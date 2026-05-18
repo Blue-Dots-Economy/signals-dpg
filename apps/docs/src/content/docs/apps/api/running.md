@@ -45,19 +45,17 @@ docker compose up -d db redis
 
 ## Docker Image
 
-The API can be built from `apps/api/Dockerfile`.
-
-Build from the repository root:
+Run the API container against the Compose PostgreSQL and Redis services:
 
 ```bash
-docker build -f apps/api/Dockerfile -t dpg-api .
+docker compose up -d db redis
+DOCKER_NETWORK=dpg_internal pnpm docker:api
 ```
 
-Run with an env file:
+The `docker:api` script builds `dpg-api:local`, normalizes quoted values from
+`.env` for Docker, and runs the API container on the `dpg_internal` network.
 
-```bash
-docker run --env-file .env -p 2742:2742 dpg-api
-```
+You can still build the image directly with `docker build -f apps/api/Dockerfile -t dpg-api:local .` when needed.
 
 The Dockerfile:
 

@@ -62,6 +62,14 @@ docker compose up -d db redis
 pnpm dev:api
 ```
 
+To run the API itself as a Docker container against the Compose PostgreSQL and
+Redis services:
+
+```bash
+docker compose up -d db redis
+DOCKER_NETWORK=dpg_internal pnpm docker:api
+```
+
 The API should be available at:
 
 - `http://localhost:2742`
