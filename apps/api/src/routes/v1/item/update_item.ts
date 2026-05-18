@@ -8,13 +8,13 @@ import z, {
   validateAgainstJsonSchema,
 } from '@dpg/schemas';
 import { FastifyReply, FastifyRequest } from 'fastify';
-import { db } from '../../../../db/postgres/drizzle_config';
+import { db } from '@api/db/postgres/drizzle_config';
 import { and, DrizzleQueryError, eq, sql } from 'drizzle-orm';
 import { DatabaseError } from '@dpg/database';
 import { items } from '@dpg/database';
-import { auth_middleware_if_enabled } from '../../../../plugins/auth/auth_middleware';
-import { apiConfig } from '../../../config';
-import { getOrFetchSchemaByUrl } from '../../../network_schema_cache';
+import { auth_middleware_if_enabled } from '@api/plugins/auth/auth_middleware';
+import { apiConfig } from '@/config';
+import { getOrFetchSchemaByUrl } from '@/network_schema_cache';
 
 type UpdateItemRequest = FastifyRequest<{
   Params: z.infer<typeof UpdateItemParamsSchema>;

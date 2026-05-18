@@ -2,8 +2,8 @@ import { type FastifyPluginAsyncZod } from 'fastify-type-provider-zod';
 
 import z, { SchemaFetchError } from '@dpg/schemas';
 
-import { auth_middleware_if_enabled } from '../../../../../plugins/auth/auth_middleware';
-import { refreshConsumedSchemas } from '../../../../network_schema_cache';
+import { auth_middleware_if_enabled } from '@api/plugins/auth/auth_middleware';
+import { refreshConsumedSchemas } from '@/network_schema_cache';
 
 const ErrorResponseSchema = z.object({
   error: z.string(),

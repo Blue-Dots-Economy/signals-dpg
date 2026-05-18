@@ -1,5 +1,5 @@
 import { createMatchScoreClient } from '@dpg/match_score';
-import { matchScoreConfig } from '../config';
+import { matchScoreConfig } from '@/config';
 
 export const getMatchScoreClient = () => {
   switch (matchScoreConfig.provider) {

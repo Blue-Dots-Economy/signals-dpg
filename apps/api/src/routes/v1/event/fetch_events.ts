@@ -6,8 +6,8 @@ import z, {
 } from '@dpg/schemas';
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import { type FastifyPluginAsyncZod } from 'fastify-type-provider-zod';
-import { auth_middleware_if_enabled } from '../../../../plugins/auth/auth_middleware';
-import { db } from '../../../../db/postgres/drizzle_config';
+import { auth_middleware_if_enabled } from '@api/plugins/auth/auth_middleware';
+import { db } from '@api/db/postgres/drizzle_config';
 
 type FetchOwnedEventsRequest = FastifyRequest<{
   Querystring: z.infer<typeof FetchOwnedEventsQuerySchema>;

@@ -8,20 +8,20 @@ import z, {
   validateAgainstJsonSchema,
 } from '@dpg/schemas';
 import { FastifyReply, FastifyRequest } from 'fastify';
-import { db } from '../../../../db/postgres/drizzle_config';
+import { db } from '@api/db/postgres/drizzle_config';
 import { DrizzleQueryError } from 'drizzle-orm';
 import { DatabaseError, ensureItemPartition, items } from '@dpg/database';
-import { auth_middleware_if_enabled } from '../../../../plugins/auth/auth_middleware';
+import { auth_middleware_if_enabled } from '@api/plugins/auth/auth_middleware';
 import {
   isServedDomainBinding,
   replyForUnservedDomain,
-} from '../../../utils/served_domain_guard';
-import { getNetworkConfigByName } from '../../../network_configs';
+} from '@/utils/served_domain_guard';
+import { getNetworkConfigByName } from '@/network_configs';
 import {
   buildNetworkItemSchemaUrl,
   getOrFetchSchemaByUrl,
-} from '../../../network_schema_cache';
-import { apiConfig, getCurrentApiBaseUrl } from '../../../config';
+} from '@/network_schema_cache';
+import { apiConfig, getCurrentApiBaseUrl } from '@/config';
 
 type CreateItemRequest = FastifyRequest<{
   Body: z.infer<typeof CreateItemBodySchema>;

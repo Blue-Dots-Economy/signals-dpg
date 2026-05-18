@@ -5,18 +5,18 @@ import z, {
 } from '@dpg/schemas';
 import { type FastifyPluginAsyncZod } from 'fastify-type-provider-zod';
 import type { FastifyReply, FastifyRequest } from 'fastify';
-import { db } from '../../../../../db/postgres/drizzle_config';
+import { db } from '@api/db/postgres/drizzle_config';
 import {
   ensureActionEventPartition,
   ensureActionPartition,
   item_actions,
 } from '@dpg/database';
-import { apiConfig, getCurrentApiBaseUrl } from '../../../../config';
-import { getNetworkConfigByName } from '../../../../network_configs';
+import { apiConfig, getCurrentApiBaseUrl } from '@/config';
+import { getNetworkConfigByName } from '@/network_configs';
 import {
   isServedDomainBinding,
   replyForUnservedDomain,
-} from '../../../../utils/served_domain_guard';
+} from '@/utils/served_domain_guard';
 import {
   buildActionEventPayload,
   fetchLocalItemSnapshot,
@@ -24,7 +24,7 @@ import {
   isCurrentInstanceItem,
   mirrorActionEventToSourceInstance,
   validateActionEventPayload,
-} from '../../../../utils/action_event_runtime';
+} from '@/utils/action_event_runtime';
 
 type PerformNetworkActionRequest = FastifyRequest<{
   Body: z.infer<typeof PerformNetworkActionBodySchema>;

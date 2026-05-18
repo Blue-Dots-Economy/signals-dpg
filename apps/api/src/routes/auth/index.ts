@@ -1,4 +1,4 @@
-import { authInstance } from './create_auth';
+import { authInstance } from '@/routes/auth/create_auth';
 import { FastifyPluginAsyncZod } from 'fastify-type-provider-zod';
 
 const AuthRoutes: FastifyPluginAsyncZod = async (fastify) => {

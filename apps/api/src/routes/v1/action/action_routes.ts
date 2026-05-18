@@ -1,7 +1,7 @@
 import { FastifyPluginAsyncZod } from 'fastify-type-provider-zod';
-import { fetch_actions } from './fetch_actions';
-import { perform_action } from './perform_action';
-import { update_action_status } from './update_action_status';
+import { fetch_actions } from '@/routes/v1/action/fetch_actions';
+import { perform_action } from '@/routes/v1/action/perform_action';
+import { update_action_status } from '@/routes/v1/action/update_action_status';
 
 const action_routes: FastifyPluginAsyncZod = async (fastify) => {
   fastify.register(fetch_actions);

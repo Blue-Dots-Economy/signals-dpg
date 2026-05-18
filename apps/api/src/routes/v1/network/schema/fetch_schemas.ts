@@ -1,6 +1,6 @@
 import z from '@dpg/schemas';
 import { type FastifyPluginAsyncZod } from 'fastify-type-provider-zod';
-import { getConfiguredNetworkSchemas } from '../../../../network_schema_cache';
+import { getConfiguredNetworkSchemas } from '@/network_schema_cache';
 
 const ReadSchemasQuerySchema = z.object({
   network: z.string().optional(),

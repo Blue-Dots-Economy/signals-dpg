@@ -1,5 +1,5 @@
 import { parseServedDomains } from '@dpg/config';
-import { loadEnv } from './env';
+import { loadEnv } from '@/env';
 
 export const {
   instance,

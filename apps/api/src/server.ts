@@ -5,8 +5,8 @@ import {
   serializerCompiler,
   validatorCompiler,
 } from 'fastify-type-provider-zod';
-import AuthRoutes from './routes/auth';
-import { apiConfig, getCurrentApiBaseUrl, instance } from './config';
+import AuthRoutes from '@/routes/auth';
+import { apiConfig, getCurrentApiBaseUrl, instance } from '@/config';
 import cors from '@fastify/cors';
 import fastifyQs from 'fastify-qs';
 import fastifySwagger from '@fastify/swagger';
@@ -16,8 +16,8 @@ import {
   getAllowedInstanceOriginsFromNetworkConfig,
   mergeAllowedOrigins,
 } from '@dpg/config';
-import v1_routes from './routes/v1/v1_routes';
-import { getNetworkConfigs } from './network_configs';
+import v1_routes from '@/routes/v1/v1_routes';
+import { getNetworkConfigs } from '@/network_configs';
 
 const app = fastify({
   logger: true,

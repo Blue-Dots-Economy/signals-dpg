@@ -9,13 +9,13 @@ import { type FastifyPluginAsyncZod } from 'fastify-type-provider-zod';
 import {
   isServedDomainBinding,
   replyForUnservedDomain,
-} from '../../../../utils/served_domain_guard';
+} from '@/utils/served_domain_guard';
 import {
   countLocalItems,
   fetchLocalItems,
-} from '../../../../utils/item_fetch_runtime';
-import { getNetworkConfigByName } from '../../../../network_configs';
-import { fetchItemsAcrossInstances } from '../../../../utils/inter_instance_fetch';
+} from '@/utils/item_fetch_runtime';
+import { getNetworkConfigByName } from '@/network_configs';
+import { fetchItemsAcrossInstances } from '@/utils/inter_instance_fetch';
 
 type FetchItemsAggregateRequest = FastifyRequest<{
   Querystring: z.infer<typeof FetchItemsQuerySchema>;

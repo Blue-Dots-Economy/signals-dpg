@@ -3,7 +3,7 @@ import {
   parseNetworkConfigDocument,
 } from '@dpg/schemas';
 import { loadNetworkConfigs } from '@dpg/config';
-import { apiConfig } from './config';
+import { apiConfig } from '@/config';
 
 let networkConfigsPromise: Promise<NetworkConfigDocument[]> | null = null;
 

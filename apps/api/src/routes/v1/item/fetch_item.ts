@@ -4,13 +4,13 @@ import z, {
 } from '@dpg/schemas';
 import { FastifyReply, FastifyRequest } from 'fastify';
 import { type FastifyPluginAsyncZod } from 'fastify-type-provider-zod';
-import { auth_middleware_if_enabled } from '../../../../plugins/auth/auth_middleware';
+import { auth_middleware_if_enabled } from '@api/plugins/auth/auth_middleware';
 import {
   isServedDomainBinding,
   replyForUnservedDomain,
-} from '../../../utils/served_domain_guard';
-import { fetchLocalItems } from '../../../utils/item_fetch_runtime';
-import { getCachedLocalItemFetch } from '../../../utils/item_fetch_cache';
+} from '@/utils/served_domain_guard';
+import { fetchLocalItems } from '@/utils/item_fetch_runtime';
+import { getCachedLocalItemFetch } from '@/utils/item_fetch_cache';
 
 type FetchItemsRequest = FastifyRequest<{
   Querystring: z.infer<typeof FetchItemsQuerySchema>;

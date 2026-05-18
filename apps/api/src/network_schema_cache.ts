@@ -8,10 +8,10 @@ import {
   SchemaFetchError,
   type NetworkConfigDocument,
 } from '@dpg/schemas';
-import { db } from '../db/postgres/drizzle_config';
+import { db } from '@api/db/postgres/drizzle_config';
 import { items } from '@dpg/database';
 import { and, eq } from 'drizzle-orm';
-import { getNetworkConfigs, refreshNetworkConfigs } from './network_configs';
+import { getNetworkConfigs, refreshNetworkConfigs } from '@/network_configs';
 
 type CachedSchemaKind =
   | 'network_config'

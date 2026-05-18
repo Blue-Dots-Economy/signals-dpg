@@ -1,5 +1,5 @@
 import { createNotificationClient } from '@dpg/notification';
-import { notification } from '../config';
+import { notification } from '@/config';
 
 /**
  * Creates and returns a notification client if all required configuration is present.

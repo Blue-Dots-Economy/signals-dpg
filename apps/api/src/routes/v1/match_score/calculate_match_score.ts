@@ -4,8 +4,8 @@ import z, {
 } from '@dpg/schemas';
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import { type FastifyPluginAsyncZod } from 'fastify-type-provider-zod';
-import { auth_middleware_if_enabled } from '../../../../plugins/auth/auth_middleware';
-import { getMatchScoreClient } from '../../../utils/match_score_client';
+import { auth_middleware_if_enabled } from '@api/plugins/auth/auth_middleware';
+import { getMatchScoreClient } from '@/utils/match_score_client';
 
 type CalculateMatchScoreRequest = FastifyRequest<{
   Body: z.infer<typeof MatchScoreRequestSchema>;

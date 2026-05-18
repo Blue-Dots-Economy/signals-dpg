@@ -1,5 +1,5 @@
 import { and, eq, sql } from 'drizzle-orm';
-import { db } from '../../db/postgres/drizzle_config';
+import { db } from '@api/db/postgres/drizzle_config';
 import { items } from '@dpg/database';
 import { mergeItemStateWithPrivate } from '@dpg/schemas';
 

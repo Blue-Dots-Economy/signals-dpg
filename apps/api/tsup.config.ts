@@ -1,3 +1,5 @@
+import { resolve } from 'node:path';
+
 import { defineConfig } from 'tsup';
 
 export default defineConfig({
@@ -10,6 +12,13 @@ export default defineConfig({
   clean: true,
   sourcemap: true,
   dts: false,
+  esbuildOptions(options) {
+    options.alias = {
+      ...options.alias,
+      '@': resolve('src'),
+      '@api': resolve('.'),
+    };
+  },
   external: [
     'fastify',
     '@fastify/cors',

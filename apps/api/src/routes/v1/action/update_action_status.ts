@@ -5,21 +5,21 @@ import z, {
 } from '@dpg/schemas';
 import { type FastifyPluginAsyncZod } from 'fastify-type-provider-zod';
 import type { FastifyReply, FastifyRequest } from 'fastify';
-import { db } from '../../../../db/postgres/drizzle_config';
-import { auth_middleware_if_enabled } from '../../../../plugins/auth/auth_middleware';
+import { db } from '@api/db/postgres/drizzle_config';
+import { auth_middleware_if_enabled } from '@api/plugins/auth/auth_middleware';
 import {
   ensureActionEventPartition,
   item_actions,
 } from '@dpg/database';
-import { getCurrentApiBaseUrl } from '../../../config';
-import { getNetworkConfigByName } from '../../../network_configs';
+import { getCurrentApiBaseUrl } from '@/config';
+import { getNetworkConfigByName } from '@/network_configs';
 import {
   buildActionEventPayload,
   fetchLocalItemSnapshot,
   insertActionEvent,
   mirrorActionEventToSourceInstance,
   validateActionEventPayload,
-} from '../../../utils/action_event_runtime';
+} from '@/utils/action_event_runtime';
 
 type UpdateActionStatusRequest = FastifyRequest<{
   Body: z.infer<typeof UpdateActionStatusBodySchema>;

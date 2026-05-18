@@ -5,6 +5,12 @@
     "moduleResolution": "bundler",
     "ignoreDeprecations": "6.0",
     "paths": {
+      "@/*": [
+        "./src/*"
+      ],
+      "@api/*": [
+        "./*"
+      ],
       "@dpg/*": [
         "../../packages/*/src"
       ]

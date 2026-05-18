@@ -8,7 +8,7 @@ import z, {
 } from '@dpg/schemas';
 import { action_events, items } from '@dpg/database';
 import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
-import { apiConfig, getCurrentApiBaseUrl } from '../config';
+import { apiConfig, getCurrentApiBaseUrl } from '@/config';
 
 type ActionItemRef = z.infer<typeof PerformNetworkActionBodySchema>['source_item'];
 type PerformActionTargetItemRef = z.infer<

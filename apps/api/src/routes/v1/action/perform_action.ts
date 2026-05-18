@@ -7,19 +7,19 @@ import z, {
 } from '@dpg/schemas';
 import { type FastifyPluginAsyncZod } from 'fastify-type-provider-zod';
 import type { FastifyReply, FastifyRequest } from 'fastify';
-import { auth_middleware_if_enabled } from '../../../../plugins/auth/auth_middleware';
-import { apiConfig, getCurrentApiBaseUrl } from '../../../config';
+import { auth_middleware_if_enabled } from '@api/plugins/auth/auth_middleware';
+import { apiConfig, getCurrentApiBaseUrl } from '@/config';
 import {
   buildNetworkActionTargetItem,
   fetchLocalItemSnapshot,
   normalizeInstanceUrl,
-} from '../../../utils/action_event_runtime';
-import { db } from '../../../../db/postgres/drizzle_config';
-import { getNetworkConfigByName } from '../../../network_configs';
+} from '@/utils/action_event_runtime';
+import { db } from '@api/db/postgres/drizzle_config';
+import { getNetworkConfigByName } from '@/network_configs';
 import {
   isServedDomainBinding,
   replyForUnservedDomain,
-} from '../../../utils/served_domain_guard';
+} from '@/utils/served_domain_guard';
 
 type PerformActionRequest = FastifyRequest<{
   Body: z.infer<typeof PerformActionBodySchema>;
