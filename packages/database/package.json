@@ -14,11 +14,11 @@
   "keywords": [],
   "author": "",
   "license": "ISC",
-  "packageManager": "pnpm@10.28.1",
+  "packageManager": "pnpm@11.1.2",
   "devDependencies": {},
   "dependencies": {
-    "@types/pg": "^8.16.0",
+    "@types/pg": "^8.20.0",
     "pg": "^8.17.2",
-    "drizzle-orm": "^0.45.1"
+    "drizzle-orm": "^0.45.2"
   }
 }

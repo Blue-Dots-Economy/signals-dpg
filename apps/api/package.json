@@ -18,10 +18,10 @@
   "keywords": [],
   "author": "",
   "license": "ISC",
-  "packageManager": "pnpm@10.28.1",
+  "packageManager": "pnpm@11.1.2",
   "devDependencies": {
     "drizzle-kit": "^0.31.8",
-    "tsx": "^4.21.0"
+    "tsx": "^4.22.1"
   },
   "dependencies": {
     "auth": "workspace:*",
@@ -29,10 +29,10 @@
     "database": "workspace:*",
     "@fastify/cors": "^11.2.0",
     "@fastify/swagger": "^9.6.1",
-    "@scalar/fastify-api-reference": "^1.44.14",
-    "dotenv": "^17.2.4",
-    "drizzle-orm": "^0.45.1",
-    "fastify": "^5.7.4",
+    "@scalar/fastify-api-reference": "^1.57.2",
+    "dotenv": "^17.4.2",
+    "drizzle-orm": "^0.45.2",
+    "fastify": "^5.8.5",
     "fastify-qs": "^5.0.0",
     "fastify-type-provider-zod": "^6.1.0",
     "ioredis": "^5.9.2",

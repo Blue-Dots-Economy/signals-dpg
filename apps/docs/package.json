@@ -13,10 +13,10 @@
   "keywords": [],
   "author": "",
   "license": "ISC",
-  "packageManager": "pnpm@10.28.1",
+  "packageManager": "pnpm@11.1.2",
   "dependencies": {
-    "@astrojs/starlight": "^0.38.2",
-    "astro": "^6.1.10",
+    "@astrojs/starlight": "^0.39.2",
+    "astro": "^6.3.3",
     "astro-mermaid": "^2.0.1",
     "mermaid": "^11.15.0"
   }

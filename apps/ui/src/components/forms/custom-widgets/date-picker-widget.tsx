@@ -60,7 +60,7 @@ export function DatePickerWidget({
               setOpen(false);
             }}
             disabled={disabled || readonly}
-            initialFocus
+            autoFocus
           />
         </PopoverContent>
       </Popover>

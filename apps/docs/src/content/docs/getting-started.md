@@ -1,6 +1,8 @@
 ---
 title: Getting Started
-description: End-to-end local setup for running DPG, understanding examples, and testing the API.
+description:
+  End-to-end local setup for running DPG, understanding examples, and testing
+  the API.
 head: []
 ---
 
@@ -9,7 +11,7 @@ This guide is the fastest way to get a working DPG instance on your machine.
 ## Prerequisites
 
 - Node.js `>=24`
-- `pnpm` `10.28.1`
+- `pnpm` `11.1.2`
 - Docker Desktop or Docker Engine
 
 ## What You Will Run
@@ -71,7 +73,8 @@ The API should be available at:
 pnpm dev:ui
 ```
 
-The UI reads schemas and network items from the API. Set `VITE_API_URL` in the UI environment when the API is not available at the default local URL.
+The UI reads schemas and network items from the API. Set `VITE_API_URL` in the
+UI environment when the API is not available at the default local URL.
 
 ## 6. Optional: Run The Docs Site
 
@@ -85,8 +88,10 @@ Use one of the payloads from:
 
 - `examples/api/yellow_dot.md`
 - `examples/api/blue_dot.md`
-- `examples/postman/dpg.postman_collection.json` for a generic single-domain collection
-- `examples/schemas/*/postman/*.postman_collection.json` for schema-specific collections
+- `examples/postman/dpg.postman_collection.json` for a generic single-domain
+  collection
+- `examples/schemas/*/postman/*.postman_collection.json` for schema-specific
+  collections
 
 Remember:
 

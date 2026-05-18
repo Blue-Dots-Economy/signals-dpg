@@ -23,39 +23,40 @@ dpg-monorepo/
 
 ## Package Manager
 
-**pnpm 10.28.1**. Always use `pnpm` (never npm/yarn). Use `pnpm add <pkg>` inside an app/package dir, or `pnpm add -w <pkg>` for workspace-wide deps.
+**pnpm 11.1.2**. Always use `pnpm` (never npm/yarn). Use `pnpm add <pkg>` inside
+an app/package dir, or `pnpm add -w <pkg>` for workspace-wide deps.
 
 ## Commands
 
 ### From root
 
-| Command | Description |
-|---|---|
-| `pnpm dev:api` | Start API in watch mode |
-| `pnpm dev:docs` | Start docs site |
-| `pnpm dev:ui` | Start UI dev server |
-| `pnpm build:api` | Build API for production |
-| `pnpm build:ui` | Build UI for production |
-| `pnpm build:docs` | Build docs site |
-| `pnpm preview:ui` | Preview UI production build |
-| `pnpm preview:api` | Preview API production build |
-| `pnpm preview:docs` | Preview docs production build |
-| `pnpm start:ui` | Start UI production server |
-| `pnpm db:generate:api` | Generate Drizzle migrations |
-| `pnpm db:migrate:api` | Apply migrations |
-| `pnpm db:push:api` | Push schema to DB (no migrations) |
-| `pnpm db:pull:api` | Pull schema from DB |
-| `pnpm db:studio:api` | Open Drizzle Studio |
+| Command                | Description                       |
+| ---------------------- | --------------------------------- |
+| `pnpm dev:api`         | Start API in watch mode           |
+| `pnpm dev:docs`        | Start docs site                   |
+| `pnpm dev:ui`          | Start UI dev server               |
+| `pnpm build:api`       | Build API for production          |
+| `pnpm build:ui`        | Build UI for production           |
+| `pnpm build:docs`      | Build docs site                   |
+| `pnpm preview:ui`      | Preview UI production build       |
+| `pnpm preview:api`     | Preview API production build      |
+| `pnpm preview:docs`    | Preview docs production build     |
+| `pnpm start:ui`        | Start UI production server        |
+| `pnpm db:generate:api` | Generate Drizzle migrations       |
+| `pnpm db:migrate:api`  | Apply migrations                  |
+| `pnpm db:push:api`     | Push schema to DB (no migrations) |
+| `pnpm db:pull:api`     | Pull schema from DB               |
+| `pnpm db:studio:api`   | Open Drizzle Studio               |
 
 ### From `apps/api` directly
 
-| Command | Description |
-|---|---|
-| `tsx watch src/server.ts` | Dev (watch mode) |
-| `tsup` | Build |
-| `drizzle-kit generate` | Generate migrations |
-| `drizzle-kit migrate` | Apply migrations |
-| `drizzle-kit push` | Push schema |
+| Command                   | Description         |
+| ------------------------- | ------------------- |
+| `tsx watch src/server.ts` | Dev (watch mode)    |
+| `tsup`                    | Build               |
+| `drizzle-kit generate`    | Generate migrations |
+| `drizzle-kit migrate`     | Apply migrations    |
+| `drizzle-kit push`        | Push schema         |
 
 ### Tests
 
@@ -89,19 +90,20 @@ import type { AuthRuntimeConfig } from './types';
 
 ## Naming Conventions
 
-| Entity | Convention | Example |
-|---|---|---|
-| Files | snake_case | `fetch_items.ts`, `item_routes.ts` |
-| Functions/variables | camelCase | `createItem`, `fetchItemsHandler` |
-| Route handlers (exported) | snake_case | `create_item`, `fetch_items` |
-| Handler internals | camelCase | `createItemHandler` |
-| Env vars | SCREAMING_SNAKE_CASE | `POSTGRES_HOST`, `API_PORT` |
-| Zod schemas | PascalCase | `CreateItemBodySchema` |
-| DB tables/columns | snake_case | `item_type`, `created_at` |
+| Entity                    | Convention           | Example                            |
+| ------------------------- | -------------------- | ---------------------------------- |
+| Files                     | snake_case           | `fetch_items.ts`, `item_routes.ts` |
+| Functions/variables       | camelCase            | `createItem`, `fetchItemsHandler`  |
+| Route handlers (exported) | snake_case           | `create_item`, `fetch_items`       |
+| Handler internals         | camelCase            | `createItemHandler`                |
+| Env vars                  | SCREAMING_SNAKE_CASE | `POSTGRES_HOST`, `API_PORT`        |
+| Zod schemas               | PascalCase           | `CreateItemBodySchema`             |
+| DB tables/columns         | snake_case           | `item_type`, `created_at`          |
 
 ## Imports & Exports
 
 ### Package structure
+
 - Every package must export from `src/index.ts`.
 - Use `exports` field in `package.json` (not `main`):
   ```json
@@ -109,12 +111,14 @@ import type { AuthRuntimeConfig } from './types';
   ```
 
 ### Import ordering (separate groups with blank lines)
+
 1. Node/built-in modules (`import fs from 'node:fs'`)
 2. Third-party packages
 3. Workspace packages (`@dpg/*`)
 4. Relative imports
 
 ### Cross-package imports
+
 ```ts
 import { items } from '@dpg/database';
 import z from '@dpg/schemas';
@@ -126,6 +130,7 @@ import { allowed_origins } from '@dpg/config';
 Routes use `fastify-type-provider-zod` with Zod for validation.
 
 ### File layout
+
 ```
 apps/api/src/routes/v1/item/
 ├── item_routes.ts    # Registers sub-routes
@@ -135,6 +140,7 @@ apps/api/src/routes/v1/item/
 ```
 
 ### Route pattern
+
 ```ts
 import { type FastifyPluginAsyncZod } from 'fastify-type-provider-zod';
 
@@ -155,9 +161,11 @@ export default my_route;
 ```
 
 ### Error handling
+
 - Return structured errors with `error` (machine-readable code) and `message`.
 - Log with `request.log.error({ err, context }, 'message')`.
-- Handle known DB errors explicitly (PostgreSQL codes `23505` unique violation, `23503` foreign key violation).
+- Handle known DB errors explicitly (PostgreSQL codes `23505` unique violation,
+  `23503` foreign key violation).
 - Use `reply.code(N).send({ error, message })` — never throw.
 
 ```ts
@@ -169,7 +177,8 @@ export default my_route;
 
 ## Environment & Config
 
-- All env vars are validated with Zod schemas in `packages/config/src/secrets.ts`.
+- All env vars are validated with Zod schemas in
+  `packages/config/src/secrets.ts`.
 - Load config via `loadEnv()` in `apps/api/src/env.ts`.
 - Prefer URL-based connection strings (`POSTGRES_URL`, `REDIS_URL`).
 - Copy `.env.example` to `.env` to get started.
@@ -185,9 +194,12 @@ export default my_route;
 ## Cursor Rules (Codacy MCP)
 
 Follow rules in `.cursor/rules/codacy.mdc`:
-- After any `edit_file` operation, run `codacy_cli_analyze` via Codacy MCP Server.
+
+- After any `edit_file` operation, run `codacy_cli_analyze` via Codacy MCP
+  Server.
 - If Codacy CLI is not installed, ask the user before proceeding.
-- After installing dependencies, run `codacy_cli_analyze` with tool `trivy` for security checks.
+- After installing dependencies, run `codacy_cli_analyze` with tool `trivy` for
+  security checks.
 - Do NOT run complexity or coverage analysis.
 
 ## General Guidelines
