@@ -30,7 +30,7 @@ Compact domain example:
 
 ```json
 {
-  "name": "student",
+  "id": "student",
   "item_schemas": {
     "profile_1.0": {
       "type": "object",

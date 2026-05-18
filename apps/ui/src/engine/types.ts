@@ -23,7 +23,7 @@ export interface DotActionSchema {
 }
 
 export interface DotNetworkDomain {
-  name: string;
+  id: string;
   description: string;
   default_item_schemas?: {
     profile: RJSFSchema;
@@ -39,7 +39,7 @@ export interface DotNetworkInteraction {
 }
 
 export interface DotNetworkInstance {
-  domain_name: string;
+  domain_id: string;
   instance_name?: string;
   instance_url: string;
   custom_item_schema_urls?: Record<string, string>;
@@ -51,7 +51,7 @@ export interface DotNetworkAction {
 }
 
 export interface DotNetworkSchema {
-  name: string;
+  id: string;
   display_name: string;
   description: string;
   schema_standard: string;

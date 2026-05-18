@@ -30,7 +30,7 @@ pnpm preview:ui
 | `VITE_DEFAULT_API_URL` | — | Preferred default API URL when multiple URLs are configured |
 | `VITE_API_URLS` | — | JSON map of named API URLs |
 | `VITE_SHOW_INSTANCE_SELECTOR` | dev mode | Forces API instance selector behavior |
-| `VITE_NETWORK_NAME` | first returned network | Comma-separated allowlist of network names to expose in the UI |
+| `VITE_NETWORK_ID` | first returned network | Comma-separated allowlist of network ids to expose in the UI |
 | `VITE_MAP_PROVIDER` | `leaflet` | Active registered map provider |
 | `VITE_GEOCODING_API_URL` | `api.postalpincode.in` | Pincode geocoding endpoint |
 | `VITE_VC_WALLET_URL` | — | Base URL for the wallet credential service used by the Dhiway Wallet provider |

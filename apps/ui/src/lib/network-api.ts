@@ -56,15 +56,15 @@ export async function fetchNetworkConfigs(): Promise<DotNetworkSchema[]> {
 }
 
 export async function fetchNetworkConfig(
-  networkName: string
+  networkId: string
 ): Promise<DotNetworkSchema> {
   const response = await networkApiClient.get<CachedSchemaEntry[]>(
     '/api/v1/network/schemas',
-    { params: { network: networkName } }
+    { params: { network: networkId } }
   );
   const config = response.data.find((e) => e.kind === 'network_config');
   if (!config) {
-    throw new Error(`Network "${networkName}" not found`);
+    throw new Error(`Network "${networkId}" not found`);
   }
   return config.schema;
 }

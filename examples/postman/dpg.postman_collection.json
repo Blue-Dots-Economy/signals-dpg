@@ -111,7 +111,7 @@
       "value": "http://127.0.0.1:2742"
     },
     {
-      "key": "action_name",
+      "key": "action_type",
       "value": "connect"
     },
     {
@@ -487,7 +487,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"action_name\": \"{{action_name}}\",\n  \"source_item\": {\n    \"item_network\": \"{{source_item_network}}\",\n    \"item_domain\": \"{{source_item_domain}}\",\n    \"item_type\": \"{{source_item_type}}\",\n    \"item_id\": \"{{source_item_id}}\"\n  },\n  \"target_item\": {\n    \"item_network\": \"{{target_item_network}}\",\n    \"item_domain\": \"{{target_item_domain}}\",\n    \"item_type\": \"{{target_item_type}}\",\n    \"item_id\": \"{{target_item_id}}\",\n    \"item_instance_url\": \"{{target_instance_url}}\"\n  },\n  \"requirements_snapshot\": {\n    \"example\": \"replace with schema-valid requirements_snapshot\"\n  }\n}"
+              "raw": "{\n  \"action_type\": \"{{action_type}}\",\n  \"source_item\": {\n    \"item_network\": \"{{source_item_network}}\",\n    \"item_domain\": \"{{source_item_domain}}\",\n    \"item_type\": \"{{source_item_type}}\",\n    \"item_id\": \"{{source_item_id}}\"\n  },\n  \"target_item\": {\n    \"item_network\": \"{{target_item_network}}\",\n    \"item_domain\": \"{{target_item_domain}}\",\n    \"item_type\": \"{{target_item_type}}\",\n    \"item_id\": \"{{target_item_id}}\",\n    \"item_instance_url\": \"{{target_instance_url}}\"\n  },\n  \"requirements_snapshot\": {\n    \"example\": \"replace with schema-valid requirements_snapshot\"\n  }\n}"
             },
             "url": {
               "raw": "{{base_url}}/api/v1/action/perform",
@@ -660,7 +660,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"action_name\": \"{{action_name}}\",\n  \"source_item\": {\n    \"item_network\": \"{{source_item_network}}\",\n    \"item_domain\": \"{{source_item_domain}}\",\n    \"item_type\": \"{{source_item_type}}\",\n    \"item_id\": \"{{source_item_id}}\",\n    \"item_instance_url\": \"{{source_instance_url}}\"\n  },\n  \"target_item\": {\n    \"item_network\": \"{{target_item_network}}\",\n    \"item_domain\": \"{{target_item_domain}}\",\n    \"item_type\": \"{{target_item_type}}\",\n    \"item_id\": \"{{target_item_id}}\",\n    \"item_instance_url\": \"{{target_instance_url}}\"\n  },\n  \"source_item_owner\": \"{{source_item_owner}}\",\n  \"requirements_snapshot\": {\n    \"example\": \"replace with schema-valid requirements_snapshot\"\n  }\n}"
+              "raw": "{\n  \"action_type\": \"{{action_type}}\",\n  \"source_item\": {\n    \"item_network\": \"{{source_item_network}}\",\n    \"item_domain\": \"{{source_item_domain}}\",\n    \"item_type\": \"{{source_item_type}}\",\n    \"item_id\": \"{{source_item_id}}\",\n    \"item_instance_url\": \"{{source_instance_url}}\"\n  },\n  \"target_item\": {\n    \"item_network\": \"{{target_item_network}}\",\n    \"item_domain\": \"{{target_item_domain}}\",\n    \"item_type\": \"{{target_item_type}}\",\n    \"item_id\": \"{{target_item_id}}\",\n    \"item_instance_url\": \"{{target_instance_url}}\"\n  },\n  \"source_item_owner\": \"{{source_item_owner}}\",\n  \"requirements_snapshot\": {\n    \"example\": \"replace with schema-valid requirements_snapshot\"\n  }\n}"
             },
             "url": {
               "raw": "{{target_instance_url}}/api/v1/network/action/perform",

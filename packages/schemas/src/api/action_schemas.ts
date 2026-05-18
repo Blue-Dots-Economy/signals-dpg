@@ -18,14 +18,14 @@ export const ActionItemRefWithInstanceSchema = ActionItemRefSchema.extend({
 });
 
 export const PerformActionBodySchema = z.object({
-  action_name: z.string().min(1),
+  action_type: z.string().min(1),
   source_item: ActionItemRefSchema,
   target_item: ActionTargetItemRefSchema,
   requirements_snapshot: z.record(z.string(), z.unknown()),
 });
 
 export const PerformNetworkActionBodySchema = z.object({
-  action_name: z.string().min(1),
+  action_type: z.string().min(1),
   source_item: ActionItemRefWithInstanceSchema,
   target_item: ActionItemRefWithInstanceSchema,
   source_item_owner: z.string().min(1),
@@ -40,7 +40,7 @@ export const UpdateActionStatusBodySchema = z.object({
 
 export const StoreEventBodySchema = z.object({
   origin_instance_domain: z.url(),
-  action_name: z.string().min(1),
+  action_type: z.string().min(1),
   action_id: z.uuid(),
   action_status: z.string().min(1),
   update_count: z.int().nonnegative(),
@@ -61,7 +61,7 @@ export const ActionOwnershipTagSchema = z.enum(['initiated', 'received']);
 
 const FetchOwnedRecordsQuerySchemaBase = z.object({
   action_id: z.uuid().optional(),
-  action_name: z.string().min(1).optional(),
+  action_type: z.string().min(1).optional(),
   action_status: z.string().min(1).optional(),
   item_id: z.uuid().optional(),
   ownership_role: ActionOwnershipRoleSchema.default('all'),

@@ -39,7 +39,7 @@
 
 ```json
 {
-  "action_name": "apply",
+  "action_type": "apply",
   "source_item": {
     "item_network": "blue_dot",
     "item_domain": "seeker",

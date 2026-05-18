@@ -53,7 +53,7 @@ const fetch_events_handler = async (
 
   const {
     action_id,
-    action_name,
+    action_type,
     action_status,
     item_id,
     update_count,
@@ -68,8 +68,8 @@ const fetch_events_handler = async (
     conditions.push(eq(action_events.action_id, action_id));
   }
 
-  if (action_name) {
-    conditions.push(eq(action_events.action_name, action_name));
+  if (action_type) {
+    conditions.push(eq(action_events.action_type, action_type));
   }
 
   if (action_status) {

@@ -1,11 +1,9 @@
 {
-  "name": "onest_yellow_dot",
   "display_name": "Yellow Dot",
   "description": "Education focused DOT.",
   "schema_standard": "https://json-schema.org/draft/2020-12/schema",
   "domains": [
     {
-      "name": "student",
       "description": "Learners on the network.",
       "minimum_cache_ttl_seconds": 300,
       "item_schemas": {
@@ -75,10 +73,10 @@
             }
           }
         }
-      }
+      },
+      "id": "student"
     },
     {
-      "name": "individual_tutor_weera_counsellor",
       "description": "Individual tutors, WEERA members, and counsellors on the network.",
       "minimum_cache_ttl_seconds": 300,
       "item_schemas": {
@@ -161,33 +159,34 @@
             }
           }
         }
-      }
+      },
+      "id": "individual_tutor_weera_counsellor"
     }
   ],
   "instances": [
     {
-      "domain_name": "student",
       "instance_name": "Yellow Dot Student Local",
       "instance_url": "http://localhost:2742",
-      "custom_item_schema_urls": {}
+      "custom_item_schema_urls": {},
+      "domain_id": "student"
     },
     {
-      "domain_name": "individual_tutor_weera_counsellor",
       "instance_name": "Yellow Dot Tutor Local",
       "instance_url": "http://localhost:2742",
-      "custom_item_schema_urls": {}
+      "custom_item_schema_urls": {},
+      "domain_id": "individual_tutor_weera_counsellor"
     },
     {
-      "domain_name": "student",
       "instance_name": "Yellow Dot Student",
       "instance_url": "https://ubi-backend1.onest.dhiway.net",
-      "custom_item_schema_urls": {}
+      "custom_item_schema_urls": {},
+      "domain_id": "student"
     },
     {
-      "domain_name": "individual_tutor_weera_counsellor",
       "instance_name": "Yellow Dot Tutor",
       "instance_url": "https://ubi-backend1.onest.dhiway.net",
-      "custom_item_schema_urls": {}
+      "custom_item_schema_urls": {},
+      "domain_id": "individual_tutor_weera_counsellor"
     }
   ],
   "actions": {
@@ -311,5 +310,6 @@
         }
       ]
     }
-  }
+  },
+  "id": "onest_yellow_dot"
 }

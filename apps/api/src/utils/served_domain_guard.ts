@@ -16,10 +16,10 @@ export async function getServedDomainSummary() {
   const itemTypesByBinding = Object.fromEntries(
     apiConfig.served_domains.map((binding) => {
       const networkConfig = networkConfigs.find(
-        (config) => config.name === binding.network
+        (config) => config.id === binding.network
       );
       const domainConfig = networkConfig?.domains.find(
-        (domain) => domain.name === binding.domain
+        (domain) => domain.id === binding.domain
       );
 
       return [binding.key, Object.keys(domainConfig?.item_schemas ?? {})];

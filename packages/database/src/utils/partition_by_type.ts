@@ -30,44 +30,44 @@ export async function ensureItemPartition(
 export async function ensureActionPartition(
   db: NodePgDatabase<any>,
   network: string,
-  actionName: string
+  actionType: string
 ) {
   assertValidPartitionKey(network, 'partition_network');
-  assertValidPartitionKey(actionName, 'action_name');
+  assertValidPartitionKey(actionType, 'action_type');
 
   try {
     await ensureNestedListPartition(
       db,
       'item_actions',
       network,
-      'action_name',
-      actionName,
+      'action_type',
+      actionType,
       'a'
     );
   } catch (err) {
-    handlePartitionError(err, `action partition "${network}/${actionName}"`);
+    handlePartitionError(err, `action partition "${network}/${actionType}"`);
   }
 }
 
 export async function ensureActionEventPartition(
   db: NodePgDatabase<any>,
   network: string,
-  actionName: string
+  actionType: string
 ) {
   assertValidPartitionKey(network, 'partition_network');
-  assertValidPartitionKey(actionName, 'action_name');
+  assertValidPartitionKey(actionType, 'action_type');
 
   try {
     await ensureNestedListPartition(
       db,
       'action_events',
       network,
-      'action_name',
-      actionName,
+      'action_type',
+      actionType,
       'e'
     );
   } catch (err) {
-    handlePartitionError(err, `event partition "${network}/${actionName}"`);
+    handlePartitionError(err, `event partition "${network}/${actionType}"`);
   }
 }
 
@@ -75,7 +75,7 @@ async function ensureNestedListPartition(
   db: NodePgDatabase<any>,
   rootTableName: 'items' | 'item_actions' | 'action_events',
   network: string,
-  childPartitionKey: 'item_domain' | 'action_name',
+  childPartitionKey: 'item_domain' | 'action_type',
   childValue: string,
   kind: 'i' | 'a' | 'e'
 ) {

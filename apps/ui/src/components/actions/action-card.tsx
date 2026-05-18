@@ -84,9 +84,9 @@ function getStatusConfig(status: string) {
   return statusConfig[status] ?? { label: status, variant: 'outline', icon: null };
 }
 
-function getActionTypeClass(actionName: string): string {
+function getActionTypeClass(actionType: string): string {
   return (
-    actionTypeColors[actionName.toLowerCase()] ??
+    actionTypeColors[actionType.toLowerCase()] ??
     'bg-gray-100 text-gray-800 border-gray-200'
   );
 }
@@ -104,7 +104,7 @@ export function ActionCard({ action, ownershipRole, onStatusUpdate }: ActionCard
   const [showRequirements, setShowRequirements] = React.useState(false);
 
   const status = getStatusConfig(action.action_status);
-  const actionTypeClass = getActionTypeClass(action.action_name);
+  const actionTypeClass = getActionTypeClass(action.action_type);
 
   // Determine which item is "the other party" based on ownership
   const otherParty =
@@ -166,7 +166,7 @@ export function ActionCard({ action, ownershipRole, onStatusUpdate }: ActionCard
         <div className="flex items-start justify-between gap-2">
           <div className="flex flex-wrap items-center gap-2">
             <Badge variant="outline" className={actionTypeClass}>
-              {action.action_name}
+              {action.action_type}
             </Badge>
             <Badge variant={status.variant} className="gap-1">
               {status.icon}

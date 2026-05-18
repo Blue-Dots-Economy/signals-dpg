@@ -53,7 +53,7 @@ const fetch_actions_handler = async (
 
   const {
     action_id,
-    action_name,
+    action_type,
     action_status,
     item_id,
     ownership_role,
@@ -67,8 +67,8 @@ const fetch_actions_handler = async (
     conditions.push(eq(item_actions.action_id, action_id));
   }
 
-  if (action_name) {
-    conditions.push(eq(item_actions.action_name, action_name));
+  if (action_type) {
+    conditions.push(eq(item_actions.action_type, action_type));
   }
 
   if (action_status) {

@@ -12,7 +12,7 @@ import {
   item_actions,
 } from '@dpg/database';
 import { apiConfig, getCurrentApiBaseUrl } from '@/config';
-import { getNetworkConfigByName } from '@/network_configs';
+import { getNetworkConfigById } from '@/network_configs';
 import {
   isServedDomainBinding,
   replyForUnservedDomain,
@@ -32,7 +32,7 @@ type PerformNetworkActionRequest = FastifyRequest<{
 
 const PerformNetworkActionResponseSchema = z.object({
   action_id: z.string(),
-  action_name: z.string(),
+  action_type: z.string(),
   action_status: z.string(),
   update_count: z.number().int().nonnegative(),
   source_item_id: z.string(),
@@ -84,11 +84,11 @@ export const perform_network_action_handler = async (
 
   let interaction: ReturnType<typeof getActionInteraction>;
   try {
-    const networkConfig = await getNetworkConfigByName(
+    const networkConfig = await getNetworkConfigById(
       body.target_item.item_network
     );
     interaction = getActionInteraction(networkConfig, {
-      actionName: body.action_name,
+      actionType: body.action_type,
       fromNetwork: body.source_item.item_network,
       fromDomain: body.source_item.item_domain,
       fromItemType: body.source_item.item_type,
@@ -134,18 +134,18 @@ export const perform_network_action_handler = async (
     await ensureActionPartition(
       db,
       body.target_item.item_network,
-      body.action_name
+      body.action_type
     );
     await ensureActionEventPartition(
       db,
       body.target_item.item_network,
-      body.action_name
+      body.action_type
     );
   } catch (err) {
     request.log.error(
       {
         err,
-        action_name: body.action_name,
+        action_type: body.action_type,
       },
       'Failed to ensure action/event partitions'
     );
@@ -162,7 +162,7 @@ export const perform_network_action_handler = async (
     event_schema: interaction.event_schema,
     action_status: actionStatus,
     context: {
-      action_name: body.action_name,
+      action_type: body.action_type,
       source_item: body.source_item,
       target_item: body.target_item,
       requirements_snapshot: body.requirements_snapshot,
@@ -181,7 +181,7 @@ export const perform_network_action_handler = async (
   const [created] = await db
     .insert(item_actions)
     .values({
-      action_name: body.action_name,
+      action_type: body.action_type,
       partition_network: body.target_item.item_network,
       action_status: actionStatus,
       update_count: updateCount,
@@ -202,7 +202,7 @@ export const perform_network_action_handler = async (
     })
     .returning({
       action_id: item_actions.action_id,
-      action_name: item_actions.action_name,
+      action_type: item_actions.action_type,
       action_status: item_actions.action_status,
       update_count: item_actions.update_count,
       source_item_id: item_actions.source_item_id,
@@ -211,7 +211,7 @@ export const perform_network_action_handler = async (
 
   const storedEvent = {
     origin_instance_domain: getCurrentApiBaseUrl(),
-    action_name: created.action_name,
+    action_type: created.action_type,
     action_id: created.action_id,
     action_status: created.action_status,
     update_count: created.update_count,

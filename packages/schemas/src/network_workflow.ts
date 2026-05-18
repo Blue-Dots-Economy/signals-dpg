@@ -4,7 +4,7 @@ import { z } from 'zod';
 const JsonSchemaDocumentSchema = z.record(z.string(), z.unknown());
 
 const NetworkDomainSchema = z.object({
-  name: z.string().min(1),
+  id: z.string().min(1),
   description: z.string().optional(),
   minimum_cache_ttl_seconds: z.number().int().positive().optional().default(300),
   item_schemas: z
@@ -24,7 +24,7 @@ const NetworkDomainSchema = z.object({
 }));
 
 const NetworkInstanceSchema = z.object({
-  domain_name: z.string().min(1),
+  domain_id: z.string().min(1),
   instance_name: z.string().optional(),
   instance_url: z.url(),
   schema_url: z.url().nullable().optional(),
@@ -54,7 +54,7 @@ const NetworkActionSchema = z.object({
 });
 
 export const NetworkConfigSchema = z.object({
-  name: z.string().min(1),
+  id: z.string().min(1),
   display_name: z.string().optional(),
   description: z.string().optional(),
   schema_standard: z.string().optional(),
@@ -63,7 +63,7 @@ export const NetworkConfigSchema = z.object({
   instances: NetworkInstanceSchema.array().default([]),
   cross_network_origins: z
     .object({
-      name: z.string().min(1),
+      id: z.string().min(1),
       display_name: z.string().optional(),
       schema_url: z.url(),
     })
@@ -86,7 +86,7 @@ export function parseNetworkConfigDocument(
 export function getActionInteraction(
   networkConfig: NetworkConfigDocument,
   input: {
-    actionName: string;
+    actionType: string;
     fromNetwork: string;
     fromDomain: string;
     fromItemType?: string;
@@ -95,17 +95,17 @@ export function getActionInteraction(
     toItemType?: string;
   }
 ) {
-  const action = networkConfig.actions[input.actionName];
+  const action = networkConfig.actions[input.actionType];
 
   if (!action) {
     throw new Error(
-      `Action "${input.actionName}" is not defined for network "${networkConfig.name}".`
+      `Action "${input.actionType}" is not defined for network "${networkConfig.id}".`
     );
   }
 
   const interaction = action.interactions.find((entry) => {
-    const fromNetwork = entry.from_network ?? networkConfig.name;
-    const toNetwork = entry.to_network ?? networkConfig.name;
+    const fromNetwork = entry.from_network ?? networkConfig.id;
+    const toNetwork = entry.to_network ?? networkConfig.id;
 
     return (
       fromNetwork === input.fromNetwork &&
@@ -119,7 +119,7 @@ export function getActionInteraction(
 
   if (!interaction) {
     throw new Error(
-      `Action "${input.actionName}" is not allowed from "${input.fromNetwork}/${input.fromDomain}${formatItemType(input.fromItemType)}" to "${input.toNetwork}/${input.toDomain}${formatItemType(input.toItemType)}".`
+      `Action "${input.actionType}" is not allowed from "${input.fromNetwork}/${input.fromDomain}${formatItemType(input.fromItemType)}" to "${input.toNetwork}/${input.toDomain}${formatItemType(input.toItemType)}".`
     );
   }
 
@@ -146,12 +146,12 @@ export function getDomainItemSchema(
   itemType: string
 ) {
   const domainConfig = networkConfig.domains.find(
-    (entry) => entry.name === domain
+    (entry) => entry.id === domain
   );
 
   if (!domainConfig) {
     throw new Error(
-      `Domain "${domain}" is not defined for network "${networkConfig.name}".`
+      `Domain "${domain}" is not defined for network "${networkConfig.id}".`
     );
   }
 
@@ -159,7 +159,7 @@ export function getDomainItemSchema(
 
   if (!itemSchema) {
     throw new Error(
-      `Item type "${itemType}" is not defined for domain "${domain}" in network "${networkConfig.name}".`
+      `Item type "${itemType}" is not defined for domain "${domain}" in network "${networkConfig.id}".`
     );
   }
 
@@ -171,12 +171,12 @@ export function getDomainItemTypes(
   domain: string
 ): string[] {
   const domainConfig = networkConfig.domains.find(
-    (entry) => entry.name === domain
+    (entry) => entry.id === domain
   );
 
   if (!domainConfig) {
     throw new Error(
-      `Domain "${domain}" is not defined for network "${networkConfig.name}".`
+      `Domain "${domain}" is not defined for network "${networkConfig.id}".`
     );
   }
 
@@ -188,12 +188,12 @@ export function getDomainMinimumCacheTtlSeconds(
   domain: string
 ): number {
   const domainConfig = networkConfig.domains.find(
-    (entry) => entry.name === domain
+    (entry) => entry.id === domain
   );
 
   if (!domainConfig) {
     throw new Error(
-      `Domain "${domain}" is not defined for network "${networkConfig.name}".`
+      `Domain "${domain}" is not defined for network "${networkConfig.id}".`
     );
   }
 
@@ -210,7 +210,7 @@ export function getInstanceCustomItemSchemaUrl(
 ): string | null {
   const instanceConfig = networkConfig.instances.find(
     (entry) =>
-      entry.domain_name === input.domain &&
+      entry.domain_id === input.domain &&
       entry.instance_url === input.instanceUrl
   );
 

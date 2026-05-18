@@ -10,10 +10,10 @@ interface PageShellProps {
   children: React.ReactNode;
   networks?: DotNetworkSchema[];
   selectedNetwork?: string | null;
-  onNetworkSelect?: (networkName: string) => void;
+  onNetworkSelect?: (networkId: string) => void;
   domains: DotNetworkDomain[];
   selectedDomain: string | null;
-  onDomainSelect: (domainName: string | null) => void;
+  onDomainSelect: (domainId: string | null) => void;
   currentDomainLabel?: string;
   myItems?: Item[];
   activeProfileId?: string | null;

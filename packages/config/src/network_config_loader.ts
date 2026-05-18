@@ -66,28 +66,28 @@ async function loadNetworkConfigFromUrl(url: string): Promise<NetworkConfig> {
 async function loadOneHopCrossNetworkConfigs(
   baseConfigs: NetworkConfig[]
 ): Promise<NetworkConfig[]> {
-  const configsByName = new Map(
-    baseConfigs.map((config) => [config.name, config])
+  const configsById = new Map(
+    baseConfigs.map((config) => [config.id, config])
   );
   const origins = baseConfigs.flatMap(
     (config) => config.cross_network_origins ?? []
   );
 
   for (const origin of origins) {
-    if (configsByName.has(origin.name)) {
+    if (configsById.has(origin.id)) {
       continue;
     }
 
     const config = await loadNetworkConfigFromUrl(origin.schema_url);
 
-    if (config.name !== origin.name) {
+    if (config.id !== origin.id) {
       throw new Error(
-        `Cross-network origin "${origin.name}" loaded schema for network "${config.name}".`
+        `Cross-network origin "${origin.id}" loaded schema for network "${config.id}".`
       );
     }
 
-    configsByName.set(config.name, config);
+    configsById.set(config.id, config);
   }
 
-  return [...configsByName.values()];
+  return [...configsById.values()];
 }

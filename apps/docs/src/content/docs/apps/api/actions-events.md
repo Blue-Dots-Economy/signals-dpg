@@ -50,7 +50,7 @@ The route:
 Filters include:
 
 - `action_id`
-- `action_name`
+- `action_type`
 - `action_status`
 - `item_id`
 - `ownership_role`

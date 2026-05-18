@@ -80,7 +80,7 @@ export async function fetchItemsAcrossInstances(input: {
   }
 
   const domainInstances = input.networkConfig.instances.filter(
-    (instance) => instance.domain_name === input.filters.item_domain
+    (instance) => instance.domain_id === input.filters.item_domain
   );
 
   const counts = await Promise.all(

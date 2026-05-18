@@ -15,7 +15,7 @@ import {
   normalizeInstanceUrl,
 } from '@/utils/action_event_runtime';
 import { db } from '@api/db/postgres/drizzle_config';
-import { getNetworkConfigByName } from '@/network_configs';
+import { getNetworkConfigById } from '@/network_configs';
 import {
   isServedDomainBinding,
   replyForUnservedDomain,
@@ -27,7 +27,7 @@ type PerformActionRequest = FastifyRequest<{
 
 const PerformActionResponseSchema = z.object({
   action_id: z.string(),
-  action_name: z.string(),
+  action_type: z.string(),
   action_status: z.string(),
   update_count: z.number().int().nonnegative(),
   source_item_id: z.string(),
@@ -87,9 +87,9 @@ export const perform_action_handler = async (
   let requirementsSnapshot = body.requirements_snapshot;
 
   try {
-    const networkConfig = await getNetworkConfigByName(targetItem.item_network);
+    const networkConfig = await getNetworkConfigById(targetItem.item_network);
     const matchedDomain = networkConfig.domains.find(
-      (domain) => domain.name === targetItem.item_domain
+      (domain) => domain.id === targetItem.item_domain
     );
 
     if (!matchedDomain) {
@@ -101,7 +101,7 @@ export const perform_action_handler = async (
 
     const allowedInstance = networkConfig.instances.some(
       (instance) =>
-        instance.domain_name === targetItem.item_domain &&
+        instance.domain_id === targetItem.item_domain &&
         normalizeInstanceUrl(instance.instance_url) ===
           normalizeInstanceUrl(targetItem.item_instance_url)
     );
@@ -114,7 +114,7 @@ export const perform_action_handler = async (
     }
 
     const interaction = getActionInteraction(networkConfig, {
-      actionName: body.action_name,
+      actionType: body.action_type,
       fromNetwork: sourceItem.item_network,
       fromDomain: sourceItem.item_domain,
       fromItemType: sourceItem.item_type,
@@ -141,7 +141,7 @@ export const perform_action_handler = async (
     request.log.error(
       {
         err,
-        action_name: body.action_name,
+        action_type: body.action_type,
         target_item_id: body.target_item.item_id,
         target_instance_url: body.target_item.item_instance_url,
       },
@@ -164,7 +164,7 @@ export const perform_action_handler = async (
           'content-type': 'application/json',
         },
         body: JSON.stringify({
-          action_name: body.action_name,
+          action_type: body.action_type,
           source_item: sourceItem,
           target_item: targetItem,
           source_item_owner: sourceItemSnapshot.created_by,
@@ -184,7 +184,7 @@ export const perform_action_handler = async (
     request.log.error(
       {
         err,
-        action_name: body.action_name,
+        action_type: body.action_type,
         target_instance_url: targetItem.item_instance_url,
       },
       'Failed to call target instance perform action API'

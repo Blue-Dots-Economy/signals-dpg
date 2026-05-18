@@ -87,7 +87,7 @@
       "value": "http://127.0.0.1:2742"
     },
     {
-      "key": "action_name",
+      "key": "action_type",
       "value": "apply"
     },
     {
@@ -392,7 +392,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"action_name\": \"apply\",\n  \"source_item\": {\n    \"item_network\": \"{{yellow_network}}\",\n    \"item_domain\": \"{{yellow_student_domain}}\",\n    \"item_type\": \"{{yellow_student_item_type}}\",\n    \"item_id\": \"{{yellow_student_item_id}}\"\n  },\n  \"target_item\": {\n    \"item_network\": \"{{blue_network}}\",\n    \"item_domain\": \"{{blue_provider_domain}}\",\n    \"item_type\": \"{{blue_provider_item_type}}\",\n    \"item_id\": \"{{blue_provider_item_id}}\",\n    \"item_instance_url\": \"{{blue_provider_instance_url}}\"\n  },\n  \"requirements_snapshot\": {\n    \"job_id\": \"job-001\",\n    \"cover_note\": \"I am interested in this role and meet the eligibility criteria.\",\n    \"eligibility_confirmation\": true,\n    \"resume_url\": \"https://example.com/resume.pdf\",\n    \"portfolio_url\": \"https://example.com/portfolio\"\n  }\n}"
+              "raw": "{\n  \"action_type\": \"apply\",\n  \"source_item\": {\n    \"item_network\": \"{{yellow_network}}\",\n    \"item_domain\": \"{{yellow_student_domain}}\",\n    \"item_type\": \"{{yellow_student_item_type}}\",\n    \"item_id\": \"{{yellow_student_item_id}}\"\n  },\n  \"target_item\": {\n    \"item_network\": \"{{blue_network}}\",\n    \"item_domain\": \"{{blue_provider_domain}}\",\n    \"item_type\": \"{{blue_provider_item_type}}\",\n    \"item_id\": \"{{blue_provider_item_id}}\",\n    \"item_instance_url\": \"{{blue_provider_instance_url}}\"\n  },\n  \"requirements_snapshot\": {\n    \"job_id\": \"job-001\",\n    \"cover_note\": \"I am interested in this role and meet the eligibility criteria.\",\n    \"eligibility_confirmation\": true,\n    \"resume_url\": \"https://example.com/resume.pdf\",\n    \"portfolio_url\": \"https://example.com/portfolio\"\n  }\n}"
             },
             "url": {
               "raw": "{{yellow_student_instance_url}}/api/v1/action/perform",
@@ -421,7 +421,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"action_name\": \"apply\",\n  \"source_item\": {\n    \"item_network\": \"{{yellow_network}}\",\n    \"item_domain\": \"{{yellow_student_domain}}\",\n    \"item_type\": \"{{yellow_student_item_type}}\",\n    \"item_id\": \"{{yellow_student_item_id}}\",\n    \"item_instance_url\": \"{{yellow_student_instance_url}}\"\n  },\n  \"target_item\": {\n    \"item_network\": \"{{blue_network}}\",\n    \"item_domain\": \"{{blue_provider_domain}}\",\n    \"item_type\": \"{{blue_provider_item_type}}\",\n    \"item_id\": \"{{blue_provider_item_id}}\",\n    \"item_instance_url\": \"{{blue_provider_instance_url}}\"\n  },\n  \"source_item_owner\": \"{{user_id}}\",\n  \"requirements_snapshot\": {\n    \"job_id\": \"job-001\",\n    \"cover_note\": \"Direct server-to-server diagnostic request.\",\n    \"eligibility_confirmation\": true\n  }\n}"
+              "raw": "{\n  \"action_type\": \"apply\",\n  \"source_item\": {\n    \"item_network\": \"{{yellow_network}}\",\n    \"item_domain\": \"{{yellow_student_domain}}\",\n    \"item_type\": \"{{yellow_student_item_type}}\",\n    \"item_id\": \"{{yellow_student_item_id}}\",\n    \"item_instance_url\": \"{{yellow_student_instance_url}}\"\n  },\n  \"target_item\": {\n    \"item_network\": \"{{blue_network}}\",\n    \"item_domain\": \"{{blue_provider_domain}}\",\n    \"item_type\": \"{{blue_provider_item_type}}\",\n    \"item_id\": \"{{blue_provider_item_id}}\",\n    \"item_instance_url\": \"{{blue_provider_instance_url}}\"\n  },\n  \"source_item_owner\": \"{{user_id}}\",\n  \"requirements_snapshot\": {\n    \"job_id\": \"job-001\",\n    \"cover_note\": \"Direct server-to-server diagnostic request.\",\n    \"eligibility_confirmation\": true\n  }\n}"
             },
             "url": {
               "raw": "{{blue_provider_instance_url}}/api/v1/network/action/perform",

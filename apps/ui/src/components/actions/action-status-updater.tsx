@@ -151,7 +151,7 @@ export function ActionStatusUpdater({
           <DrawerHeader>
             <DrawerTitle>Update Action Status</DrawerTitle>
             <DrawerDescription>
-              {action.action_name} from {action.source_item_domain} → {action.target_item_domain}
+              {action.action_type} from {action.source_item_domain} → {action.target_item_domain}
             </DrawerDescription>
           </DrawerHeader>
           <div className="px-4 pb-4 overflow-y-auto">{formContent}</div>
@@ -174,7 +174,7 @@ export function ActionStatusUpdater({
         <DialogHeader>
           <DialogTitle>Update Action Status</DialogTitle>
           <DialogDescription>
-            {action.action_name} from {action.source_item_domain} → {action.target_item_domain}
+            {action.action_type} from {action.source_item_domain} → {action.target_item_domain}
           </DialogDescription>
         </DialogHeader>
         <div className="py-4">{formContent}</div>

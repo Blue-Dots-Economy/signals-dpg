@@ -102,7 +102,7 @@ Request body:
 
 ```json
 {
-  "action_name": "connect",
+  "action_type": "connect",
   "source_item": {
     "item_network": "network-a",
     "item_domain": "https://source.example",
@@ -123,13 +123,13 @@ Behavior:
 
 1. Validate served-domain rules for the target item.
 2. Load the target network config.
-3. Resolve the interaction by action name, source network/domain, and target
+3. Resolve the interaction by action type, source network/domain, and target
    network/domain.
 4. Validate `requirements_snapshot` against `requirement_schema`.
 5. Create an action row in the target instance with initial status.
 6. Create the first event row locally with:
    - `action_id`
-   - `action_name`
+   - `action_type`
    - `action_status`
    - `update_count = 0`
    - source and target item references
@@ -151,7 +151,7 @@ Suggested response body:
 ```json
 {
   "action_id": "uuid",
-  "action_name": "connect",
+  "action_type": "connect",
   "action_status": "created",
   "update_count": 0,
   "source_item_id": "uuid",
@@ -213,7 +213,7 @@ Request body:
 {
   "origin_instance_domain": "https://target.example",
   "action_id": "uuid",
-  "action_name": "connect",
+  "action_type": "connect",
   "action_status": "accepted",
   "update_count": 1,
   "source_item": {
@@ -262,7 +262,7 @@ Purpose:
 Suggested columns:
 
 - `action_id uuid primary key`
-- `action_name text not null`
+- `action_type text not null`
 - `action_status text not null`
 - `update_count integer not null default 0`
 
@@ -290,7 +290,7 @@ Rules:
 
 Partition naming:
 
-- Partition by `action_name`.
+- Partition by `action_type`.
 - Example: action `connect` uses partition table `connect_action`.
 
 ## `action_events`
@@ -306,7 +306,7 @@ Suggested columns:
 - `origin_instance_domain text not null`
 
 - `action_id uuid not null`
-- `action_name text not null`
+- `action_type text not null`
 - `action_status text not null`
 - `update_count integer not null`
 
@@ -341,7 +341,7 @@ Reason:
 
 Partition naming:
 
-- Partition by `action_name` for action-derived events.
+- Partition by `action_type` for action-derived events.
 - Example: action `connect` uses event partition table `connect_event`.
 
 ## Event Payload Rules

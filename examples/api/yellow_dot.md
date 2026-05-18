@@ -36,7 +36,7 @@
 
 ```json
 {
-  "action_name": "connect",
+  "action_type": "connect",
   "source_item": {
     "item_network": "yellow_dot",
     "item_domain": "student",

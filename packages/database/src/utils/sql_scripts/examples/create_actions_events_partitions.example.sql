@@ -14,7 +14,7 @@ END $$;
 CREATE TABLE IF NOT EXISTS a_p_yellowdot
 PARTITION OF item_actions
 FOR VALUES IN ('yellow_dot')
-PARTITION BY LIST (action_name);
+PARTITION BY LIST (action_type);
 
 CREATE TABLE IF NOT EXISTS a_p_yellowdot_connect
 PARTITION OF a_p_yellowdot
@@ -23,7 +23,7 @@ FOR VALUES IN ('connect');
 CREATE TABLE IF NOT EXISTS e_p_yellowdot
 PARTITION OF action_events
 FOR VALUES IN ('yellow_dot')
-PARTITION BY LIST (action_name);
+PARTITION BY LIST (action_type);
 
 CREATE TABLE IF NOT EXISTS e_p_yellowdot_connect
 PARTITION OF e_p_yellowdot

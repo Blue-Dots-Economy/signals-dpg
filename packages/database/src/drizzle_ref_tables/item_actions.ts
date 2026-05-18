@@ -13,7 +13,7 @@ import { sql } from 'drizzle-orm';
 export const item_actions = pgTable(
   'item_actions',
   {
-    action_name: text('action_name').notNull(),
+    action_type: text('action_type').notNull(),
     partition_network: text('partition_network').notNull(),
     action_id: uuid('action_id').defaultRandom().notNull(),
     action_status: text('action_status').notNull(),
@@ -48,7 +48,7 @@ export const item_actions = pgTable(
   },
   (table) => [
     primaryKey({
-      columns: [table.partition_network, table.action_name, table.action_id],
+      columns: [table.partition_network, table.action_type, table.action_id],
     }),
     index('item_actions_source_owner_idx').on(
       table.source_item_owner,

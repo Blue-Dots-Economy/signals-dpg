@@ -33,7 +33,7 @@ import { fetchNetworkConfig, fetchNetworkConfigs } from '@/lib/network-api';
 import { extractAndGeocode } from '@/lib/item-utils';
 import { apiConfig } from '@/lib/api-config';
 
-function parseNetworkNames(networkEnv: string | undefined): string[] {
+function parseNetworkIds(networkEnv: string | undefined): string[] {
   if (!networkEnv) return [];
   return networkEnv.split(',').map(n => n.trim()).filter(Boolean);
 }
@@ -59,12 +59,12 @@ export function ProfileFormPage() {
   const [initialData, setInitialData] = React.useState<Record<string, unknown> | null>(null);
   const [isSubmitting, setIsSubmitting] = React.useState(false);
   const [isLoading, setIsLoading] = React.useState(isEdit);
-  const [availableNetworkNames, setAvailableNetworkNames] = React.useState<string[] | null>(null);
+  const [availableNetworkIds, setAvailableNetworkIds] = React.useState<string[] | null>(null);
   const [isWalletModalOpen, setIsWalletModalOpen] = React.useState(false);
 
   // Get network from URL query param, fallback to env config
-  const configuredNetworkNames = React.useMemo(
-    () => parseNetworkNames(import.meta.env.VITE_NETWORK_NAME),
+  const configuredNetworkIds = React.useMemo(
+    () => parseNetworkIds(import.meta.env.VITE_NETWORK_ID),
     []
   );
   const networkFromUrl = searchParams.get('network');
@@ -75,37 +75,37 @@ export function ProfileFormPage() {
     fetchNetworkConfigs()
       .then((networks) => {
         if (controller.signal.aborted) return;
-        const filteredNetworks = configuredNetworkNames.length > 0
-          ? networks.filter((network) => configuredNetworkNames.includes(network.name))
+        const filteredNetworks = configuredNetworkIds.length > 0
+          ? networks.filter((network) => configuredNetworkIds.includes(network.id))
           : networks;
-        setAvailableNetworkNames(filteredNetworks.map((network) => network.name));
+        setAvailableNetworkIds(filteredNetworks.map((network) => network.id));
       })
       .catch((err) => {
         if (controller.signal.aborted) return;
         console.error('Failed to fetch networks:', err);
-        setAvailableNetworkNames([]);
+        setAvailableNetworkIds([]);
         setIsLoading(false);
       });
 
     return () => { controller.abort(); };
-  }, [configuredNetworkNames]);
+  }, [configuredNetworkIds]);
 
-  const targetNetworkName = React.useMemo(() => {
-    if (availableNetworkNames === null) return null;
-    if (networkFromUrl && availableNetworkNames.includes(networkFromUrl)) {
+  const targetNetworkId = React.useMemo(() => {
+    if (availableNetworkIds === null) return null;
+    if (networkFromUrl && availableNetworkIds.includes(networkFromUrl)) {
       return networkFromUrl;
     }
-    return availableNetworkNames[0] ?? null;
-  }, [availableNetworkNames, networkFromUrl]);
+    return availableNetworkIds[0] ?? null;
+  }, [availableNetworkIds, networkFromUrl]);
 
   // Fetch and resolve network config from API
   React.useEffect(() => {
-    if (!targetNetworkName) return;
+    if (!targetNetworkId) return;
 
     const controller = new AbortController();
     setResolvedNetwork(null);
 
-    fetchNetworkConfig(targetNetworkName)
+    fetchNetworkConfig(targetNetworkId)
       .then((config) => {
         if (controller.signal.aborted) return;
         return resolveNetworkRefs(config, { baseUrl: apiConfig.getUrl() });
@@ -120,7 +120,7 @@ export function ProfileFormPage() {
       });
 
     return () => { controller.abort(); };
-  }, [targetNetworkName]);
+  }, [targetNetworkId]);
 
   // Fetch existing profile for edit mode
   React.useEffect(() => {
@@ -137,8 +137,8 @@ export function ProfileFormPage() {
           const itemType = itemTypeKeys.length > 0 ? itemTypeKeys[0] : 'profile';
 
           const response = await fetchItems({
-            item_network: resolvedNetwork.name,
-            item_domain: domain.name,
+            item_network: resolvedNetwork.id,
+            item_domain: domain.id,
             item_type: itemType,
             item_id: id,
             limit: 1,
@@ -157,7 +157,7 @@ export function ProfileFormPage() {
 
         if (!cancelled && !foundItem) {
           toast.error('Profile not found on selected network');
-          navigate(`/?network=${resolvedNetwork.name}`);
+          navigate(`/?network=${resolvedNetwork.id}`);
         }
       } catch (err) {
         if (!cancelled) {
@@ -179,19 +179,19 @@ export function ProfileFormPage() {
   // Find the profile schema for the selected domain
   const profileSchema = React.useMemo<RJSFSchema | null>(() => {
     if (!selectedDomain || !domains.length) return null;
-    const domain = domains.find((d) => d.name === selectedDomain);
+    const domain = domains.find((d) => d.id === selectedDomain);
     return domain?.item_schemas ? Object.values(domain.item_schemas)[0] : null;
   }, [selectedDomain, domains]);
 
   // Get the default item type name from domain config (e.g., "profile_1.0")
   const defaultItemType = React.useMemo<string | null>(() => {
     if (!selectedDomain || !domains.length) return null;
-    const domain = domains.find((d) => d.name === selectedDomain);
+    const domain = domains.find((d) => d.id === selectedDomain);
     const itemTypeKeys = domain?.item_schemas ? Object.keys(domain.item_schemas) : [];
     return itemTypeKeys.length > 0 ? itemTypeKeys[0] : null;
   }, [selectedDomain, domains]);
 
-  const selectedDomainInfo = domains.find((d) => d.name === selectedDomain);
+  const selectedDomainInfo = domains.find((d) => d.id === selectedDomain);
   const canImportCredentials = React.useMemo(
     () => Boolean(profileSchema) && getConfiguredWalletProviders().length > 0,
     [profileSchema]
@@ -200,7 +200,7 @@ export function ProfileFormPage() {
   // Get network-level instance URL and schema URL for the selected domain
   const domainInstance = React.useMemo(() => {
     if (!selectedDomain || !network) return null;
-    return network.instances?.find((i) => i.domain_name === selectedDomain) ?? null;
+    return network.instances?.find((i) => i.domain_id === selectedDomain) ?? null;
   }, [selectedDomain, network]);
 
   const walletImportContext = React.useMemo(
@@ -210,12 +210,12 @@ export function ProfileFormPage() {
         phoneNumber: user?.phoneNumber ?? null,
         name: user?.name ?? 'User',
       },
-      networkName: network?.name ?? null,
-      domainName: selectedDomain,
+      networkId: network?.id ?? null,
+      domainId: selectedDomain,
       schema: profileSchema,
       formData: initialData,
     }),
-    [initialData, network?.name, profileSchema, selectedDomain, user?.email, user?.name, user?.phoneNumber]
+    [initialData, network?.id, profileSchema, selectedDomain, user?.email, user?.name, user?.phoneNumber]
   );
 
   const handleImportedCredentials = React.useCallback(
@@ -277,7 +277,7 @@ export function ProfileFormPage() {
       } else {
         // Create new profile
         const createPayload: CreateItemPayload = {
-          item_network: network.name,
+          item_network: network.id,
           item_domain: selectedDomain,
           item_type: defaultItemType ?? 'profile',
           item_state: data,
@@ -301,7 +301,7 @@ export function ProfileFormPage() {
         toast.success('Profile created!', { description: `ID: ${result.item_id}` });
       }
 
-      navigate(`/?network=${resolvedNetwork?.name ?? ''}`);
+      navigate(`/?network=${resolvedNetwork?.id ?? ''}`);
     } catch (err: unknown) {
       console.error('Failed to save profile:', err);
 
@@ -333,7 +333,7 @@ export function ProfileFormPage() {
     }
   };
 
-  if (availableNetworkNames === null || isLoading) {
+  if (availableNetworkIds === null || isLoading) {
     return (
       <div className="flex h-screen items-center justify-center">
         <p className="text-muted-foreground">
@@ -343,7 +343,7 @@ export function ProfileFormPage() {
     );
   }
 
-  if (!targetNetworkName) {
+  if (!targetNetworkId) {
     return (
       <div className="flex h-screen items-center justify-center">
         <p className="text-muted-foreground">No networks available.</p>
@@ -367,7 +367,7 @@ export function ProfileFormPage() {
           <Button
             variant="ghost"
             className="mb-4 gap-2"
-            onClick={() => navigate(`/?network=${targetNetworkName}`)}
+            onClick={() => navigate(`/?network=${targetNetworkId}`)}
           >
             <ArrowLeft className="h-4 w-4" />
             Back
@@ -380,19 +380,19 @@ export function ProfileFormPage() {
           </div>
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
             {domains.map((domain) => {
-              const Icon = domainIcons[domain.name] ?? GraduationCap;
+              const Icon = domainIcons[domain.id] ?? GraduationCap;
               return (
                 <Card
-                  key={domain.name}
+                  key={domain.id}
                   className="cursor-pointer hover:shadow-md transition-shadow"
-                  onClick={() => setSelectedDomain(domain.name)}
+                  onClick={() => setSelectedDomain(domain.id)}
                 >
                   <CardHeader>
                     <div className="mb-2 flex h-10 w-10 items-center justify-center rounded-lg bg-primary/10">
                       <Icon className="h-5 w-5 text-primary" />
                     </div>
                     <CardTitle className="text-lg capitalize">
-                      {domain.name.replace(/_/g, ' ')}
+                      {domain.id.replace(/_/g, ' ')}
                     </CardTitle>
                     <CardDescription>{domain.description}</CardDescription>
                   </CardHeader>
@@ -411,7 +411,7 @@ export function ProfileFormPage() {
         <Button
           variant="ghost"
           className="mb-4 gap-2"
-          onClick={() => (selectedDomain && !isEdit ? setSelectedDomain(null) : navigate(`/?network=${resolvedNetwork?.name ?? ''}`))}
+          onClick={() => (selectedDomain && !isEdit ? setSelectedDomain(null) : navigate(`/?network=${resolvedNetwork?.id ?? ''}`))}
         >
           <ArrowLeft className="h-4 w-4" />
           {selectedDomain && !isEdit ? 'Choose different role' : 'Back'}

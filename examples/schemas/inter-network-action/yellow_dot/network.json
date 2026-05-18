@@ -1,18 +1,16 @@
 {
-  "name": "yellow_dot",
   "display_name": "Yellow Dot",
   "description": "Education focused DOT with inter-network citizen actions.",
   "schema_standard": "https://json-schema.org/draft/2020-12/schema",
   "cross_network_origins": [
     {
-      "name": "blue_dot",
       "display_name": "Blue Dot",
-      "schema_url": "https://registry.example.com/schemas/inter-network-action/blue_dot/network.json"
+      "schema_url": "https://registry.example.com/schemas/inter-network-action/blue_dot/network.json",
+      "id": "blue_dot"
     }
   ],
   "domains": [
     {
-      "name": "student",
       "description": "Learners on the network.",
       "minimum_cache_ttl_seconds": 300,
       "item_schemas": {
@@ -22,7 +20,10 @@
           "title": "Citizen 1.0",
           "type": "object",
           "additionalProperties": false,
-          "required": ["name", "location"],
+          "required": [
+            "name",
+            "location"
+          ],
           "properties": {
             "name": {
               "type": "string",
@@ -31,7 +32,11 @@
             "location": {
               "type": "object",
               "additionalProperties": false,
-              "required": ["city", "state", "country"],
+              "required": [
+                "city",
+                "state",
+                "country"
+              ],
               "properties": {
                 "city": {
                   "type": "string",
@@ -69,11 +74,20 @@
             },
             {
               "type": "object",
-              "required": ["grade", "preferred_subject"],
+              "required": [
+                "grade",
+                "preferred_subject"
+              ],
               "properties": {
                 "grade": {
                   "type": "string",
-                  "enum": ["8", "9", "10", "11", "12"]
+                  "enum": [
+                    "8",
+                    "9",
+                    "10",
+                    "11",
+                    "12"
+                  ]
                 },
                 "preferred_subject": {
                   "type": "string"
@@ -84,7 +98,10 @@
           "$defs": {
             "citizen_1_0": {
               "type": "object",
-              "required": ["name", "location"],
+              "required": [
+                "name",
+                "location"
+              ],
               "properties": {
                 "name": {
                   "type": "string",
@@ -92,7 +109,11 @@
                 },
                 "location": {
                   "type": "object",
-                  "required": ["city", "state", "country"],
+                  "required": [
+                    "city",
+                    "state",
+                    "country"
+                  ],
                   "properties": {
                     "city": {
                       "type": "string",
@@ -132,11 +153,21 @@
             },
             {
               "type": "object",
-              "required": ["grade", "language", "preferred_subject"],
+              "required": [
+                "grade",
+                "language",
+                "preferred_subject"
+              ],
               "properties": {
                 "grade": {
                   "type": "string",
-                  "enum": ["8", "9", "10", "11", "12"]
+                  "enum": [
+                    "8",
+                    "9",
+                    "10",
+                    "11",
+                    "12"
+                  ]
                 },
                 "language": {
                   "type": "string",
@@ -151,7 +182,10 @@
           "$defs": {
             "citizen_1_0": {
               "type": "object",
-              "required": ["name", "location"],
+              "required": [
+                "name",
+                "location"
+              ],
               "properties": {
                 "name": {
                   "type": "string",
@@ -159,7 +193,11 @@
                 },
                 "location": {
                   "type": "object",
-                  "required": ["city", "state", "country"],
+                  "required": [
+                    "city",
+                    "state",
+                    "country"
+                  ],
                   "properties": {
                     "city": {
                       "type": "string",
@@ -189,10 +227,10 @@
             }
           }
         }
-      }
+      },
+      "id": "student"
     },
     {
-      "name": "tutor",
       "description": "Tutors on the network.",
       "minimum_cache_ttl_seconds": 300,
       "item_schemas": {
@@ -201,7 +239,11 @@
           "title": "Tutor Profile 1.0",
           "type": "object",
           "additionalProperties": false,
-          "required": ["name", "subjects", "experience_years"],
+          "required": [
+            "name",
+            "subjects",
+            "experience_years"
+          ],
           "properties": {
             "name": {
               "type": "string",
@@ -220,14 +262,18 @@
             },
             "teaching_mode": {
               "type": "string",
-              "enum": ["online", "offline", "hybrid"]
+              "enum": [
+                "online",
+                "offline",
+                "hybrid"
+              ]
             }
           }
         }
-      }
+      },
+      "id": "tutor"
     },
     {
-      "name": "coaching_center",
       "description": "Coaching centers on the network.",
       "minimum_cache_ttl_seconds": 300,
       "item_schemas": {
@@ -236,7 +282,11 @@
           "title": "Coaching Center Profile 1.0",
           "type": "object",
           "additionalProperties": false,
-          "required": ["name", "city", "programs"],
+          "required": [
+            "name",
+            "city",
+            "programs"
+          ],
           "properties": {
             "name": {
               "type": "string",
@@ -258,33 +308,34 @@
             }
           }
         }
-      }
+      },
+      "id": "coaching_center"
     }
   ],
   "instances": [
     {
-      "domain_name": "student",
       "instance_name": "Yellow Dot Student Localhost",
       "instance_url": "http://localhost:2742",
-      "custom_item_schema_urls": {}
+      "custom_item_schema_urls": {},
+      "domain_id": "student"
     },
     {
-      "domain_name": "student",
       "instance_name": "Yellow Dot Student",
       "instance_url": "http://127.0.0.1:2742",
-      "custom_item_schema_urls": {}
+      "custom_item_schema_urls": {},
+      "domain_id": "student"
     },
     {
-      "domain_name": "tutor",
       "instance_name": "Yellow Dot Tutor Localhost",
       "instance_url": "http://localhost:2742",
-      "custom_item_schema_urls": {}
+      "custom_item_schema_urls": {},
+      "domain_id": "tutor"
     },
     {
-      "domain_name": "tutor",
       "instance_name": "Yellow Dot Tutor",
       "instance_url": "http://127.0.0.1:2742",
-      "custom_item_schema_urls": {}
+      "custom_item_schema_urls": {},
+      "domain_id": "tutor"
     }
   ],
   "actions": {
@@ -294,16 +345,25 @@
         {
           "from_network": "yellow_dot",
           "from_domain": "student",
-          "from_items": ["citizen_1.0", "profile_1.0", "profile_1.1"],
+          "from_items": [
+            "citizen_1.0",
+            "profile_1.0",
+            "profile_1.1"
+          ],
           "to_network": "yellow_dot",
           "to_domain": "tutor",
-          "to_items": ["profile_1.0"],
+          "to_items": [
+            "profile_1.0"
+          ],
           "requirement_schema": {
             "$schema": "https://json-schema.org/draft/2020-12/schema",
             "title": "Student To Tutor Connect Requirement",
             "type": "object",
             "additionalProperties": false,
-            "required": ["subject", "goal"],
+            "required": [
+              "subject",
+              "goal"
+            ],
             "properties": {
               "subject": {
                 "type": "string"
@@ -318,11 +378,18 @@
             "title": "Student To Tutor Connect Event",
             "type": "object",
             "additionalProperties": false,
-            "required": ["status", "remark"],
+            "required": [
+              "status",
+              "remark"
+            ],
             "properties": {
               "status": {
                 "type": "string",
-                "enum": ["pending", "accepted", "rejected"]
+                "enum": [
+                  "pending",
+                  "accepted",
+                  "rejected"
+                ]
               },
               "remark": {
                 "type": "string"
@@ -333,16 +400,25 @@
         {
           "from_network": "yellow_dot",
           "from_domain": "student",
-          "from_items": ["citizen_1.0", "profile_1.0", "profile_1.1"],
+          "from_items": [
+            "citizen_1.0",
+            "profile_1.0",
+            "profile_1.1"
+          ],
           "to_network": "yellow_dot",
           "to_domain": "coaching_center",
-          "to_items": ["profile_1.0"],
+          "to_items": [
+            "profile_1.0"
+          ],
           "requirement_schema": {
             "$schema": "https://json-schema.org/draft/2020-12/schema",
             "title": "Student To Coaching Center Connect Requirement",
             "type": "object",
             "additionalProperties": false,
-            "required": ["program", "goal"],
+            "required": [
+              "program",
+              "goal"
+            ],
             "properties": {
               "program": {
                 "type": "string"
@@ -357,11 +433,18 @@
             "title": "Student To Coaching Center Connect Event",
             "type": "object",
             "additionalProperties": false,
-            "required": ["status", "remark"],
+            "required": [
+              "status",
+              "remark"
+            ],
             "properties": {
               "status": {
                 "type": "string",
-                "enum": ["pending", "accepted", "rejected"]
+                "enum": [
+                  "pending",
+                  "accepted",
+                  "rejected"
+                ]
               },
               "remark": {
                 "type": "string"
@@ -377,16 +460,27 @@
         {
           "from_network": "yellow_dot",
           "from_domain": "student",
-          "from_items": ["citizen_1.0", "profile_1.0", "profile_1.1"],
+          "from_items": [
+            "citizen_1.0",
+            "profile_1.0",
+            "profile_1.1"
+          ],
           "to_network": "blue_dot",
           "to_domain": "provider",
-          "to_items": ["job_posting_1.0", "job_posting_1.1"],
+          "to_items": [
+            "job_posting_1.0",
+            "job_posting_1.1"
+          ],
           "requirement_schema": {
             "$schema": "https://json-schema.org/draft/2020-12/schema",
             "title": "Yellow Dot Citizen Job Application Requirement",
             "type": "object",
             "additionalProperties": false,
-            "required": ["job_id", "cover_note", "eligibility_confirmation"],
+            "required": [
+              "job_id",
+              "cover_note",
+              "eligibility_confirmation"
+            ],
             "properties": {
               "job_id": {
                 "type": "string",
@@ -415,11 +509,18 @@
             "title": "Yellow Dot Citizen Job Application Event",
             "type": "object",
             "additionalProperties": false,
-            "required": ["status", "remark"],
+            "required": [
+              "status",
+              "remark"
+            ],
             "properties": {
               "status": {
                 "type": "string",
-                "enum": ["submitted", "shortlisted", "rejected"]
+                "enum": [
+                  "submitted",
+                  "shortlisted",
+                  "rejected"
+                ]
               },
               "remark": {
                 "type": "string"
@@ -429,5 +530,6 @@
         }
       ]
     }
-  }
+  },
+  "id": "yellow_dot"
 }

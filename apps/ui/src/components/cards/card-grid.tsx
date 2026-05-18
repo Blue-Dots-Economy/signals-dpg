@@ -17,7 +17,7 @@ interface CardGridProps {
   emptyMessage?: string;
   // Match score props
   localItem?: Item | null;
-  networkName?: string;
+  networkId?: string;
   selectedDomain?: string | null;
 }
 
@@ -33,7 +33,7 @@ export function CardGrid({
   loading = false,
   emptyMessage = 'No items found',
   localItem,
-  networkName = '',
+  networkId = '',
   selectedDomain,
 }: CardGridProps) {
   if (loading) {
@@ -68,7 +68,7 @@ export function CardGrid({
         // Create a fallback item if full item not available
         const networkItem = fullItem || {
           item_id: item.id,
-          item_network: networkName,
+          item_network: networkId,
           item_domain: selectedDomain || '',
           item_type: 'profile',
           item_instance_url: null,

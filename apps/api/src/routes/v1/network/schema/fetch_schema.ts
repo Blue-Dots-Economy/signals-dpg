@@ -4,7 +4,7 @@ import z, {
 } from '@dpg/schemas';
 import { type FastifyPluginAsyncZod } from 'fastify-type-provider-zod';
 import { getCurrentApiBaseUrl } from '@/config';
-import { getNetworkConfigByName } from '@/network_configs';
+import { getNetworkConfigById } from '@/network_configs';
 import { getOrFetchSchemaByUrl } from '@/network_schema_cache';
 import {
   isServedDomainBinding,
@@ -36,7 +36,7 @@ export const fetch_schema: FastifyPluginAsyncZod = async function (fastify) {
         );
       }
 
-      const networkConfig = await getNetworkConfigByName(params.network);
+      const networkConfig = await getNetworkConfigById(params.network);
       const currentInstanceUrl = getCurrentApiBaseUrl();
       const customSchemaUrl = getInstanceCustomItemSchemaUrl(networkConfig, {
         domain: params.domain,

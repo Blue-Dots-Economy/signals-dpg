@@ -14,7 +14,7 @@ import {
   countLocalItems,
   fetchLocalItems,
 } from '@/utils/item_fetch_runtime';
-import { getNetworkConfigByName } from '@/network_configs';
+import { getNetworkConfigById } from '@/network_configs';
 import { fetchItemsAcrossInstances } from '@/utils/inter_instance_fetch';
 
 type FetchItemsAggregateRequest = FastifyRequest<{
@@ -103,10 +103,10 @@ const fetch_network_item_handler = async (
   } = request.query;
 
   try {
-    const networkConfig = await getNetworkConfigByName(item_network);
+    const networkConfig = await getNetworkConfigById(item_network);
     const domainExists = networkConfig.domains.some(
       (domain: (typeof networkConfig.domains)[number]) =>
-        domain.name === item_domain
+        domain.id === item_domain
     );
 
     if (!domainExists) {

@@ -171,7 +171,7 @@ sequenceDiagram
     participant PG_T as PostgreSQL (B)
 
     UI->>SRC: POST /api/v1/action/perform
-    Note over UI,SRC: {action_name, source_item_id, target_item_id, requirements_snapshot}
+    Note over UI,SRC: {action_type, source_item_id, target_item_id, requirements_snapshot}
 
     SRC->>AUTH_S: Verify x-api-key or session
     AUTH_S-->>SRC: Auth confirmed
@@ -179,7 +179,7 @@ sequenceDiagram
     SRC->>NS_S: Confirm source domain served by this instance
     NS_S-->>SRC: Domain confirmed
 
-    SRC->>NS_S: Load actions[action_name].interactions[]
+    SRC->>NS_S: Load actions[action_type].interactions[]
     NS_S-->>SRC: Interaction definitions (from_items, to_items, schemas)
 
     Note over SRC: Validate source/target item_type eligibility against interactions[].from_items and to_items
@@ -193,12 +193,12 @@ sequenceDiagram
     NS_S-->>SRC: target_instance_url (Instance B)
 
     SRC->>TGT: POST /api/v1/network/action/perform
-    Note over SRC,TGT: {action_name, source routing, target routing, requirements_snapshot}
+    Note over SRC,TGT: {action_type, source routing, target routing, requirements_snapshot}
 
     Note over TGT: Validate requirements_snapshot against requirement_schema
 
     TGT->>PG_T: INSERT INTO item_actions
-    Note over PG_T: action_id, action_name, source and target routing,<br/>requirements_snapshot JSONB, action_status, update_count
+    Note over PG_T: action_id, action_type, source and target routing,<br/>requirements_snapshot JSONB, action_status, update_count
 
     TGT->>PG_T: INSERT initial row into action_events
 

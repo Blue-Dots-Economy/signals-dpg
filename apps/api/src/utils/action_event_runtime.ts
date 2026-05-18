@@ -17,7 +17,7 @@ type PerformActionTargetItemRef = z.infer<
 export type StoredActionEvent = z.infer<typeof StoreEventBodySchema>;
 
 export type ActionEventPayloadContext = {
-  action_name: string;
+  action_type: string;
   source_item: ActionItemRef;
   target_item: ActionItemRef;
   requirements_snapshot: Record<string, unknown>;
@@ -111,7 +111,7 @@ export async function insertActionEvent(
   const [created] = await db
     .insert(action_events)
     .values({
-      action_name: event.action_name,
+      action_type: event.action_type,
       partition_network: getActionEventPartitionNetwork(event),
       origin_instance_domain: event.origin_instance_domain,
       action_id: event.action_id,
@@ -139,7 +139,7 @@ export async function insertActionEvent(
     .onConflictDoNothing({
       target: [
         action_events.partition_network,
-        action_events.action_name,
+        action_events.action_type,
         action_events.origin_instance_domain,
         action_events.action_id,
         action_events.update_count,
@@ -148,7 +148,7 @@ export async function insertActionEvent(
     .returning({
       event_id: action_events.event_id,
       action_id: action_events.action_id,
-      action_name: action_events.action_name,
+      action_type: action_events.action_type,
       action_status: action_events.action_status,
       update_count: action_events.update_count,
     });

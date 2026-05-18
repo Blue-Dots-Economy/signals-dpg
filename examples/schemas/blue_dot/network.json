@@ -1,11 +1,9 @@
 {
-  "name": "blue_dot",
   "display_name": "Blue Dot",
   "description": "Jobs and hiring network.",
   "schema_standard": "https://json-schema.org/draft/2020-12/schema",
   "domains": [
     {
-      "name": "seeker",
       "description": "People looking for jobs.",
       "minimum_cache_ttl_seconds": 300,
       "item_schemas": {
@@ -14,7 +12,13 @@
           "title": "Job Seeker Profile 1.0",
           "type": "object",
           "additionalProperties": false,
-          "required": ["name", "gender", "location", "age", "phone"],
+          "required": [
+            "name",
+            "gender",
+            "location",
+            "age",
+            "phone"
+          ],
           "properties": {
             "name": {
               "type": "string",
@@ -38,19 +42,44 @@
             },
             "workExperience": {
               "type": "string",
-              "enum": ["Fresher", "Worked before", "Returning after a break"]
+              "enum": [
+                "Fresher",
+                "Worked before",
+                "Returning after a break"
+              ]
             },
             "workExperienceYearsConditional": {
               "type": "string",
-              "enum": ["0", "< 1 Year", "1 Year", "2 Years", "3 Years", "3-5 Years", "5-10 Years", "10-15 Years", "15+ Years", "Other"]
+              "enum": [
+                "0",
+                "< 1 Year",
+                "1 Year",
+                "2 Years",
+                "3 Years",
+                "3-5 Years",
+                "5-10 Years",
+                "10-15 Years",
+                "15+ Years",
+                "Other"
+              ]
             },
             "highestQualificationOrSkill": {
               "type": "string",
-              "enum": ["School", "College", "ITI / Other Vocational Trainings", "Certification / Learned on the job"]
+              "enum": [
+                "School",
+                "College",
+                "ITI / Other Vocational Trainings",
+                "Certification / Learned on the job"
+              ]
             },
             "natureOfJobsInterestedIn": {
               "type": "string",
-              "enum": ["Internship", "Apprenticeship", "Full-time", "Flexible"]
+              "enum": [
+                "Internship",
+                "Apprenticeship",
+                "Full-time",
+                "Flexible"
+              ]
             },
             "nameOfJobRolesInterestedIn": {
               "type": "string",
@@ -58,14 +87,19 @@
             },
             "otherHelpNeeded": {
               "type": "string",
-              "enum": ["Training", "Accommodation", "Travel", "Other"]
+              "enum": [
+                "Training",
+                "Accommodation",
+                "Travel",
+                "Other"
+              ]
             }
           }
         }
-      }
+      },
+      "id": "seeker"
     },
     {
-      "name": "provider",
       "description": "Employers and recruiters posting jobs.",
       "minimum_cache_ttl_seconds": 300,
       "item_schemas": {
@@ -74,7 +108,16 @@
           "title": "Job Posting 1.0",
           "type": "object",
           "additionalProperties": false,
-          "required": ["jobProviderName", "role", "jobProviderLocation", "hiringManagerName", "hiringManagerPhoneNumber", "hiringManagerEmail", "positions", "natureOfJob"],
+          "required": [
+            "jobProviderName",
+            "role",
+            "jobProviderLocation",
+            "hiringManagerName",
+            "hiringManagerPhoneNumber",
+            "hiringManagerEmail",
+            "positions",
+            "natureOfJob"
+          ],
           "properties": {
             "jobProviderName": {
               "type": "string",
@@ -103,7 +146,12 @@
             },
             "natureOfJob": {
               "type": "string",
-              "enum": ["Internship", "Apprenticeship", "Full-time", "Flexible"]
+              "enum": [
+                "Internship",
+                "Apprenticeship",
+                "Full-time",
+                "Flexible"
+              ]
             },
             "stipendMin": {
               "type": "number",
@@ -114,7 +162,7 @@
               "type": "number",
               "title": "Monthly In-hand Stipend (INR) max",
               "minimum": 0
-             },
+            },
             "salaryMin": {
               "type": "number",
               "title": "Monthly In-hand Salary (INR) min",
@@ -126,26 +174,48 @@
               "minimum": 0
             },
             "taskRateMin": {
-                "type": "number",
-                "title": "Per Task (INR) min",
-                "minimum": 0
+              "type": "number",
+              "title": "Per Task (INR) min",
+              "minimum": 0
             },
             "taskRateMax": {
-                "type": "number",
-                "title": "Per Task (INR) max",
-                "minimum": 0
+              "type": "number",
+              "title": "Per Task (INR) max",
+              "minimum": 0
             },
             "candidateExperienceType": {
               "type": "string",
-              "enum": ["Fresher", "Worked before", "Returning after a break"]
+              "enum": [
+                "Fresher",
+                "Worked before",
+                "Returning after a break"
+              ]
             },
             "minEducationalInstitute": {
               "type": "string",
-              "enum": ["School", "College", "ITI", "Other Vocational Training", "Certifications", "None"]
+              "enum": [
+                "School",
+                "College",
+                "ITI",
+                "Other Vocational Training",
+                "Certifications",
+                "None"
+              ]
             },
             "workExperienceYears": {
               "type": "string",
-              "enum": ["0", "< 1 Year", "1 Year", "2 Years", "3 Years", "3-5 Years", "5-10 Years", "10-15 Years", "15+ Years", "Other"]
+              "enum": [
+                "0",
+                "< 1 Year",
+                "1 Year",
+                "2 Years",
+                "3 Years",
+                "3-5 Years",
+                "5-10 Years",
+                "10-15 Years",
+                "15+ Years",
+                "Other"
+              ]
             },
             "lastRoleHeld": {
               "type": "string",
@@ -153,33 +223,34 @@
             }
           }
         }
-      }
+      },
+      "id": "provider"
     }
   ],
   "instances": [
     {
-      "domain_name": "seeker",
       "instance_name": "Blue Dot Seeker Local",
       "instance_url": "http://localhost:2742",
-      "custom_item_schema_urls": {}
+      "custom_item_schema_urls": {},
+      "domain_id": "seeker"
     },
     {
-      "domain_name": "provider",
       "instance_name": "Blue Dot Provider Local",
       "instance_url": "http://localhost:2742",
-      "custom_item_schema_urls": {}
+      "custom_item_schema_urls": {},
+      "domain_id": "provider"
     },
     {
-      "domain_name": "seeker",
       "instance_name": "Blue Dot Seeker",
       "instance_url": "https://ubi-backend.onest.dhiway.net",
-      "custom_item_schema_urls": {}
+      "custom_item_schema_urls": {},
+      "domain_id": "seeker"
     },
     {
-      "domain_name": "provider",
       "instance_name": "Blue Dot Provider",
       "instance_url": "https://ubi-backend.onest.dhiway.net",
-      "custom_item_schema_urls": {}
+      "custom_item_schema_urls": {},
+      "domain_id": "provider"
     }
   ],
   "actions": {
@@ -196,7 +267,11 @@
             "title": "Job Application Requirement",
             "type": "object",
             "additionalProperties": false,
-            "required": ["role", "workExperience", "age"],
+            "required": [
+              "role",
+              "workExperience",
+              "age"
+            ],
             "properties": {
               "role": {
                 "type": "string",
@@ -209,7 +284,11 @@
               },
               "workExperience": {
                 "type": "string",
-                "enum": ["Fresher", "Worked before", "Returning after a break"]
+                "enum": [
+                  "Fresher",
+                  "Worked before",
+                  "Returning after a break"
+                ]
               }
             }
           },
@@ -218,11 +297,19 @@
             "title": "Job Application Event",
             "type": "object",
             "additionalProperties": false,
-            "required": ["status", "remark"],
+            "required": [
+              "status",
+              "remark"
+            ],
             "properties": {
               "status": {
                 "type": "string",
-                "enum": ["created", "submitted", "shortlisted", "rejected"]
+                "enum": [
+                  "created",
+                  "submitted",
+                  "shortlisted",
+                  "rejected"
+                ]
               },
               "remark": {
                 "type": "string"
@@ -240,7 +327,11 @@
             "title": "Interview Invitation Requirement",
             "type": "object",
             "additionalProperties": false,
-            "required": ["role", "interview_time", "interview_mode"],
+            "required": [
+              "role",
+              "interview_time",
+              "interview_mode"
+            ],
             "properties": {
               "role": {
                 "type": "string",
@@ -252,7 +343,11 @@
               },
               "interview_mode": {
                 "type": "string",
-                "enum": ["in_person", "online", "phone"]
+                "enum": [
+                  "in_person",
+                  "online",
+                  "phone"
+                ]
               },
               "message_to_candidate": {
                 "type": "string"
@@ -264,11 +359,19 @@
             "title": "Interview Invitation Event",
             "type": "object",
             "additionalProperties": false,
-            "required": ["status", "remark"],
+            "required": [
+              "status",
+              "remark"
+            ],
             "properties": {
               "status": {
                 "type": "string",
-                "enum": ["created", "invited", "accepted", "rejected"]
+                "enum": [
+                  "created",
+                  "invited",
+                  "accepted",
+                  "rejected"
+                ]
               },
               "remark": {
                 "type": "string"
@@ -278,5 +381,6 @@
         }
       ]
     }
-  }
+  },
+  "id": "blue_dot"
 }

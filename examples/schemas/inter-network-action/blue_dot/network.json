@@ -1,18 +1,16 @@
 {
-  "name": "blue_dot",
   "display_name": "Blue Dot",
   "description": "Jobs and hiring network with inter-network citizen actions.",
   "schema_standard": "https://json-schema.org/draft/2020-12/schema",
   "cross_network_origins": [
     {
-      "name": "yellow_dot",
       "display_name": "Yellow Dot",
-      "schema_url": "https://registry.example.com/schemas/inter-network-action/yellow_dot/network.json"
+      "schema_url": "https://registry.example.com/schemas/inter-network-action/yellow_dot/network.json",
+      "id": "yellow_dot"
     }
   ],
   "domains": [
     {
-      "name": "seeker",
       "description": "People looking for jobs.",
       "minimum_cache_ttl_seconds": 300,
       "item_schemas": {
@@ -22,7 +20,10 @@
           "title": "Citizen 1.0",
           "type": "object",
           "additionalProperties": false,
-          "required": ["name", "location"],
+          "required": [
+            "name",
+            "location"
+          ],
           "properties": {
             "name": {
               "type": "string",
@@ -31,7 +32,11 @@
             "location": {
               "type": "object",
               "additionalProperties": false,
-              "required": ["city", "state", "country"],
+              "required": [
+                "city",
+                "state",
+                "country"
+              ],
               "properties": {
                 "city": {
                   "type": "string",
@@ -69,7 +74,11 @@
             },
             {
               "type": "object",
-              "required": ["skills", "preferred_city", "experience_years"],
+              "required": [
+                "skills",
+                "preferred_city",
+                "experience_years"
+              ],
               "properties": {
                 "skills": {
                   "type": "array",
@@ -94,7 +103,10 @@
           "$defs": {
             "citizen_1_0": {
               "type": "object",
-              "required": ["name", "location"],
+              "required": [
+                "name",
+                "location"
+              ],
               "properties": {
                 "name": {
                   "type": "string",
@@ -102,7 +114,11 @@
                 },
                 "location": {
                   "type": "object",
-                  "required": ["city", "state", "country"],
+                  "required": [
+                    "city",
+                    "state",
+                    "country"
+                  ],
                   "properties": {
                     "city": {
                       "type": "string",
@@ -132,10 +148,10 @@
             }
           }
         }
-      }
+      },
+      "id": "seeker"
     },
     {
-      "name": "provider",
       "description": "Employers and recruiters posting jobs.",
       "minimum_cache_ttl_seconds": 300,
       "item_schemas": {
@@ -144,7 +160,12 @@
           "title": "Job Posting 1.0",
           "type": "object",
           "additionalProperties": false,
-          "required": ["company_name", "role", "city", "employment_type"],
+          "required": [
+            "company_name",
+            "role",
+            "city",
+            "employment_type"
+          ],
           "properties": {
             "company_name": {
               "type": "string",
@@ -159,7 +180,12 @@
             },
             "employment_type": {
               "type": "string",
-              "enum": ["full_time", "part_time", "contract", "internship"]
+              "enum": [
+                "full_time",
+                "part_time",
+                "contract",
+                "internship"
+              ]
             },
             "salary_range": {
               "type": "string"
@@ -172,35 +198,36 @@
             }
           }
         }
-      }
+      },
+      "id": "provider"
     }
   ],
   "instances": [
     {
-      "domain_name": "seeker",
       "instance_name": "Blue Dot Seeker Local",
       "instance_url": "http://localhost:2742",
-      "custom_item_schema_urls": {}
+      "custom_item_schema_urls": {},
+      "domain_id": "seeker"
     },
     {
-      "domain_name": "provider",
       "instance_name": "Blue Dot Provider Local",
       "instance_url": "http://localhost:2742",
-      "custom_item_schema_urls": {}
+      "custom_item_schema_urls": {},
+      "domain_id": "provider"
     },
     {
-      "domain_name": "seeker",
       "instance_name": "Blue Dot Seeker",
       "instance_url": "https://seeker.bluedot.example.com",
-      "custom_item_schema_urls": {}
+      "custom_item_schema_urls": {},
+      "domain_id": "seeker"
     },
     {
-      "domain_name": "provider",
       "instance_name": "Blue Dot Provider",
       "instance_url": "https://provider.bluedot.example.com",
       "custom_item_schema_urls": {
         "job_posting_1.1": "https://provider.bluedot.example.com/schemas/job_posting_1.1.json"
-      }
+      },
+      "domain_id": "provider"
     }
   ],
   "actions": {
@@ -210,16 +237,25 @@
         {
           "from_network": "blue_dot",
           "from_domain": "seeker",
-          "from_items": ["citizen_1.0", "profile_1.0"],
+          "from_items": [
+            "citizen_1.0",
+            "profile_1.0"
+          ],
           "to_network": "blue_dot",
           "to_domain": "provider",
-          "to_items": ["job_posting_1.0", "job_posting_1.1"],
+          "to_items": [
+            "job_posting_1.0",
+            "job_posting_1.1"
+          ],
           "requirement_schema": {
             "$schema": "https://json-schema.org/draft/2020-12/schema",
             "title": "Job Application Requirement",
             "type": "object",
             "additionalProperties": false,
-            "required": ["job_id", "cover_note"],
+            "required": [
+              "job_id",
+              "cover_note"
+            ],
             "properties": {
               "job_id": {
                 "type": "string",
@@ -240,11 +276,18 @@
             "title": "Job Application Event",
             "type": "object",
             "additionalProperties": false,
-            "required": ["status", "remark"],
+            "required": [
+              "status",
+              "remark"
+            ],
             "properties": {
               "status": {
                 "type": "string",
-                "enum": ["submitted", "shortlisted", "rejected"]
+                "enum": [
+                  "submitted",
+                  "shortlisted",
+                  "rejected"
+                ]
               },
               "remark": {
                 "type": "string"
@@ -255,16 +298,27 @@
         {
           "from_network": "yellow_dot",
           "from_domain": "student",
-          "from_items": ["citizen_1.0", "profile_1.0", "profile_1.1"],
+          "from_items": [
+            "citizen_1.0",
+            "profile_1.0",
+            "profile_1.1"
+          ],
           "to_network": "blue_dot",
           "to_domain": "provider",
-          "to_items": ["job_posting_1.0", "job_posting_1.1"],
+          "to_items": [
+            "job_posting_1.0",
+            "job_posting_1.1"
+          ],
           "requirement_schema": {
             "$schema": "https://json-schema.org/draft/2020-12/schema",
             "title": "Yellow Dot Citizen Job Application Requirement",
             "type": "object",
             "additionalProperties": false,
-            "required": ["job_id", "cover_note", "eligibility_confirmation"],
+            "required": [
+              "job_id",
+              "cover_note",
+              "eligibility_confirmation"
+            ],
             "properties": {
               "job_id": {
                 "type": "string",
@@ -293,11 +347,18 @@
             "title": "Yellow Dot Citizen Job Application Event",
             "type": "object",
             "additionalProperties": false,
-            "required": ["status", "remark"],
+            "required": [
+              "status",
+              "remark"
+            ],
             "properties": {
               "status": {
                 "type": "string",
-                "enum": ["submitted", "shortlisted", "rejected"]
+                "enum": [
+                  "submitted",
+                  "shortlisted",
+                  "rejected"
+                ]
               },
               "remark": {
                 "type": "string"
@@ -307,5 +368,6 @@
         }
       ]
     }
-  }
+  },
+  "id": "blue_dot"
 }

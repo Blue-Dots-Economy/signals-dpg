@@ -45,7 +45,7 @@ Actions describe what one domain can request from another domain. They also defi
 
 | Field | Purpose |
 |-------|---------|
-| action name | Stable API value such as `connect`, `apply`, `book_trip` |
+| action type | Stable API value such as `connect`, `apply`, `book_trip` |
 | `from_domain` | Domain that initiates the action |
 | `from_items` | Source item types allowed to initiate the action |
 | `to_domain` | Domain that receives the action |
@@ -53,7 +53,7 @@ Actions describe what one domain can request from another domain. They also defi
 | `requirement_schema` | Request payload shape |
 | `event_schema` | Event/status payload shape |
 
-`from_network` and `to_network` are optional. If omitted, the current network name is used.
+`from_network` and `to_network` are optional. If omitted, the current network id is used.
 
 ## Runtime Flow
 

@@ -16,7 +16,7 @@ import {
   isServedDomainBinding,
   replyForUnservedDomain,
 } from '@/utils/served_domain_guard';
-import { getNetworkConfigByName } from '@/network_configs';
+import { getNetworkConfigById } from '@/network_configs';
 import {
   buildNetworkItemSchemaUrl,
   getOrFetchSchemaByUrl,
@@ -76,7 +76,7 @@ export const create_item_handler = async (
   }
 
   try {
-    const networkConfig = await getNetworkConfigByName(body.item_network);
+    const networkConfig = await getNetworkConfigById(body.item_network);
     const supportedItemTypes = getDomainItemTypes(
       networkConfig,
       body.item_domain

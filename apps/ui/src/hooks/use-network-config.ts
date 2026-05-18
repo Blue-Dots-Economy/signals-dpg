@@ -13,17 +13,17 @@ interface UseNetworkConfigResult {
 
 /**
  * Hook to fetch and cache a specific network configuration
- * @param networkName - The name of the network to fetch
+ * @param networkId - The id of the network to fetch
  * @returns Network config data and query state
  */
-export function useNetworkConfig(networkName: string | null): UseNetworkConfigResult {
+export function useNetworkConfig(networkId: string | null): UseNetworkConfigResult {
   const { data, isLoading, isError, error } = useQuery({
-    queryKey: [NETWORK_CONFIG_KEY, networkName],
+    queryKey: [NETWORK_CONFIG_KEY, networkId],
     queryFn: async () => {
-      if (!networkName) return null;
-      return fetchNetworkConfig(networkName);
+      if (!networkId) return null;
+      return fetchNetworkConfig(networkId);
     },
-    enabled: !!networkName,
+    enabled: !!networkId,
     staleTime: 5 * 60 * 1000, // 5 minutes cache
   });
 

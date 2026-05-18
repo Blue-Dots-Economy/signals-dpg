@@ -45,7 +45,7 @@ export interface TargetItemRef extends ItemRef {
  * Matches the actual API schema: POST /api/v1/action/perform
  */
 export interface PerformActionPayload {
-  action_name: string;
+  action_type: string;
   source_item: ItemRef;
   target_item: TargetItemRef;
   requirements_snapshot: Record<string, unknown>;
@@ -56,7 +56,7 @@ export interface PerformActionPayload {
  */
 export interface PerformActionResponse {
   action_id: string;
-  action_name: string;
+  action_type: string;
   action_status: string;
   update_count: number;
   source_item_id: string;
@@ -78,7 +78,7 @@ export interface UpdateActionStatusPayload {
  */
 export interface UpdateActionStatusResponse {
   action_id: string;
-  action_name: string;
+  action_type: string;
   action_status: string;
   update_count: number;
 }
@@ -88,7 +88,7 @@ export interface UpdateActionStatusResponse {
  */
 export interface FetchMyActionsQuery {
   action_id?: string;
-  action_name?: string;
+  action_type?: string;
   action_status?: string;
   item_id?: string;
   ownership_role?: 'all' | 'initiated' | 'received';
@@ -101,7 +101,7 @@ export interface FetchMyActionsQuery {
  */
 export interface Action {
   action_id: string;
-  action_name: string;
+  action_type: string;
   action_status: string;
   update_count: number;
   source_item_id: string;
@@ -141,7 +141,7 @@ export interface FetchMyActionsResponse {
  */
 export interface ActionEvent {
   event_id: string;
-  action_name: string;
+  action_type: string;
   action_id: string;
   update_count: number;
   action_status: string;
@@ -182,7 +182,7 @@ export interface FetchActionEventsResponse {
  * Query parameters for fetching action events
  */
 export interface FetchActionEventsQuery {
-  action_name: string;
+  action_type: string;
   action_id: string;
   update_count?: number;
   limit?: number;
@@ -246,7 +246,7 @@ export async function fetchMyActions(
   params.set('ownership_role', query.ownership_role ?? 'all');
 
   if (query.action_id) params.set('action_id', query.action_id);
-  if (query.action_name) params.set('action_name', query.action_name);
+  if (query.action_type) params.set('action_type', query.action_type);
   if (query.action_status) params.set('action_status', query.action_status);
   if (query.item_id) params.set('item_id', query.item_id);
   if (query.limit !== undefined) params.set('limit', String(query.limit));
@@ -268,7 +268,7 @@ export async function fetchActionEvents(
 ): Promise<FetchActionEventsResponse> {
   const params = new URLSearchParams();
 
-  params.set('action_name', query.action_name);
+  params.set('action_type', query.action_type);
   params.set('action_id', query.action_id);
   if (query.update_count !== undefined) {
     params.set('update_count', String(query.update_count));

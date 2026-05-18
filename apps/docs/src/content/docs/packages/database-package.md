@@ -82,7 +82,7 @@ Important columns in `items`:
 Important columns in `item_actions`:
 
 - partition owner: `partition_network`
-- action identity: `action_name`, `action_id`
+- action identity: `action_type`, `action_id`
 - action state: `action_status`, `update_count`, `requirements_snapshot`, `remarks`
 - source item reference: `source_item_network`, `source_item_domain`, `source_item_type`, `source_item_id`, `source_item_instance_url`
 - source owner snapshot: `source_item_owner`
@@ -93,7 +93,7 @@ Important columns in `item_actions`:
 Important columns in `action_events`:
 
 - partition owner: `partition_network`
-- event identity: `action_name`, `event_id`
+- event identity: `action_type`, `event_id`
 - origin and action state: `origin_instance_domain`, `action_id`, `action_status`, `update_count`
 - source item reference: `source_item_network`, `source_item_domain`, `source_item_type`, `source_item_id`, `source_item_instance_url`
 - source owner and geo snapshots: `source_item_owner`, `source_item_latitude`, `source_item_longitude`
@@ -135,7 +135,7 @@ For `items`:
 For `item_actions` and `action_events`:
 
 - root tables partition by `partition_network`
-- network partitions subpartition by `action_name`
+- network partitions subpartition by `action_type`
 - leaf partition tables are named as `a_p_{network}_{action}` and `e_p_{network}_{action}`
 
 This design keeps item rows grouped by network/domain and runtime action/event rows grouped by network/action.
@@ -179,8 +179,8 @@ Then it creates:
 The package exports:
 
 - `ensureItemPartition(db, network, domain)`
-- `ensureActionPartition(db, network, actionName)`
-- `ensureActionEventPartition(db, network, actionName)`
+- `ensureActionPartition(db, network, actionType)`
+- `ensureActionEventPartition(db, network, actionType)`
 
 This helper creates missing partitions lazily with `CREATE TABLE IF NOT EXISTS`.
 
@@ -192,12 +192,12 @@ This helper creates missing partitions lazily with `CREATE TABLE IF NOT EXISTS`.
 `ensureActionPartition()` creates:
 
 1. `a_p_{network}`
-2. `a_p_{network}_{action_name}`
+2. `a_p_{network}_{action_type}`
 
 `ensureActionEventPartition()` creates:
 
 1. `e_p_{network}`
-2. `e_p_{network}_{action_name}`
+2. `e_p_{network}_{action_type}`
 
 The helper accepts any non-empty partition key up to 120 characters. It normalizes generated table names by lowercasing the keys, removing non-alphanumeric characters, joining with underscores, and prepending `i_p_`, `a_p_`, or `e_p_`.
 
@@ -210,7 +210,7 @@ For `items`, the partition key consists of:
 - `item_network`
 - `item_domain`
 
-For `item_actions` and `action_events`, include `partition_network` and `action_name` when possible.
+For `item_actions` and `action_events`, include `partition_network` and `action_type` when possible.
 
 These keys should be included in `where` clauses to allow PostgreSQL to scan only the relevant partition.
 
@@ -325,7 +325,7 @@ await ensureActionPartition(db, 'yellow_dot', 'connect');
 
 await db.insert(item_actions).values({
   partition_network: 'yellow_dot',
-  action_name: 'connect',
+  action_type: 'connect',
   action_status: 'created',
   update_count: 0,
   source_item_network: 'yellow_dot',
@@ -353,7 +353,7 @@ await ensureActionEventPartition(db, 'yellow_dot', 'connect');
 
 await db.insert(action_events).values({
   partition_network: 'yellow_dot',
-  action_name: 'connect',
+  action_type: 'connect',
   origin_instance_domain: 'https://tutor.yellowdot.example.com',
   action_id: '33333333-3333-3333-3333-333333333333',
   action_status: 'created',
@@ -385,7 +385,7 @@ const events = await db
   .from(action_events)
   .where(
     and(
-      eq(action_events.action_name, 'connect'),
+      eq(action_events.action_type, 'connect'),
       eq(action_events.partition_network, 'yellow_dot'),
       eq(action_events.action_id, '33333333-3333-3333-3333-333333333333')
     )

@@ -33,31 +33,31 @@ function itemToCardItem(item: Item): { id: string; data: Record<string, unknown>
   };
 }
 
-function getItemTypeForDomain(network: DotNetworkSchema, domainName: string): string {
-  const domain = network.domains.find((d) => d.name === domainName);
+function getItemTypeForDomain(network: DotNetworkSchema, domainId: string): string {
+  const domain = network.domains.find((d) => d.id === domainId);
   const itemTypeKeys = domain?.item_schemas ? Object.keys(domain.item_schemas) : [];
   return itemTypeKeys.length > 0 ? itemTypeKeys[0] : 'profile';
 }
 
-function parseNetworkNames(networkEnv: string | undefined): string[] {
+function parseNetworkIds(networkEnv: string | undefined): string[] {
   if (!networkEnv) return [];
   return networkEnv.split(',').map(n => n.trim()).filter(Boolean);
 }
 
-function getActiveProfileStorageKey(networkName: string): string {
-  return `activeProfileId:${networkName}`;
+function getActiveProfileStorageKey(networkId: string): string {
+  return `activeProfileId:${networkId}`;
 }
 
-function getStoredActiveProfileId(networkName: string): string | null {
-  return localStorage.getItem(getActiveProfileStorageKey(networkName));
+function getStoredActiveProfileId(networkId: string): string | null {
+  return localStorage.getItem(getActiveProfileStorageKey(networkId));
 }
 
-function setStoredActiveProfileId(networkName: string, profileId: string): void {
-  localStorage.setItem(getActiveProfileStorageKey(networkName), profileId);
+function setStoredActiveProfileId(networkId: string, profileId: string): void {
+  localStorage.setItem(getActiveProfileStorageKey(networkId), profileId);
 }
 
-function clearStoredActiveProfileId(networkName: string): void {
-  localStorage.removeItem(getActiveProfileStorageKey(networkName));
+function clearStoredActiveProfileId(networkId: string): void {
+  localStorage.removeItem(getActiveProfileStorageKey(networkId));
 }
 
 function getAllInteractions(network: DotNetworkSchema): Array<{ actionType: string; interaction: DotNetworkInteraction }> {
@@ -88,7 +88,7 @@ function resolveTargetInstanceUrl(
     itemDomain: targetItem.item_domain,
     itemInstanceUrl: targetItem.item_instance_url,
     currentApiUrl,
-    networkInstances: network?.instances?.map(i => ({ domain: i.domain_name, url: i.instance_url })),
+    networkInstances: network?.instances?.map(i => ({ domain: i.domain_id, url: i.instance_url })),
   });
 
   // Priority 1: Use item's instance URL if it exists and is valid (not localhost in production)
@@ -110,7 +110,7 @@ function resolveTargetInstanceUrl(
   // Priority 2: Lookup in network.instances by domain
   if (network?.instances) {
     const instanceConfig = network.instances.find(
-      (i) => i.domain_name === targetItem.item_domain
+      (i) => i.domain_id === targetItem.item_domain
     );
     if (instanceConfig?.instance_url) {
       console.log(`✅ Using network.instances lookup: ${instanceConfig.instance_url}`);
@@ -135,27 +135,27 @@ export function HomePage() {
   );
   const [resolvedNetwork, setResolvedNetwork] = React.useState<DotNetworkSchema | null>(null);
   const [allNetworks, setAllNetworks] = React.useState<DotNetworkSchema[]>([]);
-  const configuredNetworkNames = parseNetworkNames(import.meta.env.VITE_NETWORK_NAME);
+  const configuredNetworkIds = parseNetworkIds(import.meta.env.VITE_NETWORK_ID);
   
   // Get network from URL query param, fallback to env config
   const networkFromUrl = searchParams.get('network');
-  const initialNetworkName = networkFromUrl && configuredNetworkNames.includes(networkFromUrl)
+  const initialNetworkId = networkFromUrl && configuredNetworkIds.includes(networkFromUrl)
     ? networkFromUrl
-    : (configuredNetworkNames[0] || null);
+    : (configuredNetworkIds[0] || null);
   
-  const [selectedNetworkName, setSelectedNetworkName] = React.useState<string | null>(initialNetworkName);
+  const [selectedNetworkId, setSelectedNetworkId] = React.useState<string | null>(initialNetworkId);
   const [domainItems, setDomainItems] = React.useState<Record<string, Item[]>>({});
   const [myItems, setMyItems] = React.useState<Item[]>([]);
   const [activeProfileId, setActiveProfileId] = React.useState<string | null>(null);
   const [loading, setLoading] = React.useState(false);
 
   React.useEffect(() => {
-    if (!selectedNetworkName) {
+    if (!selectedNetworkId) {
       setActiveProfileId(null);
       return;
     }
-    setActiveProfileId(getStoredActiveProfileId(selectedNetworkName));
-  }, [selectedNetworkName]);
+    setActiveProfileId(getStoredActiveProfileId(selectedNetworkId));
+  }, [selectedNetworkId]);
 
   // Fetch networks from API on mount
   React.useEffect(() => {
@@ -165,16 +165,16 @@ export function HomePage() {
       .then((networks) => {
         if (controller.signal.aborted) return;
         
-        // Filter by configured networks if VITE_NETWORK_NAME is set, otherwise use all
-        const targetNetworks = configuredNetworkNames.length > 0
-          ? networks.filter(n => configuredNetworkNames.includes(n.name))
+        // Filter by configured networks if VITE_NETWORK_ID is set, otherwise use all
+        const targetNetworks = configuredNetworkIds.length > 0
+          ? networks.filter(n => configuredNetworkIds.includes(n.id))
           : networks;
         setAllNetworks(targetNetworks);
 
         // Use first configured network, or first available
-        const defaultNetwork = targetNetworks[0]?.name;
-        if (defaultNetwork && !selectedNetworkName) {
-          setSelectedNetworkName(defaultNetwork);
+        const defaultNetwork = targetNetworks[0]?.id;
+        if (defaultNetwork && !selectedNetworkId) {
+          setSelectedNetworkId(defaultNetwork);
         }
       })
       .catch((err) => {
@@ -186,7 +186,7 @@ export function HomePage() {
 
   // Fetch and resolve the selected network
   React.useEffect(() => {
-    if (!selectedNetworkName) return;
+    if (!selectedNetworkId) return;
 
     const controller = new AbortController();
 
@@ -194,7 +194,7 @@ export function HomePage() {
     setDomainItems({});
     setMyItems([]);
 
-    fetchNetworkConfig(selectedNetworkName)
+    fetchNetworkConfig(selectedNetworkId)
       .then((config) => {
         if (controller.signal.aborted) return;
         // Resolve any $ref in the network config
@@ -209,7 +209,7 @@ export function HomePage() {
       });
 
     return () => { controller.abort(); };
-  }, [selectedNetworkName]);
+  }, [selectedNetworkId]);
 
   const network = resolvedNetwork;
 
@@ -220,10 +220,10 @@ export function HomePage() {
     const controller = new AbortController();
 
     const domainFetches = network.domains.map((domain) => {
-      const itemType = getItemTypeForDomain(network, domain.name);
+      const itemType = getItemTypeForDomain(network, domain.id);
       return fetchItems({
-        item_network: network.name,
-        item_domain: domain.name,
+        item_network: network.id,
+        item_domain: domain.id,
         item_type: itemType,
         created_by_me: true,
         limit: 100,
@@ -238,16 +238,16 @@ export function HomePage() {
       setMyItems(allProfiles);
 
       // Auto-select: use stored ID if valid, otherwise first profile
-      const storedId = getStoredActiveProfileId(network.name);
+      const storedId = getStoredActiveProfileId(network.id);
       if (storedId && allProfiles.some((p) => p.item_id === storedId)) {
         setActiveProfileId(storedId);
       } else if (allProfiles.length > 0) {
         setActiveProfileId(allProfiles[0].item_id);
-        setStoredActiveProfileId(network.name, allProfiles[0].item_id);
+        setStoredActiveProfileId(network.id, allProfiles[0].item_id);
       } else {
         // No profiles for this user — clear any stale ID from a previous session
         setActiveProfileId(null);
-        clearStoredActiveProfileId(network.name);
+        clearStoredActiveProfileId(network.id);
       }
     });
 
@@ -261,7 +261,7 @@ export function HomePage() {
   }, [myItems, activeProfileId]);
 
   // Current domain: from ?as= param (demo override), active profile, or network default
-  const currentDomain = searchParams.get('as') ?? myItem?.item_domain ?? network?.domains[0]?.name ?? 'student_profile';
+  const currentDomain = searchParams.get('as') ?? myItem?.item_domain ?? network?.domains[0]?.id ?? 'student_profile';
 
   // Domains visible to the current user
   const visibleDomains = React.useMemo(() => {
@@ -275,13 +275,13 @@ export function HomePage() {
         .filter(({ interaction }) => interaction.from_domain === currentDomain)
         .map(({ interaction }) => interaction.to_domain)
     );
-    return network.domains.filter((d) => targetNames.has(d.name));
+    return network.domains.filter((d) => targetNames.has(d.id));
   }, [network, currentDomain, myItem]);
 
   React.useEffect(() => {
     if (!network) return;
     if (selectedDomain === null) return;
-    if (!visibleDomains.some((d) => d.name === selectedDomain)) {
+    if (!visibleDomains.some((d) => d.id === selectedDomain)) {
       setSelectedDomain(null);
       setSearchParams((prev) => {
         prev.delete('domain');
@@ -307,20 +307,20 @@ export function HomePage() {
 
     const domainsToFetch = selectedDomain === null
       ? visibleDomains
-      : visibleDomains.filter((d) => d.name === selectedDomain);
+      : visibleDomains.filter((d) => d.id === selectedDomain);
 
     Promise.all(
       domainsToFetch.map((domain) => {
-        const itemType = getItemTypeForDomain(network, domain.name);
+        const itemType = getItemTypeForDomain(network, domain.id);
         return fetchNetworkItems(
-          { item_network: network.name, item_domain: domain.name, item_type: itemType, limit: 100 },
+          { item_network: network.id, item_domain: domain.id, item_type: itemType, limit: 100 },
           controller.signal
         )
           .then((res) => ({
-            domain: domain.name,
+            domain: domain.id,
             items: res.items.filter((item) => !localProfileItemIds.has(item.item_id)),
           }))
-          .catch(() => ({ domain: domain.name, items: [] as Item[] }));
+          .catch(() => ({ domain: domain.id, items: [] as Item[] }));
       })
     )
       .then((results) => {
@@ -339,8 +339,8 @@ export function HomePage() {
   // Active schema: from the selected browsing domain, or first visible domain
   const activeSchema = React.useMemo(() => {
     if (!network) return undefined;
-    const domainName = selectedDomain ?? visibleDomains[0]?.name;
-    const domain = network.domains.find((d) => d.name === domainName) ?? network.domains[0];
+    const domainId = selectedDomain ?? visibleDomains[0]?.id;
+    const domain = network.domains.find((d) => d.id === domainId) ?? network.domains[0];
     if (!domain) return undefined;
     return domain.item_schemas ? Object.values(domain.item_schemas)[0] : undefined;
   }, [network, selectedDomain, visibleDomains]);
@@ -351,30 +351,30 @@ export function HomePage() {
     const map: Record<string, RJSFSchema> = {};
     for (const domain of network.domains) {
       const schema = domain.item_schemas ? Object.values(domain.item_schemas)[0] : undefined;
-      if (schema) map[domain.name] = schema;
+      if (schema) map[domain.id] = schema;
     }
     return map;
   }, [network]);
 
   // Get all available actions for a given target domain
   const getActionsForDomain = React.useCallback(
-    (targetDomainName: string): DotActionSchema[] => {
+    (targetDomainId: string): DotActionSchema[] => {
       if (!network || !myItem) return [];
 
       const actions: DotActionSchema[] = [];
 
       // Iterate through all action types defined in the network schema
-      for (const [actionName, actionConfig] of Object.entries(network.actions)) {
+      for (const [actionType, actionConfig] of Object.entries(network.actions)) {
         if (!actionConfig?.interactions) continue;
 
         // Find matching interactions for currentDomain -> targetDomain
         const matchingInteractions = actionConfig.interactions.filter(
-          (i) => i.from_domain === currentDomain && i.to_domain === targetDomainName
+          (i) => i.from_domain === currentDomain && i.to_domain === targetDomainId
         );
 
         for (const interaction of matchingInteractions) {
           actions.push({
-            action_type: actionName,
+            action_type: actionType,
             from_domain: interaction.from_domain,
             to_domain: interaction.to_domain,
             requirement_schema: interaction.requirement_schema,
@@ -390,7 +390,7 @@ export function HomePage() {
 
   // Legacy: single active action for the selected domain (for CardGrid)
   const activeAction = React.useMemo<DotActionSchema | null>(() => {
-    const toDomain = selectedDomain ?? visibleDomains[0]?.name;
+    const toDomain = selectedDomain ?? visibleDomains[0]?.id;
     if (!toDomain) return null;
     const actions = getActionsForDomain(toDomain);
     return actions[0] ?? null;
@@ -412,11 +412,11 @@ export function HomePage() {
     return result;
   }, [domainItems, search]);
 
-  const handleDomainSelect = (domainName: string | null) => {
-    setSelectedDomain(domainName);
+  const handleDomainSelect = (domainId: string | null) => {
+    setSelectedDomain(domainId);
     setSearchParams((prev) => {
-      if (domainName) {
-        prev.set('domain', domainName);
+      if (domainId) {
+        prev.set('domain', domainId);
       } else {
         prev.delete('domain');
       }
@@ -434,16 +434,16 @@ export function HomePage() {
 
   const handleActiveProfileChange = (profileId: string) => {
     setActiveProfileId(profileId);
-    if (network?.name) {
-      setStoredActiveProfileId(network.name, profileId);
+    if (network?.id) {
+      setStoredActiveProfileId(network.id, profileId);
     }
   };
 
-  const handleNetworkSelect = (networkName: string) => {
-    setSelectedNetworkName(networkName);
+  const handleNetworkSelect = (networkId: string) => {
+    setSelectedNetworkId(networkId);
     setSelectedDomain(null);
     setSearchParams((prev) => {
-      prev.set('network', networkName);
+      prev.set('network', networkId);
       prev.delete('domain'); // Remove domain since it's network-specific
       return prev;
     });
@@ -452,7 +452,7 @@ export function HomePage() {
   const showNetworkSelector = allNetworks.length > 1;
 
   const currentDomainLabel = visibleDomains.find(
-    (d) => d.name === selectedDomain
+    (d) => d.id === selectedDomain
   )?.description;
 
   // Get dynamic actions for the selected domain
@@ -473,7 +473,7 @@ export function HomePage() {
   return (
     <PageShell
       networks={showNetworkSelector ? allNetworks : []}
-      selectedNetwork={selectedNetworkName}
+      selectedNetwork={selectedNetworkId}
       onNetworkSelect={handleNetworkSelect}
       domains={visibleDomains}
       selectedDomain={selectedDomain}
@@ -521,7 +521,7 @@ export function HomePage() {
 
             await performAction(
               {
-                action_name: actionType,
+                action_type: actionType,
                 source_item: {
                   item_network: myItem.item_network,
                   item_domain: myItem.item_domain,
@@ -551,8 +551,8 @@ export function HomePage() {
                     ? (Object.values(domain.item_schemas)[0] as import('@rjsf/utils').RJSFSchema)
                     : undefined;
                   // Get all dynamic actions for this domain
-                  const domainActions = getActionsForDomain(domain.name);
-                  return (filteredDomainItems[domain.name] ?? []).map((item) => ({
+                  const domainActions = getActionsForDomain(domain.id);
+                  return (filteredDomainItems[domain.id] ?? []).map((item) => ({
                     item,
                     schema: domainSchema,
                     domainActions,
@@ -601,7 +601,7 @@ export function HomePage() {
                           localItem={myItem}
                           networkItem={fullItem || {
                             item_id: item.id,
-                            item_network: network?.name || '',
+                            item_network: network?.id || '',
                             item_domain: selectedDomain || '',
                             item_type: 'profile',
                             item_instance_url: null,
@@ -637,7 +637,7 @@ export function HomePage() {
                     : `No ${currentDomainLabel ?? 'items'} found`
                 }
                 localItem={myItem}
-                networkName={network?.name}
+                networkId={network?.id}
                 selectedDomain={selectedDomain}
               />
             )

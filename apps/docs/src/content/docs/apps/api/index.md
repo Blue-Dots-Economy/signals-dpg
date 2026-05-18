@@ -49,4 +49,4 @@ The root endpoint returns service health plus the served domain bindings and net
 - `SERVED_DOMAINS` decides which `network/domain` pairs an instance may serve
 - network-wide fetch relies on `instances[]` in the network config
 - action validation relies on `actions[<name>].interactions`
-- the current UI focuses on `connect`, but the API can accept any configured action name
+- the current UI focuses on `connect`, but the API can accept any configured action type

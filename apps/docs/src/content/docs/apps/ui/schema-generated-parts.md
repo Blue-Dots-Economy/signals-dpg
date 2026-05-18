@@ -8,7 +8,7 @@ The UI loads network config documents from the API and renders most domain behav
 
 | Network schema source | UI behavior |
 |-----------------------|-------------|
-| `network.name` | API context, item requests, action payloads |
+| `network.id` | API context, item requests, action payloads |
 | `display_name` | Network selector label |
 | `description` | Optional user-facing context |
 | `domains[]` | Sidebar domain list and create-profile role choices |

@@ -26,8 +26,8 @@ Network
 
 | Part | Meaning |
 |------|---------|
-| `name` | Stable network id used in API payloads |
-| `display_name` | Human-readable network name |
+| `id` | Stable network id used in API payloads |
+| `display_name` | Human-readable network label |
 | `domains` | Business roles such as `student`, `tutor`, `seeker`, `provider` |
 | `item_schemas` | JSON Schemas for records a domain can publish |
 | `instances` | Registered API instances that serve a domain |
@@ -71,4 +71,4 @@ The UI still has product assumptions:
 - it usually picks the first item schema for a domain
 - it has field-name heuristics for titles and map locations
 
-The backend contract is more general than the current UI. You can define multiple action names and item types now, but a custom UI may be needed to expose all of them elegantly.
+The backend contract is more general than the current UI. You can define multiple action types and item types now, but a custom UI may be needed to expose all of them elegantly.

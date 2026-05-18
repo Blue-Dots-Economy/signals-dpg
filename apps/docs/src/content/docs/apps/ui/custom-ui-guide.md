@@ -15,7 +15,7 @@ Use this sequence to build a custom interface that behaves like `apps/ui` withou
 5. Hide public fields with the `private: true` convention.
 6. Fetch user-owned local items from `/api/v1/item/fetch`.
 7. Fetch target browsing items from `/api/v1/network/item/fetch`.
-8. Derive allowed actions from `actions[<action_name>].interactions`.
+8. Derive allowed actions from `actions[<action_type>].interactions`.
 9. Render action requirement forms from `requirement_schema`.
 10. Submit actions with source item, target item, and validated `requirements_snapshot`.
 
@@ -54,14 +54,14 @@ Replace these for your own product:
 The current UI focuses on `connect`. A general UI should do:
 
 ```ts
-for (const [actionName, action] of Object.entries(network.actions)) {
+for (const [actionType, action] of Object.entries(network.actions)) {
   for (const interaction of action.interactions) {
-    // render actionName when from/to domains match the active source and target
+    // render actionType when from/to domains match the active source and target
   }
 }
 ```
 
-Use each interaction's `requirement_schema` to render the form and submit the selected `actionName` to the API.
+Use each interaction's `requirement_schema` to render the form and submit the selected `actionType` to the API.
 
 ## Multiple Item Types
 

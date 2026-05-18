@@ -10,7 +10,7 @@ The DPG network schema is a runtime contract.
 
 ```json
 {
-  "name": "blue_dot",
+  "id": "blue_dot",
   "display_name": "Blue Dot",
   "description": "Jobs and hiring network.",
   "schema_standard": "https://json-schema.org/draft/2020-12/schema",
@@ -24,7 +24,7 @@ The DPG network schema is a runtime contract.
 
 | Field | Required | Runtime use |
 |-------|----------|-------------|
-| `name` | yes | API payload network id and default action network |
+| `id` | yes | API payload network id and default action network |
 | `display_name` | no | UI/network display label |
 | `description` | no | Human-readable context |
 | `schema_standard` | no | JSON Schema draft reference |
@@ -42,7 +42,7 @@ Example:
 
 ```json
 {
-  "name": "student",
+  "id": "student",
   "minimum_cache_ttl_seconds": 300,
   "item_schemas": {
     "profile_1.0": {
@@ -65,7 +65,7 @@ If a specific instance needs to override the payload for a supported `item_type`
 
 ```json
 {
-  "domain_name": "tutor",
+  "domain_id": "tutor",
   "instance_url": "https://tutor.yellowdot.example.com",
   "custom_item_schema_urls": {
     "profile_1.1": "https://tutor.yellowdot.example.com/schemas/profile_1.1.json"
@@ -98,7 +98,7 @@ Actions define interaction rules.
 }
 ```
 
-`from_network` and `to_network` are optional. When omitted, the current network name is used. `from_items` and `to_items` restrict the allowed source and target item types; omit them only when all item types for the domains are allowed.
+`from_network` and `to_network` are optional. When omitted, the current network id is used. `from_items` and `to_items` restrict the allowed source and target item types; omit them only when all item types for the domains are allowed.
 
 ## Runtime Usage In DPG
 
@@ -122,4 +122,4 @@ UI-interpreted behavior:
 - `item_schemas` drive forms and cards
 - `private: true` hides fields on public cards and map markers
 - action `requirement_schema` drives action modal forms
-- the current UI focuses on `connect`, though the schema/API model supports multiple action names
+- the current UI focuses on `connect`, though the schema/API model supports multiple action types

@@ -114,9 +114,9 @@ async function readSchemaFile(fileName: string): Promise<Record<string, unknown>
 async function cacheNetworkConfigSchemas(networkConfig: NetworkConfigDocument) {
   await cacheSchemaDocument(
     {
-      cache_key: createCacheKey(['network_config', networkConfig.name]),
+      cache_key: createCacheKey(['network_config', networkConfig.id]),
       kind: 'network_config',
-      network: networkConfig.name,
+      network: networkConfig.id,
       source: 'inline',
     },
     networkConfig as Record<string, unknown>
@@ -128,18 +128,18 @@ async function cacheNetworkConfigSchemas(networkConfig: NetworkConfigDocument) {
         {
           cache_key: createCacheKey([
             'domain_item_schema',
-            networkConfig.name,
-            domain.name,
+            networkConfig.id,
+            domain.id,
             itemType,
           ]),
           kind: 'domain_item_schema',
-          network: networkConfig.name,
-          domain: domain.name,
+          network: networkConfig.id,
+          domain: domain.id,
           item_type: itemType,
           schema_url:
             buildNetworkItemSchemaUrl({
               networkConfig,
-              domain: domain.name,
+              domain: domain.id,
               itemType,
             }) ?? undefined,
           source: 'inline',
@@ -162,15 +162,15 @@ async function cacheNetworkConfigSchemas(networkConfig: NetworkConfigDocument) {
         {
           cache_key: createCacheKey([
             'instance_custom_item_schema',
-            networkConfig.name,
-            instance.domain_name,
+            networkConfig.id,
+            instance.domain_id,
             instance.instance_url,
             itemType,
             schemaUrl,
           ]),
           kind: 'instance_custom_item_schema',
-          network: networkConfig.name,
-          domain: instance.domain_name,
+          network: networkConfig.id,
+          domain: instance.domain_id,
           item_type: itemType,
           instance_url: instance.instance_url,
           schema_url: schemaUrl,
@@ -314,7 +314,7 @@ export function buildNetworkItemSchemaUrl(input: {
   const url = new URL(input.networkConfig.source_url);
   url.hash = [
     NETWORK_ITEM_SCHEMA_FRAGMENT_PREFIX,
-    encodeURIComponent(input.networkConfig.name),
+    encodeURIComponent(input.networkConfig.id),
     encodeURIComponent(input.domain),
     encodeURIComponent(input.itemType),
   ].join('/');
@@ -342,7 +342,7 @@ async function resolveNetworkItemSchemaUrl(schemaUrl: string) {
   const networkConfigs = await getNetworkConfigs();
   const networkConfig = networkConfigs.find(
     (entry) =>
-      entry.name === network &&
+      entry.id === network &&
       entry.source_url &&
       withoutHash(entry.source_url) === withoutHash(schemaUrl)
   );

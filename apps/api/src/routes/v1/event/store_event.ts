@@ -7,7 +7,7 @@ import type { FastifyReply, FastifyRequest } from 'fastify';
 import { db } from '@api/db/postgres/drizzle_config';
 import { auth_middleware_if_enabled } from '@api/plugins/auth/auth_middleware';
 import { ensureActionEventPartition } from '@dpg/database';
-import { getNetworkConfigByName } from '@/network_configs';
+import { getNetworkConfigById } from '@/network_configs';
 import {
   isServedDomainBinding,
   replyForUnservedDomain,
@@ -24,7 +24,7 @@ type StoreEventRequest = FastifyRequest<{
 const StoreEventResponseSchema = z.object({
   event_id: z.string().nullable(),
   action_id: z.string(),
-  action_name: z.string(),
+  action_type: z.string(),
   action_status: z.string(),
   update_count: z.number().int().nonnegative(),
 });
@@ -65,9 +65,9 @@ export const store_event_handler = async (
   }
 
   try {
-    const networkConfig = await getNetworkConfigByName(body.target_item.item_network);
+    const networkConfig = await getNetworkConfigById(body.target_item.item_network);
     const interaction = getActionInteraction(networkConfig, {
-      actionName: body.action_name,
+      actionType: body.action_type,
       fromNetwork: body.source_item.item_network,
       fromDomain: body.source_item.item_domain,
       fromItemType: body.source_item.item_type,
@@ -88,13 +88,13 @@ export const store_event_handler = async (
     await ensureActionEventPartition(
       db,
       body.source_item.item_network,
-      body.action_name
+      body.action_type
     );
   } catch (err) {
     request.log.error(
       {
         err,
-        action_name: body.action_name,
+        action_type: body.action_type,
         action_id: body.action_id,
       },
       'Failed to ensure event partition'
@@ -111,7 +111,7 @@ export const store_event_handler = async (
   return reply.code(201).send({
     event_id: created?.event_id ?? null,
     action_id: body.action_id,
-    action_name: body.action_name,
+    action_type: body.action_type,
     action_status: body.action_status,
     update_count: body.update_count,
   });

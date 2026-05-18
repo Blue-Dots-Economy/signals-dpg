@@ -59,7 +59,7 @@ Each domain exposes a map of item types to JSON Schemas.
 
 ```json
 {
-  "name": "seeker",
+  "id": "seeker",
   "minimum_cache_ttl_seconds": 300,
   "item_schemas": {
     "profile_1.0": {
@@ -92,7 +92,7 @@ Instances tell the network which API serves a domain.
 
 ```json
 {
-  "domain_name": "provider",
+  "domain_id": "provider",
   "instance_name": "Blue Dot Provider",
   "instance_url": "https://provider.bluedot.example.com",
   "custom_item_schema_urls": {
@@ -149,7 +149,7 @@ Every domain can define `minimum_cache_ttl_seconds`.
 
 ```json
 {
-  "name": "provider",
+  "id": "provider",
   "minimum_cache_ttl_seconds": 300
 }
 ```
@@ -178,4 +178,4 @@ Use this sequence:
 - actions declare permission and payload shape together
 - instances are explicit and enumerable
 - cache policy belongs in the network contract
-- continuous flows should use multiple action names instead of overloading one action with every step
+- continuous flows should use multiple action types instead of overloading one action with every step

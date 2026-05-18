@@ -8,8 +8,8 @@ export interface WalletImportContextUser {
 
 export interface WalletImportContext {
   user: WalletImportContextUser;
-  networkName: string | null;
-  domainName: string | null;
+  networkId: string | null;
+  domainId: string | null;
   schema: Record<string, unknown> | null;
   formData: Record<string, unknown> | null;
 }

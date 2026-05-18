@@ -23,10 +23,10 @@ import type { LucideIcon } from 'lucide-react';
 interface AppSidebarProps {
   networks?: DotNetworkSchema[];
   selectedNetwork?: string | null;
-  onNetworkSelect?: (networkName: string) => void;
+  onNetworkSelect?: (networkId: string) => void;
   domains: DotNetworkDomain[];
   selectedDomain: string | null;
-  onDomainSelect: (domainName: string | null) => void;
+  onDomainSelect: (domainId: string | null) => void;
   currentDomainLabel?: string;
   myItems?: Item[];
   activeProfileId?: string | null;
@@ -49,8 +49,8 @@ function findTitleField(schema: RJSFSchema): string | null {
   return Object.keys(schema.properties)[0] ?? null;
 }
 
-function getDomainLabel(domainName: string): string {
-  return domainName
+function getDomainLabel(domainId: string): string {
+  return domainId
     .split('_')
     .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
     .join(' ');
@@ -110,13 +110,13 @@ export function AppSidebar({
     }
   }, [activeDomain]);
 
-  function toggleDomain(domainName: string) {
+  function toggleDomain(domainId: string) {
     setExpandedDomains((prev) => {
       const next = new Set(prev);
-      if (next.has(domainName)) {
-        next.delete(domainName);
+      if (next.has(domainId)) {
+        next.delete(domainId);
       } else {
-        next.add(domainName);
+        next.add(domainId);
       }
       return next;
     });
@@ -138,13 +138,13 @@ export function AppSidebar({
             <SidebarGroupContent>
               <SidebarMenu>
                 {networks.map((network) => (
-                  <SidebarMenuItem key={network.name}>
+                  <SidebarMenuItem key={network.id}>
                     <SidebarMenuButton
-                      isActive={selectedNetwork === network.name}
-                      onClick={() => onNetworkSelect?.(network.name)}
+                      isActive={selectedNetwork === network.id}
+                      onClick={() => onNetworkSelect?.(network.id)}
                     >
                       <Network className="h-4 w-4" />
-                      <span>{network.display_name || network.name}</span>
+                      <span>{network.display_name || network.id}</span>
                     </SidebarMenuButton>
                   </SidebarMenuItem>
                 ))}
@@ -167,12 +167,12 @@ export function AppSidebar({
                 </SidebarMenuButton>
               </SidebarMenuItem>
               {domains.map((domain) => {
-                const Icon = domainIcons[domain.name] ?? Box;
+                const Icon = domainIcons[domain.id] ?? Box;
                 return (
-                  <SidebarMenuItem key={domain.name}>
+                  <SidebarMenuItem key={domain.id}>
                     <SidebarMenuButton
-                      isActive={selectedDomain === domain.name}
-                      onClick={() => onDomainSelect(domain.name)}
+                      isActive={selectedDomain === domain.id}
+                      onClick={() => onDomainSelect(domain.id)}
                     >
                       <Icon className="h-4 w-4" />
                       <span>{domain.description}</span>
@@ -198,18 +198,18 @@ export function AppSidebar({
               </SidebarMenu>
             ) : (
               <div className="space-y-1">
-                {domainKeys.map((domainName) => {
-                  const profiles = profilesByDomain[domainName];
-                  const Icon = domainIcons[domainName] ?? Box;
-                  const label = getDomainLabel(domainName);
-                  const isExpanded = expandedDomains.has(domainName);
+                {domainKeys.map((domainId) => {
+                  const profiles = profilesByDomain[domainId];
+                  const Icon = domainIcons[domainId] ?? Box;
+                  const label = getDomainLabel(domainId);
+                  const isExpanded = expandedDomains.has(domainId);
                   const hasActiveProfile = profiles.some((p) => p.item_id === activeProfileId);
 
                   return (
-                    <div key={domainName}>
+                    <div key={domainId}>
                       {/* Accordion header */}
                       <button
-                        onClick={() => toggleDomain(domainName)}
+                        onClick={() => toggleDomain(domainId)}
                         className={[
                           'flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-sm transition-colors',
                           'hover:bg-sidebar-accent hover:text-sidebar-accent-foreground',

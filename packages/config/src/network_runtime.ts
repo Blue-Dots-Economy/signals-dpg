@@ -7,7 +7,7 @@ export type ServedDomainBinding = {
 export type JsonSchemaDocument = Record<string, unknown>;
 
 export type NetworkDomainConfig = {
-  name: string;
+  id: string;
   description?: string;
   minimum_cache_ttl_seconds?: number;
   item_schemas?: Record<string, JsonSchemaDocument>;
@@ -15,7 +15,7 @@ export type NetworkDomainConfig = {
 };
 
 type NetworkInstanceConfig = {
-  domain_name: string;
+  domain_id: string;
   instance_url: string;
   instance_name?: string;
   schema_url?: string | null;
@@ -39,7 +39,7 @@ type NetworkActionConfig = {
 };
 
 export type NetworkConfig = {
-  name: string;
+  id: string;
   display_name?: string;
   description?: string;
   schema_standard?: string;
@@ -51,7 +51,7 @@ export type NetworkConfig = {
 };
 
 export type NetworkCrossOriginConfig = {
-  name: string;
+  id: string;
   display_name?: string;
   schema_url: string;
 };
@@ -97,7 +97,7 @@ export function getAllowedInstanceOriginsFromNetworkConfig(
 
   const servedForNetwork = new Set(
     servedDomains
-      .filter((binding) => binding.network === networkConfig.name)
+      .filter((binding) => binding.network === networkConfig.id)
       .map((binding) => binding.domain)
   );
 
@@ -116,7 +116,7 @@ export function getAllowedInstanceOriginsFromNetworkConfig(
   }
 
   return networkConfig.instances
-    .filter((instance) => allowedDomains.has(instance.domain_name))
+    .filter((instance) => allowedDomains.has(instance.domain_id))
     .map((instance) => toOrigin(instance.instance_url))
     .filter((origin, index, list) => list.indexOf(origin) === index);
 }

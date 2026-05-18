@@ -16,7 +16,7 @@ import { sql } from 'drizzle-orm';
 export const action_events = pgTable(
   'action_events',
   {
-    action_name: text('action_name').notNull(),
+    action_type: text('action_type').notNull(),
     partition_network: text('partition_network').notNull(),
     event_id: uuid('event_id').defaultRandom().notNull(),
     origin_instance_domain: text('origin_instance_domain').notNull(),
@@ -54,17 +54,17 @@ export const action_events = pgTable(
   },
   (table) => [
     primaryKey({
-      columns: [table.partition_network, table.action_name, table.event_id],
+      columns: [table.partition_network, table.action_type, table.event_id],
     }),
     uniqueIndex('action_events_origin_action_update_idx').on(
       table.partition_network,
-      table.action_name,
+      table.action_type,
       table.origin_instance_domain,
       table.action_id,
       table.update_count
     ),
     index('action_events_action_idx').on(
-      table.action_name,
+      table.action_type,
       table.action_id,
       table.update_count
     ),
