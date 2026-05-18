@@ -1,0 +1,42 @@
+# VCS
+.git
+.gitignore
+
+# Dependencies and package-manager state
+node_modules
+.pnpm-store
+
+# Build output and caches
+.turbo
+dist
+coverage
+.cache
+tsconfig.tsbuildinfo
+v10
+
+# Local environment files
+.env
+.env.*
+!.env.example
+.DS_Store
+
+# Editor / tooling
+.idea
+.vscode
+
+# Agent and analysis metadata
+.agents
+.codacy
+.cursor
+AGENTS.md
+
+# Local-only scratch data
+.fastembed_cache
+draft
+
+# Existing app/package artifacts
+apps/*/dist
+apps/*/.astro
+apps/*/.vite
+apps/*/coverage
+packages/*/dist

@@ -1,16 +1,35 @@
 {
   "$schema": "https://turbo.build/schema.json",
   "globalEnv": [
-    "*"
+    "VITE_*",
+    "PUBLIC_*",
+    "ASTRO_*"
   ],
-  "globalDependencies": [
-    ".env"
+  "globalPassThroughEnv": [
+    "ALLOWED_ORIGINS",
+    "ALLOW_EXTRA_SCHEMA_DATA",
+    "API_DOMAIN",
+    "API_PORT",
+    "AUTH_MIDDLEWARE_ENABLED",
+    "AUTH_SECRET",
+    "CREATE_TEST_OTP",
+    "DATABASE_PORT",
+    "DPG_SCORING_*",
+    "INSTANCE_ENV",
+    "INSTANCE_NAME",
+    "MATCH_SCORE_PROVIDER",
+    "NETWORK_CONFIG_*",
+    "NOTIFICATION_SERVICE_*",
+    "POSTGRES_*",
+    "REDIS_*",
+    "SCHEMA_REGISTRY_URL",
+    "SERVED_DOMAINS",
+    "SMS_TEMPLATE_ID"
   ],
   "tasks": {
     "build": {
       "inputs": [
-        "$TURBO_DEFAULT$",
-        ".env*"
+        "$TURBO_DEFAULT$"
       ],
       "dependsOn": [
         "^build"

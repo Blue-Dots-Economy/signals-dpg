@@ -21,7 +21,7 @@ WORKDIR /repo
 
 COPY . .
 
-RUN pnpm dlx turbo@2.9.4 prune api --docker
+RUN pnpm dlx turbo@2.9.14 prune api --docker
 
 
 FROM base AS deps
@@ -47,6 +47,7 @@ COPY --from=deps /app/ ./
 COPY --from=pruner /repo/out/full/ ./
 
 RUN --mount=type=cache,id=pnpm-store,target=/pnpm/store \
+  --mount=type=cache,id=turbo-cache-api,target=/app/.turbo \
   pnpm turbo run build --filter=api
 
 # Reinstall as production-only so the final image does not contain
@@ -72,6 +73,7 @@ COPY --from=builder /app/package.json ./package.json
 
 COPY --from=builder /app/apps/api/package.json ./apps/api/package.json
 COPY --from=builder /app/packages ./packages
+COPY --from=pruner /repo/examples ./examples
 
 # Install ONLY api production deps
 RUN --mount=type=cache,id=pnpm-store,target=/pnpm/store \
