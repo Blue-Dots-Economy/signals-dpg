@@ -122,6 +122,13 @@ pnpm db:migrate:api
 pnpm dev:api
 ```
 
+To run the API itself as a container against the Compose PostgreSQL and Redis services:
+
+```bash
+docker compose up -d db redis
+DOCKER_NETWORK=dpg_internal pnpm docker:api
+```
+
 Optional:
 
 ```bash
