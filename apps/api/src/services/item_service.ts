@@ -37,6 +37,7 @@ export interface CreateItemServiceParams {
   item_latitude?: number | null;
   item_longitude?: number | null;
   created_by: string;
+  aggregator_id?: string | null;
 }
 
 export interface UpdateItemServiceBody {
@@ -156,6 +157,7 @@ export async function createItemInternal(
       item_latitude: params.item_latitude ?? null,
       item_longitude: params.item_longitude ?? null,
       created_by: params.created_by,
+      aggregator_id: params.aggregator_id ?? null,
     })
     .onConflictDoNothing({
       target: [
@@ -197,6 +199,8 @@ export async function updateItemInternal(
     ...body,
     updated_at: sql`now()`,
   };
+  // aggregator_id is provenance metadata, immutable after create
+  delete (updateValues as { aggregator_id?: unknown }).aggregator_id;
 
   if (body.item_state) {
     const [existingItem] = await exec

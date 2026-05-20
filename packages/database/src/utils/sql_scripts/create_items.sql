@@ -17,6 +17,7 @@ CREATE TABLE IF NOT EXISTS items (
   item_latitude DOUBLE PRECISION,
   item_longitude DOUBLE PRECISION,
   created_by TEXT NOT NULL,
+  aggregator_id UUID,
 
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -41,6 +42,9 @@ PARTITION BY LIST (item_network);
 ALTER TABLE IF EXISTS items
 ADD COLUMN IF NOT EXISTS item_private_state JSONB NOT NULL DEFAULT '{}'::jsonb;
 
+ALTER TABLE IF EXISTS items
+ADD COLUMN IF NOT EXISTS aggregator_id UUID;
+
 CREATE INDEX IF NOT EXISTS items_lookup_idx
 ON items (item_network, item_domain, created_at DESC);
 
@@ -61,3 +65,6 @@ ON items USING GIN (item_private_state);
 
 CREATE INDEX IF NOT EXISTS items_geo_earth_idx
 ON items USING GIST (ll_to_earth(item_latitude, item_longitude));
+
+CREATE INDEX IF NOT EXISTS items_aggregator_id_idx
+ON items (aggregator_id) WHERE aggregator_id IS NOT NULL;

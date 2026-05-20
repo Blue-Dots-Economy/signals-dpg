@@ -39,7 +39,7 @@ const OnboardProfileSchema = z
 export const OnboardBodySchema = z.object({
   user: OnboardUserSchema,
   profile: OnboardProfileSchema.optional(),
-  lookup_only: z.boolean().optional().default(false),
+  aggregator_id: z.string().uuid().optional(),
 });
 
 type OnboardRequest = FastifyRequest<{
@@ -83,7 +83,7 @@ export const onboard_handler = async (
   const {
     user: userInput,
     profile: profileInput,
-    lookup_only: lookupOnly,
+    aggregator_id: aggregatorId,
   } = request.body;
   const normalizedEmail = userInput.email?.trim().toLowerCase() || null;
   const normalizedPhone = userInput.phoneNumber?.trim() || null;
@@ -93,41 +93,6 @@ export const onboard_handler = async (
       error: 'MISSING_IDENTIFIER',
       message: 'Either email or phoneNumber is required',
     });
-  }
-
-  if (lookupOnly) {
-    try {
-      const emailUser = normalizedEmail ? (
-        await db.select().from(userTable).where(eq(userTable.email, normalizedEmail)).limit(1))[0] : undefined;
-      const phoneUser = normalizedPhone ? (
-        await db.select().from(userTable).where(eq(userTable.phoneNumber, normalizedPhone)).limit(1))[0] : undefined;
-      if (emailUser && phoneUser && emailUser.id !== phoneUser.id) {
-        return reply.code(409).send({
-          error: 'USER_CONFLICT',
-          message: 'email and phoneNumber map to different existing users',
-        });
-      }
-      const userRow = emailUser ?? phoneUser ?? null;
-      if (!userRow) {
-        return reply.code(200).send({ exists: false, user: null });
-      }
-      return reply.code(200).send({
-        exists: true,
-        user: {
-          id: userRow.id,
-          name: userRow.name,
-          email: userRow.email,
-          phoneNumber: userRow.phoneNumber,
-          role: userRow.role,
-        },
-      });
-    } catch (err) {
-      request.log.error({ err }, 'Onboard lookup failed');
-      return reply.code(500).send({
-        error: 'INTERNAL_SERVER_ERROR',
-        message: 'Lookup failed',
-      });
-    }
   }
 
   if (profileInput && !profileInput.item_id) {
@@ -266,6 +231,7 @@ export const onboard_handler = async (
             item_latitude: profileInput.item_latitude ?? null,
             item_longitude: profileInput.item_longitude ?? null,
             created_by: userRow.id,
+            aggregator_id: aggregatorId ?? null,
           });
           profileCreated = true;
         }
@@ -280,6 +246,7 @@ export const onboard_handler = async (
           item_state: items.item_state,
           item_latitude: items.item_latitude,
           item_longitude: items.item_longitude,
+          aggregator_id: items.aggregator_id,
           created_at: items.created_at,
           updated_at: items.updated_at,
         })

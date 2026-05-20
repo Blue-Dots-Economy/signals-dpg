@@ -32,6 +32,7 @@ export const items = pgTable(
     item_latitude: doublePrecision('item_latitude'),
     item_longitude: doublePrecision('item_longitude'),
     created_by: text('created_by').notNull(),
+    aggregator_id: uuid('aggregator_id'),
 
     created_at: timestamp('created_at')
       .$defaultFn(() => /* @__PURE__ */ new Date())
