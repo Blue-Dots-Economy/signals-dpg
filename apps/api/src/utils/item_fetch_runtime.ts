@@ -9,6 +9,7 @@ export type ItemFetchFilters = {
   item_domain: string;
   item_type?: string;
   created_by?: string;
+  aggregator_id?: string;
   item_instance_url?: string | null;
   item_schema_url?: string | null;
   item_state?: Record<string, unknown>;
@@ -32,6 +33,7 @@ const itemResponseColumns = {
   item_latitude: items.item_latitude,
   item_longitude: items.item_longitude,
   created_by: items.created_by,
+  aggregator_id: items.aggregator_id,
   created_at: items.created_at,
   updated_at: items.updated_at,
 };
@@ -52,6 +54,10 @@ function buildWhereClause(filters: Omit<ItemFetchFilters, 'limit' | 'offset'>) {
 
   if (filters.created_by) {
     conditions.push(eq(items.created_by, filters.created_by));
+  }
+
+  if (filters.aggregator_id) {
+    conditions.push(eq(items.aggregator_id, filters.aggregator_id));
   }
 
   if (filters.item_instance_url) {
