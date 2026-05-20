@@ -1,0 +1,151 @@
+name: dpg-blue
+
+services:
+  db:
+    image: postgres:18-alpine
+    container_name: dpg-blue-db
+    restart: unless-stopped
+    ports:
+      - '${POSTGRES_PORT}:5432'
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    volumes:
+      - dpg-blue-pg:/var/lib/postgresql
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB} -p 5432']
+      interval: 5s
+      timeout: 3s
+      retries: 30
+    networks: [dpg_blue]
+
+  redis:
+    image: redis:7.2-alpine
+    container_name: dpg-blue-redis
+    restart: unless-stopped
+    ports:
+      - '${REDIS_PORT}:6379'
+    command: >
+      sh -c 'exec redis-server --appendonly yes --requirepass ${REDIS_PASSWORD}'
+    volumes:
+      - dpg-blue-redis:/data
+    healthcheck:
+      test: ['CMD-SHELL', 'redis-cli -a ${REDIS_PASSWORD} ping | grep PONG']
+      interval: 5s
+      timeout: 3s
+      retries: 30
+    networks: [dpg_blue]
+
+  db-init:
+    image: postgres:18-alpine
+    container_name: dpg-blue-db-init
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      PGPASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_DB: ${POSTGRES_DB}
+    volumes:
+      - ./packages/database/src/utils/sql_scripts:/sql:ro
+      - ./apps/api/drizzle:/drizzle:ro
+    entrypoint:
+      - sh
+      - -c
+      - |
+        set -e
+        until pg_isready -h db -p 5432 -U "$$POSTGRES_USER"; do
+          echo "waiting for db..."; sleep 2;
+        done
+        # drizzle migrations: tolerate "already exists" on re-run (ON_ERROR_STOP=0)
+        # but fail loudly on connection / auth issues.
+        for f in /drizzle/*.sql; do
+          echo "applying $$f";
+          psql -h db -U "$$POSTGRES_USER" -d "$$POSTGRES_DB" -v ON_ERROR_STOP=0 -f "$$f";
+        done
+        # idempotent bootstrap scripts: any error is a real bug, stop.
+        psql -h db -U "$$POSTGRES_USER" -d "$$POSTGRES_DB" -v ON_ERROR_STOP=1 -f /sql/create_items.sql
+        psql -h db -U "$$POSTGRES_USER" -d "$$POSTGRES_DB" -v ON_ERROR_STOP=1 -f /sql/create_actions_events.sql
+        echo "schema bootstrap OK"
+    networks: [dpg_blue]
+
+  api:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    image: dpg-monorepo/api:latest
+    container_name: dpg-blue-api
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      db-init:
+        condition: service_completed_successfully
+    environment:
+      INSTANCE_NAME: ${INSTANCE_NAME}
+      INSTANCE_ENV: ${INSTANCE_ENV}
+      SERVED_DOMAINS: ${SERVED_DOMAINS}
+      NETWORK_CONFIG_SOURCE: local
+      NETWORK_CONFIG_LOCAL_FILE: /app/network.json
+      SCHEMA_REGISTRY_URL: ${SCHEMA_REGISTRY_URL}
+      API_DOMAIN: ${API_DOMAIN}
+      API_PORT: 2742
+      ALLOWED_ORIGINS: ${ALLOWED_ORIGINS}
+      AUTH_MIDDLEWARE_ENABLED: ${AUTH_MIDDLEWARE_ENABLED}
+      AUTH_SECRET: ${AUTH_SECRET}
+      BETTER_AUTH_SECRET: ${AUTH_SECRET}
+      CREATE_TEST_OTP: ${CREATE_TEST_OTP}
+      ALLOW_EXTRA_SCHEMA_DATA: ${ALLOW_EXTRA_SCHEMA_DATA}
+      ADMIN_DOMAINS: ${ADMIN_DOMAINS:-dhiway.com}
+      POSTGRES_HOST: db
+      POSTGRES_PORT: 5432
+      DATABASE_PORT: 5432
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
+      MATCH_SCORE_PROVIDER: dpg_scoring
+      DPG_SCORING_ENDPOINT: ${DPG_SCORING_ENDPOINT:-https://scoring.example.com}
+      DPG_SCORING_KEY_ID: ${DPG_SCORING_KEY_ID:-test}
+      DPG_SCORING_SECRET: ${DPG_SCORING_SECRET:-test}
+      NOTIFICATION_SERVICE_ENDPOINT: ${NOTIFICATION_SERVICE_ENDPOINT:-disabled}
+      NOTIFICATION_SERVICE_KEY_ID: ${NOTIFICATION_SERVICE_KEY_ID:-disabled}
+      NOTIFICATION_SERVICE_SECRET: ${NOTIFICATION_SERVICE_SECRET:-disabled}
+    volumes:
+      - ./examples/schemas/blue_dot/network.json:/app/network.json:ro
+    ports:
+      - '${API_PORT}:2742'
+    networks: [dpg_blue]
+
+  ui:
+    build:
+      context: .
+      dockerfile: apps/ui/Dockerfile
+      args:
+        VITE_API_URL: http://localhost:${API_PORT}
+        VITE_NETWORK_NAME: ${VITE_NETWORK_NAME}
+    image: dpg-monorepo/ui:latest
+    container_name: dpg-blue-ui
+    restart: unless-stopped
+    depends_on:
+      api:
+        condition: service_started
+    ports:
+      - '${UI_PORT}:80'
+    networks: [dpg_blue]
+
+networks:
+  dpg_blue:
+    name: dpg_blue
+    driver: bridge
+
+volumes:
+  dpg-blue-pg:
+    name: dpg-blue-pg
+  dpg-blue-redis:
+    name: dpg-blue-redis

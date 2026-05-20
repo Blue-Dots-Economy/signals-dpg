@@ -50,7 +50,8 @@ export const create_item_handler = async (
   request: CreateItemRequest,
   reply: FastifyReply
 ) => {
-  const userId = request.user?.id;
+  const callerId = request.user?.id;
+  const callerRole = request.user?.role;
   const body = request.body;
   const submittedItemState = body.item_state ?? {};
   const itemInstanceUrl = getCurrentApiBaseUrl();
@@ -60,12 +61,30 @@ export const create_item_handler = async (
     privateState: {},
   };
 
-  if (!userId) {
+  if (!callerId) {
     return reply.code(401).send({
       error: 'UNAUTHORIZED',
       message: 'Authenticated user is required to create an item',
     });
   }
+
+  const isAdmin = callerRole === 'admin';
+
+  if (!isAdmin && body.created_by) {
+    return reply.code(403).send({
+      error: 'FORBIDDEN_CREATED_BY',
+      message: 'Only admin callers may set created_by',
+    });
+  }
+
+  if (isAdmin && !body.created_by) {
+    return reply.code(400).send({
+      error: 'CREATED_BY_REQUIRED',
+      message: 'created_by is required when an admin creates an item',
+    });
+  }
+
+  const userId = isAdmin ? (body.created_by as string) : callerId;
 
   if (!isServedDomainBinding(body.item_network, body.item_domain)) {
     return await replyForUnservedDomain(

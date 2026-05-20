@@ -20,6 +20,8 @@ export const CreateItemBodySchema = ItemInsertSchema.omit({
   item_private_state: true,
   created_at: true,
   updated_at: true,
+}).extend({
+  created_by: z.string().min(1).optional(),
 });
 
 const FetchItemsSchemaBase = z.object({

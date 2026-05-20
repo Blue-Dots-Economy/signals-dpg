@@ -1,0 +1,598 @@
+{
+  "display_name": "Purple Dot",
+  "description": "Discovery and services network for People with Disabilities.",
+  "schema_standard": "https://json-schema.org/draft/2020-12/schema",
+  "domains": [
+    {
+      "description": "Persons with disabilities seeking services, devices, training, or other support.",
+      "minimum_cache_ttl_seconds": 300,
+      "item_schemas": {
+        "profile_1.0": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "title": "PWD Beneficiary Profile 1.0",
+          "type": "object",
+          "additionalProperties": false,
+          "$defs": {
+            "disability_type": {
+              "type": "string",
+              "enum": [
+                "Acid Attack Victim",
+                "Autism Spectrum Disorder",
+                "Blindness",
+                "Cerebral Palsy",
+                "Dwarfism",
+                "Hearing Impairment",
+                "Hemophilia",
+                "Intellectual Disability",
+                "Leprosy Cured",
+                "Locomotor Disability",
+                "Low Vision",
+                "Mental Illness",
+                "Multiple Sclerosis",
+                "Muscular Dystrophy",
+                "Parkinson's Disease",
+                "Sickle Cell Disease",
+                "Specific Learning Disabilities",
+                "Speech and Language Disability",
+                "Thalassemia",
+                "Chronic Neurological Conditions",
+                "Deaf",
+                "Hard of Hearing",
+                "Multiple Disabilities including deaf-blindness",
+                "Multiple Disabilities",
+                "Mental Retardation"
+              ]
+            },
+            "support_category": {
+              "type": "string",
+              "enum": [
+                "Assistive Devices",
+                "Health & Rehabilitation",
+                "Training & Skill Building",
+                "Application Support",
+                "Counselling & Mentorship",
+                "Accessibility Support",
+                "Employment Opportunities",
+                "Scholarships",
+                "Financial Products (Loans/Insurance)",
+                "Other"
+              ]
+            },
+            "document_type": {
+              "type": "string",
+              "enum": [
+                "Aadhaar",
+                "Income Certificate",
+                "Disability Certificate",
+                "School ID",
+                "Bank Account",
+                "Other"
+              ]
+            }
+          },
+          "required": [
+            "beneficiary_name",
+            "mobile_number",
+            "age",
+            "gender",
+            "disability_type",
+            "disability_percentage",
+            "looking_for",
+            "looking_for_details",
+            "service_city",
+            "documents_available"
+          ],
+          "properties": {
+            "beneficiary_name": {
+              "type": "string",
+              "title": "Name",
+              "minLength": 1
+            },
+            "mobile_number": {
+              "type": "string",
+              "title": "Mobile",
+              "pattern": "^[0-9]{10}$",
+              "private": true
+            },
+            "email": {
+              "type": "string",
+              "title": "Email",
+              "format": "email",
+              "private": true
+            },
+            "age": {
+              "type": "integer",
+              "title": "Age",
+              "minimum": 0,
+              "maximum": 120
+            },
+            "gender": {
+              "type": "string",
+              "title": "Gender",
+              "enum": [
+                "Male",
+                "Female",
+                "Other",
+                "Prefer not to say"
+              ]
+            },
+            "disability_type": {
+              "type": "array",
+              "title": "Disability",
+              "minItems": 1,
+              "items": {
+                "$ref": "#/$defs/disability_type"
+              }
+            },
+            "disability_percentage": {
+              "type": "integer",
+              "title": "Disability %",
+              "minimum": 0,
+              "maximum": 100
+            },
+            "looking_for": {
+              "type": "array",
+              "title": "Looking For",
+              "description": "What are you looking for?",
+              "minItems": 1,
+              "items": {
+                "$ref": "#/$defs/support_category"
+              }
+            },
+            "looking_for_details": {
+              "type": "string",
+              "title": "Details",
+              "description": "Explain your choice in more detail",
+              "minLength": 1
+            },
+            "service_city": {
+              "type": "string",
+              "title": "Service City",
+              "description": "City or village where you can receive the service or support",
+              "minLength": 1
+            },
+            "address": {
+              "type": "string",
+              "title": "Address",
+              "description": "Area, street, city to help reach you easily",
+              "private": true
+            },
+            "state": {
+              "type": "string",
+              "title": "State"
+            },
+            "district": {
+              "type": "string",
+              "title": "District"
+            },
+            "block": {
+              "type": "string",
+              "title": "Block"
+            },
+            "pincode": {
+              "type": "string",
+              "title": "Pincode",
+              "pattern": "^[0-9]{6}$"
+            },
+            "documents_available": {
+              "type": "array",
+              "title": "Documents",
+              "description": "Which documents do you have?",
+              "minItems": 1,
+              "items": {
+                "$ref": "#/$defs/document_type"
+              }
+            },
+            "highest_qualification": {
+              "type": "string",
+              "title": "Qualification",
+              "description": "Highest qualification",
+              "enum": [
+                "10th Pass",
+                "12th Pass",
+                "Diploma Pass",
+                "ITI Graduate",
+                "College Graduate",
+                "Post Graduate",
+                "None of the above"
+              ]
+            }
+          }
+        }
+      },
+      "id": "seeker"
+    },
+    {
+      "description": "Organisations and individuals providing services, devices, training, or other support for persons with disabilities.",
+      "minimum_cache_ttl_seconds": 300,
+      "item_schemas": {
+        "profile_1.0": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "title": "PWD Service Provider Profile 1.0",
+          "type": "object",
+          "additionalProperties": false,
+          "$defs": {
+            "disability_type": {
+              "type": "string",
+              "enum": [
+                "Acid Attack Victim",
+                "Autism Spectrum Disorder",
+                "Blindness",
+                "Cerebral Palsy",
+                "Dwarfism",
+                "Hearing Impairment",
+                "Hemophilia",
+                "Intellectual Disability",
+                "Leprosy Cured",
+                "Locomotor Disability",
+                "Low Vision",
+                "Mental Illness",
+                "Multiple Sclerosis",
+                "Muscular Dystrophy",
+                "Parkinson's Disease",
+                "Sickle Cell Disease",
+                "Specific Learning Disabilities",
+                "Speech and Language Disability",
+                "Thalassemia",
+                "Chronic Neurological Conditions",
+                "Deaf",
+                "Hard of Hearing",
+                "Multiple Disabilities including deaf-blindness",
+                "Multiple Disabilities",
+                "Mental Retardation"
+              ]
+            },
+            "support_category": {
+              "type": "string",
+              "enum": [
+                "Assistive Devices",
+                "Health & Rehabilitation",
+                "Training & Skill Building",
+                "Application Support",
+                "Counselling & Mentorship",
+                "Accessibility Support",
+                "Employment Opportunities",
+                "Scholarships",
+                "Financial Products (Loans/Insurance)",
+                "Other"
+              ]
+            }
+          },
+          "required": [
+            "contact_name",
+            "contact_phone",
+            "provider_category",
+            "organisation_name",
+            "disabilities_served",
+            "services_offered",
+            "service_cities",
+            "official_address",
+            "service_details"
+          ],
+          "properties": {
+            "contact_name": {
+              "type": "string",
+              "title": "Contact Name",
+              "minLength": 1
+            },
+            "contact_phone": {
+              "type": "string",
+              "title": "Phone",
+              "pattern": "^[0-9]{10}$",
+              "private": true
+            },
+            "contact_email": {
+              "type": "string",
+              "title": "Email",
+              "format": "email",
+              "private": true
+            },
+            "provider_category": {
+              "type": "string",
+              "title": "Category",
+              "description": "Select the category that applies to you",
+              "enum": [
+                "NGO / Trust",
+                "Government Body",
+                "Private Company",
+                "Community Group",
+                "Private Individual Practice",
+                "Hospital / Clinic",
+                "Educational Institution",
+                "Professional Network",
+                "Digital Platform"
+              ]
+            },
+            "organisation_name": {
+              "type": "string",
+              "title": "Organisation",
+              "description": "Name of your organisation (or your name if individual)",
+              "minLength": 1
+            },
+            "disabilities_served": {
+              "type": "array",
+              "title": "Disabilities Served",
+              "description": "What type of seekers are you looking for?",
+              "minItems": 1,
+              "items": {
+                "$ref": "#/$defs/disability_type"
+              }
+            },
+            "services_offered": {
+              "type": "array",
+              "title": "Services Offered",
+              "description": "What services or support do you provide?",
+              "minItems": 1,
+              "items": {
+                "$ref": "#/$defs/support_category"
+              }
+            },
+            "service_cities": {
+              "type": "string",
+              "title": "Service Cities",
+              "description": "Cities where the service is provided",
+              "minLength": 1
+            },
+            "official_address": {
+              "type": "string",
+              "title": "Address",
+              "description": "Official address",
+              "minLength": 1
+            },
+            "state": {
+              "type": "string",
+              "title": "State"
+            },
+            "district": {
+              "type": "string",
+              "title": "District"
+            },
+            "block": {
+              "type": "string",
+              "title": "Block"
+            },
+            "pincode": {
+              "type": "string",
+              "title": "Pincode",
+              "pattern": "^[0-9]{6}$"
+            },
+            "service_details": {
+              "type": "string",
+              "title": "Service Details",
+              "description": "Share more about the service, opportunity, or support provided",
+              "minLength": 1
+            },
+            "catalog_url": {
+              "type": "string",
+              "title": "Catalog URL",
+              "description": "URL to a catalog or service list you provide",
+              "format": "uri"
+            }
+          }
+        }
+      },
+      "id": "provider"
+    }
+  ],
+  "instances": [
+    {
+      "instance_name": "Purple Dot Seeker Local",
+      "instance_url": "http://localhost:2742",
+      "custom_item_schema_urls": {},
+      "domain_id": "seeker"
+    },
+    {
+      "instance_name": "Purple Dot Provider Local",
+      "instance_url": "http://localhost:2742",
+      "custom_item_schema_urls": {},
+      "domain_id": "provider"
+    },
+    {
+      "instance_name": "Purple Dot Seeker",
+      "instance_url": "https://ubi-backend.onest.dhiway.net",
+      "custom_item_schema_urls": {},
+      "domain_id": "seeker"
+    },
+    {
+      "instance_name": "Purple Dot Provider",
+      "instance_url": "https://ubi-backend.onest.dhiway.net",
+      "custom_item_schema_urls": {},
+      "domain_id": "provider"
+    }
+  ],
+  "actions": {
+    "connect": {
+      "description": "Lets a seeker and a provider request a connection with each other. Either party can initiate; the receiver can accept, reject, or the initiator can cancel before the receiver responds.",
+      "interactions": [
+        {
+          "from_network": "purple_dot",
+          "from_domain": "seeker",
+          "to_network": "purple_dot",
+          "to_domain": "provider",
+          "requirement_schema": {
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "title": "Seeker To Provider Connect Requirement",
+            "type": "object",
+            "additionalProperties": false,
+            "$defs": {
+              "disability_type": {
+                "type": "string",
+                "enum": [
+                  "Acid Attack Victim",
+                  "Autism Spectrum Disorder",
+                  "Blindness",
+                  "Cerebral Palsy",
+                  "Dwarfism",
+                  "Hearing Impairment",
+                  "Hemophilia",
+                  "Intellectual Disability",
+                  "Leprosy Cured",
+                  "Locomotor Disability",
+                  "Low Vision",
+                  "Mental Illness",
+                  "Multiple Sclerosis",
+                  "Muscular Dystrophy",
+                  "Parkinson's Disease",
+                  "Sickle Cell Disease",
+                  "Specific Learning Disabilities",
+                  "Speech and Language Disability",
+                  "Thalassemia",
+                  "Chronic Neurological Conditions",
+                  "Deaf",
+                  "Hard of Hearing",
+                  "Multiple Disabilities including deaf-blindness",
+                  "Multiple Disabilities",
+                  "Mental Retardation"
+                ]
+              },
+              "support_category": {
+                "type": "string",
+                "enum": [
+                  "Assistive Devices",
+                  "Health & Rehabilitation",
+                  "Training & Skill Building",
+                  "Application Support",
+                  "Counselling & Mentorship",
+                  "Accessibility Support",
+                  "Employment Opportunities",
+                  "Scholarships",
+                  "Financial Products (Loans/Insurance)",
+                  "Other"
+                ]
+              }
+            },
+            "required": [
+              "disability_type",
+              "looking_for",
+              "message"
+            ],
+            "properties": {
+              "disability_type": {
+                "type": "array",
+                "title": "Disability",
+                "minItems": 1,
+                "items": {
+                  "$ref": "#/$defs/disability_type"
+                }
+              },
+              "looking_for": {
+                "type": "array",
+                "title": "Looking For",
+                "description": "What are you looking for?",
+                "minItems": 1,
+                "items": {
+                  "$ref": "#/$defs/support_category"
+                }
+              },
+              "message": {
+                "type": "string",
+                "title": "Message",
+                "description": "Message to the provider",
+                "minLength": 1
+              }
+            }
+          },
+          "event_schema": {
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "title": "Seeker To Provider Connect Event",
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "status",
+              "remark"
+            ],
+            "properties": {
+              "status": {
+                "type": "string",
+                "enum": [
+                  "created",
+                  "accepted",
+                  "rejected",
+                  "cancelled"
+                ]
+              },
+              "remark": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        {
+          "from_network": "purple_dot",
+          "from_domain": "provider",
+          "to_network": "purple_dot",
+          "to_domain": "seeker",
+          "requirement_schema": {
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "title": "Provider To Seeker Connect Requirement",
+            "type": "object",
+            "additionalProperties": false,
+            "$defs": {
+              "support_category": {
+                "type": "string",
+                "enum": [
+                  "Assistive Devices",
+                  "Health & Rehabilitation",
+                  "Training & Skill Building",
+                  "Application Support",
+                  "Counselling & Mentorship",
+                  "Accessibility Support",
+                  "Employment Opportunities",
+                  "Scholarships",
+                  "Financial Products (Loans/Insurance)",
+                  "Other"
+                ]
+              }
+            },
+            "required": [
+              "services_offered",
+              "message"
+            ],
+            "properties": {
+              "services_offered": {
+                "type": "array",
+                "title": "Services Offered",
+                "description": "Services or support being offered",
+                "minItems": 1,
+                "items": {
+                  "$ref": "#/$defs/support_category"
+                }
+              },
+              "message": {
+                "type": "string",
+                "title": "Message",
+                "description": "Message to the seeker",
+                "minLength": 1
+              }
+            }
+          },
+          "event_schema": {
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "title": "Provider To Seeker Connect Event",
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "status",
+              "remark"
+            ],
+            "properties": {
+              "status": {
+                "type": "string",
+                "enum": [
+                  "created",
+                  "accepted",
+                  "rejected",
+                  "cancelled"
+                ]
+              },
+              "remark": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      ]
+    }
+  },
+  "id": "purple_dot"
+}
