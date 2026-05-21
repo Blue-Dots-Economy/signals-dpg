@@ -68,23 +68,31 @@ export const create_item_handler = async (
     });
   }
 
-  const isAdmin = callerRole === 'admin';
+  // The "admin acting on behalf of another user" flow is reserved for
+  // server-to-server callers identified by an api-key. UI sessions — even
+  // when the logged-in user happens to carry an admin role — should behave
+  // like a normal user and own the items they create. Distinguishing on
+  // the api-key header keeps that contract explicit and avoids confusing
+  // signed-in admins with a CREATED_BY_REQUIRED error when they create
+  // their own profile.
+  const isApiKeyCaller = Boolean(request.headers['x-api-key']);
+  const isAdminApiCaller = isApiKeyCaller && callerRole === 'admin';
 
-  if (!isAdmin && body.created_by) {
+  if (!isAdminApiCaller && body.created_by) {
     return reply.code(403).send({
       error: 'FORBIDDEN_CREATED_BY',
-      message: 'Only admin callers may set created_by',
+      message: 'created_by may only be set by an admin api-key caller',
     });
   }
 
-  if (isAdmin && !body.created_by) {
+  if (isAdminApiCaller && !body.created_by) {
     return reply.code(400).send({
       error: 'CREATED_BY_REQUIRED',
-      message: 'created_by is required when an admin creates an item',
+      message: 'created_by is required when an admin api-key creates an item',
     });
   }
 
-  const userId = isAdmin ? (body.created_by as string) : callerId;
+  const userId = isAdminApiCaller ? (body.created_by as string) : callerId;
 
   if (!isServedDomainBinding(body.item_network, body.item_domain)) {
     return await replyForUnservedDomain(
