@@ -18,7 +18,7 @@ class ApiConfig {
     const defaultUrl =
       import.meta.env.VITE_DEFAULT_API_URL ||
       import.meta.env.VITE_API_URL ||
-      'http://localhost:3000';
+      'http://localhost:2742';
 
     this.endpoints.push({
       key: 'default',
@@ -53,7 +53,7 @@ class ApiConfig {
     const endpoint = this.endpoints.find(
       (e) => e.key === this.selectedKey
     );
-    return endpoint?.url ?? this.endpoints[0]?.url ?? 'http://localhost:3000';
+    return endpoint?.url ?? this.endpoints[0]?.url ?? 'http://localhost:2742';
   }
 
   getEndpoints(): ApiEndpoint[] {
