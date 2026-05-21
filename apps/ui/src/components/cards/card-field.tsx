@@ -10,9 +10,7 @@ interface CardFieldProps {
 function CardField({ label, value, type }: CardFieldProps) {
   let displayValue: string;
 
-  if (value === null || value === undefined) {
-    displayValue = '—';
-  } else if (Array.isArray(value)) {
+  if (Array.isArray(value)) {
     displayValue = value
       .map((item) => {
         if (item === null || item === undefined) return '—';
@@ -43,6 +41,37 @@ interface CardFieldsFromSchemaProps {
   data: Record<string, unknown>;
 }
 
+/**
+ * `isEmptyValue` decides which fields the card hides.
+ *
+ * The browse card has no obligation to advertise what a user did NOT fill —
+ * empty rows just add visual noise and break the grid. Boolean false stays
+ * visible because "Open to remote: No" is meaningful information; treating
+ * it the same as null would hide a legitimate user answer.
+ */
+function isEmptyValue(value: unknown): boolean {
+  if (value === null || value === undefined) return true;
+  if (typeof value === 'string') return value.trim().length === 0;
+  if (Array.isArray(value)) return value.length === 0;
+  return false;
+}
+
+/**
+ * Fallback label when a property has no `title` in the schema. Splits
+ * camelCase and snake_case into a single space-separated, title-cased
+ * phrase — `workExperienceYearsConditional` becomes
+ * "Work Experience Years Conditional", `preferred_city` becomes
+ * "Preferred City". Schemas with proper `title` fields always win.
+ */
+function humaniseFieldKey(key: string): string {
+  return key
+    .replace(/_/g, ' ')
+    .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
 export function CardFieldsFromSchema({
   schema,
   data,
@@ -61,17 +90,19 @@ export function CardFieldsFromSchema({
 
   return (
     <div className="grid grid-cols-2 gap-3">
-      {Object.entries(publicSchema.properties ?? {}).map(([key, prop]) => {
+      {Object.entries(publicSchema.properties ?? {}).flatMap(([key, prop]) => {
         const typed = prop as RJSFSchema;
-        const label = typed.title ?? key.replace(/_/g, ' ');
-        return (
+        const value = publicData[key];
+        if (isEmptyValue(value)) return [];
+        const label = typed.title ?? humaniseFieldKey(key);
+        return [
           <CardField
             key={key}
             label={label}
-            value={publicData[key]}
+            value={value}
             type={typed.type as string}
-          />
-        );
+          />,
+        ];
       })}
     </div>
   );

@@ -22,26 +22,32 @@
           "properties": {
             "name": {
               "type": "string",
+              "title": "Full Name",
               "minLength": 1
             },
             "gender": {
               "type": "string",
+              "title": "Gender",
               "minItems": 1
             },
             "location": {
-              "type": "string"
+              "type": "string",
+              "title": "Location"
             },
             "phone": {
               "type": "string",
+              "title": "Mobile Number",
               "minimum": 10
             },
             "age": {
               "type": "integer",
+              "title": "Age",
               "minimum": 14,
               "maximum": 65
             },
             "workExperience": {
               "type": "string",
+              "title": "Work Experience",
               "enum": [
                 "Fresher",
                 "Worked before",
@@ -50,6 +56,7 @@
             },
             "workExperienceYearsConditional": {
               "type": "string",
+              "title": "Years of Work Experience",
               "enum": [
                 "0",
                 "< 1 Year",
@@ -65,6 +72,7 @@
             },
             "highestQualificationOrSkill": {
               "type": "string",
+              "title": "Highest Qualification / Skill",
               "enum": [
                 "School",
                 "College",
@@ -74,6 +82,7 @@
             },
             "natureOfJobsInterestedIn": {
               "type": "string",
+              "title": "Nature of Jobs Interested In",
               "enum": [
                 "Internship",
                 "Apprenticeship",
@@ -83,10 +92,12 @@
             },
             "nameOfJobRolesInterestedIn": {
               "type": "string",
+              "title": "Job Roles Interested In",
               "minLength": 1
             },
             "otherHelpNeeded": {
               "type": "string",
+              "title": "Other Help Needed",
               "enum": [
                 "Training",
                 "Accommodation",
@@ -121,31 +132,39 @@
           "properties": {
             "jobProviderName": {
               "type": "string",
+              "title": "Company Name",
               "minLength": 1
             },
             "jobProviderLocation": {
-              "type": "string"
+              "type": "string",
+              "title": "Job Location"
             },
             "hiringManagerName": {
               "type": "string",
+              "title": "Hiring Manager Name",
               "minLength": 1
             },
             "hiringManagerPhoneNumber": {
-              "type": "string"
+              "type": "string",
+              "title": "Hiring Manager Mobile Number"
             },
             "hiringManagerEmail": {
-              "type": "string"
+              "type": "string",
+              "title": "Hiring Manager Email"
             },
             "role": {
               "type": "string",
+              "title": "Role",
               "minLength": 1
             },
             "positions": {
               "type": "integer",
+              "title": "Open Positions",
               "minimum": 1
             },
             "natureOfJob": {
               "type": "string",
+              "title": "Nature of Job",
               "enum": [
                 "Internship",
                 "Apprenticeship",
@@ -230,25 +249,13 @@
   "instances": [
     {
       "instance_name": "Blue Dot Seeker Local",
-      "instance_url": "http://localhost:2742",
+      "instance_url": "__PUBLIC_API_URL__",
       "custom_item_schema_urls": {},
       "domain_id": "seeker"
     },
     {
       "instance_name": "Blue Dot Provider Local",
-      "instance_url": "http://localhost:2742",
-      "custom_item_schema_urls": {},
-      "domain_id": "provider"
-    },
-    {
-      "instance_name": "Blue Dot Seeker",
-      "instance_url": "https://ubi-backend.onest.dhiway.net",
-      "custom_item_schema_urls": {},
-      "domain_id": "seeker"
-    },
-    {
-      "instance_name": "Blue Dot Provider",
-      "instance_url": "https://ubi-backend.onest.dhiway.net",
+      "instance_url": "__PUBLIC_API_URL__",
       "custom_item_schema_urls": {},
       "domain_id": "provider"
     }
