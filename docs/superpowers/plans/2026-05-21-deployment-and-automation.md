@@ -228,6 +228,14 @@ Any divergence between the two sources fails CI. This is what keeps the bundle h
 
 ## Workstream B — CI workflow
 
+> **Pre-task: typecheck orchestration is currently broken at the root.**
+> `pnpm tsc --noEmit` (the command `CLAUDE.md` documents as the pre-commit check) executes against the root `tsconfig.json`, which includes every workspace but doesn't carry per-workspace compiler options (`jsx`, per-workspace path aliases, Astro virtual modules). It reports false errors. The correct command today is **per-workspace**:
+> - `pnpm --filter api  exec tsc --noEmit`
+> - `pnpm --filter ui   exec tsc --noEmit`
+> - `pnpm --filter docs exec astro check` (Astro's `astro:content` virtual modules require `astro check`, not `tsc` — `tsc` will always fail on them)
+>
+> CI (Task B.1) must use these forms. Task B.2 (below) lands the durable fix.
+
 ### Task B.1: PR + develop checks
 
 **Files:**
@@ -246,7 +254,7 @@ concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 jobs:
-  typecheck:
+  typecheck-api:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -254,7 +262,29 @@ jobs:
       - uses: actions/setup-node@v4
         with: { node-version: 24, cache: pnpm }
       - run: pnpm install --frozen-lockfile
-      - run: pnpm tsc --noEmit
+      - run: pnpm --filter api exec tsc --noEmit
+
+  typecheck-ui:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v3
+      - uses: actions/setup-node@v4
+        with: { node-version: 24, cache: pnpm }
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter ui exec tsc --noEmit
+
+  typecheck-docs:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v3
+      - uses: actions/setup-node@v4
+        with: { node-version: 24, cache: pnpm }
+      - run: pnpm install --frozen-lockfile
+      # `astro check` regenerates the astro:content virtual module types
+      # internally; plain `tsc --noEmit` cannot see them.
+      - run: pnpm --filter docs exec astro check
 
   test:
     runs-on: ubuntu-latest
@@ -325,6 +355,80 @@ jobs:
 - [ ] **Step 2: Run on a draft PR to validate**
 
 - [ ] **Step 3: Commit**
+
+### Task B.2: Durable fix for the typecheck contract
+
+**Problem:** the root `tsconfig.json` declares `include: ["apps/**/*", "packages/**/*"]` and extends `tsconfig.base.json`, but per-workspace settings (`jsx`, path aliases, library types) are NOT inherited from each workspace's local `tsconfig.json`. So `pnpm tsc --noEmit` at the root reports false errors. `CLAUDE.md` documents this command as the pre-commit check — it has never actually worked end-to-end.
+
+Two acceptable fixes, in order of preference:
+
+**Option A (recommended): TypeScript project references.**
+
+- Convert the root `tsconfig.json` from `include`-based to references-based:
+  ```jsonc
+  // tsconfig.json
+  {
+    "files": [],
+    "references": [
+      { "path": "apps/api" },
+      { "path": "apps/ui" },
+      { "path": "apps/docs" },
+      { "path": "packages/auth" },
+      { "path": "packages/config" },
+      { "path": "packages/database" },
+      { "path": "packages/match_score" },
+      { "path": "packages/notification" },
+      { "path": "packages/schemas" }
+    ]
+  }
+  ```
+- Each workspace `tsconfig.json` must set `composite: true` (most already do via `tsconfig.base.json`).
+- `tsc -b` at the root then orchestrates per-workspace builds and respects each workspace's compiler options.
+- For Astro: `apps/docs` is excluded from the `tsc -b` references and gets its own job (`astro check`) in CI. Project references do not handle Astro's virtual modules.
+
+**Option B (simpler, less durable): add a root `typecheck` script that fans out per workspace.**
+
+- In root `package.json`:
+  ```json
+  "scripts": {
+    "typecheck": "pnpm --filter api exec tsc --noEmit && pnpm --filter ui exec tsc --noEmit && pnpm --filter docs exec astro check"
+  }
+  ```
+- Document `pnpm typecheck` instead of `pnpm tsc --noEmit` in `CLAUDE.md`.
+- Faster to land; doesn't unlock incremental builds the way project references do.
+
+**Files:**
+- Modify: `tsconfig.json` (root)
+- Modify: `package.json` (root) — `typecheck` script
+- Modify: `CLAUDE.md` — replace `pnpm tsc --noEmit` with `pnpm typecheck` (and/or per-workspace forms)
+- Possibly modify: `apps/docs/package.json` — add a `typecheck` script wrapping `astro check`
+
+**Steps:**
+
+- [ ] **Step 1: Choose Option A or Option B**
+  Surface to user. Default = Option A; Option B if the team wants to defer the project-references investment.
+
+- [ ] **Step 2: Implement chosen option** (one of the file lists above).
+
+- [ ] **Step 3: Verify**
+  ```bash
+  # Option A
+  tsc -b --dry --verbose            # confirms graph
+  pnpm typecheck                    # runs the actual build
+
+  # Option B
+  pnpm typecheck                    # fans out per-workspace
+  ```
+  Both should exit 0 on a clean tree.
+
+- [ ] **Step 4: Update CLAUDE.md**
+  Replace any reference to a root-level `pnpm tsc --noEmit` with the working command.
+
+- [ ] **Step 5: Tighten CI (Task B.1)**
+  Once `pnpm typecheck` works at the root, the three separate `typecheck-{api,ui,docs}` jobs can collapse into one. Keep them separate until then so a failure in one doesn't mask the others.
+
+- [ ] **Step 6: Commit**
+  Single commit, low blast radius. Lands independently of any other workstream.
 
 ---
 
