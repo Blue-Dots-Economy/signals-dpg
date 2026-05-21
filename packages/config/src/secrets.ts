@@ -50,8 +50,11 @@ export const OptionalSchemaRegistrySecretsSchema = z.object({
 export const NetworkRuntimeSecretsSchema = z.object({
   SERVED_DOMAINS: z.string().min(1),
   NETWORK_CONFIG_SOURCE: z.enum(['local', 'remote']).default('local'),
+  // Resolved relative to process.cwd() by network_config_loader.ts. The
+  // API process runs from apps/api/ (via turbo / pnpm dev:api), so the
+  // default points up two levels into the repo-root `examples/` tree.
   NETWORK_CONFIG_LOCAL_FILE: z.string().default(
-    'examples/schemas/yellow_dot/network.json'
+    '../../examples/schemas/yellow_dot/network.json'
   ),
   NETWORK_CONFIG_URLS: z.string().optional(),
   ALLOW_EXTRA_SCHEMA_DATA: z
