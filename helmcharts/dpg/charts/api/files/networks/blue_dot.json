@@ -1,0 +1,237 @@
+{
+  "name": "blue_dot",
+  "display_name": "Blue Dot",
+  "description": "Jobs and hiring network.",
+  "schema_standard": "https://json-schema.org/draft/2020-12/schema",
+  "domains": [
+    {
+      "name": "seeker",
+      "description": "People looking for jobs.",
+      "minimum_cache_ttl_seconds": 300,
+      "item_schemas": {
+        "profile_1.0": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "title": "Job Seeker Profile 1.0",
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["name", "skills", "preferred_city", "experience_years"],
+          "properties": {
+            "name": {
+              "type": "string",
+              "minLength": 1
+            },
+            "skills": {
+              "type": "array",
+              "minItems": 1,
+              "items": {
+                "type": "string"
+              }
+            },
+            "preferred_city": {
+              "type": "string"
+            },
+            "experience_years": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "open_to_remote": {
+              "type": "boolean"
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "provider",
+      "description": "Employers and recruiters posting jobs.",
+      "minimum_cache_ttl_seconds": 300,
+      "item_schemas": {
+        "job_posting_1.0": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "title": "Job Posting 1.0",
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["company_name", "role", "city", "employment_type"],
+          "properties": {
+            "company_name": {
+              "type": "string",
+              "minLength": 1
+            },
+            "role": {
+              "type": "string",
+              "minLength": 1
+            },
+            "city": {
+              "type": "string"
+            },
+            "employment_type": {
+              "type": "string",
+              "enum": ["full_time", "part_time", "contract", "internship"]
+            },
+            "salary_range": {
+              "type": "string"
+            },
+            "required_skills": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    }
+  ],
+  "instances": [
+    {
+      "domain_name": "seeker",
+      "instance_name": "Blue Dot Seeker Localhost",
+      "instance_url": "__PUBLIC_API_URL__",
+      "custom_item_schema_urls": {}
+    },
+    {
+      "domain_name": "provider",
+      "instance_name": "Blue Dot Provider Localhost",
+      "instance_url": "__PUBLIC_API_URL__",
+      "custom_item_schema_urls": {}
+    }
+  ],
+  "cross_network_origins": [
+    {
+      "name": "yellow_dot",
+      "display_name": "Yellow Dot",
+      "schema_url": "__SCHEMAS_URL__/yellow_dot.json"
+    }
+  ],
+  "actions": {
+    "invite": {
+      "description": "Lets a provider invite a seeker to apply to one of their job postings.",
+      "interactions": [
+        {
+          "from_network": "blue_dot",
+          "from_domain": "provider",
+          "from_items": ["job_posting_1.0"],
+          "to_network": "blue_dot",
+          "to_domain": "seeker",
+          "to_items": ["profile_1.0"],
+          "requirement_schema": {
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "title": "Job Invitation Requirement",
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["role", "message"],
+            "properties": {
+              "role": {
+                "type": "string",
+                "minLength": 1
+              },
+              "message": {
+                "type": "string",
+                "minLength": 1
+              },
+              "salary_range": {
+                "type": "string"
+              }
+            }
+          },
+          "event_schema": {
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "title": "Job Invitation Event",
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["status", "remark"],
+            "properties": {
+              "status": {
+                "type": "string",
+                "enum": ["sent", "accepted", "declined"]
+              },
+              "remark": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      ]
+    },
+    "apply": {
+      "description": "Lets a seeker apply to a provider's job posting. Also accepts yellow_dot students applying cross-network.",
+      "interactions": [
+        {
+          "from_network": "yellow_dot",
+          "from_domain": "student",
+          "from_items": ["profile_1.0", "profile_1.1"],
+          "to_network": "blue_dot",
+          "to_domain": "provider",
+          "to_items": ["job_posting_1.0"],
+          "requirement_schema": {
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "title": "Cross-network Student Application Requirement",
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["cover_note"],
+            "properties": {
+              "cover_note": { "type": "string", "minLength": 1 },
+              "expected_start": { "type": "string" }
+            }
+          },
+          "event_schema": {
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "title": "Cross-network Student Application Event",
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["status", "remark"],
+            "properties": {
+              "status": { "type": "string", "enum": ["submitted", "shortlisted", "rejected"] },
+              "remark": { "type": "string" }
+            }
+          }
+        },
+        {
+          "from_network": "blue_dot",
+          "from_domain": "seeker",
+          "from_items": ["profile_1.0"],
+          "to_network": "blue_dot",
+          "to_domain": "provider",
+          "to_items": ["job_posting_1.0", "job_posting_1.1"],
+          "requirement_schema": {
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "title": "Job Application Requirement",
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["job_id", "cover_note"],
+            "properties": {
+              "job_id": {
+                "type": "string",
+                "minLength": 1
+              },
+              "cover_note": {
+                "type": "string",
+                "minLength": 1
+              },
+              "resume_url": {
+                "type": "string",
+                "format": "uri"
+              }
+            }
+          },
+          "event_schema": {
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "title": "Job Application Event",
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["status", "remark"],
+            "properties": {
+              "status": {
+                "type": "string",
+                "enum": ["submitted", "shortlisted", "rejected"]
+              },
+              "remark": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      ]
+    }
+  }
+}

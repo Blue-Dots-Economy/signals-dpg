@@ -1,0 +1,123 @@
+# Default values for dpg-match-score.
+
+replicaCount: 1
+
+image:
+  repository: ghcr.io/sanketika-obsrv/dpg-monorepo/match-score
+  tag: ""            # defaults to .Chart.AppVersion
+  pullPolicy: IfNotPresent
+
+imagePullSecrets: []
+nameOverride: ""
+fullnameOverride: ""
+
+serviceAccount:
+  create: true
+  automount: true
+  annotations: {}
+  name: ""
+
+podAnnotations: {}
+podLabels: {}
+
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 1000
+  fsGroup: 1000
+
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: false
+  capabilities:
+    drop:
+      - ALL
+
+service:
+  type: ClusterIP
+  port: 3000
+  targetPort: 3000
+  annotations: {}
+
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+  hosts:
+    - host: match-score.dpg.local
+      paths:
+        - path: /
+          pathType: Prefix
+  tls: []
+
+resources: {}
+
+# Compose healthcheck: GET /ready on port 3000.
+livenessProbe:
+  httpGet:
+    path: /ready
+    port: http
+  initialDelaySeconds: 30
+  periodSeconds: 30
+  timeoutSeconds: 5
+  failureThreshold: 5
+
+readinessProbe:
+  httpGet:
+    path: /ready
+    port: http
+  initialDelaySeconds: 10
+  periodSeconds: 10
+  timeoutSeconds: 5
+  failureThreshold: 5
+
+autoscaling:
+  enabled: false
+  minReplicas: 1
+  maxReplicas: 5
+  targetCPUUtilizationPercentage: 80
+  targetMemoryUtilizationPercentage: ""
+
+nodeSelector: {}
+tolerations: []
+affinity: {}
+
+# Non-secret config rendered into a ConfigMap and loaded via envFrom.
+config:
+  NODE_ENV: production
+  HOST: 0.0.0.0
+  PORT: "3000"
+  MATCH_SCORE_PROVIDER: openai
+  MATCH_SCORE_MODEL: gpt-4o-mini
+  # File paths the app reads at boot. Files are mounted from configFiles.* Secret.
+  AUTH_SECRETS_FILE: /app/config/auth.keys.json
+  AI_PROVIDER_SECRETS_FILE: /app/config/ai.providers.local.json
+
+extraEnv: []
+
+# REDIS_URL is composed in the Deployment as redis://:$(REDIS_PASSWORD)@host:port
+# using REDIS_PASSWORD from the Secret below + redis.host/port.
+secrets:
+  create: true
+  existingSecret: ""
+  data:
+    REDIS_PASSWORD: ""
+
+# In-cluster Redis wiring used to build REDIS_URL.
+redis:
+  enabled: true
+  host: dpg-redis-master
+  port: 6379
+
+# Config JSON files mounted at /app/config/<fileName>. Compose mounts host
+# files; we render the JSON into Secret keys and mount as projected files.
+configFiles:
+  create: true
+  existingSecret: ""
+  mountPath: /app/config
+  # Override JSON via --set-file configFiles.authKeysJson=./auth.keys.json
+  authKeysFileName: auth.keys.json
+  authKeysJson: |
+    {}
+  aiProvidersFileName: ai.providers.local.json
+  aiProvidersJson: |
+    {}

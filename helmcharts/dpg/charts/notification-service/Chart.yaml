@@ -1,0 +1,16 @@
+apiVersion: v2
+name: dpg-notification-service
+description: Helm chart for the DPG notification-service (multi-channel notifications via Redis-driven workers).
+type: application
+version: 0.1.0
+appVersion: "1.0.0"
+keywords:
+  - dpg
+  - notification
+  - email
+  - sms
+  - whatsapp
+sources:
+  - https://github.com/Sanketika-Obsrv/dpg-monorepo
+maintainers:
+  - name: Sanketika

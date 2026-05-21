@@ -1,0 +1,14 @@
+{{ include "dpg-ui.fullname" . }} deployed.
+
+{{- if .Values.ingress.enabled }}
+Reach the UI via:
+{{- range .Values.ingress.hosts }}
+  http{{ if $.Values.ingress.tls }}s{{ end }}://{{ .host }}
+{{- end }}
+{{- else if eq .Values.service.type "ClusterIP" }}
+Port-forward to access locally:
+  kubectl --namespace {{ .Release.Namespace }} port-forward svc/{{ include "dpg-ui.fullname" . }} 8080:{{ .Values.service.port }}
+{{- end }}
+
+Runtime config (window.__DPG_UI_CONFIG__) is mounted from ConfigMap
+{{ include "dpg-ui.fullname" . }}-runtime. Override with --set runtimeConfig.VITE_API_URL=https://api.example.com

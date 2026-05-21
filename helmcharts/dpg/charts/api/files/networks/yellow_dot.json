@@ -1,0 +1,344 @@
+{
+  "name": "yellow_dot",
+  "display_name": "Yellow Dot",
+  "description": "Education focused DOT.",
+  "schema_standard": "https://json-schema.org/draft/2020-12/schema",
+  "domains": [
+    {
+      "name": "student",
+      "description": "Learners on the network.",
+      "minimum_cache_ttl_seconds": 300,
+      "item_schemas": {
+        "profile_1.0": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "title": "Student Profile 1.0",
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "name",
+            "grade",
+            "city"
+          ],
+          "properties": {
+            "name": {
+              "type": "string",
+              "minLength": 1
+            },
+            "grade": {
+              "type": "string",
+              "enum": [
+                "8",
+                "9",
+                "10",
+                "11",
+                "12"
+              ]
+            },
+            "city": {
+              "type": "string"
+            },
+            "preferred_subject": {
+              "type": "string"
+            }
+          }
+        },
+        "profile_1.1": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "title": "Student Profile 1.1",
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "name",
+            "grade",
+            "city",
+            "language"
+          ],
+          "properties": {
+            "name": {
+              "type": "string",
+              "minLength": 1
+            },
+            "grade": {
+              "type": "string",
+              "enum": [
+                "8",
+                "9",
+                "10",
+                "11",
+                "12"
+              ]
+            },
+            "city": {
+              "type": "string"
+            },
+            "language": {
+              "type": "string",
+              "minLength": 1
+            },
+            "preferred_subject": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "tutor",
+      "description": "Tutors on the network.",
+      "minimum_cache_ttl_seconds": 300,
+      "item_schemas": {
+        "profile_1.0": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "title": "Tutor Profile 1.0",
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "name",
+            "subjects",
+            "experience_years"
+          ],
+          "properties": {
+            "name": {
+              "type": "string",
+              "minLength": 1
+            },
+            "subjects": {
+              "type": "array",
+              "minItems": 1,
+              "items": {
+                "type": "string"
+              }
+            },
+            "experience_years": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "teaching_mode": {
+              "type": "string",
+              "enum": [
+                "online",
+                "offline",
+                "hybrid"
+              ]
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "coaching_center",
+      "description": "Coaching centers on the network.",
+      "minimum_cache_ttl_seconds": 300,
+      "item_schemas": {
+        "profile_1.0": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "title": "Coaching Center Profile 1.0",
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "name",
+            "city",
+            "programs"
+          ],
+          "properties": {
+            "name": {
+              "type": "string",
+              "minLength": 1
+            },
+            "city": {
+              "type": "string"
+            },
+            "programs": {
+              "type": "array",
+              "minItems": 1,
+              "items": {
+                "type": "string"
+              }
+            },
+            "seats_available": {
+              "type": "integer",
+              "minimum": 0
+            }
+          }
+        }
+      }
+    }
+  ],
+  "instances": [
+    {
+      "domain_name": "student",
+      "instance_name": "Yellow Dot Student Localhost",
+      "instance_url": "__PUBLIC_API_URL__",
+      "custom_item_schema_urls": {}
+    },
+    {
+      "domain_name": "tutor",
+      "instance_name": "Yellow Dot Tutor Localhost",
+      "instance_url": "__PUBLIC_API_URL__",
+      "custom_item_schema_urls": {}
+    },
+    {
+      "domain_name": "coaching_center",
+      "instance_name": "Yellow Dot Coaching Localhost",
+      "instance_url": "__PUBLIC_API_URL__",
+      "custom_item_schema_urls": {}
+    }
+  ],
+  "cross_network_origins": [
+    {
+      "name": "blue_dot",
+      "display_name": "Blue Dot",
+      "schema_url": "__SCHEMAS_URL__/blue_dot.json"
+    }
+  ],
+  "actions": {
+    "connect": {
+      "description": "Defines which domains can connect to which other domains, what requirement payload they send, and what event payload is returned.",
+      "interactions": [
+        {
+          "from_network": "yellow_dot",
+          "from_domain": "student",
+          "from_items": ["profile_1.0", "profile_1.1"],
+          "to_network": "yellow_dot",
+          "to_domain": "tutor",
+          "to_items": ["profile_1.0"],
+          "requirement_schema": {
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "title": "Student To Tutor Connect Requirement",
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "subject",
+              "goal"
+            ],
+            "properties": {
+              "subject": {
+                "type": "string"
+              },
+              "goal": {
+                "type": "string"
+              }
+            }
+          },
+          "event_schema": {
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "title": "Student To Tutor Connect Event",
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "status",
+              "remark"
+            ],
+            "properties": {
+              "status": {
+                "type": "string",
+                "enum": [
+                  "pending",
+                  "accepted",
+                  "rejected"
+                ]
+              },
+              "remark": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        {
+          "from_network": "yellow_dot",
+          "from_domain": "student",
+          "from_items": ["profile_1.0", "profile_1.1"],
+          "to_network": "yellow_dot",
+          "to_domain": "coaching_center",
+          "to_items": ["profile_1.0"],
+          "requirement_schema": {
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "title": "Student To Coaching Center Connect Requirement",
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "program",
+              "goal"
+            ],
+            "properties": {
+              "program": {
+                "type": "string"
+              },
+              "goal": {
+                "type": "string"
+              }
+            }
+          },
+          "event_schema": {
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "title": "Student To Coaching Center Connect Event",
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "status",
+              "remark"
+            ],
+            "properties": {
+              "status": {
+                "type": "string",
+                "enum": [
+                  "pending",
+                  "accepted",
+                  "rejected"
+                ]
+              },
+              "remark": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        {
+          "from_network": "yellow_dot",
+          "from_domain": "tutor",
+          "from_items": ["profile_1.0"],
+          "to_network": "yellow_dot",
+          "to_domain": "student",
+          "to_items": ["profile_1.0", "profile_1.1"],
+          "requirement_schema": {
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "title": "Tutor To Student Connect Requirement",
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "intro_message"
+            ],
+            "properties": {
+              "intro_message": {
+                "type": "string"
+              }
+            }
+          },
+          "event_schema": {
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "title": "Tutor To Student Connect Event",
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "status",
+              "remark"
+            ],
+            "properties": {
+              "status": {
+                "type": "string",
+                "enum": [
+                  "pending",
+                  "accepted",
+                  "rejected"
+                ]
+              },
+              "remark": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      ]
+    }
+  }
+}
