@@ -13,6 +13,7 @@
     "start:api": "node scripts/turbo-with-root-env.mjs run start --filter=api",
     "start:docs": "node scripts/turbo-with-root-env.mjs run start --filter=docs",
     "db:studio:api": "node scripts/turbo-with-root-env.mjs run db:studio --filter=api",
+    "db:init:api": "pnpm --filter api db:init",
     "dev:ui": "node scripts/turbo-with-root-env.mjs run dev --filter=ui",
     "build:ui": "node scripts/turbo-with-root-env.mjs run build --filter=ui",
     "preview:ui": "node scripts/turbo-with-root-env.mjs run preview --filter=ui",
