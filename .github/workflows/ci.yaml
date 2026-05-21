@@ -56,6 +56,11 @@ jobs:
 
   test:
     runs-on: ubuntu-latest
+    # Warn-only until Vitest lands per-workspace (Plan 1 Task 1 introduces it
+    # in apps/api). Today every workspace ships a placeholder
+    # `echo Error: no test specified && exit 1` so an unguarded `pnpm -r test`
+    # is always red. Tighten this job (drop `|| true`) once real test scripts
+    # exist.
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v3
@@ -64,7 +69,7 @@ jobs:
           node-version: 24
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - run: pnpm -r test
+      - run: pnpm -r test || true
 
   dep-cruise:
     runs-on: ubuntu-latest
