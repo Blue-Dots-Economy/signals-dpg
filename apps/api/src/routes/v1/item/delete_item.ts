@@ -5,6 +5,7 @@ import { and, eq } from 'drizzle-orm';
 import { db } from '@api/db/postgres/drizzle_config';
 import { items } from '@dpg/database';
 import { auth_middleware_if_enabled } from '@api/plugins/auth/auth_middleware';
+import { invalidateItemFetchCache } from '@/utils/item_fetch_cache_invalidate';
 
 type DeleteItemRequest = FastifyRequest<{
   Params: z.infer<typeof UpdateItemParamsSchema>;
@@ -54,7 +55,11 @@ export const delete_item_handler = async (
     const result = await db
       .delete(items)
       .where(and(eq(items.item_id, itemId), eq(items.created_by, callerId)))
-      .returning({ item_id: items.item_id });
+      .returning({
+        item_id: items.item_id,
+        item_network: items.item_network,
+        item_domain: items.item_domain,
+      });
 
     if (result.length === 0) {
       return reply.code(404).send({
@@ -62,6 +67,14 @@ export const delete_item_handler = async (
         message: 'Item not found or does not belong to the authenticated user',
       });
     }
+
+    // Cache invalidation: the inter-instance read path caches `item-count`
+    // and `item-page` for up to `minimum_cache_ttl_seconds` (5 min by
+    // default for blue_dot/seeker). Without this sweep the deleted row
+    // keeps showing up on /network/item/fetch until the TTL expires.
+    await invalidateItemFetchCache(result[0].item_network, result[0].item_domain).catch(
+      (err) => request.log.warn({ err }, 'cache invalidation after delete failed'),
+    );
 
     return reply.code(204).send();
   } catch (err) {

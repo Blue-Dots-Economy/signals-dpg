@@ -15,6 +15,7 @@ import { items } from '@dpg/database';
 import { auth_middleware_if_enabled } from '@api/plugins/auth/auth_middleware';
 import { apiConfig } from '@/config';
 import { getOrFetchSchemaByUrl } from '@/network_schema_cache';
+import { invalidateItemFetchCache } from '@/utils/item_fetch_cache_invalidate';
 
 type UpdateItemRequest = FastifyRequest<{
   Params: z.infer<typeof UpdateItemParamsSchema>;
@@ -129,6 +130,13 @@ export const update_item_handler = async (
     }
 
     const { item_private_state, ...updatedItem } = result[0];
+
+    // Invalidate cached counts + pages for this (network, domain) so the
+    // next /network/item/fetch returns the freshly updated row instead of
+    // serving a stale 5-min cached page.
+    await invalidateItemFetchCache(updatedItem.item_network, updatedItem.item_domain).catch(
+      (err) => request.log.warn({ err }, 'cache invalidation after update failed'),
+    );
 
     return reply.code(200).send({
       item: {

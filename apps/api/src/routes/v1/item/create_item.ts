@@ -16,6 +16,7 @@ import {
   isServedDomainBinding,
   replyForUnservedDomain,
 } from '@/utils/served_domain_guard';
+import { invalidateItemFetchCache } from '@/utils/item_fetch_cache_invalidate';
 import { getNetworkConfigById } from '@/network_configs';
 import {
   buildNetworkItemSchemaUrl,
@@ -221,6 +222,13 @@ export const create_item_handler = async (
         message: 'An item with the same type and id already exists',
       });
     }
+
+    // Invalidate cached counts + pages for this (network, domain) so the
+    // next /network/item/fetch returns the freshly inserted row instead of
+    // serving a stale 5-min cached page.
+    await invalidateItemFetchCache(body.item_network, body.item_domain).catch((err) =>
+      request.log.warn({ err }, 'cache invalidation after create failed'),
+    );
 
     return reply.code(201).send({
       item_type: result[0].itemType,
