@@ -98,6 +98,16 @@ export async function updateItem(itemId: string, payload: UpdateItemPayload): Pr
   return response.data;
 }
 
+/**
+ * Hard-delete the caller's own profile item. The server enforces ownership
+ * via `items.created_by = session.user.id`; a 404 from the API means either
+ * the item never existed or it belongs to someone else (same envelope so
+ * the server never leaks the existence of another user's row).
+ */
+export async function deleteItem(itemId: string): Promise<void> {
+  await apiClient.delete(`/api/v1/item/${itemId}`);
+}
+
 // Re-export action-related types and functions from action-api.ts
 export {
   type ItemRef,

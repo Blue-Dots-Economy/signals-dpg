@@ -16,6 +16,7 @@ import {
   isServedDomainBinding,
   replyForUnservedDomain,
 } from '@/utils/served_domain_guard';
+import { invalidateItemFetchCache } from '@/utils/item_fetch_cache_invalidate';
 import { getNetworkConfigById } from '@/network_configs';
 import {
   buildNetworkItemSchemaUrl,
@@ -50,7 +51,8 @@ export const create_item_handler = async (
   request: CreateItemRequest,
   reply: FastifyReply
 ) => {
-  const userId = request.user?.id;
+  const callerId = request.user?.id;
+  const callerRole = request.user?.role;
   const body = request.body;
   const submittedItemState = body.item_state ?? {};
   const itemInstanceUrl = getCurrentApiBaseUrl();
@@ -60,12 +62,38 @@ export const create_item_handler = async (
     privateState: {},
   };
 
-  if (!userId) {
+  if (!callerId) {
     return reply.code(401).send({
       error: 'UNAUTHORIZED',
       message: 'Authenticated user is required to create an item',
     });
   }
+
+  // The "admin acting on behalf of another user" flow is reserved for
+  // server-to-server callers identified by an api-key. UI sessions — even
+  // when the logged-in user happens to carry an admin role — should behave
+  // like a normal user and own the items they create. Distinguishing on
+  // the api-key header keeps that contract explicit and avoids confusing
+  // signed-in admins with a CREATED_BY_REQUIRED error when they create
+  // their own profile.
+  const isApiKeyCaller = Boolean(request.headers['x-api-key']);
+  const isAdminApiCaller = isApiKeyCaller && callerRole === 'admin';
+
+  if (!isAdminApiCaller && body.created_by) {
+    return reply.code(403).send({
+      error: 'FORBIDDEN_CREATED_BY',
+      message: 'created_by may only be set by an admin api-key caller',
+    });
+  }
+
+  if (isAdminApiCaller && !body.created_by) {
+    return reply.code(400).send({
+      error: 'CREATED_BY_REQUIRED',
+      message: 'created_by is required when an admin api-key creates an item',
+    });
+  }
+
+  const userId = isAdminApiCaller ? (body.created_by as string) : callerId;
 
   if (!isServedDomainBinding(body.item_network, body.item_domain)) {
     return await replyForUnservedDomain(
@@ -194,6 +222,13 @@ export const create_item_handler = async (
         message: 'An item with the same type and id already exists',
       });
     }
+
+    // Invalidate cached counts + pages for this (network, domain) so the
+    // next /network/item/fetch returns the freshly inserted row instead of
+    // serving a stale 5-min cached page.
+    await invalidateItemFetchCache(body.item_network, body.item_domain).catch((err) =>
+      request.log.warn({ err }, 'cache invalidation after create failed'),
+    );
 
     return reply.code(201).send({
       item_type: result[0].itemType,

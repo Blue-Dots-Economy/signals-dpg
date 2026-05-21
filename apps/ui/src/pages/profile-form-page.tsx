@@ -1,7 +1,7 @@
 import * as React from 'react';
 import { useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { toast } from 'sonner';
-import { ArrowLeft, GraduationCap, UserCheck, Building2, Wallet } from 'lucide-react';
+import { ArrowLeft, GraduationCap, UserCheck, Building2, Wallet, Trash2 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import type { RJSFSchema } from '@rjsf/utils';
 import { Button } from '@/components/ui/button';
@@ -23,6 +23,7 @@ import { mergeImportedDataIntoSchema } from '@/lib/import-mapping';
 
 import {
   createItem,
+  deleteItem,
   fetchItems,
   updateItem,
   type CreateItemPayload,
@@ -58,6 +59,7 @@ export function ProfileFormPage() {
   const [existingItem, setExistingItem] = React.useState<Item | null>(null);
   const [initialData, setInitialData] = React.useState<Record<string, unknown> | null>(null);
   const [isSubmitting, setIsSubmitting] = React.useState(false);
+  const [isDeleting, setIsDeleting] = React.useState(false);
   const [isLoading, setIsLoading] = React.useState(isEdit);
   const [availableNetworkIds, setAvailableNetworkIds] = React.useState<string[] | null>(null);
   const [isWalletModalOpen, setIsWalletModalOpen] = React.useState(false);
@@ -333,6 +335,35 @@ export function ProfileFormPage() {
     }
   };
 
+  const handleDelete = async () => {
+    if (!existingItem) return;
+    if (!window.confirm('Delete this profile? This cannot be undone.')) return;
+
+    setIsDeleting(true);
+    try {
+      await deleteItem(existingItem.item_id);
+      toast.success('Profile deleted');
+      navigate(`/?network=${resolvedNetwork?.id ?? ''}`);
+    } catch (err: unknown) {
+      const axiosError = err as { response?: { status?: number; data?: { error?: string; message?: string } } };
+      const status = axiosError?.response?.status;
+      const error = axiosError?.response?.data;
+      if (status === 404) {
+        toast.error('Profile not found', {
+          description: 'It may have already been deleted, or it does not belong to you.',
+        });
+      } else if (status === 401) {
+        toast.error('Please sign in again');
+      } else {
+        toast.error('Failed to delete profile', {
+          description: error?.message ?? 'Something went wrong',
+        });
+      }
+    } finally {
+      setIsDeleting(false);
+    }
+  };
+
   if (availableNetworkIds === null || isLoading) {
     return (
       <div className="flex h-screen items-center justify-center">
@@ -438,10 +469,26 @@ export function ProfileFormPage() {
               <SchemaForm
                 schema={profileSchema}
                 onSubmit={handleSubmit}
-                disabled={isSubmitting}
+                disabled={isSubmitting || isDeleting}
                 formData={initialData ?? undefined}
                 submitButtonText={isEdit ? 'Update' : undefined}
               />
+            )}
+            {isEdit && existingItem && (
+              <div className="mt-6 pt-4 border-t flex items-center justify-between">
+                <p className="text-xs text-muted-foreground">
+                  Removing the profile is permanent — applications and matches against this profile will no longer be visible.
+                </p>
+                <Button
+                  variant="destructive"
+                  className="gap-2"
+                  onClick={handleDelete}
+                  disabled={isSubmitting || isDeleting}
+                >
+                  <Trash2 className="h-4 w-4" />
+                  {isDeleting ? 'Deleting…' : 'Delete profile'}
+                </Button>
+              </div>
             )}
           </CardContent>
         </Card>

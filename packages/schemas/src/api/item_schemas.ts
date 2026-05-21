@@ -20,6 +20,11 @@ export const CreateItemBodySchema = ItemInsertSchema.omit({
   item_private_state: true,
   created_at: true,
   updated_at: true,
+}).extend({
+  // Optional override used by admin / service callers to author items on
+  // behalf of another user. Non-admin callers cannot supply this — see
+  // create_item.ts.
+  created_by: z.string().min(1).optional(),
 });
 
 const FetchItemsSchemaBase = z.object({
