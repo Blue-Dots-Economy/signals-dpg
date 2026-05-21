@@ -6,7 +6,7 @@
     "ignoreDeprecations": "6.0",
     "paths": {
       "@dpg/*": [
-        "packages/*/src"
+        "./packages/*/src"
       ]
     },
     "strict": true,
