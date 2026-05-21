@@ -72,6 +72,9 @@ importers:
         specifier: workspace:*
         version: link:../../packages/schemas
     devDependencies:
+      '@types/pg':
+        specifier: ^8.15.5
+        version: 8.20.0
       drizzle-kit:
         specifier: ^0.31.8
         version: 0.31.10
