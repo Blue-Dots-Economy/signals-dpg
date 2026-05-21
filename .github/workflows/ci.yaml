@@ -10,15 +10,20 @@ concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
+permissions:
+  contents: read
+
 jobs:
   typecheck-api:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v3
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.1.2
       - uses: actions/setup-node@v4
         with:
-          node-version: 24
+          node-version: '24'
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm --filter api exec tsc --noEmit
@@ -27,10 +32,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v3
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.1.2
       - uses: actions/setup-node@v4
         with:
-          node-version: 24
+          node-version: '24'
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm --filter ui exec tsc --noEmit
@@ -46,44 +53,50 @@ jobs:
     continue-on-error: true
     steps:
       - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v3
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.1.2
       - uses: actions/setup-node@v4
         with:
-          node-version: 24
+          node-version: '24'
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm --filter docs exec astro check
 
   test:
     runs-on: ubuntu-latest
-    # Warn-only until Vitest lands per-workspace (Plan 1 Task 1 introduces it
-    # in apps/api). Today every workspace ships a placeholder
-    # `echo Error: no test specified && exit 1` so an unguarded `pnpm -r test`
-    # is always red. Tighten this job (drop `|| true`) once real test scripts
-    # exist.
+    continue-on-error: true
+    # Warn-only until Vitest lands per-workspace (Plan 1 Task 1 introduces
+    # it in apps/api). Today every workspace ships a placeholder
+    # `echo Error: no test specified && exit 1` so this job is red on every
+    # run. Drop `continue-on-error` once real test scripts exist.
     steps:
       - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v3
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.1.2
       - uses: actions/setup-node@v4
         with:
-          node-version: 24
+          node-version: '24'
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - run: pnpm -r test || true
+      - run: pnpm -r test
 
   dep-cruise:
     runs-on: ubuntu-latest
     if: hashFiles('.dependency-cruiser.cjs') != ''
+    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v3
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.1.2
       - uses: actions/setup-node@v4
         with:
-          node-version: 24
+          node-version: '24'
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      # `|| true` is intentional: tighten once dep-cruise is clean.
-      - run: pnpm dep-check || true
+      - run: pnpm dep-check
 
   helm-lint:
     runs-on: ubuntu-latest
