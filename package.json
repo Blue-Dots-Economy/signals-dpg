@@ -21,6 +21,7 @@
     "build:ui": "node scripts/turbo-with-root-env.mjs run build --filter=ui",
     "preview:ui": "node scripts/turbo-with-root-env.mjs run preview --filter=ui",
     "docker:api": "node scripts/run-api-docker.mjs",
+    "typecheck": "pnpm --filter api exec tsc --noEmit && pnpm --filter ui exec tsc --noEmit && pnpm --filter docs exec astro check",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [],
