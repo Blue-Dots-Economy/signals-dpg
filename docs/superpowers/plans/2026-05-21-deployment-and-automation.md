@@ -1,0 +1,607 @@
+# Deployment & Automation Implementation Plan
+
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+
+**Goal:** Stand Signals-DPG up with its own CI, image build, and deploy pipeline now that we own the repo. Establish Drizzle as the single source of truth for schema. Land the helm-chart updates that Plan 2 (`user` attribution columns) and Plan 3 (`signal-processor` worker + `participant_metrics` table) require.
+
+**Architecture:**
+- **Schema source of truth:** Drizzle. A generator script renders `helmcharts/dpg/charts/api/files/schema.sql` from current Drizzle migrations on every PR. CI fails if the bundled SQL is stale.
+- **CI:** one GitHub Actions workflow (`.github/workflows/ci.yaml`) running on PRs and pushes to `develop` — install / typecheck / vitest / dep-cruise / helm lint / schema-bundle freshness check.
+- **CD:** workflow that on merge to `develop` builds images for `api`, `ui`, `signal-processor`, `match-score`, `notification-service` and pushes to our own GHCR namespace; on a semver tag also tags with the version.
+- **Helm:** umbrella chart from PR #3 gets a new sub-chart for `signal-processor`; `api/values.yaml`, `ui/values.yaml`, etc. switch `image.repository` from the vendor's `ghcr.io/sanketika-obsrv/...` to our own.
+- **Migrate-job:** keeps the `psql + idempotent schema.sql` pattern for now (covers Plans 2 + 3, which are additive-only). Migration runner upgrade is deferred behind a contract written into the plan but not implemented yet.
+
+**Tech Stack:** GitHub Actions, Drizzle (`drizzle-kit`), `pnpm`, `helm` 3.x, `kubectl`, Docker buildx, GHCR.
+
+**Prereqs:**
+- PR #3 (helmcharts) retargeted to `develop` and merged.
+- Cross-cutting cherry-pick PR (auth middleware unification, item delete, cache invalidation, etc.) merged. Plan 1 builds on that auth middleware.
+- Plan 1 doesn't have to be merged for this plan to start — Workstreams A (schema), B (CI), and C (images) are independent. Workstream D (signal-processor sub-chart) only lands meaningfully once Plan 3's worker exists.
+
+**Out of scope:**
+- ArgoCD / Flux / any GitOps controller selection. This plan lands a working `helm upgrade` from CI; a GitOps wrapper on top is a follow-up.
+- Observability stack (Grafana / Loki / Tempo / Prometheus). Mentioned in Workstream H as a follow-up but not implemented here.
+- Multi-cluster / multi-region. Single deploy target per environment.
+
+---
+
+## File Structure
+
+| File | Workstream | Responsibility |
+|---|---|---|
+| `scripts/generate-schema-bundle.mjs` (new) | A | Reads Drizzle migrations + `packages/database/src/utils/sql_scripts/*.sql`, produces `helmcharts/dpg/charts/api/files/schema.sql` |
+| `scripts/__tests__/generate-schema-bundle.test.mjs` (new) | A | Tests the generator |
+| `helmcharts/dpg/charts/api/files/schema.sql` (regenerated) | A | Bundled idempotent schema for the migrate-job |
+| `.github/workflows/ci.yaml` (new) | B | PR + push-to-develop checks |
+| `.github/workflows/build-images.yaml` (new) | C | Builds and pushes images on merge / tag |
+| `apps/signal-processor/Dockerfile` (lives in Plan 3, referenced here) | C | Built by build-images.yaml |
+| `helmcharts/dpg/charts/signal-processor/` (new tree) | D | Sub-chart for Plan 3's worker |
+| `helmcharts/dpg/Chart.yaml` (modify) | D | Add signal-processor as a dependency |
+| `helmcharts/dpg/values.yaml` (modify) | D | Defaults for signal-processor |
+| `helmcharts/dpg/values-aws.yaml` (modify) | D | AWS overrides for signal-processor |
+| `helmcharts/dpg/charts/api/values.yaml` (modify) | C | image.repository → our GHCR namespace |
+| `helmcharts/dpg/charts/ui/values.yaml` (modify) | C | same |
+| `helmcharts/dpg/charts/match-score/values.yaml` (modify) | C | same |
+| `helmcharts/dpg/charts/notification-service/values.yaml` (modify) | C | same |
+| `docs/operations/secrets.md` (new) | F | How secrets are sourced per environment |
+| `docs/operations/migrations.md` (new) | G | Migration contract (idempotent SQL today, drizzle-kit migrate later) |
+
+---
+
+## Workstream A — Drizzle as schema source of truth
+
+### Task A.1: Generator script
+
+**Files:**
+- Create: `scripts/generate-schema-bundle.mjs`
+
+- [ ] **Step 1: Implement**
+
+```js
+// scripts/generate-schema-bundle.mjs
+//
+// Reads the Drizzle migration journal + meta snapshots and the idempotent
+// scripts under packages/database/src/utils/sql_scripts/, and emits the
+// bundle the migrate-job applies.
+//
+// We do NOT translate Drizzle migrations 1:1 into the bundle (those are
+// imperative ALTERs that fail on second run). We use Drizzle's *meta*
+// snapshot (the final desired state) to render idempotent
+// CREATE … IF NOT EXISTS / ADD COLUMN IF NOT EXISTS / CREATE INDEX
+// IF NOT EXISTS statements, the same shape `create_items.sql` already uses.
+
+import { readFile, writeFile, readdir } from 'node:fs/promises';
+import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+const root = fileURLToPath(new URL('..', import.meta.url));
+const drizzle_dir = join(root, 'apps/api/drizzle');
+const idempotent_scripts_dir = join(root, 'packages/database/src/utils/sql_scripts');
+const out_path = join(root, 'helmcharts/dpg/charts/api/files/schema.sql');
+
+const BANNER = `-- GENERATED FILE — do not edit by hand.
+-- Source: drizzle meta snapshots + packages/database/src/utils/sql_scripts/.
+-- Regenerate with: pnpm schema:bundle
+--
+-- This file is consumed by the helm migrate-job (postgres:16-alpine + psql).
+-- Every statement MUST be idempotent (IF NOT EXISTS / ADD COLUMN IF NOT EXISTS).
+`;
+
+const read_snapshot = async () => {
+  const meta_dir = join(drizzle_dir, 'meta');
+  const journal = JSON.parse(await readFile(join(meta_dir, '_journal.json'), 'utf8'));
+  const latest = journal.entries.at(-1);
+  if (!latest) throw new Error('no drizzle migrations found — run pnpm db:generate:api first');
+  const snap = JSON.parse(await readFile(join(meta_dir, `${latest.tag}.snapshot.json`), 'utf8'));
+  return snap;
+};
+
+const render_table = (table) => {
+  // Render CREATE TABLE IF NOT EXISTS + ADD COLUMN IF NOT EXISTS for each
+  // column. Drizzle's snapshot has the column list — read it and emit.
+  // (Implementation: walk table.columns, table.indexes, table.compositePrimaryKeys.)
+  // …
+};
+
+const render_from_snapshot = (snap) => {
+  return Object.values(snap.tables).map(render_table).join('\n\n');
+};
+
+const append_idempotent_scripts = async () => {
+  const files = (await readdir(idempotent_scripts_dir))
+    .filter((f) => f.endsWith('.sql'))
+    .sort();
+  const parts = [];
+  for (const f of files) {
+    parts.push(`-- from ${f}`);
+    parts.push(await readFile(join(idempotent_scripts_dir, f), 'utf8'));
+  }
+  return parts.join('\n');
+};
+
+const main = async () => {
+  const snap = await read_snapshot();
+  const auth_block = render_from_snapshot(snap); // auth, organization, etc.
+  const items_block = await append_idempotent_scripts(); // items + indexes
+  const bundle = [BANNER, auth_block, items_block].join('\n\n');
+  await writeFile(out_path, bundle, 'utf8');
+  console.log(`wrote ${out_path} (${bundle.length} bytes)`);
+};
+
+main().catch((err) => { console.error(err); process.exit(1); });
+```
+
+Pragmatic note: the `render_table` walk is non-trivial. There are two acceptable shortcuts on day one:
+1. **Hand-write `auth.sql`** alongside `create_items.sql` (idempotent CREATE TABLE IF NOT EXISTS for `user`, `account`, `verification`, `organization`, `member`, `invitation`, `team`, `team_member`, `apikey`). The generator just concatenates `*.sql` files in the `sql_scripts` dir. The Drizzle snapshot becomes the source for Drizzle-managed types; the SQL files become the source for the deploy bundle. CI verifies they match by spinning up a Postgres, applying the SQL bundle to one DB, applying Drizzle migrations to a second, and `pg_dump`-comparing schemas.
+2. **Use `drizzle-kit drop --custom` or the introspection output** — Drizzle Kit can emit a single CREATE script. Then transform it (regex) to idempotent form.
+
+Option 1 (two parallel sources + CI parity check) is more boring and more correct. Recommended.
+
+- [ ] **Step 2: Add `pnpm schema:bundle` script**
+
+In repo-root `package.json`:
+```json
+"schema:bundle": "node scripts/generate-schema-bundle.mjs",
+"schema:bundle:check": "node scripts/generate-schema-bundle.mjs && git diff --exit-code helmcharts/dpg/charts/api/files/schema.sql"
+```
+
+- [ ] **Step 3: Commit**
+
+### Task A.2: Hand-write `auth.sql` (the missing half of the bundle)
+
+**Files:**
+- Create: `packages/database/src/utils/sql_scripts/auth.sql`
+
+- [ ] **Step 1: Write idempotent CREATEs for all better-auth tables**
+
+For each table in `apps/api/db/postgres/schema/auth.ts`, emit:
+```sql
+CREATE TABLE IF NOT EXISTS "user" (
+  id            TEXT PRIMARY KEY,
+  name          TEXT NOT NULL,
+  email         TEXT UNIQUE,
+  email_verified BOOLEAN NOT NULL DEFAULT FALSE,
+  …
+);
+ALTER TABLE "user" ADD COLUMN IF NOT EXISTS phone_number TEXT;
+ALTER TABLE "user" ADD COLUMN IF NOT EXISTS terms_accepted BOOLEAN DEFAULT FALSE;
+-- Plan 2 columns — land in the same file once Plan 2 schema PR merges:
+ALTER TABLE "user" ADD COLUMN IF NOT EXISTS onboarded_by_org_id TEXT;
+ALTER TABLE "user" ADD COLUMN IF NOT EXISTS onboarded_via       TEXT;
+ALTER TABLE "user" ADD COLUMN IF NOT EXISTS onboarded_source_id TEXT;
+ALTER TABLE "user" ADD COLUMN IF NOT EXISTS onboarded_at        TIMESTAMPTZ;
+ALTER TABLE "user" ADD CONSTRAINT IF NOT EXISTS user_onboarded_by_org_fk
+  FOREIGN KEY (onboarded_by_org_id) REFERENCES organization(id);
+CREATE INDEX IF NOT EXISTS user_onboarded_by_org_idx ON "user" (onboarded_by_org_id);
+…
+```
+
+And for Plan 3's `participant_metrics`:
+```sql
+CREATE TABLE IF NOT EXISTS participant_metrics (
+  user_id                  TEXT PRIMARY KEY REFERENCES "user"(id) ON DELETE CASCADE,
+  onboarded_by_org_id      TEXT REFERENCES organization(id),
+  …
+);
+CREATE INDEX IF NOT EXISTS participant_metrics_org_status_idx
+  ON participant_metrics (onboarded_by_org_id, profile_status);
+```
+
+- [ ] **Step 2: Verify against Drizzle** — see Task A.3.
+
+### Task A.3: CI parity check (two-DB diff)
+
+**Files:**
+- Modify: `.github/workflows/ci.yaml` (created in Workstream B)
+
+- [ ] **Step 1: Add job**
+
+```yaml
+schema-parity:
+  runs-on: ubuntu-latest
+  services:
+    postgres-sql:    { image: postgres:16, env: { POSTGRES_PASSWORD: x }, ports: ['5432:5432'] }
+    postgres-drizzle:{ image: postgres:16, env: { POSTGRES_PASSWORD: x }, ports: ['5433:5432'] }
+  steps:
+    - uses: actions/checkout@v4
+    - uses: pnpm/action-setup@v3
+    - run: pnpm install --frozen-lockfile
+    # 1. apply the bundled SQL to DB A
+    - run: psql "postgres://postgres:x@localhost:5432/postgres" -f helmcharts/dpg/charts/api/files/schema.sql
+    # 2. apply Drizzle migrations to DB B
+    - run: pnpm db:migrate:api
+      env: { POSTGRES_URL: 'postgres://postgres:x@localhost:5433/postgres' }
+    # 3. compare schemas
+    - run: |
+        pg_dump --schema-only --no-owner --no-privileges \
+          "postgres://postgres:x@localhost:5432/postgres" > /tmp/sql.sql
+        pg_dump --schema-only --no-owner --no-privileges \
+          "postgres://postgres:x@localhost:5433/postgres" > /tmp/drizzle.sql
+        diff /tmp/sql.sql /tmp/drizzle.sql
+```
+
+Any divergence between the two sources fails CI. This is what keeps the bundle honest.
+
+- [ ] **Step 2: Commit**
+
+---
+
+## Workstream B — CI workflow
+
+### Task B.1: PR + develop checks
+
+**Files:**
+- Create: `.github/workflows/ci.yaml`
+
+- [ ] **Step 1: Write the workflow**
+
+```yaml
+name: CI
+on:
+  pull_request:
+    branches: [develop, main]
+  push:
+    branches: [develop]
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  typecheck:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v3
+      - uses: actions/setup-node@v4
+        with: { node-version: 24, cache: pnpm }
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm tsc --noEmit
+
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v3
+      - uses: actions/setup-node@v4
+        with: { node-version: 24, cache: pnpm }
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm -r test
+
+  dep-cruise:
+    runs-on: ubuntu-latest
+    if: ${{ hashFiles('.dependency-cruiser.cjs') != '' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v3
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm dep-check || true   # tighten to fail once green
+
+  schema-bundle-fresh:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v3
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm schema:bundle:check
+
+  helm-lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: azure/setup-helm@v4
+      - run: helm dependency update helmcharts/dpg
+      - run: helm lint helmcharts/dpg
+      - run: helm lint helmcharts/dpg -f helmcharts/dpg/values-aws.yaml
+      - run: helm template helmcharts/dpg > /dev/null
+      - run: helm template helmcharts/dpg -f helmcharts/dpg/values-aws.yaml > /dev/null
+
+  schema-parity:
+    # See Workstream A Task A.3
+    runs-on: ubuntu-latest
+    services:
+      postgres-sql:
+        image: postgres:16
+        env: { POSTGRES_PASSWORD: x }
+        ports: ['5432:5432']
+        options: --health-cmd "pg_isready" --health-interval 5s --health-retries 10
+      postgres-drizzle:
+        image: postgres:16
+        env: { POSTGRES_PASSWORD: x }
+        ports: ['5433:5432']
+        options: --health-cmd "pg_isready" --health-interval 5s --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v3
+      - run: pnpm install --frozen-lockfile
+      - run: psql postgres://postgres:x@localhost:5432/postgres -f helmcharts/dpg/charts/api/files/schema.sql
+      - run: pnpm db:migrate:api
+        env: { POSTGRES_URL: postgres://postgres:x@localhost:5433/postgres }
+      - name: diff
+        run: |
+          pg_dump --schema-only --no-owner --no-privileges postgres://postgres:x@localhost:5432/postgres > /tmp/sql.sql
+          pg_dump --schema-only --no-owner --no-privileges postgres://postgres:x@localhost:5433/postgres > /tmp/drizzle.sql
+          diff /tmp/sql.sql /tmp/drizzle.sql
+```
+
+- [ ] **Step 2: Run on a draft PR to validate**
+
+- [ ] **Step 3: Commit**
+
+---
+
+## Workstream C — Image build & registry
+
+### Task C.1: Pick the registry namespace
+
+- [ ] **Step 1: Decision**
+
+Default: `ghcr.io/blue-dots-economy/signals-dpg/<service>`. GHCR is free for public repos; for private repos billed minimally; tightly tied to GitHub identity which simplifies auth.
+
+Surface to user before writing the workflow. If they pick ECR or another registry, swap the login + tag steps below.
+
+### Task C.2: Build & push workflow
+
+**Files:**
+- Create: `.github/workflows/build-images.yaml`
+
+- [ ] **Step 1: Write the workflow**
+
+```yaml
+name: build-images
+on:
+  push:
+    branches: [develop, main]
+    tags: ['v*.*.*']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        service:
+          - { name: api,                  context: ., dockerfile: apps/api/Dockerfile }
+          - { name: ui,                   context: ., dockerfile: apps/ui/Dockerfile }
+          - { name: signal-processor,     context: ., dockerfile: apps/signal-processor/Dockerfile }
+          - { name: match-score,          context: ., dockerfile: packages/match_score/Dockerfile }
+          - { name: notification-service, context: ., dockerfile: packages/notification/Dockerfile }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/metadata-action@v5
+        id: meta
+        with:
+          images: ghcr.io/blue-dots-economy/signals-dpg/${{ matrix.service.name }}
+          tags: |
+            type=ref,event=branch
+            type=semver,pattern={{version}}
+            type=sha,format=short
+      - uses: docker/build-push-action@v6
+        with:
+          context: ${{ matrix.service.context }}
+          file: ${{ matrix.service.dockerfile }}
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha,scope=${{ matrix.service.name }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.service.name }}
+```
+
+- [ ] **Step 2: Confirm each Dockerfile exists**
+
+`apps/api/Dockerfile`, `apps/ui/Dockerfile` (from cross-cutting PR), `apps/signal-processor/Dockerfile` (Plan 3). For services that don't yet have a Dockerfile, mark the matrix entry as `if: false` in the workflow until the Dockerfile lands.
+
+- [ ] **Step 3: Commit**
+
+### Task C.3: Point helm at our registry
+
+**Files:**
+- Modify: `helmcharts/dpg/charts/{api,ui,match-score,notification-service}/values.yaml`
+
+- [ ] **Step 1: For each sub-chart, change `image.repository`:**
+```yaml
+image:
+  repository: ghcr.io/blue-dots-economy/signals-dpg/api  # was: ghcr.io/sanketika-obsrv/dpg-monorepo/api
+  tag: ""
+  pullPolicy: IfNotPresent
+```
+
+- [ ] **Step 2: Commit**
+
+---
+
+## Workstream D — `signal-processor` sub-chart
+
+### Task D.1: Scaffold the sub-chart
+
+**Files:**
+- Create: `helmcharts/dpg/charts/signal-processor/` tree
+
+- [ ] **Step 1: Generate scaffold**
+```bash
+cd helmcharts/dpg/charts
+helm create signal-processor
+# delete the generated ingress.yaml, service.yaml, serviceaccount.yaml ingress chunks —
+# the worker has no HTTP surface.
+```
+
+- [ ] **Step 2: Trim templates**
+
+Keep:
+- `templates/deployment.yaml`
+- `templates/configmap.yaml`
+- `templates/_helpers.tpl`
+- `Chart.yaml`
+- `values.yaml`
+
+Delete:
+- `templates/service.yaml`
+- `templates/ingress.yaml`
+- `templates/hpa.yaml` (worker is singleton; scaling is wrong without sharding)
+- `templates/tests/` (no smoke test endpoint to hit)
+
+- [ ] **Step 3: Configure**
+
+`Chart.yaml`:
+```yaml
+apiVersion: v2
+name: signal-processor
+description: "Signals DPG — schedule-driven metrics worker"
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+```
+
+`values.yaml`:
+```yaml
+replicaCount: 1   # singleton; scheduler is in-process
+
+image:
+  repository: ghcr.io/blue-dots-economy/signals-dpg/signal-processor
+  tag: ""
+  pullPolicy: IfNotPresent
+
+env:
+  NODE_ENV: production
+  LOG_LEVEL: info
+  # POSTGRES_URL / REDIS_URL come from the umbrella secret
+
+resources:
+  requests: { cpu: 100m, memory: 256Mi }
+  limits:   { cpu: 500m, memory: 512Mi }
+
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 1000
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities: { drop: [ALL] }
+
+# explicitly NO service block — this is a worker.
+```
+
+`templates/deployment.yaml` is a standard Deployment with `replicas: {{ .Values.replicaCount }}`, one container, envFrom: configmap + secret (mirroring the api sub-chart). No probes (the cron schedule is the heartbeat); add a `livenessProbe` later that touches a tiny health file the scheduler writes once per tick.
+
+- [ ] **Step 4: Add as dependency in the umbrella**
+
+`helmcharts/dpg/Chart.yaml`:
+```yaml
+dependencies:
+  - name: signal-processor
+    version: 0.1.0
+    condition: signal-processor.enabled
+```
+
+`helmcharts/dpg/values.yaml`:
+```yaml
+signal-processor:
+  enabled: true
+```
+
+- [ ] **Step 5: Lint + commit**
+```bash
+helm dependency update helmcharts/dpg
+helm lint helmcharts/dpg
+helm template helmcharts/dpg | grep -A2 "kind: Deployment" | grep signal-processor   # sanity
+```
+
+---
+
+## Workstream E — Schema deltas for Plans 2 and 3
+
+This is a sequencing workstream, not new artefacts. When Plan 2 or 3 merges:
+
+- [ ] **Step 1**: Plan 2 introduces 4 columns on `user` + FK + index. Drizzle migration is generated by `pnpm db:generate:api`. `packages/database/src/utils/sql_scripts/auth.sql` (Workstream A.2) gets matching `ALTER TABLE … ADD COLUMN IF NOT EXISTS` statements in the same PR.
+
+- [ ] **Step 2**: Plan 3 introduces `participant_metrics`. Same pattern: Drizzle migration + idempotent SQL block in `auth.sql` (or a new `metrics.sql`).
+
+- [ ] **Step 3**: CI's `schema-parity` job (A.3) catches it if anyone forgets.
+
+---
+
+## Workstream F — Secrets
+
+### Task F.1: Document the contract
+
+**Files:**
+- Create: `docs/operations/secrets.md`
+
+- [ ] **Step 1: Write**
+
+Contents:
+- **Local dev:** plaintext `.env` at repo root, loaded by `scripts/turbo-with-root-env.mjs`. Never committed (already in `.gitignore`).
+- **In-cluster default values (`values.yaml`):** plain Kubernetes secrets created out-of-band with `kubectl create secret generic dpg-secrets --from-literal=…`. Helm references them by name.
+- **AWS values (`values-aws.yaml`):** External Secrets Operator. Each secret in the chart resolves to an `ExternalSecret` that points at a `SecretStore` backed by AWS Secrets Manager.
+
+ESO bootstrap is **out of scope for this repo** — it's a platform-team install (cluster-wide). Document the required SecretStore name and the secret keys this chart consumes.
+
+- [ ] **Step 2: List the required secret keys**
+
+For api: `POSTGRES_URL`, `REDIS_URL`, `BETTER_AUTH_SECRET`, `ANTHROPIC_API_KEY` (if used), apikey signing secret, etc.
+
+For signal-processor: `POSTGRES_URL` only.
+
+Producing a single canonical list lets the platform team pre-create the keys.
+
+---
+
+## Workstream G — Migrate-job evolution contract
+
+### Task G.1: Document today's contract
+
+**Files:**
+- Create: `docs/operations/migrations.md`
+
+- [ ] **Step 1: Write**
+
+> **Today (Plans 1–3 era):** migrate-job runs `psql -f /etc/dpg/schema.sql` against the database. `schema.sql` is generated from Drizzle migrations + idempotent SQL files by `pnpm schema:bundle` (Workstream A). Every statement must be of the form `CREATE … IF NOT EXISTS`, `ADD COLUMN IF NOT EXISTS`, `ALTER … ADD CONSTRAINT IF NOT EXISTS`. This handles additive changes only.
+>
+> **Tomorrow:** the moment we need a non-additive change (drop a column, change a type, add NOT NULL on existing data, rename), this contract breaks. Switch the migrate-job to a real migration runner:
+>
+> - Replace the `postgres:16-alpine` container with a `node:24-alpine` container that has the API's `node_modules/drizzle-kit` available.
+> - Replace the command `psql -f …` with `pnpm db:migrate:api` (which runs `drizzle-kit migrate`).
+> - Drop the embedded `schema.sql` configmap; Drizzle's migration journal in the image is sufficient.
+>
+> Don't switch preemptively — keep the idempotent SQL bundle until a non-additive change is actually needed.
+
+- [ ] **Step 2: Commit**
+
+---
+
+## Workstream H — Observability (deferred; documented)
+
+Not implemented in this plan. Captured so it's not forgotten:
+
+- **Logging:** pino → stdout → cluster log collector (Loki / CloudWatch / etc.) — depends on the platform team's stack.
+- **Metrics:** add `prom-client` to the api and signal-processor; expose `/metrics`; let Prometheus scrape via a `ServiceMonitor` CRD if the cluster runs Prometheus Operator.
+- **Tracing:** OpenTelemetry SDK in api; the signal-processor passes can emit a single span per run.
+
+Open a tracking issue once Plans 1–3 are deployed; size the work then.
+
+---
+
+## Self-Review Checklist
+
+- Workstream A produces a single source of truth (Drizzle) with a parity check that fails CI on drift. ✅
+- Workstream B covers typecheck, test, dep-cruise, helm-lint, schema-parity. Missing: vitest needs to exist for `apps/api` (added in Plan 1 Task 1). ✅ — dependency noted in Prereqs.
+- Workstream C ships images for every service the umbrella chart references. Matrix gate (`if: false`) covers services whose Dockerfile lags. ✅
+- Workstream D's sub-chart for signal-processor matches Plan 3 Task 12's Dockerfile path (`apps/signal-processor/Dockerfile`). ✅
+- Workstream E captures the sequencing dependency between this plan and Plans 2/3. ✅
+- Workstream F documents (not implements) ESO. Acceptable for MVP; platform team owns the cluster-wide install. ✅
+- Workstream G locks in the migrate-job contract and the upgrade path. ✅
+
+## Open Questions
+
+1. **Registry choice** (Workstream C Task C.1) — surface to user. Default = GHCR under `blue-dots-economy`.
+2. **Pre-merge smoke test** — do we want a "deploy to ephemeral cluster, hit `/health/ready`, tear down" stage in CD? Useful but slow; add once the basic pipeline is stable.
+3. **Drizzle journal format compatibility** — the generator in Task A.1 reads `apps/api/drizzle/meta/_journal.json`. Confirm with the existing Drizzle version in use; Drizzle Kit has changed the snapshot format between major versions.
+4. **Signal-processor singleton enforcement** — if helm later scales replicas to >1 by accident, the cron passes will run twice. Add a Postgres advisory lock around each pass body (cheap, 5 lines) as a belt-and-braces guard.

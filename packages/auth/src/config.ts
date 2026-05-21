@@ -18,6 +18,7 @@ export function createAuth(config: AuthRuntimeConfig) {
     apiKeyHeaders: 'x-api-key',
     defaultPrefix: `${config.appName.toLowerCase()}_`,
     enableMetadata: true,
+    enableSessionForAPIKeys: true,
   };
 
   return betterAuth({
