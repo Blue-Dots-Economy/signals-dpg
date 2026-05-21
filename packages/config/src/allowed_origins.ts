@@ -9,8 +9,16 @@ const from_env =
     .map((origin) => origin.trim())
     .filter(Boolean) ?? [];
 
+// In production, ALLOWED_ORIGINS strictly overrides the defaults — we don't
+// want localhost bleed into a deployed instance. In any other environment
+// (dev, test) the env value augments the defaults so local UIs on 3000 /
+// 5173 keep working even when ALLOWED_ORIGINS is set for some other purpose.
+const is_production = process.env.NODE_ENV === 'production';
+
 export const allowed_origins =
-  from_env.length > 0 ? from_env : default_allowed_origins;
+  is_production && from_env.length > 0
+    ? from_env
+    : Array.from(new Set([...default_allowed_origins, ...from_env]));
 
 export function mergeAllowedOrigins(...originGroups: Array<string[]>) {
   return originGroups
