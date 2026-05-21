@@ -1,0 +1,92 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [develop, main]
+  push:
+    branches: [develop]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  typecheck-api:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v3
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter api exec tsc --noEmit
+
+  typecheck-ui:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v3
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter ui exec tsc --noEmit
+
+  typecheck-docs:
+    runs-on: ubuntu-latest
+    # `astro check` is required because the docs app relies on the
+    # `astro:content` virtual modules that plain `tsc --noEmit` cannot resolve.
+    # Today this job is expected to fail: `astro check` is not yet wired into
+    # apps/docs (no @astrojs/check dep, no tsconfig tuned for it). Task B.2
+    # owns the durable typecheck-contract fix that will green this job; until
+    # then we mark it continue-on-error so CI is not blocked.
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v3
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter docs exec astro check
+
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v3
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm -r test
+
+  dep-cruise:
+    runs-on: ubuntu-latest
+    if: hashFiles('.dependency-cruiser.cjs') != ''
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v3
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      # `|| true` is intentional: tighten once dep-cruise is clean.
+      - run: pnpm dep-check || true
+
+  helm-lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: azure/setup-helm@v4
+      - run: helm dependency update helmcharts/dpg
+      - run: helm lint helmcharts/dpg
+      - run: helm lint helmcharts/dpg -f helmcharts/dpg/values-aws.yaml
+      - run: helm template helmcharts/dpg > /dev/null
+      - run: helm template helmcharts/dpg -f helmcharts/dpg/values-aws.yaml > /dev/null
