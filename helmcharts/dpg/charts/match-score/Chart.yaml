@@ -1,0 +1,15 @@
+apiVersion: v2
+name: dpg-match-score
+description: Helm chart for the DPG match-score (dpg-scoring) service — AI-driven matching with Redis-backed queue.
+type: application
+version: 0.1.0
+appVersion: "1.0.0"
+keywords:
+  - dpg
+  - match-score
+  - scoring
+  - ai
+sources:
+  - https://github.com/Sanketika-Obsrv/dpg-monorepo
+maintainers:
+  - name: Sanketika

@@ -1,0 +1,103 @@
+# Default values for dpg-ui.
+
+replicaCount: 1
+
+# nginx in the UI image reverse-proxies /api/* to this upstream.
+# Default matches the umbrella release name `dpg` in the same namespace.
+apiUpstream: "http://dpg-api:2742"
+
+image:
+  repository: ghcr.io/sanketika-obsrv/dpg-monorepo/ui
+  tag: ""            # defaults to .Chart.AppVersion
+  pullPolicy: IfNotPresent
+
+imagePullSecrets: []
+nameOverride: ""
+fullnameOverride: ""
+
+serviceAccount:
+  create: true
+  automount: true
+  annotations: {}
+  name: ""
+
+podAnnotations: {}
+podLabels: {}
+
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 101         # nginx user in nginx:alpine
+  fsGroup: 101
+
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: false
+  capabilities:
+    drop:
+      - ALL
+
+service:
+  type: ClusterIP
+  port: 80
+  targetPort: 8080
+  annotations: {}
+
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+  hosts:
+    - host: dpg.local
+      paths:
+        - path: /
+          pathType: Prefix
+  tls: []
+    # - secretName: dpg-ui-tls
+    #   hosts:
+    #     - dpg.local
+
+resources: {}
+  # limits:
+  #   cpu: 200m
+  #   memory: 128Mi
+  # requests:
+  #   cpu: 50m
+  #   memory: 64Mi
+
+livenessProbe:
+  httpGet:
+    path: /
+    port: http
+  initialDelaySeconds: 10
+  periodSeconds: 30
+  timeoutSeconds: 3
+  failureThreshold: 5
+
+readinessProbe:
+  httpGet:
+    path: /
+    port: http
+  initialDelaySeconds: 5
+  periodSeconds: 10
+  timeoutSeconds: 3
+  failureThreshold: 5
+
+autoscaling:
+  enabled: false
+  minReplicas: 1
+  maxReplicas: 5
+  targetCPUUtilizationPercentage: 80
+  targetMemoryUtilizationPercentage: ""
+
+nodeSelector: {}
+tolerations: []
+affinity: {}
+
+# Runtime config.js values injected as window.__DPG_UI_CONFIG__.
+# Rendered into a ConfigMap and mounted at /usr/share/nginx/html/config.js,
+# overriding the image default.
+runtimeConfig:
+  VITE_API_URL: ""
+  VITE_API_URLS: ""
+  VITE_DEFAULT_API_URL: ""
+  VITE_SHOW_INSTANCE_SELECTOR: "false"

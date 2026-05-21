@@ -1,0 +1,114 @@
+{{- if .Values.migrate.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "dpg-api.fullname" . }}-migrate-sql
+  labels:
+    {{- include "dpg-api.labels" . | nindent 4 }}
+  annotations:
+    "helm.sh/hook": post-install,post-upgrade
+    "helm.sh/hook-weight": "-1"
+    "helm.sh/hook-delete-policy": before-hook-creation
+data:
+  schema.sql: |
+{{ .Files.Get "files/schema.sql" | indent 4 }}
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "dpg-api.fullname" . }}-migrate
+  labels:
+    {{- include "dpg-api.labels" . | nindent 4 }}
+  annotations:
+    "helm.sh/hook": post-install,post-upgrade
+    "helm.sh/hook-weight": "0"
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+spec:
+  backoffLimit: {{ .Values.migrate.backoffLimit | default 3 }}
+  ttlSecondsAfterFinished: {{ .Values.migrate.ttlSecondsAfterFinished | default 300 }}
+  template:
+    metadata:
+      labels:
+        {{- include "dpg-api.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: migrate
+    spec:
+      restartPolicy: OnFailure
+      serviceAccountName: {{ include "dpg-api.serviceAccountName" . }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      containers:
+        - name: migrate
+          image: {{ .Values.migrate.image | default "postgres:16-alpine" }}
+          imagePullPolicy: {{ .Values.migrate.imagePullPolicy | default "IfNotPresent" }}
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          envFrom:
+            - configMapRef:
+                name: {{ include "dpg-api.fullname" . }}
+            - secretRef:
+                name: {{ include "dpg-api.secretName" . }}
+          env:
+            {{- if .Values.postgres.adminSecret }}
+            - name: POSTGRES_ADMIN_USER
+              value: {{ .Values.postgres.adminUser | default "postgres" | quote }}
+            - name: POSTGRES_ADMIN_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.postgres.adminSecret }}
+                  key: {{ .Values.postgres.adminPasswordKey | default "postgres-password" }}
+            {{- end }}
+          command:
+            - sh
+            - -ec
+            - |
+              : "${POSTGRES_HOST:?missing}" "${POSTGRES_PORT:=5432}" "${POSTGRES_USER:?missing}" "${POSTGRES_PASSWORD:?missing}" "${POSTGRES_DB:?missing}"
+              echo "waiting for postgres at $POSTGRES_HOST:$POSTGRES_PORT"
+              i=0
+              until PGPASSWORD="$POSTGRES_PASSWORD" pg_isready -h "$POSTGRES_HOST" -p "$POSTGRES_PORT" -U "$POSTGRES_USER" -d "$POSTGRES_DB" >/dev/null 2>&1; do
+                i=$((i+1))
+                if [ "$i" -gt 60 ]; then echo "postgres not reachable" >&2; exit 1; fi
+                sleep 2
+              done
+              echo "postgres ready"
+              if [ -n "${POSTGRES_ADMIN_PASSWORD:-}" ]; then
+                echo "creating extensions as ${POSTGRES_ADMIN_USER}"
+                PGPASSWORD="$POSTGRES_ADMIN_PASSWORD" psql -v ON_ERROR_STOP=1 \
+                  -h "$POSTGRES_HOST" -p "$POSTGRES_PORT" -U "$POSTGRES_ADMIN_USER" -d "$POSTGRES_DB" \
+                  -c "CREATE EXTENSION IF NOT EXISTS pgcrypto; CREATE EXTENSION IF NOT EXISTS cube; CREATE EXTENSION IF NOT EXISTS earthdistance;"
+              else
+                echo "no admin creds; skipping CREATE EXTENSION (rely on initdb scripts)"
+              fi
+              export PGPASSWORD="$POSTGRES_PASSWORD"
+              EXISTS=$(psql -h "$POSTGRES_HOST" -p "$POSTGRES_PORT" -U "$POSTGRES_USER" -d "$POSTGRES_DB" -tAc "SELECT 1 FROM information_schema.tables WHERE table_schema='public' AND table_name='items'")
+              if [ "$EXISTS" = "1" ]; then
+                echo "schema already present, skipping"
+                exit 0
+              fi
+              echo "applying schema"
+              psql -v ON_ERROR_STOP=1 --single-transaction \
+                -h "$POSTGRES_HOST" -p "$POSTGRES_PORT" -U "$POSTGRES_USER" -d "$POSTGRES_DB" \
+                -f /sql/schema.sql
+              echo "schema applied"
+          volumeMounts:
+            - name: sql
+              mountPath: /sql
+              readOnly: true
+          resources:
+            {{- toYaml (.Values.migrate.resources | default dict) | nindent 12 }}
+      volumes:
+        - name: sql
+          configMap:
+            name: {{ include "dpg-api.fullname" . }}-migrate-sql
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+{{- end }}

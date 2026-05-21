@@ -1,0 +1,403 @@
+# =============================================================================
+# DPG umbrella chart — centralized values
+# Edit ONLY the three sections below (images, resources, credentials).
+# Per-subchart blocks at the bottom alias these via YAML anchors.
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# Images — single source for all 4 components
+# -----------------------------------------------------------------------------
+images:
+  api: &api_image
+    repository: ghcr.io/vinodbhorge/dpg-monorepo/api
+    tag: "v1.0.4"
+    pullPolicy: IfNotPresent
+  ui: &ui_image
+    repository: ghcr.io/vinodbhorge/dpg-monorepo/ui
+    tag: "v1.0.4"
+    pullPolicy: IfNotPresent
+  notificationService: &notification_service_image
+    repository: vinodbbhorge/notification-service
+    tag: "latest"              # user supplies
+    pullPolicy: IfNotPresent
+  matchScore: &match_score_image
+    repository: vinodbbhorge/match-scoring
+    tag: "latest"              # user supplies
+    pullPolicy: IfNotPresent
+  postgresql: &postgresql_image
+    registry: docker.io
+    repository: bitnamilegacy/postgresql
+    tag: 17.6.0
+    pullPolicy: IfNotPresent
+  redis: &redis_image
+    registry: docker.io
+    repository: bitnamilegacy/redis
+    tag: 7.2.5
+    pullPolicy: IfNotPresent
+
+# Pull secrets shared by api/ui (bitnami charts use image.pullSecrets directly).
+imagePullSecrets: &image_pull_secrets []
+
+# -----------------------------------------------------------------------------
+# Resources — single source for all 4 components
+# -----------------------------------------------------------------------------
+resources:
+  api: &api_resources {}
+    # limits:
+    #   cpu: 500m
+    #   memory: 512Mi
+    # requests:
+    #   cpu: 100m
+    #   memory: 256Mi
+  ui: &ui_resources {}
+  notificationService: &notification_service_resources {}
+  matchScore: &match_score_resources {}
+    # limits:
+    #   cpu: 200m
+    #   memory: 128Mi
+    # requests:
+    #   cpu: 50m
+    #   memory: 64Mi
+  postgresql: &postgresql_resources {}
+    # limits:
+    #   cpu: 1000m
+    #   memory: 1Gi
+    # requests:
+    #   cpu: 250m
+    #   memory: 512Mi
+  redis:
+    master: &redis_master_resources {}
+    replica: &redis_replica_resources {}
+
+# -----------------------------------------------------------------------------
+# Credentials — single source for all secret material.
+# Passwords below are populated by install.sh (generate_passwords). Helm
+# renders them into Secrets via templates/secrets.yaml; subcharts reference
+# those Secrets through existingSecret. Do NOT commit real values.
+# -----------------------------------------------------------------------------
+credentials:
+  postgresql:
+    existingSecret: &pg_existing_secret dpg-postgres
+    adminPasswordKey: &pg_admin_key postgres-password
+    userPasswordKey: &pg_user_key password
+    username: &pg_username dpg
+    database: &pg_database dpg
+    password: &pg_password ""  # PG_PW
+  redis:
+    existingSecret: &redis_existing_secret dpg-redis
+    passwordKey: &redis_password_key redis-password
+    password: &redis_password ""  # REDIS_PW
+  api: &api_secrets
+    create: true
+    existingSecret: &api_existing_secret dpg-api-secrets
+    authSecret: &api_auth_secret ""  # AUTH_SECRET
+    # API → notification-service auth. keyId+secret MUST match
+    # notification-service internalSecrets.json keys[] below.
+    notificationKeyId: &notification_key_id "dpg-api-client"
+    notificationSecret: &notification_secret "" # openssl rand -hex 32
+    # All keys here become env vars on api pod (envFrom secretRef).
+    # Required by AuthSecretsSchema/PostgresSchema/RedisSchema zod validators
+    # at boot — missing key = crash on startup.
+    data:
+      AUTH_SECRET: *api_auth_secret
+      POSTGRES_USER: *pg_username
+      POSTGRES_DB: *pg_database
+      POSTGRES_PASSWORD: *pg_password
+      REDIS_PASSWORD: *redis_password
+      NOTIFICATION_SERVICE_ENDPOINT: "http://dpg-notification-service:3000"
+      NOTIFICATION_SERVICE_KEY_ID: *notification_key_id
+      NOTIFICATION_SERVICE_SECRET: *notification_secret
+      SMS_TEMPLATE_ID: ""
+      # Match-score (dpg-scoring) provider. keyId+secret MUST match
+      # match-score.configFiles.authKeysJson keys[] entry below.
+      MATCH_SCORE_PROVIDER: "dpg_scoring"
+      DPG_SCORING_ENDPOINT: "http://dpg-match-score:3000"
+      DPG_SCORING_KEY_ID: "match-score-client"
+      DPG_SCORING_SECRET: ""
+      DPG_SCORING_PATH: ""           # blank → client uses default 'api/v1/scores/match'
+      DPG_SCORING_VERSION: ""
+      DPG_SCORING_PROMPT_VERSION: ""
+  notificationService: &notification_service_secrets
+    create: true
+    existingSecret: ""
+    data:
+      REDIS_PASSWORD: *redis_password
+      GMAIL_USER: ""         # e.g. notify@yourdomain.com
+      GMAIL_PASS: ""    # 16-char App Password (2FA required)
+  matchScore: &match_score_secrets
+    create: true
+    existingSecret: ""
+    data:
+      REDIS_PASSWORD: *redis_password
+
+# =============================================================================
+# Subchart pass-throughs — do NOT edit values here.
+# Each block uses anchors from the sections above.
+# Non-shared (chart-specific) settings live here.
+# =============================================================================
+
+api:
+  image: *api_image
+  imagePullSecrets: *image_pull_secrets
+  resources: *api_resources
+  secrets: *api_secrets
+
+  replicaCount: 1
+  service:
+    type: ClusterIP
+    port: 2742
+    targetPort: 2742
+  ingress:
+    enabled: false
+  config:
+    NODE_ENV: production
+    INSTANCE_NAME: dpg
+    INSTANCE_ENV: production
+    API_DOMAIN: http://api.dpg.local
+    API_PORT: "2742"
+    AUTH_MIDDLEWARE_ENABLED: "true"
+    CREATE_TEST_OTP: "false"
+    ALLOWED_ORIGINS: "http://localhost:8080"
+    SERVED_DOMAINS: "yellow_dot/student,yellow_dot/tutor,yellow_dot/coaching_center,blue_dot/seeker,blue_dot/provider"
+    # Network schemas are mounted into the api pod from a ConfigMap (see
+    # api.schemas.networks below). Files live in
+    # helmcharts/dpg/charts/api/files/networks/<name>.json and are exposed
+    # at /app/schemas/<name>.json. To add a network: drop the JSON, append
+    # the name to api.schemas.networks AND the path here.
+    NETWORK_CONFIG_SOURCE: local
+    NETWORK_CONFIG_LOCAL_FILE: "/app/schemas/yellow_dot.json,/app/schemas/blue_dot.json"
+    NETWORK_CONFIG_URLS: ""
+    ALLOW_EXTRA_SCHEMA_DATA: "false"
+    SCHEMA_REGISTRY_URL: ""
+  # Hosts assume umbrella release name "dpg". Override --set api.postgres.host=... if different.
+  postgres:
+    enabled: true
+    host: dpg-postgresql
+    port: 5432
+    # Admin creds (superuser) for the migrate Job — needed for CREATE EXTENSION.
+    adminSecret: *pg_existing_secret
+    adminUser: postgres
+    adminPasswordKey: *pg_admin_key
+  redis:
+    enabled: true
+    host: dpg-redis-master
+    port: 6379
+
+  # Network schema ConfigMap mounted into this pod. apiInternalUrl is the
+  # in-cluster URL substituted into instance_url fields at render time.
+  # crossNetworkUrl substitutes into cross_network_origins[].schema_url —
+  # local mode skips cross-network fetches but NetworkConfigSchema still
+  # validates schema_url as a URL, so it must be a valid URL.
+  schemas:
+    apiInternalUrl: "http://dpg-api:2742"
+    crossNetworkUrl: "http://dpg-api:2742"
+    networks:
+      - yellow_dot
+      - blue_dot
+
+ui:
+  image: *ui_image
+  imagePullSecrets: *image_pull_secrets
+  resources: *ui_resources
+
+  # nginx in the UI pod reverse-proxies /api/* to this upstream.
+  apiUpstream: "http://dpg-api:2742"
+
+  replicaCount: 1
+  service:
+    type: ClusterIP
+    port: 80
+    targetPort: 8080
+  ingress:
+    enabled: false
+  # UI nginx proxies /api/* to the in-cluster dpg-api service, so the browser
+  # only needs to reach the UI pod (single port-forward, API never exposed).
+  # VITE_API_URL is intentionally empty so axios baseURL stays empty and
+  # the UI sends paths verbatim (/api/...); nginx then proxies to dpg-api.
+  runtimeConfig:
+    VITE_API_URL: ""
+    VITE_API_URLS: ""
+    VITE_DEFAULT_API_URL: ""
+    VITE_SHOW_INSTANCE_SELECTOR: "false"
+    # Comma-separated network names to show in UI. Empty = show all networks
+    # that the API serves (currently yellow_dot + blue_dot).
+    VITE_NETWORK_NAME: ""
+
+notification-service:
+  enabled: true
+  image: *notification_service_image
+  imagePullSecrets: *image_pull_secrets
+  resources: *notification_service_resources
+  secrets: *notification_service_secrets
+
+  replicaCount: 1
+  service:
+    type: ClusterIP
+    port: 3000
+    targetPort: 3000
+  ingress:
+    enabled: false
+
+  redis:
+    enabled: true
+    host: dpg-redis-master
+    port: 6379
+
+  config:
+    NODE_ENV: production
+    SERVER_PORT: "3000"
+    SMTP_GMAIL: "true"
+    SMTP_AWS_SES: ""
+    SEND_WHATSAPP_NOTIFICATION: ""
+    MAIL_LOG: "true"
+    LOG_ACTIVITY: "true"
+    INTERNAL_SECRETS_JSON: /app/config/internal-secrets.json
+
+  # internal-secrets.json mounted at /app/config/internal-secrets.json.
+  # Override with: --set-file notificationService.internalSecrets.json=./internal-secrets.json
+  # keys[].keyId + keys[].secret MUST match credentials.api.notificationKeyId
+  # and credentials.api.notificationSecret above (API sends X-NS-Key + HMAC
+  # which notification-service validates against this file).
+  internalSecrets:
+    create: true
+    existingSecret: ""
+    fileName: internal-secrets.json
+    mountPath: /app/config
+    # Use same as notificationSecret.
+    json: |
+      {
+        "dpg-api-client": {
+          "secret": " "
+        }
+      }
+
+match-score:
+  enabled: true
+  image: *match_score_image
+  imagePullSecrets: *image_pull_secrets
+  resources: *match_score_resources
+  secrets: *match_score_secrets
+
+  replicaCount: 1
+  service:
+    type: ClusterIP
+    port: 3000
+    targetPort: 3000
+  ingress:
+    enabled: false
+
+  redis:
+    enabled: true
+    host: dpg-redis-master
+    port: 6379
+
+  config:
+    NODE_ENV: production
+    HOST: 0.0.0.0
+    PORT: "3000"
+    MATCH_SCORE_PROVIDER: openai
+    MATCH_SCORE_MODEL: gpt-4o-mini
+    AUTH_SECRETS_FILE: /app/config/auth.keys.json
+    AI_PROVIDER_SECRETS_FILE: /app/config/ai.providers.local.json
+
+  # AI auth + provider config — mirrors VM compose host-mounts of
+  # ../dpg-scoring/config/{auth.keys.json,ai.providers.local.json}.
+  # Stored in a k8s Secret, projected as files at /app/config/.
+  # NEVER commit real keys: override at install time with --set-file:
+  #   --set-file match-score.configFiles.authKeysJson=./auth.keys.json
+  #   --set-file match-score.configFiles.aiProvidersJson=./ai.providers.local.json
+  # Or pre-create a Secret and reference via existingSecret (keys must match
+  # authKeysFileName + aiProvidersFileName).
+  configFiles:
+    create: true
+    existingSecret: ""
+    mountPath: /app/config
+    authKeysFileName: auth.keys.json
+    # Schema (validated by zod in dpg-scoring/src/lib/auth/secrets.ts):
+    #   { keys: [{ keyId: string, secret: string }, ...] }
+    # Defaults are placeholders — override before deploy.
+    authKeysJson: |
+      {
+        "keys": [
+          {
+            "keyId": "match-score-client",
+            "secret": " "
+          }
+        ]
+      }
+    aiProvidersFileName: ai.providers.local.json
+    # Schema (validated by zod in dpg-scoring/src/lib/ai/provider-secrets.ts):
+    #   { providers: { <name>: { apiKey: string }, ... } }
+    # <name> must match config.MATCH_SCORE_PROVIDER above (default: openai).
+    # update the Key for the respective provider you will opt for.
+    aiProvidersJson: |
+      {
+        "providers": {
+          "openai": {
+            "apiKey": "REPLACE_WITH_OPENAI_API_KEY"
+          },
+          "gemini": {
+            "apiKey": "REPLACE_WITH_GEMINI_API_KEY"
+          }
+        }
+      }
+
+postgresql:
+  enabled: true
+  image: *postgresql_image
+  architecture: standalone
+  auth:
+    username: *pg_username
+    database: *pg_database
+    password: *pg_password
+    postgresPassword: *pg_password
+    existingSecret: *pg_existing_secret
+    secretKeys:
+      adminPasswordKey: *pg_admin_key
+      userPasswordKey: *pg_user_key
+  primary:
+    resources: *postgresql_resources
+    persistence:
+      enabled: true
+      size: 8Gi
+    service:
+      ports:
+        postgresql: 5432
+    # Bitnami runs these on an empty data dir (first boot only).
+    # Extensions live in the app database; superuser is required.
+    initdb:
+      scriptsConfigMap: ""
+      scripts:
+        00-extensions.sql: |
+          \connect dpg
+          CREATE EXTENSION IF NOT EXISTS pgcrypto;
+          CREATE EXTENSION IF NOT EXISTS cube;
+          CREATE EXTENSION IF NOT EXISTS earthdistance;
+
+redis:
+  enabled: true
+  image: *redis_image
+  architecture: standalone
+  auth:
+    enabled: true
+    password: *redis_password
+    existingSecret: *redis_existing_secret
+    existingSecretPasswordKey: *redis_password_key
+  commonConfiguration: |-
+    appendonly yes
+    appendfsync everysec
+    save ""
+    maxmemory 256mb
+    maxmemory-policy allkeys-lru
+  master:
+    resources: *redis_master_resources
+    persistence:
+      enabled: true
+      size: 8Gi
+    service:
+      ports:
+        redis: 6379
+  replica:
+    replicaCount: 0
+    resources: *redis_replica_resources
+

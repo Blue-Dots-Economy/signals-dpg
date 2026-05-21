@@ -1,0 +1,18 @@
+{{ include "dpg-notification-service.fullname" . }} deployed.
+
+{{- if .Values.ingress.enabled }}
+Reach the service via:
+{{- range .Values.ingress.hosts }}
+  http{{ if $.Values.ingress.tls }}s{{ end }}://{{ .host }}
+{{- end }}
+{{- else if eq .Values.service.type "ClusterIP" }}
+Port-forward to access locally:
+  kubectl --namespace {{ .Release.Namespace }} port-forward svc/{{ include "dpg-notification-service.fullname" . }} {{ .Values.service.port }}:{{ .Values.service.port }}
+{{- end }}
+
+Required Secret keys ({{ include "dpg-notification-service.secretName" . }}):
+  REDIS_PASSWORD, GMAIL_USER, GMAIL_PASS
+
+internal-secrets.json mounted at {{ .Values.internalSecrets.mountPath }}/{{ .Values.internalSecrets.fileName }}.
+Override the JSON contents with:
+  --set-file internalSecrets.json=./internal-secrets.json

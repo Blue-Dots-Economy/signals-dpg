@@ -1,0 +1,122 @@
+# Default values for dpg-notification-service.
+
+replicaCount: 1
+
+image:
+  repository: ghcr.io/sanketika-obsrv/dpg-monorepo/notification-service
+  tag: ""            # defaults to .Chart.AppVersion
+  pullPolicy: IfNotPresent
+
+imagePullSecrets: []
+nameOverride: ""
+fullnameOverride: ""
+
+serviceAccount:
+  create: true
+  automount: true
+  annotations: {}
+  name: ""
+
+podAnnotations: {}
+podLabels: {}
+
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 1000
+  fsGroup: 1000
+
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: false
+  capabilities:
+    drop:
+      - ALL
+
+service:
+  type: ClusterIP
+  port: 3000
+  targetPort: 3000
+  annotations: {}
+
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+  hosts:
+    - host: notification.dpg.local
+      paths:
+        - path: /
+          pathType: Prefix
+  tls: []
+
+resources: {}
+
+# Compose has no healthcheck for notification-service → default to TCP probe.
+livenessProbe:
+  tcpSocket:
+    port: http
+  initialDelaySeconds: 30
+  periodSeconds: 30
+  timeoutSeconds: 5
+  failureThreshold: 5
+
+readinessProbe:
+  tcpSocket:
+    port: http
+  initialDelaySeconds: 10
+  periodSeconds: 10
+  timeoutSeconds: 5
+  failureThreshold: 5
+
+autoscaling:
+  enabled: false
+  minReplicas: 1
+  maxReplicas: 5
+  targetCPUUtilizationPercentage: 80
+  targetMemoryUtilizationPercentage: ""
+
+nodeSelector: {}
+tolerations: []
+affinity: {}
+
+# Non-secret config rendered into a ConfigMap and loaded via envFrom.
+config:
+  NODE_ENV: production
+  SERVER_PORT: "3000"
+  SMTP_GMAIL: "true"
+  SMTP_AWS_SES: ""
+  SEND_WHATSAPP_NOTIFICATION: ""
+  MAIL_LOG: "true"
+  LOG_ACTIVITY: "true"
+  # Path the app reads for runtime secrets JSON (mounted from internalSecrets.json below).
+  INTERNAL_SECRETS_JSON: /app/config/internal-secrets.json
+
+extraEnv: []
+
+# Secrets rendered into a Secret resource and loaded via envFrom.
+secrets:
+  create: true
+  existingSecret: ""
+  data:
+    REDIS_PASSWORD: ""
+    GMAIL_USER: ""
+    GMAIL_PASS: ""
+
+# In-cluster Redis wiring. Injects REDIS_HOST/REDIS_PORT into the ConfigMap.
+redis:
+  enabled: true
+  host: dpg-redis-master
+  port: 6379
+
+# internal-secrets.json mounted at /app/config/internal-secrets.json.
+# Compose mounts a host file; in k8s we render the JSON into a Secret key and
+# mount it as a file. Provide the JSON string (or use existingSecret).
+internalSecrets:
+  create: true
+  existingSecret: ""
+  # Filename under /app/config. Must match INTERNAL_SECRETS_JSON above.
+  fileName: internal-secrets.json
+  mountPath: /app/config
+  # Raw JSON contents. Override via --set-file internalSecrets.json=./internal-secrets.json
+  json: |
+    {}

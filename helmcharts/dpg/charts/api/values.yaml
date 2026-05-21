@@ -1,0 +1,192 @@
+# Default values for dpg-api.
+
+replicaCount: 1
+
+image:
+  repository: ghcr.io/sanketika-obsrv/dpg-monorepo/api
+  tag: ""            # defaults to .Chart.AppVersion
+  pullPolicy: IfNotPresent
+
+imagePullSecrets: []
+nameOverride: ""
+fullnameOverride: ""
+
+serviceAccount:
+  create: true
+  automount: true
+  annotations: {}
+  name: ""
+
+podAnnotations: {}
+podLabels: {}
+
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 1000
+  fsGroup: 1000
+
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: false
+  capabilities:
+    drop:
+      - ALL
+
+service:
+  type: ClusterIP
+  port: 2742
+  targetPort: 2742
+  annotations: {}
+
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+    # nginx.ingress.kubernetes.io/rewrite-target: /
+  hosts:
+    - host: api.dpg.local
+      paths:
+        - path: /
+          pathType: Prefix
+  tls: []
+    # - secretName: dpg-api-tls
+    #   hosts:
+    #     - api.dpg.local
+
+resources: {}
+  # limits:
+  #   cpu: 500m
+  #   memory: 512Mi
+  # requests:
+  #   cpu: 100m
+  #   memory: 256Mi
+
+livenessProbe:
+  httpGet:
+    path: /
+    port: http
+  initialDelaySeconds: 30
+  periodSeconds: 30
+  timeoutSeconds: 5
+  failureThreshold: 5
+
+readinessProbe:
+  httpGet:
+    path: /
+    port: http
+  initialDelaySeconds: 10
+  periodSeconds: 10
+  timeoutSeconds: 5
+  failureThreshold: 5
+
+autoscaling:
+  enabled: false
+  minReplicas: 1
+  maxReplicas: 5
+  targetCPUUtilizationPercentage: 80
+  targetMemoryUtilizationPercentage: ""
+
+nodeSelector: {}
+tolerations: []
+affinity: {}
+
+# Non-secret config rendered into a ConfigMap and loaded via envFrom.
+config:
+  NODE_ENV: production
+  INSTANCE_NAME: dpg
+  INSTANCE_ENV: production
+  API_DOMAIN: http://api.dpg.local
+  API_PORT: "2742"
+  AUTH_MIDDLEWARE_ENABLED: "true"
+  CREATE_TEST_OTP: "false"
+  ALLOWED_ORIGINS: ""
+  SERVED_DOMAINS: ""
+  NETWORK_CONFIG_SOURCE: local
+  NETWORK_CONFIG_LOCAL_FILE: examples/schemas/yellow_dot/network.json
+  NETWORK_CONFIG_URLS: ""
+  ALLOW_EXTRA_SCHEMA_DATA: "false"
+  SCHEMA_REGISTRY_URL: ""
+  # POSTGRES_HOST and REDIS_HOST default to in-cluster service DNS when externalDatabase/externalRedis is disabled.
+  # Override here if connecting to external clusters.
+  # POSTGRES_HOST: my-postgres.default.svc.cluster.local
+  # POSTGRES_PORT: "5432"
+  # POSTGRES_DB: dpg
+  # POSTGRES_USER: dpg
+  # REDIS_HOST: my-redis.default.svc.cluster.local
+  # REDIS_PORT: "6379"
+
+# Extra free-form env entries appended to the container.
+extraEnv: []
+# - name: FOO
+#   value: bar
+
+# Secrets rendered into a Secret resource and loaded via envFrom.
+# Leave blank ("") to omit a key.
+secrets:
+  # If create=false, point existingSecret at a pre-created Secret containing
+  # the same keys.
+  create: true
+  existingSecret: ""
+  data:
+    AUTH_SECRET: ""
+    POSTGRES_USER: dpg
+    POSTGRES_PASSWORD: ""
+    POSTGRES_DB: dpg
+    REDIS_PASSWORD: ""
+    NOTIFICATION_SERVICE_ENDPOINT: ""
+    NOTIFICATION_SERVICE_KEY_ID: ""
+    NOTIFICATION_SERVICE_SECRET: ""
+    SMS_TEMPLATE_ID: ""
+    MATCH_SCORE_PROVIDER: ""
+    DPG_SCORING_ENDPOINT: ""
+    DPG_SCORING_KEY_ID: ""
+    DPG_SCORING_SECRET: ""
+    DPG_SCORING_PATH: ""
+    DPG_SCORING_VERSION: ""
+    DPG_SCORING_PROMPT_VERSION: ""
+
+# DB schema migration Job.
+# Mounts files/schema.sql as a ConfigMap; container uses psql to apply it.
+# Idempotent: checks `to_regclass('public."user"')`; skips if table exists.
+# Runs as a Helm post-install / post-upgrade hook.
+migrate:
+  enabled: true
+  image: postgres:16-alpine
+  imagePullPolicy: IfNotPresent
+  backoffLimit: 3
+  ttlSecondsAfterFinished: 300
+  resources: {}
+
+# In-cluster Postgres wiring. Set enabled=true to inject host/port from
+# the bundled dpg-postgres release (same namespace).
+postgres:
+  enabled: true
+  host: dpg-postgres-postgresql
+  port: 5432
+  # Admin credentials used by the migrate Job to CREATE EXTENSION (requires
+  # superuser). Leave empty to skip the extension step.
+  adminSecret: ""
+  adminUser: postgres
+  adminPasswordKey: postgres-password
+
+# In-cluster Redis wiring. Set enabled=true to inject host/port from
+# the bundled dpg-redis release.
+redis:
+  enabled: true
+  host: dpg-redis-master
+  port: 6379
+
+# Network schemas — JSON files mounted into the api pod as a ConfigMap at
+# /app/schemas/<name>.json. The api reads them via NETWORK_CONFIG_SOURCE=local
+# and NETWORK_CONFIG_LOCAL_FILE (comma-separated paths).
+# To add a network: drop helmcharts/dpg/charts/api/files/networks/<name>.json
+# and append <name> to .schemas.networks here.
+schemas:
+  # In-cluster URL substituted into instance_url fields at render time.
+  # Used by the api for cross-instance fetches; must resolve inside the cluster.
+  apiInternalUrl: "http://dpg-api:2742"
+  # Substituted into cross_network_origins[].schema_url. NetworkConfigSchema
+  # validates this as a URL, so even though local mode skips the actual
+  # cross-network fetch, the value must parse as a URL.
+  crossNetworkUrl: "http://dpg-api:2742"
+  networks: []

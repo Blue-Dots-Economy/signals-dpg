@@ -1,0 +1,97 @@
+# =============================================================================
+# AWS overlay for the DPG umbrella chart.
+#
+# Layered on top of values.yaml at install time:
+#
+#   helm upgrade --install dpg ./helmcharts/dpg -n dpg \
+#     -f ./helmcharts/dpg/values.yaml \
+#     -f ./helmcharts/dpg/values-aws.yaml \
+#     --set ui.ingress.hosts[0].host=dpg.example.com \
+#     --set 'api.config.ALLOWED_ORIGINS=https://dpg.example.com' \
+#     --set 'ui.ingress.annotations.alb\.ingress\.kubernetes\.io/certificate-arn=arn:aws:acm:...'
+#
+# Assumes:
+#   - EKS with the AWS Load Balancer Controller installed (ALB ingress).
+#     Swap `className: alb` + annotations for `className: nginx` if you use
+#     the NGINX ingress controller instead.
+#   - A default StorageClass that provisions EBS volumes (gp3 / gp2). Set
+#     storageClass: explicitly below if you have multiple classes.
+#   - An ACM certificate covering the host you'll route to the UI.
+# =============================================================================
+
+# UI fronted by ALB; API stays ClusterIP and is reached via the UI's nginx
+# proxy on /api/*, so only the UI hostname needs to be public.
+ui:
+  ingress:
+    enabled: true
+    className: alb
+    annotations:
+      kubernetes.io/ingress.class: alb
+      alb.ingress.kubernetes.io/scheme: internet-facing
+      alb.ingress.kubernetes.io/target-type: ip
+      alb.ingress.kubernetes.io/listen-ports: '[{"HTTP":80},{"HTTPS":443}]'
+      alb.ingress.kubernetes.io/ssl-redirect: "443"
+      alb.ingress.kubernetes.io/healthcheck-path: /
+      # Inject your ACM certificate ARN via --set at install time:
+      #   --set 'ui.ingress.annotations.alb\.ingress\.kubernetes\.io/certificate-arn=arn:aws:acm:...'
+    hosts:
+      - host: dpg.example.com   # override at install
+        paths:
+          - path: /
+            pathType: Prefix
+    tls: []
+
+# Browser-facing config. Override ALLOWED_ORIGINS at install to match the
+# Ingress hostname; the rest stay as-is (API still ClusterIP, reached via
+# the UI nginx proxy).
+api:
+  config:
+    ALLOWED_ORIGINS: "https://dpg.example.com"  # override at install
+
+# Postgres + Redis PVCs land on whatever the cluster's default
+# StorageClass is. EKS clusters typically have `gp2` (legacy) or `gp3`
+# (recommended) — set storageClass explicitly if multiple classes exist.
+postgresql:
+  primary:
+    persistence:
+      enabled: true
+      size: 20Gi
+      # storageClass: gp3
+redis:
+  master:
+    persistence:
+      enabled: true
+      size: 8Gi
+      # storageClass: gp3
+
+# Production resource requests/limits. Tune for your workload.
+resources:
+  api:
+    requests:
+      cpu: 200m
+      memory: 256Mi
+    limits:
+      cpu: 1000m
+      memory: 512Mi
+  ui:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 200m
+      memory: 128Mi
+  postgresql:
+    requests:
+      cpu: 250m
+      memory: 512Mi
+    limits:
+      cpu: 1000m
+      memory: 1Gi
+  redis:
+    master:
+      requests:
+        cpu: 100m
+        memory: 128Mi
+      limits:
+        cpu: 500m
+        memory: 256Mi

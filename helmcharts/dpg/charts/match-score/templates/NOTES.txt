@@ -1,0 +1,21 @@
+{{ include "dpg-match-score.fullname" . }} deployed.
+
+{{- if .Values.ingress.enabled }}
+Reach the service via:
+{{- range .Values.ingress.hosts }}
+  http{{ if $.Values.ingress.tls }}s{{ end }}://{{ .host }}
+{{- end }}
+{{- else if eq .Values.service.type "ClusterIP" }}
+Port-forward to access locally:
+  kubectl --namespace {{ .Release.Namespace }} port-forward svc/{{ include "dpg-match-score.fullname" . }} {{ .Values.service.port }}:{{ .Values.service.port }}
+{{- end }}
+
+Required Secret key ({{ include "dpg-match-score.secretName" . }}):
+  REDIS_PASSWORD   (combined with redis.host/port to build REDIS_URL)
+
+Mounted JSON files at {{ .Values.configFiles.mountPath }}/:
+  {{ .Values.configFiles.authKeysFileName }}, {{ .Values.configFiles.aiProvidersFileName }}
+
+Override JSON contents:
+  --set-file configFiles.authKeysJson=./auth.keys.json
+  --set-file configFiles.aiProvidersJson=./ai.providers.local.json
