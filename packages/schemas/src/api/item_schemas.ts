@@ -34,6 +34,9 @@ const FetchItemsSchemaBase = z.object({
 
   item_schema_url: z.url().nullable().optional(),
 
+  /** Filter to items produced by a single aggregator (provenance scope). */
+  aggregator_id: z.uuid().optional(),
+
   item_state: z.record(z.string(), z.unknown()).optional(),
   item_latitude: z.coerce.number().optional(),
   item_longitude: z.coerce.number().optional(),
