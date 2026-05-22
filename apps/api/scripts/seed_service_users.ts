@@ -13,7 +13,7 @@
  * are left alone. Minted keys are printed ONCE — capture them then and
  * store them in a secret manager.
  */
-import { randomUUID, randomBytes } from 'node:crypto';
+import { randomUUID, randomBytes, createHash } from 'node:crypto';
 import { eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/node-postgres';
 import { Pool } from 'pg';
@@ -115,11 +115,17 @@ const ensure_apikey = async (user_id: string, name: string): Promise<void> => {
     return;
   }
   const raw_key = `sk_signals_${randomBytes(24).toString('hex')}`;
+  // @better-auth/api-key stores SHA-256(key) base64url-encoded (no padding)
+  // and compares the hash at verify time. We must insert the hash, not the
+  // raw key. See node_modules/@better-auth/api-key/dist/index.mjs
+  // `defaultKeyHasher`. Node's `digest('base64url')` is unpadded by default,
+  // matching better-auth's `base64Url.encode(..., { padding: false })`.
+  const hashed_key = createHash('sha256').update(raw_key).digest('base64url');
   const now = new Date();
   await db.insert(apikey).values({
     id: `key_${randomUUID()}`,
     name,
-    key: raw_key,
+    key: hashed_key,
     userId: user_id,
     referenceId: user_id,
     configId: 'default',
