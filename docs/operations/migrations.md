@@ -18,17 +18,19 @@ database up:
    `member`, `invitation`, `team`, `teamMember`, plus the better-auth
    indexes.
 
-2. **Idempotent raw SQL (network item layer).** Under
-   `packages/database/src/utils/sql_scripts/`:
+2. **Idempotent raw SQL (network item + auth layer).** Under
+   `packages/database/src/utils/sql_scripts/` (3 files, in FK-safe order:
+   `auth.sql`, `create_items.sql`, `create_actions_events.sql`):
+   - `auth.sql` — idempotent DDL for the better-auth tables (`user`,
+     `account`, `session`, `verification`, `apikey`, `organization`,
+     `member`, `invitation`, `team`, `teamMember`). Used only by the
+     helm migrate-job's bundled `schema.sql`; local dev applies the
+     equivalent via Drizzle (`pnpm db:push:api`).
    - `create_items.sql` — extensions (`pgcrypto`, `cube`, `earthdistance`),
      the partitioned `items` table, GIN/GiST indexes, geo CHECKs, and the
      `items_created_by_fk` FK to `"user"`.
    - `create_actions_events.sql` — `item_actions` and `action_events`
      (partitioned, with their FKs back into items).
-   - `create_auth_table.sql` — a vendor snapshot of the auth DDL.
-     **Not applied by any code path** today; Drizzle owns those tables.
-     Treat it as reference until Workstream A.2 turns it into the
-     drizzle-derived `auth.sql` block of the bundle.
 
 Every statement in the items/actions/events scripts is written in the form
 `CREATE EXTENSION IF NOT EXISTS …`, `CREATE TABLE IF NOT EXISTS …`,
@@ -60,8 +62,11 @@ Script wiring:
   ```ts
   const FILES = ['create_items.sql', 'create_actions_events.sql'];
   ```
-  `create_auth_table.sql` is **intentionally skipped** because Drizzle
-  owns the auth tables. The script is idempotent and safe to re-run.
+  `db_init.ts` doesn't include `auth.sql` because local dev uses
+  `pnpm db:push:api` for better-auth tables. The helm migrate-job applies
+  `auth.sql` indirectly via the generated `schema.sql` bundle
+  (`scripts/generate-schema-bundle.mjs`). The script is idempotent and
+  safe to re-run.
 
 Without `pnpm db:init:api`, the first `POST /api/v1/item/create` against a
 fresh database fails with `PARTITION_SETUP_FAILED` — the parent `items`
