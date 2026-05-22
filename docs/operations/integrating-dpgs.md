@@ -186,6 +186,91 @@ The aggregator dashboard (Plan 3, not yet implemented) queries by `onboarded_by_
 
 The endpoint accepts either `email` OR `phone_number` (or both). If only `phone_number` is provided, the route synthesises a `<uuid>@no-email.local` placeholder for better-auth's signUp — the user's later OTP login binds the real verification.
 
+## Aggregator dashboard
+
+Per-aggregator participant metrics for the UI's hero counts + paginated list. Backed by a cached `participant_metrics` table that recomputes on-demand when stale.
+
+### Endpoint
+
+```bash
+curl -X GET 'http://localhost:2742/api/v1/aggregator/dashboard?page=1&limit=50&status=at_risk' \
+  -H 'x-api-key: <aggregator-dpg apikey>' \
+  -H 'x-acting-org-id: <BBMP org_id>'
+```
+
+Response (abridged):
+
+```json
+{
+  "rollup": {
+    "participants_total": 1247,
+    "by_status": { "new": 84, "active": 612, "at_risk": 219, "satisfied": 270, "inactive": 62 },
+    "applications_pending": 380, "applications_accepted": 421, "applications_rejected": 192
+  },
+  "participants": [
+    {
+      "user_id": "usr_…",
+      "profile_status": "at_risk",
+      "profile_completion_pct": 67,
+      "actionable_tags": ["missing_phone_number", "no_recent_activity"],
+      "applications_pending": 0, "applications_accepted": 0, "applications_rejected": 3, "applications_total": 3,
+      "…": "…"
+    }
+  ],
+  "next_cursor": "2",
+  "total_matching": 219,
+  "metadata": {
+    "last_computed_at": "2026-05-22T07:00:00.000Z",
+    "ttl_seconds": 3600,
+    "refreshed": false
+  }
+}
+```
+
+### Cache + TTL contract
+
+- Per-aggregator rows live in `participant_metrics`. `last_computed_at` per row is the TTL field.
+- Each dashboard / export request reads `MIN(last_computed_at)` for the aggregator. If older than `DASHBOARD_CACHE_TTL_SECONDS` (default 3600), the handler recomputes synchronously under a Postgres advisory lock (`pg_try_advisory_lock(hash(aggregator_id))`).
+- Concurrent requests during a recompute don't pile up: the second-and-later requests see `pg_try_advisory_lock` return `false`, serve stale data, and let the in-flight recompute land within seconds.
+- `metadata.refreshed: true` means *this* request triggered the recompute; `false` means it served what was already in the cache (whether fresh or stale-during-contention).
+- First-ever read for an aggregator (no rows) is treated as stale → triggers compute.
+
+### Filtering + pagination
+
+- `?status=<one of new|active|at_risk|satisfied|inactive>` scopes the list (rollup always shows the full status histogram regardless).
+- `?page=1&limit=50` for offset pagination. Default page=1, default limit=50, max 500.
+- `total_matching` is the count after filter, useful for "showing N of M" UI badges.
+
+The UI hits the API on every filter change. Use TanStack Query (or your preferred fetcher) and key the cache by `(aggregator_id, page, limit, status)` with `staleTime: 60_000` so users navigating filters back-and-forth don't re-fetch.
+
+### CSV export
+
+```bash
+curl -X GET 'http://localhost:2742/api/v1/aggregator/dashboard/export?status=at_risk' \
+  -H 'x-api-key: <key>' \
+  -H 'x-acting-org-id: <org_id>' \
+  -o participants.csv
+```
+
+Streamed `text/csv` response. Same staleness contract as the dashboard route. The body is generated row-by-row in pages of 5000 so 200k+ participants don't OOM the API process.
+
+CSV format notes:
+- `actionable_tags` is pipe-separated (`missing_phone_number|no_recent_activity`) to keep one column per metric.
+- Standard RFC 4180 escaping: commas, quotes, newlines inside a value wrap the cell in double-quotes; embedded `"` doubles to `""`.
+- Filename suggested via `content-disposition: attachment; filename="participants_<org_id>_<YYYY-MM-DD>.csv"`.
+
+### Per-aggregator schema override (advanced)
+
+The recompute reads the JSON Schema for `profile_1.0` to score completion + derive `missing_<field>` tags. By default it uses the first network/domain binding configured in `SERVED_DOMAINS`. Aggregators whose participants live on a different network can override by setting `organization.metadata = '{"network": "...", "domain": "..."}'` (stored as JSON-stringified text). The aggregator-mirror endpoint (`/api/v1/admin/aggregator/upsert`) accepts a `metadata` field for this purpose.
+
+### Plan 3 follow-ups (not in pilot)
+
+- **Async export + blob storage**: switch when sync export crosses ~2 min wall time, ~200k rows, or concurrent-export contention. Today's streaming is fine for current scale.
+- **Pre-warming**: fire-and-forget recompute on participant onboard so the next dashboard hit is hot. Currently the optional cache invalidation is the simpler stand-in (delete the aggregator's rows on onboard).
+- **`q` parameter (free-text search)**: requires a tsvector + GIN index on profile fields. Param is accepted by the schema but ignored today.
+- **Inter-instance aggregation**: querying peer Signals instances. Out of pilot scope.
+- **Recompute observability**: Plan 4 H — log/emit duration, processed count, failure rate per recompute.
+
 ## What the acting_org preHandler checks
 
 `apps/api/src/middleware/acting_org.ts` runs after `auth_middleware` on
