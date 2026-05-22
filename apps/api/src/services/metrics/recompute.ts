@@ -10,6 +10,24 @@ const BATCH_SIZE = 1000;
 const PROFILE_ITEM_TYPE = 'profile_1.0';
 const MS_PER_DAY = 86_400_000;
 
+/**
+ * Coerce a raw timestamp value from `db.execute(sql`...`)` into a Date.
+ *
+ * Drizzle's high-level query builder maps declared `timestamp()` columns
+ * to Date automatically. Raw SQL via .execute() bypasses that — node-postgres
+ * returns timestamps as ISO strings unless type parsers are configured.
+ * Already-Date inputs pass through unchanged; null/undefined returns null.
+ */
+const to_date = (v: unknown): Date | null => {
+  if (v === null || v === undefined) return null;
+  if (v instanceof Date) return v;
+  if (typeof v === 'string' || typeof v === 'number') return new Date(v);
+  // Anything else (object that's not a Date?) — surface the bug rather than mask it.
+  throw new TypeError(
+    `to_date: expected Date | string | number | null, got ${typeof v}`,
+  );
+};
+
 export interface RecomputeResult {
   processed: number;
   duration_ms: number;
@@ -115,10 +133,16 @@ export const recompute_aggregator_metrics = async (
 
   for (const r of rows) {
     const payload = r.profile_state ?? {};
+    // node-postgres returns timestamps as strings from raw db.execute(sql`...`)
+    // calls (Drizzle only coerces dates when the high-level query builder
+    // sees a declared `timestamp()` column). Coerce defensively — already-
+    // Date inputs pass through `new Date()` unchanged. user.created_at is
+    // NOT NULL in the schema, so to_date never returns null here.
+    const created_at = to_date(r.created_at)!;
     // Users without a profile fall back to their user record's timestamps —
     // age_days then reflects "how long since signup" instead of throwing.
-    const profile_created = r.profile_created_at ?? r.created_at;
-    const profile_updated = r.profile_last_updated_at ?? r.updated_at;
+    const profile_created = to_date(r.profile_created_at) ?? created_at;
+    const profile_updated = to_date(r.profile_last_updated_at) ?? created_at;
     const idle_days = Math.floor((now.getTime() - profile_updated.getTime()) / MS_PER_DAY);
 
     buffer.push({
@@ -135,7 +159,7 @@ export const recompute_aggregator_metrics = async (
       profileCompletionPct: profile_completion_pct(payload, schema),
       profileCreatedAt: profile_created,
       profileLastUpdatedAt: profile_updated,
-      ageDays: Math.floor((now.getTime() - r.created_at.getTime()) / MS_PER_DAY),
+      ageDays: Math.floor((now.getTime() - created_at.getTime()) / MS_PER_DAY),
       applicationsPending: r.applications_pending,
       applicationsAccepted: r.applications_accepted,
       applicationsRejected: r.applications_rejected,
