@@ -203,7 +203,7 @@
           "response": []
         },
         {
-          "name": "Onboard via QR Link",
+          "name": "Onboard Provider via QR Link",
           "event": [
             {
               "listen": "test",
@@ -213,8 +213,8 @@
                   "pm.test('Onboard ok', function () { pm.response.to.have.status(200); });",
                   "const body = pm.response.json();",
                   "if (body) {",
-                  "  if (body.user_id) pm.environment.set('seeker_user_id', body.user_id);",
-                  "  if (body.profile_item_id) pm.environment.set('seeker_profile_item_id', body.profile_item_id);",
+                  "  if (body.user_id) pm.environment.set('provider_user_id', body.user_id);",
+                  "  if (body.profile_item_id) pm.environment.set('provider_item_id', body.profile_item_id);",
                   "}"
                 ]
               }
@@ -229,14 +229,14 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"name\": \"{{seeker_name}}\",\n  \"phone_number\": \"{{seeker_phone}}\",\n  \"terms_accepted\": true,\n  \"privacy_accepted\": true,\n  \"channel\": \"link\",\n  \"source_id\": \"magic_link_abc123\",\n  \"network\": \"{{network_id}}\",\n  \"domain\": \"{{seeker_domain}}\",\n  \"item_type\": \"{{seeker_item_type}}\",\n  \"profile\": {{seeker_profile_payload_json}}\n}"
+              "raw": "{\n  \"name\": \"{{provider_name}}\",\n  \"phone_number\": \"{{provider_phone}}\",\n  \"terms_accepted\": true,\n  \"privacy_accepted\": true,\n  \"channel\": \"link\",\n  \"source_id\": \"magic_link_provider_xyz\",\n  \"network\": \"{{network_id}}\",\n  \"domain\": \"{{provider_domain}}\",\n  \"item_type\": \"{{provider_item_type}}\",\n  \"profile\": {{provider_profile_payload_json}}\n}"
             },
             "url": {
               "raw": "{{base_url}}/api/v1/admin/onboard_participant",
               "host": ["{{base_url}}"],
               "path": ["api", "v1", "admin", "onboard_participant"]
             },
-            "description": "Same endpoint as Bulk; the only difference is `channel=link` and `source_id` is the magic-link id from upstream. Useful for QR-code-driven self-signups attributed to the aggregator that issued the QR."
+            "description": "Onboard a PROVIDER (e.g. employer, training centre) via the QR / magic-link channel. Same endpoint as the seeker flows, but targets the provider domain + provider item_type. `channel=link` with `source_id` carrying the upstream magic-link id. Test script captures the resulting user_id + profile_item_id into `provider_user_id` / `provider_item_id` so the Seeker > Apply to Provider request can reference them.\n\nNote: the `profile` payload must match the provider domain's item-type schema (`{{provider_item_type}}`). Each env file ships a `provider_profile_payload_json` template — adjust it to match the running instance's schema (fetch via `GET /api/v1/network/schema/{{network_id}}/{{provider_domain}}/{{provider_item_type}}` to see the live shape)."
           },
           "response": []
         },
