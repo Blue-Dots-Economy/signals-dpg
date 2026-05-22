@@ -191,7 +191,7 @@ in `apps/ui/src/lib/api-config.ts`.
 | `VITE_API_URLS` | optional | JSON-encoded `{ key: url }` map; adds extra endpoints to the instance selector. Invalid JSON is silently ignored. |
 | `VITE_DEFAULT_API_URL` | optional | Wins over `VITE_API_URL` when set. |
 | `VITE_SHOW_INSTANCE_SELECTOR` | optional | When `true`, surfaces the instance selector even outside `import.meta.env.DEV`. |
-| `VITE_NETWORK_NAME` | optional | Comma-separated list of network names to show in the UI. Empty = show all networks the API serves. |
+| `VITE_NETWORK_ID` | optional | Comma-separated list of network IDs to scope the UI to. Parsed by `parseNetworkIds` (split on `,`, trimmed, empties dropped) in `apps/ui/src/pages/home-page.tsx` and `profile-form-page.tsx`. Empty/unset = no network filter applied. |
 
 In the default Helm install the UI's nginx reverse-proxies `/api/*` to
 `dpg-api:2742`, so `VITE_API_URL` is intentionally left empty in
