@@ -15,11 +15,24 @@
  */
 import { randomUUID, randomBytes } from 'node:crypto';
 import { eq } from 'drizzle-orm';
+import { drizzle } from 'drizzle-orm/node-postgres';
+import { Pool } from 'pg';
 import dotenv from 'dotenv';
 
 dotenv.config({ path: '../../.env' });
 
-import { db } from '../db/postgres/drizzle_config';
+// Build our own pg pool + drizzle instance rather than importing
+// `apps/api/db/postgres/drizzle_config`, which transitively pulls in
+// the API's full Zod env validation (INSTANCE_NAME, INSTANCE_ENV, etc.).
+// A standalone DB-only script shouldn't require app-context env vars —
+// matches the pattern db_init.ts uses for the same reason.
+const pgUrl =
+  process.env.POSTGRES_URL ??
+  `postgres://${process.env.POSTGRES_USER}:${process.env.POSTGRES_PASSWORD}@${process.env.POSTGRES_HOST ?? '127.0.0.1'}:${process.env.POSTGRES_PORT ?? process.env.DATABASE_PORT ?? '5432'}/${process.env.POSTGRES_DB}`;
+
+const pool = new Pool({ connectionString: pgUrl, ssl: false });
+const db = drizzle(pool);
+
 import {
   user as userTable,
   organization,
