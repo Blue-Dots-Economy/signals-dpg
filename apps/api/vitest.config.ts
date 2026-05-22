@@ -10,6 +10,13 @@ export default defineConfig({
   resolve: {
     alias: {
       '@': new URL('./src', import.meta.url).pathname,
+      '@api': new URL('./', import.meta.url).pathname,
+      '@dpg/schemas': new URL('../../packages/schemas/src', import.meta.url)
+        .pathname,
+      '@dpg/config': new URL('../../packages/config/src', import.meta.url)
+        .pathname,
+      '@dpg/database': new URL('../../packages/database/src', import.meta.url)
+        .pathname,
     },
   },
 });
