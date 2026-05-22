@@ -15,7 +15,9 @@
     "db:migrate": "drizzle-kit migrate",
     "db:studio": "drizzle-kit studio",
     "db:init": "tsx scripts/db_init.ts",
-    "db:seed:purple_dot": "tsx scripts/seed_purple_dot.ts"
+    "db:seed:purple_dot": "tsx scripts/seed_purple_dot.ts",
+    "test": "vitest run --passWithNoTests",
+    "test:watch": "vitest"
   },
   "keywords": [],
   "author": "",
@@ -24,15 +26,16 @@
   "devDependencies": {
     "@types/pg": "^8.15.5",
     "drizzle-kit": "^0.31.8",
-    "tsx": "^4.22.1"
+    "tsx": "^4.22.1",
+    "vitest": "^4.1.7"
   },
   "dependencies": {
-    "auth": "workspace:*",
-    "config": "workspace:*",
-    "database": "workspace:*",
     "@fastify/cors": "^11.2.0",
     "@fastify/swagger": "^9.6.1",
     "@scalar/fastify-api-reference": "^1.57.2",
+    "auth": "workspace:*",
+    "config": "workspace:*",
+    "database": "workspace:*",
     "dotenv": "^17.4.2",
     "drizzle-orm": "^0.45.2",
     "fastify": "^5.8.5",
@@ -40,8 +43,8 @@
     "fastify-type-provider-zod": "^6.1.0",
     "ioredis": "^5.9.2",
     "match_score": "workspace:*",
-    "pg": "^8.17.2",
     "notification": "workspace:*",
+    "pg": "^8.17.2",
     "schemas": "workspace:*"
   }
 }
