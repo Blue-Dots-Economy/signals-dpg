@@ -22,6 +22,7 @@ export const PerformActionBodySchema = z.object({
   source_item: ActionItemRefSchema,
   target_item: ActionTargetItemRefSchema,
   requirements_snapshot: z.record(z.string(), z.unknown()),
+  acting_as_user_id: z.string().min(1).optional(),
 });
 
 export const PerformNetworkActionBodySchema = z.object({
@@ -30,12 +31,15 @@ export const PerformNetworkActionBodySchema = z.object({
   target_item: ActionItemRefWithInstanceSchema,
   source_item_owner: z.string().min(1),
   requirements_snapshot: z.record(z.string(), z.unknown()),
+  performed_by_org_id: z.string().min(1).nullable().optional(),
+  performed_by_service_user_id: z.string().min(1).nullable().optional(),
 });
 
 export const UpdateActionStatusBodySchema = z.object({
   action_id: z.uuid(),
   action_status: z.string().min(1),
   remarks: z.string().min(1).optional(),
+  acting_as_user_id: z.string().min(1).optional(),
 });
 
 export const StoreEventBodySchema = z.object({
