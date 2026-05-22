@@ -181,8 +181,8 @@ API payload examples:
 
 DPG treats notification delivery and match scoring as replaceable service integrations behind package-level clients.
 
-- Notification service: [dhiway/notification-service](https://github.com/dhiway/notification-service.git)
-- Match score service client: [`packages/match_score`](https://github.com/dhiway/dpg-monorepo/tree/main/packages/match_score)
+- Notification service: [signals-dpg-notification-service](https://github.com/Blue-Dots-Economy/notification-service)
+- Match score service client: [signals-dpg-match-engine](https://github.com/Blue-Dots-Economy/match-engine)
 
 ## Fetch Model
 
