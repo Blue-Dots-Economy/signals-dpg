@@ -10,15 +10,19 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 // batch handed to flush() so the test can assert batching + payload shape.
 // ---------------------------------------------------------------------------
 
+// Mirrors the shape `db.execute(sql`...`)` actually returns: timestamps
+// are ISO strings (unless type parsers are configured — see
+// apps/api/db/postgres/drizzle_config.ts). Recompute's `to_date` helper
+// coerces them; these tests verify that coercion stays correct.
 interface UserRow {
   user_id: string;
-  created_at: Date;
-  updated_at: Date;
+  created_at: string;
+  updated_at: string;
   onboarded_by_org_id: string | null;
   onboarded_via: string | null;
   profile_state: Record<string, unknown> | null;
-  profile_created_at: Date | null;
-  profile_last_updated_at: Date | null;
+  profile_created_at: string | null;
+  profile_last_updated_at: string | null;
   applications_total: number;
   applications_pending: number;
   applications_accepted: number;
@@ -71,7 +75,15 @@ vi.mock('../schema_lookup.js', () => ({
 const { recompute_aggregator_metrics } = await import('../recompute.js');
 
 const NOW = new Date('2026-05-22T00:00:00.000Z');
-const daysAgo = (n: number) => new Date(NOW.getTime() - n * 86_400_000);
+// Fixtures feed ISO STRINGS rather than Date objects to mirror what raw
+// db.execute(sql`...`) actually returns when node-postgres type parsers
+// aren't configured — exactly the bug class that produced the
+// `profile_updated.getTime is not a function` 500 in prod. The recompute
+// path's `to_date` helper coerces these on the way in; this test verifies
+// that path stays exercised even if drizzle_config.ts's parser config
+// regresses.
+const daysAgo = (n: number): string =>
+  new Date(NOW.getTime() - n * 86_400_000).toISOString();
 
 beforeEach(() => {
   dbState.users = [];
