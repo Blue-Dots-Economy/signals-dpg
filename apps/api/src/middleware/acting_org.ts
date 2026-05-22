@@ -1,28 +1,7 @@
 import type { FastifyRequest, FastifyReply } from 'fastify';
-// `db` is consumed from `@dpg/database`. In production the actual drizzle
-// instance lives in apps/api/db/postgres/drizzle_config; the Signals package
-// surface for `db` is wired up by the integrator (Task 5 / server bootstrap)
-// and stubbed in tests via `vi.mock('@dpg/database', ...)`. We import via a
-// namespace cast so this module compiles without depending on the package's
-// public type surface.
-import * as DatabaseModule from '@dpg/database';
 import { eq } from 'drizzle-orm';
+import { db } from '@api/db/postgres/drizzle_config';
 import { organization, member } from '../../db/postgres/schema/auth.js';
-
-type OrgRow = { id: string; type: string | null };
-type MemberRow = { id: string };
-
-type DrizzleSelectChain = {
-  select: <T>(columns: Record<string, unknown>) => {
-    from: (table: unknown) => {
-      where: (condition: unknown) => {
-        limit: (n: number) => Promise<T[]>;
-      };
-    };
-  };
-};
-
-const db = (DatabaseModule as unknown as { db: DrizzleSelectChain }).db;
 
 const ALLOWED_ORG_TYPES = ['aggregator', 'voice', 'network_service'] as const;
 type AllowedOrgType = (typeof ALLOWED_ORG_TYPES)[number];
@@ -76,7 +55,7 @@ export const acting_org_preHandler = async (
   }
 
   const org_rows = await db
-    .select<OrgRow>({ id: organization.id, type: organization.type })
+    .select({ id: organization.id, type: organization.type })
     .from(organization)
     .where(eq(organization.id, acting_org_id))
     .limit(1);
@@ -104,7 +83,7 @@ export const acting_org_preHandler = async (
   }
 
   const member_rows = await db
-    .select<MemberRow>({ id: member.id })
+    .select({ id: member.id })
     .from(member)
     .where(eq(member.userId, service_user_id))
     .limit(1);

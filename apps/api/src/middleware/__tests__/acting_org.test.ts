@@ -9,7 +9,7 @@ const selectResults: {
   nextTable: 'organization' | 'member';
 } = { organization: [], member: [], nextTable: 'organization' };
 
-vi.mock('@dpg/database', () => ({
+vi.mock('@api/db/postgres/drizzle_config', () => ({
   db: {
     select: vi.fn(() => ({
       from: vi.fn(() => {
@@ -23,8 +23,6 @@ vi.mock('@dpg/database', () => ({
       }),
     })),
   },
-  organization: { _: { name: 'organization' } },
-  member: { _: { name: 'member' } },
 }));
 
 // Import after mock so the mocked db is what acting_org_preHandler picks up.
