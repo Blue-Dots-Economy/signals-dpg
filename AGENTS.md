@@ -189,6 +189,7 @@ export default my_route;
 
 - Auth configured in `packages/auth/src/config.ts` using `better-auth`.
 - Use `auth_middleware` plugin for protected routes. OTP flows use `unifiedOtp`.
+- **Integrating DPGs**: aggregator-dpg, voice-dpg, etc. authenticate via service apikeys plus an `x-acting-org-id` header. See [`docs/operations/integrating-dpgs.md`](docs/operations/integrating-dpgs.md).
 - Schema files: `apps/api/db/postgres/schema/`. Migrations: `apps/api/drizzle/`.
 - Use `drizzle-kit` for migrations. **Never edit migration files manually.**
 - Use partition-aware queries for item tables to enable partition pruning.

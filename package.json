@@ -17,6 +17,7 @@
     "db:push:api": "pnpm --filter api db:push",
     "db:studio:api": "pnpm --filter api db:studio",
     "db:init:api": "pnpm --filter api db:init",
+    "db:seed:services:api": "pnpm --filter api db:seed:services",
     "dev:ui": "node scripts/turbo-with-root-env.mjs run dev --filter=ui",
     "build:ui": "node scripts/turbo-with-root-env.mjs run build --filter=ui",
     "preview:ui": "node scripts/turbo-with-root-env.mjs run preview --filter=ui",

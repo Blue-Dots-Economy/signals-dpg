@@ -1,0 +1,190 @@
+# Integrating DPGs (aggregator-dpg, voice-dpg)
+
+Other DPGs on the network — today `aggregator-dpg` and `voice-dpg` —
+authenticate to Signals via a **service apikey** plus a per-request
+**acting-org assertion** header. Plan 1 (`chore/plan-1-aggregator-service-auth`)
+shipped the auth foundation described here.
+
+The pattern is small on purpose: a single apikey identifies the calling DPG;
+a header tells Signals which aggregator that DPG is speaking on behalf of for
+this particular request.
+
+## The two-header model
+
+Every call from an integrating DPG into the `/api/v1/admin/*` scope sends two
+headers:
+
+| Header | Purpose |
+|---|---|
+| `x-api-key: <key>` | Identifies the calling DPG (`aggregator-dpg` or `voice-dpg`). The shared `auth_middleware` (`apps/api/plugins/auth/auth_middleware.ts`) resolves the key to its owning user and populates `request.user`. |
+| `x-acting-org-id: <org_id>` | Identifies the org the call is acting on behalf of. The `acting_org_preHandler` (`apps/api/src/middleware/acting_org.ts`) validates it and populates `request.acting_org`. |
+
+The mental model: **the apikey says who the messenger is; the header says
+who they are speaking for.** A single key serves many aggregators because
+the integrating DPG is a trusted intermediary that asserts the right org
+per request.
+
+Notes on `auth_middleware`:
+
+- Apikey auth has priority over session auth. If `x-api-key` is present and
+  invalid the middleware returns `403 INVALID_API_KEY` immediately — it does
+  not fall back to session auth.
+- If `x-api-key` is absent the middleware falls back to a session lookup
+  (used by the UI). The `/api/v1/admin/*` scope assumes the apikey path —
+  the `acting_org` preHandler will return `401 UNAUTHENTICATED` if no
+  `request.user` was set by an apikey.
+- The middleware is gated by `AUTH_MIDDLEWARE_ENABLED` (defaults to `true`).
+  See `docs/operations/secrets.md` for the env knob.
+
+## Organization types
+
+The `organization.type` text column on the better-auth `organization` table
+carries one of three values in this model:
+
+- `network_service` — the integrating DPGs themselves
+  (`aggregator-dpg`, `voice-dpg`). Their service users are members of these
+  orgs. Created by the seed script.
+- `aggregator` — every aggregator that has registered with aggregator-dpg,
+  mirrored into Signals via `POST /api/v1/admin/aggregator/upsert`.
+- `voice` — same shape as `aggregator` but for voice-hosted instances
+  (future expansion; the preHandler already accepts the type).
+
+The `acting_org` preHandler accepts all three as valid `x-acting-org-id`
+targets. Individual routes can narrow further — e.g.
+`POST /api/v1/admin/aggregator/upsert` rejects with
+`403 NOT_NETWORK_SERVICE` if the acting org's type is not `network_service`.
+
+## Local dev setup
+
+```bash
+docker compose up -d db redis
+pnpm db:push:api          # apply better-auth + Drizzle schema to Postgres
+pnpm db:init:api          # apply the non-Drizzle SQL bootstrap (items / actions / events)
+pnpm db:seed:services:api # create aggregator-dpg + voice-dpg service users and apikeys
+```
+
+The seed script (`apps/api/scripts/seed_service_users.ts`) is idempotent —
+re-running it does not mint new keys. For each of `aggregator-dpg` and
+`voice-dpg` it ensures:
+
+1. An `organization` row with `type='network_service'` and the service slug.
+2. A `user` row for the service identity (e.g. `aggregator-dpg-svc@signals.local`).
+3. A `member` row linking that user to its network-service org with
+   `role='service'`.
+4. An `apikey` row (prefix `sk_signals_`) owned by that user.
+
+The minted apikeys print to stdout **on the first run only** — capture them
+then. If you lose a key, the recovery path is to delete the corresponding
+`apikey` row and re-run the seed.
+
+## Aggregator mirroring
+
+When aggregator-dpg onboards a new aggregator (say, BBMP), it mirrors that
+record into Signals so other Signals-aware components can resolve the
+aggregator by org id:
+
+```bash
+curl -X POST http://localhost:2742/api/v1/admin/aggregator/upsert \
+  -H 'x-api-key: <aggregator-dpg apikey from the seed>' \
+  -H 'x-acting-org-id: <aggregator-dpg network_service org id>' \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "external_id": "agg_bbmp_001",
+    "name": "BBMP",
+    "slug": "bbmp"
+  }'
+# -> { "org_id": "org_<uuid>", "created": true }
+```
+
+Idempotency: the lookup key is `slug`. A second call with the same `slug`
+updates `name`, `logo_url`, and `metadata` on the existing row and returns
+`created: false`. `external_id` is opaque to Signals — it is stored inside
+`organization.metadata` for cross-system traceability rather than as its
+own column.
+
+After this call, BBMP exists in Signals' `organization` table with
+`type='aggregator'`. Subsequent admin-scope calls from aggregator-dpg can
+assert `x-acting-org-id: <BBMP's org_id>` and routes will know they are
+operating on BBMP's behalf.
+
+Request and response shapes live in
+`packages/schemas/src/admin/aggregator_upsert.ts`
+(`AggregatorUpsertRequest`, `AggregatorUpsertResponse`).
+
+## What the acting_org preHandler checks
+
+`apps/api/src/middleware/acting_org.ts` runs after `auth_middleware` on
+every `/api/v1/admin/*` route. Its checks (in order):
+
+| Failure | HTTP | error code | Cause |
+|---|---|---|---|
+| `x-acting-org-id` header missing or blank | 400 | `MISSING_ACTING_ORG` | header not sent or empty after trim |
+| `request.user` not set | 401 | `UNAUTHENTICATED` | apikey auth did not run (no `x-api-key`) |
+| `acting_org_id` does not match any `organization` row | 404 | `ACTING_ORG_NOT_FOUND` | unknown org id |
+| Org exists but `organization.type` is null/unknown | 403 | `ACTING_ORG_TYPE_NOT_ALLOWED` | type is not `aggregator`, `voice`, or `network_service` |
+| Caller's service user is not a member of any org | 403 | `SERVICE_USER_NOT_REGISTERED` | no `member` row for `request.user.id` |
+
+On success the preHandler attaches:
+
+```ts
+request.acting_org = {
+  org_id: string,
+  org_type: 'aggregator' | 'voice' | 'network_service',
+  service_user_id: string,
+};
+```
+
+and Fastify continues to the route handler. The `FastifyRequest` type
+augmentation is declared in `apps/api/types.d.ts`.
+
+## Deferred: per-org allowlist
+
+Today's preHandler accepts **any** `aggregator` / `voice` / `network_service`
+org id from **any** service user that is a member of at least one org.
+Tightening to "service user X can only assert orgs Y and Z" is intentionally
+deferred.
+
+The intended path when this is picked up:
+
+- Encode the allowlist in the better-auth `member.permissions` text column
+  (or a sibling table, depending on how granular the policy turns out to
+  need to be).
+- Add the membership-vs-acting-org check between the org-lookup and
+  member-lookup steps in `acting_org.ts`.
+- Surface a new error code (e.g. `SERVICE_USER_NOT_AUTHORIZED_FOR_ORG`,
+  `403`) for the deny case.
+
+This is safe to defer because:
+
+- Apikeys are only minted by the seed script (operator-controlled).
+- `aggregator` and `voice` orgs are only created via the
+  `network_service`-gated upsert endpoint.
+- The blast radius of a leaked service apikey is "can act for any
+  aggregator on this instance", which an operator already needs to assume
+  as part of treating the key as a secret.
+
+## Voice DPG follows the same pattern
+
+When voice-dpg ships (separate stream, not in this PR), it uses its own
+apikey from the seed and asserts `x-acting-org-id` set to either:
+
+- the aggregator org id when voice is hosted per-aggregator
+  (e.g. BBMP runs its own voice instance for itself); or
+- a designated network-voice org when voice is network-hosted with no
+  aggregator behind it (the org would be created with `type='voice'`).
+
+The Signals-side handler logic does not change — `voice` and `aggregator`
+are interchangeable consumers from Signals' point of view. Routes that
+need to discriminate (like the aggregator upsert) do so via
+`request.acting_org.org_type`.
+
+## Related plans
+
+- [Plan 1 — aggregator service auth](../superpowers/plans/2026-05-21-aggregator-service-auth.md) —
+  this plan: auth model, `acting_org` preHandler, seed script, and the
+  `/admin/aggregator/upsert` endpoint.
+- [Plan 2 — participant onboarding attribution](../superpowers/plans/2026-05-21-participant-onboarding-attribution.md) —
+  next up: `POST /api/v1/admin/onboard_participant` for aggregator-dpg /
+  voice-dpg to onboard participants, attributed back to the acting org.
+- [Plan 3 — participant metrics service](../superpowers/plans/2026-05-21-participant-metrics-service.md) —
+  the metrics dashboard each aggregator's UI reads.
