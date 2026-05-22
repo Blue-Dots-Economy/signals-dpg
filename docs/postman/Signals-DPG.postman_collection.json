@@ -1,0 +1,458 @@
+{
+  "info": {
+    "_postman_id": "signals-dpg-collection",
+    "name": "Signals-DPG",
+    "description": "End-to-end API surface for the Signals-DPG instance. Covers OTP auth, aggregator registration, participant onboarding (bulk / link / voice), seeker self-fetch, provider discovery by location, 1:1 connect/apply actions, provider accept/reject, and the aggregator metrics dashboard. Two environments (Blue Dots, Purple Dots) carry network-specific item_type + sample payloads.\n\nWorkflow:\n1. Pick an environment (Blue Dots or Purple Dots).\n2. Run '02 Network Service > Register Aggregator' to mint/lookup the aggregator org. Its returned org_id is captured into `aggregator_org_id` by a test script and reused as `x-acting-org-id` for subsequent admin calls.\n3. Onboard a participant via '03 Aggregator Onboarding' (bulk / link / voice). Capture the seeker's user_id + profile_item_id (the test script does this).\n4. As the seeker (after OTP login -> session cookie), fetch self profile, browse providers by location, and POST a 1:1 apply action.\n5. As the provider, accept the seeker's action via /action/update-status.\n6. Hit the aggregator dashboard for the rollup + CSV export.\n\nAuth model:\n- Admin endpoints (`/api/v1/admin/*`, `/api/v1/aggregator/*`) require BOTH `x-api-key` AND `x-acting-org-id` headers (the two-header service auth model).\n- Seeker/UI endpoints use a session cookie set by `POST /api/auth/unified-otp/verify`. Postman's cookie jar must be enabled for `{{base_url}}`.\n- `auth_middleware.ts` rejects requests with an invalid `x-api-key` outright (no fallback to session). When you want to act as a session user, do NOT send `x-api-key`.\n\nSchema notes (grounded from the codebase, not guessed):\n- OTP request body: `{phoneNumber}` (or `email`); verify body: `{phoneNumber, otp, rememberMe, name?}`.\n- Aggregator upsert: `{external_id, name, slug, logo_url?, metadata?}` -> `{org_id, created}`.\n- Onboard participant: `{email?|phone_number?, name, terms_accepted:true, privacy_accepted:true, channel:'bulk'|'link'|'voice'|'self', source_id?, profile, network?, domain?, item_type?}` -> `{user_id, profile_item_id, onboarded_at}`. The acting org must be of type `aggregator` or `voice`.\n- Network item discovery accepts `item_latitude` + `item_longitude` + `radius_meters` together for geo-filtering.\n- Perform action body: `{action_type, source_item:{item_network,item_domain,item_type,item_id}, target_item:{...,item_instance_url}, requirements_snapshot}` -> 201 with `{action_id, action_type, action_status, update_count, source_item_id, target_item_id}`.\n- Action status update: POST `/api/v1/action/update-status` with `{action_id, action_status, remarks?}`.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "00 Setup",
+      "item": [
+        {
+          "name": "Health (root status)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/",
+              "host": ["{{base_url}}"],
+              "path": [""]
+            },
+            "description": "GET / returns `{ service, status, served_domains, network_config_source }`. Use to confirm the API is up and serving the expected network/domain combo."
+          },
+          "response": []
+        },
+        {
+          "name": "OpenAPI Reference (Scalar)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/reference",
+              "host": ["{{base_url}}"],
+              "path": ["api", "reference"]
+            },
+            "description": "Scalar-hosted OpenAPI reference page. Useful for browsing the full schema."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "01 Auth",
+      "item": [
+        {
+          "name": "Request OTP",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('OTP request ok', function () {",
+                  "  pm.response.to.have.status(200);",
+                  "  const body = pm.response.json();",
+                  "  pm.expect(body.ok).to.eql(true);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "content-type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"phoneNumber\": \"{{seeker_phone}}\",\n  \"name\": \"{{seeker_name}}\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/auth/unified-otp/request",
+              "host": ["{{base_url}}"],
+              "path": ["api", "auth", "unified-otp", "request"]
+            },
+            "description": "Requests an OTP for the supplied phoneNumber (or email). When `CREATE_TEST_OTP=true` in the API .env, the OTP is `000000` and is what `{{test_otp}}` resolves to. In production the OTP is sent via SMS / email."
+          },
+          "response": []
+        },
+        {
+          "name": "Verify OTP (creates session)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('OTP verify ok', function () {",
+                  "  pm.response.to.have.status(200);",
+                  "});",
+                  "const body = pm.response.json();",
+                  "if (body && body.user && body.user.id) {",
+                  "  pm.environment.set('seeker_user_id', body.user.id);",
+                  "}",
+                  "if (body && body.token) {",
+                  "  pm.environment.set('session_token', body.token);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "content-type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"phoneNumber\": \"{{seeker_phone}}\",\n  \"otp\": \"{{test_otp}}\",\n  \"name\": \"{{seeker_name}}\",\n  \"rememberMe\": true\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/auth/unified-otp/verify",
+              "host": ["{{base_url}}"],
+              "path": ["api", "auth", "unified-otp", "verify"]
+            },
+            "description": "Verifies the OTP and creates a session. Postman's cookie jar will capture the session cookie set on `{{base_url}}` — make sure cookies are enabled for that domain. The returned `token` is also captured into `session_token` if you prefer header-based session use."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "02 Network Service",
+      "item": [
+        {
+          "name": "Register Aggregator (upsert)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Aggregator upsert ok', function () {",
+                  "  pm.response.to.have.status(200);",
+                  "});",
+                  "const body = pm.response.json();",
+                  "if (body && body.org_id) {",
+                  "  pm.environment.set('aggregator_org_id', body.org_id);",
+                  "  console.log('Captured aggregator_org_id =', body.org_id);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "content-type", "value": "application/json" },
+              { "key": "x-api-key", "value": "{{network_service_api_key}}" },
+              { "key": "x-acting-org-id", "value": "{{network_service_org_id}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"external_id\": \"{{aggregator_external_id}}\",\n  \"name\": \"{{aggregator_name}}\",\n  \"slug\": \"{{aggregator_slug}}\",\n  \"metadata\": {\n    \"region\": \"in-south\"\n  }\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/admin/aggregator/upsert",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "admin", "aggregator", "upsert"]
+            },
+            "description": "Must be called by the **network_service** org (its `x-api-key` + `x-acting-org-id`). Idempotent on `slug`. Response `{ org_id, created }`. The test script captures `org_id` into `aggregator_org_id` so subsequent admin calls can supply it as `x-acting-org-id`."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "03 Aggregator Onboarding",
+      "item": [
+        {
+          "name": "Onboard via Bulk",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Onboard ok', function () { pm.response.to.have.status(200); });",
+                  "const body = pm.response.json();",
+                  "if (body) {",
+                  "  if (body.user_id) pm.environment.set('seeker_user_id', body.user_id);",
+                  "  if (body.profile_item_id) pm.environment.set('seeker_profile_item_id', body.profile_item_id);",
+                  "  if (body.onboarded_at) pm.environment.set('onboarded_at', body.onboarded_at);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "content-type", "value": "application/json" },
+              { "key": "x-api-key", "value": "{{aggregator_api_key}}" },
+              { "key": "x-acting-org-id", "value": "{{aggregator_org_id}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"{{seeker_name}}\",\n  \"phone_number\": \"{{seeker_phone}}\",\n  \"email\": \"{{seeker_email}}\",\n  \"terms_accepted\": true,\n  \"privacy_accepted\": true,\n  \"channel\": \"bulk\",\n  \"source_id\": \"bulk_upload_2026_05_01\",\n  \"network\": \"{{network_id}}\",\n  \"domain\": \"{{seeker_domain}}\",\n  \"item_type\": \"{{seeker_item_type}}\",\n  \"profile\": {{seeker_profile_payload_json}}\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/admin/onboard_participant",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "admin", "onboard_participant"]
+            },
+            "description": "Creates a participant user + profile_1.0 item, attributed to the acting aggregator org. `channel=bulk` indicates a bulk upload originated this row; `source_id` is opaque to Signals (it's the upstream bulk_upload_id)."
+          },
+          "response": []
+        },
+        {
+          "name": "Onboard Provider via QR Link",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Onboard ok', function () { pm.response.to.have.status(200); });",
+                  "const body = pm.response.json();",
+                  "if (body) {",
+                  "  if (body.user_id) pm.environment.set('provider_user_id', body.user_id);",
+                  "  if (body.profile_item_id) pm.environment.set('provider_item_id', body.profile_item_id);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "content-type", "value": "application/json" },
+              { "key": "x-api-key", "value": "{{aggregator_api_key}}" },
+              { "key": "x-acting-org-id", "value": "{{aggregator_org_id}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"{{provider_name}}\",\n  \"phone_number\": \"{{provider_phone}}\",\n  \"terms_accepted\": true,\n  \"privacy_accepted\": true,\n  \"channel\": \"link\",\n  \"source_id\": \"magic_link_provider_xyz\",\n  \"network\": \"{{network_id}}\",\n  \"domain\": \"{{provider_domain}}\",\n  \"item_type\": \"{{provider_item_type}}\",\n  \"profile\": {{provider_profile_payload_json}}\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/admin/onboard_participant",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "admin", "onboard_participant"]
+            },
+            "description": "Onboard a PROVIDER (e.g. employer, training centre) via the QR / magic-link channel. Same endpoint as the seeker flows, but targets the provider domain + provider item_type. `channel=link` with `source_id` carrying the upstream magic-link id. Test script captures the resulting user_id + profile_item_id into `provider_user_id` / `provider_item_id` so the Seeker > Apply to Provider request can reference them.\n\nNote: the `profile` payload must match the provider domain's item-type schema (`{{provider_item_type}}`). Each env file ships a `provider_profile_payload_json` template — adjust it to match the running instance's schema (fetch via `GET /api/v1/network/schema/{{network_id}}/{{provider_domain}}/{{provider_item_type}}` to see the live shape)."
+          },
+          "response": []
+        },
+        {
+          "name": "Onboard via Voice",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Onboard ok', function () { pm.response.to.have.status(200); });",
+                  "const body = pm.response.json();",
+                  "if (body) {",
+                  "  if (body.user_id) pm.environment.set('seeker_user_id', body.user_id);",
+                  "  if (body.profile_item_id) pm.environment.set('seeker_profile_item_id', body.profile_item_id);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "content-type", "value": "application/json" },
+              { "key": "x-api-key", "value": "{{aggregator_api_key}}" },
+              { "key": "x-acting-org-id", "value": "{{aggregator_org_id}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"{{seeker_name}}\",\n  \"phone_number\": \"{{seeker_phone}}\",\n  \"terms_accepted\": true,\n  \"privacy_accepted\": true,\n  \"channel\": \"voice\",\n  \"source_id\": \"voice_session_xyz789\",\n  \"network\": \"{{network_id}}\",\n  \"domain\": \"{{seeker_domain}}\",\n  \"item_type\": \"{{seeker_item_type}}\",\n  \"profile\": {{seeker_profile_payload_json}}\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/admin/onboard_participant",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "admin", "onboard_participant"]
+            },
+            "description": "`channel=voice` — onboarding originated from a voice-DPG session; `source_id` is the voice_session_id. The acting org may be the voice DPG (org_type=voice) instead of aggregator; the endpoint accepts both."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "04 Seeker",
+      "item": [
+        {
+          "name": "Self Fetch (own profile_1.0)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v1/item/fetch?item_network={{network_id}}&item_domain={{seeker_domain}}&item_type={{seeker_item_type}}&limit=20&offset=0",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "item", "fetch"],
+              "query": [
+                { "key": "item_network", "value": "{{network_id}}" },
+                { "key": "item_domain", "value": "{{seeker_domain}}" },
+                { "key": "item_type", "value": "{{seeker_item_type}}" },
+                { "key": "limit", "value": "20" },
+                { "key": "offset", "value": "0" }
+              ]
+            },
+            "description": "Instance-local item fetch (short Redis cache). When called with the seeker's session cookie this returns the seeker's own profile_1.0 items. Do NOT send `x-api-key` for this call — that path is for service-to-service callers. Make sure Postman's cookie jar still has the session cookie from `Verify OTP`."
+          },
+          "response": []
+        },
+        {
+          "name": "Find Providers by Location",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "content-type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"item_network\": \"{{network_id}}\",\n  \"item_domain\": \"{{provider_domain}}\",\n  \"item_type\": \"{{provider_item_type}}\",\n  \"item_latitude\": {{search_latitude}},\n  \"item_longitude\": {{search_longitude}},\n  \"radius_meters\": {{search_radius_meters}},\n  \"limit\": 20,\n  \"offset\": 0\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/network/item/fetch_local",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "network", "item", "fetch_local"],
+              "query": []
+            },
+            "description": "Single-instance location-filtered item discovery. `item_latitude` + `item_longitude` + `radius_meters` must be supplied together (FetchItemsBodySchema enforces this with a refine). For multi-instance discovery, use GET `/api/v1/network/item/fetch` with the same params on the query string."
+          },
+          "response": []
+        },
+        {
+          "name": "Apply to Provider",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Action created', function () { pm.response.to.have.status(201); });",
+                  "const body = pm.response.json();",
+                  "if (body && body.action_id) {",
+                  "  pm.environment.set('action_id', body.action_id);",
+                  "  console.log('Captured action_id =', body.action_id);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "content-type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"action_type\": \"apply\",\n  \"source_item\": {\n    \"item_network\": \"{{network_id}}\",\n    \"item_domain\": \"{{seeker_domain}}\",\n    \"item_type\": \"{{seeker_item_type}}\",\n    \"item_id\": \"{{seeker_profile_item_id}}\"\n  },\n  \"target_item\": {\n    \"item_network\": \"{{network_id}}\",\n    \"item_domain\": \"{{provider_domain}}\",\n    \"item_type\": \"{{provider_item_type}}\",\n    \"item_id\": \"{{provider_item_id}}\",\n    \"item_instance_url\": \"{{provider_instance_url}}\"\n  },\n  \"requirements_snapshot\": {{action_requirements_snapshot_json}}\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/action/perform",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "action", "perform"],
+              "query": []
+            },
+            "description": "1:1 connect/apply action from seeker -> provider. The source instance validates the source item locally, then forwards to the target instance's `/api/v1/network/action/perform`. Response 201 with `{action_id, action_type, action_status, update_count, source_item_id, target_item_id}` — captured into `action_id` by the test script.\n\nRun as the seeker session (cookie jar), NOT as the aggregator service apikey."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "05 Provider",
+      "item": [
+        {
+          "name": "Accept Action",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "content-type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"action_id\": \"{{action_id}}\",\n  \"action_status\": \"accepted\",\n  \"remarks\": \"Shortlisted for interview\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/action/update-status",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "action", "update-status"],
+              "query": []
+            },
+            "description": "Provider transitions the action to `accepted`. Called by the provider's session (the provider must own the target item on this instance). The same endpoint is used to reject — flip `action_status` to `rejected` and supply a `remarks` string."
+          },
+          "response": []
+        },
+        {
+          "name": "Reject Action",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "content-type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"action_id\": \"{{action_id}}\",\n  \"action_status\": \"rejected\",\n  \"remarks\": \"Position filled\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/action/update-status",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "action", "update-status"],
+              "query": []
+            },
+            "description": "Same endpoint as Accept; supplies `action_status=rejected`. Plan 3's metrics recompute treats this as a terminal status for the application count rollup."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "06 Aggregator Metrics",
+      "item": [
+        {
+          "name": "Dashboard (rollup + list)",
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "x-api-key", "value": "{{aggregator_api_key}}" },
+              { "key": "x-acting-org-id", "value": "{{aggregator_org_id}}" }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/v1/aggregator/dashboard?page=1&limit=50&status={{dashboard_status_filter}}",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "aggregator", "dashboard"],
+              "query": [
+                { "key": "page", "value": "1" },
+                { "key": "limit", "value": "50" },
+                { "key": "status", "value": "{{dashboard_status_filter}}" }
+              ]
+            },
+            "description": "Reads the `participant_metrics` cache scoped to the acting aggregator org. Response carries a status rollup, the paginated participant list, `total_matching`, and a `metadata` block with `last_computed_at`, `ttl_seconds`, and `refreshed` (true when the staleness check forced a recompute). `status` accepts: new | active | at_risk | satisfied | inactive."
+          },
+          "response": []
+        },
+        {
+          "name": "Dashboard Export (CSV)",
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "x-api-key", "value": "{{aggregator_api_key}}" },
+              { "key": "x-acting-org-id", "value": "{{aggregator_org_id}}" },
+              { "key": "accept", "value": "text/csv" }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/v1/aggregator/dashboard/export?status={{dashboard_status_filter}}",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "aggregator", "dashboard", "export"],
+              "query": [
+                { "key": "status", "value": "{{dashboard_status_filter}}" }
+              ]
+            },
+            "description": "Streams a CSV of every row matching the filter (no pagination). Same status/q filters as the dashboard. Save the response to disk via Postman's 'Save response to file'."
+          },
+          "response": []
+        }
+      ]
+    }
+  ],
+  "variable": [
+    { "key": "base_url", "value": "http://localhost:2742", "type": "string" }
+  ]
+}
