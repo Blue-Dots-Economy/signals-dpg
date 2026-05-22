@@ -38,11 +38,13 @@ const dbState: {
   signUpMode: 'ok' | 'unique_violation';
   signUpUserId: string;
   attributionUpdates: Array<{ id: string; set: Record<string, unknown> }>;
+  deletes: Array<{ user_id: string }>;
 } = {
   existingUserRows: [],
   signUpMode: 'ok',
   signUpUserId: 'usr_test_default',
   attributionUpdates: [],
+  deletes: [],
 };
 
 vi.mock('@api/db/postgres/drizzle_config', () => {
@@ -74,8 +76,30 @@ vi.mock('@api/db/postgres/drizzle_config', () => {
       return cb(tx);
     },
   );
+  const deleteFn = vi.fn(() => ({
+    where: vi.fn(() => {
+      // The route calls `db.delete(user).where(eq(user.id, user_id))`
+      // for orphan cleanup. We can't easily introspect the drizzle
+      // where-clause object, so we record the current signUpUserId —
+      // that's the user_id the route will have captured in scope.
+      dbState.deletes.push({ user_id: dbState.signUpUserId });
+      return Promise.resolve();
+    }),
+  }));
   return {
-    db: { select, update, transaction },
+    db: { select, update, transaction, delete: deleteFn },
+  };
+});
+
+// ---- partial-mock @dpg/database — keep all real exports (schemas /
+// helpers @dpg/schemas pulls in), but stub ensureItemPartition so the
+// route doesn't touch a real DB. ----
+vi.mock('@dpg/database', async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import('@dpg/database')>();
+  return {
+    ...actual,
+    ensureItemPartition: vi.fn(async () => {}),
   };
 });
 
@@ -140,6 +164,7 @@ describe('POST /admin/onboard_participant', () => {
       .toString(36)
       .slice(2, 8)}`;
     dbState.attributionUpdates = [];
+    dbState.deletes = [];
   });
 
   it('400 when neither email nor phone_number is provided', async () => {
@@ -418,5 +443,43 @@ describe('POST /admin/onboard_participant', () => {
     });
     expect(res.statusCode).toBe(409);
     expect(res.json().error).toBe('USER_ALREADY_EXISTS');
+  });
+
+  it('deletes the orphan user when the transaction throws', async () => {
+    // Make create_profile_item throw an ItemServiceError-shaped error so the
+    // tx rolls back. signUp succeeded on its own connection (not part of
+    // the tx), so the route must compensate by deleting the orphan user.
+    const profileMock = await import('@/lib/profile_item');
+    vi.mocked(profileMock.create_profile_item).mockImplementationOnce(
+      async () => {
+        const err: Error & { statusCode?: number; errorCode?: string } =
+          new Error('Domain "seeker" is not served by network "blue_dot"');
+        err.statusCode = 400;
+        err.errorCode = 'UNSERVED_DOMAIN';
+        throw err;
+      },
+    );
+
+    dbState.signUpUserId = 'usr_orphan_test';
+    const app = await buildApp({ org_id: 'org_bbmp', org_type: 'aggregator' });
+    const res = await app.inject({
+      method: 'POST',
+      url: '/onboard_participant',
+      payload: {
+        phone_number: '+919876543210',
+        name: 'OrphanTest',
+        terms_accepted: true,
+        privacy_accepted: true,
+        channel: 'bulk',
+        profile: {},
+      },
+    });
+
+    // Typed downstream error surfaced faithfully.
+    expect(res.statusCode).toBe(400);
+    expect(res.json().error).toBe('UNSERVED_DOMAIN');
+    // Compensation ran exactly once for the user we just signed up.
+    expect(dbState.deletes.length).toBe(1);
+    expect(dbState.deletes[0].user_id).toBe('usr_orphan_test');
   });
 });
