@@ -2,6 +2,7 @@ import type { FastifyPluginAsync } from 'fastify';
 import { auth_middleware_if_enabled } from '@api/plugins/auth/auth_middleware';
 import { acting_org_preHandler } from '@/middleware/acting_org';
 import { aggregator_upsert } from './aggregator/upsert.js';
+import { onboard_participant } from './onboard_participant.js';
 
 /**
  * Mounts /api/v1/admin/*. Every request through this scope passes through:
@@ -20,6 +21,7 @@ export const admin_routes: FastifyPluginAsync = async (app) => {
   app.addHook('preHandler', acting_org_preHandler);
 
   await app.register(aggregator_upsert);
+  await app.register(onboard_participant);
 };
 
 export default admin_routes;
