@@ -9,20 +9,20 @@
 # -----------------------------------------------------------------------------
 images:
   api: &api_image
-    repository: ghcr.io/vinodbhorge/dpg-monorepo/api
-    tag: "v1.0.4"
+    repository: ghcr.io/blue-dots-economy/signals-dpg/api
+    tag: "develop"             # branch tag emitted by build-images.yaml; override per environment.
     pullPolicy: IfNotPresent
   ui: &ui_image
-    repository: ghcr.io/vinodbhorge/dpg-monorepo/ui
-    tag: "v1.0.4"
+    repository: ghcr.io/blue-dots-economy/signals-dpg/ui
+    tag: "develop"             # branch tag emitted by build-images.yaml; override per environment.
     pullPolicy: IfNotPresent
   notificationService: &notification_service_image
-    repository: vinodbbhorge/notification-service
-    tag: "latest"              # user supplies
+    repository: ghcr.io/blue-dots-economy/signals-dpg/notification-service
+    tag: "develop"             # branch tag emitted by build-images.yaml; override per environment.
     pullPolicy: IfNotPresent
   matchScore: &match_score_image
-    repository: vinodbbhorge/match-scoring
-    tag: "latest"              # user supplies
+    repository: ghcr.io/blue-dots-economy/signals-dpg/match-score
+    tag: "develop"             # branch tag emitted by build-images.yaml; override per environment.
     pullPolicy: IfNotPresent
   postgresql: &postgresql_image
     registry: docker.io
