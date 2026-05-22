@@ -199,6 +199,8 @@ export const perform_network_action_handler = async (
       target_item_owner: targetItemSnapshot.created_by,
       requirements_snapshot: body.requirements_snapshot,
       remarks: null,
+      performed_by_org_id: body.performed_by_org_id ?? null,
+      performed_by_service_user_id: body.performed_by_service_user_id ?? null,
     })
     .returning({
       action_id: item_actions.action_id,
