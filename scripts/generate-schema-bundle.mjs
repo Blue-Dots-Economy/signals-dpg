@@ -21,6 +21,7 @@ const outPath = join(repoRoot, 'helmcharts/dpg/charts/api/files/schema.sql');
 // FK-safe order. auth tables (referenced by items.created_by) must come first.
 const FILES = [
   'auth.sql',                  // better-auth tables (Plan 4 Task A.2)
+  'metrics.sql',               // participant_metrics (FKs to user + organization)
   'create_items.sql',          // items table + partitions
   'create_actions_events.sql', // item_actions + action_events
 ];
