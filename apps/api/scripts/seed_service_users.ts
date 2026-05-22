@@ -60,7 +60,6 @@ const ensure_org = async (slug: string, name: string): Promise<string> => {
     type: 'network_service',
     createdAt: new Date(),
   });
-  console.log(`  org created: ${slug} (${id})`);
   return id;
 };
 
@@ -81,38 +80,38 @@ const ensure_user = async (email: string, name: string): Promise<string> => {
     createdAt: now,
     updatedAt: now,
   });
-  console.log(`  user created: ${email} (${id})`);
   return id;
 };
 
-const ensure_member = async (user_id: string, org_id: string): Promise<void> => {
+const ensure_member = async (user_id: string, org_id: string): Promise<string> => {
   const [existing] = await db
     .select({ id: member.id })
     .from(member)
     .where(eq(member.userId, user_id))
     .limit(1);
-  if (existing) return;
+  if (existing) return existing.id;
+  const id = `mem_${randomUUID()}`;
   await db.insert(member).values({
-    id: `mem_${randomUUID()}`,
+    id,
     organizationId: org_id,
     userId: user_id,
     role: 'service',
     createdAt: new Date(),
   });
-  console.log(`  member linked: user=${user_id} org=${org_id} role=service`);
+  return id;
 };
 
-const ensure_apikey = async (user_id: string, name: string): Promise<void> => {
+const ensure_apikey = async (
+  user_id: string,
+  name: string,
+): Promise<{ minted: boolean; raw_key: string | null }> => {
   const [existing] = await db
     .select({ id: apikey.id })
     .from(apikey)
     .where(eq(apikey.userId, user_id))
     .limit(1);
   if (existing) {
-    console.log(
-      `  apikey already exists for ${name} (id=${existing.id}); skipping mint.`
-    );
-    return;
+    return { minted: false, raw_key: null };
   }
   const raw_key = `sk_signals_${randomBytes(24).toString('hex')}`;
   // @better-auth/api-key stores SHA-256(key) base64url-encoded (no padding)
@@ -136,22 +135,34 @@ const ensure_apikey = async (user_id: string, name: string): Promise<void> => {
     createdAt: now,
     updatedAt: now,
   });
-  console.log(
-    `MINTED ${name} apikey — store securely, will NOT be shown again:`
-  );
-  console.log(`  ${raw_key}`);
+  return { minted: true, raw_key };
 };
 
 const main = async () => {
   for (const svc of SERVICES) {
-    console.log(`\n${svc.slug}:`);
     const org_id = await ensure_org(
       svc.slug,
-      `${svc.slug} (network service)`
+      `${svc.slug} (network service)`,
     );
     const user_id = await ensure_user(svc.user_email, svc.slug);
-    await ensure_member(user_id, org_id);
-    await ensure_apikey(user_id, svc.slug);
+    const member_id = await ensure_member(user_id, org_id);
+    const apikey_result = await ensure_apikey(user_id, svc.slug);
+
+    // Always print the IDs so operators don't need psql to find them.
+    // Raw key is printed ONLY on mint — re-runs show '(existing — capture
+    // from first-run logs or rotate via TRUNCATE apikey + reseed)'.
+    console.log(`\n${svc.slug}:`);
+    console.log(`  org_id:    ${org_id}`);
+    console.log(`  user_id:   ${user_id}`);
+    console.log(`  member_id: ${member_id}`);
+    if (apikey_result.minted) {
+      console.log(`  apikey:    ${apikey_result.raw_key}`);
+      console.log(`             ↑ raw key — NOT SHOWN AGAIN. Capture now.`);
+    } else {
+      console.log(
+        `  apikey:    (existing — capture from first-run logs, or rotate via TRUNCATE apikey + reseed)`,
+      );
+    }
   }
   console.log('\nseed complete.');
   process.exit(0);

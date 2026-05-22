@@ -123,9 +123,17 @@ export const apikey = pgTable('apikey', {
   id: text('id').primaryKey(),
   configId: text('config_id').notNull().default('default'),
   name: text('name'),
+  // First N raw-key chars (better-auth defaults to 6) — for UI display only.
+  // The raw key itself is NEVER stored.
   start: text('start'),
   referenceId: text('reference_id').notNull(),
   prefix: text('prefix'),
+  // Stores SHA-256(raw_key) base64url-encoded WITHOUT padding (43 chars).
+  // Matches @better-auth/api-key's `defaultKeyHasher`. Mint via
+  // `authInstance.api.createApiKey(...)` or, for standalone scripts,
+  // hash with `createHash('sha256').update(raw).digest('base64url')`
+  // before inserting — never store the raw key. See
+  // apps/api/scripts/seed_service_users.ts for the reference pattern.
   key: text('key').notNull(),
   userId: text('user_id').references(() => user.id, { onDelete: 'cascade' }),
   refillInterval: integer('refill_interval'),
