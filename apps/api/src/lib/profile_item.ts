@@ -1,0 +1,51 @@
+/**
+ * Thin onboarding-time wrapper around the canonical item-create service.
+ *
+ * The onboarding route (POST /api/v1/admin/onboard_participant) creates a
+ * user and a profile item in one transaction. This helper lets that route
+ * invoke the same `createItemInternal` path the public /item/create route
+ * uses, so participant profile items go through identical validation +
+ * partition setup + URL generation.
+ *
+ * Inputs are kept narrow: the caller passes the user_id (the participant
+ * becomes the owner), the network/domain/item_type for the profile
+ * schema, and the payload. The helper hands these to createItemInternal
+ * with `created_by: user_id` (the participant authors their own row).
+ */
+import { createItemInternal, type DbOrTx } from '@/services/item_service';
+
+export interface CreateProfileItemInput {
+  /**
+   * Drizzle transaction (or db client) passed in by the caller so the
+   * item insert joins the same atomic block as the user insert. The
+   * `DbOrTx` type is re-exported from `@/services/item_service` and
+   * matches the parameter `createItemInternal` already accepts.
+   */
+  tx: DbOrTx;
+
+  user_id: string;
+  network: string; // e.g. 'blue_dot'
+  domain: string; // e.g. 'seeker'
+  item_type: string; // e.g. 'profile_1.0'
+  payload: Record<string, unknown>;
+}
+
+export interface CreateProfileItemResult {
+  item_id: string;
+}
+
+export const create_profile_item = async (
+  input: CreateProfileItemInput,
+): Promise<CreateProfileItemResult> => {
+  const result = await createItemInternal(input.tx, {
+    item_network: input.network,
+    item_domain: input.domain,
+    item_type: input.item_type,
+    item_state: input.payload,
+    item_latitude: null,
+    item_longitude: null,
+    created_by: input.user_id,
+  });
+
+  return { item_id: result.itemId };
+};

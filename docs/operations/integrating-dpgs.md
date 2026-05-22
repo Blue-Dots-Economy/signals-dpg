@@ -111,6 +111,81 @@ Request and response shapes live in
 `packages/schemas/src/admin/aggregator_upsert.ts`
 (`AggregatorUpsertRequest`, `AggregatorUpsertResponse`).
 
+## Onboarding a participant
+
+Once an aggregator has been mirrored (above), aggregator-dpg / voice-dpg can onboard participants on that aggregator's behalf:
+
+```bash
+curl -X POST http://localhost:2742/api/v1/admin/onboard_participant \
+  -H 'x-api-key: <aggregator-dpg apikey>' \
+  -H 'x-acting-org-id: <BBMP'\''s org_id from the upsert above>' \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "phone_number": "+919876543210",
+    "name": "Anita",
+    "terms_accepted": true,
+    "privacy_accepted": true,
+    "channel": "bulk",
+    "source_id": "bulk_upload_42",
+    "profile": { "whoIAm": { "name": "Anita" } }
+  }'
+# → 200 with { user_id, profile_item_id, onboarded_at }
+```
+
+The route is in `apps/api/src/routes/v1/admin/onboard_participant.ts` (Plan 2 Task 5). What it does:
+
+1. Validates the acting org is `aggregator` or `voice` (not `network_service`).
+2. Pre-checks uniqueness on `email` / `phone_number`. 409 USER_ALREADY_EXISTS if a row exists.
+3. In one DB transaction:
+   - `auth.api.signUpEmail` creates user + account (placeholder password — the actual credential is set later, typically via OTP).
+   - UPDATE the new row with phone, DOB, terms/privacy consent, and the **4 attribution columns** (`onboarded_by_org_id`, `onboarded_via`, `onboarded_source_id`, `onboarded_at`) added in Plan 2 Task 1.
+   - INSERT the profile_1.0 item via the canonical item-create service (`create_profile_item` from `apps/api/src/lib/profile_item.ts`).
+4. Returns `{ user_id, profile_item_id, onboarded_at }`.
+
+### Targeting a different network / domain / item_type
+
+By default the endpoint writes the profile as `blue_dot` / `seeker` / `profile_1.0`. Override per call when this Signals instance serves a different schema (e.g. an instance serving `onest_yellow_dot` / `student`):
+
+```bash
+curl -X POST http://localhost:2742/api/v1/admin/onboard_participant \
+  -H 'x-api-key: <key>' \
+  -H 'x-acting-org-id: <org_id>' \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "phone_number": "+919876543210",
+    "name": "Anita",
+    "terms_accepted": true,
+    "privacy_accepted": true,
+    "channel": "bulk",
+    "network": "onest_yellow_dot",
+    "domain": "student",
+    "item_type": "profile_1.0",
+    "profile": {
+      "Full Name": "Anita",
+      "Phone Number": "9876543210"
+    }
+  }'
+```
+
+Signals validates that the trio matches a served binding for this instance and that the `profile` payload conforms to the resolved item_type schema. A mismatch returns `400 UNSERVED_DOMAIN` (or `UNSERVED_NETWORK` / `UNSERVED_ITEM_TYPE` / `INVALID_ITEM_STATE`) with the offending values in the message.
+
+### Attribution model
+
+Every participant onboarded through this endpoint carries:
+
+| Column | Value |
+|---|---|
+| `onboarded_by_org_id` | The aggregator/voice org_id from `x-acting-org-id` |
+| `onboarded_via` | `'bulk'`, `'link'`, `'voice'`, or `'self'` |
+| `onboarded_source_id` | Opaque upstream id (your bulk_upload_id, link_id, voice_session_id, …) |
+| `onboarded_at` | Server-side timestamp |
+
+The aggregator dashboard (Plan 3, not yet implemented) queries by `onboarded_by_org_id` to scope to a single aggregator's participants. The source_id is opaque to Signals — keep your own record in aggregator-dpg / voice-dpg if you need to drill back to the originating CSV row / call session.
+
+### Phone-only onboarding
+
+The endpoint accepts either `email` OR `phone_number` (or both). If only `phone_number` is provided, the route synthesises a `<uuid>@no-email.local` placeholder for better-auth's signUp — the user's later OTP login binds the real verification.
+
 ## What the acting_org preHandler checks
 
 `apps/api/src/middleware/acting_org.ts` runs after `auth_middleware` on
