@@ -3,7 +3,7 @@
 replicaCount: 1
 
 image:
-  repository: ghcr.io/sanketika-obsrv/dpg-monorepo/notification-service
+  repository: ghcr.io/blue-dots-economy/signals-dpg/notification-service
   tag: ""            # defaults to .Chart.AppVersion
   pullPolicy: IfNotPresent
 

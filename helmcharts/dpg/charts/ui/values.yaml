@@ -7,7 +7,7 @@ replicaCount: 1
 apiUpstream: "http://dpg-api:2742"
 
 image:
-  repository: ghcr.io/sanketika-obsrv/dpg-monorepo/ui
+  repository: ghcr.io/blue-dots-economy/signals-dpg/ui
   tag: ""            # defaults to .Chart.AppVersion
   pullPolicy: IfNotPresent
 
