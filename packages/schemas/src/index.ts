@@ -4,6 +4,7 @@ export { FetchSchema, SchemaFetchError, fetchSchema } from './schema_registry';
 export * from './api/action_schemas';
 export * from './api/item_schemas';
 export * from './api/match_score_schemas';
+export * from './admin/aggregator_upsert';
 export * from './item_state_privacy';
 export {
   getActionInteraction,
