@@ -130,9 +130,9 @@ export const onboard_participant_handler = async (
       const { item_id } = await create_profile_item({
         tx,
         user_id,
-        network: 'blue_dot',
-        domain: 'seeker',
-        item_type: 'profile_1.0',
+        network: body.network ?? 'blue_dot',
+        domain: body.domain ?? 'seeker',
+        item_type: body.item_type ?? 'profile_1.0',
         payload: body.profile,
       });
 
@@ -149,9 +149,28 @@ export const onboard_participant_handler = async (
       code?: string;
       message?: string;
       cause?: { code?: string };
+      statusCode?: number;
+      errorCode?: string;
     } | null;
     const pg_code = e?.code ?? e?.cause?.code;
     const message = String(e?.message ?? '');
+
+    // Pre-known typed errors from item_service / other domain layers carry
+    // their own statusCode + errorCode — surface them faithfully rather than
+    // swallowing into ONBOARD_FAILED. ItemServiceError in
+    // apps/api/src/services/item_service.ts exposes exactly these two
+    // fields (statusCode, errorCode) on the Error subclass.
+    if (e?.statusCode && e?.errorCode) {
+      request.log.error(
+        { err, errorCode: e.errorCode },
+        'onboard_participant rejected by downstream',
+      );
+      return reply.code(e.statusCode).send({
+        error: e.errorCode,
+        message: e.message ?? 'request rejected',
+      });
+    }
+
     if (
       pg_code === '23505' ||
       message.includes('duplicate key value') ||

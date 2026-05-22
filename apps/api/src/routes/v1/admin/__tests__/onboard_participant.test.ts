@@ -346,6 +346,61 @@ describe('POST /admin/onboard_participant', () => {
     });
   });
 
+  it('uses network/domain/item_type from body when provided', async () => {
+    const mock = await import('@/lib/profile_item');
+    const spy = vi.mocked(mock.create_profile_item);
+    spy.mockClear();
+    const app = await buildApp({ org_id: 'org_bbmp', org_type: 'aggregator' });
+    await app.inject({
+      method: 'POST',
+      url: '/onboard_participant',
+      payload: {
+        phone_number: '+919876543210',
+        name: 'Y',
+        terms_accepted: true,
+        privacy_accepted: true,
+        channel: 'bulk',
+        network: 'onest_yellow_dot',
+        domain: 'student',
+        item_type: 'profile_1.0',
+        profile: {},
+      },
+    });
+    expect(spy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        network: 'onest_yellow_dot',
+        domain: 'student',
+        item_type: 'profile_1.0',
+      }),
+    );
+  });
+
+  it('defaults to blue_dot/seeker/profile_1.0 when network/domain/item_type not in body', async () => {
+    const mock = await import('@/lib/profile_item');
+    const spy = vi.mocked(mock.create_profile_item);
+    spy.mockClear();
+    const app = await buildApp({ org_id: 'org_bbmp', org_type: 'aggregator' });
+    await app.inject({
+      method: 'POST',
+      url: '/onboard_participant',
+      payload: {
+        phone_number: '+919876543220',
+        name: 'D',
+        terms_accepted: true,
+        privacy_accepted: true,
+        channel: 'bulk',
+        profile: {},
+      },
+    });
+    expect(spy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        network: 'blue_dot',
+        domain: 'seeker',
+        item_type: 'profile_1.0',
+      }),
+    );
+  });
+
   it('409 on PG 23505 from signUpEmail (uniqueness race)', async () => {
     dbState.signUpMode = 'unique_violation';
     const app = await buildApp();

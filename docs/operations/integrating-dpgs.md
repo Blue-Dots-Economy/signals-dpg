@@ -142,6 +142,33 @@ The route is in `apps/api/src/routes/v1/admin/onboard_participant.ts` (Plan 2 Ta
    - INSERT the profile_1.0 item via the canonical item-create service (`create_profile_item` from `apps/api/src/lib/profile_item.ts`).
 4. Returns `{ user_id, profile_item_id, onboarded_at }`.
 
+### Targeting a different network / domain / item_type
+
+By default the endpoint writes the profile as `blue_dot` / `seeker` / `profile_1.0`. Override per call when this Signals instance serves a different schema (e.g. an instance serving `onest_yellow_dot` / `student`):
+
+```bash
+curl -X POST http://localhost:2742/api/v1/admin/onboard_participant \
+  -H 'x-api-key: <key>' \
+  -H 'x-acting-org-id: <org_id>' \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "phone_number": "+919876543210",
+    "name": "Anita",
+    "terms_accepted": true,
+    "privacy_accepted": true,
+    "channel": "bulk",
+    "network": "onest_yellow_dot",
+    "domain": "student",
+    "item_type": "profile_1.0",
+    "profile": {
+      "Full Name": "Anita",
+      "Phone Number": "9876543210"
+    }
+  }'
+```
+
+Signals validates that the trio matches a served binding for this instance and that the `profile` payload conforms to the resolved item_type schema. A mismatch returns `400 UNSERVED_DOMAIN` (or `UNSERVED_NETWORK` / `UNSERVED_ITEM_TYPE` / `INVALID_ITEM_STATE`) with the offending values in the message.
+
 ### Attribution model
 
 Every participant onboarded through this endpoint carries:

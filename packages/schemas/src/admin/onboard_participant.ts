@@ -45,6 +45,25 @@ export const OnboardParticipantRequest = z
     profile: z
       .record(z.string(), z.unknown())
       .describe('payload written to the items table as profile_1.0'),
+    network: z
+      .string()
+      .min(1)
+      .optional()
+      .describe(
+        "network id (default: 'blue_dot'). Set when this Signals instance serves a different network.",
+      ),
+    domain: z
+      .string()
+      .min(1)
+      .optional()
+      .describe("domain within the network (default: 'seeker')."),
+    item_type: z
+      .string()
+      .min(1)
+      .optional()
+      .describe(
+        "schema-typed item_type for the profile (default: 'profile_1.0').",
+      ),
   })
   .refine((b) => Boolean(b.email) || Boolean(b.phone_number), {
     message: 'either email or phone_number is required',
