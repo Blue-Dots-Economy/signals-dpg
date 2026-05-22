@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { resolve_acting_actor } from '../_resolve_acting_actor.js';
 
 const baseAggregator = {
@@ -132,5 +132,16 @@ describe('resolve_acting_actor', () => {
       lookup_onboarded_by: lookupOnboarded,
     });
     expect(res).toEqual({ ok: false, status: 403, error: 'NOT_AUTHORIZED_FOR_TARGET' });
+  });
+
+  it('voice acting_org + missing body field → lookup_onboarded_by is never called', async () => {
+    const spy = vi.fn(lookupOnboarded);
+    await resolve_acting_actor({
+      acting_org: baseVoice,
+      request_user_id: 'svc_voice_1',
+      acting_as_user_id: undefined,
+      lookup_onboarded_by: spy,
+    });
+    expect(spy).not.toHaveBeenCalled();
   });
 });

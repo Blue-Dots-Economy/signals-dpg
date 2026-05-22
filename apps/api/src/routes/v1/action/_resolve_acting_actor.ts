@@ -1,10 +1,10 @@
-type ActingOrg = {
+export type ActingOrg = {
   org_id: string;
   org_type: 'aggregator' | 'voice' | 'network_service';
   service_user_id: string;
 };
 
-type Audit = {
+export type Audit = {
   performed_by_org_id: string | null;
   performed_by_service_user_id: string | null;
 };
@@ -38,11 +38,6 @@ export type ResolveActingActorInput = {
   lookup_onboarded_by: (user_id: string) => Promise<string | null>;
 };
 
-const NO_AUDIT: Audit = {
-  performed_by_org_id: null,
-  performed_by_service_user_id: null,
-};
-
 /**
  * Single source of truth for the on-behalf-of authorization matrix
  * documented in
@@ -57,7 +52,11 @@ export const resolve_acting_actor = async (
     if (acting_as_user_id) {
       return { ok: false, status: 400, error: 'CANNOT_OVERRIDE_SELF' };
     }
-    return { ok: true, effective_user_id: request_user_id, audit: NO_AUDIT };
+    return {
+      ok: true,
+      effective_user_id: request_user_id,
+      audit: { performed_by_org_id: null, performed_by_service_user_id: null },
+    };
   }
 
   if (acting_org.org_type !== 'voice') {
