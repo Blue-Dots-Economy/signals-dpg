@@ -108,3 +108,65 @@ jobs:
       - run: helm lint helmcharts/dpg -f helmcharts/dpg/values-aws.yaml
       - run: helm template helmcharts/dpg > /dev/null
       - run: helm template helmcharts/dpg -f helmcharts/dpg/values-aws.yaml > /dev/null
+
+  schema-parity:
+    runs-on: ubuntu-latest
+    services:
+      pg-sql:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres" --health-interval 5s
+          --health-timeout 5s --health-retries 10
+      pg-drizzle:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: postgres
+        ports:
+          - 5433:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres" --health-interval 5s
+          --health-timeout 5s --health-retries 10
+    env:
+      PG_SQL_URL: postgres://postgres:postgres@localhost:5432/postgres
+      PG_DRIZZLE_URL: postgres://postgres:postgres@localhost:5433/postgres
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.1.2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+
+      - name: Regenerate schema bundle (must be a no-op if already fresh)
+        run: pnpm schema:bundle:check
+
+      - name: Install psql client
+        run: sudo apt-get update && sudo apt-get install -y postgresql-client
+
+      - name: Apply bundled schema.sql to pg-sql
+        run: psql "$PG_SQL_URL" -v ON_ERROR_STOP=1 -f helmcharts/dpg/charts/api/files/schema.sql
+
+      - name: Apply Drizzle migrations to pg-drizzle
+        env:
+          POSTGRES_URL: ${{ env.PG_DRIZZLE_URL }}
+        run: pnpm --filter api exec drizzle-kit push --force
+
+      - name: Diff schemas
+        run: |
+          pg_dump --schema-only --no-owner --no-privileges "$PG_SQL_URL" > /tmp/sql.sql
+          pg_dump --schema-only --no-owner --no-privileges "$PG_DRIZZLE_URL" > /tmp/drizzle.sql
+          # Filter out per-dump security nonces that PG18+ emits — we're on
+          # PG16 here so this should be a no-op, but kept defensively.
+          sed -i -E 's/\\(re|un)strict [A-Za-z0-9]+/\\\1strict <NONCE>/' /tmp/sql.sql /tmp/drizzle.sql
+          diff /tmp/sql.sql /tmp/drizzle.sql
