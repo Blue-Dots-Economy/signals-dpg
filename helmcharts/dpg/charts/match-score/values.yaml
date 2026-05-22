@@ -3,7 +3,7 @@
 replicaCount: 1
 
 image:
-  repository: ghcr.io/sanketika-obsrv/dpg-monorepo/match-score
+  repository: ghcr.io/blue-dots-economy/signals-dpg/match-score
   tag: ""            # defaults to .Chart.AppVersion
   pullPolicy: IfNotPresent
 

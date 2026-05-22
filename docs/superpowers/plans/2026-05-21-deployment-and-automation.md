@@ -705,7 +705,99 @@ Open a tracking issue once Plans 1–3 are deployed; size the work then.
 
 ## Open Questions
 
-1. **Registry choice** (Workstream C Task C.1) — surface to user. Default = GHCR under `blue-dots-economy`.
+1. **Registry choice** (Workstream C Task C.1) — surface to user. Default = GHCR under `blue-dots-economy`. **Resolved during execution:** GHCR `ghcr.io/blue-dots-economy/signals-dpg/<service>`.
 2. **Pre-merge smoke test** — do we want a "deploy to ephemeral cluster, hit `/health/ready`, tear down" stage in CD? Useful but slow; add once the basic pipeline is stable.
-3. **Drizzle journal format compatibility** — the generator in Task A.1 reads `apps/api/drizzle/meta/_journal.json`. Confirm with the existing Drizzle version in use; Drizzle Kit has changed the snapshot format between major versions.
+3. **Drizzle journal format compatibility** — the generator in Task A.1 reads `apps/api/drizzle/meta/_journal.json`. Confirm with the existing Drizzle version in use; Drizzle Kit has changed the snapshot format between major versions. **Resolved by execution:** A.1 took the simpler concatenation path (3 hand-curated SQL files) instead of reading Drizzle's meta — journal format is no longer a dependency.
 4. **Signal-processor singleton enforcement** — if helm later scales replicas to >1 by accident, the cron passes will run twice. Add a Postgres advisory lock around each pass body (cheap, 5 lines) as a belt-and-braces guard.
+
+## Follow-ups discovered during execution
+
+These came out of Plan 4 execution (PR #8). They're real but were intentionally deferred to keep Plan 4 reviewable and to let Plans 1-3 move forward. Pick these up when returning to Plan 4 after Plans 1-3 land.
+
+Listed in rough priority order (most operationally critical first):
+
+### F.1 — Remove the migrate-job's "already migrated" short-circuit ⚠️ critical before Plans 2/3 deploy
+
+`helmcharts/dpg/charts/api/templates/migrate-job.yaml:82-86` runs `SELECT 1 FROM information_schema.tables WHERE table_name='items'` and `exit 0`s if the row exists. Once any cluster has run its first migration, subsequent `schema.sql` changes — including Plans 2 and 3's additive column / table adds — silently no-op on that cluster.
+
+**Fix:** delete the short-circuit (or replace with a per-statement guard that's already inside the SQL itself — every statement in the bundle is `CREATE … IF NOT EXISTS` / `ALTER … ADD COLUMN IF NOT EXISTS` / `DO`-block-guarded constraint, so re-applying the whole bundle on every release is safe).
+
+**Also:** `helmcharts/dpg/charts/api/values.yaml:150` has a stale comment claiming the check is on `public."user"` — it actually checks `items`. Fix the comment if the short-circuit stays in any form.
+
+**Sequencing:** must land before Plans 2 / 3 deploy to a cluster that has already booted Signals once. Failing that, those plans' schema additions need manual psql application per cluster — operationally painful, easy to miss.
+
+### F.2 — Fix `helmcharts/dpg/Chart.yaml` declared-deps paths
+
+`Chart.yaml` declares sub-chart dependencies via `file://../<name>` but the sub-charts are vendored at `helmcharts/dpg/charts/<name>`. `helm dependency update helmcharts/dpg` fails as a result. `helm lint` and `helm template` happen to work because the vendored copies are already in place, so this isn't immediately visible — but any clean rebuild of the chart dependency graph (e.g. when someone bumps a sub-chart version) will fail.
+
+**Fix:** change the deps to `file://./charts/<name>` (or whatever the right relative path is from `Chart.yaml`'s location), confirm `helm dependency update` exits 0, commit.
+
+### F.3 — Centralise the `postgres:16-alpine` migrate-job image
+
+`helmcharts/dpg/charts/api/templates/migrate-job.yaml` hard-codes `image: postgres:16-alpine` rather than reading from a values key. If the migrate-job ever needs a different client version (e.g. when we eventually swap to `drizzle-kit migrate` per `docs/operations/migrations.md` forward path), this needs a chart edit instead of a values override.
+
+**Fix:** route the image through `.Values.migrate.image` (or similar) and default it in `values.yaml`. Already partially set up — the values file has a `migrate:` block but it's not wired to the template's image field.
+
+### F.4 — Collapse `typecheck-{api,ui,docs}` CI jobs into one `pnpm typecheck` step
+
+B.2 landed the root `pnpm typecheck` script (fan-out). B.1's CI workflow still runs three separate jobs for visibility during the transition. Once B.2's contract has been stable for a few PRs, collapse them into a single job:
+
+```yaml
+typecheck:
+  steps: [..., - run: pnpm typecheck]
+```
+
+Removes ~20 lines of YAML and saves a couple of runner-minutes per PR. Low priority but clean.
+
+### F.5 — Add real test scripts so the `test` CI job stops being warn-only
+
+The `test` job in `.github/workflows/ci.yaml` is `continue-on-error: true` because every workspace currently ships a placeholder `"test": "echo Error && exit 1"`. **Plan 1 Task 1** introduces Vitest in `apps/api`. Once Plan 1 lands, this job should:
+
+1. Drop the `continue-on-error: true`.
+2. Update `pnpm -r test` if any workspace's `test` script needs special invocation.
+
+Same applies as more workspaces gain real tests — currently only `apps/api` has Vitest scaffolded (per Plan 1's spec).
+
+### F.6 — Wire `dep-cruise` once `.dependency-cruiser.cjs` exists
+
+The `dep-cruise` CI job is gated on `hashFiles('.dependency-cruiser.cjs') != ''` and currently silently skips. If/when we decide on a dependency-cruiser config (perhaps to enforce the interface-imports restriction documented in aggregator-dpg's `.claude/rules`), add the `.dependency-cruiser.cjs` to repo root and drop the `if:` guard.
+
+### F.7 — Extend the build-images matrix as Dockerfiles land
+
+`.github/workflows/build-images.yaml`'s matrix today has only `api` and `ui` because they're the only services with Dockerfiles in this repo. As the rest land:
+
+- **`signal-processor`** — Plan 3 Task 12 introduces `apps/signal-processor/Dockerfile`. Add a matrix entry then.
+- **`match-score`** — currently a `@dpg/match_score` package, no Dockerfile. If/when it becomes a runnable service (per the helm chart structure, the umbrella expects it to be), it'll need its own Dockerfile.
+- **`notification-service`** — same situation as `match-score`.
+
+Plan 4 Workstream D (signal-processor sub-chart) is already deferred to Plan 3; this is its CI counterpart.
+
+### F.8 — Revisit B.2 Option A (TS project references) once the team wants incremental builds
+
+B.2 shipped as Option B (fan-out script). Option A (`tsc -b` with per-workspace project references) was investigated during execution and proved more invasive than the spec assumed: it needs `composite: true` + `outDir` on `apps/api`, exclusion of `apps/ui` (whose `noEmit: true` conflicts with composite), and **fabricated tsconfigs** for the 5 source-only package workspaces (`auth`, `config`, `database`, `match_score`, `notification`).
+
+Worth revisiting when:
+- `pnpm typecheck` runtime grows past ~30 seconds AND
+- Someone has a half-day to write the 5 missing tsconfigs and fix the cross-workspace type drift that Option A will probably surface (notably the cyclical `@dpg/database` ↔ `@dpg/schemas` import flagged during the investigation).
+
+Until then, Option B is honestly fine for a 9-package monorepo.
+
+### F.9 — Drop `apps/api/drizzle/` from `.gitignore` once `drizzle-kit migrate` becomes the deploy path
+
+Today the generated Drizzle migrations under `apps/api/drizzle/` are gitignored (`.gitignore:10` → `drizzle/`). Acceptable while the deploy path is the idempotent SQL bundle.
+
+The moment we follow the forward path in `docs/operations/migrations.md` and switch the helm migrate-job to `pnpm db:migrate:api` (drizzle-kit migrate), the migrations directory becomes the production-critical artifact and must be tracked. Drop the gitignore entry then, commit the generated migrations as they're produced, and update CI to enforce `pnpm db:generate:api` was run on any schema change.
+
+### F.10 — Observability stack (Workstream H, originally deferred)
+
+Pino → stdout works locally but production needs a log shipper. Same for metrics + tracing. Pick a stack:
+
+- **Logging**: Loki / CloudWatch / Datadog / etc.
+- **Metrics**: `prom-client` exposing `/metrics`, scraped by Prometheus (or Datadog agent).
+- **Tracing**: OpenTelemetry SDK in `apps/api`; one span per `signal-processor` pass.
+
+Out of scope for Plan 4; in scope for whoever owns operability of deployed instances.
+
+### F.11 — Update plan files Tasks A.1/A.2 to reflect what shipped
+
+The plan's task descriptions for A.1 and A.2 still talk about reading Drizzle's `meta` snapshots (the path NOT taken). Once the team is comfortable with the concatenation approach, update the plan text to match reality — the task spec should describe what we did, not what we considered. Low-priority documentation hygiene.

@@ -22,6 +22,7 @@
   "license": "ISC",
   "packageManager": "pnpm@11.1.2",
   "devDependencies": {
+    "@types/pg": "^8.15.5",
     "drizzle-kit": "^0.31.8",
     "tsx": "^4.22.1"
   },

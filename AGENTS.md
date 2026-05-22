@@ -71,8 +71,10 @@ pnpm vitest run src/path/to/testfile.ts
 **No ESLint/Prettier/Biome configured.** Before committing, run:
 
 ```bash
-pnpm tsc --noEmit
+pnpm typecheck
 ```
+
+Root `pnpm typecheck` runs three checks in sequence: `tsc --noEmit` for `apps/api` and `apps/ui`, then `astro check` for `apps/docs`. The Astro check is separate because `astro:content` virtual modules aren't visible to plain `tsc`. The package workspaces (`auth`, `config`, `database`, `match_score`, `notification`, `schemas`) are typechecked transitively via the apps. True TS project references were considered (Plan 4 Task B.2 in `docs/superpowers/plans/`) but require structural changes (fabricated tsconfigs, composite + outDir on apps/api, apps/ui exclusion); deferred.
 
 Manually review code for style consistency per the guidelines below.
 

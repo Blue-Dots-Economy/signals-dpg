@@ -1,0 +1,172 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [develop, main]
+  push:
+    branches: [develop]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  typecheck-api:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.1.2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter api exec tsc --noEmit
+
+  typecheck-ui:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.1.2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter ui exec tsc --noEmit
+
+  typecheck-docs:
+    runs-on: ubuntu-latest
+    # `astro check` is required because the docs app relies on the
+    # `astro:content` virtual modules that plain `tsc --noEmit` cannot resolve.
+    # Today this job is expected to fail: `astro check` is not yet wired into
+    # apps/docs (no @astrojs/check dep, no tsconfig tuned for it). Task B.2
+    # owns the durable typecheck-contract fix that will green this job; until
+    # then we mark it continue-on-error so CI is not blocked.
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.1.2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter docs exec astro check
+
+  test:
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    # Warn-only until Vitest lands per-workspace (Plan 1 Task 1 introduces
+    # it in apps/api). Today every workspace ships a placeholder
+    # `echo Error: no test specified && exit 1` so this job is red on every
+    # run. Drop `continue-on-error` once real test scripts exist.
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.1.2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm -r test
+
+  dep-cruise:
+    runs-on: ubuntu-latest
+    if: hashFiles('.dependency-cruiser.cjs') != ''
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.1.2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm dep-check
+
+  helm-lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: azure/setup-helm@v4
+      - run: helm dependency update helmcharts/dpg
+      - run: helm lint helmcharts/dpg
+      - run: helm lint helmcharts/dpg -f helmcharts/dpg/values-aws.yaml
+      - run: helm template helmcharts/dpg > /dev/null
+      - run: helm template helmcharts/dpg -f helmcharts/dpg/values-aws.yaml > /dev/null
+
+  schema-parity:
+    runs-on: ubuntu-latest
+    services:
+      pg-sql:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres" --health-interval 5s
+          --health-timeout 5s --health-retries 10
+      pg-drizzle:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: postgres
+        ports:
+          - 5433:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres" --health-interval 5s
+          --health-timeout 5s --health-retries 10
+    env:
+      PG_SQL_URL: postgres://postgres:postgres@localhost:5432/postgres
+      PG_DRIZZLE_URL: postgres://postgres:postgres@localhost:5433/postgres
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.1.2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+
+      - name: Regenerate schema bundle (must be a no-op if already fresh)
+        run: pnpm schema:bundle:check
+
+      - name: Install psql client
+        run: sudo apt-get update && sudo apt-get install -y postgresql-client
+
+      - name: Apply bundled schema.sql to pg-sql
+        run: psql "$PG_SQL_URL" -v ON_ERROR_STOP=1 -f helmcharts/dpg/charts/api/files/schema.sql
+
+      - name: Apply Drizzle migrations to pg-drizzle
+        env:
+          POSTGRES_URL: ${{ env.PG_DRIZZLE_URL }}
+        run: pnpm --filter api exec drizzle-kit push --force
+
+      - name: Diff schemas
+        run: |
+          pg_dump --schema-only --no-owner --no-privileges "$PG_SQL_URL" > /tmp/sql.sql
+          pg_dump --schema-only --no-owner --no-privileges "$PG_DRIZZLE_URL" > /tmp/drizzle.sql
+          # Filter out per-dump security nonces that PG18+ emits — we're on
+          # PG16 here so this should be a no-op, but kept defensively.
+          sed -i -E 's/\\(re|un)strict [A-Za-z0-9]+/\\\1strict <NONCE>/' /tmp/sql.sql /tmp/drizzle.sql
+          diff /tmp/sql.sql /tmp/drizzle.sql

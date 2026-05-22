@@ -32,8 +32,12 @@ const sqlDir = resolve(
 );
 
 // Order matters: items must exist before any code-side ensureItemPartition()
-// call hits it; same for actions/events. create_auth_table.sql is intentionally
-// skipped — those tables are owned by Drizzle.
+// call hits it; same for actions/events. The better-auth tables (user,
+// account, etc.) are managed by Drizzle in local dev (pnpm db:push:api) and
+// by the helm migrate-job's bundled schema.sql in deploy (assembled from
+// packages/database/src/utils/sql_scripts/auth.sql by
+// scripts/generate-schema-bundle.mjs). Neither path runs through db_init.ts,
+// so auth.sql is intentionally not in the FILES list.
 const FILES = ['create_items.sql', 'create_actions_events.sql'];
 
 const main = async () => {
