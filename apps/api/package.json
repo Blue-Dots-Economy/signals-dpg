@@ -16,6 +16,7 @@
     "db:studio": "drizzle-kit studio",
     "db:init": "tsx scripts/db_init.ts",
     "db:seed:purple_dot": "tsx scripts/seed_purple_dot.ts",
+    "db:seed:services": "tsx scripts/seed_service_users.ts",
     "test": "vitest run --passWithNoTests",
     "test:watch": "vitest"
   },
