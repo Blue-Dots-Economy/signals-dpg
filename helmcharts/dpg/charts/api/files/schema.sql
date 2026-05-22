@@ -74,6 +74,11 @@ CREATE TABLE IF NOT EXISTS "user" (
   "date_of_birth" timestamp,
   "terms_accepted" boolean DEFAULT false,
   "privacy_accepted" boolean DEFAULT false,
+  -- Plan 2: participant attribution. Set by /api/v1/admin/onboard_participant.
+  "onboarded_by_org_id" text,
+  "onboarded_via"       text,
+  "onboarded_source_id" text,
+  "onboarded_at"        timestamp,
   CONSTRAINT "user_email_unique" UNIQUE ("email"),
   CONSTRAINT "user_phone_number_unique" UNIQUE ("phone_number")
 );
@@ -89,6 +94,10 @@ ALTER TABLE "user" ADD COLUMN IF NOT EXISTS "phone_number_verified" boolean;
 ALTER TABLE "user" ADD COLUMN IF NOT EXISTS "date_of_birth" timestamp;
 ALTER TABLE "user" ADD COLUMN IF NOT EXISTS "terms_accepted" boolean DEFAULT false;
 ALTER TABLE "user" ADD COLUMN IF NOT EXISTS "privacy_accepted" boolean DEFAULT false;
+ALTER TABLE "user" ADD COLUMN IF NOT EXISTS "onboarded_by_org_id" text;
+ALTER TABLE "user" ADD COLUMN IF NOT EXISTS "onboarded_via" text;
+ALTER TABLE "user" ADD COLUMN IF NOT EXISTS "onboarded_source_id" text;
+ALTER TABLE "user" ADD COLUMN IF NOT EXISTS "onboarded_at" timestamp;
 
 DO $$
 BEGIN
@@ -133,6 +142,22 @@ BEGIN
     SELECT 1 FROM pg_constraint WHERE conname = 'organization_slug_unique'
   ) THEN
     ALTER TABLE "organization" ADD CONSTRAINT "organization_slug_unique" UNIQUE ("slug");
+  END IF;
+END
+$$;
+
+-- Plan 2: user.onboarded_by_org_id -> organization.id. Declared here (not in
+-- section 1) because the referenced "organization" table is created above.
+-- No ON DELETE CASCADE — we keep attribution even if the org row is deleted.
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint
+    WHERE conname = 'user_onboarded_by_org_id_organization_id_fk'
+  ) THEN
+    ALTER TABLE "user"
+      ADD CONSTRAINT user_onboarded_by_org_id_organization_id_fk
+      FOREIGN KEY ("onboarded_by_org_id") REFERENCES "organization"("id");
   END IF;
 END
 $$;
@@ -362,6 +387,15 @@ BEGIN
   END IF;
 END
 $$;
+
+------------------------------------------------------------------------------
+-- 10. indexes
+------------------------------------------------------------------------------
+
+-- Plan 2: aggregator dashboard (Plan 3) filters heavily on
+-- (onboarded_by_org_id, onboarded_via) to slice participants by source.
+CREATE INDEX IF NOT EXISTS user_onboarded_by_org_via_idx
+  ON "user" (onboarded_by_org_id, onboarded_via);
 
 -- ─── create_items.sql ───
 

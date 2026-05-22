@@ -29,6 +29,13 @@ export const user = pgTable('user', {
   dateOfBirth: timestamp('date_of_birth'),
   termsAccepted: boolean('terms_accepted').default(false),
   privacyAccepted: boolean('privacy_accepted').default(false),
+  // Plan 2: participant attribution. Set by POST /api/v1/admin/onboard_participant
+  // (which acts on behalf of an aggregator or voice org via acting_org). Null
+  // for users created by other paths (better-auth signUp from a UI etc.).
+  onboardedByOrgId: text('onboarded_by_org_id').references(() => organization.id),
+  onboardedVia: text('onboarded_via'),
+  onboardedSourceId: text('onboarded_source_id'),
+  onboardedAt: timestamp('onboarded_at'),
 });
 
 export const account = pgTable('account', {
