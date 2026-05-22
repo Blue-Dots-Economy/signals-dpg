@@ -17,6 +17,17 @@
 --   ALTER TABLE ... ADD CONSTRAINT (guarded via DO block — PG doesn't support
 --                                   ADD CONSTRAINT IF NOT EXISTS for FKs directly)
 --
+-- Limitation: the standalone ALTER TABLE ADD COLUMN IF NOT EXISTS lines below
+-- can only backfill columns that are nullable or carry a DEFAULT clause.
+-- Non-additive transitions — including the better-auth 1.6.x apikey realignment
+-- that introduced `reference_id NOT NULL` — cannot be handled here; they must go
+-- through a Drizzle migration with an explicit backfill step. On fresh
+-- deployments the CREATE TABLE IF NOT EXISTS path covers everything; on
+-- populated legacy deployments any non-additive column add is the operator's
+-- responsibility (today this is moot because the helm migrate-job short-
+-- circuits when the `items` table already exists — see
+-- docs/operations/migrations.md).
+--
 -- Type mapping notes:
 --   - Drizzle pg `timestamp(...)` without `{ withTimezone: true }` maps to
 --     TIMESTAMP (no timezone). We use TIMESTAMP here to match.
@@ -317,9 +328,14 @@ CREATE TABLE IF NOT EXISTS "apikey" (
 );
 
 -- Columns added by the PR #4 realignment — re-asserted so older deployments
--- pick them up idempotently.
+-- pick them up idempotently. `config_id` is safe because the DEFAULT backfills
+-- existing rows. `reference_id` (NOT NULL, no DEFAULT) is intentionally NOT
+-- re-asserted here: on a populated legacy apikey table the ALTER would fail
+-- because there is no value to backfill. The CREATE TABLE IF NOT EXISTS path
+-- above handles fresh deployments; populated legacy deployments must apply
+-- this column via a Drizzle migration with an explicit backfill (see the
+-- header note on non-additive transitions).
 ALTER TABLE "apikey" ADD COLUMN IF NOT EXISTS "config_id" text DEFAULT 'default' NOT NULL;
-ALTER TABLE "apikey" ADD COLUMN IF NOT EXISTS "reference_id" text NOT NULL;
 
 DO $$
 BEGIN
