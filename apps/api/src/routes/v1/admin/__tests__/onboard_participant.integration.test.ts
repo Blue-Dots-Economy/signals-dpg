@@ -3,12 +3,16 @@
  *
  * Unlike the unit suite (onboard_participant.test.ts), this file talks to a
  * real Postgres instance and runs the production auth + acting_org
- * preHandlers. The filename ends with `.integration.test.ts` so vitest's
- * default include glob (configured in apps/api/vitest.config.ts per Plan 1
- * Task 1) excludes it from `pnpm test` — you have to opt in by name:
+ * preHandlers. The filename ends with `.integration.test.ts` so the default
+ * `pnpm test` config (apps/api/vitest.config.ts) excludes it. Integration
+ * tests opt in via a sibling config (apps/api/vitest.integration.config.ts)
+ * exposed as a script:
  *
- *   pnpm --filter api exec vitest run \
- *     src/routes/v1/admin/__tests__/onboard_participant.integration.test.ts
+ *   pnpm --filter api test:integration
+ *
+ * (vitest's CLI doesn't let you "force-include" an excluded path by passing
+ *  it explicitly — the exclude rule wins. The separate config inverts the
+ *  include glob so this file is the only thing picked up.)
  *
  * ## Prerequisites (operator-supplied — these are NOT in .env.example)
  *
@@ -28,8 +32,9 @@
  *    TEST_AGGREGATOR_ORG_ID.
  *
  * 3. Run with the two env vars set:
- *      TEST_AGGREGATOR_APIKEY=sk_signals_...   # raw seeded key
- *      TEST_AGGREGATOR_ORG_ID=org_...          # mirrored aggregator org_id
+ *      TEST_AGGREGATOR_APIKEY=sk_signals_... \
+ *      TEST_AGGREGATOR_ORG_ID=org_... \
+ *        pnpm --filter api test:integration
  *
  * If either env var is missing, the suite is skipped with a clear message
  * (no CI breakage on machines without the local stack). If POSTGRES_URL /
