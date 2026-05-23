@@ -77,8 +77,8 @@ export const UpsertParticipantRequest = z
     path: ['email'],
   });
 
-const ItemSnapshot = z.object({
-  item_id: z.string(),
+export const ParticipantItemSnapshot = z.object({
+  item_id: z.uuid(),
   item_network: z.string(),
   item_domain: z.string(),
   item_type: z.string(),
@@ -91,8 +91,9 @@ export const UpsertParticipantResponse = z.object({
   user_id: z.string(),
   user_existed: z.boolean(),
   onboarded_at: z.iso.datetime().nullable(),
-  items: z.array(ItemSnapshot),
+  items: z.array(ParticipantItemSnapshot),
 });
 
 export type UpsertParticipantRequest = z.infer<typeof UpsertParticipantRequest>;
 export type UpsertParticipantResponse = z.infer<typeof UpsertParticipantResponse>;
+export type ParticipantItemSnapshot = z.infer<typeof ParticipantItemSnapshot>;
