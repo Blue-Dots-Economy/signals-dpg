@@ -6,7 +6,7 @@ import type {
 import { Readable } from 'node:stream';
 import { db } from '@api/db/postgres/drizzle_config';
 import { item_metrics } from '../../../../db/postgres/schema/metrics.js';
-import { organization } from '../../../../db/postgres/schema/auth.js';
+import { organization, user } from '../../../../db/postgres/schema/auth.js';
 import { eq, and, inArray, asc } from 'drizzle-orm';
 import {
   ExportQuery,
@@ -38,6 +38,7 @@ const COLUMNS = [
   'item_domain',
   'item_type',
   'owner_user_id',
+  'name',
   'onboarded_by_org_id',
   'onboarded_via',
   'profile_status',
@@ -115,12 +116,20 @@ async function* generate_csv(
 
     if (rows.length === 0) break;
 
+    const name_by_user_id = new Map<string, string | null>();
+    const name_rows = await db
+      .select({ id: user.id, name: user.name })
+      .from(user)
+      .where(inArray(user.id, rows.map((r) => r.ownerUserId)));
+    for (const n of name_rows) name_by_user_id.set(n.id, n.name);
+
     for (const r of rows) {
       const projected: Record<(typeof COLUMNS)[number], unknown> = {
         item_id: r.itemId,
         item_domain: r.itemDomain,
         item_type: r.itemType,
         owner_user_id: r.ownerUserId,
+        name: name_by_user_id.get(r.ownerUserId) ?? null,
         onboarded_by_org_id: r.onboardedByOrgId,
         onboarded_via: r.onboardedVia,
         profile_status: r.profileStatus,

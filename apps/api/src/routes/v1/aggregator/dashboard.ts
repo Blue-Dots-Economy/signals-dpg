@@ -5,8 +5,8 @@ import type {
 } from 'fastify';
 import { db } from '@api/db/postgres/drizzle_config';
 import { item_metrics } from '../../../../db/postgres/schema/metrics.js';
-import { organization } from '../../../../db/postgres/schema/auth.js';
-import { eq, and, sql, desc } from 'drizzle-orm';
+import { organization, user } from '../../../../db/postgres/schema/auth.js';
+import { eq, and, sql, desc, inArray } from 'drizzle-orm';
 import {
   DashboardRequestQuery,
   DashboardResponse,
@@ -308,9 +308,19 @@ async function build_domain_block(
     actionableTags: string[] | null;
   }>;
 
+  const name_by_user_id = new Map<string, string | null>();
+  if (list_rows.length > 0) {
+    const name_rows = await db
+      .select({ id: user.id, name: user.name })
+      .from(user)
+      .where(inArray(user.id, list_rows.map((r) => r.ownerUserId)));
+    for (const n of name_rows) name_by_user_id.set(n.id, n.name);
+  }
+
   const participants = list_rows.map((r) => ({
     item_id: r.itemId,
     owner_user_id: r.ownerUserId,
+    name: name_by_user_id.get(r.ownerUserId) ?? null,
     item_type: r.itemType,
     profile_status: r.profileStatus,
     profile_completion_pct: r.profileCompletionPct,
