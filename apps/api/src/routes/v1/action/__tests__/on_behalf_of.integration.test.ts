@@ -18,11 +18,11 @@
  *
  *   - seeds two aggregator-type orgs (each with its own service user +
  *     member + apikey row), inserted directly via drizzle. We can't reuse
- *     /admin/onboard_participant or the existing seed script for this
+ *     /admin/participant or the existing seed script for this
  *     because (a) the default seed only mints `network_service` orgs and
  *     (b) we need TWO distinct aggregator orgs to drive the 403
  *     NOT_AUTHORIZED_FOR_TARGET case;
- *   - onboards a seeker user via /admin/onboard_participant as aggregator
+ *   - onboards a seeker user via /admin/participant as aggregator
  *     A so the source profile item exists and is attributed to A;
  *   - onboards a provider user (job_posting_1.0) via the same route so a
  *     target item exists in the same DB. The provider user is owned by
@@ -96,12 +96,12 @@ describeIf(`POST /action/perform on-behalf-of (integration)${
     user_email: `agg-int-b-${Date.now()}@signals.local`,
   };
 
-  // Seeded by /admin/onboard_participant — captured for assertions /
+  // Seeded by /admin/participant — captured for assertions /
   // cleanup. Onboarded participant rows go in `seeded_participant_ids` so
   // we cascade-delete everything tied to them on teardown.
   const seeded_participant_ids: string[] = [];
   let seeker_user_id: string;
-  let seeker_profile_item_id: string;
+  let seeker_item_id: string;
   let provider_user_id: string;
   let provider_item_id: string;
 
@@ -232,7 +232,7 @@ describeIf(`POST /action/perform on-behalf-of (integration)${
     }
     const seekerBody = seekerRes.json();
     seeker_user_id = seekerBody.user_id;
-    seeker_profile_item_id = seekerBody.items[0].item_id;
+    seeker_item_id = seekerBody.items[0].item_id;
     expect(seekerBody.user_existed).toBe(false);
     seeded_participant_ids.push(seeker_user_id);
 
@@ -345,7 +345,7 @@ describeIf(`POST /action/perform on-behalf-of (integration)${
           item_network: 'blue_dot',
           item_domain: 'seeker',
           item_type: 'profile_1.0',
-          item_id: seeker_profile_item_id,
+          item_id: seeker_item_id,
         },
         target_item: {
           item_network: 'blue_dot',
@@ -366,7 +366,7 @@ describeIf(`POST /action/perform on-behalf-of (integration)${
     const body = res.json();
     expect(body.action_id).toBeTruthy();
     expect(body.action_status).toBe('created');
-    expect(body.source_item_id).toBe(seeker_profile_item_id);
+    expect(body.source_item_id).toBe(seeker_item_id);
     expect(body.target_item_id).toBe(provider_item_id);
 
     // Cross-check the DB — the strongest signal that source_item_owner
@@ -409,7 +409,7 @@ describeIf(`POST /action/perform on-behalf-of (integration)${
           item_network: 'blue_dot',
           item_domain: 'seeker',
           item_type: 'profile_1.0',
-          item_id: seeker_profile_item_id,
+          item_id: seeker_item_id,
         },
         target_item: {
           item_network: 'blue_dot',

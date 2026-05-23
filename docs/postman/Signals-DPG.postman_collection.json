@@ -2,7 +2,7 @@
   "info": {
     "_postman_id": "signals-dpg-collection",
     "name": "Signals-DPG",
-    "description": "End-to-end API surface for the Signals-DPG instance. Covers OTP auth, aggregator registration, participant onboarding (bulk / link / voice), seeker self-fetch, provider discovery by location, 1:1 connect/apply actions, provider accept/reject, and the aggregator metrics dashboard. Two environments (Blue Dots, Purple Dots) carry network-specific item_type + sample payloads.\n\nWorkflow:\n1. Pick an environment (Blue Dots or Purple Dots).\n2. Run '02 Network Service > Register Aggregator' to mint/lookup the aggregator org. Its returned org_id is captured into `aggregator_org_id` by a test script and reused as `x-acting-org-id` for subsequent admin calls.\n3. Onboard a participant via '03 Aggregator Onboarding' (bulk / link / voice). Capture the seeker's user_id + profile_item_id (the test script does this).\n4. As the seeker (after OTP login -> session cookie), fetch self profile, browse providers by location, and POST a 1:1 apply action.\n5. As the provider, accept the seeker's action via /action/update-status.\n6. Hit the aggregator dashboard for the rollup + CSV export.\n\nAuth model:\n- Admin endpoints (`/api/v1/admin/*`, `/api/v1/aggregator/*`) require BOTH `x-api-key` AND `x-acting-org-id` headers (the two-header service auth model).\n- Seeker/UI endpoints use a session cookie set by `POST /api/auth/unified-otp/verify`. Postman's cookie jar must be enabled for `{{base_url}}`.\n- `auth_middleware.ts` rejects requests with an invalid `x-api-key` outright (no fallback to session). When you want to act as a session user, do NOT send `x-api-key`.\n\nSchema notes (grounded from the codebase, not guessed):\n- OTP request body: `{phoneNumber}` (or `email`); verify body: `{phoneNumber, otp, rememberMe, name?}`.\n- Aggregator upsert: `{external_id, name, slug, logo_url?, metadata?}` -> `{org_id, created}`.\n- Onboard participant: `{email?|phone_number?, name, terms_accepted:true, privacy_accepted:true, channel:'bulk'|'link'|'voice'|'self', source_id?, profile, network?, domain?, item_type?}` -> `{user_id, profile_item_id, onboarded_at}`. The acting org must be of type `aggregator` or `voice`.\n- Network item discovery accepts `item_latitude` + `item_longitude` + `radius_meters` together for geo-filtering.\n- Perform action body: `{action_type, source_item:{item_network,item_domain,item_type,item_id}, target_item:{...,item_instance_url}, requirements_snapshot}` -> 201 with `{action_id, action_type, action_status, update_count, source_item_id, target_item_id}`.\n- Action status update: POST `/api/v1/action/update-status` with `{action_id, action_status, remarks?}`.",
+    "description": "End-to-end API surface for the Signals-DPG instance. Covers OTP auth, aggregator registration, participant onboarding (bulk / link / voice), seeker self-fetch, provider discovery by location, 1:1 connect/apply actions, provider accept/reject, and the aggregator metrics dashboard. Two environments (Blue Dots, Purple Dots) carry network-specific item_type + sample payloads.\n\nWorkflow:\n1. Pick an environment (Blue Dots or Purple Dots).\n2. Run '02 Network Service > Register Aggregator' to mint/lookup the aggregator org. Its returned org_id is captured into `aggregator_org_id` by a test script and reused as `x-acting-org-id` for subsequent admin calls.\n3. Onboard a participant via '03 Aggregator Onboarding' (bulk / link / voice). Capture the seeker's user_id + items[0].item_id (the test script does this).\n4. As the seeker (after OTP login -> session cookie), fetch self profile, browse providers by location, and POST a 1:1 apply action.\n5. As the provider, accept the seeker's action via /action/update-status.\n6. Hit the aggregator dashboard for the rollup + CSV export.\n\nAuth model:\n- Admin endpoints (`/api/v1/admin/*`, `/api/v1/aggregator/*`) require BOTH `x-api-key` AND `x-acting-org-id` headers (the two-header service auth model).\n- Seeker/UI endpoints use a session cookie set by `POST /api/auth/unified-otp/verify`. Postman's cookie jar must be enabled for `{{base_url}}`.\n- `auth_middleware.ts` rejects requests with an invalid `x-api-key` outright (no fallback to session). When you want to act as a session user, do NOT send `x-api-key`.\n\nSchema notes (grounded from the codebase, not guessed):\n- OTP request body: `{phoneNumber}` (or `email`); verify body: `{phoneNumber, otp, rememberMe, name?}`.\n- Aggregator upsert: `{external_id, name, slug, logo_url?, metadata?}` -> `{org_id, created}`.\n- Onboard participant: `POST /api/v1/admin/participant` `{email?|phone_number?, name, terms_accepted:true, privacy_accepted:true, channel:'bulk'|'link'|'voice'|'self', source_id?, item_state, network?, domain?, item_type?}` -> `{user_id, user_existed, items:[{item_id, ...}], onboarded_at}`. The acting org must be of type `aggregator` or `voice`.\n- Network item discovery accepts `item_latitude` + `item_longitude` + `radius_meters` together for geo-filtering.\n- Perform action body: `{action_type, source_item:{item_network,item_domain,item_type,item_id}, target_item:{...,item_instance_url}, requirements_snapshot}` -> 201 with `{action_id, action_type, action_status, update_count, source_item_id, target_item_id}`.\n- Action status update: POST `/api/v1/action/update-status` with `{action_id, action_status, remarks?}`.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "item": [
@@ -225,7 +225,7 @@
                   "const body = pm.response.json();",
                   "if (body) {",
                   "  if (body.user_id) pm.environment.set('seeker_user_id', body.user_id);",
-                  "  if (body.profile_item_id) pm.environment.set('seeker_profile_item_id', body.profile_item_id);",
+                  "  if (body.items && body.items[0]) pm.environment.set('seeker_item_id', body.items[0].item_id);",
                   "  if (body.onboarded_at) pm.environment.set('onboarded_at', body.onboarded_at);",
                   "}"
                 ]
@@ -250,10 +250,10 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"name\": \"{{seeker_name}}\",\n  \"phone_number\": \"{{seeker_phone}}\",\n  \"email\": \"{{seeker_email}}\",\n  \"terms_accepted\": true,\n  \"privacy_accepted\": true,\n  \"channel\": \"bulk\",\n  \"source_id\": \"bulk_upload_2026_05_01\",\n  \"network\": \"{{network_id}}\",\n  \"domain\": \"{{seeker_domain}}\",\n  \"item_type\": \"{{seeker_item_type}}\",\n  \"profile\": {{seeker_profile_payload_json}}\n}"
+              "raw": "{\n  \"name\": \"{{seeker_name}}\",\n  \"phone_number\": \"{{seeker_phone}}\",\n  \"email\": \"{{seeker_email}}\",\n  \"terms_accepted\": true,\n  \"privacy_accepted\": true,\n  \"channel\": \"bulk\",\n  \"source_id\": \"bulk_upload_2026_05_01\",\n  \"network\": \"{{network_id}}\",\n  \"domain\": \"{{seeker_domain}}\",\n  \"item_type\": \"{{seeker_item_type}}\",\n  \"item_state\": {{seeker_profile_payload_json}}\n}"
             },
             "url": {
-              "raw": "{{base_url}}/api/v1/admin/onboard_participant",
+              "raw": "{{base_url}}/api/v1/admin/participant",
               "host": [
                 "{{base_url}}"
               ],
@@ -261,7 +261,7 @@
                 "api",
                 "v1",
                 "admin",
-                "onboard_participant"
+                "participant"
               ]
             },
             "description": "Creates a participant user + profile_1.0 item, attributed to the acting aggregator org. `channel=bulk` indicates a bulk upload originated this row; `source_id` is opaque to Signals (it's the upstream bulk_upload_id)."
@@ -280,7 +280,7 @@
                   "const body = pm.response.json();",
                   "if (body) {",
                   "  if (body.user_id) pm.environment.set('provider_user_id', body.user_id);",
-                  "  if (body.profile_item_id) pm.environment.set('provider_item_id', body.profile_item_id);",
+                  "  if (body.items && body.items[0]) pm.environment.set('provider_item_id', body.items[0].item_id);",
                   "}"
                 ]
               }
@@ -304,10 +304,10 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"name\": \"{{provider_name}}\",\n  \"phone_number\": \"{{provider_phone}}\",\n  \"terms_accepted\": true,\n  \"privacy_accepted\": true,\n  \"channel\": \"link\",\n  \"source_id\": \"magic_link_provider_xyz\",\n  \"network\": \"{{network_id}}\",\n  \"domain\": \"{{provider_domain}}\",\n  \"item_type\": \"{{provider_item_type}}\",\n  \"profile\": {{provider_profile_payload_json}}\n}"
+              "raw": "{\n  \"name\": \"{{provider_name}}\",\n  \"phone_number\": \"{{provider_phone}}\",\n  \"terms_accepted\": true,\n  \"privacy_accepted\": true,\n  \"channel\": \"link\",\n  \"source_id\": \"magic_link_provider_xyz\",\n  \"network\": \"{{network_id}}\",\n  \"domain\": \"{{provider_domain}}\",\n  \"item_type\": \"{{provider_item_type}}\",\n  \"item_state\": {{provider_profile_payload_json}}\n}"
             },
             "url": {
-              "raw": "{{base_url}}/api/v1/admin/onboard_participant",
+              "raw": "{{base_url}}/api/v1/admin/participant",
               "host": [
                 "{{base_url}}"
               ],
@@ -315,10 +315,10 @@
                 "api",
                 "v1",
                 "admin",
-                "onboard_participant"
+                "participant"
               ]
             },
-            "description": "Onboard a PROVIDER (e.g. employer, training centre) via the QR / magic-link channel. Same endpoint as the seeker flows, but targets the provider domain + provider item_type. `channel=link` with `source_id` carrying the upstream magic-link id. Test script captures the resulting user_id + profile_item_id into `provider_user_id` / `provider_item_id` so the Seeker > Apply to Provider request can reference them.\n\nNote: the `profile` payload must match the provider domain's item-type schema (`{{provider_item_type}}`). Each env file ships a `provider_profile_payload_json` template — adjust it to match the running instance's schema (fetch via `GET /api/v1/network/schema/{{network_id}}/{{provider_domain}}/{{provider_item_type}}` to see the live shape)."
+            "description": "Onboard a PROVIDER (e.g. employer, training centre) via the QR / magic-link channel. Same endpoint as the seeker flows, but targets the provider domain + provider item_type. `channel=link` with `source_id` carrying the upstream magic-link id. Test script captures the resulting user_id + items[0].item_id into `provider_user_id` / `provider_item_id` so the Seeker > Apply to Provider request can reference them.\n\nNote: the `profile` payload must match the provider domain's item-type schema (`{{provider_item_type}}`). Each env file ships a `provider_profile_payload_json` template — adjust it to match the running instance's schema (fetch via `GET /api/v1/network/schema/{{network_id}}/{{provider_domain}}/{{provider_item_type}}` to see the live shape)."
           },
           "response": []
         },
@@ -334,7 +334,7 @@
                   "const body = pm.response.json();",
                   "if (body) {",
                   "  if (body.user_id) pm.environment.set('seeker_user_id', body.user_id);",
-                  "  if (body.profile_item_id) pm.environment.set('seeker_profile_item_id', body.profile_item_id);",
+                  "  if (body.items && body.items[0]) pm.environment.set('seeker_item_id', body.items[0].item_id);",
                   "}"
                 ]
               }
@@ -358,10 +358,10 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"name\": \"{{seeker_name}}\",\n  \"phone_number\": \"{{seeker_phone}}\",\n  \"terms_accepted\": true,\n  \"privacy_accepted\": true,\n  \"channel\": \"voice\",\n  \"source_id\": \"voice_session_xyz789\",\n  \"network\": \"{{network_id}}\",\n  \"domain\": \"{{seeker_domain}}\",\n  \"item_type\": \"{{seeker_item_type}}\",\n  \"profile\": {{seeker_profile_payload_json}}\n}"
+              "raw": "{\n  \"name\": \"{{seeker_name}}\",\n  \"phone_number\": \"{{seeker_phone}}\",\n  \"terms_accepted\": true,\n  \"privacy_accepted\": true,\n  \"channel\": \"voice\",\n  \"source_id\": \"voice_session_xyz789\",\n  \"network\": \"{{network_id}}\",\n  \"domain\": \"{{seeker_domain}}\",\n  \"item_type\": \"{{seeker_item_type}}\",\n  \"item_state\": {{seeker_profile_payload_json}}\n}"
             },
             "url": {
-              "raw": "{{base_url}}/api/v1/admin/onboard_participant",
+              "raw": "{{base_url}}/api/v1/admin/participant",
               "host": [
                 "{{base_url}}"
               ],
@@ -369,7 +369,7 @@
                 "api",
                 "v1",
                 "admin",
-                "onboard_participant"
+                "participant"
               ]
             },
             "description": "`channel=voice` — onboarding originated from a voice-DPG session; `source_id` is the voice_session_id. The acting org may be the voice DPG (org_type=voice) instead of aggregator; the endpoint accepts both."
@@ -484,7 +484,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"action_type\": \"apply\",\n  \"source_item\": {\n    \"item_network\": \"{{network_id}}\",\n    \"item_domain\": \"{{seeker_domain}}\",\n    \"item_type\": \"{{seeker_item_type}}\",\n    \"item_id\": \"{{seeker_profile_item_id}}\"\n  },\n  \"target_item\": {\n    \"item_network\": \"{{network_id}}\",\n    \"item_domain\": \"{{provider_domain}}\",\n    \"item_type\": \"{{provider_item_type}}\",\n    \"item_id\": \"{{provider_item_id}}\",\n    \"item_instance_url\": \"{{provider_instance_url}}\"\n  },\n  \"requirements_snapshot\": {{action_requirements_snapshot_json}}\n}"
+              "raw": "{\n  \"action_type\": \"apply\",\n  \"source_item\": {\n    \"item_network\": \"{{network_id}}\",\n    \"item_domain\": \"{{seeker_domain}}\",\n    \"item_type\": \"{{seeker_item_type}}\",\n    \"item_id\": \"{{seeker_item_id}}\"\n  },\n  \"target_item\": {\n    \"item_network\": \"{{network_id}}\",\n    \"item_domain\": \"{{provider_domain}}\",\n    \"item_type\": \"{{provider_item_type}}\",\n    \"item_id\": \"{{provider_item_id}}\",\n    \"item_instance_url\": \"{{provider_instance_url}}\"\n  },\n  \"requirements_snapshot\": {{action_requirements_snapshot_json}}\n}"
             },
             "url": {
               "raw": "{{base_url}}/api/v1/action/perform",
@@ -701,7 +701,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"action_type\": \"apply\",\n  \"source_item\": {\n    \"item_network\": \"{{network_id}}\",\n    \"item_domain\": \"{{seeker_domain}}\",\n    \"item_type\": \"{{seeker_item_type}}\",\n    \"item_id\": \"{{seeker_profile_item_id}}\"\n  },\n  \"target_item\": {\n    \"item_network\": \"{{network_id}}\",\n    \"item_domain\": \"{{provider_domain}}\",\n    \"item_type\": \"{{provider_item_type}}\",\n    \"item_id\": \"{{provider_item_id}}\",\n    \"item_instance_url\": \"{{base_url}}\"\n  },\n  \"requirements_snapshot\": {{action_requirements_snapshot_json}},\n  \"acting_as_user_id\": \"{{seeker_user_id}}\"\n}"
+              "raw": "{\n  \"action_type\": \"apply\",\n  \"source_item\": {\n    \"item_network\": \"{{network_id}}\",\n    \"item_domain\": \"{{seeker_domain}}\",\n    \"item_type\": \"{{seeker_item_type}}\",\n    \"item_id\": \"{{seeker_item_id}}\"\n  },\n  \"target_item\": {\n    \"item_network\": \"{{network_id}}\",\n    \"item_domain\": \"{{provider_domain}}\",\n    \"item_type\": \"{{provider_item_type}}\",\n    \"item_id\": \"{{provider_item_id}}\",\n    \"item_instance_url\": \"{{base_url}}\"\n  },\n  \"requirements_snapshot\": {{action_requirements_snapshot_json}},\n  \"acting_as_user_id\": \"{{seeker_user_id}}\"\n}"
             },
             "url": {
               "raw": "{{base_url}}/api/v1/action/perform",
