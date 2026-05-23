@@ -1,3 +1,7 @@
+import { eq } from 'drizzle-orm';
+import { db } from '@api/db/postgres/drizzle_config';
+import { user } from '@api/db/postgres/schema/auth';
+
 export type ActingOrg = {
   org_id: string;
   org_type: 'aggregator' | 'voice' | 'network_service';
@@ -80,6 +84,23 @@ export const resolve_acting_actor = async (
       performed_by_service_user_id: acting_org.service_user_id,
     },
   };
+};
+
+/**
+ * Shared lookup used by both perform_action and update_action_status when
+ * resolving the on-behalf-of target user. Returns `user.onboarded_by_org_id`
+ * for the given user_id, or `null` if the user does not exist or has no
+ * attribution.
+ */
+export const lookup_onboarded_by_org = async (
+  user_id: string,
+): Promise<string | null> => {
+  const rows = await db
+    .select({ onboardedByOrgId: user.onboardedByOrgId })
+    .from(user)
+    .where(eq(user.id, user_id))
+    .limit(1);
+  return rows[0]?.onboardedByOrgId ?? null;
 };
 
 /**

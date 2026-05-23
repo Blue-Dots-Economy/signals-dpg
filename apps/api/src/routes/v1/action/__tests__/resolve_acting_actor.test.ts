@@ -1,4 +1,12 @@
 import { describe, it, expect, vi } from 'vitest';
+
+// The helper module imports db + user at the top to support the shared
+// `lookup_onboarded_by_org` export. These tests inject their own lookup
+// function, so the real db never gets invoked; we mock the import path so
+// drizzle_config doesn't try to construct a Pool from un-validated env.
+vi.mock('@api/db/postgres/drizzle_config', () => ({ db: {} }));
+vi.mock('@api/db/postgres/schema/auth', () => ({ user: {} }));
+
 import { resolve_acting_actor } from '../_resolve_acting_actor.js';
 
 const baseAggregator = {

@@ -319,4 +319,54 @@ describe('POST /api/v1/action/update-status — on-behalf-of', () => {
       performed_by_service_user_id: 'svc_voice_1',
     });
   });
+
+  it('logs WARN when overwriting on-behalf-of audit fields with a different voice org', async () => {
+    dbState.userRows = [
+      { id: 'usr_voice_owned', onboardedByOrgId: 'org_voice_1' },
+    ];
+    dbState.existingAction = {
+      ...EXISTING_ACTION,
+      performed_by_org_id: 'org_voice_2',
+      performed_by_service_user_id: 'svc_voice_2',
+    };
+    const warnSpy = vi.fn();
+    const app = Fastify().withTypeProvider<ZodTypeProvider>();
+    app.setValidatorCompiler(validatorCompiler);
+    app.setSerializerCompiler(serializerCompiler);
+    app.addHook('preHandler', async (req) => {
+      (req as unknown as { user: { id: string } }).user = {
+        id: 'usr_voice_owned',
+      };
+      (req as unknown as { acting_org: unknown }).acting_org = {
+        org_id: 'org_voice_1',
+        org_type: 'voice',
+        service_user_id: 'svc_voice_1',
+      };
+      (req as unknown as { log: unknown }).log = {
+        warn: warnSpy,
+        error: vi.fn(),
+        info: vi.fn(),
+        debug: vi.fn(),
+        fatal: vi.fn(),
+        trace: vi.fn(),
+        child: vi.fn(() => (req as unknown as { log: unknown }).log),
+      };
+    });
+    app.register(update_action_status);
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/update-status',
+      payload: { ...VALID_BODY, acting_as_user_id: 'usr_voice_owned' },
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(warnSpy).toHaveBeenCalledTimes(1);
+    expect(warnSpy.mock.calls[0][0]).toMatchObject({
+      action_id: EXISTING_ACTION.action_id,
+      acting_org_id: 'org_voice_1',
+      previous_performed_by_org_id: 'org_voice_2',
+      new_performed_by_org_id: 'org_voice_1',
+    });
+  });
 });

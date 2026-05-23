@@ -20,9 +20,11 @@ import {
   isServedDomainBinding,
   replyForUnservedDomain,
 } from '@/utils/served_domain_guard';
-import { eq } from 'drizzle-orm';
-import { user } from '@api/db/postgres/schema/auth';
-import { resolve_acting_actor, action_error_messages } from './_resolve_acting_actor.js';
+import {
+  resolve_acting_actor,
+  action_error_messages,
+  lookup_onboarded_by_org,
+} from './_resolve_acting_actor.js';
 
 type PerformActionRequest = FastifyRequest<{
   Body: z.infer<typeof PerformActionBodySchema>;
@@ -63,14 +65,7 @@ export const perform_action_handler = async (
     acting_org: request.acting_org,
     request_user_id: request.user.id,
     acting_as_user_id: body.acting_as_user_id,
-    lookup_onboarded_by: async (user_id) => {
-      const rows = await db
-        .select({ onboardedByOrgId: user.onboardedByOrgId })
-        .from(user)
-        .where(eq(user.id, user_id))
-        .limit(1);
-      return rows[0]?.onboardedByOrgId ?? null;
-    },
+    lookup_onboarded_by: lookup_onboarded_by_org,
   });
   if (!actor.ok) {
     return reply.code(actor.status).send({

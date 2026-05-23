@@ -6,7 +6,6 @@ import z, {
 import { type FastifyPluginAsyncZod } from 'fastify-type-provider-zod';
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import { db } from '@api/db/postgres/drizzle_config';
-import { user } from '@api/db/postgres/schema/auth';
 import { auth_middleware_if_enabled } from '@api/plugins/auth/auth_middleware';
 import {
   ensureActionEventPartition,
@@ -23,6 +22,7 @@ import {
 } from '@/utils/action_event_runtime';
 import {
   action_error_messages,
+  lookup_onboarded_by_org,
   resolve_acting_actor,
 } from './_resolve_acting_actor.js';
 
@@ -75,14 +75,7 @@ export const update_action_status_handler = async (
     acting_org: request.acting_org,
     request_user_id: request.user.id,
     acting_as_user_id: body.acting_as_user_id,
-    lookup_onboarded_by: async (user_id) => {
-      const rows = await db
-        .select({ onboardedByOrgId: user.onboardedByOrgId })
-        .from(user)
-        .where(eq(user.id, user_id))
-        .limit(1);
-      return rows[0]?.onboardedByOrgId ?? null;
-    },
+    lookup_onboarded_by: lookup_onboarded_by_org,
   });
 
   if (!actor.ok) {
@@ -94,7 +87,7 @@ export const update_action_status_handler = async (
 
   if (existingAction.target_item_owner !== actor.effective_user_id) {
     return reply.code(403).send({
-      error: 'NOT_TARGET_ITEM_OWNER',
+      error: 'TARGET_ITEM_NOT_OWNED_BY_ACTOR',
       message:
         'update-status may only be called by the target item owner (provider).',
     });
@@ -186,6 +179,7 @@ export const update_action_status_handler = async (
     request.log.warn(
       {
         action_id: existingAction.action_id,
+        acting_org_id: request.acting_org?.org_id,
         previous_performed_by_org_id: existingAction.performed_by_org_id,
         new_performed_by_org_id: actor.audit.performed_by_org_id,
       },
