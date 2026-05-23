@@ -4,6 +4,7 @@ import {
   timestamp,
   boolean,
   integer,
+  index,
 } from 'drizzle-orm/pg-core';
 
 export const user = pgTable('user', {
@@ -36,7 +37,12 @@ export const user = pgTable('user', {
   onboardedVia: text('onboarded_via'),
   onboardedSourceId: text('onboarded_source_id'),
   onboardedAt: timestamp('onboarded_at'),
-});
+}, (table) => [
+  index('user_onboarded_by_org_via_idx').on(
+    table.onboardedByOrgId,
+    table.onboardedVia,
+  ),
+]);
 
 export const account = pgTable('account', {
   id: text('id').primaryKey(),

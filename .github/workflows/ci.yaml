@@ -118,17 +118,16 @@ jobs:
   schema-parity:
     runs-on: ubuntu-latest
     # Schema-parity verifies that drizzle-kit push and the bundled
-    # schema.sql produce identical PG schemas. Today the SQL bundle
-    # includes partitioned tables (items, item_actions, action_events)
-    # plus their indexes, FKs, and the cube/earthdistance/pgcrypto
-    # extensions — none of which drizzle-kit can push because Drizzle's
-    # pgTable doesn't model PARTITION BY semantics. The Drizzle config
-    # at apps/api/drizzle.config.ts intentionally scopes to
-    # ./db/postgres/schema/ (auth + metrics) — those tables DO match.
-    # Marking continue-on-error until either drizzle-kit gains partition
-    # support or we ship a custom comparator that excludes partitioned
-    # tables from the diff.
-    continue-on-error: true
+    # schema.sql produce identical PG schemas for the Drizzle-managed
+    # surface (auth + metrics tables).
+    #
+    # The partitioned tables (items, item_actions, action_events) live
+    # in packages/database/src/drizzle_ref_tables/ for type inference
+    # only — they're not in apps/api/drizzle.config.ts and can't be
+    # drizzle-pushed because pgTable doesn't model PARTITION BY. The
+    # SQL bundle owns them. The Diff schemas step below excludes them
+    # (--exclude-table) plus the extensions they depend on
+    # (cube/earthdistance/pgcrypto) via a sed strip.
     services:
       pg-sql:
         image: postgres:16-alpine
@@ -182,9 +181,34 @@ jobs:
 
       - name: Diff schemas
         run: |
-          pg_dump --schema-only --no-owner --no-privileges "$PG_SQL_URL" > /tmp/sql.sql
-          pg_dump --schema-only --no-owner --no-privileges "$PG_DRIZZLE_URL" > /tmp/drizzle.sql
-          # Filter out per-dump security nonces that PG18+ emits — we're on
-          # PG16 here so this should be a no-op, but kept defensively.
+          # Dump pg-sql excluding partitioned tables (items, item_actions,
+          # action_events). drizzle-kit doesn't manage these because
+          # pgTable can't model PARTITION BY — they live in the SQL
+          # bundle only. Their indexes/FKs/check-constraints dump
+          # alongside the parent tables and disappear with them.
+          pg_dump --schema-only --no-owner --no-privileges \
+            --exclude-table=items \
+            --exclude-table=item_actions \
+            --exclude-table=action_events \
+            "$PG_SQL_URL" > /tmp/sql.sql
+          pg_dump --schema-only --no-owner --no-privileges \
+            --exclude-table=items \
+            --exclude-table=item_actions \
+            --exclude-table=action_events \
+            "$PG_DRIZZLE_URL" > /tmp/drizzle.sql
+
+          # Strip extension blocks: cube, earthdistance, pgcrypto are
+          # loaded by the SQL bundle for the items_geo_earth_idx and
+          # uuid generation on partitioned tables. drizzle-kit doesn't
+          # load them. They're known infrastructure-only objects, not
+          # subject to the auth/metrics surface we're comparing.
+          for f in /tmp/sql.sql /tmp/drizzle.sql; do
+            sed -i -E '/-- Name: (cube|earthdistance|pgcrypto); Type: EXTENSION/,/^$/d' "$f"
+            sed -i -E '/-- Name: EXTENSION (cube|earthdistance|pgcrypto)/,/^$/d' "$f"
+          done
+
+          # Filter out per-dump security nonces (PG18+ only; defensive
+          # for PG16 we're on).
           sed -i -E 's/\\(re|un)strict [A-Za-z0-9]+/\\\1strict <NONCE>/' /tmp/sql.sql /tmp/drizzle.sql
+
           diff /tmp/sql.sql /tmp/drizzle.sql
