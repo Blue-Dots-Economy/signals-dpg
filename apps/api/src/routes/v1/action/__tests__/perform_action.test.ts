@@ -350,4 +350,81 @@ describe('POST /api/v1/action/perform — on-behalf-of', () => {
     expect(res.json()).toMatchObject({ error: 'SOURCE_ITEM_NOT_OWNED_BY_ACTOR' });
     expect(fetchCalls).toHaveLength(0); // proxy hop must be skipped
   });
+
+  describe('network_service tier', () => {
+    it('network_service on-behalf-of: 200 when acting for any user in the network', async () => {
+      dbState.userRows = [
+        { id: 'usr_voice_owned', onboardedByOrgId: 'org_agg_b' },
+      ];
+      fetchLocalItemSnapshotMock.mockResolvedValueOnce({
+        created_by: 'usr_voice_owned',
+        item_id: 'src_item_1',
+        item_latitude: null,
+        item_longitude: null,
+        item_private_state: {},
+      });
+      const app = buildApp({
+        org_id: 'org_signals',
+        org_type: 'network_service',
+        service_user_id: 'svc_ns',
+      });
+      const res = await app.inject({
+        method: 'POST',
+        url: '/perform',
+        payload: { ...VALID_BODY, acting_as_user_id: 'usr_voice_owned' },
+      });
+      expect(res.statusCode).toBe(201);
+      expect(fetchCalls).toHaveLength(1);
+      expect(fetchCalls[0].body).toMatchObject({
+        source_item_owner: 'usr_voice_owned',
+        performed_by_org_id: 'org_signals',
+        performed_by_service_user_id: 'svc_ns',
+      });
+    });
+
+    it('network_service on-behalf-of: 200 for self-registered user (onboarded_by null)', async () => {
+      dbState.userRows = [
+        { id: 'usr_self_reg', onboardedByOrgId: null },
+      ];
+      fetchLocalItemSnapshotMock.mockResolvedValueOnce({
+        created_by: 'usr_self_reg',
+        item_id: 'src_item_1',
+        item_latitude: null,
+        item_longitude: null,
+        item_private_state: {},
+      });
+      const app = buildApp({
+        org_id: 'org_signals',
+        org_type: 'network_service',
+        service_user_id: 'svc_ns',
+      });
+      const res = await app.inject({
+        method: 'POST',
+        url: '/perform',
+        payload: { ...VALID_BODY, acting_as_user_id: 'usr_self_reg' },
+      });
+      expect(res.statusCode).toBe(201);
+      expect(fetchCalls[0].body).toMatchObject({
+        source_item_owner: 'usr_self_reg',
+        performed_by_org_id: 'org_signals',
+      });
+    });
+
+    it('network_service on-behalf-of: 404 USER_NOT_FOUND when pointing at non-existent user', async () => {
+      dbState.userRows = []; // empty — no row returned
+      const app = buildApp({
+        org_id: 'org_signals',
+        org_type: 'network_service',
+        service_user_id: 'svc_ns',
+      });
+      const res = await app.inject({
+        method: 'POST',
+        url: '/perform',
+        payload: { ...VALID_BODY, acting_as_user_id: 'usr_missing' },
+      });
+      expect(res.statusCode).toBe(404);
+      expect(res.json()).toMatchObject({ error: 'USER_NOT_FOUND' });
+      expect(fetchCalls).toHaveLength(0);
+    });
+  });
 });

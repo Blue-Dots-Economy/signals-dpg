@@ -23,7 +23,7 @@ import {
 import {
   resolve_acting_actor,
   action_error_messages,
-  lookup_onboarded_by_org,
+  lookup_user_for_acting,
 } from './_resolve_acting_actor.js';
 
 type PerformActionRequest = FastifyRequest<{
@@ -65,7 +65,7 @@ export const perform_action_handler = async (
     acting_org: request.acting_org,
     request_user_id: request.user.id,
     acting_as_user_id: body.acting_as_user_id,
-    lookup_onboarded_by: lookup_onboarded_by_org,
+    lookup_user: lookup_user_for_acting,
   });
   if (!actor.ok) {
     return reply.code(actor.status).send({
