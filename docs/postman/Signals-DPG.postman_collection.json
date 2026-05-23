@@ -189,7 +189,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"external_id\": \"{{aggregator_external_id}}\",\n  \"name\": \"{{aggregator_name}}\",\n  \"slug\": \"{{aggregator_slug}}\",\n  \"metadata\": {\n    \"region\": \"in-south\"\n  }\n}"
+              "raw": "{\n  \"external_id\": \"{{aggregator_external_id}}\",\n  \"name\": \"{{aggregator_name}}\",\n  \"slug\": \"{{aggregator_slug}}\",\n  \"domains\": {{aggregator_domains_json}},\n  \"metadata\": {\n    \"region\": \"in-south\"\n  }\n}"
             },
             "url": {
               "raw": "{{base_url}}/api/v1/admin/aggregator/upsert",
@@ -204,7 +204,7 @@
                 "upsert"
               ]
             },
-            "description": "Must be called by the **network_service** org (its `x-api-key` + `x-acting-org-id`). Idempotent on `slug`. Response `{ org_id, created }`. The test script captures `org_id` into `aggregator_org_id` so subsequent admin calls can supply it as `x-acting-org-id`."
+            "description": "Must be called by the **network_service** org (its `x-api-key` + `x-acting-org-id`). Idempotent on `slug`. Response `{ org_id, created }`. The test script captures `org_id` into `aggregator_org_id` so subsequent admin calls can supply it as `x-acting-org-id`.\n\n`domains` is required (non-empty array) for the aggregator to receive a dashboard response — it is persisted to `organization.metadata.domains` and gates `/api/v1/aggregator/dashboard`. Pilot value is `[\"seeker\",\"provider\"]` (override per env via `aggregator_domains_json`). An empty array → 400 `NO_DOMAINS_CONFIGURED` on dashboard reads."
           },
           "response": []
         }
@@ -615,7 +615,43 @@
                 }
               ]
             },
-            "description": "Reads the `participant_metrics` cache scoped to the acting aggregator org. Response carries a status rollup, the paginated participant list, `total_matching`, and a `metadata` block with `last_computed_at`, `ttl_seconds`, and `refreshed` (true when the staleness check forced a recompute). `status` accepts: new | active | at_risk | satisfied | inactive."
+            "description": "Reads the `item_metrics` cache scoped to the acting aggregator org. Response shape is `{ by_domain: { <domain>: { rollup, participants, total_matching, next_cursor } }, metadata }` where each configured domain on `organization.metadata.domains` gets its own block. Per-domain `rollup` carries `items_total`, `by_status`, `applications_{total,pending,shortlisted,rejected}`, user-level aggregates, and `mode_wise_counts`. Top-level `metadata` has `last_computed_at`, `ttl_seconds`, and `refreshed` (true when this request forced a recompute on at least one domain).\n\nQuery params: `?domain=<name>` narrows to a single configured domain (otherwise returns all). `?status=<new|active|at_risk|inactive>` scopes the list. `?page=1&limit=50` paginates within each returned domain block.\n\nError modes: 400 `NO_DOMAINS_CONFIGURED` if `organization.metadata.domains` is empty; 400 `DOMAIN_NOT_CONFIGURED` if `?domain=` is not in the configured set."
+          },
+          "response": []
+        },
+        {
+          "name": "Dashboard - Filter by Domain",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "x-api-key",
+                "value": "{{aggregator_api_key}}"
+              },
+              {
+                "key": "x-acting-org-id",
+                "value": "{{aggregator_org_id}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/v1/aggregator/dashboard?domain=seeker",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "aggregator",
+                "dashboard"
+              ],
+              "query": [
+                {
+                  "key": "domain",
+                  "value": "seeker"
+                }
+              ]
+            },
+            "description": "Returns the dashboard narrowed to a single domain block. The `?domain=` value must be in the aggregator's configured `organization.metadata.domains` set (otherwise 400 `DOMAIN_NOT_CONFIGURED`). Use this when the UI wants to render just one tab (seeker or provider) without paying the recompute cost of the other domain."
           },
           "response": []
         },
@@ -656,7 +692,7 @@
                 }
               ]
             },
-            "description": "Streams a CSV of every row matching the filter (no pagination). Same status/q filters as the dashboard. Save the response to disk via Postman's 'Save response to file'."
+            "description": "Streams a CSV of every row matching the filter (no pagination). Same `?status=` + `?domain=` filters as the dashboard — omit `?domain=` to get all configured domains in one CSV (the `item_domain` column tells you which row belongs to which domain).\n\n20-column layout: `item_id, item_domain, item_type, owner_user_id, onboarded_by_org_id, onboarded_via, profile_status, profile_completion_pct, profile_created_at, profile_last_updated_at, age_days, applications_total, applications_pending, applications_shortlisted, applications_rejected, last_applied_at, last_shortlisted_at, last_rejected_at, openings, actionable_tags`. `openings` is populated only for provider rows; `actionable_tags` is pipe-separated.\n\nSave the response to disk via Postman's 'Save response to file'."
           },
           "response": []
         }

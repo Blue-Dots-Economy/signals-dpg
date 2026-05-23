@@ -193,9 +193,22 @@ The old endpoint is removed. Callers update:
 - Body: `profile_item_id` (not previously used) → `item_id` (now meaningful for network_service updates)
 - Response: `profile_item_id` → `items: [...]` (full post-write set)
 
-## Aggregator dashboard
+## Aggregator dashboard — multi-domain by_domain shape
 
-Per-aggregator participant metrics for the UI's hero counts + paginated list. Backed by a cached `participant_metrics` table that recomputes on-demand when stale.
+`GET /api/v1/aggregator/dashboard` returns a per-domain rollup + paginated
+participants. Auth: aggregator-typed acting_org; the `org.metadata.domains`
+array must be populated via `/admin/aggregator/upsert` before this endpoint
+returns data.
+
+### Setup contract
+
+- The aggregator-dpg caller upserts the aggregator with `domains: ['seeker',
+  'provider']` (or the subset relevant to their flow). Persisted under
+  `organization.metadata.domains`.
+- An empty `domains` array → 400 `NO_DOMAINS_CONFIGURED` on the dashboard.
+- `GET /dashboard?domain=seeker` narrows the response to one domain block.
+  The `?domain=` value must be in the configured set; else 400
+  `DOMAIN_NOT_CONFIGURED`.
 
 ### Endpoint
 
@@ -205,50 +218,102 @@ curl -X GET 'http://localhost:2742/api/v1/aggregator/dashboard?page=1&limit=50&s
   -H 'x-acting-org-id: <BBMP org_id>'
 ```
 
-Response (abridged):
+### Response shape
 
-```json
+```jsonc
 {
-  "rollup": {
-    "participants_total": 1247,
-    "by_status": { "new": 84, "active": 612, "at_risk": 219, "satisfied": 270, "inactive": 62 },
-    "applications_pending": 380, "applications_accepted": 421, "applications_rejected": 192
-  },
-  "participants": [
-    {
-      "user_id": "usr_…",
-      "profile_status": "at_risk",
-      "profile_completion_pct": 67,
-      "actionable_tags": ["missing_phone_number", "no_recent_activity"],
-      "applications_pending": 0, "applications_accepted": 0, "applications_rejected": 3, "applications_total": 3,
-      "…": "…"
+  "by_domain": {
+    "seeker": {
+      "rollup": {
+        "items_total": 1247,
+        "by_status": { "new": 84, "active": 612, "at_risk": 219, "inactive": 270 },
+        "applications_total": 993,
+        "applications_pending": 380,
+        "applications_shortlisted": 421,
+        "applications_rejected": 192,
+        "unique_users": 1180,
+        "complete_profiles_count": 540,
+        "avg_profiles_per_user": 1.06,
+        "users_with_applications": 894,
+        "avg_applications_per_user": 1.11,
+        "new_users_last_7_days": 23,
+        "mode_wise_counts": { "bulk": 800, "link": 320, "voice": 60, "self": 0 }
+      },
+      "participants": [ /* per-item rows */ ],
+      "total_matching": 219,
+      "next_cursor": "2"
+    },
+    "provider": {
+      "rollup": { "items_total": 84, "...": "..." },
+      "participants": [ /* per-item rows incl. openings */ ],
+      "total_matching": 12,
+      "next_cursor": null
     }
-  ],
-  "next_cursor": "2",
-  "total_matching": 219,
+  },
   "metadata": {
-    "last_computed_at": "2026-05-22T07:00:00.000Z",
+    "last_computed_at": "...",
     "ttl_seconds": 3600,
     "refreshed": false
   }
 }
 ```
 
-### Cache + TTL contract
+### Per-(aggregator, domain) recompute
 
-- Per-aggregator rows live in `participant_metrics`. `last_computed_at` per row is the TTL field.
-- Each dashboard / export request reads `MIN(last_computed_at)` for the aggregator. If older than `DASHBOARD_CACHE_TTL_SECONDS` (default 3600), the handler recomputes synchronously under a Postgres advisory lock (`pg_try_advisory_lock(hash(aggregator_id))`).
-- Concurrent requests during a recompute don't pile up: the second-and-later requests see `pg_try_advisory_lock` return `false`, serve stale data, and let the in-flight recompute land within seconds.
-- `metadata.refreshed: true` means *this* request triggered the recompute; `false` means it served what was already in the cache (whether fresh or stale-during-contention).
-- First-ever read for an aggregator (no rows) is treated as stale → triggers compute.
+Each `(aggregator, domain)` pair has its own staleness TTL and PG advisory
+lock. Multi-domain aggregators recompute their domains in parallel; one
+slow domain doesn't block the other. The top-level `metadata.last_computed_at`
+is the earliest across the in-scope domains.
+
+- Per-(aggregator, domain) rows live in `item_metrics`. `last_computed_at`
+  per row is the TTL field.
+- Each dashboard / export request reads `MIN(last_computed_at)` for the
+  (aggregator, domain) pair. If older than `DASHBOARD_CACHE_TTL_SECONDS`
+  (default 3600), the handler recomputes synchronously under a Postgres
+  advisory lock keyed on `(aggregator_id, domain)`.
+- Concurrent requests during a recompute don't pile up: the second-and-later
+  requests see `pg_try_advisory_lock` return `false`, serve stale data, and
+  let the in-flight recompute land within seconds.
+- `metadata.refreshed: true` means *this* request triggered at least one
+  domain's recompute; `false` means every in-scope domain was served from
+  cache.
+- First-ever read for an (aggregator, domain) pair (no rows) is treated as
+  stale → triggers compute.
 
 ### Filtering + pagination
 
-- `?status=<one of new|active|at_risk|satisfied|inactive>` scopes the list (rollup always shows the full status histogram regardless).
-- `?page=1&limit=50` for offset pagination. Default page=1, default limit=50, max 500.
-- `total_matching` is the count after filter, useful for "showing N of M" UI badges.
+- `?domain=<one of the configured domains>` narrows the response to one
+  domain block. Omit for all configured domains.
+- `?status=<one of new|active|at_risk|inactive>` scopes the list (the
+  `by_status` rollup always shows the full status histogram regardless).
+- `?page=1&limit=50` for offset pagination. Default page=1, default limit=50,
+  max 500. Pagination applies inside each returned domain block.
+- `total_matching` (per domain block) is the count after filter, useful for
+  "showing N of M" UI badges.
 
-The UI hits the API on every filter change. Use TanStack Query (or your preferred fetcher) and key the cache by `(aggregator_id, page, limit, status)` with `staleTime: 60_000` so users navigating filters back-and-forth don't re-fetch.
+The UI hits the API on every filter change. Use TanStack Query (or your
+preferred fetcher) and key the cache by `(aggregator_id, domain, page,
+limit, status)` with `staleTime: 60_000` so users navigating filters
+back-and-forth don't re-fetch.
+
+### network.json contract: metric_categories
+
+Each network's `apply` action's `seeker→provider` interaction declares
+`metric_categories` mapping its event_schema.status enum to canonical
+buckets:
+
+```jsonc
+"metric_categories": {
+  "shortlisted": ["shortlisted"],
+  "rejected":    ["rejected"],
+  "pending":     ["created", "submitted"]
+}
+```
+
+`metric_categories: null` (or absent) on an interaction means
+"not tracked in the rollup" — recompute returns 0 for those counts.
+The pilot leaves provider→seeker invites at null in both blue_dot and
+purple_dot; future product may populate them.
 
 ### CSV export
 
@@ -259,10 +324,26 @@ curl -X GET 'http://localhost:2742/api/v1/aggregator/dashboard/export?status=at_
   -o participants.csv
 ```
 
-Streamed `text/csv` response. Same staleness contract as the dashboard route. The body is generated row-by-row in pages of 5000 so 200k+ participants don't OOM the API process.
+Streamed `text/csv` response. Same staleness contract as the dashboard route.
+The body is generated row-by-row in pages of 5000 so 200k+ rows don't OOM
+the API process.
+
+20-column layout (in order):
+
+```
+item_id, item_domain, item_type, owner_user_id, onboarded_by_org_id, onboarded_via,
+profile_status, profile_completion_pct, profile_created_at, profile_last_updated_at, age_days,
+applications_total, applications_pending, applications_shortlisted, applications_rejected,
+last_applied_at, last_shortlisted_at, last_rejected_at, openings, actionable_tags
+```
+
+`?domain=` filters the CSV the same way it filters the dashboard. Multi-domain
+orgs see rows from every configured domain in the same CSV unless filtered —
+the `item_domain` column tells you which domain each row belongs to.
 
 CSV format notes:
 - `actionable_tags` is pipe-separated (`missing_phone_number|no_recent_activity`) to keep one column per metric.
+- `openings` is populated only for provider-domain rows; seeker rows are blank in that column.
 - Standard RFC 4180 escaping: commas, quotes, newlines inside a value wrap the cell in double-quotes; embedded `"` doubles to `""`.
 - Filename suggested via `content-disposition: attachment; filename="participants_<org_id>_<YYYY-MM-DD>.csv"`.
 
