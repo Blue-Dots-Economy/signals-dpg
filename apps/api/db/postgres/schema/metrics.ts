@@ -1,4 +1,4 @@
-import { pgTable, text, integer, timestamp } from 'drizzle-orm/pg-core';
+import { pgTable, text, integer, timestamp, index } from 'drizzle-orm/pg-core';
 import { organization } from './auth.js';
 
 /**
@@ -50,4 +50,19 @@ export const item_metrics = pgTable('item_metrics', {
   actionableTags: text('actionable_tags').array(),
 
   lastComputedAt: timestamp('last_computed_at').notNull(),
-});
+}, (table) => [
+  index('item_metrics_org_domain_status_idx').on(
+    table.onboardedByOrgId,
+    table.itemDomain,
+    table.profileStatus,
+  ),
+  index('item_metrics_org_domain_last_computed_idx').on(
+    table.onboardedByOrgId,
+    table.itemDomain,
+    table.lastComputedAt,
+  ),
+  index('item_metrics_owner_domain_idx').on(
+    table.ownerUserId,
+    table.itemDomain,
+  ),
+]);
