@@ -21,12 +21,13 @@ type ResolveOk = {
 
 export type ResolveErr = {
   ok: false;
-  status: 400 | 403;
+  status: 400 | 403 | 404;
   error:
     | 'CANNOT_OVERRIDE_SELF'
     | 'MISSING_ACTING_AS_USER_ID'
     | 'ACTING_ORG_TYPE_NOT_ALLOWED'
-    | 'NOT_AUTHORIZED_FOR_TARGET';
+    | 'NOT_AUTHORIZED_FOR_TARGET'
+    | 'USER_NOT_FOUND';
 };
 
 export type ResolveActingActorResult = ResolveOk | ResolveErr;
@@ -36,22 +37,34 @@ export type ResolveActingActorInput = {
   request_user_id: string;
   acting_as_user_id: string | undefined;
   /**
-   * Returns `user.onboarded_by_org_id` for the given user_id, or `null`
-   * if the user does not exist or has no attribution.
+   * Returns `{ onboardedByOrgId }` when the user row exists (with
+   * `onboardedByOrgId` possibly null for self-registered or pre-Plan-2
+   * users); returns `null` when no user row exists at all.
+   *
+   * The two states must be distinguished — aggregator-tier and
+   * network-service-tier handle them differently.
    */
-  lookup_onboarded_by: (user_id: string) => Promise<string | null>;
+  lookup_user: (user_id: string) => Promise<{ onboardedByOrgId: string | null } | null>;
 };
 
 /**
- * Single source of truth for the aggregator on-behalf-of authorization
+ * Single source of truth for the action on-behalf-of authorization
  * matrix documented in
- * docs/superpowers/specs/2026-05-22-action-perform-on-behalf-of-design.md.
+ * docs/superpowers/specs/2026-05-23-action-on-behalf-of-network-service-tier-design.md.
+ *
+ * Two tiers are allowed today:
+ *   - `aggregator`: scoped to users with `onboarded_by_org_id ===
+ *     acting_org.org_id`.
+ *   - `network_service`: unrestricted; any user in the network.
+ *
+ * Voice-typed acting_orgs are rejected (placeholder for future).
  */
 export const resolve_acting_actor = async (
   input: ResolveActingActorInput,
 ): Promise<ResolveActingActorResult> => {
-  const { acting_org, request_user_id, acting_as_user_id, lookup_onboarded_by } = input;
+  const { acting_org, request_user_id, acting_as_user_id, lookup_user } = input;
 
+  // 1. Self-acted (no acting_org).
   if (!acting_org) {
     if (acting_as_user_id) {
       return { ok: false, status: 400, error: 'CANNOT_OVERRIDE_SELF' };
@@ -63,16 +76,32 @@ export const resolve_acting_actor = async (
     };
   }
 
-  if (acting_org.org_type !== 'aggregator') {
+  // 2. Tier gate: aggregator OR network_service. Anything else (voice,
+  //    unknown) is rejected.
+  if (
+    acting_org.org_type !== 'aggregator' &&
+    acting_org.org_type !== 'network_service'
+  ) {
     return { ok: false, status: 403, error: 'ACTING_ORG_TYPE_NOT_ALLOWED' };
   }
 
+  // 3. acting_as_user_id is required when acting_org is set.
   if (!acting_as_user_id) {
     return { ok: false, status: 400, error: 'MISSING_ACTING_AS_USER_ID' };
   }
 
-  const onboarded_by = await lookup_onboarded_by(acting_as_user_id);
-  if (onboarded_by !== acting_org.org_id) {
+  // 4. User existence (both tiers).
+  const userInfo = await lookup_user(acting_as_user_id);
+  if (!userInfo) {
+    return { ok: false, status: 404, error: 'USER_NOT_FOUND' };
+  }
+
+  // 5. Aggregator-only: enforce onboarded_by_org_id === acting_org.org_id.
+  //    network_service skips this check (network-wide scope).
+  if (
+    acting_org.org_type === 'aggregator' &&
+    userInfo.onboardedByOrgId !== acting_org.org_id
+  ) {
     return { ok: false, status: 403, error: 'NOT_AUTHORIZED_FOR_TARGET' };
   }
 
@@ -87,33 +116,36 @@ export const resolve_acting_actor = async (
 };
 
 /**
- * Shared lookup used by both perform_action and update_action_status when
- * resolving the on-behalf-of target user. Returns `user.onboarded_by_org_id`
- * for the given user_id, or `null` if the user does not exist or has no
- * attribution.
+ * Shared DB lookup used by `/action/perform` when resolving the
+ * on-behalf-of target user. Returns `null` for missing users, or
+ * `{ onboardedByOrgId }` for users that exist (the field may itself
+ * be `null` for self-registered users).
  */
-export const lookup_onboarded_by_org = async (
+export const lookup_user_for_acting = async (
   user_id: string,
-): Promise<string | null> => {
+): Promise<{ onboardedByOrgId: string | null } | null> => {
   const rows = await db
     .select({ onboardedByOrgId: user.onboardedByOrgId })
     .from(user)
     .where(eq(user.id, user_id))
     .limit(1);
-  return rows[0]?.onboardedByOrgId ?? null;
+  if (rows.length === 0) return null;
+  return { onboardedByOrgId: rows[0].onboardedByOrgId };
 };
 
 /**
- * Human-readable messages for each `ResolveErr.error` code. Route handlers
- * use this when constructing their `reply.send({ error, message })`.
+ * Human-readable messages for each `ResolveErr.error` code. Route
+ * handlers use this when constructing their `reply.send({ error, message })`.
  */
 export const action_error_messages: Record<ResolveErr['error'], string> = {
   CANNOT_OVERRIDE_SELF:
-    'acting_as_user_id requires an x-acting-org-id header naming an aggregator-type acting org.',
+    'acting_as_user_id requires an x-acting-org-id header naming an aggregator-type or network_service-type acting org.',
   MISSING_ACTING_AS_USER_ID:
-    'aggregator-type acting_org requires acting_as_user_id in the request body.',
+    'aggregator-type or network_service-type acting_org requires acting_as_user_id in the request body.',
   ACTING_ORG_TYPE_NOT_ALLOWED:
-    'only aggregator-type acting orgs may act on behalf of users today.',
+    'only aggregator-type or network_service-type acting orgs may act on behalf of users today.',
   NOT_AUTHORIZED_FOR_TARGET:
     'acting_as_user_id is not a user onboarded by this aggregator.',
+  USER_NOT_FOUND:
+    'acting_as_user_id does not resolve to any user.',
 };

@@ -1,156 +1,267 @@
 import { describe, it, expect, vi } from 'vitest';
 
-// The helper module imports db + user at the top to support the shared
-// `lookup_onboarded_by_org` export. These tests inject their own lookup
-// function, so the real db never gets invoked; we mock the import path so
-// drizzle_config doesn't try to construct a Pool from un-validated env.
 vi.mock('@api/db/postgres/drizzle_config', () => ({ db: {} }));
 vi.mock('@api/db/postgres/schema/auth', () => ({ user: {} }));
 
 import { resolve_acting_actor } from '../_resolve_acting_actor.js';
 
-const baseAggregator = {
-  org_id: 'org_agg_1',
+const aggregator = {
+  org_id: 'org_agg_a',
   org_type: 'aggregator' as const,
-  service_user_id: 'svc_agg_1',
+  service_user_id: 'svc_agg',
 };
-const baseVoiceDisallowed = {
-  org_id: 'org_voice_1',
-  org_type: 'voice' as const,
-  service_user_id: 'svc_voice_1',
-};
-const baseNetwork = {
+const network_service = {
   org_id: 'org_signals',
   org_type: 'network_service' as const,
-  service_user_id: 'svc_signals',
+  service_user_id: 'svc_ns',
+};
+const voice = {
+  org_id: 'org_voice_x',
+  org_type: 'voice' as const,
+  service_user_id: 'svc_voice',
 };
 
-const lookupOnboarded = async (user_id: string): Promise<string | null> => {
-  if (user_id === 'usr_agg_owned') return 'org_agg_1';
-  if (user_id === 'usr_other_agg_owned') return 'org_agg_2';
-  if (user_id === 'usr_no_attribution') return null;
-  return null;
-};
+const lookup_user_factory = (
+  rows: Record<string, { onboardedByOrgId: string | null }>,
+) =>
+  vi.fn(async (uid: string) => rows[uid] ?? null);
 
 describe('resolve_acting_actor', () => {
-  it('self-acted: no acting_org and no acting_as_user_id → effective_user = request.user', async () => {
-    const res = await resolve_acting_actor({
-      acting_org: undefined,
-      request_user_id: 'usr_self',
-      acting_as_user_id: undefined,
-      lookup_onboarded_by: lookupOnboarded,
+  describe('self-acted (no acting_org)', () => {
+    it('returns effective_user_id = request_user_id when no body field', async () => {
+      const result = await resolve_acting_actor({
+        acting_org: undefined,
+        request_user_id: 'usr_self',
+        acting_as_user_id: undefined,
+        lookup_user: lookup_user_factory({}),
+      });
+      expect(result).toEqual({
+        ok: true,
+        effective_user_id: 'usr_self',
+        audit: { performed_by_org_id: null, performed_by_service_user_id: null },
+      });
     });
-    expect(res).toEqual({
-      ok: true,
-      effective_user_id: 'usr_self',
-      audit: { performed_by_org_id: null, performed_by_service_user_id: null },
+
+    it('400 CANNOT_OVERRIDE_SELF when body field present', async () => {
+      const result = await resolve_acting_actor({
+        acting_org: undefined,
+        request_user_id: 'usr_self',
+        acting_as_user_id: 'usr_other',
+        lookup_user: lookup_user_factory({}),
+      });
+      expect(result).toEqual({
+        ok: false,
+        status: 400,
+        error: 'CANNOT_OVERRIDE_SELF',
+      });
     });
   });
 
-  it('no acting_org + body field present → 400 CANNOT_OVERRIDE_SELF', async () => {
-    const res = await resolve_acting_actor({
-      acting_org: undefined,
-      request_user_id: 'usr_self',
-      acting_as_user_id: 'usr_target',
-      lookup_onboarded_by: lookupOnboarded,
+  describe('tier gate', () => {
+    it('403 ACTING_ORG_TYPE_NOT_ALLOWED for voice', async () => {
+      const result = await resolve_acting_actor({
+        acting_org: voice,
+        request_user_id: 'svc',
+        acting_as_user_id: 'usr_target',
+        lookup_user: lookup_user_factory({
+          usr_target: { onboardedByOrgId: null },
+        }),
+      });
+      expect(result).toEqual({
+        ok: false,
+        status: 403,
+        error: 'ACTING_ORG_TYPE_NOT_ALLOWED',
+      });
     });
-    expect(res).toEqual({ ok: false, status: 400, error: 'CANNOT_OVERRIDE_SELF' });
-  });
 
-  it('voice acting_org → 403 ACTING_ORG_TYPE_NOT_ALLOWED (regardless of body field)', async () => {
-    const res1 = await resolve_acting_actor({
-      acting_org: baseVoiceDisallowed,
-      request_user_id: 'svc_voice_1',
-      acting_as_user_id: 'usr_agg_owned',
-      lookup_onboarded_by: lookupOnboarded,
+    it('400 MISSING_ACTING_AS_USER_ID for aggregator', async () => {
+      const result = await resolve_acting_actor({
+        acting_org: aggregator,
+        request_user_id: 'svc',
+        acting_as_user_id: undefined,
+        lookup_user: lookup_user_factory({}),
+      });
+      expect(result).toEqual({
+        ok: false,
+        status: 400,
+        error: 'MISSING_ACTING_AS_USER_ID',
+      });
     });
-    expect(res1).toEqual({ ok: false, status: 403, error: 'ACTING_ORG_TYPE_NOT_ALLOWED' });
 
-    const res2 = await resolve_acting_actor({
-      acting_org: baseVoiceDisallowed,
-      request_user_id: 'svc_voice_1',
-      acting_as_user_id: undefined,
-      lookup_onboarded_by: lookupOnboarded,
-    });
-    expect(res2).toEqual({ ok: false, status: 403, error: 'ACTING_ORG_TYPE_NOT_ALLOWED' });
-  });
-
-  it('network_service acting_org → 403 ACTING_ORG_TYPE_NOT_ALLOWED', async () => {
-    const res = await resolve_acting_actor({
-      acting_org: baseNetwork,
-      request_user_id: 'svc_signals',
-      acting_as_user_id: 'usr_agg_owned',
-      lookup_onboarded_by: lookupOnboarded,
-    });
-    expect(res).toEqual({ ok: false, status: 403, error: 'ACTING_ORG_TYPE_NOT_ALLOWED' });
-  });
-
-  it('aggregator acting_org + missing body field → 400 MISSING_ACTING_AS_USER_ID', async () => {
-    const res = await resolve_acting_actor({
-      acting_org: baseAggregator,
-      request_user_id: 'svc_agg_1',
-      acting_as_user_id: undefined,
-      lookup_onboarded_by: lookupOnboarded,
-    });
-    expect(res).toEqual({ ok: false, status: 400, error: 'MISSING_ACTING_AS_USER_ID' });
-  });
-
-  it('aggregator acting_org + target onboarded by THIS aggregator → success, audit populated', async () => {
-    const res = await resolve_acting_actor({
-      acting_org: baseAggregator,
-      request_user_id: 'svc_agg_1',
-      acting_as_user_id: 'usr_agg_owned',
-      lookup_onboarded_by: lookupOnboarded,
-    });
-    expect(res).toEqual({
-      ok: true,
-      effective_user_id: 'usr_agg_owned',
-      audit: {
-        performed_by_org_id: 'org_agg_1',
-        performed_by_service_user_id: 'svc_agg_1',
-      },
+    it('400 MISSING_ACTING_AS_USER_ID for network_service', async () => {
+      const result = await resolve_acting_actor({
+        acting_org: network_service,
+        request_user_id: 'svc',
+        acting_as_user_id: undefined,
+        lookup_user: lookup_user_factory({}),
+      });
+      expect(result).toEqual({
+        ok: false,
+        status: 400,
+        error: 'MISSING_ACTING_AS_USER_ID',
+      });
     });
   });
 
-  it('aggregator acting_org + target onboarded by ANOTHER aggregator → 403 NOT_AUTHORIZED_FOR_TARGET', async () => {
-    const res = await resolve_acting_actor({
-      acting_org: baseAggregator,
-      request_user_id: 'svc_agg_1',
-      acting_as_user_id: 'usr_other_agg_owned',
-      lookup_onboarded_by: lookupOnboarded,
+  describe('user existence', () => {
+    it('404 USER_NOT_FOUND for aggregator + missing user', async () => {
+      const result = await resolve_acting_actor({
+        acting_org: aggregator,
+        request_user_id: 'svc',
+        acting_as_user_id: 'usr_missing',
+        lookup_user: lookup_user_factory({}),
+      });
+      expect(result).toEqual({
+        ok: false,
+        status: 404,
+        error: 'USER_NOT_FOUND',
+      });
     });
-    expect(res).toEqual({ ok: false, status: 403, error: 'NOT_AUTHORIZED_FOR_TARGET' });
+
+    it('404 USER_NOT_FOUND for network_service + missing user', async () => {
+      const result = await resolve_acting_actor({
+        acting_org: network_service,
+        request_user_id: 'svc',
+        acting_as_user_id: 'usr_missing',
+        lookup_user: lookup_user_factory({}),
+      });
+      expect(result).toEqual({
+        ok: false,
+        status: 404,
+        error: 'USER_NOT_FOUND',
+      });
+    });
   });
 
-  it('aggregator acting_org + target with NULL onboarded_by → 403 NOT_AUTHORIZED_FOR_TARGET', async () => {
-    const res = await resolve_acting_actor({
-      acting_org: baseAggregator,
-      request_user_id: 'svc_agg_1',
-      acting_as_user_id: 'usr_no_attribution',
-      lookup_onboarded_by: lookupOnboarded,
+  describe('aggregator tier', () => {
+    it('happy path: user onboarded by this aggregator', async () => {
+      const result = await resolve_acting_actor({
+        acting_org: aggregator,
+        request_user_id: 'svc',
+        acting_as_user_id: 'usr_a',
+        lookup_user: lookup_user_factory({
+          usr_a: { onboardedByOrgId: 'org_agg_a' },
+        }),
+      });
+      expect(result).toEqual({
+        ok: true,
+        effective_user_id: 'usr_a',
+        audit: {
+          performed_by_org_id: 'org_agg_a',
+          performed_by_service_user_id: 'svc_agg',
+        },
+      });
     });
-    expect(res).toEqual({ ok: false, status: 403, error: 'NOT_AUTHORIZED_FOR_TARGET' });
+
+    it('403 NOT_AUTHORIZED_FOR_TARGET when user onboarded by another aggregator', async () => {
+      const result = await resolve_acting_actor({
+        acting_org: aggregator,
+        request_user_id: 'svc',
+        acting_as_user_id: 'usr_other_agg',
+        lookup_user: lookup_user_factory({
+          usr_other_agg: { onboardedByOrgId: 'org_agg_b' },
+        }),
+      });
+      expect(result).toEqual({
+        ok: false,
+        status: 403,
+        error: 'NOT_AUTHORIZED_FOR_TARGET',
+      });
+    });
+
+    it('403 NOT_AUTHORIZED_FOR_TARGET when user is self-registered (onboarded_by null)', async () => {
+      const result = await resolve_acting_actor({
+        acting_org: aggregator,
+        request_user_id: 'svc',
+        acting_as_user_id: 'usr_self_reg',
+        lookup_user: lookup_user_factory({
+          usr_self_reg: { onboardedByOrgId: null },
+        }),
+      });
+      expect(result).toEqual({
+        ok: false,
+        status: 403,
+        error: 'NOT_AUTHORIZED_FOR_TARGET',
+      });
+    });
   });
 
-  it('aggregator acting_org + target_user_id not found at all → 403 NOT_AUTHORIZED_FOR_TARGET', async () => {
-    const res = await resolve_acting_actor({
-      acting_org: baseAggregator,
-      request_user_id: 'svc_agg_1',
-      acting_as_user_id: 'usr_does_not_exist',
-      lookup_onboarded_by: lookupOnboarded,
+  describe('network_service tier', () => {
+    it('happy path: any user in the network (own aggregator)', async () => {
+      const result = await resolve_acting_actor({
+        acting_org: network_service,
+        request_user_id: 'svc',
+        acting_as_user_id: 'usr_a',
+        lookup_user: lookup_user_factory({
+          usr_a: { onboardedByOrgId: 'org_agg_a' },
+        }),
+      });
+      expect(result).toEqual({
+        ok: true,
+        effective_user_id: 'usr_a',
+        audit: {
+          performed_by_org_id: 'org_signals',
+          performed_by_service_user_id: 'svc_ns',
+        },
+      });
     });
-    expect(res).toEqual({ ok: false, status: 403, error: 'NOT_AUTHORIZED_FOR_TARGET' });
+
+    it('happy path: any user in the network (cross-aggregator user)', async () => {
+      const result = await resolve_acting_actor({
+        acting_org: network_service,
+        request_user_id: 'svc',
+        acting_as_user_id: 'usr_other_agg',
+        lookup_user: lookup_user_factory({
+          usr_other_agg: { onboardedByOrgId: 'org_agg_b' },
+        }),
+      });
+      expect(result.ok).toBe(true);
+      expect(result).toMatchObject({
+        effective_user_id: 'usr_other_agg',
+        audit: { performed_by_org_id: 'org_signals' },
+      });
+    });
+
+    it('happy path: any user in the network (self-registered user)', async () => {
+      const result = await resolve_acting_actor({
+        acting_org: network_service,
+        request_user_id: 'svc',
+        acting_as_user_id: 'usr_self_reg',
+        lookup_user: lookup_user_factory({
+          usr_self_reg: { onboardedByOrgId: null },
+        }),
+      });
+      expect(result.ok).toBe(true);
+      expect(result).toMatchObject({
+        effective_user_id: 'usr_self_reg',
+        audit: { performed_by_org_id: 'org_signals' },
+      });
+    });
   });
 
-  it('branch-order: voice acting_org + missing body field → ACTING_ORG_TYPE_NOT_ALLOWED short-circuits before MISSING_ACTING_AS_USER_ID; lookup_onboarded_by is never called', async () => {
-    const spy = vi.fn(lookupOnboarded);
-    const res = await resolve_acting_actor({
-      acting_org: baseVoiceDisallowed,
-      request_user_id: 'svc_voice_1',
-      acting_as_user_id: undefined,
-      lookup_onboarded_by: spy,
+  describe('branch-order safety', () => {
+    it('lookup_user is NOT called when body field is missing', async () => {
+      const spy = lookup_user_factory({});
+      await resolve_acting_actor({
+        acting_org: aggregator,
+        request_user_id: 'svc',
+        acting_as_user_id: undefined,
+        lookup_user: spy,
+      });
+      expect(spy).not.toHaveBeenCalled();
     });
-    expect(res).toEqual({ ok: false, status: 403, error: 'ACTING_ORG_TYPE_NOT_ALLOWED' });
-    expect(spy).not.toHaveBeenCalled();
+
+    it('lookup_user IS called for network_service when body field is present', async () => {
+      const spy = lookup_user_factory({
+        usr_a: { onboardedByOrgId: null },
+      });
+      await resolve_acting_actor({
+        acting_org: network_service,
+        request_user_id: 'svc',
+        acting_as_user_id: 'usr_a',
+        lookup_user: spy,
+      });
+      expect(spy).toHaveBeenCalledWith('usr_a');
+    });
   });
 });
