@@ -6,6 +6,7 @@ import z, {
 import { type FastifyPluginAsyncZod } from 'fastify-type-provider-zod';
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import { db } from '@api/db/postgres/drizzle_config';
+import { user } from '@api/db/postgres/schema/auth';
 import { auth_middleware_if_enabled } from '@api/plugins/auth/auth_middleware';
 import {
   ensureActionEventPartition,
@@ -20,6 +21,10 @@ import {
   mirrorActionEventToSourceInstance,
   validateActionEventPayload,
 } from '@/utils/action_event_runtime';
+import {
+  action_error_messages,
+  resolve_acting_actor,
+} from './_resolve_acting_actor.js';
 
 type UpdateActionStatusRequest = FastifyRequest<{
   Body: z.infer<typeof UpdateActionStatusBodySchema>;
@@ -63,6 +68,35 @@ export const update_action_status_handler = async (
     return reply.code(404).send({
       error: 'ACTION_NOT_FOUND',
       message: 'Action does not exist on this instance',
+    });
+  }
+
+  const actor = await resolve_acting_actor({
+    acting_org: request.acting_org,
+    request_user_id: request.user.id,
+    acting_as_user_id: body.acting_as_user_id,
+    lookup_onboarded_by: async (user_id) => {
+      const rows = await db
+        .select({ onboardedByOrgId: user.onboardedByOrgId })
+        .from(user)
+        .where(eq(user.id, user_id))
+        .limit(1);
+      return rows[0]?.onboardedByOrgId ?? null;
+    },
+  });
+
+  if (!actor.ok) {
+    return reply.code(actor.status).send({
+      error: actor.error,
+      message: action_error_messages[actor.error],
+    });
+  }
+
+  if (existingAction.target_item_owner !== actor.effective_user_id) {
+    return reply.code(403).send({
+      error: 'NOT_TARGET_ITEM_OWNER',
+      message:
+        'update-status may only be called by the target item owner (provider).',
     });
   }
 
@@ -144,6 +178,21 @@ export const update_action_status_handler = async (
     });
   }
 
+  if (
+    actor.audit.performed_by_org_id &&
+    existingAction.performed_by_org_id &&
+    existingAction.performed_by_org_id !== actor.audit.performed_by_org_id
+  ) {
+    request.log.warn(
+      {
+        action_id: existingAction.action_id,
+        previous_performed_by_org_id: existingAction.performed_by_org_id,
+        new_performed_by_org_id: actor.audit.performed_by_org_id,
+      },
+      'overwriting on-behalf-of audit fields on action update',
+    );
+  }
+
   const nextUpdateCount = existingAction.update_count + 1;
   const [updatedAction] = await db
     .update(item_actions)
@@ -152,6 +201,8 @@ export const update_action_status_handler = async (
       update_count: nextUpdateCount,
       remarks: body.remarks ?? existingAction.remarks,
       updated_at: new Date(),
+      performed_by_org_id: actor.audit.performed_by_org_id,
+      performed_by_service_user_id: actor.audit.performed_by_service_user_id,
     })
     .where(eq(item_actions.action_id, existingAction.action_id))
     .returning({
