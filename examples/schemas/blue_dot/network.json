@@ -249,13 +249,13 @@
   "instances": [
     {
       "instance_name": "Blue Dot Seeker Local",
-      "instance_url": "__PUBLIC_API_URL__",
+      "instance_url": "http://localhost:2742",
       "custom_item_schema_urls": {},
       "domain_id": "seeker"
     },
     {
       "instance_name": "Blue Dot Provider Local",
-      "instance_url": "__PUBLIC_API_URL__",
+      "instance_url": "http://localhost:2742",
       "custom_item_schema_urls": {},
       "domain_id": "provider"
     }
