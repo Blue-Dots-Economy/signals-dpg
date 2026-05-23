@@ -6,24 +6,22 @@ interface ActionableTagsSchema {
   properties?: Record<string, unknown>;
 }
 
+export type ActionableDomain = 'seeker' | 'provider';
+
 export interface ActionableTagsInput {
+  domain: ActionableDomain;
   payload: Record<string, unknown>;
   schema: ActionableTagsSchema;
   applications_total: number;
   applications_rejected: number;
-  idle_days: number;
+  /** For provider tag `no_applications_yet`; recompute passes 0 for seekers. */
+  job_post_age_days: number;
+  /** Seeker-only; null for providers. */
+  last_applied_age_days: number | null;
+  /** Provider-only; null for seekers. */
+  min_decision_age_days: number | null;
 }
 
-/**
- * Slugify a JSON Schema property key into a tag-safe identifier.
- *
- *   'Phone Number'        → 'phone_number'
- *   "Mother's Name"       → 'mother_s_name'
- *   'Service Looking For' → 'service_looking_for'
- *
- * Lowercase, runs of non-alphanumerics collapse to single `_`, no leading
- * or trailing `_`.
- */
 const slugify = (s: string): string =>
   s
     .trim()
@@ -32,33 +30,39 @@ const slugify = (s: string): string =>
     .replace(/^_+|_+$/g, '');
 
 /**
- * Combines schema-derived `missing_<required>` tags with hand-coded
- * business tags. Used by the recompute pass (Task 5) — output is upserted
- * into `participant_metrics.actionable_tags` for the aggregator dashboard.
+ * Schema-derived `missing_<required>` tags + domain-aware business tags.
  *
- * Order is stable for snapshot tests:
- *   1. missing_<required> tags in schema.required order
- *   2. all_applications_rejected (if applicable)
- *   3. no_recent_activity (if applicable)
+ * Seeker business tags:
+ *   - `all_applications_rejected` when total > 0 AND rejected == total
+ *   - `no_recent_activity` when last_applied_age_days > 30
+ *
+ * Provider business tags:
+ *   - `no_applications_yet` when applications_total == 0 AND job_post_age_days > 7
+ *   - `decisions_overdue` when min_decision_age_days > 30
  */
 export const compute_actionable_tags = (i: ActionableTagsInput): string[] => {
   const tags: string[] = [];
 
-  // 1. Schema-derived: missing_<required>
   for (const key of i.schema.required ?? []) {
     if (!is_populated(i.payload?.[key])) {
       tags.push(`missing_${slugify(key)}`);
     }
   }
 
-  // 2. Business: all submitted applications were rejected
-  if (i.applications_total > 0 && i.applications_rejected === i.applications_total) {
-    tags.push('all_applications_rejected');
-  }
-
-  // 3. Business: idle for too long
-  if (i.idle_days > 30) {
-    tags.push('no_recent_activity');
+  if (i.domain === 'seeker') {
+    if (i.applications_total > 0 && i.applications_rejected === i.applications_total) {
+      tags.push('all_applications_rejected');
+    }
+    if (i.last_applied_age_days !== null && i.last_applied_age_days > 30) {
+      tags.push('no_recent_activity');
+    }
+  } else {
+    if (i.applications_total === 0 && i.job_post_age_days > 7) {
+      tags.push('no_applications_yet');
+    }
+    if (i.min_decision_age_days !== null && i.min_decision_age_days > 30) {
+      tags.push('decisions_overdue');
+    }
   }
 
   return tags;
