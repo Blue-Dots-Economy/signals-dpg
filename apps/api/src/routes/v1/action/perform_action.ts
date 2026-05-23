@@ -22,18 +22,7 @@ import {
 } from '@/utils/served_domain_guard';
 import { eq } from 'drizzle-orm';
 import { user } from '@api/db/postgres/schema/auth';
-import { resolve_acting_actor } from './_resolve_acting_actor.js';
-
-const action_error_messages = {
-  CANNOT_OVERRIDE_SELF:
-    'acting_as_user_id requires an x-acting-org-id header from a voice-type service apikey.',
-  MISSING_ACTING_AS_USER_ID:
-    'voice-type acting_org requires acting_as_user_id in the request body.',
-  ACTING_ORG_TYPE_NOT_ALLOWED:
-    'only voice-type acting orgs may act on behalf of users today.',
-  NOT_AUTHORIZED_FOR_TARGET:
-    'acting_as_user_id is not a user onboarded by this voice org.',
-} as const;
+import { resolve_acting_actor, action_error_messages } from './_resolve_acting_actor.js';
 
 type PerformActionRequest = FastifyRequest<{
   Body: z.infer<typeof PerformActionBodySchema>;

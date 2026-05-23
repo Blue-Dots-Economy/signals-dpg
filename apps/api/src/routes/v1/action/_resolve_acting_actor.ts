@@ -15,7 +15,7 @@ type ResolveOk = {
   audit: Audit;
 };
 
-type ResolveErr = {
+export type ResolveErr = {
   ok: false;
   status: 400 | 403;
   error:
@@ -80,4 +80,19 @@ export const resolve_acting_actor = async (
       performed_by_service_user_id: acting_org.service_user_id,
     },
   };
+};
+
+/**
+ * Human-readable messages for each `ResolveErr.error` code. Route handlers
+ * use this when constructing their `reply.send({ error, message })`.
+ */
+export const action_error_messages: Record<ResolveErr['error'], string> = {
+  CANNOT_OVERRIDE_SELF:
+    'acting_as_user_id requires an x-acting-org-id header from a voice-type service apikey.',
+  MISSING_ACTING_AS_USER_ID:
+    'voice-type acting_org requires acting_as_user_id in the request body.',
+  ACTING_ORG_TYPE_NOT_ALLOWED:
+    'only voice-type acting orgs may act on behalf of users today.',
+  NOT_AUTHORIZED_FOR_TARGET:
+    'acting_as_user_id is not a user onboarded by this voice org.',
 };
