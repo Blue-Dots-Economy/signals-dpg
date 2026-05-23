@@ -37,6 +37,12 @@ const NetworkInstanceSchema = z.object({
   },
 }));
 
+const MetricCategoriesSchema = z.object({
+  shortlisted: z.array(z.string().min(1)).optional().default([]),
+  rejected: z.array(z.string().min(1)).optional().default([]),
+  pending: z.array(z.string().min(1)).optional().default([]),
+});
+
 const NetworkActionInteractionSchema = z.object({
   from_network: z.string().min(1).optional(),
   from_domain: z.string().min(1),
@@ -46,6 +52,7 @@ const NetworkActionInteractionSchema = z.object({
   to_items: z.string().min(1).array().optional().default([]),
   requirement_schema: JsonSchemaDocumentSchema,
   event_schema: JsonSchemaDocumentSchema.optional(),
+  metric_categories: MetricCategoriesSchema.nullable().optional(),
 });
 
 const NetworkActionSchema = z.object({

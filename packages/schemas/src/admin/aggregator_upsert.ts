@@ -21,6 +21,12 @@ export const AggregatorUpsertRequest = z.object({
     .regex(/^[a-z0-9-]+$/, 'slug must be lowercase alphanumeric + hyphens')
     .describe('stable url-safe identifier; lookup key for upsert'),
   logo_url: z.url().optional().describe('optional logo url shown in dashboards'),
+  domains: z
+    .array(z.string().min(1))
+    .optional()
+    .describe(
+      "item domains this aggregator's dashboard reports on (e.g. ['seeker'] or ['seeker','provider']). Persisted as org.metadata.domains. Defaults to [] when omitted; dashboard returns 400 NO_DOMAINS_CONFIGURED until set.",
+    ),
   metadata: z
     .record(z.string(), z.unknown())
     .optional()
