@@ -411,20 +411,30 @@ This is safe to defer because:
   aggregator on this instance", which an operator already needs to assume
   as part of treating the key as a secret.
 
-## Acting on behalf of a user (aggregator)
+## Acting on behalf of a user (two tiers)
 
-Aggregator-typed acting orgs can file actions on behalf of users they onboarded (e.g. counsellor-driven applications via the aggregator-dpg service apikey).
-Two endpoints accept an optional `acting_as_user_id` body field:
+Two `acting_org.org_type` values may use `acting_as_user_id` on
+`POST /api/v1/action/perform`:
 
-- `POST /api/v1/action/perform`
-- `POST /api/v1/action/update-status`
+- **`aggregator`** — scoped to users that aggregator onboarded
+  (`user.onboarded_by_org_id === acting_org.org_id`). For
+  counsellor-driven applications, future delegation models, etc.
+- **`network_service`** — unrestricted; may act for any user in the
+  network. Today's voice-DPG runs at this tier (network-hosted service).
 
-### Required headers + body
+Voice-type acting_orgs are rejected with `403 ACTING_ORG_TYPE_NOT_ALLOWED`
+(placeholder; no voice-typed orgs exist in production today).
+
+`POST /api/v1/action/update-status` is **self-acted only** — the caller
+must be the target item's owner. There is no `acting_as_user_id` field
+on update-status.
+
+### Required headers + body (perform)
 
 ```http
 POST /api/v1/action/perform
-x-api-key: <aggregator-dpg apikey>
-x-acting-org-id: <aggregator org id from /admin/aggregator/upsert>
+x-api-key: <aggregator-dpg or network_service apikey>
+x-acting-org-id: <aggregator or network_service org id>
 
 {
   "action_type": "apply",
@@ -435,41 +445,48 @@ x-acting-org-id: <aggregator org id from /admin/aggregator/upsert>
 }
 ```
 
-### Authorization rules
+For `/action/perform`, the source item must also be owned by the
+effective actor — `403 SOURCE_ITEM_NOT_OWNED_BY_ACTOR` otherwise.
 
-The target user (`acting_as_user_id`) must satisfy:
-
-- `user.onboarded_by_org_id === <x-acting-org-id>`
-
-The channel value (`user.onboarded_via`) is NOT part of the check — an aggregator that onboarded a user via `bulk` earlier can still act for that user via `voice` later.
-
-Only `aggregator`-type acting orgs may use `acting_as_user_id`. `voice` and `network_service` callers receive `403 ACTING_ORG_TYPE_NOT_ALLOWED`.
-
-For `/action/perform`, the source item must also be owned by the effective actor — `403 SOURCE_ITEM_NOT_OWNED_BY_ACTOR` otherwise. For `/action/update-status`, the existing action's target item owner must match the effective actor — `403 TARGET_ITEM_NOT_OWNED_BY_ACTOR` otherwise.
-
-### Error matrix
+### Authorization matrix (perform)
 
 | Caller shape | `acting_as_user_id` | Outcome |
 |---|---|---|
-| No `x-acting-org-id` | absent | Self-acted (unchanged). |
-| No `x-acting-org-id` | present | `400 CANNOT_OVERRIDE_SELF` |
-| Aggregator acting_org | absent | `400 MISSING_ACTING_AS_USER_ID` |
-| Aggregator acting_org | present, owned by this aggregator | `200 / 201` |
-| Aggregator acting_org | present, owned by another org | `403 NOT_AUTHORIZED_FOR_TARGET` |
-| Voice / network_service acting_org | any | `403 ACTING_ORG_TYPE_NOT_ALLOWED` |
+| Session cookie or apikey-as-self | absent | Self-attribution. |
+| Session cookie or apikey-as-self | present | `400 CANNOT_OVERRIDE_SELF` |
+| `aggregator` apikey + acting_org | absent | `400 MISSING_ACTING_AS_USER_ID` |
+| `aggregator` apikey + acting_org | present, user not found | `404 USER_NOT_FOUND` |
+| `aggregator` apikey + acting_org | present, own user | `201` |
+| `aggregator` apikey + acting_org | present, other-aggregator or self-registered | `403 NOT_AUTHORIZED_FOR_TARGET` |
+| `network_service` apikey + acting_org | absent | `400 MISSING_ACTING_AS_USER_ID` |
+| `network_service` apikey + acting_org | present, user not found | `404 USER_NOT_FOUND` |
+| `network_service` apikey + acting_org | present, user exists | `201` |
+| `voice` acting_org | (any) | `403 ACTING_ORG_TYPE_NOT_ALLOWED` |
 
-### Audit trail
+### Audit columns
 
-Successful on-behalf-of writes populate two columns on `item_actions`:
+`item_actions.performed_by_org_id` + `performed_by_service_user_id` are
+populated at create-time only (by `/action/perform`). `/action/update-status`
+does not touch them. Inspect the columns to identify the on-behalf-of
+caller:
 
-| Column | Value |
-|---|---|
-| `performed_by_org_id` | the aggregator org id from `x-acting-org-id` |
-| `performed_by_service_user_id` | the apikey owner's user id (Signals service account) |
+- `network_service` org_id → voice / ecosystem-manager-driven action.
+- `aggregator` org_id → counsellor / aggregator-DPG-driven action.
+- `NULL` → self-acted (UI session or apikey-as-self).
 
-For self-acted writes, both columns are NULL. There are no indexes on these columns today — query via `WHERE performed_by_org_id = $1` sequentially when needed. Indexes will be added if audit queries become a hot path.
+There are no indexes on these columns today — query via
+`WHERE performed_by_org_id = $1` sequentially when needed.
 
-For `/action/update-status`, the audit fields reflect the LATEST actor. If a different aggregator updates an action that was previously filed by another aggregator, the columns are overwritten and a WARN log is emitted server-side with both the previous and new `performed_by_org_id` for ops visibility.
+### Migration from update-status acting-as
+
+`/action/update-status` no longer accepts `acting_as_user_id`. Callers
+that previously used the on-behalf-of path on update-status must now
+either:
+
+- Update status via the target item owner's own session / apikey, OR
+- Skip the status update (Plan B's metrics rollup counts statuses
+  across rows; the cache catches the next perform without needing a
+  formal update-status call).
 
 ## Voice DPG follows the same pattern
 

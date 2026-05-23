@@ -39,7 +39,6 @@ export const UpdateActionStatusBodySchema = z.object({
   action_id: z.uuid(),
   action_status: z.string().min(1),
   remarks: z.string().min(1).optional(),
-  acting_as_user_id: z.string().min(1).optional(),
 });
 
 export const StoreEventBodySchema = z.object({
