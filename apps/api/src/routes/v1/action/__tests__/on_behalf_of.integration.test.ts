@@ -131,7 +131,18 @@ describeIf(`POST /action/perform on-behalf-of (integration)${
     await app.register(admin_routes, { prefix: '/api/v1/admin' });
     await app.register(action_routes_mod.default, { prefix: '/api/v1/action' });
     await app.register(network_routes_mod.default, { prefix: '/api/v1/network' });
-    await app.listen({ port: listen_port, host: '127.0.0.1' });
+    try {
+      await app.listen({ port: listen_port, host: '127.0.0.1' });
+    } catch (err: unknown) {
+      const e = err as { code?: string };
+      if (e?.code === 'EADDRINUSE') {
+        throw new Error(
+          `integration test requires port ${listen_port} to be free ` +
+          `(set API_PORT). Is the dev server already running?`,
+        );
+      }
+      throw err;
+    }
 
     const { user, organization, member, apikey } = authSchema;
     const now = new Date();
