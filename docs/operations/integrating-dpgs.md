@@ -283,10 +283,6 @@ every `/api/v1/admin/*` route. Its checks (in order):
 | `acting_org_id` does not match any `organization` row | 404 | `ACTING_ORG_NOT_FOUND` | unknown org id |
 | Org exists but `organization.type` is null/unknown | 403 | `ACTING_ORG_TYPE_NOT_ALLOWED` | type is not `aggregator`, `voice`, or `network_service` |
 | Caller's service user is not a member of any org | 403 | `SERVICE_USER_NOT_REGISTERED` | no `member` row for `request.user.id` |
-| Caller asserts `acting_as_user_id` on `/action/*` with no `x-acting-org-id` | 400 | `CANNOT_OVERRIDE_SELF` | body field present, header absent |
-| Caller asserts `x-acting-org-id` (voice) on `/action/*` with no `acting_as_user_id` | 400 | `MISSING_ACTING_AS_USER_ID` | header present, body field absent |
-| `acting_as_user_id` is not a user onboarded by this voice org | 403 | `NOT_AUTHORIZED_FOR_TARGET` | `user.onboarded_by_org_id !== acting_org_id` |
-| Effective actor does not own the source item (`/action/perform`) or target item (`/action/update-status`) | 403 | `SOURCE_ITEM_NOT_OWNED_BY_ACTOR` / `TARGET_ITEM_NOT_OWNED_BY_ACTOR` | applies when the effective user is not the item owner |
 
 On success the preHandler attaches:
 
@@ -389,8 +385,8 @@ For `/action/update-status`, the audit fields reflect the LATEST actor. If a dif
 
 ## Voice DPG follows the same pattern
 
-When voice-dpg ships (separate stream, not in this PR), it uses its own
-apikey from the seed and asserts `x-acting-org-id` set to either:
+Voice-dpg uses its own apikey from the seed and asserts `x-acting-org-id`
+set to either:
 
 - the aggregator org id when voice is hosted per-aggregator
   (e.g. BBMP runs its own voice instance for itself); or
