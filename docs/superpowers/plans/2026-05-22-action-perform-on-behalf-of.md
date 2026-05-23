@@ -1,8 +1,10 @@
-# Action Perform & Update-Status — On-Behalf-Of for Voice DPG Implementation Plan
+# Action Perform & Update-Status — On-Behalf-Of (Aggregator) Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Let voice-type orgs (apikey + `x-acting-org-id`) file `/api/v1/action/perform` and `/api/v1/action/update-status` calls on behalf of users they onboarded by passing `acting_as_user_id` in the body, with audit columns on `item_actions` and an explicit deny for aggregator / network_service callers.
+> **Scope reset, 2026-05-23:** This plan was originally written for `voice`-typed acting orgs. Production has no `voice`-typed organization rows — only `network_service` (DPG platform services) and `aggregator` (real aggregators). The allowed `acting_org.org_type` was flipped from `voice` to `aggregator`. Code, tests, docs, and Postman were updated in PR #13 commit `b2a97d5`. Task descriptions below still reference voice in places — preserved as a record of the original brainstorm. Read "voice acting_org" as "aggregator acting_org" and "aggregator acting_org → 403" as "voice acting_org → 403" throughout the tasks.
+
+**Goal:** Let `network_service` apikey callers (the aggregator-dpg / voice-dpg service users seeded in Plan 1) file `/api/v1/action/perform` and `/api/v1/action/update-status` on behalf of users that aggregators onboarded, by passing `acting_as_user_id` in the body with `x-acting-org-id` pointing at the aggregator. Two audit columns on `item_actions` capture which aggregator + service user filed the action. Voice / network_service acting_orgs are denied with 403 ACTING_ORG_TYPE_NOT_ALLOWED.
 
 **Architecture:** A new optional variant of Plan 1's acting_org preHandler is mounted on `/api/v1/action/*`. A pure `resolve_acting_actor` helper consumes `(request.acting_org, body.acting_as_user_id, request.user)` plus the target user's `onboarded_by_org_id` and returns either `{ effective_user_id, audit }` or a typed error. Two nullable FK columns (`performed_by_org_id`, `performed_by_service_user_id`) carry the audit trail on `item_actions`. The source-instance `/action/perform` orchestrator forwards the resolved owner + audit into the existing target-instance `/network/action/perform` handler, which writes the row.
 
