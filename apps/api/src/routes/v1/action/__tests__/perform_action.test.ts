@@ -118,6 +118,16 @@ vi.stubGlobal(
 );
 
 // --- mock helpers from action_event_runtime: only fetchLocalItemSnapshot is on the perform path ---
+const { fetchLocalItemSnapshotMock } = vi.hoisted(() => ({
+  fetchLocalItemSnapshotMock: vi.fn(async () => ({
+    created_by: 'usr_voice_owned',
+    item_id: 'src_item_1',
+    item_latitude: null,
+    item_longitude: null,
+    item_private_state: {},
+  })),
+}));
+
 vi.mock('@/utils/action_event_runtime', async () => {
   const actual =
     await vi.importActual<typeof import('@/utils/action_event_runtime')>(
@@ -125,13 +135,7 @@ vi.mock('@/utils/action_event_runtime', async () => {
     );
   return {
     ...actual,
-    fetchLocalItemSnapshot: vi.fn(async () => ({
-      created_by: 'usr_voice_owned',
-      item_id: 'src_item_1',
-      item_latitude: null,
-      item_longitude: null,
-      item_private_state: {},
-    })),
+    fetchLocalItemSnapshot: fetchLocalItemSnapshotMock,
   };
 });
 
@@ -318,5 +322,32 @@ describe('POST /api/v1/action/perform — on-behalf-of', () => {
       performed_by_org_id: 'org_voice_1',
       performed_by_service_user_id: 'svc_voice_1',
     });
+  });
+
+  it('voice on-behalf-of: 403 SOURCE_ITEM_NOT_OWNED_BY_ACTOR when snapshot.created_by != effective_user_id', async () => {
+    dbState.userRows = [
+      { id: 'usr_voice_owned', onboardedByOrgId: 'org_voice_1' },
+    ];
+    // Override the snapshot mock to return a DIFFERENT owner than acting_as_user_id.
+    fetchLocalItemSnapshotMock.mockResolvedValueOnce({
+      created_by: 'usr_someone_else',
+      item_id: 'src_item_1',
+      item_latitude: null,
+      item_longitude: null,
+      item_private_state: {},
+    });
+    const app = buildApp({
+      org_id: 'org_voice_1',
+      org_type: 'voice',
+      service_user_id: 'svc_voice_1',
+    });
+    const res = await app.inject({
+      method: 'POST',
+      url: '/perform',
+      payload: { ...VALID_BODY, acting_as_user_id: 'usr_voice_owned' },
+    });
+    expect(res.statusCode).toBe(403);
+    expect(res.json()).toMatchObject({ error: 'SOURCE_ITEM_NOT_OWNED_BY_ACTOR' });
+    expect(fetchCalls).toHaveLength(0); // proxy hop must be skipped
   });
 });

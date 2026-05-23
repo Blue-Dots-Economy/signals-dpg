@@ -369,4 +369,28 @@ describe('POST /api/v1/action/update-status — on-behalf-of', () => {
       new_performed_by_org_id: 'org_voice_1',
     });
   });
+
+  it('voice on-behalf-of: 403 TARGET_ITEM_NOT_OWNED_BY_ACTOR when existing target_item_owner != effective_user_id', async () => {
+    dbState.userRows = [
+      { id: 'usr_voice_owned', onboardedByOrgId: 'org_voice_1' },
+    ];
+    // The existing action's target_item_owner is NOT the actor; override the fixture.
+    dbState.existingAction = {
+      ...EXISTING_ACTION,
+      target_item_owner: 'usr_someone_else',
+    };
+    const app = buildApp({
+      org_id: 'org_voice_1',
+      org_type: 'voice',
+      service_user_id: 'svc_voice_1',
+    });
+    const res = await app.inject({
+      method: 'POST',
+      url: '/update-status',
+      payload: { ...VALID_BODY, acting_as_user_id: 'usr_voice_owned' },
+    });
+    expect(res.statusCode).toBe(403);
+    expect(res.json()).toMatchObject({ error: 'TARGET_ITEM_NOT_OWNED_BY_ACTOR' });
+    expect(dbState.updates).toHaveLength(0); // UPDATE must not run
+  });
 });
