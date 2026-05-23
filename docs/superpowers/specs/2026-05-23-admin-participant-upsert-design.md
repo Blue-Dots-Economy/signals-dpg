@@ -52,7 +52,8 @@ Same preHandler chain as the rest of `/admin/*`: `auth_middleware_if_enabled` �
 | `acting_org.org_type` | User exists? | `item_id` in body? | Outcome |
 |---|---|---|---|
 | `aggregator` | no | (ignored) | Onboard new user + create one item with the supplied `item_state`. Return `{ user_existed: false, items: [new_item] }`. |
-| `aggregator` | yes | (ignored) | **No writes.** Return `{ user_existed: true, items: [...all items for that user, served-domain scoped...] }`. The user's `onboarded_by_org_id` / `onboarded_via` is preserved verbatim. |
+| `aggregator` | yes, **and** `user.onboarded_by_org_id === acting_org.org_id` | (ignored) | **No writes.** Return `{ user_existed: true, items: [...all items for that user, served-domain scoped...] }`. The user's `onboarded_by_org_id` / `onboarded_via` is preserved verbatim. |
+| `aggregator` | yes, **but** `user.onboarded_by_org_id !== acting_org.org_id` (including null / self-registered) | (ignored) | **No writes, no item disclosure.** Return `{ user_existed: true, items: [] }`. The caller learns the user exists but doesn't see any items — the user belongs to another aggregator or self-registered, and is out of this aggregator's scope. |
 | `network_service` | no | (ignored) | Onboard new user + create one item. Same flow as aggregator new-user. |
 | `network_service` | yes | provided + valid (item belongs to this user) | PATCH-style update of that item (mirror of `PATCH /api/v1/item/:itemId` semantics — schema-validate the incoming `item_state`, run privacy split, replace `item_state` and `item_private_state`, update `updated_at`). Return all items. |
 | `network_service` | yes | provided but item doesn't belong to user (or doesn't exist) | `403 ITEM_NOT_OWNED_BY_USER`. No writes. |
@@ -121,7 +122,7 @@ Schema-level refine `email || phone_number` is preserved.
 - **Create:** `apps/api/src/routes/v1/admin/__tests__/participant.test.ts` — route-level tests, mocked DB.
 - **Create:** `apps/api/src/routes/v1/admin/__tests__/participant.integration.test.ts` — real PG, mirrors `on_behalf_of.integration.test.ts` shape.
 - **Modify (side-task 7a):** every route file under `apps/api/src/routes/v1/admin/**` adds `tags: ['admin']` to its Fastify route schema. Every route file under `apps/api/src/routes/v1/aggregator/**` adds `tags: ['aggregator']`.
-- **Modify (side-task 7b):** `docs/postman/Signals-DPG.postman_collection.json` — add new folder `08 Admin Participant` with one request per matrix row (7 requests total); update the existing `Apply on behalf of seeker` request body to use `{{action_requirements_snapshot_json}}` for `requirements_snapshot`. Both Blue-Dots and Purple-Dots env files gain `action_requirements_snapshot_json` and any missing `_org_id` vars.
+- **Modify (side-task 7b):** `docs/postman/Signals-DPG.postman_collection.json` — add new folder `08 Admin Participant` with one request per matrix row (8 requests total, see test plan); update the existing `Apply on behalf of seeker` request body to use `{{action_requirements_snapshot_json}}` for `requirements_snapshot`. Both Blue-Dots and Purple-Dots env files gain `action_requirements_snapshot_json`, `network_service_org_id`, `aggregator_b_api_key`, and `aggregator_b_org_id` (the second aggregator is needed to demonstrate the cross-aggregator empty-items case).
 
 ### Pure helper: `resolve_upsert_action`
 
@@ -169,7 +170,11 @@ Note: the `ITEM_NOT_OWNED_BY_USER` 403 is NOT a verdict — it's an outcome of t
 
    case 'aggregator_existing_noop':
      - No writes.
-     - SELECT items for user (served-domain scoped) → return with onboarded_at=null.
+     - If user.onboarded_by_org_id === acting_org.org_id:
+         SELECT items for user (served-domain scoped) → return with onboarded_at=null.
+     - Else (user belongs to another aggregator OR self-registered):
+         return { user_id, user_existed: true, onboarded_at: null, items: [] }.
+         No item-table query needed — empty array immediately.
 
    case 'update_item':
      - SELECT item by item_id. If created_by !== user.id → reply 403 ITEM_NOT_OWNED_BY_USER.
@@ -218,9 +223,10 @@ const items_rows = await db
 
 ### Unit — `participant.test.ts` (mocked DB)
 
-Mirrors `Plan A's perform_action.test.ts` isolation pattern. ~12 cases covering:
-- All 4 happy paths (matrix rows 1, 3, 4, 6).
-- Aggregator + existing user → returns items, no writes asserted via dbState.
+Mirrors Plan A's `perform_action.test.ts` isolation pattern. ~13 cases covering:
+- Happy paths for new-user creation (both tiers).
+- Aggregator + existing user **own** (`onboarded_by_org_id === acting.org_id`) → returns items, no writes asserted via dbState.
+- Aggregator + existing user **other** (`onboarded_by_org_id !== acting.org_id` and `null` cases) → returns `items: []`, no writes, no item-table SELECT asserted.
 - Network_service + update_item → asserts schema validation called + UPDATE called with new item_state.
 - Network_service + update_item with mismatched item_id → 403 ITEM_NOT_OWNED_BY_USER.
 - Network_service + insert_item with duplicate (network, domain, item_type) → no error (new row).
@@ -231,8 +237,8 @@ Mirrors `Plan A's perform_action.test.ts` isolation pattern. ~12 cases covering:
 
 Mirrors Plan A's `on_behalf_of.integration.test.ts`. Seeds two aggregator orgs + one network_service org (via existing `seed_service_users.ts` pattern). Cases:
 1. Aggregator-A onboards a new user. Asserts user row, items[0], onboarded_by_org_id = agg_A.
-2. Aggregator-A hits same user — gets items back, no new rows in DB.
-3. Aggregator-B hits user onboarded by A — same: items back, no writes, attribution unchanged.
+2. Aggregator-A hits same user — gets items back (own user), no new rows in DB.
+3. Aggregator-B hits user onboarded by A — `user_existed: true, items: []`, no writes, attribution unchanged.
 4. Network_service updates that user's profile_1.0 item — DB shows updated `item_state`.
 5. Network_service adds a provider-domain item for the same user — DB now has 2 items, attribution unchanged.
 6. Network_service tries `item_id` from a different user — 403 ITEM_NOT_OWNED_BY_USER, no writes.
@@ -240,9 +246,22 @@ Mirrors Plan A's `on_behalf_of.integration.test.ts`. Seeds two aggregator orgs +
 ### Other
 
 - `pnpm typecheck` clean.
-- `pnpm --filter api test` 128/128 → 140+ /140+ (12 new unit cases).
+- `pnpm --filter api test` 128/128 → 145+ /145+ (~17 new unit cases between the helper + route tests).
 - OpenAPI/Swagger output shows `admin` + `aggregator` tags after side-task 7a.
-- Postman collection imports cleanly; the new folder has 7 requests + the `Apply on behalf of seeker` body fix.
+- Postman collection imports cleanly; the new folder has 8 requests + the `Apply on behalf of seeker` body fix.
+
+### Postman scenarios in folder `08 Admin Participant`
+
+| # | Request name | acting_org | user pre-state | item_id in body | Expected response |
+|---|---|---|---|---|---|
+| 1 | Aggregator A — create new user | aggregator_a | new | (omit) | 200, user_existed:false, items:[new] |
+| 2 | Aggregator A — existing own user | aggregator_a | created in #1 | (omit) | 200, user_existed:true, items:[full list] |
+| 3 | Aggregator B — existing other-aggregator user | aggregator_b | created in #1 | (omit) | 200, user_existed:true, items:[] |
+| 4 | Network_service — create new user | network_service | new | (omit) | 200, user_existed:false, items:[new] |
+| 5 | Network_service — update existing item | network_service | existing | provided valid | 200, items reflects update |
+| 6 | Network_service — insert additional item | network_service | existing | (omit) | 200, items grows by 1 |
+| 7 | Network_service — invalid item_id | network_service | existing | mismatched user | 403 ITEM_NOT_OWNED_BY_USER |
+| 8 | Voice acting_org rejected | (any voice-typed if seeded) | n/a | n/a | 403 ACTING_ORG_TYPE_NOT_ALLOWED |
 
 ## Out of scope (deferred)
 
