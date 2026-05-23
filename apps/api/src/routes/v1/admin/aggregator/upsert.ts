@@ -32,6 +32,7 @@ export const aggregator_upsert: FastifyPluginAsync = async (app) => {
     url: '/aggregator/upsert',
     method: 'POST',
     schema: {
+      tags: ['admin'],
       body: AggregatorUpsertRequest,
       response: { 200: AggregatorUpsertResponse },
     },

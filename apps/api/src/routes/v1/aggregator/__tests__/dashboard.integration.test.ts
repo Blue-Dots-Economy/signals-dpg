@@ -105,7 +105,7 @@ describeIf(`GET /aggregator/dashboard (integration)${
         Math.floor(100000 + Math.random() * 900000).toString();
       const res = await app.inject({
         method: 'POST',
-        url: '/api/v1/admin/onboard_participant',
+        url: '/api/v1/admin/participant',
         headers: {
           'x-api-key': apikey!,
           'x-acting-org-id': acting_org_id!,
@@ -118,7 +118,7 @@ describeIf(`GET /aggregator/dashboard (integration)${
           privacy_accepted: true,
           channel: 'bulk',
           source_id: run_tag,
-          profile: {
+          item_state: {
             whoIAm: { name: `Metrics Test ${i}` },
             whatIWant: { roles: ['tutor'] },
           },
