@@ -30,7 +30,7 @@ vi.mock('@api/db/postgres/drizzle_config', () => ({
 }));
 
 vi.mock('../recompute.js', () => ({
-  recompute_aggregator_metrics: vi.fn(async () => {
+  recompute_aggregator_domain_metrics: vi.fn(async () => {
     if (state.recompute_throws) throw new Error('recompute failed');
     state.recompute_called = true;
     // Simulate recompute updating the min — staleness re-reads after recompute.
@@ -58,7 +58,7 @@ describe('check_and_refresh_if_stale', () => {
 
   it('returns refreshed=false when cache is fresh', async () => {
     state.min_ts = new Date(); // just now — definitely fresh
-    const result = await check_and_refresh_if_stale('org_bbmp');
+    const result = await check_and_refresh_if_stale('org_bbmp', 'seeker');
     expect(result.refreshed).toBe(false);
     expect(result.last_computed_at).toEqual(state.min_ts);
     expect(state.recompute_called).toBe(false);
@@ -66,7 +66,7 @@ describe('check_and_refresh_if_stale', () => {
 
   it('recomputes when MIN is null (first-time aggregator)', async () => {
     state.min_ts = null;
-    const result = await check_and_refresh_if_stale('org_bbmp_new');
+    const result = await check_and_refresh_if_stale('org_bbmp_new', 'provider');
     expect(result.refreshed).toBe(true);
     expect(state.recompute_called).toBe(true);
     expect(result.last_computed_at).toBeInstanceOf(Date);
@@ -74,7 +74,7 @@ describe('check_and_refresh_if_stale', () => {
 
   it('recomputes when MIN is older than TTL_SECONDS', async () => {
     state.min_ts = new Date(Date.now() - (TTL_SECONDS + 60) * 1000);
-    const result = await check_and_refresh_if_stale('org_bbmp');
+    const result = await check_and_refresh_if_stale('org_bbmp', 'seeker');
     expect(result.refreshed).toBe(true);
     expect(state.recompute_called).toBe(true);
   });
@@ -82,7 +82,7 @@ describe('check_and_refresh_if_stale', () => {
   it('serves stale when lock contention (another request computing)', async () => {
     state.min_ts = new Date(Date.now() - (TTL_SECONDS + 60) * 1000);
     state.lock_acquired = false; // simulate another request holding the lock
-    const result = await check_and_refresh_if_stale('org_bbmp');
+    const result = await check_and_refresh_if_stale('org_bbmp', 'seeker');
     expect(result.refreshed).toBe(false);
     expect(state.recompute_called).toBe(false);
     // The returned last_computed_at is the stale value, not null.
@@ -92,22 +92,34 @@ describe('check_and_refresh_if_stale', () => {
   it('releases the lock even if recompute throws', async () => {
     state.min_ts = null;
     state.recompute_throws = true;
-    await expect(check_and_refresh_if_stale('org_bbmp')).rejects.toThrow();
+    await expect(check_and_refresh_if_stale('org_bbmp', 'seeker')).rejects.toThrow();
     // We can't directly assert pg_advisory_unlock was called without
     // grepping the mocked execute calls — but the try/finally in the impl
     // is what guarantees release. This test asserts the throw path doesn't
     // swallow the error.
   });
 
-  it('uses a stable lock key derived from the aggregator_id', async () => {
-    // Two calls with the same aggregator_id should compute the same lock key.
+  it('uses a stable lock key derived from the (aggregator_id, domain) pair', async () => {
+    // Two calls with the same (aggregator_id, domain) should compute the same lock key.
     // The mock doesn't actually exercise the key, but we confirm no throw
     // and consistent behavior.
     state.min_ts = null;
-    const r1 = await check_and_refresh_if_stale('agg_a');
+    const r1 = await check_and_refresh_if_stale('agg_a', 'seeker');
     state.min_ts = null;
     state.recompute_called = false;
-    const r2 = await check_and_refresh_if_stale('agg_a');
+    const r2 = await check_and_refresh_if_stale('agg_a', 'seeker');
+    expect(r1.refreshed).toBe(true);
+    expect(r2.refreshed).toBe(true);
+  });
+
+  it('uses different lock keys for different domains of the same aggregator', async () => {
+    // Same aggregator, different domains should have different lock keys
+    // and thus not block each other.
+    state.min_ts = null;
+    const r1 = await check_and_refresh_if_stale('agg_a', 'seeker');
+    state.min_ts = null;
+    state.recompute_called = false;
+    const r2 = await check_and_refresh_if_stale('agg_a', 'provider');
     expect(r1.refreshed).toBe(true);
     expect(r2.refreshed).toBe(true);
   });

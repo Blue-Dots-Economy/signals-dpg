@@ -1,56 +1,65 @@
 -- packages/database/src/utils/sql_scripts/metrics.sql
 --
--- Idempotent SQL bootstrap for the participant_metrics table. Mirrors the
+-- Idempotent SQL bootstrap for Plan B's item_metrics table. Mirrors the
 -- Drizzle schema in apps/api/db/postgres/schema/metrics.ts; CI parity
 -- check (Plan 4 A.3) fails if they drift.
 
-CREATE TABLE IF NOT EXISTS participant_metrics (
-  user_id                 text PRIMARY KEY,
-  onboarded_by_org_id     text,
-  onboarded_via           text,
-  profile_status          text,
-  profile_completion_pct  integer,
-  profile_created_at      timestamp,
-  profile_last_updated_at timestamp,
-  age_days                integer,
-  applications_pending    integer DEFAULT 0,
-  applications_accepted   integer DEFAULT 0,
-  applications_rejected   integer DEFAULT 0,
-  applications_total      integer DEFAULT 0,
-  actionable_tags         text[],
-  last_computed_at        timestamp NOT NULL
+-- Plan B: drop the user-keyed participant_metrics (Plan 3) outright.
+-- Pre-pilot — no production data to preserve. CASCADE handles any
+-- inbound FK; recompute is the only writer so there shouldn't be any.
+DROP TABLE IF EXISTS participant_metrics CASCADE;
+
+CREATE TABLE IF NOT EXISTS item_metrics (
+  item_id                   text PRIMARY KEY,
+  item_network              text NOT NULL,
+  item_domain               text NOT NULL,
+  item_type                 text NOT NULL,
+  owner_user_id             text NOT NULL,
+  onboarded_by_org_id       text,
+  onboarded_via             text,
+
+  profile_status            text,
+  profile_completion_pct    integer,
+  profile_created_at        timestamp,
+  profile_last_updated_at   timestamp,
+  age_days                  integer,
+
+  applications_total        integer DEFAULT 0,
+  applications_pending      integer DEFAULT 0,
+  applications_shortlisted  integer DEFAULT 0,
+  applications_rejected     integer DEFAULT 0,
+
+  last_applied_at           timestamp,
+  last_shortlisted_at       timestamp,
+  last_rejected_at          timestamp,
+  openings                  integer,
+
+  actionable_tags           text[],
+
+  last_computed_at          timestamp NOT NULL
 );
 
 DO $$
 BEGIN
   IF NOT EXISTS (
     SELECT 1 FROM pg_constraint
-    WHERE conname = 'participant_metrics_user_id_user_id_fk'
+    WHERE conname = 'item_metrics_onboarded_by_org_id_organization_id_fk'
   ) THEN
-    ALTER TABLE participant_metrics
-      ADD CONSTRAINT participant_metrics_user_id_user_id_fk
-      FOREIGN KEY (user_id) REFERENCES "user"(id) ON DELETE CASCADE;
-  END IF;
-END
-$$;
-
-DO $$
-BEGIN
-  IF NOT EXISTS (
-    SELECT 1 FROM pg_constraint
-    WHERE conname = 'participant_metrics_onboarded_by_org_id_organization_id_fk'
-  ) THEN
-    ALTER TABLE participant_metrics
-      ADD CONSTRAINT participant_metrics_onboarded_by_org_id_organization_id_fk
+    ALTER TABLE item_metrics
+      ADD CONSTRAINT item_metrics_onboarded_by_org_id_organization_id_fk
       FOREIGN KEY (onboarded_by_org_id) REFERENCES organization(id);
   END IF;
 END
 $$;
 
--- Hot path: list per aggregator + filter by status.
-CREATE INDEX IF NOT EXISTS participant_metrics_org_status_idx
-  ON participant_metrics (onboarded_by_org_id, profile_status);
+-- Hot path: dashboard rollup + filter by status within a domain.
+CREATE INDEX IF NOT EXISTS item_metrics_org_domain_status_idx
+  ON item_metrics (onboarded_by_org_id, item_domain, profile_status);
 
--- Staleness check: MIN(last_computed_at) per aggregator.
-CREATE INDEX IF NOT EXISTS participant_metrics_org_last_computed_idx
-  ON participant_metrics (onboarded_by_org_id, last_computed_at);
+-- Staleness check: MIN(last_computed_at) per (aggregator, domain).
+CREATE INDEX IF NOT EXISTS item_metrics_org_domain_last_computed_idx
+  ON item_metrics (onboarded_by_org_id, item_domain, last_computed_at);
+
+-- Per-user rollup queries (avg_profiles_per_user, users_with_applications).
+CREATE INDEX IF NOT EXISTS item_metrics_owner_domain_idx
+  ON item_metrics (owner_user_id, item_domain);

@@ -5,8 +5,9 @@ import type {
 } from 'fastify';
 import { Readable } from 'node:stream';
 import { db } from '@api/db/postgres/drizzle_config';
-import { participant_metrics } from '../../../../db/postgres/schema/metrics.js';
-import { eq, and, desc } from 'drizzle-orm';
+import { item_metrics } from '../../../../db/postgres/schema/metrics.js';
+import { organization } from '../../../../db/postgres/schema/auth.js';
+import { eq, and, inArray, asc } from 'drizzle-orm';
 import {
   ExportQuery,
   type ExportQuery as ExportQueryType,
@@ -16,26 +17,42 @@ import { check_and_refresh_if_stale } from '@/services/metrics/staleness';
 /**
  * GET /api/v1/aggregator/dashboard/export
  *
- * Plan 3 Task 10. Streams CSV of all participant_metrics rows for the
- * acting aggregator, with optional ?status filter. Same auth + staleness
- * contract as the dashboard route. No pagination in the URL — the export
- * is "everything matching the filter."
+ * Plan B Task 11. Streams CSV of all item_metrics rows for the acting
+ * aggregator across its configured domains. Mirrors the dashboard
+ * route's auth + domain-resolution contract:
+ *   - acting org_type === 'aggregator'              → else 403 NOT_AGGREGATOR
+ *   - org.metadata.domains is non-empty             → else 400 NO_DOMAINS_CONFIGURED
+ *   - ?domain= (if present) is in that set          → else 400 DOMAIN_NOT_CONFIGURED
  *
- * Pages through the participant_metrics table in chunks of 5000 to avoid
- * loading 200k+ rows into memory at once. Output is piped via an async
- * generator wrapped in a Readable.
+ * Per-domain staleness refresh runs in parallel before the stream opens.
+ * No pagination in the URL — the export is "everything matching the filter."
+ * Rows are streamed via an async generator wrapped in a Readable to avoid
+ * loading 200k+ rows into memory. Ordering is `(item_domain, item_id)` so
+ * multi-domain output is grouped by domain.
+ *
+ * Note: item_private_state is intentionally excluded; only the COLUMNS list
+ * below ever reaches the response body.
  */
 const COLUMNS = [
-  'user_id',
+  'item_id',
+  'item_domain',
+  'item_type',
+  'owner_user_id',
+  'onboarded_by_org_id',
+  'onboarded_via',
   'profile_status',
   'profile_completion_pct',
   'profile_created_at',
   'profile_last_updated_at',
   'age_days',
-  'applications_pending',
-  'applications_accepted',
-  'applications_rejected',
   'applications_total',
+  'applications_pending',
+  'applications_shortlisted',
+  'applications_rejected',
+  'last_applied_at',
+  'last_shortlisted_at',
+  'last_rejected_at',
+  'openings',
   'actionable_tags',
 ] as const;
 
@@ -51,54 +68,74 @@ const csv_escape = (v: unknown): string => {
   return s;
 };
 
+const read_configured_domains = async (
+  org_id: string,
+): Promise<string[] | null> => {
+  const [org] = (await db
+    .select({ metadata: organization.metadata })
+    .from(organization)
+    .where(eq(organization.id, org_id))
+    .limit(1)) as Array<{ metadata: string | null }>;
+  if (!org?.metadata) return null;
+  try {
+    const meta = JSON.parse(org.metadata) as { domains?: unknown };
+    if (!Array.isArray(meta.domains)) return null;
+    return (meta.domains as unknown[]).filter(
+      (x): x is string => typeof x === 'string',
+    );
+  } catch {
+    return null;
+  }
+};
+
 async function* generate_csv(
   aggregator_id: string,
+  scope: string[],
   status: string | undefined,
 ): AsyncGenerator<string> {
   yield COLUMNS.join(',') + '\n';
 
-  const conditions = [eq(participant_metrics.onboardedByOrgId, aggregator_id)];
-  if (status) {
-    conditions.push(eq(participant_metrics.profileStatus, status));
-  }
-  const where = conditions.length === 1 ? conditions[0] : and(...conditions);
+  const base_where = and(
+    eq(item_metrics.onboardedByOrgId, aggregator_id),
+    inArray(item_metrics.itemDomain, scope),
+  );
+  const where = status
+    ? and(base_where, eq(item_metrics.profileStatus, status))
+    : base_where;
 
   let offset = 0;
   for (;;) {
     const rows = (await db
       .select()
-      .from(participant_metrics)
+      .from(item_metrics)
       .where(where!)
-      .orderBy(desc(participant_metrics.userId))
+      .orderBy(asc(item_metrics.itemDomain), asc(item_metrics.itemId))
       .limit(PAGE_SIZE)
-      .offset(offset)) as Array<{
-      userId: string;
-      profileStatus: string | null;
-      profileCompletionPct: number | null;
-      profileCreatedAt: Date | null;
-      profileLastUpdatedAt: Date | null;
-      ageDays: number | null;
-      applicationsPending: number | null;
-      applicationsAccepted: number | null;
-      applicationsRejected: number | null;
-      applicationsTotal: number | null;
-      actionableTags: string[] | null;
-    }>;
+      .offset(offset)) as Array<typeof item_metrics.$inferSelect>;
 
     if (rows.length === 0) break;
 
     for (const r of rows) {
       const projected: Record<(typeof COLUMNS)[number], unknown> = {
-        user_id: r.userId,
+        item_id: r.itemId,
+        item_domain: r.itemDomain,
+        item_type: r.itemType,
+        owner_user_id: r.ownerUserId,
+        onboarded_by_org_id: r.onboardedByOrgId,
+        onboarded_via: r.onboardedVia,
         profile_status: r.profileStatus,
         profile_completion_pct: r.profileCompletionPct,
         profile_created_at: r.profileCreatedAt,
         profile_last_updated_at: r.profileLastUpdatedAt,
         age_days: r.ageDays,
-        applications_pending: r.applicationsPending,
-        applications_accepted: r.applicationsAccepted,
-        applications_rejected: r.applicationsRejected,
         applications_total: r.applicationsTotal,
+        applications_pending: r.applicationsPending,
+        applications_shortlisted: r.applicationsShortlisted,
+        applications_rejected: r.applicationsRejected,
+        last_applied_at: r.lastAppliedAt,
+        last_shortlisted_at: r.lastShortlistedAt,
+        last_rejected_at: r.lastRejectedAt,
+        openings: r.openings,
         actionable_tags: r.actionableTags,
       };
       yield COLUMNS.map((c) => csv_escape(projected[c])).join(',') + '\n';
@@ -125,9 +162,32 @@ export const aggregator_export: FastifyPluginAsync = async (app) => {
         });
       }
 
-      await check_and_refresh_if_stale(acting.org_id);
+      const configured = await read_configured_domains(acting.org_id);
+      if (!configured || configured.length === 0) {
+        return reply.code(400).send({
+          error: 'NO_DOMAINS_CONFIGURED',
+          message:
+            'org.metadata.domains is empty — re-upsert with domains array',
+        });
+      }
 
-      const { status } = request.query;
+      const { domain: requested_domain, status } = request.query;
+      let scope = configured;
+      if (requested_domain) {
+        if (!configured.includes(requested_domain)) {
+          return reply.code(400).send({
+            error: 'DOMAIN_NOT_CONFIGURED',
+            message: `?domain=${requested_domain} is not in org.metadata.domains`,
+          });
+        }
+        scope = [requested_domain];
+      }
+
+      // Parallel per-domain staleness — refresh anything stale before
+      // streaming. Each (org, domain) takes its own advisory lock.
+      await Promise.all(
+        scope.map((d) => check_and_refresh_if_stale(acting.org_id, d)),
+      );
 
       const filename = `participants_${acting.org_id}_${new Date()
         .toISOString()
@@ -139,7 +199,9 @@ export const aggregator_export: FastifyPluginAsync = async (app) => {
           `attachment; filename="${filename}"`,
         );
 
-      return reply.send(Readable.from(generate_csv(acting.org_id, status)));
+      return reply.send(
+        Readable.from(generate_csv(acting.org_id, scope, status)),
+      );
     },
   });
 };
