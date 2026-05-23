@@ -51,7 +51,7 @@ environment via a test script. Subsequent admin calls pick it up automatically.
    writes `aggregator_org_id` into the environment.
 3. **03 Aggregator Onboarding -> Onboard via Bulk** (or `Link` / `Voice`) —
    creates the seeker user + `profile_1.0` item, attributed to the
-   aggregator. Captures `seeker_user_id` and `seeker_profile_item_id`.
+   aggregator. Captures `seeker_user_id` and `seeker_item_id`.
 4. **01 Auth -> Request OTP** then **Verify OTP** — logs in as the seeker.
    The session cookie lands in Postman's jar.
 5. **04 Seeker -> Self Fetch / Find Providers / Apply to Provider** — runs

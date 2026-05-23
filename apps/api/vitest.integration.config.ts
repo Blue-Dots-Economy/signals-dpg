@@ -29,6 +29,20 @@ export default defineConfig({
         .pathname,
       '@dpg/database': new URL('../../packages/database/src', import.meta.url)
         .pathname,
+      // Integration tests boot the real Fastify app, so the full
+      // workspace alias surface needs to resolve. The unit config
+      // gets away without these because unit tests stub the auth /
+      // notification / match_score modules out at the boundary.
+      '@dpg/auth': new URL('../../packages/auth/src', import.meta.url)
+        .pathname,
+      '@dpg/notification': new URL(
+        '../../packages/notification/src',
+        import.meta.url,
+      ).pathname,
+      '@dpg/match_score': new URL(
+        '../../packages/match_score/src',
+        import.meta.url,
+      ).pathname,
     },
   },
 });

@@ -32,6 +32,7 @@ export const aggregator_upsert: FastifyPluginAsync = async (app) => {
     url: '/aggregator/upsert',
     method: 'POST',
     schema: {
+      tags: ['admin'],
       body: AggregatorUpsertRequest,
       response: { 200: AggregatorUpsertResponse },
     },
@@ -50,7 +51,7 @@ export const aggregator_upsert_handler = async (
     });
   }
 
-  const { external_id, name, slug, logo_url, metadata } = request.body;
+  const { external_id, name, slug, logo_url, domains, metadata } = request.body;
 
   const [existing] = await db
     .select({ id: organization.id, metadata: organization.metadata })
@@ -58,7 +59,7 @@ export const aggregator_upsert_handler = async (
     .where(eq(organization.slug, slug))
     .limit(1);
 
-  const meta_obj = { ...(metadata ?? {}), external_id };
+  const meta_obj = { ...(metadata ?? {}), external_id, domains: domains ?? [] };
   const meta_str = JSON.stringify(meta_obj);
 
   if (existing) {

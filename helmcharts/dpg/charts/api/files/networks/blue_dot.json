@@ -184,6 +184,11 @@
               "status": { "type": "string", "enum": ["submitted", "shortlisted", "rejected"] },
               "remark": { "type": "string" }
             }
+          },
+          "metric_categories": {
+            "shortlisted": ["shortlisted"],
+            "rejected": ["rejected"],
+            "pending": ["submitted"]
           }
         },
         {
@@ -229,6 +234,11 @@
                 "type": "string"
               }
             }
+          },
+          "metric_categories": {
+            "shortlisted": ["shortlisted"],
+            "rejected": ["rejected"],
+            "pending": ["submitted"]
           }
         }
       ]

@@ -1,7 +1,7 @@
 /**
  * Thin onboarding-time wrapper around the canonical item-create service.
  *
- * The onboarding route (POST /api/v1/admin/onboard_participant) creates a
+ * The onboarding route (POST /api/v1/admin/participant) creates a
  * user and a profile item in one transaction. This helper lets that route
  * invoke the same `createItemInternal` path the public /item/create route
  * uses, so participant profile items go through identical validation +

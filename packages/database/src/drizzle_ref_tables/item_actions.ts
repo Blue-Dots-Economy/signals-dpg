@@ -33,6 +33,9 @@ export const item_actions = pgTable(
     target_item_instance_url: text('target_item_instance_url').notNull(),
     target_item_owner: text('target_item_owner'),
 
+    performed_by_org_id: text('performed_by_org_id'),
+    performed_by_service_user_id: text('performed_by_service_user_id'),
+
     requirements_snapshot: jsonb('requirements_snapshot')
       .$type<Record<string, unknown>>()
       .notNull()

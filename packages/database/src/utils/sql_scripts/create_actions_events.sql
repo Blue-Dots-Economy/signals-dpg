@@ -21,6 +21,9 @@ CREATE TABLE IF NOT EXISTS item_actions (
   target_item_instance_url TEXT NOT NULL,
   target_item_owner TEXT,
 
+  performed_by_org_id TEXT,
+  performed_by_service_user_id TEXT,
+
   requirements_snapshot JSONB NOT NULL DEFAULT '{}'::jsonb,
   remarks TEXT,
 
@@ -41,6 +44,10 @@ CREATE TABLE IF NOT EXISTS item_actions (
   ) ON DELETE CASCADE
 )
 PARTITION BY LIST (partition_network);
+
+-- Plan A: audit trail for on-behalf-of action filing.
+ALTER TABLE item_actions ADD COLUMN IF NOT EXISTS performed_by_org_id TEXT;
+ALTER TABLE item_actions ADD COLUMN IF NOT EXISTS performed_by_service_user_id TEXT;
 
 CREATE INDEX IF NOT EXISTS item_actions_source_item_idx
 ON item_actions (
@@ -142,3 +149,31 @@ ON action_events (target_item_owner, created_at DESC);
 
 CREATE INDEX IF NOT EXISTS action_events_payload_gin_idx
 ON action_events USING GIN (event_payload);
+
+-- Plan A: FK audit columns -> organization / user. No cascade per spec —
+-- keep audit even if the voice org or its service user row is deleted.
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint
+    WHERE conname = 'item_actions_performed_by_org_id_organization_id_fk'
+  ) THEN
+    ALTER TABLE item_actions
+      ADD CONSTRAINT item_actions_performed_by_org_id_organization_id_fk
+      FOREIGN KEY (performed_by_org_id) REFERENCES "organization"(id);
+  END IF;
+END
+$$;
+
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint
+    WHERE conname = 'item_actions_performed_by_service_user_id_user_id_fk'
+  ) THEN
+    ALTER TABLE item_actions
+      ADD CONSTRAINT item_actions_performed_by_service_user_id_user_id_fk
+      FOREIGN KEY (performed_by_service_user_id) REFERENCES "user"(id);
+  END IF;
+END
+$$;

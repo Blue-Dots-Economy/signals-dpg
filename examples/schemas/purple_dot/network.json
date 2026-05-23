@@ -515,7 +515,8 @@
                 "type": "string"
               }
             }
-          }
+          },
+          "metric_categories": null
         },
         {
           "from_network": "purple_dot",
@@ -589,7 +590,8 @@
                 "type": "string"
               }
             }
-          }
+          },
+          "metric_categories": null
         }
       ]
     }

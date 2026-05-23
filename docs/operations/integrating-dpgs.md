@@ -111,84 +111,104 @@ Request and response shapes live in
 `packages/schemas/src/admin/aggregator_upsert.ts`
 (`AggregatorUpsertRequest`, `AggregatorUpsertResponse`).
 
-## Onboarding a participant
+## Upserting a participant (tier-aware)
 
-Once an aggregator has been mirrored (above), aggregator-dpg / voice-dpg can onboard participants on that aggregator's behalf:
+`POST /api/v1/admin/participant` is the single endpoint integrating DPGs
+use to create or update participants. The behavior splits by the
+`acting_org.org_type` asserted via `x-acting-org-id`:
 
-```bash
-curl -X POST http://localhost:2742/api/v1/admin/onboard_participant \
-  -H 'x-api-key: <aggregator-dpg apikey>' \
-  -H 'x-acting-org-id: <BBMP'\''s org_id from the upsert above>' \
-  -H 'Content-Type: application/json' \
-  -d '{
-    "phone_number": "+919876543210",
-    "name": "Anita",
-    "terms_accepted": true,
-    "privacy_accepted": true,
-    "channel": "bulk",
-    "source_id": "bulk_upload_42",
-    "profile": { "whoIAm": { "name": "Anita" } }
-  }'
-# → 200 with { user_id, profile_item_id, onboarded_at }
+| Tier                   | acting_org.org_type | Onboard new user | Read existing user's items                                     | Update item    | Insert additional item |
+|------------------------|---------------------|------------------|----------------------------------------------------------------|----------------|------------------------|
+| Ecosystem manager      | network_service     | yes              | yes (full list, served-domain scoped)                          | yes (`item_id`)| yes (omit `item_id`)   |
+| Aggregator             | aggregator          | yes              | yes — but **only own users** (cross-aggregator returns `items:[]`) | no             | no                     |
+| Voice (future)         | voice               | (rejected today) | (rejected)                                                     | (rejected)     | (rejected)             |
+
+The future voice tier will piggyback on the aggregator behavior: when a
+voice instance is delegated to an aggregator, voice-dpg simply starts
+asserting the aggregator's `x-acting-org-id` — no code change needed.
+
+### Request
+
+```http
+POST /api/v1/admin/participant
+x-api-key: <network_service or aggregator apikey>
+x-acting-org-id: <org id>
+content-type: application/json
+
+{
+  "email": "user@example.com",
+  "name": "Asha P",
+  "terms_accepted": true,
+  "privacy_accepted": true,
+  "channel": "bulk",
+  "item_state": { ... item-schema-validated payload ... },
+  "item_id": "optional-uuid-for-update-only",
+  "network": "blue_dot",
+  "domain": "seeker",
+  "item_type": "profile_1.0"
+}
 ```
 
-The route is in `apps/api/src/routes/v1/admin/onboard_participant.ts` (Plan 2 Task 5). What it does:
+Identity rule: at least one of `email` or `phone_number` must be provided.
 
-1. Validates the acting org is `aggregator` or `voice` (not `network_service`).
-2. Pre-checks uniqueness on `email` / `phone_number`. 409 USER_ALREADY_EXISTS if a row exists.
-3. In one DB transaction:
-   - `auth.api.signUpEmail` creates user + account (placeholder password — the actual credential is set later, typically via OTP).
-   - UPDATE the new row with phone, DOB, terms/privacy consent, and the **4 attribution columns** (`onboarded_by_org_id`, `onboarded_via`, `onboarded_source_id`, `onboarded_at`) added in Plan 2 Task 1.
-   - INSERT the profile_1.0 item via the canonical item-create service (`create_profile_item` from `apps/api/src/lib/profile_item.ts`).
-4. Returns `{ user_id, profile_item_id, onboarded_at }`.
+### Response
 
-### Targeting a different network / domain / item_type
-
-By default the endpoint writes the profile as `blue_dot` / `seeker` / `profile_1.0`. Override per call when this Signals instance serves a different schema (e.g. an instance serving `onest_yellow_dot` / `student`):
-
-```bash
-curl -X POST http://localhost:2742/api/v1/admin/onboard_participant \
-  -H 'x-api-key: <key>' \
-  -H 'x-acting-org-id: <org_id>' \
-  -H 'Content-Type: application/json' \
-  -d '{
-    "phone_number": "+919876543210",
-    "name": "Anita",
-    "terms_accepted": true,
-    "privacy_accepted": true,
-    "channel": "bulk",
-    "network": "onest_yellow_dot",
-    "domain": "student",
-    "item_type": "profile_1.0",
-    "profile": {
-      "Full Name": "Anita",
-      "Phone Number": "9876543210"
+```json
+{
+  "user_id": "...",
+  "user_existed": true,
+  "onboarded_at": null,
+  "items": [
+    {
+      "item_id": "...",
+      "item_network": "blue_dot",
+      "item_domain": "seeker",
+      "item_type": "profile_1.0",
+      "item_state": { ... },
+      "created_at": "...",
+      "updated_at": "..."
     }
-  }'
+  ]
+}
 ```
 
-Signals validates that the trio matches a served binding for this instance and that the `profile` payload conforms to the resolved item_type schema. A mismatch returns `400 UNSERVED_DOMAIN` (or `UNSERVED_NETWORK` / `UNSERVED_ITEM_TYPE` / `INVALID_ITEM_STATE`) with the offending values in the message.
+`onboarded_at` is set only when this call created a new user; null
+otherwise. `items` is scoped to the networks this Signals instance
+serves.
 
-### Attribution model
+### Error matrix (additions)
 
-Every participant onboarded through this endpoint carries:
+| Caller shape | HTTP | error | When |
+|---|---|---|---|
+| acting_org missing | 403 | `INVALID_ACTING_ORG` | request reached the handler without acting_org |
+| acting_org_type == 'voice' (or anything not in aggregator/network_service) | 403 | `ACTING_ORG_TYPE_NOT_ALLOWED` | not allowed today |
+| network_service + invalid `item_id` (doesn't belong to user) | 403 | `ITEM_NOT_OWNED_BY_USER` | item ownership check failed |
+| email + phone race | 409 | `USER_ALREADY_EXISTS` | another caller created the same identity between SELECT and signUp |
 
-| Column | Value |
-|---|---|
-| `onboarded_by_org_id` | The aggregator/voice org_id from `x-acting-org-id` |
-| `onboarded_via` | `'bulk'`, `'link'`, `'voice'`, or `'self'` |
-| `onboarded_source_id` | Opaque upstream id (your bulk_upload_id, link_id, voice_session_id, …) |
-| `onboarded_at` | Server-side timestamp |
+### Migration from `/admin/onboard_participant`
 
-The aggregator dashboard (Plan 3, not yet implemented) queries by `onboarded_by_org_id` to scope to a single aggregator's participants. The source_id is opaque to Signals — keep your own record in aggregator-dpg / voice-dpg if you need to drill back to the originating CSV row / call session.
+The old endpoint is removed. Callers update:
+- URL: `/admin/onboard_participant` → `/admin/participant`
+- Body: `profile` → `item_state`
+- Body: `profile_item_id` (not previously used) → `item_id` (now meaningful for network_service updates)
+- Response: `profile_item_id` → `items: [...]` (full post-write set)
 
-### Phone-only onboarding
+## Aggregator dashboard — multi-domain by_domain shape
 
-The endpoint accepts either `email` OR `phone_number` (or both). If only `phone_number` is provided, the route synthesises a `<uuid>@no-email.local` placeholder for better-auth's signUp — the user's later OTP login binds the real verification.
+`GET /api/v1/aggregator/dashboard` returns a per-domain rollup + paginated
+participants. Auth: aggregator-typed acting_org; the `org.metadata.domains`
+array must be populated via `/admin/aggregator/upsert` before this endpoint
+returns data.
 
-## Aggregator dashboard
+### Setup contract
 
-Per-aggregator participant metrics for the UI's hero counts + paginated list. Backed by a cached `participant_metrics` table that recomputes on-demand when stale.
+- The aggregator-dpg caller upserts the aggregator with `domains: ['seeker',
+  'provider']` (or the subset relevant to their flow). Persisted under
+  `organization.metadata.domains`.
+- An empty `domains` array → 400 `NO_DOMAINS_CONFIGURED` on the dashboard.
+- `GET /dashboard?domain=seeker` narrows the response to one domain block.
+  The `?domain=` value must be in the configured set; else 400
+  `DOMAIN_NOT_CONFIGURED`.
 
 ### Endpoint
 
@@ -198,50 +218,102 @@ curl -X GET 'http://localhost:2742/api/v1/aggregator/dashboard?page=1&limit=50&s
   -H 'x-acting-org-id: <BBMP org_id>'
 ```
 
-Response (abridged):
+### Response shape
 
-```json
+```jsonc
 {
-  "rollup": {
-    "participants_total": 1247,
-    "by_status": { "new": 84, "active": 612, "at_risk": 219, "satisfied": 270, "inactive": 62 },
-    "applications_pending": 380, "applications_accepted": 421, "applications_rejected": 192
-  },
-  "participants": [
-    {
-      "user_id": "usr_…",
-      "profile_status": "at_risk",
-      "profile_completion_pct": 67,
-      "actionable_tags": ["missing_phone_number", "no_recent_activity"],
-      "applications_pending": 0, "applications_accepted": 0, "applications_rejected": 3, "applications_total": 3,
-      "…": "…"
+  "by_domain": {
+    "seeker": {
+      "rollup": {
+        "items_total": 1247,
+        "by_status": { "new": 84, "active": 612, "at_risk": 219, "inactive": 270 },
+        "applications_total": 993,
+        "applications_pending": 380,
+        "applications_shortlisted": 421,
+        "applications_rejected": 192,
+        "unique_users": 1180,
+        "complete_profiles_count": 540,
+        "avg_profiles_per_user": 1.06,
+        "users_with_applications": 894,
+        "avg_applications_per_user": 1.11,
+        "new_users_last_7_days": 23,
+        "mode_wise_counts": { "bulk": 800, "link": 320, "voice": 60, "self": 0 }
+      },
+      "participants": [ /* per-item rows */ ],
+      "total_matching": 219,
+      "next_cursor": "2"
+    },
+    "provider": {
+      "rollup": { "items_total": 84, "...": "..." },
+      "participants": [ /* per-item rows incl. openings */ ],
+      "total_matching": 12,
+      "next_cursor": null
     }
-  ],
-  "next_cursor": "2",
-  "total_matching": 219,
+  },
   "metadata": {
-    "last_computed_at": "2026-05-22T07:00:00.000Z",
+    "last_computed_at": "...",
     "ttl_seconds": 3600,
     "refreshed": false
   }
 }
 ```
 
-### Cache + TTL contract
+### Per-(aggregator, domain) recompute
 
-- Per-aggregator rows live in `participant_metrics`. `last_computed_at` per row is the TTL field.
-- Each dashboard / export request reads `MIN(last_computed_at)` for the aggregator. If older than `DASHBOARD_CACHE_TTL_SECONDS` (default 3600), the handler recomputes synchronously under a Postgres advisory lock (`pg_try_advisory_lock(hash(aggregator_id))`).
-- Concurrent requests during a recompute don't pile up: the second-and-later requests see `pg_try_advisory_lock` return `false`, serve stale data, and let the in-flight recompute land within seconds.
-- `metadata.refreshed: true` means *this* request triggered the recompute; `false` means it served what was already in the cache (whether fresh or stale-during-contention).
-- First-ever read for an aggregator (no rows) is treated as stale → triggers compute.
+Each `(aggregator, domain)` pair has its own staleness TTL and PG advisory
+lock. Multi-domain aggregators recompute their domains in parallel; one
+slow domain doesn't block the other. The top-level `metadata.last_computed_at`
+is the earliest across the in-scope domains.
+
+- Per-(aggregator, domain) rows live in `item_metrics`. `last_computed_at`
+  per row is the TTL field.
+- Each dashboard / export request reads `MIN(last_computed_at)` for the
+  (aggregator, domain) pair. If older than `DASHBOARD_CACHE_TTL_SECONDS`
+  (default 3600), the handler recomputes synchronously under a Postgres
+  advisory lock keyed on `(aggregator_id, domain)`.
+- Concurrent requests during a recompute don't pile up: the second-and-later
+  requests see `pg_try_advisory_lock` return `false`, serve stale data, and
+  let the in-flight recompute land within seconds.
+- `metadata.refreshed: true` means *this* request triggered at least one
+  domain's recompute; `false` means every in-scope domain was served from
+  cache.
+- First-ever read for an (aggregator, domain) pair (no rows) is treated as
+  stale → triggers compute.
 
 ### Filtering + pagination
 
-- `?status=<one of new|active|at_risk|satisfied|inactive>` scopes the list (rollup always shows the full status histogram regardless).
-- `?page=1&limit=50` for offset pagination. Default page=1, default limit=50, max 500.
-- `total_matching` is the count after filter, useful for "showing N of M" UI badges.
+- `?domain=<one of the configured domains>` narrows the response to one
+  domain block. Omit for all configured domains.
+- `?status=<one of new|active|at_risk|inactive>` scopes the list (the
+  `by_status` rollup always shows the full status histogram regardless).
+- `?page=1&limit=50` for offset pagination. Default page=1, default limit=50,
+  max 500. Pagination applies inside each returned domain block.
+- `total_matching` (per domain block) is the count after filter, useful for
+  "showing N of M" UI badges.
 
-The UI hits the API on every filter change. Use TanStack Query (or your preferred fetcher) and key the cache by `(aggregator_id, page, limit, status)` with `staleTime: 60_000` so users navigating filters back-and-forth don't re-fetch.
+The UI hits the API on every filter change. Use TanStack Query (or your
+preferred fetcher) and key the cache by `(aggregator_id, domain, page,
+limit, status)` with `staleTime: 60_000` so users navigating filters
+back-and-forth don't re-fetch.
+
+### network.json contract: metric_categories
+
+Each network's `apply` action's `seeker→provider` interaction declares
+`metric_categories` mapping its event_schema.status enum to canonical
+buckets:
+
+```jsonc
+"metric_categories": {
+  "shortlisted": ["shortlisted"],
+  "rejected":    ["rejected"],
+  "pending":     ["created", "submitted"]
+}
+```
+
+`metric_categories: null` (or absent) on an interaction means
+"not tracked in the rollup" — recompute returns 0 for those counts.
+The pilot leaves provider→seeker invites at null in both blue_dot and
+purple_dot; future product may populate them.
 
 ### CSV export
 
@@ -252,10 +324,26 @@ curl -X GET 'http://localhost:2742/api/v1/aggregator/dashboard/export?status=at_
   -o participants.csv
 ```
 
-Streamed `text/csv` response. Same staleness contract as the dashboard route. The body is generated row-by-row in pages of 5000 so 200k+ participants don't OOM the API process.
+Streamed `text/csv` response. Same staleness contract as the dashboard route.
+The body is generated row-by-row in pages of 5000 so 200k+ rows don't OOM
+the API process.
+
+20-column layout (in order):
+
+```
+item_id, item_domain, item_type, owner_user_id, onboarded_by_org_id, onboarded_via,
+profile_status, profile_completion_pct, profile_created_at, profile_last_updated_at, age_days,
+applications_total, applications_pending, applications_shortlisted, applications_rejected,
+last_applied_at, last_shortlisted_at, last_rejected_at, openings, actionable_tags
+```
+
+`?domain=` filters the CSV the same way it filters the dashboard. Multi-domain
+orgs see rows from every configured domain in the same CSV unless filtered —
+the `item_domain` column tells you which domain each row belongs to.
 
 CSV format notes:
 - `actionable_tags` is pipe-separated (`missing_phone_number|no_recent_activity`) to keep one column per metric.
+- `openings` is populated only for provider-domain rows; seeker rows are blank in that column.
 - Standard RFC 4180 escaping: commas, quotes, newlines inside a value wrap the cell in double-quotes; embedded `"` doubles to `""`.
 - Filename suggested via `content-disposition: attachment; filename="participants_<org_id>_<YYYY-MM-DD>.csv"`.
 
@@ -323,10 +411,70 @@ This is safe to defer because:
   aggregator on this instance", which an operator already needs to assume
   as part of treating the key as a secret.
 
+## Acting on behalf of a user (aggregator)
+
+Aggregator-typed acting orgs can file actions on behalf of users they onboarded (e.g. counsellor-driven applications via the aggregator-dpg service apikey).
+Two endpoints accept an optional `acting_as_user_id` body field:
+
+- `POST /api/v1/action/perform`
+- `POST /api/v1/action/update-status`
+
+### Required headers + body
+
+```http
+POST /api/v1/action/perform
+x-api-key: <aggregator-dpg apikey>
+x-acting-org-id: <aggregator org id from /admin/aggregator/upsert>
+
+{
+  "action_type": "apply",
+  "source_item": { ... },
+  "target_item": { ... },
+  "requirements_snapshot": { ... },
+  "acting_as_user_id": "<target user id>"
+}
+```
+
+### Authorization rules
+
+The target user (`acting_as_user_id`) must satisfy:
+
+- `user.onboarded_by_org_id === <x-acting-org-id>`
+
+The channel value (`user.onboarded_via`) is NOT part of the check — an aggregator that onboarded a user via `bulk` earlier can still act for that user via `voice` later.
+
+Only `aggregator`-type acting orgs may use `acting_as_user_id`. `voice` and `network_service` callers receive `403 ACTING_ORG_TYPE_NOT_ALLOWED`.
+
+For `/action/perform`, the source item must also be owned by the effective actor — `403 SOURCE_ITEM_NOT_OWNED_BY_ACTOR` otherwise. For `/action/update-status`, the existing action's target item owner must match the effective actor — `403 TARGET_ITEM_NOT_OWNED_BY_ACTOR` otherwise.
+
+### Error matrix
+
+| Caller shape | `acting_as_user_id` | Outcome |
+|---|---|---|
+| No `x-acting-org-id` | absent | Self-acted (unchanged). |
+| No `x-acting-org-id` | present | `400 CANNOT_OVERRIDE_SELF` |
+| Aggregator acting_org | absent | `400 MISSING_ACTING_AS_USER_ID` |
+| Aggregator acting_org | present, owned by this aggregator | `200 / 201` |
+| Aggregator acting_org | present, owned by another org | `403 NOT_AUTHORIZED_FOR_TARGET` |
+| Voice / network_service acting_org | any | `403 ACTING_ORG_TYPE_NOT_ALLOWED` |
+
+### Audit trail
+
+Successful on-behalf-of writes populate two columns on `item_actions`:
+
+| Column | Value |
+|---|---|
+| `performed_by_org_id` | the aggregator org id from `x-acting-org-id` |
+| `performed_by_service_user_id` | the apikey owner's user id (Signals service account) |
+
+For self-acted writes, both columns are NULL. There are no indexes on these columns today — query via `WHERE performed_by_org_id = $1` sequentially when needed. Indexes will be added if audit queries become a hot path.
+
+For `/action/update-status`, the audit fields reflect the LATEST actor. If a different aggregator updates an action that was previously filed by another aggregator, the columns are overwritten and a WARN log is emitted server-side with both the previous and new `performed_by_org_id` for ops visibility.
+
 ## Voice DPG follows the same pattern
 
-When voice-dpg ships (separate stream, not in this PR), it uses its own
-apikey from the seed and asserts `x-acting-org-id` set to either:
+Voice-dpg uses its own apikey from the seed and asserts `x-acting-org-id`
+set to either:
 
 - the aggregator org id when voice is hosted per-aggregator
   (e.g. BBMP runs its own voice instance for itself); or
@@ -348,3 +496,7 @@ need to discriminate (like the aggregator upsert) do so via
   voice-dpg to onboard participants, attributed back to the acting org.
 - [Plan 3 — participant metrics service](../superpowers/plans/2026-05-21-participant-metrics-service.md) —
   the metrics dashboard each aggregator's UI reads.
+- [Plan A — action perform on-behalf-of](../superpowers/plans/2026-05-22-action-perform-on-behalf-of.md) —
+  voice DPG files actions on behalf of users it onboarded; adds the
+  optional acting_org preHandler, two audit columns on `item_actions`,
+  and the `resolve_acting_actor` helper.

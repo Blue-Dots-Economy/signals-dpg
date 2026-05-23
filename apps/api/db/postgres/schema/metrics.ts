@@ -1,21 +1,30 @@
 import { pgTable, text, integer, timestamp } from 'drizzle-orm/pg-core';
-import { user, organization } from './auth.js';
+import { organization } from './auth.js';
 
 /**
- * Cached per-participant metrics for the aggregator dashboard.
+ * Item-keyed metrics for the aggregator dashboard (Plan B).
  *
- * Owner: apps/api/src/services/metrics/recompute.ts (the recompute path is
- * the only writer). The dashboard route is a pure reader. The TTL contract
- * lives in apps/api/src/services/metrics/staleness.ts — last_computed_at
- * is the only field that matters for staleness.
+ * Replaces the Plan 3 `participant_metrics` table. One row per item
+ * (not per user) — a user with two profiles gets two rows; a user
+ * spanning seeker + provider gets one row per domain.
  *
- * onboarded_by_org_id is denormalised from `user.onboardedByOrgId` (Plan 2)
- * so the dashboard can scope without a join. Recompute keeps it in sync.
+ * No FK on item_id — `items` is partitioned and Drizzle's FK story
+ * doesn't reach partition keys cleanly. Soft reference via the text
+ * column; recompute is the only writer.
+ *
+ * No cascade on onboarded_by_org_id FK — attribution survives org
+ * deletion, matching Plan 2's `user.onboardedByOrgId` convention.
+ *
+ * profile_status is computed per-domain (seeker vs provider) and is
+ * never null in practice — the catch-all in compute_provider_status
+ * absorbs any non-matching tail into 'inactive'.
  */
-export const participant_metrics = pgTable('participant_metrics', {
-  userId: text('user_id')
-    .primaryKey()
-    .references(() => user.id, { onDelete: 'cascade' }),
+export const item_metrics = pgTable('item_metrics', {
+  itemId: text('item_id').primaryKey(),
+  itemNetwork: text('item_network').notNull(),
+  itemDomain: text('item_domain').notNull(),
+  itemType: text('item_type').notNull(),
+  ownerUserId: text('owner_user_id').notNull(),
   onboardedByOrgId: text('onboarded_by_org_id').references(() => organization.id),
   onboardedVia: text('onboarded_via'),
 
@@ -25,10 +34,18 @@ export const participant_metrics = pgTable('participant_metrics', {
   profileLastUpdatedAt: timestamp('profile_last_updated_at'),
   ageDays: integer('age_days'),
 
-  applicationsPending: integer('applications_pending').default(0),
-  applicationsAccepted: integer('applications_accepted').default(0),
-  applicationsRejected: integer('applications_rejected').default(0),
   applicationsTotal: integer('applications_total').default(0),
+  applicationsPending: integer('applications_pending').default(0),
+  applicationsShortlisted: integer('applications_shortlisted').default(0),
+  applicationsRejected: integer('applications_rejected').default(0),
+
+  // Seeker-only (NULL for provider rows)
+  lastAppliedAt: timestamp('last_applied_at'),
+
+  // Provider-only (NULL for seeker rows)
+  lastShortlistedAt: timestamp('last_shortlisted_at'),
+  lastRejectedAt: timestamp('last_rejected_at'),
+  openings: integer('openings'),
 
   actionableTags: text('actionable_tags').array(),
 
