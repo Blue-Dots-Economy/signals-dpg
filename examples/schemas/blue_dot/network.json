@@ -322,6 +322,11 @@
                 "type": "string"
               }
             }
+          },
+          "metric_categories": {
+            "shortlisted": ["shortlisted"],
+            "rejected": ["rejected"],
+            "pending": ["created", "submitted"]
           }
         },
         {
@@ -384,7 +389,8 @@
                 "type": "string"
               }
             }
-          }
+          },
+          "metric_categories": null
         }
       ]
     }
