@@ -144,11 +144,14 @@ export const recompute_aggregator_domain_metrics = async (
         COUNT(*) FILTER (WHERE action_status = ANY(${pendingArr}::text[]))::int     AS pending,
         COUNT(*) FILTER (WHERE action_status = ANY(${shortlistedArr}::text[]))::int AS shortlisted,
         COUNT(*) FILTER (WHERE action_status = ANY(${rejectedArr}::text[]))::int    AS rejected,
-        MAX(created_at) FILTER (WHERE action_status = ANY(${pendingArr}::text[]) OR action_status = ANY(${shortlistedArr}::text[]) OR action_status = ANY(${rejectedArr}::text[])) AS last_action_at,
+        MAX(created_at)                                                              AS last_applied_at,
         MAX(created_at) FILTER (WHERE action_status = ANY(${shortlistedArr}::text[])) AS last_shortlisted_at,
         MAX(created_at) FILTER (WHERE action_status = ANY(${rejectedArr}::text[]))    AS last_rejected_at
       FROM item_actions
       WHERE ${directionCol} IS NOT NULL
+        AND action_type = ${APPLY_ACTION}
+        AND source_item_domain = 'seeker'
+        AND target_item_domain = 'provider'
       GROUP BY ${directionCol}
     )
     SELECT
@@ -166,7 +169,7 @@ export const recompute_aggregator_domain_metrics = async (
       COALESCE(ac.pending,     0)                AS applications_pending,
       COALESCE(ac.shortlisted, 0)                AS applications_shortlisted,
       COALESCE(ac.rejected,    0)                AS applications_rejected,
-      ac.last_action_at                          AS last_applied_at,
+      ac.last_applied_at                         AS last_applied_at,
       ac.last_shortlisted_at                     AS last_shortlisted_at,
       ac.last_rejected_at                        AS last_rejected_at,
       (i.item_state ->> 'positions')::int        AS openings
