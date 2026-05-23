@@ -72,7 +72,7 @@ const dbState: {
 vi.mock('@api/db/postgres/drizzle_config', () => {
   // The route does TWO selects via db.select():
   //   (a) `resolve_acting_actor` looks up user.onboarded_by_org_id (only
-  //       when acting_org is voice) — returns dbState.userRows.
+  //       when acting_org is aggregator) — returns dbState.userRows.
   //   (b) `fetchLocalItemSnapshot` is itself mocked below, so the second
   //       select is never actually invoked through this mock. We still
   //       toggle to keep the mock shape generic, but the only call we
@@ -120,7 +120,7 @@ vi.stubGlobal(
 // --- mock helpers from action_event_runtime: only fetchLocalItemSnapshot is on the perform path ---
 const { fetchLocalItemSnapshotMock } = vi.hoisted(() => ({
   fetchLocalItemSnapshotMock: vi.fn(async () => ({
-    created_by: 'usr_voice_owned',
+    created_by: 'usr_agg_owned',
     item_id: 'src_item_1',
     item_latitude: null,
     item_longitude: null,
@@ -201,7 +201,7 @@ const VALID_BODY = {
 
 const buildApp = (
   acting_org?: any,
-  request_user: { id: string } = { id: 'usr_voice_owned' },
+  request_user: { id: string } = { id: 'usr_agg_owned' },
 ): FastifyInstance => {
   const app = Fastify().withTypeProvider<ZodTypeProvider>();
   app.setValidatorCompiler(validatorCompiler);
@@ -221,9 +221,9 @@ describe('POST /api/v1/action/perform — on-behalf-of', () => {
   });
 
   it('self-acted: no acting_org, no body field → forwards effective_user_id as source_item_owner, audit null', async () => {
-    // The snapshot's created_by is "usr_voice_owned" — match request.user
+    // The snapshot's created_by is "usr_agg_owned" — match request.user
     // so the SOURCE_ITEM_NOT_OWNED_BY_ACTOR guard does not trip.
-    const app = buildApp(undefined, { id: 'usr_voice_owned' });
+    const app = buildApp(undefined, { id: 'usr_agg_owned' });
     const res = await app.inject({
       method: 'POST',
       url: '/perform',
@@ -232,7 +232,7 @@ describe('POST /api/v1/action/perform — on-behalf-of', () => {
     expect(res.statusCode).toBe(201);
     expect(fetchCalls).toHaveLength(1);
     expect(fetchCalls[0].body).toMatchObject({
-      source_item_owner: 'usr_voice_owned',
+      source_item_owner: 'usr_agg_owned',
       performed_by_org_id: null,
       performed_by_service_user_id: null,
     });
@@ -250,10 +250,10 @@ describe('POST /api/v1/action/perform — on-behalf-of', () => {
     expect(fetchCalls).toHaveLength(0);
   });
 
-  it('400 MISSING_ACTING_AS_USER_ID when voice acting_org but no body field', async () => {
+  it('400 MISSING_ACTING_AS_USER_ID when aggregator acting_org but no body field', async () => {
     const app = buildApp({
-      org_id: 'org_voice_1',
-      org_type: 'voice',
+      org_id: 'org_agg_1',
+      org_type: 'aggregator',
       service_user_id: 'svc',
     });
     const res = await app.inject({
@@ -266,11 +266,11 @@ describe('POST /api/v1/action/perform — on-behalf-of', () => {
     expect(fetchCalls).toHaveLength(0);
   });
 
-  it('403 ACTING_ORG_TYPE_NOT_ALLOWED for aggregator acting_org', async () => {
+  it('403 ACTING_ORG_TYPE_NOT_ALLOWED for voice acting_org', async () => {
     const app = buildApp({
-      org_id: 'org_agg',
-      org_type: 'aggregator',
-      service_user_id: 'svc_agg',
+      org_id: 'org_voice_1',
+      org_type: 'voice',
+      service_user_id: 'svc_voice_1',
     });
     const res = await app.inject({
       method: 'POST',
@@ -282,13 +282,13 @@ describe('POST /api/v1/action/perform — on-behalf-of', () => {
     expect(fetchCalls).toHaveLength(0);
   });
 
-  it('403 NOT_AUTHORIZED_FOR_TARGET when target onboarded by another voice org', async () => {
+  it('403 NOT_AUTHORIZED_FOR_TARGET when target onboarded by another aggregator', async () => {
     dbState.userRows = [
-      { id: 'usr_other', onboardedByOrgId: 'org_voice_2' },
+      { id: 'usr_other', onboardedByOrgId: 'org_agg_2' },
     ];
     const app = buildApp({
-      org_id: 'org_voice_1',
-      org_type: 'voice',
+      org_id: 'org_agg_1',
+      org_type: 'aggregator',
       service_user_id: 'svc',
     });
     const res = await app.inject({
@@ -301,32 +301,32 @@ describe('POST /api/v1/action/perform — on-behalf-of', () => {
     expect(fetchCalls).toHaveLength(0);
   });
 
-  it('voice happy path: forwards acting_as_user_id as source_item_owner + populates audit', async () => {
+  it('aggregator happy path: forwards acting_as_user_id as source_item_owner + populates audit', async () => {
     dbState.userRows = [
-      { id: 'usr_voice_owned', onboardedByOrgId: 'org_voice_1' },
+      { id: 'usr_agg_owned', onboardedByOrgId: 'org_agg_1' },
     ];
     const app = buildApp({
-      org_id: 'org_voice_1',
-      org_type: 'voice',
-      service_user_id: 'svc_voice_1',
+      org_id: 'org_agg_1',
+      org_type: 'aggregator',
+      service_user_id: 'svc_agg_1',
     });
     const res = await app.inject({
       method: 'POST',
       url: '/perform',
-      payload: { ...VALID_BODY, acting_as_user_id: 'usr_voice_owned' },
+      payload: { ...VALID_BODY, acting_as_user_id: 'usr_agg_owned' },
     });
     expect(res.statusCode).toBe(201);
     expect(fetchCalls).toHaveLength(1);
     expect(fetchCalls[0].body).toMatchObject({
-      source_item_owner: 'usr_voice_owned',
-      performed_by_org_id: 'org_voice_1',
-      performed_by_service_user_id: 'svc_voice_1',
+      source_item_owner: 'usr_agg_owned',
+      performed_by_org_id: 'org_agg_1',
+      performed_by_service_user_id: 'svc_agg_1',
     });
   });
 
-  it('voice on-behalf-of: 403 SOURCE_ITEM_NOT_OWNED_BY_ACTOR when snapshot.created_by != effective_user_id', async () => {
+  it('aggregator on-behalf-of: 403 SOURCE_ITEM_NOT_OWNED_BY_ACTOR when snapshot.created_by != effective_user_id', async () => {
     dbState.userRows = [
-      { id: 'usr_voice_owned', onboardedByOrgId: 'org_voice_1' },
+      { id: 'usr_agg_owned', onboardedByOrgId: 'org_agg_1' },
     ];
     // Override the snapshot mock to return a DIFFERENT owner than acting_as_user_id.
     fetchLocalItemSnapshotMock.mockResolvedValueOnce({
@@ -337,14 +337,14 @@ describe('POST /api/v1/action/perform — on-behalf-of', () => {
       item_private_state: {},
     });
     const app = buildApp({
-      org_id: 'org_voice_1',
-      org_type: 'voice',
-      service_user_id: 'svc_voice_1',
+      org_id: 'org_agg_1',
+      org_type: 'aggregator',
+      service_user_id: 'svc_agg_1',
     });
     const res = await app.inject({
       method: 'POST',
       url: '/perform',
-      payload: { ...VALID_BODY, acting_as_user_id: 'usr_voice_owned' },
+      payload: { ...VALID_BODY, acting_as_user_id: 'usr_agg_owned' },
     });
     expect(res.statusCode).toBe(403);
     expect(res.json()).toMatchObject({ error: 'SOURCE_ITEM_NOT_OWNED_BY_ACTOR' });

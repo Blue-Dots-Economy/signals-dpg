@@ -43,8 +43,8 @@ export type ResolveActingActorInput = {
 };
 
 /**
- * Single source of truth for the on-behalf-of authorization matrix
- * documented in
+ * Single source of truth for the aggregator on-behalf-of authorization
+ * matrix documented in
  * docs/superpowers/specs/2026-05-22-action-perform-on-behalf-of-design.md.
  */
 export const resolve_acting_actor = async (
@@ -63,7 +63,7 @@ export const resolve_acting_actor = async (
     };
   }
 
-  if (acting_org.org_type !== 'voice') {
+  if (acting_org.org_type !== 'aggregator') {
     return { ok: false, status: 403, error: 'ACTING_ORG_TYPE_NOT_ALLOWED' };
   }
 
@@ -109,11 +109,11 @@ export const lookup_onboarded_by_org = async (
  */
 export const action_error_messages: Record<ResolveErr['error'], string> = {
   CANNOT_OVERRIDE_SELF:
-    'acting_as_user_id requires an x-acting-org-id header from a voice-type service apikey.',
+    'acting_as_user_id requires an x-acting-org-id header naming an aggregator-type acting org.',
   MISSING_ACTING_AS_USER_ID:
-    'voice-type acting_org requires acting_as_user_id in the request body.',
+    'aggregator-type acting_org requires acting_as_user_id in the request body.',
   ACTING_ORG_TYPE_NOT_ALLOWED:
-    'only voice-type acting orgs may act on behalf of users today.',
+    'only aggregator-type acting orgs may act on behalf of users today.',
   NOT_AUTHORIZED_FOR_TARGET:
-    'acting_as_user_id is not a user onboarded by this voice org.',
+    'acting_as_user_id is not a user onboarded by this aggregator.',
 };

@@ -64,7 +64,7 @@ vi.mock('@api/plugins/auth/auth_middleware', () => ({
 
 // --- mock drizzle: the handler does TWO selects on the db:
 //   (1) item_actions row by action_id (existingAction lookup)
-//   (2) user.onboarded_by_org_id (inside resolve_acting_actor — only when voice)
+//   (2) user.onboarded_by_org_id (inside resolve_acting_actor — only when aggregator)
 // We toggle between the two via a module-level counter.
 const dbState: {
   userRows: Array<{ id: string; onboardedByOrgId: string | null }>;
@@ -139,7 +139,7 @@ vi.mock('@/utils/action_event_runtime', async () => {
     insertActionEvent: vi.fn(async () => undefined),
     mirrorActionEventToSourceInstance: vi.fn(() => undefined),
     fetchLocalItemSnapshot: vi.fn(async () => ({
-      created_by: 'usr_voice_owned',
+      created_by: 'usr_agg_owned',
       item_id: 'target_item_1',
       item_latitude: null,
       item_longitude: null,
@@ -186,7 +186,7 @@ const EXISTING_ACTION = {
   target_item_type: 'job_posting_1.0',
   target_item_id: '22222222-2222-4222-8222-222222222222',
   target_item_instance_url: 'http://target.local',
-  target_item_owner: 'usr_voice_owned',
+  target_item_owner: 'usr_agg_owned',
   requirements_snapshot: {},
   performed_by_org_id: null,
   performed_by_service_user_id: null,
@@ -199,7 +199,7 @@ const VALID_BODY = {
 
 const buildApp = (
   acting_org?: unknown,
-  request_user: { id: string } = { id: 'usr_voice_owned' },
+  request_user: { id: string } = { id: 'usr_agg_owned' },
 ): FastifyInstance => {
   const app = Fastify().withTypeProvider<ZodTypeProvider>();
   app.setValidatorCompiler(validatorCompiler);
@@ -247,10 +247,10 @@ describe('POST /api/v1/action/update-status — on-behalf-of', () => {
     expect(dbState.updates).toHaveLength(0);
   });
 
-  it('400 MISSING_ACTING_AS_USER_ID with voice acting_org and no body field', async () => {
+  it('400 MISSING_ACTING_AS_USER_ID with aggregator acting_org and no body field', async () => {
     const app = buildApp({
-      org_id: 'org_voice_1',
-      org_type: 'voice',
+      org_id: 'org_agg_1',
+      org_type: 'aggregator',
       service_user_id: 'svc',
     });
     const res = await app.inject({
@@ -263,45 +263,7 @@ describe('POST /api/v1/action/update-status — on-behalf-of', () => {
     expect(dbState.updates).toHaveLength(0);
   });
 
-  it('403 ACTING_ORG_TYPE_NOT_ALLOWED for aggregator', async () => {
-    const app = buildApp({
-      org_id: 'org_agg',
-      org_type: 'aggregator',
-      service_user_id: 'svc_agg',
-    });
-    const res = await app.inject({
-      method: 'POST',
-      url: '/update-status',
-      payload: { ...VALID_BODY, acting_as_user_id: 'usr_voice_owned' },
-    });
-    expect(res.statusCode).toBe(403);
-    expect(res.json()).toMatchObject({ error: 'ACTING_ORG_TYPE_NOT_ALLOWED' });
-    expect(dbState.updates).toHaveLength(0);
-  });
-
-  it('403 NOT_AUTHORIZED_FOR_TARGET when target onboarded by another voice org', async () => {
-    dbState.userRows = [
-      { id: 'usr_voice_owned', onboardedByOrgId: 'org_voice_2' },
-    ];
-    const app = buildApp({
-      org_id: 'org_voice_1',
-      org_type: 'voice',
-      service_user_id: 'svc',
-    });
-    const res = await app.inject({
-      method: 'POST',
-      url: '/update-status',
-      payload: { ...VALID_BODY, acting_as_user_id: 'usr_voice_owned' },
-    });
-    expect(res.statusCode).toBe(403);
-    expect(res.json()).toMatchObject({ error: 'NOT_AUTHORIZED_FOR_TARGET' });
-    expect(dbState.updates).toHaveLength(0);
-  });
-
-  it('voice happy path: writes audit fields to the UPDATE', async () => {
-    dbState.userRows = [
-      { id: 'usr_voice_owned', onboardedByOrgId: 'org_voice_1' },
-    ];
+  it('403 ACTING_ORG_TYPE_NOT_ALLOWED for voice', async () => {
     const app = buildApp({
       org_id: 'org_voice_1',
       org_type: 'voice',
@@ -310,24 +272,62 @@ describe('POST /api/v1/action/update-status — on-behalf-of', () => {
     const res = await app.inject({
       method: 'POST',
       url: '/update-status',
-      payload: { ...VALID_BODY, acting_as_user_id: 'usr_voice_owned' },
+      payload: { ...VALID_BODY, acting_as_user_id: 'usr_agg_owned' },
+    });
+    expect(res.statusCode).toBe(403);
+    expect(res.json()).toMatchObject({ error: 'ACTING_ORG_TYPE_NOT_ALLOWED' });
+    expect(dbState.updates).toHaveLength(0);
+  });
+
+  it('403 NOT_AUTHORIZED_FOR_TARGET when target onboarded by another aggregator', async () => {
+    dbState.userRows = [
+      { id: 'usr_agg_owned', onboardedByOrgId: 'org_agg_2' },
+    ];
+    const app = buildApp({
+      org_id: 'org_agg_1',
+      org_type: 'aggregator',
+      service_user_id: 'svc',
+    });
+    const res = await app.inject({
+      method: 'POST',
+      url: '/update-status',
+      payload: { ...VALID_BODY, acting_as_user_id: 'usr_agg_owned' },
+    });
+    expect(res.statusCode).toBe(403);
+    expect(res.json()).toMatchObject({ error: 'NOT_AUTHORIZED_FOR_TARGET' });
+    expect(dbState.updates).toHaveLength(0);
+  });
+
+  it('aggregator happy path: writes audit fields to the UPDATE', async () => {
+    dbState.userRows = [
+      { id: 'usr_agg_owned', onboardedByOrgId: 'org_agg_1' },
+    ];
+    const app = buildApp({
+      org_id: 'org_agg_1',
+      org_type: 'aggregator',
+      service_user_id: 'svc_agg_1',
+    });
+    const res = await app.inject({
+      method: 'POST',
+      url: '/update-status',
+      payload: { ...VALID_BODY, acting_as_user_id: 'usr_agg_owned' },
     });
     expect(res.statusCode).toBe(200);
     expect(dbState.updates).toHaveLength(1);
     expect(dbState.updates[0]).toMatchObject({
-      performed_by_org_id: 'org_voice_1',
-      performed_by_service_user_id: 'svc_voice_1',
+      performed_by_org_id: 'org_agg_1',
+      performed_by_service_user_id: 'svc_agg_1',
     });
   });
 
-  it('logs WARN when overwriting on-behalf-of audit fields with a different voice org', async () => {
+  it('logs WARN when overwriting on-behalf-of audit fields with a different aggregator', async () => {
     dbState.userRows = [
-      { id: 'usr_voice_owned', onboardedByOrgId: 'org_voice_1' },
+      { id: 'usr_agg_owned', onboardedByOrgId: 'org_agg_1' },
     ];
     dbState.existingAction = {
       ...EXISTING_ACTION,
-      performed_by_org_id: 'org_voice_2',
-      performed_by_service_user_id: 'svc_voice_2',
+      performed_by_org_id: 'org_agg_2',
+      performed_by_service_user_id: 'svc_agg_2',
     };
     const warnSpy = vi.fn();
     const app = Fastify().withTypeProvider<ZodTypeProvider>();
@@ -335,12 +335,12 @@ describe('POST /api/v1/action/update-status — on-behalf-of', () => {
     app.setSerializerCompiler(serializerCompiler);
     app.addHook('preHandler', async (req) => {
       (req as unknown as { user: { id: string } }).user = {
-        id: 'usr_voice_owned',
+        id: 'usr_agg_owned',
       };
       (req as unknown as { acting_org: unknown }).acting_org = {
-        org_id: 'org_voice_1',
-        org_type: 'voice',
-        service_user_id: 'svc_voice_1',
+        org_id: 'org_agg_1',
+        org_type: 'aggregator',
+        service_user_id: 'svc_agg_1',
       };
       (req as unknown as { log: unknown }).log = {
         warn: warnSpy,
@@ -357,22 +357,22 @@ describe('POST /api/v1/action/update-status — on-behalf-of', () => {
     const res = await app.inject({
       method: 'POST',
       url: '/update-status',
-      payload: { ...VALID_BODY, acting_as_user_id: 'usr_voice_owned' },
+      payload: { ...VALID_BODY, acting_as_user_id: 'usr_agg_owned' },
     });
 
     expect(res.statusCode).toBe(200);
     expect(warnSpy).toHaveBeenCalledTimes(1);
     expect(warnSpy.mock.calls[0][0]).toMatchObject({
       action_id: EXISTING_ACTION.action_id,
-      acting_org_id: 'org_voice_1',
-      previous_performed_by_org_id: 'org_voice_2',
-      new_performed_by_org_id: 'org_voice_1',
+      acting_org_id: 'org_agg_1',
+      previous_performed_by_org_id: 'org_agg_2',
+      new_performed_by_org_id: 'org_agg_1',
     });
   });
 
-  it('voice on-behalf-of: 403 TARGET_ITEM_NOT_OWNED_BY_ACTOR when existing target_item_owner != effective_user_id', async () => {
+  it('aggregator on-behalf-of: 403 TARGET_ITEM_NOT_OWNED_BY_ACTOR when existing target_item_owner != effective_user_id', async () => {
     dbState.userRows = [
-      { id: 'usr_voice_owned', onboardedByOrgId: 'org_voice_1' },
+      { id: 'usr_agg_owned', onboardedByOrgId: 'org_agg_1' },
     ];
     // The existing action's target_item_owner is NOT the actor; override the fixture.
     dbState.existingAction = {
@@ -380,14 +380,14 @@ describe('POST /api/v1/action/update-status — on-behalf-of', () => {
       target_item_owner: 'usr_someone_else',
     };
     const app = buildApp({
-      org_id: 'org_voice_1',
-      org_type: 'voice',
-      service_user_id: 'svc_voice_1',
+      org_id: 'org_agg_1',
+      org_type: 'aggregator',
+      service_user_id: 'svc_agg_1',
     });
     const res = await app.inject({
       method: 'POST',
       url: '/update-status',
-      payload: { ...VALID_BODY, acting_as_user_id: 'usr_voice_owned' },
+      payload: { ...VALID_BODY, acting_as_user_id: 'usr_agg_owned' },
     });
     expect(res.statusCode).toBe(403);
     expect(res.json()).toMatchObject({ error: 'TARGET_ITEM_NOT_OWNED_BY_ACTOR' });

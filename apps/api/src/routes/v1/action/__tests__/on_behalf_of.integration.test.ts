@@ -11,23 +11,23 @@
  *   pnpm db:seed:services:api      # the seeded voice-dpg / aggregator-dpg
  *                                  # service users are NOT used by this
  *                                  # suite — we seed our own scoped
- *                                  # voice-type orgs directly.
+ *                                  # aggregator-type orgs directly.
  *   pnpm --filter api test:integration
  *
  * The test fully self-contains the world it exercises:
  *
- *   - seeds two voice-type orgs (each with its own service user + member +
- *     apikey row), inserted directly via drizzle. We can't reuse
+ *   - seeds two aggregator-type orgs (each with its own service user +
+ *     member + apikey row), inserted directly via drizzle. We can't reuse
  *     /admin/onboard_participant or the existing seed script for this
- *     because (a) `type='voice'` orgs aren't part of the default seed and
- *     (b) we need TWO distinct voice orgs to drive the 403
+ *     because (a) the default seed only mints `network_service` orgs and
+ *     (b) we need TWO distinct aggregator orgs to drive the 403
  *     NOT_AUTHORIZED_FOR_TARGET case;
- *   - onboards a seeker user via /admin/onboard_participant as voice org A
- *     so the source profile item exists and is attributed to A;
+ *   - onboards a seeker user via /admin/onboard_participant as aggregator
+ *     A so the source profile item exists and is attributed to A;
  *   - onboards a provider user (job_posting_1.0) via the same route so a
  *     target item exists in the same DB. The provider user is owned by
- *     voice org A too — irrelevant for the action flow because the action
- *     checks source ownership, not target ownership;
+ *     aggregator A too — irrelevant for the action flow because the
+ *     action checks source ownership, not target ownership;
  *   - boots Fastify on the env-configured API_PORT (default 2742) so the
  *     loopback fetch inside /action/perform → /network/action/perform
  *     lands back on this same instance (the network config pins the
@@ -35,7 +35,7 @@
  *     can't run the test on a random port).
  *
  * Cleanup: afterAll deletes the seeded users (cascades wipe member /
- * apikey / items / item_actions rows via FKs) and the two voice orgs.
+ * apikey / items / item_actions rows via FKs) and the two aggregator orgs.
  *
  * Skip conditions: if POSTGRES_URL/POSTGRES_USER are unset (e.g. CI box
  * without a DB) the suite is described as `.skip` so the run stays green.
@@ -74,26 +74,26 @@ describeIf(`POST /action/perform on-behalf-of (integration)${
   const listen_port = Number(process.env.API_PORT ?? 2742);
   const base_url = `http://localhost:${listen_port}`;
 
-  // Voice org A — performs an on-behalf-of action successfully.
-  const voice_a = {
+  // Aggregator A — performs an on-behalf-of action successfully.
+  const agg_a = {
     org_id: `org_${randomUUID()}`,
     user_id: `usr_${randomUUID()}`,
     member_id: `mem_${randomUUID()}`,
     apikey_id: `key_${randomUUID()}`,
     raw_key: `sk_signals_${randomBytes(24).toString('hex')}`,
-    slug: `voice-int-a-${Date.now()}`,
-    user_email: `voice-int-a-${Date.now()}@signals.local`,
+    slug: `agg-int-a-${Date.now()}`,
+    user_email: `agg-int-a-${Date.now()}@signals.local`,
   };
 
-  // Voice org B — used for the 403 NOT_AUTHORIZED_FOR_TARGET case.
-  const voice_b = {
+  // Aggregator B — used for the 403 NOT_AUTHORIZED_FOR_TARGET case.
+  const agg_b = {
     org_id: `org_${randomUUID()}`,
     user_id: `usr_${randomUUID()}`,
     member_id: `mem_${randomUUID()}`,
     apikey_id: `key_${randomUUID()}`,
     raw_key: `sk_signals_${randomBytes(24).toString('hex')}`,
-    slug: `voice-int-b-${Date.now()}`,
-    user_email: `voice-int-b-${Date.now()}@signals.local`,
+    slug: `agg-int-b-${Date.now()}`,
+    user_email: `agg-int-b-${Date.now()}@signals.local`,
   };
 
   // Seeded by /admin/onboard_participant — captured for assertions /
@@ -147,15 +147,15 @@ describeIf(`POST /action/perform on-behalf-of (integration)${
     const { user, organization, member, apikey } = authSchema;
     const now = new Date();
 
-    // Seed voice orgs directly — type='voice' is needed for the
+    // Seed aggregator orgs directly — type='aggregator' is needed for the
     // on-behalf-of code path. We deliberately bypass the seed script
     // (it only creates network_service orgs).
-    for (const v of [voice_a, voice_b]) {
+    for (const v of [agg_a, agg_b]) {
       await db.insert(organization).values({
         id: v.org_id,
         slug: v.slug,
-        name: `${v.slug} (integration voice)`,
-        type: 'voice',
+        name: `${v.slug} (integration aggregator)`,
+        type: 'aggregator',
         createdAt: now,
       });
       await db.insert(user).values({
@@ -193,15 +193,15 @@ describeIf(`POST /action/perform on-behalf-of (integration)${
       });
     }
 
-    // Onboard the seeker participant as voice org A. The route writes
-    // user.onboarded_by_org_id = voice_a.org_id and creates the
+    // Onboard the seeker participant as aggregator A. The route writes
+    // user.onboarded_by_org_id = agg_a.org_id and creates the
     // profile_1.0 source item owned by the new participant.
     const seekerRes = await app.inject({
       method: 'POST',
       url: '/api/v1/admin/onboard_participant',
       headers: {
-        'x-api-key': voice_a.raw_key,
-        'x-acting-org-id': voice_a.org_id,
+        'x-api-key': agg_a.raw_key,
+        'x-acting-org-id': agg_a.org_id,
         'content-type': 'application/json',
       },
       payload: {
@@ -238,13 +238,13 @@ describeIf(`POST /action/perform on-behalf-of (integration)${
     // Onboard a provider participant the same way to get a target
     // job_posting_1.0 item. The action flow only checks source
     // ownership, so the provider's attribution org is irrelevant — we
-    // reuse voice_a so cleanup is trivial.
+    // reuse agg_a so cleanup is trivial.
     const providerRes = await app.inject({
       method: 'POST',
       url: '/api/v1/admin/onboard_participant',
       headers: {
-        'x-api-key': voice_a.raw_key,
-        'x-acting-org-id': voice_a.org_id,
+        'x-api-key': agg_a.raw_key,
+        'x-acting-org-id': agg_a.org_id,
         'content-type': 'application/json',
       },
       payload: {
@@ -309,17 +309,17 @@ describeIf(`POST /action/perform on-behalf-of (integration)${
         // / member rows.
         await db.delete(user).where(inArray(user.id, seeded_participant_ids));
       }
-      // Voice service users + apikey rows cascade away with the user
+      // Aggregator service users + apikey rows cascade away with the user
       // delete; orgs need an explicit drop (member rows cascade).
       await db
         .delete(apikey)
-        .where(inArray(apikey.id, [voice_a.apikey_id, voice_b.apikey_id]));
+        .where(inArray(apikey.id, [agg_a.apikey_id, agg_b.apikey_id]));
       await db
         .delete(user)
-        .where(inArray(user.id, [voice_a.user_id, voice_b.user_id]));
+        .where(inArray(user.id, [agg_a.user_id, agg_b.user_id]));
       await db
         .delete(organization)
-        .where(inArray(organization.id, [voice_a.org_id, voice_b.org_id]));
+        .where(inArray(organization.id, [agg_a.org_id, agg_b.org_id]));
     } catch (err) {
       // Don't mask the actual test failure with a cleanup blow-up.
       // eslint-disable-next-line no-console
@@ -328,13 +328,13 @@ describeIf(`POST /action/perform on-behalf-of (integration)${
     if (app) await app.close();
   });
 
-  it('voice org A files an action on behalf of the user it onboarded; audit columns populated', async () => {
+  it('aggregator A files an action on behalf of the user it onboarded; audit columns populated', async () => {
     const res = await app.inject({
       method: 'POST',
       url: '/api/v1/action/perform',
       headers: {
-        'x-api-key': voice_a.raw_key,
-        'x-acting-org-id': voice_a.org_id,
+        'x-api-key': agg_a.raw_key,
+        'x-acting-org-id': agg_a.org_id,
         'content-type': 'application/json',
       },
       payload: {
@@ -388,17 +388,17 @@ describeIf(`POST /action/perform on-behalf-of (integration)${
       .limit(1);
     expect(rows).toHaveLength(1);
     expect(rows[0].source_item_owner).toBe(seeker_user_id);
-    expect(rows[0].performed_by_org_id).toBe(voice_a.org_id);
-    expect(rows[0].performed_by_service_user_id).toBe(voice_a.user_id);
+    expect(rows[0].performed_by_org_id).toBe(agg_a.org_id);
+    expect(rows[0].performed_by_service_user_id).toBe(agg_a.user_id);
   });
 
-  it('voice org B is rejected (403 NOT_AUTHORIZED_FOR_TARGET) when acting for a user onboarded by voice org A', async () => {
+  it('aggregator B is rejected (403 NOT_AUTHORIZED_FOR_TARGET) when acting for a user onboarded by aggregator A', async () => {
     const res = await app.inject({
       method: 'POST',
       url: '/api/v1/action/perform',
       headers: {
-        'x-api-key': voice_b.raw_key,
-        'x-acting-org-id': voice_b.org_id,
+        'x-api-key': agg_b.raw_key,
+        'x-acting-org-id': agg_b.org_id,
         'content-type': 'application/json',
       },
       payload: {
