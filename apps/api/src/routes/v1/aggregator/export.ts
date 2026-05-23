@@ -115,7 +115,7 @@ export const aggregator_export: FastifyPluginAsync = async (app) => {
   app.route({
     method: 'GET',
     url: '/dashboard/export',
-    schema: { querystring: ExportQuery },
+    schema: { tags: ['aggregator'], querystring: ExportQuery },
     handler: async (request: ExportRequest, reply: FastifyReply) => {
       const acting = request.acting_org;
       if (!acting || acting.org_type !== 'aggregator') {

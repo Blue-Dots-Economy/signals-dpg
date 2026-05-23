@@ -34,6 +34,7 @@ export const aggregator_dashboard: FastifyPluginAsync = async (app) => {
     method: 'GET',
     url: '/dashboard',
     schema: {
+      tags: ['aggregator'],
       querystring: DashboardRequestQuery,
       response: { 200: DashboardResponse },
     },
