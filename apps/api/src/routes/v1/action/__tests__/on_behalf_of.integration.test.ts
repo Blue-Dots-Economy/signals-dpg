@@ -198,7 +198,7 @@ describeIf(`POST /action/perform on-behalf-of (integration)${
     // profile_1.0 source item owned by the new participant.
     const seekerRes = await app.inject({
       method: 'POST',
-      url: '/api/v1/admin/onboard_participant',
+      url: '/api/v1/admin/participant',
       headers: {
         'x-api-key': agg_a.raw_key,
         'x-acting-org-id': agg_a.org_id,
@@ -216,7 +216,7 @@ describeIf(`POST /action/perform on-behalf-of (integration)${
         network: 'blue_dot',
         domain: 'seeker',
         item_type: 'profile_1.0',
-        profile: {
+        item_state: {
           name: 'Integration Seeker',
           gender: 'female',
           location: 'Bangalore',
@@ -232,7 +232,8 @@ describeIf(`POST /action/perform on-behalf-of (integration)${
     }
     const seekerBody = seekerRes.json();
     seeker_user_id = seekerBody.user_id;
-    seeker_profile_item_id = seekerBody.profile_item_id;
+    seeker_profile_item_id = seekerBody.items[0].item_id;
+    expect(seekerBody.user_existed).toBe(false);
     seeded_participant_ids.push(seeker_user_id);
 
     // Onboard a provider participant the same way to get a target
@@ -241,7 +242,7 @@ describeIf(`POST /action/perform on-behalf-of (integration)${
     // reuse agg_a so cleanup is trivial.
     const providerRes = await app.inject({
       method: 'POST',
-      url: '/api/v1/admin/onboard_participant',
+      url: '/api/v1/admin/participant',
       headers: {
         'x-api-key': agg_a.raw_key,
         'x-acting-org-id': agg_a.org_id,
@@ -259,7 +260,7 @@ describeIf(`POST /action/perform on-behalf-of (integration)${
         network: 'blue_dot',
         domain: 'provider',
         item_type: 'job_posting_1.0',
-        profile: {
+        item_state: {
           jobProviderName: 'Integration Co',
           jobProviderLocation: 'Bangalore',
           hiringManagerName: 'Integration HM',
@@ -278,7 +279,8 @@ describeIf(`POST /action/perform on-behalf-of (integration)${
     }
     const providerBody = providerRes.json();
     provider_user_id = providerBody.user_id;
-    provider_item_id = providerBody.profile_item_id;
+    provider_item_id = providerBody.items[0].item_id;
+    expect(providerBody.user_existed).toBe(false);
     seeded_participant_ids.push(provider_user_id);
   });
 

@@ -134,11 +134,17 @@ export const participant_handler = async (
         { item_state: body.item_state },
       );
     } catch (err) {
-      request.log.error(
+      const e = err as { statusCode?: number; errorCode?: string };
+      const isClientError =
+        typeof e.statusCode === 'number' &&
+        e.statusCode >= 400 &&
+        e.statusCode < 500;
+      const logger = isClientError ? request.log.warn : request.log.error;
+      logger.call(
+        request.log,
         { err, item_id: verdict.item_id },
         'updateItemInternal failed',
       );
-      const e = err as { statusCode?: number; errorCode?: string };
       return reply.code(e.statusCode ?? 500).send({
         error: e.errorCode ?? 'UPDATE_FAILED',
         message: (err as Error).message ?? 'item update failed',
@@ -180,8 +186,13 @@ export const participant_handler = async (
         payload: body.item_state,
       });
     } catch (err) {
-      request.log.error({ err }, 'insert_item failed');
       const e = err as { statusCode?: number; errorCode?: string };
+      const isClientError =
+        typeof e.statusCode === 'number' &&
+        e.statusCode >= 400 &&
+        e.statusCode < 500;
+      const logger = isClientError ? request.log.warn : request.log.error;
+      logger.call(request.log, { err }, 'insert_item failed');
       return reply.code(e.statusCode ?? 500).send({
         error: e.errorCode ?? 'INSERT_ITEM_FAILED',
         message: (err as Error).message ?? 'item insert failed',
