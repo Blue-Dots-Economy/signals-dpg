@@ -84,19 +84,28 @@ jobs:
 
   dep-cruise:
     runs-on: ubuntu-latest
-    if: hashFiles('.dependency-cruiser.cjs') != ''
     continue-on-error: true
+    # `hashFiles()` is not available in job-level `if` expressions — GitHub
+    # evaluates those before the runner provisions a workspace, so there is
+    # no filesystem yet. Guard at step level instead, after checkout.
     steps:
       - uses: actions/checkout@v4
+      - name: Note when dep-cruise config is absent
+        if: hashFiles('.dependency-cruiser.cjs') == ''
+        run: echo "::notice::No .dependency-cruiser.cjs found; skipping dep-cruise."
       - uses: pnpm/action-setup@v4
+        if: hashFiles('.dependency-cruiser.cjs') != ''
         with:
           version: 11.1.2
       - uses: actions/setup-node@v4
+        if: hashFiles('.dependency-cruiser.cjs') != ''
         with:
           node-version: '24'
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+        if: hashFiles('.dependency-cruiser.cjs') != ''
       - run: pnpm dep-check
+        if: hashFiles('.dependency-cruiser.cjs') != ''
 
   helm-lint:
     runs-on: ubuntu-latest
