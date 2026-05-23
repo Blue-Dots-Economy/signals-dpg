@@ -65,11 +65,9 @@ jobs:
 
   test:
     runs-on: ubuntu-latest
-    continue-on-error: true
-    # Warn-only until Vitest lands per-workspace (Plan 1 Task 1 introduces
-    # it in apps/api). Today every workspace ships a placeholder
-    # `echo Error: no test specified && exit 1` so this job is red on every
-    # run. Drop `continue-on-error` once real test scripts exist.
+    # Runs `pnpm -r test` across all workspaces. Packages without their
+    # own test suites use a no-op `echo "no tests yet"` script so the
+    # workspace-recursive run stays green.
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
