@@ -213,15 +213,43 @@ const buildApp = (
   return app;
 };
 
-describe('POST /api/v1/action/update-status — on-behalf-of', () => {
+describe('POST /api/v1/action/update-status (self-acted only)', () => {
   beforeEach(() => {
     dbState.userRows = [];
     dbState.existingAction = { ...EXISTING_ACTION };
     dbState.updates = [];
   });
 
-  it('self-acted: no acting_org, no body field → 200, audit fields null', async () => {
-    const app = buildApp();
+  it('404 ACTION_NOT_FOUND when action_id does not resolve', async () => {
+    dbState.existingAction = null;
+    const app = buildApp(undefined, { id: 'usr_agg_owned' });
+    const res = await app.inject({
+      method: 'POST',
+      url: '/update-status',
+      payload: VALID_BODY,
+    });
+    expect(res.statusCode).toBe(404);
+    expect(res.json()).toMatchObject({ error: 'ACTION_NOT_FOUND' });
+  });
+
+  it('403 NOT_TARGET_ITEM_OWNER when request.user.id is not the action target owner', async () => {
+    dbState.existingAction = {
+      ...EXISTING_ACTION,
+      target_item_owner: 'usr_other_provider',
+    };
+    const app = buildApp(undefined, { id: 'usr_agg_owned' });
+    const res = await app.inject({
+      method: 'POST',
+      url: '/update-status',
+      payload: VALID_BODY,
+    });
+    expect(res.statusCode).toBe(403);
+    expect(res.json()).toMatchObject({ error: 'NOT_TARGET_ITEM_OWNER' });
+    expect(dbState.updates).toHaveLength(0);
+  });
+
+  it('200 when self-acted by the target item owner', async () => {
+    const app = buildApp(undefined, { id: 'usr_agg_owned' });
     const res = await app.inject({
       method: 'POST',
       url: '/update-status',
@@ -230,167 +258,34 @@ describe('POST /api/v1/action/update-status — on-behalf-of', () => {
     expect(res.statusCode).toBe(200);
     expect(dbState.updates).toHaveLength(1);
     expect(dbState.updates[0]).toMatchObject({
-      performed_by_org_id: null,
-      performed_by_service_user_id: null,
+      action_status: 'shortlisted',
     });
   });
 
-  it('400 CANNOT_OVERRIDE_SELF when body field present but no acting_org', async () => {
-    const app = buildApp();
+  it('UPDATE does NOT write performed_by_org_id or performed_by_service_user_id', async () => {
+    const app = buildApp(undefined, { id: 'usr_agg_owned' });
+    const res = await app.inject({
+      method: 'POST',
+      url: '/update-status',
+      payload: VALID_BODY,
+    });
+    expect(res.statusCode).toBe(200);
+    const setPayload = dbState.updates[0];
+    expect(setPayload).not.toHaveProperty('performed_by_org_id');
+    expect(setPayload).not.toHaveProperty('performed_by_service_user_id');
+  });
+
+  it('acting_as_user_id in the body has no effect (field removed from schema)', async () => {
+    // Zod's default object behavior strips unknown keys; the route never
+    // sees `acting_as_user_id`. With self-acted user_id matching the owner,
+    // the request still succeeds.
+    const app = buildApp(undefined, { id: 'usr_agg_owned' });
     const res = await app.inject({
       method: 'POST',
       url: '/update-status',
       payload: { ...VALID_BODY, acting_as_user_id: 'usr_other' },
     });
-    expect(res.statusCode).toBe(400);
-    expect(res.json()).toMatchObject({ error: 'CANNOT_OVERRIDE_SELF' });
-    expect(dbState.updates).toHaveLength(0);
-  });
-
-  it('400 MISSING_ACTING_AS_USER_ID with aggregator acting_org and no body field', async () => {
-    const app = buildApp({
-      org_id: 'org_agg_1',
-      org_type: 'aggregator',
-      service_user_id: 'svc',
-    });
-    const res = await app.inject({
-      method: 'POST',
-      url: '/update-status',
-      payload: VALID_BODY,
-    });
-    expect(res.statusCode).toBe(400);
-    expect(res.json()).toMatchObject({ error: 'MISSING_ACTING_AS_USER_ID' });
-    expect(dbState.updates).toHaveLength(0);
-  });
-
-  it('403 ACTING_ORG_TYPE_NOT_ALLOWED for voice', async () => {
-    const app = buildApp({
-      org_id: 'org_voice_1',
-      org_type: 'voice',
-      service_user_id: 'svc_voice_1',
-    });
-    const res = await app.inject({
-      method: 'POST',
-      url: '/update-status',
-      payload: { ...VALID_BODY, acting_as_user_id: 'usr_agg_owned' },
-    });
-    expect(res.statusCode).toBe(403);
-    expect(res.json()).toMatchObject({ error: 'ACTING_ORG_TYPE_NOT_ALLOWED' });
-    expect(dbState.updates).toHaveLength(0);
-  });
-
-  it('403 NOT_AUTHORIZED_FOR_TARGET when target onboarded by another aggregator', async () => {
-    dbState.userRows = [
-      { id: 'usr_agg_owned', onboardedByOrgId: 'org_agg_2' },
-    ];
-    const app = buildApp({
-      org_id: 'org_agg_1',
-      org_type: 'aggregator',
-      service_user_id: 'svc',
-    });
-    const res = await app.inject({
-      method: 'POST',
-      url: '/update-status',
-      payload: { ...VALID_BODY, acting_as_user_id: 'usr_agg_owned' },
-    });
-    expect(res.statusCode).toBe(403);
-    expect(res.json()).toMatchObject({ error: 'NOT_AUTHORIZED_FOR_TARGET' });
-    expect(dbState.updates).toHaveLength(0);
-  });
-
-  it('aggregator happy path: writes audit fields to the UPDATE', async () => {
-    dbState.userRows = [
-      { id: 'usr_agg_owned', onboardedByOrgId: 'org_agg_1' },
-    ];
-    const app = buildApp({
-      org_id: 'org_agg_1',
-      org_type: 'aggregator',
-      service_user_id: 'svc_agg_1',
-    });
-    const res = await app.inject({
-      method: 'POST',
-      url: '/update-status',
-      payload: { ...VALID_BODY, acting_as_user_id: 'usr_agg_owned' },
-    });
     expect(res.statusCode).toBe(200);
     expect(dbState.updates).toHaveLength(1);
-    expect(dbState.updates[0]).toMatchObject({
-      performed_by_org_id: 'org_agg_1',
-      performed_by_service_user_id: 'svc_agg_1',
-    });
-  });
-
-  it('logs WARN when overwriting on-behalf-of audit fields with a different aggregator', async () => {
-    dbState.userRows = [
-      { id: 'usr_agg_owned', onboardedByOrgId: 'org_agg_1' },
-    ];
-    dbState.existingAction = {
-      ...EXISTING_ACTION,
-      performed_by_org_id: 'org_agg_2',
-      performed_by_service_user_id: 'svc_agg_2',
-    };
-    const warnSpy = vi.fn();
-    const app = Fastify().withTypeProvider<ZodTypeProvider>();
-    app.setValidatorCompiler(validatorCompiler);
-    app.setSerializerCompiler(serializerCompiler);
-    app.addHook('preHandler', async (req) => {
-      (req as unknown as { user: { id: string } }).user = {
-        id: 'usr_agg_owned',
-      };
-      (req as unknown as { acting_org: unknown }).acting_org = {
-        org_id: 'org_agg_1',
-        org_type: 'aggregator',
-        service_user_id: 'svc_agg_1',
-      };
-      (req as unknown as { log: unknown }).log = {
-        warn: warnSpy,
-        error: vi.fn(),
-        info: vi.fn(),
-        debug: vi.fn(),
-        fatal: vi.fn(),
-        trace: vi.fn(),
-        child: vi.fn(() => (req as unknown as { log: unknown }).log),
-      };
-    });
-    app.register(update_action_status);
-
-    const res = await app.inject({
-      method: 'POST',
-      url: '/update-status',
-      payload: { ...VALID_BODY, acting_as_user_id: 'usr_agg_owned' },
-    });
-
-    expect(res.statusCode).toBe(200);
-    expect(warnSpy).toHaveBeenCalledTimes(1);
-    expect(warnSpy.mock.calls[0][0]).toMatchObject({
-      action_id: EXISTING_ACTION.action_id,
-      acting_org_id: 'org_agg_1',
-      previous_performed_by_org_id: 'org_agg_2',
-      new_performed_by_org_id: 'org_agg_1',
-    });
-  });
-
-  it('aggregator on-behalf-of: 403 TARGET_ITEM_NOT_OWNED_BY_ACTOR when existing target_item_owner != effective_user_id', async () => {
-    dbState.userRows = [
-      { id: 'usr_agg_owned', onboardedByOrgId: 'org_agg_1' },
-    ];
-    // The existing action's target_item_owner is NOT the actor; override the fixture.
-    dbState.existingAction = {
-      ...EXISTING_ACTION,
-      target_item_owner: 'usr_someone_else',
-    };
-    const app = buildApp({
-      org_id: 'org_agg_1',
-      org_type: 'aggregator',
-      service_user_id: 'svc_agg_1',
-    });
-    const res = await app.inject({
-      method: 'POST',
-      url: '/update-status',
-      payload: { ...VALID_BODY, acting_as_user_id: 'usr_agg_owned' },
-    });
-    expect(res.statusCode).toBe(403);
-    expect(res.json()).toMatchObject({ error: 'TARGET_ITEM_NOT_OWNED_BY_ACTOR' });
-    expect(dbState.updates).toHaveLength(0); // UPDATE must not run
   });
 });
