@@ -169,7 +169,7 @@ export const recompute_aggregator_domain_metrics = async (
       GROUP BY ${directionCol}
     )
     SELECT
-      i.id                                       AS item_id,
+      i.item_id                                  AS item_id,
       i.item_network                             AS item_network,
       i.item_domain                              AS item_domain,
       i.item_type                                AS item_type,
@@ -189,7 +189,7 @@ export const recompute_aggregator_domain_metrics = async (
       (i.item_state ->> 'positions')::int        AS openings
     FROM items i
     JOIN "user" u ON u.id = i.created_by
-    LEFT JOIN action_counts ac ON ac.item_id = i.id
+    LEFT JOIN action_counts ac ON ac.item_id = i.item_id
     WHERE u.onboarded_by_org_id = ${aggregator_id}
       AND i.item_domain = ${domain};
   `);
