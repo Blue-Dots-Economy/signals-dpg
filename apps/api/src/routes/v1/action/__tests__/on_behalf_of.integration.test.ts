@@ -96,6 +96,19 @@ describeIf(`POST /action/perform on-behalf-of (integration)${
     user_email: `agg-int-b-${Date.now()}@signals.local`,
   };
 
+  // Network-service org — used to prove the cross-aggregator scope on
+  // /action/perform. Its on-behalf-of calls must succeed regardless of
+  // which aggregator onboarded the target user.
+  const ns = {
+    org_id: `org_${randomUUID()}`,
+    user_id: `usr_${randomUUID()}`,
+    member_id: `mem_${randomUUID()}`,
+    apikey_id: `key_${randomUUID()}`,
+    raw_key: `sk_signals_${randomBytes(24).toString('hex')}`,
+    slug: `ns-int-${Date.now()}`,
+    user_email: `ns-int-${Date.now()}@signals.local`,
+  };
+
   // Seeded by /admin/participant — captured for assertions /
   // cleanup. Onboarded participant rows go in `seeded_participant_ids` so
   // we cascade-delete everything tied to them on teardown.
@@ -147,15 +160,20 @@ describeIf(`POST /action/perform on-behalf-of (integration)${
     const { user, organization, member, apikey } = authSchema;
     const now = new Date();
 
-    // Seed aggregator orgs directly — type='aggregator' is needed for the
-    // on-behalf-of code path. We deliberately bypass the seed script
-    // (it only creates network_service orgs).
-    for (const v of [agg_a, agg_b]) {
+    // Seed aggregator + network_service orgs directly. The on-behalf-of
+    // code path needs both tiers exercised end-to-end; the default seed
+    // script only mints network_service orgs, so we bypass it here.
+    const seed_orgs: Array<[typeof agg_a, 'aggregator' | 'network_service']> = [
+      [agg_a, 'aggregator'],
+      [agg_b, 'aggregator'],
+      [ns, 'network_service'],
+    ];
+    for (const [v, org_type] of seed_orgs) {
       await db.insert(organization).values({
         id: v.org_id,
         slug: v.slug,
-        name: `${v.slug} (integration aggregator)`,
-        type: 'aggregator',
+        name: `${v.slug} (integration ${org_type})`,
+        type: org_type,
         createdAt: now,
       });
       await db.insert(user).values({
@@ -315,13 +333,13 @@ describeIf(`POST /action/perform on-behalf-of (integration)${
       // delete; orgs need an explicit drop (member rows cascade).
       await db
         .delete(apikey)
-        .where(inArray(apikey.id, [agg_a.apikey_id, agg_b.apikey_id]));
+        .where(inArray(apikey.id, [agg_a.apikey_id, agg_b.apikey_id, ns.apikey_id]));
       await db
         .delete(user)
-        .where(inArray(user.id, [agg_a.user_id, agg_b.user_id]));
+        .where(inArray(user.id, [agg_a.user_id, agg_b.user_id, ns.user_id]));
       await db
         .delete(organization)
-        .where(inArray(organization.id, [agg_a.org_id, agg_b.org_id]));
+        .where(inArray(organization.id, [agg_a.org_id, agg_b.org_id, ns.org_id]));
     } catch (err) {
       // Don't mask the actual test failure with a cleanup blow-up.
       // eslint-disable-next-line no-console
@@ -428,5 +446,102 @@ describeIf(`POST /action/perform on-behalf-of (integration)${
     });
     expect(res.statusCode).toBe(403);
     expect(res.json().error).toBe('NOT_AUTHORIZED_FOR_TARGET');
+  });
+
+  it('network_service acts for a user onboarded by aggregator A — succeeds (cross-aggregator scope)', async () => {
+    // The seeker user was onboarded by agg_a; aggregator B would be
+    // rejected (test above). network_service must succeed and stamp the
+    // audit columns with the network_service org_id.
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/v1/action/perform',
+      headers: {
+        'x-api-key': ns.raw_key,
+        'x-acting-org-id': ns.org_id,
+        'content-type': 'application/json',
+      },
+      payload: {
+        action_type: 'apply',
+        source_item: {
+          item_network: 'blue_dot',
+          item_domain: 'seeker',
+          item_type: 'profile_1.0',
+          item_id: seeker_item_id,
+        },
+        target_item: {
+          item_network: 'blue_dot',
+          item_domain: 'provider',
+          item_type: 'job_posting_1.0',
+          item_id: provider_item_id,
+          item_instance_url: base_url,
+        },
+        requirements_snapshot: {
+          role: 'Helper',
+          age: 24,
+          workExperience: 'Fresher',
+        },
+        acting_as_user_id: seeker_user_id,
+      },
+    });
+    expect(res.statusCode).toBe(201);
+    const action_id = res.json().action_id;
+
+    const rows = await db
+      .select({
+        source_item_owner: itemActionsTable.source_item_owner,
+        performed_by_org_id: itemActionsTable.performed_by_org_id,
+        performed_by_service_user_id:
+          itemActionsTable.performed_by_service_user_id,
+      })
+      .from(itemActionsTable)
+      .where(
+        and(
+          eq(itemActionsTable.partition_network, 'blue_dot'),
+          eq(itemActionsTable.action_type, 'apply'),
+          eq(itemActionsTable.action_id, action_id),
+        ),
+      )
+      .limit(1);
+    expect(rows).toHaveLength(1);
+    expect(rows[0].source_item_owner).toBe(seeker_user_id);
+    expect(rows[0].performed_by_org_id).toBe(ns.org_id);
+    expect(rows[0].performed_by_service_user_id).toBe(ns.user_id);
+  });
+
+  it('network_service points at non-existent user_id — returns 404 USER_NOT_FOUND', async () => {
+    const fakeUserId = `usr_does_not_exist_${randomUUID().slice(0, 8)}`;
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/v1/action/perform',
+      headers: {
+        'x-api-key': ns.raw_key,
+        'x-acting-org-id': ns.org_id,
+        'content-type': 'application/json',
+      },
+      payload: {
+        action_type: 'apply',
+        source_item: {
+          item_network: 'blue_dot',
+          item_domain: 'seeker',
+          item_type: 'profile_1.0',
+          item_id: seeker_item_id,
+        },
+        target_item: {
+          item_network: 'blue_dot',
+          item_domain: 'provider',
+          item_type: 'job_posting_1.0',
+          item_id: provider_item_id,
+          item_instance_url: base_url,
+        },
+        requirements_snapshot: {
+          role: 'Helper',
+          age: 24,
+          workExperience: 'Fresher',
+        },
+        acting_as_user_id: fakeUserId,
+      },
+    });
+    expect(res.statusCode).toBe(404);
+    expect(res.json().error).toBe('USER_NOT_FOUND');
   });
 });
