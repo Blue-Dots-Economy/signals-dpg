@@ -215,4 +215,16 @@ jobs:
           # for PG16 we're on).
           sed -i -E 's/\\(restrict|unrestrict) [A-Za-z0-9]+/\\\1 <NONCE>/' /tmp/sql.sql /tmp/drizzle.sql
 
+          # Normalize whitespace after the extension strip: removes the
+          # orphan `--` section separators that bracketed the stripped
+          # CREATE/COMMENT EXTENSION blocks, and collapses any runs of
+          # consecutive blank lines. pg_dump's `--` separators bracket
+          # every section header symmetrically on both sides, so removing
+          # all standalone `--` lines is safe — content stays.
+          for f in /tmp/sql.sql /tmp/drizzle.sql; do
+            sed -i -E '/^--$/d' "$f"
+            # cat -s collapses runs of blank lines to a single blank
+            cat -s "$f" > "$f.tmp" && mv "$f.tmp" "$f"
+          done
+
           diff /tmp/sql.sql /tmp/drizzle.sql
