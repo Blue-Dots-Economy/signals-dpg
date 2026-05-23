@@ -20,6 +20,11 @@ import {
   isServedDomainBinding,
   replyForUnservedDomain,
 } from '@/utils/served_domain_guard';
+import {
+  resolve_acting_actor,
+  action_error_messages,
+  lookup_onboarded_by_org,
+} from './_resolve_acting_actor.js';
 
 type PerformActionRequest = FastifyRequest<{
   Body: z.infer<typeof PerformActionBodySchema>;
@@ -55,6 +60,20 @@ export const perform_action_handler = async (
   reply: FastifyReply
 ) => {
   const body = request.body;
+
+  const actor = await resolve_acting_actor({
+    acting_org: request.acting_org,
+    request_user_id: request.user.id,
+    acting_as_user_id: body.acting_as_user_id,
+    lookup_onboarded_by: lookup_onboarded_by_org,
+  });
+  if (!actor.ok) {
+    return reply.code(actor.status).send({
+      error: actor.error,
+      message: action_error_messages[actor.error],
+    });
+  }
+
   const sourceInstanceUrl = getCurrentApiBaseUrl();
 
   if (
@@ -81,6 +100,13 @@ export const perform_action_handler = async (
     return reply.code(404).send({
       error: 'SOURCE_ITEM_NOT_FOUND',
       message: 'Source item does not exist on this instance',
+    });
+  }
+  if (sourceItemSnapshot.created_by !== actor.effective_user_id) {
+    return reply.code(403).send({
+      error: 'SOURCE_ITEM_NOT_OWNED_BY_ACTOR',
+      message:
+        'source_item must be owned by the effective actor (request.user or acting_as_user_id)',
     });
   }
 
@@ -167,8 +193,10 @@ export const perform_action_handler = async (
           action_type: body.action_type,
           source_item: sourceItem,
           target_item: targetItem,
-          source_item_owner: sourceItemSnapshot.created_by,
+          source_item_owner: actor.effective_user_id,
           requirements_snapshot: requirementsSnapshot,
+          performed_by_org_id: actor.audit.performed_by_org_id,
+          performed_by_service_user_id: actor.audit.performed_by_service_user_id,
         }),
       }
     );

@@ -450,6 +450,73 @@
           "response": []
         }
       ]
+    },
+    {
+      "name": "07 Aggregator (on behalf of)",
+      "item": [
+        {
+          "name": "Apply on behalf of seeker",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Action created', function () { pm.response.to.have.status(201); });",
+                  "const body = pm.response.json();",
+                  "if (body && body.action_id) {",
+                  "  pm.environment.set('action_id', body.action_id);",
+                  "  console.log('Captured action_id =', body.action_id);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "content-type", "value": "application/json" },
+              { "key": "x-api-key", "value": "{{aggregator_api_key}}" },
+              { "key": "x-acting-org-id", "value": "{{aggregator_org_id}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"action_type\": \"apply\",\n  \"source_item\": {\n    \"item_network\": \"{{network_id}}\",\n    \"item_domain\": \"{{seeker_domain}}\",\n    \"item_type\": \"{{seeker_item_type}}\",\n    \"item_id\": \"{{seeker_profile_item_id}}\"\n  },\n  \"target_item\": {\n    \"item_network\": \"{{network_id}}\",\n    \"item_domain\": \"{{provider_domain}}\",\n    \"item_type\": \"{{provider_item_type}}\",\n    \"item_id\": \"{{provider_item_id}}\",\n    \"item_instance_url\": \"{{base_url}}\"\n  },\n  \"requirements_snapshot\": {},\n  \"acting_as_user_id\": \"{{seeker_user_id}}\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/action/perform",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "action", "perform"],
+              "query": []
+            },
+            "description": "Aggregator-DPG files an `apply` action on behalf of a seeker it onboarded. The `x-api-key` is the aggregator-dpg service apikey; `x-acting-org-id` is the aggregator org id; `acting_as_user_id` in the body names the seeker. Authorization: the target user's `onboarded_by_org_id` must equal the aggregator org id. Captures the resulting `action_id` for the follow-up update-status call."
+          },
+          "response": []
+        },
+        {
+          "name": "Accept on behalf of provider",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "content-type", "value": "application/json" },
+              { "key": "x-api-key", "value": "{{aggregator_api_key}}" },
+              { "key": "x-acting-org-id", "value": "{{aggregator_org_id}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"action_id\": \"{{action_id}}\",\n  \"action_status\": \"shortlisted\",\n  \"acting_as_user_id\": \"{{provider_user_id}}\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/action/update-status",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "action", "update-status"],
+              "query": []
+            },
+            "description": "Aggregator-DPG transitions an existing action's status on behalf of the provider user. The provider must have been onboarded by this aggregator (`user.onboarded_by_org_id === aggregator_org_id`) and must own the target item. Audit columns (`performed_by_org_id`, `performed_by_service_user_id`) on `item_actions` reflect the LATEST actor — if a different aggregator touches the same action, the columns are overwritten and a WARN log is emitted."
+          },
+          "response": []
+        }
+      ]
     }
   ],
   "variable": [

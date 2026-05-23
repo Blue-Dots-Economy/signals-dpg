@@ -323,10 +323,70 @@ This is safe to defer because:
   aggregator on this instance", which an operator already needs to assume
   as part of treating the key as a secret.
 
+## Acting on behalf of a user (aggregator)
+
+Aggregator-typed acting orgs can file actions on behalf of users they onboarded (e.g. counsellor-driven applications via the aggregator-dpg service apikey).
+Two endpoints accept an optional `acting_as_user_id` body field:
+
+- `POST /api/v1/action/perform`
+- `POST /api/v1/action/update-status`
+
+### Required headers + body
+
+```http
+POST /api/v1/action/perform
+x-api-key: <aggregator-dpg apikey>
+x-acting-org-id: <aggregator org id from /admin/aggregator/upsert>
+
+{
+  "action_type": "apply",
+  "source_item": { ... },
+  "target_item": { ... },
+  "requirements_snapshot": { ... },
+  "acting_as_user_id": "<target user id>"
+}
+```
+
+### Authorization rules
+
+The target user (`acting_as_user_id`) must satisfy:
+
+- `user.onboarded_by_org_id === <x-acting-org-id>`
+
+The channel value (`user.onboarded_via`) is NOT part of the check — an aggregator that onboarded a user via `bulk` earlier can still act for that user via `voice` later.
+
+Only `aggregator`-type acting orgs may use `acting_as_user_id`. `voice` and `network_service` callers receive `403 ACTING_ORG_TYPE_NOT_ALLOWED`.
+
+For `/action/perform`, the source item must also be owned by the effective actor — `403 SOURCE_ITEM_NOT_OWNED_BY_ACTOR` otherwise. For `/action/update-status`, the existing action's target item owner must match the effective actor — `403 TARGET_ITEM_NOT_OWNED_BY_ACTOR` otherwise.
+
+### Error matrix
+
+| Caller shape | `acting_as_user_id` | Outcome |
+|---|---|---|
+| No `x-acting-org-id` | absent | Self-acted (unchanged). |
+| No `x-acting-org-id` | present | `400 CANNOT_OVERRIDE_SELF` |
+| Aggregator acting_org | absent | `400 MISSING_ACTING_AS_USER_ID` |
+| Aggregator acting_org | present, owned by this aggregator | `200 / 201` |
+| Aggregator acting_org | present, owned by another org | `403 NOT_AUTHORIZED_FOR_TARGET` |
+| Voice / network_service acting_org | any | `403 ACTING_ORG_TYPE_NOT_ALLOWED` |
+
+### Audit trail
+
+Successful on-behalf-of writes populate two columns on `item_actions`:
+
+| Column | Value |
+|---|---|
+| `performed_by_org_id` | the aggregator org id from `x-acting-org-id` |
+| `performed_by_service_user_id` | the apikey owner's user id (Signals service account) |
+
+For self-acted writes, both columns are NULL. There are no indexes on these columns today — query via `WHERE performed_by_org_id = $1` sequentially when needed. Indexes will be added if audit queries become a hot path.
+
+For `/action/update-status`, the audit fields reflect the LATEST actor. If a different aggregator updates an action that was previously filed by another aggregator, the columns are overwritten and a WARN log is emitted server-side with both the previous and new `performed_by_org_id` for ops visibility.
+
 ## Voice DPG follows the same pattern
 
-When voice-dpg ships (separate stream, not in this PR), it uses its own
-apikey from the seed and asserts `x-acting-org-id` set to either:
+Voice-dpg uses its own apikey from the seed and asserts `x-acting-org-id`
+set to either:
 
 - the aggregator org id when voice is hosted per-aggregator
   (e.g. BBMP runs its own voice instance for itself); or
@@ -348,3 +408,7 @@ need to discriminate (like the aggregator upsert) do so via
   voice-dpg to onboard participants, attributed back to the acting org.
 - [Plan 3 — participant metrics service](../superpowers/plans/2026-05-21-participant-metrics-service.md) —
   the metrics dashboard each aggregator's UI reads.
+- [Plan A — action perform on-behalf-of](../superpowers/plans/2026-05-22-action-perform-on-behalf-of.md) —
+  voice DPG files actions on behalf of users it onboarded; adds the
+  optional acting_org preHandler, two audit columns on `item_actions`,
+  and the `resolve_acting_actor` helper.
