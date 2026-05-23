@@ -131,6 +131,20 @@ export const recompute_aggregator_domain_metrics = async (
   const rejectedArr = categories.rejected;
   const pendingArr = categories.pending;
 
+  // Drizzle's template-tag interpolation splays a JS array into individual
+  // positional params, producing `($1, $2, $3)::text[]` which is invalid PG
+  // syntax. Build a parameterized `IN (...)` list via `sql.join` instead.
+  // Empty array → `IN (NULL)` which is always false (gives 0 counts, matching
+  // the "metric_categories null → 0 counts" semantic).
+  const sqlList = (arr: string[]) =>
+    arr.length > 0
+      ? sql.join(arr.map((s) => sql`${s}`), sql`, `)
+      : sql`NULL`;
+
+  const pendingList = sqlList(pendingArr);
+  const shortlistedList = sqlList(shortlistedArr);
+  const rejectedList = sqlList(rejectedArr);
+
   // Direction filter: seeker domain joins on source_item_id; provider on target.
   const directionCol =
     domain === 'provider' ? sql`target_item_id` : sql`source_item_id`;
@@ -141,12 +155,12 @@ export const recompute_aggregator_domain_metrics = async (
       SELECT
         ${directionCol} AS item_id,
         COUNT(*)::int AS total,
-        COUNT(*) FILTER (WHERE action_status = ANY(${pendingArr}::text[]))::int     AS pending,
-        COUNT(*) FILTER (WHERE action_status = ANY(${shortlistedArr}::text[]))::int AS shortlisted,
-        COUNT(*) FILTER (WHERE action_status = ANY(${rejectedArr}::text[]))::int    AS rejected,
-        MAX(created_at)                                                              AS last_applied_at,
-        MAX(created_at) FILTER (WHERE action_status = ANY(${shortlistedArr}::text[])) AS last_shortlisted_at,
-        MAX(created_at) FILTER (WHERE action_status = ANY(${rejectedArr}::text[]))    AS last_rejected_at
+        COUNT(*) FILTER (WHERE action_status IN (${pendingList}))::int     AS pending,
+        COUNT(*) FILTER (WHERE action_status IN (${shortlistedList}))::int AS shortlisted,
+        COUNT(*) FILTER (WHERE action_status IN (${rejectedList}))::int    AS rejected,
+        MAX(created_at)                                                    AS last_applied_at,
+        MAX(created_at) FILTER (WHERE action_status IN (${shortlistedList})) AS last_shortlisted_at,
+        MAX(created_at) FILTER (WHERE action_status IN (${rejectedList}))    AS last_rejected_at
       FROM item_actions
       WHERE ${directionCol} IS NOT NULL
         AND action_type = ${APPLY_ACTION}
