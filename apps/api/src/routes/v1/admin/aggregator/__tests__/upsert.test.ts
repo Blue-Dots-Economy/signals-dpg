@@ -238,4 +238,43 @@ describe('POST /aggregator/upsert', () => {
       expect(res.statusCode).toBe(400);
     }
   });
+
+  it('persists domains array into metadata when provided', async () => {
+    const app = await buildApp({ org_type: 'network_service' });
+    const res = await app.inject({
+      method: 'POST',
+      url: '/aggregator/upsert',
+      payload: {
+        external_id: 'ext_a',
+        name: 'Agg A',
+        slug: 'agg-a-domains',
+        domains: ['seeker', 'provider'],
+      },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(dbState.inserts).toHaveLength(1);
+    const writtenMetadata = dbState.inserts[0].metadata as string;
+    const meta = JSON.parse(writtenMetadata);
+    expect(meta.domains).toEqual(['seeker', 'provider']);
+    expect(meta.external_id).toBe('ext_a');
+  });
+
+  it('persists empty domains array when omitted', async () => {
+    const app = await buildApp({ org_type: 'network_service' });
+    const res = await app.inject({
+      method: 'POST',
+      url: '/aggregator/upsert',
+      payload: {
+        external_id: 'ext_b',
+        name: 'Agg B',
+        slug: 'agg-b-no-domains',
+      },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(dbState.inserts).toHaveLength(1);
+    const writtenMetadata = dbState.inserts[0].metadata as string;
+    const meta = JSON.parse(writtenMetadata);
+    expect(meta.domains).toEqual([]);
+    expect(meta.external_id).toBe('ext_b');
+  });
 });
