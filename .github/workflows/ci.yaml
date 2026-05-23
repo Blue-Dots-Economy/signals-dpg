@@ -203,12 +203,16 @@ jobs:
           # load them. They're known infrastructure-only objects, not
           # subject to the auth/metrics surface we're comparing.
           for f in /tmp/sql.sql /tmp/drizzle.sql; do
-            sed -i -E '/-- Name: (cube|earthdistance|pgcrypto); Type: EXTENSION/,/^$/d' "$f"
-            sed -i -E '/-- Name: EXTENSION (cube|earthdistance|pgcrypto)/,/^$/d' "$f"
+            for ext in cube earthdistance pgcrypto; do
+              sed -i -E "/^-- Name: ${ext}; Type: EXTENSION/d" "$f"
+              sed -i -E "/^-- Name: EXTENSION ${ext}; Type: COMMENT/d" "$f"
+              sed -i -E "/^CREATE EXTENSION IF NOT EXISTS ${ext} /d" "$f"
+              sed -i -E "/^COMMENT ON EXTENSION ${ext} /d" "$f"
+            done
           done
 
           # Filter out per-dump security nonces (PG18+ only; defensive
           # for PG16 we're on).
-          sed -i -E 's/\\(re|un)strict [A-Za-z0-9]+/\\\1strict <NONCE>/' /tmp/sql.sql /tmp/drizzle.sql
+          sed -i -E 's/\\(restrict|unrestrict) [A-Za-z0-9]+/\\\1 <NONCE>/' /tmp/sql.sql /tmp/drizzle.sql
 
           diff /tmp/sql.sql /tmp/drizzle.sql
