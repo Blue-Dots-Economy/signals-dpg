@@ -35,6 +35,7 @@ import { check_and_refresh_if_stale } from '@/services/metrics/staleness';
  */
 const COLUMNS = [
   'item_id',
+  'item_network',
   'item_domain',
   'item_type',
   'owner_user_id',
@@ -126,6 +127,7 @@ async function* generate_csv(
     for (const r of rows) {
       const projected: Record<(typeof COLUMNS)[number], unknown> = {
         item_id: r.itemId,
+        item_network: r.itemNetwork,
         item_domain: r.itemDomain,
         item_type: r.itemType,
         owner_user_id: r.ownerUserId,

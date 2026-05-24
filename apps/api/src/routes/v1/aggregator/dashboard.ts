@@ -290,6 +290,7 @@ async function build_domain_block(
     .limit(limit)
     .offset((page - 1) * limit)) as Array<{
     itemId: string;
+    itemNetwork: string;
     ownerUserId: string;
     itemType: string;
     profileStatus: string | null;
@@ -319,6 +320,7 @@ async function build_domain_block(
 
   const participants = list_rows.map((r) => ({
     item_id: r.itemId,
+    item_network: r.itemNetwork,
     owner_user_id: r.ownerUserId,
     name: name_by_user_id.get(r.ownerUserId) ?? null,
     item_type: r.itemType,

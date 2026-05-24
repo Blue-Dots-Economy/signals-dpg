@@ -47,6 +47,7 @@ export const ItemRollup = z.object({
  */
 export const ParticipantRow = z.object({
   item_id: z.string(),
+  item_network: z.string(),
   owner_user_id: z.string(),
   name: z.string().nullable(),
   item_type: z.string(),
