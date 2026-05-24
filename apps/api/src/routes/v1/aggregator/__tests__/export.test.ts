@@ -15,7 +15,7 @@ import {
  *     domain in parallel before streaming the CSV.
  *   - Streams item_metrics rows ordered by (item_domain, item_id), so
  *     multi-domain output is grouped by domain.
- *   - Projects exactly the 20-column COLUMNS list (item_private_state is
+ *   - Projects exactly the 22-column COLUMNS list (item_private_state is
  *     never included).
  *
  * Strategy: vi.mock the drizzle db client + staleness service. The select
@@ -57,6 +57,7 @@ vi.mock('@api/db/postgres/drizzle_config', () => {
   const listChain = () => {
     const chain: Record<string, unknown> = {};
     chain.from = () => chain;
+    chain.leftJoin = () => chain;
     chain.where = () => chain;
     chain.orderBy = () => chain;
     chain.limit = () => chain;
@@ -80,9 +81,11 @@ import { aggregator_export } from '../export.js';
 
 const sample = (overrides: Record<string, unknown> = {}) => ({
   itemId: 'itm_1',
+  itemNetwork: 'blue_dot',
   itemDomain: 'seeker',
   itemType: 'profile_1.0',
   ownerUserId: 'usr_1',
+  name: 'Test User',
   onboardedByOrgId: 'org_bbmp',
   onboardedVia: 'bulk',
   profileStatus: 'active',
@@ -123,7 +126,8 @@ const buildApp = async (acting?: {
 };
 
 const EXPECTED_HEADER =
-  'item_id,item_domain,item_type,owner_user_id,onboarded_by_org_id,onboarded_via,' +
+  'item_id,item_network,item_domain,item_type,owner_user_id,name,' +
+  'onboarded_by_org_id,onboarded_via,' +
   'profile_status,profile_completion_pct,profile_created_at,profile_last_updated_at,' +
   'age_days,applications_total,applications_pending,applications_shortlisted,' +
   'applications_rejected,last_applied_at,last_shortlisted_at,last_rejected_at,' +
@@ -191,13 +195,13 @@ describe('GET /aggregator/dashboard/export', () => {
     );
   });
 
-  it('header line matches the 20-column COLUMNS list', async () => {
+  it('header line matches the 22-column COLUMNS list', async () => {
     state.list_pages = [[sample()]];
     const app = await buildApp();
     const res = await app.inject({ method: 'GET', url: '/dashboard/export' });
     const lines = res.body.trim().split('\n');
     expect(lines[0]).toBe(EXPECTED_HEADER);
-    expect(lines[0].split(',')).toHaveLength(20);
+    expect(lines[0].split(',')).toHaveLength(22);
   });
 
   it('CSV body has header row + one data row for single-domain caller', async () => {

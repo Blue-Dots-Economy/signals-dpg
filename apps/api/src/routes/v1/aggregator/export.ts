@@ -7,7 +7,7 @@ import { Readable } from 'node:stream';
 import { db } from '@api/db/postgres/drizzle_config';
 import { item_metrics } from '../../../../db/postgres/schema/metrics.js';
 import { organization, user } from '../../../../db/postgres/schema/auth.js';
-import { eq, and, inArray, asc } from 'drizzle-orm';
+import { eq, and, inArray, asc, getTableColumns } from 'drizzle-orm';
 import {
   ExportQuery,
   type ExportQuery as ExportQueryType,
@@ -107,22 +107,19 @@ async function* generate_csv(
 
   let offset = 0;
   for (;;) {
-    const rows = (await db
-      .select()
+    const rows = await db
+      .select({
+        ...getTableColumns(item_metrics),
+        name: user.name,
+      })
       .from(item_metrics)
+      .leftJoin(user, eq(user.id, item_metrics.ownerUserId))
       .where(where!)
       .orderBy(asc(item_metrics.itemDomain), asc(item_metrics.itemId))
       .limit(PAGE_SIZE)
-      .offset(offset)) as Array<typeof item_metrics.$inferSelect>;
+      .offset(offset);
 
     if (rows.length === 0) break;
-
-    const name_by_user_id = new Map<string, string | null>();
-    const name_rows = await db
-      .select({ id: user.id, name: user.name })
-      .from(user)
-      .where(inArray(user.id, rows.map((r) => r.ownerUserId)));
-    for (const n of name_rows) name_by_user_id.set(n.id, n.name);
 
     for (const r of rows) {
       const projected: Record<(typeof COLUMNS)[number], unknown> = {
@@ -131,7 +128,7 @@ async function* generate_csv(
         item_domain: r.itemDomain,
         item_type: r.itemType,
         owner_user_id: r.ownerUserId,
-        name: name_by_user_id.get(r.ownerUserId) ?? null,
+        name: r.name,
         onboarded_by_org_id: r.onboardedByOrgId,
         onboarded_via: r.onboardedVia,
         profile_status: r.profileStatus,
