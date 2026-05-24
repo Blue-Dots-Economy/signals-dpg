@@ -56,7 +56,7 @@ export async function loadNetworkConfigs(
 }
 
 async function loadNetworkConfigFromUrl(url: string): Promise<NetworkConfig> {
-  const config = await new fetchSchema(url).getSchema();
+  const config = await new fetchSchema(url, { resolveRefs: false }).getSchema();
   return {
     ...NetworkConfigSchema.parse(config),
     source_url: url,

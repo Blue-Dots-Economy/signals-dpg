@@ -98,10 +98,12 @@ vi.mock('@api/db/postgres/drizzle_config', () => {
       limit: vi.fn(() => resolve()),
       then: (cb: (v: unknown) => unknown) => resolve().then(cb),
     };
+    const fromChain: Record<string, unknown> = {
+      where: vi.fn(() => whereChain),
+    };
+    fromChain.leftJoin = vi.fn(() => fromChain);
     return {
-      from: vi.fn(() => ({
-        where: vi.fn(() => whereChain),
-      })),
+      from: vi.fn(() => fromChain),
     };
   };
 
@@ -158,7 +160,9 @@ const buildApp = async (acting?: {
 
 const sample_list_row = (overrides: Record<string, unknown> = {}) => ({
   itemId: 'itm_1',
+  itemNetwork: 'blue_dot',
   ownerUserId: 'usr_1',
+  name: 'Test User',
   itemType: 'profile_1.0',
   itemDomain: 'seeker',
   onboardedByOrgId: 'org_bbmp',
@@ -332,7 +336,9 @@ describe('GET /aggregator/dashboard', () => {
     expect(block.participants).toHaveLength(2);
     const p = block.participants[0];
     expect(p.item_id).toBe('itm_1');
+    expect(p.item_network).toBe('blue_dot');
     expect(p.owner_user_id).toBe('usr_1');
+    expect(p.name).toBe('Test User');
     expect(p.item_type).toBe('profile_1.0');
     expect(p.profile_status).toBe('active');
     expect(p.profile_completion_pct).toBe(75);

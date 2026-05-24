@@ -81,10 +81,12 @@ vi.mock('@api/db/postgres/drizzle_config', () => {
       limit: vi.fn(() => resolve()),
       then: (cb: (v: unknown) => unknown) => resolve().then(cb),
     };
+    const fromChain: Record<string, unknown> = {
+      where: vi.fn(() => whereChain),
+    };
+    fromChain.leftJoin = vi.fn(() => fromChain);
     return {
-      from: vi.fn(() => ({
-        where: vi.fn(() => whereChain),
-      })),
+      from: vi.fn(() => fromChain),
     };
   };
 

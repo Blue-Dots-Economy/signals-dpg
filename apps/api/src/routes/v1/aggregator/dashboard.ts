@@ -5,8 +5,8 @@ import type {
 } from 'fastify';
 import { db } from '@api/db/postgres/drizzle_config';
 import { item_metrics } from '../../../../db/postgres/schema/metrics.js';
-import { organization } from '../../../../db/postgres/schema/auth.js';
-import { eq, and, sql, desc } from 'drizzle-orm';
+import { organization, user } from '../../../../db/postgres/schema/auth.js';
+import { eq, and, sql, desc, getTableColumns } from 'drizzle-orm';
 import {
   DashboardRequestQuery,
   DashboardResponse,
@@ -279,38 +279,26 @@ async function build_domain_block(
     .where(filter_where!)) as Array<{ n: number }>;
   const total_matching = total_rows[0]?.n ?? 0;
 
-  const list_rows = (await db
-    .select()
+  const list_rows = await db
+    .select({
+      ...getTableColumns(item_metrics),
+      name: user.name,
+    })
     .from(item_metrics)
+    .leftJoin(user, eq(user.id, item_metrics.ownerUserId))
     .where(filter_where!)
     .orderBy(
       desc(item_metrics.profileLastUpdatedAt),
       desc(item_metrics.itemId),
     )
     .limit(limit)
-    .offset((page - 1) * limit)) as Array<{
-    itemId: string;
-    ownerUserId: string;
-    itemType: string;
-    profileStatus: string | null;
-    profileCompletionPct: number | null;
-    profileCreatedAt: Date | null;
-    profileLastUpdatedAt: Date | null;
-    ageDays: number | null;
-    applicationsTotal: number | null;
-    applicationsPending: number | null;
-    applicationsShortlisted: number | null;
-    applicationsRejected: number | null;
-    lastAppliedAt: Date | null;
-    lastShortlistedAt: Date | null;
-    lastRejectedAt: Date | null;
-    openings: number | null;
-    actionableTags: string[] | null;
-  }>;
+    .offset((page - 1) * limit);
 
   const participants = list_rows.map((r) => ({
     item_id: r.itemId,
+    item_network: r.itemNetwork,
     owner_user_id: r.ownerUserId,
+    name: r.name,
     item_type: r.itemType,
     profile_status: r.profileStatus,
     profile_completion_pct: r.profileCompletionPct,
