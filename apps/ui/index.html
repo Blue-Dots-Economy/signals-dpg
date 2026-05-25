@@ -4,6 +4,8 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>DPG UI</title>
+    <!-- Runtime config injected at deploy time by chart (templates/configmap-runtime-config.yaml). Must load BEFORE the bundle. -->
+    <script src="/config.js"></script>
   </head>
   <body>
     <div id="root"></div>
