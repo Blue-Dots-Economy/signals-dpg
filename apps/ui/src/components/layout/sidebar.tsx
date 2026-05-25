@@ -168,14 +168,18 @@ export function AppSidebar({
               </SidebarMenuItem>
               {domains.map((domain) => {
                 const Icon = domainIcons[domain.id] ?? Box;
+                const label = domain.id
+                  .replace(/_/g, ' ')
+                  .replace(/\b\w/g, (c) => c.toUpperCase());
                 return (
                   <SidebarMenuItem key={domain.id}>
                     <SidebarMenuButton
                       isActive={selectedDomain === domain.id}
                       onClick={() => onDomainSelect(domain.id)}
+                      title={domain.description}
                     >
                       <Icon className="h-4 w-4" />
-                      <span>{domain.description}</span>
+                      <span>{label}</span>
                     </SidebarMenuButton>
                   </SidebarMenuItem>
                 );
