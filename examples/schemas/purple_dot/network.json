@@ -12,64 +12,6 @@
           "title": "PWD Beneficiary Profile 1.0",
           "type": "object",
           "additionalProperties": false,
-          "$defs": {
-            "disability_type": {
-              "type": "string",
-              "enum": [
-                "Acid Attack Victim",
-                "Autism Spectrum Disorder",
-                "Blindness",
-                "Cerebral Palsy",
-                "Dwarfism",
-                "Hearing Impairment",
-                "Hemophilia",
-                "Intellectual Disability",
-                "Leprosy Cured",
-                "Locomotor Disability",
-                "Low Vision",
-                "Mental Illness",
-                "Multiple Sclerosis",
-                "Muscular Dystrophy",
-                "Parkinson's Disease",
-                "Sickle Cell Disease",
-                "Specific Learning Disabilities",
-                "Speech and Language Disability",
-                "Thalassemia",
-                "Chronic Neurological Conditions",
-                "Deaf",
-                "Hard of Hearing",
-                "Multiple Disabilities including deaf-blindness",
-                "Multiple Disabilities",
-                "Mental Retardation"
-              ]
-            },
-            "support_category": {
-              "type": "string",
-              "enum": [
-                "Assistive Devices",
-                "Health & Rehabilitation",
-                "Training & Skill Building",
-                "Application Support",
-                "Counselling & Mentorship",
-                "Accessibility Support",
-                "Employment Opportunities",
-                "Scholarships",
-                "Financial Products (Loans/Insurance)",
-                "Other"
-              ]
-            },
-            "document_type": {
-              "type": "string",
-              "enum": [
-                "Aadhaar",
-                "Income Certificate",
-                "Disability Certificate",
-                "School ID",
-                "Bank Account",
-                "Other"
-              ]
-            }
-          },
           "required": [
             "beneficiary_name",
             "mobile_number",
@@ -86,7 +28,8 @@
             "beneficiary_name": {
               "type": "string",
               "title": "Name",
-              "minLength": 1
+              "minLength": 1,
+              "private": true
             },
             "mobile_number": {
               "type": "string",
@@ -121,7 +64,34 @@
               "title": "Disability",
               "minItems": 1,
               "items": {
-                "$ref": "#/$defs/disability_type"
+                "type": "string",
+                "enum": [
+                  "Acid Attack Victim",
+                  "Autism Spectrum Disorder",
+                  "Blindness",
+                  "Cerebral Palsy",
+                  "Dwarfism",
+                  "Hearing Impairment",
+                  "Hemophilia",
+                  "Intellectual Disability",
+                  "Leprosy Cured",
+                  "Locomotor Disability",
+                  "Low Vision",
+                  "Mental Illness",
+                  "Multiple Sclerosis",
+                  "Muscular Dystrophy",
+                  "Parkinson's Disease",
+                  "Sickle Cell Disease",
+                  "Specific Learning Disabilities",
+                  "Speech and Language Disability",
+                  "Thalassemia",
+                  "Chronic Neurological Conditions",
+                  "Deaf",
+                  "Hard of Hearing",
+                  "Multiple Disabilities including deaf-blindness",
+                  "Multiple Disabilities",
+                  "Mental Retardation"
+                ]
               }
             },
             "disability_percentage": {
@@ -136,7 +106,19 @@
               "description": "What are you looking for?",
               "minItems": 1,
               "items": {
-                "$ref": "#/$defs/support_category"
+                "type": "string",
+                "enum": [
+                  "Assistive Devices",
+                  "Health & Rehabilitation",
+                  "Training & Skill Building",
+                  "Application Support",
+                  "Counselling & Mentorship",
+                  "Accessibility Support",
+                  "Employment Opportunities",
+                  "Scholarships",
+                  "Financial Products (Loans/Insurance)",
+                  "Other"
+                ]
               }
             },
             "looking_for_details": {
@@ -180,7 +162,15 @@
               "description": "Which documents do you have?",
               "minItems": 1,
               "items": {
-                "$ref": "#/$defs/document_type"
+                "type": "string",
+                "enum": [
+                  "Aadhaar",
+                  "Income Certificate",
+                  "Disability Certificate",
+                  "School ID",
+                  "Bank Account",
+                  "Other"
+                ]
               }
             },
             "highest_qualification": {
@@ -211,53 +201,6 @@
           "title": "PWD Service Provider Profile 1.0",
           "type": "object",
           "additionalProperties": false,
-          "$defs": {
-            "disability_type": {
-              "type": "string",
-              "enum": [
-                "Acid Attack Victim",
-                "Autism Spectrum Disorder",
-                "Blindness",
-                "Cerebral Palsy",
-                "Dwarfism",
-                "Hearing Impairment",
-                "Hemophilia",
-                "Intellectual Disability",
-                "Leprosy Cured",
-                "Locomotor Disability",
-                "Low Vision",
-                "Mental Illness",
-                "Multiple Sclerosis",
-                "Muscular Dystrophy",
-                "Parkinson's Disease",
-                "Sickle Cell Disease",
-                "Specific Learning Disabilities",
-                "Speech and Language Disability",
-                "Thalassemia",
-                "Chronic Neurological Conditions",
-                "Deaf",
-                "Hard of Hearing",
-                "Multiple Disabilities including deaf-blindness",
-                "Multiple Disabilities",
-                "Mental Retardation"
-              ]
-            },
-            "support_category": {
-              "type": "string",
-              "enum": [
-                "Assistive Devices",
-                "Health & Rehabilitation",
-                "Training & Skill Building",
-                "Application Support",
-                "Counselling & Mentorship",
-                "Accessibility Support",
-                "Employment Opportunities",
-                "Scholarships",
-                "Financial Products (Loans/Insurance)",
-                "Other"
-              ]
-            }
-          },
           "required": [
             "contact_name",
             "contact_phone",
@@ -273,7 +216,8 @@
             "contact_name": {
               "type": "string",
               "title": "Contact Name",
-              "minLength": 1
+              "minLength": 1,
+              "private": true
             },
             "contact_phone": {
               "type": "string",
@@ -315,7 +259,34 @@
               "description": "What type of seekers are you looking for?",
               "minItems": 1,
               "items": {
-                "$ref": "#/$defs/disability_type"
+                "type": "string",
+                "enum": [
+                  "Acid Attack Victim",
+                  "Autism Spectrum Disorder",
+                  "Blindness",
+                  "Cerebral Palsy",
+                  "Dwarfism",
+                  "Hearing Impairment",
+                  "Hemophilia",
+                  "Intellectual Disability",
+                  "Leprosy Cured",
+                  "Locomotor Disability",
+                  "Low Vision",
+                  "Mental Illness",
+                  "Multiple Sclerosis",
+                  "Muscular Dystrophy",
+                  "Parkinson's Disease",
+                  "Sickle Cell Disease",
+                  "Specific Learning Disabilities",
+                  "Speech and Language Disability",
+                  "Thalassemia",
+                  "Chronic Neurological Conditions",
+                  "Deaf",
+                  "Hard of Hearing",
+                  "Multiple Disabilities including deaf-blindness",
+                  "Multiple Disabilities",
+                  "Mental Retardation"
+                ]
               }
             },
             "services_offered": {
@@ -324,7 +295,19 @@
               "description": "What services or support do you provide?",
               "minItems": 1,
               "items": {
-                "$ref": "#/$defs/support_category"
+                "type": "string",
+                "enum": [
+                  "Assistive Devices",
+                  "Health & Rehabilitation",
+                  "Training & Skill Building",
+                  "Application Support",
+                  "Counselling & Mentorship",
+                  "Accessibility Support",
+                  "Employment Opportunities",
+                  "Scholarships",
+                  "Financial Products (Loans/Insurance)",
+                  "Other"
+                ]
               }
             },
             "service_cities": {
@@ -386,18 +369,6 @@
       "instance_url": "http://localhost:2742",
       "custom_item_schema_urls": {},
       "domain_id": "provider"
-    },
-    {
-      "instance_name": "Purple Dot Seeker",
-      "instance_url": "https://ubi-backend.onest.dhiway.net",
-      "custom_item_schema_urls": {},
-      "domain_id": "seeker"
-    },
-    {
-      "instance_name": "Purple Dot Provider",
-      "instance_url": "https://ubi-backend.onest.dhiway.net",
-      "custom_item_schema_urls": {},
-      "domain_id": "provider"
     }
   ],
   "actions": {
@@ -414,53 +385,6 @@
             "title": "Seeker To Provider Connect Requirement",
             "type": "object",
             "additionalProperties": false,
-            "$defs": {
-              "disability_type": {
-                "type": "string",
-                "enum": [
-                  "Acid Attack Victim",
-                  "Autism Spectrum Disorder",
-                  "Blindness",
-                  "Cerebral Palsy",
-                  "Dwarfism",
-                  "Hearing Impairment",
-                  "Hemophilia",
-                  "Intellectual Disability",
-                  "Leprosy Cured",
-                  "Locomotor Disability",
-                  "Low Vision",
-                  "Mental Illness",
-                  "Multiple Sclerosis",
-                  "Muscular Dystrophy",
-                  "Parkinson's Disease",
-                  "Sickle Cell Disease",
-                  "Specific Learning Disabilities",
-                  "Speech and Language Disability",
-                  "Thalassemia",
-                  "Chronic Neurological Conditions",
-                  "Deaf",
-                  "Hard of Hearing",
-                  "Multiple Disabilities including deaf-blindness",
-                  "Multiple Disabilities",
-                  "Mental Retardation"
-                ]
-              },
-              "support_category": {
-                "type": "string",
-                "enum": [
-                  "Assistive Devices",
-                  "Health & Rehabilitation",
-                  "Training & Skill Building",
-                  "Application Support",
-                  "Counselling & Mentorship",
-                  "Accessibility Support",
-                  "Employment Opportunities",
-                  "Scholarships",
-                  "Financial Products (Loans/Insurance)",
-                  "Other"
-                ]
-              }
-            },
             "required": [
               "disability_type",
               "looking_for",
@@ -472,7 +396,34 @@
                 "title": "Disability",
                 "minItems": 1,
                 "items": {
-                  "$ref": "#/$defs/disability_type"
+                  "type": "string",
+                  "enum": [
+                    "Acid Attack Victim",
+                    "Autism Spectrum Disorder",
+                    "Blindness",
+                    "Cerebral Palsy",
+                    "Dwarfism",
+                    "Hearing Impairment",
+                    "Hemophilia",
+                    "Intellectual Disability",
+                    "Leprosy Cured",
+                    "Locomotor Disability",
+                    "Low Vision",
+                    "Mental Illness",
+                    "Multiple Sclerosis",
+                    "Muscular Dystrophy",
+                    "Parkinson's Disease",
+                    "Sickle Cell Disease",
+                    "Specific Learning Disabilities",
+                    "Speech and Language Disability",
+                    "Thalassemia",
+                    "Chronic Neurological Conditions",
+                    "Deaf",
+                    "Hard of Hearing",
+                    "Multiple Disabilities including deaf-blindness",
+                    "Multiple Disabilities",
+                    "Mental Retardation"
+                  ]
                 }
               },
               "looking_for": {
@@ -481,7 +432,19 @@
                 "description": "What are you looking for?",
                 "minItems": 1,
                 "items": {
-                  "$ref": "#/$defs/support_category"
+                  "type": "string",
+                  "enum": [
+                    "Assistive Devices",
+                    "Health & Rehabilitation",
+                    "Training & Skill Building",
+                    "Application Support",
+                    "Counselling & Mentorship",
+                    "Accessibility Support",
+                    "Employment Opportunities",
+                    "Scholarships",
+                    "Financial Products (Loans/Insurance)",
+                    "Other"
+                  ]
                 }
               },
               "message": {
@@ -528,23 +491,6 @@
             "title": "Provider To Seeker Connect Requirement",
             "type": "object",
             "additionalProperties": false,
-            "$defs": {
-              "support_category": {
-                "type": "string",
-                "enum": [
-                  "Assistive Devices",
-                  "Health & Rehabilitation",
-                  "Training & Skill Building",
-                  "Application Support",
-                  "Counselling & Mentorship",
-                  "Accessibility Support",
-                  "Employment Opportunities",
-                  "Scholarships",
-                  "Financial Products (Loans/Insurance)",
-                  "Other"
-                ]
-              }
-            },
             "required": [
               "services_offered",
               "message"
@@ -556,7 +502,19 @@
                 "description": "Services or support being offered",
                 "minItems": 1,
                 "items": {
-                  "$ref": "#/$defs/support_category"
+                  "type": "string",
+                  "enum": [
+                    "Assistive Devices",
+                    "Health & Rehabilitation",
+                    "Training & Skill Building",
+                    "Application Support",
+                    "Counselling & Mentorship",
+                    "Accessibility Support",
+                    "Employment Opportunities",
+                    "Scholarships",
+                    "Financial Products (Loans/Insurance)",
+                    "Other"
+                  ]
                 }
               },
               "message": {
