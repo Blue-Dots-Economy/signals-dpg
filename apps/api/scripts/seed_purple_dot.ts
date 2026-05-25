@@ -650,20 +650,61 @@ async function ensureSeedUser(
     .onConflictDoNothing({ target: userTable.id });
 }
 
+// Mirrors apps/api/src/routes/v1/admin/aggregator/upsert.ts:62 — the
+// aggregator dashboard route reads org.metadata.domains and 400s with
+// NO_DOMAINS_CONFIGURED if absent.
+const AGGREGATOR_METADATA = JSON.stringify({
+  external_id: 'purple_dot_aggregator_seed',
+  domains: ['seeker', 'provider'],
+});
+
 async function ensureAggregatorOrg(
   database: NodePgDatabase<any>,
   organizationTable: any
 ) {
-  await database
-    .insert(organizationTable)
-    .values({
+  const [existing] = await database
+    .select({
+      id: organizationTable.id,
+      metadata: organizationTable.metadata,
+    })
+    .from(organizationTable)
+    .where(eq(organizationTable.id, AGGREGATOR_ORG_ID))
+    .limit(1);
+
+  if (!existing) {
+    await database.insert(organizationTable).values({
       id: AGGREGATOR_ORG_ID,
       slug: AGGREGATOR_ORG_SLUG,
       name: AGGREGATOR_ORG_NAME,
       type: 'aggregator',
+      metadata: AGGREGATOR_METADATA,
       createdAt: new Date(),
-    })
-    .onConflictDoNothing({ target: organizationTable.id });
+    });
+    return;
+  }
+
+  // Existing row: only overwrite metadata when domains is missing/empty,
+  // so a customized metadata blob (e.g. set via admin upsert) is preserved.
+  let needs_patch = !existing.metadata;
+  if (existing.metadata) {
+    try {
+      const parsed = JSON.parse(existing.metadata) as { domains?: unknown };
+      if (!Array.isArray(parsed.domains) || parsed.domains.length === 0) {
+        needs_patch = true;
+      }
+    } catch {
+      needs_patch = true;
+    }
+  }
+  if (needs_patch) {
+    await database
+      .update(organizationTable)
+      .set({ metadata: AGGREGATOR_METADATA })
+      .where(eq(organizationTable.id, AGGREGATOR_ORG_ID));
+    console.log(
+      `[seed:purple_dot] patched metadata.domains on existing aggregator org`
+    );
+  }
 }
 
 async function ensureMember(
@@ -873,6 +914,17 @@ async function main() {
   const pool = new Pool({ connectionString: pgUrl, ssl: false });
   const db = drizzle(pool);
 
+  // Org / seed user / member setup runs UNCONDITIONALLY (not gated by the
+  // items short-circuit below) so re-running against an already-seeded DB
+  // still applies the metadata.domains patch on the aggregator org. All
+  // three helpers are idempotent.
+  await ensureAggregatorOrg(db, organization);
+  await ensureSeedUser(db, user);
+  await ensureMember(db, member, SEED_USER_ID, AGGREGATOR_ORG_ID, 'service');
+  console.log(
+    `[seed:purple_dot] aggregator org=${AGGREGATOR_ORG_ID} service user=${SEED_USER_ID}`
+  );
+
   const existing = await db
     .select({ count: sql<number>`count(*)::int` })
     .from(items)
@@ -881,17 +933,10 @@ async function main() {
   const existingCount = existing[0]?.count ?? 0;
   if (existingCount > 0) {
     console.log(
-      `[seed:purple_dot] skipping: network "${NETWORK}" already has ${existingCount} item(s).`
+      `[seed:purple_dot] skipping item + action inserts: network "${NETWORK}" already has ${existingCount} item(s).`
     );
     return;
   }
-
-  await ensureAggregatorOrg(db, organization);
-  await ensureSeedUser(db, user);
-  await ensureMember(db, member, SEED_USER_ID, AGGREGATOR_ORG_ID, 'service');
-  console.log(
-    `[seed:purple_dot] aggregator org=${AGGREGATOR_ORG_ID} service user=${SEED_USER_ID}`
-  );
 
   await ensureItemPartition(db, NETWORK, 'seeker');
   await ensureItemPartition(db, NETWORK, 'provider');
