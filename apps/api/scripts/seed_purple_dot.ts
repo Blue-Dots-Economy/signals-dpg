@@ -28,7 +28,7 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { sql } from 'drizzle-orm';
+import { and, eq, sql } from 'drizzle-orm';
 import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
 import dotenv from 'dotenv';
 import {
@@ -706,6 +706,69 @@ async function ensureRecordUser(
     .onConflictDoNothing({ target: userTable.id });
 }
 
+const CONNECT_ACTION_TYPE = 'connect';
+const CONNECT_STATUS_CYCLE = [
+  'created',   // pending bucket
+  'accepted',  // shortlisted bucket
+  'rejected',  // rejected bucket
+  'cancelled', // rejected bucket
+] as const;
+
+async function seedConnectActions(
+  database: NodePgDatabase<any>,
+  itemsTable: typeof import('@dpg/database').items,
+  itemActionsTable: typeof import('@dpg/database').item_actions,
+  orgId: string
+): Promise<number> {
+  const seekerItems = await database
+    .select({ id: itemsTable.item_id })
+    .from(itemsTable)
+    .where(
+      and(
+        eq(itemsTable.item_network, NETWORK),
+        eq(itemsTable.item_domain, 'seeker')
+      )
+    );
+  const providerItems = await database
+    .select({ id: itemsTable.item_id })
+    .from(itemsTable)
+    .where(
+      and(
+        eq(itemsTable.item_network, NETWORK),
+        eq(itemsTable.item_domain, 'provider')
+      )
+    );
+
+  if (seekerItems.length === 0 || providerItems.length === 0) return 0;
+
+  let inserted = 0;
+  for (let i = 0; i < seekerItems.length; i++) {
+    const seeker = seekerItems[i];
+    const provider = providerItems[i % providerItems.length];
+    const status = CONNECT_STATUS_CYCLE[i % CONNECT_STATUS_CYCLE.length];
+
+    await database.insert(itemActionsTable).values({
+      partition_network: NETWORK,
+      action_type: CONNECT_ACTION_TYPE,
+      action_status: status,
+      source_item_network: NETWORK,
+      source_item_domain: 'seeker',
+      source_item_type: ITEM_TYPE,
+      source_item_id: seeker.id,
+      source_item_instance_url: INSTANCE_URL,
+      target_item_network: NETWORK,
+      target_item_domain: 'provider',
+      target_item_type: ITEM_TYPE,
+      target_item_id: provider.id,
+      target_item_instance_url: INSTANCE_URL,
+      performed_by_org_id: orgId,
+      requirements_snapshot: {},
+    });
+    inserted++;
+  }
+  return inserted;
+}
+
 async function insertDomainRecords(
   database: NodePgDatabase<any>,
   itemsTable: typeof import('@dpg/database').items,
@@ -791,7 +854,12 @@ async function main() {
   // full Zod env validation (INSTANCE_NAME, INSTANCE_ENV, etc.). A DB-only
   // seed shouldn't require app-context env vars — matches db_init.ts and
   // seed_service_users.ts.
-  const { ensureItemPartition, items } = await import('@dpg/database');
+  const {
+    ensureItemPartition,
+    ensureActionPartition,
+    items,
+    item_actions,
+  } = await import('@dpg/database');
   const { user, organization, member } = await import(
     '../db/postgres/schema/auth'
   );
@@ -852,6 +920,21 @@ async function main() {
   );
   console.log(
     `[seed:purple_dot] inserted ${PROVIDER_RECORDS.length} provider records + per-record users`
+  );
+
+  // Seed sample `connect` actions so the aggregator dashboard renders
+  // non-zero per-bucket counts for purple_dot. Statuses cycle through the
+  // network's full enum (created/accepted/rejected/cancelled) which the
+  // recompute pipeline buckets via metric_categories (see network.json).
+  await ensureActionPartition(db, NETWORK, CONNECT_ACTION_TYPE);
+  const actionsInserted = await seedConnectActions(
+    db,
+    items,
+    item_actions,
+    AGGREGATOR_ORG_ID
+  );
+  console.log(
+    `[seed:purple_dot] inserted ${actionsInserted} ${CONNECT_ACTION_TYPE} actions across ${CONNECT_STATUS_CYCLE.length} statuses`
   );
 
   console.log('[seed:purple_dot] done.');

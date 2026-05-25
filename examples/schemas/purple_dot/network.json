@@ -479,7 +479,11 @@
               }
             }
           },
-          "metric_categories": null
+          "metric_categories": {
+            "pending": ["created"],
+            "shortlisted": ["accepted"],
+            "rejected": ["rejected", "cancelled"]
+          }
         },
         {
           "from_network": "purple_dot",
