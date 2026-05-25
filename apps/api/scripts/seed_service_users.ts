@@ -1,17 +1,20 @@
 /**
- * Idempotent seed for the two integrating-DPG service users:
- *   - aggregator-dpg
- *   - voice-dpg
+ * Local-dev seed for the aggregator-dpg integrating-DPG service user.
  *
- * Each lives inside an organization with type='network_service' and owns
- * one apikey. Run after `pnpm db:push:api` so the better-auth tables exist.
+ * The service user lives inside an organization with type='network_service'
+ * and owns one apikey. Run after `pnpm db:push:api` so the better-auth
+ * tables exist.
  *
  * Run from repo root:  pnpm db:seed:services:api
  * Run inside apps/api: pnpm db:seed:services
  *
  * Idempotent — safe to re-run. Existing rows are reused; existing apikeys
- * are left alone. Minted keys are printed ONCE — capture them then and
- * store them in a secret manager.
+ * are left alone. Minted keys are printed ONCE — capture them then.
+ *
+ * For production (k8s), the helm migrate-job applies
+ * `helmcharts/dpg/charts/api/files/provision_service_users.sql` on every
+ * install/upgrade, reading the raw key from the AGGREGATOR_DPG_API_KEY
+ * Secret. The cluster Secret is the source of truth there.
  */
 import { randomUUID, randomBytes, createHash } from 'node:crypto';
 import { eq } from 'drizzle-orm';
@@ -42,7 +45,6 @@ import {
 
 const SERVICES = [
   { slug: 'aggregator-dpg', user_email: 'aggregator-dpg-svc@signals.local' },
-  { slug: 'voice-dpg', user_email: 'voice-dpg-svc@signals.local' },
 ] as const;
 
 const ensure_org = async (slug: string, name: string): Promise<string> => {
