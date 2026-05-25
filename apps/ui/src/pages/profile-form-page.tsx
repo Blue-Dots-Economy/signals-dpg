@@ -449,8 +449,14 @@ export function ProfileFormPage() {
         </Button>
         <Card>
           <CardHeader>
-            <CardTitle>
-              {isEdit ? 'Edit Profile' : `Create ${selectedDomainInfo?.description ?? 'Profile'}`}
+            <CardTitle className="text-xl capitalize">
+              {isEdit
+                ? 'Edit Profile'
+                : `Create ${
+                    selectedDomainInfo?.id
+                      ?.replace(/_/g, ' ')
+                      .replace(/\b\w/g, (c) => c.toUpperCase()) ?? ''
+                  } Profile`}
             </CardTitle>
             <CardDescription>
               {selectedDomainInfo?.description ?? 'Fill in your profile details'}

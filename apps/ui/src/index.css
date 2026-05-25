@@ -92,3 +92,44 @@
   --sidebar-border: hsl(240 3.7% 15.9%);
   --sidebar-ring: hsl(217.2 91.2% 59.8%);
 }
+
+/*
+ * RJSF shadcn ships its own `FancySelect` / `FancyMultiSelect` (cmdk based,
+ * not our shadcn `Select`). Its dropdown panel uses `w-full` of the trigger,
+ * and trigger sits inside a narrow form column — long enum labels wrap
+ * ugly inside a sliver of width. Widen only the cmdk popover so the
+ * dropdown overflows its trigger; surrounding form layout stays put.
+ */
+[data-slot="command"] > .relative > .absolute {
+  width: max-content;
+  min-width: 100%;
+  max-width: min(28rem, calc(100vw - 2rem));
+  max-height: 16rem;
+  overflow-y: auto;
+}
+
+[data-slot="command"] [cmdk-item] {
+  white-space: nowrap;
+}
+
+/*
+ * Give cmdk FancySelect a sensible minimum trigger width so the empty
+ * placeholder doesn't collapse to icon-size inside RJSF array rows.
+ * Trigger still grows beyond the floor when its parent column has room.
+ */
+[data-slot="command"] {
+  min-width: 16rem;
+}
+
+/*
+ * Browsers stain autofilled inputs blue/yellow. Match form bg so prefilled
+ * fields look the same as fresh ones.
+ */
+input:-webkit-autofill,
+input:-webkit-autofill:hover,
+input:-webkit-autofill:focus,
+input:-webkit-autofill:active {
+  -webkit-box-shadow: 0 0 0 1000px var(--background) inset !important;
+  -webkit-text-fill-color: var(--foreground) !important;
+  transition: background-color 5000s ease-in-out 0s;
+}

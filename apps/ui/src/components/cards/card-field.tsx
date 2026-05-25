@@ -29,9 +29,11 @@ function CardField({ label, value, type }: CardFieldProps) {
   }
 
   return (
-    <div className="flex flex-col gap-0.5">
+    <div className="flex min-w-0 flex-col gap-0.5">
       <span className="text-xs text-muted-foreground">{label}</span>
-      <span className="text-sm font-medium">{displayValue}</span>
+      <span className="text-sm font-medium [overflow-wrap:anywhere]">
+        {displayValue}
+      </span>
     </div>
   );
 }

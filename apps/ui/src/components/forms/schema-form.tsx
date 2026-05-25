@@ -23,9 +23,21 @@ function generateUiSchema(
 ): UiSchema {
   const uiSchema: Record<string, unknown> = {};
 
-  if (submitButtonText) {
-    uiSchema['ui:submitButtonOptions'] = { submitText: submitButtonText };
-  }
+  // Suppress the JSON-Schema-supplied root title/description. Surrounding
+  // page chrome (CardTitle / CardDescription) already announces the form;
+  // the inline duplicate ("PWD Beneficiary Profile 1.0") just adds noise.
+  uiSchema['ui:title'] = '';
+  uiSchema['ui:description'] = '';
+
+  // Style the default RJSF Submit button: full width, prominent size,
+  // separated from the last field with extra top margin. The rjsf-shadcn
+  // default renders a tiny `my-2` pill that looks like an afterthought.
+  uiSchema['ui:submitButtonOptions'] = {
+    ...(submitButtonText ? { submitText: submitButtonText } : {}),
+    props: {
+      className: 'mt-6 h-11 w-full text-base font-medium',
+    },
+  };
 
   for (const [key, prop] of Object.entries(schema.properties ?? {})) {
     const typed = prop as RJSFSchema & { private?: boolean; format?: string };

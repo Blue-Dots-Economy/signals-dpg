@@ -134,8 +134,13 @@ export async function resolveNetworkRefs(
 
   const obj = network as Record<string, unknown>;
 
-  // If this node is a $ref, resolve it
+  // If this node is a $ref, resolve it.
+  // Skip local JSON Pointers ("#/...") — RJSF resolves $defs/definitions
+  // natively at render time, and we don't have the schema's local root here.
   if (typeof obj.$ref === 'string') {
+    if (obj.$ref.startsWith('#/') || obj.$ref === '#') {
+      return obj;
+    }
     const raw = await resolveRefString(obj.$ref, {
       baseUrl: options?.baseUrl,
       rootDocument: network,

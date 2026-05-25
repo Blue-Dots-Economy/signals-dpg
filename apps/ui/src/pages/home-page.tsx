@@ -451,9 +451,11 @@ export function HomePage() {
 
   const showNetworkSelector = allNetworks.length > 1;
 
-  const currentDomainLabel = visibleDomains.find(
-    (d) => d.id === selectedDomain
-  )?.description;
+  const currentDomainLabel = selectedDomain
+    ? selectedDomain
+        .replace(/_/g, ' ')
+        .replace(/\b\w/g, (c) => c.toUpperCase())
+    : undefined;
 
   // Get dynamic actions for the selected domain
   const actions = selectedDomain
