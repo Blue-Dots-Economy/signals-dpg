@@ -174,7 +174,7 @@ export function LoginPage() {
         <button
           type="submit"
           disabled={isLoading}
-          className="flex w-full items-center justify-center gap-2 rounded-full py-3 text-sm font-semibold transition-all disabled:opacity-60 bg-brand-cta h-11"
+          className="flex w-full items-center justify-center gap-2 rounded-md py-3 text-sm font-semibold transition-all disabled:opacity-60 bg-brand-cta h-11"
         >
           {isLoading && <Loader2 className="h-4 w-4 animate-spin" />}
           {userExists === null ? 'Continue' : 'Send OTP'}

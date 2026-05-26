@@ -39,8 +39,12 @@ function SectionedObjectFieldTemplate(domainId: string) {
     const elementMap = new Map(props.properties.map((el) => [el.name, el]));
     const rendered = new Set<string>();
 
+    // Track which section is being rendered so we can number them and show
+    // the divider only between sections (not above the first one).
+    let visibleSectionIndex = 0;
+
     return (
-      <div className="space-y-8">
+      <div className="space-y-10">
         {layout.sections.map((section) => {
           const sectionElements = section.fields
             .map((f) => elementMap.get(f))
@@ -67,11 +71,19 @@ function SectionedObjectFieldTemplate(domainId: string) {
             if (next && currIsTwo && nextIsTwo) rendered.add(next.name);
           }
 
+          const sectionNum = ++visibleSectionIndex;
+
           return (
             <section key={section.title}>
-              <div className="mb-4 flex items-center gap-2.5">
-                <div className="h-4 w-1 rounded-full bg-primary/70" />
-                <h3 className="text-sm font-semibold text-foreground tracking-tight">{section.title}</h3>
+              {/* Section header: numbered badge + title + accent bar + divider line below */}
+              <div className="mb-5">
+                <div className="flex items-center gap-3">
+                  <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-primary/10 text-xs font-bold text-primary">
+                    {sectionNum}
+                  </div>
+                  <h3 className="text-base font-semibold text-foreground tracking-tight">{section.title}</h3>
+                </div>
+                <div className="mt-3 h-px bg-gradient-to-r from-border via-border/60 to-transparent" />
               </div>
               <div className="space-y-3">
                 {rows.map((row, ri) =>
@@ -131,7 +143,7 @@ function generateUiSchema(
   uiSchema['ui:submitButtonOptions'] = {
     ...(submitButtonText ? { submitText: submitButtonText } : {}),
     props: {
-      className: 'mt-8 h-12 w-full text-base font-semibold rounded-full bg-brand-cta hover:brightness-110 transition-all active:scale-95 shadow-md',
+      className: 'mt-8 h-12 w-full text-base font-semibold bg-brand-cta hover:brightness-110 transition-all active:scale-95 shadow-md',
     },
   };
 

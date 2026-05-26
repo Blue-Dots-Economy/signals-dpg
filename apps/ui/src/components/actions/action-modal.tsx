@@ -110,7 +110,7 @@ export function ActionModal({
       <Button
         {...confirmButtonProps}
         disabled={loading}
-        className={cn('min-w-[120px] rounded-full font-semibold shadow-sm', display.buttonClass)}
+        className={cn('min-w-[120px] font-semibold shadow-sm', display.buttonClass)}
       >
         {loading ? `${actionTitle}ing...` : 'Confirm'}
       </Button>
