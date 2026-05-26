@@ -2,22 +2,17 @@ import { pgTable, text, integer, timestamp, index } from 'drizzle-orm/pg-core';
 import { organization } from './auth.js';
 
 /**
- * Item-keyed metrics for the aggregator dashboard (Plan B).
+ * Item-keyed metrics for the aggregator dashboard.
  *
- * Replaces the Plan 3 `participant_metrics` table. One row per item
- * (not per user) — a user with two profiles gets two rows; a user
- * spanning seeker + provider gets one row per domain.
+ * Each item gets one row. The 4 canonical action buckets
+ * (create / accept / reject / cancel) drive all count + last-at columns.
+ * display_name is resolved at recompute time from the item's schema-declared
+ * display_name_field (or item_id as fallback).
  *
- * No FK on item_id — `items` is partitioned and Drizzle's FK story
- * doesn't reach partition keys cleanly. Soft reference via the text
- * column; recompute is the only writer.
+ * No FK on item_id — items is partitioned and Drizzle's FK story doesn't
+ * reach partition keys cleanly. Recompute is the only writer.
  *
- * No cascade on onboarded_by_org_id FK — attribution survives org
- * deletion, matching Plan 2's `user.onboardedByOrgId` convention.
- *
- * profile_status is computed per-domain (seeker vs provider) and is
- * never null in practice — the catch-all in compute_provider_status
- * absorbs any non-matching tail into 'inactive'.
+ * No cascade on onboarded_by_org_id FK — attribution survives org deletion.
  */
 export const item_metrics = pgTable('item_metrics', {
   itemId: text('item_id').primaryKey(),
@@ -28,24 +23,23 @@ export const item_metrics = pgTable('item_metrics', {
   onboardedByOrgId: text('onboarded_by_org_id').references(() => organization.id),
   onboardedVia: text('onboarded_via'),
 
+  displayName: text('display_name').notNull(),
+
   profileStatus: text('profile_status'),
   profileCompletionPct: integer('profile_completion_pct'),
   profileCreatedAt: timestamp('profile_created_at'),
   profileLastUpdatedAt: timestamp('profile_last_updated_at'),
   ageDays: integer('age_days'),
 
-  applicationsTotal: integer('applications_total').default(0),
-  applicationsPending: integer('applications_pending').default(0),
-  applicationsShortlisted: integer('applications_shortlisted').default(0),
-  applicationsRejected: integer('applications_rejected').default(0),
+  countCreate: integer('count_create').default(0).notNull(),
+  countAccept: integer('count_accept').default(0).notNull(),
+  countReject: integer('count_reject').default(0).notNull(),
+  countCancel: integer('count_cancel').default(0).notNull(),
 
-  // Seeker-only (NULL for provider rows)
-  lastAppliedAt: timestamp('last_applied_at'),
-
-  // Provider-only (NULL for seeker rows)
-  lastShortlistedAt: timestamp('last_shortlisted_at'),
-  lastRejectedAt: timestamp('last_rejected_at'),
-  openings: integer('openings'),
+  lastCreateAt: timestamp('last_create_at'),
+  lastAcceptAt: timestamp('last_accept_at'),
+  lastRejectAt: timestamp('last_reject_at'),
+  lastCancelAt: timestamp('last_cancel_at'),
 
   actionableTags: text('actionable_tags').array(),
 
