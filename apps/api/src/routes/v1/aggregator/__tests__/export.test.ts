@@ -6,16 +6,16 @@ import {
 } from 'fastify-type-provider-zod';
 
 /**
- * Plan B Task 11 — unit tests for GET /api/v1/aggregator/dashboard/export.
+ * Unit tests for GET /api/v1/aggregator/dashboard/export.
  *
- * The route now:
+ * The route:
  *   - Reads org.metadata.domains and 400s when missing.
  *   - Accepts ?domain= to narrow within the configured set; 400s otherwise.
- *   - Calls check_and_refresh_if_stale(org_id, domain) for each scoped
+ *   - Calls check_and_refresh_if_stale(org_id, domain, force) for each scoped
  *     domain in parallel before streaming the CSV.
  *   - Streams item_metrics rows ordered by (item_domain, item_id), so
  *     multi-domain output is grouped by domain.
- *   - Projects exactly the 22-column COLUMNS list (item_private_state is
+ *   - Projects exactly the 19-column COLUMNS list (item_private_state is
  *     never included).
  *
  * Strategy: vi.mock the drizzle db client + staleness service. The select
@@ -27,13 +27,13 @@ import {
 const state = {
   org_metadata: JSON.stringify({ domains: ['seeker'] }) as string | null,
   list_pages: [] as Array<Array<Record<string, unknown>>>,
-  staleness_calls: [] as Array<{ org_id: string; domain: string }>,
+  staleness_calls: [] as Array<{ org_id: string; domain: string; force: boolean }>,
 };
 
 vi.mock('@/services/metrics/staleness', () => ({
   check_and_refresh_if_stale: vi.fn(
-    async (aggregator_id: string, domain: string) => {
-      state.staleness_calls.push({ org_id: aggregator_id, domain });
+    async (aggregator_id: string, domain: string, force = false) => {
+      state.staleness_calls.push({ org_id: aggregator_id, domain, force });
       return { refreshed: false, last_computed_at: new Date() };
     },
   ),
@@ -57,7 +57,6 @@ vi.mock('@api/db/postgres/drizzle_config', () => {
   const listChain = () => {
     const chain: Record<string, unknown> = {};
     chain.from = () => chain;
-    chain.leftJoin = () => chain;
     chain.where = () => chain;
     chain.orderBy = () => chain;
     chain.limit = () => chain;
@@ -85,7 +84,7 @@ const sample = (overrides: Record<string, unknown> = {}) => ({
   itemDomain: 'seeker',
   itemType: 'profile_1.0',
   ownerUserId: 'usr_1',
-  name: 'Test User',
+  displayName: 'Test User',
   onboardedByOrgId: 'org_bbmp',
   onboardedVia: 'bulk',
   profileStatus: 'active',
@@ -93,14 +92,14 @@ const sample = (overrides: Record<string, unknown> = {}) => ({
   profileCreatedAt: new Date('2026-05-01T00:00:00Z'),
   profileLastUpdatedAt: new Date('2026-05-20T00:00:00Z'),
   ageDays: 30,
-  applicationsTotal: 2,
-  applicationsPending: 1,
-  applicationsShortlisted: 0,
-  applicationsRejected: 1,
-  lastAppliedAt: new Date('2026-05-18T00:00:00Z'),
-  lastShortlistedAt: null,
-  lastRejectedAt: new Date('2026-05-19T00:00:00Z'),
-  openings: null,
+  countCreate: 2,
+  countAccept: 1,
+  countReject: 1,
+  countCancel: 0,
+  lastCreateAt: new Date('2026-05-01T00:00:00Z'),
+  lastAcceptAt: new Date('2026-05-18T00:00:00Z'),
+  lastRejectAt: new Date('2026-05-19T00:00:00Z'),
+  lastCancelAt: null,
   actionableTags: ['no_recent_activity'],
   lastComputedAt: new Date(),
   itemPrivateState: { secret: 'should-never-leak' },
@@ -126,12 +125,10 @@ const buildApp = async (acting?: {
 };
 
 const EXPECTED_HEADER =
-  'item_id,item_network,item_domain,item_type,owner_user_id,name,' +
-  'onboarded_by_org_id,onboarded_via,' +
+  'item_network,item_domain,item_type,name,onboarded_via,' +
   'profile_status,profile_completion_pct,profile_created_at,profile_last_updated_at,' +
-  'age_days,applications_total,applications_pending,applications_shortlisted,' +
-  'applications_rejected,last_applied_at,last_shortlisted_at,last_rejected_at,' +
-  'openings,actionable_tags';
+  'age_days,count_create,count_accept,count_reject,count_cancel,' +
+  'last_create_at,last_accept_at,last_reject_at,last_cancel_at,actionable_tags';
 
 describe('GET /aggregator/dashboard/export', () => {
   beforeEach(() => {
@@ -184,24 +181,24 @@ describe('GET /aggregator/dashboard/export', () => {
     expect(state.staleness_calls).toHaveLength(0);
   });
 
-  it('200 returns text/csv with attachment header', async () => {
+  it('200 returns text/csv with attachment header using items_ prefix', async () => {
     state.list_pages = [[sample()]];
     const app = await buildApp();
     const res = await app.inject({ method: 'GET', url: '/dashboard/export' });
     expect(res.statusCode).toBe(200);
     expect(res.headers['content-type']).toMatch(/^text\/csv/);
     expect(res.headers['content-disposition']).toMatch(
-      /attachment; filename="participants_/,
+      /attachment; filename="items_/,
     );
   });
 
-  it('header line matches the 22-column COLUMNS list', async () => {
+  it('header line matches the 19-column COLUMNS list', async () => {
     state.list_pages = [[sample()]];
     const app = await buildApp();
     const res = await app.inject({ method: 'GET', url: '/dashboard/export' });
     const lines = res.body.trim().split('\n');
     expect(lines[0]).toBe(EXPECTED_HEADER);
-    expect(lines[0].split(',')).toHaveLength(22);
+    expect(lines[0].split(',')).toHaveLength(19);
   });
 
   it('CSV body has header row + one data row for single-domain caller', async () => {
@@ -210,12 +207,11 @@ describe('GET /aggregator/dashboard/export', () => {
     const res = await app.inject({ method: 'GET', url: '/dashboard/export' });
     const lines = res.body.trim().split('\n');
     expect(lines).toHaveLength(2);
-    expect(lines[1]).toContain('itm_1');
     expect(lines[1]).toContain('seeker');
     expect(lines[1]).toContain('profile_1.0');
-    expect(lines[1]).toContain('usr_1');
     expect(lines[1]).toContain('active');
     expect(lines[1]).toContain('2026-05-01T00:00:00.000Z');
+    expect(lines[1]).toContain('Test User');
   });
 
   it('multi-domain export streams rows for every configured domain (sorted by domain)', async () => {
@@ -228,7 +224,6 @@ describe('GET /aggregator/dashboard/export', () => {
           itemId: 'itm_prov_1',
           itemDomain: 'provider',
           itemType: 'job_1.0',
-          openings: 3,
         }),
         sample({ itemId: 'itm_seek_1', itemDomain: 'seeker' }),
       ],
@@ -238,14 +233,12 @@ describe('GET /aggregator/dashboard/export', () => {
     expect(res.statusCode).toBe(200);
     const lines = res.body.trim().split('\n');
     expect(lines).toHaveLength(3); // header + 2 data
-    expect(lines[1]).toContain('itm_prov_1');
     expect(lines[1]).toContain('provider');
-    expect(lines[2]).toContain('itm_seek_1');
     expect(lines[2]).toContain('seeker');
     // Both domains had staleness refreshed in parallel.
     expect(state.staleness_calls).toEqual([
-      { org_id: 'org_bbmp', domain: 'seeker' },
-      { org_id: 'org_bbmp', domain: 'provider' },
+      { org_id: 'org_bbmp', domain: 'seeker', force: false },
+      { org_id: 'org_bbmp', domain: 'provider', force: false },
     ]);
   });
 
@@ -258,11 +251,23 @@ describe('GET /aggregator/dashboard/export', () => {
       url: '/dashboard/export?domain=seeker',
     });
     expect(res.statusCode).toBe(200);
-    expect(res.body).toContain('itm_seek_only');
+    expect(res.body).toContain('seeker');
     // Only seeker had staleness refreshed.
     expect(state.staleness_calls).toEqual([
-      { org_id: 'org_bbmp', domain: 'seeker' },
+      { org_id: 'org_bbmp', domain: 'seeker', force: false },
     ]);
+  });
+
+  it('?refresh=true passes force=true to check_and_refresh_if_stale', async () => {
+    state.list_pages = [[]];
+    const app = await buildApp();
+    await app.inject({ method: 'GET', url: '/dashboard/export?refresh=true' });
+    expect(state.staleness_calls).toHaveLength(1);
+    expect(state.staleness_calls[0]).toEqual({
+      org_id: 'org_bbmp',
+      domain: 'seeker',
+      force: true,
+    });
   });
 
   it('?status=active filter passes through (test verifies route accepts it)', async () => {
@@ -282,7 +287,7 @@ describe('GET /aggregator/dashboard/export', () => {
     state.list_pages = [
       [
         sample({
-          itemId: 'itm,with,commas',
+          itemDomain: 'seeker',
           profileStatus: 'has "quotes"',
           actionableTags: ['line\nbreak', 'normal'],
         }),
@@ -290,7 +295,6 @@ describe('GET /aggregator/dashboard/export', () => {
     ];
     const app = await buildApp();
     const res = await app.inject({ method: 'GET', url: '/dashboard/export' });
-    expect(res.body).toContain('"itm,with,commas"');
     expect(res.body).toContain('"has ""quotes"""');
     expect(res.body).toContain('"line\nbreak|normal"');
   });
@@ -334,8 +338,8 @@ describe('GET /aggregator/dashboard/export', () => {
     const app = await buildApp({ org_id: 'org_xyz', org_type: 'aggregator' });
     await app.inject({ method: 'GET', url: '/dashboard/export' });
     expect(state.staleness_calls).toEqual([
-      { org_id: 'org_xyz', domain: 'seeker' },
-      { org_id: 'org_xyz', domain: 'provider' },
+      { org_id: 'org_xyz', domain: 'seeker', force: false },
+      { org_id: 'org_xyz', domain: 'provider', force: false },
     ]);
   });
 
