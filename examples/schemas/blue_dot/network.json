@@ -390,7 +390,8 @@
               }
             }
           },
-          "metric_categories": null
+          "metric_categories": null,
+          "reveals_pii_on_status": ["accepted"]
         }
       ]
     }

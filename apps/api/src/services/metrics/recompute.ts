@@ -6,12 +6,18 @@ import { compute_seeker_status } from './seeker_status.js';
 import { compute_provider_status } from './provider_status.js';
 import { compute_actionable_tags } from './actionable_tags.js';
 import { get_item_schema } from './schema_lookup.js';
-import { resolve_metric_categories } from './metric_categories.js';
+import { discover_metric_categories } from './metric_categories.js';
 import { getNetworkConfigById } from '@/network_configs';
 
 const BATCH_SIZE = 1000;
 const MS_PER_DAY = 86_400_000;
-const APPLY_ACTION = 'apply';
+
+// Sentinel action_type used in the SQL filter when the network config declares
+// no metric_categories anywhere (e.g. yellow_dot today). It does not match any
+// real action, so the action_counts CTE returns 0 rows and the LEFT JOIN's
+// COALESCEs zero everything out — preserving the pre-discovery behavior of
+// "items still get item_metrics rows, just with applications_* = 0".
+const NO_ACTION_SENTINEL = '__no_metric_categories_action__';
 
 /**
  * Coerce a raw timestamp value from `db.execute(sql`...`)` into a Date.
@@ -77,12 +83,13 @@ type RecomputeRow = {
  * Flow:
  *   1. Sample query → learns `item_network` for this (aggregator, domain). If
  *      no rows exist, return early with `processed: 0`.
- *   2. Resolve `metric_categories` from the network's `apply` interaction:
- *      - seeker domain → from_domain='seeker', to_domain='provider'
- *      - provider domain → from_domain='seeker', to_domain='provider' (same
- *        interaction; the direction filter on item_actions flips instead)
- *   3. Main CTE → counts item_actions bucketed by metric_categories, joined
- *      to items + users.
+ *   2. Discover the application action + direction from network config — first
+ *      action/interaction declaring metric_categories wins. The action_type and
+ *      (from_domain, to_domain) directionality both come from config; no action
+ *      name is hardcoded here. Networks with no metric_categories anywhere
+ *      (yellow_dot) get a sentinel action_type that matches no rows → zero counts.
+ *   3. Main CTE → counts item_actions bucketed by the discovered metric_categories,
+ *      filtered by the discovered direction, joined to items + users.
  *   4. Per row: domain-specific status helper + actionable_tags + flush in
  *      batches of 1000 via item_metrics upsert.
  */
@@ -116,20 +123,19 @@ export const recompute_aggregator_domain_metrics = async (
 
   const network = sampleRows[0].item_network;
 
-  // Step 2: resolve metric_categories. The `apply` interaction is always
-  // seeker→provider (the action flows from the seeker to the provider).
-  // For seeker rows we count where source_item_id = the seeker item; for
-  // provider rows we count where target_item_id = the provider item.
+  // Step 2: discover the application action + direction from network config.
+  // First action/interaction declaring metric_categories wins. purple_dot uses
+  // `connect` with statuses created/accepted/rejected/cancelled; blue_dot uses
+  // `apply`; yellow_dot declares nothing (discovery returns null).
   const networkConfig = await getNetworkConfigById(network);
-  const categories = resolve_metric_categories(networkConfig, {
-    actionType: APPLY_ACTION,
-    fromDomain: 'seeker',
-    toDomain: 'provider',
-  }) ?? { shortlisted: [], rejected: [], pending: [] };
+  const discovered = discover_metric_categories(networkConfig);
 
-  const shortlistedArr = categories.shortlisted;
-  const rejectedArr = categories.rejected;
-  const pendingArr = categories.pending;
+  const actionType = discovered?.actionType ?? NO_ACTION_SENTINEL;
+  const fromDomain = discovered?.fromDomain ?? 'seeker';
+  const toDomain = discovered?.toDomain ?? 'provider';
+  const shortlistedArr = discovered?.categories.shortlisted ?? [];
+  const rejectedArr = discovered?.categories.rejected ?? [];
+  const pendingArr = discovered?.categories.pending ?? [];
 
   // Drizzle's template-tag interpolation splays a JS array into individual
   // positional params, producing `($1, $2, $3)::text[]` which is invalid PG
@@ -145,9 +151,15 @@ export const recompute_aggregator_domain_metrics = async (
   const shortlistedList = sqlList(shortlistedArr);
   const rejectedList = sqlList(rejectedArr);
 
-  // Direction filter: seeker domain joins on source_item_id; provider on target.
+  // Direction filter: items in fromDomain join on source_item_id (they are the
+  // actor); items in toDomain join on target_item_id (they are the recipient).
+  // Items in neither domain get no action counts (LEFT JOIN miss → 0s).
   const directionCol =
-    domain === 'provider' ? sql`target_item_id` : sql`source_item_id`;
+    domain === toDomain
+      ? sql`target_item_id`
+      : domain === fromDomain
+        ? sql`source_item_id`
+        : sql`NULL`;
 
   // Step 3: main CTE. Counts per item, joined to items + users.
   const result = await db.execute<RecomputeRow>(sql`
@@ -163,9 +175,9 @@ export const recompute_aggregator_domain_metrics = async (
         MAX(created_at) FILTER (WHERE action_status IN (${rejectedList}))    AS last_rejected_at
       FROM item_actions
       WHERE ${directionCol} IS NOT NULL
-        AND action_type = ${APPLY_ACTION}
-        AND source_item_domain = 'seeker'
-        AND target_item_domain = 'provider'
+        AND action_type = ${actionType}
+        AND source_item_domain = ${fromDomain}
+        AND target_item_domain = ${toDomain}
       GROUP BY ${directionCol}
     )
     SELECT

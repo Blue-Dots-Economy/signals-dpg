@@ -133,6 +133,11 @@ secrets:
     POSTGRES_PASSWORD: ""
     POSTGRES_DB: dpg
     REDIS_PASSWORD: ""
+    # Raw apikey for the aggregator-dpg integrating service. Min 32 chars.
+    # The migrate-job upserts a SHA-256(value) hash into the better-auth
+    # `apikey` table on every install/upgrade; updating this value and
+    # re-running `helm upgrade` rotates the key in place.
+    AGGREGATOR_DPG_API_KEY: ""
     NOTIFICATION_SERVICE_ENDPOINT: ""
     NOTIFICATION_SERVICE_KEY_ID: ""
     NOTIFICATION_SERVICE_SECRET: ""

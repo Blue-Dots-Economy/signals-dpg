@@ -9,7 +9,10 @@
     ".": "./src/index.ts"
   },
   "scripts": {
-    "test": "echo \"no tests yet\""
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "vitest": "^4.1.7"
   },
   "keywords": [],
   "author": "",

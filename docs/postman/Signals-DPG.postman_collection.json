@@ -569,6 +569,34 @@
             "description": "Same endpoint as Accept; supplies `action_status=rejected`. Plan 3's metrics recompute treats this as a terminal status for the application count rollup."
           },
           "response": []
+        },
+        {
+          "name": "get_action_contact_details",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/v1/action/{{action_id}}/contact-details",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "action",
+                "{{action_id}}",
+                "contact-details"
+              ],
+              "query": []
+            },
+            "description": "Reveals the other actor's merged item state (public + private) when the action is in a network-declared reveal-eligible status. See spec 2026-05-26-pii-reveal-on-accepted-action-design.md."
+          },
+          "response": []
         }
       ]
     },

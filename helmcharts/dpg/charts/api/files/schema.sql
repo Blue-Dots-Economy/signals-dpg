@@ -1,6 +1,6 @@
 -- GENERATED FILE — do not edit by hand.
 --
--- Source: packages/database/src/utils/sql_scripts/auth.sql, packages/database/src/utils/sql_scripts/metrics.sql, packages/database/src/utils/sql_scripts/create_items.sql, packages/database/src/utils/sql_scripts/create_actions_events.sql
+-- Source: packages/database/src/utils/sql_scripts/auth.sql, packages/database/src/utils/sql_scripts/metrics.sql, packages/database/src/utils/sql_scripts/pii_reveal_audit.sql, packages/database/src/utils/sql_scripts/create_items.sql, packages/database/src/utils/sql_scripts/create_actions_events.sql
 -- Regenerate with: pnpm schema:bundle
 -- CI guards drift via: pnpm schema:bundle:check
 --
@@ -464,6 +464,32 @@ CREATE INDEX IF NOT EXISTS item_metrics_org_domain_last_computed_idx
 -- Per-user rollup queries (avg_profiles_per_user, users_with_applications).
 CREATE INDEX IF NOT EXISTS item_metrics_owner_domain_idx
   ON item_metrics (owner_user_id, item_domain);
+
+-- ─── pii_reveal_audit.sql ───
+
+-- pii_reveal_audit.sql
+--
+-- Idempotent DDL for the PII-reveal audit table. Mirrors the Drizzle
+-- definition in apps/api/db/postgres/schema/pii_reveal_audit.ts.
+--
+-- Append-only. No FKs to item_actions or items (both partitioned).
+
+CREATE TABLE IF NOT EXISTS pii_reveal_audit (
+  reveal_id                      uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  action_id                      uuid NOT NULL,
+  viewer_user_id                 text NOT NULL,
+  revealed_item_id               uuid NOT NULL,
+  revealed_item_owner            text NOT NULL,
+  revealed_action_type           text NOT NULL,
+  revealed_action_status_at_view text NOT NULL,
+  viewed_at                      timestamp NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS pii_reveal_audit_viewer_idx
+  ON pii_reveal_audit (viewer_user_id, viewed_at);
+
+CREATE INDEX IF NOT EXISTS pii_reveal_audit_item_idx
+  ON pii_reveal_audit (revealed_item_id, viewed_at);
 
 -- ─── create_items.sql ───
 
