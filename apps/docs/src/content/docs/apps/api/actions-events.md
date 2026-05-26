@@ -12,6 +12,7 @@ Actions model interactions between items. Events record action creation and stat
 POST /api/v1/action/perform
 GET  /api/v1/action/fetch
 POST /api/v1/action/update-status
+GET  /api/v1/action/:actionId/contact-details
 GET  /api/v1/event/fetch
 POST /api/v1/event/store
 POST /api/v1/network/action/perform
@@ -70,6 +71,19 @@ It:
 - stores a new action event
 - validates event payload against `event_schema` when configured
 - mirrors the event to the source instance when needed
+
+## Contact Details (PII Reveal)
+
+`GET /api/v1/action/:actionId/contact-details` reveals the other actor's merged item state (public + private fields) when the action is in a network-declared reveal-eligible status.
+
+The route:
+
+- resolves the action and determines the caller's role (source or target side)
+- checks the action status against the network config `reveals_pii_on_status` list
+- merges the public and private snapshots of the counterpart item
+- records an audit row in `pii_reveal_audit`
+
+Returns `403 PII_NOT_REVEALED` when the current status has not been declared reveal-eligible by the network config.
 
 ## Fetch Events
 

@@ -2,7 +2,7 @@
  * Seed Purple Dot sample records.
  *
  * Creates:
- *   - organization "purple_dot_aggregator" (type='aggregator')
+ *   - organization "purple_dot_aggregator" (type='aggregator')   [default mode only]
  *   - user "purple_dot_seed" (service account for the aggregator)
  *   - member row linking purple_dot_seed to the aggregator org (role='service')
  *   - one user per seeker / provider record (deterministic ids derived from
@@ -16,8 +16,18 @@
  * schema validation, and item_instance_url / item_schema_url construction.
  *
  * Invocation:
+ *   # Default: creates / patches the seed aggregator org.
  *   pnpm --filter api db:seed:purple_dot
  *   pnpm db:seed:purple_dot:api   # from repo root
+ *
+ *   # Link records to an org you've already registered via the Aggregator UI:
+ *   pnpm db:seed:purple_dot:api -- --org-id org_abc123
+ *   pnpm db:seed:purple_dot:api -- org_abc123   # positional shorthand
+ *
+ *   When --org-id is supplied the script does NOT create the org. It verifies
+ *   the row exists (errors out if not) and patches `metadata.domains` only
+ *   when missing — so the aggregator dashboard works without overwriting
+ *   slug / name / type set by the Aggregator registration flow.
  *
  * Env overrides:
  *   PURPLE_DOT_NETWORK_JSON   path to network.json (default: examples/schemas/purple_dot/network.json)
@@ -47,10 +57,29 @@ const ITEM_TYPE = 'profile_1.0';
 const SEED_USER_ID = 'purple_dot_seed';
 const SEED_USER_EMAIL = 'purple-dot-seed@dpg.local';
 
-const AGGREGATOR_ORG_ID = 'org_purple_dot_aggregator';
+const DEFAULT_AGGREGATOR_ORG_ID = 'org_purple_dot_aggregator';
 const AGGREGATOR_ORG_SLUG = 'purple_dot_aggregator';
 const AGGREGATOR_ORG_NAME = 'Purple Dot Aggregator (seed)';
 const PARTICIPANT_EMAIL_DOMAIN = 'purple-dot-seed.dpg.local';
+
+/**
+ * Optional CLI arg: `--org-id <id>`, `--org-id=<id>`, or a single positional
+ * arg before any flags. When set, the script links seed records to this
+ * pre-existing org instead of creating the default seed aggregator. The org
+ * must already exist (typically created via the Aggregator UI registration).
+ */
+function parseOrgIdArg(argv: string[]): string | null {
+  for (let i = 0; i < argv.length; i++) {
+    const arg = argv[i];
+    if (arg === '--org-id' && i + 1 < argv.length) return argv[i + 1];
+    if (arg.startsWith('--org-id=')) return arg.slice('--org-id='.length);
+    if (i === 0 && !arg.startsWith('-')) return arg;
+  }
+  return null;
+}
+
+const ORG_ID_OVERRIDE = parseOrgIdArg(process.argv.slice(2));
+const AGGREGATOR_ORG_ID = ORG_ID_OVERRIDE ?? DEFAULT_AGGREGATOR_ORG_ID;
 
 const SCRIPT_DIR = fileURLToPath(new URL('.', import.meta.url));
 const DEFAULT_NETWORK_JSON = resolve(
@@ -672,6 +701,15 @@ async function ensureAggregatorOrg(
     .limit(1);
 
   if (!existing) {
+    if (ORG_ID_OVERRIDE) {
+      // User supplied an org_id that doesn't exist. Don't create it — the
+      // Aggregator registration flow owns org creation. Fail with a clear
+      // message instead of silently writing seed defaults onto someone
+      // else's id.
+      throw new Error(
+        `Organization "${AGGREGATOR_ORG_ID}" not found. Register the org in the Aggregator UI first, or omit the --org-id argument to use the default seed org.`
+      );
+    }
     await database.insert(organizationTable).values({
       id: AGGREGATOR_ORG_ID,
       slug: AGGREGATOR_ORG_SLUG,
@@ -684,7 +722,10 @@ async function ensureAggregatorOrg(
   }
 
   // Existing row: only overwrite metadata when domains is missing/empty,
-  // so a customized metadata blob (e.g. set via admin upsert) is preserved.
+  // so a customized metadata blob (e.g. set via admin upsert, or whatever
+  // the Aggregator wrote at registration time) is preserved. slug, name,
+  // and type are NEVER overwritten — those belong to the Aggregator when
+  // ORG_ID_OVERRIDE is set, and to a prior run otherwise.
   let needs_patch = !existing.metadata;
   if (existing.metadata) {
     try {
@@ -858,6 +899,15 @@ async function insertDomainRecords(
 }
 
 async function main() {
+  if (ORG_ID_OVERRIDE) {
+    console.log(
+      `[seed:purple_dot] targeting aggregator org "${ORG_ID_OVERRIDE}" (supplied via --org-id; org must already exist)`
+    );
+  } else {
+    console.log(
+      `[seed:purple_dot] targeting default seed aggregator org "${DEFAULT_AGGREGATOR_ORG_ID}" (will be created if missing)`
+    );
+  }
   console.log(`[seed:purple_dot] loading network config from ${NETWORK_JSON_PATH}`);
   const networkConfig = parseNetworkConfigDocument(
     JSON.parse(readFileSync(NETWORK_JSON_PATH, 'utf8'))
@@ -922,7 +972,7 @@ async function main() {
   await ensureSeedUser(db, user);
   await ensureMember(db, member, SEED_USER_ID, AGGREGATOR_ORG_ID, 'service');
   console.log(
-    `[seed:purple_dot] aggregator org=${AGGREGATOR_ORG_ID} service user=${SEED_USER_ID}`
+    `[seed:purple_dot] aggregator org=${AGGREGATOR_ORG_ID}${ORG_ID_OVERRIDE ? ' (supplied via --org-id)' : ' (default seed org)'} service user=${SEED_USER_ID}`
   );
 
   const existing = await db

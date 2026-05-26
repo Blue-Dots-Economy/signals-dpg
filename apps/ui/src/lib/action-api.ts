@@ -2,6 +2,51 @@ import axios from 'axios';
 import { createApiClient } from './api-client';
 import { getAuthToken } from './auth-token';
 
+// ─── Contact-details types ────────────────────────────────────────
+
+export type ContactDetailsErrorCode =
+  | 'UNAUTHORIZED'
+  | 'ACTION_NOT_FOUND'
+  | 'NOT_ACTION_PARTICIPANT'
+  | 'PII_NOT_REVEALED'
+  | 'CROSS_INSTANCE_REVEAL_NOT_SUPPORTED'
+  | 'OTHER_ITEM_NOT_FOUND'
+  | 'INTERNAL_SERVER_ERROR';
+
+export interface ContactDetailsErrorBody {
+  error: ContactDetailsErrorCode;
+  message: string;
+}
+
+export interface ContactDetailsOtherActorItem {
+  item_id: string;
+  item_network: string;
+  item_domain: string;
+  item_type: string;
+  item_instance_url: string | null;
+  item_schema_url: string | null;
+  item_state: Record<string, unknown>;
+  item_latitude: number | null;
+  item_longitude: number | null;
+  created_by: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ContactDetailsResponse {
+  action_id: string;
+  action_status: string;
+  other_actor: {
+    item: ContactDetailsOtherActorItem;
+  };
+}
+
+/** Error thrown by getActionContactDetails on non-2xx responses */
+export interface ContactDetailsError extends Error {
+  status: number;
+  code: ContactDetailsErrorCode;
+}
+
 const apiClient = createApiClient();
 
 /**
@@ -281,4 +326,37 @@ export async function fetchActionEvents(
     signal,
   });
   return response.data;
+}
+
+/**
+ * Fetch contact details for the other party in an accepted action.
+ * Only succeeds when the action status has PII reveal enabled.
+ *
+ * @param actionId - The action UUID
+ */
+export async function getActionContactDetails(
+  actionId: string
+): Promise<ContactDetailsResponse> {
+  try {
+    const response = await apiClient.get<ContactDetailsResponse>(
+      `/api/v1/action/${actionId}/contact-details`,
+      {
+        headers: {
+          'Cache-Control': 'no-store',
+        },
+      }
+    );
+    return response.data;
+  } catch (err) {
+    if (axios.isAxiosError(err) && err.response) {
+      const body = err.response.data as Partial<ContactDetailsErrorBody>;
+      const message = body.message ?? `HTTP error ${err.response.status}`;
+      const code: ContactDetailsErrorCode = body.error ?? 'INTERNAL_SERVER_ERROR';
+      const typed = new Error(message) as ContactDetailsError;
+      typed.status = err.response.status;
+      typed.code = code;
+      throw typed;
+    }
+    throw err;
+  }
 }

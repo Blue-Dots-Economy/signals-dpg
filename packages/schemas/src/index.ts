@@ -14,6 +14,7 @@ export {
   getDomainItemTypes,
   getDomainItemSchema,
   getInstanceCustomItemSchemaUrl,
+  getInteractionPiiRevealStatuses,
   NetworkConfigSchema,
   parseNetworkConfigDocument,
   type NetworkConfigDocument,
