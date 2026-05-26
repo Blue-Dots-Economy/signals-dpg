@@ -83,7 +83,7 @@ The route:
 - merges the public and private snapshots of the counterpart item
 - records an audit row in `pii_reveal_audit`
 
-Returns `403 REVEAL_NOT_ELIGIBLE` when the current status has not been declared reveal-eligible by the network config.
+Returns `403 PII_NOT_REVEALED` when the current status has not been declared reveal-eligible by the network config.
 
 ## Fetch Events
 

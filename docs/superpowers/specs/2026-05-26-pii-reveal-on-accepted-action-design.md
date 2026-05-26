@@ -172,8 +172,7 @@ OpenAPI tag: `action`. Postman collection's `04_action` folder gains one new req
 New derived state alongside `canAccept`, `canReject`, etc.:
 
 ```ts
-const canRevealContact =
-  action.action_status === 'accepted' || action.action_status === 'completed';
+const canRevealContact = action.action_status === 'accepted';
 ```
 
 The server is authoritative via `reveals_pii_on_status`; the UI hardcodes the union of statuses any current network reveals on so the button shows on both `initiated` and `received` cards in those states. If a future network only reveals on a different status the UI does not know about, the button won't appear — a deliberate trade for not loading network configs into the UI bundle for this iteration. A 403 `PII_NOT_REVEALED` (e.g. if the server's list is stricter than the UI's) is surfaced as a toast.
