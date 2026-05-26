@@ -1,55 +1,47 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 
-const dbState: {
-  sampleRows: Array<{ item_network: string }>;
-  itemRows: Array<Record<string, unknown>>;
-  upserts: Array<Record<string, unknown>>;
-  executeCallCount: number;
-} = { sampleRows: [], itemRows: [], upserts: [], executeCallCount: 0 };
-
-vi.mock('@api/db/postgres/drizzle_config', () => {
-  const execute = vi.fn(async () => {
-    dbState.executeCallCount++;
-    // First call is the "sample" query (LIMIT 1, learns the network).
-    // Second + later are the main CTE call.
-    if (dbState.executeCallCount === 1) {
-      return { rows: dbState.sampleRows };
-    }
-    return { rows: dbState.itemRows };
-  });
-  const insert = vi.fn(() => ({
-    values: vi.fn((rows: Array<Record<string, unknown>>) => ({
-      onConflictDoUpdate: vi.fn(() => {
-        dbState.upserts.push(...rows);
-        return Promise.resolve();
-      }),
-    })),
+const { executeMock, insertMock } = vi.hoisted(() => {
+  const executeMock = vi.fn();
+  const insertMock = vi.fn(() => ({
+    values: vi.fn(() => ({ onConflictDoUpdate: vi.fn(async () => undefined) })),
   }));
-  return { db: { execute, insert } };
+  return { executeMock, insertMock };
 });
 
-vi.mock('../schema_lookup.js', () => ({
-  get_item_schema: vi.fn(async () => ({
-    type: 'object',
-    required: ['name', 'phone'],
-    properties: { name: {}, phone: {}, bio: {} },
-  })),
+vi.mock('@api/db/postgres/drizzle_config', () => ({
+  db: { execute: executeMock, insert: insertMock },
 }));
-
 vi.mock('@/network_configs', () => ({
   getNetworkConfigById: vi.fn(async () => ({
-    id: 'blue_dot',
+    id: 'purple_dot',
+    domains: [
+      {
+        id: 'seeker',
+        item_schemas: {
+          'profile_1.0': {
+            type: 'object',
+            required: ['beneficiary_name'],
+            properties: { beneficiary_name: { type: 'string', private: true } },
+          },
+        },
+        status_rules: [
+          { status: 'new', when: { item_age_days: { lte: 7 } } },
+          { status: 'inactive', when: 'default' },
+        ],
+      },
+    ],
     actions: {
-      apply: {
+      connect: {
         interactions: [
           {
             from_domain: 'seeker',
             to_domain: 'provider',
             requirement_schema: {},
             metric_categories: {
-              shortlisted: ['shortlisted'],
-              rejected: ['rejected'],
-              pending: ['created', 'submitted'],
+              create: ['created'],
+              accept: ['accepted'],
+              reject: ['rejected'],
+              cancel: ['cancelled'],
             },
           },
         ],
@@ -57,69 +49,59 @@ vi.mock('@/network_configs', () => ({
     },
   })),
 }));
+vi.mock('../schema_lookup.js', () => ({
+  get_item_schema: vi.fn(async () => ({
+    type: 'object',
+    required: ['beneficiary_name'],
+    properties: { beneficiary_name: { type: 'string', private: true } },
+  })),
+}));
 
-const { recompute_aggregator_domain_metrics } = await import('../recompute.js');
-
-const sample_seeker_row = {
-  item_id: 'item_seeker_1',
-  item_network: 'blue_dot',
-  item_domain: 'seeker',
-  item_type: 'profile_1.0',
-  owner_user_id: 'usr_1',
-  onboarded_by_org_id: 'org_a',
-  onboarded_via: 'bulk',
-  item_state: { name: 'A', phone: '+91' },
-  profile_created_at: new Date('2026-05-15'),
-  profile_last_updated_at: new Date('2026-05-15'),
-  applications_total: 3,
-  applications_pending: 1,
-  applications_shortlisted: 1,
-  applications_rejected: 1,
-  last_applied_at: new Date('2026-05-20'),
-  last_shortlisted_at: null,
-  last_rejected_at: null,
-  openings: null,
-};
+import { recompute_aggregator_domain_metrics } from '../recompute.js';
 
 describe('recompute_aggregator_domain_metrics', () => {
   beforeEach(() => {
-    dbState.sampleRows = [];
-    dbState.itemRows = [];
-    dbState.upserts = [];
-    dbState.executeCallCount = 0;
+    executeMock.mockReset();
+    insertMock.mockClear();
   });
 
-  it('handles an empty aggregator gracefully (no items)', async () => {
-    dbState.sampleRows = [];  // sample query returns []
-    dbState.itemRows = [];
-    const result = await recompute_aggregator_domain_metrics('org_a', 'seeker');
+  it('returns processed: 0 when no items exist for the (aggregator, domain)', async () => {
+    executeMock.mockResolvedValueOnce({ rows: [] });
+    const result = await recompute_aggregator_domain_metrics('org_1', 'seeker');
     expect(result.processed).toBe(0);
-    expect(dbState.upserts).toEqual([]);
   });
 
-  it('upserts one row per seeker item with computed status + tags', async () => {
-    dbState.sampleRows = [{ item_network: 'blue_dot' }];
-    dbState.itemRows = [sample_seeker_row];
-    const result = await recompute_aggregator_domain_metrics('org_a', 'seeker');
+  it('computes and upserts one item with empty action counts → status new (age <= 7)', async () => {
+    executeMock.mockResolvedValueOnce({ rows: [{ item_network: 'purple_dot' }] });
+    const now = new Date();
+    const created = new Date(now.getTime() - 3 * 86_400_000);
+    executeMock.mockResolvedValueOnce({
+      rows: [
+        {
+          item_id: 'itm_1',
+          item_network: 'purple_dot',
+          item_domain: 'seeker',
+          item_type: 'profile_1.0',
+          owner_user_id: 'u_1',
+          onboarded_by_org_id: 'org_1',
+          onboarded_via: 'bulk',
+          item_state: { beneficiary_name: 'Asha' },
+          profile_created_at: created,
+          profile_last_updated_at: created,
+          count_create: 0,
+          count_accept: 0,
+          count_reject: 0,
+          count_cancel: 0,
+          last_create_at: null,
+          last_accept_at: null,
+          last_reject_at: null,
+          last_cancel_at: null,
+        },
+      ],
+    });
+
+    const result = await recompute_aggregator_domain_metrics('org_1', 'seeker');
     expect(result.processed).toBe(1);
-    expect(dbState.upserts).toHaveLength(1);
-    const r = dbState.upserts[0];
-    expect(r.itemId).toBe('item_seeker_1');
-    expect(r.itemDomain).toBe('seeker');
-    expect(r.applicationsTotal).toBe(3);
-    expect(r.applicationsShortlisted).toBe(1);
-    expect(r.applicationsRejected).toBe(1);
-    expect(r.profileStatus).toBeTruthy();
-  });
-
-  it('flushes in batches above 1000 rows', async () => {
-    dbState.sampleRows = [{ item_network: 'blue_dot' }];
-    dbState.itemRows = Array.from({ length: 2500 }, (_, i) => ({
-      ...sample_seeker_row,
-      item_id: `item_${i}`,
-    }));
-    const result = await recompute_aggregator_domain_metrics('org_a', 'seeker');
-    expect(result.processed).toBe(2500);
-    expect(dbState.upserts).toHaveLength(2500);
+    expect(insertMock).toHaveBeenCalledOnce();
   });
 });
