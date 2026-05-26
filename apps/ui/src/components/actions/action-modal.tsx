@@ -4,15 +4,14 @@ import type { DotActionSchema } from '@/engine/types';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { SchemaForm } from '@/components/forms/schema-form';
 import { resolveRefs } from '@/engine/schema/resolve-schema';
+import { ActionModalHeader } from './action-modal-header';
+import { getActionDisplay } from '@/lib/action-display';
+import { cn } from '@/lib/utils';
 
 // Desktop: Dialog
 import {
   Dialog,
   DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
 } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 
@@ -20,10 +19,6 @@ import { Button } from '@/components/ui/button';
 import {
   Drawer,
   DrawerContent,
-  DrawerDescription,
-  DrawerFooter,
-  DrawerHeader,
-  DrawerTitle,
 } from '@/components/ui/drawer';
 
 interface ActionModalProps {
@@ -35,6 +30,15 @@ interface ActionModalProps {
 }
 
 const ACTION_FORM_ID = 'action-requirement-form';
+
+// Friendly subtitles per action — used in the colored header band below the title.
+const ACTION_SUBTITLES: Record<string, string> = {
+  connect: 'Share details so the other party can review your request.',
+  accept: 'Confirm you want to accept this request.',
+  reject: 'Let the other party know why this request is being declined.',
+  cancel: 'Withdraw this request — both parties will be notified.',
+  complete: 'Mark this as complete once everything is finished.',
+};
 
 export function ActionModal({
   open,
@@ -64,8 +68,6 @@ export function ActionModal({
     }
   }, [open, actionSchema]);
 
-  // Shared form content — the Confirm button submits the RJSF form via id,
-  // which triggers validation before calling onSubmit with the validated data.
   const formContent = resolvedSchema ? (
     <SchemaForm
       id={ACTION_FORM_ID}
@@ -74,46 +76,54 @@ export function ActionModal({
       onSubmit={onSubmit}
     />
   ) : (
-    <p className="text-muted-foreground text-sm">
-      No additional information required.
-    </p>
+    <p className="text-muted-foreground text-sm">No additional information required.</p>
   );
 
-  // When there's no schema, Confirm fires onSubmit directly with empty data.
   const confirmButtonProps = resolvedSchema
     ? { type: 'submit' as const, form: ACTION_FORM_ID }
     : { type: 'button' as const, onClick: () => onSubmit({}) };
 
-  // Dynamic action title based on action type
-  const actionTitle = actionSchema.action_type
-    ? actionSchema.action_type.charAt(0).toUpperCase() + actionSchema.action_type.slice(1)
-    : 'Connect';
+  const actionKey = actionSchema.action_type ?? 'connect';
+  const display = getActionDisplay(actionKey);
+  const actionTitle = display.label;
+  const subtitle = ACTION_SUBTITLES[actionKey.toLowerCase()] ?? `${actionTitle} request`;
+
+  const header = (
+    <ActionModalHeader
+      actionKey={actionKey}
+      title={actionTitle}
+      description={subtitle}
+      fromDomain={actionSchema.from_domain}
+      toDomain={actionSchema.to_domain}
+    />
+  );
+
+  const footer = (
+    <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+      <Button
+        variant="outline"
+        onClick={() => onOpenChange(false)}
+        disabled={loading}
+      >
+        Cancel
+      </Button>
+      <Button
+        {...confirmButtonProps}
+        disabled={loading}
+        className={cn('min-w-[120px] rounded-full font-semibold shadow-sm', display.buttonClass)}
+      >
+        {loading ? `${actionTitle}ing...` : 'Confirm'}
+      </Button>
+    </div>
+  );
 
   if (isMobile) {
     return (
       <Drawer open={open} onOpenChange={onOpenChange}>
-        <DrawerContent className="max-h-[90vh]">
-          <DrawerHeader>
-            <DrawerTitle>{actionTitle}</DrawerTitle>
-            <DrawerDescription>
-              {actionSchema.from_domain} → {actionSchema.to_domain}
-            </DrawerDescription>
-          </DrawerHeader>
-          <div className="px-4 pb-4 overflow-y-auto">
-            {formContent}
-          </div>
-          <DrawerFooter>
-            <Button {...confirmButtonProps} disabled={loading}>
-              {loading ? `${actionTitle}ing...` : 'Confirm'}
-            </Button>
-            <Button
-              variant="outline"
-              onClick={() => onOpenChange(false)}
-              disabled={loading}
-            >
-              Cancel
-            </Button>
-          </DrawerFooter>
+        <DrawerContent className="max-h-[90vh] overflow-hidden p-0">
+          <div className="px-6 pt-6">{header}</div>
+          <div className="px-6 pb-4 overflow-y-auto">{formContent}</div>
+          <div className="border-t px-6 py-4">{footer}</div>
         </DrawerContent>
       </Drawer>
     );
@@ -121,28 +131,10 @@ export function ActionModal({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-[500px] max-h-[90vh] overflow-y-auto">
-        <DialogHeader>
-          <DialogTitle>{actionTitle}</DialogTitle>
-          <DialogDescription>
-            {actionSchema.from_domain} → {actionSchema.to_domain}
-          </DialogDescription>
-        </DialogHeader>
-        <div className="py-4">
-          {formContent}
-        </div>
-        <DialogFooter>
-          <Button
-            variant="outline"
-            onClick={() => onOpenChange(false)}
-            disabled={loading}
-          >
-            Cancel
-          </Button>
-          <Button {...confirmButtonProps} disabled={loading}>
-            {loading ? `${actionTitle}ing...` : 'Confirm'}
-          </Button>
-        </DialogFooter>
+      <DialogContent className="sm:max-w-[520px] max-h-[90vh] overflow-y-auto gap-0 p-6">
+        {header}
+        <div className="py-4">{formContent}</div>
+        {footer}
       </DialogContent>
     </Dialog>
   );

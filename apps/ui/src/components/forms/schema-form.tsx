@@ -99,6 +99,22 @@ function SectionedObjectFieldTemplate(domainId: string) {
   };
 }
 
+// Walks a local JSON pointer like "#/$defs/support_category" against the
+// root schema. Returns the referenced subschema or undefined if not found.
+function resolveLocalRef(schema: RJSFSchema, ref: string): RJSFSchema | undefined {
+  if (!ref.startsWith('#/')) return undefined;
+  const parts = ref.slice(2).split('/');
+  let curr: unknown = schema;
+  for (const p of parts) {
+    if (curr && typeof curr === 'object' && p in (curr as Record<string, unknown>)) {
+      curr = (curr as Record<string, unknown>)[p];
+    } else {
+      return undefined;
+    }
+  }
+  return curr as RJSFSchema;
+}
+
 function generateUiSchema(
   schema: RJSFSchema,
   mode: 'full' | 'compact',
@@ -138,6 +154,24 @@ function generateUiSchema(
     if (typed.enum && typed.type === 'string') {
       uiSchema[key] = { 'ui:placeholder': 'Select...' };
     }
+
+    // Render array-of-enums as a single multi-select (FancyMultiSelect:
+    // Popover + cmdk Command + Badge chips) instead of RJSF's default stack
+    // of single-selects with up/down/delete buttons per index.
+    if (typed.type === 'array' && typed.items) {
+      const items = typed.items as RJSFSchema & { $ref?: string };
+      let itemEnum = items.enum;
+      if (!itemEnum && items.$ref) {
+        itemEnum = resolveLocalRef(schema, items.$ref)?.enum;
+      }
+      if (itemEnum && itemEnum.length > 0) {
+        uiSchema[key] = {
+          ...(uiSchema[key] as object),
+          'ui:widget': 'select',
+          'ui:placeholder': 'Select...',
+        };
+      }
+    }
   }
 
   return uiSchema;
@@ -150,6 +184,48 @@ const widgets: RegistryWidgetsType = {
 function stripMetaSchema(schema: RJSFSchema): RJSFSchema {
   const { $schema, ...rest } = schema as RJSFSchema & { $schema?: string };
   return rest as RJSFSchema;
+}
+
+// Walks the schema tree, replacing local `{ $ref: "#/..." }` nodes with the
+// referenced subschema and ensuring array-of-enum fields have `uniqueItems:
+// true`. RJSF's `multiple=true` (which routes SelectWidget to FancyMultiSelect)
+// requires the items enum to be visible at the field level AND uniqueItems
+// set — without these, an `ui:widget: 'select'` array renders as a non-functional
+// single-select with no options.
+function normalizeSchemaForRjsf(schema: RJSFSchema, rootSchema?: RJSFSchema): RJSFSchema {
+  const root = rootSchema ?? schema;
+  if (typeof schema !== 'object' || schema === null) return schema;
+  if (Array.isArray(schema)) {
+    return (schema as unknown[]).map((s) => normalizeSchemaForRjsf(s as RJSFSchema, root)) as unknown as RJSFSchema;
+  }
+
+  const schemaAny = schema as RJSFSchema & { $ref?: string };
+  if (typeof schemaAny.$ref === 'string' && schemaAny.$ref.startsWith('#/')) {
+    const resolved = resolveLocalRef(root, schemaAny.$ref);
+    if (resolved) {
+      const { $ref: _, ...rest } = schemaAny;
+      return normalizeSchemaForRjsf({ ...resolved, ...rest } as RJSFSchema, root);
+    }
+  }
+
+  const result: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(schema as Record<string, unknown>)) {
+    result[key] = normalizeSchemaForRjsf(value as RJSFSchema, root);
+  }
+
+  // After children are normalized, force uniqueItems on array-of-enum fields.
+  const normalized = result as RJSFSchema & { type?: string; items?: RJSFSchema; uniqueItems?: boolean };
+  if (
+    normalized.type === 'array' &&
+    normalized.items &&
+    typeof normalized.items === 'object' &&
+    Array.isArray((normalized.items as RJSFSchema).enum) &&
+    normalized.uniqueItems !== true
+  ) {
+    normalized.uniqueItems = true;
+  }
+
+  return normalized as RJSFSchema;
 }
 
 export function SchemaForm({
@@ -169,7 +245,7 @@ export function SchemaForm({
   if (hideSubmit) {
     uiSchema['ui:submitButtonOptions'] = { norender: true };
   }
-  const schemaWithoutMeta = stripMetaSchema(schema);
+  const schemaWithoutMeta = normalizeSchemaForRjsf(stripMetaSchema(schema));
 
   const templates = domainId && formLayouts[domainId]
     ? { ObjectFieldTemplate: SectionedObjectFieldTemplate(domainId) }
