@@ -1,4 +1,5 @@
 import * as React from 'react';
+import type { RJSFSchema } from '@rjsf/utils';
 import {
   Dialog,
   DialogContent,
@@ -6,6 +7,8 @@ import {
   DialogTitle,
   DialogDescription,
 } from '@/components/ui/dialog';
+import { DomainCard } from '@/components/cards/domain-card';
+import { useNetworkConfig } from '@/hooks/use-network-config';
 import {
   getActionContactDetails,
   type ContactDetailsResponse,
@@ -70,9 +73,18 @@ export function ContactDetailsModal({
     };
   }, [open, actionId]);
 
+  const item = state.status === 'success' ? state.data.other_actor.item : null;
+  const { data: networkConfig } = useNetworkConfig(item?.item_network ?? null);
+  const schema = React.useMemo<RJSFSchema | null>(() => {
+    if (!item || !networkConfig) return null;
+    const domain = networkConfig.domains.find((d) => d.id === item.item_domain);
+    const raw = domain?.item_schemas?.[item.item_type];
+    return (raw as RJSFSchema | undefined) ?? null;
+  }, [item, networkConfig]);
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-lg">
+      <DialogContent className="max-w-xl">
         <DialogHeader>
           <DialogTitle>Contact details</DialogTitle>
           <DialogDescription>
@@ -93,12 +105,18 @@ export function ContactDetailsModal({
           </div>
         )}
 
-        {state.status === 'success' && (
-          <div className="space-y-2">
-            <pre className="overflow-auto max-h-80 rounded-md bg-muted p-3 text-xs">
-              {JSON.stringify(state.data.other_actor.item.item_state, null, 2)}
-            </pre>
-          </div>
+        {state.status === 'success' && item && schema && (
+          <DomainCard
+            schema={schema}
+            schemaName={item.item_domain}
+            data={item.item_state}
+          />
+        )}
+
+        {state.status === 'success' && item && !schema && (
+          <pre className="max-h-80 overflow-auto whitespace-pre-wrap break-words rounded-md bg-muted p-3 text-xs">
+            {JSON.stringify(item.item_state, null, 2)}
+          </pre>
         )}
       </DialogContent>
     </Dialog>
