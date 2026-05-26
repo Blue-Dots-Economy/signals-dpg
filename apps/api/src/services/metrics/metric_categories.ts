@@ -1,94 +1,61 @@
 import type { NetworkConfigDocument } from '@dpg/schemas';
+import { CANONICAL_BUCKETS, type CanonicalBucket } from './buckets.js';
 
-export interface MetricCategoriesTriple {
-  shortlisted: string[];
-  rejected: string[];
-  pending: string[];
-}
+/** Per-bucket arrays of raw `event_schema.status` values that map to each canonical bucket. */
+export type MetricCategoriesMap = Record<CanonicalBucket, string[]>;
 
-export interface ResolveInput {
+export interface InteractionWithCategories {
   actionType: string;
   fromDomain: string;
   toDomain: string;
+  categories: MetricCategoriesMap;
 }
 
-/**
- * Resolve the metric_categories triple for a `(action_type, from_domain,
- * to_domain)` interaction in a network's config. Returns `null` when:
- *   - The action_type isn't declared,
- *   - No interaction matches the (from, to) direction, or
- *   - The matching interaction has `metric_categories: null` (or absent).
- *
- * Plan B's recompute treats null identically to a zeroed triple — all
- * counts stay 0 for that direction (e.g. provider→seeker invites today).
- */
-export const resolve_metric_categories = (
-  networkConfig: NetworkConfigDocument,
-  input: ResolveInput,
-): MetricCategoriesTriple | null => {
-  const action = networkConfig.actions[input.actionType];
-  if (!action) return null;
+const empty_categories = (): MetricCategoriesMap => ({
+  create: [],
+  accept: [],
+  reject: [],
+  cancel: [],
+});
 
-  const interaction = action.interactions.find(
-    (entry) =>
-      entry.from_domain === input.fromDomain &&
-      entry.to_domain === input.toDomain,
-  );
-  if (!interaction) return null;
-
-  const mc = (interaction as { metric_categories?: MetricCategoriesTriple | null })
-    .metric_categories;
-  if (!mc) return null;
-  return {
-    shortlisted: mc.shortlisted ?? [],
-    rejected: mc.rejected ?? [],
-    pending: mc.pending ?? [],
-  };
+const normalize = (
+  raw: Partial<MetricCategoriesMap> | null | undefined,
+): MetricCategoriesMap | null => {
+  if (!raw) return null;
+  const out = empty_categories();
+  for (const b of CANONICAL_BUCKETS) {
+    out[b] = raw[b] ?? [];
+  }
+  if (CANONICAL_BUCKETS.every((b) => out[b].length === 0)) return null;
+  return out;
 };
 
-export interface DiscoveredMetricCategories {
-  actionType: string;
-  fromDomain: string;
-  toDomain: string;
-  categories: MetricCategoriesTriple;
-}
-
 /**
- * Find the first action/interaction in the network config that declares
- * `metric_categories`. Returns the action_type + direction + categories so the
- * recompute pipeline can drive the SQL filter from network config rather than
- * a hardcoded action name.
+ * Walks the network config and collects every interaction whose
+ * `metric_categories` is non-null and non-empty. Each entry carries the
+ * (action_type, from_domain, to_domain) tuple plus its canonical mapping.
  *
- * Returns null if no interaction declares metric_categories anywhere — yellow_dot
- * sits here today, and recompute treats that as "0 application counts."
- *
- * Iteration order is insertion order of `actions` keys, then declared order of
- * the action's `interactions[]`. If a future network declares metric_categories
- * on multiple interactions we'll need an explicit selector — for now first-match
- * matches the single-application-action assumption baked into the 3-bucket model.
+ * Recompute uses this list to aggregate item_actions in BOTH directions
+ * (the same item can be source OR target). Interactions with null/empty
+ * metric_categories are skipped (the historical "not tracked" sentinel).
  */
-export const discover_metric_categories = (
+export const collect_tracked_interactions = (
   networkConfig: NetworkConfigDocument,
-): DiscoveredMetricCategories | null => {
-  const actions = networkConfig.actions ?? {};
-  for (const [actionType, action] of Object.entries(actions)) {
+): InteractionWithCategories[] => {
+  const out: InteractionWithCategories[] = [];
+  for (const [actionType, action] of Object.entries(networkConfig.actions ?? {})) {
     for (const interaction of action.interactions) {
-      const mc = (interaction as { metric_categories?: MetricCategoriesTriple | null })
+      const raw = (interaction as { metric_categories?: Partial<MetricCategoriesMap> | null })
         .metric_categories;
-      if (!mc) continue;
-      const shortlisted = mc.shortlisted ?? [];
-      const rejected = mc.rejected ?? [];
-      const pending = mc.pending ?? [];
-      if (shortlisted.length === 0 && rejected.length === 0 && pending.length === 0) {
-        continue;
-      }
-      return {
+      const categories = normalize(raw);
+      if (!categories) continue;
+      out.push({
         actionType,
         fromDomain: interaction.from_domain,
         toDomain: interaction.to_domain,
-        categories: { shortlisted, rejected, pending },
-      };
+        categories,
+      });
     }
   }
-  return null;
+  return out;
 };

@@ -2,57 +2,33 @@ import { sql } from 'drizzle-orm';
 import { db } from '@api/db/postgres/drizzle_config';
 import { item_metrics } from '../../../db/postgres/schema/metrics.js';
 import { profile_completion_pct } from './profile_completion.js';
-import { compute_seeker_status } from './seeker_status.js';
-import { compute_provider_status } from './provider_status.js';
 import { compute_actionable_tags } from './actionable_tags.js';
 import { get_item_schema } from './schema_lookup.js';
-import { discover_metric_categories } from './metric_categories.js';
+import { collect_tracked_interactions, type MetricCategoriesMap } from './metric_categories.js';
+import { evaluate_status_rules, type StatusRule } from './evaluate_status_rules.js';
+import { resolve_display_name } from './resolve_display_name.js';
+import { CANONICAL_BUCKETS, type CanonicalBucket, type CanonicalStatus } from './buckets.js';
 import { getNetworkConfigById } from '@/network_configs';
 
 const BATCH_SIZE = 1000;
 const MS_PER_DAY = 86_400_000;
 
-// Sentinel action_type used in the SQL filter when the network config declares
-// no metric_categories anywhere (e.g. yellow_dot today). It does not match any
-// real action, so the action_counts CTE returns 0 rows and the LEFT JOIN's
-// COALESCEs zero everything out — preserving the pre-discovery behavior of
-// "items still get item_metrics rows, just with applications_* = 0".
-const NO_ACTION_SENTINEL = '__no_metric_categories_action__';
-
-/**
- * Coerce a raw timestamp value from `db.execute(sql`...`)` into a Date.
- * Drizzle's raw .execute() bypasses column-level Date coercion; node-postgres
- * returns timestamps as ISO strings unless type parsers are configured.
- */
 const to_date = (v: unknown): Date | null => {
   if (v === null || v === undefined) return null;
   if (v instanceof Date) return v;
   if (typeof v === 'string' || typeof v === 'number') return new Date(v);
-  throw new TypeError(
-    `to_date: expected Date | string | number | null, got ${typeof v}`,
-  );
+  throw new TypeError(`to_date: unexpected ${typeof v}`);
 };
 
 const days_between = (earlier: Date, later: Date): number =>
   Math.floor((later.getTime() - earlier.getTime()) / MS_PER_DAY);
-
-const min_not_null = (a: number | null, b: number | null): number | null => {
-  if (a === null && b === null) return null;
-  if (a === null) return b;
-  if (b === null) return a;
-  return Math.min(a, b);
-};
 
 export interface RecomputeResult {
   processed: number;
   duration_ms: number;
 }
 
-type SampleRow = {
-  item_network: string;
-} & Record<string, unknown>;
-
-type RecomputeRow = {
+interface AggregatedRow extends Record<string, unknown> {
   item_id: string;
   item_network: string;
   item_domain: string;
@@ -63,35 +39,71 @@ type RecomputeRow = {
   item_state: Record<string, unknown> | null;
   profile_created_at: Date | string | null;
   profile_last_updated_at: Date | string | null;
-  applications_total: number;
-  applications_pending: number;
-  applications_shortlisted: number;
-  applications_rejected: number;
-  last_applied_at: Date | string | null;
-  last_shortlisted_at: Date | string | null;
-  last_rejected_at: Date | string | null;
-  openings: number | null;
-} & Record<string, unknown>;
+  count_create: number;
+  count_accept: number;
+  count_reject: number;
+  count_cancel: number;
+  last_create_at: Date | string | null;
+  last_accept_at: Date | string | null;
+  last_reject_at: Date | string | null;
+  last_cancel_at: Date | string | null;
+}
 
 /**
- * Recomputes item_metrics for every item owned by users onboarded by the given
- * aggregator within the given domain. Per-(aggregator, domain) scoping is the
- * Plan B contract: aggregators can host items across multiple (network, domain,
- * item_type) triples, but a single recompute pass handles ONE domain at a time
- * so the metric_categories triple and direction filter stay coherent.
+ * Build a UNION ALL of per-bucket event SELECTs for every tracked interaction
+ * in the network. Each SELECT emits (item_id, bucket, created_at) rows that
+ * the outer GROUP BY in the main CTE buckets into per-item counts and MAX
+ * timestamps.
  *
- * Flow:
- *   1. Sample query → learns `item_network` for this (aggregator, domain). If
- *      no rows exist, return early with `processed: 0`.
- *   2. Discover the application action + direction from network config — first
- *      action/interaction declaring metric_categories wins. The action_type and
- *      (from_domain, to_domain) directionality both come from config; no action
- *      name is hardcoded here. Networks with no metric_categories anywhere
- *      (yellow_dot) get a sentinel action_type that matches no rows → zero counts.
- *   3. Main CTE → counts item_actions bucketed by the discovered metric_categories,
- *      filtered by the discovered direction, joined to items + users.
- *   4. Per row: domain-specific status helper + actionable_tags + flush in
- *      batches of 1000 via item_metrics upsert.
+ * Bidirectional: when an item's domain participates as the SOURCE of an
+ * interaction (e.g. seeker→provider connect), the seeker's item_id is
+ * source_item_id. When it participates as TARGET (e.g. provider→seeker
+ * connect for the provider domain), the provider's item_id is target_item_id.
+ * Both source and target rows of the same canonical bucket get counted on
+ * each side — that's what "symmetric" means in spec §c.
+ */
+const buildInteractionEvents = (
+  tracked: Array<{ actionType: string; fromDomain: string; toDomain: string; categories: MetricCategoriesMap }>,
+  domain: string,
+): import('drizzle-orm').SQL | null => {
+  const pieces: import('drizzle-orm').SQL[] = [];
+
+  for (const t of tracked) {
+    const isSource = t.fromDomain === domain;
+    const isTarget = t.toDomain === domain;
+    if (!isSource && !isTarget) continue;
+
+    const idCol = isSource ? sql`source_item_id` : sql`target_item_id`;
+
+    for (const bucket of CANONICAL_BUCKETS) {
+      const statuses = t.categories[bucket];
+      if (statuses.length === 0) continue;
+      const list = sql.join(statuses.map((s) => sql`${s}`), sql`, `);
+      pieces.push(sql`
+        SELECT
+          ${idCol} AS item_id,
+          ${bucket} AS bucket,
+          created_at
+        FROM item_actions
+        WHERE action_type = ${t.actionType}
+          AND source_item_domain = ${t.fromDomain}
+          AND target_item_domain = ${t.toDomain}
+          AND action_status IN (${list})
+          AND ${idCol} IS NOT NULL
+      `);
+    }
+  }
+
+  if (pieces.length === 0) return null;
+  return sql.join(pieces, sql` UNION ALL `);
+};
+
+/**
+ * Recomputes item_metrics for all items owned by users onboarded by the
+ * given aggregator within the given domain. Bidirectional: aggregates
+ * actions in both source and target positions, per the tracked-interactions
+ * collected from the network config. Per-item status is evaluated against
+ * the domain's status_rules from network.json.
  */
 export const recompute_aggregator_domain_metrics = async (
   aggregator_id: string,
@@ -100,11 +112,9 @@ export const recompute_aggregator_domain_metrics = async (
   const started = Date.now();
   const now = new Date();
 
-  // Step 1: learn the network for this (aggregator, domain) pair. One sample
-  // is enough because all items in a (aggregator, domain) share a network in
-  // Plan B's data model — aggregator.metadata.domains pins network + domain
-  // bindings together.
-  const sample = await db.execute<SampleRow>(sql`
+  // Discover the network for this (aggregator, domain) via a one-row sample.
+  // All items in a (aggregator, domain) share a network in our data model.
+  const sample = await db.execute<{ item_network: string }>(sql`
     SELECT i.item_network
     FROM items i
     JOIN "user" u ON u.id = i.created_by
@@ -112,103 +122,96 @@ export const recompute_aggregator_domain_metrics = async (
       AND i.item_domain = ${domain}
     LIMIT 1
   `);
-
-  const sampleRows: SampleRow[] = Array.isArray(sample)
-    ? (sample as SampleRow[])
-    : ((sample as { rows?: SampleRow[] }).rows ?? []);
-
+  const sampleRows: Array<{ item_network: string }> = Array.isArray(sample)
+    ? (sample as Array<{ item_network: string }>)
+    : ((sample as { rows?: Array<{ item_network: string }> }).rows ?? []);
   if (sampleRows.length === 0) {
     return { processed: 0, duration_ms: Date.now() - started };
   }
-
   const network = sampleRows[0].item_network;
 
-  // Step 2: discover the application action + direction from network config.
-  // First action/interaction declaring metric_categories wins. purple_dot uses
-  // `connect` with statuses created/accepted/rejected/cancelled; blue_dot uses
-  // `apply`; yellow_dot declares nothing (discovery returns null).
   const networkConfig = await getNetworkConfigById(network);
-  const discovered = discover_metric_categories(networkConfig);
+  const tracked = collect_tracked_interactions(networkConfig);
+  const eventsCte = buildInteractionEvents(tracked, domain);
 
-  const actionType = discovered?.actionType ?? NO_ACTION_SENTINEL;
-  const fromDomain = discovered?.fromDomain ?? 'seeker';
-  const toDomain = discovered?.toDomain ?? 'provider';
-  const shortlistedArr = discovered?.categories.shortlisted ?? [];
-  const rejectedArr = discovered?.categories.rejected ?? [];
-  const pendingArr = discovered?.categories.pending ?? [];
+  // Resolve status_rules for this domain.
+  const domainCfg = networkConfig.domains.find((d) => d.id === domain);
+  if (!domainCfg) {
+    throw new Error(
+      `recompute: domain "${domain}" not found in network "${network}" config`,
+    );
+  }
+  const status_rules = domainCfg.status_rules as StatusRule[] | undefined;
+  if (!status_rules || status_rules.length === 0) {
+    throw new Error(
+      `recompute: network "${network}" domain "${domain}" has no status_rules — add per spec`,
+    );
+  }
 
-  // Drizzle's template-tag interpolation splays a JS array into individual
-  // positional params, producing `($1, $2, $3)::text[]` which is invalid PG
-  // syntax. Build a parameterized `IN (...)` list via `sql.join` instead.
-  // Empty array → `IN (NULL)` which is always false (gives 0 counts, matching
-  // the "metric_categories null → 0 counts" semantic).
-  const sqlList = (arr: string[]) =>
-    arr.length > 0
-      ? sql.join(arr.map((s) => sql`${s}`), sql`, `)
-      : sql`NULL`;
+  // Main query: aggregate events into per-item bucket counts/timestamps,
+  // join to items + user attribution. Empty `eventsCte` (no tracked
+  // interactions touch this domain) → action_counts is an empty CTE so
+  // every join yields 0 counts via COALESCE.
+  const actionCountsCte = eventsCte
+    ? sql`
+        WITH ev AS (${eventsCte}),
+        action_counts AS (
+          SELECT
+            item_id,
+            COUNT(*) FILTER (WHERE bucket = 'create')::int AS count_create,
+            COUNT(*) FILTER (WHERE bucket = 'accept')::int AS count_accept,
+            COUNT(*) FILTER (WHERE bucket = 'reject')::int AS count_reject,
+            COUNT(*) FILTER (WHERE bucket = 'cancel')::int AS count_cancel,
+            MAX(created_at) FILTER (WHERE bucket = 'create') AS last_create_at,
+            MAX(created_at) FILTER (WHERE bucket = 'accept') AS last_accept_at,
+            MAX(created_at) FILTER (WHERE bucket = 'reject') AS last_reject_at,
+            MAX(created_at) FILTER (WHERE bucket = 'cancel') AS last_cancel_at
+          FROM ev
+          GROUP BY item_id
+        )
+      `
+    : sql`
+        WITH action_counts AS (
+          SELECT
+            ''::text AS item_id,
+            0::int AS count_create, 0::int AS count_accept,
+            0::int AS count_reject, 0::int AS count_cancel,
+            NULL::timestamp AS last_create_at,
+            NULL::timestamp AS last_accept_at,
+            NULL::timestamp AS last_reject_at,
+            NULL::timestamp AS last_cancel_at
+          WHERE FALSE
+        )
+      `;
 
-  const pendingList = sqlList(pendingArr);
-  const shortlistedList = sqlList(shortlistedArr);
-  const rejectedList = sqlList(rejectedArr);
-
-  // Direction filter: items in fromDomain join on source_item_id (they are the
-  // actor); items in toDomain join on target_item_id (they are the recipient).
-  // Items in neither domain get no action counts (LEFT JOIN miss → 0s).
-  const directionCol =
-    domain === toDomain
-      ? sql`target_item_id`
-      : domain === fromDomain
-        ? sql`source_item_id`
-        : sql`NULL`;
-
-  // Step 3: main CTE. Counts per item, joined to items + users.
-  const result = await db.execute<RecomputeRow>(sql`
-    WITH action_counts AS (
-      SELECT
-        ${directionCol} AS item_id,
-        COUNT(*)::int AS total,
-        COUNT(*) FILTER (WHERE action_status IN (${pendingList}))::int     AS pending,
-        COUNT(*) FILTER (WHERE action_status IN (${shortlistedList}))::int AS shortlisted,
-        COUNT(*) FILTER (WHERE action_status IN (${rejectedList}))::int    AS rejected,
-        MAX(created_at)                                                    AS last_applied_at,
-        MAX(created_at) FILTER (WHERE action_status IN (${shortlistedList})) AS last_shortlisted_at,
-        MAX(created_at) FILTER (WHERE action_status IN (${rejectedList}))    AS last_rejected_at
-      FROM item_actions
-      WHERE ${directionCol} IS NOT NULL
-        AND action_type = ${actionType}
-        AND source_item_domain = ${fromDomain}
-        AND target_item_domain = ${toDomain}
-      GROUP BY ${directionCol}
-    )
+  const result = await db.execute<AggregatedRow>(sql`
+    ${actionCountsCte}
     SELECT
-      i.item_id                                  AS item_id,
-      i.item_network                             AS item_network,
-      i.item_domain                              AS item_domain,
-      i.item_type                                AS item_type,
-      i.created_by                               AS owner_user_id,
-      u.onboarded_by_org_id                      AS onboarded_by_org_id,
-      u.onboarded_via                            AS onboarded_via,
-      i.item_state                               AS item_state,
-      i.created_at                               AS profile_created_at,
-      i.updated_at                               AS profile_last_updated_at,
-      COALESCE(ac.total,       0)                AS applications_total,
-      COALESCE(ac.pending,     0)                AS applications_pending,
-      COALESCE(ac.shortlisted, 0)                AS applications_shortlisted,
-      COALESCE(ac.rejected,    0)                AS applications_rejected,
-      ac.last_applied_at                         AS last_applied_at,
-      ac.last_shortlisted_at                     AS last_shortlisted_at,
-      ac.last_rejected_at                        AS last_rejected_at,
-      (i.item_state ->> 'positions')::int        AS openings
+      i.item_id            AS item_id,
+      i.item_network       AS item_network,
+      i.item_domain        AS item_domain,
+      i.item_type          AS item_type,
+      i.created_by         AS owner_user_id,
+      u.onboarded_by_org_id AS onboarded_by_org_id,
+      u.onboarded_via      AS onboarded_via,
+      i.item_state         AS item_state,
+      i.created_at         AS profile_created_at,
+      i.updated_at         AS profile_last_updated_at,
+      COALESCE(ac.count_create, 0) AS count_create,
+      COALESCE(ac.count_accept, 0) AS count_accept,
+      COALESCE(ac.count_reject, 0) AS count_reject,
+      COALESCE(ac.count_cancel, 0) AS count_cancel,
+      ac.last_create_at, ac.last_accept_at,
+      ac.last_reject_at, ac.last_cancel_at
     FROM items i
     JOIN "user" u ON u.id = i.created_by
     LEFT JOIN action_counts ac ON ac.item_id = i.item_id
     WHERE u.onboarded_by_org_id = ${aggregator_id}
       AND i.item_domain = ${domain};
   `);
-
-  const rows: RecomputeRow[] = Array.isArray(result)
-    ? (result as RecomputeRow[])
-    : ((result as { rows?: RecomputeRow[] }).rows ?? []);
+  const rows: AggregatedRow[] = Array.isArray(result)
+    ? (result as AggregatedRow[])
+    : ((result as { rows?: AggregatedRow[] }).rows ?? []);
 
   let processed = 0;
   let buffer: Array<typeof item_metrics.$inferInsert> = [];
@@ -217,51 +220,38 @@ export const recompute_aggregator_domain_metrics = async (
     const payload = (r.item_state ?? {}) as Record<string, unknown>;
     const profile_created = to_date(r.profile_created_at) ?? now;
     const profile_updated = to_date(r.profile_last_updated_at) ?? profile_created;
-    const last_applied_at = to_date(r.last_applied_at);
-    const last_shortlisted_at = to_date(r.last_shortlisted_at);
-    const last_rejected_at = to_date(r.last_rejected_at);
+    const last_create = to_date(r.last_create_at);
+    const last_accept = to_date(r.last_accept_at);
+    const last_reject = to_date(r.last_reject_at);
+    const last_cancel = to_date(r.last_cancel_at);
 
-    // Resolve the JSON Schema for this item's (network, domain, item_type).
-    // Cached at the network_configs layer; per-row call is cheap.
-    const schema = await get_item_schema(
-      r.item_network,
-      r.item_domain,
-      r.item_type,
-    );
+    const schema = await get_item_schema(r.item_network, r.item_domain, r.item_type);
 
     const age_days = days_between(profile_created, now);
 
-    let profileStatus: string;
-    let last_applied_age_days: number | null = null;
-    let min_decision_age_days: number | null = null;
+    const dsl_input = {
+      item_age_days: age_days,
+      count: {
+        create: r.count_create,
+        accept: r.count_accept,
+        reject: r.count_reject,
+        cancel: r.count_cancel,
+      } as Record<CanonicalBucket, number>,
+      days_since_last: {
+        create: last_create === null ? null : days_between(last_create, now),
+        accept: last_accept === null ? null : days_between(last_accept, now),
+        reject: last_reject === null ? null : days_between(last_reject, now),
+        cancel: last_cancel === null ? null : days_between(last_cancel, now),
+      } as Record<CanonicalBucket, number | null>,
+    };
 
-    if (r.item_domain === 'provider') {
-      const openings = r.openings ?? Number.POSITIVE_INFINITY;
-      profileStatus = compute_provider_status({
-        profile_created_at: profile_created,
-        applications_total: r.applications_total,
-        applications_shortlisted: r.applications_shortlisted,
-        applications_rejected: r.applications_rejected,
-        openings,
-        last_shortlisted_at,
-        last_rejected_at,
-        now,
-      });
-      const sh_age = last_shortlisted_at === null ? null : days_between(last_shortlisted_at, now);
-      const rj_age = last_rejected_at === null ? null : days_between(last_rejected_at, now);
-      min_decision_age_days = min_not_null(sh_age, rj_age);
-    } else {
-      profileStatus = compute_seeker_status({
-        profile_created_at: profile_created,
-        last_applied_at,
-        now,
-      });
-      last_applied_age_days =
-        last_applied_at === null ? null : days_between(last_applied_at, now);
-    }
+    const profileStatus: CanonicalStatus = evaluate_status_rules(status_rules, dsl_input);
 
-    const actionableDomain: 'seeker' | 'provider' =
-      r.item_domain === 'provider' ? 'provider' : 'seeker';
+    const displayName = resolve_display_name({
+      schema: schema as { display_name_field?: string; properties?: Record<string, unknown> },
+      item_state: payload,
+      item_id: r.item_id,
+    });
 
     buffer.push({
       itemId: r.item_id,
@@ -271,29 +261,21 @@ export const recompute_aggregator_domain_metrics = async (
       ownerUserId: r.owner_user_id,
       onboardedByOrgId: r.onboarded_by_org_id,
       onboardedVia: r.onboarded_via,
+      displayName,
       profileStatus,
       profileCompletionPct: profile_completion_pct(payload, schema),
       profileCreatedAt: profile_created,
       profileLastUpdatedAt: profile_updated,
       ageDays: age_days,
-      applicationsTotal: r.applications_total,
-      applicationsPending: r.applications_pending,
-      applicationsShortlisted: r.applications_shortlisted,
-      applicationsRejected: r.applications_rejected,
-      lastAppliedAt: r.item_domain === 'provider' ? null : last_applied_at,
-      lastShortlistedAt: r.item_domain === 'provider' ? last_shortlisted_at : null,
-      lastRejectedAt: r.item_domain === 'provider' ? last_rejected_at : null,
-      openings: r.item_domain === 'provider' ? r.openings : null,
-      actionableTags: compute_actionable_tags({
-        domain: actionableDomain,
-        payload,
-        schema,
-        applications_total: r.applications_total,
-        applications_rejected: r.applications_rejected,
-        job_post_age_days: r.item_domain === 'provider' ? age_days : 0,
-        last_applied_age_days,
-        min_decision_age_days,
-      }),
+      countCreate: r.count_create,
+      countAccept: r.count_accept,
+      countReject: r.count_reject,
+      countCancel: r.count_cancel,
+      lastCreateAt: last_create,
+      lastAcceptAt: last_accept,
+      lastRejectAt: last_reject,
+      lastCancelAt: last_cancel,
+      actionableTags: compute_actionable_tags({ payload, schema }),
       lastComputedAt: now,
     });
 
@@ -303,7 +285,6 @@ export const recompute_aggregator_domain_metrics = async (
       buffer = [];
     }
   }
-
   if (buffer.length > 0) {
     await flush(buffer);
     processed += buffer.length;
@@ -327,19 +308,20 @@ const flush = async (
         ownerUserId: sql`excluded.owner_user_id`,
         onboardedByOrgId: sql`excluded.onboarded_by_org_id`,
         onboardedVia: sql`excluded.onboarded_via`,
+        displayName: sql`excluded.display_name`,
         profileStatus: sql`excluded.profile_status`,
         profileCompletionPct: sql`excluded.profile_completion_pct`,
         profileCreatedAt: sql`excluded.profile_created_at`,
         profileLastUpdatedAt: sql`excluded.profile_last_updated_at`,
         ageDays: sql`excluded.age_days`,
-        applicationsTotal: sql`excluded.applications_total`,
-        applicationsPending: sql`excluded.applications_pending`,
-        applicationsShortlisted: sql`excluded.applications_shortlisted`,
-        applicationsRejected: sql`excluded.applications_rejected`,
-        lastAppliedAt: sql`excluded.last_applied_at`,
-        lastShortlistedAt: sql`excluded.last_shortlisted_at`,
-        lastRejectedAt: sql`excluded.last_rejected_at`,
-        openings: sql`excluded.openings`,
+        countCreate: sql`excluded.count_create`,
+        countAccept: sql`excluded.count_accept`,
+        countReject: sql`excluded.count_reject`,
+        countCancel: sql`excluded.count_cancel`,
+        lastCreateAt: sql`excluded.last_create_at`,
+        lastAcceptAt: sql`excluded.last_accept_at`,
+        lastRejectAt: sql`excluded.last_reject_at`,
+        lastCancelAt: sql`excluded.last_cancel_at`,
         actionableTags: sql`excluded.actionable_tags`,
         lastComputedAt: sql`excluded.last_computed_at`,
       },

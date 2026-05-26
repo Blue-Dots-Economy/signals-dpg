@@ -3,6 +3,61 @@ import { z } from 'zod';
 
 const JsonSchemaDocumentSchema = z.record(z.string(), z.unknown());
 
+// Canonical bucket + status enums. Duplicated here from
+// apps/api/src/services/metrics/buckets.ts because @dpg/schemas is upstream
+// of apps/api — the package can't import down the tree. Both must be updated
+// in lockstep if a bucket or status is added.
+const CANONICAL_BUCKETS = ['create', 'accept', 'reject', 'cancel'] as const;
+const CANONICAL_STATUSES = ['new', 'active', 'at_risk', 'inactive'] as const;
+const CanonicalBucketSchema = z.enum(CANONICAL_BUCKETS);
+const CanonicalStatusSchema = z.enum(CANONICAL_STATUSES);
+
+const ComparisonSchema = z.union([
+  z.object({ lt: z.number() }).strict(),
+  z.object({ lte: z.number() }).strict(),
+  z.object({ gt: z.number() }).strict(),
+  z.object({ gte: z.number() }).strict(),
+  z.object({ eq: z.number() }).strict(),
+  z.object({ between: z.tuple([z.number(), z.number()]) }).strict(),
+]);
+
+const bucketsField = { buckets: z.array(CanonicalBucketSchema).min(1) };
+const BucketScopedComparisonSchema = z.union([
+  z.object({ ...bucketsField, lt:      z.number() }).strict(),
+  z.object({ ...bucketsField, lte:     z.number() }).strict(),
+  z.object({ ...bucketsField, gt:      z.number() }).strict(),
+  z.object({ ...bucketsField, gte:     z.number() }).strict(),
+  z.object({ ...bucketsField, eq:      z.number() }).strict(),
+  z.object({ ...bucketsField, between: z.tuple([z.number(), z.number()]) }).strict(),
+]);
+
+const ItemAgePredicateSchema = z.object({ item_age_days: ComparisonSchema }).strict();
+const DaysSinceLastPredicateSchema = z.object({ days_since_last: BucketScopedComparisonSchema }).strict();
+const CountPredicateSchema = z.object({ count: BucketScopedComparisonSchema }).strict();
+
+// Recursive predicate: leaf predicates + all/any combinators
+type PredicateInput =
+  | z.input<typeof ItemAgePredicateSchema>
+  | z.input<typeof DaysSinceLastPredicateSchema>
+  | z.input<typeof CountPredicateSchema>
+  | { all: PredicateInput[] }
+  | { any: PredicateInput[] };
+
+const PredicateSchema: z.ZodType<PredicateInput> = z.lazy(() =>
+  z.union([
+    ItemAgePredicateSchema,
+    DaysSinceLastPredicateSchema,
+    CountPredicateSchema,
+    z.object({ all: z.array(PredicateSchema).min(1) }).strict(),
+    z.object({ any: z.array(PredicateSchema).min(1) }).strict(),
+  ]),
+);
+
+const StatusRuleSchema = z.object({
+  status: CanonicalStatusSchema,
+  when: z.union([PredicateSchema, z.literal('default')]),
+}).strict();
+
 const NetworkDomainSchema = z.object({
   id: z.string().min(1),
   description: z.string().optional(),
@@ -15,6 +70,16 @@ const NetworkDomainSchema = z.object({
     .record(z.string(), JsonSchemaDocumentSchema)
     .optional()
     .default({}),
+  status_rules: z.array(StatusRuleSchema).min(1),
+}).superRefine((domain, ctx) => {
+  const last = domain.status_rules[domain.status_rules.length - 1];
+  if (last.when !== 'default') {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: 'status_rules must end with a `{ when: "default" }` tail rule',
+      path: ['status_rules', domain.status_rules.length - 1, 'when'],
+    });
+  }
 }).transform((domain) => ({
   ...domain,
   item_schemas: {
@@ -38,10 +103,11 @@ const NetworkInstanceSchema = z.object({
 }));
 
 const MetricCategoriesSchema = z.object({
-  shortlisted: z.array(z.string().min(1)).optional().default([]),
-  rejected: z.array(z.string().min(1)).optional().default([]),
-  pending: z.array(z.string().min(1)).optional().default([]),
-});
+  create: z.array(z.string().min(1)).optional().default([]),
+  accept: z.array(z.string().min(1)).optional().default([]),
+  reject: z.array(z.string().min(1)).optional().default([]),
+  cancel: z.array(z.string().min(1)).optional().default([]),
+}).strict();
 
 const NetworkActionInteractionSchema = z
   .object({
@@ -125,6 +191,46 @@ export const NetworkConfigSchema = z.object({
     .array()
     .default([]),
   actions: z.record(z.string(), NetworkActionSchema).default({}),
+}).superRefine((cfg, ctx) => {
+  for (const [domainIdx, domain] of cfg.domains.entries()) {
+    for (const [schemaName, schemaDoc] of Object.entries(domain.item_schemas ?? {})) {
+      const doc = schemaDoc as Record<string, unknown>;
+      const field = doc.display_name_field;
+      if (field === undefined) continue;
+      if (typeof field !== 'string') {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: `display_name_field must be a string`,
+          path: ['domains', domainIdx, 'item_schemas', schemaName, 'display_name_field'],
+        });
+        continue;
+      }
+      const props = (doc.properties as Record<string, unknown> | undefined) ?? {};
+      const target = props[field];
+      if (!target || typeof target !== 'object') {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: `display_name_field "${field}" does not exist in properties`,
+          path: ['domains', domainIdx, 'item_schemas', schemaName, 'display_name_field'],
+        });
+        continue;
+      }
+      const t = target as Record<string, unknown>;
+      if (t.private === true) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: `display_name_field "${field}" points at a private property; pick a non-private field`,
+          path: ['domains', domainIdx, 'item_schemas', schemaName, 'display_name_field'],
+        });
+      } else if (t.type !== 'string') {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: `display_name_field "${field}" must point at a property of type "string"`,
+          path: ['domains', domainIdx, 'item_schemas', schemaName, 'display_name_field'],
+        });
+      }
+    }
+  }
 });
 
 export type NetworkConfigDocument = z.infer<typeof NetworkConfigSchema>;

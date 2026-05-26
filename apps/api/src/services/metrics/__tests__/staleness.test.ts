@@ -123,4 +123,30 @@ describe('check_and_refresh_if_stale', () => {
     expect(r1.refreshed).toBe(true);
     expect(r2.refreshed).toBe(true);
   });
+
+  it('force=true bypasses TTL and uses pg_advisory_lock (blocking)', async () => {
+    // Set min_ts to a recent time (well within TTL) — non-force would skip recompute.
+    state.min_ts = new Date(Date.now() - 60 * 1000); // 60 seconds ago, within TTL
+
+    // Capture which lock SQL was invoked.
+    const { db: mockDb } = await import('@api/db/postgres/drizzle_config');
+    const executeSpy = vi.mocked(mockDb.execute);
+    executeSpy.mockClear();
+
+    const result = await check_and_refresh_if_stale('org_bbmp', 'seeker', true);
+
+    // Recompute must run even though cache was fresh.
+    expect(result.refreshed).toBe(true);
+    expect(state.recompute_called).toBe(true);
+
+    // At least one execute call must use pg_advisory_lock (not pg_try_advisory_lock).
+    const lockCalls = executeSpy.mock.calls.filter((args) => {
+      const q = args[0] as { queryChunks?: Array<{ value?: unknown }>; sql?: string };
+      const text = String(
+        q?.queryChunks?.[0]?.value ?? q?.sql ?? q?.toString?.() ?? '',
+      );
+      return text.includes('pg_advisory_lock') && !text.includes('pg_try_advisory_lock');
+    });
+    expect(lockCalls.length).toBeGreaterThan(0);
+  });
 });

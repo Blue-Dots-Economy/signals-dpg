@@ -410,6 +410,8 @@ CREATE INDEX IF NOT EXISTS user_onboarded_by_org_via_idx
 -- inbound FK; recompute is the only writer so there shouldn't be any.
 DROP TABLE IF EXISTS participant_metrics CASCADE;
 
+DROP TABLE IF EXISTS item_metrics CASCADE;
+
 CREATE TABLE IF NOT EXISTS item_metrics (
   item_id                   text PRIMARY KEY,
   item_network              text NOT NULL,
@@ -419,21 +421,23 @@ CREATE TABLE IF NOT EXISTS item_metrics (
   onboarded_by_org_id       text,
   onboarded_via             text,
 
+  display_name              text NOT NULL,
+
   profile_status            text,
   profile_completion_pct    integer,
   profile_created_at        timestamp,
   profile_last_updated_at   timestamp,
   age_days                  integer,
 
-  applications_total        integer DEFAULT 0,
-  applications_pending      integer DEFAULT 0,
-  applications_shortlisted  integer DEFAULT 0,
-  applications_rejected     integer DEFAULT 0,
+  count_create              integer NOT NULL DEFAULT 0,
+  count_accept              integer NOT NULL DEFAULT 0,
+  count_reject              integer NOT NULL DEFAULT 0,
+  count_cancel              integer NOT NULL DEFAULT 0,
 
-  last_applied_at           timestamp,
-  last_shortlisted_at       timestamp,
-  last_rejected_at          timestamp,
-  openings                  integer,
+  last_create_at            timestamp,
+  last_accept_at            timestamp,
+  last_reject_at            timestamp,
+  last_cancel_at            timestamp,
 
   actionable_tags           text[],
 

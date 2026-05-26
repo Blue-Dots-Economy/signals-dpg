@@ -6,55 +6,30 @@ import type {
 import { Readable } from 'node:stream';
 import { db } from '@api/db/postgres/drizzle_config';
 import { item_metrics } from '../../../../db/postgres/schema/metrics.js';
-import { organization, user } from '../../../../db/postgres/schema/auth.js';
+import { organization } from '../../../../db/postgres/schema/auth.js';
 import { eq, and, inArray, asc, getTableColumns } from 'drizzle-orm';
-import {
-  ExportQuery,
-  type ExportQuery as ExportQueryType,
-} from '@dpg/schemas';
+import { ExportQuery, type ExportQuery as ExportQueryType } from '@dpg/schemas';
 import { check_and_refresh_if_stale } from '@/services/metrics/staleness';
 
-/**
- * GET /api/v1/aggregator/dashboard/export
- *
- * Plan B Task 11. Streams CSV of all item_metrics rows for the acting
- * aggregator across its configured domains. Mirrors the dashboard
- * route's auth + domain-resolution contract:
- *   - acting org_type === 'aggregator'              → else 403 NOT_AGGREGATOR
- *   - org.metadata.domains is non-empty             → else 400 NO_DOMAINS_CONFIGURED
- *   - ?domain= (if present) is in that set          → else 400 DOMAIN_NOT_CONFIGURED
- *
- * Per-domain staleness refresh runs in parallel before the stream opens.
- * No pagination in the URL — the export is "everything matching the filter."
- * Rows are streamed via an async generator wrapped in a Readable to avoid
- * loading 200k+ rows into memory. Ordering is `(item_domain, item_id)` so
- * multi-domain output is grouped by domain.
- *
- * Note: item_private_state is intentionally excluded; only the COLUMNS list
- * below ever reaches the response body.
- */
 const COLUMNS = [
-  'item_id',
   'item_network',
   'item_domain',
   'item_type',
-  'owner_user_id',
   'name',
-  'onboarded_by_org_id',
   'onboarded_via',
   'profile_status',
   'profile_completion_pct',
   'profile_created_at',
   'profile_last_updated_at',
   'age_days',
-  'applications_total',
-  'applications_pending',
-  'applications_shortlisted',
-  'applications_rejected',
-  'last_applied_at',
-  'last_shortlisted_at',
-  'last_rejected_at',
-  'openings',
+  'count_create',
+  'count_accept',
+  'count_reject',
+  'count_cancel',
+  'last_create_at',
+  'last_accept_at',
+  'last_reject_at',
+  'last_cancel_at',
   'actionable_tags',
 ] as const;
 
@@ -82,9 +57,7 @@ const read_configured_domains = async (
   try {
     const meta = JSON.parse(org.metadata) as { domains?: unknown };
     if (!Array.isArray(meta.domains)) return null;
-    return (meta.domains as unknown[]).filter(
-      (x): x is string => typeof x === 'string',
-    );
+    return (meta.domains as unknown[]).filter((x): x is string => typeof x === 'string');
   } catch {
     return null;
   }
@@ -108,12 +81,8 @@ async function* generate_csv(
   let offset = 0;
   for (;;) {
     const rows = await db
-      .select({
-        ...getTableColumns(item_metrics),
-        name: user.name,
-      })
+      .select(getTableColumns(item_metrics))
       .from(item_metrics)
-      .leftJoin(user, eq(user.id, item_metrics.ownerUserId))
       .where(where!)
       .orderBy(asc(item_metrics.itemDomain), asc(item_metrics.itemId))
       .limit(PAGE_SIZE)
@@ -123,27 +92,24 @@ async function* generate_csv(
 
     for (const r of rows) {
       const projected: Record<(typeof COLUMNS)[number], unknown> = {
-        item_id: r.itemId,
         item_network: r.itemNetwork,
         item_domain: r.itemDomain,
         item_type: r.itemType,
-        owner_user_id: r.ownerUserId,
-        name: r.name,
-        onboarded_by_org_id: r.onboardedByOrgId,
+        name: r.displayName,
         onboarded_via: r.onboardedVia,
         profile_status: r.profileStatus,
         profile_completion_pct: r.profileCompletionPct,
         profile_created_at: r.profileCreatedAt,
         profile_last_updated_at: r.profileLastUpdatedAt,
         age_days: r.ageDays,
-        applications_total: r.applicationsTotal,
-        applications_pending: r.applicationsPending,
-        applications_shortlisted: r.applicationsShortlisted,
-        applications_rejected: r.applicationsRejected,
-        last_applied_at: r.lastAppliedAt,
-        last_shortlisted_at: r.lastShortlistedAt,
-        last_rejected_at: r.lastRejectedAt,
-        openings: r.openings,
+        count_create: r.countCreate,
+        count_accept: r.countAccept,
+        count_reject: r.countReject,
+        count_cancel: r.countCancel,
+        last_create_at: r.lastCreateAt,
+        last_accept_at: r.lastAcceptAt,
+        last_reject_at: r.lastRejectAt,
+        last_cancel_at: r.lastCancelAt,
         actionable_tags: r.actionableTags,
       };
       yield COLUMNS.map((c) => csv_escape(projected[c])).join(',') + '\n';
@@ -174,12 +140,11 @@ export const aggregator_export: FastifyPluginAsync = async (app) => {
       if (!configured || configured.length === 0) {
         return reply.code(400).send({
           error: 'NO_DOMAINS_CONFIGURED',
-          message:
-            'org.metadata.domains is empty — re-upsert with domains array',
+          message: 'org.metadata.domains is empty — re-upsert with domains array',
         });
       }
 
-      const { domain: requested_domain, status } = request.query;
+      const { domain: requested_domain, status, refresh } = request.query;
       let scope = configured;
       if (requested_domain) {
         if (!configured.includes(requested_domain)) {
@@ -191,25 +156,18 @@ export const aggregator_export: FastifyPluginAsync = async (app) => {
         scope = [requested_domain];
       }
 
-      // Parallel per-domain staleness — refresh anything stale before
-      // streaming. Each (org, domain) takes its own advisory lock.
       await Promise.all(
-        scope.map((d) => check_and_refresh_if_stale(acting.org_id, d)),
+        scope.map((d) => check_and_refresh_if_stale(acting.org_id, d, refresh)),
       );
 
-      const filename = `participants_${acting.org_id}_${new Date()
+      const filename = `items_${acting.org_id}_${new Date()
         .toISOString()
         .slice(0, 10)}.csv`;
       reply
         .header('content-type', 'text/csv; charset=utf-8')
-        .header(
-          'content-disposition',
-          `attachment; filename="${filename}"`,
-        );
+        .header('content-disposition', `attachment; filename="${filename}"`);
 
-      return reply.send(
-        Readable.from(generate_csv(acting.org_id, scope, status)),
-      );
+      return reply.send(Readable.from(generate_csv(acting.org_id, scope, status)));
     },
   });
 };

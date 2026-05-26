@@ -640,12 +640,51 @@
                 {
                   "key": "status",
                   "value": "{{dashboard_status_filter}}"
+                },
+                {
+                  "key": "refresh",
+                  "value": "false",
+                  "description": "Force recompute, bypass TTL, blocking advisory lock",
+                  "disabled": true
                 }
               ]
             },
-            "description": "Reads the `item_metrics` cache scoped to the acting aggregator org. Response shape is `{ by_domain: { <domain>: { rollup, participants, total_matching, next_cursor } }, metadata }` where each configured domain on `organization.metadata.domains` gets its own block. Per-domain `rollup` carries `items_total`, `by_status`, `applications_{total,pending,shortlisted,rejected}`, user-level aggregates, and `mode_wise_counts`. Top-level `metadata` has `last_computed_at`, `ttl_seconds`, and `refreshed` (true when this request forced a recompute on at least one domain).\n\nQuery params: `?domain=<name>` narrows to a single configured domain (otherwise returns all). `?status=<new|active|at_risk|inactive>` scopes the list. `?page=1&limit=50` paginates within each returned domain block.\n\nError modes: 400 `NO_DOMAINS_CONFIGURED` if `organization.metadata.domains` is empty; 400 `DOMAIN_NOT_CONFIGURED` if `?domain=` is not in the configured set."
+            "description": "Reads the `item_metrics` cache scoped to the acting aggregator org. Response shape is `{ by_domain: { <domain>: { rollup, items, total_matching, next_cursor } }, metadata }` where each configured domain on `organization.metadata.domains` gets its own block. Per-domain `rollup` carries `total_items`, `complete_profiles`, `has_applications`, `by_status` (4 canonical statuses), `by_action_status` (4 canonical buckets: create/accept/reject/cancel), `avg_items_per_user`, `avg_actions_per_user`, and `mode_wise_counts`. Top-level `metadata` has `last_computed_at`, `ttl_seconds`, and `refreshed` (true when this request forced a recompute on at least one domain).\n\nQuery params: `?domain=<name>` narrows to a single configured domain (otherwise returns all). `?status=<new|active|at_risk|inactive>` scopes the items list (rollup always reflects the full population). `?page=1&limit=50` paginates within each returned domain block. `?refresh=true` bypasses the TTL gate and forces a recompute using a blocking advisory lock — the caller waits for any in-flight recompute to finish.\n\nError modes: 400 `NO_DOMAINS_CONFIGURED` if `organization.metadata.domains` is empty; 400 `DOMAIN_NOT_CONFIGURED` if `?domain=` is not in the configured set; 400 `INVALID_REFRESH` if `?refresh=` cannot be parsed as boolean."
           },
-          "response": []
+          "response": [
+            {
+              "name": "200 OK — seeker domain example",
+              "originalRequest": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "x-api-key",
+                    "value": "{{aggregator_api_key}}"
+                  },
+                  {
+                    "key": "x-acting-org-id",
+                    "value": "{{aggregator_org_id}}"
+                  }
+                ],
+                "url": {
+                  "raw": "{{base_url}}/api/v1/aggregator/dashboard?page=1&limit=50",
+                  "host": ["{{base_url}}"],
+                  "path": ["api","v1","aggregator","dashboard"],
+                  "query": [
+                    { "key": "page", "value": "1" },
+                    { "key": "limit", "value": "50" }
+                  ]
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                { "key": "Content-Type", "value": "application/json" }
+              ],
+              "body": "{\n  \"by_domain\": {\n    \"seeker\": {\n      \"rollup\": {\n        \"total_items\": 5,\n        \"complete_profiles\": 2,\n        \"has_applications\": 3,\n        \"by_status\": { \"new\": 2, \"active\": 1, \"at_risk\": 1, \"inactive\": 1 },\n        \"by_action_status\": { \"create\": 4, \"accept\": 1, \"reject\": 1, \"cancel\": 0 },\n        \"avg_items_per_user\": 1.0,\n        \"avg_actions_per_user\": 2.0,\n        \"mode_wise_counts\": { \"bulk\": 5 }\n      },\n      \"items\": [\n        {\n          \"item_network\": \"purple_dot\",\n          \"item_domain\": \"seeker\",\n          \"item_type\": \"profile_1.0\",\n          \"name\": \"itm_01HX...\",\n          \"onboarded_via\": \"bulk\",\n          \"profile_status\": \"new\",\n          \"profile_completion_pct\": 80,\n          \"profile_created_at\": \"2026-05-26T07:00:00.000Z\",\n          \"profile_last_updated_at\": \"2026-05-26T07:00:00.000Z\",\n          \"age_days\": 3,\n          \"count_create\": 1,\n          \"count_accept\": 0,\n          \"count_reject\": 0,\n          \"count_cancel\": 0,\n          \"last_create_at\": \"2026-05-26T07:00:00.000Z\",\n          \"last_accept_at\": null,\n          \"last_reject_at\": null,\n          \"last_cancel_at\": null,\n          \"actionable_tags\": []\n        }\n      ],\n      \"total_matching\": 5,\n      \"next_cursor\": null\n    }\n  },\n  \"metadata\": {\n    \"last_computed_at\": \"2026-05-26T07:00:00.000Z\",\n    \"ttl_seconds\": 3600,\n    \"refreshed\": false\n  }\n}"
+            }
+          ]
         },
         {
           "name": "Dashboard - Filter by Domain",
@@ -676,6 +715,12 @@
                 {
                   "key": "domain",
                   "value": "seeker"
+                },
+                {
+                  "key": "refresh",
+                  "value": "false",
+                  "description": "Force recompute, bypass TTL, blocking advisory lock",
+                  "disabled": true
                 }
               ]
             },
@@ -717,12 +762,43 @@
                 {
                   "key": "status",
                   "value": "{{dashboard_status_filter}}"
+                },
+                {
+                  "key": "refresh",
+                  "value": "false",
+                  "description": "Force recompute, bypass TTL, blocking advisory lock",
+                  "disabled": true
                 }
               ]
             },
-            "description": "Streams a CSV of every row matching the filter (no pagination). Same `?status=` + `?domain=` filters as the dashboard — omit `?domain=` to get all configured domains in one CSV (the `item_domain` column tells you which row belongs to which domain).\n\n20-column layout: `item_id, item_domain, item_type, owner_user_id, onboarded_by_org_id, onboarded_via, profile_status, profile_completion_pct, profile_created_at, profile_last_updated_at, age_days, applications_total, applications_pending, applications_shortlisted, applications_rejected, last_applied_at, last_shortlisted_at, last_rejected_at, openings, actionable_tags`. `openings` is populated only for provider rows; `actionable_tags` is pipe-separated.\n\nSave the response to disk via Postman's 'Save response to file'."
+            "description": "Streams a CSV of every row matching the filter (no pagination). Same `?status=` + `?domain=` + `?refresh=` params as the dashboard — omit `?domain=` to get all configured domains in one CSV (the `item_domain` column tells you which row belongs to which domain).\n\n19-column layout: `item_network, item_domain, item_type, name, onboarded_via, profile_status, profile_completion_pct, profile_created_at, profile_last_updated_at, age_days, count_create, count_accept, count_reject, count_cancel, last_create_at, last_accept_at, last_reject_at, last_cancel_at, actionable_tags`. `name` is the resolved display name (from `display_name_field` on the item schema, falling back to `item_id`). `actionable_tags` is pipe-separated. Nullable timestamp cells are empty. Filename: `items_<org_id>_<YYYY-MM-DD>.csv`.\n\nSave the response to disk via Postman's 'Save response to file'."
           },
-          "response": []
+          "response": [
+            {
+              "name": "200 OK — CSV sample",
+              "originalRequest": {
+                "method": "GET",
+                "header": [
+                  { "key": "x-api-key", "value": "{{aggregator_api_key}}" },
+                  { "key": "x-acting-org-id", "value": "{{aggregator_org_id}}" },
+                  { "key": "accept", "value": "text/csv" }
+                ],
+                "url": {
+                  "raw": "{{base_url}}/api/v1/aggregator/dashboard/export",
+                  "host": ["{{base_url}}"],
+                  "path": ["api","v1","aggregator","dashboard","export"]
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "text",
+              "header": [
+                { "key": "Content-Type", "value": "text/csv" },
+                { "key": "Content-Disposition", "value": "attachment; filename=\"items_org_abc_2026-05-26.csv\"" }
+              ],
+              "body": "item_network,item_domain,item_type,name,onboarded_via,profile_status,profile_completion_pct,profile_created_at,profile_last_updated_at,age_days,count_create,count_accept,count_reject,count_cancel,last_create_at,last_accept_at,last_reject_at,last_cancel_at,actionable_tags\npurple_dot,seeker,profile_1.0,itm_01HX...,bulk,new,80,2026-05-26T07:00:00.000Z,2026-05-26T07:00:00.000Z,3,1,0,0,0,2026-05-26T07:00:00.000Z,,,,\npurple_dot,provider,profile_1.0,Acme Corp,link,active,100,2026-05-20T07:00:00.000Z,2026-05-25T07:00:00.000Z,9,2,1,0,0,2026-05-24T07:00:00.000Z,2026-05-25T07:00:00.000Z,,,missing_phone_number"
+            }
+          ]
         }
       ]
     },
