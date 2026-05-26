@@ -12,6 +12,8 @@ metadata:
 data:
   schema.sql: |
 {{ .Files.Get "files/schema.sql" | indent 4 }}
+  provision_service_users.sql: |
+{{ .Files.Get "files/provision_service_users.sql" | indent 4 }}
 ---
 apiVersion: batch/v1
 kind: Job
@@ -81,14 +83,26 @@ spec:
               export PGPASSWORD="$POSTGRES_PASSWORD"
               EXISTS=$(psql -h "$POSTGRES_HOST" -p "$POSTGRES_PORT" -U "$POSTGRES_USER" -d "$POSTGRES_DB" -tAc "SELECT 1 FROM information_schema.tables WHERE table_schema='public' AND table_name='items'")
               if [ "$EXISTS" = "1" ]; then
-                echo "schema already present, skipping"
-                exit 0
+                echo "schema already present, skipping DDL"
+              else
+                echo "applying schema"
+                psql -v ON_ERROR_STOP=1 --single-transaction \
+                  -h "$POSTGRES_HOST" -p "$POSTGRES_PORT" -U "$POSTGRES_USER" -d "$POSTGRES_DB" \
+                  -f /sql/schema.sql
+                echo "schema applied"
               fi
-              echo "applying schema"
-              psql -v ON_ERROR_STOP=1 --single-transaction \
+
+              # Always provision integrating-DPG service apikeys — this must run
+              # on every upgrade so rotations of AGGREGATOR_DPG_API_KEY (the
+              # k8s Secret) take effect. SQL is idempotent: insert if missing,
+              # UPDATE hash in place if it differs, no-op if unchanged.
+              : "${AGGREGATOR_DPG_API_KEY:?missing — set via the api Secret}"
+              echo "provisioning service apikeys"
+              psql -v ON_ERROR_STOP=1 \
+                -v aggregator_dpg_api_key="$AGGREGATOR_DPG_API_KEY" \
                 -h "$POSTGRES_HOST" -p "$POSTGRES_PORT" -U "$POSTGRES_USER" -d "$POSTGRES_DB" \
-                -f /sql/schema.sql
-              echo "schema applied"
+                -f /sql/provision_service_users.sql
+              echo "service apikeys provisioned"
           volumeMounts:
             - name: sql
               mountPath: /sql
