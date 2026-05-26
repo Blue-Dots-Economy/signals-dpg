@@ -21,15 +21,17 @@ export function BrandHero() {
         </div>
       </div>
 
-      {/* Stat counters */}
-      <div className="relative z-10 grid grid-cols-4 gap-4 border-t border-white/10 pt-8">
-        {theme.stats.map((stat) => (
-          <div key={stat.label}>
-            <p className="text-brand-stat text-2xl font-bold leading-none">{stat.value}</p>
-            <p className="mt-1 text-xs text-white/60">{stat.label}</p>
-          </div>
-        ))}
-      </div>
+      {/* Stat counters — hidden when stats array is empty (populated via API later) */}
+      {theme.stats.length > 0 && (
+        <div className="relative z-10 grid grid-cols-4 gap-4 border-t border-white/10 pt-8">
+          {theme.stats.map((stat) => (
+            <div key={stat.label}>
+              <p className="text-brand-stat text-2xl font-bold leading-none">{stat.value}</p>
+              <p className="mt-1 text-xs text-white/60">{stat.label}</p>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

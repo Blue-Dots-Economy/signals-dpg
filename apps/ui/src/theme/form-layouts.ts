@@ -52,72 +52,53 @@ export const formLayouts: Record<string, FormLayout> = {
     twoColumn: ['Phone Number', 'Email Address', 'Coverage Radius (km)', 'Service Offered'],
   },
 
+  // purple_dot network — PWD Beneficiary Profile
   seeker: {
     sections: [
       {
         title: 'Personal Details',
-        fields: ['name', 'gender', 'age', 'location', 'phone'],
+        fields: ['beneficiary_name', 'age', 'gender', 'mobile_number', 'email'],
       },
       {
-        title: 'Work Preferences',
-        fields: [
-          'workExperience',
-          'workExperienceYearsConditional',
-          'highestQualificationOrSkill',
-          'natureOfJobsInterestedIn',
-          'nameOfJobRolesInterestedIn',
-        ],
+        title: 'Disability Profile',
+        fields: ['disability_type', 'disability_percentage', 'looking_for', 'looking_for_details'],
       },
       {
-        title: 'Additional Support',
-        fields: ['otherHelpNeeded'],
+        title: 'Location',
+        fields: ['service_city', 'state', 'district', 'block', 'pincode', 'address'],
+      },
+      {
+        title: 'Documents & Education',
+        fields: ['documents_available', 'highest_qualification'],
       },
     ],
-    twoColumn: ['gender', 'age', 'workExperience', 'workExperienceYearsConditional'],
+    twoColumn: ['age', 'gender', 'mobile_number', 'email', 'state', 'district', 'block', 'pincode'],
   },
 
+  // purple_dot network — PWD Service Provider Profile
   provider: {
     sections: [
       {
-        title: 'Company Details',
-        fields: ['jobProviderName', 'jobProviderLocation', 'role', 'positions', 'natureOfJob'],
+        title: 'Contact Details',
+        fields: ['contact_name', 'contact_phone', 'contact_email'],
       },
       {
-        title: 'Hiring Manager',
-        fields: ['hiringManagerName', 'hiringManagerPhoneNumber', 'hiringManagerEmail'],
+        title: 'Organisation',
+        fields: ['provider_category', 'organisation_name'],
       },
       {
-        title: 'Compensation',
-        fields: [
-          'salaryMin',
-          'salaryMax',
-          'stipendMin',
-          'stipendMax',
-          'taskRateMin',
-          'taskRateMax',
-        ],
+        title: 'Services & Coverage',
+        fields: ['disabilities_served', 'services_offered', 'service_cities'],
       },
       {
-        title: 'Candidate Requirements',
-        fields: [
-          'candidateExperienceType',
-          'minEducationalInstitute',
-          'workExperienceYears',
-          'lastRoleHeld',
-        ],
+        title: 'Location',
+        fields: ['official_address', 'state', 'district', 'block', 'pincode'],
+      },
+      {
+        title: 'More Details',
+        fields: ['service_details', 'catalog_url'],
       },
     ],
-    twoColumn: [
-      'hiringManagerPhoneNumber',
-      'hiringManagerEmail',
-      'salaryMin',
-      'salaryMax',
-      'stipendMin',
-      'stipendMax',
-      'taskRateMin',
-      'taskRateMax',
-      'positions',
-      'natureOfJob',
-    ],
+    twoColumn: ['contact_phone', 'contact_email', 'state', 'district', 'block', 'pincode'],
   },
 };

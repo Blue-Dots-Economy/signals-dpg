@@ -54,12 +54,7 @@ const blue_dot: NetworkTheme = {
     'A unified network where aggregators, providers, and seekers move together — every blue dot is a person, an opportunity, a path forward.',
   portalLabel: 'Seeker & Provider Portal',
   inviteLine: 'Invite-only · Blue Dots DPG',
-  stats: [
-    { value: '2.4M+', label: 'Seekers' },
-    { value: '18K', label: 'Providers' },
-    { value: '142', label: 'Aggregators' },
-    { value: '34%', label: 'Match rate' },
-  ],
+  stats: [],
   tokens: {
     '--primary': 'oklch(0.55 0.20 250)',
     '--primary-foreground': 'oklch(0.985 0 0)',
@@ -94,12 +89,7 @@ const purple_dot: NetworkTheme = {
     'A unified network connecting persons with disabilities to assistive devices, health services, and rehabilitation support — every purple dot is a door to a better life.',
   portalLabel: 'Services Portal',
   inviteLine: 'Invite-only · Purple Dot DPG',
-  stats: [
-    { value: '1.2M+', label: 'Beneficiaries' },
-    { value: '8K', label: 'Providers' },
-    { value: '96', label: 'Aggregators' },
-    { value: '41%', label: 'Match rate' },
-  ],
+  stats: [],
   tokens: {
     '--primary': 'oklch(0.55 0.22 300)',
     '--primary-foreground': 'oklch(0.985 0 0)',
@@ -134,12 +124,7 @@ const yellow_dot: NetworkTheme = {
     'A unified education network where students find tutors, counsellors, and coaching centres — every yellow dot is a step forward on the learning path.',
   portalLabel: 'Education Portal',
   inviteLine: 'Invite-only · Yellow Dot DPG',
-  stats: [
-    { value: '3.1M+', label: 'Students' },
-    { value: '22K', label: 'Tutors' },
-    { value: '180', label: 'Aggregators' },
-    { value: '38%', label: 'Match rate' },
-  ],
+  stats: [],
   tokens: {
     '--primary': 'oklch(0.68 0.18 80)',
     '--primary-foreground': 'oklch(0.12 0 0)',
@@ -174,12 +159,7 @@ const pink_dot: NetworkTheme = {
     'A unified network for early-childhood care and education — every pink dot connects a child to a carer, a parent to a resource, a community to a future.',
   portalLabel: 'Care Portal',
   inviteLine: 'Invite-only · Pink Dot DPG',
-  stats: [
-    { value: '800K+', label: 'Children' },
-    { value: '12K', label: 'Providers' },
-    { value: '74', label: 'Aggregators' },
-    { value: '52%', label: 'Match rate' },
-  ],
+  stats: [],
   tokens: {
     '--primary': 'oklch(0.60 0.22 350)',
     '--primary-foreground': 'oklch(0.985 0 0)',
@@ -214,12 +194,7 @@ const green_dot: NetworkTheme = {
     'A unified agri-network where farmers, buyers, and support services converge — every green dot is a harvest made possible by the right connection.',
   portalLabel: 'Agri Portal',
   inviteLine: 'Invite-only · Green Dot DPG',
-  stats: [
-    { value: '2M+', label: 'Farmers' },
-    { value: '6K', label: 'Buyers' },
-    { value: '58', label: 'Aggregators' },
-    { value: '29%', label: 'Match rate' },
-  ],
+  stats: [],
   tokens: {
     '--primary': 'oklch(0.55 0.18 155)',
     '--primary-foreground': 'oklch(0.985 0 0)',

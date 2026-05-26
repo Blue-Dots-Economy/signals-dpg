@@ -1,7 +1,7 @@
 import * as React from 'react';
 import { useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { toast } from 'sonner';
-import { ArrowLeft, GraduationCap, UserCheck, Building2, Wallet, Trash2 } from 'lucide-react';
+import { ArrowLeft, GraduationCap, UserCheck, Building2, Wallet, Trash2, Accessibility, HandHeart } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import type { RJSFSchema } from '@rjsf/utils';
 import { Button } from '@/components/ui/button';
@@ -42,10 +42,16 @@ function parseNetworkIds(networkEnv: string | undefined): string[] {
 }
 
 const domainIcons: Record<string, LucideIcon> = {
+  // yellow_dot / education network
   student_profile: GraduationCap,
   learner_profile: GraduationCap,
+  student: GraduationCap,
   tutor_counsellor_profile: UserCheck,
+  tutor_counsellor: UserCheck,
   coaching_center: Building2,
+  // purple_dot / disability services network
+  seeker: Accessibility,
+  provider: HandHeart,
 };
 
 export function ProfileFormPage() {

@@ -17,7 +17,7 @@ import {
   SidebarSeparator,
 } from '@/components/ui/sidebar';
 import { PortalHeader } from './portal-header';
-import { LayoutGrid, Box, Plus, Pencil, GraduationCap, UserCheck, Building2, Network, ChevronRight, Activity } from 'lucide-react';
+import { LayoutGrid, Box, Plus, Pencil, GraduationCap, UserCheck, Building2, Network, ChevronRight, Activity, Accessibility, HandHeart } from 'lucide-react';
 import { usePendingActionsCount } from '@/hooks/use-actions';
 import type { LucideIcon } from 'lucide-react';
 
@@ -36,9 +36,14 @@ interface AppSidebarProps {
 }
 
 const domainIcons: Record<string, LucideIcon> = {
+  // yellow_dot / education network
   student: GraduationCap,
   tutor: UserCheck,
+  tutor_counsellor: UserCheck,
   coaching_center: Building2,
+  // purple_dot / disability services network
+  seeker: Accessibility,
+  provider: HandHeart,
 };
 
 function findTitleField(schema: RJSFSchema): string | null {

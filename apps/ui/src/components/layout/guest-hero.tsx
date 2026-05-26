@@ -39,15 +39,17 @@ export function GuestHero() {
         </Link>
       </div>
 
-      {/* Stat strip at the bottom */}
-      <div className="relative z-10 flex flex-wrap gap-x-6 gap-y-2 border-t border-white/10 px-6 py-3 lg:px-10">
-        {theme.stats.map((stat) => (
-          <div key={stat.label} className="flex items-baseline gap-1.5">
-            <span className="text-sm font-bold text-brand-stat">{stat.value}</span>
-            <span className="text-[11px] text-white/40">{stat.label}</span>
-          </div>
-        ))}
-      </div>
+      {/* Stat strip — hidden when stats array is empty (populated via API later) */}
+      {theme.stats.length > 0 && (
+        <div className="relative z-10 flex flex-wrap gap-x-6 gap-y-2 border-t border-white/10 px-6 py-3 lg:px-10">
+          {theme.stats.map((stat) => (
+            <div key={stat.label} className="flex items-baseline gap-1.5">
+              <span className="text-sm font-bold text-brand-stat">{stat.value}</span>
+              <span className="text-[11px] text-white/40">{stat.label}</span>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
