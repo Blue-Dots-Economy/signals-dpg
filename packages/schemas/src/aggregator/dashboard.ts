@@ -18,7 +18,7 @@ export const DashboardRequestQuery = z.object({
   domain: z.string().min(1).optional(),
   status: StatusEnum.optional(),
   q: z.string().min(1).max(200).optional(),
-  refresh: z.coerce.boolean().optional().default(false),
+  refresh: z.enum(['true', 'false']).transform((v) => v === 'true').optional().default(false),
 });
 
 export const ItemRollup = z.object({
@@ -86,7 +86,7 @@ export const ExportQuery = z.object({
   domain: z.string().min(1).optional(),
   status: StatusEnum.optional(),
   q: z.string().min(1).max(200).optional(),
-  refresh: z.coerce.boolean().optional().default(false),
+  refresh: z.enum(['true', 'false']).transform((v) => v === 'true').optional().default(false),
 });
 
 export type DashboardRequestQuery = z.infer<typeof DashboardRequestQuery>;

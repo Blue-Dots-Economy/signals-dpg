@@ -4,11 +4,13 @@ import {
   getInteractionPiiRevealStatuses,
 } from '../network_workflow';
 
+const minimalStatusRules = [{ status: 'new', when: 'default' }];
+
 const baseConfig = {
   id: 'test_net',
   domains: [
-    { id: 'seeker', item_schemas: { profile_1_0: { type: 'object' } } },
-    { id: 'provider', item_schemas: { profile_1_0: { type: 'object' } } },
+    { id: 'seeker', item_schemas: { profile_1_0: { type: 'object' } }, status_rules: minimalStatusRules },
+    { id: 'provider', item_schemas: { profile_1_0: { type: 'object' } }, status_rules: minimalStatusRules },
   ],
   instances: [],
   cross_network_origins: [],

@@ -70,17 +70,15 @@ const NetworkDomainSchema = z.object({
     .record(z.string(), JsonSchemaDocumentSchema)
     .optional()
     .default({}),
-  status_rules: z.array(StatusRuleSchema).min(1).optional(),
+  status_rules: z.array(StatusRuleSchema).min(1),
 }).superRefine((domain, ctx) => {
-  if (domain.status_rules) {
-    const last = domain.status_rules[domain.status_rules.length - 1];
-    if (last.when !== 'default') {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        message: 'status_rules must end with a `{ when: "default" }` tail rule',
-        path: ['status_rules', domain.status_rules.length - 1, 'when'],
-      });
-    }
+  const last = domain.status_rules[domain.status_rules.length - 1];
+  if (last.when !== 'default') {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: 'status_rules must end with a `{ when: "default" }` tail rule',
+      path: ['status_rules', domain.status_rules.length - 1, 'when'],
+    });
   }
 }).transform((domain) => ({
   ...domain,

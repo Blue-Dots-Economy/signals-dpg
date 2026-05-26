@@ -502,8 +502,8 @@ describeIf(`GET /aggregator/dashboard by_domain (integration)${
 
   it.todo(
     'GET /aggregator/dashboard/export returns CSV with the new canonical columns — ' +
-      'disabled: export.ts still uses old column names (applications_total, openings, etc.). ' +
-      'Re-enable after Task 14 (rewrite export route handler) is complete. ' +
-      'See: docs/superpowers/plans/2026-05-26-metrics-config-driven-redesign.md',
+      'disabled: action seeding in this suite uses apply/shortlisted literals that are no longer ' +
+      'valid after blue_dot migrated to canonical action types (connect/accept/reject/cancel). ' +
+      'Re-enable after seed_blue_dot.ts updates action statuses to canonical bucket inputs.',
   );
 });
