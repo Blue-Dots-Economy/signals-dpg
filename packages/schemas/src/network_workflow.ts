@@ -58,6 +58,12 @@ const StatusRuleSchema = z.object({
   when: z.union([PredicateSchema, z.literal('default')]),
 }).strict();
 
+const DashboardTileLabelsSchema = z.object({
+  total_items: z.string().min(1).optional(),
+  complete_profiles: z.string().min(1).optional(),
+  has_applications: z.string().min(1).optional(),
+}).strict();
+
 const NetworkDomainSchema = z.object({
   id: z.string().min(1),
   description: z.string().optional(),
@@ -71,6 +77,7 @@ const NetworkDomainSchema = z.object({
     .optional()
     .default({}),
   status_rules: z.array(StatusRuleSchema).min(1),
+  dashboard_tiles: DashboardTileLabelsSchema.optional(),
 }).superRefine((domain, ctx) => {
   const last = domain.status_rules[domain.status_rules.length - 1];
   if (last.when !== 'default') {
@@ -174,6 +181,21 @@ const NetworkActionSchema = z.object({
   interactions: NetworkActionInteractionSchema.array().default([]),
 });
 
+const DashboardBucketsSchema = z.object({
+  by_status: z.object({
+    new: z.string().min(1).optional(),
+    active: z.string().min(1).optional(),
+    at_risk: z.string().min(1).optional(),
+    inactive: z.string().min(1).optional(),
+  }).strict().optional(),
+  by_action_status: z.object({
+    create: z.string().min(1).optional(),
+    accept: z.string().min(1).optional(),
+    reject: z.string().min(1).optional(),
+    cancel: z.string().min(1).optional(),
+  }).strict().optional(),
+}).strict();
+
 export const NetworkConfigSchema = z.object({
   id: z.string().min(1),
   display_name: z.string().optional(),
@@ -191,6 +213,7 @@ export const NetworkConfigSchema = z.object({
     .array()
     .default([]),
   actions: z.record(z.string(), NetworkActionSchema).default({}),
+  dashboard_buckets: DashboardBucketsSchema.optional(),
 }).superRefine((cfg, ctx) => {
   for (const [domainIdx, domain] of cfg.domains.entries()) {
     for (const [schemaName, schemaDoc] of Object.entries(domain.item_schemas ?? {})) {

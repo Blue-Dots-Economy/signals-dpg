@@ -115,7 +115,12 @@
           }
         }
       },
-      "id": "seeker"
+      "id": "seeker",
+      "dashboard_tiles": {
+        "total_items": "Total Job Seekers",
+        "complete_profiles": "Profiles Complete",
+        "has_applications": "Applied for Jobs"
+      }
     },
     {
       "description": "Employers and recruiters posting jobs.",
@@ -257,7 +262,12 @@
           }
         }
       },
-      "id": "provider"
+      "id": "provider",
+      "dashboard_tiles": {
+        "total_items": "Total Job Postings",
+        "complete_profiles": "Postings Complete",
+        "has_applications": "Received Applications"
+      }
     }
   ],
   "instances": [
@@ -411,5 +421,19 @@
       ]
     }
   },
-  "id": "blue_dot"
+  "id": "blue_dot",
+  "dashboard_buckets": {
+    "by_status": {
+      "new": "New",
+      "active": "Active",
+      "at_risk": "At Risk",
+      "inactive": "Inactive"
+    },
+    "by_action_status": {
+      "create": "Applied",
+      "accept": "Shortlisted",
+      "reject": "Rejected",
+      "cancel": "Withdrawn"
+    }
+  }
 }

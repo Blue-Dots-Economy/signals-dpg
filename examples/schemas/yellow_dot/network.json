@@ -81,7 +81,12 @@
           }
         }
       },
-      "id": "student"
+      "id": "student",
+      "dashboard_tiles": {
+        "total_items": "Total Students",
+        "complete_profiles": "Profiles Complete",
+        "has_applications": "Has Activity"
+      }
     },
     {
       "description": "Individual tutors, WEERA members, and counsellors on the network.",
@@ -174,7 +179,12 @@
           }
         }
       },
-      "id": "individual_tutor_weera_counsellor"
+      "id": "individual_tutor_weera_counsellor",
+      "dashboard_tiles": {
+        "total_items": "Total Tutors",
+        "complete_profiles": "Profiles Complete",
+        "has_applications": "Has Activity"
+      }
     }
   ],
   "instances": [
@@ -325,5 +335,19 @@
       ]
     }
   },
-  "id": "onest_yellow_dot"
+  "id": "onest_yellow_dot",
+  "dashboard_buckets": {
+    "by_status": {
+      "new": "New",
+      "active": "Active",
+      "at_risk": "At Risk",
+      "inactive": "Inactive"
+    },
+    "by_action_status": {
+      "create": "Created",
+      "accept": "Accepted",
+      "reject": "Rejected",
+      "cancel": "Cancelled"
+    }
+  }
 }
