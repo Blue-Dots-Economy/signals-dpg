@@ -101,7 +101,7 @@ CREATE INDEX pii_reveal_audit_item_idx   ON pii_reveal_audit (revealed_item_id, 
 
 - Append-only. No updates, no deletes wired up.
 - No foreign keys to `item_actions` or `items`: both are partitioned and don't support single-column FKs. App-level integrity is enforced by the handler always reading the action and item rows first.
-- Drizzle definition lives in `packages/database/src/drizzle_ref_tables/pii_reveal_audit.ts`, exported from the package index.
+- Drizzle definition lives in `apps/api/db/postgres/schema/pii_reveal_audit.ts`, re-exported from `apps/api/db/postgres/schema/index.ts`. (Matches the `item_metrics` precedent for API-only tables; `packages/database/src/drizzle_ref_tables/` is reserved for partitioned tables shared across packages.)
 - Migration generated via `pnpm db:generate:api`. `pnpm schema:bundle` re-runs to refresh the Helm-bundled `schema.sql`. Schema-parity CI must pass.
 - Retention policy is **deferred**; documented as a follow-up rather than designed here.
 
