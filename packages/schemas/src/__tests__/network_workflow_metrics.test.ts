@@ -94,4 +94,23 @@ describe('NetworkConfigSchema metrics extensions', () => {
     cfg.domains[0].item_schemas['profile_1.0'].display_name_field = 'nonexistent';
     expect(() => NetworkConfigSchema.parse(cfg)).toThrow(/does not exist/);
   });
+
+  it('accepts status_rules using days_since_last (bucket-scoped) predicate', () => {
+    const cfg = JSON.parse(JSON.stringify(baseConfig));
+    cfg.domains[0].status_rules = [
+      { status: 'active', when: { days_since_last: { buckets: ['accept', 'create'], lte: 30 } } },
+      { status: 'at_risk', when: { count: { buckets: ['reject'], between: [1, 5] } } },
+      { status: 'inactive', when: 'default' },
+    ];
+    expect(() => NetworkConfigSchema.parse(cfg)).not.toThrow();
+  });
+
+  it('rejects bucket-scoped predicate referencing an unknown bucket name', () => {
+    const cfg = JSON.parse(JSON.stringify(baseConfig));
+    cfg.domains[0].status_rules = [
+      { status: 'active', when: { days_since_last: { buckets: ['shortlisted'], lte: 30 } } },
+      { status: 'inactive', when: 'default' },
+    ];
+    expect(() => NetworkConfigSchema.parse(cfg)).toThrow();
+  });
 });

@@ -21,10 +21,15 @@ const ComparisonSchema = z.union([
   z.object({ between: z.tuple([z.number(), z.number()]) }).strict(),
 ]);
 
-const BucketScopedComparisonSchema = z.intersection(
-  z.object({ buckets: z.array(CanonicalBucketSchema).min(1) }),
-  ComparisonSchema,
-);
+const bucketsField = { buckets: z.array(CanonicalBucketSchema).min(1) };
+const BucketScopedComparisonSchema = z.union([
+  z.object({ ...bucketsField, lt:      z.number() }).strict(),
+  z.object({ ...bucketsField, lte:     z.number() }).strict(),
+  z.object({ ...bucketsField, gt:      z.number() }).strict(),
+  z.object({ ...bucketsField, gte:     z.number() }).strict(),
+  z.object({ ...bucketsField, eq:      z.number() }).strict(),
+  z.object({ ...bucketsField, between: z.tuple([z.number(), z.number()]) }).strict(),
+]);
 
 const ItemAgePredicateSchema = z.object({ item_age_days: ComparisonSchema }).strict();
 const DaysSinceLastPredicateSchema = z.object({ days_since_last: BucketScopedComparisonSchema }).strict();
@@ -220,8 +225,7 @@ export const NetworkConfigSchema = z.object({
           message: `display_name_field "${field}" points at a private property; pick a non-private field`,
           path: ['domains', domainIdx, 'item_schemas', schemaName, 'display_name_field'],
         });
-      }
-      if (t.type !== 'string') {
+      } else if (t.type !== 'string') {
         ctx.addIssue({
           code: z.ZodIssueCode.custom,
           message: `display_name_field "${field}" must point at a property of type "string"`,
