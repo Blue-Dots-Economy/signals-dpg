@@ -42,9 +42,8 @@ type PredicateInput =
   | z.input<typeof CountPredicateSchema>
   | { all: PredicateInput[] }
   | { any: PredicateInput[] };
-type PredicateOutput = PredicateInput;
 
-const PredicateSchema: z.ZodType<PredicateOutput, z.ZodTypeDef, PredicateInput> = z.lazy(() =>
+const PredicateSchema: z.ZodType<PredicateInput> = z.lazy(() =>
   z.union([
     ItemAgePredicateSchema,
     DaysSinceLastPredicateSchema,
