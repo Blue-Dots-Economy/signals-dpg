@@ -1,6 +1,7 @@
 import { action_events, item_actions } from '@dpg/database';
 import { createSelectSchema } from 'drizzle-zod';
 import z from 'zod';
+import { ItemResponseSchema } from './item_schemas';
 
 const ActionItemRefSchema = z.object({
   item_network: z.string().min(1),
@@ -87,4 +88,16 @@ export const OwnedItemActionSchema = ItemActionSelectSchema.extend({
 
 export const OwnedActionEventSchema = ActionEventSelectSchema.extend({
   ownership_roles: ActionOwnershipTagSchema.array().min(1),
+});
+
+export const ActionContactDetailsParamsSchema = z.object({
+  action_id: z.uuid(),
+});
+
+export const ActionContactDetailsResponseSchema = z.object({
+  action_id: z.uuid(),
+  action_status: z.string().min(1),
+  other_actor: z.object({
+    item: ItemResponseSchema,
+  }),
 });
