@@ -49,6 +49,7 @@ const compare = (value: number, op: Comparison): boolean => {
   return false;
 };
 
+/** Returns the smallest non-null value (≡ most-recently elapsed days). */
 const min_not_null = (vals: Array<number | null>): number | null => {
   let best: number | null = null;
   for (const v of vals) {

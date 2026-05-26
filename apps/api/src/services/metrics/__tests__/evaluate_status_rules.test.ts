@@ -5,9 +5,6 @@ import {
   type StatusRule,
 } from '../evaluate_status_rules.js';
 
-const NOW = new Date('2026-05-26T00:00:00Z');
-const daysAgo = (n: number): Date => new Date(NOW.getTime() - n * 86_400_000);
-
 const baseInput = (overrides: Partial<RuleInput> = {}): RuleInput => ({
   item_age_days: 10,
   count: { create: 0, accept: 0, reject: 0, cancel: 0 },
