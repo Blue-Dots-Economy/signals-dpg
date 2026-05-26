@@ -113,4 +113,37 @@ describe('NetworkConfigSchema metrics extensions', () => {
     ];
     expect(() => NetworkConfigSchema.parse(cfg)).toThrow();
   });
+
+  it('accepts dashboard_tiles on a domain', () => {
+    const cfg = JSON.parse(JSON.stringify(baseConfig));
+    cfg.domains[0].dashboard_tiles = {
+      total_items: 'Total Seekers',
+      complete_profiles: 'Profiles Done',
+      has_applications: 'Engaged',
+    };
+    expect(() => NetworkConfigSchema.parse(cfg)).not.toThrow();
+  });
+
+  it('rejects an unknown key in dashboard_tiles', () => {
+    const cfg = JSON.parse(JSON.stringify(baseConfig));
+    cfg.domains[0].dashboard_tiles = { total_items: 'Total', not_a_tile: 'x' };
+    expect(() => NetworkConfigSchema.parse(cfg)).toThrow();
+  });
+
+  it('accepts dashboard_buckets at the network root', () => {
+    const cfg = JSON.parse(JSON.stringify(baseConfig));
+    cfg.dashboard_buckets = {
+      by_status: { new: 'New', active: 'Active', at_risk: 'At Risk', inactive: 'Inactive' },
+      by_action_status: { create: 'Applied', accept: 'Shortlisted', reject: 'Rejected', cancel: 'Withdrawn' },
+    };
+    expect(() => NetworkConfigSchema.parse(cfg)).not.toThrow();
+  });
+
+  it('rejects unknown bucket key in dashboard_buckets.by_action_status', () => {
+    const cfg = JSON.parse(JSON.stringify(baseConfig));
+    cfg.dashboard_buckets = {
+      by_action_status: { shortlisted: 'foo' },
+    };
+    expect(() => NetworkConfigSchema.parse(cfg)).toThrow();
+  });
 });

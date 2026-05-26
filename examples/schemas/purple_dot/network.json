@@ -196,7 +196,12 @@
           }
         }
       },
-      "id": "seeker"
+      "id": "seeker",
+      "dashboard_tiles": {
+        "total_items": "Total Beneficiaries",
+        "complete_profiles": "Profiles Complete",
+        "has_applications": "Made Connections"
+      }
     },
     {
       "description": "Organisations and individuals providing services, devices, training, or other support for persons with disabilities.",
@@ -367,7 +372,12 @@
           }
         }
       },
-      "id": "provider"
+      "id": "provider",
+      "dashboard_tiles": {
+        "total_items": "Total Service Providers",
+        "complete_profiles": "Profiles Complete",
+        "has_applications": "Received Connections"
+      }
     }
   ],
   "instances": [
@@ -574,5 +584,19 @@
       ]
     }
   },
-  "id": "purple_dot"
+  "id": "purple_dot",
+  "dashboard_buckets": {
+    "by_status": {
+      "new": "New",
+      "active": "Active",
+      "at_risk": "At Risk",
+      "inactive": "Inactive"
+    },
+    "by_action_status": {
+      "create": "Requested",
+      "accept": "Connected",
+      "reject": "Declined",
+      "cancel": "Cancelled"
+    }
+  }
 }
