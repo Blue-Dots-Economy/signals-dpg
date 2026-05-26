@@ -3,9 +3,14 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>DPG UI</title>
-    <!-- FOUC prevention: set data-network before React boots so the first
-         CSS paint already has the right token values from index.css. -->
+    <!-- Initial title — replaced by theme-provider once the active network's
+         brand is known (becomes e.g. "Purple Dot · Signal Stack"). -->
+    <title>Signal Stack</title>
+    <!-- Set data-network before React boots so first CSS paint has the
+         right brand tokens. Favicon is generated as a square SVG using
+         the active network's --brand-cta colour after the brand-themes
+         style block (injected by the Vite plugin) is parsed. -->
+
     <script>
       (function () {
         var url = new URLSearchParams(location.search).get('network');
@@ -13,7 +18,20 @@
           typeof __DEFAULT_NETWORK_THEME__ !== 'undefined'
             ? __DEFAULT_NETWORK_THEME__
             : 'blue_dot';
-        document.documentElement.dataset.network = url || fallback;
+        var id = url || fallback;
+        document.documentElement.dataset.network = id;
+
+        // Apply dark class before first paint so the user doesn't see a
+        // light flash when their stored preference is dark. Default mode
+        // is light — only honour system pref if user explicitly chose it.
+        try {
+          var stored = localStorage.getItem('dpg-theme-mode');
+          var resolved =
+            stored === 'dark' ||
+            (stored === 'system' &&
+              window.matchMedia('(prefers-color-scheme: dark)').matches);
+          if (resolved) document.documentElement.classList.add('dark');
+        } catch (_) {}
       })();
     </script>
   </head>

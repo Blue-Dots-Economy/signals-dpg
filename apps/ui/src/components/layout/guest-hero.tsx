@@ -7,49 +7,42 @@ export function GuestHero() {
   const { theme } = useNetworkTheme();
 
   return (
-    <div className="relative mb-6 overflow-hidden rounded-xl bg-brand-hero min-h-[200px] lg:min-h-[240px]">
-      {/* Constellation — fades in from the right on large screens, full-cover on small */}
-      <div className="pointer-events-none absolute inset-0 opacity-[0.18] lg:opacity-25">
-        <NetworkConstellation className="h-full w-full" />
-      </div>
-
-      {/* Left vignette — keeps text legible over the constellation */}
-      <div className="pointer-events-none absolute inset-0 bg-gradient-to-r from-black/50 via-black/20 to-transparent" />
-
-      {/* Content */}
-      <div className="relative z-10 flex flex-col items-start justify-center gap-3 px-6 py-10 lg:px-10 lg:py-14 max-w-xl">
-        <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-white/45">
-          {theme.portalLabel}
-        </p>
-
-        <h2 className="text-2xl font-bold leading-snug text-white/90 lg:text-3xl">
-          {theme.tagline.lead}{' '}
-          <span className="text-brand-hero-highlight">{theme.tagline.highlight}</span>
-          {theme.tagline.tail ? ` ${theme.tagline.tail}` : ''}
-        </h2>
-
-        <p className="text-sm text-white/55 leading-relaxed max-w-sm">{theme.subline}</p>
-
-        <Link
-          to="/auth/login"
-          className="mt-1 inline-flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-semibold shadow-lg transition-all hover:brightness-110 active:scale-95 bg-brand-cta"
-        >
-          <LogIn className="h-4 w-4" />
-          Sign in to connect
-        </Link>
-      </div>
-
-      {/* Stat strip — hidden when stats array is empty (populated via API later) */}
-      {theme.stats.length > 0 && (
-        <div className="relative z-10 flex flex-wrap gap-x-6 gap-y-2 border-t border-white/10 px-6 py-3 lg:px-10">
-          {theme.stats.map((stat) => (
-            <div key={stat.label} className="flex items-baseline gap-1.5">
-              <span className="text-sm font-bold text-brand-stat">{stat.value}</span>
-              <span className="text-[11px] text-white/40">{stat.label}</span>
-            </div>
-          ))}
+    <div className="sticky top-0 z-30 -mx-4 mb-4 sm:-mx-6">
+      <div className="relative overflow-hidden bg-brand-hero shadow-lg sm:mx-4 sm:rounded-xl lg:mx-6">
+        {/* Constellation — faint backdrop; compact banner doesn't need full cover */}
+        <div className="pointer-events-none absolute inset-0 opacity-[0.18]">
+          <NetworkConstellation className="h-full w-full" />
         </div>
-      )}
+
+        {/* Vignette — keeps text legible over the constellation */}
+        <div className="pointer-events-none absolute inset-0 bg-gradient-to-r from-black/55 via-black/25 to-transparent" />
+
+        {/* Content row: portal label + tagline on the left, CTA on the right */}
+        <div className="relative z-10 flex items-center gap-4 px-5 py-3 sm:px-7 sm:py-4 lg:px-10">
+          <div className="min-w-0 flex-1">
+            <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-white/50">
+              {theme.portalLabel}
+            </p>
+            <h2 className="truncate text-sm font-bold leading-tight text-white/95 sm:text-base lg:text-lg">
+              {theme.tagline.lead}{' '}
+              <span className="text-brand-hero-highlight">{theme.tagline.highlight}</span>
+              {theme.tagline.tail ? ` ${theme.tagline.tail}` : ''}
+            </h2>
+            <p className="mt-1 hidden text-[11px] leading-snug text-white/55 sm:line-clamp-1 sm:text-xs lg:line-clamp-2 lg:max-w-2xl">
+              {theme.subline}
+            </p>
+          </div>
+
+          <Link
+            to="/auth/login"
+            className="inline-flex shrink-0 items-center gap-2 rounded-lg bg-brand-cta px-3.5 py-2 text-xs font-semibold shadow-md transition-all hover:brightness-110 active:scale-95 sm:px-5 sm:py-2.5 sm:text-sm"
+          >
+            <LogIn className="h-4 w-4" />
+            <span className="hidden sm:inline">Sign in to connect</span>
+            <span className="sm:hidden">Sign in</span>
+          </Link>
+        </div>
+      </div>
     </div>
   );
 }

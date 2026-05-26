@@ -59,7 +59,7 @@ export function PageShell({
           onActiveProfileChange={onActiveProfileChange}
           userSchemas={userSchemas}
         />
-        <div className="flex flex-1 flex-col">
+        <div className="flex h-svh flex-1 flex-col">
           <TopBar
             search={search}
             onSearchChange={onSearchChange}

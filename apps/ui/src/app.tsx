@@ -3,6 +3,7 @@ import { Toaster } from 'sonner';
 import { RequireAuth } from '@/components/auth/require-auth';
 import { AuthProvider } from '@/contexts/auth-context';
 import { NetworkThemeProvider } from '@/theme/theme-provider';
+import { ThemeModeProvider } from '@/theme/mode-provider';
 import { HomePage } from './pages/home-page';
 import { ProfileFormPage } from './pages/profile-form-page';
 import { LoginPage } from './pages/auth/login-page';
@@ -13,6 +14,7 @@ export function App() {
   return (
     <AuthProvider>
       <BrowserRouter>
+       <ThemeModeProvider>
         <NetworkThemeProvider>
           <Toaster
             position="top-center"
@@ -31,6 +33,7 @@ export function App() {
             <Route path="/my-actions/*" element={<RequireAuth><MyActionsPage /></RequireAuth>} />
           </Routes>
         </NetworkThemeProvider>
+       </ThemeModeProvider>
       </BrowserRouter>
     </AuthProvider>
   );
