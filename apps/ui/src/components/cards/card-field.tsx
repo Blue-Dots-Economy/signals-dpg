@@ -1,5 +1,6 @@
 import type { RJSFSchema } from '@rjsf/utils';
 import { filterDataBySchema } from '@/engine/schema/schema-privacy';
+import type { PrivacyMode } from '@/engine/types';
 
 interface CardFieldProps {
   label: string;
@@ -41,6 +42,13 @@ function CardField({ label, value, type }: CardFieldProps) {
 interface CardFieldsFromSchemaProps {
   schema: RJSFSchema;
   data: Record<string, unknown>;
+  /**
+   * `'public-only'` (default) hides `private: true` fields — the right
+   * default for browse / list views. `'all'` renders every field,
+   * including private ones; use only when the caller has explicit
+   * authorization to display PII (e.g. the post-accept reveal modal).
+   */
+  privacyMode?: PrivacyMode;
 }
 
 /**
@@ -77,16 +85,20 @@ function humaniseFieldKey(key: string): string {
 export function CardFieldsFromSchema({
   schema,
   data,
+  privacyMode = 'public-only',
 }: CardFieldsFromSchemaProps) {
-  const publicSchema = {
-    ...schema,
-    properties: Object.fromEntries(
-      Object.entries(schema.properties ?? {}).filter(([_, prop]) => {
-        const typed = prop as RJSFSchema & { private?: boolean };
-        return typed.private !== true;
-      })
-    ),
-  };
+  const publicSchema =
+    privacyMode === 'all'
+      ? schema
+      : {
+          ...schema,
+          properties: Object.fromEntries(
+            Object.entries(schema.properties ?? {}).filter(([_, prop]) => {
+              const typed = prop as RJSFSchema & { private?: boolean };
+              return typed.private !== true;
+            })
+          ),
+        };
 
   const publicData = filterDataBySchema(data, publicSchema);
 

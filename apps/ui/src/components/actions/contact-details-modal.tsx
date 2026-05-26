@@ -110,6 +110,7 @@ export function ContactDetailsModal({
             schema={schema}
             schemaName={item.item_domain}
             data={item.item_state}
+            privacyMode="all"
           />
         )}
 
