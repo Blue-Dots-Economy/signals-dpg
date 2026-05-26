@@ -42,27 +42,6 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm --filter ui exec tsc --noEmit
 
-  typecheck-docs:
-    runs-on: ubuntu-latest
-    # `astro check` is required because the docs app relies on the
-    # `astro:content` virtual modules that plain `tsc --noEmit` cannot resolve.
-    # Today this job is expected to fail: `astro check` is not yet wired into
-    # apps/docs (no @astrojs/check dep, no tsconfig tuned for it). Task B.2
-    # owns the durable typecheck-contract fix that will green this job; until
-    # then we mark it continue-on-error so CI is not blocked.
-    continue-on-error: true
-    steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
-        with:
-          version: 11.1.2
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '24'
-          cache: pnpm
-      - run: pnpm install --frozen-lockfile
-      - run: pnpm --filter docs exec astro check
-
   test:
     runs-on: ubuntu-latest
     # Runs `pnpm -r test` across all workspaces. Packages without their

@@ -1,5 +1,7 @@
 # CLAUDE.md
 
+> 📚 The full public documentation site has moved to its own repo: [Blue-Dots-Economy/bluedots-docs](https://github.com/Blue-Dots-Economy/bluedots-docs) (live at https://blue-dots-economy.github.io/bluedots-docs/). Edit docs content there, not here.
+
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
 ## Companion docs
@@ -11,7 +13,6 @@ Other load-bearing docs:
 - `readme.md` — quick start, useful commands
 - `docs/operations/integrating-dpgs.md` — the two-header service-auth model used by aggregator-dpg / voice-dpg
 - `docs/operations/migrations.md`, `docs/operations/secrets.md`
-- `apps/docs/src/content/docs/` — full architecture / vocabulary / schema-authoring docs
 
 ## Core mental model
 
@@ -49,7 +50,6 @@ pnpm + Turborepo monorepo. Workspace alias is `@dpg/*` → `packages/*/src` (not
 
 - `apps/api` — Fastify + Zod (`fastify-type-provider-zod`) + Drizzle ORM + better-auth + Redis. Entry: `src/server.ts`.
 - `apps/ui` — React 19 + Vite, schema-driven (renders forms/cards from network + item schemas).
-- `apps/docs` — Astro Starlight site.
 - `packages/config` — Zod env schemas (`secrets.ts`), allowed-origins lists, network-config loader. **All env vars must be added here**, not parsed ad-hoc.
 - `packages/database` — Drizzle setup, partition-aware query helpers.
 - `packages/schemas` — shared Zod schemas (API request bodies, admin, schema registry).
@@ -73,7 +73,7 @@ pnpm --filter api test:integration
 # Run one test file
 pnpm --filter api exec vitest run src/path/to/file.test.ts
 
-# Typecheck everything (api tsc, ui tsc, docs astro check, run sequentially)
+# Typecheck everything (api tsc + ui tsc, run sequentially)
 pnpm typecheck
 
 # Generate the Helm-bundled schema.sql + verify it matches checked-in copy
