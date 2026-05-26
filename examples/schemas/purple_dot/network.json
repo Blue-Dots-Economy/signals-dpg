@@ -6,6 +6,12 @@
     {
       "description": "Persons with disabilities seeking services, devices, training, or other support.",
       "minimum_cache_ttl_seconds": 300,
+      "status_rules": [
+        { "status": "new",      "when": { "item_age_days": { "lte": 7 } } },
+        { "status": "active",   "when": { "days_since_last": { "buckets": ["create", "accept"], "lte": 30 } } },
+        { "status": "at_risk",  "when": { "days_since_last": { "buckets": ["create", "accept", "reject"], "between": [31, 90] } } },
+        { "status": "inactive", "when": "default" }
+      ],
       "item_schemas": {
         "profile_1.0": {
           "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -195,10 +201,17 @@
     {
       "description": "Organisations and individuals providing services, devices, training, or other support for persons with disabilities.",
       "minimum_cache_ttl_seconds": 300,
+      "status_rules": [
+        { "status": "new",      "when": { "item_age_days": { "lte": 7 } } },
+        { "status": "active",   "when": { "days_since_last": { "buckets": ["create", "accept"], "lte": 30 } } },
+        { "status": "at_risk",  "when": { "days_since_last": { "buckets": ["create", "accept", "reject"], "between": [31, 90] } } },
+        { "status": "inactive", "when": "default" }
+      ],
       "item_schemas": {
         "profile_1.0": {
           "$schema": "https://json-schema.org/draft/2020-12/schema",
           "title": "PWD Service Provider Profile 1.0",
+          "display_name_field": "organisation_name",
           "type": "object",
           "additionalProperties": false,
           "required": [
@@ -480,9 +493,10 @@
             }
           },
           "metric_categories": {
-            "pending": ["created"],
-            "shortlisted": ["accepted"],
-            "rejected": ["rejected", "cancelled"]
+            "create": ["created"],
+            "accept": ["accepted"],
+            "reject": ["rejected"],
+            "cancel": ["cancelled"]
           },
           "reveals_pii_on_status": ["accepted"]
         },

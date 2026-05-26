@@ -13,11 +13,18 @@
     {
       "description": "People looking for jobs.",
       "minimum_cache_ttl_seconds": 300,
+      "status_rules": [
+        { "status": "new",      "when": { "item_age_days": { "lte": 7 } } },
+        { "status": "active",   "when": { "days_since_last": { "buckets": ["create", "accept"], "lte": 30 } } },
+        { "status": "at_risk",  "when": { "days_since_last": { "buckets": ["create", "accept", "reject"], "between": [31, 90] } } },
+        { "status": "inactive", "when": "default" }
+      ],
       "item_schemas": {
         "citizen_1.0": {
           "$schema": "https://json-schema.org/draft/2020-12/schema",
           "$id": "https://registry.example.com/schemas/inter-network-action/blue_dot/seeker/citizen_1.0.json",
           "title": "Citizen 1.0",
+          "display_name_field": "name",
           "type": "object",
           "additionalProperties": false,
           "required": [
@@ -154,10 +161,17 @@
     {
       "description": "Employers and recruiters posting jobs.",
       "minimum_cache_ttl_seconds": 300,
+      "status_rules": [
+        { "status": "new",      "when": { "item_age_days": { "lte": 7 } } },
+        { "status": "active",   "when": { "days_since_last": { "buckets": ["create", "accept"], "lte": 30 } } },
+        { "status": "at_risk",  "when": { "days_since_last": { "buckets": ["create", "accept", "reject"], "between": [31, 90] } } },
+        { "status": "inactive", "when": "default" }
+      ],
       "item_schemas": {
         "job_posting_1.0": {
           "$schema": "https://json-schema.org/draft/2020-12/schema",
           "title": "Job Posting 1.0",
+          "display_name_field": "company_name",
           "type": "object",
           "additionalProperties": false,
           "required": [
