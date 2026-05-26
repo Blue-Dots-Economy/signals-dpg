@@ -41,9 +41,13 @@ export function ActionHandler({ children, onActionSubmit }: ActionHandlerProps) 
     setLoading(true);
     try {
       await onActionSubmit?.(type, schema, {}, targetItemId);
-      toast.success(`${type} completed successfully`);
+      toast.success(`${type} completed`, {
+        description: 'Your request was submitted successfully.',
+      });
     } catch (err) {
-      toast.error(`Failed to ${type}`);
+      toast.error(`Couldn't complete ${type}`, {
+        description: 'Something went wrong while processing your request. Please try again.',
+      });
     } finally {
       setLoading(false);
     }
@@ -54,10 +58,14 @@ export function ActionHandler({ children, onActionSubmit }: ActionHandlerProps) 
     setLoading(true);
     try {
       await onActionSubmit?.(activeAction.type, activeAction.schema, formData, activeAction.targetItemId);
-      toast.success(`${activeAction.type} completed successfully`);
+      toast.success(`${activeAction.type} completed`, {
+        description: 'Your request was submitted successfully.',
+      });
       setActiveAction(null);
     } catch (err) {
-      toast.error(`Failed to ${activeAction.type}`);
+      toast.error(`Couldn't complete ${activeAction.type}`, {
+        description: 'Something went wrong while processing your request. Please try again.',
+      });
     } finally {
       setLoading(false);
     }

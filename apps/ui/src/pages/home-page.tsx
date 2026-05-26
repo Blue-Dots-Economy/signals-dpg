@@ -1,6 +1,6 @@
 import * as React from 'react';
 import type { RJSFSchema } from '@rjsf/utils';
-import { useSearchParams } from 'react-router-dom';
+import { useSearchParams, Link } from 'react-router-dom';
 import { toast } from 'sonner';
 import type {
   DotNetworkSchema,
@@ -11,13 +11,18 @@ import type {
 import { filterSchemaByPrivacy } from '@/engine/schema/schema-privacy';
 import { resolveNetworkRefs } from '@/engine/schema/resolve-schema';
 import { PageShell } from '@/components/layout/page-shell';
+import { ContentHeader } from '@/components/layout/content-header';
+import { GuestHero } from '@/components/layout/guest-hero';
 import { CardGrid } from '@/components/cards/card-grid';
 import { DomainCard } from '@/components/cards/domain-card';
+import { Skeleton } from '@/components/ui/skeleton';
+import { Button } from '@/components/ui/button';
 import { ActionHandler } from '@/components/actions/action-handler';
 import { MapView } from '@/components/map/map-container';
 import { MatchScoreCard } from '@/components/match-score';
 import '@/components/map/providers';
 import { fetchItems, performAction, type Item } from '@/lib/item-api';
+import { EmptyState } from '@/components/empty-state';
 import { fetchNetworkConfigs, fetchNetworkConfig, fetchNetworkItems } from '@/lib/network-api';
 import { useAuth } from '@/contexts/auth-context';
 import { apiConfig } from '@/lib/api-config';
@@ -466,9 +471,61 @@ export function HomePage() {
 
   if (!network) {
     return (
-      <div className="flex h-screen items-center justify-center">
-        <p className="text-muted-foreground">Loading network schemas...</p>
+      <div className="flex h-screen flex-col">
+        <div className="h-14 border-b bg-gradient-to-r from-background to-primary/5" />
+        <div className="flex flex-1 overflow-hidden">
+          <div className="hidden md:block w-64 shrink-0 border-r p-4 space-y-3">
+            <Skeleton className="h-8 w-3/4" />
+            <Skeleton className="h-4 w-full" />
+            <Skeleton className="h-4 w-2/3" />
+            <Skeleton className="h-4 w-full" />
+            <Skeleton className="h-4 w-1/2" />
+          </div>
+          <div className="flex-1 p-6 space-y-4">
+            <Skeleton className="h-7 w-40" />
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+              {Array.from({ length: 6 }).map((_, i) => (
+                <Skeleton key={i} className="h-40 rounded-lg" />
+              ))}
+            </div>
+          </div>
+        </div>
       </div>
+    );
+  }
+
+  const contentTitle = selectedDomain
+    ? selectedDomain.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())
+    : 'Browse All';
+  const contentDescription = selectedDomain
+    ? visibleDomains.find((d) => d.id === selectedDomain)?.description
+    : undefined;
+  const contentCount = selectedDomain
+    ? (filteredDomainItems[selectedDomain]?.length ?? 0)
+    : Object.values(filteredDomainItems).reduce((s, a) => s + a.length, 0);
+
+  function buildEmptyState(domainLabel: string) {
+    if (search) return <EmptyState message={`No results for "${search}"`} />;
+    // GuestHero already shows the sign-in CTA — keep this message simple
+    if (!user) return <EmptyState message="No listings in this network yet." />;
+    if (!myItem) {
+      return (
+        <EmptyState
+          heading="Create your profile"
+          message="Set up a profile to start connecting with others."
+          action={
+            <Button asChild size="sm">
+              <Link to={`/profile/new?network=${selectedNetworkId ?? ''}`}>Create profile</Link>
+            </Button>
+          }
+        />
+      );
+    }
+    return (
+      <EmptyState
+        heading="Nothing here yet"
+        message={`No ${domainLabel.toLowerCase()} listings found in this network.`}
+      />
     );
   }
 
@@ -490,21 +547,37 @@ export function HomePage() {
       viewMode={viewMode}
       onViewModeChange={handleViewModeChange}
     >
+      {!user ? (
+        <GuestHero />
+      ) : (
+        <ContentHeader
+          title={contentTitle}
+          description={contentDescription}
+          count={loading ? undefined : contentCount}
+          noProfilePrompt={{ show: !myItem, networkId: selectedNetworkId ?? '' }}
+        />
+      )}
       {viewMode === 'list' ? (
         <ActionHandler
           onActionSubmit={async (actionType, _actionSchema, formData, targetItemId) => {
             if (!myItem) {
-              toast.error('Create your profile first to connect');
+              toast.error('Profile required', {
+                description: 'You need to create your own profile before you can connect with others.',
+              });
               throw new Error('No source item');
             }
             if (!user) {
-              toast.error('You must be signed in to connect');
+              toast.error('Sign in to connect', {
+                description: 'You need to be signed in to send connection requests.',
+              });
               throw new Error('No user');
             }
             const allItems = Object.values(domainItems).flat();
             const targetItem = allItems.find((i) => i.item_id === targetItemId);
             if (!targetItem) {
-              toast.error('Could not find the target item');
+              toast.error('Profile not found', {
+                description: 'The profile you\'re trying to connect with is no longer available. Try refreshing the page.',
+              });
               throw new Error('Target item not found');
             }
 
@@ -541,7 +614,9 @@ export function HomePage() {
               },
               sourceItemInstanceUrl // Call the SOURCE instance (where myItem exists)
             );
-            toast.success(`${actionType.charAt(0).toUpperCase() + actionType.slice(1)} request sent!`);
+            toast.success(`${actionType.charAt(0).toUpperCase() + actionType.slice(1)} request sent!`, {
+              description: 'The other party will be notified and can accept or respond to your request.',
+            });
           }}
         >
           {(triggerAction) =>
@@ -552,20 +627,23 @@ export function HomePage() {
                   const domainSchema = domain.item_schemas
                     ? (Object.values(domain.item_schemas)[0] as import('@rjsf/utils').RJSFSchema)
                     : undefined;
-                  // Get all dynamic actions for this domain
                   const domainActions = getActionsForDomain(domain.id);
+                  const domainLabel = domain.id
+                    .replace(/_/g, ' ')
+                    .replace(/\b\w/g, (c) => c.toUpperCase());
                   return (filteredDomainItems[domain.id] ?? []).map((item) => ({
                     item,
                     schema: domainSchema,
                     domainActions,
                     domainDescription: domain.description,
+                    domainLabel,
                   }));
                 });
 
                 if (loading) {
                   return (
                     <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-                      {Array.from({ length: 3 }).map((_, i) => (
+                      {Array.from({ length: 6 }).map((_, i) => (
                         <DomainCard key={i} schema={{}} data={{}} loading />
                       ))}
                     </div>
@@ -573,28 +651,22 @@ export function HomePage() {
                 }
 
                 if (allFlatItems.length === 0) {
-                  return (
-                    <div className="flex items-center justify-center py-12">
-                      <p className="text-muted-foreground">
-                        {search ? `No results for "${search}"` : 'No items found'}
-                      </p>
-                    </div>
-                  );
+                  return buildEmptyState('All');
                 }
 
                 return (
                   <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-                    {allFlatItems.map(({ item, schema, domainActions, domainDescription }) => {
-                      // Find the full Item object from domainItems
+                    {allFlatItems.map(({ item, schema, domainActions, domainDescription, domainLabel }) => {
                       const fullItem = Object.values(domainItems)
                         .flat()
                         .find((i) => i.item_id === item.id);
-                      
+
                       return (
                         <MatchScoreCard
                           key={item.id}
                           schema={schema!}
                           schemaDescription={domainDescription}
+                          domainLabel={domainLabel}
                           data={item.data}
                           actions={domainActions}
                           onAction={(type, actionSchema) =>
@@ -633,11 +705,7 @@ export function HomePage() {
                   triggerAction(_type, actionSchema, itemId);
                 }}
                 loading={loading}
-                emptyMessage={
-                  search
-                    ? `No results for "${search}"`
-                    : `No ${currentDomainLabel ?? 'items'} found`
-                }
+                emptyState={buildEmptyState(currentDomainLabel ?? 'items')}
                 localItem={myItem}
                 networkId={network?.id}
                 selectedDomain={selectedDomain}

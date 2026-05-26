@@ -26,15 +26,137 @@
   --success: oklch(0.627 0.194 149.214);
   --warning: oklch(0.768 0.184 70.08);
   --info: oklch(0.588 0.158 241.966);
-  --sidebar: hsl(0 0% 98%);
-  --sidebar-foreground: hsl(240 5.3% 26.1%);
-  --sidebar-primary: hsl(240 5.9% 10%);
-  --sidebar-primary-foreground: hsl(0 0% 98%);
-  --sidebar-accent: hsl(240 4.8% 95.9%);
-  --sidebar-accent-foreground: hsl(240 5.9% 10%);
-  --sidebar-border: hsl(220 13% 91%);
-  --sidebar-ring: hsl(217.2 91.2% 59.8%);
+  --sidebar: oklch(0.985 0 0);
+  --sidebar-foreground: oklch(0.30 0 0);
+  --sidebar-primary: oklch(0.205 0 0);
+  --sidebar-primary-foreground: oklch(0.985 0 0);
+  --sidebar-accent: oklch(0.94 0 0);
+  --sidebar-accent-foreground: oklch(0.205 0 0);
+  --sidebar-border: oklch(0.92 0 0);
+  --sidebar-ring: oklch(0.65 0.15 250);
+  /* brand tokens — overridden per network below */
+  --brand-hero-from: #0b1530;
+  --brand-hero-to: #1a2554;
+  --brand-hero-highlight: #7da8ff;
+  --brand-hero-glow: #5b8def;
+  --brand-stat-accent: #7da8ff;
+  --brand-cta: oklch(0.55 0.22 285);
+  --brand-cta-foreground: #ffffff;
 }
+
+/* ─── Per-network static token blocks (Layer 1 — applied on first CSS paint) ─── */
+
+:root[data-network="blue_dot"] {
+  --primary: oklch(0.55 0.20 250);
+  --primary-foreground: oklch(0.985 0 0);
+  --secondary: oklch(0.94 0.04 250);
+  --secondary-foreground: oklch(0.20 0 0);
+  --accent: oklch(0.94 0.04 250);
+  --accent-foreground: oklch(0.20 0 0);
+  --ring: oklch(0.65 0.15 250);
+  --sidebar-primary: oklch(0.55 0.20 250);
+  --sidebar-primary-foreground: oklch(0.985 0 0);
+  --sidebar-accent: oklch(0.96 0.03 250);
+  --sidebar-accent-foreground: oklch(0.25 0 0);
+  --sidebar-ring: oklch(0.65 0.15 250);
+  --brand-hero-from: #0b1530;
+  --brand-hero-to: #1a2554;
+  --brand-hero-highlight: #7da8ff;
+  --brand-hero-glow: #5b8def;
+  --brand-stat-accent: #7da8ff;
+  --brand-cta: oklch(0.55 0.22 285);
+  --brand-cta-foreground: #ffffff;
+}
+
+:root[data-network="purple_dot"] {
+  --primary: oklch(0.55 0.22 300);
+  --primary-foreground: oklch(0.985 0 0);
+  --secondary: oklch(0.94 0.04 300);
+  --secondary-foreground: oklch(0.20 0 0);
+  --accent: oklch(0.94 0.04 300);
+  --accent-foreground: oklch(0.20 0 0);
+  --ring: oklch(0.65 0.15 300);
+  --sidebar-primary: oklch(0.55 0.22 300);
+  --sidebar-primary-foreground: oklch(0.985 0 0);
+  --sidebar-accent: oklch(0.96 0.03 300);
+  --sidebar-accent-foreground: oklch(0.25 0 0);
+  --sidebar-ring: oklch(0.65 0.15 300);
+  --brand-hero-from: #1a0b30;
+  --brand-hero-to: #2d1354;
+  --brand-hero-highlight: #c4a8ff;
+  --brand-hero-glow: #a87bef;
+  --brand-stat-accent: #c4a8ff;
+  --brand-cta: oklch(0.55 0.22 300);
+  --brand-cta-foreground: #ffffff;
+}
+
+:root[data-network="yellow_dot"] {
+  --primary: oklch(0.68 0.18 80);
+  --primary-foreground: oklch(0.12 0 0);
+  --secondary: oklch(0.94 0.05 80);
+  --secondary-foreground: oklch(0.20 0 0);
+  --accent: oklch(0.94 0.05 80);
+  --accent-foreground: oklch(0.20 0 0);
+  --ring: oklch(0.60 0.15 80);
+  --sidebar-primary: oklch(0.68 0.18 80);
+  --sidebar-primary-foreground: oklch(0.12 0 0);
+  --sidebar-accent: oklch(0.95 0.04 80);
+  --sidebar-accent-foreground: oklch(0.25 0 0);
+  --sidebar-ring: oklch(0.60 0.15 80);
+  --brand-hero-from: #1e1300;
+  --brand-hero-to: #2e1f00;
+  --brand-hero-highlight: #ffd080;
+  --brand-hero-glow: #f5a623;
+  --brand-stat-accent: #ffd080;
+  --brand-cta: oklch(0.68 0.18 80);
+  --brand-cta-foreground: oklch(0.12 0 0);
+}
+
+:root[data-network="pink_dot"] {
+  --primary: oklch(0.60 0.22 350);
+  --primary-foreground: oklch(0.985 0 0);
+  --secondary: oklch(0.95 0.04 350);
+  --secondary-foreground: oklch(0.20 0 0);
+  --accent: oklch(0.95 0.04 350);
+  --accent-foreground: oklch(0.20 0 0);
+  --ring: oklch(0.70 0.15 350);
+  --sidebar-primary: oklch(0.60 0.22 350);
+  --sidebar-primary-foreground: oklch(0.985 0 0);
+  --sidebar-accent: oklch(0.96 0.03 350);
+  --sidebar-accent-foreground: oklch(0.25 0 0);
+  --sidebar-ring: oklch(0.70 0.15 350);
+  --brand-hero-from: #1f0b14;
+  --brand-hero-to: #3d1528;
+  --brand-hero-highlight: #ffaac8;
+  --brand-hero-glow: #ef4d7a;
+  --brand-stat-accent: #ffaac8;
+  --brand-cta: oklch(0.60 0.22 350);
+  --brand-cta-foreground: #ffffff;
+}
+
+:root[data-network="green_dot"] {
+  --primary: oklch(0.55 0.18 155);
+  --primary-foreground: oklch(0.985 0 0);
+  --secondary: oklch(0.94 0.04 155);
+  --secondary-foreground: oklch(0.20 0 0);
+  --accent: oklch(0.94 0.04 155);
+  --accent-foreground: oklch(0.20 0 0);
+  --ring: oklch(0.65 0.13 155);
+  --sidebar-primary: oklch(0.55 0.18 155);
+  --sidebar-primary-foreground: oklch(0.985 0 0);
+  --sidebar-accent: oklch(0.96 0.03 155);
+  --sidebar-accent-foreground: oklch(0.25 0 0);
+  --sidebar-ring: oklch(0.65 0.13 155);
+  --brand-hero-from: #071a0e;
+  --brand-hero-to: #0d2d18;
+  --brand-hero-highlight: #86efb0;
+  --brand-hero-glow: #22c55e;
+  --brand-stat-accent: #86efb0;
+  --brand-cta: oklch(0.55 0.18 155);
+  --brand-cta-foreground: #ffffff;
+}
+
+/* ─── Tailwind @theme bridge ─── */
 
 @theme inline {
   --color-background: var(--background);
@@ -82,15 +204,75 @@
   }
 }
 
+/* ─── Brand utility classes (hero + CTA) ─── */
+
+.bg-brand-hero {
+  background: linear-gradient(135deg, var(--brand-hero-from), var(--brand-hero-to));
+}
+
+.text-brand-hero-highlight {
+  color: var(--brand-hero-highlight);
+}
+
+.bg-brand-cta {
+  background-color: var(--brand-cta);
+  color: var(--brand-cta-foreground);
+}
+
+.bg-brand-cta:hover {
+  filter: brightness(1.08);
+}
+
+.text-brand-stat {
+  color: var(--brand-stat-accent);
+}
+
+.fill-brand-glow {
+  fill: var(--brand-hero-glow);
+}
+
+.stroke-brand-glow {
+  stroke: var(--brand-hero-glow);
+}
+
+/* ─── Constellation keyframe pulse ─── */
+
+@keyframes constellation-pulse {
+  0%, 100% { opacity: 0.7; r: 3; }
+  50% { opacity: 1; r: 4.5; }
+}
+
+@keyframes constellation-pulse-slow {
+  0%, 100% { opacity: 0.4; r: 2; }
+  50% { opacity: 0.8; r: 3; }
+}
+
+.constellation-dot-pulse {
+  animation: constellation-pulse 3s ease-in-out infinite;
+}
+
+.constellation-dot-pulse-slow {
+  animation: constellation-pulse-slow 4.5s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .constellation-dot-pulse,
+  .constellation-dot-pulse-slow {
+    animation: none;
+  }
+}
+
+/* ─── Dark mode sidebar (dormant — toggle not yet shipped) ─── */
+
 .dark {
-  --sidebar: hsl(240 5.9% 10%);
-  --sidebar-foreground: hsl(240 4.8% 95.9%);
-  --sidebar-primary: hsl(224.3 76.3% 48%);
-  --sidebar-primary-foreground: hsl(0 0% 100%);
-  --sidebar-accent: hsl(240 3.7% 15.9%);
-  --sidebar-accent-foreground: hsl(240 4.8% 95.9%);
-  --sidebar-border: hsl(240 3.7% 15.9%);
-  --sidebar-ring: hsl(217.2 91.2% 59.8%);
+  --sidebar: oklch(0.18 0 0);
+  --sidebar-foreground: oklch(0.92 0 0);
+  --sidebar-primary: oklch(0.55 0.20 250);
+  --sidebar-primary-foreground: oklch(0.985 0 0);
+  --sidebar-accent: oklch(0.24 0 0);
+  --sidebar-accent-foreground: oklch(0.92 0 0);
+  --sidebar-border: oklch(0.24 0 0);
+  --sidebar-ring: oklch(0.65 0.15 250);
 }
 
 /*
@@ -119,6 +301,18 @@
  */
 [data-slot="command"] {
   min-width: 16rem;
+}
+
+/*
+ * Sonner toasts default to align-items: center, which vertically centers the
+ * icon between the title and description. Override so the icon aligns with
+ * the title line instead.
+ */
+[data-sonner-toast] {
+  align-items: flex-start !important;
+}
+[data-sonner-toast] [data-icon] {
+  margin-top: 2px;
 }
 
 /*

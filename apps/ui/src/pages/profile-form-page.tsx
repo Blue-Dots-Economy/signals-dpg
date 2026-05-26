@@ -1,18 +1,17 @@
 import * as React from 'react';
 import { useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { toast } from 'sonner';
-import { ArrowLeft, GraduationCap, UserCheck, Building2, Wallet, Trash2 } from 'lucide-react';
+import { ArrowLeft, GraduationCap, UserCheck, Building2, Wallet, Trash2, Accessibility, HandHeart, OctagonX } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import type { RJSFSchema } from '@rjsf/utils';
 import { Button } from '@/components/ui/button';
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from '@/components/ui/card';
+import { Card, CardContent } from '@/components/ui/card';
 import { SchemaForm } from '@/components/forms/schema-form';
+import { Alert, AlertTitle, AlertDescription } from '@/components/ui/alert';
+import { AuthShell } from '@/components/layout/auth-shell';
+import { NetworkConstellation } from '@/components/layout/network-constellation';
+import { RoleCard } from '@/components/cards/role-card';
+import { useNetworkTheme } from '@/theme/theme-provider';
 import { WalletImportModal } from '@/components/wallet/wallet-import-modal';
 import { resolveNetworkRefs } from '@/engine/schema/resolve-schema';
 import type { DotNetworkSchema } from '@/engine/types';
@@ -40,10 +39,16 @@ function parseNetworkIds(networkEnv: string | undefined): string[] {
 }
 
 const domainIcons: Record<string, LucideIcon> = {
+  // yellow_dot / education network
   student_profile: GraduationCap,
   learner_profile: GraduationCap,
+  student: GraduationCap,
   tutor_counsellor_profile: UserCheck,
+  tutor_counsellor: UserCheck,
   coaching_center: Building2,
+  // purple_dot / disability services network
+  seeker: Accessibility,
+  provider: HandHeart,
 };
 
 export function ProfileFormPage() {
@@ -52,6 +57,7 @@ export function ProfileFormPage() {
   const { id } = useParams();
   const [searchParams] = useSearchParams();
   const { user } = useAuth();
+  const { theme } = useNetworkTheme();
   const isEdit = !!id;
 
   const [selectedDomain, setSelectedDomain] = React.useState<string | null>(null);
@@ -63,6 +69,7 @@ export function ProfileFormPage() {
   const [isLoading, setIsLoading] = React.useState(isEdit);
   const [availableNetworkIds, setAvailableNetworkIds] = React.useState<string[] | null>(null);
   const [isWalletModalOpen, setIsWalletModalOpen] = React.useState(false);
+  const [formError, setFormError] = React.useState<{ title: string; description?: string } | null>(null);
 
   // Get network from URL query param, fallback to env config
   const configuredNetworkIds = React.useMemo(
@@ -158,13 +165,17 @@ export function ProfileFormPage() {
         }
 
         if (!cancelled && !foundItem) {
-          toast.error('Profile not found on selected network');
+          toast.error('Profile not found', {
+            description: 'This profile doesn\'t exist on the selected network. You may have followed an outdated link.',
+          });
           navigate(`/?network=${resolvedNetwork.id}`);
         }
       } catch (err) {
         if (!cancelled) {
           console.error('Failed to load profile:', err);
-          toast.error('Failed to load profile');
+          toast.error('Couldn\'t load profile', {
+            description: 'There was a problem fetching your profile data. Please check your connection and try again.',
+          });
         }
       } finally {
         if (!cancelled) setIsLoading(false);
@@ -194,6 +205,9 @@ export function ProfileFormPage() {
   }, [selectedDomain, domains]);
 
   const selectedDomainInfo = domains.find((d) => d.id === selectedDomain);
+  const DomainIcon = domainIcons[selectedDomain ?? ''] ?? GraduationCap;
+  const roleLabel = (selectedDomain ?? '').replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
+
   const canImportCredentials = React.useMemo(
     () => Boolean(profileSchema) && getConfiguredWalletProviders().length > 0,
     [profileSchema]
@@ -223,7 +237,9 @@ export function ProfileFormPage() {
   const handleImportedCredentials = React.useCallback(
     (result: WalletImportResult) => {
       if (!profileSchema) {
-        toast.error('No active profile schema available for import');
+        toast.error('No profile schema available', {
+          description: 'Select a role first before importing credentials — the form needs to be ready to receive data.',
+        });
         return;
       }
 
@@ -258,6 +274,7 @@ export function ProfileFormPage() {
     if (!selectedDomain || !network) return;
 
     setIsSubmitting(true);
+    setFormError(null);
 
     try {
       // Geocode from domain-specific pincode field
@@ -275,7 +292,9 @@ export function ProfileFormPage() {
         }
 
         await updateItem(existingItem.item_id, updatePayload);
-        toast.success('Profile updated!');
+        toast.success('Profile updated!', {
+          description: 'Your changes have been saved and are now visible on the network.',
+        });
       } else {
         // Create new profile
         const createPayload: CreateItemPayload = {
@@ -299,8 +318,10 @@ export function ProfileFormPage() {
           createPayload.item_longitude = coordinates.lng;
         }
 
-        const result = await createItem(createPayload);
-        toast.success('Profile created!', { description: `ID: ${result.item_id}` });
+        await createItem(createPayload);
+        toast.success('Profile created!', {
+          description: 'You\'re now visible on the network. Others can discover and connect with you.',
+        });
       }
 
       navigate(`/?network=${resolvedNetwork?.id ?? ''}`);
@@ -312,8 +333,9 @@ export function ProfileFormPage() {
       const error = axiosError?.response?.data;
 
       if (status === 403 && error?.error === 'UNSERVED_DOMAIN_BINDING') {
-        toast.error('Domain not served by this API instance', {
-          description: error.message,
+        setFormError({
+          title: 'Role not available on this instance',
+          description: error?.message ?? 'This profile type isn\'t supported here. Try a different role or contact your network administrator.',
         });
       } else if (status === 401) {
         const redirectTo = `${location.pathname}${location.search}`;
@@ -322,12 +344,14 @@ export function ProfileFormPage() {
         });
         navigate(`/auth/login?redirect=${encodeURIComponent(redirectTo)}`);
       } else if (status === 409) {
-        toast.error('Profile already exists', {
-          description: 'A profile with this combination already exists',
+        setFormError({
+          title: 'Profile already exists',
+          description: 'You already have a profile for this role. Return to the home page to view or edit your existing profile.',
         });
       } else {
-        toast.error(isEdit ? 'Failed to update profile' : 'Failed to create profile', {
-          description: error?.message ?? 'Something went wrong',
+        setFormError({
+          title: isEdit ? 'Couldn\'t update your profile' : 'Couldn\'t create your profile',
+          description: error?.message ?? 'An unexpected error occurred. Please try again — if the problem persists, contact support.',
         });
       }
     } finally {
@@ -342,7 +366,9 @@ export function ProfileFormPage() {
     setIsDeleting(true);
     try {
       await deleteItem(existingItem.item_id);
-      toast.success('Profile deleted');
+      toast.success('Profile deleted', {
+        description: 'Your profile has been permanently removed from the network.',
+      });
       navigate(`/?network=${resolvedNetwork?.id ?? ''}`);
     } catch (err: unknown) {
       const axiosError = err as { response?: { status?: number; data?: { error?: string; message?: string } } };
@@ -353,7 +379,9 @@ export function ProfileFormPage() {
           description: 'It may have already been deleted, or it does not belong to you.',
         });
       } else if (status === 401) {
-        toast.error('Please sign in again');
+        toast.error('Session expired', {
+          description: 'Please sign in again to continue managing your profile.',
+        });
       } else {
         toast.error('Failed to delete profile', {
           description: error?.message ?? 'Something went wrong',
@@ -393,84 +421,102 @@ export function ProfileFormPage() {
   // Domain selection step
   if (!selectedDomain && !isEdit) {
     return (
-      <div className="min-h-screen bg-background p-4 sm:p-6">
-        <div className="mx-auto max-w-2xl">
-          <Button
-            variant="ghost"
-            className="mb-4 gap-2"
-            onClick={() => navigate(`/?network=${targetNetworkId}`)}
-          >
-            <ArrowLeft className="h-4 w-4" />
-            Back
-          </Button>
-          <div className="mb-6">
-            <h1 className="text-2xl font-bold">Create Profile</h1>
-            <p className="text-muted-foreground mt-1">
-              Choose your role on the network
-            </p>
-          </div>
-          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-            {domains.map((domain) => {
-              const Icon = domainIcons[domain.id] ?? GraduationCap;
-              return (
-                <Card
-                  key={domain.id}
-                  className="cursor-pointer hover:shadow-md transition-shadow"
-                  onClick={() => setSelectedDomain(domain.id)}
-                >
-                  <CardHeader>
-                    <div className="mb-2 flex h-10 w-10 items-center justify-center rounded-lg bg-primary/10">
-                      <Icon className="h-5 w-5 text-primary" />
-                    </div>
-                    <CardTitle className="text-lg capitalize">
-                      {domain.id.replace(/_/g, ' ')}
-                    </CardTitle>
-                    <CardDescription>{domain.description}</CardDescription>
-                  </CardHeader>
-                </Card>
-              );
-            })}
-          </div>
+      <AuthShell>
+        <button
+          type="button"
+          onClick={() => navigate(`/?network=${targetNetworkId}`)}
+          className="mb-6 flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors"
+        >
+          <ArrowLeft className="h-4 w-4" />
+          Back
+        </button>
+        <div className="mb-6">
+          <p className="mb-2 inline-flex items-center rounded-full bg-primary/10 px-2.5 py-0.5 text-[10px] font-semibold uppercase tracking-[0.18em] text-primary">
+            {theme.portalLabel}
+          </p>
+          <h2 className="text-2xl font-bold">Create Profile</h2>
+          <p className="text-muted-foreground mt-1">Choose your role on the network</p>
+          <p className="text-sm text-muted-foreground/80 mt-2">{theme.subline}</p>
         </div>
-      </div>
+        <div className="grid gap-4 sm:grid-cols-2">
+          {domains.map((domain, idx) => {
+            const Icon = domainIcons[domain.id] ?? GraduationCap;
+            const label = domain.id
+              .replace(/_/g, ' ')
+              .replace(/\b\w/g, (c) => c.toUpperCase());
+            return (
+              <RoleCard
+                key={domain.id}
+                icon={Icon}
+                title={label}
+                description={domain.description ?? ''}
+                onClick={() => setSelectedDomain(domain.id)}
+                variant={idx % 2 === 0 ? 'primary' : 'secondary'}
+              />
+            );
+          })}
+        </div>
+      </AuthShell>
     );
   }
 
   return (
-    <div className="min-h-screen bg-background p-4 sm:p-6">
+    <div className="min-h-screen bg-gradient-to-b from-[var(--brand-hero-to)]/8 to-background p-4 sm:p-6">
       <div className="mx-auto max-w-2xl">
-        <Button
-          variant="ghost"
-          className="mb-4 gap-2"
-          onClick={() => (selectedDomain && !isEdit ? setSelectedDomain(null) : navigate(`/?network=${resolvedNetwork?.id ?? ''}`))}
-        >
-          <ArrowLeft className="h-4 w-4" />
-          {selectedDomain && !isEdit ? 'Choose different role' : 'Back'}
-        </Button>
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-xl capitalize">
-              {isEdit
-                ? 'Edit Profile'
-                : `Create ${
-                    selectedDomainInfo?.id
-                      ?.replace(/_/g, ' ')
-                      .replace(/\b\w/g, (c) => c.toUpperCase()) ?? ''
-                  } Profile`}
-            </CardTitle>
-            <CardDescription>
-              {selectedDomainInfo?.description ?? 'Fill in your profile details'}
-            </CardDescription>
-            {canImportCredentials ? (
-              <div>
-                <Button variant="outline" className="mt-2" onClick={() => setIsWalletModalOpen(true)}>
+        {/* Branded hero strip — sits flush above the form Card */}
+        <div className="relative overflow-hidden rounded-t-xl bg-brand-hero">
+          <div className="pointer-events-none absolute inset-0 opacity-15">
+            <NetworkConstellation className="h-full w-full" />
+          </div>
+          <div className="pointer-events-none absolute inset-0 bg-gradient-to-r from-black/50 via-black/20 to-transparent" />
+          <div className="relative z-10 px-5 pt-4 sm:px-6">
+            <button
+              type="button"
+              onClick={() => (selectedDomain && !isEdit ? setSelectedDomain(null) : navigate(`/?network=${resolvedNetwork?.id ?? ''}`))}
+              className="flex items-center gap-1.5 text-sm text-white/70 hover:text-white transition-colors"
+            >
+              <ArrowLeft className="h-4 w-4" />
+              {selectedDomain && !isEdit ? 'Choose different role' : 'Back'}
+            </button>
+          </div>
+          <div className="relative z-10 flex items-center gap-4 px-5 pb-6 pt-3 sm:px-6">
+            <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-white/20 backdrop-blur-sm ring-1 ring-white/20">
+              <DomainIcon className="h-6 w-6 text-white" />
+            </div>
+            <div className="min-w-0">
+              <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-white/50">
+                {theme.portalLabel}
+              </p>
+              <h2 className="text-xl font-bold text-white leading-tight truncate">
+                {isEdit ? `Edit ${roleLabel} Profile` : `Create ${roleLabel} Profile`}
+              </h2>
+              <p className="mt-0.5 text-xs text-white/70 leading-snug">
+                {selectedDomainInfo?.description ?? 'Fill in your profile details'}
+              </p>
+            </div>
+          </div>
+        </div>
+
+        {/* Form card — connects flush to the hero strip */}
+        <Card className="rounded-t-none border-t-0 shadow-lg">
+          <CardContent className="pt-6">
+            {canImportCredentials && (
+              <div className="mb-4">
+                <Button variant="outline" size="sm" onClick={() => setIsWalletModalOpen(true)}>
                   <Wallet className="h-4 w-4" />
                   Import Credentials
                 </Button>
               </div>
-            ) : null}
-          </CardHeader>
-          <CardContent>
+            )}
+
+            {formError && (
+              <Alert variant="destructive" className="mb-4">
+                <OctagonX className="h-4 w-4" />
+                <AlertTitle>{formError.title}</AlertTitle>
+                {formError.description && <AlertDescription>{formError.description}</AlertDescription>}
+              </Alert>
+            )}
+
             {profileSchema && (
               <SchemaForm
                 schema={profileSchema}
@@ -478,16 +524,18 @@ export function ProfileFormPage() {
                 disabled={isSubmitting || isDeleting}
                 formData={initialData ?? undefined}
                 submitButtonText={isEdit ? 'Update' : undefined}
+                domainId={selectedDomain ?? undefined}
               />
             )}
             {isEdit && existingItem && (
-              <div className="mt-6 pt-4 border-t flex items-center justify-between">
+              <div className="mt-6 pt-4 border-t flex items-center justify-between gap-4">
                 <p className="text-xs text-muted-foreground">
                   Removing the profile is permanent — applications and matches against this profile will no longer be visible.
                 </p>
                 <Button
                   variant="destructive"
-                  className="gap-2"
+                  size="sm"
+                  className="shrink-0 gap-2"
                   onClick={handleDelete}
                   disabled={isSubmitting || isDeleting}
                 >
@@ -498,6 +546,7 @@ export function ProfileFormPage() {
             )}
           </CardContent>
         </Card>
+
         <WalletImportModal
           open={isWalletModalOpen}
           onOpenChange={setIsWalletModalOpen}

@@ -1,10 +1,9 @@
 import { useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { Loader2, ArrowLeft } from 'lucide-react';
-import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Label } from '@/components/ui/label';
+import { AuthShell } from '@/components/layout/auth-shell';
 import { checkUser, requestOtp, type AuthIdentifier } from '@/lib/auth-api';
 import { toast } from 'sonner';
 
@@ -25,8 +24,7 @@ export function LoginPage() {
   const contactValue = mode === 'email' ? email : phoneNumber;
   const contactLabel = mode === 'email' ? 'email address' : 'phone number';
 
-  const handleModeChange = (value: string) => {
-    if (value !== 'phone' && value !== 'email') return;
+  const handleModeChange = (value: AuthMode) => {
     setMode(value);
     setUserExists(null);
   };
@@ -49,7 +47,9 @@ export function LoginPage() {
       } else {
         if (!name.trim()) {
           setIsLoading(false);
-          toast.info('Please enter your name to create an account');
+          toast.info('One more step', {
+            description: 'Enter your name below to finish setting up your account.',
+          });
           return;
         }
         await requestOtp(identifier);
@@ -58,99 +58,128 @@ export function LoginPage() {
         });
       }
     } catch {
-      toast.error('Failed to send OTP. Please try again.');
+      toast.error('Couldn\'t send verification code', {
+        description: 'Check your connection and make sure the number or email is correct, then try again.',
+      });
     } finally {
       setIsLoading(false);
     }
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-background p-4">
-      <Card className="w-full max-w-md">
-        <CardHeader className="space-y-1">
-          <Button
-            variant="ghost"
-            size="sm"
-            className="gap-2 w-fit -ml-2"
-            onClick={() => navigate('/')}
-          >
-            <ArrowLeft className="h-4 w-4" />
-            Back
-          </Button>
-          <CardTitle className="text-2xl">
-            {userExists === null
-              ? 'Sign in or create account'
-              : userExists
-                ? 'Welcome back'
-                : 'Create your account'}
-          </CardTitle>
-          <CardDescription>
-            {userExists === null
-              ? `Enter your ${contactLabel} to continue`
-              : userExists
-                ? `Enter your ${contactLabel} to sign in`
-                : `Enter your ${contactLabel} and name to get started`}
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <form onSubmit={handleSubmit} className="space-y-4">
-            <Tabs value={mode} onValueChange={handleModeChange} className="w-full">
-              <TabsList className="grid w-full grid-cols-2">
-                <TabsTrigger value="phone">Phone</TabsTrigger>
-                <TabsTrigger value="email">Email</TabsTrigger>
-              </TabsList>
-            </Tabs>
+    <AuthShell>
+      {/* Back link */}
+      <button
+        type="button"
+        onClick={() => navigate('/')}
+        className="mb-6 flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors"
+      >
+        <ArrowLeft className="h-4 w-4" />
+        Back
+      </button>
 
-            <div className="space-y-2">
-              {mode === 'phone' ? (
-                <Input
-                  type="tel"
-                  placeholder="+911234567890"
-                  value={phoneNumber}
-                  onChange={(e) => setPhoneNumber(e.target.value)}
-                  disabled={isLoading}
-                  required
-                />
-              ) : (
-                <Input
-                  type="email"
-                  placeholder="you@example.com"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  disabled={isLoading}
-                  required
-                />
-              )}
-            </div>
+      {/* Heading */}
+      <div className="mb-6">
+        <h2 className="text-2xl font-bold text-foreground">
+          {userExists === null
+            ? 'Sign in'
+            : userExists
+              ? 'Welcome back'
+              : 'Create your account'}
+        </h2>
+        <p className="mt-1 text-sm text-muted-foreground">
+          {userExists === null
+            ? 'Continue with email or mobile to receive a verification code'
+            : userExists
+              ? `Enter your ${contactLabel} to sign in`
+              : `Enter your ${contactLabel} and name to get started`}
+        </p>
+      </div>
 
-            {userExists === false && (
-              <div className="space-y-2">
-                <Input
-                  type="text"
-                  placeholder="Your name"
-                  value={name}
-                  onChange={(e) => setName(e.target.value)}
-                  disabled={isLoading}
-                  required
-                />
-              </div>
-            )}
+      <form onSubmit={handleSubmit} className="space-y-4">
+        {/* Phone / Email pill toggle */}
+        <div className="flex rounded-full border border-border bg-muted p-1 text-sm">
+          {(['phone', 'email'] as AuthMode[]).map((m) => (
+            <button
+              key={m}
+              type="button"
+              onClick={() => handleModeChange(m)}
+              className={[
+                'flex-1 rounded-full py-1.5 font-medium transition-colors capitalize',
+                mode === m
+                  ? 'bg-background text-foreground shadow-sm'
+                  : 'text-muted-foreground hover:text-foreground',
+              ].join(' ')}
+            >
+              {m}
+            </button>
+          ))}
+        </div>
 
-            {userExists !== null && userExists === false && (
-              <p className="text-sm text-muted-foreground">
-                {mode === 'email'
-                  ? "We'll send you an OTP to verify your email address."
-                  : "We'll send you an OTP to verify your phone number."}
-              </p>
-            )}
+        {/* Contact input */}
+        <div className="space-y-1.5">
+          <Label htmlFor="contact" className="text-sm font-medium">
+            {mode === 'email' ? 'Email or mobile number' : 'Mobile number'}
+          </Label>
+          {mode === 'phone' ? (
+            <Input
+              id="contact"
+              type="tel"
+              placeholder="+91 98765 43210"
+              value={phoneNumber}
+              onChange={(e) => setPhoneNumber(e.target.value)}
+              disabled={isLoading}
+              required
+              className="h-11"
+            />
+          ) : (
+            <Input
+              id="contact"
+              type="email"
+              placeholder="name@example.in"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              disabled={isLoading}
+              required
+              className="h-11"
+            />
+          )}
+        </div>
 
-            <Button type="submit" className="w-full" disabled={isLoading}>
-              {isLoading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-              {userExists === null ? 'Continue' : 'Send OTP'}
-            </Button>
-          </form>
-        </CardContent>
-      </Card>
-    </div>
+        {/* Name — only shown when creating account */}
+        {userExists === false && (
+          <div className="space-y-1.5">
+            <Label htmlFor="name" className="text-sm font-medium">
+              Your name
+            </Label>
+            <Input
+              id="name"
+              type="text"
+              placeholder="Full name"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              disabled={isLoading}
+              required
+              className="h-11"
+            />
+            <p className="text-xs text-muted-foreground">
+              {mode === 'email'
+                ? "We'll send a one-time code to verify your email."
+                : "We'll send a one-time code to verify your number."}
+            </p>
+          </div>
+        )}
+
+        {/* CTA */}
+        <button
+          type="submit"
+          disabled={isLoading}
+          className="flex w-full items-center justify-center gap-2 rounded-md py-3 text-sm font-semibold transition-all disabled:opacity-60 bg-brand-cta h-11"
+        >
+          {isLoading && <Loader2 className="h-4 w-4 animate-spin" />}
+          {userExists === null ? 'Continue' : 'Send OTP'}
+        </button>
+      </form>
+    </AuthShell>
   );
 }

@@ -64,7 +64,7 @@ export function ActionList({
             <Inbox className="h-4 w-4" />
             <span>Received</span>
             {receivedActions.length > 0 && (
-              <span className="ml-1 text-xs bg-muted rounded-full px-2 py-0.5">
+              <span className="ml-1 text-xs bg-primary/10 text-primary rounded-full px-2 py-0.5 font-medium">
                 {receivedActions.length}
               </span>
             )}

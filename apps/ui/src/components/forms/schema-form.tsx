@@ -1,7 +1,8 @@
 import Form from '@rjsf/shadcn';
 import validator from '@rjsf/validator-ajv8';
-import type { RJSFSchema, UiSchema, RegistryWidgetsType } from '@rjsf/utils';
+import type { RJSFSchema, UiSchema, RegistryWidgetsType, ObjectFieldTemplateProps } from '@rjsf/utils';
 import { DatePickerWidget } from './custom-widgets/date-picker-widget';
+import { formLayouts } from '@/theme/form-layouts';
 
 interface SchemaFormProps {
   schema: RJSFSchema;
@@ -14,6 +15,116 @@ interface SchemaFormProps {
   submitButtonText?: string;
   id?: string;
   hideSubmit?: boolean;
+  domainId?: string;
+}
+
+// Root-only ObjectFieldTemplate that renders section headers + two-column grid.
+// For nested objects (non-root) it falls back to the default RJSF column layout.
+function SectionedObjectFieldTemplate(domainId: string) {
+  const layout = formLayouts[domainId];
+
+  return function ObjectFieldTemplate(props: ObjectFieldTemplateProps) {
+    if (!layout) {
+      // No layout config — render properties in a simple column
+      return (
+        <div className="space-y-4">
+          {props.properties.map((element) => (
+            <div key={element.name}>{element.content}</div>
+          ))}
+        </div>
+      );
+    }
+
+    // Build a lookup of name → element
+    const elementMap = new Map(props.properties.map((el) => [el.name, el]));
+    const rendered = new Set<string>();
+
+    // Track which section is being rendered so we can number them and show
+    // the divider only between sections (not above the first one).
+    let visibleSectionIndex = 0;
+
+    return (
+      <div className="space-y-10">
+        {layout.sections.map((section) => {
+          const sectionElements = section.fields
+            .map((f) => elementMap.get(f))
+            .filter((el): el is NonNullable<typeof el> => !!el);
+
+          if (sectionElements.length === 0) return null;
+
+          // Group into rows: pairs from twoColumn list go side-by-side, rest go full-width
+          const rows: Array<typeof sectionElements> = [];
+          let i = 0;
+          while (i < sectionElements.length) {
+            const curr = sectionElements[i];
+            const next = sectionElements[i + 1];
+            const currIsTwo = layout.twoColumn.includes(curr.name);
+            const nextIsTwo = next && layout.twoColumn.includes(next.name);
+            if (currIsTwo && nextIsTwo) {
+              rows.push([curr, next]);
+              i += 2;
+            } else {
+              rows.push([curr]);
+              i += 1;
+            }
+            rendered.add(curr.name);
+            if (next && currIsTwo && nextIsTwo) rendered.add(next.name);
+          }
+
+          const sectionNum = ++visibleSectionIndex;
+
+          return (
+            <section key={section.title}>
+              {/* Section header: numbered badge + title + accent bar + divider line below */}
+              <div className="mb-5">
+                <div className="flex items-center gap-3">
+                  <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-primary/10 text-xs font-bold text-primary">
+                    {sectionNum}
+                  </div>
+                  <h3 className="text-base font-semibold text-foreground tracking-tight">{section.title}</h3>
+                </div>
+                <div className="mt-3 h-px bg-gradient-to-r from-border via-border/60 to-transparent" />
+              </div>
+              <div className="space-y-3">
+                {rows.map((row, ri) =>
+                  row.length === 2 ? (
+                    <div key={ri} className="grid grid-cols-2 gap-3">
+                      {row.map((el) => <div key={el.name}>{el.content}</div>)}
+                    </div>
+                  ) : (
+                    <div key={ri}>{row[0].content}</div>
+                  )
+                )}
+              </div>
+            </section>
+          );
+        })}
+
+        {/* Render any fields not covered by sections */}
+        {props.properties
+          .filter((el) => !rendered.has(el.name))
+          .map((el) => (
+            <div key={el.name}>{el.content}</div>
+          ))}
+      </div>
+    );
+  };
+}
+
+// Walks a local JSON pointer like "#/$defs/support_category" against the
+// root schema. Returns the referenced subschema or undefined if not found.
+function resolveLocalRef(schema: RJSFSchema, ref: string): RJSFSchema | undefined {
+  if (!ref.startsWith('#/')) return undefined;
+  const parts = ref.slice(2).split('/');
+  let curr: unknown = schema;
+  for (const p of parts) {
+    if (curr && typeof curr === 'object' && p in (curr as Record<string, unknown>)) {
+      curr = (curr as Record<string, unknown>)[p];
+    } else {
+      return undefined;
+    }
+  }
+  return curr as RJSFSchema;
 }
 
 function generateUiSchema(
@@ -25,17 +136,14 @@ function generateUiSchema(
 
   // Suppress the JSON-Schema-supplied root title/description. Surrounding
   // page chrome (CardTitle / CardDescription) already announces the form;
-  // the inline duplicate ("PWD Beneficiary Profile 1.0") just adds noise.
+  // the inline duplicate adds noise. Section headers come from SectionedObjectFieldTemplate.
   uiSchema['ui:title'] = '';
   uiSchema['ui:description'] = '';
 
-  // Style the default RJSF Submit button: full width, prominent size,
-  // separated from the last field with extra top margin. The rjsf-shadcn
-  // default renders a tiny `my-2` pill that looks like an afterthought.
   uiSchema['ui:submitButtonOptions'] = {
     ...(submitButtonText ? { submitText: submitButtonText } : {}),
     props: {
-      className: 'mt-6 h-11 w-full text-base font-medium',
+      className: 'mt-8 h-12 w-full text-base font-semibold bg-brand-cta hover:brightness-110 transition-all active:scale-95 shadow-md',
     },
   };
 
@@ -58,6 +166,24 @@ function generateUiSchema(
     if (typed.enum && typed.type === 'string') {
       uiSchema[key] = { 'ui:placeholder': 'Select...' };
     }
+
+    // Render array-of-enums as a single multi-select (FancyMultiSelect:
+    // Popover + cmdk Command + Badge chips) instead of RJSF's default stack
+    // of single-selects with up/down/delete buttons per index.
+    if (typed.type === 'array' && typed.items) {
+      const items = typed.items as RJSFSchema & { $ref?: string };
+      let itemEnum = items.enum;
+      if (!itemEnum && items.$ref) {
+        itemEnum = resolveLocalRef(schema, items.$ref)?.enum;
+      }
+      if (itemEnum && itemEnum.length > 0) {
+        uiSchema[key] = {
+          ...(uiSchema[key] as object),
+          'ui:widget': 'select',
+          'ui:placeholder': 'Select...',
+        };
+      }
+    }
   }
 
   return uiSchema;
@@ -72,6 +198,48 @@ function stripMetaSchema(schema: RJSFSchema): RJSFSchema {
   return rest as RJSFSchema;
 }
 
+// Walks the schema tree, replacing local `{ $ref: "#/..." }` nodes with the
+// referenced subschema and ensuring array-of-enum fields have `uniqueItems:
+// true`. RJSF's `multiple=true` (which routes SelectWidget to FancyMultiSelect)
+// requires the items enum to be visible at the field level AND uniqueItems
+// set — without these, an `ui:widget: 'select'` array renders as a non-functional
+// single-select with no options.
+function normalizeSchemaForRjsf(schema: RJSFSchema, rootSchema?: RJSFSchema): RJSFSchema {
+  const root = rootSchema ?? schema;
+  if (typeof schema !== 'object' || schema === null) return schema;
+  if (Array.isArray(schema)) {
+    return (schema as unknown[]).map((s) => normalizeSchemaForRjsf(s as RJSFSchema, root)) as unknown as RJSFSchema;
+  }
+
+  const schemaAny = schema as RJSFSchema & { $ref?: string };
+  if (typeof schemaAny.$ref === 'string' && schemaAny.$ref.startsWith('#/')) {
+    const resolved = resolveLocalRef(root, schemaAny.$ref);
+    if (resolved) {
+      const { $ref: _, ...rest } = schemaAny;
+      return normalizeSchemaForRjsf({ ...resolved, ...rest } as RJSFSchema, root);
+    }
+  }
+
+  const result: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(schema as Record<string, unknown>)) {
+    result[key] = normalizeSchemaForRjsf(value as RJSFSchema, root);
+  }
+
+  // After children are normalized, force uniqueItems on array-of-enum fields.
+  const normalized = result as RJSFSchema & { type?: string; items?: RJSFSchema; uniqueItems?: boolean };
+  if (
+    normalized.type === 'array' &&
+    normalized.items &&
+    typeof normalized.items === 'object' &&
+    Array.isArray((normalized.items as RJSFSchema).enum) &&
+    normalized.uniqueItems !== true
+  ) {
+    normalized.uniqueItems = true;
+  }
+
+  return normalized as RJSFSchema;
+}
+
 export function SchemaForm({
   schema,
   formData,
@@ -83,12 +251,17 @@ export function SchemaForm({
   submitButtonText,
   id,
   hideSubmit = false,
+  domainId,
 }: SchemaFormProps) {
   const uiSchema = generateUiSchema(schema, mode, hideSubmit ? undefined : submitButtonText);
   if (hideSubmit) {
     uiSchema['ui:submitButtonOptions'] = { norender: true };
   }
-  const schemaWithoutMeta = stripMetaSchema(schema);
+  const schemaWithoutMeta = normalizeSchemaForRjsf(stripMetaSchema(schema));
+
+  const templates = domainId && formLayouts[domainId]
+    ? { ObjectFieldTemplate: SectionedObjectFieldTemplate(domainId) }
+    : undefined;
 
   return (
     <div className={className}>
@@ -99,11 +272,13 @@ export function SchemaForm({
         formData={formData}
         validator={validator}
         widgets={widgets}
+        templates={templates}
         disabled={disabled}
         onSubmit={({ formData }) => {
           if (formData) onSubmit(formData as Record<string, unknown>);
         }}
         onError={(errors) => onError?.(errors)}
+        showErrorList={false}
         liveValidate={false}
         noHtml5Validate
       />

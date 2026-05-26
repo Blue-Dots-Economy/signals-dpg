@@ -13,9 +13,13 @@ export function UserMenu() {
   const handleSignOut = async () => {
     try {
       await signOut();
-      toast.success('Signed out successfully');
+      toast.success('Signed out', {
+        description: 'You\'ve been signed out safely. Sign back in whenever you\'re ready.',
+      });
     } catch {
-      toast.error('Failed to sign out');
+      toast.error('Couldn\'t sign out', {
+        description: 'Something went wrong. Please try again — if the problem persists, refresh the page.',
+      });
     }
   };
 
