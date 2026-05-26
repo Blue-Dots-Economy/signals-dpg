@@ -31,10 +31,14 @@ export interface StalenessResult {
  * its own lock, so domains don't block each other.
  *
  * Callers: dashboard route (Task 10) + CSV export route (Task 11).
+ *
+ * When force=true: skips the TTL check (treats as stale) and uses BLOCKING
+ * pg_advisory_lock so a concurrent recompute is awaited, not skipped.
  */
 export const check_and_refresh_if_stale = async (
   aggregator_id: string,
   domain: string,
+  force = false,
 ): Promise<StalenessResult> => {
   const [row] = await db
     .select({ ts: min(item_metrics.lastComputedAt) })
@@ -48,22 +52,28 @@ export const check_and_refresh_if_stale = async (
 
   const min_ts = (row?.ts as Date | null | undefined) ?? null;
   const stale =
-    min_ts === null || (Date.now() - min_ts.getTime()) / 1000 > TTL_SECONDS;
+    force ||
+    min_ts === null ||
+    (Date.now() - min_ts.getTime()) / 1000 > TTL_SECONDS;
 
   if (!stale) {
     return { refreshed: false, last_computed_at: min_ts };
   }
 
   const lock_key = lock_key_for(aggregator_id, domain);
-  const lockResult: unknown = await db.execute(
-    sql`SELECT pg_try_advisory_lock(${lock_key.toString()}::bigint) AS locked`,
-  );
+  // force=true uses BLOCKING pg_advisory_lock so a concurrent recompute is
+  // awaited; non-force uses pg_try_advisory_lock to skip-on-contention.
+  const lock_sql = force
+    ? sql`SELECT pg_advisory_lock(${lock_key.toString()}::bigint) AS locked`
+    : sql`SELECT pg_try_advisory_lock(${lock_key.toString()}::bigint) AS locked`;
+  const lockResult: unknown = await db.execute(lock_sql);
   const lock_rows: Array<{ locked?: unknown }> = Array.isArray(lockResult)
     ? (lockResult as Array<{ locked?: unknown }>)
     : ((lockResult as { rows?: Array<{ locked?: unknown }> }).rows ?? []);
-  const locked = lock_rows[0]?.locked === true;
+  // pg_advisory_lock returns void/true; pg_try_advisory_lock returns boolean.
+  const acquired = force ? true : lock_rows[0]?.locked === true;
 
-  if (!locked) {
+  if (!acquired) {
     return { refreshed: false, last_computed_at: min_ts };
   }
 
