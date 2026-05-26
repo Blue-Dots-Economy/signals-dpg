@@ -1,4 +1,3 @@
-// apps/api/src/services/metrics/buckets.ts
 import z from '@dpg/schemas';
 
 /**
@@ -8,7 +7,7 @@ import z from '@dpg/schemas';
  * appear in column names, API field names, and the status-rule DSL — they
  * are the Signals-internal vocabulary, not a network's wire format.
  */
-export const CANONICAL_BUCKETS = ['create', 'accept', 'reject', 'cancel'] as const;
+export const CANONICAL_BUCKETS = Object.freeze(['create', 'accept', 'reject', 'cancel'] as const);
 export type CanonicalBucket = (typeof CANONICAL_BUCKETS)[number];
 export const CanonicalBucketSchema = z.enum(CANONICAL_BUCKETS);
 
@@ -18,6 +17,6 @@ export const CanonicalBucketSchema = z.enum(CANONICAL_BUCKETS);
  * the network-config validator rejects anything else. The final
  * `default` tail rule guarantees no item is left with a null status.
  */
-export const CANONICAL_STATUSES = ['new', 'active', 'at_risk', 'inactive'] as const;
+export const CANONICAL_STATUSES = Object.freeze(['new', 'active', 'at_risk', 'inactive'] as const);
 export type CanonicalStatus = (typeof CANONICAL_STATUSES)[number];
 export const CanonicalStatusSchema = z.enum(CANONICAL_STATUSES);
