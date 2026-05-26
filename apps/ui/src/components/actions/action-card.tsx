@@ -25,10 +25,12 @@ import {
   Clock,
   AlertCircle,
   ArrowRight,
+  Contact,
   User,
   MapPin,
 } from 'lucide-react';
 import type { Action } from '@/lib/action-api';
+import { ContactDetailsModal } from '@/components/actions/contact-details-modal';
 
 interface ActionCardProps {
   action: Action;
@@ -102,6 +104,8 @@ function formatItemLocation(
 export function ActionCard({ action, ownershipRole, onStatusUpdate }: ActionCardProps) {
   const [isExpanded, setIsExpanded] = React.useState(false);
   const [showRequirements, setShowRequirements] = React.useState(false);
+  const [showContactDetails, setShowContactDetails] = React.useState(false);
+  const canRevealContact = action.action_status === 'accepted';
 
   const status = getStatusConfig(action.action_status);
   const actionTypeClass = getActionTypeClass(action.action_type);
@@ -258,6 +262,18 @@ export function ActionCard({ action, ownershipRole, onStatusUpdate }: ActionCard
       </CardContent>
 
       <CardFooter className="pt-0 flex flex-wrap gap-2">
+        {canRevealContact && (
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => setShowContactDetails(true)}
+            className="flex-1"
+          >
+            <Contact className="h-3 w-3 mr-1" />
+            View contact details
+          </Button>
+        )}
+
         {/* Action buttons for target user (received) */}
         {canAccept && (
           <Button
@@ -314,6 +330,11 @@ export function ActionCard({ action, ownershipRole, onStatusUpdate }: ActionCard
           {isExpanded ? 'Less' : 'Details'}
         </Button>
       </CardFooter>
+      <ContactDetailsModal
+        actionId={action.action_id}
+        open={showContactDetails}
+        onOpenChange={setShowContactDetails}
+      />
     </Card>
   );
 }
