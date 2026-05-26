@@ -483,7 +483,8 @@
             "pending": ["created"],
             "shortlisted": ["accepted"],
             "rejected": ["rejected", "cancelled"]
-          }
+          },
+          "reveals_pii_on_status": ["accepted"]
         },
         {
           "from_network": "purple_dot",
@@ -553,7 +554,8 @@
               }
             }
           },
-          "metric_categories": null
+          "metric_categories": null,
+          "reveals_pii_on_status": ["accepted"]
         }
       ]
     }
