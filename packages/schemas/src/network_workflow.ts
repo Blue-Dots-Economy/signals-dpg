@@ -43,17 +43,65 @@ const MetricCategoriesSchema = z.object({
   pending: z.array(z.string().min(1)).optional().default([]),
 });
 
-const NetworkActionInteractionSchema = z.object({
-  from_network: z.string().min(1).optional(),
-  from_domain: z.string().min(1),
-  from_items: z.string().min(1).array().optional().default([]),
-  to_network: z.string().min(1).optional(),
-  to_domain: z.string().min(1),
-  to_items: z.string().min(1).array().optional().default([]),
-  requirement_schema: JsonSchemaDocumentSchema,
-  event_schema: JsonSchemaDocumentSchema.optional(),
-  metric_categories: MetricCategoriesSchema.nullable().optional(),
-});
+const NetworkActionInteractionSchema = z
+  .object({
+    from_network: z.string().min(1).optional(),
+    from_domain: z.string().min(1),
+    from_items: z.string().min(1).array().optional().default([]),
+    to_network: z.string().min(1).optional(),
+    to_domain: z.string().min(1),
+    to_items: z.string().min(1).array().optional().default([]),
+    requirement_schema: JsonSchemaDocumentSchema,
+    event_schema: JsonSchemaDocumentSchema.optional(),
+    metric_categories: MetricCategoriesSchema.nullable().optional(),
+    reveals_pii_on_status: z.array(z.string().min(1)).optional().default([]),
+  })
+  .superRefine((interaction, ctx) => {
+    if (interaction.reveals_pii_on_status.length === 0) return;
+
+    if (!interaction.event_schema) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message:
+          'reveals_pii_on_status requires event_schema with a status.enum to validate against',
+        path: ['reveals_pii_on_status'],
+      });
+      return;
+    }
+
+    const statusEnum = extractStatusEnum(interaction.event_schema);
+    if (!statusEnum) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message:
+          'reveals_pii_on_status requires event_schema.properties.status.enum to be defined',
+        path: ['reveals_pii_on_status'],
+      });
+      return;
+    }
+
+    for (const status of interaction.reveals_pii_on_status) {
+      if (!statusEnum.includes(status)) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: `reveals_pii_on_status value "${status}" is not in event_schema.properties.status.enum`,
+          path: ['reveals_pii_on_status'],
+        });
+      }
+    }
+  });
+
+function extractStatusEnum(
+  eventSchema: Record<string, unknown>
+): string[] | null {
+  const properties = eventSchema.properties;
+  if (!properties || typeof properties !== 'object') return null;
+  const status = (properties as Record<string, unknown>).status;
+  if (!status || typeof status !== 'object') return null;
+  const enumValues = (status as Record<string, unknown>).enum;
+  if (!Array.isArray(enumValues)) return null;
+  return enumValues.filter((v): v is string => typeof v === 'string');
+}
 
 const NetworkActionSchema = z.object({
   description: z.string().optional(),
@@ -131,6 +179,22 @@ export function getActionInteraction(
   }
 
   return interaction;
+}
+
+export function getInteractionPiiRevealStatuses(
+  networkConfig: NetworkConfigDocument,
+  input: {
+    actionType: string;
+    fromNetwork: string;
+    fromDomain: string;
+    fromItemType?: string;
+    toNetwork: string;
+    toDomain: string;
+    toItemType?: string;
+  }
+): readonly string[] {
+  const interaction = getActionInteraction(networkConfig, input);
+  return interaction.reveals_pii_on_status;
 }
 
 function matchesAllowedItemType(
