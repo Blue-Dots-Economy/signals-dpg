@@ -109,8 +109,9 @@ export function OtpPage() {
         </p>
       </div>
 
-      {/* OTP input */}
-      <div className="flex justify-center mb-6">
+      {/* OTP input — left-aligned so the box row shares the form column's
+          left edge with the "Back" link and "Enter verification code" heading. */}
+      <div className="mb-6 flex justify-start">
         <OtpInput onComplete={handleOtpComplete} disabled={isLoading} />
       </div>
 
@@ -129,8 +130,8 @@ export function OtpPage() {
         </div>
       )}
 
-      {/* Resend */}
-      <div className="text-center text-sm">
+      {/* Resend — left-aligned to match the rest of the form column. */}
+      <div className="text-left text-sm">
         {countdown > 0 ? (
           <p className="text-muted-foreground">Resend code in {countdown}s</p>
         ) : (

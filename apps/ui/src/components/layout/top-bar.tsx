@@ -12,6 +12,7 @@ import {
 import { SidebarTrigger } from '@/components/ui/sidebar';
 import { Button } from '@/components/ui/button';
 import { UserMenu } from '@/components/auth/user-menu';
+import { ThemeModeToggle } from '@/components/layout/theme-mode-toggle';
 import { useAuth } from '@/contexts/auth-context';
 import { apiConfig } from '@/lib/api-config';
 import { usePendingActionsCount } from '@/hooks/use-actions';
@@ -102,6 +103,8 @@ export function TopBar({
             </SelectContent>
           </Select>
         )}
+
+        <ThemeModeToggle />
 
         {!isLoading && (
           isAuthenticated ? (

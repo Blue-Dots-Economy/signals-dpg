@@ -1,8 +1,7 @@
 import * as React from 'react';
 import { useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { toast } from 'sonner';
-import { ArrowLeft, GraduationCap, UserCheck, Building2, Wallet, Trash2, Accessibility, HandHeart, OctagonX } from 'lucide-react';
-import type { LucideIcon } from 'lucide-react';
+import { ArrowLeft, Wallet, Trash2, OctagonX } from 'lucide-react';
 import type { RJSFSchema } from '@rjsf/utils';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
@@ -38,18 +37,7 @@ function parseNetworkIds(networkEnv: string | undefined): string[] {
   return networkEnv.split(',').map(n => n.trim()).filter(Boolean);
 }
 
-const domainIcons: Record<string, LucideIcon> = {
-  // yellow_dot / education network
-  student_profile: GraduationCap,
-  learner_profile: GraduationCap,
-  student: GraduationCap,
-  tutor_counsellor_profile: UserCheck,
-  tutor_counsellor: UserCheck,
-  coaching_center: Building2,
-  // purple_dot / disability services network
-  seeker: Accessibility,
-  provider: HandHeart,
-};
+import { getDomainIcon } from '@/lib/domain-icons';
 
 export function ProfileFormPage() {
   const location = useLocation();
@@ -205,7 +193,7 @@ export function ProfileFormPage() {
   }, [selectedDomain, domains]);
 
   const selectedDomainInfo = domains.find((d) => d.id === selectedDomain);
-  const DomainIcon = domainIcons[selectedDomain ?? ''] ?? GraduationCap;
+  const DomainIcon = getDomainIcon(selectedDomain, network?.id);
   const roleLabel = (selectedDomain ?? '').replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
 
   const canImportCredentials = React.useMemo(
@@ -440,7 +428,7 @@ export function ProfileFormPage() {
         </div>
         <div className="grid gap-4 sm:grid-cols-2">
           {domains.map((domain, idx) => {
-            const Icon = domainIcons[domain.id] ?? GraduationCap;
+            const Icon = getDomainIcon(domain.id, network?.id);
             const label = domain.id
               .replace(/_/g, ' ')
               .replace(/\b\w/g, (c) => c.toUpperCase());

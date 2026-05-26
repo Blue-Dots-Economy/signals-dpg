@@ -32,13 +32,17 @@ export function AuthShell({ children }: AuthShellProps) {
           </div>
         </div>
 
-        {/* Portal header (desktop) */}
-        <div className="hidden lg:block">
-          <PortalHeader />
+        {/* Portal header (desktop) — aligned with the form column so the logo
+            doesn't float off-axis from the inputs below. Larger size variant
+            so the brand is the visual anchor of the right panel. */}
+        <div className="hidden lg:block px-6 sm:px-10 lg:px-14 pt-10">
+          <div className="mx-auto max-w-md w-full">
+            <PortalHeader size="lg" />
+          </div>
         </div>
 
         {/* Form content */}
-        <div className="flex-1 px-6 py-8 sm:px-10 lg:px-14 lg:py-10">
+        <div className="flex-1 px-6 py-6 sm:px-10 lg:px-14 lg:pt-6 lg:pb-8">
           <div className="mx-auto max-w-md w-full">{children}</div>
         </div>
 

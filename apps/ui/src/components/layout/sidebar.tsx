@@ -17,9 +17,8 @@ import {
   SidebarSeparator,
 } from '@/components/ui/sidebar';
 import { PortalHeader } from './portal-header';
-import { LayoutGrid, Box, Plus, Pencil, GraduationCap, UserCheck, Building2, Network, ChevronRight, Activity, Accessibility, HandHeart } from 'lucide-react';
+import { LayoutGrid, Plus, Pencil, Network, ChevronRight, Activity } from 'lucide-react';
 import { usePendingActionsCount } from '@/hooks/use-actions';
-import type { LucideIcon } from 'lucide-react';
 
 interface AppSidebarProps {
   networks?: DotNetworkSchema[];
@@ -35,16 +34,7 @@ interface AppSidebarProps {
   userSchemas?: Record<string, RJSFSchema>;
 }
 
-const domainIcons: Record<string, LucideIcon> = {
-  // yellow_dot / education network
-  student: GraduationCap,
-  tutor: UserCheck,
-  tutor_counsellor: UserCheck,
-  coaching_center: Building2,
-  // purple_dot / disability services network
-  seeker: Accessibility,
-  provider: HandHeart,
-};
+import { getDomainIcon } from '@/lib/domain-icons';
 
 function findTitleField(schema: RJSFSchema): string | null {
   if (!schema.properties) return null;
@@ -131,7 +121,7 @@ export function AppSidebar({
 
   return (
     <ShadcnSidebar>
-      <SidebarHeader className="border-b py-0 px-0">
+      <SidebarHeader className="border-b px-4 py-3">
         <PortalHeader />
       </SidebarHeader>
       <SidebarContent>
@@ -170,7 +160,7 @@ export function AppSidebar({
                 </SidebarMenuButton>
               </SidebarMenuItem>
               {domains.map((domain) => {
-                const Icon = domainIcons[domain.id] ?? Box;
+                const Icon = getDomainIcon(domain.id, selectedNetwork);
                 const label = domain.id
                   .replace(/_/g, ' ')
                   .replace(/\b\w/g, (c) => c.toUpperCase());
@@ -207,7 +197,7 @@ export function AppSidebar({
               <div className="space-y-1">
                 {domainKeys.map((domainId) => {
                   const profiles = profilesByDomain[domainId];
-                  const Icon = domainIcons[domainId] ?? Box;
+                  const Icon = getDomainIcon(domainId, selectedNetwork);
                   const label = getDomainLabel(domainId);
                   const isExpanded = expandedDomains.has(domainId);
                   const hasActiveProfile = profiles.some((p) => p.item_id === activeProfileId);
