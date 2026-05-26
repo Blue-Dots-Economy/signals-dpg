@@ -27,6 +27,7 @@ head: []
 | `POST` | `/api/v1/action/perform` | Source-side action request |
 | `GET` | `/api/v1/action/fetch` | Fetch owned actions |
 | `POST` | `/api/v1/action/update-status` | Update target-side action status |
+| `GET` | `/api/v1/action/:actionId/contact-details` | Reveal contact details for an action in a reveal-eligible status |
 | `POST` | `/api/v1/network/action/perform` | Target-side action creation |
 
 ## Events
