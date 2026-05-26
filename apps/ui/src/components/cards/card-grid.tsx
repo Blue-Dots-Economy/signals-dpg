@@ -1,7 +1,9 @@
+import type React from 'react';
 import type { RJSFSchema } from '@rjsf/utils';
 import type { DotActionSchema } from '@/engine/types';
 import { DomainCard } from './domain-card';
 import { MatchScoreCard } from '@/components/match-score';
+import { EmptyState } from '@/components/empty-state';
 import type { Item } from '@/lib/item-api';
 
 interface CardGridProps {
@@ -15,6 +17,7 @@ interface CardGridProps {
   onItemClick?: (itemId: string) => void;
   loading?: boolean;
   emptyMessage?: string;
+  emptyState?: React.ReactNode;
   // Match score props
   localItem?: Item | null;
   networkId?: string;
@@ -32,6 +35,7 @@ export function CardGrid({
   onItemClick,
   loading = false,
   emptyMessage = 'No items found',
+  emptyState,
   localItem,
   networkId = '',
   selectedDomain,
@@ -52,11 +56,7 @@ export function CardGrid({
   }
 
   if (items.length === 0) {
-    return (
-      <div className="flex items-center justify-center py-12">
-        <p className="text-muted-foreground">{emptyMessage}</p>
-      </div>
-    );
+    return emptyState ? <>{emptyState}</> : <EmptyState message={emptyMessage} />;
   }
 
   return (

@@ -10,6 +10,7 @@ export interface MatchScoreCardProps {
   schema: RJSFSchema;
   schemaName?: string;
   schemaDescription?: string;
+  domainLabel?: string;
   data: Record<string, unknown>;
   actions?: DotActionSchema[];
   onAction?: (type: string, schema: DotActionSchema) => void;
@@ -23,6 +24,7 @@ export function MatchScoreCard({
   schema,
   schemaName,
   schemaDescription,
+  domainLabel,
   data,
   actions = [],
   onAction,
@@ -81,6 +83,7 @@ export function MatchScoreCard({
         schema={schema}
         schemaName={schemaName}
         schemaDescription={schemaDescription}
+        domainLabel={domainLabel}
         data={data}
         actions={actions}
         onAction={onAction}

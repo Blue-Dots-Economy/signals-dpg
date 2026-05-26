@@ -10,11 +10,14 @@ interface ImportMetaEnv {
   readonly VITE_DEFAULT_API_URL: string;
   readonly VITE_SHOW_INSTANCE_SELECTOR: string;
   readonly VITE_NETWORK_ID: string;
+  readonly VITE_DEFAULT_NETWORK_THEME?: string;
   readonly VITE_VC_WALLET_URL: string;
   readonly VITE_VC_WALLET_API_KEY: string;
   readonly VITE_AGENT_URL: string;
   readonly VITE_AGENT_TOKEN: string;
 }
+
+declare const __DEFAULT_NETWORK_THEME__: string;
 
 interface ImportMeta {
   readonly env: ImportMetaEnv;

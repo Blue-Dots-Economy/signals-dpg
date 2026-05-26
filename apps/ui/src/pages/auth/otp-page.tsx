@@ -1,9 +1,8 @@
 import { useState, useEffect } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { Loader2, ArrowLeft } from 'lucide-react';
-import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { OtpInput } from '@/components/auth/otp-input';
+import { AuthShell } from '@/components/layout/auth-shell';
 import { requestOtp, type AuthIdentifier } from '@/lib/auth-api';
 import { useAuth } from '@/contexts/auth-context';
 import { toast } from 'sonner';
@@ -33,29 +32,18 @@ export function OtpPage() {
       navigate('/auth/login');
       return;
     }
-
-    const timer = setTimeout(() => setCountdown(countdown - 1), 1000);
-    if (countdown > 0) {
-      const interval = setInterval(() => {
-        setCountdown((c) => {
-          if (c <= 1) {
-            clearInterval(interval);
-            return 0;
-          }
-          return c - 1;
-        });
-      }, 1000);
-      return () => {
-        clearInterval(interval);
-        clearTimeout(timer);
-      };
-    }
-    return () => clearTimeout(timer);
+    if (countdown <= 0) return;
+    const interval = setInterval(() => {
+      setCountdown((c) => {
+        if (c <= 1) { clearInterval(interval); return 0; }
+        return c - 1;
+      });
+    }, 1000);
+    return () => clearInterval(interval);
   }, [countdown, identifierLabel, navigate]);
 
   const handleOtpComplete = async (otp: string) => {
     if (!state || !identifierLabel) return;
-
     setIsLoading(true);
     try {
       await verifyOtp(getAuthIdentifier(state), otp, state.userExists ? undefined : state.name);
@@ -70,7 +58,6 @@ export function OtpPage() {
 
   const handleResendOtp = async () => {
     if (!state || !identifierLabel || countdown > 0) return;
-
     setIsLoading(true);
     try {
       await requestOtp(getAuthIdentifier(state));
@@ -83,57 +70,55 @@ export function OtpPage() {
     }
   };
 
-  if (!identifierLabel) {
-    return null;
-  }
+  if (!identifierLabel) return null;
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-background p-4">
-      <Card className="w-full max-w-md">
-        <CardHeader className="space-y-1">
-          <Button
-            variant="ghost"
-            size="sm"
-            className="gap-2 w-fit -ml-2"
-            onClick={() => navigate('/auth/login')}
+    <AuthShell>
+      {/* Back */}
+      <button
+        type="button"
+        onClick={() => navigate('/auth/login')}
+        className="mb-6 flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors"
+      >
+        <ArrowLeft className="h-4 w-4" />
+        Back
+      </button>
+
+      {/* Heading */}
+      <div className="mb-8">
+        <h2 className="text-2xl font-bold text-foreground">Enter verification code</h2>
+        <p className="mt-1 text-sm text-muted-foreground">
+          We sent a 6-digit code to{' '}
+          <span className="font-medium text-foreground">{identifierLabel}</span>
+        </p>
+      </div>
+
+      {/* OTP input */}
+      <div className="flex justify-center mb-6">
+        <OtpInput onComplete={handleOtpComplete} disabled={isLoading} />
+      </div>
+
+      {isLoading && (
+        <div className="flex justify-center mb-4">
+          <Loader2 className="h-5 w-5 animate-spin text-primary" />
+        </div>
+      )}
+
+      {/* Resend */}
+      <div className="text-center text-sm">
+        {countdown > 0 ? (
+          <p className="text-muted-foreground">Resend code in {countdown}s</p>
+        ) : (
+          <button
+            type="button"
+            onClick={handleResendOtp}
+            disabled={isLoading}
+            className="text-primary hover:underline disabled:opacity-50"
           >
-            <ArrowLeft className="h-4 w-4" />
-            Back
-          </Button>
-          <CardTitle className="text-2xl">Enter verification code</CardTitle>
-          <CardDescription>
-            We sent a code to {identifierLabel}
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="flex justify-center py-4">
-            <OtpInput onComplete={handleOtpComplete} disabled={isLoading} />
-          </div>
-
-          {isLoading && (
-            <div className="flex justify-center">
-              <Loader2 className="h-6 w-6 animate-spin text-primary" />
-            </div>
-          )}
-
-          <div className="text-center">
-            {countdown > 0 ? (
-              <p className="text-sm text-muted-foreground">
-                Resend code in {countdown}s
-              </p>
-            ) : (
-              <button
-                type="button"
-                onClick={handleResendOtp}
-                disabled={isLoading}
-                className="text-sm text-primary hover:underline disabled:opacity-50"
-              >
-                Resend code
-              </button>
-            )}
-          </div>
-        </CardContent>
-      </Card>
-    </div>
+            Resend code
+          </button>
+        )}
+      </div>
+    </AuthShell>
   );
 }

@@ -16,6 +16,7 @@ import {
   SidebarHeader,
   SidebarSeparator,
 } from '@/components/ui/sidebar';
+import { PortalHeader } from './portal-header';
 import { LayoutGrid, Box, Plus, Pencil, GraduationCap, UserCheck, Building2, Network, ChevronRight, Activity } from 'lucide-react';
 import { usePendingActionsCount } from '@/hooks/use-actions';
 import type { LucideIcon } from 'lucide-react';
@@ -73,7 +74,6 @@ export function AppSidebar({
   domains,
   selectedDomain,
   onDomainSelect,
-  currentDomainLabel,
   myItems = [],
   activeProfileId,
   onActiveProfileChange,
@@ -126,10 +126,8 @@ export function AppSidebar({
 
   return (
     <ShadcnSidebar>
-      <SidebarHeader className="border-b px-4 py-3">
-        <h2 className="text-sm font-semibold">
-          {currentDomainLabel ?? 'Domains'}
-        </h2>
+      <SidebarHeader className="border-b py-0 px-0">
+        <PortalHeader />
       </SidebarHeader>
       <SidebarContent>
         {showNetworkSelector && (
@@ -253,7 +251,7 @@ export function AppSidebar({
                                     onClick={() => onActiveProfileChange?.(profile.item_id)}
                                     className={
                                       isActiveProfile
-                                        ? 'relative bg-primary/10 text-primary font-medium border-l-2 border-primary rounded-l-none pl-2 hover:bg-primary/15'
+                                        ? 'relative bg-primary/12 text-primary font-medium border-l-2 border-primary rounded-l-none pl-2 hover:bg-primary/15'
                                         : ''
                                     }
                                   >

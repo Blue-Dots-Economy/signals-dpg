@@ -4,6 +4,18 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>DPG UI</title>
+    <!-- FOUC prevention: set data-network before React boots so the first
+         CSS paint already has the right token values from index.css. -->
+    <script>
+      (function () {
+        var url = new URLSearchParams(location.search).get('network');
+        var fallback =
+          typeof __DEFAULT_NETWORK_THEME__ !== 'undefined'
+            ? __DEFAULT_NETWORK_THEME__
+            : 'blue_dot';
+        document.documentElement.dataset.network = url || fallback;
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>

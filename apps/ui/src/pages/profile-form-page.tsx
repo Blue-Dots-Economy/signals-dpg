@@ -13,6 +13,8 @@ import {
   CardTitle,
 } from '@/components/ui/card';
 import { SchemaForm } from '@/components/forms/schema-form';
+import { AuthShell } from '@/components/layout/auth-shell';
+import { RoleCard } from '@/components/cards/role-card';
 import { WalletImportModal } from '@/components/wallet/wallet-import-modal';
 import { resolveNetworkRefs } from '@/engine/schema/resolve-schema';
 import type { DotNetworkSchema } from '@/engine/types';
@@ -393,46 +395,38 @@ export function ProfileFormPage() {
   // Domain selection step
   if (!selectedDomain && !isEdit) {
     return (
-      <div className="min-h-screen bg-background p-4 sm:p-6">
-        <div className="mx-auto max-w-2xl">
-          <Button
-            variant="ghost"
-            className="mb-4 gap-2"
-            onClick={() => navigate(`/?network=${targetNetworkId}`)}
-          >
-            <ArrowLeft className="h-4 w-4" />
-            Back
-          </Button>
-          <div className="mb-6">
-            <h1 className="text-2xl font-bold">Create Profile</h1>
-            <p className="text-muted-foreground mt-1">
-              Choose your role on the network
-            </p>
-          </div>
-          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-            {domains.map((domain) => {
-              const Icon = domainIcons[domain.id] ?? GraduationCap;
-              return (
-                <Card
-                  key={domain.id}
-                  className="cursor-pointer hover:shadow-md transition-shadow"
-                  onClick={() => setSelectedDomain(domain.id)}
-                >
-                  <CardHeader>
-                    <div className="mb-2 flex h-10 w-10 items-center justify-center rounded-lg bg-primary/10">
-                      <Icon className="h-5 w-5 text-primary" />
-                    </div>
-                    <CardTitle className="text-lg capitalize">
-                      {domain.id.replace(/_/g, ' ')}
-                    </CardTitle>
-                    <CardDescription>{domain.description}</CardDescription>
-                  </CardHeader>
-                </Card>
-              );
-            })}
-          </div>
+      <AuthShell>
+        <button
+          type="button"
+          onClick={() => navigate(`/?network=${targetNetworkId}`)}
+          className="mb-6 flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors"
+        >
+          <ArrowLeft className="h-4 w-4" />
+          Back
+        </button>
+        <div className="mb-6">
+          <h2 className="text-2xl font-bold">Create Profile</h2>
+          <p className="text-muted-foreground mt-1">Choose your role on the network</p>
         </div>
-      </div>
+        <div className="grid gap-4 sm:grid-cols-2">
+          {domains.map((domain, idx) => {
+            const Icon = domainIcons[domain.id] ?? GraduationCap;
+            const label = domain.id
+              .replace(/_/g, ' ')
+              .replace(/\b\w/g, (c) => c.toUpperCase());
+            return (
+              <RoleCard
+                key={domain.id}
+                icon={Icon}
+                title={label}
+                description={domain.description ?? ''}
+                onClick={() => setSelectedDomain(domain.id)}
+                variant={idx % 2 === 0 ? 'primary' : 'secondary'}
+              />
+            );
+          })}
+        </div>
+      </AuthShell>
     );
   }
 
@@ -478,6 +472,7 @@ export function ProfileFormPage() {
                 disabled={isSubmitting || isDeleting}
                 formData={initialData ?? undefined}
                 submitButtonText={isEdit ? 'Update' : undefined}
+                domainId={selectedDomain ?? undefined}
               />
             )}
             {isEdit && existingItem && (

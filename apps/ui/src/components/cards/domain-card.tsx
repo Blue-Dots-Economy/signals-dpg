@@ -19,6 +19,7 @@ interface DomainCardProps {
   schema: RJSFSchema;
   schemaName?: string;
   schemaDescription?: string;
+  domainLabel?: string;
   data: Record<string, unknown>;
   actions?: DotActionSchema[];
   onAction?: (type: string, schema: DotActionSchema) => void;
@@ -38,6 +39,7 @@ export function DomainCard({
   schema,
   schemaName,
   schemaDescription,
+  domainLabel,
   data,
   actions = [],
   onAction,
@@ -72,11 +74,18 @@ export function DomainCard({
 
   return (
     <Card
-      className="h-full flex flex-col transition-shadow"
+      className="h-full flex flex-col relative overflow-hidden transition-all hover:shadow-md motion-safe:hover:-translate-y-0.5 before:absolute before:top-0 before:left-0 before:right-0 before:h-0.5 before:bg-primary/40"
       onClick={onClick}
     >
       <CardHeader>
-        <CardTitle className="text-lg">{title}</CardTitle>
+        <div className="flex items-start gap-2">
+          <CardTitle className="text-lg flex-1 min-w-0">{title}</CardTitle>
+          {domainLabel && (
+            <span className="shrink-0 rounded-full bg-primary/10 text-primary text-[11px] font-medium px-2 py-0.5 leading-none mt-0.5">
+              {domainLabel}
+            </span>
+          )}
+        </div>
         {schemaDescription && (
           <CardDescription>{schemaDescription}</CardDescription>
         )}
