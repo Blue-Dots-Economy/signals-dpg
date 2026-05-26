@@ -196,7 +196,7 @@ The old endpoint is removed. Callers update:
 ## Aggregator dashboard — multi-domain by_domain shape
 
 `GET /api/v1/aggregator/dashboard` returns a per-domain rollup + paginated
-participants. Auth: aggregator-typed acting_org; the `org.metadata.domains`
+items. Auth: aggregator-typed acting_org; the `org.metadata.domains`
 array must be populated via `/admin/aggregator/upsert` before this endpoint
 returns data.
 
@@ -225,38 +225,96 @@ curl -X GET 'http://localhost:2742/api/v1/aggregator/dashboard?page=1&limit=50&s
   "by_domain": {
     "seeker": {
       "rollup": {
-        "items_total": 1247,
-        "by_status": { "new": 84, "active": 612, "at_risk": 219, "inactive": 270 },
-        "applications_total": 993,
-        "applications_pending": 380,
-        "applications_shortlisted": 421,
-        "applications_rejected": 192,
-        "unique_users": 1180,
-        "complete_profiles_count": 540,
-        "avg_profiles_per_user": 1.06,
-        "users_with_applications": 894,
-        "avg_applications_per_user": 1.11,
-        "new_users_last_7_days": 23,
+        "total_items": 1247,
+        "complete_profiles": 540,
+        "has_applications": 894,
+        "by_status": { "new": 84, "active": 612, "at_risk": 219, "inactive": 332 },
+        "by_action_status": { "create": 1100, "accept": 421, "reject": 192, "cancel": 18 },
+        "avg_items_per_user": 1.06,
+        "avg_actions_per_user": 1.11,
         "mode_wise_counts": { "bulk": 800, "link": 320, "voice": 60, "self": 0 }
       },
-      "participants": [ /* per-item rows */ ],
+      "items": [ /* per-item rows — see field list below */ ],
       "total_matching": 219,
       "next_cursor": "2"
     },
     "provider": {
-      "rollup": { "items_total": 84, "...": "..." },
-      "participants": [ /* per-item rows incl. openings */ ],
+      "rollup": { "total_items": 84 /* ... same 7-tile shape */ },
+      "items": [ /* same 19-field row shape */ ],
       "total_matching": 12,
       "next_cursor": null
     }
   },
   "metadata": {
-    "last_computed_at": "...",
+    "last_computed_at": "2026-05-26T07:00:00.000Z",
     "ttl_seconds": 3600,
     "refreshed": false
   }
 }
 ```
+
+#### Rollup field semantics
+
+| Field | Meaning |
+|---|---|
+| `total_items` | COUNT of `item_metrics` rows in scope for this domain |
+| `complete_profiles` | COUNT where `profile_completion_pct >= 100` |
+| `has_applications` | COUNT where any canonical action bucket > 0 |
+| `by_status` | Histogram of `profile_status` (always emits all 4 keys; missing → 0) |
+| `by_action_status` | SUM of each canonical bucket count across all in-scope rows (`create`, `accept`, `reject`, `cancel`) |
+| `avg_items_per_user` | `total_items / COUNT(DISTINCT owner_user_id)`. 0 if no rows. |
+| `avg_actions_per_user` | SUM of all action counts / COUNT of users with at least one action. 0 if none. |
+| `mode_wise_counts` | Histogram of `onboarded_via` |
+
+#### Per-item row fields (19 fields, identical across all domains)
+
+```jsonc
+{
+  "item_network": "purple_dot",
+  "item_domain": "seeker",
+  "item_type": "profile_1.0",
+  "name": "itm_01HX...",                        // resolved display name or item_id fallback
+  "onboarded_via": "bulk",
+
+  "profile_status": "at_risk",
+  "profile_completion_pct": 67,
+  "profile_created_at": "2026-04-11T07:00:00.000Z",
+  "profile_last_updated_at": "2026-05-22T07:00:00.000Z",
+  "age_days": 45,
+
+  "count_create": 4,
+  "count_accept": 0,
+  "count_reject": 3,
+  "count_cancel": 1,
+
+  "last_create_at": "2026-05-20T07:00:00.000Z",
+  "last_accept_at": null,
+  "last_reject_at": "2026-05-18T07:00:00.000Z",
+  "last_cancel_at": "2026-05-19T07:00:00.000Z",
+
+  "actionable_tags": ["missing_email"]
+}
+```
+
+`name` is always non-null — the recompute resolves it from `display_name_field`
+on the item schema (see below) and falls back to `item_id` if no field is
+declared or the value is empty. `item_id`, `owner_user_id`, and
+`onboarded_by_org_id` are intentionally absent from the row — they are implicit
+from the acting org context.
+
+### `?refresh=true` — force recompute
+
+By default each domain is served from the `item_metrics` cache (TTL controlled
+by `DASHBOARD_CACHE_TTL_SECONDS`, default 3600 seconds). Pass `?refresh=true`
+to bypass the TTL gate and trigger an immediate recompute.
+
+When `?refresh=true` the recompute uses the **blocking** `pg_advisory_lock`
+instead of `pg_try_advisory_lock`. If another request is already recomputing
+the same `(aggregator, domain)` pair, the caller waits until that recompute
+finishes rather than being served stale data. `metadata.refreshed` in the
+response reflects whether a recompute actually ran for at least one domain.
+
+`?refresh=false` (or omitting the param) retains the normal TTL-based behaviour.
 
 ### Per-(aggregator, domain) recompute
 
@@ -271,9 +329,9 @@ is the earliest across the in-scope domains.
   (aggregator, domain) pair. If older than `DASHBOARD_CACHE_TTL_SECONDS`
   (default 3600), the handler recomputes synchronously under a Postgres
   advisory lock keyed on `(aggregator_id, domain)`.
-- Concurrent requests during a recompute don't pile up: the second-and-later
-  requests see `pg_try_advisory_lock` return `false`, serve stale data, and
-  let the in-flight recompute land within seconds.
+- Concurrent requests during a TTL-expired recompute don't pile up: the
+  second-and-later requests see `pg_try_advisory_lock` return `false`, serve
+  stale data, and let the in-flight recompute land within seconds.
 - `metadata.refreshed: true` means *this* request triggered at least one
   domain's recompute; `false` means every in-scope domain was served from
   cache.
@@ -284,8 +342,9 @@ is the earliest across the in-scope domains.
 
 - `?domain=<one of the configured domains>` narrows the response to one
   domain block. Omit for all configured domains.
-- `?status=<one of new|active|at_risk|inactive>` scopes the list (the
-  `by_status` rollup always shows the full status histogram regardless).
+- `?status=<one of new|active|at_risk|inactive>` scopes the `items` list (the
+  `by_status` rollup always shows the full status histogram regardless of the
+  filter).
 - `?page=1&limit=50` for offset pagination. Default page=1, default limit=50,
   max 500. Pagination applies inside each returned domain block.
 - `total_matching` (per domain block) is the count after filter, useful for
@@ -296,24 +355,88 @@ preferred fetcher) and key the cache by `(aggregator_id, domain, page,
 limit, status)` with `staleTime: 60_000` so users navigating filters
 back-and-forth don't re-fetch.
 
-### network.json contract: metric_categories
+### network.json contract: metric_categories (canonical bucket vocabulary)
 
-Each network's `apply` action's `seeker→provider` interaction declares
-`metric_categories` mapping its event_schema.status enum to canonical
-buckets:
+Each interaction that should be tracked in the rollup declares `metric_categories`
+mapping its `event_schema.status` enum values to four canonical buckets:
 
 ```jsonc
 "metric_categories": {
-  "shortlisted": ["shortlisted"],
-  "rejected":    ["rejected"],
-  "pending":     ["created", "submitted"]
+  "create": ["created"],
+  "accept": ["accepted"],
+  "reject": ["rejected"],
+  "cancel": ["cancelled"]
 }
 ```
 
+The four canonical bucket names — `create`, `accept`, `reject`, `cancel` — are
+fixed in code. Any key outside this set is a network-config validation error at
+boot. Any of the four keys may be omitted (treated as empty). Multiple raw
+status values may map to the same canonical bucket
+(`"create": ["created", "submitted"]`).
+
 `metric_categories: null` (or absent) on an interaction means
-"not tracked in the rollup" — recompute returns 0 for those counts.
-The pilot leaves provider→seeker invites at null in both blue_dot and
-purple_dot; future product may populate them.
+"not tracked in the rollup" — recompute contributes 0 for those counts.
+Provider→seeker invite directions remain at null in the current pilot networks;
+future product may populate them.
+
+### network.json contract: `display_name_field`
+
+Each `item_schema` entry in `network.json` may declare a `display_name_field`
+pointing at a string property within its own JSON Schema. The property must not
+be `private: true`. At recompute time, if the value at
+`item_state[display_name_field]` is a non-empty string, that value becomes the
+row's `name` in dashboard and CSV output. If the field is absent or its value
+is empty/null/non-string, `name` falls back to the `item_id` string.
+
+Example (Purple Dot provider):
+
+```jsonc
+"item_schemas": {
+  "profile_1.0": {
+    "display_name_field": "organisation_name",
+    ...
+  }
+}
+```
+
+Validation at boot: if declared, the referenced property must exist in the schema
+and must not have `"private": true`. A violation prevents the API from starting
+(`NETWORK_CONFIG_INVALID`). Schemas where every personally-identifying field is
+private simply omit `display_name_field` — items get `name = item_id`.
+
+### network.json contract: `status_rules`
+
+Each domain entry in `network.json` must have a `status_rules` array that
+declares how a row's `profile_status` (`new`, `active`, `at_risk`, `inactive`)
+is assigned at recompute time. Rules are evaluated top-to-bottom; the first
+matching rule wins. The array must end with a `{ "when": "default" }` entry to
+guarantee every row receives a non-null status.
+
+```jsonc
+"status_rules": [
+  { "status": "new",      "when": { "item_age_days": { "lte": 7 } } },
+  { "status": "active",
+    "when": { "days_since_last": { "buckets": ["create", "accept"], "lte": 30 } } },
+  { "status": "at_risk",
+    "when": { "days_since_last": { "buckets": ["create", "accept", "reject"], "between": [31, 90] } } },
+  { "status": "inactive", "when": "default" }
+]
+```
+
+The three leaf predicates are `item_age_days` (days since profile was created),
+`days_since_last` (days since the most recent action in one of the listed
+canonical buckets — evaluates false if no such action exists), and `count`
+(sum of canonical bucket counts). All accept `lt / lte / gt / gte / eq / between`
+operators; `between: [a, b]` is inclusive on both ends. Top-level keys in a
+`when` object are AND-ed; `all: [...]` and `any: [...]` combinators are also
+available for explicit AND/OR grouping.
+
+For the complete DSL grammar and validation rules, refer to the spec at
+`docs/superpowers/specs/2026-05-26-metrics-config-driven-redesign-design.md`.
+A missing `status_rules` array, a missing `default` tail, a `status` outside
+the four canonical values, or a bucket name outside `{create, accept, reject,
+cancel}` all prevent the API from starting.
 
 ### CSV export
 
@@ -321,20 +444,22 @@ purple_dot; future product may populate them.
 curl -X GET 'http://localhost:2742/api/v1/aggregator/dashboard/export?status=at_risk' \
   -H 'x-api-key: <key>' \
   -H 'x-acting-org-id: <org_id>' \
-  -o participants.csv
+  -o items.csv
 ```
 
-Streamed `text/csv` response. Same staleness contract as the dashboard route.
-The body is generated row-by-row in pages of 5000 so 200k+ rows don't OOM
-the API process.
+Streamed `text/csv` response. Same staleness contract as the dashboard route,
+including `?refresh=true` support. The body is generated row-by-row in pages of
+5000 so 200k+ rows don't OOM the API process.
 
-20-column layout (in order):
+19-column layout (in order):
 
 ```
-item_id, item_domain, item_type, owner_user_id, onboarded_by_org_id, onboarded_via,
-profile_status, profile_completion_pct, profile_created_at, profile_last_updated_at, age_days,
-applications_total, applications_pending, applications_shortlisted, applications_rejected,
-last_applied_at, last_shortlisted_at, last_rejected_at, openings, actionable_tags
+item_network, item_domain, item_type, name, onboarded_via,
+profile_status, profile_completion_pct,
+profile_created_at, profile_last_updated_at, age_days,
+count_create, count_accept, count_reject, count_cancel,
+last_create_at, last_accept_at, last_reject_at, last_cancel_at,
+actionable_tags
 ```
 
 `?domain=` filters the CSV the same way it filters the dashboard. Multi-domain
@@ -342,22 +467,23 @@ orgs see rows from every configured domain in the same CSV unless filtered —
 the `item_domain` column tells you which domain each row belongs to.
 
 CSV format notes:
-- `actionable_tags` is pipe-separated (`missing_phone_number|no_recent_activity`) to keep one column per metric.
-- `openings` is populated only for provider-domain rows; seeker rows are blank in that column.
+- `name` resolves via `display_name_field` (see above); always non-null.
+- `actionable_tags` is pipe-separated (`missing_phone_number|missing_email`) to keep one column per metric. Only schema-derived `missing_<required_field>` tags appear.
+- Nullable timestamp cells emit an empty string.
 - Standard RFC 4180 escaping: commas, quotes, newlines inside a value wrap the cell in double-quotes; embedded `"` doubles to `""`.
-- Filename suggested via `content-disposition: attachment; filename="participants_<org_id>_<YYYY-MM-DD>.csv"`.
+- Filename suggested via `content-disposition: attachment; filename="items_<org_id>_<YYYY-MM-DD>.csv"`.
 
 ### Per-aggregator schema override (advanced)
 
-The recompute reads the JSON Schema for `profile_1.0` to score completion + derive `missing_<field>` tags. By default it uses the first network/domain binding configured in `SERVED_DOMAINS`. Aggregators whose participants live on a different network can override by setting `organization.metadata = '{"network": "...", "domain": "..."}'` (stored as JSON-stringified text). The aggregator-mirror endpoint (`/api/v1/admin/aggregator/upsert`) accepts a `metadata` field for this purpose.
+The recompute reads the JSON Schema for `profile_1.0` to score completion + derive `missing_<field>` tags. By default it uses the first network/domain binding configured in `SERVED_DOMAINS`. Aggregators whose items live on a different network can override by setting `organization.metadata = '{"network": "...", "domain": "..."}'` (stored as JSON-stringified text). The aggregator-mirror endpoint (`/api/v1/admin/aggregator/upsert`) accepts a `metadata` field for this purpose.
 
-### Plan 3 follow-ups (not in pilot)
+### Follow-ups (not in pilot)
 
 - **Async export + blob storage**: switch when sync export crosses ~2 min wall time, ~200k rows, or concurrent-export contention. Today's streaming is fine for current scale.
 - **Pre-warming**: fire-and-forget recompute on participant onboard so the next dashboard hit is hot. Currently the optional cache invalidation is the simpler stand-in (delete the aggregator's rows on onboard).
 - **`q` parameter (free-text search)**: requires a tsvector + GIN index on profile fields. Param is accepted by the schema but ignored today.
 - **Inter-instance aggregation**: querying peer Signals instances. Out of pilot scope.
-- **Recompute observability**: Plan 4 H — log/emit duration, processed count, failure rate per recompute.
+- **Recompute observability**: log/emit duration, processed count, failure rate per recompute.
 
 ## What the acting_org preHandler checks
 
