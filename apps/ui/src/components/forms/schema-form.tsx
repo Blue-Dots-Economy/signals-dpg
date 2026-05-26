@@ -69,9 +69,10 @@ function SectionedObjectFieldTemplate(domainId: string) {
 
           return (
             <section key={section.title}>
-              <h3 className="mb-3 text-sm font-semibold text-foreground border-b border-border pb-1.5">
-                {section.title}
-              </h3>
+              <div className="mb-4 flex items-center gap-2.5">
+                <div className="h-4 w-1 rounded-full bg-primary/70" />
+                <h3 className="text-sm font-semibold text-foreground tracking-tight">{section.title}</h3>
+              </div>
               <div className="space-y-3">
                 {rows.map((row, ri) =>
                   row.length === 2 ? (
@@ -114,7 +115,7 @@ function generateUiSchema(
   uiSchema['ui:submitButtonOptions'] = {
     ...(submitButtonText ? { submitText: submitButtonText } : {}),
     props: {
-      className: 'mt-6 h-11 w-full text-base font-medium',
+      className: 'mt-8 h-12 w-full text-base font-semibold rounded-full bg-brand-cta hover:brightness-110 transition-all active:scale-95 shadow-md',
     },
   };
 
@@ -189,6 +190,7 @@ export function SchemaForm({
           if (formData) onSubmit(formData as Record<string, unknown>);
         }}
         onError={(errors) => onError?.(errors)}
+        showErrorList={false}
         liveValidate={false}
         noHtml5Validate
       />

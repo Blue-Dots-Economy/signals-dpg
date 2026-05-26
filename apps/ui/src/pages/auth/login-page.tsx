@@ -47,7 +47,9 @@ export function LoginPage() {
       } else {
         if (!name.trim()) {
           setIsLoading(false);
-          toast.info('Please enter your name to create an account');
+          toast.info('One more step', {
+            description: 'Enter your name below to finish setting up your account.',
+          });
           return;
         }
         await requestOtp(identifier);
@@ -56,7 +58,9 @@ export function LoginPage() {
         });
       }
     } catch {
-      toast.error('Failed to send OTP. Please try again.');
+      toast.error('Couldn\'t send verification code', {
+        description: 'Check your connection and make sure the number or email is correct, then try again.',
+      });
     } finally {
       setIsLoading(false);
     }

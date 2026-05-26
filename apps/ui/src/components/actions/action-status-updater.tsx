@@ -88,7 +88,9 @@ export function ActionStatusUpdater({
 
   const handleSubmit = () => {
     if (!status) {
-      toast.error('Please select a status');
+      toast.error('No status selected', {
+        description: 'Choose a new status from the dropdown before submitting.',
+      });
       return;
     }
 
@@ -100,7 +102,9 @@ export function ActionStatusUpdater({
       },
       {
         onSuccess: () => {
-          toast.success(`Action ${statusLabels[status]?.toLowerCase() ?? status} successfully`);
+          toast.success(`Action ${statusLabels[status]?.toLowerCase() ?? status}`, {
+            description: 'The status has been updated and both parties will be notified.',
+          });
           onOpenChange(false);
         },
         onError: (error: Error) => {

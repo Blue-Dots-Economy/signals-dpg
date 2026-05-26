@@ -8,12 +8,12 @@ interface AuthShellProps {
 
 export function AuthShell({ children }: AuthShellProps) {
   return (
-    <div className="min-h-screen grid grid-cols-1 lg:grid-cols-[1.1fr_1fr]">
-      {/* Left: branded hero panel (desktop only) */}
+    <div className="min-h-screen lg:h-screen lg:overflow-hidden grid grid-cols-1 lg:grid-cols-[1.1fr_1fr]">
+      {/* Left: branded hero panel (desktop only) — stays fixed while right scrolls */}
       <BrandHero />
 
-      {/* Right: form panel */}
-      <div className="flex flex-col bg-background">
+      {/* Right: form panel — scrolls independently on desktop */}
+      <div className="flex flex-col bg-background lg:overflow-y-auto">
         {/* Mobile brand band — collapses hero to a top strip on small screens */}
         <div className="bg-brand-hero lg:hidden flex items-center gap-3 px-6 py-4">
           <svg

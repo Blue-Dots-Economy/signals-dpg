@@ -304,6 +304,18 @@
 }
 
 /*
+ * Sonner toasts default to align-items: center, which vertically centers the
+ * icon between the title and description. Override so the icon aligns with
+ * the title line instead.
+ */
+[data-sonner-toast] {
+  align-items: flex-start !important;
+}
+[data-sonner-toast] [data-icon] {
+  margin-top: 2px;
+}
+
+/*
  * Browsers stain autofilled inputs blue/yellow. Match form bg so prefilled
  * fields look the same as fresh ones.
  */

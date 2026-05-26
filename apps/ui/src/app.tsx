@@ -14,7 +14,13 @@ export function App() {
     <AuthProvider>
       <BrowserRouter>
         <NetworkThemeProvider>
-          <Toaster position="top-right" richColors closeButton />
+          <Toaster
+            position="top-center"
+            richColors
+            closeButton
+            offset={20}
+            toastOptions={{ duration: 5000 }}
+          />
           <Routes>
             <Route path="/" element={<HomePage />} />
             <Route path="/profile/new" element={<RequireAuth><ProfileFormPage /></RequireAuth>} />

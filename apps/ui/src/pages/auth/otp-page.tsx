@@ -1,8 +1,9 @@
 import { useState, useEffect } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
-import { Loader2, ArrowLeft } from 'lucide-react';
+import { Loader2, ArrowLeft, OctagonX } from 'lucide-react';
 import { OtpInput } from '@/components/auth/otp-input';
 import { AuthShell } from '@/components/layout/auth-shell';
+import { Alert, AlertTitle, AlertDescription } from '@/components/ui/alert';
 import { requestOtp, type AuthIdentifier } from '@/lib/auth-api';
 import { useAuth } from '@/contexts/auth-context';
 import { toast } from 'sonner';
@@ -23,6 +24,7 @@ export function OtpPage() {
   const { verifyOtp } = useAuth();
   const [isLoading, setIsLoading] = useState(false);
   const [countdown, setCountdown] = useState(60);
+  const [inlineError, setInlineError] = useState<{ title: string; description: string } | null>(null);
 
   const state = location.state as AuthState | null;
   const identifierLabel = state?.email ?? state?.phoneNumber;
@@ -45,12 +47,20 @@ export function OtpPage() {
   const handleOtpComplete = async (otp: string) => {
     if (!state || !identifierLabel) return;
     setIsLoading(true);
+    setInlineError(null);
     try {
       await verifyOtp(getAuthIdentifier(state), otp, state.userExists ? undefined : state.name);
-      toast.success(state.userExists ? 'Welcome back!' : 'Account created successfully!');
+      toast.success(state.userExists ? 'Welcome back!' : 'Account created successfully!', {
+        description: state.userExists
+          ? 'You\'re signed in. Explore profiles and connect with others on the network.'
+          : 'Your account is ready. Start by creating your profile so others can discover you.',
+      });
       navigate(state.redirectTo ?? '/', { replace: true });
     } catch {
-      toast.error('Invalid OTP. Please try again.');
+      setInlineError({
+        title: 'Incorrect verification code',
+        description: 'The code you entered doesn\'t match. Double-check your messages and try again, or request a new code below.',
+      });
     } finally {
       setIsLoading(false);
     }
@@ -59,12 +69,18 @@ export function OtpPage() {
   const handleResendOtp = async () => {
     if (!state || !identifierLabel || countdown > 0) return;
     setIsLoading(true);
+    setInlineError(null);
     try {
       await requestOtp(getAuthIdentifier(state));
       setCountdown(60);
-      toast.success('OTP resent successfully');
+      toast.success('New code sent', {
+        description: 'Check your messages for the new 6-digit verification code.',
+      });
     } catch {
-      toast.error('Failed to resend OTP');
+      setInlineError({
+        title: 'Couldn\'t send a new code',
+        description: 'Something went wrong while requesting a new verification code. Please wait a moment and try again.',
+      });
     } finally {
       setIsLoading(false);
     }
@@ -97,6 +113,15 @@ export function OtpPage() {
       <div className="flex justify-center mb-6">
         <OtpInput onComplete={handleOtpComplete} disabled={isLoading} />
       </div>
+
+      {/* Inline error */}
+      {inlineError && (
+        <Alert variant="destructive" className="mb-4">
+          <OctagonX className="h-4 w-4" />
+          <AlertTitle>{inlineError.title}</AlertTitle>
+          <AlertDescription>{inlineError.description}</AlertDescription>
+        </Alert>
+      )}
 
       {isLoading && (
         <div className="flex justify-center mb-4">

@@ -561,17 +561,23 @@ export function HomePage() {
         <ActionHandler
           onActionSubmit={async (actionType, _actionSchema, formData, targetItemId) => {
             if (!myItem) {
-              toast.error('Create your profile first to connect');
+              toast.error('Profile required', {
+                description: 'You need to create your own profile before you can connect with others.',
+              });
               throw new Error('No source item');
             }
             if (!user) {
-              toast.error('You must be signed in to connect');
+              toast.error('Sign in to connect', {
+                description: 'You need to be signed in to send connection requests.',
+              });
               throw new Error('No user');
             }
             const allItems = Object.values(domainItems).flat();
             const targetItem = allItems.find((i) => i.item_id === targetItemId);
             if (!targetItem) {
-              toast.error('Could not find the target item');
+              toast.error('Profile not found', {
+                description: 'The profile you\'re trying to connect with is no longer available. Try refreshing the page.',
+              });
               throw new Error('Target item not found');
             }
 
@@ -608,7 +614,9 @@ export function HomePage() {
               },
               sourceItemInstanceUrl // Call the SOURCE instance (where myItem exists)
             );
-            toast.success(`${actionType.charAt(0).toUpperCase() + actionType.slice(1)} request sent!`);
+            toast.success(`${actionType.charAt(0).toUpperCase() + actionType.slice(1)} request sent!`, {
+              description: 'The other party will be notified and can accept or respond to your request.',
+            });
           }}
         >
           {(triggerAction) =>
