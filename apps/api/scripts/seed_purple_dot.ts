@@ -1,7 +1,18 @@
 /**
- * Seed Purple Dot sample records.
+ * Seed Purple Dot sample records — FAST-PATH FALLBACK.
  *
- * Creates:
+ * This script bypasses the Aggregator-DPG handshake and writes directly to
+ * Signals' DB. Useful for fast iteration on Signals-internal features.
+ *
+ * For full end-to-end integration testing of the Aggregator → Signals flow,
+ * use the operator runbook at:
+ *   docs/operations/e2e-purple-dot-runbook.md
+ * which drives the real public registration endpoint via
+ *   pnpm e2e:qr <link-slug> [count]
+ * and the real /action/perform API via
+ *   pnpm e2e:actions
+ *
+ * Creates (when run via this fallback):
  *   - organization "purple_dot_aggregator" (type='aggregator')   [default mode only]
  *   - user "purple_dot_seed" (service account for the aggregator)
  *   - member row linking purple_dot_seed to the aggregator org (role='service')

@@ -33,3 +33,7 @@ data/
 #Ignore cursor AI rules
 .fastembed_cache
 .cursor/rules/codacy.mdc
+
+# E2E test scratch + env
+scripts/e2e/.env
+scripts/e2e/scratch/
