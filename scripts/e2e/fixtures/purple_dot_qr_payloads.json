@@ -1,0 +1,122 @@
+[
+  {
+    "beneficiary_name": "Asha Devi",
+    "mobile_number": "9000000001",
+    "age": 28,
+    "gender": "Female",
+    "disability_type": ["Locomotor Disability"],
+    "disability_percentage": 60,
+    "looking_for": ["Employment Opportunities"],
+    "looking_for_details": "Remote work suited to wheelchair access",
+    "service_city": "Lucknow",
+    "documents_available": ["Aadhaar", "Disability Certificate"]
+  },
+  {
+    "beneficiary_name": "Rakesh Kumar",
+    "mobile_number": "9000000002",
+    "age": 34,
+    "gender": "Male",
+    "disability_type": ["Blindness"],
+    "disability_percentage": 100,
+    "looking_for": ["Training & Skill Building", "Assistive Devices"],
+    "looking_for_details": "Screen-reader training and a refreshable braille display",
+    "service_city": "Kanpur",
+    "documents_available": ["Aadhaar", "Disability Certificate", "Income Certificate"]
+  },
+  {
+    "beneficiary_name": "Meera Singh",
+    "mobile_number": "9000000003",
+    "age": 22,
+    "gender": "Female",
+    "disability_type": ["Hearing Impairment"],
+    "disability_percentage": 70,
+    "looking_for": ["Scholarships", "Training & Skill Building"],
+    "looking_for_details": "Sign-language training course; tuition support",
+    "service_city": "Lucknow",
+    "documents_available": ["Aadhaar", "Disability Certificate", "School ID"]
+  },
+  {
+    "beneficiary_name": "Vikram Yadav",
+    "mobile_number": "9000000004",
+    "age": 41,
+    "gender": "Male",
+    "disability_type": ["Locomotor Disability"],
+    "disability_percentage": 40,
+    "looking_for": ["Employment Opportunities"],
+    "looking_for_details": "Computer operator role, work-from-home",
+    "service_city": "Varanasi",
+    "documents_available": ["Aadhaar", "Disability Certificate"]
+  },
+  {
+    "beneficiary_name": "Priya Sharma",
+    "mobile_number": "9000000005",
+    "age": 26,
+    "gender": "Female",
+    "disability_type": ["Low Vision"],
+    "disability_percentage": 50,
+    "looking_for": ["Counselling & Mentorship", "Employment Opportunities"],
+    "looking_for_details": "Career counselling for accessible roles",
+    "service_city": "Lucknow",
+    "documents_available": ["Aadhaar", "Disability Certificate"]
+  },
+  {
+    "beneficiary_name": "Sanjay Verma",
+    "mobile_number": "9000000006",
+    "age": 38,
+    "gender": "Male",
+    "disability_type": ["Multiple Disabilities"],
+    "disability_percentage": 80,
+    "looking_for": ["Health & Rehabilitation", "Application Support"],
+    "looking_for_details": "Pension scheme application assistance",
+    "service_city": "Allahabad",
+    "documents_available": ["Aadhaar", "Disability Certificate", "Income Certificate"]
+  },
+  {
+    "beneficiary_name": "Anjali Gupta",
+    "mobile_number": "9000000007",
+    "age": 19,
+    "gender": "Female",
+    "disability_type": ["Cerebral Palsy"],
+    "disability_percentage": 75,
+    "looking_for": ["Scholarships", "Health & Rehabilitation"],
+    "looking_for_details": "College scholarship and physiotherapy sessions",
+    "service_city": "Lucknow",
+    "documents_available": ["Aadhaar", "Disability Certificate", "School ID"]
+  },
+  {
+    "beneficiary_name": "Manoj Tiwari",
+    "mobile_number": "9000000008",
+    "age": 45,
+    "gender": "Male",
+    "disability_type": ["Locomotor Disability"],
+    "disability_percentage": 55,
+    "looking_for": ["Financial Products (Loans/Insurance)"],
+    "looking_for_details": "Microloan for assistive-tech-equipped tailoring shop",
+    "service_city": "Kanpur",
+    "documents_available": ["Aadhaar", "Disability Certificate", "Bank Account"]
+  },
+  {
+    "beneficiary_name": "Sunita Pal",
+    "mobile_number": "9000000009",
+    "age": 31,
+    "gender": "Female",
+    "disability_type": ["Speech and Language Disability"],
+    "disability_percentage": 65,
+    "looking_for": ["Employment Opportunities", "Accessibility Support"],
+    "looking_for_details": "Communication-light data-entry role with AAC support",
+    "service_city": "Lucknow",
+    "documents_available": ["Aadhaar", "Disability Certificate"]
+  },
+  {
+    "beneficiary_name": "Deepak Mishra",
+    "mobile_number": "9000000010",
+    "age": 29,
+    "gender": "Male",
+    "disability_type": ["Intellectual Disability"],
+    "disability_percentage": 50,
+    "looking_for": ["Training & Skill Building", "Employment Opportunities"],
+    "looking_for_details": "Sheltered workshop training; supported employment",
+    "service_city": "Varanasi",
+    "documents_available": ["Aadhaar", "Disability Certificate"]
+  }
+]

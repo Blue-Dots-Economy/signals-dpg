@@ -19,6 +19,8 @@
     "db:init:api": "pnpm --filter api db:init",
     "db:seed:services:api": "pnpm --filter api db:seed:services",
     "db:seed:purple_dot:api": "pnpm --filter api db:seed:purple_dot",
+    "e2e:qr": "tsx scripts/e2e/submit_qr_participants.mts",
+    "e2e:actions": "pnpm --filter api exec tsx scripts/e2e/seed_actions.mts",
     "dev:ui": "node scripts/turbo-with-root-env.mjs run dev --filter=ui",
     "build:ui": "node scripts/turbo-with-root-env.mjs run build --filter=ui",
     "preview:ui": "node scripts/turbo-with-root-env.mjs run preview --filter=ui",
@@ -37,8 +39,9 @@
   "packageManager": "pnpm@11.1.2",
   "devDependencies": {
     "@types/node": "^25.8.0",
-    "turbo": "^2.9.14",
     "tsup": "^8.5.1",
+    "tsx": "^4.22.1",
+    "turbo": "^2.9.14",
     "typescript": "^6.0.3"
   }
 }
