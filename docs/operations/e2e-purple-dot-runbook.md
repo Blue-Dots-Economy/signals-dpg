@@ -168,10 +168,15 @@ Plus 2 provider→seeker connects (metric_categories: null, should not affect ro
 [01/10]      action.created_at ← NOW() - 1d
 [02/10] perform → created action=...  target=create/new
 ...
+[04/10] perform → created action=...  target=accept/active
+[04/10]      update → accepted (direct SQL)
+[04/10]      item.created_at ← NOW() - 20d
+[04/10]      action.created_at ← NOW() - 15d
+...
 [09/10] (no action; target=inactive)
 [09/10]      item.created_at ← NOW() - 100d
 [10/10] perform → created action=...  target=cancel/inactive
-[10/10]      update → cancelled
+[10/10]      update → cancelled (direct SQL)
 [10/10]      item.created_at ← NOW() - 120d
 [10/10]      action.created_at ← NOW() - 100d
 [p→s 1/2] connect created (id=...) — should NOT show in seeker rollup
@@ -181,6 +186,13 @@ Done. After ?refresh=true on the dashboard you should see:
   by_status         : { new: 2, active: 3, at_risk: 3, inactive: 2 }
   by_action_status  : { create: 4, accept: 3, reject: 1, cancel: 1 } (seeker side; provider side mirrors)
 ```
+
+The script uses Plan A on-behalf-of (`acting_as_user_id`) only for `/action/perform`.
+For action_status transitions (accept/reject/cancel), Signals' `/action/update-status`
+is self-acted only — no on-behalf-of by design (see spec
+`2026-05-23-action-on-behalf-of-network-service-tier-design.md`). The
+script bypasses the API and updates `item_actions.action_status` directly via PG.
+This is test-fixture privilege, same as the `items.created_at` backdating.
 
 ## Step 6 — Verify dashboards (manual)
 

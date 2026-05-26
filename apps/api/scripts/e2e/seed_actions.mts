@@ -7,8 +7,8 @@
  *   1. Discover seekers + providers via direct DB query (test-fixture
  *      privilege — actions still go through real HTTP).
  *   2. For each (seeker, distribution-plan-row): create connect via
- *      /action/perform (Plan A on-behalf-of), optionally transition via
- *      /action/update-status.
+ *      /action/perform (Plan A on-behalf-of), optionally transition the
+ *      action_status directly via PG UPDATE (see transitionActionStatus for why).
  *   3. UPDATE items.created_at to land the item at the target item_age_days.
  *   4. UPDATE item_actions.created_at to land the action at the target
  *      action_age_days. updated_at is left alone (recompute uses created_at).
@@ -228,28 +228,30 @@ async function postPerform(
   return { status: res.status, body };
 }
 
-async function postUpdate(
-  actionId: string,
-  newStatus: string,
-  apiKey: string,
-  orgId: string,
-  remark: string,
-): Promise<{ status: number; body: { error?: string; message?: string } }> {
-  const res = await fetch(`${signalsUrl}/api/v1/action/update-status`, {
-    method: 'POST',
-    headers: {
-      'content-type': 'application/json',
-      'x-api-key': apiKey,
-      'x-acting-org-id': orgId,
-    },
-    body: JSON.stringify({
-      action_id: actionId,
-      action_status: newStatus,
-      remarks: remark,
-    }),
-  });
-  const body = (await res.json().catch(() => ({}))) as { error?: string; message?: string };
-  return { status: res.status, body };
+/**
+ * Transition action_status directly via PG. The Signals `/action/update-status`
+ * route is self-acted only (no on-behalf-of), so the aggregator's apikey
+ * cannot satisfy the target-owner check. Test fixtures bypass the API for
+ * this transition the same way they bypass for items.created_at backdating.
+ *
+ * Mirrors what /action/update-status would have done:
+ *   - sets action_status
+ *   - increments update_count
+ *   - touches updated_at
+ *
+ * Does NOT write to action_events (the event-stream side table). The
+ * dashboard recompute reads only item_actions.action_status, so the
+ * dashboard rollup is correct. If future analytics depend on action_events,
+ * this fixture needs to also append a row there.
+ */
+async function transitionActionStatus(actionId: string, newStatus: string): Promise<void> {
+  await db.execute(sql`
+    UPDATE item_actions
+    SET action_status = ${newStatus},
+        update_count  = update_count + 1,
+        updated_at    = NOW()
+    WHERE action_id = ${actionId}
+  `);
 }
 
 async function lookupExistingActionId(sourceItemId: string, targetItemId: string): Promise<string | null> {
@@ -323,22 +325,11 @@ for (const p of planned) {
       process.exit(1);
     }
 
+    // 3b. Transition if the target bucket isn't 'create'
     if (plan.action.bucket !== 'create') {
       const newStatus = STATUS_FOR_BUCKET[plan.action.bucket];
-      const useProvider = newStatus === 'accepted' || newStatus === 'rejected';
-      const upd = await postUpdate(
-        actionId,
-        newStatus,
-        useProvider ? providerApiKey : seekerApiKey,
-        useProvider ? providerOrgId : seekerOrgId,
-        `E2E test → ${newStatus}`,
-      );
-      if (upd.status !== 200) {
-        console.error(`${label} /action/update-status (${newStatus}) failed: HTTP ${upd.status}`);
-        console.error(`  body:`, upd.body);
-        process.exit(1);
-      }
-      console.log(`${label}      update → ${newStatus}`);
+      await transitionActionStatus(actionId, newStatus);
+      console.log(`${label}      update → ${newStatus} (direct SQL)`);
     }
   } else {
     console.log(`${label} (no action; target=${plan.expected_status})`);
