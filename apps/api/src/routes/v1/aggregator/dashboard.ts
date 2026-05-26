@@ -5,7 +5,7 @@ import type {
 } from 'fastify';
 import { db } from '@api/db/postgres/drizzle_config';
 import { item_metrics } from '../../../../db/postgres/schema/metrics.js';
-import { organization, user } from '../../../../db/postgres/schema/auth.js';
+import { organization } from '../../../../db/postgres/schema/auth.js';
 import { eq, and, sql, desc, getTableColumns } from 'drizzle-orm';
 import {
   DashboardRequestQuery,
@@ -20,10 +20,10 @@ import {
 /**
  * GET /api/v1/aggregator/dashboard
  *
- * Plan B Task 10. Returns a per-domain rollup + paginated participants
- * list for the acting aggregator. The set of in-scope domains is
- * determined by `organization.metadata.domains` (a JSON string column);
- * callers can narrow to one with `?domain=`.
+ * Returns a per-domain rollup + paginated items list for the acting
+ * aggregator. The set of in-scope domains is determined by
+ * `organization.metadata.domains` (a JSON string column); callers
+ * can narrow to one with `?domain=`.
  *
  * Auth/acting_org resolution happens upstream in aggregator_routes'
  * preHandler chain. This handler enforces:
@@ -77,9 +77,7 @@ export const aggregator_dashboard_handler = async (
           (x): x is string => typeof x === 'string',
         );
       }
-    } catch {
-      /* fallthrough → 400 below */
-    }
+    } catch { /* fallthrough → 400 below */ }
   }
   if (configured_domains.length === 0) {
     return reply.code(400).send({
@@ -88,7 +86,7 @@ export const aggregator_dashboard_handler = async (
     });
   }
 
-  const { page, limit, domain: requested_domain, status } = request.query;
+  const { page, limit, domain: requested_domain, status, refresh } = request.query;
   let scope: string[] = configured_domains;
   if (requested_domain) {
     if (!configured_domains.includes(requested_domain)) {
@@ -104,24 +102,17 @@ export const aggregator_dashboard_handler = async (
   // advisory-lock key (see services/metrics/staleness.ts), so domains
   // can refresh concurrently without blocking each other.
   const staleness = await Promise.all(
-    scope.map((d) => check_and_refresh_if_stale(acting.org_id, d)),
+    scope.map((d) => check_and_refresh_if_stale(acting.org_id, d, refresh)),
   );
-  const earliest_last_computed =
-    staleness
-      .map((s) => s.last_computed_at)
-      .filter((d): d is Date => d !== null)
-      .sort((a, b) => a.getTime() - b.getTime())[0] ?? null;
+  const earliest_last_computed = staleness
+    .map((s) => s.last_computed_at)
+    .filter((d): d is Date => d !== null)
+    .sort((a, b) => a.getTime() - b.getTime())[0] ?? null;
   const any_refreshed = staleness.some((s) => s.refreshed);
 
   const by_domain: Record<string, unknown> = {};
   for (const d of scope) {
-    by_domain[d] = await build_domain_block(
-      acting.org_id,
-      d,
-      page,
-      limit,
-      status,
-    );
+    by_domain[d] = await build_domain_block(acting.org_id, d, page, limit, status);
   }
 
   return {
@@ -149,130 +140,84 @@ async function build_domain_block(
     ? and(base_where, eq(item_metrics.profileStatus, status))
     : base_where;
 
-  // Status histogram + application sums (per profile_status bucket).
-  const rollup_rows = (await db
-    .select({
-      profile_status: item_metrics.profileStatus,
-      n: sql<number>`count(*)::int`,
-      apps_total: sql<number>`COALESCE(sum(${item_metrics.applicationsTotal}), 0)::int`,
-      pending: sql<number>`COALESCE(sum(${item_metrics.applicationsPending}), 0)::int`,
-      shortlisted: sql<number>`COALESCE(sum(${item_metrics.applicationsShortlisted}), 0)::int`,
-      rejected: sql<number>`COALESCE(sum(${item_metrics.applicationsRejected}), 0)::int`,
-    })
-    .from(item_metrics)
-    .where(base_where!)
-    .groupBy(item_metrics.profileStatus)) as Array<{
-    profile_status: string | null;
-    n: number;
-    apps_total: number;
-    pending: number;
-    shortlisted: number;
-    rejected: number;
-  }>;
-
-  // Per-user aggregates (one row).
-  const user_agg_result: unknown = await db.execute(sql`
+  // Single aggregate query for the rollup tiles + derived metrics.
+  // ?status= filters the items list but NOT the rollup counts — those
+  // reflect the full domain population regardless of the status filter.
+  const rollupRes: unknown = await db.execute(sql`
     SELECT
-      COUNT(DISTINCT ${item_metrics.ownerUserId})::int             AS unique_users,
-      COUNT(*) FILTER (WHERE ${item_metrics.profileCompletionPct} >= 100)::int AS complete_profiles_count,
-      COUNT(DISTINCT ${item_metrics.ownerUserId}) FILTER (
-        WHERE ${item_metrics.applicationsTotal} > 0
-      )::int                                                       AS users_with_applications,
+      COUNT(*)::int AS total_items,
+      COUNT(*) FILTER (WHERE ${item_metrics.profileCompletionPct} >= 100)::int AS complete_profiles,
       COUNT(*) FILTER (
-        WHERE ${item_metrics.profileCreatedAt} >= NOW() - INTERVAL '7 days'
-      )::int                                                       AS new_users_last_7_days,
-      COALESCE(SUM(${item_metrics.applicationsTotal}), 0)::int     AS total_applications
+        WHERE (${item_metrics.countCreate} + ${item_metrics.countAccept}
+             + ${item_metrics.countReject} + ${item_metrics.countCancel}) > 0
+      )::int AS has_applications,
+
+      COUNT(*) FILTER (WHERE ${item_metrics.profileStatus} = 'new')::int      AS s_new,
+      COUNT(*) FILTER (WHERE ${item_metrics.profileStatus} = 'active')::int   AS s_active,
+      COUNT(*) FILTER (WHERE ${item_metrics.profileStatus} = 'at_risk')::int  AS s_at_risk,
+      COUNT(*) FILTER (WHERE ${item_metrics.profileStatus} = 'inactive')::int AS s_inactive,
+
+      COALESCE(SUM(${item_metrics.countCreate}), 0)::int AS b_create,
+      COALESCE(SUM(${item_metrics.countAccept}), 0)::int AS b_accept,
+      COALESCE(SUM(${item_metrics.countReject}), 0)::int AS b_reject,
+      COALESCE(SUM(${item_metrics.countCancel}), 0)::int AS b_cancel,
+
+      COUNT(DISTINCT ${item_metrics.ownerUserId})::int AS unique_users,
+      COALESCE(SUM(
+        ${item_metrics.countCreate} + ${item_metrics.countAccept}
+        + ${item_metrics.countReject} + ${item_metrics.countCancel}
+      ), 0)::int AS total_actions,
+      COUNT(DISTINCT ${item_metrics.ownerUserId}) FILTER (
+        WHERE (${item_metrics.countCreate} + ${item_metrics.countAccept}
+             + ${item_metrics.countReject} + ${item_metrics.countCancel}) > 0
+      )::int AS engaged_users
     FROM ${item_metrics}
     WHERE ${item_metrics.onboardedByOrgId} = ${org_id}
       AND ${item_metrics.itemDomain} = ${domain};
   `);
-  const user_agg_rows: Array<{
-    unique_users: number;
-    complete_profiles_count: number;
-    users_with_applications: number;
-    new_users_last_7_days: number;
-    total_applications: number;
-  }> = Array.isArray(user_agg_result)
-    ? (user_agg_result as Array<{
-        unique_users: number;
-        complete_profiles_count: number;
-        users_with_applications: number;
-        new_users_last_7_days: number;
-        total_applications: number;
-      }>)
-    : (
-        (user_agg_result as {
-          rows?: Array<{
-            unique_users: number;
-            complete_profiles_count: number;
-            users_with_applications: number;
-            new_users_last_7_days: number;
-            total_applications: number;
-          }>;
-        }).rows ?? []
-      );
-  const user_agg = user_agg_rows[0];
+  const rollupRow: Record<string, number> = (Array.isArray(rollupRes)
+    ? (rollupRes as Array<Record<string, number>>)[0]
+    : ((rollupRes as { rows?: Array<Record<string, number>> }).rows ?? [])[0]) ?? {};
 
-  const items_total = rollup_rows.reduce((s, r) => s + (r.n ?? 0), 0);
-  const apps_total = rollup_rows.reduce(
-    (s, r) => s + (r.apps_total ?? 0),
-    0,
-  );
-
-  // Mode-wise counts (group by onboarded_via).
-  const mode_result: unknown = await db.execute(sql`
+  const modeRes: unknown = await db.execute(sql`
     SELECT ${item_metrics.onboardedVia} AS via, COUNT(*)::int AS n
     FROM ${item_metrics}
     WHERE ${item_metrics.onboardedByOrgId} = ${org_id}
       AND ${item_metrics.itemDomain} = ${domain}
     GROUP BY ${item_metrics.onboardedVia};
   `);
-  const mode_rows: Array<{ via: string | null; n: number }> = Array.isArray(
-    mode_result,
-  )
-    ? (mode_result as Array<{ via: string | null; n: number }>)
-    : (
-        (mode_result as { rows?: Array<{ via: string | null; n: number }> })
-          .rows ?? []
-      );
-
+  const modeRows: Array<{ via: string | null; n: number }> = Array.isArray(modeRes)
+    ? (modeRes as Array<{ via: string | null; n: number }>)
+    : ((modeRes as { rows?: Array<{ via: string | null; n: number }> }).rows ?? []);
   const mode_wise_counts: Record<string, number> = {};
-  for (const r of mode_rows) {
-    if (r?.via) mode_wise_counts[r.via] = r.n;
-  }
+  for (const r of modeRows) if (r?.via) mode_wise_counts[r.via] = r.n;
+
+  const total_items = rollupRow.total_items ?? 0;
+  const unique_users = rollupRow.unique_users ?? 0;
+  const total_actions = rollupRow.total_actions ?? 0;
+  const engaged_users = rollupRow.engaged_users ?? 0;
 
   const rollup = {
-    items_total,
-    by_status: Object.fromEntries(
-      rollup_rows.map((r) => [r.profile_status ?? 'unknown', r.n ?? 0]),
-    ) as Record<string, number>,
-    applications_total: apps_total,
-    applications_pending: rollup_rows.reduce(
-      (s, r) => s + (r.pending ?? 0),
-      0,
-    ),
-    applications_shortlisted: rollup_rows.reduce(
-      (s, r) => s + (r.shortlisted ?? 0),
-      0,
-    ),
-    applications_rejected: rollup_rows.reduce(
-      (s, r) => s + (r.rejected ?? 0),
-      0,
-    ),
-    unique_users: user_agg?.unique_users ?? 0,
-    complete_profiles_count: user_agg?.complete_profiles_count ?? 0,
-    avg_profiles_per_user: user_agg?.unique_users
-      ? items_total / user_agg.unique_users
-      : 0,
-    users_with_applications: user_agg?.users_with_applications ?? 0,
-    avg_applications_per_user: user_agg?.users_with_applications
-      ? (user_agg?.total_applications ?? 0) / user_agg.users_with_applications
-      : 0,
-    new_users_last_7_days: user_agg?.new_users_last_7_days ?? 0,
+    total_items,
+    complete_profiles: rollupRow.complete_profiles ?? 0,
+    has_applications: rollupRow.has_applications ?? 0,
+    by_status: {
+      new: rollupRow.s_new ?? 0,
+      active: rollupRow.s_active ?? 0,
+      at_risk: rollupRow.s_at_risk ?? 0,
+      inactive: rollupRow.s_inactive ?? 0,
+    },
+    by_action_status: {
+      create: rollupRow.b_create ?? 0,
+      accept: rollupRow.b_accept ?? 0,
+      reject: rollupRow.b_reject ?? 0,
+      cancel: rollupRow.b_cancel ?? 0,
+    },
+    avg_items_per_user: unique_users > 0 ? total_items / unique_users : 0,
+    avg_actions_per_user: engaged_users > 0 ? total_actions / engaged_users : 0,
     mode_wise_counts,
   };
 
-  // total_matching applies the status filter (rollup above does not).
   const total_rows = (await db
     .select({ n: sql<number>`count(*)::int` })
     .from(item_metrics)
@@ -280,45 +225,42 @@ async function build_domain_block(
   const total_matching = total_rows[0]?.n ?? 0;
 
   const list_rows = await db
-    .select({
-      ...getTableColumns(item_metrics),
-      name: user.name,
-    })
+    .select(getTableColumns(item_metrics))
     .from(item_metrics)
-    .leftJoin(user, eq(user.id, item_metrics.ownerUserId))
     .where(filter_where!)
-    .orderBy(
-      desc(item_metrics.profileLastUpdatedAt),
-      desc(item_metrics.itemId),
-    )
+    .orderBy(desc(item_metrics.profileLastUpdatedAt), desc(item_metrics.itemId))
     .limit(limit)
     .offset((page - 1) * limit);
 
-  const participants = list_rows.map((r) => ({
-    item_id: r.itemId,
+  const items = list_rows.map((r) => ({
     item_network: r.itemNetwork,
-    owner_user_id: r.ownerUserId,
-    name: r.name,
+    item_domain: r.itemDomain,
     item_type: r.itemType,
-    profile_status: r.profileStatus,
+    name: r.displayName,
+    onboarded_via: r.onboardedVia,
+
+    profile_status: r.profileStatus as 'new' | 'active' | 'at_risk' | 'inactive' | null,
     profile_completion_pct: r.profileCompletionPct,
     profile_created_at: r.profileCreatedAt?.toISOString() ?? null,
     profile_last_updated_at: r.profileLastUpdatedAt?.toISOString() ?? null,
     age_days: r.ageDays,
-    applications_total: r.applicationsTotal ?? 0,
-    applications_pending: r.applicationsPending ?? 0,
-    applications_shortlisted: r.applicationsShortlisted ?? 0,
-    applications_rejected: r.applicationsRejected ?? 0,
-    last_applied_at: r.lastAppliedAt?.toISOString() ?? null,
-    last_shortlisted_at: r.lastShortlistedAt?.toISOString() ?? null,
-    last_rejected_at: r.lastRejectedAt?.toISOString() ?? null,
-    openings: r.openings ?? null,
+
+    count_create: r.countCreate ?? 0,
+    count_accept: r.countAccept ?? 0,
+    count_reject: r.countReject ?? 0,
+    count_cancel: r.countCancel ?? 0,
+
+    last_create_at: r.lastCreateAt?.toISOString() ?? null,
+    last_accept_at: r.lastAcceptAt?.toISOString() ?? null,
+    last_reject_at: r.lastRejectAt?.toISOString() ?? null,
+    last_cancel_at: r.lastCancelAt?.toISOString() ?? null,
+
     actionable_tags: r.actionableTags ?? [],
   }));
 
   return {
     rollup,
-    participants,
+    items,
     total_matching,
     next_cursor: list_rows.length === limit ? String(page + 1) : null,
   };

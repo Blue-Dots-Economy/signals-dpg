@@ -6,20 +6,40 @@ import {
 } from 'fastify-type-provider-zod';
 
 /**
- * Plan B Task 10 — multi-domain unit tests for GET /api/v1/aggregator/dashboard.
+ * Multi-domain unit tests for GET /api/v1/aggregator/dashboard.
  *
  * Covers the multi-domain shape: when org.metadata.domains has more than
  * one entry, by_domain contains one block per domain, staleness is checked
  * per domain (in parallel via Promise.all), and the top-level
  * last_computed_at is the earliest across the per-domain timestamps.
  *
- * Mock pattern mirrors dashboard.test.ts but the staleness mock can return
- * different timestamps per domain.
+ * build_domain_block calls db.execute twice per domain:
+ *   1st: rollup aggregate row
+ *   2nd: mode-wise counts
+ * db.select is used for the org lookup, count query, and list rows only.
  */
 
 interface StalenessOutcome {
   refreshed: boolean;
   last_computed_at: Date | null;
+}
+
+// Rollup row shape returned by db.execute (first call per domain).
+interface RollupRow {
+  total_items: number;
+  complete_profiles: number;
+  has_applications: number;
+  s_new: number;
+  s_active: number;
+  s_at_risk: number;
+  s_inactive: number;
+  b_create: number;
+  b_accept: number;
+  b_reject: number;
+  b_cancel: number;
+  unique_users: number;
+  total_actions: number;
+  engaged_users: number;
 }
 
 const state = {
@@ -33,21 +53,20 @@ const state = {
   org_metadata: JSON.stringify({
     domains: ['seeker', 'provider'],
   }) as string | null,
-  // Per-domain rollup fixtures.
-  rollup_by_domain: {} as Record<string, Array<Record<string, unknown>>>,
-  user_agg_by_domain: {} as Record<string, Array<Record<string, unknown>>>,
+  // Per-domain rollup row fixtures (single row per domain).
+  rollup_row_by_domain: {} as Record<string, RollupRow>,
+  // Per-domain mode rows fixtures.
   mode_rows_by_domain: {} as Record<string, Array<Record<string, unknown>>>,
   total_matching_by_domain: {} as Record<string, number>,
   list_rows_by_domain: {} as Record<string, Array<Record<string, unknown>>>,
   staleness_calls: [] as Array<{ org_id: string; domain: string }>,
-  // db.select cycles in domain order — we use a counter to attribute
-  // each rollup/count/list call to the next domain in scope.
+  // db.select cycles — attributed by counter to domains in order.
   select_cycle: {
     domain_order: [] as string[],
-    rollup_idx: 0,
     count_idx: 0,
     list_idx: 0,
   },
+  // db.execute cycles: 2 calls per domain (rollup then mode rows).
   execute_cycle: {
     domain_order: [] as string[],
     counter: 0,
@@ -66,9 +85,6 @@ vi.mock('@/services/metrics/staleness', () => ({
 
 vi.mock('@api/db/postgres/drizzle_config', () => {
   const makeChain = (resolve: () => Promise<unknown>) => {
-    const thenable = {
-      then: (cb: (v: unknown) => unknown) => resolve().then(cb),
-    };
     const limitOffsetChain = {
       offset: vi.fn(() => resolve()),
     };
@@ -76,7 +92,6 @@ vi.mock('@api/db/postgres/drizzle_config', () => {
       limit: vi.fn(() => limitOffsetChain),
     };
     const whereChain = {
-      groupBy: vi.fn(() => thenable),
       orderBy: vi.fn(() => orderByChain),
       limit: vi.fn(() => resolve()),
       then: (cb: (v: unknown) => unknown) => resolve().then(cb),
@@ -84,13 +99,12 @@ vi.mock('@api/db/postgres/drizzle_config', () => {
     const fromChain: Record<string, unknown> = {
       where: vi.fn(() => whereChain),
     };
-    fromChain.leftJoin = vi.fn(() => fromChain);
     return {
       from: vi.fn(() => fromChain),
     };
   };
 
-  const nextDomain = (which: 'rollup' | 'count' | 'list'): string => {
+  const nextDomain = (which: 'count' | 'list'): string => {
     const order = state.select_cycle.domain_order;
     const key = `${which}_idx` as const;
     const i = state.select_cycle[key];
@@ -102,19 +116,13 @@ vi.mock('@api/db/postgres/drizzle_config', () => {
     db: {
       select: vi.fn((projection?: Record<string, unknown>) => {
         const keys = Object.keys(projection ?? {});
-        let mode: 'org' | 'rollup' | 'count' | 'list';
+        let mode: 'org' | 'count' | 'list';
         if (keys.length === 1 && keys[0] === 'metadata') mode = 'org';
-        else if (keys.includes('profile_status') && keys.includes('apps_total'))
-          mode = 'rollup';
         else if (keys.length === 1 && keys[0] === 'n') mode = 'count';
         else mode = 'list';
 
         return makeChain(async () => {
           if (mode === 'org') return [{ metadata: state.org_metadata }];
-          if (mode === 'rollup') {
-            const d = nextDomain('rollup');
-            return state.rollup_by_domain[d] ?? [];
-          }
           if (mode === 'count') {
             const d = nextDomain('count');
             return [{ n: state.total_matching_by_domain[d] ?? 0 }];
@@ -125,13 +133,15 @@ vi.mock('@api/db/postgres/drizzle_config', () => {
       }),
       execute: vi.fn(async () => {
         const i = state.execute_cycle.counter++;
-        // user-agg then mode-rows per domain, in domain order.
+        // 2 execute calls per domain: rollup (even) then mode rows (odd).
         const domain_idx = Math.floor(i / 2);
-        const is_user_agg = i % 2 === 0;
+        const is_rollup = i % 2 === 0;
         const d = state.execute_cycle.domain_order[domain_idx] ?? '';
-        return is_user_agg
-          ? state.user_agg_by_domain[d] ?? []
-          : state.mode_rows_by_domain[d] ?? [];
+        if (is_rollup) {
+          const row = state.rollup_row_by_domain[d];
+          return row ? [row] : [{}];
+        }
+        return state.mode_rows_by_domain[d] ?? [];
       }),
     },
   };
@@ -157,28 +167,21 @@ const buildApp = async (acting?: {
   return app;
 };
 
-const makeRollup = (
-  status: string,
-  n: number,
-  apps_total = 0,
-  pending = 0,
-  shortlisted = 0,
-  rejected = 0,
-) => ({
-  profile_status: status,
-  n,
-  apps_total,
-  pending,
-  shortlisted,
-  rejected,
-});
-
-const makeUserAgg = (overrides: Record<string, number> = {}) => ({
+const makeRollupRow = (overrides: Partial<RollupRow> = {}): RollupRow => ({
+  total_items: 0,
+  complete_profiles: 0,
+  has_applications: 0,
+  s_new: 0,
+  s_active: 0,
+  s_at_risk: 0,
+  s_inactive: 0,
+  b_create: 0,
+  b_accept: 0,
+  b_reject: 0,
+  b_cancel: 0,
   unique_users: 0,
-  complete_profiles_count: 0,
-  users_with_applications: 0,
-  new_users_last_7_days: 0,
-  total_applications: 0,
+  total_actions: 0,
+  engaged_users: 0,
   ...overrides,
 });
 
@@ -194,14 +197,13 @@ const seedTwoDomains = (
     };
   }
   state.select_cycle.domain_order = scope;
+  state.select_cycle.count_idx = 0;
+  state.select_cycle.list_idx = 0;
   state.execute_cycle.domain_order = scope;
-  state.rollup_by_domain = {
-    seeker: [makeRollup('active', 5, 7, 4, 1, 2)],
-    provider: [makeRollup('active', 2, 0, 0, 0, 0)],
-  };
-  state.user_agg_by_domain = {
-    seeker: [makeUserAgg({ unique_users: 5, total_applications: 7 })],
-    provider: [makeUserAgg({ unique_users: 2 })],
+  state.execute_cycle.counter = 0;
+  state.rollup_row_by_domain = {
+    seeker: makeRollupRow({ total_items: 5, s_active: 5, unique_users: 5, total_actions: 7, engaged_users: 3, b_create: 7 }),
+    provider: makeRollupRow({ total_items: 2, s_active: 2, unique_users: 2 }),
   };
   state.mode_rows_by_domain = {
     seeker: [{ via: 'bulk', n: 5 }],
@@ -219,14 +221,12 @@ const resetState = () => {
     last_computed_at: new Date('2026-06-01T00:00:00Z'),
   };
   state.org_metadata = JSON.stringify({ domains: ['seeker', 'provider'] });
-  state.rollup_by_domain = {};
-  state.user_agg_by_domain = {};
+  state.rollup_row_by_domain = {};
   state.mode_rows_by_domain = {};
   state.total_matching_by_domain = {};
   state.list_rows_by_domain = {};
   state.select_cycle = {
     domain_order: ['seeker', 'provider'],
-    rollup_idx: 0,
     count_idx: 0,
     list_idx: 0,
   };
@@ -251,8 +251,8 @@ describe('GET /aggregator/dashboard — multi-domain', () => {
     expect(res.statusCode).toBe(200);
     const body = res.json();
     expect(Object.keys(body.by_domain).sort()).toEqual(['provider', 'seeker']);
-    expect(body.by_domain.seeker.rollup.items_total).toBe(5);
-    expect(body.by_domain.provider.rollup.items_total).toBe(2);
+    expect(body.by_domain.seeker.rollup.total_items).toBe(5);
+    expect(body.by_domain.provider.rollup.total_items).toBe(2);
   });
 
   it('?domain=seeker narrows scope to one key + one staleness call', async () => {

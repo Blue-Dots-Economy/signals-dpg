@@ -6,18 +6,19 @@ import {
 } from 'fastify-type-provider-zod';
 
 /**
- * Plan B Task 10 — unit tests for GET /api/v1/aggregator/dashboard
+ * Unit tests for GET /api/v1/aggregator/dashboard
  *
- * The new response shape is `{ by_domain: { [domain]: DomainBlock }, metadata }`.
- * Each DomainBlock has a per-item rollup with the extra per-user aggregates
- * (unique_users, complete_profiles_count, avg_profiles_per_user, etc.),
- * a paginated participants list, total_matching, and next_cursor.
+ * Response shape: `{ by_domain: { [domain]: DomainBlock }, metadata }`.
+ * Each DomainBlock has a rollup (total_items, complete_profiles,
+ * has_applications, by_status, by_action_status, avg_items_per_user,
+ * avg_actions_per_user, mode_wise_counts), a paginated items list,
+ * total_matching, and next_cursor.
  *
  * Strategy: vi.mock the drizzle `db` client + `@/services/metrics/staleness`.
- * The mock inspects each `db.select(projection).from(table).where(...)` chain
- * to decide which fixture to return. `db.execute` returns user-aggregate or
- * mode-wise-counts fixtures based on a counter (user_agg first, mode_rows
- * second per build_domain_block invocation).
+ * build_domain_block calls db.execute twice per invocation:
+ *   1st: single-row rollup aggregate
+ *   2nd: mode-wise counts
+ * db.select is used for the org metadata lookup, count query, and list rows.
  */
 
 const state = {
@@ -26,55 +27,38 @@ const state = {
     last_computed_at: new Date('2026-06-01T00:00:00Z'),
   } as { refreshed: boolean; last_computed_at: Date | null },
   org_metadata: JSON.stringify({ domains: ['seeker'] }) as string | null,
-  rollup_rows: [
-    {
-      profile_status: 'new',
-      n: 2,
-      apps_total: 0,
-      pending: 0,
-      shortlisted: 0,
-      rejected: 0,
-    },
-    {
-      profile_status: 'active',
-      n: 5,
-      apps_total: 7,
-      pending: 4,
-      shortlisted: 1,
-      rejected: 2,
-    },
-    {
-      profile_status: 'at_risk',
-      n: 3,
-      apps_total: 3,
-      pending: 0,
-      shortlisted: 0,
-      rejected: 3,
-    },
-  ] as Array<Record<string, unknown>>,
-  user_agg_rows: [
-    {
-      unique_users: 8,
-      complete_profiles_count: 4,
-      users_with_applications: 3,
-      new_users_last_7_days: 1,
-      total_applications: 10,
-    },
-  ] as Array<Record<string, unknown>>,
+  // Single-row rollup fixture returned by the first db.execute call.
+  rollup_row: {
+    total_items: 10,
+    complete_profiles: 4,
+    has_applications: 3,
+    s_new: 2,
+    s_active: 5,
+    s_at_risk: 3,
+    s_inactive: 0,
+    b_create: 10,
+    b_accept: 1,
+    b_reject: 5,
+    b_cancel: 0,
+    unique_users: 8,
+    total_actions: 16,
+    engaged_users: 3,
+  } as Record<string, number>,
+  // Mode rows fixture returned by the second db.execute call.
   mode_rows: [
     { via: 'bulk', n: 6 },
     { via: 'self', n: 4 },
   ] as Array<Record<string, unknown>>,
   total_matching: 10,
   list_rows: [] as Array<Record<string, unknown>>,
-  staleness_calls: [] as Array<{ org_id: string; domain: string }>,
+  staleness_calls: [] as Array<{ org_id: string; domain: string; refresh: boolean }>,
   execute_call_counter: 0,
 };
 
 vi.mock('@/services/metrics/staleness', () => ({
   check_and_refresh_if_stale: vi.fn(
-    async (aggregator_id: string, domain: string) => {
-      state.staleness_calls.push({ org_id: aggregator_id, domain });
+    async (aggregator_id: string, domain: string, refresh: boolean) => {
+      state.staleness_calls.push({ org_id: aggregator_id, domain, refresh: refresh ?? false });
       return state.staleness;
     },
   ),
@@ -83,9 +67,6 @@ vi.mock('@/services/metrics/staleness', () => ({
 
 vi.mock('@api/db/postgres/drizzle_config', () => {
   const makeChain = (resolve: () => Promise<unknown>) => {
-    const thenable = {
-      then: (cb: (v: unknown) => unknown) => resolve().then(cb),
-    };
     const limitOffsetChain = {
       offset: vi.fn(() => resolve()),
     };
@@ -93,7 +74,6 @@ vi.mock('@api/db/postgres/drizzle_config', () => {
       limit: vi.fn(() => limitOffsetChain),
     };
     const whereChain = {
-      groupBy: vi.fn(() => thenable),
       orderBy: vi.fn(() => orderByChain),
       limit: vi.fn(() => resolve()),
       then: (cb: (v: unknown) => unknown) => resolve().then(cb),
@@ -101,7 +81,6 @@ vi.mock('@api/db/postgres/drizzle_config', () => {
     const fromChain: Record<string, unknown> = {
       where: vi.fn(() => whereChain),
     };
-    fromChain.leftJoin = vi.fn(() => fromChain);
     return {
       from: vi.fn(() => fromChain),
     };
@@ -111,27 +90,24 @@ vi.mock('@api/db/postgres/drizzle_config', () => {
     db: {
       select: vi.fn((projection?: Record<string, unknown>) => {
         const keys = Object.keys(projection ?? {});
-        let mode: 'org' | 'rollup' | 'count' | 'list';
+        let mode: 'org' | 'count' | 'list';
         if (keys.length === 1 && keys[0] === 'metadata') mode = 'org';
-        else if (keys.includes('profile_status') && keys.includes('apps_total'))
-          mode = 'rollup';
         else if (keys.length === 1 && keys[0] === 'n') mode = 'count';
         else mode = 'list';
 
         return makeChain(async () => {
           if (mode === 'org') return [{ metadata: state.org_metadata }];
-          if (mode === 'rollup') return state.rollup_rows;
           if (mode === 'count') return [{ n: state.total_matching }];
           return state.list_rows;
         });
       }),
       execute: vi.fn(async () => {
         // build_domain_block calls db.execute twice per invocation:
-        //   1st: user-aggregate query
-        //   2nd: mode-wise-counts query
+        //   1st: rollup aggregate (single row)
+        //   2nd: mode-wise counts
         const n = state.execute_call_counter++;
-        const isUserAgg = n % 2 === 0;
-        return isUserAgg ? state.user_agg_rows : state.mode_rows;
+        const is_rollup = n % 2 === 0;
+        return is_rollup ? [state.rollup_row] : state.mode_rows;
       }),
     },
   };
@@ -162,7 +138,7 @@ const sample_list_row = (overrides: Record<string, unknown> = {}) => ({
   itemId: 'itm_1',
   itemNetwork: 'blue_dot',
   ownerUserId: 'usr_1',
-  name: 'Test User',
+  displayName: 'Test User',
   itemType: 'profile_1.0',
   itemDomain: 'seeker',
   onboardedByOrgId: 'org_bbmp',
@@ -172,14 +148,14 @@ const sample_list_row = (overrides: Record<string, unknown> = {}) => ({
   profileCreatedAt: new Date('2026-05-01T00:00:00Z'),
   profileLastUpdatedAt: new Date('2026-05-20T00:00:00Z'),
   ageDays: 31,
-  applicationsTotal: 2,
-  applicationsPending: 1,
-  applicationsShortlisted: 0,
-  applicationsRejected: 1,
-  lastAppliedAt: new Date('2026-05-18T00:00:00Z'),
-  lastShortlistedAt: null,
-  lastRejectedAt: new Date('2026-05-19T00:00:00Z'),
-  openings: null,
+  countCreate: 2,
+  countAccept: 0,
+  countReject: 1,
+  countCancel: 0,
+  lastCreateAt: new Date('2026-05-18T00:00:00Z'),
+  lastAcceptAt: null,
+  lastRejectAt: new Date('2026-05-19T00:00:00Z'),
+  lastCancelAt: null,
   actionableTags: ['no_recent_activity'],
   lastComputedAt: new Date('2026-06-01T00:00:00Z'),
   ...overrides,
@@ -191,41 +167,22 @@ const resetState = () => {
     last_computed_at: new Date('2026-06-01T00:00:00Z'),
   };
   state.org_metadata = JSON.stringify({ domains: ['seeker'] });
-  state.rollup_rows = [
-    {
-      profile_status: 'new',
-      n: 2,
-      apps_total: 0,
-      pending: 0,
-      shortlisted: 0,
-      rejected: 0,
-    },
-    {
-      profile_status: 'active',
-      n: 5,
-      apps_total: 7,
-      pending: 4,
-      shortlisted: 1,
-      rejected: 2,
-    },
-    {
-      profile_status: 'at_risk',
-      n: 3,
-      apps_total: 3,
-      pending: 0,
-      shortlisted: 0,
-      rejected: 3,
-    },
-  ];
-  state.user_agg_rows = [
-    {
-      unique_users: 8,
-      complete_profiles_count: 4,
-      users_with_applications: 3,
-      new_users_last_7_days: 1,
-      total_applications: 10,
-    },
-  ];
+  state.rollup_row = {
+    total_items: 10,
+    complete_profiles: 4,
+    has_applications: 3,
+    s_new: 2,
+    s_active: 5,
+    s_at_risk: 3,
+    s_inactive: 0,
+    b_create: 10,
+    b_accept: 1,
+    b_reject: 5,
+    b_cancel: 0,
+    unique_users: 8,
+    total_actions: 16,
+    engaged_users: 3,
+  };
   state.mode_rows = [
     { via: 'bulk', n: 6 },
     { via: 'self', n: 4 },
@@ -233,7 +190,7 @@ const resetState = () => {
   state.total_matching = 10;
   state.list_rows = [
     sample_list_row(),
-    sample_list_row({ itemId: 'itm_2', userId: 'usr_2', profileStatus: 'new' }),
+    sample_list_row({ itemId: 'itm_2', ownerUserId: 'usr_2', profileStatus: 'new' }),
   ];
   state.staleness_calls = [];
   state.execute_call_counter = 0;
@@ -302,53 +259,62 @@ describe('GET /aggregator/dashboard', () => {
     expect(res.statusCode).toBe(200);
     const body = res.json();
     expect(Object.keys(body.by_domain)).toEqual(['seeker']);
-    expect(body.by_domain.seeker.rollup.items_total).toBe(10);
+    expect(body.by_domain.seeker.rollup.total_items).toBe(10);
     expect(body.by_domain.seeker.rollup.by_status).toEqual({
       new: 2,
       active: 5,
       at_risk: 3,
+      inactive: 0,
     });
   });
 
-  it('200 rollup includes per-user aggregates + mode_wise_counts', async () => {
+  it('200 rollup includes canonical counts + avg fields + mode_wise_counts', async () => {
     const app = await buildApp();
     const res = await app.inject({ method: 'GET', url: '/dashboard' });
     const r = res.json().by_domain.seeker.rollup;
-    expect(r.applications_total).toBe(10);
-    expect(r.applications_pending).toBe(4);
-    expect(r.applications_shortlisted).toBe(1);
-    expect(r.applications_rejected).toBe(5);
-    expect(r.unique_users).toBe(8);
-    expect(r.complete_profiles_count).toBe(4);
-    expect(r.users_with_applications).toBe(3);
-    expect(r.new_users_last_7_days).toBe(1);
-    // items_total / unique_users = 10 / 8 = 1.25
-    expect(r.avg_profiles_per_user).toBeCloseTo(1.25);
-    // total_applications / users_with_applications = 10 / 3
-    expect(r.avg_applications_per_user).toBeCloseTo(10 / 3);
+    expect(r.total_items).toBe(10);
+    expect(r.complete_profiles).toBe(4);
+    expect(r.has_applications).toBe(3);
+    expect(r.by_action_status).toEqual({
+      create: 10,
+      accept: 1,
+      reject: 5,
+      cancel: 0,
+    });
+    // avg_items_per_user = total_items / unique_users = 10 / 8 = 1.25
+    expect(r.avg_items_per_user).toBeCloseTo(1.25);
+    // avg_actions_per_user = total_actions / engaged_users = 16 / 3
+    expect(r.avg_actions_per_user).toBeCloseTo(16 / 3);
     expect(r.mode_wise_counts).toEqual({ bulk: 6, self: 4 });
   });
 
-  it('200 participants have snake_case keys + ISO timestamps', async () => {
+  it('200 items have snake_case keys + ISO timestamps + new column names', async () => {
     const app = await buildApp();
     const res = await app.inject({ method: 'GET', url: '/dashboard' });
     const block = res.json().by_domain.seeker;
-    expect(block.participants).toHaveLength(2);
-    const p = block.participants[0];
-    expect(p.item_id).toBe('itm_1');
+    expect(block.items).toHaveLength(2);
+    const p = block.items[0];
     expect(p.item_network).toBe('blue_dot');
-    expect(p.owner_user_id).toBe('usr_1');
     expect(p.name).toBe('Test User');
     expect(p.item_type).toBe('profile_1.0');
     expect(p.profile_status).toBe('active');
     expect(p.profile_completion_pct).toBe(75);
     expect(p.profile_created_at).toBe('2026-05-01T00:00:00.000Z');
     expect(p.profile_last_updated_at).toBe('2026-05-20T00:00:00.000Z');
-    expect(p.applications_total).toBe(2);
-    expect(p.applications_shortlisted).toBe(0);
+    expect(p.count_create).toBe(2);
+    expect(p.count_accept).toBe(0);
+    expect(p.count_reject).toBe(1);
+    expect(p.count_cancel).toBe(0);
+    expect(p.last_create_at).toBe('2026-05-18T00:00:00.000Z');
+    expect(p.last_accept_at).toBeNull();
+    expect(p.last_reject_at).toBe('2026-05-19T00:00:00.000Z');
+    expect(p.last_cancel_at).toBeNull();
     expect(p.actionable_tags).toEqual(['no_recent_activity']);
-    expect(p.last_applied_at).toBe('2026-05-18T00:00:00.000Z');
-    expect(p.last_shortlisted_at).toBeNull();
+    // Confirm old field names are gone
+    expect(p.item_id).toBeUndefined();
+    expect(p.owner_user_id).toBeUndefined();
+    expect(p.applications_total).toBeUndefined();
+    expect(p.last_applied_at).toBeUndefined();
   });
 
   it('200 ?status=active filter passes through to total_matching/list', async () => {
@@ -362,8 +328,8 @@ describe('GET /aggregator/dashboard', () => {
     expect(res.statusCode).toBe(200);
     const block = res.json().by_domain.seeker;
     expect(block.total_matching).toBe(5);
-    expect(block.participants).toHaveLength(1);
-    expect(block.participants[0].profile_status).toBe('active');
+    expect(block.items).toHaveLength(1);
+    expect(block.items[0].profile_status).toBe('active');
   });
 
   it('200 metadata exposes last_computed_at, ttl_seconds, refreshed=false', async () => {
@@ -387,16 +353,22 @@ describe('GET /aggregator/dashboard', () => {
 
   it('200 first-time aggregator (null last_computed_at) returns null + zeros', async () => {
     state.staleness = { refreshed: true, last_computed_at: null };
-    state.rollup_rows = [];
-    state.user_agg_rows = [
-      {
-        unique_users: 0,
-        complete_profiles_count: 0,
-        users_with_applications: 0,
-        new_users_last_7_days: 0,
-        total_applications: 0,
-      },
-    ];
+    state.rollup_row = {
+      total_items: 0,
+      complete_profiles: 0,
+      has_applications: 0,
+      s_new: 0,
+      s_active: 0,
+      s_at_risk: 0,
+      s_inactive: 0,
+      b_create: 0,
+      b_accept: 0,
+      b_reject: 0,
+      b_cancel: 0,
+      unique_users: 0,
+      total_actions: 0,
+      engaged_users: 0,
+    };
     state.mode_rows = [];
     state.total_matching = 0;
     state.list_rows = [];
@@ -405,11 +377,10 @@ describe('GET /aggregator/dashboard', () => {
     expect(res.statusCode).toBe(200);
     const body = res.json();
     expect(body.metadata.last_computed_at).toBeNull();
-    expect(body.by_domain.seeker.rollup.items_total).toBe(0);
-    expect(body.by_domain.seeker.rollup.unique_users).toBe(0);
-    expect(body.by_domain.seeker.rollup.avg_profiles_per_user).toBe(0);
-    expect(body.by_domain.seeker.rollup.avg_applications_per_user).toBe(0);
-    expect(body.by_domain.seeker.participants).toEqual([]);
+    expect(body.by_domain.seeker.rollup.total_items).toBe(0);
+    expect(body.by_domain.seeker.rollup.avg_items_per_user).toBe(0);
+    expect(body.by_domain.seeker.rollup.avg_actions_per_user).toBe(0);
+    expect(body.by_domain.seeker.items).toEqual([]);
   });
 
   it('passes acting_org.org_id + domain to check_and_refresh_if_stale', async () => {
@@ -418,9 +389,16 @@ describe('GET /aggregator/dashboard', () => {
       org_type: 'aggregator',
     });
     await app.inject({ method: 'GET', url: '/dashboard' });
-    expect(state.staleness_calls).toEqual([
-      { org_id: 'org_xyz_ngo', domain: 'seeker' },
-    ]);
+    expect(state.staleness_calls[0]).toMatchObject({
+      org_id: 'org_xyz_ngo',
+      domain: 'seeker',
+    });
+  });
+
+  it('passes refresh=true to check_and_refresh_if_stale when ?refresh=true', async () => {
+    const app = await buildApp();
+    await app.inject({ method: 'GET', url: '/dashboard?refresh=true' });
+    expect(state.staleness_calls[0]?.refresh).toBe(true);
   });
 
   it('next_cursor is next page when full page returned', async () => {
