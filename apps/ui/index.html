@@ -14,11 +14,13 @@
     <script>
       (function () {
         var url = new URLSearchParams(location.search).get('network');
+        var storedNet = null;
+        try { storedNet = localStorage.getItem('dpg-active-network'); } catch (_) {}
         var fallback =
           typeof __DEFAULT_NETWORK_THEME__ !== 'undefined'
             ? __DEFAULT_NETWORK_THEME__
             : 'blue_dot';
-        var id = url || fallback;
+        var id = url || storedNet || fallback;
         document.documentElement.dataset.network = id;
 
         // Apply dark class before first paint so the user doesn't see a
