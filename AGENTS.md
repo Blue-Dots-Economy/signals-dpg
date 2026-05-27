@@ -8,7 +8,6 @@ Guidance for AI agents working in the DPG monorepo.
 dpg-monorepo/
 ├── apps/
 │   ├── api/               # Fastify API server
-│   ├── docs/              # Astro Starlight documentation
 │   └── ui/                # React + Vite schema-driven UI
 ├── packages/
 │   ├── auth/              # better-auth configuration
@@ -33,14 +32,11 @@ an app/package dir, or `pnpm add -w <pkg>` for workspace-wide deps.
 | Command                | Description                       |
 | ---------------------- | --------------------------------- |
 | `pnpm dev:api`         | Start API in watch mode           |
-| `pnpm dev:docs`        | Start docs site                   |
 | `pnpm dev:ui`          | Start UI dev server               |
 | `pnpm build:api`       | Build API for production          |
 | `pnpm build:ui`        | Build UI for production           |
-| `pnpm build:docs`      | Build docs site                   |
 | `pnpm preview:ui`      | Preview UI production build       |
 | `pnpm preview:api`     | Preview API production build      |
-| `pnpm preview:docs`    | Preview docs production build     |
 | `pnpm start:ui`        | Start UI production server        |
 | `pnpm db:generate:api` | Generate Drizzle migrations       |
 | `pnpm db:migrate:api`  | Apply migrations                  |
@@ -74,7 +70,7 @@ pnpm vitest run src/path/to/testfile.ts
 pnpm typecheck
 ```
 
-Root `pnpm typecheck` runs three checks in sequence: `tsc --noEmit` for `apps/api` and `apps/ui`, then `astro check` for `apps/docs`. The Astro check is separate because `astro:content` virtual modules aren't visible to plain `tsc`. The package workspaces (`auth`, `config`, `database`, `match_score`, `notification`, `schemas`) are typechecked transitively via the apps. True TS project references were considered (Plan 4 Task B.2 in `docs/superpowers/plans/`) but require structural changes (fabricated tsconfigs, composite + outDir on apps/api, apps/ui exclusion); deferred.
+Root `pnpm typecheck` runs `tsc --noEmit` for `apps/api` and `apps/ui` in sequence. The package workspaces (`auth`, `config`, `database`, `match_score`, `notification`, `schemas`) are typechecked transitively via the apps. True TS project references were considered (Plan 4 Task B.2 in `docs/superpowers/plans/`) but require structural changes (fabricated tsconfigs, composite + outDir on apps/api, apps/ui exclusion); deferred.
 
 Manually review code for style consistency per the guidelines below.
 

@@ -2,6 +2,8 @@
 
 DPG is a network-aware backend for publishing, validating, discovering, and interacting with schema-typed items across many independent instances.
 
+> 📚 **Documentation**: https://blue-dots-economy.github.io/bluedots-docs/ — source at [Blue-Dots-Economy/bluedots-docs](https://github.com/Blue-Dots-Economy/bluedots-docs)
+
 The core model is:
 
 - a network defines the shared contract
@@ -11,12 +13,11 @@ The core model is:
 - an action is an interaction between items
 - an event is the structured result of that action
 
-This repository contains the current DPG API runtime, schema-driven UI app, docs site, example network schemas, and shared packages.
+This repository contains the current DPG API runtime, schema-driven UI app, example network schemas, and shared packages.
 
 ## Repository Layout
 
 - `apps/api`: Fastify API runtime
-- `apps/docs`: documentation site
 - `apps/ui`: schema-driven React UI for browsing domains, creating items, and triggering actions
 - `examples/schemas`: example network definitions such as `yellow_dot` and `blue_dot`
 - `examples/api`: example request payloads in Markdown
@@ -50,8 +51,6 @@ Item typing is schema-driven. `item_type` is not arbitrary; it should be a schem
 ## UI App
 
 The UI app lives in `apps/ui`. It is a React 19 + Vite frontend that renders pages from network and item schemas instead of hard-coding per-domain forms and cards.
-
-Source: [`apps/ui` on GitHub](https://github.com/dhiway/dpg-monorepo/tree/main/apps/ui). Documentation: `/apps/ui` in the docs app.
 
 Current UI responsibilities:
 
@@ -129,12 +128,6 @@ docker compose up -d db redis
 DOCKER_NETWORK=dpg_internal pnpm docker:api
 ```
 
-Optional:
-
-```bash
-pnpm dev:docs
-```
-
 To run the UI app:
 
 ```bash
@@ -159,8 +152,6 @@ VITE_MAP_PROVIDER="leaflet"
 - `pnpm db:generate:api`
 - `pnpm db:migrate:api`
 - `pnpm db:studio:api`
-- `pnpm dev:docs`
-- `pnpm build:docs`
 - `pnpm dev:ui`
 - `pnpm build:ui`
 - `pnpm preview:ui`
@@ -190,28 +181,6 @@ DPG uses two fetch paths:
 
 - `GET /api/v1/item/fetch`: instance-local fetch, intended for local reads such as a user's own items; cached briefly in Redis
 - `GET /api/v1/network/item/fetch`: inter-instance fetch, which performs count-first discovery, selects only relevant peer instances, then fetches the required slices and caches the result in Redis
-
-## Documentation
-
-The full documentation lives in `apps/docs`. A good reading order is:
-
-1. `apps/docs/src/content/docs/index.md`
-2. `apps/docs/src/content/docs/concepts/vocabulary.md`
-3. `apps/docs/src/content/docs/concepts/architecture.md`
-4. `apps/docs/src/content/docs/getting-started.md`
-5. `apps/docs/src/content/docs/environment.md`
-6. `apps/docs/src/content/docs/schemas/authoring.md`
-7. `apps/docs/src/content/docs/apps/api.md`
-8. `apps/docs/src/content/docs/apps/ui.md`
-
-The docs cover:
-
-- vocabulary and architecture
-- local setup, Docker, Dokploy, and Nixpacks hosting
-- single-instance and multi-instance deployment
-- schema authoring and versioning
-- API behavior
-- onboarding new networks and domains
 
 ## Notes
 
