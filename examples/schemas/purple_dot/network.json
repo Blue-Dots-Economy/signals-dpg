@@ -210,7 +210,7 @@
         { "status": "new",      "label": "New",      "description": "Recently joined",      "when": { "item_age_days": { "lte": 7 } } },
         { "status": "active",   "label": "Active",   "description": "Currently hiring",     "when": { "days_since_last": { "buckets": ["create", "accept"], "lte": 30 } } },
         { "status": "at_risk",  "label": "At Risk",  "description": "Stalled requirements", "when": { "days_since_last": { "buckets": ["create", "accept", "reject"], "between": [31, 90] } } },
-        { "status": "inactive", "label": "Inactive", "description": "No openings 30+ days", "when": "default" }
+        { "status": "inactive", "label": "Inactive", "description": "No openings 90+ days", "when": "default" }
       ],
       "item_schemas": {
         "profile_1.0": {
