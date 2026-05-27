@@ -121,6 +121,88 @@ docker compose -f ../aggregator-dpg/docker-compose.yml cp \
 export NODE_EXTRA_CA_CERTS=/tmp/aggregator-nginx.pem
 ```
 
+## Fixture generation (optional)
+
+The pre-shipped fixtures at `scripts/e2e/fixtures/` are good for a default
+run (10 seekers + 5 providers). When you want more data, scenario-specific
+records, or a fresh deterministic seed, use the fixture generator:
+
+```bash
+pnpm tsx scripts/e2e/generate_fixtures.mts \
+  --output-format <csv|json> \
+  --domain <seeker|provider> \
+  --count <integer> \
+  [--output <path>]   # defaults to stdout
+  [--seed <number>]   # defaults to Date.now(); pin for reproducible output
+```
+
+### What the generator produces
+
+All records are schema-valid against
+`Signals-DPG/examples/schemas/purple_dot/network.json` — every required
+field is populated, enum-typed fields draw from the schema's allowed values
+verbatim, and array fields have at least the schema's `minItems`.
+
+**Seekers** (`profile_1.0` beneficiary schema):
+- Required: `beneficiary_name`, `mobile_number`, `age`, `gender`, `disability_type[]`, `disability_percentage`, `looking_for[]`, `looking_for_details`, `service_city`, `documents_available[]`
+- Optional (each field populated ~30-50% of the time): `email`, `address`, `state`, `district`, `block`, `pincode`, `highest_qualification`
+
+**Providers** (`profile_1.0` service provider schema):
+- Required: `contact_name`, `contact_phone`, `contact_email`, `provider_category`, `organisation_name`, `disabilities_served[]`, `services_offered[]`, `service_cities`, `official_address`, `state`, `district`, `block`, `pincode`, `service_details`
+- Optional: `catalog_url` (~60% populated)
+
+### Conventions matched
+
+| Concern | Convention |
+|---|---|
+| CSV array delimiter | `\|` (matches Aggregator's bulk-upload import) |
+| CSV cells with `,` / `"` / newline | quoted, with `""` escape |
+| Phone numbers | synthetic, prefix `9020000000` for seekers / `9011100000` for providers — never collides with real subscribers |
+| Email addresses | `<slug>.<seq>@purpledots.example` — never hits a real inbox |
+| Determinism | `--seed <N>` pins a mulberry32 PRNG so re-runs produce byte-identical output |
+
+### Common recipes
+
+```bash
+# Replace the default seeker QR fixture with 50 records:
+pnpm tsx scripts/e2e/generate_fixtures.mts \
+  --output-format json --domain seeker --count 50 --seed 1 \
+  --output scripts/e2e/fixtures/purple_dot_qr_payloads.json
+
+# Generate a provider QR fixture (required if you use `--domain provider`
+# on the QR submitter and the file doesn't exist yet):
+pnpm tsx scripts/e2e/generate_fixtures.mts \
+  --output-format json --domain provider --count 25 \
+  --output scripts/e2e/fixtures/purple_dot_qr_provider.json
+
+# Generate a fresh provider CSV for bulk upload via the Aggregator UI:
+pnpm tsx scripts/e2e/generate_fixtures.mts \
+  --output-format csv --domain provider --count 100 --seed 42 \
+  --output scripts/e2e/fixtures/providers_bulk_100.csv
+
+# Quick preview of seeker JSON to stdout + pipe to jq:
+pnpm tsx scripts/e2e/generate_fixtures.mts \
+  --output-format json --domain seeker --count 3 \
+  | jq '.[].service_city'
+```
+
+### When NOT to regenerate
+
+The pre-shipped `scripts/e2e/fixtures/purple_dot_qr_payloads.json` (10
+seekers) and `scripts/e2e/fixtures/purple_dot_providers.csv` (5 providers)
+are deliberately small and hand-tuned for the deterministic action-driver
+plan (`SEEKER_PLAN` has 10 rows; `PROVIDER_PLAN` has 5). The action driver
+applies the plan to the FIRST N items it discovers per domain (10 seekers,
+5 providers) — extra items beyond that are left untouched. So if you
+regenerate with `--count > 10` for seekers or `> 5` for providers and want
+the dashboard's expected counts to still match the runbook, those extra
+items will land in `new` status (no plan applied), which throws off the
+`{ new: 2, active: 3, at_risk: 3, inactive: 2 }` numbers.
+
+If you want to scale the plan to a larger fixture, edit the `SEEKER_PLAN`
+and `PROVIDER_PLAN` arrays in `apps/api/scripts/e2e/seed_actions.mts` to
+match the new fixture size and adjust the expected counts in this runbook.
+
 ## Step 4 — Submit synthetic QR seekers (scripted)
 
 ```bash
@@ -149,24 +231,84 @@ psql -h localhost -p 5432 -U postgres -d signals_dpg -c \
 # Expect: 10
 ```
 
+## Step 4 (alternative) — Onboard providers via QR link too
+
+Want providers to come in through a QR link instead of a CSV upload? The
+QR submitter accepts `--domain provider`:
+
+```bash
+# Generate the provider QR fixture once:
+pnpm tsx scripts/e2e/generate_fixtures.mts \
+  --output-format json --domain provider --count 25 \
+  --output scripts/e2e/fixtures/purple_dot_qr_provider.json
+
+# Submit (after creating an active provider link via the Aggregator UI):
+pnpm e2e:qr "$PROVIDER_QR_LINK_SLUG" 10 --domain provider
+```
+
+The script reads `PROVIDER_ORG_SLUG` (vs `SEEKER_ORG_SLUG` for the default
+seeker domain) and loads `purple_dot_qr_provider.json` (vs
+`purple_dot_qr_payloads.json`). Mix both flows freely — they target
+different aggregator orgs.
+
+`--fixture <path>` overrides the domain-default fixture if you want to
+push a custom or larger generated set:
+
+```bash
+pnpm e2e:qr "$SEEKER_QR_LINK_SLUG" 100 \
+  --domain seeker \
+  --fixture ./scratch/seekers_bulk_100.json
+```
+
 ## Step 5 — Drive connect actions + backdate timestamps (scripted)
 
 ```bash
 pnpm e2e:actions
 ```
 
+The action driver applies TWO domain plans:
+
+- **SEEKER_PLAN** — 10 rows on seekers; each initiates a `connect` (s→p)
+  to a configured target provider; bucket spread is create/accept/reject/cancel.
+- **PROVIDER_PLAN** — 5 rows on providers; each initiates a `connect` (p→s)
+  to a configured target seeker; all `create` bucket (p→s has
+  `metric_categories: null` in Purple Dot, so the bucket label is cosmetic).
+
+Both domains get their `items.created_at` backdated FIRST. Then action ages
+are clamped at runtime to `min(intended, source_age, target_age, 0)` so no
+action predates either item it touches — a clamp log fires whenever the
+intended age can't be honoured (which shouldn't happen with the current plan
+but guards future plan tweaks).
+
 Expected output:
 
 ```
 Discovered 10 seekers, 5 providers.
-Applying plan to 10 seekers (any extras left as-is).
-Expected profile_status counts:        { new: 2, active: 3, at_risk: 3, inactive: 2 }
-Expected by_action_status counts (seeker side): { create: 4, accept: 3, reject: 1, cancel: 1 }
-Plus 2 provider→seeker connects (metric_categories: null, should not affect rollup).
-[01/10] perform → created action=...  target=create/new
-[01/10]      item.created_at ← NOW() - 2d
-[01/10]      action.created_at ← NOW() - 1d
-[02/10] perform → created action=...  target=create/new
+Applying plan to 10/10 seekers and 5/5 providers (extras left untouched).
+Expected by_status (seeker):   { new: 2, active: 3, at_risk: 3, inactive: 2 }
+Expected by_status (provider): { new: 1, active: 1, at_risk: 2, inactive: 1 }
+Expected by_action_status (seeker side, s→p): { create: 4, accept: 3, reject: 1, cancel: 1 }
+p→s actions: metric_categories: null in Purple Dot — exercised but not counted.
+
+[seeker 01/10] item.created_at ← NOW() - 2d
+[seeker 02/10] item.created_at ← NOW() - 5d
+...
+[provider 01/05] item.created_at ← NOW() - 3d
+[provider 02/05] item.created_at ← NOW() - 20d
+...
+
+— s→p actions —
+[s→p 01/10] perform → created action=... target=create/new
+[s→p 01/10]      action.created_at ← NOW() - 1d
+...
+[s→p 09/10] (no action; target=inactive)
+[s→p 10/10] perform → created action=... target=cancel/inactive
+[s→p 10/10]      update → cancelled (direct SQL)
+[s→p 10/10]      action.created_at ← NOW() - 100d
+
+— p→s actions (won't affect rollup buckets in Purple Dot) —
+[p→s 01/05] perform → created action=...
+[p→s 01/05]      action.created_at ← NOW() - 1d
 ...
 [04/10] perform → created action=...  target=accept/active
 [04/10]      update → accepted (direct SQL)
@@ -178,13 +320,13 @@ Plus 2 provider→seeker connects (metric_categories: null, should not affect ro
 [10/10] perform → created action=...  target=cancel/inactive
 [10/10]      update → cancelled (direct SQL)
 [10/10]      item.created_at ← NOW() - 120d
-[10/10]      action.created_at ← NOW() - 100d
-[p→s 1/2] connect created (id=...) — should NOT show in seeker rollup
-[p→s 2/2] connect created (id=...) — should NOT show in seeker rollup
+[p→s 05/05] perform → created action=...
+[p→s 05/05]      action.created_at ← NOW() - 110d
 
 Done. After ?refresh=true on the dashboard you should see:
-  by_status         : { new: 2, active: 3, at_risk: 3, inactive: 2 }
-  by_action_status  : { create: 4, accept: 3, reject: 1, cancel: 1 } (seeker side; provider side mirrors)
+  seeker  by_status        : { new: 2, active: 3, at_risk: 3, inactive: 2 }
+  provider by_status       : { new: 1, active: 1, at_risk: 2, inactive: 1 }
+  seeker  by_action_status : { create: 4, accept: 3, reject: 1, cancel: 1 }
 ```
 
 The script uses Plan A on-behalf-of (`acting_as_user_id`) only for `/action/perform`.
@@ -238,16 +380,23 @@ Expected `provider` rollup:
 | `by_action_status.cancel` | 1 |
 | `mode_wise_counts.bulk` | 5 |
 
-Provider `by_status` depends on the backdating applied to SEEKER items
-only — the script does not backdate provider items. Providers will land
-mostly in `new` or `active` (recent provider onboarding + recent actions
-in their role as targets). This is intentional: the test demonstrates
-that seekers and providers can have independent status distributions
-even though they share the same action stream.
+Provider `by_status` is driven by PROVIDER_PLAN's `item_age_days` joint with
+the s→p actions each provider receives. The plan deliberately spreads
+providers across all four buckets:
+
+| Field | Expected (provider) |
+|---|---|
+| `by_status.new` | 1 |
+| `by_status.active` | 1 |
+| `by_status.at_risk` | 2 |
+| `by_status.inactive` | 1 |
+
+The seeker and provider rollups are independent dimensions of the same
+action stream — the same connect contributes to one bucket on each side.
 
 ### Negative-direction check
 
-The 2 provider→seeker connects from Step 5 use the `connect` interaction
+The 5 provider→seeker connects from Step 5 use the `connect` interaction
 that has `metric_categories: null` in `purple_dot/network.json`. They
 should NOT inflate any `by_action_status` bucket. If they do, that's a
 bug — likely in the `collect_tracked_interactions` walk.
