@@ -55,6 +55,9 @@ const PredicateSchema: z.ZodType<PredicateInput> = z.lazy(() =>
 
 const StatusRuleSchema = z.object({
   status: CanonicalStatusSchema,
+  // Optional UI copy rendered on the aggregator dashboard status cards.
+  label: z.string().min(1).optional(),
+  description: z.string().min(1).optional(),
   when: z.union([PredicateSchema, z.literal('default')]),
 }).strict();
 
