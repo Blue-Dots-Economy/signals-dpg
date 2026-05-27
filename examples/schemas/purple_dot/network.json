@@ -592,6 +592,12 @@
       "at_risk": "At Risk",
       "inactive": "Inactive"
     },
+    "by_status_hint": {
+      "new": "Recently joined",
+      "active": "Active in last 30 days",
+      "at_risk": "Stalling — 31–90 days idle",
+      "inactive": "No activity 90+ days"
+    },
     "by_action_status": {
       "create": "Requested",
       "accept": "Connected",
