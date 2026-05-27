@@ -150,6 +150,9 @@ export function ActionStatusUpdater({
   const headerKey = status || action.action_type || 'connect';
   const display = getActionDisplay(headerKey);
   const actionLabel = statusLabels[status] ?? display.label;
+  // The dismiss button already says "Cancel"; when the chosen status verb is
+  // also "Cancel" use "OK" for the confirm button so the two don't collide.
+  const confirmLabel = actionLabel.toLowerCase() === 'cancel' ? 'OK' : actionLabel;
   const subtitle = STATUS_SUBTITLES[status] ?? `Update status for this ${action.action_type ?? 'action'}`;
 
   const header = (
@@ -172,7 +175,7 @@ export function ActionStatusUpdater({
         disabled={isPending || !status}
         className={cn('min-w-[120px] font-semibold shadow-sm', display.buttonClass)}
       >
-        {isPending ? 'Updating...' : actionLabel}
+        {isPending ? 'Updating...' : confirmLabel}
       </Button>
     </div>
   );
