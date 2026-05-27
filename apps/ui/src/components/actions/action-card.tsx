@@ -1,34 +1,19 @@
 import * as React from 'react';
 import { formatDistanceToNow } from 'date-fns';
 import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardFooter,
-  CardHeader,
-  CardTitle,
-} from '@/components/ui/card';
-import { Badge } from '@/components/ui/badge';
-import { Button } from '@/components/ui/button';
-import { Separator } from '@/components/ui/separator';
-import {
-  Collapsible,
-  CollapsibleContent,
-  CollapsibleTrigger,
-} from '@/components/ui/collapsible';
-import {
   ChevronDown,
-  ChevronUp,
   Check,
   X,
   CheckCircle2,
   Clock,
   AlertCircle,
+  Sparkles,
   ArrowRight,
+  MessageSquare,
   Contact,
-  User,
   MapPin,
 } from 'lucide-react';
+import { Button } from '@/components/ui/button';
 import type { Action } from '@/lib/action-api';
 import { ContactDetailsModal } from '@/components/actions/contact-details-modal';
 
@@ -38,58 +23,29 @@ interface ActionCardProps {
   onStatusUpdate?: (action: Action) => void;
 }
 
-const statusConfig: Record<
+// Status pill: dot + label on a soft tint. Semantic colours (not brand) so
+// state reads consistently across networks.
+const statusStyles: Record<
   string,
-  { label: string; variant: 'default' | 'secondary' | 'destructive' | 'outline'; icon: React.ReactNode }
+  { label: string; cls: string; dot: string; icon: React.ReactNode }
 > = {
-  created: {
-    label: 'Pending',
-    variant: 'secondary',
-    icon: <Clock className="h-3 w-3" />,
-  },
-  pending: {
-    label: 'Pending',
-    variant: 'secondary',
-    icon: <Clock className="h-3 w-3" />,
-  },
-  accepted: {
-    label: 'Accepted',
-    variant: 'default',
-    icon: <Check className="h-3 w-3" />,
-  },
-  rejected: {
-    label: 'Rejected',
-    variant: 'destructive',
-    icon: <X className="h-3 w-3" />,
-  },
-  completed: {
-    label: 'Completed',
-    variant: 'default',
-    icon: <CheckCircle2 className="h-3 w-3" />,
-  },
-  cancelled: {
-    label: 'Cancelled',
-    variant: 'outline',
-    icon: <AlertCircle className="h-3 w-3" />,
-  },
+  created: { label: 'Pending', cls: 'bg-amber-50 text-amber-700', dot: 'bg-amber-500', icon: <Clock className="h-3 w-3" /> },
+  pending: { label: 'Pending', cls: 'bg-amber-50 text-amber-700', dot: 'bg-amber-500', icon: <Clock className="h-3 w-3" /> },
+  new: { label: 'New', cls: 'bg-primary/10 text-primary', dot: 'bg-primary', icon: <Sparkles className="h-3 w-3" /> },
+  accepted: { label: 'Accepted', cls: 'bg-emerald-50 text-emerald-700', dot: 'bg-emerald-500', icon: <Check className="h-3 w-3" /> },
+  completed: { label: 'Completed', cls: 'bg-emerald-50 text-emerald-700', dot: 'bg-emerald-500', icon: <CheckCircle2 className="h-3 w-3" /> },
+  rejected: { label: 'Rejected', cls: 'bg-red-50 text-red-700', dot: 'bg-red-500', icon: <X className="h-3 w-3" /> },
+  cancelled: { label: 'Cancelled', cls: 'bg-slate-100 text-slate-600', dot: 'bg-slate-400', icon: <AlertCircle className="h-3 w-3" /> },
 };
 
-const actionTypeColors: Record<string, string> = {
-  connect: 'bg-blue-100 text-blue-800 border-blue-200',
-  apply: 'bg-green-100 text-green-800 border-green-200',
-  share: 'bg-purple-100 text-purple-800 border-purple-200',
-  bookmark: 'bg-yellow-100 text-yellow-800 border-yellow-200',
-  message: 'bg-pink-100 text-pink-800 border-pink-200',
-};
-
-function getStatusConfig(status: string) {
-  return statusConfig[status] ?? { label: status, variant: 'outline', icon: null };
-}
-
-function getActionTypeClass(actionType: string): string {
+function getStatusStyle(status: string) {
   return (
-    actionTypeColors[actionType.toLowerCase()] ??
-    'bg-gray-100 text-gray-800 border-gray-200'
+    statusStyles[status] ?? {
+      label: status,
+      cls: 'bg-slate-100 text-slate-600',
+      dot: 'bg-slate-400',
+      icon: null,
+    }
   );
 }
 
@@ -101,240 +57,234 @@ function formatItemLocation(
   return `${latitude.toFixed(4)}, ${longitude.toFixed(4)}`;
 }
 
+function formatRequirementValue(value: unknown): string {
+  if (value == null) return '—';
+  if (Array.isArray(value)) return value.map((v) => String(v)).join(', ');
+  if (typeof value === 'object') return JSON.stringify(value);
+  return String(value);
+}
+
+const titleCase = (s: string) =>
+  s.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
+
 export function ActionCard({ action, ownershipRole, onStatusUpdate }: ActionCardProps) {
-  const [isExpanded, setIsExpanded] = React.useState(false);
-  const [showRequirements, setShowRequirements] = React.useState(false);
+  const [showRequirements, setShowRequirements] = React.useState(true);
   const [showContactDetails, setShowContactDetails] = React.useState(false);
   const canRevealContact = action.action_status === 'accepted';
 
-  const status = getStatusConfig(action.action_status);
-  const actionTypeClass = getActionTypeClass(action.action_type);
+  const status = getStatusStyle(action.action_status);
 
-  // Determine which item is "the other party" based on ownership
+  // Resolve the "other party" vs "me" from ownership.
   const otherParty =
     ownershipRole === 'initiated'
       ? {
+          name: action.target_item_name,
           itemId: action.target_item_id,
-          network: action.target_item_network,
           domain: action.target_item_domain,
-          type: action.target_item_type,
-          owner: action.target_item_owner,
           latitude: action.target_item_latitude,
           longitude: action.target_item_longitude,
-          label: 'To',
         }
       : {
+          name: action.source_item_name,
           itemId: action.source_item_id,
-          network: action.source_item_network,
           domain: action.source_item_domain,
-          type: action.source_item_type,
-          owner: action.source_item_owner,
           latitude: action.source_item_latitude,
           longitude: action.source_item_longitude,
-          label: 'From',
         };
+  const myDomain =
+    ownershipRole === 'initiated' ? action.source_item_domain : action.target_item_domain;
 
-  const myItem =
-    ownershipRole === 'initiated'
-      ? {
-          itemId: action.source_item_id,
-          network: action.source_item_network,
-          domain: action.source_item_domain,
-          type: action.source_item_type,
-        }
-      : {
-          itemId: action.target_item_id,
-          network: action.target_item_network,
-          domain: action.target_item_domain,
-          type: action.target_item_type,
-        };
+  const otherRole = titleCase(otherParty.domain);
+  const myRole = titleCase(myDomain);
+  const hasRealName = !!otherParty.name && otherParty.name !== otherParty.itemId;
+  const rawName = hasRealName
+    ? otherParty.name!
+    : `#${otherParty.itemId.slice(0, 6)}`;
+  const isMaskedOrFallback = !hasRealName || rawName.includes('*');
+  // Avatar: first letter of a real public name, else the role's initial.
+  const initial = (isMaskedOrFallback ? otherRole : rawName).charAt(0).toUpperCase() || '?';
+
+  // Direction labels carry role + name: "You (Provider)" → "Seeker (Ab**** Ga***)".
+  const meLabel = `You (${myRole})`;
+  const otherLabel = `${otherRole} (${rawName})`;
+  const fromLabel = ownershipRole === 'initiated' ? meLabel : otherLabel;
+  const toLabel = ownershipRole === 'initiated' ? otherLabel : meLabel;
 
   const location = formatItemLocation(otherParty.latitude, otherParty.longitude);
 
-  // Determine available actions based on status and ownership
-  const canAccept =
-    ownershipRole === 'received' &&
-    (action.action_status === 'created' || action.action_status === 'pending');
-  const canReject =
-    ownershipRole === 'received' &&
-    (action.action_status === 'created' || action.action_status === 'pending');
-  const canComplete =
-    ownershipRole === 'received' && action.action_status === 'accepted';
-  const canCancel =
-    ownershipRole === 'initiated' &&
-    (action.action_status === 'created' || action.action_status === 'pending');
+  const isPending =
+    action.action_status === 'created' || action.action_status === 'pending';
+  const canAccept = ownershipRole === 'received' && isPending;
+  const canReject = ownershipRole === 'received' && isPending;
+  const canComplete = ownershipRole === 'received' && action.action_status === 'accepted';
+  const canCancel = ownershipRole === 'initiated' && isPending;
+
+  // Message + structured requirement fields split out of the snapshot.
+  const reqEntries = Object.entries(action.requirements_snapshot);
+  const messageEntry = reqEntries.find(([k]) => k.toLowerCase() === 'message');
+  const fieldEntries = reqEntries.filter(([k]) => k.toLowerCase() !== 'message');
+  const message =
+    messageEntry && typeof messageEntry[1] === 'string' ? messageEntry[1] : null;
+  const hasRequirements = reqEntries.length > 0;
 
   return (
-    <Card className="w-full">
-      <CardHeader className="pb-3">
-        <div className="flex items-start justify-between gap-2">
-          <div className="flex flex-wrap items-center gap-2">
-            <Badge variant="outline" className={actionTypeClass}>
+    <div className="group relative overflow-hidden rounded-[18px] border bg-card shadow-sm transition-all duration-200 hover:shadow-md">
+      {/* Top accent strip — brand gradient */}
+      <div className="h-[3px] w-full bg-gradient-to-r from-primary/40 via-primary to-primary/70" />
+
+      <div className="p-5">
+        {/* Row 1: type + status badges, time */}
+        <div className="mb-4 flex items-center justify-between gap-2">
+          <div className="flex items-center gap-2">
+            <span className="inline-flex items-center gap-1.5 rounded-full border border-primary/20 bg-gradient-to-b from-background to-primary/5 px-2.5 py-1 text-[11px] font-semibold capitalize text-primary">
               {action.action_type}
-            </Badge>
-            <Badge variant={status.variant} className="gap-1">
-              {status.icon}
+            </span>
+            <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-semibold ${status.cls}`}>
+              <span className={`h-1.5 w-1.5 rounded-full ${status.dot}`} />
               {status.label}
-            </Badge>
+            </span>
           </div>
-          <span className="text-muted-foreground text-xs">
+          <span className="whitespace-nowrap text-xs font-medium text-muted-foreground">
             {formatDistanceToNow(new Date(action.created_at), { addSuffix: true })}
           </span>
         </div>
-        <CardTitle className="text-base font-medium pt-2">
-          {myItem.domain} → {otherParty.domain}
-        </CardTitle>
-        <CardDescription className="text-xs">
-          Action #{action.action_id.slice(0, 8)} • Update #{action.update_count}
-        </CardDescription>
-      </CardHeader>
 
-      <CardContent className="pb-3 space-y-3">
-        {/* Flow visualization */}
-        <div className="flex items-center gap-2 text-sm">
-          <div className="flex-1 min-w-0">
-            <div className="flex items-center gap-1 text-muted-foreground text-xs">
-              <User className="h-3 w-3" />
-              <span>Your {myItem.domain}</span>
-            </div>
-            <p className="font-medium truncate">{myItem.type}</p>
-            <p className="text-muted-foreground text-xs truncate">
-              ID: {myItem.itemId.slice(0, 8)}...
-            </p>
+        {/* Row 2: identity */}
+        <div className="mb-4 flex items-center gap-3">
+          <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-primary/10 text-base font-bold text-primary ring-1 ring-black/5">
+            {initial}
           </div>
-
-          <ArrowRight className="h-4 w-4 text-muted-foreground shrink-0" />
-
-          <div className="flex-1 min-w-0">
-            <div className="flex items-center gap-1 text-muted-foreground text-xs">
-              <span className="font-medium">{otherParty.label}</span>
-              {otherParty.domain}
+          <div className="min-w-0 flex-1">
+            <div className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-sm font-semibold leading-snug text-foreground [overflow-wrap:anywhere]">
+              <span>{fromLabel}</span>
+              <ArrowRight className="h-3.5 w-3.5 shrink-0 text-primary/70" />
+              <span>{toLabel}</span>
             </div>
-            <p className="font-medium truncate">{otherParty.type}</p>
-            <p className="text-muted-foreground text-xs truncate">
-              ID: {otherParty.itemId.slice(0, 8)}...
-            </p>
           </div>
         </div>
 
-        {/* Location info if available */}
+        {/* Requirements */}
+        {hasRequirements && (
+          <>
+            <button
+              type="button"
+              onClick={() => setShowRequirements((o) => !o)}
+              className="flex w-full items-center justify-between border-t py-2.5"
+            >
+              <span className="text-[11px] font-bold uppercase tracking-[0.12em] text-muted-foreground">
+                Requirements
+              </span>
+              <ChevronDown
+                className={`h-4 w-4 text-muted-foreground transition-transform ${showRequirements ? 'rotate-180' : ''}`}
+              />
+            </button>
+
+            {showRequirements && (
+              <div className="mb-4 rounded-xl border bg-muted/50 p-3.5">
+                {message && (
+                  <div className="mb-3 flex items-start gap-3 border-b pb-3">
+                    <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-card text-primary shadow-sm">
+                      <MessageSquare className="h-3.5 w-3.5" />
+                    </div>
+                    <div className="min-w-0">
+                      <p className="mb-0.5 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                        Message
+                      </p>
+                      <p className="text-[13px] leading-relaxed text-foreground [overflow-wrap:anywhere]">
+                        {message}
+                      </p>
+                    </div>
+                  </div>
+                )}
+
+                {fieldEntries.map(([key, value]) => (
+                  <div
+                    key={key}
+                    className="grid grid-cols-1 gap-2 py-1.5 sm:grid-cols-[120px_1fr] sm:items-start sm:gap-3"
+                  >
+                    <div className="pt-1 text-xs font-medium text-muted-foreground">
+                      {titleCase(key)}
+                    </div>
+                    <div className="flex flex-wrap gap-1.5">
+                      {Array.isArray(value) ? (
+                        value.length === 0 ? (
+                          <span className="text-xs text-muted-foreground">—</span>
+                        ) : (
+                          value.map((v, i) => (
+                            <span
+                              key={i}
+                              className="inline-flex items-center rounded-lg bg-primary/10 px-2.5 py-1 text-xs font-medium text-primary"
+                            >
+                              {String(v)}
+                            </span>
+                          ))
+                        )
+                      ) : (
+                        <span className="text-[13px] text-foreground [overflow-wrap:anywhere]">
+                          {formatRequirementValue(value)}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </>
+        )}
+
         {location && (
-          <div className="flex items-center gap-1 text-xs text-muted-foreground">
+          <div className="mb-3 flex items-center gap-1.5 text-xs text-muted-foreground">
             <MapPin className="h-3 w-3" />
             <span>{location}</span>
           </div>
         )}
 
-        <Separator />
+        {/* Actions */}
+        <div className="flex flex-wrap items-center gap-2 border-t pt-3">
+          {canRevealContact && (
+            <Button
+              size="sm"
+              variant="outline"
+              className="flex-1"
+              onClick={() => setShowContactDetails(true)}
+            >
+              <Contact className="mr-1.5 h-3.5 w-3.5" />
+              View contact
+            </Button>
+          )}
 
-        {/* Requirements snapshot */}
-        {Object.keys(action.requirements_snapshot).length > 0 && (
-          <Collapsible open={showRequirements} onOpenChange={setShowRequirements}>
-            <CollapsibleTrigger asChild>
-              <Button variant="ghost" size="sm" className="w-full justify-between p-0 h-auto">
-                <span className="text-xs font-medium">Requirements</span>
-                {showRequirements ? (
-                  <ChevronUp className="h-3 w-3" />
-                ) : (
-                  <ChevronDown className="h-3 w-3" />
-                )}
-              </Button>
-            </CollapsibleTrigger>
-            <CollapsibleContent>
-              <div className="bg-muted rounded-md p-2 mt-2">
-                <pre className="text-xs overflow-auto max-h-32">
-                  {JSON.stringify(action.requirements_snapshot, null, 2)}
-                </pre>
-              </div>
-            </CollapsibleContent>
-          </Collapsible>
-        )}
+          {canAccept && (
+            <Button size="sm" className="flex-1 shadow-sm" onClick={() => onStatusUpdate?.(action)}>
+              <Check className="mr-1.5 h-3.5 w-3.5" />
+              Accept
+            </Button>
+          )}
+          {canReject && (
+            <Button size="sm" variant="outline" className="flex-1" onClick={() => onStatusUpdate?.(action)}>
+              <X className="mr-1.5 h-3.5 w-3.5" />
+              Reject
+            </Button>
+          )}
+          {canComplete && (
+            <Button size="sm" className="flex-1 shadow-sm" onClick={() => onStatusUpdate?.(action)}>
+              <CheckCircle2 className="mr-1.5 h-3.5 w-3.5" />
+              Complete
+            </Button>
+          )}
+          {canCancel && (
+            <Button size="sm" variant="outline" className="flex-1" onClick={() => onStatusUpdate?.(action)}>
+              <X className="mr-1.5 h-3.5 w-3.5 text-destructive" />
+              Cancel
+            </Button>
+          )}
+        </div>
+      </div>
 
-        {/* Expanded details */}
-        {isExpanded && (
-          <div className="text-xs text-muted-foreground space-y-1 pt-2">
-            <p>Created: {new Date(action.created_at).toLocaleString()}</p>
-            <p>Updated: {new Date(action.updated_at).toLocaleString()}</p>
-            <p>Action ID: {action.action_id}</p>
-            <p>Updates: {action.update_count}</p>
-          </div>
-        )}
-      </CardContent>
-
-      <CardFooter className="pt-0 flex flex-wrap gap-2">
-        {canRevealContact && (
-          <Button
-            size="sm"
-            variant="outline"
-            onClick={() => setShowContactDetails(true)}
-            className="flex-1"
-          >
-            <Contact className="h-3 w-3 mr-1" />
-            View contact details
-          </Button>
-        )}
-
-        {/* Action buttons for target user (received) */}
-        {canAccept && (
-          <Button
-            size="sm"
-            onClick={() => onStatusUpdate?.(action)}
-            className="flex-1"
-          >
-            <Check className="h-3 w-3 mr-1" />
-            Accept
-          </Button>
-        )}
-        {canReject && (
-          <Button
-            size="sm"
-            variant="outline"
-            onClick={() => onStatusUpdate?.(action)}
-            className="flex-1"
-          >
-            <X className="h-3 w-3 mr-1" />
-            Reject
-          </Button>
-        )}
-        {canComplete && (
-          <Button
-            size="sm"
-            onClick={() => onStatusUpdate?.(action)}
-            className="flex-1"
-          >
-            <CheckCircle2 className="h-3 w-3 mr-1" />
-            Complete
-          </Button>
-        )}
-
-        {/* Action buttons for source user (initiated) */}
-        {canCancel && (
-          <Button
-            size="sm"
-            variant="outline"
-            onClick={() => onStatusUpdate?.(action)}
-            className="flex-1"
-          >
-            <AlertCircle className="h-3 w-3 mr-1" />
-            Cancel
-          </Button>
-        )}
-
-        {/* Details toggle */}
-        <Button
-          size="sm"
-          variant="ghost"
-          onClick={() => setIsExpanded(!isExpanded)}
-          className="ml-auto"
-        >
-          {isExpanded ? 'Less' : 'Details'}
-        </Button>
-      </CardFooter>
       <ContactDetailsModal
         actionId={action.action_id}
         open={showContactDetails}
         onOpenChange={setShowContactDetails}
       />
-    </Card>
+    </div>
   );
 }

@@ -1,4 +1,4 @@
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import * as React from 'react';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import { RefreshCw, Inbox, Send, AlertCircle } from 'lucide-react';
@@ -18,6 +18,17 @@ interface ActionListProps {
   isRefetching: boolean;
 }
 
+const FILTERS = ['All', 'Pending', 'Accepted', 'Rejected'] as const;
+type Filter = (typeof FILTERS)[number];
+
+// Maps a filter chip to the raw action_status values it should match.
+const FILTER_STATUSES: Record<Filter, string[] | null> = {
+  All: null,
+  Pending: ['created', 'pending'],
+  Accepted: ['accepted', 'completed'],
+  Rejected: ['rejected', 'cancelled'],
+};
+
 export function ActionList({
   initiatedActions,
   receivedActions,
@@ -30,159 +41,150 @@ export function ActionList({
   onRefresh,
   isRefetching,
 }: ActionListProps) {
-  const handleTabChange = (value: string) => {
-    onTabChange(value as 'initiated' | 'received');
-  };
+  const [filter, setFilter] = React.useState<Filter>('All');
+
+  const actions = activeTab === 'initiated' ? initiatedActions : receivedActions;
+
+  const visible = React.useMemo(() => {
+    const allowed = FILTER_STATUSES[filter];
+    if (!allowed) return actions;
+    return actions.filter((a) => allowed.includes(a.action_status));
+  }, [actions, filter]);
+
+  const tabs = [
+    { id: 'initiated' as const, label: 'Initiated', Icon: Send, count: initiatedActions.length },
+    { id: 'received' as const, label: 'Received', Icon: Inbox, count: receivedActions.length },
+  ];
+  const activeIdx = tabs.findIndex((t) => t.id === activeTab);
 
   return (
-    <div className="w-full space-y-4">
-      <div className="flex items-center justify-between">
-        <h2 className="text-2xl font-bold tracking-tight">My Actions</h2>
+    <div className="w-full space-y-5">
+      {/* Toolbar: filter chips + refresh */}
+      <div className="flex flex-wrap items-center gap-3">
+        <div className="inline-flex gap-1 rounded-xl border bg-card p-1">
+          {FILTERS.map((f) => (
+            <button
+              key={f}
+              type="button"
+              onClick={() => setFilter(f)}
+              className={`rounded-lg px-3 py-1.5 text-xs font-medium transition ${
+                filter === f
+                  ? 'bg-primary/10 text-primary'
+                  : 'text-muted-foreground hover:text-foreground'
+              }`}
+            >
+              {f}
+            </button>
+          ))}
+        </div>
+
         <Button
           variant="outline"
           size="sm"
+          className="ml-auto"
           onClick={onRefresh}
           disabled={isRefetching}
         >
-          <RefreshCw className={`h-4 w-4 mr-2 ${isRefetching ? 'animate-spin' : ''}`} />
+          <RefreshCw className={`mr-2 h-4 w-4 ${isRefetching ? 'animate-spin' : ''}`} />
           Refresh
         </Button>
       </div>
 
-      <Tabs value={activeTab} onValueChange={handleTabChange} className="w-full">
-        <TabsList className="grid w-full grid-cols-2">
-          <TabsTrigger value="initiated" className="flex items-center gap-2">
-            <Send className="h-4 w-4" />
-            <span>Initiated</span>
-            {initiatedActions.length > 0 && (
-              <span className="ml-1 text-xs bg-muted rounded-full px-2 py-0.5">
-                {initiatedActions.length}
-              </span>
-            )}
-          </TabsTrigger>
-          <TabsTrigger value="received" className="flex items-center gap-2">
-            <Inbox className="h-4 w-4" />
-            <span>Received</span>
-            {receivedActions.length > 0 && (
-              <span className="ml-1 text-xs bg-primary/10 text-primary rounded-full px-2 py-0.5 font-medium">
-                {receivedActions.length}
-              </span>
-            )}
-          </TabsTrigger>
-        </TabsList>
-
-        <TabsContent value="initiated" className="mt-4">
-          <ActionListContent
-            actions={initiatedActions}
-            ownershipRole="initiated"
-            isLoading={isLoading}
-            isError={isError}
-            error={error}
-            onStatusUpdate={onStatusUpdate}
-            emptyMessage="You haven't initiated any actions yet."
-            emptySubMessage="Browse items and use action buttons to connect with others."
-          />
-        </TabsContent>
-
-        <TabsContent value="received" className="mt-4">
-          <ActionListContent
-            actions={receivedActions}
-            ownershipRole="received"
-            isLoading={isLoading}
-            isError={isError}
-            error={error}
-            onStatusUpdate={onStatusUpdate}
-            emptyMessage="No actions received yet."
-            emptySubMessage="When someone initiates an action with your items, they will appear here."
-          />
-        </TabsContent>
-      </Tabs>
-    </div>
-  );
-}
-
-interface ActionListContentProps {
-  actions: Action[];
-  ownershipRole: 'initiated' | 'received';
-  isLoading: boolean;
-  isError: boolean;
-  error: Error | null;
-  onStatusUpdate: (action: Action) => void;
-  emptyMessage: string;
-  emptySubMessage: string;
-}
-
-function ActionListContent({
-  actions,
-  ownershipRole,
-  isLoading,
-  isError,
-  error,
-  onStatusUpdate,
-  emptyMessage,
-  emptySubMessage,
-}: ActionListContentProps) {
-  if (isLoading) {
-    return (
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-        {Array.from({ length: 6 }).map((_, i) => (
-          <ActionCardSkeleton key={i} />
-        ))}
-      </div>
-    );
-  }
-
-  if (isError) {
-    return (
-      <div className="flex flex-col items-center justify-center py-12 text-center">
-        <AlertCircle className="h-12 w-12 text-destructive mb-4" />
-        <h3 className="text-lg font-semibold text-destructive">Failed to load actions</h3>
-        <p className="text-muted-foreground text-sm mt-2 max-w-md">
-          {error?.message ?? 'An unexpected error occurred while fetching your actions.'}
-        </p>
-      </div>
-    );
-  }
-
-  if (actions.length === 0) {
-    return (
-      <div className="flex flex-col items-center justify-center py-12 text-center border rounded-lg bg-muted/50">
-        <Inbox className="h-12 w-12 text-muted-foreground mb-4" />
-        <h3 className="text-lg font-semibold">{emptyMessage}</h3>
-        <p className="text-muted-foreground text-sm mt-2 max-w-md">{emptySubMessage}</p>
-      </div>
-    );
-  }
-
-  return (
-    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-      {actions.map((action) => (
-        <ActionCard
-          key={action.action_id}
-          action={action}
-          ownershipRole={ownershipRole}
-          onStatusUpdate={onStatusUpdate}
+      {/* Sliding-pill tabs */}
+      <div className="relative flex rounded-2xl border bg-muted/60 p-1.5">
+        <div
+          className="absolute bottom-1.5 top-1.5 rounded-xl bg-card shadow-sm transition-[left] duration-300"
+          style={{ left: `calc(${activeIdx * 50}% + 6px)`, width: 'calc(50% - 12px)' }}
         />
-      ))}
+        {tabs.map((t) => {
+          const isActive = t.id === activeTab;
+          return (
+            <button
+              key={t.id}
+              type="button"
+              onClick={() => onTabChange(t.id)}
+              className={`relative z-10 flex flex-1 items-center justify-center gap-2 py-2.5 text-sm transition-colors ${
+                isActive ? 'font-bold text-primary' : 'font-semibold text-muted-foreground'
+              }`}
+            >
+              <t.Icon className={`h-4 w-4 ${isActive ? 'text-primary' : 'text-muted-foreground'}`} />
+              {t.label}
+              <span
+                className={`inline-flex h-5 min-w-[22px] items-center justify-center rounded-full px-1.5 text-[11px] font-bold ${
+                  isActive ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground'
+                }`}
+              >
+                {t.count}
+              </span>
+            </button>
+          );
+        })}
+      </div>
+
+      {/* Content */}
+      {isLoading ? (
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
+          {Array.from({ length: 6 }).map((_, i) => (
+            <ActionCardSkeleton key={i} />
+          ))}
+        </div>
+      ) : isError ? (
+        <div className="flex flex-col items-center justify-center rounded-2xl border border-dashed py-14 text-center">
+          <AlertCircle className="mb-3 h-10 w-10 text-destructive" />
+          <h3 className="text-lg font-semibold text-destructive">Failed to load actions</h3>
+          <p className="mt-1.5 max-w-md text-sm text-muted-foreground">
+            {error?.message ?? 'An unexpected error occurred while fetching your actions.'}
+          </p>
+        </div>
+      ) : visible.length === 0 ? (
+        <div className="flex flex-col items-center justify-center rounded-2xl border border-dashed py-14 text-center">
+          <div className="mb-3 flex h-14 w-14 items-center justify-center rounded-2xl bg-primary/10 text-primary">
+            {activeTab === 'initiated' ? <Send className="h-6 w-6" /> : <Inbox className="h-6 w-6" />}
+          </div>
+          <h3 className="text-base font-bold text-foreground">Nothing here yet</h3>
+          <p className="mt-1 text-sm text-muted-foreground">
+            {activeTab === 'initiated'
+              ? 'Requests you send will show up here.'
+              : 'Requests sent to you will appear here.'}
+          </p>
+        </div>
+      ) : (
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
+          {visible.map((action) => (
+            <ActionCard
+              key={action.action_id}
+              action={action}
+              ownershipRole={activeTab}
+              onStatusUpdate={onStatusUpdate}
+            />
+          ))}
+        </div>
+      )}
     </div>
   );
 }
 
 function ActionCardSkeleton() {
   return (
-    <div className="rounded-lg border p-4 space-y-4">
+    <div className="space-y-4 rounded-[18px] border p-5">
       <div className="flex items-start justify-between gap-2">
         <div className="flex gap-2">
-          <Skeleton className="h-5 w-20" />
-          <Skeleton className="h-5 w-16" />
+          <Skeleton className="h-6 w-20 rounded-full" />
+          <Skeleton className="h-6 w-16 rounded-full" />
         </div>
-        <Skeleton className="h-4 w-24" />
+        <Skeleton className="h-4 w-20" />
       </div>
-      <Skeleton className="h-6 w-3/4" />
-      <Skeleton className="h-4 w-1/2" />
-      <div className="flex items-center gap-2 pt-2">
-        <Skeleton className="h-10 flex-1" />
-        <Skeleton className="h-10 flex-1" />
+      <div className="flex items-center gap-3">
+        <Skeleton className="h-11 w-11 rounded-full" />
+        <div className="flex-1 space-y-2">
+          <Skeleton className="h-4 w-3/4" />
+          <Skeleton className="h-3 w-1/2" />
+        </div>
+      </div>
+      <Skeleton className="h-20 w-full rounded-xl" />
+      <div className="flex gap-2">
+        <Skeleton className="h-9 flex-1" />
+        <Skeleton className="h-9 flex-1" />
       </div>
     </div>
   );

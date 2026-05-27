@@ -84,6 +84,12 @@ export const ActionEventSelectSchema = createSelectSchema(action_events);
 
 export const OwnedItemActionSchema = ItemActionSelectSchema.extend({
   ownership_roles: ActionOwnershipTagSchema.array().min(1),
+  // Human-readable names resolved from each item's display_name_field
+  // (falls back to the item_id when the schema declares none or the value
+  // is missing). Lets the UI show "You → Mobility World India" instead of
+  // raw ids.
+  source_item_name: z.string().nullable().optional(),
+  target_item_name: z.string().nullable().optional(),
 });
 
 export const OwnedActionEventSchema = ActionEventSelectSchema.extend({
