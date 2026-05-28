@@ -140,7 +140,18 @@ export function ActionCard({ action, ownershipRole, onStatusUpdate }: ActionCard
             disambiguates cross-network actions on the shared list. */}
         <div className="mb-4 flex items-center justify-between gap-2">
           <div className="flex flex-wrap items-center gap-2">
-            <span className="inline-flex items-center gap-1 rounded-full border bg-muted/50 px-2 py-1 text-[11px] font-semibold text-muted-foreground">
+            {/* Teal — common to both networks' brand.json (colours.secondary
+                "Teal" + accent "Pale Mint"). Stays the same across networks
+                so the chip reads as a neutral cross-network indicator,
+                not another brand colour. */}
+            <span
+              className="inline-flex items-center gap-1 rounded-full border px-2 py-1 text-[11px] font-semibold"
+              style={{
+                background: '#e6fff5',
+                color: '#0a8f7c',
+                borderColor: '#b8ecdf',
+              }}
+            >
               <Network className="h-3 w-3" />
               {titleCase(action.source_item_network)}
               {action.target_item_network !== action.source_item_network && (
