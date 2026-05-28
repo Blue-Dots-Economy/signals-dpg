@@ -7,10 +7,10 @@
       "description": "People looking for jobs.",
       "minimum_cache_ttl_seconds": 300,
       "status_rules": [
-        { "status": "new",      "label": "New",      "description": "Last 7 days",            "when": { "item_age_days": { "lte": 7 } } },
-        { "status": "active",   "label": "Active",   "description": "Active in last 30 days", "when": { "days_since_last": { "buckets": ["create", "accept"], "lte": 30 } } },
-        { "status": "at_risk",  "label": "At Risk",  "description": "Idle 31–90 days",        "when": { "days_since_last": { "buckets": ["create", "accept", "reject"], "between": [31, 90] } } },
-        { "status": "inactive", "label": "Inactive", "description": "No activity 90+ days",   "when": "default" }
+        { "status": "new",      "label": "New",      "description": "Joined within the last 7 days",            "when": { "item_age_days": { "lte": 7 } } },
+        { "status": "active",   "label": "Active",   "description": "Applied to a job in the last 30 days",     "when": { "days_since_last": { "buckets": ["create", "accept"], "lte": 30 } } },
+        { "status": "at_risk",  "label": "At Risk",  "description": "No applications for 30–90 days",           "when": { "days_since_last": { "buckets": ["create", "accept", "reject"], "between": [31, 90] } } },
+        { "status": "inactive", "label": "Inactive", "description": "No activity 90+ days",                     "when": "default" }
       ],
       "item_schemas": {
         "profile_1.0": {
@@ -126,10 +126,10 @@
       "description": "Employers and recruiters posting jobs.",
       "minimum_cache_ttl_seconds": 300,
       "status_rules": [
-        { "status": "new",      "label": "New",      "description": "Last 7 days",            "when": { "item_age_days": { "lte": 7 } } },
-        { "status": "active",   "label": "Active",   "description": "Active in last 30 days", "when": { "days_since_last": { "buckets": ["create", "accept"], "lte": 30 } } },
-        { "status": "at_risk",  "label": "At Risk",  "description": "Idle 31–90 days",        "when": { "days_since_last": { "buckets": ["create", "accept", "reject"], "between": [31, 90] } } },
-        { "status": "inactive", "label": "Inactive", "description": "No activity 90+ days",   "when": "default" }
+        { "status": "new",      "label": "New",      "description": "Job posted within the last 7 days",                                "when": { "item_age_days": { "lte": 7 } } },
+        { "status": "active",   "label": "Active",   "description": "Received applications and shortlisted or rejected in last 30 days", "when": { "all": [ { "count": { "buckets": ["create"], "gt": 0 } }, { "days_since_last": { "buckets": ["accept", "reject"], "lte": 30 } } ] } },
+        { "status": "at_risk",  "label": "At Risk",  "description": "No applications shortlisted or rejected for 30–90 days",            "when": { "all": [ { "count": { "buckets": ["create"], "gt": 0 } }, { "days_since_last": { "buckets": ["accept", "reject"], "between": [31, 90] } } ] } },
+        { "status": "inactive", "label": "Inactive", "description": "No activity for 90+ days",                                          "when": "default" }
       ],
       "item_schemas": {
         "job_posting_1.0": {
