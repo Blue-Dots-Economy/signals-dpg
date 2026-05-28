@@ -105,9 +105,11 @@ export function ActionCard({ action, ownershipRole, onStatusUpdate }: ActionCard
   // Avatar: first letter of a real public name, else the role's initial.
   const initial = (isMaskedOrFallback ? otherRole : rawName).charAt(0).toUpperCase() || '?';
 
-  // Direction labels carry role + name: "You (Provider)" → "Seeker (Ab**** Ga***)".
+  // Both sides format as "<Subject> (<Role>)" so the brackets consistently
+  // contain the role on each end — avoids the mismatch where "You (Seeker)"
+  // had role-in-brackets while "Provider (Name)" had name-in-brackets.
   const meLabel = `You (${myRole})`;
-  const otherLabel = `${otherRole} (${rawName})`;
+  const otherLabel = `${rawName} (${otherRole})`;
   const fromLabel = ownershipRole === 'initiated' ? meLabel : otherLabel;
   const toLabel = ownershipRole === 'initiated' ? otherLabel : meLabel;
 
