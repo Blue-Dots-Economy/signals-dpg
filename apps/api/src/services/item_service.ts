@@ -3,9 +3,12 @@ import {
   getDomainItemSchema,
   getDomainItemTypes,
   getInstanceCustomItemSchemaUrl,
+  maskPrivateState,
+  mergeMasksIntoPublic,
   splitItemStateByPrivacy,
   validateAgainstJsonSchema,
 } from '@dpg/schemas';
+import { encryptPiiBlob, getPiiKey } from '@dpg/auth';
 import { items } from '@dpg/database';
 import { db } from '@api/db/postgres/drizzle_config';
 import { isServedDomainBinding } from '@/utils/served_domain_guard';
@@ -128,7 +131,7 @@ async function resolveSchema(params: {
   }
 
   const itemState = splitItemStateByPrivacy(itemSchema, params.submittedItemState);
-  return { itemSchemaUrl, itemState, itemInstanceUrl };
+  return { itemSchemaUrl, itemState, itemInstanceUrl, itemSchema };
 }
 
 export async function createItemInternal(
@@ -136,12 +139,19 @@ export async function createItemInternal(
   params: CreateItemServiceParams
 ) {
   const submittedItemState = params.item_state ?? {};
-  const { itemSchemaUrl, itemState, itemInstanceUrl } = await resolveSchema({
+  const { itemSchemaUrl, itemState, itemInstanceUrl, itemSchema } = await resolveSchema({
     item_network: params.item_network,
     item_domain: params.item_domain,
     item_type: params.item_type,
     submittedItemState,
   });
+
+  const masked = maskPrivateState(itemSchema, itemState.privateState);
+  const itemStateForStorage = mergeMasksIntoPublic(itemState.publicState, masked);
+  const encryptedPrivate =
+    Object.keys(itemState.privateState).length === 0
+      ? ''
+      : encryptPiiBlob(JSON.stringify(itemState.privateState), getPiiKey());
 
   const result = await exec
     .insert(items)
@@ -151,8 +161,8 @@ export async function createItemInternal(
       item_domain: params.item_domain,
       item_instance_url: itemInstanceUrl,
       item_schema_url: itemSchemaUrl,
-      item_state: itemState.publicState,
-      item_private_state: itemState.privateState,
+      item_state: itemStateForStorage,
+      item_private_state: encryptedPrivate,
       item_latitude: params.item_latitude ?? null,
       item_longitude: params.item_longitude ?? null,
       created_by: params.created_by,
