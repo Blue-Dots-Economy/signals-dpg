@@ -1,7 +1,6 @@
 import * as React from 'react';
 import type { RJSFSchema } from '@rjsf/utils';
 import type { MapMarker } from '@/engine/types';
-import { filterDataBySchema, getPublicFieldKeys } from '@/engine/schema/schema-privacy';
 import { getActiveMapProvider } from '@/engine/map/map-registry';
 import { extractAddressFromForm, extractPincodeFromForm, normalizeFieldName } from '@/lib/item-utils';
 import { geocodePincode, geocodeAddress, geocodeAddressWithGoogle } from './geocoding';
@@ -32,7 +31,6 @@ export function MapView({
 
     async function resolveMarkers() {
       setLoading(true);
-      const publicFields = getPublicFieldKeys(schema);
       const titleField = findTitleField(schema);
 
       const resolved = await Promise.all(
@@ -95,17 +93,7 @@ export function MapView({
             lat,
             lng,
             label,
-            data: filterDataBySchema(
-              item.data,
-              {
-                ...schema,
-                properties: Object.fromEntries(
-                  Object.entries(schema.properties ?? {}).filter(([k]) =>
-                    publicFields.includes(k)
-                  )
-                ),
-              }
-            ),
+            data: item.data,
             precision,
             geocodedFrom,
           } satisfies MapMarker;

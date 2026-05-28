@@ -71,10 +71,6 @@ export type SchemaInput =
   | { url: string }
   | { api: string; baseUrl?: string };
 
-// ─── Privacy ───────────────────────────────────────────────────
-
-export type PrivacyMode = 'all' | 'public-only';
-
 // ─── Card Types ────────────────────────────────────────────────
 
 export interface CardField {

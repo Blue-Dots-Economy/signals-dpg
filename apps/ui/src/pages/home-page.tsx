@@ -8,7 +8,6 @@ import type {
   DotNetworkInteraction,
   ViewMode,
 } from '@/engine/types';
-import { filterSchemaByPrivacy } from '@/engine/schema/schema-privacy';
 import { resolveNetworkRefs } from '@/engine/schema/resolve-schema';
 import { PageShell } from '@/components/layout/page-shell';
 import { ContentHeader } from '@/components/layout/content-header';
@@ -715,7 +714,7 @@ export function HomePage() {
         </ActionHandler>
       ) : (
         <MapView
-          schema={filterSchemaByPrivacy(activeSchema!, 'public-only')}
+          schema={activeSchema!}
           items={Object.values(filteredDomainItems).flat()}
         />
       )}
