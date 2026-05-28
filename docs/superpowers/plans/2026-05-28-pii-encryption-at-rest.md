@@ -1822,3 +1822,18 @@ EOF
 - **Spec coverage:** crypto module (§1) → Tasks 2-3. Schema/masking + create/update (§2) → Tasks 4-9. Read paths (§3) → Tasks 7, 10, 11. UI changes (§4) → Task 12. Testing + non-goals + ops (§5) → Tasks 14-16. Seed scripts → Task 13. DB type change → Task 6. Env var + Helm → Tasks 1, 15.
 - **Placeholders:** Task 8/9 tests reference test fixtures that may not exist verbatim ("profile_1.0" with these fields) — the plan calls this out and tells the engineer to match the project's existing test style. This is intentional, not a TBD.
 - **Type consistency:** `decryptItemPrivate(row).mergedState` is the only public surface name used across Tasks 7 and 10. `getPiiKey()` is used identically in Tasks 7-10. `maskPrivateState(itemSchema, privateState)` signature matches across Tasks 4, 8, 9.
+
+---
+
+## Revision 1 — added Tasks 8b, 9b, 9c, 9d (2026-05-28, mid-execution)
+
+The original plan assumed `createItemInternal` / `updateItemInternal` were the sole write paths. They are not. Discovered during Task 6 (DDL type change): the public `POST /item/create` and `PUT /item/update` routes duplicate the split-and-insert logic and bypass the service. The admin participant route and `action_event_runtime` also read `item_private_state` directly.
+
+Per user direction (option A), routes will be refactored to call the service. Four new tasks:
+
+- **Task 8b** — Refactor `apps/api/src/routes/v1/item/create_item.ts` to call `createItemInternal`. Drop the duplicated `splitItemStateByPrivacy` + `db.insert(items)` block. Keep partition setup, cache invalidation, and response shaping in the route.
+- **Task 9b** — Refactor `apps/api/src/routes/v1/item/update_item.ts` to call `updateItemInternal`. This requires `updateItemInternal` (currently `void`) to return the updated row shape; adjust Task 9 accordingly.
+- **Task 9c** — `apps/api/src/utils/action_event_runtime.ts` selects `item_private_state` (lines 64, 87). Either stop selecting it (if the event payload doesn't need decrypted private values) or route through `decryptItemPrivate`.
+- **Task 9d** — `apps/api/src/routes/v1/admin/participant.ts:370-385` reads + merges private state inline via `mergeItemStateWithPrivate`. Replace with `decryptItemPrivate`.
+
+Sequence: Tasks 7 → 8 → 8b → 9 → 9b → 9c → 9d → 10 → … (rest unchanged).
