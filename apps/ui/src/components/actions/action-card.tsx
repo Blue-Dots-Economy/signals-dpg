@@ -68,6 +68,23 @@ function formatRequirementValue(value: unknown): string {
 const titleCase = (s: string) =>
   s.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
 
+// Per-network chip colours pulled from each brand.json (colours.primary
+// "<Dot> 500" + accent shades). Add a new entry per network as they ship.
+const NETWORK_CHIP_COLOURS: Record<
+  string,
+  { background: string; color: string; borderColor: string }
+> = {
+  blue_dot: { background: '#e6f0ff', color: '#0050b3', borderColor: '#a4daff' },
+  purple_dot: { background: '#f3e8ff', color: '#5a1fbf', borderColor: '#d8c2ff' },
+};
+const FALLBACK_CHIP = {
+  background: '#eef1f6',
+  color: '#2a3344',
+  borderColor: '#cbd5e1',
+};
+const networkChipStyle = (networkId: string) =>
+  NETWORK_CHIP_COLOURS[networkId] ?? FALLBACK_CHIP;
+
 export function ActionCard({ action, ownershipRole, onStatusUpdate }: ActionCardProps) {
   const [showRequirements, setShowRequirements] = React.useState(true);
   const [showContactDetails, setShowContactDetails] = React.useState(false);
@@ -140,16 +157,12 @@ export function ActionCard({ action, ownershipRole, onStatusUpdate }: ActionCard
             disambiguates cross-network actions on the shared list. */}
         <div className="mb-4 flex items-center justify-between gap-2">
           <div className="flex flex-wrap items-center gap-2">
-            {/* Slate from brand.json's shared accent palette (Ink/Slate/Mist) —
-                neutral, common to both networks. Teal would collide with the
-                green emerald used for Accepted/Completed status. */}
+            {/* Each network's own brand palette (from brand.json) so the chip
+                colour identifies the action's network — purple_dot purple,
+                blue_dot blue — independent of the viewing context. */}
             <span
               className="inline-flex items-center gap-1 rounded-full border px-2 py-1 text-[11px] font-semibold"
-              style={{
-                background: '#eef1f6',
-                color: '#2a3344',
-                borderColor: '#cbd5e1',
-              }}
+              style={networkChipStyle(action.source_item_network)}
             >
               <Network className="h-3 w-3" />
               {titleCase(action.source_item_network)}
