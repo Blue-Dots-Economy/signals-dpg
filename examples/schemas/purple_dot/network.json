@@ -7,10 +7,10 @@
       "description": "Persons with disabilities seeking services, devices, training, or other support.",
       "minimum_cache_ttl_seconds": 300,
       "status_rules": [
-        { "status": "new",      "when": { "item_age_days": { "lte": 7 } } },
-        { "status": "active",   "when": { "days_since_last": { "buckets": ["create", "accept"], "lte": 30 } } },
-        { "status": "at_risk",  "when": { "days_since_last": { "buckets": ["create", "accept", "reject"], "between": [31, 90] } } },
-        { "status": "inactive", "when": "default" }
+        { "status": "new",      "label": "New",      "description": "Joined within the last 7 days",                  "when": { "item_age_days": { "lte": 7 } } },
+        { "status": "active",   "label": "Active",   "description": "Connected with a provider in the last 30 days",  "when": { "days_since_last": { "buckets": ["create", "accept"], "lte": 30 } } },
+        { "status": "at_risk",  "label": "At Risk",  "description": "No activity for 30–90 days",                    "when": { "days_since_last": { "buckets": ["create", "accept", "reject"], "between": [31, 90] } } },
+        { "status": "inactive", "label": "Inactive", "description": "No activity 90+ days",                            "when": "default" }
       ],
       "item_schemas": {
         "profile_1.0": {
@@ -207,10 +207,10 @@
       "description": "Organisations and individuals providing services, devices, training, or other support for persons with disabilities.",
       "minimum_cache_ttl_seconds": 300,
       "status_rules": [
-        { "status": "new",      "when": { "item_age_days": { "lte": 7 } } },
-        { "status": "active",   "when": { "days_since_last": { "buckets": ["create", "accept"], "lte": 30 } } },
-        { "status": "at_risk",  "when": { "days_since_last": { "buckets": ["create", "accept", "reject"], "between": [31, 90] } } },
-        { "status": "inactive", "when": "default" }
+        { "status": "new",      "label": "New",      "description": "Service posted within the last 7 days",             "when": { "item_age_days": { "lte": 7 } } },
+        { "status": "active",   "label": "Active",   "description": "Accepted or rejected a request in the last 30 days", "when": { "all": [ { "count": { "buckets": ["create"], "gt": 0 } }, { "days_since_last": { "buckets": ["accept", "reject"], "lte": 30 } } ] } },
+        { "status": "at_risk",  "label": "At Risk",  "description": "No responses for 30–90 days",                    "when": { "all": [ { "count": { "buckets": ["create"], "gt": 0 } }, { "days_since_last": { "buckets": ["accept", "reject"], "between": [31, 90] } } ] } },
+        { "status": "inactive", "label": "Inactive", "description": "No activity for 90+ days",                       "when": "default" }
       ],
       "item_schemas": {
         "profile_1.0": {
