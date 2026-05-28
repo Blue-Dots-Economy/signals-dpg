@@ -150,9 +150,10 @@ export function ActionStatusUpdater({
   const headerKey = status || action.action_type || 'connect';
   const display = getActionDisplay(headerKey);
   const actionLabel = statusLabels[status] ?? display.label;
-  // The dismiss button already says "Cancel"; when the chosen status verb is
-  // also "Cancel" use "OK" for the confirm button so the two don't collide.
-  const confirmLabel = actionLabel.toLowerCase() === 'cancel' ? 'OK' : actionLabel;
+  // Confirm button is always "Submit" regardless of the chosen status verb —
+  // user-facing label stays stable while the modal title carries the verb
+  // (e.g. "Cancel Request", "Accept Request").
+  const confirmLabel = 'Submit';
   const subtitle = STATUS_SUBTITLES[status] ?? `Update status for this ${action.action_type ?? 'action'}`;
 
   const header = (
