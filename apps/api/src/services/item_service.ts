@@ -5,10 +5,11 @@ import {
   getInstanceCustomItemSchemaUrl,
   maskPrivateState,
   mergeMasksIntoPublic,
+  mergeItemStateWithPrivate,
   splitItemStateByPrivacy,
   validateAgainstJsonSchema,
 } from '@dpg/schemas';
-import { encryptPiiBlob, getPiiKey } from '@dpg/auth';
+import { decryptPiiBlob, encryptPiiBlob, getPiiKey } from '@dpg/auth';
 import { items } from '@dpg/database';
 import { db } from '@api/db/postgres/drizzle_config';
 import { isServedDomainBinding } from '@/utils/served_domain_guard';
@@ -204,9 +205,10 @@ export async function updateItemInternal(
     : and(eq(items.item_id, itemId), eq(items.created_by, callerId));
 
   const updateValues: Record<string, unknown> = {
-    ...body,
     updated_at: sql`now()`,
   };
+  if (body.item_latitude !== undefined) updateValues.item_latitude = body.item_latitude;
+  if (body.item_longitude !== undefined) updateValues.item_longitude = body.item_longitude;
 
   if (body.item_state) {
     const [existingItem] = await exec
@@ -215,6 +217,8 @@ export async function updateItemInternal(
         item_domain: items.item_domain,
         item_type: items.item_type,
         item_schema_url: items.item_schema_url,
+        item_state: items.item_state,
+        item_private_state: items.item_private_state,
       })
       .from(items)
       .where(ownershipFilter)
@@ -235,8 +239,25 @@ export async function updateItemInternal(
       itemType: existingItem.item_type,
     });
 
+    // Decrypt existing private blob (empty string => no prior private fields).
+    const priorPrivate =
+      existingItem.item_private_state === ''
+        ? {}
+        : (JSON.parse(
+            decryptPiiBlob(existingItem.item_private_state, getPiiKey())
+          ) as Record<string, unknown>);
+
+    // Reconstitute the full prior state (real values, not masks).
+    const priorFullState = mergeItemStateWithPrivate(
+      existingItem.item_state as Record<string, unknown>,
+      priorPrivate
+    );
+
+    // Layer the caller's partial update on top.
+    const mergedFullState: Record<string, unknown> = { ...priorFullState, ...body.item_state };
+
     try {
-      validateAgainstJsonSchema(itemSchema, body.item_state, 'item_state', {
+      validateAgainstJsonSchema(itemSchema, mergedFullState, 'item_state', {
         allowAdditionalProperties: apiConfig.allow_extra_schema_data,
       });
     } catch (err) {
@@ -247,9 +268,13 @@ export async function updateItemInternal(
       );
     }
 
-    const splitState = splitItemStateByPrivacy(itemSchema, body.item_state);
-    updateValues.item_state = splitState.publicState;
-    updateValues.item_private_state = splitState.privateState;
+    const split = splitItemStateByPrivacy(itemSchema, mergedFullState);
+    const masked = maskPrivateState(itemSchema, split.privateState);
+    updateValues.item_state = mergeMasksIntoPublic(split.publicState, masked);
+    updateValues.item_private_state =
+      Object.keys(split.privateState).length === 0
+        ? ''
+        : encryptPiiBlob(JSON.stringify(split.privateState), getPiiKey());
   }
 
   const result = await exec
