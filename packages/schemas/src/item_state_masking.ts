@@ -25,21 +25,15 @@ const MASKING_RULES: MaskingRule[] = [
     },
   },
   {
-    // phone / tel: +XX-XX-XXXX-X{last4}; preserve country code if present
-    test: (_k, p) => format(p) === 'phone' || format(p) === 'tel',
-    apply: (v) => {
-      const digits = v.replace(/\D/g, '');
-      const tail = lastN(digits, 4).padStart(4, 'X');
-      // Extract country code: most are 1-2 digits, up to 3
-      const plusIdx = v.indexOf('+');
-      if (plusIdx === 0 && digits.length > 0) {
-        // Use heuristic: country codes are usually 1-2 digits, default to 2 if enough digits
-        const ccLength = digits.length > 10 ? 2 : Math.min(3, digits.length - 4);
-        const cc = '+' + digits.slice(0, ccLength);
-        return `${cc}-XX-XXXX-X${tail}`;
-      }
-      return `+XX-XX-XXXX-X${tail}`;
-    },
+    // phone / tel — first 3 chars + ***. Fires on either format=phone/tel
+    // or on key-name heuristics (mobile, phone, contact_phone, whatsapp, etc.)
+    // so schemas don't have to opt in via a custom `format`.
+    test: (k, p) =>
+      format(p) === 'phone' ||
+      format(p) === 'tel' ||
+      /(^|_)(mobile|phone|tel|whatsapp|contact_number)(_|$)/i.test(k) ||
+      /(^|_)contact_phone(_|$)/i.test(k),
+    apply: (v) => (v.length <= 3 ? v : `${v.slice(0, 3)}***`),
   },
   {
     // date / date-time
@@ -72,6 +66,14 @@ const MASKING_RULES: MaskingRule[] = [
       const tail = lastN(digits, 4);
       return 'X'.repeat(Math.max(v.length - tail.length, 0)) + tail;
     },
+  },
+  {
+    // address-like keys: fully redacted. Addresses are too variable in shape
+    // for a partial reveal to be predictable; *** signals "intentionally hidden".
+    test: (k) =>
+      /(^|_)(address|street|line1|line2|address_line)(_|$)/i.test(k) ||
+      /^official_address$/i.test(k),
+    apply: () => '***',
   },
 ];
 

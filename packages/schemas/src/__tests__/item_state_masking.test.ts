@@ -4,13 +4,16 @@ import { maskPrivateState } from '../item_state_masking';
 const profileSchema = {
   type: 'object',
   properties: {
-    email:    { type: 'string', format: 'email',   private: true },
-    phone:    { type: 'string', format: 'phone',   private: true },
-    dob:      { type: 'string',                    private: true },
-    name:     { type: 'string',                    private: true },
-    aadhaar:  { type: 'string',                    private: true },
-    bio:      { type: 'string',                    private: true },
-    address: {
+    email:         { type: 'string', format: 'email',   private: true },
+    phone:         { type: 'string', format: 'phone',   private: true },
+    mobile_number: { type: 'string',                    private: true },
+    contact_phone: { type: 'string',                    private: true },
+    dob:           { type: 'string',                    private: true },
+    name:          { type: 'string',                    private: true },
+    aadhaar:       { type: 'string',                    private: true },
+    bio:           { type: 'string',                    private: true },
+    address:       { type: 'string',                    private: true },
+    nested_address: {
       type: 'object', private: true,
       properties: {
         line1: { type: 'string' },
@@ -33,9 +36,19 @@ describe('maskPrivateState', () => {
     expect(out.email).toBe('a***@example.com');
   });
 
-  it('masks a phone by format with last 4 visible', () => {
+  it('masks a phone by format — first 3 chars + ***', () => {
     const out = maskPrivateState(profileSchema, { phone: '+919876543210' });
-    expect(out.phone).toBe('+91-XX-XXXX-X3210');
+    expect(out.phone).toBe('+91***');
+  });
+
+  it('masks a mobile_number by key-name heuristic — first 3 chars + ***', () => {
+    const out = maskPrivateState(profileSchema, { mobile_number: '9876543210' });
+    expect(out.mobile_number).toBe('987***');
+  });
+
+  it('masks a contact_phone by key-name heuristic — first 3 chars + ***', () => {
+    const out = maskPrivateState(profileSchema, { contact_phone: '9876543210' });
+    expect(out.contact_phone).toBe('987***');
   });
 
   it('masks a dob by key-name heuristic', () => {
@@ -58,13 +71,18 @@ describe('maskPrivateState', () => {
     expect(out.bio).toBe('XXXXX');
   });
 
+  it('masks an address by key-name heuristic — full ***', () => {
+    const out = maskPrivateState(profileSchema, { address: '221B Baker St, London' });
+    expect(out.address).toBe('***');
+  });
+
   it('recurses into nested object schemas', () => {
     const out = maskPrivateState(profileSchema, {
-      address: { line1: '221B Baker St', city: 'London' },
+      nested_address: { line1: '221B Baker St', city: 'London' },
     });
-    expect(out.address).toEqual({
-      line1: 'XXXXXXXXXXXXX',
-      city:  'XXXXXX',
+    expect(out.nested_address).toEqual({
+      line1: '***',         // matches address-like heuristic
+      city:  'XXXXXX',      // no heuristic match, length-preserving fallback
     });
   });
 
