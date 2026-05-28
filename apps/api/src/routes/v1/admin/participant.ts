@@ -16,8 +16,8 @@ import {
   UpsertParticipantRequest,
   UpsertParticipantResponse,
   type UpsertParticipantRequest as UpsertBody,
-  mergeItemStateWithPrivate,
 } from '@dpg/schemas';
+import { decryptItemPrivate } from '@/utils/item_decrypt';
 import { resolve_upsert_action } from './_resolve_upsert_action.js';
 
 /**
@@ -379,10 +379,14 @@ async function readItemsForUser(user_id: string) {
     )
     .orderBy(items.created_at);
   return rows.map((r) => {
-    const { item_private_state, ...rest } = r;
+    const { item_private_state: _drop, ...rest } = r;
+    const { mergedState } = decryptItemPrivate({
+      item_state: r.item_state as Record<string, unknown>,
+      item_private_state: r.item_private_state,
+    });
     return {
       ...rest,
-      item_state: mergeItemStateWithPrivate(r.item_state, item_private_state),
+      item_state: mergedState,
       created_at: (r.created_at as Date).toISOString(),
       updated_at: (r.updated_at as Date).toISOString(),
     };

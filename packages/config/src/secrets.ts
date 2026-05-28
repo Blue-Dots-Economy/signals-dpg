@@ -76,3 +76,13 @@ export const DatabaseSecretsSchema = z.object({
   REDIS_PASSWORD: z.string(),
   REDIS_PORT: z.coerce.number().default(6370),
 });
+
+export const PiiCryptoSecretsSchema = z.object({
+  SIGNALS_PII_KEY: z
+    .string()
+    .regex(/^[A-Za-z0-9+/=]+$/, 'SIGNALS_PII_KEY must be base64')
+    .refine(
+      (s) => Buffer.from(s, 'base64').length === 32,
+      'SIGNALS_PII_KEY must be base64-encoded 32 bytes (AES-256)'
+    ),
+});

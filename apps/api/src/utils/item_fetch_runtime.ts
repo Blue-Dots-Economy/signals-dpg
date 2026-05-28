@@ -1,7 +1,7 @@
 import { and, eq, sql } from 'drizzle-orm';
 import { db } from '@api/db/postgres/drizzle_config';
 import { items } from '@dpg/database';
-import { mergeItemStateWithPrivate } from '@dpg/schemas';
+import { decryptItemPrivate } from './item_decrypt';
 
 export type ItemFetchFilters = {
   item_id?: string;
@@ -17,6 +17,11 @@ export type ItemFetchFilters = {
   radius_meters?: number;
   limit: number;
   offset: number;
+  /**
+   * When true, the encrypted item_private_state blob is decrypted and merged
+   * over item_state. Callers MUST verify ownership/authorization before passing
+   * true.
+   */
   includePrivateState?: boolean;
 };
 
@@ -128,12 +133,15 @@ export async function fetchLocalItems(filters: ItemFetchFilters) {
     },
     items: result.map((item) => {
       const { item_private_state, ...responseItem } = item;
-
+      if (!filters.includePrivateState) {
+        return responseItem;
+      }
       return {
         ...responseItem,
-        item_state: filters.includePrivateState
-          ? mergeItemStateWithPrivate(item.item_state, item_private_state)
-          : item.item_state,
+        item_state: decryptItemPrivate({
+          item_state: item.item_state,
+          item_private_state: item_private_state ?? '',
+        }).mergedState,
       };
     }),
   };

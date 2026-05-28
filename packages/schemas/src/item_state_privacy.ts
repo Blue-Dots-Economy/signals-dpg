@@ -19,6 +19,18 @@ export function mergeItemStateWithPrivate(
   return mergeObjects(publicState, privateState);
 }
 
+/**
+ * Same merge semantics as mergeItemStateWithPrivate. Named alias for the
+ * "merge mask values into the public mirror at create/update time" call site,
+ * so reader intent is clear.
+ */
+export function mergeMasksIntoPublic(
+  publicState: JsonRecord,
+  maskedPrivate: JsonRecord
+): JsonRecord {
+  return mergeItemStateWithPrivate(publicState, maskedPrivate);
+}
+
 export function projectPrivateStateForSchema(
   schema: JsonRecord,
   privateState: JsonRecord

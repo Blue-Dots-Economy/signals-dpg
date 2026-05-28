@@ -511,7 +511,7 @@ CREATE TABLE IF NOT EXISTS items (
   item_schema_url TEXT NOT NULL,
 
   item_state JSONB NOT NULL DEFAULT '{}'::jsonb,
-  item_private_state JSONB NOT NULL DEFAULT '{}'::jsonb,
+  item_private_state TEXT NOT NULL DEFAULT '',
 
   item_latitude DOUBLE PRECISION,
   item_longitude DOUBLE PRECISION,
@@ -537,9 +537,6 @@ CREATE TABLE IF NOT EXISTS items (
 )
 PARTITION BY LIST (item_network);
 
-ALTER TABLE IF EXISTS items
-ADD COLUMN IF NOT EXISTS item_private_state JSONB NOT NULL DEFAULT '{}'::jsonb;
-
 CREATE INDEX IF NOT EXISTS items_lookup_idx
 ON items (item_network, item_domain, created_at DESC);
 
@@ -554,9 +551,6 @@ ON items (created_by, created_at DESC);
 
 CREATE INDEX IF NOT EXISTS items_state_gin_idx
 ON items USING GIN (item_state);
-
-CREATE INDEX IF NOT EXISTS items_private_state_gin_idx
-ON items USING GIN (item_private_state);
 
 CREATE INDEX IF NOT EXISTS items_geo_earth_idx
 ON items USING GIST (ll_to_earth(item_latitude, item_longitude));

@@ -55,9 +55,9 @@ import dotenv from 'dotenv';
 import {
   getDomainItemSchema,
   parseNetworkConfigDocument,
-  splitItemStateByPrivacy,
   validateAgainstJsonSchema,
 } from '@dpg/schemas';
+import { createItemInternal } from '@/services/item_service';
 
 dotenv.config({ path: '../../.env' });
 
@@ -877,35 +877,27 @@ async function insertDomainRecords(
     const identity = recordIdentity(domain, record);
     await ensureRecordUser(database, userTable, identity, orgId);
 
-    // Mirror apps/api/src/routes/v1/item/create_item.ts: split `state` into
-    // public + private columns using the schema's `"private": true` markers.
-    const { publicState, privateState } = splitItemStateByPrivacy(
-      itemSchema,
-      record.state
-    );
-
-    await database
-      .insert(itemsTable)
-      .values({
+    // Route through the service so seeded items go through the same
+    // mask + encrypt path as production writes.
+    try {
+      await createItemInternal(database, {
         item_network: NETWORK,
         item_domain: domain,
         item_type: ITEM_TYPE,
-        item_instance_url: INSTANCE_URL,
-        item_schema_url: schemaUrl,
-        item_state: publicState,
-        item_private_state: privateState,
+        item_state: record.state,
         item_latitude: record.latitude ?? null,
         item_longitude: record.longitude ?? null,
         created_by: identity.id,
-      })
-      .onConflictDoNothing({
-        target: [
-          itemsTable.item_network,
-          itemsTable.item_domain,
-          itemsTable.item_type,
-          itemsTable.item_id,
-        ],
       });
+    } catch (err) {
+      // ITEM_ALREADY_EXISTS is idempotent re-run noise; everything else surfaces.
+      if (
+        !(err instanceof Error) ||
+        !err.message.includes('ITEM_ALREADY_EXISTS')
+      ) {
+        throw err;
+      }
+    }
   }
 }
 

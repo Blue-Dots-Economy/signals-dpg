@@ -44,10 +44,11 @@ generate_passwords() {
   local file=$1
   _write_if_empty() {
     local marker=$1 newval=$2
-    # Match `password: ""  # MARKER` and `password: &anchor ""  # MARKER`.
-    if grep -qE "^[[:space:]]+(password|authSecret):[[:space:]]+(&[A-Za-z_][A-Za-z0-9_]*[[:space:]]+)?\"\"[[:space:]]+# ${marker}\$" "$file"; then
+    # Match `password: ""  # MARKER`, `authSecret: &anchor ""  # MARKER`,
+    # and `piiKey: &anchor ""  # MARKER`.
+    if grep -qE "^[[:space:]]+(password|authSecret|piiKey):[[:space:]]+(&[A-Za-z_][A-Za-z0-9_]*[[:space:]]+)?\"\"[[:space:]]+# ${marker}\$" "$file"; then
       sed -i -E \
-        "s,^([[:space:]]+(password|authSecret)):[[:space:]]+(&[A-Za-z_][A-Za-z0-9_]*[[:space:]]+)?\"\"[[:space:]]+# ${marker}\$,\1: \3\"${newval}\"  # ${marker}," \
+        "s,^([[:space:]]+(password|authSecret|piiKey)):[[:space:]]+(&[A-Za-z_][A-Za-z0-9_]*[[:space:]]+)?\"\"[[:space:]]+# ${marker}\$,\1: \3\"${newval}\"  # ${marker}," \
         "$file"
       echo "  generated ${marker}"
     else
@@ -56,9 +57,10 @@ generate_passwords() {
   }
 
   echo "credentials:"
-  _write_if_empty PG_PW       "$(openssl rand -hex 16)"
-  _write_if_empty REDIS_PW    "$(openssl rand -hex 16)"
-  _write_if_empty AUTH_SECRET "$(openssl rand -hex 32)"
+  _write_if_empty PG_PW          "$(openssl rand -hex 16)"
+  _write_if_empty REDIS_PW       "$(openssl rand -hex 16)"
+  _write_if_empty AUTH_SECRET    "$(openssl rand -hex 32)"
+  _write_if_empty SIGNALS_PII_KEY "$(openssl rand -base64 32)"
 }
 
 # -------------------------------------------------------------------------
@@ -70,7 +72,7 @@ generate_passwords() {
 scrub_passwords() {
   local file=$1
   sed -i -E \
-    's,^([[:space:]]+(password|authSecret)):[[:space:]]+(&[A-Za-z_][A-Za-z0-9_]*[[:space:]]+)?"[^"]+"([[:space:]]+# (PG_PW|REDIS_PW|AUTH_SECRET))$,\1: \3""\4,' \
+    's,^([[:space:]]+(password|authSecret|piiKey)):[[:space:]]+(&[A-Za-z_][A-Za-z0-9_]*[[:space:]]+)?"[^"]+"([[:space:]]+# (PG_PW|REDIS_PW|AUTH_SECRET|SIGNALS_PII_KEY))$,\1: \3""\4,' \
     "$file"
 }
 

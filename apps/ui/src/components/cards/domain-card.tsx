@@ -1,5 +1,5 @@
 import type { RJSFSchema } from '@rjsf/utils';
-import type { DotActionSchema, PrivacyMode } from '@/engine/types';
+import type { DotActionSchema } from '@/engine/types';
 import {
   Card,
   CardContent,
@@ -33,8 +33,6 @@ interface DomainCardProps {
   matchScoreError?: Error | null;
   onCalculateMatch?: () => void;
   onViewMatchDetails?: () => void;
-  /** Controls whether `private: true` fields are rendered. Defaults to `'public-only'`. */
-  privacyMode?: PrivacyMode;
 }
 
 export function DomainCard({
@@ -54,7 +52,6 @@ export function DomainCard({
   matchScoreError,
   onCalculateMatch,
   onViewMatchDetails,
-  privacyMode = 'public-only',
 }: DomainCardProps) {
   if (loading) {
     return (
@@ -94,7 +91,7 @@ export function DomainCard({
         )}
       </CardHeader>
       <CardContent className="flex-1">
-        <CardFieldsFromSchema schema={schema} data={data} privacyMode={privacyMode} />
+        <CardFieldsFromSchema schema={schema} data={data} />
       </CardContent>
       {(actions.length > 0 && onAction) || (networkItem && onCalculateMatch) ? (
         <CardFooter className="flex flex-wrap gap-2">

@@ -8,6 +8,7 @@ export * from './admin/aggregator_upsert';
 export * from './admin/participant';
 export * from './aggregator/dashboard';
 export * from './item_state_privacy';
+export * from './item_state_masking';
 export {
   getActionInteraction,
   getDomainMinimumCacheTtlSeconds,

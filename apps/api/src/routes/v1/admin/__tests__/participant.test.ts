@@ -98,7 +98,7 @@ type ItemRow = {
   item_domain: string;
   item_type: string;
   item_state: Record<string, unknown>;
-  item_private_state: Record<string, unknown>;
+  item_private_state: string;
   created_at: Date;
   updated_at: Date;
 };
@@ -257,7 +257,7 @@ vi.mock('@/lib/profile_item', () => {
       item_domain: input.domain,
       item_type: input.item_type,
       item_state: input.payload,
-      item_private_state: {},
+      item_private_state: '',
       created_at: now,
       updated_at: now,
     };
@@ -435,7 +435,7 @@ describe('POST /admin/participant', () => {
         item_domain: 'seeker',
         item_type: 'profile_1.0',
         item_state: { foo: 'bar' },
-        item_private_state: {},
+        item_private_state: '',
         created_at: new Date('2026-01-01T00:00:00Z'),
         updated_at: new Date('2026-01-01T00:00:00Z'),
       },
@@ -478,7 +478,7 @@ describe('POST /admin/participant', () => {
         item_domain: 'seeker',
         item_type: 'profile_1.0',
         item_state: { foo: 'bar' },
-        item_private_state: {},
+        item_private_state: '',
         created_at: new Date(),
         updated_at: new Date(),
       },
@@ -517,7 +517,7 @@ describe('POST /admin/participant', () => {
         item_domain: 'seeker',
         item_type: 'profile_1.0',
         item_state: {},
-        item_private_state: {},
+        item_private_state: '',
         created_at: new Date(),
         updated_at: new Date(),
       },
@@ -572,7 +572,7 @@ describe('POST /admin/participant', () => {
         item_domain: 'seeker',
         item_type: 'profile_1.0',
         item_state: { v: 1 },
-        item_private_state: {},
+        item_private_state: '',
         created_at: new Date('2026-01-01T00:00:00Z'),
         updated_at: new Date('2026-01-01T00:00:00Z'),
       },
@@ -679,7 +679,7 @@ describe('POST /admin/participant', () => {
         item_domain: 'seeker',
         item_type: 'profile_1.0',
         item_state: { v: 1 },
-        item_private_state: {},
+        item_private_state: '',
         created_at: new Date(),
         updated_at: new Date(),
       },
@@ -732,7 +732,7 @@ describe('POST /admin/participant', () => {
         item_domain: 'seeker',
         item_type: 'profile_1.0',
         item_state: {},
-        item_private_state: {},
+        item_private_state: '',
         created_at: new Date(),
         updated_at: new Date(),
       },
@@ -742,7 +742,7 @@ describe('POST /admin/participant', () => {
         item_domain: 'student',
         item_type: 'profile_1.0',
         item_state: {},
-        item_private_state: {},
+        item_private_state: '',
         created_at: new Date(),
         updated_at: new Date(),
       },

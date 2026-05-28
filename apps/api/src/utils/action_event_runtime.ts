@@ -9,6 +9,7 @@ import z, {
 import { action_events, items } from '@dpg/database';
 import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
 import { apiConfig, getCurrentApiBaseUrl } from '@/config';
+import { decryptItemPrivate } from './item_decrypt';
 
 type ActionItemRef = z.infer<typeof PerformNetworkActionBodySchema>['source_item'];
 type PerformActionTargetItemRef = z.infer<
@@ -46,6 +47,17 @@ export function normalizeInstanceUrl(url: string) {
   return parsedUrl.toString().replace(/\/$/, '');
 }
 
+function decodeSnapshot<
+  T extends { item_state: unknown; item_private_state: string },
+>(row: T) {
+  const { mergedState } = decryptItemPrivate({
+    item_state: row.item_state as Record<string, unknown>,
+    item_private_state: row.item_private_state,
+  });
+  const { item_state: _drop, item_private_state: _drop2, ...rest } = row;
+  return { ...rest, private_state: mergedState };
+}
+
 export async function fetchLocalItemSnapshot(
   db: NodePgDatabase<any>,
   item: ActionItemRef
@@ -61,6 +73,7 @@ export async function fetchLocalItemSnapshot(
     .select({
       item_id: items.item_id,
       item_instance_url: items.item_instance_url,
+      item_state: items.item_state,
       item_private_state: items.item_private_state,
       created_by: items.created_by,
       item_latitude: items.item_latitude,
@@ -71,7 +84,7 @@ export async function fetchLocalItemSnapshot(
     .limit(1);
 
   if (exactResult) {
-    return exactResult;
+    return decodeSnapshot(exactResult);
   }
 
   const normalizedItemInstanceUrl = normalizeInstanceUrl(item.item_instance_url);
@@ -84,6 +97,7 @@ export async function fetchLocalItemSnapshot(
     .select({
       item_id: items.item_id,
       item_instance_url: items.item_instance_url,
+      item_state: items.item_state,
       item_private_state: items.item_private_state,
       created_by: items.created_by,
       item_latitude: items.item_latitude,
@@ -98,7 +112,7 @@ export async function fetchLocalItemSnapshot(
     normalizeInstanceUrl(localAliasResult.item_instance_url) ===
       normalizedCurrentInstanceUrl
   ) {
-    return localAliasResult;
+    return decodeSnapshot(localAliasResult);
   }
 
   return null;

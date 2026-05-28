@@ -124,7 +124,7 @@ const { fetchLocalItemSnapshotMock } = vi.hoisted(() => ({
     item_id: 'src_item_1',
     item_latitude: null,
     item_longitude: null,
-    item_private_state: {},
+    private_state: {},
   })),
 }));
 
@@ -334,7 +334,7 @@ describe('POST /api/v1/action/perform — on-behalf-of', () => {
       item_id: 'src_item_1',
       item_latitude: null,
       item_longitude: null,
-      item_private_state: {},
+      private_state: {},
     });
     const app = buildApp({
       org_id: 'org_agg_1',
@@ -361,7 +361,7 @@ describe('POST /api/v1/action/perform — on-behalf-of', () => {
         item_id: 'src_item_1',
         item_latitude: null,
         item_longitude: null,
-        item_private_state: {},
+        private_state: {},
       });
       const app = buildApp({
         org_id: 'org_signals',
@@ -391,7 +391,7 @@ describe('POST /api/v1/action/perform — on-behalf-of', () => {
         item_id: 'src_item_1',
         item_latitude: null,
         item_longitude: null,
-        item_private_state: {},
+        private_state: {},
       });
       const app = buildApp({
         org_id: 'org_signals',

@@ -7,6 +7,7 @@ import {
   NetworkRuntimeSecretsSchema,
   NotificationSecretsSchema,
   OptionalSchemaRegistrySecretsSchema,
+  PiiCryptoSecretsSchema,
 } from '@dpg/config';
 
 export function loadEnv() {
@@ -18,6 +19,7 @@ export function loadEnv() {
   const matchScore = MatchScoreSecretsSchema.parse(process.env);
   const networkRuntime = NetworkRuntimeSecretsSchema.parse(process.env);
   const schemaRegistry = OptionalSchemaRegistrySecretsSchema.parse(process.env);
+  const piiCrypto = PiiCryptoSecretsSchema.parse(process.env);
   return {
     instance,
     api,
@@ -27,5 +29,6 @@ export function loadEnv() {
     matchScore,
     networkRuntime,
     schemaRegistry,
+    piiCrypto,
   };
 }
