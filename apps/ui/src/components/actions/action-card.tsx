@@ -12,6 +12,7 @@ import {
   MessageSquare,
   Contact,
   MapPin,
+  Network,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import type { Action } from '@/lib/action-api';
@@ -133,9 +134,21 @@ export function ActionCard({ action, ownershipRole, onStatusUpdate }: ActionCard
       <div className="h-[3px] w-full bg-gradient-to-r from-primary/40 via-primary to-primary/70" />
 
       <div className="p-5">
-        {/* Row 1: type + status badges, time */}
+        {/* Row 1: network + type + status badges, time. Network chip
+            disambiguates cross-network actions on the shared list. */}
         <div className="mb-4 flex items-center justify-between gap-2">
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="inline-flex items-center gap-1 rounded-full border bg-muted/50 px-2 py-1 text-[11px] font-semibold text-muted-foreground">
+              <Network className="h-3 w-3" />
+              {titleCase(action.source_item_network)}
+              {action.target_item_network !== action.source_item_network && (
+                <>
+                  {' '}
+                  <ArrowRight className="h-2.5 w-2.5" />
+                  {titleCase(action.target_item_network)}
+                </>
+              )}
+            </span>
             <span className="inline-flex items-center gap-1.5 rounded-full border border-primary/20 bg-gradient-to-b from-background to-primary/5 px-2.5 py-1 text-[11px] font-semibold capitalize text-primary">
               {action.action_type}
             </span>
