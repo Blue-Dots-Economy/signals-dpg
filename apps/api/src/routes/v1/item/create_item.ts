@@ -1,28 +1,16 @@
 import { type FastifyPluginAsyncZod } from 'fastify-type-provider-zod';
-import z, {
-  CreateItemBodySchema,
-  getDomainItemSchema,
-  getDomainItemTypes,
-  getInstanceCustomItemSchemaUrl,
-  splitItemStateByPrivacy,
-  validateAgainstJsonSchema,
-} from '@dpg/schemas';
+import z, { CreateItemBodySchema } from '@dpg/schemas';
 import { FastifyReply, FastifyRequest } from 'fastify';
 import { db } from '@api/db/postgres/drizzle_config';
 import { DrizzleQueryError } from 'drizzle-orm';
-import { DatabaseError, ensureItemPartition, items } from '@dpg/database';
+import { DatabaseError, ensureItemPartition } from '@dpg/database';
 import { auth_middleware_if_enabled } from '@api/plugins/auth/auth_middleware';
 import {
   isServedDomainBinding,
   replyForUnservedDomain,
 } from '@/utils/served_domain_guard';
 import { invalidateItemFetchCache } from '@/utils/item_fetch_cache_invalidate';
-import { getNetworkConfigById } from '@/network_configs';
-import {
-  buildNetworkItemSchemaUrl,
-  getOrFetchSchemaByUrl,
-} from '@/network_schema_cache';
-import { apiConfig, getCurrentApiBaseUrl } from '@/config';
+import { createItemInternal, ItemServiceError } from '@/services/item_service';
 
 type CreateItemRequest = FastifyRequest<{
   Body: z.infer<typeof CreateItemBodySchema>;
@@ -54,13 +42,6 @@ export const create_item_handler = async (
   const callerId = request.user?.id;
   const callerRole = request.user?.role;
   const body = request.body;
-  const submittedItemState = body.item_state ?? {};
-  const itemInstanceUrl = getCurrentApiBaseUrl();
-  let itemSchemaUrl = `${itemInstanceUrl}/api/v1/network/schema/${encodeURIComponent(body.item_network)}/${encodeURIComponent(body.item_domain)}/${encodeURIComponent(body.item_type)}`;
-  let itemState = {
-    publicState: submittedItemState,
-    privateState: {},
-  };
 
   if (!callerId) {
     return reply.code(401).send({
@@ -104,63 +85,6 @@ export const create_item_handler = async (
   }
 
   try {
-    const networkConfig = await getNetworkConfigById(body.item_network);
-    const supportedItemTypes = getDomainItemTypes(
-      networkConfig,
-      body.item_domain
-    );
-
-    if (!supportedItemTypes.includes(body.item_type)) {
-      throw new Error(
-        `Item type "${body.item_type}" is not defined for domain "${body.item_domain}" in network "${body.item_network}".`
-      );
-    }
-
-    let itemSchema: Record<string, unknown> | null = null;
-    const expectedSchemaUrl = getInstanceCustomItemSchemaUrl(networkConfig, {
-      domain: body.item_domain,
-      instanceUrl: itemInstanceUrl,
-      itemType: body.item_type,
-    });
-
-    if (expectedSchemaUrl) {
-      itemSchemaUrl = expectedSchemaUrl;
-      itemSchema = await getOrFetchSchemaByUrl({
-        schemaUrl: expectedSchemaUrl,
-        network: body.item_network,
-        domain: body.item_domain,
-        itemType: body.item_type,
-        instanceUrl: itemInstanceUrl,
-        kind: 'instance_custom_item_schema',
-      });
-    }
-
-    if (!itemSchema) {
-      itemSchema = getDomainItemSchema(
-        networkConfig,
-        body.item_domain,
-        body.item_type
-      );
-      itemSchemaUrl =
-        buildNetworkItemSchemaUrl({
-          networkConfig,
-          domain: body.item_domain,
-          itemType: body.item_type,
-        }) ?? itemSchemaUrl;
-    }
-
-    validateAgainstJsonSchema(itemSchema, submittedItemState, 'item_state', {
-      allowAdditionalProperties: apiConfig.allow_extra_schema_data,
-    });
-    itemState = splitItemStateByPrivacy(itemSchema, submittedItemState);
-  } catch (err) {
-    return reply.code(400).send({
-      error: 'INVALID_ITEM_STATE',
-      message: err instanceof Error ? err.message : 'Invalid item_state',
-    });
-  }
-
-  try {
     await ensureItemPartition(
       db,
       body.item_network,
@@ -184,60 +108,31 @@ export const create_item_handler = async (
   }
 
   try {
-    const result = await db
-      .insert(items)
-      .values({
-        item_network: body.item_network,
-        item_type: body.item_type,
+    const created = await createItemInternal(db, {
+      item_network: body.item_network,
+      item_domain: body.item_domain,
+      item_type: body.item_type,
+      item_state: body.item_state ?? {},
+      item_latitude: body.item_latitude ?? null,
+      item_longitude: body.item_longitude ?? null,
+      created_by: userId,
+    });
 
-        item_domain: body.item_domain,
-        item_instance_url: itemInstanceUrl,
-
-        item_schema_url: itemSchemaUrl,
-
-        item_state: itemState.publicState,
-        item_private_state: itemState.privateState,
-        item_latitude: body.item_latitude ?? null,
-        item_longitude: body.item_longitude ?? null,
-        created_by: userId,
-      })
-      .onConflictDoNothing({
-        target: [
-          items.item_network,
-          items.item_domain,
-          items.item_type,
-          items.item_id,
-        ],
-      })
-      .returning({
-        itemNetwork: items.item_network,
-        itemDomain: items.item_domain,
-        itemType: items.item_type,
-        itemId: items.item_id,
-      });
-
-    if (result.length === 0) {
-      return reply.code(409).send({
-        error: 'ITEM_ALREADY_EXISTS',
-        message: 'An item with the same type and id already exists',
-      });
-    }
-
-    // Invalidate cached counts + pages for this (network, domain) so the
-    // next /network/item/fetch returns the freshly inserted row instead of
-    // serving a stale 5-min cached page.
     await invalidateItemFetchCache(body.item_network, body.item_domain).catch((err) =>
       request.log.warn({ err }, 'cache invalidation after create failed'),
     );
 
     return reply.code(201).send({
-      item_type: result[0].itemType,
-      item_id: result[0].itemId,
+      item_type: created.itemType,
+      item_id: created.itemId,
     });
   } catch (err) {
-    /**
-     * Handle known database errors explicitly
-     */
+    if (err instanceof ItemServiceError) {
+      return reply.code(err.statusCode).send({
+        error: err.errorCode,
+        message: err.message,
+      });
+    }
     if (err instanceof DrizzleQueryError) {
       const cause = err.cause;
 
@@ -261,15 +156,7 @@ export const create_item_handler = async (
       }
     }
 
-    request.log.error(
-      {
-        err,
-        item_network: body.item_network,
-        item_domain: body.item_domain,
-        item_type: body.item_type,
-      },
-      'Failed to create item'
-    );
+    request.log.error({ err, body }, 'Failed to create item');
 
     return reply.code(500).send({
       error: 'INTERNAL_SERVER_ERROR',
