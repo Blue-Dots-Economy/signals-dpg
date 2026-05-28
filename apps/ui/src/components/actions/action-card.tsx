@@ -118,9 +118,8 @@ export function ActionCard({ action, ownershipRole, onStatusUpdate }: ActionCard
   const rawName = hasRealName
     ? otherParty.name!
     : `#${otherParty.itemId.slice(0, 6)}`;
-  const isMaskedOrFallback = !hasRealName || rawName.includes('*');
-  // Avatar: first letter of a real public name, else the role's initial.
-  const initial = (isMaskedOrFallback ? otherRole : rawName).charAt(0).toUpperCase() || '?';
+  // Avatar: first letter of a real name, else the role's initial.
+  const initial = (hasRealName ? rawName : otherRole).charAt(0).toUpperCase() || '?';
 
   // Both sides format as "<Subject> (<Role>)" so the brackets consistently
   // contain the role on each end — avoids the mismatch where "You (Seeker)"

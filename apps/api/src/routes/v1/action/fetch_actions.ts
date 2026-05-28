@@ -123,21 +123,10 @@ const fetch_actions_handler = async (
       .limit(limit)
       .offset(offset);
 
-    // Resolve a display name for every source + target item on the page.
-    // Public names (e.g. a provider's organisation_name) come back as-is.
-    // Private names (e.g. a seeker's beneficiary_name, PII) come back with a
-    // flag so we can mask them until the action is accepted.
+    // Resolve a public display name (via display_name_field) for every source
+    // + target item on the page. Private-name handling / consent gating lives
+    // elsewhere — this route just surfaces the value as-is.
     const nameById = await resolveItemNames(rows);
-
-    // Once a connection is accepted/completed, both parties have consented to
-    // the reveal, so the private counterparty name is shown unmasked.
-    const isRevealed = (s: string) => s === 'accepted' || s === 'completed';
-    const displayName = (id: string, actionStatus: string): string | null => {
-      const entry = nameById.get(id);
-      if (!entry) return null;
-      if (entry.isPrivate && !isRevealed(actionStatus)) return maskName(entry.value);
-      return entry.value;
-    };
 
     return reply.code(200).send({
       meta: {
@@ -155,8 +144,8 @@ const fetch_actions_handler = async (
           row.updated_at instanceof Date
             ? row.updated_at
             : new Date(row.updated_at),
-        source_item_name: displayName(row.source_item_id, row.action_status),
-        target_item_name: displayName(row.target_item_id, row.action_status),
+        source_item_name: nameById.get(row.source_item_id) ?? null,
+        target_item_name: nameById.get(row.target_item_id) ?? null,
         ownership_roles: [
           ...(row.source_item_owner === userId ? (['initiated'] as const) : []),
           ...(row.target_item_owner === userId ? (['received'] as const) : []),
@@ -184,43 +173,17 @@ type ActionRow = {
   target_item_type: string;
 };
 
-type ResolvedName = { value: string; isPrivate: boolean };
-
-// Common name-bearing property keys to fall back on when a schema declares no
-// public `display_name_field` (e.g. a seeker whose name is PII). Checked
-// against the merged private state; any hit is flagged private so the caller
-// masks it until the action is accepted.
-const PRIVATE_NAME_FIELDS = [
-  'beneficiary_name',
-  'full_name',
-  'name',
-  'contact_name',
-];
-
-/** Mask a name for pre-acceptance display: keep the first 2 letters of each
- *  word, replace the rest with asterisks (capped) → "Ab**** Ga***". */
-function maskName(name: string): string {
-  return name
-    .trim()
-    .split(/\s+/)
-    .map((w) =>
-      w.length <= 2 ? w : w.slice(0, 2) + '*'.repeat(Math.min(w.length - 2, 4))
-    )
-    .join(' ');
-}
-
 /**
- * Batch-resolves display names for every source + target item referenced by
- * the action rows. One `items` query for the whole page. A public
- * `display_name_field` (e.g. provider organisation_name) resolves to a clean
- * name. When absent, falls back to a private name field (seeker PII) flagged
- * `isPrivate` so the handler can mask it until the connection is accepted.
- * Network config lookups are memoised; best-effort on any failure.
+ * Batch-resolves a public display name for every source + target item on the
+ * page using each item's `display_name_field` (via resolve_display_name).
+ * One `items` query for the whole batch; network config lookups memoised.
+ * Items without a public display name are simply absent from the map (the UI
+ * shows a role-based fallback). Private-name handling lives elsewhere.
  */
 async function resolveItemNames(
   rows: ActionRow[]
-): Promise<Map<string, ResolvedName>> {
-  const result = new Map<string, ResolvedName>();
+): Promise<Map<string, string>> {
+  const result = new Map<string, string>();
   if (rows.length === 0) return result;
 
   const ids = new Set<string>();
@@ -236,7 +199,6 @@ async function resolveItemNames(
       item_domain: items.item_domain,
       item_type: items.item_type,
       item_state: items.item_state,
-      item_private_state: items.item_private_state,
     })
     .from(items)
     .where(inArray(items.item_id, [...ids]));
@@ -263,35 +225,12 @@ async function resolveItemNames(
     const schema = domain?.item_schemas?.[item.item_type] as
       | { display_name_field?: string; properties?: Record<string, unknown> }
       | undefined;
-    const publicState = (item.item_state ?? {}) as Record<string, unknown>;
-
-    // 1. Public display name (provider org name etc.) — never masked.
-    const publicName = resolve_display_name({
+    const name = resolve_display_name({
       schema: schema ?? {},
-      item_state: publicState,
+      item_state: (item.item_state ?? null) as Record<string, unknown> | null,
       item_id: item.item_id,
     });
-    if (publicName !== item.item_id) {
-      result.set(item.item_id, { value: publicName, isPrivate: false });
-      continue;
-    }
-
-    // 2. Private name fallback (seeker PII) — flagged for masking.
-    const merged = {
-      ...publicState,
-      ...((item.item_private_state ?? {}) as Record<string, unknown>),
-    };
-    let privateName: string | null = null;
-    for (const field of PRIVATE_NAME_FIELDS) {
-      const raw = merged[field];
-      if (typeof raw === 'string' && raw.trim().length > 0) {
-        privateName = raw.trim();
-        break;
-      }
-    }
-    if (privateName) {
-      result.set(item.item_id, { value: privateName, isPrivate: true });
-    }
+    if (name !== item.item_id) result.set(item.item_id, name);
   }
 
   return result;
