@@ -153,7 +153,7 @@ export const perform_action_handler = async (
       body.requirements_snapshot,
       projectPrivateStateForSchema(
         interaction.requirement_schema,
-        sourceItemSnapshot.item_private_state
+        sourceItemSnapshot.private_state
       )
     );
 

@@ -143,7 +143,7 @@ vi.mock('@/utils/action_event_runtime', async () => {
       item_id: 'target_item_1',
       item_latitude: null,
       item_longitude: null,
-      item_private_state: {},
+      private_state: {},
     })),
   };
 });
