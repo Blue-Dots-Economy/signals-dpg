@@ -91,6 +91,9 @@ credentials:
     create: true
     existingSecret: &api_existing_secret dpg-api-secrets
     authSecret: &api_auth_secret ""  # AUTH_SECRET
+    # AES-256 master key for PII encryption at rest (base64 of 32 bytes).
+    # Generate: openssl rand -base64 32
+    piiKey: &api_pii_key ""  # SIGNALS_PII_KEY
     # API → notification-service auth. keyId+secret MUST match
     # notification-service internalSecrets.json keys[] below.
     notificationKeyId: &notification_key_id "dpg-api-client"
@@ -100,6 +103,7 @@ credentials:
     # at boot — missing key = crash on startup.
     data:
       AUTH_SECRET: *api_auth_secret
+      SIGNALS_PII_KEY: *api_pii_key
       POSTGRES_USER: *pg_username
       POSTGRES_DB: *pg_database
       POSTGRES_PASSWORD: *pg_password
