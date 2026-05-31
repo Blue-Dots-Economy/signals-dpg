@@ -21,6 +21,7 @@ import { MapView } from '@/components/map/map-container';
 import { MatchScoreCard } from '@/components/match-score';
 import '@/components/map/providers';
 import { fetchItems, performAction, type Item } from '@/lib/item-api';
+import { ACTION_CONSENT_SENTINEL } from '@/lib/action-api';
 import { EmptyState } from '@/components/empty-state';
 import { fetchNetworkConfigs, fetchNetworkConfig, fetchNetworkItems } from '@/lib/network-api';
 import { useAuth } from '@/contexts/auth-context';
@@ -581,8 +582,8 @@ export function HomePage() {
             }
 
             // Extract consent sentinel placed by ConsentCheckbox inside ActionModal.
-            // __consent must not appear in requirements_snapshot sent to the server.
-            const { __consent: consentRaw, ...requirementsSnapshot } = formData;
+            // Must not appear in requirements_snapshot sent to the server.
+            const { [ACTION_CONSENT_SENTINEL]: consentRaw, ...requirementsSnapshot } = formData;
             const consent =
               consentRaw &&
               typeof consentRaw === 'object' &&

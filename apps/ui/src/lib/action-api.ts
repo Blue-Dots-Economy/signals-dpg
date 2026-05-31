@@ -86,6 +86,13 @@ export interface TargetItemRef extends ItemRef {
 }
 
 /**
+ * Sentinel key used by ActionModal to smuggle the consent block through the
+ * onSubmit(formData) signature into the parent's PerformActionPayload assembly
+ * (see action-modal.tsx producer + home-page.tsx consumer).
+ */
+export const ACTION_CONSENT_SENTINEL = '__consent' as const;
+
+/**
  * Payload for performing an action (initiated by source user)
  * Matches the actual API schema: POST /api/v1/action/perform
  */

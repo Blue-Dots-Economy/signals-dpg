@@ -8,6 +8,7 @@ import { resolveRefs } from '@/engine/schema/resolve-schema';
 import { ActionModalHeader } from './action-modal-header';
 import { ConsentCheckbox } from './consent-checkbox';
 import { getActionDisplay } from '@/lib/action-display';
+import { ACTION_CONSENT_SENTINEL } from '@/lib/action-api';
 import { cn } from '@/lib/utils';
 
 // Desktop: Dialog
@@ -75,7 +76,7 @@ export function ActionModal({
   const handleSubmit = (formData: Record<string, unknown>) => {
     const payload: Record<string, unknown> = { ...formData };
     if (consentText && consentChecked) {
-      payload.__consent = { acknowledged: true as const, text: consentText };
+      payload[ACTION_CONSENT_SENTINEL] = { acknowledged: true as const, text: consentText };
     }
     onSubmit(payload);
   };
