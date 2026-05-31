@@ -150,6 +150,10 @@ export function ActionStatusUpdater({
   const headerKey = status || action.action_type || 'connect';
   const display = getActionDisplay(headerKey);
   const actionLabel = statusLabels[status] ?? display.label;
+  // Confirm button is always "Submit" regardless of the chosen status verb —
+  // user-facing label stays stable while the modal title carries the verb
+  // (e.g. "Cancel Request", "Accept Request").
+  const confirmLabel = 'Submit';
   const subtitle = STATUS_SUBTITLES[status] ?? `Update status for this ${action.action_type ?? 'action'}`;
 
   const header = (
@@ -172,7 +176,7 @@ export function ActionStatusUpdater({
         disabled={isPending || !status}
         className={cn('min-w-[120px] font-semibold shadow-sm', display.buttonClass)}
       >
-        {isPending ? 'Updating...' : actionLabel}
+        {isPending ? 'Updating...' : confirmLabel}
       </Button>
     </div>
   );

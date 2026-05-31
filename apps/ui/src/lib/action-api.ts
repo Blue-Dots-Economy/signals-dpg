@@ -167,6 +167,10 @@ export interface Action {
   created_at: string;
   updated_at: string;
   ownership_roles: ('initiated' | 'received')[];
+  // Human-readable names resolved server-side from each item's
+  // display_name_field (falls back to the item id when unavailable).
+  source_item_name?: string | null;
+  target_item_name?: string | null;
 }
 
 /**

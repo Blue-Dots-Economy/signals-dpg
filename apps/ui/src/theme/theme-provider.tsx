@@ -76,15 +76,38 @@ function applyThemeTokens(id: string): void {
   applyDocumentTitle(theme);
 }
 
+const ACTIVE_NETWORK_KEY = 'dpg-active-network';
+
 export function NetworkThemeProvider({ children }: { children: React.ReactNode }) {
   const [searchParams] = useSearchParams();
   const networkFromUrl = searchParams.get('network');
 
   const themeId = React.useMemo(() => {
+    // URL wins. Otherwise reuse the last network the user was on (routes like
+    // /my-actions carry no ?network=, and falling back to the build default
+    // would flip the theme to the wrong brand mid-session).
     if (networkFromUrl) return networkFromUrl;
+    let stored = '';
+    try {
+      stored = localStorage.getItem(ACTIVE_NETWORK_KEY) ?? '';
+    } catch {
+      /* localStorage unavailable */
+    }
+    if (stored) return stored;
     const fromEnv =
       typeof __DEFAULT_NETWORK_THEME__ !== 'undefined' ? __DEFAULT_NETWORK_THEME__ : '';
     return fromEnv || 'blue_dot';
+  }, [networkFromUrl]);
+
+  // Persist the network whenever it's explicitly chosen via the URL so other
+  // routes inherit the same brand theme.
+  React.useEffect(() => {
+    if (!networkFromUrl) return;
+    try {
+      localStorage.setItem(ACTIVE_NETWORK_KEY, networkFromUrl);
+    } catch {
+      /* ignore */
+    }
   }, [networkFromUrl]);
 
   const theme = React.useMemo(() => resolveTheme(themeId), [themeId]);
