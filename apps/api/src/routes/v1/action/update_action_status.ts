@@ -100,10 +100,34 @@ export const update_action_status_handler = async (
     });
   }
 
+  const requiresReceiverConsent =
+    (interaction.reveals_pii_on_status ?? []).includes(body.action_status) &&
+    !!interaction.consent_text_receiver?.trim();
+
+  if (requiresReceiverConsent && !body.consent?.acknowledged) {
+    return reply.code(403).send({
+      error: 'CONSENT_REQUIRED',
+      message: 'Receiver consent acknowledgment required to transition to this status.',
+    });
+  }
+
+  if (requiresReceiverConsent && body.consent?.acknowledged) {
+    request.log.info(
+      {
+        side: 'receiver',
+        action_id: body.action_id,
+        action_status: body.action_status,
+        consent_text_length: body.consent.text.length,
+      },
+      'consent recorded',
+    );
+  }
+
   const eventPayload = buildActionEventPayload({
     event_schema: interaction.event_schema,
     action_status: body.action_status,
     remarks: body.remarks,
+    consent: body.consent,
     context: {
       action_type: existingAction.action_type,
       source_item: {
