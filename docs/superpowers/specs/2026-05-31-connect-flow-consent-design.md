@@ -1,6 +1,6 @@
 # Connect-Flow Consent Simplification — Design
 
-**Status:** spec — awaiting implementation plan
+**Status:** spec — PR #38 open
 **Author:** brainstorming session, 2026-05-31
 **Related:**
 - `docs/superpowers/specs/2026-05-28-pii-encryption-at-rest-design.md` — schema-aware masking + decrypt pipeline this design depends on.
