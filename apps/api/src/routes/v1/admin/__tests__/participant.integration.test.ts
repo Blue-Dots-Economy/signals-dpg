@@ -281,7 +281,6 @@ describeIf(`POST /api/v1/admin/participant (integration)${
   // Resolved at beforeAll — schema-derived bindings consumed by each test.
   let primary: ResolvedBinding;
   let secondary: ResolvedBinding | null;
-  let primaryFixture: Record<string, unknown>;
 
   beforeAll(async () => {
     // Lazy-import the DB / database-package surfaces so a CI box without
@@ -298,7 +297,6 @@ describeIf(`POST /api/v1/admin/participant (integration)${
     const resolved = await resolveBindings();
     primary = resolved.primary;
     secondary = resolved.secondary;
-    primaryFixture = generateMinimalItemState(primary.schema);
 
     const { admin_routes } = await import('../admin_routes.js');
     const network_routes_mod = await import('../../network/network_routes.js');
@@ -449,13 +447,9 @@ describeIf(`POST /api/v1/admin/participant (integration)${
   let canonical_user_email: string;
   let canonical_item_id: string;
 
-  // The fixture sent in case #1 — stored so case #3's round-trip assertion
-  // uses a different (detectable) payload.
-  let case1Fixture: Record<string, unknown>;
-
   it('agg_A onboards a brand-new user; row exists with onboardedByOrgId = agg_A.org_id, items[0] present', async () => {
     canonical_user_email = `int_c_${randomUUID().slice(0, 6)}@a.test`;
-    case1Fixture = generateMinimalItemState(primary.schema);
+    const initialFixture = generateMinimalItemState(primary.schema);
     const res = await app.inject({
       method: 'POST',
       url: '/api/v1/admin/participant',
@@ -473,7 +467,7 @@ describeIf(`POST /api/v1/admin/participant (integration)${
         network: primary.network,
         domain: primary.domain,
         item_type: primary.item_type,
-        item_state: case1Fixture,
+        item_state: initialFixture,
       },
     });
     expect(res.statusCode).toBe(200);
