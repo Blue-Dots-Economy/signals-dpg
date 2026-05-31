@@ -21,7 +21,7 @@ import { ContactDetailsModal } from '@/components/actions/contact-details-modal'
 interface ActionCardProps {
   action: Action;
   ownershipRole: 'initiated' | 'received';
-  onStatusUpdate?: (action: Action) => void;
+  onStatusUpdate?: (action: Action, targetStatus: string) => void;
 }
 
 // Status pill: dot + label on a soft tint. Semantic colours (not brand) so
@@ -291,25 +291,25 @@ export function ActionCard({ action, ownershipRole, onStatusUpdate }: ActionCard
           )}
 
           {canAccept && (
-            <Button size="sm" className="flex-1 shadow-sm" onClick={() => onStatusUpdate?.(action)}>
+            <Button size="sm" className="flex-1 shadow-sm" onClick={() => onStatusUpdate?.(action, 'accepted')}>
               <Check className="mr-1.5 h-3.5 w-3.5" />
               Accept
             </Button>
           )}
           {canReject && (
-            <Button size="sm" variant="outline" className="flex-1" onClick={() => onStatusUpdate?.(action)}>
+            <Button size="sm" variant="outline" className="flex-1" onClick={() => onStatusUpdate?.(action, 'rejected')}>
               <X className="mr-1.5 h-3.5 w-3.5" />
               Reject
             </Button>
           )}
           {canComplete && (
-            <Button size="sm" className="flex-1 shadow-sm" onClick={() => onStatusUpdate?.(action)}>
+            <Button size="sm" className="flex-1 shadow-sm" onClick={() => onStatusUpdate?.(action, 'completed')}>
               <CheckCircle2 className="mr-1.5 h-3.5 w-3.5" />
               Complete
             </Button>
           )}
           {canCancel && (
-            <Button size="sm" variant="outline" className="flex-1" onClick={() => onStatusUpdate?.(action)}>
+            <Button size="sm" variant="outline" className="flex-1" onClick={() => onStatusUpdate?.(action, 'cancelled')}>
               <X className="mr-1.5 h-3.5 w-3.5 text-destructive" />
               Cancel
             </Button>

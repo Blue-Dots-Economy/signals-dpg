@@ -22,6 +22,7 @@ export interface DotActionSchema {
   event_schema: RJSFSchema;
   consent_text_initiator?: string;
   consent_text_receiver?: string;
+  reveals_pii_on_status?: string[];
 }
 
 export interface DotNetworkDomain {

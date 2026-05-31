@@ -13,7 +13,7 @@ interface ActionListProps {
   error: Error | null;
   activeTab: 'initiated' | 'received';
   onTabChange: (tab: 'initiated' | 'received') => void;
-  onStatusUpdate: (action: Action) => void;
+  onStatusUpdate: (action: Action, targetStatus: string) => void;
   onRefresh: () => void;
   isRefetching: boolean;
 }
