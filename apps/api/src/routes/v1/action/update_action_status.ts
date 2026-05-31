@@ -101,7 +101,7 @@ export const update_action_status_handler = async (
   }
 
   const requiresReceiverConsent =
-    (interaction.reveals_pii_on_status ?? []).includes(body.action_status) &&
+    interaction.reveals_pii_on_status.includes(body.action_status) &&
     !!interaction.consent_text_receiver?.trim();
 
   if (requiresReceiverConsent && !body.consent?.acknowledged) {

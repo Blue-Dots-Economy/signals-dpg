@@ -162,7 +162,7 @@ vi.mock('@dpg/schemas', async () => {
     await vi.importActual<typeof import('@dpg/schemas')>('@dpg/schemas');
   return {
     ...actual,
-    getActionInteraction: vi.fn(() => ({ event_schema: {} })),
+    getActionInteraction: vi.fn(() => ({ event_schema: {}, reveals_pii_on_status: [] })),
   };
 });
 
