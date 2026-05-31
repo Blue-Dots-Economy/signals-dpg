@@ -3,6 +3,7 @@ import { item_actions, items } from '@dpg/database';
 import z, {
   FetchOwnedActionsQuerySchema,
   OwnedItemActionSchema,
+  getInteractionPiiRevealStatuses,
 } from '@dpg/schemas';
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import { type FastifyPluginAsyncZod } from 'fastify-type-provider-zod';
@@ -120,11 +121,58 @@ const fetch_actions_handler = async (
     // - Private name (e.g. seeker beneficiary_name) → the schema-aware mask
     //   already lives in item_state (written via maskPrivateState at item
     //   create time, e.g. "M***"). Per-action consent gating happens below:
-    //   for accepted/completed actions we decrypt item_private_state and
-    //   reveal the real value; otherwise the already-masked value is used.
+    //   reveal the real value only when action_status is in the network's
+    //   schema-declared reveals_pii_on_status for this interaction; otherwise
+    //   the already-masked value is used.
     const resolvedNames = await resolveItemNames(rows);
 
-    const isRevealed = (s: string) => s === 'accepted' || s === 'completed';
+    // Pre-resolve reveals_pii_on_status per action row. Mirrors the gate used
+    // by /api/v1/action/:id/contact-details so the list view never reveals a
+    // status the contact-detail reveal would refuse. Resolution failures fall
+    // back to an empty set (mask), matching the contact-details fail-closed
+    // posture.
+    const networkConfigCache = new Map<
+      string,
+      Awaited<ReturnType<typeof getNetworkConfigById>> | null
+    >();
+    const getNetworkConfigCached = async (network: string) => {
+      if (networkConfigCache.has(network)) {
+        return networkConfigCache.get(network) ?? null;
+      }
+      try {
+        const cfg = await getNetworkConfigById(network);
+        networkConfigCache.set(network, cfg);
+        return cfg;
+      } catch {
+        networkConfigCache.set(network, null);
+        return null;
+      }
+    };
+    const revealStatusesByAction = new Map<string, readonly string[]>();
+    for (const row of rows) {
+      if (revealStatusesByAction.has(row.action_id)) continue;
+      let statuses: readonly string[] = [];
+      try {
+        const cfg = await getNetworkConfigCached(row.target_item_network);
+        if (cfg) {
+          statuses = getInteractionPiiRevealStatuses(cfg, {
+            actionType: row.action_type,
+            fromNetwork: row.source_item_network,
+            fromDomain: row.source_item_domain,
+            fromItemType: row.source_item_type,
+            toNetwork: row.target_item_network,
+            toDomain: row.target_item_domain,
+            toItemType: row.target_item_type,
+          });
+        }
+      } catch (err) {
+        request.log.warn(
+          { err, action_id: row.action_id, action_type: row.action_type },
+          'pii reveal-status resolution failed in fetch_actions — defaulting to masked',
+        );
+      }
+      revealStatusesByAction.set(row.action_id, statuses);
+    }
     // Memoise decrypts per item — the same item can appear on multiple rows
     // (source on one action, target on another) and we only want to pay the
     // crypto cost once per page.
@@ -154,13 +202,19 @@ const fetch_actions_handler = async (
       return value;
     };
 
-    const displayName = (id: string, status: string): string | null => {
+    const displayName = (
+      id: string,
+      actionId: string,
+      status: string,
+    ): string | null => {
       const entry = resolvedNames.get(id);
       if (!entry) return null;
       if (entry.kind === 'public') return entry.value;
       // Private field: schema-aware mask sits in item_state already; reveal
-      // the real value only when the action has been accepted/completed.
-      if (isRevealed(status)) return unmask(id) ?? entry.masked;
+      // the real value only when this action's status is in the network's
+      // schema-declared reveals_pii_on_status for this interaction.
+      const revealStatuses = revealStatusesByAction.get(actionId) ?? [];
+      if (revealStatuses.includes(status)) return unmask(id) ?? entry.masked;
       return entry.masked;
     };
 
@@ -176,8 +230,16 @@ const fetch_actions_handler = async (
           row.updated_at instanceof Date
             ? row.updated_at
             : new Date(row.updated_at),
-        source_item_name: displayName(row.source_item_id, row.action_status),
-        target_item_name: displayName(row.target_item_id, row.action_status),
+        source_item_name: displayName(
+          row.source_item_id,
+          row.action_id,
+          row.action_status,
+        ),
+        target_item_name: displayName(
+          row.target_item_id,
+          row.action_id,
+          row.action_status,
+        ),
         ownership_roles: [
           ...(row.source_item_owner === userId ? (['initiated'] as const) : []),
           ...(row.target_item_owner === userId ? (['received'] as const) : []),
