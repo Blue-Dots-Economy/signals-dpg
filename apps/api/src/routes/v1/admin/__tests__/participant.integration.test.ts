@@ -28,6 +28,12 @@
  *
  * Skip conditions: if POSTGRES_URL / POSTGRES_USER are unset the suite
  * is described as `.skip` so CI without a DB stays green.
+ *
+ * Config-driven: served-domain bindings are resolved from apiConfig at
+ * beforeAll. The test passes explicit network/domain/item_type in every
+ * request so the route never falls back to hard-coded defaults. A minimal
+ * valid item_state is generated from the JSON schema for the first
+ * item_type declared in each binding's domain config.
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
@@ -51,6 +57,173 @@ const describeIf = can_run ? describe : describe.skip;
 const hash_key = (raw: string) =>
   createHash('sha256').update(raw).digest('base64url');
 
+// ---------------------------------------------------------------------------
+// Minimal-valid item_state generator
+// ---------------------------------------------------------------------------
+
+/**
+ * Walks `schema.required` and produces the smallest valid object that
+ * satisfies each required property's type constraints. Optional fields
+ * are intentionally omitted to keep payloads deterministic.
+ *
+ * Supported leaf types: enum, string, integer, number, boolean, array, object.
+ * Encountering oneOf / anyOf / $ref throws immediately so the test fails
+ * loudly rather than emitting silently-invalid data.
+ */
+function generateMinimalItemState(
+  schema: Record<string, unknown>,
+  opts?: { stringPrefix?: string },
+): Record<string, unknown> {
+  const required = schema.required;
+  if (!Array.isArray(required)) {
+    return {};
+  }
+
+  const properties = schema.properties as Record<string, Record<string, unknown>> | undefined;
+  if (!properties) {
+    return {};
+  }
+
+  const prefix = opts?.stringPrefix ?? 'int';
+  const suffix = randomBytes(4).toString('hex');
+  const result: Record<string, unknown> = {};
+
+  for (const name of required as string[]) {
+    const prop = properties[name];
+    if (!prop) {
+      throw new Error(
+        `generateMinimalItemState: required property "${name}" missing from schema.properties`,
+      );
+    }
+
+    result[name] = pickValue(prop, name, prefix, suffix);
+  }
+
+  return result;
+}
+
+function pickValue(
+  prop: Record<string, unknown>,
+  name: string,
+  prefix: string,
+  suffix: string,
+): unknown {
+  if ('oneOf' in prop || 'anyOf' in prop || '$ref' in prop) {
+    throw new Error(
+      `generateMinimalItemState: property "${name}" uses oneOf/anyOf/$ref which is not supported — ` +
+        `provide a concrete schema or extend the generator.`,
+    );
+  }
+
+  if (Array.isArray(prop.enum) && prop.enum.length > 0) {
+    return prop.enum[0];
+  }
+
+  const type = prop.type as string | undefined;
+
+  switch (type) {
+    case 'string': {
+      const minLen = typeof prop.minLength === 'number' ? prop.minLength : 1;
+      const raw = `${prefix}-${name}-${suffix}`;
+      return raw.length >= minLen ? raw : raw.padEnd(minLen, 'x');
+    }
+    case 'integer':
+    case 'number': {
+      const min = typeof prop.minimum === 'number' ? prop.minimum : undefined;
+      const max = typeof prop.maximum === 'number' ? prop.maximum : undefined;
+      const base = min ?? 1;
+      if (max !== undefined && base > max) return max;
+      return base;
+    }
+    case 'boolean':
+      return true;
+    case 'array':
+      // Produce an empty array; the route does not validate array contents
+      // for the purposes of this suite.
+      return [];
+    case 'object': {
+      const nested = prop as Record<string, unknown>;
+      return generateMinimalItemState(nested, { stringPrefix: prefix });
+    }
+    default:
+      throw new Error(
+        `generateMinimalItemState: property "${name}" has unsupported type "${type ?? '(none)'}". ` +
+          `Extend the generator to handle this type.`,
+      );
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Served-domain binding resolver
+// ---------------------------------------------------------------------------
+
+type ResolvedBinding = {
+  network: string;
+  domain: string;
+  item_type: string;
+  schema: Record<string, unknown>;
+};
+
+type ResolvedBindings = {
+  primary: ResolvedBinding;
+  secondary: ResolvedBinding | null;
+};
+
+async function resolveBindings(): Promise<ResolvedBindings> {
+  const { apiConfig } = await import('@/config');
+  const { getNetworkConfigById } = await import('@/network_configs');
+
+  if (apiConfig.served_domains.length === 0) {
+    throw new Error(
+      'resolveBindings: SERVED_DOMAINS is empty. ' +
+        'Configure at least one "network/domain" binding to run this suite.',
+    );
+  }
+
+  async function resolveSingle(
+    network: string,
+    domain: string,
+  ): Promise<ResolvedBinding> {
+    const networkConfig = await getNetworkConfigById(network);
+    const domainConfig = networkConfig.domains?.find((d) => d.id === domain);
+    if (!domainConfig) {
+      throw new Error(
+        `resolveBindings: domain "${domain}" not found in network config for "${network}". ` +
+          `Available domains: ${(networkConfig.domains ?? []).map((d) => d.id).join(', ')}`,
+      );
+    }
+
+    const itemSchemas = domainConfig.item_schemas;
+    if (!itemSchemas || Object.keys(itemSchemas).length === 0) {
+      throw new Error(
+        `resolveBindings: domain "${domain}" in network "${network}" declares no item_schemas. ` +
+          `Cannot derive a test fixture without at least one schema.`,
+      );
+    }
+
+    const item_type = Object.keys(itemSchemas)[0];
+    const schema = itemSchemas[item_type] as Record<string, unknown>;
+
+    return { network, domain, item_type, schema };
+  }
+
+  const primaryBinding = apiConfig.served_domains[0];
+  const primary = await resolveSingle(primaryBinding.network, primaryBinding.domain);
+
+  const secondaryBinding = apiConfig.served_domains.find(
+    (b) => b.key !== primaryBinding.key,
+  );
+  const secondary = secondaryBinding
+    ? await resolveSingle(secondaryBinding.network, secondaryBinding.domain)
+    : null;
+
+  return { primary, secondary };
+}
+
+// ---------------------------------------------------------------------------
+// Suite
+// ---------------------------------------------------------------------------
+
 describeIf(`POST /api/v1/admin/participant (integration)${
   can_run ? '' : ` — ${skip_reason}`
 }`, () => {
@@ -59,7 +232,7 @@ describeIf(`POST /api/v1/admin/participant (integration)${
   let authSchema: typeof import('../../../../../db/postgres/schema/auth.js');
   let itemsTable: typeof import('@dpg/database').items;
 
-  // Default to the network-config blue_dot port so the route's downstream
+  // Default to the network-config port so the route's downstream
   // partition-ensure / signUp paths see the same host they would in the
   // dev server. EADDRINUSE guarded below.
   const listen_port = Number(process.env.API_PORT ?? 2742);
@@ -105,6 +278,11 @@ describeIf(`POST /api/v1/admin/participant (integration)${
   // cases 1–5, the second is the secondary user seeded inside case 6.
   const onboarded_user_ids: string[] = [];
 
+  // Resolved at beforeAll — schema-derived bindings consumed by each test.
+  let primary: ResolvedBinding;
+  let secondary: ResolvedBinding | null;
+  let primaryFixture: Record<string, unknown>;
+
   beforeAll(async () => {
     // Lazy-import the DB / database-package surfaces so a CI box without
     // a live DB doesn't blow up on import (drizzle_config builds a Pool
@@ -115,6 +293,12 @@ describeIf(`POST /api/v1/admin/participant (integration)${
     db = drizzle_mod.db;
     authSchema = auth_mod;
     itemsTable = database_pkg.items;
+
+    // Resolve primary + secondary served-domain bindings from env config.
+    const resolved = await resolveBindings();
+    primary = resolved.primary;
+    secondary = resolved.secondary;
+    primaryFixture = generateMinimalItemState(primary.schema);
 
     const { admin_routes } = await import('../admin_routes.js');
     const network_routes_mod = await import('../../network/network_routes.js');
@@ -265,8 +449,13 @@ describeIf(`POST /api/v1/admin/participant (integration)${
   let canonical_user_email: string;
   let canonical_item_id: string;
 
+  // The fixture sent in case #1 — stored so case #3's round-trip assertion
+  // uses a different (detectable) payload.
+  let case1Fixture: Record<string, unknown>;
+
   it('agg_A onboards a brand-new user; row exists with onboardedByOrgId = agg_A.org_id, items[0] present', async () => {
     canonical_user_email = `int_c_${randomUUID().slice(0, 6)}@a.test`;
+    case1Fixture = generateMinimalItemState(primary.schema);
     const res = await app.inject({
       method: 'POST',
       url: '/api/v1/admin/participant',
@@ -281,13 +470,10 @@ describeIf(`POST /api/v1/admin/participant (integration)${
         terms_accepted: true,
         privacy_accepted: true,
         channel: 'bulk',
-        item_state: {
-          name: 'Int C A',
-          phone: '9999000001',
-          gender: 'female',
-          location: 'Bangalore',
-          age: 25,
-        },
+        network: primary.network,
+        domain: primary.domain,
+        item_type: primary.item_type,
+        item_state: case1Fixture,
       },
     });
     expect(res.statusCode).toBe(200);
@@ -319,6 +505,10 @@ describeIf(`POST /api/v1/admin/participant (integration)${
       .from(itemsTable)
       .where(eq(itemsTable.created_by, canonical_user_id));
 
+    // Aggregator + existing user → handler short-circuits to noop;
+    // the payload is never written. Send a valid-shape body anyway
+    // so we don't hit schema-level rejects.
+    const noopFixture = generateMinimalItemState(primary.schema);
     const res = await app.inject({
       method: 'POST',
       url: '/api/v1/admin/participant',
@@ -333,16 +523,10 @@ describeIf(`POST /api/v1/admin/participant (integration)${
         terms_accepted: true,
         privacy_accepted: true,
         channel: 'bulk',
-        // Aggregator + existing user → handler short-circuits to noop;
-        // the payload is never written. Send a valid-shape body anyway
-        // so we don't hit schema-level rejects.
-        item_state: {
-          name: 'wont be written',
-          phone: '9999000099',
-          gender: 'female',
-          location: 'Bangalore',
-          age: 30,
-        },
+        network: primary.network,
+        domain: primary.domain,
+        item_type: primary.item_type,
+        item_state: noopFixture,
       },
     });
     expect(res.statusCode).toBe(200);
@@ -359,6 +543,7 @@ describeIf(`POST /api/v1/admin/participant (integration)${
   });
 
   it('network_service updates an existing item via item_id; item_state in DB reflects the new payload', async () => {
+    const updateFixture = generateMinimalItemState(primary.schema);
     const res = await app.inject({
       method: 'POST',
       url: '/api/v1/admin/participant',
@@ -373,13 +558,10 @@ describeIf(`POST /api/v1/admin/participant (integration)${
         terms_accepted: true,
         privacy_accepted: true,
         channel: 'bulk',
-        item_state: {
-          name: 'NS Updated Name',
-          phone: '9999000002',
-          gender: 'female',
-          location: 'Bangalore',
-          age: 26,
-        },
+        network: primary.network,
+        domain: primary.domain,
+        item_type: primary.item_type,
+        item_state: updateFixture,
         item_id: canonical_item_id,
       },
     });
@@ -391,17 +573,21 @@ describeIf(`POST /api/v1/admin/participant (integration)${
       .where(eq(itemsTable.item_id, canonical_item_id))
       .limit(1);
     expect(refreshed).toBeTruthy();
-    const state = refreshed.item_state as Record<string, unknown>;
-    expect(state.name).toBe('NS Updated Name');
-    expect(state.age).toBe(26);
+    expect(refreshed.item_state).toEqual(updateFixture);
   });
 
-  it('network_service inserts an additional item for the same user (provider/job_posting_1.0); item count goes up by 1', async () => {
+  it('network_service inserts an additional item for the same user (secondary served-domain binding); item count goes up by 1', async (ctx) => {
+    if (secondary === null) {
+      ctx.skip();
+      return;
+    }
+
     const before = await db
       .select()
       .from(itemsTable)
       .where(eq(itemsTable.created_by, canonical_user_id));
 
+    const secondaryFixture = generateMinimalItemState(secondary.schema);
     const res = await app.inject({
       method: 'POST',
       url: '/api/v1/admin/participant',
@@ -416,19 +602,10 @@ describeIf(`POST /api/v1/admin/participant (integration)${
         terms_accepted: true,
         privacy_accepted: true,
         channel: 'bulk',
-        network: 'blue_dot',
-        domain: 'provider',
-        item_type: 'job_posting_1.0',
-        item_state: {
-          jobProviderName: 'Acme Integration',
-          jobProviderLocation: 'Bangalore',
-          hiringManagerName: 'Alice Int',
-          hiringManagerPhoneNumber: '9999999900',
-          hiringManagerEmail: 'alice@acme.integration.test',
-          role: 'Engineer',
-          positions: 1,
-          natureOfJob: 'Full-time',
-        },
+        network: secondary.network,
+        domain: secondary.domain,
+        item_type: secondary.item_type,
+        item_state: secondaryFixture,
       },
     });
     expect(res.statusCode).toBe(200);
@@ -441,6 +618,7 @@ describeIf(`POST /api/v1/admin/participant (integration)${
   });
 
   it("agg_B trying to read agg_A's user gets user_existed=true but items: []", async () => {
+    const probeFixture = generateMinimalItemState(primary.schema);
     const res = await app.inject({
       method: 'POST',
       url: '/api/v1/admin/participant',
@@ -455,13 +633,10 @@ describeIf(`POST /api/v1/admin/participant (integration)${
         terms_accepted: true,
         privacy_accepted: true,
         channel: 'bulk',
-        item_state: {
-          name: 'noop',
-          phone: '9999099999',
-          gender: 'female',
-          location: 'Bangalore',
-          age: 22,
-        },
+        network: primary.network,
+        domain: primary.domain,
+        item_type: primary.item_type,
+        item_state: probeFixture,
       },
     });
     expect(res.statusCode).toBe(200);
@@ -475,6 +650,7 @@ describeIf(`POST /api/v1/admin/participant (integration)${
     // Seed a second user via agg_A so we have an item owned by someone
     // other than the canonical user.
     const other_email = `int_c_${randomUUID().slice(0, 6)}@b.test`;
+    const seedFixture = generateMinimalItemState(primary.schema);
     const seed = await app.inject({
       method: 'POST',
       url: '/api/v1/admin/participant',
@@ -489,13 +665,10 @@ describeIf(`POST /api/v1/admin/participant (integration)${
         terms_accepted: true,
         privacy_accepted: true,
         channel: 'bulk',
-        item_state: {
-          name: 'Other Int C',
-          phone: '9999090909',
-          gender: 'female',
-          location: 'Bangalore',
-          age: 22,
-        },
+        network: primary.network,
+        domain: primary.domain,
+        item_type: primary.item_type,
+        item_state: seedFixture,
       },
     });
     expect(seed.statusCode).toBe(200);
@@ -524,6 +697,7 @@ describeIf(`POST /api/v1/admin/participant (integration)${
       .where(eq(itemsTable.item_id, other_item_id))
       .limit(1);
 
+    const badFixture = generateMinimalItemState(primary.schema);
     const res = await app.inject({
       method: 'POST',
       url: '/api/v1/admin/participant',
@@ -538,13 +712,10 @@ describeIf(`POST /api/v1/admin/participant (integration)${
         terms_accepted: true,
         privacy_accepted: true,
         channel: 'bulk',
-        item_state: {
-          name: 'should not be written',
-          phone: '9999088888',
-          gender: 'female',
-          location: 'Bangalore',
-          age: 22,
-        },
+        network: primary.network,
+        domain: primary.domain,
+        item_type: primary.item_type,
+        item_state: badFixture,
         item_id: other_item_id, // belongs to the OTHER user
       },
     });
@@ -562,7 +733,7 @@ describeIf(`POST /api/v1/admin/participant (integration)${
       .where(eq(itemsTable.created_by, canonical_user_id));
     expect(after_canonical.length).toBe(before_canonical.length);
 
-    // Other user's item likewise untouched (state unchanged).
+    // Other user's item likewise untouched (full state equality check).
     const [after_other] = await db
       .select({
         item_id: itemsTable.item_id,
@@ -573,8 +744,6 @@ describeIf(`POST /api/v1/admin/participant (integration)${
       .where(eq(itemsTable.item_id, other_item_id))
       .limit(1);
     expect(after_other).toBeTruthy();
-    expect(
-      (after_other.item_state as Record<string, unknown>).name,
-    ).toBe((before_other[0].item_state as Record<string, unknown>).name);
+    expect(after_other.item_state).toEqual(before_other[0].item_state);
   });
 });
