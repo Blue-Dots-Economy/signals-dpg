@@ -123,6 +123,9 @@ function pickValue(
 
   switch (type) {
     case 'string': {
+      if (typeof prop.pattern === 'string') {
+        return generateStringForPattern(prop.pattern, name);
+      }
       const minLen = typeof prop.minLength === 'number' ? prop.minLength : 1;
       const raw = `${prefix}-${name}-${suffix}`;
       return raw.length >= minLen ? raw : raw.padEnd(minLen, 'x');
@@ -137,10 +140,22 @@ function pickValue(
     }
     case 'boolean':
       return true;
-    case 'array':
-      // Produce an empty array; the route does not validate array contents
-      // for the purposes of this suite.
-      return [];
+    case 'array': {
+      const minItems = typeof prop.minItems === 'number' ? prop.minItems : 0;
+      if (minItems === 0) return [];
+      const items = prop.items as Record<string, unknown> | undefined;
+      if (!items) {
+        throw new Error(
+          `generateMinimalItemState: array "${name}" requires minItems ${minItems} ` +
+            `but declares no items schema`,
+        );
+      }
+      const values: unknown[] = [];
+      for (let i = 0; i < minItems; i++) {
+        values.push(pickValue(items, `${name}[${i}]`, prefix, suffix));
+      }
+      return values;
+    }
     case 'object': {
       const nested = prop as Record<string, unknown>;
       return generateMinimalItemState(nested, { stringPrefix: prefix });
@@ -151,6 +166,46 @@ function pickValue(
           `Extend the generator to handle this type.`,
       );
   }
+}
+
+// Strips properties marked `"private": true` from a state object — used when
+// asserting that an item's persisted item_state matches what the test sent,
+// since private fields are stored as type-aware masks (PR #37) and won't
+// equal their input. Public fields round-trip verbatim.
+function nonPrivateFields(
+  schema: Record<string, unknown>,
+  state: Record<string, unknown>,
+): Record<string, unknown> {
+  const properties = schema.properties as
+    | Record<string, Record<string, unknown>>
+    | undefined;
+  if (!properties) return { ...state };
+  const result: Record<string, unknown> = {};
+  for (const [name, value] of Object.entries(state)) {
+    if (properties[name]?.private !== true) {
+      result[name] = value;
+    }
+  }
+  return result;
+}
+
+// Generates a string that satisfies a JSON Schema `pattern`. Recognises only
+// the digit-only patterns currently in use across the bundled network configs
+// (`^[0-9]{N}$`, `^\d{N}$`, `^[0-9]+$`, `^\d+$`). Other patterns throw with a
+// pointer to extend this helper rather than producing silently-invalid data.
+function generateStringForPattern(pattern: string, name: string): string {
+  const fixedDigits = pattern.match(/^\^?\[0-9\]\{(\d+)\}\$?$/)
+    ?? pattern.match(/^\^?\\d\{(\d+)\}\$?$/);
+  if (fixedDigits) {
+    return '0'.repeat(Number(fixedDigits[1]));
+  }
+  if (/^\^?\[0-9\]\+\$?$/.test(pattern) || /^\^?\\d\+\$?$/.test(pattern)) {
+    return '0123456789';
+  }
+  throw new Error(
+    `generateMinimalItemState: property "${name}" has pattern "${pattern}" which is not recognised. ` +
+      `Extend generateStringForPattern to handle it, or override the fixture for this test.`,
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -567,7 +622,15 @@ describeIf(`POST /api/v1/admin/participant (integration)${
       .where(eq(itemsTable.item_id, canonical_item_id))
       .limit(1);
     expect(refreshed).toBeTruthy();
-    expect(refreshed.item_state).toEqual(updateFixture);
+    // Private fields land in item_state as type-aware masks (PII encryption at
+    // rest, see 2026-05-28-pii-encryption-at-rest design). The unmasked values
+    // live in item_private_state. Round-trip assert on the public-only subset.
+    const publicFromFixture = nonPrivateFields(primary.schema, updateFixture);
+    const publicFromDb = nonPrivateFields(
+      primary.schema,
+      refreshed.item_state as Record<string, unknown>,
+    );
+    expect(publicFromDb).toEqual(publicFromFixture);
   });
 
   it('network_service inserts an additional item for the same user (secondary served-domain binding); item count goes up by 1', async (ctx) => {
