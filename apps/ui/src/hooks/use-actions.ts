@@ -26,7 +26,28 @@ export const actionKeys = {
 
 // ─── Constants ───────────────────────────────────────────────────
 
-const POLLING_INTERVAL = 5000; // 5 seconds
+// How often to re-fetch action lists + the pending-action badge count.
+// 5s was historically the default for a "real-time feel" but produces ~12
+// requests per minute per logged-in user even when nothing changes — the
+// dominant cost in the captured HAR. 30s is a better default for a
+// notification badge (the receiver also gets an instant local refresh via
+// useUpdateActionStatus.onSuccess invalidation, so polling only covers
+// the cross-user case of someone else sending a new action).
+//
+// Override via `VITE_ACTION_POLL_INTERVAL_MS` (e.g. `"15000"` to poll every
+// 15 seconds, or `"0"` to disable polling entirely and rely on mutations).
+const DEFAULT_POLLING_INTERVAL = 30000;
+
+function resolvePollingInterval(): number | false {
+  const raw = import.meta.env.VITE_ACTION_POLL_INTERVAL_MS;
+  if (raw === undefined || raw === '') return DEFAULT_POLLING_INTERVAL;
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed) || parsed < 0) return DEFAULT_POLLING_INTERVAL;
+  if (parsed === 0) return false; // false disables polling in react-query
+  return parsed;
+}
+
+const POLLING_INTERVAL = resolvePollingInterval();
 
 // ─── Hooks ────────────────────────────────────────────────────────
 
@@ -56,8 +77,9 @@ export function useActions(
         meta: response.meta,
       };
     },
-    refetchInterval: POLLING_INTERVAL, // Auto-poll every 5 seconds
-    staleTime: 0, // Consider data stale immediately for real-time feel
+    refetchInterval: POLLING_INTERVAL,
+    refetchIntervalInBackground: false, // Stop polling when tab is hidden
+    staleTime: POLLING_INTERVAL === false ? Infinity : POLLING_INTERVAL,
     ...options,
   });
 }
@@ -82,7 +104,8 @@ export function usePendingActionsCount() {
       return response.meta.total;
     },
     refetchInterval: POLLING_INTERVAL,
-    staleTime: 0,
+    refetchIntervalInBackground: false,
+    staleTime: POLLING_INTERVAL === false ? Infinity : POLLING_INTERVAL,
   });
 }
 
@@ -133,7 +156,8 @@ export function useReceivedActionsByStatus(
       };
     },
     refetchInterval: POLLING_INTERVAL,
-    staleTime: 0,
+    refetchIntervalInBackground: false,
+    staleTime: POLLING_INTERVAL === false ? Infinity : POLLING_INTERVAL,
     ...options,
   });
 }
