@@ -156,7 +156,7 @@ export const perform_action_handler = async (
       });
     }
 
-    if (body.consent?.acknowledged) {
+    if (interaction.consent_text_initiator?.trim() && body.consent?.acknowledged) {
       request.log.info(
         {
           side: 'initiator',
