@@ -5,6 +5,7 @@ import { ActionModalHeader } from './action-modal-header';
 import { ConsentCheckbox } from './consent-checkbox';
 import { getActionDisplay } from '@/lib/action-display';
 import { cn } from '@/lib/utils';
+import { useNetworkConfig } from '@/hooks/use-network-config';
 
 // Desktop: Dialog
 import {
@@ -24,19 +25,12 @@ import {
 import { useUpdateActionStatus } from '@/hooks/use-actions';
 import { toast } from 'sonner';
 
-interface InteractionConsent {
-  reveals_pii_on_status?: string[];
-  consent_text_receiver?: string;
-}
-
 interface ActionStatusUpdaterProps {
   action: Action | null;
   open: boolean;
   onOpenChange: (open: boolean) => void;
   /** The status the user intends to transition to, pre-selected by the action-card button. */
   suggestedStatus?: string;
-  /** Consent-relevant fields from the interaction schema (DotActionSchema). */
-  interaction?: InteractionConsent;
 }
 
 const statusLabels: Record<string, string> = {
@@ -59,7 +53,6 @@ export function ActionStatusUpdater({
   open,
   onOpenChange,
   suggestedStatus,
-  interaction,
 }: ActionStatusUpdaterProps) {
   const isMobile = useIsMobile();
   const { mutate: updateStatus, isPending } = useUpdateActionStatus();
@@ -74,6 +67,30 @@ export function ActionStatusUpdater({
       setRemarks('');
     }
   }, [open]);
+
+  // Resolve the interaction from the network config so consent fields are
+  // always available without prop drilling from the action list.
+  const { data: networkConfig } = useNetworkConfig(action?.target_item_network ?? null);
+
+  const interaction = React.useMemo(() => {
+    if (!networkConfig || !action) return null;
+    const actionDef = networkConfig.actions?.[action.action_type];
+    if (!actionDef) return null;
+    return (
+      (actionDef.interactions ?? []).find((i) => {
+        const fromNet = i.from_network ?? networkConfig.id;
+        const toNet = i.to_network ?? networkConfig.id;
+        return (
+          fromNet === action.source_item_network &&
+          i.from_domain === action.source_item_domain &&
+          (i.from_items?.length === 0 || i.from_items?.includes(action.source_item_type)) &&
+          toNet === action.target_item_network &&
+          i.to_domain === action.target_item_domain &&
+          (i.to_items?.length === 0 || i.to_items?.includes(action.target_item_type))
+        );
+      }) ?? null
+    );
+  }, [networkConfig, action]);
 
   if (!action) return null;
 
@@ -160,7 +177,7 @@ export function ActionStatusUpdater({
       </Button>
       <Button
         onClick={handleSubmit}
-        disabled={isPending || (requiresConsent && !consentChecked)}
+        disabled={isPending || !networkConfig || (requiresConsent && !consentChecked)}
         className={cn('min-w-[120px] font-semibold shadow-sm', display.buttonClass)}
       >
         {isPending ? 'Updating...' : confirmLabel}
