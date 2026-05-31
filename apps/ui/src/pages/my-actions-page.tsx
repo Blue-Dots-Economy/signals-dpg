@@ -36,9 +36,9 @@ export function MyActionsPage() {
     isRefetching: isReceivedRefetching,
   } = useReceivedActions();
 
-  const handleStatusUpdate = (action: Action, suggestedNewStatus?: string) => {
+  const handleStatusUpdate = (action: Action, targetStatus: string) => {
     setSelectedAction(action);
-    setSuggestedStatus(suggestedNewStatus ?? '');
+    setSuggestedStatus(targetStatus);
     setIsStatusModalOpen(true);
   };
 
@@ -103,7 +103,7 @@ export function MyActionsPage() {
           error={error}
           activeTab={activeTab}
           onTabChange={setActiveTab}
-          onStatusUpdate={(action) => handleStatusUpdate(action)}
+          onStatusUpdate={(action, targetStatus) => handleStatusUpdate(action, targetStatus)}
           onRefresh={handleRefresh}
           isRefetching={isRefetching}
         />

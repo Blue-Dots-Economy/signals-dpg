@@ -403,81 +403,7 @@
           "from_domain": "seeker",
           "to_network": "purple_dot",
           "to_domain": "provider",
-          "requirement_schema": {
-            "$schema": "https://json-schema.org/draft/2020-12/schema",
-            "title": "Seeker To Provider Connect Requirement",
-            "type": "object",
-            "additionalProperties": false,
-            "required": [
-              "disability_type",
-              "looking_for",
-              "message"
-            ],
-            "properties": {
-              "disability_type": {
-                "type": "array",
-                "title": "Disability",
-                "minItems": 1,
-                "items": {
-                  "type": "string",
-                  "enum": [
-                    "Acid Attack Victim",
-                    "Autism Spectrum Disorder",
-                    "Blindness",
-                    "Cerebral Palsy",
-                    "Dwarfism",
-                    "Hearing Impairment",
-                    "Hemophilia",
-                    "Intellectual Disability",
-                    "Leprosy Cured",
-                    "Locomotor Disability",
-                    "Low Vision",
-                    "Mental Illness",
-                    "Multiple Sclerosis",
-                    "Muscular Dystrophy",
-                    "Parkinson's Disease",
-                    "Sickle Cell Disease",
-                    "Specific Learning Disabilities",
-                    "Speech and Language Disability",
-                    "Thalassemia",
-                    "Chronic Neurological Conditions",
-                    "Deaf",
-                    "Hard of Hearing",
-                    "Multiple Disabilities including deaf-blindness",
-                    "Multiple Disabilities",
-                    "Mental Retardation"
-                  ]
-                }
-              },
-              "looking_for": {
-                "type": "array",
-                "title": "Looking For",
-                "description": "What are you looking for?",
-                "minItems": 1,
-                "items": {
-                  "type": "string",
-                  "enum": [
-                    "Assistive Devices",
-                    "Health & Rehabilitation",
-                    "Training & Skill Building",
-                    "Application Support",
-                    "Counselling & Mentorship",
-                    "Accessibility Support",
-                    "Employment Opportunities",
-                    "Scholarships",
-                    "Financial Products (Loans/Insurance)",
-                    "Other"
-                  ]
-                }
-              },
-              "message": {
-                "type": "string",
-                "title": "Message",
-                "description": "Message to the provider",
-                "minLength": 1
-              }
-            }
-          },
+          "requirement_schema": { "type": "object", "properties": {} },
           "event_schema": {
             "$schema": "https://json-schema.org/draft/2020-12/schema",
             "title": "Seeker To Provider Connect Event",
@@ -508,52 +434,16 @@
             "reject": ["rejected"],
             "cancel": ["cancelled"]
           },
-          "reveals_pii_on_status": ["accepted"]
+          "reveals_pii_on_status": ["accepted"],
+          "consent_text_initiator": "I agree to share my contact details (name, email, phone) with this provider if they accept my request.",
+          "consent_text_receiver": "I agree to share my contact details (name, email, phone) with the requester."
         },
         {
           "from_network": "purple_dot",
           "from_domain": "provider",
           "to_network": "purple_dot",
           "to_domain": "seeker",
-          "requirement_schema": {
-            "$schema": "https://json-schema.org/draft/2020-12/schema",
-            "title": "Provider To Seeker Connect Requirement",
-            "type": "object",
-            "additionalProperties": false,
-            "required": [
-              "services_offered",
-              "message"
-            ],
-            "properties": {
-              "services_offered": {
-                "type": "array",
-                "title": "Services Offered",
-                "description": "Services or support being offered",
-                "minItems": 1,
-                "items": {
-                  "type": "string",
-                  "enum": [
-                    "Assistive Devices",
-                    "Health & Rehabilitation",
-                    "Training & Skill Building",
-                    "Application Support",
-                    "Counselling & Mentorship",
-                    "Accessibility Support",
-                    "Employment Opportunities",
-                    "Scholarships",
-                    "Financial Products (Loans/Insurance)",
-                    "Other"
-                  ]
-                }
-              },
-              "message": {
-                "type": "string",
-                "title": "Message",
-                "description": "Message to the seeker",
-                "minLength": 1
-              }
-            }
-          },
+          "requirement_schema": { "type": "object", "properties": {} },
           "event_schema": {
             "$schema": "https://json-schema.org/draft/2020-12/schema",
             "title": "Provider To Seeker Connect Event",
@@ -579,7 +469,9 @@
             }
           },
           "metric_categories": null,
-          "reveals_pii_on_status": ["accepted"]
+          "reveals_pii_on_status": ["accepted"],
+          "consent_text_initiator": "I agree to share my contact details (name, email, phone) with this provider if they accept my request.",
+          "consent_text_receiver": "I agree to share my contact details (name, email, phone) with the requester."
         }
       ]
     }

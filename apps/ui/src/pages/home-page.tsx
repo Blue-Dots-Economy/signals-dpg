@@ -21,6 +21,7 @@ import { MapView } from '@/components/map/map-container';
 import { MatchScoreCard } from '@/components/match-score';
 import '@/components/map/providers';
 import { fetchItems, performAction, type Item } from '@/lib/item-api';
+import { ACTION_CONSENT_SENTINEL } from '@/lib/action-api';
 import { EmptyState } from '@/components/empty-state';
 import { fetchNetworkConfigs, fetchNetworkConfig, fetchNetworkItems } from '@/lib/network-api';
 import { useAuth } from '@/contexts/auth-context';
@@ -383,6 +384,9 @@ export function HomePage() {
             to_domain: interaction.to_domain,
             requirement_schema: interaction.requirement_schema,
             event_schema: interaction.event_schema,
+            consent_text_initiator: interaction.consent_text_initiator,
+            consent_text_receiver: interaction.consent_text_receiver,
+            reveals_pii_on_status: interaction.reveals_pii_on_status,
           });
         }
       }
@@ -580,13 +584,24 @@ export function HomePage() {
               throw new Error('Target item not found');
             }
 
+            // Extract consent sentinel placed by ConsentCheckbox inside ActionModal.
+            // Must not appear in requirements_snapshot sent to the server.
+            const { [ACTION_CONSENT_SENTINEL]: consentRaw, ...requirementsSnapshot } = formData;
+            const consent =
+              consentRaw &&
+              typeof consentRaw === 'object' &&
+              (consentRaw as { acknowledged?: unknown }).acknowledged === true &&
+              typeof (consentRaw as { text?: unknown }).text === 'string'
+                ? ({ acknowledged: true as const, text: (consentRaw as { text: string }).text })
+                : undefined;
+
             // Resolve source item instance URL (where my profile is stored)
-            // IMPORTANT: If the source item has localhost as instance_url, 
+            // IMPORTANT: If the source item has localhost as instance_url,
             // it means it was created on the current API instance
             const sourceItemInstanceUrl = myItem.item_instance_url?.includes('localhost')
               ? apiConfig.getUrl()  // Use current API where the item was actually created
               : resolveTargetInstanceUrl(myItem, network, apiConfig.getUrl(), 'source');
-            
+
             // Resolve target item instance URL dynamically
             // IMPORTANT: If target item has localhost, use current API as fallback
             const targetItemInstanceUrl = targetItem.item_instance_url?.includes('localhost')
@@ -609,7 +624,8 @@ export function HomePage() {
                   item_id: targetItem.item_id,
                   item_instance_url: targetItemInstanceUrl,
                 },
-                requirements_snapshot: formData,
+                requirements_snapshot: requirementsSnapshot,
+                ...(consent ? { consent } : {}),
               },
               sourceItemInstanceUrl // Call the SOURCE instance (where myItem exists)
             );

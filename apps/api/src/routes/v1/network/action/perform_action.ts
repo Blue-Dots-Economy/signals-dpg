@@ -167,6 +167,7 @@ export const perform_network_action_handler = async (
       target_item: body.target_item,
       requirements_snapshot: body.requirements_snapshot,
     },
+    consent: body.consent,
   });
 
   try {

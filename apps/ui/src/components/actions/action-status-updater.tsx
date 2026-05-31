@@ -1,9 +1,11 @@
 import * as React from 'react';
 import { useIsMobile } from '@/hooks/use-mobile';
-import type { Action } from '@/lib/action-api';
+import type { Action, UpdateActionStatusPayload } from '@/lib/action-api';
 import { ActionModalHeader } from './action-modal-header';
+import { ConsentCheckbox } from './consent-checkbox';
 import { getActionDisplay } from '@/lib/action-display';
 import { cn } from '@/lib/utils';
+import { useNetworkConfig } from '@/hooks/use-network-config';
 
 // Desktop: Dialog
 import {
@@ -11,15 +13,8 @@ import {
   DialogContent,
 } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select';
 import { Label } from '@/components/ui/label';
-import { Input } from '@/components/ui/input';
+import { Textarea } from '@/components/ui/textarea';
 
 // Mobile: Drawer
 import {
@@ -34,20 +29,9 @@ interface ActionStatusUpdaterProps {
   action: Action | null;
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  /** The status the user intends to transition to, pre-selected by the action-card button. */
   suggestedStatus?: string;
 }
-
-const getValidTransitions = (currentStatus: string): string[] => {
-  const transitions: Record<string, string[]> = {
-    created: ['accepted', 'rejected', 'cancelled'],
-    pending: ['accepted', 'rejected', 'cancelled'],
-    accepted: ['completed', 'cancelled'],
-    rejected: [],
-    completed: [],
-    cancelled: [],
-  };
-  return transitions[currentStatus] ?? [];
-};
 
 const statusLabels: Record<string, string> = {
   accepted: 'Accept',
@@ -73,93 +57,123 @@ export function ActionStatusUpdater({
   const isMobile = useIsMobile();
   const { mutate: updateStatus, isPending } = useUpdateActionStatus();
 
-  const [status, setStatus] = React.useState(suggestedStatus ?? '');
+  const targetStatus = suggestedStatus ?? '';
+  const [consentChecked, setConsentChecked] = React.useState(false);
   const [remarks, setRemarks] = React.useState('');
 
   React.useEffect(() => {
-    if (open && action) {
-      setStatus(suggestedStatus ?? getValidTransitions(action.action_status)[0] ?? '');
+    if (open) {
+      setConsentChecked(false);
       setRemarks('');
     }
-  }, [open, action, suggestedStatus]);
+  }, [open]);
+
+  // Resolve the interaction from the network config so consent fields are
+  // always available without prop drilling from the action list.
+  const { data: networkConfig } = useNetworkConfig(action?.target_item_network ?? null);
+
+  const interaction = React.useMemo(() => {
+    if (!networkConfig || !action) return null;
+    const actionDef = networkConfig.actions?.[action.action_type];
+    if (!actionDef) return null;
+    return (
+      (actionDef.interactions ?? []).find((i) => {
+        const fromNet = i.from_network ?? networkConfig.id;
+        const toNet = i.to_network ?? networkConfig.id;
+        const fromItems = i.from_items ?? [];
+        const toItems = i.to_items ?? [];
+        return (
+          fromNet === action.source_item_network &&
+          i.from_domain === action.source_item_domain &&
+          (fromItems.length === 0 || fromItems.includes(action.source_item_type)) &&
+          toNet === action.target_item_network &&
+          i.to_domain === action.target_item_domain &&
+          (toItems.length === 0 || toItems.includes(action.target_item_type))
+        );
+      }) ?? null
+    );
+  }, [networkConfig, action]);
+
+  // Reset form state when the resolved interaction changes mid-session
+  // (e.g. networkConfig finishes loading after the modal opened) so a stale
+  // consentChecked from the pre-load render can't bypass a freshly-required gate.
+  React.useEffect(() => {
+    setConsentChecked(false);
+    setRemarks('');
+  }, [interaction]);
 
   if (!action) return null;
 
-  const validTransitions = getValidTransitions(action.action_status);
+  // Determine whether consent is required for this status transition.
+  const revealStatuses = interaction?.reveals_pii_on_status ?? [];
+  const consentText = (interaction?.consent_text_receiver ?? '').trim();
+  const requiresConsent = revealStatuses.includes(targetStatus) && consentText !== '';
 
   const handleSubmit = () => {
-    if (!status) {
+    if (!targetStatus) {
       toast.error('No status selected', {
-        description: 'Choose a new status from the dropdown before submitting.',
+        description: 'No target status was provided for this action.',
       });
       return;
     }
 
-    updateStatus(
-      {
-        action_id: action.action_id,
-        action_status: status,
-        remarks: remarks || undefined,
+    const payload: UpdateActionStatusPayload = {
+      action_id: action.action_id,
+      action_status: targetStatus,
+      ...(requiresConsent
+        ? { consent: { acknowledged: true as const, text: consentText } }
+        : remarks.trim()
+          ? { remarks: remarks.trim() }
+          : {}),
+    };
+
+    updateStatus(payload, {
+      onSuccess: () => {
+        toast.success(`Action ${statusLabels[targetStatus]?.toLowerCase() ?? targetStatus}d`, {
+          description: 'The status has been updated and both parties will be notified.',
+        });
+        onOpenChange(false);
       },
-      {
-        onSuccess: () => {
-          toast.success(`Action ${statusLabels[status]?.toLowerCase() ?? status}`, {
-            description: 'The status has been updated and both parties will be notified.',
-          });
-          onOpenChange(false);
-        },
-        onError: (error: Error) => {
-          toast.error(`Failed to update status: ${error.message}`);
-        },
-      }
-    );
+      onError: (error: Error) => {
+        toast.error(`Failed to update status: ${error.message}`);
+      },
+    });
   };
 
   const formContent = (
     <div className="space-y-4">
-      <div className="space-y-2">
-        <Label htmlFor="status">New Status</Label>
-        <Select value={status} onValueChange={setStatus}>
-          <SelectTrigger id="status">
-            <SelectValue placeholder="Select status" />
-          </SelectTrigger>
-          <SelectContent>
-            {validTransitions.map((s) => (
-              <SelectItem key={s} value={s}>
-                {statusLabels[s] ?? s.charAt(0).toUpperCase() + s.slice(1)}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-      </div>
-
-      <div className="space-y-2">
-        <Label htmlFor="remarks">Remarks (Optional)</Label>
-        <Input
-          id="remarks"
-          value={remarks}
-          onChange={(e) => setRemarks(e.target.value)}
-          placeholder="Add any notes about this status change..."
+      {requiresConsent ? (
+        <ConsentCheckbox
+          text={consentText}
+          checked={consentChecked}
+          onCheckedChange={setConsentChecked}
         />
-      </div>
+      ) : (
+        <div className="space-y-2">
+          <Label htmlFor="action-remarks">Reason (optional)</Label>
+          <Textarea
+            id="action-remarks"
+            value={remarks}
+            onChange={(e) => setRemarks(e.target.value)}
+            placeholder="Add a brief note (optional)"
+          />
+        </div>
+      )}
     </div>
   );
 
-  // Drive the header band from the currently selected target status — falls
-  // back to the action type when nothing's chosen yet (the typical "first paint").
-  const headerKey = status || action.action_type || 'connect';
+  // Drive the header band from the target status — falls back to the action
+  // type when nothing's chosen yet (the typical "first paint").
+  const headerKey = targetStatus || action.action_type || 'connect';
   const display = getActionDisplay(headerKey);
-  const actionLabel = statusLabels[status] ?? display.label;
-  // Confirm button is always "Submit" regardless of the chosen status verb —
-  // user-facing label stays stable while the modal title carries the verb
-  // (e.g. "Cancel Request", "Accept Request").
+  const actionLabel = statusLabels[targetStatus] ?? display.label;
   const confirmLabel = 'Submit';
-  const subtitle = STATUS_SUBTITLES[status] ?? `Update status for this ${action.action_type ?? 'action'}`;
+  const subtitle = STATUS_SUBTITLES[targetStatus] ?? `Update status for this ${action.action_type ?? 'action'}`;
 
   const header = (
     <ActionModalHeader
       actionKey={headerKey}
-      title={status ? `${actionLabel} Request` : 'Update Status'}
+      title={targetStatus ? `${actionLabel} Request` : 'Update Status'}
       description={subtitle}
       fromDomain={action.source_item_domain}
       toDomain={action.target_item_domain}
@@ -173,7 +187,7 @@ export function ActionStatusUpdater({
       </Button>
       <Button
         onClick={handleSubmit}
-        disabled={isPending || !status}
+        disabled={isPending || !networkConfig || (requiresConsent && !consentChecked)}
         className={cn('min-w-[120px] font-semibold shadow-sm', display.buttonClass)}
       >
         {isPending ? 'Updating...' : confirmLabel}
