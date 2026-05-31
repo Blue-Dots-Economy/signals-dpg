@@ -80,17 +80,27 @@ export function ActionStatusUpdater({
       (actionDef.interactions ?? []).find((i) => {
         const fromNet = i.from_network ?? networkConfig.id;
         const toNet = i.to_network ?? networkConfig.id;
+        const fromItems = i.from_items ?? [];
+        const toItems = i.to_items ?? [];
         return (
           fromNet === action.source_item_network &&
           i.from_domain === action.source_item_domain &&
-          (i.from_items?.length === 0 || i.from_items?.includes(action.source_item_type)) &&
+          (fromItems.length === 0 || fromItems.includes(action.source_item_type)) &&
           toNet === action.target_item_network &&
           i.to_domain === action.target_item_domain &&
-          (i.to_items?.length === 0 || i.to_items?.includes(action.target_item_type))
+          (toItems.length === 0 || toItems.includes(action.target_item_type))
         );
       }) ?? null
     );
   }, [networkConfig, action]);
+
+  // Reset form state when the resolved interaction changes mid-session
+  // (e.g. networkConfig finishes loading after the modal opened) so a stale
+  // consentChecked from the pre-load render can't bypass a freshly-required gate.
+  React.useEffect(() => {
+    setConsentChecked(false);
+    setRemarks('');
+  }, [interaction]);
 
   if (!action) return null;
 
