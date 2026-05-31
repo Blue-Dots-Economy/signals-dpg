@@ -19,6 +19,14 @@ export default defineConfig({
     environment: 'node',
     globals: false,
     setupFiles: ['./vitest.setup.ts'],
+    // Every integration suite boots a real Fastify app on API_PORT (default
+    // 2742) and asserts against it. Parallel suite execution makes them race
+    // for the same port, so exactly one wins per run and the others fail at
+    // beforeAll with EADDRINUSE. Serialising keeps each suite's listen() call
+    // exclusive without changing per-suite port logic (the suites are also
+    // coupled to apiConfig.served_domains' instance_url, which hard-codes
+    // localhost:2742 via the bundled network configs).
+    fileParallelism: false,
   },
   resolve: {
     alias: {
