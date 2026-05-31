@@ -149,6 +149,25 @@ export const perform_action_handler = async (
       toItemType: targetItem.item_type,
     });
 
+    if (interaction.consent_text_initiator?.trim() && !body.consent?.acknowledged) {
+      return reply.code(403).send({
+        error: 'CONSENT_REQUIRED',
+        message: 'Initiator consent acknowledgment required for this action.',
+      });
+    }
+
+    if (interaction.consent_text_initiator?.trim() && body.consent?.acknowledged) {
+      request.log.info(
+        {
+          side: 'initiator',
+          action_type: body.action_type,
+          target_item_id: body.target_item.item_id,
+          consent_text_length: body.consent.text.length,
+        },
+        'consent recorded',
+      );
+    }
+
     requirementsSnapshot = mergeItemStateWithPrivate(
       body.requirements_snapshot,
       projectPrivateStateForSchema(
@@ -197,6 +216,7 @@ export const perform_action_handler = async (
           requirements_snapshot: requirementsSnapshot,
           performed_by_org_id: actor.audit.performed_by_org_id,
           performed_by_service_user_id: actor.audit.performed_by_service_user_id,
+          consent: body.consent,
         }),
       }
     );

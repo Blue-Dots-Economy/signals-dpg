@@ -28,6 +28,12 @@
  *
  * Skip conditions: if POSTGRES_URL / POSTGRES_USER are unset the suite
  * is described as `.skip` so CI without a DB stays green.
+ *
+ * Config-driven: served-domain bindings are resolved from apiConfig at
+ * beforeAll. The test passes explicit network/domain/item_type in every
+ * request so the route never falls back to hard-coded defaults. A minimal
+ * valid item_state is generated from the JSON schema for the first
+ * item_type declared in each binding's domain config.
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
@@ -39,6 +45,12 @@ import {
 } from 'fastify-type-provider-zod';
 import { eq, inArray } from 'drizzle-orm';
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
+import {
+  generateMinimalItemState,
+  nonPrivateFields,
+  resolveBindings,
+  type ResolvedBinding,
+} from '../../__tests__/integration_helpers';
 
 const pg_url = process.env.POSTGRES_URL ?? process.env.POSTGRES_USER;
 const can_run = Boolean(pg_url);
@@ -51,6 +63,10 @@ const describeIf = can_run ? describe : describe.skip;
 const hash_key = (raw: string) =>
   createHash('sha256').update(raw).digest('base64url');
 
+// ---------------------------------------------------------------------------
+// Suite
+// ---------------------------------------------------------------------------
+
 describeIf(`POST /api/v1/admin/participant (integration)${
   can_run ? '' : ` — ${skip_reason}`
 }`, () => {
@@ -59,7 +75,7 @@ describeIf(`POST /api/v1/admin/participant (integration)${
   let authSchema: typeof import('../../../../../db/postgres/schema/auth.js');
   let itemsTable: typeof import('@dpg/database').items;
 
-  // Default to the network-config blue_dot port so the route's downstream
+  // Default to the network-config port so the route's downstream
   // partition-ensure / signUp paths see the same host they would in the
   // dev server. EADDRINUSE guarded below.
   const listen_port = Number(process.env.API_PORT ?? 2742);
@@ -105,6 +121,10 @@ describeIf(`POST /api/v1/admin/participant (integration)${
   // cases 1–5, the second is the secondary user seeded inside case 6.
   const onboarded_user_ids: string[] = [];
 
+  // Resolved at beforeAll — schema-derived bindings consumed by each test.
+  let primary: ResolvedBinding;
+  let secondary: ResolvedBinding | null;
+
   beforeAll(async () => {
     // Lazy-import the DB / database-package surfaces so a CI box without
     // a live DB doesn't blow up on import (drizzle_config builds a Pool
@@ -115,6 +135,11 @@ describeIf(`POST /api/v1/admin/participant (integration)${
     db = drizzle_mod.db;
     authSchema = auth_mod;
     itemsTable = database_pkg.items;
+
+    // Resolve primary + secondary served-domain bindings from env config.
+    const resolved = await resolveBindings();
+    primary = resolved.primary;
+    secondary = resolved.secondary;
 
     const { admin_routes } = await import('../admin_routes.js');
     const network_routes_mod = await import('../../network/network_routes.js');
@@ -267,6 +292,7 @@ describeIf(`POST /api/v1/admin/participant (integration)${
 
   it('agg_A onboards a brand-new user; row exists with onboardedByOrgId = agg_A.org_id, items[0] present', async () => {
     canonical_user_email = `int_c_${randomUUID().slice(0, 6)}@a.test`;
+    const initialFixture = generateMinimalItemState(primary.schema);
     const res = await app.inject({
       method: 'POST',
       url: '/api/v1/admin/participant',
@@ -281,13 +307,10 @@ describeIf(`POST /api/v1/admin/participant (integration)${
         terms_accepted: true,
         privacy_accepted: true,
         channel: 'bulk',
-        item_state: {
-          name: 'Int C A',
-          phone: '9999000001',
-          gender: 'female',
-          location: 'Bangalore',
-          age: 25,
-        },
+        network: primary.network,
+        domain: primary.domain,
+        item_type: primary.item_type,
+        item_state: initialFixture,
       },
     });
     expect(res.statusCode).toBe(200);
@@ -319,6 +342,10 @@ describeIf(`POST /api/v1/admin/participant (integration)${
       .from(itemsTable)
       .where(eq(itemsTable.created_by, canonical_user_id));
 
+    // Aggregator + existing user → handler short-circuits to noop;
+    // the payload is never written. Send a valid-shape body anyway
+    // so we don't hit schema-level rejects.
+    const noopFixture = generateMinimalItemState(primary.schema);
     const res = await app.inject({
       method: 'POST',
       url: '/api/v1/admin/participant',
@@ -333,16 +360,10 @@ describeIf(`POST /api/v1/admin/participant (integration)${
         terms_accepted: true,
         privacy_accepted: true,
         channel: 'bulk',
-        // Aggregator + existing user → handler short-circuits to noop;
-        // the payload is never written. Send a valid-shape body anyway
-        // so we don't hit schema-level rejects.
-        item_state: {
-          name: 'wont be written',
-          phone: '9999000099',
-          gender: 'female',
-          location: 'Bangalore',
-          age: 30,
-        },
+        network: primary.network,
+        domain: primary.domain,
+        item_type: primary.item_type,
+        item_state: noopFixture,
       },
     });
     expect(res.statusCode).toBe(200);
@@ -359,6 +380,7 @@ describeIf(`POST /api/v1/admin/participant (integration)${
   });
 
   it('network_service updates an existing item via item_id; item_state in DB reflects the new payload', async () => {
+    const updateFixture = generateMinimalItemState(primary.schema);
     const res = await app.inject({
       method: 'POST',
       url: '/api/v1/admin/participant',
@@ -373,13 +395,10 @@ describeIf(`POST /api/v1/admin/participant (integration)${
         terms_accepted: true,
         privacy_accepted: true,
         channel: 'bulk',
-        item_state: {
-          name: 'NS Updated Name',
-          phone: '9999000002',
-          gender: 'female',
-          location: 'Bangalore',
-          age: 26,
-        },
+        network: primary.network,
+        domain: primary.domain,
+        item_type: primary.item_type,
+        item_state: updateFixture,
         item_id: canonical_item_id,
       },
     });
@@ -391,17 +410,29 @@ describeIf(`POST /api/v1/admin/participant (integration)${
       .where(eq(itemsTable.item_id, canonical_item_id))
       .limit(1);
     expect(refreshed).toBeTruthy();
-    const state = refreshed.item_state as Record<string, unknown>;
-    expect(state.name).toBe('NS Updated Name');
-    expect(state.age).toBe(26);
+    // Private fields land in item_state as type-aware masks (PII encryption at
+    // rest, see 2026-05-28-pii-encryption-at-rest design). The unmasked values
+    // live in item_private_state. Round-trip assert on the public-only subset.
+    const publicFromFixture = nonPrivateFields(primary.schema, updateFixture);
+    const publicFromDb = nonPrivateFields(
+      primary.schema,
+      refreshed.item_state as Record<string, unknown>,
+    );
+    expect(publicFromDb).toEqual(publicFromFixture);
   });
 
-  it('network_service inserts an additional item for the same user (provider/job_posting_1.0); item count goes up by 1', async () => {
+  it('network_service inserts an additional item for the same user (secondary served-domain binding); item count goes up by 1', async (ctx) => {
+    if (secondary === null) {
+      ctx.skip();
+      return;
+    }
+
     const before = await db
       .select()
       .from(itemsTable)
       .where(eq(itemsTable.created_by, canonical_user_id));
 
+    const secondaryFixture = generateMinimalItemState(secondary.schema);
     const res = await app.inject({
       method: 'POST',
       url: '/api/v1/admin/participant',
@@ -416,19 +447,10 @@ describeIf(`POST /api/v1/admin/participant (integration)${
         terms_accepted: true,
         privacy_accepted: true,
         channel: 'bulk',
-        network: 'blue_dot',
-        domain: 'provider',
-        item_type: 'job_posting_1.0',
-        item_state: {
-          jobProviderName: 'Acme Integration',
-          jobProviderLocation: 'Bangalore',
-          hiringManagerName: 'Alice Int',
-          hiringManagerPhoneNumber: '9999999900',
-          hiringManagerEmail: 'alice@acme.integration.test',
-          role: 'Engineer',
-          positions: 1,
-          natureOfJob: 'Full-time',
-        },
+        network: secondary.network,
+        domain: secondary.domain,
+        item_type: secondary.item_type,
+        item_state: secondaryFixture,
       },
     });
     expect(res.statusCode).toBe(200);
@@ -441,6 +463,7 @@ describeIf(`POST /api/v1/admin/participant (integration)${
   });
 
   it("agg_B trying to read agg_A's user gets user_existed=true but items: []", async () => {
+    const probeFixture = generateMinimalItemState(primary.schema);
     const res = await app.inject({
       method: 'POST',
       url: '/api/v1/admin/participant',
@@ -455,13 +478,10 @@ describeIf(`POST /api/v1/admin/participant (integration)${
         terms_accepted: true,
         privacy_accepted: true,
         channel: 'bulk',
-        item_state: {
-          name: 'noop',
-          phone: '9999099999',
-          gender: 'female',
-          location: 'Bangalore',
-          age: 22,
-        },
+        network: primary.network,
+        domain: primary.domain,
+        item_type: primary.item_type,
+        item_state: probeFixture,
       },
     });
     expect(res.statusCode).toBe(200);
@@ -475,6 +495,7 @@ describeIf(`POST /api/v1/admin/participant (integration)${
     // Seed a second user via agg_A so we have an item owned by someone
     // other than the canonical user.
     const other_email = `int_c_${randomUUID().slice(0, 6)}@b.test`;
+    const seedFixture = generateMinimalItemState(primary.schema);
     const seed = await app.inject({
       method: 'POST',
       url: '/api/v1/admin/participant',
@@ -489,13 +510,10 @@ describeIf(`POST /api/v1/admin/participant (integration)${
         terms_accepted: true,
         privacy_accepted: true,
         channel: 'bulk',
-        item_state: {
-          name: 'Other Int C',
-          phone: '9999090909',
-          gender: 'female',
-          location: 'Bangalore',
-          age: 22,
-        },
+        network: primary.network,
+        domain: primary.domain,
+        item_type: primary.item_type,
+        item_state: seedFixture,
       },
     });
     expect(seed.statusCode).toBe(200);
@@ -524,6 +542,7 @@ describeIf(`POST /api/v1/admin/participant (integration)${
       .where(eq(itemsTable.item_id, other_item_id))
       .limit(1);
 
+    const badFixture = generateMinimalItemState(primary.schema);
     const res = await app.inject({
       method: 'POST',
       url: '/api/v1/admin/participant',
@@ -538,13 +557,10 @@ describeIf(`POST /api/v1/admin/participant (integration)${
         terms_accepted: true,
         privacy_accepted: true,
         channel: 'bulk',
-        item_state: {
-          name: 'should not be written',
-          phone: '9999088888',
-          gender: 'female',
-          location: 'Bangalore',
-          age: 22,
-        },
+        network: primary.network,
+        domain: primary.domain,
+        item_type: primary.item_type,
+        item_state: badFixture,
         item_id: other_item_id, // belongs to the OTHER user
       },
     });
@@ -562,7 +578,7 @@ describeIf(`POST /api/v1/admin/participant (integration)${
       .where(eq(itemsTable.created_by, canonical_user_id));
     expect(after_canonical.length).toBe(before_canonical.length);
 
-    // Other user's item likewise untouched (state unchanged).
+    // Other user's item likewise untouched (full state equality check).
     const [after_other] = await db
       .select({
         item_id: itemsTable.item_id,
@@ -573,8 +589,6 @@ describeIf(`POST /api/v1/admin/participant (integration)${
       .where(eq(itemsTable.item_id, other_item_id))
       .limit(1);
     expect(after_other).toBeTruthy();
-    expect(
-      (after_other.item_state as Record<string, unknown>).name,
-    ).toBe((before_other[0].item_state as Record<string, unknown>).name);
+    expect(after_other.item_state).toEqual(before_other[0].item_state);
   });
 });

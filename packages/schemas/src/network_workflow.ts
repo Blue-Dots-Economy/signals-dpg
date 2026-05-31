@@ -119,7 +119,9 @@ const MetricCategoriesSchema = z.object({
   cancel: z.array(z.string().min(1)).optional().default([]),
 }).strict();
 
-const NetworkActionInteractionSchema = z
+const ConsentTextSchema = z.string().trim().min(1).max(500);
+
+export const NetworkActionInteractionSchema = z
   .object({
     from_network: z.string().min(1).optional(),
     from_domain: z.string().min(1),
@@ -131,6 +133,8 @@ const NetworkActionInteractionSchema = z
     event_schema: JsonSchemaDocumentSchema.optional(),
     metric_categories: MetricCategoriesSchema.nullable().optional(),
     reveals_pii_on_status: z.array(z.string().min(1)).optional().default([]),
+    consent_text_initiator: ConsentTextSchema.optional(),
+    consent_text_receiver: ConsentTextSchema.optional(),
   })
   .superRefine((interaction, ctx) => {
     if (interaction.reveals_pii_on_status.length === 0) return;
@@ -263,6 +267,90 @@ export type NetworkConfigDocument = z.infer<typeof NetworkConfigSchema>;
 export type NetworkActionInteraction = z.infer<
   typeof NetworkActionInteractionSchema
 >;
+
+/** A directional edge (network/domain → network/domain) of an interaction. */
+export interface MetricCategoryEdge {
+  from_network: string;
+  from_domain: string;
+  to_network: string;
+  to_domain: string;
+}
+
+/**
+ * One asymmetry: a tracked interaction whose mirror-direction interaction
+ * exists in the same action but is NOT tracked. The recompute pipeline
+ * silently drops actions performed in the untracked direction (their
+ * counts never reach item_metrics), so this is almost always a config bug.
+ */
+export interface MetricCategoryAsymmetry {
+  action_type: string;
+  tracked: MetricCategoryEdge;
+  untracked: MetricCategoryEdge;
+}
+
+/**
+ * An interaction is "tracked" iff its metric_categories is present AND at
+ * least one canonical bucket has entries. Mirrors the runtime contract in
+ * apps/api/.../metric_categories.ts (`normalize` returns null when empty),
+ * so this lint matches exactly which interactions the recompute aggregates.
+ */
+function isMetricTracked(
+  metric_categories: NetworkActionInteraction['metric_categories'],
+): boolean {
+  if (!metric_categories) return false;
+  return CANONICAL_BUCKETS.some(
+    (bucket) => (metric_categories[bucket]?.length ?? 0) > 0,
+  );
+}
+
+const edgeOf = (
+  networkId: string,
+  interaction: NetworkActionInteraction,
+): MetricCategoryEdge => ({
+  from_network: interaction.from_network ?? networkId,
+  from_domain: interaction.from_domain,
+  to_network: interaction.to_network ?? networkId,
+  to_domain: interaction.to_domain,
+});
+
+const isReverseEdge = (a: MetricCategoryEdge, b: MetricCategoryEdge): boolean =>
+  a.from_network === b.to_network &&
+  a.from_domain === b.to_domain &&
+  a.to_network === b.from_network &&
+  a.to_domain === b.from_domain;
+
+/**
+ * Detects metric_categories asymmetries: within a single action, a tracked
+ * interaction whose reverse-direction interaction exists but is untracked.
+ *
+ * Returns one entry per offending (tracked, untracked) pair. An empty array
+ * means every tracked interaction either has no reverse edge (one-directional
+ * by design) or a reverse edge that is also tracked.
+ */
+export function findMetricCategoryAsymmetries(
+  config: NetworkConfigDocument,
+): MetricCategoryAsymmetry[] {
+  const out: MetricCategoryAsymmetry[] = [];
+  for (const [action_type, action] of Object.entries(config.actions)) {
+    for (const tracked of action.interactions) {
+      if (!isMetricTracked(tracked.metric_categories)) continue;
+      const trackedEdge = edgeOf(config.id, tracked);
+
+      for (const reverse of action.interactions) {
+        if (reverse === tracked) continue;
+        const reverseEdge = edgeOf(config.id, reverse);
+        if (!isReverseEdge(trackedEdge, reverseEdge)) continue;
+        if (isMetricTracked(reverse.metric_categories)) continue;
+        out.push({
+          action_type,
+          tracked: trackedEdge,
+          untracked: reverseEdge,
+        });
+      }
+    }
+  }
+  return out;
+}
 
 export function parseNetworkConfigDocument(
   input: unknown

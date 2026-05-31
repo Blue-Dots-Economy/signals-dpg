@@ -351,6 +351,76 @@ describe('POST /api/v1/action/perform — on-behalf-of', () => {
     expect(fetchCalls).toHaveLength(0); // proxy hop must be skipped
   });
 
+  describe('initiator consent gate', () => {
+    it('403 CONSENT_REQUIRED when interaction declares consent_text_initiator but body has no consent', async () => {
+      const { getActionInteraction } = await import('@dpg/schemas');
+      (getActionInteraction as ReturnType<typeof vi.fn>).mockReturnValueOnce({
+        requirement_schema: {
+          type: 'object',
+          properties: {},
+          additionalProperties: true,
+        },
+        consent_text_initiator: 'I agree to share my PII.',
+      });
+      const app = buildApp(undefined, { id: 'usr_agg_owned' });
+      const res = await app.inject({
+        method: 'POST',
+        url: '/perform',
+        payload: VALID_BODY, // no consent field
+      });
+      expect(res.statusCode).toBe(403);
+      expect(res.json()).toMatchObject({ error: 'CONSENT_REQUIRED' });
+      expect(fetchCalls).toHaveLength(0);
+    });
+
+    it('forwards consent block to /network/action/perform when supplied', async () => {
+      const { getActionInteraction } = await import('@dpg/schemas');
+      (getActionInteraction as ReturnType<typeof vi.fn>).mockReturnValueOnce({
+        requirement_schema: {
+          type: 'object',
+          properties: {},
+          additionalProperties: true,
+        },
+        consent_text_initiator: 'I agree.',
+      });
+      const app = buildApp(undefined, { id: 'usr_agg_owned' });
+      const res = await app.inject({
+        method: 'POST',
+        url: '/perform',
+        payload: {
+          ...VALID_BODY,
+          consent: { acknowledged: true, text: 'I agree.' },
+        },
+      });
+      expect(res.statusCode).toBe(201);
+      expect(fetchCalls).toHaveLength(1);
+      expect(fetchCalls[0].body.consent).toEqual({
+        acknowledged: true,
+        text: 'I agree.',
+      });
+    });
+
+    it('does NOT gate when interaction has no consent_text_initiator (back-compat)', async () => {
+      const { getActionInteraction } = await import('@dpg/schemas');
+      (getActionInteraction as ReturnType<typeof vi.fn>).mockReturnValueOnce({
+        requirement_schema: {
+          type: 'object',
+          properties: {},
+          additionalProperties: true,
+        },
+        consent_text_initiator: undefined,
+      });
+      const app = buildApp(undefined, { id: 'usr_agg_owned' });
+      const res = await app.inject({
+        method: 'POST',
+        url: '/perform',
+        payload: VALID_BODY, // no consent field
+      });
+      expect(res.statusCode).toBe(201);
+      expect(fetchCalls).toHaveLength(1);
+    });
+  });
+
   describe('network_service tier', () => {
     it('network_service on-behalf-of: 200 when acting for any user in the network', async () => {
       dbState.userRows = [

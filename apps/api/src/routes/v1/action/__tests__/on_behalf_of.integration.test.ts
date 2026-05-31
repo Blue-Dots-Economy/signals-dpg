@@ -22,23 +22,26 @@
  *     because (a) the default seed only mints `network_service` orgs and
  *     (b) we need TWO distinct aggregator orgs to drive the 403
  *     NOT_AUTHORIZED_FOR_TARGET case;
+ *   - resolves served-domain bindings from apiConfig so the suite works
+ *     against any network configured via SERVED_DOMAINS (purple_dot,
+ *     blue_dot, etc.) without hardcoding network/domain/item_type;
  *   - onboards a seeker user via /admin/participant as aggregator
- *     A so the source profile item exists and is attributed to A;
- *   - onboards a provider user (job_posting_1.0) via the same route so a
- *     target item exists in the same DB. The provider user is owned by
- *     aggregator A too — irrelevant for the action flow because the
- *     action checks source ownership, not target ownership;
+ *     A so the source item exists and is attributed to A;
+ *   - onboards a provider user via the same route so a target item exists
+ *     in the same DB. The provider user is owned by aggregator A too —
+ *     irrelevant for the action flow because the action checks source
+ *     ownership, not target ownership;
  *   - boots Fastify on the env-configured API_PORT (default 2742) so the
  *     loopback fetch inside /action/perform → /network/action/perform
- *     lands back on this same instance (the network config pins the
- *     blue_dot seeker/provider instances to http://localhost:2742, so we
- *     can't run the test on a random port).
+ *     lands back on this same instance.
  *
  * Cleanup: afterAll deletes the seeded users (cascades wipe member /
  * apikey / items / item_actions rows via FKs) and the two aggregator orgs.
  *
  * Skip conditions: if POSTGRES_URL/POSTGRES_USER are unset (e.g. CI box
  * without a DB) the suite is described as `.skip` so the run stays green.
+ * If SERVED_DOMAINS only provides one binding (seeker OR provider but not
+ * both), beforeAll throws a descriptive error.
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
@@ -50,6 +53,13 @@ import {
 } from 'fastify-type-provider-zod';
 import { and, eq, inArray } from 'drizzle-orm';
 import { randomUUID, randomBytes, createHash } from 'node:crypto';
+import {
+  generateMinimalItemState,
+  resolveBindings,
+  resolveInteractionConsent,
+  consentAck,
+  type ResolvedBinding,
+} from '../../__tests__/integration_helpers';
 
 const pg_url = process.env.POSTGRES_URL ?? process.env.POSTGRES_USER;
 const can_run = Boolean(pg_url);
@@ -69,8 +79,9 @@ describeIf(`POST /action/perform on-behalf-of (integration)${
   let itemActionsTable: typeof import('@dpg/database').item_actions;
 
   // The Fastify instance must listen on the port the network config
-  // declares for blue_dot, otherwise INVALID_TARGET_INSTANCE fires. The
-  // env defaults match this (API_DOMAIN=http://localhost, API_PORT=2742).
+  // declares for the served domain, otherwise INVALID_TARGET_INSTANCE
+  // fires. The env defaults match this (API_DOMAIN=http://localhost,
+  // API_PORT=2742).
   const listen_port = Number(process.env.API_PORT ?? 2742);
   const base_url = `http://localhost:${listen_port}`;
 
@@ -115,8 +126,17 @@ describeIf(`POST /action/perform on-behalf-of (integration)${
   const seeded_participant_ids: string[] = [];
   let seeker_user_id: string;
   let seeker_item_id: string;
-  let provider_user_id: string;
   let provider_item_id: string;
+  let provider_user_id: string;
+
+  // Resolved at beforeAll from apiConfig — drives all network/domain/item_type
+  // values so the suite works against any SERVED_DOMAINS configuration.
+  let primary: ResolvedBinding;   // seeker binding
+  let secondary: ResolvedBinding; // provider binding
+
+  // Consent text resolved from the interaction config (may be undefined for
+  // networks without consent requirements).
+  let initiator_consent: { acknowledged: true; text: string } | undefined;
 
   beforeAll(async () => {
     // Lazy-imported so a CI box without a live DB doesn't blow up on
@@ -129,6 +149,37 @@ describeIf(`POST /action/perform on-behalf-of (integration)${
     itemsTable = database_pkg.items;
     itemActionsTable = database_pkg.item_actions;
 
+    // Resolve primary (seeker) and secondary (provider) bindings from the
+    // configured SERVED_DOMAINS. Throws loudly if fewer than two distinct
+    // bindings are served — the suite needs both a source and a target item.
+    const resolved = await resolveBindings();
+    if (resolved.secondary === null) {
+      throw new Error(
+        'on_behalf_of integration suite requires two served-domain bindings ' +
+        '(a source/seeker domain and a target/provider domain). ' +
+        'Set SERVED_DOMAINS to include two distinct network/domain pairs, ' +
+        `e.g. "purple_dot/seeker,purple_dot/provider". ` +
+        `Currently only one binding is served: ${resolved.primary.network}/${resolved.primary.domain}.`,
+      );
+    }
+    primary = resolved.primary;
+    secondary = resolved.secondary;
+
+    // Resolve consent text for the action interaction between primary and
+    // secondary. consentAck returns undefined when no consent_text_initiator
+    // is declared, so it spreads safely as a no-op for networks without
+    // consent requirements.
+    const consentInfo = await resolveInteractionConsent({
+      actionType: 'connect',
+      fromNetwork: primary.network,
+      fromDomain: primary.domain,
+      fromItemType: primary.item_type,
+      toNetwork: secondary.network,
+      toDomain: secondary.domain,
+      toItemType: secondary.item_type,
+    });
+    initiator_consent = consentAck(consentInfo?.consent_text_initiator);
+
     const { admin_routes } = await import('../../admin/admin_routes.js');
     const action_routes_mod = await import('../action_routes.js');
     const network_routes_mod = await import('../../network/network_routes.js');
@@ -140,7 +191,7 @@ describeIf(`POST /action/perform on-behalf-of (integration)${
     // preHandler chain. /action/perform internally proxies to
     // /network/action/perform via HTTP fetch — both must be reachable
     // on the listening port that matches the network config's
-    // instance_url for blue_dot.
+    // instance_url for the served network.
     await app.register(admin_routes, { prefix: '/api/v1/admin' });
     await app.register(action_routes_mod.default, { prefix: '/api/v1/action' });
     await app.register(network_routes_mod.default, { prefix: '/api/v1/network' });
@@ -211,9 +262,10 @@ describeIf(`POST /action/perform on-behalf-of (integration)${
       });
     }
 
-    // Onboard the seeker participant as aggregator A. The route writes
-    // user.onboarded_by_org_id = agg_a.org_id and creates the
-    // profile_1.0 source item owned by the new participant.
+    // Onboard the seeker participant as aggregator A using the primary
+    // binding resolved from SERVED_DOMAINS. generateMinimalItemState
+    // builds a valid fixture from the JSON schema so no hardcoded
+    // network-specific fields are needed.
     const seekerRes = await app.inject({
       method: 'POST',
       url: '/api/v1/admin/participant',
@@ -231,16 +283,10 @@ describeIf(`POST /action/perform on-behalf-of (integration)${
         privacy_accepted: true,
         channel: 'voice',
         source_id: `integration_obo_${Date.now()}`,
-        network: 'blue_dot',
-        domain: 'seeker',
-        item_type: 'profile_1.0',
-        item_state: {
-          name: 'Integration Seeker',
-          gender: 'female',
-          location: 'Bangalore',
-          phone: '9920000001',
-          age: 24,
-        },
+        network: primary.network,
+        domain: primary.domain,
+        item_type: primary.item_type,
+        item_state: generateMinimalItemState(primary.schema),
       },
     });
     if (seekerRes.statusCode !== 200) {
@@ -254,10 +300,9 @@ describeIf(`POST /action/perform on-behalf-of (integration)${
     expect(seekerBody.user_existed).toBe(false);
     seeded_participant_ids.push(seeker_user_id);
 
-    // Onboard a provider participant the same way to get a target
-    // job_posting_1.0 item. The action flow only checks source
-    // ownership, so the provider's attribution org is irrelevant — we
-    // reuse agg_a so cleanup is trivial.
+    // Onboard a provider participant the same way to get a target item.
+    // The action flow only checks source ownership, so the provider's
+    // attribution org is irrelevant — we reuse agg_a so cleanup is trivial.
     const providerRes = await app.inject({
       method: 'POST',
       url: '/api/v1/admin/participant',
@@ -275,19 +320,10 @@ describeIf(`POST /action/perform on-behalf-of (integration)${
         privacy_accepted: true,
         channel: 'voice',
         source_id: `integration_obo_provider_${Date.now()}`,
-        network: 'blue_dot',
-        domain: 'provider',
-        item_type: 'job_posting_1.0',
-        item_state: {
-          jobProviderName: 'Integration Co',
-          jobProviderLocation: 'Bangalore',
-          hiringManagerName: 'Integration HM',
-          hiringManagerPhoneNumber: '9999999999',
-          hiringManagerEmail: 'hm@integration.local',
-          role: 'Helper',
-          positions: 1,
-          natureOfJob: 'Full-time',
-        },
+        network: secondary.network,
+        domain: secondary.domain,
+        item_type: secondary.item_type,
+        item_state: generateMinimalItemState(secondary.schema),
       },
     });
     if (providerRes.statusCode !== 200) {
@@ -358,26 +394,23 @@ describeIf(`POST /action/perform on-behalf-of (integration)${
         'content-type': 'application/json',
       },
       payload: {
-        action_type: 'apply',
+        action_type: 'connect',
         source_item: {
-          item_network: 'blue_dot',
-          item_domain: 'seeker',
-          item_type: 'profile_1.0',
+          item_network: primary.network,
+          item_domain: primary.domain,
+          item_type: primary.item_type,
           item_id: seeker_item_id,
         },
         target_item: {
-          item_network: 'blue_dot',
-          item_domain: 'provider',
-          item_type: 'job_posting_1.0',
+          item_network: secondary.network,
+          item_domain: secondary.domain,
+          item_type: secondary.item_type,
           item_id: provider_item_id,
           item_instance_url: base_url,
         },
-        requirements_snapshot: {
-          role: 'Helper',
-          age: 24,
-          workExperience: 'Fresher',
-        },
+        requirements_snapshot: {},
         acting_as_user_id: seeker_user_id,
+        ...(initiator_consent !== undefined ? { consent: initiator_consent } : {}),
       },
     });
     expect(res.statusCode).toBe(201);
@@ -400,8 +433,8 @@ describeIf(`POST /action/perform on-behalf-of (integration)${
       .from(itemActionsTable)
       .where(
         and(
-          eq(itemActionsTable.partition_network, 'blue_dot'),
-          eq(itemActionsTable.action_type, 'apply'),
+          eq(itemActionsTable.partition_network, primary.network),
+          eq(itemActionsTable.action_type, 'connect'),
           eq(itemActionsTable.action_id, body.action_id),
         ),
       )
@@ -422,26 +455,23 @@ describeIf(`POST /action/perform on-behalf-of (integration)${
         'content-type': 'application/json',
       },
       payload: {
-        action_type: 'apply',
+        action_type: 'connect',
         source_item: {
-          item_network: 'blue_dot',
-          item_domain: 'seeker',
-          item_type: 'profile_1.0',
+          item_network: primary.network,
+          item_domain: primary.domain,
+          item_type: primary.item_type,
           item_id: seeker_item_id,
         },
         target_item: {
-          item_network: 'blue_dot',
-          item_domain: 'provider',
-          item_type: 'job_posting_1.0',
+          item_network: secondary.network,
+          item_domain: secondary.domain,
+          item_type: secondary.item_type,
           item_id: provider_item_id,
           item_instance_url: base_url,
         },
-        requirements_snapshot: {
-          role: 'Helper',
-          age: 24,
-          workExperience: 'Fresher',
-        },
+        requirements_snapshot: {},
         acting_as_user_id: seeker_user_id,
+        ...(initiator_consent !== undefined ? { consent: initiator_consent } : {}),
       },
     });
     expect(res.statusCode).toBe(403);
@@ -461,26 +491,23 @@ describeIf(`POST /action/perform on-behalf-of (integration)${
         'content-type': 'application/json',
       },
       payload: {
-        action_type: 'apply',
+        action_type: 'connect',
         source_item: {
-          item_network: 'blue_dot',
-          item_domain: 'seeker',
-          item_type: 'profile_1.0',
+          item_network: primary.network,
+          item_domain: primary.domain,
+          item_type: primary.item_type,
           item_id: seeker_item_id,
         },
         target_item: {
-          item_network: 'blue_dot',
-          item_domain: 'provider',
-          item_type: 'job_posting_1.0',
+          item_network: secondary.network,
+          item_domain: secondary.domain,
+          item_type: secondary.item_type,
           item_id: provider_item_id,
           item_instance_url: base_url,
         },
-        requirements_snapshot: {
-          role: 'Helper',
-          age: 24,
-          workExperience: 'Fresher',
-        },
+        requirements_snapshot: {},
         acting_as_user_id: seeker_user_id,
+        ...(initiator_consent !== undefined ? { consent: initiator_consent } : {}),
       },
     });
     expect(res.statusCode).toBe(201);
@@ -496,8 +523,8 @@ describeIf(`POST /action/perform on-behalf-of (integration)${
       .from(itemActionsTable)
       .where(
         and(
-          eq(itemActionsTable.partition_network, 'blue_dot'),
-          eq(itemActionsTable.action_type, 'apply'),
+          eq(itemActionsTable.partition_network, primary.network),
+          eq(itemActionsTable.action_type, 'connect'),
           eq(itemActionsTable.action_id, action_id),
         ),
       )
@@ -519,26 +546,23 @@ describeIf(`POST /action/perform on-behalf-of (integration)${
         'content-type': 'application/json',
       },
       payload: {
-        action_type: 'apply',
+        action_type: 'connect',
         source_item: {
-          item_network: 'blue_dot',
-          item_domain: 'seeker',
-          item_type: 'profile_1.0',
+          item_network: primary.network,
+          item_domain: primary.domain,
+          item_type: primary.item_type,
           item_id: seeker_item_id,
         },
         target_item: {
-          item_network: 'blue_dot',
-          item_domain: 'provider',
-          item_type: 'job_posting_1.0',
+          item_network: secondary.network,
+          item_domain: secondary.domain,
+          item_type: secondary.item_type,
           item_id: provider_item_id,
           item_instance_url: base_url,
         },
-        requirements_snapshot: {
-          role: 'Helper',
-          age: 24,
-          workExperience: 'Fresher',
-        },
+        requirements_snapshot: {},
         acting_as_user_id: fakeUserId,
+        ...(initiator_consent !== undefined ? { consent: initiator_consent } : {}),
       },
     });
     expect(res.statusCode).toBe(404);

@@ -162,7 +162,7 @@ vi.mock('@dpg/schemas', async () => {
     await vi.importActual<typeof import('@dpg/schemas')>('@dpg/schemas');
   return {
     ...actual,
-    getActionInteraction: vi.fn(() => ({ event_schema: {} })),
+    getActionInteraction: vi.fn(() => ({ event_schema: {}, reveals_pii_on_status: [] })),
   };
 });
 
@@ -287,5 +287,110 @@ describe('POST /api/v1/action/update-status (self-acted only)', () => {
     });
     expect(res.statusCode).toBe(200);
     expect(dbState.updates).toHaveLength(1);
+  });
+
+  describe('receiver consent gate', () => {
+    it('403 CONSENT_REQUIRED when status is in reveals_pii_on_status, consent_text_receiver declared, but body has no consent', async () => {
+      const { getActionInteraction } = await import('@dpg/schemas');
+      (getActionInteraction as ReturnType<typeof vi.fn>).mockReturnValueOnce({
+        event_schema: {},
+        reveals_pii_on_status: ['accepted'],
+        consent_text_receiver: 'I agree to share my PII.',
+      });
+      const app = buildApp(undefined, { id: 'usr_agg_owned' });
+      const res = await app.inject({
+        method: 'POST',
+        url: '/update-status',
+        payload: {
+          action_id: EXISTING_ACTION.action_id,
+          action_status: 'accepted',
+        },
+      });
+      expect(res.statusCode).toBe(403);
+      expect(res.json()).toMatchObject({ error: 'CONSENT_REQUIRED' });
+      expect(dbState.updates).toHaveLength(0);
+    });
+
+    it('200 when status is NOT in reveals_pii_on_status (rejected does not need consent)', async () => {
+      const { getActionInteraction } = await import('@dpg/schemas');
+      (getActionInteraction as ReturnType<typeof vi.fn>).mockReturnValueOnce({
+        event_schema: {},
+        reveals_pii_on_status: ['accepted'],
+        consent_text_receiver: 'I agree to share my PII.',
+      });
+      const app = buildApp(undefined, { id: 'usr_agg_owned' });
+      const res = await app.inject({
+        method: 'POST',
+        url: '/update-status',
+        payload: {
+          action_id: EXISTING_ACTION.action_id,
+          action_status: 'rejected',
+          remarks: 'not a fit',
+        },
+      });
+      expect(res.statusCode).toBe(200);
+      expect(dbState.updates).toHaveLength(1);
+    });
+
+    it('200 when consent and remarks both provided on an accepted action', async () => {
+      const { getActionInteraction } = await import('@dpg/schemas');
+      (getActionInteraction as ReturnType<typeof vi.fn>).mockReturnValueOnce({
+        event_schema: {},
+        reveals_pii_on_status: ['accepted'],
+        consent_text_receiver: 'I agree to share my PII.',
+      });
+      const { buildActionEventPayload } = await import(
+        '@/utils/action_event_runtime'
+      );
+      const buildSpy = buildActionEventPayload as ReturnType<typeof vi.fn>;
+      buildSpy.mockReturnValueOnce({
+        status: 'accepted',
+        remark: 'looking forward',
+        consent: {
+          acknowledged: true,
+          text: 'I agree.',
+          consented_at: '2026-01-01T00:00:00.000Z',
+        },
+      });
+      const app = buildApp(undefined, { id: 'usr_agg_owned' });
+      const res = await app.inject({
+        method: 'POST',
+        url: '/update-status',
+        payload: {
+          action_id: EXISTING_ACTION.action_id,
+          action_status: 'accepted',
+          remarks: 'looking forward',
+          consent: { acknowledged: true, text: 'I agree.' },
+        },
+      });
+      expect(res.statusCode).toBe(200);
+      // Verify buildActionEventPayload was called with consent
+      expect(buildSpy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          consent: { acknowledged: true, text: 'I agree.' },
+          remarks: 'looking forward',
+        }),
+      );
+    });
+
+    it('200 back-compat — does NOT gate when interaction has no consent_text_receiver', async () => {
+      const { getActionInteraction } = await import('@dpg/schemas');
+      (getActionInteraction as ReturnType<typeof vi.fn>).mockReturnValueOnce({
+        event_schema: {},
+        reveals_pii_on_status: ['accepted'],
+        // no consent_text_receiver
+      });
+      const app = buildApp(undefined, { id: 'usr_agg_owned' });
+      const res = await app.inject({
+        method: 'POST',
+        url: '/update-status',
+        payload: {
+          action_id: EXISTING_ACTION.action_id,
+          action_status: 'accepted',
+        },
+      });
+      expect(res.statusCode).toBe(200);
+      expect(dbState.updates).toHaveLength(1);
+    });
   });
 });

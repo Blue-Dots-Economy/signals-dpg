@@ -24,7 +24,7 @@ export type ActionEventPayloadContext = {
   requirements_snapshot: Record<string, unknown>;
 };
 
-const actionEventSystemPayloadKeys = ['status', 'remark'] as const;
+const actionEventSystemPayloadKeys = ['status', 'remark', 'consent'] as const;
 
 export function normalizeInstanceUrl(url: string) {
   const parsedUrl = new URL(url);
@@ -202,11 +202,21 @@ export function buildActionEventPayload(input: {
   action_status: string;
   remarks?: string | null;
   context: ActionEventPayloadContext;
+  consent?: { acknowledged: true; text: string };
 }): Record<string, unknown> {
-  return {
+  const base = {
     ...projectEventPayloadFromSchema(input.event_schema, input.context),
     status: input.action_status,
     remark: input.remarks ?? defaultActionEventRemark(input.action_status),
+  };
+  if (!input.consent) return base;
+  return {
+    ...base,
+    consent: {
+      acknowledged: input.consent.acknowledged,
+      text: input.consent.text,
+      consented_at: new Date().toISOString(),
+    },
   };
 }
 

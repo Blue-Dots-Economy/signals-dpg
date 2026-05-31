@@ -18,12 +18,22 @@ export const ActionItemRefWithInstanceSchema = ActionItemRefSchema.extend({
   item_instance_url: z.url(),
 });
 
+export const ConsentAckSchema = z
+  .object({
+    acknowledged: z.literal(true),
+    text: z.string().trim().min(1).max(500),
+  })
+  .strict();
+
+export type ConsentAck = z.infer<typeof ConsentAckSchema>;
+
 export const PerformActionBodySchema = z.object({
   action_type: z.string().min(1),
   source_item: ActionItemRefSchema,
   target_item: ActionTargetItemRefSchema,
   requirements_snapshot: z.record(z.string(), z.unknown()),
   acting_as_user_id: z.string().min(1).optional(),
+  consent: ConsentAckSchema.optional(),
 });
 
 export const PerformNetworkActionBodySchema = z.object({
@@ -34,12 +44,14 @@ export const PerformNetworkActionBodySchema = z.object({
   requirements_snapshot: z.record(z.string(), z.unknown()),
   performed_by_org_id: z.string().min(1).nullable().optional(),
   performed_by_service_user_id: z.string().min(1).nullable().optional(),
+  consent: ConsentAckSchema.optional(),
 });
 
 export const UpdateActionStatusBodySchema = z.object({
   action_id: z.uuid(),
   action_status: z.string().min(1),
   remarks: z.string().min(1).optional(),
+  consent: ConsentAckSchema.optional(),
 });
 
 export const StoreEventBodySchema = z.object({
@@ -84,6 +96,12 @@ export const ActionEventSelectSchema = createSelectSchema(action_events);
 
 export const OwnedItemActionSchema = ItemActionSelectSchema.extend({
   ownership_roles: ActionOwnershipTagSchema.array().min(1),
+  // Human-readable names resolved from each item's display_name_field
+  // (falls back to the item_id when the schema declares none or the value
+  // is missing). Lets the UI show "You → Mobility World India" instead of
+  // raw ids.
+  source_item_name: z.string().nullable().optional(),
+  target_item_name: z.string().nullable().optional(),
 });
 
 export const OwnedActionEventSchema = ActionEventSelectSchema.extend({

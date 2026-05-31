@@ -6,4 +6,9 @@ export default defineConfig({
     environment: 'node',
     globals: false,
   },
+  resolve: {
+    alias: {
+      '@dpg/database': new URL('../../packages/database/src', import.meta.url).pathname,
+    },
+  },
 });
