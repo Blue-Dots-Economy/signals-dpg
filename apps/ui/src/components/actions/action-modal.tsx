@@ -1,10 +1,12 @@
 import * as React from 'react';
+import { useState } from 'react';
 import type { RJSFSchema } from '@rjsf/utils';
 import type { DotActionSchema } from '@/engine/types';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { SchemaForm } from '@/components/forms/schema-form';
 import { resolveRefs } from '@/engine/schema/resolve-schema';
 import { ActionModalHeader } from './action-modal-header';
+import { ConsentCheckbox } from './consent-checkbox';
 import { getActionDisplay } from '@/lib/action-display';
 import { cn } from '@/lib/utils';
 
@@ -49,6 +51,8 @@ export function ActionModal({
 }: ActionModalProps) {
   const isMobile = useIsMobile();
   const [resolvedSchema, setResolvedSchema] = React.useState<RJSFSchema | null>(null);
+  const consentText = (actionSchema.consent_text_initiator ?? '').trim();
+  const [consentChecked, setConsentChecked] = useState(false);
 
   React.useEffect(() => {
     if (!open) return;
@@ -68,25 +72,50 @@ export function ActionModal({
     }
   }, [open, actionSchema]);
 
-  const formContent = resolvedSchema ? (
-    <SchemaForm
-      id={ACTION_FORM_ID}
-      schema={resolvedSchema}
-      hideSubmit
-      onSubmit={onSubmit}
-    />
-  ) : (
-    <p className="text-muted-foreground text-sm">No additional information required.</p>
+  const handleSubmit = (formData: Record<string, unknown>) => {
+    const payload: Record<string, unknown> = { ...formData };
+    if (consentText && consentChecked) {
+      payload.__consent = { acknowledged: true as const, text: consentText };
+    }
+    onSubmit(payload);
+  };
+
+  const formContent = (
+    <>
+      {resolvedSchema ? (
+        <SchemaForm
+          id={ACTION_FORM_ID}
+          schema={resolvedSchema}
+          hideSubmit
+          onSubmit={handleSubmit}
+        />
+      ) : (
+        <p className="text-muted-foreground text-sm">No additional information required.</p>
+      )}
+      {consentText && (
+        <ConsentCheckbox
+          text={consentText}
+          checked={consentChecked}
+          onCheckedChange={setConsentChecked}
+        />
+      )}
+    </>
   );
+
+  const consentGate = consentText !== '' && !consentChecked;
 
   const confirmButtonProps = resolvedSchema
     ? { type: 'submit' as const, form: ACTION_FORM_ID }
-    : { type: 'button' as const, onClick: () => onSubmit({}) };
+    : { type: 'button' as const, onClick: () => handleSubmit({}) };
 
   const actionKey = actionSchema.action_type ?? 'connect';
   const display = getActionDisplay(actionKey);
   const actionTitle = display.label;
-  const subtitle = ACTION_SUBTITLES[actionKey.toLowerCase()] ?? `${actionTitle} request`;
+  // When consent text is present the consent card provides the user-facing framing,
+  // so the generic subtitle is suppressed to avoid redundancy.
+  const subtitle = consentText
+    ? undefined
+    : (ACTION_SUBTITLES[actionKey.toLowerCase()] ?? `${actionTitle} request`);
 
   const header = (
     <ActionModalHeader
@@ -109,7 +138,7 @@ export function ActionModal({
       </Button>
       <Button
         {...confirmButtonProps}
-        disabled={loading}
+        disabled={loading || consentGate}
         className={cn('min-w-[120px] font-semibold shadow-sm', display.buttonClass)}
       >
         {loading ? `${actionTitle}ing...` : 'Confirm'}
