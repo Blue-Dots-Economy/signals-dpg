@@ -43,6 +43,13 @@ import {
 } from 'fastify-type-provider-zod';
 import { and, eq, inArray } from 'drizzle-orm';
 import { randomUUID, randomBytes, createHash } from 'node:crypto';
+import {
+  generateMinimalItemState,
+  resolveBindings,
+  resolveInteractionConsent,
+  consentAck,
+  type ResolvedBinding,
+} from '../../__tests__/integration_helpers';
 
 const pg_url = process.env.POSTGRES_URL ?? process.env.POSTGRES_USER;
 const can_run = Boolean(pg_url);
@@ -90,6 +97,10 @@ describeIf(`GET /action/:action_id/contact-details (integration)${
   const bob_apikey_id = `key_${randomUUID()}`;
   const bob_raw_key = `sk_signals_${randomBytes(24).toString('hex')}`;
 
+  // Config-driven binding resolution — populated in beforeAll.
+  let primary: ResolvedBinding;    // seeker
+  let secondary: ResolvedBinding;  // provider
+
   // Populated by /admin/participant + first action call.
   const seeded_participant_ids: string[] = [];
   let alice_user_id: string;
@@ -114,6 +125,19 @@ describeIf(`GET /action/:action_id/contact-details (integration)${
     piiRevealAuditTable = api_schema_mod.pii_reveal_audit;
     itemsTable = database_pkg.items;
     itemActionsTable = database_pkg.item_actions;
+
+    // Resolve network/domain/item_type/schema from the served config so
+    // the suite isn't hardcoded to purple_dot. SERVED_DOMAINS determines
+    // primary (seeker) and secondary (provider) at runtime.
+    const bindings = await resolveBindings();
+    primary = bindings.primary;
+    if (!bindings.secondary) {
+      throw new Error(
+        'get_action_contact_details integration suite requires two served domains ' +
+        '(seeker + provider). Set SERVED_DOMAINS="<network>/seeker,<network>/provider".',
+      );
+    }
+    secondary = bindings.secondary;
 
     const { admin_routes } = await import('../../admin/admin_routes.js');
     const action_routes_mod = await import('../action_routes.js');
@@ -180,10 +204,15 @@ describeIf(`GET /action/:action_id/contact-details (integration)${
       updatedAt: now,
     });
 
-    // Onboard alice as a purple_dot seeker. /admin/participant creates
-    // the user + member row + a profile_1.0 item; the private fields
-    // (beneficiary_name, mobile_number, address) land in
-    // item_private_state per the schema's `private: true` flags.
+    // Onboard alice as a seeker. /admin/participant creates the user +
+    // member row + a profile item; the private fields land in
+    // item_private_state per the schema's `private: true` flags. We
+    // merge the generated minimal state with a known mobile_number so
+    // the assertion later can be exact.
+    const alice_item_state = {
+      ...generateMinimalItemState(primary.schema),
+      mobile_number: alice_private_mobile,
+    };
     const aliceRes = await app.inject({
       method: 'POST',
       url: '/api/v1/admin/participant',
@@ -200,22 +229,10 @@ describeIf(`GET /action/:action_id/contact-details (integration)${
         privacy_accepted: true,
         channel: 'voice',
         source_id: `pii_reveal_alice_${Date.now()}`,
-        network: 'purple_dot',
-        domain: 'seeker',
-        item_type: 'profile_1.0',
-        item_state: {
-          beneficiary_name: 'Alice PII Seeker',
-          mobile_number: alice_private_mobile,
-          age: 30,
-          gender: 'Female',
-          disability_type: ['Locomotor Disability'],
-          disability_percentage: 60,
-          looking_for: ['Assistive Devices'],
-          looking_for_details: 'Wheelchair, assistive device for daily use.',
-          service_city: 'Lucknow',
-          address: '12 Test Lane, Lucknow, Uttar Pradesh',
-          documents_available: ['Aadhaar'],
-        },
+        network: primary.network,
+        domain: primary.domain,
+        item_type: primary.item_type,
+        item_state: alice_item_state,
       },
     });
     if (aliceRes.statusCode !== 200) {
@@ -229,7 +246,12 @@ describeIf(`GET /action/:action_id/contact-details (integration)${
     expect(aliceBody.user_existed).toBe(false);
     seeded_participant_ids.push(alice_user_id);
 
-    // Onboard bob as a purple_dot provider.
+    // Onboard bob as a provider. Merge the generated minimal state with
+    // a known contact_phone so the assertion later can be exact.
+    const bob_item_state = {
+      ...generateMinimalItemState(secondary.schema),
+      contact_phone: bob_private_phone,
+    };
     const bobRes = await app.inject({
       method: 'POST',
       url: '/api/v1/admin/participant',
@@ -246,21 +268,10 @@ describeIf(`GET /action/:action_id/contact-details (integration)${
         privacy_accepted: true,
         channel: 'voice',
         source_id: `pii_reveal_bob_${Date.now()}`,
-        network: 'purple_dot',
-        domain: 'provider',
-        item_type: 'profile_1.0',
-        item_state: {
-          contact_name: 'Bob PII Provider',
-          contact_phone: bob_private_phone,
-          contact_email: 'bob.provider@signals.local',
-          provider_category: 'NGO / Trust',
-          organisation_name: 'Test NGO',
-          disabilities_served: ['Locomotor Disability'],
-          services_offered: ['Assistive Devices'],
-          service_cities: 'Lucknow',
-          official_address: '99 Test Office, Lucknow, Uttar Pradesh',
-          service_details: 'Provides wheelchairs and locomotor aids.',
-        },
+        network: secondary.network,
+        domain: secondary.domain,
+        item_type: secondary.item_type,
+        item_state: bob_item_state,
       },
     });
     if (bobRes.statusCode !== 200) {
@@ -311,7 +322,19 @@ describeIf(`GET /action/:action_id/contact-details (integration)${
 
     // Alice files a `connect` action targeting bob's item — self-acted
     // (no x-acting-org-id header). reveals_pii_on_status=["accepted"]
-    // is declared for seeker→provider in purple_dot/network.json.
+    // is declared for seeker→provider in the network config.
+    // Resolve the interaction's consent text so we can include it in
+    // the request body (required since PR #38 when consent_text_initiator
+    // is declared).
+    const performConsent = await resolveInteractionConsent({
+      actionType: 'connect',
+      fromNetwork: primary.network,
+      fromDomain: primary.domain,
+      fromItemType: primary.item_type,
+      toNetwork: secondary.network,
+      toDomain: secondary.domain,
+      toItemType: secondary.item_type,
+    });
     const performRes = await app.inject({
       method: 'POST',
       url: '/api/v1/action/perform',
@@ -322,23 +345,22 @@ describeIf(`GET /action/:action_id/contact-details (integration)${
       payload: {
         action_type: 'connect',
         source_item: {
-          item_network: 'purple_dot',
-          item_domain: 'seeker',
-          item_type: 'profile_1.0',
+          item_network: primary.network,
+          item_domain: primary.domain,
+          item_type: primary.item_type,
           item_id: alice_item_id,
         },
         target_item: {
-          item_network: 'purple_dot',
-          item_domain: 'provider',
-          item_type: 'profile_1.0',
+          item_network: secondary.network,
+          item_domain: secondary.domain,
+          item_type: secondary.item_type,
           item_id: bob_item_id,
           item_instance_url: base_url,
         },
-        requirements_snapshot: {
-          disability_type: ['Locomotor Disability'],
-          looking_for: ['Assistive Devices'],
-          message: 'Hi, I need a wheelchair.',
-        },
+        requirements_snapshot: {},
+        ...(consentAck(performConsent?.consent_text_initiator) !== undefined
+          ? { consent: consentAck(performConsent?.consent_text_initiator) }
+          : {}),
       },
     });
     if (performRes.statusCode !== 201) {
@@ -349,7 +371,18 @@ describeIf(`GET /action/:action_id/contact-details (integration)${
     action_id = performRes.json().action_id;
 
     // Bob accepts. /update-status enforces target_item_owner = caller,
-    // which matches bob's apikey-resolved user_id.
+    // which matches bob's apikey-resolved user_id. "accepted" is in
+    // reveals_pii_on_status so the route requires consent_text_receiver
+    // acknowledgement (PR #38).
+    const updateConsent = await resolveInteractionConsent({
+      actionType: 'connect',
+      fromNetwork: primary.network,
+      fromDomain: primary.domain,
+      fromItemType: primary.item_type,
+      toNetwork: secondary.network,
+      toDomain: secondary.domain,
+      toItemType: secondary.item_type,
+    });
     const updateRes = await app.inject({
       method: 'POST',
       url: '/api/v1/action/update-status',
@@ -361,6 +394,9 @@ describeIf(`GET /action/:action_id/contact-details (integration)${
         action_id,
         action_status: 'accepted',
         remarks: 'Happy to help.',
+        ...(consentAck(updateConsent?.consent_text_receiver) !== undefined
+          ? { consent: consentAck(updateConsent?.consent_text_receiver) }
+          : {}),
       },
     });
     if (updateRes.statusCode !== 200) {
