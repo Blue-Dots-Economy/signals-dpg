@@ -580,13 +580,24 @@ export function HomePage() {
               throw new Error('Target item not found');
             }
 
+            // Extract consent sentinel placed by ConsentCheckbox inside ActionModal.
+            // __consent must not appear in requirements_snapshot sent to the server.
+            const { __consent: consentRaw, ...requirementsSnapshot } = formData;
+            const consent =
+              consentRaw &&
+              typeof consentRaw === 'object' &&
+              (consentRaw as { acknowledged?: unknown }).acknowledged === true &&
+              typeof (consentRaw as { text?: unknown }).text === 'string'
+                ? ({ acknowledged: true as const, text: (consentRaw as { text: string }).text })
+                : undefined;
+
             // Resolve source item instance URL (where my profile is stored)
-            // IMPORTANT: If the source item has localhost as instance_url, 
+            // IMPORTANT: If the source item has localhost as instance_url,
             // it means it was created on the current API instance
             const sourceItemInstanceUrl = myItem.item_instance_url?.includes('localhost')
               ? apiConfig.getUrl()  // Use current API where the item was actually created
               : resolveTargetInstanceUrl(myItem, network, apiConfig.getUrl(), 'source');
-            
+
             // Resolve target item instance URL dynamically
             // IMPORTANT: If target item has localhost, use current API as fallback
             const targetItemInstanceUrl = targetItem.item_instance_url?.includes('localhost')
@@ -609,7 +620,8 @@ export function HomePage() {
                   item_id: targetItem.item_id,
                   item_instance_url: targetItemInstanceUrl,
                 },
-                requirements_snapshot: formData,
+                requirements_snapshot: requirementsSnapshot,
+                ...(consent ? { consent } : {}),
               },
               sourceItemInstanceUrl // Call the SOURCE instance (where myItem exists)
             );
