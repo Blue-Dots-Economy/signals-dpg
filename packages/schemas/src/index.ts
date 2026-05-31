@@ -10,12 +10,15 @@ export * from './aggregator/dashboard';
 export * from './item_state_privacy';
 export * from './item_state_masking';
 export {
+  findMetricCategoryAsymmetries,
   getActionInteraction,
   getDomainMinimumCacheTtlSeconds,
   getDomainItemTypes,
   getDomainItemSchema,
   getInstanceCustomItemSchemaUrl,
   getInteractionPiiRevealStatuses,
+  type MetricCategoryAsymmetry,
+  type MetricCategoryEdge,
   NetworkConfigSchema,
   parseNetworkConfigDocument,
   type NetworkConfigDocument,

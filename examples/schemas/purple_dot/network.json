@@ -468,7 +468,12 @@
               }
             }
           },
-          "metric_categories": null,
+          "metric_categories": {
+            "create": ["created"],
+            "accept": ["accepted"],
+            "reject": ["rejected"],
+            "cancel": ["cancelled"]
+          },
           "reveals_pii_on_status": ["accepted"],
           "consent_text_initiator": "I agree to share my contact details (name, email, phone) with this provider if they accept my request.",
           "consent_text_receiver": "I agree to share my contact details (name, email, phone) with the requester."
