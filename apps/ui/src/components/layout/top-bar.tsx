@@ -77,11 +77,11 @@ export function TopBar({
             if (value) onViewModeChange(value as ViewMode);
           }}
         >
-          <ToggleGroupItem value="list" aria-label="List view">
-            <List className="h-4 w-4" />
-          </ToggleGroupItem>
           <ToggleGroupItem value="map" aria-label="Map view">
             <Map className="h-4 w-4" />
+          </ToggleGroupItem>
+          <ToggleGroupItem value="list" aria-label="List view">
+            <List className="h-4 w-4" />
           </ToggleGroupItem>
         </ToggleGroup>
 

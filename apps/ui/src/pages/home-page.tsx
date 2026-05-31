@@ -128,12 +128,21 @@ function resolveTargetInstanceUrl(
   return currentApiUrl;
 }
 
+// Resolves the landing-page default view mode from VITE_DEFAULT_VIEW_MODE.
+// Falls back to 'map' when the env var is missing or holds an unrecognised
+// value, so a fresh install ships with the map-first experience.
+function resolveDefaultViewMode(): ViewMode {
+  const raw = import.meta.env.VITE_DEFAULT_VIEW_MODE;
+  if (raw === 'list' || raw === 'map') return raw;
+  return 'map';
+}
+
 export function HomePage() {
   const { user } = useAuth();
   const [searchParams, setSearchParams] = useSearchParams();
   const [search, setSearch] = React.useState('');
   const [viewMode, setViewMode] = React.useState<ViewMode>(
-    (searchParams.get('view') as ViewMode) ?? 'list'
+    (searchParams.get('view') as ViewMode) ?? resolveDefaultViewMode()
   );
   const [selectedDomain, setSelectedDomain] = React.useState<string | null>(
     searchParams.get('domain')
