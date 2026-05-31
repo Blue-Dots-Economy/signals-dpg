@@ -45,6 +45,12 @@ import {
 } from 'fastify-type-provider-zod';
 import { eq, inArray } from 'drizzle-orm';
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
+import {
+  generateMinimalItemState,
+  nonPrivateFields,
+  resolveBindings,
+  type ResolvedBinding,
+} from '../../__tests__/integration_helpers';
 
 const pg_url = process.env.POSTGRES_URL ?? process.env.POSTGRES_USER;
 const can_run = Boolean(pg_url);
@@ -56,169 +62,6 @@ const describeIf = can_run ? describe : describe.skip;
 
 const hash_key = (raw: string) =>
   createHash('sha256').update(raw).digest('base64url');
-
-// ---------------------------------------------------------------------------
-// Minimal-valid item_state generator
-// ---------------------------------------------------------------------------
-
-/**
- * Walks `schema.required` and produces the smallest valid object that
- * satisfies each required property's type constraints. Optional fields
- * are intentionally omitted to keep payloads deterministic.
- *
- * Supported leaf types: enum, string, integer, number, boolean, array, object.
- * Encountering oneOf / anyOf / $ref throws immediately so the test fails
- * loudly rather than emitting silently-invalid data.
- */
-function generateMinimalItemState(
-  schema: Record<string, unknown>,
-  opts?: { stringPrefix?: string },
-): Record<string, unknown> {
-  const required = schema.required;
-  if (!Array.isArray(required)) {
-    return {};
-  }
-
-  const properties = schema.properties as Record<string, Record<string, unknown>> | undefined;
-  if (!properties) {
-    return {};
-  }
-
-  const prefix = opts?.stringPrefix ?? 'int';
-  const suffix = randomBytes(4).toString('hex');
-  const result: Record<string, unknown> = {};
-
-  for (const name of required as string[]) {
-    const prop = properties[name];
-    if (!prop) {
-      throw new Error(
-        `generateMinimalItemState: required property "${name}" missing from schema.properties`,
-      );
-    }
-
-    result[name] = pickValue(prop, name, prefix, suffix);
-  }
-
-  return result;
-}
-
-function pickValue(
-  prop: Record<string, unknown>,
-  name: string,
-  prefix: string,
-  suffix: string,
-): unknown {
-  if ('oneOf' in prop || 'anyOf' in prop || '$ref' in prop) {
-    throw new Error(
-      `generateMinimalItemState: property "${name}" uses oneOf/anyOf/$ref which is not supported — ` +
-        `provide a concrete schema or extend the generator.`,
-    );
-  }
-
-  if (Array.isArray(prop.enum) && prop.enum.length > 0) {
-    return prop.enum[0];
-  }
-
-  const type = prop.type as string | undefined;
-
-  switch (type) {
-    case 'string': {
-      const minLen = typeof prop.minLength === 'number' ? prop.minLength : 1;
-      const raw = `${prefix}-${name}-${suffix}`;
-      return raw.length >= minLen ? raw : raw.padEnd(minLen, 'x');
-    }
-    case 'integer':
-    case 'number': {
-      const min = typeof prop.minimum === 'number' ? prop.minimum : undefined;
-      const max = typeof prop.maximum === 'number' ? prop.maximum : undefined;
-      const base = min ?? 1;
-      if (max !== undefined && base > max) return max;
-      return base;
-    }
-    case 'boolean':
-      return true;
-    case 'array':
-      // Produce an empty array; the route does not validate array contents
-      // for the purposes of this suite.
-      return [];
-    case 'object': {
-      const nested = prop as Record<string, unknown>;
-      return generateMinimalItemState(nested, { stringPrefix: prefix });
-    }
-    default:
-      throw new Error(
-        `generateMinimalItemState: property "${name}" has unsupported type "${type ?? '(none)'}". ` +
-          `Extend the generator to handle this type.`,
-      );
-  }
-}
-
-// ---------------------------------------------------------------------------
-// Served-domain binding resolver
-// ---------------------------------------------------------------------------
-
-type ResolvedBinding = {
-  network: string;
-  domain: string;
-  item_type: string;
-  schema: Record<string, unknown>;
-};
-
-type ResolvedBindings = {
-  primary: ResolvedBinding;
-  secondary: ResolvedBinding | null;
-};
-
-async function resolveBindings(): Promise<ResolvedBindings> {
-  const { apiConfig } = await import('@/config');
-  const { getNetworkConfigById } = await import('@/network_configs');
-
-  if (apiConfig.served_domains.length === 0) {
-    throw new Error(
-      'resolveBindings: SERVED_DOMAINS is empty. ' +
-        'Configure at least one "network/domain" binding to run this suite.',
-    );
-  }
-
-  async function resolveSingle(
-    network: string,
-    domain: string,
-  ): Promise<ResolvedBinding> {
-    const networkConfig = await getNetworkConfigById(network);
-    const domainConfig = networkConfig.domains?.find((d) => d.id === domain);
-    if (!domainConfig) {
-      throw new Error(
-        `resolveBindings: domain "${domain}" not found in network config for "${network}". ` +
-          `Available domains: ${(networkConfig.domains ?? []).map((d) => d.id).join(', ')}`,
-      );
-    }
-
-    const itemSchemas = domainConfig.item_schemas;
-    if (!itemSchemas || Object.keys(itemSchemas).length === 0) {
-      throw new Error(
-        `resolveBindings: domain "${domain}" in network "${network}" declares no item_schemas. ` +
-          `Cannot derive a test fixture without at least one schema.`,
-      );
-    }
-
-    const item_type = Object.keys(itemSchemas)[0];
-    const schema = itemSchemas[item_type] as Record<string, unknown>;
-
-    return { network, domain, item_type, schema };
-  }
-
-  const primaryBinding = apiConfig.served_domains[0];
-  const primary = await resolveSingle(primaryBinding.network, primaryBinding.domain);
-
-  const secondaryBinding = apiConfig.served_domains.find(
-    (b) => b.key !== primaryBinding.key,
-  );
-  const secondary = secondaryBinding
-    ? await resolveSingle(secondaryBinding.network, secondaryBinding.domain)
-    : null;
-
-  return { primary, secondary };
-}
 
 // ---------------------------------------------------------------------------
 // Suite
@@ -567,7 +410,15 @@ describeIf(`POST /api/v1/admin/participant (integration)${
       .where(eq(itemsTable.item_id, canonical_item_id))
       .limit(1);
     expect(refreshed).toBeTruthy();
-    expect(refreshed.item_state).toEqual(updateFixture);
+    // Private fields land in item_state as type-aware masks (PII encryption at
+    // rest, see 2026-05-28-pii-encryption-at-rest design). The unmasked values
+    // live in item_private_state. Round-trip assert on the public-only subset.
+    const publicFromFixture = nonPrivateFields(primary.schema, updateFixture);
+    const publicFromDb = nonPrivateFields(
+      primary.schema,
+      refreshed.item_state as Record<string, unknown>,
+    );
+    expect(publicFromDb).toEqual(publicFromFixture);
   });
 
   it('network_service inserts an additional item for the same user (secondary served-domain binding); item count goes up by 1', async (ctx) => {
