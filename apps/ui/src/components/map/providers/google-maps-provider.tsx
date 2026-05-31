@@ -84,7 +84,7 @@ export function GoogleMapProvider({
   return (
     <APIProvider apiKey={apiKey}>
       <Map
-        center={{ lat: center[0], lng: center[1] }}
+        defaultCenter={{ lat: center[0], lng: center[1] }}
         defaultZoom={zoom}
         gestureHandling="greedy"
         mapId="dpg-items-map"
