@@ -58,6 +58,8 @@ export function ActionModal({
   React.useEffect(() => {
     if (!open) return;
 
+    setConsentChecked(false);
+
     const reqSchema = actionSchema.requirement_schema;
     if (!reqSchema) {
       setResolvedSchema(null);

@@ -353,6 +353,7 @@
             "reject": ["rejected"],
             "cancel": []
           },
+          "reveals_pii_on_status": ["shortlisted"],
           "consent_text_initiator": "I agree to share my profile contact details with this organization if my application is accepted.",
           "consent_text_receiver": "I agree to share my organisation's contact details with the applicant."
         },

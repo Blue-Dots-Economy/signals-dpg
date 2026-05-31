@@ -384,6 +384,9 @@ export function HomePage() {
             to_domain: interaction.to_domain,
             requirement_schema: interaction.requirement_schema,
             event_schema: interaction.event_schema,
+            consent_text_initiator: interaction.consent_text_initiator,
+            consent_text_receiver: interaction.consent_text_receiver,
+            reveals_pii_on_status: interaction.reveals_pii_on_status,
           });
         }
       }
