@@ -50,6 +50,11 @@ import {
 } from 'fastify-type-provider-zod';
 import { eq, inArray, sql } from 'drizzle-orm';
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
+import {
+  generateMinimalItemState,
+  resolveBindings,
+  type ResolvedBinding,
+} from '../../__tests__/integration_helpers';
 
 const pg_url = process.env.POSTGRES_URL ?? process.env.POSTGRES_USER;
 const can_run = Boolean(pg_url);
@@ -103,6 +108,11 @@ describeIf(`GET /aggregator/dashboard by_domain (integration)${
   const svc_user_id = `usr_${randomUUID()}`;
   const svc_user_email = `signals-b12-int-${ts}@signals.local`;
 
+  // Resolved at beforeAll — schema-derived bindings consumed by each test.
+  // primary maps to the 5-seeker seed, secondary to the 2-provider seed.
+  let primary: ResolvedBinding;
+  let secondary: ResolvedBinding | null;
+
   // Per-run tracking so cleanup can scope deletes.
   const seeker_user_ids: string[] = [];
   const provider_user_ids: string[] = [];
@@ -127,6 +137,11 @@ describeIf(`GET /aggregator/dashboard by_domain (integration)${
     itemsTable = database_pkg.items;
     itemActionsTable = database_pkg.item_actions;
     itemMetricsTable = metrics_mod.item_metrics;
+
+    // Resolve primary + secondary served-domain bindings from env config.
+    const resolved = await resolveBindings();
+    primary = resolved.primary;
+    secondary = resolved.secondary;
 
     const { admin_routes } = await import('../../admin/admin_routes.js');
     const action_routes_mod = await import('../../action/action_routes.js');
@@ -175,7 +190,11 @@ describeIf(`GET /aggregator/dashboard by_domain (integration)${
 
     // Aggregator with both domains configured. metadata is a JSON string
     // (better-auth's text column). The dashboard parses it and reads
-    // meta.domains.
+    // meta.domains. Domains are derived from resolved served-domain bindings
+    // so the suite adapts to any network (e.g. purple_dot, blue_dot).
+    const configured_domains = secondary
+      ? [primary.domain, secondary.domain]
+      : [primary.domain];
     await db.insert(organization).values([
       {
         id: agg.org_id,
@@ -184,7 +203,7 @@ describeIf(`GET /aggregator/dashboard by_domain (integration)${
         type: 'aggregator',
         metadata: JSON.stringify({
           external_id: `agg_b12_${ts}`,
-          domains: ['seeker', 'provider'],
+          domains: configured_domains,
         }),
         createdAt: now,
       },
@@ -297,9 +316,12 @@ describeIf(`GET /aggregator/dashboard by_domain (integration)${
     // recompute (which joins on u.onboarded_by_org_id = aggregator_id)
     // picks them up.
 
-    // 5 seekers — channels cycle across bulk/link/voice for a
-    // non-trivial mode_wise_counts histogram in test 3.
+    // 5 primary-domain participants — channels cycle across bulk/link/voice
+    // for a non-trivial mode_wise_counts histogram in test 3.
     for (let i = 0; i < 5; i++) {
+      const item_state = generateMinimalItemState(primary.schema, {
+        stringPrefix: `b12s${i}`,
+      });
       const res = await app.inject({
         method: 'POST',
         url: '/api/v1/admin/participant',
@@ -314,21 +336,15 @@ describeIf(`GET /aggregator/dashboard by_domain (integration)${
           terms_accepted: true,
           privacy_accepted: true,
           channel: seeker_channels[i],
-          network: 'blue_dot',
-          domain: 'seeker',
-          item_type: 'profile_1.0',
-          item_state: {
-            name: `B12 Seeker ${i}`,
-            gender: i % 2 === 0 ? 'female' : 'male',
-            location: 'Bangalore',
-            phone: `99300000${String(10 + i).slice(-2)}`,
-            age: 22 + i,
-          },
+          network: primary.network,
+          domain: primary.domain,
+          item_type: primary.item_type,
+          item_state,
         },
       });
       if (res.statusCode !== 200) {
         throw new Error(
-          `seed seeker ${i} via NS failed: ${res.statusCode} ${res.body}`,
+          `seed primary-domain participant ${i} via NS failed: ${res.statusCode} ${res.body}`,
         );
       }
       const body = res.json();
@@ -338,58 +354,54 @@ describeIf(`GET /aggregator/dashboard by_domain (integration)${
     expect(seeker_user_ids).toHaveLength(5);
     expect(seeker_item_ids).toHaveLength(5);
 
-    // 2 providers — job_posting_1.0 items.
-    for (let i = 0; i < 2; i++) {
-      const res = await app.inject({
-        method: 'POST',
-        url: '/api/v1/admin/participant',
-        headers: {
-          'x-api-key': ns.raw_key,
-          'x-acting-org-id': ns.org_id,
-          'content-type': 'application/json',
-        },
-        payload: {
-          phone_number: provider_phone(i),
-          name: `B12 Provider ${i}`,
-          terms_accepted: true,
-          privacy_accepted: true,
-          channel: 'bulk',
-          network: 'blue_dot',
-          domain: 'provider',
-          item_type: 'job_posting_1.0',
-          item_state: {
-            jobProviderName: `B12 Provider ${i} Co`,
-            jobProviderLocation: 'Bangalore',
-            hiringManagerName: `B12 HM ${i}`,
-            hiringManagerPhoneNumber: `99400000${String(10 + i).slice(-2)}`,
-            hiringManagerEmail: `hm${i}@b12.integration.test`,
-            role: 'Helper',
-            positions: 2,
-            natureOfJob: 'Full-time',
+    // 2 secondary-domain participants — skipped when no secondary binding
+    // is served (single-domain environment).
+    if (secondary) {
+      for (let i = 0; i < 2; i++) {
+        const item_state = generateMinimalItemState(secondary.schema, {
+          stringPrefix: `b12p${i}`,
+        });
+        const res = await app.inject({
+          method: 'POST',
+          url: '/api/v1/admin/participant',
+          headers: {
+            'x-api-key': ns.raw_key,
+            'x-acting-org-id': ns.org_id,
+            'content-type': 'application/json',
           },
-        },
-      });
-      if (res.statusCode !== 200) {
-        throw new Error(
-          `seed provider ${i} failed: ${res.statusCode} ${res.body}`,
-        );
+          payload: {
+            phone_number: provider_phone(i),
+            name: `B12 Provider ${i}`,
+            terms_accepted: true,
+            privacy_accepted: true,
+            channel: 'bulk',
+            network: secondary.network,
+            domain: secondary.domain,
+            item_type: secondary.item_type,
+            item_state,
+          },
+        });
+        if (res.statusCode !== 200) {
+          throw new Error(
+            `seed secondary-domain participant ${i} failed: ${res.statusCode} ${res.body}`,
+          );
+        }
+        const body = res.json();
+        provider_user_ids.push(body.user_id);
+        provider_item_ids.push(body.items[0].item_id);
       }
-      const body = res.json();
-      provider_user_ids.push(body.user_id);
-      provider_item_ids.push(body.items[0].item_id);
+      expect(provider_user_ids).toHaveLength(2);
+      expect(provider_item_ids).toHaveLength(2);
     }
-    expect(provider_user_ids).toHaveLength(2);
-    expect(provider_item_ids).toHaveLength(2);
 
     // Re-attribute every seeded user from ns.org_id to agg.org_id so
     // recompute (which filters by u.onboarded_by_org_id) sees them.
     const { user } = authSchema;
+    const all_seeded = [...seeker_user_ids, ...provider_user_ids];
     await db
       .update(user)
       .set({ onboardedByOrgId: agg.org_id })
-      .where(
-        inArray(user.id, [...seeker_user_ids, ...provider_user_ids]),
-      );
+      .where(inArray(user.id, all_seeded));
   });
 
   it.todo(
@@ -439,22 +451,31 @@ describeIf(`GET /aggregator/dashboard by_domain (integration)${
       };
     };
 
-    expect(Object.keys(body.by_domain).sort()).toEqual(['provider', 'seeker']);
-    expect(body.by_domain.seeker.rollup.total_items).toBe(5);
-    expect(body.by_domain.provider.rollup.total_items).toBe(2);
+    // Domains present must match what was configured from resolved bindings.
+    const expected_domains = secondary
+      ? [primary.domain, secondary.domain].sort()
+      : [primary.domain];
+    expect(Object.keys(body.by_domain).sort()).toEqual(expected_domains);
+
+    // primary domain always has 5 seeded items.
+    expect(body.by_domain[primary.domain].rollup.total_items).toBe(5);
+    // secondary domain has 2 seeded items (only asserted when served).
+    if (secondary) {
+      expect(body.by_domain[secondary.domain].rollup.total_items).toBe(2);
+    }
 
     // by_status always has the 4 canonical keys (may all be zero if
     // recompute hasn't run yet, but keys must exist).
-    expect(body.by_domain.seeker.rollup.by_status).toHaveProperty('new');
-    expect(body.by_domain.seeker.rollup.by_status).toHaveProperty('active');
-    expect(body.by_domain.seeker.rollup.by_status).toHaveProperty('at_risk');
-    expect(body.by_domain.seeker.rollup.by_status).toHaveProperty('inactive');
+    expect(body.by_domain[primary.domain].rollup.by_status).toHaveProperty('new');
+    expect(body.by_domain[primary.domain].rollup.by_status).toHaveProperty('active');
+    expect(body.by_domain[primary.domain].rollup.by_status).toHaveProperty('at_risk');
+    expect(body.by_domain[primary.domain].rollup.by_status).toHaveProperty('inactive');
 
     // by_action_status always has the 4 canonical keys.
-    expect(body.by_domain.seeker.rollup.by_action_status).toHaveProperty('create');
-    expect(body.by_domain.seeker.rollup.by_action_status).toHaveProperty('accept');
-    expect(body.by_domain.seeker.rollup.by_action_status).toHaveProperty('reject');
-    expect(body.by_domain.seeker.rollup.by_action_status).toHaveProperty('cancel');
+    expect(body.by_domain[primary.domain].rollup.by_action_status).toHaveProperty('create');
+    expect(body.by_domain[primary.domain].rollup.by_action_status).toHaveProperty('accept');
+    expect(body.by_domain[primary.domain].rollup.by_action_status).toHaveProperty('reject');
+    expect(body.by_domain[primary.domain].rollup.by_action_status).toHaveProperty('cancel');
 
     // metadata.refreshed should be true on first hit (no prior rows).
     expect(body.metadata.refreshed).toBe(true);
@@ -480,13 +501,18 @@ describeIf(`GET /aggregator/dashboard by_domain (integration)${
       metadata: { refreshed: boolean; last_computed_at: string | null };
     };
     expect(body.metadata.refreshed).toBe(true);
-    expect(body.metadata.last_computed_at).toMatch(/^\d{4}-\d{2}-\d{2}T/);
+    // last_computed_at is null when no items exist for this org; after
+    // successful seeding it is an ISO-8601 string from .toISOString().
+    // Guard with not.toBeNull() first so a null produces a clear message
+    // rather than a confusing toMatch TypeError.
+    expect(body.metadata.last_computed_at).not.toBeNull();
+    expect(String(body.metadata.last_computed_at)).toMatch(/^\d{4}-\d{2}-\d{2}T/);
   });
 
-  it('?domain=seeker scopes by_domain to a single key', async () => {
+  it('?domain=<primary.domain> scopes by_domain to a single key', async () => {
     const res = await app.inject({
       method: 'GET',
-      url: '/api/v1/aggregator/dashboard?domain=seeker',
+      url: `/api/v1/aggregator/dashboard?domain=${primary.domain}`,
       headers: {
         'x-api-key': agg.raw_key,
         'x-acting-org-id': agg.org_id,
@@ -496,8 +522,11 @@ describeIf(`GET /aggregator/dashboard by_domain (integration)${
     const body = res.json() as {
       by_domain: Record<string, unknown>;
     };
-    expect(Object.keys(body.by_domain)).toEqual(['seeker']);
-    expect(body.by_domain.provider).toBeUndefined();
+    expect(Object.keys(body.by_domain)).toEqual([primary.domain]);
+    // When secondary exists, its domain must not appear in the scoped response.
+    if (secondary) {
+      expect(body.by_domain[secondary.domain]).toBeUndefined();
+    }
   });
 
   it.todo(
