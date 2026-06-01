@@ -6,6 +6,14 @@
     <!-- Initial title — replaced by theme-provider once the active network's
          brand is known (becomes e.g. "Purple Dot · Signal Stack"). -->
     <title>Signal Stack</title>
+
+    <!-- Runtime config (window.__DPG_UI_CONFIG__) — written by the chart at
+         deploy time (helmcharts/dpg/charts/ui/templates/configmap.yaml) and
+         mounted at /config.js by nginx. Must load BEFORE /src/main.tsx so
+         api-config.ts picks up VITE_API_URL/VITE_NETWORK_NAME at module
+         init; otherwise it falls through to compile-time defaults. -->
+    <script src="/config.js"></script>
+
     <!-- Set data-network before React boots so first CSS paint has the
          right brand tokens. Favicon is generated as a square SVG using
          the active network's --brand-cta colour after the brand-themes
