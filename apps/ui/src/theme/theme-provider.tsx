@@ -19,6 +19,15 @@ export function useNetworkTheme(): NetworkThemeContextValue {
 function getInitialNetworkId(): string {
   const url = new URLSearchParams(window.location.search).get('network');
   if (url) return url;
+  // Runtime config (window.__DPG_UI_CONFIG__) is injected by the chart at
+  // deploy time via /config.js (loaded in index.html before the bundle).
+  // It wins over the Vite build-time default, so a single image can be
+  // re-used across networks — the chart decides which brand renders.
+  const runtimeNet =
+    typeof window !== 'undefined'
+      ? (window as Window).__DPG_UI_CONFIG__?.VITE_NETWORK_NAME
+      : undefined;
+  if (runtimeNet) return runtimeNet;
   // __DEFAULT_NETWORK_THEME__ is injected by Vite define at build time
   const fromEnv =
     typeof __DEFAULT_NETWORK_THEME__ !== 'undefined' ? __DEFAULT_NETWORK_THEME__ : '';
