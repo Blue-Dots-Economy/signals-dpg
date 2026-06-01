@@ -33,13 +33,20 @@ class ApiConfig {
     const urlsJson = runtime.VITE_API_URLS || import.meta.env.VITE_API_URLS;
     // Runtime config wins. Empty string in runtime config means "relative to
     // current origin" — axios baseURL='' → browser resolves to current host.
+    //
+    // No-runtime-config fallback hierarchy:
+    //   1. compile-time VITE_DEFAULT_API_URL / VITE_API_URL (if baked at build)
+    //   2. in DEV (vite dev server), localhost:2742 so `pnpm dev:ui` works
+    //   3. in PROD, empty string → same-origin; nginx in the UI image
+    //      reverse-proxies /api/* to dpg-api. This way a missing /config.js
+    //      script tag won't strand the browser on localhost:2742.
     const runtimeProvided =
       'VITE_DEFAULT_API_URL' in runtime || 'VITE_API_URL' in runtime;
+    const compileTime =
+      import.meta.env.VITE_DEFAULT_API_URL || import.meta.env.VITE_API_URL;
     const defaultUrl = runtimeProvided
       ? runtime.VITE_DEFAULT_API_URL || runtime.VITE_API_URL || ''
-      : import.meta.env.VITE_DEFAULT_API_URL ||
-        import.meta.env.VITE_API_URL ||
-        'http://localhost:2742';
+      : compileTime || (import.meta.env.DEV ? 'http://localhost:2742' : '');
 
     this.endpoints.push({
       key: 'default',
