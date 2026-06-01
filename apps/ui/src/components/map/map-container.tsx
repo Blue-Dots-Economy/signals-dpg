@@ -1,31 +1,113 @@
 import * as React from 'react';
 import type { RJSFSchema } from '@rjsf/utils';
-import type { MapMarker } from '@/engine/types';
+import type { MapMarker, DotNetworkDomain } from '@/engine/types';
 import { getActiveMapProvider } from '@/engine/map/map-registry';
 import { extractAddressFromForm, extractPincodeFromForm, normalizeFieldName } from '@/lib/item-utils';
 import { geocodePincode, geocodeAddress, geocodeAddressWithGoogle } from './geocoding';
+import { MapFiltersPanel } from './map-filters-panel';
+import { Button } from '@/components/ui/button';
+import { Maximize2, Minimize2 } from 'lucide-react';
 
 interface MapViewProps {
   schema: RJSFSchema;
-  items: Array<{ id: string; data: Record<string, unknown> }>;
+  /**
+   * Items to render as markers. `domain` is the item's domain string (e.g.
+   * "seeker", "provider") and is threaded to `MapMarker.domain` so each
+   * provider can render a domain-specific icon. It is intentionally kept
+   * outside of `data` so it never appears in the popup's data display.
+   */
+  items: Array<{ id: string; domain?: string; data: Record<string, unknown> }>;
   onMarkerClick?: (id: string) => void;
   center?: [number, number];
   zoom?: number;
+  /**
+   * The currently active/selected profile's coordinates. When present, the map
+   * centers on this point (city-level zoom) instead of fitting all markers.
+   * Driven by the active profile selected in the sidebar — switching profiles
+   * re-centers the map. When null (no active profile, or it has no coords) the
+   * map falls back to the default view and fits all markers.
+   */
+  focusPoint?: { lat: number; lng: number } | null;
+  /**
+   * Visible domains from the network config. Used to render the domain group
+   * inside the filters panel. When absent the domain group is hidden.
+   */
+  visibleDomains?: DotNetworkDomain[];
+  /** Active domain filter values (empty = all). Controlled from home-page. */
+  selectedDomains?: string[];
+  /** Called when the domain filter selection changes. */
+  onDomainsChange?: (domains: string[]) => void;
+  /** Active status filter values (empty = all). Controlled from home-page. */
+  selectedStatuses?: string[];
+  /** Called when the status filter selection changes. */
+  onStatusesChange?: (statuses: string[]) => void;
+  /**
+   * Active enum-field filter values (fieldKey → selected values).
+   * Controlled from home-page.
+   */
+  selectedFields?: Record<string, string[]>;
+  /** Called when enum field filter selections change. */
+  onFieldsChange?: (fields: Record<string, string[]>) => void;
 }
 
 const INDIA_CENTER: [number, number] = [20.5937, 78.9629];
+const INDIA_ZOOM = 5;
+const PROFILE_ZOOM = 12;
 
 export function MapView({
   schema,
   items,
   onMarkerClick,
   center = INDIA_CENTER,
-  zoom = 5,
+  zoom = INDIA_ZOOM,
+  focusPoint,
+  visibleDomains,
+  selectedDomains,
+  onDomainsChange,
+  selectedStatuses,
+  onStatusesChange,
+  selectedFields,
+  onFieldsChange,
 }: MapViewProps) {
   const MapProviderComponent = getActiveMapProvider();
   const [markers, setMarkers] = React.useState<MapMarker[]>([]);
   const [loading, setLoading] = React.useState(true);
+  const [isMaximized, setIsMaximized] = React.useState(false);
 
+  // When toggling maximize, the map container changes size. Both Leaflet and
+  // Google Maps listen for window 'resize' to re-fit their canvas, so dispatch
+  // one after the DOM updates.
+  React.useEffect(() => {
+    const id = window.setTimeout(() => window.dispatchEvent(new Event('resize')), 0);
+    return () => window.clearTimeout(id);
+  }, [isMaximized]);
+
+  // Allow Esc to exit maximized mode.
+  React.useEffect(() => {
+    if (!isMaximized) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setIsMaximized(false);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [isMaximized]);
+
+  // ── Effective center / zoom / initialViewSet ──────────────────────────────
+  // When an active profile with coordinates is selected, center on it at
+  // city-level zoom. Otherwise fall back to the caller-supplied center/zoom
+  // (INDIA_CENTER default) and let FitBounds fit all markers.
+  const { effectiveCenter, effectiveZoom, initialViewSet } = React.useMemo(() => {
+    if (!focusPoint) {
+      return { effectiveCenter: center, effectiveZoom: zoom, initialViewSet: false };
+    }
+    return {
+      effectiveCenter: [focusPoint.lat, focusPoint.lng] as [number, number],
+      effectiveZoom: PROFILE_ZOOM,
+      initialViewSet: true,
+    };
+  }, [focusPoint, center, zoom]);
+
+  // ── Marker resolution ─────────────────────────────────────────────────────
   React.useEffect(() => {
     let cancelled = false;
 
@@ -96,12 +178,14 @@ export function MapView({
             data: item.data,
             precision,
             geocodedFrom,
+            domain: item.domain,
           } satisfies MapMarker;
         })
       );
 
       if (!cancelled) {
-        setMarkers(resolved.filter((m): m is NonNullable<typeof m> & MapMarker => m !== null));
+        const valid = resolved.filter((m): m is NonNullable<typeof m> & MapMarker => m !== null);
+        setMarkers(spreadCoLocatedMarkers(valid));
         setLoading(false);
       }
     }
@@ -110,34 +194,123 @@ export function MapView({
     return () => { cancelled = true; };
   }, [items, schema]);
 
-  if (loading) {
-    return (
-      <div className="flex h-full items-center justify-center rounded-lg border border-dashed">
-        <p className="text-muted-foreground">Loading map data...</p>
-      </div>
-    );
-  }
+  const showFilters =
+    visibleDomains !== undefined &&
+    onDomainsChange !== undefined &&
+    onStatusesChange !== undefined &&
+    onFieldsChange !== undefined;
 
-  if (markers.length === 0) {
-    return (
-      <div className="flex h-full items-center justify-center rounded-lg border border-dashed">
-        <p className="text-muted-foreground">
-          No items with location data to display on map.
-        </p>
-      </div>
-    );
-  }
-
+  // The map, the filters pill and the maximize button always render. Loading
+  // and empty states are shown as overlays ON TOP of the map rather than
+  // replacing it — otherwise a filter that yields zero markers would remove the
+  // map AND the controls, trapping the user with no way to clear the filter.
+  // The overlay lives in the same wrapper that gets maximized, so the controls
+  // stay visible in maximized mode (unlike the provider's native fullscreen).
   return (
-    <div className="h-[calc(100vh-8rem)] min-h-[400px]">
+    <div
+      className={
+        isMaximized
+          ? 'fixed inset-0 z-[2000] bg-background'
+          : 'relative h-[calc(100vh-8rem)] min-h-[400px]'
+      }
+    >
       <MapProviderComponent
-        center={center}
-        zoom={zoom}
+        center={effectiveCenter}
+        zoom={effectiveZoom}
         markers={markers}
         onMarkerClick={onMarkerClick}
+        initialViewSet={initialViewSet}
       />
+      {/* Top-right overlay: filters pill + maximize toggle. Placed top-right to
+          avoid the providers' top-left controls (Leaflet zoom, Google map type). */}
+      <div className="absolute right-2 top-2 z-[1000] flex items-center gap-2">
+        {showFilters && (
+          <MapFiltersPanel
+            domains={visibleDomains ?? []}
+            selectedDomains={selectedDomains ?? []}
+            onDomainsChange={onDomainsChange!}
+            selectedStatuses={selectedStatuses ?? []}
+            onStatusesChange={onStatusesChange!}
+            selectedFields={selectedFields ?? {}}
+            onFieldsChange={onFieldsChange!}
+          />
+        )}
+        <Button
+          type="button"
+          variant="outline"
+          size="icon"
+          className="h-8 w-8 bg-background/95 shadow-md backdrop-blur-sm"
+          onClick={() => setIsMaximized((v) => !v)}
+          aria-label={isMaximized ? 'Exit maximized map' : 'Maximize map'}
+          title={isMaximized ? 'Exit maximized map' : 'Maximize map'}
+        >
+          {isMaximized ? <Minimize2 className="h-4 w-4" /> : <Maximize2 className="h-4 w-4" />}
+        </Button>
+      </div>
+      {/* Loading / empty-state overlays (non-blocking, centered) */}
+      {(loading || markers.length === 0) && (
+        <div className="pointer-events-none absolute inset-0 z-[900] flex items-center justify-center">
+          <p className="rounded-md bg-background/90 px-4 py-2 text-sm text-muted-foreground shadow-md backdrop-blur-sm">
+            {loading
+              ? 'Loading map data...'
+              : 'No items match the current filters.'}
+          </p>
+        </div>
+      )}
     </div>
   );
+}
+
+// ── Helpers ─────────────────────────────────────────────────────────────────
+
+/**
+ * Many items geocode to the EXACT same coordinate (e.g. every "Bengaluru"
+ * profile lands on the city centroid). Markers stacked on one pixel can't be
+ * told apart or individually clicked once a cluster is expanded — and the
+ * Google Maps clusterer (unlike Leaflet) has no spiderfy. To make every item
+ * reachable on both providers, we deterministically fan out any group of
+ * markers that share identical coordinates onto a small circle (~15m radius).
+ *
+ * This is effectively a permanent, provider-agnostic spiderfy: zoomed out the
+ * points are close enough to still cluster into a count; zoomed in they
+ * separate into individually-clickable pins. The offset is tiny relative to a
+ * city-centroid's inherent imprecision, so it does not misrepresent location.
+ */
+function spreadCoLocatedMarkers(markers: MapMarker[]): MapMarker[] {
+  // ~15 metres expressed in degrees of latitude (1° lat ≈ 111_320 m).
+  const RADIUS_DEG = 15 / 111_320;
+
+  const groups = new Map<string, MapMarker[]>();
+  for (const marker of markers) {
+    const key = `${marker.lat.toFixed(6)},${marker.lng.toFixed(6)}`;
+    const group = groups.get(key);
+    if (group) group.push(marker);
+    else groups.set(key, [marker]);
+  }
+
+  const result: MapMarker[] = [];
+  for (const group of groups.values()) {
+    if (group.length === 1) {
+      result.push(group[0]);
+      continue;
+    }
+    // Evenly distribute the group around a small circle centered on the
+    // shared coordinate. Longitude offset is scaled by cos(lat) so the spread
+    // stays roughly circular on the ground.
+    const n = group.length;
+    const latRad = (group[0].lat * Math.PI) / 180;
+    const lngScale = Math.max(Math.cos(latRad), 0.01);
+    group.forEach((marker, i) => {
+      const angle = (2 * Math.PI * i) / n;
+      result.push({
+        ...marker,
+        lat: marker.lat + RADIUS_DEG * Math.cos(angle),
+        lng: marker.lng + (RADIUS_DEG * Math.sin(angle)) / lngScale,
+      });
+    });
+  }
+
+  return result;
 }
 
 function resolveCoordinate(
@@ -168,7 +341,17 @@ function resolveCoordinate(
 
 function findTitleField(schema: RJSFSchema): string | null {
   if (!schema.properties) return null;
-  const candidates = ['name', 'full_name', 'title', 'provider_id', 'learner_id', 'student_id'];
+
+  // Prefer the schema's own declared display field (network configs set
+  // `display_name_field` per item schema, e.g. "jobProviderName", "Full Name").
+  // This is the generic, network-agnostic source of truth.
+  const declared = (schema as Record<string, unknown>)['display_name_field'];
+  if (typeof declared === 'string' && declared in schema.properties) {
+    return declared;
+  }
+
+  // Fall back to common generic title field names (no domain-specific names).
+  const candidates = ['name', 'full_name', 'display_name', 'title', 'label'];
   for (const key of candidates) {
     if (key in schema.properties) return key;
   }
