@@ -7,7 +7,6 @@ import { randomUUID } from 'node:crypto';
 import { and, eq, inArray, or } from 'drizzle-orm';
 import { db } from '@api/db/postgres/drizzle_config';
 import { ensureItemPartition, items } from '@dpg/database';
-import { sql } from 'drizzle-orm';
 import { user } from '../../../../db/postgres/schema/auth.js';
 import { authInstance } from '@/routes/auth/create_auth';
 import { create_profile_item } from '@/lib/profile_item';
@@ -213,16 +212,18 @@ export const participant_handler = async (
           payload: body.item_state,
         });
         if (!matched) {
-          // Append "network/domain" if absent; array_append is idempotent
-          // enough for our purposes — the prior check + tx scope keeps it
-          // race-safe.
-          await tx.execute(sql`
-            UPDATE "user"
-            SET domains = ARRAY(
-              SELECT DISTINCT unnest(domains || ARRAY[${requestedBinding}]::text[])
-            )
-            WHERE id = ${existing!.id}
-          `);
+          // Append "network/domain" if absent. Drizzle's typed .update()
+          // accepts a JS array and encodes it as a PG text[] via the
+          // column's pgTable definition — no raw-SQL workaround needed
+          // here (only the better-auth adapter has the array-serialization
+          // bug). dedup defensively against the just-read row.
+          const next = Array.from(
+            new Set([...currentDomains, requestedBinding]),
+          );
+          await tx
+            .update(user)
+            .set({ domains: next })
+            .where(eq(user.id, existing!.id));
         }
       });
     } catch (err) {
