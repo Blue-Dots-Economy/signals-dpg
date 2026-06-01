@@ -96,6 +96,14 @@ export function NetworkThemeProvider({ children }: { children: React.ReactNode }
     // /my-actions carry no ?network=, and falling back to the build default
     // would flip the theme to the wrong brand mid-session).
     if (networkFromUrl) return networkFromUrl;
+    // Runtime config (window.__DPG_UI_CONFIG__.VITE_NETWORK_NAME) — written
+    // by the chart at deploy time. Must win over localStorage so a fresh
+    // visitor lands on the chart-configured brand even without ?network=.
+    const runtimeNet =
+      typeof window !== 'undefined'
+        ? (window as Window).__DPG_UI_CONFIG__?.VITE_NETWORK_NAME
+        : undefined;
+    if (runtimeNet) return runtimeNet;
     let stored = '';
     try {
       stored = localStorage.getItem(ACTIVE_NETWORK_KEY) ?? '';
