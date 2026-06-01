@@ -8,7 +8,13 @@ interface AuthContextType {
   isAuthenticated: boolean;
   checkUser: (identifier: AuthIdentifier) => Promise<boolean>;
   requestOtp: (identifier: AuthIdentifier) => Promise<void>;
-  verifyOtp: (identifier: AuthIdentifier, otp: string, name?: string) => Promise<void>;
+  verifyOtp: (
+    identifier: AuthIdentifier,
+    otp: string,
+    name?: string,
+    network?: string,
+    domain?: string,
+  ) => Promise<void>;
   signOut: () => Promise<void>;
 }
 
@@ -47,12 +53,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     await requestOtpApi(identifier);
   }, []);
 
-  const verifyOtp = useCallback(async (identifier: AuthIdentifier, otp: string, name?: string): Promise<void> => {
-    const { verifyOtp: verifyOtpApi } = await import('@/lib/auth-api');
-    const response = await verifyOtpApi(identifier, otp, name);
-    setAuthToken(response.token);
-    setUser(response.user);
-  }, []);
+  const verifyOtp = useCallback(
+    async (
+      identifier: AuthIdentifier,
+      otp: string,
+      name?: string,
+      network?: string,
+      domain?: string,
+    ): Promise<void> => {
+      const { verifyOtp: verifyOtpApi } = await import('@/lib/auth-api');
+      const response = await verifyOtpApi(identifier, otp, name, network, domain);
+      setAuthToken(response.token);
+      setUser(response.user);
+    },
+    [],
+  );
 
   const signOut = useCallback(async () => {
     try {

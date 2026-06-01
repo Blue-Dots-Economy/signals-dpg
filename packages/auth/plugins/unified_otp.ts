@@ -79,6 +79,24 @@ const VerifyOtpInput = z.object({
     description:
       'disables phone otp, request fails if invalid email provided, only predefined email domains allowed',
   }),
+  // Network membership: when a new user signs up, record which (network,
+  // domain) they joined under. Both are required together; passing only
+  // one is ignored. Validated against the API's served domain bindings on
+  // the server side before insertion.
+  network: z
+    .string()
+    .nonempty()
+    .optional()
+    .meta({
+      description: 'Network id the new user is joining. Eg: "purple_dot"',
+    }),
+  domain: z
+    .string()
+    .nonempty()
+    .optional()
+    .meta({
+      description: 'Domain id within the network. Eg: "seeker"',
+    }),
 });
 
 export interface UserWithPhoneNumber extends User {
@@ -103,10 +121,15 @@ export interface unifiedOtpOptions {
     user: UserWithPhoneNumber | null;
   }) => Promise<void>;
   /**
-   * Function to run after user creation
+   * Function to run after user creation. Receives the freshly created user
+   * plus the (network, domain) the signup happened under (when supplied by
+   * the client). The host app uses this to persist the user_network
+   * membership row.
    */
   afterUserCreate: (data: {
     user: UserWithPhoneNumber;
+    network?: string;
+    domain?: string;
   }) => Promise<Record<string, any>>;
   /**
    * email domains to be set as admin by default
@@ -138,6 +161,22 @@ export const unifiedOtp = ({
         dateOfBirth: { type: 'date', required: false },
         termsAccepted: { type: 'boolean', required: false },
         privacyAccepted: { type: 'boolean', required: false },
+      },
+    },
+    userNetwork: {
+      modelName: 'user_network',
+      fields: {
+        userId: {
+          type: 'string',
+          required: true,
+          references: {
+            model: 'user',
+            field: 'id',
+            onDelete: 'cascade',
+          },
+        },
+        network: { type: 'string', required: true },
+        domain: { type: 'string', required: true },
       },
     },
   },
@@ -516,6 +555,8 @@ export const unifiedOtp = ({
           joinOrg,
           createAdmin,
           dateOfBirth,
+          network,
+          domain,
         } = validator.data;
 
         if (!email && !phoneNumber) {
@@ -724,8 +765,27 @@ export const unifiedOtp = ({
           throw new APIError('SERVICE_UNAVAILABLE');
         }
 
+        // Persist (user, network, domain) membership for fresh users when
+        // the client supplied them. PK on (user_id, network) deduplicates;
+        // we log and swallow other errors so signup never fails on the
+        // bridge insert.
+        if (isNewUser && network && domain) {
+          try {
+            await ctx.context.adapter.create({
+              model: 'userNetwork',
+              data: {
+                userId: user.id,
+                network,
+                domain,
+              },
+            });
+          } catch (err) {
+            console.error('Failed to record user_network membership:', err);
+          }
+        }
+
         const afterUser = isNewUser
-          ? await afterUserCreate({ user })
+          ? await afterUserCreate({ user, network, domain })
           : null;
 
         try {

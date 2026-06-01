@@ -12,6 +12,8 @@ interface AuthState extends AuthIdentifier {
   userExists: boolean;
   name?: string;
   redirectTo?: string;
+  network?: string;
+  domain?: string;
 }
 
 function getAuthIdentifier(state: AuthState): AuthIdentifier {
@@ -49,7 +51,13 @@ export function OtpPage() {
     setIsLoading(true);
     setInlineError(null);
     try {
-      await verifyOtp(getAuthIdentifier(state), otp, state.userExists ? undefined : state.name);
+      await verifyOtp(
+        getAuthIdentifier(state),
+        otp,
+        state.userExists ? undefined : state.name,
+        state.userExists ? undefined : state.network,
+        state.userExists ? undefined : state.domain,
+      );
       toast.success(state.userExists ? 'Welcome back!' : 'Account created successfully!', {
         description: state.userExists
           ? 'You\'re signed in. Explore profiles and connect with others on the network.'

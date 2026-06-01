@@ -81,12 +81,16 @@ export async function requestOtp(identifier: AuthIdentifier): Promise<RequestOtp
 export async function verifyOtp(
   identifier: AuthIdentifier,
   otp: string,
-  name?: string
+  name?: string,
+  network?: string,
+  domain?: string,
 ): Promise<VerifyOtpResponse> {
   const response = await apiClient.post<VerifyOtpResponse>('/api/auth/unified-otp/verify', {
     ...normalizeIdentifier(identifier),
     otp,
     name: name || 'user',
+    ...(network ? { network } : {}),
+    ...(domain ? { domain } : {}),
   });
   return response.data;
 }

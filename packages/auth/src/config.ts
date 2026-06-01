@@ -167,6 +167,9 @@ export function createAuth(config: AuthRuntimeConfig) {
         },
 
         afterUserCreate: async (payload) => {
+          // Membership insert is handled inside the unified_otp plugin via
+          // ctx.context.adapter.create; this hook only owns the welcome
+          // notifications.
           if (!nc) return payload;
 
           if (payload.user.email) {

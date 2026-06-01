@@ -5,6 +5,8 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { AuthShell } from '@/components/layout/auth-shell';
 import { checkUser, requestOtp, type AuthIdentifier } from '@/lib/auth-api';
+import { useNetworkTheme } from '@/theme/theme-provider';
+import { useNetworkConfig } from '@/hooks/use-network-config';
 import { toast } from 'sonner';
 
 type AuthMode = 'phone' | 'email';
@@ -19,6 +21,13 @@ export function LoginPage() {
   const [userExists, setUserExists] = useState<boolean | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const redirectTo = searchParams.get('redirect') ?? '/';
+
+  // Domain pick — only asked when creating a new account. Network comes
+  // from the active theme (per-deploy), so the user never picks it.
+  const { themeId } = useNetworkTheme();
+  const { data: networkConfig } = useNetworkConfig(themeId);
+  const domainOptions = networkConfig?.domains ?? [];
+  const [domain, setDomain] = useState('');
 
   const identifier: AuthIdentifier = mode === 'email' ? { email } : { phoneNumber };
   const contactValue = mode === 'email' ? email : phoneNumber;
@@ -52,9 +61,23 @@ export function LoginPage() {
           });
           return;
         }
+        if (!domain) {
+          setIsLoading(false);
+          toast.info('Pick your role', {
+            description: 'Select how you want to participate in this network.',
+          });
+          return;
+        }
         await requestOtp(identifier);
         navigate('/auth/otp', {
-          state: { ...identifier, userExists: exists, name, redirectTo },
+          state: {
+            ...identifier,
+            userExists: exists,
+            name,
+            redirectTo,
+            network: themeId,
+            domain,
+          },
         });
       }
     } catch {
@@ -146,28 +169,55 @@ export function LoginPage() {
           )}
         </div>
 
-        {/* Name — only shown when creating account */}
+        {/* Name + role — only shown when creating account */}
         {userExists === false && (
-          <div className="space-y-1.5">
-            <Label htmlFor="name" className="text-sm font-medium">
-              Your name
-            </Label>
-            <Input
-              id="name"
-              type="text"
-              placeholder="Full name"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              disabled={isLoading}
-              required
-              className="h-11"
-            />
-            <p className="text-xs text-muted-foreground">
-              {mode === 'email'
-                ? "We'll send a one-time code to verify your email."
-                : "We'll send a one-time code to verify your number."}
-            </p>
-          </div>
+          <>
+            <div className="space-y-1.5">
+              <Label htmlFor="name" className="text-sm font-medium">
+                Your name
+              </Label>
+              <Input
+                id="name"
+                type="text"
+                placeholder="Full name"
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                disabled={isLoading}
+                required
+                className="h-11"
+              />
+              <p className="text-xs text-muted-foreground">
+                {mode === 'email'
+                  ? "We'll send a one-time code to verify your email."
+                  : "We'll send a one-time code to verify your number."}
+              </p>
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="domain" className="text-sm font-medium">
+                Your role
+              </Label>
+              <select
+                id="domain"
+                value={domain}
+                onChange={(e) => setDomain(e.target.value)}
+                disabled={isLoading || domainOptions.length === 0}
+                required
+                className="h-11 w-full rounded-md border border-input bg-background px-3 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                <option value="" disabled>
+                  {domainOptions.length === 0
+                    ? 'Loading roles…'
+                    : 'Select your role'}
+                </option>
+                {domainOptions.map((d) => (
+                  <option key={d.id} value={d.id}>
+                    {d.id}
+                    {d.description ? ` — ${d.description}` : ''}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </>
         )}
 
         {/* CTA */}

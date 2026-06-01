@@ -8,6 +8,7 @@ import { and, eq, inArray, or } from 'drizzle-orm';
 import { db } from '@api/db/postgres/drizzle_config';
 import { ensureItemPartition, items } from '@dpg/database';
 import { user } from '../../../../db/postgres/schema/auth.js';
+import { userNetwork } from '../../../../db/postgres/schema/user_network.js';
 import { authInstance } from '@/routes/auth/create_auth';
 import { create_profile_item } from '@/lib/profile_item';
 import { updateItemInternal } from '@/services/item_service';
@@ -295,6 +296,15 @@ export const participant_handler = async (
         item_type,
         payload: body.item_state,
       });
+
+      // Record (user, network, domain) membership. PK on (user_id, network)
+      // makes this idempotent; ON CONFLICT keeps the original row when the
+      // same admin re-onboards an existing user against a different domain
+      // (the create_profile_item call above already guards against that).
+      await tx
+        .insert(userNetwork)
+        .values({ userId: user_id, network, domain })
+        .onConflictDoNothing({ target: [userNetwork.userId, userNetwork.network] });
     });
   } catch (txErr: unknown) {
     try {
