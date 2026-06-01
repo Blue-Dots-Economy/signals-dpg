@@ -361,42 +361,21 @@
           "from_network": "blue_dot",
           "from_domain": "provider",
           "to_network": "blue_dot",
-          "to_domain": "seeker",
+          "to_domain": "provider",
           "requirement_schema": {
             "$schema": "https://json-schema.org/draft/2020-12/schema",
-            "title": "Interview Invitation Requirement",
+            "title": "Provider Connection Requirement",
             "type": "object",
             "additionalProperties": false,
-            "required": [
-              "role",
-              "interview_time",
-              "interview_mode"
-            ],
             "properties": {
-              "role": {
-                "type": "string",
-                "minLength": 1
-              },
-              "interview_time": {
-                "type": "string",
-                "format": "date-time"
-              },
-              "interview_mode": {
-                "type": "string",
-                "enum": [
-                  "in_person",
-                  "online",
-                  "phone"
-                ]
-              },
-              "message_to_candidate": {
+              "message": {
                 "type": "string"
               }
             }
           },
           "event_schema": {
             "$schema": "https://json-schema.org/draft/2020-12/schema",
-            "title": "Interview Invitation Event",
+            "title": "Provider Connection Event",
             "type": "object",
             "additionalProperties": false,
             "required": [
@@ -408,14 +387,53 @@
                 "type": "string",
                 "enum": [
                   "created",
-                  "invited",
                   "accepted",
-                  "rejected"
+                  "rejected",
+                  "cancelled"
                 ]
               },
               "remark": {
                 "type": "string"
               }
+            }
+          },
+          "metric_categories": {
+            "create": ["created"],
+            "accept": ["accepted"],
+            "reject": ["rejected"],
+            "cancel": ["cancelled"]
+          },
+          "reveals_pii_on_status": ["accepted"],
+          "consent_text_initiator": "I agree to share my organisation's contact details with the receiving provider if they accept my request.",
+          "consent_text_receiver": "I agree to share my organisation's contact details with the requesting provider."
+        },
+        {
+          "from_network": "blue_dot",
+          "from_domain": "provider",
+          "to_network": "blue_dot",
+          "to_domain": "seeker",
+          "requirement_schema": {
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "title": "Interview Invitation Requirement",
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["role", "interview_time", "interview_mode"],
+            "properties": {
+              "role": { "type": "string", "minLength": 1 },
+              "interview_time": { "type": "string", "format": "date-time" },
+              "interview_mode": { "type": "string", "enum": ["in_person", "online", "phone"] },
+              "message_to_candidate": { "type": "string" }
+            }
+          },
+          "event_schema": {
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "title": "Interview Invitation Event",
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["status", "remark"],
+            "properties": {
+              "status": { "type": "string", "enum": ["created", "invited", "accepted", "rejected"] },
+              "remark": { "type": "string" }
             }
           },
           "metric_categories": {

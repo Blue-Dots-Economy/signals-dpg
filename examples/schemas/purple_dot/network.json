@@ -396,8 +396,48 @@
   ],
   "actions": {
     "connect": {
-      "description": "Lets a seeker and a provider request a connection with each other. Either party can initiate; the receiver can accept, reject, or the initiator can cancel before the receiver responds.",
+      "description": "Lets two providers, or two seekers, request a peer connection with each other. Either party can initiate; the receiver can accept, reject, or the initiator can cancel before the receiver responds.",
       "interactions": [
+        {
+          "from_network": "purple_dot",
+          "from_domain": "provider",
+          "to_network": "purple_dot",
+          "to_domain": "provider",
+          "requirement_schema": { "type": "object", "properties": {} },
+          "event_schema": {
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "title": "Provider To Provider Connect Event",
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "status",
+              "remark"
+            ],
+            "properties": {
+              "status": {
+                "type": "string",
+                "enum": [
+                  "created",
+                  "accepted",
+                  "rejected",
+                  "cancelled"
+                ]
+              },
+              "remark": {
+                "type": "string"
+              }
+            }
+          },
+          "metric_categories": {
+            "create": ["created"],
+            "accept": ["accepted"],
+            "reject": ["rejected"],
+            "cancel": ["cancelled"]
+          },
+          "reveals_pii_on_status": ["accepted"],
+          "consent_text_initiator": "I agree to share my contact details (name, email, phone) with this provider if they accept my request.",
+          "consent_text_receiver": "I agree to share my contact details (name, email, phone) with the requester."
+        },
         {
           "from_network": "purple_dot",
           "from_domain": "seeker",
@@ -449,23 +489,10 @@
             "title": "Provider To Seeker Connect Event",
             "type": "object",
             "additionalProperties": false,
-            "required": [
-              "status",
-              "remark"
-            ],
+            "required": ["status", "remark"],
             "properties": {
-              "status": {
-                "type": "string",
-                "enum": [
-                  "created",
-                  "accepted",
-                  "rejected",
-                  "cancelled"
-                ]
-              },
-              "remark": {
-                "type": "string"
-              }
+              "status": { "type": "string", "enum": ["created", "accepted", "rejected", "cancelled"] },
+              "remark": { "type": "string" }
             }
           },
           "metric_categories": {
@@ -475,7 +502,7 @@
             "cancel": ["cancelled"]
           },
           "reveals_pii_on_status": ["accepted"],
-          "consent_text_initiator": "I agree to share my contact details (name, email, phone) with this provider if they accept my request.",
+          "consent_text_initiator": "I agree to share my contact details (name, email, phone) with this seeker if they accept my request.",
           "consent_text_receiver": "I agree to share my contact details (name, email, phone) with the requester."
         }
       ]

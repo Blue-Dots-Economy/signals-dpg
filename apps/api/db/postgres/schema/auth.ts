@@ -37,11 +37,18 @@ export const user = pgTable('user', {
   onboardedVia: text('onboarded_via'),
   onboardedSourceId: text('onboarded_source_id'),
   onboardedAt: timestamp('onboarded_at'),
+  // Network memberships expressed as an array of "network/domain" strings,
+  // e.g. {'blue_dot/seeker','purple_dot/provider'}. One entry per network
+  // max — the app guards this; cross-network multi-membership is the
+  // multi-element shape. Empty array (default) means the user hasn't
+  // joined any network yet.
+  domains: text('domains').array().notNull().default([]),
 }, (table) => [
   index('user_onboarded_by_org_via_idx').on(
     table.onboardedByOrgId,
     table.onboardedVia,
   ),
+  index('user_domains_gin_idx').using('gin', table.domains),
 ]);
 
 export const account = pgTable('account', {

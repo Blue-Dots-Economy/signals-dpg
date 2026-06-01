@@ -241,6 +241,9 @@ importers:
       better-auth:
         specifier: ^1.6.11
         version: 1.6.11(drizzle-kit@0.31.10)(drizzle-orm@0.45.2(@types/pg@8.20.0)(kysely@0.28.17)(pg@8.20.0))(pg@8.20.0)(react-dom@19.2.6(react@19.2.6))(react@19.2.6)(vitest@4.1.7(@types/node@25.8.0)(vite@8.0.13(@types/node@25.8.0)(esbuild@0.28.0)(jiti@2.6.1)(tsx@4.22.1)(yaml@2.9.0)))
+      drizzle-orm:
+        specifier: ^0.45.2
+        version: 0.45.2(@types/pg@8.20.0)(kysely@0.28.17)(pg@8.20.0)
       notification:
         specifier: workspace:*
         version: link:../notification

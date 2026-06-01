@@ -5,6 +5,7 @@ import { unifiedOtp } from '../plugins/unified_otp';
 import type { AuthRuntimeConfig } from './types';
 import { drizzleAdapter } from 'better-auth/adapters/drizzle';
 import { emailOtpHtmlTemplate } from './templates/otp_email';
+import { sql } from 'drizzle-orm';
 
 export function createAuth(config: AuthRuntimeConfig) {
   const redis = config.redis;
@@ -113,6 +114,8 @@ export function createAuth(config: AuthRuntimeConfig) {
 
       unifiedOtp({
         adminByDomain: config.adminDomains,
+        isServedBinding: config.isServedBinding,
+        db: config.db as never,
 
         sendPhoneOtp: async ({ phoneNumber, otp }) => {
           if (nc) {
@@ -167,9 +170,36 @@ export function createAuth(config: AuthRuntimeConfig) {
         },
 
         afterUserCreate: async (payload) => {
-          // Membership insert is handled inside the unified_otp plugin via
-          // ctx.context.adapter.create; this hook only owns the welcome
-          // notifications.
+          // Persist user.domains text[] for fresh signups. Dedup + drop
+          // unparseable entries; app-side served_domains validation
+          // happens at the API surface before this point.
+          if (Array.isArray(payload.domains) && payload.domains.length > 0) {
+            const unique = Array.from(
+              new Set(
+                payload.domains.filter(
+                  (d): d is string =>
+                    typeof d === 'string' && /^[a-z0-9_]+\/[a-z0-9_]+$/.test(d),
+                ),
+              ),
+            );
+            if (unique.length > 0) {
+              try {
+                // Build a PG text[] literal "{a,b}" from the JS array — drizzle's
+                // sql template doesn't auto-convert arrays in parameter slots.
+                const literal = `{${unique
+                  .map((d) => `"${d.replace(/"/g, '\\"')}"`)
+                  .join(',')}}`;
+                await config.db.execute(sql`
+                  UPDATE "user"
+                  SET domains = ${literal}::text[]
+                  WHERE id = ${payload.user.id}
+                `);
+              } catch (err) {
+                console.error('Failed to set user.domains:', err);
+              }
+            }
+          }
+
           if (!nc) return payload;
 
           if (payload.user.email) {

@@ -7,8 +7,8 @@ import { randomUUID } from 'node:crypto';
 import { and, eq, inArray, or } from 'drizzle-orm';
 import { db } from '@api/db/postgres/drizzle_config';
 import { ensureItemPartition, items } from '@dpg/database';
+import { sql } from 'drizzle-orm';
 import { user } from '../../../../db/postgres/schema/auth.js';
-import { userNetwork } from '../../../../db/postgres/schema/user_network.js';
 import { authInstance } from '@/routes/auth/create_auth';
 import { create_profile_item } from '@/lib/profile_item';
 import { updateItemInternal } from '@/services/item_service';
@@ -165,6 +165,31 @@ export const participant_handler = async (
     const network = body.network ?? 'blue_dot';
     const domain = body.domain ?? 'seeker';
     const item_type = body.item_type ?? 'profile_1.0';
+
+    // Domain mismatch guard: user.domains carries at most one "network/X"
+    // entry per network. Reject if there's already one with a different
+    // domain in this network. If absent, append it alongside the insert.
+    const userRow = await db
+      .select({ domains: user.domains })
+      .from(user)
+      .where(eq(user.id, existing!.id))
+      .limit(1);
+
+    const currentDomains = userRow[0]?.domains ?? [];
+    const networkPrefix = `${network}/`;
+    const matched = currentDomains.find((d) => d.startsWith(networkPrefix));
+    const requestedBinding = `${network}/${domain}`;
+
+    if (matched && matched !== requestedBinding) {
+      const registeredDomain = matched.slice(networkPrefix.length);
+      return reply.code(409).send({
+        error: 'DOMAIN_MISMATCH',
+        message: `user already registered as "${registeredDomain}" in "${network}"; refusing to create "${domain}" item`,
+        registered_domain: registeredDomain,
+        requested_domain: domain,
+      });
+    }
+
     try {
       await ensureItemPartition(db, network, domain);
     } catch (err) {
@@ -178,13 +203,27 @@ export const participant_handler = async (
       });
     }
     try {
-      await create_profile_item({
-        tx: db,
-        user_id: existing!.id,
-        network,
-        domain,
-        item_type,
-        payload: body.item_state,
+      await db.transaction(async (tx) => {
+        await create_profile_item({
+          tx,
+          user_id: existing!.id,
+          network,
+          domain,
+          item_type,
+          payload: body.item_state,
+        });
+        if (!matched) {
+          // Append "network/domain" if absent; array_append is idempotent
+          // enough for our purposes — the prior check + tx scope keeps it
+          // race-safe.
+          await tx.execute(sql`
+            UPDATE "user"
+            SET domains = ARRAY(
+              SELECT DISTINCT unnest(domains || ARRAY[${requestedBinding}]::text[])
+            )
+            WHERE id = ${existing!.id}
+          `);
+        }
       });
     } catch (err) {
       const e = err as { statusCode?: number; errorCode?: string };
@@ -284,6 +323,7 @@ export const participant_handler = async (
           onboardedVia: body.channel,
           onboardedSourceId: body.source_id ?? null,
           onboardedAt: now,
+          domains: [`${network}/${domain}`],
           updatedAt: now,
         })
         .where(eq(user.id, user_id));
@@ -296,15 +336,8 @@ export const participant_handler = async (
         item_type,
         payload: body.item_state,
       });
-
-      // Record (user, network, domain) membership. PK on (user_id, network)
-      // makes this idempotent; ON CONFLICT keeps the original row when the
-      // same admin re-onboards an existing user against a different domain
-      // (the create_profile_item call above already guards against that).
-      await tx
-        .insert(userNetwork)
-        .values({ userId: user_id, network, domain })
-        .onConflictDoNothing({ target: [userNetwork.userId, userNetwork.network] });
+      // user.domains was seeded above in the same UPDATE — nothing more
+      // to record here.
     });
   } catch (txErr: unknown) {
     try {

@@ -1,8 +1,29 @@
 import { type User } from 'better-auth';
-import { APIError, createAuthEndpoint } from 'better-auth/api';
+import {
+  APIError,
+  createAuthEndpoint,
+  sessionMiddleware,
+} from 'better-auth/api';
 import { type BetterAuthPlugin } from 'better-auth/types';
 import { setSessionCookie } from '../utils';
 import z from '@dpg/schemas';
+import { sql } from 'drizzle-orm';
+
+const BINDING_PATTERN = /^[a-z][a-z0-9_]*\/[a-z][a-z0-9_]*$/;
+
+/**
+ * Build a Postgres text[] literal "{a,b,...}" from a JS string array. Each
+ * element is validated against BINDING_PATTERN so quotes, backslashes, or
+ * spaces never reach the SQL parser. Used because the better-auth drizzle
+ * adapter can't reliably serialise JS arrays to PG text[] columns.
+ */
+function buildPgTextArrayLiteral(values: string[]): string {
+  const clean = values.filter((v) => typeof v === 'string' && BINDING_PATTERN.test(v));
+  if (clean.length === 0) return '{}';
+  // Pattern guarantees no quoting needed — emit unquoted for max
+  // robustness against future Postgres versions.
+  return `{${clean.join(',')}}`;
+}
 
 const CheckUserInput = z.object({
   email: z.email('Please enter a valid Email').optional().meta({
@@ -79,23 +100,16 @@ const VerifyOtpInput = z.object({
     description:
       'disables phone otp, request fails if invalid email provided, only predefined email domains allowed',
   }),
-  // Network membership: when a new user signs up, record which (network,
-  // domain) they joined under. Both are required together; passing only
-  // one is ignored. Validated against the API's served domain bindings on
-  // the server side before insertion.
-  network: z
-    .string()
-    .nonempty()
+  // Network memberships chosen at signup. Each element is "network/domain",
+  // e.g. ["blue_dot/seeker","purple_dot/provider"]. App-side guard enforces
+  // at most one entry per network. Validated against served_domains on the
+  // host (apps/api) before persistence.
+  domains: z
+    .array(z.string().nonempty())
     .optional()
     .meta({
-      description: 'Network id the new user is joining. Eg: "purple_dot"',
-    }),
-  domain: z
-    .string()
-    .nonempty()
-    .optional()
-    .meta({
-      description: 'Domain id within the network. Eg: "seeker"',
+      description:
+        'Network/domain memberships, e.g. ["blue_dot/seeker","purple_dot/provider"]',
     }),
 });
 
@@ -108,6 +122,22 @@ export interface UserWithPhoneNumber extends User {
 }
 
 export interface unifiedOtpOptions {
+  /**
+   * Optional callback that validates whether a (network, domain) binding is
+   * served by this API instance. Used by /unified-otp/join-network to keep
+   * the host's served_domains as the source of truth.
+   */
+  isServedBinding?: (network: string, domain: string) => boolean;
+  /**
+   * Drizzle db handle used by /unified-otp/join-network to write
+   * user.domains as a real Postgres text[] (the better-auth drizzle
+   * adapter can't reliably round-trip JS arrays). When omitted, the
+   * join-network endpoint falls back to adapter.update — fine for tests,
+   * unsafe for production.
+   */
+  db?: {
+    execute: (query: ReturnType<typeof sql>) => Promise<unknown>;
+  };
   /**
    * Function to send unified otp via sms
    */
@@ -122,14 +152,12 @@ export interface unifiedOtpOptions {
   }) => Promise<void>;
   /**
    * Function to run after user creation. Receives the freshly created user
-   * plus the (network, domain) the signup happened under (when supplied by
-   * the client). The host app uses this to persist the user_network
-   * membership row.
+   * plus the network/domain memberships chosen at signup (when supplied by
+   * the client). The host app persists these into user.domains.
    */
   afterUserCreate: (data: {
     user: UserWithPhoneNumber;
-    network?: string;
-    domain?: string;
+    domains?: string[];
   }) => Promise<Record<string, any>>;
   /**
    * email domains to be set as admin by default
@@ -144,12 +172,19 @@ export const generateOtp = (is_test: boolean) => {
     ? '000000'
     : Math.floor(100000 + Math.random() * 900000).toString();
 };
+const JoinNetworkInput = z.object({
+  network: z.string().nonempty(),
+  domain: z.string().nonempty(),
+});
+
 export const unifiedOtp = ({
   sendPhoneOtp,
   sendEmailOtp,
   afterUserCreate,
   adminByDomain,
   createTestOtp,
+  isServedBinding,
+  db,
 }: unifiedOtpOptions): BetterAuthPlugin => ({
   id: 'unified-otp',
   schema: {
@@ -161,22 +196,10 @@ export const unifiedOtp = ({
         dateOfBirth: { type: 'date', required: false },
         termsAccepted: { type: 'boolean', required: false },
         privacyAccepted: { type: 'boolean', required: false },
-      },
-    },
-    userNetwork: {
-      modelName: 'user_network',
-      fields: {
-        userId: {
-          type: 'string',
-          required: true,
-          references: {
-            model: 'user',
-            field: 'id',
-            onDelete: 'cascade',
-          },
-        },
-        network: { type: 'string', required: true },
-        domain: { type: 'string', required: true },
+        // Network memberships ("network/domain" entries). Returned by
+        // /api/auth/get-session so the UI can read them without an extra
+        // /me/domains fetch.
+        domains: { type: 'string[]', required: false },
       },
     },
   },
@@ -555,8 +578,7 @@ export const unifiedOtp = ({
           joinOrg,
           createAdmin,
           dateOfBirth,
-          network,
-          domain,
+          domains,
         } = validator.data;
 
         if (!email && !phoneNumber) {
@@ -755,6 +777,14 @@ export const unifiedOtp = ({
           });
         }
 
+        // Membership persistence happens inside afterUserCreate (host owns
+        // the raw drizzle handle and the user.domains column). Run BEFORE
+        // the final user re-read so the response + cookie cache include
+        // the newly-written domains.
+        const afterUser = isNewUser
+          ? await afterUserCreate({ user, domains })
+          : null;
+
         const updatedUser =
           await ctx.context.adapter.findOne<UserWithPhoneNumber>({
             model: 'user',
@@ -764,29 +794,6 @@ export const unifiedOtp = ({
         if (!updatedUser) {
           throw new APIError('SERVICE_UNAVAILABLE');
         }
-
-        // Persist (user, network, domain) membership for fresh users when
-        // the client supplied them. PK on (user_id, network) deduplicates;
-        // we log and swallow other errors so signup never fails on the
-        // bridge insert.
-        if (isNewUser && network && domain) {
-          try {
-            await ctx.context.adapter.create({
-              model: 'userNetwork',
-              data: {
-                userId: user.id,
-                network,
-                domain,
-              },
-            });
-          } catch (err) {
-            console.error('Failed to record user_network membership:', err);
-          }
-        }
-
-        const afterUser = isNewUser
-          ? await afterUserCreate({ user, network, domain })
-          : null;
 
         try {
           const session = await ctx.context.internalAdapter.createSession(
@@ -814,5 +821,147 @@ export const unifiedOtp = ({
         }
       }
     ),
+
+    joinNetwork: createAuthEndpoint(
+      '/unified-otp/join-network',
+      {
+        method: 'POST',
+        body: JoinNetworkInput,
+        use: [sessionMiddleware],
+        metadata: {
+          openapi: {
+            summary: 'Join a (network, domain)',
+            description:
+              'Appends "network/domain" to the authenticated user\'s domains[]. Idempotent if the user already holds the same binding; 409 if they already hold a different domain in this network.',
+          },
+        },
+      },
+      async (ctx) => {
+        const validator = JoinNetworkInput.safeParse(ctx.body);
+        if (!validator.success) {
+          throw new APIError('BAD_REQUEST', {
+            message: 'Validation failed',
+            issues: validator.error.issues,
+          });
+        }
+
+        const { network, domain } = validator.data;
+        const binding = `${network}/${domain}`;
+
+        if (isServedBinding && !isServedBinding(network, domain)) {
+          throw new APIError('FORBIDDEN', {
+            message: `network/domain "${binding}" is not served by this instance`,
+          });
+        }
+
+        const userId = ctx.context.session.user.id;
+
+        // Read current domains so we can enforce "one domain per network"
+        // and idempotency before writing.
+        const current =
+          (ctx.context.session.user as unknown as { domains?: string[] })
+            .domains ?? [];
+        const networkPrefix = `${network}/`;
+        const matched = current.find((d: string) =>
+          d.startsWith(networkPrefix),
+        );
+
+        if (matched === binding) {
+          return ctx.json({ network, domain, created: false });
+        }
+        if (matched) {
+          const registeredDomain = matched.slice(networkPrefix.length);
+          throw new APIError('CONFLICT', {
+            message: `user is already registered as "${registeredDomain}" in "${network}"`,
+          });
+        }
+
+        // Re-read user.domains from the DB before computing the new array
+        // — the session cookie cache (configured in createAuth) can be up
+        // to 10 minutes stale, so trusting session.user.domains here can
+        // wipe a binding that already exists.
+        const fresh = (await ctx.context.adapter.findOne<{
+          id: string;
+          domains?: string[];
+        }>({
+          model: 'user',
+          where: [{ field: 'id', value: userId }],
+        })) as { id: string; domains?: string[] } | null;
+
+        const freshDomains = fresh?.domains ?? [];
+        const freshMatched = freshDomains.find((d: string) =>
+          d.startsWith(networkPrefix),
+        );
+
+        // Helper — refresh cookie cache with the freshest row so a
+        // /get-session right after this endpoint reflects the up-to-date
+        // domains (cookieCache.maxAge is ~10 min otherwise).
+        const refreshCookie = async (rowForCookie: unknown) => {
+          await setSessionCookie(ctx, {
+            session: ctx.context.session.session as any,
+            user: {
+              ...ctx.context.session.user,
+              ...((rowForCookie as object) ?? {}),
+            } as any,
+          });
+        };
+
+        if (freshMatched === binding) {
+          // Idempotent fast-path. Still refresh the cookie — the stale
+          // session might be lacking this very binding even though the
+          // DB has it (e.g. when the user just joined via another tab).
+          await refreshCookie(fresh);
+          return ctx.json({ network, domain, created: false });
+        }
+        if (freshMatched) {
+          const registeredDomain = freshMatched.slice(networkPrefix.length);
+          throw new APIError('CONFLICT', {
+            message: `user is already registered as "${registeredDomain}" in "${network}"`,
+          });
+        }
+
+        const next = Array.from(new Set([...freshDomains, binding]));
+
+        // Write the array as a real Postgres text[] literal — the
+        // better-auth drizzle adapter can serialise JS arrays as JSON
+        // strings under some configurations, which would corrupt the
+        // column. The buildPgTextArrayLiteral helper validates each
+        // element against BINDING_PATTERN so no shell/SQL meta-chars can
+        // leak into the literal.
+        if (db) {
+          const literal = buildPgTextArrayLiteral(next);
+          try {
+            await db.execute(sql`
+              UPDATE "user"
+              SET domains = ${literal}::text[]
+              WHERE id = ${userId}
+            `);
+          } catch (err) {
+            throw new APIError('INTERNAL_SERVER_ERROR', {
+              message: 'failed to write user.domains',
+              cause: err as Error,
+            });
+          }
+        } else {
+          // Fallback for tests that don't pass a db handle.
+          await ctx.context.adapter.update({
+            model: 'user',
+            where: [{ field: 'id', value: userId }],
+            update: { domains: next },
+          });
+        }
+
+        // Refresh cookie cache — otherwise /get-session returns the
+        // pre-join user object for up to cookieCache.maxAge seconds.
+        const updated = await ctx.context.adapter.findOne({
+          model: 'user',
+          where: [{ field: 'id', value: userId }],
+        });
+        await refreshCookie(updated);
+
+        return ctx.json({ network, domain, created: true });
+      },
+    ),
   },
 });
+

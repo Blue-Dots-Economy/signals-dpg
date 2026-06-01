@@ -4,6 +4,7 @@ import { api, instance, auth, notification } from '@/config';
 import { db } from '@api/db/postgres/drizzle_config';
 import { redis } from '@api/db/secondary/redis';
 import { getNotificationClient } from '@/utils/notificationClient';
+import { isServedDomainBinding } from '@/utils/served_domain_guard';
 
 export const authInstance = createAuth({
   appName: instance.INSTANCE_NAME ?? 'DPG',
@@ -26,4 +27,5 @@ export const authInstance = createAuth({
   createTestOTP: auth.CREATE_TEST_OTP,
   notificationClient: getNotificationClient(),
   smsTemplateId: notification.SMS_TEMPLATE_ID,
+  isServedBinding: isServedDomainBinding,
 });

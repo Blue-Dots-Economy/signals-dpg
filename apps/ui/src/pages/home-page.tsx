@@ -25,6 +25,7 @@ import { ACTION_CONSENT_SENTINEL } from '@/lib/action-api';
 import { EmptyState } from '@/components/empty-state';
 import { fetchNetworkConfigs, fetchNetworkConfig, fetchNetworkItems } from '@/lib/network-api';
 import { useAuth } from '@/contexts/auth-context';
+import { useMyNetworks } from '@/hooks/use-my-networks';
 import { apiConfig } from '@/lib/api-config';
 
 function itemToCardItem(item: Item): { id: string; data: Record<string, unknown> } {
@@ -139,6 +140,11 @@ function resolveDefaultViewMode(): ViewMode {
 
 export function HomePage() {
   const { user } = useAuth();
+  // The "Create profile" prompt should only appear on the tab matching
+  // the user's registered domain for this network (e.g. a seeker user
+  // browsing the Provider tab shouldn't be invited to create a provider
+  // profile — they can't anyway).
+  const { data: myMemberships } = useMyNetworks(Boolean(user));
   const [searchParams, setSearchParams] = useSearchParams();
   const [search, setSearch] = React.useState('');
   const [viewMode, setViewMode] = React.useState<ViewMode>(
@@ -150,13 +156,16 @@ export function HomePage() {
   const [resolvedNetwork, setResolvedNetwork] = React.useState<DotNetworkSchema | null>(null);
   const [allNetworks, setAllNetworks] = React.useState<DotNetworkSchema[]>([]);
   const configuredNetworkIds = parseNetworkIds(import.meta.env.VITE_NETWORK_ID);
-  
-  // Get network from URL query param, fallback to env config
+
+  // Get network from URL query param. Don't pre-seed from VITE_NETWORK_ID —
+  // that env can drift from what the API actually serves (e.g. a deploy
+  // restricted to purple_dot but a build with VITE_NETWORK_ID=blue_dot),
+  // causing /schemas?network=blue_dot fetches that return []. The
+  // fetch-networks effect below sets selectedNetworkId from the API's
+  // first served network once it loads.
   const networkFromUrl = searchParams.get('network');
-  const initialNetworkId = networkFromUrl && configuredNetworkIds.includes(networkFromUrl)
-    ? networkFromUrl
-    : (configuredNetworkIds[0] || null);
-  
+  const initialNetworkId = networkFromUrl;
+
   const [selectedNetworkId, setSelectedNetworkId] = React.useState<string | null>(initialNetworkId);
   const [domainItems, setDomainItems] = React.useState<Record<string, Item[]>>({});
   const [myItems, setMyItems] = React.useState<Item[]>([]);
@@ -566,7 +575,20 @@ export function HomePage() {
           title={contentTitle}
           description={contentDescription}
           count={loading ? undefined : contentCount}
-          noProfilePrompt={{ show: !myItem, networkId: selectedNetworkId ?? '' }}
+          noProfilePrompt={{
+            show:
+              !myItem &&
+              (() => {
+                const m = myMemberships?.find(
+                  (x) => x.network === selectedNetworkId,
+                );
+                // Only invite create-profile on the user's own role tab.
+                // No membership → don't invite at all (the network-join
+                // gate handles that case).
+                return Boolean(m && m.domain === selectedDomain);
+              })(),
+            networkId: selectedNetworkId ?? '',
+          }}
         />
       )}
       {viewMode === 'list' ? (

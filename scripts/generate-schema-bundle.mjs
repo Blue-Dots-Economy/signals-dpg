@@ -23,7 +23,6 @@ const FILES = [
   'auth.sql',                  // better-auth tables (Plan 4 Task A.2)
   'metrics.sql',               // participant_metrics (FKs to user + organization)
   'pii_reveal_audit.sql',      // PII-reveal audit log (no FKs — partitioned refs)
-  'user_network.sql',          // user ↔ (network, domain) membership bridge
   'create_items.sql',          // items table + partitions
   'create_actions_events.sql', // item_actions + action_events
 ];

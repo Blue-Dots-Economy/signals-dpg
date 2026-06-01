@@ -65,6 +65,9 @@ CREATE TABLE IF NOT EXISTS "user" (
   "onboarded_via"       text,
   "onboarded_source_id" text,
   "onboarded_at"        timestamp,
+  -- Multi-network membership. Each element is "network/domain", e.g.
+  -- 'blue_dot/seeker'. App enforces at most one entry per network.
+  "domains"             text[] NOT NULL DEFAULT '{}',
   CONSTRAINT "user_email_unique" UNIQUE ("email"),
   CONSTRAINT "user_phone_number_unique" UNIQUE ("phone_number")
 );
@@ -84,6 +87,12 @@ ALTER TABLE "user" ADD COLUMN IF NOT EXISTS "onboarded_by_org_id" text;
 ALTER TABLE "user" ADD COLUMN IF NOT EXISTS "onboarded_via" text;
 ALTER TABLE "user" ADD COLUMN IF NOT EXISTS "onboarded_source_id" text;
 ALTER TABLE "user" ADD COLUMN IF NOT EXISTS "onboarded_at" timestamp;
+ALTER TABLE "user" ADD COLUMN IF NOT EXISTS "domains" text[] NOT NULL DEFAULT '{}';
+
+-- GIN index for fast `domains @> ARRAY[...]` / `&&` / `= ANY` lookups —
+-- "all users in X/Y" stays sub-ms even at scale.
+CREATE INDEX IF NOT EXISTS "user_domains_gin_idx"
+  ON "user" USING GIN ("domains");
 
 DO $$
 BEGIN

@@ -12,8 +12,7 @@ interface AuthState extends AuthIdentifier {
   userExists: boolean;
   name?: string;
   redirectTo?: string;
-  network?: string;
-  domain?: string;
+  domains?: string[];
 }
 
 function getAuthIdentifier(state: AuthState): AuthIdentifier {
@@ -55,8 +54,7 @@ export function OtpPage() {
         getAuthIdentifier(state),
         otp,
         state.userExists ? undefined : state.name,
-        state.userExists ? undefined : state.network,
-        state.userExists ? undefined : state.domain,
+        state.userExists ? undefined : state.domains,
       );
       toast.success(state.userExists ? 'Welcome back!' : 'Account created successfully!', {
         description: state.userExists

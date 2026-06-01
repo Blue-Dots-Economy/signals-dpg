@@ -4,6 +4,7 @@ import { RequireAuth } from '@/components/auth/require-auth';
 import { AuthProvider } from '@/contexts/auth-context';
 import { NetworkThemeProvider } from '@/theme/theme-provider';
 import { ThemeModeProvider } from '@/theme/mode-provider';
+import { NetworkJoinGate } from '@/components/auth/network-join-gate';
 import { HomePage } from './pages/home-page';
 import { ProfileFormPage } from './pages/profile-form-page';
 import { LoginPage } from './pages/auth/login-page';
@@ -23,6 +24,7 @@ export function App() {
             offset={20}
             toastOptions={{ duration: 5000 }}
           />
+          <NetworkJoinGate />
           <Routes>
             <Route path="/" element={<HomePage />} />
             <Route path="/profile/new" element={<RequireAuth><ProfileFormPage /></RequireAuth>} />

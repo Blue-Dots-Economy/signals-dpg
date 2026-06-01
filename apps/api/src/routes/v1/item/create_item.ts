@@ -2,7 +2,7 @@ import { type FastifyPluginAsyncZod } from 'fastify-type-provider-zod';
 import z, { CreateItemBodySchema } from '@dpg/schemas';
 import { FastifyReply, FastifyRequest } from 'fastify';
 import { db } from '@api/db/postgres/drizzle_config';
-import { DrizzleQueryError } from 'drizzle-orm';
+import { DrizzleQueryError, eq } from 'drizzle-orm';
 import { DatabaseError, ensureItemPartition } from '@dpg/database';
 import { auth_middleware_if_enabled } from '@api/plugins/auth/auth_middleware';
 import {
@@ -11,6 +11,7 @@ import {
 } from '@/utils/served_domain_guard';
 import { invalidateItemFetchCache } from '@/utils/item_fetch_cache_invalidate';
 import { createItemInternal, ItemServiceError } from '@/services/item_service';
+import { user } from '@api/db/postgres/schema/auth';
 
 type CreateItemRequest = FastifyRequest<{
   Body: z.infer<typeof CreateItemBodySchema>;
@@ -82,6 +83,40 @@ export const create_item_handler = async (
       body.item_network,
       body.item_domain
     );
+  }
+
+  // Membership check: user.domains is a text[] of "network/domain". A user
+  // can hold only one domain per network (app-enforced). Reject creates
+  // when this network is absent from the user's domains, and reject when
+  // present under a different domain. Admin api-key callers bypass —
+  // they're acting on behalf of the user with explicit intent.
+  if (!isAdminApiCaller) {
+    const userRows = await db
+      .select({ domains: user.domains })
+      .from(user)
+      .where(eq(user.id, userId))
+      .limit(1);
+
+    const userDomains = userRows[0]?.domains ?? [];
+    const networkPrefix = `${body.item_network}/`;
+    const matched = userDomains.find((d) => d.startsWith(networkPrefix));
+    const requestedBinding = `${body.item_network}/${body.item_domain}`;
+
+    if (!matched) {
+      return reply.code(403).send({
+        error: 'NO_NETWORK_MEMBERSHIP',
+        message: `user is not a member of network "${body.item_network}"`,
+      });
+    }
+    if (matched !== requestedBinding) {
+      const registeredDomain = matched.slice(networkPrefix.length);
+      return reply.code(403).send({
+        error: 'DOMAIN_MISMATCH',
+        message: `user is registered as "${registeredDomain}" in "${body.item_network}"; cannot create items under "${body.item_domain}"`,
+        registered_domain: registeredDomain,
+        requested_domain: body.item_domain,
+      });
+    }
   }
 
   try {

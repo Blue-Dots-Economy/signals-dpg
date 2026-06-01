@@ -1,15 +1,29 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { Loader2, ArrowLeft } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import { AuthShell } from '@/components/layout/auth-shell';
-import { checkUser, requestOtp, type AuthIdentifier } from '@/lib/auth-api';
-import { useNetworkTheme } from '@/theme/theme-provider';
-import { useNetworkConfig } from '@/hooks/use-network-config';
+import {
+  checkUser,
+  isValidPhoneNumber,
+  requestOtp,
+  type AuthIdentifier,
+} from '@/lib/auth-api';
+import { fetchNetworkConfigs } from '@/lib/network-api';
+import type { DotNetworkSchema } from '@/engine/types';
 import { toast } from 'sonner';
 
 type AuthMode = 'phone' | 'email';
+
+const NONE = '__none__';
 
 export function LoginPage() {
   const navigate = useNavigate();
@@ -22,12 +36,24 @@ export function LoginPage() {
   const [isLoading, setIsLoading] = useState(false);
   const redirectTo = searchParams.get('redirect') ?? '/';
 
-  // Domain pick — only asked when creating a new account. Network comes
-  // from the active theme (per-deploy), so the user never picks it.
-  const { themeId } = useNetworkTheme();
-  const { data: networkConfig } = useNetworkConfig(themeId);
-  const domainOptions = networkConfig?.domains ?? [];
-  const [domain, setDomain] = useState('');
+  // All served networks — signup shows one role dropdown per network so
+  // multi-dot deployments let the user pick a role in each network they
+  // want to join (or skip). Stored as map { network: domain | '' }; on
+  // submit we serialize to ["network/domain", ...].
+  const [networks, setNetworks] = useState<DotNetworkSchema[]>([]);
+  const [domainByNetwork, setDomainByNetwork] = useState<
+    Record<string, string>
+  >({});
+
+  useEffect(() => {
+    if (userExists !== false) return;
+    if (networks.length > 0) return;
+    fetchNetworkConfigs()
+      .then((cfgs) => setNetworks(cfgs))
+      .catch(() => {
+        /* picker hides itself when list stays empty */
+      });
+  }, [userExists, networks.length]);
 
   const identifier: AuthIdentifier = mode === 'email' ? { email } : { phoneNumber };
   const contactValue = mode === 'email' ? email : phoneNumber;
@@ -38,9 +64,29 @@ export function LoginPage() {
     setUserExists(null);
   };
 
+  const selectedBindings = Object.entries(domainByNetwork)
+    .filter(([, d]) => d && d !== NONE)
+    .map(([n, d]) => `${n}/${d}`);
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!contactValue.trim()) return;
+
+    // Client-side validation — server won't crash on a malformed number
+    // but the OTP send will fail silently. Surface a clean inline error.
+    if (mode === 'phone' && !isValidPhoneNumber(phoneNumber)) {
+      toast.error('Invalid mobile number', {
+        description:
+          'Enter a 10-digit Indian mobile number (must start with 6, 7, 8, or 9). +91 prefix is optional.',
+      });
+      return;
+    }
+    if (mode === 'email' && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) {
+      toast.error('Invalid email', {
+        description: 'Enter a valid email address (e.g. name@example.com).',
+      });
+      return;
+    }
 
     setIsLoading(true);
     try {
@@ -61,10 +107,11 @@ export function LoginPage() {
           });
           return;
         }
-        if (!domain) {
+        if (selectedBindings.length === 0) {
           setIsLoading(false);
-          toast.info('Pick your role', {
-            description: 'Select how you want to participate in this network.',
+          toast.info('Pick at least one role', {
+            description:
+              'Select your role in at least one network to continue.',
           });
           return;
         }
@@ -75,14 +122,14 @@ export function LoginPage() {
             userExists: exists,
             name,
             redirectTo,
-            network: themeId,
-            domain,
+            domains: selectedBindings,
           },
         });
       }
     } catch {
       toast.error('Couldn\'t send verification code', {
-        description: 'Check your connection and make sure the number or email is correct, then try again.',
+        description:
+          "Check your connection and make sure the number or email is correct, then try again.",
       });
     } finally {
       setIsLoading(false);
@@ -91,7 +138,6 @@ export function LoginPage() {
 
   return (
     <AuthShell>
-      {/* Back link */}
       <button
         type="button"
         onClick={() => navigate('/')}
@@ -101,7 +147,6 @@ export function LoginPage() {
         Back
       </button>
 
-      {/* Heading */}
       <div className="mb-6">
         <h2 className="text-2xl font-bold text-foreground">
           {userExists === null
@@ -115,12 +160,11 @@ export function LoginPage() {
             ? 'Continue with email or mobile to receive a verification code'
             : userExists
               ? `Enter your ${contactLabel} to sign in`
-              : `Enter your ${contactLabel} and name to get started`}
+              : `Enter your ${contactLabel} and pick your role in each network`}
         </p>
       </div>
 
       <form onSubmit={handleSubmit} className="space-y-4">
-        {/* Phone / Email pill toggle */}
         <div className="flex rounded-full border border-border bg-muted p-1 text-sm">
           {(['phone', 'email'] as AuthMode[]).map((m) => (
             <button
@@ -139,7 +183,6 @@ export function LoginPage() {
           ))}
         </div>
 
-        {/* Contact input */}
         <div className="space-y-1.5">
           <Label htmlFor="contact" className="text-sm font-medium">
             {mode === 'email' ? 'Email or mobile number' : 'Mobile number'}
@@ -169,7 +212,6 @@ export function LoginPage() {
           )}
         </div>
 
-        {/* Name + role — only shown when creating account */}
         {userExists === false && (
           <>
             <div className="space-y-1.5">
@@ -192,35 +234,84 @@ export function LoginPage() {
                   : "We'll send a one-time code to verify your number."}
               </p>
             </div>
-            <div className="space-y-1.5">
-              <Label htmlFor="domain" className="text-sm font-medium">
-                Your role
-              </Label>
-              <select
-                id="domain"
-                value={domain}
-                onChange={(e) => setDomain(e.target.value)}
-                disabled={isLoading || domainOptions.length === 0}
-                required
-                className="h-11 w-full rounded-md border border-input bg-background px-3 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                <option value="" disabled>
-                  {domainOptions.length === 0
-                    ? 'Loading roles…'
-                    : 'Select your role'}
-                </option>
-                {domainOptions.map((d) => (
-                  <option key={d.id} value={d.id}>
-                    {d.id}
-                    {d.description ? ` — ${d.description}` : ''}
-                  </option>
-                ))}
-              </select>
-            </div>
+            {networks.length === 0 ? (
+              <p className="text-xs text-muted-foreground">Loading networks…</p>
+            ) : (
+              networks.map((n) => {
+                const value = domainByNetwork[n.id] ?? '';
+                const displayName = n.display_name ?? n.id;
+                const singleNetwork = networks.length === 1;
+                // Single-network deploys: role is required, no skip option.
+                // Multi-network deploys: each network is optional with a
+                // skip entry, so the user can join only the ones they want.
+                return (
+                  <div key={n.id} className="space-y-1.5">
+                    <Label
+                      htmlFor={`domain-${n.id}`}
+                      className="text-sm font-medium"
+                    >
+                      {singleNetwork ? 'Your role' : `${displayName} role`}
+                    </Label>
+                    <Select
+                      value={value}
+                      onValueChange={(v) =>
+                        setDomainByNetwork((prev) => ({
+                          ...prev,
+                          [n.id]: v === NONE ? '' : v,
+                        }))
+                      }
+                      disabled={isLoading}
+                    >
+                      <SelectTrigger id={`domain-${n.id}`} className="h-11 w-full">
+                        <SelectValue
+                          placeholder={
+                            singleNetwork ? 'Select your role' : 'Select role or skip'
+                          }
+                        >
+                          {value ? (
+                            <span className="capitalize">{value}</span>
+                          ) : null}
+                        </SelectValue>
+                      </SelectTrigger>
+                      <SelectContent
+                        position="popper"
+                        className="w-[var(--radix-select-trigger-width)] max-w-[var(--radix-select-trigger-width)]"
+                      >
+                        {!singleNetwork && (
+                          <SelectItem value={NONE} textValue="Skip this network">
+                            <span className="text-muted-foreground">
+                              — Skip this network —
+                            </span>
+                          </SelectItem>
+                        )}
+                        {(n.domains ?? []).map((d) => (
+                          <SelectItem
+                            key={d.id}
+                            value={d.id}
+                            textValue={d.id}
+                            className="py-2"
+                          >
+                            <div className="flex flex-col gap-0.5 text-left">
+                              <span className="capitalize font-medium leading-tight">
+                                {d.id}
+                              </span>
+                              {d.description ? (
+                                <span className="text-xs text-muted-foreground leading-snug whitespace-normal break-words">
+                                  {d.description}
+                                </span>
+                              ) : null}
+                            </div>
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                );
+              })
+            )}
           </>
         )}
 
-        {/* CTA */}
         <button
           type="submit"
           disabled={isLoading}

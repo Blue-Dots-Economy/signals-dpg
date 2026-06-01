@@ -19,4 +19,9 @@ export interface AuthRuntimeConfig {
   createTestOTP?: boolean;
   notificationClient?: NotificationClient;
   smsTemplateId?: string;
+  /**
+   * Predicate used by /unified-otp/join-network to reject bindings the host
+   * doesn't serve. Wired by the host (apps/api) to apiConfig.served_domains.
+   */
+  isServedBinding?: (network: string, domain: string) => boolean;
 }

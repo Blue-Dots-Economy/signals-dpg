@@ -17,6 +17,7 @@ import type { DotNetworkSchema } from '@/engine/types';
 import { getConfiguredWalletProviders } from '@/engine/wallet/wallet-registry';
 import type { WalletImportResult } from '@/engine/wallet/types';
 import { useAuth } from '@/contexts/auth-context';
+import { useMyNetworks } from '@/hooks/use-my-networks';
 import { mergeImportedDataIntoSchema } from '@/lib/import-mapping';
 
 import {
@@ -175,7 +176,29 @@ export function ProfileFormPage() {
   }, [isEdit, id, resolvedNetwork]);
 
   const network = resolvedNetwork;
-  const domains = network?.domains ?? [];
+
+  // Filter network domains down to the user's membership for this network.
+  // A user holds only one domain per network (app-enforced; user.domains
+  // text[] stores at most one "network/X" entry per network); the picker
+  // should reflect that — no point offering a role they're not allowed
+  // to create items under.
+  const { data: myMemberships } = useMyNetworks(Boolean(user));
+  const allDomains = network?.domains ?? [];
+  const myDomainHere = React.useMemo(() => {
+    if (!network || !myMemberships) return null;
+    return myMemberships.find((m) => m.network === network.id)?.domain ?? null;
+  }, [network, myMemberships]);
+  const domains = React.useMemo(() => {
+    if (!myDomainHere) return allDomains;
+    return allDomains.filter((d) => d.id === myDomainHere);
+  }, [allDomains, myDomainHere]);
+
+  // Auto-select the single allowed domain so the picker step is skipped.
+  React.useEffect(() => {
+    if (!selectedDomain && !isEdit && myDomainHere) {
+      setSelectedDomain(myDomainHere);
+    }
+  }, [selectedDomain, isEdit, myDomainHere]);
 
   // Find the profile schema for the selected domain
   const profileSchema = React.useMemo<RJSFSchema | null>(() => {
@@ -460,11 +483,22 @@ export function ProfileFormPage() {
           <div className="relative z-10 px-5 pt-4 sm:px-6">
             <button
               type="button"
-              onClick={() => (selectedDomain && !isEdit ? setSelectedDomain(null) : navigate(`/?network=${resolvedNetwork?.id ?? ''}`))}
+              onClick={() => {
+                // When the user has a fixed membership domain, the picker step
+                // is skipped entirely — clearing selectedDomain would just be
+                // re-applied by the auto-select effect, so go straight home.
+                if (selectedDomain && !isEdit && !myDomainHere) {
+                  setSelectedDomain(null);
+                } else {
+                  navigate(`/?network=${resolvedNetwork?.id ?? ''}`);
+                }
+              }}
               className="flex items-center gap-1.5 text-sm text-white/70 hover:text-white transition-colors"
             >
               <ArrowLeft className="h-4 w-4" />
-              {selectedDomain && !isEdit ? 'Choose different role' : 'Back'}
+              {selectedDomain && !isEdit && !myDomainHere
+                ? 'Choose different role'
+                : 'Back'}
             </button>
           </div>
           <div className="relative z-10 flex items-center gap-4 px-5 pb-6 pt-3 sm:px-6">

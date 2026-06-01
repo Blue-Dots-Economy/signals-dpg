@@ -12,10 +12,15 @@ interface AuthContextType {
     identifier: AuthIdentifier,
     otp: string,
     name?: string,
-    network?: string,
-    domain?: string,
+    domains?: string[],
   ) => Promise<void>;
   signOut: () => Promise<void>;
+  /**
+   * Re-fetches /api/auth/get-session and updates the context. Use after
+   * mutating fields on the user row (e.g. joining a network) so the new
+   * value flows into useMyNetworks without a page reload.
+   */
+  refreshSession: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -25,6 +30,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [isLoading, setIsLoading] = useState(true);
 
   const fetchSession = useCallback(async () => {
+    // Mark loading BEFORE the await so consumers (e.g. NetworkJoinGate)
+    // that gate on isLoading don't briefly re-render with the prior
+    // user state between a refreshSession() call and the GET completing.
+    setIsLoading(true);
     try {
       const session = await getSession();
       if (session.token) {
@@ -58,11 +67,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       identifier: AuthIdentifier,
       otp: string,
       name?: string,
-      network?: string,
-      domain?: string,
+      domains?: string[],
     ): Promise<void> => {
       const { verifyOtp: verifyOtpApi } = await import('@/lib/auth-api');
-      const response = await verifyOtpApi(identifier, otp, name, network, domain);
+      const response = await verifyOtpApi(identifier, otp, name, domains);
       setAuthToken(response.token);
       setUser(response.user);
     },
@@ -88,6 +96,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         requestOtp,
         verifyOtp,
         signOut,
+        refreshSession: fetchSession,
       }}
     >
       {children}
