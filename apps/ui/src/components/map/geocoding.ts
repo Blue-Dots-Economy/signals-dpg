@@ -1,3 +1,5 @@
+import { getRuntimeEnv } from '@/lib/runtime-env';
+
 export interface GeoCoordinate {
   lat: number;
   lng: number;
@@ -249,7 +251,7 @@ export async function geocodeAddressWithGoogle(address: string): Promise<GeoCoor
   if (!address || typeof address !== 'string') return null;
   if (looksLikePIIMask(address)) return null;
 
-  const apiKey = import.meta.env.VITE_GOOGLE_MAPS_API_KEY;
+  const apiKey = getRuntimeEnv('VITE_GOOGLE_MAPS_API_KEY');
   if (!apiKey || typeof window === 'undefined') return null;
 
   const key = address.trim();
