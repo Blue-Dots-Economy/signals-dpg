@@ -1,4 +1,5 @@
 import * as React from 'react';
+import { useTranslation } from 'react-i18next';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import { RefreshCw, Inbox, Send, AlertCircle } from 'lucide-react';
@@ -41,7 +42,15 @@ export function ActionList({
   onRefresh,
   isRefetching,
 }: ActionListProps) {
+  const { t } = useTranslation();
   const [filter, setFilter] = React.useState<Filter>('All');
+
+  const filterLabels: Record<Filter, string> = {
+    All: t('actions.filter_all'),
+    Pending: t('actions.filter_pending'),
+    Accepted: t('actions.filter_accepted'),
+    Rejected: t('actions.filter_rejected'),
+  };
 
   const actions = activeTab === 'initiated' ? initiatedActions : receivedActions;
 
@@ -52,10 +61,10 @@ export function ActionList({
   }, [actions, filter]);
 
   const tabs = [
-    { id: 'initiated' as const, label: 'Initiated', Icon: Send, count: initiatedActions.length },
-    { id: 'received' as const, label: 'Received', Icon: Inbox, count: receivedActions.length },
+    { id: 'initiated' as const, label: t('actions.tab_initiated'), Icon: Send, count: initiatedActions.length },
+    { id: 'received' as const, label: t('actions.tab_received'), Icon: Inbox, count: receivedActions.length },
   ];
-  const activeIdx = tabs.findIndex((t) => t.id === activeTab);
+  const activeIdx = tabs.findIndex((tab) => tab.id === activeTab);
 
   return (
     <div className="w-full space-y-5">
@@ -73,7 +82,7 @@ export function ActionList({
                   : 'text-muted-foreground hover:text-foreground'
               }`}
             >
-              {f}
+              {filterLabels[f]}
             </button>
           ))}
         </div>
@@ -86,7 +95,7 @@ export function ActionList({
           disabled={isRefetching}
         >
           <RefreshCw className={`mr-2 h-4 w-4 ${isRefetching ? 'animate-spin' : ''}`} />
-          Refresh
+          {t('actions.refresh')}
         </Button>
       </div>
 
@@ -96,25 +105,25 @@ export function ActionList({
           className="absolute bottom-1.5 top-1.5 rounded-xl bg-card shadow-sm transition-[left] duration-300"
           style={{ left: `calc(${activeIdx * 50}% + 6px)`, width: 'calc(50% - 12px)' }}
         />
-        {tabs.map((t) => {
-          const isActive = t.id === activeTab;
+        {tabs.map((tab) => {
+          const isActive = tab.id === activeTab;
           return (
             <button
-              key={t.id}
+              key={tab.id}
               type="button"
-              onClick={() => onTabChange(t.id)}
+              onClick={() => onTabChange(tab.id)}
               className={`relative z-10 flex flex-1 items-center justify-center gap-2 py-2.5 text-sm transition-colors ${
                 isActive ? 'font-bold text-primary' : 'font-semibold text-muted-foreground'
               }`}
             >
-              <t.Icon className={`h-4 w-4 ${isActive ? 'text-primary' : 'text-muted-foreground'}`} />
-              {t.label}
+              <tab.Icon className={`h-4 w-4 ${isActive ? 'text-primary' : 'text-muted-foreground'}`} />
+              {tab.label}
               <span
                 className={`inline-flex h-5 min-w-[22px] items-center justify-center rounded-full px-1.5 text-[11px] font-bold ${
                   isActive ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground'
                 }`}
               >
-                {t.count}
+                {tab.count}
               </span>
             </button>
           );
@@ -131,9 +140,9 @@ export function ActionList({
       ) : isError ? (
         <div className="flex flex-col items-center justify-center rounded-2xl border border-dashed py-14 text-center">
           <AlertCircle className="mb-3 h-10 w-10 text-destructive" />
-          <h3 className="text-lg font-semibold text-destructive">Failed to load actions</h3>
+          <h3 className="text-lg font-semibold text-destructive">{t('actions.error_heading')}</h3>
           <p className="mt-1.5 max-w-md text-sm text-muted-foreground">
-            {error?.message ?? 'An unexpected error occurred while fetching your actions.'}
+            {error?.message ?? t('actions.error_fallback')}
           </p>
         </div>
       ) : visible.length === 0 ? (
@@ -141,11 +150,13 @@ export function ActionList({
           <div className="mb-3 flex h-14 w-14 items-center justify-center rounded-2xl bg-primary/10 text-primary">
             {activeTab === 'initiated' ? <Send className="h-6 w-6" /> : <Inbox className="h-6 w-6" />}
           </div>
-          <h3 className="text-base font-bold text-foreground">Nothing here yet</h3>
+          <h3 className="text-base font-bold text-foreground">
+            {activeTab === 'initiated' ? t('actions.empty_initiated_heading') : t('actions.empty_received_heading')}
+          </h3>
           <p className="mt-1 text-sm text-muted-foreground">
             {activeTab === 'initiated'
-              ? 'Requests you send will show up here.'
-              : 'Requests sent to you will appear here.'}
+              ? t('actions.empty_initiated_desc')
+              : t('actions.empty_received_desc')}
           </p>
         </div>
       ) : (

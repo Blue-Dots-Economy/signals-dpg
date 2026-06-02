@@ -1,4 +1,5 @@
 import * as React from 'react';
+import { useTranslation } from 'react-i18next';
 import type { RJSFSchema } from '@rjsf/utils';
 import type { MapMarker } from '@/engine/types';
 import { getActiveMapProvider } from '@/engine/map/map-registry';
@@ -48,6 +49,7 @@ export function MapView({
   focusPoint,
   filtersSlot,
 }: MapViewProps) {
+  const { t } = useTranslation();
   const MapProviderComponent = getActiveMapProvider();
   const [markers, setMarkers] = React.useState<MapMarker[]>([]);
   const [loading, setLoading] = React.useState(true);
@@ -205,8 +207,8 @@ export function MapView({
           size="icon"
           className="h-8 w-8 bg-background/95 shadow-md backdrop-blur-sm"
           onClick={() => setIsMaximized((v) => !v)}
-          aria-label={isMaximized ? 'Exit maximized map' : 'Maximize map'}
-          title={isMaximized ? 'Exit maximized map' : 'Maximize map'}
+          aria-label={isMaximized ? t('map.minimize') : t('map.maximize')}
+          title={isMaximized ? t('map.minimize') : t('map.maximize')}
         >
           {isMaximized ? <Minimize2 className="h-4 w-4" /> : <Maximize2 className="h-4 w-4" />}
         </Button>
@@ -216,8 +218,8 @@ export function MapView({
         <div className="pointer-events-none absolute inset-0 z-[900] flex items-center justify-center">
           <p className="rounded-md bg-background/90 px-4 py-2 text-sm text-muted-foreground shadow-md backdrop-blur-sm">
             {loading
-              ? 'Loading map data...'
-              : 'No items match the current filters.'}
+              ? t('map.loading')
+              : t('map.no_results')}
           </p>
         </div>
       )}

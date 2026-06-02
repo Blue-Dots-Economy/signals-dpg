@@ -1,5 +1,6 @@
 import * as React from 'react';
 import { Copy, ExternalLink, FileText, Loader2 } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
 
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -47,6 +48,7 @@ function detectCodeFromMessage(data: unknown): string | null {
 }
 
 function DigiLockerProvider({ onSuccess, onCancel }: WalletImportProviderProps) {
+  const { t } = useTranslation();
   const [isLoading, setIsLoading] = React.useState(false);
   const [authCode, setAuthCode] = React.useState('');
   const [launchUrl, setLaunchUrl] = React.useState<string | null>(null);
@@ -90,10 +92,10 @@ function DigiLockerProvider({ onSuccess, onCancel }: WalletImportProviderProps) 
           providerName: 'digilocker',
           providerLabel: 'DigiLocker',
           metadata: { provider: 'digilocker' },
-          summary: 'Imported verified details from DigiLocker',
+          summary: t('wallet.digilocker_summary'),
         });
       } catch (err) {
-        setError(err instanceof Error ? err.message : 'Failed to complete DigiLocker import');
+        setError(err instanceof Error ? err.message : t('wallet.digilocker_error_complete'));
       } finally {
         setIsLoading(false);
       }
@@ -133,7 +135,7 @@ function DigiLockerProvider({ onSuccess, onCancel }: WalletImportProviderProps) 
         'width=900,height=700,scrollbars=yes,resizable=yes,toolbar=no,menubar=no,location=yes'
       );
       if (!popupRef.current) {
-        setError('Popup blocked. Please allow popups for this site and try again.');
+        setError(t('wallet.digilocker_popup_blocked'));
         return;
       }
       setIsMonitoring(true);
@@ -161,10 +163,10 @@ function DigiLockerProvider({ onSuccess, onCancel }: WalletImportProviderProps) 
 
       timeoutRef.current = window.setTimeout(() => {
         cleanupPopup(true);
-        setError('DigiLocker authentication timed out. Please try again.');
+        setError(t('wallet.digilocker_timeout'));
       }, 600000);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to start DigiLocker import');
+      setError(err instanceof Error ? err.message : t('wallet.digilocker_error_start'));
     } finally {
       setIsLoading(false);
     }
@@ -178,9 +180,9 @@ function DigiLockerProvider({ onSuccess, onCancel }: WalletImportProviderProps) 
             <FileText className="h-5 w-5" />
           </div>
           <div>
-            <p className="font-medium">DigiLocker</p>
+            <p className="font-medium">{t('wallet.digilocker_title')}</p>
             <p className="text-sm text-muted-foreground">
-              Start the DigiLocker flow in a popup. If the bridge page is configured, the import completes automatically.
+              {t('wallet.digilocker_subtitle')}
             </p>
           </div>
         </div>
@@ -189,23 +191,23 @@ function DigiLockerProvider({ onSuccess, onCancel }: WalletImportProviderProps) 
       <div className="space-y-2">
         <Button variant="outline" onClick={startFlow} disabled={isLoading}>
           {isLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <ExternalLink className="h-4 w-4" />}
-          Open DigiLocker
+          {t('wallet.digilocker_open_btn')}
         </Button>
         {launchUrl ? (
           <p className="text-xs text-muted-foreground">
             {isMonitoring
-              ? 'Waiting for DigiLocker to finish. If automatic detection does not work, you can paste the redirect URL or code below.'
-              : 'If automatic detection does not work, paste the redirect URL or the code below.'}
+              ? t('wallet.digilocker_waiting')
+              : t('wallet.digilocker_manual_hint')}
           </p>
         ) : null}
       </div>
 
       <div className="space-y-2">
-        <p className="text-sm font-medium">Authorization code or redirect URL</p>
+        <p className="text-sm font-medium">{t('wallet.digilocker_code_label')}</p>
         <Input
           value={authCode}
           onChange={(event) => setAuthCode(event.target.value)}
-          placeholder="Paste the code or redirect URL here"
+          placeholder={t('wallet.digilocker_code_placeholder')}
         />
       </div>
 
@@ -214,7 +216,7 @@ function DigiLockerProvider({ onSuccess, onCancel }: WalletImportProviderProps) 
       {launchUrl ? (
         <div className="rounded-md border p-3 text-xs text-muted-foreground">
           <p>
-            Host a redirect bridge page like `public/digilocker-bridge.html` on the callback origin used by DigiLocker for automatic popup callbacks.
+            {t('wallet.digilocker_bridge_hint')}
           </p>
           <Button
             variant="ghost"
@@ -224,23 +226,23 @@ function DigiLockerProvider({ onSuccess, onCancel }: WalletImportProviderProps) 
               try {
                 await navigator.clipboard.writeText(launchUrl);
               } catch {
-                setError('Could not copy the DigiLocker URL to the clipboard.');
+                setError(t('wallet.digilocker_copy_error'));
               }
             }}
           >
             <Copy className="h-4 w-4" />
-            Copy launch URL
+            {t('wallet.digilocker_copy_url')}
           </Button>
         </div>
       ) : null}
 
       <div className="flex justify-between gap-2">
         <Button variant="ghost" onClick={onCancel}>
-          Cancel
+          {t('common.cancel')}
         </Button>
         <Button onClick={() => void completeImport(authCode)} disabled={!authCode.trim() || isLoading}>
           {isLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
-          Import from DigiLocker
+          {t('wallet.digilocker_import_btn')}
         </Button>
       </div>
     </div>

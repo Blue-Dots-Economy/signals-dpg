@@ -1,4 +1,5 @@
 import { Sparkles, Loader2, AlertCircle } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
 import { Button } from '@/components/ui/button';
 import {
   Tooltip,
@@ -30,6 +31,7 @@ export function MatchScoreButton({
   onViewDetails,
   disabled = false,
 }: MatchScoreButtonProps) {
+  const { t } = useTranslation();
   // If we have a score, show the badge
   if (score && !error) {
     return (
@@ -54,12 +56,12 @@ export function MatchScoreButton({
               className="gap-1.5 text-muted-foreground hover:text-destructive"
             >
               <AlertCircle className="h-3.5 w-3.5" />
-              <span className="text-xs">Unable to calculate</span>
+              <span className="text-xs">{t('match.btn_unable')}</span>
             </Button>
           </TooltipTrigger>
           <TooltipContent side="top">
             <p className="max-w-xs text-xs">
-              Click to retry calculating the match score
+              {t('match.tooltip_retry')}
             </p>
           </TooltipContent>
         </Tooltip>
@@ -77,7 +79,7 @@ export function MatchScoreButton({
         className="gap-1.5 min-w-0"
       >
         <Loader2 className="h-3.5 w-3.5 animate-spin" />
-        <span className="truncate">Calculating...</span>
+        <span className="truncate">{t('match.calculating_short')}</span>
       </Button>
     );
   }
@@ -97,15 +99,15 @@ export function MatchScoreButton({
             className="gap-1.5 min-w-0 max-w-full"
           >
             <Sparkles className="h-3.5 w-3.5 shrink-0" />
-            <span className="truncate">See Match Score</span>
+            <span className="truncate">{t('match.btn_see_score')}</span>
           </Button>
         </TooltipTrigger>
         {isDisabled && (
           <TooltipContent side="top">
             <p className="max-w-xs text-xs">
-                {!localItem 
-                ? 'Create a profile to see match scores'
-                : 'Sign in to see match scores'
+                {!localItem
+                ? t('match.tooltip_need_profile')
+                : t('match.tooltip_need_signin')
               }
             </p>
           </TooltipContent>

@@ -1,5 +1,6 @@
 import { useNavigate } from 'react-router-dom';
 import { Search, List, MapPinned, LogIn, Server, Bell } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
 import { Input } from '@/components/ui/input';
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
 import {
@@ -13,6 +14,7 @@ import { SidebarTrigger } from '@/components/ui/sidebar';
 import { Button } from '@/components/ui/button';
 import { UserMenu } from '@/components/auth/user-menu';
 import { ThemeModeToggle } from '@/components/layout/theme-mode-toggle';
+import { LanguageSwitcher } from '@/components/layout/language-switcher';
 import { useAuth } from '@/contexts/auth-context';
 import { apiConfig } from '@/lib/api-config';
 import { usePendingActionsCount } from '@/hooks/use-actions';
@@ -27,6 +29,7 @@ interface TopBarProps {
 
 function NotificationBell() {
   const navigate = useNavigate();
+  const { t } = useTranslation();
   const { data: count = 0 } = usePendingActionsCount();
 
   return (
@@ -35,7 +38,7 @@ function NotificationBell() {
       size="icon"
       className="relative"
       onClick={() => navigate('/my-actions')}
-      aria-label={`${count} pending actions`}
+      aria-label={t('nav.pending_actions', { count })}
     >
       <Bell className="h-4 w-4" />
       {count > 0 && (
@@ -54,6 +57,7 @@ export function TopBar({
   onViewModeChange,
 }: TopBarProps) {
   const navigate = useNavigate();
+  const { t } = useTranslation();
   const { isAuthenticated, isLoading } = useAuth();
 
   return (
@@ -63,7 +67,7 @@ export function TopBar({
         <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
         <Input
           type="search"
-          placeholder="Search..."
+          placeholder={t('common.search')}
           className="pl-8"
           value={search}
           onChange={(e) => onSearchChange(e.target.value)}
@@ -77,10 +81,10 @@ export function TopBar({
             if (value) onViewModeChange(value as ViewMode);
           }}
         >
-          <ToggleGroupItem value="map" aria-label="Map view">
+          <ToggleGroupItem value="map" aria-label={t('nav.map_view')}>
             <MapPinned className="h-4 w-4" />
           </ToggleGroupItem>
-          <ToggleGroupItem value="list" aria-label="List view">
+          <ToggleGroupItem value="list" aria-label={t('nav.list_view')}>
             <List className="h-4 w-4" />
           </ToggleGroupItem>
         </ToggleGroup>
@@ -90,9 +94,9 @@ export function TopBar({
             value={apiConfig.getSelectedKey() ?? 'default'}
             onValueChange={(value) => apiConfig.setSelectedKey(value)}
           >
-            <SelectTrigger className="w-[180px]" aria-label="Select API instance">
+            <SelectTrigger className="w-[180px]" aria-label={t('nav.select_api_instance')}>
               <Server className="h-4 w-4 mr-2" />
-              <SelectValue placeholder="Select API" />
+              <SelectValue placeholder={t('nav.select_api')} />
             </SelectTrigger>
             <SelectContent>
               {apiConfig.getEndpoints().map((ep) => (
@@ -104,6 +108,7 @@ export function TopBar({
           </Select>
         )}
 
+        <LanguageSwitcher />
         <ThemeModeToggle />
 
         {!isLoading && (
@@ -120,7 +125,7 @@ export function TopBar({
               className="gap-2"
             >
               <LogIn className="h-4 w-4" />
-              <span className="hidden sm:inline">Login</span>
+              <span className="hidden sm:inline">{t('common.login')}</span>
             </Button>
           )
         )}

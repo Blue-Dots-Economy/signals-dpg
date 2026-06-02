@@ -1,6 +1,7 @@
 /// <reference types="google.maps" />
 import * as React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
+import { useTranslation } from 'react-i18next';
 import {
   AdvancedMarker,
   APIProvider,
@@ -360,6 +361,7 @@ export function GoogleMapProvider({
   onMarkerClick,
   initialViewSet = false,
 }: MapProviderProps) {
+  const { t } = useTranslation();
   const [activeMarker, setActiveMarker] = React.useState<MapMarker | null>(null);
   const apiKey = import.meta.env.VITE_GOOGLE_MAPS_API_KEY;
 
@@ -367,8 +369,8 @@ export function GoogleMapProvider({
     return (
       <div className="flex h-full items-center justify-center rounded-lg border border-dashed">
         <div className="text-center">
-          <p className="text-muted-foreground">Google Maps provider not configured.</p>
-          <p className="mt-1 text-xs text-muted-foreground">Set VITE_GOOGLE_MAPS_API_KEY to render Google Maps.</p>
+          <p className="text-muted-foreground">{t('map.google_not_configured')}</p>
+          <p className="mt-1 text-xs text-muted-foreground">{t('map.google_set_key')}</p>
         </div>
       </div>
     );

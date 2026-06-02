@@ -2,6 +2,7 @@ import * as React from 'react';
 import type { RJSFSchema } from '@rjsf/utils';
 import { useSearchParams, Link } from 'react-router-dom';
 import { toast } from 'sonner';
+import { useTranslation } from 'react-i18next';
 import type {
   DotNetworkSchema,
   DotActionSchema,
@@ -141,6 +142,7 @@ function resolveDefaultViewMode(): ViewMode {
 }
 
 export function HomePage() {
+  const { t } = useTranslation();
   const { user } = useAuth();
   const [searchParams, setSearchParams] = useSearchParams();
   const [search, setSearch] = React.useState('');
@@ -596,7 +598,7 @@ export function HomePage() {
 
   const contentTitle = selectedDomain
     ? selectedDomain.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())
-    : 'Browse All';
+    : t('home.browse_all');
   const contentDescription = selectedDomain
     ? visibleDomains.find((d) => d.id === selectedDomain)?.description
     : undefined;
@@ -605,17 +607,17 @@ export function HomePage() {
     : Object.values(filteredDomainItems).reduce((s, a) => s + a.length, 0);
 
   function buildEmptyState(domainLabel: string) {
-    if (search) return <EmptyState message={`No results for "${search}"`} />;
+    if (search) return <EmptyState message={t('home.no_search_results', { search })} />;
     // GuestHero already shows the sign-in CTA — keep this message simple
-    if (!user) return <EmptyState message="No listings in this network yet." />;
+    if (!user) return <EmptyState message={t('home.no_listings_yet')} />;
     if (!myItem) {
       return (
         <EmptyState
-          heading="Create your profile"
-          message="Set up a profile to start connecting with others."
+          heading={t('home.empty_create_heading')}
+          message={t('home.empty_create_message')}
           action={
             <Button asChild size="sm">
-              <Link to={`/profile/new?network=${selectedNetworkId ?? ''}`}>Create profile</Link>
+              <Link to={`/profile/new?network=${selectedNetworkId ?? ''}`}>{t('nav.create_profile')}</Link>
             </Button>
           }
         />
@@ -623,8 +625,8 @@ export function HomePage() {
     }
     return (
       <EmptyState
-        heading="Nothing here yet"
-        message={`No ${domainLabel.toLowerCase()} listings found in this network.`}
+        heading={t('home.nothing_here_heading')}
+        message={t('home.no_domain_listings', { domain: domainLabel.toLowerCase() })}
       />
     );
   }
@@ -680,22 +682,22 @@ export function HomePage() {
         <ActionHandler
           onActionSubmit={async (actionType, _actionSchema, formData, targetItemId) => {
             if (!myItem) {
-              toast.error('Profile required', {
-                description: 'You need to create your own profile before you can connect with others.',
+              toast.error(t('home.toast_profile_required'), {
+                description: t('home.toast_profile_required_desc'),
               });
               throw new Error('No source item');
             }
             if (!user) {
-              toast.error('Sign in to connect', {
-                description: 'You need to be signed in to send connection requests.',
+              toast.error(t('nav.sign_in_to_connect'), {
+                description: t('home.toast_sign_in_desc'),
               });
               throw new Error('No user');
             }
             const allItems = Object.values(domainItems).flat();
             const targetItem = allItems.find((i) => i.item_id === targetItemId);
             if (!targetItem) {
-              toast.error('Profile not found', {
-                description: 'The profile you\'re trying to connect with is no longer available. Try refreshing the page.',
+              toast.error(t('home.toast_profile_not_found'), {
+                description: t('home.toast_profile_not_found_desc'),
               });
               throw new Error('Target item not found');
             }
@@ -745,8 +747,8 @@ export function HomePage() {
               },
               sourceItemInstanceUrl // Call the SOURCE instance (where myItem exists)
             );
-            toast.success(`${actionType.charAt(0).toUpperCase() + actionType.slice(1)} request sent!`, {
-              description: 'The other party will be notified and can accept or respond to your request.',
+            toast.success(t('home.toast_action_sent', { action: actionType.charAt(0).toUpperCase() + actionType.slice(1) }), {
+              description: t('home.toast_action_sent_desc'),
             });
           }}
         >
