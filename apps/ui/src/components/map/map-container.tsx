@@ -1,10 +1,9 @@
 import * as React from 'react';
 import type { RJSFSchema } from '@rjsf/utils';
-import type { MapMarker, DotNetworkDomain } from '@/engine/types';
+import type { MapMarker } from '@/engine/types';
 import { getActiveMapProvider } from '@/engine/map/map-registry';
 import { extractAddressFromForm, extractPincodeFromForm, normalizeFieldName } from '@/lib/item-utils';
 import { geocodePincode, geocodeAddress, geocodeAddressWithGoogle } from './geocoding';
-import { MapFiltersPanel } from './map-filters-panel';
 import { Button } from '@/components/ui/button';
 import { Maximize2, Minimize2 } from 'lucide-react';
 
@@ -29,25 +28,11 @@ interface MapViewProps {
    */
   focusPoint?: { lat: number; lng: number } | null;
   /**
-   * Visible domains from the network config. Used to render the domain group
-   * inside the filters panel. When absent the domain group is hidden.
+   * The Filters control. Rendered inside the map overlay ONLY when the map is
+   * maximized (in normal mode the page header hosts it, but that header is
+   * covered when the map goes fullscreen, so we surface it here too).
    */
-  visibleDomains?: DotNetworkDomain[];
-  /** Active domain filter values (empty = all). Controlled from home-page. */
-  selectedDomains?: string[];
-  /** Called when the domain filter selection changes. */
-  onDomainsChange?: (domains: string[]) => void;
-  /** Active status filter values (empty = all). Controlled from home-page. */
-  selectedStatuses?: string[];
-  /** Called when the status filter selection changes. */
-  onStatusesChange?: (statuses: string[]) => void;
-  /**
-   * Active enum-field filter values (fieldKey → selected values).
-   * Controlled from home-page.
-   */
-  selectedFields?: Record<string, string[]>;
-  /** Called when enum field filter selections change. */
-  onFieldsChange?: (fields: Record<string, string[]>) => void;
+  filtersSlot?: React.ReactNode;
 }
 
 const INDIA_CENTER: [number, number] = [20.5937, 78.9629];
@@ -61,13 +46,7 @@ export function MapView({
   center = INDIA_CENTER,
   zoom = INDIA_ZOOM,
   focusPoint,
-  visibleDomains,
-  selectedDomains,
-  onDomainsChange,
-  selectedStatuses,
-  onStatusesChange,
-  selectedFields,
-  onFieldsChange,
+  filtersSlot,
 }: MapViewProps) {
   const MapProviderComponent = getActiveMapProvider();
   const [markers, setMarkers] = React.useState<MapMarker[]>([]);
@@ -194,18 +173,12 @@ export function MapView({
     return () => { cancelled = true; };
   }, [items, schema]);
 
-  const showFilters =
-    visibleDomains !== undefined &&
-    onDomainsChange !== undefined &&
-    onStatusesChange !== undefined &&
-    onFieldsChange !== undefined;
-
-  // The map, the filters pill and the maximize button always render. Loading
-  // and empty states are shown as overlays ON TOP of the map rather than
-  // replacing it — otherwise a filter that yields zero markers would remove the
-  // map AND the controls, trapping the user with no way to clear the filter.
-  // The overlay lives in the same wrapper that gets maximized, so the controls
-  // stay visible in maximized mode (unlike the provider's native fullscreen).
+  // The map and the maximize button always render. Loading and empty states are
+  // shown as overlays ON TOP of the map rather than replacing it — otherwise a
+  // filter that yields zero markers would remove the map, leaving the user with
+  // nothing. The overlay lives in the same wrapper that gets maximized, so the
+  // control stays visible in maximized mode (unlike the provider's native
+  // fullscreen). The Filters control lives in the page header, not here.
   return (
     <div
       className={
@@ -221,20 +194,11 @@ export function MapView({
         onMarkerClick={onMarkerClick}
         initialViewSet={initialViewSet}
       />
-      {/* Top-right overlay: filters pill + maximize toggle. Placed top-right to
-          avoid the providers' top-left controls (Leaflet zoom, Google map type). */}
+      {/* Top-right overlay: Filters (only while maximized — the page header
+          hosts it normally but is hidden in fullscreen) + maximize toggle.
+          Placed top-right to avoid the providers' top-left controls. */}
       <div className="absolute right-2 top-2 z-[1000] flex items-center gap-2">
-        {showFilters && (
-          <MapFiltersPanel
-            domains={visibleDomains ?? []}
-            selectedDomains={selectedDomains ?? []}
-            onDomainsChange={onDomainsChange!}
-            selectedStatuses={selectedStatuses ?? []}
-            onStatusesChange={onStatusesChange!}
-            selectedFields={selectedFields ?? {}}
-            onFieldsChange={onFieldsChange!}
-          />
-        )}
+        {isMaximized && filtersSlot}
         <Button
           type="button"
           variant="outline"

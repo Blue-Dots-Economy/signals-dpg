@@ -1,5 +1,6 @@
 /// <reference types="google.maps" />
 import * as React from 'react';
+import { renderToStaticMarkup } from 'react-dom/server';
 import {
   AdvancedMarker,
   APIProvider,
@@ -13,14 +14,17 @@ import { MarkerClusterer, type Renderer, type Cluster } from '@googlemaps/marker
 import type { MapMarker, MapProviderProps } from '@/engine/types';
 import { registerMapProvider } from '@/engine/map/map-registry';
 import { getIconForDomain } from '../domain-icons';
+import { tallyDomains } from '../cluster-breakdown';
 import { MarkerPopupCard } from '../marker-popup-card';
 
 /**
- * Custom cluster renderer so the cluster bubble uses the active network theme
- * (`bg-primary` / `text-primary-foreground`) instead of the library's default
- * blue. Renders an AdvancedMarkerElement whose content is a themed circle with
- * the child count. Size scales gently with the count.
+ * Module-level WeakMap: AdvancedMarkerElement → domain string.
+ * Populated by each ClusteredMarker when its underlying element becomes
+ * available; read by the cluster renderer to tally per-domain counts.
+ * WeakMap ensures entries are GC-eligible alongside the element object.
  */
+const markerDomainMap = new WeakMap<object, string>();
+
 /**
  * Resolves a CSS custom property (e.g. --primary) to a concrete rgb/hex string.
  * The theme stores --primary as an `oklch(...)` value; an SVG data-URI `fill`
@@ -44,29 +48,76 @@ function resolveThemeColor(varName: string, fallback: string): string {
 }
 
 /**
+ * Builds the cluster bubble as an HTML element (for AdvancedMarkerElement
+ * content). Rendering as real HTML — rather than an SVG data-URI — lets the
+ * lucide icons keep their stroke styling and lets the mini badges tuck neatly
+ * under the main circle via flexbox, matching the intended design.
+ *
+ * A main circle shows the total (themed --primary background, white text). When
+ * the cluster spans more than one domain, a row of small white chips below it
+ * shows each domain's icon + count (sorted by count desc).
+ */
+function buildClusterContent(
+  total: number,
+  breakdown: Array<{ domain: string; count: number }>,
+  primary: string,
+): HTMLElement {
+  const wrap = document.createElement('div');
+  // AdvancedMarkerElement anchors content bottom-centre to the point; shift down
+  // so the bubble sits roughly centred over the cluster location.
+  wrap.style.cssText =
+    'display:flex;flex-direction:column;align-items:center;transform:translateY(50%);';
+
+  const size = total < 10 ? 38 : total < 100 ? 44 : 50;
+  const circle = document.createElement('div');
+  circle.style.cssText =
+    `display:flex;align-items:center;justify-content:center;width:${size}px;height:${size}px;` +
+    `background:${primary};color:#ffffff;border:2px solid #ffffff;border-radius:9999px;` +
+    `box-shadow:0 1px 4px rgba(0,0,0,0.35);font:600 14px ui-sans-serif,system-ui,sans-serif;`;
+  circle.textContent = String(total);
+  wrap.appendChild(circle);
+
+  if (breakdown.length > 1) {
+    const badges = document.createElement('div');
+    badges.style.cssText = 'display:flex;gap:4px;margin-top:-8px;';
+    for (const b of breakdown) {
+      const Icon = getIconForDomain(b.domain);
+      const iconSvg = renderToStaticMarkup(
+        React.createElement(Icon, { size: 11, color: primary, strokeWidth: 2.4 }),
+      );
+      const chip = document.createElement('span');
+      chip.style.cssText =
+        'display:inline-flex;align-items:center;gap:3px;background:#ffffff;border:1px solid #e2e8f0;' +
+        'border-radius:9999px;padding:2px 7px 2px 5px;font:600 11px ui-sans-serif,system-ui,sans-serif;' +
+        'color:#1e293b;box-shadow:0 1px 2px rgba(0,0,0,0.18);line-height:1;';
+      chip.innerHTML = `${iconSvg}<span>${b.count}</span>`;
+      badges.appendChild(chip);
+    }
+    wrap.appendChild(badges);
+  }
+
+  return wrap;
+}
+
+/**
  * Custom cluster renderer so the cluster bubble uses the active network theme
- * colour instead of the library's default blue. Renders a single themed circle
- * (SVG) with the child count — mirrors markerclusterer's own DefaultRenderer
- * pattern but with our --primary colour.
+ * colour (instead of the library's default blue) and shows a per-domain
+ * breakdown. Returns an AdvancedMarkerElement with HTML content.
  */
 const clusterRenderer: Renderer = {
   render(cluster: Cluster) {
-    const { count, position } = cluster;
+    const { count, position, markers } = cluster;
     // Neutral gray fallback used only if --primary can't be resolved — must not
     // be a specific network's brand colour.
-    const fill = resolveThemeColor('--primary', '#6b7280');
-    const size = count < 10 ? 36 : count < 100 ? 42 : 48;
-    const r = size / 2;
-    const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 ${size} ${size}"><circle cx="${r}" cy="${r}" r="${r - 2}" fill="${fill}" stroke="#ffffff" stroke-width="2"/></svg>`;
-    return new google.maps.Marker({
+    const primary = resolveThemeColor('--primary', '#6b7280');
+
+    // Tally domains from the clustered marker elements via the WeakMap.
+    const domains = (markers ?? []).map((m) => markerDomainMap.get(m as object) ?? '');
+    const breakdown = tallyDomains(domains);
+
+    return new google.maps.marker.AdvancedMarkerElement({
       position,
-      icon: {
-        url: `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(svg)}`,
-        scaledSize: new google.maps.Size(size, size),
-        anchor: new google.maps.Point(r, r),
-        labelOrigin: new google.maps.Point(r, r),
-      },
-      label: { text: String(count), color: '#ffffff', fontSize: '12px', fontWeight: '600' },
+      content: buildClusterContent(count, breakdown, primary),
       zIndex: 1000 + count,
     });
   },
@@ -102,9 +153,15 @@ function ClusteredMarker({
   const DomainIcon = getIconForDomain(marker.domain);
 
   // Report the underlying element to the parent each time it changes.
+  // Also register this element→domain mapping so the cluster renderer can
+  // look up each marker's domain when building the badge row.
   React.useEffect(() => {
+    if (markerEl) {
+      markerDomainMap.set(markerEl, marker.domain ?? '');
+    }
     onMarkerReady(id, markerEl);
     // Cleanup: remove from clusterer when this marker unmounts.
+    // WeakMap cleanup is automatic (GC) when markerEl is released.
     return () => {
       onMarkerReady(id, null);
     };

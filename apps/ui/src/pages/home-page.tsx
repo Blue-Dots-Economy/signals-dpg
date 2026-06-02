@@ -18,6 +18,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { Button } from '@/components/ui/button';
 import { ActionHandler } from '@/components/actions/action-handler';
 import { MapView } from '@/components/map/map-container';
+import { MapFiltersPanel } from '@/components/map/map-filters-panel';
 import { MatchScoreCard } from '@/components/match-score';
 import '@/components/map/providers';
 import { fetchItems, performAction, type Item } from '@/lib/item-api';
@@ -26,7 +27,6 @@ import { EmptyState } from '@/components/empty-state';
 import { fetchNetworkConfigs, fetchNetworkConfig, fetchNetworkItems } from '@/lib/network-api';
 import { useAuth } from '@/contexts/auth-context';
 import { apiConfig } from '@/lib/api-config';
-import { deriveItemStatus } from '@/lib/item-status';
 import { getEnumFilterFieldsForDomains, itemPassesEnumFilters } from '@/lib/enum-filters';
 
 function itemToCardItem(item: Item): { id: string; domain: string; data: Record<string, unknown> } {
@@ -153,12 +153,6 @@ export function HomePage() {
   // Map filter: multi-select domain filter (URL param: ?map_domains=seeker,provider)
   const [mapSelectedDomains, setMapSelectedDomains] = React.useState<string[]>(() => {
     const raw = searchParams.get('map_domains');
-    if (!raw) return [];
-    return raw.split(',').map((s) => s.trim()).filter(Boolean);
-  });
-  // Map filter: multi-select status filter (URL param: ?status=new,active)
-  const [mapSelectedStatuses, setMapSelectedStatuses] = React.useState<string[]>(() => {
-    const raw = searchParams.get('status');
     if (!raw) return [];
     return raw.split(',').map((s) => s.trim()).filter(Boolean);
   });
@@ -467,10 +461,6 @@ export function HomePage() {
         continue;
       }
 
-      // Resolve the domain's status_rules for client-side status derivation.
-      const domainConfig = network?.domains.find((d) => d.id === domainId);
-      const statusRules = domainConfig?.status_rules;
-
       let cards = itemList.map(itemToCardItem);
 
       // Text search filter
@@ -480,22 +470,6 @@ export function HomePage() {
             String(val).toLowerCase().includes(search.toLowerCase())
           )
         );
-      }
-
-      // Status filter: apply only when status filter is active AND the domain
-      // has status_rules. When no rules are defined, items in this domain are
-      // always shown regardless of the status filter.
-      if (mapSelectedStatuses.length > 0 && statusRules && statusRules.length > 0) {
-        cards = cards.filter((item) => {
-          // Retrieve the full item to get created_at/updated_at
-          const fullItem = itemList.find((i) => i.item_id === item.id);
-          if (!fullItem) return false;
-          const derivedStatus = deriveItemStatus(fullItem, statusRules);
-          // Items with an unresolvable status are shown when their domain has rules
-          // but the status couldn't be computed (defensive fallback).
-          if (derivedStatus === null) return true;
-          return mapSelectedStatuses.includes(derivedStatus);
-        });
       }
 
       // Enum-field filters: AND across different fields, OR within a field's
@@ -510,7 +484,7 @@ export function HomePage() {
     }
 
     return result;
-  }, [domainItems, search, mapSelectedDomains, mapSelectedStatuses, mapSelectedFields, network, enumFilterFields]);
+  }, [domainItems, search, mapSelectedDomains, mapSelectedFields, network, enumFilterFields]);
 
   const handleDomainSelect = (domainId: string | null) => {
     setSelectedDomain(domainId);
@@ -556,18 +530,6 @@ export function HomePage() {
         prev.set('map_domains', domains.join(','));
       } else {
         prev.delete('map_domains');
-      }
-      return prev;
-    });
-  };
-
-  const handleMapStatusesChange = (statuses: string[]) => {
-    setMapSelectedStatuses(statuses);
-    setSearchParams((prev) => {
-      if (statuses.length > 0) {
-        prev.set('status', statuses.join(','));
-      } else {
-        prev.delete('status');
       }
       return prev;
     });
@@ -667,6 +629,19 @@ export function HomePage() {
     );
   }
 
+  // Single filters element reused in the page header, the guest view, and the
+  // maximized map overlay. Each location instantiates its own popover state; the
+  // filter selection itself is controlled via the shared props below.
+  const filtersPanel = (
+    <MapFiltersPanel
+      domains={visibleDomains}
+      selectedDomains={mapSelectedDomains}
+      onDomainsChange={handleMapDomainsChange}
+      selectedFields={mapSelectedFields}
+      onFieldsChange={handleMapFieldsChange}
+    />
+  );
+
   return (
     <PageShell
       networks={showNetworkSelector ? allNetworks : []}
@@ -686,13 +661,19 @@ export function HomePage() {
       onViewModeChange={handleViewModeChange}
     >
       {!user ? (
-        <GuestHero />
+        <>
+          <GuestHero />
+          {/* Guests don't get the ContentHeader, but should still be able to
+              filter the browsed items — show the Filters control below the banner. */}
+          <div className="mb-4 mt-3 flex justify-end">{filtersPanel}</div>
+        </>
       ) : (
         <ContentHeader
           title={contentTitle}
           description={contentDescription}
           count={loading ? undefined : contentCount}
           noProfilePrompt={{ show: !myItem, networkId: selectedNetworkId ?? '' }}
+          actions={filtersPanel}
         />
       )}
       {viewMode === 'list' ? (
@@ -872,13 +853,7 @@ export function HomePage() {
               ? { lat: myItem.item_latitude, lng: myItem.item_longitude }
               : null
           }
-          visibleDomains={visibleDomains}
-          selectedDomains={mapSelectedDomains}
-          onDomainsChange={handleMapDomainsChange}
-          selectedStatuses={mapSelectedStatuses}
-          onStatusesChange={handleMapStatusesChange}
-          selectedFields={mapSelectedFields}
-          onFieldsChange={handleMapFieldsChange}
+          filtersSlot={filtersPanel}
         />
       )}
     </PageShell>

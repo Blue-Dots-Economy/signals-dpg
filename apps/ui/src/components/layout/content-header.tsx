@@ -1,3 +1,4 @@
+import type { ReactNode } from 'react';
 import { Link } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { UserPlus } from 'lucide-react';
@@ -7,9 +8,11 @@ interface ContentHeaderProps {
   description?: string;
   count?: number;
   noProfilePrompt?: { show: boolean; networkId: string };
+  /** Optional controls rendered on the right of the title row (e.g. Filters). */
+  actions?: ReactNode;
 }
 
-export function ContentHeader({ title, description, count, noProfilePrompt }: ContentHeaderProps) {
+export function ContentHeader({ title, description, count, noProfilePrompt, actions }: ContentHeaderProps) {
   return (
     <div className="mb-6 space-y-3">
       <div className="flex items-start gap-3">
@@ -26,6 +29,7 @@ export function ContentHeader({ title, description, count, noProfilePrompt }: Co
             <p className="mt-0.5 text-sm text-muted-foreground">{description}</p>
           )}
         </div>
+        {actions && <div className="shrink-0">{actions}</div>}
       </div>
       {noProfilePrompt?.show && (
         <div className="flex items-center justify-between gap-4 rounded-lg border border-primary/15 bg-primary/5 px-4 py-3">

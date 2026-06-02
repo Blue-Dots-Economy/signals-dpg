@@ -12,12 +12,20 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import type { MapMarker, MapProviderProps } from '@/engine/types';
 import { registerMapProvider } from '@/engine/map/map-registry';
 import { getIconForDomain } from '../domain-icons';
+import { tallyDomains } from '../cluster-breakdown';
 import { FitBounds } from '../fit-bounds';
 import { MarkerPopupCard } from '../marker-popup-card';
 
 import 'leaflet/dist/leaflet.css';
 import 'react-leaflet-cluster/dist/assets/MarkerCluster.css';
 import 'react-leaflet-cluster/dist/assets/MarkerCluster.Default.css';
+
+/**
+ * Module-level WeakMap: L.Marker instance → domain string.
+ * Populated via a ref callback on each <Marker>; read by createClusterDivIcon
+ * to tally per-domain counts when building the badge row.
+ */
+const markerDomainMap = new WeakMap<object, string>();
 
 /**
  * Imperatively pans/zooms the Leaflet map whenever the `center` or `zoom`
@@ -122,35 +130,107 @@ function createMarkerDivIcon(marker: MapMarker): L.DivIcon {
  * Builds the cluster bubble icon (shown when overlapping markers collapse into
  * a count). Uses the active network theme colours (--primary /
  * --primary-foreground) instead of leaflet.markercluster's default blue/green.
+ *
+ * When the cluster spans more than one distinct domain, a row of mini badge
+ * chips is rendered below the main circle — one chip per domain, sorted by
+ * count descending, each showing the domain's icon + count.
  */
-function createClusterDivIcon(cluster: { getChildCount: () => number }): L.DivIcon {
+function createClusterDivIcon(cluster: { getChildCount: () => number; getAllChildMarkers?: () => L.Marker[] }): L.DivIcon {
   const count = cluster.getChildCount();
   // Neutral gray fallback (not a specific network's brand colour) if unresolved.
   const bg = readCssVar('--primary', '#6b7280');
   const fg = readCssVar('--primary-foreground', '#ffffff');
   const size = count < 10 ? 34 : count < 100 ? 40 : 46;
 
+  // Tally per-domain counts using the WeakMap populated on each marker's ref.
+  const childMarkers: L.Marker[] = cluster.getAllChildMarkers?.() ?? [];
+  const domains = childMarkers.map((m) => markerDomainMap.get(m as object) ?? '');
+  const breakdown = tallyDomains(domains);
+  const multiDomain = breakdown.length > 1;
+
+  // Build badge chips HTML (only when there are multiple distinct domains).
+  let badgesHtml = '';
+  if (multiDomain) {
+    const chips = breakdown.map(({ domain, count: dc }) => {
+      const Icon = getIconForDomain(domain);
+      const iconSvg = renderToStaticMarkup(
+        React.createElement(Icon, { size: 12, color: bg, strokeWidth: 2 }),
+      );
+      return `
+        <span style="
+          display: inline-flex;
+          align-items: center;
+          gap: 3px;
+          background: #ffffff;
+          border: 1px solid #e2e8f0;
+          border-radius: 9999px;
+          padding: 1px 5px;
+          font-size: 10px;
+          font-weight: 600;
+          color: #1e293b;
+          line-height: 1;
+          white-space: nowrap;
+        ">
+          ${iconSvg}
+          ${dc}
+        </span>`;
+    });
+
+    badgesHtml = `
+      <div style="
+        display: flex;
+        flex-direction: row;
+        align-items: center;
+        justify-content: center;
+        gap: 3px;
+        margin-top: 4px;
+        flex-wrap: nowrap;
+      ">
+        ${chips.join('')}
+      </div>`;
+  }
+
   const html = `
     <div style="
       display: flex;
+      flex-direction: column;
       align-items: center;
-      justify-content: center;
-      width: ${size}px;
-      height: ${size}px;
-      background: ${bg};
-      color: ${fg};
-      border: 2px solid #ffffff;
-      border-radius: 9999px;
-      box-shadow: 0 1px 4px rgba(0,0,0,0.3);
-      font-size: 13px;
-      font-weight: 600;
-    ">${count}</div>
+      /* no width constraint — let badge row set the width */
+    ">
+      <div style="
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        width: ${size}px;
+        height: ${size}px;
+        background: ${bg};
+        color: ${fg};
+        border: 2px solid #ffffff;
+        border-radius: 9999px;
+        box-shadow: 0 1px 4px rgba(0,0,0,0.3);
+        font-size: 13px;
+        font-weight: 600;
+        flex-shrink: 0;
+      ">${count}</div>
+      ${badgesHtml}
+    </div>
   `.trim();
+
+  // iconSize: make the height tall enough to include badges. The width is set
+  // generously so chips are never clipped; Leaflet clips the div icon's
+  // overflow, so we ensure the container is wide enough.
+  const badgeRowH = multiDomain ? 22 : 0; // 18px chip + 4px margin
+  const totalH = size + badgeRowH;
+  // Estimate badge row width: each chip ~(12 icon + 3 gap + ~10 text + 10 padding) ≈ 35px; gap 3px between chips
+  const estimatedBadgeW = multiDomain ? breakdown.length * 38 + (breakdown.length - 1) * 3 : size;
+  const totalW = Math.max(size, estimatedBadgeW);
 
   return L.divIcon({
     html,
     className: '',
-    iconSize: L.point(size, size),
+    // Centre the anchor on the main circle (top half of the icon).
+    iconSize: L.point(totalW, totalH),
+    iconAnchor: L.point(totalW / 2, size / 2),
   });
 }
 
@@ -195,12 +275,21 @@ export function LeafletMapProvider({
       >
         {markers.map((marker) => {
           const icon = createMarkerDivIcon(marker);
+          const domain = marker.domain ?? '';
 
           return (
             <Marker
               key={marker.id}
               position={[marker.lat, marker.lng]}
               icon={icon}
+              ref={(leafletMarker) => {
+                // Populate the WeakMap so createClusterDivIcon can look up the
+                // domain for this marker when building the badge row. react-leaflet
+                // passes the underlying L.Marker instance to `ref` callbacks.
+                if (leafletMarker) {
+                  markerDomainMap.set(leafletMarker as object, domain);
+                }
+              }}
               eventHandlers={{
                 click: () => onMarkerClick?.(marker.id),
               }}

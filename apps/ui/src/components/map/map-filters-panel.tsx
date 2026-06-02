@@ -6,7 +6,6 @@ import { Input } from '@/components/ui/input';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { cn } from '@/lib/utils';
 import type { DotNetworkDomain } from '@/engine/types';
-import { getStatusOptions } from '@/lib/item-status';
 import { getEnumFilterFieldsForDomains } from '@/lib/enum-filters';
 import type { EnumFilterField } from '@/lib/enum-filters';
 
@@ -17,10 +16,6 @@ export interface MapFiltersPanelProps {
   selectedDomains: string[];
   /** Called when the domain filter selection changes. */
   onDomainsChange: (domains: string[]) => void;
-  /** Currently selected status filter values. Empty array = all. */
-  selectedStatuses: string[];
-  /** Called when the status filter selection changes. */
-  onStatusesChange: (statuses: string[]) => void;
   /**
    * Currently selected enum-field filter values.
    * Map of fieldKey → selected option values. Empty array = all.
@@ -183,8 +178,7 @@ function MultiSelectGroup({ title, options, selected, onToggle }: MultiSelectGro
  * A "Filters" pill button that opens a polished popover with chip-based filter
  * groups:
  *   1. Domain  — multi-select chips, one per visible domain.
- *   2. Status  — multi-select chips, derived from per-domain `status_rules`.
- *   3+. Schema enum fields — one chip group per enum / array-of-enum property
+ *   2+. Schema enum fields — one chip group per enum / array-of-enum property
  *       found in the visible domains' item schemas (derived generically).
  *
  * Groups with no options are hidden. All groups are always-expanded since chips
@@ -197,27 +191,10 @@ export function MapFiltersPanel({
   domains,
   selectedDomains,
   onDomainsChange,
-  selectedStatuses,
-  onStatusesChange,
   selectedFields,
   onFieldsChange,
 }: MapFiltersPanelProps) {
   const [open, setOpen] = React.useState(false);
-
-  // Aggregate distinct status options across all visible domains
-  const allStatusOptions = React.useMemo(() => {
-    const seen = new Set<string>();
-    const result: Array<{ status: string; label: string; description?: string }> = [];
-    for (const domain of domains) {
-      for (const opt of getStatusOptions(domain.status_rules)) {
-        if (!seen.has(opt.status)) {
-          seen.add(opt.status);
-          result.push(opt);
-        }
-      }
-    }
-    return result;
-  }, [domains]);
 
   // Derive enum filter fields generically from all visible domain schemas
   const enumFilterFields: EnumFilterField[] = React.useMemo(
@@ -226,7 +203,6 @@ export function MapFiltersPanel({
   );
 
   const showDomainGroup = domains.length > 1;
-  const showStatusGroup = allStatusOptions.length > 0;
   const showEnumGroups = enumFilterFields.length > 0;
 
   // Count of active selections across all enum fields
@@ -235,11 +211,10 @@ export function MapFiltersPanel({
     0,
   );
 
-  const activeCount = selectedDomains.length + selectedStatuses.length + enumActiveCount;
+  const activeCount = selectedDomains.length + enumActiveCount;
 
   const handleClearAll = () => {
     onDomainsChange([]);
-    onStatusesChange([]);
     onFieldsChange({});
   };
 
@@ -248,14 +223,6 @@ export function MapFiltersPanel({
       selectedDomains.includes(domainId)
         ? selectedDomains.filter((d) => d !== domainId)
         : [...selectedDomains, domainId],
-    );
-  };
-
-  const toggleStatus = (status: string) => {
-    onStatusesChange(
-      selectedStatuses.includes(status)
-        ? selectedStatuses.filter((s) => s !== status)
-        : [...selectedStatuses, status],
     );
   };
 
@@ -274,7 +241,7 @@ export function MapFiltersPanel({
   };
 
   // Nothing to filter — don't render the pill at all
-  if (!showDomainGroup && !showStatusGroup && !showEnumGroups) return null;
+  if (!showDomainGroup && !showEnumGroups) return null;
 
   return (
     <Popover open={open} onOpenChange={setOpen}>
@@ -361,21 +328,6 @@ export function MapFiltersPanel({
                   />
                 );
               })}
-            </FilterGroup>
-          )}
-
-          {showStatusGroup && (
-            <FilterGroup title="Status">
-              {allStatusOptions.map(({ status, label, description }) => (
-                <Chip
-                  key={status}
-                  label={label}
-                  selected={selectedStatuses.includes(status)}
-                  onToggle={() => toggleStatus(status)}
-                  title={description}
-                  ariaLabel={`Filter by status: ${label}`}
-                />
-              ))}
             </FilterGroup>
           )}
 
