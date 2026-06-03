@@ -38,7 +38,34 @@
             "languages_spoken": {
               "type": "array",
               "title": "Languages Spoken",
-              "items": { "type": "string" }
+              "uniqueItems": true,
+              "items": {
+                "type": "string",
+                "enum": [
+                  "English",
+                  "Hindi",
+                  "Kannada",
+                  "Tulu",
+                  "Konkani",
+                  "Tamil",
+                  "Telugu",
+                  "Malayalam",
+                  "Marathi",
+                  "Bengali",
+                  "Gujarati",
+                  "Punjabi",
+                  "French",
+                  "German",
+                  "Spanish",
+                  "Italian",
+                  "Portuguese",
+                  "Russian",
+                  "Japanese",
+                  "Mandarin",
+                  "Korean",
+                  "Arabic"
+                ]
+              }
             },
             "party_composition": {
               "type": "string",
@@ -192,7 +219,34 @@
               "type": "array",
               "title": "Languages",
               "description": "Languages spoken / supported by the supplier.",
-              "items": { "type": "string" }
+              "uniqueItems": true,
+              "items": {
+                "type": "string",
+                "enum": [
+                  "English",
+                  "Hindi",
+                  "Kannada",
+                  "Tulu",
+                  "Konkani",
+                  "Tamil",
+                  "Telugu",
+                  "Malayalam",
+                  "Marathi",
+                  "Bengali",
+                  "Gujarati",
+                  "Punjabi",
+                  "French",
+                  "German",
+                  "Spanish",
+                  "Italian",
+                  "Portuguese",
+                  "Russian",
+                  "Japanese",
+                  "Mandarin",
+                  "Korean",
+                  "Arabic"
+                ]
+              }
             },
             "pricing": {
               "type": "string",
@@ -235,13 +289,13 @@
   "instances": [
     {
       "instance_name": "Orange Dot Tourist Local",
-      "instance_url": "http://localhost:2742",
+      "instance_url": "http://localhost:3742",
       "custom_item_schema_urls": {},
       "domain_id": "tourist"
     },
     {
       "instance_name": "Orange Dot Practitioner Local",
-      "instance_url": "http://localhost:2742",
+      "instance_url": "http://localhost:3742",
       "custom_item_schema_urls": {},
       "domain_id": "practitioner"
     }

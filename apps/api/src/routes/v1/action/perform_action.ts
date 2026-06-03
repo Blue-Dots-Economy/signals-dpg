@@ -168,20 +168,24 @@ export const perform_action_handler = async (
       );
     }
 
-    requirementsSnapshot = mergeItemStateWithPrivate(
-      body.requirements_snapshot,
-      projectPrivateStateForSchema(
-        interaction.requirement_schema,
-        sourceItemSnapshot.private_state
-      )
-    );
+    requirementsSnapshot = interaction.requirement_schema
+      ? mergeItemStateWithPrivate(
+          body.requirements_snapshot,
+          projectPrivateStateForSchema(
+            interaction.requirement_schema,
+            sourceItemSnapshot.private_state
+          )
+        )
+      : body.requirements_snapshot;
 
-    validateAgainstJsonSchema(
-      interaction.requirement_schema,
-      requirementsSnapshot,
-      'action requirements',
-      { allowAdditionalProperties: apiConfig.allow_extra_schema_data }
-    );
+    if (interaction.requirement_schema) {
+      validateAgainstJsonSchema(
+        interaction.requirement_schema,
+        requirementsSnapshot,
+        'action requirements',
+        { allowAdditionalProperties: apiConfig.allow_extra_schema_data }
+      );
+    }
   } catch (err) {
     request.log.error(
       {

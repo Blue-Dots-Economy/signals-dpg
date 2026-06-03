@@ -97,12 +97,14 @@ export const perform_network_action_handler = async (
       toItemType: body.target_item.item_type,
     });
 
-    validateAgainstJsonSchema(
-      interaction.requirement_schema,
-      body.requirements_snapshot,
-      'action requirements',
-      { allowAdditionalProperties: apiConfig.allow_extra_schema_data }
-    );
+    if (interaction.requirement_schema) {
+      validateAgainstJsonSchema(
+        interaction.requirement_schema,
+        body.requirements_snapshot,
+        'action requirements',
+        { allowAdditionalProperties: apiConfig.allow_extra_schema_data }
+      );
+    }
   } catch (err) {
     return reply.code(400).send({
       error: 'INVALID_ACTION_REQUEST',

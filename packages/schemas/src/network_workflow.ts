@@ -129,7 +129,7 @@ export const NetworkActionInteractionSchema = z
     to_network: z.string().min(1).optional(),
     to_domain: z.string().min(1),
     to_items: z.string().min(1).array().optional().default([]),
-    requirement_schema: JsonSchemaDocumentSchema,
+    requirement_schema: JsonSchemaDocumentSchema.optional(),
     event_schema: JsonSchemaDocumentSchema.optional(),
     metric_categories: MetricCategoriesSchema.nullable().optional(),
     reveals_pii_on_status: z.array(z.string().min(1)).optional().default([]),
