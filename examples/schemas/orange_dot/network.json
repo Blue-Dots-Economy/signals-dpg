@@ -1,0 +1,328 @@
+{
+  "display_name": "Orange Dots",
+  "description": "Tourism, Arts & Culture discovery network — Udupi district (PWA + voice via Tourist Saarthi).",
+  "schema_standard": "https://json-schema.org/draft/2020-12/schema",
+  "domains": [
+    {
+      "description": "Tourists / travellers discovering local Udupi practitioners. Tourist profiles are captured incrementally by Tourist Saarthi — never via a form.",
+      "minimum_cache_ttl_seconds": 300,
+      "status_rules": [
+        { "status": "new",      "label": "New",      "description": "Tourist token created within the last 7 days",                                           "when": { "item_age_days": { "lte": 7 } } },
+        { "status": "active",   "label": "Active",   "description": "Connected with a practitioner in the last 30 days",                                       "when": { "days_since_last": { "buckets": ["create", "accept"], "lte": 30 } } },
+        { "status": "at_risk",  "label": "At Risk",  "description": "No activity for 30–90 days",                                                              "when": { "days_since_last": { "buckets": ["create", "accept", "reject"], "between": [31, 90] } } },
+        { "status": "inactive", "label": "Inactive", "description": "No activity 90+ days",                                                                    "when": "default" }
+      ],
+      "item_schemas": {
+        "profile_1.0": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "title": "Orange Dot Tourist Profile 1.0",
+          "display_name_field": "tourist_token",
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "tourist_token",
+            "consent_state"
+          ],
+          "properties": {
+            "tourist_token": {
+              "type": "string",
+              "title": "Tourist Token",
+              "description": "Attribution anchor from the entry QR / landing page. Links all sessions and actions to one traveller.",
+              "minLength": 1
+            },
+            "consent_state": {
+              "type": "string",
+              "title": "Consent State",
+              "enum": ["granted", "revoked"],
+              "default": "granted"
+            },
+            "name": {
+              "type": "string",
+              "title": "Name"
+            },
+            "nationality": {
+              "type": "string",
+              "title": "Nationality"
+            },
+            "languages_spoken": {
+              "type": "array",
+              "title": "Languages Spoken",
+              "items": { "type": "string" }
+            },
+            "party_composition": {
+              "type": "string",
+              "title": "Travelling As",
+              "enum": ["solo", "couple", "family", "group", "solo_female"]
+            },
+            "phone_number": {
+              "type": "string",
+              "title": "Phone",
+              "private": true,
+              "pattern": "^[0-9]{10}$"
+            },
+            "whatsapp_number": {
+              "type": "string",
+              "title": "WhatsApp",
+              "private": true,
+              "pattern": "^[0-9]{10}$"
+            },
+            "trip_window_start": {
+              "type": "string",
+              "title": "Trip Start",
+              "format": "date"
+            },
+            "trip_window_end": {
+              "type": "string",
+              "title": "Trip End",
+              "format": "date"
+            },
+            "base_location": {
+              "type": "string",
+              "title": "Base Location",
+              "description": "Where the tourist is staying — used for 'near me' calculations."
+            },
+            "budget_band": {
+              "type": "string",
+              "title": "Budget Band",
+              "enum": ["Economical", "Moderate", "Premium"]
+            },
+            "dietary_preference": {
+              "type": "string",
+              "title": "Dietary Preference",
+              "enum": ["Veg", "Non-veg", "Seafood", "Vegan", "Jain", "Other"]
+            },
+            "interest": {
+              "type": "string",
+              "title": "Primary Interest",
+              "description": "Category A–D plus clarifying sub-intent (e.g. 'Culture → Yakshagana').",
+              "enum": [
+                "Experiences & Activities",
+                "Food / Crafts / Local Produce",
+                "Guides / Culture / Spiritual",
+                "Stays & Transport"
+              ]
+            },
+            "guide_preference": {
+              "type": "string",
+              "title": "Guide Preference",
+              "enum": ["With guide", "Self-explore", "No preference"]
+            }
+          }
+        }
+      },
+      "id": "tourist",
+      "dashboard_tiles": {
+        "total_items": "Total Tourists",
+        "complete_profiles": "Tourist Tokens Active",
+        "has_applications": "Connections Initiated"
+      }
+    },
+    {
+      "description": "Practitioners — surf instructors, guides, artisans, homestays, GI suppliers, temple trusts, curated experiences. One Orange Dot per supplier / listing.",
+      "minimum_cache_ttl_seconds": 300,
+      "status_rules": [
+        { "status": "new",      "label": "New",      "description": "Listed within the last 7 days",                                                  "when": { "item_age_days": { "lte": 7 } } },
+        { "status": "active",   "label": "Active",   "description": "Received and responded to a connection in the last 30 days",                     "when": { "all": [ { "count": { "buckets": ["create"], "gt": 0 } }, { "days_since_last": { "buckets": ["accept", "reject"], "lte": 30 } } ] } },
+        { "status": "at_risk",  "label": "At Risk",  "description": "No responses for 30–90 days",                                                    "when": { "all": [ { "count": { "buckets": ["create"], "gt": 0 } }, { "days_since_last": { "buckets": ["accept", "reject"], "between": [31, 90] } } ] } },
+        { "status": "inactive", "label": "Inactive", "description": "No activity for 90+ days",                                                       "when": "default" }
+      ],
+      "item_schemas": {
+        "profile_1.0": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "title": "Orange Dot Practitioner Listing 1.0",
+          "display_name_field": "name",
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "name",
+            "category",
+            "description",
+            "onetac_id",
+            "verified_by"
+          ],
+          "properties": {
+            "name": {
+              "type": "string",
+              "title": "Name",
+              "description": "Display name of the listing / experience (e.g. 'Surf with a Local').",
+              "minLength": 1
+            },
+            "category": {
+              "type": "string",
+              "title": "Category",
+              "description": "Sets the map filter and pin. One of the five Orange Dot map categories.",
+              "enum": [
+                "Stay",
+                "Artists",
+                "Activities",
+                "GI Products",
+                "Curated"
+              ]
+            },
+            "description": {
+              "type": "string",
+              "title": "Description",
+              "description": "Short blurb on the peek / detail card.",
+              "minLength": 1,
+              "maxLength": 280
+            },
+            "onetac_id": {
+              "type": "string",
+              "title": "OneTAC ID",
+              "description": "Unique OneTAC identifier issued per supplier.",
+              "minLength": 1
+            },
+            "verified_by": {
+              "type": "string",
+              "title": "Verified By",
+              "description": "Who verified the supplier — surfaces a 'verified by' stamp on the card.",
+              "minLength": 1
+            },
+            "provider_name": {
+              "type": "string",
+              "title": "Provider Name",
+              "description": "Source / aggregator behind the listing (e.g. 'RubiX', 'Paradise Resorts')."
+            },
+            "area": {
+              "type": "string",
+              "title": "Area",
+              "description": "Locality / town within Udupi district."
+            },
+            "contact_phone": {
+              "type": "string",
+              "title": "Contact Phone",
+              "description": "Released to the traveller only on a connection request. Curated (RubiX) listings carry no number.",
+              "pattern": "^[0-9]{10}$",
+              "private": true
+            },
+            "services": {
+              "type": "array",
+              "title": "Services",
+              "description": "Discovery tags / services offered (e.g. 'stay', 'experiential', 'community-led').",
+              "items": { "type": "string", "minLength": 1 },
+              "maxItems": 15
+            },
+            "languages": {
+              "type": "array",
+              "title": "Languages",
+              "description": "Languages spoken / supported by the supplier.",
+              "items": { "type": "string" }
+            },
+            "pricing": {
+              "type": "string",
+              "title": "Pricing",
+              "description": "Pricing details / ranges."
+            },
+            "onetac_verification_url": {
+              "type": "string",
+              "title": "OneTAC Verification Link",
+              "description": "Backs the 'verified by' stamp on the card.",
+              "format": "uri"
+            },
+            "website": {
+              "type": "string",
+              "title": "Website",
+              "format": "uri"
+            },
+            "photos": {
+              "type": "array",
+              "title": "Photos / Videos",
+              "description": "Media URLs shown on the listing card.",
+              "items": { "type": "string", "format": "uri" }
+            },
+            "ancillary_details": {
+              "type": "string",
+              "title": "Ancillary Details",
+              "description": "Extra context — Tips & Tricks, History, Do's & Don'ts."
+            }
+          }
+        }
+      },
+      "id": "practitioner",
+      "dashboard_tiles": {
+        "total_items": "Total Orange Dots",
+        "complete_profiles": "Verified Listings",
+        "has_applications": "Received Connections"
+      }
+    }
+  ],
+  "instances": [
+    {
+      "instance_name": "Orange Dot Tourist Local",
+      "instance_url": "http://localhost:2742",
+      "custom_item_schema_urls": {},
+      "domain_id": "tourist"
+    },
+    {
+      "instance_name": "Orange Dot Practitioner Local",
+      "instance_url": "http://localhost:2742",
+      "custom_item_schema_urls": {},
+      "domain_id": "practitioner"
+    }
+  ],
+  "actions": {
+    "connect": {
+      "description": "A tourist initiates a connection with a practitioner. Either Option 1 (tourist shares contact + itinerary with the practitioner) or Option 2 (tourist receives practitioner's contact via WhatsApp). Both record one Connection in the funnel.",
+      "interactions": [
+        {
+          "from_network": "orange_dot",
+          "from_domain": "tourist",
+          "to_network": "orange_dot",
+          "to_domain": "practitioner",
+          "requirement_schema": {
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "title": "Tourist Connect Requirement",
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["connect_mode"],
+            "properties": {
+              "connect_mode": {
+                "type": "string",
+                "title": "Connect Mode",
+                "enum": ["share_itinerary", "receive_whatsapp"]
+              }
+            }
+          },
+          "event_schema": {
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "title": "Tourist → Practitioner Connect Event",
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["status", "remark"],
+            "properties": {
+              "status": {
+                "type": "string",
+                "enum": ["created", "accepted", "rejected", "cancelled"]
+              },
+              "remark": { "type": "string" }
+            }
+          },
+          "metric_categories": {
+            "create": ["created"],
+            "accept": ["accepted"],
+            "reject": ["rejected"],
+            "cancel": ["cancelled"]
+          },
+          "reveals_pii_on_status": ["accepted"],
+          "consent_text_initiator": "I agree to share my contact details with this practitioner so they can follow up about my trip.",
+          "consent_text_receiver": "I agree to share my contact details with this traveller."
+        }
+      ]
+    }
+  },
+  "id": "orange_dot",
+  "dashboard_buckets": {
+    "by_status": {
+      "new": "New",
+      "active": "Active",
+      "at_risk": "At Risk",
+      "inactive": "Inactive"
+    },
+    "by_action_status": {
+      "create": "Requested",
+      "accept": "Connected",
+      "reject": "Declined",
+      "cancel": "Cancelled"
+    }
+  }
+}
