@@ -280,21 +280,6 @@
                 "type": "string",
                 "title": "Connect Mode",
                 "enum": ["share_itinerary", "receive_whatsapp"]
-              },
-              "trip_dates": {
-                "type": "string",
-                "title": "Trip Dates",
-                "description": "Optional — supplied when connect_mode = 'share_itinerary'."
-              },
-              "interests": {
-                "type": "string",
-                "title": "Interests",
-                "description": "Short note from the tourist about what they are looking for."
-              },
-              "message": {
-                "type": "string",
-                "title": "Message to Practitioner",
-                "maxLength": 500
               }
             }
           },
