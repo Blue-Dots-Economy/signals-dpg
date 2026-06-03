@@ -322,7 +322,7 @@ export function ProfileFormPage() {
       const status = axiosError?.response?.status;
       const error = axiosError?.response?.data;
 
-      if (error?.error === 'UNSERVED_DOMAIN_BINDING') {
+      if (status === 403 && error?.error === 'UNSERVED_DOMAIN_BINDING') {
         setFormError({
           title: t('profile.error_role_unavailable'),
           description: error?.message ?? t('profile.error_role_unavailable_fallback_desc'),
@@ -333,7 +333,7 @@ export function ProfileFormPage() {
           description: t('profile.toast_sign_in_desc'),
         });
         navigate(`/auth/login?redirect=${encodeURIComponent(redirectTo)}`);
-      } else if (error?.error === 'ITEM_ALREADY_EXISTS') {
+      } else if (status === 409) {
         setFormError({
           title: t('profile.error_already_exists'),
           description: t('profile.error_already_exists_desc'),

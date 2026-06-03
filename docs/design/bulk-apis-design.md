@@ -1,20 +1,25 @@
-# Bulk APIs Design — Create, Connect, Accept/Reject
+# Bulk APIs Design — Connect, Accept/Reject
 
 - **Date:** 2026-06-03
-- **Status:** Approved (pending spec review)
+- **Status:** Approved
 - **Branch:** `bulk-apis` (off `feature`)
+
+> **Scope update:** Bulk for `POST /api/v1/item/create` was **removed per client
+> decision** — bulk applies **only to Connect and Accept/Reject**. No create
+> endpoint (`/item/create`, `/admin/participant`) is bulk; `/item/create` remains
+> single-object. Any "Create" references in sections below are historical and no
+> longer in scope.
 
 ## Goal
 
-Make three currently one-to-one APIs support bulk operations by accepting an
-**array** payload and processing each element independently. Sending an array
+Make two currently one-to-one **action** APIs support bulk operations by accepting
+an **array** payload and processing each element independently. Sending an array
 of one performs a single operation; sending many performs many.
 
 Target endpoints:
 
 | Name | Route | Handler | Nature |
 |---|---|---|---|
-| Create | `POST /api/v1/item/create` | `item/create_item.ts` | Local DB write |
 | Connect | `POST /api/v1/action/perform` | `action/perform_action.ts` | Validates locally, then HTTP-delegates to the target item's instance |
 | Accept/Reject | `POST /api/v1/action/update-status` | `action/update_action_status.ts` | Local DB update + event insert + async mirror to source instance |
 

@@ -1,8 +1,10 @@
 # Bulk APIs Implementation Plan
 
+> **Scope update:** Bulk for `POST /api/v1/item/create` was **removed per client decision** — bulk applies **only to `/action/perform` and `/action/update-status`**. **Task 1's create handler / Task 4 (Convert `/item/create`) are no longer in scope** and were reverted; `/item/create` stays single-object. The `runBulk` helper, `BULK_MAX_ITEMS` config, and bulk response schemas remain (used by the two action endpoints). The sections below that build/convert `/item/create` are historical.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Make `POST /api/v1/item/create`, `POST /api/v1/action/perform`, and `POST /api/v1/action/update-status` accept a JSON **array** and process each element best-effort, returning per-item results.
+**Goal:** Make `POST /api/v1/action/perform` and `POST /api/v1/action/update-status` accept a JSON **array** and process each element best-effort, returning per-item results. (`/item/create` is **excluded** — see scope update above.)
 
 **Architecture:** A shared `runBulk` helper owns limit/loop/result/status concerns. Each route handler resolves per-request context once, then delegates each array element to a `processOne` callback that contains the (refactored) single-item logic and throws `BulkItemFailure(code, message)` for per-item errors. Array-only contract; response mirrors a `{ results, summary }` envelope with HTTP 201/200 (all ok), 207 (partial), 422 (all fail), 400 (request-level). The UI client layer wraps single calls as arrays of one and unwraps `results[0]`.
 

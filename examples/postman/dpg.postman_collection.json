@@ -367,7 +367,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "[\n  {\n    \"item_network\": \"{{network}}\",\n    \"item_domain\": \"{{domain}}\",\n    \"item_type\": \"{{item_type}}\",\n    \"item_state\": {\n      \"example\": \"replace with schema-valid item_state\"\n    }\n  }\n]"
+              "raw": "{\n  \"item_network\": \"{{network}}\",\n  \"item_domain\": \"{{domain}}\",\n  \"item_type\": \"{{item_type}}\",\n  \"item_state\": {\n    \"example\": \"replace with schema-valid item_state\"\n  }\n}"
             },
             "url": {
               "raw": "{{base_url}}/api/v1/item/create",

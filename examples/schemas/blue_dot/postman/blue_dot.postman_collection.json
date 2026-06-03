@@ -338,7 +338,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "[\n  {\n    \"item_network\": \"{{network}}\",\n    \"item_domain\": \"{{seeker_domain}}\",\n    \"item_type\": \"{{seeker_item_type}}\",\n    \"item_state\": {\n      \"name\": \"Asha Worker\",\n      \"gender\": \"Female\",\n      \"location\": \"Bengaluru\",\n      \"age\": 24,\n      \"phone\": \"9876543210\",\n      \"workExperience\": \"Fresher\",\n      \"workExperienceYearsConditional\": \"0\",\n      \"highestQualificationOrSkill\": \"College\",\n      \"natureOfJobsInterestedIn\": \"Full-time\",\n      \"nameOfJobRolesInterestedIn\": \"Retail associate\",\n      \"otherHelpNeeded\": \"Training\"\n    }\n  }\n]"
+              "raw": "{\n  \"item_network\": \"{{network}}\",\n  \"item_domain\": \"{{seeker_domain}}\",\n  \"item_type\": \"{{seeker_item_type}}\",\n  \"item_state\": {\n    \"name\": \"Asha Worker\",\n    \"gender\": \"Female\",\n    \"location\": \"Bengaluru\",\n    \"age\": 24,\n    \"phone\": \"9876543210\",\n    \"workExperience\": \"Fresher\",\n    \"workExperienceYearsConditional\": \"0\",\n    \"highestQualificationOrSkill\": \"College\",\n    \"natureOfJobsInterestedIn\": \"Full-time\",\n    \"nameOfJobRolesInterestedIn\": \"Retail associate\",\n    \"otherHelpNeeded\": \"Training\"\n  }\n}"
             },
             "url": {
               "raw": "{{seeker_instance_url}}/api/v1/item/create",
@@ -379,7 +379,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "[\n  {\n    \"item_network\": \"{{network}}\",\n    \"item_domain\": \"{{provider_domain}}\",\n    \"item_type\": \"{{provider_item_type}}\",\n    \"item_state\": {\n      \"jobProviderName\": \"Blue Jobs Pvt Ltd\",\n      \"role\": \"Retail associate\",\n      \"jobProviderLocation\": \"Bengaluru\",\n      \"hiringManagerName\": \"Nisha Rao\",\n      \"hiringManagerPhoneNumber\": \"9876501234\",\n      \"hiringManagerEmail\": \"nisha@example.com\",\n      \"positions\": 3,\n      \"natureOfJob\": \"Full-time\",\n      \"salaryMin\": 15000,\n      \"salaryMax\": 22000,\n      \"candidateExperienceType\": \"Fresher\",\n      \"minEducationalInstitute\": \"College\",\n      \"workExperienceYears\": \"0\",\n      \"lastRoleHeld\": \"Fresher\"\n    }\n  }\n]"
+              "raw": "{\n  \"item_network\": \"{{network}}\",\n  \"item_domain\": \"{{provider_domain}}\",\n  \"item_type\": \"{{provider_item_type}}\",\n  \"item_state\": {\n    \"jobProviderName\": \"Blue Jobs Pvt Ltd\",\n    \"role\": \"Retail associate\",\n    \"jobProviderLocation\": \"Bengaluru\",\n    \"hiringManagerName\": \"Nisha Rao\",\n    \"hiringManagerPhoneNumber\": \"9876501234\",\n    \"hiringManagerEmail\": \"nisha@example.com\",\n    \"positions\": 3,\n    \"natureOfJob\": \"Full-time\",\n    \"salaryMin\": 15000,\n    \"salaryMax\": 22000,\n    \"candidateExperienceType\": \"Fresher\",\n    \"minEducationalInstitute\": \"College\",\n    \"workExperienceYears\": \"0\",\n    \"lastRoleHeld\": \"Fresher\"\n  }\n}"
             },
             "url": {
               "raw": "{{provider_instance_url}}/api/v1/item/create",

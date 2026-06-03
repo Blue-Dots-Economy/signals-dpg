@@ -1,15 +1,14 @@
 import { describe, it, expect } from 'vitest';
 import {
-  BulkCreateItemResponseSchema,
   BulkPerformActionResponseSchema,
   BulkUpdateActionStatusResponseSchema,
 } from '../api/bulk_schemas';
 
 describe('bulk response schemas', () => {
-  it('accepts a mixed create envelope', () => {
-    const parsed = BulkCreateItemResponseSchema.parse({
+  it('accepts a mixed envelope (success + error)', () => {
+    const parsed = BulkUpdateActionStatusResponseSchema.parse({
       results: [
-        { index: 0, status: 'success', item_id: 'a', item_type: 'profile_1.0' },
+        { index: 0, status: 'success', action_id: 'a', action_type: 'connect', action_status: 'accepted', update_count: 1 },
         { index: 1, status: 'error', error: 'INVALID_PAYLOAD', message: 'bad' },
       ],
       summary: { total: 2, succeeded: 1, failed: 1 },
@@ -17,10 +16,10 @@ describe('bulk response schemas', () => {
     expect(parsed.results).toHaveLength(2);
   });
 
-  it('rejects a success entry missing item_id', () => {
+  it('rejects a success entry missing a required field', () => {
     expect(() =>
-      BulkCreateItemResponseSchema.parse({
-        results: [{ index: 0, status: 'success', item_type: 'x' }],
+      BulkUpdateActionStatusResponseSchema.parse({
+        results: [{ index: 0, status: 'success', action_id: 'a' }],
         summary: { total: 1, succeeded: 1, failed: 0 },
       }),
     ).toThrow();

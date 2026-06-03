@@ -496,7 +496,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "[\n  {\n    \"item_network\": \"{{network}}\",\n    \"item_domain\": \"{{student_domain}}\",\n    \"item_type\": \"{{student_item_type}}\",\n    \"item_state\": {\n      \"Student ID\": \"stu-001\",\n      \"Full Name\": \"{{user_display_name}}\",\n      \"Phone Number\": \"9876543210\",\n      \"Email Address\": \"{{email}}\",\n      \"Location\": \"Bengaluru\",\n      \"Grade\": \"Class XI\",\n      \"Academic Stream\": \"Science\",\n      \"Service Looking For\": \"Subject Tutoring\"\n    }\n  }\n]"
+              "raw": "{\n  \"item_network\": \"{{network}}\",\n  \"item_domain\": \"{{student_domain}}\",\n  \"item_type\": \"{{student_item_type}}\",\n  \"item_state\": {\n    \"Student ID\": \"stu-001\",\n    \"Full Name\": \"{{user_display_name}}\",\n    \"Phone Number\": \"9876543210\",\n    \"Email Address\": \"{{email}}\",\n    \"Location\": \"Bengaluru\",\n    \"Grade\": \"Class XI\",\n    \"Academic Stream\": \"Science\",\n    \"Service Looking For\": \"Subject Tutoring\"\n  }\n}"
             },
             "url": {
               "raw": "{{student_instance_url}}/api/v1/item/create",
@@ -624,7 +624,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "[\n  {\n    \"item_network\": \"{{network}}\",\n    \"item_domain\": \"{{tutor_domain}}\",\n    \"item_type\": \"{{tutor_item_type}}\",\n    \"item_state\": {\n      \"Tutor ID\": \"tutor-001\",\n      \"Full Name\": \"Ravi Kumar\",\n      \"Phone Number\": \"9123456780\",\n      \"Email Address\": \"ravi.tutor@example.com\",\n      \"Location\": \"Bengaluru\",\n      \"Coverage Radius (km)\": 12,\n      \"Service Offered\": \"Subject Tutoring\",\n      \"Grade Bands Served\": [\n        \"Class XI\",\n        \"Class XII\"\n      ],\n      \"Academic Streams Served\": [\n        \"Science\"\n      ]\n    }\n  }\n]"
+              "raw": "{\n  \"item_network\": \"{{network}}\",\n  \"item_domain\": \"{{tutor_domain}}\",\n  \"item_type\": \"{{tutor_item_type}}\",\n  \"item_state\": {\n    \"Tutor ID\": \"tutor-001\",\n    \"Full Name\": \"Ravi Kumar\",\n    \"Phone Number\": \"9123456780\",\n    \"Email Address\": \"ravi.tutor@example.com\",\n    \"Location\": \"Bengaluru\",\n    \"Coverage Radius (km)\": 12,\n    \"Service Offered\": \"Subject Tutoring\",\n    \"Grade Bands Served\": [\n      \"Class XI\",\n      \"Class XII\"\n    ],\n    \"Academic Streams Served\": [\n      \"Science\"\n    ]\n  }\n}"
             },
             "url": {
               "raw": "{{tutor_instance_url}}/api/v1/item/create",

@@ -27,11 +27,6 @@ function bulkEnvelope<T extends z.ZodRawShape>(successFields: T) {
   });
 }
 
-export const BulkCreateItemResponseSchema = bulkEnvelope({
-  item_id: z.string(),
-  item_type: z.string(),
-});
-
 export const BulkPerformActionResponseSchema = bulkEnvelope({
   action_id: z.string(),
   action_type: z.string(),

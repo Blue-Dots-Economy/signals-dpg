@@ -1,5 +1,4 @@
 import { createApiClient } from './api-client';
-import { unwrapBulkSingle, type BulkEnvelope } from './bulk';
 
 const apiClient = createApiClient();
 
@@ -72,9 +71,8 @@ export interface ApiError {
 }
 
 export async function createItem(payload: CreateItemPayload): Promise<CreateItemResponse> {
-  return unwrapBulkSingle(
-    apiClient.post<BulkEnvelope<CreateItemResponse>>('/api/v1/item/create', [payload]),
-  );
+  const response = await apiClient.post<CreateItemResponse>('/api/v1/item/create', payload);
+  return response.data;
 }
 
 export async function fetchItems(query: FetchItemsQuery, signal?: AbortSignal): Promise<FetchItemsResponse> {
