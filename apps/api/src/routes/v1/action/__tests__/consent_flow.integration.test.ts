@@ -322,7 +322,7 @@ describeIf(`consent flow integration (purple_dot/connect)${
     if (app) await app.close();
   });
 
-  it('returns 403 CONSENT_REQUIRED on /action/perform when consent_text_initiator is declared and body omits consent', async () => {
+  it('returns 422 CONSENT_REQUIRED on /action/perform when consent_text_initiator is declared and body omits consent', async () => {
     // purple_dot connect (seeker→provider) declares consent_text_initiator.
     // A request without the consent field must be rejected before the action
     // is created.
@@ -333,31 +333,33 @@ describeIf(`consent flow integration (purple_dot/connect)${
         'x-api-key': alice_raw_key,
         'content-type': 'application/json',
       },
-      payload: {
-        action_type: 'connect',
-        source_item: {
-          item_network: 'purple_dot',
-          item_domain: 'seeker',
-          item_type: 'profile_1.0',
-          item_id: alice_item_id,
+      payload: [
+        {
+          action_type: 'connect',
+          source_item: {
+            item_network: 'purple_dot',
+            item_domain: 'seeker',
+            item_type: 'profile_1.0',
+            item_id: alice_item_id,
+          },
+          target_item: {
+            item_network: 'purple_dot',
+            item_domain: 'provider',
+            item_type: 'profile_1.0',
+            item_id: bob_item_id,
+            item_instance_url: base_url,
+          },
+          requirements_snapshot: {},
+          // consent field intentionally omitted
         },
-        target_item: {
-          item_network: 'purple_dot',
-          item_domain: 'provider',
-          item_type: 'profile_1.0',
-          item_id: bob_item_id,
-          item_instance_url: base_url,
-        },
-        requirements_snapshot: {},
-        // consent field intentionally omitted
-      },
+      ],
     });
 
-    expect(res.statusCode).toBe(403);
+    expect(res.statusCode).toBe(422);
     const body = res.json();
-    expect(body.error).toBe('CONSENT_REQUIRED');
-    expect(typeof body.message).toBe('string');
-    expect(body.message.length).toBeGreaterThan(0);
+    expect(body.results[0]).toMatchObject({ status: 'error', error: 'CONSENT_REQUIRED' });
+    expect(typeof body.results[0].message).toBe('string');
+    expect(body.results[0].message.length).toBeGreaterThan(0);
   });
 
   it('persists initiator consent snapshot in event_payload when /action/perform includes valid consent', async () => {
@@ -368,35 +370,38 @@ describeIf(`consent flow integration (purple_dot/connect)${
         'x-api-key': alice_raw_key,
         'content-type': 'application/json',
       },
-      payload: {
-        action_type: 'connect',
-        source_item: {
-          item_network: 'purple_dot',
-          item_domain: 'seeker',
-          item_type: 'profile_1.0',
-          item_id: alice_item_id,
+      payload: [
+        {
+          action_type: 'connect',
+          source_item: {
+            item_network: 'purple_dot',
+            item_domain: 'seeker',
+            item_type: 'profile_1.0',
+            item_id: alice_item_id,
+          },
+          target_item: {
+            item_network: 'purple_dot',
+            item_domain: 'provider',
+            item_type: 'profile_1.0',
+            item_id: bob_item_id,
+            item_instance_url: base_url,
+          },
+          requirements_snapshot: {},
+          consent: {
+            acknowledged: true,
+            text: INITIATOR_CONSENT_TEXT,
+          },
         },
-        target_item: {
-          item_network: 'purple_dot',
-          item_domain: 'provider',
-          item_type: 'profile_1.0',
-          item_id: bob_item_id,
-          item_instance_url: base_url,
-        },
-        requirements_snapshot: {},
-        consent: {
-          acknowledged: true,
-          text: INITIATOR_CONSENT_TEXT,
-        },
-      },
+      ],
     });
 
     expect(res.statusCode).toBe(201);
     const responseBody = res.json();
-    expect(responseBody.action_id).toBeTruthy();
-    expect(responseBody.action_status).toBe('created');
+    expect(responseBody.summary).toEqual({ total: 1, succeeded: 1, failed: 0 });
+    expect(responseBody.results[0].action_id).toBeTruthy();
+    expect(responseBody.results[0].action_status).toBe('created');
 
-    const action_id: string = responseBody.action_id;
+    const action_id: string = responseBody.results[0].action_id;
 
     // Query the action_events table for the new event row and assert the
     // consent snapshot was persisted verbatim.
@@ -442,34 +447,36 @@ describeIf(`consent flow integration (purple_dot/connect)${
         'x-api-key': alice_raw_key,
         'content-type': 'application/json',
       },
-      payload: {
-        action_type: 'connect',
-        source_item: {
-          item_network: 'purple_dot',
-          item_domain: 'seeker',
-          item_type: 'profile_1.0',
-          item_id: alice_item_id,
+      payload: [
+        {
+          action_type: 'connect',
+          source_item: {
+            item_network: 'purple_dot',
+            item_domain: 'seeker',
+            item_type: 'profile_1.0',
+            item_id: alice_item_id,
+          },
+          target_item: {
+            item_network: 'purple_dot',
+            item_domain: 'provider',
+            item_type: 'profile_1.0',
+            item_id: bob_item_id,
+            item_instance_url: base_url,
+          },
+          requirements_snapshot: {},
+          consent: {
+            acknowledged: true,
+            text: INITIATOR_CONSENT_TEXT,
+          },
         },
-        target_item: {
-          item_network: 'purple_dot',
-          item_domain: 'provider',
-          item_type: 'profile_1.0',
-          item_id: bob_item_id,
-          item_instance_url: base_url,
-        },
-        requirements_snapshot: {},
-        consent: {
-          acknowledged: true,
-          text: INITIATOR_CONSENT_TEXT,
-        },
-      },
+      ],
     });
     if (performRes.statusCode !== 201) {
       throw new Error(
         `seed perform failed: ${performRes.statusCode} ${performRes.body}`,
       );
     }
-    const action_id: string = performRes.json().action_id;
+    const action_id: string = performRes.json().results[0].action_id;
 
     // Step 1: Bob tries to accept WITHOUT consent — must be rejected.
     // The purple_dot connect interaction declares consent_text_receiver AND
@@ -482,16 +489,18 @@ describeIf(`consent flow integration (purple_dot/connect)${
         'x-api-key': bob_raw_key,
         'content-type': 'application/json',
       },
-      payload: {
-        action_id,
-        action_status: 'accepted',
-        // consent intentionally omitted
-      },
+      payload: [
+        {
+          action_id,
+          action_status: 'accepted',
+          // consent intentionally omitted
+        },
+      ],
     });
 
-    expect(rejectRes.statusCode).toBe(403);
+    expect(rejectRes.statusCode).toBe(422);
     const rejectBody = rejectRes.json();
-    expect(rejectBody.error).toBe('CONSENT_REQUIRED');
+    expect(rejectBody.results[0]).toMatchObject({ status: 'error', error: 'CONSENT_REQUIRED' });
 
     // Step 2: Bob accepts WITH consent — must succeed.
     const acceptRes = await app.inject({
@@ -501,20 +510,22 @@ describeIf(`consent flow integration (purple_dot/connect)${
         'x-api-key': bob_raw_key,
         'content-type': 'application/json',
       },
-      payload: {
-        action_id,
-        action_status: 'accepted',
-        consent: {
-          acknowledged: true,
-          text: RECEIVER_CONSENT_TEXT,
+      payload: [
+        {
+          action_id,
+          action_status: 'accepted',
+          consent: {
+            acknowledged: true,
+            text: RECEIVER_CONSENT_TEXT,
+          },
         },
-      },
+      ],
     });
 
     expect(acceptRes.statusCode).toBe(200);
     const acceptBody = acceptRes.json();
-    expect(acceptBody.action_id).toBe(action_id);
-    expect(acceptBody.action_status).toBe('accepted');
+    expect(acceptBody.results[0].action_id).toBe(action_id);
+    expect(acceptBody.results[0].action_status).toBe('accepted');
 
     // Query the event row written by update-status (update_count === 1).
     const eventRows = await db
