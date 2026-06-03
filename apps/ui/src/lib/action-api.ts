@@ -1,5 +1,6 @@
 import axios from 'axios';
 import { createApiClient } from './api-client';
+import { unwrapBulkSingle, type BulkEnvelope } from './bulk';
 import { getAuthToken } from './auth-token';
 
 // ─── Contact-details types ────────────────────────────────────────
@@ -265,15 +266,13 @@ export async function performAction(
   sourceInstanceUrl?: string
 ): Promise<PerformActionResponse> {
   // Use source instance URL if provided, otherwise fall back to default API client
-  const client = sourceInstanceUrl 
+  const client = sourceInstanceUrl
     ? createInstanceApiClient(sourceInstanceUrl)
     : apiClient;
-    
-  const response = await client.post<PerformActionResponse>(
-    '/api/v1/action/perform',
-    payload
+
+  return unwrapBulkSingle(
+    client.post<BulkEnvelope<PerformActionResponse>>('/api/v1/action/perform', [payload]),
   );
-  return response.data;
 }
 
 /**
@@ -283,11 +282,9 @@ export async function performAction(
 export async function updateActionStatus(
   payload: UpdateActionStatusPayload
 ): Promise<UpdateActionStatusResponse> {
-  const response = await apiClient.post<UpdateActionStatusResponse>(
-    '/api/v1/action/update-status',
-    payload
+  return unwrapBulkSingle(
+    apiClient.post<BulkEnvelope<UpdateActionStatusResponse>>('/api/v1/action/update-status', [payload]),
   );
-  return response.data;
 }
 
 /**
