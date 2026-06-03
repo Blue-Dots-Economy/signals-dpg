@@ -181,3 +181,13 @@ Per endpoint (vitest, following existing `__tests__` patterns):
 - Per-item partition creation (`ensureItemPartition`,
   `ensureActionEventPartition`) is idempotent, so repeated calls within a batch
   are safe.
+- **Error-envelope flattening (intentional).** Each per-item failure is reduced
+  to `{ error, message }`. Two consequences vs the prior single-item handlers,
+  both accepted by design: (1) rich diagnostic bodies are dropped — e.g. the
+  single-item `UNSERVED_DOMAIN_BINDING` reply included `allowed_bindings` /
+  `allowed_networks` / `allowed_domains`; the bulk per-item error keeps only the
+  code + a human message. (2) Per-item failures no longer carry their own HTTP
+  status (403/404/409/…); the HTTP status is aggregate (201/200 · 207 · 422) and
+  clients must key on the per-item `error` code, not status. A new
+  `INVALID_PAYLOAD` code is introduced for per-element schema-validation failures
+  (the single-item path relied on Fastify's automatic 400).
