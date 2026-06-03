@@ -16,9 +16,26 @@ export function useNetworkTheme(): NetworkThemeContextValue {
   return React.useContext(NetworkThemeContext);
 }
 
+// Pulls `?network=…` out of the `redirect` query when the user is mid-auth.
+// Prevents a brand flicker on /auth/login → /profile/new?network=X for a
+// fresh visitor whose localStorage hasn't been seeded yet.
+function networkFromRedirectParam(search: string): string | null {
+  const raw = new URLSearchParams(search).get('redirect');
+  if (!raw) return null;
+  const qIdx = raw.indexOf('?');
+  if (qIdx < 0) return null;
+  try {
+    return new URLSearchParams(raw.slice(qIdx + 1)).get('network');
+  } catch {
+    return null;
+  }
+}
+
 function getInitialNetworkId(): string {
   const url = new URLSearchParams(window.location.search).get('network');
   if (url) return url;
+  const nested = networkFromRedirectParam(window.location.search);
+  if (nested) return nested;
   // Runtime config (window.__DPG_UI_CONFIG__) is injected by the chart at
   // deploy time via /config.js (loaded in index.html before the bundle).
   // It wins over the Vite build-time default, so a single image can be
@@ -90,12 +107,21 @@ const ACTIVE_NETWORK_KEY = 'dpg-active-network';
 export function NetworkThemeProvider({ children }: { children: React.ReactNode }) {
   const [searchParams] = useSearchParams();
   const networkFromUrl = searchParams.get('network');
+  // On /auth/login the brand-bearing param is nested inside `redirect=`. Peek
+  // into it so the login page renders the brand the user is signing up for —
+  // not the localStorage residue from a prior network.
+  const networkFromRedirect = React.useMemo(
+    () => networkFromRedirectParam(window.location.search),
+    // re-derive when react-router updates ?redirect=
+    [searchParams],
+  );
 
   const themeId = React.useMemo(() => {
     // URL wins. Otherwise reuse the last network the user was on (routes like
     // /my-actions carry no ?network=, and falling back to the build default
     // would flip the theme to the wrong brand mid-session).
     if (networkFromUrl) return networkFromUrl;
+    if (networkFromRedirect) return networkFromRedirect;
     // Runtime config (window.__DPG_UI_CONFIG__.VITE_NETWORK_NAME) — written
     // by the chart at deploy time. Must win over localStorage so a fresh
     // visitor lands on the chart-configured brand even without ?network=.
@@ -114,7 +140,7 @@ export function NetworkThemeProvider({ children }: { children: React.ReactNode }
     const fromEnv =
       typeof __DEFAULT_NETWORK_THEME__ !== 'undefined' ? __DEFAULT_NETWORK_THEME__ : '';
     return fromEnv || 'blue_dot';
-  }, [networkFromUrl]);
+  }, [networkFromUrl, networkFromRedirect]);
 
   // Persist the network whenever it's explicitly chosen via the URL so other
   // routes inherit the same brand theme.
