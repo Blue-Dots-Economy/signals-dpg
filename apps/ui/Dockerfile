@@ -23,6 +23,14 @@ FROM base AS builder
 WORKDIR /app
 COPY --from=deps /app/ ./
 COPY --from=pruner /repo/out/full/ ./
+# `turbo prune ui --docker` doesn't pull in examples/schemas/, but the
+# brand-theme Vite plugin (apps/ui/vite.config.ts) reads each network's
+# brand.json from that tree to emit [data-network=<id>]{...} CSS blocks
+# into index.html at build time. Without these files the deployed UI has
+# no per-network token block and every network falls back to the default
+# :root palette (blue-leaning) — visible as "Blue Dots" colours on the
+# Orange Dots deployment. Copy the brand.json files explicitly.
+COPY examples/schemas/ /app/examples/schemas/
 ARG VITE_API_URL
 ARG VITE_NETWORK_NAME
 ENV VITE_API_URL=$VITE_API_URL
