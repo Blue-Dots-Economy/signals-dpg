@@ -18,6 +18,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { Button } from '@/components/ui/button';
 import { ActionHandler } from '@/components/actions/action-handler';
 import { MapView } from '@/components/map/map-container';
+import { MapFiltersPanel } from '@/components/map/map-filters-panel';
 import { MatchScoreCard } from '@/components/match-score';
 import '@/components/map/providers';
 import { fetchItems, performAction, type Item } from '@/lib/item-api';
@@ -27,10 +28,12 @@ import { EmptyState } from '@/components/empty-state';
 import { fetchNetworkConfigs, fetchNetworkConfig, fetchNetworkItems } from '@/lib/network-api';
 import { useAuth } from '@/contexts/auth-context';
 import { apiConfig } from '@/lib/api-config';
+import { getEnumFilterFieldsForDomains, itemPassesEnumFilters } from '@/lib/enum-filters';
 
-function itemToCardItem(item: Item): { id: string; data: Record<string, unknown> } {
+function itemToCardItem(item: Item): { id: string; domain: string; data: Record<string, unknown> } {
   return {
     id: item.item_id,
+    domain: item.item_domain,
     data: {
       ...item.item_state,
       item_latitude: item.item_latitude,
@@ -148,6 +151,25 @@ export function HomePage() {
   const [selectedDomain, setSelectedDomain] = React.useState<string | null>(
     searchParams.get('domain')
   );
+  // Map filter: multi-select domain filter (URL param: ?map_domains=seeker,provider)
+  const [mapSelectedDomains, setMapSelectedDomains] = React.useState<string[]>(() => {
+    const raw = searchParams.get('map_domains');
+    if (!raw) return [];
+    return raw.split(',').map((s) => s.trim()).filter(Boolean);
+  });
+  // Map filter: enum-field filters (URL params: ?f_<key>=value1,value2)
+  // Each active field gets its own param namespaced with the "f_" prefix.
+  const [mapSelectedFields, setMapSelectedFields] = React.useState<Record<string, string[]>>(() => {
+    const result: Record<string, string[]> = {};
+    for (const [param, value] of searchParams.entries()) {
+      if (!param.startsWith('f_')) continue;
+      const fieldKey = param.slice(2); // strip "f_" prefix
+      if (!fieldKey) continue;
+      const values = value.split(',').map((s) => decodeURIComponent(s.trim())).filter(Boolean);
+      if (values.length > 0) result[fieldKey] = values;
+    }
+    return result;
+  });
   const [resolvedNetwork, setResolvedNetwork] = React.useState<DotNetworkSchema | null>(null);
   const [allNetworks, setAllNetworks] = React.useState<DotNetworkSchema[]>([]);
   const configuredNetworkIds = parseNetworkIds(import.meta.env.VITE_NETWORK_ID);
@@ -414,21 +436,56 @@ export function HomePage() {
     return actions[0] ?? null;
   }, [getActionsForDomain, selectedDomain, visibleDomains]);
 
-  // Build per-domain card items filtered by search
+  // Build per-domain card items filtered by search, domain, and status.
+  // The same filtered result is consumed by both the list view and the map view
+  // so both stay in sync without duplicating filter logic.
+  // Derive enum filter field metadata once (used in the memo below and in MapView)
+  const enumFilterFields = React.useMemo(
+    () => (network ? getEnumFilterFieldsForDomains(network.domains) : []),
+    [network],
+  );
+
   const filteredDomainItems = React.useMemo(() => {
-    const result: Record<string, { id: string; data: Record<string, unknown> }[]> = {};
-    for (const [domain, itemList] of Object.entries(domainItems)) {
-      const cards = itemList.map(itemToCardItem);
-      result[domain] = search
-        ? cards.filter((item) =>
-            Object.values(item.data).some((val) =>
-              String(val).toLowerCase().includes(search.toLowerCase())
-            )
+    const result: Record<string, { id: string; domain: string; data: Record<string, unknown> }[]> = {};
+
+    // Determine which enum-field filters are active (non-empty selected arrays)
+    const activeFieldFilters = Object.fromEntries(
+      Object.entries(mapSelectedFields).filter(([, vals]) => vals.length > 0),
+    );
+    const hasFieldFilters = Object.keys(activeFieldFilters).length > 0;
+
+    for (const [domainId, itemList] of Object.entries(domainItems)) {
+      // Map domain filter: skip this domain entirely if filter is active and
+      // this domain is not selected.
+      if (mapSelectedDomains.length > 0 && !mapSelectedDomains.includes(domainId)) {
+        result[domainId] = [];
+        continue;
+      }
+
+      let cards = itemList.map(itemToCardItem);
+
+      // Text search filter
+      if (search) {
+        cards = cards.filter((item) =>
+          Object.values(item.data).some((val) =>
+            String(val).toLowerCase().includes(search.toLowerCase())
           )
-        : cards;
+        );
+      }
+
+      // Enum-field filters: AND across different fields, OR within a field's
+      // selected values. Absent fields on an item always pass (domain-safe).
+      if (hasFieldFilters) {
+        cards = cards.filter((item) =>
+          itemPassesEnumFilters(item.data, activeFieldFilters, enumFilterFields),
+        );
+      }
+
+      result[domainId] = cards;
     }
+
     return result;
-  }, [domainItems, search]);
+  }, [domainItems, search, mapSelectedDomains, mapSelectedFields, network, enumFilterFields]);
 
   const handleDomainSelect = (domainId: string | null) => {
     setSelectedDomain(domainId);
@@ -463,6 +520,37 @@ export function HomePage() {
     setSearchParams((prev) => {
       prev.set('network', networkId);
       prev.delete('domain'); // Remove domain since it's network-specific
+      return prev;
+    });
+  };
+
+  const handleMapDomainsChange = (domains: string[]) => {
+    setMapSelectedDomains(domains);
+    setSearchParams((prev) => {
+      if (domains.length > 0) {
+        prev.set('map_domains', domains.join(','));
+      } else {
+        prev.delete('map_domains');
+      }
+      return prev;
+    });
+  };
+
+  const handleMapFieldsChange = (fields: Record<string, string[]>) => {
+    setMapSelectedFields(fields);
+    setSearchParams((prev) => {
+      // Remove all existing f_* params before re-writing
+      const keysToDelete: string[] = [];
+      for (const key of prev.keys()) {
+        if (key.startsWith('f_')) keysToDelete.push(key);
+      }
+      for (const key of keysToDelete) prev.delete(key);
+      // Write active field selections as ?f_<key>=value1,value2
+      for (const [fieldKey, values] of Object.entries(fields)) {
+        if (values.length > 0) {
+          prev.set(`f_${fieldKey}`, values.map(encodeURIComponent).join(','));
+        }
+      }
       return prev;
     });
   };
@@ -542,6 +630,19 @@ export function HomePage() {
     );
   }
 
+  // Single filters element reused in the page header, the guest view, and the
+  // maximized map overlay. Each location instantiates its own popover state; the
+  // filter selection itself is controlled via the shared props below.
+  const filtersPanel = (
+    <MapFiltersPanel
+      domains={visibleDomains}
+      selectedDomains={mapSelectedDomains}
+      onDomainsChange={handleMapDomainsChange}
+      selectedFields={mapSelectedFields}
+      onFieldsChange={handleMapFieldsChange}
+    />
+  );
+
   return (
     <PageShell
       networks={showNetworkSelector ? allNetworks : []}
@@ -561,13 +662,19 @@ export function HomePage() {
       onViewModeChange={handleViewModeChange}
     >
       {!user ? (
-        <GuestHero />
+        <>
+          <GuestHero />
+          {/* Guests don't get the ContentHeader, but should still be able to
+              filter the browsed items — show the Filters control below the banner. */}
+          <div className="mb-4 mt-3 flex justify-end">{filtersPanel}</div>
+        </>
       ) : (
         <ContentHeader
           title={contentTitle}
           description={contentDescription}
           count={loading ? undefined : contentCount}
           noProfilePrompt={{ show: !myItem, networkId: selectedNetworkId ?? '' }}
+          actions={filtersPanel}
         />
       )}
       {viewMode === 'list' ? (
@@ -742,6 +849,12 @@ export function HomePage() {
         <MapView
           schema={activeSchema!}
           items={Object.values(filteredDomainItems).flat()}
+          focusPoint={
+            myItem && myItem.item_latitude != null && myItem.item_longitude != null
+              ? { lat: myItem.item_latitude, lng: myItem.item_longitude }
+              : null
+          }
+          filtersSlot={filtersPanel}
         />
       )}
     </PageShell>

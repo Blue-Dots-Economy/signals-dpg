@@ -1,5 +1,5 @@
 import { useNavigate } from 'react-router-dom';
-import { Search, List, Map, LogIn, Server, Bell } from 'lucide-react';
+import { Search, List, MapPinned, LogIn, Server, Bell } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
 import {
@@ -78,7 +78,7 @@ export function TopBar({
           }}
         >
           <ToggleGroupItem value="map" aria-label="Map view">
-            <Map className="h-4 w-4" />
+            <MapPinned className="h-4 w-4" />
           </ToggleGroupItem>
           <ToggleGroupItem value="list" aria-label="List view">
             <List className="h-4 w-4" />
