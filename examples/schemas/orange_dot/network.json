@@ -16,20 +16,10 @@
         "profile_1.0": {
           "$schema": "https://json-schema.org/draft/2020-12/schema",
           "title": "Orange Dot Tourist Profile 1.0",
-          "display_name_field": "tourist_token",
           "type": "object",
           "additionalProperties": false,
-          "required": [
-            "tourist_token",
-            "consent_state"
-          ],
+          "required": [],
           "properties": {
-            "tourist_token": {
-              "type": "string",
-              "title": "Tourist Token",
-              "description": "Attribution anchor from the entry QR / landing page. Links all sessions and actions to one traveller.",
-              "minLength": 1
-            },
             "consent_state": {
               "type": "string",
               "title": "Consent State",
@@ -38,7 +28,8 @@
             },
             "name": {
               "type": "string",
-              "title": "Name"
+              "title": "Name",
+              "private": true
             },
             "nationality": {
               "type": "string",
@@ -59,13 +50,7 @@
               "title": "Phone",
               "private": true,
               "pattern": "^[0-9]{10}$"
-            },
-            "whatsapp_number": {
-              "type": "string",
-              "title": "WhatsApp",
-              "private": true,
-              "pattern": "^[0-9]{10}$"
-            },
+            },          
             "trip_window_start": {
               "type": "string",
               "title": "Trip Start",
@@ -79,6 +64,7 @@
             "base_location": {
               "type": "string",
               "title": "Base Location",
+              "private": true,
               "description": "Where the tourist is staying — used for 'near me' calculations."
             },
             "budget_band": {
@@ -269,20 +255,6 @@
           "from_domain": "tourist",
           "to_network": "orange_dot",
           "to_domain": "practitioner",
-          "requirement_schema": {
-            "$schema": "https://json-schema.org/draft/2020-12/schema",
-            "title": "Tourist Connect Requirement",
-            "type": "object",
-            "additionalProperties": false,
-            "required": ["connect_mode"],
-            "properties": {
-              "connect_mode": {
-                "type": "string",
-                "title": "Connect Mode",
-                "enum": ["share_itinerary", "receive_whatsapp"]
-              }
-            }
-          },
           "event_schema": {
             "$schema": "https://json-schema.org/draft/2020-12/schema",
             "title": "Tourist → Practitioner Connect Event",
