@@ -1,22 +1,15 @@
+import * as React from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Search, List, MapPinned, LogIn, Server, Bell } from 'lucide-react';
+import { Search, List, MapPinned, LogIn, Bell } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { Input } from '@/components/ui/input';
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select';
 import { SidebarTrigger } from '@/components/ui/sidebar';
 import { Button } from '@/components/ui/button';
 import { UserMenu } from '@/components/auth/user-menu';
 import { ThemeModeToggle } from '@/components/layout/theme-mode-toggle';
 import { LanguageSwitcher } from '@/components/layout/language-switcher';
 import { useAuth } from '@/contexts/auth-context';
-import { apiConfig } from '@/lib/api-config';
 import { usePendingActionsCount } from '@/hooks/use-actions';
 import type { ViewMode } from '@/engine/types';
 
@@ -25,6 +18,8 @@ interface TopBarProps {
   onSearchChange: (value: string) => void;
   viewMode: ViewMode;
   onViewModeChange: (mode: ViewMode) => void;
+  /** Optional Filters control rendered next to the search bar (home/browse only). */
+  filtersSlot?: React.ReactNode;
 }
 
 function NotificationBell() {
@@ -55,13 +50,14 @@ export function TopBar({
   onSearchChange,
   viewMode,
   onViewModeChange,
+  filtersSlot,
 }: TopBarProps) {
   const navigate = useNavigate();
   const { t } = useTranslation();
   const { isAuthenticated, isLoading } = useAuth();
 
   return (
-    <header className="sticky top-0 z-40 flex h-14 items-center gap-4 border-b bg-gradient-to-r from-background to-primary/5 px-4 sm:px-6">
+    <header className="sticky top-0 z-40 flex h-14 items-center gap-3 border-b bg-gradient-to-r from-background to-primary/5 px-4 sm:px-6">
       <SidebarTrigger className="md:hidden" />
       <div className="relative flex-1 max-w-md">
         <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
@@ -73,6 +69,8 @@ export function TopBar({
           onChange={(e) => onSearchChange(e.target.value)}
         />
       </div>
+      {/* Filters control sits immediately to the right of the search bar. */}
+      {filtersSlot}
       <div className="ml-auto flex items-center gap-2">
         <ToggleGroup
           type="single"
@@ -88,25 +86,6 @@ export function TopBar({
             <List className="h-4 w-4" />
           </ToggleGroupItem>
         </ToggleGroup>
-
-        {apiConfig.isDevMode() && (
-          <Select
-            value={apiConfig.getSelectedKey() ?? 'default'}
-            onValueChange={(value) => apiConfig.setSelectedKey(value)}
-          >
-            <SelectTrigger className="w-[180px]" aria-label={t('nav.select_api_instance')}>
-              <Server className="h-4 w-4 mr-2" />
-              <SelectValue placeholder={t('nav.select_api')} />
-            </SelectTrigger>
-            <SelectContent>
-              {apiConfig.getEndpoints().map((ep) => (
-                <SelectItem key={ep.key} value={ep.key}>
-                  {ep.label}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        )}
 
         <LanguageSwitcher />
         <ThemeModeToggle />

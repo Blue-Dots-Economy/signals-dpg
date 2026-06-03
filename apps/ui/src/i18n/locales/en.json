@@ -183,8 +183,6 @@
   "nav.networks_group": "Networks",
   "nav.pending_actions": "{{count}} pending actions",
   "nav.portal_logo_alt": "{{name}} logo",
-  "nav.select_api": "Select API",
-  "nav.select_api_instance": "Select API instance",
   "nav.sign_in": "Sign in",
   "nav.sign_in_to_connect": "Sign in to connect",
   "profile.choose_different_role": "Choose different role",

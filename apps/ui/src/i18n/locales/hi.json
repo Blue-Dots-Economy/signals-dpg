@@ -183,8 +183,6 @@
   "nav.networks_group": "नेटवर्क",
   "nav.pending_actions": "{{count}} लंबित क्रियाएं",
   "nav.portal_logo_alt": "{{name}} लोगो",
-  "nav.select_api": "API चुनें",
-  "nav.select_api_instance": "API इंस्टेंस चुनें",
   "nav.sign_in": "साइन इन",
   "nav.sign_in_to_connect": "जुड़ने के लिए साइन इन करें",
   "profile.choose_different_role": "अलग भूमिका चुनें",

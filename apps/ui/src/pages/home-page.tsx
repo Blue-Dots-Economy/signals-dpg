@@ -631,9 +631,10 @@ export function HomePage() {
     );
   }
 
-  // Single filters element reused in the page header, the guest view, and the
-  // maximized map overlay. Each location instantiates its own popover state; the
-  // filter selection itself is controlled via the shared props below.
+  // Single filters element surfaced in the top bar (next to search) and, when
+  // the map is maximized, in the map overlay (the top bar is hidden in
+  // fullscreen). Each location instantiates its own popover state; the filter
+  // selection itself is controlled via the shared props below.
   const filtersPanel = (
     <MapFiltersPanel
       domains={visibleDomains}
@@ -661,21 +662,16 @@ export function HomePage() {
       onSearchChange={setSearch}
       viewMode={viewMode}
       onViewModeChange={handleViewModeChange}
+      filtersSlot={filtersPanel}
     >
       {!user ? (
-        <>
-          <GuestHero />
-          {/* Guests don't get the ContentHeader, but should still be able to
-              filter the browsed items — show the Filters control below the banner. */}
-          <div className="mb-4 mt-3 flex justify-end">{filtersPanel}</div>
-        </>
+        <GuestHero />
       ) : (
         <ContentHeader
           title={contentTitle}
           description={contentDescription}
           count={loading ? undefined : contentCount}
           noProfilePrompt={{ show: !myItem, networkId: selectedNetworkId ?? '' }}
-          actions={filtersPanel}
         />
       )}
       {viewMode === 'list' ? (
