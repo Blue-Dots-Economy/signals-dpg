@@ -2,6 +2,8 @@ import { eq } from 'drizzle-orm';
 import z, {
   getActionInteraction,
   UpdateActionStatusBodySchema,
+  BulkUpdateActionStatusResponseSchema,
+  BulkRequestErrorSchema,
 } from '@dpg/schemas';
 import { type FastifyPluginAsyncZod } from 'fastify-type-provider-zod';
 import type { FastifyReply, FastifyRequest } from 'fastify';
@@ -11,7 +13,7 @@ import {
   ensureActionEventPartition,
   item_actions,
 } from '@dpg/database';
-import { getCurrentApiBaseUrl } from '@/config';
+import { getCurrentApiBaseUrl, apiConfig } from '@/config';
 import { getNetworkConfigById } from '@/network_configs';
 import {
   buildActionEventPayload,
@@ -20,17 +22,9 @@ import {
   mirrorActionEventToSourceInstance,
   validateActionEventPayload,
 } from '@/utils/action_event_runtime';
+import { runBulk, BulkItemFailure } from '@/utils/bulk_runner';
 
-type UpdateActionStatusRequest = FastifyRequest<{
-  Body: z.infer<typeof UpdateActionStatusBodySchema>;
-}>;
-
-const UpdateActionStatusResponseSchema = z.object({
-  action_id: z.string(),
-  action_type: z.string(),
-  action_status: z.string(),
-  update_count: z.number().int().nonnegative(),
-});
+const BulkUpdateActionStatusBodySchema = z.array(z.unknown());
 
 export const update_action_status: FastifyPluginAsyncZod = async function (fastify) {
   fastify.route({
@@ -39,9 +33,12 @@ export const update_action_status: FastifyPluginAsyncZod = async function (fasti
     preHandler: auth_middleware_if_enabled,
     schema: {
       tags: ['action'],
-      body: UpdateActionStatusBodySchema,
+      body: BulkUpdateActionStatusBodySchema,
       response: {
-        200: UpdateActionStatusResponseSchema,
+        200: BulkUpdateActionStatusResponseSchema,
+        207: BulkUpdateActionStatusResponseSchema,
+        422: BulkUpdateActionStatusResponseSchema,
+        400: BulkRequestErrorSchema,
       },
     },
     handler: update_action_status_handler,
@@ -56,219 +53,235 @@ export const update_action_status: FastifyPluginAsyncZod = async function (fasti
  * (by `/action/perform`).
  */
 export const update_action_status_handler = async (
-  request: UpdateActionStatusRequest,
-  reply: FastifyReply
+  request: FastifyRequest<{ Body: unknown[] }>,
+  reply: FastifyReply,
 ) => {
-  const body = request.body;
-  const [existingAction] = await db
-    .select()
-    .from(item_actions)
-    .where(eq(item_actions.action_id, body.action_id))
-    .limit(1);
+  const callerId = request.user.id;
 
-  if (!existingAction) {
-    return reply.code(404).send({
-      error: 'ACTION_NOT_FOUND',
-      message: 'Action does not exist on this instance',
-    });
-  }
+  const outcome = await runBulk(
+    request.body,
+    async (raw, index) => {
+      const parsed = UpdateActionStatusBodySchema.safeParse(raw);
+      if (!parsed.success) {
+        throw new BulkItemFailure(
+          'INVALID_PAYLOAD',
+          parsed.error.issues.map((i) => `${i.path.join('.')}: ${i.message}`).join('; '),
+        );
+      }
+      const body = parsed.data;
 
-  if (existingAction.target_item_owner !== request.user.id) {
-    return reply.code(403).send({
-      error: 'NOT_TARGET_ITEM_OWNER',
-      message: 'update-status may only be called by the target item owner.',
-    });
-  }
+      const [existingAction] = await db
+        .select()
+        .from(item_actions)
+        .where(eq(item_actions.action_id, body.action_id))
+        .limit(1);
 
-  let interaction: ReturnType<typeof getActionInteraction>;
+      if (!existingAction) {
+        throw new BulkItemFailure('ACTION_NOT_FOUND', 'Action does not exist on this instance');
+      }
 
-  try {
-    const networkConfig = await getNetworkConfigById(existingAction.target_item_network);
-    interaction = getActionInteraction(networkConfig, {
-      actionType: existingAction.action_type,
-      fromNetwork: existingAction.source_item_network,
-      fromDomain: existingAction.source_item_domain,
-      fromItemType: existingAction.source_item_type,
-      toNetwork: existingAction.target_item_network,
-      toDomain: existingAction.target_item_domain,
-      toItemType: existingAction.target_item_type,
-    });
-  } catch (err) {
-    return reply.code(400).send({
-      error: 'INVALID_ACTION_EVENT',
-      message: err instanceof Error ? err.message : 'Invalid action event',
-    });
-  }
+      if (existingAction.target_item_owner !== callerId) {
+        throw new BulkItemFailure(
+          'NOT_TARGET_ITEM_OWNER',
+          'update-status may only be called by the target item owner.',
+        );
+      }
 
-  const requiresReceiverConsent =
-    interaction.reveals_pii_on_status.includes(body.action_status) &&
-    !!interaction.consent_text_receiver?.trim();
+      let interaction: ReturnType<typeof getActionInteraction>;
+      try {
+        const networkConfig = await getNetworkConfigById(existingAction.target_item_network);
+        interaction = getActionInteraction(networkConfig, {
+          actionType: existingAction.action_type,
+          fromNetwork: existingAction.source_item_network,
+          fromDomain: existingAction.source_item_domain,
+          fromItemType: existingAction.source_item_type,
+          toNetwork: existingAction.target_item_network,
+          toDomain: existingAction.target_item_domain,
+          toItemType: existingAction.target_item_type,
+        });
+      } catch (err) {
+        throw new BulkItemFailure(
+          'INVALID_ACTION_EVENT',
+          err instanceof Error ? err.message : 'Invalid action event',
+        );
+      }
 
-  if (requiresReceiverConsent && !body.consent?.acknowledged) {
-    return reply.code(403).send({
-      error: 'CONSENT_REQUIRED',
-      message: 'Receiver consent acknowledgment required to transition to this status.',
-    });
-  }
+      const requiresReceiverConsent =
+        interaction.reveals_pii_on_status.includes(body.action_status) &&
+        !!interaction.consent_text_receiver?.trim();
 
-  if (requiresReceiverConsent && body.consent?.acknowledged) {
-    request.log.info(
-      {
-        side: 'receiver',
-        action_id: body.action_id,
+      if (requiresReceiverConsent && !body.consent?.acknowledged) {
+        throw new BulkItemFailure(
+          'CONSENT_REQUIRED',
+          'Receiver consent acknowledgment required to transition to this status.',
+        );
+      }
+
+      if (requiresReceiverConsent && body.consent?.acknowledged) {
+        request.log.info(
+          {
+            side: 'receiver',
+            action_id: body.action_id,
+            action_status: body.action_status,
+            consent_text_length: body.consent.text.length,
+          },
+          'consent recorded',
+        );
+      }
+
+      const eventPayload = buildActionEventPayload({
+        event_schema: interaction.event_schema,
         action_status: body.action_status,
-        consent_text_length: body.consent.text.length,
-      },
-      'consent recorded',
-    );
-  }
+        remarks: body.remarks,
+        consent: body.consent,
+        context: {
+          action_type: existingAction.action_type,
+          source_item: {
+            item_network: existingAction.source_item_network,
+            item_domain: existingAction.source_item_domain,
+            item_type: existingAction.source_item_type,
+            item_id: existingAction.source_item_id,
+            item_instance_url: existingAction.source_item_instance_url,
+          },
+          target_item: {
+            item_network: existingAction.target_item_network,
+            item_domain: existingAction.target_item_domain,
+            item_type: existingAction.target_item_type,
+            item_id: existingAction.target_item_id,
+            item_instance_url: existingAction.target_item_instance_url,
+          },
+          requirements_snapshot: existingAction.requirements_snapshot as Record<string, unknown>,
+        },
+      });
 
-  const eventPayload = buildActionEventPayload({
-    event_schema: interaction.event_schema,
-    action_status: body.action_status,
-    remarks: body.remarks,
-    consent: body.consent,
-    context: {
-      action_type: existingAction.action_type,
-      source_item: {
-        item_network: existingAction.source_item_network,
-        item_domain: existingAction.source_item_domain,
-        item_type: existingAction.source_item_type,
-        item_id: existingAction.source_item_id,
-        item_instance_url: existingAction.source_item_instance_url,
-      },
-      target_item: {
-        item_network: existingAction.target_item_network,
-        item_domain: existingAction.target_item_domain,
-        item_type: existingAction.target_item_type,
-        item_id: existingAction.target_item_id,
-        item_instance_url: existingAction.target_item_instance_url,
-      },
-      requirements_snapshot: existingAction.requirements_snapshot as Record<
-        string,
-        unknown
-      >,
-    },
-  });
+      try {
+        validateActionEventPayload(interaction.event_schema, eventPayload);
+      } catch (err) {
+        throw new BulkItemFailure(
+          'INVALID_ACTION_EVENT',
+          err instanceof Error ? err.message : 'Invalid action event',
+        );
+      }
 
-  try {
-    validateActionEventPayload(interaction.event_schema, eventPayload);
-  } catch (err) {
-    return reply.code(400).send({
-      error: 'INVALID_ACTION_EVENT',
-      message: err instanceof Error ? err.message : 'Invalid action event',
-    });
-  }
+      try {
+        await ensureActionEventPartition(
+          db,
+          existingAction.target_item_network,
+          existingAction.action_type,
+        );
+      } catch (err) {
+        request.log.error(
+          { err, index, action_id: existingAction.action_id, action_type: existingAction.action_type },
+          'Failed to ensure action event partition',
+        );
+        throw new BulkItemFailure('PARTITION_SETUP_FAILED', 'Failed to prepare storage for action event');
+      }
 
-  try {
-    await ensureActionEventPartition(
-      db,
-      existingAction.target_item_network,
-      existingAction.action_type
-    );
-  } catch (err) {
-    request.log.error(
-      {
-        err,
-        action_id: existingAction.action_id,
-        action_type: existingAction.action_type,
-      },
-      'Failed to ensure action event partition'
-    );
+      const nextUpdateCount = existingAction.update_count + 1;
+      const [updatedAction] = await db
+        .update(item_actions)
+        .set({
+          action_status: body.action_status,
+          update_count: nextUpdateCount,
+          remarks: body.remarks ?? existingAction.remarks,
+          updated_at: new Date(),
+        })
+        .where(eq(item_actions.action_id, existingAction.action_id))
+        .returning({
+          action_id: item_actions.action_id,
+          action_type: item_actions.action_type,
+          action_status: item_actions.action_status,
+          update_count: item_actions.update_count,
+          source_item_network: item_actions.source_item_network,
+          source_item_domain: item_actions.source_item_domain,
+          source_item_type: item_actions.source_item_type,
+          source_item_id: item_actions.source_item_id,
+          source_item_instance_url: item_actions.source_item_instance_url,
+          source_item_owner: item_actions.source_item_owner,
+          target_item_network: item_actions.target_item_network,
+          target_item_domain: item_actions.target_item_domain,
+          target_item_type: item_actions.target_item_type,
+          target_item_id: item_actions.target_item_id,
+          target_item_instance_url: item_actions.target_item_instance_url,
+          target_item_owner: item_actions.target_item_owner,
+          remarks: item_actions.remarks,
+        });
 
-    return reply.code(500).send({
-      error: 'PARTITION_SETUP_FAILED',
-      message: 'Failed to prepare storage for action event',
-    });
-  }
+      const targetItemSnapshot = await fetchLocalItemSnapshot(db, {
+        item_network: updatedAction.target_item_network,
+        item_domain: updatedAction.target_item_domain,
+        item_type: updatedAction.target_item_type,
+        item_id: updatedAction.target_item_id,
+        item_instance_url: updatedAction.target_item_instance_url,
+      });
+      const sourceItemSnapshot =
+        updatedAction.source_item_instance_url === getCurrentApiBaseUrl()
+          ? await fetchLocalItemSnapshot(db, {
+              item_network: updatedAction.source_item_network,
+              item_domain: updatedAction.source_item_domain,
+              item_type: updatedAction.source_item_type,
+              item_id: updatedAction.source_item_id,
+              item_instance_url: updatedAction.source_item_instance_url,
+            })
+          : null;
 
-  const nextUpdateCount = existingAction.update_count + 1;
-  const [updatedAction] = await db
-    .update(item_actions)
-    .set({
-      action_status: body.action_status,
-      update_count: nextUpdateCount,
-      remarks: body.remarks ?? existingAction.remarks,
-      updated_at: new Date(),
-    })
-    .where(eq(item_actions.action_id, existingAction.action_id))
-    .returning({
-      action_id: item_actions.action_id,
-      action_type: item_actions.action_type,
-      action_status: item_actions.action_status,
-      update_count: item_actions.update_count,
-      source_item_network: item_actions.source_item_network,
-      source_item_domain: item_actions.source_item_domain,
-      source_item_type: item_actions.source_item_type,
-      source_item_id: item_actions.source_item_id,
-      source_item_instance_url: item_actions.source_item_instance_url,
-      source_item_owner: item_actions.source_item_owner,
-      target_item_network: item_actions.target_item_network,
-      target_item_domain: item_actions.target_item_domain,
-      target_item_type: item_actions.target_item_type,
-      target_item_id: item_actions.target_item_id,
-      target_item_instance_url: item_actions.target_item_instance_url,
-      target_item_owner: item_actions.target_item_owner,
-      remarks: item_actions.remarks,
-    });
-
-  const targetItemSnapshot = await fetchLocalItemSnapshot(db, {
-    item_network: updatedAction.target_item_network,
-    item_domain: updatedAction.target_item_domain,
-    item_type: updatedAction.target_item_type,
-    item_id: updatedAction.target_item_id,
-    item_instance_url: updatedAction.target_item_instance_url,
-  });
-  const sourceItemSnapshot =
-    updatedAction.source_item_instance_url === getCurrentApiBaseUrl()
-      ? await fetchLocalItemSnapshot(db, {
+      const storedEvent = {
+        origin_instance_domain: getCurrentApiBaseUrl(),
+        action_type: updatedAction.action_type,
+        action_id: updatedAction.action_id,
+        action_status: updatedAction.action_status,
+        update_count: updatedAction.update_count,
+        source_item: {
           item_network: updatedAction.source_item_network,
           item_domain: updatedAction.source_item_domain,
           item_type: updatedAction.source_item_type,
           item_id: updatedAction.source_item_id,
           item_instance_url: updatedAction.source_item_instance_url,
-        })
-      : null;
+        },
+        target_item: {
+          item_network: updatedAction.target_item_network,
+          item_domain: updatedAction.target_item_domain,
+          item_type: updatedAction.target_item_type,
+          item_id: updatedAction.target_item_id,
+          item_instance_url: updatedAction.target_item_instance_url,
+        },
+        source_item_owner: updatedAction.source_item_owner ?? sourceItemSnapshot?.created_by ?? null,
+        target_item_owner: updatedAction.target_item_owner ?? targetItemSnapshot?.created_by ?? null,
+        source_item_latitude: sourceItemSnapshot?.item_latitude ?? null,
+        source_item_longitude: sourceItemSnapshot?.item_longitude ?? null,
+        target_item_latitude: targetItemSnapshot?.item_latitude ?? null,
+        target_item_longitude: targetItemSnapshot?.item_longitude ?? null,
+        event_payload: eventPayload,
+        remarks: body.remarks,
+      };
 
-  const storedEvent = {
-    origin_instance_domain: getCurrentApiBaseUrl(),
-    action_type: updatedAction.action_type,
-    action_id: updatedAction.action_id,
-    action_status: updatedAction.action_status,
-    update_count: updatedAction.update_count,
-    source_item: {
-      item_network: updatedAction.source_item_network,
-      item_domain: updatedAction.source_item_domain,
-      item_type: updatedAction.source_item_type,
-      item_id: updatedAction.source_item_id,
-      item_instance_url: updatedAction.source_item_instance_url,
+      await insertActionEvent(db, storedEvent);
+      void mirrorActionEventToSourceInstance(storedEvent, request.log);
+
+      return {
+        action_id: updatedAction.action_id,
+        action_type: updatedAction.action_type,
+        action_status: updatedAction.action_status,
+        update_count: updatedAction.update_count,
+      };
     },
-    target_item: {
-      item_network: updatedAction.target_item_network,
-      item_domain: updatedAction.target_item_domain,
-      item_type: updatedAction.target_item_type,
-      item_id: updatedAction.target_item_id,
-      item_instance_url: updatedAction.target_item_instance_url,
+    {
+      okStatus: 200,
+      maxItems: apiConfig.bulk_max_items,
+      onUnexpectedError: (err, index) =>
+        request.log.error({ err, index }, 'bulk update-status unexpected error'),
     },
-    source_item_owner:
-      updatedAction.source_item_owner ?? sourceItemSnapshot?.created_by ?? null,
-    target_item_owner:
-      updatedAction.target_item_owner ?? targetItemSnapshot?.created_by ?? null,
-    source_item_latitude: sourceItemSnapshot?.item_latitude ?? null,
-    source_item_longitude: sourceItemSnapshot?.item_longitude ?? null,
-    target_item_latitude: targetItemSnapshot?.item_latitude ?? null,
-    target_item_longitude: targetItemSnapshot?.item_longitude ?? null,
-    event_payload: eventPayload,
-    remarks: body.remarks,
-  };
+  );
 
-  await insertActionEvent(db, storedEvent);
-  void mirrorActionEventToSourceInstance(storedEvent, request.log);
+  if (outcome.requestError) {
+    return reply.code(400).send({
+      error: outcome.requestError.code,
+      message: outcome.requestError.message,
+    });
+  }
 
-  return reply.code(200).send({
-    action_id: updatedAction.action_id,
-    action_type: updatedAction.action_type,
-    action_status: updatedAction.action_status,
-    update_count: updatedAction.update_count,
+  return reply.code(outcome.httpStatus!).send({
+    results: outcome.results,
+    summary: outcome.summary,
   });
 };

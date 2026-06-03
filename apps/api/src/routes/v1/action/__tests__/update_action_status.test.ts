@@ -7,13 +7,12 @@ import {
 } from 'fastify-type-provider-zod';
 
 /**
- * Plan A Task 6 — failing tests for POST /api/v1/action/update-status's
- * on-behalf-of behavior. The update_action_status route is mounted in
- * isolation (no acting_org preHandler, no auth middleware); the test
- * stubs `request.user` and `request.acting_org` via a custom preHandler
- * so the route's actor-resolution + audit persistence logic is exercised
- * independently of the surrounding wiring.
+ * Task 5 — bulk POST /api/v1/action/update-status.
+ * Each payload is an array; the route returns a { results, summary } envelope.
  */
+
+// Single source of truth for the known action id used across mocks and test data.
+const KNOWN_ACTION_ID = '00000000-0000-4000-8000-000000000aaa';
 
 // --- mock @/config so the env-validating loadEnv() never runs in tests ---
 vi.mock('@/config', () => ({
@@ -25,6 +24,7 @@ vi.mock('@/config', () => ({
     network_config_local_file: '',
     network_config_urls: [],
     allow_extra_schema_data: true,
+    bulk_max_items: 100,
     schema_registry_url: '',
   },
   authConfig: {
@@ -70,6 +70,8 @@ const dbState: {
   userRows: Array<{ id: string; onboardedByOrgId: string | null }>;
   existingAction: Record<string, unknown> | null;
   updates: Array<Record<string, unknown>>;
+  /** When set, each select call pops the next id and matches against EXISTING_ACTION.action_id. */
+  actionIdQueue?: string[];
 } = {
   userRows: [],
   existingAction: null,
@@ -82,6 +84,11 @@ vi.mock('@api/db/postgres/drizzle_config', () => {
       // Discriminate by the shape of select's projection:
       //   - existingAction lookup uses `db.select()` (no args)        → returns existingAction row
       //   - resolve_acting_actor uses `db.select({ onboardedByOrgId })` → returns userRows
+      //
+      // For the mixed-batch test: dbState.resolvedIds tracks which action_ids have
+      // been queried so far. On each no-projection select call, pop the next id from
+      // dbState.resolvedIds. If the id matches EXISTING_ACTION.action_id, return the
+      // existing action; otherwise return [].
       select: vi.fn((projection?: Record<string, unknown>) => {
         const isUserLookup =
           projection !== undefined && 'onboardedByOrgId' in projection;
@@ -90,6 +97,15 @@ vi.mock('@api/db/postgres/drizzle_config', () => {
             where: vi.fn(() => ({
               limit: vi.fn(() => {
                 if (isUserLookup) return Promise.resolve(dbState.userRows);
+                // Pop the next queried action_id from the queue if present.
+                const nextId = dbState.actionIdQueue?.shift();
+                if (nextId !== undefined) {
+                  return Promise.resolve(
+                    nextId === KNOWN_ACTION_ID && dbState.existingAction
+                      ? [dbState.existingAction]
+                      : [],
+                  );
+                }
                 return Promise.resolve(
                   dbState.existingAction ? [dbState.existingAction] : [],
                 );
@@ -170,7 +186,7 @@ vi.mock('@dpg/schemas', async () => {
 import { update_action_status } from '../update_action_status.js';
 
 const EXISTING_ACTION = {
-  action_id: '00000000-0000-4000-8000-000000000aaa',
+  action_id: KNOWN_ACTION_ID,
   action_type: 'apply',
   action_status: 'created',
   update_count: 0,
@@ -213,61 +229,54 @@ const buildApp = (
   return app;
 };
 
-describe('POST /api/v1/action/update-status (self-acted only)', () => {
+describe('POST /api/v1/action/update-status (bulk, self-acted only)', () => {
   beforeEach(() => {
     dbState.userRows = [];
     dbState.existingAction = { ...EXISTING_ACTION };
     dbState.updates = [];
+    dbState.actionIdQueue = undefined;
   });
 
-  it('404 ACTION_NOT_FOUND when action_id does not resolve', async () => {
+  it('422 ACTION_NOT_FOUND when action_id does not resolve', async () => {
     dbState.existingAction = null;
-    const app = buildApp(undefined, { id: 'usr_agg_owned' });
-    const res = await app.inject({
+    const res = await buildApp(undefined, { id: 'usr_agg_owned' }).inject({
       method: 'POST',
       url: '/update-status',
-      payload: VALID_BODY,
+      payload: [VALID_BODY],
     });
-    expect(res.statusCode).toBe(404);
-    expect(res.json()).toMatchObject({ error: 'ACTION_NOT_FOUND' });
+    expect(res.statusCode).toBe(422);
+    expect(res.json().results[0]).toMatchObject({ status: 'error', error: 'ACTION_NOT_FOUND' });
   });
 
-  it('403 NOT_TARGET_ITEM_OWNER when request.user.id is not the action target owner', async () => {
-    dbState.existingAction = {
-      ...EXISTING_ACTION,
-      target_item_owner: 'usr_other_provider',
-    };
-    const app = buildApp(undefined, { id: 'usr_agg_owned' });
-    const res = await app.inject({
+  it('422 NOT_TARGET_ITEM_OWNER when request.user is not the target owner', async () => {
+    dbState.existingAction = { ...EXISTING_ACTION, target_item_owner: 'usr_other_provider' };
+    const res = await buildApp(undefined, { id: 'usr_agg_owned' }).inject({
       method: 'POST',
       url: '/update-status',
-      payload: VALID_BODY,
+      payload: [VALID_BODY],
     });
-    expect(res.statusCode).toBe(403);
-    expect(res.json()).toMatchObject({ error: 'NOT_TARGET_ITEM_OWNER' });
+    expect(res.statusCode).toBe(422);
+    expect(res.json().results[0]).toMatchObject({ error: 'NOT_TARGET_ITEM_OWNER' });
     expect(dbState.updates).toHaveLength(0);
   });
 
   it('200 when self-acted by the target item owner', async () => {
-    const app = buildApp(undefined, { id: 'usr_agg_owned' });
-    const res = await app.inject({
+    const res = await buildApp(undefined, { id: 'usr_agg_owned' }).inject({
       method: 'POST',
       url: '/update-status',
-      payload: VALID_BODY,
+      payload: [VALID_BODY],
     });
     expect(res.statusCode).toBe(200);
+    expect(res.json().summary).toEqual({ total: 1, succeeded: 1, failed: 0 });
     expect(dbState.updates).toHaveLength(1);
-    expect(dbState.updates[0]).toMatchObject({
-      action_status: 'shortlisted',
-    });
+    expect(dbState.updates[0]).toMatchObject({ action_status: 'shortlisted' });
   });
 
   it('UPDATE does NOT write performed_by_org_id or performed_by_service_user_id', async () => {
-    const app = buildApp(undefined, { id: 'usr_agg_owned' });
-    const res = await app.inject({
+    const res = await buildApp(undefined, { id: 'usr_agg_owned' }).inject({
       method: 'POST',
       url: '/update-status',
-      payload: VALID_BODY,
+      payload: [VALID_BODY],
     });
     expect(res.statusCode).toBe(200);
     const setPayload = dbState.updates[0];
@@ -275,39 +284,83 @@ describe('POST /api/v1/action/update-status (self-acted only)', () => {
     expect(setPayload).not.toHaveProperty('performed_by_service_user_id');
   });
 
-  it('acting_as_user_id in the body has no effect (field removed from schema)', async () => {
+  it('acting_as_user_id in the body element has no effect (field removed from schema)', async () => {
     // Zod's default object behavior strips unknown keys; the route never
     // sees `acting_as_user_id`. With self-acted user_id matching the owner,
     // the request still succeeds.
-    const app = buildApp(undefined, { id: 'usr_agg_owned' });
-    const res = await app.inject({
+    const res = await buildApp(undefined, { id: 'usr_agg_owned' }).inject({
       method: 'POST',
       url: '/update-status',
-      payload: { ...VALID_BODY, acting_as_user_id: 'usr_other' },
+      payload: [{ ...VALID_BODY, acting_as_user_id: 'usr_other' }],
     });
     expect(res.statusCode).toBe(200);
     expect(dbState.updates).toHaveLength(1);
   });
 
+  it('207 on a mixed batch (one ok, one not found)', async () => {
+    dbState.existingAction = { ...EXISTING_ACTION };
+    // Drive per-item lookup: first element uses EXISTING_ACTION.action_id (found),
+    // second uses an unknown id (not found).
+    dbState.actionIdQueue = [
+      EXISTING_ACTION.action_id,
+      '00000000-0000-4000-8000-0000000000ff',
+    ];
+    const res = await buildApp(undefined, { id: 'usr_agg_owned' }).inject({
+      method: 'POST',
+      url: '/update-status',
+      payload: [
+        VALID_BODY,
+        { action_id: '00000000-0000-4000-8000-0000000000ff', action_status: 'shortlisted' },
+      ],
+    });
+    expect(res.statusCode).toBe(207);
+    expect(res.json().summary).toEqual({ total: 2, succeeded: 1, failed: 1 });
+    expect(res.json().results[0]).toMatchObject({ index: 0, status: 'success', action_id: KNOWN_ACTION_ID });
+    expect(res.json().results[1]).toMatchObject({ status: 'error', error: 'ACTION_NOT_FOUND' });
+  });
+
+  describe('route-level request errors (short-circuit before db)', () => {
+    it('400 BULK_EMPTY_ARRAY when body is an empty array', async () => {
+      const res = await buildApp(undefined, { id: 'usr_agg_owned' }).inject({
+        method: 'POST',
+        url: '/update-status',
+        payload: [],
+      });
+      expect(res.statusCode).toBe(400);
+      expect(res.json()).toMatchObject({ error: 'BULK_EMPTY_ARRAY' });
+    });
+
+    it('400 BULK_LIMIT_EXCEEDED when body exceeds bulk_max_items (100)', async () => {
+      const res = await buildApp(undefined, { id: 'usr_agg_owned' }).inject({
+        method: 'POST',
+        url: '/update-status',
+        payload: Array.from({ length: 101 }, () => VALID_BODY),
+      });
+      expect(res.statusCode).toBe(400);
+      expect(res.json()).toMatchObject({ error: 'BULK_LIMIT_EXCEEDED' });
+    });
+  });
+
   describe('receiver consent gate', () => {
-    it('403 CONSENT_REQUIRED when status is in reveals_pii_on_status, consent_text_receiver declared, but body has no consent', async () => {
+    it('422 CONSENT_REQUIRED when status is in reveals_pii_on_status, consent_text_receiver declared, but body has no consent', async () => {
       const { getActionInteraction } = await import('@dpg/schemas');
       (getActionInteraction as ReturnType<typeof vi.fn>).mockReturnValueOnce({
         event_schema: {},
         reveals_pii_on_status: ['accepted'],
         consent_text_receiver: 'I agree to share my PII.',
       });
-      const app = buildApp(undefined, { id: 'usr_agg_owned' });
-      const res = await app.inject({
+      const res = await buildApp(undefined, { id: 'usr_agg_owned' }).inject({
         method: 'POST',
         url: '/update-status',
-        payload: {
-          action_id: EXISTING_ACTION.action_id,
-          action_status: 'accepted',
-        },
+        payload: [
+          {
+            action_id: EXISTING_ACTION.action_id,
+            action_status: 'accepted',
+          },
+        ],
       });
-      expect(res.statusCode).toBe(403);
-      expect(res.json()).toMatchObject({ error: 'CONSENT_REQUIRED' });
+      expect(res.statusCode).toBe(422);
+      expect(res.json().results[0]).toMatchObject({ error: 'CONSENT_REQUIRED' });
       expect(dbState.updates).toHaveLength(0);
     });
 
@@ -318,17 +371,19 @@ describe('POST /api/v1/action/update-status (self-acted only)', () => {
         reveals_pii_on_status: ['accepted'],
         consent_text_receiver: 'I agree to share my PII.',
       });
-      const app = buildApp(undefined, { id: 'usr_agg_owned' });
-      const res = await app.inject({
+      const res = await buildApp(undefined, { id: 'usr_agg_owned' }).inject({
         method: 'POST',
         url: '/update-status',
-        payload: {
-          action_id: EXISTING_ACTION.action_id,
-          action_status: 'rejected',
-          remarks: 'not a fit',
-        },
+        payload: [
+          {
+            action_id: EXISTING_ACTION.action_id,
+            action_status: 'rejected',
+            remarks: 'not a fit',
+          },
+        ],
       });
       expect(res.statusCode).toBe(200);
+      expect(res.json().summary.succeeded).toBe(1);
       expect(dbState.updates).toHaveLength(1);
     });
 
@@ -352,16 +407,17 @@ describe('POST /api/v1/action/update-status (self-acted only)', () => {
           consented_at: '2026-01-01T00:00:00.000Z',
         },
       });
-      const app = buildApp(undefined, { id: 'usr_agg_owned' });
-      const res = await app.inject({
+      const res = await buildApp(undefined, { id: 'usr_agg_owned' }).inject({
         method: 'POST',
         url: '/update-status',
-        payload: {
-          action_id: EXISTING_ACTION.action_id,
-          action_status: 'accepted',
-          remarks: 'looking forward',
-          consent: { acknowledged: true, text: 'I agree.' },
-        },
+        payload: [
+          {
+            action_id: EXISTING_ACTION.action_id,
+            action_status: 'accepted',
+            remarks: 'looking forward',
+            consent: { acknowledged: true, text: 'I agree.' },
+          },
+        ],
       });
       expect(res.statusCode).toBe(200);
       // Verify buildActionEventPayload was called with consent
@@ -380,16 +436,18 @@ describe('POST /api/v1/action/update-status (self-acted only)', () => {
         reveals_pii_on_status: ['accepted'],
         // no consent_text_receiver
       });
-      const app = buildApp(undefined, { id: 'usr_agg_owned' });
-      const res = await app.inject({
+      const res = await buildApp(undefined, { id: 'usr_agg_owned' }).inject({
         method: 'POST',
         url: '/update-status',
-        payload: {
-          action_id: EXISTING_ACTION.action_id,
-          action_status: 'accepted',
-        },
+        payload: [
+          {
+            action_id: EXISTING_ACTION.action_id,
+            action_status: 'accepted',
+          },
+        ],
       });
       expect(res.statusCode).toBe(200);
+      expect(res.json().summary.succeeded).toBe(1);
       expect(dbState.updates).toHaveLength(1);
     });
   });
