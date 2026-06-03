@@ -338,7 +338,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"item_network\": \"{{network}}\",\n  \"item_domain\": \"{{seeker_domain}}\",\n  \"item_type\": \"{{seeker_item_type}}\",\n  \"item_state\": {\n    \"name\": \"Asha Worker\",\n    \"gender\": \"Female\",\n    \"location\": \"Bengaluru\",\n    \"age\": 24,\n    \"phone\": \"9876543210\",\n    \"workExperience\": \"Fresher\",\n    \"workExperienceYearsConditional\": \"0\",\n    \"highestQualificationOrSkill\": \"College\",\n    \"natureOfJobsInterestedIn\": \"Full-time\",\n    \"nameOfJobRolesInterestedIn\": \"Retail associate\",\n    \"otherHelpNeeded\": \"Training\"\n  }\n}"
+              "raw": "[\n  {\n    \"item_network\": \"{{network}}\",\n    \"item_domain\": \"{{seeker_domain}}\",\n    \"item_type\": \"{{seeker_item_type}}\",\n    \"item_state\": {\n      \"name\": \"Asha Worker\",\n      \"gender\": \"Female\",\n      \"location\": \"Bengaluru\",\n      \"age\": 24,\n      \"phone\": \"9876543210\",\n      \"workExperience\": \"Fresher\",\n      \"workExperienceYearsConditional\": \"0\",\n      \"highestQualificationOrSkill\": \"College\",\n      \"natureOfJobsInterestedIn\": \"Full-time\",\n      \"nameOfJobRolesInterestedIn\": \"Retail associate\",\n      \"otherHelpNeeded\": \"Training\"\n    }\n  }\n]"
             },
             "url": {
               "raw": "{{seeker_instance_url}}/api/v1/item/create",
@@ -379,7 +379,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"item_network\": \"{{network}}\",\n  \"item_domain\": \"{{provider_domain}}\",\n  \"item_type\": \"{{provider_item_type}}\",\n  \"item_state\": {\n    \"jobProviderName\": \"Blue Jobs Pvt Ltd\",\n    \"role\": \"Retail associate\",\n    \"jobProviderLocation\": \"Bengaluru\",\n    \"hiringManagerName\": \"Nisha Rao\",\n    \"hiringManagerPhoneNumber\": \"9876501234\",\n    \"hiringManagerEmail\": \"nisha@example.com\",\n    \"positions\": 3,\n    \"natureOfJob\": \"Full-time\",\n    \"salaryMin\": 15000,\n    \"salaryMax\": 22000,\n    \"candidateExperienceType\": \"Fresher\",\n    \"minEducationalInstitute\": \"College\",\n    \"workExperienceYears\": \"0\",\n    \"lastRoleHeld\": \"Fresher\"\n  }\n}"
+              "raw": "[\n  {\n    \"item_network\": \"{{network}}\",\n    \"item_domain\": \"{{provider_domain}}\",\n    \"item_type\": \"{{provider_item_type}}\",\n    \"item_state\": {\n      \"jobProviderName\": \"Blue Jobs Pvt Ltd\",\n      \"role\": \"Retail associate\",\n      \"jobProviderLocation\": \"Bengaluru\",\n      \"hiringManagerName\": \"Nisha Rao\",\n      \"hiringManagerPhoneNumber\": \"9876501234\",\n      \"hiringManagerEmail\": \"nisha@example.com\",\n      \"positions\": 3,\n      \"natureOfJob\": \"Full-time\",\n      \"salaryMin\": 15000,\n      \"salaryMax\": 22000,\n      \"candidateExperienceType\": \"Fresher\",\n      \"minEducationalInstitute\": \"College\",\n      \"workExperienceYears\": \"0\",\n      \"lastRoleHeld\": \"Fresher\"\n    }\n  }\n]"
             },
             "url": {
               "raw": "{{provider_instance_url}}/api/v1/item/create",
@@ -414,7 +414,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"action_type\": \"apply\",\n  \"source_item\": {\n    \"item_network\": \"blue_dot\",\n    \"item_domain\": \"seeker\",\n    \"item_type\": \"profile_1.0\",\n    \"item_id\": \"{{seeker_item_id}}\"\n  },\n  \"target_item\": {\n    \"item_network\": \"blue_dot\",\n    \"item_domain\": \"provider\",\n    \"item_type\": \"job_posting_1.0\",\n    \"item_id\": \"{{provider_item_id}}\",\n    \"item_instance_url\": \"{{provider_instance_url}}\"\n  },\n  \"requirements_snapshot\": {\n    \"role\": \"Retail associate\",\n    \"age\": 24,\n    \"workExperience\": \"Fresher\"\n  }\n}"
+              "raw": "[\n  {\n    \"action_type\": \"apply\",\n    \"source_item\": {\n      \"item_network\": \"blue_dot\",\n      \"item_domain\": \"seeker\",\n      \"item_type\": \"profile_1.0\",\n      \"item_id\": \"{{seeker_item_id}}\"\n    },\n    \"target_item\": {\n      \"item_network\": \"blue_dot\",\n      \"item_domain\": \"provider\",\n      \"item_type\": \"job_posting_1.0\",\n      \"item_id\": \"{{provider_item_id}}\",\n      \"item_instance_url\": \"{{provider_instance_url}}\"\n    },\n    \"requirements_snapshot\": {\n      \"role\": \"Retail associate\",\n      \"age\": 24,\n      \"workExperience\": \"Fresher\"\n    }\n  }\n]"
             },
             "url": {
               "raw": "{{seeker_instance_url}}/api/v1/action/perform",
@@ -443,7 +443,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"action_type\": \"apply\",\n  \"source_item\": {\n    \"item_network\": \"blue_dot\",\n    \"item_domain\": \"provider\",\n    \"item_type\": \"job_posting_1.0\",\n    \"item_id\": \"{{provider_item_id}}\"\n  },\n  \"target_item\": {\n    \"item_network\": \"blue_dot\",\n    \"item_domain\": \"seeker\",\n    \"item_type\": \"profile_1.0\",\n    \"item_id\": \"{{seeker_item_id}}\",\n    \"item_instance_url\": \"{{seeker_instance_url}}\"\n  },\n  \"requirements_snapshot\": {\n    \"role\": \"Retail associate\",\n    \"interview_time\": \"2026-05-20T10:00:00.000Z\",\n    \"interview_mode\": \"online\",\n    \"message_to_candidate\": \"We would like to speak with you.\"\n  }\n}"
+              "raw": "[\n  {\n    \"action_type\": \"apply\",\n    \"source_item\": {\n      \"item_network\": \"blue_dot\",\n      \"item_domain\": \"provider\",\n      \"item_type\": \"job_posting_1.0\",\n      \"item_id\": \"{{provider_item_id}}\"\n    },\n    \"target_item\": {\n      \"item_network\": \"blue_dot\",\n      \"item_domain\": \"seeker\",\n      \"item_type\": \"profile_1.0\",\n      \"item_id\": \"{{seeker_item_id}}\",\n      \"item_instance_url\": \"{{seeker_instance_url}}\"\n    },\n    \"requirements_snapshot\": {\n      \"role\": \"Retail associate\",\n      \"interview_time\": \"2026-05-20T10:00:00.000Z\",\n      \"interview_mode\": \"online\",\n      \"message_to_candidate\": \"We would like to speak with you.\"\n    }\n  }\n]"
             },
             "url": {
               "raw": "{{provider_instance_url}}/api/v1/action/perform",

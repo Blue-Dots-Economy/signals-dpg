@@ -304,7 +304,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"item_network\": \"{{yellow_network}}\",\n  \"item_domain\": \"{{yellow_student_domain}}\",\n  \"item_type\": \"{{yellow_student_item_type}}\",\n  \"item_state\": {\n    \"name\": \"Asha Student\",\n    \"location\": {\n      \"city\": \"Bengaluru\",\n      \"state\": \"Karnataka\",\n      \"country\": \"India\",\n      \"postal_code\": \"560001\"\n    },\n    \"email\": \"asha@example.com\",\n    \"phone\": \"9876543210\",\n    \"grade\": \"11\",\n    \"preferred_subject\": \"career readiness\"\n  }\n}"
+              "raw": "[\n  {\n    \"item_network\": \"{{yellow_network}}\",\n    \"item_domain\": \"{{yellow_student_domain}}\",\n    \"item_type\": \"{{yellow_student_item_type}}\",\n    \"item_state\": {\n      \"name\": \"Asha Student\",\n      \"location\": {\n        \"city\": \"Bengaluru\",\n        \"state\": \"Karnataka\",\n        \"country\": \"India\",\n        \"postal_code\": \"560001\"\n      },\n      \"email\": \"asha@example.com\",\n      \"phone\": \"9876543210\",\n      \"grade\": \"11\",\n      \"preferred_subject\": \"career readiness\"\n    }\n  }\n]"
             },
             "url": {
               "raw": "{{yellow_student_instance_url}}/api/v1/item/create",
@@ -345,7 +345,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"item_network\": \"{{blue_network}}\",\n  \"item_domain\": \"{{blue_provider_domain}}\",\n  \"item_type\": \"{{blue_provider_item_type}}\",\n  \"item_state\": {\n    \"company_name\": \"Blue Jobs Pvt Ltd\",\n    \"role\": \"Apprentice associate\",\n    \"city\": \"Bengaluru\",\n    \"employment_type\": \"internship\",\n    \"salary_range\": \"15000-22000\",\n    \"required_skills\": [\n      \"communication\",\n      \"basic computer skills\"\n    ]\n  }\n}"
+              "raw": "[\n  {\n    \"item_network\": \"{{blue_network}}\",\n    \"item_domain\": \"{{blue_provider_domain}}\",\n    \"item_type\": \"{{blue_provider_item_type}}\",\n    \"item_state\": {\n      \"company_name\": \"Blue Jobs Pvt Ltd\",\n      \"role\": \"Apprentice associate\",\n      \"city\": \"Bengaluru\",\n      \"employment_type\": \"internship\",\n      \"salary_range\": \"15000-22000\",\n      \"required_skills\": [\n        \"communication\",\n        \"basic computer skills\"\n      ]\n    }\n  }\n]"
             },
             "url": {
               "raw": "{{blue_provider_instance_url}}/api/v1/item/create",
@@ -392,7 +392,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"action_type\": \"apply\",\n  \"source_item\": {\n    \"item_network\": \"{{yellow_network}}\",\n    \"item_domain\": \"{{yellow_student_domain}}\",\n    \"item_type\": \"{{yellow_student_item_type}}\",\n    \"item_id\": \"{{yellow_student_item_id}}\"\n  },\n  \"target_item\": {\n    \"item_network\": \"{{blue_network}}\",\n    \"item_domain\": \"{{blue_provider_domain}}\",\n    \"item_type\": \"{{blue_provider_item_type}}\",\n    \"item_id\": \"{{blue_provider_item_id}}\",\n    \"item_instance_url\": \"{{blue_provider_instance_url}}\"\n  },\n  \"requirements_snapshot\": {\n    \"job_id\": \"job-001\",\n    \"cover_note\": \"I am interested in this role and meet the eligibility criteria.\",\n    \"eligibility_confirmation\": true,\n    \"resume_url\": \"https://example.com/resume.pdf\",\n    \"portfolio_url\": \"https://example.com/portfolio\"\n  }\n}"
+              "raw": "[\n  {\n    \"action_type\": \"apply\",\n    \"source_item\": {\n      \"item_network\": \"{{yellow_network}}\",\n      \"item_domain\": \"{{yellow_student_domain}}\",\n      \"item_type\": \"{{yellow_student_item_type}}\",\n      \"item_id\": \"{{yellow_student_item_id}}\"\n    },\n    \"target_item\": {\n      \"item_network\": \"{{blue_network}}\",\n      \"item_domain\": \"{{blue_provider_domain}}\",\n      \"item_type\": \"{{blue_provider_item_type}}\",\n      \"item_id\": \"{{blue_provider_item_id}}\",\n      \"item_instance_url\": \"{{blue_provider_instance_url}}\"\n    },\n    \"requirements_snapshot\": {\n      \"job_id\": \"job-001\",\n      \"cover_note\": \"I am interested in this role and meet the eligibility criteria.\",\n      \"eligibility_confirmation\": true,\n      \"resume_url\": \"https://example.com/resume.pdf\",\n      \"portfolio_url\": \"https://example.com/portfolio\"\n    }\n  }\n]"
             },
             "url": {
               "raw": "{{yellow_student_instance_url}}/api/v1/action/perform",

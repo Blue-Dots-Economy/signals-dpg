@@ -484,7 +484,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"action_type\": \"apply\",\n  \"source_item\": {\n    \"item_network\": \"{{network_id}}\",\n    \"item_domain\": \"{{seeker_domain}}\",\n    \"item_type\": \"{{seeker_item_type}}\",\n    \"item_id\": \"{{seeker_item_id}}\"\n  },\n  \"target_item\": {\n    \"item_network\": \"{{network_id}}\",\n    \"item_domain\": \"{{provider_domain}}\",\n    \"item_type\": \"{{provider_item_type}}\",\n    \"item_id\": \"{{provider_item_id}}\",\n    \"item_instance_url\": \"{{provider_instance_url}}\"\n  },\n  \"requirements_snapshot\": {{action_requirements_snapshot_json}}\n}"
+              "raw": "[\n  {\n    \"action_type\": \"apply\",\n    \"source_item\": {\n      \"item_network\": \"{{network_id}}\",\n      \"item_domain\": \"{{seeker_domain}}\",\n      \"item_type\": \"{{seeker_item_type}}\",\n      \"item_id\": \"{{seeker_item_id}}\"\n    },\n    \"target_item\": {\n      \"item_network\": \"{{network_id}}\",\n      \"item_domain\": \"{{provider_domain}}\",\n      \"item_type\": \"{{provider_item_type}}\",\n      \"item_id\": \"{{provider_item_id}}\",\n      \"item_instance_url\": \"{{provider_instance_url}}\"\n    },\n    \"requirements_snapshot\": {{action_requirements_snapshot_json}}\n  }\n]"
             },
             "url": {
               "raw": "{{base_url}}/api/v1/action/perform",
@@ -520,7 +520,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"action_id\": \"{{action_id}}\",\n  \"action_status\": \"accepted\",\n  \"remarks\": \"Shortlisted for interview\"\n}"
+              "raw": "[\n  {\n    \"action_id\": \"{{action_id}}\",\n    \"action_status\": \"accepted\",\n    \"remarks\": \"Shortlisted for interview\"\n  }\n]"
             },
             "url": {
               "raw": "{{base_url}}/api/v1/action/update-status",
@@ -551,7 +551,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"action_id\": \"{{action_id}}\",\n  \"action_status\": \"rejected\",\n  \"remarks\": \"Position filled\"\n}"
+              "raw": "[\n  {\n    \"action_id\": \"{{action_id}}\",\n    \"action_status\": \"rejected\",\n    \"remarks\": \"Position filled\"\n  }\n]"
             },
             "url": {
               "raw": "{{base_url}}/api/v1/action/update-status",
@@ -841,7 +841,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"action_type\": \"apply\",\n  \"source_item\": {\n    \"item_network\": \"{{network_id}}\",\n    \"item_domain\": \"{{seeker_domain}}\",\n    \"item_type\": \"{{seeker_item_type}}\",\n    \"item_id\": \"{{seeker_item_id}}\"\n  },\n  \"target_item\": {\n    \"item_network\": \"{{network_id}}\",\n    \"item_domain\": \"{{provider_domain}}\",\n    \"item_type\": \"{{provider_item_type}}\",\n    \"item_id\": \"{{provider_item_id}}\",\n    \"item_instance_url\": \"{{base_url}}\"\n  },\n  \"requirements_snapshot\": {{action_requirements_snapshot_json}},\n  \"acting_as_user_id\": \"{{seeker_user_id}}\"\n}"
+              "raw": "[\n  {\n    \"action_type\": \"apply\",\n    \"source_item\": {\n      \"item_network\": \"{{network_id}}\",\n      \"item_domain\": \"{{seeker_domain}}\",\n      \"item_type\": \"{{seeker_item_type}}\",\n      \"item_id\": \"{{seeker_item_id}}\"\n    },\n    \"target_item\": {\n      \"item_network\": \"{{network_id}}\",\n      \"item_domain\": \"{{provider_domain}}\",\n      \"item_type\": \"{{provider_item_type}}\",\n      \"item_id\": \"{{provider_item_id}}\",\n      \"item_instance_url\": \"{{base_url}}\"\n    },\n    \"requirements_snapshot\": {{action_requirements_snapshot_json}},\n    \"acting_as_user_id\": \"{{seeker_user_id}}\"\n  }\n]"
             },
             "url": {
               "raw": "{{base_url}}/api/v1/action/perform",
@@ -882,7 +882,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"action_type\": \"apply\",\n  \"source_item\": {\n    \"item_network\": \"{{network_id}}\",\n    \"item_domain\": \"{{seeker_domain}}\",\n    \"item_type\": \"{{seeker_item_type}}\",\n    \"item_id\": \"{{seeker_item_id}}\"\n  },\n  \"target_item\": {\n    \"item_network\": \"{{network_id}}\",\n    \"item_domain\": \"{{provider_domain}}\",\n    \"item_type\": \"{{provider_item_type}}\",\n    \"item_id\": \"{{provider_item_id}}\",\n    \"item_instance_url\": \"{{base_url}}\"\n  },\n  \"requirements_snapshot\": {{action_requirements_snapshot_json}},\n  \"acting_as_user_id\": \"{{seeker_user_id}}\"\n}",
+              "raw": "[\n  {\n    \"action_type\": \"apply\",\n    \"source_item\": {\n      \"item_network\": \"{{network_id}}\",\n      \"item_domain\": \"{{seeker_domain}}\",\n      \"item_type\": \"{{seeker_item_type}}\",\n      \"item_id\": \"{{seeker_item_id}}\"\n    },\n    \"target_item\": {\n      \"item_network\": \"{{network_id}}\",\n      \"item_domain\": \"{{provider_domain}}\",\n      \"item_type\": \"{{provider_item_type}}\",\n      \"item_id\": \"{{provider_item_id}}\",\n      \"item_instance_url\": \"{{base_url}}\"\n    },\n    \"requirements_snapshot\": {{action_requirements_snapshot_json}},\n    \"acting_as_user_id\": \"{{seeker_user_id}}\"\n  }\n]",
               "options": {
                 "raw": {
                   "language": "json"
@@ -921,7 +921,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"action_id\": \"{{action_id}}\",\n  \"action_status\": \"shortlisted\"\n}"
+              "raw": "[\n  {\n    \"action_id\": \"{{action_id}}\",\n    \"action_status\": \"shortlisted\"\n  }\n]"
             },
             "url": {
               "raw": "{{base_url}}/api/v1/action/update-status",
