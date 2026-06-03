@@ -361,7 +361,7 @@ export function GoogleMapProvider({
   onMarkerClick,
   initialViewSet = false,
 }: MapProviderProps) {
-  const [activeMarkerId, setActiveMarkerId] = React.useState<string | null>(null);
+  const [activeMarker, setActiveMarker] = React.useState<MapMarker | null>(null);
   const apiKey = getRuntimeEnv('VITE_GOOGLE_MAPS_API_KEY');
 
   if (!apiKey) {
