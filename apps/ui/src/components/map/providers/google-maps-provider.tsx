@@ -16,6 +16,7 @@ import { registerMapProvider } from '@/engine/map/map-registry';
 import { getIconForDomain } from '../domain-icons';
 import { tallyDomains } from '../cluster-breakdown';
 import { MarkerPopupCard } from '../marker-popup-card';
+import { getRuntimeEnv } from '@/lib/runtime-env';
 
 /**
  * Module-level WeakMap: AdvancedMarkerElement → domain string.
@@ -360,8 +361,8 @@ export function GoogleMapProvider({
   onMarkerClick,
   initialViewSet = false,
 }: MapProviderProps) {
-  const [activeMarker, setActiveMarker] = React.useState<MapMarker | null>(null);
-  const apiKey = import.meta.env.VITE_GOOGLE_MAPS_API_KEY;
+  const [activeMarkerId, setActiveMarkerId] = React.useState<string | null>(null);
+  const apiKey = getRuntimeEnv('VITE_GOOGLE_MAPS_API_KEY');
 
   if (!apiKey) {
     return (

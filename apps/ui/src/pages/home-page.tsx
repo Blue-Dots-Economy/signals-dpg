@@ -22,6 +22,7 @@ import { MapFiltersPanel } from '@/components/map/map-filters-panel';
 import { MatchScoreCard } from '@/components/match-score';
 import '@/components/map/providers';
 import { fetchItems, performAction, type Item } from '@/lib/item-api';
+import { getRuntimeEnv } from '@/lib/runtime-env';
 import { ACTION_CONSENT_SENTINEL } from '@/lib/action-api';
 import { EmptyState } from '@/components/empty-state';
 import { fetchNetworkConfigs, fetchNetworkConfig, fetchNetworkItems } from '@/lib/network-api';
@@ -135,7 +136,7 @@ function resolveTargetInstanceUrl(
 // Falls back to 'map' when the env var is missing or holds an unrecognised
 // value, so a fresh install ships with the map-first experience.
 function resolveDefaultViewMode(): ViewMode {
-  const raw = import.meta.env.VITE_DEFAULT_VIEW_MODE;
+  const raw = getRuntimeEnv('VITE_DEFAULT_VIEW_MODE');
   if (raw === 'list' || raw === 'map') return raw;
   return 'map';
 }

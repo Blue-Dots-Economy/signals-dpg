@@ -22,13 +22,18 @@
     <script>
       (function () {
         var url = new URLSearchParams(location.search).get('network');
+        // Runtime config from /config.js (loaded above). Lets the chart's
+        // runtimeConfig.VITE_NETWORK_NAME pick the brand for first paint,
+        // so a single image works across networks (purple_dot, blue_dot, …).
+        var rt =
+          (window.__DPG_UI_CONFIG__ && window.__DPG_UI_CONFIG__.VITE_NETWORK_NAME) || null;
         var storedNet = null;
         try { storedNet = localStorage.getItem('dpg-active-network'); } catch (_) {}
         var fallback =
           typeof __DEFAULT_NETWORK_THEME__ !== 'undefined'
             ? __DEFAULT_NETWORK_THEME__
             : 'blue_dot';
-        var id = url || storedNet || fallback;
+        var id = url || rt || storedNet || fallback;
         document.documentElement.dataset.network = id;
 
         // Apply dark class before first paint so the user doesn't see a
