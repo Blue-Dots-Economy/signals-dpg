@@ -24,7 +24,8 @@ database up:
    - `auth.sql` — idempotent DDL for the better-auth tables (`user`,
      `account`, `session`, `verification`, `apikey`, `organization`,
      `member`, `invitation`, `team`, `teamMember`). Used only by the
-     helm migrate-job's bundled `schema.sql`; local dev applies the
+     deploy-time migrate-job's bundled `schema.sql`
+     (`apps/api/db/postgres/schema.sql`); local dev applies the
      equivalent via Drizzle (`pnpm db:push:api`).
    - `create_items.sql` — extensions (`pgcrypto`, `cube`, `earthdistance`),
      the partitioned `items` table, GIN/GiST indexes, geo CHECKs, and the
@@ -63,9 +64,10 @@ Script wiring:
   const FILES = ['create_items.sql', 'create_actions_events.sql'];
   ```
   `db_init.ts` doesn't include `auth.sql` because local dev uses
-  `pnpm db:push:api` for better-auth tables. The helm migrate-job applies
-  `auth.sql` indirectly via the generated `schema.sql` bundle
-  (`scripts/generate-schema-bundle.mjs`). The script is idempotent and
+  `pnpm db:push:api` for better-auth tables. The deploy-time migrate-job
+  applies `auth.sql` indirectly via the generated `schema.sql` bundle
+  (`scripts/generate-schema-bundle.mjs` →
+  `apps/api/db/postgres/schema.sql`). The script is idempotent and
   safe to re-run.
 
 Without `pnpm db:init:api`, the first `POST /api/v1/item/create` against a
@@ -83,12 +85,19 @@ For iterating on the Drizzle schema you also have:
 
 ### Deployed (helm migrate-job)
 
+> The Helm charts no longer live in this repo — they were moved to a
+> separate deployment repository. Chart paths below
+> (`dpg/charts/api/templates/…`, `values.yaml`) refer to that repo. The
+> `schema.sql` bundle the migrate-job consumes is generated **here**
+> (`pnpm schema:bundle` → `apps/api/db/postgres/schema.sql`) and copied
+> into the charts repo.
+
 The deploy-time migration runs as a Helm `post-install,post-upgrade` hook
-defined in `helmcharts/dpg/charts/api/templates/migrate-job.yaml`. The
+defined in `dpg/charts/api/templates/migrate-job.yaml` (charts repo). The
 shape:
 
-- A `ConfigMap` named `<release>-migrate-sql` mounts the file
-  `helmcharts/dpg/charts/api/files/schema.sql` (`hook-weight: -1`).
+- A `ConfigMap` named `<release>-migrate-sql` mounts the bundled
+  `schema.sql` (`hook-weight: -1`).
 - A `Job` named `<release>-migrate` (`hook-weight: 0`) runs a container
   off `image: postgres:16-alpine` (see `values.yaml:154`) with
   `migrate.enabled: true` (`values.yaml:153`).
@@ -107,22 +116,12 @@ shape:
 So in production, the source-of-truth file is the **bundled
 `schema.sql`**, not the Drizzle migrations or the SQL scripts directly.
 
-`helmcharts/dpg/charts/api/files/schema.sql` is **a hand-maintained
-snapshot today.** Its header claims:
-
-```
--- Sources (kept canonical; do not edit by hand):
---   apps/api/drizzle/0000_init.sql                          -> auth tables
---   packages/database/src/utils/sql_scripts/create_items.sql -> items + indexes
---   packages/database/src/utils/sql_scripts/create_actions_events.sql -> actions/events
-```
-
-…but no generator exists yet — that's Plan 4 Workstream A
-(`pnpm schema:bundle`), and it has not landed. Until it does, **any
-change to `packages/database/src/utils/sql_scripts/*.sql` or the Drizzle
-schema must be hand-mirrored into `helmcharts/dpg/charts/api/files/schema.sql`
-in the same PR.** No CI check enforces this yet (Workstream A.3 is also
-deferred).
+`apps/api/db/postgres/schema.sql` is a **generated** bundle — assembled
+by `scripts/generate-schema-bundle.mjs` from the scripts under
+`packages/database/src/utils/sql_scripts/`. Regenerate with
+`pnpm schema:bundle`; CI guards freshness via `pnpm schema:bundle:check`
+and verifies parity with the Drizzle schema in the `schema-parity` job.
+Never edit the bundle by hand.
 
 ### Why two layers today
 
@@ -184,7 +183,7 @@ Drizzle already has the data model and is the source of truth for new
 schema; we already invoke `drizzle-kit migrate` locally via
 `pnpm db:migrate:api`. Reuse that path in cluster:
 
-- In `helmcharts/dpg/charts/api/templates/migrate-job.yaml`:
+- In `dpg/charts/api/templates/migrate-job.yaml` (charts repo):
   - Replace the container image. Today: `image: postgres:16-alpine`.
     Switch to either the API's own image (which already has
     `drizzle-kit` in `apps/api/package.json` devDependencies and the
@@ -195,10 +194,9 @@ schema; we already invoke `drizzle-kit migrate` locally via
     `pnpm --filter api db:migrate` (a.k.a. `pnpm db:migrate:api` at the
     root). It reads `apps/api/drizzle/meta/_journal.json` and applies
     everything past the recorded high-water mark.
-  - Drop the `ConfigMap` `<release>-migrate-sql` and the
-    `helmcharts/dpg/charts/api/files/schema.sql` file — Drizzle's
-    `apps/api/drizzle/` directory shipped inside the image is now the
-    source of truth.
+  - Drop the `ConfigMap` `<release>-migrate-sql` and the bundled
+    `schema.sql` file — Drizzle's `apps/api/drizzle/` directory shipped
+    inside the image is now the source of truth.
   - Drop the `SELECT 1 FROM … WHERE table_name='items'` short-circuit.
     Drizzle's `__drizzle_migrations` tracking table replaces it.
   - Keep the `pg_isready` wait loop and the admin-creds
@@ -210,7 +208,7 @@ schema; we already invoke `drizzle-kit migrate` locally via
   - Make sure `drizzle-kit` survives `pnpm install --prod` (it's a
     devDependency today; move to dependencies, or build a dedicated
     migration image).
-- In `helmcharts/dpg/charts/api/values.yaml`:
+- In `dpg/charts/api/values.yaml` (charts repo):
   - Rename/repurpose `migrate.image` to point at the migration image.
   - Add any drizzle-specific env (the existing `POSTGRES_*` envFrom is
     already enough — `drizzle.config.ts` reads the same vars).
@@ -253,17 +251,13 @@ Don't pick this path without a concrete change Drizzle can't express.
       `ALTER TABLE … ADD COLUMN <name> …` without `IF NOT EXISTS`, no
       `DROP …`, no `ALTER COLUMN TYPE`, no `SET NOT NULL` on a populated
       column.
-- [ ] **Mirror into the bundle**: until Workstream A.1's generator
-      lands, any change to either source (Drizzle schema or
-      `sql_scripts/`) must be applied **by hand** to
-      `helmcharts/dpg/charts/api/files/schema.sql` in the same PR.
-      Drift between the two is silent today — nothing in CI catches it.
+- [ ] **Regenerate the bundle**: any change to either source (Drizzle
+      schema or `sql_scripts/`) requires `pnpm schema:bundle` and
+      committing the updated `apps/api/db/postgres/schema.sql` in the
+      same PR. CI fails the PR otherwise (`pnpm schema:bundle:check` +
+      the `schema-parity` job).
 - [ ] **`pnpm db:init:api` still succeeds on a fresh DB** (apply locally
       against an empty database and verify).
-- [ ] **Helm chart lints**: `helm lint helmcharts/dpg` doesn't regress.
-- [ ] **CI schema-parity check** (Plan 4 Workstream A Task A.3): not
-      landed yet. When it does, it will fail any PR where Drizzle and
-      the bundle disagree — re-run `pnpm schema:bundle` and commit.
 
 ## Rollback
 
@@ -306,7 +300,7 @@ Operational guidance until the switchover:
 - `apps/api/drizzle.config.ts` — Drizzle Kit configuration for the
   better-auth schema.
 - `apps/api/scripts/db_init.ts` — local idempotent SQL applier.
-- `helmcharts/dpg/charts/api/templates/migrate-job.yaml` — deploy-time
-  Job.
-- `helmcharts/dpg/charts/api/files/schema.sql` — hand-maintained
-  deploy-time bundle (future Workstream A output).
+- `dpg/charts/api/templates/migrate-job.yaml` (charts repo) —
+  deploy-time Job.
+- `apps/api/db/postgres/schema.sql` — generated deploy-time bundle
+  (`pnpm schema:bundle`).

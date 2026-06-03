@@ -23,7 +23,11 @@ in each.
   `packages/config/src/secrets.ts`. A missing required key crashes the
   process with a readable error before any request is served.
 
-## Kubernetes — default values (`helmcharts/dpg/values.yaml`)
+## Kubernetes — default values (`dpg/values.yaml`, charts repo)
+
+> The Helm charts moved out of this monorepo into a separate deployment
+> repository. The chart paths in the two Kubernetes sections below refer
+> to that repo.
 
 - The umbrella chart renders three Kubernetes Secrets from
   `templates/secrets.yaml`:
@@ -36,7 +40,7 @@ in each.
 - Values are read from the `credentials.*` block at the top of
   `values.yaml`. The shipped file holds empty placeholders
   (`PG_PW`, `REDIS_PW`, `AUTH_SECRET` markers).
-- `helmcharts/dpg/install.sh` fills those placeholders before `helm install`
+- `dpg/install.sh` fills those placeholders before `helm install`
   via its `generate_passwords()` helper, which writes:
   - `PG_PW = openssl rand -hex 16`
   - `REDIS_PW = openssl rand -hex 16`
@@ -50,7 +54,7 @@ in each.
   and the `keyId` / `secret` values must match the corresponding
   `internal-secrets.json` / `auth.keys.json` files mounted into those pods.
 
-## Kubernetes — AWS overlay (`helmcharts/dpg/values-aws.yaml`)
+## Kubernetes — AWS overlay (`dpg/values-aws.yaml`, charts repo)
 
 - **No External Secrets Operator, no AWS Secrets Manager wiring today.**
   `values-aws.yaml` only overlays ingress (ALB), persistence (EBS), and

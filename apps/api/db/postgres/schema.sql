@@ -4,10 +4,10 @@
 -- Regenerate with: pnpm schema:bundle
 -- CI guards drift via: pnpm schema:bundle:check
 --
--- Applied by the helm migrate-job at install/upgrade time. Every statement
--- must be idempotent (CREATE … IF NOT EXISTS / ALTER … ADD COLUMN IF NOT
--- EXISTS / DO-block-guarded ADD CONSTRAINT). See docs/operations/migrations.md
--- for the full contract.
+-- Applied by the deployment migrate-job at install/upgrade time (charts live
+-- in a separate repo). Every statement must be idempotent (CREATE … IF NOT
+-- EXISTS / ALTER … ADD COLUMN IF NOT EXISTS / DO-block-guarded ADD
+-- CONSTRAINT). See docs/operations/migrations.md for the full contract.
 
 
 -- ─── auth.sql ───
