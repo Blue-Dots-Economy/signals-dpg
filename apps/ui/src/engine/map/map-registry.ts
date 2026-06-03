@@ -1,8 +1,9 @@
 import type { MapProvider, MapProviderProps } from '../types';
 import type React from 'react';
+import { getRuntimeEnv } from '@/lib/runtime-env';
 
 const providers = new Map<string, React.ComponentType<MapProviderProps>>();
-let activeProviderName = import.meta.env.VITE_MAP_PROVIDER ?? 'leaflet';
+let activeProviderName = getRuntimeEnv('VITE_MAP_PROVIDER') ?? 'leaflet';
 
 export function registerMapProvider(provider: MapProvider): void {
   providers.set(provider.name, provider.component);

@@ -6,6 +6,14 @@
     <!-- Initial title — replaced by theme-provider once the active network's
          brand is known (becomes e.g. "Purple Dot · Signal Stack"). -->
     <title>Signal Stack</title>
+
+    <!-- Runtime config (window.__DPG_UI_CONFIG__) — written by the chart at
+         deploy time (helmcharts/dpg/charts/ui/templates/configmap.yaml) and
+         mounted at /config.js by nginx. Must load BEFORE /src/main.tsx so
+         api-config.ts picks up VITE_API_URL/VITE_NETWORK_NAME at module
+         init; otherwise it falls through to compile-time defaults. -->
+    <script src="/config.js"></script>
+
     <!-- Set data-network before React boots so first CSS paint has the
          right brand tokens. Favicon is generated as a square SVG using
          the active network's --brand-cta colour after the brand-themes
@@ -14,13 +22,18 @@
     <script>
       (function () {
         var url = new URLSearchParams(location.search).get('network');
+        // Runtime config from /config.js (loaded above). Lets the chart's
+        // runtimeConfig.VITE_NETWORK_NAME pick the brand for first paint,
+        // so a single image works across networks (purple_dot, blue_dot, …).
+        var rt =
+          (window.__DPG_UI_CONFIG__ && window.__DPG_UI_CONFIG__.VITE_NETWORK_NAME) || null;
         var storedNet = null;
         try { storedNet = localStorage.getItem('dpg-active-network'); } catch (_) {}
         var fallback =
           typeof __DEFAULT_NETWORK_THEME__ !== 'undefined'
             ? __DEFAULT_NETWORK_THEME__
             : 'blue_dot';
-        var id = url || storedNet || fallback;
+        var id = url || rt || storedNet || fallback;
         document.documentElement.dataset.network = id;
 
         // Apply dark class before first paint so the user doesn't see a
