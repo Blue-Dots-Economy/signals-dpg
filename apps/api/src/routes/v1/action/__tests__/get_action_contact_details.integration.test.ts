@@ -342,33 +342,35 @@ describeIf(`GET /action/:action_id/contact-details (integration)${
         'x-api-key': alice_raw_key,
         'content-type': 'application/json',
       },
-      payload: {
-        action_type: 'connect',
-        source_item: {
-          item_network: primary.network,
-          item_domain: primary.domain,
-          item_type: primary.item_type,
-          item_id: alice_item_id,
+      payload: [
+        {
+          action_type: 'connect',
+          source_item: {
+            item_network: primary.network,
+            item_domain: primary.domain,
+            item_type: primary.item_type,
+            item_id: alice_item_id,
+          },
+          target_item: {
+            item_network: secondary.network,
+            item_domain: secondary.domain,
+            item_type: secondary.item_type,
+            item_id: bob_item_id,
+            item_instance_url: base_url,
+          },
+          requirements_snapshot: {},
+          ...(consentAck(performConsent?.consent_text_initiator) !== undefined
+            ? { consent: consentAck(performConsent?.consent_text_initiator) }
+            : {}),
         },
-        target_item: {
-          item_network: secondary.network,
-          item_domain: secondary.domain,
-          item_type: secondary.item_type,
-          item_id: bob_item_id,
-          item_instance_url: base_url,
-        },
-        requirements_snapshot: {},
-        ...(consentAck(performConsent?.consent_text_initiator) !== undefined
-          ? { consent: consentAck(performConsent?.consent_text_initiator) }
-          : {}),
-      },
+      ],
     });
     if (performRes.statusCode !== 201) {
       throw new Error(
         `seed action.perform failed: ${performRes.statusCode} ${performRes.body}`,
       );
     }
-    action_id = performRes.json().action_id;
+    action_id = performRes.json().results[0].action_id;
 
     // Bob accepts. /update-status enforces target_item_owner = caller,
     // which matches bob's apikey-resolved user_id. "accepted" is in
@@ -390,14 +392,16 @@ describeIf(`GET /action/:action_id/contact-details (integration)${
         'x-api-key': bob_raw_key,
         'content-type': 'application/json',
       },
-      payload: {
-        action_id,
-        action_status: 'accepted',
-        remarks: 'Happy to help.',
-        ...(consentAck(updateConsent?.consent_text_receiver) !== undefined
-          ? { consent: consentAck(updateConsent?.consent_text_receiver) }
-          : {}),
-      },
+      payload: [
+        {
+          action_id,
+          action_status: 'accepted',
+          remarks: 'Happy to help.',
+          ...(consentAck(updateConsent?.consent_text_receiver) !== undefined
+            ? { consent: consentAck(updateConsent?.consent_text_receiver) }
+            : {}),
+        },
+      ],
     });
     if (updateRes.statusCode !== 200) {
       throw new Error(
