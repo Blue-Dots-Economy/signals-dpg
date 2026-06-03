@@ -269,20 +269,6 @@
           "from_domain": "tourist",
           "to_network": "orange_dot",
           "to_domain": "practitioner",
-          "requirement_schema": {
-            "$schema": "https://json-schema.org/draft/2020-12/schema",
-            "title": "Tourist Connect Requirement",
-            "type": "object",
-            "additionalProperties": false,
-            "required": ["connect_mode"],
-            "properties": {
-              "connect_mode": {
-                "type": "string",
-                "title": "Connect Mode",
-                "enum": ["share_itinerary", "receive_whatsapp"]
-              }
-            }
-          },
           "event_schema": {
             "$schema": "https://json-schema.org/draft/2020-12/schema",
             "title": "Tourist → Practitioner Connect Event",
