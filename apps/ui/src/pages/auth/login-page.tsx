@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { Loader2, ArrowLeft } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { AuthShell } from '@/components/layout/auth-shell';
@@ -12,6 +13,7 @@ type AuthMode = 'phone' | 'email';
 export function LoginPage() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
+  const { t } = useTranslation();
   const [mode, setMode] = useState<AuthMode>('phone');
   const [phoneNumber, setPhoneNumber] = useState('');
   const [email, setEmail] = useState('');
@@ -22,7 +24,9 @@ export function LoginPage() {
 
   const identifier: AuthIdentifier = mode === 'email' ? { email } : { phoneNumber };
   const contactValue = mode === 'email' ? email : phoneNumber;
-  const contactLabel = mode === 'email' ? 'email address' : 'phone number';
+  const contactLabel = mode === 'email'
+    ? t('auth.contact_label_email')
+    : t('auth.contact_label_phone');
 
   const handleModeChange = (value: AuthMode) => {
     setMode(value);
@@ -47,8 +51,8 @@ export function LoginPage() {
       } else {
         if (!name.trim()) {
           setIsLoading(false);
-          toast.info('One more step', {
-            description: 'Enter your name below to finish setting up your account.',
+          toast.info(t('auth.toast_one_more_step'), {
+            description: t('auth.toast_one_more_step_desc'),
           });
           return;
         }
@@ -58,8 +62,8 @@ export function LoginPage() {
         });
       }
     } catch {
-      toast.error('Couldn\'t send verification code', {
-        description: 'Check your connection and make sure the number or email is correct, then try again.',
+      toast.error(t('auth.toast_send_code_error'), {
+        description: t('auth.toast_send_code_error_desc'),
       });
     } finally {
       setIsLoading(false);
@@ -75,24 +79,24 @@ export function LoginPage() {
         className="mb-6 flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors"
       >
         <ArrowLeft className="h-4 w-4" />
-        Back
+        {t('auth.back')}
       </button>
 
       {/* Heading */}
       <div className="mb-6">
         <h2 className="text-2xl font-bold text-foreground">
           {userExists === null
-            ? 'Sign in'
+            ? t('auth.heading_sign_in')
             : userExists
-              ? 'Welcome back'
-              : 'Create your account'}
+              ? t('auth.heading_welcome_back')
+              : t('auth.heading_create_account')}
         </h2>
         <p className="mt-1 text-sm text-muted-foreground">
           {userExists === null
-            ? 'Continue with email or mobile to receive a verification code'
+            ? t('auth.sub_initial')
             : userExists
-              ? `Enter your ${contactLabel} to sign in`
-              : `Enter your ${contactLabel} and name to get started`}
+              ? t('auth.sub_existing', { contactLabel })
+              : t('auth.sub_new', { contactLabel })}
         </p>
       </div>
 
@@ -119,13 +123,13 @@ export function LoginPage() {
         {/* Contact input */}
         <div className="space-y-1.5">
           <Label htmlFor="contact" className="text-sm font-medium">
-            {mode === 'email' ? 'Email or mobile number' : 'Mobile number'}
+            {mode === 'email' ? t('auth.label_email_or_mobile') : t('auth.label_mobile')}
           </Label>
           {mode === 'phone' ? (
             <Input
               id="contact"
               type="tel"
-              placeholder="+91 98765 43210"
+              placeholder={t('auth.placeholder_phone')}
               value={phoneNumber}
               onChange={(e) => setPhoneNumber(e.target.value)}
               disabled={isLoading}
@@ -136,7 +140,7 @@ export function LoginPage() {
             <Input
               id="contact"
               type="email"
-              placeholder="name@example.in"
+              placeholder={t('auth.placeholder_email')}
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               disabled={isLoading}
@@ -150,12 +154,12 @@ export function LoginPage() {
         {userExists === false && (
           <div className="space-y-1.5">
             <Label htmlFor="name" className="text-sm font-medium">
-              Your name
+              {t('auth.label_name')}
             </Label>
             <Input
               id="name"
               type="text"
-              placeholder="Full name"
+              placeholder={t('auth.placeholder_name')}
               value={name}
               onChange={(e) => setName(e.target.value)}
               disabled={isLoading}
@@ -164,8 +168,8 @@ export function LoginPage() {
             />
             <p className="text-xs text-muted-foreground">
               {mode === 'email'
-                ? "We'll send a one-time code to verify your email."
-                : "We'll send a one-time code to verify your number."}
+                ? t('auth.hint_verify_email')
+                : t('auth.hint_verify_phone')}
             </p>
           </div>
         )}
@@ -177,7 +181,7 @@ export function LoginPage() {
           className="flex w-full items-center justify-center gap-2 rounded-md py-3 text-sm font-semibold transition-all disabled:opacity-60 bg-brand-cta h-11"
         >
           {isLoading && <Loader2 className="h-4 w-4 animate-spin" />}
-          {userExists === null ? 'Continue' : 'Send OTP'}
+          {userExists === null ? t('auth.cta_continue') : t('auth.cta_send_otp')}
         </button>
       </form>
     </AuthShell>

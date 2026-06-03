@@ -1,5 +1,6 @@
 import * as React from 'react';
 import { useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import type { RJSFSchema } from '@rjsf/utils';
 import type { DotActionSchema } from '@/engine/types';
 import { useIsMobile } from '@/hooks/use-mobile';
@@ -34,13 +35,15 @@ interface ActionModalProps {
 
 const ACTION_FORM_ID = 'action-requirement-form';
 
-// Friendly subtitles per action — used in the colored header band below the title.
-const ACTION_SUBTITLES: Record<string, string> = {
-  connect: 'Share details so the other party can review your request.',
-  accept: 'Confirm you want to accept this request.',
-  reject: 'Let the other party know why this request is being declined.',
-  cancel: 'Withdraw this request — both parties will be notified.',
-  complete: 'Mark this as complete once everything is finished.',
+// Friendly subtitle i18n keys per known action — the component resolves them
+// via t() so non-English locales render translated copy. Unknown action types
+// fall back to actions.modal_subtitle_fallback (with the action title interpolated).
+const ACTION_SUBTITLE_KEYS: Record<string, string> = {
+  connect: 'actions.modal_subtitle_connect',
+  accept: 'actions.modal_subtitle_accept',
+  reject: 'actions.modal_subtitle_reject',
+  cancel: 'actions.modal_subtitle_cancel',
+  complete: 'actions.modal_subtitle_complete',
 };
 
 export function ActionModal({
@@ -50,6 +53,7 @@ export function ActionModal({
   onSubmit,
   loading = false,
 }: ActionModalProps) {
+  const { t } = useTranslation();
   const isMobile = useIsMobile();
   const [resolvedSchema, setResolvedSchema] = React.useState<RJSFSchema | null>(null);
   const consentText = (actionSchema.consent_text_initiator ?? '').trim();
@@ -93,7 +97,7 @@ export function ActionModal({
           onSubmit={handleSubmit}
         />
       ) : (
-        <p className="text-muted-foreground text-sm">No additional information required.</p>
+        <p className="text-muted-foreground text-sm">{t('actions.modal_no_form')}</p>
       )}
       {consentText && (
         <ConsentCheckbox
@@ -116,9 +120,12 @@ export function ActionModal({
   const actionTitle = display.label;
   // When consent text is present the consent card provides the user-facing framing,
   // so the generic subtitle is suppressed to avoid redundancy.
+  const subtitleKey = ACTION_SUBTITLE_KEYS[actionKey.toLowerCase()];
   const subtitle = consentText
     ? undefined
-    : (ACTION_SUBTITLES[actionKey.toLowerCase()] ?? `${actionTitle} request`);
+    : subtitleKey
+      ? t(subtitleKey)
+      : t('actions.modal_subtitle_fallback', { actionTitle });
 
   const header = (
     <ActionModalHeader
@@ -137,14 +144,14 @@ export function ActionModal({
         onClick={() => onOpenChange(false)}
         disabled={loading}
       >
-        Cancel
+        {t('common.cancel')}
       </Button>
       <Button
         {...confirmButtonProps}
         disabled={loading || consentGate}
         className={cn('min-w-[120px] font-semibold shadow-sm', display.buttonClass)}
       >
-        {loading ? `${actionTitle}ing...` : 'Confirm'}
+        {loading ? t('actions.modal_processing') : t('actions.modal_confirm')}
       </Button>
     </div>
   );

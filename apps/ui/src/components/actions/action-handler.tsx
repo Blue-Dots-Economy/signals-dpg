@@ -1,4 +1,5 @@
 import * as React from 'react';
+import { useTranslation } from 'react-i18next';
 import type { DotActionSchema } from '@/engine/types';
 import { ActionModal } from './action-modal';
 import { toast } from 'sonner';
@@ -14,6 +15,7 @@ interface ActionHandlerProps {
 }
 
 export function ActionHandler({ children, onActionSubmit }: ActionHandlerProps) {
+  const { t } = useTranslation();
   const [activeAction, setActiveAction] = React.useState<{
     type: string;
     schema: DotActionSchema;
@@ -41,12 +43,12 @@ export function ActionHandler({ children, onActionSubmit }: ActionHandlerProps) 
     setLoading(true);
     try {
       await onActionSubmit?.(type, schema, {}, targetItemId);
-      toast.success(`${type} completed`, {
-        description: 'Your request was submitted successfully.',
+      toast.success(t('actions.handler_completed_title'), {
+        description: t('actions.handler_completed_desc'),
       });
     } catch (err) {
-      toast.error(`Couldn't complete ${type}`, {
-        description: 'Something went wrong while processing your request. Please try again.',
+      toast.error(t('actions.handler_error_title'), {
+        description: t('actions.handler_error_desc'),
       });
     } finally {
       setLoading(false);
@@ -58,13 +60,13 @@ export function ActionHandler({ children, onActionSubmit }: ActionHandlerProps) 
     setLoading(true);
     try {
       await onActionSubmit?.(activeAction.type, activeAction.schema, formData, activeAction.targetItemId);
-      toast.success(`${activeAction.type} completed`, {
-        description: 'Your request was submitted successfully.',
+      toast.success(t('actions.handler_completed_title'), {
+        description: t('actions.handler_completed_desc'),
       });
       setActiveAction(null);
     } catch (err) {
-      toast.error(`Couldn't complete ${activeAction.type}`, {
-        description: 'Something went wrong while processing your request. Please try again.',
+      toast.error(t('actions.handler_error_title'), {
+        description: t('actions.handler_error_desc'),
       });
     } finally {
       setLoading(false);

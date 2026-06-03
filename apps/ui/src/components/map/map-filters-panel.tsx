@@ -1,4 +1,5 @@
 import * as React from 'react';
+import { useTranslation } from 'react-i18next';
 import { SlidersHorizontal, X, ChevronDown, Check, Search } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -90,6 +91,7 @@ interface MultiSelectGroupProps {
 }
 
 function MultiSelectGroup({ title, options, selected, onToggle }: MultiSelectGroupProps) {
+  const { t } = useTranslation();
   const [open, setOpen] = React.useState(false);
   const [query, setQuery] = React.useState('');
 
@@ -112,7 +114,7 @@ function MultiSelectGroup({ title, options, selected, onToggle }: MultiSelectGro
           {title}
         </span>
         <span className="flex items-center gap-1 text-[11px] text-muted-foreground">
-          {count > 0 ? `${count} selected` : 'Any'}
+          {count > 0 ? t('filters.selected', { count }) : t('filters.any')}
           <ChevronDown
             className={cn('size-3.5 transition-transform', open && 'rotate-180')}
           />
@@ -126,14 +128,14 @@ function MultiSelectGroup({ title, options, selected, onToggle }: MultiSelectGro
             <Input
               value={query}
               onChange={(e) => setQuery(e.target.value)}
-              placeholder={`Search ${title.toLowerCase()}…`}
+              placeholder={t('filters.search_placeholder', { field: title.toLowerCase() })}
               className="h-6 border-0 bg-transparent px-0 text-xs shadow-none focus-visible:ring-0"
-              aria-label={`Search ${title} options`}
+              aria-label={t('filters.search_placeholder', { field: title })}
             />
           </div>
           <div className="max-h-44 overflow-y-auto p-1">
             {filtered.length === 0 ? (
-              <p className="px-2 py-1.5 text-[11px] text-muted-foreground">No matches</p>
+              <p className="px-2 py-1.5 text-[11px] text-muted-foreground">{t('filters.no_matches')}</p>
             ) : (
               filtered.map((option) => {
                 const isSelected = selected.includes(option);
@@ -194,6 +196,7 @@ export function MapFiltersPanel({
   selectedFields,
   onFieldsChange,
 }: MapFiltersPanelProps) {
+  const { t } = useTranslation();
   const [open, setOpen] = React.useState(false);
 
   // Derive enum filter fields generically from all visible domain schemas
@@ -253,15 +256,15 @@ export function MapFiltersPanel({
             'h-8 gap-1.5 border border-input bg-background/95 text-xs shadow-md backdrop-blur-sm',
             activeCount > 0 && 'border-primary/50 bg-primary/5',
           )}
-          aria-label="Open map filters"
+          aria-label={t('filters.open')}
         >
           <SlidersHorizontal className="size-3.5" />
-          Filters
+          {t('filters.title')}
           {activeCount > 0 && (
             <Badge
               variant="default"
               className="size-4 rounded-full p-0 text-[10px] leading-none"
-              aria-label={`${activeCount} active filter${activeCount === 1 ? '' : 's'}`}
+              aria-label={t('filters.selected', { count: activeCount })}
             >
               {activeCount}
             </Badge>
@@ -280,7 +283,7 @@ export function MapFiltersPanel({
         {/* ── Sticky header ──────────────────────────────────────────────────── */}
         <div className="sticky top-0 z-10 flex items-center justify-between rounded-t-xl border-b border-border bg-popover px-4 py-3">
           <span className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">
-            Filters
+            {t('filters.title')}
           </span>
           <div className="flex items-center gap-2">
             {activeCount > 0 && (
@@ -288,9 +291,9 @@ export function MapFiltersPanel({
                 type="button"
                 onClick={handleClearAll}
                 className="text-[10px] font-medium text-muted-foreground underline-offset-2 hover:text-foreground hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                aria-label="Clear all filters"
+                aria-label={t('filters.clear_all')}
               >
-                Clear all
+                {t('filters.clear_all')}
               </button>
             )}
             {/* X close button */}
@@ -303,7 +306,7 @@ export function MapFiltersPanel({
                 'hover:bg-accent hover:text-accent-foreground',
                 'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
               )}
-              aria-label="Close filters"
+              aria-label={t('filters.close')}
             >
               <X className="size-3" />
             </button>
@@ -313,7 +316,7 @@ export function MapFiltersPanel({
         {/* ── Scrollable filter groups ────────────────────────────────────────── */}
         <div className="max-h-[75vh] space-y-5 overflow-y-auto px-4 py-4">
           {showDomainGroup && (
-            <FilterGroup title="Domain">
+            <FilterGroup title={t('filters.domain_group')}>
               {domains.map((domain) => {
                 const label = domain.id
                   .replace(/_/g, ' ')
@@ -364,7 +367,7 @@ export function MapFiltersPanel({
 
           {activeCount === 0 && (
             <p className="text-[10px] text-muted-foreground">
-              Select options above to filter map markers.
+              {t('filters.help')}
             </p>
           )}
         </div>

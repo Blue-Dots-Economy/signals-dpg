@@ -1,4 +1,5 @@
 import * as React from 'react';
+import { useTranslation } from 'react-i18next';
 import type { RJSFSchema } from '@rjsf/utils';
 import {
   Dialog,
@@ -20,16 +21,16 @@ interface ContactDetailsModalProps {
   onOpenChange: (open: boolean) => void;
 }
 
-const errorMessages: Record<string, string> = {
-  PII_NOT_REVEALED:
-    'Contact details are no longer available for this connection.',
-  CROSS_INSTANCE_REVEAL_NOT_SUPPORTED:
-    "This contact is hosted on another instance and isn't supported yet.",
-  NOT_ACTION_PARTICIPANT: "You don't have access to these details.",
-  UNAUTHORIZED: "You don't have access to these details.",
-  ACTION_NOT_FOUND: 'This action no longer exists.',
-  OTHER_ITEM_NOT_FOUND: 'Something went wrong; please try again.',
-  INTERNAL_SERVER_ERROR: 'Something went wrong; please try again.',
+// Map server error codes → i18n keys. The component resolves them via t() so
+// the user sees translated copy in their locale instead of English server text.
+const errorMessageKeys: Record<string, string> = {
+  PII_NOT_REVEALED: 'contact.error_pii_not_revealed',
+  CROSS_INSTANCE_REVEAL_NOT_SUPPORTED: 'contact.error_cross_instance',
+  NOT_ACTION_PARTICIPANT: 'contact.error_not_participant',
+  UNAUTHORIZED: 'contact.error_unauthorized',
+  ACTION_NOT_FOUND: 'contact.error_action_not_found',
+  OTHER_ITEM_NOT_FOUND: 'contact.error_other_item_not_found',
+  INTERNAL_SERVER_ERROR: 'contact.error_internal',
 };
 
 type ModalState =
@@ -43,6 +44,7 @@ export function ContactDetailsModal({
   open,
   onOpenChange,
 }: ContactDetailsModalProps) {
+  const { t } = useTranslation();
   const [state, setState] = React.useState<ModalState>({ status: 'idle' });
 
   React.useEffect(() => {
@@ -61,17 +63,18 @@ export function ContactDetailsModal({
       .catch((err: Error & { code?: string }) => {
         if (cancelled) return;
         const code = err.code ?? 'INTERNAL_SERVER_ERROR';
+        const messageKey = errorMessageKeys[code];
         setState({
           status: 'error',
           code,
-          message: errorMessages[code] ?? err.message,
+          message: messageKey ? t(messageKey) : err.message,
         });
       });
 
     return () => {
       cancelled = true;
     };
-  }, [open, actionId]);
+  }, [open, actionId, t]);
 
   const item = state.status === 'success' ? state.data.other_actor.item : null;
   const { data: networkConfig } = useNetworkConfig(item?.item_network ?? null);
@@ -86,20 +89,20 @@ export function ContactDetailsModal({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-xl">
         <DialogHeader>
-          <DialogTitle>Contact details</DialogTitle>
+          <DialogTitle>{t('contact.dialog_title')}</DialogTitle>
           <DialogDescription>
-            Shared once the connection is accepted.
+            {t('contact.dialog_desc')}
           </DialogDescription>
         </DialogHeader>
 
         {state.status === 'loading' && (
-          <p className="text-sm text-muted-foreground">Loading...</p>
+          <p className="text-sm text-muted-foreground">{t('contact.loading')}</p>
         )}
 
         {state.status === 'error' && (
           <div className="rounded-md border border-destructive/50 bg-destructive/10 p-4">
             <p className="text-sm font-semibold text-destructive">
-              Couldn&apos;t load contact details
+              {t('contact.error_title')}
             </p>
             <p className="mt-1 text-sm text-destructive/80">{state.message}</p>
           </div>

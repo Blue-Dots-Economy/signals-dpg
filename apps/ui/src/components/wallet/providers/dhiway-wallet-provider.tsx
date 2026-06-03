@@ -1,5 +1,6 @@
 import * as React from 'react';
 import { Loader2, Mail, Phone, ShieldCheck, Wallet } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
 
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -40,9 +41,9 @@ function getIdentifierOptions({ email, phoneNumber }: WalletImportProviderProps[
   return options;
 }
 
-function getSchemaTitle(credential: WalletCredential): string {
+function getSchemaTitle(credential: WalletCredential, fallback: string): string {
   const title = credential.credentialSchema?.title;
-  return typeof title === 'string' && title.trim() ? title : 'Credential';
+  return typeof title === 'string' && title.trim() ? title : fallback;
 }
 
 function getProviderLabel(value: unknown, fallback: string): string {
@@ -58,6 +59,7 @@ function getPreviewFields(subject: Record<string, unknown> | undefined): string[
 }
 
 function DhiwayWalletProvider({ context, onSuccess, onCancel }: WalletImportProviderProps) {
+  const { t } = useTranslation();
   const [step, setStep] = React.useState<FlowStep>('identifier');
   const [isLoading, setIsLoading] = React.useState(false);
   const [identifier, setIdentifier] = React.useState('');
@@ -84,7 +86,7 @@ function DhiwayWalletProvider({ context, onSuccess, onCancel }: WalletImportProv
       await walletApi.requestCode(identifier, identifierType);
       setStep('verify');
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to send verification code');
+      setError(err instanceof Error ? err.message : t('wallet.dhiway_error_send_code'));
     } finally {
       setIsLoading(false);
     }
@@ -104,7 +106,7 @@ function DhiwayWalletProvider({ context, onSuccess, onCancel }: WalletImportProv
       setCredentialGroups(credentials.credentials);
       setStep('credentials');
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to verify code');
+      setError(err instanceof Error ? err.message : t('wallet.dhiway_error_verify_code'));
     } finally {
       setIsLoading(false);
     }
@@ -132,9 +134,9 @@ function DhiwayWalletProvider({ context, onSuccess, onCancel }: WalletImportProv
             <Wallet className="h-5 w-5" />
           </div>
           <div>
-            <p className="font-medium">Dhiway Wallet</p>
+            <p className="font-medium">{t('wallet.dhiway_title')}</p>
             <p className="text-sm text-muted-foreground">
-              Verify your identity and import one of your issued credentials.
+              {t('wallet.dhiway_subtitle')}
             </p>
           </div>
         </div>
@@ -143,7 +145,7 @@ function DhiwayWalletProvider({ context, onSuccess, onCancel }: WalletImportProv
       {step === 'identifier' && (
         <div className="space-y-4">
           <div className="space-y-2">
-            <p className="text-sm font-medium">Choose an identifier</p>
+            <p className="text-sm font-medium">{t('wallet.dhiway_choose_identifier')}</p>
             {identifierOptions.length > 1 ? (
               <Select
                 value={identifier}
@@ -154,7 +156,7 @@ function DhiwayWalletProvider({ context, onSuccess, onCancel }: WalletImportProv
                 }}
               >
                 <SelectTrigger className="w-full">
-                  <SelectValue placeholder="Select email or phone" />
+                  <SelectValue placeholder={t('wallet.dhiway_select_placeholder')} />
                 </SelectTrigger>
                 <SelectContent>
                   {identifierOptions.map((option) => (
@@ -166,13 +168,13 @@ function DhiwayWalletProvider({ context, onSuccess, onCancel }: WalletImportProv
               </Select>
             ) : (
               <div className="rounded-md border px-3 py-2 text-sm">
-                {identifier || 'No identifier available'}
+                {identifier || t('wallet.dhiway_no_identifier')}
               </div>
             )}
           </div>
           <div className="flex items-center gap-2 text-sm text-muted-foreground">
             {identifierType === 'email' ? <Mail className="h-4 w-4" /> : <Phone className="h-4 w-4" />}
-            A verification code will be sent to your selected {identifierType}.
+            {t('wallet.dhiway_code_hint', { identifierType })}
           </div>
         </div>
       )}
@@ -180,15 +182,15 @@ function DhiwayWalletProvider({ context, onSuccess, onCancel }: WalletImportProv
       {step === 'verify' && (
         <div className="space-y-4">
           <div className="space-y-2">
-            <p className="text-sm font-medium">Enter verification code</p>
+            <p className="text-sm font-medium">{t('wallet.dhiway_enter_code')}</p>
             <Input
               value={verificationCode}
               onChange={(event) => setVerificationCode(event.target.value)}
-              placeholder="Enter the code you received"
+              placeholder={t('wallet.dhiway_code_placeholder')}
             />
           </div>
           <Button variant="outline" onClick={() => setStep('identifier')}>
-            Change identifier
+            {t('wallet.dhiway_change_identifier')}
           </Button>
         </div>
       )}
@@ -196,16 +198,16 @@ function DhiwayWalletProvider({ context, onSuccess, onCancel }: WalletImportProv
       {step === 'credentials' && (
         <div className="max-h-[52vh] space-y-3 overflow-y-auto pr-1">
           {credentialGroups.length === 0 ? (
-            <p className="text-sm text-muted-foreground">No verified credentials were found.</p>
+            <p className="text-sm text-muted-foreground">{t('wallet.dhiway_no_credentials')}</p>
           ) : (
             credentialGroups.map((credentialData) => (
                 <Card key={credentialData.id} className="gap-4 py-4">
                   <CardHeader className="px-4">
                   <CardTitle className="text-base">
-                    {getProviderLabel(credentialData.metadata?.orgName, 'Credential issuer')}
+                    {getProviderLabel(credentialData.metadata?.orgName, t('wallet.dhiway_fallback_issuer'))}
                   </CardTitle>
                   <CardDescription>
-                    {getProviderLabel(credentialData.metadata?.issuedBy, 'Wallet credential')}
+                    {getProviderLabel(credentialData.metadata?.issuedBy, t('wallet.dhiway_fallback_issued_by'))}
                   </CardDescription>
                   </CardHeader>
                 <CardContent className="space-y-3 px-4">
@@ -213,14 +215,14 @@ function DhiwayWalletProvider({ context, onSuccess, onCancel }: WalletImportProv
                     <div key={credential.id} className="rounded-lg border p-3">
                       <div className="flex items-start justify-between gap-3">
                         <div>
-                          <p className="font-medium">{getSchemaTitle(credential)}</p>
+                          <p className="font-medium">{getSchemaTitle(credential, t('wallet.dhiway_credential'))}</p>
                           {credential.issuanceDate ? (
                             <p className="text-xs text-muted-foreground">
-                              Issued {new Date(credential.issuanceDate).toLocaleDateString()}
+                              {t('wallet.dhiway_issued_on', { date: new Date(credential.issuanceDate).toLocaleDateString() })}
                             </p>
                           ) : null}
                         </div>
-                        <Badge variant="secondary">Verified</Badge>
+                        <Badge variant="secondary">{t('wallet.dhiway_verified_badge')}</Badge>
                       </div>
                       <div className="mt-3 flex flex-wrap gap-2 text-xs text-muted-foreground">
                         {getPreviewFields(credential.credentialSubject).map((field) => (
@@ -228,7 +230,7 @@ function DhiwayWalletProvider({ context, onSuccess, onCancel }: WalletImportProv
                         ))}
                       </div>
                       <Button className="mt-3" size="sm" onClick={() => handleImport(credentialData, credential)}>
-                        Import this credential
+                        {t('wallet.dhiway_import_btn')}
                       </Button>
                     </div>
                   ))}
@@ -243,17 +245,17 @@ function DhiwayWalletProvider({ context, onSuccess, onCancel }: WalletImportProv
 
       <div className="flex justify-between gap-2">
         <Button variant="ghost" onClick={onCancel}>
-          Cancel
+          {t('common.cancel')}
         </Button>
         {step === 'identifier' ? (
           <Button onClick={requestCode} disabled={!identifier || isLoading}>
             {isLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <ShieldCheck className="h-4 w-4" />}
-            Send code
+            {t('wallet.dhiway_send_code')}
           </Button>
         ) : step === 'verify' ? (
           <Button onClick={verifyCode} disabled={!verificationCode.trim() || isLoading}>
             {isLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
-            Verify and fetch credentials
+            {t('wallet.dhiway_verify_fetch')}
           </Button>
         ) : null}
       </div>

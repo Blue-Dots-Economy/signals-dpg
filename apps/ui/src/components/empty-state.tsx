@@ -1,3 +1,5 @@
+import { useTranslation } from 'react-i18next';
+
 interface EmptyStateProps {
   heading?: string;
   message?: string;
@@ -31,12 +33,14 @@ function SparseDots() {
   );
 }
 
-export function EmptyState({ heading, message = 'No items found', action }: EmptyStateProps) {
+export function EmptyState({ heading, message, action }: EmptyStateProps) {
+  const { t } = useTranslation();
+  const resolvedMessage = message ?? t('common.no_items');
   return (
     <div className="flex flex-col items-center justify-center gap-3 py-16 text-center">
       <SparseDots />
       {heading && <p className="font-semibold text-foreground">{heading}</p>}
-      <p className="text-muted-foreground text-sm max-w-xs">{message}</p>
+      <p className="text-muted-foreground text-sm max-w-xs">{resolvedMessage}</p>
       {action && <div className="mt-1">{action}</div>}
     </div>
   );

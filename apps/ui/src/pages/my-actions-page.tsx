@@ -1,6 +1,7 @@
 import * as React from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ArrowLeft } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
 import { useInitiatedActions, useReceivedActions } from '@/hooks/use-actions';
 import { ActionList } from '@/components/actions/action-list';
 import { ActionStatusUpdater } from '@/components/actions/action-status-updater';
@@ -11,6 +12,7 @@ type TabValue = 'initiated' | 'received';
 
 export function MyActionsPage() {
   const navigate = useNavigate();
+  const { t } = useTranslation();
   const [activeTab, setActiveTab] = React.useState<TabValue>('received');
   const [selectedAction, setSelectedAction] = React.useState<Action | null>(null);
   const [isStatusModalOpen, setIsStatusModalOpen] = React.useState(false);
@@ -77,16 +79,16 @@ export function MyActionsPage() {
               size="icon"
               className="h-9 w-9 shrink-0 rounded-xl"
               onClick={() => navigate(-1)}
-              aria-label="Back"
+              aria-label={t('actions.my_actions_back')}
             >
               <ArrowLeft className="h-5 w-5" />
             </Button>
             <div className="min-w-0">
               <h1 className="text-2xl font-extrabold leading-tight tracking-tight text-foreground">
-                My Actions
+                {t('actions.my_actions_title')}
               </h1>
               <p className="mt-0.5 text-sm text-muted-foreground">
-                Manage requests you&apos;ve initiated and the ones you&apos;ve received.
+                {t('actions.my_actions_subtitle')}
               </p>
             </div>
           </div>

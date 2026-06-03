@@ -1,3 +1,4 @@
+import { useTranslation } from 'react-i18next';
 import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
 import { Button } from '@/components/ui/button';
@@ -17,26 +18,26 @@ const HIDDEN_KEYS = new Set([
 // ── Precision helpers ──────────────────────────────────────────────────────────
 
 interface PrecisionInfo {
-  label: string;
+  labelKey: string;
   colorClass: string;
 }
 
 export function getPrecisionInfo(precision: string): PrecisionInfo {
-  // The label wording conveys the precision; the colour stays theme-neutral
-  // (text-muted-foreground) so it reads correctly in light/dark and across
-  // every network theme rather than using fixed brand colours.
+  // Returns a stable i18n key; the component calls t(labelKey) to render the
+  // translated string. The colour stays theme-neutral (text-muted-foreground)
+  // so it reads correctly in light/dark and across every network theme.
   const colorClass = 'text-muted-foreground';
   switch (precision) {
     case 'exact':
-      return { label: 'Exact location', colorClass };
+      return { labelKey: 'map.precision.exact', colorClass };
     case 'geocoded_pincode':
-      return { label: 'From pincode', colorClass };
+      return { labelKey: 'map.precision.pincode', colorClass };
     case 'geocoded_full_address':
-      return { label: 'From full address', colorClass };
+      return { labelKey: 'map.precision.full_address', colorClass };
     case 'geocoded_city_only':
-      return { label: 'From city (estimated)', colorClass };
+      return { labelKey: 'map.precision.city', colorClass };
     default:
-      return { label: 'Unknown precision', colorClass };
+      return { labelKey: 'map.precision.unknown', colorClass };
   }
 }
 
@@ -78,6 +79,7 @@ interface MarkerPopupCardProps {
 // ── Component ──────────────────────────────────────────────────────────────────
 
 export function MarkerPopupCard({ marker, onViewDetails }: MarkerPopupCardProps) {
+  const { t } = useTranslation();
   const initials = getInitials(marker.label);
   const precisionInfo = getPrecisionInfo(marker.precision);
 
@@ -110,7 +112,7 @@ export function MarkerPopupCard({ marker, onViewDetails }: MarkerPopupCardProps)
 
       {/* Precision hint */}
       <p className={`mb-3 text-[11px] leading-none ${precisionInfo.colorClass}`}>
-        {precisionInfo.label}
+        {t(precisionInfo.labelKey)}
         {marker.geocodedFrom && ` · ${marker.geocodedFrom}`}
       </p>
 
@@ -143,7 +145,7 @@ export function MarkerPopupCard({ marker, onViewDetails }: MarkerPopupCardProps)
             className="h-auto p-0 text-xs font-medium"
             onClick={() => onViewDetails(marker.id)}
           >
-            View details
+            {t('map.view_details')}
           </Button>
         </div>
       )}
