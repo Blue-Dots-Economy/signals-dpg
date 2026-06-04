@@ -212,7 +212,7 @@ export function ActionList({
                 id={action.action_id}
                 selectMode={selection.selectMode}
                 selected={selection.isSelected(action.action_id)}
-                selectable={cls !== null}
+                selectable={cls !== null && selection.canSelect(cls)}
                 onToggle={(id) => selection.toggle(id, cls ?? '')}
               >
                 <ActionCard
