@@ -18,69 +18,79 @@
           "title": "Orange Dot Tourist Profile 1.0",
           "type": "object",
           "additionalProperties": false,
-          "required": [],
+          "required": [
+            "name",
+            "phone_number",
+            "location"
+          ],
           "properties": {
-            "consent_state": {
-              "type": "string",
-              "title": "Consent State",
-              "enum": ["granted", "revoked"],
-              "default": "granted"
-            },
             "name": {
               "type": "string",
               "title": "Name",
+              "description": "Your full name.",
               "private": true
             },
             "nationality": {
               "type": "string",
-              "title": "Nationality"
+              "title": "Nationality",
+              "description": "Your nationality."
             },
             "languages_spoken": {
               "type": "array",
               "title": "Languages Spoken",
-              "items": { "type": "string" }
+              "description": "Languages you speak.",
+              "items": {
+                "type": "string",
+                "enum": ["English", "Hindi", "Kannada", "Tulu", "Konkani", "Others"]
+              }
             },
             "party_composition": {
               "type": "string",
               "title": "Travelling As",
+              "description": "Who you're travelling with.",
               "enum": ["solo", "couple", "family", "group", "solo_female"]
             },
             "phone_number": {
               "type": "string",
               "title": "Phone",
+              "description": "Your 10-digit mobile number.",
               "private": true,
               "pattern": "^[0-9]{10}$"
-            },          
+            },
             "trip_window_start": {
               "type": "string",
               "title": "Trip Start",
+              "description": "When your trip begins.",
               "format": "date"
             },
             "trip_window_end": {
               "type": "string",
               "title": "Trip End",
+              "description": "When your trip ends.",
               "format": "date"
             },
-            "base_location": {
+            "location": {
               "type": "string",
-              "title": "Base Location",
-              "private": true,
-              "description": "Where the tourist is staying — used for 'near me' calculations."
+              "title": "Location",
+              "description": "Where you're staying in Udupi — used to show practitioners near you.",
+              "private": true
             },
             "budget_band": {
               "type": "string",
               "title": "Budget Band",
+              "description": "Your typical spending range for the trip.",
               "enum": ["Economical", "Moderate", "Premium"]
             },
             "dietary_preference": {
               "type": "string",
               "title": "Dietary Preference",
+              "description": "Your dietary preference.",
               "enum": ["Veg", "Non-veg", "Seafood", "Vegan", "Jain", "Other"]
             },
             "interest": {
               "type": "string",
               "title": "Primary Interest",
-              "description": "Category A–D plus clarifying sub-intent (e.g. 'Culture → Yakshagana').",
+              "description": "What you're most interested in exploring.",
               "enum": [
                 "Experiences & Activities",
                 "Food / Crafts / Local Produce",
@@ -91,6 +101,7 @@
             "guide_preference": {
               "type": "string",
               "title": "Guide Preference",
+              "description": "Whether you'd like a local guide.",
               "enum": ["With guide", "Self-explore", "No preference"]
             }
           }
@@ -123,20 +134,20 @@
             "name",
             "category",
             "description",
-            "onetac_id",
-            "verified_by"
+            "area",
+            "contact_phone"
           ],
           "properties": {
             "name": {
               "type": "string",
               "title": "Name",
-              "description": "Display name of the listing / experience (e.g. 'Surf with a Local').",
+              "description": "Display name of your listing or experience.",
               "minLength": 1
             },
             "category": {
               "type": "string",
               "title": "Category",
-              "description": "Sets the map filter and pin. One of the five Orange Dot map categories.",
+              "description": "What kind of listing this is.",
               "enum": [
                 "Stay",
                 "Artists",
@@ -148,78 +159,65 @@
             "description": {
               "type": "string",
               "title": "Description",
-              "description": "Short blurb on the peek / detail card.",
+              "description": "A short blurb shown on your listing card.",
               "minLength": 1,
               "maxLength": 280
-            },
-            "onetac_id": {
-              "type": "string",
-              "title": "OneTAC ID",
-              "description": "Unique OneTAC identifier issued per supplier.",
-              "minLength": 1
-            },
-            "verified_by": {
-              "type": "string",
-              "title": "Verified By",
-              "description": "Who verified the supplier — surfaces a 'verified by' stamp on the card.",
-              "minLength": 1
             },
             "provider_name": {
               "type": "string",
               "title": "Provider Name",
-              "description": "Source / aggregator behind the listing (e.g. 'RubiX', 'Paradise Resorts')."
+              "description": "Your business or organisation name."
             },
             "area": {
               "type": "string",
               "title": "Area",
-              "description": "Locality / town within Udupi district."
+              "description": "Locality or town within Udupi district."
             },
             "contact_phone": {
               "type": "string",
               "title": "Contact Phone",
-              "description": "Released to the traveller only on a connection request. Curated (RubiX) listings carry no number.",
+              "description": "Your 10-digit contact number — shared with a traveller only after you accept a connection.",
               "pattern": "^[0-9]{10}$",
               "private": true
             },
             "services": {
               "type": "array",
               "title": "Services",
-              "description": "Discovery tags / services offered (e.g. 'stay', 'experiential', 'community-led').",
-              "items": { "type": "string", "minLength": 1 },
-              "maxItems": 15
+              "description": "What you offer.",
+              "items": {
+                "type": "string",
+                "enum": [
+                  "Stay",
+                  "Food & Dining",
+                  "Experiences & Activities",
+                  "Crafts / GI Products",
+                  "Guided Tours",
+                  "Cultural / Spiritual",
+                  "Transport",
+                  "Wellness"
+                ]
+              }
             },
             "languages": {
               "type": "array",
               "title": "Languages",
-              "description": "Languages spoken / supported by the supplier.",
-              "items": { "type": "string" }
+              "description": "Languages you can support.",
+              "items": {
+                "type": "string",
+                "enum": ["English", "Hindi", "Kannada", "Tulu", "Konkani", "Others"]
+              }
             },
             "pricing": {
               "type": "string",
               "title": "Pricing",
-              "description": "Pricing details / ranges."
-            },
-            "onetac_verification_url": {
-              "type": "string",
-              "title": "OneTAC Verification Link",
-              "description": "Backs the 'verified by' stamp on the card.",
-              "format": "uri"
+              "description": "Your typical price range.",
+              "enum": ["Economical", "Moderate", "Premium"]
             },
             "website": {
               "type": "string",
               "title": "Website",
+              "description": "Your website, if any.",
               "format": "uri"
-            },
-            "photos": {
-              "type": "array",
-              "title": "Photos / Videos",
-              "description": "Media URLs shown on the listing card.",
-              "items": { "type": "string", "format": "uri" }
-            },
-            "ancillary_details": {
-              "type": "string",
-              "title": "Ancillary Details",
-              "description": "Extra context — Tips & Tricks, History, Do's & Don'ts."
             }
           }
         }
