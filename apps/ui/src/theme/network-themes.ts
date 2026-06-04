@@ -218,12 +218,48 @@ const green_dot: NetworkTheme = {
   },
 };
 
+const orange_dot: NetworkTheme = {
+  name: 'Orange Dots',
+  tagline: {
+    lead: 'Discovering',
+    highlight: 'verified locals',
+    tail: 'for every traveller exploring Udupi.',
+  },
+  subline:
+    'A unified tourism, arts & culture network connecting travellers to verified practitioners — every orange dot is a guide, an artisan, a stay, an experience worth finding.',
+  portalLabel: 'Tourism & Culture Portal',
+  inviteLine: 'Invite-only · Orange Dots DPG',
+  stats: [],
+  tokens: {
+    '--primary': 'oklch(0.66 0.18 50)',
+    '--primary-foreground': 'oklch(0.985 0 0)',
+    '--secondary': 'oklch(0.95 0.05 65)',
+    '--secondary-foreground': 'oklch(0.20 0 0)',
+    '--accent': 'oklch(0.95 0.05 65)',
+    '--accent-foreground': 'oklch(0.20 0 0)',
+    '--ring': 'oklch(0.70 0.15 50)',
+    '--sidebar-primary': 'oklch(0.66 0.18 50)',
+    '--sidebar-primary-foreground': 'oklch(0.985 0 0)',
+    '--sidebar-accent': 'oklch(0.96 0.04 65)',
+    '--sidebar-accent-foreground': 'oklch(0.25 0 0)',
+    '--sidebar-ring': 'oklch(0.70 0.15 50)',
+    '--brand-hero-from': '#7c2d12',
+    '--brand-hero-to': '#c2410c',
+    '--brand-hero-highlight': '#fb923c',
+    '--brand-hero-glow': '#f97316',
+    '--brand-stat-accent': '#facc15',
+    '--brand-cta': 'oklch(0.66 0.18 50)',
+    '--brand-cta-foreground': '#ffffff',
+  },
+};
+
 export const networkThemes: Record<string, NetworkTheme> = {
   blue_dot,
   purple_dot,
   yellow_dot,
   pink_dot,
   green_dot,
+  orange_dot,
 };
 
 export function resolveTheme(networkId: string | null | undefined): NetworkTheme {
