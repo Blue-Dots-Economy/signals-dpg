@@ -61,6 +61,7 @@ export const NetworkRuntimeSecretsSchema = z.object({
     .string()
     .default('false')
     .transform((val) => val === 'true'),
+  BULK_MAX_ITEMS: z.coerce.number().int().positive().default(100),
 });
 
 export const DatabaseSecretsSchema = z.object({
