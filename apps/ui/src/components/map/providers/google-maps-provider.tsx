@@ -211,6 +211,7 @@ function ClusteredMarker({
         <InfoWindow
           anchor={markerEl}
           onCloseClick={onClose}
+          headerDisabled
         >
           {renderPopup ? (
             renderPopup(marker)

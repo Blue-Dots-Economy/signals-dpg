@@ -295,7 +295,7 @@ export function LeafletMapProvider({
                 click: () => onMarkerClick?.(marker.id),
               }}
             >
-              <Popup>
+              <Popup closeButton={false} className="dpg-marker-popup" minWidth={300} maxWidth={300}>
                 {renderPopup ? (
                   renderPopup(marker)
                 ) : (
