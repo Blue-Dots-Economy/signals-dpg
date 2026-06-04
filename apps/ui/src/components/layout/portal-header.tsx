@@ -17,10 +17,19 @@ export function PortalHeader({ size = 'sm' }: PortalHeaderProps) {
   // designer-shipped, which is the priority.
   const logoSrc = brandLogoUrl(themeId, resolved === 'dark' ? 'light' : 'default');
 
+  // OneTAC (orange_dot) is a near-square mark (~1.78:1) rather than a wide
+  // wordmark like blue/purple (~5:1). With `max-w-[150px]` + `h-7`, the
+  // wordmarks fill the width and read as full-height, but the square mark
+  // stays tiny (~50×28). Bump the height for square-ish brands so the mark
+  // reads at parity.
+  const isSquareishMark = themeId === 'orange_dot';
+
   const logoClass =
     size === 'lg'
       ? 'h-10 w-auto max-w-[220px] shrink-0 object-contain sm:h-12 sm:max-w-[260px]'
-      : 'h-7 w-auto max-w-[150px] shrink-0 object-contain';
+      : isSquareishMark
+        ? 'h-10 w-auto max-w-[150px] shrink-0 object-contain'
+        : 'h-7 w-auto max-w-[150px] shrink-0 object-contain';
 
   return (
     <div className="flex items-center gap-2.5">
