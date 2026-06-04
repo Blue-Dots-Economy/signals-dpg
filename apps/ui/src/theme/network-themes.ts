@@ -223,7 +223,7 @@ const orange_dot: NetworkTheme = {
   tagline: {
     lead: 'Discovering',
     highlight: 'verified locals',
-    tail: 'for every traveller exploring Udupi.',
+    tail: 'for every traveller exploring.',
   },
   subline:
     'A unified tourism, arts & culture network connecting travellers to verified practitioners — every orange dot is a guide, an artisan, a stay, an experience worth finding.',

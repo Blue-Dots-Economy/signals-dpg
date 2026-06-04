@@ -121,7 +121,7 @@ export function AppSidebar({
 
   return (
     <ShadcnSidebar>
-      <SidebarHeader className="border-b px-4 py-3">
+      <SidebarHeader className="flex h-14 justify-center border-b px-4">
         <PortalHeader />
       </SidebarHeader>
       <SidebarContent>
