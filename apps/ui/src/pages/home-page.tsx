@@ -23,6 +23,7 @@ import { MapFiltersPanel } from '@/components/map/map-filters-panel';
 import { MatchScoreCard } from '@/components/match-score';
 import '@/components/map/providers';
 import { fetchItems, performAction, performActionsBulk, type Item } from '@/lib/item-api';
+import { bulkFailureIndices, firstBulkError } from '@/lib/bulk';
 import { useCardSelection } from '@/hooks/use-card-selection';
 import { SelectableCard } from '@/components/selection/selectable-card';
 import { BulkActionBar } from '@/components/selection/bulk-action-bar';
@@ -445,6 +446,16 @@ export function HomePage() {
       try {
         const allItems = Object.values(domainItems).flat();
         const ids = Array.from(browseSelection.selected);
+        const targets = ids
+          .map((id) => allItems.find((i) => i.item_id === id))
+          .filter((t): t is Item => !!t);
+
+        // Guard: nothing valid to send (e.g. selection went stale after a reload)
+        if (targets.length === 0) {
+          setBulkConnectOpen(false);
+          browseSelection.exitSelect();
+          return;
+        }
 
         const { [ACTION_CONSENT_SENTINEL]: consentRaw, ...requirementsSnapshot } = formData;
         const consent =
@@ -459,10 +470,7 @@ export function HomePage() {
           ? apiConfig.getUrl()
           : resolveTargetInstanceUrl(myItem, network, apiConfig.getUrl(), 'source');
 
-        const payloads = ids
-          .map((id) => allItems.find((i) => i.item_id === id))
-          .filter((targetItem): targetItem is Item => !!targetItem)
-          .map((targetItem) => {
+        const payloads = targets.map((targetItem) => {
             const targetItemInstanceUrl = targetItem.item_instance_url?.includes('localhost')
               ? apiConfig.getUrl()
               : resolveTargetInstanceUrl(targetItem, network, apiConfig.getUrl(), 'target');
@@ -493,21 +501,18 @@ export function HomePage() {
           toast.success(t('home.bulk_connected_all', { count: env.summary.succeeded }));
           browseSelection.exitSelect();
         } else {
-          const failedIdxs = new Set(
-            env.results.filter((r) => r.status === 'error').map((r) => r.index),
-          );
-          const failedIds = ids.filter((_, i) => failedIdxs.has(i));
-          const firstErr = env.results.find((r) => r.status === 'error');
+          const failedIdxs = bulkFailureIndices(env);
+          const failedIds = failedIdxs.map((i) => targets[i].item_id);
+          const firstErr = firstBulkError(env);
           toast.warning(
             t('home.bulk_connected_partial', {
               succeeded: env.summary.succeeded,
               total: env.summary.total,
             }),
             {
-              description:
-                firstErr && firstErr.status === 'error'
-                  ? t('home.bulk_connect_first_error', { message: firstErr.message })
-                  : undefined,
+              description: firstErr
+                ? t('home.bulk_connect_first_error', { message: firstErr })
+                : undefined,
             },
           );
           browseSelection.setSelected(failedIds);
@@ -520,7 +525,15 @@ export function HomePage() {
         setBulkConnectBusy(false);
       }
     },
-    [myItem, network, domainItems, browseSelection, t],
+    [
+      myItem,
+      network,
+      domainItems,
+      browseSelection.selected,
+      browseSelection.exitSelect,
+      browseSelection.setSelected,
+      t,
+    ],
   );
 
   // Legacy: single active action for the selected domain (for CardGrid)
