@@ -115,4 +115,5 @@ export {
   type PerformActionPayload,
   type PerformActionResponse,
   performAction,
+  performActionsBulk,
 } from './action-api';

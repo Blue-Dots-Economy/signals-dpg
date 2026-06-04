@@ -1,6 +1,7 @@
 import * as React from 'react';
 import { useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { toast } from 'sonner';
+import { useTranslation } from 'react-i18next';
 import { ArrowLeft, Wallet, Trash2, OctagonX } from 'lucide-react';
 import type { RJSFSchema } from '@rjsf/utils';
 import { Button } from '@/components/ui/button';
@@ -40,6 +41,7 @@ function parseNetworkIds(networkEnv: string | undefined): string[] {
 import { getDomainIcon } from '@/lib/domain-icons';
 
 export function ProfileFormPage() {
+  const { t } = useTranslation();
   const location = useLocation();
   const navigate = useNavigate();
   const { id } = useParams();
@@ -153,16 +155,16 @@ export function ProfileFormPage() {
         }
 
         if (!cancelled && !foundItem) {
-          toast.error('Profile not found', {
-            description: 'This profile doesn\'t exist on the selected network. You may have followed an outdated link.',
+          toast.error(t('home.toast_profile_not_found'), {
+            description: t('profile.toast_not_found_desc'),
           });
           navigate(`/?network=${resolvedNetwork.id}`);
         }
       } catch (err) {
         if (!cancelled) {
           console.error('Failed to load profile:', err);
-          toast.error('Couldn\'t load profile', {
-            description: 'There was a problem fetching your profile data. Please check your connection and try again.',
+          toast.error(t('profile.toast_load_error'), {
+            description: t('profile.toast_load_error_desc'),
           });
         }
       } finally {
@@ -225,8 +227,8 @@ export function ProfileFormPage() {
   const handleImportedCredentials = React.useCallback(
     (result: WalletImportResult) => {
       if (!profileSchema) {
-        toast.error('No profile schema available', {
-          description: 'Select a role first before importing credentials — the form needs to be ready to receive data.',
+        toast.error(t('profile.toast_no_schema'), {
+          description: t('profile.toast_no_schema_desc'),
         });
         return;
       }
@@ -238,20 +240,20 @@ export function ProfileFormPage() {
       );
 
       if (mappedCount === 0) {
-        toast.error(`Imported from ${result.providerLabel}, but none of the fields matched this form.`);
+        toast.error(t('profile.toast_import_no_match', { provider: result.providerLabel }));
         return;
       }
 
       setInitialData(mergedData);
 
       if (skippedKeys.length > 0) {
-        toast.success(`Imported ${mappedCount} field${mappedCount === 1 ? '' : 's'} from ${result.providerLabel}.`, {
-          description: `${skippedKeys.length} field${skippedKeys.length === 1 ? '' : 's'} did not match this schema.`,
+        toast.success(t('profile.toast_import_success', { count: mappedCount, provider: result.providerLabel }), {
+          description: t('profile.toast_import_skipped', { count: skippedKeys.length }),
         });
         return;
       }
 
-      toast.success(`Imported ${mappedCount} field${mappedCount === 1 ? '' : 's'} from ${result.providerLabel}.`, {
+      toast.success(t('profile.toast_import_success', { count: mappedCount, provider: result.providerLabel }), {
         description: result.summary,
       });
     },
@@ -280,8 +282,8 @@ export function ProfileFormPage() {
         }
 
         await updateItem(existingItem.item_id, updatePayload);
-        toast.success('Profile updated!', {
-          description: 'Your changes have been saved and are now visible on the network.',
+        toast.success(t('profile.toast_updated'), {
+          description: t('profile.toast_updated_desc'),
         });
       } else {
         // Create new profile
@@ -307,8 +309,8 @@ export function ProfileFormPage() {
         }
 
         await createItem(createPayload);
-        toast.success('Profile created!', {
-          description: 'You\'re now visible on the network. Others can discover and connect with you.',
+        toast.success(t('profile.toast_created'), {
+          description: t('profile.toast_created_desc'),
         });
       }
 
@@ -322,24 +324,24 @@ export function ProfileFormPage() {
 
       if (status === 403 && error?.error === 'UNSERVED_DOMAIN_BINDING') {
         setFormError({
-          title: 'Role not available on this instance',
-          description: error?.message ?? 'This profile type isn\'t supported here. Try a different role or contact your network administrator.',
+          title: t('profile.error_role_unavailable'),
+          description: error?.message ?? t('profile.error_role_unavailable_fallback_desc'),
         });
       } else if (status === 401) {
         const redirectTo = `${location.pathname}${location.search}`;
-        toast.error('Please sign in to continue', {
-          description: 'Your session has expired or you are not signed in.',
+        toast.error(t('profile.toast_sign_in'), {
+          description: t('profile.toast_sign_in_desc'),
         });
         navigate(`/auth/login?redirect=${encodeURIComponent(redirectTo)}`);
       } else if (status === 409) {
         setFormError({
-          title: 'Profile already exists',
-          description: 'You already have a profile for this role. Return to the home page to view or edit your existing profile.',
+          title: t('profile.error_already_exists'),
+          description: t('profile.error_already_exists_desc'),
         });
       } else {
         setFormError({
-          title: isEdit ? 'Couldn\'t update your profile' : 'Couldn\'t create your profile',
-          description: error?.message ?? 'An unexpected error occurred. Please try again — if the problem persists, contact support.',
+          title: isEdit ? t('profile.error_update_failed') : t('profile.error_create_failed'),
+          description: error?.message ?? t('profile.error_generic_desc'),
         });
       }
     } finally {
@@ -349,13 +351,13 @@ export function ProfileFormPage() {
 
   const handleDelete = async () => {
     if (!existingItem) return;
-    if (!window.confirm('Delete this profile? This cannot be undone.')) return;
+    if (!window.confirm(t('profile.delete_confirm'))) return;
 
     setIsDeleting(true);
     try {
       await deleteItem(existingItem.item_id);
-      toast.success('Profile deleted', {
-        description: 'Your profile has been permanently removed from the network.',
+      toast.success(t('profile.toast_deleted'), {
+        description: t('profile.toast_deleted_desc'),
       });
       navigate(`/?network=${resolvedNetwork?.id ?? ''}`);
     } catch (err: unknown) {
@@ -363,16 +365,16 @@ export function ProfileFormPage() {
       const status = axiosError?.response?.status;
       const error = axiosError?.response?.data;
       if (status === 404) {
-        toast.error('Profile not found', {
-          description: 'It may have already been deleted, or it does not belong to you.',
+        toast.error(t('home.toast_profile_not_found'), {
+          description: t('profile.delete_not_found_desc'),
         });
       } else if (status === 401) {
-        toast.error('Session expired', {
-          description: 'Please sign in again to continue managing your profile.',
+        toast.error(t('profile.toast_session_expired'), {
+          description: t('profile.toast_session_expired_desc'),
         });
       } else {
-        toast.error('Failed to delete profile', {
-          description: error?.message ?? 'Something went wrong',
+        toast.error(t('profile.toast_delete_failed'), {
+          description: error?.message ?? t('common.something_went_wrong'),
         });
       }
     } finally {
@@ -384,7 +386,7 @@ export function ProfileFormPage() {
     return (
       <div className="flex h-screen items-center justify-center">
         <p className="text-muted-foreground">
-          {isLoading ? 'Loading profile...' : 'Loading network schemas...'}
+          {isLoading ? t('profile.loading_profile') : t('profile.loading_schemas')}
         </p>
       </div>
     );
@@ -393,7 +395,7 @@ export function ProfileFormPage() {
   if (!targetNetworkId) {
     return (
       <div className="flex h-screen items-center justify-center">
-        <p className="text-muted-foreground">No networks available.</p>
+        <p className="text-muted-foreground">{t('profile.no_networks')}</p>
       </div>
     );
   }
@@ -401,7 +403,7 @@ export function ProfileFormPage() {
   if (!network) {
     return (
       <div className="flex h-screen items-center justify-center">
-        <p className="text-muted-foreground">Loading network schemas...</p>
+        <p className="text-muted-foreground">{t('profile.loading_schemas')}</p>
       </div>
     );
   }
@@ -416,14 +418,14 @@ export function ProfileFormPage() {
           className="mb-6 flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors"
         >
           <ArrowLeft className="h-4 w-4" />
-          Back
+          {t('common.back')}
         </button>
         <div className="mb-6">
           <p className="mb-2 inline-flex items-center rounded-full bg-primary/10 px-2.5 py-0.5 text-[10px] font-semibold uppercase tracking-[0.18em] text-primary">
             {theme.portalLabel}
           </p>
-          <h2 className="text-2xl font-bold">Create Profile</h2>
-          <p className="text-muted-foreground mt-1">Choose your role on the network</p>
+          <h2 className="text-2xl font-bold">{t('profile.create_heading')}</h2>
+          <p className="text-muted-foreground mt-1">{t('profile.choose_role')}</p>
           <p className="text-sm text-muted-foreground/80 mt-2">{theme.subline}</p>
         </div>
         <div className="grid gap-4 sm:grid-cols-2">
@@ -464,7 +466,7 @@ export function ProfileFormPage() {
               className="flex items-center gap-1.5 text-sm text-white/70 hover:text-white transition-colors"
             >
               <ArrowLeft className="h-4 w-4" />
-              {selectedDomain && !isEdit ? 'Choose different role' : 'Back'}
+              {selectedDomain && !isEdit ? t('profile.choose_different_role') : t('common.back')}
             </button>
           </div>
           <div className="relative z-10 flex items-center gap-4 px-5 pb-6 pt-3 sm:px-6">
@@ -476,10 +478,10 @@ export function ProfileFormPage() {
                 {theme.portalLabel}
               </p>
               <h2 className="text-xl font-bold text-white leading-tight truncate">
-                {isEdit ? `Edit ${roleLabel} Profile` : `Create ${roleLabel} Profile`}
+                {isEdit ? t('profile.edit_role_heading', { role: roleLabel }) : t('profile.create_role_heading', { role: roleLabel })}
               </h2>
               <p className="mt-0.5 text-xs text-white/70 leading-snug">
-                {selectedDomainInfo?.description ?? 'Fill in your profile details'}
+                {selectedDomainInfo?.description ?? t('profile.fill_details')}
               </p>
             </div>
           </div>
@@ -492,7 +494,7 @@ export function ProfileFormPage() {
               <div className="mb-4">
                 <Button variant="outline" size="sm" onClick={() => setIsWalletModalOpen(true)}>
                   <Wallet className="h-4 w-4" />
-                  Import Credentials
+                  {t('profile.import_credentials')}
                 </Button>
               </div>
             )}
@@ -511,14 +513,14 @@ export function ProfileFormPage() {
                 onSubmit={handleSubmit}
                 disabled={isSubmitting || isDeleting}
                 formData={initialData ?? undefined}
-                submitButtonText={isEdit ? 'Update' : undefined}
+                submitButtonText={isEdit ? t('profile.btn_update') : undefined}
                 domainId={selectedDomain ?? undefined}
               />
             )}
             {isEdit && existingItem && (
               <div className="mt-6 pt-4 border-t flex items-center justify-between gap-4">
                 <p className="text-xs text-muted-foreground">
-                  Removing the profile is permanent — applications and matches against this profile will no longer be visible.
+                  {t('profile.delete_warning')}
                 </p>
                 <Button
                   variant="destructive"
@@ -528,7 +530,7 @@ export function ProfileFormPage() {
                   disabled={isSubmitting || isDeleting}
                 >
                   <Trash2 className="h-4 w-4" />
-                  {isDeleting ? 'Deleting…' : 'Delete profile'}
+                  {isDeleting ? t('profile.deleting') : t('profile.delete_profile')}
                 </Button>
               </div>
             )}

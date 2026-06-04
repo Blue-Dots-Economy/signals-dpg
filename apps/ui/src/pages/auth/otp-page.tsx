@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { Loader2, ArrowLeft, OctagonX } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
 import { OtpInput } from '@/components/auth/otp-input';
 import { AuthShell } from '@/components/layout/auth-shell';
 import { Alert, AlertTitle, AlertDescription } from '@/components/ui/alert';
@@ -22,6 +23,7 @@ export function OtpPage() {
   const navigate = useNavigate();
   const location = useLocation();
   const { verifyOtp } = useAuth();
+  const { t } = useTranslation();
   const [isLoading, setIsLoading] = useState(false);
   const [countdown, setCountdown] = useState(60);
   const [inlineError, setInlineError] = useState<{ title: string; description: string } | null>(null);
@@ -50,16 +52,16 @@ export function OtpPage() {
     setInlineError(null);
     try {
       await verifyOtp(getAuthIdentifier(state), otp, state.userExists ? undefined : state.name);
-      toast.success(state.userExists ? 'Welcome back!' : 'Account created successfully!', {
+      toast.success(state.userExists ? t('auth.toast_welcome_back') : t('auth.toast_account_created'), {
         description: state.userExists
-          ? 'You\'re signed in. Explore profiles and connect with others on the network.'
-          : 'Your account is ready. Start by creating your profile so others can discover you.',
+          ? t('auth.toast_welcome_back_desc')
+          : t('auth.toast_account_created_desc'),
       });
       navigate(state.redirectTo ?? '/', { replace: true });
     } catch {
       setInlineError({
-        title: 'Incorrect verification code',
-        description: 'The code you entered doesn\'t match. Double-check your messages and try again, or request a new code below.',
+        title: t('auth.otp_incorrect_title'),
+        description: t('auth.otp_incorrect_desc'),
       });
     } finally {
       setIsLoading(false);
@@ -73,13 +75,13 @@ export function OtpPage() {
     try {
       await requestOtp(getAuthIdentifier(state));
       setCountdown(60);
-      toast.success('New code sent', {
-        description: 'Check your messages for the new 6-digit verification code.',
+      toast.success(t('auth.toast_new_code_sent'), {
+        description: t('auth.toast_new_code_sent_desc'),
       });
     } catch {
       setInlineError({
-        title: 'Couldn\'t send a new code',
-        description: 'Something went wrong while requesting a new verification code. Please wait a moment and try again.',
+        title: t('auth.otp_resend_error_title'),
+        description: t('auth.otp_resend_error_desc'),
       });
     } finally {
       setIsLoading(false);
@@ -97,14 +99,14 @@ export function OtpPage() {
         className="mb-6 flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors"
       >
         <ArrowLeft className="h-4 w-4" />
-        Back
+        {t('auth.back')}
       </button>
 
       {/* Heading */}
       <div className="mb-8">
-        <h2 className="text-2xl font-bold text-foreground">Enter verification code</h2>
+        <h2 className="text-2xl font-bold text-foreground">{t('auth.otp_heading')}</h2>
         <p className="mt-1 text-sm text-muted-foreground">
-          We sent a 6-digit code to{' '}
+          {t('auth.otp_sub')}{' '}
           <span className="font-medium text-foreground">{identifierLabel}</span>
         </p>
       </div>
@@ -133,7 +135,7 @@ export function OtpPage() {
       {/* Resend — left-aligned to match the rest of the form column. */}
       <div className="text-left text-sm">
         {countdown > 0 ? (
-          <p className="text-muted-foreground">Resend code in {countdown}s</p>
+          <p className="text-muted-foreground">{t('auth.otp_resend_countdown', { count: countdown })}</p>
         ) : (
           <button
             type="button"
@@ -141,7 +143,7 @@ export function OtpPage() {
             disabled={isLoading}
             className="text-primary hover:underline disabled:opacity-50"
           >
-            Resend code
+            {t('auth.otp_resend')}
           </button>
         )}
       </div>

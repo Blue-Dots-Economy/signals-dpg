@@ -1,10 +1,12 @@
 import { Link } from 'react-router-dom';
 import { LogIn } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
 import { NetworkConstellation } from './network-constellation';
 import { useNetworkTheme } from '@/theme/theme-provider';
 
 export function GuestHero() {
   const { theme } = useNetworkTheme();
+  const { t } = useTranslation();
 
   return (
     <div className="sticky top-0 z-30 -mx-4 mb-4 sm:-mx-6">
@@ -38,8 +40,8 @@ export function GuestHero() {
             className="inline-flex shrink-0 items-center gap-2 rounded-lg bg-brand-cta px-3.5 py-2 text-xs font-semibold shadow-md transition-all hover:brightness-110 active:scale-95 sm:px-5 sm:py-2.5 sm:text-sm"
           >
             <LogIn className="h-4 w-4" />
-            <span className="hidden sm:inline">Sign in to connect</span>
-            <span className="sm:hidden">Sign in</span>
+            <span className="hidden sm:inline">{t('nav.sign_in_to_connect')}</span>
+            <span className="sm:hidden">{t('nav.sign_in')}</span>
           </Link>
         </div>
       </div>

@@ -18,6 +18,7 @@ export interface MatchScoreCardProps {
   onClick?: () => void;
   localItem: Item | null;
   networkItem: Item;
+  selectionMode?: boolean;
 }
 
 export function MatchScoreCard({
@@ -32,6 +33,7 @@ export function MatchScoreCard({
   onClick,
   localItem,
   networkItem,
+  selectionMode = false,
 }: MatchScoreCardProps) {
   const [isModalOpen, setIsModalOpen] = React.useState(false);
   
@@ -91,6 +93,7 @@ export function MatchScoreCard({
         onClick={onClick}
         localItem={localItem}
         networkItem={networkItem}
+        selectionMode={selectionMode}
         matchScore={score}
         matchScoreLoading={matchScoreLoading}
         matchScoreError={matchScoreError}

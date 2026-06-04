@@ -343,3 +343,44 @@ input:-webkit-autofill:active {
   -webkit-text-fill-color: var(--foreground) !important;
   transition: background-color 5000s ease-in-out 0s;
 }
+
+/*
+ * Map marker popups: MarkerPopupCard already provides the full chrome (rounded
+ * background + shadow), so strip the map libraries' own popup frame — otherwise
+ * the card sits inside a redundant white box with extra padding + a close
+ * button. We disable each library's header/close button in the provider and
+ * neutralize the container here so our card IS the popup.
+ */
+
+/* Google Maps InfoWindow */
+.gm-style .gm-style-iw-c {
+  padding: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  border-radius: 1rem !important;
+  max-width: none !important;
+  overflow: visible !important;
+}
+.gm-style .gm-style-iw-d {
+  padding: 0 !important;
+  overflow: hidden !important;
+}
+/* The pointer tail under the bubble — match the card's bottom so it blends. */
+.gm-style .gm-style-iw-tc::after {
+  background: var(--background) !important;
+}
+
+/* Leaflet popup */
+.leaflet-popup.dpg-marker-popup .leaflet-popup-content-wrapper {
+  padding: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  border-radius: 1rem !important;
+}
+.leaflet-popup.dpg-marker-popup .leaflet-popup-content {
+  margin: 0 !important;
+  width: auto !important;
+}
+.leaflet-popup.dpg-marker-popup .leaflet-popup-tip {
+  background: var(--background) !important;
+}

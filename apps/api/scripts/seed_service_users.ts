@@ -11,8 +11,8 @@
  * Idempotent — safe to re-run. Existing rows are reused; existing apikeys
  * are left alone. Minted keys are printed ONCE — capture them then.
  *
- * For production (k8s), the helm migrate-job applies
- * `helmcharts/dpg/charts/api/files/provision_service_users.sql` on every
+ * For production (k8s), the deploy-time migrate-job (in the separate
+ * charts repo) applies `provision_service_users.sql` on every
  * install/upgrade, reading the raw key from the AGGREGATOR_DPG_API_KEY
  * Secret. The cluster Secret is the source of truth there.
  */

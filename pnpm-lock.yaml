@@ -90,6 +90,9 @@ importers:
 
   apps/ui:
     dependencies:
+      '@googlemaps/markerclusterer':
+        specifier: 2.6.2
+        version: 2.6.2
       '@radix-ui/react-collapsible':
         specifier: ^1.1.12
         version: 1.1.12(@types/react-dom@19.2.3(@types/react@19.2.14))(@types/react@19.2.14)(react-dom@19.2.6(react@19.2.6))(react@19.2.6)
@@ -168,6 +171,12 @@ importers:
       date-fns:
         specifier: ^4.1.0
         version: 4.1.0
+      i18next:
+        specifier: ^26.3.0
+        version: 26.3.0(typescript@6.0.3)
+      i18next-browser-languagedetector:
+        specifier: ^8.2.1
+        version: 8.2.1
       leaflet:
         specifier: ^1.9.4
         version: 1.9.4
@@ -189,9 +198,15 @@ importers:
       react-dom:
         specifier: ^19.2.6
         version: 19.2.6(react@19.2.6)
+      react-i18next:
+        specifier: ^17.0.8
+        version: 17.0.8(i18next@26.3.0(typescript@6.0.3))(react-dom@19.2.6(react@19.2.6))(react@19.2.6)(typescript@6.0.3)
       react-leaflet:
         specifier: ^5.0.0
         version: 5.0.0(leaflet@1.9.4)(react-dom@19.2.6(react@19.2.6))(react@19.2.6)
+      react-leaflet-cluster:
+        specifier: 4.1.3
+        version: 4.1.3(@react-leaflet/core@3.0.0(leaflet@1.9.4)(react-dom@19.2.6(react@19.2.6))(react@19.2.6))(leaflet@1.9.4)(react-dom@19.2.6(react@19.2.6))(react-leaflet@5.0.0(leaflet@1.9.4)(react-dom@19.2.6(react@19.2.6))(react@19.2.6))(react@19.2.6)
       react-router-dom:
         specifier: ^7.15.1
         version: 7.15.1(react-dom@19.2.6(react@19.2.6))(react@19.2.6)
@@ -211,6 +226,9 @@ importers:
       '@tailwindcss/vite':
         specifier: ^4.3.0
         version: 4.3.0(vite@8.0.13(@types/node@25.8.0)(esbuild@0.28.0)(jiti@2.6.1)(tsx@4.22.1)(yaml@2.9.0))
+      '@types/google.maps':
+        specifier: ^3.65.0
+        version: 3.65.0
       '@types/leaflet':
         specifier: ^1.9.18
         version: 1.9.21
@@ -297,6 +315,10 @@ importers:
         version: 4.1.7(@types/node@25.8.0)(vite@8.0.13(@types/node@25.8.0)(esbuild@0.28.0)(jiti@2.6.1)(tsx@4.22.1)(yaml@2.9.0))
 
 packages:
+
+  '@babel/runtime@7.29.7':
+    resolution: {integrity: sha512-Nq8OhGWiZIZGV6hLHoyAKLLcJihP/xFeBMGJoUrxTX2psI8dCifzLhZISFb+VWS3wFMRDmCGw5R+dOySCqPLhw==}
+    engines: {node: '>=6.9.0'}
 
   '@better-auth/api-key@1.6.11':
     resolution: {integrity: sha512-717Bmbs1Y2h0KrPIwrutxI/HwdqKlga1a1OHlL5TrRbN35IxHeY3GilqvyI/92n7RxFGa/AQhIajX0OL+FJkvw==}
@@ -1048,6 +1070,9 @@ packages:
 
   '@googlemaps/js-api-loader@2.0.2':
     resolution: {integrity: sha512-bKVuTqatS8Jven5aFqVB7rCHF1VFEzpzyi0ruzO0GUR+A7m9oMqMgtnmpANj7kMYEvvhty8Fk7TnJ1MKjWHu+Q==}
+
+  '@googlemaps/markerclusterer@2.6.2':
+    resolution: {integrity: sha512-U6uVhq8iWhiIckA89sgRu8OK35mjd6/3CuoZKWakKEf0QmRRWpatlsPb3kqXkoWSmbcZkopRiI4dnW6DQSd7bQ==}
 
   '@ioredis/commands@1.5.1':
     resolution: {integrity: sha512-JH8ZL/ywcJyR9MmJ5BNqZllXNZQqQbnVZOqpPQqE1vHiFgAw4NHbvE0FOduNU8IX9babitBT46571OnPTT0Zcw==}
@@ -2328,6 +2353,9 @@ packages:
   '@types/google.maps@3.64.0':
     resolution: {integrity: sha512-dN0H6tB4lgLQLovcbPXFYYOEV41TpyyJghzb5jrzjB96FZmjeOghevVdC+BMGd6YqyCqXaggyEtqRXLRjzCBZA==}
 
+  '@types/google.maps@3.65.0':
+    resolution: {integrity: sha512-u4SHiRC3m27lPa4vDBxh2AI7mDcHcheX6GSHn1Mwi0Gap8/uhM2kFppiFTnWASXLHZO+1ahHciLeEIV+Sjqk/A==}
+
   '@types/json-schema@7.0.15':
     resolution: {integrity: sha512-5+fP8P8MFNC+AyZCDxrB2pkZFPGzqQWUzpSeuuVLvm8VMcorNYavBqoFcxK8bQz4Qsbn4oUEEem4wDLfcysGHA==}
 
@@ -2347,6 +2375,9 @@ packages:
 
   '@types/react@19.2.14':
     resolution: {integrity: sha512-ilcTH/UniCkMdtexkoCN0bI7pMcJDvmQFPvuPvmEaYA/NSfFTAgdUSLAoVjaRJm7+6PvcM+q1zYOwS4wTYMF9w==}
+
+  '@types/supercluster@7.1.3':
+    resolution: {integrity: sha512-Z0pOY34GDFl3Q6hUFYf3HkTwKEE02e7QgtJppBt+beEAxnyOpJua+voGFvxINBHa06GwLFFym7gRPY2SiKIfIA==}
 
   '@vis.gl/react-google-maps@1.8.3':
     resolution: {integrity: sha512-DW7nEuvOJ299DmdBnvGiUARrgS/+sTEO1iJgG9J8YaErZqLoq7S4TJ22f3EjJvR4dti4L4gft43JEK77nnKXDw==}
@@ -2806,6 +2837,10 @@ packages:
   fast-deep-equal@3.1.3:
     resolution: {integrity: sha512-f3qQ9oQy9j2AhBe/H9VC91wLmKBCCU/gDOnKNAYG5hswO7BLKj09Hc5HYNz9cGI++xlpDCIgDaitVs03ATR84Q==}
 
+  fast-equals@5.4.0:
+    resolution: {integrity: sha512-jt2DW/aNFNwke7AUd+Z+e6pz39KO5rzdbbFCg2sGafS4mk13MI7Z8O5z9cADNn5lhGODIgLwug6TZO2ctf7kcw==}
+    engines: {node: '>=6.0.0'}
+
   fast-equals@6.0.0:
     resolution: {integrity: sha512-PFhhIGgdM79r5Uztdj9Zb6Tt1zKafqVfdMGwVca1z5z6fbX7DmsySSuJd8HiP6I1j505DCS83cLxo5rmSNeVEA==}
     engines: {node: '>=6.0.0'}
@@ -2919,9 +2954,23 @@ packages:
     resolution: {integrity: sha512-0hJU9SCPvmMzIBdZFqNPXWa6dqh7WdH0cII9y+CyS8rG3nL48Bclra9HmKhVVUHyPWNH5Y7xDwAB7bfgSjkUMQ==}
     engines: {node: '>= 0.4'}
 
+  html-parse-stringify@3.0.1:
+    resolution: {integrity: sha512-KknJ50kTInJ7qIScF3jeaFRpMpE8/lfiTdzf/twXyPBLAGrLRTmkz3AdTnKeh40X8k9L2fdYwEp/42WGXIRGcg==}
+
   https-proxy-agent@5.0.1:
     resolution: {integrity: sha512-dFcAjpTQFgoLMzC2VwU+C/CbS7uRL0lWmxDITmqm7C+7F0Odmj6s9l6alZc6AELXhrnggM2CeWSXHGOdX2YtwA==}
     engines: {node: '>= 6'}
+
+  i18next-browser-languagedetector@8.2.1:
+    resolution: {integrity: sha512-bZg8+4bdmaOiApD7N7BPT9W8MLZG+nPTOFlLiJiT8uzKXFjhxw4v2ierCXOwB5sFDMtuA5G4kgYZ0AznZxQ/cw==}
+
+  i18next@26.3.0:
+    resolution: {integrity: sha512-gHSgGpUXVmuqE2El1W61DmxeyeTlFfZgdJRWMo9jScAn5pu7TuTuiccb1zh3E2J9hEBVGJ23+96x0ieBhfuIHA==}
+    peerDependencies:
+      typescript: ^5 || ^6
+    peerDependenciesMeta:
+      typescript:
+        optional: true
 
   ioredis@5.10.1:
     resolution: {integrity: sha512-HuEDBTI70aYdx1v6U97SbNx9F1+svQKBDo30o0b9fw055LMepzpOOd0Ccg9Q6tbqmBSJaMuY0fB7yw9/vjBYCA==}
@@ -2959,9 +3008,17 @@ packages:
     resolution: {integrity: sha512-p/nXbhSEcu3pZRdkW1OfJhpsVtW1gd4Wa1fnQc9YLiTfAjn0312eMKimbdIQzuZl9aa9xUGaRlP9T/CJE/ditQ==}
     engines: {node: '>=0.10.0'}
 
+  kdbush@4.1.0:
+    resolution: {integrity: sha512-e9vurzrXJQrFX6ckpHP3bvj5l+9CnYzkxDNnNQ1h2QTqdWsUAJgXiKdGNcOa1EY85dU8KbQ+z/FdQdB7P+9yfQ==}
+
   kysely@0.28.17:
     resolution: {integrity: sha512-nbD8lB9EB3wNdMhOCdx5Li8DxnLbvKByylRLcJ1h+4SkrowVeECAyZlyiKMThF7xFdRz0jSQ2MoJr+wXux2y0Q==}
     engines: {node: '>=20.0.0'}
+
+  leaflet.markercluster@1.5.3:
+    resolution: {integrity: sha512-vPTw/Bndq7eQHjLBVlWpnGeLa3t+3zGiuM7fJwCkiMFq+nmRuG3RI3f7f4N4TDX7T4NpbAXpR2+NTRSEGfCSeA==}
+    peerDependencies:
+      leaflet: ^1.3.1
 
   leaflet@1.9.4:
     resolution: {integrity: sha512-nxS1ynzJOmOlHp+iL3FyWqK89GtNL8U8rvlMOsQdTTssxZwCXh8N2NB3GDQOL+YR3XnWyZAxwQixURb+FA74PA==}
@@ -3302,11 +3359,36 @@ packages:
     peerDependencies:
       react: ^19.2.6
 
+  react-i18next@17.0.8:
+    resolution: {integrity: sha512-0ooKbGLU8JXhe1zwpQUWIeXSgLPOfwJmgheWRIUpcoA0CpyabpGhayjdG+/eA5esC1AQ8h2jWpXjJfzQzeDOCw==}
+    peerDependencies:
+      i18next: '>= 26.2.0'
+      react: '>= 16.8.0'
+      react-dom: '*'
+      react-native: '*'
+      typescript: ^5 || ^6
+    peerDependenciesMeta:
+      react-dom:
+        optional: true
+      react-native:
+        optional: true
+      typescript:
+        optional: true
+
   react-is@16.13.1:
     resolution: {integrity: sha512-24e6ynE2H+OKt4kqsOvNd8kBpV65zoxbA4BVsEOB3ARVWQki/DHzaUoC5KuON/BiccDaCCTZBuOcfZs70kR8bQ==}
 
   react-is@18.3.1:
     resolution: {integrity: sha512-/LLMVyas0ljjAtoYiPqYiL8VWXzUUdThrmU5+n20DZv+a+ClRoevUzw5JxU+Ieh5/c87ytoTBV9G1FiKfNJdmg==}
+
+  react-leaflet-cluster@4.1.3:
+    resolution: {integrity: sha512-b3ICS7r9Fs5hBWrFPMVnmkCuDewyG3m1GaGzamXY0eryyAXDfQ+ikSkiR/mVethueIIA5MSyLok2/KsZVotspQ==}
+    peerDependencies:
+      '@react-leaflet/core': ^3.0.0
+      leaflet: ^1.9.0
+      react: ^19.0.0
+      react-dom: ^19.0.0
+      react-leaflet: ^5.0.0
 
   react-leaflet@5.0.0:
     resolution: {integrity: sha512-CWbTpr5vcHw5bt9i4zSlPEVQdTVcML390TjeDG0cK59z1ylexpqC6M1PJFjV8jD7CF+ACBFsLIDs6DRMoLEofw==}
@@ -3502,6 +3584,9 @@ packages:
     resolution: {integrity: sha512-DhuTmvZWux4H1UOnWMB3sk0sbaCVOoQZjv8u1rDoTV0HTdGem9hkAZtl4JZy8P2z4Bg0nT+YMeOFyVr4zcG5Tw==}
     engines: {node: '>=16 || 14 >=14.17'}
     hasBin: true
+
+  supercluster@8.0.1:
+    resolution: {integrity: sha512-IiOea5kJ9iqzD2t7QJq/cREyLHTtSmUT6gQsweojg9WH2sYJqZK9SswTu6jrscO6D1G5v5vYZ9ru/eq85lXeZQ==}
 
   tagged-tag@1.0.0:
     resolution: {integrity: sha512-yEFYrVhod+hdNyx7g5Bnkkb0G6si8HJurOoOEgC8B/O0uXLHlaey/65KRv6cuWBNhBgHKAROVpc7QyYqE5gFng==}
@@ -3734,6 +3819,10 @@ packages:
       jsdom:
         optional: true
 
+  void-elements@3.1.0:
+    resolution: {integrity: sha512-Dhxzh5HZuiHQhbvTW9AMetFfBHDMYpo23Uo9btPXgdYP+3T5S+p+jgNy7spra+veYhBP2dCSgxR/i2Y02h5/6w==}
+    engines: {node: '>=0.10.0'}
+
   why-is-node-running@2.3.0:
     resolution: {integrity: sha512-hUrmaWBdVDcxvYqnyh09zunKzROWjbZTiNy8dBEjkS7ehEDQibXJ7XvlmtbwuTclUiIyN+CyXQD4Vmko8fNm8w==}
     engines: {node: '>=8'}
@@ -3757,6 +3846,8 @@ packages:
     resolution: {integrity: sha512-ytENFjIJFl2UwYglde2jchW2Hwm4GJFLDiSXWdTrJQBIN9Fcyp7n4DhxJEiWNAJMV1/BqWfW/kkg71UDcHJyTQ==}
 
 snapshots:
+
+  '@babel/runtime@7.29.7': {}
 
   '@better-auth/api-key@1.6.11(@better-auth/core@1.6.11(@better-auth/utils@0.4.0)(@better-fetch/fetch@1.1.21)(better-call@1.3.5(zod@4.4.3))(jose@6.2.2)(kysely@0.28.17)(nanostores@1.2.0))(@better-auth/utils@0.4.0)(better-auth@1.6.11(drizzle-kit@0.31.10)(drizzle-orm@0.45.2(@types/pg@8.20.0)(kysely@0.28.17)(pg@8.20.0))(pg@8.20.0)(react-dom@19.2.6(react@19.2.6))(react@19.2.6)(vitest@4.1.7(@types/node@25.8.0)(vite@8.0.13(@types/node@25.8.0)(esbuild@0.28.0)(jiti@2.6.1)(tsx@4.22.1)(yaml@2.9.0))))':
     dependencies:
@@ -4206,6 +4297,12 @@ snapshots:
   '@googlemaps/js-api-loader@2.0.2':
     dependencies:
       '@types/google.maps': 3.64.0
+
+  '@googlemaps/markerclusterer@2.6.2':
+    dependencies:
+      '@types/supercluster': 7.1.3
+      fast-equals: 5.4.0
+      supercluster: 8.0.1
 
   '@ioredis/commands@1.5.1': {}
 
@@ -5410,6 +5507,8 @@ snapshots:
 
   '@types/google.maps@3.64.0': {}
 
+  '@types/google.maps@3.65.0': {}
+
   '@types/json-schema@7.0.15': {}
 
   '@types/leaflet@1.9.21':
@@ -5433,6 +5532,10 @@ snapshots:
   '@types/react@19.2.14':
     dependencies:
       csstype: 3.2.3
+
+  '@types/supercluster@7.1.3':
+    dependencies:
+      '@types/geojson': 7946.0.16
 
   '@vis.gl/react-google-maps@1.8.3(react-dom@19.2.6(react@19.2.6))(react@19.2.6)':
     dependencies:
@@ -5843,6 +5946,8 @@ snapshots:
 
   fast-deep-equal@3.1.3: {}
 
+  fast-equals@5.4.0: {}
+
   fast-equals@6.0.0: {}
 
   fast-json-stringify@6.3.0:
@@ -5972,12 +6077,24 @@ snapshots:
     dependencies:
       function-bind: 1.1.2
 
+  html-parse-stringify@3.0.1:
+    dependencies:
+      void-elements: 3.1.0
+
   https-proxy-agent@5.0.1:
     dependencies:
       agent-base: 6.0.2
       debug: 4.4.3
     transitivePeerDependencies:
       - supports-color
+
+  i18next-browser-languagedetector@8.2.1:
+    dependencies:
+      '@babel/runtime': 7.29.7
+
+  i18next@26.3.0(typescript@6.0.3):
+    optionalDependencies:
+      typescript: 6.0.3
 
   ioredis@5.10.1:
     dependencies:
@@ -6019,7 +6136,13 @@ snapshots:
 
   jsonpointer@5.0.1: {}
 
+  kdbush@4.1.0: {}
+
   kysely@0.28.17: {}
+
+  leaflet.markercluster@1.5.3(leaflet@1.9.4):
+    dependencies:
+      leaflet: 1.9.4
 
   leaflet@1.9.4: {}
 
@@ -6346,9 +6469,29 @@ snapshots:
       react: 19.2.6
       scheduler: 0.27.0
 
+  react-i18next@17.0.8(i18next@26.3.0(typescript@6.0.3))(react-dom@19.2.6(react@19.2.6))(react@19.2.6)(typescript@6.0.3):
+    dependencies:
+      '@babel/runtime': 7.29.7
+      html-parse-stringify: 3.0.1
+      i18next: 26.3.0(typescript@6.0.3)
+      react: 19.2.6
+      use-sync-external-store: 1.6.0(react@19.2.6)
+    optionalDependencies:
+      react-dom: 19.2.6(react@19.2.6)
+      typescript: 6.0.3
+
   react-is@16.13.1: {}
 
   react-is@18.3.1: {}
+
+  react-leaflet-cluster@4.1.3(@react-leaflet/core@3.0.0(leaflet@1.9.4)(react-dom@19.2.6(react@19.2.6))(react@19.2.6))(leaflet@1.9.4)(react-dom@19.2.6(react@19.2.6))(react-leaflet@5.0.0(leaflet@1.9.4)(react-dom@19.2.6(react@19.2.6))(react@19.2.6))(react@19.2.6):
+    dependencies:
+      '@react-leaflet/core': 3.0.0(leaflet@1.9.4)(react-dom@19.2.6(react@19.2.6))(react@19.2.6)
+      leaflet: 1.9.4
+      leaflet.markercluster: 1.5.3(leaflet@1.9.4)
+      react: 19.2.6
+      react-dom: 19.2.6(react@19.2.6)
+      react-leaflet: 5.0.0(leaflet@1.9.4)(react-dom@19.2.6(react@19.2.6))(react@19.2.6)
 
   react-leaflet@5.0.0(leaflet@1.9.4)(react-dom@19.2.6(react@19.2.6))(react@19.2.6):
     dependencies:
@@ -6560,6 +6703,10 @@ snapshots:
       tinyglobby: 0.2.16
       ts-interface-checker: 0.1.13
 
+  supercluster@8.0.1:
+    dependencies:
+      kdbush: 4.1.0
+
   tagged-tag@1.0.0: {}
 
   tailwind-merge@3.5.0: {}
@@ -6736,6 +6883,8 @@ snapshots:
       '@types/node': 25.8.0
     transitivePeerDependencies:
       - msw
+
+  void-elements@3.1.0: {}
 
   why-is-node-running@2.3.0:
     dependencies:

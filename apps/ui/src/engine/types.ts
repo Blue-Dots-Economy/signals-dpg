@@ -25,6 +25,26 @@ export interface DotActionSchema {
   reveals_pii_on_status?: string[];
 }
 
+// ─── Status Rules ──────────────────────────────────────────────
+
+/**
+ * A single status rule from the network config. The `when` field is either a
+ * predicate object (evaluated by the server) or the literal string "default"
+ * (always-match fallback, must be last in the array).
+ */
+export interface StatusRule {
+  status: string;
+  /** Human-readable label for display. Falls back to `status` when absent. */
+  label?: string;
+  /** Optional longer description for tooltips / filter panel copy. */
+  description?: string;
+  /**
+   * Predicate evaluated by the server. The client receives this opaquely; it
+   * is used only to enumerate the distinct status values for the filter panel.
+   */
+  when: Record<string, unknown> | 'default';
+}
+
 export interface DotNetworkDomain {
   id: string;
   description: string;
@@ -32,6 +52,12 @@ export interface DotNetworkDomain {
     profile: RJSFSchema;
   };
   item_schemas?: Record<string, RJSFSchema>;
+  /**
+   * Lifecycle status rules for items in this domain. Defined in network.json
+   * per-domain. The client uses these to enumerate filter options and to
+   * derive a best-effort status for each item client-side (see item-status.ts).
+   */
+  status_rules?: StatusRule[];
 }
 
 export interface DotNetworkInteraction {
@@ -109,6 +135,8 @@ export interface MapMarker {
   data: Record<string, unknown>;
   precision: MapMarkerPrecision;
   geocodedFrom?: string;
+  /** The item's domain string (e.g. "seeker", "provider"). Used to pick the marker icon. */
+  domain?: string;
 }
 
 export interface MapProviderProps {
@@ -116,7 +144,11 @@ export interface MapProviderProps {
   zoom: number;
   markers: MapMarker[];
   onMarkerClick?: (id: string) => void;
+  /** When true, the provider should NOT auto-fit bounds on first render */
+  initialViewSet?: boolean;
   children?: React.ReactNode;
+  /** Optional custom popup renderer; falls back to the default MarkerPopupCard. */
+  renderPopup?: (marker: MapMarker) => React.ReactNode;
 }
 
 export interface MapProvider {
@@ -141,4 +173,15 @@ export interface FilterState {
   search: string;
   selectedDomain: string | null;
   viewMode: ViewMode;
+  /**
+   * Active status filter values (e.g. ["new", "active"]). An empty array means
+   * "show all" (no status filter applied).
+   */
+  selectedStatuses: string[];
+  /**
+   * Active domain filter values for the map filters panel (multi-select,
+   * separate from the sidebar's single-domain tab selector).
+   * An empty array means "show all domains".
+   */
+  selectedDomains: string[];
 }

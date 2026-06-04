@@ -8,6 +8,7 @@
   "globalPassThroughEnv": [
     "ALLOWED_ORIGINS",
     "ALLOW_EXTRA_SCHEMA_DATA",
+    "BULK_MAX_ITEMS",
     "API_DOMAIN",
     "API_PORT",
     "AUTH_MIDDLEWARE_ENABLED",

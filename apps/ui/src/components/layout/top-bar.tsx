@@ -1,20 +1,15 @@
+import * as React from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Search, List, Map, LogIn, Server, Bell } from 'lucide-react';
+import { Search, List, MapPinned, LogIn, Bell } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
 import { Input } from '@/components/ui/input';
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select';
 import { SidebarTrigger } from '@/components/ui/sidebar';
 import { Button } from '@/components/ui/button';
 import { UserMenu } from '@/components/auth/user-menu';
 import { ThemeModeToggle } from '@/components/layout/theme-mode-toggle';
+import { LanguageSwitcher } from '@/components/layout/language-switcher';
 import { useAuth } from '@/contexts/auth-context';
-import { apiConfig } from '@/lib/api-config';
 import { usePendingActionsCount } from '@/hooks/use-actions';
 import type { ViewMode } from '@/engine/types';
 
@@ -23,10 +18,13 @@ interface TopBarProps {
   onSearchChange: (value: string) => void;
   viewMode: ViewMode;
   onViewModeChange: (mode: ViewMode) => void;
+  /** Optional Filters control rendered next to the search bar (home/browse only). */
+  filtersSlot?: React.ReactNode;
 }
 
 function NotificationBell() {
   const navigate = useNavigate();
+  const { t } = useTranslation();
   const { data: count = 0 } = usePendingActionsCount();
 
   return (
@@ -35,7 +33,7 @@ function NotificationBell() {
       size="icon"
       className="relative"
       onClick={() => navigate('/my-actions')}
-      aria-label={`${count} pending actions`}
+      aria-label={t('nav.pending_actions', { count })}
     >
       <Bell className="h-4 w-4" />
       {count > 0 && (
@@ -52,23 +50,27 @@ export function TopBar({
   onSearchChange,
   viewMode,
   onViewModeChange,
+  filtersSlot,
 }: TopBarProps) {
   const navigate = useNavigate();
+  const { t } = useTranslation();
   const { isAuthenticated, isLoading } = useAuth();
 
   return (
-    <header className="sticky top-0 z-40 flex h-14 items-center gap-4 border-b bg-gradient-to-r from-background to-primary/5 px-4 sm:px-6">
+    <header className="sticky top-0 z-40 flex h-14 items-center gap-3 border-b bg-gradient-to-r from-background to-primary/5 px-4 sm:px-6">
       <SidebarTrigger className="md:hidden" />
       <div className="relative flex-1 max-w-md">
         <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
         <Input
           type="search"
-          placeholder="Search..."
+          placeholder={t('common.search')}
           className="pl-8"
           value={search}
           onChange={(e) => onSearchChange(e.target.value)}
         />
       </div>
+      {/* Filters control sits immediately to the right of the search bar. */}
+      {filtersSlot}
       <div className="ml-auto flex items-center gap-2">
         <ToggleGroup
           type="single"
@@ -77,33 +79,15 @@ export function TopBar({
             if (value) onViewModeChange(value as ViewMode);
           }}
         >
-          <ToggleGroupItem value="map" aria-label="Map view">
-            <Map className="h-4 w-4" />
+          <ToggleGroupItem value="map" aria-label={t('nav.map_view')}>
+            <MapPinned className="h-4 w-4" />
           </ToggleGroupItem>
-          <ToggleGroupItem value="list" aria-label="List view">
+          <ToggleGroupItem value="list" aria-label={t('nav.list_view')}>
             <List className="h-4 w-4" />
           </ToggleGroupItem>
         </ToggleGroup>
 
-        {apiConfig.isDevMode() && (
-          <Select
-            value={apiConfig.getSelectedKey() ?? 'default'}
-            onValueChange={(value) => apiConfig.setSelectedKey(value)}
-          >
-            <SelectTrigger className="w-[180px]" aria-label="Select API instance">
-              <Server className="h-4 w-4 mr-2" />
-              <SelectValue placeholder="Select API" />
-            </SelectTrigger>
-            <SelectContent>
-              {apiConfig.getEndpoints().map((ep) => (
-                <SelectItem key={ep.key} value={ep.key}>
-                  {ep.label}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        )}
-
+        <LanguageSwitcher />
         <ThemeModeToggle />
 
         {!isLoading && (
@@ -120,7 +104,7 @@ export function TopBar({
               className="gap-2"
             >
               <LogIn className="h-4 w-4" />
-              <span className="hidden sm:inline">Login</span>
+              <span className="hidden sm:inline">{t('common.login')}</span>
             </Button>
           )
         )}

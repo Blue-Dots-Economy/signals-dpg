@@ -14,6 +14,7 @@ import {
   MapPin,
   Network,
 } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
 import { Button } from '@/components/ui/button';
 import type { Action } from '@/lib/action-api';
 import { ContactDetailsModal } from '@/components/actions/contact-details-modal';
@@ -22,27 +23,34 @@ interface ActionCardProps {
   action: Action;
   ownershipRole: 'initiated' | 'received';
   onStatusUpdate?: (action: Action, targetStatus: string) => void;
+  /** When true, hide the action footer (the card is a selection target). */
+  selectionMode?: boolean;
 }
 
-// Status pill: dot + label on a soft tint. Semantic colours (not brand) so
-// state reads consistently across networks.
-const statusStyles: Record<
-  string,
-  { label: string; cls: string; dot: string; icon: React.ReactNode }
-> = {
-  created: { label: 'Pending', cls: 'bg-amber-50 text-amber-700', dot: 'bg-amber-500', icon: <Clock className="h-3 w-3" /> },
-  pending: { label: 'Pending', cls: 'bg-amber-50 text-amber-700', dot: 'bg-amber-500', icon: <Clock className="h-3 w-3" /> },
-  new: { label: 'New', cls: 'bg-primary/10 text-primary', dot: 'bg-primary', icon: <Sparkles className="h-3 w-3" /> },
-  accepted: { label: 'Accepted', cls: 'bg-emerald-50 text-emerald-700', dot: 'bg-emerald-500', icon: <Check className="h-3 w-3" /> },
-  completed: { label: 'Completed', cls: 'bg-emerald-50 text-emerald-700', dot: 'bg-emerald-500', icon: <CheckCircle2 className="h-3 w-3" /> },
-  rejected: { label: 'Rejected', cls: 'bg-red-50 text-red-700', dot: 'bg-red-500', icon: <X className="h-3 w-3" /> },
-  cancelled: { label: 'Cancelled', cls: 'bg-slate-100 text-slate-600', dot: 'bg-slate-400', icon: <AlertCircle className="h-3 w-3" /> },
+type StatusStyleShape = {
+  labelKey: string | null;
+  cls: string;
+  dot: string;
+  icon: React.ReactNode;
 };
 
-function getStatusStyle(status: string) {
+// Status pill: dot + label on a soft tint. Semantic colours (not brand) so
+// state reads consistently across networks. Labels are i18n keys; the
+// component resolves them via t() so non-English locales render correctly.
+const statusStyles: Record<string, StatusStyleShape> = {
+  created: { labelKey: 'actions.status_pill_pending', cls: 'bg-amber-50 text-amber-700', dot: 'bg-amber-500', icon: <Clock className="h-3 w-3" /> },
+  pending: { labelKey: 'actions.status_pill_pending', cls: 'bg-amber-50 text-amber-700', dot: 'bg-amber-500', icon: <Clock className="h-3 w-3" /> },
+  new: { labelKey: 'actions.status_pill_new', cls: 'bg-primary/10 text-primary', dot: 'bg-primary', icon: <Sparkles className="h-3 w-3" /> },
+  accepted: { labelKey: 'actions.status_pill_accepted', cls: 'bg-emerald-50 text-emerald-700', dot: 'bg-emerald-500', icon: <Check className="h-3 w-3" /> },
+  completed: { labelKey: 'actions.status_pill_completed', cls: 'bg-emerald-50 text-emerald-700', dot: 'bg-emerald-500', icon: <CheckCircle2 className="h-3 w-3" /> },
+  rejected: { labelKey: 'actions.status_pill_rejected', cls: 'bg-red-50 text-red-700', dot: 'bg-red-500', icon: <X className="h-3 w-3" /> },
+  cancelled: { labelKey: 'actions.status_pill_cancelled', cls: 'bg-slate-100 text-slate-600', dot: 'bg-slate-400', icon: <AlertCircle className="h-3 w-3" /> },
+};
+
+function getStatusStyle(status: string): StatusStyleShape {
   return (
     statusStyles[status] ?? {
-      label: status,
+      labelKey: null,
       cls: 'bg-slate-100 text-slate-600',
       dot: 'bg-slate-400',
       icon: null,
@@ -85,7 +93,8 @@ const FALLBACK_CHIP = {
 const networkChipStyle = (networkId: string) =>
   NETWORK_CHIP_COLOURS[networkId] ?? FALLBACK_CHIP;
 
-export function ActionCard({ action, ownershipRole, onStatusUpdate }: ActionCardProps) {
+export function ActionCard({ action, ownershipRole, onStatusUpdate, selectionMode = false }: ActionCardProps) {
+  const { t } = useTranslation();
   const [showRequirements, setShowRequirements] = React.useState(true);
   const [showContactDetails, setShowContactDetails] = React.useState(false);
   const canRevealContact = action.action_status === 'accepted';
@@ -124,7 +133,7 @@ export function ActionCard({ action, ownershipRole, onStatusUpdate }: ActionCard
   // Both sides format as "<Subject> (<Role>)" so the brackets consistently
   // contain the role on each end — avoids the mismatch where "You (Seeker)"
   // had role-in-brackets while "Provider (Name)" had name-in-brackets.
-  const meLabel = `You (${myRole})`;
+  const meLabel = t('actions.you_label', { role: myRole });
   const otherLabel = `${rawName} (${otherRole})`;
   const fromLabel = ownershipRole === 'initiated' ? meLabel : otherLabel;
   const toLabel = ownershipRole === 'initiated' ? otherLabel : meLabel;
@@ -178,7 +187,7 @@ export function ActionCard({ action, ownershipRole, onStatusUpdate }: ActionCard
             </span>
             <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-semibold ${status.cls}`}>
               <span className={`h-1.5 w-1.5 rounded-full ${status.dot}`} />
-              {status.label}
+              {status.labelKey ? t(status.labelKey) : action.action_status}
             </span>
           </div>
           <span className="whitespace-nowrap text-xs font-medium text-muted-foreground">
@@ -209,7 +218,7 @@ export function ActionCard({ action, ownershipRole, onStatusUpdate }: ActionCard
               className="flex w-full items-center justify-between border-t py-2.5"
             >
               <span className="text-[11px] font-bold uppercase tracking-[0.12em] text-muted-foreground">
-                Requirements
+                {t('actions.requirements')}
               </span>
               <ChevronDown
                 className={`h-4 w-4 text-muted-foreground transition-transform ${showRequirements ? 'rotate-180' : ''}`}
@@ -225,7 +234,7 @@ export function ActionCard({ action, ownershipRole, onStatusUpdate }: ActionCard
                     </div>
                     <div className="min-w-0">
                       <p className="mb-0.5 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
-                        Message
+                        {t('actions.message_label')}
                       </p>
                       <p className="text-[13px] leading-relaxed text-foreground [overflow-wrap:anywhere]">
                         {message}
@@ -277,6 +286,7 @@ export function ActionCard({ action, ownershipRole, onStatusUpdate }: ActionCard
         )}
 
         {/* Actions */}
+        {!selectionMode && (
         <div className="flex flex-wrap items-center gap-2 border-t pt-3">
           {canRevealContact && (
             <Button
@@ -286,35 +296,36 @@ export function ActionCard({ action, ownershipRole, onStatusUpdate }: ActionCard
               onClick={() => setShowContactDetails(true)}
             >
               <Contact className="mr-1.5 h-3.5 w-3.5" />
-              View contact
+              {t('actions.btn_view_contact')}
             </Button>
           )}
 
           {canAccept && (
             <Button size="sm" className="flex-1 shadow-sm" onClick={() => onStatusUpdate?.(action, 'accepted')}>
               <Check className="mr-1.5 h-3.5 w-3.5" />
-              Accept
+              {t('actions.btn_accept')}
             </Button>
           )}
           {canReject && (
             <Button size="sm" variant="outline" className="flex-1" onClick={() => onStatusUpdate?.(action, 'rejected')}>
               <X className="mr-1.5 h-3.5 w-3.5" />
-              Reject
+              {t('actions.btn_reject')}
             </Button>
           )}
           {canComplete && (
             <Button size="sm" className="flex-1 shadow-sm" onClick={() => onStatusUpdate?.(action, 'completed')}>
               <CheckCircle2 className="mr-1.5 h-3.5 w-3.5" />
-              Complete
+              {t('actions.btn_complete')}
             </Button>
           )}
           {canCancel && (
             <Button size="sm" variant="outline" className="flex-1" onClick={() => onStatusUpdate?.(action, 'cancelled')}>
               <X className="mr-1.5 h-3.5 w-3.5 text-destructive" />
-              Cancel
+              {t('actions.btn_cancel')}
             </Button>
           )}
         </div>
+        )}
       </div>
 
       <ContactDetailsModal
