@@ -3,8 +3,10 @@ import { useNavigate } from 'react-router-dom';
 import { ArrowLeft } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { useInitiatedActions, useReceivedActions } from '@/hooks/use-actions';
+import { useCardSelection } from '@/hooks/use-card-selection';
 import { ActionList } from '@/components/actions/action-list';
 import { ActionStatusUpdater } from '@/components/actions/action-status-updater';
+import { BulkStatusDialog } from '@/components/actions/bulk-status-dialog';
 import { Button } from '@/components/ui/button';
 import type { Action } from '@/lib/action-api';
 
@@ -17,6 +19,9 @@ export function MyActionsPage() {
   const [selectedAction, setSelectedAction] = React.useState<Action | null>(null);
   const [isStatusModalOpen, setIsStatusModalOpen] = React.useState(false);
   const [suggestedStatus, setSuggestedStatus] = React.useState<string>('');
+  const selection = useCardSelection();
+  const [bulkOpen, setBulkOpen] = React.useState(false);
+  const [bulkStatus, setBulkStatus] = React.useState<string>('');
 
   // Fetch initiated actions with auto-polling (every 5s)
   const {
@@ -37,6 +42,11 @@ export function MyActionsPage() {
     refetch: refetchReceived,
     isRefetching: isReceivedRefetching,
   } = useReceivedActions();
+
+  const handleTabChange = (tab: TabValue) => {
+    selection.exitSelect();
+    setActiveTab(tab);
+  };
 
   const handleStatusUpdate = (action: Action, targetStatus: string) => {
     setSelectedAction(action);
@@ -59,6 +69,9 @@ export function MyActionsPage() {
 
   const initiatedActions = initiatedData?.actions ?? [];
   const receivedActions = receivedData?.actions ?? [];
+
+  const sourceActions = activeTab === 'initiated' ? initiatedActions : receivedActions;
+  const selectedActions = sourceActions.filter((a) => selection.selected.has(a.action_id));
 
   return (
     <div className="min-h-screen bg-background">
@@ -104,10 +117,15 @@ export function MyActionsPage() {
           isError={isError}
           error={error}
           activeTab={activeTab}
-          onTabChange={setActiveTab}
+          onTabChange={handleTabChange}
           onStatusUpdate={(action, targetStatus) => handleStatusUpdate(action, targetStatus)}
           onRefresh={handleRefresh}
           isRefetching={isRefetching}
+          selection={selection}
+          onBulkAction={(targetStatus) => {
+            setBulkStatus(targetStatus);
+            setBulkOpen(true);
+          }}
         />
       </main>
 
@@ -116,6 +134,16 @@ export function MyActionsPage() {
         open={isStatusModalOpen}
         onOpenChange={setIsStatusModalOpen}
         suggestedStatus={suggestedStatus}
+      />
+      <BulkStatusDialog
+        open={bulkOpen}
+        onOpenChange={setBulkOpen}
+        actions={selectedActions}
+        targetStatus={bulkStatus}
+        onSettled={(_succeeded, _total, failedIds) => {
+          if (failedIds.length === 0) selection.exitSelect();
+          else selection.setSelected(failedIds);
+        }}
       />
     </div>
   );
