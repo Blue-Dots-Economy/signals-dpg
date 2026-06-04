@@ -1019,9 +1019,10 @@ export function HomePage() {
                 filtersSlot={filtersPanel}
                 renderPopup={(marker) => {
                   const fullItem =
-                    Object.values(domainItems)
-                      .flat()
-                      .find((i) => i.item_id === marker.id) ?? null;
+                    (marker.domain
+                      ? domainItems[marker.domain]
+                      : Object.values(domainItems).flat()
+                    )?.find((i) => i.item_id === marker.id) ?? null;
                   const domainActions = marker.domain ? getActionsForDomain(marker.domain) : [];
                   const connectAction = domainActions[0];
                   return (
