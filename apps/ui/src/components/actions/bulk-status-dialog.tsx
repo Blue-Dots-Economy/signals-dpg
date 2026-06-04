@@ -72,7 +72,9 @@ export function BulkStatusDialog({
       ? 'actions.bulk_confirm_accept_title'
       : targetStatus === 'rejected'
         ? 'actions.bulk_confirm_reject_title'
-        : 'actions.bulk_confirm_cancel_title';
+        : targetStatus === 'completed'
+          ? 'actions.bulk_confirm_complete_title'
+          : 'actions.bulk_confirm_cancel_title';
 
   const handleConfirm = async () => {
     const ids = actions.map((a) => a.action_id);
@@ -131,7 +133,7 @@ export function BulkStatusDialog({
               checked={consentChecked}
               onCheckedChange={setConsentChecked}
             />
-          ) : targetStatus === 'rejected' || targetStatus === 'cancelled' ? (
+          ) : targetStatus === 'rejected' || targetStatus === 'cancelled' || targetStatus === 'completed' ? (
             <div className="space-y-2">
               <Label htmlFor="bulk-reason">{t('actions.bulk_reason_label')}</Label>
               <Textarea

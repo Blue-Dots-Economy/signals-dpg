@@ -37,6 +37,22 @@ const FILTER_STATUSES: Record<Filter, string[] | null> = {
   Rejected: ['rejected', 'cancelled'],
 };
 
+// Which bulk operation a (tab, filter) view supports — and therefore which
+// status is selectable. Each view is homogeneous: All/Pending act on pending
+// items, the Accepted filter (received only) completes accepted items.
+type BulkMode = 'accept_reject' | 'complete' | 'cancel';
+
+function bulkModeFor(tab: 'initiated' | 'received', filter: Filter): BulkMode | null {
+  if (tab === 'received') {
+    if (filter === 'All' || filter === 'Pending') return 'accept_reject';
+    if (filter === 'Accepted') return 'complete';
+    return null;
+  }
+  // initiated
+  if (filter === 'All' || filter === 'Pending') return 'cancel';
+  return null;
+}
+
 export function ActionList({
   initiatedActions,
   receivedActions,
@@ -63,19 +79,22 @@ export function ActionList({
 
   const actions = activeTab === 'initiated' ? initiatedActions : receivedActions;
 
-  const hasPending = actions.some(
-    (a) => a.action_status === 'created' || a.action_status === 'pending',
-  );
-
-  // Selection only makes sense where pending items are shown: the All and
-  // Pending filters. Accepted / Rejected views have nothing actionable.
-  const selectAllowed = filter === 'All' || filter === 'Pending';
+  // What bulk operation (if any) this tab + filter supports, and which cards
+  // are selectable for it. Selection is offered only where there's a bulk op.
+  const bulkMode = bulkModeFor(activeTab, filter);
+  const selectAllowed = bulkMode !== null;
+  const isSelectable = (a: Action) =>
+    bulkMode === 'complete'
+      ? a.action_status === 'accepted'
+      : a.action_status === 'created' || a.action_status === 'pending';
 
   const visible = React.useMemo(() => {
     const allowed = FILTER_STATUSES[filter];
     if (!allowed) return actions;
     return actions.filter((a) => allowed.includes(a.action_status));
   }, [actions, filter]);
+
+  const hasSelectable = selectAllowed && visible.some(isSelectable);
 
   const tabs = [
     { id: 'initiated' as const, label: t('actions.tab_initiated'), Icon: Send, count: initiatedActions.length },
@@ -94,9 +113,9 @@ export function ActionList({
               type="button"
               onClick={() => {
                 setFilter(f);
-                // Leaving the All/Pending filters can't keep a meaningful
-                // selection, so drop out of select mode.
-                if (f !== 'All' && f !== 'Pending') selection.exitSelect();
+                // Switching to a filter with no bulk operation can't keep a
+                // meaningful selection, so drop out of select mode.
+                if (bulkModeFor(activeTab, f) === null) selection.exitSelect();
               }}
               className={`rounded-lg px-3 py-1.5 text-xs font-medium transition ${
                 filter === f
@@ -109,7 +128,7 @@ export function ActionList({
           ))}
         </div>
 
-        {selectAllowed && (hasPending || selection.selectMode) && (
+        {selectAllowed && (hasSelectable || selection.selectMode) && (
           <Button
             variant={selection.selectMode ? 'default' : 'outline'}
             size="sm"
@@ -195,15 +214,13 @@ export function ActionList({
       ) : (
         <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
           {visible.map((action) => {
-            const isPending =
-              action.action_status === 'created' || action.action_status === 'pending';
             return (
               <SelectableCard
                 key={action.action_id}
                 id={action.action_id}
                 selectMode={selection.selectMode}
                 selected={selection.isSelected(action.action_id)}
-                selectable={isPending}
+                selectable={isSelectable(action)}
                 onToggle={(id) => selection.toggle(id, activeTab)}
               >
                 <ActionCard
@@ -219,7 +236,7 @@ export function ActionList({
       )}
       {selection.selectMode && selection.selected.size > 0 && (
         <BulkActionBar count={selection.selected.size} onClear={selection.clear}>
-          {activeTab === 'received' ? (
+          {bulkMode === 'accept_reject' ? (
             <>
               <button
                 type="button"
@@ -236,6 +253,14 @@ export function ActionList({
                 {t('actions.bulk_accept')}
               </button>
             </>
+          ) : bulkMode === 'complete' ? (
+            <button
+              type="button"
+              onClick={() => onBulkAction('completed')}
+              className="rounded-lg bg-emerald-600 px-4 py-1.5 text-xs font-bold text-white"
+            >
+              {t('actions.bulk_complete')}
+            </button>
           ) : (
             <button
               type="button"
