@@ -4,7 +4,6 @@ import { CalendarIcon } from 'lucide-react';
 import type { WidgetProps } from '@rjsf/utils';
 import { Button } from '@/components/ui/button';
 import { Calendar } from '@/components/ui/calendar';
-import { Label } from '@/components/ui/label';
 import {
   Popover,
   PopoverContent,
@@ -15,24 +14,19 @@ import { cn } from '@/lib/utils';
 export function DatePickerWidget({
   id,
   value,
-  required,
   disabled,
   readonly,
-  label,
   onChange,
   rawErrors,
 }: WidgetProps) {
   const [open, setOpen] = React.useState(false);
   const dateValue = value ? new Date(value as string) : undefined;
 
+  // The RJSF field template already renders the field label (and required
+  // asterisk); rendering our own <Label> here double-labelled every date
+  // field. Rely on the field template's label, like the other widgets.
   return (
     <div className="space-y-2">
-      {label && (
-        <Label htmlFor={id}>
-          {label}
-          {required && <span className="text-destructive ml-1">*</span>}
-        </Label>
-      )}
       <Popover open={open} onOpenChange={setOpen}>
         <PopoverTrigger asChild>
           <Button

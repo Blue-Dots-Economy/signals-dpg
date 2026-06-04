@@ -8,6 +8,7 @@ import {
 } from '@vis.gl/react-google-maps';
 import type { MapMarker, MapProviderProps } from '@/engine/types';
 import { registerMapProvider } from '@/engine/map/map-registry';
+import { getRuntimeEnv } from '@/lib/runtime-env';
 
 const precisionColors: Record<MapMarker['precision'], { background: string; border: string; glyph: string }> = {
   exact: { background: '#2563eb', border: '#1d4ed8', glyph: '#ffffff' },
@@ -68,7 +69,7 @@ export function GoogleMapProvider({
   onMarkerClick,
 }: MapProviderProps) {
   const [activeMarkerId, setActiveMarkerId] = React.useState<string | null>(null);
-  const apiKey = import.meta.env.VITE_GOOGLE_MAPS_API_KEY;
+  const apiKey = getRuntimeEnv('VITE_GOOGLE_MAPS_API_KEY');
 
   if (!apiKey) {
     return (
