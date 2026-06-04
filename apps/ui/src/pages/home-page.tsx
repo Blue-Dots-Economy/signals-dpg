@@ -20,6 +20,7 @@ import { Button } from '@/components/ui/button';
 import { ActionHandler } from '@/components/actions/action-handler';
 import { MapView } from '@/components/map/map-container';
 import { MapFiltersPanel } from '@/components/map/map-filters-panel';
+import { MarkerPopupCard } from '@/components/map/marker-popup-card';
 import { MatchScoreCard } from '@/components/match-score';
 import '@/components/map/providers';
 import { fetchItems, performAction, performActionsBulk, type Item } from '@/lib/item-api';
@@ -798,9 +799,7 @@ export function HomePage() {
           }
         />
       )}
-      {viewMode === 'list' ? (
-        <>
-        <ActionHandler
+      <ActionHandler
           onActionSubmit={async (actionType, _actionSchema, formData, targetItemId) => {
             if (!myItem) {
               toast.error(t('home.toast_profile_required'), {
@@ -874,7 +873,9 @@ export function HomePage() {
           }}
         >
           {(triggerAction) =>
-            selectedDomain === null ? (
+            viewMode === 'list' ? (
+              <>
+                {selectedDomain === null ? (
               // All tab: flat grid across all domains, each card uses its own schema
               (() => {
                 const allFlatItems = visibleDomains.flatMap((domain) => {
@@ -974,52 +975,73 @@ export function HomePage() {
                 selectedDomain={selectedDomain}
                 selection={browseSelection}
               />
+                )}
+                {browseSelection.selectMode && (() => {
+                  const lockDomain = browseSelection.lockKey ?? selectedDomain ?? '';
+                  const connectAction = lockDomain ? getActionsForDomain(lockDomain)[0] : undefined;
+                  return (
+                    <>
+                      <BulkActionBar
+                        count={browseSelection.selected.size}
+                        onClear={browseSelection.clear}
+                      >
+                        <button
+                          type="button"
+                          disabled={!connectAction || bulkConnectBusy}
+                          onClick={() => setBulkConnectOpen(true)}
+                          className="rounded-lg bg-primary px-4 py-1.5 text-xs font-bold text-primary-foreground disabled:opacity-50"
+                        >
+                          {t('home.bulk_connect_all', { count: browseSelection.selected.size })}
+                        </button>
+                      </BulkActionBar>
+                      {connectAction && (
+                        <ActionModal
+                          open={bulkConnectOpen}
+                          onOpenChange={(open) => !open && setBulkConnectOpen(false)}
+                          actionSchema={connectAction}
+                          loading={bulkConnectBusy}
+                          onSubmit={(fd) => handleBulkConnect(connectAction.action_type, fd)}
+                        />
+                      )}
+                    </>
+                  );
+                })()}
+              </>
+            ) : (
+              <MapView
+                schema={activeSchema!}
+                items={Object.values(filteredDomainItems).flat()}
+                focusPoint={
+                  myItem && myItem.item_latitude != null && myItem.item_longitude != null
+                    ? { lat: myItem.item_latitude, lng: myItem.item_longitude }
+                    : null
+                }
+                filtersSlot={filtersPanel}
+                renderPopup={(marker) => {
+                  const fullItem =
+                    Object.values(domainItems)
+                      .flat()
+                      .find((i) => i.item_id === marker.id) ?? null;
+                  const domainActions = marker.domain ? getActionsForDomain(marker.domain) : [];
+                  const connectAction = domainActions[0];
+                  return (
+                    <MarkerPopupCard
+                      marker={marker}
+                      actions={myItem && connectAction ? [connectAction] : []}
+                      onConnect={
+                        myItem && connectAction
+                          ? () => triggerAction(connectAction.action_type, connectAction, marker.id)
+                          : undefined
+                      }
+                      localItem={myItem}
+                      networkItem={fullItem}
+                    />
+                  );
+                }}
+              />
             )
           }
         </ActionHandler>
-        {browseSelection.selectMode && (() => {
-          const lockDomain = browseSelection.lockKey ?? selectedDomain ?? '';
-          const connectAction = lockDomain ? getActionsForDomain(lockDomain)[0] : undefined;
-          return (
-            <>
-              <BulkActionBar
-                count={browseSelection.selected.size}
-                onClear={browseSelection.clear}
-              >
-                <button
-                  type="button"
-                  disabled={!connectAction || bulkConnectBusy}
-                  onClick={() => setBulkConnectOpen(true)}
-                  className="rounded-lg bg-primary px-4 py-1.5 text-xs font-bold text-primary-foreground disabled:opacity-50"
-                >
-                  {t('home.bulk_connect_all', { count: browseSelection.selected.size })}
-                </button>
-              </BulkActionBar>
-              {connectAction && (
-                <ActionModal
-                  open={bulkConnectOpen}
-                  onOpenChange={(open) => !open && setBulkConnectOpen(false)}
-                  actionSchema={connectAction}
-                  loading={bulkConnectBusy}
-                  onSubmit={(fd) => handleBulkConnect(connectAction.action_type, fd)}
-                />
-              )}
-            </>
-          );
-        })()}
-        </>
-      ) : (
-        <MapView
-          schema={activeSchema!}
-          items={Object.values(filteredDomainItems).flat()}
-          focusPoint={
-            myItem && myItem.item_latitude != null && myItem.item_longitude != null
-              ? { lat: myItem.item_latitude, lng: myItem.item_longitude }
-              : null
-          }
-          filtersSlot={filtersPanel}
-        />
-      )}
     </PageShell>
   );
 }
