@@ -67,6 +67,10 @@ export function ActionList({
     (a) => a.action_status === 'created' || a.action_status === 'pending',
   );
 
+  // Selection only makes sense where pending items are shown: the All and
+  // Pending filters. Accepted / Rejected views have nothing actionable.
+  const selectAllowed = filter === 'All' || filter === 'Pending';
+
   const visible = React.useMemo(() => {
     const allowed = FILTER_STATUSES[filter];
     if (!allowed) return actions;
@@ -88,7 +92,12 @@ export function ActionList({
             <button
               key={f}
               type="button"
-              onClick={() => setFilter(f)}
+              onClick={() => {
+                setFilter(f);
+                // Leaving the All/Pending filters can't keep a meaningful
+                // selection, so drop out of select mode.
+                if (f !== 'All' && f !== 'Pending') selection.exitSelect();
+              }}
               className={`rounded-lg px-3 py-1.5 text-xs font-medium transition ${
                 filter === f
                   ? 'bg-primary/10 text-primary'
@@ -100,7 +109,7 @@ export function ActionList({
           ))}
         </div>
 
-        {(hasPending || selection.selectMode) && (
+        {selectAllowed && (hasPending || selection.selectMode) && (
           <Button
             variant={selection.selectMode ? 'default' : 'outline'}
             size="sm"
