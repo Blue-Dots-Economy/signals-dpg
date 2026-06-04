@@ -1,6 +1,6 @@
 import axios from 'axios';
 import { createApiClient } from './api-client';
-import { unwrapBulkSingle, type BulkEnvelope } from './bulk';
+import { unwrapBulkSingle, postBulkEnvelope, type BulkEnvelope } from './bulk';
 import { getAuthToken } from './auth-token';
 
 // ─── Contact-details types ────────────────────────────────────────
@@ -284,6 +284,37 @@ export async function updateActionStatus(
 ): Promise<UpdateActionStatusResponse> {
   return unwrapBulkSingle(
     apiClient.post<BulkEnvelope<UpdateActionStatusResponse>>('/api/v1/action/update-status', [payload]),
+  );
+}
+
+/**
+ * Perform multiple actions in one bulk call. All payloads share the same source
+ * instance (the source item's instance), so a single array POST is correct; the
+ * backend loops per-item over the peer endpoint. Returns the full envelope so
+ * callers can surface partial-success (207).
+ */
+export async function performActionsBulk(
+  payloads: PerformActionPayload[],
+  sourceInstanceUrl?: string,
+): Promise<BulkEnvelope<PerformActionResponse>> {
+  const client = sourceInstanceUrl
+    ? createInstanceApiClient(sourceInstanceUrl)
+    : apiClient;
+  return postBulkEnvelope<PerformActionResponse>(
+    client.post<BulkEnvelope<PerformActionResponse>>('/api/v1/action/perform', payloads),
+  );
+}
+
+/**
+ * Update multiple action statuses in one bulk call. All target actions are
+ * self-owned and live on the caller's instance, so a single array POST is
+ * correct. Returns the full envelope.
+ */
+export async function updateActionStatusBulk(
+  payloads: UpdateActionStatusPayload[],
+): Promise<BulkEnvelope<UpdateActionStatusResponse>> {
+  return postBulkEnvelope<UpdateActionStatusResponse>(
+    apiClient.post<BulkEnvelope<UpdateActionStatusResponse>>('/api/v1/action/update-status', payloads),
   );
 }
 

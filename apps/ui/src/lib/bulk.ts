@@ -80,3 +80,39 @@ export async function unwrapBulkSingle<T extends object>(
     throw err;
   }
 }
+
+/**
+ * Await a bulk POST that wraps an array of payloads, returning the full
+ * envelope. On 200/201/207 axios resolves → return data. On 422 (all items
+ * failed) axios rejects with the envelope in response.data → return that.
+ * Genuine request-level errors (401, network failure, 400 {error,message}
+ * without `results`) are rethrown unchanged.
+ */
+export async function postBulkEnvelope<T extends object>(
+  request: Promise<{ data: BulkEnvelope<NoStatusField<T>> }>,
+): Promise<BulkEnvelope<T>> {
+  try {
+    const res = await request;
+    return res.data as BulkEnvelope<T>;
+  } catch (err) {
+    if (
+      isAxiosError(err) &&
+      err.response?.data &&
+      Array.isArray((err.response.data as Partial<BulkEnvelope<NoStatusField<T>>>).results)
+    ) {
+      return err.response.data as BulkEnvelope<T>;
+    }
+    throw err;
+  }
+}
+
+/** The request indices (echoed by the server as `index`) of items that failed. */
+export function bulkFailureIndices<T>(env: BulkEnvelope<T>): number[] {
+  return env.results.filter((r) => r.status === 'error').map((r) => r.index);
+}
+
+/** The first per-item error message in the envelope, if any. */
+export function firstBulkError<T>(env: BulkEnvelope<T>): string | null {
+  const f = env.results.find((r) => r.status === 'error');
+  return f && f.status === 'error' ? f.message : null;
+}

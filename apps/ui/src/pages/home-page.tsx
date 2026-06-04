@@ -20,9 +20,16 @@ import { Button } from '@/components/ui/button';
 import { ActionHandler } from '@/components/actions/action-handler';
 import { MapView } from '@/components/map/map-container';
 import { MapFiltersPanel } from '@/components/map/map-filters-panel';
+import { MarkerPopupCard } from '@/components/map/marker-popup-card';
 import { MatchScoreCard } from '@/components/match-score';
 import '@/components/map/providers';
-import { fetchItems, performAction, type Item } from '@/lib/item-api';
+import { fetchItems, performAction, performActionsBulk, type Item } from '@/lib/item-api';
+import { bulkFailureIndices, firstBulkError } from '@/lib/bulk';
+import { useCardSelection } from '@/hooks/use-card-selection';
+import { SelectableCard } from '@/components/selection/selectable-card';
+import { BulkActionBar } from '@/components/selection/bulk-action-bar';
+import { ActionModal } from '@/components/actions/action-modal';
+import { CheckSquare } from 'lucide-react';
 import { getRuntimeEnv } from '@/lib/runtime-env';
 import { ACTION_CONSENT_SENTINEL } from '@/lib/action-api';
 import { EmptyState } from '@/components/empty-state';
@@ -187,6 +194,9 @@ export function HomePage() {
   const [myItems, setMyItems] = React.useState<Item[]>([]);
   const [activeProfileId, setActiveProfileId] = React.useState<string | null>(null);
   const [loading, setLoading] = React.useState(false);
+  const browseSelection = useCardSelection();
+  const [bulkConnectOpen, setBulkConnectOpen] = React.useState(false);
+  const [bulkConnectBusy, setBulkConnectBusy] = React.useState(false);
 
   React.useEffect(() => {
     if (!selectedNetworkId) {
@@ -428,6 +438,103 @@ export function HomePage() {
       return actions;
     },
     [network, currentDomain, myItem]
+  );
+
+  const handleBulkConnect = React.useCallback(
+    async (actionType: string, formData: Record<string, unknown>) => {
+      if (!myItem || !network) return;
+      setBulkConnectBusy(true);
+      try {
+        const allItems = Object.values(domainItems).flat();
+        const ids = Array.from(browseSelection.selected);
+        const targets = ids
+          .map((id) => allItems.find((i) => i.item_id === id))
+          .filter((t): t is Item => !!t);
+
+        // Guard: nothing valid to send (e.g. selection went stale after a reload)
+        if (targets.length === 0) {
+          setBulkConnectOpen(false);
+          browseSelection.exitSelect();
+          return;
+        }
+
+        const { [ACTION_CONSENT_SENTINEL]: consentRaw, ...requirementsSnapshot } = formData;
+        const consent =
+          consentRaw &&
+          typeof consentRaw === 'object' &&
+          (consentRaw as { acknowledged?: unknown }).acknowledged === true &&
+          typeof (consentRaw as { text?: unknown }).text === 'string'
+            ? { acknowledged: true as const, text: (consentRaw as { text: string }).text }
+            : undefined;
+
+        const sourceItemInstanceUrl = myItem.item_instance_url?.includes('localhost')
+          ? apiConfig.getUrl()
+          : resolveTargetInstanceUrl(myItem, network, apiConfig.getUrl(), 'source');
+
+        const payloads = targets.map((targetItem) => {
+            const targetItemInstanceUrl = targetItem.item_instance_url?.includes('localhost')
+              ? apiConfig.getUrl()
+              : resolveTargetInstanceUrl(targetItem, network, apiConfig.getUrl(), 'target');
+            return {
+              action_type: actionType,
+              source_item: {
+                item_network: myItem.item_network,
+                item_domain: myItem.item_domain,
+                item_type: myItem.item_type,
+                item_id: myItem.item_id,
+              },
+              target_item: {
+                item_network: targetItem.item_network,
+                item_domain: targetItem.item_domain,
+                item_type: targetItem.item_type,
+                item_id: targetItem.item_id,
+                item_instance_url: targetItemInstanceUrl,
+              },
+              requirements_snapshot: requirementsSnapshot,
+              ...(consent ? { consent } : {}),
+            };
+          });
+
+        const env = await performActionsBulk(payloads, sourceItemInstanceUrl);
+        setBulkConnectOpen(false);
+
+        if (env.summary.failed === 0) {
+          toast.success(t('home.bulk_connected_all', { count: env.summary.succeeded }));
+          browseSelection.exitSelect();
+        } else {
+          const failedIdxs = bulkFailureIndices(env);
+          const failedIds = failedIdxs.map((i) => targets[i].item_id);
+          const firstErr = firstBulkError(env);
+          toast.warning(
+            t('home.bulk_connected_partial', {
+              succeeded: env.summary.succeeded,
+              total: env.summary.total,
+            }),
+            {
+              description: firstErr
+                ? t('home.bulk_connect_first_error', { message: firstErr })
+                : undefined,
+            },
+          );
+          browseSelection.setSelected(failedIds);
+        }
+      } catch (err) {
+        toast.error(t('home.bulk_connect_failed'), {
+          description: err instanceof Error ? err.message : undefined,
+        });
+      } finally {
+        setBulkConnectBusy(false);
+      }
+    },
+    [
+      myItem,
+      network,
+      domainItems,
+      browseSelection.selected,
+      browseSelection.exitSelect,
+      browseSelection.setSelected,
+      t,
+    ],
   );
 
   // Legacy: single active action for the selected domain (for CardGrid)
@@ -673,10 +780,26 @@ export function HomePage() {
           description={contentDescription}
           count={loading ? undefined : contentCount}
           noProfilePrompt={{ show: !myItem, networkId: selectedNetworkId ?? '' }}
+          actions={
+            myItem && viewMode === 'list' ? (
+              <Button
+                type="button"
+                variant={browseSelection.selectMode ? 'default' : 'outline'}
+                size="sm"
+                onClick={() =>
+                  browseSelection.selectMode
+                    ? browseSelection.exitSelect()
+                    : browseSelection.enterSelect()
+                }
+              >
+                <CheckSquare className="mr-1.5 h-4 w-4" />
+                {browseSelection.selectMode ? t('selection.done') : t('selection.select')}
+              </Button>
+            ) : undefined
+          }
         />
       )}
-      {viewMode === 'list' ? (
-        <ActionHandler
+      <ActionHandler
           onActionSubmit={async (actionType, _actionSchema, formData, targetItemId) => {
             if (!myItem) {
               toast.error(t('home.toast_profile_required'), {
@@ -750,7 +873,9 @@ export function HomePage() {
           }}
         >
           {(triggerAction) =>
-            selectedDomain === null ? (
+            viewMode === 'list' ? (
+              <>
+                {selectedDomain === null ? (
               // All tab: flat grid across all domains, each card uses its own schema
               (() => {
                 const allFlatItems = visibleDomains.flatMap((domain) => {
@@ -792,31 +917,40 @@ export function HomePage() {
                         .find((i) => i.item_id === item.id);
 
                       return (
-                        <MatchScoreCard
+                        <SelectableCard
                           key={item.id}
-                          schema={schema!}
-                          schemaDescription={domainDescription}
-                          domainLabel={domainLabel}
-                          data={item.data}
-                          actions={domainActions}
-                          onAction={(type, actionSchema) =>
-                            triggerAction(type, actionSchema, item.id)
-                          }
-                          localItem={myItem}
-                          networkItem={fullItem || {
-                            item_id: item.id,
-                            item_network: network?.id || '',
-                            item_domain: selectedDomain || '',
-                            item_type: 'profile',
-                            item_instance_url: null,
-                            item_schema_url: null,
-                            item_state: item.data,
-                            item_latitude: null,
-                            item_longitude: null,
-                            created_at: new Date().toISOString(),
-                            updated_at: new Date().toISOString(),
-                          }}
-                        />
+                          id={item.id}
+                          selectMode={browseSelection.selectMode}
+                          selected={browseSelection.isSelected(item.id)}
+                          selectable={browseSelection.canSelect(item.domain ?? '')}
+                          onToggle={(id) => browseSelection.toggle(id, item.domain ?? '')}
+                        >
+                          <MatchScoreCard
+                            schema={schema!}
+                            schemaDescription={domainDescription}
+                            domainLabel={domainLabel}
+                            data={item.data}
+                            actions={domainActions}
+                            selectionMode={browseSelection.selectMode}
+                            onAction={(type, actionSchema) =>
+                              triggerAction(type, actionSchema, item.id)
+                            }
+                            localItem={myItem}
+                            networkItem={fullItem || {
+                              item_id: item.id,
+                              item_network: network?.id || '',
+                              item_domain: selectedDomain || '',
+                              item_type: 'profile',
+                              item_instance_url: null,
+                              item_schema_url: null,
+                              item_state: item.data,
+                              item_latitude: null,
+                              item_longitude: null,
+                              created_at: new Date().toISOString(),
+                              updated_at: new Date().toISOString(),
+                            }}
+                          />
+                        </SelectableCard>
                       );
                     })}
                   </div>
@@ -839,22 +973,76 @@ export function HomePage() {
                 localItem={myItem}
                 networkId={network?.id}
                 selectedDomain={selectedDomain}
+                selection={browseSelection}
+              />
+                )}
+                {browseSelection.selectMode && (() => {
+                  const lockDomain = browseSelection.lockKey ?? selectedDomain ?? '';
+                  const connectAction = lockDomain ? getActionsForDomain(lockDomain)[0] : undefined;
+                  return (
+                    <>
+                      <BulkActionBar
+                        count={browseSelection.selected.size}
+                        onClear={browseSelection.clear}
+                      >
+                        <button
+                          type="button"
+                          disabled={!connectAction || bulkConnectBusy}
+                          onClick={() => setBulkConnectOpen(true)}
+                          className="rounded-lg bg-primary px-4 py-1.5 text-xs font-bold text-primary-foreground disabled:opacity-50"
+                        >
+                          {t('home.bulk_connect_all', { count: browseSelection.selected.size })}
+                        </button>
+                      </BulkActionBar>
+                      {connectAction && (
+                        <ActionModal
+                          open={bulkConnectOpen}
+                          onOpenChange={(open) => !open && setBulkConnectOpen(false)}
+                          actionSchema={connectAction}
+                          loading={bulkConnectBusy}
+                          onSubmit={(fd) => handleBulkConnect(connectAction.action_type, fd)}
+                        />
+                      )}
+                    </>
+                  );
+                })()}
+              </>
+            ) : (
+              <MapView
+                schema={activeSchema!}
+                items={Object.values(filteredDomainItems).flat()}
+                focusPoint={
+                  myItem && myItem.item_latitude != null && myItem.item_longitude != null
+                    ? { lat: myItem.item_latitude, lng: myItem.item_longitude }
+                    : null
+                }
+                filtersSlot={filtersPanel}
+                renderPopup={(marker) => {
+                  const fullItem =
+                    (marker.domain
+                      ? domainItems[marker.domain]
+                      : Object.values(domainItems).flat()
+                    )?.find((i) => i.item_id === marker.id) ?? null;
+                  const domainActions = marker.domain ? getActionsForDomain(marker.domain) : [];
+                  const connectAction = domainActions[0];
+                  return (
+                    <MarkerPopupCard
+                      marker={marker}
+                      actions={myItem && connectAction ? [connectAction] : []}
+                      onConnect={
+                        myItem && connectAction
+                          ? () => triggerAction(connectAction.action_type, connectAction, marker.id)
+                          : undefined
+                      }
+                      localItem={myItem}
+                      networkItem={fullItem}
+                    />
+                  );
+                }}
               />
             )
           }
         </ActionHandler>
-      ) : (
-        <MapView
-          schema={activeSchema!}
-          items={Object.values(filteredDomainItems).flat()}
-          focusPoint={
-            myItem && myItem.item_latitude != null && myItem.item_longitude != null
-              ? { lat: myItem.item_latitude, lng: myItem.item_longitude }
-              : null
-          }
-          filtersSlot={filtersPanel}
-        />
-      )}
     </PageShell>
   );
 }

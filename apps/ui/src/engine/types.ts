@@ -147,6 +147,8 @@ export interface MapProviderProps {
   /** When true, the provider should NOT auto-fit bounds on first render */
   initialViewSet?: boolean;
   children?: React.ReactNode;
+  /** Optional custom popup renderer; falls back to the default MarkerPopupCard. */
+  renderPopup?: (marker: MapMarker) => React.ReactNode;
 }
 
 export interface MapProvider {

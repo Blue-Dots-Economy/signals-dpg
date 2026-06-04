@@ -2,8 +2,11 @@ import * as React from 'react';
 import { useTranslation } from 'react-i18next';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
-import { RefreshCw, Inbox, Send, AlertCircle } from 'lucide-react';
+import { RefreshCw, Inbox, Send, AlertCircle, CheckSquare } from 'lucide-react';
 import { ActionCard } from './action-card';
+import { SelectableCard } from '@/components/selection/selectable-card';
+import { BulkActionBar } from '@/components/selection/bulk-action-bar';
+import type { CardSelection } from '@/hooks/use-card-selection';
 import type { Action } from '@/lib/action-api';
 
 interface ActionListProps {
@@ -17,6 +20,10 @@ interface ActionListProps {
   onStatusUpdate: (action: Action, targetStatus: string) => void;
   onRefresh: () => void;
   isRefetching: boolean;
+  /** Selection state owned by the page (drives bulk accept/reject/cancel). */
+  selection: CardSelection;
+  /** Open the bulk confirm dialog for the given target status. */
+  onBulkAction: (targetStatus: string) => void;
 }
 
 const FILTERS = ['All', 'Pending', 'Accepted', 'Rejected'] as const;
@@ -30,6 +37,19 @@ const FILTER_STATUSES: Record<Filter, string[] | null> = {
   Rejected: ['rejected', 'cancelled'],
 };
 
+// The actionable "class" of a card for the current tab — used as the selection
+// lock group. null = not actionable (can't be selected). The first card picked
+// locks the class, so a batch is always homogeneous: on the Received tab you
+// bulk accept/reject a set of PENDING items OR bulk complete a set of ACCEPTED
+// items (never mixed); on the Initiated tab you bulk cancel PENDING items.
+type ActionClass = 'pending' | 'accepted';
+
+function actionClassFor(tab: 'initiated' | 'received', status: string): ActionClass | null {
+  if (status === 'created' || status === 'pending') return 'pending';
+  if (tab === 'received' && status === 'accepted') return 'accepted';
+  return null;
+}
+
 export function ActionList({
   initiatedActions,
   receivedActions,
@@ -41,6 +61,8 @@ export function ActionList({
   onStatusUpdate,
   onRefresh,
   isRefetching,
+  selection,
+  onBulkAction,
 }: ActionListProps) {
   const { t } = useTranslation();
   const [filter, setFilter] = React.useState<Filter>('All');
@@ -60,6 +82,11 @@ export function ActionList({
     return actions.filter((a) => allowed.includes(a.action_status));
   }, [actions, filter]);
 
+  // A card is selectable when it has an actionable class for this tab. The
+  // lock group is that class, so the first pick fixes pending-vs-accepted.
+  const isSelectable = (a: Action) => actionClassFor(activeTab, a.action_status) !== null;
+  const hasSelectable = visible.some(isSelectable);
+
   const tabs = [
     { id: 'initiated' as const, label: t('actions.tab_initiated'), Icon: Send, count: initiatedActions.length },
     { id: 'received' as const, label: t('actions.tab_received'), Icon: Inbox, count: receivedActions.length },
@@ -75,7 +102,12 @@ export function ActionList({
             <button
               key={f}
               type="button"
-              onClick={() => setFilter(f)}
+              onClick={() => {
+                setFilter(f);
+                // Changing the filter can hide selected cards; drop out of
+                // select mode so the selection never goes invisible/stale.
+                selection.exitSelect();
+              }}
               className={`rounded-lg px-3 py-1.5 text-xs font-medium transition ${
                 filter === f
                   ? 'bg-primary/10 text-primary'
@@ -86,6 +118,17 @@ export function ActionList({
             </button>
           ))}
         </div>
+
+        {(hasSelectable || selection.selectMode) && (
+          <Button
+            variant={selection.selectMode ? 'default' : 'outline'}
+            size="sm"
+            onClick={() => (selection.selectMode ? selection.exitSelect() : selection.enterSelect())}
+          >
+            <CheckSquare className="mr-2 h-4 w-4" />
+            {selection.selectMode ? t('selection.done') : t('selection.select')}
+          </Button>
+        )}
 
         <Button
           variant="outline"
@@ -161,15 +204,68 @@ export function ActionList({
         </div>
       ) : (
         <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
-          {visible.map((action) => (
-            <ActionCard
-              key={action.action_id}
-              action={action}
-              ownershipRole={activeTab}
-              onStatusUpdate={onStatusUpdate}
-            />
-          ))}
+          {visible.map((action) => {
+            const cls = actionClassFor(activeTab, action.action_status);
+            return (
+              <SelectableCard
+                key={action.action_id}
+                id={action.action_id}
+                selectMode={selection.selectMode}
+                selected={selection.isSelected(action.action_id)}
+                selectable={cls !== null && selection.canSelect(cls)}
+                onToggle={(id) => selection.toggle(id, cls ?? '')}
+              >
+                <ActionCard
+                  action={action}
+                  ownershipRole={activeTab}
+                  onStatusUpdate={onStatusUpdate}
+                  selectionMode={selection.selectMode}
+                />
+              </SelectableCard>
+            );
+          })}
         </div>
+      )}
+      {selection.selectMode && selection.selected.size > 0 && (
+        <BulkActionBar count={selection.selected.size} onClear={selection.clear}>
+          {selection.lockKey === 'accepted' ? (
+            // Received + accepted selection → bulk complete.
+            <button
+              type="button"
+              onClick={() => onBulkAction('completed')}
+              className="rounded-lg bg-emerald-600 px-4 py-1.5 text-xs font-bold text-white"
+            >
+              {t('actions.bulk_complete')}
+            </button>
+          ) : activeTab === 'received' ? (
+            // Received + pending selection → bulk accept / reject.
+            <>
+              <button
+                type="button"
+                onClick={() => onBulkAction('rejected')}
+                className="rounded-lg bg-background px-4 py-1.5 text-xs font-bold text-red-600"
+              >
+                {t('actions.bulk_reject')}
+              </button>
+              <button
+                type="button"
+                onClick={() => onBulkAction('accepted')}
+                className="rounded-lg bg-emerald-600 px-4 py-1.5 text-xs font-bold text-white"
+              >
+                {t('actions.bulk_accept')}
+              </button>
+            </>
+          ) : (
+            // Initiated + pending selection → bulk cancel.
+            <button
+              type="button"
+              onClick={() => onBulkAction('cancelled')}
+              className="rounded-lg bg-background px-4 py-1.5 text-xs font-bold text-red-600"
+            >
+              {t('actions.bulk_cancel')}
+            </button>
+          )}
+        </BulkActionBar>
       )}
     </div>
   );

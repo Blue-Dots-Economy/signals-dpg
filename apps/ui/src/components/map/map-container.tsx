@@ -34,6 +34,8 @@ interface MapViewProps {
    * covered when the map goes fullscreen, so we surface it here too).
    */
   filtersSlot?: React.ReactNode;
+  /** Optional custom popup renderer passed to the active provider. */
+  renderPopup?: (marker: MapMarker) => React.ReactNode;
 }
 
 const INDIA_CENTER: [number, number] = [20.5937, 78.9629];
@@ -48,6 +50,7 @@ export function MapView({
   zoom = INDIA_ZOOM,
   focusPoint,
   filtersSlot,
+  renderPopup,
 }: MapViewProps) {
   const { t } = useTranslation();
   const MapProviderComponent = getActiveMapProvider();
@@ -195,6 +198,7 @@ export function MapView({
         markers={markers}
         onMarkerClick={onMarkerClick}
         initialViewSet={initialViewSet}
+        renderPopup={renderPopup}
       />
       {/* Top-right overlay: Filters (only while maximized — the page header
           hosts it normally but is hidden in fullscreen) + maximize toggle.
