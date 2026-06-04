@@ -152,15 +152,20 @@ export function AppSidebar({
           <SidebarGroupLabel>{t('nav.browse_group')}</SidebarGroupLabel>
           <SidebarGroupContent>
             <SidebarMenu>
-              <SidebarMenuItem>
-                <SidebarMenuButton
-                  isActive={selectedDomain === null}
-                  onClick={() => onDomainSelect(null)}
-                >
-                  <LayoutGrid className="h-4 w-4" />
-                  <span>{t('common.all')}</span>
-                </SidebarMenuButton>
-              </SidebarMenuItem>
+              {/* "All" only makes sense when there's more than one browseable
+                  domain (i.e. more than one distinct `to_domain`). With a single
+                  domain it's redundant, so hide it and let that domain stand alone. */}
+              {domains.length > 1 && (
+                <SidebarMenuItem>
+                  <SidebarMenuButton
+                    isActive={selectedDomain === null}
+                    onClick={() => onDomainSelect(null)}
+                  >
+                    <LayoutGrid className="h-4 w-4" />
+                    <span>{t('common.all')}</span>
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
+              )}
               {domains.map((domain) => {
                 const Icon = getDomainIcon(domain.id, selectedNetwork);
                 const label = domain.id
