@@ -23,7 +23,9 @@ export function PortalHeader({ size = 'sm' }: PortalHeaderProps) {
 
   const logoClass =
     size === 'lg'
-      ? 'h-10 w-auto max-w-[220px] shrink-0 object-contain sm:h-12 sm:max-w-[260px]'
+      ? isSquareishMark
+        ? 'h-16 w-auto max-w-[260px] shrink-0 object-contain sm:h-20 sm:max-w-[320px]'
+        : 'h-10 w-auto max-w-[220px] shrink-0 object-contain sm:h-12 sm:max-w-[260px]'
       : isSquareishMark
         ? 'h-12 w-auto max-w-[200px] shrink-0 object-contain'
         : 'h-7 w-auto max-w-[150px] shrink-0 object-contain';
