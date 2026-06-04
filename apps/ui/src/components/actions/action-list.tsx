@@ -63,6 +63,10 @@ export function ActionList({
 
   const actions = activeTab === 'initiated' ? initiatedActions : receivedActions;
 
+  const hasPending = actions.some(
+    (a) => a.action_status === 'created' || a.action_status === 'pending',
+  );
+
   const visible = React.useMemo(() => {
     const allowed = FILTER_STATUSES[filter];
     if (!allowed) return actions;
@@ -96,14 +100,16 @@ export function ActionList({
           ))}
         </div>
 
-        <Button
-          variant={selection.selectMode ? 'default' : 'outline'}
-          size="sm"
-          onClick={() => (selection.selectMode ? selection.exitSelect() : selection.enterSelect())}
-        >
-          <CheckSquare className="mr-2 h-4 w-4" />
-          {selection.selectMode ? t('selection.done') : t('selection.select')}
-        </Button>
+        {(hasPending || selection.selectMode) && (
+          <Button
+            variant={selection.selectMode ? 'default' : 'outline'}
+            size="sm"
+            onClick={() => (selection.selectMode ? selection.exitSelect() : selection.enterSelect())}
+          >
+            <CheckSquare className="mr-2 h-4 w-4" />
+            {selection.selectMode ? t('selection.done') : t('selection.select')}
+          </Button>
+        )}
 
         <Button
           variant="outline"

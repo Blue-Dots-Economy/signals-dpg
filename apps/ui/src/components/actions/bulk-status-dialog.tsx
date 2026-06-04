@@ -115,7 +115,13 @@ export function BulkStatusDialog({
   const confirmDisabled = isPending || (requiresConsent && !consentChecked) || actions.length === 0;
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog
+      open={open}
+      onOpenChange={(next) => {
+        if (!next && isPending) return; // don't allow dismiss mid-submit
+        onOpenChange(next);
+      }}
+    >
       <DialogContent className="sm:max-w-[480px] gap-0 p-6">
         <h2 className="text-lg font-bold">{t(titleKey, { count: actions.length })}</h2>
         <div className="py-4">
@@ -125,7 +131,7 @@ export function BulkStatusDialog({
               checked={consentChecked}
               onCheckedChange={setConsentChecked}
             />
-          ) : targetStatus === 'rejected' ? (
+          ) : targetStatus === 'rejected' || targetStatus === 'cancelled' ? (
             <div className="space-y-2">
               <Label htmlFor="bulk-reason">{t('actions.bulk_reason_label')}</Label>
               <Textarea
