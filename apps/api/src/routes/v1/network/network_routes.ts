@@ -4,12 +4,14 @@ import { refetch_schema } from '@/routes/v1/network/schema/refetch_schema';
 import { fetch_schema } from '@/routes/v1/network/schema/fetch_schema';
 import { fetch_item } from '@/routes/v1/network/item/fetch_item';
 import { perform_network_action } from '@/routes/v1/network/action/perform_action';
+import { fetch_local_actions } from '@/routes/v1/network/action/fetch_local_actions';
 
 const network_routes: FastifyPluginAsyncZod = async (fastify) => {
   fastify.register(fetch_schemas);
   fastify.register(fetch_schema);
   fastify.register(fetch_item);
   fastify.register(perform_network_action);
+  fastify.register(fetch_local_actions);
   fastify.register(refetch_schema);
 };
 

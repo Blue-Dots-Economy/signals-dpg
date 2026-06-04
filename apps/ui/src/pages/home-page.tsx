@@ -832,18 +832,17 @@ export function HomePage() {
                 ? ({ acknowledged: true as const, text: (consentRaw as { text: string }).text })
                 : undefined;
 
-            // Resolve source item instance URL (where my profile is stored)
-            // IMPORTANT: If the source item has localhost as instance_url,
-            // it means it was created on the current API instance
-            const sourceItemInstanceUrl = myItem.item_instance_url?.includes('localhost')
-              ? apiConfig.getUrl()  // Use current API where the item was actually created
-              : resolveTargetInstanceUrl(myItem, network, apiConfig.getUrl(), 'source');
-
-            // Resolve target item instance URL dynamically
-            // IMPORTANT: If target item has localhost, use current API as fallback
-            const targetItemInstanceUrl = targetItem.item_instance_url?.includes('localhost')
-              ? apiConfig.getUrl()  // Use current API where the item was actually fetched from
-              : resolveTargetInstanceUrl(targetItem, network, apiConfig.getUrl(), 'target');
+            // The action MUST be performed on the TARGET item's instance —
+            // perform_action rejects it otherwise (INVALID_TARGET_INSTANCE /
+            // TARGET_ITEM_NOT_FOUND). Use the target's real instance_url; fall
+            // back to the network-config lookup only when the item carries
+            // none. Do NOT collapse localhost to the current API: with multiple
+            // local instances (:2742 Karnataka / :2743 Maharashtra) that would
+            // mis-route the action to the wrong backend, where the target item
+            // does not exist.
+            const targetItemInstanceUrl =
+              targetItem.item_instance_url ??
+              resolveTargetInstanceUrl(targetItem, network, apiConfig.getUrl(), 'target');
 
             await performAction(
               {
@@ -864,7 +863,14 @@ export function HomePage() {
                 requirements_snapshot: requirementsSnapshot,
                 ...(consent ? { consent } : {}),
               },
-              sourceItemInstanceUrl // Call the SOURCE instance (where myItem exists)
+              // Network-level action: POST to the SOURCE instance (where my
+              // profile lives and where I'm authenticated). That instance
+              // validates and forwards to the TARGET item's instance via the
+              // public /api/v1/network/action/perform endpoint — so a Karnataka
+              // seeker can connect to a Maharashtra provider without an account
+              // on Maharashtra. target_item.item_instance_url (above) tells the
+              // source instance where to forward.
+              apiConfig.getUrl()
             );
             toast.success(t('home.toast_action_sent', { action: actionType.charAt(0).toUpperCase() + actionType.slice(1) }), {
               description: t('home.toast_action_sent_desc'),
