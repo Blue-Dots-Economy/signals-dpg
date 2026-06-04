@@ -242,6 +242,7 @@ export function LeafletMapProvider({
   markers,
   onMarkerClick,
   initialViewSet = false,
+  renderPopup,
 }: MapProviderProps) {
   return (
     <MapContainer
@@ -295,10 +296,11 @@ export function LeafletMapProvider({
               }}
             >
               <Popup>
-                <MarkerPopupCard
-                  marker={marker}
-                  onViewDetails={onMarkerClick}
-                />
+                {renderPopup ? (
+                  renderPopup(marker)
+                ) : (
+                  <MarkerPopupCard marker={marker} onViewDetails={onMarkerClick} />
+                )}
               </Popup>
             </Marker>
           );

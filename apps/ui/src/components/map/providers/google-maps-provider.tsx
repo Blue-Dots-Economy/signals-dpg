@@ -138,6 +138,7 @@ interface ClusteredMarkerProps {
   onClose: () => void;
   onMarkerClick?: (id: string) => void;
   onMarkerReady: (id: string, el: NonNullable<AdvancedMarkerRef> | null) => void;
+  renderPopup?: (marker: MapMarker) => React.ReactNode;
 }
 
 function ClusteredMarker({
@@ -147,6 +148,7 @@ function ClusteredMarker({
   onClose,
   onMarkerClick,
   onMarkerReady,
+  renderPopup,
 }: ClusteredMarkerProps) {
   const [markerRef, markerEl] = useAdvancedMarkerRef();
   const { id } = marker;
@@ -210,7 +212,11 @@ function ClusteredMarker({
           anchor={markerEl}
           onCloseClick={onClose}
         >
-          <MarkerPopupCard marker={marker} onViewDetails={onMarkerClick} />
+          {renderPopup ? (
+            renderPopup(marker)
+          ) : (
+            <MarkerPopupCard marker={marker} onViewDetails={onMarkerClick} />
+          )}
         </InfoWindow>
       )}
     </>
@@ -268,6 +274,7 @@ interface ClustererManagerProps {
   onMarkerActivate: (marker: MapMarker) => void;
   onMarkerDeactivate: () => void;
   onMarkerClick?: (id: string) => void;
+  renderPopup?: (marker: MapMarker) => React.ReactNode;
 }
 
 function ClustererManager({
@@ -276,6 +283,7 @@ function ClustererManager({
   onMarkerActivate,
   onMarkerDeactivate,
   onMarkerClick,
+  renderPopup,
 }: ClustererManagerProps) {
   const map = useMap();
 
@@ -347,6 +355,7 @@ function ClustererManager({
           onClose={onMarkerDeactivate}
           onMarkerClick={onMarkerClick}
           onMarkerReady={handleMarkerReady}
+          renderPopup={renderPopup}
         />
       ))}
     </>
@@ -361,6 +370,7 @@ export function GoogleMapProvider({
   markers,
   onMarkerClick,
   initialViewSet = false,
+  renderPopup,
 }: MapProviderProps) {
   const { t } = useTranslation();
   const [activeMarker, setActiveMarker] = React.useState<MapMarker | null>(null);
@@ -408,6 +418,7 @@ export function GoogleMapProvider({
           onMarkerActivate={setActiveMarker}
           onMarkerDeactivate={() => setActiveMarker(null)}
           onMarkerClick={onMarkerClick}
+          renderPopup={renderPopup}
         />
       </Map>
     </APIProvider>
