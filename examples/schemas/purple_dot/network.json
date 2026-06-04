@@ -382,14 +382,26 @@
   ],
   "instances": [
     {
-      "instance_name": "Purple Dot Seeker Local",
+      "instance_name": "Purple Dot Karnataka Seeker",
       "instance_url": "http://localhost:2742",
       "custom_item_schema_urls": {},
       "domain_id": "seeker"
     },
     {
-      "instance_name": "Purple Dot Provider Local",
+      "instance_name": "Purple Dot Karnataka Provider",
       "instance_url": "http://localhost:2742",
+      "custom_item_schema_urls": {},
+      "domain_id": "provider"
+    },
+    {
+      "instance_name": "Purple Dot Maharashtra Seeker",
+      "instance_url": "http://localhost:2743",
+      "custom_item_schema_urls": {},
+      "domain_id": "seeker"
+    },
+    {
+      "instance_name": "Purple Dot Maharashtra Provider",
+      "instance_url": "http://localhost:2743",
       "custom_item_schema_urls": {},
       "domain_id": "provider"
     }
