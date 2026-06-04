@@ -5,6 +5,7 @@ import { DomainCard } from './domain-card';
 import { MatchScoreCard } from '@/components/match-score';
 import { EmptyState } from '@/components/empty-state';
 import type { Item } from '@/lib/item-api';
+import { SelectableCard } from '@/components/selection/selectable-card';
 
 interface CardGridProps {
   schema: RJSFSchema;
@@ -22,6 +23,13 @@ interface CardGridProps {
   localItem?: Item | null;
   networkId?: string;
   selectedDomain?: string | null;
+  /** Selection mode passthrough (browse bulk connect). */
+  selection?: {
+    selectMode: boolean;
+    isSelected: (id: string) => boolean;
+    canSelect: (groupKey?: string) => boolean;
+    toggle: (id: string, groupKey?: string) => void;
+  };
 }
 
 export function CardGrid({
@@ -39,6 +47,7 @@ export function CardGrid({
   localItem,
   networkId = '',
   selectedDomain,
+  selection,
 }: CardGridProps) {
   if (loading) {
     return (
@@ -64,7 +73,7 @@ export function CardGrid({
       {items.map((item) => {
         // Find the full Item object if available
         const fullItem = fullItems.find((i) => i.item_id === item.id);
-        
+
         // Create a fallback item if full item not available
         const networkItem = fullItem || {
           item_id: item.id,
@@ -80,40 +89,44 @@ export function CardGrid({
           updated_at: new Date().toISOString(),
         };
 
-        // If we have localItem and networkItem, use MatchScoreCard for match score support
-        if (localItem && networkItem) {
-          return (
+        const cardElement =
+          localItem && networkItem ? (
             <MatchScoreCard
-              key={item.id}
               schema={schema}
               schemaName={schemaName}
               schemaDescription={schemaDescription}
               data={item.data}
               actions={actions}
-              onAction={(type, actionSchema) =>
-                onAction?.(item.id, type, actionSchema)
-              }
+              selectionMode={selection?.selectMode ?? false}
+              onAction={(type, actionSchema) => onAction?.(item.id, type, actionSchema)}
               onClick={() => onItemClick?.(item.id)}
               localItem={localItem}
               networkItem={networkItem}
             />
+          ) : (
+            <DomainCard
+              schema={schema}
+              schemaName={schemaName}
+              schemaDescription={schemaDescription}
+              data={item.data}
+              actions={actions}
+              selectionMode={selection?.selectMode ?? false}
+              onAction={(type, actionSchema) => onAction?.(item.id, type, actionSchema)}
+              onClick={() => onItemClick?.(item.id)}
+            />
           );
-        }
 
-        // Fallback to regular DomainCard if no match score support needed
         return (
-          <DomainCard
+          <SelectableCard
             key={item.id}
-            schema={schema}
-            schemaName={schemaName}
-            schemaDescription={schemaDescription}
-            data={item.data}
-            actions={actions}
-            onAction={(type, actionSchema) =>
-              onAction?.(item.id, type, actionSchema)
-            }
-            onClick={() => onItemClick?.(item.id)}
-          />
+            id={item.id}
+            selectMode={selection?.selectMode ?? false}
+            selected={selection?.isSelected(item.id) ?? false}
+            selectable={selection?.canSelect(selectedDomain ?? '') ?? true}
+            onToggle={(id) => selection?.toggle(id, selectedDomain ?? '')}
+          >
+            {cardElement}
+          </SelectableCard>
         );
       })}
     </div>
