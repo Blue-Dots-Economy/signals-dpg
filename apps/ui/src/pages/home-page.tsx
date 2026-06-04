@@ -312,20 +312,19 @@ export function HomePage() {
   // Current domain: from ?as= param (demo override), active profile, or network default
   const currentDomain = searchParams.get('as') ?? myItem?.item_domain ?? network?.domains[0]?.id ?? 'student_profile';
 
-  // Domains visible to the current user
+  // Browseable domains = the distinct `to_domain`s across all interactions in
+  // the network. These are the only domains anyone connects *to*, so they're
+  // the only ones worth listing/fetching in Browse. Domains that never appear
+  // as a `to_domain` (e.g. orange_dot `tourist`) are intentionally excluded —
+  // nobody browses them. Network-wide and independent of the active profile
+  // (e.g. purple_dot/blue_dot show both seeker + provider).
   const visibleDomains = React.useMemo(() => {
     if (!network) return [];
-    // No profile yet — show all domains so user can browse and create
-    if (!myItem) return network.domains;
-    // Has profile — show domains the active profile can perform actions on
-    const allInteractions = getAllInteractions(network);
-    const targetNames = new Set(
-      allInteractions
-        .filter(({ interaction }) => interaction.from_domain === currentDomain)
-        .map(({ interaction }) => interaction.to_domain)
+    const toDomains = new Set(
+      getAllInteractions(network).map(({ interaction }) => interaction.to_domain)
     );
-    return network.domains.filter((d) => targetNames.has(d.id));
-  }, [network, currentDomain, myItem]);
+    return network.domains.filter((d) => toDomains.has(d.id));
+  }, [network]);
 
   React.useEffect(() => {
     if (!network) return;
