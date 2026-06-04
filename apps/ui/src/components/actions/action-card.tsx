@@ -23,6 +23,8 @@ interface ActionCardProps {
   action: Action;
   ownershipRole: 'initiated' | 'received';
   onStatusUpdate?: (action: Action, targetStatus: string) => void;
+  /** When true, hide the action footer (the card is a selection target). */
+  selectionMode?: boolean;
 }
 
 type StatusStyleShape = {
@@ -91,7 +93,7 @@ const FALLBACK_CHIP = {
 const networkChipStyle = (networkId: string) =>
   NETWORK_CHIP_COLOURS[networkId] ?? FALLBACK_CHIP;
 
-export function ActionCard({ action, ownershipRole, onStatusUpdate }: ActionCardProps) {
+export function ActionCard({ action, ownershipRole, onStatusUpdate, selectionMode = false }: ActionCardProps) {
   const { t } = useTranslation();
   const [showRequirements, setShowRequirements] = React.useState(true);
   const [showContactDetails, setShowContactDetails] = React.useState(false);
@@ -284,6 +286,7 @@ export function ActionCard({ action, ownershipRole, onStatusUpdate }: ActionCard
         )}
 
         {/* Actions */}
+        {!selectionMode && (
         <div className="flex flex-wrap items-center gap-2 border-t pt-3">
           {canRevealContact && (
             <Button
@@ -322,6 +325,7 @@ export function ActionCard({ action, ownershipRole, onStatusUpdate }: ActionCard
             </Button>
           )}
         </div>
+        )}
       </div>
 
       <ContactDetailsModal
