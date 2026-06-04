@@ -76,7 +76,7 @@ pnpm --filter api exec vitest run src/path/to/file.test.ts
 # Typecheck everything (api tsc + ui tsc, run sequentially)
 pnpm typecheck
 
-# Generate the Helm-bundled schema.sql + verify it matches checked-in copy
+# Generate the deploy schema bundle (apps/api/db/postgres/schema.sql) + verify it matches checked-in copy
 pnpm schema:bundle
 pnpm schema:bundle:check
 ```

@@ -33,6 +33,8 @@ interface DomainCardProps {
   matchScoreError?: Error | null;
   onCalculateMatch?: () => void;
   onViewMatchDetails?: () => void;
+  /** When true, hide the action/match footer (the card is a selection target). */
+  selectionMode?: boolean;
 }
 
 export function DomainCard({
@@ -52,6 +54,7 @@ export function DomainCard({
   matchScoreError,
   onCalculateMatch,
   onViewMatchDetails,
+  selectionMode = false,
 }: DomainCardProps) {
   if (loading) {
     return (
@@ -93,7 +96,7 @@ export function DomainCard({
       <CardContent className="flex-1">
         <CardFieldsFromSchema schema={schema} data={data} />
       </CardContent>
-      {(actions.length > 0 && onAction) || (networkItem && onCalculateMatch) ? (
+      {!selectionMode && ((actions.length > 0 && onAction) || (networkItem && onCalculateMatch)) ? (
         <CardFooter className="flex flex-wrap gap-2">
           {networkItem && onCalculateMatch && (
             <MatchScoreButton

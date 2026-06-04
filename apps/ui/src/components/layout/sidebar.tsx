@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
 import type { RJSFSchema } from '@rjsf/utils';
 import type { DotNetworkDomain, DotNetworkSchema } from '@/engine/types';
 import type { Item } from '@/lib/item-api';
@@ -75,6 +76,7 @@ export function AppSidebar({
   userSchemas,
 }: AppSidebarProps) {
   const navigate = useNavigate();
+  const { t } = useTranslation();
 
   // Group profiles by domain
   const profilesByDomain = myItems.reduce<Record<string, Item[]>>((acc, item) => {
@@ -127,7 +129,7 @@ export function AppSidebar({
       <SidebarContent>
         {showNetworkSelector && (
           <SidebarGroup>
-            <SidebarGroupLabel>Networks</SidebarGroupLabel>
+            <SidebarGroupLabel>{t('nav.networks_group')}</SidebarGroupLabel>
             <SidebarGroupContent>
               <SidebarMenu>
                 {networks.map((network) => (
@@ -147,7 +149,7 @@ export function AppSidebar({
         )}
         {showNetworkSelector && <SidebarSeparator />}
         <SidebarGroup>
-          <SidebarGroupLabel>Browse</SidebarGroupLabel>
+          <SidebarGroupLabel>{t('nav.browse_group')}</SidebarGroupLabel>
           <SidebarGroupContent>
             <SidebarMenu>
               <SidebarMenuItem>
@@ -156,7 +158,7 @@ export function AppSidebar({
                   onClick={() => onDomainSelect(null)}
                 >
                   <LayoutGrid className="h-4 w-4" />
-                  <span>All</span>
+                  <span>{t('common.all')}</span>
                 </SidebarMenuButton>
               </SidebarMenuItem>
               {domains.map((domain) => {
@@ -182,14 +184,14 @@ export function AppSidebar({
         </SidebarGroup>
         <SidebarSeparator />
         <SidebarGroup>
-          <SidebarGroupLabel>My Profile(s)</SidebarGroupLabel>
+          <SidebarGroupLabel>{t('nav.my_profiles_group')}</SidebarGroupLabel>
           <SidebarGroupContent>
             {domainKeys.length === 0 ? (
               <SidebarMenu>
                 <SidebarMenuItem>
                   <SidebarMenuButton onClick={() => navigate(`/profile/new?network=${selectedNetwork ?? ''}`)}>
                     <Plus className="h-4 w-4" />
-                    <span>Create Profile</span>
+                    <span>{t('nav.create_profile')}</span>
                   </SidebarMenuButton>
                 </SidebarMenuItem>
               </SidebarMenu>
@@ -236,8 +238,8 @@ export function AppSidebar({
                               const schema = userSchemas?.[profile.item_domain];
                               const titleKey = schema ? findTitleField(schema) : null;
                               const title = titleKey
-                                ? String(profile.item_state[titleKey] ?? 'Profile')
-                                : 'Profile';
+                                ? String(profile.item_state[titleKey] ?? t('nav.profile_fallback'))
+                                : t('nav.profile_fallback');
                               const isActiveProfile = profile.item_id === activeProfileId;
 
                               return (
@@ -253,7 +255,7 @@ export function AppSidebar({
                                     <span className="truncate">{title}</span>
                                     {isActiveProfile && (
                                       <span className="ml-auto shrink-0 rounded-full bg-primary px-1.5 py-0.5 text-[10px] font-semibold text-primary-foreground leading-none">
-                                        active
+                                        {t('nav.active_badge')}
                                       </span>
                                     )}
                                   </SidebarMenuButton>
@@ -275,7 +277,7 @@ export function AppSidebar({
                   <SidebarMenuItem>
                     <SidebarMenuButton onClick={() => navigate(`/profile/new?network=${selectedNetwork ?? ''}`)}>
                       <Plus className="h-4 w-4" />
-                      <span>Create Profile</span>
+                      <span>{t('nav.create_profile')}</span>
                     </SidebarMenuButton>
                   </SidebarMenuItem>
                 </SidebarMenu>
@@ -285,13 +287,13 @@ export function AppSidebar({
         </SidebarGroup>
         <SidebarSeparator />
         <SidebarGroup>
-          <SidebarGroupLabel>Actions</SidebarGroupLabel>
+          <SidebarGroupLabel>{t('nav.actions_group')}</SidebarGroupLabel>
           <SidebarGroupContent>
             <SidebarMenu>
               <SidebarMenuItem>
                 <SidebarMenuButton onClick={() => navigate('/my-actions')}>
                   <Activity className="h-4 w-4" />
-                  <span>My Actions</span>
+                  <span>{t('nav.my_actions')}</span>
                   <PendingActionsBadge />
                 </SidebarMenuButton>
               </SidebarMenuItem>

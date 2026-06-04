@@ -17,6 +17,7 @@ interface ImportMetaEnv {
   readonly VITE_VC_WALLET_API_KEY: string;
   readonly VITE_AGENT_URL: string;
   readonly VITE_AGENT_TOKEN: string;
+  readonly VITE_ENABLED_LANGUAGES: string;
 }
 
 declare const __DEFAULT_NETWORK_THEME__: string;

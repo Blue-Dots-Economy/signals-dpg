@@ -1,5 +1,6 @@
 import * as React from 'react';
 import { RefreshCw, TrendingUp, MapPin, BookOpen, Award, Clock, AlertCircle, CheckCircle2, Star } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
 import {
   Dialog,
   DialogContent,
@@ -90,6 +91,7 @@ export function MatchScoreModal({
   onRecalculate,
   onProceed,
 }: MatchScoreModalProps) {
+  const { t } = useTranslation();
   const scoreValue = score?.score ?? 0;
   const styles = getMatchScoreBand(scoreValue);
   const [progressValue, setProgressValue] = React.useState(0);
@@ -122,7 +124,7 @@ export function MatchScoreModal({
       <DialogContent className="sm:max-w-lg max-h-[90vh] overflow-hidden p-0">
         <DialogHeader className="px-6 pt-6 pb-4 border-b">
           <DialogTitle className="flex items-center gap-2">
-            <span>Match Score Details</span>
+            <span>{t('match.modal_title')}</span>
           </DialogTitle>
         </DialogHeader>
 
@@ -132,10 +134,10 @@ export function MatchScoreModal({
               <div className="flex flex-col items-center justify-center py-12 space-y-4">
                 <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary" />
                 <p className="text-sm text-muted-foreground animate-pulse">
-                  Calculating match score...
+                  {t('match.calculating')}
                 </p>
                 <p className="text-xs text-muted-foreground">
-                  Comparing {localItemName} with {networkItemName}
+                  {t('match.comparing', { localName: localItemName, networkName: networkItemName })}
                 </p>
               </div>
             ) : score ? (
@@ -149,7 +151,7 @@ export function MatchScoreModal({
                   )}>
                     <Star className="h-10 w-10 fill-current" />
                   </div>
-                  
+
                   <div>
                     <div className="text-4xl font-bold tracking-tight">
                       {formatScorePercentage(scoreValue)}
@@ -161,8 +163,8 @@ export function MatchScoreModal({
 
                   {/* Progress Bar */}
                   <div className="w-full max-w-xs mx-auto space-y-2">
-                    <Progress 
-                      value={progressValue} 
+                    <Progress
+                      value={progressValue}
                       className="h-2"
                     />
                     <div className="flex justify-between text-xs text-muted-foreground">
@@ -174,7 +176,7 @@ export function MatchScoreModal({
 
                   {score.confidence !== undefined && (
                     <p className="text-sm text-muted-foreground">
-                      Confidence: {Math.round(score.confidence * 100)}%
+                      {t('match.confidence', { value: Math.round(score.confidence * 100) })}
                     </p>
                   )}
                 </div>
@@ -184,7 +186,7 @@ export function MatchScoreModal({
                   <div className="border rounded-lg p-4 space-y-3">
                     <h3 className="font-semibold flex items-center gap-2">
                       <TrendingUp className="h-4 w-4" />
-                      Matching Factors
+                      {t('match.factors_heading')}
                     </h3>
                     <div className="divide-y divide-border">
                       {score.signals.map((signal, index) => (
@@ -199,7 +201,7 @@ export function MatchScoreModal({
                   <div className="border rounded-lg p-4 space-y-3">
                     <h3 className="font-semibold flex items-center gap-2">
                       <span className="text-lg">🤔</span>
-                      AI Reasoning
+                      {t('match.ai_reasoning_heading')}
                     </h3>
                     <p className="text-sm text-muted-foreground leading-relaxed">
                       {score.reasoning}
@@ -210,7 +212,7 @@ export function MatchScoreModal({
             ) : (
               <div className="text-center py-12 text-muted-foreground">
                 <AlertCircle className="h-12 w-12 mx-auto mb-4 opacity-50" />
-                <p>No match score available</p>
+                <p>{t('match.no_score')}</p>
               </div>
             )}
           </div>
@@ -226,15 +228,15 @@ export function MatchScoreModal({
             className="gap-1.5"
           >
             <RefreshCw className={cn('h-3.5 w-3.5', isLoading && 'animate-spin')} />
-            Recalculate
+            {t('match.btn_recalculate')}
           </Button>
           <div className="flex items-center gap-2">
             <Button variant="outline" size="sm" onClick={onClose}>
-              Close
+              {t('match.btn_close')}
             </Button>
             {onProceed && (
               <Button size="sm" onClick={onProceed}>
-                Proceed with Connect →
+                {t('match.btn_proceed')}
               </Button>
             )}
           </div>

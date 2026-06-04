@@ -3,6 +3,7 @@ import ReactDOM from 'react-dom/client';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { App } from './app';
 import '@/components/wallet/providers';
+import './i18n';
 import './index.css';
 
 // Create React Query client with default options

@@ -2,6 +2,7 @@ import * as React from 'react';
 import type { RJSFSchema } from '@rjsf/utils';
 import { useSearchParams, Link } from 'react-router-dom';
 import { toast } from 'sonner';
+import { useTranslation } from 'react-i18next';
 import type {
   DotNetworkSchema,
   DotActionSchema,
@@ -18,19 +19,29 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { Button } from '@/components/ui/button';
 import { ActionHandler } from '@/components/actions/action-handler';
 import { MapView } from '@/components/map/map-container';
+import { MapFiltersPanel } from '@/components/map/map-filters-panel';
+import { MarkerPopupCard } from '@/components/map/marker-popup-card';
 import { MatchScoreCard } from '@/components/match-score';
 import '@/components/map/providers';
-import { fetchItems, performAction, type Item } from '@/lib/item-api';
+import { fetchItems, performAction, performActionsBulk, type Item } from '@/lib/item-api';
+import { bulkFailureIndices, firstBulkError } from '@/lib/bulk';
+import { useCardSelection } from '@/hooks/use-card-selection';
+import { SelectableCard } from '@/components/selection/selectable-card';
+import { BulkActionBar } from '@/components/selection/bulk-action-bar';
+import { ActionModal } from '@/components/actions/action-modal';
+import { CheckSquare } from 'lucide-react';
 import { getRuntimeEnv } from '@/lib/runtime-env';
 import { ACTION_CONSENT_SENTINEL } from '@/lib/action-api';
 import { EmptyState } from '@/components/empty-state';
 import { fetchNetworkConfigs, fetchNetworkConfig, fetchNetworkItems } from '@/lib/network-api';
 import { useAuth } from '@/contexts/auth-context';
 import { apiConfig } from '@/lib/api-config';
+import { getEnumFilterFieldsForDomains, itemPassesEnumFilters } from '@/lib/enum-filters';
 
-function itemToCardItem(item: Item): { id: string; data: Record<string, unknown> } {
+function itemToCardItem(item: Item): { id: string; domain: string; data: Record<string, unknown> } {
   return {
     id: item.item_id,
+    domain: item.item_domain,
     data: {
       ...item.item_state,
       item_latitude: item.item_latitude,
@@ -139,6 +150,7 @@ function resolveDefaultViewMode(): ViewMode {
 }
 
 export function HomePage() {
+  const { t } = useTranslation();
   const { user } = useAuth();
   const [searchParams, setSearchParams] = useSearchParams();
   const [search, setSearch] = React.useState('');
@@ -148,6 +160,25 @@ export function HomePage() {
   const [selectedDomain, setSelectedDomain] = React.useState<string | null>(
     searchParams.get('domain')
   );
+  // Map filter: multi-select domain filter (URL param: ?map_domains=seeker,provider)
+  const [mapSelectedDomains, setMapSelectedDomains] = React.useState<string[]>(() => {
+    const raw = searchParams.get('map_domains');
+    if (!raw) return [];
+    return raw.split(',').map((s) => s.trim()).filter(Boolean);
+  });
+  // Map filter: enum-field filters (URL params: ?f_<key>=value1,value2)
+  // Each active field gets its own param namespaced with the "f_" prefix.
+  const [mapSelectedFields, setMapSelectedFields] = React.useState<Record<string, string[]>>(() => {
+    const result: Record<string, string[]> = {};
+    for (const [param, value] of searchParams.entries()) {
+      if (!param.startsWith('f_')) continue;
+      const fieldKey = param.slice(2); // strip "f_" prefix
+      if (!fieldKey) continue;
+      const values = value.split(',').map((s) => decodeURIComponent(s.trim())).filter(Boolean);
+      if (values.length > 0) result[fieldKey] = values;
+    }
+    return result;
+  });
   const [resolvedNetwork, setResolvedNetwork] = React.useState<DotNetworkSchema | null>(null);
   const [allNetworks, setAllNetworks] = React.useState<DotNetworkSchema[]>([]);
   const configuredNetworkIds = parseNetworkIds(import.meta.env.VITE_NETWORK_ID);
@@ -163,6 +194,9 @@ export function HomePage() {
   const [myItems, setMyItems] = React.useState<Item[]>([]);
   const [activeProfileId, setActiveProfileId] = React.useState<string | null>(null);
   const [loading, setLoading] = React.useState(false);
+  const browseSelection = useCardSelection();
+  const [bulkConnectOpen, setBulkConnectOpen] = React.useState(false);
+  const [bulkConnectBusy, setBulkConnectBusy] = React.useState(false);
 
   React.useEffect(() => {
     if (!selectedNetworkId) {
@@ -406,6 +440,103 @@ export function HomePage() {
     [network, currentDomain, myItem]
   );
 
+  const handleBulkConnect = React.useCallback(
+    async (actionType: string, formData: Record<string, unknown>) => {
+      if (!myItem || !network) return;
+      setBulkConnectBusy(true);
+      try {
+        const allItems = Object.values(domainItems).flat();
+        const ids = Array.from(browseSelection.selected);
+        const targets = ids
+          .map((id) => allItems.find((i) => i.item_id === id))
+          .filter((t): t is Item => !!t);
+
+        // Guard: nothing valid to send (e.g. selection went stale after a reload)
+        if (targets.length === 0) {
+          setBulkConnectOpen(false);
+          browseSelection.exitSelect();
+          return;
+        }
+
+        const { [ACTION_CONSENT_SENTINEL]: consentRaw, ...requirementsSnapshot } = formData;
+        const consent =
+          consentRaw &&
+          typeof consentRaw === 'object' &&
+          (consentRaw as { acknowledged?: unknown }).acknowledged === true &&
+          typeof (consentRaw as { text?: unknown }).text === 'string'
+            ? { acknowledged: true as const, text: (consentRaw as { text: string }).text }
+            : undefined;
+
+        const sourceItemInstanceUrl = myItem.item_instance_url?.includes('localhost')
+          ? apiConfig.getUrl()
+          : resolveTargetInstanceUrl(myItem, network, apiConfig.getUrl(), 'source');
+
+        const payloads = targets.map((targetItem) => {
+            const targetItemInstanceUrl = targetItem.item_instance_url?.includes('localhost')
+              ? apiConfig.getUrl()
+              : resolveTargetInstanceUrl(targetItem, network, apiConfig.getUrl(), 'target');
+            return {
+              action_type: actionType,
+              source_item: {
+                item_network: myItem.item_network,
+                item_domain: myItem.item_domain,
+                item_type: myItem.item_type,
+                item_id: myItem.item_id,
+              },
+              target_item: {
+                item_network: targetItem.item_network,
+                item_domain: targetItem.item_domain,
+                item_type: targetItem.item_type,
+                item_id: targetItem.item_id,
+                item_instance_url: targetItemInstanceUrl,
+              },
+              requirements_snapshot: requirementsSnapshot,
+              ...(consent ? { consent } : {}),
+            };
+          });
+
+        const env = await performActionsBulk(payloads, sourceItemInstanceUrl);
+        setBulkConnectOpen(false);
+
+        if (env.summary.failed === 0) {
+          toast.success(t('home.bulk_connected_all', { count: env.summary.succeeded }));
+          browseSelection.exitSelect();
+        } else {
+          const failedIdxs = bulkFailureIndices(env);
+          const failedIds = failedIdxs.map((i) => targets[i].item_id);
+          const firstErr = firstBulkError(env);
+          toast.warning(
+            t('home.bulk_connected_partial', {
+              succeeded: env.summary.succeeded,
+              total: env.summary.total,
+            }),
+            {
+              description: firstErr
+                ? t('home.bulk_connect_first_error', { message: firstErr })
+                : undefined,
+            },
+          );
+          browseSelection.setSelected(failedIds);
+        }
+      } catch (err) {
+        toast.error(t('home.bulk_connect_failed'), {
+          description: err instanceof Error ? err.message : undefined,
+        });
+      } finally {
+        setBulkConnectBusy(false);
+      }
+    },
+    [
+      myItem,
+      network,
+      domainItems,
+      browseSelection.selected,
+      browseSelection.exitSelect,
+      browseSelection.setSelected,
+      t,
+    ],
+  );
+
   // Legacy: single active action for the selected domain (for CardGrid)
   const activeAction = React.useMemo<DotActionSchema | null>(() => {
     const toDomain = selectedDomain ?? visibleDomains[0]?.id;
@@ -414,21 +545,56 @@ export function HomePage() {
     return actions[0] ?? null;
   }, [getActionsForDomain, selectedDomain, visibleDomains]);
 
-  // Build per-domain card items filtered by search
+  // Build per-domain card items filtered by search, domain, and status.
+  // The same filtered result is consumed by both the list view and the map view
+  // so both stay in sync without duplicating filter logic.
+  // Derive enum filter field metadata once (used in the memo below and in MapView)
+  const enumFilterFields = React.useMemo(
+    () => (network ? getEnumFilterFieldsForDomains(network.domains) : []),
+    [network],
+  );
+
   const filteredDomainItems = React.useMemo(() => {
-    const result: Record<string, { id: string; data: Record<string, unknown> }[]> = {};
-    for (const [domain, itemList] of Object.entries(domainItems)) {
-      const cards = itemList.map(itemToCardItem);
-      result[domain] = search
-        ? cards.filter((item) =>
-            Object.values(item.data).some((val) =>
-              String(val).toLowerCase().includes(search.toLowerCase())
-            )
+    const result: Record<string, { id: string; domain: string; data: Record<string, unknown> }[]> = {};
+
+    // Determine which enum-field filters are active (non-empty selected arrays)
+    const activeFieldFilters = Object.fromEntries(
+      Object.entries(mapSelectedFields).filter(([, vals]) => vals.length > 0),
+    );
+    const hasFieldFilters = Object.keys(activeFieldFilters).length > 0;
+
+    for (const [domainId, itemList] of Object.entries(domainItems)) {
+      // Map domain filter: skip this domain entirely if filter is active and
+      // this domain is not selected.
+      if (mapSelectedDomains.length > 0 && !mapSelectedDomains.includes(domainId)) {
+        result[domainId] = [];
+        continue;
+      }
+
+      let cards = itemList.map(itemToCardItem);
+
+      // Text search filter
+      if (search) {
+        cards = cards.filter((item) =>
+          Object.values(item.data).some((val) =>
+            String(val).toLowerCase().includes(search.toLowerCase())
           )
-        : cards;
+        );
+      }
+
+      // Enum-field filters: AND across different fields, OR within a field's
+      // selected values. Absent fields on an item always pass (domain-safe).
+      if (hasFieldFilters) {
+        cards = cards.filter((item) =>
+          itemPassesEnumFilters(item.data, activeFieldFilters, enumFilterFields),
+        );
+      }
+
+      result[domainId] = cards;
     }
+
     return result;
-  }, [domainItems, search]);
+  }, [domainItems, search, mapSelectedDomains, mapSelectedFields, network, enumFilterFields]);
 
   const handleDomainSelect = (domainId: string | null) => {
     setSelectedDomain(domainId);
@@ -463,6 +629,37 @@ export function HomePage() {
     setSearchParams((prev) => {
       prev.set('network', networkId);
       prev.delete('domain'); // Remove domain since it's network-specific
+      return prev;
+    });
+  };
+
+  const handleMapDomainsChange = (domains: string[]) => {
+    setMapSelectedDomains(domains);
+    setSearchParams((prev) => {
+      if (domains.length > 0) {
+        prev.set('map_domains', domains.join(','));
+      } else {
+        prev.delete('map_domains');
+      }
+      return prev;
+    });
+  };
+
+  const handleMapFieldsChange = (fields: Record<string, string[]>) => {
+    setMapSelectedFields(fields);
+    setSearchParams((prev) => {
+      // Remove all existing f_* params before re-writing
+      const keysToDelete: string[] = [];
+      for (const key of prev.keys()) {
+        if (key.startsWith('f_')) keysToDelete.push(key);
+      }
+      for (const key of keysToDelete) prev.delete(key);
+      // Write active field selections as ?f_<key>=value1,value2
+      for (const [fieldKey, values] of Object.entries(fields)) {
+        if (values.length > 0) {
+          prev.set(`f_${fieldKey}`, values.map(encodeURIComponent).join(','));
+        }
+      }
       return prev;
     });
   };
@@ -509,7 +706,7 @@ export function HomePage() {
 
   const contentTitle = selectedDomain
     ? selectedDomain.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())
-    : 'Browse All';
+    : t('home.browse_all');
   const contentDescription = selectedDomain
     ? visibleDomains.find((d) => d.id === selectedDomain)?.description
     : undefined;
@@ -518,17 +715,17 @@ export function HomePage() {
     : Object.values(filteredDomainItems).reduce((s, a) => s + a.length, 0);
 
   function buildEmptyState(domainLabel: string) {
-    if (search) return <EmptyState message={`No results for "${search}"`} />;
+    if (search) return <EmptyState message={t('home.no_search_results', { search })} />;
     // GuestHero already shows the sign-in CTA — keep this message simple
-    if (!user) return <EmptyState message="No listings in this network yet." />;
+    if (!user) return <EmptyState message={t('home.no_listings_yet')} />;
     if (!myItem) {
       return (
         <EmptyState
-          heading="Create your profile"
-          message="Set up a profile to start connecting with others."
+          heading={t('home.empty_create_heading')}
+          message={t('home.empty_create_message')}
           action={
             <Button asChild size="sm">
-              <Link to={`/profile/new?network=${selectedNetworkId ?? ''}`}>Create profile</Link>
+              <Link to={`/profile/new?network=${selectedNetworkId ?? ''}`}>{t('nav.create_profile')}</Link>
             </Button>
           }
         />
@@ -536,11 +733,25 @@ export function HomePage() {
     }
     return (
       <EmptyState
-        heading="Nothing here yet"
-        message={`No ${domainLabel.toLowerCase()} listings found in this network.`}
+        heading={t('home.nothing_here_heading')}
+        message={t('home.no_domain_listings', { domain: domainLabel.toLowerCase() })}
       />
     );
   }
+
+  // Single filters element surfaced in the top bar (next to search) and, when
+  // the map is maximized, in the map overlay (the top bar is hidden in
+  // fullscreen). Each location instantiates its own popover state; the filter
+  // selection itself is controlled via the shared props below.
+  const filtersPanel = (
+    <MapFiltersPanel
+      domains={visibleDomains}
+      selectedDomains={mapSelectedDomains}
+      onDomainsChange={handleMapDomainsChange}
+      selectedFields={mapSelectedFields}
+      onFieldsChange={handleMapFieldsChange}
+    />
+  );
 
   return (
     <PageShell
@@ -559,6 +770,7 @@ export function HomePage() {
       onSearchChange={setSearch}
       viewMode={viewMode}
       onViewModeChange={handleViewModeChange}
+      filtersSlot={filtersPanel}
     >
       {!user ? (
         <GuestHero />
@@ -568,28 +780,44 @@ export function HomePage() {
           description={contentDescription}
           count={loading ? undefined : contentCount}
           noProfilePrompt={{ show: !myItem, networkId: selectedNetworkId ?? '' }}
+          actions={
+            myItem && viewMode === 'list' ? (
+              <Button
+                type="button"
+                variant={browseSelection.selectMode ? 'default' : 'outline'}
+                size="sm"
+                onClick={() =>
+                  browseSelection.selectMode
+                    ? browseSelection.exitSelect()
+                    : browseSelection.enterSelect()
+                }
+              >
+                <CheckSquare className="mr-1.5 h-4 w-4" />
+                {browseSelection.selectMode ? t('selection.done') : t('selection.select')}
+              </Button>
+            ) : undefined
+          }
         />
       )}
-      {viewMode === 'list' ? (
-        <ActionHandler
+      <ActionHandler
           onActionSubmit={async (actionType, _actionSchema, formData, targetItemId) => {
             if (!myItem) {
-              toast.error('Profile required', {
-                description: 'You need to create your own profile before you can connect with others.',
+              toast.error(t('home.toast_profile_required'), {
+                description: t('home.toast_profile_required_desc'),
               });
               throw new Error('No source item');
             }
             if (!user) {
-              toast.error('Sign in to connect', {
-                description: 'You need to be signed in to send connection requests.',
+              toast.error(t('nav.sign_in_to_connect'), {
+                description: t('home.toast_sign_in_desc'),
               });
               throw new Error('No user');
             }
             const allItems = Object.values(domainItems).flat();
             const targetItem = allItems.find((i) => i.item_id === targetItemId);
             if (!targetItem) {
-              toast.error('Profile not found', {
-                description: 'The profile you\'re trying to connect with is no longer available. Try refreshing the page.',
+              toast.error(t('home.toast_profile_not_found'), {
+                description: t('home.toast_profile_not_found_desc'),
               });
               throw new Error('Target item not found');
             }
@@ -639,13 +867,15 @@ export function HomePage() {
               },
               sourceItemInstanceUrl // Call the SOURCE instance (where myItem exists)
             );
-            toast.success(`${actionType.charAt(0).toUpperCase() + actionType.slice(1)} request sent!`, {
-              description: 'The other party will be notified and can accept or respond to your request.',
+            toast.success(t('home.toast_action_sent', { action: actionType.charAt(0).toUpperCase() + actionType.slice(1) }), {
+              description: t('home.toast_action_sent_desc'),
             });
           }}
         >
           {(triggerAction) =>
-            selectedDomain === null ? (
+            viewMode === 'list' ? (
+              <>
+                {selectedDomain === null ? (
               // All tab: flat grid across all domains, each card uses its own schema
               (() => {
                 const allFlatItems = visibleDomains.flatMap((domain) => {
@@ -687,31 +917,40 @@ export function HomePage() {
                         .find((i) => i.item_id === item.id);
 
                       return (
-                        <MatchScoreCard
+                        <SelectableCard
                           key={item.id}
-                          schema={schema!}
-                          schemaDescription={domainDescription}
-                          domainLabel={domainLabel}
-                          data={item.data}
-                          actions={domainActions}
-                          onAction={(type, actionSchema) =>
-                            triggerAction(type, actionSchema, item.id)
-                          }
-                          localItem={myItem}
-                          networkItem={fullItem || {
-                            item_id: item.id,
-                            item_network: network?.id || '',
-                            item_domain: selectedDomain || '',
-                            item_type: 'profile',
-                            item_instance_url: null,
-                            item_schema_url: null,
-                            item_state: item.data,
-                            item_latitude: null,
-                            item_longitude: null,
-                            created_at: new Date().toISOString(),
-                            updated_at: new Date().toISOString(),
-                          }}
-                        />
+                          id={item.id}
+                          selectMode={browseSelection.selectMode}
+                          selected={browseSelection.isSelected(item.id)}
+                          selectable={browseSelection.canSelect(item.domain ?? '')}
+                          onToggle={(id) => browseSelection.toggle(id, item.domain ?? '')}
+                        >
+                          <MatchScoreCard
+                            schema={schema!}
+                            schemaDescription={domainDescription}
+                            domainLabel={domainLabel}
+                            data={item.data}
+                            actions={domainActions}
+                            selectionMode={browseSelection.selectMode}
+                            onAction={(type, actionSchema) =>
+                              triggerAction(type, actionSchema, item.id)
+                            }
+                            localItem={myItem}
+                            networkItem={fullItem || {
+                              item_id: item.id,
+                              item_network: network?.id || '',
+                              item_domain: selectedDomain || '',
+                              item_type: 'profile',
+                              item_instance_url: null,
+                              item_schema_url: null,
+                              item_state: item.data,
+                              item_latitude: null,
+                              item_longitude: null,
+                              created_at: new Date().toISOString(),
+                              updated_at: new Date().toISOString(),
+                            }}
+                          />
+                        </SelectableCard>
                       );
                     })}
                   </div>
@@ -734,16 +973,76 @@ export function HomePage() {
                 localItem={myItem}
                 networkId={network?.id}
                 selectedDomain={selectedDomain}
+                selection={browseSelection}
+              />
+                )}
+                {browseSelection.selectMode && (() => {
+                  const lockDomain = browseSelection.lockKey ?? selectedDomain ?? '';
+                  const connectAction = lockDomain ? getActionsForDomain(lockDomain)[0] : undefined;
+                  return (
+                    <>
+                      <BulkActionBar
+                        count={browseSelection.selected.size}
+                        onClear={browseSelection.clear}
+                      >
+                        <button
+                          type="button"
+                          disabled={!connectAction || bulkConnectBusy}
+                          onClick={() => setBulkConnectOpen(true)}
+                          className="rounded-lg bg-primary px-4 py-1.5 text-xs font-bold text-primary-foreground disabled:opacity-50"
+                        >
+                          {t('home.bulk_connect_all', { count: browseSelection.selected.size })}
+                        </button>
+                      </BulkActionBar>
+                      {connectAction && (
+                        <ActionModal
+                          open={bulkConnectOpen}
+                          onOpenChange={(open) => !open && setBulkConnectOpen(false)}
+                          actionSchema={connectAction}
+                          loading={bulkConnectBusy}
+                          onSubmit={(fd) => handleBulkConnect(connectAction.action_type, fd)}
+                        />
+                      )}
+                    </>
+                  );
+                })()}
+              </>
+            ) : (
+              <MapView
+                schema={activeSchema!}
+                items={Object.values(filteredDomainItems).flat()}
+                focusPoint={
+                  myItem && myItem.item_latitude != null && myItem.item_longitude != null
+                    ? { lat: myItem.item_latitude, lng: myItem.item_longitude }
+                    : null
+                }
+                filtersSlot={filtersPanel}
+                renderPopup={(marker) => {
+                  const fullItem =
+                    (marker.domain
+                      ? domainItems[marker.domain]
+                      : Object.values(domainItems).flat()
+                    )?.find((i) => i.item_id === marker.id) ?? null;
+                  const domainActions = marker.domain ? getActionsForDomain(marker.domain) : [];
+                  const connectAction = domainActions[0];
+                  return (
+                    <MarkerPopupCard
+                      marker={marker}
+                      actions={myItem && connectAction ? [connectAction] : []}
+                      onConnect={
+                        myItem && connectAction
+                          ? () => triggerAction(connectAction.action_type, connectAction, marker.id)
+                          : undefined
+                      }
+                      localItem={myItem}
+                      networkItem={fullItem}
+                    />
+                  );
+                }}
               />
             )
           }
         </ActionHandler>
-      ) : (
-        <MapView
-          schema={activeSchema!}
-          items={Object.values(filteredDomainItems).flat()}
-        />
-      )}
     </PageShell>
   );
 }

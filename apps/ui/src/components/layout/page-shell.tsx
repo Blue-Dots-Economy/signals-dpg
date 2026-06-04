@@ -23,6 +23,8 @@ interface PageShellProps {
   onSearchChange: (value: string) => void;
   viewMode: ViewMode;
   onViewModeChange: (mode: ViewMode) => void;
+  /** Optional Filters control surfaced in the top bar next to the search input. */
+  filtersSlot?: React.ReactNode;
 }
 
 export function PageShell({
@@ -42,6 +44,7 @@ export function PageShell({
   onSearchChange,
   viewMode,
   onViewModeChange,
+  filtersSlot,
 }: PageShellProps) {
   return (
     <TooltipProvider>
@@ -65,6 +68,7 @@ export function PageShell({
             onSearchChange={onSearchChange}
             viewMode={viewMode}
             onViewModeChange={onViewModeChange}
+            filtersSlot={filtersSlot}
           />
           <main className="flex-1 overflow-y-auto p-4 sm:p-6">{children}</main>
         </div>

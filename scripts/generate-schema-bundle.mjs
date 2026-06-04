@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // scripts/generate-schema-bundle.mjs
 //
-// Assembles helmcharts/dpg/charts/api/files/schema.sql from the idempotent
+// Assembles apps/api/db/postgres/schema.sql from the idempotent
 // SQL scripts under packages/database/src/utils/sql_scripts/.
 //
 // Source order matters — tables referenced by FKs must exist before the
@@ -16,7 +16,7 @@ import { fileURLToPath } from 'node:url';
 
 const repoRoot = fileURLToPath(new URL('..', import.meta.url));
 const sqlDir = join(repoRoot, 'packages/database/src/utils/sql_scripts');
-const outPath = join(repoRoot, 'helmcharts/dpg/charts/api/files/schema.sql');
+const outPath = join(repoRoot, 'apps/api/db/postgres/schema.sql');
 
 // FK-safe order. auth tables (referenced by items.created_by) must come first.
 const FILES = [
@@ -33,10 +33,10 @@ const BANNER = `-- GENERATED FILE — do not edit by hand.
 -- Regenerate with: pnpm schema:bundle
 -- CI guards drift via: pnpm schema:bundle:check
 --
--- Applied by the helm migrate-job at install/upgrade time. Every statement
--- must be idempotent (CREATE … IF NOT EXISTS / ALTER … ADD COLUMN IF NOT
--- EXISTS / DO-block-guarded ADD CONSTRAINT). See docs/operations/migrations.md
--- for the full contract.
+-- Applied by the deployment migrate-job at install/upgrade time (charts live
+-- in a separate repo). Every statement must be idempotent (CREATE … IF NOT
+-- EXISTS / ALTER … ADD COLUMN IF NOT EXISTS / DO-block-guarded ADD
+-- CONSTRAINT). See docs/operations/migrations.md for the full contract.
 `;
 
 async function main() {

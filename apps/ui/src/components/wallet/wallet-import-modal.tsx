@@ -1,5 +1,6 @@
 import * as React from 'react';
 import { ChevronLeft, PlugZap } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
 
 import {
   Dialog,
@@ -25,6 +26,7 @@ interface WalletImportModalProps {
 }
 
 export function WalletImportModal({ open, onOpenChange, context, onImported }: WalletImportModalProps) {
+  const { t } = useTranslation();
   const providers = React.useMemo(() => getRegisteredWalletProviders(), [open]);
   const configuredProviders = React.useMemo(() => getConfiguredWalletProviders(), [open]);
   const [selectedProviderName, setSelectedProviderName] = React.useState<string | null>(null);
@@ -42,9 +44,9 @@ export function WalletImportModal({ open, onOpenChange, context, onImported }: W
       <DialogContent className="max-h-[85vh] max-w-2xl overflow-hidden p-0 sm:max-h-[90vh]">
         <div className="flex max-h-[85vh] flex-col sm:max-h-[90vh]">
           <DialogHeader className="border-b px-6 py-5">
-            <DialogTitle>Import Credentials</DialogTitle>
+            <DialogTitle>{t('wallet.import_title')}</DialogTitle>
             <DialogDescription>
-              Choose a wallet provider and import verified profile details into this form.
+              {t('wallet.import_subtitle')}
             </DialogDescription>
           </DialogHeader>
 
@@ -52,7 +54,7 @@ export function WalletImportModal({ open, onOpenChange, context, onImported }: W
             {!selectedProvider ? (
               <div className="space-y-4">
                 {providers.length === 0 ? (
-                  <p className="text-sm text-muted-foreground">No wallet providers are registered.</p>
+                  <p className="text-sm text-muted-foreground">{t('wallet.none_registered')}</p>
                 ) : (
                   providers.map((provider) => {
                     const configured = provider.isConfigured();
@@ -68,11 +70,11 @@ export function WalletImportModal({ open, onOpenChange, context, onImported }: W
                         <CardContent className="flex flex-col items-start justify-between gap-4 px-4 sm:flex-row sm:items-center">
                           <p className="text-xs text-muted-foreground">
                             {configured
-                              ? 'Ready to import.'
-                              : provider.getConfigurationHint?.() ?? 'Provider is not configured.'}
+                              ? t('wallet.ready_to_import')
+                              : provider.getConfigurationHint?.() ?? t('wallet.not_configured')}
                           </p>
                           <Button disabled={!configured} onClick={() => setSelectedProviderName(provider.name)}>
-                            Use {provider.label}
+                            {t('wallet.use_provider', { provider: provider.label })}
                           </Button>
                         </CardContent>
                       </Card>
@@ -82,7 +84,7 @@ export function WalletImportModal({ open, onOpenChange, context, onImported }: W
 
                 {configuredProviders.length === 0 ? (
                   <p className="text-sm text-muted-foreground">
-                    Configure at least one provider before importing credentials.
+                    {t('wallet.configure_at_least_one')}
                   </p>
                 ) : null}
               </div>
@@ -90,7 +92,7 @@ export function WalletImportModal({ open, onOpenChange, context, onImported }: W
               <div className="space-y-4">
                 <Button variant="ghost" className="w-fit" onClick={() => setSelectedProviderName(null)}>
                   <ChevronLeft className="h-4 w-4" />
-                  Back to providers
+                  {t('wallet.back_to_providers')}
                 </Button>
                 <selectedProvider.component
                   context={context}

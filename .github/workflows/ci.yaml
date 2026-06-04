@@ -84,16 +84,6 @@ jobs:
       - run: pnpm dep-check
         if: hashFiles('.dependency-cruiser.cjs') != ''
 
-  helm-lint:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: azure/setup-helm@v4
-      - run: helm lint helmcharts/dpg
-      - run: helm lint helmcharts/dpg -f helmcharts/dpg/values-aws.yaml
-      - run: helm template helmcharts/dpg > /dev/null
-      - run: helm template helmcharts/dpg -f helmcharts/dpg/values-aws.yaml > /dev/null
-
   schema-parity:
     runs-on: ubuntu-latest
     # Schema-parity verifies that drizzle-kit push and the bundled
@@ -151,7 +141,7 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y postgresql-client
 
       - name: Apply bundled schema.sql to pg-sql
-        run: psql "$PG_SQL_URL" -v ON_ERROR_STOP=1 -f helmcharts/dpg/charts/api/files/schema.sql
+        run: psql "$PG_SQL_URL" -v ON_ERROR_STOP=1 -f apps/api/db/postgres/schema.sql
 
       - name: Apply Drizzle migrations to pg-drizzle
         env:

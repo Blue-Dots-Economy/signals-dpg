@@ -7,10 +7,13 @@ import {
 import {
   fetchMyActions,
   updateActionStatus,
+  updateActionStatusBulk,
   type FetchMyActionsQuery,
   type UpdateActionStatusPayload,
+  type UpdateActionStatusResponse,
   type Action,
 } from '@/lib/action-api';
+import type { BulkEnvelope } from '@/lib/bulk';
 
 // ─── Query Keys ───────────────────────────────────────────────────
 
@@ -123,6 +126,21 @@ export function useUpdateActionStatus() {
     },
     onSuccess: () => {
       // Invalidate all action-related queries to refresh data
+      queryClient.invalidateQueries({ queryKey: actionKeys.all });
+    },
+  });
+}
+
+/**
+ * Bulk update action statuses. Returns the full envelope (so callers can show
+ * partial-success). Invalidates all action queries on settle.
+ */
+export function useUpdateActionStatusBulk() {
+  const queryClient = useQueryClient();
+
+  return useMutation<BulkEnvelope<UpdateActionStatusResponse>, Error, UpdateActionStatusPayload[]>({
+    mutationFn: (payloads) => updateActionStatusBulk(payloads),
+    onSettled: () => {
       queryClient.invalidateQueries({ queryKey: actionKeys.all });
     },
   });

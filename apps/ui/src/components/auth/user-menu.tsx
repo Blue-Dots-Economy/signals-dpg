@@ -1,3 +1,4 @@
+import { useTranslation } from 'react-i18next';
 import { useAuth } from '@/contexts/auth-context';
 import {
   Popover,
@@ -9,16 +10,17 @@ import { toast } from 'sonner';
 
 export function UserMenu() {
   const { user, signOut } = useAuth();
+  const { t } = useTranslation();
 
   const handleSignOut = async () => {
     try {
       await signOut();
-      toast.success('Signed out', {
-        description: 'You\'ve been signed out safely. Sign back in whenever you\'re ready.',
+      toast.success(t('menu.toast_signed_out'), {
+        description: t('menu.toast_signed_out_desc'),
       });
     } catch {
-      toast.error('Couldn\'t sign out', {
-        description: 'Something went wrong. Please try again — if the problem persists, refresh the page.',
+      toast.error(t('menu.toast_sign_out_error'), {
+        description: t('menu.toast_sign_out_error_desc'),
       });
     }
   };
@@ -75,7 +77,7 @@ export function UserMenu() {
             className="flex w-full items-center gap-2 rounded-sm px-3 py-2 text-sm text-destructive hover:bg-destructive/10"
           >
             <LogOut className="h-4 w-4" />
-            Sign out
+            {t('menu.sign_out')}
           </button>
         </div>
       </PopoverContent>
