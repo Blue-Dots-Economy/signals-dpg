@@ -57,7 +57,7 @@ export function UserMenu() {
           )}
         </button>
       </PopoverTrigger>
-      <PopoverContent className="w-64 p-0" align="end">
+      <PopoverContent className="z-[1000] w-64 p-0" align="end" sideOffset={8}>
         <div className="flex items-center gap-3 p-4">
           <div className="flex h-10 w-10 items-center justify-center rounded-full bg-primary text-sm font-medium text-primary-foreground">
             {initials}
