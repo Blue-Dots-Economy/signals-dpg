@@ -264,6 +264,20 @@ export function HomePage() {
 
   const network = resolvedNetwork;
 
+  // Resolve a map marker's label from its domain's card.title_field so titles
+  // are correct even in the "All" view where markers span multiple domains.
+  const resolveMarkerLabel = React.useCallback(
+    (item: { id: string; domain?: string; data: Record<string, unknown> }) => {
+      const domain = item.domain
+        ? network?.domains.find((d) => d.id === item.domain)
+        : undefined;
+      const titleField = domain?.card?.title_field;
+      const value = titleField ? item.data[titleField] : undefined;
+      return value != null && String(value).trim() ? String(value) : undefined;
+    },
+    [network]
+  );
+
   // Fetch all user profiles across all domains to discover their domain
   React.useEffect(() => {
     if (!network || !user) return;
@@ -1014,6 +1028,7 @@ export function HomePage() {
             ) : (
               <MapView
                 schema={activeSchema!}
+                resolveMarkerLabel={resolveMarkerLabel}
                 items={Object.values(filteredDomainItems).flat()}
                 focusPoint={
                   myItem && myItem.item_latitude != null && myItem.item_longitude != null

@@ -36,6 +36,17 @@ interface MapViewProps {
   filtersSlot?: React.ReactNode;
   /** Optional custom popup renderer passed to the active provider. */
   renderPopup?: (marker: MapMarker) => React.ReactNode;
+  /**
+   * Resolve a marker's display label per item — used to honour each domain's
+   * `card.title_field` when items span multiple domains (the "All" view), where
+   * a single `schema`-based heuristic can't pick the right title field. Returns
+   * undefined to fall back to the schema heuristic.
+   */
+  resolveMarkerLabel?: (item: {
+    id: string;
+    domain?: string;
+    data: Record<string, unknown>;
+  }) => string | undefined;
 }
 
 const INDIA_CENTER: [number, number] = [20.5937, 78.9629];
@@ -51,6 +62,7 @@ export function MapView({
   focusPoint,
   filtersSlot,
   renderPopup,
+  resolveMarkerLabel,
 }: MapViewProps) {
   const { t } = useTranslation();
   const MapProviderComponent = getActiveMapProvider();
@@ -150,9 +162,12 @@ export function MapView({
           // Skip items without any location data
           if (lat === null || lng === null) return null;
 
-          const label = titleField
-            ? String(item.data[titleField] ?? 'Item')
-            : 'Item';
+          // Prefer the per-domain card.title_field (works across domains in the
+          // "All" view); fall back to the single-schema heuristic, then 'Item'.
+          const resolvedLabel = resolveMarkerLabel?.(item)?.trim();
+          const label =
+            resolvedLabel ||
+            (titleField ? String(item.data[titleField] ?? 'Item') : 'Item');
 
           return {
             id: item.id,
@@ -176,7 +191,7 @@ export function MapView({
 
     resolveMarkers();
     return () => { cancelled = true; };
-  }, [items, schema]);
+  }, [items, schema, resolveMarkerLabel]);
 
   // The map and the maximize button always render. Loading and empty states are
   // shown as overlays ON TOP of the map rather than replacing it — otherwise a
