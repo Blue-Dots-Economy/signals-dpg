@@ -2,8 +2,8 @@ import { type FastifyPluginAsyncZod } from 'fastify-type-provider-zod';
 import z, { CreateItemBodySchema } from '@dpg/schemas';
 import { FastifyReply, FastifyRequest } from 'fastify';
 import { db } from '@api/db/postgres/drizzle_config';
-import { DrizzleQueryError } from 'drizzle-orm';
-import { DatabaseError, ensureItemPartition } from '@dpg/database';
+import { DrizzleQueryError, and, eq } from 'drizzle-orm';
+import { DatabaseError, ensureItemPartition, items } from '@dpg/database';
 import { auth_middleware_if_enabled } from '@api/plugins/auth/auth_middleware';
 import {
   isServedDomainBinding,
@@ -11,6 +11,7 @@ import {
 } from '@/utils/served_domain_guard';
 import { invalidateItemFetchCache } from '@/utils/item_fetch_cache_invalidate';
 import { createItemInternal, ItemServiceError } from '@/services/item_service';
+import { resolveDomainLock } from './resolve_domain_lock';
 
 type CreateItemRequest = FastifyRequest<{
   Body: z.infer<typeof CreateItemBodySchema>;
@@ -82,6 +83,37 @@ export const create_item_handler = async (
       body.item_network,
       body.item_domain
     );
+  }
+
+  // Single-domain lock: a user may only create items in the one domain they
+  // already hold within this network. The lock is derived live from the items
+  // table (no membership column). Admin api-key callers bypass — they act on
+  // behalf of a user with explicit intent. Empty set => not yet locked, so any
+  // served domain is allowed; deleting all their items releases the lock.
+  if (!isAdminApiCaller) {
+    const heldRows = await db
+      .selectDistinct({ item_domain: items.item_domain })
+      .from(items)
+      .where(
+        and(
+          eq(items.created_by, userId),
+          eq(items.item_network, body.item_network),
+        ),
+      );
+
+    const lock = resolveDomainLock(
+      heldRows.map((r) => r.item_domain),
+      body.item_domain,
+    );
+
+    if (!lock.allowed) {
+      return reply.code(403).send({
+        error: 'DOMAIN_LOCKED',
+        message: `You are registered as "${lock.lockedDomain}" in "${body.item_network}" and cannot create items under "${body.item_domain}".`,
+        locked_domain: lock.lockedDomain,
+        requested_domain: body.item_domain,
+      });
+    }
   }
 
   try {
