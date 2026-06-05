@@ -152,9 +152,13 @@ export function ItemCard({
             </div>
           )}
 
-          {/* Action buttons (Connect / See Match Score) — supplied by the caller */}
+          {/* Action buttons (Connect / See Match Score) — supplied by the caller.
+              justify-between spreads natural-width list buttons to the left/right
+              edges; the map popup's buttons use flex-1 so they fill instead. */}
           {actions && (
-            <div className="flex flex-wrap gap-2 px-4 pb-4 pt-2">{actions}</div>
+            <div className="flex flex-wrap items-center justify-between gap-2 px-4 pb-4 pt-2">
+              {actions}
+            </div>
           )}
         </div>
       )}
