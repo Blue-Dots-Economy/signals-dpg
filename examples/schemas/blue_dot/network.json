@@ -116,6 +116,11 @@
         }
       },
       "id": "seeker",
+      "card": {
+        "title_field": "name",
+        "avatar_from": "name",
+        "default_fields": ["location", "natureOfJobsInterestedIn", "highestQualificationOrSkill", "workExperience"]
+      },
       "dashboard_tiles": {
         "total_items": "Total Job Seekers",
         "complete_profiles": "Profiles Complete",
@@ -263,6 +268,11 @@
         }
       },
       "id": "provider",
+      "card": {
+        "title_field": "jobProviderName",
+        "avatar_from": "jobProviderName",
+        "default_fields": ["role", "jobProviderLocation", "natureOfJob", "positions"]
+      },
       "dashboard_tiles": {
         "total_items": "Total Job Postings",
         "complete_profiles": "Postings Complete",

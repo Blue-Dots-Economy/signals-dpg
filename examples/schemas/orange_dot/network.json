@@ -108,6 +108,11 @@
         }
       },
       "id": "tourist",
+      "card": {
+        "title_field": "name",
+        "avatar_from": "name",
+        "default_fields": ["nationality", "party_composition", "interest", "budget_band"]
+      },
       "dashboard_tiles": {
         "total_items": "Total Tourists",
         "complete_profiles": "Tourist Tokens Active",
@@ -223,6 +228,11 @@
         }
       },
       "id": "practitioner",
+      "card": {
+        "title_field": "name",
+        "avatar_from": "name",
+        "default_fields": ["category", "area", "pricing", "services"]
+      },
       "dashboard_tiles": {
         "total_items": "Total Orange Dots",
         "complete_profiles": "Verified Listings",
@@ -253,6 +263,10 @@
           "from_domain": "tourist",
           "to_network": "orange_dot",
           "to_domain": "practitioner",
+          "requirement_schema": {
+            "type": "object",
+            "properties": {}
+          },
           "event_schema": {
             "$schema": "https://json-schema.org/draft/2020-12/schema",
             "title": "Tourist → Practitioner Connect Event",

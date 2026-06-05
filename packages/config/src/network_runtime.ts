@@ -6,12 +6,20 @@ export type ServedDomainBinding = {
 
 export type JsonSchemaDocument = Record<string, unknown>;
 
+export type CardConfig = {
+  title_field?: string;
+  subtitle_field?: string;
+  avatar_from?: string;
+  default_fields?: string[];
+};
+
 export type NetworkDomainConfig = {
   id: string;
   description?: string;
   minimum_cache_ttl_seconds?: number;
   item_schemas?: Record<string, JsonSchemaDocument>;
   default_item_schemas?: Record<string, JsonSchemaDocument>;
+  card?: CardConfig;
 };
 
 type NetworkInstanceConfig = {

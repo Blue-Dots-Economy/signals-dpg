@@ -67,6 +67,17 @@ const DashboardTileLabelsSchema = z.object({
   has_applications: z.string().min(1).optional(),
 }).strict();
 
+// Per-domain card display config (consumed by the UI item card). Drives which
+// fields show by default on a card and what becomes the heading / avatar; the
+// rest of the schema's fields move behind the "view more" expander. Optional —
+// domains without a `card` block fall back to a best-guess in the UI.
+const CardConfigSchema = z.object({
+  title_field: z.string().min(1).optional(),
+  subtitle_field: z.string().min(1).optional(),
+  avatar_from: z.string().min(1).optional(),
+  default_fields: z.array(z.string().min(1)).optional().default([]),
+}).strict();
+
 const NetworkDomainSchema = z.object({
   id: z.string().min(1),
   description: z.string().optional(),
@@ -81,6 +92,7 @@ const NetworkDomainSchema = z.object({
     .default({}),
   status_rules: z.array(StatusRuleSchema).min(1),
   dashboard_tiles: DashboardTileLabelsSchema.optional(),
+  card: CardConfigSchema.optional(),
 }).superRefine((domain, ctx) => {
   const last = domain.status_rules[domain.status_rules.length - 1];
   if (last.when !== 'default') {

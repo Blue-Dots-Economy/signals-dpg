@@ -692,7 +692,7 @@ export function HomePage() {
           </div>
           <div className="flex-1 p-6 space-y-4">
             <Skeleton className="h-7 w-40" />
-            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            <div className="grid grid-cols-1 items-start gap-4 sm:grid-cols-2 lg:grid-cols-3">
               {Array.from({ length: 6 }).map((_, i) => (
                 <Skeleton key={i} className="h-40 rounded-lg" />
               ))}
@@ -891,12 +891,13 @@ export function HomePage() {
                     domainActions,
                     domainDescription: domain.description,
                     domainLabel,
+                    cardConfig: domain.card,
                   }));
                 });
 
                 if (loading) {
                   return (
-                    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                    <div className="grid grid-cols-1 items-start gap-4 sm:grid-cols-2 lg:grid-cols-3">
                       {Array.from({ length: 6 }).map((_, i) => (
                         <DomainCard key={i} schema={{}} data={{}} loading />
                       ))}
@@ -909,8 +910,8 @@ export function HomePage() {
                 }
 
                 return (
-                  <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-                    {allFlatItems.map(({ item, schema, domainActions, domainDescription, domainLabel }) => {
+                  <div className="grid grid-cols-1 items-start gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                    {allFlatItems.map(({ item, schema, domainActions, domainDescription, domainLabel, cardConfig }) => {
                       const fullItem = Object.values(domainItems)
                         .flat()
                         .find((i) => i.item_id === item.id);
@@ -928,6 +929,7 @@ export function HomePage() {
                             schema={schema!}
                             schemaDescription={domainDescription}
                             domainLabel={domainLabel}
+                            cardConfig={cardConfig}
                             data={item.data}
                             actions={domainActions}
                             selectionMode={browseSelection.selectMode}
@@ -961,6 +963,7 @@ export function HomePage() {
                 schema={activeSchema!}
                 schemaName={selectedDomain}
                 schemaDescription={currentDomainLabel}
+                cardConfig={network?.domains.find((d) => d.id === selectedDomain)?.card}
                 items={filteredDomainItems[selectedDomain] ?? []}
                 fullItems={domainItems[selectedDomain] ?? []}
                 actions={actions}
@@ -1024,9 +1027,17 @@ export function HomePage() {
                     )?.find((i) => i.item_id === marker.id) ?? null;
                   const domainActions = marker.domain ? getActionsForDomain(marker.domain) : [];
                   const connectAction = domainActions[0];
+                  const markerDomain = marker.domain
+                    ? network?.domains.find((d) => d.id === marker.domain)
+                    : undefined;
+                  const markerSchema = markerDomain?.item_schemas
+                    ? (Object.values(markerDomain.item_schemas)[0] as import('@rjsf/utils').RJSFSchema)
+                    : activeSchema;
                   return (
                     <MarkerPopupCard
                       marker={marker}
+                      schema={markerSchema}
+                      cardConfig={markerDomain?.card}
                       actions={myItem && connectAction ? [connectAction] : []}
                       onConnect={
                         myItem && connectAction
