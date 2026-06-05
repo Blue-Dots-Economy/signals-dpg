@@ -6,7 +6,7 @@ import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { cn } from '@/lib/utils';
-import type { DotNetworkDomain } from '@/engine/types';
+import type { DotNetworkDomain, ViewMode } from '@/engine/types';
 import { getEnumFilterFieldsForDomains } from '@/lib/enum-filters';
 import type { EnumFilterField } from '@/lib/enum-filters';
 
@@ -24,6 +24,8 @@ export interface MapFiltersPanelProps {
   selectedFields: Record<string, string[]>;
   /** Called when any enum field filter selection changes. */
   onFieldsChange: (fields: Record<string, string[]>) => void;
+  /** Current browse view — tailors the help text (map markers vs listings). */
+  viewMode?: ViewMode;
 }
 
 // ─── Chip toggle button ────────────────────────────────────────────────────────
@@ -195,6 +197,7 @@ export function MapFiltersPanel({
   onDomainsChange,
   selectedFields,
   onFieldsChange,
+  viewMode = 'map',
 }: MapFiltersPanelProps) {
   const { t } = useTranslation();
   const [open, setOpen] = React.useState(false);
@@ -367,7 +370,7 @@ export function MapFiltersPanel({
 
           {activeCount === 0 && (
             <p className="text-[10px] text-muted-foreground">
-              {t('filters.help')}
+              {t(viewMode === 'list' ? 'filters.help_list' : 'filters.help')}
             </p>
           )}
         </div>

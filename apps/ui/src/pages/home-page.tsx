@@ -765,6 +765,7 @@ export function HomePage() {
       onDomainsChange={handleMapDomainsChange}
       selectedFields={mapSelectedFields}
       onFieldsChange={handleMapFieldsChange}
+      viewMode={viewMode}
     />
   );
 
