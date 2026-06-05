@@ -26,6 +26,7 @@ import '@/components/map/providers';
 import { fetchItems, performAction, performActionsBulk, type Item } from '@/lib/item-api';
 import { bulkFailureIndices, firstBulkError } from '@/lib/bulk';
 import { useCardSelection } from '@/hooks/use-card-selection';
+import { useEqualRowHeights } from '@/hooks/use-equal-row-heights';
 import { SelectableCard } from '@/components/selection/selectable-card';
 import { BulkActionBar } from '@/components/selection/bulk-action-bar';
 import { ActionModal } from '@/components/actions/action-modal';
@@ -152,6 +153,7 @@ function resolveDefaultViewMode(): ViewMode {
 export function HomePage() {
   const { t } = useTranslation();
   const { user } = useAuth();
+  const allCardsGridRef = useEqualRowHeights<HTMLDivElement>();
   const [searchParams, setSearchParams] = useSearchParams();
   const [search, setSearch] = React.useState('');
   const [viewMode, setViewMode] = React.useState<ViewMode>(
@@ -910,7 +912,7 @@ export function HomePage() {
                 }
 
                 return (
-                  <div className="grid grid-cols-1 items-start gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                  <div ref={allCardsGridRef} className="grid grid-cols-1 items-start gap-4 sm:grid-cols-2 lg:grid-cols-3">
                     {allFlatItems.map(({ item, schema, domainActions, domainDescription, domainLabel, cardConfig }) => {
                       const fullItem = Object.values(domainItems)
                         .flat()

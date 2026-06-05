@@ -80,10 +80,12 @@ export function ItemCard({
 
   return (
     <div
+      data-item-card={variant === 'list' ? '' : undefined}
+      data-expanded={variant === 'list' ? open : undefined}
       className={cn(
         'flex flex-col overflow-hidden rounded-2xl bg-background text-foreground shadow-sm',
         variant === 'list' &&
-          'transition-all hover:shadow-md motion-safe:hover:-translate-y-0.5',
+          'transition hover:shadow-md motion-safe:hover:-translate-y-0.5',
         className
       )}
       onClick={onClick}
@@ -122,33 +124,39 @@ export function ItemCard({
           resolved.extraRows.map((row) => <FieldRow key={row.key} row={row} />)}
       </div>
 
-      {/* View more / Hide accordion */}
-      {hasExtra && (
-        <div className="px-4 pb-1">
-          <button
-            type="button"
-            onClick={(e) => {
-              e.stopPropagation();
-              setOpen((v) => !v);
-            }}
-            className="flex w-full items-center justify-center gap-1.5 rounded-lg border border-border bg-muted/40 py-2 text-[13px] font-semibold text-primary hover:bg-muted"
-          >
-            {open
-              ? t('card.hide_details', 'Hide details')
-              : t('card.view_more', 'View more details')}
-            <ChevronDown
-              className={cn(
-                'h-4 w-4 transition-transform',
-                open && 'rotate-180'
-              )}
-            />
-          </button>
-        </div>
-      )}
+      {/* Footer pinned to the bottom (mt-auto): when a card is taller than its
+          content (equal-height rows), the extra space sits above the footer —
+          after the last field — never below the buttons. */}
+      {(hasExtra || actions) && (
+        <div className="mt-auto pt-1">
+          {hasExtra && (
+            <div className="px-4 pb-1">
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setOpen((v) => !v);
+                }}
+                className="flex w-full items-center justify-center gap-1.5 rounded-lg border border-border bg-muted/40 py-2 text-[13px] font-semibold text-primary hover:bg-muted"
+              >
+                {open
+                  ? t('card.hide_details', 'Hide details')
+                  : t('card.view_more', 'View more details')}
+                <ChevronDown
+                  className={cn(
+                    'h-4 w-4 transition-transform',
+                    open && 'rotate-180'
+                  )}
+                />
+              </button>
+            </div>
+          )}
 
-      {/* Action buttons (Connect / See Match Score) — supplied by the caller */}
-      {actions && (
-        <div className="flex flex-wrap gap-2 px-4 pb-4 pt-2">{actions}</div>
+          {/* Action buttons (Connect / See Match Score) — supplied by the caller */}
+          {actions && (
+            <div className="flex flex-wrap gap-2 px-4 pb-4 pt-2">{actions}</div>
+          )}
+        </div>
       )}
     </div>
   );

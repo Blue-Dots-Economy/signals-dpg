@@ -6,6 +6,7 @@ import { MatchScoreCard } from '@/components/match-score';
 import { EmptyState } from '@/components/empty-state';
 import type { Item } from '@/lib/item-api';
 import { SelectableCard } from '@/components/selection/selectable-card';
+import { useEqualRowHeights } from '@/hooks/use-equal-row-heights';
 
 interface CardGridProps {
   schema: RJSFSchema;
@@ -51,6 +52,8 @@ export function CardGrid({
   selectedDomain,
   selection,
 }: CardGridProps) {
+  const gridRef = useEqualRowHeights<HTMLDivElement>();
+
   if (loading) {
     return (
       <div className="grid grid-cols-1 items-start gap-4 sm:grid-cols-2 lg:grid-cols-3">
@@ -71,7 +74,7 @@ export function CardGrid({
   }
 
   return (
-    <div className="grid grid-cols-1 items-start gap-4 sm:grid-cols-2 lg:grid-cols-3">
+    <div ref={gridRef} className="grid grid-cols-1 items-start gap-4 sm:grid-cols-2 lg:grid-cols-3">
       {items.map((item) => {
         // Find the full Item object if available
         const fullItem = fullItems.find((i) => i.item_id === item.id);
