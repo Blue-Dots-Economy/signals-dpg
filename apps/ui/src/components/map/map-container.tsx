@@ -261,9 +261,23 @@ export function MapView({
  * separate into individually-clickable pins. The offset is tiny relative to a
  * city-centroid's inherent imprecision, so it does not misrepresent location.
  */
+/**
+ * Stable hash of a string to a unit float in [0, 1) (FNV-1a, 32-bit). Used to
+ * derive a marker's fan-out angle from its item id so the offset is a pure
+ * function of the item — never of the surrounding group.
+ */
+function hashToUnit(str: string): number {
+  let h = 2166136261;
+  for (let i = 0; i < str.length; i++) {
+    h ^= str.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  return (h >>> 0) / 4294967296;
+}
+
 function spreadCoLocatedMarkers(markers: MapMarker[]): MapMarker[] {
-  // ~15 metres expressed in degrees of latitude (1° lat ≈ 111_320 m).
-  const RADIUS_DEG = 15 / 111_320;
+  // ~10 metres expressed in degrees of latitude (1° lat ≈ 111_320 m).
+  const RADIUS_DEG = 10 / 111_320;
 
   const groups = new Map<string, MapMarker[]>();
   for (const marker of markers) {
@@ -279,20 +293,21 @@ function spreadCoLocatedMarkers(markers: MapMarker[]): MapMarker[] {
       result.push(group[0]);
       continue;
     }
-    // Evenly distribute the group around a small circle centered on the
-    // shared coordinate. Longitude offset is scaled by cos(lat) so the spread
-    // stays roughly circular on the ground.
-    const n = group.length;
+    // Fan the group onto a small circle centered on the shared coordinate.
+    // The angle is a deterministic function of each marker's id, so the same
+    // item always lands at the same offset regardless of which other markers
+    // are present — switching filters (All vs a single domain) no longer moves
+    // a pin. Longitude offset is scaled by cos(lat) to stay circular on ground.
     const latRad = (group[0].lat * Math.PI) / 180;
     const lngScale = Math.max(Math.cos(latRad), 0.01);
-    group.forEach((marker, i) => {
-      const angle = (2 * Math.PI * i) / n;
+    for (const marker of group) {
+      const angle = hashToUnit(marker.id) * 2 * Math.PI;
       result.push({
         ...marker,
         lat: marker.lat + RADIUS_DEG * Math.cos(angle),
         lng: marker.lng + (RADIUS_DEG * Math.sin(angle)) / lngScale,
       });
-    });
+    }
   }
 
   return result;
