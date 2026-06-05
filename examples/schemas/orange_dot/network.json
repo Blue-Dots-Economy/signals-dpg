@@ -48,7 +48,7 @@
               "type": "string",
               "title": "Travelling As",
               "description": "Who you're travelling with.",
-              "enum": ["solo", "couple", "family", "group", "solo_female"]
+              "enum": ["Solo", "Couple", "Family", "Group", "Solo Female"]
             },
             "phone_number": {
               "type": "string",
