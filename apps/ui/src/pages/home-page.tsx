@@ -182,13 +182,16 @@ export function HomePage() {
   const [resolvedNetwork, setResolvedNetwork] = React.useState<DotNetworkSchema | null>(null);
   const [allNetworks, setAllNetworks] = React.useState<DotNetworkSchema[]>([]);
   const configuredNetworkIds = parseNetworkIds(import.meta.env.VITE_NETWORK_ID);
-  
-  // Get network from URL query param, fallback to env config
+
+  // Get network from URL query param. Don't pre-seed from VITE_NETWORK_ID —
+  // that env can drift from what the API actually serves (e.g. a deploy
+  // restricted to purple_dot but a build with VITE_NETWORK_ID=blue_dot),
+  // causing /schemas?network=blue_dot fetches that return []. The
+  // fetch-networks effect below sets selectedNetworkId from the API's first
+  // served network once it loads.
   const networkFromUrl = searchParams.get('network');
-  const initialNetworkId = networkFromUrl && configuredNetworkIds.includes(networkFromUrl)
-    ? networkFromUrl
-    : (configuredNetworkIds[0] || null);
-  
+  const initialNetworkId = networkFromUrl;
+
   const [selectedNetworkId, setSelectedNetworkId] = React.useState<string | null>(initialNetworkId);
   const [domainItems, setDomainItems] = React.useState<Record<string, Item[]>>({});
   const [myItems, setMyItems] = React.useState<Item[]>([]);

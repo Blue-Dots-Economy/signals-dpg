@@ -1,6 +1,7 @@
 import * as React from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { resolveTheme, type NetworkTheme } from './network-themes';
+import { fetchNetworkConfigs } from '@/lib/network-api';
 
 interface NetworkThemeContextValue {
   themeId: string;
@@ -110,14 +111,39 @@ export function NetworkThemeProvider({ children }: { children: React.ReactNode }
   const [searchParams] = useSearchParams();
   const networkFromUrl = searchParams.get('network');
 
+  // Once the API tells us which networks are served, the first one becomes
+  // the de-facto default — beats the hardcoded `'blue_dot'` fallback which
+  // breaks single-network deploys (e.g. purple_dot only) by triggering empty
+  // /schemas?network=blue_dot fetches.
+  const [servedIds, setServedIds] = React.useState<string[] | null>(null);
+  React.useEffect(() => {
+    let cancelled = false;
+    fetchNetworkConfigs()
+      .then((configs) => {
+        if (cancelled) return;
+        setServedIds(configs.map((c) => c.id));
+      })
+      .catch(() => {
+        /* fall back to runtime / env / hardcoded path below */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   const themeId = React.useMemo(() => {
     // URL wins. Otherwise reuse the last network the user was on (routes like
     // /my-actions carry no ?network=, and falling back to the build default
-    // would flip the theme to the wrong brand mid-session).
-    if (networkFromUrl) return networkFromUrl;
+    // would flip the theme to the wrong brand mid-session). But only honour
+    // stored / URL values once we know they're actually served by this
+    // deploy — otherwise stale localStorage from a previous multi-network
+    // session triggers /schemas?network=blue_dot calls that return [] forever.
+    const isServed = (id: string) => !servedIds || servedIds.includes(id);
+
+    if (networkFromUrl && isServed(networkFromUrl)) return networkFromUrl;
     // Runtime config (window.__DPG_UI_CONFIG__.VITE_NETWORK_NAME) — written
-    // by the chart at deploy time. Must win over localStorage so a fresh
-    // visitor lands on the chart-configured brand even without ?network=.
+    // by the chart at deploy time. It is deploy-authoritative, so it wins
+    // over localStorage without the served-list gate.
     const runtimeNet =
       typeof window !== 'undefined'
         ? (window as Window).__DPG_UI_CONFIG__?.VITE_NETWORK_NAME
@@ -129,22 +155,31 @@ export function NetworkThemeProvider({ children }: { children: React.ReactNode }
     } catch {
       /* localStorage unavailable */
     }
-    if (stored) return stored;
+    if (stored && isServed(stored)) return stored;
+
+    // Once we know the served list, use the first entry.
+    if (servedIds && servedIds.length > 0) return servedIds[0];
+
     const fromEnv =
       typeof __DEFAULT_NETWORK_THEME__ !== 'undefined' ? __DEFAULT_NETWORK_THEME__ : '';
-    return fromEnv || 'blue_dot';
-  }, [networkFromUrl]);
+    // Return '' (rather than a hardcoded fallback like 'blue_dot') while the
+    // served-defaults fetch is in flight — consumers like
+    // useNetworkConfig(themeId) gate on truthiness, so an empty id suppresses
+    // the bogus first-paint request for a network the API doesn't serve.
+    return fromEnv || '';
+  }, [networkFromUrl, servedIds]);
 
-  // Persist the network whenever it's explicitly chosen via the URL so other
-  // routes inherit the same brand theme.
+  // Persist the network whenever the resolved themeId is one this instance
+  // actually serves — also flushes a stale stored value that didn't survive
+  // the isServed check above.
   React.useEffect(() => {
-    if (!networkFromUrl) return;
+    if (!themeId) return;
     try {
-      localStorage.setItem(ACTIVE_NETWORK_KEY, networkFromUrl);
+      localStorage.setItem(ACTIVE_NETWORK_KEY, themeId);
     } catch {
       /* ignore */
     }
-  }, [networkFromUrl]);
+  }, [themeId]);
 
   const theme = React.useMemo(() => resolveTheme(themeId), [themeId]);
 
