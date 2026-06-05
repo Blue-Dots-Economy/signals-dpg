@@ -138,6 +138,7 @@
   "filters.close": "ಫಿಲ್ಟರ್‌ಗಳು ಮುಚ್ಚಿರಿ",
   "filters.domain_group": "ಡೊಮೇನ್",
   "filters.help": "ನಕ್ಷೆ ಮಾರ್ಕರ್‌ಗಳನ್ನು ಫಿಲ್ಟರ್ ಮಾಡಲು ಮೇಲಿನ ಆಯ್ಕೆಗಳನ್ನು ಆರಿಸಿ.",
+  "filters.help_list": "ಪಟ್ಟಿಗಳನ್ನು ಫಿಲ್ಟರ್ ಮಾಡಲು ಮೇಲಿನ ಆಯ್ಕೆಗಳನ್ನು ಆರಿಸಿ.",
   "filters.no_matches": "ಯಾವ ಫಲಿತಾಂಶಗಳೂ ಇಲ್ಲ",
   "filters.open": "ನಕ್ಷೆ ಫಿಲ್ಟರ್‌ಗಳು ತೆರೆಯಿರಿ",
   "filters.search_placeholder": "{{field}} ಹುಡುಕಿ…",

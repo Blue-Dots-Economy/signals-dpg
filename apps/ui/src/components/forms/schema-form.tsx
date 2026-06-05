@@ -1,8 +1,70 @@
+import * as React from 'react';
 import Form from '@rjsf/shadcn';
 import validator from '@rjsf/validator-ajv8';
 import type { RJSFSchema, UiSchema, RegistryWidgetsType, ObjectFieldTemplateProps } from '@rjsf/utils';
 import { DatePickerWidget } from './custom-widgets/date-picker-widget';
 import { formLayouts } from '@/theme/form-layouts';
+
+interface RjsfError {
+  property?: string;
+  name?: string;
+  params?: { missingProperty?: string };
+}
+
+/**
+ * Map an RJSF validation error to the DOM id RJSF assigns the offending field.
+ * RJSF defaults to idPrefix "root" + idSeparator "_", so a property like
+ * ".trip_window_start" becomes "root_trip_window_start" and ".items.0.name"
+ * becomes "root_items_0_name". (RJSF v6 already points `property` at the field
+ * for `required` errors, so no special-casing is needed.)
+ */
+function fieldIdFromError(error: RjsfError): string {
+  const segments = (error.property ?? '')
+    .replace(/\[(\w+)\]/g, '.$1')
+    .split('.')
+    .filter(Boolean);
+  return ['root', ...segments].join('_');
+}
+
+/**
+ * `focusOnFirstError` handler: on a blocked submit RJSF passes us the first
+ * error; we smooth-scroll its field to the centre of the viewport and focus it,
+ * so the user is taken to the problem instead of nothing happening. Resolution
+ * mirrors RJSF's own (exact id, then a prefix match) because some shadcn widgets
+ * put the field id on a wrapping button rather than a native input.
+ */
+function focusErrorField(container: HTMLElement | null, error: RjsfError): void {
+  if (!container) return;
+  const elementId = fieldIdFromError(error);
+  const form = container.querySelector('form');
+
+  // Resolve like RJSF does: the form's elements collection matches by id OR
+  // name, with a prefix fallback for widgets (e.g. shadcn radios/selects) that
+  // put the id on a wrapping button rather than a native input.
+  const named = form?.elements.namedItem(elementId) ?? null;
+  let candidate: Element | null =
+    named instanceof RadioNodeList ? (named.item(0) as Element | null) : named;
+  if (!candidate) {
+    try {
+      candidate = container.querySelector(`#${CSS.escape(elementId)}`);
+    } catch {
+      candidate = null;
+    }
+  }
+  if (!candidate) {
+    candidate = container.querySelector(
+      `input[id^="${elementId}"], button[id^="${elementId}"], [id^="${elementId}"]`
+    );
+  }
+  if (!(candidate instanceof HTMLElement)) return;
+  const field = candidate;
+
+  field.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  const focusable = field.matches('input, select, textarea, button, [tabindex]')
+    ? field
+    : field.querySelector<HTMLElement>('input, select, textarea, button, [tabindex]');
+  (focusable ?? field).focus({ preventScroll: true });
+}
 
 interface SchemaFormProps {
   schema: RJSFSchema;
@@ -263,8 +325,10 @@ export function SchemaForm({
     ? { ObjectFieldTemplate: SectionedObjectFieldTemplate(domainId) }
     : undefined;
 
+  const containerRef = React.useRef<HTMLDivElement>(null);
+
   return (
-    <div className={className}>
+    <div className={className} ref={containerRef}>
       <Form
         id={id}
         schema={schemaWithoutMeta}
@@ -278,6 +342,9 @@ export function SchemaForm({
           if (formData) onSubmit(formData as Record<string, unknown>);
         }}
         onError={(errors) => onError?.(errors)}
+        focusOnFirstError={(error) =>
+          focusErrorField(containerRef.current, error as RjsfError)
+        }
         showErrorList={false}
         liveValidate={false}
         noHtml5Validate

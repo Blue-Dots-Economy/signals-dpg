@@ -15,6 +15,13 @@ export interface ActionDisplay {
   gradient: string;
   buttonClass: string;
   toneText: string;
+  /**
+   * When true, the modal header uses the active network theme gradient
+   * (--brand-hero-from → --brand-hero-to) instead of the static `gradient`
+   * class. Connect is themed per dot; semantic actions (accept/reject/…)
+   * keep their fixed colours.
+   */
+  themed?: boolean;
 }
 
 // Visual treatment per action type / status. The gradient is used in the modal
@@ -25,7 +32,8 @@ const ACTION_DISPLAY: Record<string, ActionDisplay> = {
     label: 'Connect',
     gradient: 'from-violet-600 to-indigo-600',
     buttonClass: 'bg-brand-cta hover:brightness-110 text-white',
-    toneText: 'text-violet-50',
+    toneText: 'text-white/85',
+    themed: true,
   },
   accept: {
     icon: CheckCircle2,
@@ -97,7 +105,8 @@ const FALLBACK: ActionDisplay = {
   label: 'Action',
   gradient: 'from-violet-600 to-indigo-600',
   buttonClass: 'bg-brand-cta hover:brightness-110 text-white',
-  toneText: 'text-violet-50',
+  toneText: 'text-white/85',
+  themed: true,
 };
 
 export function getActionDisplay(actionKey: string | null | undefined): ActionDisplay {

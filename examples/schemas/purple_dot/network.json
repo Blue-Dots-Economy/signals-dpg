@@ -197,6 +197,11 @@
         }
       },
       "id": "seeker",
+      "card": {
+        "title_field": "beneficiary_name",
+        "avatar_from": "beneficiary_name",
+        "default_fields": ["disability_type", "looking_for", "service_city", "highest_qualification"]
+      },
       "dashboard_tiles": {
         "total_items": "Total Beneficiaries",
         "complete_profiles": "Profiles Complete",
@@ -373,6 +378,11 @@
         }
       },
       "id": "provider",
+      "card": {
+        "title_field": "organisation_name",
+        "avatar_from": "organisation_name",
+        "default_fields": ["provider_category", "services_offered", "service_cities", "disabilities_served"]
+      },
       "dashboard_tiles": {
         "total_items": "Total Service Providers",
         "complete_profiles": "Profiles Complete",
