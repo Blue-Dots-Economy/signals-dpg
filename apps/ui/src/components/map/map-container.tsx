@@ -36,6 +36,17 @@ interface MapViewProps {
   filtersSlot?: React.ReactNode;
   /** Optional custom popup renderer passed to the active provider. */
   renderPopup?: (marker: MapMarker) => React.ReactNode;
+  /**
+   * Resolve a marker's display label per item — used to honour each domain's
+   * `card.title_field` when items span multiple domains (the "All" view), where
+   * a single `schema`-based heuristic can't pick the right title field. Returns
+   * undefined to fall back to the schema heuristic.
+   */
+  resolveMarkerLabel?: (item: {
+    id: string;
+    domain?: string;
+    data: Record<string, unknown>;
+  }) => string | undefined;
 }
 
 const INDIA_CENTER: [number, number] = [20.5937, 78.9629];
@@ -51,6 +62,7 @@ export function MapView({
   focusPoint,
   filtersSlot,
   renderPopup,
+  resolveMarkerLabel,
 }: MapViewProps) {
   const { t } = useTranslation();
   const MapProviderComponent = getActiveMapProvider();
@@ -150,9 +162,12 @@ export function MapView({
           // Skip items without any location data
           if (lat === null || lng === null) return null;
 
-          const label = titleField
-            ? String(item.data[titleField] ?? 'Item')
-            : 'Item';
+          // Prefer the per-domain card.title_field (works across domains in the
+          // "All" view); fall back to the single-schema heuristic, then 'Item'.
+          const resolvedLabel = resolveMarkerLabel?.(item)?.trim();
+          const label =
+            resolvedLabel ||
+            (titleField ? String(item.data[titleField] ?? 'Item') : 'Item');
 
           return {
             id: item.id,
@@ -176,7 +191,7 @@ export function MapView({
 
     resolveMarkers();
     return () => { cancelled = true; };
-  }, [items, schema]);
+  }, [items, schema, resolveMarkerLabel]);
 
   // The map and the maximize button always render. Loading and empty states are
   // shown as overlays ON TOP of the map rather than replacing it — otherwise a
@@ -246,9 +261,23 @@ export function MapView({
  * separate into individually-clickable pins. The offset is tiny relative to a
  * city-centroid's inherent imprecision, so it does not misrepresent location.
  */
+/**
+ * Stable hash of a string to a unit float in [0, 1) (FNV-1a, 32-bit). Used to
+ * derive a marker's fan-out angle from its item id so the offset is a pure
+ * function of the item — never of the surrounding group.
+ */
+function hashToUnit(str: string): number {
+  let h = 2166136261;
+  for (let i = 0; i < str.length; i++) {
+    h ^= str.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  return (h >>> 0) / 4294967296;
+}
+
 function spreadCoLocatedMarkers(markers: MapMarker[]): MapMarker[] {
-  // ~15 metres expressed in degrees of latitude (1° lat ≈ 111_320 m).
-  const RADIUS_DEG = 15 / 111_320;
+  // ~10 metres expressed in degrees of latitude (1° lat ≈ 111_320 m).
+  const RADIUS_DEG = 10 / 111_320;
 
   const groups = new Map<string, MapMarker[]>();
   for (const marker of markers) {
@@ -264,20 +293,21 @@ function spreadCoLocatedMarkers(markers: MapMarker[]): MapMarker[] {
       result.push(group[0]);
       continue;
     }
-    // Evenly distribute the group around a small circle centered on the
-    // shared coordinate. Longitude offset is scaled by cos(lat) so the spread
-    // stays roughly circular on the ground.
-    const n = group.length;
+    // Fan the group onto a small circle centered on the shared coordinate.
+    // The angle is a deterministic function of each marker's id, so the same
+    // item always lands at the same offset regardless of which other markers
+    // are present — switching filters (All vs a single domain) no longer moves
+    // a pin. Longitude offset is scaled by cos(lat) to stay circular on ground.
     const latRad = (group[0].lat * Math.PI) / 180;
     const lngScale = Math.max(Math.cos(latRad), 0.01);
-    group.forEach((marker, i) => {
-      const angle = (2 * Math.PI * i) / n;
+    for (const marker of group) {
+      const angle = hashToUnit(marker.id) * 2 * Math.PI;
       result.push({
         ...marker,
         lat: marker.lat + RADIUS_DEG * Math.cos(angle),
         lng: marker.lng + (RADIUS_DEG * Math.sin(angle)) / lngScale,
       });
-    });
+    }
   }
 
   return result;

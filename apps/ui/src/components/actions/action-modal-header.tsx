@@ -31,10 +31,18 @@ export function ActionModalHeader({
   return (
     <div
       className={cn(
-        'relative -mx-6 -mt-6 mb-2 overflow-hidden rounded-t-lg bg-gradient-to-br px-6 py-5',
-        display.gradient,
+        'relative -mx-6 -mt-6 mb-2 overflow-hidden rounded-t-lg px-6 py-5',
+        display.themed ? undefined : ['bg-gradient-to-br', display.gradient],
         className
       )}
+      style={
+        display.themed
+          ? {
+              background:
+                'linear-gradient(135deg, var(--brand-hero-from), var(--brand-hero-to))',
+            }
+          : undefined
+      }
     >
       {/* Subtle texture for visual depth */}
       <div

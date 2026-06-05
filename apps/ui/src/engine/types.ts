@@ -45,6 +45,23 @@ export interface StatusRule {
   when: Record<string, unknown> | 'default';
 }
 
+/**
+ * Per-domain card display config (network.json `card` block). Controls which
+ * fields a card shows by default and which become "view more" rows, plus the
+ * heading / avatar source. All fields optional — the UI falls back to a
+ * best-guess when a domain has no `card` block.
+ */
+export interface DotCardConfig {
+  /** Field key whose value is the card heading. */
+  title_field?: string;
+  /** Optional field key rendered as a secondary line under the title. */
+  subtitle_field?: string;
+  /** Field key used to derive avatar initials (defaults to title_field). */
+  avatar_from?: string;
+  /** Ordered field keys shown collapsed; everything else moves behind "view more". */
+  default_fields?: string[];
+}
+
 export interface DotNetworkDomain {
   id: string;
   description: string;
@@ -58,6 +75,8 @@ export interface DotNetworkDomain {
    * derive a best-effort status for each item client-side (see item-status.ts).
    */
   status_rules?: StatusRule[];
+  /** Card display config — see {@link DotCardConfig}. */
+  card?: DotCardConfig;
 }
 
 export interface DotNetworkInteraction {

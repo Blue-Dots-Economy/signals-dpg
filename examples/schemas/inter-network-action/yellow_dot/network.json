@@ -235,7 +235,12 @@
           }
         }
       },
-      "id": "student"
+      "id": "student",
+      "card": {
+        "title_field": "name",
+        "avatar_from": "name",
+        "default_fields": ["location", "email", "phone"]
+      }
     },
     {
       "description": "Tutors on the network.",
@@ -285,7 +290,12 @@
           }
         }
       },
-      "id": "tutor"
+      "id": "tutor",
+      "card": {
+        "title_field": "name",
+        "avatar_from": "name",
+        "default_fields": ["subjects", "experience_years", "teaching_mode"]
+      }
     },
     {
       "description": "Coaching centers on the network.",
@@ -330,7 +340,12 @@
           }
         }
       },
-      "id": "coaching_center"
+      "id": "coaching_center",
+      "card": {
+        "title_field": "name",
+        "avatar_from": "name",
+        "default_fields": ["city", "programs", "seats_available"]
+      }
     }
   ],
   "instances": [

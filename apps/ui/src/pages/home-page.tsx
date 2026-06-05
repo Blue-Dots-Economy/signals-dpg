@@ -26,6 +26,7 @@ import '@/components/map/providers';
 import { fetchItems, performAction, performActionsBulk, type Item } from '@/lib/item-api';
 import { bulkFailureIndices, firstBulkError } from '@/lib/bulk';
 import { useCardSelection } from '@/hooks/use-card-selection';
+import { useEqualRowHeights } from '@/hooks/use-equal-row-heights';
 import { SelectableCard } from '@/components/selection/selectable-card';
 import { BulkActionBar } from '@/components/selection/bulk-action-bar';
 import { ActionModal } from '@/components/actions/action-modal';
@@ -152,6 +153,7 @@ function resolveDefaultViewMode(): ViewMode {
 export function HomePage() {
   const { t } = useTranslation();
   const { user } = useAuth();
+  const allCardsGridRef = useEqualRowHeights<HTMLDivElement>();
   const [searchParams, setSearchParams] = useSearchParams();
   const [search, setSearch] = React.useState('');
   const [viewMode, setViewMode] = React.useState<ViewMode>(
@@ -261,6 +263,20 @@ export function HomePage() {
   }, [selectedNetworkId]);
 
   const network = resolvedNetwork;
+
+  // Resolve a map marker's label from its domain's card.title_field so titles
+  // are correct even in the "All" view where markers span multiple domains.
+  const resolveMarkerLabel = React.useCallback(
+    (item: { id: string; domain?: string; data: Record<string, unknown> }) => {
+      const domain = item.domain
+        ? network?.domains.find((d) => d.id === item.domain)
+        : undefined;
+      const titleField = domain?.card?.title_field;
+      const value = titleField ? item.data[titleField] : undefined;
+      return value != null && String(value).trim() ? String(value) : undefined;
+    },
+    [network]
+  );
 
   // Fetch all user profiles across all domains to discover their domain
   React.useEffect(() => {
@@ -692,7 +708,7 @@ export function HomePage() {
           </div>
           <div className="flex-1 p-6 space-y-4">
             <Skeleton className="h-7 w-40" />
-            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            <div className="grid grid-cols-1 items-start gap-4 sm:grid-cols-2 lg:grid-cols-3">
               {Array.from({ length: 6 }).map((_, i) => (
                 <Skeleton key={i} className="h-40 rounded-lg" />
               ))}
@@ -749,6 +765,7 @@ export function HomePage() {
       onDomainsChange={handleMapDomainsChange}
       selectedFields={mapSelectedFields}
       onFieldsChange={handleMapFieldsChange}
+      viewMode={viewMode}
     />
   );
 
@@ -891,12 +908,13 @@ export function HomePage() {
                     domainActions,
                     domainDescription: domain.description,
                     domainLabel,
+                    cardConfig: domain.card,
                   }));
                 });
 
                 if (loading) {
                   return (
-                    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                    <div className="grid grid-cols-1 items-start gap-4 sm:grid-cols-2 lg:grid-cols-3">
                       {Array.from({ length: 6 }).map((_, i) => (
                         <DomainCard key={i} schema={{}} data={{}} loading />
                       ))}
@@ -909,8 +927,8 @@ export function HomePage() {
                 }
 
                 return (
-                  <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-                    {allFlatItems.map(({ item, schema, domainActions, domainDescription, domainLabel }) => {
+                  <div ref={allCardsGridRef} className="grid grid-cols-1 items-start gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                    {allFlatItems.map(({ item, schema, domainActions, domainDescription, domainLabel, cardConfig }) => {
                       const fullItem = Object.values(domainItems)
                         .flat()
                         .find((i) => i.item_id === item.id);
@@ -928,6 +946,7 @@ export function HomePage() {
                             schema={schema!}
                             schemaDescription={domainDescription}
                             domainLabel={domainLabel}
+                            cardConfig={cardConfig}
                             data={item.data}
                             actions={domainActions}
                             selectionMode={browseSelection.selectMode}
@@ -961,6 +980,7 @@ export function HomePage() {
                 schema={activeSchema!}
                 schemaName={selectedDomain}
                 schemaDescription={currentDomainLabel}
+                cardConfig={network?.domains.find((d) => d.id === selectedDomain)?.card}
                 items={filteredDomainItems[selectedDomain] ?? []}
                 fullItems={domainItems[selectedDomain] ?? []}
                 actions={actions}
@@ -1009,6 +1029,7 @@ export function HomePage() {
             ) : (
               <MapView
                 schema={activeSchema!}
+                resolveMarkerLabel={resolveMarkerLabel}
                 items={Object.values(filteredDomainItems).flat()}
                 focusPoint={
                   myItem && myItem.item_latitude != null && myItem.item_longitude != null
@@ -1024,9 +1045,17 @@ export function HomePage() {
                     )?.find((i) => i.item_id === marker.id) ?? null;
                   const domainActions = marker.domain ? getActionsForDomain(marker.domain) : [];
                   const connectAction = domainActions[0];
+                  const markerDomain = marker.domain
+                    ? network?.domains.find((d) => d.id === marker.domain)
+                    : undefined;
+                  const markerSchema = markerDomain?.item_schemas
+                    ? (Object.values(markerDomain.item_schemas)[0] as import('@rjsf/utils').RJSFSchema)
+                    : activeSchema;
                   return (
                     <MarkerPopupCard
                       marker={marker}
+                      schema={markerSchema}
+                      cardConfig={markerDomain?.card}
                       actions={myItem && connectAction ? [connectAction] : []}
                       onConnect={
                         myItem && connectAction

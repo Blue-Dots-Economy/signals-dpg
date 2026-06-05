@@ -82,6 +82,11 @@
         }
       },
       "id": "student",
+      "card": {
+        "title_field": "Full Name",
+        "avatar_from": "Full Name",
+        "default_fields": ["Location", "Grade", "Academic Stream", "Service Looking For"]
+      },
       "dashboard_tiles": {
         "total_items": "Total Students",
         "complete_profiles": "Profiles Complete",
@@ -180,6 +185,11 @@
         }
       },
       "id": "individual_tutor_weera_counsellor",
+      "card": {
+        "title_field": "Full Name",
+        "avatar_from": "Full Name",
+        "default_fields": ["Location", "Service Offered", "Grade Bands Served", "Academic Streams Served"]
+      },
       "dashboard_tiles": {
         "total_items": "Total Tutors",
         "complete_profiles": "Profiles Complete",

@@ -1,6 +1,6 @@
 import * as React from 'react';
 import type { RJSFSchema } from '@rjsf/utils';
-import type { DotActionSchema } from '@/engine/types';
+import type { DotActionSchema, DotCardConfig } from '@/engine/types';
 import { DomainCard } from '@/components/cards/domain-card';
 import { MatchScoreModal } from './match-score-modal';
 import { useMatchScore } from '@/hooks/use-match-score';
@@ -11,6 +11,7 @@ export interface MatchScoreCardProps {
   schemaName?: string;
   schemaDescription?: string;
   domainLabel?: string;
+  cardConfig?: DotCardConfig | null;
   data: Record<string, unknown>;
   actions?: DotActionSchema[];
   onAction?: (type: string, schema: DotActionSchema) => void;
@@ -26,6 +27,7 @@ export function MatchScoreCard({
   schemaName,
   schemaDescription,
   domainLabel,
+  cardConfig,
   data,
   actions = [],
   onAction,
@@ -86,6 +88,7 @@ export function MatchScoreCard({
         schemaName={schemaName}
         schemaDescription={schemaDescription}
         domainLabel={domainLabel}
+        cardConfig={cardConfig}
         data={data}
         actions={actions}
         onAction={onAction}
