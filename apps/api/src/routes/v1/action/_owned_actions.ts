@@ -20,16 +20,14 @@ export type OwnedActionsFilters = {
 /**
  * Query + enrich the actions owned by `ownerId` on THIS instance's DB.
  *
- * Shared by:
- *  - the authenticated GET /api/v1/action/fetch handler (ownerId = session user),
- *    which additionally fans out to peer instances and merges, and
- *  - the public POST /api/v1/network/action/fetch_local peer endpoint, which
- *    runs this against the local DB for a caller-supplied owner id.
+ * Used by the authenticated GET /api/v1/action/fetch handler (ownerId =
+ * session user). The read is local-only: cross-instance actions are mirrored
+ * to the initiator's home instance at write time (see
+ * /api/v1/network/action/store_local), so the owner's rows always live here.
  *
  * `ownerId` here is the network-wide user id stored on the action row
  * (source_item_owner / target_item_owner). For a cross-instance action the
- * source row carries the initiator's home-instance user id verbatim, so a peer
- * can match it directly.
+ * mirrored row carries the initiator's home-instance user id verbatim.
  */
 export async function collectOwnedActions(opts: {
   ownerId: string;

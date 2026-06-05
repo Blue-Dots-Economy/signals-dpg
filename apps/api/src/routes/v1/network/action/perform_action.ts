@@ -23,6 +23,7 @@ import {
   insertActionEvent,
   isCurrentInstanceItem,
   mirrorActionEventToSourceInstance,
+  mirrorActionRowToSourceInstance,
   validateActionEventPayload,
 } from '@/utils/action_event_runtime';
 
@@ -210,6 +211,8 @@ export const perform_network_action_handler = async (
       update_count: item_actions.update_count,
       source_item_id: item_actions.source_item_id,
       target_item_id: item_actions.target_item_id,
+      created_at: item_actions.created_at,
+      updated_at: item_actions.updated_at,
     });
 
   const storedEvent = {
@@ -231,6 +234,34 @@ export const perform_network_action_handler = async (
 
   await insertActionEvent(db, storedEvent);
   void mirrorActionEventToSourceInstance(storedEvent, request.log);
+  void mirrorActionRowToSourceInstance(
+    {
+      action_type: body.action_type,
+      partition_network: body.target_item.item_network,
+      action_id: created.action_id,
+      action_status: actionStatus,
+      update_count: updateCount,
+      source_item_network: body.source_item.item_network,
+      source_item_domain: body.source_item.item_domain,
+      source_item_type: body.source_item.item_type,
+      source_item_id: body.source_item.item_id,
+      source_item_instance_url: body.source_item.item_instance_url,
+      source_item_owner: body.source_item_owner,
+      target_item_network: body.target_item.item_network,
+      target_item_domain: body.target_item.item_domain,
+      target_item_type: body.target_item.item_type,
+      target_item_id: body.target_item.item_id,
+      target_item_instance_url: body.target_item.item_instance_url,
+      target_item_owner: targetItemSnapshot.created_by,
+      performed_by_org_id: body.performed_by_org_id ?? null,
+      performed_by_service_user_id: body.performed_by_service_user_id ?? null,
+      requirements_snapshot: body.requirements_snapshot,
+      remarks: null,
+      created_at: created.created_at,
+      updated_at: created.updated_at,
+    },
+    request.log
+  );
 
   return reply.code(201).send(created);
 };

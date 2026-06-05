@@ -72,6 +72,38 @@ export const StoreEventBodySchema = z.object({
   remarks: z.string().min(1).optional(),
 });
 
+/**
+ * The full item_actions row, mirrored from the target instance (where the row
+ * is authoritative) to the source item's home instance so the initiator can
+ * read their own actions locally without fanning out to peers. Sent on create
+ * and on every status change; the receiving instance upserts on action_id.
+ */
+export const MirrorActionRowBodySchema = z.object({
+  action_type: z.string().min(1),
+  partition_network: z.string().min(1),
+  action_id: z.uuid(),
+  action_status: z.string().min(1),
+  update_count: z.int().nonnegative(),
+  source_item_network: z.string().min(1),
+  source_item_domain: z.string().min(1),
+  source_item_type: z.string().min(1),
+  source_item_id: z.uuid(),
+  source_item_instance_url: z.url(),
+  source_item_owner: z.string().min(1).nullable().optional(),
+  target_item_network: z.string().min(1),
+  target_item_domain: z.string().min(1),
+  target_item_type: z.string().min(1),
+  target_item_id: z.uuid(),
+  target_item_instance_url: z.url(),
+  target_item_owner: z.string().min(1).nullable().optional(),
+  performed_by_org_id: z.string().min(1).nullable().optional(),
+  performed_by_service_user_id: z.string().min(1).nullable().optional(),
+  requirements_snapshot: z.record(z.string(), z.unknown()).default({}),
+  remarks: z.string().min(1).nullable().optional(),
+  created_at: z.coerce.date(),
+  updated_at: z.coerce.date(),
+});
+
 export const ActionOwnershipRoleSchema = z.enum(['all', 'initiated', 'received']);
 export const ActionOwnershipTagSchema = z.enum(['initiated', 'received']);
 

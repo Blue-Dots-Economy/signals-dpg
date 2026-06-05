@@ -1,6 +1,7 @@
 import { and, eq } from 'drizzle-orm';
 import type { FastifyBaseLogger } from 'fastify';
 import z, {
+  MirrorActionRowBodySchema,
   PerformActionBodySchema,
   PerformNetworkActionBodySchema,
   StoreEventBodySchema,
@@ -280,6 +281,63 @@ function defaultActionEventRemark(actionStatus: string) {
 
 function isPlainObject(input: unknown): input is Record<string, unknown> {
   return typeof input === 'object' && input !== null && !Array.isArray(input);
+}
+
+// Derived from the wire schema so the runtime type and the validated payload
+// can't drift. Mirrors the StoredActionEvent ⇄ StoreEventBodySchema pairing.
+export type MirroredActionRow = z.infer<typeof MirrorActionRowBodySchema>;
+
+/**
+ * Mirror the authoritative item_actions row to the source item's home
+ * instance. The row lives on the target instance (it owns status changes), so
+ * the initiator's instance only learns about its own actions via this push.
+ * Fire-and-forget: a failed mirror leaves the source instance stale until the
+ * next change re-pushes; it never blocks or fails the action itself.
+ */
+export async function mirrorActionRowToSourceInstance(
+  row: MirroredActionRow,
+  log: FastifyBaseLogger
+) {
+  if (
+    normalizeInstanceUrl(row.source_item_instance_url) ===
+    normalizeInstanceUrl(getCurrentApiBaseUrl())
+  ) {
+    return;
+  }
+
+  try {
+    const response = await fetch(
+      new URL('/api/v1/network/action/store_local', row.source_item_instance_url),
+      {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify(row),
+      }
+    );
+
+    if (!response.ok) {
+      log.error(
+        {
+          action_id: row.action_id,
+          source_instance_url: row.source_item_instance_url,
+          status_code: response.status,
+          status_text: response.statusText,
+        },
+        'Failed to mirror action row to source instance'
+      );
+    }
+  } catch (err) {
+    log.error(
+      {
+        err,
+        action_id: row.action_id,
+        source_instance_url: row.source_item_instance_url,
+      },
+      'Failed to mirror action row to source instance'
+    );
+  }
 }
 
 export async function mirrorActionEventToSourceInstance(
