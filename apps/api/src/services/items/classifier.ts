@@ -3,7 +3,12 @@ import { is_populated } from '../metrics/profile_completion.js';
 export type LifecycleStatus = 'draft' | 'live' | 'paused';
 
 export interface ClassifierInput {
-  schema: { required?: string[] } | null | undefined;
+  /**
+   * The JSON schema for the item. Only `required` is read; pass any
+   * superset (the full `Record<string, unknown>` from getOrFetchSchemaByUrl
+   * is fine).
+   */
+  schema: ({ required?: string[] } & Record<string, unknown>) | null | undefined;
   merged_state: Record<string, unknown> | null | undefined;
   /**
    * Stored lifecycle_status BEFORE this write. `paused` is sticky — the

@@ -54,11 +54,12 @@ export const update_item_handler = async (
   }
 
   try {
-    const updated = await updateItemInternal(db, itemId, callerId, isAdmin, {
+    const result = await updateItemInternal(db, itemId, callerId, isAdmin, {
       item_state: body.item_state,
       item_latitude: body.item_latitude,
       item_longitude: body.item_longitude,
     });
+    const updated = result.row;
 
     await invalidateItemFetchCache(updated.item_network, updated.item_domain).catch(
       (err) => request.log.warn({ err }, 'cache invalidation after update failed'),

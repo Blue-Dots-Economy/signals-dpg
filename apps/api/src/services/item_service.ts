@@ -19,6 +19,7 @@ import {
   getOrFetchSchemaByUrl,
 } from '@/network_schema_cache';
 import { apiConfig, getCurrentApiBaseUrl } from '@/config';
+import { classify_item, type LifecycleStatus } from './items/classifier.js';
 
 export class ItemServiceError extends Error {
   statusCode: number;
@@ -120,8 +121,12 @@ async function resolveSchema(params: {
   }
 
   try {
+    const required = Array.isArray((itemSchema as { required?: unknown }).required)
+      ? ((itemSchema as { required?: string[] }).required as string[])
+      : [];
     validateAgainstJsonSchema(itemSchema, params.submittedItemState, 'item_state', {
       allowAdditionalProperties: apiConfig.allow_extra_schema_data,
+      ignoredKeys: required,
     });
   } catch (err) {
     throw new ItemServiceError(
@@ -154,6 +159,12 @@ export async function createItemInternal(
       ? ''
       : encryptPiiBlob(JSON.stringify(itemState.privateState), getPiiKey());
 
+  const classification = classify_item({
+    schema: itemSchema as { required?: string[] },
+    merged_state: submittedItemState,
+    current_status: 'draft',
+  });
+
   const result = await exec
     .insert(items)
     .values({
@@ -167,6 +178,8 @@ export async function createItemInternal(
       item_latitude: params.item_latitude ?? null,
       item_longitude: params.item_longitude ?? null,
       created_by: params.created_by,
+      lifecycle_status: classification.lifecycle_status,
+      completion_pct: classification.completion_pct,
     })
     .onConflictDoNothing({
       target: [
@@ -210,6 +223,8 @@ export async function updateItemInternal(
   if (body.item_latitude !== undefined) updateValues.item_latitude = body.item_latitude;
   if (body.item_longitude !== undefined) updateValues.item_longitude = body.item_longitude;
 
+  let isLeavingLive = false;
+  let priorItemId: string | null = null;
   if (body.item_state) {
     const [existingItem] = await exec
       .select({
@@ -219,6 +234,8 @@ export async function updateItemInternal(
         item_schema_url: items.item_schema_url,
         item_state: items.item_state,
         item_private_state: items.item_private_state,
+        lifecycle_status: items.lifecycle_status,
+        item_id_col: items.item_id,
       })
       .from(items)
       .where(ownershipFilter)
@@ -231,6 +248,8 @@ export async function updateItemInternal(
         'Item not found or does not belong to the authenticated user'
       );
     }
+
+    priorItemId = existingItem.item_id_col;
 
     const itemSchema = await getOrFetchSchemaByUrl({
       schemaUrl: existingItem.item_schema_url,
@@ -257,8 +276,12 @@ export async function updateItemInternal(
     const mergedFullState: Record<string, unknown> = { ...priorFullState, ...body.item_state };
 
     try {
+      const required = Array.isArray((itemSchema as { required?: unknown }).required)
+        ? ((itemSchema as { required?: string[] }).required as string[])
+        : [];
       validateAgainstJsonSchema(itemSchema, mergedFullState, 'item_state', {
         allowAdditionalProperties: apiConfig.allow_extra_schema_data,
+        ignoredKeys: required,
       });
     } catch (err) {
       throw new ItemServiceError(
@@ -275,6 +298,18 @@ export async function updateItemInternal(
       Object.keys(split.privateState).length === 0
         ? ''
         : encryptPiiBlob(JSON.stringify(split.privateState), getPiiKey());
+
+    const classification = classify_item({
+      schema: itemSchema as { required?: string[] },
+      merged_state: mergedFullState,
+      current_status: existingItem.lifecycle_status as LifecycleStatus,
+    });
+    updateValues.lifecycle_status = classification.lifecycle_status;
+    updateValues.completion_pct = classification.completion_pct;
+
+    isLeavingLive =
+      existingItem.lifecycle_status === 'live' &&
+      classification.lifecycle_status !== 'live';
   }
 
   const result = await exec
@@ -304,5 +339,10 @@ export async function updateItemInternal(
       'Item not found or does not belong to the authenticated user'
     );
   }
-  return result[0];
+  return {
+    row: result[0],
+    leavingLive: isLeavingLive,
+    cancelledPendingActions: 0,
+    priorItemId,
+  };
 }
