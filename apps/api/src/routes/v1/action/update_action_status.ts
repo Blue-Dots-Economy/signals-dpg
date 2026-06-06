@@ -87,6 +87,39 @@ export const update_action_status_handler = async (
         );
       }
 
+      // Spec §10 — accept/etc. require both endpoints still 'live'.
+      // (Pending actions whose endpoint left live are auto-cancelled by
+      // §7 during the leave-live transition; this residual race guard
+      // catches in-flight requests.)
+      const targetSnapshot = await fetchLocalItemSnapshot(db, {
+        item_network: existingAction.target_item_network,
+        item_domain: existingAction.target_item_domain,
+        item_type: existingAction.target_item_type,
+        item_id: existingAction.target_item_id,
+        item_instance_url: existingAction.target_item_instance_url,
+      });
+      if (!targetSnapshot || targetSnapshot.lifecycle_status !== 'live') {
+        throw new BulkItemFailure(
+          'PROFILE_NOT_LIVE',
+          'target_item is not live; status updates blocked',
+        );
+      }
+      if (existingAction.source_item_instance_url === getCurrentApiBaseUrl()) {
+        const sourceSnap = await fetchLocalItemSnapshot(db, {
+          item_network: existingAction.source_item_network,
+          item_domain: existingAction.source_item_domain,
+          item_type: existingAction.source_item_type,
+          item_id: existingAction.source_item_id,
+          item_instance_url: existingAction.source_item_instance_url,
+        });
+        if (!sourceSnap || sourceSnap.lifecycle_status !== 'live') {
+          throw new BulkItemFailure(
+            'PROFILE_NOT_LIVE',
+            'source_item is not live; status updates blocked',
+          );
+        }
+      }
+
       let interaction: ReturnType<typeof getActionInteraction>;
       try {
         const networkConfig = await getNetworkConfigById(existingAction.target_item_network);
