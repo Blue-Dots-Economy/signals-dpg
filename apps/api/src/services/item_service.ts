@@ -20,6 +20,7 @@ import {
 } from '@/network_schema_cache';
 import { apiConfig, getCurrentApiBaseUrl } from '@/config';
 import { classify_item, type LifecycleStatus } from './items/classifier.js';
+import { cancel_pending_actions_for_item } from './items/cancel_pending_actions.js';
 
 export class ItemServiceError extends Error {
   statusCode: number;
@@ -339,10 +340,19 @@ export async function updateItemInternal(
       'Item not found or does not belong to the authenticated user'
     );
   }
+
+  let cancelledPendingActions = 0;
+  if (isLeavingLive && priorItemId) {
+    cancelledPendingActions = await cancel_pending_actions_for_item(
+      exec,
+      priorItemId,
+    );
+  }
+
   return {
     row: result[0],
     leavingLive: isLeavingLive,
-    cancelledPendingActions: 0,
+    cancelledPendingActions,
     priorItemId,
   };
 }
