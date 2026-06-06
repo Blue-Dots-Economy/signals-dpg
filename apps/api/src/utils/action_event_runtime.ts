@@ -78,6 +78,7 @@ export async function fetchLocalItemSnapshot(
       created_by: items.created_by,
       item_latitude: items.item_latitude,
       item_longitude: items.item_longitude,
+      lifecycle_status: items.lifecycle_status,
     })
     .from(items)
     .where(and(baseConditions, eq(items.item_instance_url, item.item_instance_url)))
@@ -102,6 +103,7 @@ export async function fetchLocalItemSnapshot(
       created_by: items.created_by,
       item_latitude: items.item_latitude,
       item_longitude: items.item_longitude,
+      lifecycle_status: items.lifecycle_status,
     })
     .from(items)
     .where(baseConditions)
