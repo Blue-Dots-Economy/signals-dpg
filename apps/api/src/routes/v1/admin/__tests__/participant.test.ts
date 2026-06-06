@@ -418,7 +418,7 @@ describe('POST /admin/participant', () => {
     expect(dbState.inserts).toHaveLength(1);
   });
 
-  it('aggregator + existing OWN user → 200 user_existed:true, items populated, onboarded_at:null, no writes', async () => {
+  it('aggregator + existing OWN user, no item_state → 200 account_only, items populated, onboarded_at:null, no writes', async () => {
     const user_id = 'usr_own';
     dbState.existingUserRows = [
       {
@@ -449,13 +449,14 @@ describe('POST /admin/participant', () => {
     const res = await app.inject({
       method: 'POST',
       url: '/participant',
-      payload: baseBody(),
+      payload: baseBody({ item_state: undefined }),
     });
     expect(res.statusCode).toBe(200);
     const body = res.json();
     expect(body.user_existed).toBe(true);
     expect(body.user_id).toBe(user_id);
     expect(body.onboarded_at).toBeNull();
+    expect(body.owned_elsewhere).toBe(false);
     expect(body.items).toHaveLength(1);
     expect(dbState.updates).toHaveLength(0);
     expect(dbState.inserts).toHaveLength(0);
@@ -755,7 +756,7 @@ describe('POST /admin/participant', () => {
     const res = await app.inject({
       method: 'POST',
       url: '/participant',
-      payload: baseBody(),
+      payload: baseBody({ item_state: undefined }),
     });
     expect(res.statusCode).toBe(200);
     const body = res.json();
