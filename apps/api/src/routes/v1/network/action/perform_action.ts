@@ -117,6 +117,12 @@ export const perform_network_action_handler = async (
       message: 'Target item does not exist on this instance',
     });
   }
+  if (targetItemSnapshot.lifecycle_status !== 'live') {
+    return reply.code(409).send({
+      error: 'PROFILE_NOT_LIVE',
+      message: 'target_item is not live; cannot perform actions',
+    });
+  }
 
   let sourceItemSnapshot = null;
   if (isCurrentInstanceItem(body.source_item)) {
@@ -126,6 +132,12 @@ export const perform_network_action_handler = async (
       return reply.code(404).send({
         error: 'SOURCE_ITEM_NOT_FOUND',
         message: 'Source item does not exist on this instance',
+      });
+    }
+    if (sourceItemSnapshot.lifecycle_status !== 'live') {
+      return reply.code(409).send({
+        error: 'PROFILE_NOT_LIVE',
+        message: 'source_item is not live; cannot perform actions',
       });
     }
   }
