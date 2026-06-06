@@ -160,6 +160,7 @@ vi.mock('@/utils/action_event_runtime', async () => {
       item_latitude: null,
       item_longitude: null,
       private_state: {},
+      lifecycle_status: 'live',
     })),
   };
 });

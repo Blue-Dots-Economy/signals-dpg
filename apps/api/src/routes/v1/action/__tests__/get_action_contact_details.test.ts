@@ -99,6 +99,18 @@ vi.mock('@/utils/item_fetch_runtime', () => ({
   })),
 }));
 
+vi.mock('@/utils/action_event_runtime', () => ({
+  fetchLocalItemSnapshot: vi.fn(async () => ({
+    item_id: 'caller_side',
+    item_instance_url: 'http://source.local',
+    created_by: 'usr_caller',
+    item_latitude: null,
+    item_longitude: null,
+    private_state: {},
+    lifecycle_status: 'live',
+  })),
+}));
+
 vi.mock('@/network_configs', () => ({
   getNetworkConfigById: vi.fn(async () => ({
     id: 'test_net',
@@ -174,6 +186,8 @@ function buildItem(item_id: string, ownerId: string) {
     created_by: ownerId,
     created_at: new Date('2026-01-01T00:00:00Z'),
     updated_at: new Date('2026-01-02T00:00:00Z'),
+    lifecycle_status: 'live',
+    completion_pct: 100,
   };
 }
 
