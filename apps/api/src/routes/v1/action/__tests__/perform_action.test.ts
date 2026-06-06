@@ -122,6 +122,7 @@ const { fetchLocalItemSnapshotMock } = vi.hoisted(() => ({
     item_latitude: null,
     item_longitude: null,
     private_state: {},
+    lifecycle_status: 'live',
   })),
 }));
 
@@ -222,6 +223,7 @@ describe('POST /api/v1/action/perform — on-behalf-of (bulk)', () => {
       item_latitude: null,
       item_longitude: null,
       private_state: {},
+    lifecycle_status: 'live',
     });
     // Reset fetchResponse to default success
     fetchResponse.status = 201;
@@ -365,6 +367,7 @@ describe('POST /api/v1/action/perform — on-behalf-of (bulk)', () => {
       item_latitude: null,
       item_longitude: null,
       private_state: {},
+    lifecycle_status: 'live',
     });
     const app = buildApp({
       org_id: 'org_agg_1',
@@ -492,6 +495,7 @@ describe('POST /api/v1/action/perform — on-behalf-of (bulk)', () => {
         item_latitude: null,
         item_longitude: null,
         private_state: {},
+    lifecycle_status: 'live',
       });
       const app = buildApp({
         org_id: 'org_signals',
@@ -524,6 +528,7 @@ describe('POST /api/v1/action/perform — on-behalf-of (bulk)', () => {
         item_latitude: null,
         item_longitude: null,
         private_state: {},
+    lifecycle_status: 'live',
       });
       const app = buildApp({
         org_id: 'org_signals',
