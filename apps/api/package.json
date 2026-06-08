@@ -19,7 +19,8 @@
     "db:seed:services": "tsx scripts/seed_service_users.ts",
     "test": "vitest run --passWithNoTests",
     "test:watch": "vitest",
-    "test:integration": "vitest run --config vitest.integration.config.ts"
+    "test:integration": "vitest run --config vitest.integration.config.ts",
+    "backfill:lifecycle": "tsx --env-file=../../.env scripts/backfill-item-lifecycle.ts"
   },
   "keywords": [],
   "author": "",
