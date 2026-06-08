@@ -25,6 +25,8 @@ export const CreateItemBodySchema = ItemInsertSchema.omit({
   item_private_state: true,
   created_at: true,
   updated_at: true,
+  lifecycle_status: true,
+  completion_pct: true,
 }).extend({
   // Optional override used by admin / service callers to author items on
   // behalf of another user. Non-admin callers cannot supply this — see
@@ -108,6 +110,8 @@ export const UpdateItemBodySchema = ItemInsertSchema.omit({
   item_private_state: true,
   created_at: true,
   updated_at: true,
+  lifecycle_status: true,
+  completion_pct: true,
 })
   .partial()
   .strict()

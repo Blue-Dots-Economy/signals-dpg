@@ -498,8 +498,8 @@ export function ProfileFormPage() {
 
     setIsPausing(true);
     try {
-      await unpauseItem(existingItem.item_id);
-      setExistingItem({ ...existingItem, lifecycle_status: 'live' });
+      const result = await unpauseItem(existingItem.item_id);
+      setExistingItem({ ...existingItem, lifecycle_status: result.lifecycle_status });
       toast.success(t('profile.toast_unpaused'), {
         description: t('profile.toast_unpaused_desc'),
       });
