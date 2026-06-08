@@ -1096,11 +1096,31 @@ describeIf(`lifecycle integration${can_run ? '' : ` — ${skip_reason}`}`, () =>
 
     const returned_ids = new Set(body.items.map((i) => i.item_id));
 
-    // Positive assertion: the known live item must appear in the results.
-    // An empty `items` array would false-pass the draft-exclusion check below.
-    expect(returned_ids.has(live_item_id)).toBe(true);
+    // The filter is correct iff EVERY returned item is live (and the list is
+    // non-empty so this isn't a vacuous pass). NOTE: we deliberately do NOT
+    // assert a specific seeded id is present — earlier scenarios pause/demote
+    // shared items, so the only stable invariant is "everything returned is live".
+    expect(body.items.length).toBeGreaterThan(0);
+    expect(body.items.every((i) => i.lifecycle_status === 'live')).toBe(true);
 
-    // Cross-check: no draft item created by our seeded users appears in the list.
+    // Negative cross-check: no draft OR paused item created by our seeded users
+    // appears in the list (covers both lifecycle-exclusion cases).
+    const hidden_ids = await db
+      .select({ item_id: itemsTable.item_id })
+      .from(itemsTable)
+      .where(
+        and(
+          inArray(itemsTable.lifecycle_status, ['draft', 'paused']),
+          eq(itemsTable.item_network, primary.network),
+          eq(itemsTable.item_domain, primary.domain),
+          inArray(itemsTable.created_by, onboarded_user_ids),
+        ),
+      );
+    for (const { item_id } of hidden_ids) {
+      expect(returned_ids.has(item_id)).toBe(false);
+    }
+
+    // Legacy cross-check retained: no draft item created by our seeded users appears in the list.
     const draft_ids = await db
       .select({ item_id: itemsTable.item_id })
       .from(itemsTable)
