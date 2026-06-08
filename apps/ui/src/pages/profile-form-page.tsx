@@ -30,7 +30,7 @@ import {
   type Item,
 } from '@/lib/item-api';
 import { fetchNetworkConfig, fetchNetworkConfigs } from '@/lib/network-api';
-import { parseLocationFields, buildGeoQuery } from '@dpg/schemas';
+import { parseLocationFields, buildGeoQuery } from '@dpg/schemas/location_fields';
 import { getGeoProvider } from '@/lib/geo/provider';
 import { apiConfig } from '@/lib/api-config';
 

@@ -218,6 +218,17 @@ export default defineConfig(({ mode }) => {
       // listed before `@` since both are matched in order. Array form is
       // required for the regex `@dpg/*` mapping.
       alias: [
+        // Lean, dependency-free subpath: the UI only needs the pure geo
+        // helpers, NOT the @dpg/schemas barrel (which re-exports DB-bound
+        // modules via @dpg/database → pg, breaking the browser build).
+        // This specific entry must precede the generic @dpg/* mapping.
+        {
+          find: '@dpg/schemas/location_fields',
+          replacement: path.resolve(
+            __dirname,
+            '../../packages/schemas/src/location_fields.ts',
+          ),
+        },
         {
           find: /^@dpg\/(.*)$/,
           replacement: path.resolve(__dirname, '../../packages/$1/src'),

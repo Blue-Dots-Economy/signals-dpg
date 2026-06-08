@@ -4,7 +4,7 @@ import type { RJSFSchema } from '@rjsf/utils';
 import type { MapMarker } from '@/engine/types';
 import { getActiveMapProvider } from '@/engine/map/map-registry';
 import { normalizeFieldName } from '@/lib/item-utils';
-import { parseLocationFields, buildGeoQuery } from '@dpg/schemas';
+import { parseLocationFields, buildGeoQuery } from '@dpg/schemas/location_fields';
 import { getGeoProvider } from '@/lib/geo/provider';
 import { Button } from '@/components/ui/button';
 import { Maximize2, Minimize2 } from 'lucide-react';
