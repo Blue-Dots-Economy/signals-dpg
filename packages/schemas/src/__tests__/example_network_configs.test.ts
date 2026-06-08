@@ -89,6 +89,18 @@ describe('example network configs declare a primary location field', () => {
         fields.primary,
         `${network}/${domainId} has no primary location field`,
       ).not.toBeNull();
+
+      const properties = schema.properties as Record<
+        string,
+        { location?: unknown }
+      >;
+      const primaryCount = Object.values(properties).filter(
+        (p) => p?.location === 'primary',
+      ).length;
+      expect(
+        primaryCount,
+        `${network}/${domainId} must have exactly one primary location marker, found ${primaryCount}`,
+      ).toBe(1);
     },
   );
 });
