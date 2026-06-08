@@ -144,7 +144,7 @@ export interface ActionButton {
 
 // ─── Map Types ─────────────────────────────────────────────────
 
-export type MapMarkerPrecision = 'exact' | 'geocoded_pincode' | 'geocoded_full_address' | 'geocoded_city_only';
+export type MapMarkerPrecision = 'exact' | 'geocoded_full_address';
 
 export interface MapMarker {
   id: string;

@@ -144,7 +144,9 @@ export const create_item_handler = async (
 
   let lat = body.item_latitude ?? null;
   let lng = body.item_longitude ?? null;
-  if (lat === null && lng === null) {
+  // Geocode unless the caller supplied a complete pair. A half-pair (only one
+  // of lat/lng) is treated as missing and re-resolved, never persisted as-is.
+  if (lat === null || lng === null) {
     try {
       const networkConfig = await getNetworkConfigById(body.item_network);
       const itemSchema = getDomainItemSchema(
