@@ -75,4 +75,24 @@ describe('buildGeoQuery', () => {
   it('returns null when there is no primary field', () => {
     expect(buildGeoQuery({ city: 'X' }, parseLocationFields(noMarkerSchema))).toBeNull();
   });
+
+  it('returns secondary-only join when the primary value is missing', () => {
+    const data = { service_city: 'Bengaluru', state: 'Karnataka', pincode: '560001' };
+    expect(buildGeoQuery(data, parseLocationFields(seekerSchema))).toBe(
+      'Bengaluru, Karnataka, 560001'
+    );
+  });
+});
+
+describe('parseLocationFields — duplicate primary', () => {
+  it('keeps the first primary when multiple are marked', () => {
+    const schema = {
+      type: 'object',
+      properties: {
+        address: { type: 'string', location: 'primary' },
+        alt_address: { type: 'string', location: 'primary' },
+      },
+    };
+    expect(parseLocationFields(schema)).toEqual({ primary: 'address', secondary: [] });
+  });
 });

@@ -38,9 +38,11 @@ export function parseLocationFields(
 
 /**
  * Builds a single geocode query string from the marked fields' values in
- * `data`: primary first, then secondaries in declaration order. Empty/missing
- * values are skipped. Returns null when there is no primary field or no usable
- * value.
+ * `data`. Concatenates the values of the marked fields (primary first, then
+ * secondaries in order), skipping empty/missing ones. A partial query — e.g.
+ * secondaries only when the primary value is absent — is intentional and still
+ * returned. Returns null only when no primary field is declared, or no marked
+ * field has a usable value.
  */
 export function buildGeoQuery(
   data: Record<string, unknown>,
@@ -49,10 +51,14 @@ export function buildGeoQuery(
   if (!fields.primary) return null;
 
   const ordered = [fields.primary, ...fields.secondary];
-  const parts = ordered
-    .map((name) => data[name])
-    .filter((v): v is string => typeof v === 'string' && v.trim().length > 0)
-    .map((v) => v.trim());
+  const parts: string[] = [];
+  for (const name of ordered) {
+    const raw = data[name];
+    if (typeof raw === 'string') {
+      const trimmed = raw.trim();
+      if (trimmed.length > 0) parts.push(trimmed);
+    }
+  }
 
   return parts.length > 0 ? parts.join(', ') : null;
 }
