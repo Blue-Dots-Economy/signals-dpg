@@ -42,6 +42,7 @@ export interface Item {
   item_longitude: number | null;
   created_at: string;
   updated_at: string;
+  lifecycle_status?: 'draft' | 'live' | 'paused';
 }
 
 export interface FetchItemsResponse {
@@ -106,6 +107,37 @@ export async function updateItem(itemId: string, payload: UpdateItemPayload): Pr
  */
 export async function deleteItem(itemId: string): Promise<void> {
   await apiClient.delete(`/api/v1/item/${itemId}`);
+}
+
+export interface ItemLifecycleResponse {
+  item_id: string;
+  lifecycle_status: 'draft' | 'live' | 'paused';
+  completion_pct: number;
+  cancelled_pending_actions: number;
+}
+
+/**
+ * Pause the caller's own item (must be in 'live' state).
+ * The server auto-cancels pending actions and returns the count.
+ */
+export async function pauseItem(itemId: string): Promise<ItemLifecycleResponse> {
+  const response = await apiClient.post<ItemLifecycleResponse>('/api/v1/item/lifecycle', {
+    item_id: itemId,
+    action: 'pause',
+  });
+  return response.data;
+}
+
+/**
+ * Unpause (resume) the caller's own item (must be in 'paused' state).
+ * The server re-classifies the item and sets it back to 'live' or 'draft'.
+ */
+export async function unpauseItem(itemId: string): Promise<ItemLifecycleResponse> {
+  const response = await apiClient.post<ItemLifecycleResponse>('/api/v1/item/lifecycle', {
+    item_id: itemId,
+    action: 'unpause',
+  });
+  return response.data;
 }
 
 // Re-export action-related types and functions from action-api.ts
