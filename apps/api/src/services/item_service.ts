@@ -10,6 +10,7 @@ import {
   validateAgainstJsonSchema,
 } from '@dpg/schemas';
 import { classify_item } from './items/classifier.js';
+import { cancel_pending_actions_for_item } from './items/cancel_pending_actions.js';
 import { decryptPiiBlob, encryptPiiBlob, getPiiKey } from '@dpg/auth';
 import { items } from '@dpg/database';
 import { db } from '@api/db/postgres/drizzle_config';
@@ -223,8 +224,7 @@ export interface UpdateItemInternalResult {
     updated_at: Date;
   };
   leavingLive: boolean;
-  itemIdForCancellation: string | null;
-  networkForCancellation: string | null;
+  cancelledPendingActions: number;
 }
 
 export async function updateItemInternal(
@@ -244,10 +244,10 @@ export async function updateItemInternal(
   if (body.item_latitude !== undefined) updateValues.item_latitude = body.item_latitude;
   if (body.item_longitude !== undefined) updateValues.item_longitude = body.item_longitude;
 
-  let itemStateWasUpdated = false;
   let isLeavingLive = false;
-  let savedItemId: string | null = null;
-  let savedNetwork: string | null = null;
+  let existingItemId: string | null = null;
+  let existingItemNetwork: string | null = null;
+  let cancelledPendingActions = 0;
 
   if (body.item_state) {
     const [existingItem] = await exec
@@ -331,43 +331,56 @@ export async function updateItemInternal(
 
     isLeavingLive =
       existingItem.lifecycle_status === 'live' && classification.lifecycle_status !== 'live';
-    itemStateWasUpdated = true;
-    savedItemId = existingItem.item_id;
-    savedNetwork = existingItem.item_network;
+    existingItemId = existingItem.item_id;
+    existingItemNetwork = existingItem.item_network;
   }
 
-  const result = await exec
-    .update(items)
-    .set(updateValues)
-    .where(ownershipFilter)
-    .returning({
-      item_network: items.item_network,
-      item_domain: items.item_domain,
-      item_type: items.item_type,
-      item_id: items.item_id,
-      item_instance_url: items.item_instance_url,
-      item_schema_url: items.item_schema_url,
-      item_state: items.item_state,
-      item_private_state: items.item_private_state,
-      item_latitude: items.item_latitude,
-      item_longitude: items.item_longitude,
-      created_by: items.created_by,
-      created_at: items.created_at,
-      updated_at: items.updated_at,
-    });
+  // When leaving live, the item UPDATE and the pending-action cancel must be
+  // atomic (spec §7). exec.transaction() opens a real transaction when exec is
+  // the bare db pool, or a savepoint when exec is already a transaction —
+  // correct in both cases.
+  const { row, cancelledCount } = await exec.transaction(async (txx) => {
+    const updateResult = await txx
+      .update(items)
+      .set(updateValues)
+      .where(ownershipFilter)
+      .returning({
+        item_network: items.item_network,
+        item_domain: items.item_domain,
+        item_type: items.item_type,
+        item_id: items.item_id,
+        item_instance_url: items.item_instance_url,
+        item_schema_url: items.item_schema_url,
+        item_state: items.item_state,
+        item_private_state: items.item_private_state,
+        item_latitude: items.item_latitude,
+        item_longitude: items.item_longitude,
+        created_by: items.created_by,
+        created_at: items.created_at,
+        updated_at: items.updated_at,
+      });
 
-  if (result.length === 0) {
-    throw new ItemServiceError(
-      404,
-      'ITEM_NOT_FOUND_OR_FORBIDDEN',
-      'Item not found or does not belong to the authenticated user'
-    );
-  }
+    if (updateResult.length === 0) {
+      throw new ItemServiceError(
+        404,
+        'ITEM_NOT_FOUND_OR_FORBIDDEN',
+        'Item not found or does not belong to the authenticated user'
+      );
+    }
+
+    let cancelled = 0;
+    if (isLeavingLive && existingItemId !== null && existingItemNetwork !== null) {
+      cancelled = await cancel_pending_actions_for_item(txx, existingItemId, existingItemNetwork);
+    }
+
+    return { row: updateResult[0], cancelledCount: cancelled };
+  });
+
+  cancelledPendingActions = cancelledCount;
 
   return {
-    row: result[0],
-    leavingLive: itemStateWasUpdated && isLeavingLive,
-    itemIdForCancellation: itemStateWasUpdated ? savedItemId : null,
-    networkForCancellation: itemStateWasUpdated ? savedNetwork : null,
+    row,
+    leavingLive: isLeavingLive,
+    cancelledPendingActions,
   };
 }
