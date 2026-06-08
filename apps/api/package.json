@@ -17,7 +17,6 @@
     "db:init": "tsx scripts/db_init.ts",
     "db:seed:purple_dot": "tsx scripts/seed_purple_dot.ts",
     "db:seed:services": "tsx scripts/seed_service_users.ts",
-    "db:backfill:lifecycle": "tsx scripts/backfill_item_lifecycle.ts",
     "test": "vitest run --passWithNoTests",
     "test:watch": "vitest",
     "test:integration": "vitest run --config vitest.integration.config.ts"

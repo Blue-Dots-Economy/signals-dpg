@@ -80,24 +80,11 @@ export const participant_handler = async (
   const existing = existingRows[0] ?? null;
   const user_exists = Boolean(existing);
 
-  const aggregator_owns_user = Boolean(
-    request.acting_org &&
-      request.acting_org.org_type === 'aggregator' &&
-      existing &&
-      existing.onboardedByOrgId === request.acting_org.org_id,
-  );
-
-  const has_item_state = Boolean(
-    body.item_state && Object.keys(body.item_state).length > 0,
-  );
-
   // 2. Dispatch on the helper's verdict.
   const verdict = resolve_upsert_action({
     acting_org: request.acting_org,
     user_exists,
     item_id_in_body: body.item_id,
-    has_item_state,
-    aggregator_owns_user,
   });
 
   if (verdict.kind === 'rejected') {
@@ -111,116 +98,15 @@ export const participant_handler = async (
   }
 
   // 3. Verdict-specific branches.
-  if (verdict.kind === 'aggregator_owned_elsewhere') {
+  if (verdict.kind === 'aggregator_existing_noop') {
+    const acting_org_id = request.acting_org!.org_id;
+    const isOwn = existing!.onboardedByOrgId === acting_org_id;
+    const itemsList = isOwn ? await readItemsForUser(existing!.id) : [];
     return reply.code(200).send({
       user_id: existing!.id,
       user_existed: true,
-      owned_elsewhere: true,
       onboarded_at: null,
-      items: [],
-    });
-  }
-
-  if (verdict.kind === 'account_only') {
-    if (user_exists) {
-      const itemsList = await readItemsForUser(existing!.id);
-      return reply.code(200).send({
-        user_id: existing!.id,
-        user_existed: true,
-        owned_elsewhere: false,
-        onboarded_at: null,
-        items: itemsList,
-      });
-    }
-
-    // No user, no item_state — create the user only.
-    const acting_org_id = request.acting_org!.org_id;
-    const now = new Date();
-    const email_for_signup = email_norm ?? `${randomUUID()}@no-email.local`;
-    let user_id: string;
-    try {
-      const signed_up = await authInstance.api.signUpEmail({
-        body: {
-          email: email_for_signup,
-          password: randomUUID(),
-          name: body.name,
-        },
-      });
-      user_id = signed_up.user.id;
-    } catch (signupErr: unknown) {
-      const e = signupErr as {
-        code?: string;
-        cause?: { code?: string };
-        message?: string;
-      } | null;
-      const pg_code = e?.code ?? e?.cause?.code;
-      const message = String(e?.message ?? '');
-      if (
-        pg_code === '23505' ||
-        message.includes('duplicate key value') ||
-        message.includes('unique constraint')
-      ) {
-        request.log.warn(
-          { err: signupErr },
-          'signUp race; user exists now (account_only)',
-        );
-        return reply.code(409).send({
-          error: 'USER_ALREADY_EXISTS',
-          message:
-            'email or phone already in use (race) — retry the request',
-        });
-      }
-      request.log.error(
-        { err: signupErr },
-        'signUp failed during account-only onboarding',
-      );
-      return reply.code(500).send({
-        error: 'ONBOARD_FAILED',
-        message: 'could not onboard participant',
-      });
-    }
-
-    try {
-      await db
-        .update(user)
-        .set({
-          phoneNumber: phone_norm,
-          phoneNumberVerified: false,
-          dateOfBirth: body.date_of_birth ? new Date(body.date_of_birth) : null,
-          termsAccepted: true,
-          privacyAccepted: true,
-          onboardedByOrgId: acting_org_id,
-          onboardedVia: body.channel,
-          onboardedSourceId: body.source_id ?? null,
-          onboardedAt: now,
-          updatedAt: now,
-        })
-        .where(eq(user.id, user_id));
-    } catch (txErr) {
-      try {
-        await db.delete(user).where(eq(user.id, user_id));
-      } catch (cleanupErr) {
-        request.log.error(
-          { cleanupErr, orphan_user_id: user_id },
-          'failed to clean up orphan user — manual cleanup needed',
-        );
-      }
-      request.log.error(
-        { err: txErr },
-        'account-only onboarding failed during user update',
-      );
-      return reply.code(500).send({
-        error: 'ONBOARD_FAILED',
-        message: 'could not onboard participant',
-      });
-    }
-
-    return reply.code(200).send({
-      user_id,
-      user_existed: false,
-      owned_elsewhere: false,
-      onboarded_at: now.toISOString(),
-      items: [],
+      items: itemsList,
     });
   }
 
@@ -245,7 +131,7 @@ export const participant_handler = async (
         verdict.item_id,
         existing!.id,
         true, // isAdmin — ownership already verified above
-        { item_state: body.item_state ?? {} },
+        { item_state: body.item_state },
       );
     } catch (err) {
       const e = err as { statusCode?: number; errorCode?: string };
@@ -269,7 +155,6 @@ export const participant_handler = async (
     return reply.code(200).send({
       user_id: existing!.id,
       user_existed: true,
-      owned_elsewhere: false,
       onboarded_at: null,
       items: itemsList,
     });
@@ -298,7 +183,7 @@ export const participant_handler = async (
         network,
         domain,
         item_type,
-        payload: body.item_state ?? {},
+        payload: body.item_state,
       });
     } catch (err) {
       const e = err as { statusCode?: number; errorCode?: string };
@@ -317,7 +202,6 @@ export const participant_handler = async (
     return reply.code(200).send({
       user_id: existing!.id,
       user_existed: true,
-      owned_elsewhere: false,
       onboarded_at: null,
       items: itemsList,
     });
@@ -409,7 +293,7 @@ export const participant_handler = async (
         network,
         domain,
         item_type,
-        payload: body.item_state ?? {},
+        payload: body.item_state,
       });
     });
   } catch (txErr: unknown) {
@@ -461,7 +345,6 @@ export const participant_handler = async (
   return reply.code(200).send({
     user_id,
     user_existed: false,
-    owned_elsewhere: false,
     onboarded_at: now.toISOString(),
     items: itemsList,
   });

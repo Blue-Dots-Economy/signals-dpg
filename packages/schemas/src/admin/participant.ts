@@ -44,10 +44,7 @@ export const UpsertParticipantRequest = z
     source_id: z.string().min(1).optional(),
     item_state: z
       .record(z.string(), z.unknown())
-      .optional()
-      .describe(
-        'payload written to the items table; if absent the user is created/looked up without an item (account-only)',
-      ),
+      .describe('payload written to the items table'),
     item_id: z
       .uuid()
       .optional()
@@ -93,7 +90,6 @@ export const ParticipantItemSnapshot = z.object({
 export const UpsertParticipantResponse = z.object({
   user_id: z.string(),
   user_existed: z.boolean(),
-  owned_elsewhere: z.boolean(),
   onboarded_at: z.iso.datetime().nullable(),
   items: z.array(ParticipantItemSnapshot),
 });

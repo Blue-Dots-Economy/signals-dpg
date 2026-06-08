@@ -3,14 +3,12 @@ import { create_item } from '@/routes/v1/item/create_item';
 import { fetch_item } from '@/routes/v1/item/fetch_item';
 import { update_item } from '@/routes/v1/item/update_item';
 import { delete_item } from '@/routes/v1/item/delete_item';
-import { item_lifecycle } from '@/routes/v1/item/lifecycle';
 
 const item_routes: FastifyPluginAsyncZod = async (fastify) => {
   fastify.register(create_item);
   fastify.register(fetch_item);
   fastify.register(update_item);
   fastify.register(delete_item);
-  fastify.register(item_lifecycle);
 };
 
 export default item_routes;

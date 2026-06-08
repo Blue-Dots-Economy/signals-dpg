@@ -13,7 +13,6 @@ import { pii_reveal_audit } from '@api/db/postgres/schema';
 import { getCurrentApiBaseUrl } from '@/config';
 import { getNetworkConfigById } from '@/network_configs';
 import { fetchLocalItems } from '@/utils/item_fetch_runtime';
-import { fetchLocalItemSnapshot } from '@/utils/action_event_runtime';
 
 type Params = z.infer<typeof ActionContactDetailsParamsSchema>;
 
@@ -98,25 +97,6 @@ export const get_action_contact_details_handler = async (
     });
   }
 
-  // Spec §12 — reveal requires BOTH endpoints to be 'live' at read time.
-  // The caller's side is always local on this instance (contact-details
-  // is routed to the actor's home instance); the other side is local iff
-  // its instance_url matches getCurrentApiBaseUrl. Remote-other gating is
-  // documented as a residual gap (see spec §10/§12 cross-instance notes).
-  const callerSnap = await fetchLocalItemSnapshot(db, {
-    item_network: callerIsSource ? action.source_item_network : action.target_item_network,
-    item_domain: callerIsSource ? action.source_item_domain : action.target_item_domain,
-    item_type: callerIsSource ? action.source_item_type : action.target_item_type,
-    item_id: callerIsSource ? action.source_item_id : action.target_item_id,
-    item_instance_url: callerIsSource ? action.source_item_instance_url : action.target_item_instance_url,
-  });
-  if (callerSnap && callerSnap.lifecycle_status !== 'live') {
-    return reply.code(403).send({
-      error: 'PROFILE_NOT_LIVE',
-      message: 'Contact details hidden because your own profile is not live',
-    });
-  }
-
   const other = callerIsSource
     ? {
         network: action.target_item_network,
@@ -158,16 +138,6 @@ export const get_action_contact_details_handler = async (
     return reply.code(404).send({
       error: 'OTHER_ITEM_NOT_FOUND',
       message: 'Other-actor item missing locally despite same instance',
-    });
-  }
-
-  const otherLifecycle = (otherItem as { lifecycle_status?: string })
-    .lifecycle_status;
-  if (otherLifecycle && otherLifecycle !== 'live') {
-    return reply.code(403).send({
-      error: 'PROFILE_NOT_LIVE',
-      message:
-        'Contact details hidden because the other actor profile is not live',
     });
   }
 

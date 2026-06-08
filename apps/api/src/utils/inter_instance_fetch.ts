@@ -154,7 +154,6 @@ async function getInstanceCount(input: {
     item_latitude: input.filters.item_latitude,
     item_longitude: input.filters.item_longitude,
     radius_meters: input.filters.radius_meters,
-    lifecycle_filter: input.filters.lifecycle_filter,
   };
 
   const count =
