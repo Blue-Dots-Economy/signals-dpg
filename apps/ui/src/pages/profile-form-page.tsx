@@ -63,6 +63,12 @@ export function ProfileFormPage() {
   const [formError, setFormError] = React.useState<{ title: string; description?: string } | null>(null);
   const [resolvedCoords, setResolvedCoords] = React.useState<{ lat: number; lng: number } | null>(null);
 
+  // Clear stale coords whenever the user switches domain so a prior domain's
+  // address suggestion is never submitted for a different domain.
+  React.useEffect(() => {
+    setResolvedCoords(null);
+  }, [selectedDomain]);
+
   // Get network from URL query param, fallback to env config
   const configuredNetworkIds = React.useMemo(
     () => parseNetworkIds(import.meta.env.VITE_NETWORK_ID),
