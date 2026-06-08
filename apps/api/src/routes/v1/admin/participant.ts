@@ -23,10 +23,15 @@ import { resolve_upsert_action } from './_resolve_upsert_action.js';
 /**
  * POST /api/v1/admin/participant
  *
- * Plan C — Tier-aware upsert that replaces /admin/onboard_participant.
- * The handler dispatches on `resolve_upsert_action`'s verdict (5 kinds)
- * + an additional runtime ownership check for the update_item branch
- * that produces 403 ITEM_NOT_OWNED_BY_USER.
+ * Tier-aware upsert. Dispatches on `resolve_upsert_action`'s verdict
+ * (6 kinds) + a runtime ownership check for the update_item branch.
+ *
+ * When `item_state` is absent the route enters account_only mode:
+ * - new user  → create user (no item), return user_existed:false
+ * - existing user → return items, owned_elsewhere:false
+ *
+ * Aggregators that target a user they did not onboard receive
+ * owned_elsewhere:true with an empty items list and no data disclosed.
  */
 type UpsertRequest = FastifyRequest<{ Body: UpsertBody }>;
 
@@ -42,6 +47,174 @@ export const participant: FastifyPluginAsync = async (app) => {
     handler: participant_handler,
   });
 };
+
+// ---------------------------------------------------------------------------
+// Shared onboarding-field payload builder (same columns in both branches).
+// ---------------------------------------------------------------------------
+
+type OnboardingFields = {
+  phone_norm: string | null;
+  date_of_birth: string | undefined;
+  acting_org_id: string;
+  channel: UpsertBody['channel'];
+  source_id: string | undefined;
+  now: Date;
+};
+
+const buildOnboardingSet = (f: OnboardingFields) => ({
+  phoneNumber: f.phone_norm,
+  phoneNumberVerified: false,
+  dateOfBirth: f.date_of_birth ? new Date(f.date_of_birth) : null,
+  termsAccepted: true,
+  privacyAccepted: true,
+  onboardedByOrgId: f.acting_org_id,
+  onboardedVia: f.channel,
+  onboardedSourceId: f.source_id ?? null,
+  onboardedAt: f.now,
+  updatedAt: f.now,
+});
+
+// ---------------------------------------------------------------------------
+// signUpAndOnboardUser
+//
+// Handles the signUpEmail call (incl. 23505-race → 409 early exit) and
+// the db.update for onboarding fields (incl. orphan cleanup on failure).
+//
+// Used by two branches:
+//   - account_only new-user: plain update, no item step.
+//   - create_new_user: update + create_profile_item wrapped in db.transaction.
+//     For that branch, pass `updateExecutor` to run inside the same transaction.
+//
+// Returns:
+//   { ok: true; user_id: string }   – success
+//   { ok: false; reply: Response }  – caller must `return reply.code(...).send(...)`
+//                                     (use the already-sent reply object)
+//
+// Rationale: the two callers share signUpEmail error handling verbatim (~30 lines)
+// and the same onboarding columns. The only difference is the update executor
+// (plain db.update vs a transactional tx.update + create_profile_item). Passing
+// the executor as a callback keeps the distinction visible and avoids merging
+// incompatible error shapes.
+// ---------------------------------------------------------------------------
+
+type SignUpResult =
+  | { ok: true; user_id: string }
+  | { ok: false; statusCode: number; error: string; message: string };
+
+async function signUpAndOnboardUser(params: {
+  email_for_signup: string;
+  name: string;
+  fields: OnboardingFields;
+  log: FastifyRequest['log'];
+  /**
+   * Called with the new user_id to perform the DB update (and any extra
+   * work). Must throw on failure. The outer function handles orphan cleanup.
+   */
+  updateExecutor: (user_id: string) => Promise<void>;
+}): Promise<SignUpResult> {
+  const { email_for_signup, name, fields, log, updateExecutor } = params;
+
+  let user_id: string;
+  try {
+    const signed_up = await authInstance.api.signUpEmail({
+      body: {
+        email: email_for_signup,
+        password: randomUUID(),
+        name,
+      },
+    });
+    user_id = signed_up.user.id;
+  } catch (signupErr: unknown) {
+    const e = signupErr as {
+      code?: string;
+      cause?: { code?: string };
+      message?: string;
+    } | null;
+    const pg_code = e?.code ?? e?.cause?.code;
+    const message = String(e?.message ?? '');
+    if (
+      pg_code === '23505' ||
+      message.includes('duplicate key value') ||
+      message.includes('unique constraint')
+    ) {
+      log.warn({ err: signupErr }, 'signUp race; user exists now');
+      return {
+        ok: false,
+        statusCode: 409,
+        error: 'USER_ALREADY_EXISTS',
+        message: 'email or phone already in use (race) — retry the request',
+      };
+    }
+    log.error({ err: signupErr }, 'signUp failed during onboarding');
+    return {
+      ok: false,
+      statusCode: 500,
+      error: 'ONBOARD_FAILED',
+      message: 'could not onboard participant',
+    };
+  }
+
+  try {
+    await updateExecutor(user_id);
+  } catch (updateErr: unknown) {
+    // Orphan cleanup — best effort.
+    try {
+      await db.delete(user).where(eq(user.id, user_id));
+      log.warn(
+        { orphan_user_id: user_id },
+        'cleaned up orphan user after update/tx failed',
+      );
+    } catch (cleanupErr) {
+      log.error(
+        { cleanupErr, orphan_user_id: user_id },
+        'failed to clean up orphan user — manual cleanup needed',
+      );
+    }
+
+    const e = updateErr as {
+      code?: string;
+      message?: string;
+      cause?: { code?: string };
+      statusCode?: number;
+      errorCode?: string;
+    } | null;
+
+    // Propagate typed service errors (e.g. from create_profile_item).
+    if (e?.statusCode && e?.errorCode) {
+      return {
+        ok: false,
+        statusCode: e.statusCode,
+        error: e.errorCode,
+        message: e.message ?? 'request rejected',
+      };
+    }
+
+    const pg_code = e?.code ?? e?.cause?.code;
+    const msg = String(e?.message ?? '');
+    if (
+      pg_code === '23505' ||
+      msg.includes('duplicate key value') ||
+      msg.includes('unique constraint')
+    ) {
+      return {
+        ok: false,
+        statusCode: 409,
+        error: 'USER_ALREADY_EXISTS',
+        message: 'email or phone already in use (race)',
+      };
+    }
+
+    log.error({ err: updateErr }, 'participant onboard failed');
+    return {
+      ok: false,
+      statusCode: 500,
+      error: 'ONBOARD_FAILED',
+      message: 'could not onboard participant',
+    };
+  }
+
+  return { ok: true, user_id };
+}
 
 export const participant_handler = async (
   request: UpsertRequest,
@@ -80,11 +253,24 @@ export const participant_handler = async (
   const existing = existingRows[0] ?? null;
   const user_exists = Boolean(existing);
 
-  // 2. Dispatch on the helper's verdict.
+  // 2. Compute aggregator ownership and dispatch on the helper's verdict.
+  const aggregator_owns_user = Boolean(
+    request.acting_org &&
+    request.acting_org.org_type === 'aggregator' &&
+    existing &&
+    existing.onboardedByOrgId === request.acting_org.org_id,
+  );
+
+  const has_item_state = Boolean(
+    body.item_state && Object.keys(body.item_state).length > 0,
+  );
+
   const verdict = resolve_upsert_action({
     acting_org: request.acting_org,
     user_exists,
     item_id_in_body: body.item_id,
+    has_item_state,
+    aggregator_owns_user,
   });
 
   if (verdict.kind === 'rejected') {
@@ -98,13 +284,68 @@ export const participant_handler = async (
   }
 
   // 3. Verdict-specific branches.
-  if (verdict.kind === 'aggregator_existing_noop') {
-    const acting_org_id = request.acting_org!.org_id;
-    const isOwn = existing!.onboardedByOrgId === acting_org_id;
-    const itemsList = isOwn ? await readItemsForUser(existing!.id) : [];
+
+  if (verdict.kind === 'aggregator_owned_elsewhere') {
     return reply.code(200).send({
       user_id: existing!.id,
       user_existed: true,
+      owned_elsewhere: true,
+      onboarded_at: null,
+      items: [],
+    });
+  }
+
+  if (verdict.kind === 'account_only') {
+    if (!user_exists) {
+      // New user — create account but skip item creation.
+      const acting_org_id = request.acting_org!.org_id;
+      const now = new Date();
+      const email_for_signup = email_norm ?? `${randomUUID()}@no-email.local`;
+
+      const fields: OnboardingFields = {
+        phone_norm,
+        date_of_birth: body.date_of_birth,
+        acting_org_id,
+        channel: body.channel,
+        source_id: body.source_id,
+        now,
+      };
+
+      const result = await signUpAndOnboardUser({
+        email_for_signup,
+        name: body.name,
+        fields,
+        log: request.log,
+        updateExecutor: async (user_id) => {
+          await db
+            .update(user)
+            .set(buildOnboardingSet(fields))
+            .where(eq(user.id, user_id));
+        },
+      });
+
+      if (!result.ok) {
+        return reply.code(result.statusCode).send({
+          error: result.error,
+          message: result.message,
+        });
+      }
+
+      return reply.code(200).send({
+        user_id: result.user_id,
+        user_existed: false,
+        owned_elsewhere: false,
+        onboarded_at: now.toISOString(),
+        items: [],
+      });
+    }
+
+    // Existing user, no item_state — read and return their items.
+    const itemsList = await readItemsForUser(existing!.id);
+    return reply.code(200).send({
+      user_id: existing!.id,
+      user_existed: true,
+      owned_elsewhere: false,
       onboarded_at: null,
       items: itemsList,
     });
@@ -131,7 +372,7 @@ export const participant_handler = async (
         verdict.item_id,
         existing!.id,
         true, // isAdmin — ownership already verified above
-        { item_state: body.item_state },
+        { item_state: body.item_state ?? {} },
       );
     } catch (err) {
       const e = err as { statusCode?: number; errorCode?: string };
@@ -155,6 +396,7 @@ export const participant_handler = async (
     return reply.code(200).send({
       user_id: existing!.id,
       user_existed: true,
+      owned_elsewhere: false,
       onboarded_at: null,
       items: itemsList,
     });
@@ -183,7 +425,7 @@ export const participant_handler = async (
         network,
         domain,
         item_type,
-        payload: body.item_state,
+        payload: body.item_state ?? {},
       });
     } catch (err) {
       const e = err as { statusCode?: number; errorCode?: string };
@@ -202,6 +444,7 @@ export const participant_handler = async (
     return reply.code(200).send({
       user_id: existing!.id,
       user_existed: true,
+      owned_elsewhere: false,
       onboarded_at: null,
       items: itemsList,
     });
@@ -229,122 +472,51 @@ export const participant_handler = async (
   const now = new Date();
   const email_for_signup = email_norm ?? `${randomUUID()}@no-email.local`;
 
-  let user_id: string;
-  try {
-    const signed_up = await authInstance.api.signUpEmail({
-      body: {
-        email: email_for_signup,
-        password: randomUUID(),
-        name: body.name,
-      },
-    });
-    user_id = signed_up.user.id;
-  } catch (signupErr: unknown) {
-    const e = signupErr as {
-      code?: string;
-      cause?: { code?: string };
-      message?: string;
-    } | null;
-    const pg_code = e?.code ?? e?.cause?.code;
-    const message = String(e?.message ?? '');
-    if (
-      pg_code === '23505' ||
-      message.includes('duplicate key value') ||
-      message.includes('unique constraint')
-    ) {
-      request.log.warn({ err: signupErr }, 'signUp race; user exists now');
-      return reply.code(409).send({
-        error: 'USER_ALREADY_EXISTS',
-        message:
-          'email or phone already in use (race) — retry the request',
+  const fields: OnboardingFields = {
+    phone_norm,
+    date_of_birth: body.date_of_birth,
+    acting_org_id,
+    channel: body.channel,
+    source_id: body.source_id,
+    now,
+  };
+
+  const result = await signUpAndOnboardUser({
+    email_for_signup,
+    name: body.name,
+    fields,
+    log: request.log,
+    updateExecutor: async (user_id) => {
+      await db.transaction(async (tx) => {
+        await tx
+          .update(user)
+          .set(buildOnboardingSet(fields))
+          .where(eq(user.id, user_id));
+
+        await create_profile_item({
+          tx,
+          user_id,
+          network,
+          domain,
+          item_type,
+          payload: body.item_state ?? {},
+        });
       });
-    }
-    request.log.error(
-      { err: signupErr },
-      'signUp failed during onboarding',
-    );
-    return reply.code(500).send({
-      error: 'ONBOARD_FAILED',
-      message: 'could not onboard participant',
+    },
+  });
+
+  if (!result.ok) {
+    return reply.code(result.statusCode).send({
+      error: result.error,
+      message: result.message,
     });
   }
 
-  try {
-    await db.transaction(async (tx) => {
-      await tx
-        .update(user)
-        .set({
-          phoneNumber: phone_norm,
-          phoneNumberVerified: false,
-          dateOfBirth: body.date_of_birth ? new Date(body.date_of_birth) : null,
-          termsAccepted: true,
-          privacyAccepted: true,
-          onboardedByOrgId: acting_org_id,
-          onboardedVia: body.channel,
-          onboardedSourceId: body.source_id ?? null,
-          onboardedAt: now,
-          updatedAt: now,
-        })
-        .where(eq(user.id, user_id));
-
-      await create_profile_item({
-        tx,
-        user_id,
-        network,
-        domain,
-        item_type,
-        payload: body.item_state,
-      });
-    });
-  } catch (txErr: unknown) {
-    try {
-      await db.delete(user).where(eq(user.id, user_id));
-      request.log.warn(
-        { orphan_user_id: user_id },
-        'cleaned up orphan user after tx rolled back',
-      );
-    } catch (cleanupErr) {
-      request.log.error(
-        { cleanupErr, orphan_user_id: user_id },
-        'failed to clean up orphan user — manual cleanup needed',
-      );
-    }
-    const e = txErr as {
-      code?: string;
-      message?: string;
-      cause?: { code?: string };
-      statusCode?: number;
-      errorCode?: string;
-    } | null;
-    if (e?.statusCode && e?.errorCode) {
-      return reply.code(e.statusCode).send({
-        error: e.errorCode,
-        message: e.message ?? 'request rejected',
-      });
-    }
-    const pg_code = e?.code ?? e?.cause?.code;
-    const message = String(e?.message ?? '');
-    if (
-      pg_code === '23505' ||
-      message.includes('duplicate key value') ||
-      message.includes('unique constraint')
-    ) {
-      return reply.code(409).send({
-        error: 'USER_ALREADY_EXISTS',
-        message: 'email or phone already in use (race)',
-      });
-    }
-    request.log.error({ err: txErr }, 'participant onboard failed in tx');
-    return reply.code(500).send({
-      error: 'ONBOARD_FAILED',
-      message: 'could not onboard participant',
-    });
-  }
-
-  const itemsList = await readItemsForUser(user_id);
+  const itemsList = await readItemsForUser(result.user_id);
   return reply.code(200).send({
-    user_id,
+    user_id: result.user_id,
     user_existed: false,
+    owned_elsewhere: false,
     onboarded_at: now.toISOString(),
     items: itemsList,
   });
