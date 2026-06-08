@@ -23,37 +23,67 @@ export function LocationAutocompleteWidget({
   const [suggestions, setSuggestions] = React.useState<GeoSuggestion[]>([]);
   const [open, setOpen] = React.useState(false);
   const provider = React.useMemo(() => getGeoProvider(), []);
+  const debounceRef = React.useRef<number | undefined>(undefined);
+  const blurRef = React.useRef<number | undefined>(undefined);
+  const abortRef = React.useRef<AbortController | null>(null);
 
+  // Keep the input in sync when RJSF pushes a new value (e.g. edit-mode
+  // prefill). This intentionally does NOT trigger a search — searching is
+  // driven only by user typing (see runSearch in handleInput), so selecting a
+  // suggestion (which calls onChange and updates `value`) never re-opens the
+  // dropdown.
   React.useEffect(() => {
     setText((value as string) ?? '');
   }, [value]);
 
-  React.useEffect(() => {
-    const q = text.trim();
+  // Cancel any pending work on unmount.
+  React.useEffect(
+    () => () => {
+      window.clearTimeout(debounceRef.current);
+      window.clearTimeout(blurRef.current);
+      abortRef.current?.abort();
+    },
+    [],
+  );
+
+  function runSearch(query: string) {
+    window.clearTimeout(debounceRef.current);
+    abortRef.current?.abort();
+    const q = query.trim();
     if (q.length < 3) {
       setSuggestions([]);
+      setOpen(false);
       return;
     }
-    const controller = new AbortController();
-    const handle = window.setTimeout(async () => {
-      const results = await provider.suggest(q, controller.signal);
-      if (!controller.signal.aborted) {
+    debounceRef.current = window.setTimeout(() => {
+      const controller = new AbortController();
+      abortRef.current = controller;
+      void provider.suggest(q, controller.signal).then((results) => {
+        if (controller.signal.aborted) return;
         setSuggestions(results);
         setOpen(results.length > 0);
-      }
+      });
     }, 300);
-    return () => {
-      controller.abort();
-      window.clearTimeout(handle);
-    };
-  }, [text, provider]);
+  }
+
+  function handleInput(next: string) {
+    setText(next);
+    onChange(next);
+    // The freshly typed text is no longer a resolved place — drop prior coords
+    // so the submit-time fallback re-geocodes (or the next selection sets them).
+    ctx.onLocationResolved?.(null);
+    runSearch(next);
+  }
 
   function choose(s: GeoSuggestion) {
+    // Cancel any pending/in-flight search so selecting never re-opens the list.
+    window.clearTimeout(debounceRef.current);
+    abortRef.current?.abort();
     setText(s.label);
     onChange(s.label);
     ctx.onLocationResolved?.({ lat: s.lat, lng: s.lng });
-    setOpen(false);
     setSuggestions([]);
+    setOpen(false);
   }
 
   return (
@@ -64,12 +94,12 @@ export function LocationAutocompleteWidget({
         disabled={disabled || readonly}
         autoComplete="off"
         className={cn(rawErrors && rawErrors.length > 0 && 'border-destructive')}
-        onChange={(e) => {
-          setText(e.target.value);
-          onChange(e.target.value);
-          ctx.onLocationResolved?.(null);
-        }}
+        onChange={(e) => handleInput(e.target.value)}
         onFocus={() => setOpen(suggestions.length > 0)}
+        onBlur={() => {
+          // Delay the close so a suggestion mousedown still registers.
+          blurRef.current = window.setTimeout(() => setOpen(false), 150);
+        }}
       />
       {open && suggestions.length > 0 && (
         <ul className="absolute z-50 mt-1 w-full rounded-md border bg-popover shadow-md">
@@ -78,7 +108,12 @@ export function LocationAutocompleteWidget({
               <button
                 type="button"
                 className="block w-full px-3 py-2 text-left text-sm hover:bg-accent"
-                onClick={() => choose(s)}
+                // onMouseDown (not onClick) so selection runs before the input's
+                // blur fires; preventDefault keeps focus from flicking away.
+                onMouseDown={(e) => {
+                  e.preventDefault();
+                  choose(s);
+                }}
               >
                 {s.label}
               </button>
