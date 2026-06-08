@@ -95,12 +95,6 @@ export const perform_action_handler = async (
           'source_item must be owned by the effective actor (request.user or acting_as_user_id)',
         );
       }
-      if (sourceItemSnapshot.lifecycle_status !== 'live') {
-        throw new BulkItemFailure(
-          'PROFILE_NOT_LIVE',
-          'source_item is not live; cannot perform actions',
-        );
-      }
 
       let requirementsSnapshot = body.requirements_snapshot;
 

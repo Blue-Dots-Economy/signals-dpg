@@ -439,6 +439,36 @@
           "consent_text_receiver": "I agree to share my organisation's contact details with the applicant."
         }
       ]
+    },
+    "connect": {
+      "description": "Lets a provider connect with another provider (partnership / referral). Either party can initiate; the receiver can accept or reject.",
+      "interactions": [
+        {
+          "from_network": "blue_dot",
+          "from_domain": "provider",
+          "to_network": "blue_dot",
+          "to_domain": "provider",
+          "requirement_schema": { "type": "object", "properties": {} },
+          "event_schema": {
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "title": "Provider To Provider Connect Event",
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["status", "remark"],
+            "properties": {
+              "status": {
+                "type": "string",
+                "enum": ["created", "accepted", "rejected", "cancelled"]
+              },
+              "remark": { "type": "string" }
+            }
+          },
+          "metric_categories": null,
+          "reveals_pii_on_status": ["accepted"],
+          "consent_text_initiator": "I agree to share my organisation's contact details with this organisation if they accept my request.",
+          "consent_text_receiver": "I agree to share my organisation's contact details with the requester."
+        }
+      ]
     }
   },
   "id": "blue_dot",

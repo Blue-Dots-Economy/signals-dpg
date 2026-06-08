@@ -51,6 +51,7 @@ export function ProfileFormPage() {
   const isEdit = !!id;
 
   const [selectedDomain, setSelectedDomain] = React.useState<string | null>(null);
+  const [myItems, setMyItems] = React.useState<Item[]>([]);
   const [resolvedNetwork, setResolvedNetwork] = React.useState<DotNetworkSchema | null>(null);
   const [existingItem, setExistingItem] = React.useState<Item | null>(null);
   const [initialData, setInitialData] = React.useState<Record<string, unknown> | null>(null);
@@ -178,6 +179,61 @@ export function ProfileFormPage() {
 
   const network = resolvedNetwork;
   const domains = network?.domains ?? [];
+
+  // Single-domain lock: a user's domain is implied by the items they already
+  // hold in this network. Fetch them across served domains so the create flow
+  // can lock the picker to the held domain (server enforces the real lock —
+  // see create_item's DOMAIN_LOCKED guard). Edit mode reads the domain off the
+  // existing item, so this only runs for create.
+  React.useEffect(() => {
+    if (isEdit || !network || !user) return;
+    const controller = new AbortController();
+    Promise.all(
+      (network.domains ?? []).map((domain) => {
+        const itemTypeKeys = domain.item_schemas
+          ? Object.keys(domain.item_schemas)
+          : [];
+        const itemType = itemTypeKeys.length > 0 ? itemTypeKeys[0] : 'profile';
+        return fetchItems(
+          {
+            item_network: network.id,
+            item_domain: domain.id,
+            item_type: itemType,
+            created_by_me: true,
+            limit: 100,
+          },
+          controller.signal,
+        )
+          .then((res) => res.items)
+          .catch(() => [] as Item[]);
+      }),
+    ).then((results) => {
+      if (!controller.signal.aborted) setMyItems(results.flat());
+    });
+    return () => controller.abort();
+  }, [isEdit, network, user]);
+
+  // Domain the user is locked to, or null when they hold no items yet.
+  const lockedDomain = React.useMemo(
+    () => (myItems.length > 0 ? myItems[0].item_domain : null),
+    [myItems],
+  );
+
+  // Domains offered in the picker: only the locked one when locked, else all
+  // served domains (network.domains is already filtered to served by config).
+  const selectableDomains = React.useMemo(
+    () =>
+      lockedDomain
+        ? domains.filter((d) => d.id === lockedDomain)
+        : domains,
+    [lockedDomain, domains],
+  );
+
+  // Locked users skip the role picker — auto-select their held domain.
+  React.useEffect(() => {
+    if (isEdit || selectedDomain || !lockedDomain) return;
+    setSelectedDomain(lockedDomain);
+  }, [isEdit, selectedDomain, lockedDomain]);
 
   // Find the profile schema for the selected domain
   const profileSchema = React.useMemo<RJSFSchema | null>(() => {
@@ -429,7 +485,7 @@ export function ProfileFormPage() {
           <p className="text-sm text-muted-foreground/80 mt-2">{theme.subline}</p>
         </div>
         <div className="grid gap-4 sm:grid-cols-2">
-          {domains.map((domain, idx) => {
+          {selectableDomains.map((domain, idx) => {
             const Icon = getDomainIcon(domain.id, network?.id);
             const label = domain.id
               .replace(/_/g, ' ')
@@ -462,11 +518,11 @@ export function ProfileFormPage() {
           <div className="relative z-10 px-5 pt-4 sm:px-6">
             <button
               type="button"
-              onClick={() => (selectedDomain && !isEdit ? setSelectedDomain(null) : navigate(`/?network=${resolvedNetwork?.id ?? ''}`))}
+              onClick={() => (selectedDomain && !isEdit && !lockedDomain ? setSelectedDomain(null) : navigate(`/?network=${resolvedNetwork?.id ?? ''}`))}
               className="flex items-center gap-1.5 text-sm text-white/70 hover:text-white transition-colors"
             >
               <ArrowLeft className="h-4 w-4" />
-              {selectedDomain && !isEdit ? t('profile.choose_different_role') : t('common.back')}
+              {selectedDomain && !isEdit && !lockedDomain ? t('profile.choose_different_role') : t('common.back')}
             </button>
           </div>
           <div className="relative z-10 flex items-center gap-4 px-5 pb-6 pt-3 sm:px-6">
