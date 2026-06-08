@@ -137,21 +137,25 @@
               "type": "string",
               "title": "Service City",
               "description": "City or village where you can receive the service or support",
-              "minLength": 1
+              "minLength": 1,
+              "location": true
             },
             "address": {
               "type": "string",
               "title": "Address",
               "description": "Area, street, city to help reach you easily",
-              "private": true
+              "private": true,
+              "location": "primary"
             },
             "state": {
               "type": "string",
-              "title": "State"
+              "title": "State",
+              "location": true
             },
             "district": {
               "type": "string",
-              "title": "District"
+              "title": "District",
+              "location": true
             },
             "block": {
               "type": "string",
@@ -160,7 +164,8 @@
             "pincode": {
               "type": "string",
               "title": "Pincode",
-              "pattern": "^[0-9]{6}$"
+              "pattern": "^[0-9]{6}$",
+              "location": true
             },
             "documents_available": {
               "type": "array",
@@ -343,15 +348,18 @@
               "type": "string",
               "title": "Address",
               "description": "Official address",
-              "minLength": 1
+              "minLength": 1,
+              "location": "primary"
             },
             "state": {
               "type": "string",
-              "title": "State"
+              "title": "State",
+              "location": true
             },
             "district": {
               "type": "string",
-              "title": "District"
+              "title": "District",
+              "location": true
             },
             "block": {
               "type": "string",
@@ -360,7 +368,8 @@
             "pincode": {
               "type": "string",
               "title": "Pincode",
-              "pattern": "^[0-9]{6}$"
+              "pattern": "^[0-9]{6}$",
+              "location": true
             },
             "service_details": {
               "type": "string",
