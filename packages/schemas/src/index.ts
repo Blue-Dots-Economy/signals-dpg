@@ -25,4 +25,9 @@ export {
   type NetworkConfigDocument,
   validateAgainstJsonSchema,
 } from './network_workflow';
+export {
+  parseLocationFields,
+  buildGeoQuery,
+  type LocationFields,
+} from './location_fields';
 export default z;
