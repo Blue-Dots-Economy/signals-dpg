@@ -4,6 +4,11 @@ import z from 'zod';
 export const ItemSelectSchema = createSelectSchema(items);
 export const ItemResponseSchema = ItemSelectSchema.omit({
   item_private_state: true,
+}).extend({
+  // Kept optional deliberately: response paths that do not project these columns
+  // (e.g. browse/fetch without lifecycle filter) must not cause a serialization 500.
+  lifecycle_status: z.enum(['draft', 'live', 'paused']).optional(),
+  completion_pct: z.number().int().min(0).max(100).optional(),
 });
 export const ItemInsertSchema = createInsertSchema(items);
 export const ItemSnapshotSchema = ItemResponseSchema.omit({
