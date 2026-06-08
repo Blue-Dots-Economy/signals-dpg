@@ -3,8 +3,9 @@ import { useTranslation } from 'react-i18next';
 import type { RJSFSchema } from '@rjsf/utils';
 import type { MapMarker } from '@/engine/types';
 import { getActiveMapProvider } from '@/engine/map/map-registry';
-import { extractAddressFromForm, extractPincodeFromForm, normalizeFieldName } from '@/lib/item-utils';
-import { geocodePincode, geocodeAddress, geocodeAddressWithGoogle } from './geocoding';
+import { normalizeFieldName } from '@/lib/item-utils';
+import { parseLocationFields, buildGeoQuery } from '@dpg/schemas';
+import { getGeoProvider } from '@/lib/geo/provider';
 import { Button } from '@/components/ui/button';
 import { Maximize2, Minimize2 } from 'lucide-react';
 
@@ -122,39 +123,17 @@ export function MapView({
           lat = resolveCoordinate(item.data, 'item_latitude', 'lat', 'latitude');
           lng = resolveCoordinate(item.data, 'item_longitude', 'lng', 'lon', 'longitude');
 
-          // 2. Fallback to pincode geocoding
+          // 2. Fallback: geocode using the marker-based composite query for this item's schema.
           if (lat === null || lng === null) {
-            const pincode = extractPincodeFromForm(item.data, '');
-            if (pincode) {
-              const geo = await geocodePincode(pincode);
-              if (geo) {
-                lat = geo.lat;
-                lng = geo.lng;
-                precision = 'geocoded_pincode';
-                geocodedFrom = 'pincode';
-              }
-            }
-          }
-
-          // 3. Fallback to address geocoding (full address format)
-          if (lat === null || lng === null) {
-            const address = extractAddressFromForm(item.data);
-            if (address) {
-              const geo = await geocodeAddressWithGoogle(address) ?? await geocodeAddress(address, 'full');
-              if (geo) {
-                lat = geo.lat;
-                lng = geo.lng;
+            const fields = parseLocationFields(schema as Record<string, unknown>);
+            const query = buildGeoQuery(item.data, fields);
+            if (query) {
+              const [best] = await getGeoProvider().suggest(query);
+              if (best) {
+                lat = best.lat;
+                lng = best.lng;
                 precision = 'geocoded_full_address';
-                geocodedFrom = 'location';
-              } else {
-                // Fallback to city-only format
-                const cityGeo = await geocodeAddress(address, 'city-only');
-                if (cityGeo) {
-                  lat = cityGeo.lat;
-                  lng = cityGeo.lng;
-                  precision = 'geocoded_city_only';
-                  geocodedFrom = 'city';
-                }
+                geocodedFrom = fields.primary ?? 'location';
               }
             }
           }
