@@ -291,7 +291,10 @@ function normalizeSchemaForRjsf(schema: RJSFSchema, rootSchema?: RJSFSchema): RJ
 
   const result: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(schema as Record<string, unknown>)) {
-    if (key === 'location') continue; // custom marker — consumed by uiSchema, not JSON Schema
+    // Strip the custom `location` MARKER (value "primary" | true), which is consumed
+    // by generateUiSchema, not real JSON Schema. Must NOT strip a property whose
+    // NAME is "location" (its value is the field's schema object).
+    if (key === 'location' && (value === 'primary' || value === true)) continue;
     result[key] = normalizeSchemaForRjsf(value as RJSFSchema, root);
   }
 

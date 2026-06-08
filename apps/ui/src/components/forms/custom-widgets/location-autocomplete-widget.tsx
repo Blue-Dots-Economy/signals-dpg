@@ -25,6 +25,10 @@ export function LocationAutocompleteWidget({
   const provider = React.useMemo(() => getGeoProvider(), []);
 
   React.useEffect(() => {
+    setText((value as string) ?? '');
+  }, [value]);
+
+  React.useEffect(() => {
     const q = text.trim();
     if (q.length < 3) {
       setSuggestions([]);
