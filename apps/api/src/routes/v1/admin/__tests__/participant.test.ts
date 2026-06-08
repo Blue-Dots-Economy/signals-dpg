@@ -116,6 +116,13 @@ const dbState: {
   inserts: Array<{ user_id: string; network: string; domain: string; item_type: string }>;
   signUpMode: 'ok' | 'unique_violation';
   signUpUserId: string;
+  /**
+   * When set (non-null), the mock returns this item_id for the
+   * existing-owned-item lookup (SELECT item_id FROM items WHERE
+   * created_by=... AND item_network=... ORDER BY updated_at DESC LIMIT 1).
+   * Set per-test for the idempotent re-onboard scenario.
+   */
+  existingOwnedItemId: string | null;
 } = {
   existingUserRows: [],
   itemsByUser: new Map(),
@@ -124,16 +131,19 @@ const dbState: {
   inserts: [],
   signUpMode: 'ok',
   signUpUserId: 'usr_new_default',
+  existingOwnedItemId: null,
 };
 
 // Discriminate db.select() projections by their key set, so the same
-// db mock can serve user-lookups, ownership-lookups, and items-list reads.
-type SelectMode = 'user' | 'items_list' | 'item_owner' | 'unknown';
+// db mock can serve user-lookups, ownership-lookups, items-list reads,
+// and the idempotent existing-owned-item lookup.
+type SelectMode = 'user' | 'items_list' | 'item_owner' | 'existing_item_lookup' | 'unknown';
 
 const classifyProjection = (proj: Record<string, unknown>): SelectMode => {
   const keys = Object.keys(proj);
   if (keys.includes('onboardedByOrgId')) return 'user';
   if (keys.length === 1 && keys[0] === 'created_by') return 'item_owner';
+  if (keys.length === 1 && keys[0] === 'item_id') return 'existing_item_lookup';
   if (keys.includes('item_state') && keys.includes('item_private_state')) {
     return 'items_list';
   }
@@ -183,6 +193,19 @@ vi.mock('@api/db/postgres/drizzle_config', () => {
                 allowedNetworks.has(r.item_network),
               );
               return Promise.resolve(filtered);
+            }
+            if (mode === 'existing_item_lookup') {
+              // Returns a chainable .limit() so the caller can do
+              // .orderBy(...).limit(1). The result resolves to either
+              // [{item_id}] or [] depending on dbState.existingOwnedItemId.
+              return {
+                limit: vi.fn(() => {
+                  if (dbState.existingOwnedItemId) {
+                    return Promise.resolve([{ item_id: dbState.existingOwnedItemId }]);
+                  }
+                  return Promise.resolve([]);
+                }),
+              };
             }
             return Promise.resolve([]);
           }),
@@ -371,6 +394,7 @@ describe('POST /admin/participant', () => {
     dbState.inserts = [];
     dbState.signUpMode = 'ok';
     dbState.signUpUserId = 'usr_new_default';
+    dbState.existingOwnedItemId = null;
     lastQueriedUserId = null;
     lastQueriedItemId = null;
   });
@@ -845,8 +869,8 @@ describe('POST /admin/participant', () => {
     expect(dbState.inserts).toHaveLength(0);
   });
 
-  it('network_service + existing user + duplicate (network,domain,item_type) + no item_id → 200, still inserts', async () => {
-    const user_id = 'usr_ns_dup';
+  it('network_service + existing user + existing item (same network/domain/type) + no item_id → 200 idempotent update, no insert', async () => {
+    const user_id = 'usr_ns_reonboard';
     dbState.existingUserRows = [
       {
         id: user_id,
@@ -869,7 +893,13 @@ describe('POST /admin/participant', () => {
       },
     ]);
     dbState.itemOwnerLookup.set(VALID_UUID_A, user_id);
+    // Feed the existing-owned-item lookup side channel so the resolver
+    // returns update_item{VALID_UUID_A} instead of insert_item.
+    dbState.existingOwnedItemId = VALID_UUID_A;
     lastQueriedUserId = user_id;
+    lastQueriedItemId = VALID_UUID_A;
+    const { updateItemInternal } = await import('@/services/item_service');
+    vi.mocked(updateItemInternal).mockClear();
     const app = await buildApp({
       org_id: 'org_ns_1',
       org_type: 'network_service',
@@ -877,12 +907,58 @@ describe('POST /admin/participant', () => {
     const res = await app.inject({
       method: 'POST',
       url: '/participant',
-      payload: baseBody(),
+      payload: baseBody({ item_state: { v: 2 } }),
     });
     expect(res.statusCode).toBe(200);
-    expect(dbState.inserts).toHaveLength(1);
-    // items grew by one.
-    expect(dbState.itemsByUser.get(user_id)).toHaveLength(2);
+    // Idempotent path: updateItemInternal called, NO new insert.
+    expect(vi.mocked(updateItemInternal)).toHaveBeenCalledTimes(1);
+    expect(dbState.inserts).toHaveLength(0);
+    // Item count unchanged — no duplicate created.
+    expect(dbState.itemsByUser.get(user_id)).toHaveLength(1);
+  });
+
+  it('aggregator + existing OWN user + existing item (same network/domain/type) + no item_id → 200 idempotent update, no insert', async () => {
+    const user_id = 'usr_agg_reonboard';
+    dbState.existingUserRows = [
+      {
+        id: user_id,
+        email: VALID_EMAIL,
+        phoneNumber: null,
+        onboardedByOrgId: 'org_agg_1',
+      },
+    ];
+    dbState.itemsByUser.set(user_id, [
+      {
+        item_id: VALID_UUID_A,
+        item_network: 'blue_dot',
+        item_domain: 'seeker',
+        item_type: 'profile_1.0',
+        item_state: { v: 1 },
+        item_private_state: '',
+        created_at: new Date(),
+        updated_at: new Date(),
+      },
+    ]);
+    dbState.itemOwnerLookup.set(VALID_UUID_A, user_id);
+    dbState.existingOwnedItemId = VALID_UUID_A;
+    lastQueriedUserId = user_id;
+    lastQueriedItemId = VALID_UUID_A;
+    const { updateItemInternal } = await import('@/services/item_service');
+    vi.mocked(updateItemInternal).mockClear();
+    const app = await buildApp({
+      org_id: 'org_agg_1',
+      org_type: 'aggregator',
+    });
+    const res = await app.inject({
+      method: 'POST',
+      url: '/participant',
+      payload: baseBody({ item_state: { v: 2 } }),
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().owned_elsewhere).toBe(false);
+    expect(vi.mocked(updateItemInternal)).toHaveBeenCalledTimes(1);
+    expect(dbState.inserts).toHaveLength(0);
+    expect(dbState.itemsByUser.get(user_id)).toHaveLength(1);
   });
 
   it('400 when neither email nor phone_number is provided', async () => {
@@ -941,10 +1017,9 @@ describe('POST /admin/participant', () => {
       url: '/participant',
       payload: baseBody(),
     });
-    // aggregator + existing OWN user + item_state → insert_item
-    // owned network items: 1 (blue_dot), plus 1 newly inserted = 2 after
-    // But scope filter only returns blue_dot items from itemsByUser which
-    // already has blue_dot + yellow_dot — after insert, blue_dot count = 2
+    // existingOwnedItemId = null (default) → resolver chooses insert_item.
+    // Scope filter returns only blue_dot items; yellow_dot is excluded.
+    // This test validates the network-scoping logic regardless of insert/update.
     expect(res.statusCode).toBe(200);
     const body = res.json();
     // All returned items must be blue_dot
