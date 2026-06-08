@@ -213,9 +213,17 @@ export default defineConfig(({ mode }) => {
   return {
     plugins: [react(), tailwindcss(), brandThemePlugin()],
     resolve: {
-      alias: {
-        '@': path.resolve(__dirname, './src'),
-      },
+      // Mirror the tsconfig `paths` so Vite resolves the same aliases the
+      // type-checker does. `@dpg/*` -> packages/*/src (workspace source);
+      // listed before `@` since both are matched in order. Array form is
+      // required for the regex `@dpg/*` mapping.
+      alias: [
+        {
+          find: /^@dpg\/(.*)$/,
+          replacement: path.resolve(__dirname, '../../packages/$1/src'),
+        },
+        { find: '@', replacement: path.resolve(__dirname, './src') },
+      ],
     },
     define: {
       __DEFAULT_NETWORK_THEME__: JSON.stringify(defaultNetworkTheme),
