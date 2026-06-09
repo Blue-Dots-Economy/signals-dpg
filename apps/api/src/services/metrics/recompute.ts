@@ -28,6 +28,15 @@ export interface RecomputeResult {
   duration_ms: number;
 }
 
+/** Both action directions, in payload order. */
+const DIRECTIONS = ['initiated', 'received'] as const;
+type Direction = (typeof DIRECTIONS)[number];
+
+/** SQL column alias for a (direction, bucket) count, e.g. `initiated_create`. */
+const count_col = (d: Direction, b: CanonicalBucket): string => `${d}_${b}`;
+/** SQL column alias for a (direction, bucket) MAX timestamp. */
+const last_col = (d: Direction, b: CanonicalBucket): string => `last_${d}_${b}_at`;
+
 interface AggregatedRow extends Record<string, unknown> {
   item_id: string;
   item_network: string;
@@ -39,28 +48,23 @@ interface AggregatedRow extends Record<string, unknown> {
   item_state: Record<string, unknown> | null;
   profile_created_at: Date | string | null;
   profile_last_updated_at: Date | string | null;
-  count_create: number;
-  count_accept: number;
-  count_reject: number;
-  count_cancel: number;
-  last_create_at: Date | string | null;
-  last_accept_at: Date | string | null;
-  last_reject_at: Date | string | null;
-  last_cancel_at: Date | string | null;
+  // initiated_<bucket> / received_<bucket> counts + last_<direction>_<bucket>_at
+  // timestamps are accessed dynamically via count_col() / last_col().
 }
 
 /**
- * Build a UNION ALL of per-bucket event SELECTs for every tracked interaction
- * in the network. Each SELECT emits (item_id, bucket, created_at) rows that
- * the outer GROUP BY in the main CTE buckets into per-item counts and MAX
- * timestamps.
+ * Build a UNION ALL of per-(direction,bucket) event SELECTs for every tracked
+ * interaction in the network. Each SELECT emits (item_id, direction, bucket,
+ * created_at) rows that the outer GROUP BY in the main CTE buckets into
+ * per-item directional counts and MAX timestamps.
  *
- * Bidirectional: when an item's domain participates as the SOURCE of an
+ * Directional: when an item's domain participates as the SOURCE of an
  * interaction (e.g. seeker→provider connect), the seeker's item_id is
- * source_item_id. When it participates as TARGET (e.g. provider→seeker
- * connect for the provider domain), the provider's item_id is target_item_id.
- * Both source and target rows of the same canonical bucket get counted on
- * each side — that's what "symmetric" means in spec §c.
+ * source_item_id and the event is `initiated`. When it participates as TARGET
+ * (e.g. provider→seeker connect for the seeker domain), the seeker's item_id
+ * is target_item_id and the event is `received`. A self-domain interaction
+ * (from_domain === to_domain === domain) emits BOTH an initiated and a
+ * received row for the same action, since the same item plays both roles.
  */
 const buildInteractionEvents = (
   tracked: Array<{ actionType: string; fromDomain: string; toDomain: string; categories: MetricCategoriesMap }>,
@@ -68,13 +72,11 @@ const buildInteractionEvents = (
 ): import('drizzle-orm').SQL | null => {
   const pieces: import('drizzle-orm').SQL[] = [];
 
-  for (const t of tracked) {
-    const isSource = t.fromDomain === domain;
-    const isTarget = t.toDomain === domain;
-    if (!isSource && !isTarget) continue;
-
-    const idCol = isSource ? sql`source_item_id` : sql`target_item_id`;
-
+  const emit = (
+    t: { actionType: string; fromDomain: string; toDomain: string; categories: MetricCategoriesMap },
+    idCol: import('drizzle-orm').SQL,
+    direction: Direction,
+  ) => {
     for (const bucket of CANONICAL_BUCKETS) {
       const statuses = t.categories[bucket];
       if (statuses.length === 0) continue;
@@ -82,6 +84,7 @@ const buildInteractionEvents = (
       pieces.push(sql`
         SELECT
           ${idCol} AS item_id,
+          ${direction} AS direction,
           ${bucket} AS bucket,
           created_at
         FROM item_actions
@@ -92,6 +95,11 @@ const buildInteractionEvents = (
           AND ${idCol} IS NOT NULL
       `);
     }
+  };
+
+  for (const t of tracked) {
+    if (t.fromDomain === domain) emit(t, sql`source_item_id`, 'initiated');
+    if (t.toDomain === domain) emit(t, sql`target_item_id`, 'received');
   }
 
   if (pieces.length === 0) return null;
@@ -100,10 +108,11 @@ const buildInteractionEvents = (
 
 /**
  * Recomputes item_metrics for all items owned by users onboarded by the
- * given aggregator within the given domain. Bidirectional: aggregates
- * actions in both source and target positions, per the tracked-interactions
- * collected from the network config. Per-item status is evaluated against
- * the domain's status_rules from network.json.
+ * given aggregator within the given domain. Directional: aggregates actions
+ * into initiated (item-as-source) and received (item-as-target) maps, per the
+ * tracked-interactions collected from the network config. Per-item status is
+ * evaluated against the domain's status_rules using COMBINED (initiated +
+ * received) counts, preserving the historical status semantics.
  */
 export const recompute_aggregator_domain_metrics = async (
   aggregator_id: string,
@@ -148,24 +157,49 @@ export const recompute_aggregator_domain_metrics = async (
     );
   }
 
-  // Main query: aggregate events into per-item bucket counts/timestamps,
-  // join to items + user attribution. Empty `eventsCte` (no tracked
-  // interactions touch this domain) → action_counts is an empty CTE so
-  // every join yields 0 counts via COALESCE.
+  // The per-(direction,bucket) count + MAX-timestamp projections shared by both
+  // the populated and the empty CTE branch.
+  const countSelects = sql.join(
+    DIRECTIONS.flatMap((d) =>
+      CANONICAL_BUCKETS.map(
+        (b) => sql`COUNT(*) FILTER (WHERE direction = ${d} AND bucket = ${b})::int AS ${sql.raw(count_col(d, b))}`,
+      ),
+    ),
+    sql`, `,
+  );
+  const lastSelects = sql.join(
+    DIRECTIONS.flatMap((d) =>
+      CANONICAL_BUCKETS.map(
+        (b) => sql`MAX(created_at) FILTER (WHERE direction = ${d} AND bucket = ${b}) AS ${sql.raw(last_col(d, b))}`,
+      ),
+    ),
+    sql`, `,
+  );
+  const emptyCountCols = sql.join(
+    DIRECTIONS.flatMap((d) =>
+      CANONICAL_BUCKETS.map((b) => sql`0::int AS ${sql.raw(count_col(d, b))}`),
+    ),
+    sql`, `,
+  );
+  const emptyLastCols = sql.join(
+    DIRECTIONS.flatMap((d) =>
+      CANONICAL_BUCKETS.map((b) => sql`NULL::timestamp AS ${sql.raw(last_col(d, b))}`),
+    ),
+    sql`, `,
+  );
+
+  // Main query: aggregate events into per-item directional bucket
+  // counts/timestamps, join to items + user attribution. Empty `eventsCte`
+  // (no tracked interactions touch this domain) → action_counts is an empty
+  // CTE so every join yields 0 counts via COALESCE.
   const actionCountsCte = eventsCte
     ? sql`
         WITH ev AS (${eventsCte}),
         action_counts AS (
           SELECT
             item_id,
-            COUNT(*) FILTER (WHERE bucket = 'create')::int AS count_create,
-            COUNT(*) FILTER (WHERE bucket = 'accept')::int AS count_accept,
-            COUNT(*) FILTER (WHERE bucket = 'reject')::int AS count_reject,
-            COUNT(*) FILTER (WHERE bucket = 'cancel')::int AS count_cancel,
-            MAX(created_at) FILTER (WHERE bucket = 'create') AS last_create_at,
-            MAX(created_at) FILTER (WHERE bucket = 'accept') AS last_accept_at,
-            MAX(created_at) FILTER (WHERE bucket = 'reject') AS last_reject_at,
-            MAX(created_at) FILTER (WHERE bucket = 'cancel') AS last_cancel_at
+            ${countSelects},
+            ${lastSelects}
           FROM ev
           GROUP BY item_id
         )
@@ -174,15 +208,28 @@ export const recompute_aggregator_domain_metrics = async (
         WITH action_counts AS (
           SELECT
             ''::text AS item_id,
-            0::int AS count_create, 0::int AS count_accept,
-            0::int AS count_reject, 0::int AS count_cancel,
-            NULL::timestamp AS last_create_at,
-            NULL::timestamp AS last_accept_at,
-            NULL::timestamp AS last_reject_at,
-            NULL::timestamp AS last_cancel_at
+            ${emptyCountCols},
+            ${emptyLastCols}
           WHERE FALSE
         )
       `;
+
+  // Projected count/last columns for the main SELECT — COALESCE counts to 0,
+  // pass timestamps through (NULL when the bucket never occurred).
+  const projectedCounts = sql.join(
+    DIRECTIONS.flatMap((d) =>
+      CANONICAL_BUCKETS.map(
+        (b) => sql`COALESCE(ac.${sql.raw(count_col(d, b))}, 0) AS ${sql.raw(count_col(d, b))}`,
+      ),
+    ),
+    sql`, `,
+  );
+  const projectedLast = sql.join(
+    DIRECTIONS.flatMap((d) =>
+      CANONICAL_BUCKETS.map((b) => sql`ac.${sql.raw(last_col(d, b))}`),
+    ),
+    sql`, `,
+  );
 
   const result = await db.execute<AggregatedRow>(sql`
     ${actionCountsCte}
@@ -197,12 +244,8 @@ export const recompute_aggregator_domain_metrics = async (
       i.item_state         AS item_state,
       i.created_at         AS profile_created_at,
       i.updated_at         AS profile_last_updated_at,
-      COALESCE(ac.count_create, 0) AS count_create,
-      COALESCE(ac.count_accept, 0) AS count_accept,
-      COALESCE(ac.count_reject, 0) AS count_reject,
-      COALESCE(ac.count_cancel, 0) AS count_cancel,
-      ac.last_create_at, ac.last_accept_at,
-      ac.last_reject_at, ac.last_cancel_at
+      ${projectedCounts},
+      ${projectedLast}
     FROM items i
     JOIN "user" u ON u.id = i.created_by
     LEFT JOIN action_counts ac ON ac.item_id = i.item_id
@@ -220,29 +263,52 @@ export const recompute_aggregator_domain_metrics = async (
     const payload = (r.item_state ?? {}) as Record<string, unknown>;
     const profile_created = to_date(r.profile_created_at) ?? now;
     const profile_updated = to_date(r.profile_last_updated_at) ?? profile_created;
-    const last_create = to_date(r.last_create_at);
-    const last_accept = to_date(r.last_accept_at);
-    const last_reject = to_date(r.last_reject_at);
-    const last_cancel = to_date(r.last_cancel_at);
 
     const schema = await get_item_schema(r.item_network, r.item_domain, r.item_type);
 
     const age_days = days_between(profile_created, now);
 
+    // Per-direction full count maps + per-direction last-Date maps.
+    const counts: Record<Direction, Record<CanonicalBucket, number>> = {
+      initiated: { create: 0, accept: 0, reject: 0, cancel: 0 },
+      received: { create: 0, accept: 0, reject: 0, cancel: 0 },
+    };
+    const lastDates: Record<Direction, Record<CanonicalBucket, Date | null>> = {
+      initiated: { create: null, accept: null, reject: null, cancel: null },
+      received: { create: null, accept: null, reject: null, cancel: null },
+    };
+    for (const d of DIRECTIONS) {
+      for (const b of CANONICAL_BUCKETS) {
+        counts[d][b] = Number(r[count_col(d, b)] ?? 0);
+        lastDates[d][b] = to_date(r[last_col(d, b)]);
+      }
+    }
+
+    // Sparse last-at maps: only buckets with a timestamp (omit absent).
+    const sparse_last = (dir: Direction): Record<string, string> => {
+      const out: Record<string, string> = {};
+      for (const b of CANONICAL_BUCKETS) {
+        const dt = lastDates[dir][b];
+        if (dt !== null) out[b] = dt.toISOString();
+      }
+      return out;
+    };
+
+    // Status DSL is fed COMBINED counts + the most-recent timestamp across
+    // both directions per bucket, preserving the pre-directional semantics.
     const dsl_input = {
       item_age_days: age_days,
-      count: {
-        create: r.count_create,
-        accept: r.count_accept,
-        reject: r.count_reject,
-        cancel: r.count_cancel,
-      } as Record<CanonicalBucket, number>,
-      days_since_last: {
-        create: last_create === null ? null : days_between(last_create, now),
-        accept: last_accept === null ? null : days_between(last_accept, now),
-        reject: last_reject === null ? null : days_between(last_reject, now),
-        cancel: last_cancel === null ? null : days_between(last_cancel, now),
-      } as Record<CanonicalBucket, number | null>,
+      count: Object.fromEntries(
+        CANONICAL_BUCKETS.map((b) => [b, counts.initiated[b] + counts.received[b]]),
+      ) as Record<CanonicalBucket, number>,
+      days_since_last: Object.fromEntries(
+        CANONICAL_BUCKETS.map((b) => {
+          const candidates = [lastDates.initiated[b], lastDates.received[b]]
+            .filter((d): d is Date => d !== null)
+            .map((d) => days_between(d, now));
+          return [b, candidates.length === 0 ? null : Math.min(...candidates)];
+        }),
+      ) as Record<CanonicalBucket, number | null>,
     };
 
     const profileStatus: CanonicalStatus = evaluate_status_rules(status_rules, dsl_input);
@@ -267,14 +333,10 @@ export const recompute_aggregator_domain_metrics = async (
       profileCreatedAt: profile_created,
       profileLastUpdatedAt: profile_updated,
       ageDays: age_days,
-      countCreate: r.count_create,
-      countAccept: r.count_accept,
-      countReject: r.count_reject,
-      countCancel: r.count_cancel,
-      lastCreateAt: last_create,
-      lastAcceptAt: last_accept,
-      lastRejectAt: last_reject,
-      lastCancelAt: last_cancel,
+      initiated: counts.initiated,
+      received: counts.received,
+      lastInitiatedAt: sparse_last('initiated'),
+      lastReceivedAt: sparse_last('received'),
       actionableTags: compute_actionable_tags({ payload, schema }),
       lastComputedAt: now,
     });
@@ -314,14 +376,10 @@ const flush = async (
         profileCreatedAt: sql`excluded.profile_created_at`,
         profileLastUpdatedAt: sql`excluded.profile_last_updated_at`,
         ageDays: sql`excluded.age_days`,
-        countCreate: sql`excluded.count_create`,
-        countAccept: sql`excluded.count_accept`,
-        countReject: sql`excluded.count_reject`,
-        countCancel: sql`excluded.count_cancel`,
-        lastCreateAt: sql`excluded.last_create_at`,
-        lastAcceptAt: sql`excluded.last_accept_at`,
-        lastRejectAt: sql`excluded.last_reject_at`,
-        lastCancelAt: sql`excluded.last_cancel_at`,
+        initiated: sql`excluded.initiated`,
+        received: sql`excluded.received`,
+        lastInitiatedAt: sql`excluded.last_initiated_at`,
+        lastReceivedAt: sql`excluded.last_received_at`,
         actionableTags: sql`excluded.actionable_tags`,
         lastComputedAt: sql`excluded.last_computed_at`,
       },
