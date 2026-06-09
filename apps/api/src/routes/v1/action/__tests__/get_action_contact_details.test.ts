@@ -188,7 +188,6 @@ function buildItem(
     created_at: new Date('2026-01-01T00:00:00Z'),
     updated_at: new Date('2026-01-02T00:00:00Z'),
     lifecycle_status: 'live',
-    completion_pct: 100,
     ...overrides,
   };
 }

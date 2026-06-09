@@ -391,7 +391,6 @@ describeIf(`lifecycle integration${can_run ? '' : ` — ${skip_reason}`}`, () =>
     const [row] = await db
       .select({
         lifecycle_status: itemsTable.lifecycle_status,
-        completion_pct: itemsTable.completion_pct,
       })
       .from(itemsTable)
       .where(eq(itemsTable.item_id, item_id))
@@ -399,8 +398,6 @@ describeIf(`lifecycle integration${can_run ? '' : ` — ${skip_reason}`}`, () =>
 
     expect(row).toBeTruthy();
     expect(row.lifecycle_status).toBe('draft');
-    expect(row.completion_pct).toBeGreaterThanOrEqual(0);
-    expect(row.completion_pct).toBeLessThan(100);
   });
 
   // ---------------------------------------------------------------------------
@@ -442,7 +439,6 @@ describeIf(`lifecycle integration${can_run ? '' : ` — ${skip_reason}`}`, () =>
     const [row] = await db
       .select({
         lifecycle_status: itemsTable.lifecycle_status,
-        completion_pct: itemsTable.completion_pct,
       })
       .from(itemsTable)
       .where(eq(itemsTable.item_id, live_item_id))
@@ -450,7 +446,6 @@ describeIf(`lifecycle integration${can_run ? '' : ` — ${skip_reason}`}`, () =>
 
     expect(row).toBeTruthy();
     expect(row.lifecycle_status).toBe('live');
-    expect(row.completion_pct).toBe(100);
   });
 
   // ---------------------------------------------------------------------------
@@ -489,7 +484,7 @@ describeIf(`lifecycle integration${can_run ? '' : ` — ${skip_reason}`}`, () =>
     onboarded_user_ids.push(user_id);
 
     const [row1] = await db
-      .select({ lifecycle_status: itemsTable.lifecycle_status, completion_pct: itemsTable.completion_pct })
+      .select({ lifecycle_status: itemsTable.lifecycle_status })
       .from(itemsTable)
       .where(eq(itemsTable.item_id, item_id))
       .limit(1);
@@ -791,11 +786,9 @@ describeIf(`lifecycle integration${can_run ? '' : ` — ${skip_reason}`}`, () =>
     const body = res.json() as {
       item_id: string;
       lifecycle_status: string;
-      completion_pct: number;
     };
     expect(body.item_id).toBe(live_item_id);
     expect(body.lifecycle_status).toBe('paused');
-    expect(body.completion_pct).toBeGreaterThanOrEqual(0);
 
     const [row] = await db
       .select({ lifecycle_status: itemsTable.lifecycle_status })
@@ -827,12 +820,10 @@ describeIf(`lifecycle integration${can_run ? '' : ` — ${skip_reason}`}`, () =>
     const body = res.json() as {
       item_id: string;
       lifecycle_status: string;
-      completion_pct: number;
     };
     expect(body.item_id).toBe(live_item_id);
     // Item was fully completed (100%) before pausing so unpause → live.
     expect(body.lifecycle_status).toBe('live');
-    expect(body.completion_pct).toBe(100);
   });
 
   // ---------------------------------------------------------------------------

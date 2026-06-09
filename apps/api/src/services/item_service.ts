@@ -180,7 +180,6 @@ export async function createItemInternal(
       item_longitude: params.item_longitude ?? null,
       created_by: params.created_by,
       lifecycle_status: classification.lifecycle_status,
-      completion_pct: classification.completion_pct,
     })
     .onConflictDoNothing({
       target: [
@@ -327,7 +326,6 @@ export async function updateItemInternal(
       current_status: existingItem.lifecycle_status as 'draft' | 'live' | 'paused',
     });
     updateValues.lifecycle_status = classification.lifecycle_status;
-    updateValues.completion_pct = classification.completion_pct;
 
     isLeavingLive =
       existingItem.lifecycle_status === 'live' && classification.lifecycle_status !== 'live';

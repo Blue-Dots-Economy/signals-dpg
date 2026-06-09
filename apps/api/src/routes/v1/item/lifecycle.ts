@@ -103,31 +103,22 @@ const item_lifecycle_handler = async (
       });
 
       let next_status: 'draft' | 'live' | 'paused';
-      let completion_pct: number;
 
       if (action === 'pause') {
-        const c = classify_item({
-          schema: itemSchema as { required?: string[] },
-          merged_state: mergedState,
-          current_status: 'paused',
-        });
         next_status = 'paused';
-        completion_pct = c.completion_pct;
       } else {
-        const c = classify_item({
+        // unpause: recompute draft/live from current data (non-sticky path).
+        next_status = classify_item({
           schema: itemSchema as { required?: string[] },
           merged_state: mergedState,
           current_status: 'draft',
-        });
-        next_status = c.lifecycle_status;
-        completion_pct = c.completion_pct;
+        }).lifecycle_status;
       }
 
       await tx
         .update(items)
         .set({
           lifecycle_status: next_status,
-          completion_pct,
           updated_at: sql`now()`,
         })
         .where(eq(items.item_id, item_id));
@@ -147,7 +138,6 @@ const item_lifecycle_handler = async (
         item_network: existing.item_network,
         item_domain: existing.item_domain,
         lifecycle_status: next_status,
-        completion_pct,
         cancelled_pending_actions: cancelledPendingActions,
       };
     });

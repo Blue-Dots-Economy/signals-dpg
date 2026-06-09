@@ -112,7 +112,6 @@ export async function deleteItem(itemId: string): Promise<void> {
 export interface ItemLifecycleResponse {
   item_id: string;
   lifecycle_status: 'draft' | 'live' | 'paused';
-  completion_pct: number;
   cancelled_pending_actions: number;
 }
 

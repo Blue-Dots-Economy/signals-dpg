@@ -38,7 +38,6 @@ export const items = pgTable(
       .$defaultFn(() => /* @__PURE__ */ new Date())
       .notNull(),
     lifecycle_status: text('lifecycle_status').notNull().default('draft'),
-    completion_pct: integer('completion_pct').notNull().default(0),
   },
   (table) => [
     primaryKey({

@@ -8,7 +8,6 @@ export const ItemLifecycleBody = z.object({
 export const ItemLifecycleResponse = z.object({
   item_id: z.uuid(),
   lifecycle_status: z.enum(['draft', 'live', 'paused']),
-  completion_pct: z.number().int().min(0).max(100),
   cancelled_pending_actions: z.number().int().nonnegative(),
 });
 
