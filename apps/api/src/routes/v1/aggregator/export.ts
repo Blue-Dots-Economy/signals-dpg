@@ -12,6 +12,8 @@ import { ExportQuery, type ExportQuery as ExportQueryType } from '@dpg/schemas';
 import { check_and_refresh_if_stale } from '@/services/metrics/staleness';
 
 const COLUMNS = [
+  'profile_item_id',
+  'user_id',
   'item_network',
   'item_domain',
   'item_type',
@@ -22,14 +24,22 @@ const COLUMNS = [
   'profile_created_at',
   'profile_last_updated_at',
   'age_days',
-  'count_create',
-  'count_accept',
-  'count_reject',
-  'count_cancel',
-  'last_create_at',
-  'last_accept_at',
-  'last_reject_at',
-  'last_cancel_at',
+  'initiated_create',
+  'initiated_accept',
+  'initiated_reject',
+  'initiated_cancel',
+  'received_create',
+  'received_accept',
+  'received_reject',
+  'received_cancel',
+  'last_initiated_create_at',
+  'last_initiated_accept_at',
+  'last_initiated_reject_at',
+  'last_initiated_cancel_at',
+  'last_received_create_at',
+  'last_received_accept_at',
+  'last_received_reject_at',
+  'last_received_cancel_at',
   'actionable_tags',
 ] as const;
 
@@ -91,7 +101,13 @@ async function* generate_csv(
     if (rows.length === 0) break;
 
     for (const r of rows) {
+      const initiated = r.initiated ?? {};
+      const received = r.received ?? {};
+      const lastInitiated = r.lastInitiatedAt ?? {};
+      const lastReceived = r.lastReceivedAt ?? {};
       const projected: Record<(typeof COLUMNS)[number], unknown> = {
+        profile_item_id: r.itemId,
+        user_id: r.ownerUserId,
         item_network: r.itemNetwork,
         item_domain: r.itemDomain,
         item_type: r.itemType,
@@ -102,14 +118,22 @@ async function* generate_csv(
         profile_created_at: r.profileCreatedAt,
         profile_last_updated_at: r.profileLastUpdatedAt,
         age_days: r.ageDays,
-        count_create: r.countCreate,
-        count_accept: r.countAccept,
-        count_reject: r.countReject,
-        count_cancel: r.countCancel,
-        last_create_at: r.lastCreateAt,
-        last_accept_at: r.lastAcceptAt,
-        last_reject_at: r.lastRejectAt,
-        last_cancel_at: r.lastCancelAt,
+        initiated_create: initiated.create ?? 0,
+        initiated_accept: initiated.accept ?? 0,
+        initiated_reject: initiated.reject ?? 0,
+        initiated_cancel: initiated.cancel ?? 0,
+        received_create: received.create ?? 0,
+        received_accept: received.accept ?? 0,
+        received_reject: received.reject ?? 0,
+        received_cancel: received.cancel ?? 0,
+        last_initiated_create_at: lastInitiated.create ?? null,
+        last_initiated_accept_at: lastInitiated.accept ?? null,
+        last_initiated_reject_at: lastInitiated.reject ?? null,
+        last_initiated_cancel_at: lastInitiated.cancel ?? null,
+        last_received_create_at: lastReceived.create ?? null,
+        last_received_accept_at: lastReceived.accept ?? null,
+        last_received_reject_at: lastReceived.reject ?? null,
+        last_received_cancel_at: lastReceived.cancel ?? null,
         actionable_tags: r.actionableTags,
       };
       yield COLUMNS.map((c) => csv_escape(projected[c])).join(',') + '\n';

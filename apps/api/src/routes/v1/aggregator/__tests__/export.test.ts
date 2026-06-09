@@ -15,7 +15,7 @@ import {
  *     domain in parallel before streaming the CSV.
  *   - Streams item_metrics rows ordered by (item_domain, item_id), so
  *     multi-domain output is grouped by domain.
- *   - Projects exactly the 19-column COLUMNS list (item_private_state is
+ *   - Projects exactly the 29-column COLUMNS list (item_private_state is
  *     never included).
  *
  * Strategy: vi.mock the drizzle db client + staleness service. The select
@@ -92,14 +92,14 @@ const sample = (overrides: Record<string, unknown> = {}) => ({
   profileCreatedAt: new Date('2026-05-01T00:00:00Z'),
   profileLastUpdatedAt: new Date('2026-05-20T00:00:00Z'),
   ageDays: 30,
-  countCreate: 2,
-  countAccept: 1,
-  countReject: 1,
-  countCancel: 0,
-  lastCreateAt: new Date('2026-05-01T00:00:00Z'),
-  lastAcceptAt: new Date('2026-05-18T00:00:00Z'),
-  lastRejectAt: new Date('2026-05-19T00:00:00Z'),
-  lastCancelAt: null,
+  initiated: { create: 2, accept: 1, reject: 1, cancel: 0 },
+  received: { create: 0, accept: 3, reject: 0, cancel: 0 },
+  lastInitiatedAt: {
+    create: '2026-05-01T00:00:00.000Z',
+    accept: '2026-05-18T00:00:00.000Z',
+    reject: '2026-05-19T00:00:00.000Z',
+  },
+  lastReceivedAt: { accept: '2026-05-20T00:00:00.000Z' },
   actionableTags: ['no_recent_activity'],
   lastComputedAt: new Date(),
   itemPrivateState: { secret: 'should-never-leak' },
@@ -125,10 +125,13 @@ const buildApp = async (acting?: {
 };
 
 const EXPECTED_HEADER =
-  'item_network,item_domain,item_type,name,onboarded_via,' +
+  'profile_item_id,user_id,item_network,item_domain,item_type,name,onboarded_via,' +
   'profile_status,profile_completion_pct,profile_created_at,profile_last_updated_at,' +
-  'age_days,count_create,count_accept,count_reject,count_cancel,' +
-  'last_create_at,last_accept_at,last_reject_at,last_cancel_at,actionable_tags';
+  'age_days,initiated_create,initiated_accept,initiated_reject,initiated_cancel,' +
+  'received_create,received_accept,received_reject,received_cancel,' +
+  'last_initiated_create_at,last_initiated_accept_at,last_initiated_reject_at,last_initiated_cancel_at,' +
+  'last_received_create_at,last_received_accept_at,last_received_reject_at,last_received_cancel_at,' +
+  'actionable_tags';
 
 describe('GET /aggregator/dashboard/export', () => {
   beforeEach(() => {
@@ -192,13 +195,13 @@ describe('GET /aggregator/dashboard/export', () => {
     );
   });
 
-  it('header line matches the 19-column COLUMNS list', async () => {
+  it('header line matches the 29-column COLUMNS list', async () => {
     state.list_pages = [[sample()]];
     const app = await buildApp();
     const res = await app.inject({ method: 'GET', url: '/dashboard/export' });
     const lines = res.body.trim().split('\n');
     expect(lines[0]).toBe(EXPECTED_HEADER);
-    expect(lines[0].split(',')).toHaveLength(19);
+    expect(lines[0].split(',')).toHaveLength(29);
   });
 
   it('CSV body has header row + one data row for single-domain caller', async () => {
