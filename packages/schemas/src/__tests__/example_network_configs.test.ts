@@ -54,7 +54,7 @@ describe.each([
   });
 });
 
-describe('example network configs declare a primary location field', () => {
+describe('example network configs declare a location field', () => {
   const cases = [
     ['orange_dot', 'tourist', 'examples/schemas/orange_dot/network.json'],
     ['orange_dot', 'practitioner', 'examples/schemas/orange_dot/network.json'],
@@ -65,7 +65,7 @@ describe('example network configs declare a primary location field', () => {
   ] as const;
 
   it.each(cases)(
-    '%s/%s has exactly one primary location field',
+    '%s/%s has exactly one location field',
     (network, domainId, relPath) => {
       const abs = resolve(__dirname, '../../../..', relPath);
       const doc = JSON.parse(readFileSync(abs, 'utf8')) as {
@@ -86,20 +86,20 @@ describe('example network configs declare a primary location field', () => {
 
       const fields = parseLocationFields(schema);
       expect(
-        fields.primary,
-        `${network}/${domainId} has no primary location field`,
+        fields.field,
+        `${network}/${domainId} has no location field`,
       ).not.toBeNull();
 
       const properties = schema.properties as Record<
         string,
         { location?: unknown }
       >;
-      const primaryCount = Object.values(properties).filter(
-        (p) => p?.location === 'primary',
+      const locationCount = Object.values(properties).filter(
+        (p) => p?.location === 'single' || p?.location === 'multiple',
       ).length;
       expect(
-        primaryCount,
-        `${network}/${domainId} must have exactly one primary location marker, found ${primaryCount}`,
+        locationCount,
+        `${network}/${domainId} must have exactly one location marker, found ${locationCount}`,
       ).toBe(1);
     },
   );

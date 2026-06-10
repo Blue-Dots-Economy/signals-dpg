@@ -97,8 +97,7 @@ CREATE TABLE IF NOT EXISTS action_events (
   source_item_id UUID NOT NULL,
   source_item_instance_url TEXT NOT NULL,
   source_item_owner TEXT,
-  source_item_latitude DOUBLE PRECISION,
-  source_item_longitude DOUBLE PRECISION,
+  source_item_locations JSONB NOT NULL DEFAULT '[]'::jsonb,
 
   target_item_network TEXT NOT NULL,
   target_item_domain TEXT NOT NULL,
@@ -106,8 +105,7 @@ CREATE TABLE IF NOT EXISTS action_events (
   target_item_id UUID NOT NULL,
   target_item_instance_url TEXT NOT NULL,
   target_item_owner TEXT,
-  target_item_latitude DOUBLE PRECISION,
-  target_item_longitude DOUBLE PRECISION,
+  target_item_locations JSONB NOT NULL DEFAULT '[]'::jsonb,
 
   event_payload JSONB NOT NULL DEFAULT '{}'::jsonb,
   remarks TEXT,

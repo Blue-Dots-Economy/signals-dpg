@@ -74,7 +74,7 @@
               "title": "Location",
               "description": "Where you're staying in Udupi — used to show practitioners near you.",
               "private": true,
-              "location": "primary"
+              "location": "single"
             },
             "budget_band": {
               "type": "string",
@@ -178,7 +178,7 @@
               "type": "string",
               "title": "Area",
               "description": "Locality or town within Udupi district.",
-              "location": "primary"
+              "location": "single"
             },
             "contact_phone": {
               "type": "string",

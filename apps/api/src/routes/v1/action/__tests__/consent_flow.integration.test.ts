@@ -236,7 +236,7 @@ describeIf(`consent flow integration (purple_dot/connect)${
           organisation_name: 'Consent Test NGO',
           disabilities_served: ['Locomotor Disability'],
           services_offered: ['Assistive Devices'],
-          service_cities: 'Pune',
+          service_cities: ['Pune'],
           official_address: '99 Provider Street, Pune, Maharashtra',
           service_details: 'Provides assistive devices.',
         },

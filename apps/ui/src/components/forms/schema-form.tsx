@@ -4,6 +4,7 @@ import validator from '@rjsf/validator-ajv8';
 import type { RJSFSchema, UiSchema, RegistryWidgetsType, ObjectFieldTemplateProps } from '@rjsf/utils';
 import { DatePickerWidget } from './custom-widgets/date-picker-widget';
 import { LocationAutocompleteWidget } from './custom-widgets/location-autocomplete-widget';
+import { MultiLocationAutocompleteWidget } from './custom-widgets/multi-location-autocomplete-widget';
 import { formLayouts } from '@/theme/form-layouts';
 
 interface RjsfError {
@@ -249,8 +250,12 @@ function generateUiSchema(
       }
     }
 
-    if ((typed as { location?: unknown }).location === 'primary') {
+    if ((typed as { location?: unknown }).location === 'single') {
       uiSchema[key] = { ...((uiSchema[key] as object) ?? {}), 'ui:widget': 'location-autocomplete' };
+    }
+
+    if ((typed as { location?: unknown }).location === 'multiple') {
+      uiSchema[key] = { ...((uiSchema[key] as object) ?? {}), 'ui:widget': 'location-multi' };
     }
   }
 
@@ -260,6 +265,7 @@ function generateUiSchema(
 const widgets: RegistryWidgetsType = {
   date: DatePickerWidget,
   'location-autocomplete': LocationAutocompleteWidget,
+  'location-multi': MultiLocationAutocompleteWidget,
 };
 
 function stripMetaSchema(schema: RJSFSchema): RJSFSchema {
@@ -291,10 +297,10 @@ function normalizeSchemaForRjsf(schema: RJSFSchema, rootSchema?: RJSFSchema): RJ
 
   const result: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(schema as Record<string, unknown>)) {
-    // Strip the custom `location` MARKER (value "primary" | true), which is consumed
+    // Strip the custom `location` MARKER (value "single" | "multiple"), which is consumed
     // by generateUiSchema, not real JSON Schema. Must NOT strip a property whose
-    // NAME is "location" (its value is the field's schema object).
-    if (key === 'location' && (value === 'primary' || value === true)) continue;
+    // NAME is "location" (its value is the field's schema object, not a string).
+    if (key === 'location' && (value === 'single' || value === 'multiple')) continue;
     result[key] = normalizeSchemaForRjsf(value as RJSFSchema, root);
   }
 

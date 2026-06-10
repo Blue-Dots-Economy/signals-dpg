@@ -28,7 +28,10 @@ export {
 } from './network_workflow';
 export {
   parseLocationFields,
-  buildGeoQuery,
+  buildLocationQueries,
+  isLocationFieldPrivate,
   type LocationFields,
+  type LocationCardinality,
+  type LocationPoint,
 } from './location_fields';
 export default z;

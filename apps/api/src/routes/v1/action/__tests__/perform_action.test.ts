@@ -119,8 +119,7 @@ const { fetchLocalItemSnapshotMock } = vi.hoisted(() => ({
   fetchLocalItemSnapshotMock: vi.fn(async () => ({
     created_by: 'usr_agg_owned',
     item_id: 'src_item_1',
-    item_latitude: null,
-    item_longitude: null,
+    item_locations: [],
     private_state: {},
     lifecycle_status: 'live',
   })),
@@ -220,8 +219,7 @@ describe('POST /api/v1/action/perform — on-behalf-of (bulk)', () => {
     fetchLocalItemSnapshotMock.mockResolvedValue({
       created_by: 'usr_agg_owned',
       item_id: 'src_item_1',
-      item_latitude: null,
-      item_longitude: null,
+      item_locations: [],
       private_state: {},
       lifecycle_status: 'live',
     });
@@ -364,8 +362,7 @@ describe('POST /api/v1/action/perform — on-behalf-of (bulk)', () => {
     fetchLocalItemSnapshotMock.mockResolvedValue({
       created_by: 'usr_someone_else',
       item_id: 'src_item_1',
-      item_latitude: null,
-      item_longitude: null,
+      item_locations: [],
       private_state: {},
       lifecycle_status: 'live',
     });
@@ -402,8 +399,7 @@ describe('POST /api/v1/action/perform — on-behalf-of (bulk)', () => {
     fetchLocalItemSnapshotMock.mockResolvedValue({
       created_by: 'usr_agg_owned',
       item_id: 'src_item_1',
-      item_latitude: null,
-      item_longitude: null,
+      item_locations: [],
       private_state: {},
       lifecycle_status: 'paused',
     });
@@ -512,8 +508,7 @@ describe('POST /api/v1/action/perform — on-behalf-of (bulk)', () => {
       fetchLocalItemSnapshotMock.mockResolvedValue({
         created_by: 'usr_voice_owned',
         item_id: 'src_item_1',
-        item_latitude: null,
-        item_longitude: null,
+        item_locations: [],
         private_state: {},
         lifecycle_status: 'live',
       });
@@ -545,8 +540,7 @@ describe('POST /api/v1/action/perform — on-behalf-of (bulk)', () => {
       fetchLocalItemSnapshotMock.mockResolvedValue({
         created_by: 'usr_self_reg',
         item_id: 'src_item_1',
-        item_latitude: null,
-        item_longitude: null,
+        item_locations: [],
         private_state: {},
         lifecycle_status: 'live',
       });

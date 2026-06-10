@@ -1,50 +1,25 @@
 import { describe, it, expect, vi } from 'vitest';
-import { resolveItemCoordinates } from '../geotag_item';
+import { resolveItemLocations } from '../geotag_item';
 
-describe('resolveItemCoordinates', () => {
-  it('returns provided coords unchanged when both present', async () => {
-    const out = await resolveItemCoordinates({
-      lat: 1, lng: 2, itemState: { address: 'X' }, itemSchema: {},
-      resolve: vi.fn(),
-    });
-    expect(out).toEqual({ lat: 1, lng: 2 });
+const multipleSchema = { properties: { service_cities: { type: 'array', location: 'multiple' } } };
+const singleSchema = { properties: { address: { type: 'string', location: 'single' } } };
+
+describe('resolveItemLocations', () => {
+  it('passes provided locations through unchanged', async () => {
+    const out = await resolveItemLocations({ provided: [{ lat: 1, lng: 2 }], itemState: {}, itemSchema: multipleSchema, geocode: vi.fn() });
+    expect(out).toEqual([{ lat: 1, lng: 2 }]);
   });
-
-  it('geocodes the composite query when coords absent', async () => {
-    const resolve = vi.fn().mockResolvedValue({ lat: 10, lng: 20 });
-    const out = await resolveItemCoordinates({
-      lat: null, lng: null,
-      itemState: { address: 'Udupi', pincode: '576101' },
-      itemSchema: {
-        properties: {
-          address: { type: 'string', location: 'primary' },
-          pincode: { type: 'string', location: true },
-        },
-      },
-      resolve,
-    });
-    expect(resolve).toHaveBeenCalledWith('Udupi, 576101');
-    expect(out).toEqual({ lat: 10, lng: 20 });
+  it('multiple → geocodes each city, attaches label, skips failures', async () => {
+    const geocode = vi.fn(async (q: string) => (q === 'Goa' ? { lat: 15, lng: 73 } : null));
+    const out = await resolveItemLocations({ provided: undefined, itemState: { service_cities: ['Goa', 'Nowhere'] }, itemSchema: multipleSchema, geocode });
+    expect(out).toEqual([{ lat: 15, lng: 73, label: 'Goa' }]);
   });
-
-  it('returns nulls when geocoding fails', async () => {
-    const out = await resolveItemCoordinates({
-      lat: null, lng: null,
-      itemState: { address: 'Nowhere' },
-      itemSchema: { properties: { address: { type: 'string', location: 'primary' } } },
-      resolve: vi.fn().mockResolvedValue(null),
-    });
-    expect(out).toEqual({ lat: null, lng: null });
+  it('single → one geocoded coord (no label)', async () => {
+    const geocode = vi.fn(async () => ({ lat: 12, lng: 77 }));
+    const out = await resolveItemLocations({ provided: undefined, itemState: { address: 'X' }, itemSchema: singleSchema, geocode });
+    expect(out).toEqual([{ lat: 12, lng: 77 }]);
   });
-
-  it('returns nulls when no primary field is marked', async () => {
-    const resolve = vi.fn();
-    const out = await resolveItemCoordinates({
-      lat: null, lng: null, itemState: { city: 'X' },
-      itemSchema: { properties: { city: { type: 'string' } } },
-      resolve,
-    });
-    expect(resolve).not.toHaveBeenCalled();
-    expect(out).toEqual({ lat: null, lng: null });
+  it('returns [] when no marker/value', async () => {
+    expect(await resolveItemLocations({ provided: undefined, itemState: {}, itemSchema: { properties: {} }, geocode: vi.fn() })).toEqual([]);
   });
 });

@@ -2,6 +2,8 @@ import { createApiClient } from './api-client';
 
 const apiClient = createApiClient();
 
+export type ItemLocation = { lat: number; lng: number; label?: string };
+
 export interface CreateItemPayload {
   item_network: string;
   item_domain: string;
@@ -9,8 +11,7 @@ export interface CreateItemPayload {
   item_instance_url?: string;
   item_schema_url?: string;
   item_state: Record<string, unknown>;
-  item_latitude?: number;
-  item_longitude?: number;
+  item_locations?: ItemLocation[];
 }
 
 export interface CreateItemResponse {
@@ -38,8 +39,7 @@ export interface Item {
   item_instance_url: string | null;
   item_schema_url: string | null;
   item_state: Record<string, unknown>;
-  item_latitude: number | null;
-  item_longitude: number | null;
+  item_locations: ItemLocation[];
   created_at: string;
   updated_at: string;
   lifecycle_status?: 'draft' | 'live' | 'paused';
@@ -58,8 +58,7 @@ export interface UpdateItemPayload {
   item_instance_url?: string;
   item_schema_url?: string;
   item_state?: Record<string, unknown>;
-  item_latitude?: number | null;
-  item_longitude?: number | null;
+  item_locations?: ItemLocation[];
 }
 
 export interface UpdateItemResponse {

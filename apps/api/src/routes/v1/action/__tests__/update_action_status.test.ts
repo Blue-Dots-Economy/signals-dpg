@@ -157,8 +157,7 @@ vi.mock('@/utils/action_event_runtime', async () => {
     fetchLocalItemSnapshot: vi.fn(async () => ({
       created_by: 'usr_agg_owned',
       item_id: 'target_item_1',
-      item_latitude: null,
-      item_longitude: null,
+      item_locations: [],
       private_state: {},
       lifecycle_status: 'live',
     })),

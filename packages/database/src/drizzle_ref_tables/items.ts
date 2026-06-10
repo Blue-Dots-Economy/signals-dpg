@@ -1,6 +1,4 @@
 import {
-  doublePrecision,
-  integer,
   primaryKey,
   jsonb,
   pgTable,
@@ -27,8 +25,10 @@ export const items = pgTable(
       .notNull()
       .default(sql`'{}'::jsonb`),
     item_private_state: text('item_private_state').notNull().default(''),
-    item_latitude: doublePrecision('item_latitude'),
-    item_longitude: doublePrecision('item_longitude'),
+    item_locations: jsonb('item_locations')
+      .$type<Array<{ lat: number; lng: number; label?: string }>>()
+      .notNull()
+      .default(sql`'[]'::jsonb`),
     created_by: text('created_by').notNull(),
 
     created_at: timestamp('created_at')

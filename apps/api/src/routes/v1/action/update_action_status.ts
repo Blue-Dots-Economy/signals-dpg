@@ -286,10 +286,8 @@ export const update_action_status_handler = async (
         },
         source_item_owner: updatedAction.source_item_owner ?? sourceItemSnapshot?.created_by ?? null,
         target_item_owner: updatedAction.target_item_owner ?? targetItemSnapshot?.created_by ?? null,
-        source_item_latitude: sourceItemSnapshot?.item_latitude ?? null,
-        source_item_longitude: sourceItemSnapshot?.item_longitude ?? null,
-        target_item_latitude: targetItemSnapshot?.item_latitude ?? null,
-        target_item_longitude: targetItemSnapshot?.item_longitude ?? null,
+        source_item_locations: sourceItemSnapshot?.item_locations ?? [],
+        target_item_locations: targetItemSnapshot?.item_locations ?? [],
         event_payload: eventPayload,
         remarks: body.remarks,
       };

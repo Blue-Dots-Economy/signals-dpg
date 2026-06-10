@@ -33,8 +33,9 @@ import {
 } from '@/lib/item-api';
 import { fetchMyActions } from '@/lib/action-api';
 import { fetchNetworkConfig, fetchNetworkConfigs } from '@/lib/network-api';
-import { parseLocationFields, buildGeoQuery } from '@dpg/schemas/location_fields';
+import { parseLocationFields, buildLocationQueries, isLocationFieldPrivate } from '@dpg/schemas/location_fields';
 import { getGeoProvider } from '@/lib/geo/provider';
+import type { GeoComponents } from '@/lib/geo/types';
 import { apiConfig } from '@/lib/api-config';
 import { PauseConfirmDialog } from '@/components/actions/pause-confirm-dialog';
 
@@ -69,12 +70,14 @@ export function ProfileFormPage() {
   const [isPauseDialogOpen, setIsPauseDialogOpen] = React.useState(false);
   const [isPausing, setIsPausing] = React.useState(false);
   const [pendingActionsCount, setPendingActionsCount] = React.useState(0);
-  const [resolvedCoords, setResolvedCoords] = React.useState<{ lat: number; lng: number } | null>(null);
+  const [resolvedLocations, setResolvedLocations] = React.useState<
+    Array<{ lat: number; lng: number; label?: string; components?: GeoComponents }>
+  >([]);
 
-  // Clear stale coords whenever the user switches domain so a prior domain's
+  // Clear stale locations whenever the user switches domain so a prior domain's
   // address suggestion is never submitted for a different domain.
   React.useEffect(() => {
-    setResolvedCoords(null);
+    setResolvedLocations([]);
   }, [selectedDomain]);
 
   // Get network from URL query param, fallback to env config
@@ -338,16 +341,55 @@ export function ProfileFormPage() {
     setFormError(null);
 
     try {
-      // Use widget-resolved coords, or fall back to composite geocoding from marked fields.
-      let coordinates = resolvedCoords;
-      if (!coordinates && profileSchema) {
-        // No suggestion picked (typed free text or no provider) — geocode the
-        // composite of the marked fields one-shot.
+      // Resolve the coordinates to store, all client-side using the same
+      // (Google) geocoder the autocomplete uses. For a PRIVATE field every
+      // resolved place is coarsened to its CITY centroid — the exact point never
+      // leaves the browser; public fields keep the exact point. We resolve from
+      // the picked suggestion(s) when available, otherwise from the typed text,
+      // and both go through the same coarsening — so a private field is
+      // city-level whether or not a dropdown suggestion was clicked.
+      const isPrivateLocationField = profileSchema
+        ? isLocationFieldPrivate(profileSchema as Record<string, unknown>)
+        : false;
+
+      const coarsenPlace = async (
+        lat: number,
+        lng: number,
+        components: GeoComponents | undefined,
+        label: string | undefined,
+      ): Promise<{ lat: number; lng: number; label?: string }> => {
+        if (!isPrivateLocationField) {
+          return label ? { lat, lng, label } : { lat, lng };
+        }
+        const cityQuery = components?.city
+          ? [components.city, components.state, components.country]
+              .filter((p): p is string => Boolean(p && p.trim()))
+              .join(', ')
+          : null;
+        if (cityQuery) {
+          const [best] = await getGeoProvider().suggest(cityQuery);
+          if (best) return { lat: best.lat, lng: best.lng };
+        }
+        // No city component (or its lookup failed): snap to a ~1km grid so a
+        // private field never stores the exact point.
+        return { lat: Math.round(lat * 100) / 100, lng: Math.round(lng * 100) / 100 };
+      };
+
+      let item_locations: Array<{ lat: number; lng: number; label?: string }> = [];
+
+      if (resolvedLocations.length > 0) {
+        // A suggestion was picked in the widget.
+        for (const place of resolvedLocations) {
+          item_locations.push(await coarsenPlace(place.lat, place.lng, place.components, place.label));
+        }
+      } else if (profileSchema) {
+        // No suggestion picked — geocode the marked field(s) from the typed text,
+        // then coarsen (city centroid for a private field, exact for public).
         const fields = parseLocationFields(profileSchema as Record<string, unknown>);
-        const query = buildGeoQuery(data, fields);
-        if (query) {
+        const queries = buildLocationQueries(data, fields);
+        for (const { query, label } of queries) {
           const [best] = await getGeoProvider().suggest(query);
-          if (best) coordinates = { lat: best.lat, lng: best.lng };
+          if (best) item_locations.push(await coarsenPlace(best.lat, best.lng, best.components, label));
         }
       }
 
@@ -357,9 +399,13 @@ export function ProfileFormPage() {
           item_state: data,
         };
 
-        if (coordinates) {
-          updatePayload.item_latitude = coordinates.lat;
-          updatePayload.item_longitude = coordinates.lng;
+        // Only include item_locations when we have computed a non-empty array.
+        // When item_locations is empty on edit (e.g. the user never re-selected
+        // a suggestion for a private field whose value appears as "***"), omit
+        // the field entirely so updateItemInternal preserves the stored coarse
+        // coordinate rather than overwriting it with [].
+        if (item_locations.length > 0) {
+          updatePayload.item_locations = item_locations;
         }
 
         await updateItem(existingItem.item_id, updatePayload);
@@ -384,10 +430,7 @@ export function ProfileFormPage() {
           createPayload.item_schema_url = customSchemaUrls[defaultItemType];
         }
 
-        if (coordinates) {
-          createPayload.item_latitude = coordinates.lat;
-          createPayload.item_longitude = coordinates.lng;
-        }
+        createPayload.item_locations = item_locations;
 
         await createItem(createPayload);
         toast.success(t('profile.toast_created'), {
@@ -664,7 +707,12 @@ export function ProfileFormPage() {
                 formData={initialData ?? undefined}
                 submitButtonText={isEdit ? t('profile.btn_update') : undefined}
                 domainId={selectedDomain ?? undefined}
-                formContext={{ onLocationResolved: setResolvedCoords }}
+                formContext={{
+                  onLocationResolved: (
+                    place: { lat: number; lng: number; components?: GeoComponents } | null,
+                  ) => setResolvedLocations(place ? [place] : []),
+                  onLocationsResolved: (coords: Array<{ lat: number; lng: number; label?: string }>) => setResolvedLocations(coords),
+                }}
               />
             )}
             {isEdit && existingItem && (
