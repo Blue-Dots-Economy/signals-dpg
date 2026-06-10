@@ -61,10 +61,17 @@ const StatusRuleSchema = z.object({
   when: z.union([PredicateSchema, z.literal('default')]),
 }).strict();
 
-const DashboardTileLabelsSchema = z.object({
-  total_items: z.string().min(1).optional(),
-  complete_profiles: z.string().min(1).optional(),
-  has_applications: z.string().min(1).optional(),
+// A dashboard tile declares which precomputed rollup field to render and what
+// to label it. `field` maps to a rollup key (e.g. total_items, total_users);
+// the aggregator reads the precomputed value — it never computes. Tiles are
+// grouped into profile-level and user-level sets.
+const DashboardTileSchema = z.object({
+  field: z.string().min(1),
+  label: z.string().min(1),
+}).strict();
+const DashboardTilesSchema = z.object({
+  profile: z.array(DashboardTileSchema).optional(),
+  user: z.array(DashboardTileSchema).optional(),
 }).strict();
 
 // Per-domain card display config (consumed by the UI item card). Drives which
@@ -91,7 +98,7 @@ const NetworkDomainSchema = z.object({
     .optional()
     .default({}),
   status_rules: z.array(StatusRuleSchema).min(1),
-  dashboard_tiles: DashboardTileLabelsSchema.optional(),
+  dashboard_tiles: DashboardTilesSchema.optional(),
   card: CardConfigSchema.optional(),
 }).superRefine((domain, ctx) => {
   const last = domain.status_rules[domain.status_rules.length - 1];
@@ -200,6 +207,13 @@ const NetworkActionSchema = z.object({
   interactions: NetworkActionInteractionSchema.array().default([]),
 });
 
+const ActionBucketLabelsSchema = z.object({
+  create: z.string().min(1).optional(),
+  accept: z.string().min(1).optional(),
+  reject: z.string().min(1).optional(),
+  cancel: z.string().min(1).optional(),
+}).strict();
+
 const DashboardBucketsSchema = z.object({
   by_status: z.object({
     new: z.string().min(1).optional(),
@@ -207,12 +221,9 @@ const DashboardBucketsSchema = z.object({
     at_risk: z.string().min(1).optional(),
     inactive: z.string().min(1).optional(),
   }).strict().optional(),
-  by_action_status: z.object({
-    create: z.string().min(1).optional(),
-    accept: z.string().min(1).optional(),
-    reject: z.string().min(1).optional(),
-    cancel: z.string().min(1).optional(),
-  }).strict().optional(),
+  // Directional action labels (replace the former blended by_action_status).
+  by_initiated_action_status: ActionBucketLabelsSchema.optional(),
+  by_received_action_status: ActionBucketLabelsSchema.optional(),
 }).strict();
 
 export const NetworkConfigSchema = z.object({

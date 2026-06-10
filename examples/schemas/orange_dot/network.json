@@ -115,9 +115,15 @@
         "default_fields": ["nationality", "party_composition", "interest", "budget_band"]
       },
       "dashboard_tiles": {
-        "total_items": "Total Tourists",
-        "complete_profiles": "Tourist Tokens Active",
-        "has_applications": "Connections Initiated"
+        "profile": [
+          { "field": "total_items", "label": "Tokens Registered" },
+          { "field": "complete_profiles", "label": "Tourist Tokens Active" },
+          { "field": "has_applications", "label": "Connections Initiated" }
+        ],
+        "user": [
+          { "field": "total_users", "label": "Total Tourists" },
+          { "field": "avg_items_per_user", "label": "Avg Tokens per Tourist" }
+        ]
       }
     },
     {
@@ -236,9 +242,15 @@
         "default_fields": ["category", "area", "pricing", "services"]
       },
       "dashboard_tiles": {
-        "total_items": "Total Orange Dots",
-        "complete_profiles": "Verified Listings",
-        "has_applications": "Received Connections"
+        "profile": [
+          { "field": "total_items", "label": "Listings Registered" },
+          { "field": "complete_profiles", "label": "Verified Listings" },
+          { "field": "has_applications", "label": "Received Connections" }
+        ],
+        "user": [
+          { "field": "total_users", "label": "Total Orange Dots" },
+          { "field": "avg_items_per_user", "label": "Avg Listings per Orange Dot" }
+        ]
       }
     }
   ],
@@ -304,8 +316,14 @@
       "at_risk": "At Risk",
       "inactive": "Inactive"
     },
-    "by_action_status": {
+    "by_initiated_action_status": {
       "create": "Requested",
+      "accept": "Accepted",
+      "reject": "Declined",
+      "cancel": "Cancelled"
+    },
+    "by_received_action_status": {
+      "create": "Requests",
       "accept": "Connected",
       "reject": "Declined",
       "cancel": "Cancelled"
