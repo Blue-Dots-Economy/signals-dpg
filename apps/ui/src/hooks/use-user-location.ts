@@ -18,16 +18,24 @@ export interface ResolvedUserLocation {
  * Auto-prompts for browser location ONLY when there is no profile location — so a
  * visitor / a profile whose domain has no location field / a user with no profile
  * triggers the browser permission prompt, while a profile with a location never does.
+ *
+ * `profileResolved` gates the auto-prompt: while the caller is still resolving the
+ * active profile, profileLocation is transiently null, so prompting then would hit a
+ * user who actually has a profile location. Pass `true` once the lookup has settled
+ * (a signed-out visitor resolves immediately).
  */
-export function useUserLocation(profileLocation: LatLng | null): ResolvedUserLocation {
+export function useUserLocation(
+  profileLocation: LatLng | null,
+  profileResolved: boolean,
+): ResolvedUserLocation {
   const browser = useBrowserLocation();
 
   React.useEffect(() => {
-    if (!profileLocation && browser.isSupported && browser.status === 'idle') {
+    if (profileResolved && !profileLocation && browser.isSupported && browser.status === 'idle') {
       // Errors surface via browser.status / browser.error inside useBrowserLocation; void is intentional.
       void browser.request();
     }
-  }, [profileLocation, browser.isSupported, browser.status, browser.request]);
+  }, [profileResolved, profileLocation, browser.isSupported, browser.status, browser.request]);
 
   const location: LatLng | null =
     profileLocation ??

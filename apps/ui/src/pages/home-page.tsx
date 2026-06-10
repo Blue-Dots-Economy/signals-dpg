@@ -215,6 +215,10 @@ export function HomePage() {
   const [domainItems, setDomainItems] = React.useState<Record<string, Item[]>>({});
   const [myItems, setMyItems] = React.useState<Item[]>([]);
   const [activeProfileId, setActiveProfileId] = React.useState<string | null>(null);
+  // Whether the active-profile lookup has settled. Until it has, profileLocation
+  // is transiently null even for a user who has a profile location, so the
+  // browser-geo auto-prompt must wait for this to avoid a spurious permission prompt.
+  const [profilesResolved, setProfilesResolved] = React.useState(false);
   const [loading, setLoading] = React.useState(false);
   const browseSelection = useCardSelection();
   const [bulkConnectOpen, setBulkConnectOpen] = React.useState(false);
@@ -264,6 +268,7 @@ export function HomePage() {
     setResolvedNetwork(null);
     setDomainItems({});
     setMyItems([]);
+    setProfilesResolved(false);
 
     fetchNetworkConfig(selectedNetworkId)
       .then((config) => {
@@ -306,6 +311,9 @@ export function HomePage() {
     if (!user) {
       setMyItems([]);
       setActiveProfileId(null);
+      // A signed-out visitor has no profile to wait for — resolved immediately,
+      // so the browser-geo auto-prompt may fire.
+      setProfilesResolved(true);
       return;
     }
 
@@ -328,6 +336,9 @@ export function HomePage() {
       if (controller.signal.aborted) return;
       const allProfiles = results.flat();
       setMyItems(allProfiles);
+      // Profile lookup has settled — profileLocation is now authoritative, so the
+      // browser-geo auto-prompt may fire if there's still no profile location.
+      setProfilesResolved(true);
 
       // Auto-select: use stored ID if valid, otherwise first profile
       const storedId = getStoredActiveProfileId(network.id);
@@ -361,8 +372,10 @@ export function HomePage() {
     [myItem],
   );
 
-  // Resolve: profile location → browser geo → null
-  const { location: userLocation } = useUserLocation(profileLocation);
+  // Resolve: profile location → browser geo → null. Gate the browser auto-prompt
+  // on profilesResolved so a logged-in user with a profile location isn't prompted
+  // during the async profile-load window.
+  const { location: userLocation } = useUserLocation(profileLocation, profilesResolved);
 
   // Sort a card-item array (item_locations stored in .data) nearest-first when userLocation is known.
   // Items without locations sort last (nearestDistanceMeters returns Infinity for empty/missing arrays).
