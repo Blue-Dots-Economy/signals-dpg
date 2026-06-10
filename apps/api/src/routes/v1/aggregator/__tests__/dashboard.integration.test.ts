@@ -430,12 +430,19 @@ describeIf(`GET /aggregator/dashboard by_domain (integration)${
             complete_profiles: number;
             has_applications: number;
             by_status: Record<string, number>;
-            by_action_status: {
+            by_initiated_action_status: {
               create: number;
               accept: number;
               reject: number;
               cancel: number;
             };
+            by_received_action_status: {
+              create: number;
+              accept: number;
+              reject: number;
+              cancel: number;
+            };
+            total_users: number;
             avg_items_per_user: number;
             avg_actions_per_user: number;
             mode_wise_counts: Record<string, number>;
@@ -471,11 +478,15 @@ describeIf(`GET /aggregator/dashboard by_domain (integration)${
     expect(body.by_domain[primary.domain].rollup.by_status).toHaveProperty('at_risk');
     expect(body.by_domain[primary.domain].rollup.by_status).toHaveProperty('inactive');
 
-    // by_action_status always has the 4 canonical keys.
-    expect(body.by_domain[primary.domain].rollup.by_action_status).toHaveProperty('create');
-    expect(body.by_domain[primary.domain].rollup.by_action_status).toHaveProperty('accept');
-    expect(body.by_domain[primary.domain].rollup.by_action_status).toHaveProperty('reject');
-    expect(body.by_domain[primary.domain].rollup.by_action_status).toHaveProperty('cancel');
+    // Both directional action-status maps always have the 4 canonical keys.
+    for (const dir of ['by_initiated_action_status', 'by_received_action_status'] as const) {
+      expect(body.by_domain[primary.domain].rollup[dir]).toHaveProperty('create');
+      expect(body.by_domain[primary.domain].rollup[dir]).toHaveProperty('accept');
+      expect(body.by_domain[primary.domain].rollup[dir]).toHaveProperty('reject');
+      expect(body.by_domain[primary.domain].rollup[dir]).toHaveProperty('cancel');
+    }
+    // user-level total is always present.
+    expect(body.by_domain[primary.domain].rollup).toHaveProperty('total_users');
 
     // metadata.refreshed should be true on first hit (no prior rows).
     expect(body.metadata.refreshed).toBe(true);

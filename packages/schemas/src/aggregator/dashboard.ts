@@ -22,25 +22,37 @@ export const DashboardRequestQuery = z.object({
 });
 
 export const ItemRollup = z.object({
-  // 7 fixed tiles
+  // profile-level tiles
   total_items: z.number(),
   complete_profiles: z.number(),
   has_applications: z.number(),
   by_status: z.record(StatusEnum, z.number()),
 
-  // generic derived (network-agnostic)
-  by_action_status: z.record(BucketEnum, z.number()),
+  // directional action rollups (replace the former blended by_action_status)
+  by_initiated_action_status: z.record(BucketEnum, z.number()),
+  by_received_action_status: z.record(BucketEnum, z.number()),
+
+  // user-level (computed over the full dataset, not the paginated page)
+  total_users: z.number(),
   avg_items_per_user: z.number(),
   avg_actions_per_user: z.number(),
   mode_wise_counts: z.record(z.string(), z.number()),
 });
 
 /**
- * One item row. Same shape across every domain — no NULL-on-other-side.
- * Acting org context is implicit from the calling header, so item_id,
- * owner_user_id, onboarded_by_org_id are intentionally omitted.
+ * One item row — one row per profile. `profile_item_id` is the required
+ * per-row key (a user with N profiles is N rows, so `user_id` is not unique
+ * per row). `user_id` is an optional passthrough for traceability / future
+ * profile→user drill-in; no aggregator compute depends on it.
+ *
+ * `initiated` / `received` are full count maps (every bucket present).
+ * `last_initiated_at` / `last_received_at` are SPARSE — only buckets that
+ * actually occurred carry a timestamp; absent buckets are omitted (no nulls).
  */
 export const ItemRow = z.object({
+  profile_item_id: z.string(),
+  user_id: z.string().nullable(),
+
   item_network: z.string(),
   item_domain: z.string(),
   item_type: z.string(),
@@ -53,15 +65,10 @@ export const ItemRow = z.object({
   profile_last_updated_at: z.string().nullable(),
   age_days: z.number().nullable(),
 
-  count_create: z.number(),
-  count_accept: z.number(),
-  count_reject: z.number(),
-  count_cancel: z.number(),
-
-  last_create_at: z.string().nullable(),
-  last_accept_at: z.string().nullable(),
-  last_reject_at: z.string().nullable(),
-  last_cancel_at: z.string().nullable(),
+  initiated: z.record(BucketEnum, z.number()),
+  received: z.record(BucketEnum, z.number()),
+  last_initiated_at: z.partialRecord(BucketEnum, z.string()),
+  last_received_at: z.partialRecord(BucketEnum, z.string()),
 
   actionable_tags: z.array(z.string()),
 });

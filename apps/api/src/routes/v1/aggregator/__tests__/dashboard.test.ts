@@ -36,12 +36,16 @@ const state = {
     s_active: 5,
     s_at_risk: 3,
     s_inactive: 0,
-    b_create: 10,
-    b_accept: 1,
-    b_reject: 5,
-    b_cancel: 0,
-    unique_users: 8,
-    total_actions: 16,
+    bi_create: 10,
+    bi_accept: 1,
+    bi_reject: 5,
+    bi_cancel: 0,
+    br_create: 0,
+    br_accept: 4,
+    br_reject: 1,
+    br_cancel: 0,
+    total_users: 8,
+    total_actions: 21,
     engaged_users: 3,
   } as Record<string, number>,
   // Mode rows fixture returned by the second db.execute call.
@@ -148,14 +152,13 @@ const sample_list_row = (overrides: Record<string, unknown> = {}) => ({
   profileCreatedAt: new Date('2026-05-01T00:00:00Z'),
   profileLastUpdatedAt: new Date('2026-05-20T00:00:00Z'),
   ageDays: 31,
-  countCreate: 2,
-  countAccept: 0,
-  countReject: 1,
-  countCancel: 0,
-  lastCreateAt: new Date('2026-05-18T00:00:00Z'),
-  lastAcceptAt: null,
-  lastRejectAt: new Date('2026-05-19T00:00:00Z'),
-  lastCancelAt: null,
+  initiated: { create: 2, accept: 0, reject: 1, cancel: 0 },
+  received: { create: 0, accept: 1, reject: 0, cancel: 0 },
+  lastInitiatedAt: {
+    create: '2026-05-18T00:00:00.000Z',
+    reject: '2026-05-19T00:00:00.000Z',
+  },
+  lastReceivedAt: { accept: '2026-05-20T00:00:00.000Z' },
   actionableTags: ['no_recent_activity'],
   lastComputedAt: new Date('2026-06-01T00:00:00Z'),
   ...overrides,
@@ -175,12 +178,16 @@ const resetState = () => {
     s_active: 5,
     s_at_risk: 3,
     s_inactive: 0,
-    b_create: 10,
-    b_accept: 1,
-    b_reject: 5,
-    b_cancel: 0,
-    unique_users: 8,
-    total_actions: 16,
+    bi_create: 10,
+    bi_accept: 1,
+    bi_reject: 5,
+    bi_cancel: 0,
+    br_create: 0,
+    br_accept: 4,
+    br_reject: 1,
+    br_cancel: 0,
+    total_users: 8,
+    total_actions: 21,
     engaged_users: 3,
   };
   state.mode_rows = [
@@ -268,32 +275,43 @@ describe('GET /aggregator/dashboard', () => {
     });
   });
 
-  it('200 rollup includes canonical counts + avg fields + mode_wise_counts', async () => {
+  it('200 rollup includes directional + user-level counts + avg fields + mode_wise_counts', async () => {
     const app = await buildApp();
     const res = await app.inject({ method: 'GET', url: '/dashboard' });
     const r = res.json().by_domain.seeker.rollup;
     expect(r.total_items).toBe(10);
     expect(r.complete_profiles).toBe(4);
     expect(r.has_applications).toBe(3);
-    expect(r.by_action_status).toEqual({
+    expect(r.by_initiated_action_status).toEqual({
       create: 10,
       accept: 1,
       reject: 5,
       cancel: 0,
     });
-    // avg_items_per_user = total_items / unique_users = 10 / 8 = 1.25
+    expect(r.by_received_action_status).toEqual({
+      create: 0,
+      accept: 4,
+      reject: 1,
+      cancel: 0,
+    });
+    expect(r.total_users).toBe(8);
+    // avg_items_per_user = total_items / total_users = 10 / 8 = 1.25
     expect(r.avg_items_per_user).toBeCloseTo(1.25);
-    // avg_actions_per_user = total_actions / engaged_users = 16 / 3
-    expect(r.avg_actions_per_user).toBeCloseTo(16 / 3);
+    // avg_actions_per_user = total_actions / engaged_users = 21 / 3 = 7
+    expect(r.avg_actions_per_user).toBeCloseTo(21 / 3);
     expect(r.mode_wise_counts).toEqual({ bulk: 6, self: 4 });
+    // Confirm the old blended bucket is gone
+    expect(r.by_action_status).toBeUndefined();
   });
 
-  it('200 items have snake_case keys + ISO timestamps + new column names', async () => {
+  it('200 items have snake_case keys + ISO timestamps + directional maps', async () => {
     const app = await buildApp();
     const res = await app.inject({ method: 'GET', url: '/dashboard' });
     const block = res.json().by_domain.seeker;
     expect(block.items).toHaveLength(2);
     const p = block.items[0];
+    expect(p.profile_item_id).toBe('itm_1');
+    expect(p.user_id).toBe('usr_1');
     expect(p.item_network).toBe('blue_dot');
     expect(p.name).toBe('Test User');
     expect(p.item_type).toBe('profile_1.0');
@@ -301,20 +319,20 @@ describe('GET /aggregator/dashboard', () => {
     expect(p.profile_completion_pct).toBe(75);
     expect(p.profile_created_at).toBe('2026-05-01T00:00:00.000Z');
     expect(p.profile_last_updated_at).toBe('2026-05-20T00:00:00.000Z');
-    expect(p.count_create).toBe(2);
-    expect(p.count_accept).toBe(0);
-    expect(p.count_reject).toBe(1);
-    expect(p.count_cancel).toBe(0);
-    expect(p.last_create_at).toBe('2026-05-18T00:00:00.000Z');
-    expect(p.last_accept_at).toBeNull();
-    expect(p.last_reject_at).toBe('2026-05-19T00:00:00.000Z');
-    expect(p.last_cancel_at).toBeNull();
+    expect(p.initiated).toEqual({ create: 2, accept: 0, reject: 1, cancel: 0 });
+    expect(p.received).toEqual({ create: 0, accept: 1, reject: 0, cancel: 0 });
+    // last_*_at maps are sparse — only buckets that occurred are present
+    expect(p.last_initiated_at).toEqual({
+      create: '2026-05-18T00:00:00.000Z',
+      reject: '2026-05-19T00:00:00.000Z',
+    });
+    expect(p.last_received_at).toEqual({ accept: '2026-05-20T00:00:00.000Z' });
     expect(p.actionable_tags).toEqual(['no_recent_activity']);
     // Confirm old field names are gone
+    expect(p.count_create).toBeUndefined();
+    expect(p.last_create_at).toBeUndefined();
     expect(p.item_id).toBeUndefined();
     expect(p.owner_user_id).toBeUndefined();
-    expect(p.applications_total).toBeUndefined();
-    expect(p.last_applied_at).toBeUndefined();
   });
 
   it('200 ?status=active filter passes through to total_matching/list', async () => {
@@ -361,11 +379,15 @@ describe('GET /aggregator/dashboard', () => {
       s_active: 0,
       s_at_risk: 0,
       s_inactive: 0,
-      b_create: 0,
-      b_accept: 0,
-      b_reject: 0,
-      b_cancel: 0,
-      unique_users: 0,
+      bi_create: 0,
+      bi_accept: 0,
+      bi_reject: 0,
+      bi_cancel: 0,
+      br_create: 0,
+      br_accept: 0,
+      br_reject: 0,
+      br_cancel: 0,
+      total_users: 0,
       total_actions: 0,
       engaged_users: 0,
     };

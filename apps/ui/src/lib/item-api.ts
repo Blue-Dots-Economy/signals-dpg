@@ -111,12 +111,11 @@ export async function deleteItem(itemId: string): Promise<void> {
 export interface ItemLifecycleResponse {
   item_id: string;
   lifecycle_status: 'draft' | 'live' | 'paused';
-  cancelled_pending_actions: number;
 }
 
 /**
  * Pause the caller's own item (must be in 'live' state).
- * The server auto-cancels pending actions and returns the count.
+ * Pending actions are preserved; they are gated at perform/accept time (§10).
  */
 export async function pauseItem(itemId: string): Promise<ItemLifecycleResponse> {
   const response = await apiClient.post<ItemLifecycleResponse>('/api/v1/item/lifecycle', {

@@ -3,6 +3,7 @@
 > **Status:** Design (brainstormed 2026-06-03)
 > **Scope:** signals-dpg only (the canonical store + classifier). Aggregator-dpg and voice/chat outbound are dependent follow-up specs.
 > **Supersedes:** the cross-repo draft `participant-onboarding-lifecycle-2.md` (which conflated user/item state, reused `active`/`inactive` against the engagement classifier, and bundled three subsystems).
+> **Partially superseded by:** `2026-06-10-live-latch-design.md` — the auto-cancellation of pending actions on leaving `live` (§7/§10 below) and the "this will cancel N requests" UI popup were removed. Pending actions now survive pause and resume on unpause; the §10 perform/accept-time gate is the sole enforcement. Do not implement the cancellation or popup from this document.
 
 ---
 
