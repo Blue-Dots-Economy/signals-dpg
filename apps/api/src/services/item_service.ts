@@ -11,7 +11,7 @@ import {
   validateAgainstJsonSchema,
 } from '@dpg/schemas';
 import { classify_item } from './items/classifier.js';
-import { cancel_pending_actions_for_item } from './items/cancel_pending_actions.js';
+import { is_populated } from './metrics/profile_completion.js';
 import { decryptPiiBlob, encryptPiiBlob, getPiiKey } from '@dpg/auth';
 import { items } from '@dpg/database';
 import { db } from '@api/db/postgres/drizzle_config';
@@ -277,8 +277,6 @@ export interface UpdateItemInternalResult {
     created_at: Date;
     updated_at: Date;
   };
-  leavingLive: boolean;
-  cancelledPendingActions: number;
 }
 
 export async function updateItemInternal(
@@ -295,11 +293,6 @@ export async function updateItemInternal(
   const updateValues: Record<string, unknown> = {
     updated_at: sql`now()`,
   };
-
-  let isLeavingLive = false;
-  let existingItemId: string | null = null;
-  let existingItemNetwork: string | null = null;
-  let cancelledPendingActions = 0;
 
   // Fetch the existing item + its schema once when either the state or the
   // locations are changing: the schema is needed to merge/validate state,
@@ -360,19 +353,32 @@ export async function updateItemInternal(
       // Layer the caller's partial update on top.
       const mergedFullState: Record<string, unknown> = { ...priorFullState, ...body.item_state };
 
+      const requiredKeys = Array.isArray((itemSchema as { required?: unknown }).required)
+        ? ((itemSchema as { required?: string[] }).required as string[])
+        : [];
+
       try {
-        const required = Array.isArray((itemSchema as { required?: unknown }).required)
-          ? ((itemSchema as { required?: string[] }).required as string[])
-          : [];
         validateAgainstJsonSchema(itemSchema, mergedFullState, 'item_state', {
           allowAdditionalProperties: apiConfig.allow_extra_schema_data,
-          ignoredKeys: required,
+          ignoredKeys: requiredKeys,
         });
       } catch (err) {
         throw new ItemServiceError(
           400,
           'INVALID_ITEM_STATE',
           err instanceof Error ? err.message : 'Invalid item_state'
+        );
+      }
+
+      // Live latch: a profile that has reached `live` must stay complete. Reject
+      // any edit that would leave a required field unpopulated while the item is
+      // live. (Scope: live only — see 2026-06-10-live-latch-design.md §6.)
+      const unpopulatedRequired = requiredKeys.filter((k) => !is_populated(mergedFullState[k]));
+      if (unpopulatedRequired.length > 0 && existingItem.lifecycle_status === 'live') {
+        throw new ItemServiceError(
+          409,
+          'REQUIRED_FIELD_LOCKED_WHILE_LIVE',
+          `Required field(s) must stay populated on a live profile: ${unpopulatedRequired.join(', ')}; pause it first`,
         );
       }
 
@@ -390,60 +396,37 @@ export async function updateItemInternal(
         current_status: existingItem.lifecycle_status as 'draft' | 'live' | 'paused',
       });
       updateValues.lifecycle_status = classification.lifecycle_status;
-
-      isLeavingLive =
-        existingItem.lifecycle_status === 'live' && classification.lifecycle_status !== 'live';
-      existingItemId = existingItem.item_id;
-      existingItemNetwork = existingItem.item_network;
     }
   }
 
-  // When leaving live, the item UPDATE and the pending-action cancel must be
-  // atomic (spec §7). exec.transaction() opens a real transaction when exec is
-  // the bare db pool, or a savepoint when exec is already a transaction —
-  // correct in both cases.
-  const { row, cancelledCount } = await exec.transaction(async (txx) => {
-    const updateResult = await txx
-      .update(items)
-      .set(updateValues)
-      .where(ownershipFilter)
-      .returning({
-        item_network: items.item_network,
-        item_domain: items.item_domain,
-        item_type: items.item_type,
-        item_id: items.item_id,
-        item_instance_url: items.item_instance_url,
-        item_schema_url: items.item_schema_url,
-        item_state: items.item_state,
-        item_private_state: items.item_private_state,
-        item_locations: items.item_locations,
-        lifecycle_status: items.lifecycle_status,
-        created_by: items.created_by,
-        created_at: items.created_at,
-        updated_at: items.updated_at,
-      });
+  const updateResult = await exec
+    .update(items)
+    .set(updateValues)
+    .where(ownershipFilter)
+    .returning({
+      item_network: items.item_network,
+      item_domain: items.item_domain,
+      item_type: items.item_type,
+      item_id: items.item_id,
+      item_instance_url: items.item_instance_url,
+      item_schema_url: items.item_schema_url,
+      item_state: items.item_state,
+      item_private_state: items.item_private_state,
+      item_locations: items.item_locations,
+      lifecycle_status: items.lifecycle_status,
+      created_by: items.created_by,
+      created_at: items.created_at,
+      updated_at: items.updated_at,
+    });
 
-    if (updateResult.length === 0) {
-      throw new ItemServiceError(
-        404,
-        'ITEM_NOT_FOUND_OR_FORBIDDEN',
-        'Item not found or does not belong to the authenticated user'
-      );
-    }
+  if (updateResult.length === 0) {
+    throw new ItemServiceError(
+      404,
+      'ITEM_NOT_FOUND_OR_FORBIDDEN',
+      'Item not found or does not belong to the authenticated user'
+    );
+  }
+  const row = updateResult[0];
 
-    let cancelled = 0;
-    if (isLeavingLive && existingItemId !== null && existingItemNetwork !== null) {
-      cancelled = await cancel_pending_actions_for_item(txx, existingItemId, existingItemNetwork);
-    }
-
-    return { row: updateResult[0], cancelledCount: cancelled };
-  });
-
-  cancelledPendingActions = cancelledCount;
-
-  return {
-    row,
-    leavingLive: isLeavingLive,
-    cancelledPendingActions,
-  };
+  return { row };
 }
