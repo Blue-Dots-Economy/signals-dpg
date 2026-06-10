@@ -27,9 +27,9 @@
  *   3. NS + full state → live, completion_pct === 100
  *   4. Aggregator A full state → live; retry with new state → row UPDATED, still live
  *   5. Aggregator B targets A's user → owned_elsewhere:true, items:[], no DB write
- *   6. NS clears a required field on live item → 409 REQUIRED_FIELD_LOCKED_WHILE_LIVE; action untouched
+ *   6. clear required on live → 409, stays live, action untouched
  *   6b. Allowed edit: change required field value on live item → 200, stays live
- *   7. POST /item/lifecycle {action:'pause'} on live item → paused; pending action survives (not cancelled)
+ *   7. pause → paused; pending action survives (not cancelled)
  *   8. POST /item/lifecycle {action:'unpause'} on paused-but-complete item → live
  *   9. POST /network/action/perform against a non-live target → 409 + PROFILE_NOT_LIVE
  *  10. GET /action/:id/contact-details after source pauses → 403 + PROFILE_NOT_LIVE
@@ -763,6 +763,52 @@ describeIf(`lifecycle integration${can_run ? '' : ` — ${skip_reason}`}`, () =>
 
     // Item is left paused here — scenario 8 is the unpause step and restores
     // the item to live for scenarios 9+.
+  });
+
+  // ---------------------------------------------------------------------------
+  // Back-door (accepted, §6): live → pause → clear required (allowed on paused)
+  // → unpause → draft. No cancellation; lands recoverable in draft.
+  // ---------------------------------------------------------------------------
+
+  it('back-door: paused item can be edited incomplete then unpause → draft', async () => {
+    const email = `lc_bd_${randomUUID().slice(0, 6)}@a.test`;
+    const full = generateMinimalItemState(primary.schema);
+    const create = await app.inject({
+      method: 'POST',
+      url: '/api/v1/admin/participant',
+      headers: adminHeaders(ns),
+      payload: {
+        email, name: 'LC BD', terms_accepted: true, privacy_accepted: true,
+        channel: 'bulk', network: primary.network, domain: primary.domain,
+        item_type: primary.item_type, item_state: full,
+      },
+    });
+    expect(create.statusCode).toBe(200);
+    const itemId = create.json().items[0].item_id as string;
+    onboarded_user_ids.push(create.json().user_id);
+
+    await app.inject({
+      method: 'POST', url: '/api/v1/item/lifecycle', headers: adminHeaders(ns),
+      payload: { item_id: itemId, action: 'pause' },
+    });
+
+    const requiredKey = (primary.schema.required as string[])[0];
+    const clear = await app.inject({
+      method: 'POST', url: '/api/v1/admin/participant', headers: adminHeaders(ns),
+      payload: {
+        email, name: 'LC BD', terms_accepted: true, privacy_accepted: true,
+        channel: 'bulk', network: primary.network, domain: primary.domain,
+        item_type: primary.item_type, item_id: itemId, item_state: { [requiredKey]: '' },
+      },
+    });
+    expect(clear.statusCode).toBe(200); // allowed: item is paused, not live
+
+    const unpause = await app.inject({
+      method: 'POST', url: '/api/v1/item/lifecycle', headers: adminHeaders(ns),
+      payload: { item_id: itemId, action: 'unpause' },
+    });
+    expect(unpause.statusCode).toBe(200);
+    expect(unpause.json().lifecycle_status).toBe('draft');
   });
 
   // ---------------------------------------------------------------------------
