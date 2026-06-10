@@ -23,6 +23,11 @@ export type ItemFetchFilters = {
    * true.
    */
   includePrivateState?: boolean;
+  /**
+   * When 'live_only', restricts results to items with lifecycle_status = 'live'.
+   * Defaults to returning all lifecycle states when undefined.
+   */
+  lifecycle_filter?: 'live_only' | 'all';
 };
 
 const itemResponseColumns = {
@@ -39,6 +44,7 @@ const itemResponseColumns = {
   created_by: items.created_by,
   created_at: items.created_at,
   updated_at: items.updated_at,
+  lifecycle_status: items.lifecycle_status,
 };
 
 function buildWhereClause(filters: Omit<ItemFetchFilters, 'limit' | 'offset'>) {
@@ -71,6 +77,10 @@ function buildWhereClause(filters: Omit<ItemFetchFilters, 'limit' | 'offset'>) {
     conditions.push(
       sql`${items.item_state} @> ${JSON.stringify(filters.item_state)}::jsonb`
     );
+  }
+
+  if (filters.lifecycle_filter === 'live_only') {
+    conditions.push(eq(items.lifecycle_status, 'live'));
   }
 
   if (

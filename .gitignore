@@ -19,7 +19,9 @@ apps/ui/.vite/
 apps/ui/dist/
 # Environment Variables
 .env
-.env.local
+.env.*
+!.env.example
+!.env.*.example
 
 # System Files
 .DS_Store

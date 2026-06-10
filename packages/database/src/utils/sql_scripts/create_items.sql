@@ -55,3 +55,21 @@ ON items USING GIN (item_state);
 
 CREATE INDEX IF NOT EXISTS items_geo_earth_idx
 ON items USING GIST (ll_to_earth(item_latitude, item_longitude));
+
+-- Lifecycle status (2026-06-03 spec).
+ALTER TABLE items
+  ADD COLUMN IF NOT EXISTS lifecycle_status TEXT NOT NULL DEFAULT 'draft';
+
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint WHERE conname = 'items_lifecycle_status_chk'
+  ) THEN
+    ALTER TABLE items
+      ADD CONSTRAINT items_lifecycle_status_chk
+      CHECK (lifecycle_status IN ('draft','live','paused'));
+  END IF;
+END$$;
+
+CREATE INDEX IF NOT EXISTS items_lifecycle_idx
+  ON items (item_network, item_domain, lifecycle_status);

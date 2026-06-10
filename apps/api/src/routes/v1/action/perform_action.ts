@@ -96,6 +96,11 @@ export const perform_action_handler = async (
         );
       }
 
+      // Aggregate response code is set by runBulk (207/422); the per-entry error carries the machine-readable code.
+      if (sourceItemSnapshot.lifecycle_status !== 'live') {
+        throw new BulkItemFailure('PROFILE_NOT_LIVE', 'source_item is not live; cannot perform actions');
+      }
+
       let requirementsSnapshot = body.requirements_snapshot;
 
       try {

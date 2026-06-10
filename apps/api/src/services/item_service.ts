@@ -9,6 +9,8 @@ import {
   splitItemStateByPrivacy,
   validateAgainstJsonSchema,
 } from '@dpg/schemas';
+import { classify_item } from './items/classifier.js';
+import { cancel_pending_actions_for_item } from './items/cancel_pending_actions.js';
 import { decryptPiiBlob, encryptPiiBlob, getPiiKey } from '@dpg/auth';
 import { items } from '@dpg/database';
 import { db } from '@api/db/postgres/drizzle_config';
@@ -120,8 +122,12 @@ async function resolveSchema(params: {
   }
 
   try {
+    const required = Array.isArray((itemSchema as { required?: unknown }).required)
+      ? ((itemSchema as { required?: string[] }).required as string[])
+      : [];
     validateAgainstJsonSchema(itemSchema, params.submittedItemState, 'item_state', {
       allowAdditionalProperties: apiConfig.allow_extra_schema_data,
+      ignoredKeys: required,
     });
   } catch (err) {
     throw new ItemServiceError(
@@ -154,6 +160,12 @@ export async function createItemInternal(
       ? ''
       : encryptPiiBlob(JSON.stringify(itemState.privateState), getPiiKey());
 
+  const classification = classify_item({
+    schema: itemSchema as { required?: string[] },
+    merged_state: submittedItemState,
+    current_status: 'draft',
+  });
+
   const result = await exec
     .insert(items)
     .values({
@@ -167,6 +179,7 @@ export async function createItemInternal(
       item_latitude: params.item_latitude ?? null,
       item_longitude: params.item_longitude ?? null,
       created_by: params.created_by,
+      lifecycle_status: classification.lifecycle_status,
     })
     .onConflictDoNothing({
       target: [
@@ -193,13 +206,33 @@ export async function createItemInternal(
   return result[0];
 }
 
+export interface UpdateItemInternalResult {
+  row: {
+    item_network: string;
+    item_domain: string;
+    item_type: string;
+    item_id: string;
+    item_instance_url: string;
+    item_schema_url: string;
+    item_state: unknown;
+    item_private_state: string;
+    item_latitude: number | null;
+    item_longitude: number | null;
+    created_by: string;
+    created_at: Date;
+    updated_at: Date;
+  };
+  leavingLive: boolean;
+  cancelledPendingActions: number;
+}
+
 export async function updateItemInternal(
   exec: DbOrTx,
   itemId: string,
   callerId: string,
   isAdmin: boolean,
   body: UpdateItemServiceBody
-) {
+): Promise<UpdateItemInternalResult> {
   const ownershipFilter = isAdmin
     ? eq(items.item_id, itemId)
     : and(eq(items.item_id, itemId), eq(items.created_by, callerId));
@@ -210,15 +243,22 @@ export async function updateItemInternal(
   if (body.item_latitude !== undefined) updateValues.item_latitude = body.item_latitude;
   if (body.item_longitude !== undefined) updateValues.item_longitude = body.item_longitude;
 
+  let isLeavingLive = false;
+  let existingItemId: string | null = null;
+  let existingItemNetwork: string | null = null;
+  let cancelledPendingActions = 0;
+
   if (body.item_state) {
     const [existingItem] = await exec
       .select({
+        item_id: items.item_id,
         item_network: items.item_network,
         item_domain: items.item_domain,
         item_type: items.item_type,
         item_schema_url: items.item_schema_url,
         item_state: items.item_state,
         item_private_state: items.item_private_state,
+        lifecycle_status: items.lifecycle_status,
       })
       .from(items)
       .where(ownershipFilter)
@@ -257,8 +297,12 @@ export async function updateItemInternal(
     const mergedFullState: Record<string, unknown> = { ...priorFullState, ...body.item_state };
 
     try {
+      const required = Array.isArray((itemSchema as { required?: unknown }).required)
+        ? ((itemSchema as { required?: string[] }).required as string[])
+        : [];
       validateAgainstJsonSchema(itemSchema, mergedFullState, 'item_state', {
         allowAdditionalProperties: apiConfig.allow_extra_schema_data,
+        ignoredKeys: required,
       });
     } catch (err) {
       throw new ItemServiceError(
@@ -275,34 +319,66 @@ export async function updateItemInternal(
       Object.keys(split.privateState).length === 0
         ? ''
         : encryptPiiBlob(JSON.stringify(split.privateState), getPiiKey());
-  }
 
-  const result = await exec
-    .update(items)
-    .set(updateValues)
-    .where(ownershipFilter)
-    .returning({
-      item_network: items.item_network,
-      item_domain: items.item_domain,
-      item_type: items.item_type,
-      item_id: items.item_id,
-      item_instance_url: items.item_instance_url,
-      item_schema_url: items.item_schema_url,
-      item_state: items.item_state,
-      item_private_state: items.item_private_state,
-      item_latitude: items.item_latitude,
-      item_longitude: items.item_longitude,
-      created_by: items.created_by,
-      created_at: items.created_at,
-      updated_at: items.updated_at,
+    const classification = classify_item({
+      schema: itemSchema as { required?: string[] },
+      merged_state: mergedFullState,
+      current_status: existingItem.lifecycle_status as 'draft' | 'live' | 'paused',
     });
+    updateValues.lifecycle_status = classification.lifecycle_status;
 
-  if (result.length === 0) {
-    throw new ItemServiceError(
-      404,
-      'ITEM_NOT_FOUND_OR_FORBIDDEN',
-      'Item not found or does not belong to the authenticated user'
-    );
+    isLeavingLive =
+      existingItem.lifecycle_status === 'live' && classification.lifecycle_status !== 'live';
+    existingItemId = existingItem.item_id;
+    existingItemNetwork = existingItem.item_network;
   }
-  return result[0];
+
+  // When leaving live, the item UPDATE and the pending-action cancel must be
+  // atomic (spec §7). exec.transaction() opens a real transaction when exec is
+  // the bare db pool, or a savepoint when exec is already a transaction —
+  // correct in both cases.
+  const { row, cancelledCount } = await exec.transaction(async (txx) => {
+    const updateResult = await txx
+      .update(items)
+      .set(updateValues)
+      .where(ownershipFilter)
+      .returning({
+        item_network: items.item_network,
+        item_domain: items.item_domain,
+        item_type: items.item_type,
+        item_id: items.item_id,
+        item_instance_url: items.item_instance_url,
+        item_schema_url: items.item_schema_url,
+        item_state: items.item_state,
+        item_private_state: items.item_private_state,
+        item_latitude: items.item_latitude,
+        item_longitude: items.item_longitude,
+        created_by: items.created_by,
+        created_at: items.created_at,
+        updated_at: items.updated_at,
+      });
+
+    if (updateResult.length === 0) {
+      throw new ItemServiceError(
+        404,
+        'ITEM_NOT_FOUND_OR_FORBIDDEN',
+        'Item not found or does not belong to the authenticated user'
+      );
+    }
+
+    let cancelled = 0;
+    if (isLeavingLive && existingItemId !== null && existingItemNetwork !== null) {
+      cancelled = await cancel_pending_actions_for_item(txx, existingItemId, existingItemNetwork);
+    }
+
+    return { row: updateResult[0], cancelledCount: cancelled };
+  });
+
+  cancelledPendingActions = cancelledCount;
+
+  return {
+    row,
+    leavingLive: isLeavingLive,
+    cancelledPendingActions,
+  };
 }

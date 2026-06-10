@@ -1,5 +1,6 @@
 import {
   doublePrecision,
+  integer,
   primaryKey,
   jsonb,
   pgTable,
@@ -36,6 +37,7 @@ export const items = pgTable(
     updated_at: timestamp('updated_at')
       .$defaultFn(() => /* @__PURE__ */ new Date())
       .notNull(),
+    lifecycle_status: text('lifecycle_status').notNull().default('draft'),
   },
   (table) => [
     primaryKey({

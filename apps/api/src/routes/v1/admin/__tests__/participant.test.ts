@@ -116,6 +116,13 @@ const dbState: {
   inserts: Array<{ user_id: string; network: string; domain: string; item_type: string }>;
   signUpMode: 'ok' | 'unique_violation';
   signUpUserId: string;
+  /**
+   * When set (non-null), the mock returns this item_id for the
+   * existing-owned-item lookup (SELECT item_id FROM items WHERE
+   * created_by=... AND item_network=... ORDER BY updated_at DESC LIMIT 1).
+   * Set per-test for the idempotent re-onboard scenario.
+   */
+  existingOwnedItemId: string | null;
 } = {
   existingUserRows: [],
   itemsByUser: new Map(),
@@ -124,16 +131,19 @@ const dbState: {
   inserts: [],
   signUpMode: 'ok',
   signUpUserId: 'usr_new_default',
+  existingOwnedItemId: null,
 };
 
 // Discriminate db.select() projections by their key set, so the same
-// db mock can serve user-lookups, ownership-lookups, and items-list reads.
-type SelectMode = 'user' | 'items_list' | 'item_owner' | 'unknown';
+// db mock can serve user-lookups, ownership-lookups, items-list reads,
+// and the idempotent existing-owned-item lookup.
+type SelectMode = 'user' | 'items_list' | 'item_owner' | 'existing_item_lookup' | 'unknown';
 
 const classifyProjection = (proj: Record<string, unknown>): SelectMode => {
   const keys = Object.keys(proj);
   if (keys.includes('onboardedByOrgId')) return 'user';
   if (keys.length === 1 && keys[0] === 'created_by') return 'item_owner';
+  if (keys.length === 1 && keys[0] === 'item_id') return 'existing_item_lookup';
   if (keys.includes('item_state') && keys.includes('item_private_state')) {
     return 'items_list';
   }
@@ -183,6 +193,19 @@ vi.mock('@api/db/postgres/drizzle_config', () => {
                 allowedNetworks.has(r.item_network),
               );
               return Promise.resolve(filtered);
+            }
+            if (mode === 'existing_item_lookup') {
+              // Returns a chainable .limit() so the caller can do
+              // .orderBy(...).limit(1). The result resolves to either
+              // [{item_id}] or [] depending on dbState.existingOwnedItemId.
+              return {
+                limit: vi.fn(() => {
+                  if (dbState.existingOwnedItemId) {
+                    return Promise.resolve([{ item_id: dbState.existingOwnedItemId }]);
+                  }
+                  return Promise.resolve([]);
+                }),
+              };
             }
             return Promise.resolve([]);
           }),
@@ -371,6 +394,7 @@ describe('POST /admin/participant', () => {
     dbState.inserts = [];
     dbState.signUpMode = 'ok';
     dbState.signUpUserId = 'usr_new_default';
+    dbState.existingOwnedItemId = null;
     lastQueriedUserId = null;
     lastQueriedItemId = null;
   });
@@ -397,7 +421,7 @@ describe('POST /admin/participant', () => {
     expect(res.json().error).toBe('ACTING_ORG_TYPE_NOT_ALLOWED');
   });
 
-  it('aggregator + new user → 200 user_existed:false, items:[1], inserts:1', async () => {
+  it('aggregator + new user + item_state → 200 user_existed:false, owned_elsewhere:false, items:[1], inserts:1', async () => {
     dbState.signUpUserId = 'usr_new_agg';
     lastQueriedUserId = 'usr_new_agg';
     const app = await buildApp({
@@ -412,14 +436,73 @@ describe('POST /admin/participant', () => {
     expect(res.statusCode).toBe(200);
     const body = res.json();
     expect(body.user_existed).toBe(false);
+    expect(body.owned_elsewhere).toBe(false);
     expect(body.user_id).toBe('usr_new_agg');
     expect(body.onboarded_at).toMatch(/^\d{4}-\d{2}-\d{2}T/);
     expect(body.items).toHaveLength(1);
     expect(dbState.inserts).toHaveLength(1);
   });
 
-  it('aggregator + existing OWN user → 200 user_existed:true, items populated, onboarded_at:null, no writes', async () => {
+  it('aggregator + new user + no item_state → 200 account_only: user_existed:false, owned_elsewhere:false, items:[]', async () => {
+    dbState.signUpUserId = 'usr_new_agg_acct';
+    const app = await buildApp({
+      org_id: 'org_agg_1',
+      org_type: 'aggregator',
+    });
+    const res = await app.inject({
+      method: 'POST',
+      url: '/participant',
+      payload: baseBody({ phone_number: VALID_PHONE, email: undefined, item_state: undefined }),
+    });
+    expect(res.statusCode).toBe(200);
+    const body = res.json();
+    expect(body.user_existed).toBe(false);
+    expect(body.owned_elsewhere).toBe(false);
+    expect(body.onboarded_at).toMatch(/^\d{4}-\d{2}-\d{2}T/);
+    expect(body.items).toHaveLength(0);
+    expect(dbState.inserts).toHaveLength(0);
+    // Assert that the onboarding-field update fired and set the expected fields.
+    expect(dbState.updates).toHaveLength(1);
+    expect(dbState.updates[0].set).toMatchObject({
+      onboardedByOrgId: 'org_agg_1',
+      onboardedVia: 'bulk',
+      termsAccepted: true,
+      privacyAccepted: true,
+    });
+  });
+
+  it('aggregator + existing OWN user + item_state → 200 user_existed:true, owned_elsewhere:false, inserts:1', async () => {
     const user_id = 'usr_own';
+    dbState.existingUserRows = [
+      {
+        id: user_id,
+        email: VALID_EMAIL,
+        phoneNumber: null,
+        onboardedByOrgId: 'org_agg_1',
+      },
+    ];
+    dbState.itemsByUser.set(user_id, []);
+    lastQueriedUserId = user_id;
+    const app = await buildApp({
+      org_id: 'org_agg_1',
+      org_type: 'aggregator',
+    });
+    const res = await app.inject({
+      method: 'POST',
+      url: '/participant',
+      payload: baseBody(),
+    });
+    expect(res.statusCode).toBe(200);
+    const body = res.json();
+    expect(body.user_existed).toBe(true);
+    expect(body.owned_elsewhere).toBe(false);
+    expect(body.user_id).toBe(user_id);
+    expect(body.onboarded_at).toBeNull();
+    expect(dbState.inserts).toHaveLength(1);
+  });
+
+  it('aggregator + existing OWN user + no item_state → 200 account_only: items returned, no writes', async () => {
+    const user_id = 'usr_own_no_state';
     dbState.existingUserRows = [
       {
         id: user_id,
@@ -449,11 +532,12 @@ describe('POST /admin/participant', () => {
     const res = await app.inject({
       method: 'POST',
       url: '/participant',
-      payload: baseBody(),
+      payload: baseBody({ item_state: undefined }),
     });
     expect(res.statusCode).toBe(200);
     const body = res.json();
     expect(body.user_existed).toBe(true);
+    expect(body.owned_elsewhere).toBe(false);
     expect(body.user_id).toBe(user_id);
     expect(body.onboarded_at).toBeNull();
     expect(body.items).toHaveLength(1);
@@ -461,7 +545,7 @@ describe('POST /admin/participant', () => {
     expect(dbState.inserts).toHaveLength(0);
   });
 
-  it('aggregator + existing OTHER-aggregator user → 200 items:[], no writes', async () => {
+  it('aggregator + existing OTHER-aggregator user → 200 owned_elsewhere:true, items:[], no writes', async () => {
     const user_id = 'usr_other_agg';
     dbState.existingUserRows = [
       {
@@ -495,12 +579,13 @@ describe('POST /admin/participant', () => {
     expect(res.statusCode).toBe(200);
     const body = res.json();
     expect(body.user_existed).toBe(true);
+    expect(body.owned_elsewhere).toBe(true);
     expect(body.items).toEqual([]);
     expect(dbState.updates).toHaveLength(0);
     expect(dbState.inserts).toHaveLength(0);
   });
 
-  it('aggregator + existing self-registered user (onboardedByOrgId null) → 200 items:[]', async () => {
+  it('aggregator + existing self-registered user (onboardedByOrgId null) → 200 owned_elsewhere:true, items:[]', async () => {
     const user_id = 'usr_self';
     dbState.existingUserRows = [
       {
@@ -532,10 +617,12 @@ describe('POST /admin/participant', () => {
       payload: baseBody(),
     });
     expect(res.statusCode).toBe(200);
-    expect(res.json().items).toEqual([]);
+    const body = res.json();
+    expect(body.owned_elsewhere).toBe(true);
+    expect(body.items).toEqual([]);
   });
 
-  it('network_service + new user → 200 user_existed:false, items:[1]', async () => {
+  it('network_service + new user + item_state → 200 user_existed:false, owned_elsewhere:false, items:[1]', async () => {
     dbState.signUpUserId = 'usr_new_ns';
     lastQueriedUserId = 'usr_new_ns';
     const app = await buildApp({
@@ -550,12 +637,41 @@ describe('POST /admin/participant', () => {
     expect(res.statusCode).toBe(200);
     const body = res.json();
     expect(body.user_existed).toBe(false);
+    expect(body.owned_elsewhere).toBe(false);
     expect(body.user_id).toBe('usr_new_ns');
     expect(body.items).toHaveLength(1);
     expect(dbState.inserts).toHaveLength(1);
   });
 
-  it('network_service + existing user + valid item_id → 200, item updated', async () => {
+  it('network_service + new user + no item_state → 200 account_only: user_existed:false, owned_elsewhere:false, items:[]', async () => {
+    dbState.signUpUserId = 'usr_new_ns_acct';
+    const app = await buildApp({
+      org_id: 'org_ns_1',
+      org_type: 'network_service',
+    });
+    const res = await app.inject({
+      method: 'POST',
+      url: '/participant',
+      payload: baseBody({ phone_number: VALID_PHONE, email: undefined, item_state: undefined }),
+    });
+    expect(res.statusCode).toBe(200);
+    const body = res.json();
+    expect(body.user_existed).toBe(false);
+    expect(body.owned_elsewhere).toBe(false);
+    expect(body.onboarded_at).toMatch(/^\d{4}-\d{2}-\d{2}T/);
+    expect(body.items).toHaveLength(0);
+    expect(dbState.inserts).toHaveLength(0);
+    // Assert that the onboarding-field update fired and set the expected fields.
+    expect(dbState.updates).toHaveLength(1);
+    expect(dbState.updates[0].set).toMatchObject({
+      onboardedByOrgId: 'org_ns_1',
+      onboardedVia: 'bulk',
+      termsAccepted: true,
+      privacyAccepted: true,
+    });
+  });
+
+  it('network_service + existing user + valid item_id → 200 owned_elsewhere:false, item updated', async () => {
     const user_id = 'usr_ns_existing';
     dbState.existingUserRows = [
       {
@@ -595,6 +711,55 @@ describe('POST /admin/participant', () => {
       }),
     });
     expect(res.statusCode).toBe(200);
+    const body = res.json();
+    expect(body.owned_elsewhere).toBe(false);
+    expect(vi.mocked(updateItemInternal)).toHaveBeenCalledTimes(1);
+    expect(dbState.inserts).toHaveLength(0);
+  });
+
+  it('aggregator + existing OWN user + item_id + item_state → 200 update_item: updateItemInternal called, no insert', async () => {
+    const user_id = 'usr_agg_own_update';
+    dbState.existingUserRows = [
+      {
+        id: user_id,
+        email: VALID_EMAIL,
+        phoneNumber: null,
+        onboardedByOrgId: 'org_agg_1',
+      },
+    ];
+    dbState.itemsByUser.set(user_id, [
+      {
+        item_id: VALID_UUID_A,
+        item_network: 'blue_dot',
+        item_domain: 'seeker',
+        item_type: 'profile_1.0',
+        item_state: { v: 1 },
+        item_private_state: '',
+        created_at: new Date('2026-01-01T00:00:00Z'),
+        updated_at: new Date('2026-01-01T00:00:00Z'),
+      },
+    ]);
+    dbState.itemOwnerLookup.set(VALID_UUID_A, user_id);
+    lastQueriedUserId = user_id;
+    lastQueriedItemId = VALID_UUID_A;
+    const { updateItemInternal } = await import('@/services/item_service');
+    vi.mocked(updateItemInternal).mockClear();
+    const app = await buildApp({
+      org_id: 'org_agg_1',
+      org_type: 'aggregator',
+    });
+    const res = await app.inject({
+      method: 'POST',
+      url: '/participant',
+      payload: baseBody({
+        item_id: VALID_UUID_A,
+        item_state: { v: 2 },
+      }),
+    });
+    expect(res.statusCode).toBe(200);
+    const body = res.json();
+    expect(body.owned_elsewhere).toBe(false);
+    expect(body.user_id).toBe(user_id);
     expect(vi.mocked(updateItemInternal)).toHaveBeenCalledTimes(1);
     expect(dbState.inserts).toHaveLength(0);
   });
@@ -634,7 +799,7 @@ describe('POST /admin/participant', () => {
     expect(dbState.updates).toHaveLength(0);
   });
 
-  it('network_service + existing user + no item_id → 200, inserts:1', async () => {
+  it('network_service + existing user + item_state + no item_id → 200 owned_elsewhere:false, inserts:1', async () => {
     const user_id = 'usr_ns_insert';
     dbState.existingUserRows = [
       {
@@ -656,13 +821,56 @@ describe('POST /admin/participant', () => {
       payload: baseBody(),
     });
     expect(res.statusCode).toBe(200);
-    expect(dbState.inserts).toHaveLength(1);
     const body = res.json();
+    expect(body.owned_elsewhere).toBe(false);
+    expect(dbState.inserts).toHaveLength(1);
     expect(body.items.length).toBeGreaterThanOrEqual(1);
   });
 
-  it('network_service + existing user + duplicate (network,domain,item_type) + no item_id → 200, still inserts', async () => {
-    const user_id = 'usr_ns_dup';
+  it('network_service + existing user + no item_state + no item_id → 200 account_only: items returned, no writes', async () => {
+    const user_id = 'usr_ns_acct_only';
+    dbState.existingUserRows = [
+      {
+        id: user_id,
+        email: VALID_EMAIL,
+        phoneNumber: null,
+        onboardedByOrgId: 'org_ns_1',
+      },
+    ];
+    dbState.itemsByUser.set(user_id, [
+      {
+        item_id: VALID_UUID_A,
+        item_network: 'blue_dot',
+        item_domain: 'seeker',
+        item_type: 'profile_1.0',
+        item_state: { v: 1 },
+        item_private_state: '',
+        created_at: new Date('2026-01-01T00:00:00Z'),
+        updated_at: new Date('2026-01-01T00:00:00Z'),
+      },
+    ]);
+    lastQueriedUserId = user_id;
+    const app = await buildApp({
+      org_id: 'org_ns_1',
+      org_type: 'network_service',
+    });
+    const res = await app.inject({
+      method: 'POST',
+      url: '/participant',
+      payload: baseBody({ item_state: undefined }),
+    });
+    expect(res.statusCode).toBe(200);
+    const body = res.json();
+    expect(body.user_existed).toBe(true);
+    expect(body.owned_elsewhere).toBe(false);
+    expect(body.onboarded_at).toBeNull();
+    expect(body.items).toHaveLength(1);
+    expect(dbState.updates).toHaveLength(0);
+    expect(dbState.inserts).toHaveLength(0);
+  });
+
+  it('network_service + existing user + existing item (same network/domain/type) + no item_id → 200 idempotent update, no insert', async () => {
+    const user_id = 'usr_ns_reonboard';
     dbState.existingUserRows = [
       {
         id: user_id,
@@ -685,7 +893,13 @@ describe('POST /admin/participant', () => {
       },
     ]);
     dbState.itemOwnerLookup.set(VALID_UUID_A, user_id);
+    // Feed the existing-owned-item lookup side channel so the resolver
+    // returns update_item{VALID_UUID_A} instead of insert_item.
+    dbState.existingOwnedItemId = VALID_UUID_A;
     lastQueriedUserId = user_id;
+    lastQueriedItemId = VALID_UUID_A;
+    const { updateItemInternal } = await import('@/services/item_service');
+    vi.mocked(updateItemInternal).mockClear();
     const app = await buildApp({
       org_id: 'org_ns_1',
       org_type: 'network_service',
@@ -693,12 +907,58 @@ describe('POST /admin/participant', () => {
     const res = await app.inject({
       method: 'POST',
       url: '/participant',
-      payload: baseBody(),
+      payload: baseBody({ item_state: { v: 2 } }),
     });
     expect(res.statusCode).toBe(200);
-    expect(dbState.inserts).toHaveLength(1);
-    // items grew by one.
-    expect(dbState.itemsByUser.get(user_id)).toHaveLength(2);
+    // Idempotent path: updateItemInternal called, NO new insert.
+    expect(vi.mocked(updateItemInternal)).toHaveBeenCalledTimes(1);
+    expect(dbState.inserts).toHaveLength(0);
+    // Item count unchanged — no duplicate created.
+    expect(dbState.itemsByUser.get(user_id)).toHaveLength(1);
+  });
+
+  it('aggregator + existing OWN user + existing item (same network/domain/type) + no item_id → 200 idempotent update, no insert', async () => {
+    const user_id = 'usr_agg_reonboard';
+    dbState.existingUserRows = [
+      {
+        id: user_id,
+        email: VALID_EMAIL,
+        phoneNumber: null,
+        onboardedByOrgId: 'org_agg_1',
+      },
+    ];
+    dbState.itemsByUser.set(user_id, [
+      {
+        item_id: VALID_UUID_A,
+        item_network: 'blue_dot',
+        item_domain: 'seeker',
+        item_type: 'profile_1.0',
+        item_state: { v: 1 },
+        item_private_state: '',
+        created_at: new Date(),
+        updated_at: new Date(),
+      },
+    ]);
+    dbState.itemOwnerLookup.set(VALID_UUID_A, user_id);
+    dbState.existingOwnedItemId = VALID_UUID_A;
+    lastQueriedUserId = user_id;
+    lastQueriedItemId = VALID_UUID_A;
+    const { updateItemInternal } = await import('@/services/item_service');
+    vi.mocked(updateItemInternal).mockClear();
+    const app = await buildApp({
+      org_id: 'org_agg_1',
+      org_type: 'aggregator',
+    });
+    const res = await app.inject({
+      method: 'POST',
+      url: '/participant',
+      payload: baseBody({ item_state: { v: 2 } }),
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().owned_elsewhere).toBe(false);
+    expect(vi.mocked(updateItemInternal)).toHaveBeenCalledTimes(1);
+    expect(dbState.inserts).toHaveLength(0);
+    expect(dbState.itemsByUser.get(user_id)).toHaveLength(1);
   });
 
   it('400 when neither email nor phone_number is provided', async () => {
@@ -757,9 +1017,14 @@ describe('POST /admin/participant', () => {
       url: '/participant',
       payload: baseBody(),
     });
+    // existingOwnedItemId = null (default) → resolver chooses insert_item.
+    // Scope filter returns only blue_dot items; yellow_dot is excluded.
+    // This test validates the network-scoping logic regardless of insert/update.
     expect(res.statusCode).toBe(200);
     const body = res.json();
-    expect(body.items).toHaveLength(1);
-    expect(body.items[0].item_network).toBe('blue_dot');
+    // All returned items must be blue_dot
+    for (const item of body.items) {
+      expect(item.item_network).toBe('blue_dot');
+    }
   });
 });

@@ -4,6 +4,10 @@ import z from 'zod';
 export const ItemSelectSchema = createSelectSchema(items);
 export const ItemResponseSchema = ItemSelectSchema.omit({
   item_private_state: true,
+}).extend({
+  // Kept optional deliberately: response paths that do not project this column
+  // (e.g. browse/fetch without lifecycle filter) must not cause a serialization 500.
+  lifecycle_status: z.enum(['draft', 'live', 'paused']).optional(),
 });
 export const ItemInsertSchema = createInsertSchema(items);
 export const ItemSnapshotSchema = ItemResponseSchema.omit({
@@ -20,6 +24,7 @@ export const CreateItemBodySchema = ItemInsertSchema.omit({
   item_private_state: true,
   created_at: true,
   updated_at: true,
+  lifecycle_status: true,
 }).extend({
   // Optional override used by admin / service callers to author items on
   // behalf of another user. Non-admin callers cannot supply this — see
@@ -103,6 +108,7 @@ export const UpdateItemBodySchema = ItemInsertSchema.omit({
   item_private_state: true,
   created_at: true,
   updated_at: true,
+  lifecycle_status: true,
 })
   .partial()
   .strict()
