@@ -27,8 +27,8 @@
             "disability_percentage",
             "looking_for",
             "looking_for_details",
-            "service_city",
-            "documents_available"
+            "documents_available",
+            "address"
           ],
           "properties": {
             "beneficiary_name": {
@@ -133,34 +133,13 @@
               "description": "Explain your choice in more detail",
               "minLength": 1
             },
-            "service_city": {
-              "type": "string",
-              "title": "Service City",
-              "description": "City or village where you can receive the service or support",
-              "minLength": 1
-            },
             "address": {
               "type": "string",
               "title": "Address",
-              "description": "Area, street, city to help reach you easily",
-              "private": true
-            },
-            "state": {
-              "type": "string",
-              "title": "State"
-            },
-            "district": {
-              "type": "string",
-              "title": "District"
-            },
-            "block": {
-              "type": "string",
-              "title": "Block"
-            },
-            "pincode": {
-              "type": "string",
-              "title": "Pincode",
-              "pattern": "^[0-9]{6}$"
+              "description": "Full address — house/flat, street, area, city, state, and pincode",
+              "minLength": 1,
+              "private": true,
+              "location": "primary"
             },
             "documents_available": {
               "type": "array",
@@ -200,7 +179,7 @@
       "card": {
         "title_field": "beneficiary_name",
         "avatar_from": "beneficiary_name",
-        "default_fields": ["disability_type", "looking_for", "service_city", "highest_qualification"]
+        "default_fields": ["disability_type", "looking_for", "highest_qualification"]
       },
       "dashboard_tiles": {
         "total_items": "Total Beneficiaries",
@@ -342,25 +321,9 @@
             "official_address": {
               "type": "string",
               "title": "Address",
-              "description": "Official address",
-              "minLength": 1
-            },
-            "state": {
-              "type": "string",
-              "title": "State"
-            },
-            "district": {
-              "type": "string",
-              "title": "District"
-            },
-            "block": {
-              "type": "string",
-              "title": "Block"
-            },
-            "pincode": {
-              "type": "string",
-              "title": "Pincode",
-              "pattern": "^[0-9]{6}$"
+              "description": "Full official address — building, street, area, city, state, and pincode",
+              "minLength": 1,
+              "location": "primary"
             },
             "service_details": {
               "type": "string",

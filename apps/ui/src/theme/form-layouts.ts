@@ -65,14 +65,14 @@ export const formLayouts: Record<string, FormLayout> = {
       },
       {
         title: 'Location',
-        fields: ['service_city', 'state', 'district', 'block', 'pincode', 'address'],
+        fields: ['address'],
       },
       {
         title: 'Documents & Education',
         fields: ['documents_available', 'highest_qualification'],
       },
     ],
-    twoColumn: ['age', 'gender', 'mobile_number', 'email', 'state', 'district', 'block', 'pincode'],
+    twoColumn: ['age', 'gender', 'mobile_number', 'email'],
   },
 
   // purple_dot network — PWD Service Provider Profile
@@ -92,13 +92,13 @@ export const formLayouts: Record<string, FormLayout> = {
       },
       {
         title: 'Location',
-        fields: ['official_address', 'state', 'district', 'block', 'pincode'],
+        fields: ['official_address'],
       },
       {
         title: 'More Details',
         fields: ['service_details', 'catalog_url'],
       },
     ],
-    twoColumn: ['contact_phone', 'contact_email', 'state', 'district', 'block', 'pincode'],
+    twoColumn: ['contact_phone', 'contact_email'],
   },
 };

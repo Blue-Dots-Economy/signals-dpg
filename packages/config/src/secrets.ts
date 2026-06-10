@@ -87,3 +87,8 @@ export const PiiCryptoSecretsSchema = z.object({
       'SIGNALS_PII_KEY must be base64-encoded 32 bytes (AES-256)'
     ),
 });
+
+export const GeocodingSecretsSchema = z.object({
+  GOOGLE_GEOCODING_API_KEY: z.string().optional(),
+  PHOTON_URL: z.string().optional(),
+});

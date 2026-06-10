@@ -5,6 +5,7 @@ import {
   findMetricCategoryAsymmetries,
   parseNetworkConfigDocument,
 } from '../network_workflow';
+import { parseLocationFields } from '../location_fields';
 
 describe.each([
   ['purple_dot', 'examples/schemas/purple_dot/network.json'],
@@ -51,4 +52,55 @@ describe.each([
         `silently dropped from item_metrics:\n${JSON.stringify(asymmetries, null, 2)}`,
     ).toEqual([]);
   });
+});
+
+describe('example network configs declare a primary location field', () => {
+  const cases = [
+    ['orange_dot', 'tourist', 'examples/schemas/orange_dot/network.json'],
+    ['orange_dot', 'practitioner', 'examples/schemas/orange_dot/network.json'],
+    ['purple_dot', 'seeker', 'examples/schemas/purple_dot/network.json'],
+    ['purple_dot', 'provider', 'examples/schemas/purple_dot/network.json'],
+    ['yellow_dot', 'student', 'examples/schemas/yellow_dot/network.json'],
+    ['blue_dot', 'seeker', 'examples/schemas/blue_dot/network.json'],
+  ] as const;
+
+  it.each(cases)(
+    '%s/%s has exactly one primary location field',
+    (network, domainId, relPath) => {
+      const abs = resolve(__dirname, '../../../..', relPath);
+      const doc = JSON.parse(readFileSync(abs, 'utf8')) as {
+        domains: Array<{ id: string; item_schemas?: Record<string, unknown> }>;
+      };
+
+      const domain = doc.domains.find((d) => d.id === domainId);
+      expect(domain, `domain ${domainId} not found in ${network}`).toBeTruthy();
+
+      const schema = (domain?.item_schemas?.['profile_1.0'] ?? null) as Record<
+        string,
+        unknown
+      > | null;
+      expect(
+        schema,
+        `profile_1.0 not found in ${network}/${domainId}`,
+      ).toBeTruthy();
+
+      const fields = parseLocationFields(schema);
+      expect(
+        fields.primary,
+        `${network}/${domainId} has no primary location field`,
+      ).not.toBeNull();
+
+      const properties = schema.properties as Record<
+        string,
+        { location?: unknown }
+      >;
+      const primaryCount = Object.values(properties).filter(
+        (p) => p?.location === 'primary',
+      ).length;
+      expect(
+        primaryCount,
+        `${network}/${domainId} must have exactly one primary location marker, found ${primaryCount}`,
+      ).toBe(1);
+    },
+  );
 });

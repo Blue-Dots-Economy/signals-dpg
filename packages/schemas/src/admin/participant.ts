@@ -99,6 +99,23 @@ export const UpsertParticipantResponse = z.object({
   items: z.array(ParticipantItemSnapshot),
 });
 
+export const GetParticipantRequest = z
+  .object({
+    email: z.email().optional(),
+    phone_number: PhoneE164.optional(),
+  })
+  .refine((q) => Boolean(q.email) || Boolean(q.phone_number), {
+    message: 'either email or phone_number is required',
+    path: ['email'],
+  });
+
+export const GetParticipantResponse = z.object({
+  user_id: z.string().nullable(),
+  items: z.array(ParticipantItemSnapshot),
+});
+
 export type UpsertParticipantRequest = z.infer<typeof UpsertParticipantRequest>;
 export type UpsertParticipantResponse = z.infer<typeof UpsertParticipantResponse>;
 export type ParticipantItemSnapshot = z.infer<typeof ParticipantItemSnapshot>;
+export type GetParticipantRequest = z.infer<typeof GetParticipantRequest>;
+export type GetParticipantResponse = z.infer<typeof GetParticipantResponse>;

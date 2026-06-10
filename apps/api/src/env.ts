@@ -2,6 +2,7 @@ import {
   ApiSecretsSchema,
   AuthSecretsSchema,
   DatabaseSecretsSchema,
+  GeocodingSecretsSchema,
   InstanceSecretsSchema,
   MatchScoreSecretsSchema,
   NetworkRuntimeSecretsSchema,
@@ -20,6 +21,7 @@ export function loadEnv() {
   const networkRuntime = NetworkRuntimeSecretsSchema.parse(process.env);
   const schemaRegistry = OptionalSchemaRegistrySecretsSchema.parse(process.env);
   const piiCrypto = PiiCryptoSecretsSchema.parse(process.env);
+  const geocoding = GeocodingSecretsSchema.parse(process.env);
   return {
     instance,
     api,
@@ -30,5 +32,6 @@ export function loadEnv() {
     networkRuntime,
     schemaRegistry,
     piiCrypto,
+    geocoding,
   };
 }
