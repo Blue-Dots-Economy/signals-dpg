@@ -30,7 +30,8 @@ import {
   type Item,
 } from '@/lib/item-api';
 import { fetchNetworkConfig, fetchNetworkConfigs } from '@/lib/network-api';
-import { extractAndGeocode } from '@/lib/item-utils';
+import { parseLocationFields, buildGeoQuery } from '@dpg/schemas/location_fields';
+import { getGeoProvider } from '@/lib/geo/provider';
 import { apiConfig } from '@/lib/api-config';
 
 function parseNetworkIds(networkEnv: string | undefined): string[] {
@@ -61,6 +62,13 @@ export function ProfileFormPage() {
   const [availableNetworkIds, setAvailableNetworkIds] = React.useState<string[] | null>(null);
   const [isWalletModalOpen, setIsWalletModalOpen] = React.useState(false);
   const [formError, setFormError] = React.useState<{ title: string; description?: string } | null>(null);
+  const [resolvedCoords, setResolvedCoords] = React.useState<{ lat: number; lng: number } | null>(null);
+
+  // Clear stale coords whenever the user switches domain so a prior domain's
+  // address suggestion is never submitted for a different domain.
+  React.useEffect(() => {
+    setResolvedCoords(null);
+  }, [selectedDomain]);
 
   // Get network from URL query param, fallback to env config
   const configuredNetworkIds = React.useMemo(
@@ -323,8 +331,18 @@ export function ProfileFormPage() {
     setFormError(null);
 
     try {
-      // Geocode from domain-specific pincode field
-      const { coordinates } = await extractAndGeocode(data, selectedDomain);
+      // Use widget-resolved coords, or fall back to composite geocoding from marked fields.
+      let coordinates = resolvedCoords;
+      if (!coordinates && profileSchema) {
+        // No suggestion picked (typed free text or no provider) — geocode the
+        // composite of the marked fields one-shot.
+        const fields = parseLocationFields(profileSchema as Record<string, unknown>);
+        const query = buildGeoQuery(data, fields);
+        if (query) {
+          const [best] = await getGeoProvider().suggest(query);
+          if (best) coordinates = { lat: best.lat, lng: best.lng };
+        }
+      }
 
       if (isEdit && existingItem) {
         // Update existing profile
@@ -571,6 +589,7 @@ export function ProfileFormPage() {
                 formData={initialData ?? undefined}
                 submitButtonText={isEdit ? t('profile.btn_update') : undefined}
                 domainId={selectedDomain ?? undefined}
+                formContext={{ onLocationResolved: setResolvedCoords }}
               />
             )}
             {isEdit && existingItem && (

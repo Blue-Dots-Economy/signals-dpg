@@ -193,7 +193,6 @@ describeIf(`consent flow integration (purple_dot/connect)${
           disability_percentage: 50,
           looking_for: ['Assistive Devices'],
           looking_for_details: 'Need a wheelchair.',
-          service_city: 'Pune',
           address: '1 Test Street, Pune, Maharashtra',
           documents_available: ['Aadhaar'],
         },

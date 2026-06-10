@@ -39,7 +39,8 @@
             },
             "location": {
               "type": "string",
-              "title": "Location"
+              "title": "Location",
+              "location": "primary"
             },
             "phone": {
               "type": "string",

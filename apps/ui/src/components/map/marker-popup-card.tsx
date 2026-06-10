@@ -17,12 +17,8 @@ export function getPrecisionInfo(precision: string): PrecisionInfo {
   switch (precision) {
     case 'exact':
       return { labelKey: 'map.precision.exact' };
-    case 'geocoded_pincode':
-      return { labelKey: 'map.precision.pincode' };
     case 'geocoded_full_address':
       return { labelKey: 'map.precision.full_address' };
-    case 'geocoded_city_only':
-      return { labelKey: 'map.precision.city' };
     default:
       return { labelKey: 'map.precision.unknown' };
   }

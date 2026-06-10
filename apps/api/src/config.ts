@@ -10,6 +10,7 @@ export const {
   notification,
   networkRuntime,
   schemaRegistry,
+  geocoding,
 } = loadEnv();
 
 export const apiConfig = {
@@ -35,6 +36,11 @@ export const authConfig = {
       ? `${apiConfig.domain}:${apiConfig.port}/api/auth`
       : `${apiConfig.domain}/api/auth`,
   create_test_otp: auth.CREATE_TEST_OTP,
+};
+
+export const geocodingConfig = {
+  google_api_key: geocoding.GOOGLE_GEOCODING_API_KEY,
+  photon_url: geocoding.PHOTON_URL ?? 'https://photon.komoot.io',
 };
 
 export const matchScoreConfig = {
