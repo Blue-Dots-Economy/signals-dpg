@@ -88,8 +88,7 @@ export function CardGrid({
           item_instance_url: null,
           item_schema_url: null,
           item_state: item.data,
-          item_latitude: null,
-          item_longitude: null,
+          item_locations: [],
           created_at: new Date().toISOString(),
           updated_at: new Date().toISOString(),
         };

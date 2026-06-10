@@ -42,8 +42,7 @@ export const create_profile_item = async (
     item_domain: input.domain,
     item_type: input.item_type,
     item_state: input.payload,
-    item_latitude: null,
-    item_longitude: null,
+    item_locations: [],
     created_by: input.user_id,
   });
 

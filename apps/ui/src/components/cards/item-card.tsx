@@ -84,6 +84,12 @@ export function ItemCard({
       data-expanded={variant === 'list' ? open : undefined}
       className={cn(
         'flex flex-col overflow-hidden rounded-2xl bg-background text-foreground shadow-sm',
+        // Map popup: bound the height to a compact card (≤ 28rem, and never more
+        // than 70vh on short screens) so the popup container can always show it
+        // in full — header and footer (Connect / See match score) stay pinned and
+        // the fields region between them scrolls. A taller cap let the footer sit
+        // at the map edge near the marker and get clipped.
+        variant === 'popup' && 'max-h-[min(70vh,28rem)]',
         variant === 'list' &&
           'transition hover:shadow-md motion-safe:hover:-translate-y-0.5',
         className
@@ -92,7 +98,7 @@ export function ItemCard({
     >
       {/* Branded header — colour is the per-network theme var */}
       <div
-        className="flex items-center gap-3 px-4 py-3"
+        className="flex shrink-0 items-center gap-3 px-4 py-3"
         style={{ background: HEADER_GRADIENT }}
       >
         <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-white/25 text-sm font-bold text-white">
@@ -115,8 +121,15 @@ export function ItemCard({
         </div>
       </div>
 
-      {/* Fields: default rows always, extra rows when expanded */}
-      <div className="space-y-2 px-4 py-3">
+      {/* Fields: default rows always, extra rows when expanded. In the map popup
+          this region flexes and scrolls so a long list (e.g. many service
+          cities) stays reachable without pushing the action buttons off-screen. */}
+      <div
+        className={cn(
+          'space-y-2 px-4 py-3',
+          variant === 'popup' && 'min-h-0 flex-1 overflow-y-auto'
+        )}
+      >
         {resolved.defaultRows.map((row) => (
           <FieldRow key={row.key} row={row} />
         ))}
@@ -128,7 +141,7 @@ export function ItemCard({
           content (equal-height rows), the extra space sits above the footer —
           after the last field — never below the buttons. */}
       {(hasExtra || actions) && (
-        <div className="mt-auto pt-1">
+        <div className="mt-auto shrink-0 pt-1">
           {hasExtra && (
             <div className="px-4 pb-1">
               <button

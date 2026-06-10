@@ -3,10 +3,19 @@ import type { WidgetProps } from '@rjsf/utils';
 import { Input } from '@/components/ui/input';
 import { cn } from '@/lib/utils';
 import { getGeoProvider } from '@/lib/geo/provider';
-import type { GeoSuggestion } from '@/lib/geo/types';
+import type { GeoComponents, GeoSuggestion } from '@/lib/geo/types';
+
+/** A selected place reported to the form: the exact point plus the address
+ * components, so the page can coarsen a private field to its city centroid
+ * (using the components) before submit. */
+export interface ResolvedPlace {
+  lat: number;
+  lng: number;
+  components?: GeoComponents;
+}
 
 interface LocationFormContext {
-  onLocationResolved?: (coords: { lat: number; lng: number } | null) => void;
+  onLocationResolved?: (place: ResolvedPlace | null) => void;
 }
 
 export function LocationAutocompleteWidget({
@@ -75,15 +84,22 @@ export function LocationAutocompleteWidget({
     runSearch(next);
   }
 
-  function choose(s: GeoSuggestion) {
+  async function choose(s: GeoSuggestion) {
     // Cancel any pending/in-flight search so selecting never re-opens the list.
     window.clearTimeout(debounceRef.current);
     abortRef.current?.abort();
     setText(s.label);
     onChange(s.label);
-    ctx.onLocationResolved?.({ lat: s.lat, lng: s.lng });
     setSuggestions([]);
+    // Close the dropdown immediately — before any async work — so the UI stays
+    // responsive regardless of how long the coarse geocode takes.
     setOpen(false);
+
+    // Report the selected place — exact point plus its address components. The
+    // page decides how to use it: for a public field the exact point is stored;
+    // for a PRIVATE field the page coarsens to the city centroid (via the
+    // components) at submit time, so the exact point never leaves the browser.
+    ctx.onLocationResolved?.({ lat: s.lat, lng: s.lng, components: s.components });
   }
 
   return (
@@ -112,7 +128,7 @@ export function LocationAutocompleteWidget({
                 // blur fires; preventDefault keeps focus from flicking away.
                 onMouseDown={(e) => {
                   e.preventDefault();
-                  choose(s);
+                  void choose(s);
                 }}
               >
                 {s.label}

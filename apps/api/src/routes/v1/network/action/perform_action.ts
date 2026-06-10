@@ -230,10 +230,8 @@ export const perform_network_action_handler = async (
     target_item: body.target_item,
     source_item_owner: body.source_item_owner,
     target_item_owner: targetItemSnapshot.created_by,
-    source_item_latitude: sourceItemSnapshot?.item_latitude ?? null,
-    source_item_longitude: sourceItemSnapshot?.item_longitude ?? null,
-    target_item_latitude: targetItemSnapshot.item_latitude ?? null,
-    target_item_longitude: targetItemSnapshot.item_longitude ?? null,
+    source_item_locations: sourceItemSnapshot?.item_locations ?? [],
+    target_item_locations: targetItemSnapshot.item_locations ?? [],
     event_payload: eventPayload,
   };
 
