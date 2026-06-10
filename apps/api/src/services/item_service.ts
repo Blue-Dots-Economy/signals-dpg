@@ -10,7 +10,6 @@ import {
   validateAgainstJsonSchema,
 } from '@dpg/schemas';
 import { classify_item } from './items/classifier.js';
-import { cancel_pending_actions_for_item } from './items/cancel_pending_actions.js';
 import { is_populated } from './metrics/profile_completion.js';
 import { decryptPiiBlob, encryptPiiBlob, getPiiKey } from '@dpg/auth';
 import { items } from '@dpg/database';
@@ -223,8 +222,6 @@ export interface UpdateItemInternalResult {
     created_at: Date;
     updated_at: Date;
   };
-  leavingLive: boolean;
-  cancelledPendingActions: number;
 }
 
 export async function updateItemInternal(
@@ -243,11 +240,6 @@ export async function updateItemInternal(
   };
   if (body.item_latitude !== undefined) updateValues.item_latitude = body.item_latitude;
   if (body.item_longitude !== undefined) updateValues.item_longitude = body.item_longitude;
-
-  let isLeavingLive = false;
-  let existingItemId: string | null = null;
-  let existingItemNetwork: string | null = null;
-  let cancelledPendingActions = 0;
 
   if (body.item_state) {
     const [existingItem] = await exec
@@ -342,59 +334,36 @@ export async function updateItemInternal(
       current_status: existingItem.lifecycle_status as 'draft' | 'live' | 'paused',
     });
     updateValues.lifecycle_status = classification.lifecycle_status;
-
-    isLeavingLive =
-      existingItem.lifecycle_status === 'live' && classification.lifecycle_status !== 'live';
-    existingItemId = existingItem.item_id;
-    existingItemNetwork = existingItem.item_network;
   }
 
-  // When leaving live, the item UPDATE and the pending-action cancel must be
-  // atomic (spec §7). exec.transaction() opens a real transaction when exec is
-  // the bare db pool, or a savepoint when exec is already a transaction —
-  // correct in both cases.
-  const { row, cancelledCount } = await exec.transaction(async (txx) => {
-    const updateResult = await txx
-      .update(items)
-      .set(updateValues)
-      .where(ownershipFilter)
-      .returning({
-        item_network: items.item_network,
-        item_domain: items.item_domain,
-        item_type: items.item_type,
-        item_id: items.item_id,
-        item_instance_url: items.item_instance_url,
-        item_schema_url: items.item_schema_url,
-        item_state: items.item_state,
-        item_private_state: items.item_private_state,
-        item_latitude: items.item_latitude,
-        item_longitude: items.item_longitude,
-        created_by: items.created_by,
-        created_at: items.created_at,
-        updated_at: items.updated_at,
-      });
+  const updateResult = await exec
+    .update(items)
+    .set(updateValues)
+    .where(ownershipFilter)
+    .returning({
+      item_network: items.item_network,
+      item_domain: items.item_domain,
+      item_type: items.item_type,
+      item_id: items.item_id,
+      item_instance_url: items.item_instance_url,
+      item_schema_url: items.item_schema_url,
+      item_state: items.item_state,
+      item_private_state: items.item_private_state,
+      item_latitude: items.item_latitude,
+      item_longitude: items.item_longitude,
+      created_by: items.created_by,
+      created_at: items.created_at,
+      updated_at: items.updated_at,
+    });
 
-    if (updateResult.length === 0) {
-      throw new ItemServiceError(
-        404,
-        'ITEM_NOT_FOUND_OR_FORBIDDEN',
-        'Item not found or does not belong to the authenticated user'
-      );
-    }
+  if (updateResult.length === 0) {
+    throw new ItemServiceError(
+      404,
+      'ITEM_NOT_FOUND_OR_FORBIDDEN',
+      'Item not found or does not belong to the authenticated user'
+    );
+  }
+  const row = updateResult[0];
 
-    let cancelled = 0;
-    if (isLeavingLive && existingItemId !== null && existingItemNetwork !== null) {
-      cancelled = await cancel_pending_actions_for_item(txx, existingItemId, existingItemNetwork);
-    }
-
-    return { row: updateResult[0], cancelledCount: cancelled };
-  });
-
-  cancelledPendingActions = cancelledCount;
-
-  return {
-    row,
-    leavingLive: isLeavingLive,
-    cancelledPendingActions,
-  };
+  return { row };
 }

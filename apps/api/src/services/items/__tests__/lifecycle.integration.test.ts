@@ -27,8 +27,9 @@
  *   3. NS + full state → live, completion_pct === 100
  *   4. Aggregator A full state → live; retry with new state → row UPDATED, still live
  *   5. Aggregator B targets A's user → owned_elsewhere:true, items:[], no DB write
- *   6. NS clears a required field → live → draft; pending action on item → cancelled
- *   7. POST /item/lifecycle {action:'pause'} on a live item → paused; pending action cancelled
+ *   6. NS clears a required field on live item → 409 REQUIRED_FIELD_LOCKED_WHILE_LIVE; action untouched
+ *   6b. Allowed edit: change required field value on live item → 200, stays live
+ *   7. POST /item/lifecycle {action:'pause'} on live item → paused; pending action survives (not cancelled)
  *   8. POST /item/lifecycle {action:'unpause'} on paused-but-complete item → live
  *   9. POST /network/action/perform against a non-live target → 409 + PROFILE_NOT_LIVE
  *  10. GET /action/:id/contact-details after source pauses → 403 + PROFILE_NOT_LIVE
@@ -674,7 +675,44 @@ describeIf(`lifecycle integration${can_run ? '' : ` — ${skip_reason}`}`, () =>
   });
 
   // ---------------------------------------------------------------------------
-  // Scenario 7: POST /item/lifecycle {action:'pause'} on a live item → paused
+  // Allowed edit: changing a required field to another non-empty value on a
+  // live item succeeds and stays live.
+  // Runs before scenario 7 so the item is guaranteed live (not paused).
+  // ---------------------------------------------------------------------------
+
+  it('allowed edit: change required value on live → 200, stays live', async (ctx) => {
+    if (!live_item_id) return ctx.skip();
+    const requiredKey = (primary.schema.required as string[])[0];
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/v1/admin/participant',
+      headers: adminHeaders(ns),
+      payload: {
+        email: live_user_email,
+        name: 'LC allowed',
+        terms_accepted: true,
+        privacy_accepted: true,
+        channel: 'bulk',
+        network: primary.network,
+        domain: primary.domain,
+        item_type: primary.item_type,
+        item_id: live_item_id,
+        item_state: { [requiredKey]: generateMinimalItemState(primary.schema)[requiredKey] },
+      },
+    });
+    expect(res.statusCode).toBe(200);
+
+    const [row] = await db
+      .select({ lifecycle_status: itemsTable.lifecycle_status })
+      .from(itemsTable)
+      .where(eq(itemsTable.item_id, live_item_id))
+      .limit(1);
+    expect(row.lifecycle_status).toBe('live');
+  });
+
+  // ---------------------------------------------------------------------------
+  // Scenario 7: pause leaves the item paused but does NOT cancel pending
+  // actions; they survive (gated by §10) and resume on unpause.
   //
   // Auth: the lifecycle route gates on isOwner OR isNetworkService.
   // live_item_id.created_by = live_user_id (the participant, NOT svc_user_id).
@@ -682,60 +720,49 @@ describeIf(`lifecycle integration${can_run ? '' : ` — ${skip_reason}`}`, () =>
   // → isNetworkService = true → authorised.
   // ---------------------------------------------------------------------------
 
-  it('scenario 7: POST /item/lifecycle pause → paused; pending action cancelled', async () => {
-    // Ensure live_item_id is live (restore may have happened in scenario 6).
-    const [before] = await db
-      .select({ lifecycle_status: itemsTable.lifecycle_status })
-      .from(itemsTable)
-      .where(eq(itemsTable.item_id, live_item_id))
-      .limit(1);
-
-    if (before?.lifecycle_status !== 'live') {
-      // Make it live first
-      const full = generateMinimalItemState(primary.schema);
-      await app.inject({
-        method: 'POST',
-        url: '/api/v1/admin/participant',
-        headers: adminHeaders(ns),
-        payload: {
-          email: live_user_email,
-          name: 'LC S7 restore',
-          terms_accepted: true,
-          privacy_accepted: true,
-          channel: 'bulk',
-          network: primary.network,
-          domain: primary.domain,
-          item_type: primary.item_type,
-          item_state: full,
-          item_id: live_item_id,
-        },
-      });
-    }
+  it('scenario 7: pause → paused; pending action survives (not cancelled)', async (ctx) => {
+    if (!live_item_id) return ctx.skip();
+    const actionId = randomUUID();
+    const sourceId = randomUUID();
+    await ensureActionPartition(db, primary.network, 'connect');
+    await db.insert(itemActionsTable).values({
+      action_type: 'connect',
+      partition_network: primary.network,
+      action_id: actionId,
+      action_status: 'submitted',
+      update_count: 0,
+      source_item_network: primary.network,
+      source_item_domain: primary.domain,
+      source_item_type: primary.item_type,
+      source_item_id: sourceId,
+      source_item_instance_url: `http://localhost:${listen_port}`,
+      target_item_network: primary.network,
+      target_item_domain: primary.domain,
+      target_item_type: primary.item_type,
+      target_item_id: live_item_id,
+      target_item_instance_url: `http://localhost:${listen_port}`,
+      requirements_snapshot: {},
+    });
+    seeded_action_ids.push(actionId);
 
     const res = await app.inject({
       method: 'POST',
       url: '/api/v1/item/lifecycle',
       headers: adminHeaders(ns),
-      payload: {
-        item_id: live_item_id,
-        action: 'pause',
-      },
+      payload: { item_id: live_item_id, action: 'pause' },
     });
-
     expect(res.statusCode).toBe(200);
-    const body = res.json() as {
-      item_id: string;
-      lifecycle_status: string;
-    };
-    expect(body.item_id).toBe(live_item_id);
-    expect(body.lifecycle_status).toBe('paused');
+    expect(res.json().lifecycle_status).toBe('paused');
 
-    const [row] = await db
-      .select({ lifecycle_status: itemsTable.lifecycle_status })
-      .from(itemsTable)
-      .where(eq(itemsTable.item_id, live_item_id))
+    const [actionRow] = await db
+      .select({ action_status: itemActionsTable.action_status })
+      .from(itemActionsTable)
+      .where(eq(itemActionsTable.action_id, actionId))
       .limit(1);
-    expect(row?.lifecycle_status).toBe('paused');
+    expect(actionRow?.action_status).toBe('submitted'); // NOT cancelled
+
+    // Item is left paused here — scenario 8 is the unpause step and restores
+    // the item to live for scenarios 9+.
   });
 
   // ---------------------------------------------------------------------------

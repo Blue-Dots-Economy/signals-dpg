@@ -9,7 +9,6 @@ import { eq, sql } from 'drizzle-orm';
 import { decryptItemPrivate } from '@/utils/item_decrypt';
 import { getOrFetchSchemaByUrl } from '@/network_schema_cache';
 import { classify_item } from '@/services/items/classifier';
-import { cancel_pending_actions_for_item } from '@/services/items/cancel_pending_actions';
 import { invalidateItemFetchCache } from '@/utils/item_fetch_cache_invalidate';
 
 type ItemLifecycleRequest = FastifyRequest<{
@@ -123,22 +122,11 @@ const item_lifecycle_handler = async (
         })
         .where(eq(items.item_id, item_id));
 
-      const isLeavingLive = current === 'live' && next_status !== 'live';
-      let cancelledPendingActions = 0;
-      if (isLeavingLive) {
-        cancelledPendingActions = await cancel_pending_actions_for_item(
-          tx,
-          item_id,
-          existing.item_network,
-        );
-      }
-
       return {
         item_id,
         item_network: existing.item_network,
         item_domain: existing.item_domain,
         lifecycle_status: next_status,
-        cancelled_pending_actions: cancelledPendingActions,
       };
     });
 
