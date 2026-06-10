@@ -11,6 +11,7 @@ import {
 } from '@dpg/schemas';
 import { classify_item } from './items/classifier.js';
 import { cancel_pending_actions_for_item } from './items/cancel_pending_actions.js';
+import { is_populated } from './metrics/profile_completion.js';
 import { decryptPiiBlob, encryptPiiBlob, getPiiKey } from '@dpg/auth';
 import { items } from '@dpg/database';
 import { db } from '@api/db/postgres/drizzle_config';
@@ -309,6 +310,21 @@ export async function updateItemInternal(
         400,
         'INVALID_ITEM_STATE',
         err instanceof Error ? err.message : 'Invalid item_state'
+      );
+    }
+
+    // Live latch: a profile that has reached `live` must stay complete. Reject
+    // any edit that would leave a required field unpopulated while the item is
+    // live. (Scope: live only — see 2026-06-10-live-latch-design.md §6.)
+    const requiredKeys = Array.isArray((itemSchema as { required?: unknown }).required)
+      ? ((itemSchema as { required?: string[] }).required as string[])
+      : [];
+    const requiredComplete = requiredKeys.every((k) => is_populated(mergedFullState[k]));
+    if (!requiredComplete && existingItem.lifecycle_status === 'live') {
+      throw new ItemServiceError(
+        409,
+        'REQUIRED_FIELD_LOCKED_WHILE_LIVE',
+        'Cannot clear a required field on a live profile; pause it first',
       );
     }
 

@@ -72,6 +72,7 @@ describeIf(`lifecycle integration${can_run ? '' : ` — ${skip_reason}`}`, () =>
   let authSchema: typeof import('../../../../db/postgres/schema/auth.js');
   let itemsTable: typeof import('@dpg/database').items;
   let itemActionsTable: typeof import('@dpg/database').item_actions;
+  let ensureActionPartition: typeof import('@dpg/database').ensureActionPartition;
 
   const listen_port = Number(process.env.API_PORT ?? 2742);
   const ts = Date.now();
@@ -119,6 +120,7 @@ describeIf(`lifecycle integration${can_run ? '' : ` — ${skip_reason}`}`, () =>
     authSchema = auth_mod;
     itemsTable = database_pkg.items;
     itemActionsTable = database_pkg.item_actions;
+    ensureActionPartition = database_pkg.ensureActionPartition;
 
     const resolved = await resolveBindings();
     primary = resolved.primary;
@@ -601,136 +603,74 @@ describeIf(`lifecycle integration${can_run ? '' : ` — ${skip_reason}`}`, () =>
   });
 
   // ---------------------------------------------------------------------------
-  // Scenario 6: NS clears a required field → live → draft; pending action cancelled
+  // Scenario 6: clearing a required field on a LIVE item is rejected (409);
+  // the item stays live and any pending action is left untouched.
   // ---------------------------------------------------------------------------
 
-  it('scenario 6: NS clears required field → live→draft; pending action on item → cancelled', async (ctx) => {
-    const partial = buildPartialItemState(primary.schema);
-    if (partial === null) {
-      ctx.skip();
-      return;
-    }
+  it('scenario 6: clear required on live → 409 REQUIRED_FIELD_LOCKED_WHILE_LIVE; stays live; action untouched', async (ctx) => {
+    if (!live_item_id) return ctx.skip();
 
-    // The live_item_id / live_user_id from scenario 3 is our target.
-    // First, seed a pending action against the live item so we can assert cancellation.
-    const required = primary.schema.required as string[];
-    const lastRequired = required[required.length - 1];
+    const actionId = randomUUID();
+    const sourceId = randomUUID();
 
-    // Insert a dummy pending action directly into the DB (simulates a prior
-    // /network/action/perform call). We don't go through the route because the
-    // source item would need to be live and belong to a different user — too
-    // much to set up for this assertion.
-    const dummy_action_id = randomUUID();
-    const dummy_source_id = randomUUID();
+    // Ensure the action partition exists before inserting directly.
+    await ensureActionPartition(db, primary.network, 'connect');
 
-    try {
-      await db.insert(itemActionsTable).values({
-        action_type: 'connect',
-        partition_network: primary.network,
-        action_id: dummy_action_id,
-        action_status: 'created', // pending
-        update_count: 0,
-        source_item_network: primary.network,
-        source_item_domain: primary.domain,
-        source_item_type: primary.item_type,
-        source_item_id: dummy_source_id,
-        source_item_instance_url: `http://localhost:${listen_port}`,
-        target_item_network: primary.network,
-        target_item_domain: primary.domain,
-        target_item_type: primary.item_type,
-        target_item_id: live_item_id,
-        target_item_instance_url: `http://localhost:${listen_port}`,
-        requirements_snapshot: {},
-      });
-      seeded_action_ids.push(dummy_action_id);
-    } catch {
-      // If the action partition doesn't exist yet, this will fail; skip.
-      ctx.skip();
-      return;
-    }
+    await db.insert(itemActionsTable).values({
+      action_type: 'connect',
+      partition_network: primary.network,
+      action_id: actionId,
+      action_status: 'created',
+      update_count: 0,
+      source_item_network: primary.network,
+      source_item_domain: primary.domain,
+      source_item_type: primary.item_type,
+      source_item_id: sourceId,
+      source_item_instance_url: `http://localhost:${listen_port}`,
+      target_item_network: primary.network,
+      target_item_domain: primary.domain,
+      target_item_type: primary.item_type,
+      target_item_id: live_item_id,
+      target_item_instance_url: `http://localhost:${listen_port}`,
+      requirements_snapshot: {},
+    });
+    seeded_action_ids.push(actionId);
 
-    // NS removes the last required field (clears it from the merged state).
-    // We update the item with partial state that is missing `lastRequired`.
-    const degraded: Record<string, unknown> = {};
-    for (const k of (required as string[]).slice(0, -1)) {
-      const props = (primary.schema.properties as Record<string, Record<string, unknown>>)[k];
-      // Use a safe default — empty string for strings, 0 for numbers.
-      const t = props?.type as string | undefined;
-      if (t === 'string') degraded[k] = '';
-      else if (t === 'integer' || t === 'number') degraded[k] = 0;
-      else if (t === 'boolean') degraded[k] = false;
-      else degraded[k] = null;
-    }
-    // Explicitly set the last required field to null / empty to degrade completion.
-    const props = (primary.schema.properties as Record<string, Record<string, unknown>>)[lastRequired];
-    const t = props?.type as string | undefined;
-    if (t === 'string') degraded[lastRequired] = '';
-    else if (t === 'integer' || t === 'number') degraded[lastRequired] = 0;
-    else degraded[lastRequired] = null;
-
+    const requiredKey = (primary.schema.required as string[])[0];
     const res = await app.inject({
       method: 'POST',
       url: '/api/v1/admin/participant',
       headers: adminHeaders(ns),
       payload: {
         email: live_user_email,
-        name: 'LC S6 NS degrade',
+        name: 'LC S6',
         terms_accepted: true,
         privacy_accepted: true,
         channel: 'bulk',
         network: primary.network,
         domain: primary.domain,
         item_type: primary.item_type,
-        item_state: degraded,
         item_id: live_item_id,
+        item_state: { [requiredKey]: '' },
       },
     });
 
-    // The update path may return 200 or 400 depending on schema strictness.
-    // The critical assertions are the DB state changes.
-    if (res.statusCode !== 200) {
-      // Schema validation rejected the degraded state — skip the remainder.
-      ctx.skip();
-      return;
-    }
+    expect(res.statusCode).toBe(409);
+    expect(res.json().error).toBe('REQUIRED_FIELD_LOCKED_WHILE_LIVE');
 
     const [row] = await db
       .select({ lifecycle_status: itemsTable.lifecycle_status })
       .from(itemsTable)
       .where(eq(itemsTable.item_id, live_item_id))
       .limit(1);
+    expect(row.lifecycle_status).toBe('live');
 
-    expect(row.lifecycle_status).toBe('draft');
-
-    // The pending action must have been cancelled in the same transaction.
     const [actionRow] = await db
       .select({ action_status: itemActionsTable.action_status })
       .from(itemActionsTable)
-      .where(eq(itemActionsTable.action_id, dummy_action_id))
+      .where(eq(itemActionsTable.action_id, actionId))
       .limit(1);
-
-    expect(actionRow?.action_status).toBe('cancelled');
-
-    // Restore live_item_id to live so subsequent scenarios can use it.
-    const full = generateMinimalItemState(primary.schema);
-    const restore = await app.inject({
-      method: 'POST',
-      url: '/api/v1/admin/participant',
-      headers: adminHeaders(ns),
-      payload: {
-        email: live_user_email,
-        name: 'LC S6 restore',
-        terms_accepted: true,
-        privacy_accepted: true,
-        channel: 'bulk',
-        network: primary.network,
-        domain: primary.domain,
-        item_type: primary.item_type,
-        item_state: full,
-        item_id: live_item_id,
-      },
-    });
-    expect(restore.statusCode).toBe(200);
+    expect(actionRow?.action_status).toBe('created');
   });
 
   // ---------------------------------------------------------------------------
