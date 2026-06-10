@@ -1,27 +1,27 @@
-import { parseLocationFields, buildGeoQuery } from '@dpg/schemas';
+import { parseLocationFields, buildLocationQueries } from '@dpg/schemas';
 
 interface ResolveArgs {
-  lat: number | null;
-  lng: number | null;
+  provided: Array<{ lat: number; lng: number; label?: string }> | undefined;
   itemState: Record<string, unknown>;
   itemSchema: Record<string, unknown>;
-  resolve: (query: string) => Promise<{ lat: number; lng: number } | null>;
+  geocode: (query: string) => Promise<{ lat: number; lng: number } | null>;
 }
 
 /**
- * Returns coordinates for an item: the caller-supplied pair when present,
- * otherwise the geocode of the marked composite query. Best-effort — returns
- * `{ lat: null, lng: null }` when there is nothing to geocode or it fails.
+ * Resolves an item's locations: the caller-supplied array when present, else one
+ * geocoded coord per marked query (multiple → per city w/ label; single → one).
+ * Best-effort — queries that fail to geocode are skipped.
  */
-export async function resolveItemCoordinates(
+export async function resolveItemLocations(
   args: ResolveArgs
-): Promise<{ lat: number | null; lng: number | null }> {
-  if (args.lat !== null && args.lng !== null) {
-    return { lat: args.lat, lng: args.lng };
-  }
+): Promise<Array<{ lat: number; lng: number; label?: string }>> {
+  if (args.provided && args.provided.length > 0) return args.provided;
   const fields = parseLocationFields(args.itemSchema);
-  const query = buildGeoQuery(args.itemState, fields);
-  if (!query) return { lat: null, lng: null };
-  const coords = await args.resolve(query);
-  return coords ?? { lat: null, lng: null };
+  const queries = buildLocationQueries(args.itemState, fields);
+  const out: Array<{ lat: number; lng: number; label?: string }> = [];
+  for (const { query, label } of queries) {
+    const coord = await args.geocode(query);
+    if (coord) out.push(label ? { ...coord, label } : coord);
+  }
+  return out;
 }

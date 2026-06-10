@@ -43,11 +43,7 @@ function itemToCardItem(item: Item): { id: string; domain: string; data: Record<
   return {
     id: item.item_id,
     domain: item.item_domain,
-    data: {
-      ...item.item_state,
-      item_latitude: item.item_latitude,
-      item_longitude: item.item_longitude,
-    },
+    data: { ...item.item_state, item_locations: item.item_locations },
   };
 }
 
@@ -962,8 +958,7 @@ export function HomePage() {
                               item_instance_url: null,
                               item_schema_url: null,
                               item_state: item.data,
-                              item_latitude: null,
-                              item_longitude: null,
+                              item_locations: [],
                               created_at: new Date().toISOString(),
                               updated_at: new Date().toISOString(),
                             }}
@@ -1031,18 +1026,19 @@ export function HomePage() {
                 schema={activeSchema!}
                 resolveMarkerLabel={resolveMarkerLabel}
                 items={Object.values(filteredDomainItems).flat()}
-                focusPoint={
-                  myItem && myItem.item_latitude != null && myItem.item_longitude != null
-                    ? { lat: myItem.item_latitude, lng: myItem.item_longitude }
-                    : null
-                }
+                focusPoint={(() => {
+                  const p = myItem?.item_locations?.[0];
+                  return p ? { lat: p.lat, lng: p.lng } : null;
+                })()}
                 filtersSlot={filtersPanel}
                 renderPopup={(marker) => {
+                  // Marker ids are `${item_id}#${locationIndex}` — strip the suffix to look up the item.
+                  const baseItemId = marker.id.includes('#') ? marker.id.split('#')[0] : marker.id;
                   const fullItem =
                     (marker.domain
                       ? domainItems[marker.domain]
                       : Object.values(domainItems).flat()
-                    )?.find((i) => i.item_id === marker.id) ?? null;
+                    )?.find((i) => i.item_id === baseItemId) ?? null;
                   const domainActions = marker.domain ? getActionsForDomain(marker.domain) : [];
                   const connectAction = domainActions[0];
                   const markerDomain = marker.domain
@@ -1059,7 +1055,7 @@ export function HomePage() {
                       actions={myItem && connectAction ? [connectAction] : []}
                       onConnect={
                         myItem && connectAction
-                          ? () => triggerAction(connectAction.action_type, connectAction, marker.id)
+                          ? () => triggerAction(connectAction.action_type, connectAction, baseItemId)
                           : undefined
                       }
                       localItem={myItem}

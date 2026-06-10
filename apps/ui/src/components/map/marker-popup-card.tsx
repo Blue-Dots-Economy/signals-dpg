@@ -62,7 +62,7 @@ export function MarkerPopupCard({
 
   const { score, isLoading, calculate, recalculate } = useMatchScore({
     localItem: localItem ?? null,
-    networkItem: networkItem ?? ({ item_id: marker.id, item_state: marker.data } as Item),
+    networkItem: networkItem ?? ({ item_id: marker.id.includes('#') ? marker.id.split('#')[0] : marker.id, item_state: marker.data } as Item),
   });
 
   const actionButtons =

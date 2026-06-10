@@ -1,64 +1,70 @@
 /**
- * Marker-driven location-field selection for geocoding.
- *
- * A profile JSON-Schema property may carry a `location` keyword:
- *   - `"location": "primary"` — exactly one field; the autocomplete/geocode
- *     anchor that yields lat/lng and leads the composite query.
- *   - `"location": true`      — secondary address fields appended to the
- *     composite geocode query (fallback + backend paths).
- *
- * Shared by the UI (form + map) and the API (server-side geocode) so the
- * selection semantics never drift between client and server.
+ * Marker-driven location-field selection. Exactly ONE field per domain is the
+ * geo field, marked:
+ *   - "location": "single"   — a string field → one coordinate.
+ *   - "location": "multiple" — an array-of-strings field → one coordinate per entry.
+ * No granularity/level axis (autocomplete is unrestricted) and no secondary fields.
+ * Shared by the UI (form + map) and the API (server-side geocode).
  */
+export type LocationCardinality = 'single' | 'multiple';
+
 export interface LocationFields {
-  primary: string | null;
-  secondary: string[];
+  field: string | null;
+  cardinality: LocationCardinality | null;
 }
 
-type JsonSchemaProperty = { location?: unknown };
+/** One coordinate. `label` is the place/city name when known. */
+export interface LocationPoint {
+  lat: number;
+  lng: number;
+  label?: string;
+}
+
+type JsonSchemaProperty = { location?: unknown; private?: unknown };
 
 export function parseLocationFields(
   itemSchema: Record<string, unknown> | null | undefined
 ): LocationFields {
-  const result: LocationFields = { primary: null, secondary: [] };
   const properties = (itemSchema?.properties ?? {}) as Record<string, JsonSchemaProperty>;
-
   for (const [name, prop] of Object.entries(properties)) {
-    const marker = prop?.location;
-    if (marker === 'primary') {
-      // First primary wins; ignore accidental duplicates.
-      if (result.primary === null) result.primary = name;
-    } else if (marker === true) {
-      result.secondary.push(name);
-    }
+    if (prop?.location === 'single') return { field: name, cardinality: 'single' };
+    if (prop?.location === 'multiple') return { field: name, cardinality: 'multiple' };
   }
-
-  return result;
+  return { field: null, cardinality: null };
 }
 
 /**
- * Builds a single geocode query string from the marked fields' values in
- * `data`. Concatenates the values of the marked fields (primary first, then
- * secondaries in order), skipping empty/missing ones. A partial query — e.g.
- * secondaries only when the primary value is absent — is intentional and still
- * returned. Returns null only when no primary field is declared, or no marked
- * field has a usable value.
+ * Returns true when the schema's location field carries `"private": true`.
+ * Used by the page-level geocode fallback to suppress exact-coordinate storage
+ * for private fields (PII requirement: private → coarse coordinate only).
  */
-export function buildGeoQuery(
+export function isLocationFieldPrivate(
+  itemSchema: Record<string, unknown> | null | undefined
+): boolean {
+  const fields = parseLocationFields(itemSchema);
+  if (!fields.field) return false;
+  const properties = (itemSchema?.properties ?? {}) as Record<string, JsonSchemaProperty>;
+  return properties[fields.field]?.private === true;
+}
+
+/**
+ * The geocode queries that produce the item's locations:
+ *   - multiple → one {query,label} per non-empty array entry (label = the value).
+ *   - single   → one {query} from the field's string value.
+ *   - else     → [].
+ * Pure; the caller geocodes each query.
+ */
+export function buildLocationQueries(
   data: Record<string, unknown>,
   fields: LocationFields
-): string | null {
-  if (!fields.primary) return null;
-
-  const ordered = [fields.primary, ...fields.secondary];
-  const parts: string[] = [];
-  for (const name of ordered) {
-    const raw = data[name];
-    if (typeof raw === 'string') {
-      const trimmed = raw.trim();
-      if (trimmed.length > 0) parts.push(trimmed);
-    }
+): Array<{ query: string; label?: string }> {
+  if (!fields.field) return [];
+  const raw = data[fields.field];
+  if (fields.cardinality === 'multiple') {
+    if (!Array.isArray(raw)) return [];
+    return raw
+      .filter((v): v is string => typeof v === 'string' && v.trim().length > 0)
+      .map((v) => ({ query: v.trim(), label: v.trim() }));
   }
-
-  return parts.length > 0 ? parts.join(', ') : null;
+  return typeof raw === 'string' && raw.trim() ? [{ query: raw.trim() }] : [];
 }

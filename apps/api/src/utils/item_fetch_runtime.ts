@@ -39,8 +39,7 @@ const itemResponseColumns = {
   item_schema_url: items.item_schema_url,
   item_state: items.item_state,
   item_private_state: items.item_private_state,
-  item_latitude: items.item_latitude,
-  item_longitude: items.item_longitude,
+  item_locations: items.item_locations,
   created_by: items.created_by,
   created_at: items.created_at,
   updated_at: items.updated_at,
@@ -90,19 +89,13 @@ function buildWhereClause(filters: Omit<ItemFetchFilters, 'limit' | 'offset'>) {
   ) {
     conditions.push(
       sql`
-        earth_box(
-          ll_to_earth(${filters.item_latitude}, ${filters.item_longitude}),
-          ${filters.radius_meters}
-        ) @> ll_to_earth(${items.item_latitude}, ${items.item_longitude})
-      `
-    );
-
-    conditions.push(
-      sql`
-        earth_distance(
-          ll_to_earth(${filters.item_latitude}, ${filters.item_longitude}),
-          ll_to_earth(${items.item_latitude}, ${items.item_longitude})
-        ) <= ${filters.radius_meters}
+        EXISTS (
+          SELECT 1 FROM jsonb_array_elements(${items.item_locations}) loc
+          WHERE earth_box(ll_to_earth(${filters.item_latitude}, ${filters.item_longitude}), ${filters.radius_meters})
+                  @> ll_to_earth((loc->>'lat')::float8, (loc->>'lng')::float8)
+            AND earth_distance(ll_to_earth(${filters.item_latitude}, ${filters.item_longitude}),
+                  ll_to_earth((loc->>'lat')::float8, (loc->>'lng')::float8)) <= ${filters.radius_meters}
+        )
       `
     );
   }

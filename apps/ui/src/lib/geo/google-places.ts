@@ -1,4 +1,4 @@
-import type { GeoProvider, GeoSuggestion } from './types';
+import type { GeoComponents, GeoProvider, GeoSuggestion } from './types';
 
 type GoogleNS = {
   maps: {
@@ -61,6 +61,7 @@ export function createGooglePlacesProvider(apiKey: string): GeoProvider {
                   toPlace: () => {
                     fetchFields: (req: { fields: string[] }) => Promise<void>;
                     location?: { lat: () => number; lng: () => number };
+                    addressComponents?: Array<{ types: string[]; longText: string; shortText: string }>;
                   };
                 };
               }>;
@@ -75,18 +76,33 @@ export function createGooglePlacesProvider(apiKey: string): GeoProvider {
         });
 
         const top = suggestions.slice(0, 5);
-        const resolved = await Promise.all(
-          top.map(async (s) => {
+        const resolved: (GeoSuggestion | null)[] = await Promise.all(
+          top.map(async (s): Promise<GeoSuggestion | null> => {
             if (signal?.aborted) return null;
             const place = s.placePrediction.toPlace();
-            await place.fetchFields({ fields: ['location'] });
+            await place.fetchFields({ fields: ['location', 'addressComponents'] });
             const loc = place.location;
             if (!loc) return null;
+            const addrComponents = place.addressComponents ?? [];
+            const findComponent = (types: string[]): string | undefined =>
+              addrComponents.find((c) => types.some((t) => c.types.includes(t)))?.longText;
+            const components: GeoComponents = {
+              locality:
+                findComponent(['sublocality', 'sublocality_level_1', 'neighborhood']) ??
+                findComponent(['locality']),
+              city:
+                findComponent(['locality']) ??
+                findComponent(['administrative_area_level_2']),
+              state: findComponent(['administrative_area_level_1']),
+              postcode: findComponent(['postal_code']),
+              country: findComponent(['country']),
+            };
             return {
               label: s.placePrediction.text.toString(),
               lat: loc.lat(),
               lng: loc.lng(),
-            } satisfies GeoSuggestion;
+              components,
+            };
           })
         );
         return resolved.filter((x): x is GeoSuggestion => x !== null);

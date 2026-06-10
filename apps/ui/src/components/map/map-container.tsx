@@ -3,8 +3,7 @@ import { useTranslation } from 'react-i18next';
 import type { RJSFSchema } from '@rjsf/utils';
 import type { MapMarker } from '@/engine/types';
 import { getActiveMapProvider } from '@/engine/map/map-registry';
-import { normalizeFieldName } from '@/lib/item-utils';
-import { parseLocationFields, buildGeoQuery } from '@dpg/schemas/location_fields';
+import { parseLocationFields, buildLocationQueries } from '@dpg/schemas/location_fields';
 import { getGeoProvider } from '@/lib/geo/provider';
 import { Button } from '@/components/ui/button';
 import { Maximize2, Minimize2 } from 'lucide-react';
@@ -114,55 +113,70 @@ export function MapView({
 
       const resolved = await Promise.all(
         items.map(async (item) => {
-          let lat: number | null = null;
-          let lng: number | null = null;
-          let precision: MapMarker['precision'] = 'exact';
-          let geocodedFrom: string | undefined;
+          // Primary: use stored item_locations array (one marker per entry).
+          const locs = Array.isArray(
+            (item.data as Record<string, unknown>).item_locations
+          )
+            ? (
+                item.data as {
+                  item_locations?: Array<{ lat: number; lng: number; label?: string }>;
+                }
+              ).item_locations ?? []
+            : [];
 
-          // 1. Try stored coordinates first (exact precision)
-          lat = resolveCoordinate(item.data, 'item_latitude', 'lat', 'latitude');
-          lng = resolveCoordinate(item.data, 'item_longitude', 'lng', 'lon', 'longitude');
-
-          // 2. Fallback: geocode using the marker-based composite query for this item's schema.
-          if (lat === null || lng === null) {
+          // Fallback: if the item has no stored locations, geocode the field query(ies).
+          let points: Array<{ lat: number; lng: number; label?: string }> = locs;
+          if (points.length === 0) {
             const fields = parseLocationFields(schema as Record<string, unknown>);
-            const query = buildGeoQuery(item.data, fields);
-            if (query) {
+            const queries = buildLocationQueries(item.data, fields);
+            const geocoded: Array<{ lat: number; lng: number; label?: string }> = [];
+            for (const { query, label } of queries) {
               const [best] = await getGeoProvider().suggest(query);
               if (best) {
-                lat = best.lat;
-                lng = best.lng;
-                precision = 'geocoded_full_address';
-                geocodedFrom = fields.primary ?? 'location';
+                geocoded.push(
+                  label
+                    ? { lat: best.lat, lng: best.lng, label }
+                    : { lat: best.lat, lng: best.lng }
+                );
               }
             }
+            points = geocoded;
           }
 
-          // Skip items without any location data
-          if (lat === null || lng === null) return null;
+          // Skip items with no resolvable location.
+          if (points.length === 0) return [];
 
           // Prefer the per-domain card.title_field (works across domains in the
           // "All" view); fall back to the single-schema heuristic, then 'Item'.
           const resolvedLabel = resolveMarkerLabel?.(item)?.trim();
-          const label =
+          const baseLabel =
             resolvedLabel ||
             (titleField ? String(item.data[titleField] ?? 'Item') : 'Item');
 
-          return {
-            id: item.id,
-            lat,
-            lng,
-            label,
-            data: item.data,
-            precision,
-            geocodedFrom,
-            domain: item.domain,
-          } satisfies MapMarker;
+          // Determine precision: stored locations are exact; geocoded are approximate.
+          const isGeocoded = locs.length === 0 && points.length > 0;
+          const precision: MapMarker['precision'] = isGeocoded
+            ? 'geocoded_full_address'
+            : 'exact';
+
+          return points.map(
+            (p, i) =>
+              ({
+                id: `${item.id}#${i}`,
+                lat: p.lat,
+                lng: p.lng,
+                label: p.label ? `${baseLabel} — ${p.label}` : baseLabel,
+                data: item.data,
+                precision,
+                geocodedFrom: isGeocoded ? (p.label ?? 'location') : undefined,
+                domain: item.domain,
+              }) satisfies MapMarker
+          );
         })
       );
 
       if (!cancelled) {
-        const valid = resolved.filter((m): m is NonNullable<typeof m> & MapMarker => m !== null);
+        const valid: MapMarker[] = resolved.flat();
         setMarkers(spreadCoLocatedMarkers(valid));
         setLoading(false);
       }
@@ -292,31 +306,6 @@ function spreadCoLocatedMarkers(markers: MapMarker[]): MapMarker[] {
   return result;
 }
 
-function resolveCoordinate(
-  data: Record<string, unknown>,
-  ...keys: string[]
-): number | null {
-  const normalizedKeys = keys.map(normalizeFieldName);
-  for (const key of keys) {
-    const val = data[key];
-    if (typeof val === 'number') return val;
-    if (typeof val === 'string') {
-      const num = parseFloat(val);
-      if (!isNaN(num)) return num;
-    }
-  }
-
-  for (const [key, val] of Object.entries(data)) {
-    if (!normalizedKeys.includes(normalizeFieldName(key))) continue;
-    if (typeof val === 'number') return val;
-    if (typeof val === 'string') {
-      const num = parseFloat(val);
-      if (!isNaN(num)) return num;
-    }
-  }
-
-  return null;
-}
 
 function findTitleField(schema: RJSFSchema): string | null {
   if (!schema.properties) return null;

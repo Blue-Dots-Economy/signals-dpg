@@ -1,4 +1,4 @@
-import type { GeoProvider, GeoSuggestion } from './types';
+import type { GeoComponents, GeoProvider, GeoSuggestion } from './types';
 
 const DEFAULT_PHOTON_URL = 'https://photon.komoot.io';
 
@@ -26,7 +26,14 @@ export function parsePhotonFeatures(json: unknown): GeoSuggestion[] {
     const label = [p.name, p.city, p.state, p.postcode, p.country]
       .filter((s): s is string => Boolean(s && s.trim()))
       .join(', ');
-    out.push({ label: label || `${lat}, ${lng}`, lat, lng });
+    const components: GeoComponents = {
+      locality: p.name,
+      city: p.city,
+      state: p.state,
+      postcode: p.postcode,
+      country: p.country,
+    };
+    out.push({ label: label || `${lat}, ${lng}`, lat, lng, components });
   }
   return out;
 }

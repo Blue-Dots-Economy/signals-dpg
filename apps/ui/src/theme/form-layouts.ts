@@ -84,15 +84,11 @@ export const formLayouts: Record<string, FormLayout> = {
       },
       {
         title: 'Organisation',
-        fields: ['provider_category', 'organisation_name'],
+        fields: ['provider_category', 'organisation_name', 'official_address'],
       },
       {
         title: 'Services & Coverage',
         fields: ['disabilities_served', 'services_offered', 'service_cities'],
-      },
-      {
-        title: 'Location',
-        fields: ['official_address'],
       },
       {
         title: 'More Details',

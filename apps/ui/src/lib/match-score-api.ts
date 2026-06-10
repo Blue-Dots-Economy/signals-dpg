@@ -46,6 +46,7 @@ export interface MatchScoreError {
 }
 
 export function itemToSnapshot(item: Item): ItemSnapshot {
+  const primary = item.item_locations?.[0] ?? null;
   return {
     item_id: item.item_id,
     item_network: item.item_network,
@@ -54,8 +55,8 @@ export function itemToSnapshot(item: Item): ItemSnapshot {
     item_instance_url: item.item_instance_url,
     item_schema_url: item.item_schema_url,
     item_state: item.item_state,
-    item_latitude: item.item_latitude,
-    item_longitude: item.item_longitude,
+    item_latitude: primary ? primary.lat : null,
+    item_longitude: primary ? primary.lng : null,
   };
 }
 

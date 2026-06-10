@@ -139,7 +139,7 @@
               "description": "Full address — house/flat, street, area, city, state, and pincode",
               "minLength": 1,
               "private": true,
-              "location": "primary"
+              "location": "single"
             },
             "documents_available": {
               "type": "array",
@@ -313,17 +313,22 @@
               }
             },
             "service_cities": {
-              "type": "string",
+              "type": "array",
               "title": "Service Cities",
-              "description": "Cities where the service is provided",
-              "minLength": 1
+              "description": "Cities where seekers can access your services",
+              "location": "multiple",
+              "minItems": 1,
+              "maxItems": 5,
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
             },
             "official_address": {
               "type": "string",
-              "title": "Address",
-              "description": "Full official address — building, street, area, city, state, and pincode",
-              "minLength": 1,
-              "location": "primary"
+              "title": "Organisation Address",
+              "description": "Your organisation's office or headquarters address",
+              "minLength": 1
             },
             "service_details": {
               "type": "string",

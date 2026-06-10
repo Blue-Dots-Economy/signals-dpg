@@ -40,7 +40,7 @@
             "location": {
               "type": "string",
               "title": "Location",
-              "location": "primary"
+              "location": "single"
             },
             "phone": {
               "type": "string",

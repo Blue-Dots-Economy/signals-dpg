@@ -56,8 +56,7 @@ export const update_item_handler = async (
   try {
     const { row: updated } = await updateItemInternal(db, itemId, callerId, isAdmin, {
       item_state: body.item_state,
-      item_latitude: body.item_latitude,
-      item_longitude: body.item_longitude,
+      item_locations: body.item_locations,
     });
 
     await invalidateItemFetchCache(updated.item_network, updated.item_domain).catch(

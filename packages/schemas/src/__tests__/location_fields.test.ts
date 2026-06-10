@@ -1,98 +1,35 @@
 import { describe, it, expect } from 'vitest';
-import { parseLocationFields, buildGeoQuery } from '../location_fields';
+import { parseLocationFields, buildLocationQueries } from '../location_fields';
 
-const seekerSchema = {
-  type: 'object',
-  properties: {
-    beneficiary_name: { type: 'string' },
-    address: { type: 'string', location: 'primary' },
-    service_city: { type: 'string', location: true },
-    state: { type: 'string', location: true },
-    pincode: { type: 'string', location: true },
-  },
-};
-
-const touristSchema = {
-  type: 'object',
-  properties: {
-    name: { type: 'string' },
-    location: { type: 'string', location: 'primary' },
-  },
-};
-
-const noMarkerSchema = {
-  type: 'object',
-  properties: { name: { type: 'string' }, city: { type: 'string' } },
-};
+const singleSchema = { properties: { address: { type: 'string', location: 'single' } } };
+const multipleSchema = { properties: { service_cities: { type: 'array', location: 'multiple' } } };
 
 describe('parseLocationFields', () => {
-  it('returns the primary field and secondary fields in declaration order', () => {
-    expect(parseLocationFields(seekerSchema)).toEqual({
-      primary: 'address',
-      secondary: ['service_city', 'state', 'pincode'],
-    });
+  it('captures a single field', () => {
+    expect(parseLocationFields(singleSchema)).toEqual({ field: 'address', cardinality: 'single' });
   });
-
-  it('handles a single primary field with no secondaries', () => {
-    expect(parseLocationFields(touristSchema)).toEqual({
-      primary: 'location',
-      secondary: [],
-    });
+  it('captures a multiple field', () => {
+    expect(parseLocationFields(multipleSchema)).toEqual({ field: 'service_cities', cardinality: 'multiple' });
   });
-
-  it('returns null primary when no field is marked', () => {
-    expect(parseLocationFields(noMarkerSchema)).toEqual({
-      primary: null,
-      secondary: [],
-    });
+  it('null when no marker', () => {
+    expect(parseLocationFields({ properties: { x: { type: 'string' } } })).toEqual({ field: null, cardinality: null });
+  });
+  it('null for missing/empty schema', () => {
+    expect(parseLocationFields(undefined)).toEqual({ field: null, cardinality: null });
   });
 });
 
-describe('buildGeoQuery', () => {
-  it('joins primary then secondary values present in the data', () => {
-    const data = {
-      address: '12 MG Road',
-      service_city: 'Bengaluru',
-      state: 'Karnataka',
-      pincode: '560001',
-    };
-    expect(buildGeoQuery(data, parseLocationFields(seekerSchema))).toBe(
-      '12 MG Road, Bengaluru, Karnataka, 560001'
-    );
+describe('buildLocationQueries', () => {
+  it('multiple → one query+label per non-empty array entry', () => {
+    expect(buildLocationQueries({ service_cities: ['Goa', '', 'Hubli'] }, parseLocationFields(multipleSchema)))
+      .toEqual([{ query: 'Goa', label: 'Goa' }, { query: 'Hubli', label: 'Hubli' }]);
   });
-
-  it('skips empty/missing values', () => {
-    const data = { address: 'Udupi', service_city: '', pincode: '576101' };
-    expect(buildGeoQuery(data, parseLocationFields(seekerSchema))).toBe(
-      'Udupi, 576101'
-    );
+  it('single → one query, no label', () => {
+    expect(buildLocationQueries({ address: 'MG Rd, Bengaluru' }, parseLocationFields(singleSchema)))
+      .toEqual([{ query: 'MG Rd, Bengaluru' }]);
   });
-
-  it('returns null when no marked values are present', () => {
-    expect(buildGeoQuery({}, parseLocationFields(seekerSchema))).toBeNull();
-  });
-
-  it('returns null when there is no primary field', () => {
-    expect(buildGeoQuery({ city: 'X' }, parseLocationFields(noMarkerSchema))).toBeNull();
-  });
-
-  it('returns secondary-only join when the primary value is missing', () => {
-    const data = { service_city: 'Bengaluru', state: 'Karnataka', pincode: '560001' };
-    expect(buildGeoQuery(data, parseLocationFields(seekerSchema))).toBe(
-      'Bengaluru, Karnataka, 560001'
-    );
-  });
-});
-
-describe('parseLocationFields — duplicate primary', () => {
-  it('keeps the first primary when multiple are marked', () => {
-    const schema = {
-      type: 'object',
-      properties: {
-        address: { type: 'string', location: 'primary' },
-        alt_address: { type: 'string', location: 'primary' },
-      },
-    };
-    expect(parseLocationFields(schema)).toEqual({ primary: 'address', secondary: [] });
+  it('returns [] when nothing usable', () => {
+    expect(buildLocationQueries({}, parseLocationFields(singleSchema))).toEqual([]);
+    expect(buildLocationQueries({ service_cities: [] }, parseLocationFields(multipleSchema))).toEqual([]);
   });
 });

@@ -1,5 +1,4 @@
 import {
-  doublePrecision,
   integer,
   index,
   jsonb,
@@ -30,8 +29,10 @@ export const action_events = pgTable(
     source_item_id: uuid('source_item_id').notNull(),
     source_item_instance_url: text('source_item_instance_url').notNull(),
     source_item_owner: text('source_item_owner'),
-    source_item_latitude: doublePrecision('source_item_latitude'),
-    source_item_longitude: doublePrecision('source_item_longitude'),
+    source_item_locations: jsonb('source_item_locations')
+      .$type<Array<{ lat: number; lng: number; label?: string }>>()
+      .notNull()
+      .default(sql`'[]'::jsonb`),
 
     target_item_network: text('target_item_network').notNull(),
     target_item_domain: text('target_item_domain').notNull(),
@@ -39,8 +40,10 @@ export const action_events = pgTable(
     target_item_id: uuid('target_item_id').notNull(),
     target_item_instance_url: text('target_item_instance_url').notNull(),
     target_item_owner: text('target_item_owner'),
-    target_item_latitude: doublePrecision('target_item_latitude'),
-    target_item_longitude: doublePrecision('target_item_longitude'),
+    target_item_locations: jsonb('target_item_locations')
+      .$type<Array<{ lat: number; lng: number; label?: string }>>()
+      .notNull()
+      .default(sql`'[]'::jsonb`),
 
     event_payload: jsonb('event_payload')
       .$type<Record<string, unknown>>()

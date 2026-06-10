@@ -1,5 +1,10 @@
 import { type FastifyPluginAsyncZod } from 'fastify-type-provider-zod';
-import z, { CreateItemBodySchema, getDomainItemSchema } from '@dpg/schemas';
+import z, {
+  CreateItemBodySchema,
+  getDomainItemSchema,
+  isLocationFieldPrivate,
+  parseLocationFields,
+} from '@dpg/schemas';
 import { FastifyReply, FastifyRequest } from 'fastify';
 import { db } from '@api/db/postgres/drizzle_config';
 import { DrizzleQueryError, and, eq } from 'drizzle-orm';
@@ -12,8 +17,8 @@ import {
 import { invalidateItemFetchCache } from '@/utils/item_fetch_cache_invalidate';
 import { createItemInternal, ItemServiceError } from '@/services/item_service';
 import { getNetworkConfigById } from '@/network_configs';
-import { resolveCoordinates } from '@/services/geocoding/geo_resolver';
-import { resolveItemCoordinates } from './geotag_item';
+import { resolveCoordinates, resolveCityCenter } from '@/services/geocoding/geo_resolver';
+import { resolveItemLocations } from './geotag_item';
 import { resolveDomainLock } from './resolve_domain_lock';
 
 type CreateItemRequest = FastifyRequest<{
@@ -142,11 +147,11 @@ export const create_item_handler = async (
     });
   }
 
-  let lat = body.item_latitude ?? null;
-  let lng = body.item_longitude ?? null;
-  // Geocode unless the caller supplied a complete pair. A half-pair (only one
-  // of lat/lng) is treated as missing and re-resolved, never persisted as-is.
-  if (lat === null || lng === null) {
+  // Backend geocoding happens ONLY here, and ONLY when the client supplied no
+  // coordinate. When item_locations is already present (the UI resolves it
+  // client-side), we never geocode on the server.
+  let item_locations = body.item_locations ?? [];
+  if (item_locations.length === 0) {
     try {
       const networkConfig = await getNetworkConfigById(body.item_network);
       const itemSchema = getDomainItemSchema(
@@ -155,15 +160,24 @@ export const create_item_handler = async (
         body.item_type
       ) as Record<string, unknown> | null;
       if (itemSchema) {
-        const coords = await resolveItemCoordinates({
-          lat,
-          lng,
-          itemState: body.item_state ?? {},
-          itemSchema,
-          resolve: resolveCoordinates,
-        });
-        lat = coords.lat;
-        lng = coords.lng;
+        if (isLocationFieldPrivate(itemSchema)) {
+          // Private (PII) field: resolve only to the city centre — never the
+          // exact address — from the marked address field.
+          const { field } = parseLocationFields(itemSchema);
+          const address = field ? (body.item_state ?? {})[field] : undefined;
+          if (typeof address === 'string' && address.trim()) {
+            const center = await resolveCityCenter(address);
+            if (center) item_locations = [center];
+          }
+        } else {
+          // Public field(s): geocode each marked query to its exact point.
+          item_locations = await resolveItemLocations({
+            provided: undefined,
+            itemState: body.item_state ?? {},
+            itemSchema,
+            geocode: resolveCoordinates,
+          });
+        }
       }
     } catch (err) {
       request.log.warn(
@@ -179,8 +193,7 @@ export const create_item_handler = async (
       item_domain: body.item_domain,
       item_type: body.item_type,
       item_state: body.item_state ?? {},
-      item_latitude: lat,
-      item_longitude: lng,
+      item_locations,
       created_by: userId,
     });
 
