@@ -300,7 +300,14 @@ export function HomePage() {
 
   // Fetch all user profiles across all domains to discover their domain
   React.useEffect(() => {
-    if (!network || !user) return;
+    if (!network) return;
+    // Signed out (or no session): drop the previous user's profiles so the
+    // sidebar/active-profile clear immediately instead of lingering until refresh.
+    if (!user) {
+      setMyItems([]);
+      setActiveProfileId(null);
+      return;
+    }
 
     const controller = new AbortController();
 
