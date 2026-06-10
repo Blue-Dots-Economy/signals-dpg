@@ -34,6 +34,7 @@
  *   9. POST /network/action/perform against a non-live target → 409 + PROFILE_NOT_LIVE
  *  10. GET /action/:id/contact-details after source pauses → 403 + PROFILE_NOT_LIVE
  *  11. GET /network/item/fetch lists only live items (draft item excluded)
+ *  12. action gated while target paused RESUMES after unpause (accept succeeds)
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
@@ -46,9 +47,11 @@ import {
 import { and, eq, inArray } from 'drizzle-orm';
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import {
+  consentAck,
   generateMinimalItemState,
   nonPrivateFields,
   resolveBindings,
+  resolveInteractionConsent,
   type ResolvedBinding,
 } from '../../../routes/v1/__tests__/integration_helpers';
 
@@ -112,6 +115,7 @@ describeIf(`lifecycle integration${can_run ? '' : ` — ${skip_reason}`}`, () =>
   const seeded_action_ids: string[] = [];
 
   let primary: ResolvedBinding;
+  let secondary: ResolvedBinding | null = null;
 
   beforeAll(async () => {
     const drizzle_mod = await import('@api/db/postgres/drizzle_config');
@@ -125,6 +129,7 @@ describeIf(`lifecycle integration${can_run ? '' : ` — ${skip_reason}`}`, () =>
 
     const resolved = await resolveBindings();
     primary = resolved.primary;
+    secondary = resolved.secondary;
 
     const { admin_routes } = await import(
       '../../../routes/v1/admin/admin_routes.js'
@@ -637,6 +642,12 @@ describeIf(`lifecycle integration${can_run ? '' : ` — ${skip_reason}`}`, () =>
     });
     seeded_action_ids.push(actionId);
 
+    const [beforeRow] = await db
+      .select({ item_state: itemsTable.item_state })
+      .from(itemsTable)
+      .where(eq(itemsTable.item_id, live_item_id))
+      .limit(1);
+
     const requiredKey = (primary.schema.required as string[])[0];
     const res = await app.inject({
       method: 'POST',
@@ -660,11 +671,15 @@ describeIf(`lifecycle integration${can_run ? '' : ` — ${skip_reason}`}`, () =>
     expect(res.json().error).toBe('REQUIRED_FIELD_LOCKED_WHILE_LIVE');
 
     const [row] = await db
-      .select({ lifecycle_status: itemsTable.lifecycle_status })
+      .select({
+        lifecycle_status: itemsTable.lifecycle_status,
+        item_state: itemsTable.item_state,
+      })
       .from(itemsTable)
       .where(eq(itemsTable.item_id, live_item_id))
       .limit(1);
     expect(row.lifecycle_status).toBe('live');
+    expect(row.item_state).toEqual(beforeRow.item_state);
 
     const [actionRow] = await db
       .select({ action_status: itemActionsTable.action_status })
@@ -1140,5 +1155,198 @@ describeIf(`lifecycle integration${can_run ? '' : ` — ${skip_reason}`}`, () =>
     for (const { item_id } of draft_ids) {
       expect(returned_ids.has(item_id)).toBe(false);
     }
+  });
+
+  // ---------------------------------------------------------------------------
+  // Scenario 12 (spec §7 bullet 3): a pending action gated while the target is
+  // paused RESUMES after unpause — the same accept that failed with
+  // PROFILE_NOT_LIVE succeeds once the item is live again. This is the
+  // recoverable-enforcement promise that replaced destructive cancellation.
+  //
+  // Auth reasoning:
+  //   - /action/update-status requires caller === target_item_owner.
+  //   - We seed the TARGET item with svc_user_email so created_by = svc_user_id
+  //     (the same trick scenario 10 uses for its source item); perform stores
+  //     target_item_owner = created_by, and userHeaders(ns.raw_key)
+  //     authenticates as svc_user_id → owner check passes.
+  //   - The source item belongs to a fresh participant and stays live
+  //     throughout, so the source-side §10 gate never fires.
+  // ---------------------------------------------------------------------------
+
+  it('scenario 12: action gated while target paused resumes after unpause (accept succeeds)', async (ctx) => {
+    // Find a (from → to) pair among the served bindings for which the network
+    // actually configures a 'connect' interaction — e.g. purple_dot declares
+    // seeker→provider but not seeker→seeker, so a blind primary→primary
+    // perform would 400 and silently skip the scenario.
+    const bindings = [primary, ...(secondary ? [secondary] : [])];
+    let from: ResolvedBinding | undefined;
+    let to: ResolvedBinding | undefined;
+    let interaction: Awaited<ReturnType<typeof resolveInteractionConsent>> = null;
+    for (const f of bindings) {
+      for (const t of bindings) {
+        const found = await resolveInteractionConsent({
+          actionType: 'connect',
+          fromNetwork: f.network,
+          fromDomain: f.domain,
+          fromItemType: f.item_type,
+          toNetwork: t.network,
+          toDomain: t.domain,
+          toItemType: t.item_type,
+        });
+        if (found) {
+          from = f;
+          to = t;
+          interaction = found;
+          break;
+        }
+      }
+      if (interaction) break;
+    }
+    if (!from || !to || !interaction) {
+      // No 'connect' interaction configured between served bindings — skip.
+      ctx.skip();
+      return;
+    }
+
+    // Fresh target item owned by svc_user_id (admin/participant without an
+    // item_id creates a new row; earlier svc-owned items are untouched).
+    const targetSeed = await app.inject({
+      method: 'POST',
+      url: '/api/v1/admin/participant',
+      headers: adminHeaders(ns),
+      payload: {
+        email: svc_user_email,
+        name: 'LC S12 target',
+        terms_accepted: true,
+        privacy_accepted: true,
+        channel: 'bulk',
+        network: to.network,
+        domain: to.domain,
+        item_type: to.item_type,
+        item_state: generateMinimalItemState(to.schema),
+      },
+    });
+    expect(targetSeed.statusCode).toBe(200);
+    const targetItems = (targetSeed.json() as { items: Array<{ item_id: string }> }).items;
+    const target_item_id = targetItems[targetItems.length - 1].item_id;
+    // svc_user_id is already in the DB; do not push to onboarded_user_ids.
+
+    // Fresh live source participant.
+    const src_email = `lc_s12_src_${randomUUID().slice(0, 6)}@a.test`;
+    const srcSeed = await app.inject({
+      method: 'POST',
+      url: '/api/v1/admin/participant',
+      headers: adminHeaders(ns),
+      payload: {
+        email: src_email,
+        name: 'LC S12 src',
+        terms_accepted: true,
+        privacy_accepted: true,
+        channel: 'bulk',
+        network: from.network,
+        domain: from.domain,
+        item_type: from.item_type,
+        item_state: generateMinimalItemState(from.schema),
+      },
+    });
+    expect(srcSeed.statusCode).toBe(200);
+    const srcBody = srcSeed.json() as { user_id: string; items: Array<{ item_id: string }> };
+    const src_item_id = srcBody.items[0].item_id;
+    onboarded_user_ids.push(srcBody.user_id);
+
+    // Create the action while both items are live.
+    const performRes = await app.inject({
+      method: 'POST',
+      url: '/api/v1/network/action/perform',
+      headers: { 'content-type': 'application/json' },
+      payload: {
+        action_type: 'connect',
+        source_item: {
+          item_network: from.network,
+          item_domain: from.domain,
+          item_type: from.item_type,
+          item_id: src_item_id,
+          item_instance_url: `http://localhost:${listen_port}`,
+        },
+        target_item: {
+          item_network: to.network,
+          item_domain: to.domain,
+          item_type: to.item_type,
+          item_id: target_item_id,
+          item_instance_url: `http://localhost:${listen_port}`,
+        },
+        source_item_owner: srcBody.user_id,
+        requirements_snapshot: {},
+      },
+    });
+    expect(performRes.statusCode).toBe(201);
+    const { action_id } = performRes.json() as { action_id: string };
+    seeded_action_ids.push(action_id);
+
+    // Pause the target → accept is gated (recoverable), action row untouched.
+    const pauseRes = await app.inject({
+      method: 'POST',
+      url: '/api/v1/item/lifecycle',
+      headers: adminHeaders(ns),
+      payload: { item_id: target_item_id, action: 'pause' },
+    });
+    expect(pauseRes.statusCode).toBe(200);
+
+    const gatedRes = await app.inject({
+      method: 'POST',
+      url: '/api/v1/action/update-status',
+      headers: userHeaders(ns.raw_key),
+      payload: [{ action_id, action_status: 'accepted' }],
+    });
+    expect(gatedRes.statusCode).toBe(422);
+    const gated = (gatedRes.json() as { results: Array<Record<string, unknown>> }).results[0];
+    expect(gated).toMatchObject({ status: 'error', error: 'PROFILE_NOT_LIVE' });
+
+    const [gatedRow] = await db
+      .select({ action_status: itemActionsTable.action_status })
+      .from(itemActionsTable)
+      .where(eq(itemActionsTable.action_id, action_id))
+      .limit(1);
+    expect(gatedRow?.action_status).toBe('created'); // survived the gate, not cancelled
+
+    // Unpause → live again.
+    const unpauseRes = await app.inject({
+      method: 'POST',
+      url: '/api/v1/item/lifecycle',
+      headers: adminHeaders(ns),
+      payload: { item_id: target_item_id, action: 'unpause' },
+    });
+    expect(unpauseRes.statusCode).toBe(200);
+    expect(unpauseRes.json().lifecycle_status).toBe('live');
+
+    // The SAME accept now succeeds. Include receiver consent when the
+    // interaction reveals PII on 'accepted' and declares a consent text.
+    const receiverConsent =
+      interaction.reveals_pii_on_status.includes('accepted')
+        ? consentAck(interaction.consent_text_receiver)
+        : undefined;
+    const acceptRes = await app.inject({
+      method: 'POST',
+      url: '/api/v1/action/update-status',
+      headers: userHeaders(ns.raw_key),
+      payload: [
+        {
+          action_id,
+          action_status: 'accepted',
+          ...(receiverConsent ? { consent: receiverConsent } : {}),
+        },
+      ],
+    });
+    const acceptResult = (acceptRes.json() as { results: Array<Record<string, unknown>> }).results[0];
+
+    expect(acceptRes.statusCode).toBe(200);
+    expect(acceptResult.action_status).toBe('accepted');
+
+    const [resumedRow] = await db
+      .select({ action_status: itemActionsTable.action_status })
+      .from(itemActionsTable)
+      .where(eq(itemActionsTable.action_id, action_id))
+      .limit(1);
+    expect(resumedRow?.action_status).toBe('accepted');
   });
 });

@@ -353,13 +353,14 @@ export async function updateItemInternal(
       // Layer the caller's partial update on top.
       const mergedFullState: Record<string, unknown> = { ...priorFullState, ...body.item_state };
 
+      const requiredKeys = Array.isArray((itemSchema as { required?: unknown }).required)
+        ? ((itemSchema as { required?: string[] }).required as string[])
+        : [];
+
       try {
-        const required = Array.isArray((itemSchema as { required?: unknown }).required)
-          ? ((itemSchema as { required?: string[] }).required as string[])
-          : [];
         validateAgainstJsonSchema(itemSchema, mergedFullState, 'item_state', {
           allowAdditionalProperties: apiConfig.allow_extra_schema_data,
-          ignoredKeys: required,
+          ignoredKeys: requiredKeys,
         });
       } catch (err) {
         throw new ItemServiceError(
@@ -372,15 +373,12 @@ export async function updateItemInternal(
       // Live latch: a profile that has reached `live` must stay complete. Reject
       // any edit that would leave a required field unpopulated while the item is
       // live. (Scope: live only — see 2026-06-10-live-latch-design.md §6.)
-      const requiredKeys = Array.isArray((itemSchema as { required?: unknown }).required)
-        ? ((itemSchema as { required?: string[] }).required as string[])
-        : [];
-      const requiredComplete = requiredKeys.every((k) => is_populated(mergedFullState[k]));
-      if (!requiredComplete && existingItem.lifecycle_status === 'live') {
+      const unpopulatedRequired = requiredKeys.filter((k) => !is_populated(mergedFullState[k]));
+      if (unpopulatedRequired.length > 0 && existingItem.lifecycle_status === 'live') {
         throw new ItemServiceError(
           409,
           'REQUIRED_FIELD_LOCKED_WHILE_LIVE',
-          'Cannot clear a required field on a live profile; pause it first',
+          `Required field(s) must stay populated on a live profile: ${unpopulatedRequired.join(', ')}; pause it first`,
         );
       }
 
