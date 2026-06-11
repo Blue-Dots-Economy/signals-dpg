@@ -340,5 +340,17 @@
   "wallet.none_registered": "ಯಾವುದೇ ವ್ಯಾಲೆಟ್ ಪೂರೈಕೆದಾರರು ನೋಂದಾಯಿಸಿಲ್ಲ.",
   "wallet.not_configured": "ಪೂರೈಕೆದಾರ ಕಾನ್ಫಿಗರ್ ಆಗಿಲ್ಲ.",
   "wallet.ready_to_import": "ಆಮದು ಮಾಡಲು ಸಿದ್ಧ.",
-  "wallet.use_provider": "{{provider}} ಬಳಸಿ"
+  "wallet.use_provider": "{{provider}} ಬಳಸಿ",
+  "card.view_more": "ಹೆಚ್ಚಿನ ವಿವರಗಳನ್ನು ನೋಡಿ",
+  "card.hide_details": "ವಿವರಗಳನ್ನು ಮರೆಮಾಡಿ",
+  "tourist.call": "ಕರೆ ಮಾಡಿ",
+  "tourist.website": "ವೆಬ್‌ಸೈಟ್",
+  "tourist.directions": "ದಾರಿ ಪಡೆಯಿರಿ",
+  "tourist.enable_location_title": "ಎಲ್ಲಾ ಸೇವಾದಾರರನ್ನು ತೋರಿಸಲಾಗುತ್ತಿದೆ",
+  "tourist.enable_location_body": "ನಿಮ್ಮ ಹತ್ತಿರದವರನ್ನು ನೋಡಲು ಸ್ಥಳವನ್ನು ಸಕ್ರಿಯಗೊಳಿಸಿ.",
+  "tourist.enable_location_cta": "ಸ್ಥಳ ಸಕ್ರಿಯಗೊಳಿಸಿ",
+  "tourist.empty": "ಯಾವುದೇ ಸೇವಾದಾರರು ಸಿಗಲಿಲ್ಲ.",
+  "tourist.error": "ಸೇವಾದಾರರನ್ನು ಲೋಡ್ ಮಾಡಲಾಗಲಿಲ್ಲ.",
+  "tourist.retry": "ಮರುಪ್ರಯತ್ನಿಸಿ",
+  "tourist.loading": "ಲೋಡ್ ಆಗುತ್ತಿದೆ…"
 }

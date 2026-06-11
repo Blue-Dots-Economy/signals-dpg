@@ -340,5 +340,17 @@
   "wallet.none_registered": "कोई वॉलेट प्रदाता पंजीकृत नहीं है।",
   "wallet.not_configured": "प्रदाता कॉन्फ़िगर नहीं है।",
   "wallet.ready_to_import": "आयात के लिए तैयार।",
-  "wallet.use_provider": "{{provider}} का उपयोग करें"
+  "wallet.use_provider": "{{provider}} का उपयोग करें",
+  "card.view_more": "अधिक विवरण देखें",
+  "card.hide_details": "विवरण छिपाएं",
+  "tourist.call": "कॉल करें",
+  "tourist.website": "वेबसाइट",
+  "tourist.directions": "दिशा-निर्देश पाएं",
+  "tourist.enable_location_title": "सभी सेवा प्रदाता दिखाए जा रहे हैं",
+  "tourist.enable_location_body": "अपने नज़दीकी देखने के लिए स्थान सक्षम करें।",
+  "tourist.enable_location_cta": "स्थान सक्षम करें",
+  "tourist.empty": "कोई सेवा प्रदाता नहीं मिला।",
+  "tourist.error": "सेवा प्रदाता लोड नहीं हो सके।",
+  "tourist.retry": "पुनः प्रयास करें",
+  "tourist.loading": "लोड हो रहा है…"
 }

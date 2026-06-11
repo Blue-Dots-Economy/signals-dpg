@@ -47,6 +47,19 @@ interface MapViewProps {
     domain?: string;
     data: Record<string, unknown>;
   }) => string | undefined;
+  /**
+   * Tailwind height classes for the (non-maximized) map wrapper. Defaults to
+   * `h-[calc(100vh-8rem)] min-h-[400px]` to suit the signals page chrome.
+   * Callers with a different layout (e.g. the tourist app, whose header is
+   * shorter) can pass `h-full` to fill their own flex container instead.
+   */
+  heightClassName?: string;
+  /**
+   * Optional per-marker icon resolver, forwarded to the active map provider.
+   * Defaults (in the provider) to a domain-based icon; the tourist app passes
+   * a category-based resolver. Unset for signals → unchanged behaviour.
+   */
+  resolveMarkerIcon?: (marker: MapMarker) => import('lucide-react').LucideIcon;
 }
 
 const INDIA_CENTER: [number, number] = [20.5937, 78.9629];
@@ -63,6 +76,8 @@ export function MapView({
   filtersSlot,
   renderPopup,
   resolveMarkerLabel,
+  heightClassName = 'h-[calc(100vh-8rem)] min-h-[400px]',
+  resolveMarkerIcon,
 }: MapViewProps) {
   const { t } = useTranslation();
   const MapProviderComponent = getActiveMapProvider();
@@ -197,7 +212,7 @@ export function MapView({
       className={
         isMaximized
           ? 'fixed inset-0 z-[2000] bg-background'
-          : 'relative h-[calc(100vh-8rem)] min-h-[400px]'
+          : `relative ${heightClassName}`
       }
     >
       <MapProviderComponent
@@ -207,6 +222,7 @@ export function MapView({
         onMarkerClick={onMarkerClick}
         initialViewSet={initialViewSet}
         renderPopup={renderPopup}
+        resolveIcon={resolveMarkerIcon}
       />
       {/* Top-right overlay: Filters (only while maximized — the page header
           hosts it normally but is hidden in fullscreen) + maximize toggle.

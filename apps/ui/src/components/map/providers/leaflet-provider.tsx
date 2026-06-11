@@ -77,13 +77,16 @@ function readCssVar(name: string, fallback: string): string {
  * precision combination.  The overhead is minimal — renderToStaticMarkup on
  * a tiny SVG is fast and happens only once per marker on mount.
  */
-function createMarkerDivIcon(marker: MapMarker): L.DivIcon {
+function createMarkerDivIcon(
+  marker: MapMarker,
+  resolveIcon?: MapProviderProps['resolveIcon'],
+): L.DivIcon {
   // Network-derived colours: same --primary / --primary-foreground the rest of
   // the UI is themed with (blue_dot → blue, purple_dot → purple, …).
   // Neutral gray fallback (not a specific network's brand colour) if unresolved.
   const bg = readCssVar('--primary', '#6b7280');
   const iconColor = readCssVar('--primary-foreground', '#ffffff');
-  const IconComponent = getIconForDomain(marker.domain);
+  const IconComponent = resolveIcon ? resolveIcon(marker) : getIconForDomain(marker.domain);
 
   // Render lucide icon to a static SVG string (16 × 16).
   const svgString = renderToStaticMarkup(
@@ -144,7 +147,14 @@ function createClusterDivIcon(cluster: { getChildCount: () => number; getAllChil
 
   // Tally per-domain counts using the WeakMap populated on each marker's ref.
   const childMarkers: L.Marker[] = cluster.getAllChildMarkers?.() ?? [];
-  const domains = childMarkers.map((m) => markerDomainMap.get(m as object) ?? '');
+  // Only tally markers whose domain is actually known. A marker whose ref has
+  // not registered in the WeakMap yet would otherwise fall back to '' and
+  // fabricate a phantom empty-domain group — making a single-domain cluster
+  // (e.g. all `practitioner`) look multi-domain. Unknown ones are still counted
+  // in the total (getChildCount), just not in the per-domain breakdown.
+  const domains = childMarkers
+    .map((m) => markerDomainMap.get(m as object))
+    .filter((d): d is string => Boolean(d));
   const breakdown = tallyDomains(domains);
   const multiDomain = breakdown.length > 1;
 
@@ -243,6 +253,7 @@ export function LeafletMapProvider({
   onMarkerClick,
   initialViewSet = false,
   renderPopup,
+  resolveIcon,
 }: MapProviderProps) {
   return (
     <MapContainer
@@ -275,7 +286,7 @@ export function LeafletMapProvider({
         iconCreateFunction={createClusterDivIcon}
       >
         {markers.map((marker) => {
-          const icon = createMarkerDivIcon(marker);
+          const icon = createMarkerDivIcon(marker, resolveIcon);
           const domain = marker.domain ?? '';
 
           return (

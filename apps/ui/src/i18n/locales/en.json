@@ -332,6 +332,16 @@
   "match.tooltip_need_signin": "Sign in to see match scores",
   "match.tooltip_retry": "Click to retry calculating the match score",
   "nav.profile_fallback": "Profile",
+  "tourist.call": "Call",
+  "tourist.website": "Website",
+  "tourist.directions": "Get Directions",
+  "tourist.enable_location_title": "Showing all practitioners",
+  "tourist.enable_location_body": "Enable location to see what's nearest to you.",
+  "tourist.enable_location_cta": "Enable location",
+  "tourist.empty": "No practitioners found.",
+  "tourist.error": "Couldn't load practitioners.",
+  "tourist.retry": "Retry",
+  "tourist.loading": "Loading…",
   "wallet.back_to_providers": "Back to providers",
   "wallet.configure_at_least_one": "Configure at least one provider before importing credentials.",
   "wallet.dhiway_error_send_code": "Failed to send verification code",
@@ -344,5 +354,7 @@
   "wallet.none_registered": "No wallet providers are registered.",
   "wallet.not_configured": "Provider is not configured.",
   "wallet.ready_to_import": "Ready to import.",
-  "wallet.use_provider": "Use {{provider}}"
+  "wallet.use_provider": "Use {{provider}}",
+  "card.view_more": "View more details",
+  "card.hide_details": "Hide details"
 }
