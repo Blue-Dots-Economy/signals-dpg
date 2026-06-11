@@ -105,7 +105,15 @@ export function TouristApp() {
       />
       {locationDenied && <EnableLocationBanner onEnable={() => void browser.request()} />}
 
-      <main className="min-h-0 flex-1 overflow-auto">
+      {/* Map fills the remaining height (small gutter so it isn't edge-to-edge);
+          the list scrolls. */}
+      <main
+        className={
+          viewMode === 'map'
+            ? 'min-h-0 flex-1 overflow-hidden p-2'
+            : 'min-h-0 flex-1 overflow-auto'
+        }
+      >
         {configQuery.isError || itemsQuery.isError ? (
           <div className="flex flex-col items-center gap-3 p-12 text-center">
             <p className="text-sm text-muted-foreground">{t('tourist.error')}</p>

@@ -44,7 +44,7 @@ export function TouristTopBar({
           className="h-12 w-auto max-w-[200px] shrink-0 object-contain"
         />
       )}
-      <div className="relative flex-1 max-w-md">
+      <div className="relative w-44 sm:w-64">
         <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
         <Input
           type="search"

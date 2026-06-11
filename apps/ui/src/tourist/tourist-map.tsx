@@ -26,6 +26,9 @@ export function TouristMap({ items, schema, cardConfig, focusPoint, center, zoom
       zoom={zoom}
       focusPoint={focusPoint}
       filtersSlot={filtersSlot}
+      // Fill the tourist app's flex container (its header is shorter than the
+      // signals chrome the default height assumes), so no white space below.
+      heightClassName="h-full"
       renderPopup={(marker: MapMarker) => (
         <PractitionerCard data={marker.data} schema={schema} cardConfig={cardConfig} title={marker.label} variant="popup" />
       )}
