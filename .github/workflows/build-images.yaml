@@ -1,7 +1,7 @@
 name: build-images
 on:
   push:
-    branches: [develop, main]
+    branches: [develop, main, fix/recompute-empty-cte-uuid-join]
     tags: ['v*.*.*']
   workflow_dispatch:
 
