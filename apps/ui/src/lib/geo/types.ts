@@ -1,3 +1,8 @@
+export interface LatLng {
+  lat: number;
+  lng: number;
+}
+
 export interface GeoComponents {
   locality?: string;  // area / sublocality / neighbourhood
   city?: string;
@@ -6,11 +11,9 @@ export interface GeoComponents {
   country?: string;
 }
 
-export interface GeoSuggestion {
+export interface GeoSuggestion extends LatLng {
   /** Human-readable label shown in the dropdown. */
   label: string;
-  lat: number;
-  lng: number;
   components?: GeoComponents;
 }
 

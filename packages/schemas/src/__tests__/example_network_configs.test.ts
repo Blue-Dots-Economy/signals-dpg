@@ -56,7 +56,6 @@ describe.each([
 
 describe('example network configs declare a location field', () => {
   const cases = [
-    ['orange_dot', 'tourist', 'examples/schemas/orange_dot/network.json'],
     ['orange_dot', 'practitioner', 'examples/schemas/orange_dot/network.json'],
     ['purple_dot', 'seeker', 'examples/schemas/purple_dot/network.json'],
     ['purple_dot', 'provider', 'examples/schemas/purple_dot/network.json'],

@@ -38,6 +38,9 @@ import { fetchNetworkConfigs, fetchNetworkConfig, fetchNetworkItems } from '@/li
 import { useAuth } from '@/contexts/auth-context';
 import { apiConfig } from '@/lib/api-config';
 import { getEnumFilterFieldsForDomains, itemPassesEnumFilters } from '@/lib/enum-filters';
+import { useUserLocation } from '@/hooks/use-user-location';
+import { nearestDistanceMeters } from '@/lib/geo/distance';
+import type { LatLng } from '@/lib/geo/types';
 
 function itemToCardItem(item: Item): { id: string; domain: string; data: Record<string, unknown> } {
   return {
@@ -45,6 +48,27 @@ function itemToCardItem(item: Item): { id: string; domain: string; data: Record<
     domain: item.item_domain,
     data: { ...item.item_state, item_locations: item.item_locations },
   };
+}
+
+function getItemLocations(
+  data: Record<string, unknown>,
+): Array<{ lat: number; lng: number; label?: string }> | undefined {
+  const raw = data.item_locations;
+  if (!Array.isArray(raw)) return undefined;
+  return raw as Array<{ lat: number; lng: number; label?: string }>;
+}
+
+function sortItemsByNearest<T>(
+  items: T[],
+  userLocation: LatLng | null,
+  getLocations: (item: T) => ReadonlyArray<{ lat: number; lng: number; label?: string }> | undefined,
+): T[] {
+  if (!userLocation) return items;
+  return [...items].sort(
+    (a, b) =>
+      nearestDistanceMeters(userLocation, getLocations(a)) -
+      nearestDistanceMeters(userLocation, getLocations(b)),
+  );
 }
 
 function getItemTypeForDomain(network: DotNetworkSchema, domainId: string): string {
@@ -191,6 +215,10 @@ export function HomePage() {
   const [domainItems, setDomainItems] = React.useState<Record<string, Item[]>>({});
   const [myItems, setMyItems] = React.useState<Item[]>([]);
   const [activeProfileId, setActiveProfileId] = React.useState<string | null>(null);
+  // Whether the active-profile lookup has settled. Until it has, profileLocation
+  // is transiently null even for a user who has a profile location, so the
+  // browser-geo auto-prompt must wait for this to avoid a spurious permission prompt.
+  const [profilesResolved, setProfilesResolved] = React.useState(false);
   const [loading, setLoading] = React.useState(false);
   const browseSelection = useCardSelection();
   const [bulkConnectOpen, setBulkConnectOpen] = React.useState(false);
@@ -240,6 +268,7 @@ export function HomePage() {
     setResolvedNetwork(null);
     setDomainItems({});
     setMyItems([]);
+    setProfilesResolved(false);
 
     fetchNetworkConfig(selectedNetworkId)
       .then((config) => {
@@ -276,7 +305,17 @@ export function HomePage() {
 
   // Fetch all user profiles across all domains to discover their domain
   React.useEffect(() => {
-    if (!network || !user) return;
+    if (!network) return;
+    // Signed out (or no session): drop the previous user's profiles so the
+    // sidebar/active-profile clear immediately instead of lingering until refresh.
+    if (!user) {
+      setMyItems([]);
+      setActiveProfileId(null);
+      // A signed-out visitor has no profile to wait for — resolved immediately,
+      // so the browser-geo auto-prompt may fire.
+      setProfilesResolved(true);
+      return;
+    }
 
     const controller = new AbortController();
 
@@ -297,6 +336,9 @@ export function HomePage() {
       if (controller.signal.aborted) return;
       const allProfiles = results.flat();
       setMyItems(allProfiles);
+      // Profile lookup has settled — profileLocation is now authoritative, so the
+      // browser-geo auto-prompt may fire if there's still no profile location.
+      setProfilesResolved(true);
 
       // Auto-select: use stored ID if valid, otherwise first profile
       const storedId = getStoredActiveProfileId(network.id);
@@ -320,6 +362,28 @@ export function HomePage() {
     if (!myItems.length) return null;
     return myItems.find((i) => i.item_id === activeProfileId) ?? myItems[0] ?? null;
   }, [myItems, activeProfileId]);
+
+  // Derive the active profile's first location (profile-first), or null to trigger browser-geo fallback
+  const profileLocation = React.useMemo(
+    () =>
+      myItem?.item_locations?.[0]
+        ? { lat: myItem.item_locations[0].lat, lng: myItem.item_locations[0].lng }
+        : null,
+    [myItem],
+  );
+
+  // Resolve: profile location → browser geo → null. Gate the browser auto-prompt
+  // on profilesResolved so a logged-in user with a profile location isn't prompted
+  // during the async profile-load window.
+  const { location: userLocation } = useUserLocation(profileLocation, profilesResolved);
+
+  // Sort a card-item array (item_locations stored in .data) nearest-first when userLocation is known.
+  // Items without locations sort last (nearestDistanceMeters returns Infinity for empty/missing arrays).
+  const sortByNearest = React.useCallback(
+    <T extends { data: Record<string, unknown> }>(items: T[]): T[] =>
+      sortItemsByNearest(items, userLocation, (t) => getItemLocations(t.data)),
+    [userLocation],
+  );
 
   // Current domain: from ?as= param (demo override), active profile, or network default
   const currentDomain = searchParams.get('as') ?? myItem?.item_domain ?? network?.domains[0]?.id ?? 'student_profile';
@@ -890,7 +954,7 @@ export function HomePage() {
                 {selectedDomain === null ? (
               // All tab: flat grid across all domains, each card uses its own schema
               (() => {
-                const allFlatItems = visibleDomains.flatMap((domain) => {
+                const allFlatItemsUnsorted = visibleDomains.flatMap((domain) => {
                   const domainSchema = domain.item_schemas
                     ? (Object.values(domain.item_schemas)[0] as import('@rjsf/utils').RJSFSchema)
                     : undefined;
@@ -907,6 +971,7 @@ export function HomePage() {
                     cardConfig: domain.card,
                   }));
                 });
+                const allFlatItems = sortItemsByNearest(allFlatItemsUnsorted, userLocation, (x) => getItemLocations(x.item.data));
 
                 if (loading) {
                   return (
@@ -976,7 +1041,7 @@ export function HomePage() {
                 schemaName={selectedDomain}
                 schemaDescription={currentDomainLabel}
                 cardConfig={network?.domains.find((d) => d.id === selectedDomain)?.card}
-                items={filteredDomainItems[selectedDomain] ?? []}
+                items={sortByNearest(filteredDomainItems[selectedDomain] ?? [])}
                 fullItems={domainItems[selectedDomain] ?? []}
                 actions={actions}
                 onAction={(itemId, _type, actionSchema) => {
@@ -1026,10 +1091,7 @@ export function HomePage() {
                 schema={activeSchema!}
                 resolveMarkerLabel={resolveMarkerLabel}
                 items={Object.values(filteredDomainItems).flat()}
-                focusPoint={(() => {
-                  const p = myItem?.item_locations?.[0];
-                  return p ? { lat: p.lat, lng: p.lng } : null;
-                })()}
+                focusPoint={userLocation}
                 filtersSlot={filtersPanel}
                 renderPopup={(marker) => {
                   // Marker ids are `${item_id}#${locationIndex}` — strip the suffix to look up the item.

@@ -4,136 +4,25 @@
   "schema_standard": "https://json-schema.org/draft/2020-12/schema",
   "domains": [
     {
-      "description": "Tourists / travellers discovering local Udupi practitioners. Tourist profiles are captured incrementally by Tourist Saarthi — never via a form.",
-      "minimum_cache_ttl_seconds": 300,
-      "status_rules": [
-        { "status": "new",      "label": "New",      "description": "Tourist token created within the last 7 days",                                           "when": { "item_age_days": { "lte": 7 } } },
-        { "status": "active",   "label": "Active",   "description": "Connected with a practitioner in the last 30 days",                                       "when": { "days_since_last": { "buckets": ["create", "accept"], "lte": 30 } } },
-        { "status": "at_risk",  "label": "At Risk",  "description": "No activity for 30–90 days",                                                              "when": { "days_since_last": { "buckets": ["create", "accept", "reject"], "between": [31, 90] } } },
-        { "status": "inactive", "label": "Inactive", "description": "No activity 90+ days",                                                                    "when": "default" }
-      ],
-      "item_schemas": {
-        "profile_1.0": {
-          "$schema": "https://json-schema.org/draft/2020-12/schema",
-          "title": "Orange Dot Tourist Profile 1.0",
-          "type": "object",
-          "additionalProperties": false,
-          "required": [
-            "name",
-            "phone_number",
-            "location"
-          ],
-          "properties": {
-            "name": {
-              "type": "string",
-              "title": "Name",
-              "description": "Your full name.",
-              "private": true
-            },
-            "nationality": {
-              "type": "string",
-              "title": "Nationality",
-              "description": "Your nationality."
-            },
-            "languages_spoken": {
-              "type": "array",
-              "title": "Languages Spoken",
-              "description": "Languages you speak.",
-              "items": {
-                "type": "string",
-                "enum": ["English", "Hindi", "Kannada", "Tulu", "Konkani", "Others"]
-              }
-            },
-            "party_composition": {
-              "type": "string",
-              "title": "Travelling As",
-              "description": "Who you're travelling with.",
-              "enum": ["Solo", "Couple", "Family", "Group", "Solo Female"]
-            },
-            "phone_number": {
-              "type": "string",
-              "title": "Phone",
-              "description": "Your 10-digit mobile number.",
-              "private": true,
-              "pattern": "^[0-9]{10}$"
-            },
-            "trip_window_start": {
-              "type": "string",
-              "title": "Trip Start",
-              "description": "When your trip begins.",
-              "format": "date"
-            },
-            "trip_window_end": {
-              "type": "string",
-              "title": "Trip End",
-              "description": "When your trip ends.",
-              "format": "date"
-            },
-            "location": {
-              "type": "string",
-              "title": "Location",
-              "description": "Where you're staying in Udupi — used to show practitioners near you.",
-              "private": true,
-              "location": "single"
-            },
-            "budget_band": {
-              "type": "string",
-              "title": "Budget Band",
-              "description": "Your typical spending range for the trip.",
-              "enum": ["Economical", "Moderate", "Premium"]
-            },
-            "dietary_preference": {
-              "type": "string",
-              "title": "Dietary Preference",
-              "description": "Your dietary preference.",
-              "enum": ["Veg", "Non-veg", "Seafood", "Vegan", "Jain", "Other"]
-            },
-            "interest": {
-              "type": "string",
-              "title": "Primary Interest",
-              "description": "What you're most interested in exploring.",
-              "enum": [
-                "Experiences & Activities",
-                "Food / Crafts / Local Produce",
-                "Guides / Culture / Spiritual",
-                "Stays & Transport"
-              ]
-            },
-            "guide_preference": {
-              "type": "string",
-              "title": "Guide Preference",
-              "description": "Whether you'd like a local guide.",
-              "enum": ["With guide", "Self-explore", "No preference"]
-            }
-          }
-        }
-      },
-      "id": "tourist",
-      "card": {
-        "title_field": "name",
-        "avatar_from": "name",
-        "default_fields": ["nationality", "party_composition", "interest", "budget_band"]
-      },
-      "dashboard_tiles": {
-        "profile": [
-          { "field": "total_items", "label": "Tokens Registered" },
-          { "field": "complete_profiles", "label": "Tourist Tokens Active" },
-          { "field": "has_applications", "label": "Connections Initiated" }
-        ],
-        "user": [
-          { "field": "total_users", "label": "Total Tourists" },
-          { "field": "avg_items_per_user", "label": "Avg Tokens per Tourist" }
-        ]
-      }
-    },
-    {
       "description": "Practitioners — surf instructors, guides, artisans, homestays, GI suppliers, temple trusts, curated experiences. One Orange Dot per supplier / listing.",
       "minimum_cache_ttl_seconds": 300,
       "status_rules": [
-        { "status": "new",      "label": "New",      "description": "Listed within the last 7 days",                                                  "when": { "item_age_days": { "lte": 7 } } },
-        { "status": "active",   "label": "Active",   "description": "Received and responded to a connection in the last 30 days",                     "when": { "all": [ { "count": { "buckets": ["create"], "gt": 0 } }, { "days_since_last": { "buckets": ["accept", "reject"], "lte": 30 } } ] } },
-        { "status": "at_risk",  "label": "At Risk",  "description": "No responses for 30–90 days",                                                    "when": { "all": [ { "count": { "buckets": ["create"], "gt": 0 } }, { "days_since_last": { "buckets": ["accept", "reject"], "between": [31, 90] } } ] } },
-        { "status": "inactive", "label": "Inactive", "description": "No activity for 90+ days",                                                       "when": "default" }
+        {
+          "status": "new",
+          "label": "New",
+          "description": "Listed within the last 7 days",
+          "when": {
+            "item_age_days": {
+              "lte": 7
+            }
+          }
+        },
+        {
+          "status": "active",
+          "label": "Active",
+          "description": "A live, published listing",
+          "when": "default"
+        }
       ],
       "item_schemas": {
         "profile_1.0": {
@@ -189,9 +78,8 @@
             "contact_phone": {
               "type": "string",
               "title": "Contact Phone",
-              "description": "Your 10-digit contact number — shared with a traveller only after you accept a connection.",
-              "pattern": "^[0-9]{10}$",
-              "private": true
+              "description": "Your 10-digit contact number — shown publicly so travellers can reach you directly.",
+              "pattern": "^[0-9]{10}$"
             },
             "services": {
               "type": "array",
@@ -217,14 +105,25 @@
               "description": "Languages you can support.",
               "items": {
                 "type": "string",
-                "enum": ["English", "Hindi", "Kannada", "Tulu", "Konkani", "Others"]
+                "enum": [
+                  "English",
+                  "Hindi",
+                  "Kannada",
+                  "Tulu",
+                  "Konkani",
+                  "Others"
+                ]
               }
             },
             "pricing": {
               "type": "string",
               "title": "Pricing",
               "description": "Your typical price range.",
-              "enum": ["Economical", "Moderate", "Premium"]
+              "enum": [
+                "Economical",
+                "Moderate",
+                "Premium"
+              ]
             },
             "website": {
               "type": "string",
@@ -239,28 +138,42 @@
       "card": {
         "title_field": "name",
         "avatar_from": "name",
-        "default_fields": ["category", "area", "pricing", "services"]
+        "default_fields": [
+          "category",
+          "area",
+          "pricing",
+          "services"
+        ]
       },
       "dashboard_tiles": {
         "profile": [
-          { "field": "total_items", "label": "Listings Registered" },
-          { "field": "complete_profiles", "label": "Verified Listings" },
-          { "field": "has_applications", "label": "Received Connections" }
+          {
+            "field": "total_items",
+            "label": "Listings Registered"
+          },
+          {
+            "field": "complete_profiles",
+            "label": "Verified Listings"
+          },
+          {
+            "field": "has_applications",
+            "label": "Received Connections"
+          }
         ],
         "user": [
-          { "field": "total_users", "label": "Total Orange Dots" },
-          { "field": "avg_items_per_user", "label": "Avg Listings per Orange Dot" }
+          {
+            "field": "total_users",
+            "label": "Total Orange Dots"
+          },
+          {
+            "field": "avg_items_per_user",
+            "label": "Avg Listings per Orange Dot"
+          }
         ]
       }
     }
   ],
   "instances": [
-    {
-      "instance_name": "Orange Dot Tourist Local",
-      "instance_url": "http://localhost:2742",
-      "custom_item_schema_urls": {},
-      "domain_id": "tourist"
-    },
     {
       "instance_name": "Orange Dot Practitioner Local",
       "instance_url": "http://localhost:2742",
@@ -268,65 +181,12 @@
       "domain_id": "practitioner"
     }
   ],
-  "actions": {
-    "connect": {
-      "description": "A tourist initiates a connection with a practitioner. Either Option 1 (tourist shares contact + itinerary with the practitioner) or Option 2 (tourist receives practitioner's contact via WhatsApp). Both record one Connection in the funnel.",
-      "interactions": [
-        {
-          "from_network": "orange_dot",
-          "from_domain": "tourist",
-          "to_network": "orange_dot",
-          "to_domain": "practitioner",
-          "requirement_schema": {
-            "type": "object",
-            "properties": {}
-          },
-          "event_schema": {
-            "$schema": "https://json-schema.org/draft/2020-12/schema",
-            "title": "Tourist → Practitioner Connect Event",
-            "type": "object",
-            "additionalProperties": false,
-            "required": ["status", "remark"],
-            "properties": {
-              "status": {
-                "type": "string",
-                "enum": ["created", "accepted", "rejected", "cancelled"]
-              },
-              "remark": { "type": "string" }
-            }
-          },
-          "metric_categories": {
-            "create": ["created"],
-            "accept": ["accepted"],
-            "reject": ["rejected"],
-            "cancel": ["cancelled"]
-          },
-          "reveals_pii_on_status": ["accepted"],
-          "consent_text_initiator": "I agree to share my contact details with this practitioner so they can follow up about my trip.",
-          "consent_text_receiver": "I agree to share my contact details with this traveller."
-        }
-      ]
-    }
-  },
+  "actions": {},
   "id": "orange_dot",
   "dashboard_buckets": {
     "by_status": {
       "new": "New",
-      "active": "Active",
-      "at_risk": "At Risk",
-      "inactive": "Inactive"
-    },
-    "by_initiated_action_status": {
-      "create": "Requested",
-      "accept": "Accepted",
-      "reject": "Declined",
-      "cancel": "Cancelled"
-    },
-    "by_received_action_status": {
-      "create": "Requests",
-      "accept": "Connected",
-      "reject": "Declined",
-      "cancel": "Cancelled"
+      "active": "Active"
     }
   }
 }
