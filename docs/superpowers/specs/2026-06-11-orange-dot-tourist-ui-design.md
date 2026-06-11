@@ -1,7 +1,7 @@
 # orange_dot Tourist Discovery UI — Design
 
 **Date:** 2026-06-11
-**Branch:** `orange-dot-tourist-ui` (off `feature`; additive — safe to merge back, see §9)
+**Branch:** `orange-dot-tourist-ui` (off `feature`)
 **Status:** Draft for review
 
 ## Goal
@@ -168,12 +168,10 @@ in the list (sorted last); its Get Directions button is hidden.
   vitest + RTL — during planning; if RTL is not configured, keep the directions unit tests as
   the minimum bar and note the gap.)
 
-## Mergeability (why this is safe to land on `feature`)
+## Build targets
 
-The design changes exactly one shared file (`vite.config.ts`) and adds new files/scripts. With
-`VITE_APP` unset, the signals build is unchanged and the tourist code is dormant. Therefore the
-branch can be merged into `feature` before any separate-repo move, with no regression to the
-existing dots:
+The design changes one shared file (`vite.config.ts`) and adds new files/scripts. With
+`VITE_APP` unset, the signals build is unchanged and the tourist code is dormant.
 
 | Goal | Env |
 |---|---|
