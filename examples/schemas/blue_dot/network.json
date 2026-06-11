@@ -734,7 +734,8 @@
         ],
         "user": [
           { "field": "total_users", "label": "Total Job Seekers" },
-          { "field": "avg_items_per_user", "label": "Avg Profiles per Seeker" }
+          { "field": "avg_items_per_user", "label": "Avg Profiles per Seeker" },
+          { "field": "avg_actions_per_user", "label": "Avg Actions per Seeker" }
         ]
       }
     },
@@ -1187,7 +1188,8 @@
         ],
         "user": [
           { "field": "total_users", "label": "Total Employers" },
-          { "field": "avg_items_per_user", "label": "Avg Postings per Employer" }
+          { "field": "avg_items_per_user", "label": "Avg Postings per Employer" },
+          { "field": "avg_actions_per_user", "label": "Avg Actions per Employer" }
         ]
       }
     }

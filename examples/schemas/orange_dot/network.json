@@ -168,6 +168,10 @@
           {
             "field": "avg_items_per_user",
             "label": "Avg Listings per Orange Dot"
+          },
+          {
+            "field": "avg_actions_per_user",
+            "label": "Avg Actions per Orange Dot"
           }
         ]
       }
