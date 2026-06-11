@@ -10,6 +10,7 @@ import { organization } from '../../../../db/postgres/schema/auth.js';
 import { eq, and, inArray, asc, getTableColumns } from 'drizzle-orm';
 import { ExportQuery, type ExportQuery as ExportQueryType } from '@dpg/schemas';
 import { check_and_refresh_if_stale } from '@/services/metrics/staleness';
+import { resolve_private_display_names } from './dashboard.js';
 
 const COLUMNS = [
   'profile_item_id',
@@ -100,6 +101,10 @@ async function* generate_csv(
 
     if (rows.length === 0) break;
 
+    // Same entitlement as the dashboard list: every row belongs to the
+    // acting aggregator, so private display names are revealed.
+    const private_names = await resolve_private_display_names(rows);
+
     for (const r of rows) {
       const initiated = r.initiated ?? {};
       const received = r.received ?? {};
@@ -111,7 +116,7 @@ async function* generate_csv(
         item_network: r.itemNetwork,
         item_domain: r.itemDomain,
         item_type: r.itemType,
-        name: r.displayName,
+        name: private_names.get(r.itemId) ?? r.displayName,
         onboarded_via: r.onboardedVia,
         profile_status: r.profileStatus,
         profile_completion_pct: r.profileCompletionPct,

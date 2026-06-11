@@ -6,8 +6,11 @@ import type {
 import { db } from '@api/db/postgres/drizzle_config';
 import { item_metrics } from '../../../../db/postgres/schema/metrics.js';
 import { organization } from '../../../../db/postgres/schema/auth.js';
-import { eq, and, sql, desc, getTableColumns } from 'drizzle-orm';
+import { eq, and, sql, desc, getTableColumns, inArray } from 'drizzle-orm';
 import type { AnyPgColumn } from 'drizzle-orm/pg-core';
+import { items } from '@dpg/database';
+import { decryptItemPrivate } from '@/utils/item_decrypt';
+import { getNetworkConfigById } from '@/network_configs';
 import {
   DashboardRequestQuery,
   DashboardResponse,
@@ -246,14 +249,20 @@ async function build_domain_block(
     .limit(limit)
     .offset((page - 1) * limit);
 
-  const items = list_rows.map((r) => ({
+  // Every row here is a participant this aggregator onboarded
+  // (filter_where pins onboarded_by_org_id), so revealing the private
+  // display name needs no further authorization — same entitlement rule
+  // as GET /admin/participant.
+  const private_names = await resolve_private_display_names(list_rows);
+
+  const items_out = list_rows.map((r) => ({
     profile_item_id: r.itemId,
     user_id: r.ownerUserId ?? null,
 
     item_network: r.itemNetwork,
     item_domain: r.itemDomain,
     item_type: r.itemType,
-    name: r.displayName,
+    name: private_names.get(r.itemId) ?? r.displayName,
     onboarded_via: r.onboardedVia,
 
     profile_status: r.profileStatus as 'new' | 'active' | 'at_risk' | 'inactive' | null,
@@ -274,10 +283,102 @@ async function build_domain_block(
 
   return {
     rollup,
-    items,
+    items: items_out,
     total_matching,
     next_cursor: list_rows.length === limit ? String(page + 1) : null,
   };
+}
+
+/**
+ * Resolves real display names for metric rows whose schema declares a
+ * `private: true` `display_name_field` — the precomputed
+ * `item_metrics.display_name` only ever sees the masked public state.
+ *
+ * Reads the page's item rows in one query per network/domain group,
+ * decrypts each `item_private_state` blob, and returns `item_id → name`
+ * for rows where the merged state carries a non-empty string at
+ * `display_name_field`. Rows without a private blob, without the schema
+ * hint, or from an unloadable network config fall back to the
+ * precomputed name.
+ */
+export async function resolve_private_display_names(
+  rows: Array<{ itemId: string; itemNetwork: string; itemDomain: string; itemType: string }>,
+): Promise<Map<string, string>> {
+  const out = new Map<string, string>();
+  if (rows.length === 0) return out;
+
+  // Group by network/domain — both pin the items partition and select the
+  // right schema set.
+  const groups = new Map<string, typeof rows>();
+  for (const r of rows) {
+    const key = `${r.itemNetwork} ${r.itemDomain}`;
+    const g = groups.get(key);
+    if (g) g.push(r);
+    else groups.set(key, [r]);
+  }
+
+  for (const group of groups.values()) {
+    const { itemNetwork: network, itemDomain: domain } = group[0];
+
+    let display_fields: Record<string, string>;
+    try {
+      const cfg = await getNetworkConfigById(network);
+      const domainCfg = cfg.domains.find((d) => d.id === domain);
+      // Per item type: the schema's display_name_field, else the domain's
+      // card.title_field — the existing UI hint for "the field that titles
+      // this item". Covers domains (e.g. purple_dot seeker) whose name field
+      // is private and therefore can't be a display_name_field target.
+      const card_title = (domainCfg?.card as { title_field?: unknown } | undefined)?.title_field;
+      const fallback_field = typeof card_title === 'string' ? card_title : undefined;
+      display_fields = Object.fromEntries(
+        Object.entries(domainCfg?.item_schemas ?? {}).flatMap(([type, doc]) => {
+          const field = (doc as { display_name_field?: unknown }).display_name_field;
+          const resolved = typeof field === 'string' ? field : fallback_field;
+          return resolved !== undefined ? [[type, resolved]] : [];
+        }),
+      );
+    } catch {
+      continue; // unknown network config — keep precomputed names
+    }
+    if (Object.keys(display_fields).length === 0) continue;
+
+    const item_rows = await db
+      .select({
+        item_id: items.item_id,
+        item_type: items.item_type,
+        item_state: items.item_state,
+        item_private_state: items.item_private_state,
+      })
+      .from(items)
+      .where(
+        and(
+          eq(items.item_network, network),
+          eq(items.item_domain, domain),
+          inArray(
+            items.item_id,
+            group.map((r) => r.itemId),
+          ),
+        ),
+      );
+
+    for (const r of item_rows) {
+      const field = display_fields[r.item_type];
+      if (!field) continue;
+      try {
+        const { mergedState } = decryptItemPrivate({
+          item_state: (r.item_state ?? {}) as Record<string, unknown>,
+          item_private_state: r.item_private_state ?? '',
+        });
+        const name = mergedState[field];
+        if (typeof name === 'string' && name.trim().length > 0) {
+          out.set(r.item_id, name.trim());
+        }
+      } catch {
+        // bad blob / missing key — keep the precomputed masked name
+      }
+    }
+  }
+  return out;
 }
 
 export default aggregator_dashboard;

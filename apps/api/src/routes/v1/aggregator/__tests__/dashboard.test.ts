@@ -57,7 +57,28 @@ const state = {
   list_rows: [] as Array<Record<string, unknown>>,
   staleness_calls: [] as Array<{ org_id: string; domain: string; refresh: boolean }>,
   execute_call_counter: 0,
+  // Private display-name resolution fixtures. network_cfg=null makes
+  // getNetworkConfigById throw (the pre-existing tests' behaviour: the
+  // resolver no-ops and the precomputed displayName passes through).
+  network_cfg: null as Record<string, unknown> | null,
+  item_rows: [] as Array<Record<string, unknown>>,
+  decrypt_throw: false,
+  decrypt_merge: {} as Record<string, unknown>,
 };
+
+vi.mock('@/network_configs', () => ({
+  getNetworkConfigById: vi.fn(async () => {
+    if (!state.network_cfg) throw new Error('network config not loaded');
+    return state.network_cfg;
+  }),
+}));
+
+vi.mock('@/utils/item_decrypt', () => ({
+  decryptItemPrivate: vi.fn((row: { item_state: Record<string, unknown> }) => {
+    if (state.decrypt_throw) throw new Error('bad blob');
+    return { mergedState: { ...row.item_state, ...state.decrypt_merge } };
+  }),
+}));
 
 vi.mock('@/services/metrics/staleness', () => ({
   check_and_refresh_if_stale: vi.fn(
@@ -94,14 +115,16 @@ vi.mock('@api/db/postgres/drizzle_config', () => {
     db: {
       select: vi.fn((projection?: Record<string, unknown>) => {
         const keys = Object.keys(projection ?? {});
-        let mode: 'org' | 'count' | 'list';
+        let mode: 'org' | 'count' | 'items' | 'list';
         if (keys.length === 1 && keys[0] === 'metadata') mode = 'org';
         else if (keys.length === 1 && keys[0] === 'n') mode = 'count';
+        else if (keys.includes('item_private_state')) mode = 'items';
         else mode = 'list';
 
         return makeChain(async () => {
           if (mode === 'org') return [{ metadata: state.org_metadata }];
           if (mode === 'count') return [{ n: state.total_matching }];
+          if (mode === 'items') return state.item_rows;
           return state.list_rows;
         });
       }),
@@ -201,6 +224,10 @@ const resetState = () => {
   ];
   state.staleness_calls = [];
   state.execute_call_counter = 0;
+  state.network_cfg = null;
+  state.item_rows = [];
+  state.decrypt_throw = false;
+  state.decrypt_merge = {};
 };
 
 describe('GET /aggregator/dashboard', () => {
@@ -445,5 +472,88 @@ describe('GET /aggregator/dashboard', () => {
       url: '/dashboard?page=1&limit=50',
     });
     expect(res.json().by_domain.seeker.next_cursor).toBeNull();
+  });
+});
+
+describe('private display-name resolution (aggregator-dpg#406)', () => {
+  beforeEach(() => {
+    resetState();
+  });
+
+  /** Network config where the seeker schema has NO display_name_field but
+   *  the domain card declares title_field — the purple_dot seeker shape. */
+  const seekerCardCfg = () => ({
+    domains: [
+      {
+        id: 'seeker',
+        card: { title_field: 'beneficiary_name' },
+        item_schemas: { 'profile_1.0': { properties: {} } },
+      },
+    ],
+  });
+
+  it('resolves the seeker name via card.title_field from the decrypted private state', async () => {
+    state.network_cfg = seekerCardCfg();
+    state.list_rows = [sample_list_row({ displayName: 'itm_1' })];
+    state.item_rows = [
+      {
+        item_id: 'itm_1',
+        item_type: 'profile_1.0',
+        item_state: { beneficiary_name: 'R***' },
+        item_private_state: 'v1:blob',
+      },
+    ];
+    state.decrypt_merge = { beneficiary_name: 'Ravi Kumar' };
+
+    const app = await buildApp();
+    const res = await app.inject({ method: 'GET', url: '/dashboard' });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().by_domain.seeker.items[0].name).toBe('Ravi Kumar');
+  });
+
+  it('prefers the schema display_name_field over card.title_field when both exist', async () => {
+    state.network_cfg = {
+      domains: [
+        {
+          id: 'seeker',
+          card: { title_field: 'beneficiary_name' },
+          item_schemas: {
+            'profile_1.0': { display_name_field: 'organisation_name', properties: {} },
+          },
+        },
+      ],
+    };
+    state.list_rows = [sample_list_row({ displayName: 'itm_1' })];
+    state.item_rows = [
+      {
+        item_id: 'itm_1',
+        item_type: 'profile_1.0',
+        item_state: { organisation_name: 'Sahaya Trust' },
+        item_private_state: '',
+      },
+    ];
+
+    const app = await buildApp();
+    const res = await app.inject({ method: 'GET', url: '/dashboard' });
+    expect(res.json().by_domain.seeker.items[0].name).toBe('Sahaya Trust');
+  });
+
+  it('falls back to the precomputed display name when decryption fails', async () => {
+    state.network_cfg = seekerCardCfg();
+    state.list_rows = [sample_list_row({ displayName: 'itm_1' })];
+    state.item_rows = [
+      {
+        item_id: 'itm_1',
+        item_type: 'profile_1.0',
+        item_state: { beneficiary_name: 'R***' },
+        item_private_state: 'v1:corrupt',
+      },
+    ];
+    state.decrypt_throw = true;
+
+    const app = await buildApp();
+    const res = await app.inject({ method: 'GET', url: '/dashboard' });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().by_domain.seeker.items[0].name).toBe('itm_1');
   });
 });
