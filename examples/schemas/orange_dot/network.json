@@ -20,62 +20,7 @@
         {
           "status": "active",
           "label": "Active",
-          "description": "Received and responded to a connection in the last 30 days",
-          "when": {
-            "all": [
-              {
-                "count": {
-                  "buckets": [
-                    "create"
-                  ],
-                  "gt": 0
-                }
-              },
-              {
-                "days_since_last": {
-                  "buckets": [
-                    "accept",
-                    "reject"
-                  ],
-                  "lte": 30
-                }
-              }
-            ]
-          }
-        },
-        {
-          "status": "at_risk",
-          "label": "At Risk",
-          "description": "No responses for 30–90 days",
-          "when": {
-            "all": [
-              {
-                "count": {
-                  "buckets": [
-                    "create"
-                  ],
-                  "gt": 0
-                }
-              },
-              {
-                "days_since_last": {
-                  "buckets": [
-                    "accept",
-                    "reject"
-                  ],
-                  "between": [
-                    31,
-                    90
-                  ]
-                }
-              }
-            ]
-          }
-        },
-        {
-          "status": "inactive",
-          "label": "Inactive",
-          "description": "No activity for 90+ days",
+          "description": "A live, published listing",
           "when": "default"
         }
       ],
@@ -133,9 +78,8 @@
             "contact_phone": {
               "type": "string",
               "title": "Contact Phone",
-              "description": "Your 10-digit contact number — shared with a traveller only after you accept a connection.",
-              "pattern": "^[0-9]{10}$",
-              "private": true
+              "description": "Your 10-digit contact number — shown publicly so travellers can reach you directly.",
+              "pattern": "^[0-9]{10}$"
             },
             "services": {
               "type": "array",
@@ -242,21 +186,7 @@
   "dashboard_buckets": {
     "by_status": {
       "new": "New",
-      "active": "Active",
-      "at_risk": "At Risk",
-      "inactive": "Inactive"
-    },
-    "by_initiated_action_status": {
-      "create": "Requested",
-      "accept": "Accepted",
-      "reject": "Declined",
-      "cancel": "Cancelled"
-    },
-    "by_received_action_status": {
-      "create": "Requests",
-      "accept": "Connected",
-      "reject": "Declined",
-      "cancel": "Cancelled"
+      "active": "Active"
     }
   }
 }
