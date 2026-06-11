@@ -167,7 +167,11 @@
           },
           {
             "field": "avg_items_per_user",
-            "label": "Avg Listings per Orange Dot"
+            "label": "Avg Profiles per User"
+          },
+          {
+            "field": "avg_actions_per_user",
+            "label": "Avg Actions per User"
           }
         ]
       }
