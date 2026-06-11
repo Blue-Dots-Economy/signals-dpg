@@ -4,8 +4,13 @@ import { Input } from '@/components/ui/input';
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
 import { LanguageSwitcher } from '@/components/layout/language-switcher';
 import { ThemeModeToggle } from '@/components/layout/theme-mode-toggle';
+import { brandLogoUrl } from '@/theme/brand-assets';
+import { useThemeMode } from '@/theme/mode-provider';
 import type { ViewMode } from '@/engine/types';
 import type { ReactNode } from 'react';
+
+/** The tourist app serves the orange_dot network exclusively. */
+const TOURIST_NETWORK_ID = 'orange_dot';
 
 export interface TouristTopBarProps {
   search: string;
@@ -23,8 +28,19 @@ export function TouristTopBar({
   filtersSlot,
 }: TouristTopBarProps) {
   const { t } = useTranslation();
+  const { resolved } = useThemeMode();
+  // Light logo for dark backgrounds, default logo otherwise (mirrors PortalHeader).
+  const logoSrc = brandLogoUrl(TOURIST_NETWORK_ID, resolved === 'dark' ? 'light' : 'default');
+
   return (
     <header className="sticky top-0 z-40 flex h-14 items-center gap-3 border-b bg-gradient-to-r from-background to-primary/5 px-4 sm:px-6">
+      {logoSrc && (
+        <img
+          src={logoSrc}
+          alt={t('nav.portal_logo_alt', { name: 'orange dots AI' })}
+          className="h-8 w-auto shrink-0"
+        />
+      )}
       <div className="relative flex-1 max-w-md">
         <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
         <Input

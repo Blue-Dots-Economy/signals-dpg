@@ -354,5 +354,7 @@
   "wallet.none_registered": "No wallet providers are registered.",
   "wallet.not_configured": "Provider is not configured.",
   "wallet.ready_to_import": "Ready to import.",
-  "wallet.use_provider": "Use {{provider}}"
+  "wallet.use_provider": "Use {{provider}}",
+  "card.view_more": "View more details",
+  "card.hide_details": "Hide details"
 }
