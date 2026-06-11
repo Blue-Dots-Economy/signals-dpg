@@ -38,7 +38,10 @@ export function TouristTopBar({
         <img
           src={logoSrc}
           alt={t('nav.portal_logo_alt', { name: 'orange dots AI' })}
-          className="h-8 w-auto shrink-0"
+          // Matches the size orange_dot used in the signals sidebar: the
+          // orange mark is square-ish (~1.78:1), so it gets a taller box than
+          // the wide wordmark brands.
+          className="h-12 w-auto max-w-[200px] shrink-0 object-contain"
         />
       )}
       <div className="relative flex-1 max-w-md">
