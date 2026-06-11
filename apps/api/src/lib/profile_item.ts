@@ -13,6 +13,7 @@
  * with `created_by: user_id` (the participant authors their own row).
  */
 import { createItemInternal, type DbOrTx } from '@/services/item_service';
+import { resolveLocationsForCreate } from '@/services/geocoding/resolve_locations_for_create';
 
 export interface CreateProfileItemInput {
   /**
@@ -37,12 +38,23 @@ export interface CreateProfileItemResult {
 export const create_profile_item = async (
   input: CreateProfileItemInput,
 ): Promise<CreateProfileItemResult> => {
+  // Geocode the profile's address/location field into item_locations, the same
+  // way the public /item/create route does — otherwise items onboarded via the
+  // admin-participant API (e.g. the aggregator) would be stored with no
+  // coordinates, and downstream "Get Directions"/distance features would break.
+  const item_locations = await resolveLocationsForCreate({
+    item_network: input.network,
+    item_domain: input.domain,
+    item_type: input.item_type,
+    item_state: input.payload,
+  });
+
   const result = await createItemInternal(input.tx, {
     item_network: input.network,
     item_domain: input.domain,
     item_type: input.item_type,
     item_state: input.payload,
-    item_locations: [],
+    item_locations,
     created_by: input.user_id,
   });
 
