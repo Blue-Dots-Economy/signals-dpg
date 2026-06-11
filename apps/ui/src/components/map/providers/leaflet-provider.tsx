@@ -147,7 +147,14 @@ function createClusterDivIcon(cluster: { getChildCount: () => number; getAllChil
 
   // Tally per-domain counts using the WeakMap populated on each marker's ref.
   const childMarkers: L.Marker[] = cluster.getAllChildMarkers?.() ?? [];
-  const domains = childMarkers.map((m) => markerDomainMap.get(m as object) ?? '');
+  // Only tally markers whose domain is actually known. A marker whose ref has
+  // not registered in the WeakMap yet would otherwise fall back to '' and
+  // fabricate a phantom empty-domain group — making a single-domain cluster
+  // (e.g. all `practitioner`) look multi-domain. Unknown ones are still counted
+  // in the total (getChildCount), just not in the per-domain breakdown.
+  const domains = childMarkers
+    .map((m) => markerDomainMap.get(m as object))
+    .filter((d): d is string => Boolean(d));
   const breakdown = tallyDomains(domains);
   const multiDomain = breakdown.length > 1;
 

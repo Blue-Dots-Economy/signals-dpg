@@ -113,8 +113,14 @@ const clusterRenderer: Renderer = {
     // be a specific network's brand colour.
     const primary = resolveThemeColor('--primary', '#6b7280');
 
-    // Tally domains from the clustered marker elements via the WeakMap.
-    const domains = (markers ?? []).map((m) => markerDomainMap.get(m as object) ?? '');
+    // Tally domains from the clustered marker elements via the WeakMap. Only
+    // markers with a known domain are counted in the breakdown; an unregistered
+    // marker would otherwise fall back to '' and fabricate a phantom
+    // empty-domain group, making a single-domain cluster look multi-domain.
+    // The total bubble count is independent (cluster.count).
+    const domains = (markers ?? [])
+      .map((m) => markerDomainMap.get(m as object))
+      .filter((d): d is string => Boolean(d));
     const breakdown = tallyDomains(domains);
 
     return new google.maps.marker.AdvancedMarkerElement({
