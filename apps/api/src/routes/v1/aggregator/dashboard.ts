@@ -9,6 +9,10 @@ import { organization } from '../../../../db/postgres/schema/auth.js';
 import { eq, and, sql, desc, getTableColumns } from 'drizzle-orm';
 import type { AnyPgColumn } from 'drizzle-orm/pg-core';
 import {
+  resolve_private_display_names,
+  type NameResolutionLog,
+} from '@/utils/private_display_name';
+import {
   DashboardRequestQuery,
   DashboardResponse,
   type DashboardRequestQuery as DQ,
@@ -113,7 +117,7 @@ export const aggregator_dashboard_handler = async (
 
   const by_domain: Record<string, unknown> = {};
   for (const d of scope) {
-    by_domain[d] = await build_domain_block(acting.org_id, d, page, limit, status);
+    by_domain[d] = await build_domain_block(acting.org_id, d, page, limit, status, request.log);
   }
 
   return {
@@ -132,6 +136,7 @@ async function build_domain_block(
   page: number,
   limit: number,
   status: string | undefined,
+  log?: NameResolutionLog,
 ) {
   const base_where = and(
     eq(item_metrics.onboardedByOrgId, org_id),
@@ -246,14 +251,20 @@ async function build_domain_block(
     .limit(limit)
     .offset((page - 1) * limit);
 
-  const items = list_rows.map((r) => ({
+  // Every row here is a participant this aggregator onboarded
+  // (filter_where pins onboarded_by_org_id), so revealing the private
+  // display name needs no further authorization — same entitlement rule
+  // as GET /admin/participant.
+  const private_names = await resolve_private_display_names(list_rows, log);
+
+  const items_out = list_rows.map((r) => ({
     profile_item_id: r.itemId,
     user_id: r.ownerUserId ?? null,
 
     item_network: r.itemNetwork,
     item_domain: r.itemDomain,
     item_type: r.itemType,
-    name: r.displayName,
+    name: private_names.get(r.itemId) ?? r.displayName,
     onboarded_via: r.onboardedVia,
 
     profile_status: r.profileStatus as 'new' | 'active' | 'at_risk' | 'inactive' | null,
@@ -274,7 +285,7 @@ async function build_domain_block(
 
   return {
     rollup,
-    items,
+    items: items_out,
     total_matching,
     next_cursor: list_rows.length === limit ? String(page + 1) : null,
   };
