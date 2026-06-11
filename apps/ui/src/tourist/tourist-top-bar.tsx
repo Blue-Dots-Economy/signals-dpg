@@ -33,29 +33,22 @@ export function TouristTopBar({
   const logoSrc = brandLogoUrl(TOURIST_NETWORK_ID, resolved === 'dark' ? 'light' : 'default');
 
   return (
-    <header className="sticky top-0 z-40 flex h-14 items-center gap-3 border-b bg-gradient-to-r from-background to-primary/5 px-4 sm:px-6">
+    // Mobile (base): wraps to two rows — logo + filters + controls on top,
+    // full-width search below. Desktop (sm+): a single fixed-height row,
+    // identical to before (logo → search → filters → controls), restored via
+    // the sm:order / sm:width classes on each child.
+    <header className="sticky top-0 z-40 flex flex-wrap items-center gap-2 border-b bg-gradient-to-r from-background to-primary/5 px-3 py-2 sm:h-14 sm:flex-nowrap sm:gap-3 sm:px-6 sm:py-0">
       {logoSrc && (
         <img
           src={logoSrc}
           alt={t('nav.portal_logo_alt', { name: 'orange dots AI' })}
-          // Matches the size orange_dot used in the signals sidebar: the
-          // orange mark is square-ish (~1.78:1), so it gets a taller box than
-          // the wide wordmark brands.
-          className="h-12 w-auto max-w-[200px] shrink-0 object-contain"
+          // Smaller on mobile; on desktop matches the orange_dot sidebar size
+          // (square-ish ~1.78:1 mark, so a taller box than wordmark brands).
+          className="h-8 w-auto max-w-[120px] shrink-0 object-contain sm:order-1 sm:h-12 sm:max-w-[200px]"
         />
       )}
-      <div className="relative ml-4 flex-1 max-w-md sm:ml-10">
-        <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
-        <Input
-          type="search"
-          placeholder={t('common.search')}
-          className="pl-8"
-          value={search}
-          onChange={(e) => onSearchChange(e.target.value)}
-        />
-      </div>
-      {filtersSlot}
-      <div className="ml-auto flex items-center gap-2">
+      <div className="flex items-center sm:order-3">{filtersSlot}</div>
+      <div className="ml-auto flex items-center gap-1 sm:order-4 sm:gap-2">
         <ToggleGroup
           type="single"
           value={viewMode}
@@ -72,6 +65,18 @@ export function TouristTopBar({
         </ToggleGroup>
         <LanguageSwitcher />
         <ThemeModeToggle />
+      </div>
+      {/* Search: full-width second row on mobile (order-last); on desktop it
+          sits second (sm:order-2) and grows like before. */}
+      <div className="relative order-last w-full min-w-0 sm:order-2 sm:ml-10 sm:w-auto sm:max-w-md sm:flex-1">
+        <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
+        <Input
+          type="search"
+          placeholder={t('common.search')}
+          className="pl-8"
+          value={search}
+          onChange={(e) => onSearchChange(e.target.value)}
+        />
       </div>
     </header>
   );
