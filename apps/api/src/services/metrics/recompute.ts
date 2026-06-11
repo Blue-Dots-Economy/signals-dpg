@@ -207,7 +207,7 @@ export const recompute_aggregator_domain_metrics = async (
     : sql`
         WITH action_counts AS (
           SELECT
-            ''::text AS item_id,
+            NULL::uuid AS item_id,
             ${emptyCountCols},
             ${emptyLastCols}
           WHERE FALSE
