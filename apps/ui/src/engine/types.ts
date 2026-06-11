@@ -1,4 +1,5 @@
 import type { RJSFSchema } from '@rjsf/utils';
+import type { LucideIcon } from 'lucide-react';
 
 // ─── Schema Types ───────────────────────────────────────────────
 
@@ -168,6 +169,13 @@ export interface MapProviderProps {
   children?: React.ReactNode;
   /** Optional custom popup renderer; falls back to the default MarkerPopupCard. */
   renderPopup?: (marker: MapMarker) => React.ReactNode;
+  /**
+   * Optional per-marker icon resolver. Defaults to a domain-based lucide icon
+   * (see `getIconForDomain`). Callers can override to pick an icon from other
+   * marker data (e.g. the tourist app keys on `data.category`). Signals leaves
+   * this unset, so its markers are unchanged.
+   */
+  resolveIcon?: (marker: MapMarker) => LucideIcon;
 }
 
 export interface MapProvider {

@@ -139,6 +139,7 @@ interface ClusteredMarkerProps {
   onMarkerClick?: (id: string) => void;
   onMarkerReady: (id: string, el: NonNullable<AdvancedMarkerRef> | null) => void;
   renderPopup?: (marker: MapMarker) => React.ReactNode;
+  resolveIcon?: MapProviderProps['resolveIcon'];
 }
 
 function ClusteredMarker({
@@ -149,12 +150,14 @@ function ClusteredMarker({
   onMarkerClick,
   onMarkerReady,
   renderPopup,
+  resolveIcon,
 }: ClusteredMarkerProps) {
   const [markerRef, markerEl] = useAdvancedMarkerRef();
   const { id } = marker;
 
-  // Resolve the domain icon once per render (cheap — just a lookup).
-  const DomainIcon = getIconForDomain(marker.domain);
+  // Resolve the marker icon once per render (cheap — just a lookup). Defaults
+  // to a domain-based icon; callers may override (e.g. tourist app by category).
+  const DomainIcon = resolveIcon ? resolveIcon(marker) : getIconForDomain(marker.domain);
 
   // Report the underlying element to the parent each time it changes.
   // Also register this element→domain mapping so the cluster renderer can
@@ -276,6 +279,7 @@ interface ClustererManagerProps {
   onMarkerDeactivate: () => void;
   onMarkerClick?: (id: string) => void;
   renderPopup?: (marker: MapMarker) => React.ReactNode;
+  resolveIcon?: MapProviderProps['resolveIcon'];
 }
 
 function ClustererManager({
@@ -285,6 +289,7 @@ function ClustererManager({
   onMarkerDeactivate,
   onMarkerClick,
   renderPopup,
+  resolveIcon,
 }: ClustererManagerProps) {
   const map = useMap();
 
@@ -357,6 +362,7 @@ function ClustererManager({
           onMarkerClick={onMarkerClick}
           onMarkerReady={handleMarkerReady}
           renderPopup={renderPopup}
+          resolveIcon={resolveIcon}
         />
       ))}
     </>
@@ -372,6 +378,7 @@ export function GoogleMapProvider({
   onMarkerClick,
   initialViewSet = false,
   renderPopup,
+  resolveIcon,
 }: MapProviderProps) {
   const { t } = useTranslation();
   const [activeMarker, setActiveMarker] = React.useState<MapMarker | null>(null);
@@ -420,6 +427,7 @@ export function GoogleMapProvider({
           onMarkerDeactivate={() => setActiveMarker(null)}
           onMarkerClick={onMarkerClick}
           renderPopup={renderPopup}
+          resolveIcon={resolveIcon}
         />
       </Map>
     </APIProvider>

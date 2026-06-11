@@ -4,6 +4,7 @@ import type { DotCardConfig, MapMarker } from '@/engine/types';
 import type { LatLng } from '@/lib/geo/types';
 import { MapView } from '@/components/map/map-container';
 import { PractitionerCard } from './practitioner-card';
+import { resolvePractitionerIcon } from './category-icons';
 import type { CardItem } from './practitioner-data';
 
 export interface TouristMapProps {
@@ -29,6 +30,9 @@ export function TouristMap({ items, schema, cardConfig, focusPoint, center, zoom
       // Fill the tourist app's flex container (its header is shorter than the
       // signals chrome the default height assumes), so no white space below.
       heightClassName="h-full"
+      // Marker icon by practitioner category (Stay/Artists/Activities/…) rather
+      // than by domain (all practitioners share one domain).
+      resolveMarkerIcon={resolvePractitionerIcon}
       renderPopup={(marker: MapMarker) => (
         <PractitionerCard data={marker.data} schema={schema} cardConfig={cardConfig} title={marker.label} variant="popup" />
       )}
