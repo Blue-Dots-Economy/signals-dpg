@@ -49,8 +49,7 @@ ON items USING GIN (item_state);
 -- (existing deployments re-applying the bundle).
 
 -- Multi-location items (2026-06 #112).
-ALTER TABLE items
-  ADD COLUMN IF NOT EXISTS item_locations JSONB NOT NULL DEFAULT '[]'::jsonb;
+ALTER TABLE items ADD COLUMN IF NOT EXISTS item_locations JSONB NOT NULL DEFAULT '[]'::jsonb;
 
 -- Lifecycle status (2026-06-03 spec).
 ALTER TABLE items
