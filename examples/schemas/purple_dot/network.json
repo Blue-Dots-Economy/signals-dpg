@@ -189,8 +189,8 @@
         ],
         "user": [
           { "field": "total_users", "label": "Total Beneficiaries" },
-          { "field": "avg_items_per_user", "label": "Avg Profiles per Beneficiary" },
-          { "field": "avg_actions_per_user", "label": "Avg Actions per Beneficiary" }
+          { "field": "avg_items_per_user", "label": "Avg Profiles per User" },
+          { "field": "avg_actions_per_user", "label": "Avg Actions per User" }
         ]
       }
     },
@@ -366,8 +366,8 @@
         ],
         "user": [
           { "field": "total_users", "label": "Total Service Providers" },
-          { "field": "avg_items_per_user", "label": "Avg Profiles per Provider" },
-          { "field": "avg_actions_per_user", "label": "Avg Actions per Provider" }
+          { "field": "avg_items_per_user", "label": "Avg Profiles per User" },
+          { "field": "avg_actions_per_user", "label": "Avg Actions per User" }
         ]
       }
     }
