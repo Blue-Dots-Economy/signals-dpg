@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Discover</title>
+    <script src="/config.js"></script>
+    <script>
+      (function () {
+        document.documentElement.dataset.network = 'orange_dot';
+        try {
+          var stored = localStorage.getItem('dpg-theme-mode');
+          var resolved =
+            stored === 'dark' ||
+            (stored === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches);
+          if (resolved) document.documentElement.classList.add('dark');
+        } catch (_) {}
+      })();
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/tourist/main.tourist.tsx"></script>
+  </body>
+</html>

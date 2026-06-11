@@ -6,6 +6,8 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
+    "dev:tourist": "VITE_APP=tourist VITE_NETWORK_ID=orange_dot vite",
+    "build:tourist": "tsc && VITE_APP=tourist VITE_NETWORK_ID=orange_dot vite build",
     "preview": "vite preview",
     "test": "vitest run",
     "test:watch": "vitest"

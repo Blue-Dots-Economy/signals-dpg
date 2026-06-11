@@ -42,7 +42,26 @@
         "dist/**"
       ]
     },
+    "build:tourist": {
+      "inputs": [
+        "$TURBO_DEFAULT$"
+      ],
+      "dependsOn": [
+        "^build"
+      ],
+      "outputs": [
+        "dist/tourist/**"
+      ]
+    },
     "dev": {
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        ".env*"
+      ],
+      "cache": false,
+      "persistent": true
+    },
+    "dev:tourist": {
       "inputs": [
         "$TURBO_DEFAULT$",
         ".env*"
