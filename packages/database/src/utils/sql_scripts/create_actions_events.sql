@@ -142,6 +142,15 @@ ON action_events (
 CREATE INDEX IF NOT EXISTS action_events_source_owner_idx
 ON action_events (source_item_owner, created_at DESC);
 
+-- Upgrade guards for databases created before multi-location (#112) replaced
+-- the scalar lat/lng columns with the *_item_locations jsonb arrays in the
+-- CREATE TABLE above. New columns must appear BOTH in the create statement
+-- (fresh installs) and here (existing deployments re-applying the bundle).
+ALTER TABLE action_events
+  ADD COLUMN IF NOT EXISTS source_item_locations JSONB NOT NULL DEFAULT '[]'::jsonb;
+ALTER TABLE action_events
+  ADD COLUMN IF NOT EXISTS target_item_locations JSONB NOT NULL DEFAULT '[]'::jsonb;
+
 CREATE INDEX IF NOT EXISTS action_events_target_owner_idx
 ON action_events (target_item_owner, created_at DESC);
 
