@@ -63,7 +63,7 @@ export function TouristTopBar({
             <List className="h-4 w-4" />
           </ToggleGroupItem>
         </ToggleGroup>
-        <LanguageSwitcher />
+        <LanguageSwitcher compact />
         <ThemeModeToggle />
       </div>
       {/* Search: full-width second row on mobile (order-last); on desktop it

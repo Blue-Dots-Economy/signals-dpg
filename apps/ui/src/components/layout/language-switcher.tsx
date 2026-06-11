@@ -8,8 +8,19 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { getAvailableLanguages } from '@/i18n';
+import { cn } from '@/lib/utils';
 
-export function LanguageSwitcher() {
+interface LanguageSwitcherProps {
+  /**
+   * When true, hide the current-language label on small screens (icon only),
+   * showing it again at sm+. Lets tight mobile toolbars (e.g. the tourist app
+   * bar) keep everything on one line. Defaults to false → label always shown
+   * (signals behaviour unchanged).
+   */
+  compact?: boolean;
+}
+
+export function LanguageSwitcher({ compact = false }: LanguageSwitcherProps) {
   const { i18n, t } = useTranslation();
   const languages = getAvailableLanguages();
   const currentCode = i18n.resolvedLanguage ?? i18n.language;
@@ -26,7 +37,9 @@ export function LanguageSwitcher() {
         aria-label={t('language.label')}
       >
         <Languages className="h-4 w-4 text-muted-foreground" />
-        <SelectValue />
+        <span className={cn(compact && 'hidden sm:inline')}>
+          <SelectValue />
+        </span>
       </SelectTrigger>
       <SelectContent align="end">
         {languages.map(({ code, name }) => (
