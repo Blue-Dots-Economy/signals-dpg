@@ -1,0 +1,34 @@
+import type { ReactNode } from 'react';
+import type { RJSFSchema } from '@rjsf/utils';
+import type { DotCardConfig, MapMarker } from '@/engine/types';
+import type { LatLng } from '@/lib/geo/types';
+import { MapView } from '@/components/map/map-container';
+import { PractitionerCard } from './practitioner-card';
+import type { CardItem } from './practitioner-data';
+
+export interface TouristMapProps {
+  items: CardItem[];
+  schema: RJSFSchema;
+  cardConfig: DotCardConfig | null;
+  /** Tourist location, or null → caller passes the region default via `center`. */
+  focusPoint: LatLng | null;
+  center: [number, number];
+  zoom: number;
+  filtersSlot?: ReactNode;
+}
+
+export function TouristMap({ items, schema, cardConfig, focusPoint, center, zoom, filtersSlot }: TouristMapProps) {
+  return (
+    <MapView
+      schema={schema}
+      items={items}
+      center={center}
+      zoom={zoom}
+      focusPoint={focusPoint}
+      filtersSlot={filtersSlot}
+      renderPopup={(marker: MapMarker) => (
+        <PractitionerCard data={marker.data} schema={schema} cardConfig={cardConfig} title={marker.label} variant="popup" />
+      )}
+    />
+  );
+}
