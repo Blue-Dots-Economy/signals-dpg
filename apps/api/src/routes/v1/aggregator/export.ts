@@ -10,7 +10,10 @@ import { organization } from '../../../../db/postgres/schema/auth.js';
 import { eq, and, inArray, asc, getTableColumns } from 'drizzle-orm';
 import { ExportQuery, type ExportQuery as ExportQueryType } from '@dpg/schemas';
 import { check_and_refresh_if_stale } from '@/services/metrics/staleness';
-import { resolve_private_display_names } from './dashboard.js';
+import {
+  resolve_private_display_names,
+  type NameResolutionLog,
+} from '@/utils/private_display_name';
 
 const COLUMNS = [
   'profile_item_id',
@@ -78,6 +81,7 @@ async function* generate_csv(
   aggregator_id: string,
   scope: string[],
   status: string | undefined,
+  log?: NameResolutionLog,
 ): AsyncGenerator<string> {
   yield COLUMNS.join(',') + '\n';
 
@@ -103,7 +107,7 @@ async function* generate_csv(
 
     // Same entitlement as the dashboard list: every row belongs to the
     // acting aggregator, so private display names are revealed.
-    const private_names = await resolve_private_display_names(rows);
+    const private_names = await resolve_private_display_names(rows, log);
 
     for (const r of rows) {
       const initiated = r.initiated ?? {};
@@ -196,7 +200,9 @@ export const aggregator_export: FastifyPluginAsync = async (app) => {
         .header('content-type', 'text/csv; charset=utf-8')
         .header('content-disposition', `attachment; filename="${filename}"`);
 
-      return reply.send(Readable.from(generate_csv(acting.org_id, scope, status)));
+      return reply.send(
+        Readable.from(generate_csv(acting.org_id, scope, status, request.log)),
+      );
     },
   });
 };

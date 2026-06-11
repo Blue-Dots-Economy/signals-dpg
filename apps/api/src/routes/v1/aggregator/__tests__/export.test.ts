@@ -28,7 +28,27 @@ const state = {
   org_metadata: JSON.stringify({ domains: ['seeker'] }) as string | null,
   list_pages: [] as Array<Array<Record<string, unknown>>>,
   staleness_calls: [] as Array<{ org_id: string; domain: string; force: boolean }>,
+  // Private display-name resolution fixtures. network_cfg=null makes
+  // getNetworkConfigById throw — the resolver no-ops and the precomputed
+  // displayName passes through (the pre-existing tests' behaviour).
+  network_cfg: null as Record<string, unknown> | null,
+  item_rows: [] as Array<Record<string, unknown>>,
+  items_throw: false,
+  decrypt_merge: {} as Record<string, unknown>,
 };
+
+vi.mock('@/network_configs', () => ({
+  getNetworkConfigById: vi.fn(async () => {
+    if (!state.network_cfg) throw new Error('network config not loaded');
+    return state.network_cfg;
+  }),
+}));
+
+vi.mock('@/utils/item_decrypt', () => ({
+  decryptItemPrivate: vi.fn((row: { item_state: Record<string, unknown> }) => ({
+    mergedState: { ...row.item_state, ...state.decrypt_merge },
+  })),
+}));
 
 vi.mock('@/services/metrics/staleness', () => ({
   check_and_refresh_if_stale: vi.fn(
@@ -65,11 +85,22 @@ vi.mock('@api/db/postgres/drizzle_config', () => {
     return chain;
   };
 
+  const itemsChain = () => {
+    const chain: Record<string, unknown> = {};
+    chain.from = () => chain;
+    chain.where = () =>
+      state.items_throw
+        ? Promise.reject(new Error('connection terminated'))
+        : Promise.resolve(state.item_rows);
+    return chain;
+  };
+
   return {
     db: {
       select: vi.fn((projection?: Record<string, unknown>) => {
         const keys = Object.keys(projection ?? {});
         if (keys.length === 1 && keys[0] === 'metadata') return orgChain();
+        if (keys.includes('item_private_state')) return itemsChain();
         return listChain();
       }),
     },
@@ -138,6 +169,10 @@ describe('GET /aggregator/dashboard/export', () => {
     state.org_metadata = JSON.stringify({ domains: ['seeker'] });
     state.list_pages = [];
     state.staleness_calls = [];
+    state.network_cfg = null;
+    state.item_rows = [];
+    state.items_throw = false;
+    state.decrypt_merge = {};
   });
 
   it('403 NOT_AGGREGATOR for network_service caller', async () => {
@@ -354,5 +389,61 @@ describe('GET /aggregator/dashboard/export', () => {
     const res = await app.inject({ method: 'GET', url: '/dashboard/export' });
     expect(res.body).not.toContain('should-never-leak');
     expect(res.body).not.toContain('item_private_state');
+  });
+
+  it('resolves a private display name into the CSV name column', async () => {
+    state.network_cfg = {
+      domains: [
+        {
+          id: 'seeker',
+          card: { title_field: 'beneficiary_name' },
+          item_schemas: {
+            'profile_1.0': { properties: { beneficiary_name: { private: true } } },
+          },
+        },
+      ],
+    };
+    state.list_pages = [[sample({ displayName: 'itm_1' })]];
+    state.item_rows = [
+      {
+        item_id: 'itm_1',
+        item_type: 'profile_1.0',
+        item_state: { beneficiary_name: 'R***' },
+        item_private_state: 'v1:blob',
+      },
+    ];
+    state.decrypt_merge = { beneficiary_name: 'Ravi Kumar' };
+
+    const app = await buildApp();
+    const res = await app.inject({ method: 'GET', url: '/dashboard/export' });
+    expect(res.statusCode).toBe(200);
+    expect(res.body).toContain('Ravi Kumar');
+    expect(res.body).not.toContain(',itm_1,bulk'); // name column not the item_id
+  });
+
+  it('completes the full CSV with precomputed names when the items lookup fails', async () => {
+    state.network_cfg = {
+      domains: [
+        {
+          id: 'seeker',
+          card: { title_field: 'beneficiary_name' },
+          item_schemas: {
+            'profile_1.0': { properties: { beneficiary_name: { private: true } } },
+          },
+        },
+      ],
+    };
+    const page = Array.from({ length: 3 }, (_, i) => sample({ itemId: `itm_${i}` }));
+    state.list_pages = [page];
+    state.items_throw = true;
+
+    const app = await buildApp();
+    const res = await app.inject({ method: 'GET', url: '/dashboard/export' });
+    expect(res.statusCode).toBe(200);
+    // The stream must not truncate mid-CSV: every row present, names fall
+    // back to the precomputed display_name.
+    const lines = res.body.trim().split('\n');
+    expect(lines).toHaveLength(4); // header + 3 rows
+    expect(res.body).toContain('Test User');
   });
 });

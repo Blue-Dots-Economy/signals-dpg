@@ -62,6 +62,7 @@ const state = {
   // resolver no-ops and the precomputed displayName passes through).
   network_cfg: null as Record<string, unknown> | null,
   item_rows: [] as Array<Record<string, unknown>>,
+  items_throw: false,
   decrypt_throw: false,
   decrypt_merge: {} as Record<string, unknown>,
 };
@@ -101,7 +102,10 @@ vi.mock('@api/db/postgres/drizzle_config', () => {
     const whereChain = {
       orderBy: vi.fn(() => orderByChain),
       limit: vi.fn(() => resolve()),
-      then: (cb: (v: unknown) => unknown) => resolve().then(cb),
+      // Forward BOTH handlers so a rejecting resolve() surfaces to `await`
+      // as a rejection instead of hanging the thenable.
+      then: (onOk: (v: unknown) => unknown, onErr?: (e: unknown) => unknown) =>
+        resolve().then(onOk, onErr),
     };
     const fromChain: Record<string, unknown> = {
       where: vi.fn(() => whereChain),
@@ -124,7 +128,10 @@ vi.mock('@api/db/postgres/drizzle_config', () => {
         return makeChain(async () => {
           if (mode === 'org') return [{ metadata: state.org_metadata }];
           if (mode === 'count') return [{ n: state.total_matching }];
-          if (mode === 'items') return state.item_rows;
+          if (mode === 'items') {
+            if (state.items_throw) throw new Error('connection terminated');
+            return state.item_rows;
+          }
           return state.list_rows;
         });
       }),
@@ -226,6 +233,7 @@ const resetState = () => {
   state.execute_call_counter = 0;
   state.network_cfg = null;
   state.item_rows = [];
+  state.items_throw = false;
   state.decrypt_throw = false;
   state.decrypt_merge = {};
 };
@@ -478,16 +486,22 @@ describe('GET /aggregator/dashboard', () => {
 describe('private display-name resolution (aggregator-dpg#406)', () => {
   beforeEach(() => {
     resetState();
+    // Clear decryptItemPrivate call history so not-called assertions don't
+    // see calls leaked from earlier tests.
+    vi.clearAllMocks();
   });
 
   /** Network config where the seeker schema has NO display_name_field but
-   *  the domain card declares title_field — the purple_dot seeker shape. */
+   *  the domain card declares title_field, and the field is private —
+   *  the purple_dot seeker shape. */
   const seekerCardCfg = () => ({
     domains: [
       {
         id: 'seeker',
         card: { title_field: 'beneficiary_name' },
-        item_schemas: { 'profile_1.0': { properties: {} } },
+        item_schemas: {
+          'profile_1.0': { properties: { beneficiary_name: { private: true } } },
+        },
       },
     ],
   });
@@ -518,7 +532,13 @@ describe('private display-name resolution (aggregator-dpg#406)', () => {
           id: 'seeker',
           card: { title_field: 'beneficiary_name' },
           item_schemas: {
-            'profile_1.0': { display_name_field: 'organisation_name', properties: {} },
+            'profile_1.0': {
+              display_name_field: 'organisation_name',
+              properties: {
+                organisation_name: { private: true },
+                beneficiary_name: { private: true },
+              },
+            },
           },
         },
       ],
@@ -528,14 +548,41 @@ describe('private display-name resolution (aggregator-dpg#406)', () => {
       {
         item_id: 'itm_1',
         item_type: 'profile_1.0',
-        item_state: { organisation_name: 'Sahaya Trust' },
-        item_private_state: '',
+        item_state: { organisation_name: 'S***' },
+        item_private_state: 'v1:blob',
       },
     ];
+    state.decrypt_merge = { organisation_name: 'Sahaya Trust' };
 
     const app = await buildApp();
     const res = await app.inject({ method: 'GET', url: '/dashboard' });
     expect(res.json().by_domain.seeker.items[0].name).toBe('Sahaya Trust');
+  });
+
+  it('skips decryption entirely when the display field is public (provider shape)', async () => {
+    const { decryptItemPrivate } = await import('@/utils/item_decrypt');
+    state.network_cfg = {
+      domains: [
+        {
+          id: 'seeker',
+          item_schemas: {
+            // organisation_name is public — the precomputed metrics name is
+            // already correct, so the resolver must not fetch or decrypt.
+            'profile_1.0': {
+              display_name_field: 'organisation_name',
+              properties: { organisation_name: {} },
+            },
+          },
+        },
+      ],
+    };
+    state.list_rows = [sample_list_row({ displayName: 'Sahaya Trust' })];
+
+    const app = await buildApp();
+    const res = await app.inject({ method: 'GET', url: '/dashboard' });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().by_domain.seeker.items[0].name).toBe('Sahaya Trust');
+    expect(vi.mocked(decryptItemPrivate)).not.toHaveBeenCalled();
   });
 
   it('falls back to the precomputed display name when decryption fails', async () => {
@@ -550,6 +597,37 @@ describe('private display-name resolution (aggregator-dpg#406)', () => {
       },
     ];
     state.decrypt_throw = true;
+
+    const app = await buildApp();
+    const res = await app.inject({ method: 'GET', url: '/dashboard' });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().by_domain.seeker.items[0].name).toBe('itm_1');
+  });
+
+  it('falls back to the precomputed display name when the row has no private blob', async () => {
+    state.network_cfg = seekerCardCfg();
+    state.list_rows = [sample_list_row({ displayName: 'itm_1' })];
+    state.item_rows = [
+      {
+        item_id: 'itm_1',
+        item_type: 'profile_1.0',
+        // Empty blob: merged state would surface the masked public value
+        // ("R***") — the resolver must keep the precomputed name instead.
+        item_state: { beneficiary_name: 'R***' },
+        item_private_state: '',
+      },
+    ];
+
+    const app = await buildApp();
+    const res = await app.inject({ method: 'GET', url: '/dashboard' });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().by_domain.seeker.items[0].name).toBe('itm_1');
+  });
+
+  it('still returns 200 with precomputed names when the items lookup fails', async () => {
+    state.network_cfg = seekerCardCfg();
+    state.list_rows = [sample_list_row({ displayName: 'itm_1' })];
+    state.items_throw = true;
 
     const app = await buildApp();
     const res = await app.inject({ method: 'GET', url: '/dashboard' });
