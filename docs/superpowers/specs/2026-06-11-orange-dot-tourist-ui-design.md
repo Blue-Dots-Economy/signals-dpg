@@ -7,8 +7,8 @@
 ## Goal
 
 A standalone, **login-free** tourist UI for the `orange_dot` network: a visitor opens the
-web app (primarily on a phone), the browser asks for their location, and they see and
-discover practitioners around them on a map (and in a nearest-first list). There are no
+web app, the browser asks for their location, and they see and discover practitioners
+around them on a map (and in a nearest-first list). There are no
 profiles, no profile creation, no "my actions", no sidebar, and no auth. Each practitioner
 card offers exactly three actions: **Call**, **Website**, **Get Directions**.
 
