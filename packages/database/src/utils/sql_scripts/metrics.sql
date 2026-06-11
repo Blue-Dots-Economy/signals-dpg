@@ -28,15 +28,14 @@ CREATE TABLE IF NOT EXISTS item_metrics (
   profile_last_updated_at   timestamp,
   age_days                  integer,
 
-  count_create              integer NOT NULL DEFAULT 0,
-  count_accept              integer NOT NULL DEFAULT 0,
-  count_reject              integer NOT NULL DEFAULT 0,
-  count_cancel              integer NOT NULL DEFAULT 0,
+  -- Directional action counts — full jsonb maps over the 4 canonical buckets.
+  initiated                 jsonb NOT NULL DEFAULT '{}'::jsonb,
+  received                  jsonb NOT NULL DEFAULT '{}'::jsonb,
 
-  last_create_at            timestamp,
-  last_accept_at            timestamp,
-  last_reject_at            timestamp,
-  last_cancel_at            timestamp,
+  -- Most-recent action timestamp per bucket, per direction. SPARSE jsonb:
+  -- only buckets that occurred carry an ISO-string value.
+  last_initiated_at         jsonb NOT NULL DEFAULT '{}'::jsonb,
+  last_received_at          jsonb NOT NULL DEFAULT '{}'::jsonb,
 
   actionable_tags           text[],
 

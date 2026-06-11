@@ -13,6 +13,7 @@ import { pii_reveal_audit } from '@api/db/postgres/schema';
 import { getCurrentApiBaseUrl } from '@/config';
 import { getNetworkConfigById } from '@/network_configs';
 import { fetchLocalItems } from '@/utils/item_fetch_runtime';
+import { fetchLocalItemSnapshot } from '@/utils/action_event_runtime';
 
 type Params = z.infer<typeof ActionContactDetailsParamsSchema>;
 
@@ -97,6 +98,32 @@ export const get_action_contact_details_handler = async (
     });
   }
 
+  // Gate: caller's own item must be live. The target is always local (this is the target side);
+  // gating the source is only possible when it is also local.
+  const callerItem = callerIsSource
+    ? {
+        item_network: action.source_item_network,
+        item_domain: action.source_item_domain,
+        item_type: action.source_item_type,
+        item_id: action.source_item_id,
+        item_instance_url: action.source_item_instance_url,
+      }
+    : {
+        item_network: action.target_item_network,
+        item_domain: action.target_item_domain,
+        item_type: action.target_item_type,
+        item_id: action.target_item_id,
+        item_instance_url: action.target_item_instance_url,
+      };
+
+  const callerSnapshot = await fetchLocalItemSnapshot(db, callerItem);
+  if (callerSnapshot && callerSnapshot.lifecycle_status !== 'live') {
+    return reply.code(403).send({
+      error: 'PROFILE_NOT_LIVE',
+      message: 'Contact details hidden because your own profile is not live',
+    });
+  }
+
   const other = callerIsSource
     ? {
         network: action.target_item_network,
@@ -138,6 +165,17 @@ export const get_action_contact_details_handler = async (
     return reply.code(404).send({
       error: 'OTHER_ITEM_NOT_FOUND',
       message: 'Other-actor item missing locally despite same instance',
+    });
+  }
+
+  // Gate: the other actor's profile must also be live for PII to be revealed.
+  // Fail-closed: the other item is always local here (cross-instance is rejected at the 501
+  // guard above), and lifecycle_status is a notNull DB column always projected by
+  // fetchLocalItems. There is no legitimate undefined case in this path.
+  if (otherItem.lifecycle_status !== 'live') {
+    return reply.code(403).send({
+      error: 'PROFILE_NOT_LIVE',
+      message: 'Contact details hidden because the other actor profile is not live',
     });
   }
 

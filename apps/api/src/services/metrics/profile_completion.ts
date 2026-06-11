@@ -12,9 +12,6 @@ export interface JSONSchemaLike {
   required?: string[];
 }
 
-const REQUIRED_WEIGHT = 1.0;
-const OPTIONAL_WEIGHT = 0.5;
-
 /**
  * Predicate shared by profile_completion_pct and actionable_tags' "missing_X"
  * derivation (Task 4). Returns true for any value we consider "the user
@@ -29,36 +26,24 @@ export const is_populated = (v: unknown): boolean => {
 };
 
 /**
- * Schema-driven profile completion percentage.
+ * Schema-driven profile completion percentage — **required-only**.
  *
- * Walks the JSON Schema's `properties`. Each property is weighted 1.0 if
- * it's listed in `required`, 0.5 otherwise. Earned weight / total weight ×
- * 100, rounded, capped at 100.
+ * Mirrors the lifecycle classifier (`classify_item`): only fields listed in
+ * `schema.required` count. `filled_required / total_required × 100`, rounded.
+ * Optional fields contribute nothing. A schema with no required fields is
+ * vacuously complete → 100.
  *
- * Returns 0 for: missing/empty schema, missing/empty payload, schema with
- * no `properties` block.
- *
- * Only keys that appear in `schema.properties` are scored — extra keys in
- * the payload don't push completion past 100 and don't count for/against.
+ * (Previously a weighted formula — required ×1.0 + optional ×0.5. Unified to
+ * required-only so there is a single completion notion across the system.)
  */
 export const profile_completion_pct = (
   payload: Record<string, unknown> | null | undefined,
   schema: JSONSchemaLike | null | undefined,
 ): number => {
-  const props = schema?.properties;
-  if (!props) return 0;
+  const required = schema?.required ?? [];
+  if (required.length === 0) return 100;
 
-  const required = new Set(schema?.required ?? []);
-  const keys = Object.keys(props);
-
-  let earned = 0;
-  let total = 0;
-  for (const key of keys) {
-    const weight = required.has(key) ? REQUIRED_WEIGHT : OPTIONAL_WEIGHT;
-    total += weight;
-    if (is_populated(payload?.[key])) earned += weight;
-  }
-
-  if (total === 0) return 0;
-  return Math.min(100, Math.round((earned / total) * 100));
+  const state = payload ?? {};
+  const filled = required.filter((key) => is_populated(state[key]));
+  return Math.round((filled.length / required.length) * 100);
 };

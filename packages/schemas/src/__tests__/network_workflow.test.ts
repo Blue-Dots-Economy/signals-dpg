@@ -185,3 +185,46 @@ describe('NetworkActionInteractionSchema consent_text fields', () => {
     ).toThrow();
   });
 });
+
+describe('network_workflow domain card config', () => {
+  function configWithCard(card: unknown) {
+    return {
+      ...baseConfig,
+      domains: [
+        { id: 'seeker', item_schemas: { profile_1_0: { type: 'object' } }, status_rules: minimalStatusRules, card },
+        { id: 'provider', item_schemas: { profile_1_0: { type: 'object' } }, status_rules: minimalStatusRules },
+      ],
+    };
+  }
+
+  it('preserves a card block through parsing (not stripped by Zod)', () => {
+    const parsed = parseNetworkConfigDocument(
+      configWithCard({
+        title_field: 'name',
+        avatar_from: 'name',
+        default_fields: ['category', 'area'],
+      })
+    );
+    expect(parsed.domains[0].card).toEqual({
+      title_field: 'name',
+      avatar_from: 'name',
+      default_fields: ['category', 'area'],
+    });
+  });
+
+  it('defaults default_fields to [] when omitted', () => {
+    const parsed = parseNetworkConfigDocument(configWithCard({ title_field: 'name' }));
+    expect(parsed.domains[0].card?.default_fields).toEqual([]);
+  });
+
+  it('leaves card undefined when the domain has no card block', () => {
+    const parsed = parseNetworkConfigDocument(baseConfig);
+    expect(parsed.domains[0].card).toBeUndefined();
+  });
+
+  it('rejects unknown keys inside card (strict)', () => {
+    expect(() =>
+      parseNetworkConfigDocument(configWithCard({ title_field: 'name', bogus: true }))
+    ).toThrow();
+  });
+});

@@ -157,9 +157,9 @@ vi.mock('@/utils/action_event_runtime', async () => {
     fetchLocalItemSnapshot: vi.fn(async () => ({
       created_by: 'usr_agg_owned',
       item_id: 'target_item_1',
-      item_latitude: null,
-      item_longitude: null,
+      item_locations: [],
       private_state: {},
+      lifecycle_status: 'live',
     })),
   };
 });
@@ -257,6 +257,26 @@ describe('POST /api/v1/action/update-status (bulk, self-acted only)', () => {
     });
     expect(res.statusCode).toBe(422);
     expect(res.json().results[0]).toMatchObject({ error: 'NOT_TARGET_ITEM_OWNER' });
+    expect(dbState.updates).toHaveLength(0);
+  });
+
+  it('422 PROFILE_NOT_LIVE when target item is not live', async () => {
+    const { fetchLocalItemSnapshot } = await import('@/utils/action_event_runtime');
+    (fetchLocalItemSnapshot as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      created_by: 'usr_agg_owned',
+      item_id: 'target_item_1',
+      item_latitude: null,
+      item_longitude: null,
+      private_state: {},
+      lifecycle_status: 'paused',
+    });
+    const res = await buildApp(undefined, { id: 'usr_agg_owned' }).inject({
+      method: 'POST',
+      url: '/update-status',
+      payload: [VALID_BODY],
+    });
+    expect(res.statusCode).toBe(422);
+    expect(res.json().results[0]).toMatchObject({ error: 'PROFILE_NOT_LIVE' });
     expect(dbState.updates).toHaveLength(0);
   });
 

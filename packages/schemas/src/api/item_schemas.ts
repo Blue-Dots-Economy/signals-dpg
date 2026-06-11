@@ -1,15 +1,36 @@
 import { items } from '@dpg/database';
 import { createInsertSchema, createSelectSchema } from 'drizzle-zod';
 import z from 'zod';
+
+const ItemLocationPoint = z.object({
+  lat: z.number().min(-90).max(90),
+  lng: z.number().min(-180).max(180),
+  label: z.string().optional(),
+});
+export const ItemLocationsArray = z.array(ItemLocationPoint);
+
 export const ItemSelectSchema = createSelectSchema(items);
 export const ItemResponseSchema = ItemSelectSchema.omit({
   item_private_state: true,
+}).extend({
+  // Kept optional deliberately: response paths that do not project this column
+  // (e.g. browse/fetch without lifecycle filter) must not cause a serialization 500.
+  lifecycle_status: z.enum(['draft', 'live', 'paused']).optional(),
+  item_locations: ItemLocationsArray,
 });
 export const ItemInsertSchema = createInsertSchema(items);
+// ItemSnapshotSchema is the contract sent to the external match-score scorer.
+// The scorer knows nothing about item_locations — it expects flat scalar coords
+// (item_latitude / item_longitude). The UI derives these from item_locations[0]
+// before calling the API (see apps/ui/src/lib/match-score-api.ts itemToSnapshot).
 export const ItemSnapshotSchema = ItemResponseSchema.omit({
   created_by: true,
   created_at: true,
   updated_at: true,
+  item_locations: true,
+}).extend({
+  item_latitude: z.number().min(-90).max(90).nullable().optional(),
+  item_longitude: z.number().min(-180).max(180).nullable().optional(),
 });
 
 export const CreateItemBodySchema = ItemInsertSchema.omit({
@@ -20,11 +41,13 @@ export const CreateItemBodySchema = ItemInsertSchema.omit({
   item_private_state: true,
   created_at: true,
   updated_at: true,
+  lifecycle_status: true,
 }).extend({
   // Optional override used by admin / service callers to author items on
   // behalf of another user. Non-admin callers cannot supply this — see
   // create_item.ts.
   created_by: z.string().min(1).optional(),
+  item_locations: ItemLocationsArray.optional(),
 });
 
 const FetchItemsSchemaBase = z.object({
@@ -103,7 +126,11 @@ export const UpdateItemBodySchema = ItemInsertSchema.omit({
   item_private_state: true,
   created_at: true,
   updated_at: true,
+  lifecycle_status: true,
 })
+  .extend({
+    item_locations: ItemLocationsArray.optional(),
+  })
   .partial()
   .strict()
   .refine((data) => Object.keys(data).length > 0, {

@@ -44,7 +44,11 @@ export const UpsertParticipantRequest = z
     source_id: z.string().min(1).optional(),
     item_state: z
       .record(z.string(), z.unknown())
-      .describe('payload written to the items table'),
+      .optional()
+      .describe(
+        'payload written to the items table; if absent OR an empty object {}, ' +
+        'the route enters account_only mode (only the user is created/looked up, no item is written).',
+      ),
     item_id: z
       .uuid()
       .optional()
@@ -90,10 +94,28 @@ export const ParticipantItemSnapshot = z.object({
 export const UpsertParticipantResponse = z.object({
   user_id: z.string(),
   user_existed: z.boolean(),
+  owned_elsewhere: z.boolean(),
   onboarded_at: z.iso.datetime().nullable(),
+  items: z.array(ParticipantItemSnapshot),
+});
+
+export const GetParticipantRequest = z
+  .object({
+    email: z.email().optional(),
+    phone_number: PhoneE164.optional(),
+  })
+  .refine((q) => Boolean(q.email) || Boolean(q.phone_number), {
+    message: 'either email or phone_number is required',
+    path: ['email'],
+  });
+
+export const GetParticipantResponse = z.object({
+  user_id: z.string().nullable(),
   items: z.array(ParticipantItemSnapshot),
 });
 
 export type UpsertParticipantRequest = z.infer<typeof UpsertParticipantRequest>;
 export type UpsertParticipantResponse = z.infer<typeof UpsertParticipantResponse>;
 export type ParticipantItemSnapshot = z.infer<typeof ParticipantItemSnapshot>;
+export type GetParticipantRequest = z.infer<typeof GetParticipantRequest>;
+export type GetParticipantResponse = z.infer<typeof GetParticipantResponse>;

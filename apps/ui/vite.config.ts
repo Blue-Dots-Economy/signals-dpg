@@ -1,7 +1,7 @@
 import { defineConfig, loadEnv, type Plugin } from 'vite';
 import react from '@vitejs/plugin-react';
 import tailwindcss from '@tailwindcss/vite';
-import fs from 'node:fs';
+import fs, { existsSync, renameSync } from 'node:fs';
 import path from 'path';
 
 /**
@@ -206,20 +206,71 @@ function brandThemePlugin(): Plugin {
 
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), '');
+  const isTourist = env.VITE_APP === 'tourist';
+  const touristEntry = path.resolve(__dirname, 'index.tourist.html');
   const defaultNetworkTheme =
     env.VITE_DEFAULT_NETWORK_THEME ||
     (env.VITE_NETWORK_ID ? env.VITE_NETWORK_ID.split(',')[0].trim() : 'blue_dot');
 
   return {
-    plugins: [react(), tailwindcss(), brandThemePlugin()],
+    plugins: [
+      react(),
+      tailwindcss(),
+      brandThemePlugin(),
+      ...(isTourist
+        ? [
+            {
+              name: 'tourist-root-entry',
+              configureServer(server) {
+                server.middlewares.use((req, _res, next) => {
+                  const pathname = new URL(req.url ?? '/', 'http://localhost').pathname;
+                  if (pathname === '/' || pathname === '/index.html') req.url = '/index.tourist.html';
+                  next();
+                });
+              },
+              // The build emits dist/index.tourist.html (Rollup keeps the source
+              // filename); rename it to index.html so the tourist build is servable
+              // at / by a static host. No-op in dev (closeBundle doesn't run there,
+              // and the guard covers it anyway).
+              closeBundle() {
+                const built = path.resolve(__dirname, 'dist/tourist/index.tourist.html');
+                const target = path.resolve(__dirname, 'dist/tourist/index.html');
+                if (existsSync(built)) renameSync(built, target);
+              },
+            } as Plugin,
+          ]
+        : []),
+    ],
     resolve: {
-      alias: {
-        '@': path.resolve(__dirname, './src'),
-      },
+      // Mirror the tsconfig `paths` so Vite resolves the same aliases the
+      // type-checker does. `@dpg/*` -> packages/*/src (workspace source);
+      // listed before `@` since both are matched in order. Array form is
+      // required for the regex `@dpg/*` mapping.
+      alias: [
+        // Lean, dependency-free subpath: the UI only needs the pure geo
+        // helpers, NOT the @dpg/schemas barrel (which re-exports DB-bound
+        // modules via @dpg/database → pg, breaking the browser build).
+        // This specific entry must precede the generic @dpg/* mapping.
+        {
+          find: '@dpg/schemas/location_fields',
+          replacement: path.resolve(
+            __dirname,
+            '../../packages/schemas/src/location_fields.ts',
+          ),
+        },
+        {
+          find: /^@dpg\/(.*)$/,
+          replacement: path.resolve(__dirname, '../../packages/$1/src'),
+        },
+        { find: '@', replacement: path.resolve(__dirname, './src') },
+      ],
     },
     define: {
       __DEFAULT_NETWORK_THEME__: JSON.stringify(defaultNetworkTheme),
     },
+    build: isTourist
+      ? { outDir: 'dist/tourist', rollupOptions: { input: touristEntry } }
+      : undefined,
     server: {
       port: 3000,
     },

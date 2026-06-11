@@ -58,12 +58,10 @@ function getStatusStyle(status: string): StatusStyleShape {
   );
 }
 
-function formatItemLocation(
-  latitude: number | null | undefined,
-  longitude: number | null | undefined
-): string | null {
-  if (latitude == null || longitude == null) return null;
-  return `${latitude.toFixed(4)}, ${longitude.toFixed(4)}`;
+function formatItemLocations(locs: Array<{ lat: number; lng: number; label?: string }> | undefined): string {
+  if (!locs || locs.length === 0) return '';
+  const labels = locs.map((l) => l.label).filter((s): s is string => !!s && s.trim().length > 0);
+  return labels.length > 0 ? labels.join(', ') : `${locs.length} location${locs.length > 1 ? 's' : ''}`;
 }
 
 function formatRequirementValue(value: unknown): string {
@@ -108,15 +106,13 @@ export function ActionCard({ action, ownershipRole, onStatusUpdate, selectionMod
           name: action.target_item_name,
           itemId: action.target_item_id,
           domain: action.target_item_domain,
-          latitude: action.target_item_latitude,
-          longitude: action.target_item_longitude,
+          locations: action.target_item_locations,
         }
       : {
           name: action.source_item_name,
           itemId: action.source_item_id,
           domain: action.source_item_domain,
-          latitude: action.source_item_latitude,
-          longitude: action.source_item_longitude,
+          locations: action.source_item_locations,
         };
   const myDomain =
     ownershipRole === 'initiated' ? action.source_item_domain : action.target_item_domain;
@@ -138,7 +134,7 @@ export function ActionCard({ action, ownershipRole, onStatusUpdate, selectionMod
   const fromLabel = ownershipRole === 'initiated' ? meLabel : otherLabel;
   const toLabel = ownershipRole === 'initiated' ? otherLabel : meLabel;
 
-  const location = formatItemLocation(otherParty.latitude, otherParty.longitude);
+  const location = formatItemLocations(otherParty.locations) || null;
 
   const isPending =
     action.action_status === 'created' || action.action_status === 'pending';

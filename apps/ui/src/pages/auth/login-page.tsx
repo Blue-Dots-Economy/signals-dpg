@@ -5,7 +5,12 @@ import { useTranslation } from 'react-i18next';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { AuthShell } from '@/components/layout/auth-shell';
-import { checkUser, requestOtp, type AuthIdentifier } from '@/lib/auth-api';
+import {
+  checkUser,
+  isValidPhoneNumber,
+  requestOtp,
+  type AuthIdentifier,
+} from '@/lib/auth-api';
 import { toast } from 'sonner';
 
 type AuthMode = 'phone' | 'email';
@@ -36,6 +41,21 @@ export function LoginPage() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!contactValue.trim()) return;
+
+    // Client-side validation — server won't crash on a malformed number
+    // but the OTP send will fail silently. Surface a clean inline error.
+    if (mode === 'phone' && !isValidPhoneNumber(phoneNumber)) {
+      toast.error(t('auth.toast_invalid_phone'), {
+        description: t('auth.toast_invalid_phone_desc'),
+      });
+      return;
+    }
+    if (mode === 'email' && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) {
+      toast.error(t('auth.toast_invalid_email'), {
+        description: t('auth.toast_invalid_email_desc'),
+      });
+      return;
+    }
 
     setIsLoading(true);
     try {

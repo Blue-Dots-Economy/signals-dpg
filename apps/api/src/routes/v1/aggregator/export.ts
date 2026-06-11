@@ -10,8 +10,14 @@ import { organization } from '../../../../db/postgres/schema/auth.js';
 import { eq, and, inArray, asc, getTableColumns } from 'drizzle-orm';
 import { ExportQuery, type ExportQuery as ExportQueryType } from '@dpg/schemas';
 import { check_and_refresh_if_stale } from '@/services/metrics/staleness';
+import {
+  resolve_private_display_names,
+  type NameResolutionLog,
+} from '@/utils/private_display_name';
 
 const COLUMNS = [
+  'profile_item_id',
+  'user_id',
   'item_network',
   'item_domain',
   'item_type',
@@ -22,14 +28,22 @@ const COLUMNS = [
   'profile_created_at',
   'profile_last_updated_at',
   'age_days',
-  'count_create',
-  'count_accept',
-  'count_reject',
-  'count_cancel',
-  'last_create_at',
-  'last_accept_at',
-  'last_reject_at',
-  'last_cancel_at',
+  'initiated_create',
+  'initiated_accept',
+  'initiated_reject',
+  'initiated_cancel',
+  'received_create',
+  'received_accept',
+  'received_reject',
+  'received_cancel',
+  'last_initiated_create_at',
+  'last_initiated_accept_at',
+  'last_initiated_reject_at',
+  'last_initiated_cancel_at',
+  'last_received_create_at',
+  'last_received_accept_at',
+  'last_received_reject_at',
+  'last_received_cancel_at',
   'actionable_tags',
 ] as const;
 
@@ -67,6 +81,7 @@ async function* generate_csv(
   aggregator_id: string,
   scope: string[],
   status: string | undefined,
+  log?: NameResolutionLog,
 ): AsyncGenerator<string> {
   yield COLUMNS.join(',') + '\n';
 
@@ -90,26 +105,44 @@ async function* generate_csv(
 
     if (rows.length === 0) break;
 
+    // Same entitlement as the dashboard list: every row belongs to the
+    // acting aggregator, so private display names are revealed.
+    const private_names = await resolve_private_display_names(rows, log);
+
     for (const r of rows) {
+      const initiated = r.initiated ?? {};
+      const received = r.received ?? {};
+      const lastInitiated = r.lastInitiatedAt ?? {};
+      const lastReceived = r.lastReceivedAt ?? {};
       const projected: Record<(typeof COLUMNS)[number], unknown> = {
+        profile_item_id: r.itemId,
+        user_id: r.ownerUserId,
         item_network: r.itemNetwork,
         item_domain: r.itemDomain,
         item_type: r.itemType,
-        name: r.displayName,
+        name: private_names.get(r.itemId) ?? r.displayName,
         onboarded_via: r.onboardedVia,
         profile_status: r.profileStatus,
         profile_completion_pct: r.profileCompletionPct,
         profile_created_at: r.profileCreatedAt,
         profile_last_updated_at: r.profileLastUpdatedAt,
         age_days: r.ageDays,
-        count_create: r.countCreate,
-        count_accept: r.countAccept,
-        count_reject: r.countReject,
-        count_cancel: r.countCancel,
-        last_create_at: r.lastCreateAt,
-        last_accept_at: r.lastAcceptAt,
-        last_reject_at: r.lastRejectAt,
-        last_cancel_at: r.lastCancelAt,
+        initiated_create: initiated.create ?? 0,
+        initiated_accept: initiated.accept ?? 0,
+        initiated_reject: initiated.reject ?? 0,
+        initiated_cancel: initiated.cancel ?? 0,
+        received_create: received.create ?? 0,
+        received_accept: received.accept ?? 0,
+        received_reject: received.reject ?? 0,
+        received_cancel: received.cancel ?? 0,
+        last_initiated_create_at: lastInitiated.create ?? null,
+        last_initiated_accept_at: lastInitiated.accept ?? null,
+        last_initiated_reject_at: lastInitiated.reject ?? null,
+        last_initiated_cancel_at: lastInitiated.cancel ?? null,
+        last_received_create_at: lastReceived.create ?? null,
+        last_received_accept_at: lastReceived.accept ?? null,
+        last_received_reject_at: lastReceived.reject ?? null,
+        last_received_cancel_at: lastReceived.cancel ?? null,
         actionable_tags: r.actionableTags,
       };
       yield COLUMNS.map((c) => csv_escape(projected[c])).join(',') + '\n';
@@ -167,7 +200,9 @@ export const aggregator_export: FastifyPluginAsync = async (app) => {
         .header('content-type', 'text/csv; charset=utf-8')
         .header('content-disposition', `attachment; filename="${filename}"`);
 
-      return reply.send(Readable.from(generate_csv(acting.org_id, scope, status)));
+      return reply.send(
+        Readable.from(generate_csv(acting.org_id, scope, status, request.log)),
+      );
     },
   });
 };

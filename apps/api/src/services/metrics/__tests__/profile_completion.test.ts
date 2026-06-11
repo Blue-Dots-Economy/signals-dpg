@@ -7,58 +7,42 @@ const seeker_schema = {
   properties: {
     'Full Name':     { type: 'string' as const },
     'Phone Number':  { type: 'string' as const },
-    'Email Address': { type: 'string' as const },  // optional
-    'Grade':         { type: 'string' as const },  // optional
+    'Email Address': { type: 'string' as const },  // optional — ignored by required-only
+    'Grade':         { type: 'string' as const },  // optional — ignored by required-only
   },
 };
 
-describe('profile_completion_pct', () => {
-  it('returns 0 for empty payload', () => {
+describe('profile_completion_pct (required-only)', () => {
+  it('returns 0 when no required field is populated', () => {
     expect(profile_completion_pct({}, seeker_schema)).toBe(0);
   });
 
-  it('returns 100 when all required + all optional populated', () => {
+  it('returns 100 when all required populated (optionals irrelevant)', () => {
     expect(profile_completion_pct({
       'Full Name': 'A',
       'Phone Number': '9876543210',
-      'Email Address': 'a@b.com',
-      'Grade': 'XI',
     }, seeker_schema)).toBe(100);
   });
 
-  it('weights required as 1.0 and optional as 0.5', () => {
-    // 2 required filled (weight 2.0) of total weight 3.0 = 66.67 → 67
-    expect(profile_completion_pct({
-      'Full Name': 'A',
-      'Phone Number': '9876543210',
-    }, seeker_schema)).toBe(67);
+  it('1 of 2 required → 50', () => {
+    expect(profile_completion_pct({ 'Full Name': 'A' }, seeker_schema)).toBe(50);
   });
 
-  it('half-completed optional weighted correctly', () => {
-    // 2 required (2.0) + 1 optional (0.5) of total 3.0 = 83.33 → 83
+  it('optional fields do NOT contribute (still 50 with all optionals filled)', () => {
     expect(profile_completion_pct({
       'Full Name': 'A',
-      'Phone Number': '9876543210',
       'Email Address': 'a@b.com',
-    }, seeker_schema)).toBe(83);
+      'Grade': 'XI',
+    }, seeker_schema)).toBe(50);
   });
 
-  it('caps at 100', () => {
-    const optional_only = {
-      type: 'object' as const,
-      required: [],
-      properties: { a: { type: 'string' as const }, b: { type: 'string' as const } },
-    };
-    expect(profile_completion_pct({ a: 'x', b: 'y' }, optional_only)).toBe(100);
-  });
-
-  it('treats empty string and empty array as not populated', () => {
+  it('empty string and empty array are not populated', () => {
     expect(profile_completion_pct(
       { 'Full Name': '', 'Phone Number': [] }, seeker_schema,
     )).toBe(0);
   });
 
-  it('treats boolean false as populated', () => {
+  it('boolean false counts as populated', () => {
     const yn_schema = {
       type: 'object' as const,
       required: ['Open To Remote'],
@@ -67,7 +51,7 @@ describe('profile_completion_pct', () => {
     expect(profile_completion_pct({ 'Open To Remote': false }, yn_schema)).toBe(100);
   });
 
-  it('treats numeric 0 as populated', () => {
+  it('numeric 0 counts as populated', () => {
     const yrs = {
       type: 'object' as const,
       required: ['Years Experience'],
@@ -76,28 +60,30 @@ describe('profile_completion_pct', () => {
     expect(profile_completion_pct({ 'Years Experience': 0 }, yrs)).toBe(100);
   });
 
-  it('returns 0 when schema has no properties', () => {
-    expect(profile_completion_pct({ foo: 'bar' }, {
+  it('vacuously complete (no required fields) → 100', () => {
+    expect(profile_completion_pct({}, {
       type: 'object' as const,
-    })).toBe(0);
+      required: [],
+      properties: { a: { type: 'string' as const } },
+    })).toBe(100);
   });
 
-  it('returns 0 when schema is null/undefined', () => {
-    expect(profile_completion_pct({ foo: 'bar' }, null)).toBe(0);
-    expect(profile_completion_pct({ foo: 'bar' }, undefined)).toBe(0);
+  it('no schema / no required key → 100 (vacuous, matches classifier)', () => {
+    expect(profile_completion_pct({ foo: 'bar' }, { type: 'object' as const })).toBe(100);
+    expect(profile_completion_pct({ foo: 'bar' }, null)).toBe(100);
+    expect(profile_completion_pct({ foo: 'bar' }, undefined)).toBe(100);
   });
 
-  it('returns 0 when payload is null/undefined', () => {
+  it('null/undefined payload with required fields → 0', () => {
     expect(profile_completion_pct(null, seeker_schema)).toBe(0);
     expect(profile_completion_pct(undefined, seeker_schema)).toBe(0);
   });
 
-  it('only counts keys that exist in schema.properties (ignores extra payload keys)', () => {
-    // extra key in payload should NOT inflate completion
+  it('extra payload keys are ignored', () => {
     expect(profile_completion_pct({
       'Full Name': 'A',
       'Phone Number': '9876543210',
       'extra_key_not_in_schema': 'whatever',
-    }, seeker_schema)).toBe(67);
+    }, seeker_schema)).toBe(100);
   });
 });

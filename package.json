@@ -19,6 +19,8 @@
     "e2e:actions": "pnpm --filter api exec tsx scripts/e2e/seed_actions.mts",
     "dev:ui": "node scripts/turbo-with-root-env.mjs run dev --filter=ui",
     "build:ui": "node scripts/turbo-with-root-env.mjs run build --filter=ui",
+    "dev:tourist": "node scripts/turbo-with-root-env.mjs run dev:tourist --filter=ui",
+    "build:tourist": "node scripts/turbo-with-root-env.mjs run build:tourist --filter=ui",
     "preview:ui": "node scripts/turbo-with-root-env.mjs run preview --filter=ui",
     "docker:api": "node scripts/run-api-docker.mjs",
     "schema:bundle": "node scripts/generate-schema-bundle.mjs",

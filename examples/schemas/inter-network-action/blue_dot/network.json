@@ -156,7 +156,12 @@
           }
         }
       },
-      "id": "seeker"
+      "id": "seeker",
+      "card": {
+        "title_field": "name",
+        "avatar_from": "name",
+        "default_fields": ["location", "email", "phone"]
+      }
     },
     {
       "description": "Employers and recruiters posting jobs.",
@@ -213,7 +218,12 @@
           }
         }
       },
-      "id": "provider"
+      "id": "provider",
+      "card": {
+        "title_field": "company_name",
+        "avatar_from": "company_name",
+        "default_fields": ["role", "city", "employment_type", "salary_range"]
+      }
     }
   ],
   "instances": [

@@ -3,8 +3,8 @@ import { useTranslation } from 'react-i18next';
 import type { RJSFSchema } from '@rjsf/utils';
 import type { MapMarker } from '@/engine/types';
 import { getActiveMapProvider } from '@/engine/map/map-registry';
-import { extractAddressFromForm, extractPincodeFromForm, normalizeFieldName } from '@/lib/item-utils';
-import { geocodePincode, geocodeAddress, geocodeAddressWithGoogle } from './geocoding';
+import { parseLocationFields, buildLocationQueries } from '@dpg/schemas/location_fields';
+import { getGeoProvider } from '@/lib/geo/provider';
 import { Button } from '@/components/ui/button';
 import { Maximize2, Minimize2 } from 'lucide-react';
 
@@ -36,6 +36,30 @@ interface MapViewProps {
   filtersSlot?: React.ReactNode;
   /** Optional custom popup renderer passed to the active provider. */
   renderPopup?: (marker: MapMarker) => React.ReactNode;
+  /**
+   * Resolve a marker's display label per item — used to honour each domain's
+   * `card.title_field` when items span multiple domains (the "All" view), where
+   * a single `schema`-based heuristic can't pick the right title field. Returns
+   * undefined to fall back to the schema heuristic.
+   */
+  resolveMarkerLabel?: (item: {
+    id: string;
+    domain?: string;
+    data: Record<string, unknown>;
+  }) => string | undefined;
+  /**
+   * Tailwind height classes for the (non-maximized) map wrapper. Defaults to
+   * `h-[calc(100vh-8rem)] min-h-[400px]` to suit the signals page chrome.
+   * Callers with a different layout (e.g. the tourist app, whose header is
+   * shorter) can pass `h-full` to fill their own flex container instead.
+   */
+  heightClassName?: string;
+  /**
+   * Optional per-marker icon resolver, forwarded to the active map provider.
+   * Defaults (in the provider) to a domain-based icon; the tourist app passes
+   * a category-based resolver. Unset for signals → unchanged behaviour.
+   */
+  resolveMarkerIcon?: (marker: MapMarker) => import('lucide-react').LucideIcon;
 }
 
 const INDIA_CENTER: [number, number] = [20.5937, 78.9629];
@@ -51,6 +75,9 @@ export function MapView({
   focusPoint,
   filtersSlot,
   renderPopup,
+  resolveMarkerLabel,
+  heightClassName = 'h-[calc(100vh-8rem)] min-h-[400px]',
+  resolveMarkerIcon,
 }: MapViewProps) {
   const { t } = useTranslation();
   const MapProviderComponent = getActiveMapProvider();
@@ -101,74 +128,70 @@ export function MapView({
 
       const resolved = await Promise.all(
         items.map(async (item) => {
-          let lat: number | null = null;
-          let lng: number | null = null;
-          let precision: MapMarker['precision'] = 'exact';
-          let geocodedFrom: string | undefined;
-
-          // 1. Try stored coordinates first (exact precision)
-          lat = resolveCoordinate(item.data, 'item_latitude', 'lat', 'latitude');
-          lng = resolveCoordinate(item.data, 'item_longitude', 'lng', 'lon', 'longitude');
-
-          // 2. Fallback to pincode geocoding
-          if (lat === null || lng === null) {
-            const pincode = extractPincodeFromForm(item.data, '');
-            if (pincode) {
-              const geo = await geocodePincode(pincode);
-              if (geo) {
-                lat = geo.lat;
-                lng = geo.lng;
-                precision = 'geocoded_pincode';
-                geocodedFrom = 'pincode';
-              }
-            }
-          }
-
-          // 3. Fallback to address geocoding (full address format)
-          if (lat === null || lng === null) {
-            const address = extractAddressFromForm(item.data);
-            if (address) {
-              const geo = await geocodeAddressWithGoogle(address) ?? await geocodeAddress(address, 'full');
-              if (geo) {
-                lat = geo.lat;
-                lng = geo.lng;
-                precision = 'geocoded_full_address';
-                geocodedFrom = 'location';
-              } else {
-                // Fallback to city-only format
-                const cityGeo = await geocodeAddress(address, 'city-only');
-                if (cityGeo) {
-                  lat = cityGeo.lat;
-                  lng = cityGeo.lng;
-                  precision = 'geocoded_city_only';
-                  geocodedFrom = 'city';
+          // Primary: use stored item_locations array (one marker per entry).
+          const locs = Array.isArray(
+            (item.data as Record<string, unknown>).item_locations
+          )
+            ? (
+                item.data as {
+                  item_locations?: Array<{ lat: number; lng: number; label?: string }>;
                 }
+              ).item_locations ?? []
+            : [];
+
+          // Fallback: if the item has no stored locations, geocode the field query(ies).
+          let points: Array<{ lat: number; lng: number; label?: string }> = locs;
+          if (points.length === 0) {
+            const fields = parseLocationFields(schema as Record<string, unknown>);
+            const queries = buildLocationQueries(item.data, fields);
+            const geocoded: Array<{ lat: number; lng: number; label?: string }> = [];
+            for (const { query, label } of queries) {
+              const [best] = await getGeoProvider().suggest(query);
+              if (best) {
+                geocoded.push(
+                  label
+                    ? { lat: best.lat, lng: best.lng, label }
+                    : { lat: best.lat, lng: best.lng }
+                );
               }
             }
+            points = geocoded;
           }
 
-          // Skip items without any location data
-          if (lat === null || lng === null) return null;
+          // Skip items with no resolvable location.
+          if (points.length === 0) return [];
 
-          const label = titleField
-            ? String(item.data[titleField] ?? 'Item')
-            : 'Item';
+          // Prefer the per-domain card.title_field (works across domains in the
+          // "All" view); fall back to the single-schema heuristic, then 'Item'.
+          const resolvedLabel = resolveMarkerLabel?.(item)?.trim();
+          const baseLabel =
+            resolvedLabel ||
+            (titleField ? String(item.data[titleField] ?? 'Item') : 'Item');
 
-          return {
-            id: item.id,
-            lat,
-            lng,
-            label,
-            data: item.data,
-            precision,
-            geocodedFrom,
-            domain: item.domain,
-          } satisfies MapMarker;
+          // Determine precision: stored locations are exact; geocoded are approximate.
+          const isGeocoded = locs.length === 0 && points.length > 0;
+          const precision: MapMarker['precision'] = isGeocoded
+            ? 'geocoded_full_address'
+            : 'exact';
+
+          return points.map(
+            (p, i) =>
+              ({
+                id: `${item.id}#${i}`,
+                lat: p.lat,
+                lng: p.lng,
+                label: p.label ? `${baseLabel} — ${p.label}` : baseLabel,
+                data: item.data,
+                precision,
+                geocodedFrom: isGeocoded ? (p.label ?? 'location') : undefined,
+                domain: item.domain,
+              }) satisfies MapMarker
+          );
         })
       );
 
       if (!cancelled) {
-        const valid = resolved.filter((m): m is NonNullable<typeof m> & MapMarker => m !== null);
+        const valid: MapMarker[] = resolved.flat();
         setMarkers(spreadCoLocatedMarkers(valid));
         setLoading(false);
       }
@@ -176,7 +199,7 @@ export function MapView({
 
     resolveMarkers();
     return () => { cancelled = true; };
-  }, [items, schema]);
+  }, [items, schema, resolveMarkerLabel]);
 
   // The map and the maximize button always render. Loading and empty states are
   // shown as overlays ON TOP of the map rather than replacing it — otherwise a
@@ -189,7 +212,7 @@ export function MapView({
       className={
         isMaximized
           ? 'fixed inset-0 z-[2000] bg-background'
-          : 'relative h-[calc(100vh-8rem)] min-h-[400px]'
+          : `relative ${heightClassName}`
       }
     >
       <MapProviderComponent
@@ -199,6 +222,7 @@ export function MapView({
         onMarkerClick={onMarkerClick}
         initialViewSet={initialViewSet}
         renderPopup={renderPopup}
+        resolveIcon={resolveMarkerIcon}
       />
       {/* Top-right overlay: Filters (only while maximized — the page header
           hosts it normally but is hidden in fullscreen) + maximize toggle.
@@ -246,9 +270,23 @@ export function MapView({
  * separate into individually-clickable pins. The offset is tiny relative to a
  * city-centroid's inherent imprecision, so it does not misrepresent location.
  */
+/**
+ * Stable hash of a string to a unit float in [0, 1) (FNV-1a, 32-bit). Used to
+ * derive a marker's fan-out angle from its item id so the offset is a pure
+ * function of the item — never of the surrounding group.
+ */
+function hashToUnit(str: string): number {
+  let h = 2166136261;
+  for (let i = 0; i < str.length; i++) {
+    h ^= str.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  return (h >>> 0) / 4294967296;
+}
+
 function spreadCoLocatedMarkers(markers: MapMarker[]): MapMarker[] {
-  // ~15 metres expressed in degrees of latitude (1° lat ≈ 111_320 m).
-  const RADIUS_DEG = 15 / 111_320;
+  // ~10 metres expressed in degrees of latitude (1° lat ≈ 111_320 m).
+  const RADIUS_DEG = 10 / 111_320;
 
   const groups = new Map<string, MapMarker[]>();
   for (const marker of markers) {
@@ -264,50 +302,26 @@ function spreadCoLocatedMarkers(markers: MapMarker[]): MapMarker[] {
       result.push(group[0]);
       continue;
     }
-    // Evenly distribute the group around a small circle centered on the
-    // shared coordinate. Longitude offset is scaled by cos(lat) so the spread
-    // stays roughly circular on the ground.
-    const n = group.length;
+    // Fan the group onto a small circle centered on the shared coordinate.
+    // The angle is a deterministic function of each marker's id, so the same
+    // item always lands at the same offset regardless of which other markers
+    // are present — switching filters (All vs a single domain) no longer moves
+    // a pin. Longitude offset is scaled by cos(lat) to stay circular on ground.
     const latRad = (group[0].lat * Math.PI) / 180;
     const lngScale = Math.max(Math.cos(latRad), 0.01);
-    group.forEach((marker, i) => {
-      const angle = (2 * Math.PI * i) / n;
+    for (const marker of group) {
+      const angle = hashToUnit(marker.id) * 2 * Math.PI;
       result.push({
         ...marker,
         lat: marker.lat + RADIUS_DEG * Math.cos(angle),
         lng: marker.lng + (RADIUS_DEG * Math.sin(angle)) / lngScale,
       });
-    });
+    }
   }
 
   return result;
 }
 
-function resolveCoordinate(
-  data: Record<string, unknown>,
-  ...keys: string[]
-): number | null {
-  const normalizedKeys = keys.map(normalizeFieldName);
-  for (const key of keys) {
-    const val = data[key];
-    if (typeof val === 'number') return val;
-    if (typeof val === 'string') {
-      const num = parseFloat(val);
-      if (!isNaN(num)) return num;
-    }
-  }
-
-  for (const [key, val] of Object.entries(data)) {
-    if (!normalizedKeys.includes(normalizeFieldName(key))) continue;
-    if (typeof val === 'number') return val;
-    if (typeof val === 'string') {
-      const num = parseFloat(val);
-      if (!isNaN(num)) return num;
-    }
-  }
-
-  return null;
-}
 
 function findTitleField(schema: RJSFSchema): string | null {
   if (!schema.properties) return null;

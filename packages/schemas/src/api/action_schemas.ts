@@ -1,7 +1,7 @@
 import { action_events, item_actions } from '@dpg/database';
 import { createSelectSchema } from 'drizzle-zod';
 import z from 'zod';
-import { ItemResponseSchema } from './item_schemas';
+import { ItemLocationsArray, ItemResponseSchema } from './item_schemas';
 
 const ActionItemRefSchema = z.object({
   item_network: z.string().min(1),
@@ -64,10 +64,8 @@ export const StoreEventBodySchema = z.object({
   target_item: ActionItemRefWithInstanceSchema,
   source_item_owner: z.string().min(1).nullable().optional(),
   target_item_owner: z.string().min(1).nullable().optional(),
-  source_item_latitude: z.number().nullable().optional(),
-  source_item_longitude: z.number().nullable().optional(),
-  target_item_latitude: z.number().nullable().optional(),
-  target_item_longitude: z.number().nullable().optional(),
+  source_item_locations: ItemLocationsArray.optional(),
+  target_item_locations: ItemLocationsArray.optional(),
   event_payload: z.record(z.string(), z.unknown()).default({}),
   remarks: z.string().min(1).optional(),
 });

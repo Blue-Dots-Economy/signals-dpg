@@ -19,6 +19,7 @@ import {
   buildActionEventPayload,
   fetchLocalItemSnapshot,
   insertActionEvent,
+  isCurrentInstanceItem,
   mirrorActionEventToSourceInstance,
   validateActionEventPayload,
 } from '@/utils/action_event_runtime';
@@ -85,6 +86,44 @@ export const update_action_status_handler = async (
           'NOT_TARGET_ITEM_OWNER',
           'update-status may only be called by the target item owner.',
         );
+      }
+
+      const targetSnapshot = await fetchLocalItemSnapshot(db, {
+        item_network: existingAction.target_item_network,
+        item_domain: existingAction.target_item_domain,
+        item_type: existingAction.target_item_type,
+        item_id: existingAction.target_item_id,
+        item_instance_url: existingAction.target_item_instance_url,
+      });
+      if (!targetSnapshot || targetSnapshot.lifecycle_status !== 'live') {
+        throw new BulkItemFailure(
+          'PROFILE_NOT_LIVE',
+          'target_item is not live; status updates blocked',
+        );
+      }
+
+      if (
+        isCurrentInstanceItem({
+          item_network: existingAction.source_item_network,
+          item_domain: existingAction.source_item_domain,
+          item_type: existingAction.source_item_type,
+          item_id: existingAction.source_item_id,
+          item_instance_url: existingAction.source_item_instance_url,
+        })
+      ) {
+        const sourceSnap = await fetchLocalItemSnapshot(db, {
+          item_network: existingAction.source_item_network,
+          item_domain: existingAction.source_item_domain,
+          item_type: existingAction.source_item_type,
+          item_id: existingAction.source_item_id,
+          item_instance_url: existingAction.source_item_instance_url,
+        });
+        if (!sourceSnap || sourceSnap.lifecycle_status !== 'live') {
+          throw new BulkItemFailure(
+            'PROFILE_NOT_LIVE',
+            'source_item is not live; status updates blocked',
+          );
+        }
       }
 
       let interaction: ReturnType<typeof getActionInteraction>;
@@ -247,10 +286,8 @@ export const update_action_status_handler = async (
         },
         source_item_owner: updatedAction.source_item_owner ?? sourceItemSnapshot?.created_by ?? null,
         target_item_owner: updatedAction.target_item_owner ?? targetItemSnapshot?.created_by ?? null,
-        source_item_latitude: sourceItemSnapshot?.item_latitude ?? null,
-        source_item_longitude: sourceItemSnapshot?.item_longitude ?? null,
-        target_item_latitude: targetItemSnapshot?.item_latitude ?? null,
-        target_item_longitude: targetItemSnapshot?.item_longitude ?? null,
+        source_item_locations: sourceItemSnapshot?.item_locations ?? [],
+        target_item_locations: targetItemSnapshot?.item_locations ?? [],
         event_payload: eventPayload,
         remarks: body.remarks,
       };

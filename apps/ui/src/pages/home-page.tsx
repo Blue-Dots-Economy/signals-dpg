@@ -26,6 +26,7 @@ import '@/components/map/providers';
 import { fetchItems, performAction, performActionsBulk, type Item } from '@/lib/item-api';
 import { bulkFailureIndices, firstBulkError } from '@/lib/bulk';
 import { useCardSelection } from '@/hooks/use-card-selection';
+import { useEqualRowHeights } from '@/hooks/use-equal-row-heights';
 import { SelectableCard } from '@/components/selection/selectable-card';
 import { BulkActionBar } from '@/components/selection/bulk-action-bar';
 import { ActionModal } from '@/components/actions/action-modal';
@@ -37,17 +38,37 @@ import { fetchNetworkConfigs, fetchNetworkConfig, fetchNetworkItems } from '@/li
 import { useAuth } from '@/contexts/auth-context';
 import { apiConfig } from '@/lib/api-config';
 import { getEnumFilterFieldsForDomains, itemPassesEnumFilters } from '@/lib/enum-filters';
+import { useUserLocation } from '@/hooks/use-user-location';
+import { nearestDistanceMeters } from '@/lib/geo/distance';
+import type { LatLng } from '@/lib/geo/types';
 
 function itemToCardItem(item: Item): { id: string; domain: string; data: Record<string, unknown> } {
   return {
     id: item.item_id,
     domain: item.item_domain,
-    data: {
-      ...item.item_state,
-      item_latitude: item.item_latitude,
-      item_longitude: item.item_longitude,
-    },
+    data: { ...item.item_state, item_locations: item.item_locations },
   };
+}
+
+function getItemLocations(
+  data: Record<string, unknown>,
+): Array<{ lat: number; lng: number; label?: string }> | undefined {
+  const raw = data.item_locations;
+  if (!Array.isArray(raw)) return undefined;
+  return raw as Array<{ lat: number; lng: number; label?: string }>;
+}
+
+function sortItemsByNearest<T>(
+  items: T[],
+  userLocation: LatLng | null,
+  getLocations: (item: T) => ReadonlyArray<{ lat: number; lng: number; label?: string }> | undefined,
+): T[] {
+  if (!userLocation) return items;
+  return [...items].sort(
+    (a, b) =>
+      nearestDistanceMeters(userLocation, getLocations(a)) -
+      nearestDistanceMeters(userLocation, getLocations(b)),
+  );
 }
 
 function getItemTypeForDomain(network: DotNetworkSchema, domainId: string): string {
@@ -152,6 +173,7 @@ function resolveDefaultViewMode(): ViewMode {
 export function HomePage() {
   const { t } = useTranslation();
   const { user } = useAuth();
+  const allCardsGridRef = useEqualRowHeights<HTMLDivElement>();
   const [searchParams, setSearchParams] = useSearchParams();
   const [search, setSearch] = React.useState('');
   const [viewMode, setViewMode] = React.useState<ViewMode>(
@@ -193,6 +215,10 @@ export function HomePage() {
   const [domainItems, setDomainItems] = React.useState<Record<string, Item[]>>({});
   const [myItems, setMyItems] = React.useState<Item[]>([]);
   const [activeProfileId, setActiveProfileId] = React.useState<string | null>(null);
+  // Whether the active-profile lookup has settled. Until it has, profileLocation
+  // is transiently null even for a user who has a profile location, so the
+  // browser-geo auto-prompt must wait for this to avoid a spurious permission prompt.
+  const [profilesResolved, setProfilesResolved] = React.useState(false);
   const [loading, setLoading] = React.useState(false);
   const browseSelection = useCardSelection();
   const [bulkConnectOpen, setBulkConnectOpen] = React.useState(false);
@@ -242,6 +268,7 @@ export function HomePage() {
     setResolvedNetwork(null);
     setDomainItems({});
     setMyItems([]);
+    setProfilesResolved(false);
 
     fetchNetworkConfig(selectedNetworkId)
       .then((config) => {
@@ -262,9 +289,33 @@ export function HomePage() {
 
   const network = resolvedNetwork;
 
+  // Resolve a map marker's label from its domain's card.title_field so titles
+  // are correct even in the "All" view where markers span multiple domains.
+  const resolveMarkerLabel = React.useCallback(
+    (item: { id: string; domain?: string; data: Record<string, unknown> }) => {
+      const domain = item.domain
+        ? network?.domains.find((d) => d.id === item.domain)
+        : undefined;
+      const titleField = domain?.card?.title_field;
+      const value = titleField ? item.data[titleField] : undefined;
+      return value != null && String(value).trim() ? String(value) : undefined;
+    },
+    [network]
+  );
+
   // Fetch all user profiles across all domains to discover their domain
   React.useEffect(() => {
-    if (!network || !user) return;
+    if (!network) return;
+    // Signed out (or no session): drop the previous user's profiles so the
+    // sidebar/active-profile clear immediately instead of lingering until refresh.
+    if (!user) {
+      setMyItems([]);
+      setActiveProfileId(null);
+      // A signed-out visitor has no profile to wait for — resolved immediately,
+      // so the browser-geo auto-prompt may fire.
+      setProfilesResolved(true);
+      return;
+    }
 
     const controller = new AbortController();
 
@@ -285,6 +336,9 @@ export function HomePage() {
       if (controller.signal.aborted) return;
       const allProfiles = results.flat();
       setMyItems(allProfiles);
+      // Profile lookup has settled — profileLocation is now authoritative, so the
+      // browser-geo auto-prompt may fire if there's still no profile location.
+      setProfilesResolved(true);
 
       // Auto-select: use stored ID if valid, otherwise first profile
       const storedId = getStoredActiveProfileId(network.id);
@@ -308,6 +362,28 @@ export function HomePage() {
     if (!myItems.length) return null;
     return myItems.find((i) => i.item_id === activeProfileId) ?? myItems[0] ?? null;
   }, [myItems, activeProfileId]);
+
+  // Derive the active profile's first location (profile-first), or null to trigger browser-geo fallback
+  const profileLocation = React.useMemo(
+    () =>
+      myItem?.item_locations?.[0]
+        ? { lat: myItem.item_locations[0].lat, lng: myItem.item_locations[0].lng }
+        : null,
+    [myItem],
+  );
+
+  // Resolve: profile location → browser geo → null. Gate the browser auto-prompt
+  // on profilesResolved so a logged-in user with a profile location isn't prompted
+  // during the async profile-load window.
+  const { location: userLocation } = useUserLocation(profileLocation, profilesResolved);
+
+  // Sort a card-item array (item_locations stored in .data) nearest-first when userLocation is known.
+  // Items without locations sort last (nearestDistanceMeters returns Infinity for empty/missing arrays).
+  const sortByNearest = React.useCallback(
+    <T extends { data: Record<string, unknown> }>(items: T[]): T[] =>
+      sortItemsByNearest(items, userLocation, (t) => getItemLocations(t.data)),
+    [userLocation],
+  );
 
   // Current domain: from ?as= param (demo override), active profile, or network default
   const currentDomain = searchParams.get('as') ?? myItem?.item_domain ?? network?.domains[0]?.id ?? 'student_profile';
@@ -692,7 +768,7 @@ export function HomePage() {
           </div>
           <div className="flex-1 p-6 space-y-4">
             <Skeleton className="h-7 w-40" />
-            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            <div className="grid grid-cols-1 items-start gap-4 sm:grid-cols-2 lg:grid-cols-3">
               {Array.from({ length: 6 }).map((_, i) => (
                 <Skeleton key={i} className="h-40 rounded-lg" />
               ))}
@@ -749,6 +825,7 @@ export function HomePage() {
       onDomainsChange={handleMapDomainsChange}
       selectedFields={mapSelectedFields}
       onFieldsChange={handleMapFieldsChange}
+      viewMode={viewMode}
     />
   );
 
@@ -877,7 +954,7 @@ export function HomePage() {
                 {selectedDomain === null ? (
               // All tab: flat grid across all domains, each card uses its own schema
               (() => {
-                const allFlatItems = visibleDomains.flatMap((domain) => {
+                const allFlatItemsUnsorted = visibleDomains.flatMap((domain) => {
                   const domainSchema = domain.item_schemas
                     ? (Object.values(domain.item_schemas)[0] as import('@rjsf/utils').RJSFSchema)
                     : undefined;
@@ -891,12 +968,14 @@ export function HomePage() {
                     domainActions,
                     domainDescription: domain.description,
                     domainLabel,
+                    cardConfig: domain.card,
                   }));
                 });
+                const allFlatItems = sortItemsByNearest(allFlatItemsUnsorted, userLocation, (x) => getItemLocations(x.item.data));
 
                 if (loading) {
                   return (
-                    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                    <div className="grid grid-cols-1 items-start gap-4 sm:grid-cols-2 lg:grid-cols-3">
                       {Array.from({ length: 6 }).map((_, i) => (
                         <DomainCard key={i} schema={{}} data={{}} loading />
                       ))}
@@ -909,8 +988,8 @@ export function HomePage() {
                 }
 
                 return (
-                  <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-                    {allFlatItems.map(({ item, schema, domainActions, domainDescription, domainLabel }) => {
+                  <div ref={allCardsGridRef} className="grid grid-cols-1 items-start gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                    {allFlatItems.map(({ item, schema, domainActions, domainDescription, domainLabel, cardConfig }) => {
                       const fullItem = Object.values(domainItems)
                         .flat()
                         .find((i) => i.item_id === item.id);
@@ -928,6 +1007,7 @@ export function HomePage() {
                             schema={schema!}
                             schemaDescription={domainDescription}
                             domainLabel={domainLabel}
+                            cardConfig={cardConfig}
                             data={item.data}
                             actions={domainActions}
                             selectionMode={browseSelection.selectMode}
@@ -943,8 +1023,7 @@ export function HomePage() {
                               item_instance_url: null,
                               item_schema_url: null,
                               item_state: item.data,
-                              item_latitude: null,
-                              item_longitude: null,
+                              item_locations: [],
                               created_at: new Date().toISOString(),
                               updated_at: new Date().toISOString(),
                             }}
@@ -961,7 +1040,8 @@ export function HomePage() {
                 schema={activeSchema!}
                 schemaName={selectedDomain}
                 schemaDescription={currentDomainLabel}
-                items={filteredDomainItems[selectedDomain] ?? []}
+                cardConfig={network?.domains.find((d) => d.id === selectedDomain)?.card}
+                items={sortByNearest(filteredDomainItems[selectedDomain] ?? [])}
                 fullItems={domainItems[selectedDomain] ?? []}
                 actions={actions}
                 onAction={(itemId, _type, actionSchema) => {
@@ -1009,28 +1089,35 @@ export function HomePage() {
             ) : (
               <MapView
                 schema={activeSchema!}
+                resolveMarkerLabel={resolveMarkerLabel}
                 items={Object.values(filteredDomainItems).flat()}
-                focusPoint={
-                  myItem && myItem.item_latitude != null && myItem.item_longitude != null
-                    ? { lat: myItem.item_latitude, lng: myItem.item_longitude }
-                    : null
-                }
+                focusPoint={userLocation}
                 filtersSlot={filtersPanel}
                 renderPopup={(marker) => {
+                  // Marker ids are `${item_id}#${locationIndex}` — strip the suffix to look up the item.
+                  const baseItemId = marker.id.includes('#') ? marker.id.split('#')[0] : marker.id;
                   const fullItem =
                     (marker.domain
                       ? domainItems[marker.domain]
                       : Object.values(domainItems).flat()
-                    )?.find((i) => i.item_id === marker.id) ?? null;
+                    )?.find((i) => i.item_id === baseItemId) ?? null;
                   const domainActions = marker.domain ? getActionsForDomain(marker.domain) : [];
                   const connectAction = domainActions[0];
+                  const markerDomain = marker.domain
+                    ? network?.domains.find((d) => d.id === marker.domain)
+                    : undefined;
+                  const markerSchema = markerDomain?.item_schemas
+                    ? (Object.values(markerDomain.item_schemas)[0] as import('@rjsf/utils').RJSFSchema)
+                    : activeSchema;
                   return (
                     <MarkerPopupCard
                       marker={marker}
+                      schema={markerSchema}
+                      cardConfig={markerDomain?.card}
                       actions={myItem && connectAction ? [connectAction] : []}
                       onConnect={
                         myItem && connectAction
-                          ? () => triggerAction(connectAction.action_type, connectAction, marker.id)
+                          ? () => triggerAction(connectAction.action_type, connectAction, baseItemId)
                           : undefined
                       }
                       localItem={myItem}

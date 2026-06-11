@@ -3,12 +3,15 @@ import {
   getDomainItemSchema,
   getDomainItemTypes,
   getInstanceCustomItemSchemaUrl,
+  isLocationFieldPrivate,
   maskPrivateState,
   mergeMasksIntoPublic,
   mergeItemStateWithPrivate,
   splitItemStateByPrivacy,
   validateAgainstJsonSchema,
 } from '@dpg/schemas';
+import { classify_item } from './items/classifier.js';
+import { is_populated } from './metrics/profile_completion.js';
 import { decryptPiiBlob, encryptPiiBlob, getPiiKey } from '@dpg/auth';
 import { items } from '@dpg/database';
 import { db } from '@api/db/postgres/drizzle_config';
@@ -19,6 +22,61 @@ import {
   getOrFetchSchemaByUrl,
 } from '@/network_schema_cache';
 import { apiConfig, getCurrentApiBaseUrl } from '@/config';
+
+export type ItemLocation = { lat: number; lng: number; label?: string };
+export function primaryLocation(locs: ItemLocation[] | null | undefined): ItemLocation | null {
+  return locs && locs.length > 0 ? locs[0] : null;
+}
+
+// Decimal places kept for the coordinates of a PRIVATE location field. Two
+// places ≈ a ~1.1 km grid cell — coarse enough that the stored point never
+// pinpoints the exact door, while staying useful on the map. This is the
+// authoritative server-side floor: even if a client (or an API caller that
+// bypasses the form widget) submits an exact coordinate for a private field,
+// it is rounded here before it is ever persisted.
+const PRIVATE_LOCATION_DECIMALS = 2;
+
+function roundTo(value: number, decimals: number): number {
+  const factor = 10 ** decimals;
+  return Math.round(value * factor) / factor;
+}
+
+/**
+ * Coarsens stored coordinates when the item's marked location field is private,
+ * so a PII address is never persisted at exact precision. Non-private location
+ * fields (e.g. a provider's public service cities) are returned unchanged.
+ */
+export function coarsenPrivateLocations(
+  locations: ItemLocation[],
+  itemSchema: Record<string, unknown> | null | undefined
+): ItemLocation[] {
+  if (locations.length === 0 || !itemSchema || !isLocationFieldPrivate(itemSchema)) {
+    return locations;
+  }
+  return locations.map((loc) => ({
+    ...loc,
+    lat: roundTo(loc.lat, PRIVATE_LOCATION_DECIMALS),
+    lng: roundTo(loc.lng, PRIVATE_LOCATION_DECIMALS),
+  }));
+}
+
+/**
+ * Decides the coordinates to store for an item. This NEVER geocodes — backend
+ * geocoding happens only in the create route, and only when no coordinate was
+ * provided. Here we just apply the PII floor: a PRIVATE location field's
+ * supplied coordinate is rounded to ~1 km so an exact point can never be
+ * persisted. Non-private fields (e.g. a provider's public service cities) are
+ * stored exactly as supplied.
+ */
+function locationsForStorage(
+  provided: ItemLocation[],
+  itemSchema: Record<string, unknown> | null | undefined
+): ItemLocation[] {
+  if (itemSchema && isLocationFieldPrivate(itemSchema)) {
+    return coarsenPrivateLocations(provided, itemSchema);
+  }
+  return provided;
+}
 
 export class ItemServiceError extends Error {
   statusCode: number;
@@ -38,15 +96,13 @@ export interface CreateItemServiceParams {
   item_domain: string;
   item_type: string;
   item_state?: Record<string, unknown>;
-  item_latitude?: number | null;
-  item_longitude?: number | null;
+  item_locations?: ItemLocation[];
   created_by: string;
 }
 
 export interface UpdateItemServiceBody {
   item_state?: Record<string, unknown>;
-  item_latitude?: number | null;
-  item_longitude?: number | null;
+  item_locations?: ItemLocation[];
 }
 
 async function resolveSchema(params: {
@@ -120,8 +176,12 @@ async function resolveSchema(params: {
   }
 
   try {
+    const required = Array.isArray((itemSchema as { required?: unknown }).required)
+      ? ((itemSchema as { required?: string[] }).required as string[])
+      : [];
     validateAgainstJsonSchema(itemSchema, params.submittedItemState, 'item_state', {
       allowAdditionalProperties: apiConfig.allow_extra_schema_data,
+      ignoredKeys: required,
     });
   } catch (err) {
     throw new ItemServiceError(
@@ -154,6 +214,14 @@ export async function createItemInternal(
       ? ''
       : encryptPiiBlob(JSON.stringify(itemState.privateState), getPiiKey());
 
+  const classification = classify_item({
+    schema: itemSchema as { required?: string[] },
+    merged_state: submittedItemState,
+    current_status: 'draft',
+  });
+
+  const itemLocations = locationsForStorage(params.item_locations ?? [], itemSchema);
+
   const result = await exec
     .insert(items)
     .values({
@@ -164,9 +232,9 @@ export async function createItemInternal(
       item_schema_url: itemSchemaUrl,
       item_state: itemStateForStorage,
       item_private_state: encryptedPrivate,
-      item_latitude: params.item_latitude ?? null,
-      item_longitude: params.item_longitude ?? null,
+      item_locations: itemLocations,
       created_by: params.created_by,
+      lifecycle_status: classification.lifecycle_status,
     })
     .onConflictDoNothing({
       target: [
@@ -193,13 +261,31 @@ export async function createItemInternal(
   return result[0];
 }
 
+export interface UpdateItemInternalResult {
+  row: {
+    item_network: string;
+    item_domain: string;
+    item_type: string;
+    item_id: string;
+    item_instance_url: string;
+    item_schema_url: string;
+    item_state: unknown;
+    item_private_state: string;
+    item_locations: Array<{ lat: number; lng: number; label?: string }>;
+    lifecycle_status: string;
+    created_by: string;
+    created_at: Date;
+    updated_at: Date;
+  };
+}
+
 export async function updateItemInternal(
   exec: DbOrTx,
   itemId: string,
   callerId: string,
   isAdmin: boolean,
   body: UpdateItemServiceBody
-) {
+): Promise<UpdateItemInternalResult> {
   const ownershipFilter = isAdmin
     ? eq(items.item_id, itemId)
     : and(eq(items.item_id, itemId), eq(items.created_by, callerId));
@@ -207,18 +293,21 @@ export async function updateItemInternal(
   const updateValues: Record<string, unknown> = {
     updated_at: sql`now()`,
   };
-  if (body.item_latitude !== undefined) updateValues.item_latitude = body.item_latitude;
-  if (body.item_longitude !== undefined) updateValues.item_longitude = body.item_longitude;
 
-  if (body.item_state) {
+  // Fetch the existing item + its schema once when either the state or the
+  // locations are changing: the schema is needed to merge/validate state,
+  // classify lifecycle, and coarsen a private location field.
+  if (body.item_state !== undefined || body.item_locations !== undefined) {
     const [existingItem] = await exec
       .select({
+        item_id: items.item_id,
         item_network: items.item_network,
         item_domain: items.item_domain,
         item_type: items.item_type,
         item_schema_url: items.item_schema_url,
         item_state: items.item_state,
         item_private_state: items.item_private_state,
+        lifecycle_status: items.lifecycle_status,
       })
       .from(items)
       .where(ownershipFilter)
@@ -239,45 +328,78 @@ export async function updateItemInternal(
       itemType: existingItem.item_type,
     });
 
-    // Decrypt existing private blob (empty string => no prior private fields).
-    const priorPrivate =
-      existingItem.item_private_state === ''
-        ? {}
-        : (JSON.parse(
-            decryptPiiBlob(existingItem.item_private_state, getPiiKey())
-          ) as Record<string, unknown>);
-
-    // Reconstitute the full prior state (real values, not masks).
-    const priorFullState = mergeItemStateWithPrivate(
-      existingItem.item_state as Record<string, unknown>,
-      priorPrivate
-    );
-
-    // Layer the caller's partial update on top.
-    const mergedFullState: Record<string, unknown> = { ...priorFullState, ...body.item_state };
-
-    try {
-      validateAgainstJsonSchema(itemSchema, mergedFullState, 'item_state', {
-        allowAdditionalProperties: apiConfig.allow_extra_schema_data,
-      });
-    } catch (err) {
-      throw new ItemServiceError(
-        400,
-        'INVALID_ITEM_STATE',
-        err instanceof Error ? err.message : 'Invalid item_state'
+    // A supplied coordinate is stored as-is (rounded as a PII floor for a
+    // private field). The backend does not geocode on update.
+    if (body.item_locations !== undefined) {
+      updateValues.item_locations = locationsForStorage(
+        body.item_locations,
+        itemSchema as Record<string, unknown>
       );
     }
 
-    const split = splitItemStateByPrivacy(itemSchema, mergedFullState);
-    const masked = maskPrivateState(itemSchema, split.privateState);
-    updateValues.item_state = mergeMasksIntoPublic(split.publicState, masked);
-    updateValues.item_private_state =
-      Object.keys(split.privateState).length === 0
-        ? ''
-        : encryptPiiBlob(JSON.stringify(split.privateState), getPiiKey());
+    if (body.item_state) {
+      // Decrypt existing private blob (empty string => no prior private fields)
+      // and reconstitute the full prior state (real values, not masks).
+      const priorPrivate =
+        existingItem.item_private_state === ''
+          ? {}
+          : (JSON.parse(
+              decryptPiiBlob(existingItem.item_private_state, getPiiKey())
+            ) as Record<string, unknown>);
+      const priorFullState = mergeItemStateWithPrivate(
+        existingItem.item_state as Record<string, unknown>,
+        priorPrivate
+      );
+      // Layer the caller's partial update on top.
+      const mergedFullState: Record<string, unknown> = { ...priorFullState, ...body.item_state };
+
+      const requiredKeys = Array.isArray((itemSchema as { required?: unknown }).required)
+        ? ((itemSchema as { required?: string[] }).required as string[])
+        : [];
+
+      try {
+        validateAgainstJsonSchema(itemSchema, mergedFullState, 'item_state', {
+          allowAdditionalProperties: apiConfig.allow_extra_schema_data,
+          ignoredKeys: requiredKeys,
+        });
+      } catch (err) {
+        throw new ItemServiceError(
+          400,
+          'INVALID_ITEM_STATE',
+          err instanceof Error ? err.message : 'Invalid item_state'
+        );
+      }
+
+      // Live latch: a profile that has reached `live` must stay complete. Reject
+      // any edit that would leave a required field unpopulated while the item is
+      // live. (Scope: live only — see 2026-06-10-live-latch-design.md §6.)
+      const unpopulatedRequired = requiredKeys.filter((k) => !is_populated(mergedFullState[k]));
+      if (unpopulatedRequired.length > 0 && existingItem.lifecycle_status === 'live') {
+        throw new ItemServiceError(
+          409,
+          'REQUIRED_FIELD_LOCKED_WHILE_LIVE',
+          `Required field(s) must stay populated on a live profile: ${unpopulatedRequired.join(', ')}; pause it first`,
+        );
+      }
+
+      const split = splitItemStateByPrivacy(itemSchema, mergedFullState);
+      const masked = maskPrivateState(itemSchema, split.privateState);
+      updateValues.item_state = mergeMasksIntoPublic(split.publicState, masked);
+      updateValues.item_private_state =
+        Object.keys(split.privateState).length === 0
+          ? ''
+          : encryptPiiBlob(JSON.stringify(split.privateState), getPiiKey());
+
+      const classification = classify_item({
+        schema: itemSchema as { required?: string[] },
+        merged_state: mergedFullState,
+        current_status: existingItem.lifecycle_status as 'draft' | 'live' | 'paused',
+      });
+      updateValues.lifecycle_status = classification.lifecycle_status;
+    }
   }
 
-  const result = await exec
+  const updateResult = await exec
     .update(items)
     .set(updateValues)
     .where(ownershipFilter)
@@ -290,19 +412,21 @@ export async function updateItemInternal(
       item_schema_url: items.item_schema_url,
       item_state: items.item_state,
       item_private_state: items.item_private_state,
-      item_latitude: items.item_latitude,
-      item_longitude: items.item_longitude,
+      item_locations: items.item_locations,
+      lifecycle_status: items.lifecycle_status,
       created_by: items.created_by,
       created_at: items.created_at,
       updated_at: items.updated_at,
     });
 
-  if (result.length === 0) {
+  if (updateResult.length === 0) {
     throw new ItemServiceError(
       404,
       'ITEM_NOT_FOUND_OR_FORBIDDEN',
       'Item not found or does not belong to the authenticated user'
     );
   }
-  return result[0];
+  const row = updateResult[0];
+
+  return { row };
 }

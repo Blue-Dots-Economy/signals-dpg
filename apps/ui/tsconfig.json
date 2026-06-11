@@ -24,6 +24,9 @@
       "@/*": [
         "./src/*"
       ],
+      "@dpg/schemas/location_fields": [
+        "../../packages/schemas/src/location_fields"
+      ],
       "@dpg/*": [
         "../../packages/*/src"
       ]

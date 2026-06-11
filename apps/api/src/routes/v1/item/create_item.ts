@@ -1,9 +1,14 @@
 import { type FastifyPluginAsyncZod } from 'fastify-type-provider-zod';
-import z, { CreateItemBodySchema } from '@dpg/schemas';
+import z, {
+  CreateItemBodySchema,
+  getDomainItemSchema,
+  isLocationFieldPrivate,
+  parseLocationFields,
+} from '@dpg/schemas';
 import { FastifyReply, FastifyRequest } from 'fastify';
 import { db } from '@api/db/postgres/drizzle_config';
-import { DrizzleQueryError } from 'drizzle-orm';
-import { DatabaseError, ensureItemPartition } from '@dpg/database';
+import { DrizzleQueryError, and, eq } from 'drizzle-orm';
+import { DatabaseError, ensureItemPartition, items } from '@dpg/database';
 import { auth_middleware_if_enabled } from '@api/plugins/auth/auth_middleware';
 import {
   isServedDomainBinding,
@@ -11,6 +16,10 @@ import {
 } from '@/utils/served_domain_guard';
 import { invalidateItemFetchCache } from '@/utils/item_fetch_cache_invalidate';
 import { createItemInternal, ItemServiceError } from '@/services/item_service';
+import { getNetworkConfigById } from '@/network_configs';
+import { resolveCoordinates, resolveCityCenter } from '@/services/geocoding/geo_resolver';
+import { resolveItemLocations } from './geotag_item';
+import { resolveDomainLock } from './resolve_domain_lock';
 
 type CreateItemRequest = FastifyRequest<{
   Body: z.infer<typeof CreateItemBodySchema>;
@@ -84,6 +93,37 @@ export const create_item_handler = async (
     );
   }
 
+  // Single-domain lock: a user may only create items in the one domain they
+  // already hold within this network. The lock is derived live from the items
+  // table (no membership column). Admin api-key callers bypass — they act on
+  // behalf of a user with explicit intent. Empty set => not yet locked, so any
+  // served domain is allowed; deleting all their items releases the lock.
+  if (!isAdminApiCaller) {
+    const heldRows = await db
+      .selectDistinct({ item_domain: items.item_domain })
+      .from(items)
+      .where(
+        and(
+          eq(items.created_by, userId),
+          eq(items.item_network, body.item_network),
+        ),
+      );
+
+    const lock = resolveDomainLock(
+      heldRows.map((r) => r.item_domain),
+      body.item_domain,
+    );
+
+    if (!lock.allowed) {
+      return reply.code(403).send({
+        error: 'DOMAIN_LOCKED',
+        message: `You are registered as "${lock.lockedDomain}" in "${body.item_network}" and cannot create items under "${body.item_domain}".`,
+        locked_domain: lock.lockedDomain,
+        requested_domain: body.item_domain,
+      });
+    }
+  }
+
   try {
     await ensureItemPartition(
       db,
@@ -107,14 +147,53 @@ export const create_item_handler = async (
     });
   }
 
+  // Backend geocoding happens ONLY here, and ONLY when the client supplied no
+  // coordinate. When item_locations is already present (the UI resolves it
+  // client-side), we never geocode on the server.
+  let item_locations = body.item_locations ?? [];
+  if (item_locations.length === 0) {
+    try {
+      const networkConfig = await getNetworkConfigById(body.item_network);
+      const itemSchema = getDomainItemSchema(
+        networkConfig,
+        body.item_domain,
+        body.item_type
+      ) as Record<string, unknown> | null;
+      if (itemSchema) {
+        if (isLocationFieldPrivate(itemSchema)) {
+          // Private (PII) field: resolve only to the city centre — never the
+          // exact address — from the marked address field.
+          const { field } = parseLocationFields(itemSchema);
+          const address = field ? (body.item_state ?? {})[field] : undefined;
+          if (typeof address === 'string' && address.trim()) {
+            const center = await resolveCityCenter(address);
+            if (center) item_locations = [center];
+          }
+        } else {
+          // Public field(s): geocode each marked query to its exact point.
+          item_locations = await resolveItemLocations({
+            provided: undefined,
+            itemState: body.item_state ?? {},
+            itemSchema,
+            geocode: resolveCoordinates,
+          });
+        }
+      }
+    } catch (err) {
+      request.log.warn(
+        { err, item_network: body.item_network, item_domain: body.item_domain },
+        'backend geocoding failed; creating item without coordinates'
+      );
+    }
+  }
+
   try {
     const created = await createItemInternal(db, {
       item_network: body.item_network,
       item_domain: body.item_domain,
       item_type: body.item_type,
       item_state: body.item_state ?? {},
-      item_latitude: body.item_latitude ?? null,
-      item_longitude: body.item_longitude ?? null,
+      item_locations,
       created_by: userId,
     });
 

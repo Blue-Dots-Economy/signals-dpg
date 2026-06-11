@@ -2,7 +2,7 @@ import * as React from 'react';
 import { useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { toast } from 'sonner';
 import { useTranslation } from 'react-i18next';
-import { ArrowLeft, Wallet, Trash2, OctagonX } from 'lucide-react';
+import { ArrowLeft, Wallet, Trash2, OctagonX, PauseCircle, PlayCircle } from 'lucide-react';
 import type { RJSFSchema } from '@rjsf/utils';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
@@ -24,14 +24,20 @@ import {
   createItem,
   deleteItem,
   fetchItems,
+  pauseItem,
+  unpauseItem,
   updateItem,
   type CreateItemPayload,
   type UpdateItemPayload,
   type Item,
 } from '@/lib/item-api';
+import { fetchMyActions } from '@/lib/action-api';
 import { fetchNetworkConfig, fetchNetworkConfigs } from '@/lib/network-api';
-import { extractAndGeocode } from '@/lib/item-utils';
+import { parseLocationFields, buildLocationQueries, isLocationFieldPrivate } from '@dpg/schemas/location_fields';
+import { getGeoProvider } from '@/lib/geo/provider';
+import type { GeoComponents } from '@/lib/geo/types';
 import { apiConfig } from '@/lib/api-config';
+import { PauseConfirmDialog } from '@/components/actions/pause-confirm-dialog';
 
 function parseNetworkIds(networkEnv: string | undefined): string[] {
   if (!networkEnv) return [];
@@ -51,6 +57,7 @@ export function ProfileFormPage() {
   const isEdit = !!id;
 
   const [selectedDomain, setSelectedDomain] = React.useState<string | null>(null);
+  const [myItems, setMyItems] = React.useState<Item[]>([]);
   const [resolvedNetwork, setResolvedNetwork] = React.useState<DotNetworkSchema | null>(null);
   const [existingItem, setExistingItem] = React.useState<Item | null>(null);
   const [initialData, setInitialData] = React.useState<Record<string, unknown> | null>(null);
@@ -60,6 +67,18 @@ export function ProfileFormPage() {
   const [availableNetworkIds, setAvailableNetworkIds] = React.useState<string[] | null>(null);
   const [isWalletModalOpen, setIsWalletModalOpen] = React.useState(false);
   const [formError, setFormError] = React.useState<{ title: string; description?: string } | null>(null);
+  const [isPauseDialogOpen, setIsPauseDialogOpen] = React.useState(false);
+  const [isPausing, setIsPausing] = React.useState(false);
+  const [pendingActionsCount, setPendingActionsCount] = React.useState(0);
+  const [resolvedLocations, setResolvedLocations] = React.useState<
+    Array<{ lat: number; lng: number; label?: string; components?: GeoComponents }>
+  >([]);
+
+  // Clear stale locations whenever the user switches domain so a prior domain's
+  // address suggestion is never submitted for a different domain.
+  React.useEffect(() => {
+    setResolvedLocations([]);
+  }, [selectedDomain]);
 
   // Get network from URL query param, fallback to env config
   const configuredNetworkIds = React.useMemo(
@@ -179,6 +198,61 @@ export function ProfileFormPage() {
   const network = resolvedNetwork;
   const domains = network?.domains ?? [];
 
+  // Single-domain lock: a user's domain is implied by the items they already
+  // hold in this network. Fetch them across served domains so the create flow
+  // can lock the picker to the held domain (server enforces the real lock —
+  // see create_item's DOMAIN_LOCKED guard). Edit mode reads the domain off the
+  // existing item, so this only runs for create.
+  React.useEffect(() => {
+    if (isEdit || !network || !user) return;
+    const controller = new AbortController();
+    Promise.all(
+      (network.domains ?? []).map((domain) => {
+        const itemTypeKeys = domain.item_schemas
+          ? Object.keys(domain.item_schemas)
+          : [];
+        const itemType = itemTypeKeys.length > 0 ? itemTypeKeys[0] : 'profile';
+        return fetchItems(
+          {
+            item_network: network.id,
+            item_domain: domain.id,
+            item_type: itemType,
+            created_by_me: true,
+            limit: 100,
+          },
+          controller.signal,
+        )
+          .then((res) => res.items)
+          .catch(() => [] as Item[]);
+      }),
+    ).then((results) => {
+      if (!controller.signal.aborted) setMyItems(results.flat());
+    });
+    return () => controller.abort();
+  }, [isEdit, network, user]);
+
+  // Domain the user is locked to, or null when they hold no items yet.
+  const lockedDomain = React.useMemo(
+    () => (myItems.length > 0 ? myItems[0].item_domain : null),
+    [myItems],
+  );
+
+  // Domains offered in the picker: only the locked one when locked, else all
+  // served domains (network.domains is already filtered to served by config).
+  const selectableDomains = React.useMemo(
+    () =>
+      lockedDomain
+        ? domains.filter((d) => d.id === lockedDomain)
+        : domains,
+    [lockedDomain, domains],
+  );
+
+  // Locked users skip the role picker — auto-select their held domain.
+  React.useEffect(() => {
+    if (isEdit || selectedDomain || !lockedDomain) return;
+    setSelectedDomain(lockedDomain);
+  }, [isEdit, selectedDomain, lockedDomain]);
+
   // Find the profile schema for the selected domain
   const profileSchema = React.useMemo<RJSFSchema | null>(() => {
     if (!selectedDomain || !domains.length) return null;
@@ -267,8 +341,57 @@ export function ProfileFormPage() {
     setFormError(null);
 
     try {
-      // Geocode from domain-specific pincode field
-      const { coordinates } = await extractAndGeocode(data, selectedDomain);
+      // Resolve the coordinates to store, all client-side using the same
+      // (Google) geocoder the autocomplete uses. For a PRIVATE field every
+      // resolved place is coarsened to its CITY centroid — the exact point never
+      // leaves the browser; public fields keep the exact point. We resolve from
+      // the picked suggestion(s) when available, otherwise from the typed text,
+      // and both go through the same coarsening — so a private field is
+      // city-level whether or not a dropdown suggestion was clicked.
+      const isPrivateLocationField = profileSchema
+        ? isLocationFieldPrivate(profileSchema as Record<string, unknown>)
+        : false;
+
+      const coarsenPlace = async (
+        lat: number,
+        lng: number,
+        components: GeoComponents | undefined,
+        label: string | undefined,
+      ): Promise<{ lat: number; lng: number; label?: string }> => {
+        if (!isPrivateLocationField) {
+          return label ? { lat, lng, label } : { lat, lng };
+        }
+        const cityQuery = components?.city
+          ? [components.city, components.state, components.country]
+              .filter((p): p is string => Boolean(p && p.trim()))
+              .join(', ')
+          : null;
+        if (cityQuery) {
+          const [best] = await getGeoProvider().suggest(cityQuery);
+          if (best) return { lat: best.lat, lng: best.lng };
+        }
+        // No city component (or its lookup failed): snap to a ~1km grid so a
+        // private field never stores the exact point.
+        return { lat: Math.round(lat * 100) / 100, lng: Math.round(lng * 100) / 100 };
+      };
+
+      let item_locations: Array<{ lat: number; lng: number; label?: string }> = [];
+
+      if (resolvedLocations.length > 0) {
+        // A suggestion was picked in the widget.
+        for (const place of resolvedLocations) {
+          item_locations.push(await coarsenPlace(place.lat, place.lng, place.components, place.label));
+        }
+      } else if (profileSchema) {
+        // No suggestion picked — geocode the marked field(s) from the typed text,
+        // then coarsen (city centroid for a private field, exact for public).
+        const fields = parseLocationFields(profileSchema as Record<string, unknown>);
+        const queries = buildLocationQueries(data, fields);
+        for (const { query, label } of queries) {
+          const [best] = await getGeoProvider().suggest(query);
+          if (best) item_locations.push(await coarsenPlace(best.lat, best.lng, best.components, label));
+        }
+      }
 
       if (isEdit && existingItem) {
         // Update existing profile
@@ -276,9 +399,13 @@ export function ProfileFormPage() {
           item_state: data,
         };
 
-        if (coordinates) {
-          updatePayload.item_latitude = coordinates.lat;
-          updatePayload.item_longitude = coordinates.lng;
+        // Only include item_locations when we have computed a non-empty array.
+        // When item_locations is empty on edit (e.g. the user never re-selected
+        // a suggestion for a private field whose value appears as "***"), omit
+        // the field entirely so updateItemInternal preserves the stored coarse
+        // coordinate rather than overwriting it with [].
+        if (item_locations.length > 0) {
+          updatePayload.item_locations = item_locations;
         }
 
         await updateItem(existingItem.item_id, updatePayload);
@@ -303,10 +430,7 @@ export function ProfileFormPage() {
           createPayload.item_schema_url = customSchemaUrls[defaultItemType];
         }
 
-        if (coordinates) {
-          createPayload.item_latitude = coordinates.lat;
-          createPayload.item_longitude = coordinates.lng;
-        }
+        createPayload.item_locations = item_locations;
 
         await createItem(createPayload);
         toast.success(t('profile.toast_created'), {
@@ -382,6 +506,74 @@ export function ProfileFormPage() {
     }
   };
 
+  // Load pending actions count for the current item (only in edit mode when item is live)
+  React.useEffect(() => {
+    if (!isEdit || !existingItem || existingItem.lifecycle_status !== 'live') {
+      setPendingActionsCount(0);
+      return;
+    }
+
+    let cancelled = false;
+    fetchMyActions({ item_id: existingItem.item_id, ownership_role: 'all', limit: 100 })
+      .then((res) => {
+        if (cancelled) return;
+        const pending = res.actions.filter(
+          (a) => a.action_status === 'created' || a.action_status === 'submitted',
+        );
+        setPendingActionsCount(pending.length);
+      })
+      .catch(() => {
+        if (!cancelled) setPendingActionsCount(0);
+      });
+
+    return () => { cancelled = true; };
+  }, [isEdit, existingItem]);
+
+  const handlePauseClick = () => {
+    setIsPauseDialogOpen(true);
+  };
+
+  const handlePauseConfirm = async () => {
+    if (!existingItem) return;
+
+    setIsPausing(true);
+    try {
+      await pauseItem(existingItem.item_id);
+      setExistingItem({ ...existingItem, lifecycle_status: 'paused' });
+      toast.success(t('profile.toast_paused'), {
+        description: t('profile.toast_paused_desc'),
+      });
+    } catch (err: unknown) {
+      const axiosError = err as { response?: { data?: { message?: string } } };
+      toast.error(t('profile.toast_pause_failed'), {
+        description: axiosError?.response?.data?.message ?? t('common.something_went_wrong'),
+      });
+    } finally {
+      setIsPausing(false);
+      setIsPauseDialogOpen(false);
+    }
+  };
+
+  const handleUnpause = async () => {
+    if (!existingItem) return;
+
+    setIsPausing(true);
+    try {
+      const result = await unpauseItem(existingItem.item_id);
+      setExistingItem({ ...existingItem, lifecycle_status: result.lifecycle_status });
+      toast.success(t('profile.toast_unpaused'), {
+        description: t('profile.toast_unpaused_desc'),
+      });
+    } catch (err: unknown) {
+      const axiosError = err as { response?: { data?: { message?: string } } };
+      toast.error(t('profile.toast_unpause_failed'), {
+        description: axiosError?.response?.data?.message ?? t('common.something_went_wrong'),
+      });
+    } finally {
+      setIsPausing(false);
+    }
+  };
+
   if (availableNetworkIds === null || isLoading) {
     return (
       <div className="flex h-screen items-center justify-center">
@@ -429,7 +621,7 @@ export function ProfileFormPage() {
           <p className="text-sm text-muted-foreground/80 mt-2">{theme.subline}</p>
         </div>
         <div className="grid gap-4 sm:grid-cols-2">
-          {domains.map((domain, idx) => {
+          {selectableDomains.map((domain, idx) => {
             const Icon = getDomainIcon(domain.id, network?.id);
             const label = domain.id
               .replace(/_/g, ' ')
@@ -462,11 +654,11 @@ export function ProfileFormPage() {
           <div className="relative z-10 px-5 pt-4 sm:px-6">
             <button
               type="button"
-              onClick={() => (selectedDomain && !isEdit ? setSelectedDomain(null) : navigate(`/?network=${resolvedNetwork?.id ?? ''}`))}
+              onClick={() => (selectedDomain && !isEdit && !lockedDomain ? setSelectedDomain(null) : navigate(`/?network=${resolvedNetwork?.id ?? ''}`))}
               className="flex items-center gap-1.5 text-sm text-white/70 hover:text-white transition-colors"
             >
               <ArrowLeft className="h-4 w-4" />
-              {selectedDomain && !isEdit ? t('profile.choose_different_role') : t('common.back')}
+              {selectedDomain && !isEdit && !lockedDomain ? t('profile.choose_different_role') : t('common.back')}
             </button>
           </div>
           <div className="relative z-10 flex items-center gap-4 px-5 pb-6 pt-3 sm:px-6">
@@ -515,23 +707,65 @@ export function ProfileFormPage() {
                 formData={initialData ?? undefined}
                 submitButtonText={isEdit ? t('profile.btn_update') : undefined}
                 domainId={selectedDomain ?? undefined}
+                formContext={{
+                  onLocationResolved: (
+                    place: { lat: number; lng: number; components?: GeoComponents } | null,
+                  ) => setResolvedLocations(place ? [place] : []),
+                  onLocationsResolved: (coords: Array<{ lat: number; lng: number; label?: string }>) => setResolvedLocations(coords),
+                }}
               />
             )}
             {isEdit && existingItem && (
-              <div className="mt-6 pt-4 border-t flex items-center justify-between gap-4">
-                <p className="text-xs text-muted-foreground">
-                  {t('profile.delete_warning')}
-                </p>
-                <Button
-                  variant="destructive"
-                  size="sm"
-                  className="shrink-0 gap-2"
-                  onClick={handleDelete}
-                  disabled={isSubmitting || isDeleting}
-                >
-                  <Trash2 className="h-4 w-4" />
-                  {isDeleting ? t('profile.deleting') : t('profile.delete_profile')}
-                </Button>
+              <div className="mt-6 pt-4 border-t flex flex-col gap-3">
+                {/* Pause / Unpause control */}
+                {(existingItem.lifecycle_status === 'live' || existingItem.lifecycle_status === 'paused') && (
+                  <div className="flex items-center justify-between gap-4">
+                    <p className="text-xs text-muted-foreground">
+                      {existingItem.lifecycle_status === 'paused'
+                        ? t('profile.toast_paused_desc')
+                        : t('profile.pause_confirm_desc_no_pending')}
+                    </p>
+                    {existingItem.lifecycle_status === 'live' ? (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="shrink-0 gap-2"
+                        onClick={handlePauseClick}
+                        disabled={isSubmitting || isDeleting || isPausing}
+                      >
+                        <PauseCircle className="h-4 w-4" />
+                        {t('profile.pause_profile')}
+                      </Button>
+                    ) : (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="shrink-0 gap-2"
+                        onClick={handleUnpause}
+                        disabled={isSubmitting || isDeleting || isPausing}
+                      >
+                        <PlayCircle className="h-4 w-4" />
+                        {isPausing ? t('profile.unpausing') : t('profile.unpause_profile')}
+                      </Button>
+                    )}
+                  </div>
+                )}
+                {/* Delete control */}
+                <div className="flex items-center justify-between gap-4">
+                  <p className="text-xs text-muted-foreground">
+                    {t('profile.delete_warning')}
+                  </p>
+                  <Button
+                    variant="destructive"
+                    size="sm"
+                    className="shrink-0 gap-2"
+                    onClick={handleDelete}
+                    disabled={isSubmitting || isDeleting || isPausing}
+                  >
+                    <Trash2 className="h-4 w-4" />
+                    {isDeleting ? t('profile.deleting') : t('profile.delete_profile')}
+                  </Button>
+                </div>
               </div>
             )}
           </CardContent>
@@ -542,6 +776,14 @@ export function ProfileFormPage() {
           onOpenChange={setIsWalletModalOpen}
           context={walletImportContext}
           onImported={handleImportedCredentials}
+        />
+
+        <PauseConfirmDialog
+          open={isPauseDialogOpen}
+          pendingCount={pendingActionsCount}
+          isPending={isPausing}
+          onConfirm={handlePauseConfirm}
+          onCancel={() => setIsPauseDialogOpen(false)}
         />
       </div>
     </div>

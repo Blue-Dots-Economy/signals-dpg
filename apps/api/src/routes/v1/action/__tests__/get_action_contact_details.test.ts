@@ -70,6 +70,7 @@ const state = {
   fetchedItems: [] as Array<Record<string, unknown>>,
   auditInsertShouldThrow: false,
   auditInserts: [] as Array<Record<string, unknown>>,
+  callerSnapshotLifecycle: 'live' as string | null,
 };
 
 const auditInsertMock = vi.fn(async (row: Record<string, unknown>) => {
@@ -97,6 +98,14 @@ vi.mock('@/utils/item_fetch_runtime', () => ({
     meta: { total: state.fetchedItems.length, limit: 1, offset: 0 },
     items: state.fetchedItems,
   })),
+}));
+
+vi.mock('@/utils/action_event_runtime', () => ({
+  fetchLocalItemSnapshot: vi.fn(async () =>
+    state.callerSnapshotLifecycle !== null
+      ? { lifecycle_status: state.callerSnapshotLifecycle }
+      : null
+  ),
 }));
 
 vi.mock('@/network_configs', () => ({
@@ -160,7 +169,11 @@ function buildAction(overrides: Partial<ActionRow> = {}): ActionRow {
   };
 }
 
-function buildItem(item_id: string, ownerId: string) {
+function buildItem(
+  item_id: string,
+  ownerId: string,
+  overrides: Partial<Record<string, unknown>> = {}
+) {
   return {
     item_network: 'test_net',
     item_domain: 'provider',
@@ -169,11 +182,12 @@ function buildItem(item_id: string, ownerId: string) {
     item_instance_url: 'http://source.local',
     item_schema_url: 'http://source.local/schema/profile_1.0.json',
     item_state: { name: 'Public Name', phone: '+15550001111' },
-    item_latitude: null,
-    item_longitude: null,
+    item_locations: [],
     created_by: ownerId,
     created_at: new Date('2026-01-01T00:00:00Z'),
     updated_at: new Date('2026-01-02T00:00:00Z'),
+    lifecycle_status: 'live',
+    ...overrides,
   };
 }
 
@@ -193,6 +207,7 @@ beforeEach(() => {
   state.fetchedItems = [];
   state.auditInsertShouldThrow = false;
   state.auditInserts = [];
+  state.callerSnapshotLifecycle = 'live';
   auditInsertMock.mockClear();
 });
 
@@ -271,6 +286,30 @@ describe('GET /:action_id/contact-details', () => {
     const res = await app.inject({ method: 'GET', url: `/${ACTION_ID}/contact-details` });
     expect(res.statusCode).toBe(404);
     expect(res.json().error).toBe('OTHER_ITEM_NOT_FOUND');
+  });
+
+  it('403 PROFILE_NOT_LIVE when other actor profile is not live', async () => {
+    app = buildApp({ id: SOURCE_OWNER });
+    state.action = buildAction();
+    state.fetchedItems = [buildItem(TARGET_ITEM_ID, TARGET_OWNER, { lifecycle_status: 'draft' })];
+    const res = await app.inject({ method: 'GET', url: `/${ACTION_ID}/contact-details` });
+    expect(res.statusCode).toBe(403);
+    expect(res.json().error).toBe('PROFILE_NOT_LIVE');
+  });
+
+  it('403 PROFILE_NOT_LIVE when caller own profile is not live', async () => {
+    app = buildApp({ id: SOURCE_OWNER });
+    state.action = buildAction();
+    state.callerSnapshotLifecycle = 'draft';
+    // other actor item is live — PII must still be withheld due to caller's own status
+    state.fetchedItems = [buildItem(TARGET_ITEM_ID, TARGET_OWNER)];
+    const res = await app.inject({ method: 'GET', url: `/${ACTION_ID}/contact-details` });
+    expect(res.statusCode).toBe(403);
+    expect(res.json().error).toBe('PROFILE_NOT_LIVE');
+    // No PII must be present in the response body
+    const body = res.json();
+    expect(body).not.toHaveProperty('other_actor');
+    expect(auditInsertMock).not.toHaveBeenCalled();
   });
 
   it('writes one audit row on every 2xx', async () => {

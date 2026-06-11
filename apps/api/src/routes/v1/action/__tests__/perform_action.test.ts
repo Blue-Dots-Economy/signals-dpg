@@ -119,9 +119,9 @@ const { fetchLocalItemSnapshotMock } = vi.hoisted(() => ({
   fetchLocalItemSnapshotMock: vi.fn(async () => ({
     created_by: 'usr_agg_owned',
     item_id: 'src_item_1',
-    item_latitude: null,
-    item_longitude: null,
+    item_locations: [],
     private_state: {},
+    lifecycle_status: 'live',
   })),
 }));
 
@@ -219,9 +219,9 @@ describe('POST /api/v1/action/perform — on-behalf-of (bulk)', () => {
     fetchLocalItemSnapshotMock.mockResolvedValue({
       created_by: 'usr_agg_owned',
       item_id: 'src_item_1',
-      item_latitude: null,
-      item_longitude: null,
+      item_locations: [],
       private_state: {},
+      lifecycle_status: 'live',
     });
     // Reset fetchResponse to default success
     fetchResponse.status = 201;
@@ -362,9 +362,9 @@ describe('POST /api/v1/action/perform — on-behalf-of (bulk)', () => {
     fetchLocalItemSnapshotMock.mockResolvedValue({
       created_by: 'usr_someone_else',
       item_id: 'src_item_1',
-      item_latitude: null,
-      item_longitude: null,
+      item_locations: [],
       private_state: {},
+      lifecycle_status: 'live',
     });
     const app = buildApp({
       org_id: 'org_agg_1',
@@ -392,6 +392,25 @@ describe('POST /api/v1/action/perform — on-behalf-of (bulk)', () => {
     });
     expect(res.statusCode).toBe(422);
     expect(res.json().results[0]).toMatchObject({ status: 'error', error: 'SOURCE_ITEM_NOT_FOUND' });
+    expect(fetchCalls).toHaveLength(0);
+  });
+
+  it('422 PROFILE_NOT_LIVE when source snapshot has a non-live lifecycle_status', async () => {
+    fetchLocalItemSnapshotMock.mockResolvedValue({
+      created_by: 'usr_agg_owned',
+      item_id: 'src_item_1',
+      item_locations: [],
+      private_state: {},
+      lifecycle_status: 'paused',
+    });
+    const app = buildApp(undefined, { id: 'usr_agg_owned' });
+    const res = await app.inject({
+      method: 'POST',
+      url: '/perform',
+      payload: [VALID_BODY],
+    });
+    expect(res.statusCode).toBe(422);
+    expect(res.json().results[0]).toMatchObject({ status: 'error', error: 'PROFILE_NOT_LIVE' });
     expect(fetchCalls).toHaveLength(0);
   });
 
@@ -489,9 +508,9 @@ describe('POST /api/v1/action/perform — on-behalf-of (bulk)', () => {
       fetchLocalItemSnapshotMock.mockResolvedValue({
         created_by: 'usr_voice_owned',
         item_id: 'src_item_1',
-        item_latitude: null,
-        item_longitude: null,
+        item_locations: [],
         private_state: {},
+        lifecycle_status: 'live',
       });
       const app = buildApp({
         org_id: 'org_signals',
@@ -521,9 +540,9 @@ describe('POST /api/v1/action/perform — on-behalf-of (bulk)', () => {
       fetchLocalItemSnapshotMock.mockResolvedValue({
         created_by: 'usr_self_reg',
         item_id: 'src_item_1',
-        item_latitude: null,
-        item_longitude: null,
+        item_locations: [],
         private_state: {},
+        lifecycle_status: 'live',
       });
       const app = buildApp({
         org_id: 'org_signals',

@@ -113,8 +113,14 @@ const clusterRenderer: Renderer = {
     // be a specific network's brand colour.
     const primary = resolveThemeColor('--primary', '#6b7280');
 
-    // Tally domains from the clustered marker elements via the WeakMap.
-    const domains = (markers ?? []).map((m) => markerDomainMap.get(m as object) ?? '');
+    // Tally domains from the clustered marker elements via the WeakMap. Only
+    // markers with a known domain are counted in the breakdown; an unregistered
+    // marker would otherwise fall back to '' and fabricate a phantom
+    // empty-domain group, making a single-domain cluster look multi-domain.
+    // The total bubble count is independent (cluster.count).
+    const domains = (markers ?? [])
+      .map((m) => markerDomainMap.get(m as object))
+      .filter((d): d is string => Boolean(d));
     const breakdown = tallyDomains(domains);
 
     return new google.maps.marker.AdvancedMarkerElement({
@@ -139,6 +145,7 @@ interface ClusteredMarkerProps {
   onMarkerClick?: (id: string) => void;
   onMarkerReady: (id: string, el: NonNullable<AdvancedMarkerRef> | null) => void;
   renderPopup?: (marker: MapMarker) => React.ReactNode;
+  resolveIcon?: MapProviderProps['resolveIcon'];
 }
 
 function ClusteredMarker({
@@ -149,12 +156,14 @@ function ClusteredMarker({
   onMarkerClick,
   onMarkerReady,
   renderPopup,
+  resolveIcon,
 }: ClusteredMarkerProps) {
   const [markerRef, markerEl] = useAdvancedMarkerRef();
   const { id } = marker;
 
-  // Resolve the domain icon once per render (cheap — just a lookup).
-  const DomainIcon = getIconForDomain(marker.domain);
+  // Resolve the marker icon once per render (cheap — just a lookup). Defaults
+  // to a domain-based icon; callers may override (e.g. tourist app by category).
+  const DomainIcon = resolveIcon ? resolveIcon(marker) : getIconForDomain(marker.domain);
 
   // Report the underlying element to the parent each time it changes.
   // Also register this element→domain mapping so the cluster renderer can
@@ -276,6 +285,7 @@ interface ClustererManagerProps {
   onMarkerDeactivate: () => void;
   onMarkerClick?: (id: string) => void;
   renderPopup?: (marker: MapMarker) => React.ReactNode;
+  resolveIcon?: MapProviderProps['resolveIcon'];
 }
 
 function ClustererManager({
@@ -285,6 +295,7 @@ function ClustererManager({
   onMarkerDeactivate,
   onMarkerClick,
   renderPopup,
+  resolveIcon,
 }: ClustererManagerProps) {
   const map = useMap();
 
@@ -357,6 +368,7 @@ function ClustererManager({
           onMarkerClick={onMarkerClick}
           onMarkerReady={handleMarkerReady}
           renderPopup={renderPopup}
+          resolveIcon={resolveIcon}
         />
       ))}
     </>
@@ -372,6 +384,7 @@ export function GoogleMapProvider({
   onMarkerClick,
   initialViewSet = false,
   renderPopup,
+  resolveIcon,
 }: MapProviderProps) {
   const { t } = useTranslation();
   const [activeMarker, setActiveMarker] = React.useState<MapMarker | null>(null);
@@ -420,6 +433,7 @@ export function GoogleMapProvider({
           onMarkerDeactivate={() => setActiveMarker(null)}
           onMarkerClick={onMarkerClick}
           renderPopup={renderPopup}
+          resolveIcon={resolveIcon}
         />
       </Map>
     </APIProvider>

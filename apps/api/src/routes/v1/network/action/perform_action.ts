@@ -118,6 +118,10 @@ export const perform_network_action_handler = async (
     });
   }
 
+  if (targetItemSnapshot.lifecycle_status !== 'live') {
+    return reply.code(409).send({ error: 'PROFILE_NOT_LIVE', message: 'target_item is not live; cannot perform actions' });
+  }
+
   let sourceItemSnapshot = null;
   if (isCurrentInstanceItem(body.source_item)) {
     sourceItemSnapshot = await fetchLocalItemSnapshot(db, body.source_item);
@@ -127,6 +131,10 @@ export const perform_network_action_handler = async (
         error: 'SOURCE_ITEM_NOT_FOUND',
         message: 'Source item does not exist on this instance',
       });
+    }
+
+    if (sourceItemSnapshot.lifecycle_status !== 'live') {
+      return reply.code(409).send({ error: 'PROFILE_NOT_LIVE', message: 'source_item is not live; cannot perform actions' });
     }
   }
 
@@ -222,10 +230,8 @@ export const perform_network_action_handler = async (
     target_item: body.target_item,
     source_item_owner: body.source_item_owner,
     target_item_owner: targetItemSnapshot.created_by,
-    source_item_latitude: sourceItemSnapshot?.item_latitude ?? null,
-    source_item_longitude: sourceItemSnapshot?.item_longitude ?? null,
-    target_item_latitude: targetItemSnapshot.item_latitude ?? null,
-    target_item_longitude: targetItemSnapshot.item_longitude ?? null,
+    source_item_locations: sourceItemSnapshot?.item_locations ?? [],
+    target_item_locations: targetItemSnapshot.item_locations ?? [],
     event_payload: eventPayload,
   };
 

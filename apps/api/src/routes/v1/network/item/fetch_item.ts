@@ -128,6 +128,7 @@ const fetch_network_item_handler = async (
         radius_meters,
         limit,
         offset,
+        lifecycle_filter: 'live_only',
       },
       requestedCacheTtlSeconds: cache_ttl_seconds,
     });
@@ -160,7 +161,7 @@ const count_local_items_handler = async (
     );
   }
 
-  const count = await countLocalItems(body);
+  const count = await countLocalItems({ ...body, lifecycle_filter: 'live_only' });
   return reply.code(200).send({ count });
 };
 
@@ -178,5 +179,5 @@ const fetch_local_items_handler = async (
     );
   }
 
-  return reply.code(200).send(await fetchLocalItems(body));
+  return reply.code(200).send(await fetchLocalItems({ ...body, lifecycle_filter: 'live_only' }));
 };

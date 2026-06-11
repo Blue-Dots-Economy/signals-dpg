@@ -7,6 +7,11 @@ import { db } from '@api/db/postgres/drizzle_config';
 import { item_metrics } from '../../../../db/postgres/schema/metrics.js';
 import { organization } from '../../../../db/postgres/schema/auth.js';
 import { eq, and, sql, desc, getTableColumns } from 'drizzle-orm';
+import type { AnyPgColumn } from 'drizzle-orm/pg-core';
+import {
+  resolve_private_display_names,
+  type NameResolutionLog,
+} from '@/utils/private_display_name';
 import {
   DashboardRequestQuery,
   DashboardResponse,
@@ -112,7 +117,7 @@ export const aggregator_dashboard_handler = async (
 
   const by_domain: Record<string, unknown> = {};
   for (const d of scope) {
-    by_domain[d] = await build_domain_block(acting.org_id, d, page, limit, status);
+    by_domain[d] = await build_domain_block(acting.org_id, d, page, limit, status, request.log);
   }
 
   return {
@@ -131,6 +136,7 @@ async function build_domain_block(
   page: number,
   limit: number,
   status: string | undefined,
+  log?: NameResolutionLog,
 ) {
   const base_where = and(
     eq(item_metrics.onboardedByOrgId, org_id),
@@ -140,6 +146,14 @@ async function build_domain_block(
     ? and(base_where, eq(item_metrics.profileStatus, status))
     : base_where;
 
+  // Per-(direction,bucket) integer extraction from the jsonb action maps.
+  const jint = (col: AnyPgColumn, bucket: string) =>
+    sql`COALESCE((${col}->>${bucket})::int, 0)`;
+  const dirSum = (col: AnyPgColumn) =>
+    sql`(${jint(col, 'create')} + ${jint(col, 'accept')} + ${jint(col, 'reject')} + ${jint(col, 'cancel')})`;
+  // Total actions on a row = initiated + received across all buckets.
+  const rowTotal = sql`(${dirSum(item_metrics.initiated)} + ${dirSum(item_metrics.received)})`;
+
   // Single aggregate query for the rollup tiles + derived metrics.
   // ?status= filters the items list but NOT the rollup counts — those
   // reflect the full domain population regardless of the status filter.
@@ -147,29 +161,27 @@ async function build_domain_block(
     SELECT
       COUNT(*)::int AS total_items,
       COUNT(*) FILTER (WHERE ${item_metrics.profileCompletionPct} >= 100)::int AS complete_profiles,
-      COUNT(*) FILTER (
-        WHERE (${item_metrics.countCreate} + ${item_metrics.countAccept}
-             + ${item_metrics.countReject} + ${item_metrics.countCancel}) > 0
-      )::int AS has_applications,
+      COUNT(*) FILTER (WHERE ${rowTotal} > 0)::int AS has_applications,
 
       COUNT(*) FILTER (WHERE ${item_metrics.profileStatus} = 'new')::int      AS s_new,
       COUNT(*) FILTER (WHERE ${item_metrics.profileStatus} = 'active')::int   AS s_active,
       COUNT(*) FILTER (WHERE ${item_metrics.profileStatus} = 'at_risk')::int  AS s_at_risk,
       COUNT(*) FILTER (WHERE ${item_metrics.profileStatus} = 'inactive')::int AS s_inactive,
 
-      COALESCE(SUM(${item_metrics.countCreate}), 0)::int AS b_create,
-      COALESCE(SUM(${item_metrics.countAccept}), 0)::int AS b_accept,
-      COALESCE(SUM(${item_metrics.countReject}), 0)::int AS b_reject,
-      COALESCE(SUM(${item_metrics.countCancel}), 0)::int AS b_cancel,
+      COALESCE(SUM(${jint(item_metrics.initiated, 'create')}), 0)::int AS bi_create,
+      COALESCE(SUM(${jint(item_metrics.initiated, 'accept')}), 0)::int AS bi_accept,
+      COALESCE(SUM(${jint(item_metrics.initiated, 'reject')}), 0)::int AS bi_reject,
+      COALESCE(SUM(${jint(item_metrics.initiated, 'cancel')}), 0)::int AS bi_cancel,
 
-      COUNT(DISTINCT ${item_metrics.ownerUserId})::int AS unique_users,
-      COALESCE(SUM(
-        ${item_metrics.countCreate} + ${item_metrics.countAccept}
-        + ${item_metrics.countReject} + ${item_metrics.countCancel}
-      ), 0)::int AS total_actions,
+      COALESCE(SUM(${jint(item_metrics.received, 'create')}), 0)::int AS br_create,
+      COALESCE(SUM(${jint(item_metrics.received, 'accept')}), 0)::int AS br_accept,
+      COALESCE(SUM(${jint(item_metrics.received, 'reject')}), 0)::int AS br_reject,
+      COALESCE(SUM(${jint(item_metrics.received, 'cancel')}), 0)::int AS br_cancel,
+
+      COUNT(DISTINCT ${item_metrics.ownerUserId})::int AS total_users,
+      COALESCE(SUM(${rowTotal}), 0)::int AS total_actions,
       COUNT(DISTINCT ${item_metrics.ownerUserId}) FILTER (
-        WHERE (${item_metrics.countCreate} + ${item_metrics.countAccept}
-             + ${item_metrics.countReject} + ${item_metrics.countCancel}) > 0
+        WHERE ${rowTotal} > 0
       )::int AS engaged_users
     FROM ${item_metrics}
     WHERE ${item_metrics.onboardedByOrgId} = ${org_id}
@@ -193,7 +205,7 @@ async function build_domain_block(
   for (const r of modeRows) if (r?.via) mode_wise_counts[r.via] = r.n;
 
   const total_items = rollupRow.total_items ?? 0;
-  const unique_users = rollupRow.unique_users ?? 0;
+  const total_users = rollupRow.total_users ?? 0;
   const total_actions = rollupRow.total_actions ?? 0;
   const engaged_users = rollupRow.engaged_users ?? 0;
 
@@ -207,13 +219,20 @@ async function build_domain_block(
       at_risk: rollupRow.s_at_risk ?? 0,
       inactive: rollupRow.s_inactive ?? 0,
     },
-    by_action_status: {
-      create: rollupRow.b_create ?? 0,
-      accept: rollupRow.b_accept ?? 0,
-      reject: rollupRow.b_reject ?? 0,
-      cancel: rollupRow.b_cancel ?? 0,
+    by_initiated_action_status: {
+      create: rollupRow.bi_create ?? 0,
+      accept: rollupRow.bi_accept ?? 0,
+      reject: rollupRow.bi_reject ?? 0,
+      cancel: rollupRow.bi_cancel ?? 0,
     },
-    avg_items_per_user: unique_users > 0 ? total_items / unique_users : 0,
+    by_received_action_status: {
+      create: rollupRow.br_create ?? 0,
+      accept: rollupRow.br_accept ?? 0,
+      reject: rollupRow.br_reject ?? 0,
+      cancel: rollupRow.br_cancel ?? 0,
+    },
+    total_users,
+    avg_items_per_user: total_users > 0 ? total_items / total_users : 0,
     avg_actions_per_user: engaged_users > 0 ? total_actions / engaged_users : 0,
     mode_wise_counts,
   };
@@ -232,11 +251,20 @@ async function build_domain_block(
     .limit(limit)
     .offset((page - 1) * limit);
 
-  const items = list_rows.map((r) => ({
+  // Every row here is a participant this aggregator onboarded
+  // (filter_where pins onboarded_by_org_id), so revealing the private
+  // display name needs no further authorization — same entitlement rule
+  // as GET /admin/participant.
+  const private_names = await resolve_private_display_names(list_rows, log);
+
+  const items_out = list_rows.map((r) => ({
+    profile_item_id: r.itemId,
+    user_id: r.ownerUserId ?? null,
+
     item_network: r.itemNetwork,
     item_domain: r.itemDomain,
     item_type: r.itemType,
-    name: r.displayName,
+    name: private_names.get(r.itemId) ?? r.displayName,
     onboarded_via: r.onboardedVia,
 
     profile_status: r.profileStatus as 'new' | 'active' | 'at_risk' | 'inactive' | null,
@@ -245,22 +273,19 @@ async function build_domain_block(
     profile_last_updated_at: r.profileLastUpdatedAt?.toISOString() ?? null,
     age_days: r.ageDays,
 
-    count_create: r.countCreate ?? 0,
-    count_accept: r.countAccept ?? 0,
-    count_reject: r.countReject ?? 0,
-    count_cancel: r.countCancel ?? 0,
-
-    last_create_at: r.lastCreateAt?.toISOString() ?? null,
-    last_accept_at: r.lastAcceptAt?.toISOString() ?? null,
-    last_reject_at: r.lastRejectAt?.toISOString() ?? null,
-    last_cancel_at: r.lastCancelAt?.toISOString() ?? null,
+    // Stored as jsonb maps by recompute; passed through unchanged. Counts are
+    // full maps; last_*_at maps are sparse (only buckets that occurred).
+    initiated: r.initiated ?? {},
+    received: r.received ?? {},
+    last_initiated_at: r.lastInitiatedAt ?? {},
+    last_received_at: r.lastReceivedAt ?? {},
 
     actionable_tags: r.actionableTags ?? [],
   }));
 
   return {
     rollup,
-    items,
+    items: items_out,
     total_matching,
     next_cursor: list_rows.length === limit ? String(page + 1) : null,
   };

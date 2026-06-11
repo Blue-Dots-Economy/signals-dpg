@@ -2,6 +2,8 @@ import { createApiClient } from './api-client';
 
 const apiClient = createApiClient();
 
+export type ItemLocation = { lat: number; lng: number; label?: string };
+
 export interface CreateItemPayload {
   item_network: string;
   item_domain: string;
@@ -9,8 +11,7 @@ export interface CreateItemPayload {
   item_instance_url?: string;
   item_schema_url?: string;
   item_state: Record<string, unknown>;
-  item_latitude?: number;
-  item_longitude?: number;
+  item_locations?: ItemLocation[];
 }
 
 export interface CreateItemResponse {
@@ -38,10 +39,10 @@ export interface Item {
   item_instance_url: string | null;
   item_schema_url: string | null;
   item_state: Record<string, unknown>;
-  item_latitude: number | null;
-  item_longitude: number | null;
+  item_locations: ItemLocation[];
   created_at: string;
   updated_at: string;
+  lifecycle_status?: 'draft' | 'live' | 'paused';
 }
 
 export interface FetchItemsResponse {
@@ -57,8 +58,7 @@ export interface UpdateItemPayload {
   item_instance_url?: string;
   item_schema_url?: string;
   item_state?: Record<string, unknown>;
-  item_latitude?: number | null;
-  item_longitude?: number | null;
+  item_locations?: ItemLocation[];
 }
 
 export interface UpdateItemResponse {
@@ -106,6 +106,35 @@ export async function updateItem(itemId: string, payload: UpdateItemPayload): Pr
  */
 export async function deleteItem(itemId: string): Promise<void> {
   await apiClient.delete(`/api/v1/item/${itemId}`);
+}
+
+export interface ItemLifecycleResponse {
+  item_id: string;
+  lifecycle_status: 'draft' | 'live' | 'paused';
+}
+
+/**
+ * Pause the caller's own item (must be in 'live' state).
+ * Pending actions are preserved; they are gated at perform/accept time (§10).
+ */
+export async function pauseItem(itemId: string): Promise<ItemLifecycleResponse> {
+  const response = await apiClient.post<ItemLifecycleResponse>('/api/v1/item/lifecycle', {
+    item_id: itemId,
+    action: 'pause',
+  });
+  return response.data;
+}
+
+/**
+ * Unpause (resume) the caller's own item (must be in 'paused' state).
+ * The server re-classifies the item and sets it back to 'live' or 'draft'.
+ */
+export async function unpauseItem(itemId: string): Promise<ItemLifecycleResponse> {
+  const response = await apiClient.post<ItemLifecycleResponse>('/api/v1/item/lifecycle', {
+    item_id: itemId,
+    action: 'unpause',
+  });
+  return response.data;
 }
 
 // Re-export action-related types and functions from action-api.ts

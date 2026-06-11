@@ -1,4 +1,5 @@
 import type { RJSFSchema } from '@rjsf/utils';
+import type { LucideIcon } from 'lucide-react';
 
 // ─── Schema Types ───────────────────────────────────────────────
 
@@ -45,6 +46,23 @@ export interface StatusRule {
   when: Record<string, unknown> | 'default';
 }
 
+/**
+ * Per-domain card display config (network.json `card` block). Controls which
+ * fields a card shows by default and which become "view more" rows, plus the
+ * heading / avatar source. All fields optional — the UI falls back to a
+ * best-guess when a domain has no `card` block.
+ */
+export interface DotCardConfig {
+  /** Field key whose value is the card heading. */
+  title_field?: string;
+  /** Optional field key rendered as a secondary line under the title. */
+  subtitle_field?: string;
+  /** Field key used to derive avatar initials (defaults to title_field). */
+  avatar_from?: string;
+  /** Ordered field keys shown collapsed; everything else moves behind "view more". */
+  default_fields?: string[];
+}
+
 export interface DotNetworkDomain {
   id: string;
   description: string;
@@ -58,6 +76,8 @@ export interface DotNetworkDomain {
    * derive a best-effort status for each item client-side (see item-status.ts).
    */
   status_rules?: StatusRule[];
+  /** Card display config — see {@link DotCardConfig}. */
+  card?: DotCardConfig;
 }
 
 export interface DotNetworkInteraction {
@@ -125,7 +145,7 @@ export interface ActionButton {
 
 // ─── Map Types ─────────────────────────────────────────────────
 
-export type MapMarkerPrecision = 'exact' | 'geocoded_pincode' | 'geocoded_full_address' | 'geocoded_city_only';
+export type MapMarkerPrecision = 'exact' | 'geocoded_full_address';
 
 export interface MapMarker {
   id: string;
@@ -149,6 +169,13 @@ export interface MapProviderProps {
   children?: React.ReactNode;
   /** Optional custom popup renderer; falls back to the default MarkerPopupCard. */
   renderPopup?: (marker: MapMarker) => React.ReactNode;
+  /**
+   * Optional per-marker icon resolver. Defaults to a domain-based lucide icon
+   * (see `getIconForDomain`). Callers can override to pick an icon from other
+   * marker data (e.g. the tourist app keys on `data.category`). Signals leaves
+   * this unset, so its markers are unchanged.
+   */
+  resolveIcon?: (marker: MapMarker) => LucideIcon;
 }
 
 export interface MapProvider {

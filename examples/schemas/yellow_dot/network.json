@@ -50,7 +50,8 @@
             },
             "Location": {
               "type": "string",
-              "minLength": 1
+              "minLength": 1,
+              "location": "single"
             },
             "Grade": {
               "type": "string",
@@ -82,10 +83,21 @@
         }
       },
       "id": "student",
+      "card": {
+        "title_field": "Full Name",
+        "avatar_from": "Full Name",
+        "default_fields": ["Location", "Grade", "Academic Stream", "Service Looking For"]
+      },
       "dashboard_tiles": {
-        "total_items": "Total Students",
-        "complete_profiles": "Profiles Complete",
-        "has_applications": "Has Activity"
+        "profile": [
+          { "field": "total_items", "label": "Profiles Registered" },
+          { "field": "complete_profiles", "label": "Profiles Complete" },
+          { "field": "has_applications", "label": "Has Activity" }
+        ],
+        "user": [
+          { "field": "total_users", "label": "Total Students" },
+          { "field": "avg_items_per_user", "label": "Avg Profiles per Student" }
+        ]
       }
     },
     {
@@ -180,10 +192,21 @@
         }
       },
       "id": "individual_tutor_weera_counsellor",
+      "card": {
+        "title_field": "Full Name",
+        "avatar_from": "Full Name",
+        "default_fields": ["Location", "Service Offered", "Grade Bands Served", "Academic Streams Served"]
+      },
       "dashboard_tiles": {
-        "total_items": "Total Tutors",
-        "complete_profiles": "Profiles Complete",
-        "has_applications": "Has Activity"
+        "profile": [
+          { "field": "total_items", "label": "Profiles Registered" },
+          { "field": "complete_profiles", "label": "Profiles Complete" },
+          { "field": "has_applications", "label": "Has Activity" }
+        ],
+        "user": [
+          { "field": "total_users", "label": "Total Tutors" },
+          { "field": "avg_items_per_user", "label": "Avg Profiles per Tutor" }
+        ]
       }
     }
   ],
@@ -343,8 +366,14 @@
       "at_risk": "At Risk",
       "inactive": "Inactive"
     },
-    "by_action_status": {
+    "by_initiated_action_status": {
       "create": "Created",
+      "accept": "Accepted",
+      "reject": "Rejected",
+      "cancel": "Cancelled"
+    },
+    "by_received_action_status": {
+      "create": "Requests",
       "accept": "Accepted",
       "reject": "Rejected",
       "cancel": "Cancelled"

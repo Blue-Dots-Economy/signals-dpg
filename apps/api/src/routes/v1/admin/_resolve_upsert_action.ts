@@ -6,19 +6,26 @@ type ActingOrg = {
 
 export type UpsertVerdict =
   | { kind: 'create_new_user' }
-  | { kind: 'aggregator_existing_noop' }
+  | { kind: 'account_only' }
+  | { kind: 'aggregator_owned_elsewhere' }
   | { kind: 'update_item'; item_id: string }
   | { kind: 'insert_item' }
-  | {
-      kind: 'rejected';
-      status: 403;
-      error: 'ACTING_ORG_TYPE_NOT_ALLOWED' | 'INVALID_ACTING_ORG';
-    };
+  | { kind: 'rejected'; status: 403; error: 'ACTING_ORG_TYPE_NOT_ALLOWED' | 'INVALID_ACTING_ORG' };
 
 export type ResolveUpsertActionInput = {
   acting_org: ActingOrg | undefined;
   user_exists: boolean;
   item_id_in_body: string | undefined;
+  has_item_state: boolean;
+  /** Only meaningful when aggregator AND user_exists. */
+  aggregator_owns_user: boolean;
+  /**
+   * The caller-resolved id of the user's existing item for this
+   * (item_network, item_domain, item_type) triple, if any.
+   * Only meaningful when user_exists && has_item_state && !item_id_in_body.
+   * When present, triggers idempotent dedup-to-update instead of insert.
+   */
+  existing_owned_item_id?: string | undefined;
 };
 
 /**
@@ -29,14 +36,19 @@ export type ResolveUpsertActionInput = {
  * No DB, no I/O. The handler runs this synchronously and then dispatches
  * on the verdict.
  *
+ * Tail logic (user_exists && authorized):
+ *   - item_id_in_body && has_item_state → update_item{item_id_in_body}
+ *   - has_item_state && existing_owned_item_id → update_item{existing_owned_item_id}
+ *     (idempotent re-onboard: caller resolved a pre-existing item for this type)
+ *   - has_item_state → insert_item  (first profile for this network/domain/type)
+ *   - else → account_only
+ *
  * The runtime check for "item belongs to this user" (which produces
  * ITEM_NOT_OWNED_BY_USER) lives in the handler AFTER the helper returns
  * `update_item` — keeping this function pure.
  */
-export const resolve_upsert_action = (
-  input: ResolveUpsertActionInput,
-): UpsertVerdict => {
-  const { acting_org, user_exists, item_id_in_body } = input;
+export const resolve_upsert_action = (input: ResolveUpsertActionInput): UpsertVerdict => {
+  const { acting_org, user_exists, item_id_in_body, has_item_state, aggregator_owns_user, existing_owned_item_id } = input;
 
   if (!acting_org) {
     return { kind: 'rejected', status: 403, error: 'INVALID_ACTING_ORG' };
@@ -46,24 +58,20 @@ export const resolve_upsert_action = (
     acting_org.org_type !== 'aggregator' &&
     acting_org.org_type !== 'network_service'
   ) {
-    return {
-      kind: 'rejected',
-      status: 403,
-      error: 'ACTING_ORG_TYPE_NOT_ALLOWED',
-    };
+    return { kind: 'rejected', status: 403, error: 'ACTING_ORG_TYPE_NOT_ALLOWED' };
   }
 
   if (!user_exists) {
+    if (!has_item_state) return { kind: 'account_only' };
     return { kind: 'create_new_user' };
   }
 
-  if (acting_org.org_type === 'aggregator') {
-    return { kind: 'aggregator_existing_noop' };
+  if (acting_org.org_type === 'aggregator' && !aggregator_owns_user) {
+    return { kind: 'aggregator_owned_elsewhere' };
   }
 
-  // acting_org.org_type === 'network_service' && user_exists
-  if (item_id_in_body) {
-    return { kind: 'update_item', item_id: item_id_in_body };
-  }
-  return { kind: 'insert_item' };
+  if (item_id_in_body && has_item_state) return { kind: 'update_item', item_id: item_id_in_body };
+  if (has_item_state && existing_owned_item_id) return { kind: 'update_item', item_id: existing_owned_item_id };
+  if (has_item_state) return { kind: 'insert_item' };
+  return { kind: 'account_only' };
 };
