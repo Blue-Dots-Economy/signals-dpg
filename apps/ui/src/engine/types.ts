@@ -183,6 +183,13 @@ export interface MapProviderProps {
    * this unset, so its markers are unchanged.
    */
   resolveIcon?: (marker: MapMarker) => LucideIcon;
+  /**
+   * Optional per-marker image resolver. When it returns a URL, the marker is
+   * rendered as that image (in a white circle) instead of the lucide pin —
+   * used by the tourist app to show the RubiX favicon for RubiX listings.
+   * Returns null/undefined to fall back to the icon pin.
+   */
+  resolveMarkerImage?: (marker: MapMarker) => string | null | undefined;
 }
 
 export interface MapProvider {

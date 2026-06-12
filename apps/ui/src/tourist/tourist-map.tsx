@@ -5,7 +5,10 @@ import type { LatLng } from '@/lib/geo/types';
 import { MapView } from '@/components/map/map-container';
 import { PractitionerCard } from './practitioner-card';
 import { resolvePractitionerIcon } from './category-icons';
-import type { CardItem } from './practitioner-data';
+import { isRubixListing, type CardItem } from './practitioner-data';
+import { useThemeMode } from '@/theme/mode-provider';
+import rubixLightBg from '@/assets/rubix-light-bg.svg';
+import rubixDarkBg from '@/assets/rubix-dark-bg.svg';
 
 export interface TouristMapProps {
   items: CardItem[];
@@ -19,6 +22,10 @@ export interface TouristMapProps {
 }
 
 export function TouristMap({ items, schema, cardConfig, focusPoint, center, zoom, filtersSlot }: TouristMapProps) {
+  const { resolved } = useThemeMode();
+  // Theme-matched RubiX favicon used for RubiX listings' map pins.
+  const rubixPin = resolved === 'dark' ? rubixDarkBg : rubixLightBg;
+
   return (
     <MapView
       schema={schema}
@@ -33,6 +40,8 @@ export function TouristMap({ items, schema, cardConfig, focusPoint, center, zoom
       // Marker icon by practitioner category (Stay/Artists/Activities/…) rather
       // than by domain (all practitioners share one domain).
       resolveMarkerIcon={resolvePractitionerIcon}
+      // RubiX listings use the RubiX favicon as their map pin.
+      resolveMarkerImage={(marker) => (isRubixListing(marker.data) ? rubixPin : null)}
       renderPopup={(marker: MapMarker) => (
         <PractitionerCard data={marker.data} schema={schema} cardConfig={cardConfig} title={marker.label} variant="popup" />
       )}
