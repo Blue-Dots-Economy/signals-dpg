@@ -628,7 +628,7 @@
             "itiInstitute": {
               "type": "string",
               "title": "College / Institute Name",
-              "description": "Please specify your college qualification"
+              "description": "Please specify your college or institute name"
             },
             "workExperienceYears": {
               "type": "string",
