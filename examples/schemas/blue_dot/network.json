@@ -16,7 +16,6 @@
         "profile_1.0": {
           "$schema": "https://json-schema.org/draft/2020-12/schema",
           "title": "Job Seeker Profile 1.0",
-          "display_name_field": "name",
           "type": "object",
           "additionalProperties": false,
           "required": [
@@ -30,7 +29,8 @@
             "name": {
               "type": "string",
               "title": "Full Name",
-              "minLength": 1
+              "minLength": 1,
+              "private": true
             },
             "gender": {
               "type": "string",
@@ -40,12 +40,14 @@
             "location": {
               "type": "string",
               "title": "Location",
-              "location": "single"
+              "location": "single",
+              "private": true
             },
             "phone": {
               "type": "string",
               "title": "Mobile Number",
-              "minimum": 10
+              "minimum": 10,
+              "private": true
             },
             "age": {
               "type": "integer",
@@ -777,7 +779,8 @@
             },
             "jobProviderLocation": {
               "type": "string",
-              "title": "Job Location"
+              "title": "Job Location",
+              "location": "single"
             },
             "hiringManagerName": {
               "type": "string",
