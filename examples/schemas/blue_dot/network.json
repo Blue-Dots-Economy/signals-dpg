@@ -30,7 +30,8 @@
             "name": {
               "type": "string",
               "title": "Full Name",
-              "minLength": 1
+              "minLength": 1,
+              "private": true
             },
             "gender": {
               "type": "string",
@@ -40,12 +41,14 @@
             "location": {
               "type": "string",
               "title": "Location",
-              "location": "single"
+              "location": "single",
+              "private": true
             },
             "phone": {
               "type": "string",
               "title": "Mobile Number",
-              "minimum": 10
+              "minimum": 10,
+              "private": true
             },
             "age": {
               "type": "integer",
