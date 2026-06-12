@@ -15,10 +15,13 @@ export function PractitionerActions({ phone, website, location }: PractitionerAc
   const { t } = useTranslation();
   if (!phone && !website && !location) return null;
 
+  // flex-wrap + a min width per button: on a wide card all three sit on one
+  // row (flex-1 shares the space); on a narrow card (small phones) they wrap to
+  // the next row instead of overflowing and getting clipped by the card edge.
   return (
-    <div className="flex w-full gap-2">
+    <div className="flex w-full flex-wrap gap-2">
       {phone && (
-        <Button asChild variant="outline" size="sm" className="flex-1">
+        <Button asChild variant="outline" size="sm" className="min-w-[7rem] flex-1">
           <a href={telHref(phone)}>
             <Phone className="mr-1.5 h-3.5 w-3.5" />
             {t('tourist.call')}
@@ -26,7 +29,7 @@ export function PractitionerActions({ phone, website, location }: PractitionerAc
         </Button>
       )}
       {website && (
-        <Button asChild variant="outline" size="sm" className="flex-1">
+        <Button asChild variant="outline" size="sm" className="min-w-[7rem] flex-1">
           <a href={normalizeWebsiteUrl(website)} target="_blank" rel="noopener noreferrer">
             <Globe className="mr-1.5 h-3.5 w-3.5" />
             {t('tourist.website')}
@@ -37,7 +40,7 @@ export function PractitionerActions({ phone, website, location }: PractitionerAc
         <Button
           variant="default"
           size="sm"
-          className="flex-1"
+          className="min-w-[7rem] flex-1"
           onClick={() => openDirections(location, location.label)}
         >
           <Navigation className="mr-1.5 h-3.5 w-3.5" />
