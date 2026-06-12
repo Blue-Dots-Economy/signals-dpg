@@ -14,6 +14,7 @@ import type { AdvancedMarkerRef } from '@vis.gl/react-google-maps';
 import { MarkerClusterer, type Renderer, type Cluster } from '@googlemaps/markerclusterer';
 import type { MapMarker, MapProviderProps } from '@/engine/types';
 import { registerMapProvider } from '@/engine/map/map-registry';
+import { useIsMobile } from '@/hooks/use-mobile';
 import { getIconForDomain } from '../domain-icons';
 import { tallyDomains } from '../cluster-breakdown';
 import { MarkerPopupCard } from '../marker-popup-card';
@@ -387,6 +388,7 @@ export function GoogleMapProvider({
   resolveIcon,
 }: MapProviderProps) {
   const { t } = useTranslation();
+  const isMobile = useIsMobile();
   const [activeMarker, setActiveMarker] = React.useState<MapMarker | null>(null);
   const apiKey = getRuntimeEnv('VITE_GOOGLE_MAPS_API_KEY');
 
@@ -409,6 +411,15 @@ export function GoogleMapProvider({
         gestureHandling="greedy"
         mapId="dpg-items-map"
         reuseMaps
+        // On mobile, render the Map/Satellite toggle as a compact dropdown
+        // (MapTypeControlStyle.DROPDOWN_MENU = 2) instead of the wide
+        // horizontal bar, which crowds a small screen. Desktop keeps Google's
+        // default bar.
+        mapTypeControlOptions={
+          isMobile
+            ? { style: 2 as google.maps.MapTypeControlStyle }
+            : undefined
+        }
         // Native fullscreen only maximizes the map's own element, which would
         // hide our overlay (filters / maximize button). We provide our own
         // maximize control on the wrapper instead — see MapView.
