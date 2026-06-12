@@ -105,7 +105,7 @@ export function MarkerPopupCard({
     <>
       <ItemCard
         variant="popup"
-        className="w-[320px] shadow-none"
+        className="shadow-none"
         schema={schema}
         cardConfig={cardConfig}
         data={marker.data}

@@ -34,10 +34,21 @@ export interface ItemCardProps {
 const HEADER_GRADIENT =
   'linear-gradient(135deg, var(--primary), color-mix(in srgb, var(--primary), white 32%))';
 
-function FieldRow({ row }: { row: CardRow }) {
+function FieldRow({ row, compact = false }: { row: CardRow; compact?: boolean }) {
   return (
-    <div className="flex items-start gap-3 text-sm">
-      <span className="w-[110px] shrink-0 font-medium text-muted-foreground">
+    <div
+      className={cn(
+        'flex items-start gap-3 text-sm',
+        // Popup on mobile: tighter rows + smaller text so the card stays small.
+        compact && 'gap-2 text-xs sm:gap-3 sm:text-sm'
+      )}
+    >
+      <span
+        className={cn(
+          'shrink-0 font-medium text-muted-foreground',
+          compact ? 'w-[80px] sm:w-[110px]' : 'w-[110px]'
+        )}
+      >
         {row.label}
       </span>
       <span
@@ -78,18 +89,101 @@ export function ItemCard({
   const heading = title ?? resolved.title;
   const hasExtra = resolved.extraRows.length > 0;
 
+  // Fields: default rows always, extra rows when expanded. On the DESKTOP popup
+  // this region alone scrolls (the footer stays pinned). On mobile it does not
+  // scroll on its own — the whole body wrapper scrolls instead (see below) so
+  // the action buttons are always reachable.
+  const fieldsBlock = (
+    <div
+      className={cn(
+        'space-y-2 px-4 py-3',
+        variant === 'popup' &&
+          'space-y-1.5 px-3 py-2.5 sm:min-h-0 sm:flex-1 sm:space-y-2 sm:overflow-y-auto sm:px-4 sm:py-3'
+      )}
+    >
+      {resolved.defaultRows.map((row) => (
+        <FieldRow key={row.key} row={row} compact={variant === 'popup'} />
+      ))}
+      {open &&
+        resolved.extraRows.map((row) => (
+          <FieldRow key={row.key} row={row} compact={variant === 'popup'} />
+        ))}
+    </div>
+  );
+
+  // Footer: the "view more" toggle + action buttons. On a list card it is
+  // pinned to the bottom (mt-auto) for equal-height rows. On the popup it is
+  // pinned only on desktop (sm:mt-auto); on mobile it flows at the end of the
+  // scrolling body so it can never be clipped when the fields expand.
+  const footerBlock = (hasExtra || actions) ? (
+    <div
+      className={cn(
+        'shrink-0 pt-1',
+        variant === 'list' ? 'mt-auto' : 'sm:mt-auto'
+      )}
+    >
+      {hasExtra && (
+        <div className={cn('px-4 pb-1', variant === 'popup' && 'px-3 sm:px-4')}>
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              setOpen((v) => !v);
+            }}
+            className={cn(
+              'flex w-full items-center justify-center gap-1.5 rounded-lg border border-border bg-muted/40 py-2 text-[13px] font-semibold text-primary hover:bg-muted',
+              variant === 'popup' && 'py-1.5 text-xs sm:py-2 sm:text-[13px]'
+            )}
+          >
+            {open
+              ? t('card.hide_details', 'Hide details')
+              : t('card.view_more', 'View more details')}
+            <ChevronDown
+              className={cn(
+                'h-4 w-4 transition-transform',
+                open && 'rotate-180'
+              )}
+            />
+          </button>
+        </div>
+      )}
+
+      {/* Action buttons — supplied by the caller. justify-between spreads
+          natural-width list buttons to the edges; the popup's buttons use
+          flex-1 so they fill instead. */}
+      {actions && (
+        <div
+          className={cn(
+            'flex flex-wrap items-center justify-between gap-2 px-4 pb-4 pt-2',
+            variant === 'popup' &&
+              'gap-1.5 px-3 pb-3 pt-1.5 sm:gap-2 sm:px-4 sm:pb-4 sm:pt-2'
+          )}
+        >
+          {actions}
+        </div>
+      )}
+    </div>
+  ) : null;
+
   return (
     <div
       data-item-card={variant === 'list' ? '' : undefined}
       data-expanded={variant === 'list' ? open : undefined}
       className={cn(
         'flex flex-col overflow-hidden rounded-2xl bg-background text-foreground shadow-sm',
-        // Map popup: bound the height to a compact card (≤ 28rem, and never more
-        // than 70vh on short screens) so the popup container can always show it
-        // in full — header and footer (Connect / See match score) stay pinned and
-        // the fields region between them scrolls. A taller cap let the footer sit
-        // at the map edge near the marker and get clipped.
-        variant === 'popup' && 'max-h-[min(70vh,28rem)]',
+        // Map popup: bound BOTH dimensions so the card always fits the screen.
+        //  - width: a fixed 28rem (wide enough for the three action buttons on
+        //    one row, and so fewer field values wrap → a shorter card), capped
+        //    at 90vw so it never exceeds a phone viewport. Being a definite
+        //    width, long field values wrap to the next line rather than widening
+        //    the card.
+        //  - width: a small 17rem on mobile (≤ 86vw) so the card leaves room to
+        //    pan the map; a roomier 28rem on desktop.
+        //  - height: on mobile a compact 56vh so an opened card never fills the
+        //    screen; the whole body scrolls within it. On desktop ≤ 28rem (and
+        //    ≤ 60vh on short screens) with the footer pinned.
+        variant === 'popup' &&
+          'w-[min(17rem,86vw)] max-h-[56vh] sm:w-[min(28rem,90vw)] sm:max-h-[min(60vh,28rem)]',
         variant === 'list' &&
           'transition hover:shadow-md motion-safe:hover:-translate-y-0.5',
         className
@@ -98,14 +192,14 @@ export function ItemCard({
     >
       {/* Branded header — colour is the per-network theme var */}
       <div
-        className="flex shrink-0 items-center gap-3 px-4 py-3"
+        className="flex shrink-0 items-center gap-2.5 px-3 py-2 sm:gap-3 sm:px-4 sm:py-3"
         style={{ background: HEADER_GRADIENT }}
       >
-        <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-white/25 text-sm font-bold text-white">
+        <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-white/25 text-xs font-bold text-white sm:h-11 sm:w-11 sm:text-sm">
           {resolved.initials}
         </div>
         <div className="min-w-0">
-          <p className="truncate text-[15px] font-bold leading-tight text-white">
+          <p className="truncate text-sm font-bold leading-tight text-white sm:text-[15px]">
             {heading}
           </p>
           {domainLabel && (
@@ -121,59 +215,21 @@ export function ItemCard({
         </div>
       </div>
 
-      {/* Fields: default rows always, extra rows when expanded. In the map popup
-          this region flexes and scrolls so a long list (e.g. many service
-          cities) stays reachable without pushing the action buttons off-screen. */}
-      <div
-        className={cn(
-          'space-y-2 px-4 py-3',
-          variant === 'popup' && 'min-h-0 flex-1 overflow-y-auto'
-        )}
-      >
-        {resolved.defaultRows.map((row) => (
-          <FieldRow key={row.key} row={row} />
-        ))}
-        {open &&
-          resolved.extraRows.map((row) => <FieldRow key={row.key} row={row} />)}
-      </div>
-
-      {/* Footer pinned to the bottom (mt-auto): when a card is taller than its
-          content (equal-height rows), the extra space sits above the footer —
-          after the last field — never below the buttons. */}
-      {(hasExtra || actions) && (
-        <div className="mt-auto shrink-0 pt-1">
-          {hasExtra && (
-            <div className="px-4 pb-1">
-              <button
-                type="button"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  setOpen((v) => !v);
-                }}
-                className="flex w-full items-center justify-center gap-1.5 rounded-lg border border-border bg-muted/40 py-2 text-[13px] font-semibold text-primary hover:bg-muted"
-              >
-                {open
-                  ? t('card.hide_details', 'Hide details')
-                  : t('card.view_more', 'View more details')}
-                <ChevronDown
-                  className={cn(
-                    'h-4 w-4 transition-transform',
-                    open && 'rotate-180'
-                  )}
-                />
-              </button>
-            </div>
-          )}
-
-          {/* Action buttons (Connect / See Match Score) — supplied by the caller.
-              justify-between spreads natural-width list buttons to the left/right
-              edges; the map popup's buttons use flex-1 so they fill instead. */}
-          {actions && (
-            <div className="flex flex-wrap items-center justify-between gap-2 px-4 pb-4 pt-2">
-              {actions}
-            </div>
-          )}
+      {/* Body. Popup on mobile: fields + footer share ONE scroll area, so the
+          action buttons are always reachable (even after "view more" expands
+          the fields). Popup on desktop (sm+): the body itself doesn't scroll —
+          the fields region scrolls internally and the footer stays pinned
+          (unchanged). List: fields followed by the bottom-pinned footer. */}
+      {variant === 'popup' ? (
+        <div className="flex min-h-0 flex-1 flex-col overflow-y-auto sm:overflow-hidden">
+          {fieldsBlock}
+          {footerBlock}
         </div>
+      ) : (
+        <>
+          {fieldsBlock}
+          {footerBlock}
+        </>
       )}
     </div>
   );

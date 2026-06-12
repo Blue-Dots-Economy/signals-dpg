@@ -83,7 +83,7 @@
             },
             "services": {
               "type": "array",
-              "title": "Services",
+              "title": "Services Provided",
               "description": "What you offer.",
               "items": {
                 "type": "string",
