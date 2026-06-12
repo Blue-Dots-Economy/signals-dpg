@@ -36,11 +36,8 @@
             "category",
             "description",
             "area",
-            "verified_by"
-          ],
-          "anyOf": [
-            { "required": ["contact_phone"] },
-            { "required": ["website"] }
+            "verified_by",
+            "contact_phone"
           ],
           "properties": {
             "product_name": {
