@@ -61,6 +61,13 @@ export interface DotCardConfig {
   avatar_from?: string;
   /** Ordered field keys shown collapsed; everything else moves behind "view more". */
   default_fields?: string[];
+  /**
+   * Ordered field keys revealed behind "view more". When provided, ONLY these
+   * (in this order) are shown as extra rows and any other schema field is
+   * omitted from the card entirely. When omitted, all remaining non-empty
+   * schema fields are shown (in schema order) — the previous behaviour.
+   */
+  extra_fields?: string[];
 }
 
 export interface DotNetworkDomain {

@@ -25,6 +25,9 @@ export interface ItemCardProps {
   precisionLabel?: string;
   /** Action buttons (Connect / See Match Score) rendered in the footer. */
   actions?: React.ReactNode;
+  /** When set, the avatar shows this image instead of the initials (e.g. a
+   *  RubiX listing's favicon). */
+  avatarImageUrl?: string;
   /** `popup` is the map marker card; `list` is the browse grid card. */
   variant?: 'popup' | 'list';
   className?: string;
@@ -34,7 +37,21 @@ export interface ItemCardProps {
 const HEADER_GRADIENT =
   'linear-gradient(135deg, var(--primary), color-mix(in srgb, var(--primary), white 32%))';
 
+// Long text values (e.g. Description) are truncated to a preview length and
+// expanded with an inline "Show more" toggle, so a long write-up doesn't make
+// the card tall by default.
+const LONG_VALUE_PREVIEW_CHARS = 140;
+
 function FieldRow({ row, compact = false }: { row: CardRow; compact?: boolean }) {
+  const { t } = useTranslation();
+  const [expanded, setExpanded] = React.useState(false);
+  const formatted = formatCardValue(row.value, row.type);
+  const isLong = formatted.length > LONG_VALUE_PREVIEW_CHARS;
+  const display =
+    isLong && !expanded
+      ? `${formatted.slice(0, LONG_VALUE_PREVIEW_CHARS).trimEnd()}… `
+      : formatted;
+
   return (
     <div
       className={cn(
@@ -57,7 +74,19 @@ function FieldRow({ row, compact = false }: { row: CardRow; compact?: boolean })
           row.isEmpty ? 'text-muted-foreground/60' : 'text-foreground'
         )}
       >
-        {formatCardValue(row.value, row.type)}
+        {display}
+        {isLong && (
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              setExpanded((v) => !v);
+            }}
+            className="font-medium text-primary hover:underline"
+          >
+            {expanded ? t('card.show_less', 'Show less') : t('card.show_more', 'Show more')}
+          </button>
+        )}
       </span>
     </div>
   );
@@ -78,6 +107,7 @@ export function ItemCard({
   domainLabel,
   precisionLabel,
   actions,
+  avatarImageUrl,
   variant = 'list',
   className,
   onClick,
@@ -195,8 +225,17 @@ export function ItemCard({
         className="flex shrink-0 items-center gap-2.5 px-3 py-2 sm:gap-3 sm:px-4 sm:py-3"
         style={{ background: HEADER_GRADIENT }}
       >
-        <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-white/25 text-xs font-bold text-white sm:h-11 sm:w-11 sm:text-sm">
-          {resolved.initials}
+        <div
+          className={cn(
+            'flex h-8 w-8 shrink-0 items-center justify-center overflow-hidden rounded-full text-xs font-bold text-white sm:h-11 sm:w-11 sm:text-sm',
+            avatarImageUrl ? 'bg-white' : 'bg-white/25'
+          )}
+        >
+          {avatarImageUrl ? (
+            <img src={avatarImageUrl} alt="" className="h-full w-full object-cover" />
+          ) : (
+            resolved.initials
+          )}
         </div>
         <div className="min-w-0">
           <p className="truncate text-sm font-bold leading-tight text-white sm:text-[15px]">

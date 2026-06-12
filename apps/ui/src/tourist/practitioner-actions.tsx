@@ -1,4 +1,4 @@
-import { Phone, Globe, Navigation } from 'lucide-react';
+import { Phone, Compass, Navigation } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { Button } from '@/components/ui/button';
 import type { LatLng } from '@/lib/geo/types';
@@ -34,7 +34,7 @@ export function PractitionerActions({ phone, website, location }: PractitionerAc
       {website && (
         <Button asChild variant="outline" size="sm" className={btn}>
           <a href={normalizeWebsiteUrl(website)} target="_blank" rel="noopener noreferrer">
-            <Globe className="mr-1.5 h-3.5 w-3.5" />
+            <Compass className="mr-1.5 h-3.5 w-3.5" />
             {t('tourist.website')}
           </a>
         </Button>

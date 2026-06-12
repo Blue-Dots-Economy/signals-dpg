@@ -10,13 +10,13 @@ describe('PractitionerActions', () => {
   it('renders only the buttons whose data is present', () => {
     render(<PractitionerActions phone="9876543210" website={null} location={null} />);
     expect(screen.getByRole('link', { name: /call/i })).toHaveAttribute('href', 'tel:+919876543210');
-    expect(screen.queryByRole('link', { name: /website/i })).toBeNull();
+    expect(screen.queryByRole('link', { name: /explore/i })).toBeNull();
     expect(screen.queryByRole('button', { name: /directions/i })).toBeNull();
   });
 
-  it('website link opens a normalized URL in a new tab', () => {
+  it('explore link opens a normalized URL in a new tab', () => {
     render(<PractitionerActions phone={null} website="coastalcrafts.in" location={null} />);
-    const link = screen.getByRole('link', { name: /website/i });
+    const link = screen.getByRole('link', { name: /explore/i });
     expect(link).toHaveAttribute('href', 'https://coastalcrafts.in');
     expect(link).toHaveAttribute('target', '_blank');
     expect(link).toHaveAttribute('rel', 'noopener noreferrer');
