@@ -61,6 +61,13 @@ export interface DotCardConfig {
   avatar_from?: string;
   /** Ordered field keys shown collapsed; everything else moves behind "view more". */
   default_fields?: string[];
+  /**
+   * Ordered field keys revealed behind "view more". When provided, ONLY these
+   * (in this order) are shown as extra rows and any other schema field is
+   * omitted from the card entirely. When omitted, all remaining non-empty
+   * schema fields are shown (in schema order) — the previous behaviour.
+   */
+  extra_fields?: string[];
 }
 
 export interface DotNetworkDomain {
@@ -176,6 +183,13 @@ export interface MapProviderProps {
    * this unset, so its markers are unchanged.
    */
   resolveIcon?: (marker: MapMarker) => LucideIcon;
+  /**
+   * Optional per-marker image resolver. When it returns a URL, the marker is
+   * rendered as that image (in a white circle) instead of the lucide pin —
+   * used by the tourist app to show the RubiX favicon for RubiX listings.
+   * Returns null/undefined to fall back to the icon pin.
+   */
+  resolveMarkerImage?: (marker: MapMarker) => string | null | undefined;
 }
 
 export interface MapProvider {

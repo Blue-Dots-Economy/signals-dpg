@@ -83,6 +83,9 @@ const CardConfigSchema = z.object({
   subtitle_field: z.string().min(1).optional(),
   avatar_from: z.string().min(1).optional(),
   default_fields: z.array(z.string().min(1)).optional().default([]),
+  // Ordered, exhaustive list of fields shown behind "view more". When present,
+  // only these appear as extra rows; any other schema field is omitted.
+  extra_fields: z.array(z.string().min(1)).optional(),
 }).strict();
 
 const NetworkDomainSchema = z.object({

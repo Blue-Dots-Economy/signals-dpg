@@ -60,6 +60,12 @@ interface MapViewProps {
    * a category-based resolver. Unset for signals → unchanged behaviour.
    */
   resolveMarkerIcon?: (marker: MapMarker) => import('lucide-react').LucideIcon;
+  /**
+   * Optional per-marker image resolver, forwarded to the provider. When it
+   * returns a URL the marker renders as that image (e.g. the RubiX favicon)
+   * instead of the icon pin. Unset for signals → unchanged behaviour.
+   */
+  resolveMarkerImage?: (marker: MapMarker) => string | null | undefined;
 }
 
 const INDIA_CENTER: [number, number] = [20.5937, 78.9629];
@@ -78,6 +84,7 @@ export function MapView({
   resolveMarkerLabel,
   heightClassName = 'h-[calc(100vh-8rem)] min-h-[400px]',
   resolveMarkerIcon,
+  resolveMarkerImage,
 }: MapViewProps) {
   const { t } = useTranslation();
   const MapProviderComponent = getActiveMapProvider();
@@ -223,6 +230,7 @@ export function MapView({
         initialViewSet={initialViewSet}
         renderPopup={renderPopup}
         resolveIcon={resolveMarkerIcon}
+        resolveMarkerImage={resolveMarkerImage}
       />
       {/* Top-right overlay: Filters (only while maximized — the page header
           hosts it normally but is hidden in fullscreen) + maximize toggle.

@@ -139,10 +139,16 @@
         "title_field": "name",
         "avatar_from": "name",
         "default_fields": [
-          "category",
-          "area",
+          "description",
           "pricing",
-          "services"
+          "provider_name"
+        ],
+        "extra_fields": [
+          "services",
+          "languages",
+          "category",
+          "contact_phone",
+          "area"
         ]
       },
       "dashboard_tiles": {

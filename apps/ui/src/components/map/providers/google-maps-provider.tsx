@@ -147,6 +147,7 @@ interface ClusteredMarkerProps {
   onMarkerReady: (id: string, el: NonNullable<AdvancedMarkerRef> | null) => void;
   renderPopup?: (marker: MapMarker) => React.ReactNode;
   resolveIcon?: MapProviderProps['resolveIcon'];
+  resolveMarkerImage?: MapProviderProps['resolveMarkerImage'];
 }
 
 function ClusteredMarker({
@@ -158,6 +159,7 @@ function ClusteredMarker({
   onMarkerReady,
   renderPopup,
   resolveIcon,
+  resolveMarkerImage,
 }: ClusteredMarkerProps) {
   const [markerRef, markerEl] = useAdvancedMarkerRef();
   const { id } = marker;
@@ -217,6 +219,9 @@ function ClusteredMarker({
   // Resolve the marker icon once per render (cheap — just a lookup). Defaults
   // to a domain-based icon; callers may override (e.g. tourist app by category).
   const DomainIcon = resolveIcon ? resolveIcon(marker) : getIconForDomain(marker.domain);
+  // When a marker image is provided (e.g. the RubiX favicon), the pin renders
+  // that image in a white circle instead of the coloured icon pin.
+  const markerImage = resolveMarkerImage?.(marker) ?? null;
 
   // Report the underlying element to the parent each time it changes.
   // Also register this element→domain mapping so the cluster renderer can
@@ -262,12 +267,21 @@ function ClusteredMarker({
          * purple_dot → purple, …) the same way the rest of the UI is themed.
          * The lucide icon inherits the foreground colour via currentColor.
          */}
-        <div
-          className="flex items-center justify-center rounded-full border-2 border-white bg-primary text-primary-foreground shadow-md"
-          style={{ width: 30, height: 30 }}
-        >
-          <DomainIcon size={16} strokeWidth={2.5} />
-        </div>
+        {markerImage ? (
+          <div
+            className="flex items-center justify-center overflow-hidden rounded-full border-2 border-white bg-white shadow-md"
+            style={{ width: 30, height: 30 }}
+          >
+            <img src={markerImage} alt="" className="h-full w-full object-cover" />
+          </div>
+        ) : (
+          <div
+            className="flex items-center justify-center rounded-full border-2 border-white bg-primary text-primary-foreground shadow-md"
+            style={{ width: 30, height: 30 }}
+          >
+            <DomainIcon size={16} strokeWidth={2.5} />
+          </div>
+        )}
       </AdvancedMarker>
       {isActive && markerEl && (
         <InfoWindow
@@ -341,6 +355,7 @@ interface ClustererManagerProps {
   onMarkerClick?: (id: string) => void;
   renderPopup?: (marker: MapMarker) => React.ReactNode;
   resolveIcon?: MapProviderProps['resolveIcon'];
+  resolveMarkerImage?: MapProviderProps['resolveMarkerImage'];
 }
 
 function ClustererManager({
@@ -351,6 +366,7 @@ function ClustererManager({
   onMarkerClick,
   renderPopup,
   resolveIcon,
+  resolveMarkerImage,
 }: ClustererManagerProps) {
   const map = useMap();
 
@@ -424,6 +440,7 @@ function ClustererManager({
           onMarkerReady={handleMarkerReady}
           renderPopup={renderPopup}
           resolveIcon={resolveIcon}
+          resolveMarkerImage={resolveMarkerImage}
         />
       ))}
     </>
@@ -440,6 +457,7 @@ export function GoogleMapProvider({
   initialViewSet = false,
   renderPopup,
   resolveIcon,
+  resolveMarkerImage,
 }: MapProviderProps) {
   const { t } = useTranslation();
   const isMobile = useIsMobile();
@@ -499,6 +517,7 @@ export function GoogleMapProvider({
           onMarkerClick={onMarkerClick}
           renderPopup={renderPopup}
           resolveIcon={resolveIcon}
+          resolveMarkerImage={resolveMarkerImage}
         />
       </Map>
     </APIProvider>
