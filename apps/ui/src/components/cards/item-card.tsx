@@ -84,12 +84,15 @@ export function ItemCard({
       data-expanded={variant === 'list' ? open : undefined}
       className={cn(
         'flex flex-col overflow-hidden rounded-2xl bg-background text-foreground shadow-sm',
-        // Map popup: bound the height to a compact card (≤ 28rem, and never more
-        // than 70vh on short screens) so the popup container can always show it
-        // in full — header and footer (Connect / See match score) stay pinned and
-        // the fields region between them scrolls. A taller cap let the footer sit
-        // at the map edge near the marker and get clipped.
-        variant === 'popup' && 'max-h-[min(70vh,28rem)]',
+        // Map popup: bound BOTH dimensions so the card always fits the screen.
+        //  - width: a fixed 20rem, capped at 80vw so it never exceeds a phone
+        //    viewport (with margin for the popup chrome). Being a definite width,
+        //    long field values wrap to the next line instead of widening the card.
+        //  - height: ≤ 28rem, and never more than 70vh on short screens, so the
+        //    popup container can show it in full — header and footer (Connect /
+        //    See match score) stay pinned and the fields region between scrolls.
+        //    A taller cap let the footer sit at the map edge and get clipped.
+        variant === 'popup' && 'w-[min(20rem,80vw)] max-h-[min(70vh,28rem)]',
         variant === 'list' &&
           'transition hover:shadow-md motion-safe:hover:-translate-y-0.5',
         className
