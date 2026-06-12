@@ -161,6 +161,58 @@ function ClusteredMarker({
 }: ClusteredMarkerProps) {
   const [markerRef, markerEl] = useAdvancedMarkerRef();
   const { id } = marker;
+  const map = useMap();
+
+  // Google auto-pans an InfoWindow into view when it OPENS, but not when its
+  // content later resizes (e.g. the user taps "View more details" and the card
+  // grows). Without this, a card anchored near a map edge gets its top/bottom
+  // clipped after expanding. We observe the popup content's size and, whenever
+  // it changes, nudge the map so the whole card stays visible.
+  const popupObserverRef = React.useRef<ResizeObserver | null>(null);
+  const popupPrevHeightRef = React.useRef<number | null>(null);
+
+  const fitPopupInView = React.useCallback(
+    (el: HTMLElement) => {
+      if (!map) return;
+      const mapDiv = map.getDiv();
+      if (!mapDiv) return;
+      const mapRect = mapDiv.getBoundingClientRect();
+      const cardRect = el.getBoundingClientRect();
+      const MARGIN = 16;
+      const topOverflow = mapRect.top + MARGIN - cardRect.top;
+      const bottomOverflow = cardRect.bottom - (mapRect.bottom - MARGIN);
+      // Prefer revealing a clipped top (the header); otherwise a clipped bottom.
+      const dy = topOverflow > 0 ? -topOverflow : bottomOverflow > 0 ? bottomOverflow : 0;
+      if (Math.abs(dy) > 1) map.panBy(0, dy);
+    },
+    [map]
+  );
+
+  // Callback ref: (re)wire the observer when the popup content mounts/unmounts.
+  const popupContentRef = React.useCallback(
+    (node: HTMLDivElement | null) => {
+      popupObserverRef.current?.disconnect();
+      popupPrevHeightRef.current = null;
+      if (!node) return;
+      const ro = new ResizeObserver(() => {
+        const h = node.getBoundingClientRect().height;
+        // Skip the first measurement (baseline); only react to real changes so
+        // we don't fight Google's own open-time auto-pan.
+        if (
+          popupPrevHeightRef.current !== null &&
+          Math.abs(h - popupPrevHeightRef.current) > 1
+        ) {
+          requestAnimationFrame(() => fitPopupInView(node));
+        }
+        popupPrevHeightRef.current = h;
+      });
+      ro.observe(node);
+      popupObserverRef.current = ro;
+    },
+    [fitPopupInView]
+  );
+
+  React.useEffect(() => () => popupObserverRef.current?.disconnect(), []);
 
   // Resolve the marker icon once per render (cheap — just a lookup). Defaults
   // to a domain-based icon; callers may override (e.g. tourist app by category).
@@ -223,11 +275,13 @@ function ClusteredMarker({
           onCloseClick={onClose}
           headerDisabled
         >
-          {renderPopup ? (
-            renderPopup(marker)
-          ) : (
-            <MarkerPopupCard marker={marker} onViewDetails={onMarkerClick} />
-          )}
+          <div ref={popupContentRef}>
+            {renderPopup ? (
+              renderPopup(marker)
+            ) : (
+              <MarkerPopupCard marker={marker} onViewDetails={onMarkerClick} />
+            )}
+          </div>
         </InfoWindow>
       )}
     </>
