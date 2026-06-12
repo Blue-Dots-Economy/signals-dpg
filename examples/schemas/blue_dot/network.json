@@ -628,7 +628,7 @@
             "itiInstitute": {
               "type": "string",
               "title": "College / Institute Name",
-              "description": "Select your college or institute from the dropdown list"
+              "description": "Please specify your college qualification"
             },
             "workExperienceYears": {
               "type": "string",
