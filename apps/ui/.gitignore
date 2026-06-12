@@ -1,0 +1,3 @@
+# Runtime config is injected at deploy time (Helm chart) / created locally for
+# manual testing — never committed. See public/analytics.js + bluedots-automation#12.
+public/config.js

@@ -18,6 +18,10 @@
         } catch (_) {}
       })();
     </script>
+
+    <!-- Config-driven Google Analytics loader. No-op unless this deployment's
+         /config.js sets VITE_ANALYTICS_GA_ID. Must come after /config.js. -->
+    <script src="/analytics.js"></script>
   </head>
   <body>
     <div id="root"></div>
