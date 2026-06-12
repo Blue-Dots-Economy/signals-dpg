@@ -49,7 +49,15 @@ export const participant_read_handler = async (
 ) => {
   const body = request.query;
   const email_norm = body.email?.trim().toLowerCase() ?? null;
-  const phone_norm = body.phone_number?.trim() ?? null;
+  // Stored phone numbers are canonical E.164 ("+91..."). Callers may send the
+  // number without the leading "+" (e.g. "919876543210"), so prepend it before
+  // the exact-match lookup; otherwise an existing user would silently miss.
+  const phone_trimmed = body.phone_number?.trim();
+  const phone_norm = phone_trimmed
+    ? phone_trimmed.startsWith('+')
+      ? phone_trimmed
+      : `+${phone_trimmed}`
+    : null;
 
   if (!email_norm && !phone_norm) {
     return reply.code(400).send({
