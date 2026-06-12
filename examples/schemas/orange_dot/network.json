@@ -28,20 +28,24 @@
         "profile_1.0": {
           "$schema": "https://json-schema.org/draft/2020-12/schema",
           "title": "Orange Dot Practitioner Listing 1.0",
-          "display_name_field": "name",
+          "display_name_field": "product_name",
           "type": "object",
           "additionalProperties": false,
           "required": [
-            "name",
+            "product_name",
             "category",
             "description",
             "area",
-            "contact_phone"
+            "verified_by"
+          ],
+          "anyOf": [
+            { "required": ["contact_phone"] },
+            { "required": ["website"] }
           ],
           "properties": {
-            "name": {
+            "product_name": {
               "type": "string",
-              "title": "Name",
+              "title": "Product Name",
               "description": "Display name of your listing or experience.",
               "minLength": 1
             },
@@ -54,7 +58,7 @@
                 "Artists",
                 "Activities",
                 "GI Products",
-                "Curated"
+                "Curated Experiences"
               ]
             },
             "description": {
@@ -62,7 +66,7 @@
               "title": "Description",
               "description": "A short blurb shown on your listing card.",
               "minLength": 1,
-              "maxLength": 280
+              "maxLength": 500
             },
             "provider_name": {
               "type": "string",
@@ -81,6 +85,12 @@
               "description": "Your 10-digit contact number — shown publicly so travellers can reach you directly.",
               "pattern": "^[0-9]{10}$"
             },
+            "website": {
+              "type": "string",
+              "title": "Website",
+              "description": "Your website, if any.",
+              "format": "uri"
+            },
             "services": {
               "type": "array",
               "title": "Services Provided",
@@ -88,14 +98,11 @@
               "items": {
                 "type": "string",
                 "enum": [
-                  "Stay",
-                  "Food & Dining",
-                  "Experiences & Activities",
-                  "Crafts / GI Products",
-                  "Guided Tours",
-                  "Cultural / Spiritual",
-                  "Transport",
-                  "Wellness"
+                  "Nature & Outdoors",
+                  "Adventure",
+                  "Food & Culinary",
+                  "Culture & Heritage",
+                  "Crafts & Artisan"
                 ]
               }
             },
@@ -125,19 +132,29 @@
                 "Premium"
               ]
             },
-            "website": {
+            "latitude": {
+              "type": "number",
+              "title": "Latitude",
+              "description": "Optional geographic coordinate latitude."
+            },
+            "longitude": {
+              "type": "number",
+              "title": "Longitude",
+              "description": "Optional geographic coordinate longitude."
+            },
+            "verified_by": {
               "type": "string",
-              "title": "Website",
-              "description": "Your website, if any.",
-              "format": "uri"
+              "title": "Verified By",
+              "description": "The authority, organization, or mechanism that verified this listing.",
+              "minLength": 1
             }
           }
         }
       },
       "id": "practitioner",
       "card": {
-        "title_field": "name",
-        "avatar_from": "name",
+        "title_field": "product_name",
+        "avatar_from": "product_name",
         "default_fields": [
           "description",
           "pricing",
