@@ -16,7 +16,6 @@
         "profile_1.0": {
           "$schema": "https://json-schema.org/draft/2020-12/schema",
           "title": "Job Seeker Profile 1.0",
-          "display_name_field": "name",
           "type": "object",
           "additionalProperties": false,
           "required": [
