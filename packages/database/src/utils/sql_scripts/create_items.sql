@@ -17,6 +17,8 @@ CREATE TABLE IF NOT EXISTS items (
   item_locations JSONB NOT NULL DEFAULT '[]'::jsonb,
   created_by TEXT NOT NULL,
 
+  lifecycle_status TEXT NOT NULL DEFAULT 'draft',
+
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
 
@@ -40,6 +42,14 @@ ON items (created_by, created_at DESC);
 
 CREATE INDEX IF NOT EXISTS items_state_gin_idx
 ON items USING GIN (item_state);
+
+-- Upgrade guards for databases created before these columns existed in the
+-- CREATE TABLE above. Each new items column must appear BOTH in the create
+-- statement (fresh installs) and as an ADD COLUMN IF NOT EXISTS here
+-- (existing deployments re-applying the bundle).
+
+-- Multi-location items (2026-06 #112).
+ALTER TABLE items ADD COLUMN IF NOT EXISTS item_locations JSONB NOT NULL DEFAULT '[]'::jsonb;
 
 -- Lifecycle status (2026-06-03 spec).
 ALTER TABLE items

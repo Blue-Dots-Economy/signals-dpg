@@ -1,9 +1,6 @@
 import { type FastifyPluginAsyncZod } from 'fastify-type-provider-zod';
 import z, {
   CreateItemBodySchema,
-  getDomainItemSchema,
-  isLocationFieldPrivate,
-  parseLocationFields,
 } from '@dpg/schemas';
 import { FastifyReply, FastifyRequest } from 'fastify';
 import { db } from '@api/db/postgres/drizzle_config';
@@ -16,9 +13,7 @@ import {
 } from '@/utils/served_domain_guard';
 import { invalidateItemFetchCache } from '@/utils/item_fetch_cache_invalidate';
 import { createItemInternal, ItemServiceError } from '@/services/item_service';
-import { getNetworkConfigById } from '@/network_configs';
-import { resolveCoordinates, resolveCityCenter } from '@/services/geocoding/geo_resolver';
-import { resolveItemLocations } from './geotag_item';
+import { resolveLocationsForCreate } from '@/services/geocoding/resolve_locations_for_create';
 import { resolveDomainLock } from './resolve_domain_lock';
 
 type CreateItemRequest = FastifyRequest<{
@@ -147,45 +142,17 @@ export const create_item_handler = async (
     });
   }
 
-  // Backend geocoding happens ONLY here, and ONLY when the client supplied no
-  // coordinate. When item_locations is already present (the UI resolves it
-  // client-side), we never geocode on the server.
-  let item_locations = body.item_locations ?? [];
-  if (item_locations.length === 0) {
-    try {
-      const networkConfig = await getNetworkConfigById(body.item_network);
-      const itemSchema = getDomainItemSchema(
-        networkConfig,
-        body.item_domain,
-        body.item_type
-      ) as Record<string, unknown> | null;
-      if (itemSchema) {
-        if (isLocationFieldPrivate(itemSchema)) {
-          // Private (PII) field: resolve only to the city centre — never the
-          // exact address — from the marked address field.
-          const { field } = parseLocationFields(itemSchema);
-          const address = field ? (body.item_state ?? {})[field] : undefined;
-          if (typeof address === 'string' && address.trim()) {
-            const center = await resolveCityCenter(address);
-            if (center) item_locations = [center];
-          }
-        } else {
-          // Public field(s): geocode each marked query to its exact point.
-          item_locations = await resolveItemLocations({
-            provided: undefined,
-            itemState: body.item_state ?? {},
-            itemSchema,
-            geocode: resolveCoordinates,
-          });
-        }
-      }
-    } catch (err) {
-      request.log.warn(
-        { err, item_network: body.item_network, item_domain: body.item_domain },
-        'backend geocoding failed; creating item without coordinates'
-      );
-    }
-  }
+  // Backend geocoding: resolve coordinates from the schema's location field when
+  // the client supplied none. Shared with the admin-participant onboarding path
+  // (create_profile_item) so both store item_locations identically.
+  const item_locations = await resolveLocationsForCreate({
+    item_network: body.item_network,
+    item_domain: body.item_domain,
+    item_type: body.item_type,
+    item_state: body.item_state ?? {},
+    provided: body.item_locations,
+    log: request.log,
+  });
 
   try {
     const created = await createItemInternal(db, {

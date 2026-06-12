@@ -432,7 +432,10 @@ export const participant_handler = async (
       );
       return reply.code(e.statusCode ?? 500).send({
         error: e.errorCode ?? 'UPDATE_FAILED',
-        message: (err as Error).message ?? 'item update failed',
+        // Only surface a curated ItemServiceError message (errorCode set). A raw
+        // DB error's message includes the failed SQL + bound params — i.e. the
+        // participant's item_state (name/phone/email) — so never return it.
+        message: e.errorCode ? (err as Error).message : 'item update failed',
       });
     }
 
@@ -481,7 +484,10 @@ export const participant_handler = async (
       logger.call(request.log, { err }, 'insert_item failed');
       return reply.code(e.statusCode ?? 500).send({
         error: e.errorCode ?? 'INSERT_ITEM_FAILED',
-        message: (err as Error).message ?? 'item insert failed',
+        // Only surface a curated ItemServiceError message (errorCode set). A raw
+        // DB error's message includes the failed SQL + bound params — i.e. the
+        // participant's item_state (name/phone/email) — so never return it.
+        message: e.errorCode ? (err as Error).message : 'item insert failed',
       });
     }
     const itemsList = await readItemsForUser(existing!.id);

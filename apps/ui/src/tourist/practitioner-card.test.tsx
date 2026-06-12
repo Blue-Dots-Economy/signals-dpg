@@ -14,7 +14,7 @@ describe('PractitionerCard', () => {
     render(<PractitionerCard data={data} schema={null} variant="popup" />);
     expect(screen.getAllByText('Coastal Crafts').length).toBeGreaterThan(0);
     expect(screen.getByRole('link', { name: /call/i })).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: /website/i })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: /explore/i })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /directions/i })).toBeInTheDocument();
   });
 

@@ -16,6 +16,17 @@ export function itemToCardItem(item: Item): CardItem {
   };
 }
 
+/**
+ * A listing whose description contains "Powered by RubiX" is sourced from
+ * RubiX — it gets the RubiX favicon (card avatar + map pin) and only the
+ * Explore action.
+ */
+const RUBIX_RE = /powered\s*by\s*rubix/i;
+
+export function isRubixListing(data: Record<string, unknown>): boolean {
+  return typeof data.description === 'string' && RUBIX_RE.test(data.description);
+}
+
 /** First location point (exact for orange practitioners), or null. */
 export function getPrimaryLocation(
   locations: ItemLocation[] | undefined,

@@ -14,6 +14,7 @@ import { TouristTopBar } from './tourist-top-bar';
 import { TouristMap } from './tourist-map';
 import { TouristList } from './tourist-list';
 import { EnableLocationBanner } from './enable-location-banner';
+import { TouristHero } from './tourist-hero';
 import { itemToCardItem, matchesSearch, type CardItem } from './practitioner-data';
 
 const ORANGE_NETWORK_ID = (import.meta.env.VITE_NETWORK_ID || 'orange_dot').split(',')[0].trim();
@@ -103,6 +104,7 @@ export function TouristApp() {
         onViewModeChange={setViewMode}
         filtersSlot={filtersSlot}
       />
+      <TouristHero />
       {locationDenied && <EnableLocationBanner onEnable={() => void browser.request()} />}
 
       {/* Map fills the remaining height (small gutter so it isn't edge-to-edge);

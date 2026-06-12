@@ -159,10 +159,25 @@ export function resolveCardFields(
   }
 
   const defaultSet = new Set(defaultKeys);
-  const extraSource = hasSchemaProps ? Object.keys(props) : Object.keys(data);
-  const extraKeys = extraSource.filter(
-    (key) => !isHidden(key) && !defaultSet.has(key) && !isEmptyValue(data[key])
-  );
+
+  // When `extra_fields` is configured, it is the exhaustive, ordered list of
+  // extra rows — any other schema field is intentionally omitted from the card.
+  // Otherwise fall back to "every remaining non-empty field, in schema order".
+  let extraKeys: string[];
+  if (cardConfig?.extra_fields && cardConfig.extra_fields.length > 0) {
+    extraKeys = cardConfig.extra_fields.filter(
+      (key) =>
+        (key in props || key in data) &&
+        !isHidden(key) &&
+        !defaultSet.has(key) &&
+        !isEmptyValue(data[key])
+    );
+  } else {
+    const extraSource = hasSchemaProps ? Object.keys(props) : Object.keys(data);
+    extraKeys = extraSource.filter(
+      (key) => !isHidden(key) && !defaultSet.has(key) && !isEmptyValue(data[key])
+    );
+  }
 
   return {
     title,

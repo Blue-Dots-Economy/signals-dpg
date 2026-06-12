@@ -14,6 +14,7 @@ import type { AdvancedMarkerRef } from '@vis.gl/react-google-maps';
 import { MarkerClusterer, type Renderer, type Cluster } from '@googlemaps/markerclusterer';
 import type { MapMarker, MapProviderProps } from '@/engine/types';
 import { registerMapProvider } from '@/engine/map/map-registry';
+import { useIsMobile } from '@/hooks/use-mobile';
 import { getIconForDomain } from '../domain-icons';
 import { tallyDomains } from '../cluster-breakdown';
 import { MarkerPopupCard } from '../marker-popup-card';
@@ -146,6 +147,7 @@ interface ClusteredMarkerProps {
   onMarkerReady: (id: string, el: NonNullable<AdvancedMarkerRef> | null) => void;
   renderPopup?: (marker: MapMarker) => React.ReactNode;
   resolveIcon?: MapProviderProps['resolveIcon'];
+  resolveMarkerImage?: MapProviderProps['resolveMarkerImage'];
 }
 
 function ClusteredMarker({
@@ -157,13 +159,69 @@ function ClusteredMarker({
   onMarkerReady,
   renderPopup,
   resolveIcon,
+  resolveMarkerImage,
 }: ClusteredMarkerProps) {
   const [markerRef, markerEl] = useAdvancedMarkerRef();
   const { id } = marker;
+  const map = useMap();
+
+  // Google auto-pans an InfoWindow into view when it OPENS, but not when its
+  // content later resizes (e.g. the user taps "View more details" and the card
+  // grows). Without this, a card anchored near a map edge gets its top/bottom
+  // clipped after expanding. We observe the popup content's size and, whenever
+  // it changes, nudge the map so the whole card stays visible.
+  const popupObserverRef = React.useRef<ResizeObserver | null>(null);
+  const popupPrevHeightRef = React.useRef<number | null>(null);
+
+  const fitPopupInView = React.useCallback(
+    (el: HTMLElement) => {
+      if (!map) return;
+      const mapDiv = map.getDiv();
+      if (!mapDiv) return;
+      const mapRect = mapDiv.getBoundingClientRect();
+      const cardRect = el.getBoundingClientRect();
+      const MARGIN = 16;
+      const topOverflow = mapRect.top + MARGIN - cardRect.top;
+      const bottomOverflow = cardRect.bottom - (mapRect.bottom - MARGIN);
+      // Prefer revealing a clipped top (the header); otherwise a clipped bottom.
+      const dy = topOverflow > 0 ? -topOverflow : bottomOverflow > 0 ? bottomOverflow : 0;
+      if (Math.abs(dy) > 1) map.panBy(0, dy);
+    },
+    [map]
+  );
+
+  // Callback ref: (re)wire the observer when the popup content mounts/unmounts.
+  const popupContentRef = React.useCallback(
+    (node: HTMLDivElement | null) => {
+      popupObserverRef.current?.disconnect();
+      popupPrevHeightRef.current = null;
+      if (!node) return;
+      const ro = new ResizeObserver(() => {
+        const h = node.getBoundingClientRect().height;
+        // Skip the first measurement (baseline); only react to real changes so
+        // we don't fight Google's own open-time auto-pan.
+        if (
+          popupPrevHeightRef.current !== null &&
+          Math.abs(h - popupPrevHeightRef.current) > 1
+        ) {
+          requestAnimationFrame(() => fitPopupInView(node));
+        }
+        popupPrevHeightRef.current = h;
+      });
+      ro.observe(node);
+      popupObserverRef.current = ro;
+    },
+    [fitPopupInView]
+  );
+
+  React.useEffect(() => () => popupObserverRef.current?.disconnect(), []);
 
   // Resolve the marker icon once per render (cheap — just a lookup). Defaults
   // to a domain-based icon; callers may override (e.g. tourist app by category).
   const DomainIcon = resolveIcon ? resolveIcon(marker) : getIconForDomain(marker.domain);
+  // When a marker image is provided (e.g. the RubiX favicon), the pin renders
+  // that image in a white circle instead of the coloured icon pin.
+  const markerImage = resolveMarkerImage?.(marker) ?? null;
 
   // Report the underlying element to the parent each time it changes.
   // Also register this element→domain mapping so the cluster renderer can
@@ -209,12 +267,21 @@ function ClusteredMarker({
          * purple_dot → purple, …) the same way the rest of the UI is themed.
          * The lucide icon inherits the foreground colour via currentColor.
          */}
-        <div
-          className="flex items-center justify-center rounded-full border-2 border-white bg-primary text-primary-foreground shadow-md"
-          style={{ width: 30, height: 30 }}
-        >
-          <DomainIcon size={16} strokeWidth={2.5} />
-        </div>
+        {markerImage ? (
+          <div
+            className="flex items-center justify-center overflow-hidden rounded-full border-2 border-white bg-white shadow-md"
+            style={{ width: 30, height: 30 }}
+          >
+            <img src={markerImage} alt="" className="h-full w-full object-cover" />
+          </div>
+        ) : (
+          <div
+            className="flex items-center justify-center rounded-full border-2 border-white bg-primary text-primary-foreground shadow-md"
+            style={{ width: 30, height: 30 }}
+          >
+            <DomainIcon size={16} strokeWidth={2.5} />
+          </div>
+        )}
       </AdvancedMarker>
       {isActive && markerEl && (
         <InfoWindow
@@ -222,11 +289,13 @@ function ClusteredMarker({
           onCloseClick={onClose}
           headerDisabled
         >
-          {renderPopup ? (
-            renderPopup(marker)
-          ) : (
-            <MarkerPopupCard marker={marker} onViewDetails={onMarkerClick} />
-          )}
+          <div ref={popupContentRef}>
+            {renderPopup ? (
+              renderPopup(marker)
+            ) : (
+              <MarkerPopupCard marker={marker} onViewDetails={onMarkerClick} />
+            )}
+          </div>
         </InfoWindow>
       )}
     </>
@@ -286,6 +355,7 @@ interface ClustererManagerProps {
   onMarkerClick?: (id: string) => void;
   renderPopup?: (marker: MapMarker) => React.ReactNode;
   resolveIcon?: MapProviderProps['resolveIcon'];
+  resolveMarkerImage?: MapProviderProps['resolveMarkerImage'];
 }
 
 function ClustererManager({
@@ -296,6 +366,7 @@ function ClustererManager({
   onMarkerClick,
   renderPopup,
   resolveIcon,
+  resolveMarkerImage,
 }: ClustererManagerProps) {
   const map = useMap();
 
@@ -369,6 +440,7 @@ function ClustererManager({
           onMarkerReady={handleMarkerReady}
           renderPopup={renderPopup}
           resolveIcon={resolveIcon}
+          resolveMarkerImage={resolveMarkerImage}
         />
       ))}
     </>
@@ -385,8 +457,10 @@ export function GoogleMapProvider({
   initialViewSet = false,
   renderPopup,
   resolveIcon,
+  resolveMarkerImage,
 }: MapProviderProps) {
   const { t } = useTranslation();
+  const isMobile = useIsMobile();
   const [activeMarker, setActiveMarker] = React.useState<MapMarker | null>(null);
   const apiKey = getRuntimeEnv('VITE_GOOGLE_MAPS_API_KEY');
 
@@ -409,6 +483,15 @@ export function GoogleMapProvider({
         gestureHandling="greedy"
         mapId="dpg-items-map"
         reuseMaps
+        // On mobile, render the Map/Satellite toggle as a compact dropdown
+        // (MapTypeControlStyle.DROPDOWN_MENU = 2) instead of the wide
+        // horizontal bar, which crowds a small screen. Desktop keeps Google's
+        // default bar.
+        mapTypeControlOptions={
+          isMobile
+            ? { style: 2 as google.maps.MapTypeControlStyle }
+            : undefined
+        }
         // Native fullscreen only maximizes the map's own element, which would
         // hide our overlay (filters / maximize button). We provide our own
         // maximize control on the wrapper instead — see MapView.
@@ -434,6 +517,7 @@ export function GoogleMapProvider({
           onMarkerClick={onMarkerClick}
           renderPopup={renderPopup}
           resolveIcon={resolveIcon}
+          resolveMarkerImage={resolveMarkerImage}
         />
       </Map>
     </APIProvider>

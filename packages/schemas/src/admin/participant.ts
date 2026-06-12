@@ -28,6 +28,13 @@ const PhoneE164 = z
   .string()
   .regex(/^\+\d{10,15}$/, 'must be E.164 (e.g. +911234567890)');
 
+// Read-side lookup accepts the number with or without the leading "+"
+// (callers often send "919876543210"). The handler canonicalizes to E.164
+// (prepends "+") before matching the stored, "+"-prefixed phone_number.
+const PhoneLookup = z
+  .string()
+  .regex(/^\+?\d{10,15}$/, 'must be digits, optionally E.164 (e.g. 919876543210 or +919876543210)');
+
 export const UpsertParticipantRequest = z
   .object({
     email: z.email().optional(),
@@ -102,7 +109,7 @@ export const UpsertParticipantResponse = z.object({
 export const GetParticipantRequest = z
   .object({
     email: z.email().optional(),
-    phone_number: PhoneE164.optional(),
+    phone_number: PhoneLookup.optional(),
   })
   .refine((q) => Boolean(q.email) || Boolean(q.phone_number), {
     message: 'either email or phone_number is required',
