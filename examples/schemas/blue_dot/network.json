@@ -773,7 +773,8 @@
             },
             "jobProviderLocation": {
               "type": "string",
-              "title": "Job Location"
+              "title": "Job Location",
+              "location": "single"
             },
             "hiringManagerName": {
               "type": "string",
