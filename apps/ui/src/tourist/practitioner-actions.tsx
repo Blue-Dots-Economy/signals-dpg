@@ -18,10 +18,13 @@ export function PractitionerActions({ phone, website, location }: PractitionerAc
   // flex-wrap + a min width per button: on a wide card all three sit on one
   // row (flex-1 shares the space); on a narrow card (small phones) they wrap to
   // the next row instead of overflowing and getting clipped by the card edge.
+  // On mobile the buttons are shorter/smaller text so the card stays compact;
+  // sm+ restores the regular size (desktop unchanged).
+  const btn = 'h-8 min-w-[5rem] flex-1 text-xs sm:h-9 sm:min-w-[7rem] sm:text-sm';
   return (
-    <div className="flex w-full flex-wrap gap-2">
+    <div className="flex w-full flex-wrap gap-1.5 sm:gap-2">
       {phone && (
-        <Button asChild variant="outline" size="sm" className="min-w-[7rem] flex-1">
+        <Button asChild variant="outline" size="sm" className={btn}>
           <a href={telHref(phone)}>
             <Phone className="mr-1.5 h-3.5 w-3.5" />
             {t('tourist.call')}
@@ -29,7 +32,7 @@ export function PractitionerActions({ phone, website, location }: PractitionerAc
         </Button>
       )}
       {website && (
-        <Button asChild variant="outline" size="sm" className="min-w-[7rem] flex-1">
+        <Button asChild variant="outline" size="sm" className={btn}>
           <a href={normalizeWebsiteUrl(website)} target="_blank" rel="noopener noreferrer">
             <Globe className="mr-1.5 h-3.5 w-3.5" />
             {t('tourist.website')}
@@ -40,7 +43,7 @@ export function PractitionerActions({ phone, website, location }: PractitionerAc
         <Button
           variant="default"
           size="sm"
-          className="min-w-[7rem] flex-1"
+          className={btn}
           onClick={() => openDirections(location, location.label)}
         >
           <Navigation className="mr-1.5 h-3.5 w-3.5" />

@@ -34,10 +34,21 @@ export interface ItemCardProps {
 const HEADER_GRADIENT =
   'linear-gradient(135deg, var(--primary), color-mix(in srgb, var(--primary), white 32%))';
 
-function FieldRow({ row }: { row: CardRow }) {
+function FieldRow({ row, compact = false }: { row: CardRow; compact?: boolean }) {
   return (
-    <div className="flex items-start gap-3 text-sm">
-      <span className="w-[110px] shrink-0 font-medium text-muted-foreground">
+    <div
+      className={cn(
+        'flex items-start gap-3 text-sm',
+        // Popup on mobile: tighter rows + smaller text so the card stays small.
+        compact && 'gap-2 text-xs sm:gap-3 sm:text-sm'
+      )}
+    >
+      <span
+        className={cn(
+          'shrink-0 font-medium text-muted-foreground',
+          compact ? 'w-[80px] sm:w-[110px]' : 'w-[110px]'
+        )}
+      >
         {row.label}
       </span>
       <span
@@ -86,14 +97,17 @@ export function ItemCard({
     <div
       className={cn(
         'space-y-2 px-4 py-3',
-        variant === 'popup' && 'sm:min-h-0 sm:flex-1 sm:overflow-y-auto'
+        variant === 'popup' &&
+          'space-y-1.5 px-3 py-2.5 sm:min-h-0 sm:flex-1 sm:space-y-2 sm:overflow-y-auto sm:px-4 sm:py-3'
       )}
     >
       {resolved.defaultRows.map((row) => (
-        <FieldRow key={row.key} row={row} />
+        <FieldRow key={row.key} row={row} compact={variant === 'popup'} />
       ))}
       {open &&
-        resolved.extraRows.map((row) => <FieldRow key={row.key} row={row} />)}
+        resolved.extraRows.map((row) => (
+          <FieldRow key={row.key} row={row} compact={variant === 'popup'} />
+        ))}
     </div>
   );
 
@@ -109,14 +123,17 @@ export function ItemCard({
       )}
     >
       {hasExtra && (
-        <div className="px-4 pb-1">
+        <div className={cn('px-4 pb-1', variant === 'popup' && 'px-3 sm:px-4')}>
           <button
             type="button"
             onClick={(e) => {
               e.stopPropagation();
               setOpen((v) => !v);
             }}
-            className="flex w-full items-center justify-center gap-1.5 rounded-lg border border-border bg-muted/40 py-2 text-[13px] font-semibold text-primary hover:bg-muted"
+            className={cn(
+              'flex w-full items-center justify-center gap-1.5 rounded-lg border border-border bg-muted/40 py-2 text-[13px] font-semibold text-primary hover:bg-muted',
+              variant === 'popup' && 'py-1.5 text-xs sm:py-2 sm:text-[13px]'
+            )}
           >
             {open
               ? t('card.hide_details', 'Hide details')
@@ -135,7 +152,13 @@ export function ItemCard({
           natural-width list buttons to the edges; the popup's buttons use
           flex-1 so they fill instead. */}
       {actions && (
-        <div className="flex flex-wrap items-center justify-between gap-2 px-4 pb-4 pt-2">
+        <div
+          className={cn(
+            'flex flex-wrap items-center justify-between gap-2 px-4 pb-4 pt-2',
+            variant === 'popup' &&
+              'gap-1.5 px-3 pb-3 pt-1.5 sm:gap-2 sm:px-4 sm:pb-4 sm:pt-2'
+          )}
+        >
           {actions}
         </div>
       )}
@@ -154,11 +177,13 @@ export function ItemCard({
         //    at 90vw so it never exceeds a phone viewport. Being a definite
         //    width, long field values wrap to the next line rather than widening
         //    the card.
-        //  - height: on mobile a compact 58vh so an opened card never fills the
+        //  - width: a small 17rem on mobile (≤ 86vw) so the card leaves room to
+        //    pan the map; a roomier 28rem on desktop.
+        //  - height: on mobile a compact 56vh so an opened card never fills the
         //    screen; the whole body scrolls within it. On desktop ≤ 28rem (and
         //    ≤ 60vh on short screens) with the footer pinned.
         variant === 'popup' &&
-          'w-[min(28rem,90vw)] max-h-[58vh] sm:max-h-[min(60vh,28rem)]',
+          'w-[min(17rem,86vw)] max-h-[56vh] sm:w-[min(28rem,90vw)] sm:max-h-[min(60vh,28rem)]',
         variant === 'list' &&
           'transition hover:shadow-md motion-safe:hover:-translate-y-0.5',
         className
@@ -167,14 +192,14 @@ export function ItemCard({
     >
       {/* Branded header — colour is the per-network theme var */}
       <div
-        className="flex shrink-0 items-center gap-3 px-4 py-2.5 sm:py-3"
+        className="flex shrink-0 items-center gap-2.5 px-3 py-2 sm:gap-3 sm:px-4 sm:py-3"
         style={{ background: HEADER_GRADIENT }}
       >
-        <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-white/25 text-sm font-bold text-white sm:h-11 sm:w-11">
+        <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-white/25 text-xs font-bold text-white sm:h-11 sm:w-11 sm:text-sm">
           {resolved.initials}
         </div>
         <div className="min-w-0">
-          <p className="truncate text-[15px] font-bold leading-tight text-white">
+          <p className="truncate text-sm font-bold leading-tight text-white sm:text-[15px]">
             {heading}
           </p>
           {domainLabel && (
