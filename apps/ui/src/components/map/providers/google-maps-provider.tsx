@@ -1,5 +1,6 @@
 /// <reference types="google.maps" />
 import * as React from 'react';
+import { createPortal } from 'react-dom';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { useTranslation } from 'react-i18next';
 import {
@@ -164,6 +165,7 @@ function ClusteredMarker({
   const [markerRef, markerEl] = useAdvancedMarkerRef();
   const { id } = marker;
   const map = useMap();
+  const isMobile = useIsMobile();
 
   // Google auto-pans an InfoWindow into view when it OPENS, but not when its
   // content later resizes (e.g. the user taps "View more details" and the card
@@ -283,21 +285,47 @@ function ClusteredMarker({
           </div>
         )}
       </AdvancedMarker>
-      {isActive && markerEl && (
-        <InfoWindow
-          anchor={markerEl}
-          onCloseClick={onClose}
-          headerDisabled
-        >
-          <div ref={popupContentRef}>
-            {renderPopup ? (
-              renderPopup(marker)
-            ) : (
-              <MarkerPopupCard marker={marker} onViewDetails={onMarkerClick} />
-            )}
-          </div>
-        </InfoWindow>
-      )}
+      {isActive &&
+        (isMobile
+          ? // Mobile: render the card as a centered overlay (portal to <body>)
+            // with a tap-to-close backdrop instead of the Google InfoWindow.
+            // Anchoring to the marker pushed tall cards partly off-screen and
+            // the InfoWindow never gave the card a bounded height, so its scroll
+            // didn't engage on touch. A fixed overlay is always fully on-screen
+            // and the card's own scroll works normally. Card size is unchanged.
+            createPortal(
+              <div
+                className="fixed inset-0 z-[2000] flex items-center justify-center p-3"
+                role="dialog"
+                aria-modal="true"
+              >
+                <button
+                  type="button"
+                  aria-label="Close"
+                  className="absolute inset-0 bg-black/40"
+                  onClick={onClose}
+                />
+                <div className="relative">
+                  {renderPopup ? (
+                    renderPopup(marker)
+                  ) : (
+                    <MarkerPopupCard marker={marker} onViewDetails={onMarkerClick} />
+                  )}
+                </div>
+              </div>,
+              document.body,
+            )
+          : markerEl && (
+              <InfoWindow anchor={markerEl} onCloseClick={onClose} headerDisabled>
+                <div ref={popupContentRef}>
+                  {renderPopup ? (
+                    renderPopup(marker)
+                  ) : (
+                    <MarkerPopupCard marker={marker} onViewDetails={onMarkerClick} />
+                  )}
+                </div>
+              </InfoWindow>
+            ))}
     </>
   );
 }
