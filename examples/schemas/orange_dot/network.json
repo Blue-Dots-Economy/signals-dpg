@@ -38,10 +38,6 @@
             "area",
             "verified_by"
           ],
-          "anyOf": [
-            { "required": ["contact_phone"] },
-            { "required": ["website"] }
-          ],
           "properties": {
             "product_name": {
               "type": "string",
@@ -90,6 +86,12 @@
               "title": "Website",
               "description": "Your website, if any.",
               "format": "uri"
+            },
+            "email": {
+              "type": "string",
+              "title": "Email",
+              "description": "Contact email — provide this if you don't have a contact phone.",
+              "format": "email"
             },
             "services": {
               "type": "array",
