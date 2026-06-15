@@ -1,6 +1,7 @@
 import {
   type NetworkConfigDocument,
   parseNetworkConfigDocument,
+  assertSinglePrimaryLocation,
 } from '@dpg/schemas';
 import { loadNetworkConfigs } from '@dpg/config';
 import { apiConfig } from '@/config';
@@ -16,7 +17,18 @@ async function loadAndParseNetworkConfigs(): Promise<NetworkConfigDocument[]> {
     servedDomains: apiConfig.served_domains,
   });
 
-  return configs.map((config) => parseNetworkConfigDocument(config));
+  return configs.map((config) => {
+    const parsed = parseNetworkConfigDocument(config);
+    for (const domain of parsed.domains) {
+      for (const [itemType, itemSchema] of Object.entries(domain.item_schemas)) {
+        assertSinglePrimaryLocation(
+          itemSchema as Record<string, unknown>,
+          `${parsed.id}/${domain.id}/${itemType}`,
+        );
+      }
+    }
+    return parsed;
+  });
 }
 
 export async function getNetworkConfigs(): Promise<NetworkConfigDocument[]> {
