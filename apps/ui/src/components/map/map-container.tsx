@@ -153,7 +153,7 @@ export function MapView({
             const queries = buildLocationQueries(item.data, fields);
             const geocoded: Array<{ lat: number; lng: number; label?: string }> = [];
             for (const { query, label } of queries) {
-              const [best] = await getGeoProvider().suggest(query);
+              const best = await getGeoProvider().geocode(query);
               if (best) {
                 geocoded.push(
                   label
