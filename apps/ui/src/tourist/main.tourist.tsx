@@ -7,6 +7,11 @@ import '../i18n';
 import '../index.css';
 import '@/components/map/providers';
 import { TouristApp } from './tourist-app';
+import { getRuntimeEnv } from '@/lib/runtime-env';
+
+// Browser tab title — configurable per deployment via VITE_TOURIST_APP_TITLE
+// (runtime config /config.js, else build-time env), defaulting to "OneTAC".
+document.title = getRuntimeEnv('VITE_TOURIST_APP_TITLE')?.trim() || 'OneTAC';
 
 const queryClient = new QueryClient({ defaultOptions: { queries: { staleTime: 0, retry: 2 } } });
 
