@@ -250,12 +250,18 @@ function generateUiSchema(
       }
     }
 
-    if ((typed as { location?: unknown }).location === 'single') {
-      uiSchema[key] = { ...((uiSchema[key] as object) ?? {}), 'ui:widget': 'location-autocomplete' };
-    }
-
-    if ((typed as { location?: unknown }).location === 'multiple') {
-      uiSchema[key] = { ...((uiSchema[key] as object) ?? {}), 'ui:widget': 'location-multi' };
+    const locationRole = (typed as { location?: unknown }).location;
+    if (locationRole === 'primary' || locationRole === 'secondary') {
+      const isArray = typed.type === 'array';
+      const existing = (uiSchema[key] as Record<string, unknown>) ?? {};
+      const existingOptions = (existing['ui:options'] as Record<string, unknown>) ?? {};
+      uiSchema[key] = {
+        ...existing,
+        'ui:widget': isArray ? 'location-multi' : 'location-autocomplete',
+        // Only the primary field's picked coordinate feeds item_locations;
+        // secondary fields are autocomplete-only.
+        'ui:options': { ...existingOptions, isPrimaryLocation: locationRole === 'primary' },
+      };
     }
   }
 
@@ -297,10 +303,10 @@ function normalizeSchemaForRjsf(schema: RJSFSchema, rootSchema?: RJSFSchema): RJ
 
   const result: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(schema as Record<string, unknown>)) {
-    // Strip the custom `location` MARKER (value "single" | "multiple"), which is consumed
+    // Strip the custom `location` MARKER (value "primary" | "secondary"), which is consumed
     // by generateUiSchema, not real JSON Schema. Must NOT strip a property whose
     // NAME is "location" (its value is the field's schema object, not a string).
-    if (key === 'location' && (value === 'single' || value === 'multiple')) continue;
+    if (key === 'location' && (value === 'primary' || value === 'secondary')) continue;
     result[key] = normalizeSchemaForRjsf(value as RJSFSchema, root);
   }
 
