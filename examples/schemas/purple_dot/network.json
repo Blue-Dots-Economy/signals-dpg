@@ -335,7 +335,8 @@
               "type": "string",
               "title": "Organisation Address",
               "description": "Your organisation's office or headquarters address",
-              "minLength": 1
+              "minLength": 1,
+              "location": "secondary"
             },
             "service_details": {
               "type": "string",
