@@ -58,8 +58,10 @@ export function MultiLocationAutocompleteWidget({
   schema,
   rawErrors,
   formContext,
+  options,
 }: WidgetProps) {
   const ctx = (formContext ?? {}) as LocationFormContext;
+  const isPrimary = (options as { isPrimaryLocation?: boolean } | undefined)?.isPrimaryLocation === true;
 
   // Coerce incoming value to string[]. RJSF passes `undefined` on a fresh form.
   const incoming = React.useMemo<string[]>(() => {
@@ -160,7 +162,7 @@ export function MultiLocationAutocompleteWidget({
     const coords = nextRows
       .filter((r) => r.coord !== null)
       .map((r) => r.coord as { lat: number; lng: number; label?: string });
-    ctx.onLocationsResolved?.(coords);
+    if (isPrimary) ctx.onLocationsResolved?.(coords);
   }
 
   function updateRow(index: number, patch: Partial<LocationRow>) {

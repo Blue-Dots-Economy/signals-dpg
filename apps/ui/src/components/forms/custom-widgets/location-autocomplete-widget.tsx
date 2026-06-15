@@ -26,8 +26,10 @@ export function LocationAutocompleteWidget({
   onChange,
   rawErrors,
   formContext,
+  options,
 }: WidgetProps) {
   const ctx = (formContext ?? {}) as LocationFormContext;
+  const isPrimary = (options as { isPrimaryLocation?: boolean } | undefined)?.isPrimaryLocation === true;
   const [text, setText] = React.useState<string>((value as string) ?? '');
   const [suggestions, setSuggestions] = React.useState<GeoSuggestion[]>([]);
   const [open, setOpen] = React.useState(false);
@@ -80,7 +82,8 @@ export function LocationAutocompleteWidget({
     onChange(next);
     // The freshly typed text is no longer a resolved place — drop prior coords
     // so the submit-time fallback re-geocodes (or the next selection sets them).
-    ctx.onLocationResolved?.(null);
+    // Only the primary field feeds item_locations.
+    if (isPrimary) ctx.onLocationResolved?.(null);
     runSearch(next);
   }
 
@@ -99,7 +102,9 @@ export function LocationAutocompleteWidget({
     // page decides how to use it: for a public field the exact point is stored;
     // for a PRIVATE field the page coarsens to the city centroid (via the
     // components) at submit time, so the exact point never leaves the browser.
-    ctx.onLocationResolved?.({ lat: s.lat, lng: s.lng, components: s.components });
+    if (isPrimary) {
+      ctx.onLocationResolved?.({ lat: s.lat, lng: s.lng, components: s.components });
+    }
   }
 
   return (
