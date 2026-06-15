@@ -348,6 +348,7 @@
   "tourist.directions": "ದಾರಿ ಪಡೆಯಿರಿ",
   "tourist.enable_location_title": "ಎಲ್ಲಾ ಸೇವಾದಾರರನ್ನು ತೋರಿಸಲಾಗುತ್ತಿದೆ",
   "tourist.enable_location_body": "ನಿಮ್ಮ ಹತ್ತಿರದವರನ್ನು ನೋಡಲು ಸ್ಥಳವನ್ನು ಸಕ್ರಿಯಗೊಳಿಸಿ.",
+  "tourist.enable_location_blocked_body": "ಸ್ಥಳ ನಿರ್ಬಂಧಿಸಲಾಗಿದೆ. ನಿಮ್ಮ ಹತ್ತಿರದವರನ್ನು ನೋಡಲು ಬ್ರೌಸರ್ ಸೆಟ್ಟಿಂಗ್‌ಗಳಲ್ಲಿ ಈ ಸೈಟ್‌ಗೆ ಸ್ಥಳ ಅನುಮತಿ ನೀಡಿ.",
   "tourist.enable_location_cta": "ಸ್ಥಳ ಸಕ್ರಿಯಗೊಳಿಸಿ",
   "tourist.empty": "ಯಾವುದೇ ಸೇವಾದಾರರು ಸಿಗಲಿಲ್ಲ.",
   "tourist.error": "ಸೇವಾದಾರರನ್ನು ಲೋಡ್ ಮಾಡಲಾಗಲಿಲ್ಲ.",
