@@ -50,8 +50,8 @@ export async function resolveLocationsForCreate(
     if (isLocationFieldPrivate(itemSchema)) {
       // Private (PII) field: resolve only to the city centre — never the exact
       // address — from the marked address field.
-      const { field } = parseLocationFields(itemSchema);
-      const address = field ? args.item_state[field] : undefined;
+      const { primary } = parseLocationFields(itemSchema);
+      const address = primary ? args.item_state[primary.field] : undefined;
       if (typeof address === 'string' && address.trim()) {
         const center = await resolveCityCenter(address);
         if (center) return [center];
@@ -60,8 +60,8 @@ export async function resolveLocationsForCreate(
     }
 
     // Public field(s): geocode each marked query to its exact point.
-    const fields = parseLocationFields(itemSchema);
-    const queries = buildLocationQueries(args.item_state, fields);
+    const { primary } = parseLocationFields(itemSchema);
+    const queries = buildLocationQueries(args.item_state, primary);
     const out: ItemLocation[] = [];
     for (const { query, label } of queries) {
       const coord = await resolveCoordinates(query);

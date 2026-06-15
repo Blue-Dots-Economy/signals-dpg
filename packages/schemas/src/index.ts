@@ -30,8 +30,12 @@ export {
   parseLocationFields,
   buildLocationQueries,
   isLocationFieldPrivate,
+  getAutocompleteLocationFields,
+  assertSinglePrimaryLocation,
   type LocationFields,
+  type LocationField,
   type LocationCardinality,
+  type LocationRole,
   type LocationPoint,
 } from './location_fields';
 export default z;

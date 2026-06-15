@@ -1,35 +1,114 @@
 import { describe, it, expect } from 'vitest';
-import { parseLocationFields, buildLocationQueries } from '../location_fields';
+import {
+  parseLocationFields,
+  buildLocationQueries,
+  isLocationFieldPrivate,
+  getAutocompleteLocationFields,
+  assertSinglePrimaryLocation,
+} from '../location_fields';
 
-const singleSchema = { properties: { address: { type: 'string', location: 'single' } } };
-const multipleSchema = { properties: { service_cities: { type: 'array', location: 'multiple' } } };
+const primaryString = {
+  properties: { address: { type: 'string', location: 'primary' } },
+};
+const primaryArray = {
+  properties: { service_cities: { type: 'array', location: 'primary' } },
+};
+const withSecondary = {
+  properties: {
+    address: { type: 'string', location: 'primary', private: true },
+    orgAddress: { type: 'string', location: 'secondary' },
+    serviceAreas: { type: 'array', location: 'secondary' },
+  },
+};
 
 describe('parseLocationFields', () => {
-  it('captures a single field', () => {
-    expect(parseLocationFields(singleSchema)).toEqual({ field: 'address', cardinality: 'single' });
+  it('reads a single primary (cardinality from string type)', () => {
+    expect(parseLocationFields(primaryString)).toEqual({
+      primary: { field: 'address', cardinality: 'single' },
+      secondary: [],
+    });
   });
-  it('captures a multiple field', () => {
-    expect(parseLocationFields(multipleSchema)).toEqual({ field: 'service_cities', cardinality: 'multiple' });
+
+  it('derives multiple cardinality from array type', () => {
+    expect(parseLocationFields(primaryArray).primary).toEqual({
+      field: 'service_cities',
+      cardinality: 'multiple',
+    });
   });
-  it('null when no marker', () => {
-    expect(parseLocationFields({ properties: { x: { type: 'string' } } })).toEqual({ field: null, cardinality: null });
+
+  it('collects secondary fields with their cardinality', () => {
+    const { primary, secondary } = parseLocationFields(withSecondary);
+    expect(primary).toEqual({ field: 'address', cardinality: 'single' });
+    expect(secondary).toEqual([
+      { field: 'orgAddress', cardinality: 'single' },
+      { field: 'serviceAreas', cardinality: 'multiple' },
+    ]);
   });
-  it('null for missing/empty schema', () => {
-    expect(parseLocationFields(undefined)).toEqual({ field: null, cardinality: null });
+
+  it('returns null primary when none is marked', () => {
+    expect(parseLocationFields({ properties: { name: { type: 'string' } } })).toEqual({
+      primary: null,
+      secondary: [],
+    });
   });
 });
 
-describe('buildLocationQueries', () => {
-  it('multiple → one query+label per non-empty array entry', () => {
-    expect(buildLocationQueries({ service_cities: ['Goa', '', 'Hubli'] }, parseLocationFields(multipleSchema)))
-      .toEqual([{ query: 'Goa', label: 'Goa' }, { query: 'Hubli', label: 'Hubli' }]);
+describe('getAutocompleteLocationFields', () => {
+  it('returns primary first, then all secondary', () => {
+    expect(getAutocompleteLocationFields(withSecondary).map((f) => f.field)).toEqual([
+      'address',
+      'orgAddress',
+      'serviceAreas',
+    ]);
   });
-  it('single → one query, no label', () => {
-    expect(buildLocationQueries({ address: 'MG Rd, Bengaluru' }, parseLocationFields(singleSchema)))
-      .toEqual([{ query: 'MG Rd, Bengaluru' }]);
+});
+
+describe('buildLocationQueries (primary only)', () => {
+  it('single primary -> one query from the string', () => {
+    expect(
+      buildLocationQueries({ address: 'Mumbai' }, { field: 'address', cardinality: 'single' })
+    ).toEqual([{ query: 'Mumbai' }]);
   });
-  it('returns [] when nothing usable', () => {
-    expect(buildLocationQueries({}, parseLocationFields(singleSchema))).toEqual([]);
-    expect(buildLocationQueries({ service_cities: [] }, parseLocationFields(multipleSchema))).toEqual([]);
+
+  it('multiple primary -> one query+label per entry', () => {
+    expect(
+      buildLocationQueries(
+        { service_cities: ['Pune', ' Mumbai '] },
+        { field: 'service_cities', cardinality: 'multiple' }
+      )
+    ).toEqual([
+      { query: 'Pune', label: 'Pune' },
+      { query: 'Mumbai', label: 'Mumbai' },
+    ]);
+  });
+
+  it('null primary -> no queries (secondary never geocoded)', () => {
+    expect(buildLocationQueries({ orgAddress: 'X' }, null)).toEqual([]);
+  });
+});
+
+describe('isLocationFieldPrivate', () => {
+  it('reads the primary field private flag', () => {
+    expect(isLocationFieldPrivate(withSecondary)).toBe(true);
+    expect(isLocationFieldPrivate(primaryString)).toBe(false);
+  });
+});
+
+describe('assertSinglePrimaryLocation', () => {
+  it('passes with exactly one primary', () => {
+    expect(() => assertSinglePrimaryLocation(withSecondary, 'net/dom/type')).not.toThrow();
+  });
+  it('throws with zero primaries', () => {
+    expect(() =>
+      assertSinglePrimaryLocation({ properties: { a: { type: 'string' } } }, 'net/dom/type')
+    ).toThrow(/exactly one .* found 0/);
+  });
+  it('throws with two primaries', () => {
+    expect(() =>
+      assertSinglePrimaryLocation(
+        { properties: { a: { type: 'string', location: 'primary' }, b: { type: 'string', location: 'primary' } } },
+        'net/dom/type'
+      )
+    ).toThrow(/found 2/);
   });
 });

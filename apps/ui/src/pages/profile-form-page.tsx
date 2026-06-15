@@ -385,8 +385,8 @@ export function ProfileFormPage() {
       } else if (profileSchema) {
         // No suggestion picked — geocode the marked field(s) from the typed text,
         // then coarsen (city centroid for a private field, exact for public).
-        const fields = parseLocationFields(profileSchema as Record<string, unknown>);
-        const queries = buildLocationQueries(data, fields);
+        const { primary } = parseLocationFields(profileSchema as Record<string, unknown>);
+        const queries = buildLocationQueries(data, primary);
         for (const { query, label } of queries) {
           const [best] = await getGeoProvider().suggest(query);
           if (best) item_locations.push(await coarsenPlace(best.lat, best.lng, best.components, label));
