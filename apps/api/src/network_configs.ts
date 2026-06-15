@@ -20,6 +20,13 @@ async function loadAndParseNetworkConfigs(): Promise<NetworkConfigDocument[]> {
   return configs.map((config) => {
     const parsed = parseNetworkConfigDocument(config);
     for (const domain of parsed.domains) {
+      // Only the domains this instance actually serves are validated — an
+      // unserved sibling/peer domain in the same config (which this instance
+      // never geocodes) must not be able to fail boot.
+      const isServed = apiConfig.served_domains.some(
+        (binding) => binding.network === parsed.id && binding.domain === domain.id,
+      );
+      if (!isServed) continue;
       for (const [itemType, itemSchema] of Object.entries(domain.item_schemas)) {
         assertSinglePrimaryLocation(
           itemSchema as Record<string, unknown>,
