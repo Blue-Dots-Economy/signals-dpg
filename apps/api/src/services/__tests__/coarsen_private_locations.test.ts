@@ -3,19 +3,19 @@ import { coarsenPrivateLocations } from '../item_service';
 
 const privateSingle = {
   properties: {
-    address: { type: 'string', private: true, location: 'single' },
+    address: { type: 'string', private: true, location: 'primary' },
   },
 };
 
 const publicSingle = {
   properties: {
-    address: { type: 'string', location: 'single' },
+    address: { type: 'string', location: 'primary' },
   },
 };
 
 const publicMultiple = {
   properties: {
-    service_cities: { type: 'array', location: 'multiple' },
+    service_cities: { type: 'array', location: 'primary' },
   },
 };
 

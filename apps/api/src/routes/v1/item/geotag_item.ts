@@ -16,8 +16,8 @@ export async function resolveItemLocations(
   args: ResolveArgs
 ): Promise<Array<{ lat: number; lng: number; label?: string }>> {
   if (args.provided && args.provided.length > 0) return args.provided;
-  const fields = parseLocationFields(args.itemSchema);
-  const queries = buildLocationQueries(args.itemState, fields);
+  const { primary } = parseLocationFields(args.itemSchema);
+  const queries = buildLocationQueries(args.itemState, primary);
   const out: Array<{ lat: number; lng: number; label?: string }> = [];
   for (const { query, label } of queries) {
     const coord = await args.geocode(query);

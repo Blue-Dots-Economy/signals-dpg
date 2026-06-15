@@ -40,7 +40,7 @@
             "location": {
               "type": "string",
               "title": "Location",
-              "location": "single",
+              "location": "primary",
               "private": true
             },
             "phone": {
@@ -780,7 +780,7 @@
             "jobProviderLocation": {
               "type": "string",
               "title": "Job Location",
-              "location": "single"
+              "location": "primary"
             },
             "hiringManagerName": {
               "type": "string",

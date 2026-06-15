@@ -149,11 +149,11 @@ export function MapView({
           // Fallback: if the item has no stored locations, geocode the field query(ies).
           let points: Array<{ lat: number; lng: number; label?: string }> = locs;
           if (points.length === 0) {
-            const fields = parseLocationFields(schema as Record<string, unknown>);
-            const queries = buildLocationQueries(item.data, fields);
+            const { primary } = parseLocationFields(schema as Record<string, unknown>);
+            const queries = buildLocationQueries(item.data, primary);
             const geocoded: Array<{ lat: number; lng: number; label?: string }> = [];
             for (const { query, label } of queries) {
-              const [best] = await getGeoProvider().suggest(query);
+              const best = await getGeoProvider().geocode(query);
               if (best) {
                 geocoded.push(
                   label

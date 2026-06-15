@@ -73,7 +73,7 @@
               "type": "string",
               "title": "Area",
               "description": "Locality or town within Udupi district.",
-              "location": "single"
+              "location": "primary"
             },
             "contact_phone": {
               "type": "string",

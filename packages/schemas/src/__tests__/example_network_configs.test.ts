@@ -85,20 +85,20 @@ describe('example network configs declare a location field', () => {
 
       const fields = parseLocationFields(schema);
       expect(
-        fields.field,
-        `${network}/${domainId} has no location field`,
+        fields.primary,
+        `${network}/${domainId} has no primary location field`,
       ).not.toBeNull();
 
       const properties = schema.properties as Record<
         string,
         { location?: unknown }
       >;
-      const locationCount = Object.values(properties).filter(
-        (p) => p?.location === 'single' || p?.location === 'multiple',
+      const primaryCount = Object.values(properties).filter(
+        (p) => p?.location === 'primary',
       ).length;
       expect(
-        locationCount,
-        `${network}/${domainId} must have exactly one location marker, found ${locationCount}`,
+        primaryCount,
+        `${network}/${domainId} must have exactly one primary location marker, found ${primaryCount}`,
       ).toBe(1);
     },
   );
