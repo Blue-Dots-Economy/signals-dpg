@@ -348,6 +348,7 @@
   "tourist.directions": "दिशा-निर्देश पाएं",
   "tourist.enable_location_title": "सभी सेवा प्रदाता दिखाए जा रहे हैं",
   "tourist.enable_location_body": "अपने नज़दीकी देखने के लिए स्थान सक्षम करें।",
+  "tourist.enable_location_blocked_body": "स्थान अवरुद्ध है। अपने नज़दीकी देखने के लिए ब्राउज़र सेटिंग्स में इस साइट के लिए स्थान की अनुमति दें।",
   "tourist.enable_location_cta": "स्थान सक्षम करें",
   "tourist.empty": "कोई सेवा प्रदाता नहीं मिला।",
   "tourist.error": "सेवा प्रदाता लोड नहीं हो सके।",

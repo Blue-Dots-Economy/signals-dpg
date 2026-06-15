@@ -337,6 +337,7 @@
   "tourist.directions": "Get Directions",
   "tourist.enable_location_title": "Showing all practitioners",
   "tourist.enable_location_body": "Enable location to see what's nearest to you.",
+  "tourist.enable_location_blocked_body": "Location is blocked. Allow location for this site in your browser settings to see what's nearest to you.",
   "tourist.enable_location_cta": "Enable location",
   "tourist.empty": "No practitioners found.",
   "tourist.error": "Couldn't load practitioners.",
