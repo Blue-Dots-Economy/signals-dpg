@@ -211,38 +211,45 @@ export function AppSidebar({
                   const profiles = profilesByDomain[domainId];
                   const Icon = getDomainIcon(domainId, selectedNetwork);
                   const label = getDomainLabel(domainId);
-                  const isExpanded = expandedDomains.has(domainId);
+                  // A single domain group (always the case in a domain-bound
+                  // portal) needs no accordion header — show its profiles
+                  // directly, always expanded.
+                  const singleGroup = domainKeys.length === 1;
+                  const isExpanded = singleGroup || expandedDomains.has(domainId);
                   const hasActiveProfile = profiles.some((p) => p.item_id === activeProfileId);
 
                   return (
                     <div key={domainId}>
-                      {/* Accordion header */}
-                      <button
-                        onClick={() => toggleDomain(domainId)}
-                        className={[
-                          'flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-sm transition-colors',
-                          'hover:bg-sidebar-accent hover:text-sidebar-accent-foreground',
-                          hasActiveProfile
-                            ? 'font-semibold text-primary'
-                            : 'text-sidebar-foreground/70',
-                        ].join(' ')}
-                      >
-                        <Icon className="h-3.5 w-3.5 shrink-0" />
-                        <span className="flex-1 truncate text-left">{label}</span>
-                        <span className="text-xs text-muted-foreground tabular-nums">
-                          {profiles.length}
-                        </span>
-                        <ChevronRight
+                      {/* Accordion header — only when there's more than one
+                          domain group; a single group is shown flat. */}
+                      {!singleGroup && (
+                        <button
+                          onClick={() => toggleDomain(domainId)}
                           className={[
-                            'h-3.5 w-3.5 shrink-0 transition-transform duration-200',
-                            isExpanded ? 'rotate-90' : '',
+                            'flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-sm transition-colors',
+                            'hover:bg-sidebar-accent hover:text-sidebar-accent-foreground',
+                            hasActiveProfile
+                              ? 'font-semibold text-primary'
+                              : 'text-sidebar-foreground/70',
                           ].join(' ')}
-                        />
-                      </button>
+                        >
+                          <Icon className="h-3.5 w-3.5 shrink-0" />
+                          <span className="flex-1 truncate text-left">{label}</span>
+                          <span className="text-xs text-muted-foreground tabular-nums">
+                            {profiles.length}
+                          </span>
+                          <ChevronRight
+                            className={[
+                              'h-3.5 w-3.5 shrink-0 transition-transform duration-200',
+                              isExpanded ? 'rotate-90' : '',
+                            ].join(' ')}
+                          />
+                        </button>
+                      )}
 
                       {/* Accordion body */}
                       {isExpanded && (
-                        <div className="ml-3 mt-0.5 border-l border-border pl-2">
+                        <div className={singleGroup ? 'mt-0.5' : 'ml-3 mt-0.5 border-l border-border pl-2'}>
                           <SidebarMenu>
                             {profiles.map((profile) => {
                               const schema = userSchemas?.[profile.item_domain];

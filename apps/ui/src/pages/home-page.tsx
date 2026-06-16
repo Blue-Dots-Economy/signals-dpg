@@ -776,14 +776,18 @@ export function HomePage() {
     );
   }
 
-  const contentTitle = selectedDomain
-    ? selectedDomain.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())
+  // With a single browseable domain there's no "All" — the header names that
+  // one domain (derived from visibleDomains, so it's generic, not per-network).
+  const headerDomain =
+    selectedDomain ?? (visibleDomains.length === 1 ? visibleDomains[0].id : null);
+  const contentTitle = headerDomain
+    ? headerDomain.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())
     : t('home.browse_all');
-  const contentDescription = selectedDomain
-    ? visibleDomains.find((d) => d.id === selectedDomain)?.description
+  const contentDescription = headerDomain
+    ? visibleDomains.find((d) => d.id === headerDomain)?.description
     : undefined;
-  const contentCount = selectedDomain
-    ? (filteredDomainItems[selectedDomain]?.length ?? 0)
+  const contentCount = headerDomain
+    ? (filteredDomainItems[headerDomain]?.length ?? 0)
     : Object.values(filteredDomainItems).reduce((s, a) => s + a.length, 0);
 
   function buildEmptyState(domainLabel: string) {
