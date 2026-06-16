@@ -47,6 +47,20 @@ blue_dot) but is **inert** — no code reads it.
 
 ## Design
 
+Two pieces: **Component 1** is pure logic that decides *what* should be visible
+given the current answers; **Component 2** is the React glue that calls it *live*
+as the user types. Keeping the logic pure means the tricky parts (chains, AND,
+clearing, `required`-pruning) are testable without rendering anything.
+
+**Running example** (a real blue_dot chain):
+```json
+"educationCategory":        { "enum": ["School", "College", "None"] },
+"schoolQualification":      { "enum": ["10th", "12th"], "x-show-if": { "educationCategory": ["School"] } },
+"schoolQualificationOther": { "type": "string",         "x-show-if": { "schoolQualification": ["12th"] } }
+```
+`schoolQualification` shows only when `educationCategory === "School"`;
+`schoolQualificationOther` shows only when `schoolQualification === "12th"`.
+
 ### Component 1 — pure evaluator (`apps/ui/src/lib/show-if.ts`, new)
 
 ```ts
@@ -87,9 +101,23 @@ always visible.
 5. Return: schema with hidden properties deleted from `properties` and filtered out
    of `required`; the cleared formData; and the hidden list.
 
+The loop (not a single pass) is what makes **chains** work. If the user changes
+`educationCategory` from `"School"` back to `"College"`:
+- pass 1 hides + clears `schoolQualification` (its control no longer matches);
+- pass 2 re-evaluates and now `schoolQualificationOther` has no control, so it hides
+  + clears too;
+- pass 3 finds nothing new → stop.
+
+A single pass would have left the grandchild (`schoolQualificationOther`) behind.
+
 Pure and synchronous — unit-tested in isolation.
 
 ### Component 2 — controlled form (`schema-form.tsx`)
+
+A pure evaluator only helps if something re-runs it on every keystroke. Today the
+form is **uncontrolled** — it hands RJSF the schema once and only listens for the
+final `onSubmit`, so it never sees intermediate edits and can't react. Component 2
+makes the form **controlled** so Component 1 runs on each change:
 
 - Track `formData` in component state, seeded from the `formData` prop; wire RJSF's
   **`onChange`** to update it (today only `onSubmit` is handled).
