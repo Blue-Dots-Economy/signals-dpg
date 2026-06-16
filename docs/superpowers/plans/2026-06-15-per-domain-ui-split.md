@@ -12,7 +12,7 @@
 
 **Commands:** UI typecheck via `pnpm typecheck` (api+ui). UI tests: `pnpm --filter ui exec vitest run <file>`. Node 24: `source ~/.nvm/nvm.sh && nvm use 24` before running. Do NOT run Codacy (MCP not connected here).
 
-**Precedence rule used throughout:** acting domain = `?as=` (local test override) → `servedBinding.domain` → today's fallback. Browse scoping (`viewerDomain`) = `?as=` → `servedBinding.domain` → `null` (null ⇒ today's network-wide browse; a user's own profile domain does NOT scope browse in legacy mode — preserves backward-compat).
+**Precedence rule used throughout:** acting domain = `?as=` (local test override) → `servedBinding.domain` → `myItem.item_domain` → fallback. Browse scoping (`viewerDomain`) = `?as=` → `servedBinding.domain` → `myItem.item_domain` → `null`. A signed-in user is scoped to their own domain's targets in both the bound portals and the combined UI; `null` (only a signed-out / no-profile visitor) ⇒ network-wide browse.
 
 ---
 
@@ -398,11 +398,13 @@ with:
     network?.domains[0]?.id ??
     'student_profile';
 
-  // Viewer domain for Browse scoping: ?as= → served binding → null. Null means
-  // legacy network-wide browse (a user's own profile does NOT scope browse, to
-  // preserve today's behavior). When set, Browse shows only that domain's
-  // interaction targets (computeVisibleDomains).
-  const viewerDomain = searchParams.get('as') ?? servedBinding?.domain ?? null;
+  // Viewer domain for Browse scoping: ?as= → served binding → the logged-in
+  // user's own profile domain → null. A signed-in user is scoped to their
+  // domain's interaction targets in BOTH the bound portals and the combined UI
+  // (a seeker never sees other seekers). Null — only a signed-out / no-profile
+  // visitor — means network-wide browse (computeVisibleDomains).
+  const viewerDomain =
+    searchParams.get('as') ?? servedBinding?.domain ?? myItem?.item_domain ?? null;
 
   const visibleDomains = React.useMemo(
     () => (network ? computeVisibleDomains(network, viewerDomain) : []),

@@ -41,7 +41,7 @@
   "auth.otp_incorrect_desc": "आपका दर्ज किया गया कोड मेल नहीं खाता। अपने संदेश दोबारा जांचें या नया कोड मांगें।",
   "auth.otp_resend_error_title": "नया कोड नहीं भेजा जा सका",
   "auth.otp_resend_error_desc": "नया सत्यापन कोड मांगते समय कुछ गलत हो गया। कुछ देर रुकें और फिर कोशिश करें।",
-  "auth.wrong_portal": "This account already has a profile in the {{domain}} domain. Please sign in through the {{domain}} portal.",
+  "auth.wrong_portal": "इस खाते के पास पहले से {{domain}} डोमेन में एक प्रोफ़ाइल है। कृपया {{domain}} पोर्टल के माध्यम से साइन इन करें।",
   "actions.my_actions_title": "मेरी क्रियाएं",
   "actions.my_actions_subtitle": "आपने जो अनुरोध शुरू किए और जो मिले हैं, उन्हें प्रबंधित करें।",
   "actions.my_actions_back": "वापस",
