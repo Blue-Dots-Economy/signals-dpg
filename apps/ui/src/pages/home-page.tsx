@@ -6,7 +6,6 @@ import { useTranslation } from 'react-i18next';
 import type {
   DotNetworkSchema,
   DotActionSchema,
-  DotNetworkInteraction,
   ViewMode,
 } from '@/engine/types';
 import { resolveNetworkRefs } from '@/engine/schema/resolve-schema';
@@ -38,6 +37,8 @@ import { fetchNetworkConfigs, fetchNetworkConfig, fetchNetworkItems } from '@/li
 import { useAuth } from '@/contexts/auth-context';
 import { apiConfig } from '@/lib/api-config';
 import { getEnumFilterFieldsForDomains, itemPassesEnumFilters } from '@/lib/enum-filters';
+import { getServedBinding } from '@/lib/served-binding';
+import { computeVisibleDomains } from '@/lib/visible-domains';
 import { useUserLocation } from '@/hooks/use-user-location';
 import { nearestDistanceMeters } from '@/lib/geo/distance';
 import type { LatLng } from '@/lib/geo/types';
@@ -96,16 +97,6 @@ function setStoredActiveProfileId(networkId: string, profileId: string): void {
 
 function clearStoredActiveProfileId(networkId: string): void {
   localStorage.removeItem(getActiveProfileStorageKey(networkId));
-}
-
-function getAllInteractions(network: DotNetworkSchema): Array<{ actionType: string; interaction: DotNetworkInteraction }> {
-  const interactions: Array<{ actionType: string; interaction: DotNetworkInteraction }> = [];
-  for (const [actionType, action] of Object.entries(network.actions)) {
-    for (const interaction of action.interactions) {
-      interactions.push({ actionType, interaction });
-    }
-  }
-  return interactions;
 }
 
 /**
@@ -204,13 +195,16 @@ export function HomePage() {
   const [resolvedNetwork, setResolvedNetwork] = React.useState<DotNetworkSchema | null>(null);
   const [allNetworks, setAllNetworks] = React.useState<DotNetworkSchema[]>([]);
   const configuredNetworkIds = parseNetworkIds(import.meta.env.VITE_NETWORK_ID);
-  
-  // Get network from URL query param, fallback to env config
+  const servedBinding = getServedBinding();
+
+  // Network: the served binding pins it; otherwise URL param, then env config.
   const networkFromUrl = searchParams.get('network');
-  const initialNetworkId = networkFromUrl && configuredNetworkIds.includes(networkFromUrl)
-    ? networkFromUrl
-    : (configuredNetworkIds[0] || null);
-  
+  const initialNetworkId =
+    servedBinding?.network ??
+    (networkFromUrl && configuredNetworkIds.includes(networkFromUrl)
+      ? networkFromUrl
+      : (configuredNetworkIds[0] || null));
+
   const [selectedNetworkId, setSelectedNetworkId] = React.useState<string | null>(initialNetworkId);
   const [domainItems, setDomainItems] = React.useState<Record<string, Item[]>>({});
   const [myItems, setMyItems] = React.useState<Item[]>([]);
@@ -385,22 +379,25 @@ export function HomePage() {
     [userLocation],
   );
 
-  // Current domain: from ?as= param (demo override), active profile, or network default
-  const currentDomain = searchParams.get('as') ?? myItem?.item_domain ?? network?.domains[0]?.id ?? 'student_profile';
+  // Acting domain: ?as= test override → served binding → active profile →
+  // network default. Drives the connect-action source (from_domain).
+  const currentDomain =
+    searchParams.get('as') ??
+    servedBinding?.domain ??
+    myItem?.item_domain ??
+    network?.domains[0]?.id ??
+    'student_profile';
 
-  // Browseable domains = the distinct `to_domain`s across all interactions in
-  // the network. These are the only domains anyone connects *to*, so they're
-  // the only ones worth listing/fetching in Browse. Domains that never appear
-  // as a `to_domain` (e.g. orange_dot `tourist`) are intentionally excluded —
-  // nobody browses them. Network-wide and independent of the active profile
-  // (e.g. purple_dot/blue_dot show both seeker + provider).
-  const visibleDomains = React.useMemo(() => {
-    if (!network) return [];
-    const toDomains = new Set(
-      getAllInteractions(network).map(({ interaction }) => interaction.to_domain)
-    );
-    return network.domains.filter((d) => toDomains.has(d.id));
-  }, [network]);
+  // Viewer domain for Browse scoping: ?as= → served binding → null. Null means
+  // legacy network-wide browse (a user's own profile does NOT scope browse, to
+  // preserve today's behavior). When set, Browse shows only that domain's
+  // interaction targets (computeVisibleDomains).
+  const viewerDomain = searchParams.get('as') ?? servedBinding?.domain ?? null;
+
+  const visibleDomains = React.useMemo(
+    () => (network ? computeVisibleDomains(network, viewerDomain) : []),
+    [network, viewerDomain],
+  );
 
   React.useEffect(() => {
     if (!network) return;
@@ -739,7 +736,7 @@ export function HomePage() {
     });
   };
 
-  const showNetworkSelector = allNetworks.length > 1;
+  const showNetworkSelector = !servedBinding && allNetworks.length > 1;
 
   const currentDomainLabel = selectedDomain
     ? selectedDomain
