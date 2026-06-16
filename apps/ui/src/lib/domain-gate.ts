@@ -17,8 +17,16 @@ export function evaluateDomainGate(heldDomains: string[], boundDomain: string): 
 /**
  * The distinct domains in which the signed-in user holds a profile within
  * `networkId`. Fetches the network config to enumerate domains, then probes
- * each for a created-by-me item. I/O wrapper around evaluateDomainGate; best
- * effort (a failed probe counts as "no item" for that domain).
+ * each for a created-by-me item.
+ *
+ * Fail-open by design: a failed probe is treated as "no item in that domain".
+ * This UI gate is only a best-effort redirect to the right per-domain portal —
+ * the server's DOMAIN_LOCKED guard is the authoritative control, so a transient
+ * probe error can at worst let a user briefly land on the wrong portal's browse
+ * view (they still cannot create a cross-domain profile), and it self-corrects
+ * on the next successful login. Blocking on a transient error would instead
+ * wrongly turn away legitimate new / same-domain users, so fail-open is the
+ * deliberate choice here.
  */
 export async function resolveHeldDomains(
   networkId: string,
