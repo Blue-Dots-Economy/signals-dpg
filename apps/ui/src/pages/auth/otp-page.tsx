@@ -7,7 +7,7 @@ import { AuthShell } from '@/components/layout/auth-shell';
 import { Alert, AlertTitle, AlertDescription } from '@/components/ui/alert';
 import { requestOtp, type AuthIdentifier } from '@/lib/auth-api';
 import { useAuth } from '@/contexts/auth-context';
-import { getServedBinding } from '@/lib/served-binding';
+import { getServedScope } from '@/lib/served-binding';
 import { evaluateDomainGate, resolveHeldDomains } from '@/lib/domain-gate';
 import { toast } from 'sonner';
 
@@ -55,12 +55,12 @@ export function OtpPage() {
     try {
       await verifyOtp(getAuthIdentifier(state), otp, state.userExists ? undefined : state.name);
 
-      // Per-domain UI: block a user who already holds a profile in another
-      // domain of this network (they must use that domain's portal).
-      const binding = getServedBinding();
-      if (binding) {
-        const held = await resolveHeldDomains(binding.network);
-        const gate = evaluateDomainGate(held, binding.domain);
+      // Per-domain UI: block a user who already holds a profile in a domain
+      // this deployment does not serve (they must use that domain's portal).
+      const scope = getServedScope();
+      if (scope) {
+        const held = await resolveHeldDomains(scope.network);
+        const gate = evaluateDomainGate(held, scope.domains);
         if (!gate.allow) {
           await signOut();
           navigate('/auth/login', { replace: true, state: { wrongPortalDomain: gate.heldDomain } });

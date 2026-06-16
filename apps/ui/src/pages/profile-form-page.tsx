@@ -19,7 +19,7 @@ import { getConfiguredWalletProviders } from '@/engine/wallet/wallet-registry';
 import type { WalletImportResult } from '@/engine/wallet/types';
 import { useAuth } from '@/contexts/auth-context';
 import { mergeImportedDataIntoSchema } from '@/lib/import-mapping';
-import { getServedBinding } from '@/lib/served-binding';
+import { getServedScope } from '@/lib/served-binding';
 
 import {
   createItem,
@@ -56,13 +56,18 @@ export function ProfileFormPage() {
   const { user } = useAuth();
   const { theme } = useNetworkTheme();
   const isEdit = !!id;
-  const servedBinding = getServedBinding();
+  // The domains this deployment serves (VITE_SERVED_BINDINGS), or null = all.
+  const servedScope = React.useMemo(() => getServedScope(), []);
+  // Exactly one served domain ⇒ no picker; that domain is the form's domain.
+  const singleServedDomain =
+    servedScope && servedScope.domains.length === 1 ? servedScope.domains[0] : null;
 
-  // A served-binding UI is scoped to one domain: initialise the selected domain
-  // to it (create mode) so the role-picker step is skipped entirely — the form
-  // for the bound domain renders directly, with no intermediate page or flash.
+  // With a single served domain, initialise the selected domain to it (create
+  // mode) so the role-picker step is skipped entirely — the form renders
+  // directly, no intermediate page or flash. With multiple served domains the
+  // picker (restricted to the served set) is shown.
   const [selectedDomain, setSelectedDomain] = React.useState<string | null>(
-    () => (!isEdit && servedBinding ? servedBinding.domain : null),
+    () => (!isEdit && singleServedDomain ? singleServedDomain : null),
   );
   const [myItems, setMyItems] = React.useState<Item[]>([]);
   const [resolvedNetwork, setResolvedNetwork] = React.useState<DotNetworkSchema | null>(null);
@@ -116,13 +121,13 @@ export function ProfileFormPage() {
   }, [configuredNetworkIds]);
 
   const targetNetworkId = React.useMemo(() => {
-    if (servedBinding?.network) return servedBinding.network;
+    if (servedScope?.network) return servedScope.network;
     if (availableNetworkIds === null) return null;
     if (networkFromUrl && availableNetworkIds.includes(networkFromUrl)) {
       return networkFromUrl;
     }
     return availableNetworkIds[0] ?? null;
-  }, [servedBinding?.network, availableNetworkIds, networkFromUrl]);
+  }, [servedScope?.network, availableNetworkIds, networkFromUrl]);
 
   // Fetch and resolve network config from API
   React.useEffect(() => {
@@ -245,15 +250,15 @@ export function ProfileFormPage() {
     [myItems],
   );
 
-  // Domains offered in the picker: only the locked one when locked, else all
-  // served domains (network.domains is already filtered to served by config).
-  const selectableDomains = React.useMemo(
-    () =>
-      lockedDomain
-        ? domains.filter((d) => d.id === lockedDomain)
-        : domains,
-    [lockedDomain, domains],
-  );
+  // Domains offered in the picker: restricted to the served set (when a scope
+  // is configured), then to the locked domain when the user already holds one.
+  const selectableDomains = React.useMemo(() => {
+    let list = servedScope
+      ? domains.filter((d) => servedScope.domains.includes(d.id))
+      : domains;
+    if (lockedDomain) list = list.filter((d) => d.id === lockedDomain);
+    return list;
+  }, [domains, servedScope, lockedDomain]);
 
   // Locked users skip the role picker — auto-select their held domain.
   React.useEffect(() => {
@@ -662,11 +667,11 @@ export function ProfileFormPage() {
           <div className="relative z-10 px-5 pt-4 sm:px-6">
             <button
               type="button"
-              onClick={() => (selectedDomain && !isEdit && !lockedDomain && !servedBinding ? setSelectedDomain(null) : navigate(`/?network=${resolvedNetwork?.id ?? ''}`))}
+              onClick={() => (selectedDomain && !isEdit && !lockedDomain && !singleServedDomain ? setSelectedDomain(null) : navigate(`/?network=${resolvedNetwork?.id ?? ''}`))}
               className="flex items-center gap-1.5 text-sm text-white/70 hover:text-white transition-colors"
             >
               <ArrowLeft className="h-4 w-4" />
-              {selectedDomain && !isEdit && !lockedDomain && !servedBinding ? t('profile.choose_different_role') : t('common.back')}
+              {selectedDomain && !isEdit && !lockedDomain && !singleServedDomain ? t('profile.choose_different_role') : t('common.back')}
             </button>
           </div>
           <div className="relative z-10 flex items-center gap-4 px-5 pb-6 pt-3 sm:px-6">

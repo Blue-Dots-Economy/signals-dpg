@@ -1,7 +1,7 @@
 import * as React from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { resolveTheme, type NetworkTheme } from './network-themes';
-import { getServedBinding } from '@/lib/served-binding';
+import { getServedScope } from '@/lib/served-binding';
 
 interface NetworkThemeContextValue {
   themeId: string;
@@ -84,14 +84,16 @@ function applyFavicon(id: string): void {
 }
 
 function applyDocumentTitle(theme: NetworkTheme): void {
-  // Network brand + "Signal Stack" platform name. On a domain-bound portal
-  // (VITE_SERVED_BINDING set) the bound domain is woven in so each per-domain
-  // UI gets a distinct tab title (e.g. "Purple Dot · Provider · Signal Stack").
-  // Generic for any network/domain; unset → the combined-UI title, unchanged.
-  const binding = getServedBinding();
-  const domainLabel = binding
-    ? binding.domain.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())
-    : null;
+  // Network brand + "Signal Stack" platform name. When the deployment serves a
+  // single domain (VITE_SERVED_BINDINGS with one entry) the domain is woven in
+  // so each per-domain UI gets a distinct tab title (e.g. "Purple Dot ·
+  // Provider · Signal Stack"). Multiple served domains, or unset, → the plain
+  // network title. Generic for any network/domain.
+  const scope = getServedScope();
+  const domainLabel =
+    scope && scope.domains.length === 1
+      ? scope.domains[0].replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())
+      : null;
   document.title = domainLabel
     ? `${theme.name} · ${domainLabel} · Signal Stack`
     : `${theme.name} · Signal Stack`;

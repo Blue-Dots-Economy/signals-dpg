@@ -4,14 +4,17 @@ import { fetchItems } from '@/lib/item-api';
 export type DomainGate = { allow: true } | { allow: false; heldDomain: string };
 
 /**
- * Decides whether a user may use a UI bound to `boundDomain`, given the domains
- * they already hold profiles in (within the bound network). Blocks when they
- * hold a profile in any OTHER domain; allows when they hold none (new user) or
- * only the bound domain. Pure.
+ * Decides whether a user may use a UI that serves `servedDomains`, given the
+ * domains they already hold profiles in (within the served network). Blocks
+ * when they hold a profile in any domain NOT in the served set; allows when
+ * they hold none (new user) or only served domain(s). Pure.
  */
-export function evaluateDomainGate(heldDomains: string[], boundDomain: string): DomainGate {
-  const other = heldDomains.find((d) => d !== boundDomain);
-  return other ? { allow: false, heldDomain: other } : { allow: true };
+export function evaluateDomainGate(
+  heldDomains: string[],
+  servedDomains: string[],
+): DomainGate {
+  const blocked = heldDomains.find((d) => !servedDomains.includes(d));
+  return blocked ? { allow: false, heldDomain: blocked } : { allow: true };
 }
 
 /**

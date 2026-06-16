@@ -37,19 +37,24 @@ logged-in user's profile.
 
 ## Decisions (locked)
 
-1. **Config knob = a `network/domain` pair**, runtime-only:
-   `VITE_SERVED_BINDING=purple_dot/provider`. It pins both the network and the
-   acting domain and hides the network selector. One self-contained value.
+1. **Config knob = a served *set* of `network/domain` values**, runtime-only,
+   comma-separated, all sharing one network:
+   `VITE_SERVED_BINDINGS=purple_dot/provider` (one) or
+   `VITE_SERVED_BINDINGS=yellow_dot/tutor,yellow_dot/coaching_center` (a subset).
+   It pins the network and hides the selector. **One served domain** = the
+   single-domain portal (acting domain forced to it). **Multiple** = a
+   whitelisted combined UI (acting domain derived from the logged-in user,
+   create-picker restricted to the served set). Unset = serve all domains.
 2. **Cross-domain login is blocked at login.** After identity is verified, if
-   the user already holds a profile in a **different** domain of the bound
-   network, login is refused with a message naming their domain (e.g. "This
-   email/phone already has a profile in the **seeker** domain — please use the
-   seeker portal"). No profile anywhere, or a profile in the **bound** domain →
-   login proceeds. (Message is **name-only** for now; a clickable portal link is
-   a future enhancement, not in scope.)
-3. **No domain-picker page for profile creation.** In a bound UI, choosing
-   "create profile" goes **directly** to the form for the bound domain — the
-   domain/role selection step is not rendered at all.
+   the user already holds a profile in a domain **not in the served set**, login
+   is refused with a message naming their domain (e.g. "This email/phone already
+   has a profile in the **seeker** domain — please use the seeker portal"). No
+   profile anywhere, or a profile in a served domain → login proceeds. (Message
+   is **name-only** for now; a clickable portal link is a future enhancement.)
+3. **Profile-creation picker is scoped to the served set.** A single served
+   domain → "create profile" goes **directly** to that domain's form (no
+   picker). Multiple served domains → the role picker offers exactly those
+   domains. Unset → the picker offers all domains (as before).
 4. **Unset key = today's behavior**, byte-for-byte. The split is additive and
    opt-in per deployment.
 
@@ -68,14 +73,14 @@ as it already does for `VITE_API_URL` etc.
 ```ts
 export interface ServedBinding { network: string; domain: string; }
 
-/** Parses VITE_SERVED_BINDING ("network/domain") from runtime/build config.
+/** Parses VITE_SERVED_BINDINGS ("network/domain") from runtime/build config.
  *  Returns null when unset or malformed (→ legacy multi-domain behavior). */
 export function getServedBinding(): ServedBinding | null;
 ```
 
-- Reads `getRuntimeEnv('VITE_SERVED_BINDING')`, trims, splits on the first `/`,
+- Reads `getRuntimeEnv('VITE_SERVED_BINDINGS')`, trims, splits on the first `/`,
   requires both halves non-empty; otherwise returns `null`.
-- Add `VITE_SERVED_BINDING?: string` to `ImportMetaEnv` in
+- Add `VITE_SERVED_BINDINGS?: string` to `ImportMetaEnv` in
   `apps/ui/src/vite-env.d.ts` so `getRuntimeEnv` stays typed.
 - Pure and synchronous; unit-tested in isolation.
 
@@ -106,7 +111,7 @@ When `getServedBinding()` is non-null (`binding`):
   network); with `null` (only a signed-out / no-profile visitor) it returns all
   `to_domain`s network-wide. NOTE: a signed-in user's own profile domain scopes
   Browse in BOTH the bound portals and the combined UI — a logged-in seeker
-  sees providers, never other seekers, regardless of `VITE_SERVED_BINDING`.
+  sees providers, never other seekers, regardless of `VITE_SERVED_BINDINGS`.
 
 - Connect actions (`getActionsForTarget`) already filter on `currentDomain`, so
   they need no change.
@@ -181,7 +186,7 @@ When `binding` is set:
   no networks / suppress the selector). The domain-tab "All" already auto-hides
   for a single browseable domain.
 - **Theme / first paint.** The pre-React script in `apps/ui/index.html` gains
-  `VITE_SERVED_BINDING` (split on `/` → network) as its **highest-priority**
+  `VITE_SERVED_BINDINGS` (split on `/` → network) as its **highest-priority**
   network source for `data-network`, so the bound network themes correctly on
   first paint with the single key (no separate `VITE_NETWORK_NAME` to keep in
   sync). `theme-provider.tsx` likewise prefers the binding's network. Theme
@@ -193,13 +198,13 @@ When `binding` is set:
 Every behavior in Components 2–5 is gated on `getServedBinding() !== null`.
 With the key unset, the UI is the current multi-domain app with no observable
 change. No existing deployment is affected until it opts in by setting
-`VITE_SERVED_BINDING`.
+`VITE_SERVED_BINDINGS`.
 
 ## Deployment
 
 - **One image** (`UI_VARIANT=signals`, the existing build). Two (or N)
   Kubernetes Deployments of it.
-- Each Deployment's `config.js` sets `VITE_SERVED_BINDING` (e.g.
+- Each Deployment's `config.js` sets `VITE_SERVED_BINDINGS` (e.g.
   `purple_dot/provider` vs `purple_dot/seeker`) and the same `VITE_API_URL`;
   two ingress hostnames (e.g. `provider.…` / `seeker.…`).
 - No change to `vite.config.ts`, the `Dockerfile`, the entry, or the build
@@ -217,7 +222,7 @@ change. No existing deployment is affected until it opts in by setting
 - **Unit — `domain-gate.ts` (`evaluateDomainGate`):** no profiles → allow;
   same-domain → allow; other-domain → block with that domain; multi-domain
   anomaly (held includes another domain) → block.
-- **Manual (purple_dot):** deploy/run with `config.js` `VITE_SERVED_BINDING`
+- **Manual (purple_dot):** deploy/run with `config.js` `VITE_SERVED_BINDINGS`
   set to `purple_dot/provider` then `purple_dot/seeker`; verify: correct browse
   targets, no network selector, create-profile goes straight to the bound
   domain's form, and a seeker logging into the provider portal is blocked with

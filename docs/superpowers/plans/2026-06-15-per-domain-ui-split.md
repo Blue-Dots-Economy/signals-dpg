@@ -2,7 +2,9 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Let the same signals UI build run as per-domain instances chosen by one runtime config value `VITE_SERVED_BINDING=<network>/<domain>` — pinning the network + acting domain, scoping browse to that domain's interaction targets, locking profile creation to it (no picker), and blocking cross-domain login after OTP. Unset key = today's behavior.
+**Goal:** Let the same signals UI build run as per-domain instances chosen by one runtime config value `VITE_SERVED_BINDINGS=<network>/<domain>` — pinning the network + acting domain, scoping browse to that domain's interaction targets, locking profile creation to it (no picker), and blocking cross-domain login after OTP. Unset key = today's behavior.
+
+> **Superseded — generalized to a served *set*.** `VITE_SERVED_BINDINGS` now accepts a **comma-separated list** of `network/domain` values (one network). One entry = the single-domain portal below; multiple = a whitelisted combined UI (acting domain from the logged-in user, picker restricted to the served set, login blocked for non-served domains). The snippets below describe the original single-binding form; the current design of record is the spec. Key change: `served-binding` exposes `getServedScope()`/`parseServedScope()` (a `{network, domains[]}` scope) and `evaluateDomainGate(held, servedDomains[])`.
 
 **Architecture:** One new runtime key read via the existing `config.js`/`getRuntimeEnv` layer, parsed once by a small `served-binding` module and consulted at each domain-resolution point. Three new pure helpers (`served-binding`, `visible-domains`, `domain-gate`) plus targeted edits to `home-page.tsx`, `profile-form-page.tsx`, and the auth/OTP flow. No backend, Vite, or Dockerfile change.
 
@@ -26,7 +28,7 @@
 - [ ] **Step 1: Add the env key type.** In `apps/ui/src/vite-env.d.ts`, inside `interface ImportMetaEnv`, add after the `VITE_NETWORK_ID` line:
 
 ```ts
-  readonly VITE_SERVED_BINDING?: string;
+  readonly VITE_SERVED_BINDINGS?: string;
 ```
 
 - [ ] **Step 2: Create the module.** `apps/ui/src/lib/served-binding.ts`:
@@ -57,11 +59,11 @@ export function parseServedBinding(raw: string | null | undefined): ServedBindin
 
 /**
  * The network/domain this UI instance is scoped to, from the runtime config
- * key VITE_SERVED_BINDING. Null when unset/malformed — the UI then runs in its
+ * key VITE_SERVED_BINDINGS. Null when unset/malformed — the UI then runs in its
  * legacy multi-domain mode (domain derived from the logged-in user's profile).
  */
 export function getServedBinding(): ServedBinding | null {
-  return parseServedBinding(getRuntimeEnv('VITE_SERVED_BINDING') as string | undefined);
+  return parseServedBinding(getRuntimeEnv('VITE_SERVED_BINDINGS') as string | undefined);
 }
 ```
 
@@ -101,7 +103,7 @@ describe('parseServedBinding', () => {
 
 ```bash
 git add apps/ui/src/lib/served-binding.ts apps/ui/src/lib/served-binding.test.ts apps/ui/src/vite-env.d.ts
-git commit -m "feat(ui): served-binding config (VITE_SERVED_BINDING network/domain)
+git commit -m "feat(ui): served-binding config (VITE_SERVED_BINDINGS network/domain)
 
 Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>"
 ```
@@ -610,10 +612,10 @@ Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>"
 
 - [ ] **Step 2: Run the UI test suite.** `pnpm --filter ui exec vitest run` → all pass (includes the three new pure-helper tests).
 
-- [ ] **Step 3: Manual smoke (local, purple_dot).** With the API running on purple_dot and the signals UI served with a `config.js` (or `apps/ui/.env`) setting `VITE_SERVED_BINDING`:
+- [ ] **Step 3: Manual smoke (local, purple_dot).** With the API running on purple_dot and the signals UI served with a `config.js` (or `apps/ui/.env`) setting `VITE_SERVED_BINDINGS`:
   - `purple_dot/provider`: Browse shows seekers (+providers); no network selector; "create profile" opens the provider form directly (no role picker); a seeker account is blocked at login with the name-only message; a brand-new account proceeds and can create a provider profile.
   - `purple_dot/seeker`: Browse shows providers only; "create profile" opens the seeker form directly.
-  - **Unset** `VITE_SERVED_BINDING`: the app is unchanged (multi-domain browse, picker, selector as today).
+  - **Unset** `VITE_SERVED_BINDINGS`: the app is unchanged (multi-domain browse, picker, selector as today).
 
 - [ ] **Step 4: Confirm no backend / build-pipeline change.** `git diff feature..HEAD --name-only` touches only `apps/ui/**` and the docs; no `apps/api/**`, no `vite.config.ts`, no `Dockerfile`.
 
@@ -628,7 +630,7 @@ Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>"
 - Login gate after OTP, name-only message, no backend change → Task 6 (`evaluateDomainGate`/`resolveHeldDomains`, message via nav state). ✅
 - Hide network selector → Task 4 Step 5. ✅
 - Backward-compatible when unset → every consumer guards on the binding / `null` viewerDomain; verified in Tasks 4–6 typecheck notes and Task 7 Step 3. ✅
-- Theme network pinning at first paint (`index.html`) — **NOTE:** the spec's Component 5 mentions the pre-React `index.html` script reading the binding for first-paint theme. It is intentionally **not** required for functional correctness (the React `theme-provider` re-applies the network theme on mount, and the binding pins `selectedNetworkId`); the only effect of omitting it is a possible first-paint theme flash before React hydrates. Left out of these tasks to keep scope tight; if the flash is undesirable, add `VITE_SERVED_BINDING` (split on `/`) as the top-priority source in the `index.html` script and `theme-provider.tsx` as a small follow-up. Flagging rather than silently dropping.
+- Theme network pinning at first paint (`index.html`) — **NOTE:** the spec's Component 5 mentions the pre-React `index.html` script reading the binding for first-paint theme. It is intentionally **not** required for functional correctness (the React `theme-provider` re-applies the network theme on mount, and the binding pins `selectedNetworkId`); the only effect of omitting it is a possible first-paint theme flash before React hydrates. Left out of these tasks to keep scope tight; if the flash is undesirable, add `VITE_SERVED_BINDINGS` (split on `/`) as the top-priority source in the `index.html` script and `theme-provider.tsx` as a small follow-up. Flagging rather than silently dropping.
 
 **Placeholder scan:** No TBD/TODO. The two "read the exact current expression first" notes (Task 4 Step 4 grep guard; Task 5 Step 3 network expression) name the exact transformation; they are guardrails, not unspecified work.
 

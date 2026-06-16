@@ -37,7 +37,7 @@ import { fetchNetworkConfigs, fetchNetworkConfig, fetchNetworkItems } from '@/li
 import { useAuth } from '@/contexts/auth-context';
 import { apiConfig } from '@/lib/api-config';
 import { getEnumFilterFieldsForDomains, itemPassesEnumFilters } from '@/lib/enum-filters';
-import { getServedBinding } from '@/lib/served-binding';
+import { getServedScope } from '@/lib/served-binding';
 import { computeVisibleDomains } from '@/lib/visible-domains';
 import { useUserLocation } from '@/hooks/use-user-location';
 import { nearestDistanceMeters } from '@/lib/geo/distance';
@@ -195,12 +195,19 @@ export function HomePage() {
   const [resolvedNetwork, setResolvedNetwork] = React.useState<DotNetworkSchema | null>(null);
   const [allNetworks, setAllNetworks] = React.useState<DotNetworkSchema[]>([]);
   const configuredNetworkIds = parseNetworkIds(import.meta.env.VITE_NETWORK_ID);
-  const servedBinding = getServedBinding();
+  // The set of domains this deployment serves (VITE_SERVED_BINDINGS), or null
+  // when unset (serve all domains). When exactly ONE domain is served, that is
+  // the forced acting/browse domain (the single-domain portal); with multiple,
+  // the acting domain is derived from the logged-in user (whitelisted combined
+  // UI). Memoised — runtime config is fixed for the session's lifetime.
+  const servedScope = React.useMemo(() => getServedScope(), []);
+  const boundDomain =
+    servedScope && servedScope.domains.length === 1 ? servedScope.domains[0] : null;
 
-  // Network: the served binding pins it; otherwise URL param, then env config.
+  // Network: the served scope pins it; otherwise URL param, then env config.
   const networkFromUrl = searchParams.get('network');
   const initialNetworkId =
-    servedBinding?.network ??
+    servedScope?.network ??
     (networkFromUrl && configuredNetworkIds.includes(networkFromUrl)
       ? networkFromUrl
       : (configuredNetworkIds[0] || null));
@@ -383,19 +390,19 @@ export function HomePage() {
   // network default. Drives the connect-action source (from_domain).
   const currentDomain =
     searchParams.get('as') ??
-    servedBinding?.domain ??
+    boundDomain ??
     myItem?.item_domain ??
     network?.domains[0]?.id ??
     'student_profile';
 
-  // Viewer domain for Browse scoping: ?as= → served binding → the logged-in
-  // user's own profile domain → null. A signed-in viewer only browses the
-  // domains their domain can initiate toward (e.g. a seeker sees providers, not
-  // other seekers) in BOTH the bound portals and the combined UI. Null (only a
-  // signed-out / no-profile visitor) means network-wide browse — all
-  // to_domains. Scoping is via computeVisibleDomains over the interactions.
+  // Viewer domain for Browse scoping: ?as= → the single served domain (when
+  // exactly one is served) → the logged-in user's own profile domain → null.
+  // A signed-in viewer only browses the domains their domain can initiate
+  // toward (e.g. a seeker sees providers, not other seekers) in bound portals
+  // and the combined UI alike. Null (only a signed-out / no-profile visitor)
+  // means network-wide browse — all to_domains (computeVisibleDomains).
   const viewerDomain =
-    searchParams.get('as') ?? servedBinding?.domain ?? myItem?.item_domain ?? null;
+    searchParams.get('as') ?? boundDomain ?? myItem?.item_domain ?? null;
 
   const visibleDomains = React.useMemo(
     () => (network ? computeVisibleDomains(network, viewerDomain) : []),
@@ -739,7 +746,7 @@ export function HomePage() {
     });
   };
 
-  const showNetworkSelector = !servedBinding && allNetworks.length > 1;
+  const showNetworkSelector = !servedScope && allNetworks.length > 1;
 
   const currentDomainLabel = selectedDomain
     ? selectedDomain
