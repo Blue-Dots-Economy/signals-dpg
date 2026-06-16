@@ -168,3 +168,51 @@ clearedFormData}` → RJSF `<Form>`; RJSF `onChange` → `setFormData` → re-ev
 - Independent of the per-domain UI split (PR #178) — different files
   (`schema-form.tsx` is identical on `feature` and the per-domain branch), so this
   branch rebases cleanly onto `feature` once #178 merges.
+
+## Design review (2026-06-16)
+
+Reviewed against the codebase (`schema-form.tsx` / `normalizeSchemaForRjsf`, RJSF
+ajv8 handling, the #129 finding that `x-show-if` is currently inert, and the #104
+lifecycle classifier). **Verdict: approve to implement** — the model (pure
+evaluator + fixpoint chains + controlled-form glue) is sound and well-reasoned.
+Fold in the findings below.
+
+**Strengths.** Pure evaluator / React-glue split keeps the tricky parts (chains,
+AND, clearing, `required`-pruning) unit-testable. The fixpoint loop for chains is
+correct and the running example shows exactly why a single pass orphans
+grandchildren. Matching semantics (scalar membership, array→intersection,
+missing→no-match, multi-key AND) and strip-before-ajv are the right calls.
+Edit-mode-against-live-formData and out-of-scope bounding are handled.
+
+1. **[Document the invariant — not a live bug today] Conditional-`required` vs the
+   server lifecycle classifier (#104).** This design prunes hidden fields from
+   `required` only in the *client* pruned schema. The server classifier computes
+   `required_complete` over the flat server `required[]` and is `x-show-if`-unaware.
+   Verified safe today: **no `x-show-if` field is in blue_dot's `required[]`**
+   (seeker + provider — all conditional fields optional). But if a future schema
+   author puts an `x-show-if` field into the top-level `required[]`, taking the
+   *other* branch leaves it empty and the classifier strands those items in `draft`
+   (never `live`) despite a validly completed form. **Action:** state the invariant
+   ("`x-show-if` fields must not appear in the unconditional `required[]`") and
+   ideally fail the `example_network_configs` test if a conditional field is also
+   required.
+
+2. **[Important — implementation pitfall] Controlled-form focus/identity
+   stability.** Converting RJSF uncontrolled→controlled and "running
+   `resolveVisibleSchema` on each render" risks text-input focus/cursor loss if the
+   pruned schema is a new object identity every keystroke (RJSF can remount fields).
+   **Memoize** so the pruned schema is referentially stable when the visible set is
+   unchanged; ideally only recompute when a *control* field changes (typing a
+   non-control field can't change visibility). Call this out in Component 2.
+
+3. **[Moderate] Guard the submit against retained hidden data.** Passing
+   `clearedFormData` is good; to be safe against RJSF retaining controlled extra
+   data, set `omitExtraData` + `liveOmit` on `<Form>` (or assert in the form test
+   that the submit payload contains no hidden keys). Make "hidden fields aren't
+   submitted" guaranteed, not incidental.
+
+4. **[Minor]** Decision 1 (clear-on-hide) loses entered data on accidental control
+   toggling with no undo — fine/by-design, note the UX on long forms. Edit mode will
+   also silently clear an orphaned value when loaded data's control no longer matches
+   (correct cleanup, but a silent mutation). Add the optional dev `console.warn` for
+   an unknown control field (a schema typo otherwise silently hides the field).
