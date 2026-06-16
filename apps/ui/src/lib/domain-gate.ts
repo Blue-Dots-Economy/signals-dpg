@@ -32,7 +32,15 @@ export async function resolveHeldDomains(
   networkId: string,
   signal?: AbortSignal,
 ): Promise<string[]> {
-  const network = await fetchNetworkConfig(networkId);
+  // Fail open on config-fetch failure too (not just per-probe): a transient
+  // network-config error must not reject out of the post-OTP gate and surface
+  // as a misleading "wrong code" error to an already-authenticated user.
+  let network: Awaited<ReturnType<typeof fetchNetworkConfig>>;
+  try {
+    network = await fetchNetworkConfig(networkId);
+  } catch {
+    return [];
+  }
   const perDomain = await Promise.all(
     network.domains.map((domain) => {
       const itemType = Object.keys(domain.item_schemas ?? {})[0] ?? 'profile';

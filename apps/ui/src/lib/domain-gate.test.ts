@@ -57,4 +57,9 @@ describe('resolveHeldDomains', () => {
     });
     expect(await resolveHeldDomains('purple_dot')).toEqual([]);
   });
+
+  it('fail-open: a rejected network-config fetch yields no held domains', async () => {
+    mockedFetchNetworkConfig.mockRejectedValue(new Error('config unavailable'));
+    expect(await resolveHeldDomains('purple_dot')).toEqual([]);
+  });
 });
