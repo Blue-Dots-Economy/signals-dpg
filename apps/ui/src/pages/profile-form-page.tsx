@@ -56,8 +56,14 @@ export function ProfileFormPage() {
   const { user } = useAuth();
   const { theme } = useNetworkTheme();
   const isEdit = !!id;
+  const servedBinding = getServedBinding();
 
-  const [selectedDomain, setSelectedDomain] = React.useState<string | null>(null);
+  // A served-binding UI is scoped to one domain: initialise the selected domain
+  // to it (create mode) so the role-picker step is skipped entirely — the form
+  // for the bound domain renders directly, with no intermediate page or flash.
+  const [selectedDomain, setSelectedDomain] = React.useState<string | null>(
+    () => (!isEdit && servedBinding ? servedBinding.domain : null),
+  );
   const [myItems, setMyItems] = React.useState<Item[]>([]);
   const [resolvedNetwork, setResolvedNetwork] = React.useState<DotNetworkSchema | null>(null);
   const [existingItem, setExistingItem] = React.useState<Item | null>(null);
@@ -80,8 +86,6 @@ export function ProfileFormPage() {
   React.useEffect(() => {
     setResolvedLocations([]);
   }, [selectedDomain]);
-
-  const servedBinding = getServedBinding();
 
   // Get network from URL query param, fallback to env config
   const configuredNetworkIds = React.useMemo(
@@ -256,13 +260,6 @@ export function ProfileFormPage() {
     if (isEdit || selectedDomain || !lockedDomain) return;
     setSelectedDomain(lockedDomain);
   }, [isEdit, selectedDomain, lockedDomain]);
-
-  // Served-binding UIs are scoped to one domain — skip the role picker entirely
-  // and go straight to that domain's form (create mode only).
-  React.useEffect(() => {
-    if (isEdit || !servedBinding) return;
-    if (selectedDomain !== servedBinding.domain) setSelectedDomain(servedBinding.domain);
-  }, [isEdit, servedBinding?.domain, selectedDomain]);
 
   // Find the profile schema for the selected domain
   const profileSchema = React.useMemo<RJSFSchema | null>(() => {
@@ -665,11 +662,11 @@ export function ProfileFormPage() {
           <div className="relative z-10 px-5 pt-4 sm:px-6">
             <button
               type="button"
-              onClick={() => (selectedDomain && !isEdit && !lockedDomain ? setSelectedDomain(null) : navigate(`/?network=${resolvedNetwork?.id ?? ''}`))}
+              onClick={() => (selectedDomain && !isEdit && !lockedDomain && !servedBinding ? setSelectedDomain(null) : navigate(`/?network=${resolvedNetwork?.id ?? ''}`))}
               className="flex items-center gap-1.5 text-sm text-white/70 hover:text-white transition-colors"
             >
               <ArrowLeft className="h-4 w-4" />
-              {selectedDomain && !isEdit && !lockedDomain ? t('profile.choose_different_role') : t('common.back')}
+              {selectedDomain && !isEdit && !lockedDomain && !servedBinding ? t('profile.choose_different_role') : t('common.back')}
             </button>
           </div>
           <div className="relative z-10 flex items-center gap-4 px-5 pb-6 pt-3 sm:px-6">
