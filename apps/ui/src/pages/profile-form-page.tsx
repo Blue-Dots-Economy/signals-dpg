@@ -19,6 +19,7 @@ import { getConfiguredWalletProviders } from '@/engine/wallet/wallet-registry';
 import type { WalletImportResult } from '@/engine/wallet/types';
 import { useAuth } from '@/contexts/auth-context';
 import { mergeImportedDataIntoSchema } from '@/lib/import-mapping';
+import { getServedBinding } from '@/lib/served-binding';
 
 import {
   createItem,
@@ -80,6 +81,8 @@ export function ProfileFormPage() {
     setResolvedLocations([]);
   }, [selectedDomain]);
 
+  const servedBinding = getServedBinding();
+
   // Get network from URL query param, fallback to env config
   const configuredNetworkIds = React.useMemo(
     () => parseNetworkIds(import.meta.env.VITE_NETWORK_ID),
@@ -109,12 +112,13 @@ export function ProfileFormPage() {
   }, [configuredNetworkIds]);
 
   const targetNetworkId = React.useMemo(() => {
+    if (servedBinding?.network) return servedBinding.network;
     if (availableNetworkIds === null) return null;
     if (networkFromUrl && availableNetworkIds.includes(networkFromUrl)) {
       return networkFromUrl;
     }
     return availableNetworkIds[0] ?? null;
-  }, [availableNetworkIds, networkFromUrl]);
+  }, [servedBinding?.network, availableNetworkIds, networkFromUrl]);
 
   // Fetch and resolve network config from API
   React.useEffect(() => {
@@ -252,6 +256,13 @@ export function ProfileFormPage() {
     if (isEdit || selectedDomain || !lockedDomain) return;
     setSelectedDomain(lockedDomain);
   }, [isEdit, selectedDomain, lockedDomain]);
+
+  // Served-binding UIs are scoped to one domain — skip the role picker entirely
+  // and go straight to that domain's form (create mode only).
+  React.useEffect(() => {
+    if (isEdit || !servedBinding) return;
+    if (selectedDomain !== servedBinding.domain) setSelectedDomain(servedBinding.domain);
+  }, [isEdit, servedBinding?.domain, selectedDomain]);
 
   // Find the profile schema for the selected domain
   const profileSchema = React.useMemo<RJSFSchema | null>(() => {
