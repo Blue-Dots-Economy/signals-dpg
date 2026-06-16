@@ -24,7 +24,11 @@ export function LoginPage() {
   useEffect(() => {
     const wrongPortalDomain = (location.state as { wrongPortalDomain?: string } | null)?.wrongPortalDomain;
     if (wrongPortalDomain) {
-      toast.error(t('auth.wrong_portal', { domain: wrongPortalDomain }));
+      // Stable id so the toast is de-duped if this effect runs more than once
+      // (e.g. React StrictMode double-invokes it in dev) — one visible toast.
+      toast.error(t('auth.wrong_portal', { domain: wrongPortalDomain }), {
+        id: 'wrong-portal-block',
+      });
       // Clear the state so the toast doesn't re-fire on back/refresh.
       window.history.replaceState({}, '');
     }
