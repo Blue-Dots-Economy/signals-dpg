@@ -45,6 +45,7 @@
   "auth.otp_incorrect_desc": "The code you entered doesn't match. Double-check your messages and try again, or request a new code below.",
   "auth.otp_resend_error_title": "Couldn't send a new code",
   "auth.otp_resend_error_desc": "Something went wrong while requesting a new verification code. Please wait a moment and try again.",
+  "auth.wrong_portal": "This account already has a profile in the {{domain}} domain. Please sign in through the {{domain}} portal.",
   "actions.my_actions_title": "My Actions",
   "actions.my_actions_subtitle": "Manage requests you've initiated and the ones you've received.",
   "actions.my_actions_back": "Back",

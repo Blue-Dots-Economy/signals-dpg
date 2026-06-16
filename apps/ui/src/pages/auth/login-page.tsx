@@ -1,5 +1,5 @@
-import { useState } from 'react';
-import { useNavigate, useSearchParams } from 'react-router-dom';
+import { useState, useEffect } from 'react';
+import { useNavigate, useSearchParams, useLocation } from 'react-router-dom';
 import { Loader2, ArrowLeft } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { Input } from '@/components/ui/input';
@@ -18,7 +18,17 @@ type AuthMode = 'phone' | 'email';
 export function LoginPage() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
+  const location = useLocation();
   const { t } = useTranslation();
+
+  useEffect(() => {
+    const wrongPortalDomain = (location.state as { wrongPortalDomain?: string } | null)?.wrongPortalDomain;
+    if (wrongPortalDomain) {
+      toast.error(t('auth.wrong_portal', { domain: wrongPortalDomain }));
+      // Clear the state so the toast doesn't re-fire on back/refresh.
+      window.history.replaceState({}, '');
+    }
+  }, [location.state, t]);
   const [mode, setMode] = useState<AuthMode>('phone');
   const [phoneNumber, setPhoneNumber] = useState('');
   const [email, setEmail] = useState('');
