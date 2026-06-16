@@ -71,15 +71,23 @@ as it already does for `VITE_API_URL` etc.
 `apps/ui/src/lib/served-binding.ts`:
 
 ```ts
-export interface ServedBinding { network: string; domain: string; }
+export interface ServedBinding { network: string; domain: string; }  // one entry
+export interface ServedScope { network: string; domains: string[]; } // the set
 
-/** Parses VITE_SERVED_BINDINGS ("network/domain") from runtime/build config.
- *  Returns null when unset or malformed (→ legacy multi-domain behavior). */
-export function getServedBinding(): ServedBinding | null;
+/** Parse one "network/domain" entry; null if malformed. */
+export function parseServedBinding(raw: string | null | undefined): ServedBinding | null;
+
+/** Parse a comma-separated VITE_SERVED_BINDINGS list into a single-network
+ *  scope. Null when unset / blank / any entry malformed / mixed networks. */
+export function parseServedScope(raw: string | null | undefined): ServedScope | null;
+
+/** The served scope from runtime config (VITE_SERVED_BINDINGS), or null = all. */
+export function getServedScope(): ServedScope | null;
 ```
 
-- Reads `getRuntimeEnv('VITE_SERVED_BINDINGS')`, trims, splits on the first `/`,
-  requires both halves non-empty; otherwise returns `null`.
+- `getServedScope` reads `getRuntimeEnv('VITE_SERVED_BINDINGS')`, splits on commas,
+  parses each entry via `parseServedBinding`, requires all entries to share one
+  network, dedupes domains; returns `null` (→ serve all) when unset/malformed/mixed.
 - Add `VITE_SERVED_BINDINGS?: string` to `ImportMetaEnv` in
   `apps/ui/src/vite-env.d.ts` so `getRuntimeEnv` stays typed.
 - Pure and synchronous; unit-tested in isolation.
