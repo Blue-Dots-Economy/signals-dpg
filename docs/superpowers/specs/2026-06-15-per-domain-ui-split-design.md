@@ -99,10 +99,14 @@ When `getServedBinding()` is non-null (`binding`):
   ): DotNetworkDomain[];
   ```
 
-  `visibleDomains = computeVisibleDomains(network, binding ? binding.domain : null)`.
-  With a viewer domain it returns the distinct `to_domain`s of interactions
-  whose `from_domain === viewerDomain` (guarding `from_network` to the current
-  network); with `null` it returns all `to_domain`s network-wide (unchanged).
+  `viewerDomain = ?as= ?? binding?.domain ?? myItem?.item_domain ?? null`, then
+  `visibleDomains = computeVisibleDomains(network, viewerDomain)`. With a viewer
+  domain it returns the distinct `to_domain`s of interactions whose
+  `from_domain === viewerDomain` (guarding `from_network` to the current
+  network); with `null` (only a signed-out / no-profile visitor) it returns all
+  `to_domain`s network-wide. NOTE: a signed-in user's own profile domain scopes
+  Browse in BOTH the bound portals and the combined UI — a logged-in seeker
+  sees providers, never other seekers, regardless of `VITE_SERVED_BINDING`.
 
 - Connect actions (`getActionsForTarget`) already filter on `currentDomain`, so
   they need no change.

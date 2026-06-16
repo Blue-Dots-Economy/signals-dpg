@@ -388,11 +388,14 @@ export function HomePage() {
     network?.domains[0]?.id ??
     'student_profile';
 
-  // Viewer domain for Browse scoping: ?as= → served binding → null. Null means
-  // legacy network-wide browse (a user's own profile does NOT scope browse, to
-  // preserve today's behavior). When set, Browse shows only that domain's
-  // interaction targets (computeVisibleDomains).
-  const viewerDomain = searchParams.get('as') ?? servedBinding?.domain ?? null;
+  // Viewer domain for Browse scoping: ?as= → served binding → the logged-in
+  // user's own profile domain → null. A signed-in viewer only browses the
+  // domains their domain can initiate toward (e.g. a seeker sees providers, not
+  // other seekers) in BOTH the bound portals and the combined UI. Null (only a
+  // signed-out / no-profile visitor) means network-wide browse — all
+  // to_domains. Scoping is via computeVisibleDomains over the interactions.
+  const viewerDomain =
+    searchParams.get('as') ?? servedBinding?.domain ?? myItem?.item_domain ?? null;
 
   const visibleDomains = React.useMemo(
     () => (network ? computeVisibleDomains(network, viewerDomain) : []),
