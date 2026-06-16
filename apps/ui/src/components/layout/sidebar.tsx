@@ -148,46 +148,51 @@ export function AppSidebar({
           </SidebarGroup>
         )}
         {showNetworkSelector && <SidebarSeparator />}
-        <SidebarGroup>
-          <SidebarGroupLabel>{t('nav.browse_group')}</SidebarGroupLabel>
-          <SidebarGroupContent>
-            <SidebarMenu>
-              {/* "All" only makes sense when there's more than one browseable
-                  domain (i.e. more than one distinct `to_domain`). With a single
-                  domain it's redundant, so hide it and let that domain stand alone. */}
-              {domains.length > 1 && (
-                <SidebarMenuItem>
-                  <SidebarMenuButton
-                    isActive={selectedDomain === null}
-                    onClick={() => onDomainSelect(null)}
-                  >
-                    <LayoutGrid className="h-4 w-4" />
-                    <span>{t('common.all')}</span>
-                  </SidebarMenuButton>
-                </SidebarMenuItem>
-              )}
-              {domains.map((domain) => {
-                const Icon = getDomainIcon(domain.id, selectedNetwork);
-                const label = domain.id
-                  .replace(/_/g, ' ')
-                  .replace(/\b\w/g, (c) => c.toUpperCase());
-                return (
-                  <SidebarMenuItem key={domain.id}>
+        {/* The Browse domain selector only appears when there is MORE THAN ONE
+            browseable domain (i.e. >1 distinct interaction `to_domain`). With a
+            single target domain there is no choice to make — a lone tab (and an
+            "All") is redundant — so the whole selector and its separator are
+            hidden, and that domain's listings render directly in the main view.
+            Driven by the network's interactions; not network-specific. */}
+        {domains.length > 1 && (
+          <>
+            <SidebarGroup>
+              <SidebarGroupLabel>{t('nav.browse_group')}</SidebarGroupLabel>
+              <SidebarGroupContent>
+                <SidebarMenu>
+                  <SidebarMenuItem>
                     <SidebarMenuButton
-                      isActive={selectedDomain === domain.id}
-                      onClick={() => onDomainSelect(domain.id)}
-                      title={domain.description}
+                      isActive={selectedDomain === null}
+                      onClick={() => onDomainSelect(null)}
                     >
-                      <Icon className="h-4 w-4" />
-                      <span>{label}</span>
+                      <LayoutGrid className="h-4 w-4" />
+                      <span>{t('common.all')}</span>
                     </SidebarMenuButton>
                   </SidebarMenuItem>
-                );
-              })}
-            </SidebarMenu>
-          </SidebarGroupContent>
-        </SidebarGroup>
-        <SidebarSeparator />
+                  {domains.map((domain) => {
+                    const Icon = getDomainIcon(domain.id, selectedNetwork);
+                    const label = domain.id
+                      .replace(/_/g, ' ')
+                      .replace(/\b\w/g, (c) => c.toUpperCase());
+                    return (
+                      <SidebarMenuItem key={domain.id}>
+                        <SidebarMenuButton
+                          isActive={selectedDomain === domain.id}
+                          onClick={() => onDomainSelect(domain.id)}
+                          title={domain.description}
+                        >
+                          <Icon className="h-4 w-4" />
+                          <span>{label}</span>
+                        </SidebarMenuButton>
+                      </SidebarMenuItem>
+                    );
+                  })}
+                </SidebarMenu>
+              </SidebarGroupContent>
+            </SidebarGroup>
+            <SidebarSeparator />
+          </>
+        )}
         <SidebarGroup>
           <SidebarGroupLabel>{t('nav.my_profiles_group')}</SidebarGroupLabel>
           <SidebarGroupContent>
