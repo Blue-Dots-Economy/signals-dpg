@@ -10,6 +10,7 @@ interface ImportMetaEnv {
   readonly VITE_DEFAULT_API_URL: string;
   readonly VITE_SHOW_INSTANCE_SELECTOR: string;
   readonly VITE_NETWORK_ID: string;
+  readonly VITE_SERVED_BINDINGS?: string;
   readonly VITE_DEFAULT_NETWORK_THEME?: string;
   readonly VITE_DEFAULT_VIEW_MODE?: 'list' | 'map';
   readonly VITE_ACTION_POLL_INTERVAL_MS?: string;
