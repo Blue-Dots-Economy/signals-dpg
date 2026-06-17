@@ -9,7 +9,7 @@
     ".": "./src/index.ts"
   },
   "scripts": {
-    "test": "echo \"no tests yet\""
+    "test": "vitest run"
   },
   "keywords": [],
   "author": "",
@@ -17,5 +17,8 @@
   "packageManager": "pnpm@11.1.2",
   "dependencies": {
     "schemas": "workspace:*"
+  },
+  "devDependencies": {
+    "vitest": "^4.1.7"
   }
 }

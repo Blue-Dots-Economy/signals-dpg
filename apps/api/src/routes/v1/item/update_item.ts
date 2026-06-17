@@ -10,6 +10,7 @@ import { DrizzleQueryError } from 'drizzle-orm';
 import { DatabaseError } from '@dpg/database';
 import { auth_middleware_if_enabled } from '@api/plugins/auth/auth_middleware';
 import { invalidateItemFetchCache } from '@/utils/item_fetch_cache_invalidate';
+import { publishItemEvent } from '@/utils/publish_item_event';
 import { updateItemInternal, ItemServiceError } from '@/services/item_service';
 import { decryptItemPrivate } from '@/utils/item_decrypt';
 
@@ -58,6 +59,17 @@ export const update_item_handler = async (
       item_state: body.item_state,
       item_locations: body.item_locations,
     });
+
+    await publishItemEvent(
+      {
+        item_network: updated.item_network,
+        item_domain: updated.item_domain,
+        item_type: updated.item_type,
+        item_id: updated.item_id,
+        op: 'upsert',
+      },
+      request.log,
+    );
 
     await invalidateItemFetchCache(updated.item_network, updated.item_domain).catch(
       (err) => request.log.warn({ err }, 'cache invalidation after update failed'),

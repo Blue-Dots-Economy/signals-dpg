@@ -6,6 +6,7 @@ import { db } from '@api/db/postgres/drizzle_config';
 import { items } from '@dpg/database';
 import { auth_middleware_if_enabled } from '@api/plugins/auth/auth_middleware';
 import { invalidateItemFetchCache } from '@/utils/item_fetch_cache_invalidate';
+import { publishItemEvent } from '@/utils/publish_item_event';
 
 type DeleteItemRequest = FastifyRequest<{
   Params: z.infer<typeof UpdateItemParamsSchema>;
@@ -59,6 +60,7 @@ export const delete_item_handler = async (
         item_id: items.item_id,
         item_network: items.item_network,
         item_domain: items.item_domain,
+        item_type: items.item_type,
       });
 
     if (result.length === 0) {
@@ -67,6 +69,20 @@ export const delete_item_handler = async (
         message: 'Item not found or does not belong to the authenticated user',
       });
     }
+
+    // Best-effort: notify the search index this item is gone (op 'delete').
+    // Never throws — a Redis outage must not fail the delete; the
+    // signals-search reconciliation sweep is the backstop.
+    await publishItemEvent(
+      {
+        item_network: result[0].item_network,
+        item_domain: result[0].item_domain,
+        item_type: result[0].item_type,
+        item_id: result[0].item_id,
+        op: 'delete',
+      },
+      request.log,
+    );
 
     // Cache invalidation: the inter-instance read path caches `item-count`
     // and `item-page` for up to `minimum_cache_ttl_seconds` (5 min by

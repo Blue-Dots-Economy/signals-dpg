@@ -12,6 +12,7 @@ import { authInstance } from '@/routes/auth/create_auth';
 import { create_profile_item } from '@/lib/profile_item';
 import { updateItemInternal } from '@/services/item_service';
 import { apiConfig } from '@/config';
+import { publishItemEvent } from '@/utils/publish_item_event';
 import {
   UpsertParticipantRequest,
   UpsertParticipantResponse,
@@ -410,8 +411,9 @@ export const participant_handler = async (
       });
     }
 
+    let updateResult: { row: { item_network: string; item_domain: string; item_type: string; item_id: string } } | undefined;
     try {
-      await updateItemInternal(
+      updateResult = await updateItemInternal(
         db,
         verdict.item_id,
         existing!.id,
@@ -439,6 +441,17 @@ export const participant_handler = async (
       });
     }
 
+    await publishItemEvent(
+      {
+        item_network: updateResult.row.item_network,
+        item_domain: updateResult.row.item_domain,
+        item_type: updateResult.row.item_type,
+        item_id: updateResult.row.item_id,
+        op: 'upsert',
+      },
+      request.log,
+    );
+
     const itemsList = await readItemsForUser(existing!.id);
     return reply.code(200).send({
       user_id: existing!.id,
@@ -465,8 +478,9 @@ export const participant_handler = async (
         message: 'failed to prepare storage for item type',
       });
     }
+    let insertedItemId: string | undefined;
     try {
-      await create_profile_item({
+      const { item_id } = await create_profile_item({
         tx: db,
         user_id: existing!.id,
         network,
@@ -474,6 +488,7 @@ export const participant_handler = async (
         item_type,
         payload: body.item_state ?? {},
       });
+      insertedItemId = item_id;
     } catch (err) {
       const e = err as { statusCode?: number; errorCode?: string };
       const isClientError =
@@ -490,6 +505,12 @@ export const participant_handler = async (
         message: e.errorCode ? (err as Error).message : 'item insert failed',
       });
     }
+
+    await publishItemEvent(
+      { item_network: network, item_domain: domain, item_type, item_id: insertedItemId!, op: 'upsert' },
+      request.log,
+    );
+
     const itemsList = await readItemsForUser(existing!.id);
     return reply.code(200).send({
       user_id: existing!.id,
@@ -531,6 +552,7 @@ export const participant_handler = async (
     now,
   };
 
+  let onboarded_item_id: string | undefined;
   const result = await signUpAndOnboardUser({
     email_for_signup,
     name: body.name,
@@ -543,7 +565,7 @@ export const participant_handler = async (
           .set(buildOnboardingSet(fields))
           .where(eq(user.id, user_id));
 
-        await create_profile_item({
+        const { item_id } = await create_profile_item({
           tx,
           user_id,
           network,
@@ -551,6 +573,7 @@ export const participant_handler = async (
           item_type,
           payload: body.item_state ?? {},
         });
+        onboarded_item_id = item_id;
       });
     },
   });
@@ -560,6 +583,13 @@ export const participant_handler = async (
       error: result.error,
       message: result.message,
     });
+  }
+
+  if (onboarded_item_id) {
+    await publishItemEvent(
+      { item_network: network, item_domain: domain, item_type, item_id: onboarded_item_id, op: 'upsert' },
+      request.log,
+    );
   }
 
   const itemsList = await readItemsForUser(result.user_id);

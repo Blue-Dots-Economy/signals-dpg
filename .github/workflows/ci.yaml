@@ -141,7 +141,15 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y postgresql-client
 
       - name: Apply bundled schema.sql to pg-sql
-        run: psql "$PG_SQL_URL" -v ON_ERROR_STOP=1 -f apps/api/db/postgres/schema.sql
+        run: |
+          # item_search and its pgvector/postgis extensions are owned by the SQL
+          # bundle but are NOT part of the drizzle-managed parity surface (like the
+          # partitioned tables) and need third-party extensions absent from stock
+          # postgres. Strip them before applying; they're excluded from the diff too.
+          grep -vE '^CREATE EXTENSION IF NOT EXISTS (vector|postgis);' apps/api/db/postgres/schema.sql \
+            | awk '/item_search \(Signals search engine/{skip=1} skip&&/WHERE lifecycle_status/{skip=0;next} skip{next} {print}' \
+            > /tmp/schema_parity.sql
+          psql "$PG_SQL_URL" -v ON_ERROR_STOP=1 -f /tmp/schema_parity.sql
 
       - name: Apply Drizzle migrations to pg-drizzle
         env:
@@ -159,11 +167,13 @@ jobs:
             --exclude-table=items \
             --exclude-table=item_actions \
             --exclude-table=action_events \
+            --exclude-table=item_search \
             "$PG_SQL_URL" > /tmp/sql.sql
           pg_dump --schema-only --no-owner --no-privileges \
             --exclude-table=items \
             --exclude-table=item_actions \
             --exclude-table=action_events \
+            --exclude-table=item_search \
             "$PG_DRIZZLE_URL" > /tmp/drizzle.sql
 
           # Strip extension blocks: cube, earthdistance, pgcrypto are
