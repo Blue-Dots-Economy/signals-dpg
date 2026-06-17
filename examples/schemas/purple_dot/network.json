@@ -302,6 +302,7 @@
               "type": "array",
               "title": "Services Offered",
               "description": "What services or support do you provide?",
+              "vectorize": true,
               "minItems": 1,
               "items": {
                 "type": "string",
@@ -341,6 +342,8 @@
               "type": "string",
               "title": "Service Details",
               "description": "Share more about the service, opportunity, or support provided",
+              "vectorize": true,
+              "vector_weight": 2,
               "minLength": 1
             },
             "catalog_url": {
