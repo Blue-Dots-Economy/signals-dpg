@@ -124,26 +124,53 @@ makes the form **controlled** so Component 1 runs on each change:
 - On each render, run `resolveVisibleSchema(baseSchema, formData)` and pass the
   **pruned schema** + **cleared formData** to `<Form>`. Hidden fields don't render,
   don't validate, and aren't submitted.
-- `onSubmit` already receives RJSF's formData (which, with the pruned schema, won't
-  contain hidden fields).
+- **Memoize the pruned schema** (review finding #2). Recomputing
+  `resolveVisibleSchema` into a *new object identity* every keystroke makes RJSF
+  remount fields → text inputs lose focus / the cursor jumps mid-typing. Memoize so
+  the pruned schema is referentially stable while the visible set is unchanged; key
+  the recompute on **control-field values only** (typing a non-control field can't
+  change visibility, so it must not re-prune).
+- **Guarantee hidden data never submits** (review finding #3). `clearedFormData` is
+  the primary mechanism; additionally set `omitExtraData` + `liveOmit` on `<Form>` so
+  RJSF strips any value not in the pruned schema. The form test asserts the submit
+  payload contains no hidden keys — a guarantee, not incidental.
+- `onSubmit` already receives RJSF's formData (which, with the pruned schema + omit,
+  won't contain hidden fields).
 - **Strip `x-show-if`** in `normalizeSchemaForRjsf` (alongside `location`) so ajv
   never sees the custom keyword.
 - **Edit mode:** because evaluation runs against the live formData (seeded from the
   loaded profile), the correct conditional fields appear when editing an existing
-  item.
+  item. If a loaded item's stored control value no longer matches, the orphaned
+  hidden value is silently cleared on load (correct cleanup — see Edge cases).
 
 ### Data flow
 `baseSchema` + `formData(state)` → `resolveVisibleSchema` → `{prunedSchema,
 clearedFormData}` → RJSF `<Form>`; RJSF `onChange` → `setFormData` → re-evaluate.
 
+## Schema-authoring invariant (review finding #1)
+
+**An `x-show-if` field MUST NOT appear in the schema's unconditional top-level
+`required[]`.** This design prunes hidden fields from `required` only in the
+*client* schema. The server lifecycle classifier (#104) computes `required_complete`
+over the flat server `required[]` and is `x-show-if`-unaware — so a conditional
+field listed in `required[]` whose control takes the *other* branch stays empty and
+strands the item in `draft` forever despite a validly completed form. Verified safe
+today (no `x-show-if` field is in blue_dot seeker/provider `required[]`). To keep it
+safe, the `example_network_configs` test fails if any conditional field is also
+unconditionally required.
+
 ## Edge cases
-- **Required + hidden:** hidden fields are removed from `required` (no phantom
-  validation block).
+- **Required + hidden:** hidden fields are removed from `required` in the client
+  pruned schema (no phantom validation block). See the invariant above for the
+  server side.
 - **Chains:** handled by the fixpoint loop (clear-then-re-evaluate).
 - **Array control fields:** intersection match (handles multi-select controls).
-- **Unknown control field** (typo in schema) → treated as no-match → field hidden;
-  acceptable (authoring error surfaces as a missing field). Could optionally
-  `console.warn` in dev.
+- **Unknown control field** (typo in schema) → treated as no-match → field hidden.
+  Emit a dev-only `console.warn` (review finding #4) so an authoring typo doesn't
+  silently hide a field with no signal.
+- **Clear-on-hide data loss (UX, by design):** toggling a control by accident clears
+  the dependent's entered value with no undo. Accepted per Decision 1; worth noting
+  on long forms.
 - **Nested objects/arrays:** v1 scopes evaluation to **top-level** properties (all
   current `x-show-if` usage is top-level). Nested support is out of scope unless a
   schema needs it.
@@ -155,7 +182,9 @@ clearedFormData}` → RJSF `<Form>`; RJSF `onChange` → `setFormData` → re-ev
   cascade clears grandchildren, schema without `x-show-if` unchanged).
 - **Form test:** rendering a schema with `x-show-if`, changing a control field
   shows/hides the dependent and clears its value; a hidden required field does not
-  block submit.
+  block submit; the submit payload contains **no hidden keys** (finding #3).
+- **Schema-config guard (`example_network_configs`):** fails if any `x-show-if`
+  field also appears in a top-level `required[]` (finding #1 invariant).
 
 ## Out of scope
 - Backend / schema changes (the keyword already exists in `network.json`).
