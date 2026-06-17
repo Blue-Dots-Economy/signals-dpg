@@ -83,7 +83,7 @@ rendered HTML; notification-service owns templates + per-dot copy and renders.
         │
         ▼
  buildNotifications(event)
-   • find local owner → email
+   • find local owner → email (resolveOwnerEmail: created_by → better-auth user)
    • pick template_id + identifiers
      (interaction, direction, kind)
    • build dynamic vars
@@ -305,14 +305,23 @@ Each instance sends only for the owner(s) it hosts locally.
 - **`in_*` alerts:** always sent per recipient (distinct people). Not collapsed.
 - **`out_*` confirmations to the initiator:** when one bulk produces > 1 action, suppress
   per-action `out_req` and send one summary (`bulk_out_req`, e.g. "20 sent"). Bulk of 1
-  keeps the normal single `out_req`. Uses `bulk_id` correlation on the event.
+  keeps the normal single `out_req`. **Correlated at the route level** — `perform_action.ts`
+  already holds the full `z.array` request in scope, so the dispatcher decides collapse from
+  `array.length > 1` there. No `bulk_id` column / migration (there is none on `action_events`).
 
 ---
 
 ## 8. Triggers (where dispatch fires)
 
-- **Action:** after `insertActionEvent` in the action paths, gated on a non-null `created`,
-  fire-and-forget — matching `mirrorActionEventToSourceInstance`.
+- **Action (local owner):** after `insertActionEvent` in the action paths
+  (`action/perform_action.ts`, `network/action/perform_action.ts`, `update_action_status.ts`),
+  gated on a non-null `created`, fire-and-forget — matching `mirrorActionEventToSourceInstance`.
+- **Action (remote owner = the other side's confirmation):** **also** after `insertActionEvent`
+  in `event/store_event.ts` (`store_event.ts:109`). This is the seam where a mirrored event
+  lands on the **source** instance — the only place it can send `out_req` / `in_status` for
+  the owner it hosts. Without this trigger, every cross-side confirmation silently never fires.
+  Same non-null `created` gate + fire-and-forget. `network_id` resolves from this instance's
+  own env, so the confirmation carries the source instance's base URL.
 - **Item lifecycle:** after profile/offer create/update (`item_success`).
 - **Item failure:** on the failure branch of the item update route (`item_failed`) — no
   event stored, so this is a separate trigger, not the `insertActionEvent` seam.
@@ -336,6 +345,10 @@ Per-dot copy/config lives in **notification-service**, not here.
 
 - Dispatch fire-and-forget; never blocks/fails the route.
 - `nc.notify` failures logged; notification-service queue handles SMTP retry + dead-letter.
+- **Owner→email resolution:** `resolveOwnerEmail(item.created_by)` — a new Signals helper that
+  reads the better-auth user table (`email`/`phoneNumber`) by user-id. It does NOT exist today;
+  `items.created_by` is only a user-id. Email is **not** carried on the wire and notification-service
+  stays contact-blind (§1.1). Only the local instance resolves its own owners.
 - Missing recipient email (phone-only, `user.email = NULL`) → **skip + log + counter**
   ("notification skipped: owner has no email") so the number going dark is visible.
 - Missing template vars → notification-service render validation rejects; logged.
@@ -348,7 +361,11 @@ Per-dot copy/config lives in **notification-service**, not here.
 
 - Unit (Signals): `buildNotifications` — 4 action kinds × direction × interaction selection;
   `item_success`/`item_failed`; local-vs-remote owner skip; missing-email skip;
-  `statusLabel` derivation; `network_id` env override; bulk collapse.
+  `statusLabel` derivation; `network_id` env override; route-level bulk collapse
+  (array.length > 1 → `bulk_out_req`; length 1 → single `out_req`); `resolveOwnerEmail`
+  (created_by hit, phone-only NULL → skip+counter, unknown user-id).
+- Trigger sites (Signals): `store_event.ts` dispatch fires the cross-side confirmation
+  (`out_req` / `in_status`) on a non-null `created`, and is suppressed on duplicate (`null`).
 - Unit (notification-service): resolution `(network_id,template_id,channel,locale)` +
   `extends` merge; free-text body → HTML render in layout; `{{cta}}` per channel;
   missing-var rejection; html pass-through fallback.
@@ -375,7 +392,10 @@ The html pass-through fallback keeps existing OTP/welcome working through the tr
 ## 13. Out of scope / future
 
 - Kafka event bus + per-instance consumer (`KafkaDispatcher`) — Phase 2; `action.events`
-  also feeds a future metrics consumer.
+  also feeds a future metrics consumer. **Dedupe caveat:** notification-service dedupe is a
+  Redis `SET NX EX 60s` window (`src/lib/dedupe.ts`), not durable idempotency. Phase 1
+  fire-and-forget retries fall inside 60s, so this is safe now. Kafka reprocessing >60s later
+  **will double-send** — before Phase 2, lengthen the TTL for action mails or add durable dedupe.
 - WhatsApp + voice channels — model is already channel-agnostic (free-text body + `{{cta}}`
   + per-channel override + `(…,channel,…)` key); WhatsApp additionally needs a
   Meta-approved-template mapping.
