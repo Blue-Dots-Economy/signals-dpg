@@ -71,6 +71,12 @@ function focusErrorField(container: HTMLElement | null, error: RjsfError): void 
 
 interface SchemaFormProps {
   schema: RJSFSchema;
+  /**
+   * Initial form values. MUST be referentially stable (e.g. React state or a
+   * memoized object) — the controlled form re-seeds its internal state whenever
+   * this prop's identity changes, so an inline object literal would discard the
+   * user's edits on every render.
+   */
   formData?: Record<string, unknown>;
   onSubmit: (data: Record<string, unknown>) => void;
   onError?: (errors: unknown[]) => void;
