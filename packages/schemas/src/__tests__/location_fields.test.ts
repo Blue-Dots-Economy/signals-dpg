@@ -5,6 +5,7 @@ import {
   isLocationFieldPrivate,
   getAutocompleteLocationFields,
   assertSinglePrimaryLocation,
+  primaryAddressChanged,
 } from '../location_fields';
 
 const primaryString = {
@@ -91,6 +92,56 @@ describe('isLocationFieldPrivate', () => {
   it('reads the primary field private flag', () => {
     expect(isLocationFieldPrivate(withSecondary)).toBe(true);
     expect(isLocationFieldPrivate(primaryString)).toBe(false);
+  });
+});
+
+describe('primaryAddressChanged', () => {
+  const noPrimary = { properties: { name: { type: 'string' } } };
+
+  it('returns false when the schema has no primary location field', () => {
+    expect(primaryAddressChanged(noPrimary, { name: 'New' }, { name: 'Old' })).toBe(false);
+  });
+
+  it('returns false when the primary field is absent from the partial update', () => {
+    expect(
+      primaryAddressChanged(primaryString, { name: 'X' }, { address: 'Mumbai' })
+    ).toBe(false);
+  });
+
+  it('returns false when the primary field is present but unchanged', () => {
+    expect(
+      primaryAddressChanged(primaryString, { address: 'Mumbai' }, { address: 'Mumbai' })
+    ).toBe(false);
+  });
+
+  it('returns true when the primary field is present and its value differs', () => {
+    expect(
+      primaryAddressChanged(primaryString, { address: 'Pune' }, { address: 'Mumbai' })
+    ).toBe(true);
+  });
+
+  it('treats a newly-set value (absent prior) as changed', () => {
+    expect(primaryAddressChanged(primaryString, { address: 'Pune' }, {})).toBe(true);
+  });
+
+  it('returns true when a multiple-cardinality array value changes', () => {
+    expect(
+      primaryAddressChanged(
+        primaryArray,
+        { service_cities: ['Pune', 'Mumbai'] },
+        { service_cities: ['Pune'] }
+      )
+    ).toBe(true);
+  });
+
+  it('returns false when a multiple-cardinality array value is identical', () => {
+    expect(
+      primaryAddressChanged(
+        primaryArray,
+        { service_cities: ['Pune', 'Mumbai'] },
+        { service_cities: ['Pune', 'Mumbai'] }
+      )
+    ).toBe(false);
   });
 });
 

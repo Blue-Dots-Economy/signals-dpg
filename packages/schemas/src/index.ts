@@ -32,6 +32,7 @@ export {
   isLocationFieldPrivate,
   getAutocompleteLocationFields,
   assertSinglePrimaryLocation,
+  primaryAddressChanged,
   type LocationFields,
   type LocationField,
   type LocationCardinality,

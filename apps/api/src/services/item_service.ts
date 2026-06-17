@@ -7,6 +7,7 @@ import {
   maskPrivateState,
   mergeMasksIntoPublic,
   mergeItemStateWithPrivate,
+  primaryAddressChanged,
   splitItemStateByPrivacy,
   validateAgainstJsonSchema,
 } from '@dpg/schemas';
@@ -17,6 +18,7 @@ import { items } from '@dpg/database';
 import { db } from '@api/db/postgres/drizzle_config';
 import { isServedDomainBinding } from '@/utils/served_domain_guard';
 import { getNetworkConfigById } from '@/network_configs';
+import { geocodeLocationsFromState } from '@/services/geocoding/resolve_locations_for_create';
 import {
   buildNetworkItemSchemaUrl,
   getOrFetchSchemaByUrl,
@@ -328,14 +330,12 @@ export async function updateItemInternal(
       itemType: existingItem.item_type,
     });
 
-    // A supplied coordinate is stored as-is (rounded as a PII floor for a
-    // private field). The backend does not geocode on update.
-    if (body.item_locations !== undefined) {
-      updateValues.item_locations = locationsForStorage(
-        body.item_locations,
-        itemSchema as Record<string, unknown>
-      );
-    }
+    // Full prior + merged state, hoisted so location resolution (below, after
+    // the merge) can detect an address change. Populated only when item_state
+    // is part of this update.
+    let priorFullState: Record<string, unknown> = {};
+    let mergedFullState: Record<string, unknown> = {};
+    let addressChanged = false;
 
     if (body.item_state) {
       // Decrypt existing private blob (empty string => no prior private fields)
@@ -346,12 +346,18 @@ export async function updateItemInternal(
           : (JSON.parse(
               decryptPiiBlob(existingItem.item_private_state, getPiiKey())
             ) as Record<string, unknown>);
-      const priorFullState = mergeItemStateWithPrivate(
+      priorFullState = mergeItemStateWithPrivate(
         existingItem.item_state as Record<string, unknown>,
         priorPrivate
       );
       // Layer the caller's partial update on top.
-      const mergedFullState: Record<string, unknown> = { ...priorFullState, ...body.item_state };
+      mergedFullState = { ...priorFullState, ...body.item_state };
+
+      addressChanged = primaryAddressChanged(
+        itemSchema as Record<string, unknown>,
+        body.item_state,
+        priorFullState,
+      );
 
       const requiredKeys = Array.isArray((itemSchema as { required?: unknown }).required)
         ? ((itemSchema as { required?: string[] }).required as string[])
@@ -396,6 +402,36 @@ export async function updateItemInternal(
         current_status: existingItem.lifecycle_status as 'draft' | 'live' | 'paused',
       });
       updateValues.lifecycle_status = classification.lifecycle_status;
+    }
+
+    // Location resolution precedence (runs after the state merge):
+    //  1. Explicit non-empty client coords win (e.g. user picked a map
+    //     suggestion). An empty `[]` is NOT explicit — it means "no coords".
+    //  2. Otherwise, if the primary address field was edited (present in the
+    //     partial update and changed vs prior), re-geocode from the merged
+    //     state; only overwrite when geocoding produced something, so a
+    //     geocode failure preserves the existing coords rather than wiping them.
+    //  3. Otherwise leave item_locations unchanged.
+    const providedCoords =
+      Array.isArray(body.item_locations) && body.item_locations.length > 0
+        ? body.item_locations
+        : null;
+    if (providedCoords) {
+      updateValues.item_locations = locationsForStorage(
+        providedCoords,
+        itemSchema as Record<string, unknown>
+      );
+    } else if (addressChanged) {
+      const geocoded = await geocodeLocationsFromState(
+        itemSchema as Record<string, unknown>,
+        mergedFullState
+      );
+      if (geocoded.length > 0) {
+        updateValues.item_locations = locationsForStorage(
+          geocoded,
+          itemSchema as Record<string, unknown>
+        );
+      }
     }
   }
 
