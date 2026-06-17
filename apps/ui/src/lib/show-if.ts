@@ -104,7 +104,7 @@ export function resolveVisibleSchema(
   for (const name of propNames) {
     if (!hidden.has(name)) prunedProps[name] = allProps[name];
   }
-  const prunedSchema: RJSFSchema = { ...schema, properties: prunedProps };
+  const prunedSchema: RJSFSchema = { ...schema, properties: prunedProps as RJSFSchema['properties'] };
   if (Array.isArray(schema.required)) {
     prunedSchema.required = (schema.required as string[]).filter((r) => !hidden.has(r));
   }
