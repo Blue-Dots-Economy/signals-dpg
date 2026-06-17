@@ -91,8 +91,9 @@ rendered HTML; notification-service owns templates + per-dot copy and renders.
    • network_id = ENV ?? item_network
         │
         ▼   POST /notify  { network_id, template_id, …ids…, to, variables, dedupe_key }
-        └───────────────────────────────────────────►  resolve template   (shape, shared)
-                                                        resolve dot config  (words, per-dot)
+        └───────────────────────────────────────────►  load config[network_id]  (one self-contained file)
+                                                        pick .templates[template_id] (shape + copy)
+                                                        + .interactions[..] (words) + .layout (html)
                                                         merge vars + words
                                                         render for channel  (email layout / WA / voice)
                                                         queue → deliver
@@ -119,8 +120,8 @@ template and per-dot copy itself.
 
 ```jsonc
 {
-  "network_id":  "blue_dot",          // NEW — selects per-dot config (ENV override ?? item_network)
-  "template_id": "in_req",            // catalog template (shape)
+  "network_id":  "blue_dot",          // NEW — selects the network config file (ENV override ?? item_network)
+  "template_id": "in_req",            // key into network file's .templates
   "interaction": "apply",             // NEW — picks copy in dot config
   "direction":   "sp",               // NEW — sp/ps/pp
   "kind":        "in_req",            // NEW — which of the 4 lifecycle messages
@@ -136,67 +137,71 @@ template and per-dot copy itself.
 }
 ```
 
-- **Backward compatible:** if `variables.html` is present and no catalog match, fall back
-  to today's pass-through (existing OTP/welcome keep working through the transition).
-- `dedupe_id = body.dedupe_key ?? ${channel}:${to}:${template_id}` — per-email key for
-  action mails (unique per real email, identical per retry); coarse default for OTP/welcome.
+- **Backward compatible:** if `variables.html` is present and no template match in the
+  network file, fall back to today's pass-through (existing OTP/welcome keep working).
+- `dedupe_id = body.dedupe_key ?? ${channel}:${to}:${template_id}` — per-email key, **unique
+  per real email, identical per retry**. The key's uniqueness is what makes the short 60s TTL
+  safe — not retry timing. Per message family:
+  - **action mails:** `action_id:update_count:kind`. A reject-then-reapply within 60s is a new
+    `action_id`, so it is correctly *not* suppressed.
+  - **item lifecycle:** `item_id:version:kind` (no `action_id` exists for `item_success`/`item_failed`).
+  - **OTP:** must **opt out** of fine dedupe — use a per-send unique key (include the OTP nonce)
+    or disable dedupe. The coarse `channel:to:template_id` default would drop a legitimate
+    second OTP to the same address inside 60s. Welcome can keep the coarse default (one-shot).
 - `NotifyRequest` (`packages/notification`) and the `/notify` Zod schema add the new
   optional fields together (shared contract).
 - `link` is **instance-built** (each deployment prepends its own `FRONTEND_BASE_URL`).
 
 ---
 
-## 5. Templates & per-dot config
+## 5. Per-network config (self-contained, one file per network)
 
-Two pieces in notification-service, kept separate on purpose:
+**One JSON file per network**, fully self-contained: it holds that network's templates,
+its HTML layout, its words, and its routes. Nothing is shared across networks. A change to
+one network's template or HTML **cannot affect any other network** — that isolation is the
+whole point. The notification-service code stays generic: it loads `config[network_id]` and
+renders entirely from that one file.
 
-| piece | scope | who edits | when touched |
-|---|---|---|---|
-| **template** (shape) | **shared by ALL dots** | engineer | message-shape change (rare) |
-| **layout** (HTML chrome) | shared, per channel | engineer | styling change |
-| **per-dot config** (words) | **one file per dot** | content/non-tech | **every new dot** |
-| template **override** | per-dot, optional | engineer | only if a dot needs a different body |
-
-### 5.1 Template = free text with variables (channel-agnostic)
-
-A template is **plain text + `{variables}` + a link token `{{cta}}`** — no HTML, no
-dot-specific words. Because it's free text with variables, the **same template serves any
-channel**: rendered to HTML for email, to text for WhatsApp, to a spoken script for voice.
-
-```jsonc
-// catalog/in_req  (shared by every dot)
-{
-  "template_id": "in_req",
-  "subject": "{actorLabel} {actionPhrase}",
-  "body":    "Hi {userName}!\n\n{actorLabel} {actionPhrase}.\n\n{{cta}}",
-  "cta":     { "label": "View details", "route": "received_request" }
-}
+```
+config/
+├── blue_dot.json      ← templates + layout(html) + words + routes  (complete)
+├── purple_dot.json    ← its own full copy of all of the above
+├── yellow_dot.json    ← its own full copy
+└── blue_dot_ka.json   ← its own full copy (region variant; see 5.5)
 ```
 
-- `{userName}`, `{actorLabel}`, … = placeholders filled at render time.
-- `{{cta}}` = the link, **abstracted** — it becomes an HTML button (email), a URL
-  (WhatsApp), or "open the app" (voice). **Never** hardcode `<a href>` in the body — this
-  is what lets one template serve all channels.
-- The ~10 templates: `in_req`, `out_req`, `in_status`, `out_status`, `item_success`,
-  `item_failed`, `otp`, `reg_confirmation`, `data_export_received`, `data_export_ready`.
-- A **per-channel override** is allowed when a transform isn't enough (voice wording);
-  otherwise all channels render from this one free-text body.
+| piece (all inside the network file) | who edits | when touched |
+|---|---|---|
+| **templates** (subject + body + cta, all ~10) | engineer / content | message-shape or copy change |
+| **layout** (HTML chrome, per channel) | engineer | styling change for that network |
+| **words** (interaction × direction phrasing) | content/non-tech | wording change |
+| **routes** (where CTAs point) | engineer | route change |
 
-The **layout** wraps the rendered body once (header, styled button, footer, responsive),
-so templates stay plain and styling lives in one place.
+**Tradeoff (accepted):** templates and HTML are **duplicated** across network files. The
+same `in_req` body lives in blue_dot.json and purple_dot.json. Editing shared copy means
+editing every file. We take that cost in exchange for **blast-radius isolation** — a network
+can diverge its templates/HTML freely with zero risk to the others, and notification-service
+needs no cross-file resolver / inheritance.
 
-### 5.2 Per-dot config = the words + routes (one file per network)
-
-This is the only file added for a new dot. Plain JSON; the strings are the editable
-surface. It supplies the words the shared templates inject.
+### 5.1 What one network file looks like
 
 ```jsonc
-// notification-service: config/blue_dot.json
+// notification-service: config/blue_dot.json   (complete, self-contained)
 {
   "network_id": "blue_dot",
-  "dotNetwork": "Blue Dot",                         // {dotNetwork} in every template
+  "dotNetwork": "Blue Dot",                         // {dotNetwork} usable in any template/layout
 
-  // ---- where links point (path only; instance prepends FRONTEND_BASE_URL) ----
+  // ---- HTML layout (per network — each dot styles its own email chrome) ----
+  // {{body}} = rendered template body injected here; {{ctaUrl}}/{{ctaLabel}} = the CTA button.
+  "layout": {
+    "email": {
+      "html": "<html><body><header>{dotNetwork}</header><main>{{body}}</main><footer>© {dotNetwork}</footer></body></html>",
+      "button": "<a href=\"{{ctaUrl}}\" class=\"btn\">{{ctaLabel}}</a>"
+    }
+    // future: "whatsapp": {...}, "voice": {...}  (same network file)
+  },
+
+  // ---- where CTA links point (path only; instance prepends FRONTEND_BASE_URL) ----
   "notification_routes": {
     "received_request": "/requests/received/{id}",  // in_req / out_status CTA
     "sent_request":     "/requests/sent/{id}",       // out_req / in_status CTA
@@ -205,24 +210,31 @@ surface. It supplies the words the shared templates inject.
     "offer":            "/offers/{id}"               // provider item_success CTA
   },
 
-  // ---- per interaction × direction: words injected into the shared templates ----
+  // ---- templates (full copy, lives in THIS network file) ----
+  // body = plain text + {variables} + {{cta}} token; rendered into layout.email at send time.
+  "templates": {
+    "in_req": {
+      "subject": "{actorLabel} {actionPhrase}",
+      "body":    "Hi {userName}!\n\n{actorLabel} {actionPhrase}.\n\n{{cta}}",
+      "cta":     { "label": "View details", "route": "received_request" }
+    },
+    "out_req":   { "subject": "…", "body": "Your {objectLabel} has been sent.\n\n{{cta}}", "cta": { "label": "View", "route": "sent_request" } },
+    "in_status": { "subject": "…", "body": "…", "cta": { "label": "View", "route": "sent_request" } },
+    "out_status":{ "subject": "…", "body": "…", "cta": { "label": "View", "route": "received_request" } },
+    "item_success": { "subject": "…", "body": "…", "cta": { "label": "View", "route": "profile" } },
+    "item_failed":  { "subject": "…", "body": "…", "cta": { "label": "Retry", "route": "profile" } },
+    "otp":          { "subject": "…", "body": "…", "cta": { "label": "Login", "route": "login" } },
+    "reg_confirmation": { "subject": "…", "body": "…", "cta": { "label": "Login", "route": "login" } },
+    "data_export_received": { "subject": "…", "body": "…", "cta": null },
+    "data_export_ready":    { "subject": "…", "body": "…", "cta": { "label": "Download", "route": "profile" } }
+  },
+
+  // ---- words injected into templates, per interaction × direction ----
   // key = "{interaction}.{direction}"  (sp=seeker→provider, ps=provider→seeker, pp=provider→provider)
   "interactions": {
-    "apply.sp": {
-      "actorLabel":   "A seeker",                         // in_req: who acted (told to provider)
-      "actionPhrase": "has applied for your opportunity", // in_req verb
-      "objectLabel":  "application"                       // out_req: "Your {objectLabel} has been sent"
-    },
-    "apply.ps": {
-      "actorLabel":   "A service provider",
-      "actionPhrase": "has shown interest in your profile",
-      "objectLabel":  "request"
-    },
-    "connect.pp": {
-      "actorLabel":   "A service provider",
-      "actionPhrase": "wants to connect with you",
-      "objectLabel":  "request"
-    }
+    "apply.sp":   { "actorLabel": "A seeker",           "actionPhrase": "has applied for your opportunity", "objectLabel": "application" },
+    "apply.ps":   { "actorLabel": "A service provider", "actionPhrase": "has shown interest in your profile", "objectLabel": "request" },
+    "connect.pp": { "actorLabel": "A service provider", "actionPhrase": "wants to connect with you",          "objectLabel": "request" }
   },
 
   // ---- per domain: noun for profile/offer lifecycle templates ----
@@ -233,20 +245,13 @@ surface. It supplies the words the shared templates inject.
 }
 ```
 
-### 5.3 Resolution & per-dot / per-region variation
-
-- Resolution key: **`(network_id, template_id, channel, locale)`**.
-- **Per-dot / per-region = composite `network_id`** (`blue_dot`, `blue_dot_ka`,
-  `purple_dot_mh`) — not a separate field. The region suffix comes from the sending
-  **instance's env** (`NOTIFICATION_NETWORK_ID`), since `item_network` is the same for
-  KA/MH (one network, two instances).
-- **`extends` inheritance** — a region/variant inherits a base and overrides only diffs:
-  ```jsonc
-  // config/blue_dot_ka.json
-  { "extends": "blue_dot", "dotNetwork": "Blue Dot KA" }
-  ```
-- `statusLabel` (for `*_status`) is **derived** in Signals from `metric_categories` +
-  `dashboard_buckets` and sent as a variable — not stored in the dot config.
+- `{userName}`, `{actorLabel}`, … = placeholders filled at render time.
+- `{{cta}}` = the link token, **abstracted** — at render it becomes the `layout.email.button`
+  (email), a raw URL (WhatsApp), or "open the app" (voice). Keep `{{cta}}` in the `body`
+  (don't hardcode `<a href>` there) so the same body can serve other channels later; the
+  channel-specific HTML lives in `layout`, which is also per-network.
+- The ~10 templates: `in_req`, `out_req`, `in_status`, `out_status`, `item_success`,
+  `item_failed`, `otp`, `reg_confirmation`, `data_export_received`, `data_export_ready`.
 
 ### 5.4 How a single email is produced
 
@@ -255,22 +260,24 @@ surface. It supplies the words the shared templates inject.
                        direction:"sp", kind:"in_req", template_id:"in_req",
                        to:"prov@x.com", variables:{ userName, serviceName, link } }
 2. POST /notify     → notification-service
-3. template         → catalog["in_req"]              (shape, shared)
-4. config           → config["blue_dot"]["apply.sp"] (words) + dotNetwork
-5. merge            → fill {userName}{actorLabel}{actionPhrase}{dotNetwork}{{cta}}
-6. render           → email: body→HTML in shared layout; {{cta}}→button
-7. send             → queued + delivered
+3. load file        → config["blue_dot"]                       (the one self-contained file)
+4. template         → config["blue_dot"].templates["in_req"]   (shape + copy)
+5. words            → config["blue_dot"].interactions["apply.sp"] + dotNetwork
+6. merge            → fill {userName}{actorLabel}{actionPhrase}{dotNetwork} into subject+body
+7. render           → body→HTML, {{cta}}→layout.email.button, wrap in layout.email.html
+8. send             → queued + delivered
 ```
 
-**Signals = live data · dot config = words · template = shape · layout = styling.**
+**Signals = live data · network file = everything else (templates · html · words · routes).**
 
-### 5.5 Adding a new dot
+### 5.5 Adding a new network
 
-- **New network** (`yellow_dot`): add **one** `config/yellow_dot.json` (dotNetwork, routes,
-  interaction words, domain itemLabels). Templates unchanged. Signals unchanged
-  (`network_id` flows from data/env).
-- **Region variant** (`blue_dot_ka`): a 2-line `extends` block + set
-  `NOTIFICATION_NETWORK_ID=blue_dot_ka` on that instance.
+- **New network** (`yellow_dot`): add **one** `config/yellow_dot.json` — copy an existing
+  network file and edit templates/layout/words/routes. notification-service unchanged,
+  Signals unchanged (`network_id` flows from data/env). Other networks untouched.
+- **Region variant** (`blue_dot_ka`): also its **own full file** (no inheritance — isolation
+  by design), plus set `NOTIFICATION_NETWORK_ID=blue_dot_ka` on that instance. It duplicates
+  blue_dot's content; that's the accepted cost for letting KA diverge safely.
 
 ---
 
@@ -280,7 +287,7 @@ surface. It supplies the words the shared templates inject.
 | # | Template | Action |
 |---|---|---|
 | A1 | Registration OTP | Update wording in Keycloak `email-otp-code.ftl` + `messages_en.properties`. Stays in Keycloak. |
-| A2 | Data export — received / ready | **New:** via notification-service catalog. Aggregator integrates the notification-service client. |
+| A2 | Data export — received / ready | **New:** via the aggregator's network config file in notification-service. Aggregator integrates the notification-service client. |
 
 ### Signalstack — template set
 - **Action lifecycle:** `in_req`, `out_req`, `in_status`, `out_status` (connect/apply,
@@ -301,31 +308,66 @@ Each instance sends only for the owner(s) it hosts locally.
 
 ### 7.1 Bulk actions — confirmation collapse
 
-`action/perform_action.ts` is bulk; one request → N actions.
+**Both** `action/perform_action.ts:29` and `update_action_status.ts:28` are bulk
+(`z.array(z.unknown())`); one request → N actions/responses.
 - **`in_*` alerts:** always sent per recipient (distinct people). Not collapsed.
-- **`out_*` confirmations to the initiator:** when one bulk produces > 1 action, suppress
-  per-action `out_req` and send one summary (`bulk_out_req`, e.g. "20 sent"). Bulk of 1
-  keeps the normal single `out_req`. **Correlated at the route level** — `perform_action.ts`
-  already holds the full `z.array` request in scope, so the dispatcher decides collapse from
+- **`out_*` confirmations to the actor:** when one bulk produces > 1 action, suppress the
+  per-action confirmation and send one summary. Applies to **both** paths:
+  - perform → `bulk_out_req` (e.g. "20 sent") instead of N × `out_req`.
+  - update-status → `bulk_out_status` (e.g. "20 responses recorded") instead of N × `out_status`.
+  Bulk of 1 keeps the normal single confirmation. **Correlated at the route level** — each
+  route already holds the full `z.array` in scope, so the dispatcher decides collapse from
   `array.length > 1` there. No `bulk_id` column / migration (there is none on `action_events`).
 
 ---
 
 ## 8. Triggers (where dispatch fires)
 
-- **Action (local owner):** after `insertActionEvent` in the action paths
-  (`action/perform_action.ts`, `network/action/perform_action.ts`, `update_action_status.ts`),
-  gated on a non-null `created`, fire-and-forget — matching `mirrorActionEventToSourceInstance`.
-- **Action (remote owner = the other side's confirmation):** **also** after `insertActionEvent`
-  in `event/store_event.ts` (`store_event.ts:109`). This is the seam where a mirrored event
-  lands on the **source** instance — the only place it can send `out_req` / `in_status` for
-  the owner it hosts. Without this trigger, every cross-side confirmation silently never fires.
-  Same non-null `created` gate + fire-and-forget. `network_id` resolves from this instance's
-  own env, so the confirmation carries the source instance's base URL.
+**The rule:** at each seam, after `insertActionEvent` returns a non-null `created`, dispatch
+for **every side of the event whose `item_instance_url == self`** — the `in_*` alert for a
+locally-hosted target owner, the `out_*` confirmation for a locally-hosted source owner, or
+**both** when both are local. Locality is computed exactly as the mirror computes it
+(`normalizeInstanceUrl(side.item_instance_url) === normalizeInstanceUrl(getCurrentApiBaseUrl())`).
+
+This must hold at **two seams**, because the mirror has a self-skip:
+
+```
+                         single-instance (source & target both local)
+                         ─────────────────────────────────────────────
+ action route ──insertActionEvent→ created ──► dispatch BOTH (in_req + out_req)
+                         │
+                         └─ mirror? source_item.item_instance_url == self ⇒ SKIP
+                                    (action_event_runtime.ts:287-292)
+                            store_event.ts NEVER runs — but that's fine, both already sent
+
+                         multi-instance (KA seeker → MH provider)
+                         ─────────────────────────────────────────────
+ [MH] action route ─insertActionEvent→ created ─► dispatch target-local only (in_req)
+                         │ source is remote ⇒ mirror fires
+                         ▼  POST /event/store
+ [KA] store_event.ts ─insertActionEvent→ created ─► dispatch source-local only (out_req)
+```
+
+- **🔴 Single-instance is the common case for this branch family** (host-routed,
+  single-instance, multi-domain). If dispatch only fired in `store_event.ts`, every
+  `out_req` / `in_status` confirmation would be silently dropped — the mirror self-skip
+  (`action_event_runtime.ts:287-292`) means `store_event.ts` is never reached when source
+  is local. The fix is the per-side locality check **in the action route**, not a second
+  trigger only on the mirror path.
+- **Dedupe interaction (do NOT re-insert):** in single-instance you send both emails off the
+  **one** `created` event. Do not call `insertActionEvent` again to "trigger" the source side —
+  the second call hits `onConflictDoNothing`, returns `null`, and the gate would suppress it.
+  One insert → fan out to all local owners.
+- **Action seams:** `action/perform_action.ts`, `network/action/perform_action.ts`,
+  `update_action_status.ts` (action route) **and** `event/store_event.ts:109` (mirror receiver).
+  `network_id` always resolves from the **hosting** instance's env, so each email carries its
+  own base URL.
 - **Item lifecycle:** after profile/offer create/update (`item_success`).
 - **Item failure:** on the failure branch of the item update route (`item_failed`) — no
   event stored, so this is a separate trigger, not the `insertActionEvent` seam.
-- **Auth:** OTP request path, `afterUserCreate` (replaces inline welcome).
+- **Auth:** OTP request path, `afterUserCreate` (replaces inline welcome). Scope: only the
+  **email** OTP + welcome flip to the network-file template; SMS already uses
+  `template_id:'login_otp'` + `variables.message` (no html) — leave that path untouched.
 
 ---
 
@@ -333,8 +375,12 @@ Each instance sends only for the owner(s) it hosts locally.
 
 `packages/config/src/secrets.ts` **and** `turbo.json` globalPassThroughEnv:
 - `FRONTEND_BASE_URL` — base for `link`.
-- `NOTIFICATION_NETWORK_ID` — optional per-instance override of the notify network id
-  (e.g. `blue_dot_ka`); defaults to `item_network`.
+- `NOTIFICATION_NETWORK_ID` — the notify network id. **Single resolution rule (canonical):**
+  `network_id = NOTIFICATION_NETWORK_ID ?? item_network`. (§3's `ENV ?? item_network` shorthand
+  means the same thing.) If the resolved id has **no config file** in notification-service, the
+  render fails → **log + skip + counter** (same fire-and-forget posture as a missing email);
+  it never crashes the route. Deploy-time check: every `SERVED_DOMAINS` network must have a
+  matching notification-service config file.
 - `NOTIFICATION_TRANSPORT` (`direct` default).
 
 Per-dot copy/config lives in **notification-service**, not here.
@@ -348,7 +394,10 @@ Per-dot copy/config lives in **notification-service**, not here.
 - **Owner→email resolution:** `resolveOwnerEmail(item.created_by)` — a new Signals helper that
   reads the better-auth user table (`email`/`phoneNumber`) by user-id. It does NOT exist today;
   `items.created_by` is only a user-id. Email is **not** carried on the wire and notification-service
-  stays contact-blind (§1.1). Only the local instance resolves its own owners.
+  stays contact-blind (§1.1). Only the local instance resolves its own owners. This holds on
+  the `store_event` (mirror) path too: that seam runs on the **source** instance, where the
+  source item was created — so `source_item.created_by`'s better-auth user row is local there.
+  Integration coverage must assert resolution on the mirrored path, not just the local one.
 - Missing recipient email (phone-only, `user.email = NULL`) → **skip + log + counter**
   ("notification skipped: owner has no email") so the number going dark is visible.
 - Missing template vars → notification-service render validation rejects; logged.
@@ -357,32 +406,15 @@ Per-dot copy/config lives in **notification-service**, not here.
 
 ---
 
-## 11. Testing
-
-- Unit (Signals): `buildNotifications` — 4 action kinds × direction × interaction selection;
-  `item_success`/`item_failed`; local-vs-remote owner skip; missing-email skip;
-  `statusLabel` derivation; `network_id` env override; route-level bulk collapse
-  (array.length > 1 → `bulk_out_req`; length 1 → single `out_req`); `resolveOwnerEmail`
-  (created_by hit, phone-only NULL → skip+counter, unknown user-id).
-- Trigger sites (Signals): `store_event.ts` dispatch fires the cross-side confirmation
-  (`out_req` / `in_status`) on a non-null `created`, and is suppressed on duplicate (`null`).
-- Unit (notification-service): resolution `(network_id,template_id,channel,locale)` +
-  `extends` merge; free-text body → HTML render in layout; `{{cta}}` per channel;
-  missing-var rejection; html pass-through fallback.
-- Integration: perform → `*_req` pair; update-status → `*_status` pair; cross-instance
-  (each instance sends only its local recipient with its own network_id/base URL).
-- Aggregator: Keycloak OTP via MailHog; data-export via notification-service.
-
----
-
 ## 12. Implementation ordering (cross-repo)
 
-1. **notification-service first** — ~10 templates (free-text body + `{{cta}}` + shared
-   layout), per-dot config + `extends` resolver, renderer + missing-var validation,
-   `dedupe_key` + new identifier fields in `/notify` Zod schema; deploy.
+1. **notification-service first** — per-network config files (each self-contained: ~10
+   templates with body + `{{cta}}`, `layout.email.html`, words, routes), loader that reads
+   `config[network_id]`, renderer + missing-var validation, `dedupe_key` + new identifier
+   fields in `/notify` Zod schema; deploy.
 2. **Signals-DPG second** — new fields on `NotifyRequest`, dispatcher, `buildNotifications`,
    action + item/failure trigger sites, `NOTIFICATION_NETWORK_ID` env; flip basic templates
-   to catalog `template_id`s.
+   to network-file `template_id`s.
 3. **Aggregator** — integrate notification-service client for data-export; Keycloak OTP copy.
 
 The html pass-through fallback keeps existing OTP/welcome working through the transition.
