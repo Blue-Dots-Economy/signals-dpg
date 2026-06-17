@@ -59,6 +59,15 @@ COPY --from=builder /app/apps/ui/dist /usr/share/nginx/html
 # /config.js is always served from the html root so the chart's runtime config
 # (window.__DPG_UI_CONFIG__) reaches whichever variant is selected.
 ENV UI_VARIANT=signals
+# Optional host-routed served binding. When UI_HOST_BINDINGS is set (a
+# ";"-separated list of "<host>=<network>/<domain>" pairs, injected by the deploy
+# chart) nginx picks VITE_SERVED_BINDINGS per request from the Host header, so a
+# single instance can serve several per-domain portals (e.g. provider + seeker)
+# from one pod. The chart's config.js carries a "__SERVED_BINDINGS__" placeholder
+# that sub_filter rewrites to the host's binding ("" for an unmapped host →
+# serve-all, which parseServedScope already treats as "all domains"). Unset →
+# today's static /config.js, byte-for-byte.
+ENV UI_HOST_BINDINGS=""
 COPY <<'EOF' /docker-entrypoint.d/40-ui-variant.sh
 #!/bin/sh
 set -e
@@ -66,16 +75,50 @@ ROOT=/usr/share/nginx/html
 if [ "$UI_VARIANT" = "tourist" ]; then
   ROOT=/usr/share/nginx/html/tourist
 fi
+
+if [ -n "$UI_HOST_BINDINGS" ]; then
+  # Build the per-request "$host -> $served_binding" map from UI_HOST_BINDINGS.
+  MAP_ENTRIES=""
+  OLDIFS=$IFS
+  IFS=';'
+  for pair in $UI_HOST_BINDINGS; do
+    host=${pair%%=*}
+    binding=${pair#*=}
+    [ -n "$host" ] && [ -n "$binding" ] || continue
+    MAP_ENTRIES="${MAP_ENTRIES}        ${host} \"${binding}\";
+"
+  done
+  IFS=$OLDIFS
+  # `map` must sit in the http{} context; conf.d/*.conf is included there, so a
+  # top-of-file map block is valid. `hostnames` => case-insensitive host match.
+  MAP_BLOCK="map \$host \$served_binding {
+        hostnames;
+        default \"\";
+${MAP_ENTRIES}    }"
+  # Rewrite the placeholder in the mounted config.js with the matched binding.
+  CONFIG_LOCATION="location = /config.js {
+        alias /usr/share/nginx/html/config.js;
+        sub_filter_once on;
+        sub_filter_types application/javascript text/javascript;
+        sub_filter '__SERVED_BINDINGS__' '\$served_binding';
+        add_header Cache-Control \"no-store\" always;
+    }"
+else
+  MAP_BLOCK=""
+  CONFIG_LOCATION="location = /config.js { alias /usr/share/nginx/html/config.js; }"
+fi
+
 cat > /etc/nginx/conf.d/default.conf <<NGINXCONF
+${MAP_BLOCK}
 server {
     listen 80;
     root ${ROOT};
     index index.html;
-    location = /config.js { alias /usr/share/nginx/html/config.js; }
+    ${CONFIG_LOCATION}
     location / { try_files \$uri /index.html; }
 }
 NGINXCONF
-echo "[ui-variant] serving '${UI_VARIANT:-signals}' from ${ROOT}"
+echo "[ui-variant] serving '${UI_VARIANT:-signals}' from ${ROOT}${UI_HOST_BINDINGS:+ (host-routed: ${UI_HOST_BINDINGS})}"
 EOF
 RUN chmod +x /docker-entrypoint.d/40-ui-variant.sh
 EXPOSE 80
