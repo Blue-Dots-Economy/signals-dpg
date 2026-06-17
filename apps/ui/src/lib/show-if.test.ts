@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
 import type { RJSFSchema } from '@rjsf/utils';
-import { isFieldVisible, collectControlFields, resolveVisibleSchema } from './show-if';
+import { isFieldVisible, resolveVisibleSchema } from './show-if';
 
 // A small schema mirroring the real blue_dot chain:
 // educationCategory -> schoolQualification -> schoolQualificationOther
@@ -52,13 +52,6 @@ describe('isFieldVisible', () => {
     const field = { 'x-show-if': { a: ['x'], b: ['y'] } };
     expect(isFieldVisible(field, { a: 'x', b: 'y' })).toBe(true);
     expect(isFieldVisible(field, { a: 'x', b: 'z' })).toBe(false);
-  });
-});
-
-describe('collectControlFields', () => {
-  it('returns every control field referenced by any x-show-if', () => {
-    const set = collectControlFields(chainSchema());
-    expect([...set].sort()).toEqual(['educationCategory', 'schoolQualification']);
   });
 });
 

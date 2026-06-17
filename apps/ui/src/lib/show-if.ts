@@ -31,19 +31,6 @@ export function isFieldVisible(
   });
 }
 
-/** Names of every top-level property referenced as a control by some x-show-if. */
-export function collectControlFields(schema: RJSFSchema): Set<string> {
-  const out = new Set<string>();
-  const props = (schema.properties ?? {}) as Record<string, FieldSchema>;
-  for (const prop of Object.values(props)) {
-    const rule = prop?.['x-show-if'];
-    if (rule && typeof rule === 'object') {
-      for (const control of Object.keys(rule)) out.add(control);
-    }
-  }
-  return out;
-}
-
 export interface ResolveResult {
   /** Schema with hidden properties removed from `properties` and `required`. */
   schema: RJSFSchema;
