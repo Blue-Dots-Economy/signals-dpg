@@ -70,10 +70,9 @@ export const delete_item_handler = async (
       });
     }
 
-    // Cache invalidation: the inter-instance read path caches `item-count`
-    // and `item-page` for up to `minimum_cache_ttl_seconds` (5 min by
-    // default for blue_dot/seeker). Without this sweep the deleted row
-    // keeps showing up on /network/item/fetch until the TTL expires.
+    // Best-effort: notify the search index this item is gone (op 'delete').
+    // Never throws — a Redis outage must not fail the delete; the
+    // signals-search reconciliation sweep is the backstop.
     await publishItemEvent(
       {
         item_network: result[0].item_network,
@@ -85,6 +84,10 @@ export const delete_item_handler = async (
       request.log,
     );
 
+    // Cache invalidation: the inter-instance read path caches `item-count`
+    // and `item-page` for up to `minimum_cache_ttl_seconds` (5 min by
+    // default for blue_dot/seeker). Without this sweep the deleted row
+    // keeps showing up on /network/item/fetch until the TTL expires.
     await invalidateItemFetchCache(result[0].item_network, result[0].item_domain).catch(
       (err) => request.log.warn({ err }, 'cache invalidation after delete failed'),
     );
