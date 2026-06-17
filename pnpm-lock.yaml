@@ -290,6 +290,10 @@ importers:
       schemas:
         specifier: workspace:*
         version: link:../schemas
+    devDependencies:
+      vitest:
+        specifier: ^4.1.7
+        version: 4.1.7(@types/node@25.8.0)(happy-dom@15.11.7)(vite@8.0.13(@types/node@25.8.0)(esbuild@0.28.0)(jiti@2.6.1)(tsx@4.22.1)(yaml@2.9.0))
 
   packages/database:
     dependencies:

@@ -76,6 +76,7 @@ export const DatabaseSecretsSchema = z.object({
   REDIS_HOST: z.string().default('127.0.0.1'),
   REDIS_PASSWORD: z.string(),
   REDIS_PORT: z.coerce.number().default(6370),
+  INGEST_STREAM: z.string().default('signals:item-events'),
 });
 
 export const PiiCryptoSecretsSchema = z.object({
