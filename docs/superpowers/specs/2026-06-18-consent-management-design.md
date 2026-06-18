@@ -74,6 +74,7 @@ All columns snake_case; tables in `apps/api/db/postgres/schema/`; migration via 
 | `ip` / `user_agent` | text NULL | optional audit fields |
 
 - **Append-only.** Acceptance and revocation are separate rows. The **current status** for a (user, network, doc_type) is the *latest* event by `accepted_at`. This table *is* the audit ledger.
+- **Granularity — one row per accepted `doc_type`.** Accepting when **both** docs are active writes **2 rows** (one `privacy_policy`, one `terms_of_service`); only-privacy or only-terms writes **1 row**. Because the docs version/expire independently, re-consenting to one doc adds a new row for **that doc only** — the other doc's latest row stays valid (e.g. privacy v2 accepted while terms v1 remains current). Linked to the account by `user_id` → `user.id` (one user → many rows); there is no consent column on the `user` table — this ledger is the source of truth.
 - Index: `(user_id, network, doc_type, accepted_at desc)` for the latest-event lookup.
 
 ### `user` table changes
