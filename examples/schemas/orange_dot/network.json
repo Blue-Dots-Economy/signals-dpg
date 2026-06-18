@@ -43,7 +43,8 @@
               "type": "string",
               "title": "Product Name",
               "description": "Display name of your listing or experience.",
-              "minLength": 1
+              "minLength": 1,
+              "vectorize": true
             },
             "category": {
               "type": "string",
@@ -55,14 +56,17 @@
                 "Activities",
                 "GI Products",
                 "Curated Experiences"
-              ]
+              ],
+              "vectorize": true
             },
             "description": {
               "type": "string",
               "title": "Description",
               "description": "A short blurb shown on your listing card.",
               "minLength": 1,
-              "maxLength": 500
+              "maxLength": 500,
+              "vectorize": true,
+              "vector_weight": 2
             },
             "provider_name": {
               "type": "string",
@@ -106,7 +110,8 @@
                   "Culture & Heritage",
                   "Crafts & Artisan"
                 ]
-              }
+              },
+              "vectorize": true
             },
             "languages": {
               "type": "array",
