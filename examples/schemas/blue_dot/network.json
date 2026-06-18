@@ -20,7 +20,6 @@
           "additionalProperties": false,
           "required": [
             "name",
-            "gender",
             "location",
             "age",
             "phone"
@@ -78,17 +77,12 @@
                 "10-15 Years",
                 "15+ Years",
                 "Other"
-              ]
-            },
-            "highestQualificationOrSkill": {
-              "type": "string",
-              "title": "Highest Qualification / Skill",
-              "enum": [
-                "School",
-                "College",
-                "ITI / Other Vocational Trainings",
-                "Certification / Learned on the job"
-              ]
+              ],
+               "x-show-if": {
+                "workExperience": [
+                  "Worked before", "Returning after a break"
+                ]
+              }
             },
             "natureOfJobsInterestedIn": {
               "type": "string",
@@ -630,33 +624,6 @@
               "title": "College / Institute Name",
               "description": "Please specify your college or institute name"
             },
-            "workExperienceYears": {
-              "type": "string",
-              "title": "Work Experience (Years)",
-              "description": "Select your years of work experience",
-              "enum": [
-                "0",
-                "< 1 Year",
-                "1 Year",
-                "2 Years",
-                "3 Years",
-                "3-5 Years",
-                "5-10 Years",
-                "10-15 Years",
-                "15+ Years"
-              ],
-              "enumNames": [
-                "0",
-                "< 1 Year",
-                "1 Year",
-                "2 Years",
-                "3 Years",
-                "3-5 Years",
-                "5-10 Years",
-                "10-15 Years",
-                "15+ Years"
-              ]
-            },
             "nameOfLastRoleHeld": {
               "type": "string",
               "title": "Name of last role held",
@@ -730,7 +697,7 @@
       "card": {
         "title_field": "name",
         "avatar_from": "name",
-        "default_fields": ["location", "natureOfJobsInterestedIn", "highestQualificationOrSkill", "workExperience"]
+        "default_fields": ["location", "natureOfJobsInterestedIn", "educationCategory", "workExperience"]
       },
       "dashboard_tiles": {
         "profile": [
@@ -767,7 +734,6 @@
             "jobProviderLocation",
             "hiringManagerName",
             "hiringManagerPhoneNumber",
-            "hiringManagerEmail",
             "positions",
             "natureOfJob"
           ],
@@ -859,10 +825,11 @@
                 "School",
                 "College",
                 "ITI",
+                "Polytechnic/Diploma",
                 "Other Vocational Training",
                 "Certifications",
-                "None"
-              ]
+                "Learned Informally"
+            ]
             },
             "workExperienceYears": {
               "type": "string",
