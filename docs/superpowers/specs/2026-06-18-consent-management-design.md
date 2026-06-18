@@ -119,6 +119,7 @@ Follow repo conventions: Fastify + Zod, snake_case route exports, machine-readab
 ## Enforcement, revocation, expiry
 
 - **Server is the source of truth.** A Fastify **preHandler** on sensitive **mutating** routes (item create/update, action perform) checks current consent and returns `403 CONSENT_REQUIRED` if the user lacks current consent (or, for a minor, lacks valid guardian consent). The UI blocking modal is the UX layer over the same `GET /consent/status`.
+- **Scope of the gate (don't break integrators):** the preHandler applies **only to session-authenticated user actions** (a logged-in person in the UI). It does **not** apply to the **apikey / admin onboarding path** (`/admin/participant`) — the aggregator/voice DPG acts *before* the user has consented, so gating onboarding would break it. The onboarded user is instead prompted at their first Signals login.
 - **Revocation:** a `revoked` event flips the user to `needs_consent` → re-gated until re-accept.
 - **Expiry:** computed **lazily** in `GET /consent/status` and in the preHandler (`now > expires_at` ⇒ needs re-consent). No cron job; expiry is derived, not a stored state transition.
 
@@ -129,10 +130,24 @@ Follow repo conventions: Fastify + Zod, snake_case route exports, machine-readab
 - **Backfill:** for self-signup users with `terms_accepted = true` **and** `onboarded_via IS NULL`, insert a synthetic `accepted` ledger record against the seeded v1 (source `signup`) so they aren't re-prompted. **Onboarded users get no backfill** → prompted on next login.
 - Keep `terms_accepted` / `privacy_accepted` columns for now (deprecated); remove in a follow-up once no code reads them. Stop hardcoding them to `true` in `participant.ts` (so onboarded users correctly show as not-yet-consented in Signals).
 
+## Backward compatibility & API contract impact
+
+**No existing API response shape or value changes.** Nothing in the API returns `terms_accepted`/`privacy_accepted` (verified) — the only place they appear is `participant.ts` *writing* them to the user row. So stopping the hardcoded write changes no response.
+
+**`POST /admin/participant` (aggregator / voice) — request stays compatible:**
+- The fields `terms_accepted` / `privacy_accepted` are **kept** in the request schema so existing integrations don't break, but **relaxed from required-`true` to optional** (existing senders of `true` still pass; new callers may omit). They become **meaningless for Signals consent**.
+- The aggregator's claim is **ignored for gating**: it does **not** create a `consent_record` and does **not** skip the prompt. Onboarded users are **always prompted** to accept at their first Signals login. (The claimed value may be retained as provenance — e.g. in the deprecated boolean columns or an audit note — but never substitutes for a Signals `consent_record`.)
+- `participant.ts` no longer hardcodes the consent booleans on the user row.
+- The onboarding write path is **not** gated by `requireConsent` (see Enforcement scope), so onboarding keeps working before the user consents.
+
+**New behaviors (additive, not shape changes):**
+- A new `403 CONSENT_REQUIRED` failure on **session-user** write paths (item create/update, action perform) when the logged-in user lacks current consent — handled by the UI consent modal. Apikey integrators are unaffected.
+- Self-signup gains an optional **DOB** field on account creation and a separate `POST /consent/accept` call after OTP verify; existing auth/OTP endpoints are unchanged.
+
 ## Components / files (where changes land)
 
 - DB: `apps/api/db/postgres/schema/consent.ts` (new tables), `auth.ts` (guardian fields); migration in `apps/api/drizzle/`.
-- API: `apps/api/src/routes/v1/consent/*` (active, status, accept, revoke, guardian), `apps/api/src/routes/v1/admin/consent/*` (publish/list); a `consent_service` (status computation, accept/revoke, expiry) for testability; a `requireConsent` preHandler; `participant.ts` (stop hardcoding consent booleans).
+- API: `apps/api/src/routes/v1/consent/*` (active, status, accept, revoke, guardian), `apps/api/src/routes/v1/admin/consent/*` (publish/list); a `consent_service` (status computation, accept/revoke, expiry) for testability; a `requireConsent` preHandler (session-user routes only); `participant.ts` (stop hardcoding consent booleans); `packages/schemas/src/admin/participant.ts` (relax `terms_accepted`/`privacy_accepted` to optional).
 - Schemas: `packages/schemas/src/consent/*` (Zod request/response + the `needs_consent` status logic as a pure, unit-testable function).
 - UI: `apps/ui/src/pages/auth/login-page.tsx` (DOB + required checkbox + popup), a `ConsentDialog`/`ConsentGate` component, `otp-page.tsx` (post-verify accept + minor flow), a login-time consent gate (in the auth context / home bootstrap), `/privacy` `/terms` pages + routes in `app.tsx`, `apps/ui/src/lib/consent-api.ts`. The one consent popup (summary + Privacy|Terms tabs of rendered Markdown + accept) is a reusable component used by signup, re-consent, and onboarded gates.
 - Seed/backfill script under `apps/api/scripts/`.
