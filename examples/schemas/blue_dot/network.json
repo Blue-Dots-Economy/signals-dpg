@@ -1229,30 +1229,8 @@
             "title": "Job Application Requirement",
             "type": "object",
             "additionalProperties": false,
-            "required": [
-              "role",
-              "workExperience",
-              "age"
-            ],
-            "properties": {
-              "role": {
-                "type": "string",
-                "minLength": 1
-              },
-              "age": {
-                "type": "integer",
-                "minimum": 14,
-                "maximum": 65
-              },
-              "workExperience": {
-                "type": "string",
-                "enum": [
-                  "Fresher",
-                  "Worked before",
-                  "Returning after a break"
-                ]
-              }
-            }
+            "required": [],
+            "properties": {}
           },
           "event_schema": {
             "$schema": "https://json-schema.org/draft/2020-12/schema",

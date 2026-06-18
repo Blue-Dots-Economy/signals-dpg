@@ -59,6 +59,9 @@ export function MarkerPopupCard({
 
   const canMatch = !!localItem && !!networkItem;
   const canConnect = actions.length > 0 && !!onConnect;
+  const actionLabel = actions[0]
+    ? actions[0].action_type.charAt(0).toUpperCase() + actions[0].action_type.slice(1)
+    : t('map.connect');
 
   const { score, isLoading, calculate, recalculate } = useMatchScore({
     localItem: localItem ?? null,
@@ -86,7 +89,7 @@ export function MarkerPopupCard({
         {canConnect && (
           <Button size="sm" className="flex-1" onClick={onConnect}>
             <Plug className="mr-1.5 h-3.5 w-3.5" />
-            {t('map.connect')}
+            {actionLabel}
           </Button>
         )}
       </>

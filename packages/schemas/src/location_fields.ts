@@ -100,6 +100,44 @@ export function buildLocationQueries(
 }
 
 /**
+ * True when the schema's primary location field is present in `partialState`
+ * (a partial update payload) and its value differs from `priorState`.
+ * Used to decide whether an UPDATE should re-geocode.
+ */
+export function primaryAddressChanged(
+  itemSchema: Record<string, unknown>,
+  partialState: Record<string, unknown>,
+  priorState: Record<string, unknown>,
+): boolean {
+  const { primary } = parseLocationFields(itemSchema);
+  if (!primary) return false;
+  if (!Object.prototype.hasOwnProperty.call(partialState, primary.field)) return false;
+  // Primary location values are a string (single) or string[] (multiple), so
+  // JSON.stringify is a sound deterministic equality check (and array reordering
+  // is intentionally treated as a change). Not safe for object-valued fields.
+  return JSON.stringify(partialState[primary.field]) !== JSON.stringify(priorState[primary.field]);
+}
+
+/**
+ * True when the schema's primary location field is blank/empty in `state`
+ * (missing, null, empty/whitespace string, or empty array). Lets an UPDATE
+ * distinguish "address cleared" (→ wipe coords) from "geocode failed" (→ keep
+ * existing coords). Returns false when the schema has no primary field.
+ */
+export function isPrimaryAddressBlank(
+  itemSchema: Record<string, unknown>,
+  state: Record<string, unknown>,
+): boolean {
+  const { primary } = parseLocationFields(itemSchema);
+  if (!primary) return false;
+  const value = state[primary.field];
+  if (value === undefined || value === null) return true;
+  if (typeof value === 'string') return value.trim() === '';
+  if (Array.isArray(value)) return value.length === 0;
+  return false;
+}
+
+/**
  * Throws when an item schema does not declare exactly one `primary` location
  * field. Called at network-config load so a misconfigured network fails fast.
  */

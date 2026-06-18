@@ -2,7 +2,7 @@ import * as React from 'react';
 import { useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { toast } from 'sonner';
 import { useTranslation } from 'react-i18next';
-import { ArrowLeft, Wallet, Trash2, OctagonX, PauseCircle, PlayCircle } from 'lucide-react';
+import { ArrowLeft, Wallet, OctagonX } from 'lucide-react';
 import type { RJSFSchema } from '@rjsf/utils';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
@@ -23,22 +23,17 @@ import { getServedScope } from '@/lib/served-binding';
 
 import {
   createItem,
-  deleteItem,
   fetchItems,
-  pauseItem,
-  unpauseItem,
   updateItem,
   type CreateItemPayload,
   type UpdateItemPayload,
   type Item,
 } from '@/lib/item-api';
-import { fetchMyActions } from '@/lib/action-api';
 import { fetchNetworkConfig, fetchNetworkConfigs } from '@/lib/network-api';
 import { parseLocationFields, buildLocationQueries, isLocationFieldPrivate } from '@dpg/schemas/location_fields';
 import { getGeoProvider } from '@/lib/geo/provider';
 import type { GeoComponents } from '@/lib/geo/types';
 import { apiConfig } from '@/lib/api-config';
-import { PauseConfirmDialog } from '@/components/actions/pause-confirm-dialog';
 
 function parseNetworkIds(networkEnv: string | undefined): string[] {
   if (!networkEnv) return [];
@@ -74,14 +69,10 @@ export function ProfileFormPage() {
   const [existingItem, setExistingItem] = React.useState<Item | null>(null);
   const [initialData, setInitialData] = React.useState<Record<string, unknown> | null>(null);
   const [isSubmitting, setIsSubmitting] = React.useState(false);
-  const [isDeleting, setIsDeleting] = React.useState(false);
   const [isLoading, setIsLoading] = React.useState(isEdit);
   const [availableNetworkIds, setAvailableNetworkIds] = React.useState<string[] | null>(null);
   const [isWalletModalOpen, setIsWalletModalOpen] = React.useState(false);
   const [formError, setFormError] = React.useState<{ title: string; description?: string } | null>(null);
-  const [isPauseDialogOpen, setIsPauseDialogOpen] = React.useState(false);
-  const [isPausing, setIsPausing] = React.useState(false);
-  const [pendingActionsCount, setPendingActionsCount] = React.useState(0);
   const [resolvedLocations, setResolvedLocations] = React.useState<
     Array<{ lat: number; lng: number; label?: string; components?: GeoComponents }>
   >([]);
@@ -486,107 +477,6 @@ export function ProfileFormPage() {
     }
   };
 
-  const handleDelete = async () => {
-    if (!existingItem) return;
-    if (!window.confirm(t('profile.delete_confirm'))) return;
-
-    setIsDeleting(true);
-    try {
-      await deleteItem(existingItem.item_id);
-      toast.success(t('profile.toast_deleted'), {
-        description: t('profile.toast_deleted_desc'),
-      });
-      navigate(`/?network=${resolvedNetwork?.id ?? ''}`);
-    } catch (err: unknown) {
-      const axiosError = err as { response?: { status?: number; data?: { error?: string; message?: string } } };
-      const status = axiosError?.response?.status;
-      const error = axiosError?.response?.data;
-      if (status === 404) {
-        toast.error(t('home.toast_profile_not_found'), {
-          description: t('profile.delete_not_found_desc'),
-        });
-      } else if (status === 401) {
-        toast.error(t('profile.toast_session_expired'), {
-          description: t('profile.toast_session_expired_desc'),
-        });
-      } else {
-        toast.error(t('profile.toast_delete_failed'), {
-          description: error?.message ?? t('common.something_went_wrong'),
-        });
-      }
-    } finally {
-      setIsDeleting(false);
-    }
-  };
-
-  // Load pending actions count for the current item (only in edit mode when item is live)
-  React.useEffect(() => {
-    if (!isEdit || !existingItem || existingItem.lifecycle_status !== 'live') {
-      setPendingActionsCount(0);
-      return;
-    }
-
-    let cancelled = false;
-    fetchMyActions({ item_id: existingItem.item_id, ownership_role: 'all', limit: 100 })
-      .then((res) => {
-        if (cancelled) return;
-        const pending = res.actions.filter(
-          (a) => a.action_status === 'created' || a.action_status === 'submitted',
-        );
-        setPendingActionsCount(pending.length);
-      })
-      .catch(() => {
-        if (!cancelled) setPendingActionsCount(0);
-      });
-
-    return () => { cancelled = true; };
-  }, [isEdit, existingItem]);
-
-  const handlePauseClick = () => {
-    setIsPauseDialogOpen(true);
-  };
-
-  const handlePauseConfirm = async () => {
-    if (!existingItem) return;
-
-    setIsPausing(true);
-    try {
-      await pauseItem(existingItem.item_id);
-      setExistingItem({ ...existingItem, lifecycle_status: 'paused' });
-      toast.success(t('profile.toast_paused'), {
-        description: t('profile.toast_paused_desc'),
-      });
-    } catch (err: unknown) {
-      const axiosError = err as { response?: { data?: { message?: string } } };
-      toast.error(t('profile.toast_pause_failed'), {
-        description: axiosError?.response?.data?.message ?? t('common.something_went_wrong'),
-      });
-    } finally {
-      setIsPausing(false);
-      setIsPauseDialogOpen(false);
-    }
-  };
-
-  const handleUnpause = async () => {
-    if (!existingItem) return;
-
-    setIsPausing(true);
-    try {
-      const result = await unpauseItem(existingItem.item_id);
-      setExistingItem({ ...existingItem, lifecycle_status: result.lifecycle_status });
-      toast.success(t('profile.toast_unpaused'), {
-        description: t('profile.toast_unpaused_desc'),
-      });
-    } catch (err: unknown) {
-      const axiosError = err as { response?: { data?: { message?: string } } };
-      toast.error(t('profile.toast_unpause_failed'), {
-        description: axiosError?.response?.data?.message ?? t('common.something_went_wrong'),
-      });
-    } finally {
-      setIsPausing(false);
-    }
-  };
-
   if (availableNetworkIds === null || isLoading) {
     return (
       <div className="flex h-screen items-center justify-center">
@@ -716,7 +606,7 @@ export function ProfileFormPage() {
               <SchemaForm
                 schema={profileSchema}
                 onSubmit={handleSubmit}
-                disabled={isSubmitting || isDeleting}
+                disabled={isSubmitting}
                 formData={initialData ?? undefined}
                 submitButtonText={isEdit ? t('profile.btn_update') : undefined}
                 domainId={selectedDomain ?? undefined}
@@ -728,59 +618,6 @@ export function ProfileFormPage() {
                 }}
               />
             )}
-            {isEdit && existingItem && (
-              <div className="mt-6 pt-4 border-t flex flex-col gap-3">
-                {/* Pause / Unpause control */}
-                {(existingItem.lifecycle_status === 'live' || existingItem.lifecycle_status === 'paused') && (
-                  <div className="flex items-center justify-between gap-4">
-                    <p className="text-xs text-muted-foreground">
-                      {existingItem.lifecycle_status === 'paused'
-                        ? t('profile.toast_paused_desc')
-                        : t('profile.pause_confirm_desc_no_pending')}
-                    </p>
-                    {existingItem.lifecycle_status === 'live' ? (
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        className="shrink-0 gap-2"
-                        onClick={handlePauseClick}
-                        disabled={isSubmitting || isDeleting || isPausing}
-                      >
-                        <PauseCircle className="h-4 w-4" />
-                        {t('profile.pause_profile')}
-                      </Button>
-                    ) : (
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        className="shrink-0 gap-2"
-                        onClick={handleUnpause}
-                        disabled={isSubmitting || isDeleting || isPausing}
-                      >
-                        <PlayCircle className="h-4 w-4" />
-                        {isPausing ? t('profile.unpausing') : t('profile.unpause_profile')}
-                      </Button>
-                    )}
-                  </div>
-                )}
-                {/* Delete control */}
-                <div className="flex items-center justify-between gap-4">
-                  <p className="text-xs text-muted-foreground">
-                    {t('profile.delete_warning')}
-                  </p>
-                  <Button
-                    variant="destructive"
-                    size="sm"
-                    className="shrink-0 gap-2"
-                    onClick={handleDelete}
-                    disabled={isSubmitting || isDeleting || isPausing}
-                  >
-                    <Trash2 className="h-4 w-4" />
-                    {isDeleting ? t('profile.deleting') : t('profile.delete_profile')}
-                  </Button>
-                </div>
-              </div>
-            )}
           </CardContent>
         </Card>
 
@@ -789,14 +626,6 @@ export function ProfileFormPage() {
           onOpenChange={setIsWalletModalOpen}
           context={walletImportContext}
           onImported={handleImportedCredentials}
-        />
-
-        <PauseConfirmDialog
-          open={isPauseDialogOpen}
-          pendingCount={pendingActionsCount}
-          isPending={isPausing}
-          onConfirm={handlePauseConfirm}
-          onCancel={() => setIsPauseDialogOpen(false)}
         />
       </div>
     </div>

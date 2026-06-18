@@ -21,6 +21,40 @@ interface ResolveLocationsForCreateArgs {
 }
 
 /**
+ * Geocode an item's primary location field from its (full) item_state.
+ * Private (PII) field → city centre only; public field(s) → exact point per query.
+ * Best-effort: any failure → []. Caller decides how to treat an empty result.
+ */
+export async function geocodeLocationsFromState(
+  itemSchema: Record<string, unknown>,
+  item_state: Record<string, unknown>,
+  log?: { warn: (obj: unknown, msg: string) => void },
+): Promise<ItemLocation[]> {
+  try {
+    const { primary } = parseLocationFields(itemSchema);
+    if (isLocationFieldPrivate(itemSchema)) {
+      // Private (PII) field: never geocode the exact address — only the city.
+      const address = primary ? item_state[primary.field] : undefined;
+      if (typeof address === 'string' && address.trim()) {
+        const center = await resolveCityCenter(address);
+        if (center) return [center];
+      }
+      return [];
+    }
+    const queries = buildLocationQueries(item_state, primary);
+    const out: ItemLocation[] = [];
+    for (const { query, label } of queries) {
+      const coord = await resolveCoordinates(query);
+      if (coord) out.push(label ? { ...coord, label } : coord);
+    }
+    return out;
+  } catch (err) {
+    log?.warn({ err }, 'geocoding failed');
+    return [];
+  }
+}
+
+/**
  * Resolves the coordinates to store for a NEW item from its address/location
  * field, when the caller supplied none. Shared by the public `/item/create`
  * route and the admin-participant onboarding path (`create_profile_item`) so
@@ -47,27 +81,7 @@ export async function resolveLocationsForCreate(
     ) as Record<string, unknown> | null;
     if (!itemSchema) return [];
 
-    if (isLocationFieldPrivate(itemSchema)) {
-      // Private (PII) field: resolve only to the city centre — never the exact
-      // address — from the marked address field.
-      const { primary } = parseLocationFields(itemSchema);
-      const address = primary ? args.item_state[primary.field] : undefined;
-      if (typeof address === 'string' && address.trim()) {
-        const center = await resolveCityCenter(address);
-        if (center) return [center];
-      }
-      return [];
-    }
-
-    // Public field(s): geocode each marked query to its exact point.
-    const { primary } = parseLocationFields(itemSchema);
-    const queries = buildLocationQueries(args.item_state, primary);
-    const out: ItemLocation[] = [];
-    for (const { query, label } of queries) {
-      const coord = await resolveCoordinates(query);
-      if (coord) out.push(label ? { ...coord, label } : coord);
-    }
-    return out;
+    return await geocodeLocationsFromState(itemSchema, args.item_state, args.log);
   } catch (err) {
     args.log?.warn(
       { err, item_network: args.item_network, item_domain: args.item_domain },
