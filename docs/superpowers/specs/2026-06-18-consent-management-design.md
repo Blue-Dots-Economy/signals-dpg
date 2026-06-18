@@ -117,7 +117,7 @@ Follow repo conventions: Fastify + Zod, snake_case route exports, machine-readab
 - If **DOB < 18**: after OTP verify, show the **guardian-details popup** (name + phone *or* email) → `guardian/request-otp` → guardian enters OTP → `guardian/verify` → guardian consent recorded → then into the app.
 
 ### 2. Login (returning user)
-- After OTP verify (session established), the app calls `GET /consent/status`. If `needs_consent` → the **blocking consent popup** opens with a banner and the new version's **`change_summary`** ("what's new") plus the full updated document(s) in the tabs → **Accept** → `POST /consent/accept` (source `login_reconsent`) → proceed. If `guardian_consent_required` (minor, no valid guardian consent) → guardian flow.
+- After OTP verify (session established), the app calls `GET /consent/status`. If `needs_consent` → the **blocking consent popup** opens with a banner and the new version's **`change_summary`** ("what's new") plus the full updated document(s) in the tabs → **Accept** → `POST /consent/accept` (source `login_reconsent`) → proceed. If `guardian_consent_required` (minor, no valid guardian consent) → guardian flow. **Open question:** whether a *terms/privacy version change* for a returning minor re-triggers the **guardian** (vs the minor re-accepting) is undecided — see Open questions §1.
 
 ### 3. Onboarded (aggregator/voice) first login
 - `GET /consent/status` returns no record → same blocking accept modal (source `onboarded_first_login`) before proceeding.
@@ -187,3 +187,12 @@ Follow repo conventions: Fastify + Zod, snake_case route exports, machine-readab
 5. Revocation (`POST /consent/revoke`, API-only — no UI); admin publish API.
 
 UI prototypes for the consent popups / dialogs will be produced **after** this design is approved, before implementation (per the user's request).
+
+## Open questions (to resolve before/during implementation)
+
+1. **Minor re-consent on a terms/privacy update — whose consent?** When a document version changes and a **returning under-18** user logs in, who must re-consent? The flow as written re-takes the **user's** consent via the normal re-consent modal and only invokes the guardian flow when `guardian_consent_required` is set for *initial* approval — so it does **not** currently re-trigger the guardian on a version bump. Options:
+   - **(a) Guardian re-consents** — a version bump re-triggers the guardian flow (re-OTP the stored guardian contact to approve the new version); the guardian's versioned consent is what gates. Rationale: for an under-18 the guardian is the legal consenter, so their approval of the *old* version shouldn't carry to a *new* one.
+   - **(b) Both** — the minor re-accepts (acknowledgment) **and** the guardian re-approves the new version.
+   - **(c) Minor only** — the minor re-accepts; the guardian's original approval persists (simplest, but legally weak for under-18).
+
+   This decides whether, for minors, `needs_consent`/re-consent keys off the **guardian's** versioned `consent_record` (a/b) or the **minor's** (c), and whether a version bump re-opens the guardian OTP flow. **Decision pending.**
