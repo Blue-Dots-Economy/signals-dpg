@@ -1,8 +1,8 @@
 import { describe, it, expect, vi } from 'vitest';
 import { resolveItemLocations } from '../geotag_item';
 
-const multipleSchema = { properties: { service_cities: { type: 'array', location: 'multiple' } } };
-const singleSchema = { properties: { address: { type: 'string', location: 'single' } } };
+const multipleSchema = { properties: { service_cities: { type: 'array', location: 'primary' } } };
+const singleSchema = { properties: { address: { type: 'string', location: 'primary' } } };
 
 describe('resolveItemLocations', () => {
   it('passes provided locations through unchanged', async () => {

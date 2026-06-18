@@ -6,6 +6,7 @@ import { DatePickerWidget } from './custom-widgets/date-picker-widget';
 import { LocationAutocompleteWidget } from './custom-widgets/location-autocomplete-widget';
 import { MultiLocationAutocompleteWidget } from './custom-widgets/multi-location-autocomplete-widget';
 import { formLayouts } from '@/theme/form-layouts';
+import { resolveVisibleSchema } from '@/lib/show-if';
 
 interface RjsfError {
   property?: string;
@@ -70,6 +71,12 @@ function focusErrorField(container: HTMLElement | null, error: RjsfError): void 
 
 interface SchemaFormProps {
   schema: RJSFSchema;
+  /**
+   * Initial form values. MUST be referentially stable (e.g. React state or a
+   * memoized object) — the controlled form re-seeds its internal state whenever
+   * this prop's identity changes, so an inline object literal would discard the
+   * user's edits on every render.
+   */
   formData?: Record<string, unknown>;
   onSubmit: (data: Record<string, unknown>) => void;
   onError?: (errors: unknown[]) => void;
@@ -250,12 +257,18 @@ function generateUiSchema(
       }
     }
 
-    if ((typed as { location?: unknown }).location === 'single') {
-      uiSchema[key] = { ...((uiSchema[key] as object) ?? {}), 'ui:widget': 'location-autocomplete' };
-    }
-
-    if ((typed as { location?: unknown }).location === 'multiple') {
-      uiSchema[key] = { ...((uiSchema[key] as object) ?? {}), 'ui:widget': 'location-multi' };
+    const locationRole = (typed as { location?: unknown }).location;
+    if (locationRole === 'primary' || locationRole === 'secondary') {
+      const isArray = typed.type === 'array';
+      const existing = (uiSchema[key] as Record<string, unknown>) ?? {};
+      const existingOptions = (existing['ui:options'] as Record<string, unknown>) ?? {};
+      uiSchema[key] = {
+        ...existing,
+        'ui:widget': isArray ? 'location-multi' : 'location-autocomplete',
+        // Only the primary field's picked coordinate feeds item_locations;
+        // secondary fields are autocomplete-only.
+        'ui:options': { ...existingOptions, isPrimaryLocation: locationRole === 'primary' },
+      };
     }
   }
 
@@ -297,10 +310,13 @@ function normalizeSchemaForRjsf(schema: RJSFSchema, rootSchema?: RJSFSchema): RJ
 
   const result: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(schema as Record<string, unknown>)) {
-    // Strip the custom `location` MARKER (value "single" | "multiple"), which is consumed
+    // Strip the custom `location` MARKER (value "primary" | "secondary"), which is consumed
     // by generateUiSchema, not real JSON Schema. Must NOT strip a property whose
     // NAME is "location" (its value is the field's schema object, not a string).
-    if (key === 'location' && (value === 'single' || value === 'multiple')) continue;
+    if (key === 'location' && (value === 'primary' || value === 'secondary')) continue;
+    // Strip the custom `x-show-if` keyword — consumed by resolveVisibleSchema before
+    // this point; ajv must never see it.
+    if (key === 'x-show-if') continue;
     result[key] = normalizeSchemaForRjsf(value as RJSFSchema, root);
   }
 
@@ -333,11 +349,41 @@ export function SchemaForm({
   domainId,
   formContext,
 }: SchemaFormProps) {
-  const uiSchema = generateUiSchema(schema, mode, hideSubmit ? undefined : submitButtonText);
-  if (hideSubmit) {
-    uiSchema['ui:submitButtonOptions'] = { norender: true };
-  }
-  const schemaWithoutMeta = normalizeSchemaForRjsf(stripMetaSchema(schema));
+  // Base schema (meta stripped) still carries `x-show-if` so the evaluator can read it.
+  const baseSchema = React.useMemo(() => stripMetaSchema(schema), [schema]);
+
+  // Controlled form data. Seeded from the prop, with hidden values pre-cleared so
+  // an edit-mode load whose stored control no longer matches starts clean.
+  const [data, setData] = React.useState<Record<string, unknown>>(
+    () => resolveVisibleSchema(baseSchema, formData ?? {}).formData,
+  );
+
+  // Re-seed when the incoming formData identity changes (edit mode loads async).
+  // Parents pass a stable formData identity except on (re)load, so this does not
+  // fire while the user is typing.
+  React.useEffect(() => {
+    setData(resolveVisibleSchema(baseSchema, formData ?? {}).formData);
+  }, [baseSchema, formData]);
+
+  const resolved = resolveVisibleSchema(baseSchema, data);
+  // Signature of the visible set. The normalized schema + uiSchema are memoized on
+  // this so their object identity is stable while the visible set is unchanged —
+  // otherwise RJSF remounts fields and text inputs lose focus on every keystroke.
+  const hiddenKey = resolved.hidden.join('|');
+
+  const rjsfSchema = React.useMemo(
+    () => normalizeSchemaForRjsf(resolved.schema),
+    // resolved.schema depends only on (schema, visible set); key on hiddenKey.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [schema, hiddenKey],
+  );
+
+  const uiSchema = React.useMemo(() => {
+    const ui = generateUiSchema(resolved.schema, mode, hideSubmit ? undefined : submitButtonText);
+    if (hideSubmit) ui['ui:submitButtonOptions'] = { norender: true };
+    return ui;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [schema, hiddenKey, mode, hideSubmit, submitButtonText]);
 
   const templates = domainId && formLayouts[domainId]
     ? { ObjectFieldTemplate: SectionedObjectFieldTemplate(domainId) }
@@ -349,16 +395,19 @@ export function SchemaForm({
     <div className={className} ref={containerRef}>
       <Form
         id={id}
-        schema={schemaWithoutMeta}
+        schema={rjsfSchema}
         uiSchema={uiSchema}
-        formData={formData}
+        formData={data}
         validator={validator}
         widgets={widgets}
         templates={templates}
         disabled={disabled}
         formContext={formContext}
-        onSubmit={({ formData }) => {
-          if (formData) onSubmit(formData as Record<string, unknown>);
+        onChange={({ formData: next }) => {
+          setData(resolveVisibleSchema(baseSchema, (next ?? {}) as Record<string, unknown>).formData);
+        }}
+        onSubmit={({ formData: submitted }) => {
+          if (submitted) onSubmit(submitted as Record<string, unknown>);
         }}
         onError={(errors) => onError?.(errors)}
         focusOnFirstError={(error) =>
@@ -367,6 +416,8 @@ export function SchemaForm({
         showErrorList={false}
         liveValidate={false}
         noHtml5Validate
+        omitExtraData
+        liveOmit
       />
     </div>
   );

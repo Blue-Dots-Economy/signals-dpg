@@ -6,7 +6,6 @@ import { useTranslation } from 'react-i18next';
 import type {
   DotNetworkSchema,
   DotActionSchema,
-  DotNetworkInteraction,
   ViewMode,
 } from '@/engine/types';
 import { resolveNetworkRefs } from '@/engine/schema/resolve-schema';
@@ -38,6 +37,8 @@ import { fetchNetworkConfigs, fetchNetworkConfig, fetchNetworkItems } from '@/li
 import { useAuth } from '@/contexts/auth-context';
 import { apiConfig } from '@/lib/api-config';
 import { getEnumFilterFieldsForDomains, itemPassesEnumFilters } from '@/lib/enum-filters';
+import { getServedScope } from '@/lib/served-binding';
+import { computeVisibleDomains } from '@/lib/visible-domains';
 import { useUserLocation } from '@/hooks/use-user-location';
 import { nearestDistanceMeters } from '@/lib/geo/distance';
 import type { LatLng } from '@/lib/geo/types';
@@ -96,16 +97,6 @@ function setStoredActiveProfileId(networkId: string, profileId: string): void {
 
 function clearStoredActiveProfileId(networkId: string): void {
   localStorage.removeItem(getActiveProfileStorageKey(networkId));
-}
-
-function getAllInteractions(network: DotNetworkSchema): Array<{ actionType: string; interaction: DotNetworkInteraction }> {
-  const interactions: Array<{ actionType: string; interaction: DotNetworkInteraction }> = [];
-  for (const [actionType, action] of Object.entries(network.actions)) {
-    for (const interaction of action.interactions) {
-      interactions.push({ actionType, interaction });
-    }
-  }
-  return interactions;
 }
 
 /**
@@ -204,13 +195,23 @@ export function HomePage() {
   const [resolvedNetwork, setResolvedNetwork] = React.useState<DotNetworkSchema | null>(null);
   const [allNetworks, setAllNetworks] = React.useState<DotNetworkSchema[]>([]);
   const configuredNetworkIds = parseNetworkIds(import.meta.env.VITE_NETWORK_ID);
-  
-  // Get network from URL query param, fallback to env config
+  // The set of domains this deployment serves (VITE_SERVED_BINDINGS), or null
+  // when unset (serve all domains). When exactly ONE domain is served, that is
+  // the forced acting/browse domain (the single-domain portal); with multiple,
+  // the acting domain is derived from the logged-in user (whitelisted combined
+  // UI). Memoised — runtime config is fixed for the session's lifetime.
+  const servedScope = React.useMemo(() => getServedScope(), []);
+  const boundDomain =
+    servedScope && servedScope.domains.length === 1 ? servedScope.domains[0] : null;
+
+  // Network: the served scope pins it; otherwise URL param, then env config.
   const networkFromUrl = searchParams.get('network');
-  const initialNetworkId = networkFromUrl && configuredNetworkIds.includes(networkFromUrl)
-    ? networkFromUrl
-    : (configuredNetworkIds[0] || null);
-  
+  const initialNetworkId =
+    servedScope?.network ??
+    (networkFromUrl && configuredNetworkIds.includes(networkFromUrl)
+      ? networkFromUrl
+      : (configuredNetworkIds[0] || null));
+
   const [selectedNetworkId, setSelectedNetworkId] = React.useState<string | null>(initialNetworkId);
   const [domainItems, setDomainItems] = React.useState<Record<string, Item[]>>({});
   const [myItems, setMyItems] = React.useState<Item[]>([]);
@@ -385,22 +386,28 @@ export function HomePage() {
     [userLocation],
   );
 
-  // Current domain: from ?as= param (demo override), active profile, or network default
-  const currentDomain = searchParams.get('as') ?? myItem?.item_domain ?? network?.domains[0]?.id ?? 'student_profile';
+  // Acting domain: ?as= test override → served binding → active profile →
+  // network default. Drives the connect-action source (from_domain).
+  const currentDomain =
+    searchParams.get('as') ??
+    boundDomain ??
+    myItem?.item_domain ??
+    network?.domains[0]?.id ??
+    'student_profile';
 
-  // Browseable domains = the distinct `to_domain`s across all interactions in
-  // the network. These are the only domains anyone connects *to*, so they're
-  // the only ones worth listing/fetching in Browse. Domains that never appear
-  // as a `to_domain` (e.g. orange_dot `tourist`) are intentionally excluded —
-  // nobody browses them. Network-wide and independent of the active profile
-  // (e.g. purple_dot/blue_dot show both seeker + provider).
-  const visibleDomains = React.useMemo(() => {
-    if (!network) return [];
-    const toDomains = new Set(
-      getAllInteractions(network).map(({ interaction }) => interaction.to_domain)
-    );
-    return network.domains.filter((d) => toDomains.has(d.id));
-  }, [network]);
+  // Viewer domain for Browse scoping: ?as= → the single served domain (when
+  // exactly one is served) → the logged-in user's own profile domain → null.
+  // A signed-in viewer only browses the domains their domain can initiate
+  // toward (e.g. a seeker sees providers, not other seekers) in bound portals
+  // and the combined UI alike. Null (only a signed-out / no-profile visitor)
+  // means network-wide browse — all to_domains (computeVisibleDomains).
+  const viewerDomain =
+    searchParams.get('as') ?? boundDomain ?? myItem?.item_domain ?? null;
+
+  const visibleDomains = React.useMemo(
+    () => (network ? computeVisibleDomains(network, viewerDomain) : []),
+    [network, viewerDomain],
+  );
 
   React.useEffect(() => {
     if (!network) return;
@@ -739,7 +746,7 @@ export function HomePage() {
     });
   };
 
-  const showNetworkSelector = allNetworks.length > 1;
+  const showNetworkSelector = !servedScope && allNetworks.length > 1;
 
   const currentDomainLabel = selectedDomain
     ? selectedDomain
@@ -779,14 +786,18 @@ export function HomePage() {
     );
   }
 
-  const contentTitle = selectedDomain
-    ? selectedDomain.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())
+  // With a single browseable domain there's no "All" — the header names that
+  // one domain (derived from visibleDomains, so it's generic, not per-network).
+  const headerDomain =
+    selectedDomain ?? (visibleDomains.length === 1 ? visibleDomains[0].id : null);
+  const contentTitle = headerDomain
+    ? headerDomain.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())
     : t('home.browse_all');
-  const contentDescription = selectedDomain
-    ? visibleDomains.find((d) => d.id === selectedDomain)?.description
+  const contentDescription = headerDomain
+    ? visibleDomains.find((d) => d.id === headerDomain)?.description
     : undefined;
-  const contentCount = selectedDomain
-    ? (filteredDomainItems[selectedDomain]?.length ?? 0)
+  const contentCount = headerDomain
+    ? (filteredDomainItems[headerDomain]?.length ?? 0)
     : Object.values(filteredDomainItems).reduce((s, a) => s + a.length, 0);
 
   function buildEmptyState(domainLabel: string) {

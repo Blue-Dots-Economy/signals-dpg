@@ -1,4 +1,4 @@
-import type { GeoComponents, GeoProvider, GeoSuggestion } from './types';
+import type { GeoComponents, GeoProvider, GeoSuggestion, LatLng } from './types';
 
 type GoogleNS = {
   maps: {
@@ -108,6 +108,32 @@ export function createGooglePlacesProvider(apiKey: string): GeoProvider {
         return resolved.filter((x): x is GeoSuggestion => x !== null);
       } catch {
         return [];
+      }
+    },
+    async geocode(address, signal): Promise<LatLng | null> {
+      const q = address.trim();
+      if (!q) return null;
+      try {
+        await loadMapsApi(apiKey);
+        if (signal?.aborted) return null;
+        const { Geocoder } = (await (
+          window as unknown as { google: GoogleNS }
+        ).google.maps.importLibrary('geocoding')) as {
+          Geocoder: new () => {
+            geocode: (req: { address: string }) => Promise<{
+              results: Array<{
+                geometry: { location: { lat: () => number; lng: () => number } };
+              }>;
+            }>;
+          };
+        };
+        const { results } = await new Geocoder().geocode({ address: q });
+        const [first] = results;
+        if (!first) return null;
+        const loc = first.geometry.location;
+        return { lat: loc.lat(), lng: loc.lng() };
+      } catch {
+        return null;
       }
     },
   };

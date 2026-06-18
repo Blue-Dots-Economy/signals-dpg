@@ -82,6 +82,11 @@ vi.mock('@dpg/database', async (importOriginal) => {
   };
 });
 
+// --- mock publishItemEvent so Redis is never touched in unit tests ---
+vi.mock('@/utils/publish_item_event', () => ({
+  publishItemEvent: vi.fn(async () => {}),
+}));
+
 // --- mock @dpg/schemas: keep real exports + neutralize the merge helper for tests ---
 vi.mock('@dpg/schemas', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@dpg/schemas')>();
@@ -338,7 +343,7 @@ vi.mock('@/services/item_service', () => {
             updated_at: new Date(),
           };
         }
-        return list[idx];
+        return { row: list[idx] };
       },
     ),
   };
@@ -346,6 +351,7 @@ vi.mock('@/services/item_service', () => {
 
 // Imported after mocks.
 import { participant } from '../participant.js';
+import { publishItemEvent } from '@/utils/publish_item_event';
 
 const VALID_EMAIL = 'demo@example.com';
 const VALID_PHONE = '+919876543210';
@@ -397,6 +403,7 @@ describe('POST /admin/participant', () => {
     dbState.existingOwnedItemId = null;
     lastQueriedUserId = null;
     lastQueriedItemId = null;
+    vi.mocked(publishItemEvent).mockClear();
   });
 
   it('403 INVALID_ACTING_ORG when acting_org is missing', async () => {
@@ -959,6 +966,129 @@ describe('POST /admin/participant', () => {
     expect(vi.mocked(updateItemInternal)).toHaveBeenCalledTimes(1);
     expect(dbState.inserts).toHaveLength(0);
     expect(dbState.itemsByUser.get(user_id)).toHaveLength(1);
+  });
+
+  // ---------------------------------------------------------------------------
+  // publishItemEvent enqueue assertions (insert_item / update_item / create_new_user)
+  // ---------------------------------------------------------------------------
+
+  it('insert_item branch: publishItemEvent called with op:upsert and correct item identity', async () => {
+    const user_id = 'usr_insert_enqueue';
+    dbState.existingUserRows = [
+      {
+        id: user_id,
+        email: VALID_EMAIL,
+        phoneNumber: null,
+        onboardedByOrgId: 'org_ns_1',
+      },
+    ];
+    dbState.itemsByUser.set(user_id, []);
+    lastQueriedUserId = user_id;
+    const app = await buildApp({ org_id: 'org_ns_1', org_type: 'network_service' });
+    const res = await app.inject({
+      method: 'POST',
+      url: '/participant',
+      payload: baseBody({ network: 'blue_dot', domain: 'seeker', item_type: 'profile_1.0' }),
+    });
+    expect(res.statusCode).toBe(200);
+    expect(vi.mocked(publishItemEvent)).toHaveBeenCalledTimes(1);
+    const [event] = vi.mocked(publishItemEvent).mock.calls[0];
+    expect(event.op).toBe('upsert');
+    expect(event.item_network).toBe('blue_dot');
+    expect(event.item_domain).toBe('seeker');
+    expect(event.item_type).toBe('profile_1.0');
+    expect(typeof event.item_id).toBe('string');
+    expect(event.item_id.length).toBeGreaterThan(0);
+  });
+
+  it('update_item branch: publishItemEvent called with op:upsert and row identity from updateItemInternal', async () => {
+    const user_id = 'usr_update_enqueue';
+    dbState.existingUserRows = [
+      {
+        id: user_id,
+        email: VALID_EMAIL,
+        phoneNumber: null,
+        onboardedByOrgId: 'org_ns_1',
+      },
+    ];
+    dbState.itemsByUser.set(user_id, [
+      {
+        item_id: VALID_UUID_A,
+        item_network: 'blue_dot',
+        item_domain: 'seeker',
+        item_type: 'profile_1.0',
+        item_state: { v: 1 },
+        item_private_state: '',
+        created_at: new Date('2026-01-01T00:00:00Z'),
+        updated_at: new Date('2026-01-01T00:00:00Z'),
+      },
+    ]);
+    dbState.itemOwnerLookup.set(VALID_UUID_A, user_id);
+    lastQueriedUserId = user_id;
+    lastQueriedItemId = VALID_UUID_A;
+    const { updateItemInternal } = await import('@/services/item_service');
+    vi.mocked(updateItemInternal).mockClear();
+    const app = await buildApp({ org_id: 'org_ns_1', org_type: 'network_service' });
+    const res = await app.inject({
+      method: 'POST',
+      url: '/participant',
+      payload: baseBody({ item_id: VALID_UUID_A, item_state: { v: 2 } }),
+    });
+    expect(res.statusCode).toBe(200);
+    expect(vi.mocked(publishItemEvent)).toHaveBeenCalledTimes(1);
+    const [event] = vi.mocked(publishItemEvent).mock.calls[0];
+    expect(event.op).toBe('upsert');
+    expect(event.item_id).toBe(VALID_UUID_A);
+    expect(event.item_network).toBe('blue_dot');
+    expect(event.item_domain).toBe('seeker');
+    expect(event.item_type).toBe('profile_1.0');
+  });
+
+  it('create_new_user branch: publishItemEvent called with op:upsert after tx commits', async () => {
+    dbState.signUpUserId = 'usr_new_enqueue';
+    lastQueriedUserId = 'usr_new_enqueue';
+    const app = await buildApp({ org_id: 'org_agg_1', org_type: 'aggregator' });
+    const res = await app.inject({
+      method: 'POST',
+      url: '/participant',
+      payload: baseBody({ phone_number: VALID_PHONE, email: undefined, network: 'blue_dot', domain: 'seeker', item_type: 'profile_1.0' }),
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().user_existed).toBe(false);
+    expect(vi.mocked(publishItemEvent)).toHaveBeenCalledTimes(1);
+    const [event] = vi.mocked(publishItemEvent).mock.calls[0];
+    expect(event.op).toBe('upsert');
+    expect(event.item_network).toBe('blue_dot');
+    expect(event.item_domain).toBe('seeker');
+    expect(event.item_type).toBe('profile_1.0');
+    expect(typeof event.item_id).toBe('string');
+    expect(event.item_id.length).toBeGreaterThan(0);
+  });
+
+  it('error branches: publishItemEvent NOT called when insert_item fails', async () => {
+    const user_id = 'usr_insert_fail_no_enqueue';
+    dbState.existingUserRows = [
+      {
+        id: user_id,
+        email: VALID_EMAIL,
+        phoneNumber: null,
+        onboardedByOrgId: 'org_ns_1',
+      },
+    ];
+    dbState.itemsByUser.set(user_id, []);
+    lastQueriedUserId = user_id;
+    const { create_profile_item } = await import('@/lib/profile_item');
+    vi.mocked(create_profile_item).mockRejectedValueOnce(
+      Object.assign(new Error('schema error'), { statusCode: 400, errorCode: 'INVALID_ITEM_STATE' }),
+    );
+    const app = await buildApp({ org_id: 'org_ns_1', org_type: 'network_service' });
+    const res = await app.inject({
+      method: 'POST',
+      url: '/participant',
+      payload: baseBody(),
+    });
+    expect(res.statusCode).toBe(400);
+    expect(vi.mocked(publishItemEvent)).not.toHaveBeenCalled();
   });
 
   it('400 when neither email nor phone_number is provided', async () => {

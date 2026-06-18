@@ -85,21 +85,64 @@ describe('example network configs declare a location field', () => {
 
       const fields = parseLocationFields(schema);
       expect(
-        fields.field,
-        `${network}/${domainId} has no location field`,
+        fields.primary,
+        `${network}/${domainId} has no primary location field`,
       ).not.toBeNull();
 
       const properties = schema.properties as Record<
         string,
         { location?: unknown }
       >;
-      const locationCount = Object.values(properties).filter(
-        (p) => p?.location === 'single' || p?.location === 'multiple',
+      const primaryCount = Object.values(properties).filter(
+        (p) => p?.location === 'primary',
       ).length;
       expect(
-        locationCount,
-        `${network}/${domainId} must have exactly one location marker, found ${locationCount}`,
+        primaryCount,
+        `${network}/${domainId} must have exactly one primary location marker, found ${primaryCount}`,
       ).toBe(1);
     },
   );
+});
+
+describe('x-show-if fields are never unconditionally required', () => {
+  // Server lifecycle classifier (#104) is x-show-if-unaware: a conditional field
+  // in a top-level required[] would strand items in draft when the other branch
+  // is taken. Guard the invariant across every example network's item schemas.
+  const configs = [
+    ['orange_dot', 'examples/schemas/orange_dot/network.json'],
+    ['purple_dot', 'examples/schemas/purple_dot/network.json'],
+    ['yellow_dot', 'examples/schemas/yellow_dot/network.json'],
+    ['blue_dot', 'examples/schemas/blue_dot/network.json'],
+  ] as const;
+
+  it.each(configs)('%s has no x-show-if field in any required[]', (_network, relPath) => {
+    const abs = resolve(__dirname, '../../../..', relPath);
+    const doc = JSON.parse(readFileSync(abs, 'utf8')) as {
+      domains: Array<{
+        id: string;
+        item_schemas?: Record<
+          string,
+          { properties?: Record<string, { 'x-show-if'?: unknown }>; required?: string[] }
+        >;
+      }>;
+    };
+
+    const violations: string[] = [];
+    for (const domain of doc.domains ?? []) {
+      for (const [itemType, itemSchema] of Object.entries(domain.item_schemas ?? {})) {
+        const props = itemSchema.properties ?? {};
+        const required = itemSchema.required ?? [];
+        for (const field of required) {
+          if (props[field]?.['x-show-if'] !== undefined) {
+            violations.push(`${domain.id}/${itemType}.${field}`);
+          }
+        }
+      }
+    }
+
+    expect(
+      violations,
+      `x-show-if fields must not be unconditionally required:\n${violations.join('\n')}`,
+    ).toEqual([]);
+  });
 });

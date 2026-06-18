@@ -12,6 +12,7 @@ import {
   replyForUnservedDomain,
 } from '@/utils/served_domain_guard';
 import { invalidateItemFetchCache } from '@/utils/item_fetch_cache_invalidate';
+import { publishItemEvent } from '@/utils/publish_item_event';
 import { createItemInternal, ItemServiceError } from '@/services/item_service';
 import { resolveLocationsForCreate } from '@/services/geocoding/resolve_locations_for_create';
 import { resolveDomainLock } from './resolve_domain_lock';
@@ -163,6 +164,17 @@ export const create_item_handler = async (
       item_locations,
       created_by: userId,
     });
+
+    await publishItemEvent(
+      {
+        item_network: body.item_network,
+        item_domain: body.item_domain,
+        item_type: body.item_type,
+        item_id: created.itemId,
+        op: 'upsert',
+      },
+      request.log,
+    );
 
     await invalidateItemFetchCache(body.item_network, body.item_domain).catch((err) =>
       request.log.warn({ err }, 'cache invalidation after create failed'),

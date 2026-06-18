@@ -148,46 +148,51 @@ export function AppSidebar({
           </SidebarGroup>
         )}
         {showNetworkSelector && <SidebarSeparator />}
-        <SidebarGroup>
-          <SidebarGroupLabel>{t('nav.browse_group')}</SidebarGroupLabel>
-          <SidebarGroupContent>
-            <SidebarMenu>
-              {/* "All" only makes sense when there's more than one browseable
-                  domain (i.e. more than one distinct `to_domain`). With a single
-                  domain it's redundant, so hide it and let that domain stand alone. */}
-              {domains.length > 1 && (
-                <SidebarMenuItem>
-                  <SidebarMenuButton
-                    isActive={selectedDomain === null}
-                    onClick={() => onDomainSelect(null)}
-                  >
-                    <LayoutGrid className="h-4 w-4" />
-                    <span>{t('common.all')}</span>
-                  </SidebarMenuButton>
-                </SidebarMenuItem>
-              )}
-              {domains.map((domain) => {
-                const Icon = getDomainIcon(domain.id, selectedNetwork);
-                const label = domain.id
-                  .replace(/_/g, ' ')
-                  .replace(/\b\w/g, (c) => c.toUpperCase());
-                return (
-                  <SidebarMenuItem key={domain.id}>
+        {/* The Browse domain selector only appears when there is MORE THAN ONE
+            browseable domain (i.e. >1 distinct interaction `to_domain`). With a
+            single target domain there is no choice to make — a lone tab (and an
+            "All") is redundant — so the whole selector and its separator are
+            hidden, and that domain's listings render directly in the main view.
+            Driven by the network's interactions; not network-specific. */}
+        {domains.length > 1 && (
+          <>
+            <SidebarGroup>
+              <SidebarGroupLabel>{t('nav.browse_group')}</SidebarGroupLabel>
+              <SidebarGroupContent>
+                <SidebarMenu>
+                  <SidebarMenuItem>
                     <SidebarMenuButton
-                      isActive={selectedDomain === domain.id}
-                      onClick={() => onDomainSelect(domain.id)}
-                      title={domain.description}
+                      isActive={selectedDomain === null}
+                      onClick={() => onDomainSelect(null)}
                     >
-                      <Icon className="h-4 w-4" />
-                      <span>{label}</span>
+                      <LayoutGrid className="h-4 w-4" />
+                      <span>{t('common.all')}</span>
                     </SidebarMenuButton>
                   </SidebarMenuItem>
-                );
-              })}
-            </SidebarMenu>
-          </SidebarGroupContent>
-        </SidebarGroup>
-        <SidebarSeparator />
+                  {domains.map((domain) => {
+                    const Icon = getDomainIcon(domain.id, selectedNetwork);
+                    const label = domain.id
+                      .replace(/_/g, ' ')
+                      .replace(/\b\w/g, (c) => c.toUpperCase());
+                    return (
+                      <SidebarMenuItem key={domain.id}>
+                        <SidebarMenuButton
+                          isActive={selectedDomain === domain.id}
+                          onClick={() => onDomainSelect(domain.id)}
+                          title={domain.description}
+                        >
+                          <Icon className="h-4 w-4" />
+                          <span>{label}</span>
+                        </SidebarMenuButton>
+                      </SidebarMenuItem>
+                    );
+                  })}
+                </SidebarMenu>
+              </SidebarGroupContent>
+            </SidebarGroup>
+            <SidebarSeparator />
+          </>
+        )}
         <SidebarGroup>
           <SidebarGroupLabel>{t('nav.my_profiles_group')}</SidebarGroupLabel>
           <SidebarGroupContent>
@@ -206,38 +211,45 @@ export function AppSidebar({
                   const profiles = profilesByDomain[domainId];
                   const Icon = getDomainIcon(domainId, selectedNetwork);
                   const label = getDomainLabel(domainId);
-                  const isExpanded = expandedDomains.has(domainId);
+                  // A single domain group (always the case in a domain-bound
+                  // portal) needs no accordion header — show its profiles
+                  // directly, always expanded.
+                  const singleGroup = domainKeys.length === 1;
+                  const isExpanded = singleGroup || expandedDomains.has(domainId);
                   const hasActiveProfile = profiles.some((p) => p.item_id === activeProfileId);
 
                   return (
                     <div key={domainId}>
-                      {/* Accordion header */}
-                      <button
-                        onClick={() => toggleDomain(domainId)}
-                        className={[
-                          'flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-sm transition-colors',
-                          'hover:bg-sidebar-accent hover:text-sidebar-accent-foreground',
-                          hasActiveProfile
-                            ? 'font-semibold text-primary'
-                            : 'text-sidebar-foreground/70',
-                        ].join(' ')}
-                      >
-                        <Icon className="h-3.5 w-3.5 shrink-0" />
-                        <span className="flex-1 truncate text-left">{label}</span>
-                        <span className="text-xs text-muted-foreground tabular-nums">
-                          {profiles.length}
-                        </span>
-                        <ChevronRight
+                      {/* Accordion header — only when there's more than one
+                          domain group; a single group is shown flat. */}
+                      {!singleGroup && (
+                        <button
+                          onClick={() => toggleDomain(domainId)}
                           className={[
-                            'h-3.5 w-3.5 shrink-0 transition-transform duration-200',
-                            isExpanded ? 'rotate-90' : '',
+                            'flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-sm transition-colors',
+                            'hover:bg-sidebar-accent hover:text-sidebar-accent-foreground',
+                            hasActiveProfile
+                              ? 'font-semibold text-primary'
+                              : 'text-sidebar-foreground/70',
                           ].join(' ')}
-                        />
-                      </button>
+                        >
+                          <Icon className="h-3.5 w-3.5 shrink-0" />
+                          <span className="flex-1 truncate text-left">{label}</span>
+                          <span className="text-xs text-muted-foreground tabular-nums">
+                            {profiles.length}
+                          </span>
+                          <ChevronRight
+                            className={[
+                              'h-3.5 w-3.5 shrink-0 transition-transform duration-200',
+                              isExpanded ? 'rotate-90' : '',
+                            ].join(' ')}
+                          />
+                        </button>
+                      )}
 
                       {/* Accordion body */}
                       {isExpanded && (
-                        <div className="ml-3 mt-0.5 border-l border-border pl-2">
+                        <div className={singleGroup ? 'mt-0.5' : 'ml-3 mt-0.5 border-l border-border pl-2'}>
                           <SidebarMenu>
                             {profiles.map((profile) => {
                               const schema = userSchemas?.[profile.item_domain];

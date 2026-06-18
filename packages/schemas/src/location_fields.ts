@@ -1,16 +1,29 @@
 /**
- * Marker-driven location-field selection. Exactly ONE field per domain is the
- * geo field, marked:
- *   - "location": "single"   — a string field → one coordinate.
- *   - "location": "multiple" — an array-of-strings field → one coordinate per entry.
- * No granularity/level axis (autocomplete is unrestricted) and no secondary fields.
- * Shared by the UI (form + map) and the API (server-side geocode).
+ * Marker-driven location-field selection.
+ *
+ *   "location": "primary"   — the ONE field per domain that is geocoded,
+ *                             stored as item_locations, and shown on the map.
+ *                             Also gets form autocomplete.
+ *   "location": "secondary" — a field that gets form autocomplete ONLY; never
+ *                             geocoded, stored, or mapped. Zero or more per domain.
+ *
+ * Cardinality (one coordinate vs many) is derived from the field's JSON Schema
+ * `type`: `array` -> multiple, otherwise single. Shared by the UI (form + map)
+ * and the API (server-side geocode).
  */
 export type LocationCardinality = 'single' | 'multiple';
+export type LocationRole = 'primary' | 'secondary';
+
+export interface LocationField {
+  field: string;
+  cardinality: LocationCardinality;
+}
 
 export interface LocationFields {
-  field: string | null;
-  cardinality: LocationCardinality | null;
+  /** The geo field (geocode + map). Null when no field is marked primary. */
+  primary: LocationField | null;
+  /** Autocomplete-only fields. */
+  secondary: LocationField[];
 }
 
 /** One coordinate. `label` is the place/city name when known. */
@@ -20,51 +33,125 @@ export interface LocationPoint {
   label?: string;
 }
 
-type JsonSchemaProperty = { location?: unknown; private?: unknown };
+type JsonSchemaProperty = { location?: unknown; private?: unknown; type?: unknown };
+
+function cardinalityOf(prop: JsonSchemaProperty): LocationCardinality {
+  return prop?.type === 'array' ? 'multiple' : 'single';
+}
 
 export function parseLocationFields(
   itemSchema: Record<string, unknown> | null | undefined
 ): LocationFields {
   const properties = (itemSchema?.properties ?? {}) as Record<string, JsonSchemaProperty>;
+  let primary: LocationField | null = null;
+  const secondary: LocationField[] = [];
   for (const [name, prop] of Object.entries(properties)) {
-    if (prop?.location === 'single') return { field: name, cardinality: 'single' };
-    if (prop?.location === 'multiple') return { field: name, cardinality: 'multiple' };
+    if (prop?.location === 'primary') {
+      // Validation guarantees at most one; first wins defensively.
+      primary ??= { field: name, cardinality: cardinalityOf(prop) };
+    } else if (prop?.location === 'secondary') {
+      secondary.push({ field: name, cardinality: cardinalityOf(prop) });
+    }
   }
-  return { field: null, cardinality: null };
+  return { primary, secondary };
+}
+
+/** Primary + secondary fields (primary first) — the fields that get autocomplete. */
+export function getAutocompleteLocationFields(
+  itemSchema: Record<string, unknown> | null | undefined
+): LocationField[] {
+  const { primary, secondary } = parseLocationFields(itemSchema);
+  return primary ? [primary, ...secondary] : secondary;
 }
 
 /**
- * Returns true when the schema's location field carries `"private": true`.
- * Used by the page-level geocode fallback to suppress exact-coordinate storage
- * for private fields (PII requirement: private → coarse coordinate only).
+ * True when the primary location field carries `"private": true`. Used by the
+ * geocode paths to coarsen exact coordinates for a PII field.
  */
 export function isLocationFieldPrivate(
   itemSchema: Record<string, unknown> | null | undefined
 ): boolean {
-  const fields = parseLocationFields(itemSchema);
-  if (!fields.field) return false;
+  const { primary } = parseLocationFields(itemSchema);
+  if (!primary) return false;
   const properties = (itemSchema?.properties ?? {}) as Record<string, JsonSchemaProperty>;
-  return properties[fields.field]?.private === true;
+  return properties[primary.field]?.private === true;
 }
 
 /**
- * The geocode queries that produce the item's locations:
- *   - multiple → one {query,label} per non-empty array entry (label = the value).
- *   - single   → one {query} from the field's string value.
- *   - else     → [].
- * Pure; the caller geocodes each query.
+ * The geocode queries that produce the item's locations, from the PRIMARY field
+ * only (secondary fields are never geocoded):
+ *   - multiple -> one {query,label} per non-empty array entry (label = value).
+ *   - single   -> one {query} from the field's string value.
+ *   - null     -> [].
  */
 export function buildLocationQueries(
   data: Record<string, unknown>,
-  fields: LocationFields
+  primary: LocationField | null
 ): Array<{ query: string; label?: string }> {
-  if (!fields.field) return [];
-  const raw = data[fields.field];
-  if (fields.cardinality === 'multiple') {
+  if (!primary) return [];
+  const raw = data[primary.field];
+  if (primary.cardinality === 'multiple') {
     if (!Array.isArray(raw)) return [];
     return raw
       .filter((v): v is string => typeof v === 'string' && v.trim().length > 0)
       .map((v) => ({ query: v.trim(), label: v.trim() }));
   }
   return typeof raw === 'string' && raw.trim() ? [{ query: raw.trim() }] : [];
+}
+
+/**
+ * True when the schema's primary location field is present in `partialState`
+ * (a partial update payload) and its value differs from `priorState`.
+ * Used to decide whether an UPDATE should re-geocode.
+ */
+export function primaryAddressChanged(
+  itemSchema: Record<string, unknown>,
+  partialState: Record<string, unknown>,
+  priorState: Record<string, unknown>,
+): boolean {
+  const { primary } = parseLocationFields(itemSchema);
+  if (!primary) return false;
+  if (!Object.prototype.hasOwnProperty.call(partialState, primary.field)) return false;
+  // Primary location values are a string (single) or string[] (multiple), so
+  // JSON.stringify is a sound deterministic equality check (and array reordering
+  // is intentionally treated as a change). Not safe for object-valued fields.
+  return JSON.stringify(partialState[primary.field]) !== JSON.stringify(priorState[primary.field]);
+}
+
+/**
+ * True when the schema's primary location field is blank/empty in `state`
+ * (missing, null, empty/whitespace string, or empty array). Lets an UPDATE
+ * distinguish "address cleared" (→ wipe coords) from "geocode failed" (→ keep
+ * existing coords). Returns false when the schema has no primary field.
+ */
+export function isPrimaryAddressBlank(
+  itemSchema: Record<string, unknown>,
+  state: Record<string, unknown>,
+): boolean {
+  const { primary } = parseLocationFields(itemSchema);
+  if (!primary) return false;
+  const value = state[primary.field];
+  if (value === undefined || value === null) return true;
+  if (typeof value === 'string') return value.trim() === '';
+  if (Array.isArray(value)) return value.length === 0;
+  return false;
+}
+
+/**
+ * Throws when an item schema does not declare exactly one `primary` location
+ * field. Called at network-config load so a misconfigured network fails fast.
+ */
+export function assertSinglePrimaryLocation(
+  itemSchema: Record<string, unknown> | null | undefined,
+  context: string
+): void {
+  const properties = (itemSchema?.properties ?? {}) as Record<string, JsonSchemaProperty>;
+  const primaryCount = Object.values(properties).filter(
+    (p) => p?.location === 'primary'
+  ).length;
+  if (primaryCount !== 1) {
+    throw new Error(
+      `${context}: item schema must declare exactly one "location": "primary" field, found ${primaryCount}.`
+    );
+  }
 }

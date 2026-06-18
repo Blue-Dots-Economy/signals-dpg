@@ -24,6 +24,8 @@ export function getGeoProvider(): GeoProvider {
   cached = {
     suggest: (query, signal) =>
       looksLikePIIMask(query) ? Promise.resolve([]) : base.suggest(query, signal),
+    geocode: (address, signal) =>
+      looksLikePIIMask(address) ? Promise.resolve(null) : base.geocode(address, signal),
   };
   return cached;
 }

@@ -98,45 +98,6 @@ export async function updateItem(itemId: string, payload: UpdateItemPayload): Pr
   return response.data;
 }
 
-/**
- * Hard-delete the caller's own profile item. The server enforces ownership
- * via `items.created_by = session.user.id`; a 404 from the API means either
- * the item never existed or it belongs to someone else (same envelope so
- * the server never leaks the existence of another user's row).
- */
-export async function deleteItem(itemId: string): Promise<void> {
-  await apiClient.delete(`/api/v1/item/${itemId}`);
-}
-
-export interface ItemLifecycleResponse {
-  item_id: string;
-  lifecycle_status: 'draft' | 'live' | 'paused';
-}
-
-/**
- * Pause the caller's own item (must be in 'live' state).
- * Pending actions are preserved; they are gated at perform/accept time (§10).
- */
-export async function pauseItem(itemId: string): Promise<ItemLifecycleResponse> {
-  const response = await apiClient.post<ItemLifecycleResponse>('/api/v1/item/lifecycle', {
-    item_id: itemId,
-    action: 'pause',
-  });
-  return response.data;
-}
-
-/**
- * Unpause (resume) the caller's own item (must be in 'paused' state).
- * The server re-classifies the item and sets it back to 'live' or 'draft'.
- */
-export async function unpauseItem(itemId: string): Promise<ItemLifecycleResponse> {
-  const response = await apiClient.post<ItemLifecycleResponse>('/api/v1/item/lifecycle', {
-    item_id: itemId,
-    action: 'unpause',
-  });
-  return response.data;
-}
-
 // Re-export action-related types and functions from action-api.ts
 export {
   type ItemRef,

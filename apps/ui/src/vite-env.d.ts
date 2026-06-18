@@ -10,6 +10,7 @@ interface ImportMetaEnv {
   readonly VITE_DEFAULT_API_URL: string;
   readonly VITE_SHOW_INSTANCE_SELECTOR: string;
   readonly VITE_NETWORK_ID: string;
+  readonly VITE_SERVED_BINDINGS?: string;
   readonly VITE_DEFAULT_NETWORK_THEME?: string;
   readonly VITE_DEFAULT_VIEW_MODE?: 'list' | 'map';
   readonly VITE_ACTION_POLL_INTERVAL_MS?: string;
@@ -18,6 +19,8 @@ interface ImportMetaEnv {
   readonly VITE_AGENT_URL: string;
   readonly VITE_AGENT_TOKEN: string;
   readonly VITE_ENABLED_LANGUAGES: string;
+  /** Browser tab title for the tourist app. Defaults to "OneTAC". */
+  readonly VITE_TOURIST_APP_TITLE?: string;
 }
 
 declare const __DEFAULT_NETWORK_THEME__: string;
