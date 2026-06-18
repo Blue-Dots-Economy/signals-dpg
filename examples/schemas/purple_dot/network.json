@@ -125,13 +125,16 @@
                   "Financial Products (Loans/Insurance)",
                   "Other"
                 ]
-              }
+              },
+              "vectorize": true
             },
             "looking_for_details": {
               "type": "string",
               "title": "Details",
               "description": "Explain your choice in more detail",
-              "minLength": 1
+              "minLength": 1,
+              "vectorize": true,
+              "vector_weight": 2
             },
             "address": {
               "type": "string",
@@ -260,7 +263,8 @@
               "type": "string",
               "title": "Organisation",
               "description": "Name of your organisation (or your name if individual)",
-              "minLength": 1
+              "minLength": 1,
+              "vectorize": true
             },
             "disabilities_served": {
               "type": "array",

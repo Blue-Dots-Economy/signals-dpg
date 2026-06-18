@@ -97,7 +97,9 @@
             "nameOfJobRolesInterestedIn": {
               "type": "string",
               "title": "Job Roles Interested In",
-              "minLength": 1
+              "minLength": 1,
+              "vectorize": true,
+              "vector_weight": 2
             },
             "otherHelpNeeded": {
               "type": "string",
@@ -612,6 +614,7 @@
               "type": "string",
               "title": "Certification Details",
               "description": "Please describe your certification or skills learned informally",
+              "vectorize": true,
               "x-show-if": {
                 "educationCategory": [
                   "Certification",
@@ -627,7 +630,8 @@
             "nameOfLastRoleHeld": {
               "type": "string",
               "title": "Name of last role held",
-              "description": "Enter the name of your last role"
+              "description": "Enter the name of your last role",
+              "vectorize": true
             },
             "languageSpoken": {
               "type": "array",
@@ -741,7 +745,8 @@
             "jobProviderName": {
               "type": "string",
               "title": "Company Name",
-              "minLength": 1
+              "minLength": 1,
+              "vectorize": true
             },
             "jobProviderLocation": {
               "type": "string",
@@ -764,7 +769,9 @@
             "role": {
               "type": "string",
               "title": "Role",
-              "minLength": 1
+              "minLength": 1,
+              "vectorize": true,
+              "vector_weight": 2
             },
             "positions": {
               "type": "integer",
@@ -848,14 +855,16 @@
             },
             "lastRoleHeld": {
               "type": "string",
-              "minLength": 1
+              "minLength": 1,
+              "vectorize": true
             },
             "title": {
               "type": "string",
               "title": "Job Title",
               "description": "Job title (editable)",
               "pattern": "^\\s*\\S+\\s*$",
-              "minLength": 1
+              "minLength": 1,
+              "vectorize": true
             },
             "minQualificationSchool": {
               "type": "string",
