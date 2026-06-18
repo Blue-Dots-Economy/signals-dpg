@@ -123,7 +123,8 @@ Follow repo conventions: Fastify + Zod, snake_case route exports, machine-readab
 - `GET /consent/status` returns no record → same blocking accept modal (source `onboarded_first_login`) before proceeding.
 
 ### 4. `/privacy` and `/terms` routes
-- Add real routes in `apps/ui/src/app.tsx` rendering the active document content (reuse the popup's content component), so the footer links work as standalone pages too.
+- The **in-flow** Privacy/Terms links (signup checkbox, re-consent/onboarded modals) open the **popup** — that's the read-and-accept surface; they do **not** navigate.
+- Separately, add real `/privacy` and `/terms` routes in `apps/ui/src/app.tsx` that render the active document **full-page**, reusing the **same content component** as the popup (both read `GET /consent/active`). These exist for a **stable, public, shareable URL** — compliance, app-store / OAuth-consent listings, external references, and "open in new tab" — not for the consent flow itself. It's a second mount point of one component, not a second implementation.
 
 ### 5. Withdraw consent — API only (no UI this phase)
 - `POST /consent/revoke` exists and works (records a `revoked` event → user re-gated). The in-app "Withdraw consent" UI is **deferred**; no account-menu item is built now.
