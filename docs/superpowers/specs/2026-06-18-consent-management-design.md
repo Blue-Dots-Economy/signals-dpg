@@ -75,6 +75,17 @@ All columns snake_case; tables in `apps/api/db/postgres/schema/`; migration via 
 
 - **Append-only.** Acceptance and revocation are separate rows. The **current status** for a (user, network, doc_type) is the *latest* event by `accepted_at`. This table *is* the audit ledger.
 - **Granularity — one row per accepted `doc_type`.** Accepting when **both** docs are active writes **2 rows** (one `privacy_policy`, one `terms_of_service`); only-privacy or only-terms writes **1 row**. Because the docs version/expire independently, re-consenting to one doc adds a new row for **that doc only** — the other doc's latest row stays valid (e.g. privacy v2 accepted while terms v1 remains current). Linked to the account by `user_id` → `user.id` (one user → many rows); there is no consent column on the `user` table — this ledger is the source of truth.
+
+#### Why one row per document, not a single combined row
+
+Acceptance is **atomic** at the UI — one checkbox, the user can't accept one document and reject the other — so two rows is **not** about allowing partial consent. We keep a row per document because the two documents are **independent artefacts** and a combined row breaks down on each of these:
+
+- **Different metadata + different expiry.** Each document carries its own `version`, `purpose`, and `retention_duration` → its own `expires_at` (e.g. Privacy kept 12 months, Terms 24). A combined row would have to hold **two versions and two expiry dates** in one record, and "Privacy expired but Terms still valid" becomes an awkward partial state inside a single row.
+- **Independent re-versioning.** Privacy can go v1→v2 while Terms stays v1. Per-doc, re-consent just **adds one new `privacy_policy` row** and leaves the `terms_of_service` row untouched and valid. A combined row must re-state the unchanged document on every re-consent and decide whether to carry its expiry forward — duplicative and error-prone.
+- **Per-document audit (DPDP).** #119 requires an append-only ledger keyed by *which version of what*. "Who accepted Privacy Policy v2?" is a one-line `WHERE doc_type='privacy_policy' AND version=2`; with a combined row it means parsing a nested blob.
+- **Extensible with no schema change.** Adding or removing a document type for a network is just more/fewer rows — the combined-row shape would otherwise have to change whenever the document set does.
+
+The atomic accept still happens in a single `POST /consent/accept` call; it simply writes one row per active document.
 - Index: `(user_id, network, doc_type, accepted_at desc)` for the latest-event lookup.
 
 ### `user` table changes
