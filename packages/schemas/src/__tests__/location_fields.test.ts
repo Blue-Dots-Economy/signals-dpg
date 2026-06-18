@@ -6,6 +6,7 @@ import {
   getAutocompleteLocationFields,
   assertSinglePrimaryLocation,
   primaryAddressChanged,
+  isPrimaryAddressBlank,
 } from '../location_fields';
 
 const primaryString = {
@@ -142,6 +143,36 @@ describe('primaryAddressChanged', () => {
         { service_cities: ['Pune', 'Mumbai'] }
       )
     ).toBe(false);
+  });
+});
+
+describe('isPrimaryAddressBlank', () => {
+  const noPrimary = { properties: { name: { type: 'string' } } };
+
+  it('returns false when the schema has no primary field', () => {
+    expect(isPrimaryAddressBlank(noPrimary, { name: 'x' })).toBe(false);
+  });
+  it('treats missing / null / empty / whitespace string as blank', () => {
+    expect(isPrimaryAddressBlank(primaryString, {})).toBe(true);
+    expect(isPrimaryAddressBlank(primaryString, { address: null })).toBe(true);
+    expect(isPrimaryAddressBlank(primaryString, { address: '' })).toBe(true);
+    expect(isPrimaryAddressBlank(primaryString, { address: '   ' })).toBe(true);
+  });
+  it('treats a non-empty string as not blank', () => {
+    expect(isPrimaryAddressBlank(primaryString, { address: 'Pune' })).toBe(false);
+  });
+  it('treats an empty array as blank and a non-empty array as not blank', () => {
+    expect(isPrimaryAddressBlank(primaryArray, { service_cities: [] })).toBe(true);
+    expect(isPrimaryAddressBlank(primaryArray, { service_cities: ['Pune'] })).toBe(false);
+  });
+});
+
+// Reviewer case: an UPDATE that clears the primary address must be detectable
+// as "cleared" (→ wipe coords) rather than conflated with a geocode failure.
+describe('clearing the primary address (changed + blank)', () => {
+  it('is reported as both changed and blank', () => {
+    expect(primaryAddressChanged(primaryString, { address: '' }, { address: 'Mumbai' })).toBe(true);
+    expect(isPrimaryAddressBlank(primaryString, { address: '' })).toBe(true);
   });
 });
 

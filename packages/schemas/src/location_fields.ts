@@ -119,6 +119,25 @@ export function primaryAddressChanged(
 }
 
 /**
+ * True when the schema's primary location field is blank/empty in `state`
+ * (missing, null, empty/whitespace string, or empty array). Lets an UPDATE
+ * distinguish "address cleared" (→ wipe coords) from "geocode failed" (→ keep
+ * existing coords). Returns false when the schema has no primary field.
+ */
+export function isPrimaryAddressBlank(
+  itemSchema: Record<string, unknown>,
+  state: Record<string, unknown>,
+): boolean {
+  const { primary } = parseLocationFields(itemSchema);
+  if (!primary) return false;
+  const value = state[primary.field];
+  if (value === undefined || value === null) return true;
+  if (typeof value === 'string') return value.trim() === '';
+  if (Array.isArray(value)) return value.length === 0;
+  return false;
+}
+
+/**
  * Throws when an item schema does not declare exactly one `primary` location
  * field. Called at network-config load so a misconfigured network fails fast.
  */

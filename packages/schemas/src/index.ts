@@ -33,6 +33,7 @@ export {
   getAutocompleteLocationFields,
   assertSinglePrimaryLocation,
   primaryAddressChanged,
+  isPrimaryAddressBlank,
   type LocationFields,
   type LocationField,
   type LocationCardinality,

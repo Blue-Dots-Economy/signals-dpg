@@ -8,6 +8,7 @@ import {
   mergeMasksIntoPublic,
   mergeItemStateWithPrivate,
   primaryAddressChanged,
+  isPrimaryAddressBlank,
   splitItemStateByPrivacy,
   validateAgainstJsonSchema,
 } from '@dpg/schemas';
@@ -408,9 +409,11 @@ export async function updateItemInternal(
     //  1. Explicit non-empty client coords win (e.g. user picked a map
     //     suggestion). An empty `[]` is NOT explicit — it means "no coords".
     //  2. Otherwise, if the primary address field was edited (present in the
-    //     partial update and changed vs prior), re-geocode from the merged
-    //     state; only overwrite when geocoding produced something, so a
-    //     geocode failure preserves the existing coords rather than wiping them.
+    //     partial update and changed vs prior):
+    //       a. cleared to blank/empty → wipe coords (`[]`).
+    //       b. non-blank → re-geocode from the merged state; only overwrite
+    //          when geocoding produced something, so a geocode FAILURE
+    //          preserves the existing coords rather than wiping them.
     //  3. Otherwise leave item_locations unchanged.
     const providedCoords =
       Array.isArray(body.item_locations) && body.item_locations.length > 0
@@ -422,15 +425,20 @@ export async function updateItemInternal(
         itemSchema as Record<string, unknown>
       );
     } else if (addressChanged) {
-      const geocoded = await geocodeLocationsFromState(
-        itemSchema as Record<string, unknown>,
-        mergedFullState
-      );
-      if (geocoded.length > 0) {
-        updateValues.item_locations = locationsForStorage(
-          geocoded,
-          itemSchema as Record<string, unknown>
+      if (isPrimaryAddressBlank(itemSchema as Record<string, unknown>, mergedFullState)) {
+        // Address removed — wipe coords (distinct from a geocode failure).
+        updateValues.item_locations = [];
+      } else {
+        const geocoded = await geocodeLocationsFromState(
+          itemSchema as Record<string, unknown>,
+          mergedFullState
         );
+        if (geocoded.length > 0) {
+          updateValues.item_locations = locationsForStorage(
+            geocoded,
+            itemSchema as Record<string, unknown>
+          );
+        }
       }
     }
   }
