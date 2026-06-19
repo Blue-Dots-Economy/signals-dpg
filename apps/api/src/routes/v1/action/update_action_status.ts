@@ -24,6 +24,7 @@ import {
   validateActionEventPayload,
 } from '@/utils/action_event_runtime';
 import { runBulk, BulkItemFailure } from '@/utils/bulk_runner';
+import { dispatchActionNotifications } from '@/notifications/notify_actions';
 
 const BulkUpdateActionStatusBodySchema = z.array(z.unknown());
 
@@ -292,8 +293,39 @@ export const update_action_status_handler = async (
         remarks: body.remarks,
       };
 
-      await insertActionEvent(db, storedEvent);
+      const createdEvent = await insertActionEvent(db, storedEvent);
       void mirrorActionEventToSourceInstance(storedEvent, request.log);
+
+      if (createdEvent) {
+        void dispatchActionNotifications(
+          {
+            lifecycle: 'status',
+            actionType: updatedAction.action_type,
+            actionId: updatedAction.action_id,
+            status: updatedAction.action_status,
+            updateCount: updatedAction.update_count,
+            currentInstanceUrl: getCurrentApiBaseUrl(),
+            revealCounterpartyName: interaction.reveals_pii_on_status.includes(
+              updatedAction.action_status,
+            ),
+            source: {
+              ownerUserId: storedEvent.source_item_owner,
+              domain: updatedAction.source_item_domain,
+              network: updatedAction.source_item_network,
+              instanceUrl: updatedAction.source_item_instance_url,
+            },
+            target: {
+              ownerUserId: storedEvent.target_item_owner,
+              domain: updatedAction.target_item_domain,
+              network: updatedAction.target_item_network,
+              instanceUrl: updatedAction.target_item_instance_url,
+            },
+          },
+          request.log,
+        ).catch((err) =>
+          request.log.error({ err }, 'action notification dispatch failed'),
+        );
+      }
 
       return {
         action_id: updatedAction.action_id,
