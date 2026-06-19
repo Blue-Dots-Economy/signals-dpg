@@ -39,7 +39,7 @@ export const actionKeys = {
 //
 // Override via `VITE_ACTION_POLL_INTERVAL_MS` (e.g. `"15000"` to poll every
 // 15 seconds, or `"0"` to disable polling entirely and rely on mutations).
-const DEFAULT_POLLING_INTERVAL = 30000;
+const DEFAULT_POLLING_INTERVAL = 60000;
 
 function resolvePollingInterval(): number | false {
   const raw = import.meta.env.VITE_ACTION_POLL_INTERVAL_MS;
