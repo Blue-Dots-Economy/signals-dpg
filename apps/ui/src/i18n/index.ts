@@ -34,11 +34,21 @@ const enabledCodes: string[] =
     .map((s: string) => s.trim())
     .filter((s: string) => s.length > 0) ?? [];
 
-// supportedLngs: env list (if set) else all discovered; always include 'en'
+// Default active languages when VITE_ENABLED_LANGUAGES is unset. Curated
+// (NOT "all discovered") so retained-but-inactive locales like kn stay off by
+// default — set VITE_ENABLED_LANGUAGES to override (e.g. "en,hi,kn").
+const DEFAULT_ENABLED_CODES = ['en', 'hi'];
+
+// supportedLngs: env list (if set) else the curated default; always include 'en'
 const supportedLngs: string[] =
   enabledCodes.length > 0
     ? Array.from(new Set(['en', ...enabledCodes]))
-    : Array.from(new Set(['en', ...discoveredCodes]));
+    : Array.from(
+        new Set([
+          'en',
+          ...DEFAULT_ENABLED_CODES.filter((c) => discoveredCodes.includes(c)),
+        ]),
+      );
 
 void i18next
   .use(LanguageDetector)
@@ -69,7 +79,8 @@ export default i18next;
 /**
  * Returns the list of available languages for the dropdown.
  * If VITE_ENABLED_LANGUAGES is set, returns those codes in order (intersected
- * with discovered locale files). If unset, returns all discovered locales.
+ * with discovered locale files). If unset, returns the curated default
+ * (DEFAULT_ENABLED_CODES — en, hi) intersected with discovered locales.
  * Each entry has `code` and `name` (the `_name` field from the JSON, or code
  * as fallback).
  */
@@ -77,7 +88,7 @@ export function getAvailableLanguages(): Array<{ code: string; name: string }> {
   const orderedCodes =
     enabledCodes.length > 0
       ? enabledCodes.filter((c) => discoveredCodes.includes(c))
-      : discoveredCodes;
+      : DEFAULT_ENABLED_CODES.filter((c) => discoveredCodes.includes(c));
 
   return orderedCodes.map((code) => {
     const translation = resources[code]?.translation;

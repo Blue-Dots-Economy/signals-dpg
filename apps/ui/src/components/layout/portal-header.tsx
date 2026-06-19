@@ -23,14 +23,23 @@ export function PortalHeader({ size = 'sm' }: PortalHeaderProps) {
   // square-ish brands so the mark reads at parity.
   const isSquareishMark = themeId === 'orange_dot';
 
+  // blue_dot is a detailed wordmark + strapline (~3.3:1). Height-driven sizing
+  // (h-7) renders it too narrow to read; size it by WIDTH instead so it fills
+  // the same footprint the previous blue-dot logo occupied.
+  const isWideWordmark = themeId === 'blue_dot';
+
   const logoClass =
     size === 'lg'
       ? isSquareishMark
         ? 'h-16 w-auto max-w-[260px] shrink-0 object-contain sm:h-20 sm:max-w-[320px]'
-        : 'h-10 w-auto max-w-[220px] shrink-0 object-contain sm:h-12 sm:max-w-[260px]'
+        : isWideWordmark
+          ? 'h-auto w-[220px] shrink-0 object-contain sm:w-[260px]'
+          : 'h-10 w-auto max-w-[220px] shrink-0 object-contain sm:h-12 sm:max-w-[260px]'
       : isSquareishMark
         ? 'h-12 w-auto max-w-[200px] shrink-0 object-contain'
-        : 'h-7 w-auto max-w-[150px] shrink-0 object-contain';
+        : isWideWordmark
+          ? 'h-auto w-[150px] shrink-0 object-contain'
+          : 'h-7 w-auto max-w-[150px] shrink-0 object-contain';
 
   return (
     <div className="flex items-center gap-2.5">
