@@ -83,8 +83,10 @@ function maskLeaf(key: string, propSchema: JsonRecord, value: unknown): unknown 
   for (const rule of MASKING_RULES) {
     if (rule.test(key, propSchema)) return rule.apply(str);
   }
-  // Fallback: length-preserving X.
-  return 'X'.repeat(str.length);
+  // Fallback: first char + *** — same shape as name/phone masking so every
+  // unmatched private field (e.g. location, free-text) reveals nothing about
+  // its length and stays visually consistent with the dedicated rules above.
+  return str.length === 0 ? '' : `${str.charAt(0)}***`;
 }
 
 function isPlainObject(input: unknown): input is JsonRecord {
