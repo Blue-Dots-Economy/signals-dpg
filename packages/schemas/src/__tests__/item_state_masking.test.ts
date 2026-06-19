@@ -12,6 +12,7 @@ const profileSchema = {
     name:          { type: 'string',                    private: true },
     aadhaar:       { type: 'string',                    private: true },
     bio:           { type: 'string',                    private: true },
+    location:      { type: 'string',                    private: true },
     address:       { type: 'string',                    private: true },
     nested_address: {
       type: 'object', private: true,
@@ -66,9 +67,19 @@ describe('maskPrivateState', () => {
     expect(out.aadhaar).toBe('XXXXXXXX9012');
   });
 
-  it('falls back to length-preserving X for unknown fields', () => {
+  it('falls back to first-char + *** for unknown fields', () => {
     const out = maskPrivateState(profileSchema, { bio: 'hello' });
-    expect(out.bio).toBe('XXXXX');
+    expect(out.bio).toBe('h***');
+  });
+
+  it('masks an unmatched location field with the standardized first-char + *** format', () => {
+    const out = maskPrivateState(profileSchema, { location: 'Bengaluru, Karnataka' });
+    expect(out.location).toBe('B***');
+  });
+
+  it('returns empty string for an empty unknown field (no stray ***)', () => {
+    const out = maskPrivateState(profileSchema, { bio: '' });
+    expect(out.bio).toBe('');
   });
 
   it('masks an address by key-name heuristic — full ***', () => {
@@ -82,7 +93,7 @@ describe('maskPrivateState', () => {
     });
     expect(out.nested_address).toEqual({
       line1: '***',         // matches address-like heuristic
-      city:  'XXXXXX',      // no heuristic match, length-preserving fallback
+      city:  'L***',        // no heuristic match, first-char + *** fallback
     });
   });
 
@@ -108,6 +119,6 @@ describe('maskPrivateState', () => {
   it('stringifies non-string scalars before masking', () => {
     const schema = { type: 'object', properties: { age: { type: 'number', private: true } } };
     const out = maskPrivateState(schema, { age: 42 });
-    expect(out.age).toBe('XX');
+    expect(out.age).toBe('4***');
   });
 });
