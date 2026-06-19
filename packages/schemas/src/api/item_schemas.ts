@@ -65,7 +65,7 @@ const FetchItemsSchemaBase = z.object({
   item_longitude: z.coerce.number().optional(),
   radius_meters: z.coerce.number().positive().optional(),
 
-  limit: z.coerce.number().int().min(1).max(100).default(20),
+  limit: z.coerce.number().int().min(1).max(1000).default(20),
   offset: z.coerce.number().int().min(0).default(0),
   cache_ttl_seconds: z.coerce.number().int().positive().optional(),
 });
@@ -108,7 +108,7 @@ export const FetchItemsCountBodySchema = withGeoSearchRefinement(
 );
 
 export const FetchItemsBodySchema = withGeoSearchRefinement(FetchItemsSchemaBase.extend({
-  limit: z.number().int().min(1).max(100),
+  limit: z.number().int().min(1).max(1000),
   offset: z.number().int().min(0),
   cache_ttl_seconds: z.number().int().positive().optional(),
 }));

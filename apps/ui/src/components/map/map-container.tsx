@@ -68,16 +68,18 @@ interface MapViewProps {
   resolveMarkerImage?: (marker: MapMarker) => string | null | undefined;
 }
 
-const INDIA_CENTER: [number, number] = [20.5937, 78.9629];
-const INDIA_ZOOM = 5;
+// Default map view when there is no user location / no profile location:
+// Muzaffarnagar, Uttar Pradesh (city-level zoom).
+const DEFAULT_CENTER: [number, number] = [29.4727, 77.7085];
+const DEFAULT_ZOOM = 12;
 const PROFILE_ZOOM = 12;
 
 export function MapView({
   schema,
   items,
   onMarkerClick,
-  center = INDIA_CENTER,
-  zoom = INDIA_ZOOM,
+  center = DEFAULT_CENTER,
+  zoom = DEFAULT_ZOOM,
   focusPoint,
   filtersSlot,
   renderPopup,
@@ -113,7 +115,7 @@ export function MapView({
   // ── Effective center / zoom / initialViewSet ──────────────────────────────
   // When an active profile with coordinates is selected, center on it at
   // city-level zoom. Otherwise fall back to the caller-supplied center/zoom
-  // (INDIA_CENTER default) and let FitBounds fit all markers.
+  // (DEFAULT_CENTER / Muzaffarnagar) and let FitBounds fit all markers.
   const { effectiveCenter, effectiveZoom, initialViewSet } = React.useMemo(() => {
     if (!focusPoint) {
       return { effectiveCenter: center, effectiveZoom: zoom, initialViewSet: false };

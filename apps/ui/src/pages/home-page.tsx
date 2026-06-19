@@ -444,7 +444,7 @@ export function HomePage() {
       domainsToFetch.map((domain) => {
         const itemType = getItemTypeForDomain(network, domain.id);
         return fetchNetworkItems(
-          { item_network: network.id, item_domain: domain.id, item_type: itemType, limit: 100 },
+          { item_network: network.id, item_domain: domain.id, item_type: itemType, limit: 1000 },
           controller.signal
         )
           .then((res) => ({
