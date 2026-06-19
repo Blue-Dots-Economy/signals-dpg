@@ -17,29 +17,21 @@ export function PortalHeader({ size = 'sm' }: PortalHeaderProps) {
   // designer-shipped, which is the priority.
   const logoSrc = brandLogoUrl(themeId, resolved === 'dark' ? 'light' : 'default');
 
-  // OneTAC (orange_dot) is a near-square mark (~1.78:1) — wordmarks like
-  // blue/purple are ~5:1. With max-w-[150px] + h-7, the wordmarks fill the
-  // width nicely but the square-ish mark stays tiny. Bump the height for
-  // square-ish brands so the mark reads at parity.
-  const isSquareishMark = themeId === 'orange_dot';
-
-  // blue_dot is a detailed wordmark + strapline (~3.3:1). Height-driven sizing
-  // (h-7) renders it too narrow to read; size it by WIDTH instead so it fills
-  // the same footprint the previous blue-dot logo occupied.
-  const isWideWordmark = themeId === 'blue_dot';
+  // Near-square marks: orange_dot (OneTAC, ~1.78:1) and blue_dot (UPSDM emblem,
+  // ~1:1). Wordmarks like purple are ~5:1. Height-driven sizing keeps a wide
+  // wordmark readable, but a square mark stays tiny at h-7 — bump the height for
+  // square-ish brands so the mark reads at parity (and doesn't overflow the
+  // header the way width-sizing a square emblem would).
+  const isSquareishMark = themeId === 'orange_dot' || themeId === 'blue_dot';
 
   const logoClass =
     size === 'lg'
       ? isSquareishMark
         ? 'h-16 w-auto max-w-[260px] shrink-0 object-contain sm:h-20 sm:max-w-[320px]'
-        : isWideWordmark
-          ? 'h-auto w-[220px] shrink-0 object-contain sm:w-[260px]'
-          : 'h-10 w-auto max-w-[220px] shrink-0 object-contain sm:h-12 sm:max-w-[260px]'
+        : 'h-10 w-auto max-w-[220px] shrink-0 object-contain sm:h-12 sm:max-w-[260px]'
       : isSquareishMark
         ? 'h-12 w-auto max-w-[200px] shrink-0 object-contain'
-        : isWideWordmark
-          ? 'h-auto w-[150px] shrink-0 object-contain'
-          : 'h-7 w-auto max-w-[150px] shrink-0 object-contain';
+        : 'h-7 w-auto max-w-[150px] shrink-0 object-contain';
 
   return (
     <div className="flex items-center gap-2.5">

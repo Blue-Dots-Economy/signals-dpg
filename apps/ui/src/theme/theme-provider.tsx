@@ -37,10 +37,10 @@ function getInitialNetworkId(): string {
 
 // Networks shipping a designer-provided square mark drop a favicon.png next
 // to their logos. List them here so applyFavicon picks the file over the
-// generated SVG fallback. Wordmark-only networks (blue/purple) keep using
-// the generated dot-mark since their PNG logos are wide and unreadable at
-// 16×16.
-const NETWORKS_WITH_FAVICON_PNG = new Set(['orange_dot']);
+// generated SVG fallback. Wordmark-only networks (purple) keep using the
+// generated dot-mark since their PNG logos are wide and unreadable at 16×16;
+// square marks (orange_dot OneTAC, blue_dot UPSDM emblem) ship a real favicon.
+const NETWORKS_WITH_FAVICON_PNG = new Set(['orange_dot', 'blue_dot']);
 
 function kebab(id: string): string {
   return id.replace(/_/g, '-');
