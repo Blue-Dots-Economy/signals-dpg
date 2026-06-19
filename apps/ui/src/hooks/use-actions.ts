@@ -14,6 +14,7 @@ import {
   type Action,
 } from '@/lib/action-api';
 import type { BulkEnvelope } from '@/lib/bulk';
+import { useAuth } from '@/contexts/auth-context';
 
 // ─── Query Keys ───────────────────────────────────────────────────
 
@@ -65,6 +66,8 @@ export function useActions(
     'queryKey' | 'queryFn'
   > = {}
 ) {
+  const { isAuthenticated } = useAuth();
+  const { enabled: callerEnabled, ...restOptions } = options;
   const query: FetchMyActionsQuery = {
     ownership_role: ownershipRole,
     limit: 100,
@@ -83,7 +86,10 @@ export function useActions(
     refetchInterval: POLLING_INTERVAL,
     refetchIntervalInBackground: false, // Stop polling when tab is hidden
     staleTime: POLLING_INTERVAL === false ? Infinity : POLLING_INTERVAL,
-    ...options,
+    ...restOptions,
+    // Don't fetch/poll actions for anonymous users — the endpoint requires a
+    // session and would 401 on every poll (e.g. sidebar open while logged out).
+    enabled: isAuthenticated && (callerEnabled ?? true),
   });
 }
 
@@ -92,6 +98,7 @@ export function useActions(
  * Auto-polls every 5 seconds
  */
 export function usePendingActionsCount() {
+  const { isAuthenticated } = useAuth();
   return useQuery({
     queryKey: actionKeys.pendingCount(),
     queryFn: async ({ signal }) => {
@@ -109,6 +116,9 @@ export function usePendingActionsCount() {
     refetchInterval: POLLING_INTERVAL,
     refetchIntervalInBackground: false,
     staleTime: POLLING_INTERVAL === false ? Infinity : POLLING_INTERVAL,
+    // Anonymous users have no actions — skip the polling entirely (avoids
+    // repeated 401s when the sidebar is open while logged out).
+    enabled: isAuthenticated,
   });
 }
 
@@ -157,6 +167,8 @@ export function useReceivedActionsByStatus(
     'queryKey' | 'queryFn'
   > = {}
 ) {
+  const { isAuthenticated } = useAuth();
+  const { enabled: callerEnabled, ...restOptions } = options;
   const query: FetchMyActionsQuery = {
     ownership_role: 'received',
     action_status: status,
@@ -176,7 +188,8 @@ export function useReceivedActionsByStatus(
     refetchInterval: POLLING_INTERVAL,
     refetchIntervalInBackground: false,
     staleTime: POLLING_INTERVAL === false ? Infinity : POLLING_INTERVAL,
-    ...options,
+    ...restOptions,
+    enabled: isAuthenticated && (callerEnabled ?? true),
   });
 }
 
