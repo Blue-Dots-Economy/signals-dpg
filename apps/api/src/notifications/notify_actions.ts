@@ -1,6 +1,7 @@
 import type { FastifyBaseLogger } from 'fastify';
 
 import { instance, notification } from '@/config';
+import { getNetworkConfigById } from '@/network_configs';
 import { getNotificationClient } from '@/utils/notificationClient';
 
 import type { NotificationEvent, NotificationPlan } from './build_notifications';
@@ -11,12 +12,26 @@ import { resolveOwnerEmail, resolveProviderServiceName } from './resolve_owner';
 
 interface NotifierConfig {
   notify: (req: NotifyRequest) => Promise<unknown>;
-  brand: {
-    brandName: string;
-    fromEmail: string;
-    replyTo: string;
-    ctaUrl: string;
-  };
+  fromEmail: string;
+  replyTo: string;
+  ctaUrl: string;
+}
+
+/**
+ * Brand display name for the sign-off ("Team {name}"): the action network's
+ * `display_name` (e.g. "Blue Dot"), falling back to INSTANCE_NAME when the
+ * network config has none. Best-effort — never throws.
+ */
+async function resolveNetworkBrandName(networkId: string): Promise<string> {
+  try {
+    const config = await getNetworkConfigById(networkId);
+    return resolveBrandName({
+      networkDisplayName: config.display_name,
+      instanceName: instance.INSTANCE_NAME,
+    });
+  } catch {
+    return resolveBrandName({ instanceName: instance.INSTANCE_NAME });
+  }
 }
 
 // `undefined` = not yet resolved; `null` = resolved and not configured.
@@ -36,12 +51,9 @@ function resolveConfig(): NotifierConfig | null {
 
   cachedConfig = {
     notify: (req) => nc.notify(req),
-    brand: {
-      brandName: resolveBrandName({ instanceName: instance.INSTANCE_NAME }),
-      fromEmail,
-      replyTo: notification.NOTIFICATION_REPLY_TO ?? fromEmail,
-      ctaUrl: buildCtaUrl(frontendBaseUrl),
-    },
+    fromEmail,
+    replyTo: notification.NOTIFICATION_REPLY_TO ?? fromEmail,
+    ctaUrl: buildCtaUrl(frontendBaseUrl),
   };
   return cachedConfig;
 }
@@ -59,6 +71,9 @@ export async function dispatchActionNotifications(
   const config = resolveConfig();
   if (!config) return;
 
+  // Brand name is per-network (the action's network display_name).
+  const brandName = await resolveNetworkBrandName(event.target.network);
+
   const dispatcher = createDirectDispatcher({
     notify: config.notify,
     resolveEmail: resolveOwnerEmail,
@@ -69,7 +84,12 @@ export async function dispatchActionNotifications(
       plan.counterpartyDomain === 'provider'
         ? resolveProviderServiceName(plan.counterpartyItemId)
         : null,
-    brand: config.brand,
+    brand: {
+      brandName,
+      fromEmail: config.fromEmail,
+      replyTo: config.replyTo,
+      ctaUrl: config.ctaUrl,
+    },
     log: (message, meta) => log.warn(meta ?? {}, message),
     onSkip: (reason) => log.info({ reason }, 'action notification skipped'),
   });
