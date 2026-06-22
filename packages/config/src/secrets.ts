@@ -27,6 +27,16 @@ export const NotificationSecretsSchema = z.object({
   NOTIFICATION_SERVICE_KEY_ID: z.string().optional(),
   NOTIFICATION_SERVICE_SECRET: z.string().optional(),
   SMS_TEMPLATE_ID: z.string().optional(),
+  // Action-notification config (Phase 1 event notifications).
+  // From address for action emails. Under Gmail SMTP the notification-service
+  // forces the authenticated account as sender, so this is mainly the SES/prod
+  // sender and the address shown to recipients.
+  NOTIFICATION_FROM_EMAIL: z.string().optional(),
+  // Reply-to for action emails; honoured by all transports. Defaults to
+  // NOTIFICATION_FROM_EMAIL when unset.
+  NOTIFICATION_REPLY_TO: z.string().optional(),
+  // Base URL for the generic /auth/login CTA in action emails.
+  FRONTEND_BASE_URL: z.string().optional(),
 });
 
 export const MatchScoreSecretsSchema = z.object({
