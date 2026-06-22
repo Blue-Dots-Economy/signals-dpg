@@ -3,80 +3,104 @@ import { describe, expect, it } from 'vitest';
 import { renderActionEmail } from '../render_action_email';
 
 const base = {
-  brandName: 'Blue Dot',
-  ctaUrl: 'https://app.example.com/login',
+  network: 'blue_dot',
+  brandName: 'Blue Dots',
+  ctaUrl: 'https://app.example.com/auth/login',
 };
 
-describe('renderActionEmail', () => {
-  it('INBOUND_REQUEST announces the counterparty action and asks to respond', () => {
+describe('renderActionEmail — doc copy', () => {
+  it('connect / seeker-facing / INBOUND_REQUEST: generic subject, service name in body', () => {
     const { subject, html } = renderActionEmail({
       actionType: 'connect',
       shape: 'INBOUND_REQUEST',
-      counterpartyLabel: 'a service provider',
-      ...base,
-    });
-    expect(subject).toBe('A service provider wants to connect with you');
-    expect(html).toContain('wants to connect with you');
-    expect(html).toContain('https://app.example.com/login');
-    expect(html).toContain('Blue Dot');
-  });
-
-  it('OUTBOUND_REQUEST confirms the request was sent to the counterparty', () => {
-    const { subject } = renderActionEmail({
-      actionType: 'connect',
-      shape: 'OUTBOUND_REQUEST',
-      counterpartyLabel: 'a seeker',
-      ...base,
-    });
-    expect(subject).toBe('Your connection request has been sent to a seeker');
-  });
-
-  it('INBOUND_STATUS tells the requester the counterparty responded', () => {
-    const { subject } = renderActionEmail({
-      actionType: 'apply',
-      shape: 'INBOUND_STATUS',
-      counterpartyLabel: 'a service provider',
-      ...base,
-    });
-    expect(subject).toBe('A service provider has responded to your application');
-  });
-
-  it('OUTBOUND_STATUS confirms the response was sent', () => {
-    const { subject } = renderActionEmail({
-      actionType: 'apply',
-      shape: 'OUTBOUND_STATUS',
-      counterpartyLabel: 'a seeker',
-      ...base,
-    });
-    expect(subject).toBe('Your response to a seeker has been sent');
-  });
-
-  it('uses the counterparty name when one is provided (PII revealed)', () => {
-    const { subject } = renderActionEmail({
-      actionType: 'connect',
-      shape: 'INBOUND_STATUS',
-      counterpartyLabel: 'a service provider',
+      recipientRole: 'seeker',
       counterpartyName: 'Acme Services',
       ...base,
     });
-    expect(subject).toBe('Acme Services has responded to your connection request');
+    expect(subject).toBe('A service provider wants to connect with you');
+    expect(html).toContain('Acme Services has expressed interest in connecting with you');
+    expect(html).toContain('https://app.example.com/auth/login');
+    expect(html).toContain('Blue Dots');
+    expect(html).toContain('View the details and respond');
   });
 
-  it('falls back to generic interaction copy for unknown action types', () => {
+  it('connect / seeker-facing / OUTBOUND_REQUEST: service name in subject', () => {
     const { subject } = renderActionEmail({
-      actionType: 'mystery',
-      shape: 'INBOUND_REQUEST',
-      counterpartyLabel: 'another user',
+      actionType: 'connect',
+      shape: 'OUTBOUND_REQUEST',
+      recipientRole: 'seeker',
+      counterpartyName: 'Acme Services',
       ...base,
     });
-    expect(subject).toBe('Another user has taken an action on your profile');
+    expect(subject).toBe('Your connection request has been sent to Acme Services');
   });
 
-  it('escapes HTML in the counterparty name within the body but not the subject', () => {
+  it('connect / provider-facing / INBOUND_REQUEST: seeker stays generic', () => {
     const { subject, html } = renderActionEmail({
       actionType: 'connect',
-      shape: 'INBOUND_STATUS',
-      counterpartyLabel: 'a service provider',
+      shape: 'INBOUND_REQUEST',
+      recipientRole: 'provider',
+      ...base,
+    });
+    expect(subject).toBe('A seeker wants to avail your service');
+    expect(html).toContain('A seeker has shown interest in the service you’re offering');
+  });
+
+  it('apply / provider-facing / INBOUND_REQUEST', () => {
+    const { subject } = renderActionEmail({
+      actionType: 'apply',
+      shape: 'INBOUND_REQUEST',
+      recipientRole: 'provider',
+      ...base,
+    });
+    expect(subject).toBe('A seeker has applied for your opportunity');
+  });
+
+  it('shortlist maps to the apply family copy', () => {
+    const { subject } = renderActionEmail({
+      actionType: 'shortlist',
+      shape: 'OUTBOUND_REQUEST',
+      recipientRole: 'provider',
+      ...base,
+    });
+    expect(subject).toBe('Your shortlisting action has been sent to the seeker');
+  });
+
+  it('falls back to a generic service name when none is provided', () => {
+    const { subject } = renderActionEmail({
+      actionType: 'connect',
+      shape: 'OUTBOUND_REQUEST',
+      recipientRole: 'seeker',
+      ...base,
+    });
+    expect(subject).toBe('Your connection request has been sent to the service provider');
+  });
+
+  it('uses the network brand colour for the CTA button', () => {
+    const blue = renderActionEmail({
+      actionType: 'connect',
+      shape: 'INBOUND_REQUEST',
+      recipientRole: 'provider',
+      ...base,
+    });
+    expect(blue.html).toContain('background-color:#2563eb');
+
+    const green = renderActionEmail({
+      actionType: 'connect',
+      shape: 'INBOUND_REQUEST',
+      recipientRole: 'provider',
+      ...base,
+      network: 'green_dot',
+    });
+    expect(green.html).toContain('background-color:#16a34a');
+    expect(green.html).not.toContain('#2563eb');
+  });
+
+  it('escapes the service name in the body but not the subject', () => {
+    const { subject, html } = renderActionEmail({
+      actionType: 'connect',
+      shape: 'OUTBOUND_REQUEST',
+      recipientRole: 'seeker',
       counterpartyName: 'Acme <script>',
       ...base,
     });

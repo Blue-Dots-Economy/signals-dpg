@@ -250,17 +250,16 @@ export const perform_network_action_handler = async (
         status: created.action_status,
         updateCount: created.update_count,
         currentInstanceUrl: getCurrentApiBaseUrl(),
-        revealCounterpartyName: interaction.reveals_pii_on_status.includes(
-          created.action_status,
-        ),
         source: {
           ownerUserId: body.source_item_owner ?? null,
+          itemId: body.source_item.item_id,
           domain: body.source_item.item_domain,
           network: body.source_item.item_network,
           instanceUrl: body.source_item.item_instance_url,
         },
         target: {
           ownerUserId: targetItemSnapshot.created_by ?? null,
+          itemId: body.target_item.item_id,
           domain: body.target_item.item_domain,
           network: body.target_item.item_network,
           instanceUrl: body.target_item.item_instance_url,

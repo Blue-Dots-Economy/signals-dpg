@@ -8,12 +8,14 @@ const LOCAL = 'http://localhost:3000';
 const baseSides = {
   source: {
     ownerUserId: 'user-source',
+    itemId: 'item-source',
     domain: 'seeker',
     network: 'blue_dot',
     instanceUrl: LOCAL,
   },
   target: {
     ownerUserId: 'user-target',
+    itemId: 'item-target',
     domain: 'provider',
     network: 'blue_dot',
     instanceUrl: LOCAL,
@@ -44,6 +46,7 @@ describe('buildNotifications — single instance', () => {
       recipientUserId: 'user-target',
       recipientDomain: 'provider',
       counterpartyDomain: 'seeker',
+      counterpartyItemId: 'item-source',
       actionType: 'connect',
     });
 
@@ -52,6 +55,7 @@ describe('buildNotifications — single instance', () => {
       recipientUserId: 'user-source',
       recipientDomain: 'seeker',
       counterpartyDomain: 'provider',
+      counterpartyItemId: 'item-target',
     });
   });
 

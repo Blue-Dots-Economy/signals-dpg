@@ -14,8 +14,8 @@ function createEvent(overrides: Partial<NotificationEvent> = {}): NotificationEv
     status: 'created',
     updateCount: 0,
     currentInstanceUrl: LOCAL,
-    source: { ownerUserId: 'user-source', domain: 'seeker', network: 'blue_dot', instanceUrl: LOCAL },
-    target: { ownerUserId: 'user-target', domain: 'provider', network: 'blue_dot', instanceUrl: LOCAL },
+    source: { ownerUserId: 'user-source', itemId: 'item-source', domain: 'seeker', network: 'blue_dot', instanceUrl: LOCAL },
+    target: { ownerUserId: 'user-target', itemId: 'item-target', domain: 'provider', network: 'blue_dot', instanceUrl: LOCAL },
     ...overrides,
   };
 }
@@ -32,12 +32,13 @@ function makeDeps(overrides: Partial<DispatcherDeps> = {}): {
       calls.push(req);
     }),
     resolveEmail: vi.fn(async (userId: string) => `${userId}@example.com`),
+    // Default: counterparty is a seeker → no name resolved.
     resolveCounterpartyName: vi.fn(async () => null),
     brand: {
       brandName: 'Blue Dot',
       fromEmail: 'no-reply@blue.example',
       replyTo: 'support@blue.example',
-      ctaUrl: 'https://app.example.com/login',
+      ctaUrl: 'https://app.example.com/auth/login',
     },
     log: vi.fn(),
     onSkip: vi.fn((reason: string) => {
@@ -55,6 +56,7 @@ describe('DirectDispatcher', () => {
 
     expect(calls).toHaveLength(2);
 
+    // INBOUND_REQUEST → provider (target); provider-facing connect copy.
     const inbound = calls.find((c) => c.dedupe_id.endsWith('INBOUND_REQUEST'));
     expect(inbound).toMatchObject({
       channel: 'email',
@@ -67,7 +69,7 @@ describe('DirectDispatcher', () => {
       fromName: 'Blue Dot',
       fromEmail: 'no-reply@blue.example',
       replyTo: 'support@blue.example',
-      subject: 'A seeker wants to connect with you',
+      subject: 'A seeker wants to avail your service',
     });
     expect(inbound?.variables.html).toContain('Blue Dot');
   });
@@ -75,7 +77,7 @@ describe('DirectDispatcher', () => {
   it('skips and counts a side whose owner has no user id (no throw)', async () => {
     const { deps, calls, skips } = makeDeps();
     const event = createEvent({
-      target: { ownerUserId: null, domain: 'provider', network: 'blue_dot', instanceUrl: LOCAL },
+      target: { ownerUserId: null, itemId: 'item-target', domain: 'provider', network: 'blue_dot', instanceUrl: LOCAL },
     });
 
     await createDirectDispatcher(deps).dispatch(event);
@@ -113,7 +115,7 @@ describe('DirectDispatcher', () => {
     expect(deps.log).toHaveBeenCalled();
   });
 
-  it('includes the counterparty name in the subject when PII is revealed', async () => {
+  it('substitutes the resolved provider service name into seeker-facing copy', async () => {
     const { deps, calls } = makeDeps({
       resolveCounterpartyName: vi.fn(async () => 'Acme Services'),
     });
@@ -122,7 +124,9 @@ describe('DirectDispatcher', () => {
       createEvent({ lifecycle: 'status', status: 'accepted', updateCount: 1 }),
     );
 
+    // INBOUND_STATUS → source (seeker); seeker-facing connect copy uses {name}.
     const inboundStatus = calls.find((c) => c.dedupe_id.endsWith('INBOUND_STATUS'));
+    expect(inboundStatus?.to).toBe('user-source@example.com');
     expect(inboundStatus?.variables.subject).toBe(
       'Acme Services has responded to your connection request',
     );

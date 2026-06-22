@@ -1,4 +1,3 @@
-import { resolveDomainLabel } from './action_copy';
 import { buildNotifications } from './build_notifications';
 import type { NotificationEvent, NotificationPlan } from './build_notifications';
 import { renderActionEmail } from './render_action_email';
@@ -23,7 +22,10 @@ export interface DispatcherDeps {
   notify: (req: NotifyRequest) => Promise<unknown>;
   /** Resolves a local owner's email by user id; null when unknown/phone-only. */
   resolveEmail: (userId: string) => Promise<string | null>;
-  /** Counterparty display name when PII reveal permits it; null otherwise. */
+  /**
+   * Resolves the counterparty's service name for `{name}` in seeker-facing
+   * copy (the provider's Service Name); null for provider-facing copy.
+   */
   resolveCounterpartyName: (plan: NotificationPlan) => Promise<string | null>;
   brand: {
     brandName: string;
@@ -71,7 +73,8 @@ export function createDirectDispatcher(deps: DispatcherDeps): DirectDispatcher {
     const { subject, html } = renderActionEmail({
       actionType: plan.actionType,
       shape: plan.shape,
-      counterpartyLabel: resolveDomainLabel(plan.counterpartyDomain),
+      recipientRole: plan.recipientDomain,
+      network: plan.counterpartyNetwork,
       counterpartyName: counterpartyName ?? undefined,
       brandName: deps.brand.brandName,
       ctaUrl: deps.brand.ctaUrl,

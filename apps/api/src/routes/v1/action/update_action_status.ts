@@ -305,17 +305,16 @@ export const update_action_status_handler = async (
             status: updatedAction.action_status,
             updateCount: updatedAction.update_count,
             currentInstanceUrl: getCurrentApiBaseUrl(),
-            revealCounterpartyName: interaction.reveals_pii_on_status.includes(
-              updatedAction.action_status,
-            ),
             source: {
               ownerUserId: storedEvent.source_item_owner,
+              itemId: updatedAction.source_item_id,
               domain: updatedAction.source_item_domain,
               network: updatedAction.source_item_network,
               instanceUrl: updatedAction.source_item_instance_url,
             },
             target: {
               ownerUserId: storedEvent.target_item_owner,
+              itemId: updatedAction.target_item_id,
               domain: updatedAction.target_item_domain,
               network: updatedAction.target_item_network,
               instanceUrl: updatedAction.target_item_instance_url,

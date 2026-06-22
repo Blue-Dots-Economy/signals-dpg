@@ -5,6 +5,8 @@ import type { NotificationShape } from './types';
 export interface OwnerSide {
   /** Better-auth user id of the item owner; null when the owner has no user. */
   ownerUserId: string | null;
+  /** Item id of this side's item — used to resolve a display/service name. */
+  itemId: string;
   /** Item domain (role) for this side, e.g. "seeker" / "provider". */
   domain: string;
   /** Network the item belongs to. */
@@ -24,21 +26,15 @@ export interface NotificationEvent {
   target: OwnerSide;
   /** Base URL of the instance handling this event. */
   currentInstanceUrl: string;
-  /**
-   * Whether PII-reveal rules permit naming the counterparty for this
-   * action/status. Defaults to false (role-generic labels only).
-   */
-  revealCounterpartyName?: boolean;
 }
 
 export interface NotificationPlan {
   recipientUserId: string | null;
   recipientDomain: string;
-  counterpartyUserId: string | null;
+  /** Counterparty item id — used to resolve the provider's service name. */
+  counterpartyItemId: string;
   counterpartyDomain: string;
   counterpartyNetwork: string;
-  /** PII-gated: name the counterparty only when this is true. */
-  revealCounterpartyName: boolean;
   shape: NotificationShape;
   actionType: string;
   status: string;
@@ -55,10 +51,9 @@ function planFor(
   return {
     recipientUserId: recipient.ownerUserId,
     recipientDomain: recipient.domain,
-    counterpartyUserId: counterparty.ownerUserId,
+    counterpartyItemId: counterparty.itemId,
     counterpartyDomain: counterparty.domain,
     counterpartyNetwork: counterparty.network,
-    revealCounterpartyName: event.revealCounterpartyName ?? false,
     shape,
     actionType: event.actionType,
     status: event.status,

@@ -7,7 +7,7 @@ import type { NotificationEvent, NotificationPlan } from './build_notifications'
 import { buildCtaUrl, resolveBrandName } from './brand';
 import { createDirectDispatcher } from './dispatcher';
 import type { NotifyRequest } from './dispatcher';
-import { resolveOwnerEmail, resolveOwnerName } from './resolve_owner';
+import { resolveOwnerEmail, resolveProviderServiceName } from './resolve_owner';
 
 interface NotifierConfig {
   notify: (req: NotifyRequest) => Promise<unknown>;
@@ -62,9 +62,12 @@ export async function dispatchActionNotifications(
   const dispatcher = createDirectDispatcher({
     notify: config.notify,
     resolveEmail: resolveOwnerEmail,
+    // Seeker-facing copy uses the provider's service name; provider-facing
+    // copy keeps the seeker generic, so resolve a name only when the
+    // counterparty is a provider.
     resolveCounterpartyName: async (plan: NotificationPlan) =>
-      plan.revealCounterpartyName && plan.counterpartyUserId
-        ? resolveOwnerName(plan.counterpartyUserId)
+      plan.counterpartyDomain === 'provider'
+        ? resolveProviderServiceName(plan.counterpartyItemId)
         : null,
     brand: config.brand,
     log: (message, meta) => log.warn(meta ?? {}, message),

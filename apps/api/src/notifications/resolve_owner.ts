@@ -2,6 +2,7 @@ import { eq } from 'drizzle-orm';
 
 import { db } from '@api/db/postgres/drizzle_config';
 import { user } from '@api/db/postgres/schema/auth';
+import { items } from '@dpg/database';
 
 /**
  * Resolves a local owner's email by better-auth user id. Returns null when the
@@ -18,12 +19,20 @@ export async function resolveOwnerEmail(userId: string): Promise<string | null> 
   return rows[0]?.email ?? null;
 }
 
-/** Resolves a user's display name by id; null when unknown. */
-export async function resolveOwnerName(userId: string): Promise<string | null> {
+/**
+ * Resolves a provider item's public service name (`jobProviderName`) by item id.
+ * Used to substitute `{name}` in seeker-facing action emails. Returns null when
+ * unknown. The field is public (not a masked PII field).
+ */
+export async function resolveProviderServiceName(
+  itemId: string,
+): Promise<string | null> {
   const rows = await db
-    .select({ name: user.name })
-    .from(user)
-    .where(eq(user.id, userId))
+    .select({ state: items.item_state })
+    .from(items)
+    .where(eq(items.item_id, itemId))
     .limit(1);
-  return rows[0]?.name ?? null;
+  const state = rows[0]?.state as Record<string, unknown> | undefined;
+  const name = state?.jobProviderName;
+  return typeof name === 'string' && name.trim() ? name : null;
 }

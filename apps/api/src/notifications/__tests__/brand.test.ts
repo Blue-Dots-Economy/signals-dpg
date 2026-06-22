@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { buildCtaUrl, resolveBrandName } from '../brand';
+import { DEFAULT_BRAND_COLOR, buildCtaUrl, resolveBrandColor, resolveBrandName } from '../brand';
 
 describe('buildCtaUrl', () => {
   it('appends /auth/login to the base url', () => {
@@ -31,5 +31,18 @@ describe('resolveBrandName', () => {
     expect(
       resolveBrandName({ networkDisplayName: '   ', instanceName: 'blue_dot_api' }),
     ).toBe('blue_dot_api');
+  });
+});
+
+describe('resolveBrandColor', () => {
+  it('returns the network brand colour', () => {
+    expect(resolveBrandColor('blue_dot')).toBe('#2563eb');
+    expect(resolveBrandColor('green_dot')).toBe('#16a34a');
+    expect(resolveBrandColor('orange_dot')).toBe('#ea580c');
+  });
+
+  it('falls back to the default for unknown / missing networks', () => {
+    expect(resolveBrandColor('mystery_dot')).toBe(DEFAULT_BRAND_COLOR);
+    expect(resolveBrandColor(null)).toBe(DEFAULT_BRAND_COLOR);
   });
 });
