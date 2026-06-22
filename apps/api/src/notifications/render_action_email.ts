@@ -50,12 +50,13 @@ function renderEmailShell(args: {
   const { introHtml, ctaUrl, ctaLabel, ctaColor, brandName } = args;
   const url = escapeHtml(ctaUrl);
   const brand = escapeHtml(brandName);
+  const label = escapeHtml(ctaLabel);
   return `
   <div style="font-family: Arial, sans-serif; font-size: 15px; color: #333;">
     <p>Hi!</p>
     <p>${introHtml}</p>
     <p style="margin: 20px 0;">
-      <a href="${url}" style="background-color:${ctaColor};color:#ffffff;text-decoration:none;padding:10px 18px;border-radius:6px;display:inline-block;">${ctaLabel}</a>
+      <a href="${url}" style="background-color:${ctaColor};color:#ffffff;text-decoration:none;padding:10px 18px;border-radius:6px;display:inline-block;">${label}</a>
     </p>
     <p style="font-size:13px;color:#555;">Or open this link: <a href="${url}" style="color:${ctaColor};">${url}</a></p>
     <p style="margin-top:24px;">Thanks,<br/>Team ${brand}</p>

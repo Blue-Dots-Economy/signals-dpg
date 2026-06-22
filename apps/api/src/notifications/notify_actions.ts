@@ -8,6 +8,7 @@ import type { NotificationEvent, NotificationPlan } from './build_notifications'
 import { buildCtaUrl, resolveBrandName } from './brand';
 import { createDirectDispatcher } from './dispatcher';
 import type { NotifyRequest } from './dispatcher';
+import { resolveRecipientRole } from './action_copy';
 import { resolveOwnerEmail, resolveProviderServiceName } from './resolve_owner';
 
 interface NotifierConfig {
@@ -78,11 +79,12 @@ export async function dispatchActionNotifications(
     notify: config.notify,
     resolveEmail: resolveOwnerEmail,
     // Seeker-facing copy uses the provider's service name; provider-facing
-    // copy keeps the seeker generic, so resolve a name only when the
-    // counterparty is a provider.
+    // copy keeps the seeker generic. Use the same provider-like classification
+    // as the copy selection so the two never drift, and pass the counterparty's
+    // network so the item lookup can prune to its partition.
     resolveCounterpartyName: async (plan: NotificationPlan) =>
-      plan.counterpartyDomain === 'provider'
-        ? resolveProviderServiceName(plan.counterpartyItemId)
+      resolveRecipientRole(plan.counterpartyDomain) === 'provider'
+        ? resolveProviderServiceName(plan.counterpartyItemId, plan.counterpartyNetwork)
         : null,
     brand: {
       brandName,
