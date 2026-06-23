@@ -40,4 +40,10 @@ export interface NotifyRequest<TVariables extends Record<string, unknown>> {
    * Must satisfy the provider JSON schema.
    */
   variables: TVariables;
+
+  /**
+   * Optional idempotency key. The notification-service dedupes on this key
+   * (defaulting to `${channel}:${to}:${template_id}` when omitted).
+   */
+  dedupe_id?: string;
 }

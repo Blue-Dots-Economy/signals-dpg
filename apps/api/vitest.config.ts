@@ -13,6 +13,10 @@ export default defineConfig({
       '@': new URL('./src', import.meta.url).pathname,
       '@api': new URL('./', import.meta.url).pathname,
       '@dpg/auth': new URL('../../packages/auth/src', import.meta.url).pathname,
+      '@dpg/notification': new URL(
+        '../../packages/notification/src',
+        import.meta.url,
+      ).pathname,
       '@dpg/schemas': new URL('../../packages/schemas/src', import.meta.url)
         .pathname,
       '@dpg/config': new URL('../../packages/config/src', import.meta.url)

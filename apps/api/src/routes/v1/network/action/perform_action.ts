@@ -25,6 +25,7 @@ import {
   mirrorActionEventToSourceInstance,
   validateActionEventPayload,
 } from '@/utils/action_event_runtime';
+import { dispatchActionNotifications } from '@/notifications/notify_actions';
 
 type PerformNetworkActionRequest = FastifyRequest<{
   Body: z.infer<typeof PerformNetworkActionBodySchema>;
@@ -235,8 +236,40 @@ export const perform_network_action_handler = async (
     event_payload: eventPayload,
   };
 
-  await insertActionEvent(db, storedEvent);
+  const createdEvent = await insertActionEvent(db, storedEvent);
   void mirrorActionEventToSourceInstance(storedEvent, request.log);
+
+  // Fire-and-forget action emails for every owner side hosted locally. Guarded
+  // on the non-null event insert so retries/duplicates don't re-notify.
+  if (createdEvent) {
+    void dispatchActionNotifications(
+      {
+        lifecycle: 'created',
+        actionType: created.action_type,
+        actionId: created.action_id,
+        status: created.action_status,
+        updateCount: created.update_count,
+        currentInstanceUrl: getCurrentApiBaseUrl(),
+        source: {
+          ownerUserId: body.source_item_owner ?? null,
+          itemId: body.source_item.item_id,
+          domain: body.source_item.item_domain,
+          network: body.source_item.item_network,
+          instanceUrl: body.source_item.item_instance_url,
+        },
+        target: {
+          ownerUserId: targetItemSnapshot.created_by ?? null,
+          itemId: body.target_item.item_id,
+          domain: body.target_item.item_domain,
+          network: body.target_item.item_network,
+          instanceUrl: body.target_item.item_instance_url,
+        },
+      },
+      request.log,
+    ).catch((err) =>
+      request.log.error({ err }, 'action notification dispatch failed'),
+    );
+  }
 
   return reply.code(201).send(created);
 };
