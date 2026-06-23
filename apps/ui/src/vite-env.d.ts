@@ -13,6 +13,10 @@ interface ImportMetaEnv {
   readonly VITE_SERVED_BINDINGS?: string;
   readonly VITE_DEFAULT_NETWORK_THEME?: string;
   readonly VITE_DEFAULT_VIEW_MODE?: 'list' | 'map';
+  /** Per-deployment default map centre as "lat,lng" (falls back to Muzaffarnagar). */
+  readonly VITE_MAP_DEFAULT_CENTER?: string;
+  /** Per-deployment default map zoom (falls back to 12). */
+  readonly VITE_MAP_DEFAULT_ZOOM?: string;
   readonly VITE_ACTION_POLL_INTERVAL_MS?: string;
   readonly VITE_VC_WALLET_URL: string;
   readonly VITE_VC_WALLET_API_KEY: string;
