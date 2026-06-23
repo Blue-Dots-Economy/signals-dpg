@@ -72,11 +72,11 @@ interface MapViewProps {
 // Per-DEPLOYMENT (not per-network): the same network can run as separate
 // instances for different regions (e.g. blue_dot UP vs blue_dot Karnataka),
 // so the default is an env var set per deployment, not network config.
-//   VITE_MAP_DEFAULT_CENTER = "lat,lng"  (e.g. "29.4727,77.7085")
-//   VITE_MAP_DEFAULT_ZOOM   = number     (e.g. 12)
-// Falls back to Muzaffarnagar, Uttar Pradesh (city-level zoom) when unset/invalid.
-export const FALLBACK_CENTER: [number, number] = [29.4727, 77.7085];
-export const FALLBACK_ZOOM = 12;
+//   VITE_MAP_DEFAULT_CENTER = "lat,lng"  (e.g. "29.4727,77.7085" for Muzaffarnagar)
+//   VITE_MAP_DEFAULT_ZOOM   = number     (e.g. 12 for city-level)
+// Falls back to a whole-India view when unset/invalid.
+export const FALLBACK_CENTER: [number, number] = [20.5937, 78.9629];
+export const FALLBACK_ZOOM = 5;
 
 export function parseDefaultCenter(raw: string | undefined): [number, number] {
   const parts = (raw ?? '').split(',').map((s) => Number(s.trim()));
@@ -144,7 +144,7 @@ export function MapView({
   // ── Effective center / zoom / initialViewSet ──────────────────────────────
   // When an active profile with coordinates is selected, center on it at
   // city-level zoom. Otherwise fall back to the caller-supplied center/zoom
-  // (DEFAULT_CENTER from env / Muzaffarnagar fallback) and let FitBounds fit all markers.
+  // (DEFAULT_CENTER from env / whole-India fallback) and let FitBounds fit all markers.
   const { effectiveCenter, effectiveZoom, initialViewSet } = React.useMemo(() => {
     if (!focusPoint) {
       return { effectiveCenter: center, effectiveZoom: zoom, initialViewSet: false };
