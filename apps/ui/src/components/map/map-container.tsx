@@ -68,10 +68,39 @@ interface MapViewProps {
   resolveMarkerImage?: (marker: MapMarker) => string | null | undefined;
 }
 
-// Default map view when there is no user location / no profile location:
-// Muzaffarnagar, Uttar Pradesh (city-level zoom).
-const DEFAULT_CENTER: [number, number] = [29.4727, 77.7085];
-const DEFAULT_ZOOM = 12;
+// Default map view when there is no user location / no profile location.
+// Per-DEPLOYMENT (not per-network): the same network can run as separate
+// instances for different regions (e.g. blue_dot UP vs blue_dot Karnataka),
+// so the default is an env var set per deployment, not network config.
+//   VITE_MAP_DEFAULT_CENTER = "lat,lng"  (e.g. "29.4727,77.7085")
+//   VITE_MAP_DEFAULT_ZOOM   = number     (e.g. 12)
+// Falls back to Muzaffarnagar, Uttar Pradesh (city-level zoom) when unset/invalid.
+export const FALLBACK_CENTER: [number, number] = [29.4727, 77.7085];
+export const FALLBACK_ZOOM = 12;
+
+export function parseDefaultCenter(raw: string | undefined): [number, number] {
+  const parts = (raw ?? '').split(',').map((s) => Number(s.trim()));
+  const [lat, lng] = parts;
+  const valid =
+    parts.length === 2 &&
+    Number.isFinite(lat) &&
+    Number.isFinite(lng) &&
+    lat >= -90 &&
+    lat <= 90 &&
+    lng >= -180 &&
+    lng <= 180;
+  return valid ? [lat, lng] : FALLBACK_CENTER;
+}
+
+export function parseDefaultZoom(raw: string | undefined): number {
+  const z = Number(raw);
+  return Number.isFinite(z) && z > 0 && z <= 22 ? z : FALLBACK_ZOOM;
+}
+
+const DEFAULT_CENTER: [number, number] = parseDefaultCenter(
+  import.meta.env.VITE_MAP_DEFAULT_CENTER,
+);
+const DEFAULT_ZOOM = parseDefaultZoom(import.meta.env.VITE_MAP_DEFAULT_ZOOM);
 const PROFILE_ZOOM = 12;
 
 export function MapView({
@@ -115,7 +144,7 @@ export function MapView({
   // ── Effective center / zoom / initialViewSet ──────────────────────────────
   // When an active profile with coordinates is selected, center on it at
   // city-level zoom. Otherwise fall back to the caller-supplied center/zoom
-  // (DEFAULT_CENTER / Muzaffarnagar) and let FitBounds fit all markers.
+  // (DEFAULT_CENTER from env / Muzaffarnagar fallback) and let FitBounds fit all markers.
   const { effectiveCenter, effectiveZoom, initialViewSet } = React.useMemo(() => {
     if (!focusPoint) {
       return { effectiveCenter: center, effectiveZoom: zoom, initialViewSet: false };
