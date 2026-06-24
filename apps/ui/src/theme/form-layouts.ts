@@ -52,7 +52,7 @@ export const formLayouts: Record<string, FormLayout> = {
     twoColumn: ['Phone Number', 'Email Address', 'Coverage Radius (km)', 'Service Offered'],
   },
 
-  // purple_dot network — PWD Beneficiary Profile
+  // purple_dot network — PWD Seeker Profile
   seeker: {
     sections: [
       {
