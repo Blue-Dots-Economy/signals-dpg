@@ -15,8 +15,8 @@ import { TOURIST_NETWORK_ID, TOURIST_BRAND } from './resolve-tourist-config';
 //   1. resolved brand copy.title (e.g. "OneTAC" when onetac brand is active)
 //   2. VITE_TOURIST_APP_TITLE runtime/build env
 //   3. neutral default 'Signals'
-const _meta = resolveBrandMeta(TOURIST_NETWORK_ID, TOURIST_BRAND);
-document.title = _meta.copy['title'] || getRuntimeEnv('VITE_TOURIST_APP_TITLE')?.trim() || 'Signals';
+const meta = resolveBrandMeta(TOURIST_NETWORK_ID, TOURIST_BRAND);
+document.title = meta.copy.title || getRuntimeEnv('VITE_TOURIST_APP_TITLE')?.trim() || 'Signals';
 
 const queryClient = new QueryClient({ defaultOptions: { queries: { staleTime: 0, retry: 2 } } });
 

@@ -10,10 +10,11 @@
     <script>
       (function () {
         // Resolve tourist network: ?network= → runtime config → build-time env → 'orange_dot'.
-        // orange_dot is the overridable fallback for the default tourist deployment.
+        // __DEFAULT_NETWORK_THEME__ is injected by Vite at build time (mirrors index.html).
         var params = new URLSearchParams(window.location.search);
         var cfg = window.__DPG_UI_CONFIG__ || {};
-        var networkId = (params.get('network') || cfg.VITE_NETWORK_NAME || '').trim() || 'orange_dot';
+        var fallback = typeof __DEFAULT_NETWORK_THEME__ !== 'undefined' ? __DEFAULT_NETWORK_THEME__ : 'orange_dot';
+        var networkId = (params.get('network') || cfg.VITE_NETWORK_NAME || '').trim() || fallback;
         document.documentElement.dataset.network = networkId;
 
         // Resolve brand: ?brand= → runtime config → build default → 'standard'.
