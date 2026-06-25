@@ -1,16 +1,19 @@
 import * as React from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { resolveTheme, type NetworkTheme } from './network-themes';
+import { resolveBrand } from './resolve-brand';
 import { getServedScope } from '@/lib/served-binding';
 
 interface NetworkThemeContextValue {
   themeId: string;
   theme: NetworkTheme;
+  brand: string;
 }
 
 const NetworkThemeContext = React.createContext<NetworkThemeContextValue>({
   themeId: 'blue_dot',
   theme: resolveTheme('blue_dot'),
+  brand: 'standard',
 });
 
 export function useNetworkTheme(): NetworkThemeContextValue {
@@ -99,10 +102,11 @@ function applyDocumentTitle(theme: NetworkTheme): void {
     : `${theme.name} · Signal Stack`;
 }
 
-function applyThemeTokens(id: string): void {
+function applyThemeTokens(id: string, brand: string): void {
   const theme = resolveTheme(id);
   const el = document.documentElement;
   el.dataset.network = id;
+  el.dataset.brand = brand;
   // Tokens come from the brand-theme Vite plugin's static <style> block
   // selected by [data-network=<id>] — inline styles here would shadow
   // those with stale hardcoded values from network-themes.ts and stop
@@ -158,11 +162,29 @@ export function NetworkThemeProvider({ children }: { children: React.ReactNode }
 
   const theme = React.useMemo(() => resolveTheme(themeId), [themeId]);
 
-  React.useLayoutEffect(() => {
-    applyThemeTokens(themeId);
-  }, [themeId]);
+  const brandFromUrl = searchParams.get('brand');
+  const activeBrand = React.useMemo(
+    () =>
+      resolveBrand({
+        queryParam: brandFromUrl,
+        runtimeConfig:
+          typeof window !== 'undefined'
+            ? (window as Window).__DPG_UI_CONFIG__?.VITE_BRAND_NAME
+            : null,
+        buildDefault:
+          typeof __DEFAULT_BRAND__ !== 'undefined' ? __DEFAULT_BRAND__ : null,
+      }),
+    [brandFromUrl],
+  );
 
-  const value = React.useMemo(() => ({ themeId, theme }), [themeId, theme]);
+  React.useLayoutEffect(() => {
+    applyThemeTokens(themeId, activeBrand);
+  }, [themeId, activeBrand]);
+
+  const value = React.useMemo(
+    () => ({ themeId, theme, brand: activeBrand }),
+    [themeId, theme, activeBrand],
+  );
 
   return (
     <NetworkThemeContext.Provider value={value}>{children}</NetworkThemeContext.Provider>
