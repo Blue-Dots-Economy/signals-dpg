@@ -147,17 +147,8 @@ cascade — the `:root[data-network][data-brand]` rule wins over
 ### CSS theme tokens
 
 Token overrides **must** go in a `theme:` block. The Vite CSS plugin is
-override-only and only honours `theme:`, not `colours:`. Example:
-
-```json
-{
-  "logoShape": "square",
-  "faviconType": "png",
-  "copy": { "title": "UPSDM" }
-}
-```
-
-A brand that also needs colour token overrides would add:
+override-only and only honours `theme:`, not `colours:`. A brand that needs
+colour token overrides must include a `theme:` block, for example:
 
 ```json
 {
@@ -178,6 +169,21 @@ runtime. Only `theme:` keys are injected as CSS custom properties.
 
 ### Non-CSS brand fields
 
+A minimal brand that only needs a custom name, logo shape, and favicon type —
+but inherits the network's colour palette unchanged — omits the `theme:` block
+entirely:
+
+```json
+{
+  "logoShape": "square",
+  "faviconType": "png",
+  "copy": { "title": "UPSDM" }
+}
+```
+
+These non-CSS fields are read by `resolveBrandMeta()` independently of the CSS
+plugin; no `theme:` block is required when colour overrides are not needed.
+
 | Field | Type | Effect |
 |-------|------|--------|
 | `logoShape` | `'square'` \| `'wordmark'` | Controls header sizing for the logo mark |
@@ -187,7 +193,10 @@ runtime. Only `theme:` keys are injected as CSS custom properties.
 
 These fields are read by `resolveBrandMeta()` and fed into `__BRAND_REGISTRY__`
 at build time. The `logo:` block inside `brand.json` is **not** read at runtime
-for logo resolution — use the folder convention above instead.
+for logo resolution — use the folder convention above instead. Note that some
+existing brand configs (e.g. `orange_dot/onetac/brand.json`) still contain a
+legacy `logo:` block inherited from earlier configs — it is silently ignored;
+logos always resolve via the `<network-kebab>/<brand-slug>/` folder convention.
 
 ## How to add a new brand
 
