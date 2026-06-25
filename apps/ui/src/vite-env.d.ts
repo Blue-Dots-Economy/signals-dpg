@@ -12,6 +12,8 @@ interface ImportMetaEnv {
   readonly VITE_NETWORK_ID: string;
   readonly VITE_SERVED_BINDINGS?: string;
   readonly VITE_DEFAULT_NETWORK_THEME?: string;
+  readonly VITE_DEFAULT_BRAND?: string;
+  readonly VITE_BRAND_NAME?: string;
   readonly VITE_DEFAULT_VIEW_MODE?: 'list' | 'map';
   /** Per-deployment default map centre as "lat,lng" (falls back to Muzaffarnagar). */
   readonly VITE_MAP_DEFAULT_CENTER?: string;
@@ -28,6 +30,7 @@ interface ImportMetaEnv {
 }
 
 declare const __DEFAULT_NETWORK_THEME__: string;
+declare const __DEFAULT_BRAND__: string;
 
 interface ImportMeta {
   readonly env: ImportMetaEnv;

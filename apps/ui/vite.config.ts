@@ -211,6 +211,7 @@ export default defineConfig(({ mode }) => {
   const defaultNetworkTheme =
     env.VITE_DEFAULT_NETWORK_THEME ||
     (env.VITE_NETWORK_ID ? env.VITE_NETWORK_ID.split(',')[0].trim() : 'blue_dot');
+  const defaultBrand = env.VITE_DEFAULT_BRAND?.trim() || 'standard';
 
   return {
     plugins: [
@@ -267,6 +268,7 @@ export default defineConfig(({ mode }) => {
     },
     define: {
       __DEFAULT_NETWORK_THEME__: JSON.stringify(defaultNetworkTheme),
+      __DEFAULT_BRAND__: JSON.stringify(defaultBrand),
     },
     build: isTourist
       ? { outDir: 'dist/tourist', rollupOptions: { input: touristEntry } }
