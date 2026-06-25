@@ -1,7 +1,7 @@
 import { useTranslation } from 'react-i18next';
 import { useNetworkTheme } from '@/theme/theme-provider';
 import { useThemeMode } from '@/theme/mode-provider';
-import { brandLogoUrl } from '@/theme/brand-assets';
+import { brandLogoUrl, networkLogoUrl } from '@/theme/brand-assets';
 import { resolveBrandMeta } from '@/theme/brand-meta';
 
 interface PortalHeaderProps {
@@ -16,7 +16,8 @@ export function PortalHeader({ size = 'sm' }: PortalHeaderProps) {
   // Dark mode → light-text wordmark variant. Brand dot reads as a grey
   // ring on dark grey, but the wordmark itself is fully readable and
   // designer-shipped, which is the priority.
-  const logoSrc = brandLogoUrl(themeId, resolved === 'dark' ? 'light' : 'default');
+  const variant = resolved === 'dark' ? 'light' : 'default';
+  const logoSrc = brandLogoUrl(themeId, variant, brand);
 
   // Near-square marks have logoShape 'square' in the brand registry; wordmarks
   // are 'wordmark'. Height-driven sizing keeps a wide wordmark readable, but a
@@ -41,6 +42,10 @@ export function PortalHeader({ size = 'sm' }: PortalHeaderProps) {
           alt={t('nav.portal_logo_alt', { name: theme.name })}
           className={logoClass}
           loading="eager"
+          onError={(e) => {
+            const fb = networkLogoUrl(themeId, variant);
+            if (fb && e.currentTarget.src.endsWith(fb) === false) e.currentTarget.src = fb;
+          }}
         />
       ) : (
         /* Fallback dot-mark when the network has no designer logo on disk */

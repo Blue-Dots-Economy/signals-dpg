@@ -31,10 +31,23 @@ function kebabFromNetworkId(networkId: string): string {
   return networkId.replace(/_/g, '-');
 }
 
-export function brandLogoUrl(
+export function networkLogoUrl(
   networkId: string | null | undefined,
   variant: BrandLogoVariant = 'default',
 ): string | null {
   if (!networkId) return null;
   return `/brand/${kebabFromNetworkId(networkId)}/${VARIANT_FILE[variant]}`;
+}
+
+export function brandLogoUrl(
+  networkId: string | null | undefined,
+  variant: BrandLogoVariant = 'default',
+  brandSlug?: string | null,
+): string | null {
+  if (!networkId) return null;
+  const slug = (brandSlug ?? '').trim();
+  if (slug && slug !== 'standard') {
+    return `/brand/${kebabFromNetworkId(networkId)}/${slug}/${VARIANT_FILE[variant]}`;
+  }
+  return networkLogoUrl(networkId, variant);
 }
