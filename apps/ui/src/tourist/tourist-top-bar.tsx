@@ -8,9 +8,7 @@ import { brandLogoUrl, networkLogoUrl } from '@/theme/brand-assets';
 import { useThemeMode } from '@/theme/mode-provider';
 import type { ViewMode } from '@/engine/types';
 import type { ReactNode } from 'react';
-
-/** The tourist app serves the orange_dot network exclusively. */
-const TOURIST_NETWORK_ID = 'orange_dot';
+import { TOURIST_NETWORK_ID, TOURIST_BRAND } from './resolve-tourist-config';
 
 export interface TouristTopBarProps {
   search: string;
@@ -30,9 +28,8 @@ export function TouristTopBar({
   const { t } = useTranslation();
   const { resolved } = useThemeMode();
   // Light logo for dark backgrounds, default logo otherwise (mirrors PortalHeader).
-  // Brand arg is 'standard' (network-level path) until Task 6 wires the active brand here.
   const variant = resolved === 'dark' ? 'light' : 'default';
-  const logoSrc = brandLogoUrl(TOURIST_NETWORK_ID, variant, 'standard');
+  const logoSrc = brandLogoUrl(TOURIST_NETWORK_ID, variant, TOURIST_BRAND);
 
   return (
     <header className="sticky top-0 z-40 border-b bg-gradient-to-r from-background to-primary/5 px-3 py-2 sm:px-6 sm:py-0">
@@ -50,9 +47,8 @@ export function TouristTopBar({
           {logoSrc && (
             <img
               src={logoSrc}
-              alt={t('nav.portal_logo_alt', { name: 'orange dots AI' })}
-              // Smaller on mobile; on desktop matches the orange_dot sidebar size
-              // (square-ish ~1.78:1 mark, so a taller box than wordmark brands).
+              alt={t('nav.portal_logo_alt', { name: TOURIST_NETWORK_ID })}
+              // Smaller on mobile; on desktop matches the tourist network sidebar size.
               className="h-8 w-auto max-w-[120px] shrink-0 object-contain sm:order-1 sm:h-12 sm:max-w-[200px]"
               onError={(e) => {
                 const fb = networkLogoUrl(TOURIST_NETWORK_ID, variant);
