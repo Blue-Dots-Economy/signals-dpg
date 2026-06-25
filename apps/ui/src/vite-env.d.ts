@@ -25,7 +25,7 @@ interface ImportMetaEnv {
   readonly VITE_AGENT_URL: string;
   readonly VITE_AGENT_TOKEN: string;
   readonly VITE_ENABLED_LANGUAGES: string;
-  /** Browser tab title for the tourist app. Defaults to "OneTAC". */
+  /** Browser tab title override for the tourist app. Falls back to the resolved brand title, else "Signals". */
   readonly VITE_TOURIST_APP_TITLE?: string;
 }
 
