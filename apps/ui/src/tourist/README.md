@@ -52,7 +52,7 @@ the configured `VITE_API_URL` (defaults to `http://localhost:2742`).
 | Entry | `apps/ui/index.tourist.html` → `src/tourist/main.tourist.tsx` |
 | Build/dev selection | `VITE_APP=tourist` in `apps/ui/vite.config.ts` (dev rewrites `/` to the tourist entry; build sets `outDir: dist/tourist` + the input). When unset, the signals build is byte-identical. |
 | Scripts | root + `apps/ui` `dev:tourist` / `build:tourist`; `turbo.json` tasks |
-| Network | hardwired to `orange_dot` via `VITE_NETWORK_ID` (baked into the scripts) |
+| Network | runtime-resolved (`?network=` → `VITE_NETWORK_NAME` → `VITE_NETWORK_ID` → `'orange_dot'` default); brand resolved in parallel (`?brand=` → `VITE_BRAND_NAME` → `VITE_DEFAULT_BRAND` → `'standard'`). See `resolve-tourist-config.ts`. |
 | Backend | the shared signals-dpg API, read anonymously — **no backend code changes** |
 
 ## Files
