@@ -189,11 +189,26 @@ function brandThemePlugin(): Plugin {
     return meta;
   };
 
-  // Derive CSS token lines from a brand.json that may contain only a partial
-  // `theme` override. Returns only the lines for tokens that are present and
-  // non-empty (override-only semantics for brand subfolders).
-  const tokenLinesFromBrand = (brandJson: any, networkId: string): string => {
+  // Derive CSS token lines from a brand.json for base networks (full synthesis
+  // via colours: or theme: is both allowed here — networks define the baseline).
+  const tokenLinesFromNetwork = (brandJson: any, networkId: string): string => {
     const tokens = tokensFromTheme(deriveTheme(brandJson, networkId));
+    return Object.entries(tokens)
+      .filter(([, v]) => typeof v === 'string' && v.length > 0)
+      .map(([k, v]) => `  ${k}: ${v};`)
+      .join('\n');
+  };
+
+  // Derive CSS token lines for brand subfolders — strictly override-only.
+  // Brand blocks express token deltas via the explicit `theme:` map; we do NOT
+  // run the colours: synthesis branch here (that would emit a full token set and
+  // defeat cascade inheritance from the network base). If a brand has no theme:
+  // keys, emit nothing — it still inherits all tokens from the network base.
+  const tokenLinesFromBrand = (brandJson: any): string => {
+    if (!brandJson?.theme || typeof brandJson.theme !== 'object') return '';
+    const fontFamily = cssFontFamily(brandJson?.typography?.primaryFont);
+    const themeWithFont = { ...brandJson.theme, fontFamily: brandJson.theme.fontFamily ?? fontFamily };
+    const tokens = tokensFromTheme(themeWithFont);
     return Object.entries(tokens)
       .filter(([, v]) => typeof v === 'string' && v.length > 0)
       .map(([k, v]) => `  ${k}: ${v};`)
@@ -226,7 +241,7 @@ function brandThemePlugin(): Plugin {
       }
 
       // Emit base network block.
-      const baseLines = tokenLinesFromBrand(brand, name);
+      const baseLines = tokenLinesFromNetwork(brand, name);
       blocks.push(`:root[data-network="${name}"] {\n${baseLines}\n}`);
 
       // Accumulate base network registry entry.
@@ -246,8 +261,8 @@ function brandThemePlugin(): Plugin {
           continue;
         }
 
-        // Override-only: emit only tokens present in this brand's brand.json.
-        const brandLines = tokenLinesFromBrand(subBrand, name);
+        // Override-only: emit only tokens present in this brand's theme: block.
+        const brandLines = tokenLinesFromBrand(subBrand);
         if (brandLines) {
           blocks.push(`:root[data-network="${name}"][data-brand="${entry}"] {\n${brandLines}\n}`);
         }
