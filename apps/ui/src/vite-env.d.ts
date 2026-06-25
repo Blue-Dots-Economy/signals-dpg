@@ -31,6 +31,12 @@ interface ImportMetaEnv {
 
 declare const __DEFAULT_NETWORK_THEME__: string;
 declare const __DEFAULT_BRAND__: string;
+declare const __BRAND_REGISTRY__: Record<string, {
+  faviconType?: 'png' | 'svg';
+  logoShape?: 'square' | 'wordmark';
+  copy?: Record<string, string>;
+  brands?: Record<string, { faviconType?: 'png' | 'svg'; logoShape?: 'square' | 'wordmark'; copy?: Record<string, string> }>;
+}>;
 
 interface ImportMeta {
   readonly env: ImportMetaEnv;

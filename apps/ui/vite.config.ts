@@ -169,11 +169,54 @@ function brandThemePlugin(): Plugin {
     '--font-sans': t.fontFamily,
   });
 
-  const buildStyleTag = () => {
-    if (!fs.existsSync(schemasDir)) return '';
+  type BrandMeta = {
+    faviconType?: 'png' | 'svg';
+    logoShape?: 'square' | 'wordmark';
+    copy?: Record<string, string>;
+  };
+
+  const extractMeta = (brandJson: any): BrandMeta => {
+    const meta: BrandMeta = {};
+    if (brandJson?.faviconType === 'png' || brandJson?.faviconType === 'svg') {
+      meta.faviconType = brandJson.faviconType;
+    }
+    if (brandJson?.logoShape === 'square' || brandJson?.logoShape === 'wordmark') {
+      meta.logoShape = brandJson.logoShape;
+    }
+    if (brandJson?.copy && typeof brandJson.copy === 'object' && !Array.isArray(brandJson.copy)) {
+      meta.copy = brandJson.copy as Record<string, string>;
+    }
+    return meta;
+  };
+
+  // Derive CSS token lines from a brand.json that may contain only a partial
+  // `theme` override. Returns only the lines for tokens that are present and
+  // non-empty (override-only semantics for brand subfolders).
+  const tokenLinesFromBrand = (brandJson: any, networkId: string): string => {
+    const tokens = tokensFromTheme(deriveTheme(brandJson, networkId));
+    return Object.entries(tokens)
+      .filter(([, v]) => typeof v === 'string' && v.length > 0)
+      .map(([k, v]) => `  ${k}: ${v};`)
+      .join('\n');
+  };
+
+  type RegistryEntry = BrandMeta & { brands: Record<string, BrandMeta> };
+
+  // Scan all network and brand subdirectories once, returning CSS blocks and
+  // the registry together so nothing is computed twice.
+  const scanSchemas = (): {
+    styleTag: string;
+    registry: Record<string, RegistryEntry>;
+  } => {
+    const registry: Record<string, RegistryEntry> = {};
+    if (!fs.existsSync(schemasDir)) return { styleTag: '', registry };
     const blocks: string[] = [];
+
     for (const name of fs.readdirSync(schemasDir)) {
-      const brandPath = path.join(schemasDir, name, 'brand.json');
+      const networkDir = path.join(schemasDir, name);
+      const stat = fs.statSync(networkDir, { throwIfNoEntry: false });
+      if (!stat?.isDirectory()) continue;
+      const brandPath = path.join(networkDir, 'brand.json');
       if (!fs.existsSync(brandPath)) continue;
       let brand: any;
       try {
@@ -181,25 +224,64 @@ function brandThemePlugin(): Plugin {
       } catch {
         continue;
       }
-      const tokens = tokensFromTheme(deriveTheme(brand, name));
-      const lines = Object.entries(tokens)
-        .filter(([, v]) => typeof v === 'string' && v.length > 0)
-        .map(([k, v]) => `  ${k}: ${v};`)
-        .join('\n');
-      blocks.push(`:root[data-network="${name}"] {\n${lines}\n}`);
+
+      // Emit base network block.
+      const baseLines = tokenLinesFromBrand(brand, name);
+      blocks.push(`:root[data-network="${name}"] {\n${baseLines}\n}`);
+
+      // Accumulate base network registry entry.
+      registry[name] = { ...extractMeta(brand), brands: {} };
+
+      // Scan subdirectories for per-brand overrides.
+      for (const entry of fs.readdirSync(networkDir)) {
+        const subDir = path.join(networkDir, entry);
+        const subStat = fs.statSync(subDir, { throwIfNoEntry: false });
+        if (!subStat?.isDirectory()) continue;
+        const subBrandPath = path.join(subDir, 'brand.json');
+        if (!fs.existsSync(subBrandPath)) continue;
+        let subBrand: any;
+        try {
+          subBrand = JSON.parse(fs.readFileSync(subBrandPath, 'utf8'));
+        } catch {
+          continue;
+        }
+
+        // Override-only: emit only tokens present in this brand's brand.json.
+        const brandLines = tokenLinesFromBrand(subBrand, name);
+        if (brandLines) {
+          blocks.push(`:root[data-network="${name}"][data-brand="${entry}"] {\n${brandLines}\n}`);
+        }
+
+        // Accumulate brand registry entry.
+        registry[name].brands[entry] = extractMeta(subBrand);
+      }
     }
-    if (blocks.length === 0) return '';
-    return `<style data-brand-themes>\n${blocks.join('\n\n')}\n</style>`;
+
+    const styleTag =
+      blocks.length === 0
+        ? ''
+        : `<style data-brand-themes>\n${blocks.join('\n\n')}\n</style>`;
+    return { styleTag, registry };
   };
+
+  // Eagerly scan once so that both `config()` and `transformIndexHtml` share
+  // the same result without scanning the filesystem twice.
+  const { styleTag: cachedStyleTag, registry: cachedRegistry } = scanSchemas();
 
   return {
     name: 'brand-theme-tokens',
+    config() {
+      return {
+        define: {
+          __BRAND_REGISTRY__: JSON.stringify(cachedRegistry),
+        },
+      };
+    },
     transformIndexHtml(html) {
-      const tag = buildStyleTag();
-      if (!tag) return html;
+      if (!cachedStyleTag) return html;
       // Inject just before </head> so it overrides matching :root blocks in
       // index.css (same specificity, later source wins).
-      return html.replace('</head>', `${tag}\n</head>`);
+      return html.replace('</head>', `${cachedStyleTag}\n</head>`);
     },
   };
 }
