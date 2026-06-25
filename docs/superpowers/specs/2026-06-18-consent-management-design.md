@@ -3,7 +3,12 @@
 **Date:** 2026-06-18
 **Issue:** [#119](https://github.com/Blue-Dots-Economy/Signals-DPG/issues/119) — Consent upgrades: capture why/when/duration + audit ledger; under-18 guardian OTP
 **Branch:** `feat/consent-management` (from `feature` @ 201b61e, with #187 merged)
-**Status:** Design — pending user review before the implementation plan
+**Status:** ⚠️ SUPERSEDED — historical reference only.
+
+> **This design has been superseded by the cross-DPG consent design:**
+> [`docs/superpowers/specs/2026-06-25-consent-management-design.md`](./2026-06-25-consent-management-design.md)
+>
+> The newer document covers the full scope (standalone shared consent service keyed on the Keycloak subject, multi-channel capture across UI/voice/aggregator/bulk, first-class per-action consent, capability-gated OTP, full cross-service erasure, and DPDP / ISO 29184·Kantara / W3C DPV / DEPA alignment). The decisions below reflect the earlier Signals-only, account-T&C scope and are kept for history.
 
 ## Goal
 
