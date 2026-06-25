@@ -149,6 +149,7 @@ async function readItemsForUser(user_id: string) {
       item_domain: items.item_domain,
       item_type: items.item_type,
       item_state: items.item_state,
+      item_locations: items.item_locations,
       item_private_state: items.item_private_state,
       created_at: items.created_at,
       updated_at: items.updated_at,

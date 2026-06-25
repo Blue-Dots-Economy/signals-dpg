@@ -104,6 +104,7 @@ type ItemRow = {
   item_type: string;
   item_state: Record<string, unknown>;
   item_private_state: string;
+  item_locations?: Array<{ lat: number; lng: number; label?: string }>;
   created_at: Date;
   updated_at: Date;
 };
@@ -194,9 +195,11 @@ vi.mock('@api/db/postgres/drizzle_config', () => {
                 : [];
               // Scope by served-domain networks (only blue_dot in tests).
               const allowedNetworks = new Set(['blue_dot']);
-              const filtered = rows.filter((r) =>
-                allowedNetworks.has(r.item_network),
-              );
+              const filtered = rows
+                .filter((r) => allowedNetworks.has(r.item_network))
+                // item_locations is projected by readItemsForUser; default to []
+                // for mock rows that don't set it (matches the NOT NULL column).
+                .map((r) => ({ item_locations: [], ...r }));
               return Promise.resolve(filtered);
             }
             if (mode === 'existing_item_lookup') {

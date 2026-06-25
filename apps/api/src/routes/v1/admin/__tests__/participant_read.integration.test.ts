@@ -262,6 +262,43 @@ describeIf(`GET /api/v1/admin/participant (integration)${
     expect(body.user_id).toBe(agg_a_user_id);
     expect(body.items).toHaveLength(1);
     expect(body.items[0].item_id).toBe(agg_a_item_id);
+    // item_locations is now projected on every item (array of {lat,lng,label?}).
+    expect(Array.isArray(body.items[0].item_locations)).toBe(true);
+  });
+
+  it('GET returns the stored item_locations for an item that has coordinates', async () => {
+    // Set coordinates directly on the row (coarsened ~2dp, as a private location
+    // field would be stored) and confirm the read surfaces them verbatim.
+    const coords = [{ lat: 29.47, lng: 77.71 }];
+    await db
+      .update(itemsTable)
+      .set({ item_locations: coords })
+      .where(eq(itemsTable.item_id, agg_a_item_id));
+
+    const res = await app.inject({
+      method: 'GET',
+      url: `/api/v1/admin/participant?email=${encodeURIComponent(agg_a_user_email)}`,
+      headers: {
+        'x-api-key': ns.raw_key,
+        'x-acting-org-id': ns.org_id,
+      },
+    });
+    expect(res.statusCode).toBe(200);
+    const body = res.json();
+    expect(body.items[0].item_id).toBe(agg_a_item_id);
+    expect(body.items[0].item_locations).toEqual(coords);
+
+    // empty case: clearing the column returns [] (not null/undefined)
+    await db
+      .update(itemsTable)
+      .set({ item_locations: [] })
+      .where(eq(itemsTable.item_id, agg_a_item_id));
+    const res2 = await app.inject({
+      method: 'GET',
+      url: `/api/v1/admin/participant?email=${encodeURIComponent(agg_a_user_email)}`,
+      headers: { 'x-api-key': ns.raw_key, 'x-acting-org-id': ns.org_id },
+    });
+    expect(res2.json().items[0].item_locations).toEqual([]);
   });
 
   it('agg_A can lookup their own user by email and sees items', async () => {
