@@ -2,7 +2,7 @@ import * as React from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { resolveTheme, type NetworkTheme } from './network-themes';
 import { resolveBrand } from './resolve-brand';
-import { resolveBrandMeta } from './brand-meta';
+import { resolveBrandMeta, type BrandMeta } from './brand-meta';
 import { getServedScope } from '@/lib/served-binding';
 
 interface NetworkThemeContextValue {
@@ -43,7 +43,7 @@ function kebab(id: string): string {
   return id.replace(/_/g, '-');
 }
 
-function applyFavicon(id: string, brand: string): void {
+function applyFavicon(id: string, meta: BrandMeta): void {
   // Drop any existing icons (PNG remnants etc.) before installing the new one.
   document
     .querySelectorAll('link[rel="icon"], link[rel="shortcut icon"]')
@@ -53,7 +53,6 @@ function applyFavicon(id: string, brand: string): void {
   link.rel = 'icon';
   link.dataset.network = id;
 
-  const meta = resolveBrandMeta(id, brand);
   if (meta.faviconType === 'png') {
     // Designer-shipped square mark at /brand/<network>/favicon.png — used
     // verbatim. Avoids the SVG dot-mark generated below.
@@ -112,7 +111,7 @@ function applyThemeTokens(id: string, brand: string): void {
   // applyFavicon reads --brand-cta.
   void el.offsetWidth;
   const meta = resolveBrandMeta(id, brand);
-  applyFavicon(id, brand);
+  applyFavicon(id, meta);
   applyDocumentTitle(theme, meta.copy);
 }
 
