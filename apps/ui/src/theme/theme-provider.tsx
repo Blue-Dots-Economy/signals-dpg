@@ -2,6 +2,7 @@ import * as React from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { resolveTheme, type NetworkTheme } from './network-themes';
 import { resolveBrand } from './resolve-brand';
+import { resolveBrandMeta } from './brand-meta';
 import { getServedScope } from '@/lib/served-binding';
 
 interface NetworkThemeContextValue {
@@ -38,18 +39,11 @@ function getInitialNetworkId(): string {
   return fromEnv || 'blue_dot';
 }
 
-// Networks shipping a designer-provided square mark drop a favicon.png next
-// to their logos. List them here so applyFavicon picks the file over the
-// generated SVG fallback. Wordmark-only networks (purple) keep using the
-// generated dot-mark since their PNG logos are wide and unreadable at 16×16;
-// square marks (orange_dot OneTAC, blue_dot UPSDM emblem) ship a real favicon.
-const NETWORKS_WITH_FAVICON_PNG = new Set(['orange_dot', 'blue_dot']);
-
 function kebab(id: string): string {
   return id.replace(/_/g, '-');
 }
 
-function applyFavicon(id: string): void {
+function applyFavicon(id: string, brand: string): void {
   // Drop any existing icons (PNG remnants etc.) before installing the new one.
   document
     .querySelectorAll('link[rel="icon"], link[rel="shortcut icon"]')
@@ -59,7 +53,8 @@ function applyFavicon(id: string): void {
   link.rel = 'icon';
   link.dataset.network = id;
 
-  if (NETWORKS_WITH_FAVICON_PNG.has(id)) {
+  const meta = resolveBrandMeta(id, brand);
+  if (meta.faviconType === 'png') {
     // Designer-shipped square mark at /brand/<network>/favicon.png — used
     // verbatim. Avoids the SVG dot-mark generated below.
     link.type = 'image/png';
@@ -86,20 +81,22 @@ function applyFavicon(id: string): void {
   document.head.appendChild(link);
 }
 
-function applyDocumentTitle(theme: NetworkTheme): void {
+function applyDocumentTitle(theme: NetworkTheme, brandCopy: Record<string, string>): void {
   // Network brand + "Signal Stack" platform name. When the deployment serves a
   // single domain (VITE_SERVED_BINDINGS with one entry) the domain is woven in
   // so each per-domain UI gets a distinct tab title (e.g. "Purple Dot ·
   // Provider · Signal Stack"). Multiple served domains, or unset, → the plain
   // network title. Generic for any network/domain.
+  // Brand copy wins over network defaults when a title key is present.
+  const networkName = brandCopy['title'] ?? theme.name;
   const scope = getServedScope();
   const domainLabel =
     scope && scope.domains.length === 1
       ? scope.domains[0].replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())
       : null;
   document.title = domainLabel
-    ? `${theme.name} · ${domainLabel} · Signal Stack`
-    : `${theme.name} · Signal Stack`;
+    ? `${networkName} · ${domainLabel} · Signal Stack`
+    : `${networkName} · Signal Stack`;
 }
 
 function applyThemeTokens(id: string, brand: string): void {
@@ -114,8 +111,9 @@ function applyThemeTokens(id: string, brand: string): void {
   // network switch. Force the browser to apply the new selector before
   // applyFavicon reads --brand-cta.
   void el.offsetWidth;
-  applyFavicon(id);
-  applyDocumentTitle(theme);
+  const meta = resolveBrandMeta(id, brand);
+  applyFavicon(id, brand);
+  applyDocumentTitle(theme, meta.copy);
 }
 
 const ACTIVE_NETWORK_KEY = 'dpg-active-network';

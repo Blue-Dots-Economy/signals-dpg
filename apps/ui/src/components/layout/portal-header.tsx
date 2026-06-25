@@ -2,6 +2,7 @@ import { useTranslation } from 'react-i18next';
 import { useNetworkTheme } from '@/theme/theme-provider';
 import { useThemeMode } from '@/theme/mode-provider';
 import { brandLogoUrl } from '@/theme/brand-assets';
+import { resolveBrandMeta } from '@/theme/brand-meta';
 
 interface PortalHeaderProps {
   /** Logo size preset. `sm` matches sidebar density; `lg` for auth / hero spots. */
@@ -9,7 +10,7 @@ interface PortalHeaderProps {
 }
 
 export function PortalHeader({ size = 'sm' }: PortalHeaderProps) {
-  const { themeId, theme } = useNetworkTheme();
+  const { themeId, theme, brand } = useNetworkTheme();
   const { resolved } = useThemeMode();
   const { t } = useTranslation();
   // Dark mode → light-text wordmark variant. Brand dot reads as a grey
@@ -17,12 +18,11 @@ export function PortalHeader({ size = 'sm' }: PortalHeaderProps) {
   // designer-shipped, which is the priority.
   const logoSrc = brandLogoUrl(themeId, resolved === 'dark' ? 'light' : 'default');
 
-  // Near-square marks: orange_dot (OneTAC, ~1.78:1) and blue_dot (UPSDM emblem,
-  // ~1:1). Wordmarks like purple are ~5:1. Height-driven sizing keeps a wide
-  // wordmark readable, but a square mark stays tiny at h-7 — bump the height for
-  // square-ish brands so the mark reads at parity (and doesn't overflow the
-  // header the way width-sizing a square emblem would).
-  const isSquareishMark = themeId === 'orange_dot' || themeId === 'blue_dot';
+  // Near-square marks have logoShape 'square' in the brand registry; wordmarks
+  // are 'wordmark'. Height-driven sizing keeps a wide wordmark readable, but a
+  // square mark stays tiny at h-7 — bump the height for square-ish brands so
+  // the mark reads at parity (and doesn't overflow the header).
+  const isSquareishMark = resolveBrandMeta(themeId, brand).logoShape === 'square';
 
   const logoClass =
     size === 'lg'
