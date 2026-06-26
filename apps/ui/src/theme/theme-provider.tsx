@@ -102,21 +102,33 @@ function applyDocumentTitle(theme: NetworkTheme, brandCopy: Record<string, strin
     : `${networkName} · Signal Stack`;
 }
 
-function applyThemeTokens(id: string, brand: string): void {
-  const theme = resolveTheme(id);
+/**
+ * Apply the active network + brand to `<html>` (`data-network`/`data-brand`)
+ * and install the brand-aware favicon. Returns the resolved brand meta.
+ *
+ * Exported so non-router entry points (the tourist app) can apply branding
+ * after boot: the inline HTML `<script>` only sets first-paint *fallback*
+ * values because Vite `define` does NOT replace tokens (`__DEFAULT_BRAND__`,
+ * `__BRAND_REGISTRY__`) inside classic inline scripts — only inside JS
+ * modules. The signals app re-applies via NetworkThemeProvider; the tourist
+ * app calls this directly.
+ */
+export function applyNetworkBrand(id: string, brand: string): BrandMeta {
   const el = document.documentElement;
   el.dataset.network = id;
   el.dataset.brand = brand;
   // Tokens come from the brand-theme Vite plugin's static <style> block
-  // selected by [data-network=<id>] — inline styles here would shadow
-  // those with stale hardcoded values from network-themes.ts and stop
-  // brand.json-derived colours (incl. --brand-cta) from updating on
-  // network switch. Force the browser to apply the new selector before
-  // applyFavicon reads --brand-cta.
+  // selected by [data-network=<id>][data-brand=<brand>]. Force the browser to
+  // apply the selector before applyFavicon reads --brand-cta.
   void el.offsetWidth;
   const meta = resolveBrandMeta(id, brand);
   applyFavicon(id, brand, meta);
-  applyDocumentTitle(theme, meta.copy);
+  return meta;
+}
+
+function applyThemeTokens(id: string, brand: string): void {
+  const meta = applyNetworkBrand(id, brand);
+  applyDocumentTitle(resolveTheme(id), meta.copy);
 }
 
 const ACTIVE_NETWORK_KEY = 'dpg-active-network';
