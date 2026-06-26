@@ -1,11 +1,12 @@
 /**
- * Resolves the active brand slug, parallel to network resolution.
- * Order: query param → runtime config (window.__DPG_UI_CONFIG__) →
- * build-time default → 'standard'. 'standard' means no brand override
- * (the agnostic network theme).
+ * Resolves the active brand slug from deployment config only.
+ * Order: runtime config (window.__DPG_UI_CONFIG__) → build-time default →
+ * 'standard'. 'standard' means no brand override (the agnostic network theme).
+ *
+ * The ?brand= query param was intentionally removed: brand is per-deployment
+ * and must not be overridable by end-users via URL.
  */
 export function resolveBrand(opts: {
-  queryParam?: string | null;
   runtimeConfig?: string | null;
   buildDefault?: string | null;
 }): string {
@@ -13,5 +14,5 @@ export function resolveBrand(opts: {
     const t = (v ?? '').trim();
     return t.length > 0 ? t : null;
   };
-  return pick(opts.queryParam) ?? pick(opts.runtimeConfig) ?? pick(opts.buildDefault) ?? 'standard';
+  return pick(opts.runtimeConfig) ?? pick(opts.buildDefault) ?? 'standard';
 }

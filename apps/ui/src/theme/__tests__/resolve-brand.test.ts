@@ -5,16 +5,16 @@ describe('resolveBrand', () => {
   it('defaults to standard when nothing set', () => {
     expect(resolveBrand({})).toBe('standard');
   });
-  it('query param wins over everything', () => {
-    expect(resolveBrand({ queryParam: 'upsdm', runtimeConfig: 'onetac', buildDefault: 'x' })).toBe('upsdm');
-  });
-  it('runtime config beats build default', () => {
+  it('runtimeConfig wins over buildDefault', () => {
     expect(resolveBrand({ runtimeConfig: 'onetac', buildDefault: 'x' })).toBe('onetac');
   });
-  it('build default used when no query/runtime', () => {
+  it('buildDefault used when no runtimeConfig', () => {
     expect(resolveBrand({ buildDefault: 'upsdm' })).toBe('upsdm');
   });
   it('ignores empty/whitespace values', () => {
-    expect(resolveBrand({ queryParam: '  ', runtimeConfig: '', buildDefault: 'upsdm' })).toBe('upsdm');
+    expect(resolveBrand({ runtimeConfig: '', buildDefault: 'upsdm' })).toBe('upsdm');
+  });
+  it('ignores whitespace-only values', () => {
+    expect(resolveBrand({ runtimeConfig: '  ', buildDefault: 'upsdm' })).toBe('upsdm');
   });
 });

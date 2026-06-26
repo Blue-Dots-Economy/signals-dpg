@@ -43,7 +43,7 @@ function kebab(id: string): string {
   return id.replace(/_/g, '-');
 }
 
-function applyFavicon(id: string, meta: BrandMeta): void {
+function applyFavicon(id: string, brand: string, meta: BrandMeta): void {
   // Drop any existing icons (PNG remnants etc.) before installing the new one.
   document
     .querySelectorAll('link[rel="icon"], link[rel="shortcut icon"]')
@@ -54,10 +54,14 @@ function applyFavicon(id: string, meta: BrandMeta): void {
   link.dataset.network = id;
 
   if (meta.faviconType === 'png') {
-    // Designer-shipped square mark at /brand/<network>/favicon.png — used
-    // verbatim. Avoids the SVG dot-mark generated below.
+    // Designer-shipped square mark — path is brand-slug aware:
+    //   non-standard brand: /brand/<network>/<brand>/favicon.png
+    //   standard brand:     /brand/<network>/favicon.png
     link.type = 'image/png';
-    link.href = `/brand/${kebab(id)}/favicon.png`;
+    link.href =
+      brand && brand !== 'standard'
+        ? `/brand/${kebab(id)}/${brand}/favicon.png`
+        : `/brand/${kebab(id)}/favicon.png`;
   } else {
     // brand.json logos are wide wordmarks ("purple dots AI") — useless when
     // downscaled to the tab's 16×16 favicon slot. Generate a square dot-mark
@@ -111,7 +115,7 @@ function applyThemeTokens(id: string, brand: string): void {
   // applyFavicon reads --brand-cta.
   void el.offsetWidth;
   const meta = resolveBrandMeta(id, brand);
-  applyFavicon(id, meta);
+  applyFavicon(id, brand, meta);
   applyDocumentTitle(theme, meta.copy);
 }
 
@@ -159,19 +163,16 @@ export function NetworkThemeProvider({ children }: { children: React.ReactNode }
 
   const theme = React.useMemo(() => resolveTheme(themeId), [themeId]);
 
-  const brandFromUrl = searchParams.get('brand');
   const activeBrand = React.useMemo(
     () =>
       resolveBrand({
-        queryParam: brandFromUrl,
         runtimeConfig:
           typeof window !== 'undefined'
             ? (window as Window).__DPG_UI_CONFIG__?.VITE_BRAND_NAME
             : null,
-        buildDefault:
-          typeof __DEFAULT_BRAND__ !== 'undefined' ? __DEFAULT_BRAND__ : null,
+        buildDefault: typeof __DEFAULT_BRAND__ !== 'undefined' ? __DEFAULT_BRAND__ : null,
       }),
-    [brandFromUrl],
+    [],
   );
 
   React.useLayoutEffect(() => {

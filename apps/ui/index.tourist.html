@@ -17,8 +17,9 @@
         var networkId = (params.get('network') || cfg.VITE_NETWORK_NAME || '').trim() || fallback;
         document.documentElement.dataset.network = networkId;
 
-        // Resolve brand: ?brand= → runtime config → build default → 'standard'.
-        var brand = (params.get('brand') || cfg.VITE_BRAND_NAME || (typeof __DEFAULT_BRAND__ !== 'undefined' ? __DEFAULT_BRAND__ : '') || 'standard').trim() || 'standard';
+        // Resolve brand: runtime config → build default → 'standard'.
+        // Brand is per-deployment — not overridable via URL query params.
+        var brand = (cfg.VITE_BRAND_NAME || (typeof __DEFAULT_BRAND__ !== 'undefined' ? __DEFAULT_BRAND__ : '') || 'standard').trim() || 'standard';
         document.documentElement.dataset.brand = brand;
 
         // Set favicon from resolved network + brand using the brand registry.

@@ -8,8 +8,9 @@
  *   3. import.meta.env.VITE_NETWORK_ID.split(',')[0] (build-time env)
  *   4. 'orange_dot'  — overridable fallback for the default tourist deployment
  *
- * Brand resolution delegates to resolveBrand() (query → runtime config →
- * build default → 'standard').
+ * Brand resolution delegates to resolveBrand() (runtime config → build
+ * default → 'standard'). The ?brand= query param is intentionally excluded:
+ * brand is per-deployment and must not be overridable by end-users via URL.
  */
 import { resolveBrand } from '@/theme/resolve-brand';
 
@@ -28,19 +29,13 @@ function resolveTouristNetwork(): string {
 }
 
 function resolveTouristBrand(): string {
-  const params =
-    typeof window !== 'undefined' ? new URLSearchParams(window.location.search) : null;
   const rt =
     typeof window !== 'undefined'
       ? (window as Window).__DPG_UI_CONFIG__?.VITE_BRAND_NAME
       : null;
   const buildDefault =
     typeof __DEFAULT_BRAND__ !== 'undefined' ? __DEFAULT_BRAND__ : null;
-  return resolveBrand({
-    queryParam: params?.get('brand') ?? null,
-    runtimeConfig: rt ?? null,
-    buildDefault,
-  });
+  return resolveBrand({ runtimeConfig: rt ?? null, buildDefault });
 }
 
 export const TOURIST_NETWORK_ID: string = resolveTouristNetwork();
