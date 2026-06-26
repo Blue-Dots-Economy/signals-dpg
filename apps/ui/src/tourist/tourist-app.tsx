@@ -16,8 +16,7 @@ import { TouristList } from './tourist-list';
 import { EnableLocationBanner } from './enable-location-banner';
 import { TouristHero } from './tourist-hero';
 import { itemToCardItem, matchesSearch, type CardItem } from './practitioner-data';
-
-const ORANGE_NETWORK_ID = (import.meta.env.VITE_NETWORK_ID || 'orange_dot').split(',')[0].trim();
+import { TOURIST_NETWORK_ID as ORANGE_NETWORK_ID } from './resolve-tourist-config';
 const ORANGE_DOMAIN_ID = 'practitioner';
 const REGION_DEFAULT_CENTER: [number, number] = [13.3409, 74.7421]; // Udupi
 const REGION_DEFAULT_ZOOM = 12;

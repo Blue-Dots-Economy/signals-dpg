@@ -36,6 +36,13 @@
         var id = url || rt || storedNet || fallback;
         document.documentElement.dataset.network = id;
 
+        // Resolve brand (runtime config → build default → 'standard').
+        // Brand is per-deployment — not overridable via URL query params.
+        // CSS override blocks match real brand slugs (e.g. 'onetac').
+        var cfg = window.__DPG_UI_CONFIG__ || {};
+        var brand = (cfg.VITE_BRAND_NAME || (typeof __DEFAULT_BRAND__ !== 'undefined' ? __DEFAULT_BRAND__ : '') || 'standard').trim();
+        document.documentElement.dataset.brand = brand || 'standard';
+
         // Apply dark class before first paint so the user doesn't see a
         // light flash when their stored preference is dark. Default mode
         // is light — only honour system pref if user explicitly chose it.
