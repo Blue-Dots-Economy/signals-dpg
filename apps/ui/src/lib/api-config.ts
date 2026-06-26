@@ -9,6 +9,7 @@ interface RuntimeConfig {
   VITE_API_URLS?: string;
   VITE_DEFAULT_API_URL?: string;
   VITE_NETWORK_NAME?: string;
+  VITE_BRAND_NAME?: string;
   VITE_SHOW_INSTANCE_SELECTOR?: string;
   // GA4 measurement ID. When set by a deployment's config.js, public/analytics.js
   // loads gtag.js for that deployment; empty/unset = analytics off.

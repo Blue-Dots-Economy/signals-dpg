@@ -5,6 +5,7 @@ import type { RJSFSchema, UiSchema, RegistryWidgetsType, ObjectFieldTemplateProp
 import { DatePickerWidget } from './custom-widgets/date-picker-widget';
 import { LocationAutocompleteWidget } from './custom-widgets/location-autocomplete-widget';
 import { MultiLocationAutocompleteWidget } from './custom-widgets/multi-location-autocomplete-widget';
+import CustomFieldTemplate from './custom-field-template';
 import { formLayouts } from '@/theme/form-layouts';
 import { resolveVisibleSchema } from '@/lib/show-if';
 
@@ -385,9 +386,14 @@ export function SchemaForm({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [schema, hiddenKey, mode, hideSubmit, submitButtonText]);
 
-  const templates = domainId && formLayouts[domainId]
-    ? { ObjectFieldTemplate: SectionedObjectFieldTemplate(domainId) }
-    : undefined;
+  // FieldTemplate applies to every form (red required marker). ObjectFieldTemplate
+  // (section layout) is added only for domains with a configured layout.
+  const templates = {
+    FieldTemplate: CustomFieldTemplate,
+    ...(domainId && formLayouts[domainId]
+      ? { ObjectFieldTemplate: SectionedObjectFieldTemplate(domainId) }
+      : {}),
+  };
 
   const containerRef = React.useRef<HTMLDivElement>(null);
 

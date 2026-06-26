@@ -15,7 +15,7 @@
       "item_schemas": {
         "profile_1.0": {
           "$schema": "https://json-schema.org/draft/2020-12/schema",
-          "title": "PWD Beneficiary Profile 1.0",
+          "title": "PWD Seeker Profile 1.0",
           "type": "object",
           "additionalProperties": false,
           "required": [
@@ -66,6 +66,8 @@
               ]
             },
             "disability_type": {
+              "vectorize": true,
+              "vector_weight": 2,
               "type": "array",
               "title": "Disability",
               "minItems": 1,
@@ -162,6 +164,7 @@
               }
             },
             "highest_qualification": {
+              "vectorize": true,
               "type": "string",
               "title": "Qualification",
               "description": "Highest qualification",
@@ -191,7 +194,7 @@
           { "field": "has_applications", "label": "Made Connections" }
         ],
         "user": [
-          { "field": "total_users", "label": "Total Beneficiaries" },
+          { "field": "total_users", "label": "Total Seekers" },
           { "field": "avg_items_per_user", "label": "Avg Profiles per User" },
           { "field": "avg_actions_per_user", "label": "Avg Actions per User" }
         ]
@@ -244,6 +247,7 @@
               "private": true
             },
             "provider_category": {
+              "vectorize": true,
               "type": "string",
               "title": "Category",
               "description": "Select the category that applies to you",
@@ -267,6 +271,8 @@
               "vectorize": true
             },
             "disabilities_served": {
+              "vectorize": true,
+              "vector_weight": 2,
               "type": "array",
               "title": "Disabilities Served",
               "description": "What type of seekers are you looking for?",

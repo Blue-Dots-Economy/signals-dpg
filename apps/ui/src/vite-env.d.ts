@@ -12,6 +12,8 @@ interface ImportMetaEnv {
   readonly VITE_NETWORK_ID: string;
   readonly VITE_SERVED_BINDINGS?: string;
   readonly VITE_DEFAULT_NETWORK_THEME?: string;
+  readonly VITE_DEFAULT_BRAND?: string;
+  readonly VITE_BRAND_NAME?: string;
   readonly VITE_DEFAULT_VIEW_MODE?: 'list' | 'map';
   /** Per-deployment default map centre as "lat,lng" (falls back to Muzaffarnagar). */
   readonly VITE_MAP_DEFAULT_CENTER?: string;
@@ -23,11 +25,18 @@ interface ImportMetaEnv {
   readonly VITE_AGENT_URL: string;
   readonly VITE_AGENT_TOKEN: string;
   readonly VITE_ENABLED_LANGUAGES: string;
-  /** Browser tab title for the tourist app. Defaults to "OneTAC". */
+  /** Browser tab title override for the tourist app. Falls back to the resolved brand title, else "Signals". */
   readonly VITE_TOURIST_APP_TITLE?: string;
 }
 
 declare const __DEFAULT_NETWORK_THEME__: string;
+declare const __DEFAULT_BRAND__: string;
+declare const __BRAND_REGISTRY__: Record<string, {
+  faviconType?: 'png' | 'svg';
+  logoShape?: 'square' | 'wordmark';
+  copy?: Record<string, string>;
+  brands?: Record<string, { faviconType?: 'png' | 'svg'; logoShape?: 'square' | 'wordmark'; copy?: Record<string, string> }>;
+}>;
 
 interface ImportMeta {
   readonly env: ImportMetaEnv;

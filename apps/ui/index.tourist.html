@@ -3,12 +3,55 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>OneTAC</title>
-    <link rel="icon" type="image/png" href="/brand/orange-dot/favicon.png" />
+    <!-- Initial title — set in main.tourist.tsx from resolved brand copy. -->
+    <title>Signals</title>
+    <!-- Favicon is set dynamically below once network+brand are resolved. -->
     <script src="/config.js"></script>
     <script>
       (function () {
-        document.documentElement.dataset.network = 'orange_dot';
+        // Resolve tourist network: ?network= → runtime config → build-time env → 'orange_dot'.
+        // __DEFAULT_NETWORK_THEME__ is injected by Vite at build time (mirrors index.html).
+        var params = new URLSearchParams(window.location.search);
+        var cfg = window.__DPG_UI_CONFIG__ || {};
+        var fallback = typeof __DEFAULT_NETWORK_THEME__ !== 'undefined' ? __DEFAULT_NETWORK_THEME__ : 'orange_dot';
+        var networkId = (params.get('network') || cfg.VITE_NETWORK_NAME || '').trim() || fallback;
+        document.documentElement.dataset.network = networkId;
+
+        // Resolve brand: runtime config → build default → 'standard'.
+        // Brand is per-deployment — not overridable via URL query params.
+        var brand = (cfg.VITE_BRAND_NAME || (typeof __DEFAULT_BRAND__ !== 'undefined' ? __DEFAULT_BRAND__ : '') || 'standard').trim() || 'standard';
+        document.documentElement.dataset.brand = brand;
+
+        // Set favicon from resolved network + brand using the brand registry.
+        // Falls back to an inline SVG dot-mark if the registry entry is absent.
+        (function () {
+          var registry = typeof __BRAND_REGISTRY__ !== 'undefined' ? __BRAND_REGISTRY__ : {};
+          var net = registry[networkId] || {};
+          var brandEntry = (net.brands && net.brands[brand]) || {};
+          var faviconType = brandEntry.faviconType || net.faviconType || 'svg';
+          var kebab = networkId.replace(/_/g, '-');
+          var link = document.createElement('link');
+          link.rel = 'icon';
+          if (faviconType === 'png') {
+            link.type = 'image/png';
+            link.href = brand && brand !== 'standard'
+              ? '/brand/' + kebab + '/' + brand + '/favicon.png'
+              : '/brand/' + kebab + '/favicon.png';
+          } else {
+            // SVG dot-mark generated from --brand-cta (applied after the brand-themes
+            // style block is parsed). Colour may be empty on very first paint; it is
+            // re-applied by NetworkThemeProvider once React boots.
+            var cssVar = '';
+            try { cssVar = getComputedStyle(document.documentElement).getPropertyValue('--brand-cta').trim(); } catch (_) {}
+            var colour = cssVar || '#000000';
+            var svg = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><rect width="32" height="32" rx="6" fill="' + colour + '"/><circle cx="16" cy="16" r="6" fill="white" opacity="0.95"/><circle cx="10" cy="10" r="2.2" fill="white" opacity="0.6"/><circle cx="23" cy="22" r="2" fill="white" opacity="0.55"/></svg>';
+            link.type = 'image/svg+xml';
+            link.href = 'data:image/svg+xml;utf8,' + encodeURIComponent(svg);
+          }
+          document.head.appendChild(link);
+        })();
+
+        // Apply dark class before first paint.
         try {
           var stored = localStorage.getItem('dpg-theme-mode');
           var resolved =

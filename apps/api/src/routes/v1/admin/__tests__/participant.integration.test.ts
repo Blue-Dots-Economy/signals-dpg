@@ -318,6 +318,8 @@ describeIf(`POST /api/v1/admin/participant (integration)${
     expect(body.user_existed).toBe(false);
     expect(body.items).toHaveLength(1);
     expect(body.items[0].item_id).toBeTruthy();
+    // POST response now surfaces item_locations (array; [] when no location set)
+    expect(Array.isArray(body.items[0].item_locations)).toBe(true);
 
     canonical_user_id = body.user_id;
     canonical_item_id = body.items[0].item_id;
