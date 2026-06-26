@@ -66,6 +66,8 @@
               ]
             },
             "disability_type": {
+              "vectorize": true,
+              "vector_weight": 2,
               "type": "array",
               "title": "Disability",
               "minItems": 1,
@@ -162,6 +164,7 @@
               }
             },
             "highest_qualification": {
+              "vectorize": true,
               "type": "string",
               "title": "Qualification",
               "description": "Highest qualification",
@@ -244,6 +247,7 @@
               "private": true
             },
             "provider_category": {
+              "vectorize": true,
               "type": "string",
               "title": "Category",
               "description": "Select the category that applies to you",
@@ -267,6 +271,8 @@
               "vectorize": true
             },
             "disabilities_served": {
+              "vectorize": true,
+              "vector_weight": 2,
               "type": "array",
               "title": "Disabilities Served",
               "description": "What type of seekers are you looking for?",
