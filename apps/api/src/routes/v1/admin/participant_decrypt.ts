@@ -7,7 +7,6 @@ import { and, eq, inArray, sql } from 'drizzle-orm';
 import { db } from '@api/db/postgres/drizzle_config';
 import { items } from '@dpg/database';
 import { item_metrics } from '../../../../db/postgres/schema/metrics.js';
-import { user } from '../../../../db/postgres/schema/auth.js';
 import {
   DecryptParticipantRequest as DecryptParticipantRequestSchema,
   DecryptParticipantResponse,
@@ -133,35 +132,34 @@ export const participant_decrypt_handler = async (
   } else {
     mode = 'user_id';
     const userId = body.user_id!;
-    const existingRows = await db
-      .select({ id: user.id, onboardedByOrgId: user.onboardedByOrgId })
-      .from(user)
-      .where(eq(user.id, userId))
-      .limit(1);
-    const existing = existingRows[0] ?? null;
-
-    const entitled = existing !== null && (!isAgg || existing.onboardedByOrgId === acting.org_id);
-    if (entitled) {
-      const rows = (await db
-        .select({
-          item_id: items.item_id,
-          item_network: items.item_network,
-          item_domain: items.item_domain,
-          item_type: items.item_type,
-          item_state: items.item_state,
-          item_private_state: items.item_private_state,
-          created_at: items.created_at,
-          updated_at: items.updated_at,
-        })
-        .from(items)
-        .where(
-          networks.length > 0
-            ? and(eq(items.created_by, existing.id), inArray(items.item_network, networks))
-            : eq(items.created_by, existing.id),
-        )
-        .orderBy(items.created_at)) as DecryptableRow[];
-      profiles = rows.map(toSnapshot);
-    }
+    // Scope IDENTICALLY to item_ids mode: ownership is per-item via
+    // item_metrics.onboarded_by_org_id, NOT user.onboarded_by_org_id. Both
+    // modes must agree on what "owned" means, or an aggregator that onboarded
+    // a user (but not a given item) would receive another org's decrypted PII
+    // for that user's items. An aggregator therefore only ever receives the
+    // user's items IT onboarded; network_service receives all of them.
+    const rows = (await db
+      .select({
+        item_id: items.item_id,
+        item_network: items.item_network,
+        item_domain: items.item_domain,
+        item_type: items.item_type,
+        item_state: items.item_state,
+        item_private_state: items.item_private_state,
+        created_at: items.created_at,
+        updated_at: items.updated_at,
+      })
+      .from(items)
+      .innerJoin(item_metrics, eq(item_metrics.itemId, sql`${items.item_id}::text`))
+      .where(
+        and(
+          eq(items.created_by, userId),
+          networks.length > 0 ? inArray(items.item_network, networks) : undefined,
+          isAgg ? eq(item_metrics.onboardedByOrgId, acting.org_id) : undefined,
+        ),
+      )
+      .orderBy(items.created_at)) as DecryptableRow[];
+    profiles = rows.map(toSnapshot);
     skipped = [];
   }
 

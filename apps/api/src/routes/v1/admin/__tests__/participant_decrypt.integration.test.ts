@@ -207,4 +207,30 @@ describeIf('POST /api/v1/admin/participant/decrypt (integration)', () => {
     const b = (await post(agg_b, { user_id: participant_user_id })).json();
     expect(b.profiles).toEqual([]);
   });
+
+  it('user_id mode scopes per-item by onboarded org — no cross-aggregator leak', async () => {
+    // Divergent ownership: the USER stays onboarded by agg_a, but the ITEM is
+    // re-attributed to agg_b. user_id mode must scope per-item (item_metrics),
+    // not per-user, so agg_a (which onboarded the user but NOT this item) must
+    // receive nothing, and agg_b (which now owns the item) receives it.
+    await db
+      .update(metricsSchema.item_metrics)
+      .set({ onboardedByOrgId: agg_b.org_id })
+      .where(eq(metricsSchema.item_metrics.itemId, item_id));
+    try {
+      const a = (await post(agg_a, { user_id: participant_user_id })).json();
+      expect(a.profiles).toEqual([]);
+
+      const b = (await post(agg_b, { user_id: participant_user_id })).json();
+      expect(b.profiles).toHaveLength(1);
+      expect(b.profiles[0].item_id).toBe(item_id);
+      expect(b.profiles[0].item_state.name).toBe('Velu Murugan');
+    } finally {
+      // Restore attribution so test ordering stays independent.
+      await db
+        .update(metricsSchema.item_metrics)
+        .set({ onboardedByOrgId: agg_a.org_id })
+        .where(eq(metricsSchema.item_metrics.itemId, item_id));
+    }
+  });
 });
