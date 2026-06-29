@@ -752,7 +752,8 @@
             "jobProviderLocation",
             "hiringManagerName",
             "hiringManagerPhoneNumber",
-            "positions"
+            "positions",
+            "natureOfJob"
           ],
           "properties": {
             "jobProviderName": {
@@ -799,7 +800,8 @@
                 "Internship",
                 "Apprenticeship",
                 "Full-time",
-                "Flexible"
+                "Flexible",
+                "Not Available"
               ]
             },
             "stipendMin": {
@@ -844,6 +846,7 @@
             "minEducationalInstitute": {
               "type": "string",
               "enum": [
+                "None",
                 "School",
                 "College",
                 "ITI",
@@ -877,7 +880,7 @@
               "type": "string",
               "title": "Job Title",
               "description": "Job title (editable)",
-              "pattern": "^\\s*\\S+\\s*$",
+              "pattern": "^\\s*\\S+(\\s+\\S+)*\\s*$",
               "minLength": 1,
               "vectorize": true
             },
