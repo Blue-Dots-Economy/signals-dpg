@@ -3,7 +3,7 @@ import type {
   FastifyReply,
   FastifyRequest,
 } from 'fastify';
-import { and, eq, inArray } from 'drizzle-orm';
+import { and, eq, inArray, sql } from 'drizzle-orm';
 import { db } from '@api/db/postgres/drizzle_config';
 import { items } from '@dpg/database';
 import { item_metrics } from '../../../../db/postgres/schema/metrics.js';
@@ -118,7 +118,7 @@ export const participant_decrypt_handler = async (
         updated_at: items.updated_at,
       })
       .from(items)
-      .innerJoin(item_metrics, eq(item_metrics.itemId, items.item_id))
+      .innerJoin(item_metrics, eq(item_metrics.itemId, sql`${items.item_id}::text`))
       .where(
         and(
           inArray(items.item_id, requested),
