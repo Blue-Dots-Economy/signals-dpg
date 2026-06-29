@@ -15,7 +15,7 @@ Server-side decryption is feasible: signals holds a symmetric key (`SIGNALS_PII_
 
 ## Goals
 
-- New signals admin endpoint returning **decrypted** profile `item_state` for a set of `item_ids` (now) or a `user_id` (future).
+- New signals admin endpoint returning **decrypted** profile `item_state`, accepting **either** a set of `item_ids` **or** a `user_id` — both modes implemented now. (The aggregator UI uses `item_ids` first; `user_id` is for later UI use.)
 - Aggregator "Export profile data" downloads a **separate** CSV of decrypted profiles for the **selected** dashboard rows.
 - Decrypted PII is exposed only to the aggregator that **onboarded** those participants (`onboarded_by_org_id`); `network_service` may read all.
 - No browser ever holds the signals admin key — the decrypt call is server-to-server.
@@ -25,7 +25,7 @@ Server-side decryption is feasible: signals holds a symmetric key (`SIGNALS_PII_
 - No change to the existing dashboard rollup export (`/v1/dashboard/export`) — the profile export is a separate, sibling option.
 - No end-to-end / per-user key encryption change — decryption stays server-side with the existing `SIGNALS_PII_KEY`.
 - No new permission/role concept — authorization reuses the existing two-header + acting-org scoping.
-- The `user_id` lookup mode is wired but not surfaced in the aggregator UI yet (future use).
+- The signals endpoint **fully implements both `item_ids` and `user_id` modes now** (both functional + tested). "Future" applies only to the **aggregator UI**, which uses `item_ids` for now and will surface the `user_id` mode later — no signals-side stub.
 
 ## Key decisions
 
@@ -53,14 +53,16 @@ Registered in `apps/api/src/routes/v1/admin/admin_routes.ts` (same `auth_middlew
 Validate that exactly one is present (Zod refine; reject both/neither with `400`).
 
 **Handler** (`apps/api/src/routes/v1/admin/participant_decrypt.ts`):
-- **`item_ids` path:** load matching rows from `items` — partition-pruned with `inArray(items.item_network, apiConfig.served_domains-derived networks)` + `inArray(items.item_id, item_ids)` (mirrors `participant_read.ts:158-162`). Select `item_id, item_network, item_domain, item_type, item_state, item_private_state, created_at, updated_at, created_by`.
-- **Scoping:** for `org_type === 'aggregator'`, keep only rows whose participant was onboarded by the acting org — resolve via the same ownership chain `participant_read.ts:118-127` uses (`item_metrics.onboarded_by_org_id === acting_org.org_id`, or `items.created_by → user.onboarded_by_org_id`). For `network_service`, keep all.
+- **`item_ids` path:** load matching rows by joining `items` to `item_metrics` on `item_id` — partition-pruned with `inArray(items.item_network, apiConfig.served_domains-derived networks)` + `inArray(items.item_id, item_ids)` (mirrors `participant_read.ts:158-162`). Select `items.{item_id, item_network, item_domain, item_type, item_state, item_private_state, created_at, updated_at}` + `item_metrics.onboarded_by_org_id`.
+- **Scoping (per mode — different source tables):**
+  - `item_ids` mode scopes on **`item_metrics.onboarded_by_org_id`** (`metrics.ts:26`; `item_metrics.item_id` is the PK == `items.item_id`). For `org_type === 'aggregator'`, add `eq(item_metrics.onboardedByOrgId, acting_org.org_id)` to the WHERE — this is the **same table the dashboard scopes by**, so "decryptable" == "visible on your dashboard." For `network_service`, drop that clause (keep all).
+  - `user_id` mode scopes on **`user.onboarded_by_org_id`** — the exact chain `participant_read.ts:118-127` uses (look up user, check `user.onboardedByOrgId === acting_org.org_id`, else `items: []`; `network_service` skips the check).
 - **Decrypt:** for each kept row call `decryptItemPrivate()` (`apps/api/src/utils/item_decrypt.ts`) → `mergedState`. Drop `item_private_state` before returning.
-- **`skipped`:** any requested `item_id` not present in the kept set (not found OR not owned) → added to `skipped` (no distinction, to avoid leaking existence of other aggregators' items).
-- **`user_id` path:** reuse the existing `readItemsForUser` decrypt logic (the same function `participant_read.ts` uses), applying the same acting-org scoping; `skipped` is `[]`.
+- **`skipped`:** any requested `item_id` not present in the kept set (not found, not in a served network, OR not owned) → added to `skipped` (no distinction, to avoid leaking existence of other aggregators' items).
+- **`user_id` path:** reuse the existing `readItemsForUser` decrypt logic (the same function `participant_read.ts` uses), applying the `user.onboarded_by_org_id` scoping above; `skipped` is `[]`.
 - **Audit:** emit one audit event (signals' existing audit path) recording `acting_org.org_id`, mode (`item_ids`/`user_id`), and count of decrypted items — this exposes raw PII.
 
-**Response** (`200`): `{ profiles: ParticipantDecryptedSnapshot[], skipped: string[] }` where each snapshot is `{ item_id, item_network, item_domain, item_type, item_state /* decrypted, full cleartext */, created_at, updated_at }`. `item_private_state` is never serialized.
+**Response** (`200`): `{ profiles: ParticipantDecryptedSnapshot[], skipped: string[] }` where each snapshot is `{ item_id, item_network, item_domain, item_type, item_state /* decrypted, full cleartext */, created_at, updated_at }`. `item_private_state` is never serialized. **Invariant (item_ids mode):** every requested id appears in exactly one of `profiles` or `skipped`, so `len(profiles) + len(skipped) == len(distinct item_ids requested)`.
 
 ### A2. Signals files
 
