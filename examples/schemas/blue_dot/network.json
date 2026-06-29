@@ -752,8 +752,7 @@
             "jobProviderLocation",
             "hiringManagerName",
             "hiringManagerPhoneNumber",
-            "positions",
-            "natureOfJob"
+            "positions"
           ],
           "properties": {
             "jobProviderName": {
