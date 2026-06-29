@@ -34,7 +34,12 @@
             "gender": {
               "type": "string",
               "title": "Gender",
-              "minItems": 1
+              "enum": [
+                "Male",
+                "Female",
+                "Other",
+                "Don't want to share"
+              ]
             },
             "location": {
               "type": "string",
