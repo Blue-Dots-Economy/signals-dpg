@@ -165,7 +165,8 @@ export const participant_decrypt_handler = async (
     skipped = [];
   }
 
-  // Audit: one structured entry per call — this exposes raw PII.
+  // Audit: this endpoint returns decrypted PII to the caller, so every call is
+  // recorded. The log entry itself carries counts only — never item_state values.
   request.log.info({
     operation: 'admin.participant.decrypt',
     acting_org_id: acting.org_id,
