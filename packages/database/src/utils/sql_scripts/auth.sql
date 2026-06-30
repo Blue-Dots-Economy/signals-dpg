@@ -65,6 +65,8 @@ CREATE TABLE IF NOT EXISTS "user" (
   "onboarded_via"       text,
   "onboarded_source_id" text,
   "onboarded_at"        timestamp,
+  -- Extensible support/ops markers (e.g. {"is_test": true}). See ADD COLUMN below.
+  "tags"                jsonb NOT NULL DEFAULT '{}'::jsonb,
   CONSTRAINT "user_email_unique" UNIQUE ("email"),
   CONSTRAINT "user_phone_number_unique" UNIQUE ("phone_number")
 );
@@ -84,6 +86,13 @@ ALTER TABLE "user" ADD COLUMN IF NOT EXISTS "onboarded_by_org_id" text;
 ALTER TABLE "user" ADD COLUMN IF NOT EXISTS "onboarded_via" text;
 ALTER TABLE "user" ADD COLUMN IF NOT EXISTS "onboarded_source_id" text;
 ALTER TABLE "user" ADD COLUMN IF NOT EXISTS "onboarded_at" timestamp;
+-- Extensible support/ops markers. Keyed jsonb so new flags need no migration.
+-- Current key: `is_test` (boolean) — marks a user (and, via the
+-- created_by/owner join, their profiles, posts, and applications) as test data
+-- for analysis + later bulk cleanup.
+ALTER TABLE "user" ADD COLUMN IF NOT EXISTS "tags" jsonb NOT NULL DEFAULT '{}'::jsonb;
+-- GIN index accelerates `tags @> '{"is_test": true}'` containment lookups.
+CREATE INDEX IF NOT EXISTS user_tags_gin_idx ON "user" USING GIN (tags);
 
 DO $$
 BEGIN
