@@ -14,6 +14,21 @@ interface CachedSchemaEntry {
 
 const networkApiClient = createApiClient();
 
+// Default page size for network-wide profile browse fetches (Signals home page
+// and the orange-dots tourist UI). Override via `VITE_PROFILE_FETCH_LIMIT`
+// (e.g. `"500"`). Falls back to 1000 when unset, empty, or invalid.
+const DEFAULT_PROFILE_FETCH_LIMIT = 1000;
+
+export function resolveProfileFetchLimit(): number {
+  const raw = import.meta.env.VITE_PROFILE_FETCH_LIMIT;
+  if (raw === undefined || raw === '') return DEFAULT_PROFILE_FETCH_LIMIT;
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed) || parsed <= 0) return DEFAULT_PROFILE_FETCH_LIMIT;
+  return parsed;
+}
+
+export const PROFILE_FETCH_LIMIT = resolveProfileFetchLimit();
+
 export interface FetchNetworkItemsQuery
   extends Omit<FetchItemsQuery, 'created_by_me'> {
   cache_ttl_seconds?: number;
