@@ -8,6 +8,7 @@ export * from './api/bulk_schemas';
 export * from './api/match_score_schemas';
 export * from './admin/aggregator_upsert';
 export * from './admin/participant';
+export * from './admin/participant_decrypt';
 export * from './aggregator/dashboard';
 export * from './item_state_privacy';
 export * from './item_state_masking';
