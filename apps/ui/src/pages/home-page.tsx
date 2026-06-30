@@ -33,7 +33,7 @@ import { CheckSquare } from 'lucide-react';
 import { getRuntimeEnv } from '@/lib/runtime-env';
 import { ACTION_CONSENT_SENTINEL } from '@/lib/action-api';
 import { EmptyState } from '@/components/empty-state';
-import { fetchNetworkConfigs, fetchNetworkConfig, fetchNetworkItems } from '@/lib/network-api';
+import { fetchNetworkConfigs, fetchNetworkConfig, fetchNetworkItems, PROFILE_FETCH_LIMIT } from '@/lib/network-api';
 import { useAuth } from '@/contexts/auth-context';
 import { apiConfig } from '@/lib/api-config';
 import { getEnumFilterFieldsForDomains, itemPassesEnumFilters } from '@/lib/enum-filters';
@@ -444,7 +444,7 @@ export function HomePage() {
       domainsToFetch.map((domain) => {
         const itemType = getItemTypeForDomain(network, domain.id);
         return fetchNetworkItems(
-          { item_network: network.id, item_domain: domain.id, item_type: itemType, limit: 1000 },
+          { item_network: network.id, item_domain: domain.id, item_type: itemType, limit: PROFILE_FETCH_LIMIT },
           controller.signal
         )
           .then((res) => ({
