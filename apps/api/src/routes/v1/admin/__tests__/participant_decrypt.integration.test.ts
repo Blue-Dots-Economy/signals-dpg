@@ -1,13 +1,17 @@
 /**
  * Integration test for POST /api/v1/admin/participant/decrypt against a real
- * Postgres. Seeds two aggregator orgs + one network_service org, an onboarded
- * user with one item carrying masked public state + an encrypted private blob,
- * and an item_metrics row attributing the item to aggregator A. Verifies:
- *   1. aggregator A decrypts its own item (cleartext private fields)
+ * Postgres. Seeds two aggregator orgs + one network_service org and an
+ * onboarded user with one item carrying masked public state + an encrypted
+ * private blob. The item is deliberately given NO item_metrics row — ownership
+ * is keyed on user.onboarded_by_org_id, so the export must work without the
+ * lazily-materialized metrics cache. Verifies:
+ *   1. aggregator A decrypts its own item (cleartext private fields) — with no
+ *      item_metrics row present (proves the metrics cache is not required)
  *   2. aggregator B gets the same item in `skipped` (not owned)
  *   3. network_service decrypts any item
  *   4. unknown item_id → skipped; invariant profiles+skipped == requested
  *   5. user_id mode returns A's items for A, empty for B
+ *   6. a corrupt private blob is skipped, not 500 — the batch survives
  */
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import Fastify, { type FastifyInstance } from 'fastify';
@@ -30,7 +34,6 @@ describeIf('POST /api/v1/admin/participant/decrypt (integration)', () => {
   let app: FastifyInstance;
   let db: typeof import('@api/db/postgres/drizzle_config').db;
   let authSchema: typeof import('../../../../../db/postgres/schema/auth.js');
-  let metricsSchema: typeof import('../../../../../db/postgres/schema/metrics.js');
   let itemsTable: typeof import('@dpg/database').items;
 
   const listen_port = Number(process.env.API_PORT ?? 2742);
@@ -56,7 +59,6 @@ describeIf('POST /api/v1/admin/participant/decrypt (integration)', () => {
   beforeAll(async () => {
     const drizzle_mod = await import('@api/db/postgres/drizzle_config');
     authSchema = await import('../../../../../db/postgres/schema/auth.js');
-    metricsSchema = await import('../../../../../db/postgres/schema/metrics.js');
     itemsTable = (await import('@dpg/database')).items;
     db = drizzle_mod.db;
 
@@ -94,7 +96,7 @@ describeIf('POST /api/v1/admin/participant/decrypt (integration)', () => {
 
     // Onboard a participant via the real POST route (agg A) so the item row is
     // created with every required column. onboard sets user.onboarded_by_org_id
-    // to the acting org, but does NOT write item_metrics (inserted below).
+    // to the acting org — that is the ownership signal the endpoint scopes on.
     const fixture = generateMinimalItemState(primary.schema);
     const onboardRes = await app.inject({
       method: 'POST',
@@ -131,23 +133,14 @@ describeIf('POST /api/v1/admin/participant/decrypt (integration)', () => {
       })
       .where(eq(itemsTable.item_id, item_id));
 
-    // item_metrics row attributing the item to aggregator A (onboard does not write this).
-    await db.insert(metricsSchema.item_metrics).values({
-      itemId: item_id,
-      itemNetwork: primary.network,
-      itemDomain: primary.domain,
-      itemType: primary.item_type,
-      ownerUserId: participant_user_id,
-      onboardedByOrgId: agg_a.org_id,
-      displayName: 'V***',
-      lastComputedAt: now,
-    });
+    // NB: we deliberately do NOT create an item_metrics row. Ownership is keyed
+    // on user.onboarded_by_org_id, so the export must succeed without the lazy
+    // metrics cache — these tests would fail if scoping still inner-joined it.
   });
 
   afterAll(async () => {
     const { user, organization, apikey } = authSchema;
     try {
-      await db.delete(metricsSchema.item_metrics).where(eq(metricsSchema.item_metrics.itemId, item_id));
       await db.delete(itemsTable).where(eq(itemsTable.item_id, item_id));
       await db.delete(user).where(inArray(user.id, [participant_user_id, svc_user_id]));
       await db.delete(apikey).where(inArray(apikey.id, [agg_a.apikey_id, agg_b.apikey_id, ns.apikey_id]));
@@ -208,29 +201,30 @@ describeIf('POST /api/v1/admin/participant/decrypt (integration)', () => {
     expect(b.profiles).toEqual([]);
   });
 
-  it('user_id mode scopes per-item by onboarded org — no cross-aggregator leak', async () => {
-    // Divergent ownership: the USER stays onboarded by agg_a, but the ITEM is
-    // re-attributed to agg_b. user_id mode must scope per-item (item_metrics),
-    // not per-user, so agg_a (which onboarded the user but NOT this item) must
-    // receive nothing, and agg_b (which now owns the item) receives it.
+  it('a corrupt private blob is skipped, not 500 — the batch survives', async () => {
+    // Corrupt the encrypted blob so decryption throws for this row.
     await db
-      .update(metricsSchema.item_metrics)
-      .set({ onboardedByOrgId: agg_b.org_id })
-      .where(eq(metricsSchema.item_metrics.itemId, item_id));
+      .update(itemsTable)
+      .set({ item_private_state: 'v1:not-valid-base64-$$$' })
+      .where(eq(itemsTable.item_id, item_id));
     try {
-      const a = (await post(agg_a, { user_id: participant_user_id })).json();
-      expect(a.profiles).toEqual([]);
-
-      const b = (await post(agg_b, { user_id: participant_user_id })).json();
-      expect(b.profiles).toHaveLength(1);
-      expect(b.profiles[0].item_id).toBe(item_id);
-      expect(b.profiles[0].item_state.name).toBe('Velu Murugan');
+      const res = await post(agg_a, { item_ids: [item_id] });
+      // The whole batch must not 500 on one bad row.
+      expect(res.statusCode).toBe(200);
+      const body = res.json();
+      expect(body.profiles).toEqual([]);
+      expect(body.skipped).toEqual([item_id]);
     } finally {
-      // Restore attribution so test ordering stays independent.
+      // Restore the valid blob so test ordering stays independent.
       await db
-        .update(metricsSchema.item_metrics)
-        .set({ onboardedByOrgId: agg_a.org_id })
-        .where(eq(metricsSchema.item_metrics.itemId, item_id));
+        .update(itemsTable)
+        .set({
+          item_private_state: encryptPiiBlob(
+            JSON.stringify({ name: 'Velu Murugan', phone: '+919876801011' }),
+            getPiiKey(),
+          ),
+        })
+        .where(eq(itemsTable.item_id, item_id));
     }
   });
 });
