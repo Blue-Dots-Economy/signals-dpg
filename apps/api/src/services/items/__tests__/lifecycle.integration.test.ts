@@ -1320,11 +1320,10 @@ describeIf(`lifecycle integration${can_run ? '' : ` — ${skip_reason}`}`, () =>
     expect(unpauseRes.json().lifecycle_status).toBe('live');
 
     // The SAME accept now succeeds. Include receiver consent when the
-    // interaction reveals PII on 'accepted' and declares a consent text.
-    const receiverConsent =
-      interaction.reveals_pii_on_status.includes('accepted')
-        ? consentAck(interaction.consent_text_receiver)
-        : undefined;
+    // interaction reveals PII on 'accepted' (reveals_pii_on_status-driven).
+    const receiverConsent = interaction.reveals_pii_on_status.includes('accepted')
+      ? consentAck()
+      : undefined;
     const acceptRes = await app.inject({
       method: 'POST',
       url: '/api/v1/action/update-status',

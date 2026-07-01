@@ -583,5 +583,25 @@ describeIf(`consent flow integration (purple_dot/connect)${
     expect(Number.isFinite(Date.parse(consent.consented_at as string))).toBe(
       true,
     );
+
+    // Assert a consent_record row was written for the accept stage.
+    const consentRows = await db
+      .select({
+        consentCategory: consentRecordTable.consentCategory,
+        actionStage: consentRecordTable.actionStage,
+        userId: consentRecordTable.userId,
+        itemId: consentRecordTable.itemId,
+        actionId: consentRecordTable.actionId,
+        source: consentRecordTable.source,
+      })
+      .from(consentRecordTable)
+      .where(eq(consentRecordTable.actionId, action_id))
+      .limit(10);
+
+    const acceptRow = consentRows.find((r) => r.actionStage === 'accept');
+    expect(acceptRow).toBeTruthy();
+    expect(acceptRow?.consentCategory).toBe('action');
+    expect(acceptRow?.actionId).toBe(action_id);
+    expect(acceptRow?.source).toBe('action');
   });
 });

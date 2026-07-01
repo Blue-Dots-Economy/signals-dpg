@@ -134,9 +134,9 @@ describeIf(`POST /action/perform on-behalf-of (integration)${
   let primary: ResolvedBinding;   // seeker binding
   let secondary: ResolvedBinding; // provider binding
 
-  // Consent text resolved from the interaction config (may be undefined for
-  // networks without consent requirements).
-  let initiator_consent: { acknowledged: true; text: string } | undefined;
+  // Consent resolved from the interaction config (undefined when no
+  // reveals_pii_on_status is declared, i.e. networks without consent requirements).
+  let initiator_consent: { acknowledged: true; version: number } | undefined;
 
   beforeAll(async () => {
     // Lazy-imported so a CI box without a live DB doesn't blow up on
@@ -165,10 +165,9 @@ describeIf(`POST /action/perform on-behalf-of (integration)${
     primary = resolved.primary;
     secondary = resolved.secondary;
 
-    // Resolve consent text for the action interaction between primary and
-    // secondary. consentAck returns undefined when no consent_text_initiator
-    // is declared, so it spreads safely as a no-op for networks without
-    // consent requirements.
+    // Resolve the interaction between primary and secondary to determine
+    // whether consent is required (reveals_pii_on_status.length > 0).
+    // Include consent in requests only when the interaction requires it.
     const consentInfo = await resolveInteractionConsent({
       actionType: 'connect',
       fromNetwork: primary.network,
@@ -178,7 +177,10 @@ describeIf(`POST /action/perform on-behalf-of (integration)${
       toDomain: secondary.domain,
       toItemType: secondary.item_type,
     });
-    initiator_consent = consentAck(consentInfo?.consent_text_initiator);
+    initiator_consent =
+      (consentInfo?.reveals_pii_on_status.length ?? 0) > 0
+        ? consentAck()
+        : undefined;
 
     const { admin_routes } = await import('../../admin/admin_routes.js');
     const action_routes_mod = await import('../action_routes.js');

@@ -323,9 +323,8 @@ describeIf(`GET /action/:action_id/contact-details (integration)${
     // Alice files a `connect` action targeting bob's item — self-acted
     // (no x-acting-org-id header). reveals_pii_on_status=["accepted"]
     // is declared for seeker→provider in the network config.
-    // Resolve the interaction's consent text so we can include it in
-    // the request body (required since PR #38 when consent_text_initiator
-    // is declared).
+    // Resolve the interaction to determine whether consent is required
+    // (reveals_pii_on_status.length > 0) and include it accordingly.
     const performConsent = await resolveInteractionConsent({
       actionType: 'connect',
       fromNetwork: primary.network,
@@ -359,8 +358,8 @@ describeIf(`GET /action/:action_id/contact-details (integration)${
             item_instance_url: base_url,
           },
           requirements_snapshot: {},
-          ...(consentAck(performConsent?.consent_text_initiator) !== undefined
-            ? { consent: consentAck(performConsent?.consent_text_initiator) }
+          ...((performConsent?.reveals_pii_on_status.length ?? 0) > 0
+            ? { consent: consentAck() }
             : {}),
         },
       ],
@@ -374,8 +373,7 @@ describeIf(`GET /action/:action_id/contact-details (integration)${
 
     // Bob accepts. /update-status enforces target_item_owner = caller,
     // which matches bob's apikey-resolved user_id. "accepted" is in
-    // reveals_pii_on_status so the route requires consent_text_receiver
-    // acknowledgement (PR #38).
+    // reveals_pii_on_status so the receiver consent is required.
     const updateConsent = await resolveInteractionConsent({
       actionType: 'connect',
       fromNetwork: primary.network,
@@ -397,8 +395,8 @@ describeIf(`GET /action/:action_id/contact-details (integration)${
           action_id,
           action_status: 'accepted',
           remarks: 'Happy to help.',
-          ...(consentAck(updateConsent?.consent_text_receiver) !== undefined
-            ? { consent: consentAck(updateConsent?.consent_text_receiver) }
+          ...((updateConsent?.reveals_pii_on_status.length ?? 0) > 0
+            ? { consent: consentAck() }
             : {}),
         },
       ],
