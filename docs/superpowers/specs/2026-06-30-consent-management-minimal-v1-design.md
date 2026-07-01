@@ -36,6 +36,19 @@ These remain the domain of the canonical cross-DPG spec.
 
 ---
 
+## 1.1 Architecture — UI-merge + backend-ledger (confirmed)
+
+The backend has **no brand concept** (verified: brand is resolved only in the UI via `window.__DPG_UI_CONFIG__.VITE_BRAND_NAME` → build default → `'standard'`; no `brand.json` is read by the API, no brand header/param exists). Consequently, for v1:
+
+- **Backend = ledger + config server.** The API stores `consent_record` rows and returns a user's accepted versions. It also **serves the network-default `consent.json`** through the existing schema pipeline (`GET /api/v1/network/schemas`, new `kind: 'consent_config'`), and — because the deployment knows its own brand at config-load time — **also serves a brand-scoped consent entry** when a brand override file is configured.
+- **UI = merge + gate.** The UI receives the network-default (and, if present, the brand) consent entries, applies the per-brand override (it is the only layer that knows the active brand), renders `current_version`, computes `needs_consent`, and gates the flows.
+- **`network`** is authoritative server-side for item/action rows (derived from the item/action). For user-level `terms`/`privacy`, the UI supplies the served network, validated against the instance's `served_domains`. **`brand`** and **`document_version`** are supplied by the UI (accepted v1 tradeoff — not server-validated; the canonical service hardens this later).
+- **Action-consent required-ness stays server-enforced** via `reveals_pii_on_status` in `network.json` (unchanged). Only the recorded version comes from the UI.
+
+Tradeoff accepted for v1: terms/privacy/profile gating is **client-side**. A user bypassing the popup simply gets no consent row written; PII-revealing actions remain server-gated as today.
+
+---
+
 ## 2. The consent types — network-agnostic
 
 Action types are **not** universal. Verified against the shipped configs:
@@ -202,7 +215,7 @@ A brand declares only the documents it changes, in its own `consent.json` under 
 
 → UPSDM gets `terms`, `profile_creation`, and all actions from the `blue_dot` default; `privacy` is the UPSDM one. The `brand` column in `consent_record` records which variant applied, so a version int is always resolved against the right (network-or-brand) document.
 
-The `consent.json` is loaded the same way `network.json` is, with the brand-override layer applied identically to `brand.json`. (Exact loader wiring is an implementation detail to confirm against the network-config loader during planning.)
+**Loading & serving (per §1.1):** the backend loads `consent.json` alongside `network.json` (local file in dev; schema-registry/remote URL in prod) and caches it in the schema pipeline as a `kind: 'consent_config'` entry served by `GET /api/v1/network/schemas`. When the deployment is configured with a brand that has an override file, the backend also caches a **brand-scoped** `consent_config` entry (tagged with the brand). The **UI performs the per-document merge** of network-default + brand entries — the backend does not merge, because it has no brand concept at request time (§1.1).
 
 ---
 
@@ -213,7 +226,7 @@ The `consent.json` is loaded the same way `network.json` is, with the brand-over
 Replace the implicit footer with explicit capture:
 
 - The `Privacy Policy` / `Terms` links open a **modal with two tabs** (privacy + terms content from `consent.json`), with **one checkbox + Accept button**. The checkbox is **never pre-checked**.
-- A new endpoint **`GET /api/v1/consent/status`** tells the UI whether the current versions are already accepted by this user. New user, or a version bump since their last acceptance → the modal must be cleared before continuing. A returning user already on the current version is **not interrupted** ("only when needed").
+- **`GET /api/v1/consent/status`** returns the user's accepted versions; the UI compares them against the merged config's `current_version` per document to decide whether to show the modal. New user, or a version bump since their last acceptance → the modal must be cleared before continuing. A returning user already on the current version is **not interrupted** ("only when needed"). Gating is computed client-side (§1.1).
 - Consent is recorded via **`POST /api/v1/consent/accept`** **right after OTP verify** (when `user_id` exists), writing the `terms` + `privacy` rows. This keeps the better-auth OTP plugin untouched — no need to thread consent through `unified_otp.ts`.
 - The legacy `terms_accepted` / `privacy_accepted` booleans **stop being hardcoded `true`**; they are set from the accept call for backward compatibility. The `consent_record` table is the system of record; the booleans are deprecated (column removal deferred to a later cleanup, consistent with the canonical spec's stance).
 - Build the missing **`/privacy`** and **`/terms`** routes/pages so the footer links resolve (today → blank). These render the same `consent.json` content as the popup tabs.
@@ -244,13 +257,13 @@ Keep the existing `ConsentCheckbox` + network-driven UI (`action-modal.tsx` for 
 
 Minimal, Signals-internal (no service-to-service auth — same app):
 
-- `GET /api/v1/consent/status` — auth. Returns, per universal `consent_category`, the user's latest accepted version (if any) and whether re-consent is needed — `needs_consent` = **no acceptance row equal to the document's current `current_version`** (§4.1). Drives the login gate.
-- `POST /api/v1/consent/accept` — auth. Body carries the categories + versions being accepted (e.g. `terms` v1, `privacy` v1). Writes one row per accepted document. Used by the signup/login gate.
-- `POST /api/v1/item/create` — **extended** to accept an optional consent payload and write the `profile_creation` row.
-- `perform_action` / `update_action_status` — **extended** to write the `action` rows (the consent payload already flows through these routes today).
-- `GET /api/v1/consent/content?network=&brand=` *(optional, if the UI needs the resolved config client-side)* — returns the merged `consent.json` for rendering popups/pages. Public (pre-login) for the privacy/terms pages.
+- `GET /api/v1/consent/status?network=` — auth. Returns, per universal `consent_category`, the user's **latest accepted version** (raw — no gating verdict, since `current_version` lives in the UI-merged config). The UI computes `needs_consent` = **no accepted version equal to the document's current `current_version`** (§4.1) by comparing this response against the merged config.
+- `POST /api/v1/consent/accept` — auth. Body: `{ network, brand, items: [{ category, version }] }` — one entry per document accepted (e.g. `terms` v1, `privacy` v1). Writes one row per item. `network` is validated against the instance's `served_domains`; `brand`/`version` are recorded as supplied.
+- `POST /api/v1/item/create` — **extended** with an optional `consent: { category: 'profile_creation', version, brand }`; writes the `profile_creation` row with the new `item_id`, `network` derived from the created item.
+- `perform_action` / `update_action_status` — **extended** to write the `action` rows. The existing `consent` payload changes from `{ acknowledged, text }` to `{ acknowledged, version, brand }` (text no longer stored); `network`/`item_id`/`action_id` are derived server-side from the action.
+- **Consent config is served, not a bespoke endpoint** — it rides the existing `GET /api/v1/network/schemas?network=` response as `kind: 'consent_config'` (network default) plus a brand-scoped entry when configured. The `/privacy` & `/terms` pages and the popup read from that (public, pre-login, same as network config today).
 
-`network` is always server-derived. Error codes are machine-readable; routes never throw across boundaries (existing repo convention).
+Error codes are machine-readable; routes never throw across boundaries (existing repo convention).
 
 ---
 
