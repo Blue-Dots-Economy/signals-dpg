@@ -291,6 +291,7 @@
   "contact.error_unauthorized": "You don't have access to these details.",
   "contact.loading": "Loading…",
   "profile.btn_update": "Update",
+  "profile.btn_create": "Create Profile",
   "profile.error_generic_desc": "An unexpected error occurred. Please try again — if the problem persists, contact support.",
   "profile.error_role_unavailable_fallback_desc": "This profile type isn't supported here. Try a different role or contact your network administrator.",
   "theme.label_dark": "Dark",

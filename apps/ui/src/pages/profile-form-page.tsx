@@ -12,6 +12,8 @@ import { AuthShell } from '@/components/layout/auth-shell';
 import { NetworkConstellation } from '@/components/layout/network-constellation';
 import { RoleCard } from '@/components/cards/role-card';
 import { useNetworkTheme } from '@/theme/theme-provider';
+import { useConsentConfig } from '@/hooks/use-consent-config';
+import { ConsentCheckbox } from '@/components/actions/consent-checkbox';
 import { WalletImportModal } from '@/components/wallet/wallet-import-modal';
 import { resolveNetworkRefs } from '@/engine/schema/resolve-schema';
 import type { DotNetworkSchema } from '@/engine/types';
@@ -49,7 +51,8 @@ export function ProfileFormPage() {
   const { id } = useParams();
   const [searchParams] = useSearchParams();
   const { user } = useAuth();
-  const { theme } = useNetworkTheme();
+  const { theme, brand } = useNetworkTheme();
+  const { config: consentConfig, isLoading: consentLoading } = useConsentConfig();
   const isEdit = !!id;
   // The domains this deployment serves (VITE_SERVED_BINDINGS), or null = all.
   const servedScope = React.useMemo(() => getServedScope(), []);
@@ -76,6 +79,8 @@ export function ProfileFormPage() {
   const [resolvedLocations, setResolvedLocations] = React.useState<
     Array<{ lat: number; lng: number; label?: string; components?: GeoComponents }>
   >([]);
+  const [formValid, setFormValid] = React.useState(false);
+  const [consentChecked, setConsentChecked] = React.useState(false);
 
   // Clear stale locations whenever the user switches domain so a prior domain's
   // address suggestion is never submitted for a different domain.
@@ -272,6 +277,12 @@ export function ProfileFormPage() {
     return itemTypeKeys.length > 0 ? itemTypeKeys[0] : null;
   }, [selectedDomain, domains]);
 
+  // Consent config derivations — only relevant in create mode.
+  const profileDoc = consentConfig?.documents.profile_creation;
+  const profileVersion = profileDoc?.versions.find((v) => v.version === profileDoc.current_version);
+  const statement = profileVersion?.statement ?? '';
+  const consentRequired = !isEdit && !!statement;
+
   const selectedDomainInfo = domains.find((d) => d.id === selectedDomain);
   const DomainIcon = getDomainIcon(selectedDomain, network?.id);
   const roleLabel = (selectedDomain ?? '').replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
@@ -435,6 +446,14 @@ export function ProfileFormPage() {
         }
 
         createPayload.item_locations = item_locations;
+
+        if (consentRequired && profileDoc) {
+          createPayload.consent = {
+            category: 'profile_creation',
+            version: profileDoc.current_version,
+            brand: brand === 'standard' ? null : brand,
+          };
+        }
 
         await createItem(createPayload);
         toast.success(t('profile.toast_created'), {
@@ -604,11 +623,14 @@ export function ProfileFormPage() {
 
             {profileSchema && (
               <SchemaForm
+                id="profile-form"
                 schema={profileSchema}
                 onSubmit={handleSubmit}
                 disabled={isSubmitting}
                 formData={initialData ?? undefined}
                 submitButtonText={isEdit ? t('profile.btn_update') : undefined}
+                hideSubmit={!isEdit}
+                onValidityChange={!isEdit ? setFormValid : undefined}
                 domainId={selectedDomain ?? undefined}
                 formContext={{
                   onLocationResolved: (
@@ -617,6 +639,26 @@ export function ProfileFormPage() {
                   onLocationsResolved: (coords: Array<{ lat: number; lng: number; label?: string }>) => setResolvedLocations(coords),
                 }}
               />
+            )}
+
+            {!isEdit && (
+              <div className="mt-6 space-y-4">
+                {consentRequired && formValid && (
+                  <ConsentCheckbox
+                    text={statement}
+                    checked={consentChecked}
+                    onCheckedChange={setConsentChecked}
+                  />
+                )}
+                <button
+                  type="submit"
+                  form="profile-form"
+                  disabled={!formValid || (!isEdit && consentLoading) || (consentRequired && !consentChecked)}
+                  className="mt-2 h-12 w-full rounded-md text-base font-semibold bg-brand-cta hover:brightness-110 transition-all active:scale-95 shadow-md text-white disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {t('profile.btn_create')}
+                </button>
+              </div>
             )}
           </CardContent>
         </Card>

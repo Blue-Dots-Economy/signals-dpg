@@ -287,6 +287,7 @@
   "contact.error_unauthorized": "ಈ ವಿವರಗಳಿಗೆ ನಿಮಗೆ ಪ್ರವೇಶವಿಲ್ಲ.",
   "contact.loading": "ಲೋಡ್ ಆಗುತ್ತಿದೆ…",
   "profile.btn_update": "ನವೀಕರಿಸಿ",
+  "profile.btn_create": "ಪ್ರೊಫೈಲ್ ರಚಿಸಿ",
   "profile.error_generic_desc": "ಅನಿರೀಕ್ಷಿತ ದೋಷ ಸಂಭವಿಸಿದೆ. ದಯವಿಟ್ಟು ಮತ್ತೆ ಪ್ರಯತ್ನಿಸಿ — ಸಮಸ್ಯೆ ಮುಂದುವರಿದರೆ, ಬೆಂಬಲವನ್ನು ಸಂಪರ್ಕಿಸಿ.",
   "profile.error_role_unavailable_fallback_desc": "ಈ ಪ್ರೊಫೈಲ್ ಪ್ರಕಾರವು ಇಲ್ಲಿ ಬೆಂಬಲಿತವಾಗಿಲ್ಲ. ಬೇರೆ ಪಾತ್ರವನ್ನು ಪ್ರಯತ್ನಿಸಿ ಅಥವಾ ನಿಮ್ಮ ನೆಟ್‌ವರ್ಕ್ ನಿರ್ವಾಹಕರನ್ನು ಸಂಪರ್ಕಿಸಿ.",
   "theme.label_dark": "ಗಾಢ",
