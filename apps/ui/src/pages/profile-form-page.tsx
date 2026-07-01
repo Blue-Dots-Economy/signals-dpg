@@ -82,6 +82,11 @@ export function ProfileFormPage() {
   const [formValid, setFormValid] = React.useState(false);
   const [consentChecked, setConsentChecked] = React.useState(false);
 
+  // Reset consent checkbox when form becomes invalid
+  React.useEffect(() => {
+    if (!formValid) setConsentChecked(false);
+  }, [formValid]);
+
   // Clear stale locations whenever the user switches domain so a prior domain's
   // address suggestion is never submitted for a different domain.
   React.useEffect(() => {
