@@ -11,6 +11,7 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Label } from '@/components/ui/label';
 import { Markdown } from '@/components/consent/markdown';
+import { useNetworkTheme } from '@/theme/theme-provider';
 
 export type ConsentModalMode = 'gate' | 'view';
 export type ConsentModalTab = 'privacy' | 'terms';
@@ -37,6 +38,7 @@ export function ConsentModal({
   onOpenChange,
 }: ConsentModalProps) {
   const [checked, setChecked] = useState(false);
+  const { theme } = useNetworkTheme();
 
   const privacyVersion = getCurrentVersion(config.documents.privacy);
   const termsVersion = getCurrentVersion(config.documents.terms);
@@ -58,24 +60,35 @@ export function ConsentModal({
           if (mode === 'gate') e.preventDefault();
         }}
       >
-        <DialogHeader className="px-6 pt-6 pb-4 shrink-0">
-          <DialogTitle className="text-lg font-semibold">
+        <DialogHeader className="px-6 pt-6 pb-4 shrink-0 text-left">
+          {theme?.name && (
+            <p className="text-xs font-bold uppercase tracking-wide text-primary">
+              {theme.name}
+            </p>
+          )}
+          <DialogTitle className="text-xl font-bold">
             {mode === 'gate' ? 'Review & accept to continue' : 'Privacy Policy & Terms'}
           </DialogTitle>
           <DialogDescription className="text-sm text-muted-foreground">
             {mode === 'gate'
-              ? 'Please read the following documents and accept to proceed.'
-              : 'Read the documents below.'}
+              ? 'Please read the Privacy Policy and Terms. You must agree before continuing.'
+              : 'Read the Privacy Policy and Terms below.'}
           </DialogDescription>
         </DialogHeader>
 
         <div className="flex flex-col flex-1 overflow-hidden px-6 pb-4 gap-4">
           <Tabs defaultValue={initialTab} className="flex flex-col flex-1 overflow-hidden">
-            <TabsList className="w-full shrink-0">
-              <TabsTrigger value="privacy" className="flex-1">
+            <TabsList className="w-full shrink-0 h-11 p-1">
+              <TabsTrigger
+                value="privacy"
+                className="flex-1 data-[state=active]:text-primary data-[state=active]:font-semibold"
+              >
                 Privacy Policy
               </TabsTrigger>
-              <TabsTrigger value="terms" className="flex-1">
+              <TabsTrigger
+                value="terms"
+                className="flex-1 data-[state=active]:text-primary data-[state=active]:font-semibold"
+              >
                 Terms of Service
               </TabsTrigger>
             </TabsList>
@@ -84,24 +97,14 @@ export function ConsentModal({
               value="privacy"
               className="flex-1 overflow-y-auto mt-4 pr-1"
             >
-              {privacyVersion && (
-                <>
-                  <h3 className="text-base font-semibold mb-3">{privacyVersion.title}</h3>
-                  <Markdown>{privacyVersion.content}</Markdown>
-                </>
-              )}
+              {privacyVersion && <Markdown>{privacyVersion.content}</Markdown>}
             </TabsContent>
 
             <TabsContent
               value="terms"
               className="flex-1 overflow-y-auto mt-4 pr-1"
             >
-              {termsVersion && (
-                <>
-                  <h3 className="text-base font-semibold mb-3">{termsVersion.title}</h3>
-                  <Markdown>{termsVersion.content}</Markdown>
-                </>
-              )}
+              {termsVersion && <Markdown>{termsVersion.content}</Markdown>}
             </TabsContent>
           </Tabs>
 
@@ -121,9 +124,9 @@ export function ConsentModal({
                 type="button"
                 disabled={!checked}
                 onClick={onAccept}
-                className="flex w-full items-center justify-center rounded-md py-3 text-sm font-semibold transition-all disabled:opacity-60 bg-brand-cta hover:brightness-110 h-11"
+                className="flex w-full items-center justify-center rounded-md py-3 text-sm font-semibold text-[var(--brand-cta-foreground)] transition-all disabled:opacity-60 bg-brand-cta hover:brightness-110 h-11"
               >
-                Accept
+                Accept &amp; Continue
               </button>
             </div>
           )}

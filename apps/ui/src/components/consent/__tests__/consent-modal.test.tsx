@@ -105,13 +105,15 @@ describe('ConsentModal — gate mode', () => {
     );
 
     // Privacy tab is active by default — its content should be visible
-    expect(screen.getByText('Privacy Policy v1')).toBeInTheDocument();
+    expect(screen.getByText('We respect your privacy.')).toBeInTheDocument();
 
     // Click Terms tab
     const termsTab = screen.getByRole('tab', { name: /terms of service/i });
     await user.click(termsTab);
 
-    expect(screen.getByText('Terms of Service v1')).toBeInTheDocument();
+    expect(
+      screen.getByText('By using this service you agree to these terms.'),
+    ).toBeInTheDocument();
   });
 });
 
@@ -142,6 +144,8 @@ describe('ConsentModal — view mode', () => {
       />,
     );
 
-    expect(screen.getByText('Terms of Service v1')).toBeInTheDocument();
+    expect(
+      screen.getByText('By using this service you agree to these terms.'),
+    ).toBeInTheDocument();
   });
 });
