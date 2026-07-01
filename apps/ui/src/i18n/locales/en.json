@@ -293,6 +293,7 @@
   "contact.loading": "Loading…",
   "profile.btn_update": "Update",
   "profile.btn_create": "Create Profile",
+  "profile.fill_required_hint": "Please fill in all the required fields to continue.",
   "profile.error_generic_desc": "An unexpected error occurred. Please try again — if the problem persists, contact support.",
   "profile.error_role_unavailable_fallback_desc": "This profile type isn't supported here. Try a different role or contact your network administrator.",
   "theme.label_dark": "Dark",

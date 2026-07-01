@@ -289,6 +289,7 @@
   "contact.loading": "लोड हो रहा है…",
   "profile.btn_update": "अपडेट करें",
   "profile.btn_create": "प्रोफ़ाइल बनाएँ",
+  "profile.fill_required_hint": "जारी रखने के लिए कृपया सभी आवश्यक फ़ील्ड भरें।",
   "profile.error_generic_desc": "एक अप्रत्याशित त्रुटि हुई। कृपया पुनः प्रयास करें — यदि समस्या बनी रहती है, तो समर्थन से संपर्क करें।",
   "profile.error_role_unavailable_fallback_desc": "यह प्रोफ़ाइल प्रकार यहाँ समर्थित नहीं है। कोई अन्य भूमिका आज़माएँ या अपने नेटवर्क प्रशासक से संपर्क करें।",
   "theme.label_dark": "गहरा",

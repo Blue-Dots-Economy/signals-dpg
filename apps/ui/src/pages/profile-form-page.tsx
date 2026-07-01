@@ -648,12 +648,18 @@ export function ProfileFormPage() {
 
             {!isEdit && (
               <div className="mt-6 space-y-4">
-                {consentRequired && formValid && (
-                  <ConsentCheckbox
-                    text={statement}
-                    checked={consentChecked}
-                    onCheckedChange={setConsentChecked}
-                  />
+                {!formValid ? (
+                  <p className="rounded-md border border-border bg-muted/40 px-4 py-3 text-sm text-muted-foreground">
+                    {t('profile.fill_required_hint')}
+                  </p>
+                ) : (
+                  consentRequired && (
+                    <ConsentCheckbox
+                      text={statement}
+                      checked={consentChecked}
+                      onCheckedChange={setConsentChecked}
+                    />
+                  )
                 )}
                 <button
                   type="submit"
