@@ -6,6 +6,7 @@ import { FastifyReply, FastifyRequest } from 'fastify';
 import { db } from '@api/db/postgres/drizzle_config';
 import { DrizzleQueryError, and, eq } from 'drizzle-orm';
 import { DatabaseError, ensureItemPartition, items } from '@dpg/database';
+import { consent_record } from '@api/db/postgres/schema';
 import { auth_middleware_if_enabled } from '@api/plugins/auth/auth_middleware';
 import {
   isServedDomainBinding,
@@ -164,6 +165,25 @@ export const create_item_handler = async (
       item_locations,
       created_by: userId,
     });
+
+    if (body.consent) {
+      try {
+        await db.insert(consent_record).values({
+          level: 'item',
+          consentCategory: 'profile_creation',
+          userId: callerId,
+          itemId: created.itemId,
+          network: body.item_network,
+          brand: body.consent.brand ?? null,
+          documentVersion: body.consent.version,
+          source: 'profile',
+          acceptedAt: new Date(),
+        });
+      } catch (err) {
+        request.log.error({ err, itemId: created.itemId }, 'profile consent write failed');
+        // Do not fail item creation on consent-write error; log for reconciliation.
+      }
+    }
 
     await publishItemEvent(
       {
