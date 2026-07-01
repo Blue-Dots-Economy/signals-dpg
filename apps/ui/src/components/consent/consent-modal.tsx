@@ -12,6 +12,7 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { Label } from '@/components/ui/label';
 import { Markdown } from '@/components/consent/markdown';
 import { useNetworkTheme } from '@/theme/theme-provider';
+import { useTranslation } from 'react-i18next';
 
 export type ConsentModalMode = 'gate' | 'view';
 export type ConsentModalTab = 'privacy' | 'terms';
@@ -39,6 +40,7 @@ export function ConsentModal({
 }: ConsentModalProps) {
   const [checked, setChecked] = useState(false);
   const { theme } = useNetworkTheme();
+  const { t } = useTranslation();
 
   const privacyVersion = getCurrentVersion(config.documents.privacy);
   const termsVersion = getCurrentVersion(config.documents.terms);
@@ -67,12 +69,10 @@ export function ConsentModal({
             </p>
           )}
           <DialogTitle className="text-xl font-bold">
-            {mode === 'gate' ? 'Review & accept to continue' : 'Privacy Policy & Terms'}
+            {mode === 'gate' ? t('consent.title_gate') : t('consent.title_view')}
           </DialogTitle>
           <DialogDescription className="text-sm text-muted-foreground">
-            {mode === 'gate'
-              ? 'Please read the Privacy Policy and Terms. You must agree before continuing.'
-              : 'Read the Privacy Policy and Terms below.'}
+            {mode === 'gate' ? t('consent.desc_gate') : t('consent.desc_view')}
           </DialogDescription>
         </DialogHeader>
 
@@ -83,13 +83,13 @@ export function ConsentModal({
                 value="privacy"
                 className="flex-1 data-[state=active]:text-primary data-[state=active]:font-semibold"
               >
-                Privacy Policy
+                {t('consent.tab_privacy')}
               </TabsTrigger>
               <TabsTrigger
                 value="terms"
                 className="flex-1 data-[state=active]:text-primary data-[state=active]:font-semibold"
               >
-                Terms of Service
+                {t('consent.tab_terms')}
               </TabsTrigger>
             </TabsList>
 
@@ -117,7 +117,7 @@ export function ConsentModal({
                   onCheckedChange={(value) => setChecked(value === true)}
                 />
                 <Label htmlFor="consent-agree" className="text-sm leading-snug cursor-pointer">
-                  I have read and agree to the Terms of Service and Privacy Policy.
+                  {t('consent.agree_label')}
                 </Label>
               </div>
               <button
@@ -126,7 +126,7 @@ export function ConsentModal({
                 onClick={onAccept}
                 className="flex w-full items-center justify-center rounded-md py-3 text-sm font-semibold text-[var(--brand-cta-foreground)] transition-all disabled:opacity-60 bg-brand-cta hover:brightness-110 h-11"
               >
-                Accept &amp; Continue
+                {t('consent.accept_continue')}
               </button>
             </div>
           )}
