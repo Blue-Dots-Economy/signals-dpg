@@ -148,8 +148,7 @@
             },
             "Location": {
               "type": "string",
-              "minLength": 1,
-              "location": "primary"
+              "minLength": 1
             },
             "Coverage Radius (km)": {
               "type": "number",
