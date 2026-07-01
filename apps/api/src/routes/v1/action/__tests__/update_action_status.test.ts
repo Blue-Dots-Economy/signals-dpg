@@ -523,6 +523,34 @@ describe('POST /api/v1/action/update-status (bulk, self-acted only)', () => {
       expect(dbState.updates).toHaveLength(0);
     });
 
+    it('422 ACTION_CANCELLED — receiver cannot accept an already-cancelled request', async () => {
+      const { getActionInteraction } = await import('@dpg/schemas');
+      (getActionInteraction as ReturnType<typeof vi.fn>).mockReturnValueOnce(CANCEL_INTERACTION);
+      dbState.existingAction = { ...EXISTING_ACTION, action_status: 'cancelled', update_count: 1 };
+      const res = await buildApp(undefined, { id: 'usr_agg_owned' }).inject({
+        method: 'POST',
+        url: '/update-status',
+        payload: [{ action_id: EXISTING_ACTION.action_id, action_status: 'accepted' }],
+      });
+      expect(res.statusCode).toBe(422);
+      expect(res.json().results[0]).toMatchObject({ error: 'ACTION_CANCELLED' });
+      expect(dbState.updates).toHaveLength(0);
+    });
+
+    it('422 ACTION_CANCELLED — source owner cannot re-cancel an already-cancelled request', async () => {
+      const { getActionInteraction } = await import('@dpg/schemas');
+      (getActionInteraction as ReturnType<typeof vi.fn>).mockReturnValueOnce(CANCEL_INTERACTION);
+      dbState.existingAction = { ...EXISTING_ACTION, action_status: 'cancelled', update_count: 1 };
+      const res = await buildApp(undefined, { id: 'usr_seeker' }).inject({
+        method: 'POST',
+        url: '/update-status',
+        payload: [CANCEL_BODY],
+      });
+      expect(res.statusCode).toBe(422);
+      expect(res.json().results[0]).toMatchObject({ error: 'ACTION_CANCELLED' });
+      expect(dbState.updates).toHaveLength(0);
+    });
+
     it('200 cancellation is not gated on liveness (target item not live)', async () => {
       const { getActionInteraction } = await import('@dpg/schemas');
       (getActionInteraction as ReturnType<typeof vi.fn>).mockReturnValueOnce(CANCEL_INTERACTION);

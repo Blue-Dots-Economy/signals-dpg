@@ -104,6 +104,18 @@ export const update_action_status_handler = async (
         );
       }
 
+      // Cancellation is terminal: once the source owner has withdrawn a
+      // request, it is dead. No further transition (accept/reject or a repeat
+      // cancel) is allowed by either party — otherwise the receiver could
+      // "accept" an application the applicant already pulled.
+      const cancelStatuses = interaction.metric_categories?.cancel ?? [];
+      if (cancelStatuses.includes(existingAction.action_status)) {
+        throw new BulkItemFailure(
+          'ACTION_CANCELLED',
+          'This request was cancelled and can no longer be updated.',
+        );
+      }
+
       // A "cancellation" is any status the network config buckets under
       // metric_categories.cancel. Every other transition is a receiver
       // response (self-acted by the target owner). A cancellation instead is
@@ -111,9 +123,7 @@ export const update_action_status_handler = async (
       // request — and is only allowed while the receiver has not yet acted
       // (update_count === 0). Withdrawal is de-escalation, so it is not gated
       // on either side's liveness.
-      const isCancellation = (interaction.metric_categories?.cancel ?? []).includes(
-        body.action_status,
-      );
+      const isCancellation = cancelStatuses.includes(body.action_status);
 
       if (isCancellation) {
         if (existingAction.source_item_owner !== callerId) {
