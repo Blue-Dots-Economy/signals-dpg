@@ -48,11 +48,14 @@ export const update_action_status: FastifyPluginAsyncZod = async function (fasti
 };
 
 /**
- * Self-acted only. The caller (session cookie or apikey-as-self) must
- * be the target item's owner. On-behalf-of via `acting_as_user_id` was
- * removed by spec 2026-05-23-action-on-behalf-of-network-service-tier-design.md
- * — audit columns on `item_actions` are populated only at create-time
- * (by `/action/perform`).
+ * Self-acted only. For receiver responses (accept/reject/…) the caller
+ * (session cookie or apikey-as-self) must be the target item's owner. The one
+ * exception is a cancellation (a status bucketed under metric_categories.cancel):
+ * that is initiated by the source item owner to withdraw their own request, and
+ * is only allowed while the receiver has not yet acted. On-behalf-of via
+ * `acting_as_user_id` was removed by spec
+ * 2026-05-23-action-on-behalf-of-network-service-tier-design.md — audit columns
+ * on `item_actions` are populated only at create-time (by `/action/perform`).
  */
 export const update_action_status_handler = async (
   request: FastifyRequest<{ Body: unknown[] }>,
@@ -82,51 +85,6 @@ export const update_action_status_handler = async (
         throw new BulkItemFailure('ACTION_NOT_FOUND', 'Action does not exist on this instance');
       }
 
-      if (existingAction.target_item_owner !== callerId) {
-        throw new BulkItemFailure(
-          'NOT_TARGET_ITEM_OWNER',
-          'update-status may only be called by the target item owner.',
-        );
-      }
-
-      const targetSnapshot = await fetchLocalItemSnapshot(db, {
-        item_network: existingAction.target_item_network,
-        item_domain: existingAction.target_item_domain,
-        item_type: existingAction.target_item_type,
-        item_id: existingAction.target_item_id,
-        item_instance_url: existingAction.target_item_instance_url,
-      });
-      if (!targetSnapshot || targetSnapshot.lifecycle_status !== 'live') {
-        throw new BulkItemFailure(
-          'PROFILE_NOT_LIVE',
-          'target_item is not live; status updates blocked',
-        );
-      }
-
-      if (
-        isCurrentInstanceItem({
-          item_network: existingAction.source_item_network,
-          item_domain: existingAction.source_item_domain,
-          item_type: existingAction.source_item_type,
-          item_id: existingAction.source_item_id,
-          item_instance_url: existingAction.source_item_instance_url,
-        })
-      ) {
-        const sourceSnap = await fetchLocalItemSnapshot(db, {
-          item_network: existingAction.source_item_network,
-          item_domain: existingAction.source_item_domain,
-          item_type: existingAction.source_item_type,
-          item_id: existingAction.source_item_id,
-          item_instance_url: existingAction.source_item_instance_url,
-        });
-        if (!sourceSnap || sourceSnap.lifecycle_status !== 'live') {
-          throw new BulkItemFailure(
-            'PROFILE_NOT_LIVE',
-            'source_item is not live; status updates blocked',
-          );
-        }
-      }
-
       let interaction: ReturnType<typeof getActionInteraction>;
       try {
         const networkConfig = await getNetworkConfigById(existingAction.target_item_network);
@@ -144,6 +102,77 @@ export const update_action_status_handler = async (
           'INVALID_ACTION_EVENT',
           err instanceof Error ? err.message : 'Invalid action event',
         );
+      }
+
+      // A "cancellation" is any status the network config buckets under
+      // metric_categories.cancel. Every other transition is a receiver
+      // response (self-acted by the target owner). A cancellation instead is
+      // driven by the source item owner — the initiator withdrawing their own
+      // request — and is only allowed while the receiver has not yet acted
+      // (update_count === 0). Withdrawal is de-escalation, so it is not gated
+      // on either side's liveness.
+      const isCancellation = (interaction.metric_categories?.cancel ?? []).includes(
+        body.action_status,
+      );
+
+      if (isCancellation) {
+        if (existingAction.source_item_owner !== callerId) {
+          throw new BulkItemFailure(
+            'NOT_SOURCE_ITEM_OWNER',
+            'A request may only be cancelled by the source item owner.',
+          );
+        }
+        if (existingAction.update_count > 0) {
+          throw new BulkItemFailure(
+            'RECEIVER_ALREADY_ACTED',
+            'Cannot cancel; the receiver has already responded to this request.',
+          );
+        }
+      } else {
+        if (existingAction.target_item_owner !== callerId) {
+          throw new BulkItemFailure(
+            'NOT_TARGET_ITEM_OWNER',
+            'update-status may only be called by the target item owner.',
+          );
+        }
+
+        const targetSnapshot = await fetchLocalItemSnapshot(db, {
+          item_network: existingAction.target_item_network,
+          item_domain: existingAction.target_item_domain,
+          item_type: existingAction.target_item_type,
+          item_id: existingAction.target_item_id,
+          item_instance_url: existingAction.target_item_instance_url,
+        });
+        if (!targetSnapshot || targetSnapshot.lifecycle_status !== 'live') {
+          throw new BulkItemFailure(
+            'PROFILE_NOT_LIVE',
+            'target_item is not live; status updates blocked',
+          );
+        }
+
+        if (
+          isCurrentInstanceItem({
+            item_network: existingAction.source_item_network,
+            item_domain: existingAction.source_item_domain,
+            item_type: existingAction.source_item_type,
+            item_id: existingAction.source_item_id,
+            item_instance_url: existingAction.source_item_instance_url,
+          })
+        ) {
+          const sourceSnap = await fetchLocalItemSnapshot(db, {
+            item_network: existingAction.source_item_network,
+            item_domain: existingAction.source_item_domain,
+            item_type: existingAction.source_item_type,
+            item_id: existingAction.source_item_id,
+            item_instance_url: existingAction.source_item_instance_url,
+          });
+          if (!sourceSnap || sourceSnap.lifecycle_status !== 'live') {
+            throw new BulkItemFailure(
+              'PROFILE_NOT_LIVE',
+              'source_item is not live; status updates blocked',
+            );
+          }
+        }
       }
 
       const requiresReceiverConsent =
