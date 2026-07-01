@@ -820,10 +820,26 @@ export function HomePage() {
       ? [activeAction]
       : [];
 
+  // Label the pending profile so the user knows which profile the (repeating)
+  // consent popup is for — reuses the sidebar's title-field candidates.
+  const pendingProfileLabel = React.useMemo(() => {
+    if (!pendingConsentProfileId) return undefined;
+    const profile = myItems.find((p) => p.item_id === pendingConsentProfileId);
+    if (!profile) return undefined;
+    const schema = userSchemas[profile.item_domain] as
+      | { properties?: Record<string, unknown> }
+      | undefined;
+    const candidates = ['name', 'full_name', 'title', 'provider_id', 'learner_id', 'student_id'];
+    const titleKey = candidates.find((c) => schema?.properties?.[c] !== undefined);
+    const value = titleKey ? profile.item_state[titleKey] : undefined;
+    return value ? String(value) : profile.item_domain;
+  }, [pendingConsentProfileId, myItems, userSchemas]);
+
   const profileConsentModal = (
     <ProfileConsentModal
       open={Boolean(pendingConsentProfileId)}
       statement={profileStatement}
+      profileLabel={pendingProfileLabel}
       onAccept={async () => {
         const pending = pendingConsentProfileId;
         if (!pending || !network?.id || !profileDoc) return;

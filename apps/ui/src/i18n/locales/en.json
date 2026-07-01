@@ -304,6 +304,7 @@
   "consent.accept_continue": "Accept & Continue",
   "consent.agree_short": "I agree",
   "consent.profile_title": "Confirm your profile consent",
+  "consent.profile_for": "This consent is for your profile: {{name}}",
   "consent.cancel": "Cancel",
   "profile.error_generic_desc": "An unexpected error occurred. Please try again — if the problem persists, contact support.",
   "profile.error_role_unavailable_fallback_desc": "This profile type isn't supported here. Try a different role or contact your network administrator.",

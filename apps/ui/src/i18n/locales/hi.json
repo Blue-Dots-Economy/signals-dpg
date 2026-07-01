@@ -300,6 +300,7 @@
   "consent.accept_continue": "स्वीकार करें और जारी रखें",
   "consent.agree_short": "मैं सहमत हूँ",
   "consent.profile_title": "अपनी प्रोफ़ाइल सहमति की पुष्टि करें",
+  "consent.profile_for": "यह सहमति आपकी प्रोफ़ाइल के लिए है: {{name}}",
   "consent.cancel": "रद्द करें",
   "profile.error_generic_desc": "एक अप्रत्याशित त्रुटि हुई। कृपया पुनः प्रयास करें — यदि समस्या बनी रहती है, तो समर्थन से संपर्क करें।",
   "profile.error_role_unavailable_fallback_desc": "यह प्रोफ़ाइल प्रकार यहाँ समर्थित नहीं है। कोई अन्य भूमिका आज़माएँ या अपने नेटवर्क प्रशासक से संपर्क करें।",

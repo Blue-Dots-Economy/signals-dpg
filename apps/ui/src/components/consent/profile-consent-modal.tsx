@@ -13,12 +13,15 @@ export interface ProfileConsentModalProps {
   open: boolean;
   statement: string;
   onAccept: () => void;
+  /** Display name of the profile this consent is for (shown so the user knows why it re-appeared per profile). */
+  profileLabel?: string;
 }
 
 export function ProfileConsentModal({
   open,
   statement,
   onAccept,
+  profileLabel,
 }: ProfileConsentModalProps) {
   const { t } = useTranslation();
   const [checked, setChecked] = React.useState(false);
@@ -45,6 +48,12 @@ export function ProfileConsentModal({
         <DialogHeader>
           <DialogTitle>{t('consent.profile_title')}</DialogTitle>
         </DialogHeader>
+
+        {profileLabel && (
+          <p className="text-sm text-muted-foreground">
+            {t('consent.profile_for', { name: profileLabel })}
+          </p>
+        )}
 
         <div className="flex flex-col gap-4 py-2">
           <ConsentCheckbox
