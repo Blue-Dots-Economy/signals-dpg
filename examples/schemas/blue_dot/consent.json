@@ -1,0 +1,32 @@
+{
+  "documents": {
+    "terms": {
+      "current_version": 1,
+      "versions": [
+        { "version": 1, "title": "Terms of Service", "content": "# Terms of Service\n\nBy using Blue Dots you agree to these terms.", "effective_from": "2026-06-01" }
+      ]
+    },
+    "privacy": {
+      "current_version": 1,
+      "versions": [
+        { "version": 1, "title": "Privacy Policy", "content": "# Privacy Policy\n\nWe process your data to match you with services and opportunities.", "effective_from": "2026-06-01" }
+      ]
+    },
+    "profile_creation": {
+      "current_version": 1,
+      "versions": [
+        { "version": 1, "statement": "The information collected will be used to match you with services and opportunities. You can opt out anytime by pausing, or deleting your profile in the portal. Tap \"I agree to continue\".", "effective_from": "2026-06-01" }
+      ]
+    }
+  },
+  "actions": {
+    "connect": {
+      "initiate": { "current_version": 1, "versions": [ { "version": 1, "statement": "I agree to share my organisation's contact details with this organisation if they accept my request. The request may be cancelled at any time.", "effective_from": "2026-06-01" } ] },
+      "accept": { "current_version": 1, "versions": [ { "version": 1, "statement": "I agree to share my organisation's contact details with the requester.", "effective_from": "2026-06-01" } ] }
+    },
+    "apply": {
+      "initiate": { "current_version": 1, "versions": [ { "version": 1, "statement": "I agree to share my profile contact details with this organization if my application is accepted.", "effective_from": "2026-06-01" } ] },
+      "accept": { "current_version": 1, "versions": [ { "version": 1, "statement": "I agree to share my organisation's contact details with the applicant.", "effective_from": "2026-06-01" } ] }
+    }
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "documents": {
+    "terms": { "current_version": 1, "versions": [ { "version": 1, "title": "Terms of Service", "content": "# Terms of Service", "effective_from": "2026-06-01" } ] },
+    "privacy": { "current_version": 1, "versions": [ { "version": 1, "title": "Privacy Policy", "content": "# Privacy Policy", "effective_from": "2026-06-01" } ] },
+    "profile_creation": { "current_version": 1, "versions": [ { "version": 1, "statement": "The information collected will be used to match you with services and opportunities. You can opt out anytime by pausing, or deleting your profile in the portal. Tap \"I agree to continue\".", "effective_from": "2026-06-01" } ] }
+  },
+  "actions": {
+    "connect": {
+      "initiate": { "current_version": 1, "versions": [ { "version": 1, "statement": "I agree to share my contact details (name, email, phone) with this seeker / provider if they accept my request. The request may be cancelled at any time.", "effective_from": "2026-06-01" } ] },
+      "accept": { "current_version": 1, "versions": [ { "version": 1, "statement": "I agree to share my contact details (name, email, phone) with this seeker / provider.", "effective_from": "2026-06-01" } ] }
+    }
+  }
+}

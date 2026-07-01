@@ -1,0 +1,10 @@
+{
+  "documents": {
+    "privacy": {
+      "current_version": 1,
+      "versions": [
+        { "version": 1, "title": "UPSDM Privacy Policy", "content": "# UPSDM Privacy Policy\n\nUP Skill Development Mission processes your data to match you with opportunities.", "effective_from": "2026-06-15" }
+      ]
+    }
+  }
+}
