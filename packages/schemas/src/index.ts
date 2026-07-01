@@ -6,6 +6,7 @@ export * from './api/item_schemas';
 export * from './item/lifecycle.js';
 export * from './api/bulk_schemas';
 export * from './api/match_score_schemas';
+export * from './consent_config';
 export * from './admin/aggregator_upsert';
 export * from './admin/participant';
 export * from './admin/participant_decrypt';
