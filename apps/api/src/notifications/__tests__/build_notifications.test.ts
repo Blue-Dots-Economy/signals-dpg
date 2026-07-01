@@ -80,42 +80,6 @@ describe('buildNotifications — single instance', () => {
       counterpartyDomain: 'seeker',
     });
   });
-
-  it('on a cancellation notifies only the receiver (target) with WITHDRAWN', () => {
-    const plans = buildNotifications(
-      event({
-        lifecycle: 'status',
-        isCancellation: true,
-        status: 'cancelled',
-        updateCount: 1,
-      }),
-    );
-
-    expect(plans).toHaveLength(1);
-    expect(plans[0]).toMatchObject({
-      shape: 'WITHDRAWN',
-      recipientUserId: 'user-target',
-      recipientDomain: 'provider',
-      counterpartyDomain: 'seeker',
-      status: 'cancelled',
-    });
-    // The canceller (source) gets no email.
-    expect(plans.some((p) => p.recipientUserId === 'user-source')).toBe(false);
-  });
-
-  it('a cancellation emits nothing when the receiver is on a remote instance', () => {
-    const plans = buildNotifications(
-      event({
-        lifecycle: 'status',
-        isCancellation: true,
-        status: 'cancelled',
-        updateCount: 1,
-        target: { ...baseSides.target, instanceUrl: 'https://remote.example.com' },
-      }),
-    );
-
-    expect(plans).toHaveLength(0);
-  });
 });
 
 describe('buildNotifications — locality (Phase 2 readiness)', () => {

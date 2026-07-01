@@ -356,11 +356,13 @@ export const update_action_status_handler = async (
       const createdEvent = await insertActionEvent(db, storedEvent);
       void mirrorActionEventToSourceInstance(storedEvent, request.log);
 
-      if (createdEvent) {
+      // Cancellation e-mails are deferred (separate issue): a source-initiated
+      // withdrawal must not reuse the receiver-response copy, so we send no
+      // notification for it here rather than send misleading mail.
+      if (createdEvent && !isCancellation) {
         void dispatchActionNotifications(
           {
             lifecycle: 'status',
-            isCancellation,
             actionType: updatedAction.action_type,
             actionId: updatedAction.action_id,
             status: updatedAction.action_status,

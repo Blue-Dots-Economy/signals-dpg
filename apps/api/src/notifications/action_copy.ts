@@ -74,11 +74,6 @@ const COPY: Record<
         body: 'Your response to {name}’s connection request has been sent successfully. They will be notified. Click below to view the details.',
         ctaLabel: 'View the details',
       },
-      WITHDRAWN: {
-        subject: '{name} has withdrawn their connection request',
-        body: '{name} has withdrawn their connection request, so no further action is needed. Click below to view the details.',
-        ctaLabel: 'View the details',
-      },
     },
     // Connect – Provider to Seeker (recipient = provider; counterparty = seeker)
     provider: {
@@ -101,11 +96,6 @@ const COPY: Record<
         subject: 'Your response has been sent to the seeker',
         body: 'Your response to the seeker’s connection request has been sent successfully. They will be notified. Click below to view the details.',
         ctaLabel: 'View the details',
-      },
-      WITHDRAWN: {
-        subject: 'A seeker has withdrawn their connection request',
-        body: 'A seeker has withdrawn their connection request, so no further action is needed. Click below to view your requests.',
-        ctaLabel: 'View your requests',
       },
     },
   },
@@ -132,11 +122,6 @@ const COPY: Record<
         body: 'Your response to {name}’s action has been sent successfully. They will be notified. Click below to view the details.',
         ctaLabel: 'View the details',
       },
-      WITHDRAWN: {
-        subject: '{name} has withdrawn their request',
-        body: '{name} has withdrawn their request, so no further action is needed. Click below to view the details.',
-        ctaLabel: 'View the details',
-      },
     },
     // Apply / Shortlist / Pre-Shortlist – Provider to Seeker (recipient = provider)
     provider: {
@@ -159,11 +144,6 @@ const COPY: Record<
         subject: 'Your response has been sent to the seeker',
         body: 'Your response to the seeker’s application has been sent successfully. They will be notified. Click below to view the details.',
         ctaLabel: 'View the details',
-      },
-      WITHDRAWN: {
-        subject: 'A seeker has withdrawn their application',
-        body: 'A seeker has withdrawn their application, so no further action is needed. Click below to view your applications.',
-        ctaLabel: 'View your applications',
       },
     },
   },
