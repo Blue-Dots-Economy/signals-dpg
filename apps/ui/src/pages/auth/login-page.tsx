@@ -212,7 +212,7 @@ export function LoginPage() {
         <ConsentModal
           open={true}
           mode="gate"
-          initialTab="terms"
+          initialTab="privacy"
           config={consentGate.config}
           onAccept={() => { void handleConsentAccept(); }}
         />
