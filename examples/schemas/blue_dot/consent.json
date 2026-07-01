@@ -27,7 +27,7 @@
       "versions": [
         {
           "version": 1,
-          "statement": "The information you provide will be used to match you with relevant opportunities, jobs, and providers, and to make your profile discoverable to relevant participants. Tap \"I agree\" to continue.",
+          "statement": "The information collected will be used to match you with services and opportunities. Tap \"I agree to continue\".",
           "effective_from": "2026-06-01"
         }
       ]
@@ -40,7 +40,7 @@
         "versions": [
           {
             "version": 1,
-            "statement": "I agree to share my organisation's contact details (name, email, phone) with this organisation if they accept my request. The request may be cancelled at any time.",
+            "statement": "I agree to share my contact details (name, email, phone) with this seeker / provider if they accept my request. The request may be cancelled at any time.",
             "effective_from": "2026-06-01"
           }
         ]
@@ -50,7 +50,7 @@
         "versions": [
           {
             "version": 1,
-            "statement": "I agree to share my organisation's contact details (name, email, phone) with the requester.",
+            "statement": "I agree to share my contact details (name, email, phone) with this seeker / provider.",
             "effective_from": "2026-06-01"
           }
         ]
@@ -62,7 +62,7 @@
         "versions": [
           {
             "version": 1,
-            "statement": "I agree to share my contact details (name, email, phone) with this organisation if my application is accepted. The application may be cancelled at any time.",
+            "statement": "I agree to share my contact details (name, email, phone) with this seeker / provider if they accept my request. The request may be cancelled at any time.",
             "effective_from": "2026-06-01"
           }
         ]
@@ -72,7 +72,7 @@
         "versions": [
           {
             "version": 1,
-            "statement": "I agree to share my organisation's contact details (name, email, phone) with the applicant.",
+            "statement": "I agree to share my contact details (name, email, phone) with this seeker / provider.",
             "effective_from": "2026-06-01"
           }
         ]
