@@ -404,12 +404,21 @@ export function SchemaForm({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [schema, hiddenKey, mode, hideSubmit, submitButtonText]);
 
-  // Report AJV validity to the consumer once on mount and whenever data or schema changes.
-  // Guarded so no computation happens unless the callback is provided.
+  // Keep a ref to the latest onValidityChange so the validity effect below does
+  // not depend on the callback's identity. This prevents a render loop when a
+  // consumer passes an unstable function reference (e.g. an inline arrow).
+  const onValidityChangeRef = React.useRef(onValidityChange);
   React.useEffect(() => {
-    if (!onValidityChange) return;
-    onValidityChange(isSchemaFormValid(validator, rjsfSchema, data));
-  }, [onValidityChange, rjsfSchema, data]);
+    onValidityChangeRef.current = onValidityChange;
+  });
+
+  // Report AJV validity to the consumer once on mount and whenever data or schema
+  // changes. Depends only on [rjsfSchema, data] — not on the callback ref — so it
+  // never re-fires due to an unstable callback identity.
+  React.useEffect(() => {
+    const cb = onValidityChangeRef.current;
+    if (cb) cb(isSchemaFormValid(validator, rjsfSchema, data));
+  }, [rjsfSchema, data]);
 
   // FieldTemplate applies to every form (red required marker). ObjectFieldTemplate
   // (section layout) is added only for domains with a configured layout.
@@ -437,9 +446,6 @@ export function SchemaForm({
         onChange={({ formData: next }) => {
           const nextData = resolveVisibleSchema(baseSchema, (next ?? {}) as Record<string, unknown>).formData;
           setData(nextData);
-          if (onValidityChange) {
-            onValidityChange(isSchemaFormValid(validator, rjsfSchema, nextData));
-          }
         }}
         onSubmit={({ formData: submitted }) => {
           if (submitted) onSubmit(submitted as Record<string, unknown>);
