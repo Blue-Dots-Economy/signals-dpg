@@ -19,6 +19,12 @@ interface RawSchemaEntry {
   schema: unknown;
 }
 
+export interface ConsentStatusByIdentifierParams {
+  network: string;
+  phone?: string;
+  email?: string;
+}
+
 export async function fetchConsentConfigs(networkId: string): Promise<ConsentConfigEntry[]> {
   const response = await apiClient.get<RawSchemaEntry[]>('/api/v1/network/schemas', {
     params: { network: networkId },
@@ -32,6 +38,16 @@ export async function getConsentStatus(networkId: string): Promise<ConsentStatus
   const response = await apiClient.get<ConsentStatusResponse>('/api/v1/consent/status', {
     params: { network: networkId },
   });
+  return response.data;
+}
+
+export async function getConsentStatusByIdentifier(
+  params: ConsentStatusByIdentifierParams,
+): Promise<ConsentStatusResponse> {
+  const response = await apiClient.get<ConsentStatusResponse>(
+    '/api/v1/consent/status-by-identifier',
+    { params },
+  );
   return response.data;
 }
 

@@ -10,6 +10,12 @@ export const ConsentStatusResponseSchema = z.object({
   }),
 });
 
+export const ConsentStatusByIdentifierQuerySchema = z.object({
+  network: z.string().min(1),
+  phone: z.string().optional(),
+  email: z.string().optional(),
+});
+
 export const ConsentAcceptItemSchema = z.object({
   category: UserConsentCategorySchema,
   version: z.number().int().min(1),
@@ -24,3 +30,4 @@ export const ConsentAcceptResponseSchema = z.object({ recorded: z.number().int()
 
 export type ConsentStatusResponse = z.infer<typeof ConsentStatusResponseSchema>;
 export type ConsentAcceptBody = z.infer<typeof ConsentAcceptBodySchema>;
+export type ConsentStatusByIdentifierQuery = z.infer<typeof ConsentStatusByIdentifierQuerySchema>;

@@ -277,4 +277,39 @@ describeIf(`consent status + accept endpoints (integration)${
 
     expect(res.statusCode).toBe(401);
   });
+
+  // status-by-identifier (public, pre-login)
+
+  it('GET /status-by-identifier with known email returns accepted versions', async () => {
+    // The test user accepted terms v1, privacy v1, and terms v2 in prior tests.
+    const res = await app.inject({
+      method: 'GET',
+      url: `/api/v1/consent/status-by-identifier?network=${served_network}&email=${encodeURIComponent(user_email)}`,
+    });
+
+    expect(res.statusCode).toBe(200);
+    const body = res.json() as { statuses: { terms: number[]; privacy: number[] } };
+    expect(body.statuses.terms).toEqual([1, 2]);
+    expect(body.statuses.privacy).toEqual([1]);
+  });
+
+  it('GET /status-by-identifier with unknown identifier returns empty statuses', async () => {
+    const res = await app.inject({
+      method: 'GET',
+      url: `/api/v1/consent/status-by-identifier?network=${served_network}&email=nobody-unknown-${Date.now()}%40signals.local`,
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toEqual({ statuses: { terms: [], privacy: [] } });
+  });
+
+  it('GET /status-by-identifier requires no auth (no x-api-key)', async () => {
+    const res = await app.inject({
+      method: 'GET',
+      url: `/api/v1/consent/status-by-identifier?network=${served_network}&email=${encodeURIComponent(user_email)}`,
+      // Deliberately no x-api-key header
+    });
+
+    expect(res.statusCode).toBe(200);
+  });
 });
