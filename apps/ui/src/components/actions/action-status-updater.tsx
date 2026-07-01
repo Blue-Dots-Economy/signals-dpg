@@ -7,6 +7,8 @@ import { ConsentCheckbox } from './consent-checkbox';
 import { getActionDisplay } from '@/lib/action-display';
 import { cn } from '@/lib/utils';
 import { useNetworkConfig } from '@/hooks/use-network-config';
+import { useConsentConfig } from '@/hooks/use-consent-config';
+import { useNetworkTheme } from '@/theme/theme-provider';
 
 // Desktop: Dialog
 import {
@@ -104,12 +106,17 @@ export function ActionStatusUpdater({
     setRemarks('');
   }, [interaction]);
 
+  const { config } = useConsentConfig();
+  const { brand } = useNetworkTheme();
+
   if (!action) return null;
 
   // Determine whether consent is required for this status transition.
   const revealStatuses = interaction?.reveals_pii_on_status ?? [];
-  const consentText = (interaction?.consent_text_receiver ?? '').trim();
-  const requiresConsent = revealStatuses.includes(targetStatus) && consentText !== '';
+  const requiresConsent = revealStatuses.includes(targetStatus);
+  const acceptDoc = config?.actions?.[action.action_type]?.accept;
+  const acceptVersion = acceptDoc?.versions.find((v) => v.version === acceptDoc.current_version);
+  const consentText = acceptVersion?.statement ?? '';
 
   const handleSubmit = () => {
     if (!targetStatus) {
@@ -123,7 +130,13 @@ export function ActionStatusUpdater({
       action_id: action.action_id,
       action_status: targetStatus,
       ...(requiresConsent
-        ? { consent: { acknowledged: true as const, text: consentText } }
+        ? {
+            consent: {
+              acknowledged: true as const,
+              version: acceptDoc?.current_version ?? 1,
+              brand: brand === 'standard' ? null : brand,
+            },
+          }
         : remarks.trim()
           ? { remarks: remarks.trim() }
           : {}),

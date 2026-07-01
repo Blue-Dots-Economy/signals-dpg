@@ -510,8 +510,6 @@ export function HomePage() {
             to_domain: interaction.to_domain,
             requirement_schema: interaction.requirement_schema,
             event_schema: interaction.event_schema,
-            consent_text_initiator: interaction.consent_text_initiator,
-            consent_text_receiver: interaction.consent_text_receiver,
             reveals_pii_on_status: interaction.reveals_pii_on_status,
           });
         }
@@ -545,8 +543,12 @@ export function HomePage() {
           consentRaw &&
           typeof consentRaw === 'object' &&
           (consentRaw as { acknowledged?: unknown }).acknowledged === true &&
-          typeof (consentRaw as { text?: unknown }).text === 'string'
-            ? { acknowledged: true as const, text: (consentRaw as { text: string }).text }
+          typeof (consentRaw as { version?: unknown }).version === 'number'
+            ? {
+                acknowledged: true as const,
+                version: (consentRaw as { version: number }).version,
+                brand: (consentRaw as { brand?: string | null }).brand,
+              }
             : undefined;
 
         const sourceItemInstanceUrl = myItem.item_instance_url?.includes('localhost')
@@ -916,8 +918,12 @@ export function HomePage() {
               consentRaw &&
               typeof consentRaw === 'object' &&
               (consentRaw as { acknowledged?: unknown }).acknowledged === true &&
-              typeof (consentRaw as { text?: unknown }).text === 'string'
-                ? ({ acknowledged: true as const, text: (consentRaw as { text: string }).text })
+              typeof (consentRaw as { version?: unknown }).version === 'number'
+                ? ({
+                    acknowledged: true as const,
+                    version: (consentRaw as { version: number }).version,
+                    brand: (consentRaw as { brand?: string | null }).brand,
+                  })
                 : undefined;
 
             // Resolve source item instance URL (where my profile is stored)
