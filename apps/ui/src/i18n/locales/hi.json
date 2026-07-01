@@ -42,6 +42,7 @@
   "auth.otp_resend_error_title": "नया कोड नहीं भेजा जा सका",
   "auth.otp_resend_error_desc": "नया सत्यापन कोड मांगते समय कुछ गलत हो गया। कुछ देर रुकें और फिर कोशिश करें।",
   "auth.wrong_portal": "इस खाते के पास पहले से {{domain}} डोमेन में एक प्रोफ़ाइल है। कृपया {{domain}} पोर्टल के माध्यम से साइन इन करें।",
+  "auth.toast_consent_persist_error": "आपकी सहमति सहेजी नहीं जा सकी। अगली बार आपसे दोबारा पूछा जा सकता है।",
   "actions.my_actions_title": "मेरी क्रियाएं",
   "actions.my_actions_subtitle": "आपने जो अनुरोध शुरू किए और जो मिले हैं, उन्हें प्रबंधित करें।",
   "actions.my_actions_back": "वापस",

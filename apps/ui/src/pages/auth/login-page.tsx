@@ -18,15 +18,12 @@ import {
 import { mergeConsentConfig } from '@/hooks/use-consent-config';
 import { ConsentModal } from '@/components/consent/consent-modal';
 import { useNetworkTheme } from '@/theme/theme-provider';
-import type { ConsentAcceptBody } from '@dpg/schemas';
-import type { ConsentConfigDocument } from '@dpg/schemas';
+import type { ConsentAcceptBody, ConsentConfigDocument } from '@dpg/schemas';
 import { toast } from 'sonner';
 
 type AuthMode = 'phone' | 'email';
 
-interface PendingConsent extends Omit<ConsentAcceptBody, 'items'> {
-  items: ConsentAcceptBody['items'];
-}
+type PendingConsent = ConsentAcceptBody;
 
 interface ConsentGateState {
   config: ConsentConfigDocument;
@@ -98,19 +95,19 @@ export function LoginPage() {
 
   const handleConsentAccept = async () => {
     if (!consentGate || !pendingIdentifier) return;
+    // Capture locals and close the modal immediately to prevent re-entry
+    // from a double-click before the async OTP request completes.
+    const gate = consentGate;
+    const ident = pendingIdentifier;
+    const userEx = pendingUserExists;
+    const uname = pendingName;
+    setConsentGate(null);
     try {
-      await proceedToOtp(
-        pendingIdentifier,
-        pendingUserExists,
-        pendingName,
-        consentGate.pendingConsent,
-      );
+      await proceedToOtp(ident, userEx, uname, gate.pendingConsent);
     } catch {
       toast.error(t('auth.toast_send_code_error'), {
         description: t('auth.toast_send_code_error_desc'),
       });
-    } finally {
-      setConsentGate(null);
     }
   };
 

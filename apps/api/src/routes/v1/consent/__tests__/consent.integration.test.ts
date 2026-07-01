@@ -312,4 +312,14 @@ describeIf(`consent status + accept endpoints (integration)${
 
     expect(res.statusCode).toBe(200);
   });
+
+  it('GET /status-by-identifier with neither phone nor email returns empty statuses', async () => {
+    const res = await app.inject({
+      method: 'GET',
+      url: `/api/v1/consent/status-by-identifier?network=${served_network}`,
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toEqual({ statuses: { terms: [], privacy: [] } });
+  });
 });
