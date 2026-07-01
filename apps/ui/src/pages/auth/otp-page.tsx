@@ -84,30 +84,42 @@ export function OtpPage() {
 
       // Consent gate: fetch fresh post-auth status imperatively so we don't
       // rely on stale hook data from before the session was established.
-      const [consentStatus, configEntries] = await Promise.all([
-        getConsentStatus(themeId),
-        fetchConsentConfigs(themeId),
-      ]);
+      // Consent gating is best-effort (client-side, spec §1.1); on eval failure
+      // we let the authenticated user through and re-check next login.
+      let consentGateNeeded = false;
+      try {
+        const [consentStatus, configEntries] = await Promise.all([
+          getConsentStatus(themeId),
+          fetchConsentConfigs(themeId),
+        ]);
 
-      const networkDefault = configEntries.find((e) => e.brand === null);
-      if (networkDefault) {
-        const brandEntry = brand ? configEntries.find((e) => e.brand === brand) : undefined;
-        const mergedConfig = mergeConsentConfig(networkDefault.schema, brandEntry?.schema);
+        // A network with NO consent config intentionally has no gate (nothing
+        // to consent to) — this is deliberate fail-open, not an oversight.
+        const networkDefault = configEntries.find((e) => e.brand === null);
+        if (networkDefault) {
+          const brandEntry = brand ? configEntries.find((e) => e.brand === brand) : undefined;
+          const mergedConfig = mergeConsentConfig(networkDefault.schema, brandEntry?.schema);
 
-        const needed = (['terms', 'privacy'] as const).filter(
-          (c) => !consentStatus.statuses[c].includes(mergedConfig.documents[c].current_version),
-        );
+          const needed = (['terms', 'privacy'] as const).filter(
+            (c) => !consentStatus.statuses[c].includes(mergedConfig.documents[c].current_version),
+          );
 
-        if (needed.length > 0) {
-          setConsentGate({
-            config: mergedConfig,
-            needed,
-            redirectTo: state.redirectTo ?? '/',
-            userExists: state.userExists,
-          });
-          return;
+          if (needed.length > 0) {
+            setConsentGate({
+              config: mergedConfig,
+              needed,
+              redirectTo: state.redirectTo ?? '/',
+              userExists: state.userExists,
+            });
+            consentGateNeeded = true;
+          }
         }
+      } catch {
+        // Consent eval failed after successful auth — fail-open and let the
+        // authenticated user through; re-check will happen on next login.
       }
+
+      if (consentGateNeeded) return;
 
       toast.success(state.userExists ? t('auth.toast_welcome_back') : t('auth.toast_account_created'), {
         description: state.userExists
@@ -127,21 +139,27 @@ export function OtpPage() {
 
   const handleConsentAccept = async () => {
     if (!consentGate || !state) return;
-    await acceptConsent({
-      network: themeId,
-      brand: brand !== 'standard' ? brand : null,
-      source: consentGate.userExists ? 'login' : 'signup',
-      items: consentGate.needed.map((c) => ({
-        category: c,
-        version: consentGate.config.documents[c].current_version,
-      })),
-    });
-    toast.success(state.userExists ? t('auth.toast_welcome_back') : t('auth.toast_account_created'), {
-      description: state.userExists
-        ? t('auth.toast_welcome_back_desc')
-        : t('auth.toast_account_created_desc'),
-    });
-    navigate(consentGate.redirectTo, { replace: true });
+    try {
+      await acceptConsent({
+        network: themeId,
+        brand: brand !== 'standard' ? brand : null,
+        source: consentGate.userExists ? 'login' : 'signup',
+        items: consentGate.needed.map((c) => ({
+          category: c,
+          version: consentGate.config.documents[c].current_version,
+        })),
+      });
+      toast.success(state.userExists ? t('auth.toast_welcome_back') : t('auth.toast_account_created'), {
+        description: state.userExists
+          ? t('auth.toast_welcome_back_desc')
+          : t('auth.toast_account_created_desc'),
+      });
+      navigate(consentGate.redirectTo, { replace: true });
+    } catch {
+      // Keep the modal open so the user can retry — consent must be recorded
+      // before proceeding.
+      toast.error("Couldn't record your consent. Please try again.");
+    }
   };
 
   const handleResendOtp = async () => {
