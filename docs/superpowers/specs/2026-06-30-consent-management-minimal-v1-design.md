@@ -223,8 +223,14 @@ A brand declares only the documents it changes, in its own `consent.json` under 
 
 ### A. Terms & privacy (user-level)
 
-Replace the implicit footer with explicit capture:
+Replace the implicit footer with explicit capture. **Popup = layout Variant A (top segmented tabs: `Privacy Policy` | `Terms of Service`)**, styled with the **existing theme tokens/classes** (`bg-brand-cta`, `--primary`, etc.) so it themes per network automatically — no hardcoded colors. Prototype: `docs/superpowers/prototypes/consent-popup-prototype.html`.
 
+**Behavior (confirmed):**
+- **Gate on `Continue`.** When the user clicks `Continue` on the sign-in page: if they have **not** accepted the current version of terms/privacy (new user, or a version bump since their last acceptance), the popup opens and must be accepted before the flow proceeds (OTP send). If they **have** accepted the current versions, `Continue` proceeds with **no popup** ("only when needed").
+- **Determining need pre-OTP:** the sign-in flow already calls the OTP `check-user` step; that response is extended to also carry the identified user's accepted terms/privacy versions (null for a new user). The UI compares them against the merged config `current_version` (§4.1) to decide whether to show the popup. Acceptance is **persisted via `POST /consent/accept` immediately after OTP verify** (when `user_id` exists); for a brand-new user the user_id is created at verify, then the held acceptance is written.
+- **Footer links are always available.** "By continuing you agree to the `Privacy Policy` and `Terms`." — both are links; clicking `Privacy Policy` opens the popup on the **Privacy tab**, `Terms` opens it on the **Terms tab** (read-only view; available to any user anytime, independent of the gate).
+- **Content is Markdown**, rendered (sanitized) in the popup tabs and on the `/privacy` `/terms` pages. If the UI has no Markdown renderer, add one (sanitized GFM, raw HTML stripped) as part of Phase 2.
+- **Re-consent applies to terms/privacy ONLY.** A `current_version` bump re-opens the popup on next `Continue`. **Profile creation, connect, and apply consent are ALWAYS asked** every time the action occurs — there is no "already accepted, skip" for those (see §5B, §5C).
 - The `Privacy Policy` / `Terms` links open a **modal with two tabs** (privacy + terms content from `consent.json`), with **one checkbox + Accept button**. The checkbox is **never pre-checked**.
 - **`GET /api/v1/consent/status`** returns the user's accepted versions; the UI compares them against the merged config's `current_version` per document to decide whether to show the modal. New user, or a version bump since their last acceptance → the modal must be cleared before continuing. A returning user already on the current version is **not interrupted** ("only when needed"). Gating is computed client-side (§1.1).
 - Consent is recorded via **`POST /api/v1/consent/accept`** **right after OTP verify** (when `user_id` exists), writing the `terms` + `privacy` rows. This keeps the better-auth OTP plugin untouched — no need to thread consent through `unified_otp.ts`.
@@ -235,7 +241,7 @@ Replace the implicit footer with explicit capture:
 
 ### B. Profile creation (item-level)
 
-RJSF (`@rjsf/shadcn`) does **not** expose a public `isValid` / `formState.isValid`. We compute validity with the RJSF AJV validator (`validator.isValid(schema, formData, rootSchema)`) on each `onChange`.
+**Always asked** on profile creation (no version-based skip — the profile is created once, and consent is captured at that moment). RJSF (`@rjsf/shadcn`) does **not** expose a public `isValid` / `formState.isValid`. We compute validity with the RJSF AJV validator (`validator.isValid(schema, formData, rootSchema)`) on each `onChange`.
 
 - Hide RJSF's built-in submit button (`ui:submitButtonOptions` norender) and render a **custom footer**:
   - The `profile_creation` statement + checkbox **appear only when all required fields validate clean** (no validation error).
@@ -244,7 +250,7 @@ RJSF (`@rjsf/shadcn`) does **not** expose a public `isValid` / `formState.isVali
 
 ### C. Connect / apply (item-level)
 
-Keep the existing `ConsentCheckbox` + network-driven UI (`action-modal.tsx` for initiate, `action-status-updater.tsx` / `bulk-status-dialog.tsx` for accept), but **source the statement text from `consent.json`** instead of `network.json`.
+**Always asked** each time an action is initiated or accepted (no version-based skip — consent is per-action). Keep the existing `ConsentCheckbox` + network-driven UI (`action-modal.tsx` for initiate, `action-status-updater.tsx` / `bulk-status-dialog.tsx` for accept), but **source the statement text from `consent.json`** instead of `network.json`.
 
 - `perform_action.ts` (initiate) writes a `consent_record` row: `category=action`, `action_type`, `action_stage=initiate`, `item_id` (initiator's item), `action_id`, `document_version`.
 - `update_action_status.ts` (accept) writes the `accept` row analogously, with the receiver's `item_id`.
