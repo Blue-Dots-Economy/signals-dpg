@@ -17,6 +17,13 @@ export interface OwnerSide {
 
 export interface NotificationEvent {
   lifecycle: 'created' | 'status';
+  /**
+   * True when this status change is a source-initiated cancellation (the
+   * applicant withdrawing). Routes a single WITHDRAWN email to the receiver
+   * instead of the INBOUND/OUTBOUND_STATUS pair, whose copy assumes the
+   * receiver responded.
+   */
+  isCancellation?: boolean;
   actionType: string;
   actionId: string;
   /** Action status at the time of the event (e.g. "created", "accepted"). */
@@ -67,8 +74,9 @@ function planFor(
  * owner side hosted on the current instance (the locality check), so that the
  * Phase-2 cross-instance trigger site can reuse this unchanged.
  *
- * - create  → INBOUND_REQUEST (target) + OUTBOUND_REQUEST (source)
- * - status  → INBOUND_STATUS (source)  + OUTBOUND_STATUS (target)
+ * - create             → INBOUND_REQUEST (target) + OUTBOUND_REQUEST (source)
+ * - status             → INBOUND_STATUS (source)  + OUTBOUND_STATUS (target)
+ * - status+cancellation → WITHDRAWN (target only)
  */
 export function buildNotifications(event: NotificationEvent): NotificationPlan[] {
   const current = normalizeInstanceUrl(event.currentInstanceUrl);
@@ -83,6 +91,13 @@ export function buildNotifications(event: NotificationEvent): NotificationPlan[]
     }
     if (isLocal(event.source)) {
       plans.push(planFor(event, event.source, event.target, 'OUTBOUND_REQUEST'));
+    }
+  } else if (event.isCancellation) {
+    // Source withdrew their own request: only the receiver (target) needs to
+    // know. The canceller gets no email, and the receiver-response copy
+    // (INBOUND/OUTBOUND_STATUS) is skipped since no response occurred.
+    if (isLocal(event.target)) {
+      plans.push(planFor(event, event.target, event.source, 'WITHDRAWN'));
     }
   } else {
     if (isLocal(event.source)) {

@@ -1,4 +1,4 @@
-import { eq } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
 import z, {
   getActionInteraction,
   UpdateActionStatusBodySchema,
@@ -185,7 +185,12 @@ export const update_action_status_handler = async (
         }
       }
 
+      // Consent is a receiver-response gate. A cancellation is the source
+      // owner withdrawing their own request — never a PII reveal — so it must
+      // not be gated even if a network lists a cancel status in
+      // reveals_pii_on_status.
       const requiresReceiverConsent =
+        !isCancellation &&
         interaction.reveals_pii_on_status.includes(body.action_status) &&
         !!interaction.consent_text_receiver?.trim();
 
@@ -256,6 +261,10 @@ export const update_action_status_handler = async (
         throw new BulkItemFailure('PARTITION_SETUP_FAILED', 'Failed to prepare storage for action event');
       }
 
+      // Optimistic-concurrency guard: only write if update_count still matches
+      // what we read. Cancellation adds a second legitimate writer (the source
+      // owner alongside the target owner), so a concurrent cancel + accept must
+      // not both land — the loser gets ACTION_CONFLICT instead of clobbering.
       const nextUpdateCount = existingAction.update_count + 1;
       const [updatedAction] = await db
         .update(item_actions)
@@ -265,7 +274,12 @@ export const update_action_status_handler = async (
           remarks: body.remarks ?? existingAction.remarks,
           updated_at: new Date(),
         })
-        .where(eq(item_actions.action_id, existingAction.action_id))
+        .where(
+          and(
+            eq(item_actions.action_id, existingAction.action_id),
+            eq(item_actions.update_count, existingAction.update_count),
+          ),
+        )
         .returning({
           action_id: item_actions.action_id,
           action_type: item_actions.action_type,
@@ -285,6 +299,13 @@ export const update_action_status_handler = async (
           target_item_owner: item_actions.target_item_owner,
           remarks: item_actions.remarks,
         });
+
+      if (!updatedAction) {
+        throw new BulkItemFailure(
+          'ACTION_CONFLICT',
+          'This request was updated by someone else; reload and try again.',
+        );
+      }
 
       const targetItemSnapshot = await fetchLocalItemSnapshot(db, {
         item_network: updatedAction.target_item_network,
@@ -339,6 +360,7 @@ export const update_action_status_handler = async (
         void dispatchActionNotifications(
           {
             lifecycle: 'status',
+            isCancellation,
             actionType: updatedAction.action_type,
             actionId: updatedAction.action_id,
             status: updatedAction.action_status,
