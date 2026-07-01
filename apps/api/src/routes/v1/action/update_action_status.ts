@@ -1,4 +1,4 @@
-import { eq } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
 import z, {
   getActionInteraction,
   UpdateActionStatusBodySchema,
@@ -48,11 +48,14 @@ export const update_action_status: FastifyPluginAsyncZod = async function (fasti
 };
 
 /**
- * Self-acted only. The caller (session cookie or apikey-as-self) must
- * be the target item's owner. On-behalf-of via `acting_as_user_id` was
- * removed by spec 2026-05-23-action-on-behalf-of-network-service-tier-design.md
- * — audit columns on `item_actions` are populated only at create-time
- * (by `/action/perform`).
+ * Self-acted only. For receiver responses (accept/reject/…) the caller
+ * (session cookie or apikey-as-self) must be the target item's owner. The one
+ * exception is a cancellation (a status bucketed under metric_categories.cancel):
+ * that is initiated by the source item owner to withdraw their own request, and
+ * is only allowed while the receiver has not yet acted. On-behalf-of via
+ * `acting_as_user_id` was removed by spec
+ * 2026-05-23-action-on-behalf-of-network-service-tier-design.md — audit columns
+ * on `item_actions` are populated only at create-time (by `/action/perform`).
  */
 export const update_action_status_handler = async (
   request: FastifyRequest<{ Body: unknown[] }>,
@@ -82,51 +85,6 @@ export const update_action_status_handler = async (
         throw new BulkItemFailure('ACTION_NOT_FOUND', 'Action does not exist on this instance');
       }
 
-      if (existingAction.target_item_owner !== callerId) {
-        throw new BulkItemFailure(
-          'NOT_TARGET_ITEM_OWNER',
-          'update-status may only be called by the target item owner.',
-        );
-      }
-
-      const targetSnapshot = await fetchLocalItemSnapshot(db, {
-        item_network: existingAction.target_item_network,
-        item_domain: existingAction.target_item_domain,
-        item_type: existingAction.target_item_type,
-        item_id: existingAction.target_item_id,
-        item_instance_url: existingAction.target_item_instance_url,
-      });
-      if (!targetSnapshot || targetSnapshot.lifecycle_status !== 'live') {
-        throw new BulkItemFailure(
-          'PROFILE_NOT_LIVE',
-          'target_item is not live; status updates blocked',
-        );
-      }
-
-      if (
-        isCurrentInstanceItem({
-          item_network: existingAction.source_item_network,
-          item_domain: existingAction.source_item_domain,
-          item_type: existingAction.source_item_type,
-          item_id: existingAction.source_item_id,
-          item_instance_url: existingAction.source_item_instance_url,
-        })
-      ) {
-        const sourceSnap = await fetchLocalItemSnapshot(db, {
-          item_network: existingAction.source_item_network,
-          item_domain: existingAction.source_item_domain,
-          item_type: existingAction.source_item_type,
-          item_id: existingAction.source_item_id,
-          item_instance_url: existingAction.source_item_instance_url,
-        });
-        if (!sourceSnap || sourceSnap.lifecycle_status !== 'live') {
-          throw new BulkItemFailure(
-            'PROFILE_NOT_LIVE',
-            'source_item is not live; status updates blocked',
-          );
-        }
-      }
-
       let interaction: ReturnType<typeof getActionInteraction>;
       try {
         const networkConfig = await getNetworkConfigById(existingAction.target_item_network);
@@ -146,7 +104,93 @@ export const update_action_status_handler = async (
         );
       }
 
+      // Cancellation is terminal: once the source owner has withdrawn a
+      // request, it is dead. No further transition (accept/reject or a repeat
+      // cancel) is allowed by either party — otherwise the receiver could
+      // "accept" an application the applicant already pulled.
+      const cancelStatuses = interaction.metric_categories?.cancel ?? [];
+      if (cancelStatuses.includes(existingAction.action_status)) {
+        throw new BulkItemFailure(
+          'ACTION_CANCELLED',
+          'This request was cancelled. Please refresh to see the latest status.',
+        );
+      }
+
+      // A "cancellation" is any status the network config buckets under
+      // metric_categories.cancel. Every other transition is a receiver
+      // response (self-acted by the target owner). A cancellation instead is
+      // driven by the source item owner — the initiator withdrawing their own
+      // request — and is only allowed while the receiver has not yet acted
+      // (update_count === 0). Withdrawal is de-escalation, so it is not gated
+      // on either side's liveness.
+      const isCancellation = cancelStatuses.includes(body.action_status);
+
+      if (isCancellation) {
+        if (existingAction.source_item_owner !== callerId) {
+          throw new BulkItemFailure(
+            'NOT_SOURCE_ITEM_OWNER',
+            'A request may only be cancelled by the source item owner.',
+          );
+        }
+        if (existingAction.update_count > 0) {
+          throw new BulkItemFailure(
+            'RECEIVER_ALREADY_ACTED',
+            'Cannot cancel; the receiver has already responded to this request.',
+          );
+        }
+      } else {
+        if (existingAction.target_item_owner !== callerId) {
+          throw new BulkItemFailure(
+            'NOT_TARGET_ITEM_OWNER',
+            'update-status may only be called by the target item owner.',
+          );
+        }
+
+        const targetSnapshot = await fetchLocalItemSnapshot(db, {
+          item_network: existingAction.target_item_network,
+          item_domain: existingAction.target_item_domain,
+          item_type: existingAction.target_item_type,
+          item_id: existingAction.target_item_id,
+          item_instance_url: existingAction.target_item_instance_url,
+        });
+        if (!targetSnapshot || targetSnapshot.lifecycle_status !== 'live') {
+          throw new BulkItemFailure(
+            'PROFILE_NOT_LIVE',
+            'target_item is not live; status updates blocked',
+          );
+        }
+
+        if (
+          isCurrentInstanceItem({
+            item_network: existingAction.source_item_network,
+            item_domain: existingAction.source_item_domain,
+            item_type: existingAction.source_item_type,
+            item_id: existingAction.source_item_id,
+            item_instance_url: existingAction.source_item_instance_url,
+          })
+        ) {
+          const sourceSnap = await fetchLocalItemSnapshot(db, {
+            item_network: existingAction.source_item_network,
+            item_domain: existingAction.source_item_domain,
+            item_type: existingAction.source_item_type,
+            item_id: existingAction.source_item_id,
+            item_instance_url: existingAction.source_item_instance_url,
+          });
+          if (!sourceSnap || sourceSnap.lifecycle_status !== 'live') {
+            throw new BulkItemFailure(
+              'PROFILE_NOT_LIVE',
+              'source_item is not live; status updates blocked',
+            );
+          }
+        }
+      }
+
+      // Consent is a receiver-response gate. A cancellation is the source
+      // owner withdrawing their own request — never a PII reveal — so it must
+      // not be gated even if a network lists a cancel status in
+      // reveals_pii_on_status.
       const requiresReceiverConsent =
+        !isCancellation &&
         interaction.reveals_pii_on_status.includes(body.action_status) &&
         !!interaction.consent_text_receiver?.trim();
 
@@ -217,6 +261,10 @@ export const update_action_status_handler = async (
         throw new BulkItemFailure('PARTITION_SETUP_FAILED', 'Failed to prepare storage for action event');
       }
 
+      // Optimistic-concurrency guard: only write if update_count still matches
+      // what we read. Cancellation adds a second legitimate writer (the source
+      // owner alongside the target owner), so a concurrent cancel + accept must
+      // not both land — the loser gets ACTION_CONFLICT instead of clobbering.
       const nextUpdateCount = existingAction.update_count + 1;
       const [updatedAction] = await db
         .update(item_actions)
@@ -226,7 +274,12 @@ export const update_action_status_handler = async (
           remarks: body.remarks ?? existingAction.remarks,
           updated_at: new Date(),
         })
-        .where(eq(item_actions.action_id, existingAction.action_id))
+        .where(
+          and(
+            eq(item_actions.action_id, existingAction.action_id),
+            eq(item_actions.update_count, existingAction.update_count),
+          ),
+        )
         .returning({
           action_id: item_actions.action_id,
           action_type: item_actions.action_type,
@@ -246,6 +299,13 @@ export const update_action_status_handler = async (
           target_item_owner: item_actions.target_item_owner,
           remarks: item_actions.remarks,
         });
+
+      if (!updatedAction) {
+        throw new BulkItemFailure(
+          'ACTION_CONFLICT',
+          'This request was updated by someone else; reload and try again.',
+        );
+      }
 
       const targetItemSnapshot = await fetchLocalItemSnapshot(db, {
         item_network: updatedAction.target_item_network,
@@ -296,7 +356,10 @@ export const update_action_status_handler = async (
       const createdEvent = await insertActionEvent(db, storedEvent);
       void mirrorActionEventToSourceInstance(storedEvent, request.log);
 
-      if (createdEvent) {
+      // Cancellation e-mails are deferred (separate issue): a source-initiated
+      // withdrawal must not reuse the receiver-response copy, so we send no
+      // notification for it here rather than send misleading mail.
+      if (createdEvent && !isCancellation) {
         void dispatchActionNotifications(
           {
             lifecycle: 'status',
