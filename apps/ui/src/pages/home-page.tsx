@@ -340,10 +340,23 @@ export function HomePage() {
         .catch(() => [] as Item[]);
     });
 
-    Promise.all(domainFetches).then((results) => {
+    // Fetch the profile-consent set in the SAME flow that loads profiles so
+    // consentedProfileIds + consentLoaded are set together with profilesResolved.
+    // This closes the transient window where a restored activeProfileId would be
+    // treated as "active" before consent status loaded, delaying the gate modal.
+    // Fail-open: an empty set on error still lets the gate prompt.
+    const consentFetch = getProfileConsentStatus(network.id)
+      .then((res) => new Set(res.consented_item_ids))
+      .catch(() => new Set<string>());
+
+    Promise.all([Promise.all(domainFetches), consentFetch]).then(([results, consentedIds]) => {
       if (controller.signal.aborted) return;
       const allProfiles = results.flat();
       setMyItems(allProfiles);
+      // Consent status is known before profilesResolved is marked, so by the time
+      // activeProfileId is derived the gate effect can fire without a content flash.
+      setConsentedProfileIds(consentedIds);
+      setConsentLoaded(true);
       // Profile lookup has settled — profileLocation is now authoritative, so the
       // browser-geo auto-prompt may fire if there's still no profile location.
       setProfilesResolved(true);
@@ -395,29 +408,6 @@ export function HomePage() {
   );
   const profileStatement = profileVersion?.statement ?? '';
   const profileConsentRequired = Boolean(profileStatement);
-
-  // Fetch which of the user's profiles already have profile_creation consent.
-  React.useEffect(() => {
-    if (!network?.id || !user || !profilesResolved) return;
-
-    const controller = new AbortController();
-    setConsentLoaded(false);
-
-    getProfileConsentStatus(network.id)
-      .then((res) => {
-        if (controller.signal.aborted) return;
-        setConsentedProfileIds(new Set(res.consented_item_ids));
-        setConsentLoaded(true);
-      })
-      .catch(() => {
-        if (controller.signal.aborted) return;
-        // Fail-open: treat as no consents on error so the gate still prompts.
-        setConsentedProfileIds(new Set());
-        setConsentLoaded(true);
-      });
-
-    return () => { controller.abort(); };
-  }, [network?.id, user, profilesResolved]);
 
   // Gate the auto-selected profile: if it lacks profile_creation consent, prompt.
   React.useEffect(() => {

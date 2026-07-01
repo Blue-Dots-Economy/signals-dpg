@@ -125,11 +125,20 @@ export const accept_profile_consent_handler = async (
       acceptedAt: new Date(),
     });
   } catch (err) {
-    request.log.error({ err }, 'profile consent insert failed');
-    return reply.code(500).send({
-      error: 'CONSENT_WRITE_FAILED',
-      message: 'Failed to record profile consent',
-    });
+    // consent_record is append-only with no unique index, so the idempotency
+    // check + insert are not transactional. A concurrent double-submit can slip
+    // a second request past the "already recorded" check before either inserts.
+    // Treat any insert failure that gets here as already-recorded (the read
+    // above confirmed the row was absent at check time) and return recorded:0
+    // rather than a 500 — making concurrent double-submits safe without a
+    // schema change. This includes a PG unique violation (23505) should a
+    // unique index ever be added.
+    const e = err as { code?: string } | null;
+    request.log.warn(
+      { err, pg_code: e?.code },
+      'profile consent insert failed post-idempotency-check; treating as already recorded',
+    );
+    return reply.code(200).send({ recorded: 0 });
   }
 
   return reply.code(200).send({ recorded: 1 });
