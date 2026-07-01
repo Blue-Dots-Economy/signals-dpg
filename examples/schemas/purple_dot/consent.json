@@ -17,7 +17,7 @@
         {
           "version": 1,
           "title": "Privacy Policy",
-          "content": "## Privacy Policy\n\nWe understand that information about disability and support needs is personal, and we handle it with care. This policy explains what **Purple Dot** (seeded by EkStep Foundation) collects, why, and your choices.\n\n### What we collect\n- **Contact details** — your name, email, and phone number.\n- **Support-related information** you choose to provide — such as the devices, services, or support you are looking for, and your location.\n\n### Why we use it\nWe use your information to **match you with relevant assistive devices, health services, and rehabilitation support**, and to make your request discoverable to relevant providers within the network.\n\n### When your contact details are shared\nYour name, email, and phone number are shared with a provider **only when you initiate or accept a connection**. **We never sell your data** and do not use it for advertising.\n\n### Your control\nYou can **pause** your profile to stop being discovered, or **delete** it at any time from the portal. When you delete your profile we stop processing it and remove it from the network.\n\n### Retention\nWe keep your information while your profile is active. Deleting your profile removes it, except where we must retain limited records to meet legal obligations.\n\n### Grievances\nFor any privacy question or request, contact **support@onest.network**.",
+          "content": "## Privacy Policy\n\nWe understand that information about disability and support needs is personal, and we handle it with care. This policy explains what **Purple Dot** (seeded by EkStep Foundation) collects, why, and your choices.\n\n### What we collect\n- **Contact details** — your name, email, and phone number.\n- **Support-related information** you choose to provide — such as the devices, services, or support you are looking for, and your location.\n\n### Why we use it\nWe use your information to **match you with relevant assistive devices, health services, and rehabilitation support**, and to make your request discoverable to relevant providers within the network.\n\n### When your contact details are shared\nYour name, email, and phone number are shared with a provider **only when you initiate or accept a connection**. **We never sell your data** and do not use it for advertising.\n\n### Your control\nYou can **update** your profile from the portal at any time. To have your information removed, contact us at **support@onest.network**.\n\n### Retention\nWe keep your information only for as long as it is needed to connect you within the network.\n\n### Grievances\nFor any privacy question or request, contact **support@onest.network**.",
           "effective_from": "2026-06-01"
         }
       ]
@@ -27,7 +27,7 @@
       "versions": [
         {
           "version": 1,
-          "statement": "The information you provide will be used to match you with relevant assistive devices, health services, and rehabilitation support, and to make your request discoverable to relevant providers. You can opt out anytime by pausing or deleting your profile in the portal. Tap \"I agree\" to continue.",
+          "statement": "The information you provide will be used to match you with relevant assistive devices, health services, and rehabilitation support, and to make your request discoverable to relevant providers. Tap \"I agree\" to continue.",
           "effective_from": "2026-06-01"
         }
       ]
