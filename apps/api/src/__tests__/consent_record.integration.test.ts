@@ -1,11 +1,23 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, afterEach } from 'vitest';
 import { db } from '@api/db/postgres/drizzle_config';
 import { consent_record } from '@api/db/postgres/schema';
 import { eq } from 'drizzle-orm';
 
 describe('consent_record table', () => {
+  let insertedUserId: string | undefined;
+
+  afterEach(async () => {
+    if (insertedUserId !== undefined) {
+      await db
+        .delete(consent_record)
+        .where(eq(consent_record.userId, insertedUserId));
+      insertedUserId = undefined;
+    }
+  });
+
   it('inserts and reads a user-level row', async () => {
-    const userId = `test-user-${Date.now()}`;
+    const userId = `test-user-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    insertedUserId = userId;
     await db.insert(consent_record).values({
       level: 'user',
       consentCategory: 'terms',
