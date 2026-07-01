@@ -4,9 +4,9 @@
  * buildActionEventPayload → insertActionEvent → Postgres.
  *
  * Network: purple_dot   Action: connect   Interaction: seeker→provider
- *   - consent_text_initiator declared → /action/perform gate
- *   - consent_text_receiver declared AND reveals_pii_on_status: ["accepted"]
- *     → /action/update-status gate when transitioning to "accepted"
+ *   - reveals_pii_on_status: ["accepted"] → /action/perform gate (initiator)
+ *   - reveals_pii_on_status: ["accepted"] → /action/update-status gate when
+ *     transitioning to "accepted" (receiver)
  *
  * Requirements: purple_dot connect has an empty requirement_schema
  * ({ type: "object", properties: {} }) so requirements_snapshot can be {}.
@@ -38,11 +38,8 @@ const skip_reason = !pg_url
 
 const describeIf = can_run ? describe : describe.skip;
 
-// Consent texts as declared in examples/schemas/purple_dot/network.json
-const INITIATOR_CONSENT_TEXT =
-  'I agree to share my contact details (name, email, phone) with this provider if they accept my request.';
-const RECEIVER_CONSENT_TEXT =
-  'I agree to share my contact details (name, email, phone) with the requester.';
+// Consent version as declared in purple_dot network.json
+const CONSENT_VERSION = 1;
 
 describeIf(`consent flow integration (purple_dot/connect)${
   can_run ? '' : ` — ${skip_reason}`
@@ -53,6 +50,7 @@ describeIf(`consent flow integration (purple_dot/connect)${
   let actionEventsTable: typeof import('@dpg/database').action_events;
   let itemsTable: typeof import('@dpg/database').items;
   let itemActionsTable: typeof import('@dpg/database').item_actions;
+  let consentRecordTable: typeof import('../../../../../db/postgres/schema/consent_record.js').consent_record;
 
   // Fastify must listen on the port the network config declares for
   // purple_dot, otherwise INVALID_TARGET_INSTANCE fires when
@@ -89,11 +87,13 @@ describeIf(`consent flow integration (purple_dot/connect)${
     const drizzle_mod = await import('@api/db/postgres/drizzle_config');
     const auth_mod = await import('../../../../../db/postgres/schema/auth.js');
     const database_pkg = await import('@dpg/database');
+    const schema_mod = await import('../../../../../db/postgres/schema/consent_record.js');
     db = drizzle_mod.db;
     authSchema = auth_mod;
     actionEventsTable = database_pkg.action_events;
     itemsTable = database_pkg.items;
     itemActionsTable = database_pkg.item_actions;
+    consentRecordTable = schema_mod.consent_record;
 
     const { admin_routes } = await import('../../admin/admin_routes.js');
     const action_routes_mod = await import('../action_routes.js');
@@ -294,6 +294,9 @@ describeIf(`consent flow integration (purple_dot/connect)${
     try {
       if (seeded_participant_ids.length > 0) {
         await db
+          .delete(consentRecordTable)
+          .where(inArray(consentRecordTable.userId, seeded_participant_ids));
+        await db
           .delete(itemActionsTable)
           .where(
             inArray(itemActionsTable.source_item_owner, seeded_participant_ids),
@@ -321,8 +324,8 @@ describeIf(`consent flow integration (purple_dot/connect)${
     if (app) await app.close();
   });
 
-  it('returns 422 CONSENT_REQUIRED on /action/perform when consent_text_initiator is declared and body omits consent', async () => {
-    // purple_dot connect (seeker→provider) declares consent_text_initiator.
+  it('returns 422 CONSENT_REQUIRED on /action/perform when reveals_pii_on_status is declared and body omits consent', async () => {
+    // purple_dot connect (seeker→provider) declares reveals_pii_on_status: ["accepted"].
     // A request without the consent field must be rejected before the action
     // is created.
     const res = await app.inject({
@@ -361,7 +364,7 @@ describeIf(`consent flow integration (purple_dot/connect)${
     expect(body.results[0].message.length).toBeGreaterThan(0);
   });
 
-  it('persists initiator consent snapshot in event_payload when /action/perform includes valid consent', async () => {
+  it('persists initiator consent snapshot in event_payload and consent_record when /action/perform includes valid consent', async () => {
     const res = await app.inject({
       method: 'POST',
       url: '/api/v1/action/perform',
@@ -388,7 +391,7 @@ describeIf(`consent flow integration (purple_dot/connect)${
           requirements_snapshot: {},
           consent: {
             acknowledged: true,
-            text: INITIATOR_CONSENT_TEXT,
+            version: CONSENT_VERSION,
           },
         },
       ],
@@ -423,19 +426,47 @@ describeIf(`consent flow integration (purple_dot/connect)${
     const payload = eventRows[0].event_payload as Record<string, unknown>;
     expect(eventRows[0].action_status).toBe('created');
 
-    // The consent sub-object must be present with the exact values sent.
+    // The consent sub-object must be present with version (not text).
     const consent = payload.consent as Record<string, unknown>;
     expect(consent).toBeTruthy();
     expect(consent.acknowledged).toBe(true);
-    expect(consent.text).toBe(INITIATOR_CONSENT_TEXT);
+    expect(consent.version).toBe(CONSENT_VERSION);
     // consented_at must be a valid ISO timestamp.
     expect(typeof consent.consented_at).toBe('string');
     expect(Number.isFinite(Date.parse(consent.consented_at as string))).toBe(
       true,
     );
+
+    // Assert a consent_record row was written for the initiate stage.
+    const consentRows = await db
+      .select({
+        level: consentRecordTable.level,
+        consentCategory: consentRecordTable.consentCategory,
+        actionType: consentRecordTable.actionType,
+        actionStage: consentRecordTable.actionStage,
+        userId: consentRecordTable.userId,
+        itemId: consentRecordTable.itemId,
+        actionId: consentRecordTable.actionId,
+        documentVersion: consentRecordTable.documentVersion,
+        source: consentRecordTable.source,
+      })
+      .from(consentRecordTable)
+      .where(eq(consentRecordTable.actionId, action_id))
+      .limit(5);
+
+    const initiateRow = consentRows.find((r) => r.actionStage === 'initiate');
+    expect(initiateRow).toBeTruthy();
+    expect(initiateRow?.level).toBe('item');
+    expect(initiateRow?.consentCategory).toBe('action');
+    expect(initiateRow?.actionType).toBe('connect');
+    expect(initiateRow?.userId).toBe(alice_user_id);
+    expect(initiateRow?.itemId).toBe(alice_item_id);
+    expect(initiateRow?.actionId).toBe(action_id);
+    expect(initiateRow?.documentVersion).toBe(CONSENT_VERSION);
+    expect(initiateRow?.source).toBe('action');
   });
 
-  it('rejects /action/update-status to "accepted" with 403 when receiver consent is missing, then accepts with consent and persists snapshot', async () => {
+  it('rejects /action/update-status to "accepted" with 422 when receiver consent is missing, then accepts with consent and persists snapshot', async () => {
     // First, create a fresh action (with initiator consent) that bob will
     // later update-status. We create a new action rather than reusing the
     // one from the previous test to keep test isolation clean.
@@ -465,7 +496,7 @@ describeIf(`consent flow integration (purple_dot/connect)${
           requirements_snapshot: {},
           consent: {
             acknowledged: true,
-            text: INITIATOR_CONSENT_TEXT,
+            version: CONSENT_VERSION,
           },
         },
       ],
@@ -478,9 +509,8 @@ describeIf(`consent flow integration (purple_dot/connect)${
     const action_id: string = performRes.json().results[0].action_id;
 
     // Step 1: Bob tries to accept WITHOUT consent — must be rejected.
-    // The purple_dot connect interaction declares consent_text_receiver AND
-    // reveals_pii_on_status: ["accepted"], so update-status to "accepted"
-    // requires receiver consent.
+    // The purple_dot connect interaction declares reveals_pii_on_status: ["accepted"],
+    // so update-status to "accepted" requires receiver consent.
     const rejectRes = await app.inject({
       method: 'POST',
       url: '/api/v1/action/update-status',
@@ -515,7 +545,7 @@ describeIf(`consent flow integration (purple_dot/connect)${
           action_status: 'accepted',
           consent: {
             acknowledged: true,
-            text: RECEIVER_CONSENT_TEXT,
+            version: CONSENT_VERSION,
           },
         },
       ],
@@ -548,7 +578,7 @@ describeIf(`consent flow integration (purple_dot/connect)${
     const consent = payload.consent as Record<string, unknown>;
     expect(consent).toBeTruthy();
     expect(consent.acknowledged).toBe(true);
-    expect(consent.text).toBe(RECEIVER_CONSENT_TEXT);
+    expect(consent.version).toBe(CONSENT_VERSION);
     expect(typeof consent.consented_at).toBe('string');
     expect(Number.isFinite(Date.parse(consent.consented_at as string))).toBe(
       true,

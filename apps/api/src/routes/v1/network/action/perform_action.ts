@@ -11,6 +11,7 @@ import {
   ensureActionPartition,
   item_actions,
 } from '@dpg/database';
+import { consent_record } from '@api/db/postgres/schema';
 import { apiConfig, getCurrentApiBaseUrl } from '@/config';
 import { getNetworkConfigById } from '@/network_configs';
 import {
@@ -220,6 +221,27 @@ export const perform_network_action_handler = async (
       source_item_id: item_actions.source_item_id,
       target_item_id: item_actions.target_item_id,
     });
+
+  if (body.consent) {
+    try {
+      await db.insert(consent_record).values({
+        level: 'item',
+        consentCategory: 'action',
+        actionType: body.action_type,
+        actionStage: 'initiate',
+        userId: body.source_item_owner,
+        itemId: body.source_item.item_id,
+        actionId: created.action_id,
+        network: body.source_item.item_network,
+        brand: body.consent.brand ?? null,
+        documentVersion: body.consent.version,
+        source: 'action',
+        acceptedAt: new Date(),
+      });
+    } catch (err) {
+      request.log.error({ err, action_id: created.action_id }, 'initiate consent write failed');
+    }
+  }
 
   const storedEvent = {
     origin_instance_domain: getCurrentApiBaseUrl(),

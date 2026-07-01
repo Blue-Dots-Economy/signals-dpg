@@ -13,6 +13,7 @@ import {
   ensureActionEventPartition,
   item_actions,
 } from '@dpg/database';
+import { consent_record } from '@api/db/postgres/schema';
 import { getCurrentApiBaseUrl, apiConfig } from '@/config';
 import { getNetworkConfigById } from '@/network_configs';
 import {
@@ -190,9 +191,7 @@ export const update_action_status_handler = async (
       // not be gated even if a network lists a cancel status in
       // reveals_pii_on_status.
       const requiresReceiverConsent =
-        !isCancellation &&
-        interaction.reveals_pii_on_status.includes(body.action_status) &&
-        !!interaction.consent_text_receiver?.trim();
+        !isCancellation && interaction.reveals_pii_on_status.includes(body.action_status);
 
       if (requiresReceiverConsent && !body.consent?.acknowledged) {
         throw new BulkItemFailure(
@@ -207,7 +206,7 @@ export const update_action_status_handler = async (
             side: 'receiver',
             action_id: body.action_id,
             action_status: body.action_status,
-            consent_text_length: body.consent.text.length,
+            consent_version: body.consent.version,
           },
           'consent recorded',
         );
@@ -355,6 +354,27 @@ export const update_action_status_handler = async (
 
       const createdEvent = await insertActionEvent(db, storedEvent);
       void mirrorActionEventToSourceInstance(storedEvent, request.log);
+
+      if (requiresReceiverConsent && body.consent?.acknowledged) {
+        try {
+          await db.insert(consent_record).values({
+            level: 'item',
+            consentCategory: 'action',
+            actionType: updatedAction.action_type,
+            actionStage: 'accept',
+            userId: callerId,
+            itemId: updatedAction.target_item_id,
+            actionId: body.action_id,
+            network: updatedAction.target_item_network,
+            brand: body.consent.brand ?? null,
+            documentVersion: body.consent.version,
+            source: 'action',
+            acceptedAt: new Date(),
+          });
+        } catch (err) {
+          request.log.error({ err, action_id: body.action_id }, 'accept consent write failed');
+        }
+      }
 
       // Cancellation e-mails are deferred (separate issue): a source-initiated
       // withdrawal must not reuse the receiver-response copy, so we send no
