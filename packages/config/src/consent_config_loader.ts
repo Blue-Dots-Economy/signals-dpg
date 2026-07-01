@@ -17,7 +17,7 @@ export type LoadedConsentConfig = {
   config: ConsentConfigDocument | PartialConsentConfig;
 };
 
-type LoadConsentConfigOptions = {
+export type LoadConsentConfigOptions = {
   source: 'local' | 'remote';
   networkLocalFile: string;
   networks: string[];
@@ -36,50 +36,52 @@ async function listSubdirectories(dir: string): Promise<string[]> {
   try {
     const entries = await readdir(dir, { withFileTypes: true });
     return entries.filter((e) => e.isDirectory()).map((e) => e.name);
-  } catch {
-    return [];
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException).code;
+    if (code === 'ENOENT' || code === 'ENOTDIR') return [];
+    throw err;
   }
 }
 
 /**
  * Local mode: the network default consent.json sits beside network.json; brand
  * overrides live in immediate sub-folders named for the brand id.
+ * Local mode is single-network (mirrors network_config_loader).
  *
- * Remote mode: v1 supports the network default only, derived by swapping the
- * network config URL's filename to consent.json. Brand-scoped remote delivery is
- * a documented follow-up (spec §1.1 / Phase 1 notes) and returns [] for brands.
+ * Remote mode: remote consent delivery is a follow-up; returns [] for now.
  */
 export async function loadConsentConfigs(
   opts: LoadConsentConfigOptions
 ): Promise<LoadedConsentConfig[]> {
   if (opts.source !== 'local') {
-    // Remote handling is out of scope for this task's local-dev path; return [].
-    // (Implemented alongside remote network-config delivery in a follow-up.)
+    // Remote consent delivery is a follow-up; returns [] for now.
     return [];
   }
+
+  // Local mode represents exactly one network — use only the first entry.
+  if (opts.networks.length === 0) return [];
+  const network = opts.networks[0];
 
   const baseDir = dirname(resolve(process.cwd(), opts.networkLocalFile));
   const results: LoadedConsentConfig[] = [];
 
-  for (const network of opts.networks) {
-    const defaultRaw = await readJsonIfExists(join(baseDir, 'consent.json'));
-    if (!defaultRaw) continue; // no consent config for this network
+  const defaultRaw = await readJsonIfExists(join(baseDir, 'consent.json'));
+  if (!defaultRaw) return [];
 
+  results.push({
+    network,
+    brand: null,
+    config: parseConsentConfigDocument(defaultRaw),
+  });
+
+  for (const brand of await listSubdirectories(baseDir)) {
+    const brandRaw = await readJsonIfExists(join(baseDir, brand, 'consent.json'));
+    if (!brandRaw) continue;
     results.push({
       network,
-      brand: null,
-      config: parseConsentConfigDocument(defaultRaw),
+      brand,
+      config: PartialConsentConfigSchema.parse(brandRaw),
     });
-
-    for (const brand of await listSubdirectories(baseDir)) {
-      const brandRaw = await readJsonIfExists(join(baseDir, brand, 'consent.json'));
-      if (!brandRaw) continue;
-      results.push({
-        network,
-        brand,
-        config: PartialConsentConfigSchema.parse(brandRaw),
-      });
-    }
   }
 
   return results;
