@@ -87,6 +87,11 @@ interface SchemaFormProps {
   submitButtonText?: string;
   id?: string;
   hideSubmit?: boolean;
+  /**
+   * Called with the AJV validity of the current form data whenever data changes
+   * and once on mount. Only computed when this prop is provided.
+   */
+  onValidityChange?: (isValid: boolean) => void;
   domainId?: string;
   formContext?: Record<string, unknown>;
 }
@@ -336,6 +341,18 @@ function normalizeSchemaForRjsf(schema: RJSFSchema, rootSchema?: RJSFSchema): RJ
   return normalized as RJSFSchema;
 }
 
+/**
+ * Pure helper for AJV-backed validity checking. Extracted so it can be
+ * unit-tested deterministically without mounting the full form.
+ */
+export function isSchemaFormValid(
+  v: typeof validator,
+  schema: RJSFSchema,
+  data: Record<string, unknown>,
+): boolean {
+  return v.isValid(schema, data, schema);
+}
+
 export function SchemaForm({
   schema,
   formData,
@@ -347,6 +364,7 @@ export function SchemaForm({
   submitButtonText,
   id,
   hideSubmit = false,
+  onValidityChange,
   domainId,
   formContext,
 }: SchemaFormProps) {
@@ -386,6 +404,13 @@ export function SchemaForm({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [schema, hiddenKey, mode, hideSubmit, submitButtonText]);
 
+  // Report AJV validity to the consumer once on mount and whenever data or schema changes.
+  // Guarded so no computation happens unless the callback is provided.
+  React.useEffect(() => {
+    if (!onValidityChange) return;
+    onValidityChange(isSchemaFormValid(validator, rjsfSchema, data));
+  }, [onValidityChange, rjsfSchema, data]);
+
   // FieldTemplate applies to every form (red required marker). ObjectFieldTemplate
   // (section layout) is added only for domains with a configured layout.
   const templates = {
@@ -410,7 +435,11 @@ export function SchemaForm({
         disabled={disabled}
         formContext={formContext}
         onChange={({ formData: next }) => {
-          setData(resolveVisibleSchema(baseSchema, (next ?? {}) as Record<string, unknown>).formData);
+          const nextData = resolveVisibleSchema(baseSchema, (next ?? {}) as Record<string, unknown>).formData;
+          setData(nextData);
+          if (onValidityChange) {
+            onValidityChange(isSchemaFormValid(validator, rjsfSchema, nextData));
+          }
         }}
         onSubmit={({ formData: submitted }) => {
           if (submitted) onSubmit(submitted as Record<string, unknown>);
