@@ -112,7 +112,7 @@ export const update_action_status_handler = async (
       if (cancelStatuses.includes(existingAction.action_status)) {
         throw new BulkItemFailure(
           'ACTION_CANCELLED',
-          'This request was cancelled and can no longer be updated.',
+          'This request was cancelled. Please refresh to see the latest status.',
         );
       }
 
