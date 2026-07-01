@@ -82,12 +82,13 @@ One row per consent event. Append-only; the latest event per `(subject, type)` w
 | `action_id` | text NULL | set for `action` rows (per the "both item_id + action_id" decision) |
 | `network` | text NOT NULL | server-derived (never trusted from the request body) |
 | `brand` | text NULL | which brand variant of the config applied (config is brand-overridable) |
-| `document_version` | int NOT NULL | the version the user accepted |
-| `consent_text` | text NOT NULL | the exact statement/line shown at the moment of consent (see Open Question 2 re: full document text) |
+| `document_version` | int NOT NULL | the version the user accepted (= `current_version` at accept time). **Content is NOT stored** — it is looked up from `consent.json` by `(type, version)` when needed (see §4). |
 | `source` | text NOT NULL | `signup` \| `login` \| `profile` \| `action` (the occasion of capture) |
 | `accepted_at` | timestamptz NOT NULL | the consent timestamp |
 | `created_at` | timestamptz NOT NULL default now() | row insert time |
-| `metadata` | jsonb NULL | extensibility (and the snapshot/hash fields if Open Question 1 resolves that way) |
+| `metadata` | jsonb NULL | extensibility |
+
+> **Storage decision (resolved):** the row stores only the consent **type + version**, not the text. The literal content is recovered from `consent.json` via `(type, version)` lookup, which is safe because the config retains every version (§4). This keeps rows small and avoids duplicating full document markdown per user per acceptance.
 
 **Levels & keys:**
 
@@ -110,33 +111,96 @@ One row per consent event. Append-only; the latest event per `(subject, type)` w
 
 ## 4. Consent-content config — `consent.json` (per-network default + per-brand override)
 
-The consent text moves **out of `network.json`** into a new `consent.json`, scoped **per-network with per-brand override** — mirroring the existing `brand.json` override-and-inherit merge (`2026-06-25-brand-specific-deployments-design.md`): the network folder holds the default; a brand declares only the deltas, deep-merged over the network default. Ships as a configmap, same as the other schema config.
+The consent text moves **out of `network.json`** into a new `consent.json`, scoped **per-network with per-brand override** — mirroring the existing `brand.json` override-and-inherit merge (`2026-06-25-brand-specific-deployments-design.md`): the network folder holds the default; a brand declares only the deltas, merged over the network default. Ships as a configmap, same as the other schema config.
+
+**Version history is retained in the config (resolved decision).** Each document holds a `current_version` (the active/required one) and an **append-only `versions` array**. Nothing is ever edited or removed in place; a new version is a new array entry. This is what lets a `consent_record` row storing only `(type, version)` always resolve its exact content later.
+
+**`examples/schemas/blue_dot/consent.json`** (network default — `blue_dot` has both `connect` and `apply`):
 
 ```jsonc
 {
   "documents": {
-    "terms":            { "version": 1, "title": "Terms of Service", "content": "<sanitized markdown>" },
-    "privacy":          { "version": 1, "title": "Privacy Policy",  "content": "<sanitized markdown>" },
-    "profile_creation": { "version": 1, "statement": "The information collected will be used to match you with services and opportunities. You can opt out anytime by pausing, or deleting your profile in the portal. Tap \"I agree to continue\"." }
+    "terms": {
+      "current_version": 2,
+      "versions": [
+        { "version": 1, "title": "Terms of Service", "content": "# Terms …(v1 markdown)", "effective_from": "2026-06-01" },
+        { "version": 2, "title": "Terms of Service", "content": "# Terms …(v2 — current)", "effective_from": "2026-07-01" }
+      ]
+    },
+    "privacy": {
+      "current_version": 1,
+      "versions": [
+        { "version": 1, "title": "Privacy Policy", "content": "# Privacy …", "effective_from": "2026-06-01" }
+      ]
+    },
+    "profile_creation": {
+      "current_version": 1,
+      "versions": [
+        { "version": 1, "statement": "The information collected will be used to match you with services and opportunities. You can opt out anytime by pausing, or deleting your profile in the portal. Tap \"I agree to continue\".", "effective_from": "2026-06-01" }
+      ]
+    }
   },
   "actions": {
     "connect": {                                  // present only if this network defines `connect`
-      "initiate": { "version": 1, "statement": "I agree to share my contact details (name, email, phone) with this seeker / provider if they accept my request. The request may be cancelled at any time." },
-      "accept":   { "version": 1, "statement": "I agree to share my contact details (name, email, phone) with this seeker / provider." }
+      "initiate": {
+        "current_version": 1,
+        "versions": [
+          { "version": 1, "statement": "I agree to share my contact details (name, email, phone) with this seeker / provider if they accept my request. The request may be cancelled at any time.", "effective_from": "2026-06-01" }
+        ]
+      },
+      "accept": {
+        "current_version": 1,
+        "versions": [
+          { "version": 1, "statement": "I agree to share my contact details (name, email, phone) with this seeker / provider.", "effective_from": "2026-06-01" }
+        ]
+      }
     },
     "apply": {
-      "initiate": { "version": 1, "statement": "..." },
-      "accept":   { "version": 1, "statement": "..." }
+      "initiate": { "current_version": 1, "versions": [ { "version": 1, "statement": "I agree to share my contact details (name, email, phone) with this seeker / provider if they accept my request. The request may be cancelled at any time.", "effective_from": "2026-06-01" } ] },
+      "accept":   { "current_version": 1, "versions": [ { "version": 1, "statement": "I agree to share my contact details (name, email, phone) with this seeker / provider.", "effective_from": "2026-06-01" } ] }
     }
   }
 }
 ```
 
-- **`documents`** — the universal `terms` / `privacy` (full markdown content, rendered in the tabbed popup) and `profile_creation` (a single inline statement).
-- **`actions`** — keyed by the network's **own** action types. A network only declares the action keys it actually has.
-- **Per-interaction override:** `purple_dot` `connect` has different statements per interaction variant (seeker→provider vs provider→provider). The action entry supports an optional per-interaction override keyed by `(from_domain, to_domain)`, so no existing wording is lost. Default is per-action; the override is opt-in.
+- **`documents`** — the universal `terms` / `privacy` (full markdown `content`, rendered in the tabbed popup) and `profile_creation` (a single inline `statement`).
+- **`actions`** — keyed by the network's **own** action types. A network only declares the action keys it actually has. A network with no actions (e.g. `orange_dot`) omits `"actions"` entirely; a `connect`-only network (`purple_dot`, `yellow_dot`) omits `apply`.
+- **Per-interaction override:** `purple_dot` `connect` has different statements per interaction variant (seeker→provider vs provider→provider). The action stage entry supports an optional per-interaction override keyed by `(from_domain, to_domain)`, so no existing wording is lost. Default is per-action-stage; the override is opt-in.
 - **`reveals_pii_on_status` stays in `network.json`.** It is PII-reveal gating logic tied to the event status enum, not consent text. Only `consent_text_initiator` / `consent_text_receiver` move to `consent.json`. Validation for the moved fields is added to the `consent.json` loader/schema; the corresponding `network_workflow.ts` fields are deprecated and removed once the loader reads from `consent.json`.
-- **Versioning** — each document carries its own `version` int; bumping one (e.g. `terms`) does not force re-consent on the others. See Open Question 1 for content-retention handling.
+
+### 4.1 `current_version` semantics — display, capture, and re-consent
+
+- **Display:** the UI always renders the content of `current_version`, looked up from the `versions` array by that number. If an operator sets `current_version` back to `1` while `2` exists, the UI shows **v1** — the older version is fully usable because it is retained.
+- **Capture:** on accept, the row records **exactly the version that was shown** (= `current_version` at accept time). Roll back to v1 → new acceptances store `version = 1`.
+- **Re-consent trigger (`needs_consent`):** a user needs to consent when they have **no acceptance row for the current `current_version`** of that document. This is correct in both directions: a forward bump (v1→v2) re-prompts everyone who only accepted v1; a rollback (v2→v1) re-prompts users who only accepted v2, so everyone converges on the active version. (Not "accepted version ≠ current" — specifically "no row equal to current".)
+
+### 4.2 Adding a new version of any content
+
+1. Open the relevant `consent.json` (network default, or the brand's override file).
+2. **Append** a new object to that document's `versions` array with `version = max + 1`, the new `title`/`content` (or `statement`), and `effective_from`. **Never edit or delete existing version entries.**
+3. Bump that document's `current_version` to the new number (or to any existing number, to roll back).
+4. Deploy the config (configmap). On next login, users without an acceptance row for the new `current_version` are re-prompted; historical acceptances still resolve their old content from the retained `versions` entry.
+
+### 4.3 Per-brand override
+
+A brand declares only the documents it changes, in its own `consent.json` under the brand folder, merged over the network default **per document** (a brand-provided document node replaces that whole document's `current_version` + `versions`; everything not mentioned inherits the network default).
+
+**`examples/schemas/blue_dot/upsdm/consent.json`** (UPSDM overrides only privacy):
+
+```jsonc
+{
+  "documents": {
+    "privacy": {
+      "current_version": 1,
+      "versions": [
+        { "version": 1, "title": "UPSDM Privacy Policy", "content": "# UPSDM Privacy …", "effective_from": "2026-06-15" }
+      ]
+    }
+  }
+}
+```
+
+→ UPSDM gets `terms`, `profile_creation`, and all actions from the `blue_dot` default; `privacy` is the UPSDM one. The `brand` column in `consent_record` records which variant applied, so a version int is always resolved against the right (network-or-brand) document.
 
 The `consent.json` is loaded the same way `network.json` is, with the brand-override layer applied identically to `brand.json`. (Exact loader wiring is an implementation detail to confirm against the network-config loader during planning.)
 
@@ -163,7 +227,7 @@ RJSF (`@rjsf/shadcn`) does **not** expose a public `isValid` / `formState.isVali
 - Hide RJSF's built-in submit button (`ui:submitButtonOptions` norender) and render a **custom footer**:
   - The `profile_creation` statement + checkbox **appear only when all required fields validate clean** (no validation error).
   - The custom submit button stays **disabled until valid AND checked**.
-- **`POST /api/v1/item/create`** accepts an optional consent payload `{ category: 'profile_creation', version, statement }` and writes the `profile_creation` row with the new `item_id` **after** the item is created — atomic with creation, so the consent row always has a real `item_id`.
+- **`POST /api/v1/item/create`** accepts an optional consent payload `{ category: 'profile_creation', version }` (version = the `current_version` the UI displayed) and writes the `profile_creation` row with the new `item_id` **after** the item is created — atomic with creation, so the consent row always has a real `item_id`. The server validates the submitted version equals the current `current_version` (rejects a stale client).
 
 ### C. Connect / apply (item-level)
 
@@ -180,7 +244,7 @@ Keep the existing `ConsentCheckbox` + network-driven UI (`action-modal.tsx` for 
 
 Minimal, Signals-internal (no service-to-service auth — same app):
 
-- `GET /api/v1/consent/status` — auth. Returns, per universal `consent_category`, the user's latest accepted version (if any) and whether re-consent is needed against the current `consent.json` versions. Drives the login gate.
+- `GET /api/v1/consent/status` — auth. Returns, per universal `consent_category`, the user's latest accepted version (if any) and whether re-consent is needed — `needs_consent` = **no acceptance row equal to the document's current `current_version`** (§4.1). Drives the login gate.
 - `POST /api/v1/consent/accept` — auth. Body carries the categories + versions being accepted (e.g. `terms` v1, `privacy` v1). Writes one row per accepted document. Used by the signup/login gate.
 - `POST /api/v1/item/create` — **extended** to accept an optional consent payload and write the `profile_creation` row.
 - `perform_action` / `update_action_status` — **extended** to write the `action` rows (the consent payload already flows through these routes today).
@@ -201,32 +265,25 @@ Minimal, Signals-internal (no service-to-service auth — same app):
 
 ## 8. Testing
 
-- **Unit:** `needs_consent` logic (no record / older version / current version already accepted); per-document version compare; profile-form validity gate (checkbox hidden until valid, submit disabled until valid AND checked); brand-override deep-merge of `consent.json`; action-type derivation from `network.json` (network with only `connect`, only `apply`, both, none).
+- **Unit:** `needs_consent` logic (no row for `current_version`, incl. the rollback case where the user only accepted a higher version); `current_version` display/capture resolution; profile-form validity gate (checkbox hidden until valid, submit disabled until valid AND checked); brand-override per-document merge of `consent.json`; version-history immutability check; action-type derivation from `network.json` (network with only `connect`, only `apply`, both, none).
 - **Integration:** `POST /consent/accept` writes the correct `terms` + `privacy` rows with versions; `GET /consent/status` returns needs-consent correctly across new/returning/version-bumped users; profile-create records the item-level row with the real `item_id`; action perform/accept record rows with `item_id` + `action_id` + derived `action_type`/`action_stage`; per-interaction statement override resolves for `purple_dot`.
 - **UI:** tabbed privacy/terms popup, checkbox not pre-checked, gate blocks continue until accepted; profile checkbox appears only when the form is valid; `/privacy` and `/terms` routes resolve and render config content.
 
 ---
 
-## 9. Open questions (for reviewer)
+## 9. Resolved decisions (previously open)
 
-### Open Question 1 — version content retention
+These two were flagged as open questions and have now been decided by the reviewer:
 
-`consent.json` is **mutable config**. When a document is bumped (e.g. `terms` v1 → v2) the file is overwritten in place, so the **literal content of v1 is lost at runtime**, even though we still store `document_version = 1` against past acceptances. We can always tell *which version* a user accepted, but not necessarily *reproduce what that version said* at runtime. Three resolutions, with trade-offs — **reviewer to pick:**
+### Decision 1 — version content retention → **version history in the config**
 
-1. **Snapshot into the table.** At acceptance, copy the exact title + content (and a content hash) into the `consent_record` row. Each row becomes self-contained legal proof of what *that user* agreed to, even after the file changes. The config stays small; git history of `consent.json` preserves authored versions for reference. *Limitation:* you cannot re-render an arbitrary historical version for someone who never accepted it (only what was accepted is retained).
-2. **Version history in the config.** `consent.json` keeps an append-only list of all versions per document; nothing is ever overwritten; the table stores only the version int and looks content up from the config. Any historical version is renderable for anyone, but the file grows over time and authors must never edit past entries.
-3. **Both.** Full history in the config *and* snapshot in the table. Maximum fidelity (re-render any historical version for anyone, plus per-user proof), at the cost of more moving parts and storage.
+`consent.json` retains an **append-only `versions` array** per document; nothing is overwritten (§4). Any historical version is renderable for anyone, and a `consent_record` row storing only `(type, version)` always resolves its exact content. Cost accepted: the config file grows over time, and authors must never edit or delete past `versions` entries (enforced by review + a loader/schema check that `versions` are monotonic and immutable relative to the prior deploy where feasible).
 
-*(The canonical cross-DPG spec resolves this with immutable versioned `consent_document` rows in a DB — option (2)/(3) in DB form. v1 is config-file-driven, hence the trade-off.)*
+*(The canonical cross-DPG spec achieves the same with immutable versioned `consent_document` rows in a DB. v1 is config-file-driven, hence version history lives in the file.)*
 
-### Open Question 2 — store the full consent document text per user?
+### Decision 2 — do **not** store full document text per user → **type + version only**
 
-Distinct from Open Question 1's *mechanism* choice: should each `consent_record` row store the **complete document text** the user agreed to (the full markdown of terms / privacy, not just the short statement line), or is storing the **short statement + version int** sufficient for v1?
-
-- **Store full text per user** — strongest audit/legal posture: every acceptance row is a complete, self-contained record of exactly what the user read. Costs storage (full terms/privacy markdown duplicated per user per acceptance) and is the heavier option.
-- **Store statement + version only** — leaner: the row records the version int and the short statement line; the full document content is recovered from the config (or from the snapshot, if Open Question 1 chose option 1/3). Lighter, but relies on the config/version lookup to reconstruct the full text.
-
-**Reviewer to decide whether full per-user text storage is required for v1.** (Note this interacts with Open Question 1: if (1)/(3) snapshots full content into the row, that already satisfies "full text per user".)
+Each `consent_record` row stores only the consent **type + version** (no content, not even the short statement line). The full content is recovered from `consent.json` by `(type, version)` lookup, which is safe precisely because Decision 1 retains every version. This keeps rows small and avoids duplicating document markdown per user per acceptance.
 
 ---
 
