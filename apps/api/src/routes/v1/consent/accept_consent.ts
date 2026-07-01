@@ -1,6 +1,7 @@
 import {
   ConsentAcceptBodySchema,
   ConsentAcceptResponseSchema,
+  type ConsentAcceptBody,
 } from '@dpg/schemas';
 import type { FastifyPluginAsyncZod } from 'fastify-type-provider-zod';
 import type { FastifyReply, FastifyRequest } from 'fastify';
@@ -8,7 +9,6 @@ import { db } from '@api/db/postgres/drizzle_config';
 import { consent_record } from '@api/db/postgres/schema';
 import { auth_middleware_if_enabled } from '@api/plugins/auth/auth_middleware';
 import { apiConfig } from '@/config';
-import type { ConsentAcceptBody } from '@dpg/schemas';
 
 type Req = FastifyRequest<{ Body: ConsentAcceptBody }>;
 

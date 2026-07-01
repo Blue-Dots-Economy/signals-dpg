@@ -41,36 +41,44 @@ export const get_consent_status_handler = async (
 
   const { network } = request.query;
 
-  const rows = await db
-    .select({
-      consentCategory: consent_record.consentCategory,
-      documentVersion: consent_record.documentVersion,
-    })
-    .from(consent_record)
-    .where(
-      and(
-        eq(consent_record.userId, userId),
-        eq(consent_record.level, 'user'),
-        eq(consent_record.network, network),
-        inArray(consent_record.consentCategory, ['terms', 'privacy']),
-      ),
-    );
+  try {
+    const rows = await db
+      .select({
+        consentCategory: consent_record.consentCategory,
+        documentVersion: consent_record.documentVersion,
+      })
+      .from(consent_record)
+      .where(
+        and(
+          eq(consent_record.userId, userId),
+          eq(consent_record.level, 'user'),
+          eq(consent_record.network, network),
+          inArray(consent_record.consentCategory, ['terms', 'privacy']),
+        ),
+      );
 
-  const termsSet = new Set<number>();
-  const privacySet = new Set<number>();
+    const termsSet = new Set<number>();
+    const privacySet = new Set<number>();
 
-  for (const row of rows) {
-    if (row.consentCategory === 'terms') {
-      termsSet.add(row.documentVersion);
-    } else if (row.consentCategory === 'privacy') {
-      privacySet.add(row.documentVersion);
+    for (const row of rows) {
+      if (row.consentCategory === 'terms') {
+        termsSet.add(row.documentVersion);
+      } else if (row.consentCategory === 'privacy') {
+        privacySet.add(row.documentVersion);
+      }
     }
-  }
 
-  return reply.code(200).send({
-    statuses: {
-      terms: Array.from(termsSet).sort((a, b) => a - b),
-      privacy: Array.from(privacySet).sort((a, b) => a - b),
-    },
-  });
+    return reply.code(200).send({
+      statuses: {
+        terms: Array.from(termsSet).sort((a, b) => a - b),
+        privacy: Array.from(privacySet).sort((a, b) => a - b),
+      },
+    });
+  } catch (err) {
+    request.log.error({ err }, 'consent status read failed');
+    return reply.code(500).send({
+      error: 'CONSENT_READ_FAILED',
+      message: 'Failed to read consent status.',
+    });
+  }
 };
