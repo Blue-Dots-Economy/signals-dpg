@@ -10,11 +10,23 @@ import { useAuth } from '@/contexts/auth-context';
 import { getServedScope } from '@/lib/served-binding';
 import { evaluateDomainGate, resolveHeldDomains } from '@/lib/domain-gate';
 import { toast } from 'sonner';
+import { useNetworkTheme } from '@/theme/theme-provider';
+import { getConsentStatus, acceptConsent, fetchConsentConfigs } from '@/lib/consent-api';
+import { mergeConsentConfig } from '@/hooks/use-consent-config';
+import { ConsentModal } from '@/components/consent/consent-modal';
+import type { ConsentConfigDocument } from '@dpg/schemas';
 
 interface AuthState extends AuthIdentifier {
   userExists: boolean;
   name?: string;
   redirectTo?: string;
+}
+
+interface ConsentGateState {
+  config: ConsentConfigDocument;
+  needed: Array<'terms' | 'privacy'>;
+  redirectTo: string;
+  userExists: boolean;
 }
 
 function getAuthIdentifier(state: AuthState): AuthIdentifier {
@@ -26,9 +38,11 @@ export function OtpPage() {
   const location = useLocation();
   const { verifyOtp, signOut } = useAuth();
   const { t } = useTranslation();
+  const { themeId, brand } = useNetworkTheme();
   const [isLoading, setIsLoading] = useState(false);
   const [countdown, setCountdown] = useState(60);
   const [inlineError, setInlineError] = useState<{ title: string; description: string } | null>(null);
+  const [consentGate, setConsentGate] = useState<ConsentGateState | null>(null);
 
   const state = location.state as AuthState | null;
   const identifierLabel = state?.email ?? state?.phoneNumber;
@@ -68,6 +82,33 @@ export function OtpPage() {
         }
       }
 
+      // Consent gate: fetch fresh post-auth status imperatively so we don't
+      // rely on stale hook data from before the session was established.
+      const [consentStatus, configEntries] = await Promise.all([
+        getConsentStatus(themeId),
+        fetchConsentConfigs(themeId),
+      ]);
+
+      const networkDefault = configEntries.find((e) => e.brand === null);
+      if (networkDefault) {
+        const brandEntry = brand ? configEntries.find((e) => e.brand === brand) : undefined;
+        const mergedConfig = mergeConsentConfig(networkDefault.schema, brandEntry?.schema);
+
+        const needed = (['terms', 'privacy'] as const).filter(
+          (c) => !consentStatus.statuses[c].includes(mergedConfig.documents[c].current_version),
+        );
+
+        if (needed.length > 0) {
+          setConsentGate({
+            config: mergedConfig,
+            needed,
+            redirectTo: state.redirectTo ?? '/',
+            userExists: state.userExists,
+          });
+          return;
+        }
+      }
+
       toast.success(state.userExists ? t('auth.toast_welcome_back') : t('auth.toast_account_created'), {
         description: state.userExists
           ? t('auth.toast_welcome_back_desc')
@@ -82,6 +123,25 @@ export function OtpPage() {
     } finally {
       setIsLoading(false);
     }
+  };
+
+  const handleConsentAccept = async () => {
+    if (!consentGate || !state) return;
+    await acceptConsent({
+      network: themeId,
+      brand: brand !== 'standard' ? brand : null,
+      source: consentGate.userExists ? 'login' : 'signup',
+      items: consentGate.needed.map((c) => ({
+        category: c,
+        version: consentGate.config.documents[c].current_version,
+      })),
+    });
+    toast.success(state.userExists ? t('auth.toast_welcome_back') : t('auth.toast_account_created'), {
+      description: state.userExists
+        ? t('auth.toast_welcome_back_desc')
+        : t('auth.toast_account_created_desc'),
+    });
+    navigate(consentGate.redirectTo, { replace: true });
   };
 
   const handleResendOtp = async () => {
@@ -107,6 +167,16 @@ export function OtpPage() {
   if (!identifierLabel) return null;
 
   return (
+    <>
+    {consentGate && (
+      <ConsentModal
+        open={true}
+        mode="gate"
+        initialTab="terms"
+        config={consentGate.config}
+        onAccept={() => { void handleConsentAccept(); }}
+      />
+    )}
     <AuthShell>
       {/* Back */}
       <button
@@ -164,5 +234,6 @@ export function OtpPage() {
         )}
       </div>
     </AuthShell>
+    </>
   );
 }
