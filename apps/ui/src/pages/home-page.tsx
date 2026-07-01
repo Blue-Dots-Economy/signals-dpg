@@ -824,15 +824,6 @@ export function HomePage() {
     <ProfileConsentModal
       open={Boolean(pendingConsentProfileId)}
       statement={profileStatement}
-      onCancel={() => {
-        const pending = pendingConsentProfileId;
-        setPendingConsentProfileId(null);
-        // If the pending profile is the currently active (auto-selected) one,
-        // deactivate it so the user must consciously choose a profile.
-        if (pending === activeProfileId) {
-          setActiveProfileId(null);
-        }
-      }}
       onAccept={async () => {
         const pending = pendingConsentProfileId;
         if (!pending || !network?.id || !profileDoc) return;

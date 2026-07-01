@@ -13,14 +13,12 @@ export interface ProfileConsentModalProps {
   open: boolean;
   statement: string;
   onAccept: () => void;
-  onCancel: () => void;
 }
 
 export function ProfileConsentModal({
   open,
   statement,
   onAccept,
-  onCancel,
 }: ProfileConsentModalProps) {
   const { t } = useTranslation();
   const [checked, setChecked] = React.useState(false);
@@ -56,19 +54,14 @@ export function ProfileConsentModal({
             id="profile-consent-checkbox"
           />
 
-          <div className="flex justify-end gap-3">
-            <Button type="button" variant="outline" onClick={onCancel}>
-              {t('consent.cancel')}
-            </Button>
-            <Button
-              type="button"
-              disabled={!checked}
-              onClick={onAccept}
-              className="bg-brand-cta text-[var(--brand-cta-foreground)] hover:brightness-110"
-            >
-              {t('consent.accept_continue')}
-            </Button>
-          </div>
+          <Button
+            type="button"
+            disabled={!checked}
+            onClick={onAccept}
+            className="w-full bg-brand-cta text-[var(--brand-cta-foreground)] hover:brightness-110"
+          >
+            {t('consent.accept_continue')}
+          </Button>
         </div>
       </DialogContent>
     </Dialog>
