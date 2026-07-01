@@ -42,6 +42,10 @@ import { computeVisibleDomains } from '@/lib/visible-domains';
 import { useUserLocation } from '@/hooks/use-user-location';
 import { nearestDistanceMeters } from '@/lib/geo/distance';
 import type { LatLng } from '@/lib/geo/types';
+import { getProfileConsentStatus, acceptProfileConsent } from '@/lib/consent-api';
+import { useConsentConfig } from '@/hooks/use-consent-config';
+import { useNetworkTheme } from '@/theme/theme-provider';
+import { ProfileConsentModal } from '@/components/consent/profile-consent-modal';
 
 function itemToCardItem(item: Item): { id: string; domain: string; data: Record<string, unknown> } {
   return {
@@ -220,6 +224,9 @@ export function HomePage() {
   // is transiently null even for a user who has a profile location, so the
   // browser-geo auto-prompt must wait for this to avoid a spurious permission prompt.
   const [profilesResolved, setProfilesResolved] = React.useState(false);
+  const [consentedProfileIds, setConsentedProfileIds] = React.useState<Set<string>>(new Set());
+  const [consentLoaded, setConsentLoaded] = React.useState(false);
+  const [pendingConsentProfileId, setPendingConsentProfileId] = React.useState<string | null>(null);
   const [loading, setLoading] = React.useState(false);
   const browseSelection = useCardSelection();
   const [bulkConnectOpen, setBulkConnectOpen] = React.useState(false);
@@ -377,6 +384,62 @@ export function HomePage() {
   // on profilesResolved so a logged-in user with a profile location isn't prompted
   // during the async profile-load window.
   const { location: userLocation } = useUserLocation(profileLocation, profilesResolved);
+
+  // Profile-creation consent gate. Profiles created via the aggregator channel
+  // have no profile_creation consent recorded; selecting one must first prompt.
+  const { config: consentConfig } = useConsentConfig();
+  const { brand } = useNetworkTheme();
+  const profileDoc = consentConfig?.documents.profile_creation;
+  const profileVersion = profileDoc?.versions.find(
+    (v) => v.version === profileDoc.current_version,
+  );
+  const profileStatement = profileVersion?.statement ?? '';
+  const profileConsentRequired = Boolean(profileStatement);
+
+  // Fetch which of the user's profiles already have profile_creation consent.
+  React.useEffect(() => {
+    if (!network?.id || !user || !profilesResolved) return;
+
+    const controller = new AbortController();
+    setConsentLoaded(false);
+
+    getProfileConsentStatus(network.id)
+      .then((res) => {
+        if (controller.signal.aborted) return;
+        setConsentedProfileIds(new Set(res.consented_item_ids));
+        setConsentLoaded(true);
+      })
+      .catch(() => {
+        if (controller.signal.aborted) return;
+        // Fail-open: treat as no consents on error so the gate still prompts.
+        setConsentedProfileIds(new Set());
+        setConsentLoaded(true);
+      });
+
+    return () => { controller.abort(); };
+  }, [network?.id, user, profilesResolved]);
+
+  // Gate the auto-selected profile: if it lacks profile_creation consent, prompt.
+  React.useEffect(() => {
+    if (
+      !profilesResolved ||
+      !consentLoaded ||
+      !profileConsentRequired ||
+      !activeProfileId ||
+      pendingConsentProfileId !== null ||
+      consentedProfileIds.has(activeProfileId)
+    ) {
+      return;
+    }
+    setPendingConsentProfileId(activeProfileId);
+  }, [
+    profilesResolved,
+    consentLoaded,
+    profileConsentRequired,
+    activeProfileId,
+    consentedProfileIds,
+    pendingConsentProfileId,
+  ]);
 
   // Sort a card-item array (item_locations stored in .data) nearest-first when userLocation is known.
   // Items without locations sort last (nearestDistanceMeters returns Infinity for empty/missing arrays).
@@ -701,6 +764,10 @@ export function HomePage() {
   };
 
   const handleActiveProfileChange = (profileId: string) => {
+    if (profileConsentRequired && !consentedProfileIds.has(profileId)) {
+      setPendingConsentProfileId(profileId);
+      return;
+    }
     setActiveProfileId(profileId);
     if (network?.id) {
       setStoredActiveProfileId(network.id, profileId);
@@ -763,9 +830,52 @@ export function HomePage() {
       ? [activeAction]
       : [];
 
+  const profileConsentModal = (
+    <ProfileConsentModal
+      open={Boolean(pendingConsentProfileId)}
+      statement={profileStatement}
+      onCancel={() => {
+        const pending = pendingConsentProfileId;
+        setPendingConsentProfileId(null);
+        // If the pending profile is the currently active (auto-selected) one,
+        // deactivate it so the user must consciously choose a profile.
+        if (pending === activeProfileId) {
+          setActiveProfileId(null);
+        }
+      }}
+      onAccept={async () => {
+        const pending = pendingConsentProfileId;
+        if (!pending || !network?.id || !profileDoc) return;
+        const profile = myItems.find((p) => p.item_id === pending);
+        if (!profile) {
+          setPendingConsentProfileId(null);
+          return;
+        }
+        try {
+          await acceptProfileConsent({
+            network: network.id,
+            brand: brand === 'standard' ? null : brand,
+            item_domain: profile.item_domain,
+            item_type: profile.item_type,
+            item_id: profile.item_id,
+            version: profileDoc.current_version,
+          });
+          setConsentedProfileIds((prev) => new Set([...prev, pending]));
+          setActiveProfileId(pending);
+          setStoredActiveProfileId(network.id, pending);
+          setPendingConsentProfileId(null);
+        } catch {
+          toast.error(t('profile.error_generic_desc'));
+          // Keep the modal open so the user can retry.
+        }
+      }}
+    />
+  );
+
   if (!network) {
     return (
-      <div className="flex h-screen flex-col">
+      <>
+        <div className="flex h-screen flex-col">
         <div className="h-14 border-b bg-gradient-to-r from-background to-primary/5" />
         <div className="flex flex-1 overflow-hidden">
           <div className="hidden md:block w-64 shrink-0 border-r p-4 space-y-3">
@@ -784,7 +894,9 @@ export function HomePage() {
             </div>
           </div>
         </div>
-      </div>
+        </div>
+        {profileConsentModal}
+      </>
     );
   }
 
@@ -843,6 +955,7 @@ export function HomePage() {
   );
 
   return (
+    <>
     <PageShell
       networks={showNetworkSelector ? allNetworks : []}
       selectedNetwork={selectedNetworkId}
@@ -1147,5 +1260,7 @@ export function HomePage() {
           }
         </ActionHandler>
     </PageShell>
+    {profileConsentModal}
+    </>
   );
 }

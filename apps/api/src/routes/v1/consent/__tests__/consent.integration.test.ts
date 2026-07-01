@@ -26,8 +26,9 @@ import {
   validatorCompiler,
   type ZodTypeProvider,
 } from 'fastify-type-provider-zod';
-import { eq, inArray } from 'drizzle-orm';
+import { and, eq, inArray } from 'drizzle-orm';
 import { randomUUID, randomBytes, createHash } from 'node:crypto';
+import { ensureItemPartition, items as itemsTable } from '@dpg/database';
 
 const pg_url = process.env.POSTGRES_URL ?? process.env.POSTGRES_USER;
 const can_run = Boolean(pg_url);
@@ -57,6 +58,16 @@ describeIf(`consent status + accept endpoints (integration)${
   // The network used in happy-path tests — resolved from the first
   // served_domains entry at runtime so the suite isn't hardcoded.
   let served_network: string;
+
+  // Profile-consent seed: an item owned by the test user + a second user who
+  // does NOT own it (for the NOT_ITEM_OWNER 403 case).
+  const test_item_id = randomUUID();
+  const other_user_id = `usr_${randomUUID()}`;
+  const other_apikey_id = `key_${randomUUID()}`;
+  const other_raw_key = `sk_signals_${randomBytes(24).toString('hex')}`;
+  const other_user_email = `profile-consent-other-${Date.now()}@signals.local`;
+  let test_item_domain: string;
+  let test_item_type: string;
 
   beforeAll(async () => {
     const drizzle_mod = await import('@api/db/postgres/drizzle_config');
@@ -122,11 +133,80 @@ describeIf(`consent status + accept endpoints (integration)${
       createdAt: now,
       updatedAt: now,
     });
+
+    // Resolve a real domain + item_type from the served network config so the
+    // seeded item matches an actual partition + schema shape.
+    test_item_domain = apiConfig.served_domains[0].domain;
+    const { getNetworkConfigById } = await import('@/network_configs');
+    const networkConf = await getNetworkConfigById(served_network);
+    const domainDef = networkConf.domains?.find((d) => d.id === test_item_domain);
+    const itemSchemaKeys = domainDef?.item_schemas
+      ? Object.keys(domainDef.item_schemas)
+      : [];
+    test_item_type = itemSchemaKeys[0] ?? 'profile_1.0';
+
+    // Ensure the partition exists before inserting the item row (items is
+    // partitioned by network -> domain).
+    await ensureItemPartition(db, served_network, test_item_domain);
+
+    await db.insert(itemsTable).values({
+      item_network: served_network,
+      item_domain: test_item_domain,
+      item_type: test_item_type,
+      item_id: test_item_id,
+      item_instance_url: 'http://test.local',
+      item_schema_url: 'http://test.local/schema',
+      item_state: {},
+      item_locations: [],
+      created_by: test_user_id,
+      lifecycle_status: 'live',
+    });
+
+    // Second user (no ownership) for the NOT_ITEM_OWNER test.
+    const now2 = new Date();
+    await db.insert(user).values({
+      id: other_user_id,
+      email: other_user_email,
+      name: `profile-consent-other-${Date.now()}`,
+      emailVerified: true,
+      createdAt: now2,
+      updatedAt: now2,
+    });
+    const hashed_other = createHash('sha256')
+      .update(other_raw_key)
+      .digest('base64url');
+    await db.insert(apikey).values({
+      id: other_apikey_id,
+      name: `profile-consent-other-key-${Date.now()}`,
+      key: hashed_other,
+      userId: other_user_id,
+      referenceId: other_user_id,
+      configId: 'default',
+      start: other_raw_key.slice(0, 6),
+      prefix: 'sk_signals_',
+      enabled: true,
+      rateLimitEnabled: false,
+      createdAt: now2,
+      updatedAt: now2,
+    });
   });
 
   afterAll(async () => {
     const { user, apikey } = authSchema;
     try {
+      await db
+        .delete(consentRecordTable)
+        .where(eq(consentRecordTable.userId, other_user_id));
+      await db.delete(apikey).where(eq(apikey.id, other_apikey_id));
+      await db.delete(user).where(eq(user.id, other_user_id));
+      await db.delete(itemsTable).where(
+        and(
+          eq(itemsTable.item_network, served_network),
+          eq(itemsTable.item_domain, test_item_domain),
+          eq(itemsTable.item_type, test_item_type),
+          eq(itemsTable.item_id, test_item_id),
+        ),
+      );
       await db
         .delete(consentRecordTable)
         .where(eq(consentRecordTable.userId, test_user_id));
@@ -321,5 +401,97 @@ describeIf(`consent status + accept endpoints (integration)${
 
     expect(res.statusCode).toBe(200);
     expect(res.json()).toEqual({ statuses: { terms: [], privacy: [] } });
+  });
+
+  // profile-status + profile-accept (item-level profile_creation consent)
+
+  it('POST /profile-accept → recorded: 1 and writes a profile_creation row', async () => {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/v1/consent/profile-accept',
+      headers: {
+        'x-api-key': raw_key,
+        'content-type': 'application/json',
+      },
+      payload: {
+        network: served_network,
+        item_domain: test_item_domain,
+        item_type: test_item_type,
+        item_id: test_item_id,
+        version: 1,
+      },
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toEqual({ recorded: 1 });
+
+    const rows = await db
+      .select()
+      .from(consentRecordTable)
+      .where(
+        and(
+          eq(consentRecordTable.userId, test_user_id),
+          eq(consentRecordTable.consentCategory, 'profile_creation'),
+        ),
+      );
+
+    expect(rows).toHaveLength(1);
+    expect(rows[0].level).toBe('item');
+    expect(rows[0].source).toBe('profile');
+    expect(rows[0].itemId).toBe(test_item_id);
+  });
+
+  it('POST /profile-accept again → recorded: 0 (idempotent)', async () => {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/v1/consent/profile-accept',
+      headers: {
+        'x-api-key': raw_key,
+        'content-type': 'application/json',
+      },
+      payload: {
+        network: served_network,
+        item_domain: test_item_domain,
+        item_type: test_item_type,
+        item_id: test_item_id,
+        version: 1,
+      },
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toEqual({ recorded: 0 });
+  });
+
+  it('GET /profile-status includes the consented item_id', async () => {
+    const res = await app.inject({
+      method: 'GET',
+      url: `/api/v1/consent/profile-status?network=${served_network}`,
+      headers: { 'x-api-key': raw_key },
+    });
+
+    expect(res.statusCode).toBe(200);
+    const body = res.json() as { consented_item_ids: string[] };
+    expect(body.consented_item_ids).toContain(test_item_id);
+  });
+
+  it('POST /profile-accept by non-owner → 403 NOT_ITEM_OWNER', async () => {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/v1/consent/profile-accept',
+      headers: {
+        'x-api-key': other_raw_key,
+        'content-type': 'application/json',
+      },
+      payload: {
+        network: served_network,
+        item_domain: test_item_domain,
+        item_type: test_item_type,
+        item_id: test_item_id,
+        version: 1,
+      },
+    });
+
+    expect(res.statusCode).toBe(403);
+    expect(res.json()).toMatchObject({ error: 'NOT_ITEM_OWNER' });
   });
 });

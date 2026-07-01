@@ -1,6 +1,7 @@
 import { createApiClient } from './api-client';
 import type { ConsentConfigDocument } from '@dpg/schemas';
 import type { ConsentAcceptBody, ConsentStatusResponse } from '@dpg/schemas';
+import type { ProfileConsentAcceptBody, ProfileConsentStatusResponse } from '@dpg/schemas';
 
 const apiClient = createApiClient();
 
@@ -53,5 +54,25 @@ export async function getConsentStatusByIdentifier(
 
 export async function acceptConsent(body: ConsentAcceptBody): Promise<ConsentAcceptResponse> {
   const response = await apiClient.post<ConsentAcceptResponse>('/api/v1/consent/accept', body);
+  return response.data;
+}
+
+export async function getProfileConsentStatus(
+  networkId: string,
+): Promise<ProfileConsentStatusResponse> {
+  const response = await apiClient.get<ProfileConsentStatusResponse>(
+    '/api/v1/consent/profile-status',
+    { params: { network: networkId } },
+  );
+  return response.data;
+}
+
+export async function acceptProfileConsent(
+  body: ProfileConsentAcceptBody,
+): Promise<{ recorded: number }> {
+  const response = await apiClient.post<{ recorded: number }>(
+    '/api/v1/consent/profile-accept',
+    body,
+  );
   return response.data;
 }
