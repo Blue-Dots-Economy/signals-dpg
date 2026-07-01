@@ -649,9 +649,15 @@ export function ProfileFormPage() {
             {!isEdit && (
               <div className="mt-6 space-y-4">
                 {!formValid ? (
-                  <p className="rounded-md border border-border bg-muted/40 px-4 py-3 text-sm text-muted-foreground">
+                  <div className="flex items-center gap-2.5 rounded-md border border-amber-300 bg-amber-50 px-4 py-3 text-sm font-medium text-amber-800">
+                    <span
+                      aria-hidden="true"
+                      className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-amber-400 text-xs font-bold text-white"
+                    >
+                      !
+                    </span>
                     {t('profile.fill_required_hint')}
-                  </p>
+                  </div>
                 ) : (
                   consentRequired && (
                     <ConsentCheckbox
