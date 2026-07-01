@@ -2,6 +2,7 @@ import { z } from 'zod';
 
 export { FetchSchema, SchemaFetchError, fetchSchema } from './schema_registry';
 export * from './api/action_schemas';
+export * from './api/consent_schemas';
 export * from './api/item_schemas';
 export * from './item/lifecycle.js';
 export * from './api/bulk_schemas';
