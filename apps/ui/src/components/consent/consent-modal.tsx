@@ -60,7 +60,7 @@ export function ConsentModal({
       >
         <DialogHeader className="px-6 pt-6 pb-4 shrink-0">
           <DialogTitle className="text-lg font-semibold">
-            {mode === 'gate' ? 'Review & accept to continue' : (privacyVersion?.title ?? 'Documents')}
+            {mode === 'gate' ? 'Review & accept to continue' : 'Privacy Policy & Terms'}
           </DialogTitle>
           <DialogDescription className="text-sm text-muted-foreground">
             {mode === 'gate'
