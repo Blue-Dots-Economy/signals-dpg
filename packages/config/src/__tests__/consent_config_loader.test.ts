@@ -19,8 +19,10 @@ describe('loadConsentConfigs (local)', () => {
 
     const upsdm = loaded.find((e) => e.network === 'blue_dot' && e.brand === 'upsdm');
     expect(upsdm).toBeDefined();
-    // brand override is partial — only privacy present
+    // upsdm overrides BOTH documents with UPSDM-branded copy (terms + privacy).
+    expect(upsdm!.config.documents.terms).toBeDefined();
     expect(upsdm!.config.documents.privacy).toBeDefined();
-    expect(upsdm!.config.documents.terms).toBeUndefined();
+    expect(upsdm!.config.documents.terms.current_version).toBe(1);
+    expect(upsdm!.config.documents.privacy.current_version).toBe(1);
   });
 });
