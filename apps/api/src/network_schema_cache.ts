@@ -12,17 +12,20 @@ import { db } from '@api/db/postgres/drizzle_config';
 import { items } from '@dpg/database';
 import { and, eq } from 'drizzle-orm';
 import { getNetworkConfigs, refreshNetworkConfigs } from '@/network_configs';
+import { refreshConsentConfigs } from '@/consent_configs';
 
 type CachedSchemaKind =
   | 'network_config'
   | 'domain_item_schema'
   | 'instance_custom_item_schema'
-  | 'item_schema_url';
+  | 'item_schema_url'
+  | 'consent_config';
 
 type CachedSchemaIndexEntry = {
   cache_key: string;
   kind: CachedSchemaKind;
   network?: string;
+  brand?: string;
   domain?: string;
   item_type?: string;
   instance_url?: string;
@@ -182,6 +185,26 @@ async function cacheNetworkConfigSchemas(networkConfig: NetworkConfigDocument) {
   }
 }
 
+async function cacheConsentConfigs() {
+  const consentConfigs = await refreshConsentConfigs();
+  for (const entry of consentConfigs) {
+    await cacheSchemaDocument(
+      {
+        cache_key: createCacheKey([
+          'consent_config',
+          entry.network,
+          entry.brand ?? undefined,
+        ]),
+        kind: 'consent_config',
+        network: entry.network,
+        brand: entry.brand ?? undefined,
+        source: 'inline',
+      },
+      entry.config as Record<string, unknown>
+    );
+  }
+}
+
 async function cacheReferencedItemSchemas() {
   const referencedSchemas = await db
     .selectDistinct({ item_schema_url: items.item_schema_url })
@@ -212,6 +235,8 @@ export async function refreshConsumedSchemas() {
   for (const networkConfig of networkConfigs) {
     await cacheNetworkConfigSchemas(networkConfig);
   }
+
+  await cacheConsentConfigs();
 
   await cacheReferencedItemSchemas();
 
@@ -372,6 +397,8 @@ export async function getConfiguredNetworkSchemas() {
   for (const networkConfig of networkConfigs) {
     await cacheNetworkConfigSchemas(networkConfig);
   }
+
+  await cacheConsentConfigs();
 
   return getCachedSchemas();
 }

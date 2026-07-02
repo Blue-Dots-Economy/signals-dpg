@@ -1272,9 +1272,7 @@
             "reject": ["rejected"],
             "cancel": ["cancelled"]
           },
-          "reveals_pii_on_status": ["accepted"],
-          "consent_text_initiator": "I agree to share my profile contact details with this organization if my application is accepted.",
-          "consent_text_receiver": "I agree to share my organisation's contact details with the applicant."
+          "reveals_pii_on_status": ["accepted"]
         },
         {
           "from_network": "blue_dot",
@@ -1344,9 +1342,7 @@
             "reject": ["rejected"],
             "cancel": ["cancelled"]
           },
-          "reveals_pii_on_status": ["accepted"],
-          "consent_text_initiator": "I agree to share my profile contact details with this organization if my application is accepted.",
-          "consent_text_receiver": "I agree to share my organisation's contact details with the applicant."
+          "reveals_pii_on_status": ["accepted"]
         }
       ]
     },
@@ -1374,9 +1370,7 @@
             }
           },
           "metric_categories": null,
-          "reveals_pii_on_status": ["accepted"],
-          "consent_text_initiator": "I agree to share my organisation's contact details with this organisation if they accept my request.",
-          "consent_text_receiver": "I agree to share my organisation's contact details with the requester."
+          "reveals_pii_on_status": ["accepted"]
         }
       ]
     }

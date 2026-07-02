@@ -1,0 +1,82 @@
+{
+  "documents": {
+    "terms": {
+      "current_version": 1,
+      "versions": [
+        {
+          "version": 1,
+          "title": "Terms of Service",
+          "content": "## Terms of Service\n\nWelcome to **Blue Dots**, a digital network — seeded by EkStep Foundation — that helps opportunity seekers, providers, and aggregators discover and connect with one another.\n\n### 1. Who can use Blue Dots\nBlue Dots is currently **invite-only**. By continuing you confirm that you are at least 18 years old and that any information you provide is accurate and belongs to you or to an organisation you are authorised to represent.\n\n### 2. What Blue Dots is\nBlue Dots is a **discovery and matching network**. We help you find relevant opportunities, jobs, and providers and make your profile discoverable to relevant participants. We are **not a party** to any engagement, employment, or transaction that results — those are solely between the participants involved.\n\n### 3. Your responsibilities\n- Keep your profile accurate and up to date.\n- Use the network lawfully and treat other participants with respect.\n- Do not misuse contact details you receive, or share them beyond the purpose for which they were shared.\n\n### 4. Suspension\nWe may pause or remove access for misuse, fraudulent listings, or activity that harms other participants.\n\n### 5. Service \"as is\"\nBlue Dots is in active development and is provided on an \"as is\" and \"as available\" basis, without warranties. We work to keep it reliable but cannot guarantee uninterrupted service.\n\n### 6. Governing law\nThese terms are governed by the laws of India. Questions or grievances: **support@onest.network**.",
+          "effective_from": "2026-06-01"
+        }
+      ]
+    },
+    "privacy": {
+      "current_version": 1,
+      "versions": [
+        {
+          "version": 1,
+          "title": "Privacy Policy",
+          "content": "## Privacy Policy\n\nThis policy explains what **Blue Dots** (seeded by EkStep Foundation) collects, why, and the choices you have. We collect only what is needed to connect you with the right opportunities.\n\n### What we collect\n- **Contact details** — your name, email, and phone number.\n- **Profile information** you choose to provide — such as your role, skills, experience, and location.\n- **Activity** on the network — the connections and applications you make.\n\n### Why we use it\nWe use your information to **match you with relevant opportunities, jobs, and providers**, and to make your profile discoverable to relevant participants within the network.\n\n### When your contact details are shared\nYour name, email, and phone number are shared with another seeker or organisation **only when you initiate or accept a connection or application** — and, for applications, only once it is accepted. **We never sell your data** or share it for advertising.\n\n### Your control\nYou can **update** your profile from the portal at any time. To have your information removed, contact us at **support@onest.network**.\n\n### Retention\nWe keep your information only for as long as it is needed to connect you within the network.\n\n### Grievances\nFor any privacy question or request, contact **support@onest.network**.",
+          "effective_from": "2026-06-01"
+        }
+      ]
+    },
+    "profile_creation": {
+      "current_version": 1,
+      "versions": [
+        {
+          "version": 1,
+          "statement": "The information collected will be used to match you with services and opportunities. Tap \"I agree to continue\".",
+          "effective_from": "2026-06-01"
+        }
+      ]
+    }
+  },
+  "actions": {
+    "connect": {
+      "initiate": {
+        "current_version": 1,
+        "versions": [
+          {
+            "version": 1,
+            "statement": "I agree to share my contact details (name, email, phone) with this seeker / provider if they accept my request. The request may be cancelled at any time.",
+            "effective_from": "2026-06-01"
+          }
+        ]
+      },
+      "accept": {
+        "current_version": 1,
+        "versions": [
+          {
+            "version": 1,
+            "statement": "I agree to share my contact details (name, email, phone) with this seeker / provider.",
+            "effective_from": "2026-06-01"
+          }
+        ]
+      }
+    },
+    "apply": {
+      "initiate": {
+        "current_version": 1,
+        "versions": [
+          {
+            "version": 1,
+            "statement": "I agree to share my contact details (name, email, phone) with this seeker / provider if they accept my request. The request may be cancelled at any time.",
+            "effective_from": "2026-06-01"
+          }
+        ]
+      },
+      "accept": {
+        "current_version": 1,
+        "versions": [
+          {
+            "version": 1,
+            "statement": "I agree to share my contact details (name, email, phone) with this seeker / provider.",
+            "effective_from": "2026-06-01"
+          }
+        ]
+      }
+    }
+  }
+}

@@ -442,9 +442,7 @@
             "reject": ["rejected"],
             "cancel": ["cancelled"]
           },
-          "reveals_pii_on_status": ["accepted"],
-          "consent_text_initiator": "I agree to share my contact details (name, email, phone) with this provider if they accept my request.",
-          "consent_text_receiver": "I agree to share my contact details (name, email, phone) with the requester."
+          "reveals_pii_on_status": ["accepted"]
         },
         {
           "from_network": "purple_dot",
@@ -482,9 +480,7 @@
             "reject": ["rejected"],
             "cancel": ["cancelled"]
           },
-          "reveals_pii_on_status": ["accepted"],
-          "consent_text_initiator": "I agree to share my contact details (name, email, phone) with this provider if they accept my request.",
-          "consent_text_receiver": "I agree to share my contact details (name, email, phone) with the requester."
+          "reveals_pii_on_status": ["accepted"]
         },
         {
           "from_network": "purple_dot",
@@ -507,9 +503,7 @@
             }
           },
           "metric_categories": null,
-          "reveals_pii_on_status": ["accepted"],
-          "consent_text_initiator": "I agree to share my contact details with this provider if they accept my request.",
-          "consent_text_receiver": "I agree to share my contact details with the requester."
+          "reveals_pii_on_status": ["accepted"]
         }
       ]
     }

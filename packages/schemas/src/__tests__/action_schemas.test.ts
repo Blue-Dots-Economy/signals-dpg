@@ -7,35 +7,62 @@ import {
 } from '../api/action_schemas';
 
 describe('ConsentAckSchema', () => {
-  it('accepts a valid consent acknowledgement', () => {
+  it('accepts a valid consent acknowledgement with version', () => {
     const parsed = ConsentAckSchema.parse({
       acknowledged: true,
-      text: 'I agree to share my PII.',
+      version: 1,
     });
     expect(parsed.acknowledged).toBe(true);
-    expect(parsed.text).toBe('I agree to share my PII.');
+    expect(parsed.version).toBe(1);
+  });
+
+  it('accepts a valid consent with optional brand', () => {
+    const parsed = ConsentAckSchema.parse({
+      acknowledged: true,
+      version: 2,
+      brand: 'sanketika',
+    });
+    expect(parsed.acknowledged).toBe(true);
+    expect(parsed.version).toBe(2);
+    expect(parsed.brand).toBe('sanketika');
+  });
+
+  it('accepts null brand', () => {
+    const parsed = ConsentAckSchema.parse({
+      acknowledged: true,
+      version: 1,
+      brand: null,
+    });
+    expect(parsed.brand).toBeNull();
   });
 
   it('rejects acknowledged:false', () => {
     expect(() =>
-      ConsentAckSchema.parse({ acknowledged: false, text: 'I agree.' })
+      ConsentAckSchema.parse({ acknowledged: false, version: 1 })
     ).toThrow();
   });
 
-  it('rejects empty / whitespace text', () => {
-    expect(() => ConsentAckSchema.parse({ acknowledged: true, text: '' })).toThrow();
-    expect(() => ConsentAckSchema.parse({ acknowledged: true, text: '   ' })).toThrow();
+  it('rejects missing version', () => {
+    expect(() => ConsentAckSchema.parse({ acknowledged: true })).toThrow();
   });
 
-  it('rejects text longer than 500 chars', () => {
+  it('rejects version < 1', () => {
+    expect(() => ConsentAckSchema.parse({ acknowledged: true, version: 0 })).toThrow();
+  });
+
+  it('rejects non-integer version', () => {
+    expect(() => ConsentAckSchema.parse({ acknowledged: true, version: 1.5 })).toThrow();
+  });
+
+  it('rejects empty brand string', () => {
     expect(() =>
-      ConsentAckSchema.parse({ acknowledged: true, text: 'x'.repeat(501) })
+      ConsentAckSchema.parse({ acknowledged: true, version: 1, brand: '' })
     ).toThrow();
   });
 
   it('rejects unknown keys (strict mode)', () => {
     expect(() =>
-      ConsentAckSchema.parse({ acknowledged: true, text: 'ok', extra: 1 })
+      ConsentAckSchema.parse({ acknowledged: true, version: 1, extra: 1 })
     ).toThrow();
   });
 });
@@ -83,9 +110,10 @@ describe('PerformActionBodySchema with consent', () => {
         item_instance_url: 'http://x.example.com',
       },
       requirements_snapshot: {},
-      consent: { acknowledged: true, text: 'I agree.' },
+      consent: { acknowledged: true, version: 1 },
     });
     expect(parsed.consent?.acknowledged).toBe(true);
+    expect(parsed.consent?.version).toBe(1);
   });
 });
 
@@ -103,10 +131,11 @@ describe('UpdateActionStatusBodySchema with consent', () => {
       action_id: UUID_A,
       action_status: 'accepted',
       remarks: 'optional note',
-      consent: { acknowledged: true, text: 'I agree.' },
+      consent: { acknowledged: true, version: 1 },
     });
     expect(parsed.remarks).toBe('optional note');
     expect(parsed.consent?.acknowledged).toBe(true);
+    expect(parsed.consent?.version).toBe(1);
   });
 });
 
@@ -130,9 +159,10 @@ describe('PerformNetworkActionBodySchema with consent', () => {
       },
       source_item_owner: 'org-abc',
       requirements_snapshot: {},
-      consent: { acknowledged: true, text: 'I agree to share my PII.' },
+      consent: { acknowledged: true, version: 2, brand: 'sanketika' },
     });
     expect(parsed.consent?.acknowledged).toBe(true);
-    expect(parsed.consent?.text).toBe('I agree to share my PII.');
+    expect(parsed.consent?.version).toBe(2);
+    expect(parsed.consent?.brand).toBe('sanketika');
   });
 });

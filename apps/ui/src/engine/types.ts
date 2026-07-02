@@ -21,8 +21,6 @@ export interface DotActionSchema {
   to_domain: string;
   requirement_schema: RJSFSchema;
   event_schema?: RJSFSchema;
-  consent_text_initiator?: string;
-  consent_text_receiver?: string;
   reveals_pii_on_status?: string[];
 }
 
@@ -97,8 +95,6 @@ export interface DotNetworkInteraction {
   requirement_schema: RJSFSchema;
   event_schema?: RJSFSchema;
   reveals_pii_on_status?: string[];
-  consent_text_initiator?: string;
-  consent_text_receiver?: string;
 }
 
 export interface DotNetworkInstance {

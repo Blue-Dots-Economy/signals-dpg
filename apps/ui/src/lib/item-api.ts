@@ -12,6 +12,7 @@ export interface CreateItemPayload {
   item_schema_url?: string;
   item_state: Record<string, unknown>;
   item_locations?: ItemLocation[];
+  consent?: { category: 'profile_creation'; version: number; brand?: string | null };
 }
 
 export interface CreateItemResponse {

@@ -48,6 +48,13 @@ export const CreateItemBodySchema = ItemInsertSchema.omit({
   // create_item.ts.
   created_by: z.string().min(1).optional(),
   item_locations: ItemLocationsArray.optional(),
+  consent: z
+    .object({
+      category: z.literal('profile_creation'),
+      version: z.number().int().min(1),
+      brand: z.string().min(1).nullish(),
+    })
+    .optional(),
 });
 
 const FetchItemsSchemaBase = z.object({

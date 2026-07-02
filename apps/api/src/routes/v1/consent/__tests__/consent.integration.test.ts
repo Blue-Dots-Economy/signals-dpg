@@ -1,0 +1,504 @@
+/**
+ * Phase 2 Task 1 — integration test for GET /api/v1/consent/status and
+ * POST /api/v1/consent/accept against a real Postgres + Redis.
+ *
+ * The suite seeds a minimal user + apikey so the auth middleware can
+ * resolve request.user.id. It then exercises the four scenarios defined
+ * in the task brief:
+ *   1. POST /accept with two items → recorded: 2; two rows in consent_record.
+ *   2. GET /status?network=<net> → correct version arrays per category.
+ *   3. POST /accept with an unknown network → 400 UNKNOWN_NETWORK.
+ *   4. Second accept of terms v2 → GET /status returns both versions.
+ *
+ * Run:
+ *   docker compose up -d db redis
+ *   pnpm db:init:api
+ *   pnpm --filter api test:integration consent
+ *
+ * Skip condition: if POSTGRES_URL/POSTGRES_USER is unset the suite is
+ * describe.skip'd so CI without a live DB stays green.
+ */
+
+import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import Fastify, { type FastifyInstance } from 'fastify';
+import {
+  serializerCompiler,
+  validatorCompiler,
+  type ZodTypeProvider,
+} from 'fastify-type-provider-zod';
+import { and, eq, inArray } from 'drizzle-orm';
+import { randomUUID, randomBytes, createHash } from 'node:crypto';
+import { ensureItemPartition, items as itemsTable } from '@dpg/database';
+
+const pg_url = process.env.POSTGRES_URL ?? process.env.POSTGRES_USER;
+const can_run = Boolean(pg_url);
+const skip_reason = !pg_url
+  ? 'POSTGRES_URL / POSTGRES_USER not set — skipping integration suite'
+  : '';
+
+const describeIf = can_run ? describe : describe.skip;
+
+describeIf(`consent status + accept endpoints (integration)${
+  can_run ? '' : ` — ${skip_reason}`
+}`, () => {
+  let app: FastifyInstance;
+  let db: typeof import('@api/db/postgres/drizzle_config').db;
+  let authSchema: typeof import('../../../../../db/postgres/schema/auth.js');
+  let consentRecordTable: typeof import('@api/db/postgres/schema').consent_record;
+
+  const listen_port = Number(process.env.API_PORT ?? 2742);
+
+  // Test user + apikey (seeded directly via drizzle — no participant
+  // onboarding needed because consent_record has no FK to items).
+  const test_user_id = `usr_${randomUUID()}`;
+  const apikey_id = `key_${randomUUID()}`;
+  const raw_key = `sk_signals_${randomBytes(24).toString('hex')}`;
+  const user_email = `consent-int-${Date.now()}@signals.local`;
+
+  // The network used in happy-path tests — resolved from the first
+  // served_domains entry at runtime so the suite isn't hardcoded.
+  let served_network: string;
+
+  // Profile-consent seed: an item owned by the test user + a second user who
+  // does NOT own it (for the NOT_ITEM_OWNER 403 case).
+  const test_item_id = randomUUID();
+  const other_user_id = `usr_${randomUUID()}`;
+  const other_apikey_id = `key_${randomUUID()}`;
+  const other_raw_key = `sk_signals_${randomBytes(24).toString('hex')}`;
+  const other_user_email = `profile-consent-other-${Date.now()}@signals.local`;
+  let test_item_domain: string;
+  let test_item_type: string;
+
+  beforeAll(async () => {
+    const drizzle_mod = await import('@api/db/postgres/drizzle_config');
+    const auth_mod = await import('../../../../../db/postgres/schema/auth.js');
+    const api_schema_mod = await import('@api/db/postgres/schema');
+    db = drizzle_mod.db;
+    authSchema = auth_mod;
+    consentRecordTable = api_schema_mod.consent_record;
+
+    const { apiConfig } = await import('@/config');
+    if (apiConfig.served_domains.length === 0) {
+      throw new Error(
+        'consent integration suite requires SERVED_DOMAINS to have at least one entry',
+      );
+    }
+    served_network = apiConfig.served_domains[0].network;
+
+    const consent_routes_mod = await import('../consent_routes.js');
+
+    app = Fastify().withTypeProvider<ZodTypeProvider>();
+    app.setValidatorCompiler(validatorCompiler);
+    app.setSerializerCompiler(serializerCompiler);
+    await app.register(consent_routes_mod.default, {
+      prefix: '/api/v1/consent',
+    });
+    try {
+      await app.listen({ port: listen_port, host: '127.0.0.1' });
+    } catch (err: unknown) {
+      const e = err as { code?: string };
+      if (e?.code === 'EADDRINUSE') {
+        throw new Error(
+          `integration test requires port ${listen_port} to be free ` +
+            `(set API_PORT). Is the dev server already running?`,
+        );
+      }
+      throw err;
+    }
+
+    const { user, apikey } = authSchema;
+    const now = new Date();
+
+    await db.insert(user).values({
+      id: test_user_id,
+      email: user_email,
+      name: `consent-int-user-${Date.now()}`,
+      emailVerified: true,
+      createdAt: now,
+      updatedAt: now,
+    });
+
+    const hashed_key = createHash('sha256').update(raw_key).digest('base64url');
+    await db.insert(apikey).values({
+      id: apikey_id,
+      name: `consent-int-key-${Date.now()}`,
+      key: hashed_key,
+      userId: test_user_id,
+      referenceId: test_user_id,
+      configId: 'default',
+      start: raw_key.slice(0, 6),
+      prefix: 'sk_signals_',
+      enabled: true,
+      rateLimitEnabled: false,
+      createdAt: now,
+      updatedAt: now,
+    });
+
+    // Resolve a real domain + item_type from the served network config so the
+    // seeded item matches an actual partition + schema shape.
+    test_item_domain = apiConfig.served_domains[0].domain;
+    const { getNetworkConfigById } = await import('@/network_configs');
+    const networkConf = await getNetworkConfigById(served_network);
+    const domainDef = networkConf.domains?.find((d) => d.id === test_item_domain);
+    const itemSchemaKeys = domainDef?.item_schemas
+      ? Object.keys(domainDef.item_schemas)
+      : [];
+    test_item_type = itemSchemaKeys[0] ?? 'profile_1.0';
+
+    // Ensure the partition exists before inserting the item row (items is
+    // partitioned by network -> domain).
+    await ensureItemPartition(db, served_network, test_item_domain);
+
+    await db.insert(itemsTable).values({
+      item_network: served_network,
+      item_domain: test_item_domain,
+      item_type: test_item_type,
+      item_id: test_item_id,
+      item_instance_url: 'http://test.local',
+      item_schema_url: 'http://test.local/schema',
+      item_state: {},
+      item_locations: [],
+      created_by: test_user_id,
+      lifecycle_status: 'live',
+    });
+
+    // Second user (no ownership) for the NOT_ITEM_OWNER test.
+    const now2 = new Date();
+    await db.insert(user).values({
+      id: other_user_id,
+      email: other_user_email,
+      name: `profile-consent-other-${Date.now()}`,
+      emailVerified: true,
+      createdAt: now2,
+      updatedAt: now2,
+    });
+    const hashed_other = createHash('sha256')
+      .update(other_raw_key)
+      .digest('base64url');
+    await db.insert(apikey).values({
+      id: other_apikey_id,
+      name: `profile-consent-other-key-${Date.now()}`,
+      key: hashed_other,
+      userId: other_user_id,
+      referenceId: other_user_id,
+      configId: 'default',
+      start: other_raw_key.slice(0, 6),
+      prefix: 'sk_signals_',
+      enabled: true,
+      rateLimitEnabled: false,
+      createdAt: now2,
+      updatedAt: now2,
+    });
+  });
+
+  afterAll(async () => {
+    const { user, apikey } = authSchema;
+    try {
+      await db
+        .delete(consentRecordTable)
+        .where(eq(consentRecordTable.userId, other_user_id));
+      await db.delete(apikey).where(eq(apikey.id, other_apikey_id));
+      await db.delete(user).where(eq(user.id, other_user_id));
+      await db.delete(itemsTable).where(
+        and(
+          eq(itemsTable.item_network, served_network),
+          eq(itemsTable.item_domain, test_item_domain),
+          eq(itemsTable.item_type, test_item_type),
+          eq(itemsTable.item_id, test_item_id),
+        ),
+      );
+      await db
+        .delete(consentRecordTable)
+        .where(eq(consentRecordTable.userId, test_user_id));
+      await db.delete(apikey).where(eq(apikey.id, apikey_id));
+      await db.delete(user).where(eq(user.id, test_user_id));
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.error('consent integration test cleanup failed:', err);
+    }
+    if (app) await app.close();
+  });
+
+  it('POST /accept with two items returns recorded: 2 and writes two rows', async () => {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/v1/consent/accept',
+      headers: {
+        'x-api-key': raw_key,
+        'content-type': 'application/json',
+      },
+      payload: {
+        network: served_network,
+        source: 'signup',
+        items: [
+          { category: 'terms', version: 1 },
+          { category: 'privacy', version: 1 },
+        ],
+      },
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toEqual({ recorded: 2 });
+
+    const rows = await db
+      .select()
+      .from(consentRecordTable)
+      .where(eq(consentRecordTable.userId, test_user_id));
+
+    expect(rows).toHaveLength(2);
+    const categories = rows.map((r) => r.consentCategory).sort();
+    expect(categories).toEqual(['privacy', 'terms']);
+  });
+
+  it('GET /status?network=<net> returns correct version arrays', async () => {
+    const res = await app.inject({
+      method: 'GET',
+      url: `/api/v1/consent/status?network=${served_network}`,
+      headers: { 'x-api-key': raw_key },
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toEqual({
+      statuses: {
+        terms: [1],
+        privacy: [1],
+      },
+    });
+  });
+
+  it('POST /accept with an unknown network returns 400 UNKNOWN_NETWORK', async () => {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/v1/consent/accept',
+      headers: {
+        'x-api-key': raw_key,
+        'content-type': 'application/json',
+      },
+      payload: {
+        network: 'definitely_not_a_real_network',
+        source: 'signup',
+        items: [{ category: 'terms', version: 1 }],
+      },
+    });
+
+    expect(res.statusCode).toBe(400);
+    expect(res.json()).toMatchObject({ error: 'UNKNOWN_NETWORK' });
+  });
+
+  it('accept ignores the client-supplied version and records the server current version', async () => {
+    // The client sends version: 2, but the ledger version is derived
+    // server-side from the loaded consent config (blue_dot terms current_version
+    // is 1), so v1 is recorded — a client cannot record a version the user
+    // never saw. A genuine version bump would come from bumping the config.
+    const acceptRes = await app.inject({
+      method: 'POST',
+      url: '/api/v1/consent/accept',
+      headers: {
+        'x-api-key': raw_key,
+        'content-type': 'application/json',
+      },
+      payload: {
+        network: served_network,
+        source: 'login',
+        items: [{ category: 'terms', version: 2 }],
+      },
+    });
+
+    expect(acceptRes.statusCode).toBe(200);
+    expect(acceptRes.json()).toEqual({ recorded: 1 });
+
+    const statusRes = await app.inject({
+      method: 'GET',
+      url: `/api/v1/consent/status?network=${served_network}`,
+      headers: { 'x-api-key': raw_key },
+    });
+
+    expect(statusRes.statusCode).toBe(200);
+    const body = statusRes.json() as {
+      statuses: { terms: number[]; privacy: number[] };
+    };
+    // v2 was requested but v1 (the configured current version) was recorded.
+    expect(body.statuses.terms).toEqual([1]);
+    expect(body.statuses.privacy).toEqual([1]);
+
+    // Three append-only rows for this user (terms v1, privacy v1, terms v1);
+    // the ledger keeps every acceptance even when it repeats the version.
+    const rows = await db
+      .select({
+        consentCategory: consentRecordTable.consentCategory,
+        documentVersion: consentRecordTable.documentVersion,
+      })
+      .from(consentRecordTable)
+      .where(eq(consentRecordTable.userId, test_user_id));
+
+    expect(rows).toHaveLength(3);
+    const termRows = rows
+      .filter((r) => r.consentCategory === 'terms')
+      .map((r) => r.documentVersion)
+      .sort((a, b) => a - b);
+    expect(termRows).toEqual([1, 1]);
+  });
+
+  it('GET /status without auth returns 401', async () => {
+    const res = await app.inject({
+      method: 'GET',
+      url: `/api/v1/consent/status?network=${served_network}`,
+    });
+
+    expect(res.statusCode).toBe(401);
+  });
+
+  it('POST /accept without auth returns 401', async () => {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/v1/consent/accept',
+      headers: { 'content-type': 'application/json' },
+      payload: {
+        network: served_network,
+        source: 'signup',
+        items: [{ category: 'terms', version: 1 }],
+      },
+    });
+
+    expect(res.statusCode).toBe(401);
+  });
+
+  // status-by-identifier (public, pre-login)
+
+  it('GET /status-by-identifier with known email returns accepted versions', async () => {
+    // The test user accepted terms v1 and privacy v1 in prior tests (the
+    // client-supplied v2 was ignored in favour of the configured current
+    // version, so terms de-dupes to [1]).
+    const res = await app.inject({
+      method: 'GET',
+      url: `/api/v1/consent/status-by-identifier?network=${served_network}&email=${encodeURIComponent(user_email)}`,
+    });
+
+    expect(res.statusCode).toBe(200);
+    const body = res.json() as { statuses: { terms: number[]; privacy: number[] } };
+    expect(body.statuses.terms).toEqual([1]);
+    expect(body.statuses.privacy).toEqual([1]);
+  });
+
+  it('GET /status-by-identifier with unknown identifier returns empty statuses', async () => {
+    const res = await app.inject({
+      method: 'GET',
+      url: `/api/v1/consent/status-by-identifier?network=${served_network}&email=nobody-unknown-${Date.now()}%40signals.local`,
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toEqual({ statuses: { terms: [], privacy: [] } });
+  });
+
+  it('GET /status-by-identifier requires no auth (no x-api-key)', async () => {
+    const res = await app.inject({
+      method: 'GET',
+      url: `/api/v1/consent/status-by-identifier?network=${served_network}&email=${encodeURIComponent(user_email)}`,
+      // Deliberately no x-api-key header
+    });
+
+    expect(res.statusCode).toBe(200);
+  });
+
+  it('GET /status-by-identifier with neither phone nor email returns empty statuses', async () => {
+    const res = await app.inject({
+      method: 'GET',
+      url: `/api/v1/consent/status-by-identifier?network=${served_network}`,
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toEqual({ statuses: { terms: [], privacy: [] } });
+  });
+
+  // profile-status + profile-accept (item-level profile_creation consent)
+
+  it('POST /profile-accept → recorded: 1 and writes a profile_creation row', async () => {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/v1/consent/profile-accept',
+      headers: {
+        'x-api-key': raw_key,
+        'content-type': 'application/json',
+      },
+      payload: {
+        network: served_network,
+        item_domain: test_item_domain,
+        item_type: test_item_type,
+        item_id: test_item_id,
+        version: 1,
+      },
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toEqual({ recorded: 1 });
+
+    const rows = await db
+      .select()
+      .from(consentRecordTable)
+      .where(
+        and(
+          eq(consentRecordTable.userId, test_user_id),
+          eq(consentRecordTable.consentCategory, 'profile_creation'),
+        ),
+      );
+
+    expect(rows).toHaveLength(1);
+    expect(rows[0].level).toBe('item');
+    expect(rows[0].source).toBe('profile');
+    expect(rows[0].itemId).toBe(test_item_id);
+  });
+
+  it('POST /profile-accept again → recorded: 0 (idempotent)', async () => {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/v1/consent/profile-accept',
+      headers: {
+        'x-api-key': raw_key,
+        'content-type': 'application/json',
+      },
+      payload: {
+        network: served_network,
+        item_domain: test_item_domain,
+        item_type: test_item_type,
+        item_id: test_item_id,
+        version: 1,
+      },
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toEqual({ recorded: 0 });
+  });
+
+  it('GET /profile-status includes the consented item_id', async () => {
+    const res = await app.inject({
+      method: 'GET',
+      url: `/api/v1/consent/profile-status?network=${served_network}`,
+      headers: { 'x-api-key': raw_key },
+    });
+
+    expect(res.statusCode).toBe(200);
+    const body = res.json() as { consented_item_ids: string[] };
+    expect(body.consented_item_ids).toContain(test_item_id);
+  });
+
+  it('POST /profile-accept by non-owner → 403 NOT_ITEM_OWNER', async () => {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/v1/consent/profile-accept',
+      headers: {
+        'x-api-key': other_raw_key,
+        'content-type': 'application/json',
+      },
+      payload: {
+        network: served_network,
+        item_domain: test_item_domain,
+        item_type: test_item_type,
+        item_id: test_item_id,
+        version: 1,
+      },
+    });
+
+    expect(res.statusCode).toBe(403);
+    expect(res.json()).toMatchObject({ error: 'NOT_ITEM_OWNER' });
+  });
+});

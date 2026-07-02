@@ -1277,6 +1277,12 @@ describeIf(`lifecycle integration${can_run ? '' : ` — ${skip_reason}`}`, () =>
         },
         source_item_owner: srcBody.user_id,
         requirements_snapshot: {},
+        // Initiate-consent is now enforced on the write endpoint for any
+        // reveals_pii action (matching the /action/perform proxy), so send it
+        // when the interaction reveals PII.
+        ...(interaction.reveals_pii_on_status.length > 0
+          ? { consent: { acknowledged: true as const, version: 1 } }
+          : {}),
       },
     });
     expect(performRes.statusCode).toBe(201);
@@ -1320,11 +1326,10 @@ describeIf(`lifecycle integration${can_run ? '' : ` — ${skip_reason}`}`, () =>
     expect(unpauseRes.json().lifecycle_status).toBe('live');
 
     // The SAME accept now succeeds. Include receiver consent when the
-    // interaction reveals PII on 'accepted' and declares a consent text.
-    const receiverConsent =
-      interaction.reveals_pii_on_status.includes('accepted')
-        ? consentAck(interaction.consent_text_receiver)
-        : undefined;
+    // interaction reveals PII on 'accepted' (reveals_pii_on_status-driven).
+    const receiverConsent = interaction.reveals_pii_on_status.includes('accepted')
+      ? consentAck()
+      : undefined;
     const acceptRes = await app.inject({
       method: 'POST',
       url: '/api/v1/action/update-status',

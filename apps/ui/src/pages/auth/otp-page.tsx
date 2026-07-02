@@ -10,11 +10,14 @@ import { useAuth } from '@/contexts/auth-context';
 import { getServedScope } from '@/lib/served-binding';
 import { evaluateDomainGate, resolveHeldDomains } from '@/lib/domain-gate';
 import { toast } from 'sonner';
+import { acceptConsent } from '@/lib/consent-api';
+import type { ConsentAcceptBody } from '@dpg/schemas';
 
 interface AuthState extends AuthIdentifier {
   userExists: boolean;
   name?: string;
   redirectTo?: string;
+  pendingConsent?: ConsentAcceptBody | null;
 }
 
 function getAuthIdentifier(state: AuthState): AuthIdentifier {
@@ -65,6 +68,17 @@ export function OtpPage() {
           await signOut();
           navigate('/auth/login', { replace: true, state: { wrongPortalDomain: gate.heldDomain } });
           return;
+        }
+      }
+
+      // Persist consent that was accepted pre-OTP on the login page.
+      // The write is best-effort: on failure we toast but still navigate
+      // (the user is authenticated; they will be re-prompted next login).
+      if (state.pendingConsent) {
+        try {
+          await acceptConsent(state.pendingConsent);
+        } catch {
+          toast.error(t('auth.toast_consent_persist_error', 'Could not save your consent. You may be asked again next time.'));
         }
       }
 

@@ -101,7 +101,7 @@ export interface PerformActionPayload {
   source_item: ItemRef;
   target_item: TargetItemRef;
   requirements_snapshot: Record<string, unknown>;
-  consent?: { acknowledged: true; text: string };
+  consent?: { acknowledged: true; version: number; brand?: string | null };
 }
 
 /**
@@ -124,7 +124,7 @@ export interface UpdateActionStatusPayload {
   action_id: string;
   action_status: string;
   remarks?: string;
-  consent?: { acknowledged: true; text: string };
+  consent?: { acknowledged: true; version: number; brand?: string | null };
 }
 
 /**

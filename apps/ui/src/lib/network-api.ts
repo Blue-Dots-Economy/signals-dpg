@@ -4,11 +4,12 @@ import { createApiClient } from './api-client';
 
 interface CachedSchemaEntry {
   cache_key: string;
-  kind: 'network_config' | 'domain_item_schema' | 'instance_custom_item_schema' | 'item_schema_url';
+  kind: 'network_config' | 'domain_item_schema' | 'instance_custom_item_schema' | 'item_schema_url' | 'consent_config';
   network?: string;
   domain?: string;
   item_type?: string;
   schema_url?: string;
+  brand?: string;
   schema: DotNetworkSchema;
 }
 

@@ -1,0 +1,60 @@
+{
+  "documents": {
+    "terms": {
+      "current_version": 1,
+      "versions": [
+        {
+          "version": 1,
+          "title": "Terms of Service",
+          "content": "## Terms of Service\n\nWelcome to **Yellow Dot**, an education network — seeded by EkStep Foundation — that connects learners with tutors, counsellors, and coaching centres.\n\n### 1. Who can use Yellow Dot\nYellow Dot is currently **invite-only**. By continuing you confirm the information you provide is accurate. If you are a learner under 18, you should use the network with the involvement and consent of a parent or guardian.\n\n### 2. What Yellow Dot is\nYellow Dot is a **discovery and matching network** that helps learners find educators and vice-versa. Educators and coaching centres listed on the network are **independent**; we are not a party to, and are not responsible for, any tuition, coaching, counselling, or outcome that results.\n\n### 3. Your responsibilities\n- Keep your profile accurate.\n- Use the network lawfully and treat other participants with respect.\n- Use any contact details you receive only for the purpose for which they were shared.\n\n### 4. Suspension\nWe may pause or remove access for misuse or for activity that harms other participants.\n\n### 5. Service \"as is\"\nYellow Dot is in active development and is provided on an \"as is\" and \"as available\" basis, without warranties.\n\n### 6. Governing law\nThese terms are governed by the laws of India. Questions or grievances: **support@onest.network**.",
+          "effective_from": "2026-06-01"
+        }
+      ]
+    },
+    "privacy": {
+      "current_version": 1,
+      "versions": [
+        {
+          "version": 1,
+          "title": "Privacy Policy",
+          "content": "## Privacy Policy\n\nThis policy explains what **Yellow Dot** (seeded by EkStep Foundation) collects, why, and your choices.\n\n### What we collect\n- **Contact details** — your name, email, and phone number.\n- **Learning information** you choose to provide — such as subjects, level, goals, and location (for learners), or subjects taught and experience (for tutors and centres).\n\n### Why we use it\nWe use your information to **match learners with relevant tutors, counsellors, and coaching centres**, and to make your profile discoverable to relevant participants within the network.\n\n### When your contact details are shared\nYour name, email, and phone number are shared with another participant **only when you initiate or accept a connection**. **We never sell your data** and do not use it for advertising.\n\n### Your control\nYou can **update** your profile from the portal at any time. To have your information removed, contact us at **support@onest.network**.\n\n### Retention\nWe keep your information only for as long as it is needed to connect learners and educators within the network.\n\n### Grievances\nFor any privacy question or request, contact **support@onest.network**.",
+          "effective_from": "2026-06-01"
+        }
+      ]
+    },
+    "profile_creation": {
+      "current_version": 1,
+      "versions": [
+        {
+          "version": 1,
+          "statement": "The information collected will be used to match you with tutors, counsellors, and coaching centres. Tap \"I agree to continue\".",
+          "effective_from": "2026-06-01"
+        }
+      ]
+    }
+  },
+  "actions": {
+    "connect": {
+      "initiate": {
+        "current_version": 1,
+        "versions": [
+          {
+            "version": 1,
+            "statement": "I agree to share my contact details (name, email, phone) with this learner / educator if they accept my request. The request may be cancelled at any time.",
+            "effective_from": "2026-06-01"
+          }
+        ]
+      },
+      "accept": {
+        "current_version": 1,
+        "versions": [
+          {
+            "version": 1,
+            "statement": "I agree to share my contact details (name, email, phone) with this learner / educator.",
+            "effective_from": "2026-06-01"
+          }
+        ]
+      }
+    }
+  }
+}
