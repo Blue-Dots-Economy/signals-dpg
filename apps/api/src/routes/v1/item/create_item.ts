@@ -83,6 +83,25 @@ export const create_item_handler = async (
 
   const userId = isAdminApiCaller ? (body.created_by as string) : callerId;
 
+  // A direct/self create (session user or api-key-as-self) must carry consent
+  // when the network configures a profile_creation statement — the login/gate
+  // safety net is UI-only, so this is the server-side guarantee. The admin
+  // on-behalf (bulk) path is exempt: those participants are gated at first
+  // login. When no profile_creation consent is configured there is nothing to
+  // accept, so the create is allowed.
+  if (!isAdminApiCaller && !body.consent) {
+    const requiredVersion = await resolveConsentVersion({
+      network: body.item_network,
+      category: 'profile_creation',
+    });
+    if (requiredVersion !== null) {
+      return reply.code(400).send({
+        error: 'CONSENT_REQUIRED',
+        message: 'profile_creation consent is required to create this item',
+      });
+    }
+  }
+
   if (!isServedDomainBinding(body.item_network, body.item_domain)) {
     return await replyForUnservedDomain(
       reply,

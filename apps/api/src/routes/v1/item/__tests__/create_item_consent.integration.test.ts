@@ -184,7 +184,12 @@ describeIf(`profile_creation consent recorded on item create (integration)${
     expect(row.network).toBe(served_network);
   });
 
-  it('create without consent → 201 and no consent_record row', async () => {
+  it('self-create without consent → 400 CONSENT_REQUIRED (consent is configured)', async () => {
+    // This api-key resolves to a non-admin user with no created_by, i.e. a
+    // direct/self create. Since blue_dot configures a profile_creation
+    // statement, consent is mandatory server-side (the admin on-behalf/bulk
+    // path — which goes through /admin/participant, not this route — stays
+    // exempt and is gated at first login).
     const res = await app.inject({
       method: 'POST',
       url: '/api/v1/item/create',
@@ -200,16 +205,7 @@ describeIf(`profile_creation consent recorded on item create (integration)${
       },
     });
 
-    expect(res.statusCode).toBe(201);
-    const body = res.json() as { item_id: string; item_type: string };
-    expect(typeof body.item_id).toBe('string');
-    created_item_ids.push(body.item_id);
-
-    const rows = await db
-      .select()
-      .from(consentRecordTable)
-      .where(eq(consentRecordTable.itemId, body.item_id));
-
-    expect(rows).toHaveLength(0);
+    expect(res.statusCode).toBe(400);
+    expect(res.json()).toMatchObject({ error: 'CONSENT_REQUIRED' });
   });
 });
