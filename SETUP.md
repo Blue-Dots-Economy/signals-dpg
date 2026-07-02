@@ -1,6 +1,6 @@
 # Local Setup
 
-Get the app running on your machine. ~5 minutes. Follow the steps in order.
+Get the app running on your machine. Follow the steps in order.
 
 By default this runs the **blue_dot** network. To run a different one, see
 [Choose a network](#choose-a-network) at the end.
@@ -106,6 +106,25 @@ and restart both `dev:api` and `dev:ui`.
 | purple_dot | `../../examples/schemas/purple_dot/network.json` | `purple_dot/seeker,purple_dot/provider` | `purple_dot` |
 | orange_dot | `../../examples/schemas/orange_dot/network.json` | `orange_dot/practitioner` | `orange_dot` |
 | yellow_dot | `../../examples/schemas/yellow_dot/network.json` | `onest_yellow_dot/student` | `onest_yellow_dot` |
+
+---
+
+## Optional — use Google Maps
+
+The map works out of the box with **Leaflet** (free, no key). To use Google
+Maps instead, set these two lines in `.env` and restart `pnpm dev:ui`:
+
+```dotenv
+VITE_MAP_PROVIDER=google-maps
+VITE_GOOGLE_MAPS_API_KEY=your-google-maps-api-key
+```
+
+Get a key from the [Google Cloud Console](https://console.cloud.google.com/):
+create a project → enable the **Maps JavaScript API** (and **Geocoding API**
+if you want address search) → create an API key. The key must **not** be
+HTTP-referrer restricted for local use.
+
+(Mapbox also works: `VITE_MAP_PROVIDER=mapbox` + `VITE_MAPBOX_ACCESS_TOKEN=...`.)
 
 ---
 
