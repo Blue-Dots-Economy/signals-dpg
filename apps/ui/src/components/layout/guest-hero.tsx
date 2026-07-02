@@ -22,7 +22,7 @@ export function GuestHero() {
   const subline = t(`hero.${themeId}.subline`, { defaultValue: theme.subline });
 
   return (
-    <div className="sticky top-0 z-30 -mx-4 mb-4 sm:-mx-6">
+    <div className="-mx-4 mb-4 sm:-mx-6">
       <div className="relative overflow-hidden bg-brand-hero shadow-lg sm:mx-4 sm:rounded-xl lg:mx-6">
         {/* Constellation — faint backdrop; compact banner doesn't need full cover */}
         <div className="pointer-events-none absolute inset-0 opacity-[0.18]">

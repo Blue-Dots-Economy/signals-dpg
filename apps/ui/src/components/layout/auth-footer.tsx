@@ -31,7 +31,7 @@ export function AuthFooter() {
           <button
             type="button"
             onClick={() => openModal('privacy')}
-            className="underline underline-offset-2 hover:text-foreground"
+            className="text-primary font-medium underline underline-offset-2 hover:opacity-80"
           >
             Privacy Policy
           </button>{' '}
@@ -39,17 +39,14 @@ export function AuthFooter() {
           <button
             type="button"
             onClick={() => openModal('terms')}
-            className="underline underline-offset-2 hover:text-foreground"
+            className="text-primary font-medium underline underline-offset-2 hover:opacity-80"
           >
             Terms
           </button>
           .
         </p>
-        <div className="flex items-center justify-between">
+        <div className="flex items-center">
           <span>{theme.inviteLine}</span>
-          <a href="mailto:support@onest.network" className="hover:text-foreground hover:underline">
-            Need help?
-          </a>
         </div>
       </footer>
     </>
