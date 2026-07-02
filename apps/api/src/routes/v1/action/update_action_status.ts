@@ -14,6 +14,7 @@ import {
   item_actions,
 } from '@dpg/database';
 import { consent_record } from '@api/db/postgres/schema';
+import { resolveConsentVersion } from '@/services/consent_version';
 import { getCurrentApiBaseUrl, apiConfig } from '@/config';
 import { getNetworkConfigById } from '@/network_configs';
 import {
@@ -356,23 +357,39 @@ export const update_action_status_handler = async (
       void mirrorActionEventToSourceInstance(storedEvent, request.log);
 
       if (requiresReceiverConsent && body.consent?.acknowledged) {
-        try {
-          await db.insert(consent_record).values({
-            level: 'item',
-            consentCategory: 'action',
-            actionType: updatedAction.action_type,
-            actionStage: 'accept',
-            userId: callerId,
-            itemId: updatedAction.target_item_id,
-            actionId: body.action_id,
-            network: updatedAction.target_item_network,
-            brand: body.consent.brand ?? null,
-            documentVersion: body.consent.version,
-            source: 'action',
-            acceptedAt: new Date(),
-          });
-        } catch (err) {
-          request.log.error({ err, action_id: body.action_id }, 'accept consent write failed');
+        // Version derived server-side from the loaded consent config, never
+        // trusted from the client.
+        const acceptVersion = await resolveConsentVersion({
+          network: updatedAction.target_item_network,
+          brand: body.consent.brand,
+          category: 'action',
+          actionType: updatedAction.action_type,
+          stage: 'accept',
+        });
+        if (acceptVersion === null) {
+          request.log.error(
+            { action_id: body.action_id, action_type: updatedAction.action_type },
+            'accept consent version not configured; skipping consent write',
+          );
+        } else {
+          try {
+            await db.insert(consent_record).values({
+              level: 'item',
+              consentCategory: 'action',
+              actionType: updatedAction.action_type,
+              actionStage: 'accept',
+              userId: callerId,
+              itemId: updatedAction.target_item_id,
+              actionId: body.action_id,
+              network: updatedAction.target_item_network,
+              brand: body.consent.brand ?? null,
+              documentVersion: acceptVersion,
+              source: 'action',
+              acceptedAt: new Date(),
+            });
+          } catch (err) {
+            request.log.error({ err, action_id: body.action_id }, 'accept consent write failed');
+          }
         }
       }
 

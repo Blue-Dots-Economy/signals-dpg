@@ -12,6 +12,7 @@ import {
   item_actions,
 } from '@dpg/database';
 import { consent_record } from '@api/db/postgres/schema';
+import { resolveConsentVersion } from '@/services/consent_version';
 import { apiConfig, getCurrentApiBaseUrl } from '@/config';
 import { getNetworkConfigById } from '@/network_configs';
 import {
@@ -223,23 +224,39 @@ export const perform_network_action_handler = async (
     });
 
   if (body.consent) {
-    try {
-      await db.insert(consent_record).values({
-        level: 'item',
-        consentCategory: 'action',
-        actionType: body.action_type,
-        actionStage: 'initiate',
-        userId: body.source_item_owner,
-        itemId: body.source_item.item_id,
-        actionId: created.action_id,
-        network: body.source_item.item_network,
-        brand: body.consent.brand ?? null,
-        documentVersion: body.consent.version,
-        source: 'action',
-        acceptedAt: new Date(),
-      });
-    } catch (err) {
-      request.log.error({ err, action_id: created.action_id }, 'initiate consent write failed');
+    // Version derived server-side from the loaded consent config, never trusted
+    // from the client.
+    const initiateVersion = await resolveConsentVersion({
+      network: body.source_item.item_network,
+      brand: body.consent.brand,
+      category: 'action',
+      actionType: body.action_type,
+      stage: 'initiate',
+    });
+    if (initiateVersion === null) {
+      request.log.error(
+        { action_id: created.action_id, action_type: body.action_type },
+        'initiate consent version not configured; skipping consent write',
+      );
+    } else {
+      try {
+        await db.insert(consent_record).values({
+          level: 'item',
+          consentCategory: 'action',
+          actionType: body.action_type,
+          actionStage: 'initiate',
+          userId: body.source_item_owner,
+          itemId: body.source_item.item_id,
+          actionId: created.action_id,
+          network: body.source_item.item_network,
+          brand: body.consent.brand ?? null,
+          documentVersion: initiateVersion,
+          source: 'action',
+          acceptedAt: new Date(),
+        });
+      } catch (err) {
+        request.log.error({ err, action_id: created.action_id }, 'initiate consent write failed');
+      }
     }
   }
 

@@ -10,6 +10,7 @@ import { consent_record } from '@api/db/postgres/schema';
 import { items } from '@dpg/database';
 import { auth_middleware_if_enabled } from '@api/plugins/auth/auth_middleware';
 import { apiConfig } from '@/config';
+import { resolveConsentVersion } from '@/services/consent_version';
 
 const ProfileConsentAcceptResponseSchema = z.object({ recorded: z.number().int() });
 
@@ -112,6 +113,20 @@ export const accept_profile_consent_handler = async (
     });
   }
 
+  // Version derived server-side from the loaded consent config, never trusted
+  // from the client.
+  const profileVersion = await resolveConsentVersion({
+    network: body.network,
+    brand: body.brand,
+    category: 'profile_creation',
+  });
+  if (profileVersion === null) {
+    return reply.code(400).send({
+      error: 'CONSENT_VERSION_UNCONFIGURED',
+      message: `No profile_creation consent version configured for ${body.network}`,
+    });
+  }
+
   try {
     await db.insert(consent_record).values({
       level: 'item',
@@ -120,7 +135,7 @@ export const accept_profile_consent_handler = async (
       itemId: body.item_id,
       network: body.network,
       brand: body.brand ?? null,
-      documentVersion: body.version,
+      documentVersion: profileVersion,
       source: 'profile',
       acceptedAt: new Date(),
     });

@@ -285,7 +285,11 @@ describeIf(`consent status + accept endpoints (integration)${
     expect(res.json()).toMatchObject({ error: 'UNKNOWN_NETWORK' });
   });
 
-  it('second accept of terms v2 → GET /status returns terms: [1, 2]', async () => {
+  it('accept ignores the client-supplied version and records the server current version', async () => {
+    // The client sends version: 2, but the ledger version is derived
+    // server-side from the loaded consent config (blue_dot terms current_version
+    // is 1), so v1 is recorded — a client cannot record a version the user
+    // never saw. A genuine version bump would come from bumping the config.
     const acceptRes = await app.inject({
       method: 'POST',
       url: '/api/v1/consent/accept',
@@ -313,11 +317,12 @@ describeIf(`consent status + accept endpoints (integration)${
     const body = statusRes.json() as {
       statuses: { terms: number[]; privacy: number[] };
     };
-    expect(body.statuses.terms).toEqual([1, 2]);
+    // v2 was requested but v1 (the configured current version) was recorded.
+    expect(body.statuses.terms).toEqual([1]);
     expect(body.statuses.privacy).toEqual([1]);
 
-    // Verify the DB directly: three rows total for this user on this
-    // network (terms v1, privacy v1, terms v2).
+    // Three append-only rows for this user (terms v1, privacy v1, terms v1);
+    // the ledger keeps every acceptance even when it repeats the version.
     const rows = await db
       .select({
         consentCategory: consentRecordTable.consentCategory,
@@ -331,7 +336,7 @@ describeIf(`consent status + accept endpoints (integration)${
       .filter((r) => r.consentCategory === 'terms')
       .map((r) => r.documentVersion)
       .sort((a, b) => a - b);
-    expect(termRows).toEqual([1, 2]);
+    expect(termRows).toEqual([1, 1]);
   });
 
   it('GET /status without auth returns 401', async () => {
@@ -361,7 +366,9 @@ describeIf(`consent status + accept endpoints (integration)${
   // status-by-identifier (public, pre-login)
 
   it('GET /status-by-identifier with known email returns accepted versions', async () => {
-    // The test user accepted terms v1, privacy v1, and terms v2 in prior tests.
+    // The test user accepted terms v1 and privacy v1 in prior tests (the
+    // client-supplied v2 was ignored in favour of the configured current
+    // version, so terms de-dupes to [1]).
     const res = await app.inject({
       method: 'GET',
       url: `/api/v1/consent/status-by-identifier?network=${served_network}&email=${encodeURIComponent(user_email)}`,
@@ -369,7 +376,7 @@ describeIf(`consent status + accept endpoints (integration)${
 
     expect(res.statusCode).toBe(200);
     const body = res.json() as { statuses: { terms: number[]; privacy: number[] } };
-    expect(body.statuses.terms).toEqual([1, 2]);
+    expect(body.statuses.terms).toEqual([1]);
     expect(body.statuses.privacy).toEqual([1]);
   });
 

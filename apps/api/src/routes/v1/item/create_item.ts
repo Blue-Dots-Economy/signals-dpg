@@ -7,6 +7,7 @@ import { db } from '@api/db/postgres/drizzle_config';
 import { DrizzleQueryError, and, eq } from 'drizzle-orm';
 import { DatabaseError, ensureItemPartition, items } from '@dpg/database';
 import { consent_record } from '@api/db/postgres/schema';
+import { resolveConsentVersion } from '@/services/consent_version';
 import { auth_middleware_if_enabled } from '@api/plugins/auth/auth_middleware';
 import {
   isServedDomainBinding,
@@ -167,21 +168,35 @@ export const create_item_handler = async (
     });
 
     if (body.consent) {
-      try {
-        await db.insert(consent_record).values({
-          level: 'item',
-          consentCategory: 'profile_creation',
-          userId: callerId,
-          itemId: created.itemId,
-          network: body.item_network,
-          brand: body.consent.brand ?? null,
-          documentVersion: body.consent.version,
-          source: 'profile',
-          acceptedAt: new Date(),
-        });
-      } catch (err) {
-        request.log.error({ err, itemId: created.itemId }, 'profile consent write failed');
-        // Do not fail item creation on consent-write error; log for reconciliation.
+      // Version is derived server-side from the loaded consent config, never
+      // trusted from the client (the ledger stores only category + version).
+      const profileVersion = await resolveConsentVersion({
+        network: body.item_network,
+        brand: body.consent.brand,
+        category: 'profile_creation',
+      });
+      if (profileVersion === null) {
+        request.log.error(
+          { itemId: created.itemId, network: body.item_network },
+          'profile_creation consent version not configured; skipping consent write',
+        );
+      } else {
+        try {
+          await db.insert(consent_record).values({
+            level: 'item',
+            consentCategory: 'profile_creation',
+            userId: callerId,
+            itemId: created.itemId,
+            network: body.item_network,
+            brand: body.consent.brand ?? null,
+            documentVersion: profileVersion,
+            source: 'profile',
+            acceptedAt: new Date(),
+          });
+        } catch (err) {
+          request.log.error({ err, itemId: created.itemId }, 'profile consent write failed');
+          // Do not fail item creation on consent-write error; log for reconciliation.
+        }
       }
     }
 

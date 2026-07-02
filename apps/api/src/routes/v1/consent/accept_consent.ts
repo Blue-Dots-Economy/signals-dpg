@@ -9,6 +9,7 @@ import { db } from '@api/db/postgres/drizzle_config';
 import { consent_record } from '@api/db/postgres/schema';
 import { auth_middleware_if_enabled } from '@api/plugins/auth/auth_middleware';
 import { apiConfig } from '@/config';
+import { resolveConsentVersion } from '@/services/consent_version';
 
 type Req = FastifyRequest<{ Body: ConsentAcceptBody }>;
 
@@ -51,16 +52,41 @@ export const accept_consent_handler = async (
   }
 
   const acceptedAt = new Date();
-  const rows = body.items.map((item) => ({
-    level: 'user' as const,
-    consentCategory: item.category,
-    userId,
-    network: body.network,
-    brand: body.brand ?? null,
-    documentVersion: item.version,
-    source: body.source,
-    acceptedAt,
-  }));
+  // Versions are derived server-side from the loaded consent config, never
+  // trusted from the client (the ledger stores only category + version).
+  const rows: Array<{
+    level: 'user';
+    consentCategory: typeof body.items[number]['category'];
+    userId: string;
+    network: string;
+    brand: string | null;
+    documentVersion: number;
+    source: typeof body.source;
+    acceptedAt: Date;
+  }> = [];
+  for (const item of body.items) {
+    const version = await resolveConsentVersion({
+      network: body.network,
+      brand: body.brand,
+      category: item.category,
+    });
+    if (version === null) {
+      return reply.code(400).send({
+        error: 'CONSENT_VERSION_UNCONFIGURED',
+        message: `No consent version configured for ${item.category} on ${body.network}`,
+      });
+    }
+    rows.push({
+      level: 'user',
+      consentCategory: item.category,
+      userId,
+      network: body.network,
+      brand: body.brand ?? null,
+      documentVersion: version,
+      source: body.source,
+      acceptedAt,
+    });
+  }
 
   try {
     await db.insert(consent_record).values(rows);
