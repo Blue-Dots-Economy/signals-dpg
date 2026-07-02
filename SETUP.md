@@ -2,8 +2,8 @@
 
 Get the app running on your machine. Follow the steps in order.
 
-**Steps 1–5** run the **Signals DPG** backend + UI on their own — that's all
-most people need. The optional **aggregator-dpg** integration is at the end.
+**Steps 1–5** run the **Signals DPG** backend + UI on their own. The optional
+**aggregator-dpg** integration is at the end.
 
 By default this runs the **blue_dot** network. To run a different one, see
 [Choose a network](#choose-a-network).
@@ -30,24 +30,24 @@ openssl version
 
 ---
 
-## Step 1 — Install
+## Step 1 — Clone + install
 
 ```bash
+git clone https://github.com/Blue-Dots-Economy/Signals-DPG.git
+cd Signals-DPG
 pnpm install
 ```
 
 ## Step 2 — Make your settings file
 
 There is **one** settings file at the repo root. It holds everything: backend,
-database, cache, and the website (`VITE_*`) values. There is **no** separate
-`apps/ui/.env` — Vite reads `VITE_*` from this same file via `pnpm dev:ui`.
+database, cache, and the website (`VITE_*`) values.
 
 ```bash
 cp .env.example .env
 ```
 
-Now set the values below. Most fields already have working defaults — only
-these matter for a local blue_dot run.
+Now set the values below. Most fields already have working defaults.
 
 First make a secret key (a blank `SIGNALS_PII_KEY` crashes the API at boot):
 
@@ -197,7 +197,7 @@ grep -E 'keycloak|minio' /etc/hosts
 **1. Clone the aggregator** side-by-side with Signals-DPG:
 
 ```bash
-git clone <aggregator-dpg-remote> ../aggregator-dpg
+git clone https://github.com/Blue-Dots-Economy/aggregator-dpg.git ../aggregator-dpg
 cd ../aggregator-dpg
 ```
 
