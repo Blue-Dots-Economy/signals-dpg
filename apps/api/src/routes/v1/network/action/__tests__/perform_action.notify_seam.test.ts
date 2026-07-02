@@ -107,8 +107,12 @@ vi.mock('@dpg/database', async () => {
   };
 });
 
-vi.mock('@api/db/postgres/drizzle_config', () => ({
-  db: {
+vi.mock('@/services/consent_version', () => ({
+  resolveConsentVersion: vi.fn(async () => 1),
+}));
+
+vi.mock('@api/db/postgres/drizzle_config', () => {
+  const dbMock: Record<string, unknown> = {
     insert: vi.fn(() => ({
       values: vi.fn(() => ({
         returning: vi.fn(async () => [
@@ -123,8 +127,12 @@ vi.mock('@api/db/postgres/drizzle_config', () => ({
         ]),
       })),
     })),
-  },
-}));
+  };
+  // The handler wraps the action + initiate-consent inserts in a transaction;
+  // run the callback with the same mock as `tx`.
+  dbMock.transaction = vi.fn(async (cb: (tx: unknown) => unknown) => cb(dbMock));
+  return { db: dbMock };
+});
 
 vi.mock('@dpg/schemas', async () => {
   const actual =

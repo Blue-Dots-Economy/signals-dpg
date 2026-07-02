@@ -78,9 +78,12 @@ const dbState: {
   updates: [],
 };
 
+vi.mock('@/services/consent_version', () => ({
+  resolveConsentVersion: vi.fn(async () => 1),
+}));
+
 vi.mock('@api/db/postgres/drizzle_config', () => {
-  return {
-    db: {
+  const dbMock: Record<string, unknown> = {
       // Discriminate by the shape of select's projection:
       //   - existingAction lookup uses `db.select()` (no args)        → returns existingAction row
       //   - resolve_acting_actor uses `db.select({ onboardedByOrgId })` → returns userRows
@@ -131,8 +134,12 @@ vi.mock('@api/db/postgres/drizzle_config', () => {
           })),
         })),
       })),
-    },
+      insert: vi.fn(() => ({ values: vi.fn(() => Promise.resolve(undefined)) })),
   };
+  // The handler wraps the status update + accept-consent insert in a
+  // transaction; run the callback with the same mock as `tx`.
+  dbMock.transaction = vi.fn(async (cb: (tx: unknown) => unknown) => cb(dbMock));
+  return { db: dbMock };
 });
 
 vi.mock('@dpg/database', async () => {

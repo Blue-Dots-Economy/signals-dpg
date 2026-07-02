@@ -33,6 +33,13 @@ type PerformNetworkActionRequest = FastifyRequest<{
   Body: z.infer<typeof PerformNetworkActionBodySchema>;
 }>;
 
+/**
+ * Thrown inside the create transaction when the initiate-consent row cannot be
+ * written, so the action insert rolls back with it (fail-closed — no
+ * PII-revealing action without a consent record).
+ */
+class ConsentWriteError extends Error {}
+
 const PerformNetworkActionResponseSchema = z.object({
   action_id: z.string(),
   action_type: z.string(),
@@ -190,74 +197,97 @@ export const perform_network_action_handler = async (
     });
   }
 
-  const [created] = await db
-    .insert(item_actions)
-    .values({
-      action_type: body.action_type,
-      partition_network: body.target_item.item_network,
-      action_status: actionStatus,
-      update_count: updateCount,
-      source_item_network: body.source_item.item_network,
-      source_item_domain: body.source_item.item_domain,
-      source_item_type: body.source_item.item_type,
-      source_item_id: body.source_item.item_id,
-      source_item_instance_url: body.source_item.item_instance_url,
-      source_item_owner: body.source_item_owner,
-      target_item_network: body.target_item.item_network,
-      target_item_domain: body.target_item.item_domain,
-      target_item_type: body.target_item.item_type,
-      target_item_id: body.target_item.item_id,
-      target_item_instance_url: body.target_item.item_instance_url,
-      target_item_owner: targetItemSnapshot.created_by,
-      requirements_snapshot: body.requirements_snapshot,
-      remarks: null,
-      performed_by_org_id: body.performed_by_org_id ?? null,
-      performed_by_service_user_id: body.performed_by_service_user_id ?? null,
+  // Action + initiate-consent are written in one transaction so a consent-write
+  // failure rolls the action back too (fail-closed — never a PII-revealing
+  // action without a consent row). The action event is emitted only after commit.
+  const created = await db
+    .transaction(async (tx) => {
+      const [row] = await tx
+        .insert(item_actions)
+        .values({
+          action_type: body.action_type,
+          partition_network: body.target_item.item_network,
+          action_status: actionStatus,
+          update_count: updateCount,
+          source_item_network: body.source_item.item_network,
+          source_item_domain: body.source_item.item_domain,
+          source_item_type: body.source_item.item_type,
+          source_item_id: body.source_item.item_id,
+          source_item_instance_url: body.source_item.item_instance_url,
+          source_item_owner: body.source_item_owner,
+          target_item_network: body.target_item.item_network,
+          target_item_domain: body.target_item.item_domain,
+          target_item_type: body.target_item.item_type,
+          target_item_id: body.target_item.item_id,
+          target_item_instance_url: body.target_item.item_instance_url,
+          target_item_owner: targetItemSnapshot.created_by,
+          requirements_snapshot: body.requirements_snapshot,
+          remarks: null,
+          performed_by_org_id: body.performed_by_org_id ?? null,
+          performed_by_service_user_id: body.performed_by_service_user_id ?? null,
+        })
+        .returning({
+          action_id: item_actions.action_id,
+          action_type: item_actions.action_type,
+          action_status: item_actions.action_status,
+          update_count: item_actions.update_count,
+          source_item_id: item_actions.source_item_id,
+          target_item_id: item_actions.target_item_id,
+        });
+
+      if (body.consent) {
+        // Version derived server-side from the loaded consent config, never
+        // trusted from the client.
+        const initiateVersion = await resolveConsentVersion({
+          network: body.source_item.item_network,
+          brand: body.consent.brand,
+          category: 'action',
+          actionType: body.action_type,
+          stage: 'initiate',
+        });
+        if (initiateVersion === null) {
+          throw new ConsentWriteError(
+            `initiate consent version not configured for ${body.action_type}`,
+          );
+        }
+        try {
+          await tx.insert(consent_record).values({
+            level: 'item',
+            consentCategory: 'action',
+            actionType: body.action_type,
+            actionStage: 'initiate',
+            userId: body.source_item_owner,
+            itemId: body.source_item.item_id,
+            actionId: row.action_id,
+            network: body.source_item.item_network,
+            brand: body.consent.brand ?? null,
+            documentVersion: initiateVersion,
+            source: 'action',
+            acceptedAt: new Date(),
+          });
+        } catch (err) {
+          throw new ConsentWriteError(
+            err instanceof Error ? err.message : 'consent write failed',
+          );
+        }
+      }
+
+      return row;
     })
-    .returning({
-      action_id: item_actions.action_id,
-      action_type: item_actions.action_type,
-      action_status: item_actions.action_status,
-      update_count: item_actions.update_count,
-      source_item_id: item_actions.source_item_id,
-      target_item_id: item_actions.target_item_id,
+    .catch((err: unknown) => {
+      if (err instanceof ConsentWriteError) return null;
+      throw err;
     });
 
-  if (body.consent) {
-    // Version derived server-side from the loaded consent config, never trusted
-    // from the client.
-    const initiateVersion = await resolveConsentVersion({
-      network: body.source_item.item_network,
-      brand: body.consent.brand,
-      category: 'action',
-      actionType: body.action_type,
-      stage: 'initiate',
+  if (created === null) {
+    request.log.error(
+      { action_type: body.action_type },
+      'initiate consent write failed; action rolled back (fail-closed)',
+    );
+    return reply.code(500).send({
+      error: 'CONSENT_WRITE_FAILED',
+      message: 'Failed to record consent; the action was not created.',
     });
-    if (initiateVersion === null) {
-      request.log.error(
-        { action_id: created.action_id, action_type: body.action_type },
-        'initiate consent version not configured; skipping consent write',
-      );
-    } else {
-      try {
-        await db.insert(consent_record).values({
-          level: 'item',
-          consentCategory: 'action',
-          actionType: body.action_type,
-          actionStage: 'initiate',
-          userId: body.source_item_owner,
-          itemId: body.source_item.item_id,
-          actionId: created.action_id,
-          network: body.source_item.item_network,
-          brand: body.consent.brand ?? null,
-          documentVersion: initiateVersion,
-          source: 'action',
-          acceptedAt: new Date(),
-        });
-      } catch (err) {
-        request.log.error({ err, action_id: created.action_id }, 'initiate consent write failed');
-      }
-    }
   }
 
   const storedEvent = {

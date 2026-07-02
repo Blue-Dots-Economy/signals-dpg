@@ -30,6 +30,13 @@ import { dispatchActionNotifications } from '@/notifications/notify_actions';
 
 const BulkUpdateActionStatusBodySchema = z.array(z.unknown());
 
+/**
+ * Thrown inside the status-update transaction when the accept-consent row
+ * cannot be written, so the status update rolls back with it (fail-closed — the
+ * PII-revealing accept is not applied without a consent record).
+ */
+class ConsentWriteError extends Error {}
+
 export const update_action_status: FastifyPluginAsyncZod = async function (fastify) {
   fastify.route({
     url: '/update-status',
@@ -265,47 +272,107 @@ export const update_action_status_handler = async (
       // what we read. Cancellation adds a second legitimate writer (the source
       // owner alongside the target owner), so a concurrent cancel + accept must
       // not both land — the loser gets ACTION_CONFLICT instead of clobbering.
+      //
+      // The status update and the accept-consent row are written in one
+      // transaction so a consent-write failure rolls the accept back too
+      // (fail-closed — the PII-revealing accept is never applied without a
+      // consent record). The action event is emitted only after commit.
       const nextUpdateCount = existingAction.update_count + 1;
-      const [updatedAction] = await db
-        .update(item_actions)
-        .set({
-          action_status: body.action_status,
-          update_count: nextUpdateCount,
-          remarks: body.remarks ?? existingAction.remarks,
-          updated_at: new Date(),
+      const txOutcome = await db
+        .transaction(async (tx) => {
+          const [row] = await tx
+            .update(item_actions)
+            .set({
+              action_status: body.action_status,
+              update_count: nextUpdateCount,
+              remarks: body.remarks ?? existingAction.remarks,
+              updated_at: new Date(),
+            })
+            .where(
+              and(
+                eq(item_actions.action_id, existingAction.action_id),
+                eq(item_actions.update_count, existingAction.update_count),
+              ),
+            )
+            .returning({
+              action_id: item_actions.action_id,
+              action_type: item_actions.action_type,
+              action_status: item_actions.action_status,
+              update_count: item_actions.update_count,
+              source_item_network: item_actions.source_item_network,
+              source_item_domain: item_actions.source_item_domain,
+              source_item_type: item_actions.source_item_type,
+              source_item_id: item_actions.source_item_id,
+              source_item_instance_url: item_actions.source_item_instance_url,
+              source_item_owner: item_actions.source_item_owner,
+              target_item_network: item_actions.target_item_network,
+              target_item_domain: item_actions.target_item_domain,
+              target_item_type: item_actions.target_item_type,
+              target_item_id: item_actions.target_item_id,
+              target_item_instance_url: item_actions.target_item_instance_url,
+              target_item_owner: item_actions.target_item_owner,
+              remarks: item_actions.remarks,
+            });
+
+          if (!row) return { kind: 'conflict' as const };
+
+          if (requiresReceiverConsent && body.consent?.acknowledged) {
+            // Version derived server-side from the loaded consent config, never
+            // trusted from the client.
+            const acceptVersion = await resolveConsentVersion({
+              network: row.target_item_network,
+              brand: body.consent.brand,
+              category: 'action',
+              actionType: row.action_type,
+              stage: 'accept',
+            });
+            if (acceptVersion === null) {
+              throw new ConsentWriteError(
+                `accept consent version not configured for ${row.action_type}`,
+              );
+            }
+            try {
+              await tx.insert(consent_record).values({
+                level: 'item',
+                consentCategory: 'action',
+                actionType: row.action_type,
+                actionStage: 'accept',
+                userId: callerId,
+                itemId: row.target_item_id,
+                actionId: body.action_id,
+                network: row.target_item_network,
+                brand: body.consent.brand ?? null,
+                documentVersion: acceptVersion,
+                source: 'action',
+                acceptedAt: new Date(),
+              });
+            } catch (err) {
+              throw new ConsentWriteError(
+                err instanceof Error ? err.message : 'consent write failed',
+              );
+            }
+          }
+
+          return { kind: 'ok' as const, updatedAction: row };
         })
-        .where(
-          and(
-            eq(item_actions.action_id, existingAction.action_id),
-            eq(item_actions.update_count, existingAction.update_count),
-          ),
-        )
-        .returning({
-          action_id: item_actions.action_id,
-          action_type: item_actions.action_type,
-          action_status: item_actions.action_status,
-          update_count: item_actions.update_count,
-          source_item_network: item_actions.source_item_network,
-          source_item_domain: item_actions.source_item_domain,
-          source_item_type: item_actions.source_item_type,
-          source_item_id: item_actions.source_item_id,
-          source_item_instance_url: item_actions.source_item_instance_url,
-          source_item_owner: item_actions.source_item_owner,
-          target_item_network: item_actions.target_item_network,
-          target_item_domain: item_actions.target_item_domain,
-          target_item_type: item_actions.target_item_type,
-          target_item_id: item_actions.target_item_id,
-          target_item_instance_url: item_actions.target_item_instance_url,
-          target_item_owner: item_actions.target_item_owner,
-          remarks: item_actions.remarks,
+        .catch((err: unknown) => {
+          if (err instanceof ConsentWriteError) return { kind: 'consentFailed' as const };
+          throw err;
         });
 
-      if (!updatedAction) {
+      if (txOutcome.kind === 'conflict') {
         throw new BulkItemFailure(
           'ACTION_CONFLICT',
           'This request was updated by someone else; reload and try again.',
         );
       }
+      if (txOutcome.kind === 'consentFailed') {
+        throw new BulkItemFailure(
+          'CONSENT_WRITE_FAILED',
+          'Failed to record consent; the status change was not applied.',
+        );
+      }
+      const updatedAction = txOutcome.updatedAction;
 
       const targetItemSnapshot = await fetchLocalItemSnapshot(db, {
         item_network: updatedAction.target_item_network,
@@ -353,45 +420,10 @@ export const update_action_status_handler = async (
         remarks: body.remarks,
       };
 
+      // Accept-consent is recorded inside the status-update transaction above
+      // (fail-closed), so the event below is emitted only after it committed.
       const createdEvent = await insertActionEvent(db, storedEvent);
       void mirrorActionEventToSourceInstance(storedEvent, request.log);
-
-      if (requiresReceiverConsent && body.consent?.acknowledged) {
-        // Version derived server-side from the loaded consent config, never
-        // trusted from the client.
-        const acceptVersion = await resolveConsentVersion({
-          network: updatedAction.target_item_network,
-          brand: body.consent.brand,
-          category: 'action',
-          actionType: updatedAction.action_type,
-          stage: 'accept',
-        });
-        if (acceptVersion === null) {
-          request.log.error(
-            { action_id: body.action_id, action_type: updatedAction.action_type },
-            'accept consent version not configured; skipping consent write',
-          );
-        } else {
-          try {
-            await db.insert(consent_record).values({
-              level: 'item',
-              consentCategory: 'action',
-              actionType: updatedAction.action_type,
-              actionStage: 'accept',
-              userId: callerId,
-              itemId: updatedAction.target_item_id,
-              actionId: body.action_id,
-              network: updatedAction.target_item_network,
-              brand: body.consent.brand ?? null,
-              documentVersion: acceptVersion,
-              source: 'action',
-              acceptedAt: new Date(),
-            });
-          } catch (err) {
-            request.log.error({ err, action_id: body.action_id }, 'accept consent write failed');
-          }
-        }
-      }
 
       // Cancellation e-mails are deferred (separate issue): a source-initiated
       // withdrawal must not reuse the receiver-response copy, so we send no
