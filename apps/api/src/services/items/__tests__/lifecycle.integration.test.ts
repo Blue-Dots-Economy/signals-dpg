@@ -1277,6 +1277,12 @@ describeIf(`lifecycle integration${can_run ? '' : ` — ${skip_reason}`}`, () =>
         },
         source_item_owner: srcBody.user_id,
         requirements_snapshot: {},
+        // Initiate-consent is now enforced on the write endpoint for any
+        // reveals_pii action (matching the /action/perform proxy), so send it
+        // when the interaction reveals PII.
+        ...(interaction.reveals_pii_on_status.length > 0
+          ? { consent: { acknowledged: true as const, version: 1 } }
+          : {}),
       },
     });
     expect(performRes.statusCode).toBe(201);

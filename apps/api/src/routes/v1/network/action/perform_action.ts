@@ -120,6 +120,19 @@ export const perform_network_action_handler = async (
     });
   }
 
+  // Initiate-consent gate, enforced HERE (the write endpoint) — not only on the
+  // /action/perform proxy — because this is where the row is created and the PII
+  // action event is emitted. The proxy forwards `consent` for reveals_pii
+  // actions, so legitimate (proxied and inter-instance) calls pass; a direct
+  // call that bypasses the proxy without consent is rejected rather than
+  // creating a PII-revealing action with no consent recorded.
+  if (interaction.reveals_pii_on_status.length > 0 && !body.consent?.acknowledged) {
+    return reply.code(400).send({
+      error: 'CONSENT_REQUIRED',
+      message: 'Initiator consent acknowledgment required for this action.',
+    });
+  }
+
   const targetItemSnapshot = await fetchLocalItemSnapshot(db, body.target_item);
   if (!targetItemSnapshot) {
     return reply.code(404).send({
