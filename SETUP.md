@@ -315,6 +315,7 @@ make up               # or: make down (stop), make reset (DESTROYS volumes)
 | Page won't load / database error | Docker not up. Run `docker compose up -d db redis` and wait for `healthy`. |
 | Port already in use | Change `API_PORT` (API), `VITE_UI_PORT` (UI), `DATABASE_PORT`, or `REDIS_PORT` in `.env`. |
 | Can't log in | In `.env` set `CREATE_TEST_OTP=true`, restart the API, then use the test OTP. |
+| CORS error / "No 'Access-Control-Allow-Origin'" / 500 on every API call | The UI is on a port other than 5173 (e.g. 5174 — a **duplicate** `dev:ui` took 5173). Kill extra dev servers (`pkill -f vite; pkill -f "tsx watch src/server.ts"`), start one `pnpm dev:ui`, and open **http://localhost:5173**. Only `3000/5173/2742` are CORS-allowed. |
 | Aggregator can't reach Signals | Use `SIGNALSTACK_BASE_URL=http://host.docker.internal:2742` (not `localhost`) — the aggregator is in Docker. |
 
 ---

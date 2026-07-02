@@ -374,9 +374,14 @@ export default defineConfig(({ mode }) => {
       : undefined,
     server: {
       port: uiPort,
+      // Fail loudly if the port is taken instead of silently falling back to
+      // 5174 — the fallback port isn't in the API's CORS allow-list, so a
+      // silent switch surfaces as confusing CORS/500 errors in the browser.
+      strictPort: true,
     },
     preview: {
       port: uiPort,
+      strictPort: true,
     },
   };
 });
