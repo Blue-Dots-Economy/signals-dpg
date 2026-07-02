@@ -5,6 +5,10 @@ Get the app running on your machine. Follow the steps in order.
 By default this runs the **blue_dot** network. To run a different one, see
 [Choose a network](#choose-a-network) at the end.
 
+> This is the quick **Signals-only** start. For the full walkthrough including
+> the **aggregator-dpg** stack, Keycloak/MinIO, and Windows, see
+> [`LOCAL_SETUP.md`](./LOCAL_SETUP.md).
+
 ## What you need first
 
 - **Node.js 24+** — check: `node -v`

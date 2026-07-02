@@ -71,7 +71,7 @@ git clone <aggregator-dpg-remote>  aggregator-dpg
 ```bash
 cd Signals-DPG
 pnpm install
-cp env.example .env
+cp .env.example .env
 ```
 
 Edit `.env`. The defaults boot fine for local dev; the one value you **must**
@@ -88,17 +88,23 @@ Sanity-check the local connection block in `.env` matches the compose ports:
 ```bash
 INSTANCE_ENV="development"
 API_PORT="2742"
-SERVED_DOMAINS="onest_yellow_dot/student"   # or blue_dot/seeker etc.
+SERVED_DOMAINS="blue_dot/seeker,blue_dot/provider"   # default network
 NETWORK_CONFIG_SOURCE="local"
+NETWORK_CONFIG_LOCAL_FILE="../../examples/schemas/blue_dot/network.json"
 POSTGRES_HOST="127.0.0.1"
 POSTGRES_PORT=5432
 REDIS_HOST="127.0.0.1"
 REDIS_PORT=5555
 SIGNALS_PII_KEY="<paste openssl output>"
+# UI (VITE_*) values live in this SAME root .env — see §UI env below
+VITE_API_URL=http://localhost:2742
+VITE_NETWORK_ID=blue_dot
 ```
 
-> Compose reads `.env` for `POSTGRES_*` / `REDIS_*` / `DATABASE_PORT`, so the
-> same file drives both the containers and the API process.
+> A **single** root `.env` drives everything: the compose containers
+> (`POSTGRES_*` / `REDIS_*` / `DATABASE_PORT`), the API process, and the UI
+> (`VITE_*`, loaded into the Vite process by `pnpm dev:ui`). There is no
+> separate `apps/ui/.env`.
 
 ---
 
@@ -157,16 +163,15 @@ Keep two values for §6:
 
 ### UI env
 
-```bash
-cp apps/ui/env.example apps/ui/.env
-```
-
-Point the UI at the local API (the example default is `:3000` — change it):
+The UI reads its `VITE_*` values from the **same root `.env`** (Vite picks them
+up via `pnpm dev:ui`). No separate file to copy — just confirm these are set in
+`.env`:
 
 ```bash
-# apps/ui/.env
-VITE_API_URL=http://localhost:2742
-VITE_MAP_PROVIDER=leaflet
+# in the root .env
+VITE_API_URL=http://localhost:2742   # NOT :3000
+VITE_NETWORK_ID=blue_dot
+VITE_MAP_PROVIDER=leaflet            # free, no key; see SETUP.md for Google Maps
 ```
 
 ---
