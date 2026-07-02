@@ -8,7 +8,7 @@ This document covers how the Signals-DPG web UI is themed per network, how to co
 
 **Default theme:** `blue_dot` (blue/navy â€” requires no configuration).
 
-To change the theme for a deployment, set one environment variable in `apps/ui/.env`:
+To change the theme for a deployment, set one environment variable in the root `.env`:
 
 ```env
 VITE_DEFAULT_NETWORK_THEME=purple_dot
@@ -36,7 +36,7 @@ The network ID must match the `"id"` field in the corresponding `network.json` â
 
 ### 1. Environment variable (recommended for deployments)
 
-Set in `apps/ui/.env` or as a shell/CI secret:
+Set in the root `.env` (UI reads `VITE_*` from it via `pnpm dev:ui`/build) or as a shell/CI secret:
 
 ```env
 # Active network theme. Allowed values: blue_dot | purple_dot | yellow_dot | pink_dot | green_dot
