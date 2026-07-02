@@ -2,7 +2,28 @@ import * as React from 'react';
 import { useTranslation } from 'react-i18next';
 import type { DotActionSchema } from '@/engine/types';
 import { ActionModal } from './action-modal';
+import { ActionAbortedError } from '@/lib/action-abort';
 import { toast } from 'sonner';
+
+/**
+ * Turn a failed action submission into a user-facing toast. Suppresses its
+ * output entirely for an ActionAbortedError (the caller already showed a
+ * tailored message) and maps a draft/non-live source profile to a helpful
+ * "complete your profile" prompt instead of the generic error.
+ */
+function showActionError(err: unknown, t: (key: string) => string): void {
+  if (err instanceof ActionAbortedError) return;
+  const code = (err as { code?: string })?.code;
+  if (code === 'PROFILE_NOT_LIVE') {
+    toast.warning(t('actions.profile_not_live_title'), {
+      description: t('actions.profile_not_live_desc'),
+    });
+    return;
+  }
+  toast.error(t('actions.handler_error_title'), {
+    description: t('actions.handler_error_desc'),
+  });
+}
 
 interface ActionHandlerProps {
   children: (triggerAction: (type: string, schema: DotActionSchema, targetItemId: string) => void) => React.ReactNode;
@@ -47,9 +68,7 @@ export function ActionHandler({ children, onActionSubmit }: ActionHandlerProps) 
         description: t('actions.handler_completed_desc'),
       });
     } catch (err) {
-      toast.error(t('actions.handler_error_title'), {
-        description: t('actions.handler_error_desc'),
-      });
+      showActionError(err, t);
     } finally {
       setLoading(false);
     }
@@ -65,9 +84,10 @@ export function ActionHandler({ children, onActionSubmit }: ActionHandlerProps) 
       });
       setActiveAction(null);
     } catch (err) {
-      toast.error(t('actions.handler_error_title'), {
-        description: t('actions.handler_error_desc'),
-      });
+      // An intentional abort (e.g. draft profile) already showed its own
+      // message — just close the form so the toast isn't left behind it.
+      if (err instanceof ActionAbortedError) setActiveAction(null);
+      else showActionError(err, t);
     } finally {
       setLoading(false);
     }

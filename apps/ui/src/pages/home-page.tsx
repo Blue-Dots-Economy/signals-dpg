@@ -1,6 +1,6 @@
 import * as React from 'react';
 import type { RJSFSchema } from '@rjsf/utils';
-import { useSearchParams, Link } from 'react-router-dom';
+import { useSearchParams, useNavigate, Link } from 'react-router-dom';
 import { toast } from 'sonner';
 import { useTranslation } from 'react-i18next';
 import type {
@@ -32,6 +32,7 @@ import { ActionModal } from '@/components/actions/action-modal';
 import { CheckSquare } from 'lucide-react';
 import { getRuntimeEnv } from '@/lib/runtime-env';
 import { ACTION_CONSENT_SENTINEL } from '@/lib/action-api';
+import { ActionAbortedError } from '@/lib/action-abort';
 import { EmptyState } from '@/components/empty-state';
 import { fetchNetworkConfigs, fetchNetworkConfig, fetchNetworkItems } from '@/lib/network-api';
 import { useAuth } from '@/contexts/auth-context';
@@ -170,6 +171,7 @@ export function HomePage() {
   const { user } = useAuth();
   const allCardsGridRef = useEqualRowHeights<HTMLDivElement>();
   const [searchParams, setSearchParams] = useSearchParams();
+  const navigate = useNavigate();
   const [search, setSearch] = React.useState('');
   const [viewMode, setViewMode] = React.useState<ViewMode>(
     (searchParams.get('view') as ViewMode) ?? resolveDefaultViewMode()
@@ -384,6 +386,28 @@ export function HomePage() {
     return myItems.find((i) => i.item_id === activeProfileId) ?? myItems[0] ?? null;
   }, [myItems, activeProfileId]);
 
+  // A draft (incomplete) profile can't apply/connect — the API rejects it with
+  // PROFILE_NOT_LIVE. Prompt the user to finish their profile (with a shortcut
+  // to the edit form) instead of surfacing that error. Returns true when the
+  // profile is draft (caller should abort the action).
+  const promptCompleteDraftProfile = React.useCallback(
+    (profile: Item): boolean => {
+      if (profile.lifecycle_status !== 'draft') return false;
+      toast.warning(t('home.toast_profile_draft'), {
+        description: t('home.toast_profile_draft_desc'),
+        action: {
+          label: t('home.toast_profile_draft_cta'),
+          onClick: () =>
+            navigate(
+              `/profile/${profile.item_id}/edit?network=${encodeURIComponent(profile.item_network)}`,
+            ),
+        },
+      });
+      return true;
+    },
+    [navigate, t],
+  );
+
   // Derive the active profile's first location (profile-first), or null to trigger browser-geo fallback
   const profileLocation = React.useMemo(
     () =>
@@ -576,6 +600,11 @@ export function HomePage() {
   const handleBulkConnect = React.useCallback(
     async (actionType: string, formData: Record<string, unknown>) => {
       if (!myItem || !network) return;
+      // Draft source profile can't act — prompt to complete it, don't submit.
+      if (promptCompleteDraftProfile(myItem)) {
+        setBulkConnectOpen(false);
+        return;
+      }
       setBulkConnectBusy(true);
       try {
         const allItems = Object.values(domainItems).flat();
@@ -670,6 +699,7 @@ export function HomePage() {
       browseSelection.selected,
       browseSelection.exitSelect,
       browseSelection.setSelected,
+      promptCompleteDraftProfile,
       t,
     ],
   );
@@ -1005,6 +1035,11 @@ export function HomePage() {
                 description: t('home.toast_profile_required_desc'),
               });
               throw new Error('No source item');
+            }
+            // Draft source profile can't act — prompt to complete it. Throw an
+            // ActionAbortedError so ActionHandler suppresses its generic toast.
+            if (promptCompleteDraftProfile(myItem)) {
+              throw new ActionAbortedError('source profile is draft');
             }
             if (!user) {
               toast.error(t('nav.sign_in_to_connect'), {
