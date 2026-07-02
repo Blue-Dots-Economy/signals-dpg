@@ -47,51 +47,33 @@ database, cache, and the website (`VITE_*`) values.
 cp .env.example .env
 ```
 
-Now set the values below. Most fields already have working defaults.
-
-First make a secret key (a blank `SIGNALS_PII_KEY` crashes the API at boot):
-
-```bash
-openssl rand -base64 32
-```
-
-Then set these lines in `.env` (they already exist in the file — just change
-their values):
+The copied `.env` is **already configured for a local blue_dot run** — it works
+out of the box, no edits required. These values are set for you:
 
 ```dotenv
-SIGNALS_PII_KEY='paste-the-key-you-just-generated'
+SIGNALS_PII_KEY='...'                 # a working dev key is pre-filled
 SERVED_DOMAINS="blue_dot/seeker,blue_dot/provider"
 NETWORK_CONFIG_LOCAL_FILE="../../examples/schemas/blue_dot/network.json"
 VITE_API_URL=http://localhost:2742
 VITE_NETWORK_ID=blue_dot
-```
-
-**How to edit the file.** Open it in any editor, e.g. `vim .env` (or
-`nano .env`, or open it in VS Code). In vim: type `/SIGNALS_PII_KEY` then Enter
-to jump to the line, press `C` to replace it, type the new line, press `Esc`;
-repeat for each key; then save with `:wq`.
-
-Or set the PII key in one command without opening an editor (the other four
-lines are already correct after `cp`):
-
-```bash
-# macOS:
-sed -i '' -e "s#^SIGNALS_PII_KEY=.*#SIGNALS_PII_KEY='$(openssl rand -base64 32)'#" .env
-# Linux: same but drop the '' after -i
-```
-
-Leave everything else as-is — the defaults work. Sanity-check the connection
-block matches the compose ports:
-
-```dotenv
 API_PORT="2742"
-POSTGRES_HOST="127.0.0.1"
-POSTGRES_PORT=5432
-REDIS_HOST="127.0.0.1"
-REDIS_PORT=5555
+POSTGRES_HOST="127.0.0.1"   POSTGRES_PORT=5432
+REDIS_HOST="127.0.0.1"      REDIS_PORT=5555
 ```
 
-> **Tip:** `SIGNALS_PII_KEY` is unique per developer — always generate your own.
+You can go straight to Step 3.
+
+> **Optional:** `SIGNALS_PII_KEY` encrypts PII. The pre-filled key is fine for
+> local dev; if you'd rather use your own, generate and set it in one command:
+> ```bash
+> # macOS (Linux: drop the '' after -i)
+> sed -i '' -e "s#^SIGNALS_PII_KEY=.*#SIGNALS_PII_KEY='$(openssl rand -base64 32)'#" .env
+> ```
+>
+> ⚠️ The shipped key is **for local development only** — generate a fresh one
+> for any deployed environment.
+>
+> To run a network other than blue_dot, see [Choose a network](#choose-a-network).
 
 ## Step 3 — Start the database + cache
 
@@ -131,14 +113,18 @@ pnpm db:seed:services:api  # create the service user + apikey
 
 ## Step 5 — Run it
 
-Open two terminals:
+Open two terminals. Run **both from the repo root** (`Signals-DPG/`) — the same
+directory you've been in. Both commands read the **same** root `.env`, so
+there's nothing extra to configure per terminal:
 
 ```bash
-pnpm dev:api      # terminal 1 — API on http://localhost:2742
+# terminal 1 — from Signals-DPG/
+pnpm dev:api      # API on http://localhost:2742
 ```
 
 ```bash
-pnpm dev:ui       # terminal 2 — UI on http://localhost:5173
+# terminal 2 — from Signals-DPG/
+pnpm dev:ui       # UI on http://localhost:5173
 ```
 
 Confirm the API is up:
