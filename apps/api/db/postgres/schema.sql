@@ -542,6 +542,15 @@ CREATE INDEX IF NOT EXISTS consent_record_item_idx
 CREATE INDEX IF NOT EXISTS consent_record_action_idx
   ON consent_record (action_id);
 
+-- Item-level profile_creation is idempotent: at most one acceptance per
+-- (user, item). This makes the accept-profile-consent 23505 fallback live and
+-- prevents a concurrent double-submit from slipping past the check-then-insert.
+-- Terms/privacy/action rows are intentionally append-only and are NOT
+-- constrained, so this index is partial.
+CREATE UNIQUE INDEX IF NOT EXISTS consent_record_profile_creation_unique
+  ON consent_record (user_id, item_id)
+  WHERE level = 'item' AND consent_category = 'profile_creation';
+
 -- ─── create_items.sql ───
 
 CREATE EXTENSION IF NOT EXISTS pgcrypto;

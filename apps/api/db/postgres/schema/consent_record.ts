@@ -7,7 +7,9 @@ import {
   bigserial,
   jsonb,
   index,
+  uniqueIndex,
 } from 'drizzle-orm/pg-core';
+import { sql } from 'drizzle-orm';
 
 /**
  * Append-only consent ledger (spec 2026-06-30 minimal v1). One row per consent
@@ -48,5 +50,12 @@ export const consent_record = pgTable(
     ),
     index('consent_record_item_idx').on(table.itemId, table.consentCategory),
     index('consent_record_action_idx').on(table.actionId),
+    // Item-level profile_creation is idempotent — at most one acceptance per
+    // (user, item). Makes the accept-profile-consent 23505 fallback live and
+    // blocks concurrent double-submit. Terms/privacy/action stay append-only,
+    // so this unique index is partial.
+    uniqueIndex('consent_record_profile_creation_unique')
+      .on(table.userId, table.itemId)
+      .where(sql`level = 'item' AND consent_category = 'profile_creation'`),
   ]
 );
