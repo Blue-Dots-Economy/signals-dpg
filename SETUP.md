@@ -55,7 +55,8 @@ First make a secret key (a blank `SIGNALS_PII_KEY` crashes the API at boot):
 openssl rand -base64 32
 ```
 
-Then set these lines in `.env`:
+Then set these lines in `.env` (they already exist in the file — just change
+their values):
 
 ```dotenv
 SIGNALS_PII_KEY='paste-the-key-you-just-generated'
@@ -63,6 +64,20 @@ SERVED_DOMAINS="blue_dot/seeker,blue_dot/provider"
 NETWORK_CONFIG_LOCAL_FILE="../../examples/schemas/blue_dot/network.json"
 VITE_API_URL=http://localhost:2742
 VITE_NETWORK_ID=blue_dot
+```
+
+**How to edit the file.** Open it in any editor, e.g. `vim .env` (or
+`nano .env`, or open it in VS Code). In vim: type `/SIGNALS_PII_KEY` then Enter
+to jump to the line, press `C` to replace it, type the new line, press `Esc`;
+repeat for each key; then save with `:wq`.
+
+Or set the PII key in one command without opening an editor (the other four
+lines are already correct after `cp`):
+
+```bash
+# macOS:
+sed -i '' -e "s#^SIGNALS_PII_KEY=.*#SIGNALS_PII_KEY='$(openssl rand -base64 32)'#" .env
+# Linux: same but drop the '' after -i
 ```
 
 Leave everything else as-is — the defaults work. Sanity-check the connection
