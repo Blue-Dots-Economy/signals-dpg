@@ -309,6 +309,8 @@ export default defineConfig(({ mode }) => {
     env.VITE_DEFAULT_NETWORK_THEME ||
     (env.VITE_NETWORK_ID ? env.VITE_NETWORK_ID.split(',')[0].trim() : 'blue_dot');
   const defaultBrand = env.VITE_DEFAULT_BRAND?.trim() || 'standard';
+  // Dev-server port is env-driven (VITE_UI_PORT), falling back to 5173.
+  const uiPort = Number(env.VITE_UI_PORT) || 5173;
 
   return {
     plugins: [
@@ -371,7 +373,10 @@ export default defineConfig(({ mode }) => {
       ? { outDir: 'dist/tourist', rollupOptions: { input: touristEntry } }
       : undefined,
     server: {
-      port: 3000,
+      port: uiPort,
+    },
+    preview: {
+      port: uiPort,
     },
   };
 });

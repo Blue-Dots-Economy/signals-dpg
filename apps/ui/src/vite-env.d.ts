@@ -27,6 +27,8 @@ interface ImportMetaEnv {
   readonly VITE_ENABLED_LANGUAGES: string;
   /** Browser tab title override for the tourist app. Falls back to the resolved brand title, else "Signals". */
   readonly VITE_TOURIST_APP_TITLE?: string;
+  /** Dev/preview server port. Falls back to 5173. */
+  readonly VITE_UI_PORT?: string;
 }
 
 declare const __DEFAULT_NETWORK_THEME__: string;
