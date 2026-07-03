@@ -26,3 +26,4 @@ process.env.POSTGRES_PASSWORD ??= 'test-password';
 process.env.POSTGRES_DB ??= 'test';
 process.env.REDIS_PASSWORD ??= 'test-password';
 process.env.SERVED_DOMAINS ??= 'yellow_dot/student';
+process.env.INSTANCE_SHARED_SECRET ??= 'test-instance-shared-secret-32-bytes-min';

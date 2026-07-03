@@ -108,6 +108,16 @@ export const NetworkRuntimeSecretsSchema = z.object({
     .default('false')
     .transform((val) => val === 'true'),
   BULK_MAX_ITEMS: z.coerce.number().int().positive().default(100),
+  // Per-peer fetch budget for inter-instance count/page fan-out. One slow
+  // peer must not stall the aggregate; see inter_instance_fetch.ts.
+  PEER_FETCH_TIMEOUT_MS: z.coerce.number().int().positive().default(10000),
+  // D6 inter-instance peer auth. MUST be identical across every instance of a
+  // network (shared HMAC material). Distributed via SOPS (D1).
+  INSTANCE_SHARED_SECRET: z.string().min(32),
+  // Rollout gate. 'permissive' (default): verify a token if present, reject a
+  // bad/expired one, but allow a missing token (for peers not yet upgraded).
+  // 'enforced': a valid token is required on every peer call.
+  PEER_AUTH_MODE: z.enum(['permissive', 'enforced']).default('permissive'),
 });
 
 export const DatabaseSecretsSchema = z.object({

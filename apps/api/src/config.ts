@@ -27,6 +27,13 @@ export const apiConfig = {
   allow_extra_schema_data: networkRuntime.ALLOW_EXTRA_SCHEMA_DATA,
   bulk_max_items: networkRuntime.BULK_MAX_ITEMS,
   schema_registry_url: schemaRegistry.SCHEMA_REGISTRY_URL,
+  peer_fetch_timeout_ms: networkRuntime.PEER_FETCH_TIMEOUT_MS,
+};
+
+export const peerConfig = {
+  shared_secret: networkRuntime.INSTANCE_SHARED_SECRET,
+  auth_mode: networkRuntime.PEER_AUTH_MODE,
+  token_window_seconds: 300,
 };
 
 export const authConfig = {
