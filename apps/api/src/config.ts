@@ -27,6 +27,12 @@ export const apiConfig = {
   peer_fetch_timeout_ms: networkRuntime.PEER_FETCH_TIMEOUT_MS,
 };
 
+export const peerConfig = {
+  shared_secret: networkRuntime.INSTANCE_SHARED_SECRET,
+  auth_mode: networkRuntime.PEER_AUTH_MODE,
+  token_window_seconds: 300,
+};
+
 export const authConfig = {
   secret: auth.AUTH_SECRET,
   middleware_enabled:

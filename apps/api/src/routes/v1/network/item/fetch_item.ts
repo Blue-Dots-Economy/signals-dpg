@@ -16,6 +16,7 @@ import {
 } from '@/utils/item_fetch_runtime';
 import { getNetworkConfigById } from '@/network_configs';
 import { fetchItemsAcrossInstances } from '@/utils/inter_instance_fetch';
+import { peer_instance_guard } from '@/middleware/peer_instance_guard';
 
 type FetchItemsAggregateRequest = FastifyRequest<{
   Querystring: z.infer<typeof FetchItemsQuerySchema>;
@@ -51,6 +52,7 @@ export const fetch_item: FastifyPluginAsyncZod = async function (fastify) {
   fastify.route({
     url: '/item/count_local',
     method: 'POST',
+    preHandler: peer_instance_guard,
     schema: {
       tags: ['network'],
       body: FetchItemsCountBodySchema,
@@ -66,6 +68,7 @@ export const fetch_item: FastifyPluginAsyncZod = async function (fastify) {
   fastify.route({
     url: '/item/fetch_local',
     method: 'POST',
+    preHandler: peer_instance_guard,
     schema: {
       tags: ['network'],
       body: FetchItemsBodySchema,

@@ -16,6 +16,11 @@ vi.mock('@api/db/secondary/redis', () => ({
 vi.mock('@/config', () => ({
   getCurrentApiBaseUrl: () => 'http://self.local',
   apiConfig: { peer_fetch_timeout_ms: 3000 },
+  peerConfig: {
+    shared_secret: 'a'.repeat(48),
+    auth_mode: 'permissive',
+    token_window_seconds: 300,
+  },
 }));
 
 vi.mock('@/utils/served_domain_guard', () => ({

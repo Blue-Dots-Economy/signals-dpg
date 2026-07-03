@@ -5,6 +5,7 @@ import {
 } from '@dpg/schemas';
 import { redis } from '@api/db/secondary/redis';
 import { apiConfig, getCurrentApiBaseUrl } from '@/config';
+import { buildPeerHeaders } from '@/utils/instance_token';
 import { isServedDomainBinding } from '@/utils/served_domain_guard';
 import {
   countLocalItems,
@@ -240,17 +241,17 @@ async function fetchRemoteCount(
   instanceUrl: string,
   filters: Omit<ItemFetchFilters, 'limit' | 'offset'>
 ) {
-  const response = await fetch(
-    new URL('/api/v1/network/item/count_local', instanceUrl),
-    {
-      method: 'POST',
-      headers: {
-        'content-type': 'application/json',
-      },
-      body: JSON.stringify(filters),
-      signal: AbortSignal.timeout(apiConfig.peer_fetch_timeout_ms),
-    }
-  );
+  const target = new URL('/api/v1/network/item/count_local', instanceUrl);
+  const requestBody = JSON.stringify(filters);
+  const response = await fetch(target, {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json',
+      ...buildPeerHeaders(target.pathname, requestBody),
+    },
+    body: requestBody,
+    signal: AbortSignal.timeout(apiConfig.peer_fetch_timeout_ms),
+  });
 
   if (!response.ok) {
     throw new Error(
@@ -263,17 +264,17 @@ async function fetchRemoteCount(
 }
 
 async function fetchRemotePage(instanceUrl: string, filters: ItemFetchFilters) {
-  const response = await fetch(
-    new URL('/api/v1/network/item/fetch_local', instanceUrl),
-    {
-      method: 'POST',
-      headers: {
-        'content-type': 'application/json',
-      },
-      body: JSON.stringify(filters),
-      signal: AbortSignal.timeout(apiConfig.peer_fetch_timeout_ms),
-    }
-  );
+  const target = new URL('/api/v1/network/item/fetch_local', instanceUrl);
+  const requestBody = JSON.stringify(filters);
+  const response = await fetch(target, {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json',
+      ...buildPeerHeaders(target.pathname, requestBody),
+    },
+    body: requestBody,
+    signal: AbortSignal.timeout(apiConfig.peer_fetch_timeout_ms),
+  });
 
   if (!response.ok) {
     throw new Error(
