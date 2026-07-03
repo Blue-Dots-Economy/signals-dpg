@@ -309,6 +309,8 @@ export default defineConfig(({ mode }) => {
     env.VITE_DEFAULT_NETWORK_THEME ||
     (env.VITE_NETWORK_ID ? env.VITE_NETWORK_ID.split(',')[0].trim() : 'blue_dot');
   const defaultBrand = env.VITE_DEFAULT_BRAND?.trim() || 'standard';
+  // Dev-server port is env-driven (VITE_UI_PORT), falling back to 5173.
+  const uiPort = Number(env.VITE_UI_PORT) || 5173;
 
   return {
     plugins: [
@@ -371,7 +373,15 @@ export default defineConfig(({ mode }) => {
       ? { outDir: 'dist/tourist', rollupOptions: { input: touristEntry } }
       : undefined,
     server: {
-      port: 3000,
+      port: uiPort,
+      // Fail loudly if the port is taken instead of silently falling back to
+      // 5174 — the fallback port isn't in the API's CORS allow-list, so a
+      // silent switch surfaces as confusing CORS/500 errors in the browser.
+      strictPort: true,
+    },
+    preview: {
+      port: uiPort,
+      strictPort: true,
     },
   };
 });

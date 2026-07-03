@@ -67,6 +67,7 @@ export const NetworkRuntimeSecretsSchema = z.object({
     '../../examples/schemas/yellow_dot/network.json'
   ),
   NETWORK_CONFIG_URLS: z.string().optional(),
+  CONSENT_CONFIG_SOURCE: z.enum(['local', 'remote']).default('local'),
   ALLOW_EXTRA_SCHEMA_DATA: z
     .string()
     .default('false')

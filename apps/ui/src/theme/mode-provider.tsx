@@ -28,8 +28,9 @@ function readStoredMode(): ThemeMode {
   } catch {
     /* localStorage may be disabled (private mode) — fall through */
   }
-  // Default is light. Users opt into dark or system via the toggle.
-  return 'light';
+  // Default is system (follows the OS colour-scheme preference). Users can pin
+  // light or dark explicitly via the toggle.
+  return 'system';
 }
 
 function resolveMode(mode: ThemeMode): 'light' | 'dark' {

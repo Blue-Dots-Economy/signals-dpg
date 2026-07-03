@@ -11,6 +11,8 @@ import { ConsentCheckbox } from './consent-checkbox';
 import { getActionDisplay } from '@/lib/action-display';
 import { ACTION_CONSENT_SENTINEL } from '@/lib/action-api';
 import { cn } from '@/lib/utils';
+import { useConsentConfig } from '@/hooks/use-consent-config';
+import { useNetworkTheme } from '@/theme/theme-provider';
 
 // Desktop: Dialog
 import {
@@ -56,7 +58,13 @@ export function ActionModal({
   const { t } = useTranslation();
   const isMobile = useIsMobile();
   const [resolvedSchema, setResolvedSchema] = React.useState<RJSFSchema | null>(null);
-  const consentText = (actionSchema.consent_text_initiator ?? '').trim();
+  const { config } = useConsentConfig();
+  const { brand } = useNetworkTheme();
+  const actionType = actionSchema.action_type;
+  const initDoc = config?.actions?.[actionType]?.initiate;
+  const initVersion = initDoc?.versions.find((v) => v.version === initDoc.current_version);
+  const consentText = initVersion?.statement ?? '';
+  const consentRequired = (actionSchema.reveals_pii_on_status?.length ?? 0) > 0;
   const [consentChecked, setConsentChecked] = useState(false);
 
   React.useEffect(() => {
@@ -81,8 +89,12 @@ export function ActionModal({
 
   const handleSubmit = (formData: Record<string, unknown>) => {
     const payload: Record<string, unknown> = { ...formData };
-    if (consentText && consentChecked) {
-      payload[ACTION_CONSENT_SENTINEL] = { acknowledged: true as const, text: consentText };
+    if (consentRequired && consentChecked) {
+      payload[ACTION_CONSENT_SENTINEL] = {
+        acknowledged: true as const,
+        version: initDoc?.current_version ?? 1,
+        brand: brand === 'standard' ? null : brand,
+      };
     }
     onSubmit(payload);
   };
@@ -99,7 +111,7 @@ export function ActionModal({
       ) : (
         <p className="text-muted-foreground text-sm">{t('actions.modal_no_form')}</p>
       )}
-      {consentText && (
+      {consentRequired && (
         <ConsentCheckbox
           text={consentText}
           checked={consentChecked}
@@ -109,7 +121,7 @@ export function ActionModal({
     </>
   );
 
-  const consentGate = consentText !== '' && !consentChecked;
+  const consentGate = consentRequired && !consentChecked;
 
   const confirmButtonProps = resolvedSchema
     ? { type: 'submit' as const, form: ACTION_FORM_ID }
@@ -118,10 +130,10 @@ export function ActionModal({
   const actionKey = actionSchema.action_type ?? 'connect';
   const display = getActionDisplay(actionKey);
   const actionTitle = display.label;
-  // When consent text is present the consent card provides the user-facing framing,
+  // When consent is required the consent card provides the user-facing framing,
   // so the generic subtitle is suppressed to avoid redundancy.
   const subtitleKey = ACTION_SUBTITLE_KEYS[actionKey.toLowerCase()];
-  const subtitle = consentText
+  const subtitle = consentRequired
     ? undefined
     : subtitleKey
       ? t(subtitleKey)

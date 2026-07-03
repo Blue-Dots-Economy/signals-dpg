@@ -34,7 +34,12 @@
             "gender": {
               "type": "string",
               "title": "Gender",
-              "minItems": 1
+              "enum": [
+                "Male",
+                "Female",
+                "Other",
+                "Don't want to share"
+              ]
             },
             "location": {
               "type": "string",
@@ -800,7 +805,8 @@
                 "Internship",
                 "Apprenticeship",
                 "Full-time",
-                "Flexible"
+                "Flexible",
+                "Not Available"
               ]
             },
             "stipendMin": {
@@ -845,6 +851,7 @@
             "minEducationalInstitute": {
               "type": "string",
               "enum": [
+                "None",
                 "School",
                 "College",
                 "ITI",
@@ -878,7 +885,7 @@
               "type": "string",
               "title": "Job Title",
               "description": "Job title (editable)",
-              "pattern": "^\\s*\\S+\\s*$",
+              "pattern": "^\\s*\\S+(\\s+\\S+)*\\s*$",
               "minLength": 1,
               "vectorize": true
             },
@@ -1249,8 +1256,9 @@
                 "enum": [
                   "created",
                   "submitted",
-                  "shortlisted",
-                  "rejected"
+                  "accepted",
+                  "rejected",
+                  "cancelled"
                 ]
               },
               "remark": {
@@ -1260,13 +1268,11 @@
           },
           "metric_categories": {
             "create": ["created", "submitted"],
-            "accept": ["shortlisted"],
+            "accept": ["accepted"],
             "reject": ["rejected"],
-            "cancel": []
+            "cancel": ["cancelled"]
           },
-          "reveals_pii_on_status": ["shortlisted"],
-          "consent_text_initiator": "I agree to share my profile contact details with this organization if my application is accepted.",
-          "consent_text_receiver": "I agree to share my organisation's contact details with the applicant."
+          "reveals_pii_on_status": ["accepted"]
         },
         {
           "from_network": "blue_dot",
@@ -1321,7 +1327,8 @@
                   "created",
                   "invited",
                   "accepted",
-                  "rejected"
+                  "rejected",
+                  "cancelled"
                 ]
               },
               "remark": {
@@ -1333,11 +1340,9 @@
             "create": ["created", "invited"],
             "accept": ["accepted"],
             "reject": ["rejected"],
-            "cancel": []
+            "cancel": ["cancelled"]
           },
-          "reveals_pii_on_status": ["accepted"],
-          "consent_text_initiator": "I agree to share my profile contact details with this organization if my application is accepted.",
-          "consent_text_receiver": "I agree to share my organisation's contact details with the applicant."
+          "reveals_pii_on_status": ["accepted"]
         }
       ]
     },
@@ -1365,9 +1370,7 @@
             }
           },
           "metric_categories": null,
-          "reveals_pii_on_status": ["accepted"],
-          "consent_text_initiator": "I agree to share my organisation's contact details with this organisation if they accept my request.",
-          "consent_text_receiver": "I agree to share my organisation's contact details with the requester."
+          "reveals_pii_on_status": ["accepted"]
         }
       ]
     }

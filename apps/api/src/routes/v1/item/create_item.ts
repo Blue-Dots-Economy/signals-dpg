@@ -6,6 +6,8 @@ import { FastifyReply, FastifyRequest } from 'fastify';
 import { db } from '@api/db/postgres/drizzle_config';
 import { DrizzleQueryError, and, eq } from 'drizzle-orm';
 import { DatabaseError, ensureItemPartition, items } from '@dpg/database';
+import { consent_record } from '@api/db/postgres/schema';
+import { resolveConsentVersion } from '@/services/consent_version';
 import { auth_middleware_if_enabled } from '@api/plugins/auth/auth_middleware';
 import {
   isServedDomainBinding,
@@ -20,6 +22,13 @@ import { resolveDomainLock } from './resolve_domain_lock';
 type CreateItemRequest = FastifyRequest<{
   Body: z.infer<typeof CreateItemBodySchema>;
 }>;
+
+/**
+ * Thrown inside the create transaction when the consent row cannot be written,
+ * so the item insert rolls back with it (fail-closed — no PII item without a
+ * consent record).
+ */
+class ConsentWriteError extends Error {}
 
 export const create_item: FastifyPluginAsyncZod = async function (fastify) {
   fastify.route({
@@ -80,6 +89,25 @@ export const create_item_handler = async (
   }
 
   const userId = isAdminApiCaller ? (body.created_by as string) : callerId;
+
+  // A direct/self create (session user or api-key-as-self) must carry consent
+  // when the network configures a profile_creation statement — the login/gate
+  // safety net is UI-only, so this is the server-side guarantee. The admin
+  // on-behalf (bulk) path is exempt: those participants are gated at first
+  // login. When no profile_creation consent is configured there is nothing to
+  // accept, so the create is allowed.
+  if (!isAdminApiCaller && !body.consent) {
+    const requiredVersion = await resolveConsentVersion({
+      network: body.item_network,
+      category: 'profile_creation',
+    });
+    if (requiredVersion !== null) {
+      return reply.code(400).send({
+        error: 'CONSENT_REQUIRED',
+        message: 'profile_creation consent is required to create this item',
+      });
+    }
+  }
 
   if (!isServedDomainBinding(body.item_network, body.item_domain)) {
     return await replyForUnservedDomain(
@@ -156,13 +184,50 @@ export const create_item_handler = async (
   });
 
   try {
-    const created = await createItemInternal(db, {
-      item_network: body.item_network,
-      item_domain: body.item_domain,
-      item_type: body.item_type,
-      item_state: body.item_state ?? {},
-      item_locations,
-      created_by: userId,
+    // Item + consent are written in one transaction so a consent-write failure
+    // rolls the item back too (fail-closed — never a PII item without a consent
+    // row). The item event/cache-invalidation happen only after commit.
+    const created = await db.transaction(async (tx) => {
+      const c = await createItemInternal(tx, {
+        item_network: body.item_network,
+        item_domain: body.item_domain,
+        item_type: body.item_type,
+        item_state: body.item_state ?? {},
+        item_locations,
+        created_by: userId,
+      });
+
+      if (body.consent) {
+        // Version is derived server-side from the loaded consent config, never
+        // trusted from the client (the ledger stores only category + version).
+        const profileVersion = await resolveConsentVersion({
+          network: body.item_network,
+          brand: body.consent.brand,
+          category: 'profile_creation',
+        });
+        if (profileVersion === null) {
+          throw new ConsentWriteError(
+            `profile_creation consent version not configured for ${body.item_network}`,
+          );
+        }
+        try {
+          await tx.insert(consent_record).values({
+            level: 'item',
+            consentCategory: 'profile_creation',
+            userId: callerId,
+            itemId: c.itemId,
+            network: body.item_network,
+            brand: body.consent.brand ?? null,
+            documentVersion: profileVersion,
+            source: 'profile',
+            acceptedAt: new Date(),
+          });
+        } catch (err) {
+          throw new ConsentWriteError(err instanceof Error ? err.message : 'consent write failed');
+        }
+      }
+
+      return c;
     });
 
     await publishItemEvent(
@@ -185,6 +250,16 @@ export const create_item_handler = async (
       item_id: created.itemId,
     });
   } catch (err) {
+    if (err instanceof ConsentWriteError) {
+      request.log.error(
+        { err, item_network: body.item_network, item_type: body.item_type },
+        'consent write failed; item creation rolled back (fail-closed)',
+      );
+      return reply.code(500).send({
+        error: 'CONSENT_WRITE_FAILED',
+        message: 'Failed to record consent; the item was not created.',
+      });
+    }
     if (err instanceof ItemServiceError) {
       return reply.code(err.statusCode).send({
         error: err.errorCode,

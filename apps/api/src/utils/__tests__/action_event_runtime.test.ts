@@ -47,16 +47,16 @@ describe('buildActionEventPayload consent', () => {
     expect(payload.consent).toBeUndefined();
   });
 
-  it('includes consent + server-stamped consented_at when provided', () => {
+  it('includes consent with version + server-stamped consented_at when provided', () => {
     const payload = buildActionEventPayload({
       action_status: 'accepted',
       remarks: null,
       context: ctx,
-      consent: { acknowledged: true, text: 'I agree.' },
+      consent: { acknowledged: true, version: 1 },
     });
     expect(payload.consent).toMatchObject({
       acknowledged: true,
-      text: 'I agree.',
+      version: 1,
     });
     expect(typeof (payload.consent as Record<string, unknown>).consented_at).toBe('string');
     expect(Number.isNaN(Date.parse(((payload.consent as Record<string, string>).consented_at)))).toBe(false);

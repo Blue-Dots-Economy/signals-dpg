@@ -21,7 +21,8 @@ export const ActionItemRefWithInstanceSchema = ActionItemRefSchema.extend({
 export const ConsentAckSchema = z
   .object({
     acknowledged: z.literal(true),
-    text: z.string().trim().min(1).max(500),
+    version: z.number().int().min(1),
+    brand: z.string().min(1).nullish(),
   })
   .strict();
 

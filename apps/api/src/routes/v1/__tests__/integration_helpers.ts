@@ -257,15 +257,15 @@ export async function resolveBindings(): Promise<ResolvedBindings> {
 // ---------------------------------------------------------------------------
 
 /**
- * Resolves the consent text declared on a specific (action_type, from→to)
+ * Resolves the consent metadata declared on a specific (action_type, from→to)
  * interaction in a network config, plus the list of reveal-statuses. Returns
  * `null` when no matching interaction is configured.
  *
  * Tests calling `/api/v1/action/perform` against an interaction that declares
- * `consent_text_initiator` must include a `consent: { acknowledged: true, text }`
- * block in the body, else the route returns 403 CONSENT_REQUIRED (PR #38).
- * This helper resolves the right text without each suite re-implementing the
- * lookup.
+ * `reveals_pii_on_status` must include a `consent: { acknowledged: true, version }`
+ * block in the body, else the route returns 422 CONSENT_REQUIRED.
+ * This helper resolves the interaction metadata without each suite
+ * re-implementing the lookup.
  */
 export async function resolveInteractionConsent(input: {
   actionType: string;
@@ -276,8 +276,6 @@ export async function resolveInteractionConsent(input: {
   toDomain: string;
   toItemType?: string;
 }): Promise<{
-  consent_text_initiator?: string;
-  consent_text_receiver?: string;
   reveals_pii_on_status: string[];
 } | null> {
   const { getNetworkConfigById } = await import('@/network_configs');
@@ -304,20 +302,18 @@ export async function resolveInteractionConsent(input: {
   if (!interaction) return null;
 
   return {
-    consent_text_initiator: interaction.consent_text_initiator,
-    consent_text_receiver: interaction.consent_text_receiver,
     reveals_pii_on_status: interaction.reveals_pii_on_status ?? [],
   };
 }
 
 /**
- * Convenience: builds a consent acknowledgement body from a resolved text.
- * Returns `undefined` when text is missing/empty, so callers can spread it
- * conditionally into a request payload.
+ * Builds a consent acknowledgement body with the new version-based shape.
+ * Returns `{ acknowledged: true, version }` unconditionally (always version 1
+ * by default). Callers include this when the interaction declares
+ * `reveals_pii_on_status` (i.e. consent is required), else omit it.
  */
 export function consentAck(
-  text: string | undefined,
-): { acknowledged: true; text: string } | undefined {
-  if (!text || !text.trim()) return undefined;
-  return { acknowledged: true as const, text };
+  version = 1,
+): { acknowledged: true; version: number } {
+  return { acknowledged: true as const, version };
 }

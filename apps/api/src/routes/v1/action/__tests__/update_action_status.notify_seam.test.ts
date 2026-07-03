@@ -96,8 +96,12 @@ const EXISTING_ACTION = {
   performed_by_service_user_id: null,
 };
 
-vi.mock('@api/db/postgres/drizzle_config', () => ({
-  db: {
+vi.mock('@/services/consent_version', () => ({
+  resolveConsentVersion: vi.fn(async () => 1),
+}));
+
+vi.mock('@api/db/postgres/drizzle_config', () => {
+  const dbMock: Record<string, unknown> = {
     select: vi.fn(() => ({
       from: vi.fn(() => ({
         where: vi.fn(() => ({
@@ -114,8 +118,11 @@ vi.mock('@api/db/postgres/drizzle_config', () => ({
         })),
       })),
     })),
-  },
-}));
+    insert: vi.fn(() => ({ values: vi.fn(() => Promise.resolve(undefined)) })),
+  };
+  dbMock.transaction = vi.fn(async (cb: (tx: unknown) => unknown) => cb(dbMock));
+  return { db: dbMock };
+});
 
 vi.mock('@dpg/database', async () => {
   const actual =

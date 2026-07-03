@@ -140,17 +140,17 @@ export const perform_action_handler = async (
           toItemType: targetItem.item_type,
         });
 
-        if (interaction.consent_text_initiator?.trim() && !body.consent?.acknowledged) {
+        if (interaction.reveals_pii_on_status.length > 0 && !body.consent?.acknowledged) {
           throw new BulkItemFailure('CONSENT_REQUIRED', 'Initiator consent acknowledgment required for this action.');
         }
 
-        if (interaction.consent_text_initiator?.trim() && body.consent?.acknowledged) {
+        if (interaction.reveals_pii_on_status.length > 0 && body.consent?.acknowledged) {
           request.log.info(
             {
               side: 'initiator',
               action_type: body.action_type,
               target_item_id: body.target_item.item_id,
-              consent_text_length: body.consent.text.length,
+              consent_version: body.consent.version,
             },
             'consent recorded',
           );

@@ -1,6 +1,6 @@
 import * as React from 'react';
 import type { RJSFSchema } from '@rjsf/utils';
-import { useSearchParams, Link } from 'react-router-dom';
+import { useSearchParams, useNavigate, Link } from 'react-router-dom';
 import { toast } from 'sonner';
 import { useTranslation } from 'react-i18next';
 import type {
@@ -32,6 +32,7 @@ import { ActionModal } from '@/components/actions/action-modal';
 import { CheckSquare } from 'lucide-react';
 import { getRuntimeEnv } from '@/lib/runtime-env';
 import { ACTION_CONSENT_SENTINEL } from '@/lib/action-api';
+import { ActionAbortedError } from '@/lib/action-abort';
 import { EmptyState } from '@/components/empty-state';
 import { fetchNetworkConfigs, fetchNetworkConfig, fetchNetworkItems, PROFILE_FETCH_LIMIT } from '@/lib/network-api';
 import { useAuth } from '@/contexts/auth-context';
@@ -42,6 +43,10 @@ import { computeVisibleDomains } from '@/lib/visible-domains';
 import { useUserLocation } from '@/hooks/use-user-location';
 import { nearestDistanceMeters } from '@/lib/geo/distance';
 import type { LatLng } from '@/lib/geo/types';
+import { getProfileConsentStatus, acceptProfileConsent } from '@/lib/consent-api';
+import { useConsentConfig } from '@/hooks/use-consent-config';
+import { useNetworkTheme } from '@/theme/theme-provider';
+import { ProfileConsentModal } from '@/components/consent/profile-consent-modal';
 
 function itemToCardItem(item: Item): { id: string; domain: string; data: Record<string, unknown> } {
   return {
@@ -166,6 +171,7 @@ export function HomePage() {
   const { user } = useAuth();
   const allCardsGridRef = useEqualRowHeights<HTMLDivElement>();
   const [searchParams, setSearchParams] = useSearchParams();
+  const navigate = useNavigate();
   const [search, setSearch] = React.useState('');
   const [viewMode, setViewMode] = React.useState<ViewMode>(
     (searchParams.get('view') as ViewMode) ?? resolveDefaultViewMode()
@@ -220,6 +226,9 @@ export function HomePage() {
   // is transiently null even for a user who has a profile location, so the
   // browser-geo auto-prompt must wait for this to avoid a spurious permission prompt.
   const [profilesResolved, setProfilesResolved] = React.useState(false);
+  const [consentedProfileIds, setConsentedProfileIds] = React.useState<Set<string>>(new Set());
+  const [consentLoaded, setConsentLoaded] = React.useState(false);
+  const [pendingConsentProfileId, setPendingConsentProfileId] = React.useState<string | null>(null);
   const [loading, setLoading] = React.useState(false);
   const browseSelection = useCardSelection();
   const [bulkConnectOpen, setBulkConnectOpen] = React.useState(false);
@@ -333,10 +342,23 @@ export function HomePage() {
         .catch(() => [] as Item[]);
     });
 
-    Promise.all(domainFetches).then((results) => {
+    // Fetch the profile-consent set in the SAME flow that loads profiles so
+    // consentedProfileIds + consentLoaded are set together with profilesResolved.
+    // This closes the transient window where a restored activeProfileId would be
+    // treated as "active" before consent status loaded, delaying the gate modal.
+    // Fail-open: an empty set on error still lets the gate prompt.
+    const consentFetch = getProfileConsentStatus(network.id)
+      .then((res) => new Set(res.consented_item_ids))
+      .catch(() => new Set<string>());
+
+    Promise.all([Promise.all(domainFetches), consentFetch]).then(([results, consentedIds]) => {
       if (controller.signal.aborted) return;
       const allProfiles = results.flat();
       setMyItems(allProfiles);
+      // Consent status is known before profilesResolved is marked, so by the time
+      // activeProfileId is derived the gate effect can fire without a content flash.
+      setConsentedProfileIds(consentedIds);
+      setConsentLoaded(true);
       // Profile lookup has settled — profileLocation is now authoritative, so the
       // browser-geo auto-prompt may fire if there's still no profile location.
       setProfilesResolved(true);
@@ -364,6 +386,28 @@ export function HomePage() {
     return myItems.find((i) => i.item_id === activeProfileId) ?? myItems[0] ?? null;
   }, [myItems, activeProfileId]);
 
+  // A draft (incomplete) profile can't apply/connect — the API rejects it with
+  // PROFILE_NOT_LIVE. Prompt the user to finish their profile (with a shortcut
+  // to the edit form) instead of surfacing that error. Returns true when the
+  // profile is draft (caller should abort the action).
+  const promptCompleteDraftProfile = React.useCallback(
+    (profile: Item): boolean => {
+      if (profile.lifecycle_status !== 'draft') return false;
+      toast.warning(t('home.toast_profile_draft'), {
+        description: t('home.toast_profile_draft_desc'),
+        action: {
+          label: t('home.toast_profile_draft_cta'),
+          onClick: () =>
+            navigate(
+              `/profile/${profile.item_id}/edit?network=${encodeURIComponent(profile.item_network)}`,
+            ),
+        },
+      });
+      return true;
+    },
+    [navigate, t],
+  );
+
   // Derive the active profile's first location (profile-first), or null to trigger browser-geo fallback
   const profileLocation = React.useMemo(
     () =>
@@ -377,6 +421,39 @@ export function HomePage() {
   // on profilesResolved so a logged-in user with a profile location isn't prompted
   // during the async profile-load window.
   const { location: userLocation } = useUserLocation(profileLocation, profilesResolved);
+
+  // Profile-creation consent gate. Profiles created via the aggregator channel
+  // have no profile_creation consent recorded; selecting one must first prompt.
+  const { config: consentConfig } = useConsentConfig();
+  const { brand } = useNetworkTheme();
+  const profileDoc = consentConfig?.documents.profile_creation;
+  const profileVersion = profileDoc?.versions.find(
+    (v) => v.version === profileDoc.current_version,
+  );
+  const profileStatement = profileVersion?.statement ?? '';
+  const profileConsentRequired = Boolean(profileStatement);
+
+  // Gate the auto-selected profile: if it lacks profile_creation consent, prompt.
+  React.useEffect(() => {
+    if (
+      !profilesResolved ||
+      !consentLoaded ||
+      !profileConsentRequired ||
+      !activeProfileId ||
+      pendingConsentProfileId !== null ||
+      consentedProfileIds.has(activeProfileId)
+    ) {
+      return;
+    }
+    setPendingConsentProfileId(activeProfileId);
+  }, [
+    profilesResolved,
+    consentLoaded,
+    profileConsentRequired,
+    activeProfileId,
+    consentedProfileIds,
+    pendingConsentProfileId,
+  ]);
 
   // Sort a card-item array (item_locations stored in .data) nearest-first when userLocation is known.
   // Items without locations sort last (nearestDistanceMeters returns Infinity for empty/missing arrays).
@@ -510,8 +587,6 @@ export function HomePage() {
             to_domain: interaction.to_domain,
             requirement_schema: interaction.requirement_schema,
             event_schema: interaction.event_schema,
-            consent_text_initiator: interaction.consent_text_initiator,
-            consent_text_receiver: interaction.consent_text_receiver,
             reveals_pii_on_status: interaction.reveals_pii_on_status,
           });
         }
@@ -525,6 +600,11 @@ export function HomePage() {
   const handleBulkConnect = React.useCallback(
     async (actionType: string, formData: Record<string, unknown>) => {
       if (!myItem || !network) return;
+      // Draft source profile can't act — prompt to complete it, don't submit.
+      if (promptCompleteDraftProfile(myItem)) {
+        setBulkConnectOpen(false);
+        return;
+      }
       setBulkConnectBusy(true);
       try {
         const allItems = Object.values(domainItems).flat();
@@ -545,8 +625,12 @@ export function HomePage() {
           consentRaw &&
           typeof consentRaw === 'object' &&
           (consentRaw as { acknowledged?: unknown }).acknowledged === true &&
-          typeof (consentRaw as { text?: unknown }).text === 'string'
-            ? { acknowledged: true as const, text: (consentRaw as { text: string }).text }
+          typeof (consentRaw as { version?: unknown }).version === 'number'
+            ? {
+                acknowledged: true as const,
+                version: (consentRaw as { version: number }).version,
+                brand: (consentRaw as { brand?: string | null }).brand,
+              }
             : undefined;
 
         const sourceItemInstanceUrl = myItem.item_instance_url?.includes('localhost')
@@ -615,6 +699,7 @@ export function HomePage() {
       browseSelection.selected,
       browseSelection.exitSelect,
       browseSelection.setSelected,
+      promptCompleteDraftProfile,
       t,
     ],
   );
@@ -699,6 +784,10 @@ export function HomePage() {
   };
 
   const handleActiveProfileChange = (profileId: string) => {
+    if (profileConsentRequired && !consentedProfileIds.has(profileId)) {
+      setPendingConsentProfileId(profileId);
+      return;
+    }
     setActiveProfileId(profileId);
     if (network?.id) {
       setStoredActiveProfileId(network.id, profileId);
@@ -761,9 +850,59 @@ export function HomePage() {
       ? [activeAction]
       : [];
 
+  // Label the pending profile so the user knows which profile the (repeating)
+  // consent popup is for — reuses the sidebar's title-field candidates.
+  const pendingProfileLabel = React.useMemo(() => {
+    if (!pendingConsentProfileId) return undefined;
+    const profile = myItems.find((p) => p.item_id === pendingConsentProfileId);
+    if (!profile) return undefined;
+    const schema = userSchemas[profile.item_domain] as
+      | { properties?: Record<string, unknown> }
+      | undefined;
+    const candidates = ['name', 'full_name', 'title', 'provider_id', 'learner_id', 'student_id'];
+    const titleKey = candidates.find((c) => schema?.properties?.[c] !== undefined);
+    const value = titleKey ? profile.item_state[titleKey] : undefined;
+    return value ? String(value) : profile.item_domain;
+  }, [pendingConsentProfileId, myItems, userSchemas]);
+
+  const profileConsentModal = (
+    <ProfileConsentModal
+      open={Boolean(pendingConsentProfileId)}
+      statement={profileStatement}
+      profileLabel={pendingProfileLabel}
+      onAccept={async () => {
+        const pending = pendingConsentProfileId;
+        if (!pending || !network?.id || !profileDoc) return;
+        const profile = myItems.find((p) => p.item_id === pending);
+        if (!profile) {
+          setPendingConsentProfileId(null);
+          return;
+        }
+        try {
+          await acceptProfileConsent({
+            network: network.id,
+            brand: brand === 'standard' ? null : brand,
+            item_domain: profile.item_domain,
+            item_type: profile.item_type,
+            item_id: profile.item_id,
+            version: profileDoc.current_version,
+          });
+          setConsentedProfileIds((prev) => new Set([...prev, pending]));
+          setActiveProfileId(pending);
+          setStoredActiveProfileId(network.id, pending);
+          setPendingConsentProfileId(null);
+        } catch {
+          toast.error(t('profile.error_generic_desc'));
+          // Keep the modal open so the user can retry.
+        }
+      }}
+    />
+  );
+
   if (!network) {
     return (
-      <div className="flex h-screen flex-col">
+      <>
+        <div className="flex h-screen flex-col">
         <div className="h-14 border-b bg-gradient-to-r from-background to-primary/5" />
         <div className="flex flex-1 overflow-hidden">
           <div className="hidden md:block w-64 shrink-0 border-r p-4 space-y-3">
@@ -782,7 +921,9 @@ export function HomePage() {
             </div>
           </div>
         </div>
-      </div>
+        </div>
+        {profileConsentModal}
+      </>
     );
   }
 
@@ -841,6 +982,7 @@ export function HomePage() {
   );
 
   return (
+    <>
     <PageShell
       networks={showNetworkSelector ? allNetworks : []}
       selectedNetwork={selectedNetworkId}
@@ -894,6 +1036,11 @@ export function HomePage() {
               });
               throw new Error('No source item');
             }
+            // Draft source profile can't act — prompt to complete it. Throw an
+            // ActionAbortedError so ActionHandler suppresses its generic toast.
+            if (promptCompleteDraftProfile(myItem)) {
+              throw new ActionAbortedError('source profile is draft');
+            }
             if (!user) {
               toast.error(t('nav.sign_in_to_connect'), {
                 description: t('home.toast_sign_in_desc'),
@@ -916,8 +1063,12 @@ export function HomePage() {
               consentRaw &&
               typeof consentRaw === 'object' &&
               (consentRaw as { acknowledged?: unknown }).acknowledged === true &&
-              typeof (consentRaw as { text?: unknown }).text === 'string'
-                ? ({ acknowledged: true as const, text: (consentRaw as { text: string }).text })
+              typeof (consentRaw as { version?: unknown }).version === 'number'
+                ? ({
+                    acknowledged: true as const,
+                    version: (consentRaw as { version: number }).version,
+                    brand: (consentRaw as { brand?: string | null }).brand,
+                  })
                 : undefined;
 
             // Resolve source item instance URL (where my profile is stored)
@@ -1141,5 +1292,7 @@ export function HomePage() {
           }
         </ActionHandler>
     </PageShell>
+    {profileConsentModal}
+    </>
   );
 }

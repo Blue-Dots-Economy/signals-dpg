@@ -5,6 +5,7 @@ import {
   boolean,
   integer,
   index,
+  jsonb,
 } from 'drizzle-orm/pg-core';
 
 export const user = pgTable('user', {
@@ -37,11 +38,18 @@ export const user = pgTable('user', {
   onboardedVia: text('onboarded_via'),
   onboardedSourceId: text('onboarded_source_id'),
   onboardedAt: timestamp('onboarded_at'),
+  // Extensible support/ops markers on the user. Keyed jsonb so new flags can
+  // be added without a migration. Current key: `is_test` (boolean) — marks a
+  // user (and, by the created_by/owner join, their profiles, posts, and
+  // applications) as test data for analysis + later bulk cleanup.
+  tags: jsonb('tags').notNull().default({}),
 }, (table) => [
   index('user_onboarded_by_org_via_idx').on(
     table.onboardedByOrgId,
     table.onboardedVia,
   ),
+  // GIN index accelerates `tags @> '{"is_test": true}'` containment lookups.
+  index('user_tags_gin_idx').using('gin', table.tags),
 ]);
 
 export const account = pgTable('account', {

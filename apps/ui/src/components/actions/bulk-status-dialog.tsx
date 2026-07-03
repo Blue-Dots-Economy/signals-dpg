@@ -4,6 +4,8 @@ import { toast } from 'sonner';
 import type { Action } from '@/lib/action-api';
 import { useUpdateActionStatusBulk } from '@/hooks/use-actions';
 import { useNetworkConfig } from '@/hooks/use-network-config';
+import { useConsentConfig } from '@/hooks/use-consent-config';
+import { useNetworkTheme } from '@/theme/theme-provider';
 import { ConsentCheckbox } from './consent-checkbox';
 import { Dialog, DialogContent } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
@@ -63,9 +65,14 @@ export function BulkStatusDialog({
     );
   }, [networkConfig, first]);
 
+  const { config } = useConsentConfig();
+  const { brand } = useNetworkTheme();
+
   const revealStatuses = interaction?.reveals_pii_on_status ?? [];
-  const consentText = (interaction?.consent_text_receiver ?? '').trim();
-  const requiresConsent = revealStatuses.includes(targetStatus) && consentText !== '';
+  const requiresConsent = revealStatuses.includes(targetStatus);
+  const acceptDoc = first ? config?.actions?.[first.action_type]?.accept : undefined;
+  const acceptVersion = acceptDoc?.versions.find((v) => v.version === acceptDoc.current_version);
+  const consentText = acceptVersion?.statement ?? '';
 
   const titleKey =
     targetStatus === 'accepted'
@@ -83,7 +90,13 @@ export function BulkStatusDialog({
       action_id,
       action_status: targetStatus,
       ...(requiresConsent
-        ? { consent: { acknowledged: true as const, text: consentText } }
+        ? {
+            consent: {
+              acknowledged: true as const,
+              version: acceptDoc?.current_version ?? 1,
+              brand: brand === 'standard' ? null : brand,
+            },
+          }
         : sharedRemarks
           ? { remarks: sharedRemarks }
           : {}),

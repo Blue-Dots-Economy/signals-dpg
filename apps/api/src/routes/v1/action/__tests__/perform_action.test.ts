@@ -163,6 +163,7 @@ vi.mock('@dpg/schemas', async () => {
         properties: {},
         additionalProperties: true,
       },
+      reveals_pii_on_status: [],
     })),
     validateAgainstJsonSchema: vi.fn(),
     mergeItemStateWithPrivate: vi.fn((a: any) => a),
@@ -427,7 +428,7 @@ describe('POST /api/v1/action/perform — on-behalf-of (bulk)', () => {
   });
 
   describe('initiator consent gate', () => {
-    it('422 CONSENT_REQUIRED when interaction declares consent_text_initiator but body has no consent', async () => {
+    it('422 CONSENT_REQUIRED when interaction declares reveals_pii_on_status but body has no consent', async () => {
       const { getActionInteraction } = await import('@dpg/schemas');
       (getActionInteraction as ReturnType<typeof vi.fn>).mockReturnValueOnce({
         requirement_schema: {
@@ -435,7 +436,7 @@ describe('POST /api/v1/action/perform — on-behalf-of (bulk)', () => {
           properties: {},
           additionalProperties: true,
         },
-        consent_text_initiator: 'I agree to share my PII.',
+        reveals_pii_on_status: ['accepted'],
       });
       const app = buildApp(undefined, { id: 'usr_agg_owned' });
       const res = await app.inject({
@@ -456,7 +457,7 @@ describe('POST /api/v1/action/perform — on-behalf-of (bulk)', () => {
           properties: {},
           additionalProperties: true,
         },
-        consent_text_initiator: 'I agree.',
+        reveals_pii_on_status: ['accepted'],
       });
       const app = buildApp(undefined, { id: 'usr_agg_owned' });
       const res = await app.inject({
@@ -465,7 +466,7 @@ describe('POST /api/v1/action/perform — on-behalf-of (bulk)', () => {
         payload: [
           {
             ...VALID_BODY,
-            consent: { acknowledged: true, text: 'I agree.' },
+            consent: { acknowledged: true, version: 1 },
           },
         ],
       });
@@ -475,11 +476,11 @@ describe('POST /api/v1/action/perform — on-behalf-of (bulk)', () => {
       expect(fetchCalls).toHaveLength(1);
       expect(fetchCalls[0].body.consent).toEqual({
         acknowledged: true,
-        text: 'I agree.',
+        version: 1,
       });
     });
 
-    it('does NOT gate when interaction has no consent_text_initiator (back-compat)', async () => {
+    it('does NOT gate when interaction has empty reveals_pii_on_status (back-compat)', async () => {
       const { getActionInteraction } = await import('@dpg/schemas');
       (getActionInteraction as ReturnType<typeof vi.fn>).mockReturnValueOnce({
         requirement_schema: {
@@ -487,7 +488,7 @@ describe('POST /api/v1/action/perform — on-behalf-of (bulk)', () => {
           properties: {},
           additionalProperties: true,
         },
-        consent_text_initiator: undefined,
+        reveals_pii_on_status: [],
       });
       const app = buildApp(undefined, { id: 'usr_agg_owned' });
       const res = await app.inject({

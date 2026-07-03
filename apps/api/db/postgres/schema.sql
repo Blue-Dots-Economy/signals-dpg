@@ -1,6 +1,6 @@
 -- GENERATED FILE — do not edit by hand.
 --
--- Source: packages/database/src/utils/sql_scripts/auth.sql, packages/database/src/utils/sql_scripts/metrics.sql, packages/database/src/utils/sql_scripts/pii_reveal_audit.sql, packages/database/src/utils/sql_scripts/create_items.sql, packages/database/src/utils/sql_scripts/create_actions_events.sql
+-- Source: packages/database/src/utils/sql_scripts/auth.sql, packages/database/src/utils/sql_scripts/metrics.sql, packages/database/src/utils/sql_scripts/pii_reveal_audit.sql, packages/database/src/utils/sql_scripts/consent_record.sql, packages/database/src/utils/sql_scripts/create_items.sql, packages/database/src/utils/sql_scripts/create_actions_events.sql
 -- Regenerate with: pnpm schema:bundle
 -- CI guards drift via: pnpm schema:bundle:check
 --
@@ -79,6 +79,8 @@ CREATE TABLE IF NOT EXISTS "user" (
   "onboarded_via"       text,
   "onboarded_source_id" text,
   "onboarded_at"        timestamp,
+  -- Extensible support/ops markers (e.g. {"is_test": true}). See ADD COLUMN below.
+  "tags"                jsonb NOT NULL DEFAULT '{}'::jsonb,
   CONSTRAINT "user_email_unique" UNIQUE ("email"),
   CONSTRAINT "user_phone_number_unique" UNIQUE ("phone_number")
 );
@@ -98,6 +100,13 @@ ALTER TABLE "user" ADD COLUMN IF NOT EXISTS "onboarded_by_org_id" text;
 ALTER TABLE "user" ADD COLUMN IF NOT EXISTS "onboarded_via" text;
 ALTER TABLE "user" ADD COLUMN IF NOT EXISTS "onboarded_source_id" text;
 ALTER TABLE "user" ADD COLUMN IF NOT EXISTS "onboarded_at" timestamp;
+-- Extensible support/ops markers. Keyed jsonb so new flags need no migration.
+-- Current key: `is_test` (boolean) — marks a user (and, via the
+-- created_by/owner join, their profiles, posts, and applications) as test data
+-- for analysis + later bulk cleanup.
+ALTER TABLE "user" ADD COLUMN IF NOT EXISTS "tags" jsonb NOT NULL DEFAULT '{}'::jsonb;
+-- GIN index accelerates `tags @> '{"is_test": true}'` containment lookups.
+CREATE INDEX IF NOT EXISTS user_tags_gin_idx ON "user" USING GIN (tags);
 
 DO $$
 BEGIN
@@ -493,6 +502,54 @@ CREATE INDEX IF NOT EXISTS pii_reveal_audit_viewer_idx
 
 CREATE INDEX IF NOT EXISTS pii_reveal_audit_item_idx
   ON pii_reveal_audit (revealed_item_id, viewed_at);
+
+-- ─── consent_record.sql ───
+
+-- consent_record.sql
+--
+-- Idempotent DDL for the consent ledger. Mirrors the Drizzle
+-- definition in apps/api/db/postgres/schema/consent_record.ts.
+--
+-- Append-only. No FKs to items/item_actions (both partitioned);
+-- app-level integrity only. Latest event per (subject, type) wins
+-- by `seq`, never by timestamp.
+
+CREATE TABLE IF NOT EXISTS consent_record (
+  id                uuid        PRIMARY KEY DEFAULT gen_random_uuid(),
+  seq               bigserial   NOT NULL,
+  level             text        NOT NULL,
+  consent_category  text        NOT NULL,
+  action_type       text,
+  action_stage      text,
+  user_id           text        NOT NULL,
+  item_id           uuid,
+  action_id         uuid,
+  network           text        NOT NULL,
+  brand             text,
+  document_version  integer     NOT NULL,
+  source            text        NOT NULL,
+  accepted_at       timestamp   NOT NULL,
+  created_at        timestamp   NOT NULL DEFAULT now(),
+  metadata          jsonb
+);
+
+CREATE INDEX IF NOT EXISTS consent_record_user_idx
+  ON consent_record (user_id, consent_category, action_type, action_stage, seq);
+
+CREATE INDEX IF NOT EXISTS consent_record_item_idx
+  ON consent_record (item_id, consent_category);
+
+CREATE INDEX IF NOT EXISTS consent_record_action_idx
+  ON consent_record (action_id);
+
+-- Item-level profile_creation is idempotent: at most one acceptance per
+-- (user, item). This makes the accept-profile-consent 23505 fallback live and
+-- prevents a concurrent double-submit from slipping past the check-then-insert.
+-- Terms/privacy/action rows are intentionally append-only and are NOT
+-- constrained, so this index is partial.
+CREATE UNIQUE INDEX IF NOT EXISTS consent_record_profile_creation_unique
+  ON consent_record (user_id, item_id)
+  WHERE level = 'item' AND consent_category = 'profile_creation';
 
 -- ─── create_items.sql ───
 
