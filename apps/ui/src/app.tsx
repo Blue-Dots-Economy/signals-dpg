@@ -9,6 +9,8 @@ import { ProfileFormPage } from './pages/profile-form-page';
 import { LoginPage } from './pages/auth/login-page';
 import { OtpPage } from './pages/auth/otp-page';
 import { MyActionsPage } from './pages/my-actions-page';
+import { PrivacyPage } from './pages/legal/privacy-page';
+import { TermsPage } from './pages/legal/terms-page';
 
 export function App() {
   return (
@@ -29,6 +31,8 @@ export function App() {
             <Route path="/profile/:id/edit" element={<RequireAuth><ProfileFormPage /></RequireAuth>} />
             <Route path="/auth/login" element={<LoginPage />} />
             <Route path="/auth/otp" element={<OtpPage />} />
+            <Route path="/privacy" element={<PrivacyPage />} />
+            <Route path="/terms" element={<TermsPage />} />
             <Route path="/my-actions" element={<RequireAuth><MyActionsPage /></RequireAuth>} />
             <Route path="/my-actions/*" element={<RequireAuth><MyActionsPage /></RequireAuth>} />
           </Routes>

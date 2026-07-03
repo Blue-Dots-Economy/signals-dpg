@@ -1,4 +1,4 @@
-import { eq } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
 import z, {
   getActionInteraction,
   UpdateActionStatusBodySchema,
@@ -13,6 +13,8 @@ import {
   ensureActionEventPartition,
   item_actions,
 } from '@dpg/database';
+import { consent_record } from '@api/db/postgres/schema';
+import { resolveConsentVersion } from '@/services/consent_version';
 import { getCurrentApiBaseUrl, apiConfig } from '@/config';
 import { getNetworkConfigById } from '@/network_configs';
 import {
@@ -24,8 +26,16 @@ import {
   validateActionEventPayload,
 } from '@/utils/action_event_runtime';
 import { runBulk, BulkItemFailure } from '@/utils/bulk_runner';
+import { dispatchActionNotifications } from '@/notifications/notify_actions';
 
 const BulkUpdateActionStatusBodySchema = z.array(z.unknown());
+
+/**
+ * Thrown inside the status-update transaction when the accept-consent row
+ * cannot be written, so the status update rolls back with it (fail-closed — the
+ * PII-revealing accept is not applied without a consent record).
+ */
+class ConsentWriteError extends Error {}
 
 export const update_action_status: FastifyPluginAsyncZod = async function (fastify) {
   fastify.route({
@@ -47,11 +57,14 @@ export const update_action_status: FastifyPluginAsyncZod = async function (fasti
 };
 
 /**
- * Self-acted only. The caller (session cookie or apikey-as-self) must
- * be the target item's owner. On-behalf-of via `acting_as_user_id` was
- * removed by spec 2026-05-23-action-on-behalf-of-network-service-tier-design.md
- * — audit columns on `item_actions` are populated only at create-time
- * (by `/action/perform`).
+ * Self-acted only. For receiver responses (accept/reject/…) the caller
+ * (session cookie or apikey-as-self) must be the target item's owner. The one
+ * exception is a cancellation (a status bucketed under metric_categories.cancel):
+ * that is initiated by the source item owner to withdraw their own request, and
+ * is only allowed while the receiver has not yet acted. On-behalf-of via
+ * `acting_as_user_id` was removed by spec
+ * 2026-05-23-action-on-behalf-of-network-service-tier-design.md — audit columns
+ * on `item_actions` are populated only at create-time (by `/action/perform`).
  */
 export const update_action_status_handler = async (
   request: FastifyRequest<{ Body: unknown[] }>,
@@ -81,51 +94,6 @@ export const update_action_status_handler = async (
         throw new BulkItemFailure('ACTION_NOT_FOUND', 'Action does not exist on this instance');
       }
 
-      if (existingAction.target_item_owner !== callerId) {
-        throw new BulkItemFailure(
-          'NOT_TARGET_ITEM_OWNER',
-          'update-status may only be called by the target item owner.',
-        );
-      }
-
-      const targetSnapshot = await fetchLocalItemSnapshot(db, {
-        item_network: existingAction.target_item_network,
-        item_domain: existingAction.target_item_domain,
-        item_type: existingAction.target_item_type,
-        item_id: existingAction.target_item_id,
-        item_instance_url: existingAction.target_item_instance_url,
-      });
-      if (!targetSnapshot || targetSnapshot.lifecycle_status !== 'live') {
-        throw new BulkItemFailure(
-          'PROFILE_NOT_LIVE',
-          'target_item is not live; status updates blocked',
-        );
-      }
-
-      if (
-        isCurrentInstanceItem({
-          item_network: existingAction.source_item_network,
-          item_domain: existingAction.source_item_domain,
-          item_type: existingAction.source_item_type,
-          item_id: existingAction.source_item_id,
-          item_instance_url: existingAction.source_item_instance_url,
-        })
-      ) {
-        const sourceSnap = await fetchLocalItemSnapshot(db, {
-          item_network: existingAction.source_item_network,
-          item_domain: existingAction.source_item_domain,
-          item_type: existingAction.source_item_type,
-          item_id: existingAction.source_item_id,
-          item_instance_url: existingAction.source_item_instance_url,
-        });
-        if (!sourceSnap || sourceSnap.lifecycle_status !== 'live') {
-          throw new BulkItemFailure(
-            'PROFILE_NOT_LIVE',
-            'source_item is not live; status updates blocked',
-          );
-        }
-      }
-
       let interaction: ReturnType<typeof getActionInteraction>;
       try {
         const networkConfig = await getNetworkConfigById(existingAction.target_item_network);
@@ -145,9 +113,93 @@ export const update_action_status_handler = async (
         );
       }
 
+      // Cancellation is terminal: once the source owner has withdrawn a
+      // request, it is dead. No further transition (accept/reject or a repeat
+      // cancel) is allowed by either party — otherwise the receiver could
+      // "accept" an application the applicant already pulled.
+      const cancelStatuses = interaction.metric_categories?.cancel ?? [];
+      if (cancelStatuses.includes(existingAction.action_status)) {
+        throw new BulkItemFailure(
+          'ACTION_CANCELLED',
+          'This request was cancelled. Please refresh to see the latest status.',
+        );
+      }
+
+      // A "cancellation" is any status the network config buckets under
+      // metric_categories.cancel. Every other transition is a receiver
+      // response (self-acted by the target owner). A cancellation instead is
+      // driven by the source item owner — the initiator withdrawing their own
+      // request — and is only allowed while the receiver has not yet acted
+      // (update_count === 0). Withdrawal is de-escalation, so it is not gated
+      // on either side's liveness.
+      const isCancellation = cancelStatuses.includes(body.action_status);
+
+      if (isCancellation) {
+        if (existingAction.source_item_owner !== callerId) {
+          throw new BulkItemFailure(
+            'NOT_SOURCE_ITEM_OWNER',
+            'A request may only be cancelled by the source item owner.',
+          );
+        }
+        if (existingAction.update_count > 0) {
+          throw new BulkItemFailure(
+            'RECEIVER_ALREADY_ACTED',
+            'Cannot cancel; the receiver has already responded to this request.',
+          );
+        }
+      } else {
+        if (existingAction.target_item_owner !== callerId) {
+          throw new BulkItemFailure(
+            'NOT_TARGET_ITEM_OWNER',
+            'update-status may only be called by the target item owner.',
+          );
+        }
+
+        const targetSnapshot = await fetchLocalItemSnapshot(db, {
+          item_network: existingAction.target_item_network,
+          item_domain: existingAction.target_item_domain,
+          item_type: existingAction.target_item_type,
+          item_id: existingAction.target_item_id,
+          item_instance_url: existingAction.target_item_instance_url,
+        });
+        if (!targetSnapshot || targetSnapshot.lifecycle_status !== 'live') {
+          throw new BulkItemFailure(
+            'PROFILE_NOT_LIVE',
+            'target_item is not live; status updates blocked',
+          );
+        }
+
+        if (
+          isCurrentInstanceItem({
+            item_network: existingAction.source_item_network,
+            item_domain: existingAction.source_item_domain,
+            item_type: existingAction.source_item_type,
+            item_id: existingAction.source_item_id,
+            item_instance_url: existingAction.source_item_instance_url,
+          })
+        ) {
+          const sourceSnap = await fetchLocalItemSnapshot(db, {
+            item_network: existingAction.source_item_network,
+            item_domain: existingAction.source_item_domain,
+            item_type: existingAction.source_item_type,
+            item_id: existingAction.source_item_id,
+            item_instance_url: existingAction.source_item_instance_url,
+          });
+          if (!sourceSnap || sourceSnap.lifecycle_status !== 'live') {
+            throw new BulkItemFailure(
+              'PROFILE_NOT_LIVE',
+              'source_item is not live; status updates blocked',
+            );
+          }
+        }
+      }
+
+      // Consent is a receiver-response gate. A cancellation is the source
+      // owner withdrawing their own request — never a PII reveal — so it must
+      // not be gated even if a network lists a cancel status in
+      // reveals_pii_on_status.
       const requiresReceiverConsent =
-        interaction.reveals_pii_on_status.includes(body.action_status) &&
-        !!interaction.consent_text_receiver?.trim();
+        !isCancellation && interaction.reveals_pii_on_status.includes(body.action_status);
 
       if (requiresReceiverConsent && !body.consent?.acknowledged) {
         throw new BulkItemFailure(
@@ -162,7 +214,7 @@ export const update_action_status_handler = async (
             side: 'receiver',
             action_id: body.action_id,
             action_status: body.action_status,
-            consent_text_length: body.consent.text.length,
+            consent_version: body.consent.version,
           },
           'consent recorded',
         );
@@ -216,35 +268,111 @@ export const update_action_status_handler = async (
         throw new BulkItemFailure('PARTITION_SETUP_FAILED', 'Failed to prepare storage for action event');
       }
 
+      // Optimistic-concurrency guard: only write if update_count still matches
+      // what we read. Cancellation adds a second legitimate writer (the source
+      // owner alongside the target owner), so a concurrent cancel + accept must
+      // not both land — the loser gets ACTION_CONFLICT instead of clobbering.
+      //
+      // The status update and the accept-consent row are written in one
+      // transaction so a consent-write failure rolls the accept back too
+      // (fail-closed — the PII-revealing accept is never applied without a
+      // consent record). The action event is emitted only after commit.
       const nextUpdateCount = existingAction.update_count + 1;
-      const [updatedAction] = await db
-        .update(item_actions)
-        .set({
-          action_status: body.action_status,
-          update_count: nextUpdateCount,
-          remarks: body.remarks ?? existingAction.remarks,
-          updated_at: new Date(),
+      const txOutcome = await db
+        .transaction(async (tx) => {
+          const [row] = await tx
+            .update(item_actions)
+            .set({
+              action_status: body.action_status,
+              update_count: nextUpdateCount,
+              remarks: body.remarks ?? existingAction.remarks,
+              updated_at: new Date(),
+            })
+            .where(
+              and(
+                eq(item_actions.action_id, existingAction.action_id),
+                eq(item_actions.update_count, existingAction.update_count),
+              ),
+            )
+            .returning({
+              action_id: item_actions.action_id,
+              action_type: item_actions.action_type,
+              action_status: item_actions.action_status,
+              update_count: item_actions.update_count,
+              source_item_network: item_actions.source_item_network,
+              source_item_domain: item_actions.source_item_domain,
+              source_item_type: item_actions.source_item_type,
+              source_item_id: item_actions.source_item_id,
+              source_item_instance_url: item_actions.source_item_instance_url,
+              source_item_owner: item_actions.source_item_owner,
+              target_item_network: item_actions.target_item_network,
+              target_item_domain: item_actions.target_item_domain,
+              target_item_type: item_actions.target_item_type,
+              target_item_id: item_actions.target_item_id,
+              target_item_instance_url: item_actions.target_item_instance_url,
+              target_item_owner: item_actions.target_item_owner,
+              remarks: item_actions.remarks,
+            });
+
+          if (!row) return { kind: 'conflict' as const };
+
+          if (requiresReceiverConsent && body.consent?.acknowledged) {
+            // Version derived server-side from the loaded consent config, never
+            // trusted from the client.
+            const acceptVersion = await resolveConsentVersion({
+              network: row.target_item_network,
+              brand: body.consent.brand,
+              category: 'action',
+              actionType: row.action_type,
+              stage: 'accept',
+            });
+            if (acceptVersion === null) {
+              throw new ConsentWriteError(
+                `accept consent version not configured for ${row.action_type}`,
+              );
+            }
+            try {
+              await tx.insert(consent_record).values({
+                level: 'item',
+                consentCategory: 'action',
+                actionType: row.action_type,
+                actionStage: 'accept',
+                userId: callerId,
+                itemId: row.target_item_id,
+                actionId: body.action_id,
+                network: row.target_item_network,
+                brand: body.consent.brand ?? null,
+                documentVersion: acceptVersion,
+                source: 'action',
+                acceptedAt: new Date(),
+              });
+            } catch (err) {
+              throw new ConsentWriteError(
+                err instanceof Error ? err.message : 'consent write failed',
+              );
+            }
+          }
+
+          return { kind: 'ok' as const, updatedAction: row };
         })
-        .where(eq(item_actions.action_id, existingAction.action_id))
-        .returning({
-          action_id: item_actions.action_id,
-          action_type: item_actions.action_type,
-          action_status: item_actions.action_status,
-          update_count: item_actions.update_count,
-          source_item_network: item_actions.source_item_network,
-          source_item_domain: item_actions.source_item_domain,
-          source_item_type: item_actions.source_item_type,
-          source_item_id: item_actions.source_item_id,
-          source_item_instance_url: item_actions.source_item_instance_url,
-          source_item_owner: item_actions.source_item_owner,
-          target_item_network: item_actions.target_item_network,
-          target_item_domain: item_actions.target_item_domain,
-          target_item_type: item_actions.target_item_type,
-          target_item_id: item_actions.target_item_id,
-          target_item_instance_url: item_actions.target_item_instance_url,
-          target_item_owner: item_actions.target_item_owner,
-          remarks: item_actions.remarks,
+        .catch((err: unknown) => {
+          if (err instanceof ConsentWriteError) return { kind: 'consentFailed' as const };
+          throw err;
         });
+
+      if (txOutcome.kind === 'conflict') {
+        throw new BulkItemFailure(
+          'ACTION_CONFLICT',
+          'This request was updated by someone else; reload and try again.',
+        );
+      }
+      if (txOutcome.kind === 'consentFailed') {
+        throw new BulkItemFailure(
+          'CONSENT_WRITE_FAILED',
+          'Failed to record consent; the status change was not applied.',
+        );
+      }
+      const updatedAction = txOutcome.updatedAction;
 
       const targetItemSnapshot = await fetchLocalItemSnapshot(db, {
         item_network: updatedAction.target_item_network,
@@ -292,8 +420,43 @@ export const update_action_status_handler = async (
         remarks: body.remarks,
       };
 
-      await insertActionEvent(db, storedEvent);
+      // Accept-consent is recorded inside the status-update transaction above
+      // (fail-closed), so the event below is emitted only after it committed.
+      const createdEvent = await insertActionEvent(db, storedEvent);
       void mirrorActionEventToSourceInstance(storedEvent, request.log);
+
+      // Cancellation e-mails are deferred (separate issue): a source-initiated
+      // withdrawal must not reuse the receiver-response copy, so we send no
+      // notification for it here rather than send misleading mail.
+      if (createdEvent && !isCancellation) {
+        void dispatchActionNotifications(
+          {
+            lifecycle: 'status',
+            actionType: updatedAction.action_type,
+            actionId: updatedAction.action_id,
+            status: updatedAction.action_status,
+            updateCount: updatedAction.update_count,
+            currentInstanceUrl: getCurrentApiBaseUrl(),
+            source: {
+              ownerUserId: storedEvent.source_item_owner,
+              itemId: updatedAction.source_item_id,
+              domain: updatedAction.source_item_domain,
+              network: updatedAction.source_item_network,
+              instanceUrl: updatedAction.source_item_instance_url,
+            },
+            target: {
+              ownerUserId: storedEvent.target_item_owner,
+              itemId: updatedAction.target_item_id,
+              domain: updatedAction.target_item_domain,
+              network: updatedAction.target_item_network,
+              instanceUrl: updatedAction.target_item_instance_url,
+            },
+          },
+          request.log,
+        ).catch((err) =>
+          request.log.error({ err }, 'action notification dispatch failed'),
+        );
+      }
 
       return {
         action_id: updatedAction.action_id,

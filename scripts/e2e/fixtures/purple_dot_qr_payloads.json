@@ -64,9 +64,9 @@
     "mobile_number": "9000000006",
     "age": 38,
     "gender": "Male",
-    "disability_type": ["Multiple Disabilities"],
+    "disability_type": ["Multiple Disabilities including deaf-blindness"],
     "disability_percentage": 80,
-    "looking_for": ["Health & Rehabilitation", "Application Support"],
+    "looking_for": ["Health & Rehabilitation", "Scheme Application Support"],
     "looking_for_details": "Pension scheme application assistance",
     "service_city": "Allahabad",
     "documents_available": ["Aadhaar", "Disability Certificate", "Income Certificate"]

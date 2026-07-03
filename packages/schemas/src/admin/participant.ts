@@ -1,4 +1,5 @@
 import z from 'zod';
+import { ItemLocationsArray } from '../api/item_schemas';
 
 /**
  * Body for POST /api/v1/admin/participant.
@@ -94,6 +95,7 @@ export const ParticipantItemSnapshot = z.object({
   item_domain: z.string(),
   item_type: z.string(),
   item_state: z.record(z.string(), z.unknown()),
+  item_locations: ItemLocationsArray,
   created_at: z.iso.datetime(),
   updated_at: z.iso.datetime(),
 });

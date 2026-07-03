@@ -78,9 +78,12 @@ const dbState: {
   updates: [],
 };
 
+vi.mock('@/services/consent_version', () => ({
+  resolveConsentVersion: vi.fn(async () => 1),
+}));
+
 vi.mock('@api/db/postgres/drizzle_config', () => {
-  return {
-    db: {
+  const dbMock: Record<string, unknown> = {
       // Discriminate by the shape of select's projection:
       //   - existingAction lookup uses `db.select()` (no args)        → returns existingAction row
       //   - resolve_acting_actor uses `db.select({ onboardedByOrgId })` → returns userRows
@@ -131,8 +134,12 @@ vi.mock('@api/db/postgres/drizzle_config', () => {
           })),
         })),
       })),
-    },
+      insert: vi.fn(() => ({ values: vi.fn(() => Promise.resolve(undefined)) })),
   };
+  // The handler wraps the status update + accept-consent insert in a
+  // transaction; run the callback with the same mock as `tx`.
+  dbMock.transaction = vi.fn(async (cb: (tx: unknown) => unknown) => cb(dbMock));
+  return { db: dbMock };
 });
 
 vi.mock('@dpg/database', async () => {
@@ -362,12 +369,11 @@ describe('POST /api/v1/action/update-status (bulk, self-acted only)', () => {
   });
 
   describe('receiver consent gate', () => {
-    it('422 CONSENT_REQUIRED when status is in reveals_pii_on_status, consent_text_receiver declared, but body has no consent', async () => {
+    it('422 CONSENT_REQUIRED when status is in reveals_pii_on_status but body has no consent', async () => {
       const { getActionInteraction } = await import('@dpg/schemas');
       (getActionInteraction as ReturnType<typeof vi.fn>).mockReturnValueOnce({
         event_schema: {},
         reveals_pii_on_status: ['accepted'],
-        consent_text_receiver: 'I agree to share my PII.',
       });
       const res = await buildApp(undefined, { id: 'usr_agg_owned' }).inject({
         method: 'POST',
@@ -389,7 +395,6 @@ describe('POST /api/v1/action/update-status (bulk, self-acted only)', () => {
       (getActionInteraction as ReturnType<typeof vi.fn>).mockReturnValueOnce({
         event_schema: {},
         reveals_pii_on_status: ['accepted'],
-        consent_text_receiver: 'I agree to share my PII.',
       });
       const res = await buildApp(undefined, { id: 'usr_agg_owned' }).inject({
         method: 'POST',
@@ -412,7 +417,6 @@ describe('POST /api/v1/action/update-status (bulk, self-acted only)', () => {
       (getActionInteraction as ReturnType<typeof vi.fn>).mockReturnValueOnce({
         event_schema: {},
         reveals_pii_on_status: ['accepted'],
-        consent_text_receiver: 'I agree to share my PII.',
       });
       const { buildActionEventPayload } = await import(
         '@/utils/action_event_runtime'
@@ -423,7 +427,7 @@ describe('POST /api/v1/action/update-status (bulk, self-acted only)', () => {
         remark: 'looking forward',
         consent: {
           acknowledged: true,
-          text: 'I agree.',
+          version: 1,
           consented_at: '2026-01-01T00:00:00.000Z',
         },
       });
@@ -435,7 +439,7 @@ describe('POST /api/v1/action/update-status (bulk, self-acted only)', () => {
             action_id: EXISTING_ACTION.action_id,
             action_status: 'accepted',
             remarks: 'looking forward',
-            consent: { acknowledged: true, text: 'I agree.' },
+            consent: { acknowledged: true, version: 1 },
           },
         ],
       });
@@ -443,18 +447,40 @@ describe('POST /api/v1/action/update-status (bulk, self-acted only)', () => {
       // Verify buildActionEventPayload was called with consent
       expect(buildSpy).toHaveBeenCalledWith(
         expect.objectContaining({
-          consent: { acknowledged: true, text: 'I agree.' },
+          consent: { acknowledged: true, version: 1 },
           remarks: 'looking forward',
         }),
       );
     });
 
-    it('200 back-compat — does NOT gate when interaction has no consent_text_receiver', async () => {
+    it('422 CONSENT_REQUIRED even when interaction has no consent_text_receiver but reveals_pii_on_status is set', async () => {
       const { getActionInteraction } = await import('@dpg/schemas');
       (getActionInteraction as ReturnType<typeof vi.fn>).mockReturnValueOnce({
         event_schema: {},
         reveals_pii_on_status: ['accepted'],
-        // no consent_text_receiver
+        // no consent_text_receiver — required-ness comes from reveals_pii_on_status alone
+      });
+      const res = await buildApp(undefined, { id: 'usr_agg_owned' }).inject({
+        method: 'POST',
+        url: '/update-status',
+        payload: [
+          {
+            action_id: EXISTING_ACTION.action_id,
+            action_status: 'accepted',
+            // no consent
+          },
+        ],
+      });
+      expect(res.statusCode).toBe(422);
+      expect(res.json().results[0]).toMatchObject({ error: 'CONSENT_REQUIRED' });
+      expect(dbState.updates).toHaveLength(0);
+    });
+
+    it('200 back-compat — does NOT gate when reveals_pii_on_status is empty', async () => {
+      const { getActionInteraction } = await import('@dpg/schemas');
+      (getActionInteraction as ReturnType<typeof vi.fn>).mockReturnValueOnce({
+        event_schema: {},
+        reveals_pii_on_status: [],
       });
       const res = await buildApp(undefined, { id: 'usr_agg_owned' }).inject({
         method: 'POST',
@@ -468,6 +494,107 @@ describe('POST /api/v1/action/update-status (bulk, self-acted only)', () => {
       });
       expect(res.statusCode).toBe(200);
       expect(res.json().summary.succeeded).toBe(1);
+      expect(dbState.updates).toHaveLength(1);
+    });
+  });
+
+  describe('applicant cancellation (source-owner initiated)', () => {
+    const CANCEL_INTERACTION = {
+      event_schema: {},
+      reveals_pii_on_status: [],
+      metric_categories: { create: ['created'], accept: [], reject: [], cancel: ['cancelled'] },
+    };
+    const CANCEL_BODY = { action_id: EXISTING_ACTION.action_id, action_status: 'cancelled' };
+
+    it('200 when the source item owner cancels a request the receiver has not acted on', async () => {
+      const { getActionInteraction } = await import('@dpg/schemas');
+      (getActionInteraction as ReturnType<typeof vi.fn>).mockReturnValueOnce(CANCEL_INTERACTION);
+      dbState.existingAction = { ...EXISTING_ACTION, update_count: 0 };
+      const res = await buildApp(undefined, { id: 'usr_seeker' }).inject({
+        method: 'POST',
+        url: '/update-status',
+        payload: [CANCEL_BODY],
+      });
+      expect(res.statusCode).toBe(200);
+      expect(res.json().summary.succeeded).toBe(1);
+      expect(dbState.updates).toHaveLength(1);
+      expect(dbState.updates[0]).toMatchObject({ action_status: 'cancelled' });
+    });
+
+    it('422 RECEIVER_ALREADY_ACTED when the receiver has already acted (update_count > 0)', async () => {
+      const { getActionInteraction } = await import('@dpg/schemas');
+      (getActionInteraction as ReturnType<typeof vi.fn>).mockReturnValueOnce(CANCEL_INTERACTION);
+      dbState.existingAction = { ...EXISTING_ACTION, update_count: 1 };
+      const res = await buildApp(undefined, { id: 'usr_seeker' }).inject({
+        method: 'POST',
+        url: '/update-status',
+        payload: [CANCEL_BODY],
+      });
+      expect(res.statusCode).toBe(422);
+      expect(res.json().results[0]).toMatchObject({ error: 'RECEIVER_ALREADY_ACTED' });
+      expect(dbState.updates).toHaveLength(0);
+    });
+
+    it('422 NOT_SOURCE_ITEM_OWNER when a non-source owner (e.g. the receiver) tries to cancel', async () => {
+      const { getActionInteraction } = await import('@dpg/schemas');
+      (getActionInteraction as ReturnType<typeof vi.fn>).mockReturnValueOnce(CANCEL_INTERACTION);
+      dbState.existingAction = { ...EXISTING_ACTION, update_count: 0 };
+      const res = await buildApp(undefined, { id: 'usr_agg_owned' }).inject({
+        method: 'POST',
+        url: '/update-status',
+        payload: [CANCEL_BODY],
+      });
+      expect(res.statusCode).toBe(422);
+      expect(res.json().results[0]).toMatchObject({ error: 'NOT_SOURCE_ITEM_OWNER' });
+      expect(dbState.updates).toHaveLength(0);
+    });
+
+    it('422 ACTION_CANCELLED — receiver cannot accept an already-cancelled request', async () => {
+      const { getActionInteraction } = await import('@dpg/schemas');
+      (getActionInteraction as ReturnType<typeof vi.fn>).mockReturnValueOnce(CANCEL_INTERACTION);
+      dbState.existingAction = { ...EXISTING_ACTION, action_status: 'cancelled', update_count: 1 };
+      const res = await buildApp(undefined, { id: 'usr_agg_owned' }).inject({
+        method: 'POST',
+        url: '/update-status',
+        payload: [{ action_id: EXISTING_ACTION.action_id, action_status: 'accepted' }],
+      });
+      expect(res.statusCode).toBe(422);
+      expect(res.json().results[0]).toMatchObject({ error: 'ACTION_CANCELLED' });
+      expect(dbState.updates).toHaveLength(0);
+    });
+
+    it('422 ACTION_CANCELLED — source owner cannot re-cancel an already-cancelled request', async () => {
+      const { getActionInteraction } = await import('@dpg/schemas');
+      (getActionInteraction as ReturnType<typeof vi.fn>).mockReturnValueOnce(CANCEL_INTERACTION);
+      dbState.existingAction = { ...EXISTING_ACTION, action_status: 'cancelled', update_count: 1 };
+      const res = await buildApp(undefined, { id: 'usr_seeker' }).inject({
+        method: 'POST',
+        url: '/update-status',
+        payload: [CANCEL_BODY],
+      });
+      expect(res.statusCode).toBe(422);
+      expect(res.json().results[0]).toMatchObject({ error: 'ACTION_CANCELLED' });
+      expect(dbState.updates).toHaveLength(0);
+    });
+
+    it('200 cancellation is not gated on liveness (target item not live)', async () => {
+      const { getActionInteraction } = await import('@dpg/schemas');
+      (getActionInteraction as ReturnType<typeof vi.fn>).mockReturnValueOnce(CANCEL_INTERACTION);
+      const { fetchLocalItemSnapshot } = await import('@/utils/action_event_runtime');
+      (fetchLocalItemSnapshot as ReturnType<typeof vi.fn>).mockResolvedValue({
+        created_by: 'usr_agg_owned',
+        item_id: 'target_item_1',
+        item_locations: [],
+        private_state: {},
+        lifecycle_status: 'paused',
+      });
+      dbState.existingAction = { ...EXISTING_ACTION, update_count: 0 };
+      const res = await buildApp(undefined, { id: 'usr_seeker' }).inject({
+        method: 'POST',
+        url: '/update-status',
+        payload: [CANCEL_BODY],
+      });
+      expect(res.statusCode).toBe(200);
       expect(dbState.updates).toHaveLength(1);
     });
   });

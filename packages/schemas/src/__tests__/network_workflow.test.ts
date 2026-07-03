@@ -150,42 +150,6 @@ function validInteractionFixture() {
   };
 }
 
-describe('NetworkActionInteractionSchema consent_text fields', () => {
-  it('parses an interaction with both consent_text fields', () => {
-    const parsed = NetworkActionInteractionSchema.parse({
-      ...validInteractionFixture(),
-      consent_text_initiator: 'I agree to share my PII with this provider.',
-      consent_text_receiver: 'I agree to share my PII with the requester.',
-    });
-    expect(parsed.consent_text_initiator).toBe('I agree to share my PII with this provider.');
-    expect(parsed.consent_text_receiver).toBe('I agree to share my PII with the requester.');
-  });
-
-  it('parses an interaction with neither consent_text field (back-compat)', () => {
-    const parsed = NetworkActionInteractionSchema.parse(validInteractionFixture());
-    expect(parsed.consent_text_initiator).toBeUndefined();
-    expect(parsed.consent_text_receiver).toBeUndefined();
-  });
-
-  it('rejects whitespace-only consent_text', () => {
-    expect(() =>
-      NetworkActionInteractionSchema.parse({
-        ...validInteractionFixture(),
-        consent_text_initiator: '   ',
-      })
-    ).toThrow();
-  });
-
-  it('rejects consent_text longer than 500 chars', () => {
-    expect(() =>
-      NetworkActionInteractionSchema.parse({
-        ...validInteractionFixture(),
-        consent_text_initiator: 'x'.repeat(501),
-      })
-    ).toThrow();
-  });
-});
-
 describe('network_workflow domain card config', () => {
   function configWithCard(card: unknown) {
     return {

@@ -1,16 +1,20 @@
 import * as React from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { resolveTheme, type NetworkTheme } from './network-themes';
+import { resolveBrand } from './resolve-brand';
+import { resolveBrandMeta, type BrandMeta } from './brand-meta';
 import { getServedScope } from '@/lib/served-binding';
 
 interface NetworkThemeContextValue {
   themeId: string;
   theme: NetworkTheme;
+  brand: string;
 }
 
 const NetworkThemeContext = React.createContext<NetworkThemeContextValue>({
   themeId: 'blue_dot',
   theme: resolveTheme('blue_dot'),
+  brand: 'standard',
 });
 
 export function useNetworkTheme(): NetworkThemeContextValue {
@@ -35,18 +39,11 @@ function getInitialNetworkId(): string {
   return fromEnv || 'blue_dot';
 }
 
-// Networks shipping a designer-provided square mark drop a favicon.png next
-// to their logos. List them here so applyFavicon picks the file over the
-// generated SVG fallback. Wordmark-only networks (blue/purple) keep using
-// the generated dot-mark since their PNG logos are wide and unreadable at
-// 16×16.
-const NETWORKS_WITH_FAVICON_PNG = new Set(['orange_dot']);
-
 function kebab(id: string): string {
   return id.replace(/_/g, '-');
 }
 
-function applyFavicon(id: string): void {
+function applyFavicon(id: string, brand: string, meta: BrandMeta): void {
   // Drop any existing icons (PNG remnants etc.) before installing the new one.
   document
     .querySelectorAll('link[rel="icon"], link[rel="shortcut icon"]')
@@ -56,11 +53,15 @@ function applyFavicon(id: string): void {
   link.rel = 'icon';
   link.dataset.network = id;
 
-  if (NETWORKS_WITH_FAVICON_PNG.has(id)) {
-    // Designer-shipped square mark at /brand/<network>/favicon.png — used
-    // verbatim. Avoids the SVG dot-mark generated below.
+  if (meta.faviconType === 'png') {
+    // Designer-shipped square mark — path is brand-slug aware:
+    //   non-standard brand: /brand/<network>/<brand>/favicon.png
+    //   standard brand:     /brand/<network>/favicon.png
     link.type = 'image/png';
-    link.href = `/brand/${kebab(id)}/favicon.png`;
+    link.href =
+      brand && brand !== 'standard'
+        ? `/brand/${kebab(id)}/${brand}/favicon.png`
+        : `/brand/${kebab(id)}/favicon.png`;
   } else {
     // brand.json logos are wide wordmarks ("purple dots AI") — useless when
     // downscaled to the tab's 16×16 favicon slot. Generate a square dot-mark
@@ -83,35 +84,51 @@ function applyFavicon(id: string): void {
   document.head.appendChild(link);
 }
 
-function applyDocumentTitle(theme: NetworkTheme): void {
+function applyDocumentTitle(theme: NetworkTheme, brandCopy: Record<string, string>): void {
   // Network brand + "Signal Stack" platform name. When the deployment serves a
   // single domain (VITE_SERVED_BINDINGS with one entry) the domain is woven in
   // so each per-domain UI gets a distinct tab title (e.g. "Purple Dot ·
   // Provider · Signal Stack"). Multiple served domains, or unset, → the plain
   // network title. Generic for any network/domain.
+  // Brand copy wins over network defaults when a title key is present.
+  const networkName = brandCopy['title'] ?? theme.name;
   const scope = getServedScope();
   const domainLabel =
     scope && scope.domains.length === 1
       ? scope.domains[0].replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())
       : null;
   document.title = domainLabel
-    ? `${theme.name} · ${domainLabel} · Signal Stack`
-    : `${theme.name} · Signal Stack`;
+    ? `${networkName} · ${domainLabel} · Signal Stack`
+    : `${networkName} · Signal Stack`;
 }
 
-function applyThemeTokens(id: string): void {
-  const theme = resolveTheme(id);
+/**
+ * Apply the active network + brand to `<html>` (`data-network`/`data-brand`)
+ * and install the brand-aware favicon. Returns the resolved brand meta.
+ *
+ * Exported so non-router entry points (the tourist app) can apply branding
+ * after boot: the inline HTML `<script>` only sets first-paint *fallback*
+ * values because Vite `define` does NOT replace tokens (`__DEFAULT_BRAND__`,
+ * `__BRAND_REGISTRY__`) inside classic inline scripts — only inside JS
+ * modules. The signals app re-applies via NetworkThemeProvider; the tourist
+ * app calls this directly.
+ */
+export function applyNetworkBrand(id: string, brand: string): BrandMeta {
   const el = document.documentElement;
   el.dataset.network = id;
+  el.dataset.brand = brand;
   // Tokens come from the brand-theme Vite plugin's static <style> block
-  // selected by [data-network=<id>] — inline styles here would shadow
-  // those with stale hardcoded values from network-themes.ts and stop
-  // brand.json-derived colours (incl. --brand-cta) from updating on
-  // network switch. Force the browser to apply the new selector before
-  // applyFavicon reads --brand-cta.
+  // selected by [data-network=<id>][data-brand=<brand>]. Force the browser to
+  // apply the selector before applyFavicon reads --brand-cta.
   void el.offsetWidth;
-  applyFavicon(id);
-  applyDocumentTitle(theme);
+  const meta = resolveBrandMeta(id, brand);
+  applyFavicon(id, brand, meta);
+  return meta;
+}
+
+function applyThemeTokens(id: string, brand: string): void {
+  const meta = applyNetworkBrand(id, brand);
+  applyDocumentTitle(resolveTheme(id), meta.copy);
 }
 
 const ACTIVE_NETWORK_KEY = 'dpg-active-network';
@@ -158,11 +175,26 @@ export function NetworkThemeProvider({ children }: { children: React.ReactNode }
 
   const theme = React.useMemo(() => resolveTheme(themeId), [themeId]);
 
-  React.useLayoutEffect(() => {
-    applyThemeTokens(themeId);
-  }, [themeId]);
+  const activeBrand = React.useMemo(
+    () =>
+      resolveBrand({
+        runtimeConfig:
+          typeof window !== 'undefined'
+            ? (window as Window).__DPG_UI_CONFIG__?.VITE_BRAND_NAME
+            : null,
+        buildDefault: typeof __DEFAULT_BRAND__ !== 'undefined' ? __DEFAULT_BRAND__ : null,
+      }),
+    [],
+  );
 
-  const value = React.useMemo(() => ({ themeId, theme }), [themeId, theme]);
+  React.useLayoutEffect(() => {
+    applyThemeTokens(themeId, activeBrand);
+  }, [themeId, activeBrand]);
+
+  const value = React.useMemo(
+    () => ({ themeId, theme, brand: activeBrand }),
+    [themeId, theme, activeBrand],
+  );
 
   return (
     <NetworkThemeContext.Provider value={value}>{children}</NetworkThemeContext.Provider>

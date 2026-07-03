@@ -1,4 +1,6 @@
 {
+  "logoShape": "wordmark",
+  "faviconType": "svg",
   "brand": {
     "name": "blue dots AI",
     "wordmark": "blue dots AI",

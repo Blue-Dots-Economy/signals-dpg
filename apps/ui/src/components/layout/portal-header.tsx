@@ -1,7 +1,8 @@
 import { useTranslation } from 'react-i18next';
 import { useNetworkTheme } from '@/theme/theme-provider';
 import { useThemeMode } from '@/theme/mode-provider';
-import { brandLogoUrl } from '@/theme/brand-assets';
+import { brandLogoUrl, networkLogoUrl } from '@/theme/brand-assets';
+import { resolveBrandMeta } from '@/theme/brand-meta';
 
 interface PortalHeaderProps {
   /** Logo size preset. `sm` matches sidebar density; `lg` for auth / hero spots. */
@@ -9,37 +10,29 @@ interface PortalHeaderProps {
 }
 
 export function PortalHeader({ size = 'sm' }: PortalHeaderProps) {
-  const { themeId, theme } = useNetworkTheme();
+  const { themeId, theme, brand } = useNetworkTheme();
   const { resolved } = useThemeMode();
   const { t } = useTranslation();
   // Dark mode → light-text wordmark variant. Brand dot reads as a grey
   // ring on dark grey, but the wordmark itself is fully readable and
   // designer-shipped, which is the priority.
-  const logoSrc = brandLogoUrl(themeId, resolved === 'dark' ? 'light' : 'default');
+  const variant = resolved === 'dark' ? 'light' : 'default';
+  const logoSrc = brandLogoUrl(themeId, variant, brand);
 
-  // OneTAC (orange_dot) is a near-square mark (~1.78:1) — wordmarks like
-  // blue/purple are ~5:1. With max-w-[150px] + h-7, the wordmarks fill the
-  // width nicely but the square-ish mark stays tiny. Bump the height for
-  // square-ish brands so the mark reads at parity.
-  const isSquareishMark = themeId === 'orange_dot';
-
-  // blue_dot is a detailed wordmark + strapline (~3.3:1). Height-driven sizing
-  // (h-7) renders it too narrow to read; size it by WIDTH instead so it fills
-  // the same footprint the previous blue-dot logo occupied.
-  const isWideWordmark = themeId === 'blue_dot';
+  // Near-square marks have logoShape 'square' in the brand registry; wordmarks
+  // are 'wordmark'. Height-driven sizing keeps a wide wordmark readable, but a
+  // square mark stays tiny at h-7 — bump the height for square-ish brands so
+  // the mark reads at parity (and doesn't overflow the header).
+  const isSquareishMark = resolveBrandMeta(themeId, brand).logoShape === 'square';
 
   const logoClass =
     size === 'lg'
       ? isSquareishMark
         ? 'h-16 w-auto max-w-[260px] shrink-0 object-contain sm:h-20 sm:max-w-[320px]'
-        : isWideWordmark
-          ? 'h-auto w-[220px] shrink-0 object-contain sm:w-[260px]'
-          : 'h-10 w-auto max-w-[220px] shrink-0 object-contain sm:h-12 sm:max-w-[260px]'
+        : 'h-10 w-auto max-w-[220px] shrink-0 object-contain sm:h-12 sm:max-w-[260px]'
       : isSquareishMark
         ? 'h-12 w-auto max-w-[200px] shrink-0 object-contain'
-        : isWideWordmark
-          ? 'h-auto w-[150px] shrink-0 object-contain'
-          : 'h-7 w-auto max-w-[150px] shrink-0 object-contain';
+        : 'h-7 w-auto max-w-[150px] shrink-0 object-contain';
 
   return (
     <div className="flex items-center gap-2.5">
@@ -49,6 +42,10 @@ export function PortalHeader({ size = 'sm' }: PortalHeaderProps) {
           alt={t('nav.portal_logo_alt', { name: theme.name })}
           className={logoClass}
           loading="eager"
+          onError={(e) => {
+            const fb = networkLogoUrl(themeId, variant);
+            if (fb && e.currentTarget.src.endsWith(fb) === false) e.currentTarget.src = fb;
+          }}
         />
       ) : (
         /* Fallback dot-mark when the network has no designer logo on disk */

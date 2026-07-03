@@ -2,7 +2,7 @@ import * as React from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
 import type { RJSFSchema } from '@rjsf/utils';
-import { fetchNetworkConfig, fetchNetworkItems } from '@/lib/network-api';
+import { fetchNetworkConfig, fetchNetworkItems, PROFILE_FETCH_LIMIT } from '@/lib/network-api';
 import type { Item } from '@/lib/item-api';
 import { useBrowserLocation } from '@/hooks/use-browser-location';
 import type { LatLng } from '@/lib/geo/types';
@@ -16,8 +16,7 @@ import { TouristList } from './tourist-list';
 import { EnableLocationBanner } from './enable-location-banner';
 import { TouristHero } from './tourist-hero';
 import { itemToCardItem, matchesSearch, type CardItem } from './practitioner-data';
-
-const ORANGE_NETWORK_ID = (import.meta.env.VITE_NETWORK_ID || 'orange_dot').split(',')[0].trim();
+import { TOURIST_NETWORK_ID as ORANGE_NETWORK_ID } from './resolve-tourist-config';
 const ORANGE_DOMAIN_ID = 'practitioner';
 const REGION_DEFAULT_CENTER: [number, number] = [13.3409, 74.7421]; // Udupi
 const REGION_DEFAULT_ZOOM = 12;
@@ -81,7 +80,7 @@ export function TouristApp() {
     queryKey: ['tourist', 'items', ORANGE_NETWORK_ID, ORANGE_DOMAIN_ID, itemType],
     queryFn: ({ signal }) =>
       fetchNetworkItems(
-        { item_network: ORANGE_NETWORK_ID, item_domain: ORANGE_DOMAIN_ID, item_type: itemType, limit: 100 },
+        { item_network: ORANGE_NETWORK_ID, item_domain: ORANGE_DOMAIN_ID, item_type: itemType, limit: PROFILE_FETCH_LIMIT },
         signal,
       ),
   });

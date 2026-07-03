@@ -108,9 +108,9 @@ Write to `scripts/e2e/fixtures/purple_dot_qr_payloads.json` exactly:
     "mobile_number": "9000000006",
     "age": 38,
     "gender": "Male",
-    "disability_type": ["Multiple Disabilities"],
+    "disability_type": ["Multiple Disabilities including deaf-blindness"],
     "disability_percentage": 80,
-    "looking_for": ["Health & Rehabilitation", "Application Support"],
+    "looking_for": ["Health & Rehabilitation", "Scheme Application Support"],
     "looking_for_details": "Pension scheme application assistance",
     "service_city": "Allahabad",
     "documents_available": ["Aadhaar", "Disability Certificate", "Income Certificate"]
@@ -173,10 +173,10 @@ Write to `scripts/e2e/fixtures/purple_dot_providers.csv` exactly:
 ```csv
 contact_name,contact_phone,contact_email,provider_category,organisation_name,disabilities_served,services_offered,service_cities,official_address,state,district,block,pincode,service_details,catalog_url
 Ravi Kumar,9111111101,ravi@helpinghands.org,NGO / Trust,Helping Hands Foundation,Locomotor Disability|Blindness,Employment Opportunities|Training & Skill Building,Lucknow|Kanpur,"123 MG Road, Lucknow",Uttar Pradesh,Lucknow,Hazratganj,226001,Job placement and skilling for PWDs,https://helpinghands.org/services
-Sneha Reddy,9111111102,sneha@accessequip.in,Private Company,Access Equip Pvt Ltd,Locomotor Disability|Cerebral Palsy|Multiple Disabilities,Assistive Devices,Lucknow|Varanasi|Allahabad,"45 Civil Lines, Allahabad",Uttar Pradesh,Allahabad,Civil Lines,211001,Wheelchairs prosthetics and mobility aids,https://accessequip.in/catalog
-Dr Anil Joshi,9111111103,anil@inclusivecare.health,Hospital / Clinic,Inclusive Care Hospital,Hearing Impairment|Speech and Language Disability,Health & Rehabilitation|Application Support,Lucknow,"77 Hazratganj, Lucknow",Uttar Pradesh,Lucknow,Hazratganj,226001,Audiology and speech therapy services,
-Kavita Sinha,9111111104,kavita@scholarpath.ngo,NGO / Trust,Scholar Path Trust,Multiple Disabilities|Low Vision|Cerebral Palsy,Scholarships|Counselling & Mentorship,Kanpur|Varanasi,"22 Patel Nagar, Kanpur",Uttar Pradesh,Kanpur,Patel Nagar,208002,Education funding and life-skills mentorship,
-Ramesh Bhatia,9111111105,ramesh@finsolve.example,Private Company,FinSolve Financial Services,Multiple Disabilities,Financial Products (Loans/Insurance),Lucknow|Kanpur|Varanasi|Allahabad,"5 Banking Street, Lucknow",Uttar Pradesh,Lucknow,Aliganj,226024,Microloans and disability-friendly insurance,https://finsolve.example/products
+Sneha Reddy,9111111102,sneha@accessequip.in,Private Company,Access Equip Pvt Ltd,Locomotor Disability|Cerebral Palsy|Multiple Disabilities including deaf-blindness,Assistive Devices,Lucknow|Varanasi|Allahabad,"45 Civil Lines, Allahabad",Uttar Pradesh,Allahabad,Civil Lines,211001,Wheelchairs prosthetics and mobility aids,https://accessequip.in/catalog
+Dr Anil Joshi,9111111103,anil@inclusivecare.health,Hospital / Clinic,Inclusive Care Hospital,Hearing Impairment|Speech and Language Disability,Health & Rehabilitation|Scheme Application Support,Lucknow,"77 Hazratganj, Lucknow",Uttar Pradesh,Lucknow,Hazratganj,226001,Audiology and speech therapy services,
+Kavita Sinha,9111111104,kavita@scholarpath.ngo,NGO / Trust,Scholar Path Trust,Multiple Disabilities including deaf-blindness|Low Vision|Cerebral Palsy,Scholarships|Counselling & Mentorship,Kanpur|Varanasi,"22 Patel Nagar, Kanpur",Uttar Pradesh,Kanpur,Patel Nagar,208002,Education funding and life-skills mentorship,
+Ramesh Bhatia,9111111105,ramesh@finsolve.example,Private Company,FinSolve Financial Services,Multiple Disabilities including deaf-blindness,Financial Products (Loans/Insurance),Lucknow|Kanpur|Varanasi|Allahabad,"5 Banking Street, Lucknow",Uttar Pradesh,Lucknow,Aliganj,226024,Microloans and disability-friendly insurance,https://finsolve.example/products
 ```
 
 Note: array fields (`disabilities_served`, `services_offered`, `service_cities`) use `|` as separator — matches Aggregator's CSV import convention (verify against Aggregator's `participant-provider` v1 schema before running; if its convention is comma-in-cell, re-edit accordingly).

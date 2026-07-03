@@ -141,8 +141,6 @@ const MetricCategoriesSchema = z.object({
   cancel: z.array(z.string().min(1)).optional().default([]),
 }).strict();
 
-const ConsentTextSchema = z.string().trim().min(1).max(500);
-
 export const NetworkActionInteractionSchema = z
   .object({
     from_network: z.string().min(1).optional(),
@@ -155,8 +153,6 @@ export const NetworkActionInteractionSchema = z
     event_schema: JsonSchemaDocumentSchema.optional(),
     metric_categories: MetricCategoriesSchema.nullable().optional(),
     reveals_pii_on_status: z.array(z.string().min(1)).optional().default([]),
-    consent_text_initiator: ConsentTextSchema.optional(),
-    consent_text_receiver: ConsentTextSchema.optional(),
   })
   .superRefine((interaction, ctx) => {
     if (interaction.reveals_pii_on_status.length === 0) return;

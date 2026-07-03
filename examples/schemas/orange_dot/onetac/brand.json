@@ -1,0 +1,74 @@
+{
+  "logoShape": "square",
+  "faviconType": "png",
+  "copy": { "title": "OneTAC" },
+  "brand": {
+    "name": "orange dots AI",
+    "wordmark": "orange dots AI",
+    "seededBy": "EkStep Foundation",
+    "strapline": "Seeded by EkStep Foundation"
+  },
+  "logo": {
+    "default":       "/brand/orange-dot/logo.png",
+    "withStrapline": "/brand/orange-dot/logo-with-strapline-light.png",
+    "onLight":       "/brand/orange-dot/logo.png",
+    "onDark":        "/brand/orange-dot/logo-light.png",
+    "onBrand":       "/brand/orange-dot/logo.png",
+    "onBrandLight":  "/brand/orange-dot/logo-light.png"
+  },
+  "theme": {
+    "primary":            "#9c5b1f",
+    "primaryForeground":  "#fdf6ed",
+    "accent":             "#fef3e6",
+    "accentForeground":   "#1e1a14",
+    "heroFrom":           "#3d2510",
+    "heroTo":             "#7a4517",
+    "heroHighlight":      "#c79670",
+    "cta":                "#9c5b1f",
+    "ctaForeground":      "#ffffff"
+  },
+  "colours": {
+    "primary": [
+      { "name": "Charcoal",     "hex": "#1f1b16" },
+      { "name": "Off White",    "hex": "#fdf6ed" },
+      { "name": "Sienna 500",   "hex": "#9c5b1f" },
+      { "name": "Sienna 400",   "hex": "#b56e2a" },
+      { "name": "Sienna 700",   "hex": "#7a4517" }
+    ],
+    "secondary": [
+      { "name": "Caramel",      "hex": "#c79670" },
+      { "name": "Marigold",     "hex": "#facc15" },
+      { "name": "Coastal Teal", "hex": "#4c9aa8" },
+      { "name": "Deep Teal",    "hex": "#0d9488" },
+      { "name": "Terracotta",   "hex": "#b45309" },
+      { "name": "Sand",         "hex": "#fde68a" }
+    ],
+    "accent": [
+      { "name": "Ink",          "hex": "#1e1a14" },
+      { "name": "Slate",        "hex": "#57534e" },
+      { "name": "Mist",         "hex": "#e7e5e4" },
+      { "name": "Pale Sienna",  "hex": "#fef3e6" },
+      { "name": "Cream",        "hex": "#fff7ed" },
+      { "name": "Pale Mint",    "hex": "#ccfbf1" }
+    ],
+    "gradients": [
+      { "name": "Dusk",         "from": "#3d2510", "to": "#7a4517" },
+      { "name": "Sienna",       "from": "#7a4517", "to": "#9c5b1f" },
+      { "name": "Sand",         "from": "#fff7ed", "to": "#fde68a" },
+      { "name": "Coast",        "from": "#4c9aa8", "to": "#0d9488" }
+    ]
+  },
+  "typography": {
+    "primaryFont": "Arial",
+    "headings": {
+      "family": "Arial",
+      "weight": "Bold",
+      "sampleCopy": "Discovering verified locals for every traveller exploring"
+    },
+    "body": {
+      "family": "Arial",
+      "weight": "Regular",
+      "sampleCopy": "Local demand can't discover trusted local supply. Orange Dots makes every verified practitioner — surfer, guide, artisan, homestay — a discoverable pin on one map. No login to browse. Connect when you're ready."
+    }
+  }
+}

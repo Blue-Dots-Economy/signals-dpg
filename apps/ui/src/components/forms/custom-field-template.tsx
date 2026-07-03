@@ -1,0 +1,98 @@
+import { type FieldTemplateProps, getTemplate, getUiOptions } from '@rjsf/utils';
+
+import { cn } from '@/lib/utils';
+
+/**
+ * FieldTemplate override of `@rjsf/shadcn`'s default. Identical layout, with one
+ * change: the required indicator is a red asterisk shown for every required field
+ * (the upstream template renders a plain `*` that only turns red on validation
+ * error). This gives a consistent red required marker across all schema-driven
+ * forms. See issue #200.
+ */
+export default function CustomFieldTemplate({
+  id,
+  children,
+  displayLabel,
+  rawErrors = [],
+  errors,
+  help,
+  description,
+  rawDescription,
+  classNames,
+  style,
+  disabled,
+  label,
+  hidden,
+  onKeyRename,
+  onKeyRenameBlur,
+  onRemoveProperty,
+  readonly,
+  required,
+  schema,
+  uiSchema,
+  registry,
+}: FieldTemplateProps) {
+  const uiOptions = getUiOptions(uiSchema);
+  const WrapIfAdditionalTemplate = getTemplate<'WrapIfAdditionalTemplate'>(
+    'WrapIfAdditionalTemplate',
+    registry,
+    uiOptions,
+  );
+  if (hidden) {
+    return <div className="hidden">{children}</div>;
+  }
+  const isCheckbox = uiOptions.widget === 'checkbox';
+  return (
+    <WrapIfAdditionalTemplate
+      classNames={classNames}
+      style={style}
+      disabled={disabled}
+      id={id}
+      label={label}
+      displayLabel={displayLabel}
+      onKeyRename={onKeyRename}
+      onKeyRenameBlur={onKeyRenameBlur}
+      onRemoveProperty={onRemoveProperty}
+      rawDescription={rawDescription}
+      readonly={readonly}
+      required={required}
+      schema={schema}
+      uiSchema={uiSchema}
+      registry={registry}
+    >
+      <div className="flex flex-col gap-2">
+        {displayLabel && !isCheckbox && (
+          <label
+            className={cn(
+              'text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70',
+              { ' text-destructive': rawErrors.length > 0 },
+            )}
+            htmlFor={id}
+          >
+            {label}
+            {required ? (
+              <>
+                <span aria-hidden="true" className="ml-0.5 text-destructive">
+                  *
+                </span>
+                <span className="sr-only"> (required)</span>
+              </>
+            ) : null}
+          </label>
+        )}
+        {children}
+        {displayLabel && rawDescription && !isCheckbox && (
+          <span
+            className={cn('text-xs font-medium text-muted-foreground', {
+              ' text-destructive': rawErrors.length > 0,
+            })}
+          >
+            {description}
+          </span>
+        )}
+        {errors}
+        {help}
+      </div>
+    </WrapIfAdditionalTemplate>
+  );
+}

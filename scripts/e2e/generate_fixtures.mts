@@ -174,23 +174,19 @@ const DISABILITY_TYPES = [
   'Multiple Sclerosis',
   'Muscular Dystrophy',
   "Parkinson's Disease",
-  'Sickle Cell Disease',
+  'Sickle Cell Anaemia',
   'Specific Learning Disabilities',
   'Speech and Language Disability',
   'Thalassemia',
   'Chronic Neurological Conditions',
-  'Deaf',
-  'Hard of Hearing',
   'Multiple Disabilities including deaf-blindness',
-  'Multiple Disabilities',
-  'Mental Retardation',
 ] as const;
 
 const LOOKING_FOR = [
   'Assistive Devices',
   'Health & Rehabilitation',
   'Training & Skill Building',
-  'Application Support',
+  'Scheme Application Support',
   'Counselling & Mentorship',
   'Accessibility Support',
   'Employment Opportunities',
@@ -281,7 +277,7 @@ const LOOKING_FOR_DETAILS_BY_KEY: Record<string, string[]> = {
     'Occupational therapy + home visits',
     'Rehabilitation post-surgery',
   ],
-  'Application Support': [
+  'Scheme Application Support': [
     'Pension scheme application assistance',
     'UDID card renewal',
     'Disability certificate processing',

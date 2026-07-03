@@ -200,7 +200,7 @@ export function buildActionEventPayload(input: {
   action_status: string;
   remarks?: string | null;
   context: ActionEventPayloadContext;
-  consent?: { acknowledged: true; text: string };
+  consent?: { acknowledged: true; version: number };
 }): Record<string, unknown> {
   const base = {
     ...projectEventPayloadFromSchema(input.event_schema, input.context),
@@ -212,7 +212,7 @@ export function buildActionEventPayload(input: {
     ...base,
     consent: {
       acknowledged: input.consent.acknowledged,
-      text: input.consent.text,
+      version: input.consent.version,
       consented_at: new Date().toISOString(),
     },
   };
