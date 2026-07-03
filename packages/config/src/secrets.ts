@@ -1,4 +1,5 @@
 import z from '@dpg/schemas';
+import { ConfigError } from './config_error.js';
 
 export const InstanceSecretsSchema = z.object({
   INSTANCE_NAME: z.string(),
@@ -16,11 +17,45 @@ export const AuthSecretsSchema = z.object({
     .string()
     .default('true')
     .transform((val) => val === 'true'),
+  // Coerces the env string to a boolean. The `.transform` cannot enforce
+  // environment safety (it only parses) — assertCreateTestOtpSafe below does.
   CREATE_TEST_OTP: z
     .string()
     .default('false')
     .transform((val) => val === 'true'),
 });
+
+/**
+ * Startup guard (D7): CREATE_TEST_OTP makes generateOtp() return the fixed
+ * value "000000" for every account, so it must never be enabled in production.
+ *
+ * - production + enabled     -> throw ConfigError (boot fails, non-zero exit)
+ * - non-production + enabled -> loud warning, continue
+ * - disabled                 -> no-op
+ *
+ * Pure apart from the dev warning, so it is directly unit-testable. Invoked
+ * once from apps/api/src/config.ts at module load.
+ */
+export function assertCreateTestOtpSafe(
+  instanceEnv: 'development' | 'production',
+  createTestOtp: boolean
+): void {
+  if (!createTestOtp) return;
+
+  if (instanceEnv === 'production') {
+    throw new ConfigError(
+      'CREATE_TEST_OTP must not be enabled when INSTANCE_ENV=production: it ' +
+        'forces every OTP to the fixed value "000000", allowing anyone to sign ' +
+        'in as any account. Unset CREATE_TEST_OTP (or set it to "false").'
+    );
+  }
+
+  process.emitWarning(
+    'CREATE_TEST_OTP is enabled: all OTPs are the fixed value "000000". ' +
+      'This is for local development only and must never reach production.',
+    { code: 'CREATE_TEST_OTP_ENABLED' }
+  );
+}
 
 export const NotificationSecretsSchema = z.object({
   NOTIFICATION_SERVICE_ENDPOINT: z.string().optional(),

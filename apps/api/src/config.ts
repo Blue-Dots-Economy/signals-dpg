@@ -1,4 +1,4 @@
-import { parseServedDomains } from '@dpg/config';
+import { assertCreateTestOtpSafe, parseServedDomains } from '@dpg/config';
 import { loadEnv } from '@/env';
 
 export const {
@@ -12,6 +12,9 @@ export const {
   schemaRegistry,
   geocoding,
 } = loadEnv();
+
+// Startup guard (D7): fail hard in prod, warn in dev, if CREATE_TEST_OTP is on.
+assertCreateTestOtpSafe(instance.INSTANCE_ENV, auth.CREATE_TEST_OTP);
 
 export const apiConfig = {
   domain: api.API_DOMAIN,
