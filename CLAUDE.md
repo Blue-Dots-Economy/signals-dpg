@@ -10,7 +10,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Other load-bearing docs:
 
-- `readme.md` — quick start, useful commands
+- `README.md` — quick start, useful commands
+- `SETUP.md` — full local walkthrough (Signals API + UI + optional aggregator-dpg integration); single root `.env`
 - `docs/operations/integrating-dpgs.md` — the two-header service-auth model used by aggregator-dpg / voice-dpg
 - `docs/operations/migrations.md`, `docs/operations/secrets.md`
 
@@ -40,9 +41,23 @@ Both go through `apps/api/plugins/auth/auth_middleware.ts`:
 1. **Apikey path** — `x-api-key` is checked first. If present and invalid, returns `403 INVALID_API_KEY` immediately (no fallback). Used by integrating DPGs (aggregator-dpg, voice-dpg).
 2. **Session path** — used by the UI when `x-api-key` is absent.
 
-`/api/v1/admin/*` additionally requires `x-acting-org-id`, validated by `apps/api/src/middleware/acting_org.ts`. The `organization.type` column (`network_service` | `aggregator` | `voice`) gates what each acting org may do — e.g. only `network_service` may upsert aggregators. The middleware populates `request.user` and `request.acting_org`; routes should read those, not re-parse headers.
+`/api/v1/admin/*` additionally requires `x-acting-org-id`, validated by `apps/api/src/middleware/acting_org.ts`. The `organization.type` column (`network_service` | `aggregator` | `voice`) gates what each acting org may do — e.g. only `network_service` may upsert aggregators. The middleware populates `request.user` and `request.acting_org`; routes should read those, not re-parse headers. `POST /api/v1/admin/participant/decrypt` returns decrypted participant profile `item_state`; ownership is keyed on the item creator's `user.onboarded_by_org_id` (aggregators see only items whose creator they onboarded; `network_service` sees all items in served networks) — never on the lazily-materialized `item_metrics` cache.
 
 `AUTH_MIDDLEWARE_ENABLED` (default `true`) is the kill switch — useful when running migrations or seed scripts that shouldn't hit the auth path.
+
+## Consent (v1)
+
+Consent is an **append-only ledger** (`consent_record` table). Latest event per `(subject, type)` wins by `seq`, never by timestamp. Content is never stored in the row — only `(category, version)`; the text is resolved from `consent.json`. Levels:
+
+- **user** — `terms` / `privacy` (keyed on `user_id`), via `/api/v1/consent`.
+- **item** — `profile_creation` (keyed on `item_id`; idempotent via a partial unique index) and `action` rows (keyed on `item_id` + `action_id`, with `action_type` / `action_stage`).
+
+Two invariants worth internalising:
+
+- **Version is derived server-side.** Never trust a client-supplied version integer. `apps/api/src/services/consent_version.ts` (`resolveConsentVersion`) reads the cached config for the `(network, brand, category[, actionType, stage])` tuple and records that. A client cannot record acceptance of a version the user never saw.
+- **Consent copy lives in `consent.json`, not `network.json`.** Each network's `consent.json` sits beside its `network.json` (brand overrides in a brand-named sub-folder), is loaded via `CONSENT_CONFIG_SOURCE` (`local` default; remote is a follow-up returning `[]`), and is cached as `consent_config` entries alongside network schemas (`network_schema_cache.ts`). This **replaced** the inline `consent_text_initiator` / `consent_text_receiver` fields that used to live in `network.json` action definitions — do not reintroduce them.
+
+`create_item` accepts an optional `consent` block to capture profile-creation consent atomically with the profile. `perform_action` / `update_action_status` gate on action-consent at `initiate` / `accept` stages.
 
 ## Workspace layout
 
@@ -50,14 +65,16 @@ pnpm + Turborepo monorepo. Workspace alias is `@dpg/*` → `packages/*/src` (not
 
 - `apps/api` — Fastify + Zod (`fastify-type-provider-zod`) + Drizzle ORM + better-auth + Redis. Entry: `src/server.ts`.
 - `apps/ui` — React 19 + Vite, schema-driven (renders forms/cards from network + item schemas).
-- `packages/config` — Zod env schemas (`secrets.ts`), allowed-origins lists, network-config loader. **All env vars must be added here**, not parsed ad-hoc.
+- `packages/config` — Zod env schemas (`secrets.ts`), allowed-origins lists, network-config loader, consent-config loader. **All env vars must be added here**, not parsed ad-hoc.
 - `packages/database` — Drizzle setup, partition-aware query helpers.
-- `packages/schemas` — shared Zod schemas (API request bodies, admin, schema registry).
+- `packages/schemas` — shared Zod schemas (API request bodies, admin, consent, consent-config, schema registry).
 - `packages/auth`, `packages/notification`, `packages/match_score` — service clients / config.
 
 DB schema files live in `apps/api/db/postgres/schema/` and migrations in `apps/api/drizzle/`. **Never hand-edit migration files** — regenerate via `pnpm db:generate:api`.
 
 Item tables are partitioned. Use the partition-aware query helpers in `@dpg/database` so the planner can prune; ad-hoc queries that select across the parent without a partition key will scan everything.
+
+`user.tags` is a keyed `jsonb` column (GIN-indexed) for extensible support/ops markers without a migration per flag — current key is `is_test` (marks a user, and by the `created_by`/owner join their profiles/posts/applications, as test data for later bulk cleanup).
 
 ## Commands not covered in AGENTS.md
 

@@ -3,6 +3,8 @@
 DPG is a network-aware backend for publishing, validating, discovering, and interacting with schema-typed items across many independent instances.
 
 > 📚 **Documentation**: https://blue-dots-economy.github.io/bluedots-docs/ — source at [Blue-Dots-Economy/bluedots-docs](https://github.com/Blue-Dots-Economy/bluedots-docs)
+>
+> 🚀 **Getting started locally?** `SETUP.md` is the step-by-step local walkthrough (Signals API + UI, plus the optional aggregator-dpg integration). The Quick Start below is the condensed version.
 
 The core model is:
 
@@ -19,9 +21,9 @@ This repository contains the current DPG API runtime, schema-driven UI app, exam
 
 - `apps/api`: Fastify API runtime
 - `apps/ui`: schema-driven React UI for browsing domains, creating items, and triggering actions
-- `examples/schemas`: example network definitions such as `yellow_dot` and `blue_dot`
+- `examples/schemas`: example network definitions such as `yellow_dot`, `blue_dot`, `purple_dot`, and `orange_dot`, each with a `network.json` and a companion `consent.json` (terms/privacy/profile/action consent copy; brand overrides live in sub-folders)
 - `examples/api`: example request payloads in Markdown
-- `packages/config`: env parsing and network config loading
+- `packages/config`: env parsing, network config loading, and consent config loading
 - `packages/database`: database helpers and partitioning
 - `packages/schemas`: API request schemas and network schema parsing
 - `packages/auth`: auth integration
@@ -36,15 +38,21 @@ Main route groups:
 - `/api/v1/action`
 - `/api/v1/event`
 - `/api/v1/network`
+- `/api/v1/match-score`
+- `/api/v1/consent` — user- and item-level consent capture (terms/privacy, profile creation, per-action)
+- `/api/v1/admin` — service-to-service admin surface (requires `x-acting-org-id`)
+- `/api/v1/aggregator`
 
 Important behavior:
 
-- `POST /api/v1/item/create` creates an item on the current instance
+- `POST /api/v1/item/create` creates an item on the current instance (accepts an optional `consent` block for profile-creation acceptance)
 - `GET /api/v1/item/fetch` fetches items from the current instance only
 - `GET /api/v1/network/item/fetch` performs inter-instance fetch for a network/domain
 - `GET /api/v1/network/schema/:network/:domain/:itemType` returns one concrete item schema
-- `GET /api/v1/network/schemas` returns cached schemas known to the instance
+- `GET /api/v1/network/schemas` returns cached schemas known to the instance (now includes `consent_config` entries)
 - `POST /api/v1/network/refetch_schemas` refreshes schema cache
+- `GET`/`POST /api/v1/consent/*` reads and records consent; the accepted document **version is always derived server-side** from the loaded `consent.json`, never trusted from the client
+- `POST /api/v1/admin/participant/decrypt` returns decrypted participant profile `item_state` for owned items (aggregator scoped to items it onboarded; `network_service` scoped to its served networks)
 
 Item typing is schema-driven. `item_type` is not arbitrary; it should be a schema identifier defined by the network, for example `profile_1.0` or `profile_1.1`.
 
@@ -76,20 +84,36 @@ pnpm install
 
 ### 2. Configure environment
 
-Start from `.env.example` and set at least:
+There is a **single `.env` at the repo root** covering the API, database, cache,
+and the UI (`VITE_*`). Copy it and it works out of the box for a local `blue_dot`
+run — no edits required:
+
+```bash
+cp .env.example .env
+```
+
+The values that matter most (all pre-filled in `.env.example`):
 
 ```bash
 INSTANCE_ENV="development"
 API_DOMAIN="http://localhost"
 API_PORT="2742"
-SERVED_DOMAINS="yellow_dot/student"
+SERVED_DOMAINS="blue_dot/seeker,blue_dot/provider"
 NETWORK_CONFIG_SOURCE="local"
-NETWORK_CONFIG_LOCAL_FILE="examples/schemas/yellow_dot/network.json"
+# Path is resolved from apps/api/, so it must start with ../../
+NETWORK_CONFIG_LOCAL_FILE="../../examples/schemas/blue_dot/network.json"
 POSTGRES_HOST="127.0.0.1"
-POSTGRES_PORT="5432"
+POSTGRES_PORT=5432
 REDIS_HOST="127.0.0.1"
-REDIS_PORT="5555"
+REDIS_PORT=5555
+# Required: base64-encoded 32 bytes (AES-256) used to encrypt participant PII.
+# A working dev key is pre-filled; generate a fresh one for any deployed env:
+#   openssl rand -base64 32
+SIGNALS_PII_KEY='<replace-me>'
 ```
+
+Consent documents are loaded from a `consent.json` beside the active
+`network.json` (`CONSENT_CONFIG_SOURCE=local` by default).
 
 For remote network configs, use:
 
@@ -109,11 +133,15 @@ Or use `SCHEMA_REGISTRY_URL` with either:
 docker compose up -d db redis
 ```
 
-### 4. Run database migrations
+### 4. Set up the database (first time only)
 
 ```bash
-pnpm db:migrate:api
+pnpm db:push:api           # apply better-auth + Drizzle schema (may prompt to confirm)
+pnpm db:init:api           # create partitioned items / actions / events tables
+pnpm db:seed:services:api  # mint the service user + apikey (idempotent)
 ```
+
+See `SETUP.md` for the full walkthrough and the aggregator integration steps.
 
 ### 5. Start the API
 
@@ -147,14 +175,19 @@ VITE_MAP_PROVIDER="leaflet"
 - `pnpm build:api`
 - `pnpm preview:api`
 - `pnpm start:api`
-- `pnpm db:pull:api`
-- `pnpm db:push:api`
 - `pnpm db:generate:api`
 - `pnpm db:migrate:api`
+- `pnpm db:push:api`
+- `pnpm db:init:api` — create partitioned items / actions / events tables
+- `pnpm db:seed:services:api` — mint the service user + apikey
+- `pnpm db:seed:purple_dot:api` — seed purple_dot sample data
 - `pnpm db:studio:api`
 - `pnpm dev:ui`
 - `pnpm build:ui`
 - `pnpm preview:ui`
+- `pnpm dev:tourist` / `pnpm build:tourist` — the tourist (OneTAC) UI build variant
+- `pnpm typecheck`
+- `pnpm schema:bundle` — regenerate `apps/api/db/postgres/schema.sql` from the Drizzle schema
 
 ## Examples
 
@@ -181,6 +214,27 @@ DPG uses two fetch paths:
 
 - `GET /api/v1/item/fetch`: instance-local fetch, intended for local reads such as a user's own items; cached briefly in Redis
 - `GET /api/v1/network/item/fetch`: inter-instance fetch, which performs count-first discovery, selects only relevant peer instances, then fetches the required slices and caches the result in Redis
+
+## Consent
+
+Consent Management v1 records participant consent as an append-only ledger
+(`consent_record`) across three levels:
+
+- **User-level** — terms of service and privacy policy (`/api/v1/consent`).
+- **Item-level** — profile-creation consent, captured with the profile item
+  (`create_item` accepts an optional `consent` block).
+- **Action-level** — per-action consent at `initiate` and `accept` stages of
+  interactions such as `connect` and `apply`.
+
+Consent copy lives in a `consent.json` beside each network's `network.json`
+(brand overrides in a brand-named sub-folder), is loaded via
+`CONSENT_CONFIG_SOURCE` (`local` by default) and cached alongside network
+schemas. The **document version recorded in the ledger is always resolved
+server-side** from the loaded config for the `(network, brand, category[,
+actionType, stage])` tuple — the client cannot record acceptance of a version it
+never saw. This replaces the old inline `consent_text_initiator` /
+`consent_text_receiver` fields that used to live in `network.json` action
+definitions.
 
 ## Notes
 
