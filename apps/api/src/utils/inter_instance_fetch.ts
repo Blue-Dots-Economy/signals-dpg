@@ -1,9 +1,10 @@
+import type { FastifyBaseLogger } from 'fastify';
 import {
   getDomainMinimumCacheTtlSeconds,
   type NetworkConfigDocument,
 } from '@dpg/schemas';
 import { redis } from '@api/db/secondary/redis';
-import { getCurrentApiBaseUrl } from '@/config';
+import { apiConfig, getCurrentApiBaseUrl } from '@/config';
 import { isServedDomainBinding } from '@/utils/served_domain_guard';
 import {
   countLocalItems,
@@ -61,6 +62,7 @@ export async function fetchItemsAcrossInstances(input: {
   networkConfig: NetworkConfigDocument;
   filters: ItemFetchFilters;
   requestedCacheTtlSeconds?: number;
+  log: FastifyBaseLogger;
 }) {
   const minimumTtlSeconds = getDomainMinimumCacheTtlSeconds(
     input.networkConfig,
@@ -74,16 +76,31 @@ export async function fetchItemsAcrossInstances(input: {
   const cachedPage = await redis.get(pageCacheKey);
 
   if (cachedPage) {
-    return normalizeFetchItemsResponse(
+    // Only complete aggregates are ever cached, so a cache hit is by
+    // definition complete. Legacy entries predate the partial fields; default
+    // them so the response shape is stable.
+    const normalized = normalizeFetchItemsResponse(
       JSON.parse(cachedPage) as FetchItemsResponse
     );
+    return {
+      ...normalized,
+      meta: {
+        ...normalized.meta,
+        partial: false,
+        unavailable_instances: [] as string[],
+      },
+    };
   }
 
   const domainInstances = input.networkConfig.instances.filter(
     (instance) => instance.domain_id === input.filters.item_domain
   );
 
-  const counts = await Promise.all(
+  // One unhealthy or slow peer must never fail the whole aggregate: fan out
+  // with allSettled, drop failed peers with a warn, and return a partial.
+  const unavailableInstances = new Set<string>();
+
+  const settledCounts = await Promise.allSettled(
     domainInstances.map(async (instance) => ({
       instanceUrl: instance.instance_url,
       count: await getInstanceCount({
@@ -94,12 +111,26 @@ export async function fetchItemsAcrossInstances(input: {
     }))
   );
 
+  const counts: InstanceCount[] = [];
+  settledCounts.forEach((result, index) => {
+    if (result.status === 'fulfilled') {
+      counts.push(result.value);
+      return;
+    }
+    const instanceUrl = domainInstances[index].instance_url;
+    unavailableInstances.add(instanceUrl);
+    input.log.warn(
+      { err: result.reason, instanceUrl, phase: 'count' },
+      'Peer count fetch failed; excluding instance from aggregate'
+    );
+  });
+
   const total = counts.reduce(
     (sum: number, entry: InstanceCount) => sum + entry.count,
     0
   );
   const slices = buildPagePlan(counts, input.filters.offset, input.filters.limit);
-  const responses = await Promise.all(
+  const settledResponses = await Promise.allSettled(
     slices.map((slice) =>
       fetchInstancePage({
         instanceUrl: slice.instanceUrl,
@@ -112,21 +143,44 @@ export async function fetchItemsAcrossInstances(input: {
     )
   );
 
+  const responses: FetchItemsResponse[] = [];
+  settledResponses.forEach((result, index) => {
+    if (result.status === 'fulfilled') {
+      responses.push(result.value);
+      return;
+    }
+    const instanceUrl = slices[index].instanceUrl;
+    unavailableInstances.add(instanceUrl);
+    input.log.warn(
+      { err: result.reason, instanceUrl, phase: 'page' },
+      'Peer page fetch failed; dropping slice from aggregate'
+    );
+  });
+
+  const partial = unavailableInstances.size > 0;
+
   const mergedResponse = {
     meta: {
       total,
       limit: input.filters.limit,
       offset: input.filters.offset,
+      partial,
+      unavailable_instances: [...unavailableInstances],
     },
     items: responses.flatMap((response) => response.items),
   };
 
-  await redis.set(
-    pageCacheKey,
-    JSON.stringify(mergedResponse),
-    'EX',
-    cacheTtlSeconds
-  );
+  // Never cache a partial aggregate: caching it would serve incomplete data
+  // under the full-page key even after the failed peer recovers. Skipping the
+  // write means the next request re-attempts the peer and self-heals.
+  if (!partial) {
+    await redis.set(
+      pageCacheKey,
+      JSON.stringify(mergedResponse),
+      'EX',
+      cacheTtlSeconds
+    );
+  }
 
   return mergedResponse;
 }
@@ -194,6 +248,7 @@ async function fetchRemoteCount(
         'content-type': 'application/json',
       },
       body: JSON.stringify(filters),
+      signal: AbortSignal.timeout(apiConfig.peer_fetch_timeout_ms),
     }
   );
 
@@ -216,6 +271,7 @@ async function fetchRemotePage(instanceUrl: string, filters: ItemFetchFilters) {
         'content-type': 'application/json',
       },
       body: JSON.stringify(filters),
+      signal: AbortSignal.timeout(apiConfig.peer_fetch_timeout_ms),
     }
   );
 
