@@ -443,9 +443,26 @@ export function HomePage() {
   const showLocationBanner =
     preferredSource === 'browser' && browserLocation.status === 'error';
 
+  // Bumped on every explicit source pick so the map recenters on the chosen
+  // anchor even when the resolved coordinate is unchanged (e.g. re-selecting
+  // "My profile" after panning, or after a denied browser request fell back to
+  // the profile location).
+  const [recenterNonce, setRecenterNonce] = React.useState(0);
+
   const handleLocationSourceChange = React.useCallback(
-    (next: PreferredLocationSource) => setPreferredSource(next),
-    [],
+    (next: PreferredLocationSource) => {
+      setPreferredSource(next);
+      setRecenterNonce((n) => n + 1);
+      // An explicit "Current location" click always retries the geolocation
+      // request. The auto-request effect only fires from an `idle` state, so
+      // without this a second click after a dismiss/error would do nothing —
+      // whereas the browser will re-prompt on a fresh request while the
+      // permission is still promptable (i.e. not a real block).
+      if (next === 'browser' && browserLocation.status !== 'loading') {
+        void browserLocation.request();
+      }
+    },
+    [browserLocation],
   );
 
   // Profile-creation consent gate. Profiles created via the aggregator channel
@@ -1072,6 +1089,10 @@ export function HomePage() {
         <EnableLocationBanner
           onEnable={() => void browserLocation.request()}
           blocked={geoPermission === 'denied'}
+          title={t('home.location_off_title')}
+          body={t('home.location_off_body')}
+          blockedBody={t('home.location_blocked_body')}
+          cta={t('home.location_enable_cta')}
         />
       )}
       <ActionHandler
@@ -1300,6 +1321,7 @@ export function HomePage() {
                 resolveMarkerLabel={resolveMarkerLabel}
                 items={Object.values(filteredDomainItems).flat()}
                 focusPoint={userLocation}
+                focusNonce={recenterNonce}
                 filtersSlot={filtersPanel}
                 renderPopup={(marker) => {
                   // Marker ids are `${item_id}#${locationIndex}` — strip the suffix to look up the item.
