@@ -18,11 +18,25 @@ import {
 } from '@dpg/config';
 import v1_routes from '@/routes/v1/v1_routes';
 import { getNetworkConfigs } from '@/network_configs';
+import {
+  clearNetworkSchemaCache,
+  refreshConsumedSchemas,
+} from '@/network_schema_cache';
 
 const app = fastify({
   logger: true,
   trustProxy: true,
 });
+
+// The schema cache lives on disk under tmpdir() and outlives a restart. In
+// local mode the network is driven by NETWORK_CONFIG_LOCAL_FILE, so a stale
+// cache from a previous network keeps being served after a switch. Wipe and
+// rebuild on boot so local dev always reflects the configured network.
+// Remote mode keeps the cache (schemas there are expensive to refetch).
+if (apiConfig.network_config_source === 'local') {
+  await clearNetworkSchemaCache();
+  await refreshConsumedSchemas();
+}
 
 const networkConfigs = await getNetworkConfigs();
 
