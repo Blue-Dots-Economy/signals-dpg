@@ -86,6 +86,22 @@ export function isValidPhoneNumber(phoneNumber: string): boolean {
   return false;
 }
 
+/**
+ * Build the identifier params for the pre-login consent status check. The phone
+ * MUST be normalized to the same canonical E.164 form the auth path stores
+ * (`normalizePhoneNumber`), or the exact-match lookup in
+ * `/consent/status-by-identifier` misses a returning user and the T&C gate
+ * re-prompts on every login.
+ */
+export function consentStatusIdentifier(
+  identifier: AuthIdentifier,
+): { phone?: string; email?: string } {
+  const param: { phone?: string; email?: string } = {};
+  if (identifier.email) param.email = identifier.email;
+  if (identifier.phoneNumber) param.phone = normalizePhoneNumber(identifier.phoneNumber);
+  return param;
+}
+
 function normalizeIdentifier(identifier: AuthIdentifier): AuthIdentifier {
   const email = identifier.email?.trim().toLowerCase();
   const phoneNumber = identifier.phoneNumber?.trim();

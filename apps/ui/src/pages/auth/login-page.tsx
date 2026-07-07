@@ -7,8 +7,8 @@ import { Label } from '@/components/ui/label';
 import { AuthShell } from '@/components/layout/auth-shell';
 import {
   checkUser,
+  consentStatusIdentifier,
   isValidPhoneNumber,
-  normalizePhoneNumber,
   requestOtp,
   type AuthIdentifier,
 } from '@/lib/auth-api';
@@ -151,13 +151,10 @@ export function LoginPage() {
       // endpoint, client-side); on any failure we proceed without gating — the
       // user will be re-prompted post-verify on the next login (spec §1.1).
       try {
-        const identifierParam: { phone?: string; email?: string } = {};
-        if (identifier.email) identifierParam.email = identifier.email;
-        // Match the canonical E.164 form the auth path stores (e.g. a bare
-        // 10-digit number becomes "+91…"); otherwise the exact-match lookup in
-        // status-by-identifier misses and the T&C gate re-prompts every login.
-        if (identifier.phoneNumber)
-          identifierParam.phone = normalizePhoneNumber(identifier.phoneNumber);
+        // Normalize the phone to the canonical E.164 form auth stores; otherwise
+        // the exact-match lookup in status-by-identifier misses a returning user
+        // and the T&C gate re-prompts every login (see consentStatusIdentifier).
+        const identifierParam = consentStatusIdentifier(identifier);
 
         const [consentStatus, configEntries] = await Promise.all([
           getConsentStatusByIdentifier({ network: themeId, ...identifierParam }),
