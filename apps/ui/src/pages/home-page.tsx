@@ -41,6 +41,10 @@ import { getEnumFilterFieldsForDomains, itemPassesEnumFilters } from '@/lib/enum
 import { getServedScope } from '@/lib/served-binding';
 import { computeVisibleDomains } from '@/lib/visible-domains';
 import { useUserLocation } from '@/hooks/use-user-location';
+import type { PreferredLocationSource } from '@/hooks/use-user-location';
+import { useGeolocationPermission } from '@/hooks/use-geolocation-permission';
+import { LocationSourceToggle } from '@/components/location/location-source-toggle';
+import { EnableLocationBanner } from '@/components/location/enable-location-banner';
 import { nearestDistanceMeters } from '@/lib/geo/distance';
 import type { LatLng } from '@/lib/geo/types';
 import { getProfileConsentStatus, acceptProfileConsent } from '@/lib/consent-api';
@@ -420,7 +424,29 @@ export function HomePage() {
   // Resolve: profile location → browser geo → null. Gate the browser auto-prompt
   // on profilesResolved so a logged-in user with a profile location isn't prompted
   // during the async profile-load window.
-  const { location: userLocation } = useUserLocation(profileLocation, profilesResolved);
+  const [preferredSource, setPreferredSource] =
+    React.useState<PreferredLocationSource>('profile');
+
+  const { location: userLocation, browser: browserLocation } = useUserLocation(
+    profileLocation,
+    profilesResolved,
+    preferredSource,
+  );
+  const geoPermission = useGeolocationPermission();
+
+  // The toggle only makes sense when there's a profile location to switch away
+  // from and the browser can actually provide the alternative.
+  const canToggleLocation = Boolean(profileLocation) && browserLocation.isSupported;
+
+  // When the user picked "current location" but the browser request errored
+  // (denied / unavailable), offer to enable it.
+  const showLocationBanner =
+    preferredSource === 'browser' && browserLocation.status === 'error';
+
+  const handleLocationSourceChange = React.useCallback(
+    (next: PreferredLocationSource) => setPreferredSource(next),
+    [],
+  );
 
   // Profile-creation consent gate. Profiles created via the aggregator channel
   // have no profile_creation consent recorded; selecting one must first prompt.
@@ -970,6 +996,36 @@ export function HomePage() {
   // the map is maximized, in the map overlay (the top bar is hidden in
   // fullscreen). Each location instantiates its own popover state; the filter
   // selection itself is controlled via the shared props below.
+  const selectButton =
+    myItem && viewMode === 'list' ? (
+      <Button
+        type="button"
+        variant={browseSelection.selectMode ? 'default' : 'outline'}
+        size="sm"
+        onClick={() =>
+          browseSelection.selectMode
+            ? browseSelection.exitSelect()
+            : browseSelection.enterSelect()
+        }
+      >
+        <CheckSquare className="mr-1.5 h-4 w-4" />
+        {browseSelection.selectMode ? t('selection.done') : t('selection.select')}
+      </Button>
+    ) : null;
+
+  const headerActions =
+    canToggleLocation || selectButton ? (
+      <div className="flex items-center gap-2">
+        {canToggleLocation && (
+          <LocationSourceToggle
+            value={preferredSource}
+            onChange={handleLocationSourceChange}
+          />
+        )}
+        {selectButton}
+      </div>
+    ) : undefined;
+
   const filtersPanel = (
     <MapFiltersPanel
       domains={visibleDomains}
@@ -1009,23 +1065,13 @@ export function HomePage() {
           description={contentDescription}
           count={loading ? undefined : contentCount}
           noProfilePrompt={{ show: !myItem, networkId: selectedNetworkId ?? '' }}
-          actions={
-            myItem && viewMode === 'list' ? (
-              <Button
-                type="button"
-                variant={browseSelection.selectMode ? 'default' : 'outline'}
-                size="sm"
-                onClick={() =>
-                  browseSelection.selectMode
-                    ? browseSelection.exitSelect()
-                    : browseSelection.enterSelect()
-                }
-              >
-                <CheckSquare className="mr-1.5 h-4 w-4" />
-                {browseSelection.selectMode ? t('selection.done') : t('selection.select')}
-              </Button>
-            ) : undefined
-          }
+          actions={headerActions}
+        />
+      )}
+      {showLocationBanner && (
+        <EnableLocationBanner
+          onEnable={() => void browserLocation.request()}
+          blocked={geoPermission === 'denied'}
         />
       )}
       <ActionHandler
