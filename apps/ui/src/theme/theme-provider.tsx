@@ -156,7 +156,24 @@ export function NetworkThemeProvider({ children }: { children: React.ReactNode }
     } catch {
       /* localStorage unavailable */
     }
-    if (stored) return stored;
+    // Only honor a stored network that this build is actually configured to
+    // serve. Otherwise a stale value from a previously-run network (e.g. after
+    // switching VITE_NETWORK_ID in local dev) would pin the theme to a brand
+    // this build no longer serves. Discard it so the build default wins.
+    const configuredNetworks = (import.meta.env.VITE_NETWORK_ID ?? '')
+      .split(',')
+      .map((id) => id.trim())
+      .filter(Boolean);
+    if (stored && (configuredNetworks.length === 0 || configuredNetworks.includes(stored))) {
+      return stored;
+    }
+    if (stored) {
+      try {
+        localStorage.removeItem(ACTIVE_NETWORK_KEY);
+      } catch {
+        /* ignore */
+      }
+    }
     const fromEnv =
       typeof __DEFAULT_NETWORK_THEME__ !== 'undefined' ? __DEFAULT_NETWORK_THEME__ : '';
     return fromEnv || 'blue_dot';
