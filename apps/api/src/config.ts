@@ -1,4 +1,4 @@
-import { parseServedDomains } from '@dpg/config';
+import { assertCreateTestOtpSafe, parseServedDomains } from '@dpg/config';
 import { loadEnv } from '@/env';
 
 export const {
@@ -13,6 +13,9 @@ export const {
   geocoding,
 } = loadEnv();
 
+// Startup guard (D7): fail hard in prod, warn in dev, if CREATE_TEST_OTP is on.
+assertCreateTestOtpSafe(instance.INSTANCE_ENV, auth.CREATE_TEST_OTP);
+
 export const apiConfig = {
   domain: api.API_DOMAIN,
   port: api.API_PORT,
@@ -24,6 +27,13 @@ export const apiConfig = {
   allow_extra_schema_data: networkRuntime.ALLOW_EXTRA_SCHEMA_DATA,
   bulk_max_items: networkRuntime.BULK_MAX_ITEMS,
   schema_registry_url: schemaRegistry.SCHEMA_REGISTRY_URL,
+  peer_fetch_timeout_ms: networkRuntime.PEER_FETCH_TIMEOUT_MS,
+};
+
+export const peerConfig = {
+  shared_secret: networkRuntime.INSTANCE_SHARED_SECRET,
+  auth_mode: networkRuntime.PEER_AUTH_MODE,
+  token_window_seconds: 300,
 };
 
 export const authConfig = {
