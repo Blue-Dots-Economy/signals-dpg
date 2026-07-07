@@ -100,7 +100,17 @@ export const PiiCryptoSecretsSchema = z.object({
     ),
 });
 
-export const GeocodingSecretsSchema = z.object({
-  GOOGLE_GEOCODING_API_KEY: z.string().optional(),
-  PHOTON_URL: z.string().optional(),
-});
+export const GeocodingSecretsSchema = z
+  .object({
+    GOOGLE_GEOCODING_API_KEY: z.string().optional(),
+    PHOTON_URL: z.string().optional(),
+    // Radius of the random offset applied to a PRIVATE (PII) primary location
+    // before it is stored, so the exact address is never persisted. See
+    // docs/superpowers/specs/2026-07-07-pii-location-jitter-design.md.
+    PII_LOCATION_JITTER_MIN_METERS: z.coerce.number().positive().default(100),
+    PII_LOCATION_JITTER_MAX_METERS: z.coerce.number().positive().default(250),
+  })
+  .refine((c) => c.PII_LOCATION_JITTER_MIN_METERS <= c.PII_LOCATION_JITTER_MAX_METERS, {
+    message: 'PII_LOCATION_JITTER_MIN_METERS must be <= PII_LOCATION_JITTER_MAX_METERS',
+    path: ['PII_LOCATION_JITTER_MIN_METERS'],
+  });
