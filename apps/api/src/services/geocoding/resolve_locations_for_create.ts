@@ -1,11 +1,10 @@
 import {
   getDomainItemSchema,
-  isLocationFieldPrivate,
   parseLocationFields,
   buildLocationQueries,
 } from '@dpg/schemas';
 import { getNetworkConfigById } from '@/network_configs';
-import { resolveCoordinates, resolveCityCenter } from './geo_resolver';
+import { resolveCoordinates } from './geo_resolver';
 
 type ItemLocation = { lat: number; lng: number; label?: string };
 
@@ -22,7 +21,7 @@ interface ResolveLocationsForCreateArgs {
 
 /**
  * Geocode an item's primary location field from its (full) item_state.
- * Private (PII) field → city centre only; public field(s) → exact point per query.
+ * Always resolves to the EXACT point for both private and public fields.
  * Best-effort: any failure → []. Caller decides how to treat an empty result.
  */
 export async function geocodeLocationsFromState(
@@ -32,15 +31,9 @@ export async function geocodeLocationsFromState(
 ): Promise<ItemLocation[]> {
   try {
     const { primary } = parseLocationFields(itemSchema);
-    if (isLocationFieldPrivate(itemSchema)) {
-      // Private (PII) field: never geocode the exact address — only the city.
-      const address = primary ? item_state[primary.field] : undefined;
-      if (typeof address === 'string' && address.trim()) {
-        const center = await resolveCityCenter(address);
-        if (center) return [center];
-      }
-      return [];
-    }
+    // Always resolve to the EXACT point. Privacy for a PRIVATE field is applied
+    // downstream as a jitter at the storage choke point (item_service), so the
+    // exact coordinate is never persisted.
     const queries = buildLocationQueries(item_state, primary);
     const out: ItemLocation[] = [];
     for (const { query, label } of queries) {
@@ -62,8 +55,8 @@ export async function geocodeLocationsFromState(
  *
  * Rules (mirrors the original inline logic in create_item):
  *  - `provided` non-empty → used as-is (never geocoded over).
- *  - Private (PII) location field → resolve only to the city centre.
- *  - Public location field(s) → geocode each marked query to its exact point.
+ *  - Private and public primary fields both geocode to their exact point; a
+ *    private field is jittered at storage time.
  *  - Best-effort: any failure returns `provided ?? []` (item created without coords).
  */
 export async function resolveLocationsForCreate(
