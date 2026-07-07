@@ -20,65 +20,49 @@ import { db } from '@api/db/postgres/drizzle_config';
 import { isServedDomainBinding } from '@/utils/served_domain_guard';
 import { getNetworkConfigById } from '@/network_configs';
 import { geocodeLocationsFromState } from '@/services/geocoding/resolve_locations_for_create';
+import { jitterCoordinate } from '@/services/geocoding/jitter';
 import {
   buildNetworkItemSchemaUrl,
   getOrFetchSchemaByUrl,
 } from '@/network_schema_cache';
-import { apiConfig, getCurrentApiBaseUrl } from '@/config';
+import { apiConfig, getCurrentApiBaseUrl, geocodingConfig } from '@/config';
 
 export type ItemLocation = { lat: number; lng: number; label?: string };
 export function primaryLocation(locs: ItemLocation[] | null | undefined): ItemLocation | null {
   return locs && locs.length > 0 ? locs[0] : null;
 }
 
-// Decimal places kept for the coordinates of a PRIVATE location field. Two
-// places ≈ a ~1.1 km grid cell — coarse enough that the stored point never
-// pinpoints the exact door, while staying useful on the map. This is the
-// authoritative server-side floor: even if a client (or an API caller that
-// bypasses the form widget) submits an exact coordinate for a private field,
-// it is rounded here before it is ever persisted.
-const PRIVATE_LOCATION_DECIMALS = 2;
-
-function roundTo(value: number, decimals: number): number {
-  const factor = 10 ** decimals;
-  return Math.round(value * factor) / factor;
-}
-
 /**
- * Coarsens stored coordinates when the item's marked location field is private,
- * so a PII address is never persisted at exact precision. Non-private location
- * fields (e.g. a provider's public service cities) are returned unchanged.
+ * Jitters the coordinates of a PRIVATE (PII) primary location field so the exact
+ * address is never persisted: each point is offset to a deterministic random
+ * spot within the configured 100–250 m annulus (see geocoding/jitter.ts). This
+ * is the authoritative server-side transform — even an API caller that submits
+ * an exact coordinate for a private field has it jittered here before storage.
+ * Non-private location fields are returned unchanged.
  */
-export function coarsenPrivateLocations(
+export function jitterPrivateLocations(
   locations: ItemLocation[],
-  itemSchema: Record<string, unknown> | null | undefined
+  itemSchema: Record<string, unknown> | null | undefined,
 ): ItemLocation[] {
   if (locations.length === 0 || !itemSchema || !isLocationFieldPrivate(itemSchema)) {
     return locations;
   }
-  return locations.map((loc) => ({
-    ...loc,
-    lat: roundTo(loc.lat, PRIVATE_LOCATION_DECIMALS),
-    lng: roundTo(loc.lng, PRIVATE_LOCATION_DECIMALS),
-  }));
+  return locations.map((loc) =>
+    jitterCoordinate(loc, geocodingConfig.jitter_min_meters, geocodingConfig.jitter_max_meters),
+  );
 }
 
 /**
- * Decides the coordinates to store for an item. This NEVER geocodes — backend
- * geocoding happens only in the create route, and only when no coordinate was
- * provided. Here we just apply the PII floor: a PRIVATE location field's
- * supplied coordinate is rounded to ~1 km so an exact point can never be
- * persisted. Non-private fields (e.g. a provider's public service cities) are
- * stored exactly as supplied.
+ * Decides the coordinates to store for an item. NEVER geocodes — that happens in
+ * the create/update paths. Here we apply the PII transform: a PRIVATE location
+ * field's supplied coordinate is jittered (100–250 m) so an exact point can
+ * never be persisted. Non-private fields are stored exactly as supplied.
  */
 function locationsForStorage(
   provided: ItemLocation[],
   itemSchema: Record<string, unknown> | null | undefined
 ): ItemLocation[] {
-  if (itemSchema && isLocationFieldPrivate(itemSchema)) {
-    return coarsenPrivateLocations(provided, itemSchema);
-  }
-  return provided;
+  return jitterPrivateLocations(provided, itemSchema);
 }
 
 export class ItemServiceError extends Error {
