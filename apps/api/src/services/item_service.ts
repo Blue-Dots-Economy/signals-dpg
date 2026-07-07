@@ -61,7 +61,7 @@ export function jitterPrivateLocations(
     return locations;
   }
   return locations.map((loc) =>
-    jitterCoordinate(loc, geocodingConfig.jitter_min_meters, geocodingConfig.jitter_max_meters),
+    jitterCoordinate(loc, geocodingConfig.jitter_min_meters, geocodingConfig.jitter_max_meters, getPiiKey()),
   );
 }
 

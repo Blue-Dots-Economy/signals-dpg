@@ -7,7 +7,14 @@
  * true location always maps to the same jittered point, so re-saving a profile
  * never drifts the pin and an observer cannot average repeated snapshots back to
  * the truth. See docs/superpowers/specs/2026-07-07-pii-location-jitter-design.md.
+ *
+ * The seed is keyed with a server secret (see `jitterCoordinate`) — the jittered
+ * point is served publicly (map/search) and the algorithm is open-source, so
+ * without a secret key an attacker could brute-force the ~1 m grid within
+ * `maxMeters` of the stored point and match it back to the true coordinate.
  */
+
+import { createHmac } from 'node:crypto';
 
 export interface JitterableCoord {
   lat: number;
@@ -17,16 +24,6 @@ export interface JitterableCoord {
 
 /** Metres per degree of latitude (constant); longitude scales by cos(lat). */
 const METERS_PER_DEGREE = 111_320;
-
-/** FNV-1a hash of a string to an unsigned 32-bit int. */
-function hashStringToUint32(input: string): number {
-  let h = 2_166_136_261 >>> 0;
-  for (let i = 0; i < input.length; i++) {
-    h ^= input.charCodeAt(i);
-    h = Math.imul(h, 16_777_619);
-  }
-  return h >>> 0;
-}
 
 /** mulberry32 PRNG — deterministic uniform [0, 1) sequence from a 32-bit seed. */
 function mulberry32(seed: number): () => number {
@@ -43,9 +40,17 @@ export function jitterCoordinate(
   coord: JitterableCoord,
   minMeters: number,
   maxMeters: number,
+  secret: Buffer | string,
 ): JitterableCoord {
-  // Seed from the true point rounded to ~1 m so the same address is stable.
-  const seed = hashStringToUint32(`${coord.lat.toFixed(5)},${coord.lng.toFixed(5)}`);
+  // Seed = HMAC(secret, "location-jitter:<lat5>,<lng5>") → first 4 bytes as uint32.
+  // The 'location-jitter:' prefix domain-separates this use of the key from
+  // PII-blob encryption. Determinism (same coord+secret → same point) is
+  // preserved; without the secret the offset is unpredictable, so a publicly
+  // served jittered point cannot be brute-forced back to the true coordinate.
+  const seed = createHmac('sha256', secret)
+    .update(`location-jitter:${coord.lat.toFixed(5)},${coord.lng.toFixed(5)}`)
+    .digest()
+    .readUInt32BE(0);
   const rng = mulberry32(seed);
   const u = rng();
   const v = rng();
@@ -56,6 +61,8 @@ export function jitterCoordinate(
 
   const dLat = (dist * Math.cos(theta)) / METERS_PER_DEGREE;
   const latRad = (coord.lat * Math.PI) / 180;
+  // Equirectangular longitude scaling divides by cos(lat); undefined at the
+  // poles (lat = ±90), which is out of domain for any real street address.
   const dLng = (dist * Math.sin(theta)) / (METERS_PER_DEGREE * Math.cos(latRad));
 
   const out: JitterableCoord = { lat: coord.lat + dLat, lng: coord.lng + dLng };
