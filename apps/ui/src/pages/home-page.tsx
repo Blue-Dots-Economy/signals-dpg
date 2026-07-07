@@ -439,14 +439,20 @@ export function HomePage() {
   const canToggleLocation = Boolean(profileLocation) && browserLocation.isSupported;
 
   // When the user picked "current location" but the browser request errored
-  // (denied / unavailable), offer to enable it.
+  // (denied / unavailable), offer to enable it. Gated on canToggleLocation so
+  // the banner only appears while a profile location exists — i.e. results are
+  // still sorted by the profile fallback, which the banner copy reflects.
   const showLocationBanner =
-    preferredSource === 'browser' && browserLocation.status === 'error';
+    canToggleLocation &&
+    preferredSource === 'browser' &&
+    browserLocation.status === 'error';
 
-  // Bumped on every explicit source pick so the map recenters on the chosen
-  // anchor even when the resolved coordinate is unchanged (e.g. re-selecting
-  // "My profile" after panning, or after a denied browser request fell back to
-  // the profile location).
+  // Bumped whenever the user switches source so the map recenters on the chosen
+  // anchor even when the resolved coordinate is unchanged — e.g. switching back
+  // to "My profile" after a "Current location" attempt that was denied and fell
+  // back to the same profile coordinate, so panning-away is undone. (Re-picking
+  // the already-active source can't happen: radix single-toggle deselects to ''
+  // and handleLocationSourceChange ignores it.)
   const [recenterNonce, setRecenterNonce] = React.useState(0);
 
   const handleLocationSourceChange = React.useCallback(

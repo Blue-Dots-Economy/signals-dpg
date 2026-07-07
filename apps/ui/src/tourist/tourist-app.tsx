@@ -111,6 +111,10 @@ export function TouristApp() {
         <EnableLocationBanner
           onEnable={() => void browser.request()}
           blocked={geoPermission === 'denied'}
+          title={t('tourist.enable_location_title')}
+          body={t('tourist.enable_location_body')}
+          blockedBody={t('tourist.enable_location_blocked_body')}
+          cta={t('tourist.enable_location_cta')}
         />
       )}
 
