@@ -5,6 +5,7 @@ import type { RJSFSchema } from '@rjsf/utils';
 import { fetchNetworkConfig, fetchNetworkItems, PROFILE_FETCH_LIMIT } from '@/lib/network-api';
 import type { Item } from '@/lib/item-api';
 import { useBrowserLocation } from '@/hooks/use-browser-location';
+import { useGeolocationPermission } from '@/hooks/use-geolocation-permission';
 import type { LatLng } from '@/lib/geo/types';
 import { getEnumFilterFieldsForDomains, itemPassesEnumFilters } from '@/lib/enum-filters';
 import { MapFiltersPanel } from '@/components/map/map-filters-panel';
@@ -39,26 +40,7 @@ export function TouristApp() {
     }
   }, [browser.isSupported, browser.status, browser.request]);
 
-  // Track the geolocation PERMISSION state. The geolocation error code is
-  // PERMISSION_DENIED for both "Never allow" AND merely dismissing the prompt,
-  // so we can't tell them apart from the error. The Permissions API can: it's
-  // 'denied' only on a real block, and stays 'prompt' when dismissed. We use
-  // this to hide the "Enable location" button only when truly blocked.
-  const [geoPermission, setGeoPermission] = React.useState<PermissionState | 'unknown'>('unknown');
-  React.useEffect(() => {
-    if (typeof navigator === 'undefined' || !navigator.permissions?.query) return;
-    let status: PermissionStatus | null = null;
-    const onChange = () => setGeoPermission(status?.state ?? 'unknown');
-    navigator.permissions
-      .query({ name: 'geolocation' as PermissionName })
-      .then((s) => {
-        status = s;
-        setGeoPermission(s.state);
-        s.addEventListener('change', onChange);
-      })
-      .catch(() => setGeoPermission('unknown'));
-    return () => status?.removeEventListener('change', onChange);
-  }, []);
+  const geoPermission = useGeolocationPermission();
 
   const userLocation: LatLng | null = browser.location
     ? { lat: browser.location.lat, lng: browser.location.lng }
