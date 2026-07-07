@@ -47,7 +47,7 @@ export interface SessionResponse {
   } | null;
 }
 
-function normalizePhoneNumber(phoneNumber: string): string {
+export function normalizePhoneNumber(phoneNumber: string): string {
   // Always strip whitespace + dashes + parens first — historical data was
   // stored as "+91 9876543210" (with a space) so a later lookup against
   // the cleaner "+919876543210" missed. One canonical shape kills the

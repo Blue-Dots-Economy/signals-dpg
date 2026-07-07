@@ -8,6 +8,7 @@ import { AuthShell } from '@/components/layout/auth-shell';
 import {
   checkUser,
   isValidPhoneNumber,
+  normalizePhoneNumber,
   requestOtp,
   type AuthIdentifier,
 } from '@/lib/auth-api';
@@ -152,7 +153,11 @@ export function LoginPage() {
       try {
         const identifierParam: { phone?: string; email?: string } = {};
         if (identifier.email) identifierParam.email = identifier.email;
-        if (identifier.phoneNumber) identifierParam.phone = identifier.phoneNumber;
+        // Match the canonical E.164 form the auth path stores (e.g. a bare
+        // 10-digit number becomes "+91…"); otherwise the exact-match lookup in
+        // status-by-identifier misses and the T&C gate re-prompts every login.
+        if (identifier.phoneNumber)
+          identifierParam.phone = normalizePhoneNumber(identifier.phoneNumber);
 
         const [consentStatus, configEntries] = await Promise.all([
           getConsentStatusByIdentifier({ network: themeId, ...identifierParam }),
