@@ -13,7 +13,7 @@ import type { ViewMode } from '@/engine/types';
 import { TouristTopBar } from './tourist-top-bar';
 import { TouristMap } from './tourist-map';
 import { TouristList } from './tourist-list';
-import { EnableLocationBanner } from './enable-location-banner';
+import { EnableLocationBanner } from '@/components/location/enable-location-banner';
 import { TouristHero } from './tourist-hero';
 import { itemToCardItem, matchesSearch, type CardItem } from './practitioner-data';
 import { TOURIST_NETWORK_ID as ORANGE_NETWORK_ID } from './resolve-tourist-config';
