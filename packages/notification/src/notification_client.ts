@@ -39,7 +39,7 @@ export class NotificationClient {
    *   priority: 'realtime',
    *   variables: {
    *     fromName: 'Notification Service Demo',
-   *     fromEmail: 'support@onest.network',
+   *     fromEmail: 'hello@bluedotseconomy.org',
    *     subject: 'Welcome!',
    *     html: '<h1>Hello</h1>',
    *   },
