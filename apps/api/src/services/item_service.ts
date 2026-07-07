@@ -33,6 +33,19 @@ export function primaryLocation(locs: ItemLocation[] | null | undefined): ItemLo
 }
 
 /**
+ * Order-sensitive equality of two location arrays (coords + label). Used by the
+ * update path to detect a caller echoing back the already-stored (jittered)
+ * coordinates, so we leave them as-is instead of jittering a jittered point.
+ */
+export function sameLocations(a: ItemLocation[], b: ItemLocation[]): boolean {
+  if (a.length !== b.length) return false;
+  return a.every(
+    (l, i) =>
+      l.lat === b[i].lat && l.lng === b[i].lng && (l.label ?? undefined) === (b[i].label ?? undefined),
+  );
+}
+
+/**
  * Jitters the coordinates of a PRIVATE (PII) primary location field so the exact
  * address is never persisted: each point is offset to a deterministic random
  * spot within the configured 100–250 m annulus (see geocoding/jitter.ts). This
@@ -295,6 +308,7 @@ export async function updateItemInternal(
         item_state: items.item_state,
         item_private_state: items.item_private_state,
         lifecycle_status: items.lifecycle_status,
+        item_locations: items.item_locations,
       })
       .from(items)
       .where(ownershipFilter)
@@ -404,10 +418,12 @@ export async function updateItemInternal(
         ? body.item_locations
         : null;
     if (providedCoords) {
-      updateValues.item_locations = locationsForStorage(
-        providedCoords,
-        itemSchema as Record<string, unknown>
-      );
+      const stored = (existingItem.item_locations ?? []) as ItemLocation[];
+      // Caller echoed back the already-stored (jittered) coords → leave as-is,
+      // so a read-modify-write update never re-jitters a jittered point.
+      updateValues.item_locations = sameLocations(providedCoords, stored)
+        ? stored
+        : locationsForStorage(providedCoords, itemSchema as Record<string, unknown>);
     } else if (addressChanged) {
       if (isPrimaryAddressBlank(itemSchema as Record<string, unknown>, mergedFullState)) {
         // Address removed — wipe coords (distinct from a geocode failure).
