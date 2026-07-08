@@ -972,7 +972,10 @@
             },
             "lastRoleHeld": {
               "type": "string",
-              "minLength": 1,
+              "title": "Name of last role held",
+              "description": "Enter the names of roles the candidate should have last held",
+              "placeholder": "Enter the names of roles the candidate should have last held",
+              "x-show-if": { "candidateExperienceType": ["Worked before"] },
               "vectorize": true
             },
             "title": {
