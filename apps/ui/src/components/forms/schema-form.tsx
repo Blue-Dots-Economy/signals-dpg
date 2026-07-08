@@ -267,6 +267,17 @@ function generateUiSchema(
       }
     }
 
+    // A field-level `placeholder` on the schema (network.json) wins over the
+    // generic defaults above ('Select...', email sample) so each field can
+    // carry its own prompt text.
+    const fieldPlaceholder = (typed as { placeholder?: unknown }).placeholder;
+    if (typeof fieldPlaceholder === 'string' && fieldPlaceholder.length > 0) {
+      uiSchema[key] = {
+        ...(uiSchema[key] as object),
+        'ui:placeholder': fieldPlaceholder,
+      };
+    }
+
     const locationRole = (typed as { location?: unknown }).location;
     if (locationRole === 'primary' || locationRole === 'secondary') {
       const isArray = typed.type === 'array';
@@ -330,6 +341,10 @@ function normalizeSchemaForRjsf(schema: RJSFSchema, rootSchema?: RJSFSchema): RJ
     // Strip the custom `x-form-layout` keyword — consumed by the section
     // renderer (read off the raw schema); ajv/RJSF must never see it.
     if (key === 'x-form-layout') continue;
+    // Strip the custom field-level `placeholder` keyword (string value) — it's
+    // mapped to `ui:placeholder` by generateUiSchema, so ajv must not see it.
+    // The `typeof string` guard avoids stripping a property NAMED "placeholder".
+    if (key === 'placeholder' && typeof value === 'string') continue;
     result[key] = normalizeSchemaForRjsf(value as RJSFSchema, root);
   }
 

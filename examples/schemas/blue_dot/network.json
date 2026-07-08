@@ -22,7 +22,7 @@
             "sections": [
               {
                 "title": "Personal Details",
-                "fields": ["name", "age", "gender", "phone", "location", "languageSpoken"]
+                "fields": ["name", "age", "gender", "phone", "location"]
               },
               {
                 "title": "Work Experience & Preferences",
@@ -32,6 +32,7 @@
                   "nameOfLastRoleHeld",
                   "natureOfJobsInterestedIn",
                   "nameOfJobRolesInterestedIn",
+                  "languageSpoken",
                   "otherHelpNeeded"
                 ]
               },
@@ -689,18 +690,21 @@
             "itiInstitute": {
               "type": "string",
               "title": "College / Institute Name",
-              "description": "Please specify your college or institute name"
+              "description": "Please specify your college or institute name",
+              "placeholder": "Please specify your college or institute name"
             },
             "nameOfLastRoleHeld": {
               "type": "string",
               "title": "Name of last role held",
               "description": "Enter the name of your last role",
+              "placeholder": "Enter the name of your last role",
               "vectorize": true
             },
             "languageSpoken": {
               "type": "array",
               "title": "Language Spoken",
               "description": "Select all the languages you are familiar with",
+              "placeholder": "Select all the languages you are familiar with",
               "uniqueItems": true,
               "items": {
                 "type": "string",
