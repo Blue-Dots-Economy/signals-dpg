@@ -52,6 +52,8 @@ export const authConfig = {
 export const geocodingConfig = {
   google_api_key: geocoding.GOOGLE_GEOCODING_API_KEY,
   photon_url: geocoding.PHOTON_URL ?? 'https://photon.komoot.io',
+  jitter_min_meters: geocoding.PII_LOCATION_JITTER_MIN_METERS,
+  jitter_max_meters: geocoding.PII_LOCATION_JITTER_MAX_METERS,
 };
 
 export const matchScoreConfig = {
