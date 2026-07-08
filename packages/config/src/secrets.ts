@@ -107,8 +107,11 @@ export const GeocodingSecretsSchema = z
     // Radius of the random offset applied to a PRIVATE (PII) primary location
     // before it is stored, so the exact address is never persisted. See
     // docs/superpowers/specs/2026-07-07-pii-location-jitter-design.md.
-    PII_LOCATION_JITTER_MIN_METERS: z.coerce.number().positive().default(100),
-    PII_LOCATION_JITTER_MAX_METERS: z.coerce.number().positive().default(250),
+    // Hard bounds are enforced (not just defaults) so config can't silently
+    // defeat the control: a 50m floor keeps the offset above door precision,
+    // a 1000m ceiling keeps the point useful for proximity.
+    PII_LOCATION_JITTER_MIN_METERS: z.coerce.number().min(50).max(1000).default(100),
+    PII_LOCATION_JITTER_MAX_METERS: z.coerce.number().min(50).max(1000).default(250),
   })
   .refine((c) => c.PII_LOCATION_JITTER_MIN_METERS <= c.PII_LOCATION_JITTER_MAX_METERS, {
     message: 'PII_LOCATION_JITTER_MIN_METERS must be <= PII_LOCATION_JITTER_MAX_METERS',

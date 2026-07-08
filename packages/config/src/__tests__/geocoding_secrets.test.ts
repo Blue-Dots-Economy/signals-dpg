@@ -25,4 +25,25 @@ describe('GeocodingSecretsSchema jitter radii', () => {
       }),
     ).toThrow();
   });
+
+  it('rejects a min below the 50m privacy floor (e.g. door precision)', () => {
+    expect(() =>
+      GeocodingSecretsSchema.parse({ PII_LOCATION_JITTER_MIN_METERS: '1' }),
+    ).toThrow();
+  });
+
+  it('rejects a max above the 1000m ceiling (e.g. proximity-breaking)', () => {
+    expect(() =>
+      GeocodingSecretsSchema.parse({ PII_LOCATION_JITTER_MAX_METERS: '5000' }),
+    ).toThrow();
+  });
+
+  it('accepts the boundary values 50 and 1000', () => {
+    const parsed = GeocodingSecretsSchema.parse({
+      PII_LOCATION_JITTER_MIN_METERS: '50',
+      PII_LOCATION_JITTER_MAX_METERS: '1000',
+    });
+    expect(parsed.PII_LOCATION_JITTER_MIN_METERS).toBe(50);
+    expect(parsed.PII_LOCATION_JITTER_MAX_METERS).toBe(1000);
+  });
 });
