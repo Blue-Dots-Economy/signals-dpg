@@ -473,7 +473,6 @@ export async function updateItemInternal(
 
       const consent_accepted = await hasAcceptedProfileConsent(
         exec,
-        existingItem.created_by,
         existingItem.item_id,
       );
 

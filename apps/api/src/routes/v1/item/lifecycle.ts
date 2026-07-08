@@ -108,11 +108,7 @@ const item_lifecycle_handler = async (
         next_status = 'paused';
       } else {
         // unpause: recompute draft/live from current data (non-sticky path).
-        const consent_accepted = await hasAcceptedProfileConsent(
-          tx,
-          existing.created_by,
-          item_id,
-        );
+        const consent_accepted = await hasAcceptedProfileConsent(tx, item_id);
         next_status = classify_item({
           schema: itemSchema as { required?: string[] },
           merged_state: mergedState,
