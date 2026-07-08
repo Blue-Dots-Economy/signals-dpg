@@ -113,6 +113,8 @@ export function createAuth(config: AuthRuntimeConfig) {
 
       unifiedOtp({
         adminByDomain: config.adminDomains,
+        allowSelfSignup: config.allowSelfSignup,
+        loginChannels: config.loginChannels,
 
         sendPhoneOtp: async ({ phoneNumber, otp }) => {
           if (nc) {

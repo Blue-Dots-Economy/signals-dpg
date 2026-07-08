@@ -3,6 +3,7 @@ import { APIError, createAuthEndpoint } from 'better-auth/api';
 import { type BetterAuthPlugin } from 'better-auth/types';
 import { setSessionCookie } from '../utils';
 import z from '@dpg/schemas';
+import { assertChannelAllowed, assertSelfSignupAllowed, type LoginChannel } from './auth_guards';
 
 const CheckUserInput = z.object({
   email: z.email('Please enter a valid Email').optional().meta({
@@ -114,6 +115,10 @@ export interface unifiedOtpOptions {
    */
   adminByDomain?: string[];
   createTestOtp?: boolean;
+  /** When false, the OTP flow refuses to create new users (self-signup gated). */
+  allowSelfSignup: boolean;
+  /** Allowed login identifier channels for this instance. */
+  loginChannels: LoginChannel[];
 }
 
 export const generateOtp = (is_test: boolean) => {
@@ -127,6 +132,8 @@ export const unifiedOtp = ({
   afterUserCreate,
   adminByDomain,
   createTestOtp,
+  allowSelfSignup,
+  loginChannels,
 }: unifiedOtpOptions): BetterAuthPlugin => ({
   id: 'unified-otp',
   schema: {
@@ -208,6 +215,8 @@ export const unifiedOtp = ({
         }
 
         const { email, phoneNumber } = validator.data;
+
+        assertChannelAllowed({ email, phoneNumber }, loginChannels);
 
         let user: UserWithPhoneNumber | null = null;
 
@@ -301,6 +310,8 @@ export const unifiedOtp = ({
 
         const { email, phoneNumber } = validator.data;
 
+        assertChannelAllowed({ email, phoneNumber }, loginChannels);
+
         let user: UserWithPhoneNumber | null = null;
 
         if (email) {
@@ -315,6 +326,13 @@ export const unifiedOtp = ({
             where: [{ field: 'phoneNumber', value: phoneNumber }],
           });
         }
+
+        if (!user) {
+          // Defense-in-depth for direct callers that skip check-user; also
+          // prevents OTP-send abuse to arbitrary unknown identifiers.
+          assertSelfSignupAllowed({ allowSelfSignup, email, adminByDomain });
+        }
+
         if (user) {
           if (email && user.email && user.email.trim() !== '') {
             if (user.email !== email) {
@@ -524,6 +542,8 @@ export const unifiedOtp = ({
           });
         }
 
+        assertChannelAllowed({ email, phoneNumber }, loginChannels);
+
         const redis = ctx.context.secondaryStorage;
         let otpKey: string | null = null;
 
@@ -570,6 +590,9 @@ export const unifiedOtp = ({
         let isNewUser = false;
 
         if (!user) {
+          // Authoritative self-signup gate — runs regardless of caller.
+          assertSelfSignupAllowed({ allowSelfSignup, email, adminByDomain });
+
           isNewUser = true;
           let domain: string | undefined,
             isAdmin = false;
