@@ -263,14 +263,14 @@ export function LoginPage() {
         {/* Heading */}
         <div className="mb-6">
           <h2 className="text-2xl font-bold text-foreground">
-            {userExists === null
+            {userExists === null || signupBlocked
               ? t('auth.heading_sign_in')
               : userExists
                 ? t('auth.heading_welcome_back')
                 : t('auth.heading_create_account')}
           </h2>
           <p className="mt-1 text-sm text-muted-foreground">
-            {userExists === null
+            {userExists === null || signupBlocked
               ? t('auth.sub_initial')
               : userExists
                 ? t('auth.sub_existing', { contactLabel })
@@ -330,8 +330,8 @@ export function LoginPage() {
             )}
           </div>
 
-          {/* Name — only shown when creating account */}
-          {userExists === false && (
+          {/* Name — only shown when creating account (and self-signup isn't gated) */}
+          {userExists === false && !signupBlocked && (
             <div className="space-y-1.5">
               <Label htmlFor="name" className="text-sm font-medium">
                 {t('auth.label_name')}

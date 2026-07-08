@@ -49,7 +49,9 @@ describe('LoginPage', () => {
     fetchAuthConfig.mockResolvedValue({ selfSignupAllowed: true, loginChannels: ['phone'] });
     await renderPage();
     await waitFor(() => expect(fetchAuthConfig).toHaveBeenCalled());
-    expect(screen.queryByRole('button', { name: /email/i })).toBeNull();
+    // With a single channel, the whole pill toggle is hidden — neither button renders.
+    expect(screen.queryByRole('button', { name: /^email$/i })).toBeNull();
+    expect(screen.queryByRole('button', { name: /^phone$/i })).toBeNull();
   });
 
   it('blocks an unknown identifier when self-signup is gated (no OTP requested)', async () => {
@@ -63,6 +65,11 @@ describe('LoginPage', () => {
 
     await waitFor(() => expect(checkUser).toHaveBeenCalled());
     expect(requestOtp).not.toHaveBeenCalled();
-    expect(screen.getByText(/contact your aggregator/i)).toBeTruthy();
+    // "Contact your aggregator" is produced only by the signup-gate branch (inline
+    // signup_disabled_message + toast_signup_disabled_desc) — asserting on it (rather
+    // than just requestOtp not being called) distinguishes the gate from the
+    // separate name-required guard, which also skips requestOtp but never renders
+    // this message.
+    expect(await screen.findAllByText(/contact your aggregator/i)).not.toHaveLength(0);
   });
 });
