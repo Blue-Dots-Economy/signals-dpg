@@ -1,0 +1,174 @@
+name: signals-dpg
+
+# ═══════════════════════════════════════════════════════════════════════════
+# LOCAL stack for signals-dpg (the DPG / "Signals Stack") — STANDALONE.
+#
+# Brings up — in one `docker compose up -d` — signals-dpg and only its own
+# backing dependencies, wired for localhost development:
+#
+#   Infra    postgres (pgvector + postgis), redis (password-protected)
+#   signals  signals-bootstrap (one-shot: schema + init) -> signals-api -> signals-ui
+#
+# This file lives at signals-dpg/local-setup/ and builds only THIS repo, so its
+# build contexts are `..` (the repo root). No sibling repos required.
+#
+# LOCAL DEV ONLY — everything is exposed on plain-HTTP host ports. See
+# LOCAL_SETUP.md (next to this file) for the full walkthrough.
+#
+# ── Where to run ──────────────────────────────────────────────────────────
+#     cd signals-dpg/local-setup
+#     cp .env.example .env            # set SIGNALS_PII_KEY (see LOCAL_SETUP.md §2)
+#     docker compose up -d --build
+#
+# ── Host ports ──────────────────────────────────────────────────────────────
+#   Signals UI    http://localhost:5173   (must be 5173 — API CORS allow-list)
+#   Signals API   http://localhost:2742   (Swagger at /reference)
+#   Postgres      localhost:5432
+#   Redis         localhost:5555          (password-protected)
+# ═══════════════════════════════════════════════════════════════════════════
+
+services:
+  # ───────────────────────────────────────────────────────────────────────
+  # Backing infrastructure
+  # ───────────────────────────────────────────────────────────────────────
+
+  postgres:
+    # Custom image: Postgres 17 + pgvector + PostGIS. signals-dpg's db:init
+    # runs CREATE EXTENSION vector/postgis/cube/earthdistance; no stock image
+    # ships them all. See infra/postgres.Dockerfile.
+    build:
+      context: ./infra
+      dockerfile: postgres.Dockerfile
+    image: signals-dpg/postgres:17-postgis-pgvector
+    container_name: signals-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set in .env}
+      POSTGRES_DB: ${POSTGRES_DB:-postgresdb}
+    ports:
+      - "${DATABASE_PORT:-5432}:5432"
+    volumes:
+      - signals-postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-postgresdb}"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  # signals-dpg REQUIRES a Redis password.
+  redis:
+    image: redis:7.2-alpine
+    container_name: signals-redis
+    restart: unless-stopped
+    command: ["sh", "-c", "exec redis-server --appendonly yes --requirepass \"$$REDIS_PASSWORD\""]
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?REDIS_PASSWORD must be set in .env}
+    ports:
+      # Host 5555 to match signals' REDIS_PORT default. Container 6379.
+      - "${REDIS_PORT:-5555}:6379"
+    volumes:
+      - signals-redis-data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli -a \"$$REDIS_PASSWORD\" ping | grep -q PONG"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  # ───────────────────────────────────────────────────────────────────────
+  # signals-dpg
+  # ───────────────────────────────────────────────────────────────────────
+
+  # One-shot: applies the Drizzle schema + SQL bootstrap (extensions +
+  # partitioned item/action/event tables). Exits 0 on success. signals-api
+  # waits for it. db:seed:services (service apikeys for INTEGRATING DPGs) is
+  # intentionally NOT run here — signals runs standalone without it; enable it
+  # only if you later wire a downstream DPG (see LOCAL_SETUP.md §5).
+  signals-bootstrap:
+    build:
+      context: ..
+      dockerfile: local-setup/infra/signals-bootstrap.Dockerfile
+    container_name: signals-bootstrap
+    command:
+      - sh
+      - -lc
+      - |
+        set -e
+        echo "signals-bootstrap: applying schema (drizzle-kit push --force)…"
+        pnpm --filter api exec drizzle-kit push --force
+        echo "signals-bootstrap: initialising extensions + item/action/event tables (db:init)…"
+        pnpm --filter api db:init
+        echo "signals-bootstrap: DONE."
+    environment: &signals-env
+      INSTANCE_NAME: ${INSTANCE_NAME:-signals-local}
+      INSTANCE_ENV: development
+      API_DOMAIN: http://localhost
+      API_PORT: "2742"
+      AUTH_SECRET: ${AUTH_SECRET:?AUTH_SECRET must be set in .env}
+      AUTH_MIDDLEWARE_ENABLED: "true"
+      CREATE_TEST_OTP: "true"
+      SERVED_DOMAINS: ${SERVED_DOMAINS:-blue_dot/seeker,blue_dot/provider}
+      NETWORK_CONFIG_SOURCE: local
+      # Relative to the container CWD (/app for the built API, /repo for the
+      # bootstrap) — both have examples/ at that root.
+      NETWORK_CONFIG_LOCAL_FILE: examples/schemas/${SIGNALS_NETWORK:-blue_dot}/network.json
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB:-postgresdb}
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: "5432"
+      DATABASE_PORT: "5432"
+      POSTGRES_URL: postgres://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-postgresdb}
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
+      REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379
+      SIGNALS_PII_KEY: ${SIGNALS_PII_KEY:?SIGNALS_PII_KEY must be a base64-encoded 32-byte key}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: "no"
+
+  signals-api:
+    build:
+      context: ..
+      dockerfile: apps/api/Dockerfile
+    image: signals-dpg/api:local
+    container_name: signals-api
+    restart: unless-stopped
+    # Inherits the exact same env as the bootstrap step.
+    environment: *signals-env
+    ports:
+      - "${API_PORT:-2742}:2742"
+    depends_on:
+      signals-bootstrap:
+        condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  signals-ui:
+    build:
+      context: ..
+      dockerfile: apps/ui/Dockerfile
+      args:
+        VITE_API_URL: http://localhost:2742
+        VITE_NETWORK_NAME: ${SIGNALS_NETWORK:-blue_dot}
+    image: signals-dpg/ui:local
+    container_name: signals-ui
+    restart: unless-stopped
+    environment:
+      UI_VARIANT: signals
+    ports:
+      # MUST be 5173 — the Signals API's CORS allow-list is 3000/5173/2742 only.
+      - "5173:80"
+    depends_on:
+      signals-api:
+        condition: service_started
+
+volumes:
+  signals-postgres-data:
+  signals-redis-data:
