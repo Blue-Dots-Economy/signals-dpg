@@ -5,6 +5,7 @@ import type { RJSFSchema } from '@rjsf/utils';
 import { fetchNetworkConfig, fetchNetworkItems, PROFILE_FETCH_LIMIT } from '@/lib/network-api';
 import type { Item } from '@/lib/item-api';
 import { useBrowserLocation } from '@/hooks/use-browser-location';
+import { useGeolocationPermission } from '@/hooks/use-geolocation-permission';
 import type { LatLng } from '@/lib/geo/types';
 import { getEnumFilterFieldsForDomains, itemPassesEnumFilters } from '@/lib/enum-filters';
 import { MapFiltersPanel } from '@/components/map/map-filters-panel';
@@ -13,7 +14,7 @@ import type { ViewMode } from '@/engine/types';
 import { TouristTopBar } from './tourist-top-bar';
 import { TouristMap } from './tourist-map';
 import { TouristList } from './tourist-list';
-import { EnableLocationBanner } from './enable-location-banner';
+import { EnableLocationBanner } from '@/components/location/enable-location-banner';
 import { TouristHero } from './tourist-hero';
 import { itemToCardItem, matchesSearch, type CardItem } from './practitioner-data';
 import { TOURIST_NETWORK_ID as ORANGE_NETWORK_ID } from './resolve-tourist-config';
@@ -39,26 +40,7 @@ export function TouristApp() {
     }
   }, [browser.isSupported, browser.status, browser.request]);
 
-  // Track the geolocation PERMISSION state. The geolocation error code is
-  // PERMISSION_DENIED for both "Never allow" AND merely dismissing the prompt,
-  // so we can't tell them apart from the error. The Permissions API can: it's
-  // 'denied' only on a real block, and stays 'prompt' when dismissed. We use
-  // this to hide the "Enable location" button only when truly blocked.
-  const [geoPermission, setGeoPermission] = React.useState<PermissionState | 'unknown'>('unknown');
-  React.useEffect(() => {
-    if (typeof navigator === 'undefined' || !navigator.permissions?.query) return;
-    let status: PermissionStatus | null = null;
-    const onChange = () => setGeoPermission(status?.state ?? 'unknown');
-    navigator.permissions
-      .query({ name: 'geolocation' as PermissionName })
-      .then((s) => {
-        status = s;
-        setGeoPermission(s.state);
-        s.addEventListener('change', onChange);
-      })
-      .catch(() => setGeoPermission('unknown'));
-    return () => status?.removeEventListener('change', onChange);
-  }, []);
+  const geoPermission = useGeolocationPermission();
 
   const userLocation: LatLng | null = browser.location
     ? { lat: browser.location.lat, lng: browser.location.lng }
@@ -129,6 +111,10 @@ export function TouristApp() {
         <EnableLocationBanner
           onEnable={() => void browser.request()}
           blocked={geoPermission === 'denied'}
+          title={t('tourist.enable_location_title')}
+          body={t('tourist.enable_location_body')}
+          blockedBody={t('tourist.enable_location_blocked_body')}
+          cta={t('tourist.enable_location_cta')}
         />
       )}
 
