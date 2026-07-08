@@ -13,6 +13,7 @@ import {
   validateAgainstJsonSchema,
 } from '@dpg/schemas';
 import { classify_item } from './items/classifier.js';
+import { hasAcceptedProfileConsent } from './consent_acceptance.js';
 import { is_populated } from './metrics/profile_completion.js';
 import { decryptPiiBlob, encryptPiiBlob, getPiiKey } from '@dpg/auth';
 import { items } from '@dpg/database';
@@ -217,10 +218,15 @@ export async function createItemInternal(
       ? ''
       : encryptPiiBlob(JSON.stringify(itemState.privateState), getPiiKey());
 
+  // A brand-new item has no id yet, so per-profile `profile_creation` consent
+  // cannot exist at create time — every create starts as draft. The profile
+  // goes live only after the owner accepts profile consent
+  // (POST /consent/profile-accept), which re-classifies it (aggregator-dpg#464).
   const classification = classify_item({
     schema: itemSchema as { required?: string[] },
     merged_state: submittedItemState,
     current_status: 'draft',
+    consent_accepted: false,
   });
 
   const itemLocations = locationsForStorage(params.item_locations ?? [], itemSchema);
@@ -282,6 +288,75 @@ export interface UpdateItemInternalResult {
   };
 }
 
+/**
+ * Promote a single profile to `live` after its owner accepts `profile_creation`
+ * consent (aggregator-dpg#464). A profile is created `draft` because per-item
+ * consent can only be recorded after the item exists; when the owner accepts
+ * profile consent (via POST /consent/profile-accept, on platform login or a
+ * Voice AI call), a complete profile becomes discoverable.
+ *
+ * Only a `draft` item is promoted — `paused` is sticky and `live` needs no
+ * change. Re-runs the same classifier used on write (with consent now true),
+ * so completeness rules stay in one place. Returns true if it flipped to live.
+ *
+ * Caller is expected to have already recorded the consent row (and verified the
+ * caller owns the item); this only re-evaluates lifecycle.
+ */
+export async function promoteItemOnProfileConsent(
+  exec: DbOrTx,
+  itemId: string
+): Promise<boolean> {
+  const [item] = await exec
+    .select({
+      item_id: items.item_id,
+      item_network: items.item_network,
+      item_domain: items.item_domain,
+      item_type: items.item_type,
+      item_schema_url: items.item_schema_url,
+      item_state: items.item_state,
+      item_private_state: items.item_private_state,
+      lifecycle_status: items.lifecycle_status,
+    })
+    .from(items)
+    .where(eq(items.item_id, itemId))
+    .limit(1);
+
+  if (!item || item.lifecycle_status !== 'draft') return false;
+
+  const itemSchema = await getOrFetchSchemaByUrl({
+    schemaUrl: item.item_schema_url,
+    network: item.item_network,
+    domain: item.item_domain,
+    itemType: item.item_type,
+  });
+
+  const priv =
+    item.item_private_state === ''
+      ? {}
+      : (JSON.parse(
+          decryptPiiBlob(item.item_private_state, getPiiKey())
+        ) as Record<string, unknown>);
+  const mergedFullState = mergeItemStateWithPrivate(
+    item.item_state as Record<string, unknown>,
+    priv
+  );
+
+  const { lifecycle_status } = classify_item({
+    schema: itemSchema as { required?: string[] },
+    merged_state: mergedFullState,
+    current_status: 'draft',
+    consent_accepted: true,
+  });
+
+  if (lifecycle_status !== 'live') return false;
+
+  await exec
+    .update(items)
+    .set({ lifecycle_status: 'live', updated_at: sql`now()` })
+    .where(eq(items.item_id, itemId));
+  return true;
+}
+
 export async function updateItemInternal(
   exec: DbOrTx,
   itemId: string,
@@ -311,6 +386,7 @@ export async function updateItemInternal(
         item_state: items.item_state,
         item_private_state: items.item_private_state,
         lifecycle_status: items.lifecycle_status,
+        created_by: items.created_by,
       })
       .from(items)
       .where(ownershipFilter)
@@ -397,10 +473,17 @@ export async function updateItemInternal(
           ? ''
           : encryptPiiBlob(JSON.stringify(split.privateState), getPiiKey());
 
+      const consent_accepted = await hasAcceptedProfileConsent(
+        exec,
+        existingItem.created_by,
+        existingItem.item_id,
+      );
+
       const classification = classify_item({
         schema: itemSchema as { required?: string[] },
         merged_state: mergedFullState,
         current_status: existingItem.lifecycle_status as 'draft' | 'live' | 'paused',
+        consent_accepted,
       });
       updateValues.lifecycle_status = classification.lifecycle_status;
     }

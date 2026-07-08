@@ -11,6 +11,13 @@ export interface ClassifierInput {
    * classifier never flips out of it. For brand-new items pass `'draft'`.
    */
   current_status: LifecycleStatus;
+  /**
+   * Whether the item owner has accepted the network's terms + privacy consent
+   * (from the consent ledger, not the user-table flags). A profile goes live
+   * only when required fields are complete AND consent is accepted
+   * (aggregator-dpg#464). Every network is gated — see `hasUserAcceptedConsent`.
+   */
+  consent_accepted: boolean;
 }
 
 export interface ClassifierResult {
@@ -22,7 +29,8 @@ export interface ClassifierResult {
  * the merged post-write state. See
  * docs/superpowers/specs/2026-06-03-participant-onboarding-lifecycle-design.md §5.
  *
- * lifecycle_status: paused is sticky; otherwise required_complete ? live : draft.
+ * lifecycle_status: paused is sticky; otherwise live requires BOTH required
+ * fields complete AND consent accepted, else draft.
  * (Completion % is no longer produced here — the single completion metric is
  * `item_metrics.profile_completion_pct`, computed required-only via
  * `profile_completion_pct`.)
@@ -35,10 +43,7 @@ export const classify_item = (input: ClassifierInput): ClassifierResult => {
     return { lifecycle_status: 'paused' };
   }
 
-  if (required.length === 0) {
-    return { lifecycle_status: 'live' };
-  }
-
   const required_complete = required.every((k) => is_populated(state[k]));
-  return { lifecycle_status: required_complete ? 'live' : 'draft' };
+  const live = required_complete && input.consent_accepted;
+  return { lifecycle_status: live ? 'live' : 'draft' };
 };

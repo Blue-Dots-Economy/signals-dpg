@@ -9,6 +9,7 @@ import { eq, sql } from 'drizzle-orm';
 import { decryptItemPrivate } from '@/utils/item_decrypt';
 import { getOrFetchSchemaByUrl } from '@/network_schema_cache';
 import { classify_item } from '@/services/items/classifier';
+import { hasAcceptedProfileConsent } from '@/services/consent_acceptance';
 import { invalidateItemFetchCache } from '@/utils/item_fetch_cache_invalidate';
 
 type ItemLifecycleRequest = FastifyRequest<{
@@ -107,10 +108,16 @@ const item_lifecycle_handler = async (
         next_status = 'paused';
       } else {
         // unpause: recompute draft/live from current data (non-sticky path).
+        const consent_accepted = await hasAcceptedProfileConsent(
+          tx,
+          existing.created_by,
+          item_id,
+        );
         next_status = classify_item({
           schema: itemSchema as { required?: string[] },
           merged_state: mergedState,
           current_status: 'draft',
+          consent_accepted,
         }).lifecycle_status;
       }
 

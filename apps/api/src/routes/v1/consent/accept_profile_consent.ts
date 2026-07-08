@@ -11,6 +11,8 @@ import { items } from '@dpg/database';
 import { auth_middleware_if_enabled } from '@api/plugins/auth/auth_middleware';
 import { apiConfig } from '@/config';
 import { resolveConsentVersion } from '@/services/consent_version';
+import { hasAcceptedTermsAndPrivacy } from '@/services/consent_acceptance';
+import { promoteItemOnProfileConsent } from '@/services/item_service';
 
 const ProfileConsentAcceptResponseSchema = z.object({ recorded: z.number().int() });
 
@@ -86,6 +88,26 @@ export const accept_profile_consent_handler = async (
     });
   }
 
+  // Prerequisite: terms + privacy must already be accepted before per-profile
+  // consent can be recorded. This enforces the invariant that lets the live
+  // gate check profile_creation alone (see hasAcceptedProfileConsent).
+  try {
+    const prereqMet = await hasAcceptedTermsAndPrivacy(db, userId, body.network);
+    if (!prereqMet) {
+      return reply.code(409).send({
+        error: 'CONSENT_PREREQUISITE_MISSING',
+        message:
+          'Terms and privacy must be accepted before recording profile consent',
+      });
+    }
+  } catch (err) {
+    request.log.error({ err }, 'profile consent prerequisite check failed');
+    return reply.code(500).send({
+      error: 'CONSENT_READ_FAILED',
+      message: 'Failed to verify consent prerequisite',
+    });
+  }
+
   // Idempotency: return recorded:0 if a row already exists for this
   // (userId, item_id, profile_creation).
   try {
@@ -128,16 +150,22 @@ export const accept_profile_consent_handler = async (
   }
 
   try {
-    await db.insert(consent_record).values({
-      level: 'item',
-      consentCategory: 'profile_creation',
-      userId,
-      itemId: body.item_id,
-      network: body.network,
-      brand: body.brand ?? null,
-      documentVersion: profileVersion,
-      source: 'profile',
-      acceptedAt: new Date(),
+    await db.transaction(async (tx) => {
+      await tx.insert(consent_record).values({
+        level: 'item',
+        consentCategory: 'profile_creation',
+        userId,
+        itemId: body.item_id,
+        network: body.network,
+        brand: body.brand ?? null,
+        documentVersion: profileVersion,
+        source: 'profile',
+        acceptedAt: new Date(),
+      });
+      // Recording profile consent can make a complete draft discoverable
+      // (aggregator-dpg#464). Promote in the same transaction so the ledger
+      // write and the lifecycle flip are atomic.
+      await promoteItemOnProfileConsent(tx, body.item_id);
     });
   } catch (err) {
     // consent_record is append-only, so the idempotency check + insert are not
