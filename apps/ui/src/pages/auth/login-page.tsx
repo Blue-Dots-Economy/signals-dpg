@@ -8,9 +8,12 @@ import { AuthShell } from '@/components/layout/auth-shell';
 import {
   checkUser,
   consentStatusIdentifier,
+  fetchAuthConfig,
   isValidPhoneNumber,
   requestOtp,
+  type AuthConfigResponse,
   type AuthIdentifier,
+  type LoginChannel,
 } from '@/lib/auth-api';
 import {
   fetchConsentConfigs,
@@ -58,12 +61,29 @@ export function LoginPage() {
   const [userExists, setUserExists] = useState<boolean | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [consentGate, setConsentGate] = useState<ConsentGateState | null>(null);
+  const [authCfg, setAuthCfg] = useState<AuthConfigResponse | null>(null);
+  const [signupBlocked, setSignupBlocked] = useState(false);
   // Capture the checked identifier at the time of submission so the consent
   // accept and OTP request use the same normalized values.
   const [pendingIdentifier, setPendingIdentifier] = useState<AuthIdentifier | null>(null);
   const [pendingUserExists, setPendingUserExists] = useState<boolean>(false);
   const [pendingName, setPendingName] = useState<string>('');
   const redirectTo = searchParams.get('redirect') ?? '/';
+
+  useEffect(() => {
+    fetchAuthConfig()
+      .then(setAuthCfg)
+      // Fail-safe: assume both channels + gated so the API stays authoritative.
+      .catch(() => setAuthCfg({ selfSignupAllowed: false, loginChannels: ['phone', 'email'] }));
+  }, []);
+
+  const channels: LoginChannel[] = authCfg?.loginChannels ?? ['phone', 'email'];
+
+  useEffect(() => {
+    if (authCfg && !authCfg.loginChannels.includes(mode)) {
+      setMode(authCfg.loginChannels[0]);
+    }
+  }, [authCfg, mode]);
 
   const identifier: AuthIdentifier = mode === 'email' ? { email } : { phoneNumber };
   const contactValue = mode === 'email' ? email : phoneNumber;
@@ -74,6 +94,7 @@ export function LoginPage() {
   const handleModeChange = (value: AuthMode) => {
     setMode(value);
     setUserExists(null);
+    setSignupBlocked(false);
   };
 
   const proceedToOtp = async (
@@ -136,6 +157,15 @@ export function LoginPage() {
       const response = await checkUser(identifier);
       const exists = response.userExists;
       setUserExists(exists);
+
+      if (!exists && authCfg && !authCfg.selfSignupAllowed) {
+        setIsLoading(false);
+        toast.error(t('auth.toast_signup_disabled'), {
+          description: t('auth.toast_signup_disabled_desc'),
+        });
+        setSignupBlocked(true);
+        return;
+      }
 
       if (!exists && !name.trim()) {
         setIsLoading(false);
@@ -249,24 +279,26 @@ export function LoginPage() {
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-4">
-          {/* Phone / Email pill toggle */}
-          <div className="flex rounded-full border border-border bg-muted p-1 text-sm">
-            {(['phone', 'email'] as AuthMode[]).map((m) => (
-              <button
-                key={m}
-                type="button"
-                onClick={() => handleModeChange(m)}
-                className={[
-                  'flex-1 rounded-full py-1.5 font-medium transition-colors capitalize',
-                  mode === m
-                    ? 'bg-background text-foreground shadow-sm'
-                    : 'text-muted-foreground hover:text-foreground',
-                ].join(' ')}
-              >
-                {m}
-              </button>
-            ))}
-          </div>
+          {/* Phone / Email pill toggle — hidden entirely when only one channel is allowed */}
+          {channels.length > 1 && (
+            <div className="flex rounded-full border border-border bg-muted p-1 text-sm">
+              {channels.map((m) => (
+                <button
+                  key={m}
+                  type="button"
+                  onClick={() => handleModeChange(m)}
+                  className={[
+                    'flex-1 rounded-full py-1.5 font-medium transition-colors capitalize',
+                    mode === m
+                      ? 'bg-background text-foreground shadow-sm'
+                      : 'text-muted-foreground hover:text-foreground',
+                  ].join(' ')}
+                >
+                  {m}
+                </button>
+              ))}
+            </div>
+          )}
 
           {/* Contact input */}
           <div className="space-y-1.5">
@@ -320,6 +352,12 @@ export function LoginPage() {
                   : t('auth.hint_verify_phone')}
               </p>
             </div>
+          )}
+
+          {signupBlocked && (
+            <p className="text-sm text-destructive">
+              {t('auth.signup_disabled_message')}
+            </p>
           )}
 
           {/* CTA */}
