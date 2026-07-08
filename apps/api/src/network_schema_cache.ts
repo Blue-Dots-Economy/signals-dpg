@@ -1,4 +1,4 @@
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createHash } from 'node:crypto';
@@ -227,6 +227,17 @@ async function cacheReferencedItemSchemas() {
       throw err;
     }
   }
+}
+
+/**
+ * Wipe the on-disk schema cache. `getConfiguredNetworkSchemas` short-circuits
+ * on any cached entry and never re-reads the source config, so the cache
+ * outlives a process restart and keeps serving the previously configured
+ * network. Local dev clears it on boot (see server.ts) so a network switch in
+ * `.env` actually takes effect.
+ */
+export async function clearNetworkSchemaCache() {
+  await rm(CACHE_ROOT, { recursive: true, force: true });
 }
 
 export async function refreshConsumedSchemas() {
