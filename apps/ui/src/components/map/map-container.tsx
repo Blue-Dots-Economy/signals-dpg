@@ -257,7 +257,12 @@ export function MapView({
       className={
         isMaximized
           ? 'fixed inset-0 z-[2000] bg-background'
-          : `relative ${heightClassName}`
+          : // `isolate` creates a stacking context so Leaflet's internal panes
+            // (z-index 200–700) stay contained and can't paint above app-level
+            // overlays like the Radix dialog (z-50). Without it, an open modal
+            // (e.g. the post-login profile-consent dialog) is covered by the map
+            // and every non-map control becomes unclickable.
+            `relative isolate ${heightClassName}`
       }
     >
       <MapProviderComponent
