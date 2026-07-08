@@ -6,7 +6,7 @@ import { DatePickerWidget } from './custom-widgets/date-picker-widget';
 import { LocationAutocompleteWidget } from './custom-widgets/location-autocomplete-widget';
 import { MultiLocationAutocompleteWidget } from './custom-widgets/multi-location-autocomplete-widget';
 import CustomFieldTemplate from './custom-field-template';
-import { formLayouts } from '@/theme/form-layouts';
+import { resolveFormLayout, type FormLayout } from '@/theme/form-layouts';
 import { resolveVisibleSchema } from '@/lib/show-if';
 
 interface RjsfError {
@@ -93,14 +93,18 @@ interface SchemaFormProps {
    */
   onValidityChange?: (isValid: boolean) => void;
   domainId?: string;
+  /**
+   * Network id, used with domainId to resolve the section layout. Domain ids
+   * (seeker/provider) collide across networks, so the layout is keyed on
+   * `${networkId}:${domainId}` — see resolveFormLayout.
+   */
+  networkId?: string;
   formContext?: Record<string, unknown>;
 }
 
 // Root-only ObjectFieldTemplate that renders section headers + two-column grid.
 // For nested objects (non-root) it falls back to the default RJSF column layout.
-function SectionedObjectFieldTemplate(domainId: string) {
-  const layout = formLayouts[domainId];
-
+function SectionedObjectFieldTemplate(layout: FormLayout | undefined) {
   return function ObjectFieldTemplate(props: ObjectFieldTemplateProps) {
     if (!layout) {
       // No layout config — render properties in a simple column
@@ -323,6 +327,9 @@ function normalizeSchemaForRjsf(schema: RJSFSchema, rootSchema?: RJSFSchema): RJ
     // Strip the custom `x-show-if` keyword — consumed by resolveVisibleSchema before
     // this point; ajv must never see it.
     if (key === 'x-show-if') continue;
+    // Strip the custom `x-form-layout` keyword — consumed by the section
+    // renderer (read off the raw schema); ajv/RJSF must never see it.
+    if (key === 'x-form-layout') continue;
     result[key] = normalizeSchemaForRjsf(value as RJSFSchema, root);
   }
 
@@ -366,6 +373,7 @@ export function SchemaForm({
   hideSubmit = false,
   onValidityChange,
   domainId,
+  networkId,
   formContext,
 }: SchemaFormProps) {
   // Base schema (meta stripped) still carries `x-show-if` so the evaluator can read it.
@@ -420,12 +428,20 @@ export function SchemaForm({
     if (cb) cb(isSchemaFormValid(validator, rjsfSchema, data));
   }, [rjsfSchema, data]);
 
+  // Section layout is schema-driven first: an `x-form-layout` block on the item
+  // schema (network.json) is the single source of truth, so field add/remove/
+  // reorder needs no code change. Falls back to the code-side `formLayouts` map
+  // (keyed network:domain) for networks not yet migrated to x-form-layout.
+  const activeLayout: FormLayout | undefined =
+    (schema as { 'x-form-layout'?: FormLayout })['x-form-layout'] ??
+    resolveFormLayout(networkId, domainId);
+
   // FieldTemplate applies to every form (red required marker). ObjectFieldTemplate
-  // (section layout) is added only for domains with a configured layout.
+  // (section layout) is added only when a layout is resolved.
   const templates = {
     FieldTemplate: CustomFieldTemplate,
-    ...(domainId && formLayouts[domainId]
-      ? { ObjectFieldTemplate: SectionedObjectFieldTemplate(domainId) }
+    ...(activeLayout
+      ? { ObjectFieldTemplate: SectionedObjectFieldTemplate(activeLayout) }
       : {}),
   };
 

@@ -18,6 +18,51 @@
           "title": "Job Seeker Profile 1.0",
           "type": "object",
           "additionalProperties": false,
+          "x-form-layout": {
+            "sections": [
+              {
+                "title": "Personal Details",
+                "fields": ["name", "age", "gender", "phone", "location", "languageSpoken"]
+              },
+              {
+                "title": "Work Experience & Preferences",
+                "fields": [
+                  "workExperience",
+                  "workExperienceYearsConditional",
+                  "nameOfLastRoleHeld",
+                  "natureOfJobsInterestedIn",
+                  "nameOfJobRolesInterestedIn",
+                  "otherHelpNeeded"
+                ]
+              },
+              {
+                "title": "Education & Skills",
+                "fields": [
+                  "educationCategory",
+                  "schoolQualification",
+                  "schoolQualificationOther",
+                  "collegeQualification",
+                  "collegeQualificationOther",
+                  "itiTrade",
+                  "itiTradeOther",
+                  "itiInstitute",
+                  "vocationalTrainingOther",
+                  "polytechnicDiploma",
+                  "polytechnicDiplomaOther",
+                  "certificationDetails"
+                ]
+              }
+            ],
+            "twoColumn": [
+              "age",
+              "gender",
+              "phone",
+              "workExperienceYearsConditional",
+              "schoolQualification",
+              "collegeQualification",
+              "itiTrade"
+            ]
+          },
           "required": [
             "name",
             "location",
@@ -751,6 +796,51 @@
           "display_name_field": "jobProviderName",
           "type": "object",
           "additionalProperties": false,
+          "x-form-layout": {
+            "sections": [
+              {
+                "title": "Job Details",
+                "fields": ["jobProviderName", "jobProviderLocation", "role", "title", "positions", "natureOfJob"]
+              },
+              {
+                "title": "Hiring Contact",
+                "fields": ["hiringManagerName", "hiringManagerPhoneNumber", "hiringManagerEmail"]
+              },
+              {
+                "title": "Compensation",
+                "fields": ["stipendMin", "stipendMax", "salaryMin", "salaryMax", "taskRateMin", "taskRateMax"]
+              },
+              {
+                "title": "Candidate Requirements",
+                "fields": [
+                  "candidateExperienceType",
+                  "workExperienceYears",
+                  "lastRoleHeld",
+                  "minEducationalInstitute",
+                  "minQualificationSchool",
+                  "minQualificationSchoolOther",
+                  "minQualificationCollege",
+                  "minQualificationCollegeOther",
+                  "minQualificationVocational",
+                  "minQualificationPolytechnic",
+                  "minQualificationPolytechnicOther",
+                  "minQualificationCert",
+                  "minQualificationInformal"
+                ]
+              }
+            ],
+            "twoColumn": [
+              "hiringManagerPhoneNumber",
+              "hiringManagerEmail",
+              "positions",
+              "stipendMin",
+              "stipendMax",
+              "salaryMin",
+              "salaryMax",
+              "taskRateMin",
+              "taskRateMax"
+            ]
+          },
           "required": [
             "jobProviderName",
             "role",
