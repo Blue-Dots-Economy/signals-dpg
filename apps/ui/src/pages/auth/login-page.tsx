@@ -157,6 +157,7 @@ export function LoginPage() {
       const response = await checkUser(identifier);
       const exists = response.userExists;
       setUserExists(exists);
+      setSignupBlocked(false);
 
       if (!exists && authCfg && !authCfg.selfSignupAllowed) {
         setIsLoading(false);
@@ -367,7 +368,7 @@ export function LoginPage() {
             className="flex w-full items-center justify-center gap-2 rounded-md py-3 text-sm font-semibold transition-all disabled:opacity-60 bg-brand-cta h-11"
           >
             {isLoading && <Loader2 className="h-4 w-4 animate-spin" />}
-            {userExists === null ? t('auth.cta_continue') : t('auth.cta_send_otp')}
+            {(userExists === null || signupBlocked) ? t('auth.cta_continue') : t('auth.cta_send_otp')}
           </button>
         </form>
       </AuthShell>

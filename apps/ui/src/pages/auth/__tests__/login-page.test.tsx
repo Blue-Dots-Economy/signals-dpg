@@ -72,4 +72,32 @@ describe('LoginPage', () => {
     // this message.
     expect(await screen.findAllByText(/contact your aggregator/i)).not.toHaveLength(0);
   });
+
+  it('clears the stale signup-blocked state once a fresh submission resolves to an existing user', async () => {
+    // Regression test: signupBlocked must be re-evaluated on every submission,
+    // not just on mode toggle. Submitting an unknown identifier first gates
+    // the form; editing the field (without touching the phone/email toggle)
+    // to an identifier that DOES exist and resubmitting must drop the gated
+    // copy and proceed to the OTP flow.
+    fetchAuthConfig.mockResolvedValue({ selfSignupAllowed: false, loginChannels: ['phone', 'email'] });
+    checkUser.mockResolvedValueOnce({ userExists: false });
+    await renderPage();
+    await waitFor(() => expect(fetchAuthConfig).toHaveBeenCalled());
+
+    const input = screen.getByLabelText(/mobile/i);
+    await userEvent.type(input, '9876543210');
+    await userEvent.click(screen.getByRole('button', { name: /continue|send/i }));
+
+    await waitFor(() => expect(checkUser).toHaveBeenCalledTimes(1));
+    expect(await screen.findAllByText(/contact your aggregator/i)).not.toHaveLength(0);
+
+    checkUser.mockResolvedValueOnce({ userExists: true });
+    await userEvent.clear(input);
+    await userEvent.type(input, '9123456789');
+    await userEvent.click(screen.getByRole('button', { name: /continue|send/i }));
+
+    await waitFor(() => expect(checkUser).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(requestOtp).toHaveBeenCalled());
+    expect(screen.queryByText(/contact your aggregator/i)).toBeNull();
+  });
 });
