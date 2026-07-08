@@ -78,6 +78,8 @@ export function LoginPage() {
   }, []);
 
   const channels: LoginChannel[] = authCfg?.loginChannels ?? ['phone', 'email'];
+  const onlyEmail = channels.length === 1 && channels[0] === 'email';
+  const onlyPhone = channels.length === 1 && channels[0] === 'phone';
 
   useEffect(() => {
     if (authCfg && !authCfg.loginChannels.includes(mode)) {
@@ -272,7 +274,7 @@ export function LoginPage() {
           </h2>
           <p className="mt-1 text-sm text-muted-foreground">
             {userExists === null || signupBlocked
-              ? t('auth.sub_initial')
+              ? t(onlyEmail ? 'auth.sub_initial_email' : onlyPhone ? 'auth.sub_initial_phone' : 'auth.sub_initial')
               : userExists
                 ? t('auth.sub_existing', { contactLabel })
                 : t('auth.sub_new', { contactLabel })}
@@ -304,7 +306,9 @@ export function LoginPage() {
           {/* Contact input */}
           <div className="space-y-1.5">
             <Label htmlFor="contact" className="text-sm font-medium">
-              {mode === 'email' ? t('auth.label_email_or_mobile') : t('auth.label_mobile')}
+              {mode === 'email'
+                ? t(onlyEmail ? 'auth.label_email' : 'auth.label_email_or_mobile')
+                : t('auth.label_mobile')}
             </Label>
             {mode === 'phone' ? (
               <Input

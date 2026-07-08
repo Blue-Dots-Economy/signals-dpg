@@ -29,7 +29,7 @@ export const AuthSecretsSchema = z.object({
   SELF_SIGNUP_MODE: z.enum(['gated', 'allowed']).default('gated'),
   // Allowed login identifier channels, comma-separated (email / phone).
   // Parsed by parseLoginChannels(). Default: both.
-  LOGIN_CHANNELS: z.string().default('email,phone'),
+  LOGIN_CHANNELS: z.string().default('phone,email'),
 });
 
 /**

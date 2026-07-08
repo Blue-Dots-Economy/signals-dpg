@@ -65,12 +65,12 @@ describe('LoginPage', () => {
 
     await waitFor(() => expect(checkUser).toHaveBeenCalled());
     expect(requestOtp).not.toHaveBeenCalled();
-    // "Contact your aggregator" is produced only by the signup-gate branch (inline
+    // The "contact your administrator" copy is produced only by the signup-gate branch (inline
     // signup_disabled_message + toast_signup_disabled_desc) — asserting on it (rather
     // than just requestOtp not being called) distinguishes the gate from the
     // separate name-required guard, which also skips requestOtp but never renders
     // this message.
-    expect(await screen.findAllByText(/contact your aggregator/i)).not.toHaveLength(0);
+    expect(await screen.findAllByText(/contact your administrator/i)).not.toHaveLength(0);
   });
 
   it('clears the stale signup-blocked state once a fresh submission resolves to an existing user', async () => {
@@ -89,7 +89,7 @@ describe('LoginPage', () => {
     await userEvent.click(screen.getByRole('button', { name: /continue|send/i }));
 
     await waitFor(() => expect(checkUser).toHaveBeenCalledTimes(1));
-    expect(await screen.findAllByText(/contact your aggregator/i)).not.toHaveLength(0);
+    expect(await screen.findAllByText(/contact your administrator/i)).not.toHaveLength(0);
 
     checkUser.mockResolvedValueOnce({ userExists: true });
     await userEvent.clear(input);
@@ -98,6 +98,6 @@ describe('LoginPage', () => {
 
     await waitFor(() => expect(checkUser).toHaveBeenCalledTimes(2));
     await waitFor(() => expect(requestOtp).toHaveBeenCalled());
-    expect(screen.queryByText(/contact your aggregator/i)).toBeNull();
+    expect(screen.queryByText(/contact your administrator/i)).toBeNull();
   });
 });

@@ -49,7 +49,7 @@ export function assertSelfSignupAllowed(args: {
   if (isAdminDomainEmail(args.email, args.adminByDomain)) return;
   throw new APIError('FORBIDDEN', {
     message:
-      'Self sign-up is disabled on this instance. Contact your aggregator to get onboarded.',
+      'Self sign-up is disabled on this instance. Please contact your administrator to get onboarded.',
     code: 'SELF_SIGNUP_DISABLED',
   });
 }
