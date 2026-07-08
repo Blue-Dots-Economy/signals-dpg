@@ -936,6 +936,8 @@
             "candidateExperienceType": {
               "vectorize": true,
               "type": "string",
+              "title": "Type of Candidate",
+              "description": "Please select the option that best describes the type of candidate you want to hire based on their previous work experience",
               "enum": [
                 "Fresher",
                 "Worked before",
@@ -944,6 +946,8 @@
             },
             "minEducationalInstitute": {
               "type": "string",
+              "title": "Min. Highest Educational Institute Attended",
+              "description": "Please select the preferred minimum of the highest kind of educational institute they have attended",
               "enum": [
                 "None",
                 "School",
@@ -957,6 +961,8 @@
             },
             "workExperienceYears": {
               "type": "string",
+              "title": "Work Experience (Years)",
+              "description": "Preferred minimum years of work experience",
               "enum": [
                 "0",
                 "< 1 Year",
