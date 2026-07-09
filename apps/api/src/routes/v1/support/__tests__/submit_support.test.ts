@@ -84,4 +84,24 @@ describe('POST /api/v1/support', () => {
     expect(res.statusCode).toBe(400);
     await app.close();
   });
+
+  it('returns 502 SUPPORT_SEND_FAILED when the notification send rejects', async () => {
+    mockDeps({ recipient: 'support@org.com', fromEmail: 'from@org.com' });
+    notifyMock.mockRejectedValue(new Error('smtp down'));
+    const app = await buildApp();
+    const res = await app.inject({ method: 'POST', url: '/api/v1/support', payload: { message: 'x' } });
+    expect(res.statusCode).toBe(502);
+    expect(res.json().error).toBe('SUPPORT_SEND_FAILED');
+    await app.close();
+  });
+
+  it('returns 503 SUPPORT_NOT_CONFIGURED when the notification client is unavailable', async () => {
+    mockDeps({ recipient: 'support@org.com', fromEmail: 'from@org.com', client: false });
+    const app = await buildApp();
+    const res = await app.inject({ method: 'POST', url: '/api/v1/support', payload: { message: 'hi' } });
+    expect(res.statusCode).toBe(503);
+    expect(res.json().error).toBe('SUPPORT_NOT_CONFIGURED');
+    expect(notifyMock).not.toHaveBeenCalled();
+    await app.close();
+  });
 });
