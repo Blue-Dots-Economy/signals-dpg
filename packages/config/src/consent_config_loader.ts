@@ -21,15 +21,33 @@ export type LoadConsentConfigOptions = {
   source: 'local' | 'remote';
   networkLocalFile: string;
   networks: string[];
+  /**
+   * Address rendered in place of the `__SUPPORT_EMAIL__` placeholder that
+   * canonical consent files ship (so the email is configurable without editing
+   * consent content). Deployed instances have it substituted upstream at
+   * ConfigMap render; this fallback keeps local/direct reads showing a real
+   * address. Defaults to `hello@bluedotseconomy.org`.
+   */
+  supportEmail?: string;
 };
 
-async function readJsonIfExists(path: string): Promise<unknown | null> {
+const DEFAULT_SUPPORT_EMAIL = 'hello@bluedotseconomy.org';
+const SUPPORT_EMAIL_PLACEHOLDER = '__SUPPORT_EMAIL__';
+
+async function readConsentJson(
+  path: string,
+  supportEmail: string
+): Promise<unknown | null> {
+  let text: string;
   try {
-    return JSON.parse(await readFile(path, 'utf8'));
+    text = await readFile(path, 'utf8');
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code === 'ENOENT') return null;
     throw err;
   }
+  // Render the support-email placeholder before parsing so every content field
+  // that references it picks up the configured address.
+  return JSON.parse(text.split(SUPPORT_EMAIL_PLACEHOLDER).join(supportEmail));
 }
 
 async function listSubdirectories(dir: string): Promise<string[]> {
@@ -61,11 +79,12 @@ export async function loadConsentConfigs(
   // Local mode represents exactly one network — use only the first entry.
   if (opts.networks.length === 0) return [];
   const network = opts.networks[0];
+  const supportEmail = opts.supportEmail ?? DEFAULT_SUPPORT_EMAIL;
 
   const baseDir = dirname(resolve(process.cwd(), opts.networkLocalFile));
   const results: LoadedConsentConfig[] = [];
 
-  const defaultRaw = await readJsonIfExists(join(baseDir, 'consent.json'));
+  const defaultRaw = await readConsentJson(join(baseDir, 'consent.json'), supportEmail);
   if (!defaultRaw) return [];
 
   results.push({
@@ -75,7 +94,7 @@ export async function loadConsentConfigs(
   });
 
   for (const brand of await listSubdirectories(baseDir)) {
-    const brandRaw = await readJsonIfExists(join(baseDir, brand, 'consent.json'));
+    const brandRaw = await readConsentJson(join(baseDir, brand, 'consent.json'), supportEmail);
     if (!brandRaw) continue;
     results.push({
       network,

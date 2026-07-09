@@ -114,6 +114,10 @@ export const NetworkRuntimeSecretsSchema = z.object({
   ),
   NETWORK_CONFIG_URLS: z.string().optional(),
   CONSENT_CONFIG_SOURCE: z.enum(['local', 'remote']).default('local'),
+  // Support/grievance email rendered into consent copy in place of the
+  // `__SUPPORT_EMAIL__` placeholder canonical consent files ship, so the email
+  // is configurable without editing consent content.
+  CONSENT_SUPPORT_EMAIL: z.string().min(1).default('hello@bluedotseconomy.org'),
   ALLOW_EXTRA_SCHEMA_DATA: z
     .string()
     .default('false')
