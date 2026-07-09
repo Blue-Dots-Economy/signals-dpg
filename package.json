@@ -14,6 +14,8 @@
     "db:studio:api": "pnpm --filter api db:studio",
     "db:init:api": "pnpm --filter api db:init",
     "db:migrate:deploy:api": "pnpm --filter api db:migrate:deploy",
+    "db:check:parity:api": "pnpm --filter api db:check:parity",
+    "db:baseline:api": "pnpm --filter api db:baseline",
     "db:backfill:lifecycle:api": "pnpm --filter api db:backfill:lifecycle",
     "db:seed:services:api": "pnpm --filter api db:seed:services",
     "db:backfill:consent:api": "pnpm --filter api db:backfill:consent",

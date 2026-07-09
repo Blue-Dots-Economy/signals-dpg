@@ -88,7 +88,7 @@ COPY --from=builder /app/apps/api/dist ./apps/api/dist
 # The raw SQL (packages/database/src/utils/sql_scripts/) already ships via the
 # packages copy above; add the runner script and the committed Drizzle
 # migrations. Uses prod deps only (drizzle-orm + pg) — no drizzle-kit.
-COPY --from=builder /app/apps/api/scripts/migrate.mjs ./apps/api/scripts/migrate.mjs
+COPY --from=builder /app/apps/api/scripts ./apps/api/scripts
 COPY --from=builder /app/apps/api/drizzle ./apps/api/drizzle
 
 EXPOSE ${API_PORT}

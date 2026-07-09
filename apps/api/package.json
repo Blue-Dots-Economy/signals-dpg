@@ -16,6 +16,8 @@
     "db:studio": "drizzle-kit studio",
     "db:init": "tsx scripts/db_init.ts",
     "db:migrate:deploy": "node scripts/migrate.mjs",
+    "db:check:parity": "node scripts/check_parity.mjs",
+    "db:baseline": "node scripts/baseline.mjs",
     "db:backfill:lifecycle": "node dist/scripts/backfill_lifecycle.js",
     "db:backfill:lifecycle:dev": "tsx src/scripts/backfill_lifecycle.ts",
     "db:seed:purple_dot": "tsx scripts/seed_purple_dot.ts",
