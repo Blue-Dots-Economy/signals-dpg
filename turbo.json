@@ -38,7 +38,8 @@
     "SELF_SIGNUP_MODE",
     "SERVED_DOMAINS",
     "SIGNALS_PII_KEY",
-    "SMS_TEMPLATE_ID"
+    "SMS_TEMPLATE_ID",
+    "SUPPORT_EMAIL"
   ],
   "tasks": {
     "build": {

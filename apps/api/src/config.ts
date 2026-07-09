@@ -55,6 +55,11 @@ export const authConfig = {
   login_channels: parseLoginChannels(auth.LOGIN_CHANNELS),
 };
 
+export const supportConfig = {
+  recipient: notification.SUPPORT_EMAIL,
+  fromEmail: notification.NOTIFICATION_FROM_EMAIL,
+};
+
 export const geocodingConfig = {
   google_api_key: geocoding.GOOGLE_GEOCODING_API_KEY,
   photon_url: geocoding.PHOTON_URL ?? 'https://photon.komoot.io',

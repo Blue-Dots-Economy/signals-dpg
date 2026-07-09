@@ -79,6 +79,10 @@ export const NotificationSecretsSchema = z.object({
   NOTIFICATION_REPLY_TO: z.string().optional(),
   // Base URL for the generic /auth/login CTA in action emails.
   FRONTEND_BASE_URL: z.string().optional(),
+  // Recipient for support/contact-form submissions (#120). Optional so the API
+  // still boots without it; the feature is gated on its presence (the endpoint
+  // returns 503 and the UI hides/toasts when unset).
+  SUPPORT_EMAIL: z.string().optional(),
 });
 
 export const MatchScoreSecretsSchema = z.object({
