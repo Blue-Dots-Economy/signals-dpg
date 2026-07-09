@@ -13,6 +13,7 @@
     "db:push:api": "pnpm --filter api db:push",
     "db:studio:api": "pnpm --filter api db:studio",
     "db:init:api": "pnpm --filter api db:init",
+    "db:migrate:deploy:api": "pnpm --filter api db:migrate:deploy",
     "db:seed:services:api": "pnpm --filter api db:seed:services",
     "db:backfill:consent:api": "pnpm --filter api db:backfill:consent",
     "db:seed:purple_dot:api": "pnpm --filter api db:seed:purple_dot",

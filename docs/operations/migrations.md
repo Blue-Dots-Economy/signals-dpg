@@ -4,39 +4,48 @@ How schema changes flow from local dev to a deployed Signals-DPG instance.
 This document captures the **current contract** (Plans 1–3 era) and the
 **forward path** for when additive-only SQL stops being enough.
 
-## Today's contract (as of merge of Plan 4 Task G.1)
+## Today's contract (Direction B — Drizzle owns its tables)
 
-The schema lives in two layers, and both must be applied to bring a fresh
-database up:
+The schema is split along a principled boundary — **what Drizzle can express
+vs. what is Postgres-native** — and both layers are applied, in order, by one
+deploy runner:
 
-1. **Drizzle-managed (better-auth tables).** The auth schema is declared in
-   TypeScript under `apps/api/db/postgres/schema/` (`auth.ts`, re-exported
-   from `index.ts`). `apps/api/drizzle.config.ts` points `out` at
-   `./drizzle` and `schema` at `./db/postgres/schema`. Generated migrations
-   land under `apps/api/drizzle/`. Tables owned by this layer:
-   `user`, `account`, `session`, `verification`, `apikey`, `organization`,
-   `member`, `invitation`, `team`, `teamMember`, plus the better-auth
-   indexes.
+1. **Drizzle-owned (authoritative in TypeScript).** Declared under
+   `apps/api/db/postgres/schema/` (`auth.ts`, `metrics.ts`,
+   `pii_reveal_audit.ts`, `consent_record.ts`; re-exported from `index.ts`).
+   `apps/api/drizzle.config.ts` points `out` at `./drizzle`, `schema` at
+   `./db/postgres/schema`. Tables: the better-auth set (`user`, `account`,
+   `verification`, `apikey`, `organization`, `member`, `invitation`, `team`,
+   `team_member`) plus `item_metrics`, `pii_reveal_audit`, `consent_record`.
+   Migrations are **generated and committed** under `apps/api/drizzle/`
+   (`pnpm db:generate:api`) and applied at deploy by `drizzle-orm`'s runtime
+   `migrate()` — **not** `drizzle-kit` (a devDependency, absent from the prod
+   image). There is **no** hand-mirrored SQL copy of these tables anymore.
 
-2. **Idempotent raw SQL (network item + auth layer).** Under
-   `packages/database/src/utils/sql_scripts/` (3 files, in FK-safe order:
-   `auth.sql`, `create_items.sql`, `create_actions_events.sql`):
-   - `auth.sql` — idempotent DDL for the better-auth tables (`user`,
-     `account`, `session`, `verification`, `apikey`, `organization`,
-     `member`, `invitation`, `team`, `teamMember`). Used only by the
-     deploy-time migrate-job's bundled `schema.sql`
-     (`apps/api/db/postgres/schema.sql`); local dev applies the
-     equivalent via Drizzle (`pnpm db:push:api`).
-   - `create_items.sql` — extensions (`pgcrypto`, `cube`, `earthdistance`),
-     the partitioned `items` table, GIN/GiST indexes, geo CHECKs, and the
-     `items_created_by_fk` FK to `"user"`.
-   - `create_actions_events.sql` — `item_actions` and `action_events`
-     (partitioned, with their FKs back into items).
+2. **Raw SQL (Postgres-native — cannot be Drizzle).** Under
+   `packages/database/src/utils/sql_scripts/`, organized by concern:
+   - `extensions/extensions.sql` — `pgcrypto`, `cube`, `earthdistance`,
+     `vector` (pgvector), `postgis`. Superuser-level; in deploy these are
+     created by common-services, locally by the dev superuser.
+   - `core/create_items.sql` — the LIST-partitioned `items` table + the
+     `item_search` table (`vector(1024)` embedding, `geography` geo, HNSW/GiST
+     indexes) + the `items_created_by_fk` FK to the Drizzle-owned `"user"`.
+   - `core/create_actions_events.sql` — the partitioned `item_actions` /
+     `action_events` tables.
+   - `migrations/NNNN_*.sql` — ordered version migrations (ALTER/backfill for
+     existing DBs), e.g. `0001_item_locations.sql`.
+   These use partitioning, extensions, and extension types Drizzle Kit doesn't
+   model, so they stay raw. `apps/api/db/postgres/schema.sql` is the
+   **generated bundle** of `extensions/ + core/` (`pnpm schema:bundle`),
+   applied AFTER the Drizzle migrations (the FK to `"user"` requires it).
 
-Every statement in the items/actions/events scripts is written in the form
-`CREATE EXTENSION IF NOT EXISTS …`, `CREATE TABLE IF NOT EXISTS …`,
-`CREATE INDEX IF NOT EXISTS …`, so applying the same file to a database
-that already has the objects is a no-op.
+Every raw statement is `CREATE … IF NOT EXISTS` / `ALTER … ADD COLUMN IF NOT
+EXISTS` / DO-block-guarded, so re-applying is a no-op.
+
+**One runner applies both, in dependency order:** `apps/api/scripts/migrate.mjs`
+(`pnpm db:migrate:deploy:api`) — extensions → drizzle `migrate()` → core →
+version migrations. It uses only prod deps (`drizzle-orm` + `pg`), so it runs
+inside the app image at deploy.
 
 ### Local dev
 

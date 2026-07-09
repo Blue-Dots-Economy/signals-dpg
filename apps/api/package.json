@@ -15,6 +15,7 @@
     "db:migrate": "drizzle-kit migrate",
     "db:studio": "drizzle-kit studio",
     "db:init": "tsx scripts/db_init.ts",
+    "db:migrate:deploy": "node scripts/migrate.mjs",
     "db:seed:purple_dot": "tsx scripts/seed_purple_dot.ts",
     "db:seed:services": "tsx scripts/seed_service_users.ts",
     "db:backfill:consent": "tsx scripts/backfill_demote_consentless.ts",
