@@ -1,4 +1,8 @@
-import { assertCreateTestOtpSafe, parseServedDomains } from '@dpg/config';
+import {
+  assertCreateTestOtpSafe,
+  parseServedDomains,
+  parseLoginChannels,
+} from '@dpg/config';
 import { loadEnv } from '@/env';
 
 export const {
@@ -47,6 +51,8 @@ export const authConfig = {
       ? `${apiConfig.domain}:${apiConfig.port}/api/auth`
       : `${apiConfig.domain}/api/auth`,
   create_test_otp: auth.CREATE_TEST_OTP,
+  allow_self_signup: auth.SELF_SIGNUP_MODE === 'allowed',
+  login_channels: parseLoginChannels(auth.LOGIN_CHANNELS),
 };
 
 export const geocodingConfig = {

@@ -1,6 +1,6 @@
 import { createAuth } from '@dpg/auth';
 import { allowed_origins, admin_domains } from '@dpg/config';
-import { api, instance, auth, notification } from '@/config';
+import { api, instance, auth, notification, authConfig } from '@/config';
 import { db } from '@api/db/postgres/drizzle_config';
 import { redis } from '@api/db/secondary/redis';
 import { getNotificationClient } from '@/utils/notificationClient';
@@ -26,4 +26,7 @@ export const authInstance = createAuth({
   createTestOTP: auth.CREATE_TEST_OTP,
   notificationClient: getNotificationClient(),
   smsTemplateId: notification.SMS_TEMPLATE_ID,
+
+  allowSelfSignup: authConfig.allow_self_signup,
+  loginChannels: authConfig.login_channels,
 });

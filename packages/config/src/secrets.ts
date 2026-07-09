@@ -23,6 +23,13 @@ export const AuthSecretsSchema = z.object({
     .string()
     .default('false')
     .transform((val) => val === 'true'),
+  // Self-signup gate (#105). Default 'gated': the public OTP flow will not
+  // create new accounts (participants are onboarded via /admin/participant).
+  // Set to 'allowed' to keep self-service registration.
+  SELF_SIGNUP_MODE: z.enum(['gated', 'allowed']).default('gated'),
+  // Allowed login identifier channels, comma-separated (email / phone).
+  // Parsed by parseLoginChannels(). Default: both.
+  LOGIN_CHANNELS: z.string().default('phone,email'),
 });
 
 /**

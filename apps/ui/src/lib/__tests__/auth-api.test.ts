@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { normalizePhoneNumber, consentStatusIdentifier } from '../auth-api';
 
 describe('normalizePhoneNumber', () => {
@@ -37,5 +37,23 @@ describe('consentStatusIdentifier', () => {
     expect(
       consentStatusIdentifier({ email: 'a@b.com', phoneNumber: '+919876543210' }),
     ).toEqual({ email: 'a@b.com', phone: '+919876543210' });
+  });
+});
+
+describe('fetchAuthConfig', () => {
+  it('GETs /api/v1/auth/config and returns the config', async () => {
+    vi.resetModules();
+    vi.doMock('../api-client', () => ({
+      createApiClient: () => ({
+        get: vi.fn().mockResolvedValue({
+          data: { selfSignupAllowed: false, loginChannels: ['phone'] },
+        }),
+      }),
+    }));
+    const { fetchAuthConfig } = await import('../auth-api');
+    await expect(fetchAuthConfig()).resolves.toEqual({
+      selfSignupAllowed: false,
+      loginChannels: ['phone'],
+    });
   });
 });

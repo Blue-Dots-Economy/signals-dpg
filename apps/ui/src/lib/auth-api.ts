@@ -147,3 +147,15 @@ export async function getSession(): Promise<SessionResponse> {
   const response = await apiClient.get<SessionResponse>('/api/auth/get-session');
   return response.data;
 }
+
+export type LoginChannel = 'email' | 'phone';
+
+export interface AuthConfigResponse {
+  selfSignupAllowed: boolean;
+  loginChannels: LoginChannel[];
+}
+
+export async function fetchAuthConfig(): Promise<AuthConfigResponse> {
+  const response = await apiClient.get<AuthConfigResponse>('/api/v1/auth/config');
+  return response.data;
+}
