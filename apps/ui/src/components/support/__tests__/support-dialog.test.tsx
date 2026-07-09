@@ -28,6 +28,13 @@ describe('SupportDialog', () => {
     expect(submitSupport).not.toHaveBeenCalled();
   });
 
+  it('does not submit a whitespace-only message (trim guard)', async () => {
+    await renderDialog();
+    await userEvent.type(screen.getByLabelText(/message/i), '   ');
+    await userEvent.click(screen.getByRole('button', { name: /send/i }));
+    expect(submitSupport).not.toHaveBeenCalled();
+  });
+
   it('submits the message and calls submitSupport', async () => {
     submitSupport.mockResolvedValue(undefined);
     await renderDialog();
