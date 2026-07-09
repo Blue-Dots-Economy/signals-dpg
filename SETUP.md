@@ -152,6 +152,14 @@ Open **http://localhost:5173** in your browser.
 
 ---
 
+## Optional — Notification configuration
+
+- `SUPPORT_EMAIL` — recipient for the in-app "Contact support" form. Emails are sent via the
+  notification service from `NOTIFICATION_FROM_EMAIL`, with Reply-To set to the submitting user.
+  When unset, the form is disabled (API returns 503).
+
+---
+
 ## Choose a network
 
 Default is **blue_dot**. To run another network, change these lines in `.env`
