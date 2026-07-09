@@ -42,6 +42,8 @@ Main route groups:
 - `/api/v1/consent` — user- and item-level consent capture (terms/privacy, profile creation, per-action)
 - `/api/v1/admin` — service-to-service admin surface (requires `x-acting-org-id`)
 - `/api/v1/aggregator`
+- `/api/v1/auth` — public, unauthenticated auth-flow config (`GET /api/v1/auth/config`)
+- `/api/v1/support` — authenticated contact-support form (`POST /api/v1/support`)
 
 Important behavior:
 
@@ -53,6 +55,10 @@ Important behavior:
 - `POST /api/v1/network/refetch_schemas` refreshes schema cache
 - `GET`/`POST /api/v1/consent/*` reads and records consent; the accepted document **version is always derived server-side** from the loaded `consent.json`, never trusted from the client
 - `POST /api/v1/admin/participant/decrypt` returns decrypted participant profile `item_state` for owned items (aggregator scoped to items it onboarded; `network_service` scoped to its served networks)
+- `GET /api/v1/auth/config` returns `{ selfSignupAllowed, loginChannels }` derived from server env — the UI uses it to render the login/signup flow; server env stays the single source of truth
+- `POST /api/v1/support` submits an in-app contact-support message (requires an authenticated user); it emails `SUPPORT_EMAIL` via the notification service, and returns `503 SUPPORT_NOT_CONFIGURED` when the recipient or notification client is unset
+- `GET /api/v1/network/item/fetch` fans out to peer instances via the `*_local` peer routes (`item/count_local`, `item/fetch_local`), which require an HMAC instance token (see [Inter-instance peer auth](#inter-instance-peer-auth))
+- A profile is only network-discoverable once it is **live**: required fields must be complete **and** `profile_creation` consent accepted. Accepting profile consent runs `promoteItemOnProfileConsent`, which re-classifies a `draft` item to `live` (see [Consent](#consent))
 
 Item typing is schema-driven. `item_type` is not arbitrary; it should be a schema identifier defined by the network, for example `profile_1.0` or `profile_1.1`.
 
@@ -85,8 +91,9 @@ pnpm install
 ### 2. Configure environment
 
 There is a **single `.env` at the repo root** covering the API, database, cache,
-and the UI (`VITE_*`). Copy it and it works out of the box for a local `blue_dot`
-run — no edits required:
+and the UI (`VITE_*`). Copy it for a local `blue_dot` run; the only value you
+must add by hand is `INSTANCE_SHARED_SECRET` (required, min 32 chars — see
+below), which is not yet pre-filled in `.env.example`:
 
 ```bash
 cp .env.example .env
@@ -114,6 +121,31 @@ SIGNALS_PII_KEY='<replace-me>'
 
 Consent documents are loaded from a `consent.json` beside the active
 `network.json` (`CONSENT_CONFIG_SOURCE=local` by default).
+
+A few more envs govern signup, inter-instance trust, PII, and support. All have
+safe defaults **except `INSTANCE_SHARED_SECRET`, which is required** (min 32
+chars) and is **not** yet in `.env.example` — set it before starting the API:
+
+```bash
+# Peer auth for the inter-instance *_local routes (HMAC instance token).
+# Must be IDENTICAL across every instance of a network. Required, min 32 chars.
+INSTANCE_SHARED_SECRET="<shared 32+ char secret>"
+PEER_AUTH_MODE="permissive"      # permissive (default) | enforced
+
+# Self-signup + login. gated (default): no self-service signup via the public
+# OTP flow — onboard participants via POST /api/v1/admin/participant.
+# allowed: opens public self-registration.
+SELF_SIGNUP_MODE="gated"
+LOGIN_CHANNELS="phone,email"     # ordered subset of phone,email
+
+# Private-location (PII) jitter: the metre annulus a true coordinate is offset
+# into before storage. Keyed by SIGNALS_PII_KEY; bounds enforced 50–1000 m.
+PII_LOCATION_JITTER_MIN_METERS=100
+PII_LOCATION_JITTER_MAX_METERS=250
+
+# Recipient for the in-app "Contact support" form; unset → 503 + button hidden.
+SUPPORT_EMAIL="hello@bluedotseconomy.org"
+```
 
 For remote network configs, use:
 
@@ -181,6 +213,7 @@ VITE_MAP_PROVIDER="leaflet"
 - `pnpm db:init:api` — create partitioned items / actions / events tables
 - `pnpm db:seed:services:api` — mint the service user + apikey
 - `pnpm db:seed:purple_dot:api` — seed purple_dot sample data
+- `pnpm db:backfill:consent:api` — one-off deploy backfill for the consent-gated discoverability change (#275); re-classifies existing profiles against the consent gate
 - `pnpm db:studio:api`
 - `pnpm dev:ui`
 - `pnpm build:ui`
@@ -215,6 +248,28 @@ DPG uses two fetch paths:
 - `GET /api/v1/item/fetch`: instance-local fetch, intended for local reads such as a user's own items; cached briefly in Redis
 - `GET /api/v1/network/item/fetch`: inter-instance fetch, which performs count-first discovery, selects only relevant peer instances, then fetches the required slices and caches the result in Redis
 
+## Inter-instance peer auth
+
+The peer-only `*_local` routes (`network/item/count_local`,
+`network/item/fetch_local`) that back inter-instance fetch are guarded by an
+HMAC **instance token** bound to the request path and body. The signing material
+is `INSTANCE_SHARED_SECRET`, which must be identical across every instance of a
+network. `PEER_AUTH_MODE` gates the rollout:
+
+- `permissive` (default) — a *missing* token is allowed (for peers not yet
+  upgraded), but a present-but-invalid/expired token is rejected `401
+  PEER_AUTH_FAILED`.
+- `enforced` — a valid token is required on every peer call.
+
+## Private-location jitter
+
+Private (PII) locations are never stored at their true coordinate. At storage
+time each private location is offset to a deterministic, keyed-random point in a
+`PII_LOCATION_JITTER_MIN_METERS`–`PII_LOCATION_JITTER_MAX_METERS` annulus
+(default 100–250 m). The offset is seeded from the coordinate itself and keyed
+with `SIGNALS_PII_KEY`, so re-saving a profile never drifts the pin and repeated
+public snapshots cannot be averaged back to the true location.
+
 ## Consent
 
 Consent Management v1 records participant consent as an append-only ledger
@@ -225,6 +280,14 @@ Consent Management v1 records participant consent as an append-only ledger
   (`create_item` accepts an optional `consent` block).
 - **Action-level** — per-action consent at `initiate` and `accept` stages of
   interactions such as `connect` and `apply`.
+
+Consent now gates **discoverability**: a profile becomes network-visible
+(`lifecycle_status = live`) only when its required fields are complete **and**
+`profile_creation` consent has been accepted. Accepting profile consent calls
+`promoteItemOnProfileConsent`, which re-runs the same completeness classifier
+used on write (with consent now true) and flips a `draft` item to `live`
+(`paused` is sticky; `live` is unchanged). A one-off deploy backfill,
+`pnpm db:backfill:consent:api`, re-classifies existing profiles against this gate.
 
 Consent copy lives in a `consent.json` beside each network's `network.json`
 (brand overrides in a brand-named sub-folder), is loaded via
