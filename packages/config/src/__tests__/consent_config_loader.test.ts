@@ -25,4 +25,28 @@ describe('loadConsentConfigs (local)', () => {
     expect(upsdm!.config.documents.terms.current_version).toBe(1);
     expect(upsdm!.config.documents.privacy.current_version).toBe(1);
   });
+
+  it('renders the __SUPPORT_EMAIL__ placeholder to the configured address', async () => {
+    const loaded = await loadConsentConfigs({
+      source: 'local',
+      networkLocalFile: blueNetworkFile,
+      networks: ['blue_dot'],
+      supportEmail: 'ops@example.test',
+    });
+    const serialized = JSON.stringify(loaded);
+    // Placeholder is fully substituted (no leftover token) with the given email.
+    expect(serialized).not.toContain('__SUPPORT_EMAIL__');
+    expect(serialized).toContain('ops@example.test');
+  });
+
+  it('defaults the support email to hello@bluedotseconomy.org when unset', async () => {
+    const loaded = await loadConsentConfigs({
+      source: 'local',
+      networkLocalFile: blueNetworkFile,
+      networks: ['blue_dot'],
+    });
+    const serialized = JSON.stringify(loaded);
+    expect(serialized).not.toContain('__SUPPORT_EMAIL__');
+    expect(serialized).toContain('hello@bluedotseconomy.org');
+  });
 });

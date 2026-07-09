@@ -28,6 +28,7 @@ export const apiConfig = {
   network_config_local_file: networkRuntime.NETWORK_CONFIG_LOCAL_FILE,
   network_config_urls: networkRuntime.NETWORK_CONFIG_URLS,
   consent_config_source: networkRuntime.CONSENT_CONFIG_SOURCE,
+  consent_support_email: networkRuntime.CONSENT_SUPPORT_EMAIL,
   allow_extra_schema_data: networkRuntime.ALLOW_EXTRA_SCHEMA_DATA,
   bulk_max_items: networkRuntime.BULK_MAX_ITEMS,
   schema_registry_url: schemaRegistry.SCHEMA_REGISTRY_URL,
