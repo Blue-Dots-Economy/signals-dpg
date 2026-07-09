@@ -56,56 +56,10 @@ export const formLayouts: Record<string, FormLayout> = {
     twoColumn: ['Phone Number', 'Email Address', 'Coverage Radius (km)', 'Service Offered'],
   },
 
-  // purple_dot network — PWD Seeker Profile
-  'purple_dot:seeker': {
-    sections: [
-      {
-        title: 'Personal Details',
-        fields: ['beneficiary_name', 'age', 'gender', 'mobile_number', 'email'],
-      },
-      {
-        title: 'Disability Profile',
-        fields: ['disability_type', 'disability_percentage', 'looking_for', 'looking_for_details'],
-      },
-      {
-        title: 'Location',
-        fields: ['address'],
-      },
-      {
-        title: 'Documents & Education',
-        fields: ['documents_available', 'highest_qualification'],
-      },
-    ],
-    twoColumn: ['age', 'gender', 'mobile_number', 'email'],
-  },
-
-  // purple_dot network — PWD Service Provider Profile
-  'purple_dot:provider': {
-    sections: [
-      {
-        title: 'Contact Details',
-        fields: ['contact_name', 'contact_phone', 'contact_email'],
-      },
-      {
-        title: 'Organisation',
-        fields: ['provider_category', 'organisation_name', 'official_address'],
-      },
-      {
-        title: 'Services & Coverage',
-        fields: ['disabilities_served', 'services_offered', 'service_cities'],
-      },
-      {
-        title: 'More Details',
-        fields: ['service_details', 'catalog_url'],
-      },
-    ],
-    twoColumn: ['contact_phone', 'contact_email'],
-  },
-
-  // NOTE: blue_dot layouts are NOT here — they live in
-  // examples/schemas/blue_dot/network.json as `x-form-layout` on each item
-  // schema (schema-driven, single source of truth). The code-side map below is
-  // the fallback for networks not yet migrated (purple_dot, yellow_dot).
+  // NOTE: blue_dot AND purple_dot layouts are NOT here — they live in their
+  // examples/schemas/<network>/network.json as `x-form-layout` on each item
+  // schema (schema-driven, single source of truth). The code-side map above is
+  // the fallback for networks not yet migrated (yellow_dot student/tutor).
 };
 
 /**
