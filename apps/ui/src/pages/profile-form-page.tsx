@@ -613,6 +613,7 @@ export function ProfileFormPage() {
                 hideSubmit={!isEdit}
                 onValidityChange={!isEdit ? setFormValid : undefined}
                 domainId={selectedDomain ?? undefined}
+                networkId={network?.id}
                 formContext={{
                   onLocationResolved: (
                     place: { lat: number; lng: number; components?: GeoComponents } | null,

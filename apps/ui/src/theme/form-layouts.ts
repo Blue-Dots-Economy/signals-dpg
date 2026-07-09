@@ -8,9 +8,13 @@ export interface FormLayout {
   twoColumn: string[];
 }
 
-// Per-domain form layout config. Fields listed in `twoColumn` render
-// side-by-side within their section. Domains not listed here fall back
-// to the default single-column RJSF render.
+// Form layout config keyed by `${networkId}:${domainId}` (network-aware) or a
+// bare `domainId` (back-compat). Domain ids like `seeker`/`provider` collide
+// across networks (blue_dot AND purple_dot both expose them), so network-scoped
+// keys are required to stop one network inheriting another's field lists — see
+// `resolveFormLayout`. Fields listed in `twoColumn` render side-by-side within
+// their section. Anything not resolved here falls back to the default
+// single-column RJSF render.
 export const formLayouts: Record<string, FormLayout> = {
   student: {
     sections: [
@@ -52,49 +56,27 @@ export const formLayouts: Record<string, FormLayout> = {
     twoColumn: ['Phone Number', 'Email Address', 'Coverage Radius (km)', 'Service Offered'],
   },
 
-  // purple_dot network — PWD Seeker Profile
-  seeker: {
-    sections: [
-      {
-        title: 'Personal Details',
-        fields: ['beneficiary_name', 'age', 'gender', 'mobile_number', 'email'],
-      },
-      {
-        title: 'Disability Profile',
-        fields: ['disability_type', 'disability_percentage', 'looking_for', 'looking_for_details'],
-      },
-      {
-        title: 'Location',
-        fields: ['address'],
-      },
-      {
-        title: 'Documents & Education',
-        fields: ['documents_available', 'highest_qualification'],
-      },
-    ],
-    twoColumn: ['age', 'gender', 'mobile_number', 'email'],
-  },
-
-  // purple_dot network — PWD Service Provider Profile
-  provider: {
-    sections: [
-      {
-        title: 'Contact Details',
-        fields: ['contact_name', 'contact_phone', 'contact_email'],
-      },
-      {
-        title: 'Organisation',
-        fields: ['provider_category', 'organisation_name', 'official_address'],
-      },
-      {
-        title: 'Services & Coverage',
-        fields: ['disabilities_served', 'services_offered', 'service_cities'],
-      },
-      {
-        title: 'More Details',
-        fields: ['service_details', 'catalog_url'],
-      },
-    ],
-    twoColumn: ['contact_phone', 'contact_email'],
-  },
+  // NOTE: blue_dot AND purple_dot layouts are NOT here — they live in their
+  // examples/schemas/<network>/network.json as `x-form-layout` on each item
+  // schema (schema-driven, single source of truth). The code-side map above is
+  // the fallback for networks not yet migrated (yellow_dot student/tutor).
 };
+
+/**
+ * Resolve the form layout for a (network, domain) pair. Prefers the
+ * network-scoped key `${networkId}:${domainId}` and falls back to a bare
+ * `domainId` for networks/domains that don't collide (e.g. yellow_dot
+ * `student`). Returns undefined when nothing matches — the caller then renders
+ * the default single-column form.
+ */
+export function resolveFormLayout(
+  networkId: string | undefined,
+  domainId: string | undefined,
+): FormLayout | undefined {
+  if (!domainId) return undefined;
+  if (networkId) {
+    const scoped = formLayouts[`${networkId}:${domainId}`];
+    if (scoped) return scoped;
+  }
+  return formLayouts[domainId];
+}
