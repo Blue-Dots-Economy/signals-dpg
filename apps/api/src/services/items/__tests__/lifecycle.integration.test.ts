@@ -77,6 +77,23 @@ describeIf(`lifecycle integration${can_run ? '' : ` — ${skip_reason}`}`, () =>
   let itemsTable: typeof import('@dpg/database').items;
   let itemActionsTable: typeof import('@dpg/database').item_actions;
   let ensureActionPartition: typeof import('@dpg/database').ensureActionPartition;
+  let consentRecordTable: typeof import('@api/db/postgres/schema').consent_record;
+  let promoteItemOnProfileConsent: typeof import('../../item_service.js').promoteItemOnProfileConsent;
+
+  // Bring a freshly onboarded (draft) profile to live the way production does:
+  // record terms + privacy (user) and profile_creation (item) consent, then run
+  // the same promotion the /consent/profile-accept endpoint runs. Profiles are
+  // draft-until-consent now (aggregator-dpg#464), so any scenario that needs a
+  // live profile must consent first.
+  const makeLive = async (userId: string, itemId: string, network: string) => {
+    const now = new Date();
+    await db.insert(consentRecordTable).values([
+      { level: 'user', consentCategory: 'terms', userId, network, documentVersion: 1, source: 'login', acceptedAt: now },
+      { level: 'user', consentCategory: 'privacy', userId, network, documentVersion: 1, source: 'login', acceptedAt: now },
+      { level: 'item', consentCategory: 'profile_creation', userId, itemId, network, documentVersion: 1, source: 'profile', acceptedAt: now },
+    ]);
+    await promoteItemOnProfileConsent(db, itemId);
+  };
 
   const listen_port = Number(process.env.API_PORT ?? 2742);
   const ts = Date.now();
@@ -126,6 +143,10 @@ describeIf(`lifecycle integration${can_run ? '' : ` — ${skip_reason}`}`, () =>
     itemsTable = database_pkg.items;
     itemActionsTable = database_pkg.item_actions;
     ensureActionPartition = database_pkg.ensureActionPartition;
+    const schema_mod = await import('../../../../db/postgres/schema/index.js');
+    consentRecordTable = schema_mod.consent_record;
+    const item_service_mod = await import('../../item_service.js');
+    promoteItemOnProfileConsent = item_service_mod.promoteItemOnProfileConsent;
 
     const resolved = await resolveBindings();
     primary = resolved.primary;
@@ -254,6 +275,12 @@ describeIf(`lifecycle integration${can_run ? '' : ` — ${skip_reason}`}`, () =>
           .delete(itemActionsTable)
           .where(inArray(itemActionsTable.action_id, seeded_action_ids));
       }
+      // consent_record has no FK to user/items, so it won't cascade — delete
+      // the rows makeLive() inserted for our seeded users explicitly.
+      const consentUserIds = [...onboarded_user_ids, svc_user_id];
+      await db
+        .delete(consentRecordTable)
+        .where(inArray(consentRecordTable.userId, consentUserIds));
       if (onboarded_user_ids.length > 0) {
         await db
           .delete(itemsTable)
@@ -412,7 +439,7 @@ describeIf(`lifecycle integration${can_run ? '' : ` — ${skip_reason}`}`, () =>
   // Scenario 3: NS + full state → live, completion_pct === 100
   // ---------------------------------------------------------------------------
 
-  it('scenario 3: NS + full item_state → live, completion_pct === 100', async () => {
+  it('scenario 3: NS + full item_state → draft (consent pending); live after profile consent', async () => {
     live_user_email = `lc_s3_${randomUUID().slice(0, 6)}@a.test`;
     const full = generateMinimalItemState(primary.schema);
 
@@ -444,16 +471,23 @@ describeIf(`lifecycle integration${can_run ? '' : ` — ${skip_reason}`}`, () =>
     live_item_id = body.items[0].item_id;
     onboarded_user_ids.push(live_user_id);
 
-    const [row] = await db
-      .select({
-        lifecycle_status: itemsTable.lifecycle_status,
-      })
+    // Full fields but consent pending → draft (aggregator-dpg#464).
+    const [draftRow] = await db
+      .select({ lifecycle_status: itemsTable.lifecycle_status })
       .from(itemsTable)
       .where(eq(itemsTable.item_id, live_item_id))
       .limit(1);
+    expect(draftRow).toBeTruthy();
+    expect(draftRow.lifecycle_status).toBe('draft');
 
-    expect(row).toBeTruthy();
-    expect(row.lifecycle_status).toBe('live');
+    // After the owner accepts consent, the complete profile goes live.
+    await makeLive(live_user_id, live_item_id, primary.network);
+    const [liveRow] = await db
+      .select({ lifecycle_status: itemsTable.lifecycle_status })
+      .from(itemsTable)
+      .where(eq(itemsTable.item_id, live_item_id))
+      .limit(1);
+    expect(liveRow.lifecycle_status).toBe('live');
   });
 
   // ---------------------------------------------------------------------------
@@ -490,6 +524,9 @@ describeIf(`lifecycle integration${can_run ? '' : ` — ${skip_reason}`}`, () =>
     const item_id = body1.items[0].item_id;
     const user_id = body1.user_id;
     onboarded_user_ids.push(user_id);
+
+    // Onboard alone leaves it draft (consent pending); accept consent → live.
+    await makeLive(user_id, item_id, primary.network);
 
     const [row1] = await db
       .select({ lifecycle_status: itemsTable.lifecycle_status })
@@ -901,6 +938,10 @@ describeIf(`lifecycle integration${can_run ? '' : ` — ${skip_reason}`}`, () =>
     const src_item_id = seedBody.items[0].item_id;
     onboarded_user_ids.push(seedBody.user_id);
 
+    // Make the source live so the 409 is driven by the paused TARGET, not by a
+    // draft-until-consent source (aggregator-dpg#464).
+    await makeLive(seedBody.user_id, src_item_id, primary.network);
+
     const res = await app.inject({
       method: 'POST',
       url: '/api/v1/network/action/perform',
@@ -1014,6 +1055,10 @@ describeIf(`lifecycle integration${can_run ? '' : ` — ${skip_reason}`}`, () =>
     const src_item_id = seedBody.items[seedBody.items.length - 1].item_id;
     // svc_user_id is already in the DB; do not push to onboarded_user_ids again
     // to avoid double-delete in afterAll (items cleanup handles it separately).
+
+    // Source is draft-until-consent (aggregator-dpg#464); make it live so the
+    // action can be performed (both source and target must be live).
+    await makeLive(svc_user_id, src_item_id, primary.network);
 
     // Perform an action (both source and target must be live).
     const performRes = await app.inject({
@@ -1253,6 +1298,11 @@ describeIf(`lifecycle integration${can_run ? '' : ` — ${skip_reason}`}`, () =>
     const srcBody = srcSeed.json() as { user_id: string; items: Array<{ item_id: string }> };
     const src_item_id = srcBody.items[0].item_id;
     onboarded_user_ids.push(srcBody.user_id);
+
+    // Both are draft-until-consent (aggregator-dpg#464); accept consent so the
+    // action can be created (perform requires source + target live).
+    await makeLive(svc_user_id, target_item_id, to.network);
+    await makeLive(srcBody.user_id, src_item_id, from.network);
 
     // Create the action while both items are live.
     const performRes = await app.inject({
