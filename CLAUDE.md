@@ -45,6 +45,12 @@ Both go through `apps/api/plugins/auth/auth_middleware.ts`:
 
 `AUTH_MIDDLEWARE_ENABLED` (default `true`) is the kill switch — useful when running migrations or seed scripts that shouldn't hit the auth path.
 
+**Self-signup + login channels.** `SELF_SIGNUP_MODE` (default `gated`) and `LOGIN_CHANNELS` (default `phone,email`) are resolved into `authConfig` in `apps/api/src/config.ts` and enforced in the `unified_otp` plugin (`packages/auth/plugins/unified_otp.ts` → `assertSelfSignupAllowed`). `gated` (the default) blocks self-service account creation via the public OTP flow — new participants must be onboarded via `POST /api/v1/admin/participant`; `allowed` opens public self-registration. `GET /api/v1/auth/config` (public, unauthenticated, in `routes/v1/auth/auth_config.ts`) surfaces `{ selfSignupAllowed, loginChannels }` to the UI, but **server env stays the single source of truth** — never gate on the client-reported value.
+
+**Inter-instance peer auth.** The peer-only `*_local` network routes (`network/item/count_local`, `network/item/fetch_local`) are guarded by `apps/api/src/middleware/peer_instance_guard.ts`, an HMAC instance token bound to path + body (`utils/instance_token.ts`). Signing material is `INSTANCE_SHARED_SECRET` (required, min 32, identical across a network's instances). `PEER_AUTH_MODE` (default `permissive`) allows a *missing* token during rollout but always rejects a present-but-invalid one; `enforced` requires a valid token on every peer call. The guard returns `401 PEER_AUTH_FAILED`, never throws.
+
+**Contact support.** `POST /api/v1/support` (authenticated) emails `SUPPORT_EMAIL` via the notification client and returns `503 SUPPORT_NOT_CONFIGURED` when the recipient or client is unset.
+
 ## Consent (v1)
 
 Consent is an **append-only ledger** (`consent_record` table). Latest event per `(subject, type)` wins by `seq`, never by timestamp. Content is never stored in the row — only `(category, version)`; the text is resolved from `consent.json`. Levels:
@@ -56,8 +62,11 @@ Two invariants worth internalising:
 
 - **Version is derived server-side.** Never trust a client-supplied version integer. `apps/api/src/services/consent_version.ts` (`resolveConsentVersion`) reads the cached config for the `(network, brand, category[, actionType, stage])` tuple and records that. A client cannot record acceptance of a version the user never saw.
 - **Consent copy lives in `consent.json`, not `network.json`.** Each network's `consent.json` sits beside its `network.json` (brand overrides in a brand-named sub-folder), is loaded via `CONSENT_CONFIG_SOURCE` (`local` default; remote is a follow-up returning `[]`), and is cached as `consent_config` entries alongside network schemas (`network_schema_cache.ts`). This **replaced** the inline `consent_text_initiator` / `consent_text_receiver` fields that used to live in `network.json` action definitions — do not reintroduce them.
+- **Support email is a placeholder, not a literal.** Consent copy ships a `__SUPPORT_EMAIL__` token (T&C/Privacy/Grievances); the consent loader renders it to `CONSENT_SUPPORT_EMAIL` (default `hello@bluedotseconomy.org`) at load, so the address is deploy-time configurable without editing consent content (#266). Distinct from `SUPPORT_EMAIL` (the contact-form recipient). Deployed instances may also have it substituted upstream at ConfigMap render.
 
 `create_item` accepts an optional `consent` block to capture profile-creation consent atomically with the profile. `perform_action` / `update_action_status` gate on action-consent at `initiate` / `accept` stages.
+
+**Consent gates discoverability.** A profile is only network-visible (`lifecycle_status = live`) when its required fields are complete **and** `profile_creation` consent is accepted. Accepting profile consent (`routes/v1/consent/accept_profile_consent.ts`) calls `promoteItemOnProfileConsent` (`services/item_service.ts`), which re-runs the same `classify_item` completeness classifier used on write — with `consent_accepted: true` — and flips a `draft` item to `live`. Only `draft` is promoted: `paused` is sticky and `live` needs no change. Keep the completeness rules in the classifier, not duplicated in the consent path. The deploy migration for existing rows is a one-off backfill, `pnpm db:backfill:consent:api` (`apps/api` `db:backfill:consent`).
 
 ## Workspace layout
 
@@ -75,6 +84,8 @@ DB schema files live in `apps/api/db/postgres/schema/` and migrations in `apps/a
 Item tables are partitioned. Use the partition-aware query helpers in `@dpg/database` so the planner can prune; ad-hoc queries that select across the parent without a partition key will scan everything.
 
 `user.tags` is a keyed `jsonb` column (GIN-indexed) for extensible support/ops markers without a migration per flag — current key is `is_test` (marks a user, and by the `created_by`/owner join their profiles/posts/applications, as test data for later bulk cleanup).
+
+**Private locations are jittered at storage time.** `apps/api/src/services/geocoding/jitter.ts` offsets a PII coordinate to a deterministic, keyed-random point in the `PII_LOCATION_JITTER_MIN_METERS`–`PII_LOCATION_JITTER_MAX_METERS` annulus before it is persisted, applied at the storage choke point in `item_service.ts`. The seed is HMAC-keyed with `SIGNALS_PII_KEY` (reused, not a new key), so the same true location always maps to the same pin — re-saving never drifts it and an observer can't average public snapshots back to the truth. The true coordinate is never stored.
 
 ## Commands not covered in AGENTS.md
 
