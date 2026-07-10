@@ -145,6 +145,11 @@ PII_LOCATION_JITTER_MAX_METERS=250
 
 # Recipient for the in-app "Contact support" form; unset → 503 + button hidden.
 SUPPORT_EMAIL="hello@bluedotseconomy.org"
+
+# Support/grievance address rendered into the CONSENT copy (T&C/Privacy/
+# Grievances) in place of the __SUPPORT_EMAIL__ placeholder the consent.json
+# files ship. Distinct from SUPPORT_EMAIL above (the contact-form recipient).
+CONSENT_SUPPORT_EMAIL="hello@bluedotseconomy.org"
 ```
 
 For remote network configs, use:
