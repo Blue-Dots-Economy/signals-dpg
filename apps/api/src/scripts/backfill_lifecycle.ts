@@ -5,8 +5,13 @@
  * `live` may no longer be required-complete (or vice-versa). A blanket DEFAULT
  * is wrong either way. This command re-runs each item through the SAME pure
  * classifier used on writes (`classify_item`: `paused` sticky; otherwise
- * `required_complete ? 'live' : 'draft'`) over its stored state, and updates
- * `lifecycle_status` only where it actually changed.
+ * `live` iff required-complete AND profile-creation consent accepted) over its
+ * stored state, and updates `lifecycle_status` only where it actually changed.
+ *
+ * `consent_accepted` per item = has a `profile_creation` row in the consent
+ * ledger (same signal as backfill_demote_consentless). So this is the general
+ * recompute across BOTH gate dimensions (completeness + consent), covering the
+ * required[]-changed case the consent-only backfill doesn't.
  *
  * No decryption needed: the stored public `item_state` carries masks for
  * provided private fields, and `is_populated(mask)` is true — so completeness
@@ -17,7 +22,7 @@
  *   node dist/scripts/backfill_lifecycle.js [--network N] [--domain D] [--item-type T] [--dry-run]
  *   (local: pnpm --filter api db:backfill:lifecycle -- --dry-run)
  */
-import { and, eq, asc, type SQL } from 'drizzle-orm';
+import { and, eq, asc, sql, type SQL } from 'drizzle-orm';
 import { db } from '@api/db/postgres/drizzle_config';
 import { items } from '@dpg/database';
 import { classify_item, type LifecycleStatus } from '@/services/items/classifier';
@@ -81,6 +86,19 @@ async function main() {
   let skipped = 0;
   const transitions: Record<string, number> = {};
 
+  // The classifier gates `live` on required-completeness AND profile-creation
+  // consent. An item is consent-accepted iff it has a `profile_creation` row in
+  // the consent ledger. Load that id set once (matches backfill_demote_consentless).
+  const consentedResult = await db.execute(
+    sql`SELECT DISTINCT item_id FROM consent_record
+        WHERE level = 'item' AND consent_category = 'profile_creation' AND item_id IS NOT NULL`
+  );
+  const consented = new Set(
+    ((consentedResult as unknown as { rows: Array<{ item_id: string }> }).rows ?? []).map(
+      (r) => r.item_id
+    )
+  );
+
   // Offset pagination is stable here: the only column we UPDATE is
   // lifecycle_status, never the ORDER BY keys (the composite PK), so the row
   // set and its ordering don't shift between batches.
@@ -115,6 +133,7 @@ async function main() {
         schema,
         merged_state: (row.item_state ?? {}) as Record<string, unknown>,
         current_status: current,
+        consent_accepted: consented.has(row.item_id),
       }).lifecycle_status;
 
       if (next !== current) {
