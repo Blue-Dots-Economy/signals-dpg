@@ -7,9 +7,13 @@ import { Label } from '@/components/ui/label';
 import { AuthShell } from '@/components/layout/auth-shell';
 import {
   checkUser,
+  consentStatusIdentifier,
+  fetchAuthConfig,
   isValidPhoneNumber,
   requestOtp,
+  type AuthConfigResponse,
   type AuthIdentifier,
+  type LoginChannel,
 } from '@/lib/auth-api';
 import {
   fetchConsentConfigs,
@@ -57,12 +61,31 @@ export function LoginPage() {
   const [userExists, setUserExists] = useState<boolean | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [consentGate, setConsentGate] = useState<ConsentGateState | null>(null);
+  const [authCfg, setAuthCfg] = useState<AuthConfigResponse | null>(null);
+  const [signupBlocked, setSignupBlocked] = useState(false);
   // Capture the checked identifier at the time of submission so the consent
   // accept and OTP request use the same normalized values.
   const [pendingIdentifier, setPendingIdentifier] = useState<AuthIdentifier | null>(null);
   const [pendingUserExists, setPendingUserExists] = useState<boolean>(false);
   const [pendingName, setPendingName] = useState<string>('');
   const redirectTo = searchParams.get('redirect') ?? '/';
+
+  useEffect(() => {
+    fetchAuthConfig()
+      .then(setAuthCfg)
+      // Fail-safe: assume both channels + gated so the API stays authoritative.
+      .catch(() => setAuthCfg({ selfSignupAllowed: false, loginChannels: ['phone', 'email'] }));
+  }, []);
+
+  const channels: LoginChannel[] = authCfg?.loginChannels ?? ['phone', 'email'];
+  const onlyEmail = channels.length === 1 && channels[0] === 'email';
+  const onlyPhone = channels.length === 1 && channels[0] === 'phone';
+
+  useEffect(() => {
+    if (authCfg && !authCfg.loginChannels.includes(mode)) {
+      setMode(authCfg.loginChannels[0]);
+    }
+  }, [authCfg, mode]);
 
   const identifier: AuthIdentifier = mode === 'email' ? { email } : { phoneNumber };
   const contactValue = mode === 'email' ? email : phoneNumber;
@@ -73,6 +96,7 @@ export function LoginPage() {
   const handleModeChange = (value: AuthMode) => {
     setMode(value);
     setUserExists(null);
+    setSignupBlocked(false);
   };
 
   const proceedToOtp = async (
@@ -135,6 +159,16 @@ export function LoginPage() {
       const response = await checkUser(identifier);
       const exists = response.userExists;
       setUserExists(exists);
+      setSignupBlocked(false);
+
+      if (!exists && authCfg && !authCfg.selfSignupAllowed) {
+        setIsLoading(false);
+        toast.error(t('auth.toast_signup_disabled'), {
+          description: t('auth.toast_signup_disabled_desc'),
+        });
+        setSignupBlocked(true);
+        return;
+      }
 
       if (!exists && !name.trim()) {
         setIsLoading(false);
@@ -150,9 +184,10 @@ export function LoginPage() {
       // endpoint, client-side); on any failure we proceed without gating — the
       // user will be re-prompted post-verify on the next login (spec §1.1).
       try {
-        const identifierParam: { phone?: string; email?: string } = {};
-        if (identifier.email) identifierParam.email = identifier.email;
-        if (identifier.phoneNumber) identifierParam.phone = identifier.phoneNumber;
+        // Normalize the phone to the canonical E.164 form auth stores; otherwise
+        // the exact-match lookup in status-by-identifier misses a returning user
+        // and the T&C gate re-prompts every login (see consentStatusIdentifier).
+        const identifierParam = consentStatusIdentifier(identifier);
 
         const [consentStatus, configEntries] = await Promise.all([
           getConsentStatusByIdentifier({ network: themeId, ...identifierParam }),
@@ -231,15 +266,15 @@ export function LoginPage() {
         {/* Heading */}
         <div className="mb-6">
           <h2 className="text-2xl font-bold text-foreground">
-            {userExists === null
+            {userExists === null || signupBlocked
               ? t('auth.heading_sign_in')
               : userExists
                 ? t('auth.heading_welcome_back')
                 : t('auth.heading_create_account')}
           </h2>
           <p className="mt-1 text-sm text-muted-foreground">
-            {userExists === null
-              ? t('auth.sub_initial')
+            {userExists === null || signupBlocked
+              ? t(onlyEmail ? 'auth.sub_initial_email' : onlyPhone ? 'auth.sub_initial_phone' : 'auth.sub_initial')
               : userExists
                 ? t('auth.sub_existing', { contactLabel })
                 : t('auth.sub_new', { contactLabel })}
@@ -247,29 +282,33 @@ export function LoginPage() {
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-4">
-          {/* Phone / Email pill toggle */}
-          <div className="flex rounded-full border border-border bg-muted p-1 text-sm">
-            {(['phone', 'email'] as AuthMode[]).map((m) => (
-              <button
-                key={m}
-                type="button"
-                onClick={() => handleModeChange(m)}
-                className={[
-                  'flex-1 rounded-full py-1.5 font-medium transition-colors capitalize',
-                  mode === m
-                    ? 'bg-background text-foreground shadow-sm'
-                    : 'text-muted-foreground hover:text-foreground',
-                ].join(' ')}
-              >
-                {m}
-              </button>
-            ))}
-          </div>
+          {/* Phone / Email pill toggle — hidden entirely when only one channel is allowed */}
+          {channels.length > 1 && (
+            <div className="flex rounded-full border border-border bg-muted p-1 text-sm">
+              {channels.map((m) => (
+                <button
+                  key={m}
+                  type="button"
+                  onClick={() => handleModeChange(m)}
+                  className={[
+                    'flex-1 rounded-full py-1.5 font-medium transition-colors capitalize',
+                    mode === m
+                      ? 'bg-background text-foreground shadow-sm'
+                      : 'text-muted-foreground hover:text-foreground',
+                  ].join(' ')}
+                >
+                  {m}
+                </button>
+              ))}
+            </div>
+          )}
 
           {/* Contact input */}
           <div className="space-y-1.5">
             <Label htmlFor="contact" className="text-sm font-medium">
-              {mode === 'email' ? t('auth.label_email_or_mobile') : t('auth.label_mobile')}
+              {mode === 'email'
+                ? t(onlyEmail ? 'auth.label_email' : 'auth.label_email_or_mobile')
+                : t('auth.label_mobile')}
             </Label>
             {mode === 'phone' ? (
               <Input
@@ -296,8 +335,8 @@ export function LoginPage() {
             )}
           </div>
 
-          {/* Name — only shown when creating account */}
-          {userExists === false && (
+          {/* Name — only shown when creating account (and self-signup isn't gated) */}
+          {userExists === false && !signupBlocked && (
             <div className="space-y-1.5">
               <Label htmlFor="name" className="text-sm font-medium">
                 {t('auth.label_name')}
@@ -320,6 +359,12 @@ export function LoginPage() {
             </div>
           )}
 
+          {signupBlocked && (
+            <p className="text-sm text-destructive">
+              {t('auth.signup_disabled_message')}
+            </p>
+          )}
+
           {/* CTA */}
           <button
             type="submit"
@@ -327,7 +372,7 @@ export function LoginPage() {
             className="flex w-full items-center justify-center gap-2 rounded-md py-3 text-sm font-semibold transition-all disabled:opacity-60 bg-brand-cta h-11"
           >
             {isLoading && <Loader2 className="h-4 w-4 animate-spin" />}
-            {userExists === null ? t('auth.cta_continue') : t('auth.cta_send_otp')}
+            {(userExists === null || signupBlocked) ? t('auth.cta_continue') : t('auth.cta_send_otp')}
           </button>
         </form>
       </AuthShell>

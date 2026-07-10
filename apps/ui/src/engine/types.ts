@@ -169,6 +169,14 @@ export interface MapProviderProps {
   onMarkerClick?: (id: string) => void;
   /** When true, the provider should NOT auto-fit bounds on first render */
   initialViewSet?: boolean;
+  /**
+   * Monotonic counter bumped by the caller on an explicit "recenter" intent
+   * (e.g. the user picks a location source). The provider recenters on `center`
+   * even when the coordinate is unchanged — so re-selecting the same anchor
+   * after the user has panned still snaps back. Ignored when `initialViewSet`
+   * is false.
+   */
+  focusNonce?: number;
   children?: React.ReactNode;
   /** Optional custom popup renderer; falls back to the default MarkerPopupCard. */
   renderPopup?: (marker: MapMarker) => React.ReactNode;

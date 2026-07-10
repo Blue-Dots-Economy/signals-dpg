@@ -19,4 +19,7 @@ export interface AuthRuntimeConfig {
   createTestOTP?: boolean;
   notificationClient?: NotificationClient;
   smsTemplateId?: string;
+
+  allowSelfSignup: boolean;
+  loginChannels: ('email' | 'phone')[];
 }

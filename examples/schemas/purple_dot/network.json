@@ -18,6 +18,27 @@
           "title": "PWD Seeker Profile 1.0",
           "type": "object",
           "additionalProperties": false,
+          "x-form-layout": {
+            "sections": [
+              {
+                "title": "Personal Details",
+                "fields": ["beneficiary_name", "age", "gender", "mobile_number", "email"]
+              },
+              {
+                "title": "Disability Profile",
+                "fields": ["disability_type", "disability_percentage", "looking_for", "looking_for_details"]
+              },
+              {
+                "title": "Location",
+                "fields": ["address"]
+              },
+              {
+                "title": "Documents & Education",
+                "fields": ["documents_available", "highest_qualification"]
+              }
+            ],
+            "twoColumn": ["age", "gender", "mobile_number", "email"]
+          },
           "required": [
             "beneficiary_name",
             "mobile_number",
@@ -217,6 +238,27 @@
           "display_name_field": "organisation_name",
           "type": "object",
           "additionalProperties": false,
+          "x-form-layout": {
+            "sections": [
+              {
+                "title": "Contact Details",
+                "fields": ["contact_name", "contact_phone", "contact_email"]
+              },
+              {
+                "title": "Organisation",
+                "fields": ["provider_category", "organisation_name", "official_address"]
+              },
+              {
+                "title": "Services & Coverage",
+                "fields": ["disabilities_served", "services_offered", "service_cities"]
+              },
+              {
+                "title": "More Details",
+                "fields": ["service_details", "catalog_url"]
+              }
+            ],
+            "twoColumn": ["contact_phone", "contact_email"]
+          },
           "required": [
             "contact_name",
             "contact_phone",

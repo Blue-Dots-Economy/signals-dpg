@@ -7,6 +7,8 @@ import match_score_routes from '@/routes/v1/match_score/match_score_routes';
 import admin_routes from '@/routes/v1/admin/admin_routes';
 import aggregator_routes from '@/routes/v1/aggregator/aggregator_routes';
 import consent_routes from '@/routes/v1/consent/consent_routes';
+import { auth_config } from '@/routes/v1/auth/auth_config';
+import { submit_support } from '@/routes/v1/support/submit_support';
 
 const v1_routes: FastifyPluginAsyncZod = async (fastify) => {
   fastify.register(item_routes, { prefix: '/item' });
@@ -17,6 +19,8 @@ const v1_routes: FastifyPluginAsyncZod = async (fastify) => {
   fastify.register(admin_routes, { prefix: '/admin' });
   fastify.register(aggregator_routes, { prefix: '/aggregator' });
   fastify.register(consent_routes, { prefix: '/consent' });
+  fastify.register(auth_config, { prefix: '/auth' });
+  fastify.register(submit_support, { prefix: '/support' });
 };
 
 export default v1_routes;
