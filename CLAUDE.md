@@ -15,6 +15,10 @@ Other load-bearing docs:
 - `docs/operations/integrating-dpgs.md` — the two-header service-auth model used by aggregator-dpg / voice-dpg
 - `docs/operations/migrations.md`, `docs/operations/secrets.md`
 
+**Historical design docs.** `docs/superpowers/plans/` and `docs/superpowers/specs/` hold dated, per-feature plan/spec pairs (consent v1, metrics redesign, PII encryption, self-signup gating, etc.) — the "why" behind a subsystem when the current code doesn't make it obvious. `docs/design/*.md` covers UI-specific design (localization, network theming, bulk actions, map enhancements). Treat all of these as **point-in-time records, not living documentation** — a plan from three months ago may describe an approach the code has since moved past; when a plan and the code disagree, the code wins.
+
+**Nested docs.** These are auto-loaded when working inside their subtree — read the relevant one before making changes there: `apps/api/CLAUDE.md` (route auth wiring, config-cache patterns, notifications/support), `apps/api/src/services/metrics/README.md` (the recompute directionality model), `apps/ui/CLAUDE.md` (runtime-env config, theming/i18n, data fetching), `apps/ui/src/engine/README.md` (schema ref resolution), `packages/auth/CLAUDE.md` (better-auth wiring, OTP flow), `packages/config/CLAUDE.md` (network/consent config loading), `packages/database/src/utils/README.md` (partition management vs query pruning).
+
 ## Core mental model
 
 DPG is a **network-aware** backend. The vocabulary matters and is used consistently in code:
@@ -122,7 +126,6 @@ Node `>=24` and `pnpm@11.1.2` are pinned via `engines` / `packageManager`.
 - **ESM only**, strict TS, no `any`. Use `import type` for type-only imports.
 - **No `console.log` in library packages** — go through `request.log` in app code.
 - **No `// TODO` comments** — open an issue instead.
-- **Codacy MCP rule** (`.cursor/rules/codacy.mdc`): after any file edit, run `codacy_cli_analyze`; after installing deps, run it with `trivy`. Skip complexity/coverage analysis.
 
 ## When adding env vars
 
