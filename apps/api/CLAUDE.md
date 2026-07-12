@@ -12,7 +12,7 @@ There is no single auth default a new route inherits. Three patterns coexist in 
 
 2. **Per-route `preHandler`** — `item_routes.ts` and `consent_routes.ts` have **no group-level hook at all** (verified: both files are pure `fastify.register(...)` calls, nothing else). Every route under them (`create_item.ts`, `accept_consent.ts`, etc.) sets `preHandler: auth_middleware_if_enabled` itself. **If you add a route to one of these groups and forget the per-route `preHandler`, it is unauthenticated — there is no group default catching the omission.**
 
-3. **Peer-only guard** — the network `*_local` routes (`network/item/fetch_item.ts`, `count_local`/`fetch_local`) use `peer_instance_guard` instead of user auth; see root `CLAUDE.md`'s "Inter-instance peer auth" section for the HMAC model itself.
+3. **Peer-only guard** — the network `*_local` routes (`network/item/fetch_item.ts`, `count_local`/`fetch_local`) use `peer_instance_guard` instead of user auth; see `.claude/rules/auth-model.md`'s "Inter-instance peer auth" section for the HMAC model itself.
 
 **Rule of thumb:** before adding a route, check whether its group file has an `addHook`. If not, you own setting `preHandler` on every route you add.
 
@@ -36,7 +36,7 @@ Auth plugins (`auth_middleware.ts`, `validate_api_key.ts`, `validate_session.ts`
 ## Notifications & support are separate small pipelines
 
 - `src/notifications/`: `build_notifications.ts` (turns a `NotificationEvent` into a `NotificationPlan`) → `dispatcher.ts` (takes injected `DispatcherDeps` — `notify`, `resolveEmail`, `resolveCounterpartyName`, `brand` — so it's testable without a real notification-service call) → `render_action_email.ts` / `action_copy.ts` renders the actual HTML.
-- `src/support/build_support_email.ts`: unrelated, smaller — just an HTML-escaping email builder for `POST /api/v1/support` (see root `CLAUDE.md`'s "Contact support" note).
+- `src/support/build_support_email.ts`: unrelated, smaller — just an HTML-escaping email builder. `POST /api/v1/support` (authenticated) emails `SUPPORT_EMAIL` via the notification client and returns `503 SUPPORT_NOT_CONFIGURED` when the recipient or client is unset.
 
 Don't assume these share infrastructure — they're two independent, small pipelines that happen to both end up calling the notification-service client.
 

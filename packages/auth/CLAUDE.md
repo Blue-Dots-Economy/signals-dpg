@@ -15,11 +15,11 @@ better-auth configuration + the unified OTP plugin. Root `CLAUDE.md`'s "Auth mod
 
 ## OTP flow (`plugins/unified_otp.ts`)
 
-- `generateOtp(isTest)` returns the fixed `'000000'` when `isTest` is true — this is the `CREATE_TEST_OTP` flag guarded by `assertCreateTestOtpSafe` (see root `CLAUDE.md` / `packages/config`'s startup guard) — never assume this path is reachable in production.
+- `generateOtp(isTest)` returns the fixed `'000000'` when `isTest` is true — this is the `CREATE_TEST_OTP` flag guarded by `assertCreateTestOtpSafe` (`packages/config/src/secrets.ts`'s startup guard) — never assume this path is reachable in production.
 - Storage is Redis-keyed: `otp:phone:<phoneNumber>` / `otp:email:<email>`, 5-minute TTL (`expiresInSec = 5 * 60`, `unified_otp.ts:361`), written via `ctx.context.secondaryStorage.set(key, otp, expiresInSec)`.
 - Verification deletes the key on success (one-time use) — a stored OTP is never reusable after a correct verify.
 
 ## `plugins/auth_guards.ts` — two small, load-bearing guard functions
 
 - **`assertChannelAllowed(identifier, loginChannels)`** — rejects an OTP request/verify whose identifier channel (phone vs email) isn't in the instance's `LOGIN_CHANNELS` config, before any OTP is generated.
-- **`assertSelfSignupAllowed({ allowSelfSignup, email, adminByDomain })`** — the authoritative self-signup gate (root `CLAUDE.md`'s `SELF_SIGNUP_MODE`). Called at **both** `requestOtp` and `verifyOtp` — the two points new-user creation could occur — as defense-in-depth. Has one bypass: `isAdminDomainEmail(email, adminByDomain)` lets an email on a configured admin domain through even when signup is gated (the admin bootstrap path). **If you ever touch one call site, check the other** — a fix applied to only `requestOtp` or only `verifyOtp` reopens the gate at the other entry point.
+- **`assertSelfSignupAllowed({ allowSelfSignup, email, adminByDomain })`** — the authoritative self-signup gate (see `.claude/rules/auth-model.md` for `SELF_SIGNUP_MODE`). Called at **both** `requestOtp` and `verifyOtp` — the two points new-user creation could occur — as defense-in-depth. Has one bypass: `isAdminDomainEmail(email, adminByDomain)` lets an email on a configured admin domain through even when signup is gated (the admin bootstrap path). **If you ever touch one call site, check the other** — a fix applied to only `requestOtp` or only `verifyOtp` reopens the gate at the other entry point.
