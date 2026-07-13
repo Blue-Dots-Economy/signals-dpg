@@ -10,11 +10,11 @@ import { getNotificationClient } from '@/utils/notificationClient';
 import { buildSupportEmail, generateSupportReference } from '@/support/build_support_email';
 
 const SubmitSupportBody = z.object({
-  name: z.string().min(1).max(200),
+  name: z.string().trim().min(1).max(200),
   email: z.string().email().max(320).optional(),
   phone: z.string().min(3).max(20).optional(),
   type: z.enum(['complaint', 'support_request']),
-  details: z.string().min(1).max(5000),
+  details: z.string().trim().min(1).max(5000),
   consent: z.literal(true),
 });
 
@@ -95,6 +95,11 @@ export const submit_support_handler = async (
       template_id: 'basic_email',
       to: supportConfig.recipients,
       priority: 'other',
+      // Per-submission dedupe key. Without it the notification-service falls
+      // back to `${channel}:${to}:${template_id}` (constant per instance), so
+      // two submissions to the same inbox within its dedupe TTL collapse and
+      // the second is silently dropped. The unique reference closes that.
+      dedupe_id: reference,
       variables: {
         fromName: `${instance.INSTANCE_NAME ?? 'DPG'} Support`,
         fromEmail: supportConfig.fromEmail,

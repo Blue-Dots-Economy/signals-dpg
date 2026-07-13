@@ -84,6 +84,9 @@ describe('POST /api/v1/support', () => {
     expect(arg.variables.subject).toContain('https://x.org');
     expect(arg.variables.html).toContain('It broke');
     expect(arg.variables.cc).toBeUndefined();
+    // M1: dedupe_id is the per-submission reference so NS doesn't collapse
+    // two submissions to the same inbox within its dedupe TTL.
+    expect(arg.dedupe_id).toBe(res.json().reference);
     await app.close();
   });
 
@@ -151,6 +154,19 @@ describe('POST /api/v1/support', () => {
       payload: { ...validPayload, details: '' },
     });
     expect(res.statusCode).toBe(400);
+    await app.close();
+  });
+
+  it('returns 400 for whitespace-only details (M2 trim)', async () => {
+    mockDeps({ recipients: 'support@org.com', fromEmail: 'from@org.com' });
+    const app = await buildApp();
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/v1/support',
+      payload: { ...validPayload, details: '   ' },
+    });
+    expect(res.statusCode).toBe(400);
+    expect(notifyMock).not.toHaveBeenCalled();
     await app.close();
   });
 
