@@ -1,68 +1,79 @@
 import { describe, it, expect } from 'vitest';
-import { buildSupportEmail } from '../build_support_email';
+import { buildSupportEmail, generateSupportReference } from '../build_support_email';
 
-const submitter = {
+const base = {
+  type: 'complaint' as const,
   name: 'Asha K',
   email: 'asha@example.com',
   phone: '+919000000000',
-  userId: 'user-123',
-  network: 'blue_dot',
+  details: 'My profile broke',
+  reference: 'SUP-20260709-AB12CD',
+  teamName: 'Blue Dot',
+  submittedAt: '2026-07-09T10:00:00.000Z',
 };
 
 describe('buildSupportEmail', () => {
-  it('uses the provided subject in the subject line', () => {
-    const { subject } = buildSupportEmail({
-      subject: 'Cannot log in',
-      message: 'It fails',
-      submitter,
-      submittedAt: '2026-07-09T10:00:00.000Z',
-    });
-    expect(subject).toBe('[Support] Cannot log in — Asha K');
+  it('builds the subject with reference, type label, name and link', () => {
+    const { subject } = buildSupportEmail({ ...base, linkBaseUrl: 'https://blue.example.org' });
+    expect(subject).toBe(
+      'Issue Number: SUP-20260709-AB12CD — Complaint from Asha K from https://blue.example.org'
+    );
   });
 
-  it('falls back to a default subject when none given', () => {
-    const { subject } = buildSupportEmail({
-      message: 'hi',
-      submitter,
-      submittedAt: '2026-07-09T10:00:00.000Z',
-    });
-    expect(subject).toBe('[Support] New support request — Asha K');
+  it('omits the trailing link when no linkBaseUrl is given', () => {
+    const { subject } = buildSupportEmail(base);
+    expect(subject).toBe('Issue Number: SUP-20260709-AB12CD — Complaint from Asha K');
   });
 
-  it('includes the message and every submitter detail in the html', () => {
-    const { html } = buildSupportEmail({
-      message: 'My profile broke',
-      submitter,
-      submittedAt: '2026-07-09T10:00:00.000Z',
-    });
+  it('uses "Support Request" as the type label for support_request', () => {
+    const { subject, html } = buildSupportEmail({ ...base, type: 'support_request' });
+    expect(subject).toContain('Support Request from Asha K');
+    expect(html).toContain('Support Request has been raised by Asha K');
+  });
+
+  it('includes details, contact block, reference, consent and team sign-off in the html', () => {
+    const { html } = buildSupportEmail(base);
+    expect(html).toContain('The below Complaint has been raised by Asha K');
     expect(html).toContain('My profile broke');
-    expect(html).toContain('Asha K');
     expect(html).toContain('asha@example.com');
     expect(html).toContain('+919000000000');
-    expect(html).toContain('user-123');
-    expect(html).toContain('blue_dot');
-    expect(html).toContain('2026-07-09T10:00:00.000Z');
+    expect(html).toContain('SUP-20260709-AB12CD');
+    expect(html).toContain('Consent to share contact');
+    expect(html).toContain('Yes');
+    expect(html).toContain('Team Blue Dot');
   });
 
-  it('HTML-escapes user-supplied message and name', () => {
+  it('renders — for missing email/phone', () => {
+    const { html } = buildSupportEmail({ ...base, email: null, phone: null });
+    expect(html).toContain('—');
+  });
+
+  it('HTML-escapes user-supplied details and name', () => {
     const { html } = buildSupportEmail({
-      message: '<script>alert(1)</script>',
-      submitter: { ...submitter, name: 'A<b>C' },
-      submittedAt: '2026-07-09T10:00:00.000Z',
+      ...base,
+      details: '<script>alert(1)</script>',
+      name: 'A<b>C',
     });
     expect(html).toContain('&lt;script&gt;alert(1)&lt;/script&gt;');
     expect(html).not.toContain('<script>');
     expect(html).toContain('A&lt;b&gt;C');
   });
 
-  it('strips newlines from the subject and renders — for missing email/phone', () => {
-    const { subject, html } = buildSupportEmail({
-      subject: 'line1\nline2',
-      message: 'x',
-      submitter: { ...submitter, email: null, phone: null },
-      submittedAt: '2026-07-09T10:00:00.000Z',
-    });
-    expect(subject).toBe('[Support] line1 line2 — Asha K');
-    expect(html).toContain('—');
+  it('flattens newlines in the subject so they cannot inject headers', () => {
+    const { subject } = buildSupportEmail({ ...base, name: 'line1\nline2' });
+    expect(subject).toBe('Issue Number: SUP-20260709-AB12CD — Complaint from line1 line2');
+  });
+});
+
+describe('generateSupportReference', () => {
+  it('produces SUP-YYYYMMDD-XXXXXX using the UTC date', () => {
+    const ref = generateSupportReference(new Date('2026-07-09T23:59:59.000Z'));
+    expect(ref).toMatch(/^SUP-20260709-[2-9A-HJ-NP-Z]{6}$/);
+  });
+
+  it('is (practically) unique across calls', () => {
+    const now = new Date('2026-07-09T00:00:00.000Z');
+    const refs = new Set(Array.from({ length: 50 }, () => generateSupportReference(now)));
+    expect(refs.size).toBeGreaterThan(1);
   });
 });

@@ -81,8 +81,12 @@ export const NotificationSecretsSchema = z.object({
   FRONTEND_BASE_URL: z.string().optional(),
   // Recipient for support/contact-form submissions (#120). Optional so the API
   // still boots without it; the feature is gated on its presence (the endpoint
-  // returns 503 and the UI hides/toasts when unset).
+  // returns 503 and the UI hides/toasts when unset). Treated as a
+  // comma-separated list by the consumer (multiple recipients allowed).
   SUPPORT_EMAIL: z.string().optional(),
+  // Optional comma-separated CC list for support/contact-form submissions
+  // (#283). Forwarded to nodemailer via the notification variables.
+  SUPPORT_CC_EMAIL: z.string().optional(),
 });
 
 export const MatchScoreSecretsSchema = z.object({
