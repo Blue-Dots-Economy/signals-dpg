@@ -40,6 +40,7 @@
     "SERVED_DOMAINS",
     "SIGNALS_PII_KEY",
     "SMS_TEMPLATE_ID",
+    "SUPPORT_CC_EMAIL",
     "SUPPORT_EMAIL"
   ],
   "tasks": {
