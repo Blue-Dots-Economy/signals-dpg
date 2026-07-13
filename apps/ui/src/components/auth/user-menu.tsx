@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useAuth } from '@/contexts/auth-context';
 import {
@@ -5,12 +6,14 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from '@/components/ui/popover';
-import { LogOut } from 'lucide-react';
+import { LogOut, LifeBuoy } from 'lucide-react';
 import { toast } from 'sonner';
+import { SupportDialog } from '@/components/support/support-dialog';
 
 export function UserMenu() {
   const { user, signOut } = useAuth();
   const { t } = useTranslation();
+  const [supportOpen, setSupportOpen] = useState(false);
 
   const handleSignOut = async () => {
     try {
@@ -38,49 +41,62 @@ export function UserMenu() {
   const initials = getInitials(user.name);
 
   return (
-    <Popover>
-      <PopoverTrigger asChild>
-        <button
-          type="button"
-          className="relative flex h-8 w-8 items-center justify-center overflow-hidden rounded-full bg-primary"
-        >
-          {user.image ? (
-            <img
-              src={user.image}
-              alt={user.name}
-              className="h-full w-full object-cover"
-            />
-          ) : (
-            <span className="text-xs font-medium text-primary-foreground">
-              {initials}
-            </span>
-          )}
-        </button>
-      </PopoverTrigger>
-      <PopoverContent className="w-64 p-0" align="end">
-        <div className="flex items-center gap-3 p-4">
-          <div className="flex h-10 w-10 items-center justify-center rounded-full bg-primary text-sm font-medium text-primary-foreground">
-            {initials}
-          </div>
-          <div className="flex flex-col">
-            <span className="text-sm font-medium">{user.name}</span>
-            {user.email && (
-              <span className="text-xs text-muted-foreground">
-                {user.email}
+    <>
+      <Popover>
+        <PopoverTrigger asChild>
+          <button
+            type="button"
+            className="relative flex h-8 w-8 items-center justify-center overflow-hidden rounded-full bg-primary"
+          >
+            {user.image ? (
+              <img
+                src={user.image}
+                alt={user.name}
+                className="h-full w-full object-cover"
+              />
+            ) : (
+              <span className="text-xs font-medium text-primary-foreground">
+                {initials}
               </span>
             )}
-          </div>
-        </div>
-        <div className="border-t p-1">
-          <button
-            onClick={handleSignOut}
-            className="flex w-full items-center gap-2 rounded-sm px-3 py-2 text-sm text-destructive hover:bg-destructive/10"
-          >
-            <LogOut className="h-4 w-4" />
-            {t('menu.sign_out')}
           </button>
-        </div>
-      </PopoverContent>
-    </Popover>
+        </PopoverTrigger>
+        <PopoverContent className="w-64 p-0" align="end">
+          <div className="flex items-center gap-3 p-4">
+            <div className="flex h-10 w-10 items-center justify-center rounded-full bg-primary text-sm font-medium text-primary-foreground">
+              {initials}
+            </div>
+            <div className="flex flex-col">
+              <span className="text-sm font-medium">{user.name}</span>
+              {user.email && (
+                <span className="text-xs text-muted-foreground">
+                  {user.email}
+                </span>
+              )}
+            </div>
+          </div>
+          <div className="border-t p-1">
+            <button
+              type="button"
+              onClick={() => setSupportOpen(true)}
+              className="flex w-full items-center gap-2 rounded-sm px-3 py-2 text-sm hover:bg-accent"
+            >
+              <LifeBuoy className="h-4 w-4" />
+              {t('menu.contact_support')}
+            </button>
+          </div>
+          <div className="border-t p-1">
+            <button
+              onClick={handleSignOut}
+              className="flex w-full items-center gap-2 rounded-sm px-3 py-2 text-sm text-destructive hover:bg-destructive/10"
+            >
+              <LogOut className="h-4 w-4" />
+              {t('menu.sign_out')}
+            </button>
+          </div>
+        </PopoverContent>
+      </Popover>
+      <SupportDialog open={supportOpen} onOpenChange={setSupportOpen} />
+    </>
   );
 }

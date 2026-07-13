@@ -139,6 +139,27 @@ Open **http://localhost:5173** in your browser.
 
 ---
 
+## Optional — Auth configuration
+
+### Self-signup & login channels
+
+- `SELF_SIGNUP_MODE` (default `gated`) — the public OTP login flow will NOT create
+  new accounts. Onboard participants via `POST /api/v1/admin/participant`
+  (aggregator/voice). Set `SELF_SIGNUP_MODE=allowed` to permit self-registration.
+- `LOGIN_CHANNELS` (default `email,phone`) — restrict login identifiers. e.g.
+  `LOGIN_CHANNELS=phone` shows only the phone input and rejects email OTP.
+- Admin-domain emails (`ADMIN_DOMAINS`) are exempt from the self-signup gate.
+
+---
+
+## Optional — Notification configuration
+
+- `SUPPORT_EMAIL` — recipient for the in-app "Contact support" form. Emails are sent via the
+  notification service from `NOTIFICATION_FROM_EMAIL`, with Reply-To set to the submitting user.
+  When unset, the form is disabled (API returns 503).
+
+---
+
 ## Choose a network
 
 Default is **blue_dot**. To run another network, change these lines in `.env`

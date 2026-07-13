@@ -29,6 +29,12 @@ interface MapViewProps {
    */
   focusPoint?: { lat: number; lng: number } | null;
   /**
+   * Monotonic counter bumped on an explicit recenter intent (e.g. the user
+   * picks a location source). Forwarded to the provider so the map snaps back
+   * to `focusPoint` even when the coordinate is unchanged and the user panned.
+   */
+  focusNonce?: number;
+  /**
    * The Filters control. Rendered inside the map overlay ONLY when the map is
    * maximized (in normal mode the page header hosts it, but that header is
    * covered when the map goes fullscreen, so we surface it here too).
@@ -110,6 +116,7 @@ export function MapView({
   center = DEFAULT_CENTER,
   zoom = DEFAULT_ZOOM,
   focusPoint,
+  focusNonce,
   filtersSlot,
   renderPopup,
   resolveMarkerLabel,
@@ -264,6 +271,7 @@ export function MapView({
         markers={markers}
         onMarkerClick={onMarkerClick}
         initialViewSet={initialViewSet}
+        focusNonce={focusNonce}
         renderPopup={renderPopup}
         resolveIcon={resolveMarkerIcon}
         resolveMarkerImage={resolveMarkerImage}

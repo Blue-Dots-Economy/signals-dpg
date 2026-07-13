@@ -1,4 +1,8 @@
-import { parseServedDomains } from '@dpg/config';
+import {
+  assertCreateTestOtpSafe,
+  parseServedDomains,
+  parseLoginChannels,
+} from '@dpg/config';
 import { loadEnv } from '@/env';
 
 export const {
@@ -13,6 +17,9 @@ export const {
   geocoding,
 } = loadEnv();
 
+// Startup guard (D7): fail hard in prod, warn in dev, if CREATE_TEST_OTP is on.
+assertCreateTestOtpSafe(instance.INSTANCE_ENV, auth.CREATE_TEST_OTP);
+
 export const apiConfig = {
   domain: api.API_DOMAIN,
   port: api.API_PORT,
@@ -21,9 +28,17 @@ export const apiConfig = {
   network_config_local_file: networkRuntime.NETWORK_CONFIG_LOCAL_FILE,
   network_config_urls: networkRuntime.NETWORK_CONFIG_URLS,
   consent_config_source: networkRuntime.CONSENT_CONFIG_SOURCE,
+  consent_support_email: networkRuntime.CONSENT_SUPPORT_EMAIL,
   allow_extra_schema_data: networkRuntime.ALLOW_EXTRA_SCHEMA_DATA,
   bulk_max_items: networkRuntime.BULK_MAX_ITEMS,
   schema_registry_url: schemaRegistry.SCHEMA_REGISTRY_URL,
+  peer_fetch_timeout_ms: networkRuntime.PEER_FETCH_TIMEOUT_MS,
+};
+
+export const peerConfig = {
+  shared_secret: networkRuntime.INSTANCE_SHARED_SECRET,
+  auth_mode: networkRuntime.PEER_AUTH_MODE,
+  token_window_seconds: 300,
 };
 
 export const authConfig = {
@@ -37,11 +52,20 @@ export const authConfig = {
       ? `${apiConfig.domain}:${apiConfig.port}/api/auth`
       : `${apiConfig.domain}/api/auth`,
   create_test_otp: auth.CREATE_TEST_OTP,
+  allow_self_signup: auth.SELF_SIGNUP_MODE === 'allowed',
+  login_channels: parseLoginChannels(auth.LOGIN_CHANNELS),
+};
+
+export const supportConfig = {
+  recipient: notification.SUPPORT_EMAIL,
+  fromEmail: notification.NOTIFICATION_FROM_EMAIL,
 };
 
 export const geocodingConfig = {
   google_api_key: geocoding.GOOGLE_GEOCODING_API_KEY,
   photon_url: geocoding.PHOTON_URL ?? 'https://photon.komoot.io',
+  jitter_min_meters: geocoding.PII_LOCATION_JITTER_MIN_METERS,
+  jitter_max_meters: geocoding.PII_LOCATION_JITTER_MAX_METERS,
 };
 
 export const matchScoreConfig = {

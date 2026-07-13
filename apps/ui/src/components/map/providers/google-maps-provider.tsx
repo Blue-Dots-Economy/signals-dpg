@@ -341,12 +341,14 @@ interface MapViewControllerProps {
   center: [number, number];
   zoom: number;
   initialViewSet: boolean;
+  focusNonce?: number;
 }
 
-function MapViewController({ center, zoom, initialViewSet }: MapViewControllerProps) {
+function MapViewController({ center, zoom, initialViewSet, focusNonce }: MapViewControllerProps) {
   const map = useMap();
   const prevCenter = React.useRef<[number, number] | null>(null);
   const prevZoom = React.useRef<number | null>(null);
+  const prevNonce = React.useRef<number | undefined>(focusNonce);
 
   React.useEffect(() => {
     // Only drive the viewport when a specific profile is selected.
@@ -357,15 +359,19 @@ function MapViewController({ center, zoom, initialViewSet }: MapViewControllerPr
       prevCenter.current[0] === center[0] &&
       prevCenter.current[1] === center[1];
     const sameZoom = prevZoom.current === zoom;
+    // An explicit recenter intent (nonce bump) snaps back even if the
+    // coordinate is unchanged and the user has since panned away.
+    const nonceChanged = prevNonce.current !== focusNonce;
 
-    if (!sameCenter || !sameZoom) {
+    if (nonceChanged || !sameCenter || !sameZoom) {
       map.panTo({ lat: center[0], lng: center[1] });
       map.setZoom(zoom);
     }
 
     prevCenter.current = center;
     prevZoom.current = zoom;
-  }, [center, zoom, initialViewSet, map]);
+    prevNonce.current = focusNonce;
+  }, [center, zoom, initialViewSet, focusNonce, map]);
 
   return null;
 }
@@ -483,6 +489,7 @@ export function GoogleMapProvider({
   markers,
   onMarkerClick,
   initialViewSet = false,
+  focusNonce,
   renderPopup,
   resolveIcon,
   resolveMarkerImage,
@@ -536,7 +543,7 @@ export function GoogleMapProvider({
          * when initialViewSet=true so it never fights the user during normal
          * panning or when "All items" / fit-all mode is active.
          */}
-        <MapViewController center={center} zoom={zoom} initialViewSet={initialViewSet} />
+        <MapViewController center={center} zoom={zoom} initialViewSet={initialViewSet} focusNonce={focusNonce} />
         <ClustererManager
           markers={markers}
           activeMarkerId={activeMarker?.id ?? null}

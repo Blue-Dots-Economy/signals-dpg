@@ -113,6 +113,8 @@ export function createAuth(config: AuthRuntimeConfig) {
 
       unifiedOtp({
         adminByDomain: config.adminDomains,
+        allowSelfSignup: config.allowSelfSignup,
+        loginChannels: config.loginChannels,
 
         sendPhoneOtp: async ({ phoneNumber, otp }) => {
           if (nc) {
@@ -145,8 +147,8 @@ export function createAuth(config: AuthRuntimeConfig) {
                 priority: 'realtime',
                 variables: {
                   fromName: config.appName,
-                  fromEmail: 'support@onest.network',
-                  replyTo: 'support@onest.network',
+                  fromEmail: 'hello@bluedotseconomy.org',
+                  replyTo: 'hello@bluedotseconomy.org',
                   subject: `Your One-Time Password (OTP) for ${config.appName}`,
                   html: emailOtpHtmlTemplate(otp, user, config.appName),
                 },
@@ -178,8 +180,8 @@ export function createAuth(config: AuthRuntimeConfig) {
                 priority: 'realtime',
                 variables: {
                   fromName: `Welcome to ${config.appName}`,
-                  fromEmail: 'support@onest.network',
-                  replyTo: 'support@onest.network',
+                  fromEmail: 'hello@bluedotseconomy.org',
+                  replyTo: 'hello@bluedotseconomy.org',
                   subject: 'Welcome!',
                   html: `<div>
                     <p>Congratulations ${payload.user.name}! You just went live with an account on ${config.appName}.</p>

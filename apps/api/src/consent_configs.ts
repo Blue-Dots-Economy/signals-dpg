@@ -11,6 +11,7 @@ function loadAll(): Promise<LoadedConsentConfig[]> {
     source: apiConfig.consent_config_source,
     networkLocalFile: apiConfig.network_config_local_file,
     networks,
+    supportEmail: apiConfig.consent_support_email,
   });
 }
 

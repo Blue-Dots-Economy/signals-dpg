@@ -33,10 +33,19 @@ const markerDomainMap = new WeakMap<object, string>();
  * when the user picks a different own profile from the selector).
  * Renders nothing — pure side-effect component.
  */
-function SetView({ center, zoom }: { center: [number, number]; zoom: number }) {
+function SetView({
+  center,
+  zoom,
+  focusNonce,
+}: {
+  center: [number, number];
+  zoom: number;
+  focusNonce?: number;
+}) {
   const map = useMap();
   const prevCenter = React.useRef<[number, number] | null>(null);
   const prevZoom = React.useRef<number | null>(null);
+  const prevNonce = React.useRef<number | undefined>(focusNonce);
 
   React.useEffect(() => {
     const sameCenter =
@@ -44,14 +53,18 @@ function SetView({ center, zoom }: { center: [number, number]; zoom: number }) {
       prevCenter.current[0] === center[0] &&
       prevCenter.current[1] === center[1];
     const sameZoom = prevZoom.current === zoom;
+    // An explicit recenter intent (nonce bump) snaps back even if the
+    // coordinate is unchanged and the user has since panned away.
+    const nonceChanged = prevNonce.current !== focusNonce;
 
-    if (!sameCenter || !sameZoom) {
+    if (nonceChanged || !sameCenter || !sameZoom) {
       map.setView(center, zoom);
     }
 
     prevCenter.current = center;
     prevZoom.current = zoom;
-  }, [center, zoom, map]);
+    prevNonce.current = focusNonce;
+  }, [center, zoom, focusNonce, map]);
 
   return null;
 }
@@ -252,6 +265,7 @@ export function LeafletMapProvider({
   markers,
   onMarkerClick,
   initialViewSet = false,
+  focusNonce,
   renderPopup,
   resolveIcon,
 }: MapProviderProps) {
@@ -267,7 +281,7 @@ export function LeafletMapProvider({
         url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
       />
       <FitBounds markers={markers} skip={initialViewSet} />
-      {initialViewSet && <SetView center={center} zoom={zoom} />}
+      {initialViewSet && <SetView center={center} zoom={zoom} focusNonce={focusNonce} />}
       {/*
        * MarkerClusterGroup wraps all markers so that:
        *  - at low zoom levels, nearby markers collapse into a cluster badge

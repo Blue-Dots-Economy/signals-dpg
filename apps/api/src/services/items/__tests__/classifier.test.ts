@@ -8,42 +8,68 @@ const schema = (required: string[]) => ({
 });
 
 describe('classify_item', () => {
-  it('all required populated → live', () => {
+  it('all required populated + consent accepted → live', () => {
     expect(
       classify_item({
         schema: schema(['a', 'b']),
         merged_state: { a: 'x', b: 'y' },
         current_status: 'draft',
+        consent_accepted: true,
       }),
     ).toEqual({ lifecycle_status: 'live' });
   });
 
-  it('one of two required missing → draft', () => {
+  it('all required populated but consent pending → draft', () => {
+    expect(
+      classify_item({
+        schema: schema(['a', 'b']),
+        merged_state: { a: 'x', b: 'y' },
+        current_status: 'draft',
+        consent_accepted: false,
+      }),
+    ).toEqual({ lifecycle_status: 'draft' });
+  });
+
+  it('one of two required missing (consent accepted) → draft', () => {
     expect(
       classify_item({
         schema: schema(['a', 'b']),
         merged_state: { a: 'x' },
         current_status: 'draft',
+        consent_accepted: true,
       }),
     ).toEqual({ lifecycle_status: 'draft' });
   });
 
-  it('vacuous required (empty) → live', () => {
+  it('vacuous required (empty) + consent accepted → live', () => {
     expect(
       classify_item({
         schema: schema([]),
         merged_state: {},
         current_status: 'draft',
+        consent_accepted: true,
       }),
     ).toEqual({ lifecycle_status: 'live' });
   });
 
-  it('paused is sticky against the classifier (complete state)', () => {
+  it('vacuous required (empty) but consent pending → draft', () => {
+    expect(
+      classify_item({
+        schema: schema([]),
+        merged_state: {},
+        current_status: 'draft',
+        consent_accepted: false,
+      }),
+    ).toEqual({ lifecycle_status: 'draft' });
+  });
+
+  it('paused is sticky against the classifier (complete state + consent)', () => {
     expect(
       classify_item({
         schema: schema(['a', 'b']),
         merged_state: { a: 'x', b: 'y' },
         current_status: 'paused',
+        consent_accepted: true,
       }),
     ).toEqual({ lifecycle_status: 'paused' });
   });
@@ -54,6 +80,7 @@ describe('classify_item', () => {
         schema: schema(['a']),
         merged_state: { a: 'x', b: 'y', c: 'z' },
         current_status: 'draft',
+        consent_accepted: true,
       }),
     ).toEqual({ lifecycle_status: 'live' });
   });
@@ -64,16 +91,18 @@ describe('classify_item', () => {
         schema: schema(['a', 'b']),
         merged_state: { a: '', b: [] },
         current_status: 'draft',
+        consent_accepted: true,
       }),
     ).toEqual({ lifecycle_status: 'draft' });
   });
 
-  it('schema with no required key → vacuous live', () => {
+  it('schema with no required key + consent accepted → vacuous live', () => {
     expect(
       classify_item({
         schema: { type: 'object', properties: {} },
         merged_state: {},
         current_status: 'draft',
+        consent_accepted: true,
       }),
     ).toEqual({ lifecycle_status: 'live' });
   });
@@ -84,6 +113,7 @@ describe('classify_item', () => {
         schema: schema(['a', 'b']),
         merged_state: { a: 'x' },
         current_status: 'paused',
+        consent_accepted: true,
       }),
     ).toEqual({ lifecycle_status: 'paused' });
   });
