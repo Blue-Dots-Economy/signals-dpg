@@ -2,6 +2,7 @@
 
 **Issue:** [#196](https://github.com/Blue-Dots-Economy/signals-dpg/issues/196) (geocoding cache), expanded into a full caching sweep.
 **Date:** 2026-07-10 · **Branch:** `feat/ui-caching-strategy` (off `feature`)
+**Companion spec:** [`2026-07-13-ui-data-fetching-at-scale-design.md`](./2026-07-13-ui-data-fetching-at-scale-design.md) (epic [#203](https://github.com/Blue-Dots-Economy/signals-dpg/issues/203)) — this spec fixes caching *mechanics*; the companion reduces the *over-fetch these mechanics cache* (viewport/count-first paging, truncation & partial-federation indicators, relevance ordering). Land this spec first; the companion builds on its React Query baseline.
 
 ## 1. Goal & scope
 
@@ -131,6 +132,8 @@ A shared, session-scoped cache behind the geo provider, keyed by normalized quer
 | Actions | action list, pending count | 60s poll (unchanged) | `refetchInterval` + invalidate on write |
 
 **C3 — Central query-key factory.** A `lib/query-keys.ts` (extending the `use-actions.ts` `actionKeys` pattern) for `networkConfig`, `consentConfig`, `schemas`, `browseItems(network,domain,filters)`, `myItems(network)`, `actions`, etc. The tourist app reuses these keys / the `useNetworkConfig` hook instead of its separate namespace.
+
+> Flag-back (companion spec [#203](https://github.com/Blue-Dots-Economy/signals-dpg/issues/203)): author `browseItems(...)` — and the schema-cache key (§3.1) — to anticipate the axes the companion spec adds, so the factory does not need reworking: rounded **viewport/radius bucket**, **offset/page**, **active profile id**, **location source**, and the **instance/API base URL** (switching `selectedApiUrl` must bust both React Query and the schema cache).
 
 **C4 — Migrate the raw-fetch pages to React Query (full migration).**
 - `home-page.tsx`: replace the raw `useEffect`/`AbortController` fetches for network config (`:253/:287`), my-profiles (`:338`), and browse items (`:572`) with `useQuery` using the keys/tiers above. Keep `getProfileConsentStatus` behavior but move its state into a query (or keep local — see C5).
