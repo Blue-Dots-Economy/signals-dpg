@@ -34,6 +34,9 @@ export const queryKeys = {
     ['edit-item', networkId, itemId] as const,
   consentConfig: (themeId: string, brand: string | null) =>
     ['consent-config', themeId, brand] as const,
+  // The user's profile-creation-consent status for a network (set of consented
+  // item ids). Config-ish; invalidated on consent-accept.
+  profileConsent: (networkId: string) => ['profile-consent', networkId] as const,
   actions,
   myItems: (networkId: string) => ['my-items', networkId] as const,
   browseItems: (networkId: string, domain: string, filters: Record<string, unknown>) =>

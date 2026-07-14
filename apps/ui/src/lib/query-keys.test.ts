@@ -33,4 +33,8 @@ describe('queryKeys', () => {
     ]);
     expect(queryKeys.editItem('blue_dot', 'item-123')).toEqual(['edit-item', 'blue_dot', 'item-123']);
   });
+
+  it('defines the profile-consent key', () => {
+    expect(queryKeys.profileConsent('blue_dot')).toEqual(['profile-consent', 'blue_dot']);
+  });
 });
