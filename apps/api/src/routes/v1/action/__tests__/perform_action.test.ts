@@ -731,4 +731,26 @@ describe('POST /api/v1/action/perform — single object', () => {
     expect(res.statusCode).toBe(400);
     expect(res.json()).toMatchObject({ code: 'FST_ERR_VALIDATION' });
   });
+
+  it('422 INVALID_TARGET_INSTANCE via single-object /perform when target instance URL is not in the network config', async () => {
+    // Mirrors the bulk "422 INVALID_TARGET_INSTANCE" case above: a
+    // syntactically-valid body (passes PerformActionBodySchema) whose
+    // target_item.item_instance_url fails the business-rule check inside
+    // runPerformActions, surfaced through the single-object /perform path
+    // as the same { results, summary } envelope the bulk route returns.
+    const app = buildApp(undefined, { id: 'usr_agg_owned' });
+    const res = await app.inject({
+      method: 'POST',
+      url: '/perform',
+      payload: {
+        ...VALID_BODY,
+        target_item: { ...VALID_BODY.target_item, item_instance_url: 'http://not-allowed.local' },
+      },
+    });
+    expect(res.statusCode).toBe(422);
+    const body = res.json();
+    expect(body.summary.total).toBe(1);
+    expect(body.results[0]).toMatchObject({ status: 'error', error: 'INVALID_TARGET_INSTANCE' });
+    expect(fetchCalls).toHaveLength(0);
+  });
 });
