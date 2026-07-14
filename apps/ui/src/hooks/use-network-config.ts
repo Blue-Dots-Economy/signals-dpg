@@ -1,8 +1,7 @@
 import { useQuery } from '@tanstack/react-query';
 import { fetchNetworkConfig } from '@/lib/network-api';
 import type { DotNetworkSchema } from '@/engine/types';
-
-const NETWORK_CONFIG_KEY = 'network-config';
+import { queryKeys } from '@/lib/query-keys';
 
 interface UseNetworkConfigResult {
   data: DotNetworkSchema | null;
@@ -18,7 +17,7 @@ interface UseNetworkConfigResult {
  */
 export function useNetworkConfig(networkId: string | null): UseNetworkConfigResult {
   const { data, isLoading, isError, error } = useQuery({
-    queryKey: [NETWORK_CONFIG_KEY, networkId],
+    queryKey: networkId ? queryKeys.networkConfig(networkId) : ['network-config', null],
     queryFn: async () => {
       if (!networkId) return null;
       return fetchNetworkConfig(networkId);
