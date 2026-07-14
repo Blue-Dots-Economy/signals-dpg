@@ -4,6 +4,7 @@ import { resolveTheme, type NetworkTheme } from './network-themes';
 import { resolveBrand } from './resolve-brand';
 import { resolveBrandMeta, type BrandMeta } from './brand-meta';
 import { getServedScope } from '@/lib/served-binding';
+import { clearSchemaCache } from '@/engine';
 
 interface NetworkThemeContextValue {
   themeId: string;
@@ -206,6 +207,14 @@ export function NetworkThemeProvider({ children }: { children: React.ReactNode }
 
   React.useLayoutEffect(() => {
     applyThemeTokens(themeId, activeBrand);
+  }, [themeId, activeBrand]);
+
+  React.useEffect(() => {
+    // Resolved schemas ($ref-keyed) are network/brand-specific; a switch must
+    // drop them so the new network's forms/refs are re-fetched, not served
+    // stale from the previous network. Clearing an already-empty cache on first
+    // mount is a no-op.
+    clearSchemaCache();
   }, [themeId, activeBrand]);
 
   const value = React.useMemo(

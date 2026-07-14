@@ -1,6 +1,7 @@
 import { createContext, useContext, useState, useEffect, useCallback, type ReactNode } from 'react';
 import { getSession, signOut as apiSignOut, type AuthIdentifier, type User } from '@/lib/auth-api';
 import { setAuthToken, clearAuthToken } from '@/lib/auth-token';
+import { clearSchemaCache } from '@/engine';
 
 interface AuthContextType {
   user: User | null;
@@ -60,6 +61,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     } finally {
       clearAuthToken();
       setUser(null);
+      clearSchemaCache();
     }
   }, []);
 
