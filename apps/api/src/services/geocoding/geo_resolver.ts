@@ -1,4 +1,5 @@
 import { geocodingConfig } from '@/config';
+import { getCachedCoordinates } from './geo_cache';
 
 export interface Coordinates {
   lat: number;
@@ -50,14 +51,8 @@ async function resolveWithPhoton(query: string, baseUrl: string): Promise<Coordi
   return parsePhotonFeatures(await res.json());
 }
 
-/**
- * Server-side resolve of a composite address string to coordinates.
- * Google Geocoding when a key is configured, else Photon. Returns null on any
- * failure — callers must treat geocoding as best-effort.
- */
-export async function resolveCoordinates(query: string): Promise<Coordinates | null> {
-  const q = query.trim();
-  if (!q) return null;
+/** Dispatch to the configured provider. Best-effort — returns null on error. */
+async function resolveFromProvider(q: string): Promise<Coordinates | null> {
   try {
     if (geocodingConfig.google_api_key) {
       return await resolveWithGoogle(q, geocodingConfig.google_api_key);
@@ -66,4 +61,15 @@ export async function resolveCoordinates(query: string): Promise<Coordinates | n
   } catch {
     return null;
   }
+}
+
+/**
+ * Server-side resolve of a composite address string to coordinates, cached in
+ * Redis (#196). Google Geocoding when a key is configured, else Photon.
+ * Returns null on any failure — callers must treat geocoding as best-effort.
+ */
+export async function resolveCoordinates(query: string): Promise<Coordinates | null> {
+  const q = query.trim();
+  if (!q) return null;
+  return getCachedCoordinates(q, () => resolveFromProvider(q));
 }
