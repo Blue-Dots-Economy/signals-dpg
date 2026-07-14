@@ -7,6 +7,7 @@ import { queryKeys } from '@/lib/query-keys';
 interface UseMyItemsResult {
   data: Item[];
   isLoading: boolean;
+  isFetched: boolean;
 }
 
 /**
@@ -20,7 +21,7 @@ interface UseMyItemsResult {
 export function useMyItems(network: DotNetworkSchema | null): UseMyItemsResult {
   const { user } = useAuth();
 
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, isFetched } = useQuery({
     queryKey: network ? queryKeys.myItems(network.id) : ['my-items', null],
     queryFn: async ({ signal }) => {
       if (!network) return [];
@@ -48,5 +49,5 @@ export function useMyItems(network: DotNetworkSchema | null): UseMyItemsResult {
     staleTime: 60 * 1000,
   });
 
-  return { data: data ?? [], isLoading };
+  return { data: data ?? [], isLoading, isFetched };
 }

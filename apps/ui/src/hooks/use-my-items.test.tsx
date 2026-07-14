@@ -41,6 +41,7 @@ describe('useMyItems', () => {
       expect.objectContaining({ created_by_me: true, limit: 100 }),
       expect.anything(),
     );
+    expect(result.current.isFetched).toBe(true);
   });
 
   it('is disabled (no fetch) when network is null', () => {

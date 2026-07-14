@@ -21,7 +21,7 @@ import { MapFiltersPanel } from '@/components/map/map-filters-panel';
 import { MarkerPopupCard } from '@/components/map/marker-popup-card';
 import { MatchScoreCard } from '@/components/match-score';
 import '@/components/map/providers';
-import { fetchItems, performAction, performActionsBulk, type Item } from '@/lib/item-api';
+import { performAction, performActionsBulk, type Item } from '@/lib/item-api';
 import { bulkFailureIndices, firstBulkError } from '@/lib/bulk';
 import { useCardSelection } from '@/hooks/use-card-selection';
 import { useEqualRowHeights } from '@/hooks/use-equal-row-heights';
@@ -47,10 +47,14 @@ import { LocationSourceToggle } from '@/components/location/location-source-togg
 import { EnableLocationBanner } from '@/components/location/enable-location-banner';
 import { nearestDistanceMeters } from '@/lib/geo/distance';
 import type { LatLng } from '@/lib/geo/types';
-import { getProfileConsentStatus, acceptProfileConsent } from '@/lib/consent-api';
+import { acceptProfileConsent } from '@/lib/consent-api';
 import { useConsentConfig } from '@/hooks/use-consent-config';
 import { useNetworkTheme } from '@/theme/theme-provider';
 import { ProfileConsentModal } from '@/components/consent/profile-consent-modal';
+import { useMyItems } from '@/hooks/use-my-items';
+import { useProfileConsentStatus } from '@/hooks/use-profile-consent-status';
+import { useQueryClient } from '@tanstack/react-query';
+import { queryKeys } from '@/lib/query-keys';
 
 function itemToCardItem(item: Item): { id: string; domain: string; data: Record<string, unknown> } {
   return {
@@ -222,14 +226,7 @@ export function HomePage() {
 
   const [selectedNetworkId, setSelectedNetworkId] = React.useState<string | null>(initialNetworkId);
   const [domainItems, setDomainItems] = React.useState<Record<string, Item[]>>({});
-  const [myItems, setMyItems] = React.useState<Item[]>([]);
   const [activeProfileId, setActiveProfileId] = React.useState<string | null>(null);
-  // Whether the active-profile lookup has settled. Until it has, profileLocation
-  // is transiently null even for a user who has a profile location, so the
-  // browser-geo auto-prompt must wait for this to avoid a spurious permission prompt.
-  const [profilesResolved, setProfilesResolved] = React.useState(false);
-  const [consentedProfileIds, setConsentedProfileIds] = React.useState<Set<string>>(new Set());
-  const [consentLoaded, setConsentLoaded] = React.useState(false);
   const [pendingConsentProfileId, setPendingConsentProfileId] = React.useState<string | null>(null);
   const [loading, setLoading] = React.useState(false);
   const browseSelection = useCardSelection();
@@ -248,6 +245,18 @@ export function HomePage() {
 
   const { data: resolvedNetwork } = useResolvedNetwork(selectedNetworkId);
   const network = resolvedNetwork;
+
+  // My profiles across domains (own-data tier) + profile-consent status
+  // (config tier). Replace the coordinated raw fetch; the gate reads both.
+  const { data: myItems, isFetched: myItemsFetched } = useMyItems(network);
+  const consentQuery = useProfileConsentStatus(network);
+  const consentedProfileIds = consentQuery.data ?? new Set<string>();
+  // Settled = query resolved either way (fail-open: an error yields an empty set
+  // and still marks loaded, so the gate can prompt). Signed-out users have no
+  // profiles/consent to wait for — resolved immediately.
+  const profilesResolved = !user || myItemsFetched;
+  const consentLoaded = !user || consentQuery.isSuccess || consentQuery.isError;
+  const queryClient = useQueryClient();
 
   // Default the selected network to the first available once the list loads
   // (only when nothing is selected yet) — previously done in the mount fetch.
@@ -279,72 +288,32 @@ export function HomePage() {
     [network]
   );
 
-  // Fetch all user profiles across all domains to discover their domain
+  // Restore or auto-select the active profile once per network, when my-profiles
+  // have settled. A ref guards against re-running on a background refetch
+  // (which must not reset the user's manual selection).
+  const restoredForNetwork = React.useRef<string | null>(null);
   React.useEffect(() => {
-    if (!network) return;
-    // Signed out (or no session): drop the previous user's profiles so the
-    // sidebar/active-profile clear immediately instead of lingering until refresh.
     if (!user) {
-      setMyItems([]);
+      // Signed out: clear selection and allow restoration to re-run on next sign-in.
       setActiveProfileId(null);
-      // A signed-out visitor has no profile to wait for — resolved immediately,
-      // so the browser-geo auto-prompt may fire.
-      setProfilesResolved(true);
+      restoredForNetwork.current = null;
       return;
     }
+    if (!network || !myItemsFetched) return;
+    if (restoredForNetwork.current === network.id) return;
+    restoredForNetwork.current = network.id;
 
-    const controller = new AbortController();
-
-    const domainFetches = network.domains.map((domain) => {
-      const itemType = getItemTypeForDomain(network, domain.id);
-      return fetchItems({
-        item_network: network.id,
-        item_domain: domain.id,
-        item_type: itemType,
-        created_by_me: true,
-        limit: 100,
-      }, controller.signal)
-        .then((res) => res.items)
-        .catch(() => [] as Item[]);
-    });
-
-    // Fetch the profile-consent set in the SAME flow that loads profiles so
-    // consentedProfileIds + consentLoaded are set together with profilesResolved.
-    // This closes the transient window where a restored activeProfileId would be
-    // treated as "active" before consent status loaded, delaying the gate modal.
-    // Fail-open: an empty set on error still lets the gate prompt.
-    const consentFetch = getProfileConsentStatus(network.id)
-      .then((res) => new Set(res.consented_item_ids))
-      .catch(() => new Set<string>());
-
-    Promise.all([Promise.all(domainFetches), consentFetch]).then(([results, consentedIds]) => {
-      if (controller.signal.aborted) return;
-      const allProfiles = results.flat();
-      setMyItems(allProfiles);
-      // Consent status is known before profilesResolved is marked, so by the time
-      // activeProfileId is derived the gate effect can fire without a content flash.
-      setConsentedProfileIds(consentedIds);
-      setConsentLoaded(true);
-      // Profile lookup has settled — profileLocation is now authoritative, so the
-      // browser-geo auto-prompt may fire if there's still no profile location.
-      setProfilesResolved(true);
-
-      // Auto-select: use stored ID if valid, otherwise first profile
-      const storedId = getStoredActiveProfileId(network.id);
-      if (storedId && allProfiles.some((p) => p.item_id === storedId)) {
-        setActiveProfileId(storedId);
-      } else if (allProfiles.length > 0) {
-        setActiveProfileId(allProfiles[0].item_id);
-        setStoredActiveProfileId(network.id, allProfiles[0].item_id);
-      } else {
-        // No profiles for this user — clear any stale ID from a previous session
-        setActiveProfileId(null);
-        clearStoredActiveProfileId(network.id);
-      }
-    });
-
-    return () => { controller.abort(); };
-  }, [network, user]);
+    const storedId = getStoredActiveProfileId(network.id);
+    if (storedId && myItems.some((p) => p.item_id === storedId)) {
+      setActiveProfileId(storedId);
+    } else if (myItems.length > 0) {
+      setActiveProfileId(myItems[0].item_id);
+      setStoredActiveProfileId(network.id, myItems[0].item_id);
+    } else {
+      setActiveProfileId(null);
+      clearStoredActiveProfileId(network.id);
+    }
+  }, [user, network, myItemsFetched, myItems]);
 
   // Derive the active profile from myItems
   const myItem = React.useMemo(() => {
@@ -898,7 +867,16 @@ export function HomePage() {
             item_id: profile.item_id,
             version: profileDoc.current_version,
           });
-          setConsentedProfileIds((prev) => new Set([...prev, pending]));
+          // Update the consent-status cache directly (not invalidate) so the
+          // derived `consentedProfileIds` reflects the accepted profile in the
+          // same batched render as the activeProfileId/pendingConsentProfileId
+          // updates below — an invalidate-triggered refetch would leave a window
+          // where the gate effect sees the old (not-yet-consented) set and
+          // reopens the modal it was just told to close.
+          queryClient.setQueryData<Set<string>>(
+            queryKeys.profileConsent(network.id),
+            (prev) => new Set([...(prev ?? []), pending]),
+          );
           setActiveProfileId(pending);
           setStoredActiveProfileId(network.id, pending);
           setPendingConsentProfileId(null);
