@@ -178,11 +178,15 @@ Author caching-spec **C3 (`lib/query-keys.ts`)** — and the schema-cache key (�
 - **UI unit:** per-domain paging / `useInfiniteQuery` state (reset on domain/location change, append, `hasMore`); infinite-scroll trigger; viewport→radius (half-diagonal) math; "All" tab cross-domain merge ordering; truncation & partial indicators; cache-key stability incl. viewport bucket + instance URL busting.
 - `pnpm typecheck`; `pnpm --filter ui test`; verified on the largest instance (UP Blue Dots / Muzaffarnagar).
 
-## 14. Open items to confirm at spec review
-1. **React Query vs bespoke paging (§5).** Recommend `useInfiniteQuery` (list) + viewport-keyed `useQuery` (markers) for coherence with the caching spec — confirm with the paged-ordered-item-fetch author, since their design used bespoke state.
-2. **Cross-instance scatter-gather (§4.4):** implement now (recommended — small, makes ordering correct regardless of instance count) vs. defer if all served domains are single-instance in prod.
-3. **`VITE_MAP_FETCH_LIMIT` default and markers `limit` max.**
-4. **Anon count-first threshold (§7):** the zoom level below which pins are deferred in favor of a count screen.
+## 14. Open items — RESOLVED at spec review (2026-07-14)
+1. **React Query vs bespoke paging (§5).** ✅ **Resolved: use React Query** — `useInfiniteQuery` (list) + viewport-keyed `useQuery` (markers) for coherence with the caching spec. Bespoke paging state is dropped; this makes the caching baseline (Phase 2) a hard prerequisite for §5.
+2. **Cross-instance scatter-gather (§4.4):** ✅ **Resolved: implement now** (small; makes ordering correct regardless of instance count) — delivered in Phase 5.
+3. **`VITE_MAP_FETCH_LIMIT` default and markers `limit` max.** ✅ **Resolved:** `VITE_MAP_FETCH_LIMIT` default **5000**; markers query `limit` max **10000** (full-fetch cap stays 1000).
+4. **Anon count-first threshold (§7):** ✅ **Resolved:** defer pins below **~zoom 8** (region level); show the count-first screen above that zoom-out.
+
+### Ownership & delivery (settled)
+- Both #196 (caching, incl. Part A geocoding) and #203 (this epic) are owned by the same author; **all work lands on `feat/ui-caching-strategy`**.
+- **Phasing:** P1 = #196 server geocoding cache (caching Part A) → P2 = rest of caching baseline (Parts B/C/D — React Query foundation) → P3 = §4.0–§4.2 + §5.1 + §6 truncation (list core) → P4 = §4.3–§4.5 + §5.2–§5.4 + §6 federation (map) → P5 = §4.4 + §7 + §8 (cross-instance, anon, cache-key correctness) → P6 = §9 relevance (cross-repo, later).
 
 ## Acceptance (maps to #203)
 - [ ] Initial load issues a bounded, ordered, paged request; no full-network pull.
