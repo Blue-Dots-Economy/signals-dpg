@@ -16,20 +16,29 @@ export function normalizeGeoKey(query: string): string {
  * (insertion-order, `cap` entries) keyed by `normalizeGeoKey(query)`, with
  * in-flight dedup so concurrent identical lookups collapse to one call. Only
  * results for which `shouldCache(value)` is true are stored (so a transient
- * empty/error result is not cached). The `signal` is accepted for call-site
- * compatibility but deliberately NOT forwarded to the shared underlying call —
- * one waiter must not abort a promise shared by others; callers still gate on
- * their own signal before using the resolved value.
+ * empty/error result is not cached).
+ *
+ * Abort is ref-counted: the shared underlying call runs against an internal
+ * AbortController, and that controller is aborted only once EVERY current
+ * waiter has aborted its own signal. So a single caller aborting (e.g. the user
+ * typing the next keystroke) cancels the still-running fetch, while a caller
+ * that shares the in-flight request — or one with no signal — keeps it alive.
  */
 export function memoizeGeoLookup<T>(
-  fn: (query: string) => Promise<T>,
+  fn: (query: string, signal?: AbortSignal) => Promise<T>,
   shouldCache: (value: T) => boolean,
   cap: number = DEFAULT_CACHE_CAP,
 ): (query: string, signal?: AbortSignal) => Promise<T> {
   const resolved = new Map<string, T>();
-  const inFlight = new Map<string, Promise<T>>();
 
-  return (query: string): Promise<T> => {
+  interface InFlight {
+    promise: Promise<T>;
+    controller: AbortController;
+    waiters: Set<object>;
+  }
+  const inFlight = new Map<string, InFlight>();
+
+  return (query: string, signal?: AbortSignal): Promise<T> => {
     const key = normalizeGeoKey(query);
 
     if (resolved.has(key)) {
@@ -39,26 +48,54 @@ export function memoizeGeoLookup<T>(
       return Promise.resolve(value);
     }
 
-    const pending = inFlight.get(key);
-    if (pending) return pending;
+    let entry = inFlight.get(key);
+    if (!entry) {
+      const controller = new AbortController();
+      const created: InFlight = {
+        controller,
+        waiters: new Set<object>(),
+        promise: fn(query, controller.signal)
+          .then((value) => {
+            if (shouldCache(value)) {
+              resolved.set(key, value);
+              if (resolved.size > cap) {
+                const oldest = resolved.keys().next().value as string;
+                resolved.delete(oldest);
+              }
+            }
+            return value;
+          })
+          .finally(() => {
+            inFlight.delete(key);
+          }),
+      };
+      inFlight.set(key, created);
+      entry = created;
+    }
 
-    const promise = fn(query)
-      .then((value) => {
-        if (shouldCache(value)) {
-          resolved.set(key, value);
-          if (resolved.size > cap) {
-            const oldest = resolved.keys().next().value as string;
-            resolved.delete(oldest);
-          }
-        }
-        return value;
-      })
-      .finally(() => {
-        inFlight.delete(key);
-      });
+    // Register this caller as a waiter. The shared fetch is aborted only when
+    // every waiter has aborted; a no-signal waiter is released on settle.
+    const current = entry;
+    const token = {};
+    current.waiters.add(token);
 
-    inFlight.set(key, promise);
-    return promise;
+    if (signal) {
+      const onAbort = () => {
+        current.waiters.delete(token);
+        if (current.waiters.size === 0) current.controller.abort();
+      };
+      if (signal.aborted) {
+        onAbort();
+      } else {
+        signal.addEventListener('abort', onAbort, { once: true });
+        void current.promise.finally(() => signal.removeEventListener('abort', onAbort));
+      }
+    }
+    void current.promise.finally(() => {
+      current.waiters.delete(token);
+    });
+
+    return current.promise;
   };
 }
 
@@ -70,15 +107,12 @@ export function memoizeGeoLookup<T>(
  */
 export function withGeoCache(base: GeoProvider): GeoProvider {
   const cachedSuggest = memoizeGeoLookup<GeoSuggestion[]>(
-    (q) => base.suggest(q),
+    (q, signal) => base.suggest(q, signal),
     (results) => results.length > 0,
   );
   const cachedGeocode = memoizeGeoLookup<LatLng | null>(
-    (q) => base.geocode(q),
+    (q, signal) => base.geocode(q, signal),
     (result) => result !== null,
   );
-  return {
-    suggest: (query, signal) => cachedSuggest(query, signal),
-    geocode: (address, signal) => cachedGeocode(address, signal),
-  };
+  return { suggest: cachedSuggest, geocode: cachedGeocode };
 }

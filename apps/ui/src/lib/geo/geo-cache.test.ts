@@ -76,6 +76,56 @@ describe('memoizeGeoLookup', () => {
   });
 });
 
+describe('memoizeGeoLookup ref-counted abort', () => {
+  it('aborts the underlying call when the sole waiter aborts', async () => {
+    const fn = vi.fn((_q: string, signal?: AbortSignal) =>
+      new Promise<string[]>((resolve) => {
+        signal?.addEventListener('abort', () => resolve(['ABORTED']));
+      }));
+    const memo = memoizeGeoLookup(fn, (v) => v.length > 0 && v[0] !== 'ABORTED');
+    const ctrl = new AbortController();
+    const p = memo('delhi', ctrl.signal);
+    ctrl.abort();
+    expect(await p).toEqual(['ABORTED']); // underlying saw the abort
+    expect(fn).toHaveBeenCalledTimes(1);
+  });
+
+  it('does NOT abort the shared call while another waiter is still active', async () => {
+    let resolveFn!: (v: string[]) => void;
+    const fn = vi.fn((_q: string, signal?: AbortSignal) =>
+      new Promise<string[]>((resolve) => {
+        signal?.addEventListener('abort', () => resolve(['ABORTED']));
+        resolveFn = resolve;
+      }));
+    const memo = memoizeGeoLookup(fn, () => false);
+    const a = new AbortController();
+    const pA = memo('delhi', a.signal);       // waiter A (signal)
+    const pB = memo('delhi');                 // waiter B (no signal → keeps alive)
+    a.abort();                                // A aborts, B remains
+    resolveFn(['OK']);                        // underlying completes normally
+    expect(await pA).toEqual(['OK']);
+    expect(await pB).toEqual(['OK']);
+    expect(fn).toHaveBeenCalledTimes(1);      // deduped to one underlying call
+  });
+
+  it('aborts once ALL waiters have aborted', async () => {
+    const fn = vi.fn((_q: string, signal?: AbortSignal) =>
+      new Promise<string[]>((resolve) => {
+        signal?.addEventListener('abort', () => resolve(['ABORTED']));
+      }));
+    const memo = memoizeGeoLookup(fn, (v) => v[0] !== 'ABORTED');
+    const a = new AbortController();
+    const b = new AbortController();
+    const pA = memo('delhi', a.signal);
+    const pB = memo('delhi', b.signal);
+    a.abort();                                // still one waiter (B) → not aborted
+    b.abort();                                // now zero → abort
+    expect(await pA).toEqual(['ABORTED']);
+    expect(await pB).toEqual(['ABORTED']);
+    expect(fn).toHaveBeenCalledTimes(1);
+  });
+});
+
 describe('withGeoCache', () => {
   it('caches suggest results per normalized query (one call for repeats)', async () => {
     const suggest = vi.fn().mockResolvedValue([{ lat: 1, lng: 2, label: 'Delhi' }]);
