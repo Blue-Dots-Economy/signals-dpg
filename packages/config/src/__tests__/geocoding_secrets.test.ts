@@ -47,3 +47,26 @@ describe('GeocodingSecretsSchema jitter radii', () => {
     expect(parsed.PII_LOCATION_JITTER_MAX_METERS).toBe(1000);
   });
 });
+
+describe('GeocodingSecretsSchema cache TTLs', () => {
+  it('defaults to 30 days positive / 1 hour negative when unset', () => {
+    const parsed = GeocodingSecretsSchema.parse({});
+    expect(parsed.GEO_CACHE_TTL_SECONDS).toBe(2592000);
+    expect(parsed.GEO_CACHE_NEGATIVE_TTL_SECONDS).toBe(3600);
+  });
+
+  it('coerces string env values to numbers', () => {
+    const parsed = GeocodingSecretsSchema.parse({
+      GEO_CACHE_TTL_SECONDS: '600',
+      GEO_CACHE_NEGATIVE_TTL_SECONDS: '120',
+    });
+    expect(parsed.GEO_CACHE_TTL_SECONDS).toBe(600);
+    expect(parsed.GEO_CACHE_NEGATIVE_TTL_SECONDS).toBe(120);
+  });
+
+  it('rejects a non-positive TTL', () => {
+    expect(() =>
+      GeocodingSecretsSchema.parse({ GEO_CACHE_TTL_SECONDS: '0' }),
+    ).toThrow();
+  });
+});

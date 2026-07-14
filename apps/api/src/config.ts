@@ -87,6 +87,8 @@ export const geocodingConfig = {
   photon_url: geocoding.PHOTON_URL ?? 'https://photon.komoot.io',
   jitter_min_meters: geocoding.PII_LOCATION_JITTER_MIN_METERS,
   jitter_max_meters: geocoding.PII_LOCATION_JITTER_MAX_METERS,
+  cache_ttl_seconds: geocoding.GEO_CACHE_TTL_SECONDS,
+  cache_negative_ttl_seconds: geocoding.GEO_CACHE_NEGATIVE_TTL_SECONDS,
 };
 
 export const matchScoreConfig = {
