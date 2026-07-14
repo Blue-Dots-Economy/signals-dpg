@@ -23,4 +23,14 @@ describe('queryKeys', () => {
     expect(queryKeys.browseItems('blue_dot', 'seeker', f)).toEqual(['browse-items', 'blue_dot', 'seeker', f]);
     expect(queryKeys.markers('blue_dot', 'seeker', f)).toEqual(['markers', 'blue_dot', 'seeker', f]);
   });
+
+  it('defines the profile-form keys (2b-iii)', () => {
+    expect(queryKeys.networkConfigs()).toEqual(['network-configs']);
+    expect(queryKeys.resolvedNetwork('blue_dot', 'https://api.example')).toEqual([
+      'resolved-network',
+      'blue_dot',
+      'https://api.example',
+    ]);
+    expect(queryKeys.editItem('blue_dot', 'item-123')).toEqual(['edit-item', 'blue_dot', 'item-123']);
+  });
 });

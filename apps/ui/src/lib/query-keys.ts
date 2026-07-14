@@ -22,6 +22,16 @@ const actions = {
 
 export const queryKeys = {
   networkConfig: (networkId: string) => ['network-config', networkId] as const,
+  // The full list of network configs (GET /network/schemas, no `network` param).
+  networkConfigs: () => ['network-configs'] as const,
+  // Network config with all `$ref`s resolved against a given API base URL. The
+  // base URL is part of the key so switching instance (§8, Plan 2b-v) yields a
+  // distinct entry rather than serving a resolution built against the old host.
+  resolvedNetwork: (networkId: string, apiBaseUrl: string) =>
+    ['resolved-network', networkId, apiBaseUrl] as const,
+  // A single item located by id (edit form), scoped to its network.
+  editItem: (networkId: string, itemId: string) =>
+    ['edit-item', networkId, itemId] as const,
   consentConfig: (themeId: string, brand: string | null) =>
     ['consent-config', themeId, brand] as const,
   actions,
