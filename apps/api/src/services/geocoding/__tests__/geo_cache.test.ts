@@ -70,4 +70,11 @@ describe('getCachedCoordinates', () => {
     expect(result).toEqual({ lat: 3, lng: 4 });
     expect(loader).toHaveBeenCalledTimes(1);
   });
+
+  it('returns null without throwing when Redis get throws AND the loader throws', async () => {
+    get.mockRejectedValueOnce(new Error('redis down'));
+    const loader = vi.fn().mockRejectedValue(new Error('provider 500'));
+    await expect(getCachedCoordinates('Delhi', loader)).resolves.toBeNull();
+    expect(loader).toHaveBeenCalledTimes(1);
+  });
 });

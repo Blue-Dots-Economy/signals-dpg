@@ -46,8 +46,7 @@ export async function getCachedCoordinates(
     if (cached === GEO_NEGATIVE_SENTINEL) return null;
     if (cached !== null) return JSON.parse(cached) as Coordinates;
   } catch {
-    // Redis unavailable → resolve live, skip caching this round.
-    return loader();
+    // Redis unavailable → fall through to a live resolve (handled below).
   }
 
   let result: Coordinates | null;
