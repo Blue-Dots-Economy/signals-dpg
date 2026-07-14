@@ -94,7 +94,8 @@ export const ACTION_CONSENT_SENTINEL = '__consent' as const;
 
 /**
  * Payload for performing an action (initiated by source user)
- * Matches the actual API schema: POST /api/v1/action/perform
+ * Sent as a single object to POST /api/v1/action/perform
+ * For bulk actions, use performActionsBulk which posts to /api/v1/action/perform/bulk
  */
 export interface PerformActionPayload {
   action_type: string;
@@ -266,7 +267,7 @@ export async function performAction(
     : apiClient;
 
   return unwrapBulkSingle(
-    client.post<BulkEnvelope<PerformActionResponse>>('/api/v1/action/perform', [payload]),
+    client.post<BulkEnvelope<PerformActionResponse>>('/api/v1/action/perform', payload),
   );
 }
 
@@ -296,7 +297,7 @@ export async function performActionsBulk(
     ? createInstanceApiClient(sourceInstanceUrl)
     : apiClient;
   return postBulkEnvelope<PerformActionResponse>(
-    client.post<BulkEnvelope<PerformActionResponse>>('/api/v1/action/perform', payloads),
+    client.post<BulkEnvelope<PerformActionResponse>>('/api/v1/action/perform/bulk', payloads),
   );
 }
 
