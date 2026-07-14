@@ -120,7 +120,7 @@ export function ProfileFormPage() {
   }, [servedScope?.network, availableNetworkIds, networkFromUrl]);
 
   // Resolved network config (config tier) — fetch + $ref resolution, cached.
-  const { data: resolvedNetwork } = useResolvedNetwork(targetNetworkId);
+  const { data: resolvedNetwork, isError: resolvedNetworkError } = useResolvedNetwork(targetNetworkId);
   const network = resolvedNetwork;
   const domains = network?.domains ?? [];
 
@@ -131,25 +131,31 @@ export function ProfileFormPage() {
   // Existing profile for edit mode.
   const editItem = useEditItem(network, isEdit ? (id ?? null) : null);
 
-  // Edit-mode loading: the network is resolved but the item is still in flight.
-  // Create mode never shows the "loading profile" screen (the network guards
-  // below cover the not-yet-ready cases). Matches the prior `isLoading` state,
-  // which was seeded to `isEdit` and only cleared once the item load settled.
-  const editLoading = isEdit && !!resolvedNetwork && editItem.isPending;
+  // Edit-mode loading screen: shown from mount through the networks-list and
+  // network-config-resolve phases and while the item itself loads (old
+  // `isLoading` was seeded to `isEdit` and cleared only once the item load
+  // settled). Goes false when the network resolve errors, so a resolve failure
+  // falls through to the `!network` "loading schemas" guard exactly as before.
+  const editLoading =
+    isEdit && !resolvedNetworkError && !editItem.isSuccess && !editItem.isError;
 
   // Seed the edit form from the fetched item; redirect on a genuine miss.
   React.useEffect(() => {
     if (!isEdit) return;
-    if (editItem.data) {
-      setExistingItem(editItem.data);
-      setSelectedDomain(editItem.data.item_domain);
-      setInitialData(editItem.data.item_state);
-    } else if (editItem.isSuccess && editItem.data === null) {
+    const item = editItem.data;
+    if (item) {
+      // Seed once per item — a background refetch of the same item must not
+      // clobber the user's in-progress form edits.
+      if (existingItem?.item_id === item.item_id) return;
+      setExistingItem(item);
+      setSelectedDomain(item.item_domain);
+      setInitialData(item.item_state);
+    } else if (editItem.isSuccess && item === null && !existingItem) {
       toast.error(t('home.toast_profile_not_found'), {
         description: t('profile.toast_not_found_desc'),
       });
       navigate(`/?network=${resolvedNetwork?.id ?? ''}`);
-    } else if (editItem.isError) {
+    } else if (editItem.isError && !existingItem) {
       console.error('Failed to load profile:', editItem.error);
       toast.error(t('profile.toast_load_error'), {
         description: t('profile.toast_load_error_desc'),
@@ -161,6 +167,7 @@ export function ProfileFormPage() {
     editItem.isSuccess,
     editItem.isError,
     editItem.error,
+    existingItem,
     resolvedNetwork?.id,
     navigate,
     t,
