@@ -1,5 +1,6 @@
 import * as React from 'react';
 import { useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom';
+import { useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { useTranslation } from 'react-i18next';
 import { ArrowLeft, Wallet, OctagonX } from 'lucide-react';
@@ -23,6 +24,7 @@ import { getServedScope } from '@/lib/served-binding';
 import { useNetworkConfigs, useResolvedNetwork } from '@/hooks/use-network-config';
 import { useMyItems } from '@/hooks/use-my-items';
 import { useEditItem } from '@/hooks/use-edit-item';
+import { queryKeys } from '@/lib/query-keys';
 
 import {
   createItem,
@@ -49,6 +51,7 @@ export function ProfileFormPage() {
   const { id } = useParams();
   const [searchParams] = useSearchParams();
   const { user } = useAuth();
+  const queryClient = useQueryClient();
   const { theme, brand } = useNetworkTheme();
   const { config: consentConfig, isLoading: consentLoading } = useConsentConfig();
   const isEdit = !!id;
@@ -338,6 +341,11 @@ export function ProfileFormPage() {
         }
 
         await updateItem(existingItem.item_id, updatePayload);
+        // Reflect the write immediately in cached lists (§C5).
+        queryClient.invalidateQueries({ queryKey: queryKeys.myItems(network.id) });
+        // Network-level prefix of the browse-items key (React Query matches
+        // prefixes) — invalidates every domain's browse cache for this network.
+        queryClient.invalidateQueries({ queryKey: ['browse-items', network.id] });
         toast.success(t('profile.toast_updated'), {
           description: t('profile.toast_updated_desc'),
         });
@@ -370,6 +378,11 @@ export function ProfileFormPage() {
         }
 
         await createItem(createPayload);
+        // Reflect the write immediately in cached lists (§C5).
+        queryClient.invalidateQueries({ queryKey: queryKeys.myItems(network.id) });
+        // Network-level prefix of the browse-items key (React Query matches
+        // prefixes) — invalidates every domain's browse cache for this network.
+        queryClient.invalidateQueries({ queryKey: ['browse-items', network.id] });
         toast.success(t('profile.toast_created'), {
           description: t('profile.toast_created_desc'),
         });

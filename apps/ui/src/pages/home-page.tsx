@@ -615,6 +615,8 @@ export function HomePage() {
           });
 
         const env = await performActionsBulk(payloads, sourceItemInstanceUrl);
+        // New actions must surface without waiting for the 60s poll (§C5).
+        queryClient.invalidateQueries({ queryKey: queryKeys.actions.all });
         setBulkConnectOpen(false);
 
         if (env.summary.failed === 0) {
@@ -1091,6 +1093,8 @@ export function HomePage() {
               },
               sourceItemInstanceUrl // Call the SOURCE instance (where myItem exists)
             );
+            // New actions must surface without waiting for the 60s poll (§C5).
+            queryClient.invalidateQueries({ queryKey: queryKeys.actions.all });
             toast.success(t('home.toast_action_sent', { action: actionType.charAt(0).toUpperCase() + actionType.slice(1) }), {
               description: t('home.toast_action_sent_desc'),
             });
