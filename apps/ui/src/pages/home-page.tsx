@@ -8,7 +8,6 @@ import type {
   DotActionSchema,
   ViewMode,
 } from '@/engine/types';
-import { resolveNetworkRefs } from '@/engine/schema/resolve-schema';
 import { PageShell } from '@/components/layout/page-shell';
 import { ContentHeader } from '@/components/layout/content-header';
 import { GuestHero } from '@/components/layout/guest-hero';
@@ -26,6 +25,7 @@ import { fetchItems, performAction, performActionsBulk, type Item } from '@/lib/
 import { bulkFailureIndices, firstBulkError } from '@/lib/bulk';
 import { useCardSelection } from '@/hooks/use-card-selection';
 import { useEqualRowHeights } from '@/hooks/use-equal-row-heights';
+import { useNetworkConfigs, useResolvedNetwork } from '@/hooks/use-network-config';
 import { SelectableCard } from '@/components/selection/selectable-card';
 import { BulkActionBar } from '@/components/selection/bulk-action-bar';
 import { ActionModal } from '@/components/actions/action-modal';
@@ -34,7 +34,7 @@ import { getRuntimeEnv } from '@/lib/runtime-env';
 import { ACTION_CONSENT_SENTINEL } from '@/lib/action-api';
 import { ActionAbortedError } from '@/lib/action-abort';
 import { EmptyState } from '@/components/empty-state';
-import { fetchNetworkConfigs, fetchNetworkConfig, fetchNetworkItems, PROFILE_FETCH_LIMIT } from '@/lib/network-api';
+import { fetchNetworkItems, PROFILE_FETCH_LIMIT } from '@/lib/network-api';
 import { useAuth } from '@/contexts/auth-context';
 import { apiConfig } from '@/lib/api-config';
 import { getEnumFilterFieldsForDomains, itemPassesEnumFilters } from '@/lib/enum-filters';
@@ -202,8 +202,6 @@ export function HomePage() {
     }
     return result;
   });
-  const [resolvedNetwork, setResolvedNetwork] = React.useState<DotNetworkSchema | null>(null);
-  const [allNetworks, setAllNetworks] = React.useState<DotNetworkSchema[]>([]);
   const configuredNetworkIds = parseNetworkIds(import.meta.env.VITE_NETWORK_ID);
   // The set of domains this deployment serves (VITE_SERVED_BINDINGS), or null
   // when unset (serve all domains). When exactly ONE domain is served, that is
@@ -238,6 +236,27 @@ export function HomePage() {
   const [bulkConnectOpen, setBulkConnectOpen] = React.useState(false);
   const [bulkConnectBusy, setBulkConnectBusy] = React.useState(false);
 
+  // Networks list + resolved selected network (config tier). Replaces the raw
+  // mount-fetch + resolve effects; `allNetworks`/`network` are now query-derived.
+  const { data: networksData } = useNetworkConfigs();
+  const allNetworks = React.useMemo<DotNetworkSchema[]>(() => {
+    if (!networksData) return [];
+    return configuredNetworkIds.length > 0
+      ? networksData.filter((n) => configuredNetworkIds.includes(n.id))
+      : networksData;
+  }, [networksData, configuredNetworkIds]);
+
+  const { data: resolvedNetwork } = useResolvedNetwork(selectedNetworkId);
+  const network = resolvedNetwork;
+
+  // Default the selected network to the first available once the list loads
+  // (only when nothing is selected yet) — previously done in the mount fetch.
+  React.useEffect(() => {
+    if (selectedNetworkId) return;
+    const first = allNetworks[0]?.id;
+    if (first) setSelectedNetworkId(first);
+  }, [allNetworks, selectedNetworkId]);
+
   React.useEffect(() => {
     if (!selectedNetworkId) {
       setActiveProfileId(null);
@@ -245,63 +264,6 @@ export function HomePage() {
     }
     setActiveProfileId(getStoredActiveProfileId(selectedNetworkId));
   }, [selectedNetworkId]);
-
-  // Fetch networks from API on mount
-  React.useEffect(() => {
-    const controller = new AbortController();
-
-    fetchNetworkConfigs()
-      .then((networks) => {
-        if (controller.signal.aborted) return;
-        
-        // Filter by configured networks if VITE_NETWORK_ID is set, otherwise use all
-        const targetNetworks = configuredNetworkIds.length > 0
-          ? networks.filter(n => configuredNetworkIds.includes(n.id))
-          : networks;
-        setAllNetworks(targetNetworks);
-
-        // Use first configured network, or first available
-        const defaultNetwork = targetNetworks[0]?.id;
-        if (defaultNetwork && !selectedNetworkId) {
-          setSelectedNetworkId(defaultNetwork);
-        }
-      })
-      .catch((err) => {
-        console.error('Failed to fetch networks:', err);
-      });
-
-    return () => { controller.abort(); };
-  }, []);
-
-  // Fetch and resolve the selected network
-  React.useEffect(() => {
-    if (!selectedNetworkId) return;
-
-    const controller = new AbortController();
-
-    setResolvedNetwork(null);
-    setDomainItems({});
-    setMyItems([]);
-    setProfilesResolved(false);
-
-    fetchNetworkConfig(selectedNetworkId)
-      .then((config) => {
-        if (controller.signal.aborted) return;
-        // Resolve any $ref in the network config
-        return resolveNetworkRefs(config, { baseUrl: apiConfig.getUrl() });
-      })
-      .then((resolved) => {
-        if (controller.signal.aborted || !resolved) return;
-        setResolvedNetwork(resolved as DotNetworkSchema);
-      })
-      .catch((err) => {
-        console.error('Failed to fetch network config:', err);
-      });
-
-    return () => { controller.abort(); };
-  }, [selectedNetworkId]);
-
-  const network = resolvedNetwork;
 
   // Resolve a map marker's label from its domain's card.title_field so titles
   // are correct even in the "All" view where markers span multiple domains.
