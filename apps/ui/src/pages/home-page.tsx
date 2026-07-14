@@ -34,7 +34,6 @@ import { getRuntimeEnv } from '@/lib/runtime-env';
 import { ACTION_CONSENT_SENTINEL } from '@/lib/action-api';
 import { ActionAbortedError } from '@/lib/action-abort';
 import { EmptyState } from '@/components/empty-state';
-import { fetchNetworkItems, PROFILE_FETCH_LIMIT } from '@/lib/network-api';
 import { useAuth } from '@/contexts/auth-context';
 import { apiConfig } from '@/lib/api-config';
 import { getEnumFilterFieldsForDomains, itemPassesEnumFilters } from '@/lib/enum-filters';
@@ -52,6 +51,7 @@ import { useConsentConfig } from '@/hooks/use-consent-config';
 import { useNetworkTheme } from '@/theme/theme-provider';
 import { ProfileConsentModal } from '@/components/consent/profile-consent-modal';
 import { useMyItems } from '@/hooks/use-my-items';
+import { useBrowseItems } from '@/hooks/use-browse-items';
 import { useProfileConsentStatus } from '@/hooks/use-profile-consent-status';
 import { useQueryClient } from '@tanstack/react-query';
 import { queryKeys } from '@/lib/query-keys';
@@ -83,12 +83,6 @@ function sortItemsByNearest<T>(
       nearestDistanceMeters(userLocation, getLocations(a)) -
       nearestDistanceMeters(userLocation, getLocations(b)),
   );
-}
-
-function getItemTypeForDomain(network: DotNetworkSchema, domainId: string): string {
-  const domain = network.domains.find((d) => d.id === domainId);
-  const itemTypeKeys = domain?.item_schemas ? Object.keys(domain.item_schemas) : [];
-  return itemTypeKeys.length > 0 ? itemTypeKeys[0] : 'profile';
 }
 
 function parseNetworkIds(networkEnv: string | undefined): string[] {
@@ -225,10 +219,8 @@ export function HomePage() {
       : (configuredNetworkIds[0] || null));
 
   const [selectedNetworkId, setSelectedNetworkId] = React.useState<string | null>(initialNetworkId);
-  const [domainItems, setDomainItems] = React.useState<Record<string, Item[]>>({});
   const [activeProfileId, setActiveProfileId] = React.useState<string | null>(null);
   const [pendingConsentProfileId, setPendingConsentProfileId] = React.useState<string | null>(null);
-  const [loading, setLoading] = React.useState(false);
   const browseSelection = useCardSelection();
   const [bulkConnectOpen, setBulkConnectOpen] = React.useState(false);
   const [bulkConnectBusy, setBulkConnectBusy] = React.useState(false);
@@ -483,46 +475,27 @@ export function HomePage() {
     [myItems, currentDomain]
   );
 
-  // Fetch items for selected domain(s); when All tab (null) fetch all visible domains in parallel
-  React.useEffect(() => {
-    if (!network || visibleDomains.length === 0) {
-      setDomainItems({});
-      return;
+  // Which domains to fetch: All-tab (null) = every visible domain; else the one.
+  const domainsToFetch = React.useMemo(
+    () =>
+      selectedDomain === null
+        ? visibleDomains
+        : visibleDomains.filter((d) => d.id === selectedDomain),
+    [selectedDomain, visibleDomains],
+  );
+
+  // Browse feed (cached per domain, ~90s). Raw items come back; filter out the
+  // user's own items here (a view concern) so the cache holds the true server
+  // response and survives domain-tab switches without refetching.
+  const { data: browseData, isLoading: loading } = useBrowseItems(network, domainsToFetch);
+
+  const domainItems = React.useMemo<Record<string, Item[]>>(() => {
+    const filtered: Record<string, Item[]> = {};
+    for (const [domainId, items] of Object.entries(browseData)) {
+      filtered[domainId] = items.filter((it) => !localProfileItemIds.has(it.item_id));
     }
-
-    const controller = new AbortController();
-    setLoading(true);
-
-    const domainsToFetch = selectedDomain === null
-      ? visibleDomains
-      : visibleDomains.filter((d) => d.id === selectedDomain);
-
-    Promise.all(
-      domainsToFetch.map((domain) => {
-        const itemType = getItemTypeForDomain(network, domain.id);
-        return fetchNetworkItems(
-          { item_network: network.id, item_domain: domain.id, item_type: itemType, limit: PROFILE_FETCH_LIMIT },
-          controller.signal
-        )
-          .then((res) => ({
-            domain: domain.id,
-            items: res.items.filter((item) => !localProfileItemIds.has(item.item_id)),
-          }))
-          .catch(() => ({ domain: domain.id, items: [] as Item[] }));
-      })
-    )
-      .then((results) => {
-        if (controller.signal.aborted) return;
-        const map: Record<string, Item[]> = {};
-        for (const r of results) map[r.domain] = r.items;
-        setDomainItems(map);
-      })
-      .finally(() => {
-        if (!controller.signal.aborted) setLoading(false);
-      });
-
-    return () => { controller.abort(); };
-  }, [selectedDomain, visibleDomains, network, localProfileItemIds]);
+    return filtered;
+  }, [browseData, localProfileItemIds]);
 
   // Active schema: from the selected browsing domain, or first visible domain
   const activeSchema = React.useMemo(() => {
