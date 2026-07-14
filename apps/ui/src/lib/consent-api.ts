@@ -35,13 +35,6 @@ export async function fetchConsentConfigs(networkId: string): Promise<ConsentCon
     .map((e) => ({ brand: e.brand ?? null, schema: e.schema as ConsentConfigDocument }));
 }
 
-export async function getConsentStatus(networkId: string): Promise<ConsentStatusResponse> {
-  const response = await apiClient.get<ConsentStatusResponse>('/api/v1/consent/status', {
-    params: { network: networkId },
-  });
-  return response.data;
-}
-
 export async function getConsentStatusByIdentifier(
   params: ConsentStatusByIdentifierParams,
 ): Promise<ConsentStatusResponse> {
