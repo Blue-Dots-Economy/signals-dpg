@@ -15,27 +15,25 @@ import { useNetworkTheme } from '@/theme/theme-provider';
 import { useConsentConfig } from '@/hooks/use-consent-config';
 import { ConsentCheckbox } from '@/components/actions/consent-checkbox';
 import { WalletImportModal } from '@/components/wallet/wallet-import-modal';
-import { resolveNetworkRefs } from '@/engine/schema/resolve-schema';
-import type { DotNetworkSchema } from '@/engine/types';
 import { getConfiguredWalletProviders } from '@/engine/wallet/wallet-registry';
 import type { WalletImportResult } from '@/engine/wallet/types';
 import { useAuth } from '@/contexts/auth-context';
 import { mergeImportedDataIntoSchema } from '@/lib/import-mapping';
 import { getServedScope } from '@/lib/served-binding';
+import { useNetworkConfigs, useResolvedNetwork } from '@/hooks/use-network-config';
+import { useMyItems } from '@/hooks/use-my-items';
+import { useEditItem } from '@/hooks/use-edit-item';
 
 import {
   createItem,
-  fetchItems,
   updateItem,
   type CreateItemPayload,
   type UpdateItemPayload,
   type Item,
 } from '@/lib/item-api';
-import { fetchNetworkConfig, fetchNetworkConfigs } from '@/lib/network-api';
 import { parseLocationFields, buildLocationQueries } from '@dpg/schemas/location_fields';
 import { getGeoProvider } from '@/lib/geo/provider';
 import type { GeoComponents } from '@/lib/geo/types';
-import { apiConfig } from '@/lib/api-config';
 
 function parseNetworkIds(networkEnv: string | undefined): string[] {
   if (!networkEnv) return [];
@@ -67,13 +65,9 @@ export function ProfileFormPage() {
   const [selectedDomain, setSelectedDomain] = React.useState<string | null>(
     () => (!isEdit && singleServedDomain ? singleServedDomain : null),
   );
-  const [myItems, setMyItems] = React.useState<Item[]>([]);
-  const [resolvedNetwork, setResolvedNetwork] = React.useState<DotNetworkSchema | null>(null);
   const [existingItem, setExistingItem] = React.useState<Item | null>(null);
   const [initialData, setInitialData] = React.useState<Record<string, unknown> | null>(null);
   const [isSubmitting, setIsSubmitting] = React.useState(false);
-  const [isLoading, setIsLoading] = React.useState(isEdit);
-  const [availableNetworkIds, setAvailableNetworkIds] = React.useState<string[] | null>(null);
   const [isWalletModalOpen, setIsWalletModalOpen] = React.useState(false);
   const [formError, setFormError] = React.useState<{ title: string; description?: string } | null>(null);
   const [resolvedLocations, setResolvedLocations] = React.useState<
@@ -100,26 +94,21 @@ export function ProfileFormPage() {
   );
   const networkFromUrl = searchParams.get('network');
 
-  React.useEffect(() => {
-    const controller = new AbortController();
+  // Networks list (config tier) — discover which network ids are available.
+  const {
+    data: networksData,
+    isError: networksError,
+  } = useNetworkConfigs();
 
-    fetchNetworkConfigs()
-      .then((networks) => {
-        if (controller.signal.aborted) return;
-        const filteredNetworks = configuredNetworkIds.length > 0
-          ? networks.filter((network) => configuredNetworkIds.includes(network.id))
-          : networks;
-        setAvailableNetworkIds(filteredNetworks.map((network) => network.id));
-      })
-      .catch((err) => {
-        if (controller.signal.aborted) return;
-        console.error('Failed to fetch networks:', err);
-        setAvailableNetworkIds([]);
-        setIsLoading(false);
-      });
-
-    return () => { controller.abort(); };
-  }, [configuredNetworkIds]);
+  const availableNetworkIds = React.useMemo<string[] | null>(() => {
+    if (networksError) return [];
+    if (!networksData) return null;
+    const filtered =
+      configuredNetworkIds.length > 0
+        ? networksData.filter((network) => configuredNetworkIds.includes(network.id))
+        : networksData;
+    return filtered.map((network) => network.id);
+  }, [networksData, networksError, configuredNetworkIds]);
 
   const targetNetworkId = React.useMemo(() => {
     if (servedScope?.network) return servedScope.network;
@@ -130,120 +119,52 @@ export function ProfileFormPage() {
     return availableNetworkIds[0] ?? null;
   }, [servedScope?.network, availableNetworkIds, networkFromUrl]);
 
-  // Fetch and resolve network config from API
-  React.useEffect(() => {
-    if (!targetNetworkId) return;
-
-    const controller = new AbortController();
-    setResolvedNetwork(null);
-
-    fetchNetworkConfig(targetNetworkId)
-      .then((config) => {
-        if (controller.signal.aborted) return;
-        return resolveNetworkRefs(config, { baseUrl: apiConfig.getUrl() });
-      })
-      .then((resolved) => {
-        if (controller.signal.aborted || !resolved) return;
-        setResolvedNetwork(resolved as DotNetworkSchema);
-      })
-      .catch((err) => {
-        console.error('Failed to fetch network config:', err);
-        setIsLoading(false);
-      });
-
-    return () => { controller.abort(); };
-  }, [targetNetworkId]);
-
-  // Fetch existing profile for edit mode
-  React.useEffect(() => {
-    if (!isEdit || !id || !resolvedNetwork) return;
-
-    let cancelled = false;
-
-    const loadExistingProfile = async () => {
-      try {
-        let foundItem = false;
-        // Search across all domains to find the item
-        for (const domain of resolvedNetwork.domains ?? []) {
-          const itemTypeKeys = domain.item_schemas ? Object.keys(domain.item_schemas) : [];
-          const itemType = itemTypeKeys.length > 0 ? itemTypeKeys[0] : 'profile';
-
-          const response = await fetchItems({
-            item_network: resolvedNetwork.id,
-            item_domain: domain.id,
-            item_type: itemType,
-            item_id: id,
-            limit: 1,
-          });
-
-          if (response.items.length > 0) {
-            if (cancelled) return;
-            const item = response.items[0];
-            setExistingItem(item);
-            setSelectedDomain(item.item_domain);
-            setInitialData(item.item_state);
-            foundItem = true;
-            break;
-          }
-        }
-
-        if (!cancelled && !foundItem) {
-          toast.error(t('home.toast_profile_not_found'), {
-            description: t('profile.toast_not_found_desc'),
-          });
-          navigate(`/?network=${resolvedNetwork.id}`);
-        }
-      } catch (err) {
-        if (!cancelled) {
-          console.error('Failed to load profile:', err);
-          toast.error(t('profile.toast_load_error'), {
-            description: t('profile.toast_load_error_desc'),
-          });
-        }
-      } finally {
-        if (!cancelled) setIsLoading(false);
-      }
-    };
-
-    loadExistingProfile();
-    return () => { cancelled = true; };
-  }, [isEdit, id, resolvedNetwork]);
-
+  // Resolved network config (config tier) — fetch + $ref resolution, cached.
+  const { data: resolvedNetwork } = useResolvedNetwork(targetNetworkId);
   const network = resolvedNetwork;
   const domains = network?.domains ?? [];
 
-  // Single-domain lock: a user's domain is implied by the items they already
-  // hold in this network. Fetch them across served domains so the create flow
-  // can lock the picker to the held domain (server enforces the real lock —
-  // see create_item's DOMAIN_LOCKED guard). Edit mode reads the domain off the
-  // existing item, so this only runs for create.
+  // My items across served domains (create mode only) → single-domain lock.
+  // Edit mode reads the domain off the existing item, so skip the probe there.
+  const { data: myItems } = useMyItems(isEdit ? null : network);
+
+  // Existing profile for edit mode.
+  const editItem = useEditItem(network, isEdit ? (id ?? null) : null);
+
+  // Edit-mode loading: the network is resolved but the item is still in flight.
+  // Create mode never shows the "loading profile" screen (the network guards
+  // below cover the not-yet-ready cases). Matches the prior `isLoading` state,
+  // which was seeded to `isEdit` and only cleared once the item load settled.
+  const editLoading = isEdit && !!resolvedNetwork && editItem.isPending;
+
+  // Seed the edit form from the fetched item; redirect on a genuine miss.
   React.useEffect(() => {
-    if (isEdit || !network || !user) return;
-    const controller = new AbortController();
-    Promise.all(
-      (network.domains ?? []).map((domain) => {
-        const itemTypeKeys = domain.item_schemas
-          ? Object.keys(domain.item_schemas)
-          : [];
-        const itemType = itemTypeKeys.length > 0 ? itemTypeKeys[0] : 'profile';
-        return fetchItems(
-          {
-            item_network: network.id,
-            item_domain: domain.id,
-            item_type: itemType,
-            created_by_me: true,
-            limit: 100,
-          },
-          controller.signal,
-        )
-          .then((res) => res.items)
-          .catch(() => [] as Item[]);
-      }),
-    ).then((results) => {
-      if (!controller.signal.aborted) setMyItems(results.flat());
-    });
-    return () => controller.abort();
-  }, [isEdit, network, user]);
+    if (!isEdit) return;
+    if (editItem.data) {
+      setExistingItem(editItem.data);
+      setSelectedDomain(editItem.data.item_domain);
+      setInitialData(editItem.data.item_state);
+    } else if (editItem.isSuccess && editItem.data === null) {
+      toast.error(t('home.toast_profile_not_found'), {
+        description: t('profile.toast_not_found_desc'),
+      });
+      navigate(`/?network=${resolvedNetwork?.id ?? ''}`);
+    } else if (editItem.isError) {
+      console.error('Failed to load profile:', editItem.error);
+      toast.error(t('profile.toast_load_error'), {
+        description: t('profile.toast_load_error_desc'),
+      });
+    }
+  }, [
+    isEdit,
+    editItem.data,
+    editItem.isSuccess,
+    editItem.isError,
+    editItem.error,
+    resolvedNetwork?.id,
+    navigate,
+    t,
+  ]);
 
   // Domain the user is locked to, or null when they hold no items yet.
   const lockedDomain = React.useMemo(
@@ -477,11 +398,11 @@ export function ProfileFormPage() {
     }
   };
 
-  if (availableNetworkIds === null || isLoading) {
+  if (availableNetworkIds === null || editLoading) {
     return (
       <div className="flex h-screen items-center justify-center">
         <p className="text-muted-foreground">
-          {isLoading ? t('profile.loading_profile') : t('profile.loading_schemas')}
+          {editLoading ? t('profile.loading_profile') : t('profile.loading_schemas')}
         </p>
       </div>
     );
