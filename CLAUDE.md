@@ -78,6 +78,22 @@ Root scripts wrap turbo via `scripts/turbo-with-root-env.mjs`. That wrapper exis
 
 Node `>=24` and `pnpm@11.1.2` are pinned via `engines` / `packageManager`.
 
+## UI Data Caching (React Query)
+
+One QueryClient (`apps/ui/src/lib/query-client.ts`), one key factory
+(`apps/ui/src/lib/query-keys.ts`). staleTime tiers: config-like data 5 min
+(invalidate on change), browse feeds ~90s (+ `cache_ttl_seconds`), own data 60s
+(+ invalidate-on-write), actions via `refetchInterval`. Geocoding uses dedicated
+caches (Redis server-side, in-memory session client-side), not React Query.
+Never rely on `refetchOnWindowFocus` for freshness.
+
+**Deferred — instance-URL cache-busting (caching-spec §8):** when a
+`selectedApiUrl` / instance switcher is added to the UI, switching it must bust
+the React Query caches (browse/my-items/markers) and the client schema cache
+(`clearSchemaCache`), because `createApiClient` captures `baseURL` at
+construction. The `resolvedNetwork(networkId, apiBaseUrl)` key already carries
+the API base URL. There is no switcher today, so no busting is wired yet.
+
 ## Conventions worth highlighting
 
 - **Files are snake_case.** Route handler exports are snake_case (`create_item`), internal handler functions are camelCase (`createItemHandler`). Zod schemas are PascalCase. DB columns are snake_case.
