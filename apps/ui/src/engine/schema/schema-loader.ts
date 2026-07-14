@@ -8,7 +8,25 @@ import type { RJSFSchema } from '@rjsf/utils';
 
 type JsonSchema = RJSFSchema | DotProfileSchema | DotNetworkSchema | DotActionSchema;
 
-const schemaCache = new Map<string, JsonSchema>();
+const SCHEMA_CACHE_TTL_MS = 5 * 60 * 1000; // 5 min — aligns with the config staleTime tier
+
+interface CacheEntry {
+  schema: JsonSchema;
+  expiresAt: number;
+}
+
+const schemaCache = new Map<string, CacheEntry>();
+
+/** Returns a live (non-expired) entry's schema, deleting it if expired. */
+function readFresh(key: string): JsonSchema | undefined {
+  const entry = schemaCache.get(key);
+  if (!entry) return undefined;
+  if (entry.expiresAt <= Date.now()) {
+    schemaCache.delete(key);
+    return undefined;
+  }
+  return entry.schema;
+}
 
 function getCacheKey(input: SchemaInput): string | null {
   if (typeof input === 'string') return input;
@@ -23,8 +41,9 @@ function getCacheKey(input: SchemaInput): string | null {
 export async function loadSchema(input: SchemaInput): Promise<JsonSchema> {
   const cacheKey = getCacheKey(input);
 
-  if (cacheKey && schemaCache.has(cacheKey)) {
-    return schemaCache.get(cacheKey)!;
+  if (cacheKey) {
+    const fresh = readFresh(cacheKey);
+    if (fresh !== undefined) return fresh;
   }
 
   let schema: JsonSchema;
@@ -41,7 +60,7 @@ export async function loadSchema(input: SchemaInput): Promise<JsonSchema> {
   }
 
   if (cacheKey) {
-    schemaCache.set(cacheKey, schema);
+    schemaCache.set(cacheKey, { schema, expiresAt: Date.now() + SCHEMA_CACHE_TTL_MS });
   }
 
   return schema;
@@ -60,9 +79,9 @@ export function clearSchemaCache(): void {
 }
 
 export function getCachedSchema(key: string): JsonSchema | undefined {
-  return schemaCache.get(key);
+  return readFresh(key);
 }
 
 export function setCachedSchema(key: string, schema: JsonSchema): void {
-  schemaCache.set(key, schema);
+  schemaCache.set(key, { schema, expiresAt: Date.now() + SCHEMA_CACHE_TTL_MS });
 }
