@@ -19,4 +19,14 @@ describe('AuthProvider signOut', () => {
     });
     expect(clearSchemaCache).toHaveBeenCalled();
   });
+
+  it('clears the schema cache even when the sign-out API call fails', async () => {
+    const authApi = await import('@/lib/auth-api');
+    vi.mocked(authApi.signOut).mockRejectedValueOnce(new Error('network'));
+    const { result } = renderHook(() => useAuth(), { wrapper: AuthProvider });
+    await act(async () => {
+      await expect(result.current.signOut()).rejects.toThrow('network');
+    });
+    expect(clearSchemaCache).toHaveBeenCalled();
+  });
 });

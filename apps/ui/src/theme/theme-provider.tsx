@@ -210,10 +210,9 @@ export function NetworkThemeProvider({ children }: { children: React.ReactNode }
   }, [themeId, activeBrand]);
 
   React.useEffect(() => {
-    // Resolved schemas ($ref-keyed) are network/brand-specific; a switch must
-    // drop them so the new network's forms/refs are re-fetched, not served
-    // stale from the previous network. Clearing an already-empty cache on first
-    // mount is a no-op.
+    // Only a network switch (via URL) triggers this at runtime; activeBrand is
+    // computed once and doesn't change. Correctness relies on schema resolution
+    // being async so this sync clear lands before any post-await cache read.
     clearSchemaCache();
   }, [themeId, activeBrand]);
 
