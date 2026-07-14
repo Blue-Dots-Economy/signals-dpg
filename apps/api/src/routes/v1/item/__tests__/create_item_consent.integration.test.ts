@@ -184,6 +184,38 @@ describeIf(`profile_creation consent recorded on item create (integration)${
     expect(row.network).toBe(served_network);
   });
 
+  it('create with consent + complete required fields → item promoted live', async () => {
+    // Regression guard (#275 gated `live` on consent but never wired the
+    // create-with-consent path to promote): a self-create that supplies consent
+    // AND satisfies all required fields must land `live`, not stuck `draft`.
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/v1/item/create',
+      headers: {
+        'x-api-key': raw_key,
+        'content-type': 'application/json',
+      },
+      payload: {
+        item_network: served_network,
+        item_domain: served_domain,
+        item_type: served_item_type,
+        item_state,
+        consent: { category: 'profile_creation', version: 1 },
+      },
+    });
+
+    expect(res.statusCode).toBe(201);
+    const body = res.json() as { item_id: string };
+    created_item_ids.push(body.item_id);
+
+    const [item] = await db
+      .select({ lifecycle_status: itemsTable.lifecycle_status })
+      .from(itemsTable)
+      .where(eq(itemsTable.item_id, body.item_id));
+
+    expect(item?.lifecycle_status).toBe('live');
+  });
+
   it('self-create without consent → 400 CONSENT_REQUIRED (consent is configured)', async () => {
     // This api-key resolves to a non-admin user with no created_by, i.e. a
     // direct/self create. Since blue_dot configures a profile_creation

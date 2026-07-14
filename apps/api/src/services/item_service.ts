@@ -99,6 +99,14 @@ export interface CreateItemServiceParams {
   item_state?: Record<string, unknown>;
   item_locations?: ItemLocation[];
   created_by: string;
+  /**
+   * Whether profile_creation consent is being accepted as part of this create
+   * (the public /item/create carries a consent block). When true, a required-
+   * complete item is classified `live` immediately; when false/omitted (admin/
+   * bulk onboarding), the item stays `draft` and is promoted later via
+   * POST /consent/profile-accept. Defaults to false.
+   */
+  consent_accepted?: boolean;
 }
 
 export interface UpdateItemServiceBody {
@@ -215,15 +223,17 @@ export async function createItemInternal(
       ? ''
       : encryptPiiBlob(JSON.stringify(itemState.privateState), getPiiKey());
 
-  // A brand-new item has no id yet, so per-profile `profile_creation` consent
-  // cannot exist at create time — every create starts as draft. The profile
-  // goes live only after the owner accepts profile consent
-  // (POST /consent/profile-accept), which re-classifies it (aggregator-dpg#464).
+  // Live requires required-complete AND profile_creation consent
+  // (aggregator-dpg#464). A create that carries consent (public /item/create
+  // with a consent block, passed as `consent_accepted`) IS that acceptance, so
+  // it can go live now. #275 hardcoded this `false`, so every consenting create
+  // was stuck `draft`; the flag fixes that while keeping consent-less callers
+  // (admin/bulk onboarding) draft until POST /consent/profile-accept promotes.
   const classification = classify_item({
     schema: itemSchema as { required?: string[] },
     merged_state: submittedItemState,
     current_status: 'draft',
-    consent_accepted: false,
+    consent_accepted: params.consent_accepted ?? false,
   });
 
   const itemLocations = locationsForStorage(params.item_locations ?? [], itemSchema);
