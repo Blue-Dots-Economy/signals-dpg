@@ -242,7 +242,7 @@ describe('POST /api/v1/action/perform — on-behalf-of (bulk)', () => {
     const app = buildApp(undefined, { id: 'usr_agg_owned' });
     const res = await app.inject({
       method: 'POST',
-      url: '/perform',
+      url: '/perform/bulk',
       payload: [VALID_BODY],
     });
     expect(res.statusCode).toBe(201);
@@ -270,7 +270,7 @@ describe('POST /api/v1/action/perform — on-behalf-of (bulk)', () => {
     const app = buildApp(undefined, { id: 'usr_self' });
     const res = await app.inject({
       method: 'POST',
-      url: '/perform',
+      url: '/perform/bulk',
       payload: [{ ...VALID_BODY, acting_as_user_id: 'usr_target' }],
     });
     expect(res.statusCode).toBe(422);
@@ -286,7 +286,7 @@ describe('POST /api/v1/action/perform — on-behalf-of (bulk)', () => {
     });
     const res = await app.inject({
       method: 'POST',
-      url: '/perform',
+      url: '/perform/bulk',
       payload: [VALID_BODY],
     });
     expect(res.statusCode).toBe(422);
@@ -302,7 +302,7 @@ describe('POST /api/v1/action/perform — on-behalf-of (bulk)', () => {
     });
     const res = await app.inject({
       method: 'POST',
-      url: '/perform',
+      url: '/perform/bulk',
       payload: [{ ...VALID_BODY, acting_as_user_id: 'usr_target' }],
     });
     expect(res.statusCode).toBe(422);
@@ -321,7 +321,7 @@ describe('POST /api/v1/action/perform — on-behalf-of (bulk)', () => {
     });
     const res = await app.inject({
       method: 'POST',
-      url: '/perform',
+      url: '/perform/bulk',
       payload: [{ ...VALID_BODY, acting_as_user_id: 'usr_other' }],
     });
     expect(res.statusCode).toBe(422);
@@ -340,7 +340,7 @@ describe('POST /api/v1/action/perform — on-behalf-of (bulk)', () => {
     });
     const res = await app.inject({
       method: 'POST',
-      url: '/perform',
+      url: '/perform/bulk',
       payload: [{ ...VALID_BODY, acting_as_user_id: 'usr_agg_owned' }],
     });
     expect(res.statusCode).toBe(201);
@@ -374,7 +374,7 @@ describe('POST /api/v1/action/perform — on-behalf-of (bulk)', () => {
     });
     const res = await app.inject({
       method: 'POST',
-      url: '/perform',
+      url: '/perform/bulk',
       payload: [{ ...VALID_BODY, acting_as_user_id: 'usr_agg_owned' }],
     });
     expect(res.statusCode).toBe(422);
@@ -388,7 +388,7 @@ describe('POST /api/v1/action/perform — on-behalf-of (bulk)', () => {
     const app = buildApp(undefined, { id: 'usr_agg_owned' });
     const res = await app.inject({
       method: 'POST',
-      url: '/perform',
+      url: '/perform/bulk',
       payload: [VALID_BODY],
     });
     expect(res.statusCode).toBe(422);
@@ -407,7 +407,7 @@ describe('POST /api/v1/action/perform — on-behalf-of (bulk)', () => {
     const app = buildApp(undefined, { id: 'usr_agg_owned' });
     const res = await app.inject({
       method: 'POST',
-      url: '/perform',
+      url: '/perform/bulk',
       payload: [VALID_BODY],
     });
     expect(res.statusCode).toBe(422);
@@ -419,7 +419,7 @@ describe('POST /api/v1/action/perform — on-behalf-of (bulk)', () => {
     const app = buildApp(undefined, { id: 'usr_agg_owned' });
     const res = await app.inject({
       method: 'POST',
-      url: '/perform',
+      url: '/perform/bulk',
       payload: [{ ...VALID_BODY, target_item: { ...VALID_BODY.target_item, item_instance_url: 'http://not-allowed.local' } }],
     });
     expect(res.statusCode).toBe(422);
@@ -441,7 +441,7 @@ describe('POST /api/v1/action/perform — on-behalf-of (bulk)', () => {
       const app = buildApp(undefined, { id: 'usr_agg_owned' });
       const res = await app.inject({
         method: 'POST',
-        url: '/perform',
+        url: '/perform/bulk',
         payload: [VALID_BODY], // no consent field
       });
       expect(res.statusCode).toBe(422);
@@ -462,7 +462,7 @@ describe('POST /api/v1/action/perform — on-behalf-of (bulk)', () => {
       const app = buildApp(undefined, { id: 'usr_agg_owned' });
       const res = await app.inject({
         method: 'POST',
-        url: '/perform',
+        url: '/perform/bulk',
         payload: [
           {
             ...VALID_BODY,
@@ -493,7 +493,7 @@ describe('POST /api/v1/action/perform — on-behalf-of (bulk)', () => {
       const app = buildApp(undefined, { id: 'usr_agg_owned' });
       const res = await app.inject({
         method: 'POST',
-        url: '/perform',
+        url: '/perform/bulk',
         payload: [VALID_BODY], // no consent field
       });
       expect(res.statusCode).toBe(201);
@@ -520,7 +520,7 @@ describe('POST /api/v1/action/perform — on-behalf-of (bulk)', () => {
       });
       const res = await app.inject({
         method: 'POST',
-        url: '/perform',
+        url: '/perform/bulk',
         payload: [{ ...VALID_BODY, acting_as_user_id: 'usr_voice_owned' }],
       });
       expect(res.statusCode).toBe(201);
@@ -552,7 +552,7 @@ describe('POST /api/v1/action/perform — on-behalf-of (bulk)', () => {
       });
       const res = await app.inject({
         method: 'POST',
-        url: '/perform',
+        url: '/perform/bulk',
         payload: [{ ...VALID_BODY, acting_as_user_id: 'usr_self_reg' }],
       });
       expect(res.statusCode).toBe(201);
@@ -573,7 +573,7 @@ describe('POST /api/v1/action/perform — on-behalf-of (bulk)', () => {
       });
       const res = await app.inject({
         method: 'POST',
-        url: '/perform',
+        url: '/perform/bulk',
         payload: [{ ...VALID_BODY, acting_as_user_id: 'usr_missing' }],
       });
       expect(res.statusCode).toBe(422);
@@ -587,7 +587,7 @@ describe('POST /api/v1/action/perform — on-behalf-of (bulk)', () => {
       const app = buildApp(undefined, { id: 'usr_agg_owned' });
       const res = await app.inject({
         method: 'POST',
-        url: '/perform',
+        url: '/perform/bulk',
         payload: [
           VALID_BODY,
           { ...VALID_BODY, target_item: { ...VALID_BODY.target_item, item_instance_url: 'http://not-allowed.local' } },
@@ -606,7 +606,7 @@ describe('POST /api/v1/action/perform — on-behalf-of (bulk)', () => {
       const app = buildApp(undefined, { id: 'usr_agg_owned' });
       const res = await app.inject({
         method: 'POST',
-        url: '/perform',
+        url: '/perform/bulk',
         payload: [],
       });
       expect(res.statusCode).toBe(400);
@@ -619,7 +619,7 @@ describe('POST /api/v1/action/perform — on-behalf-of (bulk)', () => {
       const items = Array.from({ length: 101 }, () => VALID_BODY);
       const res = await app.inject({
         method: 'POST',
-        url: '/perform',
+        url: '/perform/bulk',
         payload: items,
       });
       expect(res.statusCode).toBe(400);
@@ -634,7 +634,7 @@ describe('POST /api/v1/action/perform — on-behalf-of (bulk)', () => {
       const app = buildApp(undefined, { id: 'usr_agg_owned' });
       const res = await app.inject({
         method: 'POST',
-        url: '/perform',
+        url: '/perform/bulk',
         payload: [VALID_BODY],
       });
       expect(res.statusCode).toBe(422);
@@ -645,7 +645,7 @@ describe('POST /api/v1/action/perform — on-behalf-of (bulk)', () => {
       const app = buildApp(undefined, { id: 'usr_agg_owned' });
       const res = await app.inject({
         method: 'POST',
-        url: '/perform',
+        url: '/perform/bulk',
         payload: [{ action_type: 'connect' }],
       });
       expect(res.statusCode).toBe(422);
@@ -668,7 +668,7 @@ describe('POST /api/v1/action/perform — on-behalf-of (bulk)', () => {
       const app = buildApp(undefined, { id: 'usr_agg_owned' });
       const res = await app.inject({
         method: 'POST',
-        url: '/perform',
+        url: '/perform/bulk',
         payload: [VALID_BODY],
       });
       // Restore normal fetch mock
@@ -676,5 +676,59 @@ describe('POST /api/v1/action/perform — on-behalf-of (bulk)', () => {
       expect(res.statusCode).toBe(422);
       expect(res.json().results[0]).toMatchObject({ status: 'error', error: 'TARGET_INSTANCE_UNAVAILABLE' });
     });
+  });
+});
+
+describe('POST /api/v1/action/perform — single object', () => {
+  beforeEach(() => {
+    dbState.userRows = [];
+    fetchCalls.length = 0;
+    fetchLocalItemSnapshotMock.mockResolvedValue({
+      created_by: 'usr_agg_owned',
+      item_id: 'src_item_1',
+      item_locations: [],
+      private_state: {},
+      lifecycle_status: 'live',
+    });
+    fetchResponse.status = 201;
+    fetchResponse.body = {
+      action_id: '00000000-0000-0000-0000-000000000001',
+      action_type: 'apply',
+      action_status: 'created',
+      update_count: 0,
+      source_item_id: '11111111-1111-4111-8111-111111111111',
+      target_item_id: '22222222-2222-4222-8222-222222222222',
+    };
+  });
+
+  it('201 with a single-object body → { results:[one], summary:{ total:1 } }', async () => {
+    const app = buildApp(undefined, { id: 'usr_agg_owned' });
+    const res = await app.inject({
+      method: 'POST',
+      url: '/perform',
+      payload: VALID_BODY,
+    });
+    expect(res.statusCode).toBe(201);
+    const body = res.json();
+    expect(body.summary.total).toBe(1);
+    expect(body.results).toHaveLength(1);
+  });
+
+  it('400 FST_ERR_VALIDATION when the single object body is missing required fields', async () => {
+    // NOTE: /perform validates the body against PerformActionBodySchema at
+    // the Fastify route-schema level (unlike /perform/bulk, whose body is
+    // z.array(z.unknown()) and defers per-item shape validation into
+    // runPerformActions, which reports INVALID_PAYLOAD as a 422 inside the
+    // {results, summary} envelope). A route-schema failure short-circuits
+    // before the handler runs, so Fastify's default validation error
+    // applies here — a plain 400, not the bulk envelope's 422.
+    const app = buildApp(undefined, { id: 'usr_agg_owned' });
+    const res = await app.inject({
+      method: 'POST',
+      url: '/perform',
+      payload: { action_type: 'connect' },
+    });
+    expect(res.statusCode).toBe(400);
+    expect(res.json()).toMatchObject({ code: 'FST_ERR_VALIDATION' });
   });
 });
