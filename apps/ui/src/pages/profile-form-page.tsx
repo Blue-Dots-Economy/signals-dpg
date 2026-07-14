@@ -383,6 +383,9 @@ export function ProfileFormPage() {
         // Network-level prefix of the browse-items key (React Query matches
         // prefixes) — invalidates every domain's browse cache for this network.
         queryClient.invalidateQueries({ queryKey: ['browse-items', network.id] });
+        // The create payload may record profile_creation consent; refresh the
+        // consent-status cache so returning to home doesn't re-prompt the gate.
+        queryClient.invalidateQueries({ queryKey: queryKeys.profileConsent(network.id) });
         toast.success(t('profile.toast_created'), {
           description: t('profile.toast_created_desc'),
         });

@@ -1,4 +1,5 @@
 import { createContext, useContext, useState, useEffect, useCallback, type ReactNode } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import { getSession, signOut as apiSignOut, type AuthIdentifier, type User } from '@/lib/auth-api';
 import { setAuthToken, clearAuthToken } from '@/lib/auth-token';
 import { clearSchemaCache } from '@/engine';
@@ -18,6 +19,7 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const queryClient = useQueryClient();
 
   const fetchSession = useCallback(async () => {
     try {
@@ -62,8 +64,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       clearAuthToken();
       setUser(null);
       clearSchemaCache();
+      // Drop the signed-out user's cached data so their profiles/consent don't
+      // linger until gcTime (these queries are network-scoped, not user-scoped).
+      queryClient.removeQueries({ queryKey: ['my-items'] });
+      queryClient.removeQueries({ queryKey: ['profile-consent'] });
     }
-  }, []);
+  }, [queryClient]);
 
   return (
     <AuthContext.Provider
