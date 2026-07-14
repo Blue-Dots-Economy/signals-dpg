@@ -134,10 +134,15 @@ export function ProfileFormPage() {
   // Edit-mode loading screen: shown from mount through the networks-list and
   // network-config-resolve phases and while the item itself loads (old
   // `isLoading` was seeded to `isEdit` and cleared only once the item load
-  // settled). Goes false when the network resolve errors, so a resolve failure
-  // falls through to the `!network` "loading schemas" guard exactly as before.
+  // settled). Goes false when the networks-list fetch or the network resolve
+  // errors, so a failure falls through to the terminal "no networks" /
+  // "loading schemas" guards exactly as before.
   const editLoading =
-    isEdit && !resolvedNetworkError && !editItem.isSuccess && !editItem.isError;
+    isEdit &&
+    !networksError &&
+    !resolvedNetworkError &&
+    !editItem.isSuccess &&
+    !editItem.isError;
 
   // Seed the edit form from the fetched item; redirect on a genuine miss.
   React.useEffect(() => {
