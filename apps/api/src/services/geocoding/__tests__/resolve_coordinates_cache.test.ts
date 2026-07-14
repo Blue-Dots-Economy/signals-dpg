@@ -43,3 +43,31 @@ describe('resolveCoordinates caching (#196)', () => {
     vi.unstubAllGlobals();
   });
 });
+
+describe('resolveCoordinates negative caching (#196 fix)', () => {
+  it('does NOT cache a transient provider error (retries on the next lookup)', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: false, status: 500, json: async () => ({}) });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const first = await resolveCoordinates('Bengaluru');
+    const second = await resolveCoordinates('Bengaluru');
+
+    expect(first).toBeNull();
+    expect(second).toBeNull();
+    expect(fetchMock).toHaveBeenCalledTimes(2); // not cached → retried live
+    vi.unstubAllGlobals();
+  });
+
+  it('caches a definitive ZERO_RESULTS as a negative (no second provider call)', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ status: 'ZERO_RESULTS', results: [] }) });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const first = await resolveCoordinates('Nowhereville');
+    const second = await resolveCoordinates('Nowhereville');
+
+    expect(first).toBeNull();
+    expect(second).toBeNull();
+    expect(fetchMock).toHaveBeenCalledTimes(1); // definitive → cached negative
+    vi.unstubAllGlobals();
+  });
+});

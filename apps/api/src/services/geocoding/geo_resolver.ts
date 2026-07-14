@@ -40,27 +40,29 @@ async function resolveWithGoogle(query: string, apiKey: string): Promise<Coordin
   url.searchParams.set('address', query);
   url.searchParams.set('key', apiKey);
   const res = await fetch(url);
-  if (!res.ok) return null;
-  return parseGoogleGeocode(await res.json());
+  if (!res.ok) throw new Error(`google geocode http ${res.status}`);
+  const json = await res.json();
+  const status = (json as { status?: string })?.status;
+  if (status === 'ZERO_RESULTS') return null; // definitive not-found → cacheable
+  if (status !== 'OK') throw new Error(`google geocode status ${status ?? 'unknown'}`); // transient → do not cache
+  return parseGoogleGeocode(json);
 }
 
 async function resolveWithPhoton(query: string, baseUrl: string): Promise<Coordinates | null> {
   const url = `${baseUrl.replace(/\/$/, '')}/api?q=${encodeURIComponent(query)}&limit=1`;
   const res = await fetch(url);
-  if (!res.ok) return null;
+  if (!res.ok) throw new Error(`photon http ${res.status}`);
   return parsePhotonFeatures(await res.json());
 }
 
-/** Dispatch to the configured provider. Best-effort — returns null on error. */
+/** Dispatch to the configured provider. Returns null only on a definitive
+ *  not-found; THROWS on transient/HTTP/network errors so the cache layer does
+ *  not persist a negative for a place that merely failed to resolve this time. */
 async function resolveFromProvider(q: string): Promise<Coordinates | null> {
-  try {
-    if (geocodingConfig.google_api_key) {
-      return await resolveWithGoogle(q, geocodingConfig.google_api_key);
-    }
-    return await resolveWithPhoton(q, geocodingConfig.photon_url);
-  } catch {
-    return null;
+  if (geocodingConfig.google_api_key) {
+    return resolveWithGoogle(q, geocodingConfig.google_api_key);
   }
+  return resolveWithPhoton(q, geocodingConfig.photon_url);
 }
 
 /**

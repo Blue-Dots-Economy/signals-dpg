@@ -10,6 +10,14 @@ export function normalizeGeoKey(query: string): string {
   return query.trim().toLowerCase().replace(/\s+/g, ' ');
 }
 
+// PII note: a cache entry is an UNLINKED address→coordinate map — the same fact
+// any geocoder returns — with no user/item association and never served
+// publicly (internal Redis only). Caching the exact coordinate here is therefore
+// not user-PII; the PII-jitter control still applies downstream to the
+// coordinate STORED ON and SERVED FROM an item. Caching a post-jitter value is
+// infeasible: this sits at the shared exact-resolve / paid-API layer used by
+// both public (exact) and private fields.
+// See docs/superpowers/specs/2026-07-07-pii-location-jitter-design.md.
 /** Redis key for a resolved place: `geo:place:<normalized query>`. */
 export function buildGeoCacheKey(query: string): string {
   return `geo:place:${normalizeGeoKey(query)}`;
@@ -42,7 +50,14 @@ export async function getCachedCoordinates(
     return loader();
   }
 
-  const result = await loader();
+  let result: Coordinates | null;
+  try {
+    result = await loader();
+  } catch {
+    // Transient provider error (HTTP/network/rate-limit): best-effort null,
+    // do NOT cache — the next lookup should retry live.
+    return null;
+  }
 
   try {
     if (result === null) {
