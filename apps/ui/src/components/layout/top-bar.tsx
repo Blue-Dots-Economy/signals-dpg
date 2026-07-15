@@ -57,7 +57,7 @@ export function TopBar({
   const { isAuthenticated, isLoading } = useAuth();
 
   return (
-    <header className="sticky top-0 z-40 flex h-14 items-center gap-3 border-b bg-gradient-to-r from-background to-primary/5 px-4 sm:px-6">
+    <header className="sticky top-0 z-[60] flex h-14 items-center gap-3 border-b bg-gradient-to-r from-background to-primary/5 px-4 sm:px-6">
       <SidebarTrigger className="md:hidden" />
       <div className="relative flex-1 max-w-md">
         <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />

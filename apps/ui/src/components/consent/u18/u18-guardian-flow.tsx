@@ -56,6 +56,10 @@ export function U18GuardianFlow({
   return (
     <Dialog
       open
+      // Non-modal so the page isn't inert-locked — the ward can still reach the
+      // top-right menu to sign out if they can't complete the flow. Dismissal is
+      // still blocked (onInteractOutside / onEscapeKeyDown / onOpenChange guard).
+      modal={false}
       onOpenChange={(next) => {
         // Blocking: never dismiss via the Dialog's own open-change.
         if (!next) return;
