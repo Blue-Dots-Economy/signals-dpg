@@ -32,6 +32,11 @@ export const queryKeys = {
   // A single item located by id (edit form), scoped to its network.
   editItem: (networkId: string, itemId: string) =>
     ['edit-item', networkId, itemId] as const,
+  // A single item located by id (detail view, e.g. marker click-through),
+  // scoped to its network. Declared ahead of use (#203 P4 Task 3); consumed
+  // starting Task 4+.
+  itemDetail: (networkId: string, itemId: string) =>
+    ['item-detail', networkId, itemId] as const,
   consentConfig: (themeId: string, brand: string | null) =>
     ['consent-config', themeId, brand] as const,
   // The user's profile-creation-consent status for a network (set of consented

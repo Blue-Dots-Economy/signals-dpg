@@ -37,4 +37,8 @@ describe('queryKeys', () => {
   it('defines the profile-consent key', () => {
     expect(queryKeys.profileConsent('blue_dot')).toEqual(['profile-consent', 'blue_dot']);
   });
+
+  it('defines the item-detail key (#203 P4 Task 3)', () => {
+    expect(queryKeys.itemDetail('blue_dot', 'item-123')).toEqual(['item-detail', 'blue_dot', 'item-123']);
+  });
 });
