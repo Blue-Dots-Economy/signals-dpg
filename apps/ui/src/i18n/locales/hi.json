@@ -224,6 +224,7 @@
   "language.label": "भाषा",
   "map.loading": "मैप डेटा लोड हो रहा है...",
   "map.loading_detail": "विवरण लोड हो रहा है...",
+  "map.detail_unavailable": "विवरण उपलब्ध नहीं है।",
   "map.maximize": "मैप बड़ा करें",
   "map.minimize": "बड़े मैप से बाहर निकलें",
   "map.no_results": "वर्तमान फ़िल्टर से कोई आइटम मेल नहीं खाता।",

@@ -377,15 +377,25 @@ export function ProfileFormPage() {
           };
         }
 
-        await createItem(createPayload);
+        const created = await createItem(createPayload);
         // Reflect the write immediately in cached lists (§C5).
         queryClient.invalidateQueries({ queryKey: queryKeys.myItems(network.id) });
         // Network-level prefix of the browse-items key (React Query matches
         // prefixes) — invalidates every domain's browse cache for this network.
         queryClient.invalidateQueries({ queryKey: ['browse-items', network.id] });
-        // The create payload may record profile_creation consent; refresh the
-        // consent-status cache so returning to home doesn't re-prompt the gate.
-        queryClient.invalidateQueries({ queryKey: queryKeys.profileConsent(network.id) });
+        if (consentRequired && profileDoc) {
+          // This create recorded profile_creation consent. Optimistically add
+          // the new item to the profileConsent cache so returning to home sees
+          // it as consented IMMEDIATELY. A plain invalidate is not enough: the
+          // profileConsent query is stale-while-revalidate, so the home gate
+          // would read the old set (without this profile) during the refetch
+          // window and spuriously re-prompt. Mirrors the accept handler's
+          // setQueryData approach.
+          queryClient.setQueryData<Set<string>>(
+            queryKeys.profileConsent(network.id),
+            (prev) => new Set([...(prev ?? []), created.item_id]),
+          );
+        }
         toast.success(t('profile.toast_created'), {
           description: t('profile.toast_created_desc'),
         });

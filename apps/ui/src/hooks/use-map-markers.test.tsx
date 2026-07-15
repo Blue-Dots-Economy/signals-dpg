@@ -83,24 +83,33 @@ describe('useMapMarkers', () => {
     expect(fetchNetworkMarkers).not.toHaveBeenCalled();
   });
 
-  it('rounds the viewport into a bucket so a sub-threshold pan reuses the cache', async () => {
+  it('reuses the cache for a pan within the fetch radius but refetches for a large move (#203 §5.2 jank fix)', async () => {
     vi.mocked(fetchNetworkMarkers).mockResolvedValue({
       meta: { total: 0, limit: 5000, offset: 0, partial: false, unavailable_instances: [] },
       markers: [],
     });
 
+    // City-zoom viewport: ~10km radius → bucket cell ~5km. The fetch already
+    // covers a ~10km circle, so panning a couple of km stays inside it and must
+    // reuse the cache. (The previous fixed ~110m bucket refetched on every such
+    // pan, which janked the map — this is the regression guard.)
+    const cityVp = { lat: 19.076, lng: 72.8777, radiusMeters: 10000 };
     const { result, rerender } = renderHook(
-      ({ vp }: { vp: typeof viewport }) => useMapMarkers(network, [domains[0]], vp),
-      { wrapper, initialProps: { vp: viewport } },
+      ({ vp }: { vp: typeof cityVp }) => useMapMarkers(network, [domains[0]], vp),
+      { wrapper, initialProps: { vp: cityVp } },
     );
     await waitFor(() => expect(result.current.isLoading).toBe(false));
     expect(fetchNetworkMarkers).toHaveBeenCalledTimes(1);
 
-    // A tiny pan (well under the ~110m lat/lng bucket) must not trigger a
-    // second fetch — it should collapse onto the same rounded query key.
-    rerender({ vp: { lat: viewport.lat + 0.00003, lng: viewport.lng + 0.00003, radiusMeters: 3010 } });
+    // ~2.2km pan — would have busted the old fixed bucket, but stays within the
+    // radius-relative cell → NO refetch.
+    rerender({ vp: { ...cityVp, lat: cityVp.lat + 0.02 } });
     await waitFor(() => expect(result.current.isLoading).toBe(false));
     expect(fetchNetworkMarkers).toHaveBeenCalledTimes(1);
+
+    // ~11km move (bigger than the fetched radius) → new cell → refetch.
+    rerender({ vp: { ...cityVp, lat: cityVp.lat + 0.1 } });
+    await waitFor(() => expect(fetchNetworkMarkers).toHaveBeenCalledTimes(2));
   });
 
   it('countOnly requests limit:1 per domain and still surfaces the real meta.total (#203 §7)', async () => {

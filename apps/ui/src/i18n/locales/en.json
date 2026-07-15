@@ -228,6 +228,7 @@
   "language.label": "Language",
   "map.loading": "Loading map data...",
   "map.loading_detail": "Loading details...",
+  "map.detail_unavailable": "Details unavailable.",
   "map.maximize": "Maximize map",
   "map.minimize": "Exit maximized map",
   "map.no_results": "No items match the current filters.",

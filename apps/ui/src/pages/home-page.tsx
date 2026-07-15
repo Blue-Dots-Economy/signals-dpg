@@ -267,14 +267,21 @@ function MarkerDetailPopup({
   const { t } = useTranslation();
   // Marker ids are `${item_id}#${locationIndex}` — strip the suffix to look up the item.
   const baseItemId = marker.id.includes('#') ? marker.id.split('#')[0] : marker.id;
+  // Fetch from the clicked marker's OWN id + domain (always present on the map
+  // marker) — do NOT gate on finding `sourceMarker` in the live markers array,
+  // which churns as the viewport refetches and would otherwise leave the popup
+  // stuck on "Loading…" with no request ever firing. `sourceMarker` (when
+  // present) only supplies the optional owning-instance URL for a routed fetch;
+  // its absence just means the network fetch discovers the item by id.
+  const itemDomain = marker.domain ?? sourceMarker?.item_domain;
 
   const { item, isLoading } = useItemDetail(
     networkId,
-    sourceMarker
+    itemDomain
       ? {
           item_id: baseItemId,
-          item_domain: sourceMarker.item_domain,
-          item_instance_url: sourceMarker.item_instance_url,
+          item_domain: itemDomain,
+          item_instance_url: sourceMarker?.item_instance_url,
         }
       : null,
   );
@@ -283,9 +290,14 @@ function MarkerDetailPopup({
     if (item) onItemResolved?.(item);
   }, [item, onItemResolved]);
 
-  if (!sourceMarker || isLoading || !item) {
+  if (isLoading) {
     return (
       <div className="p-3 text-sm text-muted-foreground">{t('map.loading_detail')}</div>
+    );
+  }
+  if (!item) {
+    return (
+      <div className="p-3 text-sm text-muted-foreground">{t('map.detail_unavailable')}</div>
     );
   }
 
