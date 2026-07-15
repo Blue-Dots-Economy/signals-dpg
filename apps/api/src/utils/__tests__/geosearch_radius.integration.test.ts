@@ -142,5 +142,27 @@ describeIf(
       const got = res.items.map((i) => i.item_id);
       expect(got).toEqual([ids.atCenter]);
     });
+
+    it('§4.1 orders nearest-first when lat/lng present (no radius = order-only), no-location last', async () => {
+      const res = await fetchLocalItems({
+        item_network: NET,
+        item_domain: DOMAIN,
+        item_type: TYPE,
+        item_latitude: LAT,
+        item_longitude: LNG,
+        limit: 100,
+        offset: 0,
+      });
+      const order = res.items.map((i) => i.item_id);
+      // nearest-first among located items
+      expect(order.indexOf(ids.atCenter)).toBeLessThan(order.indexOf(ids.near));
+      expect(order.indexOf(ids.near)).toBeLessThan(order.indexOf(ids.far));
+      // multiOneIn (nearest loc ~334 m) sorts ahead of near (~556 m)
+      expect(order.indexOf(ids.multiOneIn)).toBeLessThan(order.indexOf(ids.near));
+      // no-location item sorts LAST
+      expect(order[order.length - 1]).toBe(ids.noLocations);
+      // order-only: nothing filtered out (all 6 present)
+      expect(res.items.length).toBe(6);
+    });
   },
 );

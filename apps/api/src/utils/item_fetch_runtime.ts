@@ -120,11 +120,26 @@ export async function countLocalItems(
 export async function fetchLocalItems(filters: ItemFetchFilters) {
   const whereClause = buildWhereClause(filters);
   const total = await countLocalItems(filters);
+  const orderByClause =
+    filters.item_latitude !== undefined && filters.item_longitude !== undefined
+      ? sql`
+          (
+            SELECT MIN(
+              earth_distance(
+                ll_to_earth(${filters.item_latitude}, ${filters.item_longitude}),
+                ll_to_earth((loc->>'lat')::float8, (loc->>'lng')::float8)
+              )
+            )
+            FROM jsonb_array_elements(${items.item_locations}) loc
+          ) ASC NULLS LAST,
+          ${items.created_at} DESC
+        `
+      : sql`${items.created_at} DESC`;
   const result = await db
     .select(itemResponseColumns)
     .from(items)
     .where(whereClause)
-    .orderBy(sql`${items.created_at} DESC`)
+    .orderBy(orderByClause)
     .limit(filters.limit)
     .offset(filters.offset);
 
