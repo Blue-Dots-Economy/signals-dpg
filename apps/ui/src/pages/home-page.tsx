@@ -704,6 +704,16 @@ export function HomePage() {
   );
   // --- end Task 5 -------------------------------------------------------------
 
+  // Task 6 (#203 §6): "All" tab total for the X-of-Y indicator is the sum of
+  // each visible domain's server-reported total (no single server call spans
+  // domains, so there's no one `meta.total` to read). P3 surfaces meta.total
+  // only — the federation-degradation banner (meta.partial/unavailable_instances)
+  // lands in P5.
+  const allDomainsTotalCount = React.useMemo(
+    () => Object.values(allDomainPages).reduce((sum, state) => sum + state.total, 0),
+    [allDomainPages],
+  );
+
   // Active schema: from the selected browsing domain, or first visible domain
   const activeSchema = React.useMemo(() => {
     if (!network) return undefined;
@@ -1378,6 +1388,14 @@ export function HomePage() {
                 return (
                   <>
                     {pagedFetchers}
+                    {allFlatItems.length < allDomainsTotalCount && (
+                      <p className="mb-2 text-xs text-muted-foreground">
+                        {t('home.showing_x_of_y', {
+                          shown: allFlatItems.length,
+                          total: allDomainsTotalCount,
+                        })}
+                      </p>
+                    )}
                     <div ref={allCardsGridRef} className="grid grid-cols-1 items-start gap-4 sm:grid-cols-2 lg:grid-cols-3">
                       {allFlatItems.map(({ item, schema, domainActions, domainDescription, domainLabel, cardConfig }) => {
                         const fullItem = Object.values(allDomainItemsFiltered)
@@ -1430,6 +1448,14 @@ export function HomePage() {
               // Single domain tab: paged infinite scroll (§5.1). Server already
               // orders nearest-first when coords are known, so no client sort here.
               <>
+                {singleDomainList.items.length < singleDomainList.total && (
+                  <p className="mb-2 text-xs text-muted-foreground">
+                    {t('home.showing_x_of_y', {
+                      shown: singleDomainList.items.length,
+                      total: singleDomainList.total,
+                    })}
+                  </p>
+                )}
                 <CardGrid
                   schema={activeSchema!}
                   schemaName={selectedDomain}

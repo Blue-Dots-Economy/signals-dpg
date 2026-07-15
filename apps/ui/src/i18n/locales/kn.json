@@ -199,6 +199,7 @@
   "home.no_domain_listings": "ಈ ನೆಟ್‌ವರ್ಕ್‌ನಲ್ಲಿ {{domain}} ಲಿಸ್ಟಿಂಗ್‌ಗಳು ಕಂಡುಬಂದಿಲ್ಲ.",
   "home.no_listings_yet": "ಈ ನೆಟ್‌ವರ್ಕ್‌ನಲ್ಲಿ ಇನ್ನೂ ಯಾವ ಲಿಸ್ಟಿಂಗ್‌ಗಳೂ ಇಲ್ಲ.",
   "home.no_search_results": "\"{{search}}\" ಗಾಗಿ ಯಾವ ಫಲಿತಾಂಶಗಳೂ ಇಲ್ಲ",
+  "home.showing_x_of_y": "{{total}} ರಲ್ಲಿ {{shown}} ತೋರಿಸಲಾಗುತ್ತಿದೆ",
   "home.nothing_here_heading": "ಇನ್ನೂ ಏನೂ ಇಲ್ಲ",
   "home.toast_action_sent": "{{action}} ವಿನಂತಿ ಕಳುಹಿಸಲಾಗಿದೆ!",
   "home.toast_action_sent_desc": "ಇನ್ನೊಂದು ಪಕ್ಷಕ್ಕೆ ಅಧಿಸೂಚನೆ ಕಳುಹಿಸಲಾಗುತ್ತದೆ ಮತ್ತು ಅವರು ನಿಮ್ಮ ವಿನಂತಿಯನ್ನು ಸ್ವೀಕರಿಸಬಹುದು ಅಥವಾ ಪ್ರತಿಕ್ರಿಯಿಸಬಹುದು.",

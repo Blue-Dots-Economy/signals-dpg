@@ -199,6 +199,7 @@
   "home.no_domain_listings": "इस नेटवर्क में {{domain}} की कोई लिस्टिंग नहीं मिली।",
   "home.no_listings_yet": "इस नेटवर्क में अभी कोई लिस्टिंग नहीं है।",
   "home.no_search_results": "\"{{search}}\" के लिए कोई परिणाम नहीं",
+  "home.showing_x_of_y": "{{total}} में से {{shown}} दिखाए जा रहे हैं",
   "home.nothing_here_heading": "अभी कुछ नहीं",
   "home.toast_action_sent": "{{action}} अनुरोध भेजा गया!",
   "home.toast_action_sent_desc": "दूसरे पक्ष को सूचित किया जाएगा और वे आपके अनुरोध को स्वीकार या उत्तर दे सकते हैं।",

@@ -203,6 +203,7 @@
   "home.no_domain_listings": "No {{domain}} listings found in this network.",
   "home.no_listings_yet": "No listings in this network yet.",
   "home.no_search_results": "No results for \"{{search}}\"",
+  "home.showing_x_of_y": "Showing {{shown}} of {{total}}",
   "home.nothing_here_heading": "Nothing here yet",
   "home.toast_action_sent": "{{action}} request sent!",
   "home.toast_action_sent_desc": "The other party will be notified and can accept or respond to your request.",
