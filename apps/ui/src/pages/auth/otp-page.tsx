@@ -10,14 +10,22 @@ import { useAuth } from '@/contexts/auth-context';
 import { getServedScope } from '@/lib/served-binding';
 import { evaluateDomainGate, resolveHeldDomains } from '@/lib/domain-gate';
 import { toast } from 'sonner';
-import { acceptConsent } from '@/lib/consent-api';
+import { acceptConsent, submitU18Dob } from '@/lib/consent-api';
 import type { ConsentAcceptBody } from '@dpg/schemas';
+import { useNetworkTheme } from '@/theme/theme-provider';
+import { fetchNetworkConfig } from '@/lib/network-api';
+import { isGuardianConsentRequiredDomain } from '@/lib/guardian-consent';
+import { U18GuardianFlow } from '@/components/consent/u18/u18-guardian-flow';
+import { setStoredSignupDomain, type SignupExtras } from '@/lib/signup-domain';
 
 interface AuthState extends AuthIdentifier {
   userExists: boolean;
   name?: string;
   redirectTo?: string;
   pendingConsent?: ConsentAcceptBody | null;
+  /** Only ever set for a brand-new signup (see login-page.tsx). Absent/null
+   * for a returning user's login — that path is untouched by this feature. */
+  signupExtras?: SignupExtras | null;
 }
 
 function getAuthIdentifier(state: AuthState): AuthIdentifier {
@@ -29,9 +37,14 @@ export function OtpPage() {
   const location = useLocation();
   const { verifyOtp, signOut } = useAuth();
   const { t } = useTranslation();
+  const { themeId, brand } = useNetworkTheme();
   const [isLoading, setIsLoading] = useState(false);
   const [countdown, setCountdown] = useState(60);
   const [inlineError, setInlineError] = useState<{ title: string; description: string } | null>(null);
+  // Set only when a brand-new minor's chosen domain requires the guardian
+  // consent flow (server-authoritative isMinor via submitU18Dob) — blocks
+  // navigation to home until the guardian flow completes.
+  const [guardianGateDomain, setGuardianGateDomain] = useState<string | null>(null);
 
   const state = location.state as AuthState | null;
   const identifierLabel = state?.email ?? state?.phoneNumber;
@@ -50,6 +63,18 @@ export function OtpPage() {
     }, 1000);
     return () => clearInterval(interval);
   }, [countdown, identifierLabel, navigate]);
+
+  // Final step once verification (and, for a gated minor, the guardian flow)
+  // has settled: toast + land on home (or the original redirect target).
+  const finishSignIn = () => {
+    if (!state) return;
+    toast.success(state.userExists ? t('auth.toast_welcome_back') : t('auth.toast_account_created'), {
+      description: state.userExists
+        ? t('auth.toast_welcome_back_desc')
+        : t('auth.toast_account_created_desc'),
+    });
+    navigate(state.redirectTo ?? '/', { replace: true });
+  };
 
   const handleOtpComplete = async (otp: string) => {
     if (!state || !identifierLabel) return;
@@ -82,12 +107,34 @@ export function OtpPage() {
         }
       }
 
-      toast.success(state.userExists ? t('auth.toast_welcome_back') : t('auth.toast_account_created'), {
-        description: state.userExists
-          ? t('auth.toast_welcome_back_desc')
-          : t('auth.toast_account_created_desc'),
-      });
-      navigate(state.redirectTo ?? '/', { replace: true });
+      // Signup-time DOB (U18 Phase 6 at signup): only for a brand-new
+      // account that captured domain + DOB on the signup form — never for a
+      // returning user's login. Persist DOB now that the session is
+      // authenticated (submitU18Dob requires it), then, if the server says
+      // the ward is a minor AND the chosen domain requires guardian consent,
+      // gate on the existing guardian flow before landing on home.
+      if (!state.userExists && state.signupExtras) {
+        const { domain, birthMonth, birthYear } = state.signupExtras;
+        // Hand the chosen domain off to profile-form-page (one-shot; it
+        // clears this once read) so profile creation doesn't ask again.
+        setStoredSignupDomain(themeId, domain);
+        try {
+          const { isMinor } = await submitU18Dob({ network: themeId, birthMonth, birthYear });
+          if (isMinor) {
+            const network = await fetchNetworkConfig(themeId).catch(() => null);
+            if (network && isGuardianConsentRequiredDomain(network, domain)) {
+              setGuardianGateDomain(domain);
+              return; // Block navigation — U18GuardianFlow renders below.
+            }
+          }
+        } catch {
+          // Best-effort, same as the consent-accept write above — the user
+          // is authenticated either way; don't block signup on this.
+          toast.error(t('auth.toast_consent_persist_error', 'Could not save your consent. You may be asked again next time.'));
+        }
+      }
+
+      finishSignIn();
     } catch {
       setInlineError({
         title: t('auth.otp_incorrect_title'),
@@ -121,6 +168,21 @@ export function OtpPage() {
   if (!identifierLabel) return null;
 
   return (
+    <>
+    {guardianGateDomain && (
+      <U18GuardianFlow
+        network={themeId}
+        brand={brand === 'standard' ? null : brand}
+        // DOB is already known (submitU18Dob already returned isMinor: true
+        // above) — skip straight to the guardian-details step.
+        initialStep="guardian"
+        onComplete={finishSignIn}
+        // Dead branch in this call path (we only render this component once
+        // isMinor is already confirmed true), kept for prop-type parity with
+        // the first-login call site — falls back to the normal landing.
+        onNotMinor={finishSignIn}
+      />
+    )}
     <AuthShell>
       {/* Back */}
       <button
@@ -178,5 +240,6 @@ export function OtpPage() {
         )}
       </div>
     </AuthShell>
+    </>
   );
 }

@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { useNavigate, useSearchParams, useLocation } from 'react-router-dom';
 import { Loader2, ArrowLeft } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
@@ -24,6 +24,11 @@ import { ConsentModal } from '@/components/consent/consent-modal';
 import { useNetworkTheme } from '@/theme/theme-provider';
 import type { ConsentAcceptBody, ConsentConfigDocument } from '@dpg/schemas';
 import { toast } from 'sonner';
+import { fetchNetworkConfig } from '@/lib/network-api';
+import type { DotNetworkDomain } from '@/engine/types';
+import { getServedScope } from '@/lib/served-binding';
+import { MONTHS, buildYearOptions } from '@/lib/dob-options';
+import type { SignupExtras } from '@/lib/signup-domain';
 
 type AuthMode = 'phone' | 'email';
 
@@ -32,6 +37,10 @@ type PendingConsent = ConsentAcceptBody;
 interface ConsentGateState {
   config: ConsentConfigDocument;
   pendingConsent: PendingConsent;
+}
+
+function domainLabel(domain: DotNetworkDomain): string {
+  return domain.id.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
 }
 
 export function LoginPage() {
@@ -58,17 +67,24 @@ export function LoginPage() {
   const [phoneNumber, setPhoneNumber] = useState('');
   const [email, setEmail] = useState('');
   const [name, setName] = useState('');
+  const [domain, setDomain] = useState('');
+  const [birthMonth, setBirthMonth] = useState('');
+  const [birthYear, setBirthYear] = useState('');
   const [userExists, setUserExists] = useState<boolean | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [consentGate, setConsentGate] = useState<ConsentGateState | null>(null);
   const [authCfg, setAuthCfg] = useState<AuthConfigResponse | null>(null);
   const [signupBlocked, setSignupBlocked] = useState(false);
+  const [networkDomains, setNetworkDomains] = useState<DotNetworkDomain[]>([]);
   // Capture the checked identifier at the time of submission so the consent
   // accept and OTP request use the same normalized values.
   const [pendingIdentifier, setPendingIdentifier] = useState<AuthIdentifier | null>(null);
   const [pendingUserExists, setPendingUserExists] = useState<boolean>(false);
   const [pendingName, setPendingName] = useState<string>('');
+  const [pendingSignupExtras, setPendingSignupExtras] = useState<SignupExtras | null>(null);
   const redirectTo = searchParams.get('redirect') ?? '/';
+  const years = useMemo(() => buildYearOptions(), []);
+  const servedScope = useMemo(() => getServedScope(), []);
 
   useEffect(() => {
     fetchAuthConfig()
@@ -76,6 +92,23 @@ export function LoginPage() {
       // Fail-safe: assume both channels + gated so the API stays authoritative.
       .catch(() => setAuthCfg({ selfSignupAllowed: false, loginChannels: ['phone', 'email'] }));
   }, []);
+
+  // Domain options for the signup form's domain select. Fetched from the
+  // served network's own schema (network.domains) — not user input — so the
+  // domain a signup submits is always one the network actually defines.
+  useEffect(() => {
+    fetchNetworkConfig(themeId)
+      .then((cfg) => setNetworkDomains(cfg.domains ?? []))
+      .catch(() => setNetworkDomains([]));
+  }, [themeId]);
+
+  // Restrict to the served set when this deployment is bound to a subset of
+  // domains (single- or multi-domain portal) — mirrors profile-form-page's
+  // own domain-picker scoping so a signup can't pick a domain this portal
+  // doesn't serve.
+  const domainOptions = servedScope
+    ? networkDomains.filter((d) => servedScope.domains.includes(d.id))
+    : networkDomains;
 
   const channels: LoginChannel[] = authCfg?.loginChannels ?? ['phone', 'email'];
   const onlyEmail = channels.length === 1 && channels[0] === 'email';
@@ -103,6 +136,7 @@ export function LoginPage() {
     resolvedIdentifier: AuthIdentifier,
     resolvedUserExists: boolean,
     resolvedName: string,
+    resolvedSignupExtras: SignupExtras | null,
     pendingConsent?: PendingConsent,
   ) => {
     await requestOtp(resolvedIdentifier);
@@ -113,6 +147,9 @@ export function LoginPage() {
         name: resolvedName,
         redirectTo,
         pendingConsent: pendingConsent ?? null,
+        // Only ever set for a brand-new signup — otp-page uses its presence
+        // (not userExists alone) to decide whether to run submitU18Dob.
+        signupExtras: resolvedSignupExtras,
       },
     });
   };
@@ -125,9 +162,10 @@ export function LoginPage() {
     const ident = pendingIdentifier;
     const userEx = pendingUserExists;
     const uname = pendingName;
+    const extras = pendingSignupExtras;
     setConsentGate(null);
     try {
-      await proceedToOtp(ident, userEx, uname, gate.pendingConsent);
+      await proceedToOtp(ident, userEx, uname, extras, gate.pendingConsent);
     } catch {
       toast.error(t('auth.toast_send_code_error'), {
         description: t('auth.toast_send_code_error_desc'),
@@ -170,7 +208,11 @@ export function LoginPage() {
         return;
       }
 
-      if (!exists && !name.trim()) {
+      // Domain confirmed here (Domain select is populated from the served
+      // network's own schema — see the networkDomains effect above) + DOB
+      // (month/year only) are required alongside the name for every new
+      // signup, never for a returning user.
+      if (!exists && (!name.trim() || !domain || !birthMonth || !birthYear)) {
         setIsLoading(false);
         toast.info(t('auth.toast_one_more_step'), {
           description: t('auth.toast_one_more_step_desc'),
@@ -179,6 +221,9 @@ export function LoginPage() {
       }
 
       const resolvedName = exists ? '' : name;
+      const resolvedSignupExtras: SignupExtras | null = exists
+        ? null
+        : { domain, birthMonth: Number(birthMonth), birthYear: Number(birthYear) };
 
       // Evaluate consent before sending the OTP. This is best-effort (public
       // endpoint, client-side); on any failure we proceed without gating — the
@@ -209,6 +254,7 @@ export function LoginPage() {
             setPendingIdentifier(identifier);
             setPendingUserExists(exists);
             setPendingName(resolvedName);
+            setPendingSignupExtras(resolvedSignupExtras);
             setConsentGate({
               config: mergedConfig,
               pendingConsent: {
@@ -231,7 +277,7 @@ export function LoginPage() {
         // The user will be re-prompted post-verify on their next login.
       }
 
-      await proceedToOtp(identifier, exists, resolvedName);
+      await proceedToOtp(identifier, exists, resolvedName, resolvedSignupExtras);
     } catch {
       toast.error(t('auth.toast_send_code_error'), {
         description: t('auth.toast_send_code_error_desc'),
@@ -357,6 +403,80 @@ export function LoginPage() {
                   : t('auth.hint_verify_phone')}
               </p>
             </div>
+          )}
+
+          {/* Domain + DOB — captured once, at signup, alongside the name.
+              Domain is confirmed here; DOB (month/year only) is persisted
+              post-OTP-verify via submitU18Dob (see otp-page.tsx). */}
+          {userExists === false && !signupBlocked && (
+            <>
+              <div className="space-y-1.5">
+                <Label htmlFor="signup-domain" className="text-sm font-medium">
+                  {t('auth.label_domain', 'I am a')}
+                </Label>
+                <select
+                  id="signup-domain"
+                  value={domain}
+                  onChange={(e) => setDomain(e.target.value)}
+                  disabled={isLoading}
+                  required
+                  className="h-11 w-full rounded-md border border-input bg-transparent px-3 text-sm shadow-xs outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50"
+                >
+                  <option value="" disabled>
+                    {t('auth.domain_placeholder', 'Select one')}
+                  </option>
+                  {domainOptions.map((d) => (
+                    <option key={d.id} value={d.id}>
+                      {domainLabel(d)}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="space-y-1.5">
+                <Label className="text-sm font-medium">
+                  {t('auth.label_dob', 'Date of birth (month & year)')}
+                </Label>
+                <div className="grid grid-cols-2 gap-3">
+                  <select
+                    id="signup-dob-month"
+                    aria-label={t('auth.dob_label_month', 'Birth month')}
+                    value={birthMonth}
+                    onChange={(e) => setBirthMonth(e.target.value)}
+                    disabled={isLoading}
+                    required
+                    className="h-11 w-full rounded-md border border-input bg-transparent px-3 text-sm shadow-xs outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50"
+                  >
+                    <option value="" disabled>
+                      {t('auth.dob_month_placeholder', 'Month')}
+                    </option>
+                    {MONTHS.map((label, idx) => (
+                      <option key={label} value={idx + 1}>
+                        {label}
+                      </option>
+                    ))}
+                  </select>
+                  <select
+                    id="signup-dob-year"
+                    aria-label={t('auth.dob_label_year', 'Birth year')}
+                    value={birthYear}
+                    onChange={(e) => setBirthYear(e.target.value)}
+                    disabled={isLoading}
+                    required
+                    className="h-11 w-full rounded-md border border-input bg-transparent px-3 text-sm shadow-xs outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50"
+                  >
+                    <option value="" disabled>
+                      {t('auth.dob_year_placeholder', 'Year')}
+                    </option>
+                    {years.map((y) => (
+                      <option key={y} value={y}>
+                        {y}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+            </>
           )}
 
           {signupBlocked && (

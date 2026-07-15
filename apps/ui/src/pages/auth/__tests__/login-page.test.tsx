@@ -7,6 +7,13 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 const checkUser = vi.fn();
 const requestOtp = vi.fn();
 const fetchAuthConfig = vi.fn();
+const fetchNetworkConfig = vi.fn();
+const navigateMock = vi.fn();
+
+const NETWORK_DOMAINS = [
+  { id: 'seeker', description: 'Job seeker' },
+  { id: 'provider', description: 'Job provider' },
+];
 
 vi.mock('@/lib/auth-api', async (orig) => ({
   ...(await orig<typeof import('@/lib/auth-api')>()),
@@ -23,6 +30,13 @@ vi.mock('@/theme/theme-provider', async () => {
 vi.mock('@/lib/consent-api', () => ({
   fetchConsentConfigs: vi.fn().mockResolvedValue([]),
   getConsentStatusByIdentifier: vi.fn().mockResolvedValue({ statuses: { terms: [], privacy: [] } }),
+}));
+vi.mock('@/lib/network-api', () => ({
+  fetchNetworkConfig: (...a: unknown[]) => fetchNetworkConfig(...a),
+}));
+vi.mock('react-router-dom', async (orig) => ({
+  ...(await orig<typeof import('react-router-dom')>()),
+  useNavigate: () => navigateMock,
 }));
 
 async function renderPage() {
@@ -43,6 +57,7 @@ describe('LoginPage', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     requestOtp.mockResolvedValue({ ok: true, user: false });
+    fetchNetworkConfig.mockResolvedValue({ id: 'blue_dot', domains: NETWORK_DOMAINS });
   });
 
   it('renders only the phone input when loginChannels is ["phone"]', async () => {
@@ -99,5 +114,93 @@ describe('LoginPage', () => {
     await waitFor(() => expect(checkUser).toHaveBeenCalledTimes(2));
     await waitFor(() => expect(requestOtp).toHaveBeenCalled());
     expect(screen.queryByText(/contact your administrator/i)).toBeNull();
+  });
+
+  describe('signup domain + DOB capture', () => {
+    it('shows domain + DOB fields for a brand-new signup', async () => {
+      fetchAuthConfig.mockResolvedValue({ selfSignupAllowed: true, loginChannels: ['phone', 'email'] });
+      checkUser.mockResolvedValue({ userExists: false });
+      await renderPage();
+      await waitFor(() => expect(fetchAuthConfig).toHaveBeenCalled());
+
+      // Not shown before any identifier is checked.
+      expect(screen.queryByLabelText(/i am a/i)).toBeNull();
+      expect(screen.queryByLabelText(/birth month/i)).toBeNull();
+
+      await userEvent.type(screen.getByLabelText(/mobile/i), '9876543210');
+      await userEvent.click(screen.getByRole('button', { name: /continue|send/i }));
+
+      await waitFor(() => expect(checkUser).toHaveBeenCalled());
+      expect(await screen.findByLabelText(/i am a/i)).toBeInTheDocument();
+      expect(screen.getByLabelText(/birth month/i)).toBeInTheDocument();
+      expect(screen.getByLabelText(/birth year/i)).toBeInTheDocument();
+    });
+
+    it('never shows domain + DOB fields when logging in as a returning user', async () => {
+      fetchAuthConfig.mockResolvedValue({ selfSignupAllowed: true, loginChannels: ['phone', 'email'] });
+      checkUser.mockResolvedValue({ userExists: true });
+      await renderPage();
+      await waitFor(() => expect(fetchAuthConfig).toHaveBeenCalled());
+
+      await userEvent.type(screen.getByLabelText(/mobile/i), '9123456789');
+      await userEvent.click(screen.getByRole('button', { name: /continue|send/i }));
+
+      await waitFor(() => expect(requestOtp).toHaveBeenCalled());
+      expect(screen.queryByLabelText(/i am a/i)).toBeNull();
+      expect(screen.queryByLabelText(/birth month/i)).toBeNull();
+      expect(screen.queryByLabelText(/your name/i)).toBeNull();
+    });
+
+    it('blocks signup submission until domain and DOB are filled in, alongside the name', async () => {
+      fetchAuthConfig.mockResolvedValue({ selfSignupAllowed: true, loginChannels: ['phone', 'email'] });
+      checkUser.mockResolvedValue({ userExists: false });
+      await renderPage();
+      await waitFor(() => expect(fetchAuthConfig).toHaveBeenCalled());
+
+      await userEvent.type(screen.getByLabelText(/mobile/i), '9876543210');
+      await userEvent.click(screen.getByRole('button', { name: /continue|send/i }));
+      await waitFor(() => expect(checkUser).toHaveBeenCalledTimes(1));
+      await screen.findByLabelText(/i am a/i);
+
+      // Name only — domain + DOB (still-empty required selects) block even
+      // an in-browser submit attempt; requestOtp is never reached.
+      await userEvent.type(screen.getByLabelText(/your name/i), 'Asha');
+      await userEvent.click(screen.getByRole('button', { name: /continue|send/i }));
+      expect(requestOtp).not.toHaveBeenCalled();
+
+      // Fill everything — submission proceeds.
+      await userEvent.selectOptions(screen.getByLabelText(/i am a/i), 'seeker');
+      await userEvent.selectOptions(screen.getByLabelText(/birth month/i), 'May');
+      await userEvent.selectOptions(screen.getByLabelText(/birth year/i), '2010');
+      await userEvent.click(screen.getByRole('button', { name: /continue|send/i }));
+      await waitFor(() => expect(requestOtp).toHaveBeenCalled());
+    });
+
+    it('maps the selected DOB month/year onto the OTP-step navigation state as numbers', async () => {
+      fetchAuthConfig.mockResolvedValue({ selfSignupAllowed: true, loginChannels: ['phone', 'email'] });
+      checkUser.mockResolvedValue({ userExists: false });
+      await renderPage();
+      await waitFor(() => expect(fetchAuthConfig).toHaveBeenCalled());
+
+      await userEvent.type(screen.getByLabelText(/mobile/i), '9876543210');
+      await userEvent.click(screen.getByRole('button', { name: /continue|send/i }));
+      await waitFor(() => expect(checkUser).toHaveBeenCalledTimes(1));
+
+      await userEvent.type(screen.getByLabelText(/your name/i), 'Asha');
+      await userEvent.selectOptions(screen.getByLabelText(/i am a/i), 'provider');
+      await userEvent.selectOptions(screen.getByLabelText(/birth month/i), 'May');
+      await userEvent.selectOptions(screen.getByLabelText(/birth year/i), '2010');
+      await userEvent.click(screen.getByRole('button', { name: /continue|send/i }));
+
+      await waitFor(() => expect(requestOtp).toHaveBeenCalled());
+      await waitFor(() => expect(navigateMock).toHaveBeenCalledWith(
+        '/auth/otp',
+        expect.objectContaining({
+          state: expect.objectContaining({
+            signupExtras: { domain: 'provider', birthMonth: 5, birthYear: 2010 },
+          }),
+        }),
+      ));
+    });
   });
 });

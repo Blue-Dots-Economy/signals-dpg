@@ -22,6 +22,7 @@ import type { WalletImportResult } from '@/engine/wallet/types';
 import { useAuth } from '@/contexts/auth-context';
 import { mergeImportedDataIntoSchema } from '@/lib/import-mapping';
 import { getServedScope } from '@/lib/served-binding';
+import { getStoredSignupDomain, clearStoredSignupDomain } from '@/lib/signup-domain';
 
 import {
   createItem,
@@ -266,6 +267,25 @@ export function ProfileFormPage() {
     if (isEdit || selectedDomain || !lockedDomain) return;
     setSelectedDomain(lockedDomain);
   }, [isEdit, selectedDomain, lockedDomain]);
+
+  // Domain confirmed at Signals self-signup (see pages/auth/login-page.tsx +
+  // otp-page.tsx): a brand-new user who hasn't created any profile yet has no
+  // lockedDomain to auto-select from, so without this they'd be asked to pick
+  // a domain a second time. One-shot: cleared once consumed so it never
+  // leaks into a later, unrelated profile-creation flow.
+  React.useEffect(() => {
+    // Wait for the network's domain list to actually load before consuming —
+    // otherwise an empty `domains` on the first render (network still
+    // fetching) would fail the validity check below and clear the stored
+    // value before it ever got a chance to apply.
+    if (isEdit || selectedDomain || lockedDomain || !targetNetworkId || domains.length === 0) return;
+    const stored = getStoredSignupDomain(targetNetworkId);
+    if (!stored) return;
+    clearStoredSignupDomain(targetNetworkId);
+    if (domains.some((d) => d.id === stored)) {
+      setSelectedDomain(stored);
+    }
+  }, [isEdit, selectedDomain, lockedDomain, targetNetworkId, domains]);
 
   // Find the profile schema for the selected domain
   const profileSchema = React.useMemo<RJSFSchema | null>(() => {

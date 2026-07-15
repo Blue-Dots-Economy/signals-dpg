@@ -6,25 +6,12 @@ import { Loader2 } from 'lucide-react';
 import { Label } from '@/components/ui/label';
 import { Button } from '@/components/ui/button';
 import { submitU18Dob } from '@/lib/consent-api';
+import { MONTHS, buildYearOptions } from '@/lib/dob-options';
 
 export interface DobStepProps {
   network: string;
   /** Called once the DOB has been recorded, with whether the ward is a minor. */
   onResolved: (isMinor: boolean) => void;
-}
-
-const MONTHS = [
-  'January', 'February', 'March', 'April', 'May', 'June',
-  'July', 'August', 'September', 'October', 'November', 'December',
-];
-
-function buildYearOptions(now: Date = new Date()): number[] {
-  // A birth year anywhere from 100 years ago through this year — deliberately
-  // wide since we only ask for year+month (no day), never a future year.
-  const currentYear = now.getFullYear();
-  const years: number[] = [];
-  for (let y = currentYear; y >= currentYear - 100; y--) years.push(y);
-  return years;
 }
 
 export function DobStep({ network, onResolved }: DobStepProps) {

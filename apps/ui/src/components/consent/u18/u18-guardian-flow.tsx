@@ -21,6 +21,14 @@ export interface U18GuardianFlowProps {
   onComplete: () => void;
   /** DOB step resolved the ward as an adult — caller should fall back to the normal consent flow. */
   onNotMinor: () => void;
+  /**
+   * Step to start on. Defaults to `'dob'` (the original first-login/bulk-user
+   * gate on the home page, which doesn't yet know the ward's DOB). A caller
+   * that already resolved `isMinor === true` itself via `submitU18Dob` (e.g.
+   * the Signals self-signup flow, which collects DOB in its own form before
+   * OTP verification) can pass `'guardian'` to skip the redundant DOB step.
+   */
+  initialStep?: U18Step;
 }
 
 /**
@@ -28,9 +36,15 @@ export interface U18GuardianFlowProps {
  * DOB → guardian details (with same-contact warn-and-ack) → guardian OTP.
  * Blocking, like ProfileConsentModal — cannot be dismissed mid-flow.
  */
-export function U18GuardianFlow({ network, brand, onComplete, onNotMinor }: U18GuardianFlowProps) {
+export function U18GuardianFlow({
+  network,
+  brand,
+  onComplete,
+  onNotMinor,
+  initialStep = 'dob',
+}: U18GuardianFlowProps) {
   const { t } = useTranslation();
-  const [step, setStep] = React.useState<U18Step>('dob');
+  const [step, setStep] = React.useState<U18Step>(initialStep);
   const [guardianBody, setGuardianBody] = React.useState<SubmitGuardianBody | null>(null);
 
   const titles: Record<U18Step, string> = {
