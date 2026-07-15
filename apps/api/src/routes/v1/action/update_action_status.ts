@@ -27,6 +27,7 @@ import {
 } from '@/utils/action_event_runtime';
 import { runBulk, BulkItemFailure } from '@/utils/bulk_runner';
 import { dispatchActionNotifications } from '@/notifications/notify_actions';
+import { guardianActionGate, type GateResult } from '@/services/guardian_action_gate';
 
 const BulkUpdateActionStatusBodySchema = z.array(z.unknown());
 
@@ -50,6 +51,13 @@ export const update_action_status: FastifyPluginAsyncZod = async function (fasti
         207: BulkUpdateActionStatusResponseSchema,
         422: BulkUpdateActionStatusResponseSchema,
         400: BulkRequestErrorSchema,
+        // U18 guardian gate (Phase 5b): this endpoint is treated as single
+        // (not bulk) for challenge/response purposes — a blocked guardian
+        // gate short-circuits the whole call with a real HTTP status
+        // instead of the per-item 200/207/422 envelope above.
+        428: BulkRequestErrorSchema,
+        429: BulkRequestErrorSchema,
+        503: BulkRequestErrorSchema,
       },
     },
     handler: update_action_status_handler,
@@ -200,6 +208,89 @@ export const update_action_status_handler = async (
       // reveals_pii_on_status.
       const requiresReceiverConsent =
         !isCancellation && interaction.reveals_pii_on_status.includes(body.action_status);
+
+      // U18 guardian gate (Phase 5b). Scoped to exactly the accept / PII-
+      // reveal stage — the same `requiresReceiverConsent` condition the
+      // adult consent-acknowledgment check below applies to — so every
+      // other transition (reject, custom statuses, etc.) is byte-for-byte
+      // unchanged. The party who must clear this gate is the ACCEPTING
+      // party: every non-cancellation transition reaching this point has
+      // already required `callerId === existingAction.target_item_owner`
+      // above, so the accepting minor's own item is the *target* item and
+      // the other party's item is the *source* item (mirrored from the DB
+      // row, not re-derived from the request body). A minor *initiator* was
+      // already gated at perform (Task 2, commit bc87fd0) — this gates the
+      // minor *acceptor*. Adults and ungated domains resolve `not_required`
+      // and the rest of this handler runs exactly as it does today.
+      let guardianGate: GateResult = { status: 'not_required' };
+      if (requiresReceiverConsent) {
+        guardianGate = await guardianActionGate({
+          wardUserId: callerId,
+          network: existingAction.target_item_network,
+          sourceDomain: existingAction.target_item_domain,
+          actionType: existingAction.action_type,
+          sourceItemId: existingAction.target_item_id,
+          targetItemId: existingAction.source_item_id,
+          otp: body.guardian_otp,
+        });
+
+        // This is a single endpoint (not bulk): a blocked gate is answered
+        // with a real HTTP challenge/response status — bypassing the
+        // per-item BulkItemFailure / 200-207-422 envelope used everywhere
+        // else in this handler — because the caller needs true
+        // challenge/response semantics (428, then re-call) rather than a
+        // per-item error buried in a results array. The BulkItemFailure
+        // thrown right after is only to unwind out of this per-item
+        // callback; `reply.sent` (checked once runBulk resolves, below)
+        // ensures the aggregate response is never sent on top of it.
+        if (guardianGate.status === 'challenge_issued') {
+          reply.code(428).send({
+            error: 'GUARDIAN_OTP_REQUIRED',
+            message: 'Guardian OTP sent; resubmit with guardian_otp to confirm this action.',
+          });
+          throw new BulkItemFailure(
+            'GUARDIAN_OTP_REQUIRED',
+            'Guardian OTP sent; resubmit with guardian_otp to confirm this action.',
+          );
+        }
+        if (guardianGate.status === 'invalid_otp') {
+          reply.code(400).send({
+            error: 'GUARDIAN_OTP_INVALID',
+            message: 'Guardian OTP is invalid or expired.',
+          });
+          throw new BulkItemFailure('GUARDIAN_OTP_INVALID', 'Guardian OTP is invalid or expired.');
+        }
+        if (guardianGate.status === 'throttled') {
+          reply.code(429).send({
+            error: 'GUARDIAN_OTP_THROTTLED',
+            message: 'Too many guardian OTP attempts; try again shortly.',
+          });
+          throw new BulkItemFailure(
+            'GUARDIAN_OTP_THROTTLED',
+            'Too many guardian OTP attempts; try again shortly.',
+          );
+        }
+        if (guardianGate.status === 'rate_limited') {
+          reply.code(429).send({
+            error: 'GUARDIAN_OTP_RATE_LIMITED',
+            message: 'Too many guardian OTP requests; try again shortly.',
+          });
+          throw new BulkItemFailure(
+            'GUARDIAN_OTP_RATE_LIMITED',
+            'Too many guardian OTP requests; try again shortly.',
+          );
+        }
+        if (guardianGate.status === 'no_provider') {
+          reply.code(503).send({
+            error: 'OTP_PROVIDER_UNAVAILABLE',
+            message: 'No verified contact channel is available to send the guardian OTP.',
+          });
+          throw new BulkItemFailure(
+            'OTP_PROVIDER_UNAVAILABLE',
+            'No verified contact channel is available to send the guardian OTP.',
+          );
+        }
+      }
 
       if (requiresReceiverConsent && !body.consent?.acknowledged) {
         throw new BulkItemFailure(
@@ -353,6 +444,49 @@ export const update_action_status_handler = async (
             }
           }
 
+          // U18 guardian accept-consent (Phase 5b): only reached when the
+          // gate verified a fresh guardian OTP for this exact accept above.
+          // Mirrors the adult accept-consent write immediately above —
+          // same columns, same fail-closed behavior (a write/version
+          // failure rolls back the status update via ConsentWriteError) —
+          // with `source:'guardian'` and the u18 metadata tag. Action
+          // statements were not variant-split in Phase 2, so the version
+          // comes from the same (non-variant) accept resolver.
+          if (guardianGate.status === 'verified') {
+            const guardianVersion = await resolveConsentVersion({
+              network: row.target_item_network,
+              category: 'action',
+              actionType: row.action_type,
+              stage: 'accept',
+            });
+            if (guardianVersion === null) {
+              throw new ConsentWriteError(
+                `guardian accept consent version not configured for ${row.action_type}`,
+              );
+            }
+            try {
+              await tx.insert(consent_record).values({
+                level: 'item',
+                consentCategory: 'action',
+                actionType: row.action_type,
+                actionStage: 'accept',
+                userId: callerId,
+                itemId: row.target_item_id,
+                actionId: body.action_id,
+                network: row.target_item_network,
+                brand: body.consent?.brand ?? null,
+                documentVersion: guardianVersion,
+                source: 'guardian',
+                acceptedAt: new Date(),
+                metadata: { variant: 'u18' },
+              });
+            } catch (err) {
+              throw new ConsentWriteError(
+                err instanceof Error ? err.message : 'guardian consent write failed',
+              );
+            }
+          }
+
           return { kind: 'ok' as const, updatedAction: row };
         })
         .catch((err: unknown) => {
@@ -472,6 +606,12 @@ export const update_action_status_handler = async (
         request.log.error({ err, index }, 'bulk update-status unexpected error'),
     },
   );
+
+  // U18 guardian gate (Phase 5b): a blocked gate above already sent a real
+  // HTTP challenge/response status (428/400/429/503) directly on `reply`
+  // and threw a BulkItemFailure only to unwind out of the per-item
+  // callback. Never send the aggregate 200/207/422 envelope on top of that.
+  if (reply.sent) return;
 
   if (outcome.requestError) {
     return reply.code(400).send({

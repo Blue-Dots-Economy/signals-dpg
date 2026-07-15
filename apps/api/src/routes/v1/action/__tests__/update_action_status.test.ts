@@ -82,6 +82,17 @@ vi.mock('@/services/consent_version', () => ({
   resolveConsentVersion: vi.fn(async () => 1),
 }));
 
+// --- mock the U18 guardian gate: this suite is all adult/ungated traffic, so
+// it always resolves `not_required` (matching the real gate's behavior for
+// these fixtures). Mocked at this seam (not the deeper otp/redis primitives)
+// so this unit test doesn't need a real Redis client — the new import chain
+// (guardian_action_gate -> guardian_otp -> the real Redis client) otherwise
+// crashes at module load against this suite's minimal @/config mock (same
+// issue Task 2 hit wiring the gate into perform_action).
+vi.mock('@/services/guardian_action_gate', () => ({
+  guardianActionGate: vi.fn(async () => ({ status: 'not_required' })),
+}));
+
 vi.mock('@api/db/postgres/drizzle_config', () => {
   const dbMock: Record<string, unknown> = {
       // Discriminate by the shape of select's projection:
