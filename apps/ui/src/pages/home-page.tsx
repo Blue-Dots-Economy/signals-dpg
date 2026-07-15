@@ -713,6 +713,14 @@ export function HomePage() {
     () => Object.values(allDomainPages).reduce((sum, state) => sum + state.total, 0),
     [allDomainPages],
   );
+  // Raw loaded count (mirrors the single-domain path's raw `items.length`):
+  // sums the unfiltered per-domain page items, NOT `allFlatItems.length`
+  // (which is post search/enum-filter). The indicator must reflect pagination
+  // truncation only, not client-side filtering.
+  const allDomainsLoadedCount = React.useMemo(
+    () => Object.values(allDomainPages).reduce((sum, state) => sum + state.items.length, 0),
+    [allDomainPages],
+  );
 
   // Active schema: from the selected browsing domain, or first visible domain
   const activeSchema = React.useMemo(() => {
@@ -1388,10 +1396,10 @@ export function HomePage() {
                 return (
                   <>
                     {pagedFetchers}
-                    {allFlatItems.length < allDomainsTotalCount && (
+                    {allDomainsLoadedCount < allDomainsTotalCount && (
                       <p className="mb-2 text-xs text-muted-foreground">
                         {t('home.showing_x_of_y', {
-                          shown: allFlatItems.length,
+                          shown: allDomainsLoadedCount,
                           total: allDomainsTotalCount,
                         })}
                       </p>
