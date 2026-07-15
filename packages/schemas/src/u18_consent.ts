@@ -15,6 +15,8 @@ export const U18GuardianBodySchema = z.object({
   guardianContactType: z.enum(['phone', 'email']),
   // Ward's guardian-validity attestation (D12) — must be explicitly true.
   guardianDeclarationAccepted: z.literal(true),
+  // Explicit ack when guardianContact matches the ward's own email/phone (warn-and-confirm, not a hard reject).
+  sameContactAcknowledged: z.boolean().optional(),
 });
 export const U18GuardianResponseSchema = z.object({ otpSent: z.boolean() });
 

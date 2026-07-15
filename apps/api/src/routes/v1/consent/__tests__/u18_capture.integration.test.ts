@@ -7,7 +7,7 @@ vi.mock('@/utils/notificationClient', () => ({ getNotificationClient: () => ({ n
 import { db } from '@api/db/postgres/drizzle_config';
 import { minor_guardian, consent_record } from '@api/db/postgres/schema';
 import { redis } from '@api/db/secondary/redis';
-import { buildU18TestApp } from './u18_test_helpers';
+import { buildU18TestApp, seedU18TestUser } from './u18_test_helpers';
 
 let ctx: Awaited<ReturnType<typeof buildU18TestApp>>;
 
@@ -82,5 +82,57 @@ describe('U18 capture (integration)', () => {
       payload: { network: ctx.network, otp: '000000' },
     });
     expect(res.statusCode).toBe(400);
+  });
+});
+
+describe('U18 guardian same-contact warn-and-acknowledge (integration)', () => {
+  // Reuses ctx.app (already listening) with a freshly seeded ward user —
+  // a second buildU18TestApp() would race ctx.app for the same fixed port.
+  let sameUser: Awaited<ReturnType<typeof seedU18TestUser>>;
+
+  beforeAll(async () => {
+    sameUser = await seedU18TestUser();
+    const res = await ctx.app.inject({
+      method: 'POST', url: '/api/v1/consent/u18/dob',
+      headers: { 'x-api-key': sameUser.rawKey },
+      payload: { network: ctx.network, birthYear: 2012, birthMonth: 3 },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().isMinor).toBe(true);
+  });
+
+  afterAll(async () => {
+    await db.delete(consent_record).where(eq(consent_record.userId, sameUser.userId));
+    await db.delete(minor_guardian).where(eq(minor_guardian.userId, sameUser.userId));
+    await redis.del(`guardian_otp:code:${sameUser.userId}:guardian`);
+    await redis.del(`guardian_otp:rl:${sameUser.userId}:guardian`);
+    await redis.del(`guardian_otp:vrl:${sameUser.userId}:guardian`);
+    await sameUser.close();
+  });
+
+  it('rejects guardianContact matching the ward\'s own email with 409 SAME_CONTACT_NEEDS_ACK when unacknowledged', async () => {
+    const res = await ctx.app.inject({
+      method: 'POST', url: '/api/v1/consent/u18/guardian',
+      headers: { 'x-api-key': sameUser.rawKey },
+      payload: {
+        network: ctx.network, guardianName: 'Parent', guardianContact: sameUser.wardEmail,
+        guardianContactType: 'email', guardianDeclarationAccepted: true,
+      },
+    });
+    expect(res.statusCode).toBe(409);
+    expect(res.json().error).toBe('SAME_CONTACT_NEEDS_ACK');
+  });
+
+  it('accepts guardianContact matching the ward\'s own email once sameContactAcknowledged is true', async () => {
+    const res = await ctx.app.inject({
+      method: 'POST', url: '/api/v1/consent/u18/guardian',
+      headers: { 'x-api-key': sameUser.rawKey },
+      payload: {
+        network: ctx.network, guardianName: 'Parent', guardianContact: sameUser.wardEmail,
+        guardianContactType: 'email', guardianDeclarationAccepted: true, sameContactAcknowledged: true,
+      },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().otpSent).toBe(true);
   });
 });

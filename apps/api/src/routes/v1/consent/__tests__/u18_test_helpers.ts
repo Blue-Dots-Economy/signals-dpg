@@ -20,12 +20,67 @@ export interface U18TestAppContext {
   userId: string;
   rawKey: string;
   network: string;
+  wardEmail: string;
   close: () => Promise<void>;
 }
 
-export async function buildU18TestApp(): Promise<U18TestAppContext> {
+export interface U18TestUserContext {
+  userId: string;
+  rawKey: string;
+  wardEmail: string;
+  close: () => Promise<void>;
+}
+
+/**
+ * Seeds an additional ward `user` + apikey against the existing test DB,
+ * without booting a second Fastify app (the app is bound to a fixed port,
+ * so a second `buildU18TestApp()` call in the same process would race for
+ * it). Reuse an already-running `ctx.app` for requests made with the
+ * returned `rawKey`.
+ */
+export async function seedU18TestUser(): Promise<U18TestUserContext> {
   const { db } = await import('@api/db/postgres/drizzle_config');
   const { user, apikey } = await import('../../../../../db/postgres/schema/auth.js');
+
+  const userId = `test-u18-${randomUUID()}`;
+  const rawKey = `sk_signals_${randomBytes(24).toString('hex')}`;
+  const now = new Date();
+  const wardEmail = `u18-int-${Date.now()}-${randomUUID()}@signals.local`;
+
+  await db.insert(user).values({
+    id: userId,
+    email: wardEmail,
+    name: `u18-int-user-${Date.now()}`,
+    emailVerified: true,
+    createdAt: now,
+    updatedAt: now,
+  });
+
+  const hashed_key = createHash('sha256').update(rawKey).digest('base64url');
+  await db.insert(apikey).values({
+    id: `key_${randomUUID()}`,
+    name: `u18-int-key-${Date.now()}`,
+    key: hashed_key,
+    userId,
+    referenceId: userId,
+    configId: 'default',
+    start: rawKey.slice(0, 6),
+    prefix: 'sk_signals_',
+    enabled: true,
+    rateLimitEnabled: false,
+    createdAt: now,
+    updatedAt: now,
+  });
+
+  const close = async () => {
+    await db.delete(apikey).where(eq(apikey.userId, userId));
+    await db.delete(user).where(eq(user.id, userId));
+  };
+
+  return { userId, rawKey, wardEmail, close };
+}
+
+export async function buildU18TestApp(): Promise<U18TestAppContext> {
   const { apiConfig } = await import('@/config');
   const consent_routes_mod = await import('../consent_routes.js');
 
@@ -57,40 +112,12 @@ export async function buildU18TestApp(): Promise<U18TestAppContext> {
     throw err;
   }
 
-  const userId = `test-u18-${randomUUID()}`;
-  const rawKey = `sk_signals_${randomBytes(24).toString('hex')}`;
-  const now = new Date();
-
-  await db.insert(user).values({
-    id: userId,
-    email: `u18-int-${Date.now()}@signals.local`,
-    name: `u18-int-user-${Date.now()}`,
-    emailVerified: true,
-    createdAt: now,
-    updatedAt: now,
-  });
-
-  const hashed_key = createHash('sha256').update(rawKey).digest('base64url');
-  await db.insert(apikey).values({
-    id: `key_${randomUUID()}`,
-    name: `u18-int-key-${Date.now()}`,
-    key: hashed_key,
-    userId,
-    referenceId: userId,
-    configId: 'default',
-    start: rawKey.slice(0, 6),
-    prefix: 'sk_signals_',
-    enabled: true,
-    rateLimitEnabled: false,
-    createdAt: now,
-    updatedAt: now,
-  });
+  const seeded = await seedU18TestUser();
 
   const close = async () => {
-    await db.delete(apikey).where(eq(apikey.userId, userId));
-    await db.delete(user).where(eq(user.id, userId));
+    await seeded.close();
     await app.close();
   };
 
-  return { app, userId, rawKey, network, close };
+  return { app, userId: seeded.userId, rawKey: seeded.rawKey, network, wardEmail: seeded.wardEmail, close };
 }

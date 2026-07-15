@@ -1,8 +1,9 @@
 import type { FastifyPluginAsyncZod } from 'fastify-type-provider-zod';
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import { U18GuardianBodySchema, U18GuardianResponseSchema, type U18GuardianBody } from '@dpg/schemas';
+import { eq } from 'drizzle-orm';
 import { db } from '@api/db/postgres/drizzle_config';
-import { consent_record } from '@api/db/postgres/schema';
+import { consent_record, user } from '@api/db/postgres/schema';
 import { auth_middleware_if_enabled } from '@api/plugins/auth/auth_middleware';
 import { apiConfig } from '@/config';
 import { isMinor } from '@/services/minor';
@@ -41,6 +42,21 @@ export const u18_guardian_handler = async (request: Req, reply: FastifyReply) =>
   if (!mg) return reply.code(409).send({ error: 'DOB_REQUIRED', message: 'Submit date of birth before guardian details' });
   if (!isMinor(mg.birthYear, mg.birthMonth)) {
     return reply.code(409).send({ error: 'NOT_A_MINOR', message: 'Guardian flow applies only to under-18 users' });
+  }
+
+  // Warn-and-confirm: guardian contact must not silently equal the ward's own
+  // email/phone. Not a hard reject — an explicit ack lets the ward proceed.
+  const [ward] = await db.select({ email: user.email, phoneNumber: user.phoneNumber }).from(user).where(eq(user.id, userId));
+  const normalizedGuardianContact = body.guardianContact.trim();
+  const wardEmail = ward?.email?.trim().toLowerCase();
+  const wardPhone = ward?.phoneNumber?.trim();
+  const matchesWardEmail = !!wardEmail && normalizedGuardianContact.toLowerCase() === wardEmail;
+  const matchesWardPhone = !!wardPhone && normalizedGuardianContact === wardPhone;
+  if ((matchesWardEmail || matchesWardPhone) && body.sameContactAcknowledged !== true) {
+    return reply.code(409).send({
+      error: 'SAME_CONTACT_NEEDS_ACK',
+      message: 'Guardian contact matches your own; acknowledge to proceed',
+    });
   }
 
   // Record the ward's guardian-validity attestation (D12): source='self', u18.
