@@ -83,6 +83,13 @@ export interface DotNetworkDomain {
   status_rules?: StatusRule[];
   /** Card display config — see {@link DotCardConfig}. */
   card?: DotCardConfig;
+  /**
+   * U18 guardian consent (Phase 6): when true, a minor holding a profile in
+   * this domain is routed through the guardian consent flow instead of the
+   * ordinary adult consent gate. Mirrors `guardian_consent_required` in
+   * network.json (see apps/api/src/services/minor.ts on the server side).
+   */
+  guardian_consent_required?: boolean;
 }
 
 export interface DotNetworkInteraction {

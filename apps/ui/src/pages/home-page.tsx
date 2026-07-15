@@ -49,8 +49,11 @@ import { nearestDistanceMeters } from '@/lib/geo/distance';
 import type { LatLng } from '@/lib/geo/types';
 import { getProfileConsentStatus, acceptProfileConsent } from '@/lib/consent-api';
 import { useConsentConfig } from '@/hooks/use-consent-config';
+import { useConsentGate } from '@/hooks/use-consent-gate';
 import { useNetworkTheme } from '@/theme/theme-provider';
 import { ProfileConsentModal } from '@/components/consent/profile-consent-modal';
+import { U18GuardianFlow } from '@/components/consent/u18/u18-guardian-flow';
+import { isGuardianConsentRequiredDomain } from '@/lib/guardian-consent';
 
 function itemToCardItem(item: Item): { id: string; domain: string; data: Record<string, unknown> } {
   return {
@@ -504,6 +507,34 @@ export function HomePage() {
     pendingConsentProfileId,
   ]);
 
+  // U18 guardian consent gate (Phase 6). Domain is derived from the ward's
+  // own existing profile item — never a registration dropdown. Only wards
+  // whose profile domain is `guardian_consent_required` AND who still need
+  // the adult-equivalent terms/privacy consent (the same signal the ordinary
+  // flow uses; the guardian-OTP-verify endpoint records those categories on
+  // success) are routed through the guardian flow — everyone else (adults,
+  // ungated domains, users with no profile yet) is unaffected.
+  const wardDomain = myItem?.item_domain ?? null;
+  const requiresGuardianGate = Boolean(
+    user && network && wardDomain && isGuardianConsentRequiredDomain(network, wardDomain),
+  );
+  const {
+    needed: u18NeededConsent,
+    isLoading: u18GateLoading,
+    refetch: refetchU18Gate,
+  } = useConsentGate();
+  const [guardianFlowDismissed, setGuardianFlowDismissed] = React.useState(false);
+
+  // Re-evaluate from scratch if the acting network or ward domain changes
+  // (e.g. switching networks, or the active profile changing) instead of
+  // staying dismissed forever.
+  React.useEffect(() => {
+    setGuardianFlowDismissed(false);
+  }, [network?.id, wardDomain]);
+
+  const showU18GuardianFlow =
+    requiresGuardianGate && !u18GateLoading && u18NeededConsent.length > 0 && !guardianFlowDismissed;
+
   // Sort a card-item array (item_locations stored in .data) nearest-first when userLocation is known.
   // Items without locations sort last (nearestDistanceMeters returns Infinity for empty/missing arrays).
   const sortByNearest = React.useCallback(
@@ -914,9 +945,23 @@ export function HomePage() {
     return value ? String(value) : profile.item_domain;
   }, [pendingConsentProfileId, myItems, userSchemas]);
 
+  const u18GuardianFlowModal = showU18GuardianFlow && network ? (
+    <U18GuardianFlow
+      network={network.id}
+      brand={brand === 'standard' ? null : brand}
+      onComplete={() => {
+        setGuardianFlowDismissed(true);
+        void refetchU18Gate();
+      }}
+      onNotMinor={() => setGuardianFlowDismissed(true)}
+    />
+  ) : null;
+
   const profileConsentModal = (
     <ProfileConsentModal
-      open={Boolean(pendingConsentProfileId)}
+      // The U18 guardian gate takes priority — don't stack a second blocking
+      // dialog on top of it.
+      open={Boolean(pendingConsentProfileId) && !showU18GuardianFlow}
       statement={profileStatement}
       profileLabel={pendingProfileLabel}
       onAccept={async () => {
@@ -971,6 +1016,7 @@ export function HomePage() {
           </div>
         </div>
         </div>
+        {u18GuardianFlowModal}
         {profileConsentModal}
       </>
     );
@@ -1366,6 +1412,7 @@ export function HomePage() {
           }
         </ActionHandler>
     </PageShell>
+    {u18GuardianFlowModal}
     {profileConsentModal}
     </>
   );
