@@ -9,12 +9,13 @@ import {
 import MarkerClusterGroup from 'react-leaflet-cluster';
 import L from 'leaflet';
 import { renderToStaticMarkup } from 'react-dom/server';
-import type { MapMarker, MapProviderProps } from '@/engine/types';
+import type { MapMarker, MapProviderProps, MapViewport } from '@/engine/types';
 import { registerMapProvider } from '@/engine/map/map-registry';
 import { getIconForDomain } from '../domain-icons';
 import { tallyDomains } from '../cluster-breakdown';
 import { FitBounds } from '../fit-bounds';
 import { MarkerPopupCard } from '../marker-popup-card';
+import { useViewportReportEmitter } from './use-viewport-report';
 
 import 'leaflet/dist/leaflet.css';
 import 'react-leaflet-cluster/dist/assets/MarkerCluster.css';
@@ -65,6 +66,32 @@ function SetView({
     prevZoom.current = zoom;
     prevNonce.current = focusNonce;
   }, [center, zoom, focusNonce, map]);
+
+  return null;
+}
+
+/**
+ * Reports the map's viewport (center + half-diagonal radius) to the caller on
+ * debounced `moveend`. Only ever mounted when `onViewportChange` is provided
+ * (see `LeafletMapProvider` below), so the tourist app — which never passes
+ * it — attaches no `moveend` listener at all and is completely unaffected.
+ * Renders nothing — pure side-effect component, same shape as `SetView`.
+ */
+function ViewportReporter({ onViewportChange }: { onViewportChange: (viewport: MapViewport) => void }) {
+  const map = useMap();
+  const emit = useViewportReportEmitter(onViewportChange);
+
+  React.useEffect(() => {
+    const handleMoveEnd = () => {
+      const center = map.getCenter();
+      const ne = map.getBounds().getNorthEast();
+      emit({ lat: center.lat, lng: center.lng }, { lat: ne.lat, lng: ne.lng });
+    };
+    map.on('moveend', handleMoveEnd);
+    return () => {
+      map.off('moveend', handleMoveEnd);
+    };
+  }, [map, emit]);
 
   return null;
 }
@@ -268,6 +295,7 @@ export function LeafletMapProvider({
   focusNonce,
   renderPopup,
   resolveIcon,
+  onViewportChange,
 }: MapProviderProps) {
   return (
     <MapContainer
@@ -282,6 +310,7 @@ export function LeafletMapProvider({
       />
       <FitBounds markers={markers} skip={initialViewSet} />
       {initialViewSet && <SetView center={center} zoom={zoom} focusNonce={focusNonce} />}
+      {onViewportChange && <ViewportReporter onViewportChange={onViewportChange} />}
       {/*
        * MarkerClusterGroup wraps all markers so that:
        *  - at low zoom levels, nearby markers collapse into a cluster badge

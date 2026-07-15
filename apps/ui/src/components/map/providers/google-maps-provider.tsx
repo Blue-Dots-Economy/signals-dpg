@@ -13,13 +13,14 @@ import {
 } from '@vis.gl/react-google-maps';
 import type { AdvancedMarkerRef } from '@vis.gl/react-google-maps';
 import { MarkerClusterer, type Renderer, type Cluster } from '@googlemaps/markerclusterer';
-import type { MapMarker, MapProviderProps } from '@/engine/types';
+import type { MapMarker, MapProviderProps, MapViewport } from '@/engine/types';
 import { registerMapProvider } from '@/engine/map/map-registry';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { getIconForDomain } from '../domain-icons';
 import { tallyDomains } from '../cluster-breakdown';
 import { MarkerPopupCard } from '../marker-popup-card';
 import { getRuntimeEnv } from '@/lib/runtime-env';
+import { useViewportReportEmitter } from './use-viewport-report';
 
 /**
  * Module-level WeakMap: AdvancedMarkerElement → domain string.
@@ -376,6 +377,32 @@ function MapViewController({ center, zoom, initialViewSet, focusNonce }: MapView
   return null;
 }
 
+// ─── Viewport reporter component ─────────────────────────────────────────────
+// Lives inside <Map> so it can call useMap(). Reports the map's viewport
+// (center + half-diagonal radius) to the caller on debounced `idle` (Google's
+// settle event, fired after pan/zoom/resize finish). Only ever mounted when
+// `onViewportChange` is provided (see `GoogleMapProvider` below), so the
+// tourist app — which never passes it — attaches no `idle` listener at all.
+
+function ViewportReporter({ onViewportChange }: { onViewportChange: (viewport: MapViewport) => void }) {
+  const map = useMap();
+  const emit = useViewportReportEmitter(onViewportChange);
+
+  React.useEffect(() => {
+    if (!map) return;
+    const listener = map.addListener('idle', () => {
+      const center = map.getCenter();
+      const bounds = map.getBounds();
+      if (!center || !bounds) return;
+      const ne = bounds.getNorthEast();
+      emit({ lat: center.lat(), lng: center.lng() }, { lat: ne.lat(), lng: ne.lng() });
+    });
+    return () => listener.remove();
+  }, [map, emit]);
+
+  return null;
+}
+
 // ─── Clusterer manager component ─────────────────────────────────────────────
 // Lives inside <Map> so it can call useMap() from @vis.gl/react-google-maps.
 // Maintains a MarkerClusterer instance and keeps it in sync with the set of
@@ -493,6 +520,7 @@ export function GoogleMapProvider({
   renderPopup,
   resolveIcon,
   resolveMarkerImage,
+  onViewportChange,
 }: MapProviderProps) {
   const { t } = useTranslation();
   const isMobile = useIsMobile();
@@ -544,6 +572,7 @@ export function GoogleMapProvider({
          * panning or when "All items" / fit-all mode is active.
          */}
         <MapViewController center={center} zoom={zoom} initialViewSet={initialViewSet} focusNonce={focusNonce} />
+        {onViewportChange && <ViewportReporter onViewportChange={onViewportChange} />}
         <ClustererManager
           markers={markers}
           activeMarkerId={activeMarker?.id ?? null}

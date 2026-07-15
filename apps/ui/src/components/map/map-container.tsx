@@ -1,7 +1,7 @@
 import * as React from 'react';
 import { useTranslation } from 'react-i18next';
 import type { RJSFSchema } from '@rjsf/utils';
-import type { MapMarker } from '@/engine/types';
+import type { MapMarker, MapViewport } from '@/engine/types';
 import { getActiveMapProvider } from '@/engine/map/map-registry';
 import { parseLocationFields, buildLocationQueries } from '@dpg/schemas/location_fields';
 import { getGeoProvider } from '@/lib/geo/provider';
@@ -72,6 +72,14 @@ interface MapViewProps {
    * instead of the icon pin. Unset for signals → unchanged behaviour.
    */
   resolveMarkerImage?: (marker: MapMarker) => string | null | undefined;
+  /**
+   * Optional viewport-change callback, fed by the active provider on
+   * debounced (~300ms) pan/zoom settle: `{lat, lng, radiusMeters}` where
+   * `radiusMeters` is the half-diagonal (center → a bounds corner). Feeds the
+   * home-page markers query with a viewport-scoped fetch (#203 §5.2). Unset
+   * for the tourist app → no listener is attached and behavior is unchanged.
+   */
+  onViewportChange?: (viewport: MapViewport) => void;
 }
 
 // Default map view when there is no user location / no profile location.
@@ -123,6 +131,7 @@ export function MapView({
   heightClassName = 'h-[calc(100vh-8rem)] min-h-[400px]',
   resolveMarkerIcon,
   resolveMarkerImage,
+  onViewportChange,
 }: MapViewProps) {
   const { t } = useTranslation();
   const MapProviderComponent = getActiveMapProvider();
@@ -275,6 +284,7 @@ export function MapView({
         renderPopup={renderPopup}
         resolveIcon={resolveMarkerIcon}
         resolveMarkerImage={resolveMarkerImage}
+        onViewportChange={onViewportChange}
       />
       {/* Top-right overlay: Filters (only while maximized — the page header
           hosts it normally but is hidden in fullscreen) + maximize toggle.

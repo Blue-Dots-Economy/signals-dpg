@@ -194,11 +194,30 @@ export interface MapProviderProps {
    * Returns null/undefined to fall back to the icon pin.
    */
   resolveMarkerImage?: (marker: MapMarker) => string | null | undefined;
+  /**
+   * Optional viewport-change callback. When provided, the active provider
+   * emits `{lat, lng, radiusMeters}` on debounced (~300ms) `moveend`/`idle`.
+   * Unset (e.g. the tourist app) → the provider attaches no listener at all,
+   * so panning/zooming behaves exactly as before this prop existed.
+   */
+  onViewportChange?: (viewport: MapViewport) => void;
 }
 
 export interface MapProvider {
   name: string;
   component: React.ComponentType<MapProviderProps>;
+}
+
+/**
+ * The map's current viewport, reported on debounced pan/zoom settle
+ * (Leaflet `moveend` / Google `idle`). `radiusMeters` is the half-diagonal —
+ * the great-circle distance from `center` to a corner of the current bounds —
+ * a simple, provider-agnostic proxy for "how much area is visible".
+ */
+export interface MapViewport {
+  lat: number;
+  lng: number;
+  radiusMeters: number;
 }
 
 // ─── Plugin Types ──────────────────────────────────────────────
