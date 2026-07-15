@@ -462,9 +462,7 @@ export function LoginPage() {
           {/* Contact input */}
           <div className="space-y-1.5">
             <Label htmlFor="contact" className="text-sm font-medium">
-              {mode === 'email'
-                ? t(onlyEmail ? 'auth.label_email' : 'auth.label_email_or_mobile')
-                : t('auth.label_mobile')}
+              {mode === 'email' ? t('auth.label_email') : t('auth.label_mobile')}
             </Label>
             {mode === 'phone' ? (
               <Input
