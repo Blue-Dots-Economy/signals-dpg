@@ -376,11 +376,13 @@ export function LoginPage() {
     }
   };
 
+  // While the DOB step or the guardian flow is active, the signup form is
+  // hidden so the step reads as its own page (auth background only) rather
+  // than stacking over the half-filled form.
+  const showSignupForm = !signupDobGate && !signupGuardianGate;
+
   return (
     <>
-      {signupDobGate && (
-        <SignupDobStep onSubmit={(date) => { void handleSignupDob(date); }} />
-      )}
       {signupGuardianGate && (
         <SignupGuardianFlow
           network={themeId}
@@ -422,6 +424,10 @@ export function LoginPage() {
         />
       )}
       <AuthShell>
+        {signupDobGate ? (
+          <SignupDobStep onSubmit={(date) => { void handleSignupDob(date); }} />
+        ) : !showSignupForm ? null : (
+        <>
         {/* Back link */}
         <button
           type="button"
@@ -577,6 +583,8 @@ export function LoginPage() {
             {userExists === true ? t('auth.cta_send_otp') : t('auth.cta_continue')}
           </button>
         </form>
+        </>
+        )}
       </AuthShell>
     </>
   );
