@@ -4,7 +4,7 @@ import { getNotificationClient } from '@/utils/notificationClient';
 
 /** Codes the primitive raises; callers map these to HTTP responses. */
 export class GuardianOtpError extends Error {
-  constructor(public code: 'RATE_LIMITED' | 'NO_OTP_PROVIDER') {
+  constructor(public code: 'RATE_LIMITED' | 'NO_OTP_PROVIDER' | 'VERIFY_THROTTLED') {
     super(code);
     this.name = 'GuardianOtpError';
   }
@@ -22,9 +22,12 @@ export type OtpSend = (args: {
 export const GUARDIAN_OTP_TTL_SEC = 300; // nonce lifetime (5 min)
 export const GUARDIAN_OTP_MAX_PER_WINDOW = 3; // sends allowed per window
 export const GUARDIAN_OTP_WINDOW_SEC = 300; // rate-limit window (5 min)
+export const GUARDIAN_OTP_VERIFY_MAX = 5; // verify attempts per window
+export const GUARDIAN_OTP_VERIFY_WINDOW_SEC = 300;
 
 const codeKey = (scope: string) => `guardian_otp:code:${scope}`;
 const rateKey = (scope: string) => `guardian_otp:rl:${scope}`;
+const verifyRateKey = (scope: string) => `guardian_otp:vrl:${scope}`;
 
 function generateOtp(): string {
   return String(randomInt(0, 1_000_000)).padStart(6, '0');
@@ -70,6 +73,22 @@ export async function verifyGuardianOtp(args: {
     return true;
   }
   return false;
+}
+
+/**
+ * Throttle verify attempts per scope (brute-force guard — the core OTP is a
+ * 6-digit space). Throws VERIFY_THROTTLED past the window max. Call before
+ * verifyGuardianOtp on the HTTP boundary.
+ */
+export async function assertVerifyAttemptAllowed(scope: string): Promise<void> {
+  const k = verifyRateKey(scope);
+  const count = await redis.incr(k);
+  if (count === 1) {
+    await redis.expire(k, GUARDIAN_OTP_VERIFY_WINDOW_SEC);
+  }
+  if (count > GUARDIAN_OTP_VERIFY_MAX) {
+    throw new GuardianOtpError('VERIFY_THROTTLED');
+  }
 }
 
 // Notification channel per guardian contact type (spec D7). WhatsApp is not
