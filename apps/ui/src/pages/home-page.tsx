@@ -657,11 +657,16 @@ export function HomePage() {
 
   // Task 6 (#203 §5.2): the map view is now sourced from viewport-scoped
   // markers rather than the full `domainItems` browse feed. Map enum-field
-  // filtering (mapSelectedFields) is DEFERRED in P4 — `useMapMarkers` is never
-  // given `item_state`/enum fields; a server-side typed/OR filter is a
-  // documented follow-up. `MapFiltersPanel` stays mounted (domain selection
-  // still narrows `visibleDomains` upstream via the map's own filter state),
-  // but enum-field selections have no effect on which markers are fetched.
+  // filtering (mapSelectedFields) AND the top-bar free-text `search` are BOTH
+  // DEFERRED for the map in P4: viewport markers are slim (coords only, no
+  // item_state), so neither the enum-field filter nor a text match can run
+  // client-side, and the markers endpoint has no text-search — both need
+  // server-side support (relevance/search, spec §9). `useMapMarkers` is
+  // therefore never given `item_state`/enum fields or `search`; the map shows
+  // all viewport markers for the visible domains. `MapFiltersPanel` and the
+  // search box stay mounted (they still filter the LIST view), but have no
+  // effect on which markers are fetched. Only domain multi-select (below) —
+  // an array membership check needing no server support — still narrows pins.
   const mapMarkers = useMapMarkers(network, visibleDomains, mapViewport);
 
   // The map's own domain multi-select still narrows what's shown — applied
