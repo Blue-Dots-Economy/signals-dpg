@@ -4,6 +4,8 @@ import { minor_guardian } from '@api/db/postgres/schema';
 import { encryptGuardianField, decryptGuardianField } from '@/services/guardian_pii';
 
 type GuardianContactType = 'phone' | 'email';
+type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
+type DbOrTx = typeof db | Tx;
 
 /** Insert or update the ward's birth year/month (no exact day). */
 export async function upsertBirthMonth(
@@ -86,4 +88,50 @@ export async function setGuardianVerified(userId: string): Promise<void> {
     .update(minor_guardian)
     .set({ guardianVerified: true, updatedAt: new Date() })
     .where(eq(minor_guardian.userId, userId));
+}
+
+/**
+ * Write an ALREADY-ENCRYPTED guardian name/contact blob directly — no
+ * re-encryption. Used by the pre-auth signup-guardian flow (services/
+ * signup_guardian.ts): the guardian PII is encrypted before the ward's
+ * account exists (keyed on the signup identifier in Redis) and is
+ * materialized onto the new user id verbatim once the account is created.
+ * Marks `guardian_verified` true — the pre-auth flow only calls this after
+ * its own OTP verify has already flipped the pending record's `verified`
+ * flag, so re-verification here would be redundant.
+ */
+export async function writeEncryptedGuardian(
+  userId: string,
+  input: {
+    birthYear: number;
+    birthMonth: number;
+    guardianNameEnc: string;
+    guardianContactEnc: string;
+    guardianContactType: GuardianContactType;
+  },
+  exec: DbOrTx = db,
+): Promise<void> {
+  await exec
+    .insert(minor_guardian)
+    .values({
+      userId,
+      birthYear: input.birthYear,
+      birthMonth: input.birthMonth,
+      guardianName: input.guardianNameEnc,
+      guardianContact: input.guardianContactEnc,
+      guardianContactType: input.guardianContactType,
+      guardianVerified: true,
+    })
+    .onConflictDoUpdate({
+      target: minor_guardian.userId,
+      set: {
+        birthYear: input.birthYear,
+        birthMonth: input.birthMonth,
+        guardianName: input.guardianNameEnc,
+        guardianContact: input.guardianContactEnc,
+        guardianContactType: input.guardianContactType,
+        guardianVerified: true,
+        updatedAt: new Date(),
+      },
+    });
 }

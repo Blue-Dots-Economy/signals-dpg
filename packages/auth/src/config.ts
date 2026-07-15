@@ -169,46 +169,58 @@ export function createAuth(config: AuthRuntimeConfig) {
         },
 
         afterUserCreate: async (payload) => {
-          if (!nc) return payload;
+          if (nc) {
+            if (payload.user.email) {
+              try {
+                await nc.notify({
+                  channel: 'email',
+                  template_id: 'basic_email',
+                  to: payload.user.email,
+                  priority: 'realtime',
+                  variables: {
+                    fromName: `Welcome to ${config.appName}`,
+                    fromEmail: 'hello@bluedotseconomy.org',
+                    replyTo: 'hello@bluedotseconomy.org',
+                    subject: 'Welcome!',
+                    html: `<div>
+                      <p>Congratulations ${payload.user.name}! You just went live with an account on ${config.appName}.</p>
+                    </div>`,
+                  },
+                });
+              } catch (err) {
+                console.error('Failed to send welcome email:', err);
+              }
+            }
 
-          if (payload.user.email) {
-            try {
-              await nc.notify({
-                channel: 'email',
-                template_id: 'basic_email',
-                to: payload.user.email,
-                priority: 'realtime',
-                variables: {
-                  fromName: `Welcome to ${config.appName}`,
-                  fromEmail: 'hello@bluedotseconomy.org',
-                  replyTo: 'hello@bluedotseconomy.org',
-                  subject: 'Welcome!',
-                  html: `<div>
-                    <p>Congratulations ${payload.user.name}! You just went live with an account on ${config.appName}.</p>
-                  </div>`,
-                },
-              });
-            } catch (err) {
-              console.error('Failed to send welcome email:', err);
+            if (payload.user.phoneNumber) {
+              try {
+                await nc.notify({
+                  channel: 'whatsapp',
+                  template_id: 'other',
+                  to: payload.user.phoneNumber,
+                  priority: 'realtime',
+                  variables: {
+                    contentSid: 'HX3f2a5d7e4a18e5664124592a12a154eb',
+                    contentVariables: {
+                      '1': payload.user.name,
+                    },
+                  },
+                });
+              } catch (err) {
+                console.error('Failed to send welcome WhatsApp:', err);
+              }
             }
           }
 
-          if (payload.user.phoneNumber) {
+          // Caller-supplied signup-completion hook (e.g. materializing a
+          // pre-auth signup-guardian capture onto the new user). Always runs,
+          // independent of whether a notification client is configured —
+          // never let a failure here block or fail the signup response.
+          if (config.afterUserCreate) {
             try {
-              await nc.notify({
-                channel: 'whatsapp',
-                template_id: 'other',
-                to: payload.user.phoneNumber,
-                priority: 'realtime',
-                variables: {
-                  contentSid: 'HX3f2a5d7e4a18e5664124592a12a154eb',
-                  contentVariables: {
-                    '1': payload.user.name,
-                  },
-                },
-              });
+              await config.afterUserCreate(payload);
             } catch (err) {
-              console.error('Failed to send welcome WhatsApp:', err);
+              console.error('afterUserCreate hook failed:', err);
             }
           }
 

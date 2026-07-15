@@ -50,3 +50,47 @@ export const U18ProfileConsentVerifyResponseSchema = z.object({
 
 export type U18ProfileConsentBody = z.infer<typeof U18ProfileConsentBodySchema>;
 export type U18ProfileConsentVerifyBody = z.infer<typeof U18ProfileConsentVerifyBodySchema>;
+
+// --- Pre-auth, signup-scoped guardian consent (no session yet) ---
+//
+// The account doesn't exist yet at this point in the flow, so these bodies
+// carry the signup identifier (email OR phoneNumber) directly instead of
+// relying on an authenticated user id. Exactly one identifier must be given.
+
+const EXACTLY_ONE_IDENTIFIER = {
+  message: 'Exactly one of email or phoneNumber is required',
+  path: ['email'],
+};
+
+export const SignupGuardianBodySchema = z
+  .object({
+    network: z.string().min(1),
+    domain: z.string().min(1),
+    email: z.string().email().optional(),
+    phoneNumber: z.string().min(1).optional(),
+    birthYear: z.number().int().min(1900).max(2100),
+    birthMonth: z.number().int().min(1).max(12),
+    guardianName: z.string().min(1),
+    guardianContact: z.string().min(1),
+    guardianContactType: z.enum(['phone', 'email']),
+    // Ward's guardian-validity attestation (D12) — must be explicitly true.
+    guardianDeclarationAccepted: z.literal(true),
+    // Explicit ack when guardianContact matches the signup identifier itself
+    // (warn-and-confirm, not a hard reject).
+    sameContactAcknowledged: z.boolean().optional(),
+  })
+  .refine((v) => Boolean(v.email) !== Boolean(v.phoneNumber), EXACTLY_ONE_IDENTIFIER);
+export const SignupGuardianResponseSchema = z.object({ otpSent: z.boolean() });
+
+export const SignupGuardianVerifyBodySchema = z
+  .object({
+    network: z.string().min(1).optional(),
+    email: z.string().email().optional(),
+    phoneNumber: z.string().min(1).optional(),
+    otp: z.string().length(6),
+  })
+  .refine((v) => Boolean(v.email) !== Boolean(v.phoneNumber), EXACTLY_ONE_IDENTIFIER);
+export const SignupGuardianVerifyResponseSchema = z.object({ verified: z.boolean() });
+
+export type SignupGuardianBody = z.infer<typeof SignupGuardianBodySchema>;
+export type SignupGuardianVerifyBody = z.infer<typeof SignupGuardianVerifyBodySchema>;
