@@ -76,3 +76,103 @@ export async function acceptProfileConsent(
   );
   return response.data;
 }
+
+// ─── U18 guardian consent flow ──────────────────────────────────────
+
+export interface SubmitU18DobBody {
+  network: string;
+  birthYear: number;
+  birthMonth: number;
+}
+
+export interface SubmitU18DobResponse {
+  isMinor: boolean;
+}
+
+export type GuardianContactType = 'phone' | 'email';
+
+export interface SubmitGuardianBody {
+  network: string;
+  brand?: string | null;
+  guardianName: string;
+  guardianContact: string;
+  guardianContactType: GuardianContactType;
+  guardianDeclarationAccepted: true;
+  sameContactAcknowledged?: boolean;
+}
+
+export interface SubmitGuardianResponse {
+  otpSent: boolean;
+}
+
+export interface VerifyGuardianBody {
+  network: string;
+  brand?: string | null;
+  otp: string;
+}
+
+export interface VerifyGuardianResponse {
+  verified: boolean;
+}
+
+export interface ProfileConsentOtpItemRef {
+  network: string;
+  brand?: string | null;
+  item_domain: string;
+  item_type: string;
+  item_id: string;
+}
+
+export interface IssueProfileConsentOtpResponse {
+  otpSent: boolean;
+}
+
+export interface VerifyProfileConsentOtpBody extends ProfileConsentOtpItemRef {
+  otp: string;
+}
+
+export interface VerifyProfileConsentOtpResponse {
+  verified: boolean;
+  promoted: boolean;
+}
+
+export async function submitU18Dob(body: SubmitU18DobBody): Promise<SubmitU18DobResponse> {
+  const response = await apiClient.post<SubmitU18DobResponse>('/api/v1/consent/u18/dob', body);
+  return response.data;
+}
+
+export async function submitGuardian(body: SubmitGuardianBody): Promise<SubmitGuardianResponse> {
+  const response = await apiClient.post<SubmitGuardianResponse>(
+    '/api/v1/consent/u18/guardian',
+    body,
+  );
+  return response.data;
+}
+
+export async function verifyGuardian(body: VerifyGuardianBody): Promise<VerifyGuardianResponse> {
+  const response = await apiClient.post<VerifyGuardianResponse>(
+    '/api/v1/consent/u18/guardian/verify',
+    body,
+  );
+  return response.data;
+}
+
+export async function issueProfileConsentOtp(
+  body: ProfileConsentOtpItemRef,
+): Promise<IssueProfileConsentOtpResponse> {
+  const response = await apiClient.post<IssueProfileConsentOtpResponse>(
+    '/api/v1/consent/u18/profile-consent/issue',
+    body,
+  );
+  return response.data;
+}
+
+export async function verifyProfileConsentOtp(
+  body: VerifyProfileConsentOtpBody,
+): Promise<VerifyProfileConsentOtpResponse> {
+  const response = await apiClient.post<VerifyProfileConsentOtpResponse>(
+    '/api/v1/consent/u18/profile-consent/verify',
+    body,
+  );
+  return response.data;
+}

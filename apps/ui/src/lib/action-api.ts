@@ -243,6 +243,44 @@ export interface FetchActionEventsQuery {
   offset?: number;
 }
 
+// ─── Guardian OTP (U18) ─────────────────────────────────────────────
+
+/**
+ * Machine-readable error codes the guardian-OTP challenge/response flow can
+ * surface on a bulk result entry's `error` field (perform_action /
+ * update_action_status), so `action-modal` can branch on them.
+ */
+export type GuardianOtpErrorCode =
+  | 'GUARDIAN_OTP_REQUIRED'
+  | 'GUARDIAN_OTP_INVALID'
+  | 'GUARDIAN_OTP_THROTTLED'
+  | 'GUARDIAN_OTP_RATE_LIMITED'
+  | 'OTP_PROVIDER_UNAVAILABLE';
+
+const GUARDIAN_OTP_ERROR_CODES: readonly GuardianOtpErrorCode[] = [
+  'GUARDIAN_OTP_REQUIRED',
+  'GUARDIAN_OTP_INVALID',
+  'GUARDIAN_OTP_THROTTLED',
+  'GUARDIAN_OTP_RATE_LIMITED',
+  'OTP_PROVIDER_UNAVAILABLE',
+];
+
+/**
+ * Classifies a bulk result entry's `error` field (e.g. from
+ * `BulkEnvelope.results[i]` or a thrown `BulkSingleError`) as a
+ * `GuardianOtpErrorCode`, or `null` if it isn't one of those codes (including
+ * a success entry with no `error` field at all).
+ */
+export function guardianOtpErrorOf(
+  entry: { error?: string } | null | undefined,
+): GuardianOtpErrorCode | null {
+  const code = entry?.error;
+  if (code !== undefined && (GUARDIAN_OTP_ERROR_CODES as readonly string[]).includes(code)) {
+    return code as GuardianOtpErrorCode;
+  }
+  return null;
+}
+
 // ─── API Functions ────────────────────────────────────────────────
 
 /**
@@ -253,32 +291,44 @@ export interface FetchActionEventsQuery {
  * The source instance validates the source item exists, then forwards to target.
  * 
  * @param payload - The action payload
- * @param sourceInstanceUrl - Optional: URL of the source instance. 
+ * @param sourceInstanceUrl - Optional: URL of the source instance.
  *   If not provided, uses default API. Should be the instance where source item exists.
+ * @param guardianOtp - Optional: guardian OTP code to resubmit this same action with,
+ *   after a prior call returned a `GUARDIAN_OTP_REQUIRED` per-item error. Sent as
+ *   `guardian_otp` on the payload.
  */
 export async function performAction(
   payload: PerformActionPayload,
-  sourceInstanceUrl?: string
+  sourceInstanceUrl?: string,
+  guardianOtp?: string,
 ): Promise<PerformActionResponse> {
   // Use source instance URL if provided, otherwise fall back to default API client
   const client = sourceInstanceUrl
     ? createInstanceApiClient(sourceInstanceUrl)
     : apiClient;
 
+  const body = guardianOtp ? { ...payload, guardian_otp: guardianOtp } : payload;
+
   return unwrapBulkSingle(
-    client.post<BulkEnvelope<PerformActionResponse>>('/api/v1/action/perform', [payload]),
+    client.post<BulkEnvelope<PerformActionResponse>>('/api/v1/action/perform', [body]),
   );
 }
 
 /**
  * Update action status (target user response)
  * Target user calls this to accept, reject, or complete an action
+ *
+ * @param guardianOtp - Optional: guardian OTP code to resubmit this same action with,
+ *   after a prior call returned a `GUARDIAN_OTP_REQUIRED` per-item error. Sent as
+ *   `guardian_otp` on the payload.
  */
 export async function updateActionStatus(
-  payload: UpdateActionStatusPayload
+  payload: UpdateActionStatusPayload,
+  guardianOtp?: string,
 ): Promise<UpdateActionStatusResponse> {
+  const body = guardianOtp ? { ...payload, guardian_otp: guardianOtp } : payload;
   return unwrapBulkSingle(
-    apiClient.post<BulkEnvelope<UpdateActionStatusResponse>>('/api/v1/action/update-status', [payload]),
+    apiClient.post<BulkEnvelope<UpdateActionStatusResponse>>('/api/v1/action/update-status', [body]),
   );
 }
 
@@ -291,12 +341,16 @@ export async function updateActionStatus(
 export async function performActionsBulk(
   payloads: PerformActionPayload[],
   sourceInstanceUrl?: string,
+  guardianOtp?: string,
 ): Promise<BulkEnvelope<PerformActionResponse>> {
   const client = sourceInstanceUrl
     ? createInstanceApiClient(sourceInstanceUrl)
     : apiClient;
+  const body = guardianOtp
+    ? payloads.map((payload) => ({ ...payload, guardian_otp: guardianOtp }))
+    : payloads;
   return postBulkEnvelope<PerformActionResponse>(
-    client.post<BulkEnvelope<PerformActionResponse>>('/api/v1/action/perform', payloads),
+    client.post<BulkEnvelope<PerformActionResponse>>('/api/v1/action/perform', body),
   );
 }
 
