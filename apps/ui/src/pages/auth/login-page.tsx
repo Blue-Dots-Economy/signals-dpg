@@ -28,7 +28,7 @@ import { fetchNetworkConfig } from '@/lib/network-api';
 import type { DotNetworkDomain } from '@/engine/types';
 import { getServedScope } from '@/lib/served-binding';
 import type { SignupExtras } from '@/lib/signup-domain';
-import { DobCalendar } from '@/components/consent/u18/dob-calendar';
+import { SignupDobStep } from '@/components/consent/u18/signup-dob-step';
 import { isMinorFromBirth } from '@/lib/guardian-consent';
 import {
   SignupGuardianFlow,
@@ -73,9 +73,6 @@ export function LoginPage() {
   const [email, setEmail] = useState('');
   const [name, setName] = useState('');
   const [domain, setDomain] = useState('');
-  const [birthMonth, setBirthMonth] = useState('');
-  const [birthYear, setBirthYear] = useState('');
-  const [birthDate, setBirthDate] = useState<Date | undefined>(undefined);
   const [userExists, setUserExists] = useState<boolean | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [consentGate, setConsentGate] = useState<ConsentGateState | null>(null);
@@ -98,6 +95,13 @@ export function LoginPage() {
     birthMonth: number;
     resolvedName: string;
     resolvedSignupExtras: SignupExtras;
+  } | null>(null);
+  // Set for a brand-new signup in a guardian-gated (u18-enabled) domain —
+  // renders the DOB step AFTER the name/domain form. Ungated domains skip it.
+  const [signupDobGate, setSignupDobGate] = useState<{
+    identifier: AuthIdentifier;
+    domain: string;
+    resolvedName: string;
   } | null>(null);
   const redirectTo = searchParams.get('redirect') ?? '/';
   const servedScope = useMemo(() => getServedScope(), []);
@@ -189,6 +193,104 @@ export function LoginPage() {
     }
   };
 
+  // Evaluate consent, then send the OTP (or hold for the consent modal).
+  // Best-effort: on any pre-check failure we proceed without gating — the user
+  // is re-prompted post-verify on their next login (spec §1.1). Adults reach
+  // this from the signup form (ungated) or after the DOB step (gated-adult);
+  // minors never do (the guardian flow records their consent instead).
+  const runConsentThenOtp = async (
+    ident: AuthIdentifier,
+    exists: boolean,
+    resolvedName: string,
+    resolvedSignupExtras: SignupExtras | null,
+  ) => {
+    try {
+      // Normalize the phone to the canonical E.164 form auth stores; otherwise
+      // the exact-match lookup in status-by-identifier misses a returning user
+      // and the T&C gate re-prompts every login (see consentStatusIdentifier).
+      const identifierParam = consentStatusIdentifier(ident);
+
+      const [consentStatus, configEntries] = await Promise.all([
+        getConsentStatusByIdentifier({ network: themeId, ...identifierParam }),
+        fetchConsentConfigs(themeId),
+      ]);
+
+      const networkDefault = configEntries.find((e) => e.brand === null);
+      if (networkDefault) {
+        const brandEntry = brand && brand !== 'standard'
+          ? configEntries.find((e) => e.brand === brand)
+          : undefined;
+        const mergedConfig = mergeConsentConfig(networkDefault.schema, brandEntry?.schema);
+
+        const needed = (['terms', 'privacy'] as const).filter(
+          (c) => !consentStatus.statuses[c].includes(mergedConfig.documents[c].current_version),
+        );
+
+        if (needed.length > 0) {
+          setPendingIdentifier(ident);
+          setPendingUserExists(exists);
+          setPendingName(resolvedName);
+          setPendingSignupExtras(resolvedSignupExtras);
+          setConsentGate({
+            config: mergedConfig,
+            pendingConsent: {
+              network: themeId,
+              brand: brand !== 'standard' ? brand : null,
+              source: exists ? 'login' : 'signup',
+              items: needed.map((c) => ({
+                category: c,
+                version: mergedConfig.documents[c].current_version,
+              })),
+            },
+          });
+          // Do NOT send OTP yet — wait for accept.
+          setIsLoading(false);
+          return;
+        }
+      }
+    } catch {
+      // Consent pre-check failed — fail-open, proceed to OTP without gating.
+      // The user will be re-prompted post-verify on their next login.
+    }
+
+    await proceedToOtp(ident, exists, resolvedName, resolvedSignupExtras);
+  };
+
+  // Resolve the DOB step: minor -> guardian flow (before their own OTP);
+  // adult -> ordinary consent + OTP. DOB (month/year) rides along in
+  // signupExtras so otp-page persists it post-verify.
+  const handleSignupDob = async (date: Date) => {
+    const gate = signupDobGate;
+    if (!gate) return;
+    const birthYear = date.getFullYear();
+    const birthMonth = date.getMonth() + 1;
+    const extras: SignupExtras = { domain: gate.domain, birthMonth, birthYear };
+    setSignupDobGate(null);
+
+    if (isMinorFromBirth(birthYear, birthMonth)) {
+      setSignupGuardianGate({
+        identifier: gate.identifier,
+        domain: gate.domain,
+        birthYear,
+        birthMonth,
+        resolvedName: gate.resolvedName,
+        resolvedSignupExtras: extras,
+      });
+      return;
+    }
+
+    setIsLoading(true);
+    try {
+      await runConsentThenOtp(gate.identifier, false, gate.resolvedName, extras);
+    } catch {
+      toast.error(t('auth.toast_send_code_error'), {
+        description: t('auth.toast_send_code_error_desc'),
+      });
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!contactValue.trim()) return;
@@ -224,11 +326,11 @@ export function LoginPage() {
         return;
       }
 
-      // Domain confirmed here (Domain select is populated from the served
-      // network's own schema — see the networkDomains effect above) + DOB
-      // (month/year only) are required alongside the name for every new
-      // signup, never for a returning user.
-      if (!exists && (!name.trim() || !domain || !birthMonth || !birthYear)) {
+      // Domain is confirmed on the signup form (select populated from the
+      // served network's own schema — see the networkDomains effect above),
+      // alongside the name. DOB is NOT asked here: it's a separate step shown
+      // only for guardian-gated domains (below), never for a returning user.
+      if (!exists && (!name.trim() || !domain)) {
         setIsLoading(false);
         toast.info(t('auth.toast_one_more_step'), {
           description: t('auth.toast_one_more_step_desc'),
@@ -237,87 +339,21 @@ export function LoginPage() {
       }
 
       const resolvedName = exists ? '' : name;
-      const resolvedSignupExtras: SignupExtras | null = exists
-        ? null
-        : { domain, birthMonth: Number(birthMonth), birthYear: Number(birthYear) };
 
-      // U18 option A: a brand-new MINOR signing up in a guardian-gated domain
-      // must clear the guardian OTP BEFORE their own OTP. The guardian flow
-      // (materializeSignupGuardian) records the u18 terms/privacy as
-      // guardian-sourced, so skip the adult self-consent gate here entirely.
-      // The server re-checks minor + gated + served and is authoritative.
+      // A brand-new signup in a guardian-gated (u18-enabled) domain collects
+      // DOB in a SEPARATE next step. Ungated domains (e.g. provider) skip DOB
+      // entirely and go straight to consent + OTP. The server stays
+      // authoritative on minor + gated + served.
       const gatedDomain =
-        networkDomains.find((d) => d.id === domain)?.guardian_consent_required ?? false;
-      if (
-        resolvedSignupExtras &&
-        gatedDomain &&
-        isMinorFromBirth(resolvedSignupExtras.birthYear, resolvedSignupExtras.birthMonth)
-      ) {
-        setSignupGuardianGate({
-          identifier,
-          domain,
-          birthYear: resolvedSignupExtras.birthYear,
-          birthMonth: resolvedSignupExtras.birthMonth,
-          resolvedName,
-          resolvedSignupExtras,
-        });
+        !exists && (networkDomains.find((d) => d.id === domain)?.guardian_consent_required ?? false);
+      if (gatedDomain) {
+        setSignupDobGate({ identifier, domain, resolvedName });
         setIsLoading(false);
-        return; // Do NOT send the ward's OTP yet — wait for guardian verify.
+        return; // DOB step renders next; no OTP yet.
       }
 
-      // Evaluate consent before sending the OTP. This is best-effort (public
-      // endpoint, client-side); on any failure we proceed without gating — the
-      // user will be re-prompted post-verify on the next login (spec §1.1).
-      try {
-        // Normalize the phone to the canonical E.164 form auth stores; otherwise
-        // the exact-match lookup in status-by-identifier misses a returning user
-        // and the T&C gate re-prompts every login (see consentStatusIdentifier).
-        const identifierParam = consentStatusIdentifier(identifier);
-
-        const [consentStatus, configEntries] = await Promise.all([
-          getConsentStatusByIdentifier({ network: themeId, ...identifierParam }),
-          fetchConsentConfigs(themeId),
-        ]);
-
-        const networkDefault = configEntries.find((e) => e.brand === null);
-        if (networkDefault) {
-          const brandEntry = brand && brand !== 'standard'
-            ? configEntries.find((e) => e.brand === brand)
-            : undefined;
-          const mergedConfig = mergeConsentConfig(networkDefault.schema, brandEntry?.schema);
-
-          const needed = (['terms', 'privacy'] as const).filter(
-            (c) => !consentStatus.statuses[c].includes(mergedConfig.documents[c].current_version),
-          );
-
-          if (needed.length > 0) {
-            setPendingIdentifier(identifier);
-            setPendingUserExists(exists);
-            setPendingName(resolvedName);
-            setPendingSignupExtras(resolvedSignupExtras);
-            setConsentGate({
-              config: mergedConfig,
-              pendingConsent: {
-                network: themeId,
-                brand: brand !== 'standard' ? brand : null,
-                source: exists ? 'login' : 'signup',
-                items: needed.map((c) => ({
-                  category: c,
-                  version: mergedConfig.documents[c].current_version,
-                })),
-              },
-            });
-            // Do NOT send OTP yet — wait for accept.
-            setIsLoading(false);
-            return;
-          }
-        }
-      } catch {
-        // Consent pre-check failed — fail-open, proceed to OTP without gating.
-        // The user will be re-prompted post-verify on their next login.
-      }
-
-      await proceedToOtp(identifier, exists, resolvedName, resolvedSignupExtras);
+      const resolvedSignupExtras: SignupExtras | null = exists ? null : { domain };
+      await runConsentThenOtp(identifier, exists, resolvedName, resolvedSignupExtras);
     } catch {
       toast.error(t('auth.toast_send_code_error'), {
         description: t('auth.toast_send_code_error_desc'),
@@ -329,6 +365,9 @@ export function LoginPage() {
 
   return (
     <>
+      {signupDobGate && (
+        <SignupDobStep onSubmit={(date) => { void handleSignupDob(date); }} />
+      )}
       {signupGuardianGate && (
         <SignupGuardianFlow
           network={themeId}
@@ -471,51 +510,32 @@ export function LoginPage() {
             </div>
           )}
 
-          {/* Domain + DOB — captured once, at signup, alongside the name.
-              Domain is confirmed here; DOB (month/year only) is persisted
-              post-OTP-verify via submitU18Dob (see otp-page.tsx). */}
+          {/* Domain — confirmed at signup alongside the name (select populated
+              from the served network's own schema). DOB is NOT asked here: it's
+              a separate step shown only for guardian-gated domains. */}
           {userExists === false && !signupBlocked && (
-            <>
-              <div className="space-y-1.5">
-                <Label htmlFor="signup-domain" className="text-sm font-medium">
-                  {t('auth.label_domain', 'Your Domain')}
-                </Label>
-                <select
-                  id="signup-domain"
-                  value={domain}
-                  onChange={(e) => setDomain(e.target.value)}
-                  disabled={isLoading}
-                  required
-                  className="h-11 w-full rounded-md border border-input bg-transparent px-3 text-sm shadow-xs outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50"
-                >
-                  <option value="" disabled>
-                    {t('auth.domain_placeholder', 'Select one')}
+            <div className="space-y-1.5">
+              <Label htmlFor="signup-domain" className="text-sm font-medium">
+                {t('auth.label_domain', 'Your Domain')}
+              </Label>
+              <select
+                id="signup-domain"
+                value={domain}
+                onChange={(e) => setDomain(e.target.value)}
+                disabled={isLoading}
+                required
+                className="h-11 w-full rounded-md border border-input bg-transparent px-3 text-sm shadow-xs outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50"
+              >
+                <option value="" disabled>
+                  {t('auth.domain_placeholder', 'Select one')}
+                </option>
+                {domainOptions.map((d) => (
+                  <option key={d.id} value={d.id}>
+                    {domainLabel(d)}
                   </option>
-                  {domainOptions.map((d) => (
-                    <option key={d.id} value={d.id}>
-                      {domainLabel(d)}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              <div className="space-y-1.5">
-                <Label htmlFor="signup-dob" className="text-sm font-medium">
-                  {t('auth.label_dob', 'Date of birth')}
-                </Label>
-                <DobCalendar
-                  id="signup-dob"
-                  value={birthDate}
-                  disabled={isLoading}
-                  placeholder={t('auth.dob_placeholder', 'Select date of birth')}
-                  onChange={(d) => {
-                    setBirthDate(d);
-                    setBirthMonth(String(d.getMonth() + 1));
-                    setBirthYear(String(d.getFullYear()));
-                  }}
-                />
-              </div>
-            </>
+                ))}
+              </select>
+            </div>
           )}
 
           {signupBlocked && (

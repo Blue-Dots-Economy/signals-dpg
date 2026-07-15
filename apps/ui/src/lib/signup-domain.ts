@@ -18,8 +18,11 @@
  * never see these fields and never trigger this path. */
 export interface SignupExtras {
   domain: string;
-  birthMonth: number;
-  birthYear: number;
+  // DOB is captured in a SEPARATE step AFTER the signup form, and only when
+  // the chosen domain is guardian-gated (u18-enabled). For an ungated domain
+  // (e.g. provider) it is never collected, so both are optional here.
+  birthMonth?: number;
+  birthYear?: number;
 }
 
 const STORAGE_KEY_PREFIX = 'signupDomain:';

@@ -113,10 +113,15 @@ export function OtpPage() {
         // Hand the chosen domain off to profile-form-page (one-shot; it
         // clears this once read) so profile creation doesn't ask again.
         setStoredSignupDomain(themeId, domain);
-        try {
-          await submitU18Dob({ network: themeId, birthMonth, birthYear });
-        } catch {
-          toast.error(t('auth.toast_consent_persist_error', 'Could not save your consent. You may be asked again next time.'));
+        // DOB is only collected for guardian-gated domains (a separate signup
+        // step); ungated signups carry no birth data, so there's nothing to
+        // persist here.
+        if (typeof birthMonth === 'number' && typeof birthYear === 'number') {
+          try {
+            await submitU18Dob({ network: themeId, birthMonth, birthYear });
+          } catch {
+            toast.error(t('auth.toast_consent_persist_error', 'Could not save your consent. You may be asked again next time.'));
+          }
         }
       }
 
