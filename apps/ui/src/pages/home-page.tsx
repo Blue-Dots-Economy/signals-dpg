@@ -7,6 +7,8 @@ import type {
   DotNetworkSchema,
   DotNetworkDomain,
   DotActionSchema,
+  DotCardConfig,
+  MapMarker,
   ViewMode,
 } from '@/engine/types';
 import { PageShell } from '@/components/layout/page-shell';
@@ -56,6 +58,10 @@ import { useMyItems } from '@/hooks/use-my-items';
 import { useBrowseItems } from '@/hooks/use-browse-items';
 import { useInfiniteBrowseItems } from '@/hooks/use-infinite-browse-items';
 import { useProfileConsentStatus } from '@/hooks/use-profile-consent-status';
+import { useMapMarkers } from '@/hooks/use-map-markers';
+import type { MapViewport } from '@/hooks/use-map-markers';
+import { useItemDetail } from '@/hooks/use-item-detail';
+import type { Marker as NetworkMarker } from '@/lib/network-api';
 import { useQueryClient } from '@tanstack/react-query';
 import { queryKeys } from '@/lib/query-keys';
 
@@ -201,6 +207,70 @@ function DomainPagedFetch({
   return null;
 }
 
+// Task 6 (#203 §5.2): a map marker's popup lazily fetches the full item only
+// once the popup is actually shown — the active `MapProvider` only invokes
+// `renderPopup(marker)` while a marker is selected/open (see
+// `google-maps-provider.tsx` / `leaflet-provider.tsx`), so this component's
+// `useItemDetail` call only fires for the marker the user clicked, not for
+// every viewport marker. Hooks can't be called inside the `renderPopup`
+// callback itself, hence a standalone component (mirrors the
+// `DomainPagedFetch` pattern above) rather than an inline hook call.
+function MarkerDetailPopup({
+  networkId,
+  marker,
+  sourceMarker,
+  schema,
+  cardConfig,
+  localItem,
+  connectAction,
+  onConnect,
+}: {
+  networkId: string | null;
+  marker: MapMarker;
+  // The `Marker` (network-api) this popup's marker was derived from — carries
+  // `item_instance_url` for routed fetches, which the lightweight `MapMarker`
+  // shape does not.
+  sourceMarker: NetworkMarker | undefined;
+  schema?: RJSFSchema;
+  cardConfig?: DotCardConfig | null;
+  localItem: Item | null;
+  connectAction?: DotActionSchema;
+  onConnect?: (baseItemId: string) => void;
+}) {
+  const { t } = useTranslation();
+  // Marker ids are `${item_id}#${locationIndex}` — strip the suffix to look up the item.
+  const baseItemId = marker.id.includes('#') ? marker.id.split('#')[0] : marker.id;
+
+  const { item, isLoading } = useItemDetail(
+    networkId,
+    sourceMarker
+      ? {
+          item_id: baseItemId,
+          item_domain: sourceMarker.item_domain,
+          item_instance_url: sourceMarker.item_instance_url,
+        }
+      : null,
+  );
+
+  if (!sourceMarker || isLoading || !item) {
+    return (
+      <div className="p-3 text-sm text-muted-foreground">{t('map.loading_detail')}</div>
+    );
+  }
+
+  return (
+    <MarkerPopupCard
+      marker={marker}
+      schema={schema}
+      cardConfig={cardConfig}
+      actions={localItem && connectAction ? [connectAction] : []}
+      onConnect={localItem && connectAction ? () => onConnect?.(baseItemId) : undefined}
+      localItem={localItem}
+      networkItem={item}
+    />
+  );
+}
+
 function parseNetworkIds(networkEnv: string | undefined): string[] {
   if (!networkEnv) return [];
   return networkEnv.split(',').map(n => n.trim()).filter(Boolean);
@@ -316,6 +386,13 @@ export function HomePage() {
     }
     return result;
   });
+  // Map viewport (Task 6, #203 §5.2): null until the map reports its first
+  // `onViewportChange` (debounced pan/zoom settle). The map's own initial
+  // center/zoom comes from the existing `focusPoint`/`userLocation`/default
+  // logic below — this state only tracks what the map has told us it's
+  // actually showing, so `useMapMarkers` stays disabled (no markers query)
+  // until that first report lands.
+  const [mapViewport, setMapViewport] = React.useState<MapViewport | null>(null);
   const configuredNetworkIds = parseNetworkIds(import.meta.env.VITE_NETWORK_ID);
   // The set of domains this deployment serves (VITE_SERVED_BINDINGS), or null
   // when unset (serve all domains). When exactly ONE domain is served, that is
@@ -577,6 +654,35 @@ export function HomePage() {
       });
     }
   }, [network, selectedDomain, visibleDomains, setSearchParams]);
+
+  // Task 6 (#203 §5.2): the map view is now sourced from viewport-scoped
+  // markers rather than the full `domainItems` browse feed. Map enum-field
+  // filtering (mapSelectedFields) is DEFERRED in P4 — `useMapMarkers` is never
+  // given `item_state`/enum fields; a server-side typed/OR filter is a
+  // documented follow-up. `MapFiltersPanel` stays mounted (domain selection
+  // still narrows `visibleDomains` upstream via the map's own filter state),
+  // but enum-field selections have no effect on which markers are fetched.
+  const mapMarkers = useMapMarkers(network, visibleDomains, mapViewport);
+
+  // The map's own domain multi-select still narrows what's shown — applied
+  // client-side to the fetched markers (every `Marker` already carries
+  // `item_domain`), same "skip the whole domain when not selected" rule as
+  // `buildFilteredCardsForDomain` uses for the list view. This is distinct
+  // from the deferred enum-field filter above: domain filtering needs no
+  // server support, it's just an array membership check.
+  const mapItems = React.useMemo(
+    () =>
+      mapMarkers.markers
+        .filter(
+          (m) => mapSelectedDomains.length === 0 || mapSelectedDomains.includes(m.item_domain),
+        )
+        .map((m) => ({
+          id: m.item_id,
+          domain: m.item_domain,
+          data: { item_locations: m.item_locations },
+        })),
+    [mapMarkers.markers, mapSelectedDomains],
+  );
 
   const localProfileItemIds = React.useMemo(
     () => new Set(myItems.filter((item) => item.item_domain === currentDomain).map((item) => item.item_id)),
@@ -1540,46 +1646,59 @@ export function HomePage() {
                 })()}
               </>
             ) : (
-              <MapView
-                schema={activeSchema!}
-                resolveMarkerLabel={resolveMarkerLabel}
-                items={Object.values(filteredDomainItems).flat()}
-                focusPoint={userLocation}
-                focusNonce={recenterNonce}
-                filtersSlot={filtersPanel}
-                renderPopup={(marker) => {
-                  // Marker ids are `${item_id}#${locationIndex}` — strip the suffix to look up the item.
-                  const baseItemId = marker.id.includes('#') ? marker.id.split('#')[0] : marker.id;
-                  const fullItem =
-                    (marker.domain
-                      ? domainItems[marker.domain]
-                      : Object.values(domainItems).flat()
-                    )?.find((i) => i.item_id === baseItemId) ?? null;
-                  const domainActions = marker.domain ? getActionsForDomain(marker.domain) : [];
-                  const connectAction = domainActions[0];
-                  const markerDomain = marker.domain
-                    ? network?.domains.find((d) => d.id === marker.domain)
-                    : undefined;
-                  const markerSchema = markerDomain?.item_schemas
-                    ? (Object.values(markerDomain.item_schemas)[0] as import('@rjsf/utils').RJSFSchema)
-                    : activeSchema;
-                  return (
-                    <MarkerPopupCard
-                      marker={marker}
-                      schema={markerSchema}
-                      cardConfig={markerDomain?.card}
-                      actions={myItem && connectAction ? [connectAction] : []}
-                      onConnect={
-                        myItem && connectAction
-                          ? () => triggerAction(connectAction.action_type, connectAction, baseItemId)
-                          : undefined
-                      }
-                      localItem={myItem}
-                      networkItem={fullItem}
-                    />
-                  );
-                }}
-              />
+              <div className="relative h-full">
+                <MapView
+                  schema={activeSchema!}
+                  resolveMarkerLabel={resolveMarkerLabel}
+                  items={mapItems}
+                  focusPoint={userLocation}
+                  focusNonce={recenterNonce}
+                  filtersSlot={filtersPanel}
+                  onViewportChange={setMapViewport}
+                  renderPopup={(marker) => {
+                    // Marker ids are `${item_id}#${locationIndex}` — strip the suffix to look up the item.
+                    const baseItemId = marker.id.includes('#') ? marker.id.split('#')[0] : marker.id;
+                    const sourceMarker = mapMarkers.markers.find(
+                      (m) =>
+                        m.item_id === baseItemId &&
+                        (!marker.domain || m.item_domain === marker.domain),
+                    );
+                    const domainActions = marker.domain ? getActionsForDomain(marker.domain) : [];
+                    const connectAction = domainActions[0];
+                    const markerDomain = marker.domain
+                      ? network?.domains.find((d) => d.id === marker.domain)
+                      : undefined;
+                    const markerSchema = markerDomain?.item_schemas
+                      ? (Object.values(markerDomain.item_schemas)[0] as import('@rjsf/utils').RJSFSchema)
+                      : activeSchema;
+                    return (
+                      <MarkerDetailPopup
+                        networkId={network?.id ?? null}
+                        marker={marker}
+                        sourceMarker={sourceMarker}
+                        schema={markerSchema}
+                        cardConfig={markerDomain?.card}
+                        localItem={myItem}
+                        connectAction={connectAction}
+                        onConnect={(itemId) => {
+                          if (connectAction) triggerAction(connectAction.action_type, connectAction, itemId);
+                        }}
+                      />
+                    );
+                  }}
+                />
+                {/* Federation-degradation indicator (#203 §6): some peer instances
+                    didn't answer in time, so the viewport marker set is known-partial.
+                    `fixed` (not `absolute`) so it stays visible above the map's own
+                    maximize overlay (z-[1000]) in both normal and maximized mode. */}
+                {mapMarkers.partial && (
+                  <div className="pointer-events-none fixed left-1/2 top-20 z-[2100] -translate-x-1/2 px-4">
+                    <p className="pointer-events-auto rounded-md bg-amber-50 px-3 py-1.5 text-xs font-medium text-amber-900 shadow-md ring-1 ring-amber-300 dark:bg-amber-950 dark:text-amber-100 dark:ring-amber-800">
+                      {t('home.map_partial')}
+                    </p>
+                  </div>
+                )}
+              </div>
             )
           }
         </ActionHandler>
