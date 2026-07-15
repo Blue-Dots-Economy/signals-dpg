@@ -1,5 +1,6 @@
 import { randomInt } from 'node:crypto';
 import { redis } from '@api/db/secondary/redis';
+import { getNotificationClient } from '@/utils/notificationClient';
 
 /** Codes the primitive raises; callers map these to HTTP responses. */
 export class GuardianOtpError extends Error {
@@ -38,7 +39,7 @@ export async function issueGuardianOtp(args: {
   scope: string;
   contact: string;
   contactType: GuardianContactType;
-  send: OtpSend;
+  send?: OtpSend;
 }): Promise<void> {
   const rk = rateKey(args.scope);
   const count = await redis.incr(rk);
@@ -51,7 +52,8 @@ export async function issueGuardianOtp(args: {
 
   const otp = generateOtp();
   await redis.set(codeKey(args.scope), otp, 'EX', GUARDIAN_OTP_TTL_SEC);
-  await args.send({ contact: args.contact, contactType: args.contactType, otp });
+  const send = args.send ?? defaultGuardianOtpSend;
+  await send({ contact: args.contact, contactType: args.contactType, otp });
 }
 
 /**
@@ -69,3 +71,36 @@ export async function verifyGuardianOtp(args: {
   }
   return false;
 }
+
+// Notification channel per guardian contact type (spec D7). WhatsApp is not
+// wired — do not add it here.
+const CHANNEL_BY_CONTACT_TYPE: Record<GuardianContactType, 'sms' | 'email'> = {
+  phone: 'sms',
+  email: 'email',
+};
+
+// TODO(#9): finalize ONEST guardian-OTP templates. Placeholder ids until then.
+const GUARDIAN_OTP_TEMPLATE_ID: Record<'sms' | 'email', string> = {
+  sms: 'guardian_otp_sms',
+  email: 'guardian_otp_email',
+};
+
+/**
+ * Default dispatch: pick the channel from the guardian's contact type and send
+ * via the shared notification client. Hard-fails when no provider is
+ * configured — a guardian-required domain must not silently skip verification.
+ */
+export const defaultGuardianOtpSend: OtpSend = async ({ contact, contactType, otp }) => {
+  const client = getNotificationClient();
+  if (!client) {
+    throw new GuardianOtpError('NO_OTP_PROVIDER');
+  }
+  const channel = CHANNEL_BY_CONTACT_TYPE[contactType];
+  await client.notify({
+    channel,
+    template_id: GUARDIAN_OTP_TEMPLATE_ID[channel],
+    to: contact,
+    priority: 'realtime',
+    variables: { otp },
+  });
+};
