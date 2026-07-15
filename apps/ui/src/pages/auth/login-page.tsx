@@ -479,6 +479,8 @@ export function LoginPage() {
                 id="contact"
                 type="tel"
                 inputMode="tel"
+                // Cap at E.164 max: "+" plus 15 digits.
+                maxLength={16}
                 placeholder={t('auth.placeholder_phone')}
                 value={phoneNumber}
                 onChange={(e) => setPhoneNumber(sanitizePhoneInput(e.target.value))}
