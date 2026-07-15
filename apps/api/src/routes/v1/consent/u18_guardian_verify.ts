@@ -44,10 +44,8 @@ export const u18_guardian_verify_handler = async (request: Req, reply: FastifyRe
     throw err;
   }
 
-  const ok = await verifyGuardianOtp({ scope, otp: body.otp });
-  if (!ok) return reply.code(400).send({ error: 'INVALID_OTP', message: 'OTP is invalid or expired' });
-
-  // Resolve u18 versions for the guardian's user-level consents.
+  // Resolve u18 versions for the guardian's user-level consents BEFORE consuming
+  // the single-use OTP, so a misconfigured version doesn't burn a valid OTP.
   const rows = [];
   for (const category of GUARDIAN_USER_DOCS) {
     const version = await resolveConsentVersion({ network: body.network, brand: body.brand, category, variant: 'u18' });
@@ -66,6 +64,9 @@ export const u18_guardian_verify_handler = async (request: Req, reply: FastifyRe
       metadata: { variant: 'u18' } as Record<string, unknown>,
     });
   }
+
+  const ok = await verifyGuardianOtp({ scope, otp: body.otp });
+  if (!ok) return reply.code(400).send({ error: 'INVALID_OTP', message: 'OTP is invalid or expired' });
 
   try {
     await db.insert(consent_record).values(rows);

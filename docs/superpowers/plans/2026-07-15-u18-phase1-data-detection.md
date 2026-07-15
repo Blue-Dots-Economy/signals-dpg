@@ -34,7 +34,7 @@
 ```ts
 // apps/api/src/services/__tests__/minor.test.ts
 import { describe, it, expect } from 'vitest';
-import { isMinor } from '@api/services/minor';
+import { isMinor } from '@/services/minor';
 
 // Fixed reference "today" so the assertions are deterministic.
 const NOW = new Date(Date.UTC(2026, 6, 15)); // 2026-07-15
@@ -116,10 +116,13 @@ git commit -m "feat(u18): add isMinor derivation helper (year+month, conservativ
 ### Task 2: `minor_guardian` table + migration
 
 **Files:**
-- Create: `apps/api/db/postgres/schema/minor_guardian.ts`
+- Create: `apps/api/db/postgres/schema/minor_guardian.ts` (Drizzle schema — ORM + local `db:push`)
 - Modify: `apps/api/db/postgres/schema/index.ts` (add the re-export)
-- Generated: `apps/api/drizzle/*` (via `pnpm db:generate:api` — do not hand-edit)
+- Create: `packages/database/src/utils/sql_scripts/minor_guardian.sql` (hand-written idempotent DDL — deploy source)
+- Modify: `scripts/generate-schema-bundle.mjs` (add the new source to `FILES`)
 - Generated: `apps/api/db/postgres/schema.sql` (via `pnpm schema:bundle`)
+
+> **Repo mechanism note:** This repo maintains schema in **two** places that must agree: the Drizzle TS (used by the ORM and by local `pnpm db:push:api`) and the hand-written SQL DDL under `packages/database/src/utils/sql_scripts/` that `scripts/generate-schema-bundle.mjs` assembles into `schema.sql` (the deploy migrate-job artifact). We do **not** run `db:generate` here — incremental Drizzle migrations are not this repo's apply path (local = `db:push`, deploy = bundled `schema.sql`), and `db:generate` currently prompts interactively due to pre-existing journal drift. Add both artifacts and regenerate the bundle.
 
 **Interfaces:**
 - Produces: Drizzle table `minor_guardian` with columns `user_id` (PK), `birth_year`, `birth_month`, `guardian_name`, `guardian_contact`, `guardian_contact_type`, `guardian_verified`, `created_at`, `updated_at`. Later phases import `{ minor_guardian }` from the schema barrel.
@@ -165,22 +168,53 @@ export * from './minor_guardian';
 Run: `pnpm --filter api exec tsc --noEmit`
 Expected: exit 0, no errors.
 
-- [ ] **Step 4: Generate the migration**
+- [ ] **Step 4: Write the deploy DDL source**
 
-Run: `pnpm db:generate:api`
-Expected: a new file under `apps/api/drizzle/` creating `minor_guardian` (a `CREATE TABLE "minor_guardian" (...)`). Do not edit it by hand.
+```sql
+-- packages/database/src/utils/sql_scripts/minor_guardian.sql
+--
+-- Idempotent DDL for the U18 guardian-consent record. Mirrors the Drizzle
+-- definition in apps/api/db/postgres/schema/minor_guardian.ts.
+--
+-- One row per ward (better-auth user_id). birth_year/birth_month are
+-- plaintext (no exact day); is_minor is DERIVED at read time, never stored.
+-- guardian_name/guardian_contact hold PII (encrypted at the write path in a
+-- later phase). No FKs — app-level integrity only.
 
-- [ ] **Step 5: Regenerate the deploy schema bundle**
+CREATE TABLE IF NOT EXISTS minor_guardian (
+  user_id                text      PRIMARY KEY,
+  birth_year             integer   NOT NULL,
+  birth_month            integer   NOT NULL,
+  guardian_name          text,
+  guardian_contact       text,
+  guardian_contact_type  text,
+  guardian_verified      boolean   NOT NULL DEFAULT false,
+  created_at             timestamp NOT NULL DEFAULT now(),
+  updated_at             timestamp NOT NULL DEFAULT now()
+);
+```
+
+- [ ] **Step 5: Register the source in the bundle generator**
+
+In `scripts/generate-schema-bundle.mjs`, add `'minor_guardian.sql'` to the `FILES` array, immediately after the `'consent_record.sql'` entry:
+
+```js
+  'consent_record.sql',        // consent ledger (no FKs — append-only)
+  'minor_guardian.sql',        // U18 guardian-consent record (no FKs)
+```
+
+- [ ] **Step 6: Regenerate + verify the deploy bundle**
 
 Run: `pnpm schema:bundle`
-Then verify it matches: `pnpm schema:bundle:check`
-Expected: `schema.sql` now contains `minor_guardian`; the check passes.
+Expected: `wrote …/schema.sql (… bytes, 7 sources)` and `schema.sql` now contains `minor_guardian`.
+Then: `pnpm schema:bundle:check`
+Expected: the check passes (bundle matches the checked-in file).
 
-- [ ] **Step 6: Commit**
+- [ ] **Step 7: Commit**
 
 ```bash
-git add apps/api/db/postgres/schema/minor_guardian.ts apps/api/db/postgres/schema/index.ts apps/api/drizzle apps/api/db/postgres/schema.sql
-git commit -m "feat(u18): add minor_guardian table + migration"
+git add apps/api/db/postgres/schema/minor_guardian.ts apps/api/db/postgres/schema/index.ts packages/database/src/utils/sql_scripts/minor_guardian.sql scripts/generate-schema-bundle.mjs apps/api/db/postgres/schema.sql
+git commit -m "feat(u18): add minor_guardian table (drizzle schema + deploy DDL + bundle)"
 ```
 
 ---
@@ -211,7 +245,7 @@ In `packages/schemas/src/network_workflow.ts`, inside the `NetworkDomainSchema =
 Append to `apps/api/src/services/__tests__/minor.test.ts`:
 
 ```ts
-import { guardianConsentRequired } from '@api/services/minor';
+import { guardianConsentRequired } from '@/services/minor';
 import type { NetworkConfigDocument } from '@dpg/schemas';
 
 const cfg = {
