@@ -197,10 +197,13 @@ export const create_item_handler = async (
         created_by: userId,
         // A self-create that carries consent IS the profile_creation acceptance,
         // so classify with it now (#275 gated `live` on consent but never let
-        // the create path see it → profiles were stuck `draft`). The consent
-        // row is written just below in the same transaction; a consent-write
-        // failure rolls the whole create back (fail-closed). Admin/bulk callers
-        // omit this and stay draft, promoted later via /consent/profile-accept.
+        // the create path see it → profiles were stuck `draft`). Keyed on
+        // presence, not `body.consent.category`: the consent row + version are
+        // server-resolved to `profile_creation` (the only create-time consent
+        // category), so any consent block present is that acceptance. The row is
+        // written just below in the same transaction; a consent-write failure
+        // rolls the whole create back (fail-closed). Admin/bulk callers omit
+        // this and stay draft, promoted later via /consent/profile-accept.
         consent_accepted: body.consent != null,
       });
 
