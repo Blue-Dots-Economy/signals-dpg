@@ -55,7 +55,6 @@ import { useConsentConfig } from '@/hooks/use-consent-config';
 import { useNetworkTheme } from '@/theme/theme-provider';
 import { ProfileConsentModal } from '@/components/consent/profile-consent-modal';
 import { useMyItems } from '@/hooks/use-my-items';
-import { useBrowseItems } from '@/hooks/use-browse-items';
 import { useInfiniteBrowseItems } from '@/hooks/use-infinite-browse-items';
 import { useProfileConsentStatus } from '@/hooks/use-profile-consent-status';
 import { useMapMarkers } from '@/hooks/use-map-markers';
@@ -95,9 +94,11 @@ function sortItemsByNearest<T>(
 }
 
 // Shared card filter: search text + enum-field filters + the map's domain
-// multi-select. Used by both the (still-map/All-tab-driving) `filteredDomainItems`
-// memo and the paged single-domain list, so the predicate is defined exactly
-// once (§Task5 constraint: reuse, do not duplicate).
+// multi-select. Used by both the paged single-domain list (`singleDomainCards`)
+// and the "All" tab's merged paged union (`filteredAllDomainItems`), so the
+// predicate is defined exactly once (§Task5 constraint: reuse, do not
+// duplicate). (Task 7, #203 §5.2: the old full-fetch `filteredDomainItems`
+// caller was removed — the map reads viewport markers, not this filter.)
 function buildFilteredCardsForDomain(
   domainId: string,
   items: Item[],
@@ -172,6 +173,10 @@ interface DomainPageState {
   items: Item[];
   hasMore: boolean;
   total: number;
+  // Task 7 (#203 §5.2 cleanup): lifted so the "All" tab's loading gate can
+  // read the paged hooks directly instead of the removed full `useBrowseItems`
+  // fetch (resolves the P3-deferred loading-flash minor).
+  isLoading: boolean;
   fetchNext: () => void;
 }
 
@@ -190,20 +195,27 @@ function DomainPagedFetch({
   network: DotNetworkSchema;
   domain: DotNetworkDomain;
   coords: { lat: number; lng: number } | null;
-  onItems: (domainId: string, items: Item[], hasMore: boolean, total: number, fetchNext: () => void) => void;
+  onItems: (
+    domainId: string,
+    items: Item[],
+    hasMore: boolean,
+    total: number,
+    isLoading: boolean,
+    fetchNext: () => void,
+  ) => void;
 }): null {
   const list = useInfiniteBrowseItems(network, domain, coords);
   // `list.items` is a fresh array on every render (the hook doesn't memoize
   // it), so this effect refires on every plain re-render too. That's fine:
   // `onItems` (`handleDomainItems`) is idempotent — it bails out of its
   // `setState` when the lifted data is unchanged (element-wise reference
-  // equality on `items`, plus `hasMore`/`total`), so a plain re-render never
-  // causes a further re-render here. This is what lets a same-length
-  // refetch (new item object refs, edited `item_state`) still get lifted —
-  // gating on `items.length` would silently drop that update.
+  // equality on `items`, plus `hasMore`/`total`/`isLoading`), so a plain
+  // re-render never causes a further re-render here. This is what lets a
+  // same-length refetch (new item object refs, edited `item_state`) still
+  // get lifted — gating on `items.length` would silently drop that update.
   React.useEffect(() => {
-    onItems(domain.id, list.items, list.hasNextPage, list.total, list.fetchNextPage);
-  }, [domain.id, list.items, list.hasNextPage, list.total, list.fetchNextPage, onItems]);
+    onItems(domain.id, list.items, list.hasNextPage, list.total, list.isLoading, list.fetchNextPage);
+  }, [domain.id, list.items, list.hasNextPage, list.total, list.isLoading, list.fetchNextPage, onItems]);
   return null;
 }
 
@@ -224,6 +236,7 @@ function MarkerDetailPopup({
   localItem,
   connectAction,
   onConnect,
+  onItemResolved,
 }: {
   networkId: string | null;
   marker: MapMarker;
@@ -236,6 +249,15 @@ function MarkerDetailPopup({
   localItem: Item | null;
   connectAction?: DotActionSchema;
   onConnect?: (baseItemId: string) => void;
+  // Task 7 (#203 §5.2 cleanup): lifts this popup's already-fetched full item
+  // up to the parent. Home-page's `onActionSubmit` needs the full `Item`
+  // (network/domain/type/instance_url) to build a connect-action's
+  // `target_item`, but a map-only item (one loaded via viewport markers, never
+  // paged into the list feeds) has no other source now that the full
+  // `useBrowseItems` fetch is gone — this reuses the popup's own
+  // `useItemDetail` result instead of re-fetching or reintroducing a full
+  // browse feed.
+  onItemResolved?: (item: Item) => void;
 }) {
   const { t } = useTranslation();
   // Marker ids are `${item_id}#${locationIndex}` — strip the suffix to look up the item.
@@ -251,6 +273,10 @@ function MarkerDetailPopup({
         }
       : null,
   );
+
+  React.useEffect(() => {
+    if (item) onItemResolved?.(item);
+  }, [item, onItemResolved]);
 
   if (!sourceMarker || isLoading || !item) {
     return (
@@ -393,6 +419,10 @@ export function HomePage() {
   // actually showing, so `useMapMarkers` stays disabled (no markers query)
   // until that first report lands.
   const [mapViewport, setMapViewport] = React.useState<MapViewport | null>(null);
+  // The full `Item` most recently resolved by an open marker popup's
+  // `useItemDetail` fetch (Task 7, #203 §5.2 cleanup) — see
+  // `MarkerDetailPopup`'s `onItemResolved` doc comment for why this exists.
+  const [mapDetailItem, setMapDetailItem] = React.useState<Item | null>(null);
   const configuredNetworkIds = parseNetworkIds(import.meta.env.VITE_NETWORK_ID);
   // The set of domains this deployment serves (VITE_SERVED_BINDINGS), or null
   // when unset (serve all domains). When exactly ONE domain is served, that is
@@ -656,7 +686,8 @@ export function HomePage() {
   }, [network, selectedDomain, visibleDomains, setSearchParams]);
 
   // Task 6 (#203 §5.2): the map view is now sourced from viewport-scoped
-  // markers rather than the full `domainItems` browse feed. Map enum-field
+  // markers rather than a full per-domain browse feed (that full fetch was
+  // removed from this page entirely in Task 7). Map enum-field
   // filtering (mapSelectedFields) AND the top-bar free-text `search` are BOTH
   // DEFERRED for the map in P4: viewport markers are slim (coords only, no
   // item_state), so neither the enum-field filter nor a text match can run
@@ -694,28 +725,6 @@ export function HomePage() {
     [myItems, currentDomain]
   );
 
-  // Which domains to fetch: All-tab (null) = every visible domain; else the one.
-  const domainsToFetch = React.useMemo(
-    () =>
-      selectedDomain === null
-        ? visibleDomains
-        : visibleDomains.filter((d) => d.id === selectedDomain),
-    [selectedDomain, visibleDomains],
-  );
-
-  // Browse feed (cached per domain, ~90s). Raw items come back; filter out the
-  // user's own items here (a view concern) so the cache holds the true server
-  // response and survives domain-tab switches without refetching.
-  const { data: browseData, isLoading: loading } = useBrowseItems(network, domainsToFetch);
-
-  const domainItems = React.useMemo<Record<string, Item[]>>(() => {
-    const filtered: Record<string, Item[]> = {};
-    for (const [domainId, items] of Object.entries(browseData)) {
-      filtered[domainId] = items.filter((it) => !localProfileItemIds.has(it.item_id));
-    }
-    return filtered;
-  }, [browseData, localProfileItemIds]);
-
   // --- Task 5 (#203 §5.1): paged infinite-scroll list view ------------------
   // The selected domain's full schema object (needed by the paged hook), and
   // the coords used to drive server-side nearest ordering. Coords are omitted
@@ -738,9 +747,10 @@ export function HomePage() {
     { enabled: selectedDomain !== null },
   );
 
-  // Own-item filtering is a view concern (see `domainItems` above) — apply the
-  // same rule to the paged feed so a viewer never sees their own profile in
-  // their own browse list.
+  // Own-item filtering is a view concern (mirrored below by
+  // `allDomainItemsFiltered` for the "All" tab) — apply the same rule to the
+  // paged feed so a viewer never sees their own profile in their own browse
+  // list.
   const singleDomainItems = React.useMemo(
     () => singleDomainList.items.filter((it) => !localProfileItemIds.has(it.item_id)),
     [singleDomainList.items, localProfileItemIds],
@@ -772,29 +782,42 @@ export function HomePage() {
   // the loop terminates. "Unchanged" is element-wise reference equality on
   // `items` (individual item object refs ARE stable across a plain
   // re-render, and only change when React Query actually refetches), plus
-  // `hasMore`/`total`. `fetchNext`'s identity always changes and is
-  // intentionally excluded from the comparison — we still store the latest
-  // one, just don't gate on it.
+  // `hasMore`/`total`/`isLoading`. `fetchNext`'s identity always changes and
+  // is intentionally excluded from the comparison — we still store the
+  // latest one, just don't gate on it.
   const handleDomainItems = React.useCallback(
-    (domainId: string, items: Item[], hasMore: boolean, total: number, fetchNext: () => void) => {
+    (
+      domainId: string,
+      items: Item[],
+      hasMore: boolean,
+      total: number,
+      isLoading: boolean,
+      fetchNext: () => void,
+    ) => {
       setAllDomainPages((prev) => {
         const existing = prev[domainId];
         const itemsUnchanged =
           existing !== undefined &&
           existing.items.length === items.length &&
           existing.items.every((it, i) => it === items[i]);
-        if (itemsUnchanged && existing.hasMore === hasMore && existing.total === total) {
+        if (
+          itemsUnchanged &&
+          existing.hasMore === hasMore &&
+          existing.total === total &&
+          existing.isLoading === isLoading
+        ) {
           // Same data (plain re-render): bail so React doesn't re-render → no loop.
           return prev;
         }
-        return { ...prev, [domainId]: { items, hasMore, total, fetchNext } };
+        return { ...prev, [domainId]: { items, hasMore, total, isLoading, fetchNext } };
       });
     },
     [],
   );
 
   // Own-item-filtered accumulated union across all "All"-tab domains (mirrors
-  // `domainItems` above). The merged grid and its `fullItem` lookups read this.
+  // `singleDomainItems` above). The merged grid and its `fullItem` lookups
+  // read this.
   const allDomainItemsFiltered = React.useMemo(() => {
     const result: Record<string, Item[]> = {};
     for (const [domainId, state] of Object.entries(allDomainPages)) {
@@ -845,6 +868,16 @@ export function HomePage() {
         return state ? sum + state.items.length : sum;
       }, 0),
     [visibleDomains, allDomainPages],
+  );
+  // Task 7 (#203 §5.2 cleanup): the "All" tab's loading gate, re-sourced from
+  // the paged hooks (`allDomainPages`, lifted per-domain from
+  // `useInfiniteBrowseItems` via `DomainPagedFetch`) instead of the removed
+  // full `useBrowseItems` fetch's single `isLoading`. A domain missing from
+  // `allDomainPages` (its `DomainPagedFetch` child hasn't committed its first
+  // effect yet) counts as still loading, so the skeleton doesn't flash empty
+  // before every visible domain has reported in.
+  const allDomainsLoading = visibleDomains.some(
+    (domain) => allDomainPages[domain.id]?.isLoading ?? true,
   );
 
   // Active schema: from the selected browsing domain, or first visible domain
@@ -910,7 +943,13 @@ export function HomePage() {
       }
       setBulkConnectBusy(true);
       try {
-        const allItems = Object.values(domainItems).flat();
+        // Task 7 (#203 §5.2 cleanup): bulk-select only renders in the LIST
+        // view (see `browseSelection.selectMode` below), so its candidates are
+        // always sourced from whichever paged list feed is currently active —
+        // never from the map/markers, so no `mapDetailItem` fallback is needed
+        // here (contrast `onActionSubmit` below).
+        const allItems =
+          selectedDomain === null ? Object.values(allDomainItemsFiltered).flat() : singleDomainItems;
         const ids = Array.from(browseSelection.selected);
         const targets = ids
           .map((id) => allItems.find((i) => i.item_id === id))
@@ -1000,7 +1039,9 @@ export function HomePage() {
     [
       myItem,
       network,
-      domainItems,
+      selectedDomain,
+      allDomainItemsFiltered,
+      singleDomainItems,
       browseSelection.selected,
       browseSelection.exitSelect,
       browseSelection.setSelected,
@@ -1017,33 +1058,19 @@ export function HomePage() {
     return actions[0] ?? null;
   }, [getActionsForDomain, selectedDomain, visibleDomains]);
 
-  // Build per-domain card items filtered by search, domain, and status.
-  // The same filtered result is consumed by both the list view and the map view
-  // so both stay in sync without duplicating filter logic.
-  // Derive enum filter field metadata once (used in the memo below and in MapView)
+  // Build per-domain card items filtered by search, domain, and status, for
+  // the LIST view (the map view reads viewport markers instead — decoupled
+  // in Task 6/7, #203 §5.2).
+  // Derive enum filter field metadata once (used in the memos below and in MapView)
   const enumFilterFields = React.useMemo(
     () => (network ? getEnumFilterFieldsForDomains(network.domains) : []),
     [network],
   );
 
-  const filteredDomainItems = React.useMemo(() => {
-    const result: Record<string, { id: string; domain: string; data: Record<string, unknown> }[]> = {};
-
-    for (const [domainId, itemList] of Object.entries(domainItems)) {
-      result[domainId] = buildFilteredCardsForDomain(domainId, itemList, {
-        search,
-        mapSelectedDomains,
-        activeFieldFilters,
-        enumFilterFields,
-      });
-    }
-
-    return result;
-  }, [domainItems, search, mapSelectedDomains, activeFieldFilters, enumFilterFields]);
-
-  // Task 5 (#203 §5.1): the same search/enum/map-domain filter, applied to the
-  // paged feeds instead of the full `domainItems` snapshot. Single-domain list
-  // cards (server already orders nearest-first — no client `sortByNearest`).
+  // Task 5 (#203 §5.1): the search/enum/map-domain filter, applied to the
+  // paged feeds (the full-fetch `domainItems` snapshot this used to read from
+  // was removed in Task 7). Single-domain list cards (server already orders
+  // nearest-first — no client `sortByNearest`).
   const singleDomainCards = React.useMemo(
     () =>
       selectedDomain
@@ -1254,9 +1281,15 @@ export function HomePage() {
   const contentDescription = headerDomain
     ? visibleDomains.find((d) => d.id === headerDomain)?.description
     : undefined;
-  const contentCount = headerDomain
-    ? (filteredDomainItems[headerDomain]?.length ?? 0)
-    : Object.values(filteredDomainItems).reduce((s, a) => s + a.length, 0);
+  // Task 7 (#203 §5.2 cleanup): re-sourced from the list totals — keyed on
+  // `selectedDomain` (which paged feed is actually driving the list), not
+  // `headerDomain` (a display-only label that can be non-null even on the
+  // "All" tab when exactly one domain is visible). This also resolves the
+  // P3-deferred header-count-vs-list-total mismatch: the header now reports
+  // the same server-side total the "Showing X of Y" list indicator uses,
+  // instead of a client-filtered card count.
+  const contentCount = selectedDomain !== null ? singleDomainList.total : allDomainsTotalCount;
+  const contentLoading = selectedDomain !== null ? singleDomainList.isLoading : allDomainsLoading;
 
   function buildEmptyState(domainLabel: string) {
     if (search) return <EmptyState message={t('home.no_search_results', { search })} />;
@@ -1354,7 +1387,7 @@ export function HomePage() {
         <ContentHeader
           title={contentTitle}
           description={contentDescription}
-          count={loading ? undefined : contentCount}
+          count={contentLoading ? undefined : contentCount}
           noProfilePrompt={{ show: !myItem, networkId: selectedNetworkId ?? '' }}
           actions={headerActions}
         />
@@ -1388,8 +1421,18 @@ export function HomePage() {
               });
               throw new Error('No user');
             }
-            const allItems = Object.values(domainItems).flat();
-            const targetItem = allItems.find((i) => i.item_id === targetItemId);
+            // Task 7 (#203 §5.2 cleanup): this handler serves BOTH the list
+            // view (card actions) and the map view (a popup's connect button),
+            // so the target lookup must cover both. List-driven targets are
+            // always in one of the paged feeds; a map-driven target may be a
+            // viewport marker never paged into either list feed, so fall back
+            // to `mapDetailItem` — the full `Item` the open popup already
+            // resolved via `useItemDetail` (see `MarkerDetailPopup`).
+            const listItems =
+              selectedDomain === null ? Object.values(allDomainItemsFiltered).flat() : singleDomainItems;
+            const targetItem =
+              listItems.find((i) => i.item_id === targetItemId) ??
+              (mapDetailItem?.item_id === targetItemId ? mapDetailItem : undefined);
             if (!targetItem) {
               toast.error(t('home.toast_profile_not_found'), {
                 description: t('home.toast_profile_not_found_desc'),
@@ -1496,7 +1539,7 @@ export function HomePage() {
                 });
                 const allFlatItems = sortItemsByNearest(allFlatItemsUnsorted, userLocation, (x) => getItemLocations(x.item.data));
 
-                if (loading) {
+                if (allDomainsLoading) {
                   return (
                     <>
                       {pagedFetchers}
@@ -1688,6 +1731,7 @@ export function HomePage() {
                         onConnect={(itemId) => {
                           if (connectAction) triggerAction(connectAction.action_type, connectAction, itemId);
                         }}
+                        onItemResolved={setMapDetailItem}
                       />
                     );
                   }}
