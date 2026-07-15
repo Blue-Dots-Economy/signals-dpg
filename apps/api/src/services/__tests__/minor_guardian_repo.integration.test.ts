@@ -26,8 +26,7 @@ describe('minor_guardian_repo (integration)', () => {
   it('stores guardian details encrypted, decrypts contact, and flips verified', async () => {
     await upsertGuardianDetails(uid, {
       guardianName: 'Parent Name',
-      guardianContact: 'parent@x.co',
-      guardianContactType: 'email',
+      guardianEmail: 'parent@x.co',
     });
     // stored ciphertext is not the plaintext
     const [raw] = await db

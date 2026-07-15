@@ -22,17 +22,24 @@ export const U18StatusResponseSchema = z.object({
 });
 export type U18StatusQuery = z.infer<typeof U18StatusQuerySchema>;
 
-export const U18GuardianBodySchema = z.object({
-  network: z.string().min(1),
-  brand: z.string().min(1).nullish(),
-  guardianName: z.string().min(1),
-  guardianContact: z.string().min(1),
-  guardianContactType: z.enum(['phone', 'email']),
-  // Ward's guardian-validity attestation (D12) — must be explicitly true.
-  guardianDeclarationAccepted: z.literal(true),
-  // Explicit ack when guardianContact matches the ward's own email/phone (warn-and-confirm, not a hard reject).
-  sameContactAcknowledged: z.boolean().optional(),
-});
+export const U18GuardianBodySchema = z
+  .object({
+    network: z.string().min(1),
+    brand: z.string().min(1).nullish(),
+    guardianName: z.string().min(1),
+    // Both contacts the guardian supplied — at least one required. The server
+    // resolves the OTP channel (phone preferred) and stores whatever is given.
+    guardianEmail: z.string().min(1).optional(),
+    guardianPhone: z.string().min(1).optional(),
+    // Ward's guardian-validity attestation (D12) — must be explicitly true.
+    guardianDeclarationAccepted: z.literal(true),
+    // Explicit ack when a guardian contact matches the ward's own (warn-and-confirm, not a hard reject).
+    sameContactAcknowledged: z.boolean().optional(),
+  })
+  .refine((v) => Boolean(v.guardianEmail) || Boolean(v.guardianPhone), {
+    message: 'Provide at least one guardian contact (email or phone)',
+    path: ['guardianPhone'],
+  });
 export const U18GuardianResponseSchema = z.object({ otpSent: z.boolean() });
 
 export const U18GuardianVerifyBodySchema = z.object({
@@ -86,15 +93,21 @@ export const SignupGuardianBodySchema = z
     birthYear: z.number().int().min(1900).max(2100),
     birthMonth: z.number().int().min(1).max(12),
     guardianName: z.string().min(1),
-    guardianContact: z.string().min(1),
-    guardianContactType: z.enum(['phone', 'email']),
+    // Both guardian contacts — at least one required; server resolves the OTP
+    // channel (phone preferred) and stores whatever is given.
+    guardianEmail: z.string().min(1).optional(),
+    guardianPhone: z.string().min(1).optional(),
     // Ward's guardian-validity attestation (D12) — must be explicitly true.
     guardianDeclarationAccepted: z.literal(true),
-    // Explicit ack when guardianContact matches the signup identifier itself
+    // Explicit ack when a guardian contact matches the signup identifier itself
     // (warn-and-confirm, not a hard reject).
     sameContactAcknowledged: z.boolean().optional(),
   })
-  .refine((v) => Boolean(v.email) !== Boolean(v.phoneNumber), EXACTLY_ONE_IDENTIFIER);
+  .refine((v) => Boolean(v.email) !== Boolean(v.phoneNumber), EXACTLY_ONE_IDENTIFIER)
+  .refine((v) => Boolean(v.guardianEmail) || Boolean(v.guardianPhone), {
+    message: 'Provide at least one guardian contact (email or phone)',
+    path: ['guardianPhone'],
+  });
 export const SignupGuardianResponseSchema = z.object({ otpSent: z.boolean() });
 
 export const SignupGuardianVerifyBodySchema = z

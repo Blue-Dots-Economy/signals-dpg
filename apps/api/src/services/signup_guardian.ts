@@ -28,7 +28,7 @@ import {
   type GuardianContactType,
 } from '@/services/guardian_otp';
 import { resolveConsentVersion } from '@/services/consent_version';
-import { writeEncryptedGuardian } from '@/services/minor_guardian_repo';
+import { writeEncryptedGuardian, resolveOtpChannel } from '@/services/minor_guardian_repo';
 
 /** The ward's own signup identifier — exactly one of the two. */
 export type SignupIdentifier = { email: string } | { phoneNumber: string };
@@ -81,8 +81,10 @@ interface PendingSignupGuardian {
   birthYear: number;
   birthMonth: number;
   guardianName: string; // already encrypted
-  guardianContact: string; // already encrypted
+  guardianContact: string; // already encrypted — the OTP channel
   guardianContactType: GuardianContactType;
+  guardianEmail?: string; // already encrypted, when supplied
+  guardianPhone?: string; // already encrypted, when supplied
   guardianDeclarationAccepted: true;
   verified: boolean;
 }
@@ -112,8 +114,8 @@ export interface StartSignupGuardianInput {
   birthYear: number;
   birthMonth: number;
   guardianName: string;
-  guardianContact: string;
-  guardianContactType: GuardianContactType;
+  guardianEmail?: string;
+  guardianPhone?: string;
   guardianDeclarationAccepted: true;
   sameContactAcknowledged?: boolean;
 }
@@ -139,11 +141,17 @@ export async function startSignupGuardian(input: StartSignupGuardianInput): Prom
     throw new SignupGuardianError('NOT_A_MINOR');
   }
 
-  // Warn-and-confirm: guardian contact must not silently equal the ward's own
-  // signup identifier. Not a hard reject — an explicit ack lets it proceed.
+  // Resolve the single OTP channel (phone preferred when both are given).
+  const channel = resolveOtpChannel({ guardianEmail: input.guardianEmail, guardianPhone: input.guardianPhone });
+
+  // Warn-and-confirm: neither guardian contact may silently equal the ward's
+  // own signup identifier. Not a hard reject — an explicit ack lets it proceed.
   const ident = normalizeIdentifier(input.identifier);
-  const normalizedGuardianContact = normalizeContact(input.guardianContact, input.guardianContactType);
-  const sameContact = ident.type === input.guardianContactType && ident.value === normalizedGuardianContact;
+  const sameContact =
+    (ident.type === 'email' && !!input.guardianEmail &&
+      normalizeContact(input.guardianEmail, 'email') === ident.value) ||
+    (ident.type === 'phone' && !!input.guardianPhone &&
+      normalizeContact(input.guardianPhone, 'phone') === ident.value);
   if (sameContact && input.sameContactAcknowledged !== true) {
     throw new SignupGuardianError('SAME_CONTACT_NEEDS_ACK');
   }
@@ -156,20 +164,22 @@ export async function startSignupGuardian(input: StartSignupGuardianInput): Prom
     birthYear: input.birthYear,
     birthMonth: input.birthMonth,
     guardianName: encryptGuardianField(input.guardianName),
-    guardianContact: encryptGuardianField(input.guardianContact),
-    guardianContactType: input.guardianContactType,
+    guardianContact: encryptGuardianField(channel.contact),
+    guardianContactType: channel.contactType,
+    guardianEmail: input.guardianEmail ? encryptGuardianField(input.guardianEmail) : undefined,
+    guardianPhone: input.guardianPhone ? encryptGuardianField(input.guardianPhone) : undefined,
     guardianDeclarationAccepted: true,
     verified: false,
   };
   await writePending(hash, pending);
 
-  // Issued against the plaintext contact (the encrypted blob above is for
-  // at-rest storage only) — may throw GuardianOtpError (RATE_LIMITED /
+  // Issued against the plaintext channel contact (the encrypted blob above is
+  // for at-rest storage only) — may throw GuardianOtpError (RATE_LIMITED /
   // NO_OTP_PROVIDER), which the route maps directly.
   await issueGuardianOtp({
     scope: otpScope(hash),
-    contact: input.guardianContact,
-    contactType: input.guardianContactType,
+    contact: channel.contact,
+    contactType: channel.contactType,
   });
 }
 
@@ -252,6 +262,8 @@ export async function materializeSignupGuardian(user: MaterializeSignupGuardianU
           guardianNameEnc: pending.guardianName,
           guardianContactEnc: pending.guardianContact,
           guardianContactType: pending.guardianContactType,
+          guardianEmailEnc: pending.guardianEmail ?? null,
+          guardianPhoneEnc: pending.guardianPhone ?? null,
         },
         tx,
       );

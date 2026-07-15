@@ -14,8 +14,13 @@ export const minor_guardian = pgTable('minor_guardian', {
   birthYear: integer('birth_year').notNull(),
   birthMonth: integer('birth_month').notNull(),
   guardianName: text('guardian_name'),
+  // The OTP channel actually used (phone preferred when both are given).
   guardianContact: text('guardian_contact'),
   guardianContactType: text('guardian_contact_type'), // 'phone' | 'email'
+  // Both contacts the guardian supplied, stored when provided (encrypted PII).
+  // guardian_contact mirrors whichever of these the OTP was sent to.
+  guardianEmail: text('guardian_email'),
+  guardianPhone: text('guardian_phone'),
   guardianVerified: boolean('guardian_verified').notNull().default(false),
   createdAt: timestamp('created_at').notNull().defaultNow(),
   updatedAt: timestamp('updated_at').notNull().defaultNow(),

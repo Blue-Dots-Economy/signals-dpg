@@ -95,8 +95,10 @@ export interface SubmitGuardianBody {
   network: string;
   brand?: string | null;
   guardianName: string;
-  guardianContact: string;
-  guardianContactType: GuardianContactType;
+  /** Both contacts (at least one). Server resolves the OTP channel (phone
+   * preferred) and stores whatever is provided. */
+  guardianEmail?: string;
+  guardianPhone?: string;
   guardianDeclarationAccepted: true;
   sameContactAcknowledged?: boolean;
 }
@@ -194,8 +196,8 @@ export interface StartSignupGuardianBody {
   birthYear: number;
   birthMonth: number;
   guardianName: string;
-  guardianContact: string;
-  guardianContactType: GuardianContactType;
+  guardianEmail?: string;
+  guardianPhone?: string;
   guardianDeclarationAccepted: true;
   sameContactAcknowledged?: boolean;
 }

@@ -47,17 +47,39 @@ export async function getMinorGuardian(userId: string): Promise<{
   };
 }
 
-/** Store guardian details with name + contact encrypted at rest. Resets verified. */
+/**
+ * Resolve the single OTP channel from the two guardian contacts — phone is
+ * preferred when both are given (per the U18 spec's channel order). Throws if
+ * neither is present (callers validate at least one upstream).
+ */
+export function resolveOtpChannel(input: {
+  guardianEmail?: string | null;
+  guardianPhone?: string | null;
+}): { contact: string; contactType: GuardianContactType } {
+  if (input.guardianPhone) return { contact: input.guardianPhone, contactType: 'phone' };
+  if (input.guardianEmail) return { contact: input.guardianEmail, contactType: 'email' };
+  throw new Error('resolveOtpChannel: at least one guardian contact is required');
+}
+
+/**
+ * Store guardian details, name + contacts encrypted at rest. Resets verified.
+ * Persists BOTH contacts the guardian supplied; `guardian_contact`/`_type`
+ * mirror the resolved OTP channel (phone preferred) so the OTP + resend path
+ * has a single target to read back.
+ */
 export async function upsertGuardianDetails(
   userId: string,
-  input: { guardianName: string; guardianContact: string; guardianContactType: GuardianContactType },
+  input: { guardianName: string; guardianEmail?: string | null; guardianPhone?: string | null },
 ): Promise<void> {
+  const channel = resolveOtpChannel(input);
   await db
     .update(minor_guardian)
     .set({
       guardianName: encryptGuardianField(input.guardianName),
-      guardianContact: encryptGuardianField(input.guardianContact),
-      guardianContactType: input.guardianContactType,
+      guardianContact: encryptGuardianField(channel.contact),
+      guardianContactType: channel.contactType,
+      guardianEmail: input.guardianEmail ? encryptGuardianField(input.guardianEmail) : null,
+      guardianPhone: input.guardianPhone ? encryptGuardianField(input.guardianPhone) : null,
       guardianVerified: false,
       updatedAt: new Date(),
     })
@@ -108,30 +130,26 @@ export async function writeEncryptedGuardian(
     guardianNameEnc: string;
     guardianContactEnc: string;
     guardianContactType: GuardianContactType;
+    guardianEmailEnc?: string | null;
+    guardianPhoneEnc?: string | null;
   },
   exec: DbOrTx = db,
 ): Promise<void> {
+  const fields = {
+    birthYear: input.birthYear,
+    birthMonth: input.birthMonth,
+    guardianName: input.guardianNameEnc,
+    guardianContact: input.guardianContactEnc,
+    guardianContactType: input.guardianContactType,
+    guardianEmail: input.guardianEmailEnc ?? null,
+    guardianPhone: input.guardianPhoneEnc ?? null,
+    guardianVerified: true,
+  };
   await exec
     .insert(minor_guardian)
-    .values({
-      userId,
-      birthYear: input.birthYear,
-      birthMonth: input.birthMonth,
-      guardianName: input.guardianNameEnc,
-      guardianContact: input.guardianContactEnc,
-      guardianContactType: input.guardianContactType,
-      guardianVerified: true,
-    })
+    .values({ userId, ...fields })
     .onConflictDoUpdate({
       target: minor_guardian.userId,
-      set: {
-        birthYear: input.birthYear,
-        birthMonth: input.birthMonth,
-        guardianName: input.guardianNameEnc,
-        guardianContact: input.guardianContactEnc,
-        guardianContactType: input.guardianContactType,
-        guardianVerified: true,
-        updatedAt: new Date(),
-      },
+      set: { ...fields, updatedAt: new Date() },
     });
 }

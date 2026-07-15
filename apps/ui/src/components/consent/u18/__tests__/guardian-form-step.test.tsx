@@ -59,7 +59,7 @@ describe('GuardianFormStep', () => {
     expect(phone.value).toBe('8095444625');
   });
 
-  it('submits with the phone contact when only a phone is given', async () => {
+  it('submits the phone (E.164) when only a phone is given', async () => {
     submitGuardian.mockResolvedValue({ otpSent: true });
     const onSubmitted = vi.fn();
     await renderForm(onSubmitted);
@@ -71,15 +71,14 @@ describe('GuardianFormStep', () => {
         network: 'blue_dot',
         brand: 'standard',
         guardianName: 'Asha Guardian',
-        guardianContact: '+919876543210',
-        guardianContactType: 'phone',
+        guardianPhone: '+919876543210',
         guardianDeclarationAccepted: true,
       }),
     );
     expect(onSubmitted).toHaveBeenCalled();
   });
 
-  it('prefers email for the OTP contact when both email and phone are given', async () => {
+  it('sends BOTH contacts when email and phone are given (server picks the OTP channel)', async () => {
     submitGuardian.mockResolvedValue({ otpSent: true });
     await renderForm(vi.fn());
     await userEvent.type(screen.getByLabelText(/guardian name/i), 'Asha Guardian');
@@ -92,8 +91,8 @@ describe('GuardianFormStep', () => {
     await waitFor(() =>
       expect(submitGuardian).toHaveBeenCalledWith(
         expect.objectContaining({
-          guardianContact: 'guardian@example.com',
-          guardianContactType: 'email',
+          guardianEmail: 'guardian@example.com',
+          guardianPhone: '+919876543210',
         }),
       ),
     );

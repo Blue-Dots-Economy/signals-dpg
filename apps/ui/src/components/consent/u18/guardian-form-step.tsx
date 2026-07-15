@@ -86,13 +86,6 @@ export function GuardianFormStep({
     (!showSameContactWarning || sameContactAcknowledged) &&
     !isSubmitting;
 
-  // OTP goes to a single contact — prefer email when both are given (matches
-  // the documented channel fallback: email → SMS → WhatsApp).
-  function preferredContact(): { contact: string; contactType: 'phone' | 'email' } {
-    if (guardianEmail.trim()) return { contact: guardianEmail.trim(), contactType: 'email' };
-    return { contact: guardianPhoneE164, contactType: 'phone' };
-  }
-
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!guardianName.trim()) return;
@@ -120,13 +113,12 @@ export function GuardianFormStep({
 
     setValidationError(null);
     setIsSubmitting(true);
-    const { contact, contactType } = preferredContact();
     const body: SubmitGuardianBody = {
       network,
       brand: brand ?? null,
       guardianName: guardianName.trim(),
-      guardianContact: contact,
-      guardianContactType: contactType,
+      ...(guardianEmail.trim() ? { guardianEmail: guardianEmail.trim() } : {}),
+      ...(guardianPhone.length === 10 ? { guardianPhone: guardianPhoneE164 } : {}),
       guardianDeclarationAccepted: true,
       ...(showSameContactWarning ? { sameContactAcknowledged: true } : {}),
     };

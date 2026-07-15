@@ -570,10 +570,17 @@ CREATE TABLE IF NOT EXISTS minor_guardian (
   guardian_name          text,
   guardian_contact       text,
   guardian_contact_type  text,
+  guardian_email         text,
+  guardian_phone         text,
   guardian_verified      boolean   NOT NULL DEFAULT false,
   created_at             timestamp NOT NULL DEFAULT now(),
   updated_at             timestamp NOT NULL DEFAULT now()
 );
+
+-- Additive columns for storing BOTH guardian contacts (idempotent for
+-- already-created tables). guardian_contact still holds the OTP channel.
+ALTER TABLE minor_guardian ADD COLUMN IF NOT EXISTS guardian_email text;
+ALTER TABLE minor_guardian ADD COLUMN IF NOT EXISTS guardian_phone text;
 
 -- ─── create_items.sql ───
 

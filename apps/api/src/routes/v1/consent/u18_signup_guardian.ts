@@ -90,8 +90,8 @@ const start_handler = async (request: StartReq, reply: FastifyReply) => {
       birthYear: body.birthYear,
       birthMonth: body.birthMonth,
       guardianName: body.guardianName,
-      guardianContact: body.guardianContact,
-      guardianContactType: body.guardianContactType,
+      guardianEmail: body.guardianEmail,
+      guardianPhone: body.guardianPhone,
       guardianDeclarationAccepted: body.guardianDeclarationAccepted,
       sameContactAcknowledged: body.sameContactAcknowledged,
     });

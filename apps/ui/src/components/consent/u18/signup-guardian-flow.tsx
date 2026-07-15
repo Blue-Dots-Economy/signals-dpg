@@ -59,8 +59,8 @@ export function SignupGuardianFlow({
       birthYear,
       birthMonth,
       guardianName: body.guardianName,
-      guardianContact: body.guardianContact,
-      guardianContactType: body.guardianContactType,
+      ...(body.guardianEmail ? { guardianEmail: body.guardianEmail } : {}),
+      ...(body.guardianPhone ? { guardianPhone: body.guardianPhone } : {}),
       guardianDeclarationAccepted: body.guardianDeclarationAccepted,
       ...(body.sameContactAcknowledged ? { sameContactAcknowledged: true } : {}),
     });

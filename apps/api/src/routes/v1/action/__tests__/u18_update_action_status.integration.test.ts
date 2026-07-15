@@ -296,8 +296,7 @@ describeIf(`U18 guardian action gate — POST /action/update-status (${NETWORK}/
     await upsertBirthMonth(minor_provider_user_id, 2015, 6);
     await upsertGuardianDetails(minor_provider_user_id, {
       guardianName: 'Test Guardian',
-      guardianContact: 'guardian-accept@example.com',
-      guardianContactType: 'email',
+      guardianEmail: 'guardian-accept@example.com',
     });
 
     // Adult provider: deliberately NO minor_guardian row at all.

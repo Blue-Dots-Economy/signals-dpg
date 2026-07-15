@@ -245,8 +245,7 @@ describeIf(`U18 guardian action gate — POST /action/perform (${NETWORK}/${ACTI
     await upsertBirthMonth(minor_user_id, 2015, 6);
     await upsertGuardianDetails(minor_user_id, {
       guardianName: 'Test Guardian',
-      guardianContact: 'guardian@example.com',
-      guardianContactType: 'email',
+      guardianEmail: 'guardian@example.com',
     });
 
     // Adult ward: deliberately NO minor_guardian row at all.

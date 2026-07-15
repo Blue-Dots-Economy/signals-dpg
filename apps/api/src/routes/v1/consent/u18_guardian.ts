@@ -44,14 +44,13 @@ export const u18_guardian_handler = async (request: Req, reply: FastifyReply) =>
     return reply.code(409).send({ error: 'NOT_A_MINOR', message: 'Guardian flow applies only to under-18 users' });
   }
 
-  // Warn-and-confirm: guardian contact must not silently equal the ward's own
-  // email/phone. Not a hard reject — an explicit ack lets the ward proceed.
+  // Warn-and-confirm: a guardian contact must not silently equal the ward's
+  // own email/phone. Not a hard reject — an explicit ack lets the ward proceed.
   const [ward] = await db.select({ email: user.email, phoneNumber: user.phoneNumber }).from(user).where(eq(user.id, userId));
-  const normalizedGuardianContact = body.guardianContact.trim();
   const wardEmail = ward?.email?.trim().toLowerCase();
   const wardPhone = ward?.phoneNumber?.trim();
-  const matchesWardEmail = !!wardEmail && normalizedGuardianContact.toLowerCase() === wardEmail;
-  const matchesWardPhone = !!wardPhone && normalizedGuardianContact === wardPhone;
+  const matchesWardEmail = !!wardEmail && !!body.guardianEmail && body.guardianEmail.trim().toLowerCase() === wardEmail;
+  const matchesWardPhone = !!wardPhone && !!body.guardianPhone && body.guardianPhone.trim() === wardPhone;
   if ((matchesWardEmail || matchesWardPhone) && body.sameContactAcknowledged !== true) {
     return reply.code(409).send({
       error: 'SAME_CONTACT_NEEDS_ACK',
@@ -70,8 +69,8 @@ export const u18_guardian_handler = async (request: Req, reply: FastifyReply) =>
   try {
     await upsertGuardianDetails(userId, {
       guardianName: body.guardianName,
-      guardianContact: body.guardianContact,
-      guardianContactType: body.guardianContactType,
+      guardianEmail: body.guardianEmail ?? null,
+      guardianPhone: body.guardianPhone ?? null,
     });
     await db.insert(consent_record).values({
       level: 'user',
