@@ -1,9 +1,16 @@
 import * as React from 'react';
 import { useTranslation } from 'react-i18next';
+import { useQueryClient } from '@tanstack/react-query';
 import { useIsMobile } from '@/hooks/use-mobile';
-import type { Action, UpdateActionStatusPayload } from '@/lib/action-api';
+import {
+  updateActionStatus,
+  guardianOtpErrorFromThrown,
+  type Action,
+  type UpdateActionStatusPayload,
+} from '@/lib/action-api';
 import { ActionModalHeader } from './action-modal-header';
 import { ConsentCheckbox } from './consent-checkbox';
+import { GuardianOtpDialog } from './guardian-otp-dialog';
 import { getActionDisplay } from '@/lib/action-display';
 import { cn } from '@/lib/utils';
 import { useNetworkConfig } from '@/hooks/use-network-config';
@@ -25,7 +32,7 @@ import {
   DrawerContent,
 } from '@/components/ui/drawer';
 
-import { useUpdateActionStatus } from '@/hooks/use-actions';
+import { useUpdateActionStatus, actionKeys } from '@/hooks/use-actions';
 import { toast } from 'sonner';
 
 interface ActionStatusUpdaterProps {
@@ -44,7 +51,14 @@ export function ActionStatusUpdater({
 }: ActionStatusUpdaterProps) {
   const { t } = useTranslation();
   const isMobile = useIsMobile();
+  const queryClient = useQueryClient();
   const { mutate: updateStatus, isPending } = useUpdateActionStatus();
+  // Set when a (minor ward's) update-status call comes back
+  // `GUARDIAN_OTP_REQUIRED` — holds the exact payload to resubmit with
+  // `guardianOtp` once the guardian's code is entered.
+  const [guardianChallenge, setGuardianChallenge] = React.useState<UpdateActionStatusPayload | null>(
+    null,
+  );
 
   const statusLabels: Record<string, string> = {
     accepted: t('actions.status_label_accepted'),
@@ -69,6 +83,7 @@ export function ActionStatusUpdater({
     if (open) {
       setConsentChecked(false);
       setRemarks('');
+      setGuardianChallenge(null);
     }
   }, [open]);
 
@@ -118,6 +133,13 @@ export function ActionStatusUpdater({
   const acceptVersion = acceptDoc?.versions.find((v) => v.version === acceptDoc.current_version);
   const consentText = acceptVersion?.statement ?? '';
 
+  const successTitleByStatus: Record<string, string> = {
+    accepted: t('actions.toast_status_accepted_title'),
+    rejected: t('actions.toast_status_rejected_title'),
+    completed: t('actions.toast_status_completed_title'),
+    cancelled: t('actions.toast_status_cancelled_title'),
+  };
+
   const handleSubmit = () => {
     if (!targetStatus) {
       toast.error(t('actions.toast_no_status_title'), {
@@ -142,13 +164,6 @@ export function ActionStatusUpdater({
           : {}),
     };
 
-    const successTitleByStatus: Record<string, string> = {
-      accepted: t('actions.toast_status_accepted_title'),
-      rejected: t('actions.toast_status_rejected_title'),
-      completed: t('actions.toast_status_completed_title'),
-      cancelled: t('actions.toast_status_cancelled_title'),
-    };
-
     updateStatus(payload, {
       onSuccess: () => {
         toast.success(successTitleByStatus[targetStatus] ?? t('actions.toast_status_accepted_title'), {
@@ -157,9 +172,33 @@ export function ActionStatusUpdater({
         onOpenChange(false);
       },
       onError: (error: Error) => {
+        // A minor ward: the accept/reject/etc. requires guardian confirmation.
+        // Stash the exact payload and open the OTP challenge instead of the
+        // generic error toast — adults never see a GUARDIAN_OTP_* code here.
+        if (guardianOtpErrorFromThrown(error) === 'GUARDIAN_OTP_REQUIRED') {
+          // Close the accept/reject dialog in favor of the OTP challenge —
+          // the component itself stays mounted (`action` is unaffected), so
+          // GuardianOtpDialog (driven by its own `guardianChallenge` state)
+          // keeps working after this.
+          onOpenChange(false);
+          setGuardianChallenge(payload);
+          return;
+        }
         toast.error(t('actions.toast_update_failed', { message: error.message }));
       },
     });
+  };
+
+  const handleGuardianOtpSubmit = async (otp: string) => {
+    if (!guardianChallenge) return;
+    await updateActionStatus(guardianChallenge, otp);
+    queryClient.invalidateQueries({ queryKey: actionKeys.all });
+    setGuardianChallenge(null);
+    toast.success(
+      successTitleByStatus[guardianChallenge.action_status] ?? t('actions.toast_status_accepted_title'),
+      { description: t('actions.toast_updated_desc') },
+    );
+    onOpenChange(false);
   };
 
   const formContent = (
@@ -216,25 +255,39 @@ export function ActionStatusUpdater({
     </div>
   );
 
+  const guardianOtpDialog = (
+    <GuardianOtpDialog
+      open={!!guardianChallenge}
+      onOpenChange={(o) => !o && setGuardianChallenge(null)}
+      onSubmitOtp={handleGuardianOtpSubmit}
+    />
+  );
+
   if (isMobile) {
     return (
-      <Drawer open={open} onOpenChange={onOpenChange}>
-        <DrawerContent className="max-h-[90vh] overflow-hidden p-0">
-          <div className="px-6 pt-6">{header}</div>
-          <div className="px-6 pb-4 overflow-y-auto">{formContent}</div>
-          <div className="border-t px-6 py-4">{footer}</div>
-        </DrawerContent>
-      </Drawer>
+      <>
+        <Drawer open={open} onOpenChange={onOpenChange}>
+          <DrawerContent className="max-h-[90vh] overflow-hidden p-0">
+            <div className="px-6 pt-6">{header}</div>
+            <div className="px-6 pb-4 overflow-y-auto">{formContent}</div>
+            <div className="border-t px-6 py-4">{footer}</div>
+          </DrawerContent>
+        </Drawer>
+        {guardianOtpDialog}
+      </>
     );
   }
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-[520px] max-h-[90vh] overflow-y-auto gap-0 p-6">
-        {header}
-        <div className="py-4">{formContent}</div>
-        {footer}
-      </DialogContent>
-    </Dialog>
+    <>
+      <Dialog open={open} onOpenChange={onOpenChange}>
+        <DialogContent className="sm:max-w-[520px] max-h-[90vh] overflow-y-auto gap-0 p-6">
+          {header}
+          <div className="py-4">{formContent}</div>
+          {footer}
+        </DialogContent>
+      </Dialog>
+      {guardianOtpDialog}
+    </>
   );
 }

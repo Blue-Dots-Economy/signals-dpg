@@ -1148,7 +1148,7 @@ export function HomePage() {
         />
       )}
       <ActionHandler
-          onActionSubmit={async (actionType, _actionSchema, formData, targetItemId) => {
+          onActionSubmit={async (actionType, _actionSchema, formData, targetItemId, guardianOtp) => {
             if (!myItem) {
               toast.error(t('home.toast_profile_required'), {
                 description: t('home.toast_profile_required_desc'),
@@ -1222,7 +1222,8 @@ export function HomePage() {
                 requirements_snapshot: requirementsSnapshot,
                 ...(consent ? { consent } : {}),
               },
-              sourceItemInstanceUrl // Call the SOURCE instance (where myItem exists)
+              sourceItemInstanceUrl, // Call the SOURCE instance (where myItem exists)
+              guardianOtp
             );
             toast.success(t('home.toast_action_sent', { action: actionType.charAt(0).toUpperCase() + actionType.slice(1) }), {
               description: t('home.toast_action_sent_desc'),

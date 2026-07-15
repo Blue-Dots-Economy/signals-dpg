@@ -281,6 +281,22 @@ export function guardianOtpErrorOf(
   return null;
 }
 
+/**
+ * Classifies a *thrown* error as a `GuardianOtpErrorCode`, or `null` if it
+ * isn't one. Single-item calls (`performAction`/`updateActionStatus`) throw a
+ * `BulkSingleError` (via `unwrapBulkSingle`) carrying the machine code on
+ * `.code`; a raw axios error carries it on `response.data.error`. This lets
+ * `action-modal`/`action-handler`/`action-status-updater` share one place
+ * that knows how to pull the code out of a caught error regardless of shape.
+ */
+export function guardianOtpErrorFromThrown(err: unknown): GuardianOtpErrorCode | null {
+  if (axios.isAxiosError(err)) {
+    return guardianOtpErrorOf(err.response?.data as { error?: string } | undefined);
+  }
+  const code = (err as { code?: string } | null | undefined)?.code;
+  return guardianOtpErrorOf({ error: code });
+}
+
 // ─── API Functions ────────────────────────────────────────────────
 
 /**
