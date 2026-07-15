@@ -563,6 +563,11 @@ export function HomePage() {
   // the ordinary consent flow (ProfileConsentModal) handles terms/privacy.
   const u18ResolvedAdult = u18Status?.hasBirthData === true && u18Status.isMinor === false;
 
+  // A guardian has already been verified for this ward → the flow (including
+  // the DOB step) must never run again. This is the "reuse the flag" fix: once
+  // done at login/first-visit, creating a profile or revisiting won't re-ask.
+  const u18GuardianAlreadyDone = u18Status?.guardianVerified === true;
+
   // Skip the DOB step when birth data is already stored (captured at login);
   // only capture it here when nothing is stored yet.
   const u18InitialStep: 'dob' | 'guardian' = u18Status?.hasBirthData ? 'guardian' : 'dob';
@@ -573,7 +578,8 @@ export function HomePage() {
     u18NeededConsent.length > 0 &&
     !guardianFlowDismissed &&
     !u18StatusLoading &&
-    !u18ResolvedAdult;
+    !u18ResolvedAdult &&
+    !u18GuardianAlreadyDone;
 
   // Sort a card-item array (item_locations stored in .data) nearest-first when userLocation is known.
   // Items without locations sort last (nearestDistanceMeters returns Infinity for empty/missing arrays).
