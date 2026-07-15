@@ -333,7 +333,7 @@ export function LoginPage() {
       if (!exists && (!name.trim() || !domain)) {
         setIsLoading(false);
         toast.info(t('auth.toast_one_more_step'), {
-          description: t('auth.toast_one_more_step_desc'),
+          description: t('auth.toast_one_more_step_desc', { contactLabel }),
         });
         return;
       }
