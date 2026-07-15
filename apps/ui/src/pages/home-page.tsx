@@ -697,7 +697,10 @@ export function HomePage() {
       if (state.hasMore) state.fetchNext();
     }
   }, [allDomainPages]);
-  const anyAllDomainHasMore = Object.values(allDomainPages).some((s) => s.hasMore);
+  // Iterate `visibleDomains` (not all of `allDomainPages`) so a domain that
+  // scrolled out of view (e.g. a domain-tab/served-scope change) doesn't keep
+  // inflating this via a stale entry that's no longer rendered (Fix C).
+  const anyAllDomainHasMore = visibleDomains.some((domain) => allDomainPages[domain.id]?.hasMore ?? false);
   const allDomainsSentinelRef = useLoadMoreSentinel(
     fetchNextAllDomainPages,
     selectedDomain === null && anyAllDomainHasMore,
@@ -709,17 +712,28 @@ export function HomePage() {
   // domains, so there's no one `meta.total` to read). P3 surfaces meta.total
   // only — the federation-degradation banner (meta.partial/unavailable_instances)
   // lands in P5.
+  // Sum only over `visibleDomains` — `allDomainPages` entries are never pruned
+  // when `visibleDomains` shrinks, so a no-longer-visible domain would keep
+  // inflating the "X of Y" if we reduced over all of `allDomainPages` instead.
   const allDomainsTotalCount = React.useMemo(
-    () => Object.values(allDomainPages).reduce((sum, state) => sum + state.total, 0),
-    [allDomainPages],
+    () =>
+      visibleDomains.reduce((sum, domain) => {
+        const state = allDomainPages[domain.id];
+        return state ? sum + state.total : sum;
+      }, 0),
+    [visibleDomains, allDomainPages],
   );
   // Raw loaded count (mirrors the single-domain path's raw `items.length`):
   // sums the unfiltered per-domain page items, NOT `allFlatItems.length`
   // (which is post search/enum-filter). The indicator must reflect pagination
   // truncation only, not client-side filtering.
   const allDomainsLoadedCount = React.useMemo(
-    () => Object.values(allDomainPages).reduce((sum, state) => sum + state.items.length, 0),
-    [allDomainPages],
+    () =>
+      visibleDomains.reduce((sum, domain) => {
+        const state = allDomainPages[domain.id];
+        return state ? sum + state.items.length : sum;
+      }, 0),
+    [visibleDomains, allDomainPages],
   );
 
   // Active schema: from the selected browsing domain, or first visible domain
@@ -1389,6 +1403,13 @@ export function HomePage() {
                     <>
                       {pagedFetchers}
                       {buildEmptyState('All')}
+                      {/* Client search/enum filtering covers only loaded pages until
+                          server-side search (§9/#117) lands — keep the sentinel
+                          mounted here too so a filtered-to-empty grid with more
+                          server pages still auto-loads instead of dead-ending. */}
+                      {anyAllDomainHasMore && (
+                        <div ref={allDomainsSentinelRef} aria-hidden="true" className="h-px w-full" />
+                      )}
                     </>
                   );
                 }
@@ -1448,7 +1469,9 @@ export function HomePage() {
                         );
                       })}
                     </div>
-                    <div ref={allDomainsSentinelRef} aria-hidden="true" className="h-px w-full" />
+                    {anyAllDomainHasMore && (
+                      <div ref={allDomainsSentinelRef} aria-hidden="true" className="h-px w-full" />
+                    )}
                   </>
                 );
               })()

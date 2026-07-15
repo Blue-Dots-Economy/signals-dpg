@@ -48,4 +48,25 @@ describe('useInfiniteBrowseItems', () => {
     renderHook(() => useInfiniteBrowseItems(network, null, null), { wrapper });
     expect(fetchNetworkItems).not.toHaveBeenCalled();
   });
+
+  // meta.total sums Redis-cached per-instance counts (TTL >= 300s) while pages
+  // are fresh, so a delete/pause inside that window can leave `total` (5) higher
+  // than the rows the server can actually return (a short first page of 1, below
+  // PROFILE_PAGE_SIZE=2). Without the short-page check, `loaded` (1) < `total`
+  // (5) forever, `hasNextPage` never flips false, and the scroll sentinel fires
+  // endless empty-page fetches.
+  it('stops paging on a short page even when meta.total says more remain', async () => {
+    vi.mocked(fetchNetworkItems).mockImplementation(async () => ({
+      meta: { total: 5, limit: 2, offset: 0 },
+      items: [item('a')],
+    }));
+    const { result } = renderHook(
+      () => useInfiniteBrowseItems(network, domain, null),
+      { wrapper },
+    );
+    await waitFor(() => expect(result.current.items.length).toBe(1));
+    expect(result.current.total).toBe(5);
+    expect(result.current.hasNextPage).toBe(false);
+    expect(fetchNetworkItems).toHaveBeenCalledTimes(1);
+  });
 });

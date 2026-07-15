@@ -65,13 +65,19 @@ export function useInfiniteBrowseItems(
     },
     getNextPageParam: (lastPage, allPages) => {
       const loaded = allPages.reduce((n, p) => n + p.items.length, 0);
+      // Stop when the server returned a short page (fewer than a full page) OR
+      // we've loaded at least the reported total. meta.total is a sum of
+      // Redis-cached per-instance counts and can transiently overstate the real
+      // row count (deletes/pauses within the count-cache TTL); the short-page
+      // check prevents an endless "load more" in that case.
+      if (lastPage.items.length < PROFILE_PAGE_SIZE) return undefined;
       return loaded < lastPage.meta.total ? loaded : undefined;
     },
     staleTime: BROWSE_STALE_TIME_MS,
   });
 
   const items = query.data?.pages.flatMap((p) => p.items) ?? [];
-  const total = query.data?.pages[0]?.meta.total ?? 0;
+  const total = query.data?.pages[query.data.pages.length - 1]?.meta.total ?? 0;
 
   return {
     items,
