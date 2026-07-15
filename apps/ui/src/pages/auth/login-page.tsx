@@ -30,6 +30,7 @@ import { getServedScope } from '@/lib/served-binding';
 import type { SignupExtras } from '@/lib/signup-domain';
 import { SignupDobStep } from '@/components/consent/u18/signup-dob-step';
 import { isMinorFromBirth } from '@/lib/guardian-consent';
+import { PhoneInput, toE164 } from '@/components/auth/phone-input';
 import {
   SignupGuardianFlow,
   type SignupIdentifier,
@@ -48,13 +49,6 @@ function domainLabel(domain: DotNetworkDomain): string {
   return domain.id.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
 }
 
-// The phone field is the NATIONAL number only — the "+91" country code is a
-// fixed prefix shown beside it, never typed. Keep it to at most 10 digits and
-// strip anything else (letters, spaces, a pasted "+91"/leading zero, etc.).
-const IN_DIAL_CODE = '+91';
-function sanitizeNationalPhone(raw: string): string {
-  return raw.replace(/\D/g, '').slice(0, 10);
-}
 
 export function LoginPage() {
   const navigate = useNavigate();
@@ -149,7 +143,7 @@ export function LoginPage() {
   }, [authCfg, mode]);
 
   // phoneNumber holds the national part; the wire value is the full E.164.
-  const fullPhone = phoneNumber ? `${IN_DIAL_CODE}${phoneNumber}` : '';
+  const fullPhone = toE164(phoneNumber);
   const identifier: AuthIdentifier = mode === 'email' ? { email } : { phoneNumber: fullPhone };
   const contactValue = mode === 'email' ? email : phoneNumber;
   // Gate the CTA: in phone mode the full 10-digit national number must be in;
@@ -487,25 +481,13 @@ export function LoginPage() {
               {mode === 'email' ? t('auth.label_email') : t('auth.label_mobile')}
             </Label>
             {mode === 'phone' ? (
-              <div className="flex h-11 items-stretch overflow-hidden rounded-md border border-input bg-transparent shadow-xs focus-within:border-ring focus-within:ring-[3px] focus-within:ring-ring/50">
-                {/* Fixed India country code — the field below is the 10-digit
-                    national number only, so a pasted "+91" can't double up. */}
-                <span className="flex select-none items-center border-r border-input bg-muted px-3 text-sm text-muted-foreground">
-                  🇮🇳 {IN_DIAL_CODE}
-                </span>
-                <input
-                  id="contact"
-                  type="tel"
-                  inputMode="numeric"
-                  maxLength={10}
-                  placeholder={t('auth.placeholder_phone', '10-digit mobile number')}
-                  value={phoneNumber}
-                  onChange={(e) => setPhoneNumber(sanitizeNationalPhone(e.target.value))}
-                  disabled={isLoading}
-                  required
-                  className="min-w-0 flex-1 bg-transparent px-3 text-sm outline-none disabled:opacity-60"
-                />
-              </div>
+              <PhoneInput
+                id="contact"
+                value={phoneNumber}
+                onChange={setPhoneNumber}
+                disabled={isLoading}
+                placeholder={t('auth.placeholder_phone', '10-digit mobile number')}
+              />
             ) : (
               <Input
                 id="contact"

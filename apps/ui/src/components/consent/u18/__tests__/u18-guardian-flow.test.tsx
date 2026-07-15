@@ -61,7 +61,7 @@ describe('U18GuardianFlow', () => {
     // Step 2: guardian details (name + a contact + both consents)
     await waitFor(() => expect(screen.getByLabelText(/guardian name/i)).toBeInTheDocument());
     await userEvent.type(screen.getByLabelText(/guardian name/i), 'Asha Guardian');
-    await userEvent.type(screen.getByLabelText(/guardian phone number/i), '+911234567890');
+    await userEvent.type(screen.getByLabelText(/guardian phone number/i), '9876543210');
     await userEvent.click(screen.getByLabelText(/i accept the terms and conditions/i));
     await userEvent.click(screen.getByLabelText(/i consent to data privacy policy/i));
     await userEvent.click(screen.getByRole('button', { name: /send otp/i }));

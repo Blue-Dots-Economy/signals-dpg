@@ -7,7 +7,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Button } from '@/components/ui/button';
-import { cn } from '@/lib/utils';
+import { PhoneInput, toE164 } from '@/components/auth/phone-input';
 import { useAuth } from '@/contexts/auth-context';
 import {
   submitGuardian,
@@ -39,14 +39,6 @@ function normalize(value: string): string {
   return value.trim();
 }
 
-// Guardian phone can be any country, so keep a single leading "+" plus digits;
-// strip everything else (type="tel" otherwise accepts letters).
-function sanitizeGuardianPhone(raw: string): string {
-  const hasLeadingPlus = raw.trimStart().startsWith('+');
-  const digits = raw.replace(/\D/g, '');
-  return (hasLeadingPlus ? '+' : '') + digits;
-}
-
 export function GuardianFormStep({
   network,
   brand,
@@ -68,14 +60,16 @@ export function GuardianFormStep({
   const [isSubmitting, setIsSubmitting] = React.useState(false);
   const [validationError, setValidationError] = React.useState<string | null>(null);
 
-  const hasContact = Boolean(guardianEmail.trim()) || Boolean(guardianPhone.trim());
+  // guardianPhone is the national 10-digit part; the wire value is E.164.
+  const guardianPhoneE164 = toE164(guardianPhone);
+  const hasContact = Boolean(guardianEmail.trim()) || guardianPhone.length === 10;
 
   // Same-contact warning: either guardian field matching the ward's own.
   const ownEmail = compareContact.email?.trim().toLowerCase();
   const ownPhone = compareContact.phoneNumber?.trim();
   const clientDetectedSameContact =
     (!!ownEmail && !!guardianEmail.trim() && normalize(guardianEmail).toLowerCase() === ownEmail) ||
-    (!!ownPhone && !!guardianPhone.trim() && normalize(guardianPhone) === ownPhone);
+    (!!ownPhone && !!guardianPhoneE164 && guardianPhoneE164 === ownPhone);
   const showSameContactWarning = clientDetectedSameContact || serverFlaggedSameContact;
 
   const clearWarnings = () => {
@@ -96,7 +90,7 @@ export function GuardianFormStep({
   // the documented channel fallback: email → SMS → WhatsApp).
   function preferredContact(): { contact: string; contactType: 'phone' | 'email' } {
     if (guardianEmail.trim()) return { contact: guardianEmail.trim(), contactType: 'email' };
-    return { contact: guardianPhone.trim(), contactType: 'phone' };
+    return { contact: guardianPhoneE164, contactType: 'phone' };
   }
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -209,16 +203,12 @@ export function GuardianFormStep({
         <Label htmlFor="u18-guardian-phone">
           {t('u18.guardian_label_parent_phone', "Parent's or Guardian Phone Number")}
         </Label>
-        <Input
+        <PhoneInput
           id="u18-guardian-phone"
-          type="tel"
-          inputMode="tel"
           value={guardianPhone}
-          onChange={(e) => { setGuardianPhone(sanitizeGuardianPhone(e.target.value)); clearWarnings(); }}
-          maxLength={16}
+          onChange={(v) => { setGuardianPhone(v); clearWarnings(); }}
           disabled={isSubmitting}
-          aria-invalid={showSameContactWarning}
-          className={cn(showSameContactWarning && 'border-amber-500 focus-visible:ring-amber-500/40')}
+          invalid={showSameContactWarning}
         />
       </div>
 

@@ -27,7 +27,7 @@ async function renderForm(onSubmitted: (body: unknown) => void) {
 /** Fill name + a (non-ward) phone and tick both consent checkboxes. */
 async function fillValid() {
   await userEvent.type(screen.getByLabelText(/guardian name/i), 'Asha Guardian');
-  await userEvent.type(screen.getByLabelText(/guardian phone number/i), '+911234567890');
+  await userEvent.type(screen.getByLabelText(/guardian phone number/i), '9876543210');
   await userEvent.click(screen.getByLabelText(/i accept the terms and conditions/i));
   await userEvent.click(screen.getByLabelText(/i consent to data privacy policy/i));
 }
@@ -43,7 +43,7 @@ describe('GuardianFormStep', () => {
     expect(submit).toBeDisabled();
 
     await userEvent.type(screen.getByLabelText(/guardian name/i), 'Asha Guardian');
-    await userEvent.type(screen.getByLabelText(/guardian phone number/i), '+911234567890');
+    await userEvent.type(screen.getByLabelText(/guardian phone number/i), '9876543210');
     expect(submit).toBeDisabled(); // consents not ticked yet
 
     await userEvent.click(screen.getByLabelText(/i accept the terms and conditions/i));
@@ -52,11 +52,11 @@ describe('GuardianFormStep', () => {
     expect(submit).toBeEnabled();
   });
 
-  it('sanitizes the guardian phone to digits + a single leading "+"', async () => {
+  it('guardian phone takes only the 10-digit national number (+91 fixed prefix)', async () => {
     await renderForm(vi.fn());
     const phone = screen.getByLabelText(/guardian phone number/i) as HTMLInputElement;
-    await userEvent.type(phone, '+91 80954-44625abc');
-    expect(phone.value).toBe('+918095444625');
+    await userEvent.type(phone, '80954 44625abc99');
+    expect(phone.value).toBe('8095444625');
   });
 
   it('submits with the phone contact when only a phone is given', async () => {
@@ -71,7 +71,7 @@ describe('GuardianFormStep', () => {
         network: 'blue_dot',
         brand: 'standard',
         guardianName: 'Asha Guardian',
-        guardianContact: '+911234567890',
+        guardianContact: '+919876543210',
         guardianContactType: 'phone',
         guardianDeclarationAccepted: true,
       }),
@@ -84,7 +84,7 @@ describe('GuardianFormStep', () => {
     await renderForm(vi.fn());
     await userEvent.type(screen.getByLabelText(/guardian name/i), 'Asha Guardian');
     await userEvent.type(screen.getByLabelText(/guardian email/i), 'guardian@example.com');
-    await userEvent.type(screen.getByLabelText(/guardian phone number/i), '+911234567890');
+    await userEvent.type(screen.getByLabelText(/guardian phone number/i), '9876543210');
     await userEvent.click(screen.getByLabelText(/i accept the terms and conditions/i));
     await userEvent.click(screen.getByLabelText(/i consent to data privacy policy/i));
     await userEvent.click(screen.getByRole('button', { name: /send otp/i }));
@@ -105,7 +105,7 @@ describe('GuardianFormStep', () => {
 
     await userEvent.type(screen.getByLabelText(/guardian name/i), 'Asha Guardian');
     // Same as the ward's own phone (mocked in auth-context above).
-    await userEvent.type(screen.getByLabelText(/guardian phone number/i), '+919000000000');
+    await userEvent.type(screen.getByLabelText(/guardian phone number/i), '9000000000');
     await userEvent.click(screen.getByLabelText(/i accept the terms and conditions/i));
     await userEvent.click(screen.getByLabelText(/i consent to data privacy policy/i));
 
