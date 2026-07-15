@@ -29,7 +29,7 @@ import { eq } from 'drizzle-orm';
 import { db } from '@api/db/postgres/drizzle_config';
 import { items, ensureItemPartition } from '@dpg/database';
 import { user } from '@api/db/postgres/schema';
-import { fetchLocalItems, countLocalItems } from '../item_fetch_runtime';
+import { fetchLocalItems, countLocalItems, fetchLocalMarkers } from '../item_fetch_runtime';
 
 const pg_url = process.env.POSTGRES_URL ?? process.env.POSTGRES_USER;
 const can_run = Boolean(pg_url);
@@ -163,6 +163,32 @@ describeIf(
       expect(order[order.length - 1]).toBe(ids.noLocations);
       // order-only: nothing filtered out (all 6 present)
       expect(res.items.length).toBe(6);
+    });
+
+    it('§4.3 fetchLocalMarkers: slim projection, radius filter, nearest-first order, truthful meta.total', async () => {
+      const res = await fetchLocalMarkers({ ...baseFilters, radius_meters: 1000 });
+
+      // meta.total matches the filtered set (same 3 as the fetchLocalItems 1000 m case)
+      expect(res.meta).toEqual({ total: 3, limit: 100, offset: 0 });
+
+      // slim projection only — no item_state / item_type / created_by / etc.
+      for (const marker of res.markers) {
+        expect(Object.keys(marker).sort()).toEqual(
+          ['item_domain', 'item_id', 'item_instance_url', 'item_locations'].sort(),
+        );
+      }
+
+      const got = new Set(res.markers.map((m) => m.item_id));
+      expect(got.has(ids.atCenter)).toBe(true);
+      expect(got.has(ids.near)).toBe(true);
+      expect(got.has(ids.multiOneIn)).toBe(true);
+      expect(got.has(ids.far)).toBe(false);
+      expect(res.markers.length).toBe(3);
+
+      // nearest-first ordering, same as fetchLocalItems
+      const order = res.markers.map((m) => m.item_id);
+      expect(order.indexOf(ids.atCenter)).toBeLessThan(order.indexOf(ids.multiOneIn));
+      expect(order.indexOf(ids.multiOneIn)).toBeLessThan(order.indexOf(ids.near));
     });
   },
 );

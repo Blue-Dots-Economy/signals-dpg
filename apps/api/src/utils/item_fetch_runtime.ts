@@ -117,29 +117,46 @@ export async function countLocalItems(
   return Number(count);
 }
 
+/**
+ * §4.1/§4.3 shared ORDER BY: nearest-first when a lat/lng center is present
+ * (ties broken by created_at DESC; no-location rows sort last), otherwise
+ * plain created_at DESC. Shared by fetchLocalItems and fetchLocalMarkers so
+ * the ordering behavior can never drift between the two projections.
+ */
+function buildDistanceOrderBy(
+  filters: Pick<ItemFetchFilters, 'item_latitude' | 'item_longitude'>
+) {
+  return filters.item_latitude !== undefined && filters.item_longitude !== undefined
+    ? sql`
+        (
+          SELECT MIN(
+            earth_distance(
+              ll_to_earth(${filters.item_latitude}, ${filters.item_longitude}),
+              ll_to_earth((loc->>'lat')::float8, (loc->>'lng')::float8)
+            )
+          )
+          FROM jsonb_array_elements(${items.item_locations}) loc
+        ) ASC NULLS LAST,
+        ${items.created_at} DESC
+      `
+    : sql`${items.created_at} DESC`;
+}
+
+const markerColumns = {
+  item_id: items.item_id,
+  item_domain: items.item_domain,
+  item_instance_url: items.item_instance_url,
+  item_locations: items.item_locations,
+};
+
 export async function fetchLocalItems(filters: ItemFetchFilters) {
   const whereClause = buildWhereClause(filters);
   const total = await countLocalItems(filters);
-  const orderByClause =
-    filters.item_latitude !== undefined && filters.item_longitude !== undefined
-      ? sql`
-          (
-            SELECT MIN(
-              earth_distance(
-                ll_to_earth(${filters.item_latitude}, ${filters.item_longitude}),
-                ll_to_earth((loc->>'lat')::float8, (loc->>'lng')::float8)
-              )
-            )
-            FROM jsonb_array_elements(${items.item_locations}) loc
-          ) ASC NULLS LAST,
-          ${items.created_at} DESC
-        `
-      : sql`${items.created_at} DESC`;
   const result = await db
     .select(itemResponseColumns)
     .from(items)
     .where(whereClause)
-    .orderBy(orderByClause)
+    .orderBy(buildDistanceOrderBy(filters))
     .limit(filters.limit)
     .offset(filters.offset);
 
@@ -162,5 +179,32 @@ export async function fetchLocalItems(filters: ItemFetchFilters) {
         }).mergedState,
       };
     }),
+  };
+}
+
+/**
+ * §4.3 slim projection for map markers: item_id/item_domain/item_instance_url/
+ * item_locations only. Same WHERE + ORDER BY as fetchLocalItems (via
+ * buildWhereClause / buildDistanceOrderBy) so filtering and nearest-first
+ * ordering behave identically — just without the heavier item_state payload.
+ */
+export async function fetchLocalMarkers(filters: ItemFetchFilters) {
+  const whereClause = buildWhereClause(filters);
+  const total = await countLocalItems(filters);
+  const markers = await db
+    .select(markerColumns)
+    .from(items)
+    .where(whereClause)
+    .orderBy(buildDistanceOrderBy(filters))
+    .limit(filters.limit)
+    .offset(filters.offset);
+
+  return {
+    meta: {
+      total,
+      limit: filters.limit,
+      offset: filters.offset,
+    },
+    markers,
   };
 }

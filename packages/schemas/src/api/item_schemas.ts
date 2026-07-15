@@ -118,6 +118,27 @@ export const FetchItemsBodySchema = withGeoSearchRefinement(FetchItemsSchemaBase
   cache_ttl_seconds: z.number().int().positive().optional(),
 }));
 
+const MarkersSchemaBase = FetchItemsSchemaBase.extend({
+  // Coords are cheap — allow a much higher cap than the 1000 full-fetch cap.
+  limit: z.coerce.number().int().min(1).max(10000).default(200),
+});
+
+export const MarkersQuerySchema = withGeoSearchRefinement(MarkersSchemaBase);
+export const MarkersBodySchema = withGeoSearchRefinement(
+  MarkersSchemaBase.extend({
+    limit: z.number().int().min(1).max(10000),
+    offset: z.number().int().min(0),
+    cache_ttl_seconds: z.number().int().positive().optional(),
+  })
+);
+
+export const MarkerResponseSchema = z.object({
+  item_id: z.uuid(),
+  item_domain: z.string(),
+  item_instance_url: z.url().nullable(),
+  item_locations: ItemLocationsArray,
+});
+
 export const UpdateItemParamsSchema = z.object({
   itemId: z.uuid(),
 });
