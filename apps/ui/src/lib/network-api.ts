@@ -152,17 +152,16 @@ export async function fetchNetworkMarkers(
   if (query.radius_meters !== undefined) {
     params.set('radius_meters', String(query.radius_meters));
   }
-  // NOTE: no existing fetcher in this file serializes an object-shaped query
-  // param, so there is no established encoding to mirror. Serialized as a
-  // JSON string here per #203 P4 Task 3 brief; the server's `fastify-qs`
-  // query parser does not itself JSON-decode string values, so the
-  // `MarkersQuerySchema.item_state` (a `z.record`) will reject this as-is.
-  // Whoever wires this fetcher up (Task 6+) needs to either add a
-  // JSON-string preprocess to `MarkersQuerySchema.item_state` server-side, or
-  // switch to bracket-notation (`qs`-style) serialization here. Left
-  // unresolved intentionally — this task is additive/no-consumers.
+  // Serialize item_state as qs bracket notation (`item_state[field]=value`),
+  // which the server's `fastify-qs` parser decodes to a nested object that
+  // `MarkersQuerySchema.item_state` (a `z.record`) accepts and buildWhereClause
+  // applies as an `item_state @> jsonb` filter. Single value per field (the map
+  // enum filter's single-select case, #203 P4 §D1); multi-value-per-field
+  // filtering is a documented follow-up.
   if (query.item_state !== undefined) {
-    params.set('item_state', JSON.stringify(query.item_state));
+    for (const [field, value] of Object.entries(query.item_state)) {
+      params.set(`item_state[${field}]`, String(value));
+    }
   }
   if (query.limit !== undefined) params.set('limit', String(query.limit));
   if (query.offset !== undefined) params.set('offset', String(query.offset));
