@@ -1,6 +1,7 @@
 import { randomInt } from 'node:crypto';
 import { redis } from '@api/db/secondary/redis';
 import { getNotificationClient } from '@/utils/notificationClient';
+import { authConfig } from '@/config';
 
 /** Codes the primitive raises; callers map these to HTTP responses. */
 export class GuardianOtpError extends Error {
@@ -30,6 +31,9 @@ const rateKey = (scope: string) => `guardian_otp:rl:${scope}`;
 const verifyRateKey = (scope: string) => `guardian_otp:vrl:${scope}`;
 
 function generateOtp(): string {
+  // Dev/test bypass (CREATE_TEST_OTP): fixed code so the guardian flow is
+  // exercisable without a notifier. Guarded against production in config.
+  if (authConfig.create_test_otp) return '000000';
   return String(randomInt(0, 1_000_000)).padStart(6, '0');
 }
 
@@ -55,6 +59,9 @@ export async function issueGuardianOtp(args: {
 
   const otp = generateOtp();
   await redis.set(codeKey(args.scope), otp, 'EX', GUARDIAN_OTP_TTL_SEC);
+  // In test-OTP mode skip the real dispatch — no notifier is required and the
+  // fixed code is already known to the tester.
+  if (authConfig.create_test_otp) return;
   const send = args.send ?? defaultGuardianOtpSend;
   await send({ contact: args.contact, contactType: args.contactType, otp });
 }

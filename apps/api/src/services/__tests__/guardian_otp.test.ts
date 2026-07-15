@@ -1,5 +1,13 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
+vi.mock('@/config', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/config')>();
+  return {
+    ...actual,
+    authConfig: { ...actual.authConfig, create_test_otp: false },
+  };
+});
+
 const store = new Map<string, string>();
 
 vi.mock('@api/db/secondary/redis', () => ({
