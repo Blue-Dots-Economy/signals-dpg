@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
@@ -184,12 +184,12 @@ describe('LoginPage', () => {
 
       // Name only — the still-empty required domain select blocks submission.
       await userEvent.type(screen.getByLabelText(/your name/i), 'Asha');
-      await userEvent.click(screen.getByRole('button', { name: /send/i }));
+      await userEvent.click(screen.getByRole('button', { name: /^continue$/i }));
       expect(requestOtp).not.toHaveBeenCalled();
 
       // Name + domain (ungated) — submission proceeds straight to OTP, no DOB.
       await userEvent.selectOptions(screen.getByLabelText(/your domain/i), 'provider');
-      await userEvent.click(screen.getByRole('button', { name: /send/i }));
+      await userEvent.click(screen.getByRole('button', { name: /^continue$/i }));
       await waitFor(() => expect(requestOtp).toHaveBeenCalled());
     });
 
@@ -206,7 +206,7 @@ describe('LoginPage', () => {
 
       await userEvent.type(screen.getByLabelText(/your name/i), 'Ravi');
       await userEvent.selectOptions(screen.getByLabelText(/your domain/i), 'provider'); // ungated
-      await userEvent.click(screen.getByRole('button', { name: /send/i }));
+      await userEvent.click(screen.getByRole('button', { name: /^continue$/i }));
 
       // No DOB step shown; goes straight to OTP with a domain-only signupExtras.
       expect(screen.queryByText(/to create an account/i)).toBeNull();
@@ -234,7 +234,7 @@ describe('LoginPage', () => {
 
       await userEvent.type(screen.getByLabelText(/your name/i), 'Asha');
       await userEvent.selectOptions(screen.getByLabelText(/your domain/i), 'seeker'); // gated
-      await userEvent.click(screen.getByRole('button', { name: /send/i }));
+      await userEvent.click(screen.getByRole('button', { name: /^continue$/i }));
 
       // The DOB step appears (gated domain); the OTP is not yet sent.
       expect(await screen.findByText(/to create an account/i)).toBeInTheDocument();
@@ -242,7 +242,9 @@ describe('LoginPage', () => {
 
       // Pick a minor DOB + Continue → guardian flow renders, OTP still held.
       await pickDob(/select date of birth/i, 2015, 5);
-      await userEvent.click(screen.getByRole('button', { name: /^continue$/i }));
+      await userEvent.click(
+        within(screen.getByRole('dialog')).getByRole('button', { name: /^continue$/i }),
+      );
 
       const flow = await screen.findByTestId('signup-guardian-flow');
       expect(flow).toHaveAttribute('data-domain', 'seeker');
@@ -278,11 +280,13 @@ describe('LoginPage', () => {
 
       await userEvent.type(screen.getByLabelText(/your name/i), 'Ravi');
       await userEvent.selectOptions(screen.getByLabelText(/your domain/i), 'seeker'); // gated
-      await userEvent.click(screen.getByRole('button', { name: /send/i }));
+      await userEvent.click(screen.getByRole('button', { name: /^continue$/i }));
 
       expect(await screen.findByText(/to create an account/i)).toBeInTheDocument();
       await pickDob(/select date of birth/i, 1990, 5); // adult
-      await userEvent.click(screen.getByRole('button', { name: /^continue$/i }));
+      await userEvent.click(
+        within(screen.getByRole('dialog')).getByRole('button', { name: /^continue$/i }),
+      );
 
       await waitFor(() => expect(requestOtp).toHaveBeenCalled());
       expect(screen.queryByTestId('signup-guardian-flow')).toBeNull();

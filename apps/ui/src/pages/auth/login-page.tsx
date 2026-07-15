@@ -551,7 +551,10 @@ export function LoginPage() {
             className="flex w-full items-center justify-center gap-2 rounded-md py-3 text-sm font-semibold transition-all disabled:opacity-60 bg-brand-cta h-11"
           >
             {isLoading && <Loader2 className="h-4 w-4 animate-spin" />}
-            {(userExists === null || signupBlocked) ? t('auth.cta_continue') : t('auth.cta_send_otp')}
+            {/* "Send OTP" only for a returning user, where submit truly sends
+                the code. A new signup submit leads to more steps (DOB /
+                guardian / consent) before any OTP, so it reads "Continue". */}
+            {userExists === true ? t('auth.cta_send_otp') : t('auth.cta_continue')}
           </button>
         </form>
       </AuthShell>
