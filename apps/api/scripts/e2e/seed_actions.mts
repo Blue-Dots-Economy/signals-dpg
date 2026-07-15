@@ -287,6 +287,36 @@ async function lookupExistingActionId(
   return rows[0]?.action_id ?? null;
 }
 
+// Per-item result shapes for the `{ results, summary }` bulk envelope now
+// returned by /api/v1/action/perform (single-object POST still yields a
+// one-element envelope). See packages/schemas/src/api/bulk_schemas.ts
+// (BulkPerformActionResponseSchema) and apps/ui/src/lib/bulk.ts
+// (unwrapBulkSingle) for the canonical shape this mirrors.
+type PerformResultSuccess = {
+  index: number;
+  status: 'success';
+  action_id: string;
+  action_type: string;
+  action_status: string;
+  update_count: number;
+  source_item_id: string;
+  target_item_id: string;
+};
+type PerformResultError = {
+  index: number;
+  status: 'error';
+  error: string;
+  message: string;
+};
+type PerformEnvelopeBody = {
+  results?: (PerformResultSuccess | PerformResultError)[];
+  summary?: { total: number; succeeded: number; failed: number };
+  // Request-level (non-envelope) error, e.g. auth/validation failures that
+  // never reach the per-item handler.
+  error?: string;
+  message?: string;
+};
+
 async function postPerform(
   source: ItemRef,
   target: ItemRef,
@@ -294,7 +324,7 @@ async function postPerform(
   apiKey: string,
   orgId: string,
   actingAsUserId: string,
-): Promise<{ status: number; body: { action_id?: string; error?: string; message?: string } }> {
+): Promise<{ status: number; body: PerformEnvelopeBody }> {
   const res = await fetch(`${signalsUrl}/api/v1/action/perform`, {
     method: 'POST',
     headers: {
@@ -325,11 +355,7 @@ async function postPerform(
       acting_as_user_id: actingAsUserId,
     }),
   });
-  const body = (await res.json().catch(() => ({}))) as {
-    action_id?: string;
-    error?: string;
-    message?: string;
-  };
+  const body = (await res.json().catch(() => ({}))) as PerformEnvelopeBody;
   return { status: res.status, body };
 }
 
@@ -493,12 +519,15 @@ for (let i = 0; i < seekerCount; i++) {
     seekerOrgId,
     seeker.owner_user_id,
   );
-  if (status === 201 && body.action_id) {
-    actionId = body.action_id;
+  const firstResult = body.results?.[0];
+  if (status === 201 && firstResult?.status === 'success') {
+    actionId = firstResult.action_id;
     console.log(
       `${label} perform → created action=${actionId} target=${row.initiated_action.bucket}/${row.expected_status}`,
     );
   } else if (status === 409) {
+    // Kept for compatibility with the old array-route's idempotency status;
+    // the new envelope reports a duplicate as 422 DUPLICATE_ACTION below.
     actionId = await lookupExistingActionId(seeker.item_id, targetProvider.item_id);
     if (!actionId) {
       console.error(`${label} 409 conflict but no existing action found — aborting`);
@@ -507,9 +536,27 @@ for (let i = 0; i < seekerCount; i++) {
       process.exit(1);
     }
     console.log(`${label} perform → 409 conflict; reusing action=${actionId}`);
+  } else if (
+    status === 422 &&
+    firstResult?.status === 'error' &&
+    firstResult.error === 'DUPLICATE_ACTION'
+  ) {
+    actionId = await lookupExistingActionId(seeker.item_id, targetProvider.item_id);
+    if (!actionId) {
+      console.error(`${label} 422 DUPLICATE_ACTION but no existing action found — aborting`);
+      console.error(`  body:`, body);
+      await pool.end();
+      process.exit(1);
+    }
+    console.log(`${label} perform → 422 DUPLICATE_ACTION; reusing action=${actionId}`);
   } else {
     console.error(`${label} /action/perform failed: HTTP ${status}`);
-    console.error(`  body:`, body);
+    console.error(
+      `  error:`,
+      firstResult?.status === 'error'
+        ? { error: firstResult.error, message: firstResult.message }
+        : { error: body.error, message: body.message },
+    );
     await pool.end();
     process.exit(1);
   }
@@ -564,10 +611,13 @@ for (let j = 0; j < providerCount; j++) {
     providerOrgId,
     provider.owner_user_id,
   );
-  if (status === 201 && body.action_id) {
-    actionId = body.action_id;
+  const firstResult = body.results?.[0];
+  if (status === 201 && firstResult?.status === 'success') {
+    actionId = firstResult.action_id;
     console.log(`${label} perform → created action=${actionId}`);
   } else if (status === 409) {
+    // Kept for compatibility with the old array-route's idempotency status;
+    // the new envelope reports a duplicate as 422 DUPLICATE_ACTION below.
     actionId = await lookupExistingActionId(provider.item_id, targetSeeker.item_id);
     if (!actionId) {
       console.error(`${label} 409 conflict but no existing action found — aborting`);
@@ -576,9 +626,27 @@ for (let j = 0; j < providerCount; j++) {
       process.exit(1);
     }
     console.log(`${label} perform → 409 conflict; reusing action=${actionId}`);
+  } else if (
+    status === 422 &&
+    firstResult?.status === 'error' &&
+    firstResult.error === 'DUPLICATE_ACTION'
+  ) {
+    actionId = await lookupExistingActionId(provider.item_id, targetSeeker.item_id);
+    if (!actionId) {
+      console.error(`${label} 422 DUPLICATE_ACTION but no existing action found — aborting`);
+      console.error(`  body:`, body);
+      await pool.end();
+      process.exit(1);
+    }
+    console.log(`${label} perform → 422 DUPLICATE_ACTION; reusing action=${actionId}`);
   } else {
     console.error(`${label} /action/perform failed: HTTP ${status}`);
-    console.error(`  body:`, body);
+    console.error(
+      `  error:`,
+      firstResult?.status === 'error'
+        ? { error: firstResult.error, message: firstResult.message }
+        : { error: body.error, message: body.message },
+    );
     await pool.end();
     process.exit(1);
   }

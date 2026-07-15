@@ -341,28 +341,26 @@ describeIf(`GET /action/:action_id/contact-details (integration)${
         'x-api-key': alice_raw_key,
         'content-type': 'application/json',
       },
-      payload: [
-        {
-          action_type: 'connect',
-          source_item: {
-            item_network: primary.network,
-            item_domain: primary.domain,
-            item_type: primary.item_type,
-            item_id: alice_item_id,
-          },
-          target_item: {
-            item_network: secondary.network,
-            item_domain: secondary.domain,
-            item_type: secondary.item_type,
-            item_id: bob_item_id,
-            item_instance_url: base_url,
-          },
-          requirements_snapshot: {},
-          ...((performConsent?.reveals_pii_on_status.length ?? 0) > 0
-            ? { consent: consentAck() }
-            : {}),
+      payload: {
+        action_type: 'connect',
+        source_item: {
+          item_network: primary.network,
+          item_domain: primary.domain,
+          item_type: primary.item_type,
+          item_id: alice_item_id,
         },
-      ],
+        target_item: {
+          item_network: secondary.network,
+          item_domain: secondary.domain,
+          item_type: secondary.item_type,
+          item_id: bob_item_id,
+          item_instance_url: base_url,
+        },
+        requirements_snapshot: {},
+        ...((performConsent?.reveals_pii_on_status.length ?? 0) > 0
+          ? { consent: consentAck() }
+          : {}),
+      },
     });
     if (performRes.statusCode !== 201) {
       throw new Error(
