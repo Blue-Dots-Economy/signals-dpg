@@ -78,10 +78,24 @@ export function buildPagePlan(
  * aggregate instead of failing the whole page. Shared by
  * `fetchItemsAcrossInstances` and (Task 3) `fetchMarkersAcrossInstances` —
  * only `fetchPage`'s projection (full item vs. slim marker) differs.
+ *
+ * `peerLimitMax` clamps the per-peer top-K request to whatever limit cap the
+ * peer route itself enforces (e.g. `FetchItemsBodySchema` caps `limit` at
+ * 1000; `MarkersBodySchema` at 10000) — every remote peer validates its
+ * request body against that schema, so asking for more than the cap fails
+ * Zod validation on every remote peer and turns a healthy deep page into a
+ * spurious partial. When `offset + limit > peerLimitMax`, cross-instance
+ * ordering is only approximate for that page — each peer contributes at most
+ * its top `peerLimitMax` rows instead of its true top `offset + limit` — but
+ * this is an accepted limitation bounded by the peer route's own cap; it
+ * trades a rare deep-page ordering approximation for avoiding the spurious
+ * partial. (The list's own base limit is ≤1000 and deep multi-instance
+ * paging past the cap is a rare edge.)
  */
 export async function scatterGatherPage<T extends MergeableRow>(input: {
   activeInstances: string[];
   filters: ItemFetchFilters;
+  peerLimitMax: number;
   fetchPage: (input: {
     instanceUrl: string;
     filters: ItemFetchFilters;
@@ -92,11 +106,13 @@ export async function scatterGatherPage<T extends MergeableRow>(input: {
   // Every active instance is asked for its own top `offset + limit` rows —
   // the requesting instance can't know in advance how many of any peer's
   // rows land in the final page, so it over-fetches from each and lets the
-  // merge below pick the true global top page.
+  // merge below pick the true global top page. Clamped to `peerLimitMax` so
+  // the per-peer request never exceeds what the peer route's own schema
+  // accepts (see doc comment above).
   const topNFilters: ItemFetchFilters = {
     ...input.filters,
     offset: 0,
-    limit: offset + limit,
+    limit: Math.min(offset + limit, input.peerLimitMax),
   };
 
   const settled = await Promise.allSettled(
@@ -241,6 +257,11 @@ export async function fetchItemsAcrossInstances(input: {
       await scatterGatherPage<FetchItemsResponseItem>({
         activeInstances: activeInstances.map((entry) => entry.instanceUrl),
         filters: input.filters,
+        // FetchItemsBodySchema (packages/schemas/src/api/item_schemas.ts) caps
+        // limit at 1000 — every remote peer validates its fetch_local body
+        // against that schema, so the per-peer top-K request must never ask
+        // for more.
+        peerLimitMax: 1000,
         fetchPage: async ({ instanceUrl, filters }) =>
           (await fetchInstancePage({ instanceUrl, filters })).items,
       });

@@ -277,6 +277,7 @@ describe('scatterGatherPage — pure merge (>1 active instance)', () => {
     const result = await scatterGatherPage({
       activeInstances: [A, B],
       filters: { ...filters, item_latitude: 0, item_longitude: 0, offset: 0, limit: 2 },
+      peerLimitMax: 1000,
       fetchPage,
     });
 
@@ -305,6 +306,7 @@ describe('scatterGatherPage — pure merge (>1 active instance)', () => {
     const result = await scatterGatherPage({
       activeInstances: [A, B],
       filters: { ...filters, item_latitude: 0, item_longitude: 0, offset: 0, limit: 2 },
+      peerLimitMax: 1000,
       fetchPage,
     });
 
@@ -322,10 +324,50 @@ describe('scatterGatherPage — pure merge (>1 active instance)', () => {
     const result = await scatterGatherPage({
       activeInstances: [A, B],
       filters: { ...filters, offset: 0, limit: 2 },
+      peerLimitMax: 1000,
       fetchPage,
     });
 
     expect(result.rows.map((r) => r.item_id)).toEqual(['b1', 'a1']); // newer first
+  });
+
+  it('clamps the per-peer top-K request to peerLimitMax on a deep page (offset + limit > peerLimitMax)', async () => {
+    // offset 1000 + limit 20 = 1020, which exceeds the peer route's 1000 cap
+    // (FetchItemsBodySchema). Each peer must be asked for at most
+    // peerLimitMax rows, never offset + limit, or the remote peer's own Zod
+    // validation would reject the request.
+    const fromA = [geoItem('a-near', 0.001), geoItem('a-far', 0.05)];
+    const fromB = [geoItem('b-near', 0.002), geoItem('b-far', 0.06)];
+    const fetchPage = vi.fn(async ({ instanceUrl }: { instanceUrl: string }) =>
+      instanceUrl === A ? fromA : fromB
+    );
+
+    const result = await scatterGatherPage({
+      activeInstances: [A, B],
+      filters: {
+        ...filters,
+        item_latitude: 0,
+        item_longitude: 0,
+        offset: 1000,
+        limit: 20,
+      },
+      peerLimitMax: 1000,
+      fetchPage,
+    });
+
+    expect(fetchPage).toHaveBeenCalledWith({
+      instanceUrl: A,
+      filters: expect.objectContaining({ offset: 0, limit: 1000 }),
+    });
+    expect(fetchPage).toHaveBeenCalledWith({
+      instanceUrl: B,
+      filters: expect.objectContaining({ offset: 0, limit: 1000 }),
+    });
+
+    // The merge still produces a valid slice from the union — no spurious
+    // partial from requesting an over-cap limit.
+    expect(result.unavailableInstances.size).toBe(0);
+    expect(result.rows).toEqual([]);
   });
 });
 
