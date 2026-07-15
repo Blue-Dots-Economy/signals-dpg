@@ -17,6 +17,7 @@ import {
   normalizeInstanceUrl,
 } from '@/utils/action_event_runtime';
 import { db } from '@api/db/postgres/drizzle_config';
+import { consent_record } from '@api/db/postgres/schema';
 import { getNetworkConfigById } from '@/network_configs';
 import { isServedDomainBinding } from '@/utils/served_domain_guard';
 import {
@@ -25,6 +26,8 @@ import {
   lookup_user_for_acting,
 } from './_resolve_acting_actor.js';
 import { runBulk, BulkItemFailure } from '@/utils/bulk_runner';
+import { guardianActionGate } from '@/services/guardian_action_gate';
+import { resolveConsentVersion } from '@/services/consent_version';
 
 const BulkPerformActionBodySchema = z.array(z.unknown());
 
@@ -99,6 +102,48 @@ export const perform_action_handler = async (
       // Aggregate response code is set by runBulk (207/422); the per-entry error carries the machine-readable code.
       if (sourceItemSnapshot.lifecycle_status !== 'live') {
         throw new BulkItemFailure('PROFILE_NOT_LIVE', 'source_item is not live; cannot perform actions');
+      }
+
+      // U18 guardian gate (Phase 5b): no-op for adults / ungated domains
+      // (`not_required`) — the rest of this handler runs byte-for-byte
+      // unchanged for them. For a gated minor, this issues/verifies a guardian
+      // OTP scoped to this exact action; the guardian consent row is written
+      // below only after the action write succeeds.
+      const guardianGate = await guardianActionGate({
+        wardUserId: actor.effective_user_id,
+        network: body.source_item.item_network,
+        sourceDomain: body.source_item.item_domain,
+        actionType: body.action_type,
+        sourceItemId: body.source_item.item_id,
+        targetItemId: body.target_item.item_id,
+        otp: body.guardian_otp,
+      });
+      if (guardianGate.status === 'challenge_issued') {
+        throw new BulkItemFailure(
+          'GUARDIAN_OTP_REQUIRED',
+          'Guardian OTP sent; resubmit with guardian_otp to confirm this action.',
+        );
+      }
+      if (guardianGate.status === 'invalid_otp') {
+        throw new BulkItemFailure('GUARDIAN_OTP_INVALID', 'Guardian OTP is invalid or expired.');
+      }
+      if (guardianGate.status === 'throttled') {
+        throw new BulkItemFailure(
+          'GUARDIAN_OTP_THROTTLED',
+          'Too many guardian OTP attempts; try again shortly.',
+        );
+      }
+      if (guardianGate.status === 'rate_limited') {
+        throw new BulkItemFailure(
+          'GUARDIAN_OTP_RATE_LIMITED',
+          'Too many guardian OTP requests; try again shortly.',
+        );
+      }
+      if (guardianGate.status === 'no_provider') {
+        throw new BulkItemFailure(
+          'OTP_PROVIDER_UNAVAILABLE',
+          'No verified contact channel is available to send the guardian OTP.',
+        );
       }
 
       let requirementsSnapshot = body.requirements_snapshot;
@@ -235,7 +280,7 @@ export const perform_action_handler = async (
         throw new BulkItemFailure(code, message);
       }
 
-      return responseBody as {
+      const result = responseBody as {
         action_id: string;
         action_type: string;
         action_status: string;
@@ -243,6 +288,45 @@ export const perform_action_handler = async (
         source_item_id: string;
         target_item_id: string;
       };
+
+      // Guardian action consent (Phase 5b): only reached when the gate
+      // verified a fresh guardian OTP for this exact action above. Mirrors
+      // the adult initiate-consent row shape (see
+      // network/action/perform_action.ts), with `source:'guardian'` and the
+      // u18 metadata tag. Action statements were not variant-split in Phase 2,
+      // so the version comes from the same (non-variant) action resolver.
+      if (guardianGate.status === 'verified') {
+        const guardianVersion = await resolveConsentVersion({
+          network: body.source_item.item_network,
+          category: 'action',
+          actionType: body.action_type,
+          stage: 'initiate',
+        });
+        if (guardianVersion === null) {
+          request.log.error(
+            { action_type: body.action_type },
+            'guardian action consent version not configured; guardian row not written',
+          );
+        } else {
+          await db.insert(consent_record).values({
+            level: 'item',
+            consentCategory: 'action',
+            actionType: body.action_type,
+            actionStage: 'initiate',
+            userId: actor.effective_user_id,
+            itemId: body.source_item.item_id,
+            actionId: result.action_id,
+            network: body.source_item.item_network,
+            brand: body.consent?.brand ?? null,
+            documentVersion: guardianVersion,
+            source: 'guardian',
+            acceptedAt: new Date(),
+            metadata: { variant: 'u18' },
+          });
+        }
+      }
+
+      return result;
     },
     {
       okStatus: 201,

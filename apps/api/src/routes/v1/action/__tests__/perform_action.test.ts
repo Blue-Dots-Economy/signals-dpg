@@ -152,6 +152,16 @@ vi.mock('@/network_configs', () => ({
   })),
 }));
 
+// --- mock the U18 guardian gate: this suite is all adult/ungated traffic, so
+// it always resolves `not_required` (matching the real gate's behavior for
+// these fixtures — 'seeker' never appears as a `guardian_consent_required`
+// domain above). Mocked at this seam (not the deeper otp/redis primitives) so
+// this unit test doesn't need a real Redis client, mirroring how the other
+// deps on this route are already mocked above.
+vi.mock('@/services/guardian_action_gate', () => ({
+  guardianActionGate: vi.fn(async () => ({ status: 'not_required' })),
+}));
+
 vi.mock('@dpg/schemas', async () => {
   const actual =
     await vi.importActual<typeof import('@dpg/schemas')>('@dpg/schemas');
