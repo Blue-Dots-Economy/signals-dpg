@@ -94,6 +94,11 @@ the React Query caches (browse/my-items/markers) and the client schema cache
 construction. The `resolvedNetwork(networkId, apiBaseUrl)` key already carries
 the API base URL. There is no switcher today, so no busting is wired yet.
 
+**Deferred — active profile id (caching-spec §8):** once relevance ranking
+(§9, cross-repo P6) lands, add `activeProfileId` to `browseItems` and `markers`
+keys because ranking results differ per profile. Not in keys today; placeholder
+is in code comments at `queryKeys.browseItems` and `queryKeys.markers`.
+
 ## Conventions worth highlighting
 
 - **Files are snake_case.** Route handler exports are snake_case (`create_item`), internal handler functions are camelCase (`createItemHandler`). Zod schemas are PascalCase. DB columns are snake_case.

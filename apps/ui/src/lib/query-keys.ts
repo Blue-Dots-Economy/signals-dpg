@@ -44,8 +44,27 @@ export const queryKeys = {
   profileConsent: (networkId: string) => ['profile-consent', networkId] as const,
   actions,
   myItems: (networkId: string) => ['my-items', networkId] as const,
+  /**
+   * Paged browse feed for ONE domain (spec §5.1). Key axes carried in filters:
+   * - lat, lng (location, part of filter object; null when user has no location)
+   * - limit (page size; PROFILE_PAGE_SIZE)
+   * Offset/pagination is handled by useInfiniteQuery's pageParam.
+   * DEFERRED axes (§8): instance/API base URL (no selectedApiUrl switcher
+   * exists; wire cache busting when added), activeProfileId (only affects
+   * results once relevance ranking §9 lands).
+   */
   browseItems: (networkId: string, domain: string, filters: Record<string, unknown>) =>
     ['browse-items', networkId, domain, filters] as const,
+  /**
+   * Map markers for visible domains within a viewport (spec §5.2 / §8). Key
+   * axes carried in filters:
+   * - latBucket, lngBucket, radiusBucket (rounded viewport; buckets prevent
+   *   cache busts on sub-pixel pans or small radius changes)
+   * - limit (MAP_FETCH_LIMIT or COUNT_ONLY_LIMIT for count-first queries §7)
+   * DEFERRED axes (§8): instance/API base URL (no selectedApiUrl switcher
+   * exists; wire cache busting when added), activeProfileId (only affects
+   * results once relevance ranking §9 lands).
+   */
   markers: (networkId: string, domain: string, filters: Record<string, unknown>) =>
     ['markers', networkId, domain, filters] as const,
 };
