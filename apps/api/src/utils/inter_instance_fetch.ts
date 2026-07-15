@@ -13,6 +13,8 @@ import {
   fetchLocalMarkers,
   type ItemFetchFilters,
 } from '@/utils/item_fetch_runtime';
+import { mergeSortAndSlice, type MergeableRow } from '@/utils/instance_merge';
+import type { LatLng } from '@/utils/geo_distance';
 
 type InstanceCount = {
   instanceUrl: string;
@@ -60,6 +62,68 @@ export function buildPagePlan(
   }
 
   return slices;
+}
+
+/**
+ * §4.4 scatter-gather top-K cross-instance merge. Only used when a domain has
+ * >1 active (count > 0) instance — with exactly one active instance, a
+ * direct `[offset, limit)` slice from that instance is already globally
+ * ordered, so callers keep that frozen single-instance path instead.
+ *
+ * Fans out to every active instance for its own top rows `[0, offset+limit)`
+ * (each peer is already locally ordered nearest-first / newest-first — see
+ * `buildDistanceOrderBy` in `item_fetch_runtime.ts`), then merges the union
+ * on this instance via `mergeSortAndSlice` and slices the requested page.
+ * `Promise.allSettled` so one slow/failed peer degrades to a partial
+ * aggregate instead of failing the whole page. Shared by
+ * `fetchItemsAcrossInstances` and (Task 3) `fetchMarkersAcrossInstances` —
+ * only `fetchPage`'s projection (full item vs. slim marker) differs.
+ */
+export async function scatterGatherPage<T extends MergeableRow>(input: {
+  activeInstances: string[];
+  filters: ItemFetchFilters;
+  fetchPage: (input: {
+    instanceUrl: string;
+    filters: ItemFetchFilters;
+  }) => Promise<T[]>;
+}): Promise<{ rows: T[]; unavailableInstances: Set<string> }> {
+  const { offset, limit, item_latitude, item_longitude } = input.filters;
+
+  // Every active instance is asked for its own top `offset + limit` rows —
+  // the requesting instance can't know in advance how many of any peer's
+  // rows land in the final page, so it over-fetches from each and lets the
+  // merge below pick the true global top page.
+  const topNFilters: ItemFetchFilters = {
+    ...input.filters,
+    offset: 0,
+    limit: offset + limit,
+  };
+
+  const settled = await Promise.allSettled(
+    input.activeInstances.map(async (instanceUrl) => ({
+      instanceUrl,
+      rows: await input.fetchPage({ instanceUrl, filters: topNFilters }),
+    }))
+  );
+
+  const unavailableInstances = new Set<string>();
+  const union: T[] = [];
+  settled.forEach((result, index) => {
+    if (result.status === 'fulfilled') {
+      union.push(...result.value.rows);
+      return;
+    }
+    unavailableInstances.add(input.activeInstances[index]);
+  });
+
+  const center: LatLng | null =
+    item_latitude !== undefined && item_longitude !== undefined
+      ? { lat: item_latitude, lng: item_longitude }
+      : null;
+
+  const rows = mergeSortAndSlice(union, { center, offset, limit });
+
+  return { rows, unavailableInstances };
 }
 
 export async function fetchItemsAcrossInstances(input: {
@@ -133,33 +197,64 @@ export async function fetchItemsAcrossInstances(input: {
     (sum: number, entry: InstanceCount) => sum + entry.count,
     0
   );
-  const slices = buildPagePlan(counts, input.filters.offset, input.filters.limit);
-  const settledResponses = await Promise.allSettled(
-    slices.map((slice) =>
-      fetchInstancePage({
-        instanceUrl: slice.instanceUrl,
-        filters: {
-          ...input.filters,
-          offset: slice.offset,
-          limit: slice.limit,
-        },
-      })
-    )
-  );
 
-  const responses: FetchItemsResponse[] = [];
-  settledResponses.forEach((result, index) => {
-    if (result.status === 'fulfilled') {
-      responses.push(result.value);
-      return;
-    }
-    const instanceUrl = slices[index].instanceUrl;
-    unavailableInstances.add(instanceUrl);
-    input.log.warn(
-      { err: result.reason, instanceUrl, phase: 'page' },
-      'Peer page fetch failed; dropping slice from aggregate'
+  // Scatter-gather only kicks in with >1 active (count > 0) instance: with
+  // exactly one, its direct [offset, limit) slice is already globally
+  // ordered, so that path is frozen byte-identical to pre-§4.4 behavior
+  // (same buildPagePlan call, same cache keys, same partial semantics).
+  const activeInstances = counts.filter((entry) => entry.count > 0);
+
+  let items: FetchItemsResponseItem[];
+
+  if (activeInstances.length <= 1) {
+    const slices = buildPagePlan(counts, input.filters.offset, input.filters.limit);
+    const settledResponses = await Promise.allSettled(
+      slices.map((slice) =>
+        fetchInstancePage({
+          instanceUrl: slice.instanceUrl,
+          filters: {
+            ...input.filters,
+            offset: slice.offset,
+            limit: slice.limit,
+          },
+        })
+      )
     );
-  });
+
+    const responses: FetchItemsResponse[] = [];
+    settledResponses.forEach((result, index) => {
+      if (result.status === 'fulfilled') {
+        responses.push(result.value);
+        return;
+      }
+      const instanceUrl = slices[index].instanceUrl;
+      unavailableInstances.add(instanceUrl);
+      input.log.warn(
+        { err: result.reason, instanceUrl, phase: 'page' },
+        'Peer page fetch failed; dropping slice from aggregate'
+      );
+    });
+
+    items = responses.flatMap((response) => response.items);
+  } else {
+    const { rows, unavailableInstances: failedPages } =
+      await scatterGatherPage<FetchItemsResponseItem>({
+        activeInstances: activeInstances.map((entry) => entry.instanceUrl),
+        filters: input.filters,
+        fetchPage: async ({ instanceUrl, filters }) =>
+          (await fetchInstancePage({ instanceUrl, filters })).items,
+      });
+
+    failedPages.forEach((instanceUrl) => {
+      unavailableInstances.add(instanceUrl);
+      input.log.warn(
+        { instanceUrl, phase: 'page' },
+        'Peer page fetch failed; excluding instance from scatter-gather aggregate'
+      );
+    });
+
+    items = rows;
+  }
 
   const partial = unavailableInstances.size > 0;
 
@@ -171,7 +266,7 @@ export async function fetchItemsAcrossInstances(input: {
       partial,
       unavailable_instances: [...unavailableInstances],
     },
-    items: responses.flatMap((response) => response.items),
+    items,
   };
 
   // Never cache a partial aggregate: caching it would serve incomplete data
