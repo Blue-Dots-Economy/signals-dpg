@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { isMinor } from '@/services/minor';
+import { isMinor, guardianConsentRequired } from '@/services/minor';
+import type { NetworkConfigDocument } from '@dpg/schemas';
 
 // Fixed reference "today" so the assertions are deterministic.
 const NOW = new Date(Date.UTC(2026, 6, 15)); // 2026-07-15
@@ -26,5 +27,32 @@ describe('isMinor', () => {
 
   it('is adult for someone well over 18', () => {
     expect(isMinor(2000, 5, NOW)).toBe(false);
+  });
+});
+
+const cfg = {
+  id: 'blue_dot',
+  domains: [
+    { id: 'seeker', guardian_consent_required: true },
+    { id: 'provider', guardian_consent_required: false },
+    { id: 'legacy' }, // flag absent → default false
+  ],
+} as unknown as NetworkConfigDocument;
+
+describe('guardianConsentRequired', () => {
+  it('is true when the domain opts in', () => {
+    expect(guardianConsentRequired(cfg, 'seeker')).toBe(true);
+  });
+
+  it('is false when the domain opts out', () => {
+    expect(guardianConsentRequired(cfg, 'provider')).toBe(false);
+  });
+
+  it('is false when the flag is absent', () => {
+    expect(guardianConsentRequired(cfg, 'legacy')).toBe(false);
+  });
+
+  it('is false for an unknown domain', () => {
+    expect(guardianConsentRequired(cfg, 'nope')).toBe(false);
   });
 });

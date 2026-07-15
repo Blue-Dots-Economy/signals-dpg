@@ -1,3 +1,5 @@
+import type { NetworkConfigDocument } from '@dpg/schemas';
+
 /**
  * Derived under-18 check (U18 spec D2/D3). Birth data is year+month only.
  * Conservative rounding: a ward is a minor through the WHOLE birth-month of
@@ -19,4 +21,16 @@ export function isMinor(
   // First instant of the month the ward becomes an adult (UTC, day 1).
   const adultThreshold = Date.UTC(adultYear, adultMonth - 1, 1);
   return now.getTime() < adultThreshold;
+}
+
+/**
+ * Whether a served domain routes minors through the guardian flow (U18 D8).
+ * Read server-side at the gate; never trust a client-supplied value.
+ */
+export function guardianConsentRequired(
+  networkConfig: NetworkConfigDocument,
+  domainId: string,
+): boolean {
+  const domain = networkConfig.domains.find((entry) => entry.id === domainId);
+  return domain?.guardian_consent_required ?? false;
 }
