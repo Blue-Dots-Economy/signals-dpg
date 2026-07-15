@@ -1,6 +1,6 @@
 -- GENERATED FILE — do not edit by hand.
 --
--- Source: packages/database/src/utils/sql_scripts/auth.sql, packages/database/src/utils/sql_scripts/metrics.sql, packages/database/src/utils/sql_scripts/pii_reveal_audit.sql, packages/database/src/utils/sql_scripts/consent_record.sql, packages/database/src/utils/sql_scripts/create_items.sql, packages/database/src/utils/sql_scripts/create_actions_events.sql
+-- Source: packages/database/src/utils/sql_scripts/auth.sql, packages/database/src/utils/sql_scripts/metrics.sql, packages/database/src/utils/sql_scripts/pii_reveal_audit.sql, packages/database/src/utils/sql_scripts/consent_record.sql, packages/database/src/utils/sql_scripts/minor_guardian.sql, packages/database/src/utils/sql_scripts/create_items.sql, packages/database/src/utils/sql_scripts/create_actions_events.sql
 -- Regenerate with: pnpm schema:bundle
 -- CI guards drift via: pnpm schema:bundle:check
 --
@@ -550,6 +550,30 @@ CREATE INDEX IF NOT EXISTS consent_record_action_idx
 CREATE UNIQUE INDEX IF NOT EXISTS consent_record_profile_creation_unique
   ON consent_record (user_id, item_id)
   WHERE level = 'item' AND consent_category = 'profile_creation';
+
+-- ─── minor_guardian.sql ───
+
+-- packages/database/src/utils/sql_scripts/minor_guardian.sql
+--
+-- Idempotent DDL for the U18 guardian-consent record. Mirrors the Drizzle
+-- definition in apps/api/db/postgres/schema/minor_guardian.ts.
+--
+-- One row per ward (better-auth user_id). birth_year/birth_month are
+-- plaintext (no exact day); is_minor is DERIVED at read time, never stored.
+-- guardian_name/guardian_contact hold PII (encrypted at the write path in a
+-- later phase). No FKs — app-level integrity only.
+
+CREATE TABLE IF NOT EXISTS minor_guardian (
+  user_id                text      PRIMARY KEY,
+  birth_year             integer   NOT NULL,
+  birth_month            integer   NOT NULL,
+  guardian_name          text,
+  guardian_contact       text,
+  guardian_contact_type  text,
+  guardian_verified      boolean   NOT NULL DEFAULT false,
+  created_at             timestamp NOT NULL DEFAULT now(),
+  updated_at             timestamp NOT NULL DEFAULT now()
+);
 
 -- ─── create_items.sql ───
 

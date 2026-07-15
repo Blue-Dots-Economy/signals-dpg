@@ -24,6 +24,7 @@ const FILES = [
   'metrics.sql',               // participant_metrics (FKs to user + organization)
   'pii_reveal_audit.sql',      // PII-reveal audit log (no FKs — partitioned refs)
   'consent_record.sql',        // consent ledger (no FKs — append-only)
+  'minor_guardian.sql',        // U18 guardian-consent record (no FKs)
   'create_items.sql',          // items table + partitions
   'create_actions_events.sql', // item_actions + action_events
 ];
