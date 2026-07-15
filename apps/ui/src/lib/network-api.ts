@@ -30,8 +30,23 @@ export function resolveProfileFetchLimit(): number {
 
 export const PROFILE_FETCH_LIMIT = resolveProfileFetchLimit();
 
+const DEFAULT_PROFILE_PAGE_SIZE = 50;
+
+export function resolveProfilePageSize(): number {
+  const raw = import.meta.env.VITE_PROFILE_PAGE_SIZE;
+  if (raw === undefined || raw === '') return DEFAULT_PROFILE_PAGE_SIZE;
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed) || parsed <= 0) return DEFAULT_PROFILE_PAGE_SIZE;
+  return parsed;
+}
+
+export const PROFILE_PAGE_SIZE = resolveProfilePageSize();
+
 export interface FetchNetworkItemsQuery
   extends Omit<FetchItemsQuery, 'created_by_me'> {
+  item_latitude?: number;
+  item_longitude?: number;
+  radius_meters?: number;
   cache_ttl_seconds?: number;
 }
 
@@ -52,6 +67,15 @@ export async function fetchNetworkItems(
   if (query.item_schema_url) params.set('item_schema_url', query.item_schema_url);
   if (query.limit !== undefined) params.set('limit', String(query.limit));
   if (query.offset !== undefined) params.set('offset', String(query.offset));
+  if (query.item_latitude !== undefined) {
+    params.set('item_latitude', String(query.item_latitude));
+  }
+  if (query.item_longitude !== undefined) {
+    params.set('item_longitude', String(query.item_longitude));
+  }
+  if (query.radius_meters !== undefined) {
+    params.set('radius_meters', String(query.radius_meters));
+  }
   if (query.cache_ttl_seconds !== undefined) {
     params.set('cache_ttl_seconds', String(query.cache_ttl_seconds));
   }
