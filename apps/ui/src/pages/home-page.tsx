@@ -47,7 +47,12 @@ import { LocationSourceToggle } from '@/components/location/location-source-togg
 import { EnableLocationBanner } from '@/components/location/enable-location-banner';
 import { nearestDistanceMeters } from '@/lib/geo/distance';
 import type { LatLng } from '@/lib/geo/types';
-import { getProfileConsentStatus, acceptProfileConsent } from '@/lib/consent-api';
+import {
+  getProfileConsentStatus,
+  acceptProfileConsent,
+  getU18Status,
+  type U18StatusResponse,
+} from '@/lib/consent-api';
 import { useConsentConfig } from '@/hooks/use-consent-config';
 import { useConsentGate } from '@/hooks/use-consent-gate';
 import { useNetworkTheme } from '@/theme/theme-provider';
@@ -532,8 +537,43 @@ export function HomePage() {
     setGuardianFlowDismissed(false);
   }, [network?.id, wardDomain]);
 
+  // Stored U18 status (birth month/year captured ONCE at login). We read it
+  // instead of re-asking the DOB at profile-creation time: if birth data is
+  // already stored we skip the DOB step entirely, and a stored ADULT is never
+  // routed through the guardian flow at all.
+  const [u18Status, setU18Status] = React.useState<U18StatusResponse | null>(null);
+  const [u18StatusLoading, setU18StatusLoading] = React.useState(false);
+  React.useEffect(() => {
+    if (!requiresGuardianGate || !network) {
+      setU18Status(null);
+      return;
+    }
+    let cancelled = false;
+    setU18StatusLoading(true);
+    getU18Status(network.id)
+      .then((s) => { if (!cancelled) setU18Status(s); })
+      // On failure fall back to the DOB-capture path (u18Status stays null →
+      // initialStep 'dob'); never leave a minor ungated on a transient error.
+      .catch(() => { if (!cancelled) setU18Status(null); })
+      .finally(() => { if (!cancelled) setU18StatusLoading(false); });
+    return () => { cancelled = true; };
+  }, [requiresGuardianGate, network, network?.id, wardDomain]);
+
+  // Stored data already resolves this ward as an adult → no guardian gate;
+  // the ordinary consent flow (ProfileConsentModal) handles terms/privacy.
+  const u18ResolvedAdult = u18Status?.hasBirthData === true && u18Status.isMinor === false;
+
+  // Skip the DOB step when birth data is already stored (captured at login);
+  // only capture it here when nothing is stored yet.
+  const u18InitialStep: 'dob' | 'guardian' = u18Status?.hasBirthData ? 'guardian' : 'dob';
+
   const showU18GuardianFlow =
-    requiresGuardianGate && !u18GateLoading && u18NeededConsent.length > 0 && !guardianFlowDismissed;
+    requiresGuardianGate &&
+    !u18GateLoading &&
+    u18NeededConsent.length > 0 &&
+    !guardianFlowDismissed &&
+    !u18StatusLoading &&
+    !u18ResolvedAdult;
 
   // Sort a card-item array (item_locations stored in .data) nearest-first when userLocation is known.
   // Items without locations sort last (nearestDistanceMeters returns Infinity for empty/missing arrays).
@@ -949,6 +989,9 @@ export function HomePage() {
     <U18GuardianFlow
       network={network.id}
       brand={brand === 'standard' ? null : brand}
+      // Skip the DOB step when birth data is already stored (captured at
+      // login) — we never re-ask the date of birth at profile-creation time.
+      initialStep={u18InitialStep}
       onComplete={() => {
         setGuardianFlowDismissed(true);
         void refetchU18Gate();

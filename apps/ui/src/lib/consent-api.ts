@@ -141,6 +141,27 @@ export async function submitU18Dob(body: SubmitU18DobBody): Promise<SubmitU18Dob
   return response.data;
 }
 
+export interface U18StatusResponse {
+  /** A birth month/year is already stored — never ask DOB again. */
+  hasBirthData: boolean;
+  /** Derived server-side from the stored birth month/year. */
+  isMinor: boolean;
+  /** A guardian has already been OTP-verified for this user. */
+  guardianVerified: boolean;
+}
+
+/**
+ * Read the authenticated ward's U18 status from stored data (no DOB prompt).
+ * Used to decide whether to run the guardian flow — and whether the DOB step
+ * is even needed — at profile-creation / first-login time.
+ */
+export async function getU18Status(network: string): Promise<U18StatusResponse> {
+  const response = await apiClient.get<U18StatusResponse>('/api/v1/consent/u18/status', {
+    params: { network },
+  });
+  return response.data;
+}
+
 export async function submitGuardian(body: SubmitGuardianBody): Promise<SubmitGuardianResponse> {
   const response = await apiClient.post<SubmitGuardianResponse>(
     '/api/v1/consent/u18/guardian',
