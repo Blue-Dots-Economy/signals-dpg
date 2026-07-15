@@ -5,6 +5,7 @@ import { toast } from 'sonner';
 import { useTranslation } from 'react-i18next';
 import type {
   DotNetworkSchema,
+  DotNetworkDomain,
   DotActionSchema,
   ViewMode,
 } from '@/engine/types';
@@ -37,6 +38,7 @@ import { EmptyState } from '@/components/empty-state';
 import { useAuth } from '@/contexts/auth-context';
 import { apiConfig } from '@/lib/api-config';
 import { getEnumFilterFieldsForDomains, itemPassesEnumFilters } from '@/lib/enum-filters';
+import type { EnumFilterField } from '@/lib/enum-filters';
 import { getServedScope } from '@/lib/served-binding';
 import { computeVisibleDomains } from '@/lib/visible-domains';
 import { useUserLocation } from '@/hooks/use-user-location';
@@ -52,6 +54,7 @@ import { useNetworkTheme } from '@/theme/theme-provider';
 import { ProfileConsentModal } from '@/components/consent/profile-consent-modal';
 import { useMyItems } from '@/hooks/use-my-items';
 import { useBrowseItems } from '@/hooks/use-browse-items';
+import { useInfiniteBrowseItems } from '@/hooks/use-infinite-browse-items';
 import { useProfileConsentStatus } from '@/hooks/use-profile-consent-status';
 import { useQueryClient } from '@tanstack/react-query';
 import { queryKeys } from '@/lib/query-keys';
@@ -83,6 +86,118 @@ function sortItemsByNearest<T>(
       nearestDistanceMeters(userLocation, getLocations(a)) -
       nearestDistanceMeters(userLocation, getLocations(b)),
   );
+}
+
+// Shared card filter: search text + enum-field filters + the map's domain
+// multi-select. Used by both the (still-map/All-tab-driving) `filteredDomainItems`
+// memo and the paged single-domain list, so the predicate is defined exactly
+// once (§Task5 constraint: reuse, do not duplicate).
+function buildFilteredCardsForDomain(
+  domainId: string,
+  items: Item[],
+  opts: {
+    search: string;
+    mapSelectedDomains: string[];
+    activeFieldFilters: Record<string, string[]>;
+    enumFilterFields: EnumFilterField[];
+  },
+): Array<{ id: string; domain: string; data: Record<string, unknown> }> {
+  // Map domain filter: skip this domain entirely if filter is active and this
+  // domain is not selected.
+  if (opts.mapSelectedDomains.length > 0 && !opts.mapSelectedDomains.includes(domainId)) {
+    return [];
+  }
+
+  let cards = items.map(itemToCardItem);
+
+  // Text search filter
+  if (opts.search) {
+    cards = cards.filter((item) =>
+      Object.values(item.data).some((val) =>
+        String(val).toLowerCase().includes(opts.search.toLowerCase())
+      )
+    );
+  }
+
+  // Enum-field filters: AND across different fields, OR within a field's
+  // selected values. Absent fields on an item always pass (domain-safe).
+  if (Object.keys(opts.activeFieldFilters).length > 0) {
+    cards = cards.filter((item) =>
+      itemPassesEnumFilters(item.data, opts.activeFieldFilters, opts.enumFilterFields),
+    );
+  }
+
+  return cards;
+}
+
+// Bottom-sentinel scroll observer: fires `onIntersect` when the sentinel node
+// scrolls into view. Disconnects on cleanup / when disabled. Shared by the
+// single-domain list and the "All" tab merged list (Task 5 §5.1 paging).
+//
+// `onIntersect` is read through a ref (kept fresh every render) rather than
+// placed in the effect's dependency array — the hooks this drives
+// (`useInfiniteBrowseItems`) hand back a new closure identity on every render,
+// so depending on it directly would tear down and recreate the
+// IntersectionObserver (and re-fire its callback) on every unrelated
+// re-render instead of only on real intersection changes.
+function useLoadMoreSentinel(onIntersect: () => void, enabled: boolean): React.RefObject<HTMLDivElement | null> {
+  const ref = React.useRef<HTMLDivElement | null>(null);
+  const onIntersectRef = React.useRef(onIntersect);
+  onIntersectRef.current = onIntersect;
+
+  React.useEffect(() => {
+    if (!enabled) return;
+    const node = ref.current;
+    if (!node) return;
+
+    const observer = new IntersectionObserver((entries) => {
+      if (entries.some((entry) => entry.isIntersecting)) {
+        onIntersectRef.current();
+      }
+    });
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, [enabled]);
+
+  return ref;
+}
+
+interface DomainPageState {
+  items: Item[];
+  hasMore: boolean;
+  total: number;
+  fetchNext: () => void;
+}
+
+// Headless per-domain paged fetch for the "All" tab (Task 5 §5.1). React hooks
+// cannot be called in a loop, so each visible domain gets its own instance of
+// this component (one `useInfiniteBrowseItems` call each — legal), and lifts
+// its loaded page state up to the parent via `onItems` so the parent can
+// render ONE merged, nearest-first-sorted grid across all domains. Renders
+// nothing itself.
+function DomainPagedFetch({
+  network,
+  domain,
+  coords,
+  onItems,
+}: {
+  network: DotNetworkSchema;
+  domain: DotNetworkDomain;
+  coords: { lat: number; lng: number } | null;
+  onItems: (domainId: string, items: Item[], hasMore: boolean, total: number, fetchNext: () => void) => void;
+}): null {
+  const list = useInfiniteBrowseItems(network, domain, coords);
+  // `list.items` is a fresh array and `list.fetchNextPage` a fresh closure on
+  // every render (the hook doesn't memoize them) — depending on either
+  // directly would refire this effect (and lift state to the parent) on
+  // every render, looping forever. `itemCount` is a stable primitive proxy:
+  // pages only ever append, so "count changed" is exactly "content changed".
+  const itemCount = list.items.length;
+  React.useEffect(() => {
+    onItems(domain.id, list.items, list.hasNextPage, list.total, list.fetchNextPage);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- see comment above `itemCount`
+  }, [domain.id, itemCount, list.hasNextPage, list.total, onItems]);
+  return null;
 }
 
 function parseNetworkIds(networkEnv: string | undefined): string[] {
@@ -427,14 +542,6 @@ export function HomePage() {
     pendingConsentProfileId,
   ]);
 
-  // Sort a card-item array (item_locations stored in .data) nearest-first when userLocation is known.
-  // Items without locations sort last (nearestDistanceMeters returns Infinity for empty/missing arrays).
-  const sortByNearest = React.useCallback(
-    <T extends { data: Record<string, unknown> }>(items: T[]): T[] =>
-      sortItemsByNearest(items, userLocation, (t) => getItemLocations(t.data)),
-    [userLocation],
-  );
-
   // Acting domain: ?as= test override → served binding → active profile →
   // network default. Drives the connect-action source (from_domain).
   const currentDomain =
@@ -496,6 +603,87 @@ export function HomePage() {
     }
     return filtered;
   }, [browseData, localProfileItemIds]);
+
+  // --- Task 5 (#203 §5.1): paged infinite-scroll list view ------------------
+  // The selected domain's full schema object (needed by the paged hook), and
+  // the coords used to drive server-side nearest ordering. Coords are omitted
+  // (null) when there is no known location — the hook then fetches unordered.
+  const selectedDomainObj = React.useMemo(
+    () => (selectedDomain ? (network?.domains.find((d) => d.id === selectedDomain) ?? null) : null),
+    [network, selectedDomain],
+  );
+  const browseCoords = React.useMemo(
+    () => (userLocation ? { lat: userLocation.lat, lng: userLocation.lng } : null),
+    [userLocation],
+  );
+
+  // Single-domain paged fetch. Enabled only while a specific domain tab is
+  // selected; disabled (and thus inert) on the "All" tab.
+  const singleDomainList = useInfiniteBrowseItems(
+    network,
+    selectedDomain ? selectedDomainObj : null,
+    browseCoords,
+    { enabled: selectedDomain !== null },
+  );
+
+  // Own-item filtering is a view concern (see `domainItems` above) — apply the
+  // same rule to the paged feed so a viewer never sees their own profile in
+  // their own browse list.
+  const singleDomainItems = React.useMemo(
+    () => singleDomainList.items.filter((it) => !localProfileItemIds.has(it.item_id)),
+    [singleDomainList.items, localProfileItemIds],
+  );
+
+  const activeFieldFilters = React.useMemo(
+    () => Object.fromEntries(Object.entries(mapSelectedFields).filter(([, vals]) => vals.length > 0)),
+    [mapSelectedFields],
+  );
+
+  // Single-domain: bottom sentinel advances the paged fetch. Server already
+  // orders nearest-first (§4.1), so no client `sortByNearest` for this path.
+  // (`useLoadMoreSentinel` reads the callback through a ref, so passing the
+  // hook's non-memoized `fetchNextPage` directly is safe — see its comment.)
+  const singleDomainSentinelRef = useLoadMoreSentinel(
+    singleDomainList.fetchNextPage,
+    selectedDomain !== null && singleDomainList.hasNextPage,
+  );
+
+  // "All" tab: each visible domain's paged state, lifted up from its headless
+  // <DomainPagedFetch> child (one hook call per child — legal; hooks can't be
+  // called in a loop). Keyed by domain id.
+  const [allDomainPages, setAllDomainPages] = React.useState<Record<string, DomainPageState>>({});
+
+  // `DomainPagedFetch` only invokes this when its `itemCount`/`hasNextPage`/
+  // `total` genuinely changed (see its effect), so every call here reflects a
+  // real content change for that domain — no further gating needed.
+  const handleDomainItems = React.useCallback(
+    (domainId: string, items: Item[], hasMore: boolean, total: number, fetchNext: () => void) => {
+      setAllDomainPages((prev) => ({ ...prev, [domainId]: { items, hasMore, total, fetchNext } }));
+    },
+    [],
+  );
+
+  // Own-item-filtered accumulated union across all "All"-tab domains (mirrors
+  // `domainItems` above). The merged grid and its `fullItem` lookups read this.
+  const allDomainItemsFiltered = React.useMemo(() => {
+    const result: Record<string, Item[]> = {};
+    for (const [domainId, state] of Object.entries(allDomainPages)) {
+      result[domainId] = state.items.filter((it) => !localProfileItemIds.has(it.item_id));
+    }
+    return result;
+  }, [allDomainPages, localProfileItemIds]);
+
+  const fetchNextAllDomainPages = React.useCallback(() => {
+    for (const state of Object.values(allDomainPages)) {
+      if (state.hasMore) state.fetchNext();
+    }
+  }, [allDomainPages]);
+  const anyAllDomainHasMore = Object.values(allDomainPages).some((s) => s.hasMore);
+  const allDomainsSentinelRef = useLoadMoreSentinel(
+    fetchNextAllDomainPages,
+    selectedDomain === null && anyAllDomainHasMore,
+  );
+  // --- end Task 5 -------------------------------------------------------------
 
   // Active schema: from the selected browsing domain, or first visible domain
   const activeSchema = React.useMemo(() => {
@@ -679,44 +867,47 @@ export function HomePage() {
   const filteredDomainItems = React.useMemo(() => {
     const result: Record<string, { id: string; domain: string; data: Record<string, unknown> }[]> = {};
 
-    // Determine which enum-field filters are active (non-empty selected arrays)
-    const activeFieldFilters = Object.fromEntries(
-      Object.entries(mapSelectedFields).filter(([, vals]) => vals.length > 0),
-    );
-    const hasFieldFilters = Object.keys(activeFieldFilters).length > 0;
-
     for (const [domainId, itemList] of Object.entries(domainItems)) {
-      // Map domain filter: skip this domain entirely if filter is active and
-      // this domain is not selected.
-      if (mapSelectedDomains.length > 0 && !mapSelectedDomains.includes(domainId)) {
-        result[domainId] = [];
-        continue;
-      }
-
-      let cards = itemList.map(itemToCardItem);
-
-      // Text search filter
-      if (search) {
-        cards = cards.filter((item) =>
-          Object.values(item.data).some((val) =>
-            String(val).toLowerCase().includes(search.toLowerCase())
-          )
-        );
-      }
-
-      // Enum-field filters: AND across different fields, OR within a field's
-      // selected values. Absent fields on an item always pass (domain-safe).
-      if (hasFieldFilters) {
-        cards = cards.filter((item) =>
-          itemPassesEnumFilters(item.data, activeFieldFilters, enumFilterFields),
-        );
-      }
-
-      result[domainId] = cards;
+      result[domainId] = buildFilteredCardsForDomain(domainId, itemList, {
+        search,
+        mapSelectedDomains,
+        activeFieldFilters,
+        enumFilterFields,
+      });
     }
 
     return result;
-  }, [domainItems, search, mapSelectedDomains, mapSelectedFields, network, enumFilterFields]);
+  }, [domainItems, search, mapSelectedDomains, activeFieldFilters, enumFilterFields]);
+
+  // Task 5 (#203 §5.1): the same search/enum/map-domain filter, applied to the
+  // paged feeds instead of the full `domainItems` snapshot. Single-domain list
+  // cards (server already orders nearest-first — no client `sortByNearest`).
+  const singleDomainCards = React.useMemo(
+    () =>
+      selectedDomain
+        ? buildFilteredCardsForDomain(selectedDomain, singleDomainItems, {
+            search,
+            mapSelectedDomains,
+            activeFieldFilters,
+            enumFilterFields,
+          })
+        : [],
+    [selectedDomain, singleDomainItems, search, mapSelectedDomains, activeFieldFilters, enumFilterFields],
+  );
+
+  // "All" tab: same filter applied per-domain to the accumulated paged union.
+  const filteredAllDomainItems = React.useMemo(() => {
+    const result: Record<string, { id: string; domain: string; data: Record<string, unknown> }[]> = {};
+    for (const domain of visibleDomains) {
+      result[domain.id] = buildFilteredCardsForDomain(domain.id, allDomainItemsFiltered[domain.id] ?? [], {
+        search,
+        mapSelectedDomains,
+        activeFieldFilters,
+        enumFilterFields,
+      });
+    }
+    return result;
+  }, [visibleDomains, allDomainItemsFiltered, search, mapSelectedDomains, activeFieldFilters, enumFilterFields]);
 
   const handleDomainSelect = (domainId: string | null) => {
     setSelectedDomain(domainId);
@@ -1104,8 +1295,26 @@ export function HomePage() {
             viewMode === 'list' ? (
               <>
                 {selectedDomain === null ? (
-              // All tab: flat grid across all domains, each card uses its own schema
+              // All tab: flat grid across all domains, each card uses its own schema.
+              // Each visible domain gets a headless <DomainPagedFetch> that fetches
+              // its own pages server-ordered (nearest-first, §4.1) and lifts the
+              // loaded items up; the union is then merge-sorted client-side across
+              // domains (§5.1) since no single server call spans domains.
               (() => {
+                const pagedFetchers = (
+                  <>
+                    {visibleDomains.map((domain) => (
+                      <DomainPagedFetch
+                        key={domain.id}
+                        network={network}
+                        domain={domain}
+                        coords={browseCoords}
+                        onItems={handleDomainItems}
+                      />
+                    ))}
+                  </>
+                );
+
                 const allFlatItemsUnsorted = visibleDomains.flatMap((domain) => {
                   const domainSchema = domain.item_schemas
                     ? (Object.values(domain.item_schemas)[0] as import('@rjsf/utils').RJSFSchema)
@@ -1114,7 +1323,7 @@ export function HomePage() {
                   const domainLabel = domain.id
                     .replace(/_/g, ' ')
                     .replace(/\b\w/g, (c) => c.toUpperCase());
-                  return (filteredDomainItems[domain.id] ?? []).map((item) => ({
+                  return (filteredAllDomainItems[domain.id] ?? []).map((item) => ({
                     item,
                     schema: domainSchema,
                     domainActions,
@@ -1127,85 +1336,101 @@ export function HomePage() {
 
                 if (loading) {
                   return (
-                    <div className="grid grid-cols-1 items-start gap-4 sm:grid-cols-2 lg:grid-cols-3">
-                      {Array.from({ length: 6 }).map((_, i) => (
-                        <DomainCard key={i} schema={{}} data={{}} loading />
-                      ))}
-                    </div>
+                    <>
+                      {pagedFetchers}
+                      <div className="grid grid-cols-1 items-start gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                        {Array.from({ length: 6 }).map((_, i) => (
+                          <DomainCard key={i} schema={{}} data={{}} loading />
+                        ))}
+                      </div>
+                    </>
                   );
                 }
 
                 if (allFlatItems.length === 0) {
-                  return buildEmptyState('All');
+                  return (
+                    <>
+                      {pagedFetchers}
+                      {buildEmptyState('All')}
+                    </>
+                  );
                 }
 
                 return (
-                  <div ref={allCardsGridRef} className="grid grid-cols-1 items-start gap-4 sm:grid-cols-2 lg:grid-cols-3">
-                    {allFlatItems.map(({ item, schema, domainActions, domainDescription, domainLabel, cardConfig }) => {
-                      const fullItem = Object.values(domainItems)
-                        .flat()
-                        .find((i) => i.item_id === item.id);
+                  <>
+                    {pagedFetchers}
+                    <div ref={allCardsGridRef} className="grid grid-cols-1 items-start gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                      {allFlatItems.map(({ item, schema, domainActions, domainDescription, domainLabel, cardConfig }) => {
+                        const fullItem = Object.values(allDomainItemsFiltered)
+                          .flat()
+                          .find((i) => i.item_id === item.id);
 
-                      return (
-                        <SelectableCard
-                          key={item.id}
-                          id={item.id}
-                          selectMode={browseSelection.selectMode}
-                          selected={browseSelection.isSelected(item.id)}
-                          selectable={browseSelection.canSelect(item.domain ?? '')}
-                          onToggle={(id) => browseSelection.toggle(id, item.domain ?? '')}
-                        >
-                          <MatchScoreCard
-                            schema={schema!}
-                            schemaDescription={domainDescription}
-                            domainLabel={domainLabel}
-                            cardConfig={cardConfig}
-                            data={item.data}
-                            actions={domainActions}
-                            selectionMode={browseSelection.selectMode}
-                            onAction={(type, actionSchema) =>
-                              triggerAction(type, actionSchema, item.id)
-                            }
-                            localItem={myItem}
-                            networkItem={fullItem || {
-                              item_id: item.id,
-                              item_network: network?.id || '',
-                              item_domain: selectedDomain || '',
-                              item_type: 'profile',
-                              item_instance_url: null,
-                              item_schema_url: null,
-                              item_state: item.data,
-                              item_locations: [],
-                              created_at: new Date().toISOString(),
-                              updated_at: new Date().toISOString(),
-                            }}
-                          />
-                        </SelectableCard>
-                      );
-                    })}
-                  </div>
+                        return (
+                          <SelectableCard
+                            key={item.id}
+                            id={item.id}
+                            selectMode={browseSelection.selectMode}
+                            selected={browseSelection.isSelected(item.id)}
+                            selectable={browseSelection.canSelect(item.domain ?? '')}
+                            onToggle={(id) => browseSelection.toggle(id, item.domain ?? '')}
+                          >
+                            <MatchScoreCard
+                              schema={schema!}
+                              schemaDescription={domainDescription}
+                              domainLabel={domainLabel}
+                              cardConfig={cardConfig}
+                              data={item.data}
+                              actions={domainActions}
+                              selectionMode={browseSelection.selectMode}
+                              onAction={(type, actionSchema) =>
+                                triggerAction(type, actionSchema, item.id)
+                              }
+                              localItem={myItem}
+                              networkItem={fullItem || {
+                                item_id: item.id,
+                                item_network: network?.id || '',
+                                item_domain: selectedDomain || '',
+                                item_type: 'profile',
+                                item_instance_url: null,
+                                item_schema_url: null,
+                                item_state: item.data,
+                                item_locations: [],
+                                created_at: new Date().toISOString(),
+                                updated_at: new Date().toISOString(),
+                              }}
+                            />
+                          </SelectableCard>
+                        );
+                      })}
+                    </div>
+                    <div ref={allDomainsSentinelRef} aria-hidden="true" className="h-px w-full" />
+                  </>
                 );
               })()
             ) : (
-              // Single domain tab: existing behaviour
-              <CardGrid
-                schema={activeSchema!}
-                schemaName={selectedDomain}
-                schemaDescription={currentDomainLabel}
-                cardConfig={network?.domains.find((d) => d.id === selectedDomain)?.card}
-                items={sortByNearest(filteredDomainItems[selectedDomain] ?? [])}
-                fullItems={domainItems[selectedDomain] ?? []}
-                actions={actions}
-                onAction={(itemId, _type, actionSchema) => {
-                  triggerAction(_type, actionSchema, itemId);
-                }}
-                loading={loading}
-                emptyState={buildEmptyState(currentDomainLabel ?? 'items')}
-                localItem={myItem}
-                networkId={network?.id}
-                selectedDomain={selectedDomain}
-                selection={browseSelection}
-              />
+              // Single domain tab: paged infinite scroll (§5.1). Server already
+              // orders nearest-first when coords are known, so no client sort here.
+              <>
+                <CardGrid
+                  schema={activeSchema!}
+                  schemaName={selectedDomain}
+                  schemaDescription={currentDomainLabel}
+                  cardConfig={network?.domains.find((d) => d.id === selectedDomain)?.card}
+                  items={singleDomainCards}
+                  fullItems={singleDomainItems}
+                  actions={actions}
+                  onAction={(itemId, _type, actionSchema) => {
+                    triggerAction(_type, actionSchema, itemId);
+                  }}
+                  loading={singleDomainList.isLoading}
+                  emptyState={buildEmptyState(currentDomainLabel ?? 'items')}
+                  localItem={myItem}
+                  networkId={network?.id}
+                  selectedDomain={selectedDomain}
+                  selection={browseSelection}
+                />
+                <div ref={singleDomainSentinelRef} aria-hidden="true" className="h-px w-full" />
+              </>
                 )}
                 {browseSelection.selectMode && (() => {
                   const lockDomain = browseSelection.lockKey ?? selectedDomain ?? '';
