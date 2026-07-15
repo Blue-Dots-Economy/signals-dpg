@@ -236,6 +236,7 @@ function MarkerDetailPopup({
   networkId,
   marker,
   sourceMarker,
+  itemType,
   schema,
   cardConfig,
   localItem,
@@ -249,6 +250,9 @@ function MarkerDetailPopup({
   // `item_instance_url` for routed fetches, which the lightweight `MapMarker`
   // shape does not.
   sourceMarker: NetworkMarker | undefined;
+  // The clicked marker's domain item type (e.g. `job_posting_1.0`), derived by
+  // the parent from the network config — the by-id detail fetch filters on it.
+  itemType?: string;
   schema?: RJSFSchema;
   cardConfig?: DotCardConfig | null;
   localItem: Item | null;
@@ -281,6 +285,11 @@ function MarkerDetailPopup({
       ? {
           item_id: baseItemId,
           item_domain: itemDomain,
+          // The domain's item type (e.g. `profile_1.0` / `job_posting_1.0`).
+          // Slim markers don't carry it, so the parent derives it from the
+          // domain config and passes it in — without it the by-id fetch would
+          // filter on the wrong (default) type and match nothing.
+          item_type: itemType,
           item_instance_url: sourceMarker?.item_instance_url,
         }
       : null,
@@ -1794,11 +1803,17 @@ export function HomePage() {
                     const markerSchema = markerDomain?.item_schemas
                       ? (Object.values(markerDomain.item_schemas)[0] as import('@rjsf/utils').RJSFSchema)
                       : activeSchema;
+                    // Domain's item type (e.g. `job_posting_1.0`) for the by-id
+                    // detail fetch — slim markers don't carry it.
+                    const markerItemType = markerDomain?.item_schemas
+                      ? Object.keys(markerDomain.item_schemas)[0]
+                      : undefined;
                     return (
                       <MarkerDetailPopup
                         networkId={network?.id ?? null}
                         marker={marker}
                         sourceMarker={sourceMarker}
+                        itemType={markerItemType}
                         schema={markerSchema}
                         cardConfig={markerDomain?.card}
                         localItem={myItem}
