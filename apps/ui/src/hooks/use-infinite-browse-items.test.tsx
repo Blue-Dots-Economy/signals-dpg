@@ -49,6 +49,41 @@ describe('useInfiniteBrowseItems', () => {
     expect(fetchNetworkItems).not.toHaveBeenCalled();
   });
 
+  it('defaults partial to false when meta.partial is absent', async () => {
+    vi.mocked(fetchNetworkItems).mockImplementation(async () => ({
+      meta: { total: 1, limit: 2, offset: 0 },
+      items: [item('a')],
+    }));
+    const { result } = renderHook(
+      () => useInfiniteBrowseItems(network, domain, null),
+      { wrapper },
+    );
+    await waitFor(() => expect(result.current.items.length).toBe(1));
+    expect(result.current.partial).toBe(false);
+  });
+
+  // #203 §6: `partial` must propagate up to the list feed if ANY loaded page
+  // came back partial, even once a later page's peers all answered — earlier
+  // items may still be missing, so the feed stays flagged (sticky).
+  it('exposes partial=true when any loaded page is partial, and it stays true once a later page is not', async () => {
+    vi.mocked(fetchNetworkItems).mockImplementation(async (q) => {
+      const offset = q.offset ?? 0;
+      return offset === 0
+        ? { meta: { total: 3, limit: 2, offset, partial: true, unavailable_instances: ['https://peer.example'] }, items: [item('a'), item('b')] }
+        : { meta: { total: 3, limit: 2, offset, partial: false, unavailable_instances: [] }, items: [item('c')] };
+    });
+    const { result } = renderHook(
+      () => useInfiniteBrowseItems(network, domain, null),
+      { wrapper },
+    );
+    await waitFor(() => expect(result.current.items.length).toBe(2));
+    expect(result.current.partial).toBe(true);
+
+    act(() => result.current.fetchNextPage());
+    await waitFor(() => expect(result.current.items.length).toBe(3));
+    expect(result.current.partial).toBe(true);
+  });
+
   // meta.total sums Redis-cached per-instance counts (TTL >= 300s) while pages
   // are fresh, so a delete/pause inside that window can leave `total` (5) higher
   // than the rows the server can actually return (a short first page of 1, below

@@ -14,6 +14,13 @@ interface UseInfiniteBrowseItemsResult {
   isLoading: boolean;
   isFetchingNextPage: boolean;
   fetchNextPage: () => void;
+  // True when ANY loaded page's `meta.partial` is true — i.e. a peer instance
+  // didn't answer in time on at least one of the pages fetched so far, so the
+  // accumulated feed is known-incomplete (#203 §6, mirrors the map's
+  // `mapMarkers.partial` from P4). Sticky across pages: once a page comes
+  // back partial the feed stays flagged even if a later page's peers all
+  // answered, since earlier items may still be missing.
+  partial: boolean;
 }
 
 /**
@@ -78,6 +85,7 @@ export function useInfiniteBrowseItems(
 
   const items = query.data?.pages.flatMap((p) => p.items) ?? [];
   const total = query.data?.pages[query.data.pages.length - 1]?.meta.total ?? 0;
+  const partial = query.data?.pages.some((p) => p.meta.partial === true) ?? false;
 
   return {
     items,
@@ -88,5 +96,6 @@ export function useInfiniteBrowseItems(
     fetchNextPage: () => {
       if (query.hasNextPage && !query.isFetchingNextPage) query.fetchNextPage();
     },
+    partial,
   };
 }

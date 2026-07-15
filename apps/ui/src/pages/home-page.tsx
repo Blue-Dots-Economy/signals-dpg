@@ -178,6 +178,10 @@ interface DomainPageState {
   // fetch (resolves the P3-deferred loading-flash minor).
   isLoading: boolean;
   fetchNext: () => void;
+  // P5 (#203 §6): lifted from `useInfiniteBrowseItems`' `partial` so the "All"
+  // tab can show the same federation-degradation banner as the single-domain
+  // list and the map (P4's `mapMarkers.partial`).
+  partial: boolean;
 }
 
 // Headless per-domain paged fetch for the "All" tab (Task 5 §5.1). React hooks
@@ -202,6 +206,7 @@ function DomainPagedFetch({
     total: number,
     isLoading: boolean,
     fetchNext: () => void,
+    partial: boolean,
   ) => void;
 }): null {
   const list = useInfiniteBrowseItems(network, domain, coords);
@@ -209,13 +214,13 @@ function DomainPagedFetch({
   // it), so this effect refires on every plain re-render too. That's fine:
   // `onItems` (`handleDomainItems`) is idempotent — it bails out of its
   // `setState` when the lifted data is unchanged (element-wise reference
-  // equality on `items`, plus `hasMore`/`total`/`isLoading`), so a plain
-  // re-render never causes a further re-render here. This is what lets a
-  // same-length refetch (new item object refs, edited `item_state`) still
+  // equality on `items`, plus `hasMore`/`total`/`isLoading`/`partial`), so a
+  // plain re-render never causes a further re-render here. This is what lets
+  // a same-length refetch (new item object refs, edited `item_state`) still
   // get lifted — gating on `items.length` would silently drop that update.
   React.useEffect(() => {
-    onItems(domain.id, list.items, list.hasNextPage, list.total, list.isLoading, list.fetchNextPage);
-  }, [domain.id, list.items, list.hasNextPage, list.total, list.isLoading, list.fetchNextPage, onItems]);
+    onItems(domain.id, list.items, list.hasNextPage, list.total, list.isLoading, list.fetchNextPage, list.partial);
+  }, [domain.id, list.items, list.hasNextPage, list.total, list.isLoading, list.fetchNextPage, list.partial, onItems]);
   return null;
 }
 
@@ -782,9 +787,9 @@ export function HomePage() {
   // the loop terminates. "Unchanged" is element-wise reference equality on
   // `items` (individual item object refs ARE stable across a plain
   // re-render, and only change when React Query actually refetches), plus
-  // `hasMore`/`total`/`isLoading`. `fetchNext`'s identity always changes and
-  // is intentionally excluded from the comparison — we still store the
-  // latest one, just don't gate on it.
+  // `hasMore`/`total`/`isLoading`/`partial`. `fetchNext`'s identity always
+  // changes and is intentionally excluded from the comparison — we still
+  // store the latest one, just don't gate on it.
   const handleDomainItems = React.useCallback(
     (
       domainId: string,
@@ -793,6 +798,7 @@ export function HomePage() {
       total: number,
       isLoading: boolean,
       fetchNext: () => void,
+      partial: boolean,
     ) => {
       setAllDomainPages((prev) => {
         const existing = prev[domainId];
@@ -804,12 +810,13 @@ export function HomePage() {
           itemsUnchanged &&
           existing.hasMore === hasMore &&
           existing.total === total &&
-          existing.isLoading === isLoading
+          existing.isLoading === isLoading &&
+          existing.partial === partial
         ) {
           // Same data (plain re-render): bail so React doesn't re-render → no loop.
           return prev;
         }
-        return { ...prev, [domainId]: { items, hasMore, total, isLoading, fetchNext } };
+        return { ...prev, [domainId]: { items, hasMore, total, isLoading, fetchNext, partial } };
       });
     },
     [],
@@ -845,7 +852,7 @@ export function HomePage() {
   // each visible domain's server-reported total (no single server call spans
   // domains, so there's no one `meta.total` to read). P3 surfaces meta.total
   // only — the federation-degradation banner (meta.partial/unavailable_instances)
-  // lands in P5.
+  // lands in P5 below.
   // Sum only over `visibleDomains` — `allDomainPages` entries are never pruned
   // when `visibleDomains` shrinks, so a no-longer-visible domain would keep
   // inflating the "X of Y" if we reduced over all of `allDomainPages` instead.
@@ -879,6 +886,17 @@ export function HomePage() {
   const allDomainsLoading = visibleDomains.some(
     (domain) => allDomainPages[domain.id]?.isLoading ?? true,
   );
+
+  // P5 (#203 §6): "All" tab is partial if ANY visible domain's paged feed is
+  // partial — mirrors `allDomainsTotalCount`'s "sum over `visibleDomains` only"
+  // rule so a domain that scrolled out of view can't keep the banner up.
+  const allDomainsListPartial = visibleDomains.some(
+    (domain) => allDomainPages[domain.id]?.partial ?? false,
+  );
+  // Single source of truth for the list federation-degradation banner
+  // (mirrors the map's `mapMarkers.partial` from P4): single-domain tab reads
+  // the one paged feed directly, "All" tab is the OR above.
+  const listPartial = selectedDomain !== null ? singleDomainList.partial : allDomainsListPartial;
 
   // Active schema: from the selected browsing domain, or first visible domain
   const activeSchema = React.useMemo(() => {
@@ -1499,6 +1517,17 @@ export function HomePage() {
           {(triggerAction) =>
             viewMode === 'list' ? (
               <>
+                {/* Federation-degradation indicator (#203 §6): some peer instances
+                    didn't answer in time on at least one loaded page, so the list
+                    feed (single-domain or, on the "All" tab, at least one visible
+                    domain) is known-partial. Mirrors the map's `mapMarkers.partial`
+                    banner (P4) — same styling, in-flow above the grid instead of
+                    `fixed` (the list has no maximize overlay to sit above). */}
+                {listPartial && (
+                  <p className="mb-3 rounded-md bg-amber-50 px-3 py-1.5 text-xs font-medium text-amber-900 shadow-sm ring-1 ring-amber-300 dark:bg-amber-950 dark:text-amber-100 dark:ring-amber-800">
+                    {t('home.list_partial')}
+                  </p>
+                )}
                 {selectedDomain === null ? (
               // All tab: flat grid across all domains, each card uses its own schema.
               // Each visible domain gets a headless <DomainPagedFetch> that fetches

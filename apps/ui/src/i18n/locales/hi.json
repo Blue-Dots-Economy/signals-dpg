@@ -219,6 +219,7 @@
   "home.bulk_connect_failed": "कनेक्शन अनुरोध नहीं भेजे जा सके",
   "home.bulk_connect_first_error": "पहली त्रुटि: {{message}}",
   "home.map_partial": "कुछ स्रोत अभी उपलब्ध नहीं हैं — मैप में सभी लिस्टिंग नहीं दिख सकतीं।",
+  "home.list_partial": "कुछ स्रोत अभी उपलब्ध नहीं हैं — परिणाम अधूरे हो सकते हैं।",
   "language.label": "भाषा",
   "map.loading": "मैप डेटा लोड हो रहा है...",
   "map.loading_detail": "विवरण लोड हो रहा है...",

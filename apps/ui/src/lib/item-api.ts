@@ -51,6 +51,14 @@ export interface FetchItemsResponse {
     total: number;
     limit: number;
     offset: number;
+    // Only populated by the inter-instance network fetch
+    // (`/api/v1/network/item/fetch`, see `fetchNetworkItems` in
+    // `@/lib/network-api`) — `true` when a peer instance didn't answer in
+    // time and the merged result is known-incomplete (#203 §6). The
+    // instance-local `/api/v1/item/fetch` (`fetchItems` below) never sets
+    // these, hence optional here rather than widening every caller.
+    partial?: boolean;
+    unavailable_instances?: string[];
   };
   items: Item[];
 }
