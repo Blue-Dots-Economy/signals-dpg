@@ -6,6 +6,7 @@ import { get_profile_consent_status } from '@/routes/v1/consent/get_profile_cons
 import { accept_profile_consent } from '@/routes/v1/consent/accept_profile_consent';
 import { u18_dob } from '@/routes/v1/consent/u18_dob';
 import { u18_guardian } from '@/routes/v1/consent/u18_guardian';
+import { u18_guardian_verify } from '@/routes/v1/consent/u18_guardian_verify';
 
 const consent_routes: FastifyPluginAsyncZod = async (fastify) => {
   fastify.register(get_consent_status);
@@ -15,6 +16,7 @@ const consent_routes: FastifyPluginAsyncZod = async (fastify) => {
   fastify.register(accept_profile_consent);
   fastify.register(u18_dob);
   fastify.register(u18_guardian);
+  fastify.register(u18_guardian_verify);
 };
 
 export default consent_routes;

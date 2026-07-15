@@ -52,4 +52,35 @@ describe('U18 capture (integration)', () => {
       .find((r) => r.consentCategory === 'guardian_declaration');
     expect(decl?.source).toBe('self');
   });
+
+  it('verify with the correct OTP writes guardian terms/privacy and flips verified', async () => {
+    const otp = await redis.get(`guardian_otp:code:${ctx.userId}:guardian`);
+    expect(otp).toMatch(/^\d{6}$/);
+
+    const res = await ctx.app.inject({
+      method: 'POST', url: '/api/v1/consent/u18/guardian/verify',
+      headers: { 'x-api-key': ctx.rawKey },
+      payload: { network: ctx.network, otp },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().verified).toBe(true);
+
+    const cats = (await db.select({ c: consent_record.consentCategory, s: consent_record.source })
+      .from(consent_record).where(eq(consent_record.userId, ctx.userId)))
+      .filter((r) => r.s === 'guardian').map((r) => r.c).sort();
+    expect(cats).toEqual(['privacy', 'terms']);
+
+    const [g] = await db.select().from(minor_guardian).where(eq(minor_guardian.userId, ctx.userId));
+    expect(g.guardianVerified).toBe(true);
+  });
+
+  it('rejects a wrong OTP with 400', async () => {
+    // Nonce was consumed by the previous (successful) verify → no valid code.
+    const res = await ctx.app.inject({
+      method: 'POST', url: '/api/v1/consent/u18/guardian/verify',
+      headers: { 'x-api-key': ctx.rawKey },
+      payload: { network: ctx.network, otp: '000000' },
+    });
+    expect(res.statusCode).toBe(400);
+  });
 });
