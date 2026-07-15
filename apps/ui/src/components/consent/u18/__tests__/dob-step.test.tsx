@@ -2,6 +2,8 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { Toaster } from 'sonner';
+import { format } from 'date-fns';
+import { pickDob } from '@/test/pick-dob';
 
 const submitU18Dob = vi.fn();
 vi.mock('@/lib/consent-api', () => ({
@@ -23,15 +25,21 @@ describe('DobStep', () => {
     vi.clearAllMocks();
   });
 
-  it('disables Continue until both month and year are selected', async () => {
+  it('disables Continue until a full date is picked from the calendar', async () => {
     await renderDobStep(vi.fn());
     const submit = screen.getByRole('button', { name: /continue/i });
     expect(submit).toBeDisabled();
 
-    await userEvent.selectOptions(screen.getByLabelText('Birth month'), 'May');
+    // Navigating the caption dropdowns alone doesn't select a day — the
+    // button stays disabled until a day cell is actually clicked.
+    await userEvent.click(screen.getByRole('button', { name: /select date of birth/i }));
+    await userEvent.selectOptions(screen.getByRole('combobox', { name: /choose the year/i }), '2012');
+    await userEvent.selectOptions(screen.getByRole('combobox', { name: /choose the month/i }), '4');
     expect(submit).toBeDisabled();
 
-    await userEvent.selectOptions(screen.getByLabelText('Birth year'), '2012');
+    await userEvent.click(
+      screen.getByRole('button', { name: format(new Date(2012, 4, 1), 'PPPP') }),
+    );
     expect(submit).toBeEnabled();
   });
 
@@ -40,8 +48,7 @@ describe('DobStep', () => {
     const onResolved = vi.fn();
     await renderDobStep(onResolved);
 
-    await userEvent.selectOptions(screen.getByLabelText('Birth month'), 'May');
-    await userEvent.selectOptions(screen.getByLabelText('Birth year'), '2012');
+    await pickDob(/select date of birth/i, 2012, 5);
     await userEvent.click(screen.getByRole('button', { name: /continue/i }));
 
     await waitFor(() =>
@@ -59,8 +66,7 @@ describe('DobStep', () => {
     const onResolved = vi.fn();
     await renderDobStep(onResolved);
 
-    await userEvent.selectOptions(screen.getByLabelText('Birth month'), 'January');
-    await userEvent.selectOptions(screen.getByLabelText('Birth year'), '1990');
+    await pickDob(/select date of birth/i, 1990, 1);
     await userEvent.click(screen.getByRole('button', { name: /continue/i }));
 
     await waitFor(() => expect(onResolved).toHaveBeenCalledWith(false));
@@ -71,8 +77,7 @@ describe('DobStep', () => {
     const onResolved = vi.fn();
     await renderDobStep(onResolved);
 
-    await userEvent.selectOptions(screen.getByLabelText('Birth month'), 'May');
-    await userEvent.selectOptions(screen.getByLabelText('Birth year'), '2012');
+    await pickDob(/select date of birth/i, 2012, 5);
     await userEvent.click(screen.getByRole('button', { name: /continue/i }));
 
     await waitFor(() => expect(screen.getByText(/couldn't save/i)).toBeInTheDocument());

@@ -3,6 +3,7 @@ import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { pickDob } from '@/test/pick-dob';
 
 const checkUser = vi.fn();
 const requestOtp = vi.fn();
@@ -124,16 +125,15 @@ describe('LoginPage', () => {
       await waitFor(() => expect(fetchAuthConfig).toHaveBeenCalled());
 
       // Not shown before any identifier is checked.
-      expect(screen.queryByLabelText(/i am a/i)).toBeNull();
-      expect(screen.queryByLabelText(/birth month/i)).toBeNull();
+      expect(screen.queryByLabelText(/your domain/i)).toBeNull();
+      expect(screen.queryByRole('button', { name: /date of birth/i })).toBeNull();
 
       await userEvent.type(screen.getByLabelText(/mobile/i), '9876543210');
       await userEvent.click(screen.getByRole('button', { name: /continue|send/i }));
 
       await waitFor(() => expect(checkUser).toHaveBeenCalled());
-      expect(await screen.findByLabelText(/i am a/i)).toBeInTheDocument();
-      expect(screen.getByLabelText(/birth month/i)).toBeInTheDocument();
-      expect(screen.getByLabelText(/birth year/i)).toBeInTheDocument();
+      expect(await screen.findByLabelText(/your domain/i)).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: /date of birth/i })).toBeInTheDocument();
     });
 
     it('never shows domain + DOB fields when logging in as a returning user', async () => {
@@ -146,8 +146,8 @@ describe('LoginPage', () => {
       await userEvent.click(screen.getByRole('button', { name: /continue|send/i }));
 
       await waitFor(() => expect(requestOtp).toHaveBeenCalled());
-      expect(screen.queryByLabelText(/i am a/i)).toBeNull();
-      expect(screen.queryByLabelText(/birth month/i)).toBeNull();
+      expect(screen.queryByLabelText(/your domain/i)).toBeNull();
+      expect(screen.queryByRole('button', { name: /date of birth/i })).toBeNull();
       expect(screen.queryByLabelText(/your name/i)).toBeNull();
     });
 
@@ -160,7 +160,7 @@ describe('LoginPage', () => {
       await userEvent.type(screen.getByLabelText(/mobile/i), '9876543210');
       await userEvent.click(screen.getByRole('button', { name: /continue|send/i }));
       await waitFor(() => expect(checkUser).toHaveBeenCalledTimes(1));
-      await screen.findByLabelText(/i am a/i);
+      await screen.findByLabelText(/your domain/i);
 
       // Name only — domain + DOB (still-empty required selects) block even
       // an in-browser submit attempt; requestOtp is never reached.
@@ -169,9 +169,8 @@ describe('LoginPage', () => {
       expect(requestOtp).not.toHaveBeenCalled();
 
       // Fill everything — submission proceeds.
-      await userEvent.selectOptions(screen.getByLabelText(/i am a/i), 'seeker');
-      await userEvent.selectOptions(screen.getByLabelText(/birth month/i), 'May');
-      await userEvent.selectOptions(screen.getByLabelText(/birth year/i), '2010');
+      await userEvent.selectOptions(screen.getByLabelText(/your domain/i), 'seeker');
+      await pickDob(/date of birth/i, 2010, 5);
       await userEvent.click(screen.getByRole('button', { name: /continue|send/i }));
       await waitFor(() => expect(requestOtp).toHaveBeenCalled());
     });
@@ -187,9 +186,8 @@ describe('LoginPage', () => {
       await waitFor(() => expect(checkUser).toHaveBeenCalledTimes(1));
 
       await userEvent.type(screen.getByLabelText(/your name/i), 'Asha');
-      await userEvent.selectOptions(screen.getByLabelText(/i am a/i), 'provider');
-      await userEvent.selectOptions(screen.getByLabelText(/birth month/i), 'May');
-      await userEvent.selectOptions(screen.getByLabelText(/birth year/i), '2010');
+      await userEvent.selectOptions(screen.getByLabelText(/your domain/i), 'provider');
+      await pickDob(/date of birth/i, 2010, 5);
       await userEvent.click(screen.getByRole('button', { name: /continue|send/i }));
 
       await waitFor(() => expect(requestOtp).toHaveBeenCalled());
