@@ -18,7 +18,7 @@
   "auth.label_email_or_mobile": "ईमेल या मोबाइल नंबर",
   "auth.label_email": "ईमेल",
   "auth.label_mobile": "मोबाइल नंबर",
-  "auth.placeholder_phone": "+91 98765 43210",
+  "auth.placeholder_phone": "98765 43210",
   "auth.placeholder_email": "name@example.in",
   "auth.label_name": "आपका नाम",
   "auth.placeholder_name": "पूरा नाम",

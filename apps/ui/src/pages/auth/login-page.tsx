@@ -48,14 +48,12 @@ function domainLabel(domain: DotNetworkDomain): string {
   return domain.id.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
 }
 
-// Keep the phone field numeric: `type="tel"` still accepts letters (e.g. the
-// "e" in "+919620421129e"), and isValidPhoneNumber strips non-digits before
-// testing, so stray letters would otherwise slip through both. Allow only
-// digits and a single leading "+".
-function sanitizePhoneInput(raw: string): string {
-  const hasLeadingPlus = raw.trimStart().startsWith('+');
-  const digits = raw.replace(/\D/g, '');
-  return (hasLeadingPlus ? '+' : '') + digits;
+// The phone field is the NATIONAL number only — the "+91" country code is a
+// fixed prefix shown beside it, never typed. Keep it to at most 10 digits and
+// strip anything else (letters, spaces, a pasted "+91"/leading zero, etc.).
+const IN_DIAL_CODE = '+91';
+function sanitizeNationalPhone(raw: string): string {
+  return raw.replace(/\D/g, '').slice(0, 10);
 }
 
 export function LoginPage() {
@@ -150,7 +148,9 @@ export function LoginPage() {
     }
   }, [authCfg, mode]);
 
-  const identifier: AuthIdentifier = mode === 'email' ? { email } : { phoneNumber };
+  // phoneNumber holds the national part; the wire value is the full E.164.
+  const fullPhone = phoneNumber ? `${IN_DIAL_CODE}${phoneNumber}` : '';
+  const identifier: AuthIdentifier = mode === 'email' ? { email } : { phoneNumber: fullPhone };
   const contactValue = mode === 'email' ? email : phoneNumber;
   const contactLabel = mode === 'email'
     ? t('auth.contact_label_email')
@@ -307,7 +307,7 @@ export function LoginPage() {
 
     // Client-side validation — server won't crash on a malformed number
     // but the OTP send will fail silently. Surface a clean inline error.
-    if (mode === 'phone' && !isValidPhoneNumber(phoneNumber)) {
+    if (mode === 'phone' && !isValidPhoneNumber(fullPhone)) {
       toast.error(t('auth.toast_invalid_phone'), {
         description: t('auth.toast_invalid_phone_desc'),
       });
@@ -475,19 +475,25 @@ export function LoginPage() {
               {mode === 'email' ? t('auth.label_email') : t('auth.label_mobile')}
             </Label>
             {mode === 'phone' ? (
-              <Input
-                id="contact"
-                type="tel"
-                inputMode="tel"
-                // Cap at E.164 max: "+" plus 15 digits.
-                maxLength={16}
-                placeholder={t('auth.placeholder_phone')}
-                value={phoneNumber}
-                onChange={(e) => setPhoneNumber(sanitizePhoneInput(e.target.value))}
-                disabled={isLoading}
-                required
-                className="h-11"
-              />
+              <div className="flex h-11 items-stretch overflow-hidden rounded-md border border-input bg-transparent shadow-xs focus-within:border-ring focus-within:ring-[3px] focus-within:ring-ring/50">
+                {/* Fixed India country code — the field below is the 10-digit
+                    national number only, so a pasted "+91" can't double up. */}
+                <span className="flex select-none items-center border-r border-input bg-muted px-3 text-sm text-muted-foreground">
+                  🇮🇳 {IN_DIAL_CODE}
+                </span>
+                <input
+                  id="contact"
+                  type="tel"
+                  inputMode="numeric"
+                  maxLength={10}
+                  placeholder={t('auth.placeholder_phone', '10-digit mobile number')}
+                  value={phoneNumber}
+                  onChange={(e) => setPhoneNumber(sanitizeNationalPhone(e.target.value))}
+                  disabled={isLoading}
+                  required
+                  className="min-w-0 flex-1 bg-transparent px-3 text-sm outline-none disabled:opacity-60"
+                />
+              </div>
             ) : (
               <Input
                 id="contact"

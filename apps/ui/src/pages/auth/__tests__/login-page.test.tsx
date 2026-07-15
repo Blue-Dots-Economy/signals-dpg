@@ -139,15 +139,15 @@ describe('LoginPage', () => {
     expect(screen.queryByText(/contact your administrator/i)).toBeNull();
   });
 
-  it('sanitizes the mobile field to digits + a single leading "+"', async () => {
+  it('mobile field takes only the 10-digit national number (+91 is a fixed prefix)', async () => {
     fetchAuthConfig.mockResolvedValue({ selfSignupAllowed: true, loginChannels: ['phone', 'email'] });
     await renderPage();
     await waitFor(() => expect(fetchAuthConfig).toHaveBeenCalled());
 
     const input = screen.getByLabelText(/mobile/i) as HTMLInputElement;
-    await userEvent.type(input, '+91 9620-421129e');
-    // Letters and formatting stripped; the leading + is kept.
-    expect(input.value).toBe('+919620421129');
+    // Letters + formatting stripped; capped at 10 digits.
+    await userEvent.type(input, '9620 4211-29abc99');
+    expect(input.value).toBe('9620421129');
   });
 
   describe('signup form: name + domain only (DOB is a separate gated step)', () => {
