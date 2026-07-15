@@ -27,8 +27,8 @@ import { toast } from 'sonner';
 import { fetchNetworkConfig } from '@/lib/network-api';
 import type { DotNetworkDomain } from '@/engine/types';
 import { getServedScope } from '@/lib/served-binding';
-import { MONTHS, buildYearOptions } from '@/lib/dob-options';
 import type { SignupExtras } from '@/lib/signup-domain';
+import { DobCalendar } from '@/components/consent/u18/dob-calendar';
 
 type AuthMode = 'phone' | 'email';
 
@@ -70,6 +70,7 @@ export function LoginPage() {
   const [domain, setDomain] = useState('');
   const [birthMonth, setBirthMonth] = useState('');
   const [birthYear, setBirthYear] = useState('');
+  const [birthDate, setBirthDate] = useState<Date | undefined>(undefined);
   const [userExists, setUserExists] = useState<boolean | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [consentGate, setConsentGate] = useState<ConsentGateState | null>(null);
@@ -83,7 +84,6 @@ export function LoginPage() {
   const [pendingName, setPendingName] = useState<string>('');
   const [pendingSignupExtras, setPendingSignupExtras] = useState<SignupExtras | null>(null);
   const redirectTo = searchParams.get('redirect') ?? '/';
-  const years = useMemo(() => buildYearOptions(), []);
   const servedScope = useMemo(() => getServedScope(), []);
 
   useEffect(() => {
@@ -397,11 +397,6 @@ export function LoginPage() {
                 required
                 className="h-11"
               />
-              <p className="text-xs text-muted-foreground">
-                {mode === 'email'
-                  ? t('auth.hint_verify_email')
-                  : t('auth.hint_verify_phone')}
-              </p>
             </div>
           )}
 
@@ -412,7 +407,7 @@ export function LoginPage() {
             <>
               <div className="space-y-1.5">
                 <Label htmlFor="signup-domain" className="text-sm font-medium">
-                  {t('auth.label_domain', 'I am a')}
+                  {t('auth.label_domain', 'Your Domain')}
                 </Label>
                 <select
                   id="signup-domain"
@@ -434,47 +429,20 @@ export function LoginPage() {
               </div>
 
               <div className="space-y-1.5">
-                <Label className="text-sm font-medium">
-                  {t('auth.label_dob', 'Date of birth (month & year)')}
+                <Label htmlFor="signup-dob" className="text-sm font-medium">
+                  {t('auth.label_dob', 'Date of birth')}
                 </Label>
-                <div className="grid grid-cols-2 gap-3">
-                  <select
-                    id="signup-dob-month"
-                    aria-label={t('auth.dob_label_month', 'Birth month')}
-                    value={birthMonth}
-                    onChange={(e) => setBirthMonth(e.target.value)}
-                    disabled={isLoading}
-                    required
-                    className="h-11 w-full rounded-md border border-input bg-transparent px-3 text-sm shadow-xs outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50"
-                  >
-                    <option value="" disabled>
-                      {t('auth.dob_month_placeholder', 'Month')}
-                    </option>
-                    {MONTHS.map((label, idx) => (
-                      <option key={label} value={idx + 1}>
-                        {label}
-                      </option>
-                    ))}
-                  </select>
-                  <select
-                    id="signup-dob-year"
-                    aria-label={t('auth.dob_label_year', 'Birth year')}
-                    value={birthYear}
-                    onChange={(e) => setBirthYear(e.target.value)}
-                    disabled={isLoading}
-                    required
-                    className="h-11 w-full rounded-md border border-input bg-transparent px-3 text-sm shadow-xs outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50"
-                  >
-                    <option value="" disabled>
-                      {t('auth.dob_year_placeholder', 'Year')}
-                    </option>
-                    {years.map((y) => (
-                      <option key={y} value={y}>
-                        {y}
-                      </option>
-                    ))}
-                  </select>
-                </div>
+                <DobCalendar
+                  id="signup-dob"
+                  value={birthDate}
+                  disabled={isLoading}
+                  placeholder={t('auth.dob_placeholder', 'Select date of birth')}
+                  onChange={(d) => {
+                    setBirthDate(d);
+                    setBirthMonth(String(d.getMonth() + 1));
+                    setBirthYear(String(d.getFullYear()));
+                  }}
+                />
               </div>
             </>
           )}
