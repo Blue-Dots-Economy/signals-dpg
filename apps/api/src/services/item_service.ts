@@ -17,9 +17,11 @@ import { hasAcceptedProfileConsent } from './consent_acceptance.js';
 import { is_populated } from './metrics/profile_completion.js';
 import { decryptPiiBlob, encryptPiiBlob, getPiiKey } from '@dpg/auth';
 import { items } from '@dpg/database';
+import { minor_guardian, consent_record } from '@api/db/postgres/schema';
 import { db } from '@api/db/postgres/drizzle_config';
 import { isServedDomainBinding } from '@/utils/served_domain_guard';
 import { getNetworkConfigById } from '@/network_configs';
+import { guardianConsentRequired, isMinor } from '@/services/minor';
 import { geocodeLocationsFromState } from '@/services/geocoding/resolve_locations_for_create';
 import { jitterCoordinate } from '@/services/geocoding/jitter';
 import {
@@ -313,6 +315,7 @@ export async function promoteItemOnProfileConsent(
       item_state: items.item_state,
       item_private_state: items.item_private_state,
       lifecycle_status: items.lifecycle_status,
+      created_by: items.created_by,
     })
     .from(items)
     .where(eq(items.item_id, itemId))
@@ -346,6 +349,34 @@ export async function promoteItemOnProfileConsent(
   });
 
   if (lifecycle_status !== 'live') return false;
+
+  // U18 gate: a minor's profile only goes live on GUARDIAN profile_creation
+  // consent. Fail-closed — a gated domain with no guardian row stays draft,
+  // so the adult self-consent path cannot promote a minor (spec §7 / D11/D13).
+  const networkConfig = await getNetworkConfigById(item.item_network);
+  if (guardianConsentRequired(networkConfig, item.item_domain)) {
+    const [mg] = await exec
+      .select({ birthYear: minor_guardian.birthYear, birthMonth: minor_guardian.birthMonth })
+      .from(minor_guardian)
+      .where(eq(minor_guardian.userId, item.created_by))
+      .limit(1);
+    if (mg && isMinor(mg.birthYear, mg.birthMonth)) {
+      const [guardianRow] = await exec
+        .select({ id: consent_record.id })
+        .from(consent_record)
+        .where(
+          and(
+            eq(consent_record.userId, item.created_by),
+            eq(consent_record.level, 'item'),
+            eq(consent_record.consentCategory, 'profile_creation'),
+            eq(consent_record.itemId, itemId),
+            eq(consent_record.source, 'guardian'),
+          ),
+        )
+        .limit(1);
+      if (!guardianRow) return false; // minor without guardian consent → stay draft
+    }
+  }
 
   await exec
     .update(items)
