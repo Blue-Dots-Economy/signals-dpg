@@ -157,6 +157,55 @@ export async function verifyGuardian(body: VerifyGuardianBody): Promise<VerifyGu
   return response.data;
 }
 
+// --- Pre-auth, signup-scoped guardian consent (no session yet) ---
+//
+// Mirrors the authenticated submit/verify pair, but the account doesn't exist
+// yet: the body carries the ward's own signup identifier (email OR phone) plus
+// the network/domain and birth month/year the server needs to (re-)confirm the
+// ward is a gated minor. Backed by public routes POST /u18/signup/guardian
+// and /u18/signup/guardian/verify (services/signup_guardian.ts).
+
+export interface StartSignupGuardianBody {
+  network: string;
+  domain: string;
+  email?: string;
+  phoneNumber?: string;
+  birthYear: number;
+  birthMonth: number;
+  guardianName: string;
+  guardianContact: string;
+  guardianContactType: GuardianContactType;
+  guardianDeclarationAccepted: true;
+  sameContactAcknowledged?: boolean;
+}
+
+export interface VerifySignupGuardianBody {
+  network?: string;
+  email?: string;
+  phoneNumber?: string;
+  otp: string;
+}
+
+export async function startSignupGuardian(
+  body: StartSignupGuardianBody,
+): Promise<SubmitGuardianResponse> {
+  const response = await apiClient.post<SubmitGuardianResponse>(
+    '/api/v1/consent/u18/signup/guardian',
+    body,
+  );
+  return response.data;
+}
+
+export async function verifySignupGuardian(
+  body: VerifySignupGuardianBody,
+): Promise<VerifyGuardianResponse> {
+  const response = await apiClient.post<VerifyGuardianResponse>(
+    '/api/v1/consent/u18/signup/guardian/verify',
+    body,
+  );
+  return response.data;
+}
+
 export async function issueProfileConsentOtp(
   body: ProfileConsentOtpItemRef,
 ): Promise<IssueProfileConsentOtpResponse> {

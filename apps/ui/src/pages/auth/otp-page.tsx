@@ -13,9 +13,6 @@ import { toast } from 'sonner';
 import { acceptConsent, submitU18Dob } from '@/lib/consent-api';
 import type { ConsentAcceptBody } from '@dpg/schemas';
 import { useNetworkTheme } from '@/theme/theme-provider';
-import { fetchNetworkConfig } from '@/lib/network-api';
-import { isGuardianConsentRequiredDomain } from '@/lib/guardian-consent';
-import { U18GuardianFlow } from '@/components/consent/u18/u18-guardian-flow';
 import { setStoredSignupDomain, type SignupExtras } from '@/lib/signup-domain';
 
 interface AuthState extends AuthIdentifier {
@@ -37,14 +34,10 @@ export function OtpPage() {
   const location = useLocation();
   const { verifyOtp, signOut } = useAuth();
   const { t } = useTranslation();
-  const { themeId, brand } = useNetworkTheme();
+  const { themeId } = useNetworkTheme();
   const [isLoading, setIsLoading] = useState(false);
   const [countdown, setCountdown] = useState(60);
   const [inlineError, setInlineError] = useState<{ title: string; description: string } | null>(null);
-  // Set only when a brand-new minor's chosen domain requires the guardian
-  // consent flow (server-authoritative isMinor via submitU18Dob) — blocks
-  // navigation to home until the guardian flow completes.
-  const [guardianGateDomain, setGuardianGateDomain] = useState<string | null>(null);
 
   const state = location.state as AuthState | null;
   const identifierLabel = state?.email ?? state?.phoneNumber;
@@ -107,29 +100,22 @@ export function OtpPage() {
         }
       }
 
-      // Signup-time DOB (U18 Phase 6 at signup): only for a brand-new
-      // account that captured domain + DOB on the signup form — never for a
-      // returning user's login. Persist DOB now that the session is
-      // authenticated (submitU18Dob requires it), then, if the server says
-      // the ward is a minor AND the chosen domain requires guardian consent,
-      // gate on the existing guardian flow before landing on home.
+      // Signup-time DOB (U18 at signup): only for a brand-new account that
+      // captured domain + DOB on the signup form — never for a returning
+      // user's login. Persist DOB now that the session is authenticated. For a
+      // gated MINOR the guardian flow already ran BEFORE this OTP (option A)
+      // and materializeSignupGuardian wrote the birth month + guardian consent
+      // on account creation, so this is a harmless idempotent upsert in that
+      // case. Best-effort like the consent-accept write above — never block
+      // signup on it.
       if (!state.userExists && state.signupExtras) {
         const { domain, birthMonth, birthYear } = state.signupExtras;
         // Hand the chosen domain off to profile-form-page (one-shot; it
         // clears this once read) so profile creation doesn't ask again.
         setStoredSignupDomain(themeId, domain);
         try {
-          const { isMinor } = await submitU18Dob({ network: themeId, birthMonth, birthYear });
-          if (isMinor) {
-            const network = await fetchNetworkConfig(themeId).catch(() => null);
-            if (network && isGuardianConsentRequiredDomain(network, domain)) {
-              setGuardianGateDomain(domain);
-              return; // Block navigation — U18GuardianFlow renders below.
-            }
-          }
+          await submitU18Dob({ network: themeId, birthMonth, birthYear });
         } catch {
-          // Best-effort, same as the consent-accept write above — the user
-          // is authenticated either way; don't block signup on this.
           toast.error(t('auth.toast_consent_persist_error', 'Could not save your consent. You may be asked again next time.'));
         }
       }
@@ -169,20 +155,6 @@ export function OtpPage() {
 
   return (
     <>
-    {guardianGateDomain && (
-      <U18GuardianFlow
-        network={themeId}
-        brand={brand === 'standard' ? null : brand}
-        // DOB is already known (submitU18Dob already returned isMinor: true
-        // above) — skip straight to the guardian-details step.
-        initialStep="guardian"
-        onComplete={finishSignIn}
-        // Dead branch in this call path (we only render this component once
-        // isMinor is already confirmed true), kept for prop-type parity with
-        // the first-login call site — falls back to the normal landing.
-        onNotMinor={finishSignIn}
-      />
-    )}
     <AuthShell>
       {/* Back */}
       <button

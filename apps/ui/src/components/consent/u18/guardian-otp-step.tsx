@@ -5,7 +5,7 @@ import { toast } from 'sonner';
 import { Loader2, OctagonX } from 'lucide-react';
 import { Alert, AlertTitle, AlertDescription } from '@/components/ui/alert';
 import { OtpInput } from '@/components/auth/otp-input';
-import { verifyGuardian } from '@/lib/consent-api';
+import { verifyGuardian, type VerifyGuardianResponse } from '@/lib/consent-api';
 
 export interface GuardianOtpStepProps {
   network: string;
@@ -13,9 +13,21 @@ export interface GuardianOtpStepProps {
   onVerified: () => void;
   /** Re-sends the OTP by re-submitting the guardian details already on file. */
   onResend: () => Promise<void>;
+  /**
+   * Verify handler. Defaults to the authenticated `verifyGuardian`
+   * (POST /u18/guardian/verify). The pre-auth signup flow injects a handler
+   * that verifies via POST /u18/signup/guardian/verify (no session yet).
+   */
+  verify?: (otp: string) => Promise<VerifyGuardianResponse>;
 }
 
-export function GuardianOtpStep({ network, brand, onVerified, onResend }: GuardianOtpStepProps) {
+export function GuardianOtpStep({
+  network,
+  brand,
+  onVerified,
+  onResend,
+  verify = (otp) => verifyGuardian({ network, brand: brand ?? null, otp }),
+}: GuardianOtpStepProps) {
   const { t } = useTranslation();
   const [isVerifying, setIsVerifying] = React.useState(false);
   const [isResending, setIsResending] = React.useState(false);
@@ -37,7 +49,7 @@ export function GuardianOtpStep({ network, brand, onVerified, onResend }: Guardi
     setIsVerifying(true);
     setInlineError(null);
     try {
-      const result = await verifyGuardian({ network, brand: brand ?? null, otp });
+      const result = await verify(otp);
       if (result.verified) onVerified();
     } catch (err) {
       const status = axios.isAxiosError(err) ? err.response?.status : undefined;

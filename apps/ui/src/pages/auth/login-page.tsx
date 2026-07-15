@@ -29,6 +29,11 @@ import type { DotNetworkDomain } from '@/engine/types';
 import { getServedScope } from '@/lib/served-binding';
 import type { SignupExtras } from '@/lib/signup-domain';
 import { DobCalendar } from '@/components/consent/u18/dob-calendar';
+import { isMinorFromBirth } from '@/lib/guardian-consent';
+import {
+  SignupGuardianFlow,
+  type SignupIdentifier,
+} from '@/components/consent/u18/signup-guardian-flow';
 
 type AuthMode = 'phone' | 'email';
 
@@ -83,6 +88,17 @@ export function LoginPage() {
   const [pendingUserExists, setPendingUserExists] = useState<boolean>(false);
   const [pendingName, setPendingName] = useState<string>('');
   const [pendingSignupExtras, setPendingSignupExtras] = useState<SignupExtras | null>(null);
+  // Set only for a brand-new MINOR signup in a guardian-gated domain — renders
+  // the pre-auth SignupGuardianFlow and defers the ward's own OTP until the
+  // guardian is verified (U18 option A). null for every other path.
+  const [signupGuardianGate, setSignupGuardianGate] = useState<{
+    identifier: AuthIdentifier;
+    domain: string;
+    birthYear: number;
+    birthMonth: number;
+    resolvedName: string;
+    resolvedSignupExtras: SignupExtras;
+  } | null>(null);
   const redirectTo = searchParams.get('redirect') ?? '/';
   const servedScope = useMemo(() => getServedScope(), []);
 
@@ -225,6 +241,30 @@ export function LoginPage() {
         ? null
         : { domain, birthMonth: Number(birthMonth), birthYear: Number(birthYear) };
 
+      // U18 option A: a brand-new MINOR signing up in a guardian-gated domain
+      // must clear the guardian OTP BEFORE their own OTP. The guardian flow
+      // (materializeSignupGuardian) records the u18 terms/privacy as
+      // guardian-sourced, so skip the adult self-consent gate here entirely.
+      // The server re-checks minor + gated + served and is authoritative.
+      const gatedDomain =
+        networkDomains.find((d) => d.id === domain)?.guardian_consent_required ?? false;
+      if (
+        resolvedSignupExtras &&
+        gatedDomain &&
+        isMinorFromBirth(resolvedSignupExtras.birthYear, resolvedSignupExtras.birthMonth)
+      ) {
+        setSignupGuardianGate({
+          identifier,
+          domain,
+          birthYear: resolvedSignupExtras.birthYear,
+          birthMonth: resolvedSignupExtras.birthMonth,
+          resolvedName,
+          resolvedSignupExtras,
+        });
+        setIsLoading(false);
+        return; // Do NOT send the ward's OTP yet — wait for guardian verify.
+      }
+
       // Evaluate consent before sending the OTP. This is best-effort (public
       // endpoint, client-side); on any failure we proceed without gating — the
       // user will be re-prompted post-verify on the next login (spec §1.1).
@@ -289,6 +329,37 @@ export function LoginPage() {
 
   return (
     <>
+      {signupGuardianGate && (
+        <SignupGuardianFlow
+          network={themeId}
+          domain={signupGuardianGate.domain}
+          brand={brand !== 'standard' ? brand : null}
+          identifier={
+            (signupGuardianGate.identifier.email
+              ? { email: signupGuardianGate.identifier.email }
+              : { phoneNumber: signupGuardianGate.identifier.phoneNumber }) as SignupIdentifier
+          }
+          birthYear={signupGuardianGate.birthYear}
+          birthMonth={signupGuardianGate.birthMonth}
+          onComplete={() => {
+            const gate = signupGuardianGate;
+            setSignupGuardianGate(null);
+            // Guardian verified — now send the ward's own OTP. No pendingConsent:
+            // the minor's terms/privacy are recorded guardian-sourced on account
+            // creation (materializeSignupGuardian), not via the adult gate.
+            void proceedToOtp(
+              gate.identifier,
+              false,
+              gate.resolvedName,
+              gate.resolvedSignupExtras,
+            ).catch(() => {
+              toast.error(t('auth.toast_send_code_error'), {
+                description: t('auth.toast_send_code_error_desc'),
+              });
+            });
+          }}
+        />
+      )}
       {consentGate && (
         <ConsentModal
           open={true}

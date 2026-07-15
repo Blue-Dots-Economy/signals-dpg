@@ -39,6 +39,28 @@ vi.mock('react-router-dom', async (orig) => ({
   ...(await orig<typeof import('react-router-dom')>()),
   useNavigate: () => navigateMock,
 }));
+// Stub the pre-auth guardian flow so we can assert LoginPage's gating wiring
+// (does it render the flow, with which props, and does it hold back the OTP?)
+// without pulling in the child's internals — those have their own tests.
+const signupGuardianOnComplete = vi.fn();
+vi.mock('@/components/consent/u18/signup-guardian-flow', () => ({
+  SignupGuardianFlow: (props: { domain: string; birthYear: number; onComplete: () => void }) => {
+    signupGuardianOnComplete.mockImplementation(props.onComplete);
+    return (
+      <div
+        data-testid="signup-guardian-flow"
+        data-domain={props.domain}
+        data-birth-year={props.birthYear}
+      />
+    );
+  },
+}));
+
+// A gated domain ("seeker") + an ungated one ("provider") for the U18 tests.
+const GATED_NETWORK_DOMAINS = [
+  { id: 'seeker', description: 'Job seeker', guardian_consent_required: true },
+  { id: 'provider', description: 'Job provider' },
+];
 
 async function renderPage() {
   const { LoginPage } = await import('../login-page');
@@ -199,6 +221,65 @@ describe('LoginPage', () => {
           }),
         }),
       ));
+    });
+  });
+
+  describe('U18 pre-auth guardian gate (option A)', () => {
+    it('a minor signing up in a guardian-gated domain sees the guardian flow BEFORE their own OTP', async () => {
+      fetchAuthConfig.mockResolvedValue({ selfSignupAllowed: true, loginChannels: ['phone', 'email'] });
+      checkUser.mockResolvedValue({ userExists: false });
+      fetchNetworkConfig.mockResolvedValue({ id: 'blue_dot', domains: GATED_NETWORK_DOMAINS });
+      await renderPage();
+      await waitFor(() => expect(fetchAuthConfig).toHaveBeenCalled());
+
+      await userEvent.type(screen.getByLabelText(/mobile/i), '9876543210');
+      await userEvent.click(screen.getByRole('button', { name: /continue|send/i }));
+      await waitFor(() => expect(checkUser).toHaveBeenCalledTimes(1));
+
+      await userEvent.type(screen.getByLabelText(/your name/i), 'Asha');
+      await userEvent.selectOptions(screen.getByLabelText(/your domain/i), 'seeker');
+      await pickDob(/date of birth/i, 2015, 5); // minor
+      await userEvent.click(screen.getByRole('button', { name: /continue|send/i }));
+
+      // Guardian flow renders; the ward's OTP is held back.
+      const flow = await screen.findByTestId('signup-guardian-flow');
+      expect(flow).toHaveAttribute('data-domain', 'seeker');
+      expect(flow).toHaveAttribute('data-birth-year', '2015');
+      expect(requestOtp).not.toHaveBeenCalled();
+      expect(navigateMock).not.toHaveBeenCalled();
+
+      // Once the guardian is verified, the ward's OTP is sent + navigation runs.
+      signupGuardianOnComplete();
+      await waitFor(() => expect(requestOtp).toHaveBeenCalled());
+      await waitFor(() => expect(navigateMock).toHaveBeenCalledWith(
+        '/auth/otp',
+        expect.objectContaining({
+          state: expect.objectContaining({
+            signupExtras: { domain: 'seeker', birthMonth: 5, birthYear: 2015 },
+            pendingConsent: null,
+          }),
+        }),
+      ));
+    });
+
+    it('an ADULT in a guardian-gated domain skips the guardian flow and proceeds to OTP', async () => {
+      fetchAuthConfig.mockResolvedValue({ selfSignupAllowed: true, loginChannels: ['phone', 'email'] });
+      checkUser.mockResolvedValue({ userExists: false });
+      fetchNetworkConfig.mockResolvedValue({ id: 'blue_dot', domains: GATED_NETWORK_DOMAINS });
+      await renderPage();
+      await waitFor(() => expect(fetchAuthConfig).toHaveBeenCalled());
+
+      await userEvent.type(screen.getByLabelText(/mobile/i), '9876543210');
+      await userEvent.click(screen.getByRole('button', { name: /continue|send/i }));
+      await waitFor(() => expect(checkUser).toHaveBeenCalledTimes(1));
+
+      await userEvent.type(screen.getByLabelText(/your name/i), 'Ravi');
+      await userEvent.selectOptions(screen.getByLabelText(/your domain/i), 'seeker');
+      await pickDob(/date of birth/i, 1990, 5); // adult
+      await userEvent.click(screen.getByRole('button', { name: /continue|send/i }));
+
+      await waitFor(() => expect(requestOtp).toHaveBeenCalled());
+      expect(screen.queryByTestId('signup-guardian-flow')).toBeNull();
     });
   });
 });

@@ -13,6 +13,7 @@ import {
   submitGuardian,
   type GuardianContactType,
   type SubmitGuardianBody,
+  type SubmitGuardianResponse,
 } from '@/lib/consent-api';
 
 export interface GuardianFormStepProps {
@@ -21,6 +22,18 @@ export interface GuardianFormStepProps {
   /** Called after a successful submit (OTP sent), with the body used — kept by
    * the orchestrator so the OTP step can resend without re-collecting the form. */
   onSubmitted: (body: SubmitGuardianBody) => void;
+  /**
+   * Submit handler. Defaults to the authenticated `submitGuardian`
+   * (POST /u18/guardian). The pre-auth signup flow injects a handler that
+   * maps the same body onto POST /u18/signup/guardian (no session yet).
+   */
+  submit?: (body: SubmitGuardianBody) => Promise<SubmitGuardianResponse>;
+  /**
+   * Contact to compare against for the same-contact warning. Defaults to the
+   * authenticated user's own email/phone; the pre-auth signup flow (no session)
+   * passes the ward's signup identifier instead.
+   */
+  ownContact?: { email?: string | null; phoneNumber?: string | null };
 }
 
 function normalizeContact(value: string): string {
@@ -42,9 +55,16 @@ function matchesOwnContact(
   return matchesEmail || matchesPhone;
 }
 
-export function GuardianFormStep({ network, brand, onSubmitted }: GuardianFormStepProps) {
+export function GuardianFormStep({
+  network,
+  brand,
+  onSubmitted,
+  submit = submitGuardian,
+  ownContact,
+}: GuardianFormStepProps) {
   const { t } = useTranslation();
   const { user } = useAuth();
+  const compareContact = ownContact ?? { email: user?.email, phoneNumber: user?.phoneNumber };
   const [guardianName, setGuardianName] = React.useState('');
   const [guardianContact, setGuardianContact] = React.useState('');
   const [guardianContactType, setGuardianContactType] = React.useState<GuardianContactType>('phone');
@@ -56,8 +76,8 @@ export function GuardianFormStep({ network, brand, onSubmitted }: GuardianFormSt
 
   const clientDetectedSameContact = matchesOwnContact(
     guardianContact,
-    user?.email,
-    user?.phoneNumber,
+    compareContact.email,
+    compareContact.phoneNumber,
   );
   const showSameContactWarning = clientDetectedSameContact || serverFlaggedSameContact;
 
@@ -108,7 +128,7 @@ export function GuardianFormStep({ network, brand, onSubmitted }: GuardianFormSt
     };
 
     try {
-      const result = await submitGuardian(body);
+      const result = await submit(body);
       if (result.otpSent) onSubmitted(body);
     } catch (err) {
       const status = axios.isAxiosError(err) ? err.response?.status : undefined;
