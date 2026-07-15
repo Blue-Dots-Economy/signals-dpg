@@ -52,6 +52,13 @@ describe('GuardianFormStep', () => {
     expect(submit).toBeEnabled();
   });
 
+  it('sanitizes the guardian phone to digits + a single leading "+"', async () => {
+    await renderForm(vi.fn());
+    const phone = screen.getByLabelText(/guardian phone number/i) as HTMLInputElement;
+    await userEvent.type(phone, '+91 80954-44625abc');
+    expect(phone.value).toBe('+918095444625');
+  });
+
   it('submits with the phone contact when only a phone is given', async () => {
     submitGuardian.mockResolvedValue({ otpSent: true });
     const onSubmitted = vi.fn();

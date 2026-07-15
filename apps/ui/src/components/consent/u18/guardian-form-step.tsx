@@ -39,6 +39,14 @@ function normalize(value: string): string {
   return value.trim();
 }
 
+// Guardian phone can be any country, so keep a single leading "+" plus digits;
+// strip everything else (type="tel" otherwise accepts letters).
+function sanitizeGuardianPhone(raw: string): string {
+  const hasLeadingPlus = raw.trimStart().startsWith('+');
+  const digits = raw.replace(/\D/g, '');
+  return (hasLeadingPlus ? '+' : '') + digits;
+}
+
 export function GuardianFormStep({
   network,
   brand,
@@ -206,7 +214,8 @@ export function GuardianFormStep({
           type="tel"
           inputMode="tel"
           value={guardianPhone}
-          onChange={(e) => { setGuardianPhone(e.target.value); clearWarnings(); }}
+          onChange={(e) => { setGuardianPhone(sanitizeGuardianPhone(e.target.value)); clearWarnings(); }}
+          maxLength={16}
           disabled={isSubmitting}
           aria-invalid={showSameContactWarning}
           className={cn(showSameContactWarning && 'border-amber-500 focus-visible:ring-amber-500/40')}
