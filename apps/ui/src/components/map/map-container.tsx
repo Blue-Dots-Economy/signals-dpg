@@ -80,6 +80,16 @@ interface MapViewProps {
    * for the tourist app → no listener is attached and behavior is unchanged.
    */
   onViewportChange?: (viewport: MapViewport) => void;
+  /**
+   * When true, suppresses MapView's own loading/no-results overlay (#203
+   * §7). Used by the home-page's anonymous count-first browsing, where
+   * `items` is deliberately kept empty below `REGION_ZOOM` and the caller
+   * renders its own count-first overlay instead — without this, MapView's
+   * default "No items match the current filters." text would render
+   * underneath/alongside it. Defaults to false (unset for the tourist app
+   * and the normal signals map) → behavior is unchanged.
+   */
+  hideEmptyState?: boolean;
 }
 
 // Default map view when there is no user location / no profile location.
@@ -114,7 +124,10 @@ export function parseDefaultZoom(raw: string | undefined): number {
 const DEFAULT_CENTER: [number, number] = parseDefaultCenter(
   import.meta.env.VITE_MAP_DEFAULT_CENTER,
 );
-const DEFAULT_ZOOM = parseDefaultZoom(import.meta.env.VITE_MAP_DEFAULT_ZOOM);
+// Exported so callers (e.g. the home-page's #203 §7 count-first gating) can
+// fall back to the same default zoom the map itself uses before its first
+// `onViewportChange` report has landed.
+export const DEFAULT_ZOOM = parseDefaultZoom(import.meta.env.VITE_MAP_DEFAULT_ZOOM);
 const PROFILE_ZOOM = 12;
 
 export function MapView({
@@ -132,6 +145,7 @@ export function MapView({
   resolveMarkerIcon,
   resolveMarkerImage,
   onViewportChange,
+  hideEmptyState = false,
 }: MapViewProps) {
   const { t } = useTranslation();
   const MapProviderComponent = getActiveMapProvider();
@@ -304,7 +318,7 @@ export function MapView({
         </Button>
       </div>
       {/* Loading / empty-state overlays (non-blocking, centered) */}
-      {(loading || markers.length === 0) && (
+      {!hideEmptyState && (loading || markers.length === 0) && (
         <div className="pointer-events-none absolute inset-0 z-[900] flex items-center justify-center">
           <p className="rounded-md bg-background/90 px-4 py-2 text-sm text-muted-foreground shadow-md backdrop-blur-sm">
             {loading

@@ -213,11 +213,19 @@ export interface MapProvider {
  * (Leaflet `moveend` / Google `idle`). `radiusMeters` is the half-diagonal —
  * the great-circle distance from `center` to a corner of the current bounds —
  * a simple, provider-agnostic proxy for "how much area is visible".
+ *
+ * `zoom` (#203 §7) is the native map zoom level at the moment of the report.
+ * Optional — additive on top of the original `{lat, lng, radiusMeters}` shape
+ * so callers that construct a `MapViewport` by hand (existing tests, the
+ * `useMapMarkers` bucketing logic) don't need to supply it. Both live map
+ * providers always populate it when emitting to `onViewportChange`; it is
+ * currently consumed only by the home-page's anonymous count-first gating.
  */
 export interface MapViewport {
   lat: number;
   lng: number;
   radiusMeters: number;
+  zoom?: number;
 }
 
 // ─── Plugin Types ──────────────────────────────────────────────

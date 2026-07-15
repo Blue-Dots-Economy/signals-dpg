@@ -20,7 +20,7 @@ import { DomainCard } from '@/components/cards/domain-card';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Button } from '@/components/ui/button';
 import { ActionHandler } from '@/components/actions/action-handler';
-import { MapView } from '@/components/map/map-container';
+import { MapView, DEFAULT_ZOOM } from '@/components/map/map-container';
 import { MapFiltersPanel } from '@/components/map/map-filters-panel';
 import { MarkerPopupCard } from '@/components/map/marker-popup-card';
 import { MatchScoreCard } from '@/components/match-score';
@@ -385,6 +385,12 @@ function resolveDefaultViewMode(): ViewMode {
   return 'map';
 }
 
+// Anonymous count-first map browsing (#203 §7): below this zoom (region
+// level — a whole state/country is roughly visible), a signed-out visitor
+// with no resolved location sees an aggregate count + prompt instead of a
+// country-wide pin pull. See `countFirst` below for the full gating.
+const REGION_ZOOM = 8;
+
 export function HomePage() {
   const { t } = useTranslation();
   const { user } = useAuth();
@@ -690,6 +696,19 @@ export function HomePage() {
     }
   }, [network, selectedDomain, visibleDomains, setSearchParams]);
 
+  // Anonymous count-first map browsing (#203 §7): a signed-out visitor with
+  // no resolved location (no profile, no browser geolocation) starts the map
+  // at the whole-network default view — pulling every pin country-wide would
+  // be both wasteful and a poor experience. Below `REGION_ZOOM` we show an
+  // aggregate count + prompt instead (see the overlay near the `MapView`
+  // below). ANY of: being signed in, having a resolved location, or having
+  // zoomed in past the threshold flips this false and pins load normally —
+  // `mapViewport` is null until the map's first report lands, so we fall back
+  // to the map's own default zoom (`DEFAULT_ZOOM`) for that brief window,
+  // matching what's actually on screen before the first report.
+  const countFirst =
+    !user && !userLocation && (mapViewport?.zoom ?? DEFAULT_ZOOM) < REGION_ZOOM;
+
   // Task 6 (#203 §5.2): the map view is now sourced from viewport-scoped
   // markers rather than a full per-domain browse feed (that full fetch was
   // removed from this page entirely in Task 7). Map enum-field
@@ -703,7 +722,14 @@ export function HomePage() {
   // search box stay mounted (they still filter the LIST view), but have no
   // effect on which markers are fetched. Only domain multi-select (below) —
   // an array membership check needing no server support — still narrows pins.
-  const mapMarkers = useMapMarkers(network, visibleDomains, mapViewport);
+  //
+  // While `countFirst` is active, `useMapMarkers` is asked for `limit: 1` per
+  // domain instead of the full `VITE_MAP_FETCH_LIMIT` — cheap enough to run
+  // continuously, and `meta.total` (summed into `mapMarkers.total` below)
+  // still reports the true match count for the count-first overlay.
+  const mapMarkers = useMapMarkers(network, visibleDomains, mapViewport, {
+    countOnly: countFirst,
+  });
 
   // The map's own domain multi-select still narrows what's shown — applied
   // client-side to the fetched markers (every `Marker` already carries
@@ -711,18 +737,25 @@ export function HomePage() {
   // `buildFilteredCardsForDomain` uses for the list view. This is distinct
   // from the deferred enum-field filter above: domain filtering needs no
   // server support, it's just an array membership check.
+  //
+  // In count-first mode no pins are plotted at all (the `countOnly` fetch
+  // above returns ~1 marker per domain purely as a side effect of getting
+  // `meta.total` cheaply — rendering it would show a handful of arbitrary
+  // pins, not a meaningful sample), so `mapItems` is forced empty.
   const mapItems = React.useMemo(
     () =>
-      mapMarkers.markers
-        .filter(
-          (m) => mapSelectedDomains.length === 0 || mapSelectedDomains.includes(m.item_domain),
-        )
-        .map((m) => ({
-          id: m.item_id,
-          domain: m.item_domain,
-          data: { item_locations: m.item_locations },
-        })),
-    [mapMarkers.markers, mapSelectedDomains],
+      countFirst
+        ? []
+        : mapMarkers.markers
+            .filter(
+              (m) => mapSelectedDomains.length === 0 || mapSelectedDomains.includes(m.item_domain),
+            )
+            .map((m) => ({
+              id: m.item_id,
+              domain: m.item_domain,
+              data: { item_locations: m.item_locations },
+            })),
+    [countFirst, mapMarkers.markers, mapSelectedDomains],
   );
 
   const localProfileItemIds = React.useMemo(
@@ -1732,6 +1765,7 @@ export function HomePage() {
                   focusNonce={recenterNonce}
                   filtersSlot={filtersPanel}
                   onViewportChange={setMapViewport}
+                  hideEmptyState={countFirst}
                   renderPopup={(marker) => {
                     // Marker ids are `${item_id}#${locationIndex}` — strip the suffix to look up the item.
                     const baseItemId = marker.id.includes('#') ? marker.id.split('#')[0] : marker.id;
@@ -1765,6 +1799,22 @@ export function HomePage() {
                     );
                   }}
                 />
+                {/* Anonymous count-first overlay (#203 §7): below `REGION_ZOOM` a
+                    signed-out visitor with no resolved location sees an aggregate
+                    count + prompt instead of a country-wide pin pull (no pins are
+                    plotted — `mapItems` is forced empty above). `fixed` + high
+                    z-index for the same reason as the partial-indicator below: it
+                    must stay visible above the map's own maximize overlay
+                    (z-[2000]) in both normal and maximized mode. */}
+                {countFirst && (
+                  <div className="pointer-events-none fixed inset-0 z-[2100] flex items-center justify-center px-4">
+                    <div className="pointer-events-auto max-w-sm rounded-lg border border-border bg-background/95 px-5 py-4 text-center shadow-lg backdrop-blur-sm">
+                      <p className="text-sm font-medium text-foreground">
+                        {t('home.map_count_first', { count: mapMarkers.total })}
+                      </p>
+                    </div>
+                  </div>
+                )}
                 {/* Federation-degradation indicator (#203 §6): some peer instances
                     didn't answer in time, so the viewport marker set is known-partial.
                     `fixed` (not `absolute`) so it stays visible above the map's own

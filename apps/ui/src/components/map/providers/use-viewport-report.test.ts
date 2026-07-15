@@ -33,6 +33,34 @@ describe('useViewportReportEmitter', () => {
     expect(viewport.radiusMeters).toBeGreaterThan(0);
   });
 
+  it('emit omits zoom entirely when the caller does not pass one', () => {
+    const onViewportChange = vi.fn();
+    const { result } = renderHook(() => useViewportReportEmitter(onViewportChange));
+
+    act(() => {
+      result.current.emit(CENTER, CORNER);
+      vi.advanceTimersByTime(300);
+    });
+    const viewport = onViewportChange.mock.calls[0][0];
+    expect(viewport).not.toHaveProperty('zoom');
+  });
+
+  it('emit and emitNow thread the zoom level through to the reported viewport (#203 §7)', () => {
+    const onViewportChange = vi.fn();
+    const { result } = renderHook(() => useViewportReportEmitter(onViewportChange));
+
+    act(() => {
+      result.current.emit(CENTER, CORNER, 6);
+      vi.advanceTimersByTime(300);
+    });
+    expect(onViewportChange.mock.calls[0][0].zoom).toBe(6);
+
+    act(() => {
+      result.current.emitNow(CENTER, CORNER, 11);
+    });
+    expect(onViewportChange.mock.calls[1][0].zoom).toBe(11);
+  });
+
   it('emit collapses rapid successive calls into a single trailing emission', () => {
     const onViewportChange = vi.fn();
     const { result } = renderHook(() => useViewportReportEmitter(onViewportChange));

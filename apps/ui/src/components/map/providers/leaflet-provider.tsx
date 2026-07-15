@@ -86,6 +86,9 @@ function SetView({
  * be stuck on the "no results" overlay forever. The mount emit is skipped if
  * the map's bounds aren't valid yet (rare, only just-constructed); nothing is
  * lost in that case because `moveend` will still fire normally later.
+ *
+ * Every emit also carries `map.getZoom()` (#203 §7) so the home-page can gate
+ * anonymous count-first browsing on the zoom level without a separate event.
  */
 function ViewportReporter({ onViewportChange }: { onViewportChange: (viewport: MapViewport) => void }) {
   const map = useMap();
@@ -95,7 +98,7 @@ function ViewportReporter({ onViewportChange }: { onViewportChange: (viewport: M
     const handleMoveEnd = () => {
       const center = map.getCenter();
       const ne = map.getBounds().getNorthEast();
-      emit({ lat: center.lat, lng: center.lng }, { lat: ne.lat, lng: ne.lng });
+      emit({ lat: center.lat, lng: center.lng }, { lat: ne.lat, lng: ne.lng }, map.getZoom());
     };
     map.on('moveend', handleMoveEnd);
 
@@ -103,7 +106,7 @@ function ViewportReporter({ onViewportChange }: { onViewportChange: (viewport: M
     if (bounds.isValid()) {
       const center = map.getCenter();
       const ne = bounds.getNorthEast();
-      emitNow({ lat: center.lat, lng: center.lng }, { lat: ne.lat, lng: ne.lng });
+      emitNow({ lat: center.lat, lng: center.lng }, { lat: ne.lat, lng: ne.lng }, map.getZoom());
     }
 
     return () => {

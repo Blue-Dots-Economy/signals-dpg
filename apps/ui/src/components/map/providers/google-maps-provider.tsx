@@ -390,6 +390,10 @@ function MapViewController({ center, zoom, initialViewSet, focusNonce }: MapView
 // fast-path here rather than a fix for a stuck-forever case — but it is
 // skipped if center/bounds aren't ready yet, since the first `idle` will
 // cover it in that case.
+//
+// Every emit also carries `map.getZoom()` (#203 §7, optional on Google's own
+// types) so the home-page can gate anonymous count-first browsing on the
+// zoom level without a separate event.
 
 function ViewportReporter({ onViewportChange }: { onViewportChange: (viewport: MapViewport) => void }) {
   const map = useMap();
@@ -402,14 +406,14 @@ function ViewportReporter({ onViewportChange }: { onViewportChange: (viewport: M
       const bounds = map.getBounds();
       if (!center || !bounds) return;
       const ne = bounds.getNorthEast();
-      emit({ lat: center.lat(), lng: center.lng() }, { lat: ne.lat(), lng: ne.lng() });
+      emit({ lat: center.lat(), lng: center.lng() }, { lat: ne.lat(), lng: ne.lng() }, map.getZoom());
     });
 
     const center = map.getCenter();
     const bounds = map.getBounds();
     if (center && bounds) {
       const ne = bounds.getNorthEast();
-      emitNow({ lat: center.lat(), lng: center.lng() }, { lat: ne.lat(), lng: ne.lng() });
+      emitNow({ lat: center.lat(), lng: center.lng() }, { lat: ne.lat(), lng: ne.lng() }, map.getZoom());
     }
 
     return () => listener.remove();

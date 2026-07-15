@@ -10,6 +10,12 @@ import { queryKeys } from '@/lib/query-keys';
 const MAP_STALE_TIME_MS = 90 * 1000;
 const MAP_CACHE_TTL_SECONDS = 90;
 
+// Count-first browsing (#203 §7): the per-domain `limit` sent when only the
+// aggregate `meta.total` is needed, not the pins themselves. 1 (not 0) so the
+// request stays a normal, well-formed markers query — servers/validators are
+// not guaranteed to accept `limit: 0`.
+const COUNT_ONLY_LIMIT = 1;
+
 // Viewport bucketing (spec §8 flag-back: "rounded viewport bucket"). A tiny
 // pan or a sub-pixel radius change shouldn't bust the per-domain query cache
 // and refire a network round trip, so only the CACHE KEY is bucketed — the
@@ -38,6 +44,20 @@ interface UseMapMarkersResult {
   isLoading: boolean;
 }
 
+interface UseMapMarkersOptions {
+  /**
+   * Anonymous count-first browsing (#203 §7): when true, request `limit: 1`
+   * per domain instead of the full `MAP_FETCH_LIMIT`. The markers endpoint's
+   * `meta.total` reflects the true match count regardless of `limit` (it's
+   * produced by the network fetch layer's own count-first discovery, not by
+   * `markers.length`), so this is a cheap way to get an aggregate count
+   * without pulling — and rendering — the full pin set. The differing
+   * `limit` also lands in a distinct query-key bucket, so a count-only query
+   * never serves (or is served by) a normal full-pin query's cache entry.
+   */
+  countOnly?: boolean;
+}
+
 /**
  * Fetch map markers (`/network/item/markers`) for the visible domains within
  * a viewport, one cached query per domain via `useQueries` (mirrors the
@@ -49,7 +69,9 @@ export function useMapMarkers(
   network: DotNetworkSchema | null,
   domains: DotNetworkDomain[],
   viewport: MapViewport | null,
+  options: UseMapMarkersOptions = {},
 ): UseMapMarkersResult {
+  const limit = options.countOnly ? COUNT_ONLY_LIMIT : MAP_FETCH_LIMIT;
   const active = network && viewport ? domains : [];
   const latBucket = viewport ? bucketCoordinate(viewport.lat) : null;
   const lngBucket = viewport ? bucketCoordinate(viewport.lng) : null;
@@ -64,7 +86,7 @@ export function useMapMarkers(
           latBucket,
           lngBucket,
           radiusBucket,
-          limit: MAP_FETCH_LIMIT,
+          limit,
         }),
         queryFn: async ({ signal }: { signal: AbortSignal }) =>
           fetchNetworkMarkers(
@@ -75,7 +97,7 @@ export function useMapMarkers(
               item_latitude: viewport!.lat,
               item_longitude: viewport!.lng,
               radius_meters: viewport!.radiusMeters,
-              limit: MAP_FETCH_LIMIT,
+              limit,
               cache_ttl_seconds: MAP_CACHE_TTL_SECONDS,
             },
             signal,
