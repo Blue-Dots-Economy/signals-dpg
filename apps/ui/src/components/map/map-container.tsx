@@ -90,6 +90,14 @@ interface MapViewProps {
    * and the normal signals map) → behavior is unchanged.
    */
   hideEmptyState?: boolean;
+  /**
+   * Overrides the empty-state text. The portal map is viewport-scoped (it fetches
+   * only the pins in view), so "no items" means "none in THIS area" — not that a
+   * filter excluded them; the home page passes an area-oriented message. Unset
+   * for the tourist app, which keeps the default `map.no_results` (it genuinely
+   * filters by search + fields).
+   */
+  emptyMessage?: string;
 }
 
 // Default map view when there is no user location / no profile location.
@@ -146,6 +154,7 @@ export function MapView({
   resolveMarkerImage,
   onViewportChange,
   hideEmptyState = false,
+  emptyMessage,
 }: MapViewProps) {
   const { t } = useTranslation();
   const MapProviderComponent = getActiveMapProvider();
@@ -323,7 +332,7 @@ export function MapView({
           <p className="rounded-md bg-background/90 px-4 py-2 text-sm text-muted-foreground shadow-md backdrop-blur-sm">
             {loading
               ? t('map.loading')
-              : t('map.no_results')}
+              : (emptyMessage ?? t('map.no_results'))}
           </p>
         </div>
       )}

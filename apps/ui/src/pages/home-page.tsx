@@ -310,9 +310,23 @@ function MarkerDetailPopup({
     );
   }
 
+  // The slim map marker carries no item_state (its `data` is just
+  // `{ item_locations }`) and only a generic `label`, so the popup card would
+  // render empty fields and an "Item — <place>" title. Enrich it with the
+  // fetched full item's state + real title so the card shows the actual profile
+  // / posting details. Keep the clicked marker's location/precision/domain.
+  const resolvedTitle = cardConfig?.title_field
+    ? String((item.item_state as Record<string, unknown>)[cardConfig.title_field] ?? '').trim()
+    : '';
+  const enrichedMarker: MapMarker = {
+    ...marker,
+    data: item.item_state,
+    label: resolvedTitle || marker.label,
+  };
+
   return (
     <MarkerPopupCard
-      marker={marker}
+      marker={enrichedMarker}
       schema={schema}
       cardConfig={cardConfig}
       actions={localItem && connectAction ? [connectAction] : []}
@@ -1787,6 +1801,7 @@ export function HomePage() {
                   filtersSlot={filtersPanel}
                   onViewportChange={setMapViewport}
                   hideEmptyState={countFirst}
+                  emptyMessage={t('home.map_no_items_in_area')}
                   renderPopup={(marker) => {
                     // Marker ids are `${item_id}#${locationIndex}` — strip the suffix to look up the item.
                     const baseItemId = marker.id.includes('#') ? marker.id.split('#')[0] : marker.id;
