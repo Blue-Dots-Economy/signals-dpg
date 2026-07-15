@@ -48,6 +48,16 @@ function domainLabel(domain: DotNetworkDomain): string {
   return domain.id.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
 }
 
+// Keep the phone field numeric: `type="tel"` still accepts letters (e.g. the
+// "e" in "+919620421129e"), and isValidPhoneNumber strips non-digits before
+// testing, so stray letters would otherwise slip through both. Allow only
+// digits and a single leading "+".
+function sanitizePhoneInput(raw: string): string {
+  const hasLeadingPlus = raw.trimStart().startsWith('+');
+  const digits = raw.replace(/\D/g, '');
+  return (hasLeadingPlus ? '+' : '') + digits;
+}
+
 export function LoginPage() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
@@ -468,9 +478,10 @@ export function LoginPage() {
               <Input
                 id="contact"
                 type="tel"
+                inputMode="tel"
                 placeholder={t('auth.placeholder_phone')}
                 value={phoneNumber}
-                onChange={(e) => setPhoneNumber(e.target.value)}
+                onChange={(e) => setPhoneNumber(sanitizePhoneInput(e.target.value))}
                 disabled={isLoading}
                 required
                 className="h-11"
