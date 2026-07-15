@@ -152,6 +152,9 @@ export function LoginPage() {
   const fullPhone = phoneNumber ? `${IN_DIAL_CODE}${phoneNumber}` : '';
   const identifier: AuthIdentifier = mode === 'email' ? { email } : { phoneNumber: fullPhone };
   const contactValue = mode === 'email' ? email : phoneNumber;
+  // Gate the CTA: in phone mode the full 10-digit national number must be in;
+  // in email mode a non-empty value. Keeps "Continue" disabled until then.
+  const contactComplete = mode === 'email' ? email.trim().length > 0 : phoneNumber.length === 10;
   const contactLabel = mode === 'email'
     ? t('auth.contact_label_email')
     : t('auth.contact_label_phone');
@@ -564,7 +567,7 @@ export function LoginPage() {
           {/* CTA */}
           <button
             type="submit"
-            disabled={isLoading}
+            disabled={isLoading || !contactComplete}
             className="flex w-full items-center justify-center gap-2 rounded-md py-3 text-sm font-semibold transition-all disabled:opacity-60 bg-brand-cta h-11"
           >
             {isLoading && <Loader2 className="h-4 w-4 animate-spin" />}

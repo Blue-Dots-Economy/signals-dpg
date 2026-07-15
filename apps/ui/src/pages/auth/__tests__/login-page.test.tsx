@@ -145,9 +145,16 @@ describe('LoginPage', () => {
     await waitFor(() => expect(fetchAuthConfig).toHaveBeenCalled());
 
     const input = screen.getByLabelText(/mobile/i) as HTMLInputElement;
-    // Letters + formatting stripped; capped at 10 digits.
-    await userEvent.type(input, '9620 4211-29abc99');
+    const cta = screen.getByRole('button', { name: /^continue$/i });
+
+    // Fewer than 10 digits → CTA stays disabled.
+    await userEvent.type(input, '96204');
+    expect(cta).toBeDisabled();
+
+    // Letters + formatting stripped; capped at 10 digits; CTA enables at 10.
+    await userEvent.type(input, '21129abc99');
     expect(input.value).toBe('9620421129');
+    expect(cta).toBeEnabled();
   });
 
   describe('signup form: name + domain only (DOB is a separate gated step)', () => {
