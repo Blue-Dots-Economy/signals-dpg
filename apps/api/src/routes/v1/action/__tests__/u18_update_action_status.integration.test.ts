@@ -25,14 +25,25 @@
  *   2. Create two `apply` actions (seeker -> minor provider, seeker -> adult
  *      provider) via the real /action/perform endpoint (status: created).
  *   3. Minor provider calls /action/update-status to "accepted" with NO
- *      guardian_otp -> 428 GUARDIAN_OTP_REQUIRED, and a 6-digit OTP nonce
- *      exists in Redis at the action scope.
+ *      guardian_otp -> per-item GUARDIAN_OTP_REQUIRED in the bulk envelope
+ *      (422, since this is a single-item batch that fails), and a 6-digit
+ *      OTP nonce exists in Redis at the action scope. This is a per-item
+ *      BulkItemFailure (mirrors perform_action.ts, commit bc87fd0), NOT an
+ *      HTTP 428 — runBulk is sequential best-effort, so a real HTTP status
+ *      here would apply to the whole batch while trailing items kept
+ *      running underneath it (see the mixed-batch test below).
  *   4. Read that OTP from Redis, re-call with `guardian_otp` -> 200, status
  *      advances to "accepted", and a guardian-source `action` consent_record
  *      row exists (accept stage).
  *   5. Adult provider accepts the identical way (no guardian_otp) -> 200
  *      directly, no challenge — proves the gate is a no-op for adults (no
  *      regression on today's adult accept path).
+ *   6. A mixed batch [minor-accept-no-otp, adult-accept] in a single call ->
+ *      both items are reported per-item in the same envelope (207): the
+ *      minor item is GUARDIAN_OTP_REQUIRED and does NOT commit, the adult
+ *      item commits normally — proving a blocked guardian item can no
+ *      longer hide a trailing item's PII-revealing commit behind a
+ *      whole-batch HTTP status.
  *
  * Run:
  *   docker compose up -d db redis
@@ -352,7 +363,7 @@ describeIf(`U18 guardian action gate — POST /action/update-status (${NETWORK}/
     if (app) await app.close();
   });
 
-  it('minor provider accepting without guardian_otp -> 428 GUARDIAN_OTP_REQUIRED, OTP nonce present in Redis', async () => {
+  it('minor provider accepting without guardian_otp -> per-item GUARDIAN_OTP_REQUIRED (not an HTTP 428), OTP nonce present in Redis', async () => {
     const res = await app.inject({
       method: 'POST',
       url: '/api/v1/action/update-status',
@@ -360,8 +371,18 @@ describeIf(`U18 guardian action gate — POST /action/update-status (${NETWORK}/
       payload: acceptPayload(minor_action_id),
     });
 
-    expect(res.statusCode).toBe(428);
-    expect(res.json()).toMatchObject({ error: 'GUARDIAN_OTP_REQUIRED' });
+    // A single-item batch that fails is reported as 422 with a per-item
+    // error in `results[]` — the same bulk envelope every other error in
+    // this handler uses — never a bare HTTP 428 (Fix 1: the guardian gate
+    // now throws a per-item BulkItemFailure instead of calling
+    // reply.code(428).send(...) mid-loop).
+    expect(res.statusCode).toBe(422);
+    const body = res.json();
+    expect(body.summary).toEqual({ total: 1, succeeded: 0, failed: 1 });
+    expect(body.results[0]).toMatchObject({
+      status: 'error',
+      error: 'GUARDIAN_OTP_REQUIRED',
+    });
 
     const scope = guardianScope(minor_provider_user_id, minor_provider_item_id, seeker_item_id);
     const otp = await redis.get(`guardian_otp:code:${scope}`);
@@ -463,5 +484,91 @@ describeIf(`U18 guardian action gate — POST /action/update-status (${NETWORK}/
         ),
       );
     expect(guardianRows).toHaveLength(0);
+  });
+
+  it('mixed batch [guardian-blocked accept, non-gated reject] in ONE call -> each item reported per-item; the trailing item still commits and is not swallowed by a batch-wide HTTP status', async () => {
+    // /action/update-status is self-acted only: one HTTP call has exactly
+    // one caller identity (the apikey), so a literal mix of a minor's own
+    // item and a DIFFERENT adult's own item cannot be constructed in one
+    // call — each item's `target_item_owner` must equal that single
+    // caller. This test instead reproduces the same hazard class the
+    // Phase 5b review flagged, using two items owned by the same (minor)
+    // caller: one item transitions to "accepted" (reveals_pii_on_status,
+    // guardian-gated, no guardian_otp supplied -> blocked) and the other
+    // transitions to "rejected" (not in reveals_pii_on_status, so neither
+    // the adult consent gate nor the guardian gate apply -> commits
+    // normally). Before Fix 1, a blocked item's mid-loop
+    // reply.code(428).send(...) + `reply.sent` guard meant a LATER item in
+    // the same runBulk loop could still run and commit while the whole
+    // call answered with a blanket 428 that never surfaced that commit to
+    // the caller. After the fix, both items are reported in the same
+    // per-item results array and the aggregate status (207) reflects the
+    // mix honestly.
+    const gated_action_id = await performApply(
+      seeker_raw_key,
+      seeker_item_id,
+      minor_provider_item_id,
+    );
+    const other_action_id = await performApply(
+      seeker_raw_key,
+      seeker_item_id,
+      minor_provider_item_id,
+    );
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/v1/action/update-status',
+      headers: { 'x-api-key': minor_provider_raw_key, 'content-type': 'application/json' },
+      payload: [
+        {
+          action_id: gated_action_id,
+          action_status: 'accepted',
+          consent: { acknowledged: true, version: CONSENT_VERSION },
+          // no guardian_otp -> blocked
+        },
+        {
+          action_id: other_action_id,
+          action_status: 'rejected',
+        },
+      ],
+    });
+
+    expect(res.statusCode).toBe(207);
+    const body = res.json();
+    expect(body.summary).toEqual({ total: 2, succeeded: 1, failed: 1 });
+    expect(body.results[0]).toMatchObject({
+      index: 0,
+      status: 'error',
+      error: 'GUARDIAN_OTP_REQUIRED',
+    });
+    expect(body.results[1]).toMatchObject({
+      index: 1,
+      status: 'success',
+      action_id: other_action_id,
+      action_status: 'rejected',
+    });
+
+    // The blocked item must not have advanced.
+    const [gatedRow] = await db
+      .select({
+        action_status: itemActionsTable.action_status,
+        update_count: itemActionsTable.update_count,
+      })
+      .from(itemActionsTable)
+      .where(eq(itemActionsTable.action_id, gated_action_id))
+      .limit(1);
+    expect(gatedRow).toMatchObject({ action_status: 'created', update_count: 0 });
+
+    // The other item DID commit — the trailing item is no longer hidden
+    // behind a batch-wide HTTP status.
+    const [otherRow] = await db
+      .select({
+        action_status: itemActionsTable.action_status,
+        update_count: itemActionsTable.update_count,
+      })
+      .from(itemActionsTable)
+      .where(eq(itemActionsTable.action_id, other_action_id))
+      .limit(1);
+    expect(otherRow).toMatchObject({ action_status: 'rejected', update_count: 1 });
   });
 });

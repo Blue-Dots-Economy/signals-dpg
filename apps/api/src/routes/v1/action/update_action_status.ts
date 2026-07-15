@@ -51,13 +51,6 @@ export const update_action_status: FastifyPluginAsyncZod = async function (fasti
         207: BulkUpdateActionStatusResponseSchema,
         422: BulkUpdateActionStatusResponseSchema,
         400: BulkRequestErrorSchema,
-        // U18 guardian gate (Phase 5b): this endpoint is treated as single
-        // (not bulk) for challenge/response purposes — a blocked guardian
-        // gate short-circuits the whole call with a real HTTP status
-        // instead of the per-item 200/207/422 envelope above.
-        428: BulkRequestErrorSchema,
-        429: BulkRequestErrorSchema,
-        503: BulkRequestErrorSchema,
       },
     },
     handler: update_action_status_handler,
@@ -234,57 +227,40 @@ export const update_action_status_handler = async (
           otp: body.guardian_otp,
         });
 
-        // This is a single endpoint (not bulk): a blocked gate is answered
-        // with a real HTTP challenge/response status — bypassing the
-        // per-item BulkItemFailure / 200-207-422 envelope used everywhere
-        // else in this handler — because the caller needs true
-        // challenge/response semantics (428, then re-call) rather than a
-        // per-item error buried in a results array. The BulkItemFailure
-        // thrown right after is only to unwind out of this per-item
-        // callback; `reply.sent` (checked once runBulk resolves, below)
-        // ensures the aggregate response is never sent on top of it.
+        // Per-item BulkItemFailure (mirrors perform_action.ts, commit
+        // bc87fd0) — NOT a mid-loop reply.send. runBulk is sequential
+        // best-effort: a thrown BulkItemFailure is recorded for this item
+        // and the loop continues to the next one, so a real HTTP
+        // challenge/response status here would be wrong on two counts — it
+        // would apply to the whole batch, not just this item, and trailing
+        // items would still run and commit underneath it while the
+        // envelope that describes them never gets sent (the original bug:
+        // a batch [minorAccept-no-otp, adultAccept] could commit the
+        // adult's PII-revealing accept and then return a blanket 428 that
+        // hides it). Every item — gated or not — is reported in the normal
+        // per-item results array instead.
         if (guardianGate.status === 'challenge_issued') {
-          reply.code(428).send({
-            error: 'GUARDIAN_OTP_REQUIRED',
-            message: 'Guardian OTP sent; resubmit with guardian_otp to confirm this action.',
-          });
           throw new BulkItemFailure(
             'GUARDIAN_OTP_REQUIRED',
             'Guardian OTP sent; resubmit with guardian_otp to confirm this action.',
           );
         }
         if (guardianGate.status === 'invalid_otp') {
-          reply.code(400).send({
-            error: 'GUARDIAN_OTP_INVALID',
-            message: 'Guardian OTP is invalid or expired.',
-          });
           throw new BulkItemFailure('GUARDIAN_OTP_INVALID', 'Guardian OTP is invalid or expired.');
         }
         if (guardianGate.status === 'throttled') {
-          reply.code(429).send({
-            error: 'GUARDIAN_OTP_THROTTLED',
-            message: 'Too many guardian OTP attempts; try again shortly.',
-          });
           throw new BulkItemFailure(
             'GUARDIAN_OTP_THROTTLED',
             'Too many guardian OTP attempts; try again shortly.',
           );
         }
         if (guardianGate.status === 'rate_limited') {
-          reply.code(429).send({
-            error: 'GUARDIAN_OTP_RATE_LIMITED',
-            message: 'Too many guardian OTP requests; try again shortly.',
-          });
           throw new BulkItemFailure(
             'GUARDIAN_OTP_RATE_LIMITED',
             'Too many guardian OTP requests; try again shortly.',
           );
         }
         if (guardianGate.status === 'no_provider') {
-          reply.code(503).send({
-            error: 'OTP_PROVIDER_UNAVAILABLE',
-            message: 'No verified contact channel is available to send the guardian OTP.',
-          });
           throw new BulkItemFailure(
             'OTP_PROVIDER_UNAVAILABLE',
             'No verified contact channel is available to send the guardian OTP.',
@@ -606,12 +582,6 @@ export const update_action_status_handler = async (
         request.log.error({ err, index }, 'bulk update-status unexpected error'),
     },
   );
-
-  // U18 guardian gate (Phase 5b): a blocked gate above already sent a real
-  // HTTP challenge/response status (428/400/429/503) directly on `reply`
-  // and threw a BulkItemFailure only to unwind out of the per-item
-  // callback. Never send the aggregate 200/207/422 envelope on top of that.
-  if (reply.sent) return;
 
   if (outcome.requestError) {
     return reply.code(400).send({

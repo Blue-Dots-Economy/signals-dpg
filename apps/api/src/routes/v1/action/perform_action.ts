@@ -303,27 +303,32 @@ export const perform_action_handler = async (
           stage: 'initiate',
         });
         if (guardianVersion === null) {
-          request.log.error(
-            { action_type: body.action_type },
-            'guardian action consent version not configured; guardian row not written',
+          // Fail-closed: a verified guardian OTP with no configured consent
+          // version must not be silently treated as success (the minor's
+          // action already reached the target instance above, but the
+          // guardian consent row — the whole point of this gate — would
+          // otherwise never be recorded). Surface it as a per-item failure
+          // rather than logging and returning the write as if it succeeded.
+          throw new BulkItemFailure(
+            'CONSENT_VERSION_UNCONFIGURED',
+            'u18 action consent version not configured',
           );
-        } else {
-          await db.insert(consent_record).values({
-            level: 'item',
-            consentCategory: 'action',
-            actionType: body.action_type,
-            actionStage: 'initiate',
-            userId: actor.effective_user_id,
-            itemId: body.source_item.item_id,
-            actionId: result.action_id,
-            network: body.source_item.item_network,
-            brand: body.consent?.brand ?? null,
-            documentVersion: guardianVersion,
-            source: 'guardian',
-            acceptedAt: new Date(),
-            metadata: { variant: 'u18' },
-          });
         }
+        await db.insert(consent_record).values({
+          level: 'item',
+          consentCategory: 'action',
+          actionType: body.action_type,
+          actionStage: 'initiate',
+          userId: actor.effective_user_id,
+          itemId: body.source_item.item_id,
+          actionId: result.action_id,
+          network: body.source_item.item_network,
+          brand: body.consent?.brand ?? null,
+          documentVersion: guardianVersion,
+          source: 'guardian',
+          acceptedAt: new Date(),
+          metadata: { variant: 'u18' },
+        });
       }
 
       return result;
