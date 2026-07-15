@@ -31,6 +31,7 @@ type FetchItemsResponse = Awaited<ReturnType<typeof fetchLocalItems>>;
 type FetchItemsResponseItem = FetchItemsResponse['items'][number];
 
 type FetchMarkersResponse = Awaited<ReturnType<typeof fetchLocalMarkers>>;
+type FetchMarkersResponseMarker = FetchMarkersResponse['markers'][number];
 
 export function buildPagePlan(
   counts: InstanceCount[],
@@ -312,11 +313,16 @@ export async function fetchItemsAcrossInstances(input: {
  * caches under a distinct `marker-page:*` key so the two aggregates never
  * collide or serve each other's shape.
  *
- * Note (P5): fetchItemsAcrossInstances and fetchMarkersAcrossInstances share
- * this structure almost verbatim, differing only in the page-fetch call and
- * cache-key prefix. P5's scatter-gather rework is expected to unify both into
- * one generic aggregator parameterized by projection; left duplicated here
- * deliberately per the task 2 brief (do not refactor the item-fetch path).
+ * §4.4 (P5 Task 3): with exactly one active instance, that instance's direct
+ * `[offset, limit)` slice is already globally ordered, so this keeps the
+ * pre-§4.4 `buildPagePlan` concat path frozen byte-identical. With >1 active
+ * instance it fans out via the shared `scatterGatherPage` (same helper
+ * `fetchItemsAcrossInstances` uses) so the merged page is globally
+ * nearest-first across instances rather than a per-instance block. Markers
+ * are always requested from a map viewport, which always supplies a
+ * lat/lng center, so the merge's geo branch is the one that matters here;
+ * slim marker rows carry no `created_at`, so `mergeSortAndSlice`'s recency
+ * tie-break/fallback simply never engages for this caller.
  */
 export async function fetchMarkersAcrossInstances(input: {
   networkConfig: NetworkConfigDocument;
@@ -387,33 +393,69 @@ export async function fetchMarkersAcrossInstances(input: {
     (sum: number, entry: InstanceCount) => sum + entry.count,
     0
   );
-  const slices = buildPagePlan(counts, input.filters.offset, input.filters.limit);
-  const settledResponses = await Promise.allSettled(
-    slices.map((slice) =>
-      fetchInstanceMarkers({
-        instanceUrl: slice.instanceUrl,
-        filters: {
-          ...input.filters,
-          offset: slice.offset,
-          limit: slice.limit,
-        },
-      })
-    )
-  );
 
-  const responses: FetchMarkersResponse[] = [];
-  settledResponses.forEach((result, index) => {
-    if (result.status === 'fulfilled') {
-      responses.push(result.value);
-      return;
-    }
-    const instanceUrl = slices[index].instanceUrl;
-    unavailableInstances.add(instanceUrl);
-    input.log.warn(
-      { err: result.reason, instanceUrl, phase: 'page' },
-      'Peer marker page fetch failed; dropping slice from aggregate'
+  // Scatter-gather only kicks in with >1 active (count > 0) instance: with
+  // exactly one, its direct [offset, limit) slice is already globally
+  // ordered, so that path is frozen byte-identical to pre-§4.4 behavior
+  // (same buildPagePlan call, same cache keys, same partial semantics).
+  const activeInstances = counts.filter((entry) => entry.count > 0);
+
+  let markers: FetchMarkersResponseMarker[];
+
+  if (activeInstances.length <= 1) {
+    const slices = buildPagePlan(counts, input.filters.offset, input.filters.limit);
+    const settledResponses = await Promise.allSettled(
+      slices.map((slice) =>
+        fetchInstanceMarkers({
+          instanceUrl: slice.instanceUrl,
+          filters: {
+            ...input.filters,
+            offset: slice.offset,
+            limit: slice.limit,
+          },
+        })
+      )
     );
-  });
+
+    const responses: FetchMarkersResponse[] = [];
+    settledResponses.forEach((result, index) => {
+      if (result.status === 'fulfilled') {
+        responses.push(result.value);
+        return;
+      }
+      const instanceUrl = slices[index].instanceUrl;
+      unavailableInstances.add(instanceUrl);
+      input.log.warn(
+        { err: result.reason, instanceUrl, phase: 'page' },
+        'Peer marker page fetch failed; dropping slice from aggregate'
+      );
+    });
+
+    markers = responses.flatMap((response) => response.markers);
+  } else {
+    const { rows, unavailableInstances: failedPages } =
+      await scatterGatherPage<FetchMarkersResponseMarker>({
+        activeInstances: activeInstances.map((entry) => entry.instanceUrl),
+        filters: input.filters,
+        // MarkersBodySchema (packages/schemas/src/api/item_schemas.ts) caps
+        // limit at 10000 — every remote peer validates its markers_local body
+        // against that schema, so the per-peer top-K request must never ask
+        // for more.
+        peerLimitMax: 10000,
+        fetchPage: async ({ instanceUrl, filters }) =>
+          (await fetchInstanceMarkers({ instanceUrl, filters })).markers,
+      });
+
+    failedPages.forEach((instanceUrl) => {
+      unavailableInstances.add(instanceUrl);
+      input.log.warn(
+        { instanceUrl, phase: 'page' },
+        'Peer marker page fetch failed; excluding instance from scatter-gather aggregate'
+      );
+    });
+
+    markers = rows;
+  }
 
   const partial = unavailableInstances.size > 0;
 
@@ -425,7 +467,7 @@ export async function fetchMarkersAcrossInstances(input: {
       partial,
       unavailable_instances: [...unavailableInstances],
     },
-    markers: responses.flatMap((response) => response.markers),
+    markers,
   };
 
   // Never cache a partial aggregate: caching it would serve incomplete data

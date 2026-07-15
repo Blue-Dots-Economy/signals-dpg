@@ -30,6 +30,7 @@ vi.mock('@/utils/served_domain_guard', () => ({
 vi.mock('@/utils/item_fetch_runtime', () => ({
   countLocalItems: vi.fn(),
   fetchLocalItems: vi.fn(),
+  fetchLocalMarkers: vi.fn(),
 }));
 
 vi.mock('@dpg/schemas', () => ({
@@ -38,6 +39,7 @@ vi.mock('@dpg/schemas', () => ({
 
 import {
   fetchItemsAcrossInstances,
+  fetchMarkersAcrossInstances,
   scatterGatherPage,
 } from '../inter_instance_fetch.js';
 import { apiConfig } from '@/config';
@@ -113,6 +115,28 @@ const geoPageBody = (items: ReturnType<typeof geoItem>[]) =>
     meta: { total: items.length, limit: 20, offset: 0 },
     items,
   });
+
+// --- geo fixtures for the markers slim projection ---------------------------
+// Slim marker rows carry item_locations but no created_at (see markerColumns
+// in item_fetch_runtime.ts) — mergeSortAndSlice's geo branch is what's
+// exercised here.
+function geoMarker(id: string, lat: number, instanceUrl: string) {
+  return {
+    item_id: id,
+    item_domain: 'student',
+    item_instance_url: instanceUrl,
+    item_locations: [{ lat, lng: 0 }],
+  };
+}
+
+const geoMarkersPageBody = (markers: ReturnType<typeof geoMarker>[]) =>
+  okJson({
+    meta: { total: markers.length, limit: 20, offset: 0 },
+    markers,
+  });
+
+const markerPageSetCalls = () =>
+  redisSet.mock.calls.filter((c) => String(c[0]).startsWith('marker-page'));
 
 /**
  * Build a fetch impl keyed on hostname. `behaviour[host]` decides count/page
@@ -455,5 +479,94 @@ describe('fetchItemsAcrossInstances — scatter-gather ordering (Part B, >1 acti
     // Global nearest-2 across the surviving a/c rows.
     expect(result.items.map((i) => i.item_id)).toEqual(['a-near', 'c-near']);
     expect(pageSetCalls()).toHaveLength(0); // partial never cached
+  });
+});
+
+describe('fetchMarkersAcrossInstances — scatter-gather ordering (>1 active instance)', () => {
+  const geoFilters = {
+    ...filters,
+    item_latitude: 0,
+    item_longitude: 0,
+    limit: 2,
+    offset: 0,
+  };
+
+  it('returns the globally nearest markers page across active instances, not a per-instance block', async () => {
+    // Each instance is locally nearest-first, but the true global nearest-2
+    // interleaves a's and b's rows — a per-instance count-block plan (the
+    // pre-§4.4 buildPagePlan path) would instead return the first instance's
+    // rows verbatim.
+    const requestBodies: Array<{ url: string; body: unknown }> = [];
+    vi.stubGlobal(
+      'fetch',
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      vi.fn(async (url: any, opts: any) => {
+        const u = url instanceof URL ? url : new URL(String(url));
+        if (opts?.body) {
+          requestBodies.push({ url: u.hostname + u.pathname, body: JSON.parse(opts.body) });
+        }
+        if (u.pathname.endsWith('/count_local')) {
+          if (u.hostname === 'a.local') return countBody(2);
+          if (u.hostname === 'b.local') return countBody(2);
+          return countBody(1);
+        }
+        if (u.hostname === 'a.local') {
+          return geoMarkersPageBody([geoMarker('a-near', 0.001, A), geoMarker('a-far', 0.05, A)]);
+        }
+        if (u.hostname === 'b.local') {
+          return geoMarkersPageBody([geoMarker('b-near', 0.002, B), geoMarker('b-far', 0.06, B)]);
+        }
+        return geoMarkersPageBody([geoMarker('c-mid', 0.003, C)]);
+      })
+    );
+
+    const result = await fetchMarkersAcrossInstances({
+      networkConfig,
+      filters: geoFilters,
+      log,
+    });
+
+    expect(result.meta.total).toBe(5); // sum of per-instance counts, unchanged
+    expect(result.meta.partial).toBe(false);
+    expect(result.markers.map((m) => m.item_id)).toEqual(['a-near', 'b-near']);
+
+    // Every active instance was scattered its own top [0, offset+limit) page
+    // against the markers_local peer route, not fetch_local.
+    const pageRequests = requestBodies.filter((r) => r.url.endsWith('/markers_local'));
+    expect(pageRequests).toHaveLength(3);
+    for (const req of pageRequests) {
+      expect(req.body).toMatchObject({ offset: 0, limit: 2 });
+    }
+    expect(markerPageSetCalls()).toHaveLength(1); // complete aggregate still cached
+  });
+
+  it('returns a partial aggregate when one peer marker page fetch fails during scatter-gather', async () => {
+    vi.stubGlobal(
+      'fetch',
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      vi.fn(async (url: any) => {
+        const u = url instanceof URL ? url : new URL(String(url));
+        if (u.pathname.endsWith('/count_local')) return countBody(2);
+        if (u.hostname === 'b.local') {
+          return { ok: false, status: 500, statusText: 'ISE', json: async () => ({}) };
+        }
+        if (u.hostname === 'a.local') {
+          return geoMarkersPageBody([geoMarker('a-near', 0.001, A), geoMarker('a-far', 0.05, A)]);
+        }
+        return geoMarkersPageBody([geoMarker('c-near', 0.0015, C)]);
+      })
+    );
+
+    const result = await fetchMarkersAcrossInstances({
+      networkConfig,
+      filters: geoFilters,
+      log,
+    });
+
+    expect(result.meta.partial).toBe(true);
+    expect(result.meta.unavailable_instances).toContain(B);
+    // Global nearest-2 across the surviving a/c rows.
+    expect(result.markers.map((m) => m.item_id)).toEqual(['a-near', 'c-near']);
+    expect(markerPageSetCalls()).toHaveLength(0); // partial never cached
   });
 });
