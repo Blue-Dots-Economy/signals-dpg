@@ -388,6 +388,15 @@ export function LoginPage() {
     const gate = signupGuardianGate;
     if (!gate) return;
     setSignupGuardianGate(null);
+    // The guardian step and the ward's own verification are separate — make the
+    // hand-off explicit so the jump to the user OTP screen isn't a surprise.
+    toast.success(t('auth.guardian_confirmed_title', 'Guardian confirmed'), {
+      description: t(
+        'auth.guardian_confirmed_desc',
+        "Now enter the code we're sending to your own {{contactLabel}} to finish creating your account.",
+        { contactLabel },
+      ),
+    });
     void proceedToOtp(gate.identifier, false, gate.resolvedName, gate.resolvedSignupExtras).catch(() => {
       toast.error(t('auth.toast_send_code_error'), {
         description: t('auth.toast_send_code_error_desc'),

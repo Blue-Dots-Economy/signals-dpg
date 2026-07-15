@@ -36,6 +36,8 @@
   "auth.cta_send_otp": "Send OTP",
   "auth.minor_toast_title": "You're under 18",
   "auth.minor_toast_desc": "A parent or guardian needs to confirm your account before you can continue.",
+  "auth.guardian_confirmed_title": "Guardian confirmed",
+  "auth.guardian_confirmed_desc": "Now enter the code we're sending to your own {{contactLabel}} to finish creating your account.",
   "auth.signup_dob_title": "To create an account, please provide",
   "auth.signup_dob_label": "Select date of birth",
   "auth.signup_dob_continue": "Continue",
