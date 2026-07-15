@@ -187,16 +187,17 @@ function DomainPagedFetch({
   onItems: (domainId: string, items: Item[], hasMore: boolean, total: number, fetchNext: () => void) => void;
 }): null {
   const list = useInfiniteBrowseItems(network, domain, coords);
-  // `list.items` is a fresh array and `list.fetchNextPage` a fresh closure on
-  // every render (the hook doesn't memoize them) — depending on either
-  // directly would refire this effect (and lift state to the parent) on
-  // every render, looping forever. `itemCount` is a stable primitive proxy:
-  // pages only ever append, so "count changed" is exactly "content changed".
-  const itemCount = list.items.length;
+  // `list.items` is a fresh array on every render (the hook doesn't memoize
+  // it), so this effect refires on every plain re-render too. That's fine:
+  // `onItems` (`handleDomainItems`) is idempotent — it bails out of its
+  // `setState` when the lifted data is unchanged (element-wise reference
+  // equality on `items`, plus `hasMore`/`total`), so a plain re-render never
+  // causes a further re-render here. This is what lets a same-length
+  // refetch (new item object refs, edited `item_state`) still get lifted —
+  // gating on `items.length` would silently drop that update.
   React.useEffect(() => {
     onItems(domain.id, list.items, list.hasNextPage, list.total, list.fetchNextPage);
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- see comment above `itemCount`
-  }, [domain.id, itemCount, list.hasNextPage, list.total, onItems]);
+  }, [domain.id, list.items, list.hasNextPage, list.total, list.fetchNextPage, onItems]);
   return null;
 }
 
@@ -653,12 +654,30 @@ export function HomePage() {
   // called in a loop). Keyed by domain id.
   const [allDomainPages, setAllDomainPages] = React.useState<Record<string, DomainPageState>>({});
 
-  // `DomainPagedFetch` only invokes this when its `itemCount`/`hasNextPage`/
-  // `total` genuinely changed (see its effect), so every call here reflects a
-  // real content change for that domain — no further gating needed.
+  // `DomainPagedFetch` re-invokes this on every one of its renders (its
+  // `list.items` array is never referentially stable — see its effect), so
+  // this lift must be idempotent itself: bail out of the `setState` when the
+  // domain's data hasn't actually changed, so React skips the re-render and
+  // the loop terminates. "Unchanged" is element-wise reference equality on
+  // `items` (individual item object refs ARE stable across a plain
+  // re-render, and only change when React Query actually refetches), plus
+  // `hasMore`/`total`. `fetchNext`'s identity always changes and is
+  // intentionally excluded from the comparison — we still store the latest
+  // one, just don't gate on it.
   const handleDomainItems = React.useCallback(
     (domainId: string, items: Item[], hasMore: boolean, total: number, fetchNext: () => void) => {
-      setAllDomainPages((prev) => ({ ...prev, [domainId]: { items, hasMore, total, fetchNext } }));
+      setAllDomainPages((prev) => {
+        const existing = prev[domainId];
+        const itemsUnchanged =
+          existing !== undefined &&
+          existing.items.length === items.length &&
+          existing.items.every((it, i) => it === items[i]);
+        if (itemsUnchanged && existing.hasMore === hasMore && existing.total === total) {
+          // Same data (plain re-render): bail so React doesn't re-render → no loop.
+          return prev;
+        }
+        return { ...prev, [domainId]: { items, hasMore, total, fetchNext } };
+      });
     },
     [],
   );
