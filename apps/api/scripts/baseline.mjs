@@ -15,10 +15,9 @@
  *
  *   node apps/api/scripts/baseline.mjs [--up-to <tag>] [--dry-run]
  */
-import { readFile } from 'node:fs/promises';
-import { createHash } from 'node:crypto';
-import { join, resolve } from 'node:path';
+import { resolve } from 'node:path';
 import pg from 'pg';
+import { readJournalEntries, seedLedger } from './drizzle_baseline.mjs';
 
 try {
   const dotenv = (await import('dotenv')).default;
@@ -45,44 +44,20 @@ for (let i = 0; i < argv.length; i++) {
 }
 
 async function main() {
-  const journal = JSON.parse(await readFile(join(drizzleDir, 'meta/_journal.json'), 'utf8'));
-  const entries = [...journal.entries].sort((a, b) => a.idx - b.idx);
+  const entries = await readJournalEntries(drizzleDir);
   console.log(`baseline → ${pgUrl.replace(/:[^:@/]+@/, ':***@')}${dryRun ? ' (dry-run)' : ''}`);
 
   const client = new Client({ connectionString: pgUrl });
   await client.connect();
   try {
-    if (!dryRun) {
-      // Created by the connecting (app) role → owned by it. The migrator can
-      // then read/write drizzle.__drizzle_migrations without a grant.
-      await client.query('CREATE SCHEMA IF NOT EXISTS drizzle');
-      await client.query(
-        'CREATE TABLE IF NOT EXISTS drizzle.__drizzle_migrations (id SERIAL PRIMARY KEY, hash text NOT NULL, created_at bigint)'
-      );
-    }
-
-    let seeded = 0;
-    let skipped = 0;
-    for (const e of entries) {
-      const sql = await readFile(join(drizzleDir, `${e.tag}.sql`), 'utf8');
-      const hash = createHash('sha256').update(sql).digest('hex');
-      const existing = dryRun
-        ? { rows: [] }
-        : await client.query('SELECT 1 FROM drizzle.__drizzle_migrations WHERE created_at = $1', [e.when]);
-      if (existing.rows.length > 0) {
-        skipped++;
-      } else {
-        if (!dryRun) {
-          await client.query(
-            'INSERT INTO drizzle.__drizzle_migrations (hash, created_at) VALUES ($1, $2)',
-            [hash, e.when]
-          );
-        }
-        seeded++;
-        console.log(`  baselined ${e.tag}${dryRun ? ' (dry-run)' : ''}`);
-      }
-      if (upTo && e.tag === upTo) break;
-    }
+    // Human-driven: baseline ALL entries (up to --up-to) — safe because the
+    // operator runs db:check:parity first to confirm the full schema matches.
+    const { seeded, skipped } = await seedLedger(client, drizzleDir, {
+      entries,
+      upTo,
+      dryRun,
+      log: (m) => console.log(m),
+    });
     console.log(`baseline: seeded=${seeded} already-present=${skipped}${dryRun ? ' (dry-run — no writes)' : ''}`);
   } finally {
     await client.end();

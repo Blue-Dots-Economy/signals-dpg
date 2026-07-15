@@ -8,11 +8,25 @@
  *
  *   1. extensions        — extensions/extensions.sql (pgcrypto/cube/earthdistance/vector/postgis)
  *   2. drizzle migrations — apps/api/drizzle/ (better-auth + item_metrics/pii_reveal_audit/consent_record)
+ *                          Auto-baselines the INITIAL migration when it detects an
+ *                          existing schema with no ledger (hands-off cutover from
+ *                          the old psql/schema.sql path — see below).
  *   3. core (raw)        — core/create_items.sql, core/create_actions_events.sql
  *                          (partitioned; items.created_by FKs to the Drizzle-owned "user")
  *   4. version migrations — migrations/NNNN_*.sql (ordered ALTER/backfill)
  *
  * Idempotent — safe to re-run. Runs in the app image at deploy time.
+ *
+ * Auto-baseline (cutover safety): a database built by the OLD path already has
+ * the Drizzle-owned tables but NO ledger, so a naive migrate() would try to
+ * CREATE them and fail with "relation already exists". Before migrating, this
+ * script checks for that state (a sentinel Drizzle table present, ledger empty)
+ * and seeds ONLY the initial migration into the ledger — the full-schema
+ * snapshot the sentinel confirms. Any LATER delta migrations are still applied
+ * normally, never skipped: if a delta genuinely does not fit the live schema it
+ * fails loudly (the correct outcome for an unattended job) rather than silently
+ * dropping a change. For a DB that is ahead of the initial snapshot, run the
+ * human-driven `db:check:parity` + `db:baseline --up-to <tag>` instead.
  *
  * Run: pnpm --filter api db:migrate:deploy   (or: node apps/api/scripts/migrate.mjs)
  */
@@ -21,6 +35,12 @@ import { join, resolve } from 'node:path';
 import pg from 'pg';
 import { drizzle } from 'drizzle-orm/node-postgres';
 import { migrate } from 'drizzle-orm/node-postgres/migrator';
+import {
+  ledgerPopulated,
+  tableExists,
+  readJournalEntries,
+  seedLedger,
+} from './drizzle_baseline.mjs';
 
 // dotenv is only useful for local runs; in deploy the pod already has env vars.
 try {
@@ -70,6 +90,36 @@ async function main() {
   // 2. Drizzle-owned tables (better-auth + metrics/pii/consent) via the
   // runtime migrator over the committed apps/api/drizzle/ migration files.
   console.log('[2/4] drizzle migrations');
+
+  // 2a. Auto-baseline: adopt an existing pre-Direction-B DB (schema present, no
+  // ledger) by seeding ONLY the initial migration, so migrate() skips it
+  // instead of CREATE-ing tables that already exist. "user" is the sentinel —
+  // it (and the rest of the Drizzle-owned set) shipped in the old schema.sql
+  // bundle, so its presence means the initial snapshot is already there.
+  const baselineClient = new Client({ connectionString: pgUrl });
+  await baselineClient.connect();
+  try {
+    const populated = await ledgerPopulated(baselineClient);
+    if (populated) {
+      console.log('  ledger present → normal incremental migrate');
+    } else if (await tableExists(baselineClient, 'public', 'user')) {
+      console.log(
+        '  existing schema, no ledger → auto-baselining the initial migration (cutover)'
+      );
+      const entries = await readJournalEntries(drizzleDir);
+      const initial = entries.slice(0, 1); // initial snapshot only; deltas still apply below
+      const { seeded } = await seedLedger(baselineClient, drizzleDir, {
+        entries: initial,
+        log: (m) => console.log(`  ${m}`),
+      });
+      console.log(`  baseline: marked ${seeded} initial migration(s) as already-applied`);
+    } else {
+      console.log('  fresh database → migrator will create all tables');
+    }
+  } finally {
+    await baselineClient.end();
+  }
+
   const pool = new Pool({ connectionString: pgUrl });
   try {
     await migrate(drizzle(pool), { migrationsFolder: drizzleDir });
