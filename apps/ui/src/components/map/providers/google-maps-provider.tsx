@@ -383,10 +383,17 @@ function MapViewController({ center, zoom, initialViewSet, focusNonce }: MapView
 // settle event, fired after pan/zoom/resize finish). Only ever mounted when
 // `onViewportChange` is provided (see `GoogleMapProvider` below), so the
 // tourist app — which never passes it — attaches no `idle` listener at all.
+//
+// Also emits the CURRENT viewport once on mount (bypassing the debounce), for
+// parity with the Leaflet provider's mount emit. Google's own `idle` normally
+// fires shortly after load regardless of a location fix, so this is a
+// fast-path here rather than a fix for a stuck-forever case — but it is
+// skipped if center/bounds aren't ready yet, since the first `idle` will
+// cover it in that case.
 
 function ViewportReporter({ onViewportChange }: { onViewportChange: (viewport: MapViewport) => void }) {
   const map = useMap();
-  const emit = useViewportReportEmitter(onViewportChange);
+  const { emit, emitNow } = useViewportReportEmitter(onViewportChange);
 
   React.useEffect(() => {
     if (!map) return;
@@ -397,8 +404,16 @@ function ViewportReporter({ onViewportChange }: { onViewportChange: (viewport: M
       const ne = bounds.getNorthEast();
       emit({ lat: center.lat(), lng: center.lng() }, { lat: ne.lat(), lng: ne.lng() });
     });
+
+    const center = map.getCenter();
+    const bounds = map.getBounds();
+    if (center && bounds) {
+      const ne = bounds.getNorthEast();
+      emitNow({ lat: center.lat(), lng: center.lng() }, { lat: ne.lat(), lng: ne.lng() });
+    }
+
     return () => listener.remove();
-  }, [map, emit]);
+  }, [map, emit, emitNow]);
 
   return null;
 }

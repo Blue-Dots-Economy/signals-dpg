@@ -1,7 +1,7 @@
 import { useQueries } from '@tanstack/react-query';
 import { fetchNetworkMarkers, MAP_FETCH_LIMIT } from '@/lib/network-api';
 import type { Marker } from '@/lib/network-api';
-import type { DotNetworkSchema, DotNetworkDomain } from '@/engine/types';
+import type { DotNetworkSchema, DotNetworkDomain, MapViewport } from '@/engine/types';
 import { queryKeys } from '@/lib/query-keys';
 
 // Map tier (spec §5.2 / §8): markers are lightweight pins, cached ~90s
@@ -31,12 +31,6 @@ function bucketRadius(radiusMeters: number): number {
   return Math.round(radiusMeters / RADIUS_BUCKET_STEP_METERS) * RADIUS_BUCKET_STEP_METERS;
 }
 
-export interface MapViewport {
-  lat: number;
-  lng: number;
-  radiusMeters: number;
-}
-
 interface UseMapMarkersResult {
   markers: Marker[];
   total: number;
@@ -46,8 +40,8 @@ interface UseMapMarkersResult {
 
 /**
  * Fetch map markers (`/network/item/markers`) for the visible domains within
- * a viewport, one cached query per domain via `useQueries` (mirrors
- * `useBrowseItems`'s per-domain pattern). Map enum/state filtering is
+ * a viewport, one cached query per domain via `useQueries` (mirrors the
+ * per-domain `useQueries` pattern). Map enum/state filtering is
  * DEFERRED in P4 (#203 scope decision) — this hook only ever sends viewport +
  * domain + type + limit; it must never take or forward `item_state`.
  */

@@ -9,6 +9,7 @@ import type {
   DotActionSchema,
   DotCardConfig,
   MapMarker,
+  MapViewport,
   ViewMode,
 } from '@/engine/types';
 import { PageShell } from '@/components/layout/page-shell';
@@ -58,7 +59,6 @@ import { useMyItems } from '@/hooks/use-my-items';
 import { useInfiniteBrowseItems } from '@/hooks/use-infinite-browse-items';
 import { useProfileConsentStatus } from '@/hooks/use-profile-consent-status';
 import { useMapMarkers } from '@/hooks/use-map-markers';
-import type { MapViewport } from '@/hooks/use-map-markers';
 import { useItemDetail } from '@/hooks/use-item-detail';
 import type { Marker as NetworkMarker } from '@/lib/network-api';
 import { useQueryClient } from '@tanstack/react-query';
