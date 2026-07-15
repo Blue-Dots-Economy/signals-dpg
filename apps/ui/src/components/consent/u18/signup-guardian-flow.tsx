@@ -1,13 +1,6 @@
 import * as React from 'react';
 import { useTranslation } from 'react-i18next';
 import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogDescription,
-} from '@/components/ui/dialog';
-import {
   startSignupGuardian,
   verifySignupGuardian,
   type SubmitGuardianBody,
@@ -32,15 +25,13 @@ export interface SignupGuardianFlowProps {
 
 /**
  * PRE-AUTH guardian consent flow, run DURING signup for an under-18 ward,
- * BEFORE the ward's own login OTP (U18 option A). The account doesn't exist
- * yet, so this is keyed on the ward's signup identifier and backed by the
- * public /u18/signup/guardian[/verify] routes; the captured guardian +
- * consent are materialized onto the new user id once better-auth creates it
- * (afterUserCreate → materializeSignupGuardian).
+ * BEFORE the ward's own login OTP (U18 option A). Rendered inline as the auth
+ * page's content (inside AuthShell) — it REPLACES the signup form, matching
+ * the DOB step, rather than stacking as a modal over it.
  *
- * DOB was already collected on the signup form, so there is no DOB step here
- * (unlike the first-login U18GuardianFlow): guardian details → guardian OTP.
- * Blocking, like U18GuardianFlow — cannot be dismissed mid-flow.
+ * DOB was already collected on the previous step, so there's no DOB step here:
+ * guardian details → guardian OTP. The captured guardian + consent are
+ * materialized onto the new user id once better-auth creates it.
  */
 export function SignupGuardianFlow({
   network,
@@ -60,9 +51,6 @@ export function SignupGuardianFlow({
     phoneNumber: 'phoneNumber' in identifier ? identifier.phoneNumber : null,
   };
 
-  // Map the shared guardian-form body onto the pre-auth signup endpoint, which
-  // additionally needs the domain + identifier + birth month/year the server
-  // uses to re-confirm the ward is a gated minor.
   const submit = (body: SubmitGuardianBody) =>
     startSignupGuardian({
       network,
@@ -79,58 +67,44 @@ export function SignupGuardianFlow({
 
   const verify = (otp: string) => verifySignupGuardian({ network, ...identifier, otp });
 
-  const titles: Record<'guardian' | 'otp', string> = {
-    guardian: t('u18.step_title_guardian', 'Guardian details'),
-    otp: t('u18.step_title_otp', 'Confirm with your guardian'),
-  };
-
   return (
-    <Dialog
-      open
-      onOpenChange={(next) => {
-        // Blocking: never dismiss via the Dialog's own open-change.
-        if (!next) return;
-      }}
-    >
-      <DialogContent
-        showCloseButton={false}
-        className="max-w-lg"
-        onInteractOutside={(e) => e.preventDefault()}
-        onEscapeKeyDown={(e) => e.preventDefault()}
-      >
-        <DialogHeader>
-          <DialogTitle>{titles[step]}</DialogTitle>
-          <DialogDescription>
-            {t('u18.step_subtitle', "You're under 18, so a parent or guardian needs to confirm this account.")}
-          </DialogDescription>
-        </DialogHeader>
+    <div className="flex flex-col gap-5">
+      <div>
+        <h2 className="text-2xl font-bold text-foreground">
+          {step === 'guardian'
+            ? t('u18.step_title_guardian', 'Guardian details')
+            : t('u18.step_title_otp', 'Confirm with your guardian')}
+        </h2>
+        <p className="mt-1 text-sm text-muted-foreground">
+          {t('u18.step_subtitle', "You're under 18, so a parent or guardian needs to confirm this account.")}
+        </p>
+      </div>
 
-        {step === 'guardian' && (
-          <GuardianFormStep
-            network={network}
-            brand={brand}
-            submit={submit}
-            ownContact={ownContact}
-            onSubmitted={(body) => {
-              setGuardianBody(body);
-              setStep('otp');
-            }}
-          />
-        )}
+      {step === 'guardian' && (
+        <GuardianFormStep
+          network={network}
+          brand={brand}
+          submit={submit}
+          ownContact={ownContact}
+          onSubmitted={(body) => {
+            setGuardianBody(body);
+            setStep('otp');
+          }}
+        />
+      )}
 
-        {step === 'otp' && (
-          <GuardianOtpStep
-            network={network}
-            brand={brand}
-            verify={verify}
-            onVerified={onComplete}
-            onResend={async () => {
-              if (!guardianBody) return;
-              await submit(guardianBody);
-            }}
-          />
-        )}
-      </DialogContent>
-    </Dialog>
+      {step === 'otp' && (
+        <GuardianOtpStep
+          network={network}
+          brand={brand}
+          verify={verify}
+          onVerified={onComplete}
+          onResend={async () => {
+            if (!guardianBody) return;
+            await submit(guardianBody);
+          }}
+        />
+      )}
+    </div>
   );
 }

@@ -58,15 +58,13 @@ describe('U18GuardianFlow', () => {
     await pickDob(/select date of birth/i, 2012, 5);
     await userEvent.click(screen.getByRole('button', { name: /continue/i }));
 
-    // Step 2: guardian details
-    await waitFor(() => expect(screen.getByLabelText(/guardian's name/i)).toBeInTheDocument());
-    await userEvent.type(screen.getByLabelText(/guardian's name/i), 'Asha Guardian');
-    await userEvent.click(screen.getByRole('radio', { name: /phone/i }));
-    await userEvent.type(screen.getByLabelText(/guardian's phone number/i), '+911234567890');
-    await userEvent.click(
-      screen.getByLabelText(/i declare that the details above belong to my parent or guardian/i),
-    );
-    await userEvent.click(screen.getByRole('button', { name: /send guardian confirmation/i }));
+    // Step 2: guardian details (name + a contact + both consents)
+    await waitFor(() => expect(screen.getByLabelText(/guardian name/i)).toBeInTheDocument());
+    await userEvent.type(screen.getByLabelText(/guardian name/i), 'Asha Guardian');
+    await userEvent.type(screen.getByLabelText(/guardian phone number/i), '+911234567890');
+    await userEvent.click(screen.getByLabelText(/i accept the terms and conditions/i));
+    await userEvent.click(screen.getByLabelText(/i consent to data privacy policy/i));
+    await userEvent.click(screen.getByRole('button', { name: /send otp/i }));
 
     // Step 3: OTP
     await waitFor(() => expect(screen.getAllByRole('textbox').length).toBe(6));

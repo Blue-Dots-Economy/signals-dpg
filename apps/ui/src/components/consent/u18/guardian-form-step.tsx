@@ -11,7 +11,6 @@ import { cn } from '@/lib/utils';
 import { useAuth } from '@/contexts/auth-context';
 import {
   submitGuardian,
-  type GuardianContactType,
   type SubmitGuardianBody,
   type SubmitGuardianResponse,
 } from '@/lib/consent-api';
@@ -36,23 +35,8 @@ export interface GuardianFormStepProps {
   ownContact?: { email?: string | null; phoneNumber?: string | null };
 }
 
-function normalizeContact(value: string): string {
+function normalize(value: string): string {
   return value.trim();
-}
-
-/** Mirrors the server's own-contact check (apps/api .../u18_guardian.ts) so the
- * warning appears client-side before a round trip, though the server remains
- * the source of truth (a 409 SAME_CONTACT_NEEDS_ACK re-surfaces this if we miss it). */
-function matchesOwnContact(
-  contact: string,
-  ownEmail: string | null | undefined,
-  ownPhone: string | null | undefined,
-): boolean {
-  const normalized = normalizeContact(contact);
-  if (!normalized) return false;
-  const matchesEmail = !!ownEmail && normalized.toLowerCase() === ownEmail.trim().toLowerCase();
-  const matchesPhone = !!ownPhone && normalized === ownPhone.trim();
-  return matchesEmail || matchesPhone;
 }
 
 export function GuardianFormStep({
@@ -65,25 +49,28 @@ export function GuardianFormStep({
   const { t } = useTranslation();
   const { user } = useAuth();
   const compareContact = ownContact ?? { email: user?.email, phoneNumber: user?.phoneNumber };
+
   const [guardianName, setGuardianName] = React.useState('');
-  const [guardianContact, setGuardianContact] = React.useState('');
-  const [guardianContactType, setGuardianContactType] = React.useState<GuardianContactType>('phone');
-  const [declarationAccepted, setDeclarationAccepted] = React.useState(false);
+  const [guardianEmail, setGuardianEmail] = React.useState('');
+  const [guardianPhone, setGuardianPhone] = React.useState('');
+  const [termsAccepted, setTermsAccepted] = React.useState(false);
+  const [privacyAccepted, setPrivacyAccepted] = React.useState(false);
   const [sameContactAcknowledged, setSameContactAcknowledged] = React.useState(false);
   const [serverFlaggedSameContact, setServerFlaggedSameContact] = React.useState(false);
   const [isSubmitting, setIsSubmitting] = React.useState(false);
   const [validationError, setValidationError] = React.useState<string | null>(null);
 
-  const clientDetectedSameContact = matchesOwnContact(
-    guardianContact,
-    compareContact.email,
-    compareContact.phoneNumber,
-  );
+  const hasContact = Boolean(guardianEmail.trim()) || Boolean(guardianPhone.trim());
+
+  // Same-contact warning: either guardian field matching the ward's own.
+  const ownEmail = compareContact.email?.trim().toLowerCase();
+  const ownPhone = compareContact.phoneNumber?.trim();
+  const clientDetectedSameContact =
+    (!!ownEmail && !!guardianEmail.trim() && normalize(guardianEmail).toLowerCase() === ownEmail) ||
+    (!!ownPhone && !!guardianPhone.trim() && normalize(guardianPhone) === ownPhone);
   const showSameContactWarning = clientDetectedSameContact || serverFlaggedSameContact;
 
-  // Editing the contact after a warning invalidates the previous acknowledgement.
-  const handleContactChange = (value: string) => {
-    setGuardianContact(value);
+  const clearWarnings = () => {
     setSameContactAcknowledged(false);
     setServerFlaggedSameContact(false);
     setValidationError(null);
@@ -91,17 +78,31 @@ export function GuardianFormStep({
 
   const canSubmit =
     Boolean(guardianName.trim()) &&
-    Boolean(guardianContact.trim()) &&
-    declarationAccepted &&
+    hasContact &&
+    termsAccepted &&
+    privacyAccepted &&
     (!showSameContactWarning || sameContactAcknowledged) &&
     !isSubmitting;
 
+  // OTP goes to a single contact — prefer email when both are given (matches
+  // the documented channel fallback: email → SMS → WhatsApp).
+  function preferredContact(): { contact: string; contactType: 'phone' | 'email' } {
+    if (guardianEmail.trim()) return { contact: guardianEmail.trim(), contactType: 'email' };
+    return { contact: guardianPhone.trim(), contactType: 'phone' };
+  }
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!guardianName.trim() || !guardianContact.trim()) return;
-    if (!declarationAccepted) {
+    if (!guardianName.trim()) return;
+    if (!hasContact) {
       setValidationError(
-        t('u18.guardian_error_declaration', 'Please confirm the guardian declaration to continue.'),
+        t('u18.guardian_error_contact_required', "Enter your guardian's email or phone number."),
+      );
+      return;
+    }
+    if (!termsAccepted || !privacyAccepted) {
+      setValidationError(
+        t('u18.guardian_error_consent', 'Please accept both statements on behalf of your ward.'),
       );
       return;
     }
@@ -117,12 +118,13 @@ export function GuardianFormStep({
 
     setValidationError(null);
     setIsSubmitting(true);
+    const { contact, contactType } = preferredContact();
     const body: SubmitGuardianBody = {
       network,
       brand: brand ?? null,
       guardianName: guardianName.trim(),
-      guardianContact: guardianContact.trim(),
-      guardianContactType,
+      guardianContact: contact,
+      guardianContactType: contactType,
       guardianDeclarationAccepted: true,
       ...(showSameContactWarning ? { sameContactAcknowledged: true } : {}),
     };
@@ -168,15 +170,10 @@ export function GuardianFormStep({
 
   return (
     <form onSubmit={handleSubmit} className="flex flex-col gap-4">
-      <p className="text-sm text-muted-foreground">
-        {t(
-          'u18.guardian_desc',
-          "Since you're under 18, we need a parent or guardian to confirm your account.",
-        )}
-      </p>
-
       <div className="space-y-1.5">
-        <Label htmlFor="u18-guardian-name">{t('u18.guardian_label_name', "Guardian's name")}</Label>
+        <Label htmlFor="u18-guardian-name">
+          {t('u18.guardian_label_parent_name', "My parent's or Guardian Name")} *
+        </Label>
         <Input
           id="u18-guardian-name"
           value={guardianName}
@@ -186,53 +183,39 @@ export function GuardianFormStep({
         />
       </div>
 
-      <fieldset className="space-y-1.5" disabled={isSubmitting}>
-        <legend className="text-sm font-medium">
-          {t('u18.guardian_label_contact_type', 'How should we contact your guardian?')}
-        </legend>
-        <div className="flex gap-4">
-          <label className="flex items-center gap-2 text-sm">
-            <input
-              type="radio"
-              name="u18-guardian-contact-type"
-              value="phone"
-              checked={guardianContactType === 'phone'}
-              onChange={() => setGuardianContactType('phone')}
-            />
-            {t('u18.guardian_contact_type_phone', 'Phone')}
-          </label>
-          <label className="flex items-center gap-2 text-sm">
-            <input
-              type="radio"
-              name="u18-guardian-contact-type"
-              value="email"
-              checked={guardianContactType === 'email'}
-              onChange={() => setGuardianContactType('email')}
-            />
-            {t('u18.guardian_contact_type_email', 'Email')}
-          </label>
-        </div>
-      </fieldset>
-
       <div className="space-y-1.5">
-        <Label htmlFor="u18-guardian-contact">
-          {guardianContactType === 'email'
-            ? t('u18.guardian_label_contact_email', "Guardian's email")
-            : t('u18.guardian_label_contact_phone', "Guardian's phone number")}
+        <Label htmlFor="u18-guardian-email">
+          {t('u18.guardian_label_parent_email', "Parent's or Guardian Email")}
         </Label>
         <Input
-          id="u18-guardian-contact"
-          type={guardianContactType === 'email' ? 'email' : 'tel'}
-          value={guardianContact}
-          onChange={(e) => handleContactChange(e.target.value)}
+          id="u18-guardian-email"
+          type="email"
+          value={guardianEmail}
+          onChange={(e) => { setGuardianEmail(e.target.value); clearWarnings(); }}
           disabled={isSubmitting}
-          required
           aria-invalid={showSameContactWarning}
-          className={cn(
-            showSameContactWarning && 'border-amber-500 focus-visible:ring-amber-500/40',
-          )}
         />
       </div>
+
+      <div className="space-y-1.5">
+        <Label htmlFor="u18-guardian-phone">
+          {t('u18.guardian_label_parent_phone', "Parent's or Guardian Phone Number")}
+        </Label>
+        <Input
+          id="u18-guardian-phone"
+          type="tel"
+          inputMode="tel"
+          value={guardianPhone}
+          onChange={(e) => { setGuardianPhone(e.target.value); clearWarnings(); }}
+          disabled={isSubmitting}
+          aria-invalid={showSameContactWarning}
+          className={cn(showSameContactWarning && 'border-amber-500 focus-visible:ring-amber-500/40')}
+        />
+      </div>
+
+      <p className="text-sm text-muted-foreground">
+        {t('u18.guardian_contact_hint', '* Please provide at least one contact method (email or phone)')}
+      </p>
 
       {showSameContactWarning && (
         <div className="rounded-md border border-amber-500 bg-amber-50 p-3 dark:bg-amber-950/30">
@@ -257,16 +240,31 @@ export function GuardianFormStep({
 
       <div className="flex items-start gap-2">
         <Checkbox
-          id="u18-guardian-declaration"
-          checked={declarationAccepted}
-          onCheckedChange={(value) => setDeclarationAccepted(value === true)}
+          id="u18-guardian-terms"
+          checked={termsAccepted}
+          onCheckedChange={(value) => setTermsAccepted(value === true)}
           disabled={isSubmitting}
         />
-        <Label htmlFor="u18-guardian-declaration" className="text-sm font-normal leading-snug cursor-pointer">
-          {t(
-            'u18.guardian_declaration_label',
-            "I declare that the details above belong to my parent or guardian and that I'm asking them to confirm.",
-          )}
+        <Label htmlFor="u18-guardian-terms" className="text-sm font-normal leading-snug cursor-pointer">
+          {t('u18.guardian_accept_terms_prefix', 'On behalf of my ward, I accept the ')}
+          <a href="/terms" target="_blank" rel="noreferrer" className="underline">
+            {t('u18.terms_link', 'Terms and Conditions')}
+          </a>
+        </Label>
+      </div>
+
+      <div className="flex items-start gap-2">
+        <Checkbox
+          id="u18-guardian-privacy"
+          checked={privacyAccepted}
+          onCheckedChange={(value) => setPrivacyAccepted(value === true)}
+          disabled={isSubmitting}
+        />
+        <Label htmlFor="u18-guardian-privacy" className="text-sm font-normal leading-snug cursor-pointer">
+          {t('u18.guardian_consent_privacy_prefix', 'On behalf of my ward, I consent to Data ')}
+          <a href="/privacy" target="_blank" rel="noreferrer" className="underline">
+            {t('u18.privacy_link', 'Privacy Policy')}
+          </a>
         </Label>
       </div>
 
@@ -274,7 +272,7 @@ export function GuardianFormStep({
 
       <Button type="submit" disabled={!canSubmit} className="w-full">
         {isSubmitting && <Loader2 className="h-4 w-4 animate-spin" />}
-        {t('u18.guardian_continue', 'Send guardian confirmation')}
+        {t('u18.guardian_send_otp', 'Send OTP')}
       </Button>
     </form>
   );

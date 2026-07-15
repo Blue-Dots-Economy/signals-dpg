@@ -281,6 +281,12 @@ export function LoginPage() {
     setSignupDobGate(null);
 
     if (isMinorFromBirth(birthYear, birthMonth)) {
+      toast.info(t('auth.minor_toast_title', "You're under 18"), {
+        description: t(
+          'auth.minor_toast_desc',
+          'A parent or guardian needs to confirm your account before you can continue.',
+        ),
+      });
       setSignupGuardianGate({
         identifier: gate.identifier,
         domain: gate.domain,
@@ -381,39 +387,22 @@ export function LoginPage() {
   // than stacking over the half-filled form.
   const showSignupForm = !signupDobGate && !signupGuardianGate;
 
+  // Guardian verified — send the ward's own OTP. No pendingConsent: the
+  // minor's terms/privacy are recorded guardian-sourced on account creation
+  // (materializeSignupGuardian), not via the adult gate.
+  const handleGuardianComplete = () => {
+    const gate = signupGuardianGate;
+    if (!gate) return;
+    setSignupGuardianGate(null);
+    void proceedToOtp(gate.identifier, false, gate.resolvedName, gate.resolvedSignupExtras).catch(() => {
+      toast.error(t('auth.toast_send_code_error'), {
+        description: t('auth.toast_send_code_error_desc'),
+      });
+    });
+  };
+
   return (
     <>
-      {signupGuardianGate && (
-        <SignupGuardianFlow
-          network={themeId}
-          domain={signupGuardianGate.domain}
-          brand={brand !== 'standard' ? brand : null}
-          identifier={
-            (signupGuardianGate.identifier.email
-              ? { email: signupGuardianGate.identifier.email }
-              : { phoneNumber: signupGuardianGate.identifier.phoneNumber }) as SignupIdentifier
-          }
-          birthYear={signupGuardianGate.birthYear}
-          birthMonth={signupGuardianGate.birthMonth}
-          onComplete={() => {
-            const gate = signupGuardianGate;
-            setSignupGuardianGate(null);
-            // Guardian verified — now send the ward's own OTP. No pendingConsent:
-            // the minor's terms/privacy are recorded guardian-sourced on account
-            // creation (materializeSignupGuardian), not via the adult gate.
-            void proceedToOtp(
-              gate.identifier,
-              false,
-              gate.resolvedName,
-              gate.resolvedSignupExtras,
-            ).catch(() => {
-              toast.error(t('auth.toast_send_code_error'), {
-                description: t('auth.toast_send_code_error_desc'),
-              });
-            });
-          }}
-        />
-      )}
       {consentGate && (
         <ConsentModal
           open={true}
@@ -426,6 +415,20 @@ export function LoginPage() {
       <AuthShell>
         {signupDobGate ? (
           <SignupDobStep onSubmit={(date) => { void handleSignupDob(date); }} />
+        ) : signupGuardianGate ? (
+          <SignupGuardianFlow
+            network={themeId}
+            domain={signupGuardianGate.domain}
+            brand={brand !== 'standard' ? brand : null}
+            identifier={
+              (signupGuardianGate.identifier.email
+                ? { email: signupGuardianGate.identifier.email }
+                : { phoneNumber: signupGuardianGate.identifier.phoneNumber }) as SignupIdentifier
+            }
+            birthYear={signupGuardianGate.birthYear}
+            birthMonth={signupGuardianGate.birthMonth}
+            onComplete={handleGuardianComplete}
+          />
         ) : !showSignupForm ? null : (
         <>
         {/* Back link */}
