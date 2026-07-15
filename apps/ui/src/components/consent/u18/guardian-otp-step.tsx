@@ -121,12 +121,12 @@ export function GuardianOtpStep({
         {t('u18.otp_desc', "We sent a code to your guardian. Ask them for it and enter it below.")}
       </p>
 
-      <div className="flex justify-center">
+      <div className="flex justify-start">
         <OtpInput key={otpKey} onComplete={handleOtpComplete} disabled={isVerifying} />
       </div>
 
       {isVerifying && (
-        <div className="flex justify-center">
+        <div className="flex justify-start">
           <Loader2 className="h-5 w-5 animate-spin text-primary" />
         </div>
       )}
@@ -139,7 +139,7 @@ export function GuardianOtpStep({
         </Alert>
       )}
 
-      <div className="text-center text-sm">
+      <div className="text-left text-sm">
         {countdown > 0 ? (
           <p className="text-muted-foreground">
             {t('u18.otp_resend_countdown', 'Resend code in {{count}}s', { count: countdown })}
