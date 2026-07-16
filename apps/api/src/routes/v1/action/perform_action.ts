@@ -26,7 +26,8 @@ import {
   lookup_user_for_acting,
 } from './_resolve_acting_actor.js';
 import { runBulk, BulkItemFailure } from '@/utils/bulk_runner';
-import { guardianActionGate } from '@/services/guardian_action_gate';
+import { guardianActionGate, guardianGateFailure } from '@/services/guardian_action_gate';
+import { guardianActionConsentRow } from '@/services/guardian_consent_rows';
 import { resolveConsentVersion } from '@/services/consent_version';
 
 const BulkPerformActionBodySchema = z.array(z.unknown());
@@ -138,33 +139,8 @@ async function runPerformActions(
         targetItemId: body.target_item.item_id,
         otp: body.guardian_otp,
       });
-      if (guardianGate.status === 'challenge_issued') {
-        throw new BulkItemFailure(
-          'GUARDIAN_OTP_REQUIRED',
-          'Guardian OTP sent; resubmit with guardian_otp to confirm this action.',
-        );
-      }
-      if (guardianGate.status === 'invalid_otp') {
-        throw new BulkItemFailure('GUARDIAN_OTP_INVALID', 'Guardian OTP is invalid or expired.');
-      }
-      if (guardianGate.status === 'throttled') {
-        throw new BulkItemFailure(
-          'GUARDIAN_OTP_THROTTLED',
-          'Too many guardian OTP attempts; try again shortly.',
-        );
-      }
-      if (guardianGate.status === 'rate_limited') {
-        throw new BulkItemFailure(
-          'GUARDIAN_OTP_RATE_LIMITED',
-          'Too many guardian OTP requests; try again shortly.',
-        );
-      }
-      if (guardianGate.status === 'no_provider') {
-        throw new BulkItemFailure(
-          'OTP_PROVIDER_UNAVAILABLE',
-          'No verified contact channel is available to send the guardian OTP.',
-        );
-      }
+      const guardianGateFail = guardianGateFailure(guardianGate);
+      if (guardianGateFail) throw guardianGateFail;
 
       let requirementsSnapshot = body.requirements_snapshot;
 
@@ -334,9 +310,7 @@ async function runPerformActions(
             'u18 action consent version not configured',
           );
         }
-        await db.insert(consent_record).values({
-          level: 'item',
-          consentCategory: 'action',
+        await db.insert(consent_record).values(guardianActionConsentRow({
           actionType: body.action_type,
           actionStage: 'initiate',
           userId: actor.effective_user_id,
@@ -345,10 +319,7 @@ async function runPerformActions(
           network: body.source_item.item_network,
           brand: body.consent?.brand ?? null,
           documentVersion: guardianVersion,
-          source: 'guardian',
-          acceptedAt: new Date(),
-          metadata: { variant: 'u18' },
-        });
+        }));
       }
 
       return result;

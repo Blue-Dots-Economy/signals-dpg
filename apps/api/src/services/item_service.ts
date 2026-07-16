@@ -94,6 +94,30 @@ export class ItemServiceError extends Error {
 type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
 export type DbOrTx = typeof db | Tx;
 
+/**
+ * Whether `userId` is the creator of the item identified by the partition key.
+ * Shared by the profile-consent routes (accept + U18) so the ownership query —
+ * scoped on the partition-pruning columns — isn't hand-written per handler.
+ */
+export async function isItemOwnedBy(
+  userId: string,
+  ref: { network: string; item_domain: string; item_type: string; item_id: string },
+  exec: DbOrTx = db,
+): Promise<boolean> {
+  const [owner] = await exec
+    .select({ created_by: items.created_by })
+    .from(items)
+    .where(and(
+      eq(items.item_network, ref.network),
+      eq(items.item_domain, ref.item_domain),
+      eq(items.item_type, ref.item_type),
+      eq(items.item_id, ref.item_id),
+      eq(items.created_by, userId),
+    ))
+    .limit(1);
+  return Boolean(owner);
+}
+
 export interface CreateItemServiceParams {
   item_network: string;
   item_domain: string;

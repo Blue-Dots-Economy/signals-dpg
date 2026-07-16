@@ -1,6 +1,6 @@
 import type { FastifyPluginAsyncZod } from 'fastify-type-provider-zod';
 import type { FastifyReply, FastifyRequest } from 'fastify';
-import { and, eq, sql } from 'drizzle-orm';
+import { sql } from 'drizzle-orm';
 import {
   U18ProfileConsentBodySchema, U18ProfileConsentResponseSchema, type U18ProfileConsentBody,
   U18ProfileConsentVerifyBodySchema, U18ProfileConsentVerifyResponseSchema, type U18ProfileConsentVerifyBody,
@@ -10,7 +10,6 @@ import {
 } from '@dpg/schemas';
 import { db } from '@api/db/postgres/drizzle_config';
 import { redis } from '@api/db/secondary/redis';
-import { items } from '@dpg/database';
 import { consent_record } from '@api/db/postgres/schema';
 import { auth_middleware_if_enabled } from '@api/plugins/auth/auth_middleware';
 import { apiConfig } from '@/config';
@@ -19,9 +18,10 @@ import { getNetworkConfigById } from '@/network_configs';
 import { getWardDob, getGuardianContactPlaintext } from '@/services/minor_guardian_repo';
 import { resolveConsentVersion } from '@/services/consent_version';
 import {
-  issueGuardianOtp, verifyGuardianOtp, assertVerifyAttemptAllowed, GuardianOtpError,
+  issueGuardianOtp, verifyGuardianOtp, assertVerifyAttemptAllowed, guardianOtpErrorReply,
 } from '@/services/guardian_otp';
-import { promoteItemOnProfileConsent } from '@/services/item_service';
+import { promoteItemOnProfileConsent, isItemOwnedBy } from '@/services/item_service';
+import { guardianProfileConsentRow } from '@/services/guardian_consent_rows';
 
 const profileScope = (userId: string, itemId: string) => `${userId}:profile:${itemId}`;
 // Pre-create OTP is scoped to the ward + network + domain (no item yet). The
@@ -33,15 +33,8 @@ const precreateTokenKey = (userId: string, network: string, domain: string) =>
 const PRECREATE_TOKEN_TTL_SEC = 900; // 15 min — long enough to fill + submit the form after verifying
 
 async function assertOwnedMinorItem(userId: string, body: { network: string; item_domain: string; item_type: string; item_id: string }) {
-  const [owner] = await db
-    .select({ created_by: items.created_by })
-    .from(items)
-    .where(and(
-      eq(items.item_network, body.network), eq(items.item_domain, body.item_domain),
-      eq(items.item_type, body.item_type), eq(items.item_id, body.item_id),
-      eq(items.created_by, userId),
-    )).limit(1);
-  if (!owner) return { ok: false as const, code: 'NOT_ITEM_OWNER' };
+  const owned = await isItemOwnedBy(userId, body);
+  if (!owned) return { ok: false as const, code: 'NOT_ITEM_OWNER' };
   const dob = await getWardDob(userId);
   if (!dob) return { ok: false as const, code: 'DOB_REQUIRED' };
   if (!isMinor(dob)) return { ok: false as const, code: 'NOT_A_MINOR' };
@@ -118,8 +111,8 @@ const precreate_issue_handler = async (
       contactType: contact.contactType,
     });
   } catch (err) {
-    if (err instanceof GuardianOtpError && err.code === 'RATE_LIMITED') return reply.code(429).send({ error: 'OTP_RATE_LIMITED', message: 'Too many OTP requests' });
-    if (err instanceof GuardianOtpError && err.code === 'NO_OTP_PROVIDER') return reply.code(503).send({ error: 'OTP_PROVIDER_UNAVAILABLE', message: 'No OTP channel configured' });
+    const r = guardianOtpErrorReply(err);
+    if (r) return reply.code(r.status).send({ error: r.error, message: r.message });
     request.log.error({ err }, 'Failed to issue pre-create profile-consent OTP');
     return reply.code(500).send({ error: 'OTP_SEND_FAILED', message: 'Failed to send guardian OTP' });
   }
@@ -143,7 +136,8 @@ const precreate_verify_handler = async (
   try {
     await assertVerifyAttemptAllowed(scope);
   } catch (err) {
-    if (err instanceof GuardianOtpError && err.code === 'VERIFY_THROTTLED') return reply.code(429).send({ error: 'OTP_VERIFY_THROTTLED', message: 'Too many attempts' });
+    const r = guardianOtpErrorReply(err);
+    if (r) return reply.code(r.status).send({ error: r.error, message: r.message });
     request.log.error({ err }, 'pre-create verify attempt check failed');
     return reply.code(500).send({ error: 'OTP_VERIFY_FAILED', message: 'Failed to check verify attempts' });
   }
@@ -189,11 +183,9 @@ const finalize_handler = async (
     await db.transaction(async (tx) => {
       // Upsert to source='guardian' (see verify_handler for why an existing
       // source='profile' row from create_item must be upgraded, not skipped).
-      await tx.insert(consent_record).values({
-        level: 'item', consentCategory: 'profile_creation', userId, itemId: body.item_id,
-        network: body.network, brand: body.brand ?? null, documentVersion: version,
-        source: 'guardian', acceptedAt: new Date(), metadata: { variant: 'u18' } as Record<string, unknown>,
-      }).onConflictDoUpdate({
+      await tx.insert(consent_record).values(
+        guardianProfileConsentRow({ userId, itemId: body.item_id, network: body.network, brand: body.brand, documentVersion: version }),
+      ).onConflictDoUpdate({
         target: [consent_record.userId, consent_record.itemId],
         targetWhere: sql`level = 'item' AND consent_category = 'profile_creation'`,
         set: { source: 'guardian', documentVersion: version, acceptedAt: new Date(), metadata: { variant: 'u18' } as Record<string, unknown> },
@@ -225,8 +217,8 @@ const issue_handler = async (request: IssueReq, reply: FastifyReply) => {
   try {
     await issueGuardianOtp({ scope: profileScope(userId, body.item_id), contact: contact.contact, contactType: contact.contactType });
   } catch (err) {
-    if (err instanceof GuardianOtpError && err.code === 'RATE_LIMITED') return reply.code(429).send({ error: 'OTP_RATE_LIMITED', message: 'Too many OTP requests' });
-    if (err instanceof GuardianOtpError && err.code === 'NO_OTP_PROVIDER') return reply.code(503).send({ error: 'OTP_PROVIDER_UNAVAILABLE', message: 'No OTP channel configured' });
+    const r = guardianOtpErrorReply(err);
+    if (r) return reply.code(r.status).send({ error: r.error, message: r.message });
     request.log.error({ err }, 'Failed to issue profile-consent OTP');
     return reply.code(500).send({ error: 'OTP_SEND_FAILED', message: 'Failed to send guardian OTP' });
   }
@@ -249,7 +241,8 @@ const verify_handler = async (request: VerifyReq, reply: FastifyReply) => {
   try {
     await assertVerifyAttemptAllowed(scope);
   } catch (err) {
-    if (err instanceof GuardianOtpError && err.code === 'VERIFY_THROTTLED') return reply.code(429).send({ error: 'OTP_VERIFY_THROTTLED', message: 'Too many attempts' });
+    const r = guardianOtpErrorReply(err);
+    if (r) return reply.code(r.status).send({ error: r.error, message: r.message });
     request.log.error({ err }, 'verify attempt check failed');
     return reply.code(500).send({ error: 'OTP_VERIFY_FAILED', message: 'Failed to check verify attempts' });
   }
@@ -271,11 +264,9 @@ const verify_handler = async (request: VerifyReq, reply: FastifyReply) => {
       // unwritten, and permanently block the go-live gate (which requires a
       // `source='guardian'` row). Upgrade any existing row to 'guardian'
       // instead of skipping the write.
-      await tx.insert(consent_record).values({
-        level: 'item', consentCategory: 'profile_creation', userId, itemId: body.item_id,
-        network: body.network, brand: body.brand ?? null, documentVersion: version,
-        source: 'guardian', acceptedAt: new Date(), metadata: { variant: 'u18' } as Record<string, unknown>,
-      }).onConflictDoUpdate({
+      await tx.insert(consent_record).values(
+        guardianProfileConsentRow({ userId, itemId: body.item_id, network: body.network, brand: body.brand, documentVersion: version }),
+      ).onConflictDoUpdate({
         target: [consent_record.userId, consent_record.itemId],
         targetWhere: sql`level = 'item' AND consent_category = 'profile_creation'`,
         set: { source: 'guardian', documentVersion: version, acceptedAt: new Date(), metadata: { variant: 'u18' } as Record<string, unknown> },

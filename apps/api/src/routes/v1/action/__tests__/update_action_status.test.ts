@@ -91,6 +91,8 @@ vi.mock('@/services/consent_version', () => ({
 // issue Task 2 hit wiring the gate into perform_action).
 vi.mock('@/services/guardian_action_gate', () => ({
   guardianActionGate: vi.fn(async () => ({ status: 'not_required' })),
+  // Gate is always not_required in these tests, so the mapper only ever returns null.
+  guardianGateFailure: () => null,
 }));
 
 vi.mock('@api/db/postgres/drizzle_config', () => {

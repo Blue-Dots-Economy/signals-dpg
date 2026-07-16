@@ -2,6 +2,7 @@ import { and, eq, ne, count } from 'drizzle-orm';
 import { db } from '@api/db/postgres/drizzle_config';
 import { minor_guardian, user } from '@api/db/postgres/schema';
 import { encryptGuardianField, decryptGuardianField, guardianRef } from '@/services/guardian_pii';
+import { apiConfig } from '@/config';
 
 type GuardianContactType = 'phone' | 'email';
 type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
@@ -22,6 +23,39 @@ export async function countWardsForGuardian(
     : eq(minor_guardian.guardianRef, ref);
   const [row] = await db.select({ n: count() }).from(minor_guardian).where(where);
   return row?.n ?? 0;
+}
+
+/**
+ * Whether linking another ward to this guardian contact would hit the cap
+ * (`MAX_WARDS_PER_GUARDIAN`). `excludeUserId` is the ward being re-linked (so
+ * updating an existing ward's guardian doesn't count them twice), or null at
+ * signup where no ward id exists yet. Wraps the guardianRef + count + threshold
+ * so both the route and the pre-auth signup flow apply the same rule.
+ */
+export async function isGuardianWardLimitReached(
+  contact: string,
+  excludeUserId: string | null,
+): Promise<boolean> {
+  const n = await countWardsForGuardian(guardianRef(contact), excludeUserId);
+  return n >= apiConfig.max_wards_per_guardian;
+}
+
+/**
+ * Warn-and-ack guard: whether a guardian email/phone equals the ward's own
+ * contact. Email compared case-insensitively, phone trimmed — matching how both
+ * call sites normalized before this was centralized.
+ */
+export function guardianContactMatchesWard(args: {
+  wardEmail?: string | null;
+  wardPhone?: string | null;
+  guardianEmail?: string | null;
+  guardianPhone?: string | null;
+}): boolean {
+  const wardEmail = args.wardEmail?.trim().toLowerCase();
+  const wardPhone = args.wardPhone?.trim();
+  const emailMatch = !!wardEmail && !!args.guardianEmail && args.guardianEmail.trim().toLowerCase() === wardEmail;
+  const phoneMatch = !!wardPhone && !!args.guardianPhone && args.guardianPhone.trim() === wardPhone;
+  return emailMatch || phoneMatch;
 }
 
 /** The ward's date of birth (full date), stored on the user row. */

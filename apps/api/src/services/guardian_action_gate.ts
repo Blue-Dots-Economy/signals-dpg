@@ -1,3 +1,4 @@
+import { BulkItemFailure } from '@/utils/bulk_runner';
 import { getNetworkConfigById } from '@/network_configs';
 import { getWardDob, getGuardianContactPlaintext } from '@/services/minor_guardian_repo';
 import { isMinor, guardianConsentRequired } from '@/services/minor';
@@ -80,4 +81,33 @@ export async function guardianActionGate(input: GateInput): Promise<GateResult> 
 
   const ok = await verifyGuardianOtp({ scope, otp: input.otp });
   return ok ? { status: 'verified', scope } : { status: 'invalid_otp' };
+}
+
+/**
+ * Map a non-proceeding gate result to the per-item BulkItemFailure the action
+ * handlers throw. Returns null for `not_required` / `verified` (the caller
+ * proceeds). Shared by perform_action + update_action_status so the error
+ * codes/messages can't drift between the two.
+ */
+export function guardianGateFailure(gate: GateResult): BulkItemFailure | null {
+  switch (gate.status) {
+    case 'challenge_issued':
+      return new BulkItemFailure(
+        'GUARDIAN_OTP_REQUIRED',
+        'Guardian OTP sent; resubmit with guardian_otp to confirm this action.',
+      );
+    case 'invalid_otp':
+      return new BulkItemFailure('GUARDIAN_OTP_INVALID', 'Guardian OTP is invalid or expired.');
+    case 'throttled':
+      return new BulkItemFailure('GUARDIAN_OTP_THROTTLED', 'Too many guardian OTP attempts; try again shortly.');
+    case 'rate_limited':
+      return new BulkItemFailure('GUARDIAN_OTP_RATE_LIMITED', 'Too many guardian OTP requests; try again shortly.');
+    case 'no_provider':
+      return new BulkItemFailure(
+        'OTP_PROVIDER_UNAVAILABLE',
+        'No verified contact channel is available to send the guardian OTP.',
+      );
+    default:
+      return null; // not_required | verified → proceed
+  }
 }

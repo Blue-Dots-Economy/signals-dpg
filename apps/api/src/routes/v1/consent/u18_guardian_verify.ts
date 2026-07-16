@@ -8,8 +8,9 @@ import { consent_record } from '@api/db/postgres/schema';
 import { auth_middleware_if_enabled } from '@api/plugins/auth/auth_middleware';
 import { apiConfig } from '@/config';
 import { resolveConsentVersion } from '@/services/consent_version';
+import { guardianUserConsentRow } from '@/services/guardian_consent_rows';
 import { setGuardianVerified } from '@/services/minor_guardian_repo';
-import { assertVerifyAttemptAllowed, verifyGuardianOtp, GuardianOtpError } from '@/services/guardian_otp';
+import { assertVerifyAttemptAllowed, verifyGuardianOtp, guardianOtpErrorReply } from '@/services/guardian_otp';
 import { guardianOtpScope } from '@/routes/v1/consent/u18_guardian';
 
 type Req = FastifyRequest<{ Body: U18GuardianVerifyBody }>;
@@ -38,9 +39,8 @@ export const u18_guardian_verify_handler = async (request: Req, reply: FastifyRe
   try {
     await assertVerifyAttemptAllowed(scope);
   } catch (err) {
-    if (err instanceof GuardianOtpError && err.code === 'VERIFY_THROTTLED') {
-      return reply.code(429).send({ error: 'OTP_VERIFY_THROTTLED', message: 'Too many attempts; try again shortly' });
-    }
+    const r = guardianOtpErrorReply(err);
+    if (r) return reply.code(r.status).send({ error: r.error, message: r.message });
     throw err;
   }
 
@@ -52,17 +52,14 @@ export const u18_guardian_verify_handler = async (request: Req, reply: FastifyRe
     if (version === null) {
       return reply.code(400).send({ error: 'CONSENT_VERSION_UNCONFIGURED', message: `u18 ${category} not configured` });
     }
-    rows.push({
-      level: 'user' as const,
-      consentCategory: category,
+    rows.push(guardianUserConsentRow({
+      category,
       userId,
       network: body.network,
-      brand: body.brand ?? null,
+      brand: body.brand,
       documentVersion: version,
-      source: 'guardian' as const,
-      acceptedAt: new Date(),
-      metadata: { variant: 'u18' } as Record<string, unknown>,
-    });
+      source: 'guardian',
+    }));
   }
 
   const ok = await verifyGuardianOtp({ scope, otp: body.otp });

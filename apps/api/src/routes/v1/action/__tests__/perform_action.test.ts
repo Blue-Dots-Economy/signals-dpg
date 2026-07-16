@@ -160,6 +160,8 @@ vi.mock('@/network_configs', () => ({
 // deps on this route are already mocked above.
 vi.mock('@/services/guardian_action_gate', () => ({
   guardianActionGate: vi.fn(async () => ({ status: 'not_required' })),
+  // Gate is always not_required in these tests, so the mapper only ever returns null.
+  guardianGateFailure: () => null,
 }));
 
 vi.mock('@dpg/schemas', async () => {

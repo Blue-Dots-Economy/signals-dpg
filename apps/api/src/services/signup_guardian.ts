@@ -28,10 +28,12 @@ import {
   type GuardianContactType,
 } from '@/services/guardian_otp';
 import { resolveConsentVersion } from '@/services/consent_version';
+import { guardianUserConsentRow } from '@/services/guardian_consent_rows';
 import {
   writeEncryptedGuardian,
   resolveOtpChannel,
-  countWardsForGuardian,
+  isGuardianWardLimitReached,
+  guardianContactMatchesWard,
   setWardDob,
 } from '@/services/minor_guardian_repo';
 
@@ -67,10 +69,6 @@ function normalizePhone(value: string): string {
 function normalizeIdentifier(identifier: SignupIdentifier): { type: 'email' | 'phone'; value: string } {
   if ('email' in identifier) return { type: 'email', value: normalizeEmail(identifier.email) };
   return { type: 'phone', value: normalizePhone(identifier.phoneNumber) };
-}
-
-function normalizeContact(contact: string, contactType: GuardianContactType): string {
-  return contactType === 'email' ? normalizeEmail(contact) : normalizePhone(contact);
 }
 
 /** SHA-256 hex of the normalized identifier — never the raw identifier. */
@@ -152,18 +150,19 @@ export async function startSignupGuardian(input: StartSignupGuardianInput): Prom
   // Cap: at most MAX_WARDS_PER_GUARDIAN wards may share one guardian contact.
   // No ward id yet (account not created), so count all wards on this ref.
   const ref = guardianRef(channel.contact);
-  if ((await countWardsForGuardian(ref, null)) >= apiConfig.max_wards_per_guardian) {
+  if (await isGuardianWardLimitReached(channel.contact, null)) {
     throw new SignupGuardianError('GUARDIAN_WARD_LIMIT');
   }
 
   // Warn-and-confirm: neither guardian contact may silently equal the ward's
   // own signup identifier. Not a hard reject — an explicit ack lets it proceed.
   const ident = normalizeIdentifier(input.identifier);
-  const sameContact =
-    (ident.type === 'email' && !!input.guardianEmail &&
-      normalizeContact(input.guardianEmail, 'email') === ident.value) ||
-    (ident.type === 'phone' && !!input.guardianPhone &&
-      normalizeContact(input.guardianPhone, 'phone') === ident.value);
+  const sameContact = guardianContactMatchesWard({
+    wardEmail: ident.type === 'email' ? ident.value : null,
+    wardPhone: ident.type === 'phone' ? ident.value : null,
+    guardianEmail: input.guardianEmail,
+    guardianPhone: input.guardianPhone,
+  });
   if (sameContact && input.sameContactAcknowledged !== true) {
     throw new SignupGuardianError('SAME_CONTACT_NEEDS_ACK');
   }
@@ -282,39 +281,30 @@ export async function materializeSignupGuardian(user: MaterializeSignupGuardianU
       );
 
       await tx.insert(consent_record).values([
-        {
-          level: 'user',
-          consentCategory: 'guardian_declaration',
+        guardianUserConsentRow({
+          category: 'guardian_declaration',
           userId: user.id,
           network: pending.network,
-          brand: null,
           documentVersion: declVersion,
           source: 'self',
           acceptedAt,
-          metadata: { variant: 'u18' },
-        },
-        {
-          level: 'user',
-          consentCategory: 'terms',
+        }),
+        guardianUserConsentRow({
+          category: 'terms',
           userId: user.id,
           network: pending.network,
-          brand: null,
           documentVersion: termsVersion,
           source: 'guardian',
           acceptedAt,
-          metadata: { variant: 'u18' },
-        },
-        {
-          level: 'user',
-          consentCategory: 'privacy',
+        }),
+        guardianUserConsentRow({
+          category: 'privacy',
           userId: user.id,
           network: pending.network,
-          brand: null,
           documentVersion: privacyVersion,
           source: 'guardian',
           acceptedAt,
-          metadata: { variant: 'u18' },
-        },
+        }),
       ]);
     });
 

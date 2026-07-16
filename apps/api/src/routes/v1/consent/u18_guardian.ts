@@ -12,11 +12,12 @@ import {
   upsertGuardianDetails,
   getGuardianContactPlaintext,
   resolveOtpChannel,
-  countWardsForGuardian,
+  isGuardianWardLimitReached,
+  guardianContactMatchesWard,
 } from '@/services/minor_guardian_repo';
-import { guardianRef } from '@/services/guardian_pii';
 import { resolveConsentVersion } from '@/services/consent_version';
-import { issueGuardianOtp, GuardianOtpError } from '@/services/guardian_otp';
+import { issueGuardianOtp, guardianOtpErrorReply } from '@/services/guardian_otp';
+import { guardianUserConsentRow } from '@/services/guardian_consent_rows';
 
 type Req = FastifyRequest<{ Body: U18GuardianBody }>;
 
@@ -50,11 +51,13 @@ export const u18_guardian_handler = async (request: Req, reply: FastifyReply) =>
   // Warn-and-confirm: a guardian contact must not silently equal the ward's
   // own email/phone. Not a hard reject — an explicit ack lets the ward proceed.
   const [ward] = await db.select({ email: user.email, phoneNumber: user.phoneNumber }).from(user).where(eq(user.id, userId));
-  const wardEmail = ward?.email?.trim().toLowerCase();
-  const wardPhone = ward?.phoneNumber?.trim();
-  const matchesWardEmail = !!wardEmail && !!body.guardianEmail && body.guardianEmail.trim().toLowerCase() === wardEmail;
-  const matchesWardPhone = !!wardPhone && !!body.guardianPhone && body.guardianPhone.trim() === wardPhone;
-  if ((matchesWardEmail || matchesWardPhone) && body.sameContactAcknowledged !== true) {
+  const matchesWard = guardianContactMatchesWard({
+    wardEmail: ward?.email,
+    wardPhone: ward?.phoneNumber,
+    guardianEmail: body.guardianEmail,
+    guardianPhone: body.guardianPhone,
+  });
+  if (matchesWard && body.sameContactAcknowledged !== true) {
     return reply.code(409).send({
       error: 'SAME_CONTACT_NEEDS_ACK',
       message: 'Guardian contact matches your own; acknowledge to proceed',
@@ -63,8 +66,7 @@ export const u18_guardian_handler = async (request: Req, reply: FastifyReply) =>
 
   // Cap: at most MAX_WARDS_PER_GUARDIAN wards may share one guardian contact.
   const channel = resolveOtpChannel({ guardianEmail: body.guardianEmail, guardianPhone: body.guardianPhone });
-  const wardCount = await countWardsForGuardian(guardianRef(channel.contact), userId);
-  if (wardCount >= apiConfig.max_wards_per_guardian) {
+  if (await isGuardianWardLimitReached(channel.contact, userId)) {
     return reply.code(409).send({
       error: 'GUARDIAN_WARD_LIMIT',
       message: `This guardian is already linked to the maximum of ${apiConfig.max_wards_per_guardian} accounts.`,
@@ -85,17 +87,14 @@ export const u18_guardian_handler = async (request: Req, reply: FastifyReply) =>
       guardianEmail: body.guardianEmail ?? null,
       guardianPhone: body.guardianPhone ?? null,
     });
-    await db.insert(consent_record).values({
-      level: 'user',
-      consentCategory: 'guardian_declaration',
+    await db.insert(consent_record).values(guardianUserConsentRow({
+      category: 'guardian_declaration',
       userId,
       network: body.network,
-      brand: body.brand ?? null,
+      brand: body.brand,
       documentVersion: declVersion,
       source: 'self',
-      acceptedAt: new Date(),
-      metadata: { variant: 'u18' },
-    });
+    }));
   } catch (err) {
     request.log.error({ err }, 'Failed to persist guardian details/declaration');
     return reply.code(500).send({ error: 'GUARDIAN_WRITE_FAILED', message: 'Failed to record guardian details' });
@@ -107,12 +106,8 @@ export const u18_guardian_handler = async (request: Req, reply: FastifyReply) =>
   try {
     await issueGuardianOtp({ scope: guardianOtpScope(userId), contact: contact.contact, contactType: contact.contactType });
   } catch (err) {
-    if (err instanceof GuardianOtpError && err.code === 'RATE_LIMITED') {
-      return reply.code(429).send({ error: 'OTP_RATE_LIMITED', message: 'Too many OTP requests; try again shortly' });
-    }
-    if (err instanceof GuardianOtpError && err.code === 'NO_OTP_PROVIDER') {
-      return reply.code(503).send({ error: 'OTP_PROVIDER_UNAVAILABLE', message: 'No OTP channel configured for this instance' });
-    }
+    const r = guardianOtpErrorReply(err);
+    if (r) return reply.code(r.status).send({ error: r.error, message: r.message });
     request.log.error({ err }, 'Failed to issue guardian OTP');
     return reply.code(500).send({ error: 'OTP_SEND_FAILED', message: 'Failed to send guardian OTP' });
   }

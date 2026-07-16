@@ -30,6 +30,37 @@ const codeKey = (scope: string) => `guardian_otp:code:${scope}`;
 const rateKey = (scope: string) => `guardian_otp:rl:${scope}`;
 const verifyRateKey = (scope: string) => `guardian_otp:vrl:${scope}`;
 
+/**
+ * Fixed-window counter: increment `key`, set the window TTL on the first hit,
+ * return the running count. Shared by the send rate-limit and the verify
+ * throttle — the caller decides the max + which error to throw.
+ */
+async function incrWithinWindow(key: string, windowSec: number): Promise<number> {
+  const count = await redis.incr(key);
+  if (count === 1) await redis.expire(key, windowSec);
+  return count;
+}
+
+/**
+ * Map a `GuardianOtpError` to its HTTP reply shape ({status, error, message}),
+ * or null when `err` isn't one (caller falls back to a 500). Reused by every
+ * consent route that issues/verifies a guardian OTP so the status ladder isn't
+ * hand-rolled per handler.
+ */
+export function guardianOtpErrorReply(
+  err: unknown,
+): { status: number; error: string; message: string } | null {
+  if (!(err instanceof GuardianOtpError)) return null;
+  switch (err.code) {
+    case 'RATE_LIMITED':
+      return { status: 429, error: 'OTP_RATE_LIMITED', message: 'Too many OTP requests; try again shortly' };
+    case 'NO_OTP_PROVIDER':
+      return { status: 503, error: 'OTP_PROVIDER_UNAVAILABLE', message: 'No OTP channel configured for this instance' };
+    case 'VERIFY_THROTTLED':
+      return { status: 429, error: 'OTP_VERIFY_THROTTLED', message: 'Too many attempts; try again shortly' };
+  }
+}
+
 function generateOtp(): string {
   // Dev/test bypass (CREATE_TEST_OTP): fixed code so the guardian flow is
   // exercisable without a notifier. Guarded against production in config.
@@ -48,11 +79,7 @@ export async function issueGuardianOtp(args: {
   contactType: GuardianContactType;
   send?: OtpSend;
 }): Promise<void> {
-  const rk = rateKey(args.scope);
-  const count = await redis.incr(rk);
-  if (count === 1) {
-    await redis.expire(rk, GUARDIAN_OTP_WINDOW_SEC);
-  }
+  const count = await incrWithinWindow(rateKey(args.scope), GUARDIAN_OTP_WINDOW_SEC);
   if (count > GUARDIAN_OTP_MAX_PER_WINDOW) {
     throw new GuardianOtpError('RATE_LIMITED');
   }
@@ -88,11 +115,7 @@ export async function verifyGuardianOtp(args: {
  * verifyGuardianOtp on the HTTP boundary.
  */
 export async function assertVerifyAttemptAllowed(scope: string): Promise<void> {
-  const k = verifyRateKey(scope);
-  const count = await redis.incr(k);
-  if (count === 1) {
-    await redis.expire(k, GUARDIAN_OTP_VERIFY_WINDOW_SEC);
-  }
+  const count = await incrWithinWindow(verifyRateKey(scope), GUARDIAN_OTP_VERIFY_WINDOW_SEC);
   if (count > GUARDIAN_OTP_VERIFY_MAX) {
     throw new GuardianOtpError('VERIFY_THROTTLED');
   }
