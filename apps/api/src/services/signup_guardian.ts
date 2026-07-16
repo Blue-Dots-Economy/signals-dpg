@@ -32,7 +32,6 @@ import {
   writeEncryptedGuardian,
   resolveOtpChannel,
   countWardsForGuardian,
-  MAX_WARDS_PER_GUARDIAN,
 } from '@/services/minor_guardian_repo';
 
 /** The ward's own signup identifier — exactly one of the two. */
@@ -154,7 +153,7 @@ export async function startSignupGuardian(input: StartSignupGuardianInput): Prom
   // Cap: at most MAX_WARDS_PER_GUARDIAN wards may share one guardian contact.
   // No ward id yet (account not created), so count all wards on this ref.
   const ref = guardianRef(channel.contact);
-  if ((await countWardsForGuardian(ref, null)) >= MAX_WARDS_PER_GUARDIAN) {
+  if ((await countWardsForGuardian(ref, null)) >= apiConfig.max_wards_per_guardian) {
     throw new SignupGuardianError('GUARDIAN_WARD_LIMIT');
   }
 

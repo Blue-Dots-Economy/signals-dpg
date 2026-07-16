@@ -7,9 +7,6 @@ type GuardianContactType = 'phone' | 'email';
 type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
 type DbOrTx = typeof db | Tx;
 
-/** Max wards that may share one guardian contact (product cap; best-effort). */
-export const MAX_WARDS_PER_GUARDIAN = 6;
-
 /**
  * How many OTHER wards are already linked to this guardian contact (matched by
  * the deterministic guardian ref). Excludes `excludeUserId` (the ward being
