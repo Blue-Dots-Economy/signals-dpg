@@ -1039,6 +1039,7 @@ export function HomePage() {
       open={Boolean(pendingConsentProfileId) && !showU18GuardianFlow}
       statement={profileStatement}
       profileLabel={pendingProfileLabel}
+      minor={u18Status?.isMinor === true}
       onAccept={async () => {
         const pending = pendingConsentProfileId;
         if (!pending || !network?.id || !profileDoc) return;
