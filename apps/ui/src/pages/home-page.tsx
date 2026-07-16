@@ -20,7 +20,7 @@ import { DomainCard } from '@/components/cards/domain-card';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Button } from '@/components/ui/button';
 import { ActionHandler } from '@/components/actions/action-handler';
-import { MapView, DEFAULT_ZOOM } from '@/components/map/map-container';
+import { MapView } from '@/components/map/map-container';
 import { MapFiltersPanel } from '@/components/map/map-filters-panel';
 import { MarkerPopupCard } from '@/components/map/marker-popup-card';
 import { MatchScoreCard } from '@/components/match-score';
@@ -435,11 +435,6 @@ function resolveDefaultViewMode(): ViewMode {
   return 'map';
 }
 
-// Anonymous count-first map browsing (#203 §7): below this zoom (region
-// level — a whole state/country is roughly visible), a signed-out visitor
-// with no resolved location sees an aggregate count + prompt instead of a
-// country-wide pin pull. See `countFirst` below for the full gating.
-const REGION_ZOOM = 8;
 
 export function HomePage() {
   const { t } = useTranslation();
@@ -756,19 +751,6 @@ export function HomePage() {
       });
     }
   }, [network, selectedDomain, visibleDomains, setSearchParams]);
-
-  // Anonymous low-zoom map browsing (#203 §7, revised): a signed-out visitor
-  // with no resolved location (no profile, no browser geolocation) starts the
-  // map at the whole-network default view. We still fetch + cluster the slim
-  // pins (see `useMapMarkers` below) so they can see WHERE items are — this flag
-  // only drives the small aggregate-count pill shown near the `MapView` below,
-  // not whether pins load. ANY of: being signed in, having a resolved location,
-  // or zooming in past the threshold flips it false (the pill hides once
-  // individual pins are self-explanatory). `mapViewport` is null until the
-  // map's first report lands, so we fall back to the map's own default zoom
-  // (`DEFAULT_ZOOM`) for that brief window, matching what's on screen.
-  const countFirst =
-    !user && !userLocation && (mapViewport?.zoom ?? DEFAULT_ZOOM) < REGION_ZOOM;
 
   // Task 6 (#203 §5.2): the map view is now sourced from viewport-scoped
   // markers rather than a full per-domain browse feed (that full fetch was
@@ -1704,7 +1686,7 @@ export function HomePage() {
                 return (
                   <>
                     {pagedFetchers}
-                    {allDomainsLoadedCount < allDomainsTotalCount && (
+                    {allDomainsTotalCount > 0 && (
                       <p className="mb-2 text-xs text-muted-foreground">
                         {t('home.showing_x_of_y', {
                           shown: allDomainsLoadedCount,
@@ -1766,7 +1748,7 @@ export function HomePage() {
               // Single domain tab: paged infinite scroll (§5.1). Server already
               // orders nearest-first when coords are known, so no client sort here.
               <>
-                {singleDomainList.items.length < singleDomainList.total && (
+                {singleDomainList.total > 0 && (
                   <p className="mb-2 text-xs text-muted-foreground">
                     {t('home.showing_x_of_y', {
                       shown: singleDomainList.items.length,
@@ -1876,13 +1858,13 @@ export function HomePage() {
                     );
                   }}
                 />
-                {/* Anonymous count pill (#203 §7, revised): a signed-out visitor
-                    at low zoom now sees the clustered pins themselves (fetched
-                    slim, capped at MAP_FETCH_LIMIT) so they know where items are.
-                    This small non-blocking pill keeps the aggregate total visible
-                    without covering the map. `fixed` + high z-index so it stays
+                {/* Signed-out count pill (#203 §7, revised): logged-out map view
+                    has no header count badge (that's a logged-in ContentHeader),
+                    so this small non-blocking pill surfaces the result count for
+                    the current view at all zooms — anonymous visitors otherwise
+                    had no way to see the total. `fixed` + high z-index so it stays
                     above the map's own maximize overlay (z-[2000]). */}
-                {countFirst && mapMarkers.total > 0 && (
+                {!user && mapMarkers.total > 0 && (
                   <div className="pointer-events-none fixed bottom-6 left-1/2 z-[2100] -translate-x-1/2 px-4">
                     <div className="rounded-full border border-border bg-background/95 px-3 py-1.5 text-xs font-medium text-foreground shadow-md backdrop-blur-sm">
                       {t('header.listings', { count: mapMarkers.total })}
