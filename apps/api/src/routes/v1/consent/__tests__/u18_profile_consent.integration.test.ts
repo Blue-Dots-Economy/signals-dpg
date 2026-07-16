@@ -175,8 +175,8 @@ describe('U18 profile-consent issue/verify (integration)', () => {
       method: 'POST', url: '/api/v1/consent/u18/guardian',
       headers: { 'x-api-key': ctx.rawKey },
       payload: {
-        network: servedNetwork, guardianName: 'Parent', guardianContact: 'parent@example.com',
-        guardianContactType: 'email', guardianDeclarationAccepted: true,
+        network: servedNetwork, guardianName: 'Parent', guardianEmail: 'parent@example.com',
+        guardianDeclarationAccepted: true,
       },
     });
     expect(guardianRes.statusCode).toBe(200);

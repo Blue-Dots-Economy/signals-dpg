@@ -39,8 +39,8 @@ describe('U18 capture (integration)', () => {
       method: 'POST', url: '/api/v1/consent/u18/guardian',
       headers: { 'x-api-key': ctx.rawKey },
       payload: {
-        network: ctx.network, guardianName: 'Parent', guardianContact: 'p@x.co',
-        guardianContactType: 'email', guardianDeclarationAccepted: true,
+        network: ctx.network, guardianName: 'Parent', guardianEmail: 'p@x.co',
+        guardianDeclarationAccepted: true,
       },
     });
     expect(res.statusCode).toBe(200);
@@ -115,8 +115,8 @@ describe('U18 guardian same-contact warn-and-acknowledge (integration)', () => {
       method: 'POST', url: '/api/v1/consent/u18/guardian',
       headers: { 'x-api-key': sameUser.rawKey },
       payload: {
-        network: ctx.network, guardianName: 'Parent', guardianContact: sameUser.wardEmail,
-        guardianContactType: 'email', guardianDeclarationAccepted: true,
+        network: ctx.network, guardianName: 'Parent', guardianEmail: sameUser.wardEmail,
+        guardianDeclarationAccepted: true,
       },
     });
     expect(res.statusCode).toBe(409);
@@ -128,8 +128,8 @@ describe('U18 guardian same-contact warn-and-acknowledge (integration)', () => {
       method: 'POST', url: '/api/v1/consent/u18/guardian',
       headers: { 'x-api-key': sameUser.rawKey },
       payload: {
-        network: ctx.network, guardianName: 'Parent', guardianContact: sameUser.wardEmail,
-        guardianContactType: 'email', guardianDeclarationAccepted: true, sameContactAcknowledged: true,
+        network: ctx.network, guardianName: 'Parent', guardianEmail: sameUser.wardEmail,
+        guardianDeclarationAccepted: true, sameContactAcknowledged: true,
       },
     });
     expect(res.statusCode).toBe(200);
