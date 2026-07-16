@@ -556,7 +556,10 @@ export function HomePage() {
   // creation re-triggers the DOB step even though the ward already finished it.
   const [u18StatusReload, setU18StatusReload] = React.useState(0);
   React.useEffect(() => {
-    if (!requiresGuardianGate || !network) {
+    // Fetch whenever authenticated + on a network — NOT only when a profile
+    // already exists. Otherwise the very first profile creation can't tell the
+    // ward is a minor (no prior profile → no fetch) and skips the guardian gate.
+    if (!user || !network) {
       setU18Status(null);
       return;
     }
@@ -569,7 +572,7 @@ export function HomePage() {
       .catch(() => { if (!cancelled) setU18Status(null); })
       .finally(() => { if (!cancelled) setU18StatusLoading(false); });
     return () => { cancelled = true; };
-  }, [requiresGuardianGate, network, network?.id, wardDomain, u18StatusReload]);
+  }, [user, network, network?.id, u18StatusReload]);
 
   // Stored data already resolves this ward as an adult → no guardian gate;
   // the ordinary consent flow (ProfileConsentModal) handles terms/privacy.
@@ -1040,8 +1043,8 @@ export function HomePage() {
         }
         // A minor's profile_creation consent is GUARDIAN-given (D13): issue a
         // guardian OTP and hand off to the guardian-OTP dialog instead of the
-        // ward self-accepting. Adults keep the self-accept path below.
-        if (u18Status?.isMinor === true) {
+        // ward self-accepting. Adults / ungated domains keep the self-accept path.
+        if (u18Status?.isMinor === true && isGuardianConsentRequiredDomain(network, profile.item_domain)) {
           const ref: ProfileConsentOtpItemRef = {
             network: network.id,
             brand: brand === 'standard' ? null : brand,
