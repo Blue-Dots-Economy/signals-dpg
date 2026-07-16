@@ -32,10 +32,17 @@ export function ProfileConsentModal({
 }: ProfileConsentModalProps) {
   const { t } = useTranslation();
   const [checked, setChecked] = React.useState(false);
+  // Minor flow is two-phase: tick the consent, THEN an under-18 notice that
+  // hands off to guardian verification. Ticking is what reveals that the ward
+  // needs a guardian — the age check runs on the acknowledgement, not up front.
+  const [minorNotice, setMinorNotice] = React.useState(false);
 
   // Reset the acknowledgement whenever the modal opens for a new profile.
   React.useEffect(() => {
-    if (open) setChecked(false);
+    if (open) {
+      setChecked(false);
+      setMinorNotice(false);
+    }
   }, [open]);
 
   return (
@@ -54,7 +61,7 @@ export function ProfileConsentModal({
       >
         <DialogHeader>
           <DialogTitle>
-            {minor
+            {minor && minorNotice
               ? t('consent.profile_title_minor', 'Guardian confirmation needed')
               : t('consent.profile_title')}
           </DialogTitle>
@@ -66,12 +73,14 @@ export function ProfileConsentModal({
           </p>
         )}
 
-        {minor ? (
+        {minor && minorNotice ? (
+          // Under-18 notice: shown AFTER the ward ticks the consent, before the
+          // guardian OTP is dispatched (onAccept issues the code).
           <div className="flex flex-col gap-4 py-2">
             <p className="text-sm text-muted-foreground">
               {t(
-                'consent.profile_minor_desc',
-                "You're under 18, so a parent or guardian must confirm this profile. Continue to send them a one-time code.",
+                'consent.profile_minor_notice',
+                "You're under 18, so a parent or guardian needs to verify this profile creation. We'll send them a one-time code to confirm.",
               )}
             </p>
             <Button
@@ -79,7 +88,7 @@ export function ProfileConsentModal({
               onClick={onAccept}
               className="w-full bg-brand-cta text-[var(--brand-cta-foreground)] hover:brightness-110"
             >
-              {t('consent.profile_minor_continue', 'Send code to guardian')}
+              {t('consent.profile_minor_verify', 'Verify with guardian')}
             </Button>
           </div>
         ) : (
@@ -94,7 +103,9 @@ export function ProfileConsentModal({
             <Button
               type="button"
               disabled={!checked}
-              onClick={onAccept}
+              // Minor: ticking reveals the under-18 notice step; adults
+              // self-accept immediately.
+              onClick={() => (minor ? setMinorNotice(true) : onAccept())}
               className="w-full bg-brand-cta text-[var(--brand-cta-foreground)] hover:brightness-110"
             >
               {t('consent.accept_continue')}

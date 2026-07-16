@@ -19,6 +19,12 @@ vi.mock('@/contexts/auth-context', () => ({
   }),
 }));
 
+// GuardianFormStep opens its T&C / Privacy text via this hook; the flow test
+// never opens it, so a null config is enough (avoids needing a QueryClient).
+vi.mock('@/hooks/use-consent-config', () => ({
+  useConsentConfig: () => ({ config: null, isLoading: false }),
+}));
+
 function typeOtp(digits: string) {
   const inputs = screen.getAllByRole('textbox');
   digits.split('').forEach((d, i) => {

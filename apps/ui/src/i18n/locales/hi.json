@@ -425,5 +425,18 @@
   "u18.guardian_error_ward_limit": "यह अभिभावक पहले से ही अधिकतम संख्या में खातों से जुड़ा है। कृपया कोई अन्य अभिभावक संपर्क उपयोग करें।",
   "consent.profile_title_minor": "अभिभावक की पुष्टि आवश्यक",
   "consent.profile_minor_desc": "आप 18 वर्ष से कम हैं, इसलिए इस प्रोफ़ाइल की पुष्टि आपके माता-पिता या अभिभावक को करनी होगी। उन्हें एक बार का कोड भेजने के लिए जारी रखें।",
-  "consent.profile_minor_continue": "अभिभावक को कोड भेजें"
+  "consent.profile_minor_continue": "अभिभावक को कोड भेजें",
+  "consent.profile_minor_notice": "आप 18 वर्ष से कम हैं, इसलिए इस प्रोफ़ाइल निर्माण की पुष्टि माता-पिता या अभिभावक को करनी होगी। हम पुष्टि के लिए उन्हें एक बार का कोड भेजेंगे।",
+  "consent.profile_minor_verify": "अभिभावक से सत्यापित करें",
+  "u18.guardian_label_parent_name": "अभिभावक का नाम",
+  "u18.guardian_label_parent_email": "अभिभावक ईमेल",
+  "u18.guardian_label_parent_phone": "अभिभावक फ़ोन नंबर",
+  "u18.guardian_verified_title": "अभिभावक की पुष्टि हो गई",
+  "u18.guardian_verified_desc": "आपके अभिभावक ने पुष्टि कर दी है। अब अपना खाता बनाने के लिए अपना नंबर सत्यापित करें।",
+  "u18.guardian_verified_continue": "लॉगिन के लिए मेरा नंबर सत्यापित करें",
+  "u18.guardian_verified_for_create": "अभिभावक सत्यापित। अब आप अपनी प्रोफ़ाइल बना सकते हैं।",
+  "u18.guardian_pending_for_create": "आप 18 वर्ष से कम हैं — इस प्रोफ़ाइल को बनाने से पहले आपके अभिभावक को एक बार के कोड से सत्यापित करना होगा।",
+  "profile.guardian_confirm_title": "अभिभावक की पुष्टि आवश्यक",
+  "profile.guardian_confirm_desc": "आप 18 वर्ष से कम हैं, इसलिए आपके अभिभावक को एक बार का कोड भेजा जाएगा। उनके सत्यापित करने के बाद आप अपनी प्रोफ़ाइल बना सकते हैं।",
+  "profile.guardian_confirm_proceed": "अभिभावक को कोड भेजें"
 }

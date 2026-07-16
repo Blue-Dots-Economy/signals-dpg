@@ -73,6 +73,33 @@ export const U18ProfileConsentVerifyResponseSchema = z.object({
 export type U18ProfileConsentBody = z.infer<typeof U18ProfileConsentBodySchema>;
 export type U18ProfileConsentVerifyBody = z.infer<typeof U18ProfileConsentVerifyBodySchema>;
 
+// Pre-create guardian consent for profile creation. The OTP is issued and
+// verified BEFORE the item exists (no item_id here), so the ward's profile row
+// isn't written until the guardian has verified — mirroring the self-signup
+// materialize-after-verify flow. Verify sets a short-lived server token that
+// `finalize` (below) consumes once the item is created.
+export const U18ProfilePrecreateBodySchema = z.object({
+  network: z.string().min(1),
+  brand: z.string().min(1).nullish(),
+  item_domain: z.string().min(1),
+});
+export const U18ProfilePrecreateResponseSchema = z.object({ otpSent: z.boolean() });
+
+export const U18ProfilePrecreateVerifyBodySchema = U18ProfilePrecreateBodySchema.extend({
+  otp: z.string().length(6),
+});
+export const U18ProfilePrecreateVerifyResponseSchema = z.object({ verified: z.boolean() });
+
+// Finalize: called immediately after the item is created; consumes the
+// pre-create token to write the guardian profile_creation row and promote the
+// item to live. Same item ref shape as the item-scoped consent body.
+export const U18ProfileFinalizeBodySchema = U18ProfileConsentBodySchema;
+export const U18ProfileFinalizeResponseSchema = z.object({ promoted: z.boolean() });
+
+export type U18ProfilePrecreateBody = z.infer<typeof U18ProfilePrecreateBodySchema>;
+export type U18ProfilePrecreateVerifyBody = z.infer<typeof U18ProfilePrecreateVerifyBodySchema>;
+export type U18ProfileFinalizeBody = z.infer<typeof U18ProfileFinalizeBodySchema>;
+
 // --- Pre-auth, signup-scoped guardian consent (no session yet) ---
 //
 // The account doesn't exist yet at this point in the flow, so these bodies

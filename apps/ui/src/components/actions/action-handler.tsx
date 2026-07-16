@@ -177,6 +177,7 @@ export function ActionHandler({ children, onActionSubmit, guardianConfirmRequire
           actionSchema={activeAction.schema}
           onSubmit={handleModalSubmit}
           loading={loading}
+          minor={guardianConfirmRequired}
         />
       )}
       <GuardianOtpDialog

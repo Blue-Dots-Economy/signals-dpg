@@ -250,6 +250,10 @@ export function HomePage() {
   // to the guardian and this holds the item ref while the guardian-OTP dialog
   // is open (D13). null for adults (they self-accept via ProfileConsentModal).
   const [guardianProfileRef, setGuardianProfileRef] = React.useState<ProfileConsentOtpItemRef | null>(null);
+  // Fallback for a minor with NO guardian on file yet (issue returns 409
+  // GUARDIAN_REQUIRED): holds the item ref while the guardian-capture flow
+  // (details + setup OTP) runs, then the profile OTP is re-issued for it.
+  const [guardianSetupRef, setGuardianSetupRef] = React.useState<ProfileConsentOtpItemRef | null>(null);
   const [loading, setLoading] = React.useState(false);
   const browseSelection = useCardSelection();
   const [bulkConnectOpen, setBulkConnectOpen] = React.useState(false);
@@ -1033,11 +1037,67 @@ export function HomePage() {
     />
   ) : null;
 
+  // Issue a MINOR's profile_creation guardian OTP for a given item ref and hand
+  // off to the guardian-OTP dialog. If no guardian is on file yet (409
+  // GUARDIAN_REQUIRED), fall back to the guardian-capture flow, then this is
+  // re-invoked for the same ref once a guardian exists.
+  const issueProfileOtp = React.useCallback(
+    async (ref: ProfileConsentOtpItemRef) => {
+      try {
+        const { otpSent } = await issueProfileConsentOtp(ref);
+        if (otpSent) {
+          // Keep pendingConsentProfileId set (nulling it re-triggers the prompt
+          // effect, which would reopen the consent modal over the OTP dialog).
+          // The OTP dialog takes over via guardianProfileRef.
+          setGuardianProfileRef(ref);
+        }
+      } catch (err) {
+        const status = axios.isAxiosError(err) ? err.response?.status : undefined;
+        const code = axios.isAxiosError(err)
+          ? (err.response?.data as { error?: string } | undefined)?.error
+          : undefined;
+        if (status === 409 && code === 'GUARDIAN_REQUIRED') {
+          // No guardian captured yet — run the capture flow, then retry.
+          setGuardianSetupRef(ref);
+        } else if (status === 429) {
+          toast.error(t('u18.guardian_error_rate_limited', 'Too many attempts. Please try again shortly.'));
+        } else if (status === 503) {
+          toast.error(t('u18.guardian_error_otp_unavailable', "Guardian confirmation isn't available on this instance right now."));
+        } else {
+          toast.error(t('profile.error_generic_desc'));
+        }
+      }
+    },
+    [t],
+  );
+
+  // Guardian-capture fallback: a minor whose profile_creation consent needs a
+  // guardian that isn't on file yet. Reuses the first-login flow starting at
+  // the details step; on completion the profile OTP is re-issued for the ref.
+  const guardianSetupForProfileModal = guardianSetupRef && network ? (
+    <U18GuardianFlow
+      network={network.id}
+      brand={brand === 'standard' ? null : brand}
+      initialStep="guardian"
+      onComplete={() => {
+        const ref = guardianSetupRef;
+        setGuardianSetupRef(null);
+        setU18StatusReload((n) => n + 1);
+        void issueProfileOtp(ref);
+      }}
+      onNotMinor={() => {
+        setGuardianSetupRef(null);
+        setU18StatusReload((n) => n + 1);
+      }}
+      onLogout={() => { void signOut(); }}
+    />
+  ) : null;
+
   const profileConsentModal = (
     <ProfileConsentModal
       // The U18 guardian gate takes priority — don't stack a second blocking
       // dialog on top of it.
-      open={Boolean(pendingConsentProfileId) && !showU18GuardianFlow && !guardianProfileRef}
+      open={Boolean(pendingConsentProfileId) && !showU18GuardianFlow && !guardianProfileRef && !guardianSetupRef}
       statement={profileStatement}
       profileLabel={pendingProfileLabel}
       minor={u18Status?.isMinor === true}
@@ -1053,31 +1113,13 @@ export function HomePage() {
         // guardian OTP and hand off to the guardian-OTP dialog instead of the
         // ward self-accepting. Adults / ungated domains keep the self-accept path.
         if (u18Status?.isMinor === true && isGuardianConsentRequiredDomain(network, profile.item_domain)) {
-          const ref: ProfileConsentOtpItemRef = {
+          await issueProfileOtp({
             network: network.id,
             brand: brand === 'standard' ? null : brand,
             item_domain: profile.item_domain,
             item_type: profile.item_type,
             item_id: profile.item_id,
-          };
-          try {
-            const { otpSent } = await issueProfileConsentOtp(ref);
-            if (otpSent) {
-              // Keep pendingConsentProfileId set (nulling it re-triggers the
-              // prompt effect, which would reopen this modal over the OTP
-              // dialog). The OTP dialog takes over via guardianProfileRef.
-              setGuardianProfileRef(ref);
-            }
-          } catch (err) {
-            const status = axios.isAxiosError(err) ? err.response?.status : undefined;
-            if (status === 429) {
-              toast.error(t('u18.guardian_error_rate_limited', 'Too many attempts. Please try again shortly.'));
-            } else if (status === 503) {
-              toast.error(t('u18.guardian_error_otp_unavailable', "Guardian confirmation isn't available on this instance right now."));
-            } else {
-              toast.error(t('profile.error_generic_desc'));
-            }
-          }
+          });
           return;
         }
         try {
@@ -1152,6 +1194,7 @@ export function HomePage() {
         </div>
         </div>
         {u18GuardianFlowModal}
+        {guardianSetupForProfileModal}
         {profileConsentModal}
         {guardianProfileConsentModal}
       </>
@@ -1558,6 +1601,7 @@ export function HomePage() {
         </ActionHandler>
     </PageShell>
     {u18GuardianFlowModal}
+    {guardianSetupForProfileModal}
     {profileConsentModal}
         {guardianProfileConsentModal}
     </>

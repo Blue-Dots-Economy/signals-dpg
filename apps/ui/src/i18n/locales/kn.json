@@ -425,5 +425,18 @@
   "u18.guardian_error_ward_limit": "ಈ ಪೋಷಕರು ಈಗಾಗಲೇ ಗರಿಷ್ಠ ಸಂಖ್ಯೆಯ ಖಾತೆಗಳಿಗೆ ಲಿಂಕ್ ಆಗಿದ್ದಾರೆ. ದಯವಿಟ್ಟು ಬೇರೆ ಪೋಷಕರ ಸಂಪರ್ಕ ಬಳಸಿ.",
   "consent.profile_title_minor": "ಪೋಷಕರ ದೃಢೀಕರಣ ಅಗತ್ಯವಿದೆ",
   "consent.profile_minor_desc": "ನೀವು 18 ವರ್ಷದೊಳಗಿನವರು, ಆದ್ದರಿಂದ ಈ ಪ್ರೊಫೈಲ್ ಅನ್ನು ನಿಮ್ಮ ಪೋಷಕರು ದೃಢೀಕರಿಸಬೇಕು. ಅವರಿಗೆ ಒಂದು-ಬಾರಿ ಕೋಡ್ ಕಳುಹಿಸಲು ಮುಂದುವರಿಯಿರಿ.",
-  "consent.profile_minor_continue": "ಪೋಷಕರಿಗೆ ಕೋಡ್ ಕಳುಹಿಸಿ"
+  "consent.profile_minor_continue": "ಪೋಷಕರಿಗೆ ಕೋಡ್ ಕಳುಹಿಸಿ",
+  "consent.profile_minor_notice": "ನೀವು 18 ವರ್ಷದೊಳಗಿನವರು, ಆದ್ದರಿಂದ ಈ ಪ್ರೊಫೈಲ್ ರಚನೆಯನ್ನು ಪೋಷಕರು ಅಥವಾ ಪಾಲಕರು ಪರಿಶೀಲಿಸಬೇಕು. ದೃಢೀಕರಿಸಲು ನಾವು ಅವರಿಗೆ ಒಂದು-ಬಾರಿ ಕೋಡ್ ಕಳುಹಿಸುತ್ತೇವೆ.",
+  "consent.profile_minor_verify": "ಪಾಲಕರೊಂದಿಗೆ ಪರಿಶೀಲಿಸಿ",
+  "u18.guardian_label_parent_name": "ಪಾಲಕರ ಹೆಸರು",
+  "u18.guardian_label_parent_email": "ಪಾಲಕರ ಇಮೇಲ್",
+  "u18.guardian_label_parent_phone": "ಪಾಲಕರ ಫೋನ್ ಸಂಖ್ಯೆ",
+  "u18.guardian_verified_title": "ಪಾಲಕರು ದೃಢೀಕರಿಸಿದ್ದಾರೆ",
+  "u18.guardian_verified_desc": "ನಿಮ್ಮ ಪಾಲಕರು ದೃಢೀಕರಿಸಿದ್ದಾರೆ. ಈಗ ನಿಮ್ಮ ಖಾತೆ ರಚಿಸಲು ನಿಮ್ಮ ಸಂಖ್ಯೆಯನ್ನು ಪರಿಶೀಲಿಸಿ.",
+  "u18.guardian_verified_continue": "ಲಾಗಿನ್‌ಗಾಗಿ ನನ್ನ ಸಂಖ್ಯೆ ಪರಿಶೀಲಿಸಿ",
+  "u18.guardian_verified_for_create": "ಪಾಲಕರು ಪರಿಶೀಲಿಸಿದ್ದಾರೆ. ಈಗ ನೀವು ನಿಮ್ಮ ಪ್ರೊಫೈಲ್ ರಚಿಸಬಹುದು.",
+  "u18.guardian_pending_for_create": "ನೀವು 18 ವರ್ಷದೊಳಗಿನವರು — ಈ ಪ್ರೊಫೈಲ್ ರಚಿಸುವ ಮೊದಲು ನಿಮ್ಮ ಪಾಲಕರು ಒಂದು-ಬಾರಿ ಕೋಡ್‌ನಿಂದ ಪರಿಶೀಲಿಸಬೇಕು.",
+  "profile.guardian_confirm_title": "ಪಾಲಕರ ದೃಢೀಕರಣ ಅಗತ್ಯ",
+  "profile.guardian_confirm_desc": "ನೀವು 18 ವರ್ಷದೊಳಗಿನವರು, ಆದ್ದರಿಂದ ನಿಮ್ಮ ಪಾಲಕರಿಗೆ ಒಂದು-ಬಾರಿ ಕೋಡ್ ಕಳುಹಿಸಲಾಗುತ್ತದೆ. ಅವರು ಪರಿಶೀಲಿಸಿದ ನಂತರ ನೀವು ನಿಮ್ಮ ಪ್ರೊಫೈಲ್ ರಚಿಸಬಹುದು.",
+  "profile.guardian_confirm_proceed": "ಪಾಲಕರಿಗೆ ಕೋಡ್ ಕಳುಹಿಸಿ"
 }

@@ -9,6 +9,8 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { Button } from '@/components/ui/button';
 import { PhoneInput, toE164 } from '@/components/auth/phone-input';
 import { useAuth } from '@/contexts/auth-context';
+import { useConsentConfig } from '@/hooks/use-consent-config';
+import { ConsentModal, type ConsentModalTab } from '@/components/consent/consent-modal';
 import {
   submitGuardian,
   type SubmitGuardianBody,
@@ -48,6 +50,10 @@ export function GuardianFormStep({
 }: GuardianFormStepProps) {
   const { t } = useTranslation();
   const { user } = useAuth();
+  const { config: consentConfig } = useConsentConfig();
+  // View the T&C / Privacy text in-app (same as everywhere else) instead of
+  // navigating away and losing the half-filled guardian form.
+  const [consentTab, setConsentTab] = React.useState<ConsentModalTab | null>(null);
   const compareContact = ownContact ?? { email: user?.email, phoneNumber: user?.phoneNumber };
 
   const [guardianName, setGuardianName] = React.useState('');
@@ -170,10 +176,20 @@ export function GuardianFormStep({
   };
 
   return (
+    <>
+    {consentConfig && consentTab && (
+      <ConsentModal
+        open
+        mode="view"
+        initialTab={consentTab}
+        config={consentConfig}
+        onOpenChange={(next) => { if (!next) setConsentTab(null); }}
+      />
+    )}
     <form onSubmit={handleSubmit} className="flex flex-col gap-4">
       <div className="space-y-1.5">
         <Label htmlFor="u18-guardian-name">
-          {t('u18.guardian_label_parent_name', "My parent's or Guardian Name")} *
+          {t('u18.guardian_label_parent_name', 'Guardian Name')} *
         </Label>
         <Input
           id="u18-guardian-name"
@@ -186,7 +202,7 @@ export function GuardianFormStep({
 
       <div className="space-y-1.5">
         <Label htmlFor="u18-guardian-email">
-          {t('u18.guardian_label_parent_email', "Parent's or Guardian Email")}
+          {t('u18.guardian_label_parent_email', 'Guardian Email')}
         </Label>
         <Input
           id="u18-guardian-email"
@@ -200,7 +216,7 @@ export function GuardianFormStep({
 
       <div className="space-y-1.5">
         <Label htmlFor="u18-guardian-phone">
-          {t('u18.guardian_label_parent_phone', "Parent's or Guardian Phone Number")}
+          {t('u18.guardian_label_parent_phone', 'Guardian Phone Number')}
         </Label>
         <PhoneInput
           id="u18-guardian-phone"
@@ -245,7 +261,18 @@ export function GuardianFormStep({
         />
         <Label htmlFor="u18-guardian-terms" className="text-sm font-normal leading-snug cursor-pointer">
           {t('u18.guardian_accept_terms_prefix', 'On behalf of my ward, I accept the ')}
-          <a href="/terms" target="_blank" rel="noreferrer" className="underline">
+          {/* Anchor (no href) so it stays a non-labelable element — a <button>
+              here would become a second control associated with this label.
+              Opens the in-app viewer instead of navigating away. */}
+          <a
+            role="button"
+            tabIndex={0}
+            onClick={(e) => { e.preventDefault(); e.stopPropagation(); setConsentTab('terms'); }}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.stopPropagation(); setConsentTab('terms'); }
+            }}
+            className="underline text-primary cursor-pointer"
+          >
             {t('u18.terms_link', 'Terms and Conditions')}
           </a>
         </Label>
@@ -260,7 +287,15 @@ export function GuardianFormStep({
         />
         <Label htmlFor="u18-guardian-privacy" className="text-sm font-normal leading-snug cursor-pointer">
           {t('u18.guardian_consent_privacy_prefix', 'On behalf of my ward, I consent to Data ')}
-          <a href="/privacy" target="_blank" rel="noreferrer" className="underline">
+          <a
+            role="button"
+            tabIndex={0}
+            onClick={(e) => { e.preventDefault(); e.stopPropagation(); setConsentTab('privacy'); }}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.stopPropagation(); setConsentTab('privacy'); }
+            }}
+            className="underline text-primary cursor-pointer"
+          >
             {t('u18.privacy_link', 'Privacy Policy')}
           </a>
         </Label>
@@ -273,5 +308,6 @@ export function GuardianFormStep({
         {t('u18.guardian_send_otp', 'Send OTP')}
       </Button>
     </form>
+    </>
   );
 }

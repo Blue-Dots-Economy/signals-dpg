@@ -1,5 +1,7 @@
 import * as React from 'react';
 import { useTranslation } from 'react-i18next';
+import { CheckCircle2 } from 'lucide-react';
+import { Button } from '@/components/ui/button';
 import {
   startSignupGuardian,
   verifySignupGuardian,
@@ -42,7 +44,10 @@ export function SignupGuardianFlow({
   onComplete,
 }: SignupGuardianFlowProps) {
   const { t } = useTranslation();
-  const [step, setStep] = React.useState<'guardian' | 'otp'>('guardian');
+  // 'verified' is an explicit hand-off step AFTER the guardian OTP: the ward's
+  // own verification is a separate thing, so we don't silently jump to the user
+  // OTP screen — they click to continue.
+  const [step, setStep] = React.useState<'guardian' | 'otp' | 'verified'>('guardian');
   const [guardianBody, setGuardianBody] = React.useState<SubmitGuardianBody | null>(null);
 
   const ownContact = {
@@ -71,7 +76,9 @@ export function SignupGuardianFlow({
         <h2 className="text-2xl font-bold text-foreground">
           {step === 'guardian'
             ? t('u18.step_title_guardian', 'Guardian details')
-            : t('u18.step_title_otp', 'Confirm with your guardian')}
+            : step === 'otp'
+              ? t('u18.step_title_otp', 'Confirm with your guardian')
+              : t('u18.guardian_verified_title', 'Guardian confirmed')}
         </h2>
         {step === 'guardian' && (
           <p className="mt-1 text-sm text-muted-foreground">
@@ -98,12 +105,29 @@ export function SignupGuardianFlow({
           network={network}
           brand={brand}
           verify={verify}
-          onVerified={onComplete}
+          onVerified={() => setStep('verified')}
           onResend={async () => {
             if (!guardianBody) return;
             await submit(guardianBody);
           }}
         />
+      )}
+
+      {step === 'verified' && (
+        <div className="flex flex-col gap-5">
+          <div className="flex items-start gap-3 rounded-md border border-emerald-500/40 bg-emerald-50 p-3 dark:bg-emerald-950/30">
+            <CheckCircle2 className="mt-0.5 h-5 w-5 shrink-0 text-emerald-600 dark:text-emerald-400" />
+            <p className="text-sm text-foreground">
+              {t(
+                'u18.guardian_verified_desc',
+                'Your guardian has confirmed. Next, verify your own number to finish creating your account.',
+              )}
+            </p>
+          </div>
+          <Button type="button" onClick={onComplete} className="w-full">
+            {t('u18.guardian_verified_continue', 'Verify my number to login')}
+          </Button>
+        </div>
       )}
     </div>
   );

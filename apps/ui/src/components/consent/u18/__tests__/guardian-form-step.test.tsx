@@ -14,6 +14,12 @@ vi.mock('@/contexts/auth-context', () => ({
   }),
 }));
 
+// The T&C / Privacy links open an in-app ConsentModal via this hook (react-query
+// backed); the form tests never open it, so a null config is enough.
+vi.mock('@/hooks/use-consent-config', () => ({
+  useConsentConfig: () => ({ config: null, isLoading: false }),
+}));
+
 async function renderForm(onSubmitted: (body: unknown) => void) {
   const { GuardianFormStep } = await import('../guardian-form-step');
   render(

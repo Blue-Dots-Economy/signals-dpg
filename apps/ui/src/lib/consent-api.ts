@@ -247,3 +247,41 @@ export async function verifyProfileConsentOtp(
   );
   return response.data;
 }
+
+// Pre-create guardian consent: verified BEFORE the item exists, so a minor's
+// profile row isn't written until the guardian approves (mirrors self-signup).
+export interface ProfilePrecreateRef {
+  network: string;
+  brand?: string | null;
+  item_domain: string;
+}
+
+export async function issueProfilePrecreateOtp(
+  body: ProfilePrecreateRef,
+): Promise<{ otpSent: boolean }> {
+  const response = await apiClient.post<{ otpSent: boolean }>(
+    '/api/v1/consent/u18/profile-consent/precreate/issue',
+    body,
+  );
+  return response.data;
+}
+
+export async function verifyProfilePrecreateOtp(
+  body: ProfilePrecreateRef & { otp: string },
+): Promise<{ verified: boolean }> {
+  const response = await apiClient.post<{ verified: boolean }>(
+    '/api/v1/consent/u18/profile-consent/precreate/verify',
+    body,
+  );
+  return response.data;
+}
+
+export async function finalizeProfileConsent(
+  body: ProfileConsentOtpItemRef,
+): Promise<{ promoted: boolean }> {
+  const response = await apiClient.post<{ promoted: boolean }>(
+    '/api/v1/consent/u18/profile-consent/finalize',
+    body,
+  );
+  return response.data;
+}
