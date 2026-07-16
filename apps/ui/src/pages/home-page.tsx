@@ -51,12 +51,16 @@ import {
   getProfileConsentStatus,
   acceptProfileConsent,
   getU18Status,
+  issueProfileConsentOtp,
+  verifyProfileConsentOtp,
   type U18StatusResponse,
+  type ProfileConsentOtpItemRef,
 } from '@/lib/consent-api';
 import { useConsentConfig } from '@/hooks/use-consent-config';
 import { useConsentGate } from '@/hooks/use-consent-gate';
 import { useNetworkTheme } from '@/theme/theme-provider';
 import { ProfileConsentModal } from '@/components/consent/profile-consent-modal';
+import { GuardianOtpDialog } from '@/components/actions/guardian-otp-dialog';
 import { U18GuardianFlow } from '@/components/consent/u18/u18-guardian-flow';
 import { isGuardianConsentRequiredDomain } from '@/lib/guardian-consent';
 
@@ -241,6 +245,10 @@ export function HomePage() {
   const [consentedProfileIds, setConsentedProfileIds] = React.useState<Set<string>>(new Set());
   const [consentLoaded, setConsentLoaded] = React.useState(false);
   const [pendingConsentProfileId, setPendingConsentProfileId] = React.useState<string | null>(null);
+  // For a MINOR, profile_creation consent is guardian-given: an OTP is issued
+  // to the guardian and this holds the item ref while the guardian-OTP dialog
+  // is open (D13). null for adults (they self-accept via ProfileConsentModal).
+  const [guardianProfileRef, setGuardianProfileRef] = React.useState<ProfileConsentOtpItemRef | null>(null);
   const [loading, setLoading] = React.useState(false);
   const browseSelection = useCardSelection();
   const [bulkConnectOpen, setBulkConnectOpen] = React.useState(false);
@@ -567,13 +575,12 @@ export function HomePage() {
   // the ordinary consent flow (ProfileConsentModal) handles terms/privacy.
   const u18ResolvedAdult = u18Status?.hasBirthData === true && u18Status.isMinor === false;
 
-  // A guardian has already been verified for this ward → the flow (including
-  // the DOB step) must never run again. This is the "reuse the flag" fix: once
-  // done at login/first-visit, creating a profile or revisiting won't re-ask.
-  const u18GuardianAlreadyDone = u18Status?.guardianVerified === true;
-
-  // Skip the DOB step when birth data is already stored (captured at login);
-  // only capture it here when nothing is stored yet.
+  // DOB is captured ONCE and reused — skip the DOB step when birth data is
+  // already stored; only capture it here when nothing is stored yet. Guardian
+  // verification itself is NOT skipped by a prior verify: the account
+  // terms/privacy flow shows whenever those consents are actually needed (e.g.
+  // a version bump, D15), and profile-creation / per-action guardian OTP are
+  // gated separately.
   const u18InitialStep: 'dob' | 'guardian' = u18Status?.hasBirthData ? 'guardian' : 'dob';
 
   const showU18GuardianFlow =
@@ -582,8 +589,7 @@ export function HomePage() {
     u18NeededConsent.length > 0 &&
     !guardianFlowDismissed &&
     !u18StatusLoading &&
-    !u18ResolvedAdult &&
-    !u18GuardianAlreadyDone;
+    !u18ResolvedAdult;
 
   // Sort a card-item array (item_locations stored in .data) nearest-first when userLocation is known.
   // Items without locations sort last (nearestDistanceMeters returns Infinity for empty/missing arrays).
@@ -1032,6 +1038,28 @@ export function HomePage() {
           setPendingConsentProfileId(null);
           return;
         }
+        // A minor's profile_creation consent is GUARDIAN-given (D13): issue a
+        // guardian OTP and hand off to the guardian-OTP dialog instead of the
+        // ward self-accepting. Adults keep the self-accept path below.
+        if (u18Status?.isMinor === true) {
+          const ref: ProfileConsentOtpItemRef = {
+            network: network.id,
+            brand: brand === 'standard' ? null : brand,
+            item_domain: profile.item_domain,
+            item_type: profile.item_type,
+            item_id: profile.item_id,
+          };
+          try {
+            const { otpSent } = await issueProfileConsentOtp(ref);
+            if (otpSent) {
+              setPendingConsentProfileId(null);
+              setGuardianProfileRef(ref);
+            }
+          } catch {
+            toast.error(t('profile.error_generic_desc'));
+          }
+          return;
+        }
         try {
           await acceptProfileConsent({
             network: network.id,
@@ -1049,6 +1077,29 @@ export function HomePage() {
           toast.error(t('profile.error_generic_desc'));
           // Keep the modal open so the user can retry.
         }
+      }}
+    />
+  );
+
+  // Guardian OTP challenge for a MINOR's profile_creation consent (D13). The
+  // dialog resubmits the entered code via verifyProfileConsentOtp; on success
+  // the server records the guardian consent and (if fields complete) promotes
+  // the profile to live.
+  const guardianProfileConsentModal = (
+    <GuardianOtpDialog
+      open={!!guardianProfileRef}
+      onOpenChange={(open) => { if (!open) setGuardianProfileRef(null); }}
+      onSubmitOtp={async (otp) => {
+        const ref = guardianProfileRef;
+        if (!ref || !network?.id) return;
+        // Throws on an invalid/expired code → GuardianOtpDialog shows the inline
+        // error and keeps itself open for a retry.
+        await verifyProfileConsentOtp({ ...ref, otp });
+        setConsentedProfileIds((prev) => new Set([...prev, ref.item_id]));
+        setActiveProfileId(ref.item_id);
+        setStoredActiveProfileId(network.id, ref.item_id);
+        setGuardianProfileRef(null);
+        toast.success(t('profile.guardian_consent_recorded', 'Guardian confirmed your profile'));
       }}
     />
   );
@@ -1078,6 +1129,7 @@ export function HomePage() {
         </div>
         {u18GuardianFlowModal}
         {profileConsentModal}
+        {guardianProfileConsentModal}
       </>
     );
   }
@@ -1475,6 +1527,7 @@ export function HomePage() {
     </PageShell>
     {u18GuardianFlowModal}
     {profileConsentModal}
+        {guardianProfileConsentModal}
     </>
   );
 }
