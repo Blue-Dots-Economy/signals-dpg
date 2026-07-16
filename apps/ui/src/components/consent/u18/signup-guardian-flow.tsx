@@ -17,8 +17,8 @@ export interface SignupGuardianFlowProps {
   brand?: string | null;
   /** The ward's own signup identifier (no account exists yet). */
   identifier: SignupIdentifier;
-  birthYear: number;
-  birthMonth: number;
+  /** Ward's full date of birth captured on the DOB step. */
+  dateOfBirth: Date;
   /** Guardian OTP verified server-side — caller proceeds to the ward's own OTP. */
   onComplete: () => void;
 }
@@ -38,8 +38,7 @@ export function SignupGuardianFlow({
   domain,
   brand,
   identifier,
-  birthYear,
-  birthMonth,
+  dateOfBirth,
   onComplete,
 }: SignupGuardianFlowProps) {
   const { t } = useTranslation();
@@ -56,8 +55,7 @@ export function SignupGuardianFlow({
       network,
       domain,
       ...identifier,
-      birthYear,
-      birthMonth,
+      dateOfBirth: dateOfBirth.toISOString(),
       guardianName: body.guardianName,
       ...(body.guardianEmail ? { guardianEmail: body.guardianEmail } : {}),
       ...(body.guardianPhone ? { guardianPhone: body.guardianPhone } : {}),

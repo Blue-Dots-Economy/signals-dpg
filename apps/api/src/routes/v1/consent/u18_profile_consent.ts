@@ -11,7 +11,7 @@ import { consent_record } from '@api/db/postgres/schema';
 import { auth_middleware_if_enabled } from '@api/plugins/auth/auth_middleware';
 import { apiConfig } from '@/config';
 import { isMinor } from '@/services/minor';
-import { getMinorGuardian, getGuardianContactPlaintext } from '@/services/minor_guardian_repo';
+import { getWardDob, getGuardianContactPlaintext } from '@/services/minor_guardian_repo';
 import { resolveConsentVersion } from '@/services/consent_version';
 import {
   issueGuardianOtp, verifyGuardianOtp, assertVerifyAttemptAllowed, GuardianOtpError,
@@ -30,9 +30,9 @@ async function assertOwnedMinorItem(userId: string, body: { network: string; ite
       eq(items.created_by, userId),
     )).limit(1);
   if (!owner) return { ok: false as const, code: 'NOT_ITEM_OWNER' };
-  const mg = await getMinorGuardian(userId);
-  if (!mg) return { ok: false as const, code: 'DOB_REQUIRED' };
-  if (!isMinor(mg.birthYear, mg.birthMonth)) return { ok: false as const, code: 'NOT_A_MINOR' };
+  const dob = await getWardDob(userId);
+  if (!dob) return { ok: false as const, code: 'DOB_REQUIRED' };
+  if (!isMinor(dob)) return { ok: false as const, code: 'NOT_A_MINOR' };
   return { ok: true as const };
 }
 

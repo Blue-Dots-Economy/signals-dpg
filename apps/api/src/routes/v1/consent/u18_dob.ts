@@ -4,7 +4,7 @@ import { U18DobBodySchema, U18DobResponseSchema, type U18DobBody } from '@dpg/sc
 import { auth_middleware_if_enabled } from '@api/plugins/auth/auth_middleware';
 import { apiConfig } from '@/config';
 import { isMinor } from '@/services/minor';
-import { upsertBirthMonth } from '@/services/minor_guardian_repo';
+import { setWardDob } from '@/services/minor_guardian_repo';
 
 type Req = FastifyRequest<{ Body: U18DobBody }>;
 
@@ -22,17 +22,17 @@ export const u18_dob_handler = async (request: Req, reply: FastifyReply) => {
   const userId = request.user?.id;
   if (!userId) return reply.code(401).send({ error: 'UNAUTHORIZED', message: 'Authenticated user is required' });
 
-  const { network, birthYear, birthMonth } = request.body;
+  const { network, dateOfBirth } = request.body;
   if (!apiConfig.served_domains.some((b) => b.network === network)) {
     return reply.code(400).send({ error: 'UNKNOWN_NETWORK', message: `Network "${network}" is not served` });
   }
 
   try {
-    await upsertBirthMonth(userId, birthYear, birthMonth);
+    await setWardDob(userId, dateOfBirth);
   } catch (err) {
     request.log.error({ err }, 'Failed to persist U18 DOB');
     return reply.code(500).send({ error: 'DOB_WRITE_FAILED', message: 'Failed to record date of birth' });
   }
 
-  return reply.code(200).send({ isMinor: isMinor(birthYear, birthMonth) });
+  return reply.code(200).send({ isMinor: isMinor(dateOfBirth) });
 };

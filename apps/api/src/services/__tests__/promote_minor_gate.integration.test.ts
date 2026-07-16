@@ -179,13 +179,11 @@ describeIf(
         .where(eq(items.item_id, item_id));
       expect(seeded.lifecycle_status).toBe('draft');
 
-      // Ward is a clear minor (born 2012).
-      await db.insert(minor_guardian).values({
-        userId: minor_user_id,
-        birthYear: 2012,
-        birthMonth: 1,
-        guardianVerified: false,
-      });
+      // Ward is a clear minor (born 2012) — DOB lives on the user row now.
+      await db
+        .update(userTable)
+        .set({ dateOfBirth: new Date('2012-01-10') })
+        .where(eq(userTable.id, minor_user_id));
 
       // 1. Required fields are complete but no guardian profile_creation row
       //    exists yet → the gate fails closed and the item stays draft.

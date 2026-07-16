@@ -29,7 +29,7 @@ import type { DotNetworkDomain } from '@/engine/types';
 import { getServedScope } from '@/lib/served-binding';
 import type { SignupExtras } from '@/lib/signup-domain';
 import { SignupDobStep } from '@/components/consent/u18/signup-dob-step';
-import { isMinorFromBirth } from '@/lib/guardian-consent';
+import { isMinorFromDate } from '@/lib/guardian-consent';
 import { PhoneInput, toE164 } from '@/components/auth/phone-input';
 import {
   SignupGuardianFlow,
@@ -93,8 +93,7 @@ export function LoginPage() {
   const [signupGuardianGate, setSignupGuardianGate] = useState<{
     identifier: AuthIdentifier;
     domain: string;
-    birthYear: number;
-    birthMonth: number;
+    dateOfBirth: Date;
     resolvedName: string;
     resolvedSignupExtras: SignupExtras;
   } | null>(null);
@@ -269,12 +268,10 @@ export function LoginPage() {
   const handleSignupDob = async (date: Date) => {
     const gate = signupDobGate;
     if (!gate) return;
-    const birthYear = date.getFullYear();
-    const birthMonth = date.getMonth() + 1;
-    const extras: SignupExtras = { domain: gate.domain, birthMonth, birthYear };
+    const extras: SignupExtras = { domain: gate.domain, dateOfBirth: date.toISOString() };
     setSignupDobGate(null);
 
-    if (isMinorFromBirth(birthYear, birthMonth)) {
+    if (isMinorFromDate(date)) {
       toast.info(t('auth.minor_toast_title', "You're under 18"), {
         description: t(
           'auth.minor_toast_desc',
@@ -284,8 +281,7 @@ export function LoginPage() {
       setSignupGuardianGate({
         identifier: gate.identifier,
         domain: gate.domain,
-        birthYear,
-        birthMonth,
+        dateOfBirth: date,
         resolvedName: gate.resolvedName,
         resolvedSignupExtras: extras,
       });
@@ -428,8 +424,7 @@ export function LoginPage() {
                 ? { email: signupGuardianGate.identifier.email }
                 : { phoneNumber: signupGuardianGate.identifier.phoneNumber }) as SignupIdentifier
             }
-            birthYear={signupGuardianGate.birthYear}
-            birthMonth={signupGuardianGate.birthMonth}
+            dateOfBirth={signupGuardianGate.dateOfBirth}
             onComplete={handleGuardianComplete}
           />
         ) : !showSignupForm ? null : (

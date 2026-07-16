@@ -28,8 +28,7 @@ export function DobStep({ network, onResolved }: DobStepProps) {
     try {
       const result = await submitU18Dob({
         network,
-        birthYear: birthDate.getFullYear(),
-        birthMonth: birthDate.getMonth() + 1,
+        dateOfBirth: birthDate.toISOString(),
       });
       onResolved(result.isMinor);
     } catch (err) {

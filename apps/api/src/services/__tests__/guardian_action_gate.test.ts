@@ -7,9 +7,11 @@ vi.mock('@/network_configs', () => ({
 }));
 
 const getMinorGuardian = vi.fn();
+const getWardDob = vi.fn();
 const getGuardianContactPlaintext = vi.fn();
 vi.mock('@/services/minor_guardian_repo', () => ({
   getMinorGuardian: (...args: unknown[]) => getMinorGuardian(...args),
+  getWardDob: (...args: unknown[]) => getWardDob(...args),
   getGuardianContactPlaintext: (...args: unknown[]) => getGuardianContactPlaintext(...args),
 }));
 
@@ -66,34 +68,24 @@ describe('guardianActionGate', () => {
   it('returns not_required when the source domain is ungated', async () => {
     const result = await guardianActionGate({ ...baseInput, sourceDomain: 'provider' });
     expect(result).toEqual({ status: 'not_required' });
-    expect(getMinorGuardian).not.toHaveBeenCalled();
+    expect(getWardDob).not.toHaveBeenCalled();
   });
 
   it('returns not_required when gated but the ward is an adult (no minor_guardian row)', async () => {
-    getMinorGuardian.mockResolvedValue(null);
+    getWardDob.mockResolvedValue(null);
     const result = await guardianActionGate(baseInput);
     expect(result).toEqual({ status: 'not_required' });
     expect(issueGuardianOtp).not.toHaveBeenCalled();
   });
 
   it('returns not_required when gated but the ward is an adult (birth date says so)', async () => {
-    getMinorGuardian.mockResolvedValue({
-      birthYear: 1990,
-      birthMonth: 1,
-      guardianContactType: 'phone',
-      guardianVerified: true,
-    });
+    getWardDob.mockResolvedValue(new Date('1990-01-10'));
     const result = await guardianActionGate(baseInput);
     expect(result).toEqual({ status: 'not_required' });
   });
 
   it('issues an OTP and returns challenge_issued for a gated minor with no otp supplied', async () => {
-    getMinorGuardian.mockResolvedValue({
-      birthYear: 2015,
-      birthMonth: 1,
-      guardianContactType: 'phone',
-      guardianVerified: false,
-    });
+    getWardDob.mockResolvedValue(new Date('2015-01-10'));
     getGuardianContactPlaintext.mockResolvedValue({ contact: '+911234', contactType: 'phone' });
     issueGuardianOtp.mockResolvedValue(undefined);
 
@@ -108,12 +100,7 @@ describe('guardianActionGate', () => {
   });
 
   it('returns verified with the scope when the supplied otp checks out', async () => {
-    getMinorGuardian.mockResolvedValue({
-      birthYear: 2015,
-      birthMonth: 1,
-      guardianContactType: 'phone',
-      guardianVerified: false,
-    });
+    getWardDob.mockResolvedValue(new Date('2015-01-10'));
     assertVerifyAttemptAllowed.mockResolvedValue(undefined);
     verifyGuardianOtp.mockResolvedValue(true);
 
@@ -124,12 +111,7 @@ describe('guardianActionGate', () => {
   });
 
   it('returns invalid_otp when the supplied otp is wrong', async () => {
-    getMinorGuardian.mockResolvedValue({
-      birthYear: 2015,
-      birthMonth: 1,
-      guardianContactType: 'phone',
-      guardianVerified: false,
-    });
+    getWardDob.mockResolvedValue(new Date('2015-01-10'));
     assertVerifyAttemptAllowed.mockResolvedValue(undefined);
     verifyGuardianOtp.mockResolvedValue(false);
 
@@ -139,12 +121,7 @@ describe('guardianActionGate', () => {
   });
 
   it('returns throttled when verify attempts are exhausted', async () => {
-    getMinorGuardian.mockResolvedValue({
-      birthYear: 2015,
-      birthMonth: 1,
-      guardianContactType: 'phone',
-      guardianVerified: false,
-    });
+    getWardDob.mockResolvedValue(new Date('2015-01-10'));
     assertVerifyAttemptAllowed.mockRejectedValue(new GuardianOtpError('VERIFY_THROTTLED'));
 
     const result = await guardianActionGate({ ...baseInput, otp: '123456' });
@@ -154,12 +131,7 @@ describe('guardianActionGate', () => {
   });
 
   it('returns rate_limited when issuing throws RATE_LIMITED', async () => {
-    getMinorGuardian.mockResolvedValue({
-      birthYear: 2015,
-      birthMonth: 1,
-      guardianContactType: 'phone',
-      guardianVerified: false,
-    });
+    getWardDob.mockResolvedValue(new Date('2015-01-10'));
     getGuardianContactPlaintext.mockResolvedValue({ contact: '+911234', contactType: 'phone' });
     issueGuardianOtp.mockRejectedValue(new GuardianOtpError('RATE_LIMITED'));
 
@@ -169,12 +141,7 @@ describe('guardianActionGate', () => {
   });
 
   it('returns no_provider when issuing throws NO_OTP_PROVIDER', async () => {
-    getMinorGuardian.mockResolvedValue({
-      birthYear: 2015,
-      birthMonth: 1,
-      guardianContactType: 'phone',
-      guardianVerified: false,
-    });
+    getWardDob.mockResolvedValue(new Date('2015-01-10'));
     getGuardianContactPlaintext.mockResolvedValue({ contact: '+911234', contactType: 'phone' });
     issueGuardianOtp.mockRejectedValue(new GuardianOtpError('NO_OTP_PROVIDER'));
 
@@ -184,12 +151,7 @@ describe('guardianActionGate', () => {
   });
 
   it('returns no_provider when the guardian has no contact on file', async () => {
-    getMinorGuardian.mockResolvedValue({
-      birthYear: 2015,
-      birthMonth: 1,
-      guardianContactType: null,
-      guardianVerified: false,
-    });
+    getWardDob.mockResolvedValue(new Date('2015-01-10'));
     getGuardianContactPlaintext.mockResolvedValue(null);
 
     const result = await guardianActionGate(baseInput);

@@ -8,7 +8,7 @@ import { auth_middleware_if_enabled } from '@api/plugins/auth/auth_middleware';
 import { apiConfig } from '@/config';
 import { isMinor } from '@/services/minor';
 import {
-  getMinorGuardian,
+  getWardDob,
   upsertGuardianDetails,
   getGuardianContactPlaintext,
   resolveOtpChannel,
@@ -41,9 +41,9 @@ export const u18_guardian_handler = async (request: Req, reply: FastifyReply) =>
     return reply.code(400).send({ error: 'UNKNOWN_NETWORK', message: `Network "${body.network}" is not served` });
   }
 
-  const mg = await getMinorGuardian(userId);
-  if (!mg) return reply.code(409).send({ error: 'DOB_REQUIRED', message: 'Submit date of birth before guardian details' });
-  if (!isMinor(mg.birthYear, mg.birthMonth)) {
+  const dob = await getWardDob(userId);
+  if (!dob) return reply.code(409).send({ error: 'DOB_REQUIRED', message: 'Submit date of birth before guardian details' });
+  if (!isMinor(dob)) {
     return reply.code(409).send({ error: 'NOT_A_MINOR', message: 'Guardian flow applies only to under-18 users' });
   }
 

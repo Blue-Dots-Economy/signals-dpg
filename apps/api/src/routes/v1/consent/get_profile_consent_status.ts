@@ -5,7 +5,7 @@ import { and, eq } from 'drizzle-orm';
 import { db } from '@api/db/postgres/drizzle_config';
 import { consent_record } from '@api/db/postgres/schema';
 import { auth_middleware_if_enabled } from '@api/plugins/auth/auth_middleware';
-import { getMinorGuardian } from '@/services/minor_guardian_repo';
+import { getWardDob } from '@/services/minor_guardian_repo';
 import { isMinor } from '@/services/minor';
 
 const ProfileStatusQuerySchema = z.object({ network: z.string().min(1) });
@@ -47,8 +47,8 @@ export const get_profile_consent_status_handler = async (
     // self row `create_item` writes at create time (source='profile') does NOT
     // satisfy it, so the client keeps prompting until the guardian confirms via
     // OTP (which writes source='guardian'). Adults: any profile_creation row.
-    const mg = await getMinorGuardian(userId);
-    const isMinorWard = !!mg && isMinor(mg.birthYear, mg.birthMonth);
+    const dob = await getWardDob(userId);
+    const isMinorWard = dob !== null && isMinor(dob);
 
     const conditions = [
       eq(consent_record.userId, userId),

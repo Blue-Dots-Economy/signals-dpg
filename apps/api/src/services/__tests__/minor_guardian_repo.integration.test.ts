@@ -3,7 +3,6 @@ import { eq } from 'drizzle-orm';
 import { db } from '@api/db/postgres/drizzle_config';
 import { minor_guardian } from '@api/db/postgres/schema';
 import {
-  upsertBirthMonth,
   getMinorGuardian,
   upsertGuardianDetails,
   getGuardianContactPlaintext,
@@ -17,12 +16,6 @@ afterAll(async () => {
 });
 
 describe('minor_guardian_repo (integration)', () => {
-  it('upserts birth month and reads it back', async () => {
-    await upsertBirthMonth(uid, 2010, 6);
-    const row = await getMinorGuardian(uid);
-    expect(row).toMatchObject({ birthYear: 2010, birthMonth: 6, guardianVerified: false });
-  });
-
   it('stores guardian details encrypted, decrypts contact, and flips verified', async () => {
     await upsertGuardianDetails(uid, {
       guardianName: 'Parent Name',

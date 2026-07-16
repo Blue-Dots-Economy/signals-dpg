@@ -1,6 +1,6 @@
 import { and, eq, ne, count } from 'drizzle-orm';
 import { db } from '@api/db/postgres/drizzle_config';
-import { minor_guardian } from '@api/db/postgres/schema';
+import { minor_guardian, user } from '@api/db/postgres/schema';
 import { encryptGuardianField, decryptGuardianField, guardianRef } from '@/services/guardian_pii';
 
 type GuardianContactType = 'phone' | 'email';
@@ -24,31 +24,27 @@ export async function countWardsForGuardian(
   return row?.n ?? 0;
 }
 
-/** Insert or update the ward's birth year/month (no exact day). */
-export async function upsertBirthMonth(
-  userId: string,
-  birthYear: number,
-  birthMonth: number,
-): Promise<void> {
-  await db
-    .insert(minor_guardian)
-    .values({ userId, birthYear, birthMonth })
-    .onConflictDoUpdate({
-      target: minor_guardian.userId,
-      set: { birthYear, birthMonth, updatedAt: new Date() },
-    });
+/** The ward's date of birth (full date), stored on the user row. */
+export async function getWardDob(userId: string, exec: DbOrTx = db): Promise<Date | null> {
+  const [row] = await exec
+    .select({ dob: user.dateOfBirth })
+    .from(user)
+    .where(eq(user.id, userId))
+    .limit(1);
+  return row?.dob ?? null;
+}
+
+/** Persist the ward's date of birth on the user row. */
+export async function setWardDob(userId: string, dob: Date, exec: DbOrTx = db): Promise<void> {
+  await exec.update(user).set({ dateOfBirth: dob, updatedAt: new Date() }).where(eq(user.id, userId));
 }
 
 export async function getMinorGuardian(userId: string): Promise<{
-  birthYear: number;
-  birthMonth: number;
   guardianContactType: GuardianContactType | null;
   guardianVerified: boolean;
 } | null> {
   const [row] = await db
     .select({
-      birthYear: minor_guardian.birthYear,
-      birthMonth: minor_guardian.birthMonth,
       guardianContactType: minor_guardian.guardianContactType,
       guardianVerified: minor_guardian.guardianVerified,
     })
@@ -57,8 +53,6 @@ export async function getMinorGuardian(userId: string): Promise<{
     .limit(1);
   if (!row) return null;
   return {
-    birthYear: row.birthYear,
-    birthMonth: row.birthMonth,
     guardianContactType: (row.guardianContactType as GuardianContactType | null) ?? null,
     guardianVerified: row.guardianVerified,
   };
@@ -89,19 +83,24 @@ export async function upsertGuardianDetails(
   input: { guardianName: string; guardianEmail?: string | null; guardianPhone?: string | null },
 ): Promise<void> {
   const channel = resolveOtpChannel(input);
+  // Upsert: DOB no longer creates a minor_guardian row (it lives on user now),
+  // so this may be the first write of the ward's row.
+  const fields = {
+    guardianName: encryptGuardianField(input.guardianName),
+    guardianContact: encryptGuardianField(channel.contact),
+    guardianContactType: channel.contactType,
+    guardianEmail: input.guardianEmail ? encryptGuardianField(input.guardianEmail) : null,
+    guardianPhone: input.guardianPhone ? encryptGuardianField(input.guardianPhone) : null,
+    guardianRef: guardianRef(channel.contact),
+    guardianVerified: false,
+  };
   await db
-    .update(minor_guardian)
-    .set({
-      guardianName: encryptGuardianField(input.guardianName),
-      guardianContact: encryptGuardianField(channel.contact),
-      guardianContactType: channel.contactType,
-      guardianEmail: input.guardianEmail ? encryptGuardianField(input.guardianEmail) : null,
-      guardianPhone: input.guardianPhone ? encryptGuardianField(input.guardianPhone) : null,
-      guardianRef: guardianRef(channel.contact),
-      guardianVerified: false,
-      updatedAt: new Date(),
-    })
-    .where(eq(minor_guardian.userId, userId));
+    .insert(minor_guardian)
+    .values({ userId, ...fields })
+    .onConflictDoUpdate({
+      target: minor_guardian.userId,
+      set: { ...fields, updatedAt: new Date() },
+    });
 }
 
 /** Decrypt the guardian contact for a transient use (OTP send). */
@@ -143,8 +142,6 @@ export async function setGuardianVerified(userId: string): Promise<void> {
 export async function writeEncryptedGuardian(
   userId: string,
   input: {
-    birthYear: number;
-    birthMonth: number;
     guardianNameEnc: string;
     guardianContactEnc: string;
     guardianContactType: GuardianContactType;
@@ -155,8 +152,6 @@ export async function writeEncryptedGuardian(
   exec: DbOrTx = db,
 ): Promise<void> {
   const fields = {
-    birthYear: input.birthYear,
-    birthMonth: input.birthMonth,
     guardianName: input.guardianNameEnc,
     guardianContact: input.guardianContactEnc,
     guardianContactType: input.guardianContactType,

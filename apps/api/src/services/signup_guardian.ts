@@ -32,6 +32,7 @@ import {
   writeEncryptedGuardian,
   resolveOtpChannel,
   countWardsForGuardian,
+  setWardDob,
 } from '@/services/minor_guardian_repo';
 
 /** The ward's own signup identifier — exactly one of the two. */
@@ -83,8 +84,7 @@ const otpScope = (hash: string) => `signup_guardian:${hash}`;
 interface PendingSignupGuardian {
   network: string;
   domain: string;
-  birthYear: number;
-  birthMonth: number;
+  dateOfBirth: string; // ISO — stored on user.date_of_birth at materialize
   guardianName: string; // already encrypted
   guardianContact: string; // already encrypted — the OTP channel
   guardianContactType: GuardianContactType;
@@ -117,8 +117,7 @@ export interface StartSignupGuardianInput {
   network: string;
   domain: string;
   identifier: SignupIdentifier;
-  birthYear: number;
-  birthMonth: number;
+  dateOfBirth: Date;
   guardianName: string;
   guardianEmail?: string;
   guardianPhone?: string;
@@ -143,7 +142,7 @@ export async function startSignupGuardian(input: StartSignupGuardianInput): Prom
     throw new SignupGuardianError('NOT_GATED');
   }
 
-  if (!isMinor(input.birthYear, input.birthMonth)) {
+  if (!isMinor(input.dateOfBirth)) {
     throw new SignupGuardianError('NOT_A_MINOR');
   }
 
@@ -174,8 +173,7 @@ export async function startSignupGuardian(input: StartSignupGuardianInput): Prom
   const pending: PendingSignupGuardian = {
     network: input.network,
     domain: input.domain,
-    birthYear: input.birthYear,
-    birthMonth: input.birthMonth,
+    dateOfBirth: input.dateOfBirth.toISOString(),
     guardianName: encryptGuardianField(input.guardianName),
     guardianContact: encryptGuardianField(channel.contact),
     guardianContactType: channel.contactType,
@@ -268,11 +266,11 @@ export async function materializeSignupGuardian(user: MaterializeSignupGuardianU
 
     const acceptedAt = new Date();
     await db.transaction(async (tx) => {
+      // DOB lives on the user row now (captured pre-auth in the pending record).
+      await setWardDob(user.id, new Date(pending.dateOfBirth), tx);
       await writeEncryptedGuardian(
         user.id,
         {
-          birthYear: pending.birthYear,
-          birthMonth: pending.birthMonth,
           guardianNameEnc: pending.guardianName,
           guardianContactEnc: pending.guardianContact,
           guardianContactType: pending.guardianContactType,

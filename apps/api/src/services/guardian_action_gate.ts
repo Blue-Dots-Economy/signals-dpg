@@ -1,5 +1,5 @@
 import { getNetworkConfigById } from '@/network_configs';
-import { getMinorGuardian, getGuardianContactPlaintext } from '@/services/minor_guardian_repo';
+import { getWardDob, getGuardianContactPlaintext } from '@/services/minor_guardian_repo';
 import { isMinor, guardianConsentRequired } from '@/services/minor';
 import {
   issueGuardianOtp,
@@ -39,8 +39,8 @@ export async function guardianActionGate(input: GateInput): Promise<GateResult> 
     return { status: 'not_required' };
   }
 
-  const mg = await getMinorGuardian(input.wardUserId);
-  if (!mg || !isMinor(mg.birthYear, mg.birthMonth)) {
+  const dob = await getWardDob(input.wardUserId);
+  if (!dob || !isMinor(dob)) {
     return { status: 'not_required' };
   }
 

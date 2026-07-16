@@ -17,7 +17,7 @@ import { hasAcceptedProfileConsent } from './consent_acceptance.js';
 import { is_populated } from './metrics/profile_completion.js';
 import { decryptPiiBlob, encryptPiiBlob, getPiiKey } from '@dpg/auth';
 import { items } from '@dpg/database';
-import { minor_guardian, consent_record } from '@api/db/postgres/schema';
+import { user, consent_record } from '@api/db/postgres/schema';
 import { db } from '@api/db/postgres/drizzle_config';
 import { isServedDomainBinding } from '@/utils/served_domain_guard';
 import { getNetworkConfigById } from '@/network_configs';
@@ -355,12 +355,12 @@ export async function promoteItemOnProfileConsent(
   // so the adult self-consent path cannot promote a minor (spec §7 / D11/D13).
   const networkConfig = await getNetworkConfigById(item.item_network);
   if (guardianConsentRequired(networkConfig, item.item_domain)) {
-    const [mg] = await exec
-      .select({ birthYear: minor_guardian.birthYear, birthMonth: minor_guardian.birthMonth })
-      .from(minor_guardian)
-      .where(eq(minor_guardian.userId, item.created_by))
+    const [ward] = await exec
+      .select({ dob: user.dateOfBirth })
+      .from(user)
+      .where(eq(user.id, item.created_by))
       .limit(1);
-    if (mg && isMinor(mg.birthYear, mg.birthMonth)) {
+    if (ward?.dob && isMinor(ward.dob)) {
       const [guardianRow] = await exec
         .select({ id: consent_record.id })
         .from(consent_record)

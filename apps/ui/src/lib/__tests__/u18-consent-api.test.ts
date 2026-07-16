@@ -8,7 +8,7 @@ describe('U18 consent-api methods', () => {
     vi.doMock('../api-client', () => ({ createApiClient: () => ({ post }) }));
     const { submitU18Dob } = await import('../consent-api');
 
-    const body = { network: 'blue_dot', birthYear: 2012, birthMonth: 5 };
+    const body = { network: 'blue_dot', dateOfBirth: '2012-05-10T00:00:00.000Z' };
     await expect(submitU18Dob(body)).resolves.toEqual({ isMinor: true });
     expect(post).toHaveBeenCalledWith('/api/v1/consent/u18/dob', body);
   });

@@ -109,16 +109,16 @@ export function OtpPage() {
       // case. Best-effort like the consent-accept write above — never block
       // signup on it.
       if (!state.userExists && state.signupExtras) {
-        const { domain, birthMonth, birthYear } = state.signupExtras;
+        const { domain, dateOfBirth } = state.signupExtras;
         // Hand the chosen domain off to profile-form-page (one-shot; it
         // clears this once read) so profile creation doesn't ask again.
         setStoredSignupDomain(themeId, domain);
         // DOB is only collected for guardian-gated domains (a separate signup
         // step); ungated signups carry no birth data, so there's nothing to
         // persist here.
-        if (typeof birthMonth === 'number' && typeof birthYear === 'number') {
+        if (dateOfBirth) {
           try {
-            await submitU18Dob({ network: themeId, birthMonth, birthYear });
+            await submitU18Dob({ network: themeId, dateOfBirth });
           } catch {
             toast.error(t('auth.toast_consent_persist_error', 'Could not save your consent. You may be asked again next time.'));
           }

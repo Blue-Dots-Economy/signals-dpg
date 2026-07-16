@@ -44,13 +44,13 @@ vi.mock('react-router-dom', async (orig) => ({
 // without pulling in the child's internals — those have their own tests.
 const signupGuardianOnComplete = vi.fn();
 vi.mock('@/components/consent/u18/signup-guardian-flow', () => ({
-  SignupGuardianFlow: (props: { domain: string; birthYear: number; onComplete: () => void }) => {
+  SignupGuardianFlow: (props: { domain: string; dateOfBirth: Date; onComplete: () => void }) => {
     signupGuardianOnComplete.mockImplementation(props.onComplete);
     return (
       <div
         data-testid="signup-guardian-flow"
         data-domain={props.domain}
-        data-birth-year={props.birthYear}
+        data-birth-year={props.dateOfBirth instanceof Date ? String(props.dateOfBirth.getFullYear()) : ''}
       />
     );
   },
@@ -276,7 +276,7 @@ describe('LoginPage', () => {
         '/auth/otp',
         expect.objectContaining({
           state: expect.objectContaining({
-            signupExtras: { domain: 'seeker', birthMonth: 5, birthYear: 2015 },
+            signupExtras: expect.objectContaining({ domain: 'seeker', dateOfBirth: expect.stringMatching(/^2015-/) }),
             pendingConsent: null,
           }),
         }),
@@ -308,7 +308,7 @@ describe('LoginPage', () => {
         '/auth/otp',
         expect.objectContaining({
           state: expect.objectContaining({
-            signupExtras: { domain: 'seeker', birthMonth: 5, birthYear: 1990 },
+            signupExtras: expect.objectContaining({ domain: 'seeker', dateOfBirth: expect.stringMatching(/^1990-/) }),
           }),
         }),
       ));

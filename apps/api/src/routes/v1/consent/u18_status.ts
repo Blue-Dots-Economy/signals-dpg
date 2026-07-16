@@ -8,7 +8,7 @@ import {
 import { auth_middleware_if_enabled } from '@api/plugins/auth/auth_middleware';
 import { apiConfig } from '@/config';
 import { isMinor } from '@/services/minor';
-import { getMinorGuardian } from '@/services/minor_guardian_repo';
+import { getMinorGuardian, getWardDob } from '@/services/minor_guardian_repo';
 
 type Req = FastifyRequest<{ Querystring: U18StatusQuery }>;
 
@@ -47,14 +47,11 @@ export const u18_status_handler = async (request: Req, reply: FastifyReply) => {
     return reply.code(400).send({ error: 'UNKNOWN_NETWORK', message: `Network "${network}" is not served` });
   }
 
+  const dob = await getWardDob(userId);
   const mg = await getMinorGuardian(userId);
-  if (!mg) {
-    return reply.code(200).send({ hasBirthData: false, isMinor: false, guardianVerified: false });
-  }
-
   return reply.code(200).send({
-    hasBirthData: true,
-    isMinor: isMinor(mg.birthYear, mg.birthMonth),
-    guardianVerified: mg.guardianVerified,
+    hasBirthData: dob !== null,
+    isMinor: dob !== null && isMinor(dob),
+    guardianVerified: mg?.guardianVerified ?? false,
   });
 };

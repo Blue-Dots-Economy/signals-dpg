@@ -94,7 +94,7 @@ describeIf(`U18 guardian action gate — POST /action/update-status (${NETWORK}/
   let consentRecordTable: typeof import('@api/db/postgres/schema').consent_record;
   let minorGuardianTable: typeof import('@api/db/postgres/schema').minor_guardian;
   let redis: typeof import('@api/db/secondary/redis').redis;
-  let upsertBirthMonth: typeof import('@/services/minor_guardian_repo').upsertBirthMonth;
+  let setWardDob: typeof import('@/services/minor_guardian_repo').setWardDob;
   let upsertGuardianDetails: typeof import('@/services/minor_guardian_repo').upsertGuardianDetails;
 
   const listen_port = Number(process.env.API_PORT ?? 2742);
@@ -185,7 +185,7 @@ describeIf(`U18 guardian action gate — POST /action/update-status (${NETWORK}/
     consentRecordTable = api_schema_mod.consent_record;
     minorGuardianTable = api_schema_mod.minor_guardian;
     redis = redis_mod.redis;
-    upsertBirthMonth = minor_guardian_repo_mod.upsertBirthMonth;
+    setWardDob = minor_guardian_repo_mod.setWardDob;
     upsertGuardianDetails = minor_guardian_repo_mod.upsertGuardianDetails;
 
     const action_routes_mod = await import('../action_routes.js');
@@ -293,7 +293,7 @@ describeIf(`U18 guardian action gate — POST /action/update-status (${NETWORK}/
 
     // Minor provider: clear minor (born 2015) + guardian contact on file so
     // getGuardianContactPlaintext resolves and the OTP can be sent.
-    await upsertBirthMonth(minor_provider_user_id, 2015, 6);
+    await setWardDob(minor_provider_user_id, new Date('2015-06-15'));
     await upsertGuardianDetails(minor_provider_user_id, {
       guardianName: 'Test Guardian',
       guardianEmail: 'guardian-accept@example.com',

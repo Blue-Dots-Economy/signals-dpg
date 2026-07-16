@@ -1,4 +1,4 @@
-import { pgTable, text, integer, boolean, timestamp, index } from 'drizzle-orm/pg-core';
+import { pgTable, text, boolean, timestamp, index } from 'drizzle-orm/pg-core';
 
 /**
  * U18 guardian-consent record — one row per ward, keyed on the better-auth
@@ -11,8 +11,7 @@ import { pgTable, text, integer, boolean, timestamp, index } from 'drizzle-orm/p
  */
 export const minor_guardian = pgTable('minor_guardian', {
   userId: text('user_id').primaryKey(),
-  birthYear: integer('birth_year').notNull(),
-  birthMonth: integer('birth_month').notNull(),
+  // Birth date lives on `user.date_of_birth`; is_minor derives from it.
   guardianName: text('guardian_name'),
   // The OTP channel actually used (phone preferred when both are given).
   guardianContact: text('guardian_contact'),

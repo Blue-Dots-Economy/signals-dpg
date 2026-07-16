@@ -52,11 +52,12 @@ describe('DobStep', () => {
     await userEvent.click(screen.getByRole('button', { name: /continue/i }));
 
     await waitFor(() =>
-      expect(submitU18Dob).toHaveBeenCalledWith({
-        network: 'blue_dot',
-        birthYear: 2012,
-        birthMonth: 5,
-      }),
+      expect(submitU18Dob).toHaveBeenCalledWith(
+        expect.objectContaining({
+          network: 'blue_dot',
+          dateOfBirth: expect.stringMatching(/^2012-0[45]-/),
+        }),
+      ),
     );
     expect(onResolved).toHaveBeenCalledWith(true);
   });
