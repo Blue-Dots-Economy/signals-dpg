@@ -586,13 +586,19 @@ export function HomePage() {
   // gated separately.
   const u18InitialStep: 'dob' | 'guardian' = u18Status?.hasBirthData ? 'guardian' : 'dob';
 
+  // Minor status not yet resolved (no birth captured). Must run the flow (DOB
+  // step) even when terms/privacy is already satisfied — otherwise a bulk/form
+  // ward who self-accepted terms/privacy at login is never asked for DOB, so
+  // the server can't detect a minor and the guardian gate is bypassed.
+  const u18BirthUnresolved = !u18StatusLoading && u18Status?.hasBirthData !== true;
+
   const showU18GuardianFlow =
     requiresGuardianGate &&
     !u18GateLoading &&
-    u18NeededConsent.length > 0 &&
     !guardianFlowDismissed &&
     !u18StatusLoading &&
-    !u18ResolvedAdult;
+    !u18ResolvedAdult &&
+    (u18NeededConsent.length > 0 || u18BirthUnresolved);
 
   // Sort a card-item array (item_locations stored in .data) nearest-first when userLocation is known.
   // Items without locations sort last (nearestDistanceMeters returns Infinity for empty/missing arrays).
