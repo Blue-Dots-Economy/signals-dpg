@@ -346,6 +346,19 @@ export function ProfileFormPage() {
         // Network-level prefix of the browse-items key (React Query matches
         // prefixes) — invalidates every domain's browse cache for this network.
         queryClient.invalidateQueries({ queryKey: ['browse-items', network.id] });
+        // Bust the by-id caches for THIS item too, else re-opening the editor
+        // within the 60s own-data window seeds the form from the pre-edit copy —
+        // and the seed-once guard above then pins that stale value so the
+        // background refetch can't correct it. removeQueries (not invalidate)
+        // for editItem so the next open has no stale copy to seed from and
+        // refetches fresh via the same masked read path; itemDetail (marker
+        // click-through / detail popup) can just be invalidated.
+        queryClient.removeQueries({
+          queryKey: queryKeys.editItem(network.id, existingItem.item_id),
+        });
+        queryClient.invalidateQueries({
+          queryKey: queryKeys.itemDetail(network.id, existingItem.item_id),
+        });
         toast.success(t('profile.toast_updated'), {
           description: t('profile.toast_updated_desc'),
         });
