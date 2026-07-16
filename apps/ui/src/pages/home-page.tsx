@@ -147,26 +147,41 @@ function buildFilteredCardsForDomain(
 // so depending on it directly would tear down and recreate the
 // IntersectionObserver (and re-fire its callback) on every unrelated
 // re-render instead of only on real intersection changes.
-function useLoadMoreSentinel(onIntersect: () => void, enabled: boolean): React.RefObject<HTMLDivElement | null> {
-  const ref = React.useRef<HTMLDivElement | null>(null);
+function useLoadMoreSentinel(
+  onIntersect: () => void,
+  enabled: boolean,
+): (node: HTMLDivElement | null) => void {
   const onIntersectRef = React.useRef(onIntersect);
   onIntersectRef.current = onIntersect;
+  const enabledRef = React.useRef(enabled);
+  enabledRef.current = enabled;
+  const observerRef = React.useRef<IntersectionObserver | null>(null);
 
-  React.useEffect(() => {
-    if (!enabled) return;
-    const node = ref.current;
+  // Callback ref (stable, empty deps → runs only when the sentinel node itself
+  // mounts/unmounts, not every render). This re-attaches the observer to the
+  // *current* node: the "All" tab renders the sentinel in more than one branch,
+  // so the live node can swap without `enabled` changing — a useEffect([enabled])
+  // kept observing a stale, unmounted node and never fired (needed a tab switch
+  // to remount). rootMargin pre-triggers 200px before the 1px sentinel reaches
+  // the fold, so firing no longer depends on that exact pixel crossing the edge
+  // (flaky under max-scroll clamping / momentum scrolling).
+  return React.useCallback((node: HTMLDivElement | null) => {
+    if (observerRef.current) {
+      observerRef.current.disconnect();
+      observerRef.current = null;
+    }
     if (!node) return;
-
-    const observer = new IntersectionObserver((entries) => {
-      if (entries.some((entry) => entry.isIntersecting)) {
-        onIntersectRef.current();
-      }
-    });
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (enabledRef.current && entries.some((entry) => entry.isIntersecting)) {
+          onIntersectRef.current();
+        }
+      },
+      { rootMargin: '200px' },
+    );
     observer.observe(node);
-    return () => observer.disconnect();
-  }, [enabled]);
-
-  return ref;
+    observerRef.current = observer;
+  }, []);
 }
 
 interface DomainPageState {
@@ -1489,6 +1504,22 @@ export function HomePage() {
           actions={headerActions}
         />
       )}
+      {/* All-tab header count ("X listings") is summed from each visible
+          domain's server-reported total, lifted by these headless
+          DomainPagedFetch children. In list view the grid below mounts its own
+          set; without this, map view never fetches those totals so the count
+          stays hidden until the user visits the list once. Gated to map view
+          (viewMode !== 'list') so the two sets never double-mount. */}
+      {user && network && selectedDomain === null && viewMode !== 'list' &&
+        visibleDomains.map((domain) => (
+          <DomainPagedFetch
+            key={`count-${domain.id}`}
+            network={network}
+            domain={domain}
+            coords={browseCoords}
+            onItems={handleDomainItems}
+          />
+        ))}
       {showLocationBanner && (
         <EnableLocationBanner
           onEnable={() => void browserLocation.request()}
