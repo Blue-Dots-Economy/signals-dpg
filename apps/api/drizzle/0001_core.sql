@@ -12,7 +12,7 @@
 -- Leaf partitions (per network/domain) are created at runtime by the app
 -- (packages/database/.../partition_by_type.ts), never here.
 
-CREATE TABLE items (
+CREATE TABLE IF NOT EXISTS items (
   item_network TEXT NOT NULL,
   item_domain TEXT NOT NULL,
   item_type TEXT NOT NULL,
@@ -40,13 +40,13 @@ CREATE TABLE items (
 )
 PARTITION BY LIST (item_network);
 --> statement-breakpoint
-CREATE INDEX items_lookup_idx ON items (item_network, item_domain, created_at DESC);--> statement-breakpoint
-CREATE INDEX items_instance_url_idx ON items (item_instance_url);--> statement-breakpoint
-CREATE INDEX items_schema_url_idx ON items (item_schema_url);--> statement-breakpoint
-CREATE INDEX items_created_by_idx ON items (created_by, created_at DESC);--> statement-breakpoint
-CREATE INDEX items_state_gin_idx ON items USING GIN (item_state);--> statement-breakpoint
-CREATE INDEX items_lifecycle_idx ON items (item_network, item_domain, lifecycle_status);--> statement-breakpoint
-CREATE TABLE item_actions (
+CREATE INDEX IF NOT EXISTS items_lookup_idx ON items (item_network, item_domain, created_at DESC);--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS items_instance_url_idx ON items (item_instance_url);--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS items_schema_url_idx ON items (item_schema_url);--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS items_created_by_idx ON items (created_by, created_at DESC);--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS items_state_gin_idx ON items USING GIN (item_state);--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS items_lifecycle_idx ON items (item_network, item_domain, lifecycle_status);--> statement-breakpoint
+CREATE TABLE IF NOT EXISTS item_actions (
   partition_network TEXT NOT NULL,
   action_type TEXT NOT NULL,
   action_id UUID DEFAULT gen_random_uuid() NOT NULL,
@@ -89,14 +89,14 @@ CREATE TABLE item_actions (
 )
 PARTITION BY LIST (partition_network);
 --> statement-breakpoint
-CREATE INDEX item_actions_source_item_idx ON item_actions (source_item_network, source_item_domain, source_item_type, source_item_id, created_at DESC);--> statement-breakpoint
-CREATE INDEX item_actions_target_item_idx ON item_actions (target_item_network, target_item_domain, target_item_type, target_item_id, created_at DESC);--> statement-breakpoint
-CREATE INDEX item_actions_source_owner_idx ON item_actions (source_item_owner, updated_at DESC);--> statement-breakpoint
-CREATE INDEX item_actions_target_owner_idx ON item_actions (target_item_owner, updated_at DESC);--> statement-breakpoint
-CREATE INDEX item_actions_status_idx ON item_actions (action_status, created_at DESC);--> statement-breakpoint
-CREATE INDEX item_actions_update_count_idx ON item_actions (partition_network, action_type, action_id, update_count DESC);--> statement-breakpoint
-CREATE INDEX item_actions_requirements_gin_idx ON item_actions USING GIN (requirements_snapshot);--> statement-breakpoint
-CREATE TABLE action_events (
+CREATE INDEX IF NOT EXISTS item_actions_source_item_idx ON item_actions (source_item_network, source_item_domain, source_item_type, source_item_id, created_at DESC);--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS item_actions_target_item_idx ON item_actions (target_item_network, target_item_domain, target_item_type, target_item_id, created_at DESC);--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS item_actions_source_owner_idx ON item_actions (source_item_owner, updated_at DESC);--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS item_actions_target_owner_idx ON item_actions (target_item_owner, updated_at DESC);--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS item_actions_status_idx ON item_actions (action_status, created_at DESC);--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS item_actions_update_count_idx ON item_actions (partition_network, action_type, action_id, update_count DESC);--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS item_actions_requirements_gin_idx ON item_actions USING GIN (requirements_snapshot);--> statement-breakpoint
+CREATE TABLE IF NOT EXISTS action_events (
   partition_network TEXT NOT NULL,
   action_type TEXT NOT NULL,
   event_id UUID DEFAULT gen_random_uuid() NOT NULL,
@@ -129,10 +129,10 @@ CREATE TABLE action_events (
 )
 PARTITION BY LIST (partition_network);
 --> statement-breakpoint
-CREATE UNIQUE INDEX action_events_origin_action_update_idx ON action_events (partition_network, action_type, origin_instance_domain, action_id, update_count);--> statement-breakpoint
-CREATE INDEX action_events_action_idx ON action_events (partition_network, action_type, action_id, update_count DESC, created_at DESC);--> statement-breakpoint
-CREATE INDEX action_events_source_item_idx ON action_events (source_item_network, source_item_domain, source_item_type, source_item_id, created_at DESC);--> statement-breakpoint
-CREATE INDEX action_events_target_item_idx ON action_events (target_item_network, target_item_domain, target_item_type, target_item_id, created_at DESC);--> statement-breakpoint
-CREATE INDEX action_events_source_owner_idx ON action_events (source_item_owner, created_at DESC);--> statement-breakpoint
-CREATE INDEX action_events_target_owner_idx ON action_events (target_item_owner, created_at DESC);--> statement-breakpoint
-CREATE INDEX action_events_payload_gin_idx ON action_events USING GIN (event_payload);
+CREATE UNIQUE INDEX IF NOT EXISTS action_events_origin_action_update_idx ON action_events (partition_network, action_type, origin_instance_domain, action_id, update_count);--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS action_events_action_idx ON action_events (partition_network, action_type, action_id, update_count DESC, created_at DESC);--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS action_events_source_item_idx ON action_events (source_item_network, source_item_domain, source_item_type, source_item_id, created_at DESC);--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS action_events_target_item_idx ON action_events (target_item_network, target_item_domain, target_item_type, target_item_id, created_at DESC);--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS action_events_source_owner_idx ON action_events (source_item_owner, created_at DESC);--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS action_events_target_owner_idx ON action_events (target_item_owner, created_at DESC);--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS action_events_payload_gin_idx ON action_events USING GIN (event_payload);
