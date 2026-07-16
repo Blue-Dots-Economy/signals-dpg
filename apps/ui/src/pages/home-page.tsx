@@ -1,4 +1,5 @@
 import * as React from 'react';
+import axios from 'axios';
 import type { RJSFSchema } from '@rjsf/utils';
 import { useSearchParams, useNavigate, Link } from 'react-router-dom';
 import { toast } from 'sonner';
@@ -1065,8 +1066,15 @@ export function HomePage() {
               setPendingConsentProfileId(null);
               setGuardianProfileRef(ref);
             }
-          } catch {
-            toast.error(t('profile.error_generic_desc'));
+          } catch (err) {
+            const status = axios.isAxiosError(err) ? err.response?.status : undefined;
+            if (status === 429) {
+              toast.error(t('u18.guardian_error_rate_limited', 'Too many attempts. Please try again shortly.'));
+            } else if (status === 503) {
+              toast.error(t('u18.guardian_error_otp_unavailable', "Guardian confirmation isn't available on this instance right now."));
+            } else {
+              toast.error(t('profile.error_generic_desc'));
+            }
           }
           return;
         }
