@@ -6,6 +6,8 @@ import { Loader2, OctagonX } from 'lucide-react';
 import { Alert, AlertTitle, AlertDescription } from '@/components/ui/alert';
 import { OtpInput } from '@/components/auth/otp-input';
 import { verifyGuardian, type VerifyGuardianResponse } from '@/lib/consent-api';
+import { toastGuardianSendError } from '@/lib/guardian-consent';
+import { useResendCountdown } from '@/hooks/use-resend-countdown';
 
 export interface GuardianOtpStepProps {
   network: string;
@@ -31,19 +33,11 @@ export function GuardianOtpStep({
   const { t } = useTranslation();
   const [isVerifying, setIsVerifying] = React.useState(false);
   const [isResending, setIsResending] = React.useState(false);
-  const [countdown, setCountdown] = React.useState(60);
+  const { countdown, restart: restartCountdown } = useResendCountdown(60);
   const [otpKey, setOtpKey] = React.useState(0);
   const [inlineError, setInlineError] = React.useState<{ title: string; description: string } | null>(
     null,
   );
-
-  React.useEffect(() => {
-    if (countdown <= 0) return;
-    const interval = setInterval(() => {
-      setCountdown((c) => (c <= 1 ? 0 : c - 1));
-    }, 1000);
-    return () => clearInterval(interval);
-  }, [countdown]);
 
   const handleOtpComplete = async (otp: string) => {
     setIsVerifying(true);
@@ -92,24 +86,13 @@ export function GuardianOtpStep({
     setInlineError(null);
     try {
       await onResend();
-      setCountdown(60);
+      restartCountdown();
       toast.success(t('u18.otp_resent', 'A new code has been sent to your guardian.'));
     } catch (err) {
-      const status = axios.isAxiosError(err) ? err.response?.status : undefined;
-      if (status === 429) {
-        toast.error(
-          t('u18.guardian_error_rate_limited', 'Too many attempts. Please try again shortly.'),
-        );
-      } else if (status === 503) {
-        toast.error(
-          t(
-            'u18.guardian_error_otp_unavailable',
-            "Guardian confirmation isn't available on this instance right now.",
-          ),
-        );
-      } else {
-        toast.error(t('u18.otp_resend_error', "Couldn't resend the code. Please try again."));
-      }
+      toastGuardianSendError(err, t, {
+        key: 'u18.otp_resend_error',
+        def: "Couldn't resend the code. Please try again.",
+      });
     } finally {
       setIsResending(false);
     }

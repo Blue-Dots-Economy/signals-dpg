@@ -4,7 +4,7 @@ import type { DotActionSchema } from '@/engine/types';
 import { ActionModal } from './action-modal';
 import { GuardianOtpDialog } from './guardian-otp-dialog';
 import { ActionAbortedError } from '@/lib/action-abort';
-import { guardianOtpErrorFromThrown } from '@/lib/action-api';
+import { useGuardianOtpGate } from '@/hooks/use-guardian-otp-gate';
 import { toast } from 'sonner';
 import { useAuth } from '@/contexts/auth-context';
 import { Button } from '@/components/ui/button';
@@ -77,7 +77,12 @@ export function ActionHandler({ children, onActionSubmit, guardianConfirmRequire
     targetItemId: string;
   } | null>(null);
   const [loading, setLoading] = React.useState(false);
-  const [guardianChallenge, setGuardianChallenge] = React.useState<GuardianChallenge | null>(null);
+  // Minor-ward guardian OTP: an action that returns GUARDIAN_OTP_REQUIRED is
+  // stashed and replayed with the guardian's code (see useGuardianOtpGate).
+  const gate = useGuardianOtpGate<GuardianChallenge>(async (c, otp) => {
+    await onActionSubmit?.(c.type, c.schema, c.formData, c.targetItemId, otp);
+    // Success toast is owned by the onActionSubmit callback (action-specific).
+  });
   // Deferred submit awaiting the ward's "send OTP to my guardian?" confirmation.
   const [pendingGuardianConfirm, setPendingGuardianConfirm] = React.useState<(() => void) | null>(null);
 
@@ -110,8 +115,7 @@ export function ActionHandler({ children, onActionSubmit, guardianConfirmRequire
       await onActionSubmit?.(type, schema, formData, targetItemId);
       return true;
     } catch (err) {
-      if (guardianOtpErrorFromThrown(err) === 'GUARDIAN_OTP_REQUIRED') {
-        setGuardianChallenge({ type, schema, targetItemId, formData });
+      if (gate.captureIfGuardianRequired(err, { type, schema, targetItemId, formData })) {
         return false;
       }
       throw err;
@@ -159,14 +163,6 @@ export function ActionHandler({ children, onActionSubmit, guardianConfirmRequire
     gateSubmit(() => { void performSubmit(type, schema, formData, targetItemId); });
   };
 
-  const handleGuardianOtpSubmit = async (otp: string) => {
-    if (!guardianChallenge) return;
-    const { type, schema, formData, targetItemId } = guardianChallenge;
-    await onActionSubmit?.(type, schema, formData, targetItemId, otp);
-    setGuardianChallenge(null);
-    // Success toast is owned by the onActionSubmit callback (action-specific).
-  };
-
   return (
     <>
       {children(triggerAction)}
@@ -181,9 +177,9 @@ export function ActionHandler({ children, onActionSubmit, guardianConfirmRequire
         />
       )}
       <GuardianOtpDialog
-        open={!!guardianChallenge}
-        onOpenChange={(open) => !open && setGuardianChallenge(null)}
-        onSubmitOtp={handleGuardianOtpSubmit}
+        open={!!gate.challenge}
+        onOpenChange={(open) => !open && gate.setChallenge(null)}
+        onSubmitOtp={gate.submitOtp}
         onLogout={() => { void signOut(); }}
       />
       <Dialog

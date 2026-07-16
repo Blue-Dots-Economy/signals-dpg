@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
+import { useResendCountdown } from '@/hooks/use-resend-countdown';
 import { Loader2, ArrowLeft, OctagonX } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { OtpInput } from '@/components/auth/otp-input';
@@ -36,26 +37,15 @@ export function OtpPage() {
   const { t } = useTranslation();
   const { themeId } = useNetworkTheme();
   const [isLoading, setIsLoading] = useState(false);
-  const [countdown, setCountdown] = useState(60);
+  const { countdown, restart: restartCountdown } = useResendCountdown(60);
   const [inlineError, setInlineError] = useState<{ title: string; description: string } | null>(null);
 
   const state = location.state as AuthState | null;
   const identifierLabel = state?.email ?? state?.phoneNumber;
 
   useEffect(() => {
-    if (!identifierLabel) {
-      navigate('/auth/login');
-      return;
-    }
-    if (countdown <= 0) return;
-    const interval = setInterval(() => {
-      setCountdown((c) => {
-        if (c <= 1) { clearInterval(interval); return 0; }
-        return c - 1;
-      });
-    }, 1000);
-    return () => clearInterval(interval);
-  }, [countdown, identifierLabel, navigate]);
+    if (!identifierLabel) navigate('/auth/login');
+  }, [identifierLabel, navigate]);
 
   // Final step once verification (and, for a gated minor, the guardian flow)
   // has settled: toast + land on home (or the original redirect target).
@@ -142,7 +132,7 @@ export function OtpPage() {
     setInlineError(null);
     try {
       await requestOtp(getAuthIdentifier(state));
-      setCountdown(60);
+      restartCountdown();
       toast.success(t('auth.toast_new_code_sent'), {
         description: t('auth.toast_new_code_sent_desc'),
       });

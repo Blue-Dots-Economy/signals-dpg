@@ -1,6 +1,5 @@
 import type { FastifyPluginAsyncZod } from 'fastify-type-provider-zod';
 import type { FastifyReply, FastifyRequest } from 'fastify';
-import { sql } from 'drizzle-orm';
 import {
   U18ProfileConsentBodySchema, U18ProfileConsentResponseSchema, type U18ProfileConsentBody,
   U18ProfileConsentVerifyBodySchema, U18ProfileConsentVerifyResponseSchema, type U18ProfileConsentVerifyBody,
@@ -10,18 +9,16 @@ import {
 } from '@dpg/schemas';
 import { db } from '@api/db/postgres/drizzle_config';
 import { redis } from '@api/db/secondary/redis';
-import { consent_record } from '@api/db/postgres/schema';
 import { auth_middleware_if_enabled } from '@api/plugins/auth/auth_middleware';
 import { apiConfig } from '@/config';
-import { isMinor, guardianConsentRequired } from '@/services/minor';
+import { guardianConsentRequired } from '@/services/minor';
 import { getNetworkConfigById } from '@/network_configs';
-import { getWardDob, getGuardianContactPlaintext } from '@/services/minor_guardian_repo';
+import { getGuardianContactPlaintext, requireMinorWard } from '@/services/minor_guardian_repo';
 import { resolveConsentVersion } from '@/services/consent_version';
 import {
   issueGuardianOtp, verifyGuardianOtp, assertVerifyAttemptAllowed, guardianOtpErrorReply,
 } from '@/services/guardian_otp';
-import { promoteItemOnProfileConsent, isItemOwnedBy } from '@/services/item_service';
-import { guardianProfileConsentRow } from '@/services/guardian_consent_rows';
+import { isItemOwnedBy, upsertGuardianProfileConsentAndPromote } from '@/services/item_service';
 
 const profileScope = (userId: string, itemId: string) => `${userId}:profile:${itemId}`;
 // Pre-create OTP is scoped to the ward + network + domain (no item yet). The
@@ -35,9 +32,8 @@ const PRECREATE_TOKEN_TTL_SEC = 900; // 15 min — long enough to fill + submit 
 async function assertOwnedMinorItem(userId: string, body: { network: string; item_domain: string; item_type: string; item_id: string }) {
   const owned = await isItemOwnedBy(userId, body);
   if (!owned) return { ok: false as const, code: 'NOT_ITEM_OWNER' };
-  const dob = await getWardDob(userId);
-  if (!dob) return { ok: false as const, code: 'DOB_REQUIRED' };
-  if (!isMinor(dob)) return { ok: false as const, code: 'NOT_A_MINOR' };
+  const ward = await requireMinorWard(userId);
+  if (!ward.ok) return { ok: false as const, code: ward.code };
   return { ok: true as const };
 }
 
@@ -78,9 +74,8 @@ export const u18_profile_consent: FastifyPluginAsyncZod = async (fastify) => {
  * can't use `assertOwnedMinorItem`). Returns a typed failure code otherwise.
  */
 async function assertMinorGatedDomain(userId: string, network: string, domain: string) {
-  const dob = await getWardDob(userId);
-  if (!dob) return { ok: false as const, code: 'DOB_REQUIRED', status: 409 };
-  if (!isMinor(dob)) return { ok: false as const, code: 'NOT_A_MINOR', status: 409 };
+  const ward = await requireMinorWard(userId);
+  if (!ward.ok) return { ok: false as const, code: ward.code, status: 409 };
   const networkConfig = await getNetworkConfigById(network);
   if (!guardianConsentRequired(networkConfig, domain)) {
     return { ok: false as const, code: 'NOT_GATED', status: 409 };
@@ -181,16 +176,9 @@ const finalize_handler = async (
   let promoted = false;
   try {
     await db.transaction(async (tx) => {
-      // Upsert to source='guardian' (see verify_handler for why an existing
-      // source='profile' row from create_item must be upgraded, not skipped).
-      await tx.insert(consent_record).values(
-        guardianProfileConsentRow({ userId, itemId: body.item_id, network: body.network, brand: body.brand, documentVersion: version }),
-      ).onConflictDoUpdate({
-        target: [consent_record.userId, consent_record.itemId],
-        targetWhere: sql`level = 'item' AND consent_category = 'profile_creation'`,
-        set: { source: 'guardian', documentVersion: version, acceptedAt: new Date(), metadata: { variant: 'u18' } as Record<string, unknown> },
+      promoted = await upsertGuardianProfileConsentAndPromote(tx, {
+        userId, itemId: body.item_id, network: body.network, brand: body.brand, documentVersion: version,
       });
-      promoted = await promoteItemOnProfileConsent(tx, body.item_id);
     });
   } catch (err) {
     request.log.error({ err }, 'Failed to finalize guardian profile consent');
@@ -256,22 +244,9 @@ const verify_handler = async (request: VerifyReq, reply: FastifyReply) => {
   let promoted = false;
   try {
     await db.transaction(async (tx) => {
-      // Upsert (not plain insert): a minor's item can already have a
-      // `source='profile'` profile_creation row (self-create, or the adult
-      // /profile-accept path) written before the guardian gate ran. The
-      // partial unique index on (user_id, item_id) doesn't include `source`,
-      // so a plain insert would 23505 there, leave the guardian row
-      // unwritten, and permanently block the go-live gate (which requires a
-      // `source='guardian'` row). Upgrade any existing row to 'guardian'
-      // instead of skipping the write.
-      await tx.insert(consent_record).values(
-        guardianProfileConsentRow({ userId, itemId: body.item_id, network: body.network, brand: body.brand, documentVersion: version }),
-      ).onConflictDoUpdate({
-        target: [consent_record.userId, consent_record.itemId],
-        targetWhere: sql`level = 'item' AND consent_category = 'profile_creation'`,
-        set: { source: 'guardian', documentVersion: version, acceptedAt: new Date(), metadata: { variant: 'u18' } as Record<string, unknown> },
+      promoted = await upsertGuardianProfileConsentAndPromote(tx, {
+        userId, itemId: body.item_id, network: body.network, brand: body.brand, documentVersion: version,
       });
-      promoted = await promoteItemOnProfileConsent(tx, body.item_id);
     });
   } catch (err) {
     request.log.error({ err }, 'Failed to write guardian profile consent');

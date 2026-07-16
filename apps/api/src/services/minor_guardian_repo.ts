@@ -3,10 +3,10 @@ import { db } from '@api/db/postgres/drizzle_config';
 import { minor_guardian, user } from '@api/db/postgres/schema';
 import { encryptGuardianField, decryptGuardianField, guardianRef } from '@/services/guardian_pii';
 import { apiConfig } from '@/config';
+import { isMinor } from '@/services/minor';
+import type { DbOrTx } from './item_service';
 
 type GuardianContactType = 'phone' | 'email';
-type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
-type DbOrTx = typeof db | Tx;
 
 /**
  * How many OTHER wards are already linked to this guardian contact (matched by
@@ -71,6 +71,21 @@ export async function getWardDob(userId: string, exec: DbOrTx = db): Promise<Dat
 /** Persist the ward's date of birth on the user row. */
 export async function setWardDob(userId: string, dob: Date, exec: DbOrTx = db): Promise<void> {
   await exec.update(user).set({ dateOfBirth: dob, updatedAt: new Date() }).where(eq(user.id, userId));
+}
+
+/**
+ * The DOB-present + under-18 gate shared by the consent handlers. Returns the
+ * DOB on success, or a typed reason (DOB_REQUIRED / NOT_A_MINOR) callers map to
+ * 409 — so the pair isn't re-inlined per handler.
+ */
+export type MinorWardCheck =
+  | { ok: true; dob: Date }
+  | { ok: false; code: 'DOB_REQUIRED' | 'NOT_A_MINOR' };
+export async function requireMinorWard(userId: string, exec: DbOrTx = db): Promise<MinorWardCheck> {
+  const dob = await getWardDob(userId, exec);
+  if (!dob) return { ok: false, code: 'DOB_REQUIRED' };
+  if (!isMinor(dob)) return { ok: false, code: 'NOT_A_MINOR' };
+  return { ok: true, dob };
 }
 
 export async function getMinorGuardian(userId: string): Promise<{

@@ -1,3 +1,6 @@
+import axios from 'axios';
+import { toast } from 'sonner';
+import type { TFunction } from 'i18next';
 import type { DotNetworkSchema } from '@/engine/types';
 
 /**
@@ -23,4 +26,27 @@ export function isMinorFromDate(dateOfBirth: Date, now: Date = new Date()): bool
   const adultThreshold = new Date(dateOfBirth);
   adultThreshold.setFullYear(adultThreshold.getFullYear() + 18);
   return now.getTime() < adultThreshold.getTime();
+}
+
+/**
+ * Toast the standard guardian OTP-send failure: rate-limited (429) and
+ * confirmation-unavailable (503) map to shared copy; anything else falls back
+ * to the caller-supplied message. Shared by the guardian form + OTP step so the
+ * 429/503 branches aren't copied per site.
+ */
+export function toastGuardianSendError(
+  err: unknown,
+  t: TFunction,
+  fallback: { key: string; def: string },
+): void {
+  const status = axios.isAxiosError(err) ? err.response?.status : undefined;
+  if (status === 429) {
+    toast.error(t('u18.guardian_error_rate_limited', 'Too many attempts. Please try again shortly.'));
+  } else if (status === 503) {
+    toast.error(
+      t('u18.guardian_error_otp_unavailable', "Guardian confirmation isn't available on this instance right now."),
+    );
+  } else {
+    toast.error(t(fallback.key, fallback.def));
+  }
 }

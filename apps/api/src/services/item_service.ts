@@ -20,6 +20,7 @@ import { items } from '@dpg/database';
 import { user, consent_record } from '@api/db/postgres/schema';
 import { db } from '@api/db/postgres/drizzle_config';
 import { isServedDomainBinding } from '@/utils/served_domain_guard';
+import { guardianProfileConsentRow } from './guardian_consent_rows';
 import { getNetworkConfigById } from '@/network_configs';
 import { guardianConsentRequired, isMinor } from '@/services/minor';
 import { geocodeLocationsFromState } from '@/services/geocoding/resolve_locations_for_create';
@@ -419,6 +420,33 @@ export async function promoteItemOnProfileConsent(
     .set({ lifecycle_status: 'live', updated_at: sql`now()` })
     .where(eq(items.item_id, itemId));
   return true;
+}
+
+/**
+ * Record (or upgrade) a minor's GUARDIAN `profile_creation` consent for an item
+ * and promote it live in one step. Upsert (not plain insert): a prior
+ * `source='profile'` row from create_item must be upgraded to `'guardian'`, not
+ * 23505'd. Shared by the U18 profile-consent verify + finalize handlers, which
+ * were byte-identical. Returns whether the item was promoted to live.
+ */
+export async function upsertGuardianProfileConsentAndPromote(
+  tx: DbOrTx,
+  args: { userId: string; itemId: string; network: string; brand?: string | null; documentVersion: number },
+): Promise<boolean> {
+  await tx
+    .insert(consent_record)
+    .values(guardianProfileConsentRow(args))
+    .onConflictDoUpdate({
+      target: [consent_record.userId, consent_record.itemId],
+      targetWhere: sql`level = 'item' AND consent_category = 'profile_creation'`,
+      set: {
+        source: 'guardian',
+        documentVersion: args.documentVersion,
+        acceptedAt: new Date(),
+        metadata: { variant: 'u18' } as Record<string, unknown>,
+      },
+    });
+  return promoteItemOnProfileConsent(tx, args.itemId);
 }
 
 export async function updateItemInternal(

@@ -4,10 +4,10 @@ import { useQueryClient } from '@tanstack/react-query';
 import { useIsMobile } from '@/hooks/use-mobile';
 import {
   updateActionStatus,
-  guardianOtpErrorFromThrown,
   type Action,
   type UpdateActionStatusPayload,
 } from '@/lib/action-api';
+import { useGuardianOtpGate } from '@/hooks/use-guardian-otp-gate';
 import { ActionModalHeader } from './action-modal-header';
 import { ConsentCheckbox } from './consent-checkbox';
 import { GuardianOtpDialog } from './guardian-otp-dialog';
@@ -53,12 +53,24 @@ export function ActionStatusUpdater({
   const isMobile = useIsMobile();
   const queryClient = useQueryClient();
   const { mutate: updateStatus, isPending } = useUpdateActionStatus();
-  // Set when a (minor ward's) update-status call comes back
-  // `GUARDIAN_OTP_REQUIRED` — holds the exact payload to resubmit with
-  // `guardianOtp` once the guardian's code is entered.
-  const [guardianChallenge, setGuardianChallenge] = React.useState<UpdateActionStatusPayload | null>(
-    null,
-  );
+
+  const successTitleByStatus: Record<string, string> = {
+    accepted: t('actions.toast_status_accepted_title'),
+    rejected: t('actions.toast_status_rejected_title'),
+    completed: t('actions.toast_status_completed_title'),
+    cancelled: t('actions.toast_status_cancelled_title'),
+  };
+
+  // Minor-ward guardian OTP: an update-status that returns GUARDIAN_OTP_REQUIRED
+  // is stashed and replayed with the guardian's code (see useGuardianOtpGate).
+  const gate = useGuardianOtpGate<UpdateActionStatusPayload>(async (payload, otp) => {
+    await updateActionStatus(payload, otp);
+    queryClient.invalidateQueries({ queryKey: actionKeys.all });
+    toast.success(successTitleByStatus[payload.action_status] ?? t('actions.toast_status_accepted_title'), {
+      description: t('actions.toast_updated_desc'),
+    });
+    onOpenChange(false);
+  });
 
   const statusLabels: Record<string, string> = {
     accepted: t('actions.status_label_accepted'),
@@ -83,7 +95,7 @@ export function ActionStatusUpdater({
     if (open) {
       setConsentChecked(false);
       setRemarks('');
-      setGuardianChallenge(null);
+      gate.setChallenge(null);
     }
   }, [open]);
 
@@ -133,13 +145,6 @@ export function ActionStatusUpdater({
   const acceptVersion = acceptDoc?.versions.find((v) => v.version === acceptDoc.current_version);
   const consentText = acceptVersion?.statement ?? '';
 
-  const successTitleByStatus: Record<string, string> = {
-    accepted: t('actions.toast_status_accepted_title'),
-    rejected: t('actions.toast_status_rejected_title'),
-    completed: t('actions.toast_status_completed_title'),
-    cancelled: t('actions.toast_status_cancelled_title'),
-  };
-
   const handleSubmit = () => {
     if (!targetStatus) {
       toast.error(t('actions.toast_no_status_title'), {
@@ -175,30 +180,16 @@ export function ActionStatusUpdater({
         // A minor ward: the accept/reject/etc. requires guardian confirmation.
         // Stash the exact payload and open the OTP challenge instead of the
         // generic error toast — adults never see a GUARDIAN_OTP_* code here.
-        if (guardianOtpErrorFromThrown(error) === 'GUARDIAN_OTP_REQUIRED') {
-          // Close the accept/reject dialog in favor of the OTP challenge —
-          // the component itself stays mounted (`action` is unaffected), so
-          // GuardianOtpDialog (driven by its own `guardianChallenge` state)
-          // keeps working after this.
+        if (gate.captureIfGuardianRequired(error, payload)) {
+          // Close the accept/reject dialog in favor of the OTP challenge — the
+          // component stays mounted (`action` is unaffected), so the dialog
+          // (driven by gate.challenge) keeps working after this.
           onOpenChange(false);
-          setGuardianChallenge(payload);
           return;
         }
         toast.error(t('actions.toast_update_failed', { message: error.message }));
       },
     });
-  };
-
-  const handleGuardianOtpSubmit = async (otp: string) => {
-    if (!guardianChallenge) return;
-    await updateActionStatus(guardianChallenge, otp);
-    queryClient.invalidateQueries({ queryKey: actionKeys.all });
-    setGuardianChallenge(null);
-    toast.success(
-      successTitleByStatus[guardianChallenge.action_status] ?? t('actions.toast_status_accepted_title'),
-      { description: t('actions.toast_updated_desc') },
-    );
-    onOpenChange(false);
   };
 
   const formContent = (
@@ -257,9 +248,9 @@ export function ActionStatusUpdater({
 
   const guardianOtpDialog = (
     <GuardianOtpDialog
-      open={!!guardianChallenge}
-      onOpenChange={(o) => !o && setGuardianChallenge(null)}
-      onSubmitOtp={handleGuardianOtpSubmit}
+      open={!!gate.challenge}
+      onOpenChange={(o) => !o && gate.setChallenge(null)}
+      onSubmitOtp={gate.submitOtp}
     />
   );
 

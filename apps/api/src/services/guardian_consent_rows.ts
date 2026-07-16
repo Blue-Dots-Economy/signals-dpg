@@ -61,8 +61,13 @@ export function guardianProfileConsentRow(args: {
   };
 }
 
-/** Item-level guardian `action` consent (perform → initiate, accept → accept). */
-export function guardianActionConsentRow(args: {
+/**
+ * Item-level `action` consent row (perform → initiate, accept → accept). Covers
+ * both the adult self path (`source: 'action'`, no variant) and the guardian
+ * path (`source: 'guardian'`, `variant: 'u18'`) — the near-twin writes in the
+ * two action handlers. `variant` present ⇒ the u18 metadata is attached.
+ */
+export function actionConsentRow(args: {
   actionType: string;
   actionStage: 'initiate' | 'accept';
   userId: string;
@@ -71,6 +76,8 @@ export function guardianActionConsentRow(args: {
   network: string;
   brand?: string | null;
   documentVersion: number;
+  source: 'action' | 'guardian';
+  variant?: 'u18';
   acceptedAt?: Date;
 }): ConsentInsert {
   return {
@@ -84,8 +91,23 @@ export function guardianActionConsentRow(args: {
     network: args.network,
     brand: args.brand ?? null,
     documentVersion: args.documentVersion,
-    source: 'guardian',
+    source: args.source,
     acceptedAt: args.acceptedAt ?? new Date(),
-    metadata: { variant: 'u18' },
+    ...(args.variant ? { metadata: { variant: args.variant } } : {}),
   };
+}
+
+/** Guardian variant of {@link actionConsentRow} — the common u18 case. */
+export function guardianActionConsentRow(args: {
+  actionType: string;
+  actionStage: 'initiate' | 'accept';
+  userId: string;
+  itemId: string;
+  actionId: string;
+  network: string;
+  brand?: string | null;
+  documentVersion: number;
+  acceptedAt?: Date;
+}): ConsentInsert {
+  return actionConsentRow({ ...args, source: 'guardian', variant: 'u18' });
 }

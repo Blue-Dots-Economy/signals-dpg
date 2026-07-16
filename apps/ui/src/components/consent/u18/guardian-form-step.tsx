@@ -10,6 +10,7 @@ import { Button } from '@/components/ui/button';
 import { PhoneInput, toE164 } from '@/components/auth/phone-input';
 import { useAuth } from '@/contexts/auth-context';
 import { useConsentConfig } from '@/hooks/use-consent-config';
+import { toastGuardianSendError } from '@/lib/guardian-consent';
 import { ConsentModal, type ConsentModalTab } from '@/components/consent/consent-modal';
 import {
   submitGuardian,
@@ -154,21 +155,11 @@ export function GuardianFormStep({
             'This guardian is already linked to the maximum number of accounts. Please use a different guardian contact.',
           ),
         );
-      } else if (status === 429) {
-        toast.error(
-          t('u18.guardian_error_rate_limited', 'Too many attempts. Please try again shortly.'),
-        );
-      } else if (status === 503) {
-        toast.error(
-          t(
-            'u18.guardian_error_otp_unavailable',
-            "Guardian confirmation isn't available on this instance right now.",
-          ),
-        );
       } else {
-        toast.error(
-          t('u18.guardian_error_generic', "Couldn't save guardian details. Please try again."),
-        );
+        toastGuardianSendError(err, t, {
+          key: 'u18.guardian_error_generic',
+          def: "Couldn't save guardian details. Please try again.",
+        });
       }
     } finally {
       setIsSubmitting(false);

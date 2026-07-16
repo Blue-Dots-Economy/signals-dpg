@@ -28,7 +28,7 @@ import {
 import { runBulk, BulkItemFailure } from '@/utils/bulk_runner';
 import { dispatchActionNotifications } from '@/notifications/notify_actions';
 import { guardianActionGate, guardianGateFailure, type GateResult } from '@/services/guardian_action_gate';
-import { guardianActionConsentRow } from '@/services/guardian_consent_rows';
+import { guardianActionConsentRow, actionConsentRow } from '@/services/guardian_consent_rows';
 
 const BulkUpdateActionStatusBodySchema = z.array(z.unknown());
 
@@ -375,9 +375,7 @@ export const update_action_status_handler = async (
               );
             }
             try {
-              await tx.insert(consent_record).values({
-                level: 'item',
-                consentCategory: 'action',
+              await tx.insert(consent_record).values(actionConsentRow({
                 actionType: row.action_type,
                 actionStage: 'accept',
                 userId: callerId,
@@ -387,8 +385,7 @@ export const update_action_status_handler = async (
                 brand: body.consent.brand ?? null,
                 documentVersion: acceptVersion,
                 source: 'action',
-                acceptedAt: new Date(),
-              });
+              }));
             } catch (err) {
               throw new ConsentWriteError(
                 err instanceof Error ? err.message : 'consent write failed',
