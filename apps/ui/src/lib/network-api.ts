@@ -44,8 +44,11 @@ export const PROFILE_PAGE_SIZE = resolveProfilePageSize();
 
 // Default cap for map-viewport marker fetches (Signals map/marker layer,
 // #203 P4). Override via `VITE_MAP_FETCH_LIMIT` (e.g. `"2000"`). Falls back
-// to 5000 when unset, empty, or invalid. Mirrors `resolveProfileFetchLimit`.
-const DEFAULT_MAP_FETCH_LIMIT = 5000;
+// to 25000 when unset, empty, or invalid. Mirrors `resolveProfileFetchLimit`.
+// Must not exceed the server markers cap (`MarkersBodySchema` /
+// `MarkersQuerySchema` in `packages/schemas`, currently 25000) or the request
+// is rejected.
+const DEFAULT_MAP_FETCH_LIMIT = 25000;
 
 export function resolveMapFetchLimit(): number {
   const raw = import.meta.env.VITE_MAP_FETCH_LIMIT;

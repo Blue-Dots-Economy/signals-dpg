@@ -82,7 +82,7 @@ export function buildPagePlan(
  *
  * `peerLimitMax` clamps the per-peer top-K request to whatever limit cap the
  * peer route itself enforces (e.g. `FetchItemsBodySchema` caps `limit` at
- * 1000; `MarkersBodySchema` at 10000) — every remote peer validates its
+ * 1000; `MarkersBodySchema` at 25000) — every remote peer validates its
  * request body against that schema, so asking for more than the cap fails
  * Zod validation on every remote peer and turns a healthy deep page into a
  * spurious partial. When `offset + limit > peerLimitMax`, cross-instance
@@ -438,10 +438,10 @@ export async function fetchMarkersAcrossInstances(input: {
         activeInstances: activeInstances.map((entry) => entry.instanceUrl),
         filters: input.filters,
         // MarkersBodySchema (packages/schemas/src/api/item_schemas.ts) caps
-        // limit at 10000 — every remote peer validates its markers_local body
+        // limit at 25000 — every remote peer validates its markers_local body
         // against that schema, so the per-peer top-K request must never ask
         // for more.
-        peerLimitMax: 10000,
+        peerLimitMax: 25000,
         fetchPage: async ({ instanceUrl, filters }) =>
           (await fetchInstanceMarkers({ instanceUrl, filters })).markers,
       });
