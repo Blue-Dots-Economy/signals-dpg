@@ -19,10 +19,9 @@ interface DobCalendarProps {
 }
 
 /**
- * Date-of-birth calendar picker (U18). Only the month + year are persisted
- * server-side (submitU18Dob), but a full calendar is the friendliest input —
- * the day is captured for display and ignored on write. Future dates are
- * blocked; year navigation uses a dropdown caption for quick back-navigation.
+ * Date-of-birth calendar picker (U18). The full date is persisted server-side
+ * on `user.date_of_birth` (submitU18Dob). Future dates are blocked; year
+ * navigation uses a dropdown caption for quick back-navigation.
  */
 export function DobCalendar({
   value,

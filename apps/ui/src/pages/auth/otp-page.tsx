@@ -22,8 +22,9 @@ interface AuthState extends AuthIdentifier {
   name?: string;
   redirectTo?: string;
   pendingConsent?: ConsentAcceptBody | null;
-  /** Only ever set for a brand-new signup (see login-page.tsx). Absent/null
-   * for a returning user's login — that path is untouched by this feature. */
+  /** Carries the DOB (+ chosen domain for new signups) captured in the auth
+   * flow before this OTP: set for a brand-new signup, and for an existing user
+   * who backfilled their DOB pre-OTP (see login-page.tsx). Null otherwise. */
   signupExtras?: SignupExtras | null;
 }
 

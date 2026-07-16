@@ -162,16 +162,21 @@ const finalize_handler = async (
     return reply.code(status).send({ error: check.code, message: check.code });
   }
 
-  // Consume the pre-create token — must have verified the guardian OTP before
-  // creating this item. Delete-after-read so it can't be replayed.
+  // Atomically consume the pre-create token (guardian OTP must have verified
+  // before creating this item). getdel is single round-trip, so two concurrent
+  // finalizes can't both consume one verification (double-promote on one OTP).
   const tokenKey = precreateTokenKey(userId, body.network, body.item_domain);
-  const token = await redis.get(tokenKey);
+  const token = await redis.getdel(tokenKey);
   if (!token) {
     return reply.code(409).send({ error: 'GUARDIAN_PRECREATE_REQUIRED', message: 'Guardian OTP not verified for this profile creation' });
   }
 
   const version = await resolveConsentVersion({ network: body.network, brand: body.brand, category: 'profile_creation', variant: 'u18' });
-  if (version === null) return reply.code(400).send({ error: 'CONSENT_VERSION_UNCONFIGURED', message: 'u18 profile_creation not configured' });
+  if (version === null) {
+    // Put the token back so a config fix + retry can still finalize.
+    await redis.set(tokenKey, '1', 'EX', PRECREATE_TOKEN_TTL_SEC);
+    return reply.code(400).send({ error: 'CONSENT_VERSION_UNCONFIGURED', message: 'u18 profile_creation not configured' });
+  }
 
   let promoted = false;
   try {
@@ -182,9 +187,9 @@ const finalize_handler = async (
     });
   } catch (err) {
     request.log.error({ err }, 'Failed to finalize guardian profile consent');
+    await redis.set(tokenKey, '1', 'EX', PRECREATE_TOKEN_TTL_SEC); // allow retry
     return reply.code(500).send({ error: 'CONSENT_WRITE_FAILED', message: 'Failed to record guardian profile consent' });
   }
-  await redis.del(tokenKey);
   return reply.code(200).send({ promoted });
 };
 

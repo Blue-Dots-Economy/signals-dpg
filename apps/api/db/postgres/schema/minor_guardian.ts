@@ -2,9 +2,9 @@ import { pgTable, text, boolean, timestamp, index } from 'drizzle-orm/pg-core';
 
 /**
  * U18 guardian-consent record — one row per ward, keyed on the better-auth
- * user_id (U18 spec §4). birth_year/birth_month are plaintext (data
- * minimization: no exact day). `is_minor` is DERIVED at read time
- * (services/minor.ts), never a column. guardian_name / guardian_contact hold
+ * user_id (U18 spec §4). The ward's date of birth lives on `user.date_of_birth`
+ * (not here); `is_minor` is DERIVED at read time (services/minor.ts), never a
+ * column. guardian_name / guardian_contact hold
  * PII and are encrypted at the write path in a later phase (columns stay
  * text). Guardian approvals + the ward attestation live in `consent_record`,
  * not here.

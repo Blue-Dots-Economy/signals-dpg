@@ -436,11 +436,13 @@ export async function upsertGuardianProfileConsentAndPromote(
   await tx
     .insert(consent_record)
     .values(guardianProfileConsentRow(args))
+    // Append a distinct source='guardian' row (the ward's own source='profile'
+    // row from create_item is preserved). Conflict only on a repeat guardian
+    // acceptance for the same item → idempotent update, self row untouched.
     .onConflictDoUpdate({
-      target: [consent_record.userId, consent_record.itemId],
+      target: [consent_record.userId, consent_record.itemId, consent_record.source],
       targetWhere: sql`level = 'item' AND consent_category = 'profile_creation'`,
       set: {
-        source: 'guardian',
         documentVersion: args.documentVersion,
         acceptedAt: new Date(),
         metadata: { variant: 'u18' } as Record<string, unknown>,

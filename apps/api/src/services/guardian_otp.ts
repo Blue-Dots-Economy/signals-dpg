@@ -97,16 +97,18 @@ export async function issueGuardianOtp(args: {
  * Verify + consume a guardian OTP. Single-use: a correct code is deleted so it
  * cannot be replayed. Returns false for wrong/expired/missing codes.
  */
+// Atomic compare-and-consume: delete the stored code ONLY if it matches the
+// submitted one, in a single round-trip. Prevents the get-then-del race where
+// two concurrent verifies of the same code both succeed (double consent/action).
+// A non-match leaves the code in place so the ward can retry within its TTL.
+const CONSUME_IF_MATCH = `if redis.call('GET', KEYS[1]) == ARGV[1] then return redis.call('DEL', KEYS[1]) else return 0 end`;
+
 export async function verifyGuardianOtp(args: {
   scope: string;
   otp: string;
 }): Promise<boolean> {
-  const expected = await redis.get(codeKey(args.scope));
-  if (expected && expected === args.otp) {
-    await redis.del(codeKey(args.scope));
-    return true;
-  }
-  return false;
+  const consumed = (await redis.eval(CONSUME_IF_MATCH, 1, codeKey(args.scope), args.otp)) as number;
+  return consumed === 1;
 }
 
 /**

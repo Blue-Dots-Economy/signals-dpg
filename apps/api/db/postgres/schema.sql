@@ -550,8 +550,13 @@ CREATE INDEX IF NOT EXISTS consent_record_action_idx
 -- prevents a concurrent double-submit from slipping past the check-then-insert.
 -- Terms/privacy/action rows are intentionally append-only and are NOT
 -- constrained, so this index is partial.
+-- `source` is part of the key so a ward's self-consent ('profile') and their
+-- guardian's ('guardian') co-exist as distinct append-only events (U18) rather
+-- than one overwriting the other. DROP re-shapes any pre-existing 2-column
+-- index on upgrade.
+DROP INDEX IF EXISTS consent_record_profile_creation_unique;
 CREATE UNIQUE INDEX IF NOT EXISTS consent_record_profile_creation_unique
-  ON consent_record (user_id, item_id)
+  ON consent_record (user_id, item_id, source)
   WHERE level = 'item' AND consent_category = 'profile_creation';
 
 -- ─── minor_guardian.sql ───

@@ -15,12 +15,11 @@ type Req = FastifyRequest<{ Querystring: U18StatusQuery }>;
 /**
  * GET /u18/status — read-only U18 status for the authenticated ward.
  *
- * Derives everything from the stored `minor_guardian` row (birth month/year
- * captured ONCE at login, plus the guardian-verified flag). The UI reads this
- * to decide whether to run the guardian flow — and, crucially, whether to
- * skip the DOB step — instead of re-asking the date of birth at
- * profile-creation / action time. The server stays authoritative; the client
- * never supplies age or minor status.
+ * Derives everything from the stored `user.date_of_birth` (captured ONCE) plus
+ * the `minor_guardian` guardian-verified flag. The UI reads this to decide
+ * whether to run the guardian flow — and whether the DOB is already on file —
+ * instead of re-asking the date of birth at profile-creation / action time.
+ * The server stays authoritative; the client never supplies age or minor status.
  */
 export const u18_status: FastifyPluginAsyncZod = async (fastify) => {
   fastify.route({

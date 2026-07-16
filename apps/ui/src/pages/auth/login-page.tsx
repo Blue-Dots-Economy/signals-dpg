@@ -178,8 +178,8 @@ export function LoginPage() {
         name: resolvedName,
         redirectTo,
         pendingConsent: pendingConsent ?? null,
-        // Only ever set for a brand-new signup — otp-page uses its presence
-        // (not userExists alone) to decide whether to run submitU18Dob.
+        // Set for a new signup (domain + DOB) and for an existing user who
+        // backfilled DOB pre-OTP (dateOfBirth only). otp-page persists it.
         signupExtras: resolvedSignupExtras,
       },
     });

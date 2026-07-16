@@ -27,6 +27,14 @@ vi.mock('@api/db/secondary/redis', () => ({
       return n;
     }),
     expire: vi.fn(async () => 1),
+    // Emulates the CONSUME_IF_MATCH Lua: delete + return 1 only on match.
+    eval: vi.fn(async (_script: string, _numKeys: number, key: string, arg: string) => {
+      if (store.get(key) === arg) {
+        store.delete(key);
+        return 1;
+      }
+      return 0;
+    }),
   },
 }));
 
