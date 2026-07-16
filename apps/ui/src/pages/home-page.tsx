@@ -1263,6 +1263,14 @@ export function HomePage() {
         />
       )}
       <ActionHandler
+          // Minor on a guardian-gated domain → confirm before the guardian OTP
+          // is dispatched (server issues it on the first submit).
+          guardianConfirmRequired={
+            u18Status?.isMinor === true &&
+            !!network &&
+            !!wardDomain &&
+            isGuardianConsentRequiredDomain(network, wardDomain)
+          }
           onActionSubmit={async (actionType, _actionSchema, formData, targetItemId, guardianOtp) => {
             if (!myItem) {
               toast.error(t('home.toast_profile_required'), {

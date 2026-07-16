@@ -6,6 +6,15 @@ import { GuardianOtpDialog } from './guardian-otp-dialog';
 import { ActionAbortedError } from '@/lib/action-abort';
 import { guardianOtpErrorFromThrown } from '@/lib/action-api';
 import { toast } from 'sonner';
+import { Button } from '@/components/ui/button';
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter,
+} from '@/components/ui/dialog';
 
 /**
  * Turn a failed action submission into a user-facing toast. Suppresses its
@@ -42,6 +51,12 @@ interface ActionHandlerProps {
      */
     guardianOtp?: string
   ) => Promise<void> | void;
+  /**
+   * When true (a minor ward on a guardian-gated domain), a confirm step is
+   * shown BEFORE submitting — "an OTP will be sent to your guardian, proceed?"
+   * — so the guardian OTP isn't dispatched until the ward opts in.
+   */
+  guardianConfirmRequired?: boolean;
 }
 
 /** State for a pending action that's mid guardian-OTP challenge/response. */
@@ -52,7 +67,7 @@ interface GuardianChallenge {
   formData: Record<string, unknown>;
 }
 
-export function ActionHandler({ children, onActionSubmit }: ActionHandlerProps) {
+export function ActionHandler({ children, onActionSubmit, guardianConfirmRequired }: ActionHandlerProps) {
   const { t } = useTranslation();
   const [activeAction, setActiveAction] = React.useState<{
     type: string;
@@ -61,6 +76,8 @@ export function ActionHandler({ children, onActionSubmit }: ActionHandlerProps) 
   } | null>(null);
   const [loading, setLoading] = React.useState(false);
   const [guardianChallenge, setGuardianChallenge] = React.useState<GuardianChallenge | null>(null);
+  // Deferred submit awaiting the ward's "send OTP to my guardian?" confirmation.
+  const [pendingGuardianConfirm, setPendingGuardianConfirm] = React.useState<(() => void) | null>(null);
 
   const triggerAction = React.useCallback(
     (type: string, schema: DotActionSchema, targetItemId: string) => {
@@ -99,16 +116,17 @@ export function ActionHandler({ children, onActionSubmit }: ActionHandlerProps) 
     }
   };
 
-  const handleDirectSubmit = async (
+  // Do the actual submit. Success messaging is owned by the onActionSubmit
+  // callback (action-specific toast); we only handle errors + modal close here.
+  const performSubmit = async (
     type: string,
     schema: DotActionSchema,
-    targetItemId: string
+    formData: Record<string, unknown>,
+    targetItemId: string,
   ) => {
     setLoading(true);
     try {
-      // Success messaging is owned by the onActionSubmit callback (it toasts the
-      // action-specific "… request sent" message). Don't also toast a generic one.
-      await submitWithGuardianGate(type, schema, {}, targetItemId);
+      await submitWithGuardianGate(type, schema, formData, targetItemId);
     } catch (err) {
       showActionError(err, t);
     } finally {
@@ -116,28 +134,27 @@ export function ActionHandler({ children, onActionSubmit }: ActionHandlerProps) 
     }
   };
 
-  const handleModalSubmit = async (formData: Record<string, unknown>) => {
+  // Gate the submit behind the guardian-confirm step for a minor: stash the
+  // deferred submit and show the confirm; otherwise run immediately.
+  const gateSubmit = (run: () => void) => {
+    if (guardianConfirmRequired) setPendingGuardianConfirm(() => run);
+    else run();
+  };
+
+  const handleDirectSubmit = (
+    type: string,
+    schema: DotActionSchema,
+    targetItemId: string
+  ) => {
+    gateSubmit(() => { void performSubmit(type, schema, {}, targetItemId); });
+  };
+
+  const handleModalSubmit = (formData: Record<string, unknown>) => {
     if (!activeAction) return;
-    setLoading(true);
-    try {
-      // Success toast is owned by the onActionSubmit callback (action-specific).
-      await submitWithGuardianGate(
-        activeAction.type,
-        activeAction.schema,
-        formData,
-        activeAction.targetItemId
-      );
-      // Either the action completed, or a guardian OTP challenge opened —
-      // either way, close the confirm modal so only one dialog is visible.
-      setActiveAction(null);
-    } catch (err) {
-      // An intentional abort (e.g. draft profile) already showed its own
-      // message — just close the form so the toast isn't left behind it.
-      if (err instanceof ActionAbortedError) setActiveAction(null);
-      else showActionError(err, t);
-    } finally {
-      setLoading(false);
-    }
+    const { type, schema, targetItemId } = activeAction;
+    // Close the form first so only one dialog (confirm or OTP) is visible.
+    setActiveAction(null);
+    gateSubmit(() => { void performSubmit(type, schema, formData, targetItemId); });
   };
 
   const handleGuardianOtpSubmit = async (otp: string) => {
@@ -165,6 +182,31 @@ export function ActionHandler({ children, onActionSubmit }: ActionHandlerProps) 
         onOpenChange={(open) => !open && setGuardianChallenge(null)}
         onSubmitOtp={handleGuardianOtpSubmit}
       />
+      <Dialog
+        open={!!pendingGuardianConfirm}
+        onOpenChange={(open) => { if (!open) setPendingGuardianConfirm(null); }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>{t('actions.guardian_confirm_title')}</DialogTitle>
+            <DialogDescription>{t('actions.guardian_confirm_desc')}</DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setPendingGuardianConfirm(null)}>
+              {t('actions.guardian_confirm_cancel')}
+            </Button>
+            <Button
+              onClick={() => {
+                const run = pendingGuardianConfirm;
+                setPendingGuardianConfirm(null);
+                run?.();
+              }}
+            >
+              {t('actions.guardian_confirm_proceed')}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </>
   );
 }
