@@ -111,8 +111,9 @@ describe('action-api guardian_otp threading', () => {
 
     await performAction(performActionPayload);
 
-    expect(post).toHaveBeenCalledWith('/api/v1/action/perform', [performActionPayload]);
-    const sentBody = post.mock.calls[0][1][0];
+    // Feature #293: single-object body (not an array).
+    expect(post).toHaveBeenCalledWith('/api/v1/action/perform', performActionPayload);
+    const sentBody = post.mock.calls[0][1];
     expect(sentBody).not.toHaveProperty('guardian_otp');
   });
 
@@ -126,9 +127,10 @@ describe('action-api guardian_otp threading', () => {
 
     await performAction(performActionPayload, undefined, '123456');
 
-    expect(post).toHaveBeenCalledWith('/api/v1/action/perform', [
-      { ...performActionPayload, guardian_otp: '123456' },
-    ]);
+    expect(post).toHaveBeenCalledWith('/api/v1/action/perform', {
+      ...performActionPayload,
+      guardian_otp: '123456',
+    });
   });
 
   it('updateActionStatus includes guardian_otp only when guardianOtp is passed', async () => {
@@ -165,11 +167,12 @@ describe('action-api guardian_otp threading', () => {
 
     const payloads = [performActionPayload, { ...performActionPayload, action_type: 'connect' }];
     await performActionsBulk(payloads);
-    expect(post).toHaveBeenCalledWith('/api/v1/action/perform', payloads);
+    // Feature #293: array goes to the dedicated /perform/bulk route.
+    expect(post).toHaveBeenCalledWith('/api/v1/action/perform/bulk', payloads);
 
     await performActionsBulk(payloads, undefined, 'abcdef');
     expect(post).toHaveBeenCalledWith(
-      '/api/v1/action/perform',
+      '/api/v1/action/perform/bulk',
       payloads.map((p) => ({ ...p, guardian_otp: 'abcdef' })),
     );
   });

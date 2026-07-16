@@ -18,6 +18,9 @@ import { publishItemEvent } from '@/utils/publish_item_event';
 import { createItemInternal, ItemServiceError } from '@/services/item_service';
 import { resolveLocationsForCreate } from '@/services/geocoding/resolve_locations_for_create';
 import { resolveDomainLock } from './resolve_domain_lock';
+import { getWardDob } from '@/services/minor_guardian_repo';
+import { isMinor, guardianConsentRequired } from '@/services/minor';
+import { getNetworkConfigById } from '@/network_configs';
 
 type CreateItemRequest = FastifyRequest<{
   Body: z.infer<typeof CreateItemBodySchema>;
@@ -183,6 +186,19 @@ export const create_item_handler = async (
     log: request.log,
   });
 
+  // U18 fail-closed: a self-consent create must NOT promote a gated MINOR to
+  // live — only GUARDIAN consent (recorded via the finalize/accept path) does.
+  // So a consenting create by a gated minor is still written draft; everyone
+  // else keeps the #275 behaviour (consenting create goes live now).
+  let selfConsentPromotes = body.consent != null;
+  if (selfConsentPromotes) {
+    const dob = await getWardDob(userId);
+    if (dob && isMinor(dob)) {
+      const networkConfig = await getNetworkConfigById(body.item_network);
+      if (guardianConsentRequired(networkConfig, body.item_domain)) selfConsentPromotes = false;
+    }
+  }
+
   try {
     // Item + consent are written in one transaction so a consent-write failure
     // rolls the item back too (fail-closed — never a PII item without a consent
@@ -195,6 +211,17 @@ export const create_item_handler = async (
         item_state: body.item_state ?? {},
         item_locations,
         created_by: userId,
+        // A self-create that carries consent IS the profile_creation acceptance,
+        // so classify with it now (#275 gated `live` on consent but never let
+        // the create path see it → profiles were stuck `draft`). Keyed on
+        // presence, not `body.consent.category`: the consent row + version are
+        // server-resolved to `profile_creation` (the only create-time consent
+        // category), so any consent block present is that acceptance. The row is
+        // written just below in the same transaction; a consent-write failure
+        // rolls the whole create back (fail-closed). Admin/bulk callers omit
+        // this and stay draft, promoted later via /consent/profile-accept.
+        // A gated minor is forced draft (see selfConsentPromotes above).
+        consent_accepted: selfConsentPromotes,
       });
 
       if (body.consent) {

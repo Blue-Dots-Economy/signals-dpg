@@ -52,4 +52,37 @@ describe('computeVisibleDomains', () => {
     } as DotNetworkSchema['actions'][string]['interactions'][number]);
     expect(ids(n, 'seeker')).toEqual(['provider']);
   });
+
+  // Directory networks (e.g. orange_dot) have a domain but no action/interaction
+  // edges. Without a fallback, computeVisibleDomains returns [] and the portal
+  // never fetches items. A network with no edges is a directory: browse it all.
+  function makeDirectoryNetwork(): DotNetworkSchema {
+    return {
+      id: 'orange_dot',
+      domains: [{ id: 'practitioner', description: 'Practitioner' }],
+      actions: {},
+    } as unknown as DotNetworkSchema;
+  }
+
+  it('directory network (no interactions) shows all domains to a null viewer', () => {
+    expect(ids(makeDirectoryNetwork(), null)).toEqual(['practitioner']);
+  });
+
+  it('directory network (no interactions) shows all domains to a domain viewer', () => {
+    expect(ids(makeDirectoryNetwork(), 'practitioner')).toEqual(['practitioner']);
+  });
+
+  it('treats a network whose actions all have empty interactions as a directory', () => {
+    const n = makeDirectoryNetwork();
+    (n as unknown as { actions: Record<string, { interactions: unknown[] }> }).actions = {
+      view: { interactions: [] },
+    };
+    expect(ids(n, null)).toEqual(['practitioner']);
+  });
+
+  it('tolerates a missing actions map (directory)', () => {
+    const n = makeDirectoryNetwork();
+    delete (n as unknown as { actions?: unknown }).actions;
+    expect(ids(n, null)).toEqual(['practitioner']);
+  });
 });

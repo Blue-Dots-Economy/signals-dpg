@@ -32,8 +32,26 @@ import { resolveConsentVersion } from '@/services/consent_version';
 const BulkPerformActionBodySchema = z.array(z.unknown());
 
 export const perform_action: FastifyPluginAsyncZod = async function (fastify) {
+  // Single-object body — Raya/Litwiz voice tools can only send a JSON object (#293).
   fastify.route({
     url: '/perform',
+    method: 'POST',
+    preHandler: auth_middleware_if_enabled,
+    schema: {
+      tags: ['action'],
+      body: PerformActionBodySchema,
+      response: {
+        201: BulkPerformActionResponseSchema,
+        422: BulkPerformActionResponseSchema,
+      },
+    },
+    handler: (request, reply) =>
+      runPerformActions([request.body], request, reply),
+  });
+
+  // Array body — genuine batch (today's behavior verbatim).
+  fastify.route({
+    url: '/perform/bulk',
     method: 'POST',
     preHandler: auth_middleware_if_enabled,
     schema: {
@@ -46,18 +64,20 @@ export const perform_action: FastifyPluginAsyncZod = async function (fastify) {
         400: BulkRequestErrorSchema,
       },
     },
-    handler: perform_action_handler,
+    handler: (request, reply) =>
+      runPerformActions(request.body as unknown[], request, reply),
   });
 };
 
-export const perform_action_handler = async (
-  request: FastifyRequest<{ Body: unknown[] }>,
+async function runPerformActions(
+  items: unknown[],
+  request: FastifyRequest,
   reply: FastifyReply,
-) => {
+) {
   const sourceInstanceUrl = getCurrentApiBaseUrl();
 
   const outcome = await runBulk(
-    request.body,
+    items,
     async (raw, index) => {
       const parsed = PerformActionBodySchema.safeParse(raw);
       if (!parsed.success) {
@@ -352,4 +372,4 @@ export const perform_action_handler = async (
     results: outcome.results,
     summary: outcome.summary,
   });
-};
+}

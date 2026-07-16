@@ -94,7 +94,8 @@ export const ACTION_CONSENT_SENTINEL = '__consent' as const;
 
 /**
  * Payload for performing an action (initiated by source user)
- * Matches the actual API schema: POST /api/v1/action/perform
+ * Sent as a single object to POST /api/v1/action/perform
+ * For bulk actions, use performActionsBulk which posts to /api/v1/action/perform/bulk
  */
 export interface PerformActionPayload {
   action_type: string;
@@ -338,7 +339,9 @@ export async function performAction(
   const body = guardianOtp ? { ...payload, guardian_otp: guardianOtp } : payload;
 
   return unwrapBulkSingle(
-    client.post<BulkEnvelope<PerformActionResponse>>('/api/v1/action/perform', [body]),
+    // Feature #293: single-object body to /perform. `body` carries guardian_otp
+    // when resubmitting a minor's action after a GUARDIAN_OTP_REQUIRED.
+    client.post<BulkEnvelope<PerformActionResponse>>('/api/v1/action/perform', body),
   );
 }
 
@@ -378,7 +381,9 @@ export async function performActionsBulk(
     ? payloads.map((payload) => ({ ...payload, guardian_otp: guardianOtp }))
     : payloads;
   return postBulkEnvelope<PerformActionResponse>(
-    client.post<BulkEnvelope<PerformActionResponse>>('/api/v1/action/perform', body),
+    // Feature #293: array goes to the dedicated /perform/bulk route. `body`
+    // carries guardian_otp on each payload when set.
+    client.post<BulkEnvelope<PerformActionResponse>>('/api/v1/action/perform/bulk', body),
   );
 }
 

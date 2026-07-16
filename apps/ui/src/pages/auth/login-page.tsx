@@ -361,6 +361,8 @@ export function LoginPage() {
         return; // DOB step renders next; no OTP yet.
       }
 
+      // Non-gated / returning user: runConsentThenOtp runs the same terms/privacy
+      // pre-check (getConsentStatusByIdentifier) before sending the OTP.
       const resolvedSignupExtras: SignupExtras | null = exists ? null : { domain };
       await runConsentThenOtp(identifier, exists, resolvedName, resolvedSignupExtras);
     } catch {
