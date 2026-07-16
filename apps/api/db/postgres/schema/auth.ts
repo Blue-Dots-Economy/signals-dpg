@@ -29,6 +29,11 @@ export const user = pgTable('user', {
   phoneNumber: text('phone_number').unique(),
   phoneNumberVerified: boolean('phone_number_verified'),
   dateOfBirth: timestamp('date_of_birth'),
+  // Domain roles the user signed up for / is allowed to create profiles in
+  // (e.g. ['seeker'] now; ['seeker','provider'] once multi-role is enabled).
+  // Persisted at signup; profile creation is restricted to these. Null/empty
+  // for users onboarded before this existed — callers fall back to held items.
+  domains: text('domains').array(),
   termsAccepted: boolean('terms_accepted').default(false),
   privacyAccepted: boolean('privacy_accepted').default(false),
   // Plan 2: participant attribution. Set by POST /api/v1/admin/onboard_participant

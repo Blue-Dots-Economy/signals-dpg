@@ -164,13 +164,13 @@ describe('LoginPage', () => {
       await renderPage();
       await waitFor(() => expect(fetchAuthConfig).toHaveBeenCalled());
 
-      expect(screen.queryByLabelText(/your domain/i)).toBeNull();
+      expect(screen.queryByText(/your domain/i)).toBeNull();
 
       await userEvent.type(screen.getByLabelText(/mobile/i), '9876543210');
       await userEvent.click(screen.getByRole('button', { name: /continue|send/i }));
 
       await waitFor(() => expect(checkUser).toHaveBeenCalled());
-      expect(await screen.findByLabelText(/your domain/i)).toBeInTheDocument();
+      expect(await screen.findByText(/your domain/i)).toBeInTheDocument();
       // DOB is never on the form — it's a separate step for gated domains only.
       expect(screen.queryByRole('button', { name: /date of birth/i })).toBeNull();
     });
@@ -185,7 +185,7 @@ describe('LoginPage', () => {
       await userEvent.click(screen.getByRole('button', { name: /continue|send/i }));
 
       await waitFor(() => expect(requestOtp).toHaveBeenCalled());
-      expect(screen.queryByLabelText(/your domain/i)).toBeNull();
+      expect(screen.queryByText(/your domain/i)).toBeNull();
       expect(screen.queryByLabelText(/your name/i)).toBeNull();
     });
 
@@ -198,7 +198,7 @@ describe('LoginPage', () => {
       await userEvent.type(screen.getByLabelText(/mobile/i), '9876543210');
       await userEvent.click(screen.getByRole('button', { name: /continue|send/i }));
       await waitFor(() => expect(checkUser).toHaveBeenCalledTimes(1));
-      await screen.findByLabelText(/your domain/i);
+      await screen.findByText(/your domain/i);
 
       // Name only — the still-empty required domain select blocks submission.
       await userEvent.type(screen.getByLabelText(/your name/i), 'Asha');
@@ -206,7 +206,7 @@ describe('LoginPage', () => {
       expect(requestOtp).not.toHaveBeenCalled();
 
       // Name + domain (ungated) — submission proceeds straight to OTP, no DOB.
-      await userEvent.selectOptions(screen.getByLabelText(/your domain/i), 'provider');
+      await userEvent.click(screen.getByRole('button', { name: /^provider$/i }));
       await userEvent.click(screen.getByRole('button', { name: /^continue$/i }));
       await waitFor(() => expect(requestOtp).toHaveBeenCalled());
     });
@@ -223,7 +223,7 @@ describe('LoginPage', () => {
       await waitFor(() => expect(checkUser).toHaveBeenCalledTimes(1));
 
       await userEvent.type(screen.getByLabelText(/your name/i), 'Ravi');
-      await userEvent.selectOptions(screen.getByLabelText(/your domain/i), 'provider'); // ungated
+      await userEvent.click(screen.getByRole('button', { name: /^provider$/i })); // ungated
       await userEvent.click(screen.getByRole('button', { name: /^continue$/i }));
 
       // No DOB step shown; goes straight to OTP with a domain-only signupExtras.
@@ -251,7 +251,7 @@ describe('LoginPage', () => {
       await waitFor(() => expect(checkUser).toHaveBeenCalledTimes(1));
 
       await userEvent.type(screen.getByLabelText(/your name/i), 'Asha');
-      await userEvent.selectOptions(screen.getByLabelText(/your domain/i), 'seeker'); // gated
+      await userEvent.click(screen.getByRole('button', { name: /^seeker$/i })); // gated
       await userEvent.click(screen.getByRole('button', { name: /^continue$/i }));
 
       // The DOB step appears (gated domain); the OTP is not yet sent.
@@ -295,7 +295,7 @@ describe('LoginPage', () => {
       await waitFor(() => expect(checkUser).toHaveBeenCalledTimes(1));
 
       await userEvent.type(screen.getByLabelText(/your name/i), 'Ravi');
-      await userEvent.selectOptions(screen.getByLabelText(/your domain/i), 'seeker'); // gated
+      await userEvent.click(screen.getByRole('button', { name: /^seeker$/i })); // gated
       await userEvent.click(screen.getByRole('button', { name: /^continue$/i }));
 
       expect(await screen.findByText(/to create an account/i)).toBeInTheDocument();

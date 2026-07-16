@@ -11,10 +11,11 @@ import { useAuth } from '@/contexts/auth-context';
 import { getServedScope } from '@/lib/served-binding';
 import { evaluateDomainGate, resolveHeldDomains } from '@/lib/domain-gate';
 import { toast } from 'sonner';
-import { acceptConsent, submitU18Dob } from '@/lib/consent-api';
+import { acceptConsent, submitU18Dob, materializePendingGuardian } from '@/lib/consent-api';
 import type { ConsentAcceptBody } from '@dpg/schemas';
 import { useNetworkTheme } from '@/theme/theme-provider';
 import { setStoredSignupDomain, type SignupExtras } from '@/lib/signup-domain';
+import { setUserDomains } from '@/lib/user-api';
 
 interface AuthState extends AuthIdentifier {
   userExists: boolean;
@@ -90,28 +91,41 @@ export function OtpPage() {
         }
       }
 
-      // Signup-time DOB (U18 at signup): only for a brand-new account that
-      // captured domain + DOB on the signup form — never for a returning
-      // user's login. Persist DOB now that the session is authenticated. For a
-      // gated MINOR the guardian flow already ran BEFORE this OTP (option A)
-      // and materializeSignupGuardian wrote the birth month + guardian consent
-      // on account creation, so this is a harmless idempotent upsert in that
-      // case. Best-effort like the consent-accept write above — never block
-      // signup on it.
-      if (!state.userExists && state.signupExtras) {
+      // U18 DOB/guardian was collected in the auth flow BEFORE this OTP (signup
+      // gate, or the existing-user pre-check). Persist it now that the session
+      // exists. Best-effort like the consent-accept write above — never block
+      // sign-in on it.
+      if (state.signupExtras) {
         const { domain, dateOfBirth } = state.signupExtras;
-        // Hand the chosen domain off to profile-form-page (one-shot; it
-        // clears this once read) so profile creation doesn't ask again.
-        setStoredSignupDomain(themeId, domain);
-        // DOB is only collected for guardian-gated domains (a separate signup
-        // step); ungated signups carry no birth data, so there's nothing to
-        // persist here.
+        // New signup: hand the chosen domain off to profile-form-page (one-shot)
+        // AND persist it on the user so profile creation is restricted to it.
+        if (!state.userExists) {
+          setStoredSignupDomain(themeId, domain);
+          try {
+            await setUserDomains([domain]);
+          } catch {
+            // Best-effort — profile-form falls back to held items if unset.
+          }
+        }
+        // DOB only exists for guardian-gated flows; persist it for the now-auth
+        // user (idempotent for a signup minor already materialized on create).
         if (dateOfBirth) {
           try {
             await submitU18Dob({ network: themeId, dateOfBirth });
           } catch {
             toast.error(t('auth.toast_consent_persist_error', 'Could not save your consent. You may be asked again next time.'));
           }
+        }
+      }
+
+      // EXISTING user: materialize any pending pre-auth guardian capture (a
+      // minor who completed the guardian OTP before this login OTP). No-op when
+      // there's nothing pending; new signups materialize via afterUserCreate.
+      if (state.userExists) {
+        try {
+          await materializePendingGuardian();
+        } catch {
+          // Best-effort; the home-page guardian gate remains the safety net.
         }
       }
 

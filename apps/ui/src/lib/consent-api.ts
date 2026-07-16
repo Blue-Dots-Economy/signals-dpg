@@ -276,6 +276,19 @@ export async function verifyProfilePrecreateOtp(
   return response.data;
 }
 
+/**
+ * Materialize a pending pre-auth signup-guardian capture onto the CURRENT
+ * (existing) user — called post-OTP when an existing user collected DOB +
+ * guardian BEFORE their login OTP. No-op server-side if there's no pending.
+ */
+export async function materializePendingGuardian(): Promise<{ ok: boolean }> {
+  const response = await apiClient.post<{ ok: boolean }>(
+    '/api/v1/consent/u18/materialize-pending',
+    {},
+  );
+  return response.data;
+}
+
 export async function finalizeProfileConsent(
   body: ProfileConsentOtpItemRef,
 ): Promise<{ promoted: boolean }> {

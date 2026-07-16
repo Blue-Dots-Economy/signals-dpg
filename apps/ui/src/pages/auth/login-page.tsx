@@ -11,6 +11,7 @@ import {
   fetchAuthConfig,
   isValidPhoneNumber,
   requestOtp,
+  u18Precheck,
   type AuthConfigResponse,
   type AuthIdentifier,
   type LoginChannel,
@@ -96,13 +97,17 @@ export function LoginPage() {
     dateOfBirth: Date;
     resolvedName: string;
     resolvedSignupExtras: SignupExtras;
+    /** true = an EXISTING user backfilling DOB before login (not a new signup). */
+    exists: boolean;
   } | null>(null);
-  // Set for a brand-new signup in a guardian-gated (u18-enabled) domain —
-  // renders the DOB step AFTER the name/domain form. Ungated domains skip it.
+  // Set for a guardian-gated (u18-enabled) domain — renders the DOB step. For a
+  // brand-new signup it's AFTER the name/domain form; for an existing user
+  // missing DOB it's after the phone check, BEFORE the login OTP.
   const [signupDobGate, setSignupDobGate] = useState<{
     identifier: AuthIdentifier;
     domain: string;
     resolvedName: string;
+    exists: boolean;
   } | null>(null);
   const redirectTo = searchParams.get('redirect') ?? '/';
   const servedScope = useMemo(() => getServedScope(), []);
@@ -284,13 +289,14 @@ export function LoginPage() {
         dateOfBirth: date,
         resolvedName: gate.resolvedName,
         resolvedSignupExtras: extras,
+        exists: gate.exists,
       });
       return;
     }
 
     setIsLoading(true);
     try {
-      await runConsentThenOtp(gate.identifier, false, gate.resolvedName, extras);
+      await runConsentThenOtp(gate.identifier, gate.exists, gate.resolvedName, extras);
     } catch {
       toast.error(t('auth.toast_send_code_error'), {
         description: t('auth.toast_send_code_error_desc'),
@@ -356,9 +362,26 @@ export function LoginPage() {
       const gatedDomain =
         !exists && (networkDomains.find((d) => d.id === domain)?.guardian_consent_required ?? false);
       if (gatedDomain) {
-        setSignupDobGate({ identifier, domain, resolvedName });
+        setSignupDobGate({ identifier, domain, resolvedName, exists: false });
         setIsLoading(false);
         return; // DOB step renders next; no OTP yet.
+      }
+
+      // EXISTING user missing a DOB on a gated domain: collect DOB (+ guardian,
+      // for minors) BEFORE the login OTP — same steps as signup, but the
+      // capture is materialized onto the existing user right after OTP verify.
+      if (exists) {
+        try {
+          const pre = await u18Precheck(themeId, identifier);
+          if (pre.requiresDob && pre.domain) {
+            setSignupDobGate({ identifier, domain: pre.domain, resolvedName: '', exists: true });
+            setIsLoading(false);
+            return; // DOB step renders next; no OTP yet.
+          }
+        } catch {
+          // Fail-open: precheck failure must not block login — the home-page
+          // gate still catches a minor who slips through.
+        }
       }
 
       // Non-gated / returning user: runConsentThenOtp runs the same terms/privacy
@@ -395,7 +418,7 @@ export function LoginPage() {
         { contactLabel },
       ),
     });
-    void proceedToOtp(gate.identifier, false, gate.resolvedName, gate.resolvedSignupExtras).catch(() => {
+    void proceedToOtp(gate.identifier, gate.exists, gate.resolvedName, gate.resolvedSignupExtras).catch(() => {
       toast.error(t('auth.toast_send_code_error'), {
         description: t('auth.toast_send_code_error_desc'),
       });
@@ -532,26 +555,28 @@ export function LoginPage() {
               a separate step shown only for guardian-gated domains. */}
           {userExists === false && !signupBlocked && (
             <div className="space-y-1.5">
-              <Label htmlFor="signup-domain" className="text-sm font-medium">
+              <Label className="text-sm font-medium">
                 {t('auth.label_domain', 'Your Domain')}
               </Label>
-              <select
-                id="signup-domain"
-                value={domain}
-                onChange={(e) => setDomain(e.target.value)}
-                disabled={isLoading}
-                required
-                className="h-11 w-full rounded-md border border-input bg-transparent px-3 text-sm shadow-xs outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50"
-              >
-                <option value="" disabled>
-                  {t('auth.domain_placeholder', 'Select one')}
-                </option>
+              {/* Segmented toggle, same style as the phone/email pills. */}
+              <div className="flex flex-wrap gap-1 rounded-full border border-border bg-muted p-1 text-sm">
                 {domainOptions.map((d) => (
-                  <option key={d.id} value={d.id}>
+                  <button
+                    key={d.id}
+                    type="button"
+                    onClick={() => setDomain(d.id)}
+                    disabled={isLoading}
+                    className={[
+                      'flex-1 rounded-full py-1.5 px-3 font-medium transition-colors capitalize whitespace-nowrap',
+                      domain === d.id
+                        ? 'bg-background text-foreground shadow-sm'
+                        : 'text-muted-foreground hover:text-foreground',
+                    ].join(' ')}
+                  >
                     {domainLabel(d)}
-                  </option>
+                  </button>
                 ))}
-              </select>
+              </div>
             </div>
           )}
 

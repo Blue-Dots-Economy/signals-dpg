@@ -126,6 +126,28 @@ export async function checkUser(identifier: AuthIdentifier): Promise<CheckUserRe
   return response.data;
 }
 
+export interface U18PrecheckResponse {
+  /** Existing user on a guardian-gated domain with no stored DOB. */
+  requiresDob: boolean;
+  domain: string | null;
+}
+
+/**
+ * Public pre-OTP check: does this EXISTING user still need a DOB (they hold a
+ * gated-domain profile and `date_of_birth` is unset)? Drives whether the login
+ * flow shows the DOB → guardian steps BEFORE the user's own OTP.
+ */
+export async function u18Precheck(
+  network: string,
+  identifier: AuthIdentifier,
+): Promise<U18PrecheckResponse> {
+  const response = await apiClient.post<U18PrecheckResponse>('/api/v1/auth/u18-precheck', {
+    network,
+    ...normalizeIdentifier(identifier),
+  });
+  return response.data;
+}
+
 export async function requestOtp(identifier: AuthIdentifier): Promise<RequestOtpResponse> {
   const response = await apiClient.post<RequestOtpResponse>('/api/auth/unified-otp/request', {
     ...normalizeIdentifier(identifier),

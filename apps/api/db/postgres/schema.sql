@@ -72,6 +72,8 @@ CREATE TABLE IF NOT EXISTS "user" (
   "phone_number" text,
   "phone_number_verified" boolean,
   "date_of_birth" timestamp,
+  -- Domain roles the user may create profiles in (persisted at signup).
+  "domains" text[],
   "terms_accepted" boolean DEFAULT false,
   "privacy_accepted" boolean DEFAULT false,
   -- Plan 2: participant attribution. Set by /api/v1/admin/onboard_participant.
@@ -94,6 +96,7 @@ ALTER TABLE "user" ADD COLUMN IF NOT EXISTS "ban_expires" timestamp;
 ALTER TABLE "user" ADD COLUMN IF NOT EXISTS "phone_number" text;
 ALTER TABLE "user" ADD COLUMN IF NOT EXISTS "phone_number_verified" boolean;
 ALTER TABLE "user" ADD COLUMN IF NOT EXISTS "date_of_birth" timestamp;
+ALTER TABLE "user" ADD COLUMN IF NOT EXISTS "domains" text[];
 ALTER TABLE "user" ADD COLUMN IF NOT EXISTS "terms_accepted" boolean DEFAULT false;
 ALTER TABLE "user" ADD COLUMN IF NOT EXISTS "privacy_accepted" boolean DEFAULT false;
 ALTER TABLE "user" ADD COLUMN IF NOT EXISTS "onboarded_by_org_id" text;

@@ -31,6 +31,7 @@ import { useAuth } from '@/contexts/auth-context';
 import { mergeImportedDataIntoSchema } from '@/lib/import-mapping';
 import { getServedScope } from '@/lib/served-binding';
 import { getStoredSignupDomain, clearStoredSignupDomain } from '@/lib/signup-domain';
+import { getUserDomains } from '@/lib/user-api';
 import { isGuardianConsentRequiredDomain } from '@/lib/guardian-consent';
 import { GuardianOtpDialog } from '@/components/actions/guardian-otp-dialog';
 import { U18GuardianFlow } from '@/components/consent/u18/u18-guardian-flow';
@@ -282,21 +283,43 @@ export function ProfileFormPage() {
     [myItems],
   );
 
+  // Domain roles persisted on the user at signup. When set, profile creation is
+  // restricted to these (a brand-new user with no items yet can only create in
+  // the domain they signed up for). Empty → fall back to held items / served.
+  const [userDomains, setUserDomainsState] = React.useState<string[]>([]);
+  React.useEffect(() => {
+    if (isEdit || !user) return;
+    let cancelled = false;
+    getUserDomains()
+      .then((d) => { if (!cancelled) setUserDomainsState(d); })
+      .catch(() => { if (!cancelled) setUserDomainsState([]); });
+    return () => { cancelled = true; };
+  }, [isEdit, user]);
+
   // Domains offered in the picker: restricted to the served set (when a scope
-  // is configured), then to the locked domain when the user already holds one.
+  // is configured), to the user's signup domains (when persisted), then to the
+  // locked domain when the user already holds one.
   const selectableDomains = React.useMemo(() => {
     let list = servedScope
       ? domains.filter((d) => servedScope.domains.includes(d.id))
       : domains;
+    if (userDomains.length > 0) list = list.filter((d) => userDomains.includes(d.id));
     if (lockedDomain) list = list.filter((d) => d.id === lockedDomain);
     return list;
-  }, [domains, servedScope, lockedDomain]);
+  }, [domains, servedScope, userDomains, lockedDomain]);
 
   // Locked users skip the role picker — auto-select their held domain.
   React.useEffect(() => {
     if (isEdit || selectedDomain || !lockedDomain) return;
     setSelectedDomain(lockedDomain);
   }, [isEdit, selectedDomain, lockedDomain]);
+
+  // Only one selectable domain (e.g. the single signup domain) → skip the
+  // picker and select it directly.
+  React.useEffect(() => {
+    if (isEdit || selectedDomain || selectableDomains.length !== 1) return;
+    setSelectedDomain(selectableDomains[0].id);
+  }, [isEdit, selectedDomain, selectableDomains]);
 
   // Domain confirmed at Signals self-signup (see pages/auth/login-page.tsx +
   // otp-page.tsx): a brand-new user who hasn't created any profile yet has no
