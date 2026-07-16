@@ -1037,7 +1037,7 @@ export function HomePage() {
     <ProfileConsentModal
       // The U18 guardian gate takes priority — don't stack a second blocking
       // dialog on top of it.
-      open={Boolean(pendingConsentProfileId) && !showU18GuardianFlow}
+      open={Boolean(pendingConsentProfileId) && !showU18GuardianFlow && !guardianProfileRef}
       statement={profileStatement}
       profileLabel={pendingProfileLabel}
       minor={u18Status?.isMinor === true}
@@ -1063,7 +1063,9 @@ export function HomePage() {
           try {
             const { otpSent } = await issueProfileConsentOtp(ref);
             if (otpSent) {
-              setPendingConsentProfileId(null);
+              // Keep pendingConsentProfileId set (nulling it re-triggers the
+              // prompt effect, which would reopen this modal over the OTP
+              // dialog). The OTP dialog takes over via guardianProfileRef.
               setGuardianProfileRef(ref);
             }
           } catch (err) {
@@ -1117,6 +1119,9 @@ export function HomePage() {
         setActiveProfileId(ref.item_id);
         setStoredActiveProfileId(network.id, ref.item_id);
         setGuardianProfileRef(null);
+        // Clear the pending prompt too — it was kept set while the OTP dialog
+        // was open; the profile is now consented so it must not reopen.
+        setPendingConsentProfileId(null);
         toast.success(t('profile.guardian_consent_recorded', 'Guardian confirmed your profile'));
       }}
     />
