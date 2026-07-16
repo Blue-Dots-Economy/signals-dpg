@@ -44,7 +44,7 @@ describe('AuthProvider signOut', () => {
     expect(clearSchemaCache).toHaveBeenCalled();
   });
 
-  it('clears the previous user\'s cached my-items and profile-consent queries on sign-out', async () => {
+  it('clears every per-user cache (my-items, profile-consent, edit-item, actions) on sign-out', async () => {
     const client = new QueryClient();
     const spy = vi.spyOn(client, 'removeQueries');
     const { result } = renderHook(() => useAuth(), { wrapper: createWrapper(client) });
@@ -53,5 +53,7 @@ describe('AuthProvider signOut', () => {
     });
     expect(spy).toHaveBeenCalledWith({ queryKey: ['my-items'] });
     expect(spy).toHaveBeenCalledWith({ queryKey: ['profile-consent'] });
+    expect(spy).toHaveBeenCalledWith({ queryKey: ['edit-item'] });
+    expect(spy).toHaveBeenCalledWith({ queryKey: ['actions'] });
   });
 });

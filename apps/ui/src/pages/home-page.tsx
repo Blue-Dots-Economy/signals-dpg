@@ -555,8 +555,10 @@ export function HomePage() {
   const restoredForNetwork = React.useRef<string | null>(null);
   React.useEffect(() => {
     if (!user) {
-      // Signed out: clear selection and allow restoration to re-run on next sign-in.
+      // Signed out: clear selection + any open consent gate, and allow
+      // restoration to re-run on next sign-in.
       setActiveProfileId(null);
+      setPendingConsentProfileId(null);
       restoredForNetwork.current = null;
       return;
     }
@@ -677,6 +679,13 @@ export function HomePage() {
   // Gate the auto-selected profile: if it lacks profile_creation consent, prompt.
   React.useEffect(() => {
     if (
+      // Never gate a signed-out user. `activeProfileId` can briefly hold a
+      // stale localStorage value (from a prior session) after sign-out or when
+      // a different/no-profile user signs in — before the restore effect nulls
+      // it. Requiring `user` + that the id is a real OWNED profile in myItems
+      // stops the consent modal flashing for logged-out or profile-less users.
+      !user ||
+      !myItems.some((p) => p.item_id === activeProfileId) ||
       !profilesResolved ||
       !consentLoaded ||
       !profileConsentRequired ||
@@ -688,6 +697,8 @@ export function HomePage() {
     }
     setPendingConsentProfileId(activeProfileId);
   }, [
+    user,
+    myItems,
     profilesResolved,
     consentLoaded,
     profileConsentRequired,

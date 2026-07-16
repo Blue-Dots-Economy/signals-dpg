@@ -64,10 +64,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       clearAuthToken();
       setUser(null);
       clearSchemaCache();
-      // Drop the signed-out user's cached data so their profiles/consent don't
-      // linger until gcTime (these queries are network-scoped, not user-scoped).
+      // Drop the signed-out user's cached data so it doesn't linger until
+      // gcTime and bleed into the next session (SPA sign-out does not reload
+      // the page). All four hold per-user data: my-items + edit-item are the
+      // user's own items; profile-consent is their accepted profiles; actions
+      // covers their applications/connections — including pendingCount, whose
+      // key is NOT network/user-scoped, so a stale count would otherwise show
+      // to the next user on re-login. browse-items/markers/*-config are public
+      // network-scoped data and can stay.
       queryClient.removeQueries({ queryKey: ['my-items'] });
       queryClient.removeQueries({ queryKey: ['profile-consent'] });
+      queryClient.removeQueries({ queryKey: ['edit-item'] });
+      queryClient.removeQueries({ queryKey: ['actions'] });
     }
   }, [queryClient]);
 
