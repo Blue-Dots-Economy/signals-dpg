@@ -180,7 +180,7 @@ function resolveDefaultViewMode(): ViewMode {
 
 export function HomePage() {
   const { t } = useTranslation();
-  const { user } = useAuth();
+  const { user, signOut } = useAuth();
   const allCardsGridRef = useEqualRowHeights<HTMLDivElement>();
   const [searchParams, setSearchParams] = useSearchParams();
   const navigate = useNavigate();
@@ -1003,6 +1003,7 @@ export function HomePage() {
         void refetchU18Gate();
       }}
       onNotMinor={() => setGuardianFlowDismissed(true)}
+      onLogout={() => { void signOut(); }}
     />
   ) : null;
 

@@ -29,6 +29,12 @@ export interface U18GuardianFlowProps {
    * OTP verification) can pass `'guardian'` to skip the redundant DOB step.
    */
   initialStep?: U18Step;
+  /**
+   * Optional escape hatch. The flow blocks the whole page (a minor must not
+   * proceed without a guardian), so the external menu can't be reached — this
+   * lets a ward who can't get through (wrong account, backend outage) sign out.
+   */
+  onLogout?: () => void;
 }
 
 /**
@@ -42,6 +48,7 @@ export function U18GuardianFlow({
   onComplete,
   onNotMinor,
   initialStep = 'dob',
+  onLogout,
 }: U18GuardianFlowProps) {
   const { t } = useTranslation();
   const [step, setStep] = React.useState<U18Step>(initialStep);
@@ -56,12 +63,10 @@ export function U18GuardianFlow({
   return (
     <Dialog
       open
-      // Non-modal so the page isn't inert-locked — the ward can still reach the
-      // top-right menu to sign out if they can't complete the flow. Dismissal is
-      // still blocked (onInteractOutside / onEscapeKeyDown / onOpenChange guard).
-      modal={false}
       onOpenChange={(next) => {
-        // Blocking: never dismiss via the Dialog's own open-change.
+        // Blocking: never dismiss via the Dialog's own open-change. The whole
+        // page stays inert so a minor cannot create a profile or act before the
+        // guardian confirms.
         if (!next) return;
       }}
     >
@@ -109,6 +114,18 @@ export function U18GuardianFlow({
               await submitGuardian(guardianBody);
             }}
           />
+        )}
+
+        {onLogout && (
+          <div className="text-center">
+            <button
+              type="button"
+              onClick={onLogout}
+              className="text-sm text-muted-foreground underline underline-offset-4 hover:text-foreground"
+            >
+              {t('u18.logout', 'Not you? Log out')}
+            </button>
+          </div>
         )}
       </DialogContent>
     </Dialog>

@@ -406,6 +406,7 @@
   "u18.guardian_consent_privacy_prefix": "On behalf of my ward, I consent to Data ",
   "u18.privacy_link": "Privacy Policy",
   "u18.guardian_send_otp": "Send OTP",
+  "u18.logout": "Not you? Log out",
   "u18.guardian_error_contact_required": "Enter your guardian's email or phone number.",
   "u18.guardian_error_consent": "Please accept both statements on behalf of your ward.",
   "u18.guardian_error_declaration": "Please confirm the guardian declaration to continue.",
