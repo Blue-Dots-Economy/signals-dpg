@@ -1,37 +1,34 @@
 #!/usr/bin/env node
 /**
- * Deploy migrate runner (Direction B).
+ * Deploy migrate runner — single Drizzle ledger (Option B).
  *
- * Applies the full database schema in dependency order using PROD-only deps
- * (`drizzle-orm` + `pg`) — no `drizzle-kit` (a devDependency, pruned from the
- * production image). Order:
+ * The ENTIRE schema is applied by ONE runner (drizzle-orm's `migrate()`) over
+ * ONE ledger (drizzle.__drizzle_migrations), from apps/api/drizzle/:
  *
- *   1. extensions        — extensions/extensions.sql (pgcrypto/cube/earthdistance/vector/postgis)
- *   2. drizzle migrations — apps/api/drizzle/ (better-auth + item_metrics/pii_reveal_audit/consent_record)
- *                          Auto-baselines the INITIAL migration when it detects an
- *                          existing schema with no ledger (hands-off cutover from
- *                          the old psql/schema.sql path — see below).
- *   3. core (raw)        — core/create_items.sql, core/create_actions_events.sql
- *                          (partitioned; items.created_by FKs to the Drizzle-owned "user")
- *   4. version migrations — migrations/NNNN_*.sql (ordered ALTER/backfill)
+ *   0000_<generated>   declarative Drizzle tables (better-auth + metrics/pii/consent)
+ *   0001_core          custom SQL — items / item_actions / action_events (LIST-partitioned)
+ *   0002_item_search   custom SQL — item_search (vector + geography + hnsw/gist)
+ *   NNNN_<version>     custom SQL — version-specific schema migrations, as needed
  *
- * Idempotent — safe to re-run. Runs in the app image at deploy time.
+ * Uses PROD-only deps (`drizzle-orm` + `pg`) — no `drizzle-kit` (a devDependency,
+ * pruned from the production image). Runs in the app image at deploy time.
  *
- * Auto-baseline (cutover safety): a database built by the OLD path already has
- * the Drizzle-owned tables but NO ledger, so a naive migrate() would try to
- * CREATE them and fail with "relation already exists". Before migrating, this
- * script checks for that state (a sentinel Drizzle table present, ledger empty)
- * and seeds ONLY the initial migration into the ledger — the full-schema
- * snapshot the sentinel confirms. Any LATER delta migrations are still applied
- * normally, never skipped: if a delta genuinely does not fit the live schema it
- * fails loudly (the correct outcome for an unattended job) rather than silently
- * dropping a change. For a DB that is ahead of the initial snapshot, run the
- * human-driven `db:check:parity` + `db:baseline --up-to <tag>` instead.
+ *   pnpm --filter api db:migrate:deploy   (or: node apps/api/scripts/migrate.mjs)
  *
- * Run: pnpm --filter api db:migrate:deploy   (or: node apps/api/scripts/migrate.mjs)
+ * Steps:
+ *   1. Extension preflight — assert the extensions the schema needs (vector,
+ *      postgis) exist. They are a PROVISIONING prerequisite (common-services /
+ *      RDS master in deploy; docker-entrypoint-initdb.d locally), NOT created
+ *      here — the app role is least-privilege. Fail loudly if missing.
+ *   2. Auto-baseline (legacy cutover) — a DB built by the OLD psql/schema.sql
+ *      path already has every table but NO ledger, so `migrate()` would re-run
+ *      the CREATE TABLEs and crash on "relation already exists". When the ledger
+ *      is empty AND a sentinel table (`items`) is present, seed the ledger with
+ *      the migrations describing the already-present schema so they are skipped;
+ *      only genuinely new migrations then run. Fresh DBs (no sentinel) skip this.
+ *   3. migrate() — apply pending journal entries once, in order, transactionally.
  */
-import { readFile, readdir } from 'node:fs/promises';
-import { join, resolve } from 'node:path';
+import { resolve, join } from 'node:path';
 import pg from 'pg';
 import { drizzle } from 'drizzle-orm/node-postgres';
 import { migrate } from 'drizzle-orm/node-postgres/migrator';
@@ -56,19 +53,26 @@ const pgUrl =
   process.env.POSTGRES_URL ??
   `postgres://${process.env.POSTGRES_USER}:${process.env.POSTGRES_PASSWORD}@${process.env.POSTGRES_HOST ?? '127.0.0.1'}:${process.env.POSTGRES_PORT ?? process.env.DATABASE_PORT ?? '5432'}/${process.env.POSTGRES_DB}`;
 
-const apiRoot = resolve(import.meta.dirname, '..'); // apps/api
-const drizzleDir = join(apiRoot, 'drizzle');
-const sqlDir = resolve(
-  import.meta.dirname,
-  '../../../packages/database/src/utils/sql_scripts'
-);
+const drizzleDir = join(resolve(import.meta.dirname, '..'), 'drizzle');
 
-async function applyRawFile(client, relPath) {
-  const abs = join(sqlDir, relPath);
-  process.stdout.write(`  applying ${relPath}... `);
-  const sql = await readFile(abs, 'utf8');
-  await client.query(sql);
-  console.log('ok');
+// Extensions the schema actually depends on (item_search.embedding / .geo).
+// gen_random_uuid() is core in PG13+, so the rest of the schema needs none.
+// common-services (RDS master) provisions the full set; we only assert the two
+// the migrations would fail without.
+const REQUIRED_EXTENSIONS = ['vector', 'postgis'];
+
+async function assertExtensions(client) {
+  const { rows } = await client.query('SELECT extname FROM pg_extension');
+  const present = new Set(rows.map((r) => r.extname));
+  const missing = REQUIRED_EXTENSIONS.filter((e) => !present.has(e));
+  if (missing.length > 0) {
+    throw new Error(
+      `required Postgres extension(s) missing: ${missing.join(', ')}. ` +
+        `Extensions are a provisioning prerequisite (common-services / RDS master ` +
+        `in deploy; docker-entrypoint-initdb.d locally) and must exist before the ` +
+        `migrate-Job runs. Aborting.`
+    );
+  }
 }
 
 async function main() {
@@ -78,75 +82,43 @@ async function main() {
   const client = new Client({ connectionString: pgUrl });
   await client.connect();
   try {
-    // 1. Extensions first — the raw item/search tables use vector/geo types,
-    // and gen_random_uuid() defaults are safest with pgcrypto present. In deploy
-    // these already exist (common-services); CREATE EXTENSION IF NOT EXISTS is a no-op.
-    console.log('[1/4] extensions');
-    await applyRawFile(client, 'extensions/extensions.sql');
+    // 1. Extension preflight (guards the extensions-removed-from-path ordering).
+    console.log('[1/3] extension preflight');
+    await assertExtensions(client);
+    console.log(`  ok — ${REQUIRED_EXTENSIONS.join(', ')} present`);
+
+    // 2. Auto-baseline a legacy DB (schema present, ledger empty).
+    console.log('[2/3] baseline check');
+    const populated = await ledgerPopulated(client);
+    if (populated) {
+      console.log('  ledger present → normal incremental migrate');
+    } else if (await tableExists(client, 'public', 'items')) {
+      // Legacy cutover: every current migration describes schema that already
+      // exists (verify with db:check:parity before cutover). Seed them all so
+      // migrate() skips them; only post-cutover migrations run.
+      console.log('  existing schema, no ledger → auto-baselining current migrations (cutover)');
+      const entries = await readJournalEntries(drizzleDir);
+      const { seeded } = await seedLedger(client, drizzleDir, {
+        entries,
+        log: (m) => console.log(`  ${m}`),
+      });
+      console.log(`  baseline: marked ${seeded} migration(s) as already-applied`);
+    } else {
+      console.log('  fresh database → migrator will create everything');
+    }
   } finally {
     await client.end();
   }
 
-  // 2. Drizzle-owned tables (better-auth + metrics/pii/consent) via the
-  // runtime migrator over the committed apps/api/drizzle/ migration files.
-  console.log('[2/4] drizzle migrations');
-
-  // 2a. Auto-baseline: adopt an existing pre-Direction-B DB (schema present, no
-  // ledger) by seeding ONLY the initial migration, so migrate() skips it
-  // instead of CREATE-ing tables that already exist. "user" is the sentinel —
-  // it (and the rest of the Drizzle-owned set) shipped in the old schema.sql
-  // bundle, so its presence means the initial snapshot is already there.
-  const baselineClient = new Client({ connectionString: pgUrl });
-  await baselineClient.connect();
-  try {
-    const populated = await ledgerPopulated(baselineClient);
-    if (populated) {
-      console.log('  ledger present → normal incremental migrate');
-    } else if (await tableExists(baselineClient, 'public', 'user')) {
-      console.log(
-        '  existing schema, no ledger → auto-baselining the initial migration (cutover)'
-      );
-      const entries = await readJournalEntries(drizzleDir);
-      const initial = entries.slice(0, 1); // initial snapshot only; deltas still apply below
-      const { seeded } = await seedLedger(baselineClient, drizzleDir, {
-        entries: initial,
-        log: (m) => console.log(`  ${m}`),
-      });
-      console.log(`  baseline: marked ${seeded} initial migration(s) as already-applied`);
-    } else {
-      console.log('  fresh database → migrator will create all tables');
-    }
-  } finally {
-    await baselineClient.end();
-  }
-
+  // 3. One migrate() over one ledger — declarative tables + custom raw
+  // migrations + version migrations, in journal order.
+  console.log('[3/3] drizzle migrate()');
   const pool = new Pool({ connectionString: pgUrl });
   try {
     await migrate(drizzle(pool), { migrationsFolder: drizzleDir });
     console.log('  ok');
   } finally {
     await pool.end();
-  }
-
-  const client2 = new Client({ connectionString: pgUrl });
-  await client2.connect();
-  try {
-    // 3. Raw core tables (FK to the now-existing "user").
-    console.log('[3/4] core (items/actions/events)');
-    await applyRawFile(client2, 'core/create_items.sql');
-    await applyRawFile(client2, 'core/create_actions_events.sql');
-
-    // 4. Ordered version migrations (ALTER/backfill for existing DBs).
-    console.log('[4/4] version migrations');
-    const migDir = join(sqlDir, 'migrations');
-    const migs = (await readdir(migDir))
-      .filter((f) => f.endsWith('.sql'))
-      .sort();
-    for (const m of migs) {
-      await applyRawFile(client2, join('migrations', m));
-    }
-  } finally {
-    await client2.end();
   }
 
   console.log('db:migrate:deploy complete.');

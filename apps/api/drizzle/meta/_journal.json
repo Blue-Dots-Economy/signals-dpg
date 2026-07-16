@@ -8,6 +8,20 @@
       "when": 1783577211052,
       "tag": "0000_vengeful_yellowjacket",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1784180671420,
+      "tag": "0001_core",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1784180674005,
+      "tag": "0002_item_search",
+      "breakpoints": true
     }
   ]
 }
