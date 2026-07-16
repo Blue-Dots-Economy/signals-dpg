@@ -1,19 +1,8 @@
 #!/usr/bin/env node
 /**
- * check_parity — verify the live database's Drizzle-owned tables match the
- * committed Drizzle model BEFORE baselining (#180).
- *
- * Baselining tells the migrator "these migrations are already applied." That is
- * only truthful if the live schema actually matches the model. This compares
- * the latest Drizzle snapshot (apps/api/drizzle/meta/*_snapshot.json) against
- * the live DB's information_schema and reports divergences (missing tables,
- * missing columns, nullability mismatches). Extra columns are informational.
- *
- * The comparison itself lives in scripts/parity.mjs (shared with migrate.mjs's
- * pre-baseline guard) so the two cannot drift.
- *
- * Exit 0 = safe to baseline; exit 1 = divergence found.
- *
+ * check_parity — verify the live DB's declarative tables match the committed
+ * Drizzle model before baselining (#180). Exit 0 = safe; exit 1 = divergence.
+ * Comparison logic lives in parity.mjs (shared with migrate.mjs's guard).
  *   node apps/api/scripts/check_parity.mjs
  */
 import { resolve } from 'node:path';

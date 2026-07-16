@@ -1,13 +1,6 @@
--- Custom SQL migration (hand-written): item_search — the Signals search-engine
--- V1 index. Raw because it uses pgvector (`vector(1024)`) and PostGIS
--- (`geography(MultiPoint,4326)`) types Drizzle cannot express, plus HNSW/GiST
--- indexes. Authored via `drizzle-kit generate --custom`; run once via the ledger.
---
--- Co-owned by the signals-search service (which reads/writes this table); DDL
--- authority lives here in signals-dpg. No FK to `items` today — deletes are
--- handled by the 'delete' item-event + the reconciliation sweep. Requires the
--- `vector` and `postgis` extensions (provisioning prerequisite; asserted by the
--- migrate-Job preflight).
+-- Custom migration: item_search (Signals search index). Raw because it uses
+-- pgvector + PostGIS geography types Drizzle can't express. Co-owned by the
+-- signals-search service; requires the vector + postgis extensions.
 
 CREATE TABLE IF NOT EXISTS item_search (
   item_network     text NOT NULL,

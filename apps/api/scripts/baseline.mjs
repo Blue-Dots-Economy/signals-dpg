@@ -1,18 +1,7 @@
 #!/usr/bin/env node
 /**
- * baseline — seed Drizzle's migration ledger for an EXISTING database so that
- * `migrate()` (db:migrate:deploy) SKIPS migrations whose schema is already
- * present, instead of trying `CREATE TABLE` on tables that already exist.
- *
- * This is the one-time step for cutting a populated DB (built by the old
- * psql/schema.sql path) over to Direction B. Run it ONCE, before the first
- * Direction-B deploy, AFTER `db:check:parity` passes.
- *
- * IMPORTANT: run this as the **app DB role** (the same role db:migrate:deploy
- * uses) — the connecting role creates + owns the `drizzle` schema, which avoids
- * a `permission denied for schema drizzle` when the migrator later runs as that
- * role. Idempotent.
- *
+ * baseline — manually seed the Drizzle ledger for an existing DB so migrate()
+ * skips already-present schema. Run once, as the app DB role, after db:check:parity.
  *   node apps/api/scripts/baseline.mjs [--up-to <tag>] [--dry-run]
  */
 import { resolve } from 'node:path';

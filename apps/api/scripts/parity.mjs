@@ -1,21 +1,8 @@
 /**
- * Shared parity check: compare the live database's Drizzle-owned (declarative)
- * tables against the committed Drizzle snapshot (the model behind `0000`).
- *
- * Used by:
- *   - scripts/check_parity.mjs — standalone `db:check:parity` (prints + exits).
- *   - scripts/migrate.mjs      — a pre-baseline guard: before adopting an
- *                                existing (legacy) database by seeding the
- *                                ledger, verify the live schema actually matches
- *                                the model. If it does not, baselining would
- *                                mark migrations "applied" over a schema that
- *                                doesn't match — silently adopting drift. The
- *                                guard aborts loudly instead.
- *
- * Only the declarative tables are in the snapshot, so only those are checked
- * (the raw partitioned/geo tables are off the schema path). Missing tables,
- * missing columns, and NOT-NULL regressions are problems; extra columns are
- * informational.
+ * Shared parity check: compare the live declarative tables against the committed
+ * Drizzle snapshot. Only snapshot (declarative) tables are checked; missing
+ * tables/columns and NOT-NULL regressions are problems, extra columns are info.
+ * Used by check_parity.mjs (standalone) and migrate.mjs (pre-baseline guard).
  */
 import { readFile, readdir } from 'node:fs/promises';
 import { join } from 'node:path';
@@ -27,11 +14,7 @@ async function latestSnapshot(drizzleDir) {
   return JSON.parse(await readFile(join(metaDir, files[files.length - 1]), 'utf8'));
 }
 
-/**
- * @param {import('pg').Client} client  connected pg client
- * @param {string} drizzleDir           apps/api/drizzle
- * @returns {Promise<{ snapshotVersion: string, problems: number, messages: string[] }>}
- */
+/** @returns {Promise<{ snapshotVersion: string, problems: number, messages: string[] }>} */
 export async function checkParity(client, drizzleDir) {
   const snap = await latestSnapshot(drizzleDir);
   const messages = [];

@@ -1,16 +1,6 @@
--- Custom SQL migration (hand-written): the raw, LIST-partitioned core tables
--- that Drizzle's schema DSL cannot model (declarative partitioning has no
--- drizzle-kit API). Authored via `drizzle-kit generate --custom`; run once via
--- the ledger.
---
--- Ordering: runs after 0000 (the declarative better-auth / user / organization
--- tables) because items.created_by and item_actions.performed_by_* FK them.
--- Extensions are NOT created here — they are a provisioning prerequisite
--- (common-services / RDS master in deploy; docker-entrypoint-initdb.d locally),
--- asserted by the migrate-Job preflight before this runs.
---
--- Leaf partitions (per network/domain) are created at runtime by the app
--- (packages/database/.../partition_by_type.ts), never here.
+-- Custom migration: raw LIST-partitioned items/item_actions/action_events that
+-- Drizzle can't model. Runs after 0000 (FKs to user/organization); extensions
+-- are a provisioning prerequisite; leaf partitions are created at runtime.
 
 CREATE TABLE IF NOT EXISTS items (
   item_network TEXT NOT NULL,
