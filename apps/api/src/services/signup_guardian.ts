@@ -20,7 +20,7 @@ import { consent_record } from '@api/db/postgres/schema';
 import { apiConfig } from '@/config';
 import { getNetworkConfigById } from '@/network_configs';
 import { isMinor, guardianConsentRequired } from '@/services/minor';
-import { encryptGuardianField } from '@/services/guardian_pii';
+import { encryptGuardianField, guardianRef } from '@/services/guardian_pii';
 import {
   issueGuardianOtp,
   verifyGuardianOtp,
@@ -28,7 +28,12 @@ import {
   type GuardianContactType,
 } from '@/services/guardian_otp';
 import { resolveConsentVersion } from '@/services/consent_version';
-import { writeEncryptedGuardian, resolveOtpChannel } from '@/services/minor_guardian_repo';
+import {
+  writeEncryptedGuardian,
+  resolveOtpChannel,
+  countWardsForGuardian,
+  MAX_WARDS_PER_GUARDIAN,
+} from '@/services/minor_guardian_repo';
 
 /** The ward's own signup identifier — exactly one of the two. */
 export type SignupIdentifier = { email: string } | { phoneNumber: string };
@@ -41,6 +46,7 @@ export class SignupGuardianError extends Error {
       | 'NOT_GATED'
       | 'NOT_A_MINOR'
       | 'SAME_CONTACT_NEEDS_ACK'
+      | 'GUARDIAN_WARD_LIMIT'
       | 'INVALID_OTP'
       | 'NO_PENDING_SIGNUP',
   ) {
@@ -83,6 +89,7 @@ interface PendingSignupGuardian {
   guardianName: string; // already encrypted
   guardianContact: string; // already encrypted — the OTP channel
   guardianContactType: GuardianContactType;
+  guardianRef: string; // deterministic HMAC of the OTP-channel contact
   guardianEmail?: string; // already encrypted, when supplied
   guardianPhone?: string; // already encrypted, when supplied
   guardianDeclarationAccepted: true;
@@ -144,6 +151,13 @@ export async function startSignupGuardian(input: StartSignupGuardianInput): Prom
   // Resolve the single OTP channel (phone preferred when both are given).
   const channel = resolveOtpChannel({ guardianEmail: input.guardianEmail, guardianPhone: input.guardianPhone });
 
+  // Cap: at most MAX_WARDS_PER_GUARDIAN wards may share one guardian contact.
+  // No ward id yet (account not created), so count all wards on this ref.
+  const ref = guardianRef(channel.contact);
+  if ((await countWardsForGuardian(ref, null)) >= MAX_WARDS_PER_GUARDIAN) {
+    throw new SignupGuardianError('GUARDIAN_WARD_LIMIT');
+  }
+
   // Warn-and-confirm: neither guardian contact may silently equal the ward's
   // own signup identifier. Not a hard reject — an explicit ack lets it proceed.
   const ident = normalizeIdentifier(input.identifier);
@@ -166,6 +180,7 @@ export async function startSignupGuardian(input: StartSignupGuardianInput): Prom
     guardianName: encryptGuardianField(input.guardianName),
     guardianContact: encryptGuardianField(channel.contact),
     guardianContactType: channel.contactType,
+    guardianRef: ref,
     guardianEmail: input.guardianEmail ? encryptGuardianField(input.guardianEmail) : undefined,
     guardianPhone: input.guardianPhone ? encryptGuardianField(input.guardianPhone) : undefined,
     guardianDeclarationAccepted: true,
@@ -264,6 +279,7 @@ export async function materializeSignupGuardian(user: MaterializeSignupGuardianU
           guardianContactType: pending.guardianContactType,
           guardianEmailEnc: pending.guardianEmail ?? null,
           guardianPhoneEnc: pending.guardianPhone ?? null,
+          guardianRef: pending.guardianRef,
         },
         tx,
       );

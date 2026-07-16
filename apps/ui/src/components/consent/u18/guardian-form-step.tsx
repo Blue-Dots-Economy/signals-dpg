@@ -141,6 +141,13 @@ export function GuardianFormStep({
             'Please confirm you are okay using your own contact for the guardian before continuing.',
           ),
         );
+      } else if (status === 409 && code === 'GUARDIAN_WARD_LIMIT') {
+        setValidationError(
+          t(
+            'u18.guardian_error_ward_limit',
+            'This guardian is already linked to the maximum number of accounts. Please use a different guardian contact.',
+          ),
+        );
       } else if (status === 429) {
         toast.error(
           t('u18.guardian_error_rate_limited', 'Too many attempts. Please try again shortly.'),

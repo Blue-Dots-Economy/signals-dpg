@@ -11,7 +11,11 @@ import {
   getMinorGuardian,
   upsertGuardianDetails,
   getGuardianContactPlaintext,
+  resolveOtpChannel,
+  countWardsForGuardian,
+  MAX_WARDS_PER_GUARDIAN,
 } from '@/services/minor_guardian_repo';
+import { guardianRef } from '@/services/guardian_pii';
 import { resolveConsentVersion } from '@/services/consent_version';
 import { issueGuardianOtp, GuardianOtpError } from '@/services/guardian_otp';
 
@@ -55,6 +59,16 @@ export const u18_guardian_handler = async (request: Req, reply: FastifyReply) =>
     return reply.code(409).send({
       error: 'SAME_CONTACT_NEEDS_ACK',
       message: 'Guardian contact matches your own; acknowledge to proceed',
+    });
+  }
+
+  // Cap: at most MAX_WARDS_PER_GUARDIAN wards may share one guardian contact.
+  const channel = resolveOtpChannel({ guardianEmail: body.guardianEmail, guardianPhone: body.guardianPhone });
+  const wardCount = await countWardsForGuardian(guardianRef(channel.contact), userId);
+  if (wardCount >= MAX_WARDS_PER_GUARDIAN) {
+    return reply.code(409).send({
+      error: 'GUARDIAN_WARD_LIMIT',
+      message: `This guardian is already linked to the maximum of ${MAX_WARDS_PER_GUARDIAN} accounts.`,
     });
   }
 

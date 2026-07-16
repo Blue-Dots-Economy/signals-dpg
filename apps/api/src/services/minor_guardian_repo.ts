@@ -1,11 +1,31 @@
-import { eq } from 'drizzle-orm';
+import { and, eq, ne, count } from 'drizzle-orm';
 import { db } from '@api/db/postgres/drizzle_config';
 import { minor_guardian } from '@api/db/postgres/schema';
-import { encryptGuardianField, decryptGuardianField } from '@/services/guardian_pii';
+import { encryptGuardianField, decryptGuardianField, guardianRef } from '@/services/guardian_pii';
 
 type GuardianContactType = 'phone' | 'email';
 type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
 type DbOrTx = typeof db | Tx;
+
+/** Max wards that may share one guardian contact (product cap; best-effort). */
+export const MAX_WARDS_PER_GUARDIAN = 6;
+
+/**
+ * How many OTHER wards are already linked to this guardian contact (matched by
+ * the deterministic guardian ref). Excludes `excludeUserId` (the ward being
+ * (re)linked) so re-submitting the same guardian for the same ward doesn't
+ * count against the cap.
+ */
+export async function countWardsForGuardian(
+  ref: string,
+  excludeUserId: string | null,
+): Promise<number> {
+  const where = excludeUserId
+    ? and(eq(minor_guardian.guardianRef, ref), ne(minor_guardian.userId, excludeUserId))
+    : eq(minor_guardian.guardianRef, ref);
+  const [row] = await db.select({ n: count() }).from(minor_guardian).where(where);
+  return row?.n ?? 0;
+}
 
 /** Insert or update the ward's birth year/month (no exact day). */
 export async function upsertBirthMonth(
@@ -80,6 +100,7 @@ export async function upsertGuardianDetails(
       guardianContactType: channel.contactType,
       guardianEmail: input.guardianEmail ? encryptGuardianField(input.guardianEmail) : null,
       guardianPhone: input.guardianPhone ? encryptGuardianField(input.guardianPhone) : null,
+      guardianRef: guardianRef(channel.contact),
       guardianVerified: false,
       updatedAt: new Date(),
     })
@@ -132,6 +153,7 @@ export async function writeEncryptedGuardian(
     guardianContactType: GuardianContactType;
     guardianEmailEnc?: string | null;
     guardianPhoneEnc?: string | null;
+    guardianRef?: string | null;
   },
   exec: DbOrTx = db,
 ): Promise<void> {
@@ -143,6 +165,7 @@ export async function writeEncryptedGuardian(
     guardianContactType: input.guardianContactType,
     guardianEmail: input.guardianEmailEnc ?? null,
     guardianPhone: input.guardianPhoneEnc ?? null,
+    guardianRef: input.guardianRef ?? null,
     guardianVerified: true,
   };
   await exec

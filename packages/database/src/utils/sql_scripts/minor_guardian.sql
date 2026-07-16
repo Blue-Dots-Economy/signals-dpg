@@ -26,3 +26,7 @@ CREATE TABLE IF NOT EXISTS minor_guardian (
 -- already-created tables). guardian_contact still holds the OTP channel.
 ALTER TABLE minor_guardian ADD COLUMN IF NOT EXISTS guardian_email text;
 ALTER TABLE minor_guardian ADD COLUMN IF NOT EXISTS guardian_phone text;
+
+-- Deterministic HMAC of the guardian contact, to count wards per guardian.
+ALTER TABLE minor_guardian ADD COLUMN IF NOT EXISTS guardian_ref text;
+CREATE INDEX IF NOT EXISTS minor_guardian_guardian_ref_idx ON minor_guardian (guardian_ref);

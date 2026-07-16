@@ -1,4 +1,4 @@
-import { pgTable, text, integer, boolean, timestamp } from 'drizzle-orm/pg-core';
+import { pgTable, text, integer, boolean, timestamp, index } from 'drizzle-orm/pg-core';
 
 /**
  * U18 guardian-consent record — one row per ward, keyed on the better-auth
@@ -21,7 +21,13 @@ export const minor_guardian = pgTable('minor_guardian', {
   // guardian_contact mirrors whichever of these the OTP was sent to.
   guardianEmail: text('guardian_email'),
   guardianPhone: text('guardian_phone'),
+  // Deterministic HMAC of the guardian's OTP-channel contact — lets us count
+  // how many wards share one guardian (max enforced in the repo) without
+  // decrypting. Non-reversible.
+  guardianRef: text('guardian_ref'),
   guardianVerified: boolean('guardian_verified').notNull().default(false),
   createdAt: timestamp('created_at').notNull().defaultNow(),
   updatedAt: timestamp('updated_at').notNull().defaultNow(),
-});
+}, (table) => [
+  index('minor_guardian_guardian_ref_idx').on(table.guardianRef),
+]);
