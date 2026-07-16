@@ -6,6 +6,7 @@ import { GuardianOtpDialog } from './guardian-otp-dialog';
 import { ActionAbortedError } from '@/lib/action-abort';
 import { guardianOtpErrorFromThrown } from '@/lib/action-api';
 import { toast } from 'sonner';
+import { useAuth } from '@/contexts/auth-context';
 import { Button } from '@/components/ui/button';
 import {
   Dialog,
@@ -69,6 +70,7 @@ interface GuardianChallenge {
 
 export function ActionHandler({ children, onActionSubmit, guardianConfirmRequired }: ActionHandlerProps) {
   const { t } = useTranslation();
+  const { signOut } = useAuth();
   const [activeAction, setActiveAction] = React.useState<{
     type: string;
     schema: DotActionSchema;
@@ -181,6 +183,7 @@ export function ActionHandler({ children, onActionSubmit, guardianConfirmRequire
         open={!!guardianChallenge}
         onOpenChange={(open) => !open && setGuardianChallenge(null)}
         onSubmitOtp={handleGuardianOtpSubmit}
+        onLogout={() => { void signOut(); }}
       />
       <Dialog
         open={!!pendingGuardianConfirm}

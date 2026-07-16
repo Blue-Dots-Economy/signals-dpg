@@ -1109,6 +1109,7 @@ export function HomePage() {
     <GuardianOtpDialog
       open={!!guardianProfileRef}
       onOpenChange={(open) => { if (!open) setGuardianProfileRef(null); }}
+      onLogout={() => { void signOut(); }}
       onSubmitOtp={async (otp) => {
         const ref = guardianProfileRef;
         if (!ref || !network?.id) return;

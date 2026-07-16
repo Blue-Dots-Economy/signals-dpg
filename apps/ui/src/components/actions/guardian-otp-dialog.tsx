@@ -29,6 +29,9 @@ export interface GuardianOtpDialogProps {
    * the OTP input so the ward can retry.
    */
   onSubmitOtp: (otp: string) => Promise<void>;
+  /** Optional escape hatch — a stuck ward can sign out (wrong account / can't
+   * reach the guardian). When provided, a "Not you? Log out" link is shown. */
+  onLogout?: () => void;
 }
 
 interface InlineErrorState {
@@ -78,7 +81,7 @@ function messageForCode(
   }
 }
 
-export function GuardianOtpDialog({ open, onOpenChange, onSubmitOtp }: GuardianOtpDialogProps) {
+export function GuardianOtpDialog({ open, onOpenChange, onSubmitOtp, onLogout }: GuardianOtpDialogProps) {
   const { t } = useTranslation();
   const isMobile = useIsMobile();
   const [isSubmitting, setIsSubmitting] = React.useState(false);
@@ -137,6 +140,18 @@ export function GuardianOtpDialog({ open, onOpenChange, onSubmitOtp }: GuardianO
           <AlertTitle>{inlineError.title}</AlertTitle>
           <AlertDescription>{inlineError.description}</AlertDescription>
         </Alert>
+      )}
+
+      {onLogout && (
+        <div className="text-center">
+          <button
+            type="button"
+            onClick={onLogout}
+            className="text-sm text-muted-foreground underline underline-offset-4 hover:text-foreground"
+          >
+            {t('u18.logout', 'Not you? Log out')}
+          </button>
+        </div>
       )}
     </div>
   );

@@ -7,6 +7,11 @@ import type { DotActionSchema } from '@/engine/types';
 // via `guardianOtpErrorFromThrown` from `@/lib/action-api` — mock it so the
 // test controls classification directly instead of depending on axios/bulk
 // internals.
+// ActionHandler reads useAuth (for the "Log out" escape in GuardianOtpDialog).
+vi.mock('@/contexts/auth-context', () => ({
+  useAuth: () => ({ user: { id: 'u1' }, signOut: vi.fn() }),
+}));
+
 vi.mock('@/lib/action-api', () => ({
   guardianOtpErrorFromThrown: (err: unknown) => {
     const code = (err as { code?: string } | null | undefined)?.code;

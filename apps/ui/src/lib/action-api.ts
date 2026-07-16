@@ -271,14 +271,26 @@ const GUARDIAN_OTP_ERROR_CODES: readonly GuardianOtpErrorCode[] = [
  * `GuardianOtpErrorCode`, or `null` if it isn't one of those codes (including
  * a success entry with no `error` field at all).
  */
+// The profile-consent guardian OTP routes (/u18/profile-consent/*) use
+// different code strings than the action routes; map them to the shared set so
+// GuardianOtpDialog shows the right message (e.g. INVALID_OTP -> "Incorrect code"
+// instead of a generic error).
+const GUARDIAN_OTP_CODE_ALIASES: Record<string, GuardianOtpErrorCode> = {
+  INVALID_OTP: 'GUARDIAN_OTP_INVALID',
+  OTP_VERIFY_THROTTLED: 'GUARDIAN_OTP_THROTTLED',
+  OTP_RATE_LIMITED: 'GUARDIAN_OTP_RATE_LIMITED',
+  OTP_PROVIDER_UNAVAILABLE: 'OTP_PROVIDER_UNAVAILABLE',
+};
+
 export function guardianOtpErrorOf(
   entry: { error?: string } | null | undefined,
 ): GuardianOtpErrorCode | null {
   const code = entry?.error;
-  if (code !== undefined && (GUARDIAN_OTP_ERROR_CODES as readonly string[]).includes(code)) {
+  if (code === undefined) return null;
+  if ((GUARDIAN_OTP_ERROR_CODES as readonly string[]).includes(code)) {
     return code as GuardianOtpErrorCode;
   }
-  return null;
+  return GUARDIAN_OTP_CODE_ALIASES[code] ?? null;
 }
 
 /**
