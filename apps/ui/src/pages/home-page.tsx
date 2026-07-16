@@ -597,13 +597,20 @@ export function HomePage() {
   // the server can't detect a minor and the guardian gate is bypassed.
   const u18BirthUnresolved = !u18StatusLoading && u18Status?.hasBirthData !== true;
 
+  // A resolved minor who isn't guardian-verified yet must be gated even when
+  // terms/privacy already happen to be satisfied (e.g. an existing user who
+  // provided DOB pre-OTP but whose guardian step runs here, post-login) —
+  // otherwise they'd land in the app un-gated with no way to attach a guardian.
+  const u18MinorNeedsGuardian =
+    u18Status?.isMinor === true && u18Status?.guardianVerified !== true;
+
   const showU18GuardianFlow =
     requiresGuardianGate &&
     !u18GateLoading &&
     !guardianFlowDismissed &&
     !u18StatusLoading &&
     !u18ResolvedAdult &&
-    (u18NeededConsent.length > 0 || u18BirthUnresolved);
+    (u18NeededConsent.length > 0 || u18BirthUnresolved || u18MinorNeedsGuardian);
 
   // Sort a card-item array (item_locations stored in .data) nearest-first when userLocation is known.
   // Items without locations sort last (nearestDistanceMeters returns Infinity for empty/missing arrays).

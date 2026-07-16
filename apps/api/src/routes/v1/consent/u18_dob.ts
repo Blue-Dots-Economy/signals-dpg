@@ -4,7 +4,9 @@ import { U18DobBodySchema, U18DobResponseSchema, type U18DobBody } from '@dpg/sc
 import { auth_middleware_if_enabled } from '@api/plugins/auth/auth_middleware';
 import { apiConfig } from '@/config';
 import { isMinor } from '@/services/minor';
-import { setWardDob } from '@/services/minor_guardian_repo';
+import { getWardDob, setWardDob } from '@/services/minor_guardian_repo';
+
+const MAX_AGE_YEARS = 120;
 
 type Req = FastifyRequest<{ Body: U18DobBody }>;
 
@@ -25,6 +27,25 @@ export const u18_dob_handler = async (request: Req, reply: FastifyReply) => {
   const { network, dateOfBirth } = request.body;
   if (!apiConfig.served_domains.some((b) => b.network === network)) {
     return reply.code(400).send({ error: 'UNKNOWN_NETWORK', message: `Network "${network}" is not served` });
+  }
+
+  // Bound the date: not in the future, not absurdly old.
+  const now = new Date();
+  const oldest = new Date(now);
+  oldest.setFullYear(oldest.getFullYear() - MAX_AGE_YEARS);
+  if (dateOfBirth.getTime() > now.getTime() || dateOfBirth.getTime() < oldest.getTime()) {
+    return reply.code(400).send({ error: 'DOB_OUT_OF_RANGE', message: 'Date of birth is out of range' });
+  }
+
+  // Don't let a stored DOB be rewritten — especially a minor→adult flip after a
+  // guardian is attached (which would silently de-gate the account). Re-sending
+  // the same date is a harmless idempotent no-op; a different date is rejected.
+  const existing = await getWardDob(userId);
+  if (existing) {
+    if (existing.getTime() !== dateOfBirth.getTime()) {
+      return reply.code(409).send({ error: 'DOB_ALREADY_SET', message: 'Date of birth is already recorded and cannot be changed' });
+    }
+    return reply.code(200).send({ isMinor: isMinor(existing) });
   }
 
   try {

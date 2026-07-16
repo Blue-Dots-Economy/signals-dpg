@@ -129,7 +129,6 @@ export async function checkUser(identifier: AuthIdentifier): Promise<CheckUserRe
 export interface U18PrecheckResponse {
   /** Existing user on a guardian-gated domain with no stored DOB. */
   requiresDob: boolean;
-  domain: string | null;
 }
 
 /**

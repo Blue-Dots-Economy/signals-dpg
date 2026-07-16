@@ -310,16 +310,27 @@ async function runPerformActions(
             'u18 action consent version not configured',
           );
         }
-        await db.insert(consent_record).values(guardianActionConsentRow({
-          actionType: body.action_type,
-          actionStage: 'initiate',
-          userId: actor.effective_user_id,
-          itemId: body.source_item.item_id,
-          actionId: result.action_id,
-          network: body.source_item.item_network,
-          brand: body.consent?.brand ?? null,
-          documentVersion: guardianVersion,
-        }));
+        try {
+          await db.insert(consent_record).values(guardianActionConsentRow({
+            actionType: body.action_type,
+            actionStage: 'initiate',
+            userId: actor.effective_user_id,
+            itemId: body.source_item.item_id,
+            actionId: result.action_id,
+            network: body.source_item.item_network,
+            brand: body.consent?.brand ?? null,
+            documentVersion: guardianVersion,
+          }));
+        } catch (err) {
+          // The action already committed at the target instance above; throwing
+          // here would report the item as failed and a client retry would
+          // double-submit. Log loudly (keyed to the action id) for
+          // reconciliation instead — the guardian consent row is missing.
+          request.log.error(
+            { err, action_id: result.action_id, ward_user_id: actor.effective_user_id },
+            'guardian action consent row write FAILED after the action committed — reconcile',
+          );
+        }
       }
 
       return result;

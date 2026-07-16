@@ -10,7 +10,6 @@ import { u18_guardian } from '@/routes/v1/consent/u18_guardian';
 import { u18_guardian_verify } from '@/routes/v1/consent/u18_guardian_verify';
 import { u18_profile_consent } from '@/routes/v1/consent/u18_profile_consent';
 import { u18_signup_guardian } from '@/routes/v1/consent/u18_signup_guardian';
-import { u18_materialize_pending } from '@/routes/v1/consent/u18_materialize_pending';
 
 const consent_routes: FastifyPluginAsyncZod = async (fastify) => {
   fastify.register(get_consent_status);
@@ -24,7 +23,6 @@ const consent_routes: FastifyPluginAsyncZod = async (fastify) => {
   fastify.register(u18_guardian_verify);
   fastify.register(u18_profile_consent);
   fastify.register(u18_signup_guardian);
-  fastify.register(u18_materialize_pending);
 };
 
 export default consent_routes;

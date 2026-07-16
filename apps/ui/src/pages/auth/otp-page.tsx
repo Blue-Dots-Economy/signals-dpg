@@ -11,7 +11,7 @@ import { useAuth } from '@/contexts/auth-context';
 import { getServedScope } from '@/lib/served-binding';
 import { evaluateDomainGate, resolveHeldDomains } from '@/lib/domain-gate';
 import { toast } from 'sonner';
-import { acceptConsent, submitU18Dob, materializePendingGuardian } from '@/lib/consent-api';
+import { acceptConsent, submitU18Dob } from '@/lib/consent-api';
 import type { ConsentAcceptBody } from '@dpg/schemas';
 import { useNetworkTheme } from '@/theme/theme-provider';
 import { setStoredSignupDomain, type SignupExtras } from '@/lib/signup-domain';
@@ -118,16 +118,6 @@ export function OtpPage() {
         }
       }
 
-      // EXISTING user: materialize any pending pre-auth guardian capture (a
-      // minor who completed the guardian OTP before this login OTP). No-op when
-      // there's nothing pending; new signups materialize via afterUserCreate.
-      if (state.userExists) {
-        try {
-          await materializePendingGuardian();
-        } catch {
-          // Best-effort; the home-page guardian gate remains the safety net.
-        }
-      }
 
       finishSignIn();
     } catch {

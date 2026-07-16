@@ -276,7 +276,12 @@ export function LoginPage() {
     const extras: SignupExtras = { domain: gate.domain, dateOfBirth: date.toISOString() };
     setSignupDobGate(null);
 
-    if (isMinorFromDate(date)) {
+    // A brand-new minor signup captures the guardian pre-auth (materialized on
+    // account creation — safe, same session owns the new identifier). An
+    // EXISTING user must NOT designate a guardian before proving they own the
+    // number (login OTP), so their guardian step runs post-login on the home
+    // page; here we only persist the DOB and proceed to the login OTP.
+    if (isMinorFromDate(date) && !gate.exists) {
       toast.info(t('auth.minor_toast_title', "You're under 18"), {
         description: t(
           'auth.minor_toast_desc',
@@ -373,8 +378,10 @@ export function LoginPage() {
       if (exists) {
         try {
           const pre = await u18Precheck(themeId, identifier);
-          if (pre.requiresDob && pre.domain) {
-            setSignupDobGate({ identifier, domain: pre.domain, resolvedName: '', exists: true });
+          if (pre.requiresDob) {
+            // DOB only (no domain needed) — the guardian step, if any, runs
+            // post-login on the home page once the login OTP proves ownership.
+            setSignupDobGate({ identifier, domain: '', resolvedName: '', exists: true });
             setIsLoading(false);
             return; // DOB step renders next; no OTP yet.
           }
