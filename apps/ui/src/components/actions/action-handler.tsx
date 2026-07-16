@@ -106,12 +106,9 @@ export function ActionHandler({ children, onActionSubmit }: ActionHandlerProps) 
   ) => {
     setLoading(true);
     try {
-      const succeeded = await submitWithGuardianGate(type, schema, {}, targetItemId);
-      if (succeeded) {
-        toast.success(t('actions.handler_completed_title'), {
-          description: t('actions.handler_completed_desc'),
-        });
-      }
+      // Success messaging is owned by the onActionSubmit callback (it toasts the
+      // action-specific "… request sent" message). Don't also toast a generic one.
+      await submitWithGuardianGate(type, schema, {}, targetItemId);
     } catch (err) {
       showActionError(err, t);
     } finally {
@@ -123,17 +120,13 @@ export function ActionHandler({ children, onActionSubmit }: ActionHandlerProps) 
     if (!activeAction) return;
     setLoading(true);
     try {
-      const succeeded = await submitWithGuardianGate(
+      // Success toast is owned by the onActionSubmit callback (action-specific).
+      await submitWithGuardianGate(
         activeAction.type,
         activeAction.schema,
         formData,
         activeAction.targetItemId
       );
-      if (succeeded) {
-        toast.success(t('actions.handler_completed_title'), {
-          description: t('actions.handler_completed_desc'),
-        });
-      }
       // Either the action completed, or a guardian OTP challenge opened —
       // either way, close the confirm modal so only one dialog is visible.
       setActiveAction(null);
@@ -152,9 +145,7 @@ export function ActionHandler({ children, onActionSubmit }: ActionHandlerProps) 
     const { type, schema, formData, targetItemId } = guardianChallenge;
     await onActionSubmit?.(type, schema, formData, targetItemId, otp);
     setGuardianChallenge(null);
-    toast.success(t('actions.handler_completed_title'), {
-      description: t('actions.handler_completed_desc'),
-    });
+    // Success toast is owned by the onActionSubmit callback (action-specific).
   };
 
   return (
