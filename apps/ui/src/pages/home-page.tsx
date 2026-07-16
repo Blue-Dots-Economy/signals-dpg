@@ -773,26 +773,37 @@ export function HomePage() {
   // where items are to know where to zoom — "N results, zoom in" gave no clue
   // where. A small non-blocking count pill (below) keeps the aggregate visible.
   // `meta.total` still reports the true match count regardless of the fetch cap.
-  const mapMarkers = useMapMarkers(network, visibleDomains, mapViewport);
+  // Scope the map to the active Browse tab: a single-domain tab (Seeker /
+  // Provider) fetches + shows only that domain's pins; the "All" tab shows every
+  // visible domain (further narrowed by the Filters-panel domain toggle below).
+  // Keeps the map consistent with the list + header count, which are already
+  // scoped to `selectedDomain` — previously the tab only filtered the list and
+  // the map kept showing all domains.
+  const mapDomains = React.useMemo(
+    () => (selectedDomain ? visibleDomains.filter((d) => d.id === selectedDomain) : visibleDomains),
+    [selectedDomain, visibleDomains],
+  );
+  const mapMarkers = useMapMarkers(network, mapDomains, mapViewport);
 
-  // The map's own domain multi-select still narrows what's shown — applied
-  // client-side to the fetched markers (every `Marker` already carries
-  // `item_domain`), same "skip the whole domain when not selected" rule as
-  // `buildFilteredCardsForDomain` uses for the list view. This is distinct
-  // from the deferred enum-field filter above: domain filtering needs no
-  // server support, it's just an array membership check.
+  // On the "All" tab the Filters-panel domain multi-select narrows which pins
+  // show (client-side membership check — every `Marker` carries `item_domain`).
+  // On a single-domain tab the fetch above is already scoped to that domain, so
+  // that multi-select (an "All"-tab control) does not apply.
   const mapItems = React.useMemo(
     () =>
       mapMarkers.markers
         .filter(
-          (m) => mapSelectedDomains.length === 0 || mapSelectedDomains.includes(m.item_domain),
+          (m) =>
+            selectedDomain != null ||
+            mapSelectedDomains.length === 0 ||
+            mapSelectedDomains.includes(m.item_domain),
         )
         .map((m) => ({
           id: m.item_id,
           domain: m.item_domain,
           data: { item_locations: m.item_locations },
         })),
-    [mapMarkers.markers, mapSelectedDomains],
+    [selectedDomain, mapMarkers.markers, mapSelectedDomains],
   );
 
   const localProfileItemIds = React.useMemo(
@@ -1867,7 +1878,9 @@ export function HomePage() {
                 {!user && mapMarkers.total > 0 && (
                   <div className="pointer-events-none fixed bottom-6 left-1/2 z-[2100] -translate-x-1/2 px-4">
                     <div className="rounded-full border border-border bg-background/95 px-3 py-1.5 text-xs font-medium text-foreground shadow-md backdrop-blur-sm">
-                      {t('header.listings', { count: mapMarkers.total })}
+                      {mapItems.length < mapMarkers.total
+                        ? t('home.showing_x_of_y', { shown: mapItems.length, total: mapMarkers.total })
+                        : t('header.listings', { count: mapMarkers.total })}
                     </div>
                   </div>
                 )}
