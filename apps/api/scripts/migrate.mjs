@@ -38,6 +38,7 @@ import {
   readJournalEntries,
   seedLedger,
 } from './drizzle_baseline.mjs';
+import { checkParity } from './parity.mjs';
 
 // dotenv is only useful for local runs; in deploy the pod already has env vars.
 try {
@@ -94,9 +95,22 @@ async function main() {
       console.log('  ledger present → normal incremental migrate');
     } else if (await tableExists(client, 'public', 'items')) {
       // Legacy cutover: every current migration describes schema that already
-      // exists (verify with db:check:parity before cutover). Seed them all so
-      // migrate() skips them; only post-cutover migrations run.
-      console.log('  existing schema, no ledger → auto-baselining current migrations (cutover)');
+      // exists. Baselining marks them "applied" WITHOUT running them, so it is
+      // only truthful if the live schema actually matches the committed model.
+      // Guard: parity-check the declarative tables first and ABORT on any
+      // divergence, rather than silently adopting a drifted ("old sql") schema.
+      console.log('  existing schema, no ledger → parity check before baseline (cutover)');
+      const { problems, messages } = await checkParity(client, drizzleDir);
+      messages.forEach((m) => console.log(`    ${m}`));
+      if (problems > 0) {
+        throw new Error(
+          `check_parity: ${problems} divergence(s) between the live schema and the committed ` +
+            `Drizzle model — refusing to baseline a drifted database (would mark migrations ` +
+            `applied over a schema that does not match). Reconcile first: author a corrective ` +
+            `migration for the delta, or bring the database to match the model. Aborting.`
+        );
+      }
+      console.log('  parity OK → auto-baselining current migrations');
       const entries = await readJournalEntries(drizzleDir);
       const { seeded } = await seedLedger(client, drizzleDir, {
         entries,
