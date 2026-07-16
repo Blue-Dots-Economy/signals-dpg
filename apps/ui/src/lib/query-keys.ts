@@ -60,7 +60,7 @@ export const queryKeys = {
    * axes carried in filters:
    * - latBucket, lngBucket, radiusBucket (rounded viewport; buckets prevent
    *   cache busts on sub-pixel pans or small radius changes)
-   * - limit (MAP_FETCH_LIMIT or COUNT_ONLY_LIMIT for count-first queries §7)
+   * - limit (MAP_FETCH_LIMIT)
    * DEFERRED axes (§8): instance/API base URL (no selectedApiUrl switcher
    * exists; wire cache busting when added), activeProfileId (only affects
    * results once relevance ranking §9 lands).

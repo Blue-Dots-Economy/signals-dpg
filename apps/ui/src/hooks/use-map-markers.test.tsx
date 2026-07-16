@@ -111,43 +111,4 @@ describe('useMapMarkers', () => {
     rerender({ vp: { ...cityVp, lat: cityVp.lat + 0.1 } });
     await waitFor(() => expect(fetchNetworkMarkers).toHaveBeenCalledTimes(2));
   });
-
-  it('countOnly requests limit:1 per domain and still surfaces the real meta.total (#203 §7)', async () => {
-    vi.mocked(fetchNetworkMarkers).mockResolvedValue({
-      meta: { total: 4231, limit: 1, offset: 0, partial: false, unavailable_instances: [] },
-      markers: [marker('a', 'student')],
-    });
-
-    const { result } = renderHook(
-      () => useMapMarkers(network, [domains[0]], viewport, { countOnly: true }),
-      { wrapper },
-    );
-    await waitFor(() => expect(result.current.isLoading).toBe(false));
-
-    expect(result.current.total).toBe(4231);
-    expect(fetchNetworkMarkers).toHaveBeenCalledWith(
-      expect.objectContaining({ limit: 1 }),
-      expect.anything(),
-    );
-  });
-
-  it('countOnly uses a distinct query-key bucket from a normal (full-limit) fetch', async () => {
-    vi.mocked(fetchNetworkMarkers).mockResolvedValue({
-      meta: { total: 1, limit: 5000, offset: 0, partial: false, unavailable_instances: [] },
-      markers: [marker('a', 'student')],
-    });
-
-    const { rerender } = renderHook(
-      ({ countOnly }: { countOnly: boolean }) =>
-        useMapMarkers(network, [domains[0]], viewport, { countOnly }),
-      { wrapper, initialProps: { countOnly: false } },
-    );
-    await waitFor(() => expect(fetchNetworkMarkers).toHaveBeenCalledTimes(1));
-
-    rerender({ countOnly: true });
-    // A different `limit` must land in a different query-key bucket and
-    // therefore trigger its own fetch, rather than being served the
-    // full-limit query's cached (and differently-shaped) result.
-    await waitFor(() => expect(fetchNetworkMarkers).toHaveBeenCalledTimes(2));
-  });
 });

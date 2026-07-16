@@ -81,16 +81,6 @@ interface MapViewProps {
    */
   onViewportChange?: (viewport: MapViewport) => void;
   /**
-   * When true, suppresses MapView's own loading/no-results overlay (#203
-   * §7). Used by the home-page's anonymous count-first browsing, where
-   * `items` is deliberately kept empty below `REGION_ZOOM` and the caller
-   * renders its own count-first overlay instead — without this, MapView's
-   * default "No items match the current filters." text would render
-   * underneath/alongside it. Defaults to false (unset for the tourist app
-   * and the normal signals map) → behavior is unchanged.
-   */
-  hideEmptyState?: boolean;
-  /**
    * Overrides the empty-state text. The portal map is viewport-scoped (it fetches
    * only the pins in view), so "no items" means "none in THIS area" — not that a
    * filter excluded them; the home page passes an area-oriented message. Unset
@@ -132,10 +122,9 @@ export function parseDefaultZoom(raw: string | undefined): number {
 const DEFAULT_CENTER: [number, number] = parseDefaultCenter(
   import.meta.env.VITE_MAP_DEFAULT_CENTER,
 );
-// Exported so callers (e.g. the home-page's #203 §7 count-first gating) can
-// fall back to the same default zoom the map itself uses before its first
-// `onViewportChange` report has landed.
-export const DEFAULT_ZOOM = parseDefaultZoom(import.meta.env.VITE_MAP_DEFAULT_ZOOM);
+// The default zoom the map opens at before its first `onViewportChange`
+// report has landed (overridable via VITE_MAP_DEFAULT_ZOOM).
+const DEFAULT_ZOOM = parseDefaultZoom(import.meta.env.VITE_MAP_DEFAULT_ZOOM);
 const PROFILE_ZOOM = 12;
 
 export function MapView({
@@ -153,7 +142,6 @@ export function MapView({
   resolveMarkerIcon,
   resolveMarkerImage,
   onViewportChange,
-  hideEmptyState = false,
   emptyMessage,
 }: MapViewProps) {
   const { t } = useTranslation();
@@ -327,7 +315,7 @@ export function MapView({
         </Button>
       </div>
       {/* Loading / empty-state overlays (non-blocking, centered) */}
-      {!hideEmptyState && (loading || markers.length === 0) && (
+      {(loading || markers.length === 0) && (
         <div className="pointer-events-none absolute inset-0 z-[900] flex items-center justify-center">
           <p className="rounded-md bg-background/90 px-4 py-2 text-sm text-muted-foreground shadow-md backdrop-blur-sm">
             {loading

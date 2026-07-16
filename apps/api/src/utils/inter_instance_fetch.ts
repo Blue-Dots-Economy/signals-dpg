@@ -138,6 +138,10 @@ export async function scatterGatherPage<T extends MergeableRow>(input: {
       ? { lat: item_latitude, lng: item_longitude }
       : null;
 
+  // Each peer already ORDER BY earth_distance server-side (item_fetch_runtime.ts);
+  // mergeSortAndSlice re-sorts the union by haversine on the same 6371km sphere
+  // (geo_distance.ts) — the same great-circle metric, so this is a true global
+  // k-way merge of already-sorted per-instance runs, not a re-approximation.
   const rows = mergeSortAndSlice(union, { center, offset, limit });
 
   return { rows, unavailableInstances };
@@ -635,13 +639,50 @@ function buildCountCacheKey(
   ].join(':');
 }
 
+// Cache-key geo bucketing (#203 review). Two callers viewing the same area
+// almost never send byte-identical coordinates — a sub-metre difference in
+// center or radius would otherwise mint a brand-new cache key and miss an
+// otherwise-reusable aggregate. So the cache KEY rounds lat/lng/radius to a
+// coarse grid whose cell scales with the fetch radius, mirroring the client's
+// own viewport bucketing (apps/ui/src/hooks/use-map-markers.ts). The request
+// actually sent to peers always uses the caller's true, unrounded filters
+// (see scatterGatherPage) — only the key is bucketed. A pan/zoom that stays
+// within a cell reuses the cached aggregate; a larger move lands in a new cell
+// and refetches. The served set may over- or under-cover by up to half the
+// radius step depending on which true radius populated the cell first — the
+// same tolerance the client already accepts for the map.
+const RADIUS_BUCKET_STEP_METERS = 500;
+const METERS_PER_DEG_LAT = 111_320;
+
+function bucketGeoForCacheKey(filters: ItemFetchFilters): ItemFetchFilters {
+  const { item_latitude, item_longitude, radius_meters } = filters;
+  if (item_latitude === undefined || item_longitude === undefined) {
+    return filters;
+  }
+  const radiusBucket =
+    radius_meters !== undefined
+      ? Math.round(radius_meters / RADIUS_BUCKET_STEP_METERS) *
+        RADIUS_BUCKET_STEP_METERS
+      : RADIUS_BUCKET_STEP_METERS;
+  const cellMeters = Math.max(radiusBucket / 2, RADIUS_BUCKET_STEP_METERS);
+  const latStepDeg = cellMeters / METERS_PER_DEG_LAT;
+  const cosLat = Math.cos((item_latitude * Math.PI) / 180) || 1;
+  const lngStepDeg = cellMeters / (METERS_PER_DEG_LAT * cosLat);
+  return {
+    ...filters,
+    item_latitude: Math.round(item_latitude / latStepDeg) * latStepDeg,
+    item_longitude: Math.round(item_longitude / lngStepDeg) * lngStepDeg,
+    ...(radius_meters !== undefined ? { radius_meters: radiusBucket } : {}),
+  };
+}
+
 function buildPageCacheKey(filters: ItemFetchFilters, cacheTtlSeconds: number) {
   return [
     'item-page',
     filters.item_network,
     filters.item_domain,
     stableStringify({
-      ...filters,
+      ...bucketGeoForCacheKey(filters),
       cacheTtlSeconds,
     }),
   ].join(':');
@@ -658,7 +699,7 @@ function buildMarkerPageCacheKey(
     filters.item_network,
     filters.item_domain,
     stableStringify({
-      ...filters,
+      ...bucketGeoForCacheKey(filters),
       cacheTtlSeconds,
     }),
   ].join(':');
