@@ -543,6 +543,10 @@ export function HomePage() {
   // routed through the guardian flow at all.
   const [u18Status, setU18Status] = React.useState<U18StatusResponse | null>(null);
   const [u18StatusLoading, setU18StatusLoading] = React.useState(false);
+  // Bumped after the guardian flow completes so the stored status (birth data +
+  // guardianVerified) is re-read — otherwise it stays stale and a later profile
+  // creation re-triggers the DOB step even though the ward already finished it.
+  const [u18StatusReload, setU18StatusReload] = React.useState(0);
   React.useEffect(() => {
     if (!requiresGuardianGate || !network) {
       setU18Status(null);
@@ -557,7 +561,7 @@ export function HomePage() {
       .catch(() => { if (!cancelled) setU18Status(null); })
       .finally(() => { if (!cancelled) setU18StatusLoading(false); });
     return () => { cancelled = true; };
-  }, [requiresGuardianGate, network, network?.id, wardDomain]);
+  }, [requiresGuardianGate, network, network?.id, wardDomain, u18StatusReload]);
 
   // Stored data already resolves this ward as an adult → no guardian gate;
   // the ordinary consent flow (ProfileConsentModal) handles terms/privacy.
@@ -1000,9 +1004,15 @@ export function HomePage() {
       initialStep={u18InitialStep}
       onComplete={() => {
         setGuardianFlowDismissed(true);
+        // Re-read stored U18 status so guardianVerified/birth data are fresh —
+        // stops a later profile creation from re-asking the DOB.
+        setU18StatusReload((n) => n + 1);
         void refetchU18Gate();
       }}
-      onNotMinor={() => setGuardianFlowDismissed(true)}
+      onNotMinor={() => {
+        setGuardianFlowDismissed(true);
+        setU18StatusReload((n) => n + 1);
+      }}
       onLogout={() => { void signOut(); }}
     />
   ) : null;
