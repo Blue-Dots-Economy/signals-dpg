@@ -323,15 +323,18 @@ them (that was the pre-#287 gap). **No manual DDL needed.**
 **Backfill `user.domains` for existing users.** The profile-create role lock
 reads `user.domains` (source of truth) instead of deriving from held items. New
 users get it at signup / on first create; existing users start NULL (treated as
-"unset → any served domain"). After adding the column, run the idempotent
-backfill to set each existing user's single role from their earliest item:
+"unset → any served domain"). This is **data, not schema**, so the deploy
+migrator does not run it — it lives as a one-off in the `adhoc-scripts` repo:
+`adhoc-scripts/u18-user-domains-backfill/` (`backfill_user_domains.sql` + README).
+Run it once per environment after the deploy applies `0004`:
 
 ```bash
-pnpm db:backfill:domains:api      # from repo root
+psql "$POSTGRES_URL" -v ON_ERROR_STOP=1 -f backfill_user_domains.sql
 ```
 
-Users with no items are left empty and get their role on first create. Safe to
-re-run (only NULL/empty rows are touched).
+It sets each existing user's single role from their earliest item; users with no
+items are left empty (role assigned on first create). Idempotent — only NULL/empty
+rows are touched.
 
 ## Related
 
