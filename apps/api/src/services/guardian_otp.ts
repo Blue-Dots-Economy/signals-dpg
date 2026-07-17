@@ -1,7 +1,8 @@
 import { randomInt, createHash } from 'node:crypto';
 import { redis } from '@api/db/secondary/redis';
 import { getNotificationClient } from '@/utils/notificationClient';
-import { authConfig } from '@/config';
+import { authConfig, supportConfig, notification } from '@/config';
+import { renderGuardianOtpEmail } from '@/services/guardian_otp_email';
 
 /** Codes the primitive raises; callers map these to HTTP responses. */
 export class GuardianOtpError extends Error {
@@ -13,14 +14,34 @@ export class GuardianOtpError extends Error {
 
 export type GuardianContactType = 'phone' | 'email';
 
+/**
+ * The parent-facing scenario a guardian OTP is issued for (#294). Selects the
+ * notification template + the copy the guardian sees. Distinct from the OTP
+ * mechanics — the code/TTL/throttles are identical across scenarios.
+ *
+ * For actions, `actionType` is taken straight from `network.json` (the gate
+ * passes the interaction's own action type) — NOT hardcoded — so any action a
+ * network defines derives its template automatically:
+ *   `guardian_otp_<actionType>[_accept]_sms`.
+ */
+export type GuardianOtpScenario =
+  | { kind: 'account' } // ward wants to create an account (pre-auth signup)
+  | { kind: 'profile' } // ward wants to create a profile
+  | { kind: 'action'; actionType: string; stage: 'initiate' | 'accept' }; // connect/apply/etc.
+
+/** Extra template variables per scenario (parent name, domain, provider org). */
+export type GuardianOtpVariables = Record<string, string>;
+
 /** Dispatch seam — injected so the core is testable without the notifier. */
 export type OtpSend = (args: {
   contact: string;
   contactType: GuardianContactType;
   otp: string;
+  scenario?: GuardianOtpScenario;
+  variables?: GuardianOtpVariables;
 }) => Promise<void>;
 
-export const GUARDIAN_OTP_TTL_SEC = 300; // nonce lifetime (5 min)
+export const GUARDIAN_OTP_TTL_SEC = 600; // nonce lifetime (10 min — matches template copy, #294)
 export const GUARDIAN_OTP_MAX_PER_WINDOW = 3; // sends allowed per scope per window
 export const GUARDIAN_OTP_CONTACT_MAX_PER_WINDOW = 5; // sends allowed per guardian contact per window
 export const GUARDIAN_OTP_WINDOW_SEC = 300; // rate-limit window (5 min)
@@ -88,6 +109,8 @@ export async function issueGuardianOtp(args: {
   scope: string;
   contact: string;
   contactType: GuardianContactType;
+  scenario?: GuardianOtpScenario;
+  variables?: GuardianOtpVariables;
   send?: OtpSend;
 }): Promise<void> {
   const count = await incrWithinWindow(rateKey(args.scope), GUARDIAN_OTP_WINDOW_SEC);
@@ -112,7 +135,13 @@ export async function issueGuardianOtp(args: {
   // fixed code is already known to the tester.
   if (authConfig.create_test_otp) return;
   const send = args.send ?? defaultGuardianOtpSend;
-  await send({ contact: args.contact, contactType: args.contactType, otp });
+  await send({
+    contact: args.contact,
+    contactType: args.contactType,
+    otp,
+    scenario: args.scenario,
+    variables: args.variables,
+  });
 }
 
 /**
@@ -154,28 +183,59 @@ const CHANNEL_BY_CONTACT_TYPE: Record<GuardianContactType, 'sms' | 'email'> = {
   email: 'email',
 };
 
-// TODO(#9): finalize ONEST guardian-OTP templates. Placeholder ids until then.
-const GUARDIAN_OTP_TEMPLATE_ID: Record<'sms' | 'email', string> = {
-  sms: 'guardian_otp_sms',
-  email: 'guardian_otp_email',
-};
+// SMS uses the ONE generic DLT-approved OTP template the instance already has
+// (`SMS_TEMPLATE_ID`, default `login_otp` — same as login). It only renders the
+// code, so there are no per-scenario SMS templates and no parent-facing SMS copy
+// — that lives in the email. Variable is `{ message: otp }`, matching login.
+const GENERIC_SMS_TEMPLATE_ID = 'login_otp';
 
 /**
  * Default dispatch: pick the channel from the guardian's contact type and send
  * via the shared notification client. Hard-fails when no provider is
  * configured — a guardian-required domain must not silently skip verification.
+ *
+ * Email: the body is rendered IN-REPO (`renderGuardianOtpEmail`, #294 copy) and
+ * shipped via the generic `basic_email` template — same convention as the login
+ * OTP + action emails, so the copy lives in signals. SMS: the DLT-approved body
+ * lives in the notification service, so we send a per-scenario `template_id`
+ * plus variables and let it render.
  */
-export const defaultGuardianOtpSend: OtpSend = async ({ contact, contactType, otp }) => {
+export const defaultGuardianOtpSend: OtpSend = async ({ contact, contactType, otp, scenario, variables }) => {
   const client = getNotificationClient();
   if (!client) {
     throw new GuardianOtpError('NO_OTP_PROVIDER');
   }
   const channel = CHANNEL_BY_CONTACT_TYPE[contactType];
+
+  if (channel === 'email') {
+    const teamName = supportConfig.teamName ?? 'Blue Dots';
+    const { subject, html } = scenario
+      ? renderGuardianOtpEmail({ scenario, otp, variables: variables ?? {}, teamName })
+      : {
+          subject: 'Your One-Time Password (OTP)',
+          html: `<p>Use this OTP: <b>${otp}</b></p><p>This OTP is valid for 10 minutes. Do not share it with anyone.</p>`,
+        };
+    await client.notify({
+      channel: 'email',
+      template_id: 'basic_email',
+      to: contact,
+      priority: 'realtime',
+      variables: {
+        fromName: teamName,
+        fromEmail: supportConfig.fromEmail ?? '',
+        replyTo: supportConfig.fromEmail ?? '',
+        subject,
+        html,
+      },
+    });
+    return;
+  }
+
   await client.notify({
-    channel,
-    template_id: GUARDIAN_OTP_TEMPLATE_ID[channel],
+    channel: 'sms',
+    template_id: notification.SMS_TEMPLATE_ID || GENERIC_SMS_TEMPLATE_ID,
     to: contact,
     priority: 'realtime',
-    variables: { otp },
+    variables: { message: otp },
   });
 };

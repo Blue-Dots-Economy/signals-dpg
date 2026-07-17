@@ -1,7 +1,12 @@
 import { BulkItemFailure } from '@/utils/bulk_runner';
 import { getNetworkConfigById } from '@/network_configs';
-import { getWardDob, getGuardianContactPlaintext } from '@/services/minor_guardian_repo';
+import {
+  getWardDob,
+  getGuardianContactPlaintext,
+  getGuardianNamePlaintext,
+} from '@/services/minor_guardian_repo';
 import { isMinor, guardianConsentRequired } from '@/services/minor';
+import { resolveProviderServiceName } from '@/notifications/resolve_owner';
 import {
   issueGuardianOtp,
   verifyGuardianOtp,
@@ -16,6 +21,7 @@ export type GateInput = {
   actionType: string;
   sourceItemId: string;
   targetItemId: string;
+  stage?: 'initiate' | 'accept'; // perform → initiate (default), accept-status → accept
   otp?: string; // body.guardian_otp
 };
 
@@ -55,10 +61,23 @@ export async function guardianActionGate(input: GateInput): Promise<GateResult> 
       if (!contact) {
         throw new GuardianOtpError('NO_OTP_PROVIDER');
       }
+      // Parent-facing template vars (#294) — best-effort; the OTP is dispatched
+      // regardless if either lookup returns null (template renders without them).
+      const [parentName, providerOrgName] = await Promise.all([
+        getGuardianNamePlaintext(input.wardUserId),
+        resolveProviderServiceName(input.targetItemId, input.network),
+      ]);
       await issueGuardianOtp({
         scope,
         contact: contact.contact,
         contactType: contact.contactType,
+        // action_type comes straight from network.json (the interaction) — the
+        // template id derives from it, no hardcoded connect/apply.
+        scenario: { kind: 'action', actionType: input.actionType, stage: input.stage ?? 'initiate' },
+        variables: {
+          ...(parentName ? { parentName } : {}),
+          ...(providerOrgName ? { providerOrgName } : {}),
+        },
       });
       return { status: 'challenge_issued' };
     } catch (err) {

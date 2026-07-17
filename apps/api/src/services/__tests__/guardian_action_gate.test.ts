@@ -9,10 +9,17 @@ vi.mock('@/network_configs', () => ({
 const getMinorGuardian = vi.fn();
 const getWardDob = vi.fn();
 const getGuardianContactPlaintext = vi.fn();
+const getGuardianNamePlaintext = vi.fn();
 vi.mock('@/services/minor_guardian_repo', () => ({
   getMinorGuardian: (...args: unknown[]) => getMinorGuardian(...args),
   getWardDob: (...args: unknown[]) => getWardDob(...args),
   getGuardianContactPlaintext: (...args: unknown[]) => getGuardianContactPlaintext(...args),
+  getGuardianNamePlaintext: (...args: unknown[]) => getGuardianNamePlaintext(...args),
+}));
+
+const resolveProviderServiceName = vi.fn();
+vi.mock('@/notifications/resolve_owner', () => ({
+  resolveProviderServiceName: (...args: unknown[]) => resolveProviderServiceName(...args),
 }));
 
 // Codes the primitive raises; mirrors the real class shape so `instanceof`
@@ -62,6 +69,8 @@ const EXPECTED_SCOPE = 'guardian_action:ward-1:apply:item-src:item-tgt';
 beforeEach(() => {
   vi.clearAllMocks();
   getNetworkConfigById.mockResolvedValue(gatedCfg);
+  getGuardianNamePlaintext.mockResolvedValue('Parent P');
+  resolveProviderServiceName.mockResolvedValue('Acme Services');
 });
 
 describe('guardianActionGate', () => {
@@ -96,7 +105,21 @@ describe('guardianActionGate', () => {
       scope: EXPECTED_SCOPE,
       contact: '+911234',
       contactType: 'phone',
+      scenario: { kind: 'action', actionType: 'apply', stage: 'initiate' },
+      variables: { parentName: 'Parent P', providerOrgName: 'Acme Services' },
     });
+  });
+
+  it('passes the network.json action type + stage through as the scenario', async () => {
+    getWardDob.mockResolvedValue(new Date('2015-01-10'));
+    getGuardianContactPlaintext.mockResolvedValue({ contact: 'g@x.co', contactType: 'email' });
+    issueGuardianOtp.mockResolvedValue(undefined);
+
+    await guardianActionGate({ ...baseInput, actionType: 'connect', stage: 'accept' });
+
+    expect(issueGuardianOtp).toHaveBeenCalledWith(
+      expect.objectContaining({ scenario: { kind: 'action', actionType: 'connect', stage: 'accept' } }),
+    );
   });
 
   it('returns verified with the scope when the supplied otp checks out', async () => {
