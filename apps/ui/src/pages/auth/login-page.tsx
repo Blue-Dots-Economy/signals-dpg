@@ -30,7 +30,7 @@ import type { DotNetworkDomain } from '@/engine/types';
 import { getServedScope } from '@/lib/served-binding';
 import type { SignupExtras } from '@/lib/signup-domain';
 import { SignupDobStep } from '@/components/consent/u18/signup-dob-step';
-import { isMinorFromDate } from '@/lib/guardian-consent';
+import { isMinorFromDate, toDateOnly } from '@/lib/guardian-consent';
 import { PhoneInput, toE164 } from '@/components/auth/phone-input';
 import {
   SignupGuardianFlow,
@@ -273,7 +273,7 @@ export function LoginPage() {
   const handleSignupDob = async (date: Date) => {
     const gate = signupDobGate;
     if (!gate) return;
-    const extras: SignupExtras = { domain: gate.domain, dateOfBirth: date.toISOString() };
+    const extras: SignupExtras = { domain: gate.domain, dateOfBirth: toDateOnly(date) };
     setSignupDobGate(null);
 
     // A brand-new minor signup captures the guardian pre-auth (materialized on

@@ -6,6 +6,7 @@ import { Loader2 } from 'lucide-react';
 import { Label } from '@/components/ui/label';
 import { Button } from '@/components/ui/button';
 import { submitU18Dob } from '@/lib/consent-api';
+import { toDateOnly } from '@/lib/guardian-consent';
 import { DobCalendar } from '@/components/consent/u18/dob-calendar';
 
 export interface DobStepProps {
@@ -28,7 +29,7 @@ export function DobStep({ network, onResolved }: DobStepProps) {
     try {
       const result = await submitU18Dob({
         network,
-        dateOfBirth: birthDate.toISOString(),
+        dateOfBirth: toDateOnly(birthDate),
       });
       onResolved(result.isMinor);
     } catch (err) {

@@ -29,6 +29,20 @@ export function isMinorFromDate(dateOfBirth: Date, now: Date = new Date()): bool
 }
 
 /**
+ * Serialize a picked calendar date as a LOCAL date-only `yyyy-mm-dd`. The
+ * calendar hands back a Date at local midnight; `toISOString()` would convert
+ * to UTC and, east of Greenwich (e.g. IST +5:30), roll it back a day — which at
+ * the 18th-birthday boundary flips the minor/adult routing. Emit the local
+ * calendar day so what the user picked is what the server stores.
+ */
+export function toDateOnly(date: Date): string {
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, '0');
+  const d = String(date.getDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
+}
+
+/**
  * Toast the standard guardian OTP-send failure: rate-limited (429) and
  * confirmation-unavailable (503) map to shared copy; anything else falls back
  * to the caller-supplied message. Shared by the guardian form + OTP step so the

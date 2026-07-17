@@ -7,6 +7,7 @@ import {
   verifySignupGuardian,
   type SubmitGuardianBody,
 } from '@/lib/consent-api';
+import { toDateOnly } from '@/lib/guardian-consent';
 import { GuardianFormStep } from './guardian-form-step';
 import { GuardianOtpStep } from './guardian-otp-step';
 
@@ -60,7 +61,7 @@ export function SignupGuardianFlow({
       network,
       domain,
       ...identifier,
-      dateOfBirth: dateOfBirth.toISOString(),
+      dateOfBirth: toDateOnly(dateOfBirth),
       guardianName: body.guardianName,
       ...(body.guardianEmail ? { guardianEmail: body.guardianEmail } : {}),
       ...(body.guardianPhone ? { guardianPhone: body.guardianPhone } : {}),

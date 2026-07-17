@@ -69,6 +69,9 @@ export function guardianOtpErrorReply(
   }
 }
 
+/** sha256 hex of an OTP — what we persist in Redis (never the plaintext code). */
+const hashOtp = (otp: string) => createHash('sha256').update(otp).digest('hex');
+
 function generateOtp(): string {
   // Dev/test bypass (CREATE_TEST_OTP): fixed code so the guardian flow is
   // exercisable without a notifier. Guarded against production in config.
@@ -102,7 +105,9 @@ export async function issueGuardianOtp(args: {
   }
 
   const otp = generateOtp();
-  await redis.set(codeKey(args.scope), otp, 'EX', GUARDIAN_OTP_TTL_SEC);
+  // Store only a hash of the code — a Redis dump / read-access then can't expose
+  // a live OTP. The plaintext code is still what gets dispatched to the guardian.
+  await redis.set(codeKey(args.scope), hashOtp(otp), 'EX', GUARDIAN_OTP_TTL_SEC);
   // In test-OTP mode skip the real dispatch — no notifier is required and the
   // fixed code is already known to the tester.
   if (authConfig.create_test_otp) return;
@@ -118,13 +123,15 @@ export async function issueGuardianOtp(args: {
 // submitted one, in a single round-trip. Prevents the get-then-del race where
 // two concurrent verifies of the same code both succeed (double consent/action).
 // A non-match leaves the code in place so the ward can retry within its TTL.
+// Compares HASHES — the stored value is sha256(otp), so the caller hashes the
+// submitted code before this runs.
 const CONSUME_IF_MATCH = `if redis.call('GET', KEYS[1]) == ARGV[1] then return redis.call('DEL', KEYS[1]) else return 0 end`;
 
 export async function verifyGuardianOtp(args: {
   scope: string;
   otp: string;
 }): Promise<boolean> {
-  const consumed = (await redis.eval(CONSUME_IF_MATCH, 1, codeKey(args.scope), args.otp)) as number;
+  const consumed = (await redis.eval(CONSUME_IF_MATCH, 1, codeKey(args.scope), hashOtp(args.otp))) as number;
   return consumed === 1;
 }
 
