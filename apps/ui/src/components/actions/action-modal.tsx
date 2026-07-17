@@ -10,6 +10,7 @@ import { ActionModalHeader } from './action-modal-header';
 import { ConsentCheckbox } from './consent-checkbox';
 import { getActionDisplay } from '@/lib/action-display';
 import { ACTION_CONSENT_SENTINEL } from '@/lib/action-api';
+import { renderConsentStatement } from '@/lib/consent-copy';
 import { cn } from '@/lib/utils';
 import { useConsentConfig } from '@/hooks/use-consent-config';
 import { useNetworkTheme } from '@/theme/theme-provider';
@@ -70,7 +71,12 @@ export function ActionModal({
   const actionType = actionSchema.action_type;
   const initDoc = config?.actions?.[actionType]?.initiate;
   const initVersion = initDoc?.versions.find((v) => v.version === initDoc.current_version);
-  const consentText = initVersion?.statement ?? '';
+  // Initiate stage: the actor shares details with the item they're connecting
+  // to, so the counterparty noun is the target domain.
+  const consentText = renderConsentStatement(
+    initVersion?.statement ?? '',
+    actionSchema.to_domain,
+  );
   const consentRequired = (actionSchema.reveals_pii_on_status?.length ?? 0) > 0;
   const [consentChecked, setConsentChecked] = useState(false);
 
