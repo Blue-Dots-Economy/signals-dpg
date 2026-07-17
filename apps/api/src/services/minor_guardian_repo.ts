@@ -1,4 +1,4 @@
-import { and, eq, ne, count } from 'drizzle-orm';
+import { and, eq, ne, count, sql } from 'drizzle-orm';
 import { db } from '@api/db/postgres/drizzle_config';
 import { minor_guardian, user } from '@api/db/postgres/schema';
 import { encryptGuardianField, decryptGuardianField, guardianRef } from '@/services/guardian_pii';
@@ -17,12 +17,44 @@ type GuardianContactType = 'phone' | 'email';
 export async function countWardsForGuardian(
   ref: string,
   excludeUserId: string | null,
+  exec: DbOrTx = db,
 ): Promise<number> {
   const where = excludeUserId
     ? and(eq(minor_guardian.guardianRef, ref), ne(minor_guardian.userId, excludeUserId))
     : eq(minor_guardian.guardianRef, ref);
-  const [row] = await db.select({ n: count() }).from(minor_guardian).where(where);
+  const [row] = await exec.select({ n: count() }).from(minor_guardian).where(where);
   return row?.n ?? 0;
+}
+
+/** Thrown by the atomic cap check; call sites map it to a 409 GUARDIAN_WARD_LIMIT. */
+export class WardLimitError extends Error {
+  constructor() {
+    super('GUARDIAN_WARD_LIMIT');
+    this.name = 'WardLimitError';
+  }
+}
+
+/**
+ * Enforce `MAX_WARDS_PER_GUARDIAN` atomically INSIDE `tx`, closing the
+ * check-then-write race. `isGuardianWardLimitReached` (a bare `SELECT count()`)
+ * followed by a separate insert lets two concurrent registrations of the SAME
+ * guardian both pass the check and both insert — the `guardian_ref` index is
+ * non-unique, so nothing stops the overflow. Here a transaction-scoped advisory
+ * lock keyed on the ref serializes those registrations: the recount + insert
+ * happen while the lock is held, so the second waiter sees the first's row and
+ * is rejected. Must be called before the guardian row is written in the same tx.
+ * `excludeUserId` skips the ward being (re)linked so a re-submit isn't counted.
+ */
+export async function assertWardLimitWithLock(
+  tx: DbOrTx,
+  ref: string,
+  excludeUserId: string | null,
+): Promise<void> {
+  // hashtext(ref) → int key for the advisory lock; a hash collision only causes
+  // harmless extra serialization, never a missed cap.
+  await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${ref}))`);
+  const n = await countWardsForGuardian(ref, excludeUserId, tx);
+  if (n >= apiConfig.max_wards_per_guardian) throw new WardLimitError();
 }
 
 /**
@@ -132,6 +164,7 @@ export async function upsertGuardianDetails(
   input: { guardianName: string; guardianEmail?: string | null; guardianPhone?: string | null },
 ): Promise<void> {
   const channel = resolveOtpChannel(input);
+  const ref = guardianRef(channel.contact);
   // Upsert: DOB no longer creates a minor_guardian row (it lives on user now),
   // so this may be the first write of the ward's row.
   const fields = {
@@ -140,16 +173,22 @@ export async function upsertGuardianDetails(
     guardianContactType: channel.contactType,
     guardianEmail: input.guardianEmail ? encryptGuardianField(input.guardianEmail) : null,
     guardianPhone: input.guardianPhone ? encryptGuardianField(input.guardianPhone) : null,
-    guardianRef: guardianRef(channel.contact),
+    guardianRef: ref,
     guardianVerified: false,
   };
-  await db
-    .insert(minor_guardian)
-    .values({ userId, ...fields })
-    .onConflictDoUpdate({
-      target: minor_guardian.userId,
-      set: { ...fields, updatedAt: new Date() },
-    });
+  // Cap enforced atomically with the write (advisory lock on the ref) so
+  // concurrent links to the same guardian can't race past the limit; throws
+  // WardLimitError, which the route maps to 409.
+  await db.transaction(async (tx) => {
+    await assertWardLimitWithLock(tx, ref, userId);
+    await tx
+      .insert(minor_guardian)
+      .values({ userId, ...fields })
+      .onConflictDoUpdate({
+        target: minor_guardian.userId,
+        set: { ...fields, updatedAt: new Date() },
+      });
+  });
 }
 
 /** Decrypt the guardian contact for a transient use (OTP send). */

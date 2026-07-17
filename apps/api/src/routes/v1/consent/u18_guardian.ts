@@ -14,6 +14,7 @@ import {
   resolveOtpChannel,
   isGuardianWardLimitReached,
   guardianContactMatchesWard,
+  WardLimitError,
 } from '@/services/minor_guardian_repo';
 import { resolveConsentVersion } from '@/services/consent_version';
 import { issueGuardianOtp, guardianOtpErrorReply } from '@/services/guardian_otp';
@@ -96,6 +97,14 @@ export const u18_guardian_handler = async (request: Req, reply: FastifyReply) =>
       source: 'self',
     }));
   } catch (err) {
+    // The atomic cap re-check (advisory lock in upsertGuardianDetails) can lose
+    // the race the pre-check above passed → surface it as the same 409.
+    if (err instanceof WardLimitError) {
+      return reply.code(409).send({
+        error: 'GUARDIAN_WARD_LIMIT',
+        message: `This guardian is already linked to the maximum of ${apiConfig.max_wards_per_guardian} accounts.`,
+      });
+    }
     request.log.error({ err }, 'Failed to persist guardian details/declaration');
     return reply.code(500).send({ error: 'GUARDIAN_WRITE_FAILED', message: 'Failed to record guardian details' });
   }

@@ -31,6 +31,7 @@ import { resolveConsentVersion } from '@/services/consent_version';
 import { guardianUserConsentRow } from '@/services/guardian_consent_rows';
 import {
   writeEncryptedGuardian,
+  assertWardLimitWithLock,
   resolveOtpChannel,
   isGuardianWardLimitReached,
   guardianContactMatchesWard,
@@ -265,6 +266,9 @@ export async function materializeSignupGuardian(user: MaterializeSignupGuardianU
 
     const acceptedAt = new Date();
     await db.transaction(async (tx) => {
+      // Re-enforce the ward cap atomically at materialization (the pre-auth
+      // start-time check can race across concurrent signups sharing a guardian).
+      await assertWardLimitWithLock(tx, pending.guardianRef, user.id);
       // DOB lives on the user row now (captured pre-auth in the pending record).
       await setWardDob(user.id, new Date(pending.dateOfBirth), tx);
       await writeEncryptedGuardian(
