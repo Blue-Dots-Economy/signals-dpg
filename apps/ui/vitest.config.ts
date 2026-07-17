@@ -19,5 +19,9 @@ export default defineConfig({
     globals: false,
     setupFiles: ['./src/test/setup.ts'],
     include: ['src/**/*.test.{ts,tsx}'],
+    // Headroom for individual tests when workers contend for CPU (default 5s).
+    // Pairs with the RTL asyncUtilTimeout bump in setup.ts.
+    testTimeout: 15000,
+    hookTimeout: 15000,
   },
 });
