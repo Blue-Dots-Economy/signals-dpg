@@ -92,6 +92,9 @@ const NetworkDomainSchema = z.object({
   id: z.string().min(1),
   description: z.string().optional(),
   minimum_cache_ttl_seconds: z.number().int().positive().optional().default(300),
+  // U18 spec D8: when true, this domain routes minors' consent through a
+  // guardian. Server-read only; never trusted from the client. Defaults off.
+  guardian_consent_required: z.boolean().optional().default(false),
   item_schemas: z
     .record(z.string(), JsonSchemaDocumentSchema)
     .optional()

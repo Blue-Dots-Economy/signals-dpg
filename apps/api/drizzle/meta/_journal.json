@@ -29,6 +29,13 @@
       "when": 1784266122161,
       "tag": "0003_legacy_column_backfill",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1784272874091,
+      "tag": "0004_zippy_taskmaster",
+      "breakpoints": true
     }
   ]
 }

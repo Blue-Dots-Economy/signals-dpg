@@ -41,3 +41,4 @@ data/
 # E2E test scratch + env
 scripts/e2e/.env
 scripts/e2e/scratch/
+.gstack/

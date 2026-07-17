@@ -100,6 +100,17 @@ vi.mock('@/services/consent_version', () => ({
   resolveConsentVersion: vi.fn(async () => 1),
 }));
 
+// --- U18 guardian gate seam: this suite's fixtures never trigger
+// `requiresReceiverConsent` (reveals_pii_on_status is []), but the route
+// module still imports guardian_action_gate at load time, which otherwise
+// pulls in the real Redis client against this suite's minimal @/config mock.
+// Same seam Task 2 added when wiring the gate into perform_action.
+vi.mock('@/services/guardian_action_gate', () => ({
+  guardianActionGate: vi.fn(async () => ({ status: 'not_required' })),
+  // Gate is always not_required in these tests, so the mapper only ever returns null.
+  guardianGateFailure: () => null,
+}));
+
 vi.mock('@api/db/postgres/drizzle_config', () => {
   const dbMock: Record<string, unknown> = {
     select: vi.fn(() => ({

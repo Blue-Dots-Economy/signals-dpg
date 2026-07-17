@@ -40,6 +40,24 @@ const ActionStages = z.object({
   accept: StatementDocument,
 });
 
+// U18 (minor) document set — spec D9. Own versioned entries, never aliased to
+// the adult `documents`. guardian_declaration is the ward's attestation that
+// the named guardian is genuine (D12); it exists only in the U18 set.
+const U18Documents = z.object({
+  terms: ContentDocument,
+  privacy: ContentDocument,
+  profile_creation: StatementDocument,
+  guardian_declaration: StatementDocument,
+});
+
+// Brand override: every U18 document optional (mirrors the adult partial).
+const PartialU18Documents = z.object({
+  terms: ContentDocument.optional(),
+  privacy: ContentDocument.optional(),
+  profile_creation: StatementDocument.optional(),
+  guardian_declaration: StatementDocument.optional(),
+});
+
 export const ConsentConfigSchema = z.object({
   documents: z.object({
     terms: ContentDocument,
@@ -47,6 +65,7 @@ export const ConsentConfigSchema = z.object({
     profile_creation: StatementDocument,
   }),
   actions: z.record(z.string().min(1), ActionStages).optional(),
+  u18_documents: U18Documents.optional(),
 });
 
 // Brand overrides are a partial document set — each document is optional. Built
@@ -60,6 +79,7 @@ export const PartialConsentConfigSchema = z.object({
     })
     .optional(),
   actions: z.record(z.string().min(1), ActionStages).optional(),
+  u18_documents: PartialU18Documents.optional(),
 });
 
 export type ConsentConfigDocument = z.infer<typeof ConsentConfigSchema>;

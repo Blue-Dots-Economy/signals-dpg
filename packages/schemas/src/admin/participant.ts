@@ -41,7 +41,10 @@ export const UpsertParticipantRequest = z
     email: z.email().optional(),
     phone_number: PhoneE164.optional(),
     name: z.string().min(1),
-    date_of_birth: z.iso.datetime().optional(),
+    // Accept a date-only `yyyy-mm-dd` OR a full ISO datetime — integrating DPGs
+    // (aggregator / voice / WhatsApp) typically have only a birth date. Both
+    // parse cleanly via `new Date(...)` into `user.date_of_birth`.
+    date_of_birth: z.union([z.iso.date(), z.iso.datetime()]).optional(),
     terms_accepted: z
       .boolean()
       .refine((v) => v === true, 'terms_accepted must be true'),

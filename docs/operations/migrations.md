@@ -301,6 +301,41 @@ Operational guidance until the switchover:
   NULL") ship in two releases — the first additive, the second the
   constraint — and verify the backfill between them.
 
+### U18 guardian-consent additions
+
+The U18 feature (PR #311) adds, in the **Drizzle-owned** layer (schema under
+`apps/api/db/postgres/schema/`, applied via the `apps/api/drizzle/` ledger):
+
+- `"user"."domains" text[]` (`auth.ts`) — the signup domain(s) / role.
+- the `minor_guardian` table (`minor_guardian.ts`).
+- a **reshaped** `consent_record_profile_creation_unique` index — dropped and
+  recreated on `(user_id, item_id, source)` instead of `(user_id, item_id)` so a
+  ward's self-consent and their guardian's consent co-exist as distinct
+  append-only rows (`consent_record.ts`).
+
+All three are captured in generated migration `drizzle/0004_zippy_taskmaster.sql`
+(the DROP+recreate of the index included). Because deploy now applies the Drizzle
+ledger via `migrate.mjs` (which tracks applied migrations in
+`__drizzle_migrations`), these land on an existing DB **automatically** on the
+next deploy — the old `WHERE table_name='items'` short-circuit no longer gates
+them (that was the pre-#287 gap). **No manual DDL needed.**
+
+**Backfill `user.domains` for existing users.** The profile-create role lock
+reads `user.domains` (source of truth) instead of deriving from held items. New
+users get it at signup / on first create; existing users start NULL (treated as
+"unset → any served domain"). This is **data, not schema**, so the deploy
+migrator does not run it — it lives as a one-off in the `adhoc-scripts` repo:
+`adhoc-scripts/u18-user-domains-backfill/` (`backfill_user_domains.sql` + README).
+Run it once per environment after the deploy applies `0004`:
+
+```bash
+psql "$POSTGRES_URL" -v ON_ERROR_STOP=1 -f backfill_user_domains.sql
+```
+
+It sets each existing user's single role from their earliest item; users with no
+items are left empty (role assigned on first create). Idempotent — only NULL/empty
+rows are touched.
+
 ## Related
 
 - `docs/superpowers/plans/2026-05-21-deployment-and-automation.md` —

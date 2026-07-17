@@ -33,6 +33,12 @@ interface ActionModalProps {
   actionSchema: DotActionSchema;
   onSubmit: (formData: Record<string, unknown>) => void;
   loading?: boolean;
+  /**
+   * Minor ward on a guardian-gated domain: ticking the consent IS the trigger —
+   * it submits immediately so the guardian confirm + OTP flow (owned by
+   * ActionHandler) starts right away, instead of waiting for a separate Confirm.
+   */
+  minor?: boolean;
 }
 
 const ACTION_FORM_ID = 'action-requirement-form';
@@ -54,6 +60,7 @@ export function ActionModal({
   actionSchema,
   onSubmit,
   loading = false,
+  minor = false,
 }: ActionModalProps) {
   const { t } = useTranslation();
   const isMobile = useIsMobile();
@@ -89,7 +96,11 @@ export function ActionModal({
 
   const handleSubmit = (formData: Record<string, unknown>) => {
     const payload: Record<string, unknown> = { ...formData };
-    if (consentRequired && consentChecked) {
+    // A submit is only reachable once consent is acknowledged (adults: the
+    // Confirm button is gated on `consentChecked`; minors: submit is fired by
+    // the consent tick itself), so `consentRequired` here implies consented —
+    // don't read the possibly-stale `consentChecked` state.
+    if (consentRequired) {
       payload[ACTION_CONSENT_SENTINEL] = {
         acknowledged: true as const,
         version: initDoc?.current_version ?? 1,
@@ -97,6 +108,14 @@ export function ActionModal({
       };
     }
     onSubmit(payload);
+  };
+
+  // Minor: ticking consent is the trigger. Submit right away — with a form,
+  // via its native submit (so validation runs); otherwise directly.
+  const handleMinorConsentTick = () => {
+    const formEl = document.getElementById(ACTION_FORM_ID) as HTMLFormElement | null;
+    if (resolvedSchema && formEl) formEl.requestSubmit();
+    else handleSubmit({});
   };
 
   const formContent = (
@@ -115,7 +134,10 @@ export function ActionModal({
         <ConsentCheckbox
           text={consentText}
           checked={consentChecked}
-          onCheckedChange={setConsentChecked}
+          onCheckedChange={(v) => {
+            setConsentChecked(v);
+            if (v && minor) handleMinorConsentTick();
+          }}
         />
       )}
     </>

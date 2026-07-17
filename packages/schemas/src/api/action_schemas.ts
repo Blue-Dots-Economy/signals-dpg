@@ -35,6 +35,7 @@ export const PerformActionBodySchema = z.object({
   requirements_snapshot: z.record(z.string(), z.unknown()),
   acting_as_user_id: z.string().min(1).optional(),
   consent: ConsentAckSchema.optional(),
+  guardian_otp: z.string().length(6).optional(),
 });
 
 export const PerformNetworkActionBodySchema = z.object({
@@ -46,6 +47,7 @@ export const PerformNetworkActionBodySchema = z.object({
   performed_by_org_id: z.string().min(1).nullable().optional(),
   performed_by_service_user_id: z.string().min(1).nullable().optional(),
   consent: ConsentAckSchema.optional(),
+  guardian_otp: z.string().length(6).optional(),
 });
 
 export const UpdateActionStatusBodySchema = z.object({
@@ -53,6 +55,7 @@ export const UpdateActionStatusBodySchema = z.object({
   action_status: z.string().min(1),
   remarks: z.string().min(1).optional(),
   consent: ConsentAckSchema.optional(),
+  guardian_otp: z.string().length(6).optional(),
 });
 
 export const StoreEventBodySchema = z.object({
