@@ -74,13 +74,18 @@ async function main() {
           `check_parity: ${problems} divergence(s) — refusing to baseline a drifted database. Reconcile first. Aborting.`
         );
       }
-      console.log('  parity OK → auto-baselining current migrations');
-      const entries = await readJournalEntries(drizzleDir);
+      // Seed ONLY the initial (declarative) migration. 0001+ are idempotent
+      // (CREATE/ALTER ... IF NOT EXISTS), so letting them run self-heals a legacy
+      // DB — no-ops on present objects, and applies genuine forward fixes (e.g.
+      // a column a behind-schema legacy table is missing). Seeding them all would
+      // skip those fixes.
+      console.log('  parity OK → baselining the initial migration; 0001+ run idempotently');
+      const [initial] = await readJournalEntries(drizzleDir);
       const { seeded } = await seedLedger(client, drizzleDir, {
-        entries,
+        entries: [initial],
         log: (m) => console.log(`  ${m}`),
       });
-      console.log(`  baseline: marked ${seeded} migration(s) as already-applied`);
+      console.log(`  baseline: marked ${seeded} initial migration(s) as already-applied`);
     } else {
       console.log('  fresh database → migrator will create everything');
     }

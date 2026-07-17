@@ -9,9 +9,10 @@
 // (apps/api/db/postgres/schema/*.ts) and applied via `drizzle-orm` migrations
 // (apps/api/drizzle/), NOT bundled here.
 //
-// This bundle is applied AFTER the Drizzle migrations (items.created_by FKs to
-// the Drizzle-owned "user" table), by the deploy migrate runner
-// (apps/api/scripts/migrate.mjs → `pnpm db:migrate:deploy`).
+// This bundle is for LOCAL dev only (applied by `pnpm db:init:api` /
+// apps/api/scripts/db_init.ts). The DEPLOY path does NOT use it — the
+// migrate runner (apps/api/scripts/migrate.mjs) applies one Drizzle ledger
+// over apps/api/drizzle/ (the raw core tables live there as custom migrations).
 //
 // Source order matters — extensions first, then the core tables.
 //

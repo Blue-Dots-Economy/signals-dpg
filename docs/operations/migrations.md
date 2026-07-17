@@ -35,17 +35,24 @@ deploy runner:
    - `migrations/NNNN_*.sql` — ordered version migrations (ALTER/backfill for
      existing DBs), e.g. `0001_item_locations.sql`.
    These use partitioning, extensions, and extension types Drizzle Kit doesn't
-   model, so they stay raw. `apps/api/db/postgres/schema.sql` is the
-   **generated bundle** of `extensions/ + core/` (`pnpm schema:bundle`),
-   applied AFTER the Drizzle migrations (the FK to `"user"` requires it).
+   model, so they stay raw.
 
 Every raw statement is `CREATE … IF NOT EXISTS` / `ALTER … ADD COLUMN IF NOT
 EXISTS` / DO-block-guarded, so re-applying is a no-op.
 
-**One runner applies both, in dependency order:** `apps/api/scripts/migrate.mjs`
-(`pnpm db:migrate:deploy:api`) — extensions → drizzle `migrate()` → core →
-version migrations. It uses only prod deps (`drizzle-orm` + `pg`), so it runs
-inside the app image at deploy.
+**Two application paths — do not conflate:**
+
+- **Deploy (cluster):** `apps/api/scripts/migrate.mjs` (`pnpm db:migrate:deploy:api`)
+  applies **one Drizzle ledger** over `apps/api/drizzle/` — the declarative
+  tables (`0000`) plus the raw partitioned/geo tables re-authored as custom
+  migrations (`0001_core`, `0002_item_search`, and version migrations such as
+  `0003_legacy_column_backfill`). It does extension **preflight** (assert, not
+  create) → auto-baseline (legacy cutover) → `migrate()`, using prod deps only
+  (`drizzle-orm` + `pg`) inside the app image. It does **not** read
+  `sql_scripts/` or the generated `schema.sql` bundle.
+- **Local dev:** `pnpm db:init:api` applies the raw `sql_scripts/{extensions,core}`
+  directly, and `apps/api/db/postgres/schema.sql` is a generated reference bundle
+  of those (see "Local dev" below).
 
 ### Local dev
 
@@ -72,12 +79,10 @@ Script wiring:
   ```ts
   const FILES = ['create_items.sql', 'create_actions_events.sql'];
   ```
-  `db_init.ts` doesn't include `auth.sql` because local dev uses
-  `pnpm db:push:api` for better-auth tables. The deploy-time migrate-job
-  applies `auth.sql` indirectly via the generated `schema.sql` bundle
-  (`scripts/generate-schema-bundle.mjs` →
-  `apps/api/db/postgres/schema.sql`). The script is idempotent and
-  safe to re-run.
+  `db_init.ts` doesn't include the better-auth tables because local dev uses
+  `pnpm db:push:api` for them. In deploy, all tables (declarative + raw) are
+  applied by the single Drizzle ledger via `migrate.mjs` (see "Deployed" below),
+  not by this local script. The script is idempotent and safe to re-run.
 
 Without `pnpm db:init:api`, the first `POST /api/v1/item/create` against a
 fresh database fails with `PARTITION_SETUP_FAILED` — the parent `items`
@@ -86,24 +91,23 @@ table is missing. That mode is what the helper exists to prevent.
 For iterating on the Drizzle schema you also have:
 
 - `pnpm db:generate:api` → `drizzle-kit generate` — writes a new SQL file
-  into `apps/api/drizzle/`. Today `apps/api/drizzle/` is gitignored
-  (`.gitignore:10` → `drizzle/`), so generated files are local-only.
+  into `apps/api/drizzle/`, which is **committed** (the deploy runner applies it).
 - `pnpm db:migrate:api` → `drizzle-kit migrate` — applies any pending
   generated migrations to the connected DB.
 - `pnpm db:studio:api` → `drizzle-kit studio` — browser DB UI.
 
 ### Deployed (helm migrate-job)
 
-> The Helm charts no longer live in this repo — they were moved to a
-> separate deployment repository. Chart paths below
-> (`dpg/charts/api/templates/…`, `values.yaml`) refer to that repo. The
-> `schema.sql` bundle the migrate-job consumes is generated **here**
-> (`pnpm schema:bundle` → `apps/api/db/postgres/schema.sql`) and copied
-> into the charts repo.
+> The Helm charts live in the separate deployment repository. No `schema.sql`
+> is vendored there anymore — the migrate-job runs the **app image** and applies
+> the schema from the committed `apps/api/drizzle/` ledger via `migrate.mjs`.
 
 The deploy-time migration runs as a Helm `post-install,post-upgrade` hook
-defined in `dpg/charts/api/templates/migrate-job.yaml` (charts repo). The
-shape:
+(`migrate-job.yaml`, charts repo): a `migrate-ddl` initContainer runs the api
+image's `node apps/api/scripts/migrate.mjs` (extension preflight → auto-baseline
+→ `migrate()`), then a `provision` container upserts the aggregator-dpg apikey.
+The older shape below (a psql job consuming a `schema.sql` ConfigMap) is
+retained only as historical context:
 
 - A `ConfigMap` named `<release>-migrate-sql` mounts the bundled
   `schema.sql` (`hook-weight: -1`).

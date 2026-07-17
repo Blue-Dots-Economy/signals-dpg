@@ -35,7 +35,8 @@ CREATE INDEX IF NOT EXISTS items_instance_url_idx ON items (item_instance_url);-
 CREATE INDEX IF NOT EXISTS items_schema_url_idx ON items (item_schema_url);--> statement-breakpoint
 CREATE INDEX IF NOT EXISTS items_created_by_idx ON items (created_by, created_at DESC);--> statement-breakpoint
 CREATE INDEX IF NOT EXISTS items_state_gin_idx ON items USING GIN (item_state);--> statement-breakpoint
-CREATE INDEX IF NOT EXISTS items_lifecycle_idx ON items (item_network, item_domain, lifecycle_status);--> statement-breakpoint
+-- items_lifecycle_idx lives in 0003 (after ADD COLUMN lifecycle_status), so a
+-- legacy items missing that column doesn't fail this migration's index creation.
 CREATE TABLE IF NOT EXISTS item_actions (
   partition_network TEXT NOT NULL,
   action_type TEXT NOT NULL,
