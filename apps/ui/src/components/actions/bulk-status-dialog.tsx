@@ -7,7 +7,10 @@ import { useNetworkConfig } from '@/hooks/use-network-config';
 import { useConsentConfig } from '@/hooks/use-consent-config';
 import { useNetworkTheme } from '@/theme/theme-provider';
 import { ConsentCheckbox } from './consent-checkbox';
-import { renderConsentStatement } from '@/lib/consent-copy';
+import {
+  renderConsentStatementWithNoun,
+  formatBatchCounterpartyNoun,
+} from '@/lib/consent-copy';
 import { Dialog, DialogContent } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
@@ -73,12 +76,12 @@ export function BulkStatusDialog({
   const requiresConsent = revealStatuses.includes(targetStatus);
   const acceptDoc = first ? config?.actions?.[first.action_type]?.accept : undefined;
   const acceptVersion = acceptDoc?.versions.find((v) => v.version === acceptDoc.current_version);
-  // Bulk accept: the accepter shares details with the requester, so the
-  // counterparty noun is the source domain. The selection is homogeneous, so
-  // the first action's source domain represents the batch.
-  const consentText = renderConsentStatement(
+  // Bulk accept: the accepter shares details with the requester(s). The batch can
+  // span more than one source domain, so name every distinct one (e.g. "seeker /
+  // provider") rather than a single possibly-wrong party.
+  const consentText = renderConsentStatementWithNoun(
     acceptVersion?.statement ?? '',
-    first?.source_item_domain,
+    formatBatchCounterpartyNoun(actions.map((a) => a.source_item_domain)),
   );
 
   const titleKey =

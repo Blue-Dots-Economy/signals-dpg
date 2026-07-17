@@ -29,16 +29,47 @@ export function formatCounterpartyNoun(
 }
 
 /**
- * Substitute `__COUNTERPARTY__` in an action-consent statement with the noun
- * for `counterpartyDomainId`. A statement without the placeholder (e.g. an
- * older, not-yet-migrated config) is returned unchanged.
+ * Substitute `__COUNTERPARTY__` in an action-consent statement with `noun`. A
+ * statement without the placeholder (e.g. an older, not-yet-migrated config) is
+ * returned unchanged.
+ */
+export function renderConsentStatementWithNoun(
+  statement: string,
+  noun: string,
+): string {
+  if (!statement) return statement;
+  return statement.split(CONSENT_COUNTERPARTY_PLACEHOLDER).join(noun);
+}
+
+/**
+ * Substitute `__COUNTERPARTY__` with the noun for a single counterparty domain.
+ * Used by the request (initiate) popup and single-action accept, where the
+ * counterparty is one known domain.
  */
 export function renderConsentStatement(
   statement: string,
   counterpartyDomainId: string | null | undefined,
 ): string {
-  if (!statement) return statement;
-  return statement.split(CONSENT_COUNTERPARTY_PLACEHOLDER).join(
+  return renderConsentStatementWithNoun(
+    statement,
     formatCounterpartyNoun(counterpartyDomainId),
   );
+}
+
+/**
+ * Counterparty noun for a *batch* of accept actions. Bulk accept renders one
+ * consent statement for the whole selection, which can span more than one source
+ * (requester) domain (e.g. a provider accepting a mix of seeker and provider
+ * requests). Rather than name a single (possibly wrong) party, join the distinct
+ * domain nouns with " / " — e.g. "seeker / provider" — so every counterparty is
+ * named. A single-domain batch yields one noun; an empty batch yields the
+ * neutral fallback.
+ */
+export function formatBatchCounterpartyNoun(
+  domainIds: ReadonlyArray<string | null | undefined>,
+): string {
+  const nouns = [
+    ...new Set(domainIds.filter((d): d is string => Boolean(d))),
+  ].map(formatCounterpartyNoun);
+  return nouns.length > 0 ? nouns.join(' / ') : formatCounterpartyNoun(null);
 }

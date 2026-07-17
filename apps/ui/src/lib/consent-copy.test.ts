@@ -1,7 +1,9 @@
 import { describe, it, expect } from 'vitest';
 import {
   renderConsentStatement,
+  renderConsentStatementWithNoun,
   formatCounterpartyNoun,
+  formatBatchCounterpartyNoun,
   CONSENT_COUNTERPARTY_PLACEHOLDER,
 } from './consent-copy';
 
@@ -45,5 +47,37 @@ describe('renderConsentStatement', () => {
 
   it('returns empty/falsy statements as-is', () => {
     expect(renderConsentStatement('', 'provider')).toBe('');
+  });
+});
+
+describe('formatBatchCounterpartyNoun', () => {
+  it('yields a single noun when every action shares one source domain', () => {
+    expect(formatBatchCounterpartyNoun(['seeker', 'seeker', 'seeker'])).toBe('seeker');
+  });
+
+  it('joins the distinct nouns for a mixed batch (e.g. "seeker / provider")', () => {
+    expect(formatBatchCounterpartyNoun(['seeker', 'provider', 'seeker'])).toBe(
+      'seeker / provider',
+    );
+  });
+
+  it('ignores null/undefined entries', () => {
+    expect(formatBatchCounterpartyNoun(['provider', null, undefined, 'provider'])).toBe(
+      'provider',
+    );
+  });
+
+  it('falls back to the neutral noun for an empty batch', () => {
+    expect(formatBatchCounterpartyNoun([])).toBe('party');
+    expect(formatBatchCounterpartyNoun([null, undefined])).toBe('party');
+  });
+});
+
+describe('renderConsentStatementWithNoun', () => {
+  it('substitutes the placeholder with a pre-built (possibly joined) noun', () => {
+    const s = `…with this ${CONSENT_COUNTERPARTY_PLACEHOLDER}.`;
+    expect(renderConsentStatementWithNoun(s, 'seeker / provider')).toBe(
+      '…with this seeker / provider.',
+    );
   });
 });
