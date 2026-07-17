@@ -9,6 +9,7 @@ import {
   type SignupGuardianVerifyBody,
 } from '@dpg/schemas';
 import { apiConfig } from '@/config';
+import { redis } from '@api/db/secondary/redis';
 import {
   startSignupGuardian,
   verifySignupGuardian,
@@ -16,6 +17,25 @@ import {
   type SignupIdentifier,
 } from '@/services/signup_guardian';
 import { GuardianOtpError } from '@/services/guardian_otp';
+
+// Per-IP fixed window on this PUBLIC, unauthenticated send route (mirrors
+// u18_precheck) — a first line against OTP-send abuse before the per-scope /
+// per-guardian-contact caps in issueGuardianOtp.
+const SIGNUP_GUARDIAN_RL_WINDOW_SEC = 300;
+const SIGNUP_GUARDIAN_RL_MAX = 10;
+
+// Increment the per-IP counter; return true when the caller is OVER the window.
+// Fail-open on a limiter error (the per-contact cap still applies downstream).
+async function overIpLimit(ip: string): Promise<boolean> {
+  try {
+    const key = `u18_signup_guardian_rl:${ip}`;
+    const n = await redis.incr(key);
+    if (n === 1) await redis.expire(key, SIGNUP_GUARDIAN_RL_WINDOW_SEC);
+    return n > SIGNUP_GUARDIAN_RL_MAX;
+  } catch {
+    return false;
+  }
+}
 
 type StartReq = FastifyRequest<{ Body: SignupGuardianBody }>;
 type VerifyReq = FastifyRequest<{ Body: SignupGuardianVerifyBody }>;
@@ -75,6 +95,10 @@ export const u18_signup_guardian: FastifyPluginAsyncZod = async (fastify) => {
 };
 
 const start_handler = async (request: StartReq, reply: FastifyReply) => {
+  if (await overIpLimit(request.ip)) {
+    return reply.code(429).send({ error: 'OTP_RATE_LIMITED', message: 'Too many requests; try again shortly' });
+  }
+
   const body = request.body;
   if (!apiConfig.served_domains.some((b) => b.network === body.network && b.domain === body.domain)) {
     return reply.code(400).send({

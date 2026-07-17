@@ -1,4 +1,4 @@
-import { randomInt } from 'node:crypto';
+import { randomInt, createHash } from 'node:crypto';
 import { redis } from '@api/db/secondary/redis';
 import { getNotificationClient } from '@/utils/notificationClient';
 import { authConfig } from '@/config';
@@ -21,7 +21,8 @@ export type OtpSend = (args: {
 }) => Promise<void>;
 
 export const GUARDIAN_OTP_TTL_SEC = 300; // nonce lifetime (5 min)
-export const GUARDIAN_OTP_MAX_PER_WINDOW = 3; // sends allowed per window
+export const GUARDIAN_OTP_MAX_PER_WINDOW = 3; // sends allowed per scope per window
+export const GUARDIAN_OTP_CONTACT_MAX_PER_WINDOW = 5; // sends allowed per guardian contact per window
 export const GUARDIAN_OTP_WINDOW_SEC = 300; // rate-limit window (5 min)
 export const GUARDIAN_OTP_VERIFY_MAX = 5; // verify attempts per window
 export const GUARDIAN_OTP_VERIFY_WINDOW_SEC = 300;
@@ -29,6 +30,13 @@ export const GUARDIAN_OTP_VERIFY_WINDOW_SEC = 300;
 const codeKey = (scope: string) => `guardian_otp:code:${scope}`;
 const rateKey = (scope: string) => `guardian_otp:rl:${scope}`;
 const verifyRateKey = (scope: string) => `guardian_otp:vrl:${scope}`;
+// Per-guardian-CONTACT send counter. The scope rate-limit is keyed on the ward
+// (e.g. ward id / signup identifier), so on the public signup route — where the
+// caller supplies the guardian contact freely — an attacker can rotate ward
+// identifiers to spam one victim number/email past the scope cap. Hash the
+// contact so no PII lands in a Redis key.
+const contactRateKey = (contact: string, contactType: GuardianContactType) =>
+  `guardian_otp:crl:${contactType}:${createHash('sha256').update(contact).digest('hex')}`;
 
 /**
  * Fixed-window counter: increment `key`, set the window TTL on the first hit,
@@ -81,6 +89,15 @@ export async function issueGuardianOtp(args: {
 }): Promise<void> {
   const count = await incrWithinWindow(rateKey(args.scope), GUARDIAN_OTP_WINDOW_SEC);
   if (count > GUARDIAN_OTP_MAX_PER_WINDOW) {
+    throw new GuardianOtpError('RATE_LIMITED');
+  }
+
+  // Per-contact cap catches ward-identifier rotation aimed at one victim contact.
+  const contactCount = await incrWithinWindow(
+    contactRateKey(args.contact, args.contactType),
+    GUARDIAN_OTP_WINDOW_SEC,
+  );
+  if (contactCount > GUARDIAN_OTP_CONTACT_MAX_PER_WINDOW) {
     throw new GuardianOtpError('RATE_LIMITED');
   }
 
