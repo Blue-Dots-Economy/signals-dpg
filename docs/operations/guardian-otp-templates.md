@@ -1,30 +1,35 @@
 # Guardian OTP notification templates (U18, #294)
 
-The API selects a **template id** per scenario and passes **variables**; the
-notification service owns the actual subject/body keyed by that id. This is the
-contract between `apps/api/src/services/guardian_otp.ts`
-(`SCENARIO_TEMPLATE_ID`) and the notification-service template config.
+Email and SMS are handled differently — matching how the rest of signals already
+does OTP/notification:
 
-- Every template also receives `otp` and must state the code is **valid for 10
-  minutes** (the API TTL is `GUARDIAN_OTP_TTL_SEC = 600`) and "Do not share it
-  with anyone."
-- Variables are **best-effort**: `parentName` / `domain` / `providerOrgName` may
-  be absent (e.g. a guardian name not yet decryptable, or a provider title that
-  didn't resolve). Templates must render gracefully without them.
-- Channels: `email` and `sms`. Ids follow `guardian_otp_<scenario>_<channel>`.
-- If a scenario is not supplied, the API falls back to the generic
-  `guardian_otp_sms` / `guardian_otp_email`.
+- **Email — body rendered IN-REPO.** `apps/api/src/services/guardian_otp_email.ts`
+  (`renderGuardianOtpEmail`) builds the subject + HTML from the scenario + the
+  #294 copy, and it ships via the generic **`basic_email`** template (same
+  convention as the login OTP `packages/auth/src/templates/otp_email.ts` and
+  action emails). **No notification-service email template to author** — the copy
+  lives here.
+- **SMS — DLT-approved body owned by the notification service.** SMS text must be
+  DLT-registered, so we can't compose it in-app; the API selects a per-scenario
+  **`template_id`** (`guardian_otp_<scenario>_sms`, generic fallback
+  `guardian_otp_sms`) and passes variables. The notification service maps each id
+  to its DLT-approved template.
 
-## Template ids + variables
+Common:
+- The OTP is **valid for 10 minutes** (`GUARDIAN_OTP_TTL_SEC = 600`); both channels state this + "Do not share it with anyone."
+- Variables are **best-effort**: `parentName` / `domain` / `providerOrgName` may be absent (guardian name not decryptable yet, provider title unresolved). The email template falls back gracefully; SMS templates should too.
+- The "Team {name}" sign-off uses `INSTANCE_NAME` (via `supportConfig.teamName`), and email `from`/`replyTo` use `NOTIFICATION_FROM_EMAIL` — deploy-configurable, no hardcoded brand.
 
-| Scenario | Trigger | Template ids | Variables (besides `otp`) |
-|----------|---------|--------------|---------------------------|
-| `account` | Ward creates an account (pre-auth signup) + guardian designation | `guardian_otp_account_{email,sms}` | `parentName`, `domain` |
-| `profile` | Ward creates a profile | `guardian_otp_profile_{email,sms}` | `parentName`, `domain` |
-| `connect` | Ward initiates a connect | `guardian_otp_connect_{email,sms}` | `parentName`, `providerOrgName` |
-| `connect_accept` | Ward accepts a connect request | `guardian_otp_connect_accept_{email,sms}` | `parentName`, `providerOrgName` |
-| `apply` | Ward applies | `guardian_otp_apply_{email,sms}` | `parentName`, `providerOrgName` |
-| `apply_accept` | Ward accepts a pre-select / pre-shortlist | `guardian_otp_apply_accept_{email,sms}` | `parentName`, `providerOrgName` |
+## SMS template ids the notification service must register (DLT)
+
+| Scenario | Trigger | SMS template id | Variables (besides `otp`) |
+|----------|---------|-----------------|---------------------------|
+| `account` | Ward creates an account (pre-auth signup) + guardian designation | `guardian_otp_account_sms` | `parentName`, `domain` |
+| `profile` | Ward creates a profile | `guardian_otp_profile_sms` | `parentName`, `domain` |
+| `connect` | Ward initiates a connect | `guardian_otp_connect_sms` | `parentName`, `providerOrgName` |
+| `connect_accept` | Ward accepts a connect request | `guardian_otp_connect_accept_sms` | `parentName`, `providerOrgName` |
+| `apply` | Ward applies | `guardian_otp_apply_sms` | `parentName`, `providerOrgName` |
+| `apply_accept` | Ward accepts a pre-select / pre-shortlist | `guardian_otp_apply_accept_sms` | `parentName`, `providerOrgName` |
 
 ## Copy (from #294)
 

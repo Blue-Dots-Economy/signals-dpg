@@ -53,7 +53,7 @@ describe('defaultGuardianOtpSend', () => {
     ).rejects.toBeInstanceOf(GuardianOtpError);
   });
 
-  it('selects the per-scenario template id and merges template variables (#294)', async () => {
+  it('renders the email body in-repo via basic_email with the #294 copy', async () => {
     await defaultGuardianOtpSend({
       contact: 'a@b.co',
       contactType: 'email',
@@ -62,11 +62,30 @@ describe('defaultGuardianOtpSend', () => {
       variables: { parentName: 'Asha', providerOrgName: 'Acme' },
     });
     const payload = notify.mock.calls[0][0];
-    expect(payload.template_id).toBe('guardian_otp_apply_accept_email');
-    expect(payload.variables).toEqual({ parentName: 'Asha', providerOrgName: 'Acme', otp: '123456' });
+    expect(payload.channel).toBe('email');
+    expect(payload.template_id).toBe('basic_email');
+    expect(payload.variables.subject).toMatch(/OTP/i);
+    expect(payload.variables.html).toContain('Asha');
+    expect(payload.variables.html).toContain('Acme');
+    expect(payload.variables.html).toContain('123456');
+    expect(payload.variables.html).toMatch(/10 minutes/);
   });
 
-  it('falls back to the generic template when no scenario is supplied', async () => {
+  it('sends SMS via the per-scenario DLT template id + variables', async () => {
+    await defaultGuardianOtpSend({
+      contact: '+911',
+      contactType: 'phone',
+      otp: '000111',
+      scenario: 'connect',
+      variables: { parentName: 'Asha' },
+    });
+    const payload = notify.mock.calls[0][0];
+    expect(payload.channel).toBe('sms');
+    expect(payload.template_id).toBe('guardian_otp_connect_sms');
+    expect(payload.variables).toEqual({ parentName: 'Asha', otp: '000111' });
+  });
+
+  it('falls back to the generic sms template when no scenario is supplied', async () => {
     await defaultGuardianOtpSend({ contact: '+911', contactType: 'phone', otp: '000111' });
     expect(notify.mock.calls[0][0].template_id).toBe('guardian_otp_sms');
   });

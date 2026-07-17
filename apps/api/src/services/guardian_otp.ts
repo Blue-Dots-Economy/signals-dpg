@@ -1,7 +1,8 @@
 import { randomInt, createHash } from 'node:crypto';
 import { redis } from '@api/db/secondary/redis';
 import { getNotificationClient } from '@/utils/notificationClient';
-import { authConfig } from '@/config';
+import { authConfig, supportConfig } from '@/config';
+import { renderGuardianOtpEmail } from '@/services/guardian_otp_email';
 
 /** Codes the primitive raises; callers map these to HTTP responses. */
 export class GuardianOtpError extends Error {
@@ -180,35 +181,34 @@ const CHANNEL_BY_CONTACT_TYPE: Record<GuardianContactType, 'sms' | 'email'> = {
   email: 'email',
 };
 
-// Generic fallback template (no scenario supplied). Kept for back-compat.
-const GENERIC_TEMPLATE_ID: Record<'sms' | 'email', string> = {
-  sms: 'guardian_otp_sms',
-  email: 'guardian_otp_email',
+// SMS template ids. SMS bodies are DLT-approved and owned by the notification
+// service, so we can't compose them in-app — we select a per-scenario id and
+// pass variables (#294). Naming: `guardian_otp_<scenario>_sms`; generic fallback
+// when no scenario is supplied.
+const GENERIC_SMS_TEMPLATE_ID = 'guardian_otp_sms';
+const SCENARIO_SMS_TEMPLATE_ID: Record<GuardianOtpScenario, string> = {
+  account: 'guardian_otp_account_sms',
+  profile: 'guardian_otp_profile_sms',
+  connect: 'guardian_otp_connect_sms',
+  connect_accept: 'guardian_otp_connect_accept_sms',
+  apply: 'guardian_otp_apply_sms',
+  apply_accept: 'guardian_otp_apply_accept_sms',
 };
 
-// Per-scenario template ids (#294). The notification service owns the actual
-// body/subject keyed by these ids; this app only selects the id + supplies the
-// variables (otp + parentName / domain / providerOrgName). Naming:
-// `guardian_otp_<scenario>_<channel>`.
-const SCENARIO_TEMPLATE_ID: Record<GuardianOtpScenario, Record<'sms' | 'email', string>> = {
-  account: { sms: 'guardian_otp_account_sms', email: 'guardian_otp_account_email' },
-  profile: { sms: 'guardian_otp_profile_sms', email: 'guardian_otp_profile_email' },
-  connect: { sms: 'guardian_otp_connect_sms', email: 'guardian_otp_connect_email' },
-  connect_accept: { sms: 'guardian_otp_connect_accept_sms', email: 'guardian_otp_connect_accept_email' },
-  apply: { sms: 'guardian_otp_apply_sms', email: 'guardian_otp_apply_email' },
-  apply_accept: { sms: 'guardian_otp_apply_accept_sms', email: 'guardian_otp_apply_accept_email' },
-};
-
-function templateId(scenario: GuardianOtpScenario | undefined, channel: 'sms' | 'email'): string {
-  return scenario ? SCENARIO_TEMPLATE_ID[scenario][channel] : GENERIC_TEMPLATE_ID[channel];
+function smsTemplateId(scenario: GuardianOtpScenario | undefined): string {
+  return scenario ? SCENARIO_SMS_TEMPLATE_ID[scenario] : GENERIC_SMS_TEMPLATE_ID;
 }
 
 /**
  * Default dispatch: pick the channel from the guardian's contact type and send
  * via the shared notification client. Hard-fails when no provider is
  * configured — a guardian-required domain must not silently skip verification.
- * The scenario selects the template; `variables` (parent name, domain, provider
- * org) render the parent-facing copy (#294) alongside the OTP.
+ *
+ * Email: the body is rendered IN-REPO (`renderGuardianOtpEmail`, #294 copy) and
+ * shipped via the generic `basic_email` template — same convention as the login
+ * OTP + action emails, so the copy lives in signals. SMS: the DLT-approved body
+ * lives in the notification service, so we send a per-scenario `template_id`
+ * plus variables and let it render.
  */
 export const defaultGuardianOtpSend: OtpSend = async ({ contact, contactType, otp, scenario, variables }) => {
   const client = getNotificationClient();
@@ -216,9 +216,34 @@ export const defaultGuardianOtpSend: OtpSend = async ({ contact, contactType, ot
     throw new GuardianOtpError('NO_OTP_PROVIDER');
   }
   const channel = CHANNEL_BY_CONTACT_TYPE[contactType];
+
+  if (channel === 'email') {
+    const teamName = supportConfig.teamName ?? 'Blue Dots';
+    const { subject, html } = scenario
+      ? renderGuardianOtpEmail({ scenario, otp, variables: variables ?? {}, teamName })
+      : {
+          subject: 'Your One-Time Password (OTP)',
+          html: `<p>Use this OTP: <b>${otp}</b></p><p>This OTP is valid for 10 minutes. Do not share it with anyone.</p>`,
+        };
+    await client.notify({
+      channel: 'email',
+      template_id: 'basic_email',
+      to: contact,
+      priority: 'realtime',
+      variables: {
+        fromName: teamName,
+        fromEmail: supportConfig.fromEmail ?? '',
+        replyTo: supportConfig.fromEmail ?? '',
+        subject,
+        html,
+      },
+    });
+    return;
+  }
+
   await client.notify({
-    channel,
-    template_id: templateId(scenario, channel),
+    channel: 'sms',
+    template_id: smsTemplateId(scenario),
     to: contact,
     priority: 'realtime',
     variables: { ...variables, otp },
