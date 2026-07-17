@@ -5,6 +5,9 @@ vi.mock('@/config', async (importOriginal) => {
   return {
     ...actual,
     authConfig: { ...actual.authConfig, create_test_otp: false },
+    // Force the fallback so the SMS template assertion is deterministic (the
+    // env carries a placeholder SMS_TEMPLATE_ID in CI/local).
+    notification: { ...actual.notification, SMS_TEMPLATE_ID: undefined },
   };
 });
 
@@ -36,7 +39,8 @@ describe('defaultGuardianOtpSend', () => {
     const payload = notify.mock.calls[0][0];
     expect(payload.channel).toBe('sms');
     expect(payload.to).toBe('+911');
-    expect(payload.variables.otp).toBe('123456');
+    // Single generic DLT OTP template — code only, via `message` (like login).
+    expect(payload.variables.message).toBe('123456');
   });
 
   it('sends an email OTP over the email channel', async () => {
@@ -71,22 +75,18 @@ describe('defaultGuardianOtpSend', () => {
     expect(payload.variables.html).toMatch(/10 minutes/);
   });
 
-  it('sends SMS via the per-scenario DLT template id + variables', async () => {
+  it('SMS always uses the single generic OTP template (code only), ignoring scenario/vars', async () => {
     await defaultGuardianOtpSend({
       contact: '+911',
       contactType: 'phone',
       otp: '000111',
       scenario: { kind: 'action', actionType: 'connect', stage: 'initiate' },
-      variables: { parentName: 'Asha' },
+      variables: { parentName: 'Asha', providerOrgName: 'Acme' },
     });
     const payload = notify.mock.calls[0][0];
     expect(payload.channel).toBe('sms');
-    expect(payload.template_id).toBe('guardian_otp_connect_sms');
-    expect(payload.variables).toEqual({ parentName: 'Asha', otp: '000111' });
-  });
-
-  it('falls back to the generic sms template when no scenario is supplied', async () => {
-    await defaultGuardianOtpSend({ contact: '+911', contactType: 'phone', otp: '000111' });
-    expect(notify.mock.calls[0][0].template_id).toBe('guardian_otp_sms');
+    expect(payload.template_id).toBe('login_otp');
+    // Only the code goes to SMS — no parent-facing vars (DLT template is fixed).
+    expect(payload.variables).toEqual({ message: '000111' });
   });
 });

@@ -1,7 +1,7 @@
 import { randomInt, createHash } from 'node:crypto';
 import { redis } from '@api/db/secondary/redis';
 import { getNotificationClient } from '@/utils/notificationClient';
-import { authConfig, supportConfig } from '@/config';
+import { authConfig, supportConfig, notification } from '@/config';
 import { renderGuardianOtpEmail } from '@/services/guardian_otp_email';
 
 /** Codes the primitive raises; callers map these to HTTP responses. */
@@ -183,27 +183,11 @@ const CHANNEL_BY_CONTACT_TYPE: Record<GuardianContactType, 'sms' | 'email'> = {
   email: 'email',
 };
 
-// SMS template ids. SMS bodies are DLT-approved and owned by the notification
-// service, so we can't compose them in-app — we select an id and pass variables
-// (#294). Derived, not hardcoded: account/profile are fixed, and action ids come
-// straight from the network.json action type + stage. Generic fallback when no
-// scenario is supplied. Naming: `guardian_otp_<key>_sms`.
-const GENERIC_SMS_TEMPLATE_ID = 'guardian_otp_sms';
-
-function smsTemplateKey(scenario: GuardianOtpScenario): string {
-  switch (scenario.kind) {
-    case 'account':
-      return 'account';
-    case 'profile':
-      return 'profile';
-    case 'action':
-      return scenario.stage === 'accept' ? `${scenario.actionType}_accept` : scenario.actionType;
-  }
-}
-
-function smsTemplateId(scenario: GuardianOtpScenario | undefined): string {
-  return scenario ? `guardian_otp_${smsTemplateKey(scenario)}_sms` : GENERIC_SMS_TEMPLATE_ID;
-}
+// SMS uses the ONE generic DLT-approved OTP template the instance already has
+// (`SMS_TEMPLATE_ID`, default `login_otp` — same as login). It only renders the
+// code, so there are no per-scenario SMS templates and no parent-facing SMS copy
+// — that lives in the email. Variable is `{ message: otp }`, matching login.
+const GENERIC_SMS_TEMPLATE_ID = 'login_otp';
 
 /**
  * Default dispatch: pick the channel from the guardian's contact type and send
@@ -249,9 +233,9 @@ export const defaultGuardianOtpSend: OtpSend = async ({ contact, contactType, ot
 
   await client.notify({
     channel: 'sms',
-    template_id: smsTemplateId(scenario),
+    template_id: notification.SMS_TEMPLATE_ID || GENERIC_SMS_TEMPLATE_ID,
     to: contact,
     priority: 'realtime',
-    variables: { ...variables, otp },
+    variables: { message: otp },
   });
 };

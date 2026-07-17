@@ -9,39 +9,24 @@ does OTP/notification:
   convention as the login OTP `packages/auth/src/templates/otp_email.ts` and
   action emails). **No notification-service email template to author** — the copy
   lives here.
-- **SMS — DLT-approved body owned by the notification service.** SMS text must be
-  DLT-registered, so we can't compose it in-app; the API selects a per-scenario
-  **`template_id`** (`guardian_otp_<scenario>_sms`, generic fallback
-  `guardian_otp_sms`) and passes variables. The notification service maps each id
-  to its DLT-approved template.
+- **SMS — same as the login OTP.** SMS bodies are DLT-registered and can't be
+  composed in-app, and the instance has a single generic OTP template. So the
+  guardian SMS reuses exactly what the login OTP uses: `template_id =
+  SMS_TEMPLATE_ID` (default `login_otp`) with `variables: { message: otp }`. It
+  carries **only the code** — no per-scenario SMS templates, no parent-facing SMS
+  copy. The scenario context is conveyed in the **email**; the SMS is just the
+  code (identical to how a user's own login OTP arrives).
 
 Common:
-- The OTP is **valid for 10 minutes** (`GUARDIAN_OTP_TTL_SEC = 600`); both channels state this + "Do not share it with anyone."
-- Variables are **best-effort**: `parentName` / `domain` / `providerOrgName` may be absent (guardian name not decryptable yet, provider title unresolved). The email template falls back gracefully; SMS templates should too.
-- The "Team {name}" sign-off uses `INSTANCE_NAME` (via `supportConfig.teamName`), and email `from`/`replyTo` use `NOTIFICATION_FROM_EMAIL` — deploy-configurable, no hardcoded brand.
+- The OTP is **valid for 10 minutes** (`GUARDIAN_OTP_TTL_SEC = 600`). The email states this + "Do not share it with anyone"; the SMS says whatever the existing DLT OTP template says.
+- Email variables are **best-effort**: `parentName` / `domain` / `providerOrgName` may be absent (guardian name not decryptable yet, provider title unresolved) — the template falls back gracefully.
+- The email "Team {name}" sign-off uses `INSTANCE_NAME` (via `supportConfig.teamName`), and `from`/`replyTo` use `NOTIFICATION_FROM_EMAIL` — deploy-configurable, no hardcoded brand.
 
-## SMS template ids the notification service must register (DLT)
+## SMS
 
-Ids are **derived**, not hardcoded — `guardian_otp_<key>_sms`:
-- `account`, `profile` — fixed.
-- **actions** — `key = <action_type>` (initiate) or `<action_type>_accept`
-  (PII-revealing accept), where `action_type` is the interaction's own type from
-  `network.json`. Add an action to a network → its guardian SMS id follows
-  automatically; register the matching DLT template.
-
-For the current `blue_dot` + `purple_dot` configs (gated seeker):
-
-| Trigger | SMS template id | Variables (besides `otp`) |
-|---------|-----------------|---------------------------|
-| Create account | `guardian_otp_account_sms` | `parentName`, `domain` |
-| Create profile | `guardian_otp_profile_sms` | `parentName`, `domain` |
-| Apply (blue_dot, initiate) | `guardian_otp_apply_sms` | `parentName`, `providerOrgName` |
-| Accept apply/pre-select (blue_dot) | `guardian_otp_apply_accept_sms` | `parentName`, `providerOrgName` |
-| Connect (purple_dot, initiate) | `guardian_otp_connect_sms` | `parentName`, `providerOrgName` |
-| Accept connect (purple_dot) | `guardian_otp_connect_accept_sms` | `parentName`, `providerOrgName` |
-
-Email needs none of these — its body is rendered in-repo; the action email copy
-is identical for every action type, so only `providerOrgName` varies.
+No new DLT templates needed — the guardian SMS uses the instance's existing OTP
+template (`SMS_TEMPLATE_ID`, default `login_otp`), code only, exactly like the
+login OTP. All the #294 per-scenario copy lives in the **email**.
 
 ## Copy (from #294)
 
