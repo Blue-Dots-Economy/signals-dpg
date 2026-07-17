@@ -1295,7 +1295,7 @@
         }
       },
       "id": "provider",
-      "guardian_consent_required": true,
+      "guardian_consent_required": false,
       "card": {
         "title_field": "jobProviderName",
         "avatar_from": "jobProviderName",

@@ -204,6 +204,7 @@
         }
       },
       "id": "seeker",
+      "guardian_consent_required": true,
       "card": {
         "title_field": "beneficiary_name",
         "avatar_from": "beneficiary_name",
