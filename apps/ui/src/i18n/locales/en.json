@@ -515,5 +515,12 @@
   "profile.guardian_confirm_title": "Guardian confirmation needed",
   "profile.guardian_confirm_desc": "You're under 18, so a one-time code will be sent to your guardian. Once they verify it, you can create your profile.",
   "profile.guardian_confirm_proceed": "Send code to guardian",
-  "auth.dob_title_existing": "Please confirm your date of birth"
+  "auth.dob_title_existing": "Please confirm your date of birth",
+  "profile": {
+    "guardian_consent_recorded": "Guardian confirmed your profile"
+  },
+  "u18": {
+    "dob_label": "Select date of birth",
+    "dob_placeholder": "Select date of birth"
+  }
 }
