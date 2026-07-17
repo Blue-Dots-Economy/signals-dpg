@@ -35,6 +35,13 @@ export async function fetchConsentConfigs(networkId: string): Promise<ConsentCon
     .map((e) => ({ brand: e.brand ?? null, schema: e.schema as ConsentConfigDocument }));
 }
 
+export async function getConsentStatus(networkId: string): Promise<ConsentStatusResponse> {
+  const response = await apiClient.get<ConsentStatusResponse>('/api/v1/consent/status', {
+    params: { network: networkId },
+  });
+  return response.data;
+}
+
 export async function getConsentStatusByIdentifier(
   params: ConsentStatusByIdentifierParams,
 ): Promise<ConsentStatusResponse> {
@@ -65,6 +72,215 @@ export async function acceptProfileConsent(
 ): Promise<{ recorded: number }> {
   const response = await apiClient.post<{ recorded: number }>(
     '/api/v1/consent/profile-accept',
+    body,
+  );
+  return response.data;
+}
+
+// ─── U18 guardian consent flow ──────────────────────────────────────
+
+export interface SubmitU18DobBody {
+  network: string;
+  /** Full date of birth, ISO string — stored on user.date_of_birth. */
+  dateOfBirth: string;
+}
+
+export interface SubmitU18DobResponse {
+  isMinor: boolean;
+}
+
+export type GuardianContactType = 'phone' | 'email';
+
+export interface SubmitGuardianBody {
+  network: string;
+  brand?: string | null;
+  guardianName: string;
+  /** Both contacts (at least one). Server resolves the OTP channel (phone
+   * preferred) and stores whatever is provided. */
+  guardianEmail?: string;
+  guardianPhone?: string;
+  guardianDeclarationAccepted: true;
+  sameContactAcknowledged?: boolean;
+}
+
+export interface SubmitGuardianResponse {
+  otpSent: boolean;
+}
+
+export interface VerifyGuardianBody {
+  network: string;
+  brand?: string | null;
+  otp: string;
+}
+
+export interface VerifyGuardianResponse {
+  verified: boolean;
+}
+
+export interface ProfileConsentOtpItemRef {
+  network: string;
+  brand?: string | null;
+  item_domain: string;
+  item_type: string;
+  item_id: string;
+}
+
+export interface IssueProfileConsentOtpResponse {
+  otpSent: boolean;
+}
+
+export interface VerifyProfileConsentOtpBody extends ProfileConsentOtpItemRef {
+  otp: string;
+}
+
+export interface VerifyProfileConsentOtpResponse {
+  verified: boolean;
+  promoted: boolean;
+}
+
+export async function submitU18Dob(body: SubmitU18DobBody): Promise<SubmitU18DobResponse> {
+  const response = await apiClient.post<SubmitU18DobResponse>('/api/v1/consent/u18/dob', body);
+  return response.data;
+}
+
+export interface U18StatusResponse {
+  /** A birth month/year is already stored — never ask DOB again. */
+  hasBirthData: boolean;
+  /** Derived server-side from the stored birth month/year. */
+  isMinor: boolean;
+  /** A guardian has already been OTP-verified for this user. */
+  guardianVerified: boolean;
+}
+
+/**
+ * Read the authenticated ward's U18 status from stored data (no DOB prompt).
+ * Used to decide whether to run the guardian flow — and whether the DOB step
+ * is even needed — at profile-creation / first-login time.
+ */
+export async function getU18Status(network: string): Promise<U18StatusResponse> {
+  const response = await apiClient.get<U18StatusResponse>('/api/v1/consent/u18/status', {
+    params: { network },
+  });
+  return response.data;
+}
+
+export async function submitGuardian(body: SubmitGuardianBody): Promise<SubmitGuardianResponse> {
+  const response = await apiClient.post<SubmitGuardianResponse>(
+    '/api/v1/consent/u18/guardian',
+    body,
+  );
+  return response.data;
+}
+
+export async function verifyGuardian(body: VerifyGuardianBody): Promise<VerifyGuardianResponse> {
+  const response = await apiClient.post<VerifyGuardianResponse>(
+    '/api/v1/consent/u18/guardian/verify',
+    body,
+  );
+  return response.data;
+}
+
+// --- Pre-auth, signup-scoped guardian consent (no session yet) ---
+//
+// Mirrors the authenticated submit/verify pair, but the account doesn't exist
+// yet: the body carries the ward's own signup identifier (email OR phone) plus
+// the network/domain and birth month/year the server needs to (re-)confirm the
+// ward is a gated minor. Backed by public routes POST /u18/signup/guardian
+// and /u18/signup/guardian/verify (services/signup_guardian.ts).
+
+export interface StartSignupGuardianBody {
+  network: string;
+  domain: string;
+  email?: string;
+  phoneNumber?: string;
+  dateOfBirth: string;
+  guardianName: string;
+  guardianEmail?: string;
+  guardianPhone?: string;
+  guardianDeclarationAccepted: true;
+  sameContactAcknowledged?: boolean;
+}
+
+export interface VerifySignupGuardianBody {
+  network?: string;
+  email?: string;
+  phoneNumber?: string;
+  otp: string;
+}
+
+export async function startSignupGuardian(
+  body: StartSignupGuardianBody,
+): Promise<SubmitGuardianResponse> {
+  const response = await apiClient.post<SubmitGuardianResponse>(
+    '/api/v1/consent/u18/signup/guardian',
+    body,
+  );
+  return response.data;
+}
+
+export async function verifySignupGuardian(
+  body: VerifySignupGuardianBody,
+): Promise<VerifyGuardianResponse> {
+  const response = await apiClient.post<VerifyGuardianResponse>(
+    '/api/v1/consent/u18/signup/guardian/verify',
+    body,
+  );
+  return response.data;
+}
+
+export async function issueProfileConsentOtp(
+  body: ProfileConsentOtpItemRef,
+): Promise<IssueProfileConsentOtpResponse> {
+  const response = await apiClient.post<IssueProfileConsentOtpResponse>(
+    '/api/v1/consent/u18/profile-consent/issue',
+    body,
+  );
+  return response.data;
+}
+
+export async function verifyProfileConsentOtp(
+  body: VerifyProfileConsentOtpBody,
+): Promise<VerifyProfileConsentOtpResponse> {
+  const response = await apiClient.post<VerifyProfileConsentOtpResponse>(
+    '/api/v1/consent/u18/profile-consent/verify',
+    body,
+  );
+  return response.data;
+}
+
+// Pre-create guardian consent: verified BEFORE the item exists, so a minor's
+// profile row isn't written until the guardian approves (mirrors self-signup).
+export interface ProfilePrecreateRef {
+  network: string;
+  brand?: string | null;
+  item_domain: string;
+}
+
+export async function issueProfilePrecreateOtp(
+  body: ProfilePrecreateRef,
+): Promise<{ otpSent: boolean }> {
+  const response = await apiClient.post<{ otpSent: boolean }>(
+    '/api/v1/consent/u18/profile-consent/precreate/issue',
+    body,
+  );
+  return response.data;
+}
+
+export async function verifyProfilePrecreateOtp(
+  body: ProfilePrecreateRef & { otp: string },
+): Promise<{ verified: boolean }> {
+  const response = await apiClient.post<{ verified: boolean }>(
+    '/api/v1/consent/u18/profile-consent/precreate/verify',
+    body,
+  );
+  return response.data;
+}
+
+export async function finalizeProfileConsent(
+  body: ProfileConsentOtpItemRef,
+): Promise<{ promoted: boolean }> {
+  const response = await apiClient.post<{ promoted: boolean }>(
+    '/api/v1/consent/u18/profile-consent/finalize',
     body,
   );
   return response.data;

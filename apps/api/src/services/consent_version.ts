@@ -15,7 +15,11 @@
 import { getConfiguredNetworkSchemas } from '@/network_schema_cache';
 
 /** User-level + item-level document categories with a versioned document. */
-export type ConsentDocumentCategory = 'terms' | 'privacy' | 'profile_creation';
+export type ConsentDocumentCategory =
+  | 'terms'
+  | 'privacy'
+  | 'profile_creation'
+  | 'guardian_declaration';
 /** Stage of an action-consent statement. */
 export type ActionStage = 'initiate' | 'accept';
 
@@ -24,6 +28,7 @@ interface DocLike {
 }
 interface ConsentConfigLike {
   documents?: Partial<Record<ConsentDocumentCategory, DocLike>>;
+  u18_documents?: Partial<Record<ConsentDocumentCategory, DocLike>>;
   actions?: Record<string, Partial<Record<ActionStage, DocLike>>>;
 }
 
@@ -39,6 +44,8 @@ export interface ResolveConsentVersionInput {
   actionType?: string;
   /** Action stage — required when `category === 'action'`. */
   stage?: ActionStage;
+  /** Which document set applies. Defaults to the adult set. */
+  variant?: 'adult' | 'u18';
 }
 
 /**
@@ -70,6 +77,17 @@ export async function resolveConsentVersion(
     return typeof v === 'number' ? v : null;
   }
 
-  const doc = brand?.documents?.[input.category] ?? def?.documents?.[input.category];
+  const variant = input.variant ?? 'adult';
+
+  // guardian_declaration exists only in the U18 set.
+  if (input.category === 'guardian_declaration' && variant !== 'u18') {
+    return null;
+  }
+
+  const pick = (cfg: ConsentConfigLike | undefined) =>
+    variant === 'u18' ? cfg?.u18_documents : cfg?.documents;
+
+  const doc =
+    pick(brand)?.[input.category] ?? pick(def)?.[input.category];
   return typeof doc?.current_version === 'number' ? doc.current_version : null;
 }

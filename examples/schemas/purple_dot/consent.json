@@ -56,5 +56,49 @@
         ]
       }
     }
+  },
+  "u18_documents": {
+    "terms": {
+      "current_version": 1,
+      "versions": [
+        {
+          "version": 1,
+          "title": "Terms of Use (Under 18)",
+          "content": "These terms are agreed to by the parent or guardian of a user under 18. The guardian accepts responsibility for the minor's use of this service. [Placeholder — pending legal.]",
+          "effective_from": "2026-07-01"
+        }
+      ]
+    },
+    "privacy": {
+      "current_version": 1,
+      "versions": [
+        {
+          "version": 1,
+          "title": "Privacy Notice (Under 18)",
+          "content": "This notice explains how a minor's data is handled, agreed to by their parent or guardian. [Placeholder — pending legal.]",
+          "effective_from": "2026-07-01"
+        }
+      ]
+    },
+    "profile_creation": {
+      "current_version": 1,
+      "versions": [
+        {
+          "version": 1,
+          "statement": "As the parent/guardian, I consent to creating and listing this profile on behalf of the minor.",
+          "effective_from": "2026-07-01"
+        }
+      ]
+    },
+    "guardian_declaration": {
+      "current_version": 1,
+      "versions": [
+        {
+          "version": 1,
+          "statement": "I confirm I am the parent/legal guardian of this user and the contact details provided are mine.",
+          "effective_from": "2026-07-01"
+        }
+      ]
+    }
   }
 }

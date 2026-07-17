@@ -8,6 +8,8 @@ import admin_routes from '@/routes/v1/admin/admin_routes';
 import aggregator_routes from '@/routes/v1/aggregator/aggregator_routes';
 import consent_routes from '@/routes/v1/consent/consent_routes';
 import { auth_config } from '@/routes/v1/auth/auth_config';
+import { u18_precheck } from '@/routes/v1/auth/u18_precheck';
+import { user_domains } from '@/routes/v1/user/user_domains';
 import { submit_support } from '@/routes/v1/support/submit_support';
 
 const v1_routes: FastifyPluginAsyncZod = async (fastify) => {
@@ -20,6 +22,8 @@ const v1_routes: FastifyPluginAsyncZod = async (fastify) => {
   fastify.register(aggregator_routes, { prefix: '/aggregator' });
   fastify.register(consent_routes, { prefix: '/consent' });
   fastify.register(auth_config, { prefix: '/auth' });
+  fastify.register(u18_precheck, { prefix: '/auth' });
+  fastify.register(user_domains, { prefix: '/user' });
   fastify.register(submit_support, { prefix: '/support' });
 };
 

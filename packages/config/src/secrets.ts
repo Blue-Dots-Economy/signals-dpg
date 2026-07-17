@@ -127,6 +127,8 @@ export const NetworkRuntimeSecretsSchema = z.object({
     .default('false')
     .transform((val) => val === 'true'),
   BULK_MAX_ITEMS: z.coerce.number().int().positive().default(100),
+  // Max wards that may share one guardian contact (U18). Best-effort cap.
+  MAX_WARDS_PER_GUARDIAN: z.coerce.number().int().positive().default(6),
   // Per-peer fetch budget for inter-instance count/page fan-out. One slow
   // peer must not stall the aggregate; see inter_instance_fetch.ts.
   PEER_FETCH_TIMEOUT_MS: z.coerce.number().int().positive().default(10000),

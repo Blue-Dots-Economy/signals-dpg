@@ -3,10 +3,18 @@ import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { pickDob } from '@/test/pick-dob';
 
 const checkUser = vi.fn();
 const requestOtp = vi.fn();
 const fetchAuthConfig = vi.fn();
+const fetchNetworkConfig = vi.fn();
+const navigateMock = vi.fn();
+
+const NETWORK_DOMAINS = [
+  { id: 'seeker', description: 'Job seeker' },
+  { id: 'provider', description: 'Job provider' },
+];
 
 vi.mock('@/lib/auth-api', async (orig) => ({
   ...(await orig<typeof import('@/lib/auth-api')>()),
@@ -24,6 +32,35 @@ vi.mock('@/lib/consent-api', () => ({
   fetchConsentConfigs: vi.fn().mockResolvedValue([]),
   getConsentStatusByIdentifier: vi.fn().mockResolvedValue({ statuses: { terms: [], privacy: [] } }),
 }));
+vi.mock('@/lib/network-api', () => ({
+  fetchNetworkConfig: (...a: unknown[]) => fetchNetworkConfig(...a),
+}));
+vi.mock('react-router-dom', async (orig) => ({
+  ...(await orig<typeof import('react-router-dom')>()),
+  useNavigate: () => navigateMock,
+}));
+// Stub the pre-auth guardian flow so we can assert LoginPage's gating wiring
+// (does it render the flow, with which props, and does it hold back the OTP?)
+// without pulling in the child's internals — those have their own tests.
+const signupGuardianOnComplete = vi.fn();
+vi.mock('@/components/consent/u18/signup-guardian-flow', () => ({
+  SignupGuardianFlow: (props: { domain: string; dateOfBirth: Date; onComplete: () => void }) => {
+    signupGuardianOnComplete.mockImplementation(props.onComplete);
+    return (
+      <div
+        data-testid="signup-guardian-flow"
+        data-domain={props.domain}
+        data-birth-year={props.dateOfBirth instanceof Date ? String(props.dateOfBirth.getFullYear()) : ''}
+      />
+    );
+  },
+}));
+
+// A gated domain ("seeker") + an ungated one ("provider") for the U18 tests.
+const GATED_NETWORK_DOMAINS = [
+  { id: 'seeker', description: 'Job seeker', guardian_consent_required: true },
+  { id: 'provider', description: 'Job provider' },
+];
 
 async function renderPage() {
   const { LoginPage } = await import('../login-page');
@@ -43,6 +80,7 @@ describe('LoginPage', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     requestOtp.mockResolvedValue({ ok: true, user: false });
+    fetchNetworkConfig.mockResolvedValue({ id: 'blue_dot', domains: NETWORK_DOMAINS });
   });
 
   it('renders only the phone input when loginChannels is ["phone"]', async () => {
@@ -99,5 +137,181 @@ describe('LoginPage', () => {
     await waitFor(() => expect(checkUser).toHaveBeenCalledTimes(2));
     await waitFor(() => expect(requestOtp).toHaveBeenCalled());
     expect(screen.queryByText(/contact your administrator/i)).toBeNull();
+  });
+
+  it('mobile field takes only the 10-digit national number (+91 is a fixed prefix)', async () => {
+    fetchAuthConfig.mockResolvedValue({ selfSignupAllowed: true, loginChannels: ['phone', 'email'] });
+    await renderPage();
+    await waitFor(() => expect(fetchAuthConfig).toHaveBeenCalled());
+
+    const input = screen.getByLabelText(/mobile/i) as HTMLInputElement;
+    const cta = screen.getByRole('button', { name: /^continue$/i });
+
+    // Fewer than 10 digits → CTA stays disabled.
+    await userEvent.type(input, '96204');
+    expect(cta).toBeDisabled();
+
+    // Letters + formatting stripped; capped at 10 digits; CTA enables at 10.
+    await userEvent.type(input, '21129abc99');
+    expect(input.value).toBe('9620421129');
+    expect(cta).toBeEnabled();
+  });
+
+  describe('signup form: name + domain only (DOB is a separate gated step)', () => {
+    it('shows the domain field but NOT a DOB field on the signup form', async () => {
+      fetchAuthConfig.mockResolvedValue({ selfSignupAllowed: true, loginChannels: ['phone', 'email'] });
+      checkUser.mockResolvedValue({ userExists: false });
+      await renderPage();
+      await waitFor(() => expect(fetchAuthConfig).toHaveBeenCalled());
+
+      expect(screen.queryByText(/your domain/i)).toBeNull();
+
+      await userEvent.type(screen.getByLabelText(/mobile/i), '9876543210');
+      await userEvent.click(screen.getByRole('button', { name: /continue|send/i }));
+
+      await waitFor(() => expect(checkUser).toHaveBeenCalled());
+      expect(await screen.findByText(/your domain/i)).toBeInTheDocument();
+      // DOB is never on the form — it's a separate step for gated domains only.
+      expect(screen.queryByRole('button', { name: /date of birth/i })).toBeNull();
+    });
+
+    it('never shows domain/name fields when logging in as a returning user', async () => {
+      fetchAuthConfig.mockResolvedValue({ selfSignupAllowed: true, loginChannels: ['phone', 'email'] });
+      checkUser.mockResolvedValue({ userExists: true });
+      await renderPage();
+      await waitFor(() => expect(fetchAuthConfig).toHaveBeenCalled());
+
+      await userEvent.type(screen.getByLabelText(/mobile/i), '9123456789');
+      await userEvent.click(screen.getByRole('button', { name: /continue|send/i }));
+
+      await waitFor(() => expect(requestOtp).toHaveBeenCalled());
+      expect(screen.queryByText(/your domain/i)).toBeNull();
+      expect(screen.queryByLabelText(/your name/i)).toBeNull();
+    });
+
+    it('blocks signup submission until name + domain are filled in (no DOB on the form)', async () => {
+      fetchAuthConfig.mockResolvedValue({ selfSignupAllowed: true, loginChannels: ['phone', 'email'] });
+      checkUser.mockResolvedValue({ userExists: false });
+      await renderPage();
+      await waitFor(() => expect(fetchAuthConfig).toHaveBeenCalled());
+
+      await userEvent.type(screen.getByLabelText(/mobile/i), '9876543210');
+      await userEvent.click(screen.getByRole('button', { name: /continue|send/i }));
+      await waitFor(() => expect(checkUser).toHaveBeenCalledTimes(1));
+      await screen.findByText(/your domain/i);
+
+      // Name only — the still-empty required domain select blocks submission.
+      await userEvent.type(screen.getByLabelText(/your name/i), 'Asha');
+      await userEvent.click(screen.getByRole('button', { name: /^continue$/i }));
+      expect(requestOtp).not.toHaveBeenCalled();
+
+      // Name + domain (ungated) — submission proceeds straight to OTP, no DOB.
+      await userEvent.click(screen.getByRole('button', { name: /^provider$/i }));
+      await userEvent.click(screen.getByRole('button', { name: /^continue$/i }));
+      await waitFor(() => expect(requestOtp).toHaveBeenCalled());
+    });
+
+    it('an ungated domain skips the DOB step entirely and carries no birth data', async () => {
+      fetchAuthConfig.mockResolvedValue({ selfSignupAllowed: true, loginChannels: ['phone', 'email'] });
+      checkUser.mockResolvedValue({ userExists: false });
+      fetchNetworkConfig.mockResolvedValue({ id: 'blue_dot', domains: GATED_NETWORK_DOMAINS });
+      await renderPage();
+      await waitFor(() => expect(fetchAuthConfig).toHaveBeenCalled());
+
+      await userEvent.type(screen.getByLabelText(/mobile/i), '9876543210');
+      await userEvent.click(screen.getByRole('button', { name: /continue|send/i }));
+      await waitFor(() => expect(checkUser).toHaveBeenCalledTimes(1));
+
+      await userEvent.type(screen.getByLabelText(/your name/i), 'Ravi');
+      await userEvent.click(screen.getByRole('button', { name: /^provider$/i })); // ungated
+      await userEvent.click(screen.getByRole('button', { name: /^continue$/i }));
+
+      // No DOB step shown; goes straight to OTP with a domain-only signupExtras.
+      expect(screen.queryByText(/to create an account/i)).toBeNull();
+      await waitFor(() => expect(requestOtp).toHaveBeenCalled());
+      await waitFor(() => expect(navigateMock).toHaveBeenCalledWith(
+        '/auth/otp',
+        expect.objectContaining({
+          state: expect.objectContaining({ signupExtras: { domain: 'provider' } }),
+        }),
+      ));
+    });
+  });
+
+  describe('U18 gated DOB step + guardian gate (option A)', () => {
+    it('a gated domain shows the DOB step; a minor then sees the guardian flow BEFORE their own OTP', async () => {
+      fetchAuthConfig.mockResolvedValue({ selfSignupAllowed: true, loginChannels: ['phone', 'email'] });
+      checkUser.mockResolvedValue({ userExists: false });
+      fetchNetworkConfig.mockResolvedValue({ id: 'blue_dot', domains: GATED_NETWORK_DOMAINS });
+      await renderPage();
+      await waitFor(() => expect(fetchAuthConfig).toHaveBeenCalled());
+
+      await userEvent.type(screen.getByLabelText(/mobile/i), '9876543210');
+      await userEvent.click(screen.getByRole('button', { name: /continue|send/i }));
+      await waitFor(() => expect(checkUser).toHaveBeenCalledTimes(1));
+
+      await userEvent.type(screen.getByLabelText(/your name/i), 'Asha');
+      await userEvent.click(screen.getByRole('button', { name: /^seeker$/i })); // gated
+      await userEvent.click(screen.getByRole('button', { name: /^continue$/i }));
+
+      // The DOB step appears (gated domain); the OTP is not yet sent.
+      expect(await screen.findByText(/to create an account/i)).toBeInTheDocument();
+      expect(requestOtp).not.toHaveBeenCalled();
+
+      // Pick a minor DOB + Continue → guardian flow renders, OTP still held.
+      await pickDob(/select date of birth/i, 2015, 5);
+      await userEvent.click(screen.getByRole('button', { name: /^continue$/i }));
+
+      const flow = await screen.findByTestId('signup-guardian-flow');
+      expect(flow).toHaveAttribute('data-domain', 'seeker');
+      expect(flow).toHaveAttribute('data-birth-year', '2015');
+      expect(requestOtp).not.toHaveBeenCalled();
+      expect(navigateMock).not.toHaveBeenCalled();
+
+      // Guardian verified → the ward's OTP is sent + navigation runs, carrying
+      // the birth data and no adult consent (recorded guardian-sourced).
+      signupGuardianOnComplete();
+      await waitFor(() => expect(requestOtp).toHaveBeenCalled());
+      await waitFor(() => expect(navigateMock).toHaveBeenCalledWith(
+        '/auth/otp',
+        expect.objectContaining({
+          state: expect.objectContaining({
+            signupExtras: expect.objectContaining({ domain: 'seeker', dateOfBirth: expect.stringMatching(/^2015-/) }),
+            pendingConsent: null,
+          }),
+        }),
+      ));
+    });
+
+    it('an ADULT in a gated domain clears the DOB step and proceeds to OTP without the guardian flow', async () => {
+      fetchAuthConfig.mockResolvedValue({ selfSignupAllowed: true, loginChannels: ['phone', 'email'] });
+      checkUser.mockResolvedValue({ userExists: false });
+      fetchNetworkConfig.mockResolvedValue({ id: 'blue_dot', domains: GATED_NETWORK_DOMAINS });
+      await renderPage();
+      await waitFor(() => expect(fetchAuthConfig).toHaveBeenCalled());
+
+      await userEvent.type(screen.getByLabelText(/mobile/i), '9876543210');
+      await userEvent.click(screen.getByRole('button', { name: /continue|send/i }));
+      await waitFor(() => expect(checkUser).toHaveBeenCalledTimes(1));
+
+      await userEvent.type(screen.getByLabelText(/your name/i), 'Ravi');
+      await userEvent.click(screen.getByRole('button', { name: /^seeker$/i })); // gated
+      await userEvent.click(screen.getByRole('button', { name: /^continue$/i }));
+
+      expect(await screen.findByText(/to create an account/i)).toBeInTheDocument();
+      await pickDob(/select date of birth/i, 1990, 5); // adult
+      await userEvent.click(screen.getByRole('button', { name: /^continue$/i }));
+
+      await waitFor(() => expect(requestOtp).toHaveBeenCalled());
+      expect(screen.queryByTestId('signup-guardian-flow')).toBeNull();
+      await waitFor(() => expect(navigateMock).toHaveBeenCalledWith(
+        '/auth/otp',
+        expect.objectContaining({
+          state: expect.objectContaining({
+            signupExtras: expect.objectContaining({ domain: 'seeker', dateOfBirth: expect.stringMatching(/^1990-/) }),
+          }),
+        }),
+      ));
+    });
   });
 });

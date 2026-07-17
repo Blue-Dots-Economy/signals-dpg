@@ -17,9 +17,12 @@ import { hasAcceptedProfileConsent } from './consent_acceptance.js';
 import { is_populated } from './metrics/profile_completion.js';
 import { decryptPiiBlob, encryptPiiBlob, getPiiKey } from '@dpg/auth';
 import { items } from '@dpg/database';
+import { user, consent_record } from '@api/db/postgres/schema';
 import { db } from '@api/db/postgres/drizzle_config';
 import { isServedDomainBinding } from '@/utils/served_domain_guard';
+import { guardianProfileConsentRow } from './guardian_consent_rows';
 import { getNetworkConfigById } from '@/network_configs';
+import { guardianConsentRequired, isMinor } from '@/services/minor';
 import { geocodeLocationsFromState } from '@/services/geocoding/resolve_locations_for_create';
 import { jitterCoordinate } from '@/services/geocoding/jitter';
 import {
@@ -91,6 +94,30 @@ export class ItemServiceError extends Error {
 
 type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
 export type DbOrTx = typeof db | Tx;
+
+/**
+ * Whether `userId` is the creator of the item identified by the partition key.
+ * Shared by the profile-consent routes (accept + U18) so the ownership query —
+ * scoped on the partition-pruning columns — isn't hand-written per handler.
+ */
+export async function isItemOwnedBy(
+  userId: string,
+  ref: { network: string; item_domain: string; item_type: string; item_id: string },
+  exec: DbOrTx = db,
+): Promise<boolean> {
+  const [owner] = await exec
+    .select({ created_by: items.created_by })
+    .from(items)
+    .where(and(
+      eq(items.item_network, ref.network),
+      eq(items.item_domain, ref.item_domain),
+      eq(items.item_type, ref.item_type),
+      eq(items.item_id, ref.item_id),
+      eq(items.created_by, userId),
+    ))
+    .limit(1);
+  return Boolean(owner);
+}
 
 export interface CreateItemServiceParams {
   item_network: string;
@@ -226,9 +253,11 @@ export async function createItemInternal(
   // Live requires required-complete AND profile_creation consent
   // (aggregator-dpg#464). A create that carries consent (public /item/create
   // with a consent block, passed as `consent_accepted`) IS that acceptance, so
-  // it can go live now. #275 hardcoded this `false`, so every consenting create
-  // was stuck `draft`; the flag fixes that while keeping consent-less callers
-  // (admin/bulk onboarding) draft until POST /consent/profile-accept promotes.
+  // it can go live now (#275). Consent-less callers (admin/bulk onboarding)
+  // stay draft until POST /consent/profile-accept promotes. U18: for a gated
+  // MINOR the route passes `consent_accepted=false` (self-consent must not
+  // promote a minor), so they stay draft until GUARDIAN consent promotes via
+  // the finalize/accept path — see create_item.ts and promoteItemOnProfileConsent.
   const classification = classify_item({
     schema: itemSchema as { required?: string[] },
     merged_state: submittedItemState,
@@ -296,6 +325,56 @@ export interface UpdateItemInternalResult {
 }
 
 /**
+ * Server-authoritative U18 go-live gate. Returns true when an item must NOT be
+ * flipped `draft → live` because a guardian-gated domain lacks the required
+ * guardian consent. THE single source of truth for the age gate on every
+ * promotion path (create self-consent, /consent/profile-accept, and item
+ * update) — do not re-derive it inline. Fail-closed on two fronts:
+ *
+ *  - **null DOB on a gated domain → blocked.** A missing `date_of_birth` is
+ *    never treated as "adult": DOB capture is client-side only (u18_precheck is
+ *    a hint, not a control), so a minor account with no DOB must not be able to
+ *    self-consent to live.
+ *  - **minor with no `source='guardian'` profile_creation row → blocked.** Only
+ *    guardian consent promotes a minor; the ward's own self-consent row cannot.
+ *
+ * A proven adult (DOB present and not a minor), and ANY user on a non-gated
+ * domain, are never blocked.
+ */
+export async function guardianGateBlocksGoLive(
+  exec: DbOrTx,
+  item: { item_network: string; item_domain: string; item_id: string; created_by: string },
+): Promise<boolean> {
+  const networkConfig = await getNetworkConfigById(item.item_network);
+  if (!guardianConsentRequired(networkConfig, item.item_domain)) return false;
+
+  const [ward] = await exec
+    .select({ dob: user.dateOfBirth })
+    .from(user)
+    .where(eq(user.id, item.created_by))
+    .limit(1);
+
+  // Cannot prove adulthood without a DOB → fail-closed on a gated domain.
+  if (!ward?.dob) return true;
+  if (!isMinor(ward.dob)) return false;
+
+  const [guardianRow] = await exec
+    .select({ id: consent_record.id })
+    .from(consent_record)
+    .where(
+      and(
+        eq(consent_record.userId, item.created_by),
+        eq(consent_record.level, 'item'),
+        eq(consent_record.consentCategory, 'profile_creation'),
+        eq(consent_record.itemId, item.item_id),
+        eq(consent_record.source, 'guardian'),
+      ),
+    )
+    .limit(1);
+  return !guardianRow; // minor without guardian consent → stay draft
+}
+
+/**
  * Promote a single profile to `live` after its owner accepts `profile_creation`
  * consent (aggregator-dpg#464). A profile is created `draft` because per-item
  * consent can only be recorded after the item exists; when the owner accepts
@@ -323,6 +402,7 @@ export async function promoteItemOnProfileConsent(
       item_state: items.item_state,
       item_private_state: items.item_private_state,
       lifecycle_status: items.lifecycle_status,
+      created_by: items.created_by,
     })
     .from(items)
     .where(eq(items.item_id, itemId))
@@ -357,11 +437,43 @@ export async function promoteItemOnProfileConsent(
 
   if (lifecycle_status !== 'live') return false;
 
+  // U18 age gate (spec §7 / D11/D13). Fail-closed for a gated minor / null-DOB.
+  if (await guardianGateBlocksGoLive(exec, item)) return false;
+
   await exec
     .update(items)
     .set({ lifecycle_status: 'live', updated_at: sql`now()` })
     .where(eq(items.item_id, itemId));
   return true;
+}
+
+/**
+ * Record (or upgrade) a minor's GUARDIAN `profile_creation` consent for an item
+ * and promote it live in one step. Upsert (not plain insert): a prior
+ * `source='profile'` row from create_item must be upgraded to `'guardian'`, not
+ * 23505'd. Shared by the U18 profile-consent verify + finalize handlers, which
+ * were byte-identical. Returns whether the item was promoted to live.
+ */
+export async function upsertGuardianProfileConsentAndPromote(
+  tx: DbOrTx,
+  args: { userId: string; itemId: string; network: string; brand?: string | null; documentVersion: number },
+): Promise<boolean> {
+  await tx
+    .insert(consent_record)
+    .values(guardianProfileConsentRow(args))
+    // Append a distinct source='guardian' row (the ward's own source='profile'
+    // row from create_item is preserved). Conflict only on a repeat guardian
+    // acceptance for the same item → idempotent update, self row untouched.
+    .onConflictDoUpdate({
+      target: [consent_record.userId, consent_record.itemId, consent_record.source],
+      targetWhere: sql`level = 'item' AND consent_category = 'profile_creation'`,
+      set: {
+        documentVersion: args.documentVersion,
+        acceptedAt: new Date(),
+        metadata: { variant: 'u18' } as Record<string, unknown>,
+      },
+    });
+  return promoteItemOnProfileConsent(tx, args.itemId);
 }
 
 export async function updateItemInternal(
@@ -492,7 +604,18 @@ export async function updateItemInternal(
         current_status: existingItem.lifecycle_status as 'draft' | 'live' | 'paused',
         consent_accepted,
       });
-      updateValues.lifecycle_status = classification.lifecycle_status;
+      // U18 age gate on the UPDATE path: `hasAcceptedProfileConsent` matches a
+      // profile_creation row of ANY source, so a minor's create-draft-then-edit
+      // would otherwise flip to `live` on their own self-consent row. Block the
+      // draft→live transition through the same server gate as promote/create;
+      // an already-live item is untouched (the live-latch handles those).
+      const wouldGoLive =
+        classification.lifecycle_status === 'live' && existingItem.lifecycle_status !== 'live';
+      if (wouldGoLive && (await guardianGateBlocksGoLive(exec, existingItem))) {
+        updateValues.lifecycle_status = existingItem.lifecycle_status;
+      } else {
+        updateValues.lifecycle_status = classification.lifecycle_status;
+      }
     }
 
     // Location resolution precedence (runs after the state merge):
