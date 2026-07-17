@@ -288,6 +288,37 @@ Operational guidance until the switchover:
   NULL") ship in two releases — the first additive, the second the
   constraint — and verify the backfill between them.
 
+### U18 guardian-consent additions require manual DDL on existing DBs
+
+The U18 feature (PR #311) adds, in the idempotent SQL layer:
+
+- `"user"."domains" text[]` (`auth.sql`) — the signup domain(s).
+- the `minor_guardian` table (`minor_guardian.sql`).
+- a **reshaped** `consent_record_profile_creation_unique` index — the
+  partial unique index is dropped and recreated on
+  `(user_id, item_id, source)` instead of `(user_id, item_id)` so a
+  ward's self-consent and their guardian's consent co-exist as distinct
+  append-only rows (`consent_record.sql`). That `DROP INDEX` is a
+  deliberate exception to the additive-only contract; it is guarded
+  `IF EXISTS` and only re-shapes a pre-existing 2-column index.
+
+Because of the `WHERE table_name='items'` short-circuit above, an existing
+production DB (where `items` already exists) will **never** receive these
+via the migrate-Job — same class of gap as #287. Until the
+`drizzle-kit migrate` switchover lands, apply them by hand against the
+target DB (idempotent — safe to re-run), e.g.:
+
+```sql
+ALTER TABLE "user" ADD COLUMN IF NOT EXISTS "domains" text[];
+-- \i minor_guardian.sql  (CREATE TABLE IF NOT EXISTS minor_guardian ...)
+DROP INDEX IF EXISTS consent_record_profile_creation_unique;
+CREATE UNIQUE INDEX IF NOT EXISTS consent_record_profile_creation_unique
+  ON consent_record (user_id, item_id, source)
+  WHERE level = 'item' AND consent_category = 'profile_creation';
+```
+
+Take the exact DDL from the bundled `schema.sql` so it stays in sync.
+
 ## Related
 
 - `docs/superpowers/plans/2026-05-21-deployment-and-automation.md` —
