@@ -7,7 +7,12 @@ v10/
 dist/
 build/
 out/
+# Drizzle migrations under apps/api/drizzle/ are COMMITTED (applied at deploy by
+# the runtime migrator — see docs/operations/migrations.md). Ignore stray
+# drizzle/ output elsewhere, but track the api migrations dir.
 drizzle/
+!apps/api/drizzle/
+!apps/api/drizzle/**
 .turbo/
 *.tsbuildinfo
 apps/*/.astro/
