@@ -9,7 +9,7 @@ paths:
 
 # Database conventions
 
-DB schema files live in `apps/api/db/postgres/schema/` and migrations in `apps/api/drizzle/`. **Never hand-edit migration files** — regenerate via `pnpm db:generate:api`.
+DB schema files live in `apps/api/db/postgres/schema/` and migrations in `apps/api/drizzle/`. Since #287 the whole deploy schema is one Drizzle ledger applied by `scripts/migrate.mjs` — **read `apps/api/drizzle/README.md` before touching migrations**: **generated** migrations (declarative tables) must never be hand-edited — change `db/postgres/schema/*.ts` then `pnpm db:generate:api`; **custom** migrations (partitioned/vector/geo tables Drizzle can't express) are hand-written via `drizzle-kit generate --custom`. Extensions and leaf partitions are *not* in the ledger (provisioning prerequisite / runtime creation respectively).
 
 **Item tables are partitioned.** Use the partition-aware query helpers in `@dpg/database` so the planner can prune; ad-hoc queries that select across the parent without a partition key will scan everything. See `packages/database/src/utils/README.md` for the exact contract — those helpers manage partition *creation* (DDL), not query pruning; the pruning contract itself is "always filter on `item_network` + `item_domain`/`action_type`," demonstrated by example at `apps/api/src/utils/item_fetch_runtime.ts`.
 

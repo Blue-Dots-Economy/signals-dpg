@@ -40,6 +40,10 @@ Auth plugins (`auth_middleware.ts`, `validate_api_key.ts`, `validate_session.ts`
 
 Don't assume these share infrastructure — they're two independent, small pipelines that happen to both end up calling the notification-service client.
 
+## `action/perform` is single-object; bulk is a separate route
+
+`perform_action.ts` registers two routes (#296, Raya compat). `POST /perform` takes a **single action object** as the body — not an array. Array/batch submission has its own route, `POST /perform/bulk`, which runs items through `runBulk` (`@/utils/bulk_runner`, capped at `apiConfig.bulk_max_items`) and returns per-item results with `BulkItemFailure` entries rather than failing the whole request. Don't re-add array handling to `/perform` to "support both" — the split is deliberate so single-action callers get a flat success/error shape and bulk callers get partial-failure semantics.
+
 ## Test file placement
 
 Colocated `__tests__/` per directory is the norm (17+ such folders) — a test for `foo.ts` lives at `__tests__/foo.test.ts` next to it. `src/__tests__/` (top-level, 3 files) is the exception, reserved for tests that cut across multiple directories (e.g. `consent_config_serving.integration.test.ts`) rather than exercising one module. If your test exercises a single file/module, colocate it; only use the top-level folder when it genuinely doesn't belong to one directory.
