@@ -192,10 +192,14 @@ export const create_item_handler = async (
   // else keeps the #275 behaviour (consenting create goes live now).
   let selfConsentPromotes = body.consent != null;
   if (selfConsentPromotes) {
-    const dob = await getWardDob(userId);
-    if (dob && isMinor(dob)) {
-      const networkConfig = await getNetworkConfigById(body.item_network);
-      if (guardianConsentRequired(networkConfig, body.item_domain)) selfConsentPromotes = false;
+    const networkConfig = await getNetworkConfigById(body.item_network);
+    if (guardianConsentRequired(networkConfig, body.item_domain)) {
+      // Gated domain is fail-closed: only a PROVEN adult self-promotes to live.
+      // A minor needs guardian consent; a null DOB cannot prove adulthood (DOB
+      // capture is client-side only) → both stay draft. Mirrors
+      // guardianGateBlocksGoLive on the promote/update paths.
+      const dob = await getWardDob(userId);
+      if (!dob || isMinor(dob)) selfConsentPromotes = false;
     }
   }
 

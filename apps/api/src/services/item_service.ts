@@ -325,6 +325,56 @@ export interface UpdateItemInternalResult {
 }
 
 /**
+ * Server-authoritative U18 go-live gate. Returns true when an item must NOT be
+ * flipped `draft → live` because a guardian-gated domain lacks the required
+ * guardian consent. THE single source of truth for the age gate on every
+ * promotion path (create self-consent, /consent/profile-accept, and item
+ * update) — do not re-derive it inline. Fail-closed on two fronts:
+ *
+ *  - **null DOB on a gated domain → blocked.** A missing `date_of_birth` is
+ *    never treated as "adult": DOB capture is client-side only (u18_precheck is
+ *    a hint, not a control), so a minor account with no DOB must not be able to
+ *    self-consent to live.
+ *  - **minor with no `source='guardian'` profile_creation row → blocked.** Only
+ *    guardian consent promotes a minor; the ward's own self-consent row cannot.
+ *
+ * A proven adult (DOB present and not a minor), and ANY user on a non-gated
+ * domain, are never blocked.
+ */
+export async function guardianGateBlocksGoLive(
+  exec: DbOrTx,
+  item: { item_network: string; item_domain: string; item_id: string; created_by: string },
+): Promise<boolean> {
+  const networkConfig = await getNetworkConfigById(item.item_network);
+  if (!guardianConsentRequired(networkConfig, item.item_domain)) return false;
+
+  const [ward] = await exec
+    .select({ dob: user.dateOfBirth })
+    .from(user)
+    .where(eq(user.id, item.created_by))
+    .limit(1);
+
+  // Cannot prove adulthood without a DOB → fail-closed on a gated domain.
+  if (!ward?.dob) return true;
+  if (!isMinor(ward.dob)) return false;
+
+  const [guardianRow] = await exec
+    .select({ id: consent_record.id })
+    .from(consent_record)
+    .where(
+      and(
+        eq(consent_record.userId, item.created_by),
+        eq(consent_record.level, 'item'),
+        eq(consent_record.consentCategory, 'profile_creation'),
+        eq(consent_record.itemId, item.item_id),
+        eq(consent_record.source, 'guardian'),
+      ),
+    )
+    .limit(1);
+  return !guardianRow; // minor without guardian consent → stay draft
+}
+
+/**
  * Promote a single profile to `live` after its owner accepts `profile_creation`
  * consent (aggregator-dpg#464). A profile is created `draft` because per-item
  * consent can only be recorded after the item exists; when the owner accepts
@@ -387,33 +437,8 @@ export async function promoteItemOnProfileConsent(
 
   if (lifecycle_status !== 'live') return false;
 
-  // U18 gate: a minor's profile only goes live on GUARDIAN profile_creation
-  // consent. Fail-closed — a gated domain with no guardian row stays draft,
-  // so the adult self-consent path cannot promote a minor (spec §7 / D11/D13).
-  const networkConfig = await getNetworkConfigById(item.item_network);
-  if (guardianConsentRequired(networkConfig, item.item_domain)) {
-    const [ward] = await exec
-      .select({ dob: user.dateOfBirth })
-      .from(user)
-      .where(eq(user.id, item.created_by))
-      .limit(1);
-    if (ward?.dob && isMinor(ward.dob)) {
-      const [guardianRow] = await exec
-        .select({ id: consent_record.id })
-        .from(consent_record)
-        .where(
-          and(
-            eq(consent_record.userId, item.created_by),
-            eq(consent_record.level, 'item'),
-            eq(consent_record.consentCategory, 'profile_creation'),
-            eq(consent_record.itemId, itemId),
-            eq(consent_record.source, 'guardian'),
-          ),
-        )
-        .limit(1);
-      if (!guardianRow) return false; // minor without guardian consent → stay draft
-    }
-  }
+  // U18 age gate (spec §7 / D11/D13). Fail-closed for a gated minor / null-DOB.
+  if (await guardianGateBlocksGoLive(exec, item)) return false;
 
   await exec
     .update(items)
@@ -579,7 +604,18 @@ export async function updateItemInternal(
         current_status: existingItem.lifecycle_status as 'draft' | 'live' | 'paused',
         consent_accepted,
       });
-      updateValues.lifecycle_status = classification.lifecycle_status;
+      // U18 age gate on the UPDATE path: `hasAcceptedProfileConsent` matches a
+      // profile_creation row of ANY source, so a minor's create-draft-then-edit
+      // would otherwise flip to `live` on their own self-consent row. Block the
+      // draft→live transition through the same server gate as promote/create;
+      // an already-live item is untouched (the live-latch handles those).
+      const wouldGoLive =
+        classification.lifecycle_status === 'live' && existingItem.lifecycle_status !== 'live';
+      if (wouldGoLive && (await guardianGateBlocksGoLive(exec, existingItem))) {
+        updateValues.lifecycle_status = existingItem.lifecycle_status;
+      } else {
+        updateValues.lifecycle_status = classification.lifecycle_status;
+      }
     }
 
     // Location resolution precedence (runs after the state merge):
