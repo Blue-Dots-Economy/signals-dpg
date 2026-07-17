@@ -87,7 +87,6 @@ export function ProfileFormPage() {
   const [selectedDomain, setSelectedDomain] = React.useState<string | null>(
     () => (!isEdit && singleServedDomain ? singleServedDomain : null),
   );
-  const [myItems, setMyItems] = React.useState<Item[]>([]);
   const [resolvedNetwork, setResolvedNetwork] = React.useState<DotNetworkSchema | null>(null);
   const [existingItem, setExistingItem] = React.useState<Item | null>(null);
   const [initialData, setInitialData] = React.useState<Record<string, unknown> | null>(null);
@@ -244,48 +243,12 @@ export function ProfileFormPage() {
   const network = resolvedNetwork;
   const domains = network?.domains ?? [];
 
-  // Single-domain lock: a user's domain is implied by the items they already
-  // hold in this network. Fetch them across served domains so the create flow
-  // can lock the picker to the held domain (server enforces the real lock —
-  // see create_item's DOMAIN_LOCKED guard). Edit mode reads the domain off the
-  // existing item, so this only runs for create.
-  React.useEffect(() => {
-    if (isEdit || !network || !user) return;
-    const controller = new AbortController();
-    Promise.all(
-      (network.domains ?? []).map((domain) => {
-        const itemTypeKeys = domain.item_schemas
-          ? Object.keys(domain.item_schemas)
-          : [];
-        const itemType = itemTypeKeys.length > 0 ? itemTypeKeys[0] : 'profile';
-        return fetchItems(
-          {
-            item_network: network.id,
-            item_domain: domain.id,
-            item_type: itemType,
-            created_by_me: true,
-            limit: 100,
-          },
-          controller.signal,
-        )
-          .then((res) => res.items)
-          .catch(() => [] as Item[]);
-      }),
-    ).then((results) => {
-      if (!controller.signal.aborted) setMyItems(results.flat());
-    });
-    return () => controller.abort();
-  }, [isEdit, network, user]);
-
-  // Domain the user is locked to, or null when they hold no items yet.
-  const lockedDomain = React.useMemo(
-    () => (myItems.length > 0 ? myItems[0].item_domain : null),
-    [myItems],
-  );
-
-  // Domain roles persisted on the user at signup. When set, profile creation is
-  // restricted to these (a brand-new user with no items yet can only create in
-  // the domain they signed up for). Empty → fall back to held items / served.
+  // The user's role(s), persisted on `user.domains` — the single source of
+  // truth for which domain they may create profiles in (set at signup /
+  // bootstrapped on first create; backfilled for existing users). One entry
+  // today = single role; the server enforces the same set (create_item's
+  // DOMAIN_LOCKED guard reads user.domains too), so the picker and the server
+  // can't disagree. Empty → fall back to the served set.
   const [userDomains, setUserDomainsState] = React.useState<string[]>([]);
   React.useEffect(() => {
     if (isEdit || !user) return;
@@ -296,49 +259,42 @@ export function ProfileFormPage() {
     return () => { cancelled = true; };
   }, [isEdit, user]);
 
-  // Domains offered in the picker: restricted to the served set (when a scope
-  // is configured), to the user's signup domains (when persisted), then to the
-  // locked domain when the user already holds one.
+  // Domains offered in the picker: the served set (when a scope is configured),
+  // then narrowed to the user's persisted role(s).
   const selectableDomains = React.useMemo(() => {
     let list = servedScope
       ? domains.filter((d) => servedScope.domains.includes(d.id))
       : domains;
     if (userDomains.length > 0) list = list.filter((d) => userDomains.includes(d.id));
-    if (lockedDomain) list = list.filter((d) => d.id === lockedDomain);
     return list;
-  }, [domains, servedScope, userDomains, lockedDomain]);
+  }, [domains, servedScope, userDomains]);
 
-  // Locked users skip the role picker — auto-select their held domain.
-  React.useEffect(() => {
-    if (isEdit || selectedDomain || !lockedDomain) return;
-    setSelectedDomain(lockedDomain);
-  }, [isEdit, selectedDomain, lockedDomain]);
-
-  // Only one selectable domain (e.g. the single signup domain) → skip the
-  // picker and select it directly.
+  // Single-role users skip the picker — the one selectable domain is chosen for
+  // them (covers both the stored-role case and a single served domain).
+  const roleLocked = selectableDomains.length <= 1;
   React.useEffect(() => {
     if (isEdit || selectedDomain || selectableDomains.length !== 1) return;
     setSelectedDomain(selectableDomains[0].id);
   }, [isEdit, selectedDomain, selectableDomains]);
 
   // Domain confirmed at Signals self-signup (see pages/auth/login-page.tsx +
-  // otp-page.tsx): a brand-new user who hasn't created any profile yet has no
-  // lockedDomain to auto-select from, so without this they'd be asked to pick
-  // a domain a second time. One-shot: cleared once consumed so it never
-  // leaks into a later, unrelated profile-creation flow.
+  // otp-page.tsx): a brand-new user who hasn't created any profile yet, so
+  // without this they'd be asked to pick a domain a second time. One-shot:
+  // cleared once consumed so it never leaks into a later, unrelated
+  // profile-creation flow.
   React.useEffect(() => {
     // Wait for the network's domain list to actually load before consuming —
     // otherwise an empty `domains` on the first render (network still
     // fetching) would fail the validity check below and clear the stored
     // value before it ever got a chance to apply.
-    if (isEdit || selectedDomain || lockedDomain || !targetNetworkId || domains.length === 0) return;
+    if (isEdit || selectedDomain || !targetNetworkId || domains.length === 0) return;
     const stored = getStoredSignupDomain(targetNetworkId);
     if (!stored) return;
     clearStoredSignupDomain(targetNetworkId);
     if (domains.some((d) => d.id === stored)) {
       setSelectedDomain(stored);
     }
-  }, [isEdit, selectedDomain, lockedDomain, targetNetworkId, domains]);
+  }, [isEdit, selectedDomain, targetNetworkId, domains]);
 
   // Find the profile schema for the selected domain
   const profileSchema = React.useMemo<RJSFSchema | null>(() => {
@@ -703,11 +659,11 @@ export function ProfileFormPage() {
           <div className="relative z-10 px-5 pt-4 sm:px-6">
             <button
               type="button"
-              onClick={() => (selectedDomain && !isEdit && !lockedDomain && !singleServedDomain ? setSelectedDomain(null) : navigate(`/?network=${resolvedNetwork?.id ?? ''}`))}
+              onClick={() => (selectedDomain && !isEdit && !roleLocked && !singleServedDomain ? setSelectedDomain(null) : navigate(`/?network=${resolvedNetwork?.id ?? ''}`))}
               className="flex items-center gap-1.5 text-sm text-white/70 hover:text-white transition-colors"
             >
               <ArrowLeft className="h-4 w-4" />
-              {selectedDomain && !isEdit && !lockedDomain && !singleServedDomain ? t('profile.choose_different_role') : t('common.back')}
+              {selectedDomain && !isEdit && !roleLocked && !singleServedDomain ? t('profile.choose_different_role') : t('common.back')}
             </button>
           </div>
           <div className="relative z-10 flex items-center gap-4 px-5 pb-6 pt-3 sm:px-6">

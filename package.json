@@ -15,6 +15,7 @@
     "db:init:api": "pnpm --filter api db:init",
     "db:seed:services:api": "pnpm --filter api db:seed:services",
     "db:backfill:consent:api": "pnpm --filter api db:backfill:consent",
+    "db:backfill:domains:api": "pnpm --filter api db:backfill:domains",
     "db:seed:purple_dot:api": "pnpm --filter api db:seed:purple_dot",
     "e2e:qr": "tsx scripts/e2e/submit_qr_participants.mts",
     "e2e:actions": "pnpm --filter api exec tsx scripts/e2e/seed_actions.mts",

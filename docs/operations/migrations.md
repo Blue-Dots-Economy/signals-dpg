@@ -319,6 +319,19 @@ CREATE UNIQUE INDEX IF NOT EXISTS consent_record_profile_creation_unique
 
 Take the exact DDL from the bundled `schema.sql` so it stays in sync.
 
+**Backfill `user.domains` for existing users.** The profile-create role lock
+reads `user.domains` (source of truth) instead of deriving from held items. New
+users get it at signup / on first create; existing users start NULL (treated as
+"unset → any served domain"). After adding the column, run the idempotent
+backfill to set each existing user's single role from their earliest item:
+
+```bash
+pnpm db:backfill:domains:api      # from repo root
+```
+
+Users with no items are left empty and get their role on first create. Safe to
+re-run (only NULL/empty rows are touched).
+
 ## Related
 
 - `docs/superpowers/plans/2026-05-21-deployment-and-automation.md` —

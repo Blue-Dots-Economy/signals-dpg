@@ -18,6 +18,7 @@
     "db:seed:purple_dot": "tsx scripts/seed_purple_dot.ts",
     "db:seed:services": "tsx scripts/seed_service_users.ts",
     "db:backfill:consent": "tsx scripts/backfill_demote_consentless.ts",
+    "db:backfill:domains": "tsx scripts/backfill_user_domains.ts",
     "test": "vitest run --passWithNoTests",
     "test:watch": "vitest",
     "test:integration": "vitest run --config vitest.integration.config.ts"
