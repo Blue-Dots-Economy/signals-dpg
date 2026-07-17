@@ -121,12 +121,12 @@ export function SignupGuardianFlow({
             <p className="text-sm text-foreground">
               {t(
                 'u18.guardian_verified_desc',
-                'Your guardian has confirmed. Next, verify your own number to finish creating your account.',
+                'Your guardian has confirmed. Next, verify your account to finish signing up.',
               )}
             </p>
           </div>
           <Button type="button" onClick={onComplete} className="w-full">
-            {t('u18.guardian_verified_continue', 'Verify my number to login')}
+            {t('u18.guardian_verified_continue', 'Continue')}
           </Button>
         </div>
       )}

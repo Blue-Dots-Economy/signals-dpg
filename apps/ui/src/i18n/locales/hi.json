@@ -432,8 +432,8 @@
   "u18.guardian_label_parent_email": "अभिभावक ईमेल",
   "u18.guardian_label_parent_phone": "अभिभावक फ़ोन नंबर",
   "u18.guardian_verified_title": "अभिभावक की पुष्टि हो गई",
-  "u18.guardian_verified_desc": "आपके अभिभावक ने पुष्टि कर दी है। अब अपना खाता बनाने के लिए अपना नंबर सत्यापित करें।",
-  "u18.guardian_verified_continue": "लॉगिन के लिए मेरा नंबर सत्यापित करें",
+  "u18.guardian_verified_desc": "आपके अभिभावक ने पुष्टि कर दी है। अब साइन अप पूरा करने के लिए अपना खाता सत्यापित करें।",
+  "u18.guardian_verified_continue": "जारी रखें",
   "u18.guardian_verified_for_create": "अभिभावक सत्यापित। अब आप अपनी प्रोफ़ाइल बना सकते हैं।",
   "u18.guardian_pending_for_create": "आप 18 वर्ष से कम हैं — इस प्रोफ़ाइल को बनाने से पहले आपके अभिभावक को एक बार के कोड से सत्यापित करना होगा।",
   "profile.guardian_confirm_title": "अभिभावक की पुष्टि आवश्यक",
@@ -527,5 +527,10 @@
   },
   "profile": {
     "guardian_consent_recorded": "अभिभावक ने आपकी प्रोफ़ाइल की पुष्टि की"
-  }
+  },
+  "u18.guardian_accept_both_prefix": "अपने वार्ड की ओर से, मैं स्वीकार करता/करती हूँ ",
+  "u18.guardian_accept_both_join": " और ",
+  "u18.guardian_error_consent": "कृपया अपने वार्ड की ओर से नियम व शर्तें तथा गोपनीयता नीति स्वीकार करें।",
+  "u18.guardian_continue": "जारी रखें",
+  "u18.guardian_contact_hint": "* कम से कम एक संपर्क आवश्यक — OTP इसी पर भेजा जाएगा।"
 }
