@@ -18,14 +18,16 @@ export type GuardianContactType = 'phone' | 'email';
  * The parent-facing scenario a guardian OTP is issued for (#294). Selects the
  * notification template + the copy the guardian sees. Distinct from the OTP
  * mechanics — the code/TTL/throttles are identical across scenarios.
+ *
+ * For actions, `actionType` is taken straight from `network.json` (the gate
+ * passes the interaction's own action type) — NOT hardcoded — so any action a
+ * network defines derives its template automatically:
+ *   `guardian_otp_<actionType>[_accept]_sms`.
  */
 export type GuardianOtpScenario =
-  | 'account' // ward wants to create an account (pre-auth signup)
-  | 'profile' // ward wants to create a profile
-  | 'connect' // ward wants to connect
-  | 'connect_accept' // ward wants to accept a connect request
-  | 'apply' // ward wants to apply
-  | 'apply_accept'; // ward wants to accept a pre-select / pre-shortlist
+  | { kind: 'account' } // ward wants to create an account (pre-auth signup)
+  | { kind: 'profile' } // ward wants to create a profile
+  | { kind: 'action'; actionType: string; stage: 'initiate' | 'accept' }; // connect/apply/etc.
 
 /** Extra template variables per scenario (parent name, domain, provider org). */
 export type GuardianOtpVariables = Record<string, string>;
@@ -182,21 +184,25 @@ const CHANNEL_BY_CONTACT_TYPE: Record<GuardianContactType, 'sms' | 'email'> = {
 };
 
 // SMS template ids. SMS bodies are DLT-approved and owned by the notification
-// service, so we can't compose them in-app — we select a per-scenario id and
-// pass variables (#294). Naming: `guardian_otp_<scenario>_sms`; generic fallback
-// when no scenario is supplied.
+// service, so we can't compose them in-app — we select an id and pass variables
+// (#294). Derived, not hardcoded: account/profile are fixed, and action ids come
+// straight from the network.json action type + stage. Generic fallback when no
+// scenario is supplied. Naming: `guardian_otp_<key>_sms`.
 const GENERIC_SMS_TEMPLATE_ID = 'guardian_otp_sms';
-const SCENARIO_SMS_TEMPLATE_ID: Record<GuardianOtpScenario, string> = {
-  account: 'guardian_otp_account_sms',
-  profile: 'guardian_otp_profile_sms',
-  connect: 'guardian_otp_connect_sms',
-  connect_accept: 'guardian_otp_connect_accept_sms',
-  apply: 'guardian_otp_apply_sms',
-  apply_accept: 'guardian_otp_apply_accept_sms',
-};
+
+function smsTemplateKey(scenario: GuardianOtpScenario): string {
+  switch (scenario.kind) {
+    case 'account':
+      return 'account';
+    case 'profile':
+      return 'profile';
+    case 'action':
+      return scenario.stage === 'accept' ? `${scenario.actionType}_accept` : scenario.actionType;
+  }
+}
 
 function smsTemplateId(scenario: GuardianOtpScenario | undefined): string {
-  return scenario ? SCENARIO_SMS_TEMPLATE_ID[scenario] : GENERIC_SMS_TEMPLATE_ID;
+  return scenario ? `guardian_otp_${smsTemplateKey(scenario)}_sms` : GENERIC_SMS_TEMPLATE_ID;
 }
 
 /**

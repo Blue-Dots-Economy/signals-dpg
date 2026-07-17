@@ -22,14 +22,26 @@ Common:
 
 ## SMS template ids the notification service must register (DLT)
 
-| Scenario | Trigger | SMS template id | Variables (besides `otp`) |
-|----------|---------|-----------------|---------------------------|
-| `account` | Ward creates an account (pre-auth signup) + guardian designation | `guardian_otp_account_sms` | `parentName`, `domain` |
-| `profile` | Ward creates a profile | `guardian_otp_profile_sms` | `parentName`, `domain` |
-| `connect` | Ward initiates a connect | `guardian_otp_connect_sms` | `parentName`, `providerOrgName` |
-| `connect_accept` | Ward accepts a connect request | `guardian_otp_connect_accept_sms` | `parentName`, `providerOrgName` |
-| `apply` | Ward applies | `guardian_otp_apply_sms` | `parentName`, `providerOrgName` |
-| `apply_accept` | Ward accepts a pre-select / pre-shortlist | `guardian_otp_apply_accept_sms` | `parentName`, `providerOrgName` |
+Ids are **derived**, not hardcoded — `guardian_otp_<key>_sms`:
+- `account`, `profile` — fixed.
+- **actions** — `key = <action_type>` (initiate) or `<action_type>_accept`
+  (PII-revealing accept), where `action_type` is the interaction's own type from
+  `network.json`. Add an action to a network → its guardian SMS id follows
+  automatically; register the matching DLT template.
+
+For the current `blue_dot` + `purple_dot` configs (gated seeker):
+
+| Trigger | SMS template id | Variables (besides `otp`) |
+|---------|-----------------|---------------------------|
+| Create account | `guardian_otp_account_sms` | `parentName`, `domain` |
+| Create profile | `guardian_otp_profile_sms` | `parentName`, `domain` |
+| Apply (blue_dot, initiate) | `guardian_otp_apply_sms` | `parentName`, `providerOrgName` |
+| Accept apply/pre-select (blue_dot) | `guardian_otp_apply_accept_sms` | `parentName`, `providerOrgName` |
+| Connect (purple_dot, initiate) | `guardian_otp_connect_sms` | `parentName`, `providerOrgName` |
+| Accept connect (purple_dot) | `guardian_otp_connect_accept_sms` | `parentName`, `providerOrgName` |
+
+Email needs none of these — its body is rendered in-repo; the action email copy
+is identical for every action type, so only `providerOrgName` varies.
 
 ## Copy (from #294)
 

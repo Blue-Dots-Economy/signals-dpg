@@ -12,7 +12,6 @@ import {
   verifyGuardianOtp,
   assertVerifyAttemptAllowed,
   GuardianOtpError,
-  type GuardianOtpScenario,
 } from '@/services/guardian_otp';
 
 export type GateInput = {
@@ -25,18 +24,6 @@ export type GateInput = {
   stage?: 'initiate' | 'accept'; // perform → initiate (default), accept-status → accept
   otp?: string; // body.guardian_otp
 };
-
-/**
- * Parent-facing scenario for the action OTP template (#294): connect / apply,
- * split by whether the ward is initiating or accepting. Unknown action types
- * fall back to the generic guardian-OTP template (undefined).
- */
-function actionScenario(actionType: string, stage: 'initiate' | 'accept'): GuardianOtpScenario | undefined {
-  const t = actionType.toLowerCase();
-  const base = t.includes('apply') ? 'apply' : t.includes('connect') ? 'connect' : null;
-  if (!base) return undefined;
-  return (stage === 'accept' ? `${base}_accept` : base) as GuardianOtpScenario;
-}
 
 export type GateResult =
   | { status: 'not_required' } // adult or ungated → proceed normally
@@ -84,7 +71,9 @@ export async function guardianActionGate(input: GateInput): Promise<GateResult> 
         scope,
         contact: contact.contact,
         contactType: contact.contactType,
-        scenario: actionScenario(input.actionType, input.stage ?? 'initiate'),
+        // action_type comes straight from network.json (the interaction) — the
+        // template id derives from it, no hardcoded connect/apply.
+        scenario: { kind: 'action', actionType: input.actionType, stage: input.stage ?? 'initiate' },
         variables: {
           ...(parentName ? { parentName } : {}),
           ...(providerOrgName ? { providerOrgName } : {}),

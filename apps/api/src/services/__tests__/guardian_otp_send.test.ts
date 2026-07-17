@@ -58,7 +58,7 @@ describe('defaultGuardianOtpSend', () => {
       contact: 'a@b.co',
       contactType: 'email',
       otp: '123456',
-      scenario: 'apply_accept',
+      scenario: { kind: 'action', actionType: 'apply', stage: 'accept' },
       variables: { parentName: 'Asha', providerOrgName: 'Acme' },
     });
     const payload = notify.mock.calls[0][0];
@@ -76,7 +76,7 @@ describe('defaultGuardianOtpSend', () => {
       contact: '+911',
       contactType: 'phone',
       otp: '000111',
-      scenario: 'connect',
+      scenario: { kind: 'action', actionType: 'connect', stage: 'initiate' },
       variables: { parentName: 'Asha' },
     });
     const payload = notify.mock.calls[0][0];

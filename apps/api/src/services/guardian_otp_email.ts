@@ -21,29 +21,30 @@ function esc(s: string): string {
     .replace(/'/g, '&#39;');
 }
 
+// Email copy differentiates account / profile / action. Every action (connect,
+// apply, and their accepts) shares the same "share your ward's details" body per
+// #294 — so the specific action type doesn't change the email, only the SMS
+// template id + the providerOrgName variable.
 function bodyLine(scenario: GuardianOtpScenario, vars: GuardianOtpVariables): string {
   const domain = vars.domain ? esc(vars.domain) : null;
   const org = vars.providerOrgName ? esc(vars.providerOrgName) : 'the organisation';
-  switch (scenario) {
+  switch (scenario.kind) {
     case 'account':
       return `Your ward has requested registration${domain ? ` on <b>${domain}</b>` : ''}. This website shows services and opportunities relevant to your ward. Use the given OTP to agree to create their account.`;
     case 'profile':
       return `Your ward has requested to create a profile${domain ? ` on <b>${domain}</b>` : ''}. This profile will help your ward in discovering, and matching to relevant services and opportunities. Use the given OTP to agree to create their profile.`;
-    case 'connect':
-    case 'connect_accept':
-    case 'apply':
-    case 'apply_accept':
+    case 'action':
       return `Your ward has requested to connect to <b>${org}</b>. This will share your ward's profile details, along with name, phone, and email with the organisation. Use the given OTP to allow <b>${org}</b> to access your ward's details.`;
   }
 }
 
 function subjectFor(scenario: GuardianOtpScenario): string {
-  switch (scenario) {
+  switch (scenario.kind) {
     case 'account':
       return "Approve your ward's account — OTP";
     case 'profile':
       return "Approve your ward's profile — OTP";
-    default:
+    case 'action':
       return "Approve your ward's request — OTP";
   }
 }

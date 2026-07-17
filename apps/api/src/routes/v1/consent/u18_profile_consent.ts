@@ -105,7 +105,7 @@ const precreate_issue_handler = async (
       scope: precreateScope(userId, body.network, body.item_domain),
       contact: contact.contact,
       contactType: contact.contactType,
-      scenario: 'profile',
+      scenario: { kind: 'profile' },
       variables: { ...(parentName ? { parentName } : {}), domain: body.item_domain },
     });
   } catch (err) {
@@ -216,7 +216,7 @@ const issue_handler = async (request: IssueReq, reply: FastifyReply) => {
       scope: profileScope(userId, body.item_id),
       contact: contact.contact,
       contactType: contact.contactType,
-      scenario: 'profile',
+      scenario: { kind: 'profile' },
       variables: { ...(parentName ? { parentName } : {}), domain: body.item_domain },
     });
   } catch (err) {

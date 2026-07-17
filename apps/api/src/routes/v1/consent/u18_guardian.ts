@@ -119,7 +119,7 @@ export const u18_guardian_handler = async (request: Req, reply: FastifyReply) =>
       scope: guardianOtpScope(userId),
       contact: contact.contact,
       contactType: contact.contactType,
-      scenario: 'account',
+      scenario: { kind: 'account' },
       variables: { parentName: body.guardianName },
     });
   } catch (err) {

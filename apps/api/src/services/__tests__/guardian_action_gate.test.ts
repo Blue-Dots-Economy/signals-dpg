@@ -105,12 +105,12 @@ describe('guardianActionGate', () => {
       scope: EXPECTED_SCOPE,
       contact: '+911234',
       contactType: 'phone',
-      scenario: 'apply',
+      scenario: { kind: 'action', actionType: 'apply', stage: 'initiate' },
       variables: { parentName: 'Parent P', providerOrgName: 'Acme Services' },
     });
   });
 
-  it('maps actionType + stage to the scenario (connect accept)', async () => {
+  it('passes the network.json action type + stage through as the scenario', async () => {
     getWardDob.mockResolvedValue(new Date('2015-01-10'));
     getGuardianContactPlaintext.mockResolvedValue({ contact: 'g@x.co', contactType: 'email' });
     issueGuardianOtp.mockResolvedValue(undefined);
@@ -118,7 +118,7 @@ describe('guardianActionGate', () => {
     await guardianActionGate({ ...baseInput, actionType: 'connect', stage: 'accept' });
 
     expect(issueGuardianOtp).toHaveBeenCalledWith(
-      expect.objectContaining({ scenario: 'connect_accept' }),
+      expect.objectContaining({ scenario: { kind: 'action', actionType: 'connect', stage: 'accept' } }),
     );
   });
 
