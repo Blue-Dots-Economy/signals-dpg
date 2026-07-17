@@ -110,7 +110,7 @@ describe('U18 guardian same-contact warn-and-acknowledge (integration)', () => {
     await sameUser.close();
   });
 
-  it('rejects guardianContact matching the ward\'s own email with 409 SAME_CONTACT_NEEDS_ACK when unacknowledged', async () => {
+  it('hard-rejects guardianContact matching the ward\'s own email with 409 SAME_CONTACT_NOT_ALLOWED', async () => {
     const res = await ctx.app.inject({
       method: 'POST', url: '/api/v1/consent/u18/guardian',
       headers: { 'x-api-key': sameUser.rawKey },
@@ -120,10 +120,10 @@ describe('U18 guardian same-contact warn-and-acknowledge (integration)', () => {
       },
     });
     expect(res.statusCode).toBe(409);
-    expect(res.json().error).toBe('SAME_CONTACT_NEEDS_ACK');
+    expect(res.json().error).toBe('SAME_CONTACT_NOT_ALLOWED');
   });
 
-  it('accepts guardianContact matching the ward\'s own email once sameContactAcknowledged is true', async () => {
+  it('still hard-rejects even with sameContactAcknowledged (no ack bypass — future use case)', async () => {
     const res = await ctx.app.inject({
       method: 'POST', url: '/api/v1/consent/u18/guardian',
       headers: { 'x-api-key': sameUser.rawKey },
@@ -132,7 +132,7 @@ describe('U18 guardian same-contact warn-and-acknowledge (integration)', () => {
         guardianDeclarationAccepted: true, sameContactAcknowledged: true,
       },
     });
-    expect(res.statusCode).toBe(200);
-    expect(res.json().otpSent).toBe(true);
+    expect(res.statusCode).toBe(409);
+    expect(res.json().error).toBe('SAME_CONTACT_NOT_ALLOWED');
   });
 });

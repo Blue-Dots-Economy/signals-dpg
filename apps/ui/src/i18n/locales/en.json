@@ -521,6 +521,7 @@
   },
   "u18": {
     "dob_label": "Select date of birth",
-    "dob_placeholder": "Select date of birth"
+    "dob_placeholder": "Select date of birth",
+    "guardian_error_same_contact_not_allowed": "Your guardian's contact can't be the same as your own. Please use a different email or phone number."
   }
 }

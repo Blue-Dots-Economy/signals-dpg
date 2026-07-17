@@ -62,7 +62,6 @@ export function GuardianFormStep({
   const [guardianPhone, setGuardianPhone] = React.useState('');
   const [termsAccepted, setTermsAccepted] = React.useState(false);
   const [privacyAccepted, setPrivacyAccepted] = React.useState(false);
-  const [sameContactAcknowledged, setSameContactAcknowledged] = React.useState(false);
   const [serverFlaggedSameContact, setServerFlaggedSameContact] = React.useState(false);
   const [isSubmitting, setIsSubmitting] = React.useState(false);
   const [validationError, setValidationError] = React.useState<string | null>(null);
@@ -71,16 +70,17 @@ export function GuardianFormStep({
   const guardianPhoneE164 = toE164(guardianPhone);
   const hasContact = Boolean(guardianEmail.trim()) || guardianPhone.length === 10;
 
-  // Same-contact warning: either guardian field matching the ward's own.
+  // Hard block: a guardian contact equal to the ward's own is NOT allowed (a
+  // ward can't be their own guardian). Detected client-side and re-enforced by
+  // the server (409 SAME_CONTACT_NOT_ALLOWED).
   const ownEmail = compareContact.email?.trim().toLowerCase();
   const ownPhone = compareContact.phoneNumber?.trim();
   const clientDetectedSameContact =
     (!!ownEmail && !!guardianEmail.trim() && normalize(guardianEmail).toLowerCase() === ownEmail) ||
     (!!ownPhone && !!guardianPhoneE164 && guardianPhoneE164 === ownPhone);
-  const showSameContactWarning = clientDetectedSameContact || serverFlaggedSameContact;
+  const sameContactBlocked = clientDetectedSameContact || serverFlaggedSameContact;
 
   const clearWarnings = () => {
-    setSameContactAcknowledged(false);
     setServerFlaggedSameContact(false);
     setValidationError(null);
   };
@@ -90,7 +90,7 @@ export function GuardianFormStep({
     hasContact &&
     termsAccepted &&
     privacyAccepted &&
-    (!showSameContactWarning || sameContactAcknowledged) &&
+    !sameContactBlocked &&
     !isSubmitting;
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -108,11 +108,11 @@ export function GuardianFormStep({
       );
       return;
     }
-    if (showSameContactWarning && !sameContactAcknowledged) {
+    if (sameContactBlocked) {
       setValidationError(
         t(
-          'u18.guardian_error_same_contact_ack',
-          'Please confirm you are okay using your own contact for the guardian before continuing.',
+          'u18.guardian_error_same_contact_not_allowed',
+          "Your guardian's contact can't be the same as your own. Please use a different email or phone number.",
         ),
       );
       return;
@@ -127,7 +127,6 @@ export function GuardianFormStep({
       ...(guardianEmail.trim() ? { guardianEmail: guardianEmail.trim() } : {}),
       ...(guardianPhone.length === 10 ? { guardianPhone: guardianPhoneE164 } : {}),
       guardianDeclarationAccepted: true,
-      ...(showSameContactWarning ? { sameContactAcknowledged: true } : {}),
     };
 
     try {
@@ -139,13 +138,12 @@ export function GuardianFormStep({
         ? (err.response?.data as { error?: string } | undefined)?.error
         : undefined;
 
-      if (status === 409 && code === 'SAME_CONTACT_NEEDS_ACK') {
+      if (status === 409 && code === 'SAME_CONTACT_NOT_ALLOWED') {
         setServerFlaggedSameContact(true);
-        setSameContactAcknowledged(false);
         toast.error(
           t(
-            'u18.guardian_error_same_contact_ack',
-            'Please confirm you are okay using your own contact for the guardian before continuing.',
+            'u18.guardian_error_same_contact_not_allowed',
+            "Your guardian's contact can't be the same as your own. Please use a different email or phone number.",
           ),
         );
       } else if (status === 409 && code === 'GUARDIAN_WARD_LIMIT') {
@@ -201,7 +199,7 @@ export function GuardianFormStep({
           value={guardianEmail}
           onChange={(e) => { setGuardianEmail(e.target.value); clearWarnings(); }}
           disabled={isSubmitting}
-          aria-invalid={showSameContactWarning}
+          aria-invalid={sameContactBlocked}
         />
       </div>
 
@@ -214,7 +212,7 @@ export function GuardianFormStep({
           value={guardianPhone}
           onChange={(v) => { setGuardianPhone(v); clearWarnings(); }}
           disabled={isSubmitting}
-          invalid={showSameContactWarning}
+          invalid={sameContactBlocked}
         />
       </div>
 
@@ -222,24 +220,14 @@ export function GuardianFormStep({
         {t('u18.guardian_contact_hint', '* Please provide at least one contact method (email or phone)')}
       </p>
 
-      {showSameContactWarning && (
-        <div className="rounded-md border border-amber-500 bg-amber-50 p-3 dark:bg-amber-950/30">
-          <p className="text-sm text-amber-800 dark:text-amber-300 mb-2">
+      {sameContactBlocked && (
+        <div className="rounded-md border border-destructive bg-destructive/10 p-3">
+          <p className="text-sm text-destructive">
             {t(
-              'u18.guardian_same_contact_warning',
-              'This is the same as your own contact — are you okay with that?',
+              'u18.guardian_error_same_contact_not_allowed',
+              "Your guardian's contact can't be the same as your own. Please use a different email or phone number.",
             )}
           </p>
-          <div className="flex items-start gap-2">
-            <Checkbox
-              id="u18-same-contact-ack"
-              checked={sameContactAcknowledged}
-              onCheckedChange={(value) => setSameContactAcknowledged(value === true)}
-            />
-            <Label htmlFor="u18-same-contact-ack" className="text-sm font-normal leading-snug cursor-pointer">
-              {t('u18.guardian_same_contact_ack_label', "Yes, that's okay")}
-            </Label>
-          </div>
         </div>
       )}
 

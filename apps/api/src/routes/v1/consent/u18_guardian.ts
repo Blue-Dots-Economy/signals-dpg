@@ -58,10 +58,12 @@ export const u18_guardian_handler = async (request: Req, reply: FastifyReply) =>
     guardianEmail: body.guardianEmail,
     guardianPhone: body.guardianPhone,
   });
-  if (matchesWard && body.sameContactAcknowledged !== true) {
+  // Hard block: a ward may not be their own guardian. (Allowing it with an ack
+  // is a possible FUTURE use case — deliberately disabled for now.)
+  if (matchesWard) {
     return reply.code(409).send({
-      error: 'SAME_CONTACT_NEEDS_ACK',
-      message: 'Guardian contact matches your own; acknowledge to proceed',
+      error: 'SAME_CONTACT_NOT_ALLOWED',
+      message: "Guardian contact can't be the same as your own",
     });
   }
 

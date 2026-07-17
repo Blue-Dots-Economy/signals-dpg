@@ -104,7 +104,7 @@ describe('GuardianFormStep', () => {
     );
   });
 
-  it('warns + blocks until same-contact is acknowledged when the guardian phone equals the ward\'s own', async () => {
+  it('hard-blocks (no submit) when the guardian phone equals the ward\'s own', async () => {
     const onSubmitted = vi.fn();
     await renderForm(onSubmitted);
 
@@ -114,29 +114,20 @@ describe('GuardianFormStep', () => {
     await userEvent.click(screen.getByLabelText(/i accept the terms and conditions/i));
     await userEvent.click(screen.getByLabelText(/i consent to data privacy policy/i));
 
-    expect(
-      screen.getByText(/same as your own contact — are you okay with that\?/i),
-    ).toBeInTheDocument();
+    expect(screen.getByText(/can't be the same as your own/i)).toBeInTheDocument();
 
+    // No acknowledgement path — the submit stays disabled.
     const submit = screen.getByRole('button', { name: /send otp/i });
     expect(submit).toBeDisabled();
-
-    await userEvent.click(screen.getByLabelText(/yes, that's okay/i));
-    expect(submit).toBeEnabled();
-
-    submitGuardian.mockResolvedValue({ otpSent: true });
-    await userEvent.click(submit);
-    await waitFor(() =>
-      expect(submitGuardian).toHaveBeenCalledWith(
-        expect.objectContaining({ sameContactAcknowledged: true }),
-      ),
-    );
+    expect(screen.queryByLabelText(/yes, that's okay/i)).not.toBeInTheDocument();
+    expect(submitGuardian).not.toHaveBeenCalled();
+    expect(onSubmitted).not.toHaveBeenCalled();
   });
 
-  it('re-surfaces the same-contact warning on a 409 SAME_CONTACT_NEEDS_ACK response', async () => {
+  it('surfaces a hard error + disables submit on a 409 SAME_CONTACT_NOT_ALLOWED response', async () => {
     submitGuardian.mockRejectedValue({
       isAxiosError: true,
-      response: { status: 409, data: { error: 'SAME_CONTACT_NEEDS_ACK' } },
+      response: { status: 409, data: { error: 'SAME_CONTACT_NOT_ALLOWED' } },
     });
     const onSubmitted = vi.fn();
     await renderForm(onSubmitted);
@@ -144,9 +135,7 @@ describe('GuardianFormStep', () => {
     await userEvent.click(screen.getByRole('button', { name: /send otp/i }));
 
     await waitFor(() =>
-      expect(
-        screen.getAllByText(/same as your own contact — are you okay with that\?/i).length,
-      ).toBeGreaterThan(0),
+      expect(screen.getAllByText(/can't be the same as your own/i).length).toBeGreaterThan(0),
     );
     expect(onSubmitted).not.toHaveBeenCalled();
 

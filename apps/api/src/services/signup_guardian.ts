@@ -48,7 +48,7 @@ export class SignupGuardianError extends Error {
       | 'UNKNOWN_NETWORK'
       | 'NOT_GATED'
       | 'NOT_A_MINOR'
-      | 'SAME_CONTACT_NEEDS_ACK'
+      | 'SAME_CONTACT_NOT_ALLOWED'
       | 'GUARDIAN_WARD_LIMIT'
       | 'INVALID_OTP'
       | 'NO_PENDING_SIGNUP',
@@ -155,8 +155,9 @@ export async function startSignupGuardian(input: StartSignupGuardianInput): Prom
     throw new SignupGuardianError('GUARDIAN_WARD_LIMIT');
   }
 
-  // Warn-and-confirm: neither guardian contact may silently equal the ward's
-  // own signup identifier. Not a hard reject — an explicit ack lets it proceed.
+  // Hard block: a guardian contact may not equal the ward's own signup
+  // identifier (a ward can't be their own guardian). Allowing it with an ack is
+  // a possible FUTURE use case — deliberately disabled for now.
   const ident = normalizeIdentifier(input.identifier);
   const sameContact = guardianContactMatchesWard({
     wardEmail: ident.type === 'email' ? ident.value : null,
@@ -164,8 +165,8 @@ export async function startSignupGuardian(input: StartSignupGuardianInput): Prom
     guardianEmail: input.guardianEmail,
     guardianPhone: input.guardianPhone,
   });
-  if (sameContact && input.sameContactAcknowledged !== true) {
-    throw new SignupGuardianError('SAME_CONTACT_NEEDS_ACK');
+  if (sameContact) {
+    throw new SignupGuardianError('SAME_CONTACT_NOT_ALLOWED');
   }
 
   const hash = hashIdentifier(ident.value);
