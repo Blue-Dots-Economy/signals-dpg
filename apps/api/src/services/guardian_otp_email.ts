@@ -63,8 +63,6 @@ export function renderGuardianOtpEmail(args: {
 
     <p>${bodyLine(scenario, variables)}</p>
 
-    <p>Team ${esc(teamName)}</p>
-
     <div style="
       font-size: 20px;
       font-weight: bold;
@@ -79,6 +77,8 @@ export function renderGuardianOtpEmail(args: {
     </div>
 
     <p style="font-size: 13px; color: #555;">This OTP is valid for 10 minutes. Do not share it with anyone.</p>
+
+    <p>Team ${esc(teamName)}</p>
   </div>
 `;
   return { subject: subjectFor(scenario), html };
