@@ -1,9 +1,7 @@
 import { and, eq, inArray } from 'drizzle-orm';
 import { db } from '@api/db/postgres/drizzle_config';
 import { consent_record } from '@api/db/postgres/schema';
-
-type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
-type DbOrTx = typeof db | Tx;
+import type { DbOrTx } from './item_service';
 
 /**
  * True when the user has accepted BOTH terms and privacy for the network at

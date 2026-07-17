@@ -77,8 +77,15 @@ export function isValidPhoneNumber(phoneNumber: string): boolean {
   if (!cleaned.startsWith('+') && digits.length === 10) {
     return /^[6-9]\d{9}$/.test(digits);
   }
-  // Anything with an explicit "+" — accept any E.164. 8-15 digits total;
-  // the leading digit (the country code's first digit) must be 1-9.
+  // Indian numbers with the country code: exactly "+91" + a 10-digit mobile
+  // (first subscriber digit 6-9). Rejects too-long inputs like
+  // "+919620421129333" that the generic E.164 rule below would otherwise
+  // wave through on length alone.
+  if (cleaned.startsWith('+91')) {
+    return /^91[6-9]\d{9}$/.test(digits);
+  }
+  // Any other explicit "+" — accept generic E.164. 8-15 digits total; the
+  // leading digit (the country code's first digit) must be 1-9.
   if (cleaned.startsWith('+')) {
     return /^[1-9]\d{7,14}$/.test(digits);
   }
@@ -114,6 +121,27 @@ function normalizeIdentifier(identifier: AuthIdentifier): AuthIdentifier {
 
 export async function checkUser(identifier: AuthIdentifier): Promise<CheckUserResponse> {
   const response = await apiClient.post<CheckUserResponse>('/api/auth/unified-otp/check-user', {
+    ...normalizeIdentifier(identifier),
+  });
+  return response.data;
+}
+
+export interface U18PrecheckResponse {
+  /** Existing user on a guardian-gated domain with no stored DOB. */
+  requiresDob: boolean;
+}
+
+/**
+ * Public pre-OTP check: does this EXISTING user still need a DOB (they hold a
+ * gated-domain profile and `date_of_birth` is unset)? Drives whether the login
+ * flow shows the DOB → guardian steps BEFORE the user's own OTP.
+ */
+export async function u18Precheck(
+  network: string,
+  identifier: AuthIdentifier,
+): Promise<U18PrecheckResponse> {
+  const response = await apiClient.post<U18PrecheckResponse>('/api/v1/auth/u18-precheck', {
+    network,
     ...normalizeIdentifier(identifier),
   });
   return response.data;

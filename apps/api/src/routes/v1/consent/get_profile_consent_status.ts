@@ -5,6 +5,8 @@ import { and, eq } from 'drizzle-orm';
 import { db } from '@api/db/postgres/drizzle_config';
 import { consent_record } from '@api/db/postgres/schema';
 import { auth_middleware_if_enabled } from '@api/plugins/auth/auth_middleware';
+import { getWardDob } from '@/services/minor_guardian_repo';
+import { isMinor } from '@/services/minor';
 
 const ProfileStatusQuerySchema = z.object({ network: z.string().min(1) });
 
@@ -41,17 +43,27 @@ export const get_profile_consent_status_handler = async (
   const { network } = request.query;
 
   try {
+    // For a MINOR, profile_creation consent must be GUARDIAN-given (D13). The
+    // self row `create_item` writes at create time (source='profile') does NOT
+    // satisfy it, so the client keeps prompting until the guardian confirms via
+    // OTP (which writes source='guardian'). Adults: any profile_creation row.
+    const dob = await getWardDob(userId);
+    const isMinorWard = dob !== null && isMinor(dob);
+
+    const conditions = [
+      eq(consent_record.userId, userId),
+      eq(consent_record.level, 'item'),
+      eq(consent_record.consentCategory, 'profile_creation'),
+      eq(consent_record.network, network),
+    ];
+    if (isMinorWard) {
+      conditions.push(eq(consent_record.source, 'guardian'));
+    }
+
     const rows = await db
       .select({ itemId: consent_record.itemId })
       .from(consent_record)
-      .where(
-        and(
-          eq(consent_record.userId, userId),
-          eq(consent_record.level, 'item'),
-          eq(consent_record.consentCategory, 'profile_creation'),
-          eq(consent_record.network, network),
-        ),
-      );
+      .where(and(...conditions));
 
     const seen = new Set<string>();
     for (const row of rows) {

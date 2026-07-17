@@ -43,4 +43,5 @@ export {
   type LocationRole,
   type LocationPoint,
 } from './location_fields';
+export * from './u18_consent';
 export default z;

@@ -17,6 +17,7 @@ import {
   normalizeInstanceUrl,
 } from '@/utils/action_event_runtime';
 import { db } from '@api/db/postgres/drizzle_config';
+import { consent_record } from '@api/db/postgres/schema';
 import { getNetworkConfigById } from '@/network_configs';
 import { isServedDomainBinding } from '@/utils/served_domain_guard';
 import {
@@ -25,12 +26,33 @@ import {
   lookup_user_for_acting,
 } from './_resolve_acting_actor.js';
 import { runBulk, BulkItemFailure } from '@/utils/bulk_runner';
+import { guardianActionGate, guardianGateFailure } from '@/services/guardian_action_gate';
+import { guardianActionConsentRow } from '@/services/guardian_consent_rows';
+import { resolveConsentVersion } from '@/services/consent_version';
 
 const BulkPerformActionBodySchema = z.array(z.unknown());
 
 export const perform_action: FastifyPluginAsyncZod = async function (fastify) {
+  // Single-object body — Raya/Litwiz voice tools can only send a JSON object (#293).
   fastify.route({
     url: '/perform',
+    method: 'POST',
+    preHandler: auth_middleware_if_enabled,
+    schema: {
+      tags: ['action'],
+      body: PerformActionBodySchema,
+      response: {
+        201: BulkPerformActionResponseSchema,
+        422: BulkPerformActionResponseSchema,
+      },
+    },
+    handler: (request, reply) =>
+      runPerformActions([request.body], request, reply),
+  });
+
+  // Array body — genuine batch (today's behavior verbatim).
+  fastify.route({
+    url: '/perform/bulk',
     method: 'POST',
     preHandler: auth_middleware_if_enabled,
     schema: {
@@ -43,18 +65,20 @@ export const perform_action: FastifyPluginAsyncZod = async function (fastify) {
         400: BulkRequestErrorSchema,
       },
     },
-    handler: perform_action_handler,
+    handler: (request, reply) =>
+      runPerformActions(request.body as unknown[], request, reply),
   });
 };
 
-export const perform_action_handler = async (
-  request: FastifyRequest<{ Body: unknown[] }>,
+async function runPerformActions(
+  items: unknown[],
+  request: FastifyRequest,
   reply: FastifyReply,
-) => {
+) {
   const sourceInstanceUrl = getCurrentApiBaseUrl();
 
   const outcome = await runBulk(
-    request.body,
+    items,
     async (raw, index) => {
       const parsed = PerformActionBodySchema.safeParse(raw);
       if (!parsed.success) {
@@ -100,6 +124,23 @@ export const perform_action_handler = async (
       if (sourceItemSnapshot.lifecycle_status !== 'live') {
         throw new BulkItemFailure('PROFILE_NOT_LIVE', 'source_item is not live; cannot perform actions');
       }
+
+      // U18 guardian gate (Phase 5b): no-op for adults / ungated domains
+      // (`not_required`) — the rest of this handler runs byte-for-byte
+      // unchanged for them. For a gated minor, this issues/verifies a guardian
+      // OTP scoped to this exact action; the guardian consent row is written
+      // below only after the action write succeeds.
+      const guardianGate = await guardianActionGate({
+        wardUserId: actor.effective_user_id,
+        network: body.source_item.item_network,
+        sourceDomain: body.source_item.item_domain,
+        actionType: body.action_type,
+        sourceItemId: body.source_item.item_id,
+        targetItemId: body.target_item.item_id,
+        otp: body.guardian_otp,
+      });
+      const guardianGateFail = guardianGateFailure(guardianGate);
+      if (guardianGateFail) throw guardianGateFail;
 
       let requirementsSnapshot = body.requirements_snapshot;
 
@@ -235,7 +276,7 @@ export const perform_action_handler = async (
         throw new BulkItemFailure(code, message);
       }
 
-      return responseBody as {
+      const result = responseBody as {
         action_id: string;
         action_type: string;
         action_status: string;
@@ -243,6 +284,56 @@ export const perform_action_handler = async (
         source_item_id: string;
         target_item_id: string;
       };
+
+      // Guardian action consent (Phase 5b): only reached when the gate
+      // verified a fresh guardian OTP for this exact action above. Mirrors
+      // the adult initiate-consent row shape (see
+      // network/action/perform_action.ts), with `source:'guardian'` and the
+      // u18 metadata tag. Action statements were not variant-split in Phase 2,
+      // so the version comes from the same (non-variant) action resolver.
+      if (guardianGate.status === 'verified') {
+        const guardianVersion = await resolveConsentVersion({
+          network: body.source_item.item_network,
+          category: 'action',
+          actionType: body.action_type,
+          stage: 'initiate',
+        });
+        if (guardianVersion === null) {
+          // Fail-closed: a verified guardian OTP with no configured consent
+          // version must not be silently treated as success (the minor's
+          // action already reached the target instance above, but the
+          // guardian consent row — the whole point of this gate — would
+          // otherwise never be recorded). Surface it as a per-item failure
+          // rather than logging and returning the write as if it succeeded.
+          throw new BulkItemFailure(
+            'CONSENT_VERSION_UNCONFIGURED',
+            'u18 action consent version not configured',
+          );
+        }
+        try {
+          await db.insert(consent_record).values(guardianActionConsentRow({
+            actionType: body.action_type,
+            actionStage: 'initiate',
+            userId: actor.effective_user_id,
+            itemId: body.source_item.item_id,
+            actionId: result.action_id,
+            network: body.source_item.item_network,
+            brand: body.consent?.brand ?? null,
+            documentVersion: guardianVersion,
+          }));
+        } catch (err) {
+          // The action already committed at the target instance above; throwing
+          // here would report the item as failed and a client retry would
+          // double-submit. Log loudly (keyed to the action id) for
+          // reconciliation instead — the guardian consent row is missing.
+          request.log.error(
+            { err, action_id: result.action_id, ward_user_id: actor.effective_user_id },
+            'guardian action consent row write FAILED after the action committed — reconcile',
+          );
+        }
+      }
+
+      return result;
     },
     {
       okStatus: 201,
@@ -263,4 +354,4 @@ export const perform_action_handler = async (
     results: outcome.results,
     summary: outcome.summary,
   });
-};
+}

@@ -395,27 +395,25 @@ describeIf(`POST /action/perform on-behalf-of (integration)${
         'x-acting-org-id': agg_a.org_id,
         'content-type': 'application/json',
       },
-      payload: [
-        {
-          action_type: 'connect',
-          source_item: {
-            item_network: primary.network,
-            item_domain: primary.domain,
-            item_type: primary.item_type,
-            item_id: seeker_item_id,
-          },
-          target_item: {
-            item_network: secondary.network,
-            item_domain: secondary.domain,
-            item_type: secondary.item_type,
-            item_id: provider_item_id,
-            item_instance_url: base_url,
-          },
-          requirements_snapshot: {},
-          acting_as_user_id: seeker_user_id,
-          ...(initiator_consent !== undefined ? { consent: initiator_consent } : {}),
+      payload: {
+        action_type: 'connect',
+        source_item: {
+          item_network: primary.network,
+          item_domain: primary.domain,
+          item_type: primary.item_type,
+          item_id: seeker_item_id,
         },
-      ],
+        target_item: {
+          item_network: secondary.network,
+          item_domain: secondary.domain,
+          item_type: secondary.item_type,
+          item_id: provider_item_id,
+          item_instance_url: base_url,
+        },
+        requirements_snapshot: {},
+        acting_as_user_id: seeker_user_id,
+        ...(initiator_consent !== undefined ? { consent: initiator_consent } : {}),
+      },
     });
     expect(res.statusCode).toBe(201);
     const body = res.json();
@@ -459,27 +457,25 @@ describeIf(`POST /action/perform on-behalf-of (integration)${
         'x-acting-org-id': agg_b.org_id,
         'content-type': 'application/json',
       },
-      payload: [
-        {
-          action_type: 'connect',
-          source_item: {
-            item_network: primary.network,
-            item_domain: primary.domain,
-            item_type: primary.item_type,
-            item_id: seeker_item_id,
-          },
-          target_item: {
-            item_network: secondary.network,
-            item_domain: secondary.domain,
-            item_type: secondary.item_type,
-            item_id: provider_item_id,
-            item_instance_url: base_url,
-          },
-          requirements_snapshot: {},
-          acting_as_user_id: seeker_user_id,
-          ...(initiator_consent !== undefined ? { consent: initiator_consent } : {}),
+      payload: {
+        action_type: 'connect',
+        source_item: {
+          item_network: primary.network,
+          item_domain: primary.domain,
+          item_type: primary.item_type,
+          item_id: seeker_item_id,
         },
-      ],
+        target_item: {
+          item_network: secondary.network,
+          item_domain: secondary.domain,
+          item_type: secondary.item_type,
+          item_id: provider_item_id,
+          item_instance_url: base_url,
+        },
+        requirements_snapshot: {},
+        acting_as_user_id: seeker_user_id,
+        ...(initiator_consent !== undefined ? { consent: initiator_consent } : {}),
+      },
     });
     expect(res.statusCode).toBe(422);
     expect(res.json().results[0]).toMatchObject({ status: 'error', error: 'NOT_AUTHORIZED_FOR_TARGET' });
@@ -497,27 +493,25 @@ describeIf(`POST /action/perform on-behalf-of (integration)${
         'x-acting-org-id': ns.org_id,
         'content-type': 'application/json',
       },
-      payload: [
-        {
-          action_type: 'connect',
-          source_item: {
-            item_network: primary.network,
-            item_domain: primary.domain,
-            item_type: primary.item_type,
-            item_id: seeker_item_id,
-          },
-          target_item: {
-            item_network: secondary.network,
-            item_domain: secondary.domain,
-            item_type: secondary.item_type,
-            item_id: provider_item_id,
-            item_instance_url: base_url,
-          },
-          requirements_snapshot: {},
-          acting_as_user_id: seeker_user_id,
-          ...(initiator_consent !== undefined ? { consent: initiator_consent } : {}),
+      payload: {
+        action_type: 'connect',
+        source_item: {
+          item_network: primary.network,
+          item_domain: primary.domain,
+          item_type: primary.item_type,
+          item_id: seeker_item_id,
         },
-      ],
+        target_item: {
+          item_network: secondary.network,
+          item_domain: secondary.domain,
+          item_type: secondary.item_type,
+          item_id: provider_item_id,
+          item_instance_url: base_url,
+        },
+        requirements_snapshot: {},
+        acting_as_user_id: seeker_user_id,
+        ...(initiator_consent !== undefined ? { consent: initiator_consent } : {}),
+      },
     });
     expect(res.statusCode).toBe(201);
     const action_id = res.json().results[0].action_id;
@@ -554,27 +548,25 @@ describeIf(`POST /action/perform on-behalf-of (integration)${
         'x-acting-org-id': ns.org_id,
         'content-type': 'application/json',
       },
-      payload: [
-        {
-          action_type: 'connect',
-          source_item: {
-            item_network: primary.network,
-            item_domain: primary.domain,
-            item_type: primary.item_type,
-            item_id: seeker_item_id,
-          },
-          target_item: {
-            item_network: secondary.network,
-            item_domain: secondary.domain,
-            item_type: secondary.item_type,
-            item_id: provider_item_id,
-            item_instance_url: base_url,
-          },
-          requirements_snapshot: {},
-          acting_as_user_id: fakeUserId,
-          ...(initiator_consent !== undefined ? { consent: initiator_consent } : {}),
+      payload: {
+        action_type: 'connect',
+        source_item: {
+          item_network: primary.network,
+          item_domain: primary.domain,
+          item_type: primary.item_type,
+          item_id: seeker_item_id,
         },
-      ],
+        target_item: {
+          item_network: secondary.network,
+          item_domain: secondary.domain,
+          item_type: secondary.item_type,
+          item_id: provider_item_id,
+          item_instance_url: base_url,
+        },
+        requirements_snapshot: {},
+        acting_as_user_id: fakeUserId,
+        ...(initiator_consent !== undefined ? { consent: initiator_consent } : {}),
+      },
     });
     expect(res.statusCode).toBe(422);
     expect(res.json().results[0]).toMatchObject({ status: 'error', error: 'USER_NOT_FOUND' });

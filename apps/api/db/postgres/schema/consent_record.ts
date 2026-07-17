@@ -50,12 +50,14 @@ export const consent_record = pgTable(
     ),
     index('consent_record_item_idx').on(table.itemId, table.consentCategory),
     index('consent_record_action_idx').on(table.actionId),
-    // Item-level profile_creation is idempotent — at most one acceptance per
-    // (user, item). Makes the accept-profile-consent 23505 fallback live and
-    // blocks concurrent double-submit. Terms/privacy/action stay append-only,
-    // so this unique index is partial.
+    // Item-level profile_creation: at most one acceptance per (user, item,
+    // source). `source` is in the key so a ward's self-consent ('profile') and
+    // their guardian's ('guardian') co-exist as distinct ledger events instead
+    // of one overwriting the other (append-only audit — U18). Still blocks a
+    // double-submit of the SAME source (the accept-profile-consent 23505
+    // fallback). Terms/privacy/action stay append-only, so this index is partial.
     uniqueIndex('consent_record_profile_creation_unique')
-      .on(table.userId, table.itemId)
+      .on(table.userId, table.itemId, table.source)
       .where(sql`level = 'item' AND consent_category = 'profile_creation'`),
   ]
 );

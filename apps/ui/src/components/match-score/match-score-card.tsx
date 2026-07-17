@@ -51,7 +51,13 @@ export function MatchScoreCard({
   });
 
   const handleCalculate = React.useCallback(() => {
+    // Open the details modal on the same click that starts the calculation, so
+    // the list matches the map's one-click flow: the modal shows its loading
+    // state, then the full score + factors. Closing it collapses back to the
+    // score badge (rendered by MatchScoreButton once a score exists), which
+    // reopens the modal via handleViewDetails.
     calculate();
+    setIsModalOpen(true);
   }, [calculate]);
 
   const handleViewDetails = React.useCallback(() => {
