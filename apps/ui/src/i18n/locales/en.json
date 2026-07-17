@@ -514,5 +514,6 @@
   "u18.guardian_pending_for_create": "You're under 18 — your guardian must verify with a one-time code before you can create this profile.",
   "profile.guardian_confirm_title": "Guardian confirmation needed",
   "profile.guardian_confirm_desc": "You're under 18, so a one-time code will be sent to your guardian. Once they verify it, you can create your profile.",
-  "profile.guardian_confirm_proceed": "Send code to guardian"
+  "profile.guardian_confirm_proceed": "Send code to guardian",
+  "auth.dob_title_existing": "Please confirm your date of birth"
 }

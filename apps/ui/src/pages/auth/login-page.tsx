@@ -445,7 +445,7 @@ export function LoginPage() {
       )}
       <AuthShell>
         {signupDobGate ? (
-          <SignupDobStep onSubmit={(date) => { void handleSignupDob(date); }} />
+          <SignupDobStep existing={signupDobGate.exists} onSubmit={(date) => { void handleSignupDob(date); }} />
         ) : signupGuardianGate ? (
           <SignupGuardianFlow
             network={themeId}

@@ -438,5 +438,6 @@
   "u18.guardian_pending_for_create": "आप 18 वर्ष से कम हैं — इस प्रोफ़ाइल को बनाने से पहले आपके अभिभावक को एक बार के कोड से सत्यापित करना होगा।",
   "profile.guardian_confirm_title": "अभिभावक की पुष्टि आवश्यक",
   "profile.guardian_confirm_desc": "आप 18 वर्ष से कम हैं, इसलिए आपके अभिभावक को एक बार का कोड भेजा जाएगा। उनके सत्यापित करने के बाद आप अपनी प्रोफ़ाइल बना सकते हैं।",
-  "profile.guardian_confirm_proceed": "अभिभावक को कोड भेजें"
+  "profile.guardian_confirm_proceed": "अभिभावक को कोड भेजें",
+  "auth.dob_title_existing": "कृपया अपनी जन्म तिथि की पुष्टि करें"
 }

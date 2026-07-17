@@ -6,10 +6,14 @@ import { DobCalendar } from '@/components/consent/u18/dob-calendar';
 export interface SignupDobStepProps {
   /**
    * Called with the chosen date once the ward taps Continue. Pure UI — no API
-   * call (the account doesn't exist yet). The caller derives minor status and
-   * routes to the guardian flow (minor) or account creation (adult).
+   * call. The caller derives minor status and routes accordingly.
    */
   onSubmit: (date: Date) => void;
+  /**
+   * True when an EXISTING user is backfilling a missing DOB before their login
+   * OTP (vs a brand-new signup) — switches the heading copy accordingly.
+   */
+  existing?: boolean;
 }
 
 /**
@@ -19,14 +23,16 @@ export interface SignupDobStepProps {
  * rather than stacking as a modal over it. Purely collects the date; the
  * caller decides minor -> guardian flow vs adult -> account creation.
  */
-export function SignupDobStep({ onSubmit }: SignupDobStepProps) {
+export function SignupDobStep({ onSubmit, existing = false }: SignupDobStepProps) {
   const { t } = useTranslation();
   const [birthDate, setBirthDate] = React.useState<Date | undefined>(undefined);
 
   return (
     <div className="flex flex-col gap-6">
       <h2 className="text-2xl font-bold text-foreground">
-        {t('auth.signup_dob_title', 'To create an account, please provide')}
+        {existing
+          ? t('auth.dob_title_existing', 'Please confirm your date of birth')
+          : t('auth.signup_dob_title', 'To create an account, please provide')}
       </h2>
 
       <form
