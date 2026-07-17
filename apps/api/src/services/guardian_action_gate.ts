@@ -1,12 +1,18 @@
 import { BulkItemFailure } from '@/utils/bulk_runner';
 import { getNetworkConfigById } from '@/network_configs';
-import { getWardDob, getGuardianContactPlaintext } from '@/services/minor_guardian_repo';
+import {
+  getWardDob,
+  getGuardianContactPlaintext,
+  getGuardianNamePlaintext,
+} from '@/services/minor_guardian_repo';
 import { isMinor, guardianConsentRequired } from '@/services/minor';
+import { resolveProviderServiceName } from '@/notifications/resolve_owner';
 import {
   issueGuardianOtp,
   verifyGuardianOtp,
   assertVerifyAttemptAllowed,
   GuardianOtpError,
+  type GuardianOtpScenario,
 } from '@/services/guardian_otp';
 
 export type GateInput = {
@@ -16,8 +22,21 @@ export type GateInput = {
   actionType: string;
   sourceItemId: string;
   targetItemId: string;
+  stage?: 'initiate' | 'accept'; // perform → initiate (default), accept-status → accept
   otp?: string; // body.guardian_otp
 };
+
+/**
+ * Parent-facing scenario for the action OTP template (#294): connect / apply,
+ * split by whether the ward is initiating or accepting. Unknown action types
+ * fall back to the generic guardian-OTP template (undefined).
+ */
+function actionScenario(actionType: string, stage: 'initiate' | 'accept'): GuardianOtpScenario | undefined {
+  const t = actionType.toLowerCase();
+  const base = t.includes('apply') ? 'apply' : t.includes('connect') ? 'connect' : null;
+  if (!base) return undefined;
+  return (stage === 'accept' ? `${base}_accept` : base) as GuardianOtpScenario;
+}
 
 export type GateResult =
   | { status: 'not_required' } // adult or ungated → proceed normally
@@ -55,10 +74,21 @@ export async function guardianActionGate(input: GateInput): Promise<GateResult> 
       if (!contact) {
         throw new GuardianOtpError('NO_OTP_PROVIDER');
       }
+      // Parent-facing template vars (#294) — best-effort; the OTP is dispatched
+      // regardless if either lookup returns null (template renders without them).
+      const [parentName, providerOrgName] = await Promise.all([
+        getGuardianNamePlaintext(input.wardUserId),
+        resolveProviderServiceName(input.targetItemId, input.network),
+      ]);
       await issueGuardianOtp({
         scope,
         contact: contact.contact,
         contactType: contact.contactType,
+        scenario: actionScenario(input.actionType, input.stage ?? 'initiate'),
+        variables: {
+          ...(parentName ? { parentName } : {}),
+          ...(providerOrgName ? { providerOrgName } : {}),
+        },
       });
       return { status: 'challenge_issued' };
     } catch (err) {

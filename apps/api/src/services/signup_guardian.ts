@@ -193,6 +193,8 @@ export async function startSignupGuardian(input: StartSignupGuardianInput): Prom
     scope: otpScope(hash),
     contact: channel.contact,
     contactType: channel.contactType,
+    scenario: 'account',
+    variables: { parentName: input.guardianName, domain: input.domain },
   });
 }
 

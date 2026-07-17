@@ -9,7 +9,13 @@ vi.mock('@/config', async (importOriginal) => {
 });
 
 const notify = vi.fn(
-  async (args: { channel: string; template_id: string; to: string; priority: string; variables: { otp: string } }) => {},
+  async (args: {
+    channel: string;
+    template_id: string;
+    to: string;
+    priority: string;
+    variables: Record<string, string>;
+  }) => {},
 );
 const getNotificationClient = vi.fn<() => { notify: typeof notify } | undefined>();
 vi.mock('@/utils/notificationClient', () => ({
@@ -45,5 +51,23 @@ describe('defaultGuardianOtpSend', () => {
     await expect(
       defaultGuardianOtpSend({ contact: 'a@b.co', contactType: 'email', otp: '123456' }),
     ).rejects.toBeInstanceOf(GuardianOtpError);
+  });
+
+  it('selects the per-scenario template id and merges template variables (#294)', async () => {
+    await defaultGuardianOtpSend({
+      contact: 'a@b.co',
+      contactType: 'email',
+      otp: '123456',
+      scenario: 'apply_accept',
+      variables: { parentName: 'Asha', providerOrgName: 'Acme' },
+    });
+    const payload = notify.mock.calls[0][0];
+    expect(payload.template_id).toBe('guardian_otp_apply_accept_email');
+    expect(payload.variables).toEqual({ parentName: 'Asha', providerOrgName: 'Acme', otp: '123456' });
+  });
+
+  it('falls back to the generic template when no scenario is supplied', async () => {
+    await defaultGuardianOtpSend({ contact: '+911', contactType: 'phone', otp: '000111' });
+    expect(notify.mock.calls[0][0].template_id).toBe('guardian_otp_sms');
   });
 });

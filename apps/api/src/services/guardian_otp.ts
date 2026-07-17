@@ -13,14 +13,32 @@ export class GuardianOtpError extends Error {
 
 export type GuardianContactType = 'phone' | 'email';
 
+/**
+ * The parent-facing scenario a guardian OTP is issued for (#294). Selects the
+ * notification template + the copy the guardian sees. Distinct from the OTP
+ * mechanics — the code/TTL/throttles are identical across scenarios.
+ */
+export type GuardianOtpScenario =
+  | 'account' // ward wants to create an account (pre-auth signup)
+  | 'profile' // ward wants to create a profile
+  | 'connect' // ward wants to connect
+  | 'connect_accept' // ward wants to accept a connect request
+  | 'apply' // ward wants to apply
+  | 'apply_accept'; // ward wants to accept a pre-select / pre-shortlist
+
+/** Extra template variables per scenario (parent name, domain, provider org). */
+export type GuardianOtpVariables = Record<string, string>;
+
 /** Dispatch seam — injected so the core is testable without the notifier. */
 export type OtpSend = (args: {
   contact: string;
   contactType: GuardianContactType;
   otp: string;
+  scenario?: GuardianOtpScenario;
+  variables?: GuardianOtpVariables;
 }) => Promise<void>;
 
-export const GUARDIAN_OTP_TTL_SEC = 300; // nonce lifetime (5 min)
+export const GUARDIAN_OTP_TTL_SEC = 600; // nonce lifetime (10 min — matches template copy, #294)
 export const GUARDIAN_OTP_MAX_PER_WINDOW = 3; // sends allowed per scope per window
 export const GUARDIAN_OTP_CONTACT_MAX_PER_WINDOW = 5; // sends allowed per guardian contact per window
 export const GUARDIAN_OTP_WINDOW_SEC = 300; // rate-limit window (5 min)
@@ -88,6 +106,8 @@ export async function issueGuardianOtp(args: {
   scope: string;
   contact: string;
   contactType: GuardianContactType;
+  scenario?: GuardianOtpScenario;
+  variables?: GuardianOtpVariables;
   send?: OtpSend;
 }): Promise<void> {
   const count = await incrWithinWindow(rateKey(args.scope), GUARDIAN_OTP_WINDOW_SEC);
@@ -112,7 +132,13 @@ export async function issueGuardianOtp(args: {
   // fixed code is already known to the tester.
   if (authConfig.create_test_otp) return;
   const send = args.send ?? defaultGuardianOtpSend;
-  await send({ contact: args.contact, contactType: args.contactType, otp });
+  await send({
+    contact: args.contact,
+    contactType: args.contactType,
+    otp,
+    scenario: args.scenario,
+    variables: args.variables,
+  });
 }
 
 /**
@@ -154,18 +180,37 @@ const CHANNEL_BY_CONTACT_TYPE: Record<GuardianContactType, 'sms' | 'email'> = {
   email: 'email',
 };
 
-// TODO(#9): finalize ONEST guardian-OTP templates. Placeholder ids until then.
-const GUARDIAN_OTP_TEMPLATE_ID: Record<'sms' | 'email', string> = {
+// Generic fallback template (no scenario supplied). Kept for back-compat.
+const GENERIC_TEMPLATE_ID: Record<'sms' | 'email', string> = {
   sms: 'guardian_otp_sms',
   email: 'guardian_otp_email',
 };
+
+// Per-scenario template ids (#294). The notification service owns the actual
+// body/subject keyed by these ids; this app only selects the id + supplies the
+// variables (otp + parentName / domain / providerOrgName). Naming:
+// `guardian_otp_<scenario>_<channel>`.
+const SCENARIO_TEMPLATE_ID: Record<GuardianOtpScenario, Record<'sms' | 'email', string>> = {
+  account: { sms: 'guardian_otp_account_sms', email: 'guardian_otp_account_email' },
+  profile: { sms: 'guardian_otp_profile_sms', email: 'guardian_otp_profile_email' },
+  connect: { sms: 'guardian_otp_connect_sms', email: 'guardian_otp_connect_email' },
+  connect_accept: { sms: 'guardian_otp_connect_accept_sms', email: 'guardian_otp_connect_accept_email' },
+  apply: { sms: 'guardian_otp_apply_sms', email: 'guardian_otp_apply_email' },
+  apply_accept: { sms: 'guardian_otp_apply_accept_sms', email: 'guardian_otp_apply_accept_email' },
+};
+
+function templateId(scenario: GuardianOtpScenario | undefined, channel: 'sms' | 'email'): string {
+  return scenario ? SCENARIO_TEMPLATE_ID[scenario][channel] : GENERIC_TEMPLATE_ID[channel];
+}
 
 /**
  * Default dispatch: pick the channel from the guardian's contact type and send
  * via the shared notification client. Hard-fails when no provider is
  * configured — a guardian-required domain must not silently skip verification.
+ * The scenario selects the template; `variables` (parent name, domain, provider
+ * org) render the parent-facing copy (#294) alongside the OTP.
  */
-export const defaultGuardianOtpSend: OtpSend = async ({ contact, contactType, otp }) => {
+export const defaultGuardianOtpSend: OtpSend = async ({ contact, contactType, otp, scenario, variables }) => {
   const client = getNotificationClient();
   if (!client) {
     throw new GuardianOtpError('NO_OTP_PROVIDER');
@@ -173,9 +218,9 @@ export const defaultGuardianOtpSend: OtpSend = async ({ contact, contactType, ot
   const channel = CHANNEL_BY_CONTACT_TYPE[contactType];
   await client.notify({
     channel,
-    template_id: GUARDIAN_OTP_TEMPLATE_ID[channel],
+    template_id: templateId(scenario, channel),
     to: contact,
     priority: 'realtime',
-    variables: { otp },
+    variables: { ...variables, otp },
   });
 };

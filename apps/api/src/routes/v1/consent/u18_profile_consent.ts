@@ -13,7 +13,7 @@ import { auth_middleware_if_enabled } from '@api/plugins/auth/auth_middleware';
 import { apiConfig } from '@/config';
 import { guardianConsentRequired } from '@/services/minor';
 import { getNetworkConfigById } from '@/network_configs';
-import { getGuardianContactPlaintext, requireMinorWard } from '@/services/minor_guardian_repo';
+import { getGuardianContactPlaintext, getGuardianNamePlaintext, requireMinorWard } from '@/services/minor_guardian_repo';
 import { resolveConsentVersion } from '@/services/consent_version';
 import {
   issueGuardianOtp, verifyGuardianOtp, assertVerifyAttemptAllowed, guardianOtpErrorReply,
@@ -98,12 +98,15 @@ const precreate_issue_handler = async (
 
   const contact = await getGuardianContactPlaintext(userId);
   if (!contact) return reply.code(409).send({ error: 'GUARDIAN_REQUIRED', message: 'Submit guardian details first' });
+  const parentName = await getGuardianNamePlaintext(userId);
 
   try {
     await issueGuardianOtp({
       scope: precreateScope(userId, body.network, body.item_domain),
       contact: contact.contact,
       contactType: contact.contactType,
+      scenario: 'profile',
+      variables: { ...(parentName ? { parentName } : {}), domain: body.item_domain },
     });
   } catch (err) {
     const r = guardianOtpErrorReply(err);
@@ -207,8 +210,15 @@ const issue_handler = async (request: IssueReq, reply: FastifyReply) => {
   }
   const contact = await getGuardianContactPlaintext(userId);
   if (!contact) return reply.code(409).send({ error: 'GUARDIAN_REQUIRED', message: 'Submit guardian details first' });
+  const parentName = await getGuardianNamePlaintext(userId);
   try {
-    await issueGuardianOtp({ scope: profileScope(userId, body.item_id), contact: contact.contact, contactType: contact.contactType });
+    await issueGuardianOtp({
+      scope: profileScope(userId, body.item_id),
+      contact: contact.contact,
+      contactType: contact.contactType,
+      scenario: 'profile',
+      variables: { ...(parentName ? { parentName } : {}), domain: body.item_domain },
+    });
   } catch (err) {
     const r = guardianOtpErrorReply(err);
     if (r) return reply.code(r.status).send({ error: r.error, message: r.message });

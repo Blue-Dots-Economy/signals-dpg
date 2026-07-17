@@ -210,6 +210,16 @@ export async function getGuardianContactPlaintext(
   };
 }
 
+/** Decrypt the guardian's name for a transient use (email/SMS template var). */
+export async function getGuardianNamePlaintext(userId: string): Promise<string | null> {
+  const [row] = await db
+    .select({ guardianName: minor_guardian.guardianName })
+    .from(minor_guardian)
+    .where(eq(minor_guardian.userId, userId))
+    .limit(1);
+  return row?.guardianName ? decryptGuardianField(row.guardianName) : null;
+}
+
 export async function setGuardianVerified(userId: string): Promise<void> {
   await db
     .update(minor_guardian)

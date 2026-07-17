@@ -115,7 +115,13 @@ export const u18_guardian_handler = async (request: Req, reply: FastifyReply) =>
   if (!contact) return reply.code(500).send({ error: 'GUARDIAN_WRITE_FAILED', message: 'Guardian contact missing after write' });
 
   try {
-    await issueGuardianOtp({ scope: guardianOtpScope(userId), contact: contact.contact, contactType: contact.contactType });
+    await issueGuardianOtp({
+      scope: guardianOtpScope(userId),
+      contact: contact.contact,
+      contactType: contact.contactType,
+      scenario: 'account',
+      variables: { parentName: body.guardianName },
+    });
   } catch (err) {
     const r = guardianOtpErrorReply(err);
     if (r) return reply.code(r.status).send({ error: r.error, message: r.message });
