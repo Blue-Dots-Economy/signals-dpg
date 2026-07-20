@@ -127,4 +127,5 @@ export const databasesConfig = {
   redis_password: databases.REDIS_PASSWORD,
   redis_port: databases.REDIS_PORT,
   ingest_stream: databases.INGEST_STREAM,
+  ingest_stream_maxlen: databases.INGEST_STREAM_MAXLEN,
 };
