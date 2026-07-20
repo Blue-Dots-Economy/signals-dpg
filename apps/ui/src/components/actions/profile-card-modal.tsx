@@ -44,15 +44,33 @@ const errorMessageKeys: Record<string, string> = {
 };
 
 /**
- * PII is revealed by the server only once a request is accepted, and stays
- * revealed through completion. For those statuses we fetch the UNMASKED profile
- * via the consent-gated contact endpoint; for every other status we fetch the
- * counterparty's PUBLIC (masked) profile via the network fetch, which never
- * returns PII. This mirrors the server's `reveals_pii_on_status` gate.
+ * Whether to ATTEMPT the unmasked reveal for this status. The server is the
+ * real gate (it reveals only when the action's own `reveals_pii_on_status`
+ * includes the current status, else returns PII_NOT_REVEALED); this is a
+ * client-side hint to avoid a doomed reveal call for obviously-not-revealed
+ * statuses. Hardcoded to the default gate (accepted → stays revealed through
+ * completion) rather than threading the per-interaction `reveals_pii_on_status`
+ * array in here. A wrong guess degrades gracefully, not incorrectly:
+ * - guess too NARROW (a network reveals on some other status): we show masked,
+ *   never leaking PII;
+ * - guess too WIDE (we try reveal on a status the server won't reveal): the
+ *   server returns PII_NOT_REVEALED, which falls back to the masked profile
+ *   with a "not available" note (see REVEAL_UNAVAILABLE_CODES below).
+ * If a network ever customises `reveals_pii_on_status`, thread it in here.
  */
 function statusRevealsPii(status: string): boolean {
   return status === 'accepted' || status === 'completed';
 }
+
+// Reveal-endpoint error codes that mean "the contact reveal is legitimately
+// unavailable here" (not a failure). For these we show the public profile with
+// a distinct note; every OTHER code (UNAUTHORIZED, NOT_ACTION_PARTICIPANT,
+// ACTION_NOT_FOUND, INTERNAL_SERVER_ERROR, …) surfaces as an error rather than
+// silently showing masked copy that contradicts an accepted request.
+const REVEAL_UNAVAILABLE_CODES = new Set([
+  'CROSS_INSTANCE_REVEAL_NOT_SUPPORTED',
+  'PII_NOT_REVEALED',
+]);
 
 /** Minimal shape both fetch paths normalise to for rendering. */
 interface ResolvedItem {
@@ -62,10 +80,14 @@ interface ResolvedItem {
   item_state: Record<string, unknown>;
 }
 
+// masked → public profile, request not (yet) revealing; full → reveal succeeded;
+// reveal_unavailable → public profile because the reveal is unavailable here.
+type ViewMode = 'masked' | 'full' | 'reveal_unavailable';
+
 type ModalState =
   | { status: 'idle' }
   | { status: 'loading' }
-  | { status: 'success'; item: ResolvedItem; masked: boolean }
+  | { status: 'success'; item: ResolvedItem; mode: ViewMode }
   | { status: 'error'; message: string };
 
 /**
@@ -118,32 +140,35 @@ export function ProfileCardModal({
       };
     };
 
-    async function run() {
-      try {
-        let item: ResolvedItem;
-        let masked: boolean;
-        if (wantsUnmasked) {
-          try {
-            const data = await getActionContactDetails(actionId);
-            const it = data.other_actor.item;
-            item = {
+    const resolve = async (): Promise<{ item: ResolvedItem; mode: ViewMode }> => {
+      if (wantsUnmasked) {
+        try {
+          const data = await getActionContactDetails(actionId);
+          const it = data.other_actor.item;
+          return {
+            item: {
               item_network: it.item_network,
               item_domain: it.item_domain,
               item_type: it.item_type,
               item_state: it.item_state,
-            };
-            masked = false;
-          } catch {
-            // Reveal unavailable (e.g. cross-instance reveal not supported) —
-            // fall back to the public profile rather than showing an error.
-            item = await fetchMasked();
-            masked = true;
-          }
-        } else {
-          item = await fetchMasked();
-          masked = true;
+            },
+            mode: 'full',
+          };
+        } catch (err) {
+          const code = (err as { code?: string }).code ?? 'INTERNAL_SERVER_ERROR';
+          // Only fall back to the public profile when the reveal is genuinely
+          // unavailable; re-throw real errors so they surface to the user.
+          if (!REVEAL_UNAVAILABLE_CODES.has(code)) throw err;
+          return { item: await fetchMasked(), mode: 'reveal_unavailable' };
         }
-        if (!cancelled) setState({ status: 'success', item, masked });
+      }
+      return { item: await fetchMasked(), mode: 'masked' };
+    };
+
+    async function run() {
+      try {
+        const resolved = await resolve();
+        if (!cancelled) setState({ status: 'success', ...resolved });
       } catch (err) {
         if (cancelled) return;
         const code = (err as { code?: string }).code ?? 'INTERNAL_SERVER_ERROR';
@@ -169,18 +194,25 @@ export function ProfileCardModal({
     return (domain?.item_schemas?.[item.item_type] as RJSFSchema | undefined) ?? null;
   }, [item, networkConfig]);
 
-  // Before the fetch settles, key the description off the expected mode so the
-  // copy doesn't flash the wrong line for accepted requests.
-  const showFull = state.status === 'success' ? !state.masked : wantsUnmasked;
+  // Description keyed off the resolved mode. Before the fetch settles, guess
+  // from the expected mode so the copy doesn't flash the wrong line.
+  const descKey =
+    state.status === 'success'
+      ? state.mode === 'full'
+        ? 'profile.card_desc_full'
+        : state.mode === 'reveal_unavailable'
+          ? 'profile.card_desc_reveal_unavailable'
+          : 'profile.card_desc_masked'
+      : wantsUnmasked
+        ? 'profile.card_desc_full'
+        : 'profile.card_desc_masked';
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-xl">
         <DialogHeader>
           <DialogTitle>{name}</DialogTitle>
-          <DialogDescription>
-            {showFull ? t('profile.card_desc_full') : t('profile.card_desc_masked')}
-          </DialogDescription>
+          <DialogDescription>{t(descKey)}</DialogDescription>
         </DialogHeader>
 
         {state.status === 'loading' && (

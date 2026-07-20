@@ -334,7 +334,9 @@ export function ActionCard({ action, ownershipRole, onStatusUpdate, selectionMod
         actionId={action.action_id}
         actionStatus={action.action_status}
         counterparty={{
-          name: rawName,
+          // Fall back to the role (e.g. "Provider") for nameless profiles
+          // instead of the raw #id, matching the button's reasoning.
+          name: hasRealName ? rawName : otherRole,
           itemId: otherParty.itemId,
           itemNetwork: otherParty.network,
           itemDomain: otherParty.domain,
