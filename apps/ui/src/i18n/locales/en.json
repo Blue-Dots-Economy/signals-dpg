@@ -352,8 +352,6 @@
   "actions.you_label": "You ({{role}})",
   "auth.contact_label_email": "email address",
   "auth.contact_label_phone": "phone number",
-  "contact.dialog_desc": "Shared once the connection is accepted.",
-  "contact.dialog_title": "Contact details",
   "contact.error_action_not_found": "This action no longer exists.",
   "contact.error_cross_instance": "This contact is hosted on another instance and isn't supported yet.",
   "contact.error_internal": "Something went wrong; please try again.",

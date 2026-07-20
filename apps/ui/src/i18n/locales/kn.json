@@ -317,8 +317,6 @@
   "actions.you_label": "ನೀವು ({{role}})",
   "auth.contact_label_email": "ಇಮೇಲ್ ವಿಳಾಸ",
   "auth.contact_label_phone": "ಮೊಬೈಲ್ ಸಂಖ್ಯೆ",
-  "contact.dialog_desc": "ಸಂಪರ್ಕವನ್ನು ಸ್ವೀಕರಿಸಿದ ನಂತರ ಹಂಚಿಕೊಳ್ಳಲಾಗುತ್ತದೆ.",
-  "contact.dialog_title": "ಸಂಪರ್ಕ ವಿವರಗಳು",
   "contact.error_action_not_found": "ಈ ಕ್ರಿಯೆಯು ಇನ್ನು ಮುಂದೆ ಇಲ್ಲ.",
   "contact.error_cross_instance": "ಈ ಸಂಪರ್ಕವು ಇನ್ನೊಂದು ಸಂಸ್ಥೆಯಲ್ಲಿ ಇದೆ ಮತ್ತು ಇನ್ನೂ ಬೆಂಬಲಿತವಾಗಿಲ್ಲ.",
   "contact.error_internal": "ಏನೋ ತಪ್ಪಾಗಿದೆ; ದಯವಿಟ್ಟು ಮತ್ತೆ ಪ್ರಯತ್ನಿಸಿ.",

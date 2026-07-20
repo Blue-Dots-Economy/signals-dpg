@@ -317,8 +317,6 @@
   "actions.you_label": "आप ({{role}})",
   "auth.contact_label_email": "ईमेल पता",
   "auth.contact_label_phone": "मोबाइल नंबर",
-  "contact.dialog_desc": "कनेक्शन स्वीकार होने पर साझा किया जाता है।",
-  "contact.dialog_title": "संपर्क विवरण",
   "contact.error_action_not_found": "यह क्रिया अब मौजूद नहीं है।",
   "contact.error_cross_instance": "यह संपर्क किसी अन्य संस्थान पर है और अभी समर्थित नहीं है।",
   "contact.error_internal": "कुछ गलत हुआ; कृपया पुनः प्रयास करें।",
