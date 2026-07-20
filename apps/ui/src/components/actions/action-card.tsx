@@ -297,7 +297,7 @@ export function ActionCard({ action, ownershipRole, onStatusUpdate, selectionMod
             onClick={() => setShowProfile(true)}
           >
             <UserRound className="mr-1.5 h-3.5 w-3.5" />
-            {t('actions.btn_view_profile', { name: rawName })}
+            {t('actions.btn_view_profile')}
           </Button>
 
           {canAccept && (
