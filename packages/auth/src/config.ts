@@ -131,6 +131,9 @@ export function createAuth(config: AuthRuntimeConfig) {
                 'Failed to send phone OTP via notification service:',
                 err
               );
+              // Propagate so the OTP endpoint can report the delivery failure
+              // instead of returning ok:true for a code that never arrived.
+              throw err;
             }
           } else {
             console.log({ phoneNumber, message: `Your OTP: ${otp}` });
@@ -158,6 +161,9 @@ export function createAuth(config: AuthRuntimeConfig) {
                 'Failed to send email OTP via notification service:',
                 err
               );
+              // Propagate so the OTP endpoint can report the delivery failure
+              // instead of returning ok:true for a code that never arrived.
+              throw err;
             }
           } else {
             console.log({
