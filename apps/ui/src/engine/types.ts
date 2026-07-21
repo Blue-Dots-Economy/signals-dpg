@@ -71,6 +71,12 @@ export interface DotCardConfig {
 export interface DotNetworkDomain {
   id: string;
   description: string;
+  /**
+   * Optional per-domain override for the sidebar "My Profile(s)" group heading
+   * (e.g. "My Jobs" for a provider). Network-authored in network.json; falls
+   * back to the generic label when unset.
+   */
+  my_items_label?: string;
   default_item_schemas?: {
     profile: RJSFSchema;
   };

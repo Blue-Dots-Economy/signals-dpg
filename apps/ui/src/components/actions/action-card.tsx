@@ -12,7 +12,6 @@ import {
   MessageSquare,
   UserRound,
   MapPin,
-  Network,
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { Button } from '@/components/ui/button';
@@ -73,23 +72,6 @@ function formatRequirementValue(value: unknown): string {
 
 const titleCase = (s: string) =>
   s.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
-
-// Per-network chip colours pulled from each brand.json (colours.primary
-// "<Dot> 500" + accent shades). Add a new entry per network as they ship.
-const NETWORK_CHIP_COLOURS: Record<
-  string,
-  { background: string; color: string; borderColor: string }
-> = {
-  blue_dot: { background: '#e6f0ff', color: '#0050b3', borderColor: '#a4daff' },
-  purple_dot: { background: '#f3e8ff', color: '#5a1fbf', borderColor: '#d8c2ff' },
-};
-const FALLBACK_CHIP = {
-  background: '#eef1f6',
-  color: '#2a3344',
-  borderColor: '#cbd5e1',
-};
-const networkChipStyle = (networkId: string) =>
-  NETWORK_CHIP_COLOURS[networkId] ?? FALLBACK_CHIP;
 
 export function ActionCard({ action, ownershipRole, onStatusUpdate, selectionMode = false }: ActionCardProps) {
   const { t } = useTranslation();
@@ -160,30 +142,9 @@ export function ActionCard({ action, ownershipRole, onStatusUpdate, selectionMod
       <div className="h-[3px] w-full bg-gradient-to-r from-primary/40 via-primary to-primary/70" />
 
       <div className="p-5">
-        {/* Row 1: network + type + status badges, time. Network chip
-            disambiguates cross-network actions on the shared list. */}
+        {/* Row 1: status badge + time. */}
         <div className="mb-4 flex items-center justify-between gap-2">
           <div className="flex flex-wrap items-center gap-2">
-            {/* Each network's own brand palette (from brand.json) so the chip
-                colour identifies the action's network — purple_dot purple,
-                blue_dot blue — independent of the viewing context. */}
-            <span
-              className="inline-flex items-center gap-1 rounded-full border px-2 py-1 text-[11px] font-semibold"
-              style={networkChipStyle(action.source_item_network)}
-            >
-              <Network className="h-3 w-3" />
-              {titleCase(action.source_item_network)}
-              {action.target_item_network !== action.source_item_network && (
-                <>
-                  {' '}
-                  <ArrowRight className="h-2.5 w-2.5" />
-                  {titleCase(action.target_item_network)}
-                </>
-              )}
-            </span>
-            <span className="inline-flex items-center gap-1.5 rounded-full border border-primary/20 bg-gradient-to-b from-background to-primary/5 px-2.5 py-1 text-[11px] font-semibold capitalize text-primary">
-              {action.action_type}
-            </span>
             <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-semibold ${status.cls}`}>
               <span className={`h-1.5 w-1.5 rounded-full ${status.dot}`} />
               {status.labelKey ? t(status.labelKey) : action.action_status}

@@ -91,6 +91,10 @@ const CardConfigSchema = z.object({
 const NetworkDomainSchema = z.object({
   id: z.string().min(1),
   description: z.string().optional(),
+  // Optional per-domain override for the sidebar "My Profile(s)" group heading
+  // (e.g. blue_dot provider → "My Jobs"). Network-authored content, not i18n
+  // chrome; falls back to the generic label when unset.
+  my_items_label: z.string().min(1).optional(),
   minimum_cache_ttl_seconds: z.number().int().positive().optional().default(300),
   // U18 spec D8: when true, this domain routes minors' consent through a
   // guardian. Server-read only; never trusted from the client. Defaults off.

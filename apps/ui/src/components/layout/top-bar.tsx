@@ -57,9 +57,12 @@ export function TopBar({
   const { isAuthenticated, isLoading } = useAuth();
 
   return (
-    <header className="sticky top-0 z-40 flex h-14 items-center gap-3 border-b bg-gradient-to-r from-background to-primary/5 px-4 sm:px-6">
+    <header className="sticky top-0 z-40 flex min-h-14 flex-wrap items-center gap-x-3 gap-y-2 border-b bg-gradient-to-r from-background to-primary/5 px-4 py-2 sm:flex-nowrap sm:py-0 sm:px-6">
       <SidebarTrigger className="md:hidden" />
-      <div className="relative flex-1 max-w-md">
+      {/* On mobile the fixed right-hand controls consume the row, so the search
+          drops to its own full-width line (order-last + w-full). From sm up it
+          sits inline between the trigger and the controls as before. */}
+      <div className="relative order-last w-full min-w-0 sm:order-none sm:w-auto sm:flex-1 sm:max-w-md">
         <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
         <Input
           type="search"

@@ -643,6 +643,23 @@ export function HomePage() {
     [network, viewerDomain],
   );
 
+  // Domains whose fields drive the browse filters, keyed on the sidebar Browse
+  // selection: a specific domain → only that domain's fields (a provider
+  // viewing "Seekers" filters by seeker fields, viewing "Providers" by provider
+  // fields). "All" (null) → the counterpart domains (visible minus the viewer's
+  // own) so a provider's default view filters seekers, not the provider fields
+  // pulled in by a provider→provider "connect" self-edge; falls back to all
+  // visible domains when that would leave nothing (self-only interaction, or a
+  // signed-out viewer with no domain identity).
+  const filterFieldDomains = React.useMemo(() => {
+    if (selectedDomain) {
+      const selected = visibleDomains.filter((d) => d.id === selectedDomain);
+      if (selected.length > 0) return selected;
+    }
+    const counterparts = visibleDomains.filter((d) => d.id !== viewerDomain);
+    return counterparts.length > 0 ? counterparts : visibleDomains;
+  }, [visibleDomains, viewerDomain, selectedDomain]);
+
   React.useEffect(() => {
     if (!network) return;
     if (selectedDomain === null) return;
@@ -922,11 +939,21 @@ export function HomePage() {
 
   const handleDomainSelect = (domainId: string | null) => {
     setSelectedDomain(domainId);
+    // Switching the browse domain changes the available filter fields, so reset
+    // the map domain + enum-field selections: a leftover domain chip from
+    // another scope would otherwise hide every item, and stale field chips would
+    // show as active even though their group is no longer rendered.
+    setMapSelectedDomains([]);
+    setMapSelectedFields({});
     setSearchParams((prev) => {
       if (domainId) {
         prev.set('domain', domainId);
       } else {
         prev.delete('domain');
+      }
+      prev.delete('map_domains');
+      for (const key of [...prev.keys()]) {
+        if (key.startsWith('f_')) prev.delete(key);
       }
       return prev;
     });
@@ -1284,10 +1311,14 @@ export function HomePage() {
   const filtersPanel = (
     <MapFiltersPanel
       domains={visibleDomains}
+      filterFieldDomains={filterFieldDomains}
       selectedDomains={mapSelectedDomains}
       onDomainsChange={handleMapDomainsChange}
       selectedFields={mapSelectedFields}
       onFieldsChange={handleMapFieldsChange}
+      // A specific sidebar domain already scopes browse + the enum groups to
+      // that domain, so the domain chip toggle is redundant there.
+      showDomainToggle={selectedDomain === null}
       viewMode={viewMode}
     />
   );
