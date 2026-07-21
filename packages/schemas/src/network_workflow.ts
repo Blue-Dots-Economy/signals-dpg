@@ -106,11 +106,6 @@ const NetworkDomainSchema = z.object({
   status_rules: z.array(StatusRuleSchema).min(1),
   dashboard_tiles: DashboardTilesSchema.optional(),
   card: CardConfigSchema.optional(),
-  // Optional allowlist of property keys exposed as browse filters for this
-  // domain (in order). When present, only these enum/array-enum fields become
-  // filter chips; when absent, every enum field is filterable. Consumed by the
-  // UI (see apps/ui enum-filters). Server-read only.
-  filters: z.array(z.string().min(1)).optional(),
 }).superRefine((domain, ctx) => {
   const last = domain.status_rules[domain.status_rules.length - 1];
   if (last.when !== 'default') {

@@ -155,48 +155,12 @@ export function getEnumFilterFields(schemas: RJSFSchema[]): EnumFilterField[] {
 }
 
 /**
- * Merge several already-derived field lists into one, deduping by key
- * (first occurrence wins label/isArray; options are unioned preserving
- * first-seen order). Same union semantics as {@link getEnumFilterFields} but
- * operating on `EnumFilterField[]` inputs rather than raw schemas.
- */
-function mergeEnumFilterFields(fieldGroups: EnumFilterField[][]): EnumFilterField[] {
-  const byKey = new Map<string, { label: string; optionsSet: Set<string>; options: string[]; isArray: boolean }>();
-  for (const group of fieldGroups) {
-    for (const field of group) {
-      const existing = byKey.get(field.key);
-      if (!existing) {
-        byKey.set(field.key, {
-          label: field.label,
-          optionsSet: new Set(field.options),
-          options: [...field.options],
-          isArray: field.isArray,
-        });
-      } else {
-        for (const opt of field.options) {
-          if (!existing.optionsSet.has(opt)) {
-            existing.optionsSet.add(opt);
-            existing.options.push(opt);
-          }
-        }
-      }
-    }
-  }
-  return Array.from(byKey.entries()).map(([key, { label, options, isArray }]) => ({ key, label, options, isArray }));
-}
-
-/**
- * Convenience helper: derive enum filter fields from the given domains.
- *
- * Each domain's fields are derived independently so a per-domain `filters`
- * allowlist can be honored: when a domain declares `filters`, only those keys
- * become filter groups (ordered by the allowlist); otherwise every enum field
- * is exposed (legacy behavior). Results are then unioned across domains.
+ * Convenience helper: extract all item_schemas from the given visible domains,
+ * then derive enum filter fields.
  */
 export function getEnumFilterFieldsForDomains(domains: DotNetworkDomain[]): EnumFilterField[] {
-  const perDomain: EnumFilterField[][] = [];
+  const schemas: RJSFSchema[] = [];
   for (const domain of domains) {
-    const schemas: RJSFSchema[] = [];
     if (domain.item_schemas) {
       for (const schema of Object.values(domain.item_schemas)) {
         schemas.push(schema);
@@ -206,22 +170,8 @@ export function getEnumFilterFieldsForDomains(domains: DotNetworkDomain[]): Enum
     if (domain.default_item_schemas?.profile) {
       schemas.push(domain.default_item_schemas.profile);
     }
-
-    let fields = getEnumFilterFields(schemas);
-
-    // Per-domain allowlist: keep only allowlisted keys, in allowlist order.
-    const allow = domain.filters;
-    if (Array.isArray(allow)) {
-      const order = new Map(allow.map((k, i) => [k, i] as const));
-      fields = fields
-        .filter((f) => order.has(f.key))
-        .sort((a, b) => (order.get(a.key) ?? 0) - (order.get(b.key) ?? 0));
-    }
-
-    perDomain.push(fields);
   }
-
-  return mergeEnumFilterFields(perDomain);
+  return getEnumFilterFields(schemas);
 }
 
 // ─── Filter application ───────────────────────────────────────────────────────

@@ -767,12 +767,6 @@
       },
       "id": "seeker",
       "guardian_consent_required": true,
-      "filters": [
-        "workExperience",
-        "workExperienceYearsConditional",
-        "educationCategory",
-        "gender"
-      ],
       "card": {
         "title_field": "name",
         "avatar_from": "name",
