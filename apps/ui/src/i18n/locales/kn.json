@@ -7,6 +7,7 @@
   "common.search": "ಹುಡುಕಿ...",
   "common.something_went_wrong": "ಏನೋ ತಪ್ಪಾಗಿದೆ",
   "auth.back": "ಹಿಂದೆ",
+  "auth.select_domain_required": "ಮುಂದುವರಿಯಲು ದಯವಿಟ್ಟು ನಿಮ್ಮ ಡೊಮೇನ್ ಆಯ್ಕೆಮಾಡಿ.",
   "auth.heading_sign_in": "ಸೈನ್ ಇನ್",
   "auth.heading_welcome_back": "ಸ್ವಾಗತ",
   "auth.heading_create_account": "ನಿಮ್ಮ ಖಾತೆ ರಚಿಸಿ",

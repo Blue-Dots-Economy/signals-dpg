@@ -7,6 +7,7 @@
   "common.search": "खोजें...",
   "common.something_went_wrong": "कुछ गलत हो गया",
   "auth.back": "वापस",
+  "auth.select_domain_required": "जारी रखने के लिए कृपया अपना डोमेन चुनें।",
   "auth.heading_sign_in": "साइन इन",
   "auth.heading_welcome_back": "वापस स्वागत है",
   "auth.heading_create_account": "अपना खाता बनाएं",
