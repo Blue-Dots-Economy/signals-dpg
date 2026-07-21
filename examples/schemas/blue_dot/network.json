@@ -865,24 +865,20 @@
             "jobProviderLocation": {
               "type": "string",
               "title": "Job Location",
-              "location": "primary",
-              "private": true
+              "location": "primary"
             },
             "hiringManagerName": {
               "type": "string",
               "title": "Hiring Manager Name",
-              "minLength": 1,
-              "private": true
+              "minLength": 1
             },
             "hiringManagerPhoneNumber": {
               "type": "string",
-              "title": "Hiring Manager Mobile Number",
-              "private": true
+              "title": "Hiring Manager Mobile Number"
             },
             "hiringManagerEmail": {
               "type": "string",
-              "title": "Hiring Manager Email",
-              "private": true
+              "title": "Hiring Manager Email"
             },
             "role": {
               "type": "string",
