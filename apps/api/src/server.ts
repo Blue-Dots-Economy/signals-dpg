@@ -17,6 +17,7 @@ import {
   mergeAllowedOrigins,
 } from '@dpg/config';
 import v1_routes from '@/routes/v1/v1_routes';
+import { requestIdOptions, registerRequestIdEcho } from '@/request_id';
 import { getNetworkConfigs } from '@/network_configs';
 import {
   clearNetworkSchemaCache,
@@ -26,7 +27,13 @@ import {
 const app = fastify({
   logger: true,
   trustProxy: true,
+  // Correlation id: honour + length-cap an inbound `x-request-id`, mint one
+  // when absent, log it as `reqId` (see @/request_id).
+  ...requestIdOptions,
 });
+
+// Echo the resolved correlation id back on every response.
+registerRequestIdEcho(app);
 
 // The schema cache lives on disk under tmpdir() and outlives a restart. In
 // local mode the network is driven by NETWORK_CONFIG_LOCAL_FILE, so a stale
