@@ -154,6 +154,12 @@ export const DatabaseSecretsSchema = z.object({
   REDIS_PASSWORD: z.string(),
   REDIS_PORT: z.coerce.number().default(6370),
   INGEST_STREAM: z.string().default('signals:item-events'),
+  // Approximate cap on the item-events stream length. The publisher trims with
+  // `XADD MAXLEN ~` so the stream cannot grow unbounded in the shared Redis
+  // (which runs `noeviction` in prod — an untrimmed stream would eventually
+  // reject writes). Sized for consumer lag on signals-search; the sweep is the
+  // backstop for anything trimmed before it is consumed.
+  INGEST_STREAM_MAXLEN: z.coerce.number().int().positive().default(100_000),
 });
 
 export const PiiCryptoSecretsSchema = z.object({
