@@ -30,12 +30,11 @@ async function renderForm(onSubmitted: (body: unknown) => void) {
   );
 }
 
-/** Fill name + a (non-ward) phone and tick both consent checkboxes. */
+/** Fill name + a (non-ward) phone. Consent is captured via the gate popup on
+ * submit; with a null consent config (see mock) the form submits directly. */
 async function fillValid() {
   await userEvent.type(screen.getByLabelText(/guardian name/i), 'Asha Guardian');
   await userEvent.type(screen.getByLabelText(/guardian phone number/i), '9876543210');
-  await userEvent.click(screen.getByLabelText(/i accept the terms and conditions/i));
-  await userEvent.click(screen.getByLabelText(/i consent to data privacy policy/i));
 }
 
 describe('GuardianFormStep', () => {
@@ -43,18 +42,16 @@ describe('GuardianFormStep', () => {
     vi.clearAllMocks();
   });
 
-  it('keeps Send OTP disabled until name + a contact + both consents are given', async () => {
+  it('keeps Send OTP disabled until name + a contact are given', async () => {
     await renderForm(vi.fn());
-    const submit = screen.getByRole('button', { name: /send otp/i });
+    const submit = screen.getByRole('button', { name: /continue/i });
     expect(submit).toBeDisabled();
 
     await userEvent.type(screen.getByLabelText(/guardian name/i), 'Asha Guardian');
-    await userEvent.type(screen.getByLabelText(/guardian phone number/i), '9876543210');
-    expect(submit).toBeDisabled(); // consents not ticked yet
+    expect(submit).toBeDisabled(); // no contact yet
 
-    await userEvent.click(screen.getByLabelText(/i accept the terms and conditions/i));
-    expect(submit).toBeDisabled(); // only one consent
-    await userEvent.click(screen.getByLabelText(/i consent to data privacy policy/i));
+    // Consent is captured in the popup on submit, not a pre-req to enable.
+    await userEvent.type(screen.getByLabelText(/guardian phone number/i), '9876543210');
     expect(submit).toBeEnabled();
   });
 
@@ -70,7 +67,7 @@ describe('GuardianFormStep', () => {
     const onSubmitted = vi.fn();
     await renderForm(onSubmitted);
     await fillValid();
-    await userEvent.click(screen.getByRole('button', { name: /send otp/i }));
+    await userEvent.click(screen.getByRole('button', { name: /continue/i }));
 
     await waitFor(() =>
       expect(submitGuardian).toHaveBeenCalledWith({
@@ -90,9 +87,7 @@ describe('GuardianFormStep', () => {
     await userEvent.type(screen.getByLabelText(/guardian name/i), 'Asha Guardian');
     await userEvent.type(screen.getByLabelText(/guardian email/i), 'guardian@example.com');
     await userEvent.type(screen.getByLabelText(/guardian phone number/i), '9876543210');
-    await userEvent.click(screen.getByLabelText(/i accept the terms and conditions/i));
-    await userEvent.click(screen.getByLabelText(/i consent to data privacy policy/i));
-    await userEvent.click(screen.getByRole('button', { name: /send otp/i }));
+    await userEvent.click(screen.getByRole('button', { name: /continue/i }));
 
     await waitFor(() =>
       expect(submitGuardian).toHaveBeenCalledWith(
@@ -111,13 +106,11 @@ describe('GuardianFormStep', () => {
     await userEvent.type(screen.getByLabelText(/guardian name/i), 'Asha Guardian');
     // Same as the ward's own phone (mocked in auth-context above).
     await userEvent.type(screen.getByLabelText(/guardian phone number/i), '9000000000');
-    await userEvent.click(screen.getByLabelText(/i accept the terms and conditions/i));
-    await userEvent.click(screen.getByLabelText(/i consent to data privacy policy/i));
 
     expect(screen.getByText(/can't be the same as your own/i)).toBeInTheDocument();
 
     // No acknowledgement path — the submit stays disabled.
-    const submit = screen.getByRole('button', { name: /send otp/i });
+    const submit = screen.getByRole('button', { name: /continue/i });
     expect(submit).toBeDisabled();
     expect(screen.queryByLabelText(/yes, that's okay/i)).not.toBeInTheDocument();
     expect(submitGuardian).not.toHaveBeenCalled();
@@ -132,14 +125,14 @@ describe('GuardianFormStep', () => {
     const onSubmitted = vi.fn();
     await renderForm(onSubmitted);
     await fillValid();
-    await userEvent.click(screen.getByRole('button', { name: /send otp/i }));
+    await userEvent.click(screen.getByRole('button', { name: /continue/i }));
 
     await waitFor(() =>
       expect(screen.getAllByText(/can't be the same as your own/i).length).toBeGreaterThan(0),
     );
     expect(onSubmitted).not.toHaveBeenCalled();
 
-    const submit = screen.getByRole('button', { name: /send otp/i });
+    const submit = screen.getByRole('button', { name: /continue/i });
     expect(submit).toBeDisabled();
   });
 });
