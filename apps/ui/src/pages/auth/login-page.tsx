@@ -372,7 +372,15 @@ export function LoginPage() {
       // than the generic "one more step" so the user knows exactly what's missing.
       if (!exists && !domain) {
         setIsLoading(false);
-        toast.error(t('auth.select_domain_required'));
+        // No domain: either the multi-domain picker is shown but nothing was
+        // picked, OR the network config failed / hasn't loaded so there are no
+        // options at all (the picker is never rendered) — in the latter case
+        // surface a config error instead of "select your domain" with no picker.
+        toast.error(
+          domainOptions.length === 0
+            ? t('auth.signup_options_unavailable')
+            : t('auth.select_domain_required'),
+        );
         return;
       }
 
@@ -529,8 +537,8 @@ export function LoginPage() {
             </div>
           )}
 
-          {/* Domain — grouped directly under the channel toggle above (same
-              pill style) so the two toggles read as one unit. Shown only when
+          {/* Domain — grouped directly under the channel toggle above so the
+              two selectors read as one unit. Shown only when
               creating an account AND there's a real choice (>1 served domain);
               a single-domain portal auto-selects it and hides this. DOB is NOT
               asked here — it's a separate step for guardian-gated domains. */}
