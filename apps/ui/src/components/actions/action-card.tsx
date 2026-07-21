@@ -10,14 +10,14 @@ import {
   Sparkles,
   ArrowRight,
   MessageSquare,
-  Contact,
+  UserRound,
   MapPin,
   Network,
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { Button } from '@/components/ui/button';
 import type { Action } from '@/lib/action-api';
-import { ContactDetailsModal } from '@/components/actions/contact-details-modal';
+import { ProfileCardModal } from '@/components/actions/profile-card-modal';
 
 interface ActionCardProps {
   action: Action;
@@ -94,8 +94,7 @@ const networkChipStyle = (networkId: string) =>
 export function ActionCard({ action, ownershipRole, onStatusUpdate, selectionMode = false }: ActionCardProps) {
   const { t } = useTranslation();
   const [showRequirements, setShowRequirements] = React.useState(true);
-  const [showContactDetails, setShowContactDetails] = React.useState(false);
-  const canRevealContact = action.action_status === 'accepted';
+  const [showProfile, setShowProfile] = React.useState(false);
 
   const status = getStatusStyle(action.action_status);
 
@@ -106,12 +105,16 @@ export function ActionCard({ action, ownershipRole, onStatusUpdate, selectionMod
           name: action.target_item_name,
           itemId: action.target_item_id,
           domain: action.target_item_domain,
+          itemType: action.target_item_type,
+          network: action.target_item_network,
           locations: action.target_item_locations,
         }
       : {
           name: action.source_item_name,
           itemId: action.source_item_id,
           domain: action.source_item_domain,
+          itemType: action.source_item_type,
+          network: action.source_item_network,
           locations: action.source_item_locations,
         };
   const myDomain =
@@ -284,17 +287,18 @@ export function ActionCard({ action, ownershipRole, onStatusUpdate, selectionMod
         {/* Actions */}
         {!selectionMode && (
         <div className="flex flex-wrap items-center gap-2 border-t pt-3">
-          {canRevealContact && (
-            <Button
-              size="sm"
-              variant="outline"
-              className="flex-1"
-              onClick={() => setShowContactDetails(true)}
-            >
-              <Contact className="mr-1.5 h-3.5 w-3.5" />
-              {t('actions.btn_view_contact')}
-            </Button>
-          )}
+          {/* Always available (both roles, every status): the counterparty's
+              profile — masked while pending, unmasked once PII is revealed
+              (accepted/completed). Handled inside ProfileCardModal. */}
+          <Button
+            size="sm"
+            variant="outline"
+            className="flex-1"
+            onClick={() => setShowProfile(true)}
+          >
+            <UserRound className="mr-1.5 h-3.5 w-3.5" />
+            {t('actions.btn_view_profile')}
+          </Button>
 
           {canAccept && (
             <Button size="sm" className="flex-1 shadow-sm" onClick={() => onStatusUpdate?.(action, 'accepted')}>
@@ -324,10 +328,20 @@ export function ActionCard({ action, ownershipRole, onStatusUpdate, selectionMod
         )}
       </div>
 
-      <ContactDetailsModal
+      <ProfileCardModal
+        open={showProfile}
+        onOpenChange={setShowProfile}
         actionId={action.action_id}
-        open={showContactDetails}
-        onOpenChange={setShowContactDetails}
+        actionStatus={action.action_status}
+        counterparty={{
+          // Fall back to the role (e.g. "Provider") for nameless profiles
+          // instead of the raw #id, matching the button's reasoning.
+          name: hasRealName ? rawName : otherRole,
+          itemId: otherParty.itemId,
+          itemNetwork: otherParty.network,
+          itemDomain: otherParty.domain,
+          itemType: otherParty.itemType,
+        }}
       />
     </div>
   );
