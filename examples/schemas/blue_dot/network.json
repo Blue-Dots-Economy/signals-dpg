@@ -766,6 +766,7 @@
         }
       },
       "id": "seeker",
+      "go_live_required": ["schema_required", "consent_required"],
       "guardian_consent_required": true,
       "card": {
         "title_field": "name",
@@ -1299,6 +1300,7 @@
         }
       },
       "id": "provider",
+      "go_live_required": ["schema_required", "consent_required"],
       "my_items_label": "My Jobs",
       "guardian_consent_required": false,
       "card": {

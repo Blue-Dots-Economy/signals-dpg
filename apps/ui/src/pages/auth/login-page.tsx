@@ -391,9 +391,24 @@ export function LoginPage() {
         }
       }
 
+      const resolvedSignupExtras: SignupExtras | null = exists ? null : { domain };
+
+      // The Terms/Privacy gate is tied to the domain's `consent_required`
+      // go-live gate. A brand-new signup on a domain that does NOT require
+      // consent (e.g. a provider configured `go_live_required: ["schema_required"]`)
+      // skips the consent pre-check and goes straight to OTP. Absent config ⇒
+      // require consent (safe default). Returning users keep the pre-check.
+      if (!exists) {
+        const domGates = networkDomains.find((d) => d.id === domain)?.go_live_required;
+        const consentGated = domGates ? domGates.includes('consent_required') : true;
+        if (!consentGated) {
+          await proceedToOtp(identifier, exists, resolvedName, resolvedSignupExtras);
+          return;
+        }
+      }
+
       // Non-gated / returning user: runConsentThenOtp runs the same terms/privacy
       // pre-check (getConsentStatusByIdentifier) before sending the OTP.
-      const resolvedSignupExtras: SignupExtras | null = exists ? null : { domain };
       await runConsentThenOtp(identifier, exists, resolvedName, resolvedSignupExtras);
     } catch {
       toast.error(t('auth.toast_send_code_error'), {

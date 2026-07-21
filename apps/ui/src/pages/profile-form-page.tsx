@@ -315,7 +315,18 @@ export function ProfileFormPage() {
   const profileDoc = consentConfig?.documents.profile_creation;
   const profileVersion = profileDoc?.versions.find((v) => v.version === profileDoc.current_version);
   const statement = profileVersion?.statement ?? '';
-  const consentRequired = !isEdit && !!statement;
+  // The profile_creation consent tick only applies when the selected domain
+  // gates go-live on `consent_required` (mirrors `go_live_required` in
+  // network.json). A domain that goes live on completeness alone (e.g. a
+  // provider configured `["schema_required"]`) shows no consent step. Absent
+  // config ⇒ require (safe default, matches the login/create-enforcement gates).
+  const selectedDomainGates = network?.domains.find(
+    (d) => d.id === selectedDomain,
+  )?.go_live_required;
+  const domainNeedsConsent = selectedDomainGates
+    ? selectedDomainGates.includes('consent_required')
+    : true;
+  const consentRequired = !isEdit && !!statement && domainNeedsConsent;
 
   // Stored U18 status: whether THIS ward is a minor. Fetched in create mode so
   // the consent tick can route a minor through guardian verification before the

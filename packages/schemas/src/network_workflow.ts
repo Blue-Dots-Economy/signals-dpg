@@ -3,6 +3,14 @@ import { z } from 'zod';
 
 const JsonSchemaDocumentSchema = z.record(z.string(), z.unknown());
 
+// Go-live gate tokens (NOT field names). The single source of truth for the
+// gate vocabulary — apps/api's classifier imports these rather than redefining
+// them, so the config schema and the runtime evaluator can never drift.
+// `schema_required` is the baseline gate; `consent_required` is opt-in per
+// domain (a guardian-gated domain always enforces it — see the resolver).
+export const PROFILE_GO_LIVE_GATES = ['schema_required', 'consent_required'] as const;
+export type GoLiveGate = (typeof PROFILE_GO_LIVE_GATES)[number];
+
 // Canonical bucket + status enums. Duplicated here from
 // apps/api/src/services/metrics/buckets.ts because @dpg/schemas is upstream
 // of apps/api — the package can't import down the tree. Both must be updated
@@ -99,6 +107,13 @@ const NetworkDomainSchema = z.object({
   // U18 spec D8: when true, this domain routes minors' consent through a
   // guardian. Server-read only; never trusted from the client. Defaults off.
   guardian_consent_required: z.boolean().optional().default(false),
+  // Which gates a profile must clear before it goes `live` (discoverable) in
+  // this domain. Tokens — NOT field names — evaluated by `classify_item`
+  // (see `PROFILE_GO_LIVE_GATES`). Omit to use the baseline default (`schema_required`;
+  // a guardian-gated domain additionally always enforces `consent_required`).
+  // An empty array is rejected — a profile with no gates would go live
+  // instantly.
+  go_live_required: z.array(z.enum(PROFILE_GO_LIVE_GATES)).min(1).optional(),
   item_schemas: z
     .record(z.string(), JsonSchemaDocumentSchema)
     .optional()
@@ -117,6 +132,21 @@ const NetworkDomainSchema = z.object({
       code: z.ZodIssueCode.custom,
       message: 'status_rules must end with a `{ when: "default" }` tail rule',
       path: ['status_rules', domain.status_rules.length - 1, 'when'],
+    });
+  }
+  // The U18 guardian gate lives inside `consent_required`. A guardian-gated
+  // domain that drops that gate from `go_live_required` would silently disable
+  // the age control — reject it rather than let config turn off U18 protection.
+  if (
+    domain.guardian_consent_required &&
+    domain.go_live_required &&
+    !domain.go_live_required.includes('consent_required')
+  ) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message:
+        'a guardian_consent_required domain must keep "consent_required" in go_live_required',
+      path: ['go_live_required'],
     });
   }
 }).transform((domain) => ({

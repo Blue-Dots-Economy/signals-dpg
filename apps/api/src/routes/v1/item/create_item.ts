@@ -15,7 +15,7 @@ import {
 } from '@/utils/served_domain_guard';
 import { invalidateItemFetchCache } from '@/utils/item_fetch_cache_invalidate';
 import { publishItemEvent } from '@/utils/publish_item_event';
-import { createItemInternal, ItemServiceError } from '@/services/item_service';
+import { createItemInternal, ItemServiceError, resolveGoLiveGates } from '@/services/item_service';
 import { resolveLocationsForCreate } from '@/services/geocoding/resolve_locations_for_create';
 import { getWardDob } from '@/services/minor_guardian_repo';
 import { isMinor, guardianConsentRequired } from '@/services/minor';
@@ -93,21 +93,27 @@ export const create_item_handler = async (
   const userId = isAdminApiCaller ? (body.created_by as string) : callerId;
 
   // A direct/self create (session user or api-key-as-self) must carry consent
-  // when the network configures a profile_creation statement — the login/gate
-  // safety net is UI-only, so this is the server-side guarantee. The admin
-  // on-behalf (bulk) path is exempt: those participants are gated at first
-  // login. When no profile_creation consent is configured there is nothing to
-  // accept, so the create is allowed.
+  // when the domain gates go-live on `consent_required` AND the network
+  // configures a profile_creation statement — the login/gate safety net is
+  // UI-only, so this is the server-side guarantee. The admin on-behalf (bulk)
+  // path is exempt: those participants are gated at first login. A domain whose
+  // `go_live_required` omits `consent_required` (e.g. a provider configured
+  // `["schema_required"]`) goes live on completeness alone, so consent is not
+  // demanded at create; and when no profile_creation consent is configured
+  // there is nothing to accept.
   if (!isAdminApiCaller && !body.consent) {
-    const requiredVersion = await resolveConsentVersion({
-      network: body.item_network,
-      category: 'profile_creation',
-    });
-    if (requiredVersion !== null) {
-      return reply.code(400).send({
-        error: 'CONSENT_REQUIRED',
-        message: 'profile_creation consent is required to create this item',
+    const gates = await resolveGoLiveGates(body.item_network, body.item_domain);
+    if (gates.includes('consent_required')) {
+      const requiredVersion = await resolveConsentVersion({
+        network: body.item_network,
+        category: 'profile_creation',
       });
+      if (requiredVersion !== null) {
+        return reply.code(400).send({
+          error: 'CONSENT_REQUIRED',
+          message: 'profile_creation consent is required to create this item',
+        });
+      }
     }
   }
 

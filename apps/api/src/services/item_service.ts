@@ -12,7 +12,7 @@ import {
   splitItemStateByPrivacy,
   validateAgainstJsonSchema,
 } from '@dpg/schemas';
-import { classify_item } from './items/classifier.js';
+import { classify_item, DEFAULT_GO_LIVE_GATES, type GoLiveGate } from './items/classifier.js';
 import { hasAcceptedProfileConsent } from './consent_acceptance.js';
 import { is_populated } from './metrics/profile_completion.js';
 import { decryptPiiBlob, encryptPiiBlob, getPiiKey } from '@dpg/auth';
@@ -258,11 +258,16 @@ export async function createItemInternal(
   // MINOR the route passes `consent_accepted=false` (self-consent must not
   // promote a minor), so they stay draft until GUARDIAN consent promotes via
   // the finalize/accept path — see create_item.ts and promoteItemOnProfileConsent.
+  const goLiveGates = await resolveGoLiveGates(params.item_network, params.item_domain);
   const classification = classify_item({
     schema: itemSchema as { required?: string[] },
     merged_state: submittedItemState,
     current_status: 'draft',
+    // Guardian-aware already: create_item passes consent_accepted=false for a
+    // gated minor (self-consent must not promote), so no separate guardian
+    // check is needed on the create path.
     consent_accepted: params.consent_accepted ?? false,
+    gates: goLiveGates,
   });
 
   const itemLocations = locationsForStorage(params.item_locations ?? [], itemSchema);
@@ -322,6 +327,28 @@ export interface UpdateItemInternalResult {
     created_at: Date;
     updated_at: Date;
   };
+}
+
+/**
+ * The go-live gate set for a (network, domain), from the domain's
+ * `go_live_required` config, or `DEFAULT_GO_LIVE_GATES` when unset. Callers
+ * pass the result into `classify_item` and use it to decide whether the U18
+ * guardian check applies (it is part of the `consent_required` gate).
+ */
+export async function resolveGoLiveGates(
+  network: string,
+  domain: string,
+): Promise<readonly GoLiveGate[]> {
+  const networkConfig = await getNetworkConfigById(network);
+  const domainConfig = networkConfig.domains.find((d) => d.id === domain);
+  const gates = domainConfig?.go_live_required ?? DEFAULT_GO_LIVE_GATES;
+  // U18: the guardian age control folds into `consent_required`. A
+  // guardian-gated domain always enforces it, even if config omitted it or the
+  // default wouldn't include it — the age gate must never be droppable.
+  if (domainConfig?.guardian_consent_required && !gates.includes('consent_required')) {
+    return [...gates, 'consent_required'];
+  }
+  return gates;
 }
 
 /**
@@ -428,17 +455,22 @@ export async function promoteItemOnProfileConsent(
     priv
   );
 
+  const goLiveGates = await resolveGoLiveGates(item.item_network, item.item_domain);
+  // Reached only after the caller recorded profile_creation consent, so the
+  // consent row exists; the `consent_required` gate then reduces to the U18 age
+  // check (spec §7 / D11/D13) — fail-closed for a gated minor / null-DOB. The
+  // guardian result is folded into `consent_accepted`; the classifier just
+  // evaluates whichever gates the domain configured.
+  const consentSatisfied = !(await guardianGateBlocksGoLive(exec, item));
   const { lifecycle_status } = classify_item({
     schema: itemSchema as { required?: string[] },
     merged_state: mergedFullState,
     current_status: 'draft',
-    consent_accepted: true,
+    consent_accepted: consentSatisfied,
+    gates: goLiveGates,
   });
 
   if (lifecycle_status !== 'live') return false;
-
-  // U18 age gate (spec §7 / D11/D13). Fail-closed for a gated minor / null-DOB.
-  if (await guardianGateBlocksGoLive(exec, item)) return false;
 
   await exec
     .update(items)
@@ -593,29 +625,29 @@ export async function updateItemInternal(
           ? ''
           : encryptPiiBlob(JSON.stringify(split.privateState), getPiiKey());
 
-      const consent_accepted = await hasAcceptedProfileConsent(
-        exec,
-        existingItem.item_id,
+      const goLiveGates = await resolveGoLiveGates(
+        existingItem.item_network,
+        existingItem.item_domain,
       );
+      // `consent_required` = correct-signer consent. `hasAcceptedProfileConsent`
+      // matches a profile_creation row of ANY source, so a minor's
+      // create-draft-then-edit could otherwise flip to `live` on their own
+      // self-consent row — fold the U18 guardian check in so the gate value is
+      // guardian-aware. The classifier then just evaluates the configured gates
+      // (an already-live gated minor keeps a passing guardian row, so no
+      // demotion; the live-latch above guards field removal).
+      const consentSatisfied =
+        (await hasAcceptedProfileConsent(exec, existingItem.item_id)) &&
+        !(await guardianGateBlocksGoLive(exec, existingItem));
 
       const classification = classify_item({
         schema: itemSchema as { required?: string[] },
         merged_state: mergedFullState,
         current_status: existingItem.lifecycle_status as 'draft' | 'live' | 'paused',
-        consent_accepted,
+        consent_accepted: consentSatisfied,
+        gates: goLiveGates,
       });
-      // U18 age gate on the UPDATE path: `hasAcceptedProfileConsent` matches a
-      // profile_creation row of ANY source, so a minor's create-draft-then-edit
-      // would otherwise flip to `live` on their own self-consent row. Block the
-      // draft→live transition through the same server gate as promote/create;
-      // an already-live item is untouched (the live-latch handles those).
-      const wouldGoLive =
-        classification.lifecycle_status === 'live' && existingItem.lifecycle_status !== 'live';
-      if (wouldGoLive && (await guardianGateBlocksGoLive(exec, existingItem))) {
-        updateValues.lifecycle_status = existingItem.lifecycle_status;
-      } else {
-        updateValues.lifecycle_status = classification.lifecycle_status;
-      }
+      updateValues.lifecycle_status = classification.lifecycle_status;
     }
 
     // Location resolution precedence (runs after the state merge):

@@ -501,7 +501,18 @@ export function HomePage() {
     (v) => v.version === profileDoc.current_version,
   );
   const profileStatement = profileVersion?.statement ?? '';
-  const profileConsentRequired = Boolean(profileStatement);
+  // Whether the active profile's DOMAIN gates go-live on `consent_required`
+  // (mirrors `go_live_required` in network.json). A domain that goes live on
+  // completeness alone (e.g. a provider configured `["schema_required"]`) never
+  // prompts for profile_creation consent. Absent config ⇒ require (safe default,
+  // matches the login-gate behaviour).
+  const activeDomainGates = network?.domains.find(
+    (d) => d.id === myItem?.item_domain,
+  )?.go_live_required;
+  const activeDomainNeedsConsent = activeDomainGates
+    ? activeDomainGates.includes('consent_required')
+    : true;
+  const profileConsentRequired = Boolean(profileStatement) && activeDomainNeedsConsent;
 
   // Gate the auto-selected profile: if it lacks profile_creation consent, prompt.
   React.useEffect(() => {

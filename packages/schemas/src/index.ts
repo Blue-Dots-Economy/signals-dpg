@@ -22,6 +22,8 @@ export {
   getDomainItemSchema,
   getInstanceCustomItemSchemaUrl,
   getInteractionPiiRevealStatuses,
+  PROFILE_GO_LIVE_GATES,
+  type GoLiveGate,
   type MetricCategoryAsymmetry,
   type MetricCategoryEdge,
   NetworkConfigSchema,
