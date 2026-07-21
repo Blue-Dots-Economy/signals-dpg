@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
+import { useResendCountdown } from '@/hooks/use-resend-countdown';
 import { Loader2, ArrowLeft, OctagonX } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { OtpInput } from '@/components/auth/otp-input';
@@ -10,14 +11,21 @@ import { useAuth } from '@/contexts/auth-context';
 import { getServedScope } from '@/lib/served-binding';
 import { evaluateDomainGate, resolveHeldDomains } from '@/lib/domain-gate';
 import { toast } from 'sonner';
-import { acceptConsent } from '@/lib/consent-api';
+import { acceptConsent, submitU18Dob } from '@/lib/consent-api';
 import type { ConsentAcceptBody } from '@dpg/schemas';
+import { useNetworkTheme } from '@/theme/theme-provider';
+import { setStoredSignupDomain, type SignupExtras } from '@/lib/signup-domain';
+import { setUserDomains } from '@/lib/user-api';
 
 interface AuthState extends AuthIdentifier {
   userExists: boolean;
   name?: string;
   redirectTo?: string;
   pendingConsent?: ConsentAcceptBody | null;
+  /** Carries the DOB (+ chosen domain for new signups) captured in the auth
+   * flow before this OTP: set for a brand-new signup, and for an existing user
+   * who backfilled their DOB pre-OTP (see login-page.tsx). Null otherwise. */
+  signupExtras?: SignupExtras | null;
 }
 
 function getAuthIdentifier(state: AuthState): AuthIdentifier {
@@ -29,27 +37,29 @@ export function OtpPage() {
   const location = useLocation();
   const { verifyOtp, signOut } = useAuth();
   const { t } = useTranslation();
+  const { themeId } = useNetworkTheme();
   const [isLoading, setIsLoading] = useState(false);
-  const [countdown, setCountdown] = useState(60);
+  const { countdown, restart: restartCountdown } = useResendCountdown(60);
   const [inlineError, setInlineError] = useState<{ title: string; description: string } | null>(null);
 
   const state = location.state as AuthState | null;
   const identifierLabel = state?.email ?? state?.phoneNumber;
 
   useEffect(() => {
-    if (!identifierLabel) {
-      navigate('/auth/login');
-      return;
-    }
-    if (countdown <= 0) return;
-    const interval = setInterval(() => {
-      setCountdown((c) => {
-        if (c <= 1) { clearInterval(interval); return 0; }
-        return c - 1;
-      });
-    }, 1000);
-    return () => clearInterval(interval);
-  }, [countdown, identifierLabel, navigate]);
+    if (!identifierLabel) navigate('/auth/login');
+  }, [identifierLabel, navigate]);
+
+  // Final step once verification (and, for a gated minor, the guardian flow)
+  // has settled: toast + land on home (or the original redirect target).
+  const finishSignIn = () => {
+    if (!state) return;
+    toast.success(state.userExists ? t('auth.toast_welcome_back') : t('auth.toast_account_created'), {
+      description: state.userExists
+        ? t('auth.toast_welcome_back_desc')
+        : t('auth.toast_account_created_desc'),
+    });
+    navigate(state.redirectTo ?? '/', { replace: true });
+  };
 
   const handleOtpComplete = async (otp: string) => {
     if (!state || !identifierLabel) return;
@@ -82,12 +92,35 @@ export function OtpPage() {
         }
       }
 
-      toast.success(state.userExists ? t('auth.toast_welcome_back') : t('auth.toast_account_created'), {
-        description: state.userExists
-          ? t('auth.toast_welcome_back_desc')
-          : t('auth.toast_account_created_desc'),
-      });
-      navigate(state.redirectTo ?? '/', { replace: true });
+      // U18 DOB/guardian was collected in the auth flow BEFORE this OTP (signup
+      // gate, or the existing-user pre-check). Persist it now that the session
+      // exists. Best-effort like the consent-accept write above — never block
+      // sign-in on it.
+      if (state.signupExtras) {
+        const { domain, dateOfBirth } = state.signupExtras;
+        // New signup: hand the chosen domain off to profile-form-page (one-shot)
+        // AND persist it on the user so profile creation is restricted to it.
+        if (!state.userExists) {
+          setStoredSignupDomain(themeId, domain);
+          try {
+            await setUserDomains([domain]);
+          } catch {
+            // Best-effort — profile-form falls back to held items if unset.
+          }
+        }
+        // DOB only exists for guardian-gated flows; persist it for the now-auth
+        // user (idempotent for a signup minor already materialized on create).
+        if (dateOfBirth) {
+          try {
+            await submitU18Dob({ network: themeId, dateOfBirth });
+          } catch {
+            toast.error(t('auth.toast_consent_persist_error', 'Could not save your consent. You may be asked again next time.'));
+          }
+        }
+      }
+
+
+      finishSignIn();
     } catch {
       setInlineError({
         title: t('auth.otp_incorrect_title'),
@@ -104,7 +137,7 @@ export function OtpPage() {
     setInlineError(null);
     try {
       await requestOtp(getAuthIdentifier(state));
-      setCountdown(60);
+      restartCountdown();
       toast.success(t('auth.toast_new_code_sent'), {
         description: t('auth.toast_new_code_sent_desc'),
       });
@@ -121,6 +154,7 @@ export function OtpPage() {
   if (!identifierLabel) return null;
 
   return (
+    <>
     <AuthShell>
       {/* Back */}
       <button
@@ -178,5 +212,6 @@ export function OtpPage() {
         )}
       </div>
     </AuthShell>
+    </>
   );
 }

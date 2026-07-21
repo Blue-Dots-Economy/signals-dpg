@@ -13,6 +13,7 @@ dpg-monorepo/
 │   ├── auth/              # better-auth configuration
 │   ├── config/            # Zod env schemas & allowed lists
 │   ├── database/          # Drizzle ORM setup & utilities
+│   ├── match_score/       # Match-scoring provider client (DPG scoring)
 │   ├── notification/      # Notification service client
 │   └── schemas/           # Shared Zod schemas & schema registry
 ├── turbo.json             # Turborepo task definitions
@@ -56,10 +57,12 @@ an app/package dir, or `pnpm add -w <pkg>` for workspace-wide deps.
 
 ### Tests
 
-**No test framework is configured.** If adding tests, use Vitest and run:
+**Vitest**, colocated `__tests__/` folders per directory (the norm — a top-level `apps/api/src/__tests__/` also exists for a handful of cross-cutting integration tests). `*.test.ts` is a unit test; `*.integration.test.ts` requires a running Postgres + Redis (`docker compose up -d db redis`) and is excluded from the default `pnpm --filter api test` run.
 
 ```bash
-pnpm vitest run src/path/to/testfile.ts
+pnpm --filter api test                              # unit tests
+pnpm --filter api exec vitest run src/path/to/file.test.ts   # one file
+pnpm --filter api test:integration                   # integration (needs db+redis running)
 ```
 
 ### Type Checking
@@ -189,17 +192,6 @@ export default my_route;
 - Schema files: `apps/api/db/postgres/schema/`. Migrations: `apps/api/drizzle/`.
 - Use `drizzle-kit` for migrations. **Never edit migration files manually.**
 - Use partition-aware queries for item tables to enable partition pruning.
-
-## Cursor Rules (Codacy MCP)
-
-Follow rules in `.cursor/rules/codacy.mdc`:
-
-- After any `edit_file` operation, run `codacy_cli_analyze` via Codacy MCP
-  Server.
-- If Codacy CLI is not installed, ask the user before proceeding.
-- After installing dependencies, run `codacy_cli_analyze` with tool `trivy` for
-  security checks.
-- Do NOT run complexity or coverage analysis.
 
 ## General Guidelines
 

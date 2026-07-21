@@ -31,6 +31,7 @@ export const apiConfig = {
   consent_support_email: networkRuntime.CONSENT_SUPPORT_EMAIL,
   allow_extra_schema_data: networkRuntime.ALLOW_EXTRA_SCHEMA_DATA,
   bulk_max_items: networkRuntime.BULK_MAX_ITEMS,
+  max_wards_per_guardian: networkRuntime.MAX_WARDS_PER_GUARDIAN,
   schema_registry_url: schemaRegistry.SCHEMA_REGISTRY_URL,
   peer_fetch_timeout_ms: networkRuntime.PEER_FETCH_TIMEOUT_MS,
 };
@@ -126,4 +127,5 @@ export const databasesConfig = {
   redis_password: databases.REDIS_PASSWORD,
   redis_port: databases.REDIS_PORT,
   ingest_stream: databases.INGEST_STREAM,
+  ingest_stream_maxlen: databases.INGEST_STREAM_MAXLEN,
 };

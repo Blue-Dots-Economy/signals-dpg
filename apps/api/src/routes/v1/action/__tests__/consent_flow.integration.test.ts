@@ -335,26 +335,24 @@ describeIf(`consent flow integration (purple_dot/connect)${
         'x-api-key': alice_raw_key,
         'content-type': 'application/json',
       },
-      payload: [
-        {
-          action_type: 'connect',
-          source_item: {
-            item_network: 'purple_dot',
-            item_domain: 'seeker',
-            item_type: 'profile_1.0',
-            item_id: alice_item_id,
-          },
-          target_item: {
-            item_network: 'purple_dot',
-            item_domain: 'provider',
-            item_type: 'profile_1.0',
-            item_id: bob_item_id,
-            item_instance_url: base_url,
-          },
-          requirements_snapshot: {},
-          // consent field intentionally omitted
+      payload: {
+        action_type: 'connect',
+        source_item: {
+          item_network: 'purple_dot',
+          item_domain: 'seeker',
+          item_type: 'profile_1.0',
+          item_id: alice_item_id,
         },
-      ],
+        target_item: {
+          item_network: 'purple_dot',
+          item_domain: 'provider',
+          item_type: 'profile_1.0',
+          item_id: bob_item_id,
+          item_instance_url: base_url,
+        },
+        requirements_snapshot: {},
+        // consent field intentionally omitted
+      },
     });
 
     expect(res.statusCode).toBe(422);
@@ -372,29 +370,27 @@ describeIf(`consent flow integration (purple_dot/connect)${
         'x-api-key': alice_raw_key,
         'content-type': 'application/json',
       },
-      payload: [
-        {
-          action_type: 'connect',
-          source_item: {
-            item_network: 'purple_dot',
-            item_domain: 'seeker',
-            item_type: 'profile_1.0',
-            item_id: alice_item_id,
-          },
-          target_item: {
-            item_network: 'purple_dot',
-            item_domain: 'provider',
-            item_type: 'profile_1.0',
-            item_id: bob_item_id,
-            item_instance_url: base_url,
-          },
-          requirements_snapshot: {},
-          consent: {
-            acknowledged: true,
-            version: CONSENT_VERSION,
-          },
+      payload: {
+        action_type: 'connect',
+        source_item: {
+          item_network: 'purple_dot',
+          item_domain: 'seeker',
+          item_type: 'profile_1.0',
+          item_id: alice_item_id,
         },
-      ],
+        target_item: {
+          item_network: 'purple_dot',
+          item_domain: 'provider',
+          item_type: 'profile_1.0',
+          item_id: bob_item_id,
+          item_instance_url: base_url,
+        },
+        requirements_snapshot: {},
+        consent: {
+          acknowledged: true,
+          version: CONSENT_VERSION,
+        },
+      },
     });
 
     expect(res.statusCode).toBe(201);
@@ -477,29 +473,27 @@ describeIf(`consent flow integration (purple_dot/connect)${
         'x-api-key': alice_raw_key,
         'content-type': 'application/json',
       },
-      payload: [
-        {
-          action_type: 'connect',
-          source_item: {
-            item_network: 'purple_dot',
-            item_domain: 'seeker',
-            item_type: 'profile_1.0',
-            item_id: alice_item_id,
-          },
-          target_item: {
-            item_network: 'purple_dot',
-            item_domain: 'provider',
-            item_type: 'profile_1.0',
-            item_id: bob_item_id,
-            item_instance_url: base_url,
-          },
-          requirements_snapshot: {},
-          consent: {
-            acknowledged: true,
-            version: CONSENT_VERSION,
-          },
+      payload: {
+        action_type: 'connect',
+        source_item: {
+          item_network: 'purple_dot',
+          item_domain: 'seeker',
+          item_type: 'profile_1.0',
+          item_id: alice_item_id,
         },
-      ],
+        target_item: {
+          item_network: 'purple_dot',
+          item_domain: 'provider',
+          item_type: 'profile_1.0',
+          item_id: bob_item_id,
+          item_instance_url: base_url,
+        },
+        requirements_snapshot: {},
+        consent: {
+          acknowledged: true,
+          version: CONSENT_VERSION,
+        },
+      },
     });
     if (performRes.statusCode !== 201) {
       throw new Error(

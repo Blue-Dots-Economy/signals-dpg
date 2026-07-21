@@ -4,9 +4,9 @@ import z, {
 } from '@dpg/schemas';
 import { FastifyReply, FastifyRequest } from 'fastify';
 import { db } from '@api/db/postgres/drizzle_config';
-import { DrizzleQueryError, and, eq } from 'drizzle-orm';
-import { DatabaseError, ensureItemPartition, items } from '@dpg/database';
-import { consent_record } from '@api/db/postgres/schema';
+import { DrizzleQueryError, and, eq, sql } from 'drizzle-orm';
+import { DatabaseError, ensureItemPartition } from '@dpg/database';
+import { consent_record, user } from '@api/db/postgres/schema';
 import { resolveConsentVersion } from '@/services/consent_version';
 import { auth_middleware_if_enabled } from '@api/plugins/auth/auth_middleware';
 import {
@@ -17,7 +17,9 @@ import { invalidateItemFetchCache } from '@/utils/item_fetch_cache_invalidate';
 import { publishItemEvent } from '@/utils/publish_item_event';
 import { createItemInternal, ItemServiceError } from '@/services/item_service';
 import { resolveLocationsForCreate } from '@/services/geocoding/resolve_locations_for_create';
-import { resolveDomainLock } from './resolve_domain_lock';
+import { getWardDob } from '@/services/minor_guardian_repo';
+import { isMinor, guardianConsentRequired } from '@/services/minor';
+import { getNetworkConfigById } from '@/network_configs';
 
 type CreateItemRequest = FastifyRequest<{
   Body: z.infer<typeof CreateItemBodySchema>;
@@ -117,32 +119,25 @@ export const create_item_handler = async (
     );
   }
 
-  // Single-domain lock: a user may only create items in the one domain they
-  // already hold within this network. The lock is derived live from the items
-  // table (no membership column). Admin api-key callers bypass — they act on
-  // behalf of a user with explicit intent. Empty set => not yet locked, so any
-  // served domain is allowed; deleting all their items releases the lock.
+  // Single-role lock, driven by `user.domains` (the source of truth, persisted
+  // at signup / bootstrapped on first create below). A user may create profiles
+  // only in the domain(s) on their user row. The column is an array for a
+  // FUTURE multi-role case, but today it holds exactly one entry and this never
+  // grows it, so the role stays single. Empty => not yet set, so any served
+  // domain is allowed and the first create records it. Admin api-key callers
+  // bypass — they act on behalf of a user with explicit intent.
   if (!isAdminApiCaller) {
-    const heldRows = await db
-      .selectDistinct({ item_domain: items.item_domain })
-      .from(items)
-      .where(
-        and(
-          eq(items.created_by, userId),
-          eq(items.item_network, body.item_network),
-        ),
-      );
-
-    const lock = resolveDomainLock(
-      heldRows.map((r) => r.item_domain),
-      body.item_domain,
-    );
-
-    if (!lock.allowed) {
+    const [row] = await db
+      .select({ domains: user.domains })
+      .from(user)
+      .where(eq(user.id, userId))
+      .limit(1);
+    const allowed = row?.domains ?? [];
+    if (allowed.length > 0 && !allowed.includes(body.item_domain)) {
       return reply.code(403).send({
         error: 'DOMAIN_LOCKED',
-        message: `You are registered as "${lock.lockedDomain}" in "${body.item_network}" and cannot create items under "${body.item_domain}".`,
-        locked_domain: lock.lockedDomain,
+        message: `You are registered as "${allowed[0]}" and cannot create items under "${body.item_domain}".`,
+        locked_domain: allowed[0],
         requested_domain: body.item_domain,
       });
     }
@@ -183,6 +178,23 @@ export const create_item_handler = async (
     log: request.log,
   });
 
+  // U18 fail-closed: a self-consent create must NOT promote a gated MINOR to
+  // live — only GUARDIAN consent (recorded via the finalize/accept path) does.
+  // So a consenting create by a gated minor is still written draft; everyone
+  // else keeps the #275 behaviour (consenting create goes live now).
+  let selfConsentPromotes = body.consent != null;
+  if (selfConsentPromotes) {
+    const networkConfig = await getNetworkConfigById(body.item_network);
+    if (guardianConsentRequired(networkConfig, body.item_domain)) {
+      // Gated domain is fail-closed: only a PROVEN adult self-promotes to live.
+      // A minor needs guardian consent; a null DOB cannot prove adulthood (DOB
+      // capture is client-side only) → both stay draft. Mirrors
+      // guardianGateBlocksGoLive on the promote/update paths.
+      const dob = await getWardDob(userId);
+      if (!dob || isMinor(dob)) selfConsentPromotes = false;
+    }
+  }
+
   try {
     // Item + consent are written in one transaction so a consent-write failure
     // rolls the item back too (fail-closed — never a PII item without a consent
@@ -195,6 +207,17 @@ export const create_item_handler = async (
         item_state: body.item_state ?? {},
         item_locations,
         created_by: userId,
+        // A self-create that carries consent IS the profile_creation acceptance,
+        // so classify with it now (#275 gated `live` on consent but never let
+        // the create path see it → profiles were stuck `draft`). Keyed on
+        // presence, not `body.consent.category`: the consent row + version are
+        // server-resolved to `profile_creation` (the only create-time consent
+        // category), so any consent block present is that acceptance. The row is
+        // written just below in the same transaction; a consent-write failure
+        // rolls the whole create back (fail-closed). Admin/bulk callers omit
+        // this and stay draft, promoted later via /consent/profile-accept.
+        // A gated minor is forced draft (see selfConsentPromotes above).
+        consent_accepted: selfConsentPromotes,
       });
 
       if (body.consent) {
@@ -226,6 +249,19 @@ export const create_item_handler = async (
           throw new ConsentWriteError(err instanceof Error ? err.message : 'consent write failed');
         }
       }
+
+      // Bootstrap the single role on the user's first create so `user.domains`
+      // stays the source of truth for the lock. Sets only when unset; never
+      // grows to a second domain, so the role stays single.
+      await tx
+        .update(user)
+        .set({ domains: [body.item_domain], updatedAt: new Date() })
+        .where(
+          and(
+            eq(user.id, userId),
+            sql`(${user.domains} IS NULL OR cardinality(${user.domains}) = 0)`,
+          ),
+        );
 
       return c;
     });

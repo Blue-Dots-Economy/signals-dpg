@@ -1,4 +1,5 @@
 import * as React from 'react';
+import axios from 'axios';
 import type { RJSFSchema } from '@rjsf/utils';
 import { useSearchParams, useNavigate, Link } from 'react-router-dom';
 import { toast } from 'sonner';
@@ -47,10 +48,22 @@ import { LocationSourceToggle } from '@/components/location/location-source-togg
 import { EnableLocationBanner } from '@/components/location/enable-location-banner';
 import { nearestDistanceMeters } from '@/lib/geo/distance';
 import type { LatLng } from '@/lib/geo/types';
-import { getProfileConsentStatus, acceptProfileConsent } from '@/lib/consent-api';
+import {
+  getProfileConsentStatus,
+  acceptProfileConsent,
+  getU18Status,
+  issueProfileConsentOtp,
+  verifyProfileConsentOtp,
+  type U18StatusResponse,
+  type ProfileConsentOtpItemRef,
+} from '@/lib/consent-api';
 import { useConsentConfig } from '@/hooks/use-consent-config';
+import { useConsentGate } from '@/hooks/use-consent-gate';
 import { useNetworkTheme } from '@/theme/theme-provider';
 import { ProfileConsentModal } from '@/components/consent/profile-consent-modal';
+import { GuardianOtpDialog } from '@/components/actions/guardian-otp-dialog';
+import { U18GuardianFlow } from '@/components/consent/u18/u18-guardian-flow';
+import { isGuardianConsentRequiredDomain } from '@/lib/guardian-consent';
 
 function itemToCardItem(item: Item): { id: string; domain: string; data: Record<string, unknown> } {
   return {
@@ -172,7 +185,7 @@ function resolveDefaultViewMode(): ViewMode {
 
 export function HomePage() {
   const { t } = useTranslation();
-  const { user } = useAuth();
+  const { user, signOut } = useAuth();
   const allCardsGridRef = useEqualRowHeights<HTMLDivElement>();
   const [searchParams, setSearchParams] = useSearchParams();
   const navigate = useNavigate();
@@ -233,6 +246,14 @@ export function HomePage() {
   const [consentedProfileIds, setConsentedProfileIds] = React.useState<Set<string>>(new Set());
   const [consentLoaded, setConsentLoaded] = React.useState(false);
   const [pendingConsentProfileId, setPendingConsentProfileId] = React.useState<string | null>(null);
+  // For a MINOR, profile_creation consent is guardian-given: an OTP is issued
+  // to the guardian and this holds the item ref while the guardian-OTP dialog
+  // is open (D13). null for adults (they self-accept via ProfileConsentModal).
+  const [guardianProfileRef, setGuardianProfileRef] = React.useState<ProfileConsentOtpItemRef | null>(null);
+  // Fallback for a minor with NO guardian on file yet (issue returns 409
+  // GUARDIAN_REQUIRED): holds the item ref while the guardian-capture flow
+  // (details + setup OTP) runs, then the profile OTP is re-issued for it.
+  const [guardianSetupRef, setGuardianSetupRef] = React.useState<ProfileConsentOtpItemRef | null>(null);
   const [loading, setLoading] = React.useState(false);
   const browseSelection = useCardSelection();
   const [bulkConnectOpen, setBulkConnectOpen] = React.useState(false);
@@ -504,6 +525,93 @@ export function HomePage() {
     pendingConsentProfileId,
   ]);
 
+  // U18 guardian consent gate (Phase 6). Domain is derived from the ward's
+  // own existing profile item — never a registration dropdown. Only wards
+  // whose profile domain is `guardian_consent_required` AND who still need
+  // the adult-equivalent terms/privacy consent (the same signal the ordinary
+  // flow uses; the guardian-OTP-verify endpoint records those categories on
+  // success) are routed through the guardian flow — everyone else (adults,
+  // ungated domains, users with no profile yet) is unaffected.
+  const wardDomain = myItem?.item_domain ?? null;
+  const requiresGuardianGate = Boolean(
+    user && network && wardDomain && isGuardianConsentRequiredDomain(network, wardDomain),
+  );
+  const {
+    needed: u18NeededConsent,
+    isLoading: u18GateLoading,
+    refetch: refetchU18Gate,
+  } = useConsentGate();
+  const [guardianFlowDismissed, setGuardianFlowDismissed] = React.useState(false);
+
+  // Re-evaluate from scratch if the acting network or ward domain changes
+  // (e.g. switching networks, or the active profile changing) instead of
+  // staying dismissed forever.
+  React.useEffect(() => {
+    setGuardianFlowDismissed(false);
+  }, [network?.id, wardDomain]);
+
+  // Stored U18 status (birth month/year captured ONCE at login). We read it
+  // instead of re-asking the DOB at profile-creation time: if birth data is
+  // already stored we skip the DOB step entirely, and a stored ADULT is never
+  // routed through the guardian flow at all.
+  const [u18Status, setU18Status] = React.useState<U18StatusResponse | null>(null);
+  const [u18StatusLoading, setU18StatusLoading] = React.useState(false);
+  // Bumped after the guardian flow completes so the stored status (birth data +
+  // guardianVerified) is re-read — otherwise it stays stale and a later profile
+  // creation re-triggers the DOB step even though the ward already finished it.
+  const [u18StatusReload, setU18StatusReload] = React.useState(0);
+  React.useEffect(() => {
+    // Fetch whenever authenticated + on a network — NOT only when a profile
+    // already exists. Otherwise the very first profile creation can't tell the
+    // ward is a minor (no prior profile → no fetch) and skips the guardian gate.
+    if (!user || !network) {
+      setU18Status(null);
+      return;
+    }
+    let cancelled = false;
+    setU18StatusLoading(true);
+    getU18Status(network.id)
+      .then((s) => { if (!cancelled) setU18Status(s); })
+      // On failure fall back to the DOB-capture path (u18Status stays null →
+      // initialStep 'dob'); never leave a minor ungated on a transient error.
+      .catch(() => { if (!cancelled) setU18Status(null); })
+      .finally(() => { if (!cancelled) setU18StatusLoading(false); });
+    return () => { cancelled = true; };
+  }, [user, network, network?.id, u18StatusReload]);
+
+  // Stored data already resolves this ward as an adult → no guardian gate;
+  // the ordinary consent flow (ProfileConsentModal) handles terms/privacy.
+  const u18ResolvedAdult = u18Status?.hasBirthData === true && u18Status.isMinor === false;
+
+  // DOB is captured ONCE and reused — skip the DOB step when birth data is
+  // already stored; only capture it here when nothing is stored yet. Guardian
+  // verification itself is NOT skipped by a prior verify: the account
+  // terms/privacy flow shows whenever those consents are actually needed (e.g.
+  // a version bump, D15), and profile-creation / per-action guardian OTP are
+  // gated separately.
+  const u18InitialStep: 'dob' | 'guardian' = u18Status?.hasBirthData ? 'guardian' : 'dob';
+
+  // Minor status not yet resolved (no birth captured). Must run the flow (DOB
+  // step) even when terms/privacy is already satisfied — otherwise a bulk/form
+  // ward who self-accepted terms/privacy at login is never asked for DOB, so
+  // the server can't detect a minor and the guardian gate is bypassed.
+  const u18BirthUnresolved = !u18StatusLoading && u18Status?.hasBirthData !== true;
+
+  // A resolved minor who isn't guardian-verified yet must be gated even when
+  // terms/privacy already happen to be satisfied (e.g. an existing user who
+  // provided DOB pre-OTP but whose guardian step runs here, post-login) —
+  // otherwise they'd land in the app un-gated with no way to attach a guardian.
+  const u18MinorNeedsGuardian =
+    u18Status?.isMinor === true && u18Status?.guardianVerified !== true;
+
+  const showU18GuardianFlow =
+    requiresGuardianGate &&
+    !u18GateLoading &&
+    !guardianFlowDismissed &&
+    !u18StatusLoading &&
+    !u18ResolvedAdult &&
+    (u18NeededConsent.length > 0 || u18BirthUnresolved || u18MinorNeedsGuardian);
+
   // Sort a card-item array (item_locations stored in .data) nearest-first when userLocation is known.
   // Items without locations sort last (nearestDistanceMeters returns Infinity for empty/missing arrays).
   const sortByNearest = React.useCallback(
@@ -534,6 +642,23 @@ export function HomePage() {
     () => (network ? computeVisibleDomains(network, viewerDomain) : []),
     [network, viewerDomain],
   );
+
+  // Domains whose fields drive the browse filters, keyed on the sidebar Browse
+  // selection: a specific domain → only that domain's fields (a provider
+  // viewing "Seekers" filters by seeker fields, viewing "Providers" by provider
+  // fields). "All" (null) → the counterpart domains (visible minus the viewer's
+  // own) so a provider's default view filters seekers, not the provider fields
+  // pulled in by a provider→provider "connect" self-edge; falls back to all
+  // visible domains when that would leave nothing (self-only interaction, or a
+  // signed-out viewer with no domain identity).
+  const filterFieldDomains = React.useMemo(() => {
+    if (selectedDomain) {
+      const selected = visibleDomains.filter((d) => d.id === selectedDomain);
+      if (selected.length > 0) return selected;
+    }
+    const counterparts = visibleDomains.filter((d) => d.id !== viewerDomain);
+    return counterparts.length > 0 ? counterparts : visibleDomains;
+  }, [visibleDomains, viewerDomain, selectedDomain]);
 
   React.useEffect(() => {
     if (!network) return;
@@ -814,11 +939,21 @@ export function HomePage() {
 
   const handleDomainSelect = (domainId: string | null) => {
     setSelectedDomain(domainId);
+    // Switching the browse domain changes the available filter fields, so reset
+    // the map domain + enum-field selections: a leftover domain chip from
+    // another scope would otherwise hide every item, and stale field chips would
+    // show as active even though their group is no longer rendered.
+    setMapSelectedDomains([]);
+    setMapSelectedFields({});
     setSearchParams((prev) => {
       if (domainId) {
         prev.set('domain', domainId);
       } else {
         prev.delete('domain');
+      }
+      prev.delete('map_domains');
+      for (const key of [...prev.keys()]) {
+        if (key.startsWith('f_')) prev.delete(key);
       }
       return prev;
     });
@@ -914,17 +1049,111 @@ export function HomePage() {
     return value ? String(value) : profile.item_domain;
   }, [pendingConsentProfileId, myItems, userSchemas]);
 
+  const u18GuardianFlowModal = showU18GuardianFlow && network ? (
+    <U18GuardianFlow
+      network={network.id}
+      brand={brand === 'standard' ? null : brand}
+      // Skip the DOB step when birth data is already stored (captured at
+      // login) — we never re-ask the date of birth at profile-creation time.
+      initialStep={u18InitialStep}
+      onComplete={() => {
+        setGuardianFlowDismissed(true);
+        // Re-read stored U18 status so guardianVerified/birth data are fresh —
+        // stops a later profile creation from re-asking the DOB.
+        setU18StatusReload((n) => n + 1);
+        void refetchU18Gate();
+      }}
+      onNotMinor={() => {
+        setGuardianFlowDismissed(true);
+        setU18StatusReload((n) => n + 1);
+      }}
+      onLogout={() => { void signOut(); }}
+    />
+  ) : null;
+
+  // Issue a MINOR's profile_creation guardian OTP for a given item ref and hand
+  // off to the guardian-OTP dialog. If no guardian is on file yet (409
+  // GUARDIAN_REQUIRED), fall back to the guardian-capture flow, then this is
+  // re-invoked for the same ref once a guardian exists.
+  const issueProfileOtp = React.useCallback(
+    async (ref: ProfileConsentOtpItemRef) => {
+      try {
+        const { otpSent } = await issueProfileConsentOtp(ref);
+        if (otpSent) {
+          // Keep pendingConsentProfileId set (nulling it re-triggers the prompt
+          // effect, which would reopen the consent modal over the OTP dialog).
+          // The OTP dialog takes over via guardianProfileRef.
+          setGuardianProfileRef(ref);
+        }
+      } catch (err) {
+        const status = axios.isAxiosError(err) ? err.response?.status : undefined;
+        const code = axios.isAxiosError(err)
+          ? (err.response?.data as { error?: string } | undefined)?.error
+          : undefined;
+        if (status === 409 && code === 'GUARDIAN_REQUIRED') {
+          // No guardian captured yet — run the capture flow, then retry.
+          setGuardianSetupRef(ref);
+        } else if (status === 429) {
+          toast.error(t('u18.guardian_error_rate_limited', 'Too many attempts. Please try again shortly.'));
+        } else if (status === 503) {
+          toast.error(t('u18.guardian_error_otp_unavailable', "Guardian confirmation isn't available on this instance right now."));
+        } else {
+          toast.error(t('profile.error_generic_desc'));
+        }
+      }
+    },
+    [t],
+  );
+
+  // Guardian-capture fallback: a minor whose profile_creation consent needs a
+  // guardian that isn't on file yet. Reuses the first-login flow starting at
+  // the details step; on completion the profile OTP is re-issued for the ref.
+  const guardianSetupForProfileModal = guardianSetupRef && network ? (
+    <U18GuardianFlow
+      network={network.id}
+      brand={brand === 'standard' ? null : brand}
+      initialStep="guardian"
+      onComplete={() => {
+        const ref = guardianSetupRef;
+        setGuardianSetupRef(null);
+        setU18StatusReload((n) => n + 1);
+        void issueProfileOtp(ref);
+      }}
+      onNotMinor={() => {
+        setGuardianSetupRef(null);
+        setU18StatusReload((n) => n + 1);
+      }}
+      onLogout={() => { void signOut(); }}
+    />
+  ) : null;
+
   const profileConsentModal = (
     <ProfileConsentModal
-      open={Boolean(pendingConsentProfileId)}
+      // The U18 guardian gate takes priority — don't stack a second blocking
+      // dialog on top of it.
+      open={Boolean(pendingConsentProfileId) && !showU18GuardianFlow && !guardianProfileRef && !guardianSetupRef}
       statement={profileStatement}
       profileLabel={pendingProfileLabel}
+      minor={u18Status?.isMinor === true}
       onAccept={async () => {
         const pending = pendingConsentProfileId;
         if (!pending || !network?.id || !profileDoc) return;
         const profile = myItems.find((p) => p.item_id === pending);
         if (!profile) {
           setPendingConsentProfileId(null);
+          return;
+        }
+        // A minor's profile_creation consent is GUARDIAN-given (D13): issue a
+        // guardian OTP and hand off to the guardian-OTP dialog instead of the
+        // ward self-accepting. Adults / ungated domains keep the self-accept path.
+        if (u18Status?.isMinor === true && isGuardianConsentRequiredDomain(network, profile.item_domain)) {
+          await issueProfileOtp({
+            network: network.id,
+            brand: brand === 'standard' ? null : brand,
+            item_domain: profile.item_domain,
+            item_type: profile.item_type,
+            item_id: profile.item_id,
+          });
           return;
         }
         try {
@@ -944,6 +1173,33 @@ export function HomePage() {
           toast.error(t('profile.error_generic_desc'));
           // Keep the modal open so the user can retry.
         }
+      }}
+    />
+  );
+
+  // Guardian OTP challenge for a MINOR's profile_creation consent (D13). The
+  // dialog resubmits the entered code via verifyProfileConsentOtp; on success
+  // the server records the guardian consent and (if fields complete) promotes
+  // the profile to live.
+  const guardianProfileConsentModal = (
+    <GuardianOtpDialog
+      open={!!guardianProfileRef}
+      onOpenChange={(open) => { if (!open) setGuardianProfileRef(null); }}
+      onLogout={() => { void signOut(); }}
+      onSubmitOtp={async (otp) => {
+        const ref = guardianProfileRef;
+        if (!ref || !network?.id) return;
+        // Throws on an invalid/expired code → GuardianOtpDialog shows the inline
+        // error and keeps itself open for a retry.
+        await verifyProfileConsentOtp({ ...ref, otp });
+        setConsentedProfileIds((prev) => new Set([...prev, ref.item_id]));
+        setActiveProfileId(ref.item_id);
+        setStoredActiveProfileId(network.id, ref.item_id);
+        setGuardianProfileRef(null);
+        // Clear the pending prompt too — it was kept set while the OTP dialog
+        // was open; the profile is now consented so it must not reopen.
+        setPendingConsentProfileId(null);
+        toast.success(t('profile.guardian_consent_recorded', 'Guardian confirmed your profile'));
       }}
     />
   );
@@ -971,7 +1227,10 @@ export function HomePage() {
           </div>
         </div>
         </div>
+        {u18GuardianFlowModal}
+        {guardianSetupForProfileModal}
         {profileConsentModal}
+        {guardianProfileConsentModal}
       </>
     );
   }
@@ -1052,10 +1311,14 @@ export function HomePage() {
   const filtersPanel = (
     <MapFiltersPanel
       domains={visibleDomains}
+      filterFieldDomains={filterFieldDomains}
       selectedDomains={mapSelectedDomains}
       onDomainsChange={handleMapDomainsChange}
       selectedFields={mapSelectedFields}
       onFieldsChange={handleMapFieldsChange}
+      // A specific sidebar domain already scopes browse + the enum groups to
+      // that domain, so the domain chip toggle is redundant there.
+      showDomainToggle={selectedDomain === null}
       viewMode={viewMode}
     />
   );
@@ -1102,7 +1365,15 @@ export function HomePage() {
         />
       )}
       <ActionHandler
-          onActionSubmit={async (actionType, _actionSchema, formData, targetItemId) => {
+          // Minor on a guardian-gated domain → confirm before the guardian OTP
+          // is dispatched (server issues it on the first submit).
+          guardianConfirmRequired={
+            u18Status?.isMinor === true &&
+            !!network &&
+            !!wardDomain &&
+            isGuardianConsentRequiredDomain(network, wardDomain)
+          }
+          onActionSubmit={async (actionType, _actionSchema, formData, targetItemId, guardianOtp) => {
             if (!myItem) {
               toast.error(t('home.toast_profile_required'), {
                 description: t('home.toast_profile_required_desc'),
@@ -1176,7 +1447,8 @@ export function HomePage() {
                 requirements_snapshot: requirementsSnapshot,
                 ...(consent ? { consent } : {}),
               },
-              sourceItemInstanceUrl // Call the SOURCE instance (where myItem exists)
+              sourceItemInstanceUrl, // Call the SOURCE instance (where myItem exists)
+              guardianOtp
             );
             toast.success(t('home.toast_action_sent', { action: actionType.charAt(0).toUpperCase() + actionType.slice(1) }), {
               description: t('home.toast_action_sent_desc'),
@@ -1366,7 +1638,10 @@ export function HomePage() {
           }
         </ActionHandler>
     </PageShell>
+    {u18GuardianFlowModal}
+    {guardianSetupForProfileModal}
     {profileConsentModal}
+        {guardianProfileConsentModal}
     </>
   );
 }

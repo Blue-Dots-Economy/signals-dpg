@@ -22,6 +22,12 @@ export interface ConsentModalProps {
   mode: ConsentModalMode;
   initialTab: ConsentModalTab;
   config: ConsentConfigDocument;
+  /**
+   * Which document set to show. 'u18' renders the minor/guardian copy
+   * (`u18_documents`) so a guardian sees the U18 terms/privacy, not the adult
+   * ones. Falls back to the adult `documents` when a U18 set isn't configured.
+   */
+  variant?: 'adult' | 'u18';
   onAccept?: () => void;
   onOpenChange?: (open: boolean) => void;
 }
@@ -35,6 +41,7 @@ export function ConsentModal({
   mode,
   initialTab,
   config,
+  variant = 'adult',
   onAccept,
   onOpenChange,
 }: ConsentModalProps) {
@@ -42,8 +49,9 @@ export function ConsentModal({
   const { theme } = useNetworkTheme();
   const { t } = useTranslation();
 
-  const privacyVersion = getCurrentVersion(config.documents.privacy);
-  const termsVersion = getCurrentVersion(config.documents.terms);
+  const docs = variant === 'u18' && config.u18_documents ? config.u18_documents : config.documents;
+  const privacyVersion = getCurrentVersion(docs.privacy);
+  const termsVersion = getCurrentVersion(docs.terms);
 
   const handleOpenChange = (nextOpen: boolean) => {
     if (mode === 'gate') return;

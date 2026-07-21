@@ -22,6 +22,10 @@ export async function publishItemEvent(event: ItemEvent, logger?: WarnLogger): P
   try {
     await redis.xadd(
       databasesConfig.ingest_stream,
+      // Approximate trim (`~`) keeps the stream bounded without the per-call
+      // cost of exact trimming; acked entries would otherwise accumulate
+      // forever in the shared Redis. See INGEST_STREAM_MAXLEN.
+      'MAXLEN', '~', databasesConfig.ingest_stream_maxlen,
       '*',
       'item_network', event.item_network,
       'item_domain', event.item_domain,
