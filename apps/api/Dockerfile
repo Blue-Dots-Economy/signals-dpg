@@ -82,6 +82,13 @@ RUN --mount=type=cache,id=pnpm-store,target=/pnpm/store \
 # Copy built output AFTER install (important for layer caching)
 COPY --from=builder /app/apps/api/dist ./apps/api/dist
 
+# Deploy migration assets — the image self-migrates the DB via
+# `pnpm --filter api db:migrate:deploy` (apps/api/scripts/migrate.mjs): extension
+# preflight -> auto-baseline -> one drizzle migrate() over apps/api/drizzle/.
+# Prod deps only (drizzle-orm + pg) — no drizzle-kit.
+COPY --from=builder /app/apps/api/scripts ./apps/api/scripts
+COPY --from=builder /app/apps/api/drizzle ./apps/api/drizzle
+
 EXPOSE ${API_PORT}
 USER node
 

@@ -1,4 +1,4 @@
-import { useState, useCallback, useMemo } from 'react';
+import { useState, useCallback, useMemo, useEffect } from 'react';
 import type { Item } from '@/lib/item-api';
 import {
   calculateMatchScore,
@@ -44,6 +44,19 @@ export function useMatchScore({
     }),
     [localItem?.item_id, networkItem.item_id]
   );
+
+  // The score is specific to the (local profile, destination) pair. When the
+  // pair changes — most commonly because the user switches their active profile
+  // — a previously displayed score was computed against the OLD local profile
+  // and is no longer valid, so clear it. The card falls back to "See Match
+  // Score" and the user re-triggers a calculation for the new pair (which still
+  // hits the per-pair localStorage cache on repeat). Without this, the stale
+  // score badge lingers after a profile switch.
+  useEffect(() => {
+    setScore(null);
+    setError(null);
+    setCached(false);
+  }, [cacheKey.localItemId, cacheKey.networkItemId]);
 
   const calculate = useCallback(async () => {
     if (!localItem) {

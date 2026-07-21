@@ -766,6 +766,7 @@
         }
       },
       "id": "seeker",
+      "guardian_consent_required": true,
       "card": {
         "title_field": "name",
         "avatar_from": "name",
@@ -864,20 +865,24 @@
             "jobProviderLocation": {
               "type": "string",
               "title": "Job Location",
-              "location": "primary"
+              "location": "primary",
+              "private": true
             },
             "hiringManagerName": {
               "type": "string",
               "title": "Hiring Manager Name",
-              "minLength": 1
+              "minLength": 1,
+              "private": true
             },
             "hiringManagerPhoneNumber": {
               "type": "string",
-              "title": "Hiring Manager Mobile Number"
+              "title": "Hiring Manager Mobile Number",
+              "private": true
             },
             "hiringManagerEmail": {
               "type": "string",
-              "title": "Hiring Manager Email"
+              "title": "Hiring Manager Email",
+              "private": true
             },
             "role": {
               "type": "string",
@@ -1294,6 +1299,7 @@
         }
       },
       "id": "provider",
+      "guardian_consent_required": false,
       "card": {
         "title_field": "jobProviderName",
         "avatar_from": "jobProviderName",

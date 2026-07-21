@@ -52,3 +52,39 @@ describe('parseConsentConfigDocument', () => {
     expect(() => parseConsentConfigDocument(noActions)).not.toThrow();
   });
 });
+
+describe('u18_documents', () => {
+  const u18 = {
+    terms: {
+      current_version: 1,
+      versions: [{ version: 1, title: 'U18 T', content: '# u18 terms', effective_from: '2026-07-01' }],
+    },
+    privacy: {
+      current_version: 1,
+      versions: [{ version: 1, title: 'U18 P', content: '# u18 privacy', effective_from: '2026-07-01' }],
+    },
+    profile_creation: {
+      current_version: 1,
+      versions: [{ version: 1, statement: 'Guardian agrees to profile creation', effective_from: '2026-07-01' }],
+    },
+    guardian_declaration: {
+      current_version: 1,
+      versions: [{ version: 1, statement: 'I confirm the named guardian is my parent/guardian', effective_from: '2026-07-01' }],
+    },
+  };
+
+  it('accepts a config with a full u18_documents block', () => {
+    const parsed = parseConsentConfigDocument({ ...valid, u18_documents: u18 });
+    expect(parsed.u18_documents?.guardian_declaration.current_version).toBe(1);
+  });
+
+  it('still accepts a config with NO u18_documents (optional)', () => {
+    const parsed = parseConsentConfigDocument(valid);
+    expect(parsed.u18_documents).toBeUndefined();
+  });
+
+  it('rejects a u18_documents block missing guardian_declaration', () => {
+    const { guardian_declaration: _drop, ...noDecl } = u18;
+    expect(() => parseConsentConfigDocument({ ...valid, u18_documents: noDecl })).toThrow();
+  });
+});

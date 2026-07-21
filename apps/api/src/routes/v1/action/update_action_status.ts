@@ -27,6 +27,8 @@ import {
 } from '@/utils/action_event_runtime';
 import { runBulk, BulkItemFailure } from '@/utils/bulk_runner';
 import { dispatchActionNotifications } from '@/notifications/notify_actions';
+import { guardianActionGate, guardianGateFailure, type GateResult } from '@/services/guardian_action_gate';
+import { guardianActionConsentRow, actionConsentRow } from '@/services/guardian_consent_rows';
 
 const BulkUpdateActionStatusBodySchema = z.array(z.unknown());
 
@@ -201,6 +203,48 @@ export const update_action_status_handler = async (
       const requiresReceiverConsent =
         !isCancellation && interaction.reveals_pii_on_status.includes(body.action_status);
 
+      // U18 guardian gate (Phase 5b). Scoped to exactly the accept / PII-
+      // reveal stage — the same `requiresReceiverConsent` condition the
+      // adult consent-acknowledgment check below applies to — so every
+      // other transition (reject, custom statuses, etc.) is byte-for-byte
+      // unchanged. The party who must clear this gate is the ACCEPTING
+      // party: every non-cancellation transition reaching this point has
+      // already required `callerId === existingAction.target_item_owner`
+      // above, so the accepting minor's own item is the *target* item and
+      // the other party's item is the *source* item (mirrored from the DB
+      // row, not re-derived from the request body). A minor *initiator* was
+      // already gated at perform (Task 2, commit bc87fd0) — this gates the
+      // minor *acceptor*. Adults and ungated domains resolve `not_required`
+      // and the rest of this handler runs exactly as it does today.
+      let guardianGate: GateResult = { status: 'not_required' };
+      if (requiresReceiverConsent) {
+        guardianGate = await guardianActionGate({
+          wardUserId: callerId,
+          network: existingAction.target_item_network,
+          sourceDomain: existingAction.target_item_domain,
+          actionType: existingAction.action_type,
+          sourceItemId: existingAction.target_item_id,
+          targetItemId: existingAction.source_item_id,
+          stage: 'accept',
+          otp: body.guardian_otp,
+        });
+
+        // Per-item BulkItemFailure (mirrors perform_action.ts, commit
+        // bc87fd0) — NOT a mid-loop reply.send. runBulk is sequential
+        // best-effort: a thrown BulkItemFailure is recorded for this item
+        // and the loop continues to the next one, so a real HTTP
+        // challenge/response status here would be wrong on two counts — it
+        // would apply to the whole batch, not just this item, and trailing
+        // items would still run and commit underneath it while the
+        // envelope that describes them never gets sent (the original bug:
+        // a batch [minorAccept-no-otp, adultAccept] could commit the
+        // adult's PII-revealing accept and then return a blanket 428 that
+        // hides it). Every item — gated or not — is reported in the normal
+        // per-item results array instead.
+        const guardianGateFail = guardianGateFailure(guardianGate);
+        if (guardianGateFail) throw guardianGateFail;
+      }
+
       if (requiresReceiverConsent && !body.consent?.acknowledged) {
         throw new BulkItemFailure(
           'CONSENT_REQUIRED',
@@ -332,9 +376,7 @@ export const update_action_status_handler = async (
               );
             }
             try {
-              await tx.insert(consent_record).values({
-                level: 'item',
-                consentCategory: 'action',
+              await tx.insert(consent_record).values(actionConsentRow({
                 actionType: row.action_type,
                 actionStage: 'accept',
                 userId: callerId,
@@ -344,11 +386,48 @@ export const update_action_status_handler = async (
                 brand: body.consent.brand ?? null,
                 documentVersion: acceptVersion,
                 source: 'action',
-                acceptedAt: new Date(),
-              });
+              }));
             } catch (err) {
               throw new ConsentWriteError(
                 err instanceof Error ? err.message : 'consent write failed',
+              );
+            }
+          }
+
+          // U18 guardian accept-consent (Phase 5b): only reached when the
+          // gate verified a fresh guardian OTP for this exact accept above.
+          // Mirrors the adult accept-consent write immediately above —
+          // same columns, same fail-closed behavior (a write/version
+          // failure rolls back the status update via ConsentWriteError) —
+          // with `source:'guardian'` and the u18 metadata tag. Action
+          // statements were not variant-split in Phase 2, so the version
+          // comes from the same (non-variant) accept resolver.
+          if (guardianGate.status === 'verified') {
+            const guardianVersion = await resolveConsentVersion({
+              network: row.target_item_network,
+              category: 'action',
+              actionType: row.action_type,
+              stage: 'accept',
+            });
+            if (guardianVersion === null) {
+              throw new ConsentWriteError(
+                `guardian accept consent version not configured for ${row.action_type}`,
+              );
+            }
+            try {
+              await tx.insert(consent_record).values(guardianActionConsentRow({
+                actionType: row.action_type,
+                actionStage: 'accept',
+                userId: callerId,
+                itemId: row.target_item_id,
+                actionId: body.action_id,
+                network: row.target_item_network,
+                brand: body.consent?.brand ?? null,
+                documentVersion: guardianVersion,
+              }));
+            } catch (err) {
+              throw new ConsentWriteError(
+                err instanceof Error ? err.message : 'guardian consent write failed',
               );
             }
           }

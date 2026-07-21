@@ -6,6 +6,14 @@ import { ArrowLeft, Wallet, OctagonX } from 'lucide-react';
 import type { RJSFSchema } from '@rjsf/utils';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter,
+} from '@/components/ui/dialog';
 import { SchemaForm } from '@/components/forms/schema-form';
 import { Alert, AlertTitle, AlertDescription } from '@/components/ui/alert';
 import { AuthShell } from '@/components/layout/auth-shell';
@@ -22,6 +30,18 @@ import type { WalletImportResult } from '@/engine/wallet/types';
 import { useAuth } from '@/contexts/auth-context';
 import { mergeImportedDataIntoSchema } from '@/lib/import-mapping';
 import { getServedScope } from '@/lib/served-binding';
+import { getStoredSignupDomain, clearStoredSignupDomain } from '@/lib/signup-domain';
+import { getUserDomains } from '@/lib/user-api';
+import { isGuardianConsentRequiredDomain } from '@/lib/guardian-consent';
+import { GuardianOtpDialog } from '@/components/actions/guardian-otp-dialog';
+import { U18GuardianFlow } from '@/components/consent/u18/u18-guardian-flow';
+import {
+  getU18Status,
+  issueProfilePrecreateOtp,
+  verifyProfilePrecreateOtp,
+  finalizeProfileConsent,
+} from '@/lib/consent-api';
+import axios from 'axios';
 
 import {
   createItem,
@@ -50,7 +70,7 @@ export function ProfileFormPage() {
   const navigate = useNavigate();
   const { id } = useParams();
   const [searchParams] = useSearchParams();
-  const { user } = useAuth();
+  const { user, signOut } = useAuth();
   const { theme, brand } = useNetworkTheme();
   const { config: consentConfig, isLoading: consentLoading } = useConsentConfig();
   const isEdit = !!id;
@@ -67,7 +87,6 @@ export function ProfileFormPage() {
   const [selectedDomain, setSelectedDomain] = React.useState<string | null>(
     () => (!isEdit && singleServedDomain ? singleServedDomain : null),
   );
-  const [myItems, setMyItems] = React.useState<Item[]>([]);
   const [resolvedNetwork, setResolvedNetwork] = React.useState<DotNetworkSchema | null>(null);
   const [existingItem, setExistingItem] = React.useState<Item | null>(null);
   const [initialData, setInitialData] = React.useState<Record<string, unknown> | null>(null);
@@ -81,6 +100,18 @@ export function ProfileFormPage() {
   >([]);
   const [formValid, setFormValid] = React.useState(false);
   const [consentChecked, setConsentChecked] = React.useState(false);
+
+  // U18 guardian gate, run at the consent tick (BEFORE the profile is created,
+  // like the self-signup materialize-after-verify flow). Null until the stored
+  // status loads; a minor must have their guardian OTP-verify a pre-create
+  // token before "Create profile" is allowed.
+  const [u18IsMinor, setU18IsMinor] = React.useState<boolean | null>(null);
+  // Interstitial shown at the consent tick BEFORE any OTP is sent, so a minor
+  // is told what's about to happen (a code goes to their guardian).
+  const [guardianConfirmOpen, setGuardianConfirmOpen] = React.useState(false);
+  const [guardianOtpOpen, setGuardianOtpOpen] = React.useState(false);
+  const [guardianSetupOpen, setGuardianSetupOpen] = React.useState(false);
+  const [guardianVerifiedForCreate, setGuardianVerifiedForCreate] = React.useState(false);
 
   // Reset consent checkbox when form becomes invalid
   React.useEffect(() => {
@@ -212,60 +243,58 @@ export function ProfileFormPage() {
   const network = resolvedNetwork;
   const domains = network?.domains ?? [];
 
-  // Single-domain lock: a user's domain is implied by the items they already
-  // hold in this network. Fetch them across served domains so the create flow
-  // can lock the picker to the held domain (server enforces the real lock —
-  // see create_item's DOMAIN_LOCKED guard). Edit mode reads the domain off the
-  // existing item, so this only runs for create.
+  // The user's role(s), persisted on `user.domains` — the single source of
+  // truth for which domain they may create profiles in (set at signup /
+  // bootstrapped on first create; backfilled for existing users). One entry
+  // today = single role; the server enforces the same set (create_item's
+  // DOMAIN_LOCKED guard reads user.domains too), so the picker and the server
+  // can't disagree. Empty → fall back to the served set.
+  const [userDomains, setUserDomainsState] = React.useState<string[]>([]);
   React.useEffect(() => {
-    if (isEdit || !network || !user) return;
-    const controller = new AbortController();
-    Promise.all(
-      (network.domains ?? []).map((domain) => {
-        const itemTypeKeys = domain.item_schemas
-          ? Object.keys(domain.item_schemas)
-          : [];
-        const itemType = itemTypeKeys.length > 0 ? itemTypeKeys[0] : 'profile';
-        return fetchItems(
-          {
-            item_network: network.id,
-            item_domain: domain.id,
-            item_type: itemType,
-            created_by_me: true,
-            limit: 100,
-          },
-          controller.signal,
-        )
-          .then((res) => res.items)
-          .catch(() => [] as Item[]);
-      }),
-    ).then((results) => {
-      if (!controller.signal.aborted) setMyItems(results.flat());
-    });
-    return () => controller.abort();
-  }, [isEdit, network, user]);
+    if (isEdit || !user) return;
+    let cancelled = false;
+    getUserDomains()
+      .then((d) => { if (!cancelled) setUserDomainsState(d); })
+      .catch(() => { if (!cancelled) setUserDomainsState([]); });
+    return () => { cancelled = true; };
+  }, [isEdit, user]);
 
-  // Domain the user is locked to, or null when they hold no items yet.
-  const lockedDomain = React.useMemo(
-    () => (myItems.length > 0 ? myItems[0].item_domain : null),
-    [myItems],
-  );
-
-  // Domains offered in the picker: restricted to the served set (when a scope
-  // is configured), then to the locked domain when the user already holds one.
+  // Domains offered in the picker: the served set (when a scope is configured),
+  // then narrowed to the user's persisted role(s).
   const selectableDomains = React.useMemo(() => {
     let list = servedScope
       ? domains.filter((d) => servedScope.domains.includes(d.id))
       : domains;
-    if (lockedDomain) list = list.filter((d) => d.id === lockedDomain);
+    if (userDomains.length > 0) list = list.filter((d) => userDomains.includes(d.id));
     return list;
-  }, [domains, servedScope, lockedDomain]);
+  }, [domains, servedScope, userDomains]);
 
-  // Locked users skip the role picker — auto-select their held domain.
+  // Single-role users skip the picker — the one selectable domain is chosen for
+  // them (covers both the stored-role case and a single served domain).
+  const roleLocked = selectableDomains.length <= 1;
   React.useEffect(() => {
-    if (isEdit || selectedDomain || !lockedDomain) return;
-    setSelectedDomain(lockedDomain);
-  }, [isEdit, selectedDomain, lockedDomain]);
+    if (isEdit || selectedDomain || selectableDomains.length !== 1) return;
+    setSelectedDomain(selectableDomains[0].id);
+  }, [isEdit, selectedDomain, selectableDomains]);
+
+  // Domain confirmed at Signals self-signup (see pages/auth/login-page.tsx +
+  // otp-page.tsx): a brand-new user who hasn't created any profile yet, so
+  // without this they'd be asked to pick a domain a second time. One-shot:
+  // cleared once consumed so it never leaks into a later, unrelated
+  // profile-creation flow.
+  React.useEffect(() => {
+    // Wait for the network's domain list to actually load before consuming —
+    // otherwise an empty `domains` on the first render (network still
+    // fetching) would fail the validity check below and clear the stored
+    // value before it ever got a chance to apply.
+    if (isEdit || selectedDomain || !targetNetworkId || domains.length === 0) return;
+    const stored = getStoredSignupDomain(targetNetworkId);
+    if (!stored) return;
+    clearStoredSignupDomain(targetNetworkId);
+    if (domains.some((d) => d.id === stored)) {
+      setSelectedDomain(stored);
+    }
+  }, [isEdit, selectedDomain, targetNetworkId, domains]);
 
   // Find the profile schema for the selected domain
   const profileSchema = React.useMemo<RJSFSchema | null>(() => {
@@ -287,6 +316,66 @@ export function ProfileFormPage() {
   const profileVersion = profileDoc?.versions.find((v) => v.version === profileDoc.current_version);
   const statement = profileVersion?.statement ?? '';
   const consentRequired = !isEdit && !!statement;
+
+  // Stored U18 status: whether THIS ward is a minor. Fetched in create mode so
+  // the consent tick can route a minor through guardian verification before the
+  // profile row is ever written. Adults / edit mode are unaffected.
+  React.useEffect(() => {
+    if (isEdit || !user || !network) { setU18IsMinor(null); return; }
+    let cancelled = false;
+    getU18Status(network.id)
+      .then((s) => { if (!cancelled) setU18IsMinor(s.isMinor); })
+      // On failure leave it null — the server re-checks on finalize, so a
+      // transient error can't let a minor create a live profile ungated.
+      .catch(() => { if (!cancelled) setU18IsMinor(null); });
+    return () => { cancelled = true; };
+  }, [isEdit, user, network]);
+
+  // A minor creating a profile on a guardian-gated domain: the consent tick
+  // triggers guardian OTP; "Create profile" stays blocked until it's verified.
+  const minorGatedCreate = Boolean(
+    !isEdit && u18IsMinor === true && network && selectedDomain &&
+    isGuardianConsentRequiredDomain(network, selectedDomain),
+  );
+
+  // Re-arm the guardian gate whenever the target domain changes.
+  React.useEffect(() => {
+    setGuardianVerifiedForCreate(false);
+    setGuardianOtpOpen(false);
+    setGuardianSetupOpen(false);
+  }, [selectedDomain]);
+
+  const precreateRef = React.useCallback(
+    () => ({
+      network: network?.id ?? '',
+      brand: brand === 'standard' ? null : brand,
+      item_domain: selectedDomain ?? '',
+    }),
+    [network?.id, brand, selectedDomain],
+  );
+
+  // Issue the pre-create guardian OTP and open the OTP dialog. If no guardian is
+  // on file yet (409 GUARDIAN_REQUIRED), run the capture flow first, then retry.
+  const beginGuardianPrecreate = React.useCallback(async () => {
+    try {
+      const { otpSent } = await issueProfilePrecreateOtp(precreateRef());
+      if (otpSent) setGuardianOtpOpen(true);
+    } catch (err) {
+      const status = axios.isAxiosError(err) ? err.response?.status : undefined;
+      const code = axios.isAxiosError(err)
+        ? (err.response?.data as { error?: string } | undefined)?.error
+        : undefined;
+      if (status === 409 && code === 'GUARDIAN_REQUIRED') {
+        setGuardianSetupOpen(true);
+      } else if (status === 429) {
+        toast.error(t('u18.guardian_error_rate_limited', 'Too many attempts. Please try again shortly.'));
+      } else if (status === 503) {
+        toast.error(t('u18.guardian_error_otp_unavailable', "Guardian confirmation isn't available on this instance right now."));
+      } else {
+        toast.error(t('profile.error_generic_desc'));
+      }
+    }
+  }, [precreateRef, t]);
 
   const selectedDomainInfo = domains.find((d) => d.id === selectedDomain);
   const DomainIcon = getDomainIcon(selectedDomain, network?.id);
@@ -436,7 +525,20 @@ export function ProfileFormPage() {
           };
         }
 
-        await createItem(createPayload);
+        const created = await createItem(createPayload);
+        // Minor on a gated domain: the guardian already OTP-verified a
+        // pre-create token at the consent tick. Consume it now to record the
+        // GUARDIAN profile_creation consent and promote the fresh item to live
+        // (the create above wrote a draft with source='profile').
+        if (minorGatedCreate) {
+          await finalizeProfileConsent({
+            network: network.id,
+            brand: brand === 'standard' ? null : brand,
+            item_domain: selectedDomain,
+            item_type: defaultItemType ?? 'profile',
+            item_id: created.item_id,
+          });
+        }
         toast.success(t('profile.toast_created'), {
           description: t('profile.toast_created_desc'),
         });
@@ -557,11 +659,11 @@ export function ProfileFormPage() {
           <div className="relative z-10 px-5 pt-4 sm:px-6">
             <button
               type="button"
-              onClick={() => (selectedDomain && !isEdit && !lockedDomain && !singleServedDomain ? setSelectedDomain(null) : navigate(`/?network=${resolvedNetwork?.id ?? ''}`))}
+              onClick={() => (selectedDomain && !isEdit && !roleLocked && !singleServedDomain ? setSelectedDomain(null) : navigate(`/?network=${resolvedNetwork?.id ?? ''}`))}
               className="flex items-center gap-1.5 text-sm text-white/70 hover:text-white transition-colors"
             >
               <ArrowLeft className="h-4 w-4" />
-              {selectedDomain && !isEdit && !lockedDomain && !singleServedDomain ? t('profile.choose_different_role') : t('common.back')}
+              {selectedDomain && !isEdit && !roleLocked && !singleServedDomain ? t('profile.choose_different_role') : t('common.back')}
             </button>
           </div>
           <div className="relative z-10 flex items-center gap-4 px-5 pb-6 pt-3 sm:px-6">
@@ -640,14 +742,37 @@ export function ProfileFormPage() {
                     <ConsentCheckbox
                       text={statement}
                       checked={consentChecked}
-                      onCheckedChange={setConsentChecked}
+                      // For a minor on a gated domain, ticking the consent is the
+                      // trigger: it fires the guardian OTP BEFORE the profile is
+                      // created (no draft is written until "Create profile").
+                      onCheckedChange={(v) => {
+                        setConsentChecked(v);
+                        // Don't fire the OTP straight away — show the "you're
+                        // under 18, a code goes to your guardian" interstitial
+                        // first, then issue on confirm.
+                        if (v && minorGatedCreate && !guardianVerifiedForCreate) {
+                          setGuardianConfirmOpen(true);
+                        }
+                      }}
                     />
                   )
+                )}
+                {minorGatedCreate && consentChecked && (
+                  <p className="text-sm text-muted-foreground">
+                    {guardianVerifiedForCreate
+                      ? t('u18.guardian_verified_for_create', 'Guardian verified. You can now create your profile.')
+                      : t('u18.guardian_pending_for_create', "You're under 18 — your guardian must verify with a one-time code before you can create this profile.")}
+                  </p>
                 )}
                 <button
                   type="submit"
                   form="profile-form"
-                  disabled={!formValid || (!isEdit && consentLoading) || (consentRequired && !consentChecked)}
+                  disabled={
+                    !formValid ||
+                    (!isEdit && consentLoading) ||
+                    (consentRequired && !consentChecked) ||
+                    (minorGatedCreate && !guardianVerifiedForCreate)
+                  }
                   className="mt-2 h-12 w-full rounded-md text-base font-semibold bg-brand-cta hover:brightness-110 transition-all active:scale-95 shadow-md text-white disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   {t('profile.btn_create')}
@@ -663,6 +788,86 @@ export function ProfileFormPage() {
           context={walletImportContext}
           onImported={handleImportedCredentials}
         />
+
+        {/* Interstitial: tell the minor what's about to happen before any code
+            is sent. Confirming issues the guardian OTP. */}
+        <Dialog
+          open={guardianConfirmOpen}
+          onOpenChange={(open) => {
+            if (open) return;
+            setGuardianConfirmOpen(false);
+            // Backed out → untick so re-ticking re-opens this notice.
+            if (!guardianVerifiedForCreate) setConsentChecked(false);
+          }}
+        >
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>
+                {t('profile.guardian_confirm_title', 'Guardian confirmation needed')}
+              </DialogTitle>
+              <DialogDescription>
+                {t(
+                  'profile.guardian_confirm_desc',
+                  "You're under 18, so a one-time code will be sent to your guardian. Once they verify it, you can create your profile.",
+                )}
+              </DialogDescription>
+            </DialogHeader>
+            <DialogFooter>
+              <Button
+                variant="outline"
+                onClick={() => {
+                  setGuardianConfirmOpen(false);
+                  setConsentChecked(false);
+                }}
+              >
+                {t('common.cancel', 'Cancel')}
+              </Button>
+              <Button
+                onClick={() => {
+                  setGuardianConfirmOpen(false);
+                  void beginGuardianPrecreate();
+                }}
+              >
+                {t('profile.guardian_confirm_proceed', 'Send code to guardian')}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        {/* Pre-create guardian OTP: verified BEFORE the profile row is written. */}
+        <GuardianOtpDialog
+          open={guardianOtpOpen}
+          onOpenChange={(open) => {
+            if (open) return;
+            setGuardianOtpOpen(false);
+            // Closed without verifying → untick consent so re-ticking re-issues
+            // the OTP (otherwise the create button stays stuck-disabled).
+            if (!guardianVerifiedForCreate) setConsentChecked(false);
+          }}
+          onLogout={() => { void signOut(); }}
+          onSubmitOtp={async (otp) => {
+            // Throws on an invalid/expired code → the dialog shows the inline
+            // error and stays open for a retry.
+            await verifyProfilePrecreateOtp({ ...precreateRef(), otp });
+            setGuardianVerifiedForCreate(true);
+            setGuardianOtpOpen(false);
+          }}
+        />
+
+        {/* No guardian on file yet → capture (details + setup OTP), then retry. */}
+        {guardianSetupOpen && network && selectedDomain && (
+          <U18GuardianFlow
+            network={network.id}
+            brand={brand === 'standard' ? null : brand}
+            initialStep="guardian"
+            onComplete={() => {
+              setGuardianSetupOpen(false);
+              void beginGuardianPrecreate();
+            }}
+            onNotMinor={() => { setGuardianSetupOpen(false); }}
+            onLogout={() => { void signOut(); }}
+          />
+        )}
       </div>
     </div>
   );

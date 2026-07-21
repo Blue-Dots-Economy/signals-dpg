@@ -7,12 +7,11 @@ import type { FastifyReply, FastifyRequest } from 'fastify';
 import { and, eq } from 'drizzle-orm';
 import { db } from '@api/db/postgres/drizzle_config';
 import { consent_record } from '@api/db/postgres/schema';
-import { items } from '@dpg/database';
 import { auth_middleware_if_enabled } from '@api/plugins/auth/auth_middleware';
 import { apiConfig } from '@/config';
 import { resolveConsentVersion } from '@/services/consent_version';
 import { hasAcceptedTermsAndPrivacy } from '@/services/consent_acceptance';
-import { promoteItemOnProfileConsent } from '@/services/item_service';
+import { promoteItemOnProfileConsent, isItemOwnedBy } from '@/services/item_service';
 
 const ProfileConsentAcceptResponseSchema = z.object({ recorded: z.number().int() });
 
@@ -60,21 +59,7 @@ export const accept_profile_consent_handler = async (
   // partition key columns (item_network + item_domain + item_type + item_id) so
   // the planner can prune partitions.
   try {
-    const ownerRows = await db
-      .select({ created_by: items.created_by })
-      .from(items)
-      .where(
-        and(
-          eq(items.item_network, body.network),
-          eq(items.item_domain, body.item_domain),
-          eq(items.item_type, body.item_type),
-          eq(items.item_id, body.item_id),
-          eq(items.created_by, userId),
-        ),
-      )
-      .limit(1);
-
-    if (ownerRows.length === 0) {
+    if (!(await isItemOwnedBy(userId, body))) {
       return reply.code(403).send({
         error: 'NOT_ITEM_OWNER',
         message: 'You do not own this item or it does not exist',

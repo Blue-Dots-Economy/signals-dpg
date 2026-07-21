@@ -4,39 +4,55 @@ How schema changes flow from local dev to a deployed Signals-DPG instance.
 This document captures the **current contract** (Plans 1–3 era) and the
 **forward path** for when additive-only SQL stops being enough.
 
-## Today's contract (as of merge of Plan 4 Task G.1)
+## Today's contract (Direction B — Drizzle owns its tables)
 
-The schema lives in two layers, and both must be applied to bring a fresh
-database up:
+The schema is split along a principled boundary — **what Drizzle can express
+vs. what is Postgres-native** — and both layers are applied, in order, by one
+deploy runner:
 
-1. **Drizzle-managed (better-auth tables).** The auth schema is declared in
-   TypeScript under `apps/api/db/postgres/schema/` (`auth.ts`, re-exported
-   from `index.ts`). `apps/api/drizzle.config.ts` points `out` at
-   `./drizzle` and `schema` at `./db/postgres/schema`. Generated migrations
-   land under `apps/api/drizzle/`. Tables owned by this layer:
-   `user`, `account`, `session`, `verification`, `apikey`, `organization`,
-   `member`, `invitation`, `team`, `teamMember`, plus the better-auth
-   indexes.
+1. **Drizzle-owned (authoritative in TypeScript).** Declared under
+   `apps/api/db/postgres/schema/` (`auth.ts`, `metrics.ts`,
+   `pii_reveal_audit.ts`, `consent_record.ts`; re-exported from `index.ts`).
+   `apps/api/drizzle.config.ts` points `out` at `./drizzle`, `schema` at
+   `./db/postgres/schema`. Tables: the better-auth set (`user`, `account`,
+   `verification`, `apikey`, `organization`, `member`, `invitation`, `team`,
+   `team_member`) plus `item_metrics`, `pii_reveal_audit`, `consent_record`.
+   Migrations are **generated and committed** under `apps/api/drizzle/`
+   (`pnpm db:generate:api`) and applied at deploy by `drizzle-orm`'s runtime
+   `migrate()` — **not** `drizzle-kit` (a devDependency, absent from the prod
+   image). There is **no** hand-mirrored SQL copy of these tables anymore.
 
-2. **Idempotent raw SQL (network item + auth layer).** Under
-   `packages/database/src/utils/sql_scripts/` (3 files, in FK-safe order:
-   `auth.sql`, `create_items.sql`, `create_actions_events.sql`):
-   - `auth.sql` — idempotent DDL for the better-auth tables (`user`,
-     `account`, `session`, `verification`, `apikey`, `organization`,
-     `member`, `invitation`, `team`, `teamMember`). Used only by the
-     deploy-time migrate-job's bundled `schema.sql`
-     (`apps/api/db/postgres/schema.sql`); local dev applies the
-     equivalent via Drizzle (`pnpm db:push:api`).
-   - `create_items.sql` — extensions (`pgcrypto`, `cube`, `earthdistance`),
-     the partitioned `items` table, GIN/GiST indexes, geo CHECKs, and the
-     `items_created_by_fk` FK to `"user"`.
-   - `create_actions_events.sql` — `item_actions` and `action_events`
-     (partitioned, with their FKs back into items).
+2. **Raw SQL (Postgres-native — cannot be Drizzle).** Under
+   `packages/database/src/utils/sql_scripts/`, organized by concern:
+   - `extensions/extensions.sql` — `pgcrypto`, `cube`, `earthdistance`,
+     `vector` (pgvector), `postgis`. Superuser-level; in deploy these are
+     created by common-services, locally by the dev superuser.
+   - `core/create_items.sql` — the LIST-partitioned `items` table + the
+     `item_search` table (`vector(1024)` embedding, `geography` geo, HNSW/GiST
+     indexes) + the `items_created_by_fk` FK to the Drizzle-owned `"user"`.
+   - `core/create_actions_events.sql` — the partitioned `item_actions` /
+     `action_events` tables.
+   - `migrations/NNNN_*.sql` — ordered version migrations (ALTER/backfill for
+     existing DBs), e.g. `0001_item_locations.sql`.
+   These use partitioning, extensions, and extension types Drizzle Kit doesn't
+   model, so they stay raw.
 
-Every statement in the items/actions/events scripts is written in the form
-`CREATE EXTENSION IF NOT EXISTS …`, `CREATE TABLE IF NOT EXISTS …`,
-`CREATE INDEX IF NOT EXISTS …`, so applying the same file to a database
-that already has the objects is a no-op.
+Every raw statement is `CREATE … IF NOT EXISTS` / `ALTER … ADD COLUMN IF NOT
+EXISTS` / DO-block-guarded, so re-applying is a no-op.
+
+**Two application paths — do not conflate:**
+
+- **Deploy (cluster):** `apps/api/scripts/migrate.mjs` (`pnpm db:migrate:deploy:api`)
+  applies **one Drizzle ledger** over `apps/api/drizzle/` — the declarative
+  tables (`0000`) plus the raw partitioned/geo tables re-authored as custom
+  migrations (`0001_core`, `0002_item_search`, and version migrations such as
+  `0003_legacy_column_backfill`). It does extension **preflight** (assert, not
+  create) → auto-baseline (legacy cutover) → `migrate()`, using prod deps only
+  (`drizzle-orm` + `pg`) inside the app image. It does **not** read
+  `sql_scripts/` or the generated `schema.sql` bundle.
+- **Local dev:** `pnpm db:init:api` applies the raw `sql_scripts/{extensions,core}`
+  directly, and `apps/api/db/postgres/schema.sql` is a generated reference bundle
+  of those (see "Local dev" below).
 
 ### Local dev
 
@@ -63,12 +79,10 @@ Script wiring:
   ```ts
   const FILES = ['create_items.sql', 'create_actions_events.sql'];
   ```
-  `db_init.ts` doesn't include `auth.sql` because local dev uses
-  `pnpm db:push:api` for better-auth tables. The deploy-time migrate-job
-  applies `auth.sql` indirectly via the generated `schema.sql` bundle
-  (`scripts/generate-schema-bundle.mjs` →
-  `apps/api/db/postgres/schema.sql`). The script is idempotent and
-  safe to re-run.
+  `db_init.ts` doesn't include the better-auth tables because local dev uses
+  `pnpm db:push:api` for them. In deploy, all tables (declarative + raw) are
+  applied by the single Drizzle ledger via `migrate.mjs` (see "Deployed" below),
+  not by this local script. The script is idempotent and safe to re-run.
 
 Without `pnpm db:init:api`, the first `POST /api/v1/item/create` against a
 fresh database fails with `PARTITION_SETUP_FAILED` — the parent `items`
@@ -77,24 +91,23 @@ table is missing. That mode is what the helper exists to prevent.
 For iterating on the Drizzle schema you also have:
 
 - `pnpm db:generate:api` → `drizzle-kit generate` — writes a new SQL file
-  into `apps/api/drizzle/`. Today `apps/api/drizzle/` is gitignored
-  (`.gitignore:10` → `drizzle/`), so generated files are local-only.
+  into `apps/api/drizzle/`, which is **committed** (the deploy runner applies it).
 - `pnpm db:migrate:api` → `drizzle-kit migrate` — applies any pending
   generated migrations to the connected DB.
 - `pnpm db:studio:api` → `drizzle-kit studio` — browser DB UI.
 
 ### Deployed (helm migrate-job)
 
-> The Helm charts no longer live in this repo — they were moved to a
-> separate deployment repository. Chart paths below
-> (`dpg/charts/api/templates/…`, `values.yaml`) refer to that repo. The
-> `schema.sql` bundle the migrate-job consumes is generated **here**
-> (`pnpm schema:bundle` → `apps/api/db/postgres/schema.sql`) and copied
-> into the charts repo.
+> The Helm charts live in the separate deployment repository. No `schema.sql`
+> is vendored there anymore — the migrate-job runs the **app image** and applies
+> the schema from the committed `apps/api/drizzle/` ledger via `migrate.mjs`.
 
 The deploy-time migration runs as a Helm `post-install,post-upgrade` hook
-defined in `dpg/charts/api/templates/migrate-job.yaml` (charts repo). The
-shape:
+(`migrate-job.yaml`, charts repo): a `migrate-ddl` initContainer runs the api
+image's `node apps/api/scripts/migrate.mjs` (extension preflight → auto-baseline
+→ `migrate()`), then a `provision` container upserts the aggregator-dpg apikey.
+The older shape below (a psql job consuming a `schema.sql` ConfigMap) is
+retained only as historical context:
 
 - A `ConfigMap` named `<release>-migrate-sql` mounts the bundled
   `schema.sql` (`hook-weight: -1`).
@@ -287,6 +300,41 @@ Operational guidance until the switchover:
 - For multi-step migrations (e.g. "add column, backfill, then set NOT
   NULL") ship in two releases — the first additive, the second the
   constraint — and verify the backfill between them.
+
+### U18 guardian-consent additions
+
+The U18 feature (PR #311) adds, in the **Drizzle-owned** layer (schema under
+`apps/api/db/postgres/schema/`, applied via the `apps/api/drizzle/` ledger):
+
+- `"user"."domains" text[]` (`auth.ts`) — the signup domain(s) / role.
+- the `minor_guardian` table (`minor_guardian.ts`).
+- a **reshaped** `consent_record_profile_creation_unique` index — dropped and
+  recreated on `(user_id, item_id, source)` instead of `(user_id, item_id)` so a
+  ward's self-consent and their guardian's consent co-exist as distinct
+  append-only rows (`consent_record.ts`).
+
+All three are captured in generated migration `drizzle/0004_zippy_taskmaster.sql`
+(the DROP+recreate of the index included). Because deploy now applies the Drizzle
+ledger via `migrate.mjs` (which tracks applied migrations in
+`__drizzle_migrations`), these land on an existing DB **automatically** on the
+next deploy — the old `WHERE table_name='items'` short-circuit no longer gates
+them (that was the pre-#287 gap). **No manual DDL needed.**
+
+**Backfill `user.domains` for existing users.** The profile-create role lock
+reads `user.domains` (source of truth) instead of deriving from held items. New
+users get it at signup / on first create; existing users start NULL (treated as
+"unset → any served domain"). This is **data, not schema**, so the deploy
+migrator does not run it — it lives as a one-off in the `adhoc-scripts` repo:
+`adhoc-scripts/u18-user-domains-backfill/` (`backfill_user_domains.sql` + README).
+Run it once per environment after the deploy applies `0004`:
+
+```bash
+psql "$POSTGRES_URL" -v ON_ERROR_STOP=1 -f backfill_user_domains.sql
+```
+
+It sets each existing user's single role from their earliest item; users with no
+items are left empty (role assigned on first create). Idempotent — only NULL/empty
+rows are touched.
 
 ## Related
 

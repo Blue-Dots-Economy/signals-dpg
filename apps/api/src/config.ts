@@ -31,6 +31,7 @@ export const apiConfig = {
   consent_support_email: networkRuntime.CONSENT_SUPPORT_EMAIL,
   allow_extra_schema_data: networkRuntime.ALLOW_EXTRA_SCHEMA_DATA,
   bulk_max_items: networkRuntime.BULK_MAX_ITEMS,
+  max_wards_per_guardian: networkRuntime.MAX_WARDS_PER_GUARDIAN,
   schema_registry_url: schemaRegistry.SCHEMA_REGISTRY_URL,
   peer_fetch_timeout_ms: networkRuntime.PEER_FETCH_TIMEOUT_MS,
 };
@@ -56,9 +57,30 @@ export const authConfig = {
   login_channels: parseLoginChannels(auth.LOGIN_CHANNELS),
 };
 
+/**
+ * Normalize a comma-separated email list: split on commas, trim, drop empties
+ * and rejoin with ", " (a form nodemailer accepts for multiple addresses).
+ * Returns undefined when nothing usable remains.
+ */
+function normalizeEmailList(value: string | undefined): string | undefined {
+  if (!value) return undefined;
+  const list = value
+    .split(',')
+    .map((entry) => entry.trim())
+    .filter(Boolean);
+  return list.length ? list.join(', ') : undefined;
+}
+
 export const supportConfig = {
-  recipient: notification.SUPPORT_EMAIL,
+  recipients: normalizeEmailList(notification.SUPPORT_EMAIL),
+  cc: normalizeEmailList(notification.SUPPORT_CC_EMAIL),
   fromEmail: notification.NOTIFICATION_FROM_EMAIL,
+  // "Sub-domain link" surfaced in the support subject line.
+  linkBaseUrl: notification.FRONTEND_BASE_URL,
+  // Display name for the "Team <name>" sign-off. No brand short-name is
+  // available synchronously in config (ServedDomainBinding carries only
+  // network/domain/key), so we use the instance name — no new env (#283).
+  teamName: instance.INSTANCE_NAME,
 };
 
 export const geocodingConfig = {
