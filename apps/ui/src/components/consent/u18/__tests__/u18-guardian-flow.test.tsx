@@ -68,9 +68,7 @@ describe('U18GuardianFlow', () => {
     await waitFor(() => expect(screen.getByLabelText(/guardian name/i)).toBeInTheDocument());
     await userEvent.type(screen.getByLabelText(/guardian name/i), 'Asha Guardian');
     await userEvent.type(screen.getByLabelText(/guardian phone number/i), '9876543210');
-    await userEvent.click(screen.getByLabelText(/i accept the terms and conditions/i));
-    await userEvent.click(screen.getByLabelText(/i consent to data privacy policy/i));
-    await userEvent.click(screen.getByRole('button', { name: /send otp/i }));
+    await userEvent.click(screen.getByRole('button', { name: /continue/i }));
 
     // Step 3: OTP
     await waitFor(() => expect(screen.getAllByRole('textbox').length).toBe(6));

@@ -5,13 +5,12 @@ import { toast } from 'sonner';
 import { Loader2 } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Checkbox } from '@/components/ui/checkbox';
 import { Button } from '@/components/ui/button';
 import { PhoneInput, toE164 } from '@/components/auth/phone-input';
 import { useAuth } from '@/contexts/auth-context';
 import { useConsentConfig } from '@/hooks/use-consent-config';
 import { toastGuardianSendError } from '@/lib/guardian-consent';
-import { ConsentModal, type ConsentModalTab } from '@/components/consent/consent-modal';
+import { ConsentModal } from '@/components/consent/consent-modal';
 import {
   submitGuardian,
   type SubmitGuardianBody,
@@ -52,16 +51,15 @@ export function GuardianFormStep({
   const { t } = useTranslation();
   const { user } = useAuth();
   const { config: consentConfig } = useConsentConfig();
-  // View the T&C / Privacy text in-app (same as everywhere else) instead of
-  // navigating away and losing the half-filled guardian form.
-  const [consentTab, setConsentTab] = React.useState<ConsentModalTab | null>(null);
   const compareContact = ownContact ?? { email: user?.email, phoneNumber: user?.phoneNumber };
 
   const [guardianName, setGuardianName] = React.useState('');
   const [guardianEmail, setGuardianEmail] = React.useState('');
   const [guardianPhone, setGuardianPhone] = React.useState('');
-  const [termsAccepted, setTermsAccepted] = React.useState(false);
-  const [privacyAccepted, setPrivacyAccepted] = React.useState(false);
+  // Consent is captured via the same blocking popup the login flow uses (below):
+  // Send OTP opens it, "Accept & continue" records the acceptance and proceeds.
+  const [consentAccepted, setConsentAccepted] = React.useState(false);
+  const [showConsentGate, setShowConsentGate] = React.useState(false);
   const [serverFlaggedSameContact, setServerFlaggedSameContact] = React.useState(false);
   const [isSubmitting, setIsSubmitting] = React.useState(false);
   const [validationError, setValidationError] = React.useState<string | null>(null);
@@ -88,8 +86,6 @@ export function GuardianFormStep({
   const canSubmit =
     Boolean(guardianName.trim()) &&
     hasContact &&
-    termsAccepted &&
-    privacyAccepted &&
     !sameContactBlocked &&
     !isSubmitting;
 
@@ -99,12 +95,6 @@ export function GuardianFormStep({
     if (!hasContact) {
       setValidationError(
         t('u18.guardian_error_contact_required', "Enter your guardian's email or phone number."),
-      );
-      return;
-    }
-    if (!termsAccepted || !privacyAccepted) {
-      setValidationError(
-        t('u18.guardian_error_consent', 'Please accept both statements on behalf of your ward.'),
       );
       return;
     }
@@ -118,6 +108,20 @@ export function GuardianFormStep({
       return;
     }
 
+    // Consent via the same blocking popup login uses: open it here; its
+    // "Accept & continue" (onAccept below) records acceptance and calls doSubmit.
+    // If no consent doc is configured there's nothing to show — proceed (the
+    // server still records the ward's terms/privacy rows).
+    if (!consentAccepted && consentConfig) {
+      setValidationError(null);
+      setShowConsentGate(true);
+      return;
+    }
+
+    await doSubmit();
+  };
+
+  const doSubmit = async () => {
     setValidationError(null);
     setIsSubmitting(true);
     const body: SubmitGuardianBody = {
@@ -166,13 +170,21 @@ export function GuardianFormStep({
 
   return (
     <>
-    {consentConfig && consentTab && (
+    {consentConfig && showConsentGate && (
+      // Same blocking consent popup as login — the ward's guardian reads T&C +
+      // Privacy and taps "Accept & continue", which records acceptance and
+      // resumes sending the OTP.
       <ConsentModal
         open
-        mode="view"
-        initialTab={consentTab}
+        mode="gate"
+        initialTab="terms"
         config={consentConfig}
-        onOpenChange={(next) => { if (!next) setConsentTab(null); }}
+        variant="u18"
+        onAccept={() => {
+          setConsentAccepted(true);
+          setShowConsentGate(false);
+          void doSubmit();
+        }}
       />
     )}
     <form onSubmit={handleSubmit} className="flex flex-col gap-4">
@@ -217,7 +229,7 @@ export function GuardianFormStep({
       </div>
 
       <p className="text-sm text-muted-foreground">
-        {t('u18.guardian_contact_hint', '* Please provide at least one contact method (email or phone)')}
+        {t('u18.guardian_contact_hint', '* At least one contact required — the OTP is sent here.')}
       </p>
 
       {sameContactBlocked && (
@@ -231,60 +243,11 @@ export function GuardianFormStep({
         </div>
       )}
 
-      <div className="flex items-start gap-2">
-        <Checkbox
-          id="u18-guardian-terms"
-          checked={termsAccepted}
-          onCheckedChange={(value) => setTermsAccepted(value === true)}
-          disabled={isSubmitting}
-        />
-        <Label htmlFor="u18-guardian-terms" className="text-sm font-normal leading-snug cursor-pointer">
-          {t('u18.guardian_accept_terms_prefix', 'On behalf of my ward, I accept the ')}
-          {/* Anchor (no href) so it stays a non-labelable element — a <button>
-              here would become a second control associated with this label.
-              Opens the in-app viewer instead of navigating away. */}
-          <a
-            role="button"
-            tabIndex={0}
-            onClick={(e) => { e.preventDefault(); e.stopPropagation(); setConsentTab('terms'); }}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.stopPropagation(); setConsentTab('terms'); }
-            }}
-            className="underline text-primary cursor-pointer"
-          >
-            {t('u18.terms_link', 'Terms and Conditions')}
-          </a>
-        </Label>
-      </div>
-
-      <div className="flex items-start gap-2">
-        <Checkbox
-          id="u18-guardian-privacy"
-          checked={privacyAccepted}
-          onCheckedChange={(value) => setPrivacyAccepted(value === true)}
-          disabled={isSubmitting}
-        />
-        <Label htmlFor="u18-guardian-privacy" className="text-sm font-normal leading-snug cursor-pointer">
-          {t('u18.guardian_consent_privacy_prefix', 'On behalf of my ward, I consent to Data ')}
-          <a
-            role="button"
-            tabIndex={0}
-            onClick={(e) => { e.preventDefault(); e.stopPropagation(); setConsentTab('privacy'); }}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.stopPropagation(); setConsentTab('privacy'); }
-            }}
-            className="underline text-primary cursor-pointer"
-          >
-            {t('u18.privacy_link', 'Privacy Policy')}
-          </a>
-        </Label>
-      </div>
-
       {validationError && <p className="text-sm text-destructive">{validationError}</p>}
 
       <Button type="submit" disabled={!canSubmit} className="w-full">
         {isSubmitting && <Loader2 className="h-4 w-4 animate-spin" />}
-        {t('u18.guardian_send_otp', 'Send OTP')}
+        {t('u18.guardian_continue', 'Continue')}
       </Button>
     </form>
     </>
