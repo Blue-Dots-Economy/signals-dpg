@@ -84,6 +84,15 @@ export interface DotNetworkDomain {
   /** Card display config — see {@link DotCardConfig}. */
   card?: DotCardConfig;
   /**
+   * Optional allowlist of property keys that may surface as browse filters for
+   * this domain. When present, ONLY these enum/array-enum fields (in this
+   * order) become filter groups; when absent, every enum field is filterable
+   * (legacy behavior). Lets a network expose a curated filter set — e.g.
+   * blue_dot seeker → work experience / years / education / gender — instead of
+   * every enum on the schema. Mirrors `filters` in network.json.
+   */
+  filters?: string[];
+  /**
    * U18 guardian consent (Phase 6): when true, a minor holding a profile in
    * this domain is routed through the guardian consent flow instead of the
    * ordinary adult consent gate. Mirrors `guardian_consent_required` in

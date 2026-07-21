@@ -13,6 +13,14 @@ import type { EnumFilterField } from '@/lib/enum-filters';
 export interface MapFiltersPanelProps {
   /** All visible domains (from the network config) to show as filter options. */
   domains: DotNetworkDomain[];
+  /**
+   * Domains whose schema fields drive the enum filter groups. Defaults to
+   * `domains`. Supplied separately so the enum filters can reflect the
+   * counterpart being selected (e.g. a provider browsing seekers filters by
+   * seeker fields) while the domain chip selector still lists every visible
+   * domain.
+   */
+  filterFieldDomains?: DotNetworkDomain[];
   /** Currently selected domain filter values. Empty array = all. */
   selectedDomains: string[];
   /** Called when the domain filter selection changes. */
@@ -193,6 +201,7 @@ function MultiSelectGroup({ title, options, selected, onToggle }: MultiSelectGro
  */
 export function MapFiltersPanel({
   domains,
+  filterFieldDomains,
   selectedDomains,
   onDomainsChange,
   selectedFields,
@@ -202,10 +211,12 @@ export function MapFiltersPanel({
   const { t } = useTranslation();
   const [open, setOpen] = React.useState(false);
 
-  // Derive enum filter fields generically from all visible domain schemas
+  // Derive enum filter fields generically from the filter-field domains
+  // (defaults to the visible domains) so the filters can reflect the
+  // counterpart being browsed independently of the domain chip selector.
   const enumFilterFields: EnumFilterField[] = React.useMemo(
-    () => getEnumFilterFieldsForDomains(domains),
-    [domains],
+    () => getEnumFilterFieldsForDomains(filterFieldDomains ?? domains),
+    [filterFieldDomains, domains],
   );
 
   const showDomainGroup = domains.length > 1;

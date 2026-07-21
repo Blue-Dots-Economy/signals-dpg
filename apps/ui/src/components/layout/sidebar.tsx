@@ -88,6 +88,16 @@ export function AppSidebar({
 
   const domainKeys = Object.keys(profilesByDomain);
 
+  // "My items" group label is domain-aware: a network can override the generic
+  // "My Profile(s)" heading per domain via an i18n key `nav.my_items_group_<domainId>`
+  // (e.g. blue_dot provider → "My Jobs"). Only applied when the group holds a
+  // single domain; otherwise the generic label covers the mix. Falls back to the
+  // generic key when no per-domain override exists.
+  const myItemsGroupLabel =
+    domainKeys.length === 1
+      ? t(`nav.my_items_group_${domainKeys[0]}`, { defaultValue: t('nav.my_profiles_group') })
+      : t('nav.my_profiles_group');
+
   // Find which domain the active profile belongs to
   const activeDomain = myItems.find((i) => i.item_id === activeProfileId)?.item_domain ?? null;
 
@@ -194,7 +204,7 @@ export function AppSidebar({
           </>
         )}
         <SidebarGroup>
-          <SidebarGroupLabel>{t('nav.my_profiles_group')}</SidebarGroupLabel>
+          <SidebarGroupLabel>{myItemsGroupLabel}</SidebarGroupLabel>
           <SidebarGroupContent>
             {domainKeys.length === 0 ? (
               <SidebarMenu>

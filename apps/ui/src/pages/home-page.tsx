@@ -643,6 +643,23 @@ export function HomePage() {
     [network, viewerDomain],
   );
 
+  // Domains whose fields drive the browse filters, keyed on the sidebar Browse
+  // selection: a specific domain → only that domain's fields (a provider
+  // viewing "Seekers" filters by seeker fields, viewing "Providers" by provider
+  // fields). "All" (null) → the counterpart domains (visible minus the viewer's
+  // own) so a provider's default view filters seekers, not the provider fields
+  // pulled in by a provider→provider "connect" self-edge; falls back to all
+  // visible domains when that would leave nothing (self-only interaction, or a
+  // signed-out viewer with no domain identity).
+  const filterFieldDomains = React.useMemo(() => {
+    if (selectedDomain) {
+      const selected = visibleDomains.filter((d) => d.id === selectedDomain);
+      if (selected.length > 0) return selected;
+    }
+    const counterparts = visibleDomains.filter((d) => d.id !== viewerDomain);
+    return counterparts.length > 0 ? counterparts : visibleDomains;
+  }, [visibleDomains, viewerDomain, selectedDomain]);
+
   React.useEffect(() => {
     if (!network) return;
     if (selectedDomain === null) return;
@@ -1284,6 +1301,7 @@ export function HomePage() {
   const filtersPanel = (
     <MapFiltersPanel
       domains={visibleDomains}
+      filterFieldDomains={filterFieldDomains}
       selectedDomains={mapSelectedDomains}
       onDomainsChange={handleMapDomainsChange}
       selectedFields={mapSelectedFields}
