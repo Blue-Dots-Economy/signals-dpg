@@ -32,6 +32,12 @@ export interface MapFiltersPanelProps {
   selectedFields: Record<string, string[]>;
   /** Called when any enum field filter selection changes. */
   onFieldsChange: (fields: Record<string, string[]>) => void;
+  /**
+   * Whether to show the DOMAIN chip group. Defaults to true. Hidden when the
+   * sidebar already scopes browse to a single domain — the toggle would be
+   * redundant, and the enum groups below already reflect just that domain.
+   */
+  showDomainToggle?: boolean;
   /** Current browse view — tailors the help text (map markers vs listings). */
   viewMode?: ViewMode;
 }
@@ -206,6 +212,7 @@ export function MapFiltersPanel({
   onDomainsChange,
   selectedFields,
   onFieldsChange,
+  showDomainToggle = true,
   viewMode = 'map',
 }: MapFiltersPanelProps) {
   const { t } = useTranslation();
@@ -219,7 +226,7 @@ export function MapFiltersPanel({
     [filterFieldDomains, domains],
   );
 
-  const showDomainGroup = domains.length > 1;
+  const showDomainGroup = showDomainToggle && domains.length > 1;
   const showEnumGroups = enumFilterFields.length > 0;
 
   // Count of active selections across all enum fields

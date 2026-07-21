@@ -939,11 +939,21 @@ export function HomePage() {
 
   const handleDomainSelect = (domainId: string | null) => {
     setSelectedDomain(domainId);
+    // Switching the browse domain changes the available filter fields, so reset
+    // the map domain + enum-field selections: a leftover domain chip from
+    // another scope would otherwise hide every item, and stale field chips would
+    // show as active even though their group is no longer rendered.
+    setMapSelectedDomains([]);
+    setMapSelectedFields({});
     setSearchParams((prev) => {
       if (domainId) {
         prev.set('domain', domainId);
       } else {
         prev.delete('domain');
+      }
+      prev.delete('map_domains');
+      for (const key of [...prev.keys()]) {
+        if (key.startsWith('f_')) prev.delete(key);
       }
       return prev;
     });
@@ -1306,6 +1316,9 @@ export function HomePage() {
       onDomainsChange={handleMapDomainsChange}
       selectedFields={mapSelectedFields}
       onFieldsChange={handleMapFieldsChange}
+      // A specific sidebar domain already scopes browse + the enum groups to
+      // that domain, so the domain chip toggle is redundant there.
+      showDomainToggle={selectedDomain === null}
       viewMode={viewMode}
     />
   );
