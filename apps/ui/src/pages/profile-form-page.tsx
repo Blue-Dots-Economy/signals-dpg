@@ -47,6 +47,7 @@ import {
   createItem,
   fetchItems,
   updateItem,
+  setItemLifecycle,
   type CreateItemPayload,
   type UpdateItemPayload,
   type Item,
@@ -91,6 +92,7 @@ export function ProfileFormPage() {
   const [existingItem, setExistingItem] = React.useState<Item | null>(null);
   const [initialData, setInitialData] = React.useState<Record<string, unknown> | null>(null);
   const [isSubmitting, setIsSubmitting] = React.useState(false);
+  const [lifecycleBusy, setLifecycleBusy] = React.useState(false);
   const [isLoading, setIsLoading] = React.useState(isEdit);
   const [availableNetworkIds, setAvailableNetworkIds] = React.useState<string[] | null>(null);
   const [isWalletModalOpen, setIsWalletModalOpen] = React.useState(false);
@@ -579,6 +581,29 @@ export function ProfileFormPage() {
     }
   };
 
+  // Pause (hide) / unpause (show) the profile the owner is editing. Pause is
+  // only offered on a `live` profile; unpause on a `paused` one. The server
+  // re-validates on unpause and may land the profile in `draft`. (#346)
+  const handleLifecycle = async (action: 'pause' | 'unpause') => {
+    if (!existingItem) return;
+    setLifecycleBusy(true);
+    try {
+      const res = await setItemLifecycle(existingItem.item_id, action);
+      setExistingItem({ ...existingItem, lifecycle_status: res.lifecycle_status });
+      toast.success(
+        action === 'pause'
+          ? t('profile.toast_paused', 'Profile hidden — it is no longer discoverable.')
+          : res.lifecycle_status === 'live'
+            ? t('profile.toast_unpaused_live', 'Profile is visible again.')
+            : t('profile.toast_unpaused_draft', 'Profile restored, but it needs completing before it goes live.'),
+      );
+    } catch {
+      toast.error(t('profile.toast_lifecycle_failed', 'Could not update profile visibility. Try again.'));
+    } finally {
+      setLifecycleBusy(false);
+    }
+  };
+
   if (availableNetworkIds === null || isLoading) {
     return (
       <div className="flex h-screen items-center justify-center">
@@ -703,6 +728,32 @@ export function ProfileFormPage() {
                 {formError.description && <AlertDescription>{formError.description}</AlertDescription>}
               </Alert>
             )}
+
+            {isEdit && existingItem &&
+              (existingItem.lifecycle_status === 'live' ||
+                existingItem.lifecycle_status === 'paused') && (
+                <div className="mb-4 flex items-center justify-between gap-3 rounded-md border border-border bg-muted/40 p-3">
+                  <p className="text-sm text-muted-foreground">
+                    {existingItem.lifecycle_status === 'paused'
+                      ? t('profile.visibility_hidden', 'This profile is hidden — others cannot find or contact it.')
+                      : t('profile.visibility_live', 'This profile is visible to others.')}
+                  </p>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    disabled={lifecycleBusy}
+                    onClick={() => {
+                      void handleLifecycle(
+                        existingItem.lifecycle_status === 'paused' ? 'unpause' : 'pause',
+                      );
+                    }}
+                  >
+                    {existingItem.lifecycle_status === 'paused'
+                      ? t('profile.btn_unpause', 'Make visible')
+                      : t('profile.btn_pause', 'Hide profile')}
+                  </Button>
+                </div>
+              )}
 
             {profileSchema && (
               <SchemaForm

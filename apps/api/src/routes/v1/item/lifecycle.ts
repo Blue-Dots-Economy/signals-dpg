@@ -86,8 +86,14 @@ const item_lifecycle_handler = async (
 
       const current = existing.lifecycle_status as 'draft' | 'live' | 'paused';
 
+      // Pause is a "voluntarily hide a *ready* profile" action — only a `live`
+      // profile can be hidden (business R7.5 / #234 Q6). Hiding a draft (never
+      // ready) or an already-paused profile is meaningless.
+      if (action === 'pause' && current !== 'live') {
+        return { invalidAction: 'PAUSE_REQUIRES_LIVE' as const } as const;
+      }
       if (action === 'unpause' && current !== 'paused') {
-        return { invalidAction: true } as const;
+        return { invalidAction: 'UNPAUSE_REQUIRES_PAUSED' as const } as const;
       }
 
       const { mergedState } = decryptItemPrivate({
@@ -129,6 +135,7 @@ const item_lifecycle_handler = async (
         item_id,
         item_network: existing.item_network,
         item_domain: existing.item_domain,
+        previous_status: current,
         lifecycle_status: next_status,
       };
     });
@@ -150,7 +157,10 @@ const item_lifecycle_handler = async (
     if ('invalidAction' in result) {
       return reply.code(409).send({
         error: 'INVALID_LIFECYCLE_ACTION',
-        message: 'unpause is only valid on a paused item',
+        message:
+          result.invalidAction === 'PAUSE_REQUIRES_LIVE'
+            ? 'pause is only valid on a live item'
+            : 'unpause is only valid on a paused item',
       });
     }
 
@@ -158,7 +168,26 @@ const item_lifecycle_handler = async (
       (err) => request.log.warn({ err }, 'cache invalidation after lifecycle change failed'),
     );
 
-    const { item_network: _n, item_domain: _d, ...responseBody } = result;
+    // Audit/telemetry: log every lifecycle transition (#234 Q15 / R10.3).
+    request.log.info(
+      {
+        event: 'item.lifecycle.transition',
+        item_id: result.item_id,
+        action,
+        from: result.previous_status,
+        to: result.lifecycle_status,
+        actor: callerId,
+        actor_type: isNetworkService ? 'network_service' : 'owner',
+      },
+      'item lifecycle transition',
+    );
+
+    const {
+      item_network: _n,
+      item_domain: _d,
+      previous_status: _p,
+      ...responseBody
+    } = result;
     return reply.code(200).send(responseBody);
   } catch (err) {
     request.log.error({ err, item_id, action }, 'Failed to update item lifecycle');
