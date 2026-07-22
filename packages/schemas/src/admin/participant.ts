@@ -13,7 +13,9 @@ import { ItemLocationsArray } from '../api/item_schemas';
  *  - Phone numbers are E.164.
  *
  * Consent rules:
- *  - Both `terms_accepted` and `privacy_accepted` must be literally true.
+ *  - `terms_accepted` / `privacy_accepted` are deprecated (#309): optional,
+ *    accepted for backward compatibility, but ignored. Consent is recorded
+ *    via the `compliance` array instead.
  *
  * Attribution:
  *  - `channel` tags the broad onboarding surface.
@@ -45,12 +47,19 @@ export const UpsertParticipantRequest = z
     // (aggregator / voice / WhatsApp) typically have only a birth date. Both
     // parse cleanly via `new Date(...)` into `user.date_of_birth`.
     date_of_birth: z.union([z.iso.date(), z.iso.datetime()]).optional(),
-    terms_accepted: z
-      .boolean()
-      .refine((v) => v === true, 'terms_accepted must be true'),
-    privacy_accepted: z
-      .boolean()
-      .refine((v) => v === true, 'privacy_accepted must be true'),
+    // Deprecated (#309): accepted for backward compatibility with existing
+    // callers (aggregator-dpg / bulk) but IGNORED. Consent is recorded via
+    // `compliance`. Remove in a later cleanup ticket.
+    terms_accepted: z.boolean().optional(),
+    privacy_accepted: z.boolean().optional(),
+    // Consent captured by an external channel (voice/aggregator/bulk). Each
+    // entry names a consent the user accepted/declined on the channel; only
+    // `value: true` is recorded (append-only ledger). Recognised keys:
+    // `user_terms`, `user_privacy`, `profile_creation`. Unknown keys (e.g. a
+    // future action/connect key) are ignored. Versions are derived server-side.
+    compliance: z
+      .array(z.object({ key: z.string().min(1), value: z.boolean() }))
+      .optional(),
     channel: z.enum(['bulk', 'link', 'voice', 'self']),
     source_id: z.string().min(1).optional(),
     item_state: z
@@ -97,6 +106,9 @@ export const ParticipantItemSnapshot = z.object({
   item_network: z.string(),
   item_domain: z.string(),
   item_type: z.string(),
+  // Present on the upsert response so callers can tell live vs draft. Optional
+  // because sibling readers (participant_read) do not populate it.
+  lifecycle_status: z.string().optional(),
   item_state: z.record(z.string(), z.unknown()),
   item_locations: ItemLocationsArray,
   created_at: z.iso.datetime(),
@@ -109,6 +121,9 @@ export const UpsertParticipantResponse = z.object({
   owned_elsewhere: z.boolean(),
   onboarded_at: z.iso.datetime().nullable(),
   items: z.array(ParticipantItemSnapshot),
+  // Number of consent_record rows written this call (#309). Optional so the
+  // rejected / owned-elsewhere branches can omit it.
+  consent_recorded: z.number().int().optional(),
 });
 
 export const GetParticipantRequest = z

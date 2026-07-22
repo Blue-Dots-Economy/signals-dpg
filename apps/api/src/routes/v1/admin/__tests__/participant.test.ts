@@ -481,6 +481,23 @@ describe('POST /admin/participant', () => {
     });
   });
 
+  it('accepts a request with terms_accepted/privacy_accepted omitted (now optional) → 200', async () => {
+    dbState.signUpUserId = 'usr_new_optional';
+    lastQueriedUserId = 'usr_new_optional';
+    const app = await buildApp({ org_id: 'org_agg_1', org_type: 'aggregator' });
+    const res = await app.inject({
+      method: 'POST',
+      url: '/participant',
+      payload: {
+        email: 'optional@example.com',
+        name: 'Opt',
+        channel: 'bulk',
+        item_state: { whoIAm: { education: 'XII' } },
+      },
+    });
+    expect(res.statusCode).toBe(200);
+  });
+
   it('aggregator + existing OWN user + item_state → 200 user_existed:true, owned_elsewhere:false, inserts:1', async () => {
     const user_id = 'usr_own';
     dbState.existingUserRows = [
