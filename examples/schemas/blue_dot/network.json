@@ -2,6 +2,7 @@
   "display_name": "Blue Dot",
   "description": "Jobs and hiring network.",
   "schema_standard": "https://json-schema.org/draft/2020-12/schema",
+  "pause_enabled": true,
   "domains": [
     {
       "description": "People looking for jobs.",
