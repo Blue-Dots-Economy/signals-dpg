@@ -168,19 +168,13 @@ const item_lifecycle_handler = async (
       (err) => request.log.warn({ err }, 'cache invalidation after lifecycle change failed'),
     );
 
-    // Audit/telemetry: log every lifecycle transition (#234 Q15 / R10.3).
-    request.log.info(
-      {
-        event: 'item.lifecycle.transition',
-        item_id: result.item_id,
-        action,
-        from: result.previous_status,
-        to: result.lifecycle_status,
-        actor: callerId,
-        actor_type: isNetworkService ? 'network_service' : 'owner',
-      },
-      'item lifecycle transition',
-    );
+    // Lifecycle transitions (pause / unpause here, and the draft/live/retired
+    // transitions elsewhere) must be emitted as audit/telemetry events —
+    // #234 Q15 ("log every transition as an event") / business doc R10.3.
+    // Deferred to the cross-cutting events/telemetry pipeline so all
+    // transitions report through one emitter; wire this transition
+    // (from `result.previous_status` → `result.lifecycle_status`, actor
+    // `callerId`) in there. `previous_status` is carried on `result` for that.
 
     const {
       item_network: _n,
