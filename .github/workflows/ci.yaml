@@ -3,8 +3,11 @@ name: CI
 on:
   pull_request:
     branches: [develop, main, feature]
+  # feature: validate the merged integration state too — PRs into feature
+  # already run CI, but the post-merge result was unchecked. publish-images
+  # stays develop-only via its own `if` gate.
   push:
-    branches: [develop]
+    branches: [develop, feature]
   workflow_dispatch:
 
 concurrency:
