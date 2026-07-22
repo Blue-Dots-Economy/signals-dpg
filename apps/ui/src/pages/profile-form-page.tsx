@@ -592,13 +592,13 @@ export function ProfileFormPage() {
       setExistingItem({ ...existingItem, lifecycle_status: res.lifecycle_status });
       toast.success(
         action === 'pause'
-          ? t('profile.toast_paused', 'Profile hidden — it is no longer discoverable.')
+          ? t('profile.toast_paused', 'Profile paused — it is no longer discoverable in the network.')
           : res.lifecycle_status === 'live'
-            ? t('profile.toast_unpaused_live', 'Profile is visible again.')
-            : t('profile.toast_unpaused_draft', 'Profile restored, but it needs completing before it goes live.'),
+            ? t('profile.toast_unpaused_live', 'Profile resumed — discoverable in the network again.')
+            : t('profile.toast_unpaused_draft', 'Profile resumed, but it needs completing before it goes live.'),
       );
     } catch {
-      toast.error(t('profile.toast_lifecycle_failed', 'Could not update profile visibility. Try again.'));
+      toast.error(t('profile.toast_lifecycle_failed', 'Could not update profile status. Try again.'));
     } finally {
       setLifecycleBusy(false);
     }
@@ -735,8 +735,8 @@ export function ProfileFormPage() {
                 <div className="mb-4 flex items-center justify-between gap-3 rounded-md border border-border bg-muted/40 p-3">
                   <p className="text-sm text-muted-foreground">
                     {existingItem.lifecycle_status === 'paused'
-                      ? t('profile.visibility_hidden', 'This profile is hidden — others cannot find or contact it.')
-                      : t('profile.visibility_live', 'This profile is visible to others.')}
+                      ? t('profile.visibility_hidden', 'This profile is paused — it is not discoverable in the network.')
+                      : t('profile.visibility_live', 'This profile is discoverable in the network.')}
                   </p>
                   <Button
                     variant="outline"
@@ -749,8 +749,8 @@ export function ProfileFormPage() {
                     }}
                   >
                     {existingItem.lifecycle_status === 'paused'
-                      ? t('profile.btn_unpause', 'Make visible')
-                      : t('profile.btn_pause', 'Hide profile')}
+                      ? t('profile.btn_unpause', 'Resume profile')
+                      : t('profile.btn_pause', 'Pause profile')}
                   </Button>
                 </div>
               )}
