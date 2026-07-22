@@ -17,6 +17,9 @@ import {
   mergeAllowedOrigins,
 } from '@dpg/config';
 import v1_routes from '@/routes/v1/v1_routes';
+import health_routes from '@/routes/health/health_route';
+import { pool } from '@api/db/postgres/drizzle_config';
+import { redis } from '@api/db/secondary/redis';
 import { getNetworkConfigs } from '@/network_configs';
 import {
   clearNetworkSchemaCache,
@@ -107,6 +110,7 @@ app.withTypeProvider<ZodTypeProvider>().route({
     });
   },
 });
+app.register(health_routes);
 app.register(AuthRoutes);
 app.register(v1_routes, { prefix: '/api/v1' });
 
@@ -131,7 +135,12 @@ async function shutdown(signal: string) {
   app.log.info(`Shutting down (${signal})`);
 
   try {
+    // Drain the HTTP server first (stop accepting requests), then close the
+    // backing connections that were previously leaked on shutdown: the Postgres
+    // pool and the Redis client.
     await app.close();
+    await pool.end();
+    await redis.quit();
   } catch (err) {
     app.log.error(err);
   } finally {
