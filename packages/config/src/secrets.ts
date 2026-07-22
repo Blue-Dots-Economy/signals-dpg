@@ -9,6 +9,18 @@ export const InstanceSecretsSchema = z.object({
 export const ApiSecretsSchema = z.object({
   API_DOMAIN: z.string(),
   API_PORT: z.coerce.number().default(2742),
+  // Serve the OpenAPI spec + Scalar reference UI at /api/reference. Default
+  // on; apps/api/src/config.ts's apiReferenceEnabled force-disables it in
+  // production unless API_REFERENCE_FORCE opts back in.
+  API_REFERENCE_ENABLED: z
+    .string()
+    .default('true')
+    .transform((val) => val === 'true'),
+  // Opt back into serving the docs surface when INSTANCE_ENV=production.
+  API_REFERENCE_FORCE: z
+    .string()
+    .default('false')
+    .transform((val) => val === 'true'),
 });
 
 export const AuthSecretsSchema = z.object({

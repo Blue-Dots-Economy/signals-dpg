@@ -102,6 +102,16 @@ export const matchScoreConfig = {
   },
 };
 
+/**
+ * Serve the OpenAPI spec + Scalar reference UI at /api/reference. Secure by
+ * default: force-disabled when INSTANCE_ENV=production unless
+ * API_REFERENCE_FORCE opts back in. The always-available reference is the
+ * bluedots-docs site.
+ */
+export const apiReferenceEnabled: boolean =
+  api.API_REFERENCE_ENABLED &&
+  (instance.INSTANCE_ENV !== 'production' || api.API_REFERENCE_FORCE);
+
 export function getCurrentApiBaseUrl(): string {
   const parsedUrl = new URL(api.API_DOMAIN);
 
