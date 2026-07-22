@@ -1,0 +1,178 @@
+import { describe, it, expect, beforeEach, vi } from 'vitest';
+
+const resolveConsentVersion = vi.fn();
+const hasAcceptedTermsAndPrivacy = vi.fn();
+const hasAcceptedProfileConsent = vi.fn();
+const promoteItemOnProfileConsent = vi.fn();
+
+vi.mock('@/services/consent_version', () => ({
+  resolveConsentVersion: (...a: unknown[]) => resolveConsentVersion(...a),
+}));
+vi.mock('@/services/consent_acceptance', () => ({
+  hasAcceptedTermsAndPrivacy: (...a: unknown[]) => hasAcceptedTermsAndPrivacy(...a),
+  hasAcceptedProfileConsent: (...a: unknown[]) => hasAcceptedProfileConsent(...a),
+}));
+vi.mock('@/services/item_service', () => ({
+  promoteItemOnProfileConsent: (...a: unknown[]) => promoteItemOnProfileConsent(...a),
+}));
+vi.mock('@api/db/postgres/schema', () => ({
+  consent_record: { __table: 'consent_record' },
+}));
+
+import { recordParticipantConsent } from '@/services/participant_consent';
+
+type InsertedRow = Record<string, unknown>;
+
+function makeTx() {
+  const inserted: InsertedRow[] = [];
+  const tx = {
+    insert: vi.fn(() => ({
+      values: vi.fn(async (row: InsertedRow) => {
+        inserted.push(row);
+      }),
+    })),
+  };
+  return { tx, inserted };
+}
+
+describe('recordParticipantConsent', () => {
+  beforeEach(() => {
+    resolveConsentVersion.mockReset();
+    hasAcceptedTermsAndPrivacy.mockReset();
+    hasAcceptedProfileConsent.mockReset();
+    promoteItemOnProfileConsent.mockReset();
+    resolveConsentVersion.mockResolvedValue(1);
+    hasAcceptedTermsAndPrivacy.mockResolvedValue(true);
+    hasAcceptedProfileConsent.mockResolvedValue(false);
+    promoteItemOnProfileConsent.mockResolvedValue(true);
+  });
+
+  it('returns zero when compliance is absent', async () => {
+    const { tx, inserted } = makeTx();
+    const res = await recordParticipantConsent(tx as never, {
+      userId: 'u1', network: 'blue_dot', channel: 'voice', acceptedAt: new Date(),
+    });
+    expect(res).toEqual({ recorded: 0, promoted: false });
+    expect(inserted).toHaveLength(0);
+  });
+
+  it('records terms + privacy as user-level rows with source=signup and metadata', async () => {
+    const { tx, inserted } = makeTx();
+    const acceptedAt = new Date('2026-07-22T00:00:00.000Z');
+    const res = await recordParticipantConsent(tx as never, {
+      compliance: [
+        { key: 'user_terms', value: true },
+        { key: 'user_privacy', value: true },
+      ],
+      userId: 'u1', network: 'blue_dot', channel: 'voice', acceptedAt,
+    });
+    expect(res.recorded).toBe(2);
+    expect(inserted).toHaveLength(2);
+    expect(inserted[0]).toMatchObject({
+      level: 'user', consentCategory: 'terms', userId: 'u1', network: 'blue_dot',
+      documentVersion: 1, source: 'signup', acceptedAt,
+      metadata: { channel: 'voice', via: 'admin_participant', key: 'user_terms' },
+    });
+    expect(inserted[1]).toMatchObject({ consentCategory: 'privacy', source: 'signup' });
+  });
+
+  it('skips value:false and unknown keys', async () => {
+    const { tx, inserted } = makeTx();
+    const res = await recordParticipantConsent(tx as never, {
+      compliance: [
+        { key: 'user_terms', value: false },
+        { key: 'something_else', value: true },
+      ],
+      userId: 'u1', network: 'blue_dot', channel: 'bulk', acceptedAt: new Date(),
+    });
+    expect(res.recorded).toBe(0);
+    expect(inserted).toHaveLength(0);
+  });
+
+  it('skips a category whose version is unconfigured', async () => {
+    resolveConsentVersion.mockResolvedValue(null);
+    const { tx, inserted } = makeTx();
+    const res = await recordParticipantConsent(tx as never, {
+      compliance: [{ key: 'user_terms', value: true }],
+      userId: 'u1', network: 'blue_dot', channel: 'voice', acceptedAt: new Date(),
+    });
+    expect(res.recorded).toBe(0);
+    expect(inserted).toHaveLength(0);
+  });
+
+  it('records profile_creation and promotes when prerequisites met and item present', async () => {
+    const { tx, inserted } = makeTx();
+    const res = await recordParticipantConsent(tx as never, {
+      compliance: [
+        { key: 'user_terms', value: true },
+        { key: 'user_privacy', value: true },
+        { key: 'profile_creation', value: true },
+      ],
+      userId: 'u1', itemId: 'item-1', network: 'blue_dot', channel: 'voice', acceptedAt: new Date(),
+    });
+    expect(res.recorded).toBe(3);
+    expect(res.promoted).toBe(true);
+    expect(promoteItemOnProfileConsent).toHaveBeenCalledWith(tx, 'item-1');
+    const profileRow = inserted.find((r) => r.consentCategory === 'profile_creation');
+    expect(profileRow).toMatchObject({
+      level: 'item', itemId: 'item-1', source: 'profile',
+      metadata: { channel: 'voice', via: 'admin_participant', key: 'profile_creation' },
+    });
+  });
+
+  it('skips profile_creation when no item is present', async () => {
+    const { tx, inserted } = makeTx();
+    const res = await recordParticipantConsent(tx as never, {
+      compliance: [
+        { key: 'user_terms', value: true },
+        { key: 'user_privacy', value: true },
+        { key: 'profile_creation', value: true },
+      ],
+      userId: 'u1', network: 'blue_dot', channel: 'voice', acceptedAt: new Date(),
+    });
+    expect(res.recorded).toBe(2);
+    expect(res.promoted).toBe(false);
+    expect(promoteItemOnProfileConsent).not.toHaveBeenCalled();
+    expect(inserted.find((r) => r.consentCategory === 'profile_creation')).toBeUndefined();
+  });
+
+  it('skips profile_creation when terms/privacy prerequisite is missing', async () => {
+    hasAcceptedTermsAndPrivacy.mockResolvedValue(false);
+    const { tx, inserted } = makeTx();
+    const res = await recordParticipantConsent(tx as never, {
+      compliance: [{ key: 'profile_creation', value: true }],
+      userId: 'u1', itemId: 'item-1', network: 'blue_dot', channel: 'voice', acceptedAt: new Date(),
+    });
+    expect(res.recorded).toBe(0);
+    expect(res.promoted).toBe(false);
+    expect(promoteItemOnProfileConsent).not.toHaveBeenCalled();
+    expect(inserted).toHaveLength(0);
+  });
+
+  it('does not re-insert profile_creation when already recorded but still promotes', async () => {
+    hasAcceptedProfileConsent.mockResolvedValue(true);
+    const { tx, inserted } = makeTx();
+    const res = await recordParticipantConsent(tx as never, {
+      compliance: [{ key: 'profile_creation', value: true }],
+      userId: 'u1', itemId: 'item-1', network: 'blue_dot', channel: 'voice', acceptedAt: new Date(),
+    });
+    expect(res.recorded).toBe(0);
+    expect(res.promoted).toBe(true);
+    expect(inserted.find((r) => r.consentCategory === 'profile_creation')).toBeUndefined();
+    expect(promoteItemOnProfileConsent).toHaveBeenCalledWith(tx, 'item-1');
+  });
+
+  it('reports promoted:false when the item does not go live (e.g. minor gate)', async () => {
+    promoteItemOnProfileConsent.mockResolvedValue(false);
+    const { tx } = makeTx();
+    const res = await recordParticipantConsent(tx as never, {
+      compliance: [
+        { key: 'user_terms', value: true },
+        { key: 'user_privacy', value: true },
+        { key: 'profile_creation', value: true },
+      ],
+      userId: 'u1', itemId: 'item-1', network: 'blue_dot', channel: 'voice', acceptedAt: new Date(),
+    });
+    expect(res.promoted).toBe(false);
+  });
+});
