@@ -280,9 +280,16 @@ export function AppSidebar({
                                     }
                                   >
                                     <span className="truncate">{title}</span>
-                                    {isActiveProfile && (
-                                      <span className="ml-auto shrink-0 rounded-full bg-primary px-1.5 py-0.5 text-[10px] font-semibold text-primary-foreground leading-none">
-                                        {t('nav.active_badge')}
+                                    {/* Selection is shown by the row highlight, so no
+                                        "active" chip. Surface the lifecycle state only
+                                        when it isn't live (paused / draft). */}
+                                    {(profile.lifecycle_status === 'paused' ||
+                                      profile.lifecycle_status === 'draft') && (
+                                      <span className="ml-auto shrink-0 rounded-full bg-muted px-1.5 py-0.5 text-[10px] font-semibold text-muted-foreground leading-none capitalize">
+                                        {t(
+                                          `nav.status_${profile.lifecycle_status}`,
+                                          profile.lifecycle_status,
+                                        )}
                                       </span>
                                     )}
                                   </SidebarMenuButton>
