@@ -10,6 +10,7 @@ const requestOtp = vi.fn();
 const fetchAuthConfig = vi.fn();
 const fetchNetworkConfig = vi.fn();
 const navigateMock = vi.fn();
+const getServedScope = vi.fn();
 
 const NETWORK_DOMAINS = [
   { id: 'seeker', description: 'Job seeker' },
@@ -34,6 +35,10 @@ vi.mock('@/lib/consent-api', () => ({
 }));
 vi.mock('@/lib/network-api', () => ({
   fetchNetworkConfig: (...a: unknown[]) => fetchNetworkConfig(...a),
+}));
+vi.mock('@/lib/served-binding', async (orig) => ({
+  ...(await orig<typeof import('@/lib/served-binding')>()),
+  getServedScope: () => getServedScope(),
 }));
 vi.mock('react-router-dom', async (orig) => ({
   ...(await orig<typeof import('react-router-dom')>()),
@@ -79,6 +84,9 @@ async function renderPage() {
 describe('LoginPage', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    // Default: no served-binding scope → combined mode (all domains), matching
+    // the pre-existing tests. Individual tests override for a single-domain portal.
+    getServedScope.mockReturnValue(null);
     requestOtp.mockResolvedValue({ ok: true, user: false });
     fetchNetworkConfig.mockResolvedValue({ id: 'blue_dot', domains: NETWORK_DOMAINS });
   });
@@ -228,6 +236,35 @@ describe('LoginPage', () => {
 
       // No DOB step shown; goes straight to OTP with a domain-only signupExtras.
       expect(screen.queryByText(/to create an account/i)).toBeNull();
+      await waitFor(() => expect(requestOtp).toHaveBeenCalled());
+      await waitFor(() => expect(navigateMock).toHaveBeenCalledWith(
+        '/auth/otp',
+        expect.objectContaining({
+          state: expect.objectContaining({ signupExtras: { domain: 'provider' } }),
+        }),
+      ));
+    });
+
+    it('a single-served-domain portal hides the picker and auto-carries that domain', async () => {
+      // Provider-only (split) portal: VITE_SERVED_BINDINGS scopes to one domain.
+      getServedScope.mockReturnValue({ network: 'blue_dot', domains: ['provider'] });
+      fetchAuthConfig.mockResolvedValue({ selfSignupAllowed: true, loginChannels: ['phone', 'email'] });
+      checkUser.mockResolvedValue({ userExists: false });
+      await renderPage();
+      await waitFor(() => expect(fetchAuthConfig).toHaveBeenCalled());
+
+      await userEvent.type(screen.getByLabelText(/mobile/i), '9876543210');
+      await userEvent.click(screen.getByRole('button', { name: /continue|send/i }));
+      await waitFor(() => expect(checkUser).toHaveBeenCalledTimes(1));
+
+      // Name field appears, but the one-option "Your Domain" picker does NOT.
+      await screen.findByLabelText(/your name/i);
+      expect(screen.queryByText(/your domain/i)).toBeNull();
+
+      // No domain click needed — it's auto-selected from the served binding —
+      // so name-only submission proceeds to OTP carrying { domain: 'provider' }.
+      await userEvent.type(screen.getByLabelText(/your name/i), 'Asha');
+      await userEvent.click(screen.getByRole('button', { name: /^continue$/i }));
       await waitFor(() => expect(requestOtp).toHaveBeenCalled());
       await waitFor(() => expect(navigateMock).toHaveBeenCalledWith(
         '/auth/otp',

@@ -21,7 +21,9 @@ pgTypes.setTypeParser(1082, toDateOrNull as unknown as (val: string) => Date);
 pgTypes.setTypeParser(1114, toDateOrNull as unknown as (val: string) => Date);
 pgTypes.setTypeParser(1184, toDateOrNull as unknown as (val: string) => Date);
 
-const pool = new Pool({
+// Exported so graceful shutdown can drain the connection pool (`pool.end()`);
+// previously the pool leaked on SIGTERM because only the HTTP server was closed.
+export const pool = new Pool({
   connectionString: databasesConfig.pg_url,
   ssl: false,
 });
