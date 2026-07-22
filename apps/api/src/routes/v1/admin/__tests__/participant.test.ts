@@ -87,6 +87,12 @@ vi.mock('@/utils/publish_item_event', () => ({
   publishItemEvent: vi.fn(async () => {}),
 }));
 
+// --- mock the consent service: it is unit-tested separately; here we only
+//     assert the route calls it with the right args and stays green.
+vi.mock('@/services/participant_consent', () => ({
+  recordParticipantConsent: vi.fn(async () => ({ recorded: 0, promoted: false })),
+}));
+
 // --- mock @dpg/schemas: keep real exports + neutralize the merge helper for tests ---
 vi.mock('@dpg/schemas', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@dpg/schemas')>();
@@ -476,9 +482,9 @@ describe('POST /admin/participant', () => {
     expect(dbState.updates[0].set).toMatchObject({
       onboardedByOrgId: 'org_agg_1',
       onboardedVia: 'bulk',
-      termsAccepted: true,
-      privacyAccepted: true,
     });
+    expect(dbState.updates[0].set).not.toHaveProperty('termsAccepted');
+    expect(dbState.updates[0].set).not.toHaveProperty('privacyAccepted');
   });
 
   it('accepts a request with terms_accepted/privacy_accepted omitted (now optional) → 200', async () => {
@@ -693,9 +699,9 @@ describe('POST /admin/participant', () => {
     expect(dbState.updates[0].set).toMatchObject({
       onboardedByOrgId: 'org_ns_1',
       onboardedVia: 'bulk',
-      termsAccepted: true,
-      privacyAccepted: true,
     });
+    expect(dbState.updates[0].set).not.toHaveProperty('termsAccepted');
+    expect(dbState.updates[0].set).not.toHaveProperty('privacyAccepted');
   });
 
   it('network_service + existing user + valid item_id → 200 owned_elsewhere:false, item updated', async () => {

@@ -75,6 +75,7 @@ describeIf(`POST /api/v1/admin/participant (integration)${
   let db: typeof import('@api/db/postgres/drizzle_config').db;
   let authSchema: typeof import('../../../../../db/postgres/schema/auth.js');
   let itemsTable: typeof import('@dpg/database').items;
+  let consentRecordTable: typeof import('@api/db/postgres/schema')['consent_record'];
 
   // Default to the network-config port so the route's downstream
   // partition-ensure / signUp paths see the same host they would in the
@@ -136,6 +137,8 @@ describeIf(`POST /api/v1/admin/participant (integration)${
     db = drizzle_mod.db;
     authSchema = auth_mod;
     itemsTable = database_pkg.items;
+    const schema_mod = await import('@api/db/postgres/schema');
+    consentRecordTable = schema_mod.consent_record;
 
     // Resolve primary + secondary served-domain bindings from env config.
     const resolved = await resolveBindings();
@@ -261,6 +264,13 @@ describeIf(`POST /api/v1/admin/participant (integration)${
     const { user, organization, apikey } = authSchema;
     try {
       if (onboarded_user_ids.length > 0) {
+        try {
+          await db
+            .delete(consentRecordTable)
+            .where(inArray(consentRecordTable.userId, onboarded_user_ids));
+        } catch {
+          /* swallow cleanup errors */
+        }
         // items has no FK on user.id — delete by created_by explicitly.
         await db
           .delete(itemsTable)
@@ -710,5 +720,125 @@ describeIf(`POST /api/v1/admin/participant (integration)${
       .limit(1);
     expect(after_other).toBeTruthy();
     expect(after_other.item_state).toEqual(before_other[0].item_state);
+  });
+
+  it('records compliance consent and promotes an adult profile to live', async () => {
+    const email = `int_c_compliance_${randomUUID().slice(0, 6)}@a.test`;
+    const fixture = generateMinimalItemState(primary.schema);
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/v1/admin/participant',
+      headers: {
+        'x-api-key': ns.raw_key,
+        'x-acting-org-id': ns.org_id,
+        'content-type': 'application/json',
+      },
+      payload: {
+        email,
+        name: 'Compliance Adult',
+        date_of_birth: '1990-01-01',
+        channel: 'voice',
+        network: primary.network,
+        domain: primary.domain,
+        item_type: primary.item_type,
+        item_state: fixture,
+        compliance: [
+          { key: 'user_terms', value: true },
+          { key: 'user_privacy', value: true },
+          { key: 'profile_creation', value: true },
+        ],
+      },
+    });
+    expect(res.statusCode).toBe(200);
+    const body = res.json();
+    onboarded_user_ids.push(body.user_id);
+    expect(body.consent_recorded).toBe(3);
+    expect(body.items).toHaveLength(1);
+    expect(body.items[0].lifecycle_status).toBe('live');
+
+    const rows = await db
+      .select()
+      .from(consentRecordTable)
+      .where(eq(consentRecordTable.userId, body.user_id));
+    const cats = rows.map((r) => r.consentCategory).sort();
+    expect(cats).toEqual(['privacy', 'profile_creation', 'terms']);
+    const profileRow = rows.find((r) => r.consentCategory === 'profile_creation');
+    expect(profileRow?.source).toBe('profile');
+    expect(profileRow?.metadata).toMatchObject({
+      channel: 'voice',
+      via: 'admin_participant',
+    });
+  });
+
+  it('ignores deprecated terms_accepted/privacy_accepted and records no consent', async () => {
+    const email = `int_c_legacy_${randomUUID().slice(0, 6)}@a.test`;
+    const fixture = generateMinimalItemState(primary.schema);
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/v1/admin/participant',
+      headers: {
+        'x-api-key': ns.raw_key,
+        'x-acting-org-id': ns.org_id,
+        'content-type': 'application/json',
+      },
+      payload: {
+        email,
+        name: 'Legacy Booleans',
+        channel: 'bulk',
+        terms_accepted: true,
+        privacy_accepted: true,
+        network: primary.network,
+        domain: primary.domain,
+        item_type: primary.item_type,
+        item_state: fixture,
+      },
+    });
+    expect(res.statusCode).toBe(200);
+    const body = res.json();
+    onboarded_user_ids.push(body.user_id);
+    expect(body.consent_recorded ?? 0).toBe(0);
+    expect(body.items[0].lifecycle_status).toBe('draft');
+
+    const rows = await db
+      .select()
+      .from(consentRecordTable)
+      .where(eq(consentRecordTable.userId, body.user_id));
+    expect(rows).toHaveLength(0);
+  });
+
+  it('does not record profile_creation without the terms+privacy prerequisite', async () => {
+    const email = `int_c_prereq_${randomUUID().slice(0, 6)}@a.test`;
+    const fixture = generateMinimalItemState(primary.schema);
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/v1/admin/participant',
+      headers: {
+        'x-api-key': ns.raw_key,
+        'x-acting-org-id': ns.org_id,
+        'content-type': 'application/json',
+      },
+      payload: {
+        email,
+        name: 'Prereq Missing',
+        date_of_birth: '1990-01-01',
+        channel: 'voice',
+        network: primary.network,
+        domain: primary.domain,
+        item_type: primary.item_type,
+        item_state: fixture,
+        compliance: [{ key: 'profile_creation', value: true }],
+      },
+    });
+    expect(res.statusCode).toBe(200);
+    const body = res.json();
+    onboarded_user_ids.push(body.user_id);
+    expect(body.consent_recorded ?? 0).toBe(0);
+    expect(body.items[0].lifecycle_status).toBe('draft');
+
+    const rows = await db
+      .select()
+      .from(consentRecordTable)
+      .where(eq(consentRecordTable.userId, body.user_id));
+    expect(rows).toHaveLength(0);
   });
 });

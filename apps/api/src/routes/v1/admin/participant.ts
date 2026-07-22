@@ -20,6 +20,7 @@ import {
 } from '@dpg/schemas';
 import { decryptItemPrivate } from '@/utils/item_decrypt';
 import { resolve_upsert_action } from './_resolve_upsert_action.js';
+import { recordParticipantConsent } from '@/services/participant_consent';
 
 /**
  * POST /api/v1/admin/participant
@@ -66,8 +67,6 @@ const buildOnboardingSet = (f: OnboardingFields) => ({
   phoneNumber: f.phone_norm,
   phoneNumberVerified: false,
   dateOfBirth: f.date_of_birth ? new Date(f.date_of_birth) : null,
-  termsAccepted: true,
-  privacyAccepted: true,
   onboardedByOrgId: f.acting_org_id,
   onboardedVia: f.channel,
   onboardedSourceId: f.source_id ?? null,
@@ -222,6 +221,7 @@ export const participant_handler = async (
   reply: FastifyReply,
 ) => {
   const body = request.body;
+  let consent_recorded = 0;
   const email_norm = body.email?.trim().toLowerCase() ?? null;
   const phone_norm = body.phone_number?.trim() ?? null;
 
@@ -302,8 +302,8 @@ export const participant_handler = async (
 
   if (verdict.kind === 'account_only') {
     if (!user_exists) {
-      // New user — create account but skip item creation.
       const acting_org_id = request.acting_org!.org_id;
+      const network = body.network ?? 'blue_dot';
       const now = new Date();
       const email_for_signup = email_norm ?? `${randomUUID()}@no-email.local`;
 
@@ -322,10 +322,21 @@ export const participant_handler = async (
         fields,
         log: request.log,
         updateExecutor: async (user_id) => {
-          await db
-            .update(user)
-            .set(buildOnboardingSet(fields))
-            .where(eq(user.id, user_id));
+          await db.transaction(async (tx) => {
+            await tx
+              .update(user)
+              .set(buildOnboardingSet(fields))
+              .where(eq(user.id, user_id));
+            const consent = await recordParticipantConsent(tx, {
+              compliance: body.compliance,
+              userId: user_id,
+              network,
+              brand: null,
+              channel: body.channel,
+              acceptedAt: now,
+            });
+            consent_recorded = consent.recorded;
+          });
         },
       });
 
@@ -342,10 +353,26 @@ export const participant_handler = async (
         owned_elsewhere: false,
         onboarded_at: now.toISOString(),
         items: [],
+        consent_recorded,
       });
     }
 
-    // Existing user, no item_state — read and return their items.
+    // Existing user, no item_state — record any user-level consent, then read.
+    if (body.compliance && body.compliance.length > 0) {
+      const network = body.network ?? 'blue_dot';
+      await db.transaction(async (tx) => {
+        const consent = await recordParticipantConsent(tx, {
+          compliance: body.compliance,
+          userId: existing!.id,
+          network,
+          brand: null,
+          channel: body.channel,
+          acceptedAt: new Date(),
+        });
+        consent_recorded = consent.recorded;
+      });
+    }
+
     const itemsList = await readItemsForUser(existing!.id);
     return reply.code(200).send({
       user_id: existing!.id,
@@ -353,6 +380,7 @@ export const participant_handler = async (
       owned_elsewhere: false,
       onboarded_at: null,
       items: itemsList,
+      consent_recorded,
     });
   }
 
@@ -371,15 +399,36 @@ export const participant_handler = async (
       });
     }
 
-    let updateResult: { row: { item_network: string; item_domain: string; item_type: string; item_id: string } } | undefined;
+    let updateResult:
+      | {
+          row: {
+            item_network: string;
+            item_domain: string;
+            item_type: string;
+            item_id: string;
+          };
+        }
+      | undefined;
     try {
-      updateResult = await updateItemInternal(
-        db,
-        verdict.item_id,
-        existing!.id,
-        true, // isAdmin — ownership already verified above
-        { item_state: body.item_state ?? {} },
-      );
+      await db.transaction(async (tx) => {
+        updateResult = await updateItemInternal(
+          tx,
+          verdict.item_id,
+          existing!.id,
+          true, // isAdmin — ownership already verified above
+          { item_state: body.item_state ?? {} },
+        );
+        const consent = await recordParticipantConsent(tx, {
+          compliance: body.compliance,
+          userId: existing!.id,
+          itemId: verdict.item_id,
+          network: body.network ?? 'blue_dot',
+          brand: null,
+          channel: body.channel,
+          acceptedAt: new Date(),
+        });
+        consent_recorded = consent.recorded;
+      });
     } catch (err) {
       const e = err as { statusCode?: number; errorCode?: string };
       const isClientError =
@@ -394,19 +443,18 @@ export const participant_handler = async (
       );
       return reply.code(e.statusCode ?? 500).send({
         error: e.errorCode ?? 'UPDATE_FAILED',
-        // Only surface a curated ItemServiceError message (errorCode set). A raw
-        // DB error's message includes the failed SQL + bound params — i.e. the
-        // participant's item_state (name/phone/email) — so never return it.
         message: e.errorCode ? (err as Error).message : 'item update failed',
       });
     }
 
     await publishItemEvent(
       {
-        item_network: updateResult.row.item_network,
-        item_domain: updateResult.row.item_domain,
-        item_type: updateResult.row.item_type,
-        item_id: updateResult.row.item_id,
+        // Non-null: the transaction either assigned updateResult or the catch
+        // above already returned — this line only runs on the success path.
+        item_network: updateResult!.row.item_network,
+        item_domain: updateResult!.row.item_domain,
+        item_type: updateResult!.row.item_type,
+        item_id: updateResult!.row.item_id,
         op: 'upsert',
       },
       request.log,
@@ -419,6 +467,7 @@ export const participant_handler = async (
       owned_elsewhere: false,
       onboarded_at: null,
       items: itemsList,
+      consent_recorded,
     });
   }
 
@@ -442,20 +491,31 @@ export const participant_handler = async (
     try {
       // Must run inside a transaction: createItemInternal's profile-cap guard
       // takes a transaction-scoped advisory lock (pg_advisory_xact_lock) and
-      // then counts+inserts. On the plain pooled `db` (autocommit) that lock
+      // then counts+inserts — on the plain pooled `db` (autocommit) that lock
       // would release immediately, leaving the check→insert non-atomic and the
-      // cap racy. Wrapping here mirrors the create_new_user + /item/create paths.
-      const { item_id } = await db.transaction((tx) =>
-        create_profile_item({
+      // cap racy. The same transaction also makes the consent write + promotion
+      // atomic with the item insert. Mirrors create_new_user + /item/create.
+      await db.transaction(async (tx) => {
+        const { item_id } = await create_profile_item({
           tx,
           user_id: existing!.id,
           network,
           domain,
           item_type,
           payload: body.item_state ?? {},
-        }),
-      );
-      insertedItemId = item_id;
+        });
+        insertedItemId = item_id;
+        const consent = await recordParticipantConsent(tx, {
+          compliance: body.compliance,
+          userId: existing!.id,
+          itemId: item_id,
+          network,
+          brand: null,
+          channel: body.channel,
+          acceptedAt: new Date(),
+        });
+        consent_recorded = consent.recorded;
+      });
     } catch (err) {
       const e = err as { statusCode?: number; errorCode?: string };
       const isClientError =
@@ -466,9 +526,6 @@ export const participant_handler = async (
       logger.call(request.log, { err }, 'insert_item failed');
       return reply.code(e.statusCode ?? 500).send({
         error: e.errorCode ?? 'INSERT_ITEM_FAILED',
-        // Only surface a curated ItemServiceError message (errorCode set). A raw
-        // DB error's message includes the failed SQL + bound params — i.e. the
-        // participant's item_state (name/phone/email) — so never return it.
         message: e.errorCode ? (err as Error).message : 'item insert failed',
       });
     }
@@ -485,6 +542,7 @@ export const participant_handler = async (
       owned_elsewhere: false,
       onboarded_at: null,
       items: itemsList,
+      consent_recorded,
     });
   }
 
@@ -541,6 +599,17 @@ export const participant_handler = async (
           payload: body.item_state ?? {},
         });
         onboarded_item_id = item_id;
+
+        const consent = await recordParticipantConsent(tx, {
+          compliance: body.compliance,
+          userId: user_id,
+          itemId: item_id,
+          network,
+          brand: null,
+          channel: body.channel,
+          acceptedAt: now,
+        });
+        consent_recorded = consent.recorded;
       });
     },
   });
@@ -566,6 +635,7 @@ export const participant_handler = async (
     owned_elsewhere: false,
     onboarded_at: now.toISOString(),
     items: itemsList,
+    consent_recorded,
   });
 };
 
@@ -585,6 +655,7 @@ async function readItemsForUser(user_id: string) {
       item_network: items.item_network,
       item_domain: items.item_domain,
       item_type: items.item_type,
+      lifecycle_status: items.lifecycle_status,
       item_state: items.item_state,
       item_locations: items.item_locations,
       item_private_state: items.item_private_state,
