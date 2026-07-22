@@ -530,5 +530,6 @@
   "actions.btn_view_profile": "View profile",
   "profile.card_desc_masked": "Public profile. Contact details are shared once the request is accepted.",
   "profile.card_desc_full": "Full profile, including the shared contact details.",
-  "profile.card_desc_reveal_unavailable": "This profile is currently paused or not active, so its contact details aren’t available right now. They’ll show again once the profile is active."
+  "profile.card_desc_reveal_unavailable": "This profile is currently paused or not active, so its contact details aren’t available right now. They’ll show again once the profile is active.",
+  "profile.card_desc_reveal_blocked_self": "Your profile is currently paused, so contact details are hidden for you. Resume your profile to see them again."
 }

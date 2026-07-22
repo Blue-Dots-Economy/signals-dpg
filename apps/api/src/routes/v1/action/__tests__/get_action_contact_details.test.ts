@@ -298,6 +298,7 @@ describe('GET /:action_id/contact-details', () => {
     expect(res.statusCode).toBe(200);
     const body = res.json();
     expect(body.revealed).toBe(false);
+    expect(body.reveal_blocked_reason).toBe('other');
     expect(body.other_actor.item.item_id).toBe(TARGET_ITEM_ID);
     // Masked view is not a reveal → no audit row.
     expect(auditInsertMock).not.toHaveBeenCalled();
@@ -313,6 +314,7 @@ describe('GET /:action_id/contact-details', () => {
     expect(res.statusCode).toBe(200);
     const body = res.json();
     expect(body.revealed).toBe(false);
+    expect(body.reveal_blocked_reason).toBe('self');
     expect(body.other_actor.item.item_id).toBe(TARGET_ITEM_ID);
     expect(auditInsertMock).not.toHaveBeenCalled();
   });

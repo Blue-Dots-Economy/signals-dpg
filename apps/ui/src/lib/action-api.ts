@@ -38,6 +38,8 @@ export interface ContactDetailsResponse {
   action_status: string;
   /** false → `item` is the masked pre-reveal view (a party is not live/paused). */
   revealed: boolean;
+  /** When not revealed: `self` = viewer's own profile not live; `other` = counterparty's. */
+  reveal_blocked_reason?: 'self' | 'other';
   other_actor: {
     item: ContactDetailsOtherActorItem;
   };

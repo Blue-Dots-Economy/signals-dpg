@@ -175,6 +175,15 @@ export const get_action_contact_details_handler = async (
   }
 
   const revealAllowed = callerLive && maskedItem.lifecycle_status === 'live';
+  // Why the reveal is blocked, so the client can say whose profile is the
+  // reason: `self` = the viewer's own profile isn't live (resume it to see
+  // details); `other` = the counterparty's profile isn't live. Self takes
+  // precedence — it's the one the viewer can act on.
+  const revealBlockedReason: 'self' | 'other' | undefined = revealAllowed
+    ? undefined
+    : !callerLive
+      ? 'self'
+      : 'other';
   let otherItem = maskedItem;
 
   // Audit only an actual PII reveal — the masked view discloses nothing.
@@ -212,6 +221,7 @@ export const get_action_contact_details_handler = async (
     action_id: action.action_id,
     action_status: action.action_status,
     revealed: revealAllowed,
+    reveal_blocked_reason: revealBlockedReason,
     other_actor: {
       item: {
         ...otherItem,
