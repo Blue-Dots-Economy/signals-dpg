@@ -302,6 +302,7 @@ export const participant_handler = async (
 
   if (verdict.kind === 'account_only') {
     if (!user_exists) {
+      // New user — create account but skip item creation.
       const acting_org_id = request.acting_org!.org_id;
       const network = body.network ?? 'blue_dot';
       const now = new Date();
@@ -360,17 +361,30 @@ export const participant_handler = async (
     // Existing user, no item_state — record any user-level consent, then read.
     if (body.compliance && body.compliance.length > 0) {
       const network = body.network ?? 'blue_dot';
-      await db.transaction(async (tx) => {
-        const consent = await recordParticipantConsent(tx, {
-          compliance: body.compliance,
-          userId: existing!.id,
-          network,
-          brand: null,
-          channel: body.channel,
-          acceptedAt: new Date(),
+      try {
+        await db.transaction(async (tx) => {
+          const consent = await recordParticipantConsent(tx, {
+            compliance: body.compliance,
+            userId: existing!.id,
+            network,
+            brand: null,
+            channel: body.channel,
+            acceptedAt: new Date(),
+          });
+          consent_recorded = consent.recorded;
         });
-        consent_recorded = consent.recorded;
-      });
+      } catch (err) {
+        // Never surface the raw error message: a DB error's text can include the
+        // failed SQL + bound params. Log the full error, return a curated code.
+        request.log.error(
+          { err },
+          'participant existing-user consent recording failed',
+        );
+        return reply.code(500).send({
+          error: 'CONSENT_WRITE_FAILED',
+          message: 'failed to record consent',
+        });
+      }
     }
 
     const itemsList = await readItemsForUser(existing!.id);
@@ -443,6 +457,9 @@ export const participant_handler = async (
       );
       return reply.code(e.statusCode ?? 500).send({
         error: e.errorCode ?? 'UPDATE_FAILED',
+        // Only surface a curated ItemServiceError message (errorCode set). A raw
+        // DB error's message includes the failed SQL + bound params — i.e. the
+        // participant's item_state (name/phone/email) — so never return it.
         message: e.errorCode ? (err as Error).message : 'item update failed',
       });
     }
@@ -526,6 +543,9 @@ export const participant_handler = async (
       logger.call(request.log, { err }, 'insert_item failed');
       return reply.code(e.statusCode ?? 500).send({
         error: e.errorCode ?? 'INSERT_ITEM_FAILED',
+        // Only surface a curated ItemServiceError message (errorCode set). A raw
+        // DB error's message includes the failed SQL + bound params — i.e. the
+        // participant's item_state (name/phone/email) — so never return it.
         message: e.errorCode ? (err as Error).message : 'item insert failed',
       });
     }

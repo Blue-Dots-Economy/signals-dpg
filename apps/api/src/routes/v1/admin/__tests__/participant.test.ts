@@ -361,6 +361,7 @@ vi.mock('@/services/item_service', () => {
 // Imported after mocks.
 import { participant } from '../participant.js';
 import { publishItemEvent } from '@/utils/publish_item_event';
+import { recordParticipantConsent } from '@/services/participant_consent';
 
 const VALID_EMAIL = 'demo@example.com';
 const VALID_PHONE = '+919876543210';
@@ -413,6 +414,13 @@ describe('POST /admin/participant', () => {
     lastQueriedUserId = null;
     lastQueriedItemId = null;
     vi.mocked(publishItemEvent).mockClear();
+    // Reset the consent-service mock and restore its default resolved value so
+    // per-test mockResolvedValueOnce/mockRejectedValueOnce overrides don't bleed.
+    vi.mocked(recordParticipantConsent).mockReset();
+    vi.mocked(recordParticipantConsent).mockResolvedValue({
+      recorded: 0,
+      promoted: false,
+    });
   });
 
   it('403 INVALID_ACTING_ORG when acting_org is missing', async () => {
@@ -576,6 +584,87 @@ describe('POST /admin/participant', () => {
     expect(body.items).toHaveLength(1);
     expect(dbState.updates).toHaveLength(0);
     expect(dbState.inserts).toHaveLength(0);
+  });
+
+  it('aggregator + existing OWN user + no item_state + compliance → records user-level consent, no itemId, consent_recorded from service', async () => {
+    const user_id = 'usr_own_compliance';
+    dbState.existingUserRows = [
+      {
+        id: user_id,
+        email: VALID_EMAIL,
+        phoneNumber: null,
+        onboardedByOrgId: 'org_agg_1',
+      },
+    ];
+    dbState.itemsByUser.set(user_id, []);
+    lastQueriedUserId = user_id;
+    vi.mocked(recordParticipantConsent).mockResolvedValueOnce({
+      recorded: 2,
+      promoted: false,
+    });
+    const app = await buildApp({ org_id: 'org_agg_1', org_type: 'aggregator' });
+    const res = await app.inject({
+      method: 'POST',
+      url: '/participant',
+      payload: baseBody({
+        item_state: undefined,
+        compliance: [
+          { key: 'user_terms', value: true },
+          { key: 'user_privacy', value: true },
+        ],
+      }),
+    });
+    expect(res.statusCode).toBe(200);
+    const body = res.json();
+    expect(body.user_existed).toBe(true);
+    expect(body.user_id).toBe(user_id);
+    // The route surfaces whatever the service reported it recorded.
+    expect(body.consent_recorded).toBe(2);
+
+    expect(vi.mocked(recordParticipantConsent)).toHaveBeenCalled();
+    const [, args] = vi.mocked(recordParticipantConsent).mock.calls[0];
+    expect(args.userId).toBe(user_id);
+    expect(args.compliance).toEqual([
+      { key: 'user_terms', value: true },
+      { key: 'user_privacy', value: true },
+    ]);
+    // Account-only user-level consent carries no itemId.
+    expect(args.itemId).toBeUndefined();
+    // No user/item writes happened on this path.
+    expect(dbState.updates).toHaveLength(0);
+    expect(dbState.inserts).toHaveLength(0);
+  });
+
+  it('aggregator + existing OWN user + compliance + consent recording throws → 500 CONSENT_WRITE_FAILED, no raw-error leak', async () => {
+    const user_id = 'usr_own_consent_boom';
+    dbState.existingUserRows = [
+      {
+        id: user_id,
+        email: VALID_EMAIL,
+        phoneNumber: null,
+        onboardedByOrgId: 'org_agg_1',
+      },
+    ];
+    dbState.itemsByUser.set(user_id, []);
+    lastQueriedUserId = user_id;
+    vi.mocked(recordParticipantConsent).mockRejectedValueOnce(
+      new Error('boom SENSITIVE bound-param text'),
+    );
+    const app = await buildApp({ org_id: 'org_agg_1', org_type: 'aggregator' });
+    const res = await app.inject({
+      method: 'POST',
+      url: '/participant',
+      payload: baseBody({
+        item_state: undefined,
+        compliance: [{ key: 'user_terms', value: true }],
+      }),
+    });
+    expect(res.statusCode).toBe(500);
+    const body = res.json();
+    expect(body.error).toBe('CONSENT_WRITE_FAILED');
+    // The raw error message (with bound params) must never reach the client.
+    expect(body.message).not.toContain('boom');
+    expect(body.message).not.toContain('SENSITIVE');
   });
 
   it('aggregator + existing OTHER-aggregator user → 200 owned_elsewhere:true, items:[], no writes', async () => {
