@@ -280,22 +280,24 @@ export function AppSidebar({
                                     }
                                   >
                                     <span className="truncate">{title}</span>
-                                    {/* Selection is shown by the row highlight, so no
-                                        "active" chip. Surface the lifecycle state only
-                                        when it isn't live (paused / draft). */}
-                                    {(profile.lifecycle_status === 'paused' ||
-                                      profile.lifecycle_status === 'draft') && (
+                                    {/* Lifecycle state chip (selection is shown by the
+                                        row highlight): Active / Paused / Draft. */}
+                                    {profile.lifecycle_status && (
                                       <span
                                         className={[
                                           'ml-auto shrink-0 rounded-full px-1.5 py-0.5 text-[10px] font-semibold leading-none capitalize',
-                                          profile.lifecycle_status === 'paused'
-                                            ? 'bg-amber-100 text-amber-800 dark:bg-amber-500/20 dark:text-amber-300'
-                                            : 'bg-muted text-muted-foreground',
+                                          profile.lifecycle_status === 'live'
+                                            ? 'bg-green-100 text-green-700 dark:bg-green-500/20 dark:text-green-300'
+                                            : profile.lifecycle_status === 'paused'
+                                              ? 'bg-amber-100 text-amber-800 dark:bg-amber-500/20 dark:text-amber-300'
+                                              : 'bg-muted text-muted-foreground',
                                         ].join(' ')}
                                       >
                                         {t(
                                           `nav.status_${profile.lifecycle_status}`,
-                                          profile.lifecycle_status,
+                                          profile.lifecycle_status === 'live'
+                                            ? 'Active'
+                                            : profile.lifecycle_status,
                                         )}
                                       </span>
                                     )}
