@@ -23,6 +23,8 @@
   "auth.label_name": "Your name",
   "auth.placeholder_name": "Full name",
   "auth.label_domain": "Your Domain",
+  "auth.select_domain_required": "Please select your domain to continue.",
+  "auth.signup_options_unavailable": "Could not load sign-up options. Please refresh and try again.",
   "auth.domain_placeholder": "Select one",
   "auth.label_dob": "Date of birth",
   "auth.dob_placeholder": "Select date of birth",
