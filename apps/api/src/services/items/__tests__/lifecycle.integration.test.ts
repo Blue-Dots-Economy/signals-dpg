@@ -32,7 +32,7 @@
  *   7. pause → paused; pending action survives (not cancelled)
  *   8. POST /item/lifecycle {action:'unpause'} on paused-but-complete item → live
  *   9. POST /network/action/perform against a non-live target → 409 + PROFILE_NOT_LIVE
- *  10. GET /action/:id/contact-details after source pauses → 403 + PROFILE_NOT_LIVE
+ *  10. GET /action/:id/contact-details after source pauses → 200 masked (revealed:false)
  *  11. GET /network/item/fetch lists only live items (draft item excluded)
  *  12. action gated while target paused RESUMES after unpause (accept succeeds)
  */
@@ -1049,7 +1049,7 @@ describeIf(`lifecycle integration${can_run ? '' : ` — ${skip_reason}`}`, () =>
   //     the lifecycle gate), skip so the suite stays green on minimal networks.
   // ---------------------------------------------------------------------------
 
-  it('scenario 10: GET /action/:id/contact-details after source pauses → 403 PROFILE_NOT_LIVE', async (ctx) => {
+  it('scenario 10: GET /action/:id/contact-details after source pauses → 200 masked (revealed:false)', async (ctx) => {
     // Ensure both source and target items are live first.
     // The live_item_id belongs to live_user_id and should be live after scenario 9 restore.
     const [targetRow] = await db
@@ -1167,10 +1167,11 @@ describeIf(`lifecycle integration${can_run ? '' : ` — ${skip_reason}`}`, () =>
       return;
     }
 
-    // The endpoint checks caller's item lifecycle_status; paused → 403 PROFILE_NOT_LIVE.
-    expect(detailsRes.statusCode).toBe(403);
-    const detailsBody = detailsRes.json() as { error: string };
-    expect(detailsBody.error).toBe('PROFILE_NOT_LIVE');
+    // Paused caller → PII withheld, but the endpoint returns the MASKED
+    // pre-reveal view (#273), not an error.
+    expect(detailsRes.statusCode).toBe(200);
+    const detailsBody = detailsRes.json() as { revealed: boolean };
+    expect(detailsBody.revealed).toBe(false);
   });
 
   // ---------------------------------------------------------------------------

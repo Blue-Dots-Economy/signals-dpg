@@ -117,6 +117,9 @@ export const ActionContactDetailsParamsSchema = z.object({
 export const ActionContactDetailsResponseSchema = z.object({
   action_id: z.uuid(),
   action_status: z.string().min(1),
+  // true → `item` carries the revealed contact PII; false → the masked
+  // pre-reveal view (a party's profile is not live, e.g. paused). See #273.
+  revealed: z.boolean(),
   other_actor: z.object({
     item: ItemResponseSchema,
   }),

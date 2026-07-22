@@ -152,7 +152,9 @@ export function ProfileCardModal({
               item_type: it.item_type,
               item_state: it.item_state,
             },
-            mode: 'full',
+            // Server returns the masked pre-reveal view (revealed:false) when a
+            // party's profile isn't live (e.g. paused, #273) instead of erroring.
+            mode: data.revealed ? 'full' : 'reveal_unavailable',
           };
         } catch (err) {
           const code = (err as { code?: string }).code ?? 'INTERNAL_SERVER_ERROR';
