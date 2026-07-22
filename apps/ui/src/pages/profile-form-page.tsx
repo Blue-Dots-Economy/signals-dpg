@@ -900,7 +900,7 @@ export function ProfileFormPage() {
               <DialogDescription>
                 {t(
                   'profile.pause_confirm_desc',
-                  'While paused, this profile will not be discoverable in the network.',
+                  'While paused, this profile will not be discoverable in the network. You can resume it any time.',
                 )}
               </DialogDescription>
             </DialogHeader>
