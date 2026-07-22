@@ -34,6 +34,7 @@ export const apiConfig = {
   max_wards_per_guardian: networkRuntime.MAX_WARDS_PER_GUARDIAN,
   schema_registry_url: schemaRegistry.SCHEMA_REGISTRY_URL,
   peer_fetch_timeout_ms: networkRuntime.PEER_FETCH_TIMEOUT_MS,
+  schema_cache_warmup_enabled: networkRuntime.SCHEMA_CACHE_WARMUP_ENABLED,
 };
 
 export const peerConfig = {
@@ -48,10 +49,6 @@ export const authConfig = {
     instance.INSTANCE_ENV === 'development'
       ? auth.AUTH_MIDDLEWARE_ENABLED
       : true,
-  url:
-    instance.INSTANCE_ENV === 'development'
-      ? `${apiConfig.domain}:${apiConfig.port}/api/auth`
-      : `${apiConfig.domain}/api/auth`,
   create_test_otp: auth.CREATE_TEST_OTP,
   allow_self_signup: auth.SELF_SIGNUP_MODE === 'allowed',
   login_channels: parseLoginChannels(auth.LOGIN_CHANNELS),

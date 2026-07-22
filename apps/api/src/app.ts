@@ -47,7 +47,14 @@ export async function buildApp(): Promise<FastifyInstance> {
   // cache from a previous network keeps being served after a switch. Wipe and
   // rebuild on boot so local dev always reflects the configured network.
   // Remote mode keeps the cache (schemas there are expensive to refetch).
-  if (apiConfig.network_config_source === 'local') {
+  // Rebuilding queries the `items` table (cacheReferencedItemSchemas), so it
+  // needs a reachable Postgres; SCHEMA_CACHE_WARMUP_ENABLED=false (used by
+  // the OpenAPI dump script) skips it — safe because route registration
+  // below is fully static and never reads the schema cache itself.
+  if (
+    apiConfig.network_config_source === 'local' &&
+    apiConfig.schema_cache_warmup_enabled
+  ) {
     await clearNetworkSchemaCache();
     await refreshConsumedSchemas();
   }

@@ -151,6 +151,22 @@ export const NetworkRuntimeSecretsSchema = z.object({
   // bad/expired one, but allow a missing token (for peers not yet upgraded).
   // 'enforced': a valid token is required on every peer call.
   PEER_AUTH_MODE: z.enum(['permissive', 'enforced']).default('permissive'),
+  // In NETWORK_CONFIG_SOURCE=local mode, apps/api/src/app.ts wipes and
+  // rebuilds the on-disk network-schema cache at boot (see
+  // network_schema_cache.ts's refreshConsumedSchemas -> cacheReferencedItemSchemas),
+  // which queries the `items` table for every distinct item_schema_url on
+  // record. That query needs a reachable Postgres. Default true preserves
+  // that real-boot behavior unchanged. Callers that build the app without a
+  // database — the OpenAPI dump script (apps/api/scripts/dump_openapi.env)
+  // and any future boot-only smoke test — set this to false: route
+  // registration is fully static and never reads the schema cache at
+  // registration time (only a request-time handler, fetch_schemas.ts, reads
+  // it, lazily rebuilding on a cache miss), so skipping the warmup has no
+  // effect on the generated OpenAPI spec.
+  SCHEMA_CACHE_WARMUP_ENABLED: z
+    .string()
+    .default('true')
+    .transform((val) => val === 'true'),
 });
 
 export const DatabaseSecretsSchema = z.object({
