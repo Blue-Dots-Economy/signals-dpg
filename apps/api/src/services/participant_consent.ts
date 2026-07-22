@@ -1,12 +1,11 @@
+import { sql } from 'drizzle-orm';
 import { resolveConsentVersion } from '@/services/consent_version';
 import {
   hasAcceptedProfileConsent,
   hasAcceptedTermsAndPrivacy,
 } from '@/services/consent_acceptance';
-import {
-  promoteItemOnProfileConsent,
-  type DbOrTx,
-} from '@/services/item_service';
+import { promoteItemOnProfileConsent } from '@/services/item_service';
+import type { DbOrTx } from '@/services/item_service';
 import { consent_record } from '@api/db/postgres/schema';
 
 /** One entry of the participant API `compliance` array. */
@@ -89,12 +88,23 @@ export async function recordParticipantConsent(
 
   // 2. Item-level profile_creation — needs an item AND the terms/privacy
   //    prerequisite (mirrors accept_profile_consent). Pre-check presence to
-  //    stay idempotent without relying on a 23505 inside the transaction
-  //    (which would abort it).
+  //    stay idempotent; the insert is ALSO conflict-safe via
+  //    onConflictDoNothing on the partial unique index
+  //    consent_record_profile_creation_unique (userId,itemId,source), so two
+  //    concurrent calls that both pass the !alreadyRecorded pre-check no longer
+  //    23505-abort the outer transaction — the loser is a silent no-op. (A rare
+  //    concurrent race can over-count `recorded` by one; harmless — the ledger
+  //    still holds exactly one row.)
   if (accepted.has(PROFILE_CREATION_KEY) && itemId) {
     const prereqMet = await hasAcceptedTermsAndPrivacy(tx, userId, network);
     if (prereqMet) {
       const alreadyRecorded = await hasAcceptedProfileConsent(tx, itemId);
+      // Only promote when profile_creation consent is actually present — either
+      // a prior row exists, or we just inserted one. Never promote on the path
+      // where the version is unconfigured and nothing was recorded (that would
+      // flip the item live with zero ledger evidence — consent gates
+      // discoverability).
+      let profileConsentPresent = alreadyRecorded;
       if (!alreadyRecorded) {
         const version = await resolveConsentVersion({
           network,
@@ -102,23 +112,32 @@ export async function recordParticipantConsent(
           category: 'profile_creation',
         });
         if (version !== null) {
-          await tx.insert(consent_record).values({
-            level: 'item',
-            consentCategory: 'profile_creation',
-            userId,
-            itemId,
-            network,
-            brand,
-            documentVersion: version,
-            source: 'profile',
-            acceptedAt,
-            metadata: { channel, via: 'admin_participant', key: PROFILE_CREATION_KEY },
-          });
+          await tx
+            .insert(consent_record)
+            .values({
+              level: 'item',
+              consentCategory: 'profile_creation',
+              userId,
+              itemId,
+              network,
+              brand,
+              documentVersion: version,
+              source: 'profile',
+              acceptedAt,
+              metadata: { channel, via: 'admin_participant', key: PROFILE_CREATION_KEY },
+            })
+            .onConflictDoNothing({
+              target: [consent_record.userId, consent_record.itemId, consent_record.source],
+              where: sql`level = 'item' AND consent_category = 'profile_creation'`,
+            });
           recorded += 1;
+          profileConsentPresent = true;
         }
       }
       // Promote whenever profile_creation consent is present (new or existing).
-      promoted = await promoteItemOnProfileConsent(tx, itemId);
+      if (profileConsentPresent) {
+        promoted = await promoteItemOnProfileConsent(tx, itemId);
+      }
     }
   }
 

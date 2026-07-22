@@ -27,8 +27,16 @@ function makeTx() {
   const inserted: InsertedRow[] = [];
   const tx = {
     insert: vi.fn(() => ({
-      values: vi.fn(async (row: InsertedRow) => {
+      // `values(row)` records the attempted row and returns a thenable that
+      // ALSO exposes `.onConflictDoNothing()` — so plain `await values(row)`
+      // (user-level terms/privacy) and the chained
+      // `values(row).onConflictDoNothing(...)` (profile_creation) both work.
+      values: vi.fn((row: InsertedRow) => {
         inserted.push(row);
+        const promise = Promise.resolve();
+        return Object.assign(promise, {
+          onConflictDoNothing: () => Promise.resolve(),
+        });
       }),
     })),
   };
@@ -98,6 +106,19 @@ describe('recordParticipantConsent', () => {
     });
     expect(res.recorded).toBe(0);
     expect(inserted).toHaveLength(0);
+  });
+
+  it('does not promote when profile_creation version is unconfigured and nothing was recorded', async () => {
+    resolveConsentVersion.mockResolvedValue(null);
+    const { tx, inserted } = makeTx();
+    const res = await recordParticipantConsent(tx as never, {
+      compliance: [{ key: 'profile_creation', value: true }],
+      userId: 'u1', itemId: 'item-1', network: 'blue_dot', channel: 'voice', acceptedAt: new Date(),
+    });
+    expect(res.recorded).toBe(0);
+    expect(res.promoted).toBe(false);
+    expect(promoteItemOnProfileConsent).not.toHaveBeenCalled();
+    expect(inserted.find((r) => r.consentCategory === 'profile_creation')).toBeUndefined();
   });
 
   it('records profile_creation and promotes when prerequisites met and item present', async () => {
