@@ -283,11 +283,15 @@ export const participant_handler = async (
   //    Partition pruning: filtering on item_network, item_domain, item_type
   //    AND created_by lets the Postgres planner prune to the correct child
   //    partition before scanning.
+  //    The lookup is also skipped when body.create_new is set: the caller
+  //    explicitly wants an additional profile, so we must NOT dedup to update
+  //    an existing one (#349).
   let existing_owned_item_id: string | undefined;
   if (
     user_exists &&
     has_item_state &&
     !body.item_id &&
+    !body.create_new &&
     !(request.acting_org?.org_type === 'aggregator' && !aggregator_owns_user)
   ) {
     const network = body.network ?? 'blue_dot';
@@ -316,6 +320,7 @@ export const participant_handler = async (
     has_item_state,
     aggregator_owns_user,
     existing_owned_item_id,
+    create_new: body.create_new,
   });
 
   if (verdict.kind === 'rejected') {

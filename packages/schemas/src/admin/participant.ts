@@ -86,10 +86,23 @@ export const UpsertParticipantRequest = z
       .describe(
         "schema-typed item_type for the item (default: 'profile_1.0').",
       ),
+    create_new: z
+      .boolean()
+      .optional()
+      .describe(
+        'When true, always create a NEW item for this (network, domain, item_type) ' +
+        'even if the user already has one — bypassing the default idempotent ' +
+        'dedup-to-update. Use to give one user multiple profiles of the same type. ' +
+        'Mutually exclusive with item_id. Ignored for a brand-new user.',
+      ),
   })
   .refine((b) => Boolean(b.email) || Boolean(b.phone_number), {
     message: 'either email or phone_number is required',
     path: ['email'],
+  })
+  .refine((b) => !(b.create_new && b.item_id), {
+    message: 'create_new and item_id are mutually exclusive (create_new makes a new item; item_id targets an existing one)',
+    path: ['create_new'],
   });
 
 export const ParticipantItemSnapshot = z.object({

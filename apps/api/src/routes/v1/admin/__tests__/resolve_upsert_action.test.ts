@@ -232,4 +232,79 @@ describe('resolve_upsert_action', () => {
     });
     expect(v).toEqual({ kind: 'account_only' });
   });
+
+  // create_new: force a new profile even when a same-type one already exists (#349)
+  it('create_new overrides idempotent update: network_service + existing user + item_state + create_new + existing_owned_item_id -> insert_item', () => {
+    const v = resolve_upsert_action({
+      acting_org: networkService,
+      user_exists: true,
+      item_id_in_body: undefined,
+      has_item_state: true,
+      aggregator_owns_user: false,
+      existing_owned_item_id: '55555555-5555-4555-8555-555555555555',
+      create_new: true,
+    });
+    expect(v).toEqual({ kind: 'insert_item' });
+  });
+
+  it('create_new overrides idempotent update: aggregator + OWN user + item_state + create_new + existing_owned_item_id -> insert_item', () => {
+    const v = resolve_upsert_action({
+      acting_org: aggregator,
+      user_exists: true,
+      item_id_in_body: undefined,
+      has_item_state: true,
+      aggregator_owns_user: true,
+      existing_owned_item_id: '44444444-4444-4444-8444-444444444444',
+      create_new: true,
+    });
+    expect(v).toEqual({ kind: 'insert_item' });
+  });
+
+  it('create_new + existing user + item_state + no existing item -> insert_item (same as default)', () => {
+    const v = resolve_upsert_action({
+      acting_org: networkService,
+      user_exists: true,
+      item_id_in_body: undefined,
+      has_item_state: true,
+      aggregator_owns_user: false,
+      create_new: true,
+    });
+    expect(v).toEqual({ kind: 'insert_item' });
+  });
+
+  it('create_new is a no-op for a brand-new user (still create_new_user)', () => {
+    const v = resolve_upsert_action({
+      acting_org: aggregator,
+      user_exists: false,
+      item_id_in_body: undefined,
+      has_item_state: true,
+      aggregator_owns_user: false,
+      create_new: true,
+    });
+    expect(v).toEqual({ kind: 'create_new_user' });
+  });
+
+  it('create_new does NOT bypass aggregator ownership (owned elsewhere still wins)', () => {
+    const v = resolve_upsert_action({
+      acting_org: aggregator,
+      user_exists: true,
+      item_id_in_body: undefined,
+      has_item_state: true,
+      aggregator_owns_user: false,
+      create_new: true,
+    });
+    expect(v).toEqual({ kind: 'aggregator_owned_elsewhere' });
+  });
+
+  it('create_new without item_state -> account_only (nothing to create)', () => {
+    const v = resolve_upsert_action({
+      acting_org: networkService,
+      user_exists: true,
+      item_id_in_body: undefined,
+      has_item_state: false,
+      aggregator_owns_user: false,
+      create_new: true,
+    });
+    expect(v).toEqual({ kind: 'account_only' });
+  });
 });

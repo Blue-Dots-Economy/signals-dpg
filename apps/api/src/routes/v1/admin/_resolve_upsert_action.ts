@@ -26,6 +26,14 @@ export type ResolveUpsertActionInput = {
    * When present, triggers idempotent dedup-to-update instead of insert.
    */
   existing_owned_item_id?: string | undefined;
+  /**
+   * When true, force creation of a NEW item even if one of the same
+   * (item_network, item_domain, item_type) already exists for the user —
+   * i.e. skip the idempotent dedup-to-update (#349). Mutually exclusive
+   * with item_id_in_body (the request schema rejects both together).
+   * Ignored for a brand-new user (there is nothing to dedup against).
+   */
+  create_new?: boolean | undefined;
 };
 
 /**
@@ -38,6 +46,7 @@ export type ResolveUpsertActionInput = {
  *
  * Tail logic (user_exists && authorized):
  *   - item_id_in_body && has_item_state → update_item{item_id_in_body}
+ *   - has_item_state && create_new → insert_item  (force an additional profile, #349)
  *   - has_item_state && existing_owned_item_id → update_item{existing_owned_item_id}
  *     (idempotent re-onboard: caller resolved a pre-existing item for this type)
  *   - has_item_state → insert_item  (first profile for this network/domain/type)
@@ -48,7 +57,7 @@ export type ResolveUpsertActionInput = {
  * `update_item` — keeping this function pure.
  */
 export const resolve_upsert_action = (input: ResolveUpsertActionInput): UpsertVerdict => {
-  const { acting_org, user_exists, item_id_in_body, has_item_state, aggregator_owns_user, existing_owned_item_id } = input;
+  const { acting_org, user_exists, item_id_in_body, has_item_state, aggregator_owns_user, existing_owned_item_id, create_new } = input;
 
   if (!acting_org) {
     return { kind: 'rejected', status: 403, error: 'INVALID_ACTING_ORG' };
@@ -71,6 +80,7 @@ export const resolve_upsert_action = (input: ResolveUpsertActionInput): UpsertVe
   }
 
   if (item_id_in_body && has_item_state) return { kind: 'update_item', item_id: item_id_in_body };
+  if (has_item_state && create_new) return { kind: 'insert_item' };
   if (has_item_state && existing_owned_item_id) return { kind: 'update_item', item_id: existing_owned_item_id };
   if (has_item_state) return { kind: 'insert_item' };
   return { kind: 'account_only' };

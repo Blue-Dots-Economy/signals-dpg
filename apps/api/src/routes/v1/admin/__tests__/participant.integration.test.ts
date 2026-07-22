@@ -381,6 +381,56 @@ describeIf(`POST /api/v1/admin/participant (integration)${
     expect(items_after.length).toBe(items_before.length);
   });
 
+  it('network_service + create_new inserts an ADDITIONAL profile of the SAME type for the user (#349)', async () => {
+    const sameTriple = (rows: Array<Record<string, unknown>>) =>
+      rows.filter(
+        (r) =>
+          r.item_network === primary.network &&
+          r.item_domain === primary.domain &&
+          r.item_type === primary.item_type,
+      );
+
+    const before = sameTriple(
+      await db.select().from(itemsTable).where(eq(itemsTable.created_by, canonical_user_id)),
+    );
+    // Precondition: the user already has a same-type profile — default behaviour
+    // would dedup-to-update. create_new must instead force a new row.
+    expect(before.length).toBeGreaterThan(0);
+
+    const fixture = generateMinimalItemState(primary.schema);
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/v1/admin/participant',
+      headers: {
+        'x-api-key': ns.raw_key,
+        'x-acting-org-id': ns.org_id,
+        'content-type': 'application/json',
+      },
+      payload: {
+        email: canonical_user_email,
+        name: 'NS create_new',
+        terms_accepted: true,
+        privacy_accepted: true,
+        channel: 'bulk',
+        network: primary.network,
+        domain: primary.domain,
+        item_type: primary.item_type,
+        item_state: fixture,
+        create_new: true,
+      },
+    });
+    expect(res.statusCode).toBe(200);
+
+    const after = sameTriple(
+      await db.select().from(itemsTable).where(eq(itemsTable.created_by, canonical_user_id)),
+    );
+    // create_new bypasses idempotent dedup → a brand-new row of the same type.
+    expect(after.length).toBe(before.length + 1);
+    // the returned item is the newly created one, not a pre-existing row.
+    const returnedId = res.json().items[0].item_id as string;
+    expect(before.map((r) => r.item_id as string)).not.toContain(returnedId);
+  });
+
   it('network_service updates an existing item via item_id; item_state in DB reflects the new payload', async () => {
     const updateFixture = generateMinimalItemState(primary.schema);
     const res = await app.inject({
