@@ -285,7 +285,14 @@ export function AppSidebar({
                                         when it isn't live (paused / draft). */}
                                     {(profile.lifecycle_status === 'paused' ||
                                       profile.lifecycle_status === 'draft') && (
-                                      <span className="ml-auto shrink-0 rounded-full bg-muted px-1.5 py-0.5 text-[10px] font-semibold text-muted-foreground leading-none capitalize">
+                                      <span
+                                        className={[
+                                          'ml-auto shrink-0 rounded-full px-1.5 py-0.5 text-[10px] font-semibold leading-none capitalize',
+                                          profile.lifecycle_status === 'paused'
+                                            ? 'bg-amber-100 text-amber-800 dark:bg-amber-500/20 dark:text-amber-300'
+                                            : 'bg-muted text-muted-foreground',
+                                        ].join(' ')}
+                                      >
                                         {t(
                                           `nav.status_${profile.lifecycle_status}`,
                                           profile.lifecycle_status,
