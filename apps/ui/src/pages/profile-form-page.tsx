@@ -93,6 +93,7 @@ export function ProfileFormPage() {
   const [initialData, setInitialData] = React.useState<Record<string, unknown> | null>(null);
   const [isSubmitting, setIsSubmitting] = React.useState(false);
   const [lifecycleBusy, setLifecycleBusy] = React.useState(false);
+  const [pauseConfirmOpen, setPauseConfirmOpen] = React.useState(false);
   const [isLoading, setIsLoading] = React.useState(isEdit);
   const [availableNetworkIds, setAvailableNetworkIds] = React.useState<string[] | null>(null);
   const [isWalletModalOpen, setIsWalletModalOpen] = React.useState(false);
@@ -743,9 +744,13 @@ export function ProfileFormPage() {
                     size="sm"
                     disabled={lifecycleBusy}
                     onClick={() => {
-                      void handleLifecycle(
-                        existingItem.lifecycle_status === 'paused' ? 'unpause' : 'pause',
-                      );
+                      // Resume is safe (restores discovery) — do it directly.
+                      // Pause removes the profile from discovery, so confirm first.
+                      if (existingItem.lifecycle_status === 'paused') {
+                        void handleLifecycle('unpause');
+                      } else {
+                        setPauseConfirmOpen(true);
+                      }
                     }}
                   >
                     {existingItem.lifecycle_status === 'paused'
@@ -880,6 +885,41 @@ export function ProfileFormPage() {
                 }}
               >
                 {t('profile.guardian_confirm_proceed', 'Send code to guardian')}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        {/* Confirm before pausing — pausing removes the profile from discovery. */}
+        <Dialog open={pauseConfirmOpen} onOpenChange={setPauseConfirmOpen}>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>
+                {t('profile.pause_confirm_title', 'Pause this profile?')}
+              </DialogTitle>
+              <DialogDescription>
+                {t(
+                  'profile.pause_confirm_desc',
+                  'While paused, this profile will not be discoverable in the network — others cannot find or contact it. Existing connections are unaffected. You can resume it any time.',
+                )}
+              </DialogDescription>
+            </DialogHeader>
+            <DialogFooter>
+              <Button
+                variant="outline"
+                disabled={lifecycleBusy}
+                onClick={() => setPauseConfirmOpen(false)}
+              >
+                {t('common.cancel', 'Cancel')}
+              </Button>
+              <Button
+                disabled={lifecycleBusy}
+                onClick={() => {
+                  setPauseConfirmOpen(false);
+                  void handleLifecycle('pause');
+                }}
+              >
+                {t('profile.pause_confirm_proceed', 'Pause profile')}
               </Button>
             </DialogFooter>
           </DialogContent>
