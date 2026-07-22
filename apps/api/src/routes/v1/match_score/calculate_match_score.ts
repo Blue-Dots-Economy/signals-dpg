@@ -56,7 +56,7 @@ const calculateMatchScoreHandler = async (
     request.log.error(
       {
         err,
-        provider: 'dpg_scoring',
+        provider: 'signals_search',
         item_a_id: request.body.itemA.item_id,
         item_b_id: request.body.itemB.item_id,
       },

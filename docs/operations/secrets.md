@@ -49,10 +49,11 @@ in each.
   next install run.
 - `templates/secrets.yaml` skips emitting a Secret if its password is empty,
   so `helm template` / `helm lint` stay clean before `install.sh` runs.
-- Notification-service and match-score (dpg-scoring) secrets follow the
-  same pattern — both have a `credentials.<chart>` block in `values.yaml`,
-  and the `keyId` / `secret` values must match the corresponding
-  `internal-secrets.json` / `auth.keys.json` files mounted into those pods.
+- Notification-service secrets follow the same pattern — a
+  `credentials.<chart>` block in `values.yaml` whose `keyId` / `secret`
+  values must match the `internal-secrets.json` file mounted into that pod.
+  (Match scoring now uses signals-search via a single `SIGNALS_SEARCH_API_KEY`
+  — see the Match score table below — not an HMAC key pair.)
 
 ## Kubernetes — AWS overlay (`dpg/values-aws.yaml`, charts repo)
 
@@ -155,20 +156,18 @@ All fields optional; if unset, OTP / SMS-template features are disabled.
 | `NOTIFICATION_SERVICE_SECRET` | optional | HMAC secret paired with `NOTIFICATION_SERVICE_KEY_ID`. `openssl rand -hex 32`. |
 | `SMS_TEMPLATE_ID` | optional | |
 
-**Match score / dpg-scoring (`MatchScoreSecretsSchema`)**
+**Match score / signals-search (`MatchScoreSecretsSchema`)**
 
-All fields optional; if unset, `match_score` API falls back to the no-op
-provider.
+All fields optional; if unset (or `SIGNALS_SEARCH_ENDPOINT` / `SIGNALS_SEARCH_API_KEY`
+missing), the `match_score` API is not configured and the calculate endpoint
+returns `503`.
 
 | Key | Required | Notes |
 |---|---|---|
-| `MATCH_SCORE_PROVIDER` | optional | Currently only `dpg_scoring`. |
-| `DPG_SCORING_ENDPOINT` | optional | E.g. `http://dpg-match-score:3000`. |
-| `DPG_SCORING_KEY_ID` | optional | Must match a key in `match-score`'s `auth.keys.json`. |
-| `DPG_SCORING_SECRET` | optional | HMAC secret paired with `DPG_SCORING_KEY_ID`. |
-| `DPG_SCORING_PATH` | optional | Empty → client uses default `api/v1/scores/match`. |
-| `DPG_SCORING_VERSION` | optional | |
-| `DPG_SCORING_PROMPT_VERSION` | optional | |
+| `MATCH_SCORE_PROVIDER` | optional | Only `signals_search` (the in-network relevance API). |
+| `SIGNALS_SEARCH_ENDPOINT` | optional | signals-search base URL, e.g. `http://signals-search:3100`. Required when `MATCH_SCORE_PROVIDER=signals_search`. |
+| `SIGNALS_SEARCH_API_KEY` | optional | `x-api-key` valid in the shared Signals `apikey` store. Required when `MATCH_SCORE_PROVIDER=signals_search`. |
+| `SIGNALS_SEARCH_RELEVANCE_PATH` | optional | Empty → client uses default `v1/relevance`. |
 
 **Not in the Zod schemas but read elsewhere**
 
@@ -216,10 +215,12 @@ In the default Helm install the UI's nginx reverse-proxies `/api/*` to
   responsibility. Update the relevant Secret (or `values.yaml` +
   `helm upgrade`), then trigger a rolling restart of the api pod (and the
   signal-processor pod once Plan 3 ships).
-- `NOTIFICATION_SERVICE_SECRET` / `DPG_SCORING_SECRET`: rotate the
-  corresponding key entry in `internal-secrets.json` /
-  `auth.keys.json` **and** the matching env var on the api pod in the same
-  deploy, otherwise HMAC verification will fail on one side.
+- `NOTIFICATION_SERVICE_SECRET`: rotate the corresponding key entry in
+  `internal-secrets.json` **and** the matching env var on the api pod in the
+  same deploy, otherwise HMAC verification will fail on one side.
+- `SIGNALS_SEARCH_API_KEY`: rotate the key in the shared Signals `apikey`
+  store (via better-auth) **and** the env var on the api pod together; a
+  mismatch makes signals-search reject match-score requests with `401`.
 
 ## Anti-patterns we've already hit
 
