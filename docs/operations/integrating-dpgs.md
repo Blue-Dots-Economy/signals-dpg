@@ -138,8 +138,12 @@ content-type: application/json
 {
   "email": "user@example.com",
   "name": "Asha P",
-  "terms_accepted": true,
-  "privacy_accepted": true,
+  "date_of_birth": "1990-01-01",
+  "compliance": [
+    { "key": "user_terms", "value": true },
+    { "key": "user_privacy", "value": true },
+    { "key": "profile_creation", "value": true }
+  ],
   "channel": "bulk",
   "item_state": { ... item-schema-validated payload ... },
   "item_id": "optional-uuid-for-update-only",
@@ -150,6 +154,17 @@ content-type: application/json
 ```
 
 Identity rule: at least one of `email` or `phone_number` must be provided.
+
+**Consent (`compliance`).** Each entry names a consent the channel captured
+from the user; only `value: true` is recorded, into the `consent_record`
+ledger. Recognised keys: `user_terms`, `user_privacy` (user-level) and
+`profile_creation` (item-level). Unknown keys are ignored. Versions are
+derived server-side. When `profile_creation` is accepted (and `user_terms` +
+`user_privacy` are present), the profile is promoted to `live` on this call —
+except on guardian-gated domains for a minor / missing DOB, where it stays
+`draft` until the guardian OTP flow completes in the web UI. The legacy
+`terms_accepted` / `privacy_accepted` booleans are still accepted for
+backward compatibility but **ignored** (deprecated, #309).
 
 ### Response
 
@@ -164,17 +179,23 @@ Identity rule: at least one of `email` or `phone_number` must be provided.
       "item_network": "blue_dot",
       "item_domain": "seeker",
       "item_type": "profile_1.0",
+      "lifecycle_status": "live",
       "item_state": { ... },
       "created_at": "...",
       "updated_at": "..."
     }
-  ]
+  ],
+  "consent_recorded": 3
 }
 ```
 
 `onboarded_at` is set only when this call created a new user; null
 otherwise. `items` is scoped to the networks this Signals instance
-serves.
+serves. `lifecycle_status` tells the caller whether the profile is
+usable (`live`) or still incomplete/gated (`draft`, `paused`).
+`consent_recorded` is the number of `consent_record` rows written by
+this call from the `compliance` array (0 when `compliance` was absent
+or every entry was `false`/unrecognised).
 
 ### Error matrix (additions)
 
