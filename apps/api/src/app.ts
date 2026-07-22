@@ -111,11 +111,17 @@ export async function buildApp(): Promise<FastifyInstance> {
             '`docs/operations/integrating-dpgs.md` for the full auth model.',
           version: pkg.version,
         },
+        // Deployments are per network instance, so the published spec carries a
+        // substitute-your-host URL (from the dump env's API_DOMAIN) plus a
+        // local-dev entry; at runtime servers[0] is this instance's own URL.
         servers: [
           {
             url: getCurrentApiBaseUrl(),
-            description: 'Current API instance',
+            description: "Your deployment's public host (set per network instance)",
           },
+          ...(getCurrentApiBaseUrl() === 'http://localhost:2742'
+            ? []
+            : [{ url: 'http://localhost:2742', description: 'Local development' }]),
         ],
         components: {
           securitySchemes: {

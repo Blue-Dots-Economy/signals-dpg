@@ -6565,8 +6565,12 @@
   },
   "servers": [
     {
+      "url": "https://dpg.example.com",
+      "description": "Your deployment's public host (set per network instance)"
+    },
+    {
       "url": "http://localhost:2742",
-      "description": "Current API instance"
+      "description": "Local development"
     }
   ]
 }
