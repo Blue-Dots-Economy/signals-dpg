@@ -52,6 +52,8 @@ import {
   type ResolvedBinding,
 } from '../../__tests__/integration_helpers';
 import { apiConfig } from '@/config';
+import { guardianConsentRequired } from '@/services/minor';
+import { getNetworkConfigById } from '@/network_configs';
 
 const pg_url = process.env.POSTGRES_URL ?? process.env.POSTGRES_USER;
 const can_run = Boolean(pg_url);
@@ -840,5 +842,70 @@ describeIf(`POST /api/v1/admin/participant (integration)${
       .from(consentRecordTable)
       .where(eq(consentRecordTable.userId, body.user_id));
     expect(rows).toHaveLength(0);
+  });
+
+  it('records profile_creation consent for a minor but holds go-live per the served domain gate', async () => {
+    // Fixed 2015-01-01 DOB keeps this user unambiguously under 18 for the
+    // foreseeable future — do NOT switch to a dynamic date.
+    const email = `int_c_minor_${randomUUID().slice(0, 6)}@a.test`;
+    const fixture = generateMinimalItemState(primary.schema);
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/v1/admin/participant',
+      headers: {
+        'x-api-key': ns.raw_key,
+        'x-acting-org-id': ns.org_id,
+        'content-type': 'application/json',
+      },
+      payload: {
+        email,
+        name: 'Compliance Minor',
+        date_of_birth: '2015-01-01',
+        channel: 'voice',
+        network: primary.network,
+        domain: primary.domain,
+        item_type: primary.item_type,
+        item_state: fixture,
+        compliance: [
+          { key: 'user_terms', value: true },
+          { key: 'user_privacy', value: true },
+          { key: 'profile_creation', value: true },
+        ],
+      },
+    });
+    expect(res.statusCode).toBe(200);
+    const body = res.json();
+    onboarded_user_ids.push(body.user_id);
+
+    // All three consents are recorded regardless of the age gate — the
+    // terms+privacy prerequisite is met because all three were sent together.
+    expect(body.consent_recorded).toBe(3);
+    expect(body.items).toHaveLength(1);
+
+    const rows = await db
+      .select()
+      .from(consentRecordTable)
+      .where(eq(consentRecordTable.userId, body.user_id));
+    const profileRow = rows.find(
+      (r) => r.consentCategory === 'profile_creation',
+    );
+    expect(profileRow).toBeTruthy();
+    expect(profileRow?.source).toBe('profile');
+
+    // The go-live decision is asserted per the served domain's gating status,
+    // so CI that serves a guardian-gated seeker domain proves the held-draft
+    // path, while a non-gated domain proves the promote-to-live path.
+    const gated = guardianConsentRequired(
+      await getNetworkConfigById(primary.network),
+      primary.domain,
+    );
+    if (gated) {
+      // Minor on a guardian-gated domain is held at draft despite the recorded
+      // profile_creation consent — the participant seam never promotes a minor.
+      expect(body.items[0].lifecycle_status).toBe('draft');
+    } else {
+      // No age gate on this domain, so profile_creation consent promotes.
+      expect(body.items[0].lifecycle_status).toBe('live');
+    }
   });
 });

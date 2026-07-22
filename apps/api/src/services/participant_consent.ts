@@ -49,6 +49,14 @@ const PROFILE_CREATION_KEY = 'profile_creation';
  * profile stays draft under `guardianGateBlocksGoLive` inside
  * `promoteItemOnProfileConsent`.
  */
+/**
+ * Note on the returned `promoted` flag: the `/admin/participant` handler does
+ * NOT consume it — it reports go-live to callers via each item's freshly-read
+ * `lifecycle_status` in the response instead (a single source of truth that
+ * also reflects any other gate, e.g. the minor/guardian hold). `promoted` is
+ * therefore primarily for tests and other callers that want the decision
+ * inline without a re-read; the handler is not "forgetting" to use it.
+ */
 export async function recordParticipantConsent(
   tx: DbOrTx,
   args: RecordParticipantConsentArgs,
