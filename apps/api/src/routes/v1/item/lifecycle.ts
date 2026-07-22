@@ -8,6 +8,7 @@ import { items } from '@dpg/database';
 import { eq, sql } from 'drizzle-orm';
 import { decryptItemPrivate } from '@/utils/item_decrypt';
 import { getOrFetchSchemaByUrl } from '@/network_schema_cache';
+import { getNetworkConfigById } from '@/network_configs';
 import { classify_item } from '@/services/items/classifier';
 import { hasAcceptedProfileConsent } from '@/services/consent_acceptance';
 import { invalidateItemFetchCache } from '@/utils/item_fetch_cache_invalidate';
@@ -86,11 +87,19 @@ const item_lifecycle_handler = async (
 
       const current = existing.lifecycle_status as 'draft' | 'live' | 'paused';
 
-      // Pause is a "voluntarily hide a *ready* profile" action — only a `live`
-      // profile can be hidden (business R7.5 / #234 Q6). Hiding a draft (never
-      // ready) or an already-paused profile is meaningless.
-      if (action === 'pause' && current !== 'live') {
-        return { invalidAction: 'PAUSE_REQUIRES_LIVE' as const } as const;
+      if (action === 'pause') {
+        // Network-wide feature gate (#346). Resume stays allowed even when the
+        // feature is off, so a profile paused earlier can still be recovered.
+        const networkConfig = await getNetworkConfigById(existing.item_network);
+        if (!networkConfig.pause_enabled) {
+          return { invalidAction: 'PAUSE_NOT_ENABLED' as const } as const;
+        }
+        // Pause is a "voluntarily hide a *ready* profile" action — only a `live`
+        // profile can be hidden (business R7.5 / #234 Q6). Hiding a draft (never
+        // ready) or an already-paused profile is meaningless.
+        if (current !== 'live') {
+          return { invalidAction: 'PAUSE_REQUIRES_LIVE' as const } as const;
+        }
       }
       if (action === 'unpause' && current !== 'paused') {
         return { invalidAction: 'UNPAUSE_REQUIRES_PAUSED' as const } as const;
@@ -156,11 +165,16 @@ const item_lifecycle_handler = async (
 
     if ('invalidAction' in result) {
       return reply.code(409).send({
-        error: 'INVALID_LIFECYCLE_ACTION',
+        error:
+          result.invalidAction === 'PAUSE_NOT_ENABLED'
+            ? 'PAUSE_NOT_ENABLED'
+            : 'INVALID_LIFECYCLE_ACTION',
         message:
-          result.invalidAction === 'PAUSE_REQUIRES_LIVE'
-            ? 'pause is only valid on a live item'
-            : 'unpause is only valid on a paused item',
+          result.invalidAction === 'PAUSE_NOT_ENABLED'
+            ? 'Pause is not enabled for this network'
+            : result.invalidAction === 'PAUSE_REQUIRES_LIVE'
+              ? 'pause is only valid on a live item'
+              : 'unpause is only valid on a paused item',
       });
     }
 

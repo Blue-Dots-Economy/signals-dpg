@@ -127,6 +127,11 @@ export interface DotNetworkSchema {
   display_name: string;
   description: string;
   schema_standard: string;
+  /**
+   * Network-wide toggle for the pause (voluntarily-hide) feature. When false,
+   * the UI hides the "Pause profile" control. Absent ⇒ enabled (default). (#346)
+   */
+  pause_enabled?: boolean;
   domains: DotNetworkDomain[];
   instances?: DotNetworkInstance[];
   actions: Record<string, DotNetworkAction>;

@@ -238,6 +238,11 @@ export const NetworkConfigSchema = z.object({
   description: z.string().optional(),
   schema_standard: z.string().optional(),
   source_url: z.url().optional(),
+  // Network-wide toggle for the pause (voluntarily-hide) feature. When false,
+  // owners cannot pause their profiles and the UI hides the control. Resume
+  // (unpause) is always allowed so a profile paused before the feature was
+  // turned off can still be recovered. Defaults on. (#346)
+  pause_enabled: z.boolean().optional().default(true),
   domains: NetworkDomainSchema.array().default([]),
   instances: NetworkInstanceSchema.array().default([]),
   cross_network_origins: z

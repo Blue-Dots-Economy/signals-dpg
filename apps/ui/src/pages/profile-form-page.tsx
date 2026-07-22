@@ -730,9 +730,13 @@ export function ProfileFormPage() {
               </Alert>
             )}
 
+            {/* Pause control. Gated on the network's `pause_enabled` (default on).
+                When disabled, a live profile shows no control; an already-paused
+                profile still shows Resume so it can be recovered. */}
             {isEdit && existingItem &&
-              (existingItem.lifecycle_status === 'live' ||
-                existingItem.lifecycle_status === 'paused') && (
+              (existingItem.lifecycle_status === 'paused' ||
+                (existingItem.lifecycle_status === 'live' &&
+                  network?.pause_enabled !== false)) && (
                 <div className="mb-4 flex items-center justify-between gap-3 rounded-md border border-border bg-muted/40 p-3">
                   <p className="text-sm text-muted-foreground">
                     {existingItem.lifecycle_status === 'paused'
