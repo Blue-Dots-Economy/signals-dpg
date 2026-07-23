@@ -111,6 +111,22 @@ export async function buildApp(): Promise<FastifyInstance> {
             '`docs/operations/integrating-dpgs.md` for the full auth model.',
           version: pkg.version,
         },
+        // Tag descriptions make starlight-openapi emit one overview page per
+        // group in the published reference (tags without a description get
+        // sidebar-group-only treatment).
+        tags: [
+          { name: 'item', description: 'Create, fetch, update and delete items, and manage their lifecycle status.' },
+          { name: 'action', description: 'Perform and track actions between items — single, bulk, and status updates.' },
+          { name: 'event', description: 'Structured results of actions: store and fetch events.' },
+          { name: 'match_score', description: 'Compatibility scoring between items.' },
+          { name: 'network', description: 'Network-level schema discovery and cross-instance item reads.' },
+          { name: 'admin', description: 'Administrative operations (aggregator upsert, participants). Requires the x-acting-org-id header.' },
+          { name: 'aggregator', description: 'Aggregator-facing dashboard and export.' },
+          { name: 'consent', description: 'Consent status and acceptance, including the under-18 guardian flows.' },
+          { name: 'auth', description: 'Auth configuration and signup pre-checks.' },
+          { name: 'user', description: 'Per-user domain preferences.' },
+          { name: 'support', description: 'Contact-support form submission.' },
+        ],
         // Deployments are per network instance, so the published spec carries a
         // substitute-your-host URL (from the dump env's API_DOMAIN) plus a
         // local-dev entry; at runtime servers[0] is this instance's own URL.

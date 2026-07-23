@@ -6572,5 +6572,51 @@
       "url": "http://localhost:2742",
       "description": "Local development"
     }
+  ],
+  "tags": [
+    {
+      "name": "item",
+      "description": "Create, fetch, update and delete items, and manage their lifecycle status."
+    },
+    {
+      "name": "action",
+      "description": "Perform and track actions between items — single, bulk, and status updates."
+    },
+    {
+      "name": "event",
+      "description": "Structured results of actions: store and fetch events."
+    },
+    {
+      "name": "match_score",
+      "description": "Compatibility scoring between items."
+    },
+    {
+      "name": "network",
+      "description": "Network-level schema discovery and cross-instance item reads."
+    },
+    {
+      "name": "admin",
+      "description": "Administrative operations (aggregator upsert, participants). Requires the x-acting-org-id header."
+    },
+    {
+      "name": "aggregator",
+      "description": "Aggregator-facing dashboard and export."
+    },
+    {
+      "name": "consent",
+      "description": "Consent status and acceptance, including the under-18 guardian flows."
+    },
+    {
+      "name": "auth",
+      "description": "Auth configuration and signup pre-checks."
+    },
+    {
+      "name": "user",
+      "description": "Per-user domain preferences."
+    },
+    {
+      "name": "support",
+      "description": "Contact-support form submission."
+    }
   ]
 }
