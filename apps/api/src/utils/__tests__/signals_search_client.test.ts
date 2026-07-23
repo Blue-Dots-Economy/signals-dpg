@@ -38,10 +38,11 @@ describe('SignalsSearchClient', () => {
     expect(capturedUrl).toBe('http://search:3100/v1/relevance');
     expect(capturedInit?.method).toBe('POST');
     expect((capturedInit?.headers as Record<string, string>)['x-api-key']).toBe('sk_test');
-    // Only the composite PK is sent — no item_state / coordinates.
+    // Only the composite PK is sent (item_ prefix dropped) as source/target —
+    // no item_state / coordinates.
     expect(JSON.parse(capturedInit?.body as string)).toEqual({
-      itemA: { item_network: 'blue_dot', item_domain: 'provider', item_type: 'profile_1.0', item_id: 'a' },
-      itemB: { item_network: 'blue_dot', item_domain: 'provider', item_type: 'profile_1.0', item_id: 'b' },
+      source: { network: 'blue_dot', domain: 'provider', type: 'profile_1.0', id: 'a' },
+      target: { network: 'blue_dot', domain: 'provider', type: 'profile_1.0', id: 'b' },
     });
 
     expect(result.provider).toBe('signals_search');

@@ -15,14 +15,15 @@ const DEFAULT_RELEVANCE_PATH = 'v1/relevance';
 const PERCENTAGE_TO_SCORE_DIVISOR = 10;
 
 // signals-search's /v1/relevance identifies each item by its composite primary
-// key only; it looks the stored embeddings up itself. item_state / coordinates
-// from the snapshot are not sent (the score comes from the indexed vectors).
-function toItemRef(item: MatchScoreItem) {
+// key only (with the item_ prefix dropped), and looks the stored embeddings up
+// itself — item_state / coordinates from the snapshot are not sent (the score
+// comes from the indexed vectors).
+function toRef(item: MatchScoreItem) {
   return {
-    item_network: item.item_network,
-    item_domain: item.item_domain,
-    item_type: item.item_type,
-    item_id: item.item_id,
+    network: item.item_network,
+    domain: item.item_domain,
+    type: item.item_type,
+    id: item.item_id,
   };
 }
 
@@ -40,8 +41,8 @@ export class SignalsSearchClient implements MatchScoreClient {
         'x-api-key': this.config.apiKey,
       },
       body: JSON.stringify({
-        itemA: toItemRef(input.itemA),
-        itemB: toItemRef(input.itemB),
+        source: toRef(input.itemA),
+        target: toRef(input.itemB),
       }),
     });
 
