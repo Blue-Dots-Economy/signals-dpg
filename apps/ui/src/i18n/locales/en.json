@@ -530,5 +530,20 @@
   "actions.btn_view_profile": "View profile",
   "profile.card_desc_masked": "Public profile. Contact details are shared once the request is accepted.",
   "profile.card_desc_full": "Full profile, including the shared contact details.",
-  "profile.card_desc_reveal_unavailable": "Public profile. Contact details couldn’t be loaded for this connection."
+  "profile.card_desc_reveal_unavailable": "This profile is currently paused or not active, so its contact details aren’t available right now. They’ll show again once the profile is active.",
+  "profile.card_desc_reveal_blocked_self": "Your profile is currently paused, so contact details are hidden for you. Resume your profile to see them again.",
+  "nav.status_live": "Active",
+  "nav.status_paused": "Paused",
+  "nav.status_draft": "Draft",
+  "profile.btn_pause": "Pause profile",
+  "profile.btn_unpause": "Resume profile",
+  "profile.pause_confirm_title": "Pause this profile?",
+  "profile.pause_confirm_desc": "While paused, this profile will not be discoverable in the network. You can resume it any time.",
+  "profile.pause_confirm_proceed": "Pause profile",
+  "profile.toast_paused": "Profile paused — it is no longer discoverable in the network.",
+  "profile.toast_unpaused_live": "Profile resumed — discoverable in the network again.",
+  "profile.toast_unpaused_draft": "Profile resumed, but it needs completing before it goes live.",
+  "profile.toast_lifecycle_failed": "Could not update profile status. Try again.",
+  "profile.visibility_hidden": "This profile is paused — it is not discoverable in the network.",
+  "profile.visibility_live": "This profile is discoverable in the network."
 }

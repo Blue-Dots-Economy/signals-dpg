@@ -81,8 +81,9 @@ interface ResolvedItem {
 }
 
 // masked → public profile, request not (yet) revealing; full → reveal succeeded;
-// reveal_unavailable → public profile because the reveal is unavailable here.
-type ViewMode = 'masked' | 'full' | 'reveal_unavailable';
+// reveal_unavailable → public profile because the OTHER party isn't live;
+// reveal_blocked_self → public profile because the VIEWER's own profile isn't live.
+type ViewMode = 'masked' | 'full' | 'reveal_unavailable' | 'reveal_blocked_self';
 
 type ModalState =
   | { status: 'idle' }
@@ -152,7 +153,14 @@ export function ProfileCardModal({
               item_type: it.item_type,
               item_state: it.item_state,
             },
-            mode: 'full',
+            // Server returns the masked pre-reveal view (revealed:false) when a
+            // party's profile isn't live (e.g. paused, #273) instead of erroring.
+            // `reveal_blocked_reason` says whose profile — so we show the right copy.
+            mode: data.revealed
+              ? 'full'
+              : data.reveal_blocked_reason === 'self'
+                ? 'reveal_blocked_self'
+                : 'reveal_unavailable',
           };
         } catch (err) {
           const code = (err as { code?: string }).code ?? 'INTERNAL_SERVER_ERROR';
@@ -200,9 +208,11 @@ export function ProfileCardModal({
     state.status === 'success'
       ? state.mode === 'full'
         ? 'profile.card_desc_full'
-        : state.mode === 'reveal_unavailable'
-          ? 'profile.card_desc_reveal_unavailable'
-          : 'profile.card_desc_masked'
+        : state.mode === 'reveal_blocked_self'
+          ? 'profile.card_desc_reveal_blocked_self'
+          : state.mode === 'reveal_unavailable'
+            ? 'profile.card_desc_reveal_unavailable'
+            : 'profile.card_desc_masked'
       : wantsUnmasked
         ? 'profile.card_desc_full'
         : 'profile.card_desc_masked';
