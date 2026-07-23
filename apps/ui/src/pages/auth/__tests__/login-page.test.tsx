@@ -3,7 +3,7 @@ import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { pickDob } from '@/test/pick-dob';
+import { pickYearMonthDob } from '@/test/pick-dob';
 
 const checkUser = vi.fn();
 const requestOtp = vi.fn();
@@ -296,7 +296,7 @@ describe('LoginPage', () => {
       expect(requestOtp).not.toHaveBeenCalled();
 
       // Pick a minor DOB + Continue → guardian flow renders, OTP still held.
-      await pickDob(/select date of birth/i, 2015, 5);
+      await pickYearMonthDob(2015);
       await userEvent.click(screen.getByRole('button', { name: /^continue$/i }));
 
       const flow = await screen.findByTestId('signup-guardian-flow');
@@ -336,7 +336,7 @@ describe('LoginPage', () => {
       await userEvent.click(screen.getByRole('button', { name: /^continue$/i }));
 
       expect(await screen.findByText(/to create an account/i)).toBeInTheDocument();
-      await pickDob(/select date of birth/i, 1990, 5); // adult
+      await pickYearMonthDob(1990); // adult
       await userEvent.click(screen.getByRole('button', { name: /^continue$/i }));
 
       await waitFor(() => expect(requestOtp).toHaveBeenCalled());

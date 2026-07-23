@@ -7,7 +7,7 @@ import { Label } from '@/components/ui/label';
 import { Button } from '@/components/ui/button';
 import { submitU18Dob } from '@/lib/consent-api';
 import { toDateOnly } from '@/lib/guardian-consent';
-import { DobCalendar } from '@/components/consent/u18/dob-calendar';
+import { DobYearMonth } from '@/components/consent/u18/dob-year-month';
 
 export interface DobStepProps {
   network: string;
@@ -49,14 +49,8 @@ export function DobStep({ network, onResolved }: DobStepProps) {
   return (
     <form onSubmit={handleSubmit} className="flex flex-col gap-4">
       <div className="space-y-1.5">
-        <Label htmlFor="u18-dob">{t('u18.dob_label', 'Select date of birth')}</Label>
-        <DobCalendar
-          id="u18-dob"
-          value={birthDate}
-          disabled={isSubmitting}
-          placeholder={t('u18.dob_placeholder', 'Select date of birth')}
-          onChange={setBirthDate}
-        />
+        <Label>{t('u18.dob_label_ym', 'Select your birth year')}</Label>
+        <DobYearMonth idPrefix="u18-dob" disabled={isSubmitting} onChange={setBirthDate} />
       </div>
       <Button type="submit" disabled={!canSubmit} className="w-full">
         {isSubmitting && <Loader2 className="h-4 w-4 animate-spin" />}

@@ -1,7 +1,7 @@
 import * as React from 'react';
 import { useTranslation } from 'react-i18next';
 import { ArrowRight, Info } from 'lucide-react';
-import { DobCalendar } from '@/components/consent/u18/dob-calendar';
+import { DobYearMonth } from '@/components/consent/u18/dob-year-month';
 
 export interface SignupDobStepProps {
   /**
@@ -43,15 +43,10 @@ export function SignupDobStep({ onSubmit, existing = false }: SignupDobStepProps
         }}
       >
         <div className="space-y-2">
-          <label htmlFor="signup-dob-step" className="text-base font-semibold">
-            {t('auth.signup_dob_label', 'Select date of birth')}
+          <label className="text-base font-semibold">
+            {t('auth.signup_dob_label_ym', 'Select your birth year')}
           </label>
-          <DobCalendar
-            id="signup-dob-step"
-            value={birthDate}
-            placeholder={t('auth.dob_placeholder', 'Select date of birth')}
-            onChange={setBirthDate}
-          />
+          <DobYearMonth idPrefix="signup-dob" onChange={setBirthDate} />
         </div>
 
         <button

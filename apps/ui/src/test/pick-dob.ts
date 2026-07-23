@@ -34,3 +34,22 @@ export async function pickDob(
   await userEvent.click(screen.getByRole('button', { name: format(date, 'PPPP') }));
   return date;
 }
+
+/**
+ * Drives the `DobYearMonth` picker (#331): selects the birth year, and — only
+ * for the boundary year (turns 18 this year), where the month select appears —
+ * selects the month too. `month` is 1-indexed; ignored for non-boundary years.
+ */
+export async function pickYearMonthDob(year: number, month?: number): Promise<void> {
+  await userEvent.selectOptions(
+    screen.getByRole('combobox', { name: /birth year/i }),
+    String(year),
+  );
+  const boundary = new Date().getFullYear() - 18;
+  if (year === boundary && month !== undefined) {
+    await userEvent.selectOptions(
+      screen.getByRole('combobox', { name: /birth month/i }),
+      String(month),
+    );
+  }
+}

@@ -545,5 +545,19 @@
   "profile.toast_unpaused_draft": "Profile resumed, but it needs completing before it goes live.",
   "profile.toast_lifecycle_failed": "Could not update profile status. Try again.",
   "profile.visibility_hidden": "This profile is paused — it is not discoverable in the network.",
-  "profile.visibility_live": "This profile is discoverable in the network."
+  "profile.visibility_live": "This profile is discoverable in the network.",
+  "auth.signup_dob_label_ym": "Select your birth year",
+  "u18.dob_label_ym": "Select your birth year",
+  "common.month_1": "January",
+  "common.month_2": "February",
+  "common.month_3": "March",
+  "common.month_4": "April",
+  "common.month_5": "May",
+  "common.month_6": "June",
+  "common.month_7": "July",
+  "common.month_8": "August",
+  "common.month_9": "September",
+  "common.month_10": "October",
+  "common.month_11": "November",
+  "common.month_12": "December"
 }

@@ -2,13 +2,13 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { Toaster } from 'sonner';
-import { format } from 'date-fns';
-import { pickDob } from '@/test/pick-dob';
 
 const submitU18Dob = vi.fn();
 vi.mock('@/lib/consent-api', () => ({
   submitU18Dob: (...args: unknown[]) => submitU18Dob(...args),
 }));
+
+const BOUNDARY_YEAR = new Date().getFullYear() - 18; // turns 18 this year
 
 async function renderDobStep(onResolved: (isMinor: boolean) => void) {
   const { DobStep } = await import('../dob-step');
@@ -20,46 +20,65 @@ async function renderDobStep(onResolved: (isMinor: boolean) => void) {
   );
 }
 
-describe('DobStep', () => {
+describe('DobStep (year + conditional month, #331)', () => {
   beforeEach(() => {
     vi.clearAllMocks();
   });
 
-  it('disables Continue until a full date is picked from the calendar', async () => {
+  it('year alone enables Continue for a non-boundary year (no month asked)', async () => {
     await renderDobStep(vi.fn());
     const submit = screen.getByRole('button', { name: /continue/i });
     expect(submit).toBeDisabled();
-
-    // Navigating the caption dropdowns alone doesn't select a day — the
-    // button stays disabled until a day cell is actually clicked.
-    await userEvent.click(screen.getByRole('button', { name: /select date of birth/i }));
-    await userEvent.selectOptions(screen.getByRole('combobox', { name: /choose the year/i }), '2012');
-    await userEvent.selectOptions(screen.getByRole('combobox', { name: /choose the month/i }), '4');
-    expect(submit).toBeDisabled();
-
-    await userEvent.click(
-      screen.getByRole('button', { name: format(new Date(2012, 4, 1), 'PPPP') }),
-    );
+    await userEvent.selectOptions(screen.getByRole('combobox', { name: /birth year/i }), '2012');
+    expect(screen.queryByRole('combobox', { name: /birth month/i })).toBeNull();
     expect(submit).toBeEnabled();
   });
 
-  it('submits the selected month/year and reports isMinor=true from the response', async () => {
+  it('boundary year requires the month before Continue enables', async () => {
+    await renderDobStep(vi.fn());
+    const submit = screen.getByRole('button', { name: /continue/i });
+    await userEvent.selectOptions(
+      screen.getByRole('combobox', { name: /birth year/i }),
+      String(BOUNDARY_YEAR),
+    );
+    const month = screen.getByRole('combobox', { name: /birth month/i });
+    expect(submit).toBeDisabled();
+    await userEvent.selectOptions(month, '7');
+    expect(submit).toBeEnabled();
+  });
+
+  it('submits year-only as the end of December (last day of month)', async () => {
     submitU18Dob.mockResolvedValue({ isMinor: true });
     const onResolved = vi.fn();
     await renderDobStep(onResolved);
 
-    await pickDob(/select date of birth/i, 2012, 5);
+    await userEvent.selectOptions(screen.getByRole('combobox', { name: /birth year/i }), '2012');
     await userEvent.click(screen.getByRole('button', { name: /continue/i }));
 
     await waitFor(() =>
       expect(submitU18Dob).toHaveBeenCalledWith(
-        expect.objectContaining({
-          network: 'blue_dot',
-          dateOfBirth: expect.stringMatching(/^2012-0[45]-/),
-        }),
+        expect.objectContaining({ network: 'blue_dot', dateOfBirth: '2012-12-31' }),
       ),
     );
     expect(onResolved).toHaveBeenCalledWith(true);
+  });
+
+  it('submits boundary year + month as the last day of that month', async () => {
+    submitU18Dob.mockResolvedValue({ isMinor: true });
+    await renderDobStep(vi.fn());
+
+    await userEvent.selectOptions(
+      screen.getByRole('combobox', { name: /birth year/i }),
+      String(BOUNDARY_YEAR),
+    );
+    await userEvent.selectOptions(screen.getByRole('combobox', { name: /birth month/i }), '7');
+    await userEvent.click(screen.getByRole('button', { name: /continue/i }));
+
+    await waitFor(() =>
+      expect(submitU18Dob).toHaveBeenCalledWith(
+        expect.objectContaining({ dateOfBirth: `${BOUNDARY_YEAR}-07-31` }),
+      ),
+    );
   });
 
   it('reports isMinor=false from the response for an adult', async () => {
@@ -67,7 +86,7 @@ describe('DobStep', () => {
     const onResolved = vi.fn();
     await renderDobStep(onResolved);
 
-    await pickDob(/select date of birth/i, 1990, 1);
+    await userEvent.selectOptions(screen.getByRole('combobox', { name: /birth year/i }), '1990');
     await userEvent.click(screen.getByRole('button', { name: /continue/i }));
 
     await waitFor(() => expect(onResolved).toHaveBeenCalledWith(false));
@@ -78,7 +97,7 @@ describe('DobStep', () => {
     const onResolved = vi.fn();
     await renderDobStep(onResolved);
 
-    await pickDob(/select date of birth/i, 2012, 5);
+    await userEvent.selectOptions(screen.getByRole('combobox', { name: /birth year/i }), '2012');
     await userEvent.click(screen.getByRole('button', { name: /continue/i }));
 
     await waitFor(() => expect(screen.getByText(/couldn't save/i)).toBeInTheDocument());

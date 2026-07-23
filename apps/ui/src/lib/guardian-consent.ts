@@ -29,6 +29,29 @@ export function isMinorFromDate(dateOfBirth: Date, now: Date = new Date()): bool
 }
 
 /**
+ * The birth year that turns 18 in the given year — the only cohort where the
+ * year alone can't decide U18 (they could be 17 or 18 depending on birthday).
+ * Used to conditionally ask for the birth month. (#331)
+ */
+export function boundaryBirthYear(now: Date = new Date()): number {
+  return now.getFullYear() - 18;
+}
+
+/**
+ * Build a birth date from year (+ optional month) for U18 gating (#331). We
+ * only ever collect year — and month for the boundary year — never the day.
+ * The stored day is the LAST day of the month (month defaults to December when
+ * unknown), so the computed 18th birthday is the latest possible in that
+ * month: fail-closed (a boundary-year person stays a minor until end of the
+ * month/year). Reuses the existing `date_of_birth` date column; extensible to
+ * a real day later. Local date (see `toDateOnly` on the tz rationale).
+ *   new Date(year, mm, 0) === last day of 1-indexed month `mm`.
+ */
+export function buildYearMonthDob(year: number, month?: number): Date {
+  return new Date(year, month ?? 12, 0);
+}
+
+/**
  * Serialize a picked calendar date as a LOCAL date-only `yyyy-mm-dd`. The
  * calendar hands back a Date at local midnight; `toISOString()` would convert
  * to UTC and, east of Greenwich (e.g. IST +5:30), roll it back a day — which at
