@@ -130,6 +130,17 @@ describe('resolve_upsert_action', () => {
     expect(v).toEqual({ kind: 'account_only' });
   });
 
+  it('network_service + new user + no item_state -> account_only (create the account only)', () => {
+    const v = resolve_upsert_action({
+      acting_org: networkService,
+      user_exists: false,
+      item_id_in_body: undefined,
+      has_item_state: false,
+      aggregator_owns_user: false,
+    });
+    expect(v).toEqual({ kind: 'account_only' });
+  });
+
   it('network_service + new user + item_state -> create_new_user', () => {
     const v = resolve_upsert_action({
       acting_org: networkService,
