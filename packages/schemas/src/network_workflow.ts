@@ -99,6 +99,10 @@ const NetworkDomainSchema = z.object({
   // U18 spec D8: when true, this domain routes minors' consent through a
   // guardian. Server-read only; never trusted from the client. Defaults off.
   guardian_consent_required: z.boolean().optional().default(false),
+  // Optional per-domain cap on how many profiles a single user may own in this
+  // domain. Overrides the global MAX_PROFILES_PER_USER default when set (e.g.
+  // seeker=3, provider=5). Unset ⇒ the global default applies.
+  max_profiles_per_user: z.number().int().positive().optional(),
   item_schemas: z
     .record(z.string(), JsonSchemaDocumentSchema)
     .optional()

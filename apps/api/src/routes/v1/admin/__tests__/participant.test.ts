@@ -879,7 +879,7 @@ describe('POST /admin/participant', () => {
     expect(dbState.inserts).toHaveLength(0);
   });
 
-  it('network_service + existing user + existing item (same network/domain/type) + no item_id → 200 idempotent update, no insert', async () => {
+  it('network_service + existing user + existing item (same network/domain/type) + no item_id → 200 creates another profile (always-create)', async () => {
     const user_id = 'usr_ns_reonboard';
     dbState.existingUserRows = [
       {
@@ -903,9 +903,6 @@ describe('POST /admin/participant', () => {
       },
     ]);
     dbState.itemOwnerLookup.set(VALID_UUID_A, user_id);
-    // Feed the existing-owned-item lookup side channel so the resolver
-    // returns update_item{VALID_UUID_A} instead of insert_item.
-    dbState.existingOwnedItemId = VALID_UUID_A;
     lastQueriedUserId = user_id;
     lastQueriedItemId = VALID_UUID_A;
     const { updateItemInternal } = await import('@/services/item_service');
@@ -920,14 +917,12 @@ describe('POST /admin/participant', () => {
       payload: baseBody({ item_state: { v: 2 } }),
     });
     expect(res.statusCode).toBe(200);
-    // Idempotent path: updateItemInternal called, NO new insert.
-    expect(vi.mocked(updateItemInternal)).toHaveBeenCalledTimes(1);
-    expect(dbState.inserts).toHaveLength(0);
-    // Item count unchanged — no duplicate created.
-    expect(dbState.itemsByUser.get(user_id)).toHaveLength(1);
+    // Always-create (#349): a new profile is inserted, updateItemInternal not called.
+    expect(vi.mocked(updateItemInternal)).toHaveBeenCalledTimes(0);
+    expect(dbState.inserts).toHaveLength(1);
   });
 
-  it('aggregator + existing OWN user + existing item (same network/domain/type) + no item_id → 200 idempotent update, no insert', async () => {
+  it('aggregator + existing OWN user + existing item (same network/domain/type) + no item_id → 200 creates another profile (always-create)', async () => {
     const user_id = 'usr_agg_reonboard';
     dbState.existingUserRows = [
       {
@@ -950,7 +945,6 @@ describe('POST /admin/participant', () => {
       },
     ]);
     dbState.itemOwnerLookup.set(VALID_UUID_A, user_id);
-    dbState.existingOwnedItemId = VALID_UUID_A;
     lastQueriedUserId = user_id;
     lastQueriedItemId = VALID_UUID_A;
     const { updateItemInternal } = await import('@/services/item_service');
@@ -966,9 +960,9 @@ describe('POST /admin/participant', () => {
     });
     expect(res.statusCode).toBe(200);
     expect(res.json().owned_elsewhere).toBe(false);
-    expect(vi.mocked(updateItemInternal)).toHaveBeenCalledTimes(1);
-    expect(dbState.inserts).toHaveLength(0);
-    expect(dbState.itemsByUser.get(user_id)).toHaveLength(1);
+    // Always-create (#349): the owning aggregator adds another profile.
+    expect(vi.mocked(updateItemInternal)).toHaveBeenCalledTimes(0);
+    expect(dbState.inserts).toHaveLength(1);
   });
 
   // ---------------------------------------------------------------------------
