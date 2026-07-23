@@ -32,6 +32,63 @@ const pkg = createRequire(import.meta.url)('../package.json') as {
   version: string;
 };
 
+const baseJsonSchemaTransform = createJsonSchemaTransform({});
+
+// Operations served WITHOUT user auth (no preHandler on the route and no
+// group-level auth hook) — the spec-level default security is cleared for
+// these. Derived from the actual route wiring; keep in sync when a route's
+// preHandler changes (see apps/api/CLAUDE.md "Route auth wiring").
+const PUBLIC_OPERATION_URLS = new Set([
+  '/',
+  '/api/v1/auth/config',
+  '/api/v1/auth/u18-precheck',
+  '/api/v1/consent/status-by-identifier',
+  '/api/v1/network/schemas',
+  '/api/v1/network/item/fetch',
+  '/api/v1/network/action/perform',
+]);
+
+// Operations guarded by peer_instance_guard (inter-instance HMAC) instead of
+// user auth.
+const PEER_OPERATION_URLS = new Set(['/api/v1/network/item/count_local', '/api/v1/network/item/fetch_local']);
+
+/**
+ * Wraps the zod json-schema transform to make the auth model machine-readable
+ * in the generated OpenAPI document: applies the public/peer security
+ * exceptions and documents the `x-acting-org-id` header on the route groups
+ * whose acting-org preHandlers read it (required for admin/aggregator via
+ * acting_org.ts, optional for action via acting_org_optional.ts).
+ */
+const documentAuthTransform: typeof baseJsonSchemaTransform = (data) => {
+  const transformed = baseJsonSchemaTransform(data);
+  const { url } = transformed;
+  const schema = { ...(transformed.schema as Record<string, unknown> | undefined) };
+
+  if (PUBLIC_OPERATION_URLS.has(url) || url.startsWith('/api/v1/network/schema/')) {
+    schema.security = [];
+  } else if (PEER_OPERATION_URLS.has(url)) {
+    schema.security = [{ peerAuth: [] }];
+  }
+
+  const actingOrgRequired = url.startsWith('/api/v1/admin') || url.startsWith('/api/v1/aggregator');
+  if (actingOrgRequired || url.startsWith('/api/v1/action')) {
+    schema.headers = {
+      type: 'object',
+      properties: {
+        'x-acting-org-id': {
+          type: 'string',
+          description: actingOrgRequired
+            ? 'Organization this request acts on behalf of. Required for admin/aggregator operations.'
+            : 'Organization this request acts on behalf of. Optional: a non-admin actor can perform an action without acting for an org.',
+        },
+      },
+      ...(actingOrgRequired ? { required: ['x-acting-org-id'] } : {}),
+    };
+  }
+
+  return { ...transformed, schema: schema as typeof transformed.schema };
+};
+
 /**
  * Builds the fully-wired Fastify app WITHOUT listening. Used by the server
  * entry (which listens), the OpenAPI dump script, and the openapi smoke test.
@@ -103,14 +160,17 @@ export async function buildApp(): Promise<FastifyInstance> {
           title: 'Signals DPG API',
           description:
             'Network-aware Signals DPG API — items, actions, events, consent, network fetch, admin.\n\n' +
-            'Most `/api/v1` operations require authentication, via either the `apiKeyAuth` or ' +
-            '`sessionAuth` scheme below. Per-operation `security` annotations are not yet applied ' +
-            'in this spec (tracked as a follow-up) — the schemes are documented here for accuracy, ' +
-            'but which scheme (and which additional headers, e.g. `x-acting-org-id` for admin/' +
-            'aggregator routes) a given operation needs is not yet machine-readable. See ' +
+            'Unless marked otherwise, operations require authentication via either the `apiKeyAuth` ' +
+            'or `sessionAuth` scheme (the spec default). Public operations carry no Authorizations ' +
+            'section; the two inter-instance `*_local` operations use the service-to-service ' +
+            '`peerAuth` scheme instead. Admin and aggregator operations additionally require the ' +
+            '`x-acting-org-id` header (optional on action operations). See ' +
             '`docs/operations/integrating-dpgs.md` for the full auth model.',
           version: pkg.version,
         },
+        // Default for every operation; exceptions are applied per-route in
+        // documentAuthTransform below.
+        security: [{ apiKeyAuth: [] }, { sessionAuth: [] }],
         // Tag descriptions make starlight-openapi emit one overview page per
         // group in the published reference (tags without a description get
         // sidebar-group-only treatment).
@@ -162,10 +222,19 @@ export async function buildApp(): Promise<FastifyInstance> {
                 '(apps/api/plugins/auth/validate_session.ts). Checked as a fallback only when ' +
                 'x-api-key is absent.',
             },
+            peerAuth: {
+              type: 'apiKey',
+              in: 'header',
+              name: 'x-instance-token',
+              description:
+                'Inter-instance HMAC token (paired with an `x-instance-timestamp` header), used ' +
+                'only by peer Signals instances for the network `*_local` operations ' +
+                '(src/middleware/peer_instance_guard.ts). Not for external callers.',
+            },
           },
         },
       },
-      transform: createJsonSchemaTransform({}),
+      transform: documentAuthTransform,
     });
     await app.register(import('@scalar/fastify-api-reference'), {
       routePrefix: '/api/reference',

@@ -2,7 +2,7 @@
   "openapi": "3.0.3",
   "info": {
     "title": "Signals DPG API",
-    "description": "Network-aware Signals DPG API — items, actions, events, consent, network fetch, admin.\n\nMost `/api/v1` operations require authentication, via either the `apiKeyAuth` or `sessionAuth` scheme below. Per-operation `security` annotations are not yet applied in this spec (tracked as a follow-up) — the schemes are documented here for accuracy, but which scheme (and which additional headers, e.g. `x-acting-org-id` for admin/aggregator routes) a given operation needs is not yet machine-readable. See `docs/operations/integrating-dpgs.md` for the full auth model.",
+    "description": "Network-aware Signals DPG API — items, actions, events, consent, network fetch, admin.\n\nUnless marked otherwise, operations require authentication via either the `apiKeyAuth` or `sessionAuth` scheme (the spec default). Public operations carry no Authorizations section; the two inter-instance `*_local` operations use the service-to-service `peerAuth` scheme instead. Admin and aggregator operations additionally require the `x-acting-org-id` header (optional on action operations). See `docs/operations/integrating-dpgs.md` for the full auth model.",
     "version": "1.0.0"
   },
   "components": {
@@ -18,6 +18,12 @@
         "in": "cookie",
         "name": "better-auth.session_token",
         "description": "Browser session cookie issued by better-auth after sign-in, used by the web UI (apps/api/plugins/auth/validate_session.ts). Checked as a fallback only when x-api-key is absent."
+      },
+      "peerAuth": {
+        "type": "apiKey",
+        "in": "header",
+        "name": "x-instance-token",
+        "description": "Inter-instance HMAC token (paired with an `x-instance-timestamp` header), used only by peer Signals instances for the network `*_local` operations (src/middleware/peer_instance_guard.ts). Not for external callers."
       }
     },
     "schemas": {}
@@ -25,6 +31,7 @@
   "paths": {
     "/": {
       "get": {
+        "security": [],
         "responses": {
           "200": {
             "description": "Default Response"
@@ -876,6 +883,15 @@
             "in": "query",
             "name": "offset",
             "required": false
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "in": "header",
+            "name": "x-acting-org-id",
+            "required": false,
+            "description": "Organization this request acts on behalf of. Optional: a non-admin actor can perform an action without acting for an org."
           }
         ],
         "responses": {
@@ -1213,6 +1229,17 @@
             }
           }
         },
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "in": "header",
+            "name": "x-acting-org-id",
+            "required": false,
+            "description": "Organization this request acts on behalf of. Optional: a non-admin actor can perform an action without acting for an org."
+          }
+        ],
         "responses": {
           "201": {
             "description": "Default Response",
@@ -1487,6 +1514,17 @@
             }
           }
         },
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "in": "header",
+            "name": "x-acting-org-id",
+            "required": false,
+            "description": "Organization this request acts on behalf of. Optional: a non-admin actor can perform an action without acting for an org."
+          }
+        ],
         "responses": {
           "201": {
             "description": "Default Response",
@@ -1911,6 +1949,17 @@
             }
           }
         },
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "in": "header",
+            "name": "x-acting-org-id",
+            "required": false,
+            "description": "Organization this request acts on behalf of. Optional: a non-admin actor can perform an action without acting for an org."
+          }
+        ],
         "responses": {
           "200": {
             "description": "Default Response",
@@ -2310,6 +2359,15 @@
             "in": "path",
             "name": "action_id",
             "required": true
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "in": "header",
+            "name": "x-acting-org-id",
+            "required": false,
+            "description": "Organization this request acts on behalf of. Optional: a non-admin actor can perform an action without acting for an org."
           }
         ],
         "responses": {
@@ -3409,6 +3467,7 @@
             "required": false
           }
         ],
+        "security": [],
         "responses": {
           "200": {
             "description": "Default Response"
@@ -3450,6 +3509,7 @@
             "required": true
           }
         ],
+        "security": [],
         "responses": {
           "200": {
             "description": "Default Response"
@@ -3589,6 +3649,7 @@
             "required": false
           }
         ],
+        "security": [],
         "responses": {
           "200": {
             "description": "Default Response",
@@ -3823,6 +3884,11 @@
             }
           }
         },
+        "security": [
+          {
+            "peerAuth": []
+          }
+        ],
         "responses": {
           "200": {
             "description": "Default Response",
@@ -3927,6 +3993,11 @@
             }
           }
         },
+        "security": [
+          {
+            "peerAuth": []
+          }
+        ],
         "responses": {
           "200": {
             "description": "Default Response",
@@ -4230,6 +4301,7 @@
             }
           }
         },
+        "security": [],
         "responses": {
           "201": {
             "description": "Default Response",
@@ -4409,6 +4481,17 @@
             }
           }
         },
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "in": "header",
+            "name": "x-acting-org-id",
+            "required": true,
+            "description": "Organization this request acts on behalf of. Required for admin/aggregator operations."
+          }
+        ],
         "responses": {
           "200": {
             "description": "Default Response",
@@ -4533,6 +4616,17 @@
             }
           }
         },
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "in": "header",
+            "name": "x-acting-org-id",
+            "required": true,
+            "description": "Organization this request acts on behalf of. Required for admin/aggregator operations."
+          }
+        ],
         "responses": {
           "200": {
             "description": "Default Response",
@@ -4667,6 +4761,15 @@
             "in": "query",
             "name": "phone_number",
             "required": false
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "in": "header",
+            "name": "x-acting-org-id",
+            "required": true,
+            "description": "Organization this request acts on behalf of. Required for admin/aggregator operations."
           }
         ],
         "responses": {
@@ -4797,6 +4900,17 @@
             }
           }
         },
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "in": "header",
+            "name": "x-acting-org-id",
+            "required": true,
+            "description": "Organization this request acts on behalf of. Required for admin/aggregator operations."
+          }
+        ],
         "responses": {
           "200": {
             "description": "Default Response",
@@ -4942,6 +5056,15 @@
             "in": "query",
             "name": "refresh",
             "required": false
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "in": "header",
+            "name": "x-acting-org-id",
+            "required": true,
+            "description": "Organization this request acts on behalf of. Required for admin/aggregator operations."
           }
         ],
         "responses": {
@@ -5255,6 +5378,15 @@
             "in": "query",
             "name": "refresh",
             "required": false
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "in": "header",
+            "name": "x-acting-org-id",
+            "required": true,
+            "description": "Organization this request acts on behalf of. Required for admin/aggregator operations."
           }
         ],
         "responses": {
@@ -5358,6 +5490,7 @@
             "required": false
           }
         ],
+        "security": [],
         "responses": {
           "200": {
             "description": "Default Response",
@@ -6325,6 +6458,7 @@
         "tags": [
           "auth"
         ],
+        "security": [],
         "responses": {
           "200": {
             "description": "Default Response",
@@ -6392,6 +6526,7 @@
             }
           }
         },
+        "security": [],
         "responses": {
           "200": {
             "description": "Default Response",
@@ -6571,6 +6706,14 @@
     {
       "url": "http://localhost:2742",
       "description": "Local development"
+    }
+  ],
+  "security": [
+    {
+      "apiKeyAuth": []
+    },
+    {
+      "sessionAuth": []
     }
   ],
   "tags": [
