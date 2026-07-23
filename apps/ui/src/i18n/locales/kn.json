@@ -7,6 +7,8 @@
   "common.search": "ಹುಡುಕಿ...",
   "common.something_went_wrong": "ಏನೋ ತಪ್ಪಾಗಿದೆ",
   "auth.back": "ಹಿಂದೆ",
+  "auth.select_domain_required": "ಮುಂದುವರಿಯಲು ದಯವಿಟ್ಟು ನಿಮ್ಮ ಡೊಮೇನ್ ಆಯ್ಕೆಮಾಡಿ.",
+  "auth.signup_options_unavailable": "ಸೈನ್-ಅಪ್ ಆಯ್ಕೆಗಳನ್ನು ಲೋಡ್ ಮಾಡಲಾಗಲಿಲ್ಲ. ದಯವಿಟ್ಟು ರಿಫ್ರೆಶ್ ಮಾಡಿ ಮತ್ತೆ ಪ್ರಯತ್ನಿಸಿ.",
   "auth.heading_sign_in": "ಸೈನ್ ಇನ್",
   "auth.heading_welcome_back": "ಸ್ವಾಗತ",
   "auth.heading_create_account": "ನಿಮ್ಮ ಖಾತೆ ರಚಿಸಿ",
@@ -532,5 +534,9 @@
   "u18.guardian_accept_both_join": " ಮತ್ತು ",
   "u18.guardian_error_consent": "ದಯವಿಟ್ಟು ನಿಮ್ಮ ವಾರ್ಡ್ ಪರವಾಗಿ ನಿಯಮಗಳು ಮತ್ತು ಷರತ್ತುಗಳು ಹಾಗೂ ಗೌಪ್ಯತಾ ನೀತಿಯನ್ನು ಸ್ವೀಕರಿಸಿ.",
   "u18.guardian_continue": "ಮುಂದುವರಿಸಿ",
-  "u18.guardian_contact_hint": "* ಕನಿಷ್ಠ ಒಂದು ಸಂಪರ್ಕ ಅಗತ್ಯ — OTP ಇದಕ್ಕೆ ಕಳುಹಿಸಲಾಗುತ್ತದೆ."
+  "u18.guardian_contact_hint": "* ಕನಿಷ್ಠ ಒಂದು ಸಂಪರ್ಕ ಅಗತ್ಯ — OTP ಇದಕ್ಕೆ ಕಳುಹಿಸಲಾಗುತ್ತದೆ.",
+  "actions.btn_view_profile": "ಪ್ರೊಫೈಲ್ ವೀಕ್ಷಿಸಿ",
+  "profile.card_desc_masked": "ಸಾರ್ವಜನಿಕ ಪ್ರೊಫೈಲ್. ವಿನಂತಿಯನ್ನು ಸ್ವೀಕರಿಸಿದ ನಂತರ ಸಂಪರ್ಕ ವಿವರಗಳನ್ನು ಹಂಚಲಾಗುತ್ತದೆ.",
+  "profile.card_desc_full": "ಹಂಚಿದ ಸಂಪರ್ಕ ವಿವರಗಳನ್ನೊಳಗೊಂಡ ಪೂರ್ಣ ಪ್ರೊಫೈಲ್.",
+  "profile.card_desc_reveal_unavailable": "ಸಾರ್ವಜನಿಕ ಪ್ರೊಫೈಲ್. ಈ ಸಂಪರ್ಕಕ್ಕಾಗಿ ಸಂಪರ್ಕ ವಿವರಗಳನ್ನು ಲೋಡ್ ಮಾಡಲಾಗಲಿಲ್ಲ."
 }

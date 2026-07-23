@@ -1299,6 +1299,7 @@
         }
       },
       "id": "provider",
+      "my_items_label": "My Jobs",
       "guardian_consent_required": false,
       "card": {
         "title_field": "jobProviderName",
@@ -1382,6 +1383,34 @@
             "cancel": ["cancelled"]
           },
           "reveals_pii_on_status": ["accepted"]
+        }
+      ]
+    },
+    "connect": {
+      "description": "Lets a provider connect with another provider (partnership / referral) or reach out to a seeker (interview invitation). Either party can initiate; the receiver can accept or reject.",
+      "interactions": [
+        {
+          "from_network": "blue_dot",
+          "from_domain": "provider",
+          "to_network": "blue_dot",
+          "to_domain": "provider",
+          "requirement_schema": { "type": "object", "properties": {} },
+          "event_schema": {
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "title": "Provider To Provider Connect Event",
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["status", "remark"],
+            "properties": {
+              "status": {
+                "type": "string",
+                "enum": ["created", "accepted", "rejected", "cancelled"]
+              },
+              "remark": { "type": "string" }
+            }
+          },
+          "metric_categories": null,
+          "reveals_pii_on_status": ["accepted"]
         },
         {
           "from_network": "blue_dot",
@@ -1451,34 +1480,6 @@
             "reject": ["rejected"],
             "cancel": ["cancelled"]
           },
-          "reveals_pii_on_status": ["accepted"]
-        }
-      ]
-    },
-    "connect": {
-      "description": "Lets a provider connect with another provider (partnership / referral). Either party can initiate; the receiver can accept or reject.",
-      "interactions": [
-        {
-          "from_network": "blue_dot",
-          "from_domain": "provider",
-          "to_network": "blue_dot",
-          "to_domain": "provider",
-          "requirement_schema": { "type": "object", "properties": {} },
-          "event_schema": {
-            "$schema": "https://json-schema.org/draft/2020-12/schema",
-            "title": "Provider To Provider Connect Event",
-            "type": "object",
-            "additionalProperties": false,
-            "required": ["status", "remark"],
-            "properties": {
-              "status": {
-                "type": "string",
-                "enum": ["created", "accepted", "rejected", "cancelled"]
-              },
-              "remark": { "type": "string" }
-            }
-          },
-          "metric_categories": null,
           "reveals_pii_on_status": ["accepted"]
         }
       ]

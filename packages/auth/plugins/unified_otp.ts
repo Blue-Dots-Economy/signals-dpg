@@ -4,6 +4,7 @@ import { type BetterAuthPlugin } from 'better-auth/types';
 import { setSessionCookie } from '../utils';
 import z from '@dpg/schemas';
 import { assertChannelAllowed, assertSelfSignupAllowed, type LoginChannel } from './auth_guards';
+import { deliverOtp } from './otp_delivery';
 
 const CheckUserInput = z.object({
   email: z.email('Please enter a valid Email').optional().meta({
@@ -366,16 +367,16 @@ export const unifiedOtp = ({
 
         await ctx.context.secondaryStorage?.set(key, otp, expiresInSec);
 
-        if (phoneNumber) {
-          await sendPhoneOtp({
-            phoneNumber,
-            otp,
-          });
-        }
-
-        if (email) {
-          sendEmailOtp({ email, otp, user });
-        }
+        await deliverOtp({
+          phoneNumber,
+          email,
+          otp,
+          user,
+          storageKey: key,
+          storage: ctx.context.secondaryStorage,
+          sendPhoneOtp,
+          sendEmailOtp,
+        });
 
         return ctx.json({ ok: true, user: user ? true : false });
       }

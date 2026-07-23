@@ -13,6 +13,14 @@ import type { EnumFilterField } from '@/lib/enum-filters';
 export interface MapFiltersPanelProps {
   /** All visible domains (from the network config) to show as filter options. */
   domains: DotNetworkDomain[];
+  /**
+   * Domains whose schema fields drive the enum filter groups. Defaults to
+   * `domains`. Supplied separately so the enum filters can reflect the
+   * counterpart being selected (e.g. a provider browsing seekers filters by
+   * seeker fields) while the domain chip selector still lists every visible
+   * domain.
+   */
+  filterFieldDomains?: DotNetworkDomain[];
   /** Currently selected domain filter values. Empty array = all. */
   selectedDomains: string[];
   /** Called when the domain filter selection changes. */
@@ -24,6 +32,12 @@ export interface MapFiltersPanelProps {
   selectedFields: Record<string, string[]>;
   /** Called when any enum field filter selection changes. */
   onFieldsChange: (fields: Record<string, string[]>) => void;
+  /**
+   * Whether to show the DOMAIN chip group. Defaults to true. Hidden when the
+   * sidebar already scopes browse to a single domain — the toggle would be
+   * redundant, and the enum groups below already reflect just that domain.
+   */
+  showDomainToggle?: boolean;
   /** Current browse view — tailors the help text (map markers vs listings). */
   viewMode?: ViewMode;
 }
@@ -193,22 +207,26 @@ function MultiSelectGroup({ title, options, selected, onToggle }: MultiSelectGro
  */
 export function MapFiltersPanel({
   domains,
+  filterFieldDomains,
   selectedDomains,
   onDomainsChange,
   selectedFields,
   onFieldsChange,
+  showDomainToggle = true,
   viewMode = 'map',
 }: MapFiltersPanelProps) {
   const { t } = useTranslation();
   const [open, setOpen] = React.useState(false);
 
-  // Derive enum filter fields generically from all visible domain schemas
+  // Derive enum filter fields generically from the filter-field domains
+  // (defaults to the visible domains) so the filters can reflect the
+  // counterpart being browsed independently of the domain chip selector.
   const enumFilterFields: EnumFilterField[] = React.useMemo(
-    () => getEnumFilterFieldsForDomains(domains),
-    [domains],
+    () => getEnumFilterFieldsForDomains(filterFieldDomains ?? domains),
+    [filterFieldDomains, domains],
   );
 
-  const showDomainGroup = domains.length > 1;
+  const showDomainGroup = showDomainToggle && domains.length > 1;
   const showEnumGroups = enumFilterFields.length > 0;
 
   // Count of active selections across all enum fields
