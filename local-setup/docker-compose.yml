@@ -124,6 +124,11 @@ services:
       REDIS_PASSWORD: ${REDIS_PASSWORD}
       REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379
       SIGNALS_PII_KEY: ${SIGNALS_PII_KEY:?SIGNALS_PII_KEY must be a base64-encoded 32-byte key}
+      # D6 inter-instance peer auth (HMAC). Required by NetworkRuntimeSecretsSchema
+      # (min 32 chars). Single local instance in permissive mode → a static dev
+      # default is fine; must be IDENTICAL across peers in a multi-instance setup.
+      INSTANCE_SHARED_SECRET: ${INSTANCE_SHARED_SECRET:-local-dev-instance-shared-secret-change-me}
+      PEER_AUTH_MODE: ${PEER_AUTH_MODE:-permissive}
     depends_on:
       postgres:
         condition: service_healthy
