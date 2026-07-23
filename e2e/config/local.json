@@ -1,0 +1,39 @@
+{
+  "env": "local",
+  "apiBaseUrl": "http://localhost:2742",
+  "uiBaseUrl": "http://localhost:5173",
+  "network": "blue_dot",
+  "servedDomains": [
+    "blue_dot/seeker",
+    "blue_dot/provider"
+  ],
+  "brand": null,
+  "servedBindingHost": null,
+  "language": "en",
+  "selfSignupMode": "gated",
+  "loginChannels": [
+    "phone",
+    "email"
+  ],
+  "peerAuthMode": "permissive",
+  "action": {
+    "type": "apply",
+    "acceptStatus": "accepted"
+  },
+  "auth": {
+    "serviceApiKey": null,
+    "actingOrgId": null
+  },
+  "otp": {
+    "mode": "test-otp"
+  },
+  "notificationStubUrl": null,
+  "db": {
+    "url": null
+  },
+  "deterministicPiiKey": false,
+  "faultInjection": false,
+  "peer": {
+    "apiBaseUrl": null
+  }
+}
