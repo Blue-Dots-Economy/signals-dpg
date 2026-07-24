@@ -11,12 +11,12 @@
 ## 1. Context & goal
 
 ### Goal
-Standardize signals-dpg's identity on **Keycloak — the same identity technology the rest of the ecosystem already uses** — with signals owning its **own dedicated realm**, separate from aggregator's. Today aggregator-dpg authenticates its human users against Keycloak (realm `aggregator`, OIDC Authorization-Code + PKCE, with a custom email/phone OTP authenticator SPI). signals-dpg runs its own, separate identity system built on **better-auth**. This design moves signals-dpg onto Keycloak so that:
+Standardize signals-dpg's identity on **Keycloak — the same identity technology the rest of the ecosystem already uses** — running on a **shared Keycloak server per instance** with signals owning its **own realm(s)**, separate from aggregator's. Today aggregator-dpg authenticates its human users against Keycloak (realm `aggregator`, OIDC Authorization-Code + PKCE, with a custom email/phone OTP authenticator SPI). signals-dpg runs its own, separate identity system built on **better-auth**. This design moves signals-dpg onto that same Keycloak so that:
 
-- Both DPGs authenticate against Keycloak using the same OIDC patterns, tooling, and the shared OTP authenticator SPI — but **each DPG keeps its own realm** because they serve different user populations and use cases (signals = participants; aggregator = coordinators/aggregators). Realms are **not** shared.
+- Both DPGs run against **one shared Keycloak deployment per instance/environment** — aggregator and every signals network (blue-dot, yellow-dot, …) point at the *same* Keycloak server. It is shared **infrastructure**, not a shared **realm**: each use case keeps its own realm (signals = participants; aggregator = coordinators/aggregators), because they serve different user populations. One Keycloak server, many realms.
 - Service-to-service auth between DPGs moves to a standard OAuth2 mechanism (client-credentials) instead of the bespoke `x-api-key` scheme.
 
-> **Realm scoping note.** A Keycloak `sub` is unique *per realm*. Because signals and aggregator use separate realms, the "same" human has different `sub` values in each — there is **no shared subject identifier across DPGs**. Any future cross-DPG identity linking (e.g. the consent-service concept in `docs/superpowers/specs/2026-06-30-consent-management-minimal-v1-design.md`) would require Keycloak identity brokering/federation or an ecosystem-level user mapping, which is **out of scope here**. Within signals, `sub` is stable and equals the migrated user UUID (§6).
+> **Realm scoping note.** A Keycloak `sub` is unique *per realm*, not per server. Even though signals and aggregator share the same Keycloak deployment, they use **separate realms**, so the "same" human has different `sub` values in each — there is **no shared subject identifier across DPGs**. Any future cross-DPG identity linking (e.g. the consent-service concept in `docs/superpowers/specs/2026-06-30-consent-management-minimal-v1-design.md`) would require Keycloak identity brokering/federation or an ecosystem-level user mapping, which is **out of scope here**. Within a signals realm, `sub` is stable and equals the migrated user UUID (§6).
 
 ### Decisions locked before this draft
 1. **Full replacement**, not a partial/hybrid — better-auth is removed from the tree at the end.
@@ -83,15 +83,53 @@ The identity model is woven into domain data two ways:
 
 ## 3. Target architecture
 
-### 3.1 Keycloak topology
-- **signals gets its own dedicated realm** (e.g. `signals`), separate from aggregator's `aggregator` realm. Realms are not shared — signals and aggregator are different use cases with different user populations, and their `sub` spaces stay independent (see the realm-scoping note in §1).
-- **Deployment:** in production, signals and aggregator run against **separate Keycloak deployments per use case/instance** (they are independent DPGs). For **local-setup only**, a single Keycloak container may host **both realms** (`signals` + `aggregator`) — one Keycloak process, two realms, never one shared realm. The local-setup compose already runs a Keycloak service; this adds a `signals` realm import alongside the existing `aggregator` one.
-- **Multi-instance signals:** signals-dpg is itself network-aware with multiple API instances. Whether every signals instance shares one `signals` realm, or each network/instance gets its own realm, is a sub-decision (§10, decision 1a) — the baseline here is one `signals` realm per signals deployment.
-- **Clients:**
-  - `signals-ui` — public client, OIDC Authorization-Code + PKCE (mirrors aggregator's `aggregator-portal`).
-  - `signals-api` — confidential client / resource server; validates access tokens, and holds a service account with `realm-management` roles (`manage-users`) for the provisioning sync (mirrors aggregator's `aggregator-api`).
-  - One confidential **client per integrating DPG** (`aggregator-dpg`, `voice-dpg`) for client-credentials service auth (replaces their API keys).
-- **OTP:** reuse aggregator's custom email/phone OTP authenticator SPI JAR (`aggregator-dpg/infra/keycloak/providers/keycloak-otp-1.0.0-SNAPSHOT.jar`) in the signals login flow. This is the biggest de-risker — we do not rebuild OTP.
+### 3.1 Keycloak topology — one shared server, many realms
+
+**One Keycloak deployment per instance/environment, shared by aggregator and all signals networks.** The separation is by **realm**, not by server:
+
+- **`aggregator` realm** — aggregator-dpg's coordinators/aggregators (already exists today).
+- **One signals realm per network** — e.g. `signals-blue-dot`, `signals-yellow-dot`, … Each network is a distinct use case with its own participant population, so it gets its own realm and its own `sub` space. *(This resolves §10 decision 1a toward per-network realms; confirm the granularity — see the note below.)*
+- This is identical in **local-setup and production** — one Keycloak process, several realms. Local-setup's compose already runs a Keycloak service; this adds the signals realm import(s) alongside the existing `aggregator` one.
+
+**Per-realm clients** (each signals realm gets its own copy of these):
+- `signals-ui` — public client, OIDC Authorization-Code + PKCE (mirrors aggregator's `aggregator-portal`).
+- `signals-api` — confidential client / resource server; validates access tokens and holds a service account with `realm-management` roles (`manage-users`) for the provisioning sync (mirrors aggregator's `aggregator-api`).
+- One confidential **client per integrating DPG** (`aggregator-dpg`, `voice-dpg`) for client-credentials service auth (replaces their API keys).
+
+**OTP:** reuse aggregator's custom email/phone OTP authenticator SPI JAR (`aggregator-dpg/infra/keycloak/providers/keycloak-otp-1.0.0-SNAPSHOT.jar`) — deployed once on the shared server, enabled in every signals realm's login flow. Biggest de-risker; we do not rebuild OTP.
+
+> **Realm granularity (confirm — §10 decision 1a).** The diagram shows one realm per signals network. If instead all signals networks should share a single `signals` realm on the shared server, only the realm count changes — the client layout, provisioning, and rollout are unaffected. The shared-server decision is fixed; the per-network-vs-single-signals-realm split is the remaining open sub-decision.
+
+```mermaid
+graph TB
+    subgraph Instance["One instance / environment"]
+        subgraph KC["Shared Keycloak server (one deployment)"]
+            OTP["Custom email/phone OTP authenticator SPI JAR<br/>(deployed once, enabled per realm)"]
+            subgraph RA["realm: aggregator"]
+                RAc["clients: aggregator-portal, aggregator-api"]
+            end
+            subgraph RB["realm: signals-blue-dot"]
+                RBc["clients: signals-ui, signals-api,<br/>aggregator-dpg, voice-dpg"]
+            end
+            subgraph RY["realm: signals-yellow-dot"]
+                RYc["clients: signals-ui, signals-api,<br/>aggregator-dpg, voice-dpg"]
+            end
+        end
+
+        AGG["aggregator-dpg<br/>(portal + BFF + worker)"]
+        SIGB["signals-dpg instance<br/>(blue-dot network)"]
+        SIGY["signals-dpg instance<br/>(yellow-dot network)"]
+
+        AGG -->|"OIDC login (humans)"| RA
+        SIGB -->|"OIDC login + JWT validate"| RB
+        SIGY -->|"OIDC login + JWT validate"| RY
+        AGG -.->|"client-credentials → call signals"| RB
+        AGG -.->|"client-credentials → call signals"| RY
+    end
+
+    note["sub is unique PER REALM → no shared subject across realms/DPGs"]
+    KC -.- note
+```
 
 ### 3.2 How each surface changes
 
@@ -110,6 +148,28 @@ The identity model is woven into domain data two ways:
 - The local `user` table stays, minus better-auth-only columns (`account`, `verification` tables are dropped; password/credential columns become Keycloak's responsibility).
 - On **first successful login** (and on a periodic/webhook sync), signals upserts the local `user` row from Keycloak claims (`sub` → `id`, email, phone, and — critically — the signals-specific attributes: `domains`, `date_of_birth`, `terms_accepted`, onboarding attribution, `tags`).
 - Signals-specific attributes that Keycloak doesn't natively own are stored as **Keycloak user attributes** and/or kept authoritative in the local mirror. Decision in §10: which side owns `domains`, `date_of_birth`, onboarding fields.
+
+**Human login + first-login provisioning (target flow):**
+
+```mermaid
+sequenceDiagram
+    actor User
+    participant UI as signals-ui
+    participant KC as Keycloak (signals realm)
+    participant API as signals-api (Fastify)
+    participant DB as Postgres (local user mirror)
+
+    User->>UI: open app
+    UI->>KC: OIDC Auth-Code + PKCE redirect
+    KC->>User: OTP challenge (custom SPI, via notification svc)
+    User->>KC: enter OTP
+    KC-->>UI: access token (JWT, sub = user UUID)
+    UI->>API: request + Bearer JWT
+    API->>KC: validate JWT via JWKS (iss/aud/exp)
+    API->>DB: upsert local user by sub<br/>(provisioning: domains, DOB, terms,<br/>member-join, guardian, welcome msg)
+    API-->>UI: request.user populated → normal response
+    Note over API,DB: acting_org + ownership checks read the<br/>local mirror exactly as they do today
+```
 
 ---
 
@@ -180,6 +240,26 @@ This plan separates **implementation** (code written, merged, deployed — but i
 - Implementation runs continuously through **Build 0 → 4**, and every piece is safe to merge and deploy to production because it is flag-gated or a not-yet-run script.
 - **Build 5 (removal) is the one destructive change** — it deletes better-auth and drops tables, removing the rollback path. Its *code* may be written early, but it must **not be merged until the final rollout step**.
 - Production rollout is the ordered operator sequence **R1 → R8**; each step is reversible until R8.
+
+```mermaid
+flowchart LR
+    subgraph A["Track A — Implementation (merge behind flag, prod-safe)"]
+        direction TB
+        B0["Build 0<br/>Foundation"] --> B1["Build 1<br/>Dual validation<br/>+ provisioning"] --> B2["Build 2<br/>UI OIDC"] --> B3["Build 3<br/>Dual-accept<br/>service auth"] --> B4["Build 4<br/>Migration tooling"]
+        B5["Build 5 — Removal (destructive)<br/>❌ prepared, NOT merged until R8"]
+    end
+
+    subgraph B["Track B — Production rollout (operator switches)"]
+        direction TB
+        R1["R1 deploy inert"] --> R2["R2 dual @ staging"] --> R3["R3 dual @ prod"] --> R4["R4 run user migration"] --> R5["R5 UI cutover"] --> R6["R6 partners → client-creds"] --> R7["R7 flip default = keycloak, soak"] --> R8["R8 merge Build 5<br/>🔒 point of no return"]
+    end
+
+    B4 -.->|"all builds deployed & inert"| R1
+    B5 -.->|"held until"| R8
+
+    style B5 fill:#fde,stroke:#c33
+    style R8 fill:#fde,stroke:#c33
+```
 
 ---
 
@@ -278,8 +358,8 @@ Changes:
 
 ## 10. Open questions / decisions needed
 
-1. **Realm topology** — *resolved:* signals owns a dedicated `signals` realm, separate from aggregator's; realms are never shared. Production runs separate Keycloak deployments per DPG/use case; local-setup may run one Keycloak container hosting both realms.
-   - **1a. Multi-instance sub-decision (still open):** does every signals instance share the one `signals` realm, or does each network/instance get its own realm? Depends on whether users are shared across signals instances within a network.
+1. **Keycloak topology** — *resolved:* **one shared Keycloak deployment per instance/environment**, used by aggregator and all signals networks. Separation is by realm, never by shared realm. Same layout in local-setup and production (one server, many realms).
+   - **1a. Realm granularity (still open):** one realm **per signals network** (`signals-blue-dot`, `signals-yellow-dot`, … — the diagram's assumption) vs a **single `signals` realm** shared by all networks? Depends on whether participant accounts are shared across networks. Only the realm count changes; clients/provisioning/rollout are unaffected.
 2. **Where do signals-specific attributes live** — `domains`, `date_of_birth`, `terms_accepted`, onboarding attribution, `tags`: authoritative in Keycloak user attributes, or authoritative in the local mirror (Keycloak holds only credentials + `sub`/email/phone)? Recommendation: **local mirror stays authoritative** for domain attributes; Keycloak owns credentials + identity claims only.
 3. **Are orgs modeled in Keycloak at all** — map `organization`/`member` to Keycloak groups/roles, or keep them purely local (recommended, since acting-org gating reads local tables and orgs are a signals domain concept)?
 4. **Token transport in the UI** — keep bearer-in-`localStorage` (current) or move to secure cookies with the OIDC flow (more standard, better XSS posture)?
