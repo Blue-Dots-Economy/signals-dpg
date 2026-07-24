@@ -241,26 +241,6 @@ This plan separates **implementation** (code written, merged, deployed — but i
 - **Build 5 (removal) is the one destructive change** — it deletes better-auth and drops tables, removing the rollback path. Its *code* may be written early, but it must **not be merged until the final rollout step**.
 - Production rollout is the ordered operator sequence **R1 → R8**; each step is reversible until R8.
 
-```mermaid
-flowchart LR
-    subgraph A["Track A — Implementation (merge behind flag, prod-safe)"]
-        direction TB
-        B0["Build 0<br/>Foundation"] --> B1["Build 1<br/>Dual validation<br/>+ provisioning"] --> B2["Build 2<br/>UI OIDC"] --> B3["Build 3<br/>Dual-accept<br/>service auth"] --> B4["Build 4<br/>Migration tooling"]
-        B5["Build 5 — Removal (destructive)<br/>❌ prepared, NOT merged until R8"]
-    end
-
-    subgraph B["Track B — Production rollout (operator switches)"]
-        direction TB
-        R1["R1 deploy inert"] --> R2["R2 dual @ staging"] --> R3["R3 dual @ prod"] --> R4["R4 run user migration"] --> R5["R5 UI cutover"] --> R6["R6 partners → client-creds"] --> R7["R7 flip default = keycloak, soak"] --> R8["R8 merge Build 5<br/>🔒 point of no return"]
-    end
-
-    B4 -.->|"all builds deployed & inert"| R1
-    B5 -.->|"held until"| R8
-
-    style B5 fill:#fde,stroke:#c33
-    style R8 fill:#fde,stroke:#c33
-```
-
 ---
 
 ### Track A — Implementation (build & merge)
