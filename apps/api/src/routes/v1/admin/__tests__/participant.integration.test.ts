@@ -1052,6 +1052,61 @@ describeIf(`POST /api/v1/admin/participant (integration)${
     expect(row.lifecycle_status).toBe('live');
   });
 
+  it('gated domain: adding a NEW profile to an existing age-less user persists the age sent on that call and goes live (insert_item)', async () => {
+    // Regression: the insert_item branch (existing user + item_state, no item_id)
+    // used to drop body.age, so a new profile for a previously age-less user was
+    // stuck draft (guardian gate fail-closes on unknown age) and GET has_age
+    // stayed false even though the request supplied an adult age.
+    const gated = guardianConsentRequired(
+      await getNetworkConfigById(primary.network),
+      primary.domain,
+    );
+    if (!gated) return; // the age gate only bites on a gated domain
+
+    const email = `int_insertage_${randomUUID().slice(0, 6)}@a.test`;
+    // 1) create the user with NO age and NO item (account-only, bulk-style).
+    const c = await app.inject({
+      method: 'POST', url: '/api/v1/admin/participant',
+      headers: { 'x-api-key': ns.raw_key, 'x-acting-org-id': ns.org_id, 'content-type': 'application/json' },
+      payload: {
+        email, name: 'Insert Age', channel: 'voice',
+        network: primary.network, domain: primary.domain,
+      },
+    });
+    expect(c.statusCode).toBe(200);
+    onboarded_user_ids.push(c.json().user_id);
+
+    // 2) existing user + item_state + adult age + full consent, no item_id → insert_item.
+    const r = await app.inject({
+      method: 'POST', url: '/api/v1/admin/participant',
+      headers: { 'x-api-key': ns.raw_key, 'x-acting-org-id': ns.org_id, 'content-type': 'application/json' },
+      payload: {
+        email, name: 'Insert Age', channel: 'voice', age: 25,
+        network: primary.network, domain: primary.domain, item_type: primary.item_type,
+        item_state: generateMinimalItemState(primary.schema),
+        compliance: [
+          { key: 'user_terms', value: true },
+          { key: 'user_privacy', value: true },
+          { key: 'profile_creation', value: true },
+        ],
+      },
+    });
+    expect(r.statusCode).toBe(200);
+    const body = r.json();
+    expect(body.user_existed).toBe(true);
+    expect(body.items.length).toBe(1);
+    expect(body.items[0].lifecycle_status).toBe('live');
+
+    // 3) GET confirms the age landed on the user record.
+    const g = await app.inject({
+      method: 'GET',
+      url: `/api/v1/admin/participant?email=${encodeURIComponent(email)}`,
+      headers: { 'x-api-key': ns.raw_key, 'x-acting-org-id': ns.org_id },
+    });
+    expect(g.statusCode).toBe(200);
+    expect(g.json().user_consent.has_age).toBe(true);
+  });
+
   it('gated domain: minor + full consent + complete item_state → 400 U18_NOT_ALLOWED, no consent recorded, no item created', async () => {
     const gated = guardianConsentRequired(
       await getNetworkConfigById(primary.network),

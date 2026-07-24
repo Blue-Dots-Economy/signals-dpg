@@ -603,6 +603,16 @@ export const participant_handler = async (
       // cap racy. The same transaction also makes the consent write + promotion
       // atomic with the item insert. Mirrors create_new_user + /item/create.
       await db.transaction(async (tx) => {
+        // Persist age (#331) BEFORE recording consent so promoteItemOnProfileConsent
+        // sees the adult age and can flip the new profile live. Adding a profile to
+        // an existing user is this branch; without this write, an age supplied here
+        // is dropped and the profile is stuck draft under the guardian gate (#309).
+        if (body.age != null) {
+          await tx
+            .update(user)
+            .set({ age: body.age, updatedAt: new Date() })
+            .where(eq(user.id, existing!.id));
+        }
         const { item_id } = await create_profile_item({
           tx,
           user_id: existing!.id,
@@ -622,6 +632,11 @@ export const participant_handler = async (
           acceptedAt: new Date(),
         });
         consent_recorded = consent.recorded;
+        // A newly-known age can also unblock the user's other consented drafts
+        // (age is user-level) — sweep them, mirroring the update_item branch.
+        if (body.age != null) {
+          await promoteEligibleDraftsForUser(tx, existing!.id);
+        }
       });
     } catch (err) {
       const e = err as { statusCode?: number; errorCode?: string };
