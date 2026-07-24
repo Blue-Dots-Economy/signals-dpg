@@ -889,6 +889,62 @@ describe('POST /admin/participant', () => {
     expect(dbState.inserts).toHaveLength(0);
   });
 
+  it('network_service + existing user + valid item_id + NO item_state → 200 update_item: records consent for that item, no item write, no publish', async () => {
+    const user_id = 'usr_ns_consent_only';
+    dbState.existingUserRows = [
+      {
+        id: user_id,
+        email: VALID_EMAIL,
+        phoneNumber: null,
+        onboardedByOrgId: 'org_ns_1',
+      },
+    ];
+    dbState.itemsByUser.set(user_id, [
+      {
+        item_id: VALID_UUID_A,
+        item_network: 'blue_dot',
+        item_domain: 'seeker',
+        item_type: 'profile_1.0',
+        item_state: { v: 1 },
+        item_private_state: '',
+        created_at: new Date('2026-01-01T00:00:00Z'),
+        updated_at: new Date('2026-01-01T00:00:00Z'),
+      },
+    ]);
+    dbState.itemOwnerLookup.set(VALID_UUID_A, user_id);
+    lastQueriedUserId = user_id;
+    lastQueriedItemId = VALID_UUID_A;
+    const { updateItemInternal } = await import('@/services/item_service');
+    vi.mocked(updateItemInternal).mockClear();
+    const app = await buildApp({
+      org_id: 'org_ns_1',
+      org_type: 'network_service',
+    });
+    const res = await app.inject({
+      method: 'POST',
+      url: '/participant',
+      // item_id targets the owned profile; item_state omitted → consent/DOB-only
+      // update that must not touch the item's fields (#309).
+      payload: baseBody({
+        item_id: VALID_UUID_A,
+        item_state: undefined,
+      }),
+    });
+    expect(res.statusCode).toBe(200);
+    const body = res.json();
+    expect(body.owned_elsewhere).toBe(false);
+    expect(body.user_id).toBe(user_id);
+    // No field update and no event publish when item_state is absent.
+    expect(vi.mocked(updateItemInternal)).not.toHaveBeenCalled();
+    expect(vi.mocked(publishItemEvent)).not.toHaveBeenCalled();
+    expect(dbState.inserts).toHaveLength(0);
+    expect(dbState.updates).toHaveLength(0);
+    // Consent is still recorded, scoped to the targeted item.
+    expect(vi.mocked(recordParticipantConsent)).toHaveBeenCalled();
+    const [, consentArgs] = vi.mocked(recordParticipantConsent).mock.calls[0];
+    expect(consentArgs.itemId).toBe(VALID_UUID_A);
+  });
+
   it('network_service + existing user + invalid item_id (other user) → 403 ITEM_NOT_OWNED_BY_USER', async () => {
     const user_id = 'usr_ns_existing';
     const other_user = 'usr_someone_else';

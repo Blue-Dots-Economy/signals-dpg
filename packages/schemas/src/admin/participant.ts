@@ -66,8 +66,10 @@ export const UpsertParticipantRequest = z
       .record(z.string(), z.unknown())
       .optional()
       .describe(
-        'payload written to the items table; if absent OR an empty object {}, ' +
-        'the route enters account_only mode (only the user is created/looked up, no item is written).',
+        'payload written to the items table. If absent OR an empty object {} ' +
+        'with NO item_id, the route enters account_only mode (only the user is ' +
+        'created/looked up, no item is written). If absent/empty WITH an item_id, ' +
+        'that profile is targeted for a consent/DOB update without changing its fields.',
       ),
     item_id: z
       .uuid()
