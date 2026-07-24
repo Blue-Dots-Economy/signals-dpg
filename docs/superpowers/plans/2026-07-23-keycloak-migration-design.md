@@ -147,7 +147,7 @@ graph TB
 ### 3.4 User mirror & provisioning
 - The local `user` table stays, minus better-auth-only columns (`account`, `verification` tables are dropped; password/credential columns become Keycloak's responsibility).
 - On **first successful login** (and on a periodic/webhook sync), signals upserts the local `user` row from Keycloak claims (`sub` → `id`, email, phone, and — critically — the signals-specific attributes: `domains`, `date_of_birth`, `terms_accepted`, onboarding attribution, `tags`).
-- Signals-specific attributes that Keycloak doesn't natively own are stored as **Keycloak user attributes** and/or kept authoritative in the local mirror. Decision in §10: which side owns `domains`, `date_of_birth`, onboarding fields.
+- Signals-specific attributes (`domains`, `date_of_birth`, onboarding fields, `tags`) stay **authoritative in the local `user` table**; Keycloak owns identity + credentials + coarse authz. Full ownership split and rationale in §6.
 
 **Human login + first-login provisioning (target flow):**
 
@@ -212,21 +212,64 @@ What `unified_otp.ts` does today, and where each piece goes:
 
 ---
 
-## 6. Data migration
+## 6. User migration
 
-### Users
-- Export better-auth `user` rows. For each, create a Keycloak user **preserving the UUID as the Keycloak user id** (Keycloak's import supports explicit ids) so `sub` == existing `user.id` == every `text` owner column already in the domain tables. **This is what makes the migration non-destructive.**
-- Map columns: email, phone (→ Keycloak attribute + verified flags), plus signals attributes (`domains`, `date_of_birth`, onboarding fields, `tags`) as Keycloak user attributes (or leave authoritative in the local mirror — §10 decision).
-- **Credentials:** there are effectively none to migrate — login is OTP (no passwords in practice, though `emailAndPassword.enabled: true`). Users simply do a fresh OTP login against Keycloak. No password rehashing needed. Confirm no real password accounts exist before relying on this (R6).
+### 6.0 The decision: the `user` table stays; Keycloak becomes the identity source
 
-### Organizations, members, service accounts
-- Recreate `organization` rows and `member` links in Keycloak as **groups/roles** (or keep them purely local and only mirror what's needed). Because acting-org gating reads local tables, the safest path is: **keep `organization`/`member` local and authoritative**, and only move *human authentication* to Keycloak. Service clients map to the existing service `organization`/`user` rows. (Decision in §10: are orgs modeled in Keycloak at all, or kept local?)
+*Ownership model:* **Keycloak owns authentication identity (credentials, login, verification, coarse authz); the signals `user` table stays as the domain projection.** We do **not** move users fully into Keycloak. Migration creates an *identity shell* in Keycloak keyed on the **same UUID** as the existing `user.id` — it does not relocate the row.
 
-### Local schema changes
+#### Why the table cannot move fully to Keycloak (3 hard blockers)
+1. **Hard FK with `ON DELETE RESTRICT`.** `items.created_by → user.id` (`apps/api/drizzle/0001_core.sql:26-27`), plus `item_actions.performed_by_service_user_id → user.id` (`:79`) and the `organization` FKs. A Postgres FK requires the referenced table to exist in the same DB; dropping `user` drops these constraints and the creator-integrity guarantee.
+2. **SQL joins that are a security boundary.** `participant_decrypt.ts:141,164` joins `items ⋈ user ON user.id = items.created_by` and filters `WHERE user.onboardedByOrgId = acting.org_id` — an aggregator may only decrypt profiles of users it onboarded. This join cannot span Postgres → Keycloak; moving `user` out turns it into per-row Admin-API calls (N+1, rate-limited, non-transactional) on a security-critical path.
+3. **Attribute-filtered / aggregate / array / jsonb queries.** ~16 read sites, e.g. aggregator `dashboard.ts`/`export.ts` aggregate by `onboardedByOrgId`; `consent/get_consent_status_by_identifier.ts` looks up by email/phone; `user_domains.ts` reads `domains text[]` for profile-creation gating; `tags` uses a GIN `@>` containment index (`is_test` bulk cleanup). Keycloak's user-attribute search supports none of these efficiently.
+
+Also: an indexed PK lookup would become a network round-trip, and `domains`/`onboarding_*`/`tags` are **domain data, not identity data**.
+
+*Consequence — the table is still written, by new code paths:* first-login provisioning upserts the mirror; admin onboarding (`participant.ts`, today `signUpEmail`) becomes "Keycloak Admin create + local upsert"; `user_domains.ts` still writes `domains`.
+
+### 6.1 Field-by-field mapping (join key: `keycloak user.id == sub == signals user.id`)
+
+| signals `user` column (`auth.ts:11-58`) | Keycloak home | Authoritative | Notes |
+|---|---|---|---|
+| `id` (UUID) | user id / `sub` | **shared** | preserved on migration — the linchpin (§6.3) |
+| `email` (unique) | `email` | **Keycloak** | login identifier; **mirrored local** (consent + `resolve_owner` read it) |
+| `email_verified` | `emailVerified` | **Keycloak** | set `true` on migration for already-verified users |
+| `phone_number` (unique) | attribute `phoneNumber` | **Keycloak** | OTP login identifier; **mirrored local** |
+| `phone_number_verified` | attribute | **Keycloak** | |
+| `name` | `firstName`/`lastName` | Keycloak (mirror local) | |
+| `role` | realm role | **Keycloak** | replaces admin-plugin `role` |
+| `banned` / `ban_reason` / `ban_expires` | `enabled=false` + attrs | **Keycloak** | `enabled = !banned` |
+| `date_of_birth` | (opt. attribute) | **signals-local** | drives U18 logic + `u18_precheck.ts` |
+| `domains text[]` | — | **signals-local** | `user_domains.ts` profile-creation gating |
+| `terms_accepted` / `privacy_accepted` | Keycloak required-action | signals-local record | |
+| `onboarded_by_org_id` / `_via` / `_source_id` / `_at` | — | **signals-local** | FK → `organization`, `user_onboarded_by_org_via_idx`, aggregator scoping — **must stay local** |
+| `tags jsonb` | — | **signals-local only** | ops markers, GIN-indexed; never in Keycloak |
+| `created_at` / `updated_at` | timestamps | both | |
+
+**Split principle:** Keycloak owns identity + credentials + coarse authz; signals owns everything it must query, join, aggregate, or FK on, plus a mirror of email/phone/name/role for local reads.
+
+### 6.2 Migration execution approach — scripted Admin REST bulk-create + JIT safety net
+
+Because login is **passwordless OTP**, there are effectively **no credentials to migrate** — the job is only to create each identity shell with the right `id`, attributes, and verified flags.
+
+- **Primary (bulk pre-load):** a script iterates existing `user` rows and creates each in Keycloak via the Admin REST API through the `signals-api` service account, setting the **preserved UUID**, `email`/`emailVerified`, phone attributes, `enabled = !banned`, and realm role. Idempotent (re-runnable), with a **dry-run/reconcile mode** that reports any `user.id` lacking a Keycloak match. Runs during the `dual` window (rollout step R4) so old + new coexist.
+- **Safety net (JIT):** if a user reaches login without a Keycloak account (straggler / created between pre-load and cutover), match them by email/phone and create the Keycloak shell **with their existing UUID** on the fly. JIT is a backstop, not the primary path — users who never log in are still pre-loaded by the bulk script so admin queries stay complete.
+- **Credentials:** none to rehash. Confirm no real password accounts exist in `account` before relying on this (risk R6). Users simply do a fresh OTP login against Keycloak.
+
+### 6.3 Critical spikes to verify *before* writing migration code
+
+1. **UUID preservation (linchpin, version-sensitive).** The whole non-destructive strategy needs `keycloak user.id == existing user.id` so `sub` matches every `created_by`/owner column. **Keycloak's plain `POST .../users` has historically ignored a client-supplied `id`** (server-generated), whereas **`partialImport` reliably honors an explicit `id`.** Spike this on the target version (aggregator runs `26.5.5`): if create honors `id`, keep Approach A as-is; **if not, the bulk path falls back to `partialImport`** while keeping the same field mapping. This is the #1 pre-implementation spike.
+2. **Realm partitioning (open decision 1a).** If signals uses **one realm per network**, migration must place each existing user in the right realm — but `user` has no network column, so the network must be derived (from their items' `item_network` / `domains` / onboarding), and a user with items in multiple networks is ambiguous. **A single `signals` realm removes this problem entirely** — a strong practical argument for decision 1a.
+3. **Verified flags.** Set `emailVerified` / phone-verified `true` for already-verified users so cutover does not force everyone to re-verify.
+
+### 6.4 Organizations, members, service accounts — kept local
+`organization`/`member` stay **local and authoritative** — acting-org gating (`acting_org.ts`) and ownership checks read them via Drizzle, and they carry the `organization.type` capability model. They are **not** modeled as Keycloak groups/roles. Service accounts: each integrating DPG's Keycloak *client* maps to its existing service `organization`/`user` rows (§5).
+
+### 6.5 Local schema changes
 - Drop `account`, `verification` (better-auth credential tables).
 - Drop `apikey` after service-auth cutover.
-- `user` table: remove better-auth-only columns; keep all signals domain columns. A migration in `apps/api/drizzle/` (next number after `0004`).
-- Per `.claude/rules/database-conventions.md`: migrations are append-only; edit rules apply.
+- `user` table: drop the columns that become Keycloak-authoritative-only if any are truly unused locally (audit first — email/phone/name/role are **mirrored, not dropped**); keep all signals domain columns. A migration in `apps/api/drizzle/` (next number after `0004`).
+- Per `.claude/rules/database-conventions.md`: generated migrations are never hand-edited (change the schema file, then `pnpm db:generate:api`); the ledger is append-only.
 
 ---
 
@@ -272,9 +315,10 @@ Additive, flag-gated work. Merging any of Build 0–4 to `main` and deploying it
 - **Merge safety:** purely additive; existing `x-api-key` callers unaffected. ✅ deployable to prod.
 
 #### Build 4 — User migration tooling (not yet run)
-- Export/import script that creates Keycloak users **preserving UUIDs** (`sub` == existing `user.id`), plus a dry-run/reconcile mode (§6).
-- **Files:** new `apps/api/scripts/migrate_users_to_keycloak.ts` (dry-run + apply).
-- **Merge safety:** a script that isn't executed until R4. ✅ deployable to prod.
+- Scripted Admin-REST bulk-create that creates Keycloak users **preserving UUIDs** (`sub` == existing `user.id`), idempotent, with a **dry-run/reconcile** mode (every `user.id` must have a Keycloak match). Plus the **JIT safety-net** path in the provisioning service for stragglers. Field mapping + spikes in §6.
+- **Depends on** the UUID-preservation spike (§6.3, spike 1) — if plain create doesn't honor `id` on KC 26.5.5, the bulk path uses `partialImport` instead (same mapping).
+- **Files:** new `apps/api/scripts/migrate_users_to_keycloak.ts` (dry-run + apply); JIT branch in `apps/api/src/services/auth/provisioning.ts`.
+- **Merge safety:** a script that isn't executed until R4; JIT branch inert until flag = `dual`/`keycloak`. ✅ deployable to prod.
 
 #### Build 5 — Removal (destructive — prepared, held)
 - Delete `unified_otp`, `otp_delivery`, `auth_guards`, `create_auth.ts`, the `/api/auth/*` catch-all, better-auth deps. Drop `account`/`verification`/`apikey` tables (migration next after `0004`). `packages/auth` keeps only `pii_crypto`/`pii_key`. Retire the seed-apikey path in `seed_service_users.ts`.
@@ -339,8 +383,8 @@ Changes:
 ## 10. Open questions / decisions needed
 
 1. **Keycloak topology** — *resolved:* **one shared Keycloak deployment per instance/environment**, used by aggregator and all signals networks. Separation is by realm, never by shared realm. Same layout in local-setup and production (one server, many realms).
-   - **1a. Realm granularity (still open):** one realm **per signals network** (`signals-blue-dot`, `signals-yellow-dot`, … — the diagram's assumption) vs a **single `signals` realm** shared by all networks? Depends on whether participant accounts are shared across networks. Only the realm count changes; clients/provisioning/rollout are unaffected.
-2. **Where do signals-specific attributes live** — `domains`, `date_of_birth`, `terms_accepted`, onboarding attribution, `tags`: authoritative in Keycloak user attributes, or authoritative in the local mirror (Keycloak holds only credentials + `sub`/email/phone)? Recommendation: **local mirror stays authoritative** for domain attributes; Keycloak owns credentials + identity claims only.
+   - **1a. Realm granularity (still open):** one realm **per signals network** (`signals-blue-dot`, `signals-yellow-dot`, … — the diagram's assumption) vs a **single `signals` realm** shared by all networks? Depends on whether participant accounts are shared across networks. Clients/provisioning/rollout are unaffected — **but it directly affects user migration:** per-network realms require deriving each existing user's network to place them in the right realm (ambiguous for multi-network users); a single realm removes that problem (§6.3, spike 2).
+2. **Attribute ownership** — *resolved (§6):* signals-specific attributes (`domains`, `date_of_birth`, `terms_accepted`, onboarding attribution, `tags`) stay authoritative in the local `user` table; Keycloak owns credentials + identity claims (`sub`/email/phone/role/enabled) only, with email/phone/name/role mirrored locally for reads.
 3. **Are orgs modeled in Keycloak at all** — map `organization`/`member` to Keycloak groups/roles, or keep them purely local (recommended, since acting-org gating reads local tables and orgs are a signals domain concept)?
 4. **Token transport in the UI** — keep bearer-in-`localStorage` (current) or move to secure cookies with the OIDC flow (more standard, better XSS posture)?
 5. **Server-side revocation needs** — is immediate ban/logout enforcement required (drives token TTL + introspection strategy, R7)?
