@@ -65,7 +65,9 @@ type OnboardingFields = {
 const buildOnboardingSet = (f: OnboardingFields) => ({
   phoneNumber: f.phone_norm,
   phoneNumberVerified: false,
-  dateOfBirth: f.date_of_birth ? new Date(f.date_of_birth) : null,
+  // Aggregator still supplies a birth date; we store only a derived age snapshot
+  // (#331), matching the client rule `age = currentYear - birthYear`.
+  age: f.date_of_birth ? new Date().getFullYear() - new Date(f.date_of_birth).getFullYear() : null,
   termsAccepted: true,
   privacyAccepted: true,
   onboardedByOrgId: f.acting_org_id,

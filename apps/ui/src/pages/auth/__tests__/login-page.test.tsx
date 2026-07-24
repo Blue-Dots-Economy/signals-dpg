@@ -3,7 +3,9 @@ import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { pickYearMonthDob } from '@/test/pick-dob';
+import { pickBirthYear } from '@/test/pick-dob';
+
+const CURRENT_YEAR = new Date().getFullYear();
 
 const checkUser = vi.fn();
 const requestOtp = vi.fn();
@@ -49,13 +51,13 @@ vi.mock('react-router-dom', async (orig) => ({
 // without pulling in the child's internals — those have their own tests.
 const signupGuardianOnComplete = vi.fn();
 vi.mock('@/components/consent/u18/signup-guardian-flow', () => ({
-  SignupGuardianFlow: (props: { domain: string; dateOfBirth: Date; onComplete: () => void }) => {
+  SignupGuardianFlow: (props: { domain: string; age: number; onComplete: () => void }) => {
     signupGuardianOnComplete.mockImplementation(props.onComplete);
     return (
       <div
         data-testid="signup-guardian-flow"
         data-domain={props.domain}
-        data-birth-year={props.dateOfBirth instanceof Date ? String(props.dateOfBirth.getFullYear()) : ''}
+        data-age={String(props.age)}
       />
     );
   },
@@ -295,25 +297,25 @@ describe('LoginPage', () => {
       expect(await screen.findByText(/to create an account/i)).toBeInTheDocument();
       expect(requestOtp).not.toHaveBeenCalled();
 
-      // Pick a minor DOB + Continue → guardian flow renders, OTP still held.
-      await pickYearMonthDob(2015);
+      // Pick a minor birth year + Continue → guardian flow renders, OTP still held.
+      await pickBirthYear(2015);
       await userEvent.click(screen.getByRole('button', { name: /^continue$/i }));
 
       const flow = await screen.findByTestId('signup-guardian-flow');
       expect(flow).toHaveAttribute('data-domain', 'seeker');
-      expect(flow).toHaveAttribute('data-birth-year', '2015');
+      expect(flow).toHaveAttribute('data-age', String(CURRENT_YEAR - 2015));
       expect(requestOtp).not.toHaveBeenCalled();
       expect(navigateMock).not.toHaveBeenCalled();
 
       // Guardian verified → the ward's OTP is sent + navigation runs, carrying
-      // the birth data and no adult consent (recorded guardian-sourced).
+      // the age and no adult consent (recorded guardian-sourced).
       signupGuardianOnComplete();
       await waitFor(() => expect(requestOtp).toHaveBeenCalled());
       await waitFor(() => expect(navigateMock).toHaveBeenCalledWith(
         '/auth/otp',
         expect.objectContaining({
           state: expect.objectContaining({
-            signupExtras: expect.objectContaining({ domain: 'seeker', dateOfBirth: expect.stringMatching(/^2015-/) }),
+            signupExtras: expect.objectContaining({ domain: 'seeker', age: CURRENT_YEAR - 2015 }),
             pendingConsent: null,
           }),
         }),
@@ -336,7 +338,7 @@ describe('LoginPage', () => {
       await userEvent.click(screen.getByRole('button', { name: /^continue$/i }));
 
       expect(await screen.findByText(/to create an account/i)).toBeInTheDocument();
-      await pickYearMonthDob(1990); // adult
+      await pickBirthYear(1990); // adult
       await userEvent.click(screen.getByRole('button', { name: /^continue$/i }));
 
       await waitFor(() => expect(requestOtp).toHaveBeenCalled());
@@ -345,7 +347,7 @@ describe('LoginPage', () => {
         '/auth/otp',
         expect.objectContaining({
           state: expect.objectContaining({
-            signupExtras: expect.objectContaining({ domain: 'seeker', dateOfBirth: expect.stringMatching(/^1990-/) }),
+            signupExtras: expect.objectContaining({ domain: 'seeker', age: CURRENT_YEAR - 1990 }),
           }),
         }),
       ));

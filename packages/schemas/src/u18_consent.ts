@@ -2,8 +2,9 @@ import z from 'zod';
 
 export const U18DobBodySchema = z.object({
   network: z.string().min(1),
-  // Full date of birth (ISO) — stored on user.date_of_birth; is_minor derives.
-  dateOfBirth: z.coerce.date(),
+  // Age in years, derived from the birth year on the client (#331) and stored
+  // on user.age. is_minor derives (age <= 18); no date/month is collected.
+  age: z.coerce.number().int().min(0).max(120),
 });
 export const U18DobResponseSchema = z.object({ isMinor: z.boolean() });
 
@@ -117,7 +118,8 @@ export const SignupGuardianBodySchema = z
     domain: z.string().min(1),
     email: z.string().email().optional(),
     phoneNumber: z.string().min(1).optional(),
-    dateOfBirth: z.coerce.date(),
+    // Age in years (derived from birth year on the client, #331).
+    age: z.coerce.number().int().min(0).max(120),
     guardianName: z.string().min(1),
     // Both guardian contacts — at least one required; server resolves the OTP
     // channel (phone preferred) and stores whatever is given.

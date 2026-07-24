@@ -10,18 +10,18 @@
  * leaks into a later, unrelated profile-creation flow (e.g. a second profile
  * in another network).
  */
-/** Signup-time domain + DOB (month/year only) captured for a brand-new
- * account on the Signals self-signup form. Threaded from login-page.tsx
- * through the OTP step's router state to otp-page.tsx, which uses it to
- * call submitU18Dob post-verify and, for a minor in a guardian-gated domain,
- * to drive the U18GuardianFlow. Undefined/null for returning users — they
- * never see these fields and never trigger this path. */
+/** Signup-time domain + age captured for a brand-new account on the Signals
+ * self-signup form. Threaded from login-page.tsx through the OTP step's router
+ * state to otp-page.tsx, which uses it to call submitU18Dob post-verify and,
+ * for a minor in a guardian-gated domain, to drive the U18GuardianFlow.
+ * Undefined/null for returning users — they never see these fields and never
+ * trigger this path. */
 export interface SignupExtras {
   domain: string;
-  // DOB (full date, ISO) is captured in a SEPARATE step AFTER the signup form,
-  // and only when the chosen domain is guardian-gated (u18-enabled). Absent for
-  // an ungated domain (e.g. provider).
-  dateOfBirth?: string;
+  // Age (years, derived from the birth year) is captured in a SEPARATE step
+  // AFTER the signup form, and only when the chosen domain is guardian-gated
+  // (u18-enabled). Absent for an ungated domain (e.g. provider).
+  age?: number;
 }
 
 const STORAGE_KEY_PREFIX = 'signupDomain:';

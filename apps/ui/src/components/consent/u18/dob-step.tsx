@@ -6,8 +6,7 @@ import { Loader2 } from 'lucide-react';
 import { Label } from '@/components/ui/label';
 import { Button } from '@/components/ui/button';
 import { submitU18Dob } from '@/lib/consent-api';
-import { toDateOnly } from '@/lib/guardian-consent';
-import { DobYearMonth } from '@/components/consent/u18/dob-year-month';
+import { BirthYearSelect } from '@/components/consent/u18/birth-year-select';
 
 export interface DobStepProps {
   network: string;
@@ -17,28 +16,25 @@ export interface DobStepProps {
 
 export function DobStep({ network, onResolved }: DobStepProps) {
   const { t } = useTranslation();
-  const [birthDate, setBirthDate] = React.useState<Date | undefined>(undefined);
+  const [age, setAge] = React.useState<number | undefined>(undefined);
   const [isSubmitting, setIsSubmitting] = React.useState(false);
 
-  const canSubmit = Boolean(birthDate) && !isSubmitting;
+  const canSubmit = age !== undefined && !isSubmitting;
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!birthDate) return;
+    if (age === undefined) return;
     setIsSubmitting(true);
     try {
-      const result = await submitU18Dob({
-        network,
-        dateOfBirth: toDateOnly(birthDate),
-      });
+      const result = await submitU18Dob({ network, age });
       onResolved(result.isMinor);
     } catch (err) {
       const status = axios.isAxiosError(err) ? err.response?.status : undefined;
       if (status === 400) {
-        toast.error(t('u18.dob_error_invalid', 'That date of birth looks invalid.'));
+        toast.error(t('u18.dob_error_invalid', 'That birth year looks invalid.'));
       } else {
         toast.error(
-          t('u18.dob_error_generic', "Couldn't save your date of birth. Please try again."),
+          t('u18.dob_error_generic', "Couldn't save your birth year. Please try again."),
         );
       }
     } finally {
@@ -50,7 +46,7 @@ export function DobStep({ network, onResolved }: DobStepProps) {
     <form onSubmit={handleSubmit} className="flex flex-col gap-4">
       <div className="space-y-1.5">
         <Label>{t('u18.dob_label_ym', 'Select your birth year')}</Label>
-        <DobYearMonth idPrefix="u18-dob" disabled={isSubmitting} onChange={setBirthDate} />
+        <BirthYearSelect idPrefix="u18-dob" disabled={isSubmitting} onChange={setAge} />
       </div>
       <Button type="submit" disabled={!canSubmit} className="w-full">
         {isSubmitting && <Loader2 className="h-4 w-4 animate-spin" />}

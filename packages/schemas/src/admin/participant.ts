@@ -42,8 +42,8 @@ export const UpsertParticipantRequest = z
     phone_number: PhoneE164.optional(),
     name: z.string().min(1),
     // Accept a date-only `yyyy-mm-dd` OR a full ISO datetime — integrating DPGs
-    // (aggregator / voice / WhatsApp) typically have only a birth date. Both
-    // parse cleanly via `new Date(...)` into `user.date_of_birth`.
+    // (aggregator / voice / WhatsApp) typically have only a birth date. The
+    // server derives an age snapshot (`user.age`, #331) from it at onboarding.
     date_of_birth: z.union([z.iso.date(), z.iso.datetime()]).optional(),
     terms_accepted: z
       .boolean()

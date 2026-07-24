@@ -1,14 +1,14 @@
 import * as React from 'react';
 import { useTranslation } from 'react-i18next';
 import { ArrowRight, Info } from 'lucide-react';
-import { DobYearMonth } from '@/components/consent/u18/dob-year-month';
+import { BirthYearSelect } from '@/components/consent/u18/birth-year-select';
 
 export interface SignupDobStepProps {
   /**
-   * Called with the chosen date once the ward taps Continue. Pure UI — no API
+   * Called with the derived age once the ward taps Continue. Pure UI — no API
    * call. The caller derives minor status and routes accordingly.
    */
-  onSubmit: (date: Date) => void;
+  onSubmit: (age: number) => void;
   /**
    * True when an EXISTING user is backfilling a missing DOB before their login
    * OTP (vs a brand-new signup) — switches the heading copy accordingly.
@@ -25,7 +25,7 @@ export interface SignupDobStepProps {
  */
 export function SignupDobStep({ onSubmit, existing = false }: SignupDobStepProps) {
   const { t } = useTranslation();
-  const [birthDate, setBirthDate] = React.useState<Date | undefined>(undefined);
+  const [age, setAge] = React.useState<number | undefined>(undefined);
 
   return (
     <div className="flex flex-col gap-6">
@@ -39,19 +39,19 @@ export function SignupDobStep({ onSubmit, existing = false }: SignupDobStepProps
         className="flex flex-col gap-5"
         onSubmit={(e) => {
           e.preventDefault();
-          if (birthDate) onSubmit(birthDate);
+          if (age !== undefined) onSubmit(age);
         }}
       >
         <div className="space-y-2">
           <label className="text-base font-semibold">
             {t('auth.signup_dob_label_ym', 'Select your birth year')}
           </label>
-          <DobYearMonth idPrefix="signup-dob" onChange={setBirthDate} />
+          <BirthYearSelect idPrefix="signup-dob" onChange={setAge} />
         </div>
 
         <button
           type="submit"
-          disabled={!birthDate}
+          disabled={age === undefined}
           className="flex w-full items-center justify-center gap-2 rounded-md py-3 text-sm font-semibold transition-all disabled:opacity-60 bg-brand-cta h-12"
         >
           {t('auth.signup_dob_continue', 'Continue')}

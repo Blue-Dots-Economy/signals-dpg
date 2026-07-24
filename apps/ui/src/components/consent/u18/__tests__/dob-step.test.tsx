@@ -8,7 +8,7 @@ vi.mock('@/lib/consent-api', () => ({
   submitU18Dob: (...args: unknown[]) => submitU18Dob(...args),
 }));
 
-const BOUNDARY_YEAR = new Date().getFullYear() - 18; // turns 18 this year
+const CURRENT_YEAR = new Date().getFullYear();
 
 async function renderDobStep(onResolved: (isMinor: boolean) => void) {
   const { DobStep } = await import('../dob-step');
@@ -20,12 +20,12 @@ async function renderDobStep(onResolved: (isMinor: boolean) => void) {
   );
 }
 
-describe('DobStep (year + conditional month, #331)', () => {
+describe('DobStep (birth year → age, #331)', () => {
   beforeEach(() => {
     vi.clearAllMocks();
   });
 
-  it('year alone enables Continue for a non-boundary year (no month asked)', async () => {
+  it('picking a year enables Continue (no month asked)', async () => {
     await renderDobStep(vi.fn());
     const submit = screen.getByRole('button', { name: /continue/i });
     expect(submit).toBeDisabled();
@@ -34,20 +34,7 @@ describe('DobStep (year + conditional month, #331)', () => {
     expect(submit).toBeEnabled();
   });
 
-  it('boundary year requires the month before Continue enables', async () => {
-    await renderDobStep(vi.fn());
-    const submit = screen.getByRole('button', { name: /continue/i });
-    await userEvent.selectOptions(
-      screen.getByRole('combobox', { name: /birth year/i }),
-      String(BOUNDARY_YEAR),
-    );
-    const month = screen.getByRole('combobox', { name: /birth month/i });
-    expect(submit).toBeDisabled();
-    await userEvent.selectOptions(month, '7');
-    expect(submit).toBeEnabled();
-  });
-
-  it('submits year-only as the end of December (last day of month)', async () => {
+  it('submits the derived age (currentYear - birthYear)', async () => {
     submitU18Dob.mockResolvedValue({ isMinor: true });
     const onResolved = vi.fn();
     await renderDobStep(onResolved);
@@ -57,28 +44,10 @@ describe('DobStep (year + conditional month, #331)', () => {
 
     await waitFor(() =>
       expect(submitU18Dob).toHaveBeenCalledWith(
-        expect.objectContaining({ network: 'blue_dot', dateOfBirth: '2012-12-31' }),
+        expect.objectContaining({ network: 'blue_dot', age: CURRENT_YEAR - 2012 }),
       ),
     );
     expect(onResolved).toHaveBeenCalledWith(true);
-  });
-
-  it('submits boundary year + month as the last day of that month', async () => {
-    submitU18Dob.mockResolvedValue({ isMinor: true });
-    await renderDobStep(vi.fn());
-
-    await userEvent.selectOptions(
-      screen.getByRole('combobox', { name: /birth year/i }),
-      String(BOUNDARY_YEAR),
-    );
-    await userEvent.selectOptions(screen.getByRole('combobox', { name: /birth month/i }), '7');
-    await userEvent.click(screen.getByRole('button', { name: /continue/i }));
-
-    await waitFor(() =>
-      expect(submitU18Dob).toHaveBeenCalledWith(
-        expect.objectContaining({ dateOfBirth: `${BOUNDARY_YEAR}-07-31` }),
-      ),
-    );
   });
 
   it('reports isMinor=false from the response for an adult', async () => {

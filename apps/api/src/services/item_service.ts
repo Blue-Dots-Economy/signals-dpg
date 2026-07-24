@@ -331,14 +331,14 @@ export interface UpdateItemInternalResult {
  * promotion path (create self-consent, /consent/profile-accept, and item
  * update) — do not re-derive it inline. Fail-closed on two fronts:
  *
- *  - **null DOB on a gated domain → blocked.** A missing `date_of_birth` is
- *    never treated as "adult": DOB capture is client-side only (u18_precheck is
- *    a hint, not a control), so a minor account with no DOB must not be able to
+ *  - **null age on a gated domain → blocked.** A missing `user.age` is
+ *    never treated as "adult": age capture is client-side only (u18_precheck is
+ *    a hint, not a control), so a minor account with no age must not be able to
  *    self-consent to live.
  *  - **minor with no `source='guardian'` profile_creation row → blocked.** Only
  *    guardian consent promotes a minor; the ward's own self-consent row cannot.
  *
- * A proven adult (DOB present and not a minor), and ANY user on a non-gated
+ * A proven adult (age present and not a minor), and ANY user on a non-gated
  * domain, are never blocked.
  */
 export async function guardianGateBlocksGoLive(
@@ -349,14 +349,14 @@ export async function guardianGateBlocksGoLive(
   if (!guardianConsentRequired(networkConfig, item.item_domain)) return false;
 
   const [ward] = await exec
-    .select({ dob: user.dateOfBirth })
+    .select({ age: user.age })
     .from(user)
     .where(eq(user.id, item.created_by))
     .limit(1);
 
-  // Cannot prove adulthood without a DOB → fail-closed on a gated domain.
-  if (!ward?.dob) return true;
-  if (!isMinor(ward.dob)) return false;
+  // Cannot prove adulthood without an age → fail-closed on a gated domain.
+  if (ward?.age == null) return true;
+  if (!isMinor(ward.age)) return false;
 
   const [guardianRow] = await exec
     .select({ id: consent_record.id })
@@ -437,7 +437,7 @@ export async function promoteItemOnProfileConsent(
 
   if (lifecycle_status !== 'live') return false;
 
-  // U18 age gate (spec §7 / D11/D13). Fail-closed for a gated minor / null-DOB.
+  // U18 age gate (spec §7 / D11/D13). Fail-closed for a gated minor / null-age.
   if (await guardianGateBlocksGoLive(exec, item)) return false;
 
   await exec
