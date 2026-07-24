@@ -738,7 +738,7 @@ describeIf(`POST /api/v1/admin/participant (integration)${
       payload: {
         email,
         name: 'Compliance Adult',
-        date_of_birth: '1990-01-01',
+        age: 25,
         channel: 'voice',
         network: primary.network,
         domain: primary.domain,
@@ -822,7 +822,7 @@ describeIf(`POST /api/v1/admin/participant (integration)${
       payload: {
         email,
         name: 'Prereq Missing',
-        date_of_birth: '1990-01-01',
+        age: 25,
         channel: 'voice',
         network: primary.network,
         domain: primary.domain,
@@ -844,9 +844,10 @@ describeIf(`POST /api/v1/admin/participant (integration)${
     expect(rows).toHaveLength(0);
   });
 
-  it('records profile_creation consent for a minor but holds go-live per the served domain gate', async () => {
-    // Fixed 2015-01-01 DOB keeps this user unambiguously under 18 for the
-    // foreseeable future — do NOT switch to a dynamic date.
+  it('minor age (#331/#359) is rejected outright — 400 U18_NOT_ALLOWED, nothing created', async () => {
+    // age:15 is unambiguously a minor (isMinor is age <= 18) regardless of the
+    // served domain's guardian-gating — the U18 check runs before any DB
+    // write and before the domain gate is even consulted.
     const email = `int_c_minor_${randomUUID().slice(0, 6)}@a.test`;
     const fixture = generateMinimalItemState(primary.schema);
     const res = await app.inject({
@@ -860,7 +861,7 @@ describeIf(`POST /api/v1/admin/participant (integration)${
       payload: {
         email,
         name: 'Compliance Minor',
-        date_of_birth: '2015-01-01',
+        age: 15,
         channel: 'voice',
         network: primary.network,
         domain: primary.domain,
@@ -873,43 +874,19 @@ describeIf(`POST /api/v1/admin/participant (integration)${
         ],
       },
     });
-    expect(res.statusCode).toBe(200);
-    const body = res.json();
-    onboarded_user_ids.push(body.user_id);
+    expect(res.statusCode).toBe(400);
+    expect(res.json().error).toBe('U18_NOT_ALLOWED');
 
-    // All three consents are recorded regardless of the age gate — the
-    // terms+privacy prerequisite is met because all three were sent together.
-    expect(body.consent_recorded).toBe(3);
-    expect(body.items).toHaveLength(1);
-
-    const rows = await db
-      .select()
-      .from(consentRecordTable)
-      .where(eq(consentRecordTable.userId, body.user_id));
-    const profileRow = rows.find(
-      (r) => r.consentCategory === 'profile_creation',
-    );
-    expect(profileRow).toBeTruthy();
-    expect(profileRow?.source).toBe('profile');
-
-    // The go-live decision is asserted per the served domain's gating status,
-    // so CI that serves a guardian-gated seeker domain proves the held-draft
-    // path, while a non-gated domain proves the promote-to-live path.
-    const gated = guardianConsentRequired(
-      await getNetworkConfigById(primary.network),
-      primary.domain,
-    );
-    if (gated) {
-      // Minor on a guardian-gated domain is held at draft despite the recorded
-      // profile_creation consent — the participant seam never promotes a minor.
-      expect(body.items[0].lifecycle_status).toBe('draft');
-    } else {
-      // No age gate on this domain, so profile_creation consent promotes.
-      expect(body.items[0].lifecycle_status).toBe('live');
-    }
+    // No user was created for this identity — the check runs before any write.
+    const { user } = authSchema;
+    const userRows = await db
+      .select({ id: user.id })
+      .from(user)
+      .where(eq(user.email, email));
+    expect(userRows).toHaveLength(0);
   });
 
-  it('gated domain: user consent without date_of_birth → 400 DOB_REQUIRED', async () => {
+  it('gated domain: user consent without age → 400 AGE_REQUIRED', async () => {
     const gated = guardianConsentRequired(
       await getNetworkConfigById(primary.network),
       primary.domain,
@@ -923,8 +900,8 @@ describeIf(`POST /api/v1/admin/participant (integration)${
         'content-type': 'application/json',
       },
       payload: {
-        email: `int_dobreq_${randomUUID().slice(0, 6)}@a.test`,
-        name: 'DOB Required',
+        email: `int_agereq_${randomUUID().slice(0, 6)}@a.test`,
+        name: 'Age Required',
         channel: 'voice',
         network: primary.network,
         domain: primary.domain,
@@ -939,22 +916,22 @@ describeIf(`POST /api/v1/admin/participant (integration)${
     });
     if (gated) {
       expect(res.statusCode).toBe(400);
-      expect(res.json().error).toBe('DOB_REQUIRED');
+      expect(res.json().error).toBe('AGE_REQUIRED');
     } else {
-      // non-gated served domain: consent without DOB is allowed
+      // non-gated served domain: consent without age is allowed
       expect(res.statusCode).toBe(200);
       onboarded_user_ids.push(res.json().user_id);
     }
   });
 
-  it('gated domain: returning user with stored DOB may re-send the consent pair without DOB (no DOB_REQUIRED)', async () => {
-    const email = `int_redob_${randomUUID().slice(0, 6)}@a.test`;
-    // 1) create live with full consent + adult DOB on the (gated) primary domain
+  it('gated domain: returning user with stored age may re-send the consent pair without age (no AGE_REQUIRED)', async () => {
+    const email = `int_reage_${randomUUID().slice(0, 6)}@a.test`;
+    // 1) create live with full consent + adult age on the (gated) primary domain
     const c = await app.inject({
       method: 'POST', url: '/api/v1/admin/participant',
       headers: { 'x-api-key': ns.raw_key, 'x-acting-org-id': ns.org_id, 'content-type': 'application/json' },
       payload: {
-        email, name: 'Returning', channel: 'voice', date_of_birth: '1990-01-01',
+        email, name: 'Returning', channel: 'voice', age: 25,
         network: primary.network, domain: primary.domain, item_type: primary.item_type,
         item_state: generateMinimalItemState(primary.schema),
         compliance: [
@@ -966,7 +943,7 @@ describeIf(`POST /api/v1/admin/participant (integration)${
     });
     expect(c.statusCode).toBe(200);
     onboarded_user_ids.push(c.json().user_id);
-    // 2) re-send the user pair WITHOUT date_of_birth, no item → must NOT 400 DOB_REQUIRED
+    // 2) re-send the user pair WITHOUT age, no item → must NOT 400 AGE_REQUIRED
     const r = await app.inject({
       method: 'POST', url: '/api/v1/admin/participant',
       headers: { 'x-api-key': ns.raw_key, 'x-acting-org-id': ns.org_id, 'content-type': 'application/json' },
@@ -982,9 +959,9 @@ describeIf(`POST /api/v1/admin/participant (integration)${
     expect(r.statusCode).toBe(200);
   });
 
-  it('activates a gated draft by later supplying date_of_birth via item_id', async () => {
+  it('activates a gated draft by later supplying age via item_id', async () => {
     const email = `int_activate_${randomUUID().slice(0, 6)}@a.test`;
-    // 1) create WITH consent but NO dob on a gated domain → stays draft
+    // 1) create WITH consent but NO age on a gated domain → stays draft
     const gated = guardianConsentRequired(
       await getNetworkConfigById(primary.network),
       primary.domain,
@@ -998,8 +975,8 @@ describeIf(`POST /api/v1/admin/participant (integration)${
         email, name: 'Activate Later', channel: 'voice',
         network: primary.network, domain: primary.domain, item_type: primary.item_type,
         item_state: generateMinimalItemState(primary.schema),
-        // gated + consent + no DOB would 400 (DOB_REQUIRED); so create with NO
-        // consent first (bulk-style draft), then add consent+DOB on activation.
+        // gated + consent + no age would 400 (AGE_REQUIRED); so create with NO
+        // consent first (bulk-style draft), then add consent+age on activation.
       },
     });
     expect(createRes.statusCode).toBe(200);
@@ -1008,14 +985,14 @@ describeIf(`POST /api/v1/admin/participant (integration)${
     const itemId = created.items[0].item_id as string;
     expect(created.items[0].lifecycle_status).toBe('draft');
 
-    // 2) activate: item_id + full consent + adult DOB → live
+    // 2) activate: item_id + full consent + adult age → live
     const actRes = await app.inject({
       method: 'POST',
       url: '/api/v1/admin/participant',
       headers: { 'x-api-key': ns.raw_key, 'x-acting-org-id': ns.org_id, 'content-type': 'application/json' },
       payload: {
         email, name: 'Activate Later', channel: 'voice',
-        item_id: itemId, date_of_birth: '1990-01-01',
+        item_id: itemId, age: 25,
         network: primary.network, domain: primary.domain, item_type: primary.item_type,
         compliance: [
           { key: 'user_terms', value: true },
@@ -1028,5 +1005,74 @@ describeIf(`POST /api/v1/admin/participant (integration)${
     const activated = actRes.json();
     const row = activated.items.find((i: { item_id: string }) => i.item_id === itemId);
     expect(row.lifecycle_status).toBe('live');
+  });
+
+  it('gated domain: minor + full consent + complete item_state → 400 U18_NOT_ALLOWED, no consent recorded, no item created', async () => {
+    const gated = guardianConsentRequired(
+      await getNetworkConfigById(primary.network),
+      primary.domain,
+    );
+    if (!gated) return; // this scenario is specifically about the gated domain path
+
+    const email = `int_u18gated_${randomUUID().slice(0, 6)}@a.test`;
+    const fixture = generateMinimalItemState(primary.schema);
+
+    const itemsBefore = await db
+      .select({ item_id: itemsTable.item_id })
+      .from(itemsTable)
+      .where(eq(itemsTable.item_network, primary.network));
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/v1/admin/participant',
+      headers: {
+        'x-api-key': ns.raw_key,
+        'x-acting-org-id': ns.org_id,
+        'content-type': 'application/json',
+      },
+      payload: {
+        email,
+        name: 'Gated Minor',
+        age: 15,
+        channel: 'voice',
+        network: primary.network,
+        domain: primary.domain,
+        item_type: primary.item_type,
+        item_state: fixture,
+        compliance: [
+          { key: 'user_terms', value: true },
+          { key: 'user_privacy', value: true },
+          { key: 'profile_creation', value: true },
+        ],
+      },
+    });
+    expect(res.statusCode).toBe(400);
+    expect(res.json().error).toBe('U18_NOT_ALLOWED');
+
+    // No user was created for this identity, so no consent_record row could
+    // reference it either — confirm the identity never made it into the DB.
+    const { user } = authSchema;
+    const userRows = await db
+      .select({ id: user.id })
+      .from(user)
+      .where(eq(user.email, email));
+    expect(userRows).toHaveLength(0);
+
+    // Guard inArray against an empty id list (drizzle can't build `IN ()`).
+    const consentRows =
+      userRows.length > 0
+        ? await db
+            .select()
+            .from(consentRecordTable)
+            .where(inArray(consentRecordTable.userId, userRows.map((r) => r.id)))
+        : [];
+    expect(consentRows).toHaveLength(0);
+
+    // No item was created under this network as a side effect of the call.
+    const itemsAfter = await db
+      .select({ item_id: itemsTable.item_id })
+      .from(itemsTable)
+      .where(eq(itemsTable.item_network, primary.network));
+    expect(itemsAfter.length).toBe(itemsBefore.length);
   });
 });

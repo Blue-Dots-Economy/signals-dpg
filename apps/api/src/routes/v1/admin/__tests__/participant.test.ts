@@ -1353,4 +1353,28 @@ describe('POST /admin/participant', () => {
     expect(res.statusCode).toBe(400);
     expect(res.json().error).toBe('USER_LEVEL_INCOMPLETE');
   });
+
+  it('age:15 (minor) → 400 U18_NOT_ALLOWED, no operation performed (#331/#359)', async () => {
+    // The U18 check runs on the effective age (body.age ?? existing.age)
+    // before any DB write, so a minor is rejected with no user/item create,
+    // no update, and no consent recorded — regardless of domain/channel.
+    const app = await buildApp({ org_id: 'org_agg_1', org_type: 'aggregator' });
+    const res = await app.inject({
+      method: 'POST',
+      url: '/participant',
+      payload: baseBody({
+        age: 15,
+        compliance: [
+          { key: 'user_terms', value: true },
+          { key: 'user_privacy', value: true },
+        ],
+      }),
+    });
+    expect(res.statusCode).toBe(400);
+    expect(res.json().error).toBe('U18_NOT_ALLOWED');
+
+    expect(vi.mocked(recordParticipantConsent)).not.toHaveBeenCalled();
+    expect(dbState.updates).toHaveLength(0);
+    expect(dbState.inserts).toHaveLength(0);
+  });
 });
