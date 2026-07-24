@@ -23,7 +23,8 @@ The base design (2026-07-22) added the `compliance` array, recorded consent into
   - `terms`, `privacy` — **user-level**; accepted once, inherited by all the user's profiles.
   - `profile_creation` — **item-level**; each profile needs its own row (keyed to `item_id`) — but only to go live, not to be created.
   - `date_of_birth` — **user-level**.
-- **Multi-profile routing (post-#353):** `item_state` *without* `item_id` → creates a **new** profile (bounded by `MAX_PROFILES_PER_USER`); `item_id` + `item_state` → **updates** that profile.
+- **Multi-profile routing (post-#353, refined here):** `item_state` *without* `item_id` → creates a **new** profile (bounded by `MAX_PROFILES_PER_USER`). **`item_id` targets that existing profile**, and `item_state` on that call is *optional*: if given it updates the fields, if omitted the fields are left unchanged. Either way the call records any `compliance` (incl. item-level `profile_creation` for that `item_id`), persists `date_of_birth` if provided, and re-promotes. *(This refines #353's resolver — which today routes an `item_id` with no `item_state` to the account-only path — so a consent-only or DOB-only activation can target a specific draft without re-sending its fields.)*
+- **`date_of_birth` alone (no `item_id`, no `item_state`) → account-only**: persists the user's DOB, records any user-level consent, then promotes **all** the user's eligible consented drafts (DOB is user-level).
 
 ## Go-live gate checklist (unchanged, for reference)
 
@@ -108,6 +109,67 @@ content-type: application/json
   "consent_recorded": 3
 }
 ```
+
+### Activation payload variants
+
+All of these target an existing user (identify by `email` or `phone_number`; `name` is required by the schema, so pass the existing name). Each promotes only if the profile ends up complete + the go-live gate passes.
+
+**(a) Activate a draft by sending only its `profile_creation` consent — no field re-send** (user already has terms/privacy + adult DOB on file):
+```jsonc
+{
+  "email": "asha@example.com",
+  "name": "Asha P",
+  "item_id": "‹draft profile id›",        // targets that profile; no item_state → fields unchanged
+  "compliance": [ { "key": "profile_creation", "value": true } ]
+}
+// → records profile_creation for that item, re-promotes → live
+```
+
+**(b) Activate by sending DOB + user-level consent — no item targeting** (account-only; promotes ALL the user's consented drafts):
+```jsonc
+{
+  "email": "asha@example.com",
+  "name": "Asha P",
+  "date_of_birth": "1990-01-01",          // persisted on the user (user-level)
+  "compliance": [
+    { "key": "user_terms",   "value": true },
+    { "key": "user_privacy", "value": true }
+  ]
+  // no item_id, no item_state
+}
+// → records terms+privacy, persists DOB, promotes every draft profile that already has profile_creation
+```
+
+**(c) Activate a specific draft that only lacked DOB — send DOB with its `item_id`** (its `profile_creation` + user terms/privacy already recorded):
+```jsonc
+{
+  "email": "asha@example.com",
+  "name": "Asha P",
+  "item_id": "‹draft profile id›",
+  "date_of_birth": "1990-01-01"
+  // no item_state, no compliance
+}
+// → persists DOB, re-promotes (this draft — and any other eligible drafts, since DOB is user-level)
+```
+
+**(d) Everything-at-once on one draft — consent + DOB together via `item_id`** (nothing was recorded at create time):
+```jsonc
+{
+  "email": "asha@example.com",
+  "name": "Asha P",
+  "item_id": "‹draft profile id›",
+  "date_of_birth": "1990-01-01",
+  "compliance": [
+    { "key": "user_terms",       "value": true },
+    { "key": "user_privacy",     "value": true },
+    { "key": "profile_creation", "value": true }
+  ]
+  // item_state optional — include it to also fill/complete the profile fields
+}
+// → records terms+privacy+profile_creation, persists DOB, re-promotes → live (if complete)
+```
+
+Note the prerequisite: `profile_creation` is only recorded once `terms` + `privacy` exist (on file or in the same call). Variant (a) assumes they're already on file; if not, include `user_terms`/`user_privacy` in that call too (as in (d)).
 
 ## Read side — `GET /admin/participant` (new)
 
