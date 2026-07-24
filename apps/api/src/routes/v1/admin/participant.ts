@@ -452,6 +452,9 @@ export const participant_handler = async (
       });
     }
 
+    const hasItemState = Boolean(
+      body.item_state && Object.keys(body.item_state).length > 0,
+    );
     let updateResult:
       | {
           row: {
@@ -464,13 +467,15 @@ export const participant_handler = async (
       | undefined;
     try {
       await db.transaction(async (tx) => {
-        updateResult = await updateItemInternal(
-          tx,
-          verdict.item_id,
-          existing!.id,
-          true, // isAdmin — ownership already verified above
-          { item_state: body.item_state ?? {} },
-        );
+        if (hasItemState) {
+          updateResult = await updateItemInternal(
+            tx,
+            verdict.item_id,
+            existing!.id,
+            true, // isAdmin — ownership already verified above
+            { item_state: body.item_state ?? {} },
+          );
+        }
         const consent = await recordParticipantConsent(tx, {
           compliance: body.compliance,
           userId: existing!.id,
@@ -497,24 +502,23 @@ export const participant_handler = async (
       return reply.code(e.statusCode ?? 500).send({
         error: e.errorCode ?? 'UPDATE_FAILED',
         // Only surface a curated ItemServiceError message (errorCode set). A raw
-        // DB error's message includes the failed SQL + bound params — i.e. the
-        // participant's item_state (name/phone/email) — so never return it.
+        // DB error's message includes the failed SQL + bound params — never return it.
         message: e.errorCode ? (err as Error).message : 'item update failed',
       });
     }
 
-    await publishItemEvent(
-      {
-        // Non-null: the transaction either assigned updateResult or the catch
-        // above already returned — this line only runs on the success path.
-        item_network: updateResult!.row.item_network,
-        item_domain: updateResult!.row.item_domain,
-        item_type: updateResult!.row.item_type,
-        item_id: updateResult!.row.item_id,
-        op: 'upsert',
-      },
-      request.log,
-    );
+    if (updateResult) {
+      await publishItemEvent(
+        {
+          item_network: updateResult.row.item_network,
+          item_domain: updateResult.row.item_domain,
+          item_type: updateResult.row.item_type,
+          item_id: updateResult.row.item_id,
+          op: 'upsert',
+        },
+        request.log,
+      );
+    }
 
     const itemsList = await readItemsForUser(existing!.id);
     return reply.code(200).send({
