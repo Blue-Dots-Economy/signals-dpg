@@ -3,6 +3,9 @@ updates:
   # npm/pnpm — one entry at the workspace root covers all packages because
   # pnpm-lock.yaml holds the full dependency graph for the monorepo.
   - package-ecosystem: "npm"
+    # Check manifests on and raise PRs against the integration branch;
+    # security updates still target the default branch (GitHub limitation).
+    target-branch: "feature"
     directory: "/"
     schedule:
       interval: "weekly"
@@ -22,6 +25,9 @@ updates:
 
   # GitHub Actions — keeps CI workflow action versions current
   - package-ecosystem: "github-actions"
+    # Check manifests on and raise PRs against the integration branch;
+    # security updates still target the default branch (GitHub limitation).
+    target-branch: "feature"
     directory: "/"
     schedule:
       interval: "weekly"
@@ -36,6 +42,9 @@ updates:
 
   # Docker base images — one entry per directory containing a Dockerfile
   - package-ecosystem: "docker"
+    # Check manifests on and raise PRs against the integration branch;
+    # security updates still target the default branch (GitHub limitation).
+    target-branch: "feature"
     directories:
       - "/apps/api"
       - "/apps/ui"
