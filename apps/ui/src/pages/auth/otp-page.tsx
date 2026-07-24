@@ -22,9 +22,9 @@ interface AuthState extends AuthIdentifier {
   name?: string;
   redirectTo?: string;
   pendingConsent?: ConsentAcceptBody | null;
-  /** Carries the DOB (+ chosen domain for new signups) captured in the auth
+  /** Carries the age (+ chosen domain for new signups) captured in the auth
    * flow before this OTP: set for a brand-new signup, and for an existing user
-   * who backfilled their DOB pre-OTP (see login-page.tsx). Null otherwise. */
+   * who backfilled their age pre-OTP (see login-page.tsx). Null otherwise. */
   signupExtras?: SignupExtras | null;
 }
 
@@ -92,12 +92,12 @@ export function OtpPage() {
         }
       }
 
-      // U18 DOB/guardian was collected in the auth flow BEFORE this OTP (signup
+      // U18 age/guardian was collected in the auth flow BEFORE this OTP (signup
       // gate, or the existing-user pre-check). Persist it now that the session
       // exists. Best-effort like the consent-accept write above — never block
       // sign-in on it.
       if (state.signupExtras) {
-        const { domain, dateOfBirth } = state.signupExtras;
+        const { domain, age } = state.signupExtras;
         // New signup: hand the chosen domain off to profile-form-page (one-shot)
         // AND persist it on the user so profile creation is restricted to it.
         if (!state.userExists) {
@@ -108,11 +108,11 @@ export function OtpPage() {
             // Best-effort — profile-form falls back to held items if unset.
           }
         }
-        // DOB only exists for guardian-gated flows; persist it for the now-auth
+        // Age only exists for guardian-gated flows; persist it for the now-auth
         // user (idempotent for a signup minor already materialized on create).
-        if (dateOfBirth) {
+        if (age !== undefined) {
           try {
-            await submitU18Dob({ network: themeId, dateOfBirth });
+            await submitU18Dob({ network: themeId, age });
           } catch {
             toast.error(t('auth.toast_consent_persist_error', 'Could not save your consent. You may be asked again next time.'));
           }
