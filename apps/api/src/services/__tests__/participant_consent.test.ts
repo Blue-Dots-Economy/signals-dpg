@@ -38,6 +38,16 @@ type InsertedRow = Record<string, unknown>;
 function makeTx() {
   const inserted: InsertedRow[] = [];
   const tx = {
+    // Dedupe existence check (user-level terms/privacy loop): always report
+    // "no existing row" so pre-existing tests behave exactly as before the
+    // dedupe was added.
+    select: vi.fn(() => ({
+      from: vi.fn(() => ({
+        where: vi.fn(() => ({
+          limit: vi.fn(async () => []),
+        })),
+      })),
+    })),
     insert: vi.fn(() => ({
       // `values(row)` records the attempted row and returns a thenable that
       // ALSO exposes `.onConflictDoNothing()` — so plain `await values(row)`
@@ -207,6 +217,33 @@ describe('recordParticipantConsent', () => {
       userId: 'u1', itemId: 'item-1', network: 'blue_dot', channel: 'voice', acceptedAt: new Date(),
     });
     expect(res.promoted).toBe(false);
+  });
+
+  it('skips a user-level insert already recorded at the current version', async () => {
+    resolveConsentVersion.mockResolvedValue(1);
+    const inserted: Array<Record<string, unknown>> = [];
+    // select() → returns [{id}] for terms (exists), [] for privacy (absent)
+    let call = 0;
+    const tx = {
+      select: vi.fn(() => ({
+        from: vi.fn(() => ({
+          where: vi.fn(() => ({
+            limit: vi.fn(async () => (call++ === 0 ? [{ id: 'x' }] : [])),
+          })),
+        })),
+      })),
+      insert: vi.fn(() => ({ values: vi.fn(async (row: Record<string, unknown>) => { inserted.push(row); }) })),
+    };
+    const { recordParticipantConsent } = await import('@/services/participant_consent');
+    const res = await recordParticipantConsent(tx as never, {
+      compliance: [
+        { key: 'user_terms', value: true },
+        { key: 'user_privacy', value: true },
+      ],
+      userId: 'u1', network: 'blue_dot', channel: 'voice', acceptedAt: new Date(),
+    });
+    expect(res.recorded).toBe(1); // terms deduped, privacy inserted
+    expect(inserted.map((r) => r.consentCategory)).toEqual(['privacy']);
   });
 
   it('promoteEligibleDraftsForUser promotes only drafts that have profile_creation consent', async () => {

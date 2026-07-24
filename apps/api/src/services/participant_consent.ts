@@ -81,6 +81,23 @@ export async function recordParticipantConsent(
     if (!accepted.has(key)) continue;
     const version = await resolveConsentVersion({ network, brand, category });
     if (version === null) continue; // category not configured — skip, do not fail onboarding
+    // Dedupe: skip if this user already has this category recorded at the
+    // current version (avoids duplicate user-level rows across a user's
+    // multiple profiles). A version bump writes a fresh row.
+    const [existingUserRow] = await tx
+      .select({ id: consent_record.id })
+      .from(consent_record)
+      .where(
+        and(
+          eq(consent_record.userId, userId),
+          eq(consent_record.level, 'user'),
+          eq(consent_record.consentCategory, category),
+          eq(consent_record.network, network),
+          eq(consent_record.documentVersion, version),
+        ),
+      )
+      .limit(1);
+    if (existingUserRow) continue;
     await tx.insert(consent_record).values({
       level: 'user',
       consentCategory: category,
