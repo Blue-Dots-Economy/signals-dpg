@@ -1,0 +1,61 @@
+version: 2
+updates:
+  # npm/pnpm — one entry at the workspace root covers all packages because
+  # pnpm-lock.yaml holds the full dependency graph for the monorepo.
+  - package-ecosystem: "npm"
+    # Check manifests on and raise PRs against the integration branch;
+    # security updates still target the default branch (GitHub limitation).
+    target-branch: "feature"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "03:00"
+      timezone: "UTC"
+    open-pull-requests-limit: 5
+    labels:
+      - "dependencies"
+    commit-message:
+      prefix: "chore(deps)"
+    groups:
+      production:
+        dependency-type: "production"
+      development:
+        dependency-type: "development"
+
+  # GitHub Actions — keeps CI workflow action versions current
+  - package-ecosystem: "github-actions"
+    # Check manifests on and raise PRs against the integration branch;
+    # security updates still target the default branch (GitHub limitation).
+    target-branch: "feature"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "03:15"
+      timezone: "UTC"
+    labels:
+      - "dependencies"
+      - "ci"
+    commit-message:
+      prefix: "chore(ci)"
+
+  # Docker base images — one entry per directory containing a Dockerfile
+  - package-ecosystem: "docker"
+    # Check manifests on and raise PRs against the integration branch;
+    # security updates still target the default branch (GitHub limitation).
+    target-branch: "feature"
+    directories:
+      - "/apps/api"
+      - "/apps/ui"
+      - "/docker/postgres"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "03:30"
+      timezone: "UTC"
+    labels:
+      - "dependencies"
+      - "docker"
+    commit-message:
+      prefix: "chore(docker)"

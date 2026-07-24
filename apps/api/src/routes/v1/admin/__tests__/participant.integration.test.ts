@@ -51,6 +51,7 @@ import {
   resolveBindings,
   type ResolvedBinding,
 } from '../../__tests__/integration_helpers';
+import { apiConfig } from '@/config';
 
 const pg_url = process.env.POSTGRES_URL ?? process.env.POSTGRES_USER;
 const can_run = Boolean(pg_url);
@@ -338,16 +339,21 @@ describeIf(`POST /api/v1/admin/participant (integration)${
     expect(row.onboardedByOrgId).toBe(agg_a.org_id);
   });
 
-  it('agg_A hits the same user again — user_existed=true, items returned, no new item rows written', async () => {
-    const items_before = await db
-      .select()
-      .from(itemsTable)
-      .where(eq(itemsTable.created_by, canonical_user_id));
+  it('agg_A hits the same user again with item_state — creates ANOTHER profile (#349 always-create)', async () => {
+    const sameTriple = (rows: Array<Record<string, unknown>>) =>
+      rows.filter(
+        (r) =>
+          r.item_network === primary.network &&
+          r.item_domain === primary.domain &&
+          r.item_type === primary.item_type,
+      );
+    const before = sameTriple(
+      await db.select().from(itemsTable).where(eq(itemsTable.created_by, canonical_user_id)),
+    );
+    expect(before.length).toBeGreaterThan(0); // already has one from the create test
 
-    // Aggregator + existing user → handler short-circuits to noop;
-    // the payload is never written. Send a valid-shape body anyway
-    // so we don't hit schema-level rejects.
-    const noopFixture = generateMinimalItemState(primary.schema);
+    // Same body, no item_id → a create is always an insert now (not a dedup-to-update).
+    const fixture = generateMinimalItemState(primary.schema);
     const res = await app.inject({
       method: 'POST',
       url: '/api/v1/admin/participant',
@@ -365,20 +371,132 @@ describeIf(`POST /api/v1/admin/participant (integration)${
         network: primary.network,
         domain: primary.domain,
         item_type: primary.item_type,
-        item_state: noopFixture,
+        item_state: fixture,
       },
     });
     expect(res.statusCode).toBe(200);
     const body = res.json();
     expect(body.user_existed).toBe(true);
     expect(body.user_id).toBe(canonical_user_id);
-    expect(body.items.length).toBeGreaterThan(0);
 
-    const items_after = await db
+    const after = sameTriple(
+      await db.select().from(itemsTable).where(eq(itemsTable.created_by, canonical_user_id)),
+    );
+    // A brand-new same-type row was added.
+    expect(after.length).toBe(before.length + 1);
+    const returnedId = body.items[0].item_id as string;
+    expect(before.map((r) => r.item_id as string)).not.toContain(returnedId);
+  });
+
+  it('per-user profile cap: creating past MAX_PROFILES_PER_USER returns 409 PROFILE_LIMIT_REACHED', async () => {
+    // Fresh user so the count starts clean. Default cap = MAX_PROFILES_PER_USER (5).
+    const limit = apiConfig.max_profiles_per_user;
+    const capEmail = `cap-${randomUUID()}@test.local`;
+    const capPhone = `+9199${Math.floor(randomBytes(4).readUInt32BE(0) % 1e8).toString().padStart(8, '0')}`;
+    const mk = (n: number) =>
+      app.inject({
+        method: 'POST',
+        url: '/api/v1/admin/participant',
+        headers: {
+          'x-api-key': ns.raw_key,
+          'x-acting-org-id': ns.org_id,
+          'content-type': 'application/json',
+        },
+        payload: {
+          email: capEmail,
+          phone_number: capPhone,
+          name: `Cap User ${n}`,
+          terms_accepted: true,
+          privacy_accepted: true,
+          channel: 'bulk',
+          network: primary.network,
+          domain: primary.domain,
+          item_type: primary.item_type,
+          item_state: generateMinimalItemState(primary.schema),
+        },
+      });
+
+    // First `limit` creates succeed.
+    let capUserId: string | undefined;
+    for (let i = 0; i < limit; i++) {
+      const ok = await mk(i);
+      expect(ok.statusCode).toBe(200);
+      capUserId = ok.json().user_id;
+    }
+    // The next one is rejected by the cap.
+    const over = await mk(limit);
+    expect(over.statusCode).toBe(409);
+    expect(over.json().error).toBe('PROFILE_LIMIT_REACHED');
+
+    // cleanup — only this test user's rows.
+    if (capUserId) {
+      await db.delete(itemsTable).where(eq(itemsTable.created_by, capUserId));
+    }
+  });
+
+  it('per-user cap holds under CONCURRENCY on the insert_item path (no TOCTOU over-insert)', async () => {
+    const limit = apiConfig.max_profiles_per_user;
+    const ccEmail = `capcc-${randomUUID()}@test.local`;
+    const ccPhone = `+9199${Math.floor(randomBytes(4).readUInt32BE(0) % 1e8).toString().padStart(8, '0')}`;
+    const mk = () =>
+      app.inject({
+        method: 'POST',
+        url: '/api/v1/admin/participant',
+        headers: {
+          'x-api-key': ns.raw_key,
+          'x-acting-org-id': ns.org_id,
+          'content-type': 'application/json',
+        },
+        payload: {
+          email: ccEmail,
+          phone_number: ccPhone,
+          name: 'Cap CC User',
+          terms_accepted: true,
+          privacy_accepted: true,
+          channel: 'bulk',
+          network: primary.network,
+          domain: primary.domain,
+          item_type: primary.item_type,
+          item_state: generateMinimalItemState(primary.schema),
+        },
+      });
+
+    // 1) One sequential create so the user exists — subsequent calls hit the
+    //    insert_item path (existing user → new profile), the one #349 fixes.
+    const first = await mk();
+    expect(first.statusCode).toBe(200);
+    const ccUserId = first.json().user_id as string;
+    const slotsLeft = limit - 1;
+
+    // 2) Fire more concurrent creates than there are free slots. Only `slotsLeft`
+    //    may succeed; the rest must be capped. Without the advisory lock holding
+    //    across count+insert (the TOCTOU bug), several would read the same count
+    //    and over-insert past the cap.
+    const attempts = slotsLeft + 3;
+    const results = await Promise.all(Array.from({ length: attempts }, () => mk()));
+    const ok = results.filter((r) => r.statusCode === 200).length;
+    const capped = results.filter(
+      (r) => r.statusCode === 409 && r.json().error === 'PROFILE_LIMIT_REACHED',
+    ).length;
+
+    expect(ok).toBe(slotsLeft);
+    expect(capped).toBe(attempts - slotsLeft);
+
+    // DB truth: exactly `limit` same-type profiles for this user, never more.
+    const rows = await db
       .select()
       .from(itemsTable)
-      .where(eq(itemsTable.created_by, canonical_user_id));
-    expect(items_after.length).toBe(items_before.length);
+      .where(eq(itemsTable.created_by, ccUserId));
+    const sameType = rows.filter(
+      (r) =>
+        r.item_network === primary.network &&
+        r.item_domain === primary.domain &&
+        r.item_type === primary.item_type,
+    );
+    expect(sameType.length).toBe(limit);
+
+    // cleanup — only this test user's rows.
+    await db.delete(itemsTable).where(eq(itemsTable.created_by, ccUserId));
   });
 
   it('network_service updates an existing item via item_id; item_state in DB reflects the new payload', async () => {
