@@ -376,6 +376,43 @@ describeIf(`GET /api/v1/admin/participant (integration)${
     expect(body.error).toBe('MISSING_IDENTIFIER');
   });
 
+  it('GET returns user_consent + per-item profile_consent_accepted', async () => {
+    const email = `int_read_${randomUUID().slice(0, 6)}@a.test`;
+    // create a live profile with full consent + adult DOB on a gated domain
+    const createRes = await app.inject({
+      method: 'POST',
+      url: '/api/v1/admin/participant',
+      headers: { 'x-api-key': ns.raw_key, 'x-acting-org-id': ns.org_id, 'content-type': 'application/json' },
+      payload: {
+        email, name: 'Read Status', channel: 'voice', date_of_birth: '1990-01-01',
+        network: primary.network, domain: primary.domain, item_type: primary.item_type,
+        item_state: generateMinimalItemState(primary.schema),
+        compliance: [
+          { key: 'user_terms', value: true },
+          { key: 'user_privacy', value: true },
+          { key: 'profile_creation', value: true },
+        ],
+      },
+    });
+    expect(createRes.statusCode).toBe(200);
+    onboarded_user_ids.push(createRes.json().user_id);
+
+    const getRes = await app.inject({
+      method: 'GET',
+      url: `/api/v1/admin/participant?email=${encodeURIComponent(email)}`,
+      headers: { 'x-api-key': ns.raw_key, 'x-acting-org-id': ns.org_id },
+    });
+    expect(getRes.statusCode).toBe(200);
+    const body = getRes.json();
+    expect(body.user_consent).toMatchObject({
+      terms_accepted: true,
+      privacy_accepted: true,
+      has_date_of_birth: true,
+    });
+    expect(body.items[0].profile_consent_accepted).toBe(true);
+    expect(body.items[0].lifecycle_status).toBe('live');
+  });
+
   it('missing x-acting-org-id returns 403', async () => {
     const res = await app.inject({
       method: 'GET',

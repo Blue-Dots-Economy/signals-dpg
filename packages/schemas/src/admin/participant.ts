@@ -111,6 +111,9 @@ export const ParticipantItemSnapshot = z.object({
   // Present on the upsert response so callers can tell live vs draft. Optional
   // because sibling readers (participant_read) do not populate it.
   lifecycle_status: z.string().optional(),
+  // Whether this specific profile has profile_creation consent recorded.
+  // Optional because the upsert response doesn't populate it (only GET does).
+  profile_consent_accepted: z.boolean().optional(),
   item_state: z.record(z.string(), z.unknown()),
   item_locations: ItemLocationsArray,
   created_at: z.iso.datetime(),
@@ -140,6 +143,11 @@ export const GetParticipantRequest = z
 
 export const GetParticipantResponse = z.object({
   user_id: z.string().nullable(),
+  user_consent: z.object({
+    terms_accepted: z.boolean(),
+    privacy_accepted: z.boolean(),
+    has_date_of_birth: z.boolean(),
+  }),
   items: z.array(ParticipantItemSnapshot),
 });
 

@@ -7,6 +7,7 @@ import { and, eq, inArray, or } from 'drizzle-orm';
 import { db } from '@api/db/postgres/drizzle_config';
 import { items } from '@dpg/database';
 import { user } from '../../../../db/postgres/schema/auth.js';
+import { consent_record } from '@api/db/postgres/schema';
 import z, {
   GetParticipantRequest as GetParticipantRequestSchema,
   GetParticipantResponse,
@@ -107,6 +108,7 @@ export const participant_read_handler = async (
   if (!existing) {
     return reply.code(200).send({
       user_id: null,
+      user_consent: EMPTY_USER_CONSENT,
       items: [],
     });
   }
@@ -114,21 +116,37 @@ export const participant_read_handler = async (
   // User exists — check ownership rules
   const acting_org_id = request.acting_org.org_id;
   let itemsList: Awaited<ReturnType<typeof readItemsForUser>> = [];
+  let disclose = false;
 
   if (request.acting_org.org_type === 'aggregator') {
-    const isOwn = existing.onboardedByOrgId === acting_org_id;
-    if (isOwn) {
-      itemsList = await readItemsForUser(existing.id);
-    }
-    // If not owned by this aggregator, itemsList remains []
+    disclose = existing.onboardedByOrgId === acting_org_id;
   } else {
-    // network_service can always read items
-    itemsList = await readItemsForUser(existing.id);
+    disclose = true; // network_service can always read
   }
+
+  if (!disclose) {
+    // Aggregator that did not onboard this user — no consent disclosure.
+    return reply.code(200).send({
+      user_id: existing.id,
+      user_consent: EMPTY_USER_CONSENT,
+      items: [],
+    });
+  }
+
+  itemsList = await readItemsForUser(existing.id);
+  const consentedItemIds = await readProfileConsentedItemIds(
+    itemsList.map((i) => i.item_id),
+  );
+  const items = itemsList.map((i) => ({
+    ...i,
+    profile_consent_accepted: consentedItemIds.has(i.item_id),
+  }));
+  const user_consent = await readUserConsent(existing.id);
 
   return reply.code(200).send({
     user_id: existing.id,
-    items: itemsList,
+    user_consent,
+    items,
   });
 };
 
@@ -148,6 +166,7 @@ async function readItemsForUser(user_id: string) {
       item_network: items.item_network,
       item_domain: items.item_domain,
       item_type: items.item_type,
+      lifecycle_status: items.lifecycle_status,
       item_state: items.item_state,
       item_locations: items.item_locations,
       item_private_state: items.item_private_state,
@@ -176,5 +195,54 @@ async function readItemsForUser(user_id: string) {
     };
   });
 }
+
+async function readUserConsent(userId: string): Promise<{
+  terms_accepted: boolean;
+  privacy_accepted: boolean;
+  has_date_of_birth: boolean;
+}> {
+  const rows = await db
+    .select({ category: consent_record.consentCategory })
+    .from(consent_record)
+    .where(
+      and(
+        eq(consent_record.userId, userId),
+        eq(consent_record.level, 'user'),
+        inArray(consent_record.consentCategory, ['terms', 'privacy']),
+      ),
+    );
+  const cats = new Set(rows.map((r) => r.category));
+  const [urow] = await db
+    .select({ dob: user.dateOfBirth })
+    .from(user)
+    .where(eq(user.id, userId))
+    .limit(1);
+  return {
+    terms_accepted: cats.has('terms'),
+    privacy_accepted: cats.has('privacy'),
+    has_date_of_birth: Boolean(urow?.dob),
+  };
+}
+
+async function readProfileConsentedItemIds(itemIds: string[]): Promise<Set<string>> {
+  if (itemIds.length === 0) return new Set<string>();
+  const rows = await db
+    .select({ itemId: consent_record.itemId })
+    .from(consent_record)
+    .where(
+      and(
+        eq(consent_record.level, 'item'),
+        eq(consent_record.consentCategory, 'profile_creation'),
+        inArray(consent_record.itemId, itemIds),
+      ),
+    );
+  return new Set(rows.map((r) => r.itemId as string));
+}
+
+const EMPTY_USER_CONSENT = {
+  terms_accepted: false,
+  privacy_accepted: false,
+  has_date_of_birth: false,
+};
 
 export default participant_read;
