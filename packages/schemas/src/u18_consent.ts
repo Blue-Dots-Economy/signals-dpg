@@ -9,14 +9,14 @@ export const U18DobBodySchema = z.object({
 export const U18DobResponseSchema = z.object({ isMinor: z.boolean() });
 
 // Read-only U18 status for the authenticated ward, derived from the stored
-// minor_guardian row (birth month/year captured once at login). Lets the UI
-// decide whether to run the guardian flow WITHOUT re-asking the date of birth
-// at profile-creation / action time.
+// `user.age` snapshot (captured once at login). Lets the UI decide whether to
+// run the guardian flow WITHOUT re-asking the age at profile-creation / action
+// time.
 export const U18StatusQuerySchema = z.object({ network: z.string().min(1) });
 export const U18StatusResponseSchema = z.object({
-  /** A birth month/year is already stored for this user (never ask DOB again). */
+  /** An age is already stored for this user (never ask again). */
   hasBirthData: z.boolean(),
-  /** Derived from the stored birth month/year; false when no birth data yet. */
+  /** Derived from the stored age; false when no age captured yet. */
   isMinor: z.boolean(),
   /** A guardian has already been OTP-verified for this user. */
   guardianVerified: z.boolean(),
