@@ -32,6 +32,7 @@ export const apiConfig = {
   allow_extra_schema_data: networkRuntime.ALLOW_EXTRA_SCHEMA_DATA,
   bulk_max_items: networkRuntime.BULK_MAX_ITEMS,
   max_wards_per_guardian: networkRuntime.MAX_WARDS_PER_GUARDIAN,
+  max_profiles_per_user: networkRuntime.MAX_PROFILES_PER_USER,
   schema_registry_url: schemaRegistry.SCHEMA_REGISTRY_URL,
   peer_fetch_timeout_ms: networkRuntime.PEER_FETCH_TIMEOUT_MS,
 };

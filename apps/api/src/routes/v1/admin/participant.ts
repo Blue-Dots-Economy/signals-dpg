@@ -4,7 +4,7 @@ import type {
   FastifyRequest,
 } from 'fastify';
 import { randomUUID } from 'node:crypto';
-import { and, desc, eq, inArray, or } from 'drizzle-orm';
+import { and, eq, inArray, or } from 'drizzle-orm';
 import { db } from '@api/db/postgres/drizzle_config';
 import { ensureItemPartition, items } from '@dpg/database';
 import { user } from '../../../../db/postgres/schema/auth.js';
@@ -266,56 +266,16 @@ export const participant_handler = async (
     body.item_state && Object.keys(body.item_state).length > 0,
   );
 
-  // 3. Idempotent dedup lookup: when the user already exists, the caller
-  //    supplies item_state but NO item_id, and this org is allowed to write
-  //    (i.e. not aggregator_owned_elsewhere), look for an existing item of
-  //    the exact (item_network, item_domain, item_type) owned by this user.
-  //    If found, the resolver routes to update_item instead of insert_item,
-  //    making repeated onboard calls idempotent.
-  //
-  //    The lookup is skipped entirely when:
-  //      - user does not exist (no item can exist yet)
-  //      - body.item_id is set (caller already targeted a specific item)
-  //      - has_item_state is false (account_only path — no item write at all)
-  //      - aggregator and does NOT own the user (aggregator_owned_elsewhere
-  //        path — we must not leak the item_id to a foreign aggregator)
-  //
-  //    Partition pruning: filtering on item_network, item_domain, item_type
-  //    AND created_by lets the Postgres planner prune to the correct child
-  //    partition before scanning.
-  let existing_owned_item_id: string | undefined;
-  if (
-    user_exists &&
-    has_item_state &&
-    !body.item_id &&
-    !(request.acting_org?.org_type === 'aggregator' && !aggregator_owns_user)
-  ) {
-    const network = body.network ?? 'blue_dot';
-    const domain = body.domain ?? 'seeker';
-    const item_type = body.item_type ?? 'profile_1.0';
-    const existing_rows = await db
-      .select({ item_id: items.item_id })
-      .from(items)
-      .where(
-        and(
-          eq(items.created_by, existing!.id),
-          eq(items.item_network, network),
-          eq(items.item_domain, domain),
-          eq(items.item_type, item_type),
-        ),
-      )
-      .orderBy(desc(items.updated_at))
-      .limit(1);
-    existing_owned_item_id = existing_rows[0]?.item_id;
-  }
-
+  // 3. Dispatch. A create is always an insert (#349): item_state with no
+  //    item_id creates a NEW profile every call; item_id updates that specific
+  //    item. The per-user profile cap is enforced downstream in
+  //    createItemInternal (createProfileItem), so all creation paths share it.
   const verdict = resolve_upsert_action({
     acting_org: request.acting_org,
     user_exists,
     item_id_in_body: body.item_id,
     has_item_state,
     aggregator_owns_user,
-    existing_owned_item_id,
   });
 
   if (verdict.kind === 'rejected') {
@@ -480,14 +440,21 @@ export const participant_handler = async (
     }
     let insertedItemId: string | undefined;
     try {
-      const { item_id } = await create_profile_item({
-        tx: db,
-        user_id: existing!.id,
-        network,
-        domain,
-        item_type,
-        payload: body.item_state ?? {},
-      });
+      // Must run inside a transaction: createItemInternal's profile-cap guard
+      // takes a transaction-scoped advisory lock (pg_advisory_xact_lock) and
+      // then counts+inserts. On the plain pooled `db` (autocommit) that lock
+      // would release immediately, leaving the check→insert non-atomic and the
+      // cap racy. Wrapping here mirrors the create_new_user + /item/create paths.
+      const { item_id } = await db.transaction((tx) =>
+        create_profile_item({
+          tx,
+          user_id: existing!.id,
+          network,
+          domain,
+          item_type,
+          payload: body.item_state ?? {},
+        }),
+      );
       insertedItemId = item_id;
     } catch (err) {
       const e = err as { statusCode?: number; errorCode?: string };
