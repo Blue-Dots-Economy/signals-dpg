@@ -440,14 +440,21 @@ export const participant_handler = async (
     }
     let insertedItemId: string | undefined;
     try {
-      const { item_id } = await create_profile_item({
-        tx: db,
-        user_id: existing!.id,
-        network,
-        domain,
-        item_type,
-        payload: body.item_state ?? {},
-      });
+      // Must run inside a transaction: createItemInternal's profile-cap guard
+      // takes a transaction-scoped advisory lock (pg_advisory_xact_lock) and
+      // then counts+inserts. On the plain pooled `db` (autocommit) that lock
+      // would release immediately, leaving the check→insert non-atomic and the
+      // cap racy. Wrapping here mirrors the create_new_user + /item/create paths.
+      const { item_id } = await db.transaction((tx) =>
+        create_profile_item({
+          tx,
+          user_id: existing!.id,
+          network,
+          domain,
+          item_type,
+          payload: body.item_state ?? {},
+        }),
+      );
       insertedItemId = item_id;
     } catch (err) {
       const e = err as { statusCode?: number; errorCode?: string };
