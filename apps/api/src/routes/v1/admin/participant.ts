@@ -20,7 +20,10 @@ import {
 } from '@dpg/schemas';
 import { decryptItemPrivate } from '@/utils/item_decrypt';
 import { resolve_upsert_action } from './_resolve_upsert_action.js';
-import { recordParticipantConsent } from '@/services/participant_consent';
+import {
+  recordParticipantConsent,
+  promoteEligibleDraftsForUser,
+} from '@/services/participant_consent';
 import { getNetworkConfigById } from '@/network_configs';
 import { guardianConsentRequired } from '@/services/minor';
 
@@ -397,27 +400,40 @@ export const participant_handler = async (
       });
     }
 
-    // Existing user, no item_state — record any user-level consent, then read.
-    if (body.compliance && body.compliance.length > 0) {
+    // Existing user, no item_state — persist DOB / record user-level consent,
+    // then promote any drafts the new DOB unblocks.
+    const hasCompliance = Boolean(body.compliance && body.compliance.length > 0);
+    if (hasCompliance || body.date_of_birth) {
       const network = body.network ?? 'blue_dot';
       try {
         await db.transaction(async (tx) => {
-          const consent = await recordParticipantConsent(tx, {
-            compliance: body.compliance,
-            userId: existing!.id,
-            network,
-            brand: null,
-            channel: body.channel,
-            acceptedAt: new Date(),
-          });
-          consent_recorded = consent.recorded;
+          if (body.date_of_birth) {
+            await tx
+              .update(user)
+              .set({ dateOfBirth: new Date(body.date_of_birth), updatedAt: new Date() })
+              .where(eq(user.id, existing!.id));
+          }
+          if (hasCompliance) {
+            const consent = await recordParticipantConsent(tx, {
+              compliance: body.compliance,
+              userId: existing!.id,
+              network,
+              brand: null,
+              channel: body.channel,
+              acceptedAt: new Date(),
+            });
+            consent_recorded = consent.recorded;
+          }
+          if (body.date_of_birth) {
+            await promoteEligibleDraftsForUser(tx, existing!.id);
+          }
         });
       } catch (err) {
         // Never surface the raw error message: a DB error's text can include the
         // failed SQL + bound params. Log the full error, return a curated code.
         request.log.error(
           { err },
-          'participant existing-user consent recording failed',
+          'participant existing-user consent/DOB update failed',
         );
         return reply.code(500).send({
           error: 'CONSENT_WRITE_FAILED',
@@ -476,6 +492,12 @@ export const participant_handler = async (
             { item_state: body.item_state ?? {} },
           );
         }
+        if (body.date_of_birth) {
+          await tx
+            .update(user)
+            .set({ dateOfBirth: new Date(body.date_of_birth), updatedAt: new Date() })
+            .where(eq(user.id, existing!.id));
+        }
         const consent = await recordParticipantConsent(tx, {
           compliance: body.compliance,
           userId: existing!.id,
@@ -486,6 +508,9 @@ export const participant_handler = async (
           acceptedAt: new Date(),
         });
         consent_recorded = consent.recorded;
+        if (body.date_of_birth) {
+          await promoteEligibleDraftsForUser(tx, existing!.id);
+        }
       });
     } catch (err) {
       const e = err as { statusCode?: number; errorCode?: string };

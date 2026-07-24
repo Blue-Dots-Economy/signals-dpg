@@ -1,4 +1,5 @@
-import { sql } from 'drizzle-orm';
+import { and, eq, sql } from 'drizzle-orm';
+import { items } from '@dpg/database';
 import { resolveConsentVersion } from '@/services/consent_version';
 import {
   hasAcceptedProfileConsent,
@@ -150,4 +151,29 @@ export async function recordParticipantConsent(
   }
 
   return { recorded, promoted };
+}
+
+/**
+ * Promotes every `draft` item owned by `userId` that already has a
+ * `profile_creation` consent row. Because `date_of_birth` is user-level,
+ * persisting it can unblock several of the user's profiles at once — call this
+ * after a DOB write. Idempotent: `promoteItemOnProfileConsent` no-ops on items
+ * that are not `draft` or that the guardian/completeness gate still blocks.
+ * Returns the number actually flipped to `live`.
+ */
+export async function promoteEligibleDraftsForUser(
+  tx: DbOrTx,
+  userId: string,
+): Promise<number> {
+  const drafts = await tx
+    .select({ item_id: items.item_id })
+    .from(items)
+    .where(and(eq(items.created_by, userId), eq(items.lifecycle_status, 'draft')));
+  let promoted = 0;
+  for (const d of drafts) {
+    if (await hasAcceptedProfileConsent(tx, d.item_id)) {
+      if (await promoteItemOnProfileConsent(tx, d.item_id)) promoted += 1;
+    }
+  }
+  return promoted;
 }

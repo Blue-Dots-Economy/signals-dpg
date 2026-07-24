@@ -18,8 +18,20 @@ vi.mock('@/services/item_service', () => ({
 vi.mock('@api/db/postgres/schema', () => ({
   consent_record: { __table: 'consent_record' },
 }));
+vi.mock('@dpg/database', () => ({ items: { __table: 'items' } }));
 
 import { recordParticipantConsent } from '@/services/participant_consent';
+
+// helper to build a tx whose select().from().where() resolves to `draftRows`
+function makeSelectTx(draftRows: Array<{ item_id: string }>) {
+  return {
+    select: vi.fn(() => ({
+      from: vi.fn(() => ({
+        where: vi.fn(async () => draftRows),
+      })),
+    })),
+  };
+}
 
 type InsertedRow = Record<string, unknown>;
 
@@ -195,5 +207,16 @@ describe('recordParticipantConsent', () => {
       userId: 'u1', itemId: 'item-1', network: 'blue_dot', channel: 'voice', acceptedAt: new Date(),
     });
     expect(res.promoted).toBe(false);
+  });
+
+  it('promoteEligibleDraftsForUser promotes only drafts that have profile_creation consent', async () => {
+    hasAcceptedProfileConsent.mockImplementation(async (_tx: unknown, itemId: string) => itemId === 'has-consent');
+    promoteItemOnProfileConsent.mockResolvedValue(true);
+    const tx = makeSelectTx([{ item_id: 'has-consent' }, { item_id: 'no-consent' }]);
+    const { promoteEligibleDraftsForUser } = await import('@/services/participant_consent');
+    const n = await promoteEligibleDraftsForUser(tx as never, 'u1');
+    expect(n).toBe(1);
+    expect(promoteItemOnProfileConsent).toHaveBeenCalledWith(tx, 'has-consent');
+    expect(promoteItemOnProfileConsent).not.toHaveBeenCalledWith(tx, 'no-consent');
   });
 });

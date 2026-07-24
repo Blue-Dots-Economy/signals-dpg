@@ -946,4 +946,52 @@ describeIf(`POST /api/v1/admin/participant (integration)${
       onboarded_user_ids.push(res.json().user_id);
     }
   });
+
+  it('activates a gated draft by later supplying date_of_birth via item_id', async () => {
+    const email = `int_activate_${randomUUID().slice(0, 6)}@a.test`;
+    // 1) create WITH consent but NO dob on a gated domain → stays draft
+    const gated = guardianConsentRequired(
+      await getNetworkConfigById(primary.network),
+      primary.domain,
+    );
+    if (!gated) return; // this scenario only applies on a gated served domain
+    const createRes = await app.inject({
+      method: 'POST',
+      url: '/api/v1/admin/participant',
+      headers: { 'x-api-key': ns.raw_key, 'x-acting-org-id': ns.org_id, 'content-type': 'application/json' },
+      payload: {
+        email, name: 'Activate Later', channel: 'voice',
+        network: primary.network, domain: primary.domain, item_type: primary.item_type,
+        item_state: generateMinimalItemState(primary.schema),
+        // gated + consent + no DOB would 400 (DOB_REQUIRED); so create with NO
+        // consent first (bulk-style draft), then add consent+DOB on activation.
+      },
+    });
+    expect(createRes.statusCode).toBe(200);
+    const created = createRes.json();
+    onboarded_user_ids.push(created.user_id);
+    const itemId = created.items[0].item_id as string;
+    expect(created.items[0].lifecycle_status).toBe('draft');
+
+    // 2) activate: item_id + full consent + adult DOB → live
+    const actRes = await app.inject({
+      method: 'POST',
+      url: '/api/v1/admin/participant',
+      headers: { 'x-api-key': ns.raw_key, 'x-acting-org-id': ns.org_id, 'content-type': 'application/json' },
+      payload: {
+        email, name: 'Activate Later', channel: 'voice',
+        item_id: itemId, date_of_birth: '1990-01-01',
+        network: primary.network, domain: primary.domain, item_type: primary.item_type,
+        compliance: [
+          { key: 'user_terms', value: true },
+          { key: 'user_privacy', value: true },
+          { key: 'profile_creation', value: true },
+        ],
+      },
+    });
+    expect(actRes.statusCode).toBe(200);
+    const activated = actRes.json();
+    const row = activated.items.find((i: { item_id: string }) => i.item_id === itemId);
+    expect(row.lifecycle_status).toBe('live');
+  });
 });
