@@ -18,9 +18,10 @@ The base design (2026-07-22) added the `compliance` array, recorded consent into
 
 - **`compliance` and `date_of_birth` are both optional.** Record only entries with `value === true`; absent / `false` / unknown keys → skip. No rejection is stored.
 - **Fail-closed, no bypass:** missing DOB on a guardian-gated (seeker) domain → `draft`; a minor DOB → `draft`. Never assume adult.
+- **Creating a profile requires no consent.** `item_state` (no `item_id`) always creates the profile; with no `profile_creation` it simply stays `draft`. Consent and DOB only gate **go-live**, never creation — they can be supplied on the create call, or later via the profile's `item_id`.
 - **Consent scope differs by level:**
   - `terms`, `privacy` — **user-level**; accepted once, inherited by all the user's profiles.
-  - `profile_creation` — **item-level**; each profile needs its own row (keyed to `item_id`).
+  - `profile_creation` — **item-level**; each profile needs its own row (keyed to `item_id`) — but only to go live, not to be created.
   - `date_of_birth` — **user-level**.
 - **Multi-profile routing (post-#353):** `item_state` *without* `item_id` → creates a **new** profile (bounded by `MAX_PROFILES_PER_USER`); `item_id` + `item_state` → **updates** that profile.
 
@@ -40,7 +41,7 @@ Already implemented on PR #354 (base design): optional `compliance`; deprecated-
 
 3. **Dedupe user-level consent.** When recording `terms`/`privacy`, skip the insert if a row already exists for `(userId, network, category)` at the **current** resolved version; write a new row only when it's genuinely new or the version changed. Prevents multi-profile users accumulating duplicate user-level rows. `profile_creation` stays per-item (its own `onConflictDoNothing` idempotency, unchanged).
 
-4. **2nd (and Nth) profile:** a call with `item_state`, no `item_id`, and `compliance` containing at least `profile_creation` → `insert_item` creates a new profile and records its own `profile_creation`. `terms`/`privacy` and DOB are inherited from the user (prerequisite already satisfied), so the new profile goes `live` when complete + adult. Caller need only send `profile_creation` + the profile's `item_state` (re-sending user-level keys is harmless — deduped per §3).
+4. **2nd (and Nth) profile:** a call with `item_state` and no `item_id` → `insert_item` creates a new profile (bounded by the cap). Consent is optional here too — with no `profile_creation` the new profile is created `draft`; include `profile_creation` (on this call, or later via the profile's `item_id`) to promote it. `terms`/`privacy` and DOB are inherited from the user, so a new profile needs only its own `profile_creation` + a complete `item_state` to go `live` (re-sending user-level keys is harmless — deduped per §3).
 
 **Activation / enrichment call** (bulk-created draft → live):
 ```jsonc
