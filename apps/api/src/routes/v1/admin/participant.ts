@@ -25,7 +25,7 @@ import {
   promoteEligibleDraftsForUser,
 } from '@/services/participant_consent';
 import { getNetworkConfigById } from '@/network_configs';
-import { guardianConsentRequired } from '@/services/minor';
+import { guardianConsentRequired, isMinor } from '@/services/minor';
 
 /**
  * POST /api/v1/admin/participant
@@ -61,7 +61,7 @@ export const participant: FastifyPluginAsync = async (app) => {
 
 type OnboardingFields = {
   phone_norm: string | null;
-  date_of_birth: string | undefined;
+  age: number | undefined;
   acting_org_id: string;
   channel: UpsertBody['channel'];
   source_id: string | undefined;
@@ -71,7 +71,10 @@ type OnboardingFields = {
 const buildOnboardingSet = (f: OnboardingFields) => ({
   phoneNumber: f.phone_norm,
   phoneNumberVerified: false,
-  dateOfBirth: f.date_of_birth ? new Date(f.date_of_birth) : null,
+  // Age snapshot (#331) — integrating DPGs derive it from the birth year and
+  // send the number; no birth date is accepted. (Deprecated terms/privacy
+  // booleans are intentionally NOT written — consent lives in the ledger, #309.)
+  age: f.age ?? null,
   onboardedByOrgId: f.acting_org_id,
   onboardedVia: f.channel,
   onboardedSourceId: f.source_id ?? null,
@@ -270,7 +273,7 @@ export const participant_handler = async (
       email: user.email,
       phoneNumber: user.phoneNumber,
       onboardedByOrgId: user.onboardedByOrgId,
-      dateOfBirth: user.dateOfBirth,
+      age: user.age,
     })
     .from(user)
     .where(whereClause!)
@@ -279,23 +282,38 @@ export const participant_handler = async (
   const existing = existingRows[0] ?? null;
   const user_exists = Boolean(existing);
 
-  // On guardian-gated domains, recording user consent requires a DOB — but a
-  // DOB already on the user's record satisfies it (only a brand-new / DOB-less
-  // user must supply one). Runs after the lookup so a returning user re-sending
-  // the consent pair isn't wrongly rejected.
-  if (hasUserTerms && hasUserPrivacy && !body.date_of_birth && !existing?.dateOfBirth) {
+  // Effective age (#331): what this call supplies, else what's already on file.
+  const effectiveAge = body.age ?? existing?.age ?? null;
+
+  // U18 (#309/#331): a minor is NEVER onboarded via this server-to-server API.
+  // If we can tell the user is under 18, reject with an error and perform NO
+  // operation — no user/profile create, no update, no consent recorded. Minors
+  // complete onboarding through the portal (guardian OTP flow).
+  if (effectiveAge != null && isMinor(effectiveAge)) {
+    return reply.code(400).send({
+      error: 'U18_NOT_ALLOWED',
+      message: 'under-18 users cannot be onboarded via this API; use the portal',
+    });
+  }
+
+  // On guardian-gated domains, recording user consent requires a known age so we
+  // can confirm the user is an adult before recording consent / promoting. An age
+  // already on the user's record satisfies it; only a brand-new / age-less user
+  // must supply one. Runs after the lookup so a returning adult re-sending the
+  // consent pair isn't wrongly rejected.
+  if (hasUserTerms && hasUserPrivacy && effectiveAge == null) {
     const gate_network = body.network ?? 'blue_dot';
     const gate_domain = body.domain ?? 'seeker';
     let gated = false;
     try {
       gated = guardianConsentRequired(await getNetworkConfigById(gate_network), gate_domain);
     } catch (err) {
-      request.log.warn({ err, network: gate_network }, 'network config load failed during DOB gate check');
+      request.log.warn({ err, network: gate_network }, 'network config load failed during age gate check');
     }
     if (gated) {
       return reply.code(400).send({
-        error: 'DOB_REQUIRED',
-        message: 'date_of_birth is required with consent on this domain',
+        error: 'AGE_REQUIRED',
+        message: 'age is required with consent on this domain',
       });
     }
   }
@@ -356,7 +374,7 @@ export const participant_handler = async (
 
       const fields: OnboardingFields = {
         phone_norm,
-        date_of_birth: body.date_of_birth,
+        age: body.age,
         acting_org_id,
         channel: body.channel,
         source_id: body.source_id,
@@ -405,16 +423,16 @@ export const participant_handler = async (
     }
 
     // Existing user, no item_state — persist DOB / record user-level consent,
-    // then promote any drafts the new DOB unblocks.
+    // then promote any drafts the new age unblocks.
     const hasCompliance = Boolean(body.compliance && body.compliance.length > 0);
-    if (hasCompliance || body.date_of_birth) {
+    if (hasCompliance || body.age != null) {
       const network = body.network ?? 'blue_dot';
       try {
         await db.transaction(async (tx) => {
-          if (body.date_of_birth) {
+          if (body.age != null) {
             await tx
               .update(user)
-              .set({ dateOfBirth: new Date(body.date_of_birth), updatedAt: new Date() })
+              .set({ age: body.age, updatedAt: new Date() })
               .where(eq(user.id, existing!.id));
           }
           if (hasCompliance) {
@@ -428,7 +446,7 @@ export const participant_handler = async (
             });
             consent_recorded = consent.recorded;
           }
-          if (body.date_of_birth) {
+          if (body.age != null) {
             await promoteEligibleDraftsForUser(tx, existing!.id);
           }
         });
@@ -496,10 +514,10 @@ export const participant_handler = async (
             { item_state: body.item_state ?? {} },
           );
         }
-        if (body.date_of_birth) {
+        if (body.age != null) {
           await tx
             .update(user)
-            .set({ dateOfBirth: new Date(body.date_of_birth), updatedAt: new Date() })
+            .set({ age: body.age, updatedAt: new Date() })
             .where(eq(user.id, existing!.id));
         }
         const consent = await recordParticipantConsent(tx, {
@@ -512,7 +530,7 @@ export const participant_handler = async (
           acceptedAt: new Date(),
         });
         consent_recorded = consent.recorded;
-        if (body.date_of_birth) {
+        if (body.age != null) {
           await promoteEligibleDraftsForUser(tx, existing!.id);
         }
       });
@@ -662,7 +680,7 @@ export const participant_handler = async (
 
   const fields: OnboardingFields = {
     phone_norm,
-    date_of_birth: body.date_of_birth,
+    age: body.age,
     acting_org_id,
     channel: body.channel,
     source_id: body.source_id,

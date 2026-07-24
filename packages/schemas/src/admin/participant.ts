@@ -43,10 +43,10 @@ export const UpsertParticipantRequest = z
     email: z.email().optional(),
     phone_number: PhoneE164.optional(),
     name: z.string().min(1),
-    // Accept a date-only `yyyy-mm-dd` OR a full ISO datetime — integrating DPGs
-    // (aggregator / voice / WhatsApp) typically have only a birth date. Both
-    // parse cleanly via `new Date(...)` into `user.date_of_birth`.
-    date_of_birth: z.union([z.iso.date(), z.iso.datetime()]).optional(),
+    // Age in years, stored as the `user.age` snapshot (#331). Integrating DPGs
+    // (aggregator / voice / WhatsApp) derive it from the birth year on their side
+    // and send the number here — no birth date is accepted.
+    age: z.coerce.number().int().min(0).max(120).optional(),
     // Deprecated (#309): accepted for backward compatibility with existing
     // callers (aggregator-dpg / bulk) but IGNORED. Consent is recorded via
     // `compliance`. Remove in a later cleanup ticket.
@@ -147,7 +147,7 @@ export const GetParticipantResponse = z.object({
   user_consent: z.object({
     terms_accepted: z.boolean(),
     privacy_accepted: z.boolean(),
-    has_date_of_birth: z.boolean(),
+    has_age: z.boolean(),
   }),
   items: z.array(ParticipantItemSnapshot),
 });

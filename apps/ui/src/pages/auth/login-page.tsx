@@ -30,7 +30,7 @@ import type { DotNetworkDomain } from '@/engine/types';
 import { getServedScope } from '@/lib/served-binding';
 import type { SignupExtras } from '@/lib/signup-domain';
 import { SignupDobStep } from '@/components/consent/u18/signup-dob-step';
-import { isMinorFromDate, toDateOnly } from '@/lib/guardian-consent';
+import { isMinorFromAge } from '@/lib/guardian-consent';
 import { PhoneInput, toE164 } from '@/components/auth/phone-input';
 import {
   SignupGuardianFlow,
@@ -94,10 +94,10 @@ export function LoginPage() {
   const [signupGuardianGate, setSignupGuardianGate] = useState<{
     identifier: AuthIdentifier;
     domain: string;
-    dateOfBirth: Date;
+    age: number;
     resolvedName: string;
     resolvedSignupExtras: SignupExtras;
-    /** true = an EXISTING user backfilling DOB before login (not a new signup). */
+    /** true = an EXISTING user backfilling age before login (not a new signup). */
     exists: boolean;
   } | null>(null);
   // Set for a guardian-gated (u18-enabled) domain — renders the DOB step. For a
@@ -188,8 +188,8 @@ export function LoginPage() {
         name: resolvedName,
         redirectTo,
         pendingConsent: pendingConsent ?? null,
-        // Set for a new signup (domain + DOB) and for an existing user who
-        // backfilled DOB pre-OTP (dateOfBirth only). otp-page persists it.
+        // Set for a new signup (domain + age) and for an existing user who
+        // backfilled age pre-OTP (age only). otp-page persists it.
         signupExtras: resolvedSignupExtras,
       },
     });
@@ -277,21 +277,21 @@ export function LoginPage() {
     await proceedToOtp(ident, exists, resolvedName, resolvedSignupExtras);
   };
 
-  // Resolve the DOB step: minor -> guardian flow (before their own OTP);
-  // adult -> ordinary consent + OTP. DOB (month/year) rides along in
-  // signupExtras so otp-page persists it post-verify.
-  const handleSignupDob = async (date: Date) => {
+  // Resolve the birth-year step: minor -> guardian flow (before their own OTP);
+  // adult -> ordinary consent + OTP. Age rides along in signupExtras so
+  // otp-page persists it post-verify.
+  const handleSignupDob = async (age: number) => {
     const gate = signupDobGate;
     if (!gate) return;
-    const extras: SignupExtras = { domain: gate.domain, dateOfBirth: toDateOnly(date) };
+    const extras: SignupExtras = { domain: gate.domain, age };
     setSignupDobGate(null);
 
     // A brand-new minor signup captures the guardian pre-auth (materialized on
     // account creation — safe, same session owns the new identifier). An
     // EXISTING user must NOT designate a guardian before proving they own the
     // number (login OTP), so their guardian step runs post-login on the home
-    // page; here we only persist the DOB and proceed to the login OTP.
-    if (isMinorFromDate(date) && !gate.exists) {
+    // page; here we only persist the age and proceed to the login OTP.
+    if (isMinorFromAge(age) && !gate.exists) {
       toast.info(t('auth.minor_toast_title', "You're under 18"), {
         description: t(
           'auth.minor_toast_desc',
@@ -301,7 +301,7 @@ export function LoginPage() {
       setSignupGuardianGate({
         identifier: gate.identifier,
         domain: gate.domain,
-        dateOfBirth: date,
+        age,
         resolvedName: gate.resolvedName,
         resolvedSignupExtras: extras,
         exists: gate.exists,
@@ -471,7 +471,7 @@ export function LoginPage() {
       )}
       <AuthShell>
         {signupDobGate ? (
-          <SignupDobStep existing={signupDobGate.exists} onSubmit={(date) => { void handleSignupDob(date); }} />
+          <SignupDobStep existing={signupDobGate.exists} onSubmit={(age) => { void handleSignupDob(age); }} />
         ) : signupGuardianGate ? (
           <SignupGuardianFlow
             network={themeId}
@@ -482,7 +482,7 @@ export function LoginPage() {
                 ? { email: signupGuardianGate.identifier.email }
                 : { phoneNumber: signupGuardianGate.identifier.phoneNumber }) as SignupIdentifier
             }
-            dateOfBirth={signupGuardianGate.dateOfBirth}
+            age={signupGuardianGate.age}
             onComplete={handleGuardianComplete}
           />
         ) : !showSignupForm ? null : (

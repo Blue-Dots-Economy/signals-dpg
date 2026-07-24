@@ -81,8 +81,8 @@ export async function acceptProfileConsent(
 
 export interface SubmitU18DobBody {
   network: string;
-  /** Full date of birth, ISO string — stored on user.date_of_birth. */
-  dateOfBirth: string;
+  /** Age in years (derived from birth year on the client) — stored on user.age. */
+  age: number;
 }
 
 export interface SubmitU18DobResponse {
@@ -193,7 +193,7 @@ export interface StartSignupGuardianBody {
   domain: string;
   email?: string;
   phoneNumber?: string;
-  dateOfBirth: string;
+  age: number;
   guardianName: string;
   guardianEmail?: string;
   guardianPhone?: string;

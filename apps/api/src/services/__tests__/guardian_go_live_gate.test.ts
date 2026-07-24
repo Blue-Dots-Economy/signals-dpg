@@ -13,7 +13,7 @@ import type { DbOrTx } from '@/services/item_service';
  * Unit coverage for the server-authoritative U18 go-live gate. This is the
  * single source of truth used by create / promote / update, so proving it here
  * covers all three (the update path previously had NO coverage and would flip a
- * minor to `live` on a self-consent row — PR #311 review blocker #1; a null DOB
+ * minor to `live` on a self-consent row — PR #311 review blocker #1; a null age
  * was treated as adult — blocker #2).
  */
 
@@ -27,7 +27,7 @@ const gatedCfg = {
 } as unknown as NetworkConfigDocument;
 
 // Chainable exec stub: each `.select().from().where().limit()` chain resolves
-// to the next queued result array (query 1 = ward DOB, query 2 = guardian row).
+// to the next queued result array (query 1 = ward age, query 2 = guardian row).
 function makeExec(results: unknown[][]): DbOrTx {
   let i = 0;
   const chain = {
@@ -57,19 +57,19 @@ describe('guardianGateBlocksGoLive', () => {
     expect(blocked).toBe(false);
   });
 
-  it('blocks (fail-closed) when DOB is null on a gated domain — blocker #2', async () => {
+  it('blocks (fail-closed) when age is null on a gated domain — blocker #2', async () => {
     const blocked = await guardianGateBlocksGoLive(makeExec([[]]), item);
     expect(blocked).toBe(true);
   });
 
   it('does not block a proven adult on a gated domain', async () => {
-    const blocked = await guardianGateBlocksGoLive(makeExec([[{ dob: new Date('1990-01-10') }]]), item);
+    const blocked = await guardianGateBlocksGoLive(makeExec([[{ age: 36 }]]), item);
     expect(blocked).toBe(false);
   });
 
   it('blocks a minor with no guardian profile_creation row — blocker #1', async () => {
     const blocked = await guardianGateBlocksGoLive(
-      makeExec([[{ dob: new Date('2012-01-10') }], []]),
+      makeExec([[{ age: 14 }], []]),
       item,
     );
     expect(blocked).toBe(true);
@@ -77,7 +77,7 @@ describe('guardianGateBlocksGoLive', () => {
 
   it('does not block a minor once a guardian row exists', async () => {
     const blocked = await guardianGateBlocksGoLive(
-      makeExec([[{ dob: new Date('2012-01-10') }], [{ id: 'consent-1' }]]),
+      makeExec([[{ age: 14 }], [{ id: 'consent-1' }]]),
       item,
     );
     expect(blocked).toBe(false);

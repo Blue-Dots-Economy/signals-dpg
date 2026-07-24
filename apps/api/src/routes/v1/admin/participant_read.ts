@@ -199,7 +199,7 @@ async function readItemsForUser(user_id: string) {
 async function readUserConsent(userId: string): Promise<{
   terms_accepted: boolean;
   privacy_accepted: boolean;
-  has_date_of_birth: boolean;
+  has_age: boolean;
 }> {
   // User-level terms/privacy are intentionally not network-scoped — this
   // status view is network-agnostic by design.
@@ -215,14 +215,14 @@ async function readUserConsent(userId: string): Promise<{
     );
   const cats = new Set(rows.map((r) => r.category));
   const [urow] = await db
-    .select({ dob: user.dateOfBirth })
+    .select({ age: user.age })
     .from(user)
     .where(eq(user.id, userId))
     .limit(1);
   return {
     terms_accepted: cats.has('terms'),
     privacy_accepted: cats.has('privacy'),
-    has_date_of_birth: Boolean(urow?.dob),
+    has_age: urow?.age != null,
   };
 }
 
@@ -244,7 +244,7 @@ async function readProfileConsentedItemIds(itemIds: string[]): Promise<Set<strin
 const EMPTY_USER_CONSENT = {
   terms_accepted: false,
   privacy_accepted: false,
-  has_date_of_birth: false,
+  has_age: false,
 };
 
 export default participant_read;

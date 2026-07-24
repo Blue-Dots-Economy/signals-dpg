@@ -172,7 +172,7 @@ export async function recordParticipantConsent(
 
 /**
  * Promotes every `draft` item owned by `userId` that already has a
- * `profile_creation` consent row. Because `date_of_birth` is user-level,
+ * `profile_creation` consent row. Because `age` is user-level,
  * persisting it can unblock several of the user's profiles at once — call this
  * after a DOB write. Idempotent: `promoteItemOnProfileConsent` no-ops on items
  * that are not `draft` or that the guardian/completeness gate still blocks.
