@@ -908,4 +908,42 @@ describeIf(`POST /api/v1/admin/participant (integration)${
       expect(body.items[0].lifecycle_status).toBe('live');
     }
   });
+
+  it('gated domain: user consent without date_of_birth → 400 DOB_REQUIRED', async () => {
+    const gated = guardianConsentRequired(
+      await getNetworkConfigById(primary.network),
+      primary.domain,
+    );
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/v1/admin/participant',
+      headers: {
+        'x-api-key': ns.raw_key,
+        'x-acting-org-id': ns.org_id,
+        'content-type': 'application/json',
+      },
+      payload: {
+        email: `int_dobreq_${randomUUID().slice(0, 6)}@a.test`,
+        name: 'DOB Required',
+        channel: 'voice',
+        network: primary.network,
+        domain: primary.domain,
+        item_type: primary.item_type,
+        item_state: generateMinimalItemState(primary.schema),
+        compliance: [
+          { key: 'user_terms', value: true },
+          { key: 'user_privacy', value: true },
+          { key: 'profile_creation', value: true },
+        ],
+      },
+    });
+    if (gated) {
+      expect(res.statusCode).toBe(400);
+      expect(res.json().error).toBe('DOB_REQUIRED');
+    } else {
+      // non-gated served domain: consent without DOB is allowed
+      expect(res.statusCode).toBe(200);
+      onboarded_user_ids.push(res.json().user_id);
+    }
+  });
 });

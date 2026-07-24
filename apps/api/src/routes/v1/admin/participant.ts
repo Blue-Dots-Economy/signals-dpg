@@ -21,6 +21,8 @@ import {
 import { decryptItemPrivate } from '@/utils/item_decrypt';
 import { resolve_upsert_action } from './_resolve_upsert_action.js';
 import { recordParticipantConsent } from '@/services/participant_consent';
+import { getNetworkConfigById } from '@/network_configs';
+import { guardianConsentRequired } from '@/services/minor';
 
 /**
  * POST /api/v1/admin/participant
@@ -231,6 +233,43 @@ export const participant_handler = async (
       error: 'MISSING_IDENTIFIER',
       message: 'either email or phone_number is required',
     });
+  }
+
+  // --- Consent-payload validation (#309) ---
+  const compliance = body.compliance ?? [];
+  // Accept-only: any entry sent as false rejects the whole request.
+  if (compliance.some((c) => c.value === false)) {
+    return reply.code(400).send({
+      error: 'CONSENT_DECLINED',
+      message: 'consent cannot be declined — omit a key to skip it',
+    });
+  }
+  // user_terms + user_privacy are a both-or-none pair.
+  const hasUserTerms = compliance.some((c) => c.key === 'user_terms' && c.value === true);
+  const hasUserPrivacy = compliance.some((c) => c.key === 'user_privacy' && c.value === true);
+  if (hasUserTerms !== hasUserPrivacy) {
+    return reply.code(400).send({
+      error: 'USER_LEVEL_INCOMPLETE',
+      message: 'user_terms and user_privacy must be sent together',
+    });
+  }
+  // On guardian-gated domains, recording user consent requires date_of_birth.
+  if (hasUserTerms && hasUserPrivacy && !body.date_of_birth) {
+    const gate_network = body.network ?? 'blue_dot';
+    const gate_domain = body.domain ?? 'seeker';
+    let gated = false;
+    try {
+      gated = guardianConsentRequired(await getNetworkConfigById(gate_network), gate_domain);
+    } catch (err) {
+      // Unknown network → downstream item write will reject it; don't block here.
+      request.log.error({ err, network: gate_network }, 'network config load failed during DOB gate check');
+    }
+    if (gated) {
+      return reply.code(400).send({
+        error: 'DOB_REQUIRED',
+        message: 'date_of_birth is required with consent on this domain',
+      });
+    }
   }
 
   // 1. Look up existing user.

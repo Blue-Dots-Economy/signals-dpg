@@ -656,7 +656,10 @@ describe('POST /admin/participant', () => {
       url: '/participant',
       payload: baseBody({
         item_state: undefined,
-        compliance: [{ key: 'user_terms', value: true }],
+        compliance: [
+          { key: 'user_terms', value: true },
+          { key: 'user_privacy', value: true },
+        ],
       }),
     });
     expect(res.statusCode).toBe(500);
@@ -1265,5 +1268,33 @@ describe('POST /admin/participant', () => {
     for (const item of body.items) {
       expect(item.item_network).toBe('blue_dot');
     }
+  });
+
+  it('rejects any compliance entry with value:false → 400 CONSENT_DECLINED', async () => {
+    const app = await buildApp({ org_id: 'org_agg_1', org_type: 'aggregator' });
+    const res = await app.inject({
+      method: 'POST',
+      url: '/participant',
+      payload: baseBody({
+        item_state: undefined,
+        compliance: [{ key: 'user_terms', value: false }],
+      }),
+    });
+    expect(res.statusCode).toBe(400);
+    expect(res.json().error).toBe('CONSENT_DECLINED');
+  });
+
+  it('rejects a broken user-consent pair → 400 USER_LEVEL_INCOMPLETE', async () => {
+    const app = await buildApp({ org_id: 'org_agg_1', org_type: 'aggregator' });
+    const res = await app.inject({
+      method: 'POST',
+      url: '/participant',
+      payload: baseBody({
+        item_state: undefined,
+        compliance: [{ key: 'user_terms', value: true }], // no user_privacy
+      }),
+    });
+    expect(res.statusCode).toBe(400);
+    expect(res.json().error).toBe('USER_LEVEL_INCOMPLETE');
   });
 });
