@@ -240,7 +240,11 @@ Extend the read endpoint (`participant_read.ts` / `GetParticipantResponse`) to r
 
 Age capture is expected to move from full date of birth to **year of birth only**. Once that change is in place, the participant API accepts **year of birth** instead of a full `date_of_birth`, and the minor/adult computation uses the year. Until then we keep `date_of_birth` (full date) exactly as today — no change here.
 
-**Deferred — reject U18 at the participant API (add after the DOB→age migration).** The eventual intent is: if the user is **U18, reject the request with an error** (they must onboard via the portal, not a server-to-server channel). We are **not** doing this now: with `date_of_birth` today, a minor still **creates** a `draft` profile (per the fail-closed principle above) — no rejection. When age replaces DOB, add the U18-rejection check at that point.
+**Deferred — reject U18 at the participant API (add after the DOB→age migration).** The eventual intent is: if the user is **U18, the whole request is rejected with an error and NO operation is performed** — no user/profile create, no update, and **the consent itself is treated as invalid and not recorded**. A minor must onboard via the portal (guardian OTP flow), never a server-to-server channel.
+
+**Current behaviour (NOT the target — will change with the migration):** today a minor *can* "accept" consent through this API — the `compliance` rows **are recorded** and the profile is simply held in `draft` by the fail-closed guardian gate (see scenario #9 / the `G2` GET example: `profile_consent_accepted: true` but `lifecycle_status: draft`). This is acceptable only because DOB is client-supplied and unverified today.
+
+**When age replaces DOB:** add an early U18 check in `participant_handler` — if the computed age is under 18, return an error (e.g. `400 U18_NOT_ALLOWED`) **before** any create/update/consent write, so a minor's request performs nothing and records no consent. This supersedes the "minor → recorded-but-draft" behaviour above.
 
 ## Backward compatibility — verified against `aggregator-dpg`
 
