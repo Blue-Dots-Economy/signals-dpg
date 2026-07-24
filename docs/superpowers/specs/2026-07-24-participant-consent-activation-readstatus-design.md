@@ -16,18 +16,20 @@ The base design (2026-07-22) added the `compliance` array, recorded consent into
 
 ## Confirmed principles
 
-- **`compliance` may be omitted entirely** (bulk / registration-link send no consent and no DOB) → user + profile created as `draft`, nothing recorded.
-- **User-level consent is an ATOMIC BUNDLE — `user_terms` + `user_privacy` + `date_of_birth` are sent all-together-or-none.** A call includes **all three** or **none** of them; any partial subset (terms/privacy without DOB, DOB without the two consents, only one consent, etc.) → **`400 USER_LEVEL_INCOMPLETE`**. This captures every user-level datum in one shot, so a user is never left consented-but-DOB-less. **Applies on all channels** (bulk sends none of the trio → exempt; callers sending only the deprecated `terms_accepted`/`privacy_accepted` booleans are unaffected — those are ignored and are not part of the trio).
+- **All of `compliance` is optional** — the array itself and every key within it. Bulk / registration-link send no consent and no DOB → user + profile created as `draft`, nothing recorded. Callers sending only the deprecated `terms_accepted`/`privacy_accepted` booleans are unaffected (those are ignored).
+- **`user_terms` + `user_privacy` are a both-or-none pair** — accept both platform consents together, or send neither. One without the other → **`400 USER_LEVEL_INCOMPLETE`**. (Schema-level; domain-agnostic.)
+- **On guardian-gated domains, recording user consent requires `date_of_birth`.** When the pair is present (being recorded) **and** the call's domain is guardian-gated, `date_of_birth` must also be present → else **`400 DOB_REQUIRED`**. This stops a gated (seeker) profile being left consented-but-DOB-less (which would strand it in `draft`). On **non-gated** domains, DOB is **not** required with consent. *(Handler-level — the check needs `guardianConsentRequired(networkConfig, domain)`, which isn't available at Zod time.)*
+- **`date_of_birth` is otherwise optional and independent** — user-level; may be sent with consent, on its own, or omitted. (Only the gated-domain rule above ever makes it mandatory.)
 - **`compliance` is accept-only — ANY `false` is an error.** Every `compliance` entry that is sent MUST be `value: true`. **Any** entry with `value: false` — `user_terms`, `user_privacy`, **or** `profile_creation` — → **reject the whole request, performing no create / update / consent write** (**`400 CONSENT_DECLINED`**). To *not* consent to something, **omit its key** — never send `false`. (There is no "declined" state stored; consent is recorded or absent.)
 - **`profile_creation` is optional and item-level.** Present with `true` → recorded for that `item_id` (then promote); **omitted** → skipped → the profile is still created/kept as `draft`. (Present with `false` → rejected, per accept-only above.) Declining by *omission* never blocks creating the draft (creating needs no consent).
 - **Fail-closed, no bypass:** missing DOB on a guardian-gated (seeker) domain → `draft`; a **minor** DOB → the profile is still **created** but stays `draft`, to be completed via the **portal**. Never assume adult. *(Future: DOB is replaced by year-of-birth; a U18 still gets a draft profile and completes it via the portal — no change here beyond the payload swap.)*
 - **Creating a profile requires no consent.** `item_state` (no `item_id`) always creates the profile; with no `profile_creation` it simply stays `draft`. Consent and DOB only gate **go-live**, never creation.
 - **Consent scope differs by level:**
-  - `terms`, `privacy` — **user-level**; accepted once (with DOB, per the atomic bundle), inherited by all the user's profiles.
+  - `terms`, `privacy` — **user-level**; accepted once (as a pair), inherited by all the user's profiles.
   - `profile_creation` — **item-level**; each profile needs its own row (keyed to `item_id`) — but only to go live, not to be created.
-  - `date_of_birth` — **user-level** (part of the atomic bundle).
+  - `date_of_birth` — **user-level**; required alongside user consent only on guardian-gated domains, optional otherwise.
 - **Multi-profile routing (post-#353, refined here):** `item_state` *without* `item_id` → creates a **new** profile (bounded by `MAX_PROFILES_PER_USER`). **`item_id` targets that existing profile**, and `item_state` on that call is *optional*: if given it updates the fields, if omitted the fields are unchanged. Either way the call records any `compliance` (incl. item-level `profile_creation` for that `item_id`) and re-promotes. *(This refines #353's resolver — which today routes an `item_id` with no `item_state` to the account-only path — so a consent-only activation can target a specific draft without re-sending its fields.)*
-- **User-level bundle with no item → account-only:** a call carrying the trio (`user_terms`+`user_privacy`+`date_of_birth`) and no `item_state`/`item_id` records terms/privacy, persists DOB, then promotes **all** the user's eligible consented drafts (DOB is user-level).
+- **User-level consent with no item → account-only:** a call carrying the `user_terms`+`user_privacy` pair (+ `date_of_birth`) and no `item_state`/`item_id` records terms/privacy, persists DOB, then promotes **all** the user's eligible consented drafts (DOB is user-level).
 
 ## Go-live gate checklist (unchanged, for reference)
 
@@ -39,11 +41,12 @@ Already implemented on PR #354 (base design): optional `compliance`; deprecated-
 
 **New deltas in this extension:**
 
-0. **Request validation (schema-level, `superRefine` on `UpsertParticipantRequest`).** Two rules, both returning `400` before any DB work:
-   - **Accept-only (checked first):** any `compliance` entry present with `value: false` — any key, incl. `profile_creation` — → `400 CONSENT_DECLINED` (no create/update/consent). Omit a key to skip it; never send `false`.
-   - **Atomic user-level bundle:** `user_terms`, `user_privacy`, and `date_of_birth` are all-or-none. If any one of the three is present but not all three → `400 USER_LEVEL_INCOMPLETE`. (Presence = the `user_terms`/`user_privacy` key appearing in `compliance`, and `date_of_birth` on the body.)
-   - **Precedence:** if a call trips both, return **`CONSENT_DECLINED`** (the `false` value is the more specific error).
-   These are pure payload validations (no DB), so they belong in the Zod schema. Everything below runs only after they pass.
+0. **Request validation.** Three checks, in this order, all returning `400` before/at the start of handling:
+   - **Accept-only (schema-level, `superRefine`, checked first):** any `compliance` entry present with `value: false` (any key, incl. `profile_creation`) → **`400 CONSENT_DECLINED`** (no create/update/consent). Omit a key to skip it; never send `false`.
+   - **User-consent pair (schema-level, `superRefine`):** `user_terms` and `user_privacy` are both-or-none — exactly one present → **`400 USER_LEVEL_INCOMPLETE`**.
+   - **DOB-required-on-gated (handler-level, after network config resolves):** if the user-consent pair is being recorded **and** the call's domain is guardian-gated (`guardianConsentRequired(networkConfig, domain)`) **and** `date_of_birth` is absent → **`400 DOB_REQUIRED`**. Non-gated domains skip this — consent without DOB is fine there.
+   - **Precedence:** `CONSENT_DECLINED` (any `false`) is evaluated before the pair and DOB rules.
+   The first two are pure payload checks (Zod). The DOB rule can't be — it depends on network config — so it lives in the handler. `date_of_birth` itself stays independently optional (may be sent alone or omitted); only the gated rule makes it mandatory.
 
 1. **Persist `date_of_birth` on the update path.** Today DOB is written only when a user is *created* (`buildOnboardingSet` in the create branches). The update/enrichment path never writes it. Change: when `date_of_birth` is provided for an existing user, update `user.date_of_birth` — **only when provided** (never overwrite with `null`) — and do it **before** promotion so the guardian gate sees the new value.
 
@@ -121,7 +124,7 @@ content-type: application/json
 
 ### Activation payload variants
 
-All of these target an existing user (identify by `email` or `phone_number`; `name` is required by the schema, so pass the existing name). Each promotes only if the profile ends up complete + the go-live gate passes. Remember `user_terms` + `user_privacy` + `date_of_birth` are an **all-or-none bundle** (see the invalid cases below).
+All of these target an existing user (identify by `email` or `phone_number`; `name` is required by the schema, so pass the existing name). Each promotes only if the profile ends up complete + the go-live gate passes. Remember: `user_terms` + `user_privacy` are a **both-or-none pair**, `profile_creation` is independent, and `date_of_birth` is required alongside the pair **only on guardian-gated domains** (see the invalid cases below).
 
 **(a) Activate a draft by sending only its `profile_creation` consent — no field re-send** (user already has the terms/privacy + DOB bundle on file):
 ```jsonc
@@ -166,11 +169,12 @@ All of these target an existing user (identify by `email` or `phone_number`; `na
 // → records terms+privacy+profile_creation, persists DOB, re-promotes → live (if complete)
 ```
 
-**Invalid — rejected by validation (schema-level `400`):**
-- **Partial user-level bundle** — sending `user_terms`/`user_privacy` *without* `date_of_birth` (or `date_of_birth` without both consents, or only one consent) → **`400 USER_LEVEL_INCOMPLETE`**. The trio is all-or-none. *(This is why there is no "DOB-only" activation variant — DOB can't travel without terms+privacy.)*
-- **Any declined consent** — `user_terms`, `user_privacy`, **or** `profile_creation` sent as `false` → **`400 CONSENT_DECLINED`**; nothing is created or updated. (To skip a consent, omit its key — never send `false`.) If both this and the bundle rule apply, `CONSENT_DECLINED` wins.
+**Invalid — rejected by validation:**
+- **Broken consent pair** — exactly one of `user_terms` / `user_privacy` present → **`400 USER_LEVEL_INCOMPLETE`** (they're both-or-none). *(Schema-level.)*
+- **Consent without DOB on a gated domain** — the pair is present on a guardian-gated (seeker) domain but `date_of_birth` is missing → **`400 DOB_REQUIRED`**. On a **non-gated** domain this is allowed (DOB not required). *(Handler-level.)*
+- **Any declined consent** — `user_terms`, `user_privacy`, **or** `profile_creation` sent as `false` → **`400 CONSENT_DECLINED`**; nothing is created or updated. (Omit a key to skip it — never send `false`.) `CONSENT_DECLINED` wins over the other two.
 
-Prerequisites: `profile_creation` is recorded only once `terms` + `privacy` exist (already on file, or in the same call as the full trio — variant (c)). Variant (a) assumes the user-level bundle is already on file; if it isn't, use variant (c) — you cannot send `user_terms`/`user_privacy` without `date_of_birth`.
+Prerequisites: `profile_creation` is recorded only once `terms` + `privacy` exist (already on file, or sent in the same call). Variant (a) assumes terms/privacy are already on file; if not, send the pair in that call too (and `date_of_birth` as well when the domain is guardian-gated).
 
 ## Read side — `GET /admin/participant` (new)
 
@@ -221,14 +225,16 @@ Extend the read endpoint (`participant_read.ts` / `GetParticipantResponse`) to r
 | # | Scenario | Result |
 |---|---|---|
 | 1 | Bulk / reg-link create, no `compliance`/DOB | `draft` |
-| 2 | Voice create: full bundle (terms+privacy+DOB) + `profile_creation`(adult) + complete | `live` |
-| 3 | Create/update sending `user_terms`/`user_privacy` but **no `date_of_birth`** (partial bundle) | **`400 USER_LEVEL_INCOMPLETE`** — no action |
-| 4 | **Any** compliance key (`user_terms`/`user_privacy`/`profile_creation`) = `false` | **`400 CONSENT_DECLINED`** — nothing created/updated (wins over `USER_LEVEL_INCOMPLETE`) |
-| 5 | Bulk draft → later activation (GET → POST `item_id` + full bundle + `profile_creation`) | `live` |
-| 6 | 2nd profile (`item_state`, no `item_id`, + `profile_creation`; user-level inherited) | `live` if complete + adult |
-| 7 | Minor / unknown DOB on gated domain | profile **created** but `draft` (fail-closed; complete via portal) |
-| 8 | Multi-profile | each profile `live` iff its own `profile_creation` + the user-level bundle satisfied |
-| 9 | Full bundle with **no item** (account-only) | terms/privacy+DOB recorded; **all** eligible consented drafts promoted (§Write.2) |
+| 2 | **Gated** (seeker) create: pair + DOB(adult) + `profile_creation` + complete | `live` |
+| 3 | **Non-gated** (provider/orange/yellow) create: pair + `profile_creation` + complete, **no DOB** | `live` (DOB not required off gated domains) |
+| 4 | Only one of `user_terms` / `user_privacy` sent | **`400 USER_LEVEL_INCOMPLETE`** |
+| 5 | **Gated** domain: pair sent but **no `date_of_birth`** | **`400 DOB_REQUIRED`** |
+| 6 | **Any** compliance key = `false` | **`400 CONSENT_DECLINED`** — nothing created/updated (wins over the other two) |
+| 7 | Bulk draft → later activation (GET → POST `item_id` + pair + `profile_creation` [+ DOB if gated]) | `live` |
+| 8 | 2nd profile (`item_state`, no `item_id`, + `profile_creation`; user-level inherited) | `live` if complete (+ adult on gated) |
+| 9 | Minor / unknown DOB on gated domain | profile **created** but `draft` (fail-closed; complete via portal) |
+| 10 | Multi-profile | each profile `live` iff its own `profile_creation` + user-level satisfied |
+| 11 | Pair + DOB, **no item** (account-only) | terms/privacy+DOB recorded; **all** eligible consented drafts promoted (§Write.2) |
 
 ## Future note — DOB → year-of-birth
 
@@ -248,4 +254,4 @@ PR #353 (always-create + per-user cap) is open on the same `feature` base and re
 ## Already-done vs new work
 
 - **Done on PR #354 (base design):** `compliance` schema + optional booleans; consent recording per branch (incl. update path); `lifecycle_status` + `consent_recorded`; promotion via the shared gate; conflict-safe `profile_creation` insert; minor-stays-draft e2e test.
-- **New in this extension:** (0) request validation — atomic user-level bundle (`USER_LEVEL_INCOMPLETE`) + terms/privacy accept-only (`CONSENT_DECLINED`); (1) persist DOB on the update path (before promote); (2) promote-all-eligible-drafts on a DOB-bearing call; (3) dedupe user-level consent; (4) GET consent-status fields (`user_consent` + per-item `profile_consent_accepted`); (5) tests for the validation, activation, multi-profile, and read-status flows; (6) doc updates. Plus the #353 rebase.
+- **New in this extension:** (0) request validation — accept-only any-false (`CONSENT_DECLINED`, schema) + `user_terms`/`user_privacy` both-or-none pair (`USER_LEVEL_INCOMPLETE`, schema) + gated-domain DOB-with-consent (`DOB_REQUIRED`, handler); (1) persist DOB on the update path (before promote); (2) promote-all-eligible-drafts on a DOB-bearing call; (3) dedupe user-level consent; (4) GET consent-status fields (`user_consent` + per-item `profile_consent_accepted`); (5) tests for the validation, activation, multi-profile, and read-status flows; (6) doc updates. Plus the #353 rebase.
