@@ -159,12 +159,9 @@ Identity rule: at least one of `email` or `phone_number` must be provided.
 from the user; only `value: true` is recorded, into the `consent_record`
 ledger. Recognised keys: `user_terms`, `user_privacy` (user-level) and
 `profile_creation` (item-level). Unknown keys are ignored. Versions are
-derived server-side. When `profile_creation` is accepted (and `user_terms` +
-`user_privacy` are present), the profile is promoted to `live` on this call —
-except on guardian-gated domains for a minor / missing DOB, where it stays
-`draft` until the guardian OTP flow completes in the web UI. The legacy
-`terms_accepted` / `privacy_accepted` booleans are still accepted for
-backward compatibility but **ignored** (deprecated, #309).
+derived server-side. See "Consent (`compliance`), DOB, and activation" below
+for validation rules, DOB requirements, and how a profile gets promoted to
+`live`.
 
 ### Response
 
@@ -196,6 +193,27 @@ usable (`live`) or still incomplete/gated (`draft`, `paused`).
 `consent_recorded` is the number of `consent_record` rows written by
 this call from the `compliance` array (0 when `compliance` was absent
 or every entry was `false`/unrecognised).
+
+### Consent (`compliance`), DOB, and activation
+
+- `compliance` is an optional array of `{ key, value }`. Recognised keys:
+  `user_terms`, `user_privacy` (user-level), `profile_creation` (item-level).
+- **Accept-only:** any key sent as `false` → `400 CONSENT_DECLINED`; omit a key
+  to skip it.
+- **`user_terms` + `user_privacy` are a both-or-none pair** → one without the
+  other is `400 USER_LEVEL_INCOMPLETE`.
+- **On guardian-gated domains** (e.g. `seeker`), sending the consent pair
+  requires `date_of_birth` → else `400 DOB_REQUIRED`. Non-gated domains don't
+  require it.
+- **Activation:** target an existing profile with `item_id` (no `item_state`
+  needed) to add `profile_creation` and/or DOB and promote it. A user-level
+  call with DOB and no item promotes all the user's eligible drafts.
+- The legacy `terms_accepted` / `privacy_accepted` booleans are accepted but
+  ignored (deprecated, #309).
+- `GET /admin/participant` returns `user_consent { terms_accepted,
+  privacy_accepted, has_date_of_birth }` and per-item `profile_consent_accepted`
+  + `lifecycle_status` so callers can see what's outstanding and which profile
+  is usable.
 
 ### Error matrix (additions)
 
