@@ -55,7 +55,7 @@ export const participant: FastifyPluginAsync = async (app) => {
 
 type OnboardingFields = {
   phone_norm: string | null;
-  date_of_birth: string | undefined;
+  age: number | undefined;
   acting_org_id: string;
   channel: UpsertBody['channel'];
   source_id: string | undefined;
@@ -65,9 +65,9 @@ type OnboardingFields = {
 const buildOnboardingSet = (f: OnboardingFields) => ({
   phoneNumber: f.phone_norm,
   phoneNumberVerified: false,
-  // Aggregator still supplies a birth date; we store only a derived age snapshot
-  // (#331), matching the client rule `age = currentYear - birthYear`.
-  age: f.date_of_birth ? new Date().getFullYear() - new Date(f.date_of_birth).getFullYear() : null,
+  // Age snapshot (#331) — integrating DPGs derive it from the birth year and
+  // send the number; no birth date is accepted.
+  age: f.age ?? null,
   termsAccepted: true,
   privacyAccepted: true,
   onboardedByOrgId: f.acting_org_id,
@@ -311,7 +311,7 @@ export const participant_handler = async (
 
       const fields: OnboardingFields = {
         phone_norm,
-        date_of_birth: body.date_of_birth,
+        age: body.age,
         acting_org_id,
         channel: body.channel,
         source_id: body.source_id,
@@ -514,7 +514,7 @@ export const participant_handler = async (
 
   const fields: OnboardingFields = {
     phone_norm,
-    date_of_birth: body.date_of_birth,
+    age: body.age,
     acting_org_id,
     channel: body.channel,
     source_id: body.source_id,

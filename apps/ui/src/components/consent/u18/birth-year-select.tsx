@@ -29,27 +29,25 @@ export function BirthYearSelect({ onChange, disabled, idPrefix = 'birth-year' }:
   const selectClass =
     'h-11 w-full rounded-md border border-border bg-background px-3 text-sm disabled:opacity-60';
 
+  // No visible label: callers (dob-step / signup-dob-step) already render one
+  // above this. Keep an aria-label so the control still has an accessible name.
   return (
-    <div className="space-y-1.5">
-      <label htmlFor={`${idPrefix}-year`} className="text-sm font-medium">
-        {t('auth.dob_label_year', 'Birth year')}
-      </label>
-      <select
-        id={`${idPrefix}-year`}
-        className={selectClass}
-        disabled={disabled}
-        value={year ?? ''}
-        onChange={(e) => {
-          const y = e.target.value ? Number(e.target.value) : undefined;
-          setYear(y);
-          onChange(y === undefined ? undefined : ageFromBirthYear(y, NOW));
-        }}
-      >
-        <option value="">{t('auth.dob_year_placeholder', 'Year')}</option>
-        {YEARS.map((y) => (
-          <option key={y} value={y}>{y}</option>
-        ))}
-      </select>
-    </div>
+    <select
+      id={`${idPrefix}-year`}
+      aria-label={t('auth.dob_label_year', 'Birth year')}
+      className={selectClass}
+      disabled={disabled}
+      value={year ?? ''}
+      onChange={(e) => {
+        const y = e.target.value ? Number(e.target.value) : undefined;
+        setYear(y);
+        onChange(y === undefined ? undefined : ageFromBirthYear(y, NOW));
+      }}
+    >
+      <option value="">{t('auth.dob_year_placeholder', 'Year')}</option>
+      {YEARS.map((y) => (
+        <option key={y} value={y}>{y}</option>
+      ))}
+    </select>
   );
 }

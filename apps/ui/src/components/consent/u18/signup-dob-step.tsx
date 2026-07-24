@@ -31,7 +31,7 @@ export function SignupDobStep({ onSubmit, existing = false }: SignupDobStepProps
     <div className="flex flex-col gap-6">
       <h2 className="text-2xl font-bold text-foreground">
         {existing
-          ? t('auth.dob_title_existing', 'Please confirm your date of birth')
+          ? t('auth.dob_title_existing', 'Please confirm your birth year')
           : t('auth.signup_dob_title', 'To create an account, please provide')}
       </h2>
 
@@ -66,7 +66,7 @@ export function SignupDobStep({ onSubmit, existing = false }: SignupDobStepProps
           <p className="text-sm text-muted-foreground">
             {t(
               'auth.signup_dob_how_desc',
-              "Enter your date of birth. If you are over 18, we'll take you to the account creation page. If you are a minor, under 18, we'll first collect consent from your guardian.",
+              "Select your birth year. If you are over 18, we'll take you to the account creation page. If you are a minor, under 18, we'll first collect consent from your guardian.",
             )}
           </p>
         </div>
