@@ -182,6 +182,8 @@ export async function promoteEligibleDraftsForUser(
   tx: DbOrTx,
   userId: string,
 ): Promise<number> {
+  // Intentionally sweeps the user's drafts across all networks; each
+  // promotion still passes the per-item guardian/completeness/consent gate.
   const drafts = await tx
     .select({ item_id: items.item_id })
     .from(items)

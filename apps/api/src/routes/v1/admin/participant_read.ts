@@ -137,7 +137,7 @@ export const participant_read_handler = async (
   const consentedItemIds = await readProfileConsentedItemIds(
     itemsList.map((i) => i.item_id),
   );
-  const items = itemsList.map((i) => ({
+  const itemsWithConsent = itemsList.map((i) => ({
     ...i,
     profile_consent_accepted: consentedItemIds.has(i.item_id),
   }));
@@ -146,7 +146,7 @@ export const participant_read_handler = async (
   return reply.code(200).send({
     user_id: existing.id,
     user_consent,
-    items,
+    items: itemsWithConsent,
   });
 };
 
@@ -201,6 +201,8 @@ async function readUserConsent(userId: string): Promise<{
   privacy_accepted: boolean;
   has_date_of_birth: boolean;
 }> {
+  // User-level terms/privacy are intentionally not network-scoped — this
+  // status view is network-agnostic by design.
   const rows = await db
     .select({ category: consent_record.consentCategory })
     .from(consent_record)

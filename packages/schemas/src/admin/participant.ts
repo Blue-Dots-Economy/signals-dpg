@@ -109,7 +109,8 @@ export const ParticipantItemSnapshot = z.object({
   item_domain: z.string(),
   item_type: z.string(),
   // Present on the upsert response so callers can tell live vs draft. Optional
-  // because sibling readers (participant_read) do not populate it.
+  // because it's shared with the upsert response; both the upsert and GET
+  // readers populate it.
   lifecycle_status: z.string().optional(),
   // Whether this specific profile has profile_creation consent recorded.
   // Optional because the upsert response doesn't populate it (only GET does).

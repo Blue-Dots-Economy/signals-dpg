@@ -256,24 +256,6 @@ export const participant_handler = async (
       message: 'user_terms and user_privacy must be sent together',
     });
   }
-  // On guardian-gated domains, recording user consent requires date_of_birth.
-  if (hasUserTerms && hasUserPrivacy && !body.date_of_birth) {
-    const gate_network = body.network ?? 'blue_dot';
-    const gate_domain = body.domain ?? 'seeker';
-    let gated = false;
-    try {
-      gated = guardianConsentRequired(await getNetworkConfigById(gate_network), gate_domain);
-    } catch (err) {
-      // Unknown network → downstream item write will reject it; don't block here.
-      request.log.error({ err, network: gate_network }, 'network config load failed during DOB gate check');
-    }
-    if (gated) {
-      return reply.code(400).send({
-        error: 'DOB_REQUIRED',
-        message: 'date_of_birth is required with consent on this domain',
-      });
-    }
-  }
 
   // 1. Look up existing user.
   const conditions = [];
@@ -288,6 +270,7 @@ export const participant_handler = async (
       email: user.email,
       phoneNumber: user.phoneNumber,
       onboardedByOrgId: user.onboardedByOrgId,
+      dateOfBirth: user.dateOfBirth,
     })
     .from(user)
     .where(whereClause!)
@@ -295,6 +278,27 @@ export const participant_handler = async (
 
   const existing = existingRows[0] ?? null;
   const user_exists = Boolean(existing);
+
+  // On guardian-gated domains, recording user consent requires a DOB — but a
+  // DOB already on the user's record satisfies it (only a brand-new / DOB-less
+  // user must supply one). Runs after the lookup so a returning user re-sending
+  // the consent pair isn't wrongly rejected.
+  if (hasUserTerms && hasUserPrivacy && !body.date_of_birth && !existing?.dateOfBirth) {
+    const gate_network = body.network ?? 'blue_dot';
+    const gate_domain = body.domain ?? 'seeker';
+    let gated = false;
+    try {
+      gated = guardianConsentRequired(await getNetworkConfigById(gate_network), gate_domain);
+    } catch (err) {
+      request.log.warn({ err, network: gate_network }, 'network config load failed during DOB gate check');
+    }
+    if (gated) {
+      return reply.code(400).send({
+        error: 'DOB_REQUIRED',
+        message: 'date_of_birth is required with consent on this domain',
+      });
+    }
+  }
 
   // 2. Compute aggregator ownership and dispatch on the helper's verdict.
   const aggregator_owns_user = Boolean(

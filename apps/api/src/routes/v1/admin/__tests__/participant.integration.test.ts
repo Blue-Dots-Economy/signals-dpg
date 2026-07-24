@@ -947,6 +947,41 @@ describeIf(`POST /api/v1/admin/participant (integration)${
     }
   });
 
+  it('gated domain: returning user with stored DOB may re-send the consent pair without DOB (no DOB_REQUIRED)', async () => {
+    const email = `int_redob_${randomUUID().slice(0, 6)}@a.test`;
+    // 1) create live with full consent + adult DOB on the (gated) primary domain
+    const c = await app.inject({
+      method: 'POST', url: '/api/v1/admin/participant',
+      headers: { 'x-api-key': ns.raw_key, 'x-acting-org-id': ns.org_id, 'content-type': 'application/json' },
+      payload: {
+        email, name: 'Returning', channel: 'voice', date_of_birth: '1990-01-01',
+        network: primary.network, domain: primary.domain, item_type: primary.item_type,
+        item_state: generateMinimalItemState(primary.schema),
+        compliance: [
+          { key: 'user_terms', value: true },
+          { key: 'user_privacy', value: true },
+          { key: 'profile_creation', value: true },
+        ],
+      },
+    });
+    expect(c.statusCode).toBe(200);
+    onboarded_user_ids.push(c.json().user_id);
+    // 2) re-send the user pair WITHOUT date_of_birth, no item → must NOT 400 DOB_REQUIRED
+    const r = await app.inject({
+      method: 'POST', url: '/api/v1/admin/participant',
+      headers: { 'x-api-key': ns.raw_key, 'x-acting-org-id': ns.org_id, 'content-type': 'application/json' },
+      payload: {
+        email, name: 'Returning', channel: 'voice',
+        network: primary.network, domain: primary.domain,
+        compliance: [
+          { key: 'user_terms', value: true },
+          { key: 'user_privacy', value: true },
+        ],
+      },
+    });
+    expect(r.statusCode).toBe(200);
+  });
+
   it('activates a gated draft by later supplying date_of_birth via item_id', async () => {
     const email = `int_activate_${randomUUID().slice(0, 6)}@a.test`;
     // 1) create WITH consent but NO dob on a gated domain → stays draft
