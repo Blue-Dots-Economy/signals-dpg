@@ -422,7 +422,7 @@ export const participant_handler = async (
       });
     }
 
-    // Existing user, no item_state — persist DOB / record user-level consent,
+    // Existing user, no item_state — persist age / record user-level consent,
     // then promote any drafts the new age unblocks.
     const hasCompliance = Boolean(body.compliance && body.compliance.length > 0);
     if (hasCompliance || body.age != null) {
@@ -455,7 +455,7 @@ export const participant_handler = async (
         // failed SQL + bound params. Log the full error, return a curated code.
         request.log.error(
           { err },
-          'participant existing-user consent/DOB update failed',
+          'participant existing-user consent/age update failed',
         );
         return reply.code(500).send({
           error: 'CONSENT_WRITE_FAILED',

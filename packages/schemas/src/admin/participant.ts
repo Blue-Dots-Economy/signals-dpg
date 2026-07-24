@@ -44,9 +44,16 @@ export const UpsertParticipantRequest = z
     phone_number: PhoneE164.optional(),
     name: z.string().min(1),
     // Age in years, stored as the `user.age` snapshot (#331). Integrating DPGs
-    // (aggregator / voice / WhatsApp) derive it from the birth year on their side
-    // and send the number here — no birth date is accepted.
-    age: z.coerce.number().int().min(0).max(120).optional(),
+    // derive it from the birth year and send the number (or numeric string).
+    // An explicit null / '' / non-numeric is treated as "not provided" (not 0),
+    // so it doesn't spuriously trip the U18 age gate (#309).
+    age: z.preprocess(
+      (v) =>
+        typeof v === 'number' || (typeof v === 'string' && v.trim() !== '')
+          ? v
+          : undefined,
+      z.coerce.number().int().min(0).max(120).optional(),
+    ),
     // Deprecated (#309): accepted for backward compatibility with existing
     // callers (aggregator-dpg / bulk) but IGNORED. Consent is recorded via
     // `compliance`. Remove in a later cleanup ticket.

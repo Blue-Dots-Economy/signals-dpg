@@ -924,6 +924,51 @@ describeIf(`POST /api/v1/admin/participant (integration)${
     }
   });
 
+  it('gated domain: explicit age:null must be treated as absent — 400 AGE_REQUIRED, never U18_NOT_ALLOWED', async () => {
+    // Regression for the z.coerce bug: age:null used to coerce to 0, which
+    // isMinor() treats as a minor, producing a false 400 U18_NOT_ALLOWED. With
+    // age:null correctly treated as "not provided", a gated domain + full
+    // consent + complete item_state but no age must fail with AGE_REQUIRED
+    // (or succeed on a non-gated domain) — U18_NOT_ALLOWED must never fire.
+    const gated = guardianConsentRequired(
+      await getNetworkConfigById(primary.network),
+      primary.domain,
+    );
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/v1/admin/participant',
+      headers: {
+        'x-api-key': ns.raw_key,
+        'x-acting-org-id': ns.org_id,
+        'content-type': 'application/json',
+      },
+      payload: {
+        email: `int_agenull_${randomUUID().slice(0, 6)}@a.test`,
+        name: 'Age Null',
+        age: null,
+        channel: 'voice',
+        network: primary.network,
+        domain: primary.domain,
+        item_type: primary.item_type,
+        item_state: generateMinimalItemState(primary.schema),
+        compliance: [
+          { key: 'user_terms', value: true },
+          { key: 'user_privacy', value: true },
+          { key: 'profile_creation', value: true },
+        ],
+      },
+    });
+    expect(res.json().error).not.toBe('U18_NOT_ALLOWED');
+    if (gated) {
+      expect(res.statusCode).toBe(400);
+      expect(res.json().error).toBe('AGE_REQUIRED');
+    } else {
+      // non-gated served domain: consent without age is allowed
+      expect(res.statusCode).toBe(200);
+      onboarded_user_ids.push(res.json().user_id);
+    }
+  });
+
   it('gated domain: returning user with stored age may re-send the consent pair without age (no AGE_REQUIRED)', async () => {
     const email = `int_reage_${randomUUID().slice(0, 6)}@a.test`;
     // 1) create live with full consent + adult age on the (gated) primary domain
