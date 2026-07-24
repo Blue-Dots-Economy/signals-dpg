@@ -140,16 +140,15 @@ All of these target an existing user (identify by `email` or `phone_number`; `na
 // → records terms+privacy, persists DOB, promotes every draft profile that already has profile_creation
 ```
 
-**(c) Activate a specific draft that only lacked DOB — send DOB with its `item_id`** (its `profile_creation` + user terms/privacy already recorded):
+**(c) Activate drafts that only lacked DOB — send DOB only, no `item_id`** (the drafts already have `profile_creation` + user terms/privacy; only DOB was missing). DOB is user-level, so **no `item_id` is needed or meaningful** — supplying it would add nothing:
 ```jsonc
 {
   "email": "asha@example.com",
   "name": "Asha P",
-  "item_id": "‹draft profile id›",
   "date_of_birth": "1990-01-01"
-  // no item_state, no compliance
+  // no item_id, no item_state, no compliance → account-only
 }
-// → persists DOB, re-promotes (this draft — and any other eligible drafts, since DOB is user-level)
+// → persists DOB (user-level), promotes EVERY eligible consented draft
 ```
 
 **(d) Everything-at-once on one draft — consent + DOB together via `item_id`** (nothing was recorded at create time):
