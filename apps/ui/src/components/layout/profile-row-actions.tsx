@@ -11,6 +11,7 @@ import {
   DialogFooter,
 } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
+import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip';
 import { setItemLifecycle, type Item } from '@/lib/item-api';
 
 export interface ProfileRowActionsProps {
@@ -69,52 +70,68 @@ export function ProfileRowActions({ profile, pauseEnabled, onEdit, onChanged }: 
 
   return (
     <div className="flex items-center gap-0.5">
-      <button
-        type="button"
-        aria-label={t('profile.btn_edit', 'Edit profile')}
-        title={t('profile.btn_edit', 'Edit profile')}
-        className={iconBtn}
-        onClick={(e) => { e.stopPropagation(); onEdit(); }}
-      >
-        <Pencil className="h-3.5 w-3.5" />
-      </button>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <button
+            type="button"
+            aria-label={t('profile.btn_edit', 'Edit profile')}
+            className={iconBtn}
+            onClick={(e) => { e.stopPropagation(); onEdit(); }}
+          >
+            <Pencil className="h-3.5 w-3.5" />
+          </button>
+        </TooltipTrigger>
+        <TooltipContent>{t('profile.btn_edit', 'Edit profile')}</TooltipContent>
+      </Tooltip>
 
       {showPause && (
-        <button
-          type="button"
-          aria-label={t('profile.btn_pause', 'Pause profile')}
-          title={t('profile.btn_pause', 'Pause profile')}
-          className={iconBtn}
-          disabled={busy}
-          onClick={(e) => { e.stopPropagation(); setPauseConfirm(true); }}
-        >
-          <Pause className="h-3.5 w-3.5" />
-        </button>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <button
+              type="button"
+              aria-label={t('profile.btn_pause', 'Pause profile')}
+              className={iconBtn}
+              disabled={busy}
+              onClick={(e) => { e.stopPropagation(); setPauseConfirm(true); }}
+            >
+              <Pause className="h-3.5 w-3.5" />
+            </button>
+          </TooltipTrigger>
+          <TooltipContent>{t('profile.btn_pause', 'Pause profile')}</TooltipContent>
+        </Tooltip>
       )}
 
       {showResume && (
-        <button
-          type="button"
-          aria-label={t('profile.btn_unpause', 'Resume profile')}
-          title={t('profile.btn_unpause', 'Resume profile')}
-          className={iconBtn}
-          disabled={busy}
-          onClick={(e) => { e.stopPropagation(); void run('unpause'); }}
-        >
-          <Play className="h-3.5 w-3.5" />
-        </button>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <button
+              type="button"
+              aria-label={t('profile.btn_unpause', 'Resume profile')}
+              className={iconBtn}
+              disabled={busy}
+              onClick={(e) => { e.stopPropagation(); void run('unpause'); }}
+            >
+              <Play className="h-3.5 w-3.5" />
+            </button>
+          </TooltipTrigger>
+          <TooltipContent>{t('profile.btn_unpause', 'Resume profile')}</TooltipContent>
+        </Tooltip>
       )}
 
-      <button
-        type="button"
-        aria-label={t('profile.btn_retire', 'Retire profile')}
-        title={t('profile.btn_retire', 'Retire profile')}
-        className={`${iconBtn} hover:text-destructive`}
-        disabled={busy}
-        onClick={(e) => { e.stopPropagation(); setRetireConfirm(true); }}
-      >
-        <Trash2 className="h-3.5 w-3.5" />
-      </button>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <button
+            type="button"
+            aria-label={t('profile.btn_retire', 'Retire profile')}
+            className={`${iconBtn} hover:text-destructive`}
+            disabled={busy}
+            onClick={(e) => { e.stopPropagation(); setRetireConfirm(true); }}
+          >
+            <Trash2 className="h-3.5 w-3.5" />
+          </button>
+        </TooltipTrigger>
+        <TooltipContent>{t('profile.btn_retire', 'Retire profile')}</TooltipContent>
+      </Tooltip>
 
       {/* Confirm before pausing — pausing removes the profile from discovery. */}
       <Dialog open={pauseConfirm} onOpenChange={setPauseConfirm}>
