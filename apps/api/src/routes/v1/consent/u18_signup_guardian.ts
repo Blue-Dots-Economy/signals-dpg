@@ -112,7 +112,7 @@ const start_handler = async (request: StartReq, reply: FastifyReply) => {
       network: body.network,
       domain: body.domain,
       identifier: identifierFrom(body),
-      dateOfBirth: body.dateOfBirth,
+      age: body.age,
       guardianName: body.guardianName,
       guardianEmail: body.guardianEmail,
       guardianPhone: body.guardianPhone,

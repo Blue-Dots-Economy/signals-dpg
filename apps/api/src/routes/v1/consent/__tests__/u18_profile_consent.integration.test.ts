@@ -165,7 +165,7 @@ describe('U18 profile-consent issue/verify (integration)', () => {
     const dobRes = await ctx.app.inject({
       method: 'POST', url: '/api/v1/consent/u18/dob',
       headers: { 'x-api-key': ctx.rawKey },
-      payload: { network: servedNetwork, dateOfBirth: '2012-03-10' },
+      payload: { network: servedNetwork, age: 14 },
     });
     expect(dobRes.statusCode).toBe(200);
     expect(dobRes.json().isMinor).toBe(true);

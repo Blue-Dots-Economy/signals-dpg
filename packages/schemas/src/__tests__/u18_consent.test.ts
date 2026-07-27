@@ -8,9 +8,10 @@ import {
 } from '../u18_consent';
 
 describe('U18 consent request schemas', () => {
-  it('accepts a full date of birth and rejects a non-date', () => {
-    expect(U18DobBodySchema.safeParse({ network: 'blue_dot', dateOfBirth: '2010-06-15' }).success).toBe(true);
-    expect(U18DobBodySchema.safeParse({ network: 'blue_dot', dateOfBirth: 'not-a-date' }).success).toBe(false);
+  it('accepts a valid age and rejects out-of-range / missing', () => {
+    expect(U18DobBodySchema.safeParse({ network: 'blue_dot', age: 16 }).success).toBe(true);
+    expect(U18DobBodySchema.safeParse({ network: 'blue_dot', age: 200 }).success).toBe(false);
+    expect(U18DobBodySchema.safeParse({ network: 'blue_dot', age: -1 }).success).toBe(false);
     expect(U18DobBodySchema.safeParse({ network: 'blue_dot' }).success).toBe(false);
   });
 

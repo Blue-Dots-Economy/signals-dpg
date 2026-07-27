@@ -99,6 +99,10 @@ const NetworkDomainSchema = z.object({
   // U18 spec D8: when true, this domain routes minors' consent through a
   // guardian. Server-read only; never trusted from the client. Defaults off.
   guardian_consent_required: z.boolean().optional().default(false),
+  // Optional per-domain cap on how many profiles a single user may own in this
+  // domain. Overrides the global MAX_PROFILES_PER_USER default when set (e.g.
+  // seeker=3, provider=5). Unset ⇒ the global default applies.
+  max_profiles_per_user: z.number().int().positive().optional(),
   item_schemas: z
     .record(z.string(), JsonSchemaDocumentSchema)
     .optional()
@@ -238,6 +242,11 @@ export const NetworkConfigSchema = z.object({
   description: z.string().optional(),
   schema_standard: z.string().optional(),
   source_url: z.url().optional(),
+  // Network-wide toggle for the pause (voluntarily-hide) feature. When false,
+  // owners cannot pause their profiles and the UI hides the control. Resume
+  // (unpause) is always allowed so a profile paused before the feature was
+  // turned off can still be recovered. Defaults on. (#346)
+  pause_enabled: z.boolean().optional().default(true),
   domains: NetworkDomainSchema.array().default([]),
   instances: NetworkInstanceSchema.array().default([]),
   cross_network_origins: z

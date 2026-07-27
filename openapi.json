@@ -39,6 +39,109 @@
         }
       }
     },
+    "/health/live": {
+      "get": {
+        "tags": [
+          "health"
+        ],
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "status": {
+                      "type": "string",
+                      "enum": [
+                        "ok"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "status"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/health/ready": {
+      "get": {
+        "tags": [
+          "health"
+        ],
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "status": {
+                      "type": "string",
+                      "enum": [
+                        "ready"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "status"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "status": {
+                      "type": "string",
+                      "enum": [
+                        "not_ready"
+                      ]
+                    },
+                    "checks": {
+                      "type": "object",
+                      "properties": {
+                        "postgres": {
+                          "type": "string"
+                        },
+                        "redis": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "postgres",
+                        "redis"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": [
+                    "status",
+                    "checks"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/item/create": {
       "post": {
         "tags": [
@@ -2387,6 +2490,16 @@
                       "type": "string",
                       "minLength": 1
                     },
+                    "revealed": {
+                      "type": "boolean"
+                    },
+                    "reveal_blocked_reason": {
+                      "type": "string",
+                      "enum": [
+                        "self",
+                        "other"
+                      ]
+                    },
                     "other_actor": {
                       "type": "object",
                       "properties": {
@@ -2516,6 +2629,7 @@
                   "required": [
                     "action_id",
                     "action_status",
+                    "revealed",
                     "other_actor"
                   ],
                   "additionalProperties": false
@@ -4546,19 +4660,10 @@
                     "type": "string",
                     "minLength": 1
                   },
-                  "date_of_birth": {
-                    "anyOf": [
-                      {
-                        "type": "string",
-                        "format": "date",
-                        "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))$"
-                      },
-                      {
-                        "type": "string",
-                        "format": "date-time",
-                        "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z))$"
-                      }
-                    ]
+                  "age": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 120
                   },
                   "terms_accepted": {
                     "type": "boolean"
@@ -5759,11 +5864,15 @@
                     "type": "string",
                     "minLength": 1
                   },
-                  "dateOfBirth": {}
+                  "age": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 120
+                  }
                 },
                 "required": [
                   "network",
-                  "dateOfBirth"
+                  "age"
                 ]
               }
             }
@@ -6335,7 +6444,11 @@
                     "type": "string",
                     "minLength": 1
                   },
-                  "dateOfBirth": {},
+                  "age": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 120
+                  },
                   "guardianName": {
                     "type": "string",
                     "minLength": 1
@@ -6361,7 +6474,7 @@
                 "required": [
                   "network",
                   "domain",
-                  "dateOfBirth",
+                  "age",
                   "guardianName",
                   "guardianDeclarationAccepted"
                 ]
@@ -6717,6 +6830,10 @@
     }
   ],
   "tags": [
+    {
+      "name": "health",
+      "description": "Liveness and readiness probes for orchestrators (unauthenticated)."
+    },
     {
       "name": "item",
       "description": "Create, fetch, update and delete items, and manage their lifecycle status."

@@ -8,6 +8,8 @@
 import 'dotenv/config';
 import { apiConfig } from '@/config';
 import { buildApp } from '@/app';
+import { pool } from '@api/db/postgres/drizzle_config';
+import { redis } from '@api/db/secondary/redis';
 
 const app = await buildApp();
 
@@ -31,7 +33,12 @@ async function shutdown(signal: string) {
   app.log.info(`Shutting down (${signal})`);
 
   try {
+    // Drain the HTTP server first (stop accepting requests), then close the
+    // backing connections that were previously leaked on shutdown: the Postgres
+    // pool and the Redis client.
     await app.close();
+    await pool.end();
+    await redis.quit();
   } catch (err) {
     app.log.error(err);
   } finally {

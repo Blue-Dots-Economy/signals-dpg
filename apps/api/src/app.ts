@@ -22,6 +22,8 @@ import {
   mergeAllowedOrigins,
 } from '@dpg/config';
 import v1_routes from '@/routes/v1/v1_routes';
+import { requestIdOptions, registerRequestIdEcho } from '@/request_id';
+import health_routes from '@/routes/health/health_route';
 import { getNetworkConfigs } from '@/network_configs';
 import {
   clearNetworkSchemaCache,
@@ -40,6 +42,8 @@ const baseJsonSchemaTransform = createJsonSchemaTransform({});
 // preHandler changes (see apps/api/CLAUDE.md "Route auth wiring").
 const PUBLIC_OPERATION_URLS = new Set([
   '/',
+  '/health/live',
+  '/health/ready',
   '/api/v1/auth/config',
   '/api/v1/auth/u18-precheck',
   '/api/v1/consent/status-by-identifier',
@@ -97,7 +101,13 @@ export async function buildApp(): Promise<FastifyInstance> {
   const app = fastify({
     logger: true,
     trustProxy: true,
+    // Correlation id: honour + length-cap an inbound `x-request-id`, mint one
+    // when absent, log it as `reqId` (see @/request_id).
+    ...requestIdOptions,
   });
+
+  // Echo the resolved correlation id back on every response.
+  registerRequestIdEcho(app);
 
   // The schema cache lives on disk under tmpdir() and outlives a restart. In
   // local mode the network is driven by NETWORK_CONFIG_LOCAL_FILE, so a stale
@@ -175,6 +185,7 @@ export async function buildApp(): Promise<FastifyInstance> {
         // group in the published reference (tags without a description get
         // sidebar-group-only treatment).
         tags: [
+          { name: 'health', description: 'Liveness and readiness probes for orchestrators (unauthenticated).' },
           { name: 'item', description: 'Create, fetch, update and delete items, and manage their lifecycle status.' },
           { name: 'action', description: 'Perform and track actions between items — single, bulk, and status updates.' },
           { name: 'event', description: 'Structured results of actions: store and fetch events.' },
@@ -254,6 +265,7 @@ export async function buildApp(): Promise<FastifyInstance> {
       });
     },
   });
+  app.register(health_routes);
   app.register(AuthRoutes);
   app.register(v1_routes, { prefix: '/api/v1' });
 

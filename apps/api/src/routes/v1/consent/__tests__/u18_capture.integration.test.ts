@@ -24,11 +24,11 @@ afterAll(async () => {
 });
 
 describe('U18 capture (integration)', () => {
-  it('DOB for a minor returns isMinor:true and persists', async () => {
+  it('age for a minor returns isMinor:true and persists', async () => {
     const res = await ctx.app.inject({
       method: 'POST', url: '/api/v1/consent/u18/dob',
       headers: { 'x-api-key': ctx.rawKey },
-      payload: { network: ctx.network, dateOfBirth: '2012-03-10' },
+      payload: { network: ctx.network, age: 14 },
     });
     expect(res.statusCode).toBe(200);
     expect(res.json().isMinor).toBe(true);
@@ -95,7 +95,7 @@ describe('U18 guardian same-contact warn-and-acknowledge (integration)', () => {
     const res = await ctx.app.inject({
       method: 'POST', url: '/api/v1/consent/u18/dob',
       headers: { 'x-api-key': sameUser.rawKey },
-      payload: { network: ctx.network, dateOfBirth: '2012-03-10' },
+      payload: { network: ctx.network, age: 14 },
     });
     expect(res.statusCode).toBe(200);
     expect(res.json().isMinor).toBe(true);

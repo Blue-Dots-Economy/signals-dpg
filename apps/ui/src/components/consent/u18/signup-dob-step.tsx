@@ -1,14 +1,14 @@
 import * as React from 'react';
 import { useTranslation } from 'react-i18next';
 import { ArrowRight, Info } from 'lucide-react';
-import { DobCalendar } from '@/components/consent/u18/dob-calendar';
+import { BirthYearSelect } from '@/components/consent/u18/birth-year-select';
 
 export interface SignupDobStepProps {
   /**
-   * Called with the chosen date once the ward taps Continue. Pure UI — no API
+   * Called with the derived age once the ward taps Continue. Pure UI — no API
    * call. The caller derives minor status and routes accordingly.
    */
-  onSubmit: (date: Date) => void;
+  onSubmit: (age: number) => void;
   /**
    * True when an EXISTING user is backfilling a missing DOB before their login
    * OTP (vs a brand-new signup) — switches the heading copy accordingly.
@@ -25,13 +25,13 @@ export interface SignupDobStepProps {
  */
 export function SignupDobStep({ onSubmit, existing = false }: SignupDobStepProps) {
   const { t } = useTranslation();
-  const [birthDate, setBirthDate] = React.useState<Date | undefined>(undefined);
+  const [age, setAge] = React.useState<number | undefined>(undefined);
 
   return (
     <div className="flex flex-col gap-6">
       <h2 className="text-2xl font-bold text-foreground">
         {existing
-          ? t('auth.dob_title_existing', 'Please confirm your date of birth')
+          ? t('auth.dob_title_existing', 'Please confirm your birth year')
           : t('auth.signup_dob_title', 'To create an account, please provide')}
       </h2>
 
@@ -39,24 +39,19 @@ export function SignupDobStep({ onSubmit, existing = false }: SignupDobStepProps
         className="flex flex-col gap-5"
         onSubmit={(e) => {
           e.preventDefault();
-          if (birthDate) onSubmit(birthDate);
+          if (age !== undefined) onSubmit(age);
         }}
       >
         <div className="space-y-2">
-          <label htmlFor="signup-dob-step" className="text-base font-semibold">
-            {t('auth.signup_dob_label', 'Select date of birth')}
+          <label className="text-base font-semibold">
+            {t('auth.signup_dob_label_ym', 'Select your birth year')}
           </label>
-          <DobCalendar
-            id="signup-dob-step"
-            value={birthDate}
-            placeholder={t('auth.dob_placeholder', 'Select date of birth')}
-            onChange={setBirthDate}
-          />
+          <BirthYearSelect idPrefix="signup-dob" onChange={setAge} />
         </div>
 
         <button
           type="submit"
-          disabled={!birthDate}
+          disabled={age === undefined}
           className="flex w-full items-center justify-center gap-2 rounded-md py-3 text-sm font-semibold transition-all disabled:opacity-60 bg-brand-cta h-12"
         >
           {t('auth.signup_dob_continue', 'Continue')}
@@ -71,7 +66,7 @@ export function SignupDobStep({ onSubmit, existing = false }: SignupDobStepProps
           <p className="text-sm text-muted-foreground">
             {t(
               'auth.signup_dob_how_desc',
-              "Enter your date of birth. If you are over 18, we'll take you to the account creation page. If you are a minor, under 18, we'll first collect consent from your guardian.",
+              "Select your birth year. If you are over 18, we'll take you to the account creation page. If you are a minor, under 18, we'll first collect consent from your guardian.",
             )}
           </p>
         </div>

@@ -99,6 +99,29 @@ export async function updateItem(itemId: string, payload: UpdateItemPayload): Pr
   return response.data;
 }
 
+export type ItemLifecycleAction = 'pause' | 'unpause';
+
+export interface ItemLifecycleResponse {
+  item_id: string;
+  lifecycle_status: 'draft' | 'live' | 'paused';
+}
+
+/**
+ * Pause (voluntarily hide) or unpause a profile the caller owns.
+ * `pause` is only valid on a `live` profile; `unpause` re-validates
+ * completeness and lands `live` or `draft`. (#346)
+ */
+export async function setItemLifecycle(
+  itemId: string,
+  action: ItemLifecycleAction,
+): Promise<ItemLifecycleResponse> {
+  const response = await apiClient.post<ItemLifecycleResponse>('/api/v1/item/lifecycle', {
+    item_id: itemId,
+    action,
+  });
+  return response.data;
+}
+
 // Re-export action-related types and functions from action-api.ts
 export {
   type ItemRef,
