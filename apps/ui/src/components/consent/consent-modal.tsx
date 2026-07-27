@@ -62,7 +62,7 @@ export function ConsentModal({
     <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogContent
         showCloseButton={mode === 'view'}
-        className="flex flex-col max-w-2xl max-h-[90vh] gap-0 p-0 overflow-hidden"
+        className="flex flex-col max-w-2xl max-h-[90dvh] gap-0 p-0 overflow-hidden"
         onInteractOutside={(e) => {
           if (mode === 'gate') e.preventDefault();
         }}

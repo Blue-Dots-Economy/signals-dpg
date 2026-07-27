@@ -335,7 +335,7 @@ export function MapFiltersPanel({
         </div>
 
         {/* ── Scrollable filter groups ────────────────────────────────────────── */}
-        <div className="max-h-[75vh] space-y-5 overflow-y-auto px-4 py-4">
+        <div className="max-h-[75dvh] space-y-5 overflow-y-auto px-4 py-4">
           {showDomainGroup && (
             <FilterGroup title={t('filters.domain_group')}>
               {domains.map((domain) => {

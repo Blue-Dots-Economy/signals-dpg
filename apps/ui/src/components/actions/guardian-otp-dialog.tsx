@@ -159,7 +159,7 @@ export function GuardianOtpDialog({ open, onOpenChange, onSubmitOtp, onLogout }:
   if (isMobile) {
     return (
       <Drawer open={open} onOpenChange={onOpenChange}>
-        <DrawerContent className="max-h-[90vh] overflow-hidden p-0">
+        <DrawerContent className="max-h-[90dvh] overflow-hidden p-0">
           <DrawerHeader className="text-left">
             <DrawerTitle>{title}</DrawerTitle>
           </DrawerHeader>

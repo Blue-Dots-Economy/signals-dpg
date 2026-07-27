@@ -41,8 +41,8 @@ export function WalletImportModal({ open, onOpenChange, context, onImported }: W
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-h-[85vh] max-w-2xl overflow-hidden p-0 sm:max-h-[90vh]">
-        <div className="flex max-h-[85vh] flex-col sm:max-h-[90vh]">
+      <DialogContent className="max-h-[85dvh] max-w-2xl overflow-hidden p-0 sm:max-h-[90dvh]">
+        <div className="flex max-h-[85dvh] flex-col sm:max-h-[90dvh]">
           <DialogHeader className="border-b px-6 py-5">
             <DialogTitle>{t('wallet.import_title')}</DialogTitle>
             <DialogDescription>

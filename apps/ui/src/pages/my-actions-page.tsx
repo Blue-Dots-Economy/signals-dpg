@@ -74,7 +74,7 @@ export function MyActionsPage() {
   const selectedActions = sourceActions.filter((a) => selection.selected.has(a.action_id));
 
   return (
-    <div className="min-h-screen bg-background">
+    <div className="min-h-svh bg-background">
       {/* Header — brand chip + soft aura + page lockup */}
       <header className="relative overflow-hidden border-b bg-card">
         {/* Soft brand aura */}

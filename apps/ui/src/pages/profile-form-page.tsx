@@ -607,7 +607,7 @@ export function ProfileFormPage() {
 
   if (availableNetworkIds === null || isLoading) {
     return (
-      <div className="flex h-screen items-center justify-center">
+      <div className="flex h-svh items-center justify-center">
         <p className="text-muted-foreground">
           {isLoading ? t('profile.loading_profile') : t('profile.loading_schemas')}
         </p>
@@ -617,7 +617,7 @@ export function ProfileFormPage() {
 
   if (!targetNetworkId) {
     return (
-      <div className="flex h-screen items-center justify-center">
+      <div className="flex h-svh items-center justify-center">
         <p className="text-muted-foreground">{t('profile.no_networks')}</p>
       </div>
     );
@@ -625,7 +625,7 @@ export function ProfileFormPage() {
 
   if (!network) {
     return (
-      <div className="flex h-screen items-center justify-center">
+      <div className="flex h-svh items-center justify-center">
         <p className="text-muted-foreground">{t('profile.loading_schemas')}</p>
       </div>
     );
@@ -674,7 +674,7 @@ export function ProfileFormPage() {
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-b from-[var(--brand-hero-to)]/8 to-background p-4 sm:p-6">
+    <div className="min-h-svh bg-gradient-to-b from-[var(--brand-hero-to)]/8 to-background p-4 sm:p-6">
       <div className="mx-auto max-w-2xl">
         {/* Branded hero strip — sits flush above the form Card */}
         <div className="relative overflow-hidden rounded-t-xl bg-brand-hero">

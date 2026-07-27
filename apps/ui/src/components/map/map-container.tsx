@@ -55,7 +55,7 @@ interface MapViewProps {
   }) => string | undefined;
   /**
    * Tailwind height classes for the (non-maximized) map wrapper. Defaults to
-   * `h-[calc(100vh-8rem)] min-h-[400px]` to suit the signals page chrome.
+   * `h-[calc(100dvh-8rem)] min-h-[400px]` to suit the signals page chrome.
    * Callers with a different layout (e.g. the tourist app, whose header is
    * shorter) can pass `h-full` to fill their own flex container instead.
    */
@@ -120,7 +120,7 @@ export function MapView({
   filtersSlot,
   renderPopup,
   resolveMarkerLabel,
-  heightClassName = 'h-[calc(100vh-8rem)] min-h-[400px]',
+  heightClassName = 'h-[calc(100dvh-8rem)] min-h-[400px]',
   resolveMarkerIcon,
   resolveMarkerImage,
 }: MapViewProps) {

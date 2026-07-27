@@ -121,14 +121,14 @@ export function MatchScoreModal({
 
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>
-      <DialogContent className="sm:max-w-lg max-h-[90vh] overflow-hidden p-0">
+      <DialogContent className="sm:max-w-lg max-h-[90dvh] overflow-hidden p-0">
         <DialogHeader className="px-6 pt-6 pb-4 border-b">
           <DialogTitle className="flex items-center gap-2">
             <span>{t('match.modal_title')}</span>
           </DialogTitle>
         </DialogHeader>
 
-        <ScrollArea className="max-h-[calc(90vh-180px)]">
+        <ScrollArea className="max-h-[calc(90dvh-180px)]">
           <div className="px-6 py-4 space-y-6">
             {isLoading ? (
               <div className="flex flex-col items-center justify-center py-12 space-y-4">

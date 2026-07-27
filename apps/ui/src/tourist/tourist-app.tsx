@@ -98,7 +98,7 @@ export function TouristApp() {
   const locationDenied = browser.status === 'error' || !browser.isSupported;
 
   return (
-    <div className="flex h-screen flex-col">
+    <div className="flex h-svh flex-col">
       <TouristTopBar
         search={search}
         onSearchChange={setSearch}
