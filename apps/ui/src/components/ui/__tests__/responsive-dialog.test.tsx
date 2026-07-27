@@ -62,7 +62,7 @@ describe('ResponsiveDialog', () => {
       </ResponsiveDialog>,
     );
 
-    const closeButton = baseElement.querySelector('[aria-label="Close"]') as HTMLElement | null;
+    const closeButton = baseElement.querySelector('[data-slot="drawer-close"]') as HTMLElement | null;
     expect(closeButton).toBeTruthy();
 
     fireEvent.click(closeButton!);
@@ -87,7 +87,7 @@ describe('ResponsiveDialog', () => {
 
     // No X — the user must use the in-content action (e.g. an Accept button)
     // to leave; nothing here should offer an implicit dismiss path.
-    expect(baseElement.querySelector('[aria-label="Close"]')).toBeFalsy();
+    expect(baseElement.querySelector('[data-slot="drawer-close"]')).toBeFalsy();
 
     const content = baseElement.querySelector('[data-slot="drawer-content"]') as HTMLElement;
     fireEvent.keyDown(content, { key: 'Escape' });

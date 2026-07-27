@@ -404,7 +404,15 @@ export function MapFiltersPanel({
     return (
       <>
         {renderTrigger(() => setOpen(true))}
-        <ResponsiveDialog open={open} onOpenChange={setOpen} contentClassName="p-0">
+        {/* The panel's own sticky header already has an X (below, in panelBody)
+            — suppress ResponsiveDialog's own close button so mobile doesn't
+            show two overlapping "Close" controls. */}
+        <ResponsiveDialog
+          open={open}
+          onOpenChange={setOpen}
+          contentClassName="p-0"
+          showCloseButton={false}
+        >
           {/* Radix's underlying Dialog requires an accessible name; the visible
               "Filters" label lives in the panel's own sticky header (a plain
               <span>, not a Dialog primitive), so give the sheet itself a
