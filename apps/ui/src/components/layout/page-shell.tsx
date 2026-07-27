@@ -70,7 +70,7 @@ export function PageShell({
           onActiveProfileChange={onActiveProfileChange}
           userSchemas={userSchemas}
         />
-        <div className="flex h-svh flex-1 flex-col">
+        <div className="flex h-svh min-w-0 flex-1 flex-col">
           <TopBar
             search={search}
             onSearchChange={onSearchChange}
@@ -78,7 +78,10 @@ export function PageShell({
             onViewModeChange={onViewModeChange}
             filtersSlot={filtersSlot}
           />
-          <main id="main-content" className="flex-1 overflow-y-auto p-4 sm:p-6">
+          <main
+            id="main-content"
+            className="flex-1 overflow-y-auto p-4 max-md:overflow-x-clip sm:p-6"
+          >
             {children}
           </main>
         </div>
