@@ -7,6 +7,21 @@ import type { DbOrTx } from '@/services/item_service';
 type WarnLogger = { warn: (obj: unknown, msg?: string) => void };
 
 /**
+ * Fallback cancel status for interactions the network does not track
+ * (`metric_categories` null / no `cancel` bucket). Matches the conventional
+ * `cancel` value used by tracked interactions.
+ */
+const DEFAULT_CANCEL_STATUS = 'cancelled';
+
+/**
+ * System remark stamped on a connection cancelled by retire, so the counterparty
+ * sees why it ended (their explicit reject/cancel would carry the user's own
+ * remark). Neutral — doesn't announce that the owner retired. Only set when the
+ * action has no existing remark.
+ */
+const RETIRE_CANCEL_REMARK = 'This profile is retired and no longer available.';
+
+/**
  * Cancel every still-open connection referencing an item being retired (#347,
  * R9.3). "Open" = any action (as source OR target) whose status is not already
  * terminal (not in the interaction's `reject` ∪ `cancel` categories). Each such
@@ -48,6 +63,7 @@ export async function cancelItemConnections(
       action_type: item_actions.action_type,
       action_id: item_actions.action_id,
       action_status: item_actions.action_status,
+      remarks: item_actions.remarks,
       source_item_network: item_actions.source_item_network,
       source_item_domain: item_actions.source_item_domain,
       source_item_type: item_actions.source_item_type,
@@ -60,7 +76,10 @@ export async function cancelItemConnections(
 
   let cancelled = 0;
   for (const a of actions) {
-    let interaction: ReturnType<typeof getActionInteraction>;
+    // Resolve the interaction to read its cancel/terminal buckets. If it's no
+    // longer defined in config, fall through with no categories — retire still
+    // cancels via the fallback below rather than leaving the action dangling.
+    let interaction: ReturnType<typeof getActionInteraction> | null = null;
     try {
       const networkConfig = await getNetworkConfigById(a.target_item_network);
       interaction = getActionInteraction(networkConfig, {
@@ -73,21 +92,34 @@ export async function cancelItemConnections(
         toItemType: a.target_item_type,
       });
     } catch (err) {
-      // Interaction no longer defined in config — can't resolve a cancel status.
-      logger?.warn({ err, action_id: a.action_id }, 'retire: skipping action with no resolvable interaction');
-      continue;
+      logger?.warn({ err, action_id: a.action_id }, 'retire: interaction unresolved — cancelling with fallback status');
     }
 
-    const cats = interaction.metric_categories;
-    const cancelStatus = cats?.cancel?.[0];
-    if (!cats || !cancelStatus) continue; // untracked / no cancel status → leave
+    // Retire must end EVERY still-open connection, so we always resolve a cancel
+    // status: the interaction's own `cancel` bucket when defined, else a literal
+    // 'cancelled' fallback for interactions the network doesn't track
+    // (metric_categories null) — otherwise those actions dangle as Pending
+    // forever against a profile that no longer exists.
+    const cats = interaction?.metric_categories;
+    const cancelStatus = cats?.cancel?.[0] ?? DEFAULT_CANCEL_STATUS;
 
-    const terminal = new Set([...(cats.reject ?? []), ...(cats.cancel ?? [])]);
-    if (terminal.has(a.action_status)) continue; // already terminal
+    // Skip anything already terminal. Include the universal fallbacks so an
+    // untracked action that's already cancelled/rejected isn't touched again.
+    const terminal = new Set([
+      ...(cats?.reject ?? []),
+      ...(cats?.cancel ?? []),
+      DEFAULT_CANCEL_STATUS,
+      'rejected',
+    ]);
+    if (terminal.has(a.action_status)) continue;
 
     await tx
       .update(item_actions)
-      .set({ action_status: cancelStatus, updated_at: sql`now()` })
+      .set({
+        action_status: cancelStatus,
+        remarks: a.remarks ?? RETIRE_CANCEL_REMARK,
+        updated_at: sql`now()`,
+      })
       .where(
         and(
           eq(item_actions.partition_network, a.partition_network),

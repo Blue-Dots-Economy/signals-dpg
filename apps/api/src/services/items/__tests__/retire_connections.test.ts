@@ -96,12 +96,27 @@ describe('cancelItemConnections', () => {
     expect(updates).toHaveLength(0);
   });
 
-  it('skips untracked interactions (no resolvable config)', async () => {
+  it('cancels via fallback when the interaction has no resolvable config', async () => {
     getNetworkConfigById.mockRejectedValue(new Error('no config'));
     const { tx, updates } = makeTx([action({ action_status: 'created' })]);
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const n = await cancelItemConnections(tx as any, { item_id: 'item-1', item_network: 'blue_dot', item_domain: 'seeker', item_type: 'profile_1.0' });
-    expect(n).toBe(0);
-    expect(updates).toHaveLength(0);
+    expect(n).toBe(1);
+    expect(updates[0].action_status).toBe('cancelled');
+  });
+
+  it('cancels an untracked interaction (metric_categories null) with the fallback status', async () => {
+    const untracked = {
+      id: 'blue_dot',
+      actions: {
+        connect: { interactions: [{ from_domain: 'seeker', from_items: [], to_domain: 'seeker', to_items: [], metric_categories: null }] },
+      },
+    } as unknown;
+    getNetworkConfigById.mockResolvedValue(untracked);
+    const { tx, updates } = makeTx([action({ action_status: 'created' })]);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const n = await cancelItemConnections(tx as any, { item_id: 'item-1', item_network: 'blue_dot', item_domain: 'seeker', item_type: 'profile_1.0' });
+    expect(n).toBe(1);
+    expect(updates[0].action_status).toBe('cancelled');
   });
 });

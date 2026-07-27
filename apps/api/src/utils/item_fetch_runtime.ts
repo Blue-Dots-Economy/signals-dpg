@@ -28,6 +28,13 @@ export type ItemFetchFilters = {
    * Defaults to returning all lifecycle states when undefined.
    */
   lifecycle_filter?: 'live_only' | 'all';
+  /**
+   * When true, excludes `retired` items (#347). Set by the owner "My Profiles"
+   * fetch so a retired profile never lists there. Other reads (e.g. the
+   * contact-details masked view) must still be able to see a retired item to
+   * message the counterparty, so this is opt-in — NOT a blanket filter.
+   */
+  exclude_retired?: boolean;
 };
 
 const itemResponseColumns = {
@@ -56,11 +63,14 @@ function buildWhereClause(filters: Omit<ItemFetchFilters, 'limit' | 'offset'>) {
   conditions.push(eq(items.item_network, filters.item_network));
   conditions.push(eq(items.item_domain, filters.item_domain));
 
-  // A retired profile is permanently removed (#347): never list it, even to its
-  // owner in "My Profiles" (this local fetch is the owner path). Discovery paths
-  // already restrict to live via lifecycle_filter, so this only affects the
-  // all-states owner listing.
-  conditions.push(ne(items.lifecycle_status, 'retired'));
+  // A retired profile is permanently removed (#347). Opt-in exclusion — the
+  // owner "My Profiles" fetch sets this so a retired profile never lists there.
+  // Not blanket: contact-details must still resolve a retired item to message
+  // the counterparty. Discovery paths already restrict to live via
+  // lifecycle_filter, so they're unaffected either way.
+  if (filters.exclude_retired) {
+    conditions.push(ne(items.lifecycle_status, 'retired'));
+  }
 
   if (filters.item_type) {
     conditions.push(eq(items.item_type, filters.item_type));

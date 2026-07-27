@@ -2501,7 +2501,8 @@
                       "type": "string",
                       "enum": [
                         "self",
-                        "other"
+                        "other",
+                        "retired"
                       ]
                     },
                     "other_actor": {
