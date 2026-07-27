@@ -284,7 +284,10 @@ export function MapFiltersPanel({
       aria-label={t('filters.open')}
     >
       <SlidersHorizontal className="size-3.5" />
-      {t('filters.title')}
+      {/* Icon-only below sm so the mobile top bar's control row fits on one
+          line (the button keeps its aria-label for accessibility); the label
+          returns from sm up. */}
+      <span className="hidden sm:inline">{t('filters.title')}</span>
       {activeCount > 0 && (
         <Badge
           variant="default"

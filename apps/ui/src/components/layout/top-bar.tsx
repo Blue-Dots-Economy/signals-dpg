@@ -96,7 +96,12 @@ export function TopBar({
             user is signed in (there's no dropdown to move them into for the
             logged-out case, so they stay inline there). */}
         <div className={cn('flex items-center gap-2', isAuthenticated && 'hidden md:flex')}>
-          <LanguageSwitcher />
+          {/* `compact` renders the switcher icon-only below sm and shows the
+              language label from sm up. On the logged-out mobile bar (where the
+              controls stay inline) this frees the ~90px "English" label so the
+              row no longer overflows and wraps to a third line. Desktop (sm+)
+              is unchanged — the full label still shows. */}
+          <LanguageSwitcher compact />
           <ThemeModeToggle />
         </div>
 
