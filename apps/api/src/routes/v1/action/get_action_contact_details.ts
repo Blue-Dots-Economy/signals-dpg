@@ -117,12 +117,9 @@ export const get_action_contact_details_handler = async (
       };
 
   const callerSnapshot = await fetchLocalItemSnapshot(db, callerItem);
-  if (callerSnapshot && callerSnapshot.lifecycle_status !== 'live') {
-    return reply.code(403).send({
-      error: 'PROFILE_NOT_LIVE',
-      message: 'Contact details hidden because your own profile is not live',
-    });
-  }
+  // A null snapshot (caller item not local) is treated as live — the gate can
+  // only apply to a locally-resolvable profile.
+  const callerLive = callerSnapshot ? callerSnapshot.lifecycle_status === 'live' : true;
 
   const other = callerIsSource
     ? {
@@ -149,7 +146,16 @@ export const get_action_contact_details_handler = async (
     });
   }
 
-  const result = await fetchLocalItems({
+  // PII is revealed only when BOTH profiles are live. When either side is not
+  // live (e.g. paused — #273), we do NOT error: we return the MASKED pre-reveal
+  // view (the profile's public state, private fields already masked at storage)
+  // so the counterparty sees the profile as it was before the connection was
+  // accepted, not the contact PII. `revealed` tells the client which it got.
+  //
+  // Fetch the masked item first; it always exists locally and carries
+  // lifecycle_status. Private state is only decrypted (second fetch) once we
+  // know the reveal is allowed — never decrypt PII we won't return.
+  const maskedResult = await fetchLocalItems({
     item_id: other.id,
     item_network: other.network,
     item_domain: other.domain,
@@ -157,48 +163,65 @@ export const get_action_contact_details_handler = async (
     item_instance_url: other.instance_url,
     limit: 1,
     offset: 0,
-    includePrivateState: true,
+    includePrivateState: false,
   });
 
-  const [otherItem] = result.items;
-  if (!otherItem) {
+  const [maskedItem] = maskedResult.items;
+  if (!maskedItem) {
     return reply.code(404).send({
       error: 'OTHER_ITEM_NOT_FOUND',
       message: 'Other-actor item missing locally despite same instance',
     });
   }
 
-  // Gate: the other actor's profile must also be live for PII to be revealed.
-  // Fail-closed: the other item is always local here (cross-instance is rejected at the 501
-  // guard above), and lifecycle_status is a notNull DB column always projected by
-  // fetchLocalItems. There is no legitimate undefined case in this path.
-  if (otherItem.lifecycle_status !== 'live') {
-    return reply.code(403).send({
-      error: 'PROFILE_NOT_LIVE',
-      message: 'Contact details hidden because the other actor profile is not live',
-    });
-  }
+  const revealAllowed = callerLive && maskedItem.lifecycle_status === 'live';
+  // Why the reveal is blocked, so the client can say whose profile is the
+  // reason: `self` = the viewer's own profile isn't live (resume it to see
+  // details); `other` = the counterparty's profile isn't live. Self takes
+  // precedence — it's the one the viewer can act on.
+  const revealBlockedReason: 'self' | 'other' | undefined = revealAllowed
+    ? undefined
+    : !callerLive
+      ? 'self'
+      : 'other';
+  let otherItem = maskedItem;
 
-  try {
-    await db.insert(pii_reveal_audit).values({
-      actionId: action.action_id,
-      viewerUserId: userId,
-      revealedItemId: other.id,
-      revealedItemOwner: other.owner ?? otherItem.created_by ?? '',
-      revealedActionType: action.action_type,
-      revealedActionStatusAtView: action.action_status,
+  // Audit only an actual PII reveal — the masked view discloses nothing.
+  if (revealAllowed) {
+    const revealedResult = await fetchLocalItems({
+      item_id: other.id,
+      item_network: other.network,
+      item_domain: other.domain,
+      item_type: other.type,
+      item_instance_url: other.instance_url,
+      limit: 1,
+      offset: 0,
+      includePrivateState: true,
     });
-  } catch (err) {
-    request.log.error(
-      { err, action_id, viewer_user_id: userId, revealed_item_id: other.id },
-      'Failed to write pii_reveal_audit row'
-    );
+    otherItem = revealedResult.items[0] ?? maskedItem;
+    try {
+      await db.insert(pii_reveal_audit).values({
+        actionId: action.action_id,
+        viewerUserId: userId,
+        revealedItemId: other.id,
+        revealedItemOwner: other.owner ?? otherItem.created_by ?? '',
+        revealedActionType: action.action_type,
+        revealedActionStatusAtView: action.action_status,
+      });
+    } catch (err) {
+      request.log.error(
+        { err, action_id, viewer_user_id: userId, revealed_item_id: other.id },
+        'Failed to write pii_reveal_audit row'
+      );
+    }
   }
 
   reply.header('Cache-Control', 'no-store');
   return reply.code(200).send({
     action_id: action.action_id,
     action_status: action.action_status,
+    revealed: revealAllowed,
+    reveal_blocked_reason: revealBlockedReason,
     other_actor: {
       item: {
         ...otherItem,

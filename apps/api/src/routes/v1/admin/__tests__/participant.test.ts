@@ -87,6 +87,12 @@ vi.mock('@/utils/publish_item_event', () => ({
   publishItemEvent: vi.fn(async () => {}),
 }));
 
+// --- mock the consent service: it is unit-tested separately; here we only
+//     assert the route calls it with the right args and stays green.
+vi.mock('@/services/participant_consent', () => ({
+  recordParticipantConsent: vi.fn(async () => ({ recorded: 0, promoted: false })),
+}));
+
 // --- mock @dpg/schemas: keep real exports + neutralize the merge helper for tests ---
 vi.mock('@dpg/schemas', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@dpg/schemas')>();
@@ -355,6 +361,7 @@ vi.mock('@/services/item_service', () => {
 // Imported after mocks.
 import { participant } from '../participant.js';
 import { publishItemEvent } from '@/utils/publish_item_event';
+import { recordParticipantConsent } from '@/services/participant_consent';
 
 const VALID_EMAIL = 'demo@example.com';
 const VALID_PHONE = '+919876543210';
@@ -407,6 +414,13 @@ describe('POST /admin/participant', () => {
     lastQueriedUserId = null;
     lastQueriedItemId = null;
     vi.mocked(publishItemEvent).mockClear();
+    // Reset the consent-service mock and restore its default resolved value so
+    // per-test mockResolvedValueOnce/mockRejectedValueOnce overrides don't bleed.
+    vi.mocked(recordParticipantConsent).mockReset();
+    vi.mocked(recordParticipantConsent).mockResolvedValue({
+      recorded: 0,
+      promoted: false,
+    });
   });
 
   it('403 INVALID_ACTING_ORG when acting_org is missing', async () => {
@@ -476,9 +490,26 @@ describe('POST /admin/participant', () => {
     expect(dbState.updates[0].set).toMatchObject({
       onboardedByOrgId: 'org_agg_1',
       onboardedVia: 'bulk',
-      termsAccepted: true,
-      privacyAccepted: true,
     });
+    expect(dbState.updates[0].set).not.toHaveProperty('termsAccepted');
+    expect(dbState.updates[0].set).not.toHaveProperty('privacyAccepted');
+  });
+
+  it('accepts a request with terms_accepted/privacy_accepted omitted (now optional) → 200', async () => {
+    dbState.signUpUserId = 'usr_new_optional';
+    lastQueriedUserId = 'usr_new_optional';
+    const app = await buildApp({ org_id: 'org_agg_1', org_type: 'aggregator' });
+    const res = await app.inject({
+      method: 'POST',
+      url: '/participant',
+      payload: {
+        email: 'optional@example.com',
+        name: 'Opt',
+        channel: 'bulk',
+        item_state: { whoIAm: { education: 'XII' } },
+      },
+    });
+    expect(res.statusCode).toBe(200);
   });
 
   it('aggregator + existing OWN user + item_state → 200 user_existed:true, owned_elsewhere:false, inserts:1', async () => {
@@ -553,6 +584,90 @@ describe('POST /admin/participant', () => {
     expect(body.items).toHaveLength(1);
     expect(dbState.updates).toHaveLength(0);
     expect(dbState.inserts).toHaveLength(0);
+  });
+
+  it('aggregator + existing OWN user + no item_state + compliance → records user-level consent, no itemId, consent_recorded from service', async () => {
+    const user_id = 'usr_own_compliance';
+    dbState.existingUserRows = [
+      {
+        id: user_id,
+        email: VALID_EMAIL,
+        phoneNumber: null,
+        onboardedByOrgId: 'org_agg_1',
+      },
+    ];
+    dbState.itemsByUser.set(user_id, []);
+    lastQueriedUserId = user_id;
+    vi.mocked(recordParticipantConsent).mockResolvedValueOnce({
+      recorded: 2,
+      promoted: false,
+    });
+    const app = await buildApp({ org_id: 'org_agg_1', org_type: 'aggregator' });
+    const res = await app.inject({
+      method: 'POST',
+      url: '/participant',
+      payload: baseBody({
+        item_state: undefined,
+        compliance: [
+          { key: 'user_terms', value: true },
+          { key: 'user_privacy', value: true },
+        ],
+      }),
+    });
+    expect(res.statusCode).toBe(200);
+    const body = res.json();
+    expect(body.user_existed).toBe(true);
+    expect(body.user_id).toBe(user_id);
+    // The route surfaces whatever the service reported it recorded.
+    expect(body.consent_recorded).toBe(2);
+
+    expect(vi.mocked(recordParticipantConsent)).toHaveBeenCalled();
+    const [, args] = vi.mocked(recordParticipantConsent).mock.calls[0];
+    expect(args.userId).toBe(user_id);
+    expect(args.compliance).toEqual([
+      { key: 'user_terms', value: true },
+      { key: 'user_privacy', value: true },
+    ]);
+    // Account-only user-level consent carries no itemId.
+    expect(args.itemId).toBeUndefined();
+    // No user/item writes happened on this path.
+    expect(dbState.updates).toHaveLength(0);
+    expect(dbState.inserts).toHaveLength(0);
+  });
+
+  it('aggregator + existing OWN user + compliance + consent recording throws → 500 CONSENT_WRITE_FAILED, no raw-error leak', async () => {
+    const user_id = 'usr_own_consent_boom';
+    dbState.existingUserRows = [
+      {
+        id: user_id,
+        email: VALID_EMAIL,
+        phoneNumber: null,
+        onboardedByOrgId: 'org_agg_1',
+      },
+    ];
+    dbState.itemsByUser.set(user_id, []);
+    lastQueriedUserId = user_id;
+    vi.mocked(recordParticipantConsent).mockRejectedValueOnce(
+      new Error('boom SENSITIVE bound-param text'),
+    );
+    const app = await buildApp({ org_id: 'org_agg_1', org_type: 'aggregator' });
+    const res = await app.inject({
+      method: 'POST',
+      url: '/participant',
+      payload: baseBody({
+        item_state: undefined,
+        compliance: [
+          { key: 'user_terms', value: true },
+          { key: 'user_privacy', value: true },
+        ],
+      }),
+    });
+    expect(res.statusCode).toBe(500);
+    const body = res.json();
+    expect(body.error).toBe('CONSENT_WRITE_FAILED');
+    // The raw error message (with bound params) must never reach the client.
+    expect(body.message).not.toContain('boom');
+    expect(body.message).not.toContain('SENSITIVE');
   });
 
   it('aggregator + existing OTHER-aggregator user → 200 owned_elsewhere:true, items:[], no writes', async () => {
@@ -676,9 +791,9 @@ describe('POST /admin/participant', () => {
     expect(dbState.updates[0].set).toMatchObject({
       onboardedByOrgId: 'org_ns_1',
       onboardedVia: 'bulk',
-      termsAccepted: true,
-      privacyAccepted: true,
     });
+    expect(dbState.updates[0].set).not.toHaveProperty('termsAccepted');
+    expect(dbState.updates[0].set).not.toHaveProperty('privacyAccepted');
   });
 
   it('network_service + existing user + valid item_id → 200 owned_elsewhere:false, item updated', async () => {
@@ -772,6 +887,62 @@ describe('POST /admin/participant', () => {
     expect(body.user_id).toBe(user_id);
     expect(vi.mocked(updateItemInternal)).toHaveBeenCalledTimes(1);
     expect(dbState.inserts).toHaveLength(0);
+  });
+
+  it('network_service + existing user + valid item_id + NO item_state → 200 update_item: records consent for that item, no item write, no publish', async () => {
+    const user_id = 'usr_ns_consent_only';
+    dbState.existingUserRows = [
+      {
+        id: user_id,
+        email: VALID_EMAIL,
+        phoneNumber: null,
+        onboardedByOrgId: 'org_ns_1',
+      },
+    ];
+    dbState.itemsByUser.set(user_id, [
+      {
+        item_id: VALID_UUID_A,
+        item_network: 'blue_dot',
+        item_domain: 'seeker',
+        item_type: 'profile_1.0',
+        item_state: { v: 1 },
+        item_private_state: '',
+        created_at: new Date('2026-01-01T00:00:00Z'),
+        updated_at: new Date('2026-01-01T00:00:00Z'),
+      },
+    ]);
+    dbState.itemOwnerLookup.set(VALID_UUID_A, user_id);
+    lastQueriedUserId = user_id;
+    lastQueriedItemId = VALID_UUID_A;
+    const { updateItemInternal } = await import('@/services/item_service');
+    vi.mocked(updateItemInternal).mockClear();
+    const app = await buildApp({
+      org_id: 'org_ns_1',
+      org_type: 'network_service',
+    });
+    const res = await app.inject({
+      method: 'POST',
+      url: '/participant',
+      // item_id targets the owned profile; item_state omitted → consent/DOB-only
+      // update that must not touch the item's fields (#309).
+      payload: baseBody({
+        item_id: VALID_UUID_A,
+        item_state: undefined,
+      }),
+    });
+    expect(res.statusCode).toBe(200);
+    const body = res.json();
+    expect(body.owned_elsewhere).toBe(false);
+    expect(body.user_id).toBe(user_id);
+    // No field update and no event publish when item_state is absent.
+    expect(vi.mocked(updateItemInternal)).not.toHaveBeenCalled();
+    expect(vi.mocked(publishItemEvent)).not.toHaveBeenCalled();
+    expect(dbState.inserts).toHaveLength(0);
+    expect(dbState.updates).toHaveLength(0);
+    // Consent is still recorded, scoped to the targeted item.
+    expect(vi.mocked(recordParticipantConsent)).toHaveBeenCalled();
+    const [, consentArgs] = vi.mocked(recordParticipantConsent).mock.calls[0];
+    expect(consentArgs.itemId).toBe(VALID_UUID_A);
   });
 
   it('network_service + existing user + invalid item_id (other user) → 403 ITEM_NOT_OWNED_BY_USER', async () => {
@@ -879,7 +1050,7 @@ describe('POST /admin/participant', () => {
     expect(dbState.inserts).toHaveLength(0);
   });
 
-  it('network_service + existing user + existing item (same network/domain/type) + no item_id → 200 idempotent update, no insert', async () => {
+  it('network_service + existing user + existing item (same network/domain/type) + no item_id → 200 creates another profile (always-create)', async () => {
     const user_id = 'usr_ns_reonboard';
     dbState.existingUserRows = [
       {
@@ -903,9 +1074,6 @@ describe('POST /admin/participant', () => {
       },
     ]);
     dbState.itemOwnerLookup.set(VALID_UUID_A, user_id);
-    // Feed the existing-owned-item lookup side channel so the resolver
-    // returns update_item{VALID_UUID_A} instead of insert_item.
-    dbState.existingOwnedItemId = VALID_UUID_A;
     lastQueriedUserId = user_id;
     lastQueriedItemId = VALID_UUID_A;
     const { updateItemInternal } = await import('@/services/item_service');
@@ -920,14 +1088,12 @@ describe('POST /admin/participant', () => {
       payload: baseBody({ item_state: { v: 2 } }),
     });
     expect(res.statusCode).toBe(200);
-    // Idempotent path: updateItemInternal called, NO new insert.
-    expect(vi.mocked(updateItemInternal)).toHaveBeenCalledTimes(1);
-    expect(dbState.inserts).toHaveLength(0);
-    // Item count unchanged — no duplicate created.
-    expect(dbState.itemsByUser.get(user_id)).toHaveLength(1);
+    // Always-create (#349): a new profile is inserted, updateItemInternal not called.
+    expect(vi.mocked(updateItemInternal)).toHaveBeenCalledTimes(0);
+    expect(dbState.inserts).toHaveLength(1);
   });
 
-  it('aggregator + existing OWN user + existing item (same network/domain/type) + no item_id → 200 idempotent update, no insert', async () => {
+  it('aggregator + existing OWN user + existing item (same network/domain/type) + no item_id → 200 creates another profile (always-create)', async () => {
     const user_id = 'usr_agg_reonboard';
     dbState.existingUserRows = [
       {
@@ -950,7 +1116,6 @@ describe('POST /admin/participant', () => {
       },
     ]);
     dbState.itemOwnerLookup.set(VALID_UUID_A, user_id);
-    dbState.existingOwnedItemId = VALID_UUID_A;
     lastQueriedUserId = user_id;
     lastQueriedItemId = VALID_UUID_A;
     const { updateItemInternal } = await import('@/services/item_service');
@@ -966,9 +1131,9 @@ describe('POST /admin/participant', () => {
     });
     expect(res.statusCode).toBe(200);
     expect(res.json().owned_elsewhere).toBe(false);
-    expect(vi.mocked(updateItemInternal)).toHaveBeenCalledTimes(1);
-    expect(dbState.inserts).toHaveLength(0);
-    expect(dbState.itemsByUser.get(user_id)).toHaveLength(1);
+    // Always-create (#349): the owning aggregator adds another profile.
+    expect(vi.mocked(updateItemInternal)).toHaveBeenCalledTimes(0);
+    expect(dbState.inserts).toHaveLength(1);
   });
 
   // ---------------------------------------------------------------------------
@@ -1159,5 +1324,57 @@ describe('POST /admin/participant', () => {
     for (const item of body.items) {
       expect(item.item_network).toBe('blue_dot');
     }
+  });
+
+  it('rejects any compliance entry with value:false → 400 CONSENT_DECLINED', async () => {
+    const app = await buildApp({ org_id: 'org_agg_1', org_type: 'aggregator' });
+    const res = await app.inject({
+      method: 'POST',
+      url: '/participant',
+      payload: baseBody({
+        item_state: undefined,
+        compliance: [{ key: 'user_terms', value: false }],
+      }),
+    });
+    expect(res.statusCode).toBe(400);
+    expect(res.json().error).toBe('CONSENT_DECLINED');
+  });
+
+  it('rejects a broken user-consent pair → 400 USER_LEVEL_INCOMPLETE', async () => {
+    const app = await buildApp({ org_id: 'org_agg_1', org_type: 'aggregator' });
+    const res = await app.inject({
+      method: 'POST',
+      url: '/participant',
+      payload: baseBody({
+        item_state: undefined,
+        compliance: [{ key: 'user_terms', value: true }], // no user_privacy
+      }),
+    });
+    expect(res.statusCode).toBe(400);
+    expect(res.json().error).toBe('USER_LEVEL_INCOMPLETE');
+  });
+
+  it('age:15 (minor) → 400 U18_NOT_ALLOWED, no operation performed (#331/#359)', async () => {
+    // The U18 check runs on the effective age (body.age ?? existing.age)
+    // before any DB write, so a minor is rejected with no user/item create,
+    // no update, and no consent recorded — regardless of domain/channel.
+    const app = await buildApp({ org_id: 'org_agg_1', org_type: 'aggregator' });
+    const res = await app.inject({
+      method: 'POST',
+      url: '/participant',
+      payload: baseBody({
+        age: 15,
+        compliance: [
+          { key: 'user_terms', value: true },
+          { key: 'user_privacy', value: true },
+        ],
+      }),
+    });
+    expect(res.statusCode).toBe(400);
+    expect(res.json().error).toBe('U18_NOT_ALLOWED');
+
+    expect(vi.mocked(recordParticipantConsent)).not.toHaveBeenCalled();
+    expect(dbState.updates).toHaveLength(0);
+    expect(dbState.inserts).toHaveLength(0);
   });
 });

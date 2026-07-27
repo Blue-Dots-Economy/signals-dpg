@@ -4,9 +4,7 @@ import { U18DobBodySchema, U18DobResponseSchema, type U18DobBody } from '@dpg/sc
 import { auth_middleware_if_enabled } from '@api/plugins/auth/auth_middleware';
 import { apiConfig } from '@/config';
 import { isMinor } from '@/services/minor';
-import { getWardDob, setWardDob } from '@/services/minor_guardian_repo';
-
-const MAX_AGE_YEARS = 120;
+import { getWardAge, setWardAge } from '@/services/minor_guardian_repo';
 
 type Req = FastifyRequest<{ Body: U18DobBody }>;
 
@@ -24,36 +22,30 @@ export const u18_dob_handler = async (request: Req, reply: FastifyReply) => {
   const userId = request.user?.id;
   if (!userId) return reply.code(401).send({ error: 'UNAUTHORIZED', message: 'Authenticated user is required' });
 
-  const { network, dateOfBirth } = request.body;
+  const { network, age } = request.body;
   if (!apiConfig.served_domains.some((b) => b.network === network)) {
     return reply.code(400).send({ error: 'UNKNOWN_NETWORK', message: `Network "${network}" is not served` });
   }
 
-  // Bound the date: not in the future, not absurdly old.
-  const now = new Date();
-  const oldest = new Date(now);
-  oldest.setFullYear(oldest.getFullYear() - MAX_AGE_YEARS);
-  if (dateOfBirth.getTime() > now.getTime() || dateOfBirth.getTime() < oldest.getTime()) {
-    return reply.code(400).send({ error: 'DOB_OUT_OF_RANGE', message: 'Date of birth is out of range' });
-  }
+  // Age range is enforced by the schema (0..120); no further bounding here.
 
-  // Don't let a stored DOB be rewritten — especially a minor→adult flip after a
+  // Don't let a stored age be rewritten — especially a minor→adult flip after a
   // guardian is attached (which would silently de-gate the account). Re-sending
-  // the same date is a harmless idempotent no-op; a different date is rejected.
-  const existing = await getWardDob(userId);
-  if (existing) {
-    if (existing.getTime() !== dateOfBirth.getTime()) {
-      return reply.code(409).send({ error: 'DOB_ALREADY_SET', message: 'Date of birth is already recorded and cannot be changed' });
+  // the same age is a harmless idempotent no-op; a different age is rejected.
+  const existing = await getWardAge(userId);
+  if (existing !== null) {
+    if (existing !== age) {
+      return reply.code(409).send({ error: 'DOB_ALREADY_SET', message: 'Age is already recorded and cannot be changed' });
     }
     return reply.code(200).send({ isMinor: isMinor(existing) });
   }
 
   try {
-    await setWardDob(userId, dateOfBirth);
+    await setWardAge(userId, age);
   } catch (err) {
-    request.log.error({ err }, 'Failed to persist U18 DOB');
-    return reply.code(500).send({ error: 'DOB_WRITE_FAILED', message: 'Failed to record date of birth' });
+    request.log.error({ err }, 'Failed to persist U18 age');
+    return reply.code(500).send({ error: 'DOB_WRITE_FAILED', message: 'Failed to record age' });
   }
 
-  return reply.code(200).send({ isMinor: isMinor(dateOfBirth) });
+  return reply.code(200).send({ isMinor: isMinor(age) });
 };

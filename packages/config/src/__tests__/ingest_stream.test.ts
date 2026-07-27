@@ -19,3 +19,19 @@ describe('DatabaseSecretsSchema INGEST_STREAM', () => {
     expect(parsed.INGEST_STREAM).toBe('custom:stream');
   });
 });
+
+describe('DatabaseSecretsSchema INGEST_STREAM_MAXLEN', () => {
+  it('defaults to 100000', () => {
+    const parsed = DatabaseSecretsSchema.parse(base);
+    expect(parsed.INGEST_STREAM_MAXLEN).toBe(100_000);
+  });
+
+  it('coerces a numeric-string override', () => {
+    const parsed = DatabaseSecretsSchema.parse({ ...base, INGEST_STREAM_MAXLEN: '5000' });
+    expect(parsed.INGEST_STREAM_MAXLEN).toBe(5000);
+  });
+
+  it('rejects non-positive values', () => {
+    expect(() => DatabaseSecretsSchema.parse({ ...base, INGEST_STREAM_MAXLEN: '0' })).toThrow();
+  });
+});

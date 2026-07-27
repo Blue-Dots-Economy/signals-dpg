@@ -8,6 +8,7 @@ import { items } from '@dpg/database';
 import { eq, sql } from 'drizzle-orm';
 import { decryptItemPrivate } from '@/utils/item_decrypt';
 import { getOrFetchSchemaByUrl } from '@/network_schema_cache';
+import { getNetworkConfigById } from '@/network_configs';
 import { classify_item } from '@/services/items/classifier';
 import { hasAcceptedProfileConsent } from '@/services/consent_acceptance';
 import { invalidateItemFetchCache } from '@/utils/item_fetch_cache_invalidate';
@@ -86,8 +87,22 @@ const item_lifecycle_handler = async (
 
       const current = existing.lifecycle_status as 'draft' | 'live' | 'paused';
 
+      if (action === 'pause') {
+        // Network-wide feature gate (#346). Resume stays allowed even when the
+        // feature is off, so a profile paused earlier can still be recovered.
+        const networkConfig = await getNetworkConfigById(existing.item_network);
+        if (!networkConfig.pause_enabled) {
+          return { invalidAction: 'PAUSE_NOT_ENABLED' as const } as const;
+        }
+        // Pause is a "voluntarily hide a *ready* profile" action — only a `live`
+        // profile can be hidden (business R7.5 / #234 Q6). Hiding a draft (never
+        // ready) or an already-paused profile is meaningless.
+        if (current !== 'live') {
+          return { invalidAction: 'PAUSE_REQUIRES_LIVE' as const } as const;
+        }
+      }
       if (action === 'unpause' && current !== 'paused') {
-        return { invalidAction: true } as const;
+        return { invalidAction: 'UNPAUSE_REQUIRES_PAUSED' as const } as const;
       }
 
       const { mergedState } = decryptItemPrivate({
@@ -129,6 +144,7 @@ const item_lifecycle_handler = async (
         item_id,
         item_network: existing.item_network,
         item_domain: existing.item_domain,
+        previous_status: current,
         lifecycle_status: next_status,
       };
     });
@@ -149,8 +165,16 @@ const item_lifecycle_handler = async (
 
     if ('invalidAction' in result) {
       return reply.code(409).send({
-        error: 'INVALID_LIFECYCLE_ACTION',
-        message: 'unpause is only valid on a paused item',
+        error:
+          result.invalidAction === 'PAUSE_NOT_ENABLED'
+            ? 'PAUSE_NOT_ENABLED'
+            : 'INVALID_LIFECYCLE_ACTION',
+        message:
+          result.invalidAction === 'PAUSE_NOT_ENABLED'
+            ? 'Pause is not enabled for this network'
+            : result.invalidAction === 'PAUSE_REQUIRES_LIVE'
+              ? 'pause is only valid on a live item'
+              : 'unpause is only valid on a paused item',
       });
     }
 
@@ -158,7 +182,20 @@ const item_lifecycle_handler = async (
       (err) => request.log.warn({ err }, 'cache invalidation after lifecycle change failed'),
     );
 
-    const { item_network: _n, item_domain: _d, ...responseBody } = result;
+    // Lifecycle transitions (pause / unpause here, and the draft/live/retired
+    // transitions elsewhere) must be emitted as audit/telemetry events —
+    // #234 Q15 ("log every transition as an event") / business doc R10.3.
+    // Deferred to the cross-cutting events/telemetry pipeline so all
+    // transitions report through one emitter; wire this transition
+    // (from `result.previous_status` → `result.lifecycle_status`, actor
+    // `callerId`) in there. `previous_status` is carried on `result` for that.
+
+    const {
+      item_network: _n,
+      item_domain: _d,
+      previous_status: _p,
+      ...responseBody
+    } = result;
     return reply.code(200).send(responseBody);
   } catch (err) {
     request.log.error({ err, item_id, action }, 'Failed to update item lifecycle');

@@ -1,7 +1,7 @@
 import { BulkItemFailure } from '@/utils/bulk_runner';
 import { getNetworkConfigById } from '@/network_configs';
 import {
-  getWardDob,
+  getWardAge,
   getGuardianContactPlaintext,
   getGuardianNamePlaintext,
 } from '@/services/minor_guardian_repo';
@@ -46,8 +46,8 @@ export async function guardianActionGate(input: GateInput): Promise<GateResult> 
     return { status: 'not_required' };
   }
 
-  const dob = await getWardDob(input.wardUserId);
-  if (!dob || !isMinor(dob)) {
+  const age = await getWardAge(input.wardUserId);
+  if (age === null || !isMinor(age)) {
     return { status: 'not_required' };
   }
 
