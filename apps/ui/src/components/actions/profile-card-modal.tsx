@@ -143,37 +143,42 @@ export function ProfileCardModal({
     };
 
     const resolve = async (): Promise<{ item: ResolvedItem; mode: ViewMode }> => {
-      if (wantsUnmasked) {
-        try {
-          const data = await getActionContactDetails(actionId);
-          const it = data.other_actor.item;
-          return {
-            item: {
-              item_network: it.item_network,
-              item_domain: it.item_domain,
-              item_type: it.item_type,
-              item_state: it.item_state,
-            },
-            // Server returns the masked pre-reveal view (revealed:false) when a
-            // party's profile isn't live (e.g. paused, #273) instead of erroring.
-            // `reveal_blocked_reason` says whose profile — so we show the right copy.
-            mode: data.revealed
-              ? 'full'
-              : data.reveal_blocked_reason === 'self'
-                ? 'reveal_blocked_self'
-                : data.reveal_blocked_reason === 'retired'
-                  ? 'reveal_retired'
-                  : 'reveal_unavailable',
-          };
-        } catch (err) {
-          const code = (err as { code?: string }).code ?? 'INTERNAL_SERVER_ERROR';
-          // Only fall back to the public profile when the reveal is genuinely
-          // unavailable; re-throw real errors so they surface to the user.
-          if (!REVEAL_UNAVAILABLE_CODES.has(code)) throw err;
+      // Always ask the action's contact-details endpoint first — it's the only
+      // source that can resolve a NON-live counterparty (paused #273, or retired
+      // #347), which the network item fetch (live-only) can't see. It reveals
+      // PII when allowed, else returns the masked view + a reveal_blocked_reason.
+      try {
+        const data = await getActionContactDetails(actionId);
+        const it = data.other_actor.item;
+        return {
+          item: {
+            item_network: it.item_network,
+            item_domain: it.item_domain,
+            item_type: it.item_type,
+            item_state: it.item_state,
+          },
+          mode: data.revealed
+            ? 'full'
+            : data.reveal_blocked_reason === 'self'
+              ? 'reveal_blocked_self'
+              : data.reveal_blocked_reason === 'retired'
+                ? 'reveal_retired'
+                : 'reveal_unavailable',
+        };
+      } catch (err) {
+        const code = (err as { code?: string }).code ?? 'INTERNAL_SERVER_ERROR';
+        // PII_NOT_REVEALED: the action simply isn't at a revealing status and the
+        // counterparty is live — show the ordinary masked public profile.
+        if (code === 'PII_NOT_REVEALED') {
+          return { item: await fetchMasked(), mode: 'masked' };
+        }
+        // Other "reveal legitimately unavailable" codes → masked public + note.
+        if (REVEAL_UNAVAILABLE_CODES.has(code)) {
           return { item: await fetchMasked(), mode: 'reveal_unavailable' };
         }
+        // A real failure — surface it.
+        throw err;
       }
-      return { item: await fetchMasked(), mode: 'masked' };
     };
 
     async function run() {
