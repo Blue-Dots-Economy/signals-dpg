@@ -1522,6 +1522,20 @@ describeIf(`lifecycle integration${can_run ? '' : ` — ${skip_reason}`}`, () =>
     expect(again.statusCode).toBe(409);
     expect(again.json().error).toBe('INVALID_LIFECYCLE_ACTION');
 
+    // A retired item cannot be edited — a state PATCH must not re-introduce the
+    // wiped PII (#347). The update path rejects with 409 ITEM_RETIRED.
+    const editRes = await app.inject({
+      method: 'POST', url: '/api/v1/admin/participant', headers: adminHeaders(ns),
+      payload: {
+        email, name: 'LC S13 edit', terms_accepted: true, privacy_accepted: true,
+        channel: 'bulk', network: primary.network, domain: primary.domain,
+        item_type: primary.item_type, item_id: itemId,
+        item_state: generateMinimalItemState(primary.schema),
+      },
+    });
+    expect(editRes.statusCode).toBe(409);
+    expect(editRes.json().error).toBe('ITEM_RETIRED');
+
     // Excluded from the owner's instance-local fetch ("My Profiles").
     const fetchRes = await app.inject({
       method: 'GET',
