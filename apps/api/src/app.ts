@@ -39,7 +39,9 @@ const baseJsonSchemaTransform = createJsonSchemaTransform({});
 // Operations served WITHOUT user auth (no preHandler on the route and no
 // group-level auth hook) — the spec-level default security is cleared for
 // these. Derived from the actual route wiring; keep in sync when a route's
-// preHandler changes (see apps/api/CLAUDE.md "Route auth wiring").
+// preHandler changes (see apps/api/CLAUDE.md "Route auth wiring"). Failure
+// direction is safe: a forgotten entry documents auth on a public route — it
+// never hides auth on a protected one; runtime auth is untouched either way.
 const PUBLIC_OPERATION_URLS = new Set([
   '/',
   '/health/live',
