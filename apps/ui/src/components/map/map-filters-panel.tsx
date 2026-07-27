@@ -5,6 +5,8 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { ResponsiveDialog } from '@/components/ui/responsive-dialog';
+import { useIsMobile } from '@/hooks/use-mobile';
 import { cn } from '@/lib/utils';
 import type { DotNetworkDomain, ViewMode } from '@/engine/types';
 import { getEnumFilterFieldsForDomains } from '@/lib/enum-filters';
@@ -216,6 +218,7 @@ export function MapFiltersPanel({
   viewMode = 'map',
 }: MapFiltersPanelProps) {
   const { t } = useTranslation();
+  const isMobile = useIsMobile();
   const [open, setOpen] = React.useState(false);
 
   // Derive enum filter fields generically from the filter-field domains
@@ -267,31 +270,145 @@ export function MapFiltersPanel({
   // Nothing to filter — don't render the pill at all
   if (!showDomainGroup && !showEnumGroups) return null;
 
+  const renderTrigger = (onClick?: () => void) => (
+    <Button
+      variant="outline"
+      size="sm"
+      onClick={onClick}
+      className={cn(
+        'h-8 gap-1.5 border border-input bg-background/95 text-xs shadow-md backdrop-blur-sm',
+        activeCount > 0 && 'border-primary/50 bg-primary/5',
+      )}
+      aria-label={t('filters.open')}
+    >
+      <SlidersHorizontal className="size-3.5" />
+      {t('filters.title')}
+      {activeCount > 0 && (
+        <Badge
+          variant="default"
+          className="size-4 rounded-full p-0 text-[10px] leading-none"
+          aria-label={t('filters.selected', { count: activeCount })}
+        >
+          {activeCount}
+        </Badge>
+      )}
+    </Button>
+  );
+
+  // ── Header + scrollable groups — shared between the desktop popover and the
+  // mobile bottom sheet; only the surrounding chrome (Popover vs Drawer) differs.
+  const panelBody = (
+    <>
+      {/* ── Sticky header ──────────────────────────────────────────────────── */}
+      <div className="sticky top-0 z-10 flex items-center justify-between rounded-t-xl border-b border-border bg-popover px-4 py-3">
+        <span className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">
+          {t('filters.title')}
+        </span>
+        <div className="flex items-center gap-2">
+          {activeCount > 0 && (
+            <button
+              type="button"
+              onClick={handleClearAll}
+              className="text-[10px] font-medium text-muted-foreground underline-offset-2 hover:text-foreground hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              aria-label={t('filters.clear_all')}
+            >
+              {t('filters.clear_all')}
+            </button>
+          )}
+          {/* X close button */}
+          <button
+            type="button"
+            onClick={() => setOpen(false)}
+            className={cn(
+              'flex size-5 items-center justify-center rounded-full',
+              'bg-muted text-muted-foreground transition-colors',
+              'hover:bg-accent hover:text-accent-foreground',
+              'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+            )}
+            aria-label={t('filters.close')}
+          >
+            <X className="size-3" />
+          </button>
+        </div>
+      </div>
+
+      {/* ── Scrollable filter groups ────────────────────────────────────────── */}
+      <div className="max-h-[75dvh] space-y-5 overflow-y-auto px-4 py-4">
+        {showDomainGroup && (
+          <FilterGroup title={t('filters.domain_group')}>
+            {domains.map((domain) => {
+              const label = domain.id
+                .replace(/_/g, ' ')
+                .replace(/\b\w/g, (c) => c.toUpperCase());
+              return (
+                <Chip
+                  key={domain.id}
+                  label={label}
+                  selected={selectedDomains.includes(domain.id)}
+                  onToggle={() => toggleDomain(domain.id)}
+                  ariaLabel={`Filter by domain: ${label}`}
+                />
+              );
+            })}
+          </FilterGroup>
+        )}
+
+        {enumFilterFields.map((field) => {
+          const fieldSelected = selectedFields[field.key] ?? [];
+
+          // Many options → compact searchable dropdown; few → inline chips.
+          if (field.options.length > CHIP_THRESHOLD) {
+            return (
+              <MultiSelectGroup
+                key={field.key}
+                title={field.label}
+                options={field.options}
+                selected={fieldSelected}
+                onToggle={(value) => toggleEnumValue(field.key, value)}
+              />
+            );
+          }
+
+          return (
+            <FilterGroup key={field.key} title={field.label}>
+              {field.options.map((option) => (
+                <Chip
+                  key={option}
+                  label={option}
+                  selected={fieldSelected.includes(option)}
+                  onToggle={() => toggleEnumValue(field.key, option)}
+                  ariaLabel={`Filter by ${field.label}: ${option}`}
+                />
+              ))}
+            </FilterGroup>
+          );
+        })}
+
+        {activeCount === 0 && (
+          <p className="text-[10px] text-muted-foreground">
+            {t(viewMode === 'list' ? 'filters.help_list' : 'filters.help')}
+          </p>
+        )}
+      </div>
+    </>
+  );
+
+  // Mobile: the pill opens a bottom sheet (ResponsiveDialog renders a Drawer)
+  // instead of a popover — same header/groups markup, different chrome.
+  if (isMobile) {
+    return (
+      <>
+        {renderTrigger(() => setOpen(true))}
+        <ResponsiveDialog open={open} onOpenChange={setOpen} contentClassName="p-0">
+          {panelBody}
+        </ResponsiveDialog>
+      </>
+    );
+  }
+
   return (
     <Popover open={open} onOpenChange={setOpen}>
-      <PopoverTrigger asChild>
-        <Button
-          variant="outline"
-          size="sm"
-          className={cn(
-            'h-8 gap-1.5 border border-input bg-background/95 text-xs shadow-md backdrop-blur-sm',
-            activeCount > 0 && 'border-primary/50 bg-primary/5',
-          )}
-          aria-label={t('filters.open')}
-        >
-          <SlidersHorizontal className="size-3.5" />
-          {t('filters.title')}
-          {activeCount > 0 && (
-            <Badge
-              variant="default"
-              className="size-4 rounded-full p-0 text-[10px] leading-none"
-              aria-label={t('filters.selected', { count: activeCount })}
-            >
-              {activeCount}
-            </Badge>
-          )}
-        </Button>
-      </PopoverTrigger>
+      <PopoverTrigger asChild>{renderTrigger()}</PopoverTrigger>
 
       <PopoverContent
         align="end"
@@ -301,97 +418,7 @@ export function MapFiltersPanel({
         // visible/clickable in maximized mode, and above normal overlays otherwise.
         style={{ zIndex: 2100 }}
       >
-        {/* ── Sticky header ──────────────────────────────────────────────────── */}
-        <div className="sticky top-0 z-10 flex items-center justify-between rounded-t-xl border-b border-border bg-popover px-4 py-3">
-          <span className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">
-            {t('filters.title')}
-          </span>
-          <div className="flex items-center gap-2">
-            {activeCount > 0 && (
-              <button
-                type="button"
-                onClick={handleClearAll}
-                className="text-[10px] font-medium text-muted-foreground underline-offset-2 hover:text-foreground hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                aria-label={t('filters.clear_all')}
-              >
-                {t('filters.clear_all')}
-              </button>
-            )}
-            {/* X close button */}
-            <button
-              type="button"
-              onClick={() => setOpen(false)}
-              className={cn(
-                'flex size-5 items-center justify-center rounded-full',
-                'bg-muted text-muted-foreground transition-colors',
-                'hover:bg-accent hover:text-accent-foreground',
-                'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
-              )}
-              aria-label={t('filters.close')}
-            >
-              <X className="size-3" />
-            </button>
-          </div>
-        </div>
-
-        {/* ── Scrollable filter groups ────────────────────────────────────────── */}
-        <div className="max-h-[75dvh] space-y-5 overflow-y-auto px-4 py-4">
-          {showDomainGroup && (
-            <FilterGroup title={t('filters.domain_group')}>
-              {domains.map((domain) => {
-                const label = domain.id
-                  .replace(/_/g, ' ')
-                  .replace(/\b\w/g, (c) => c.toUpperCase());
-                return (
-                  <Chip
-                    key={domain.id}
-                    label={label}
-                    selected={selectedDomains.includes(domain.id)}
-                    onToggle={() => toggleDomain(domain.id)}
-                    ariaLabel={`Filter by domain: ${label}`}
-                  />
-                );
-              })}
-            </FilterGroup>
-          )}
-
-          {enumFilterFields.map((field) => {
-            const fieldSelected = selectedFields[field.key] ?? [];
-
-            // Many options → compact searchable dropdown; few → inline chips.
-            if (field.options.length > CHIP_THRESHOLD) {
-              return (
-                <MultiSelectGroup
-                  key={field.key}
-                  title={field.label}
-                  options={field.options}
-                  selected={fieldSelected}
-                  onToggle={(value) => toggleEnumValue(field.key, value)}
-                />
-              );
-            }
-
-            return (
-              <FilterGroup key={field.key} title={field.label}>
-                {field.options.map((option) => (
-                  <Chip
-                    key={option}
-                    label={option}
-                    selected={fieldSelected.includes(option)}
-                    onToggle={() => toggleEnumValue(field.key, option)}
-                    ariaLabel={`Filter by ${field.label}: ${option}`}
-                  />
-                ))}
-              </FilterGroup>
-            );
-          })}
-
-          {activeCount === 0 && (
-            <p className="text-[10px] text-muted-foreground">
-              {t(viewMode === 'list' ? 'filters.help_list' : 'filters.help')}
-            </p>
-          )}
-        </div>
+        {panelBody}
       </PopoverContent>
     </Popover>
   );

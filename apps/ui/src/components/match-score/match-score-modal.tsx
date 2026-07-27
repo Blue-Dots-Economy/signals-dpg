@@ -2,11 +2,10 @@ import * as React from 'react';
 import { RefreshCw, TrendingUp, MapPin, BookOpen, Award, Clock, AlertCircle, CheckCircle2, Star } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import {
-  Dialog,
-  DialogContent,
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
+import { ResponsiveDialog } from '@/components/ui/responsive-dialog';
 import { Button } from '@/components/ui/button';
 import { Progress } from '@/components/ui/progress';
 import { ScrollArea } from '@/components/ui/scroll-area';
@@ -120,8 +119,11 @@ export function MatchScoreModal({
   }, [score?.score, isLoading]);
 
   return (
-    <Dialog open={isOpen} onOpenChange={onClose}>
-      <DialogContent className="sm:max-w-lg max-h-[90dvh] overflow-hidden p-0">
+    <ResponsiveDialog
+      open={isOpen}
+      onOpenChange={onClose}
+      contentClassName="sm:max-w-lg max-h-[90dvh] overflow-hidden p-0"
+    >
         <DialogHeader className="px-6 pt-6 pb-4 border-b">
           <DialogTitle className="flex items-center gap-2">
             <span>{t('match.modal_title')}</span>
@@ -241,7 +243,6 @@ export function MatchScoreModal({
             )}
           </div>
         </div>
-      </DialogContent>
-    </Dialog>
+    </ResponsiveDialog>
   );
 }

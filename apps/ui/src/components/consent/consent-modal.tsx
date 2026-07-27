@@ -1,12 +1,11 @@
 import { useState } from 'react';
 import type { ConsentConfigDocument } from '@dpg/schemas';
 import {
-  Dialog,
-  DialogContent,
   DialogHeader,
   DialogTitle,
   DialogDescription,
 } from '@/components/ui/dialog';
+import { ResponsiveDialog } from '@/components/ui/responsive-dialog';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Label } from '@/components/ui/label';
@@ -59,17 +58,18 @@ export function ConsentModal({
   };
 
   return (
-    <Dialog open={open} onOpenChange={handleOpenChange}>
-      <DialogContent
-        showCloseButton={mode === 'view'}
-        className="flex flex-col max-w-2xl max-h-[90dvh] gap-0 p-0 overflow-hidden"
-        onInteractOutside={(e) => {
-          if (mode === 'gate') e.preventDefault();
-        }}
-        onEscapeKeyDown={(e) => {
-          if (mode === 'gate') e.preventDefault();
-        }}
-      >
+    <ResponsiveDialog
+      open={open}
+      onOpenChange={handleOpenChange}
+      showCloseButton={mode === 'view'}
+      contentClassName="flex flex-col max-w-2xl max-h-[90dvh] gap-0 p-0 overflow-hidden"
+      onInteractOutside={(e) => {
+        if (mode === 'gate') e.preventDefault();
+      }}
+      onEscapeKeyDown={(e) => {
+        if (mode === 'gate') e.preventDefault();
+      }}
+    >
         <DialogHeader className="px-6 pt-6 pb-4 shrink-0 text-left">
           {theme?.name && (
             <p className="text-xs font-bold uppercase tracking-wide text-primary">
@@ -139,7 +139,6 @@ export function ConsentModal({
             </div>
           )}
         </div>
-      </DialogContent>
-    </Dialog>
+    </ResponsiveDialog>
   );
 }

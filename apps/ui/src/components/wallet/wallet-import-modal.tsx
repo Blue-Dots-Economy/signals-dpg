@@ -3,12 +3,11 @@ import { ChevronLeft, PlugZap } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 
 import {
-  Dialog,
-  DialogContent,
   DialogDescription,
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
+import { ResponsiveDialog } from '@/components/ui/responsive-dialog';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import {
@@ -40,8 +39,11 @@ export function WalletImportModal({ open, onOpenChange, context, onImported }: W
   const selectedProvider = selectedProviderName ? getWalletProvider(selectedProviderName) : undefined;
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-h-[85dvh] max-w-2xl overflow-hidden p-0 sm:max-h-[90dvh]">
+    <ResponsiveDialog
+      open={open}
+      onOpenChange={onOpenChange}
+      contentClassName="max-h-[85dvh] max-w-2xl overflow-hidden p-0 sm:max-h-[90dvh]"
+    >
         <div className="flex max-h-[85dvh] flex-col sm:max-h-[90dvh]">
           <DialogHeader className="border-b px-6 py-5">
             <DialogTitle>{t('wallet.import_title')}</DialogTitle>
@@ -106,7 +108,6 @@ export function WalletImportModal({ open, onOpenChange, context, onImported }: W
             )}
           </div>
         </div>
-      </DialogContent>
-    </Dialog>
+    </ResponsiveDialog>
   );
 }

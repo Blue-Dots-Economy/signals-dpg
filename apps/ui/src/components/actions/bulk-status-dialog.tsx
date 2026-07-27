@@ -11,7 +11,7 @@ import {
   renderConsentStatementWithNoun,
   formatBatchCounterpartyNoun,
 } from '@/lib/consent-copy';
-import { Dialog, DialogContent } from '@/components/ui/dialog';
+import { ResponsiveDialog } from '@/components/ui/responsive-dialog';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
@@ -140,14 +140,15 @@ export function BulkStatusDialog({
   const confirmDisabled = isPending || (requiresConsent && !consentChecked) || actions.length === 0;
 
   return (
-    <Dialog
+    <ResponsiveDialog
       open={open}
       onOpenChange={(next) => {
         if (!next && isPending) return; // don't allow dismiss mid-submit
         onOpenChange(next);
       }}
+      contentClassName="sm:max-w-[480px]"
     >
-      <DialogContent className="sm:max-w-[480px] gap-0 p-6">
+      <div className="flex flex-col gap-0 overflow-y-auto p-6">
         <h2 className="text-lg font-bold">{t(titleKey, { count: actions.length })}</h2>
         <div className="py-4">
           {requiresConsent ? (
@@ -176,7 +177,7 @@ export function BulkStatusDialog({
             {isPending ? t('actions.btn_updating') : t('actions.bulk_confirm_btn')}
           </Button>
         </div>
-      </DialogContent>
-    </Dialog>
+      </div>
+    </ResponsiveDialog>
   );
 }
