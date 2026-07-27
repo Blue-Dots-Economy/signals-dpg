@@ -1,7 +1,7 @@
 import * as React from 'react';
 import { useTranslation } from 'react-i18next';
 import type { RJSFSchema } from '@rjsf/utils';
-import type { MapMarker } from '@/engine/types';
+import type { MapMarker, MapViewport } from '@/engine/types';
 import { getActiveMapProvider } from '@/engine/map/map-registry';
 import { parseLocationFields, buildLocationQueries } from '@dpg/schemas/location_fields';
 import { getGeoProvider } from '@/lib/geo/provider';
@@ -72,6 +72,22 @@ interface MapViewProps {
    * instead of the icon pin. Unset for signals → unchanged behaviour.
    */
   resolveMarkerImage?: (marker: MapMarker) => string | null | undefined;
+  /**
+   * Optional viewport-change callback, fed by the active provider on
+   * debounced (~300ms) pan/zoom settle: `{lat, lng, radiusMeters}` where
+   * `radiusMeters` is the half-diagonal (center → a bounds corner). Feeds the
+   * home-page markers query with a viewport-scoped fetch (#203 §5.2). Unset
+   * for the tourist app → no listener is attached and behavior is unchanged.
+   */
+  onViewportChange?: (viewport: MapViewport) => void;
+  /**
+   * Overrides the empty-state text. The portal map is viewport-scoped (it fetches
+   * only the pins in view), so "no items" means "none in THIS area" — not that a
+   * filter excluded them; the home page passes an area-oriented message. Unset
+   * for the tourist app, which keeps the default `map.no_results` (it genuinely
+   * filters by search + fields).
+   */
+  emptyMessage?: string;
 }
 
 // Default map view when there is no user location / no profile location.
@@ -106,6 +122,8 @@ export function parseDefaultZoom(raw: string | undefined): number {
 const DEFAULT_CENTER: [number, number] = parseDefaultCenter(
   import.meta.env.VITE_MAP_DEFAULT_CENTER,
 );
+// The default zoom the map opens at before its first `onViewportChange`
+// report has landed (overridable via VITE_MAP_DEFAULT_ZOOM).
 const DEFAULT_ZOOM = parseDefaultZoom(import.meta.env.VITE_MAP_DEFAULT_ZOOM);
 const PROFILE_ZOOM = 12;
 
@@ -123,6 +141,8 @@ export function MapView({
   heightClassName = 'h-[calc(100vh-8rem)] min-h-[400px]',
   resolveMarkerIcon,
   resolveMarkerImage,
+  onViewportChange,
+  emptyMessage,
 }: MapViewProps) {
   const { t } = useTranslation();
   const MapProviderComponent = getActiveMapProvider();
@@ -275,6 +295,7 @@ export function MapView({
         renderPopup={renderPopup}
         resolveIcon={resolveMarkerIcon}
         resolveMarkerImage={resolveMarkerImage}
+        onViewportChange={onViewportChange}
       />
       {/* Top-right overlay: Filters (only while maximized — the page header
           hosts it normally but is hidden in fullscreen) + maximize toggle.
@@ -299,7 +320,7 @@ export function MapView({
           <p className="rounded-md bg-background/90 px-4 py-2 text-sm text-muted-foreground shadow-md backdrop-blur-sm">
             {loading
               ? t('map.loading')
-              : t('map.no_results')}
+              : (emptyMessage ?? t('map.no_results'))}
           </p>
         </div>
       )}

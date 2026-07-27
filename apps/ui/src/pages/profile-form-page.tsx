@@ -1,5 +1,6 @@
 import * as React from 'react';
 import { useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom';
+import { useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { useTranslation } from 'react-i18next';
 import { ArrowLeft, Wallet, OctagonX } from 'lucide-react';
@@ -23,13 +24,14 @@ import { useNetworkTheme } from '@/theme/theme-provider';
 import { useConsentConfig } from '@/hooks/use-consent-config';
 import { ConsentCheckbox } from '@/components/actions/consent-checkbox';
 import { WalletImportModal } from '@/components/wallet/wallet-import-modal';
-import { resolveNetworkRefs } from '@/engine/schema/resolve-schema';
-import type { DotNetworkSchema } from '@/engine/types';
 import { getConfiguredWalletProviders } from '@/engine/wallet/wallet-registry';
 import type { WalletImportResult } from '@/engine/wallet/types';
 import { useAuth } from '@/contexts/auth-context';
 import { mergeImportedDataIntoSchema } from '@/lib/import-mapping';
 import { getServedScope } from '@/lib/served-binding';
+import { useNetworkConfigs, useResolvedNetwork } from '@/hooks/use-network-config';
+import { useEditItem } from '@/hooks/use-edit-item';
+import { queryKeys } from '@/lib/query-keys';
 import { getStoredSignupDomain, clearStoredSignupDomain } from '@/lib/signup-domain';
 import { getUserDomains } from '@/lib/user-api';
 import { isGuardianConsentRequiredDomain } from '@/lib/guardian-consent';
@@ -45,18 +47,15 @@ import axios from 'axios';
 
 import {
   createItem,
-  fetchItems,
   updateItem,
   setItemLifecycle,
   type CreateItemPayload,
   type UpdateItemPayload,
   type Item,
 } from '@/lib/item-api';
-import { fetchNetworkConfig, fetchNetworkConfigs } from '@/lib/network-api';
 import { parseLocationFields, buildLocationQueries } from '@dpg/schemas/location_fields';
 import { getGeoProvider } from '@/lib/geo/provider';
 import type { GeoComponents } from '@/lib/geo/types';
-import { apiConfig } from '@/lib/api-config';
 
 function parseNetworkIds(networkEnv: string | undefined): string[] {
   if (!networkEnv) return [];
@@ -72,6 +71,7 @@ export function ProfileFormPage() {
   const { id } = useParams();
   const [searchParams] = useSearchParams();
   const { user, signOut } = useAuth();
+  const queryClient = useQueryClient();
   const { theme, brand } = useNetworkTheme();
   const { config: consentConfig, isLoading: consentLoading } = useConsentConfig();
   const isEdit = !!id;
@@ -88,14 +88,16 @@ export function ProfileFormPage() {
   const [selectedDomain, setSelectedDomain] = React.useState<string | null>(
     () => (!isEdit && singleServedDomain ? singleServedDomain : null),
   );
-  const [resolvedNetwork, setResolvedNetwork] = React.useState<DotNetworkSchema | null>(null);
   const [existingItem, setExistingItem] = React.useState<Item | null>(null);
   const [initialData, setInitialData] = React.useState<Record<string, unknown> | null>(null);
   const [isSubmitting, setIsSubmitting] = React.useState(false);
+  // Pause/unpause (#346) UI state — kept from feature; the pause feature is
+  // orthogonal to #295's React Query data-loading below.
   const [lifecycleBusy, setLifecycleBusy] = React.useState(false);
   const [pauseConfirmOpen, setPauseConfirmOpen] = React.useState(false);
-  const [isLoading, setIsLoading] = React.useState(isEdit);
-  const [availableNetworkIds, setAvailableNetworkIds] = React.useState<string[] | null>(null);
+  // NOTE: `isLoading`/`availableNetworkIds` useState from feature are dropped —
+  // #295 provides `editLoading` (React Query) and `availableNetworkIds` as a
+  // useMemo (from useNetworkConfigs) below.
   const [isWalletModalOpen, setIsWalletModalOpen] = React.useState(false);
   const [formError, setFormError] = React.useState<{ title: string; description?: string } | null>(null);
   const [resolvedLocations, setResolvedLocations] = React.useState<
@@ -134,26 +136,21 @@ export function ProfileFormPage() {
   );
   const networkFromUrl = searchParams.get('network');
 
-  React.useEffect(() => {
-    const controller = new AbortController();
+  // Networks list (config tier) — discover which network ids are available.
+  const {
+    data: networksData,
+    isError: networksError,
+  } = useNetworkConfigs();
 
-    fetchNetworkConfigs()
-      .then((networks) => {
-        if (controller.signal.aborted) return;
-        const filteredNetworks = configuredNetworkIds.length > 0
-          ? networks.filter((network) => configuredNetworkIds.includes(network.id))
-          : networks;
-        setAvailableNetworkIds(filteredNetworks.map((network) => network.id));
-      })
-      .catch((err) => {
-        if (controller.signal.aborted) return;
-        console.error('Failed to fetch networks:', err);
-        setAvailableNetworkIds([]);
-        setIsLoading(false);
-      });
-
-    return () => { controller.abort(); };
-  }, [configuredNetworkIds]);
+  const availableNetworkIds = React.useMemo<string[] | null>(() => {
+    if (networksError) return [];
+    if (!networksData) return null;
+    const filtered =
+      configuredNetworkIds.length > 0
+        ? networksData.filter((network) => configuredNetworkIds.includes(network.id))
+        : networksData;
+    return filtered.map((network) => network.id);
+  }, [networksData, networksError, configuredNetworkIds]);
 
   const targetNetworkId = React.useMemo(() => {
     if (servedScope?.network) return servedScope.network;
@@ -164,87 +161,60 @@ export function ProfileFormPage() {
     return availableNetworkIds[0] ?? null;
   }, [servedScope?.network, availableNetworkIds, networkFromUrl]);
 
-  // Fetch and resolve network config from API
-  React.useEffect(() => {
-    if (!targetNetworkId) return;
-
-    const controller = new AbortController();
-    setResolvedNetwork(null);
-
-    fetchNetworkConfig(targetNetworkId)
-      .then((config) => {
-        if (controller.signal.aborted) return;
-        return resolveNetworkRefs(config, { baseUrl: apiConfig.getUrl() });
-      })
-      .then((resolved) => {
-        if (controller.signal.aborted || !resolved) return;
-        setResolvedNetwork(resolved as DotNetworkSchema);
-      })
-      .catch((err) => {
-        console.error('Failed to fetch network config:', err);
-        setIsLoading(false);
-      });
-
-    return () => { controller.abort(); };
-  }, [targetNetworkId]);
-
-  // Fetch existing profile for edit mode
-  React.useEffect(() => {
-    if (!isEdit || !id || !resolvedNetwork) return;
-
-    let cancelled = false;
-
-    const loadExistingProfile = async () => {
-      try {
-        let foundItem = false;
-        // Search across all domains to find the item
-        for (const domain of resolvedNetwork.domains ?? []) {
-          const itemTypeKeys = domain.item_schemas ? Object.keys(domain.item_schemas) : [];
-          const itemType = itemTypeKeys.length > 0 ? itemTypeKeys[0] : 'profile';
-
-          const response = await fetchItems({
-            item_network: resolvedNetwork.id,
-            item_domain: domain.id,
-            item_type: itemType,
-            item_id: id,
-            limit: 1,
-          });
-
-          if (response.items.length > 0) {
-            if (cancelled) return;
-            const item = response.items[0];
-            setExistingItem(item);
-            setSelectedDomain(item.item_domain);
-            setInitialData(item.item_state);
-            foundItem = true;
-            break;
-          }
-        }
-
-        if (!cancelled && !foundItem) {
-          toast.error(t('home.toast_profile_not_found'), {
-            description: t('profile.toast_not_found_desc'),
-          });
-          navigate(`/?network=${resolvedNetwork.id}`);
-        }
-      } catch (err) {
-        if (!cancelled) {
-          console.error('Failed to load profile:', err);
-          toast.error(t('profile.toast_load_error'), {
-            description: t('profile.toast_load_error_desc'),
-          });
-        }
-      } finally {
-        if (!cancelled) setIsLoading(false);
-      }
-    };
-
-    loadExistingProfile();
-    return () => { cancelled = true; };
-  }, [isEdit, id, resolvedNetwork]);
-
+  // Resolved network config (config tier) — fetch + $ref resolution, cached.
+  const { data: resolvedNetwork, isError: resolvedNetworkError } = useResolvedNetwork(targetNetworkId);
   const network = resolvedNetwork;
   const domains = network?.domains ?? [];
+
+  // Existing profile for edit mode.
+  const editItem = useEditItem(network, isEdit ? (id ?? null) : null);
+
+  // Edit-mode loading screen: shown from mount through the networks-list and
+  // network-config-resolve phases and while the item itself loads (old
+  // `isLoading` was seeded to `isEdit` and cleared only once the item load
+  // settled). Goes false when the networks-list fetch or the network resolve
+  // errors, so a failure falls through to the terminal "no networks" /
+  // "loading schemas" guards exactly as before.
+  const editLoading =
+    isEdit &&
+    !networksError &&
+    !resolvedNetworkError &&
+    !editItem.isSuccess &&
+    !editItem.isError;
+
+  // Seed the edit form from the fetched item; redirect on a genuine miss.
+  React.useEffect(() => {
+    if (!isEdit) return;
+    const item = editItem.data;
+    if (item) {
+      // Seed once per item — a background refetch of the same item must not
+      // clobber the user's in-progress form edits.
+      if (existingItem?.item_id === item.item_id) return;
+      setExistingItem(item);
+      setSelectedDomain(item.item_domain);
+      setInitialData(item.item_state);
+    } else if (editItem.isSuccess && item === null && !existingItem) {
+      toast.error(t('home.toast_profile_not_found'), {
+        description: t('profile.toast_not_found_desc'),
+      });
+      navigate(`/?network=${resolvedNetwork?.id ?? ''}`);
+    } else if (editItem.isError && !existingItem) {
+      console.error('Failed to load profile:', editItem.error);
+      toast.error(t('profile.toast_load_error'), {
+        description: t('profile.toast_load_error_desc'),
+      });
+    }
+  }, [
+    isEdit,
+    editItem.data,
+    editItem.isSuccess,
+    editItem.isError,
+    editItem.error,
+    existingItem,
+    resolvedNetwork?.id,
+    navigate,
+    t,
+  ]);
 
   // The user's role(s), persisted on `user.domains` — the single source of
   // truth for which domain they may create profiles in (set at signup /
@@ -497,6 +467,24 @@ export function ProfileFormPage() {
         }
 
         await updateItem(existingItem.item_id, updatePayload);
+        // Reflect the write immediately in cached lists (§C5).
+        queryClient.invalidateQueries({ queryKey: queryKeys.myItems(network.id) });
+        // Network-level prefix of the browse-items key (React Query matches
+        // prefixes) — invalidates every domain's browse cache for this network.
+        queryClient.invalidateQueries({ queryKey: ['browse-items', network.id] });
+        // Bust the by-id caches for THIS item too, else re-opening the editor
+        // within the 60s own-data window seeds the form from the pre-edit copy —
+        // and the seed-once guard above then pins that stale value so the
+        // background refetch can't correct it. removeQueries (not invalidate)
+        // for editItem so the next open has no stale copy to seed from and
+        // refetches fresh via the same masked read path; itemDetail (marker
+        // click-through / detail popup) can just be invalidated.
+        queryClient.removeQueries({
+          queryKey: queryKeys.editItem(network.id, existingItem.item_id),
+        });
+        queryClient.invalidateQueries({
+          queryKey: queryKeys.itemDetail(network.id, existingItem.item_id),
+        });
         toast.success(t('profile.toast_updated'), {
           description: t('profile.toast_updated_desc'),
         });
@@ -529,6 +517,24 @@ export function ProfileFormPage() {
         }
 
         const created = await createItem(createPayload);
+        // Reflect the write immediately in cached lists (§C5).
+        queryClient.invalidateQueries({ queryKey: queryKeys.myItems(network.id) });
+        // Network-level prefix of the browse-items key (React Query matches
+        // prefixes) — invalidates every domain's browse cache for this network.
+        queryClient.invalidateQueries({ queryKey: ['browse-items', network.id] });
+        if (consentRequired && profileDoc) {
+          // This create recorded profile_creation consent. Optimistically add
+          // the new item to the profileConsent cache so returning to home sees
+          // it as consented IMMEDIATELY. A plain invalidate is not enough: the
+          // profileConsent query is stale-while-revalidate, so the home gate
+          // would read the old set (without this profile) during the refetch
+          // window and spuriously re-prompt. Mirrors the accept handler's
+          // setQueryData approach.
+          queryClient.setQueryData<Set<string>>(
+            queryKeys.profileConsent(network.id),
+            (prev) => new Set([...(prev ?? []), created.item_id]),
+          );
+        }
         // Minor on a gated domain: the guardian already OTP-verified a
         // pre-create token at the consent tick. Consume it now to record the
         // GUARDIAN profile_creation consent and promote the fresh item to live
@@ -605,11 +611,11 @@ export function ProfileFormPage() {
     }
   };
 
-  if (availableNetworkIds === null || isLoading) {
+  if (availableNetworkIds === null || editLoading) {
     return (
       <div className="flex h-screen items-center justify-center">
         <p className="text-muted-foreground">
-          {isLoading ? t('profile.loading_profile') : t('profile.loading_schemas')}
+          {editLoading ? t('profile.loading_profile') : t('profile.loading_schemas')}
         </p>
       </div>
     );
