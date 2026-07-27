@@ -11,6 +11,7 @@ import { ThemeModeToggle } from '@/components/layout/theme-mode-toggle';
 import { LanguageSwitcher } from '@/components/layout/language-switcher';
 import { useAuth } from '@/contexts/auth-context';
 import { usePendingActionsCount } from '@/hooks/use-actions';
+import { cn } from '@/lib/utils';
 import type { ViewMode } from '@/engine/types';
 
 interface TopBarProps {
@@ -91,13 +92,20 @@ export function TopBar({
           </ToggleGroupItem>
         </ToggleGroup>
 
-        <LanguageSwitcher />
-        <ThemeModeToggle />
+        {/* On mobile, Language + Theme move into the avatar dropdown once the
+            user is signed in (there's no dropdown to move them into for the
+            logged-out case, so they stay inline there). */}
+        <div className={cn('flex items-center gap-2', isAuthenticated && 'hidden md:flex')}>
+          <LanguageSwitcher />
+          <ThemeModeToggle />
+        </div>
 
         {!isLoading && (
           isAuthenticated ? (
             <>
-              <NotificationBell />
+              <span className="hidden md:inline-flex">
+                <NotificationBell />
+              </span>
               <UserMenu />
             </>
           ) : (

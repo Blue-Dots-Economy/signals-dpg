@@ -99,6 +99,8 @@
   "actions.profile_not_live_desc": "आपकी प्रोफ़ाइल अभी ड्राफ़्ट है। इसे लाइव करने के लिए आवश्यक फ़ील्ड भरें, फिर आप कोई भी कार्रवाई कर सकते हैं।",
   "menu.sign_out": "साइन आउट",
   "menu.contact_support": "सहायता से संपर्क करें",
+  "menu.notifications": "सूचनाएं",
+  "menu.theme": "थीम",
   "support.dialog_title": "सहायता से संपर्क करें",
   "support.dialog_desc": "हमें बताएं कि क्या समस्या है और हम आपसे संपर्क करेंगे।",
   "support.label_name": "नाम",

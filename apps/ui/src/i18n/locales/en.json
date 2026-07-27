@@ -122,6 +122,8 @@
   "actions.profile_not_live_desc": "Your profile is still a draft. Fill in the required fields to make it live, then you can perform any actions.",
   "menu.sign_out": "Sign out",
   "menu.contact_support": "Contact support",
+  "menu.notifications": "Notifications",
+  "menu.theme": "Theme",
   "support.dialog_title": "Contact support",
   "support.dialog_desc": "Tell us what's going on and we'll get back to you.",
   "support.label_name": "Name",
