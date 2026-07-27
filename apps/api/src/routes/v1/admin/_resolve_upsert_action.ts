@@ -35,7 +35,7 @@ export type ResolveUpsertActionInput = {
  * specific existing item for an update. There is no dedup-to-update.
  *
  * Tail logic (user_exists && authorized):
- *   - item_id_in_body && has_item_state → update_item{item_id_in_body}
+ *   - item_id_in_body → update_item{item_id_in_body}   (with or without item_state)
  *   - has_item_state → insert_item   (always a new profile)
  *   - else → account_only
  *
@@ -66,7 +66,10 @@ export const resolve_upsert_action = (input: ResolveUpsertActionInput): UpsertVe
     return { kind: 'aggregator_owned_elsewhere' };
   }
 
-  if (item_id_in_body && has_item_state) return { kind: 'update_item', item_id: item_id_in_body };
+  // item_id targets an existing profile — with or without item_state (#309):
+  // a consent-only / DOB-only activation can update that profile without
+  // re-sending its fields. item_state without item_id is still a new insert.
+  if (item_id_in_body) return { kind: 'update_item', item_id: item_id_in_body };
   if (has_item_state) return { kind: 'insert_item' };
   return { kind: 'account_only' };
 };

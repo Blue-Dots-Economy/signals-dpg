@@ -119,7 +119,7 @@ describe('resolve_upsert_action', () => {
     expect(v).toEqual({ kind: 'update_item', item_id: '22222222-2222-4222-8222-222222222222' });
   });
 
-  it('aggregator + existing OWN user + item_id + NO item_state -> account_only', () => {
+  it('aggregator + existing OWN user + item_id + NO item_state -> update_item', () => {
     const v = resolve_upsert_action({
       acting_org: aggregator,
       user_exists: true,
@@ -127,7 +127,7 @@ describe('resolve_upsert_action', () => {
       has_item_state: false,
       aggregator_owns_user: true,
     });
-    expect(v).toEqual({ kind: 'account_only' });
+    expect(v).toEqual({ kind: 'update_item', item_id: '22222222-2222-4222-8222-222222222222' });
   });
 
   it('network_service + new user + no item_state -> account_only (create the account only)', () => {
@@ -174,7 +174,7 @@ describe('resolve_upsert_action', () => {
     expect(v).toEqual({ kind: 'update_item', item_id: '33333333-3333-4333-8333-333333333333' });
   });
 
-  it('network_service + existing user + item_id + NO item_state -> account_only', () => {
+  it('network_service + existing user + item_id + NO item_state -> update_item', () => {
     const v = resolve_upsert_action({
       acting_org: networkService,
       user_exists: true,
@@ -182,7 +182,7 @@ describe('resolve_upsert_action', () => {
       has_item_state: false,
       aggregator_owns_user: false,
     });
-    expect(v).toEqual({ kind: 'account_only' });
+    expect(v).toEqual({ kind: 'update_item', item_id: '33333333-3333-4333-8333-333333333333' });
   });
 
   it('network_service + existing user + item_state + no item_id -> insert_item', () => {
@@ -216,5 +216,19 @@ describe('resolve_upsert_action', () => {
       aggregator_owns_user: false,
     });
     expect(v).toEqual({ kind: 'account_only' });
+  });
+
+  it('item_id without item_state → update_item (consent/DOB-only target)', () => {
+    const input = {
+      acting_org: { org_id: 'o', org_type: 'network_service' as const, service_user_id: 's' },
+      user_exists: true,
+      item_id_in_body: '11111111-1111-4111-8111-111111111111',
+      has_item_state: false,
+      aggregator_owns_user: false,
+    };
+    expect(resolve_upsert_action(input)).toEqual({
+      kind: 'update_item',
+      item_id: '11111111-1111-4111-8111-111111111111',
+    });
   });
 });
