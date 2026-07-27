@@ -336,6 +336,18 @@ It sets each existing user's single role from their earliest item; users with no
 items are left empty (role assigned on first create). Idempotent — only NULL/empty
 rows are touched.
 
+### `0005_age_location` (#331) — DOB → age snapshot
+
+Custom SQL in the Drizzle ledger (`drizzle/0005_age_location.sql`): adds
+`user.age integer` + `user.location text`, **backfills `age = currentYear −
+birthYear` from any existing `date_of_birth`**, then drops `date_of_birth`
+(mirrors the client rule used to capture age). Ordered add → backfill → drop so
+populated birth dates aren't lost. Idempotent — `IF [NOT] EXISTS` on the
+add/drop and a guarded backfill/drop (`DO $$ … $$` keyed on `date_of_birth`
+still existing) make it a safe no-op on a re-run or a DB that never had the
+column. Applied automatically by the deploy migrator (`migrate.mjs`) — **no
+manual DDL needed.**
+
 ## Related
 
 - `docs/superpowers/plans/2026-05-21-deployment-and-automation.md` —

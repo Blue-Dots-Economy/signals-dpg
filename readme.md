@@ -42,8 +42,9 @@ Main route groups:
 - `/api/v1/consent` — user- and item-level consent capture (terms/privacy, profile creation, per-action)
 - `/api/v1/admin` — service-to-service admin surface (requires `x-acting-org-id`)
 - `/api/v1/aggregator`
-- `/api/v1/auth` — public, unauthenticated auth-flow config (`GET /api/v1/auth/config`)
+- `/api/v1/auth` — public, unauthenticated auth-flow config (`GET /api/v1/auth/config`) and the U18 age precheck (`POST /api/v1/auth/u18-precheck`)
 - `/api/v1/support` — authenticated contact-support form (`POST /api/v1/support`)
+- `GET /health/live` and `GET /health/ready` — Kubernetes probes at the **root** path (not `/api/v1`); `live` is pure process-liveness, `ready` actively probes Postgres + Redis
 
 Important behavior:
 
@@ -59,6 +60,12 @@ Important behavior:
 - `POST /api/v1/support` submits an in-app contact-support message (requires an authenticated user); it emails `SUPPORT_EMAIL` via the notification service, and returns `503 SUPPORT_NOT_CONFIGURED` when the recipient or notification client is unset
 - `GET /api/v1/network/item/fetch` fans out to peer instances via the `*_local` peer routes (`item/count_local`, `item/fetch_local`), which require an HMAC instance token (see [Inter-instance peer auth](#inter-instance-peer-auth))
 - A profile is only network-discoverable once it is **live**: required fields must be complete **and** `profile_creation` consent accepted. Accepting profile consent runs `promoteItemOnProfileConsent`, which re-classifies a `draft` item to `live` (see [Consent](#consent))
+- `POST /api/v1/admin/participant` onboards/updates a participant from an integrating DPG (always-create profiles; per-user cap via `MAX_PROFILES_PER_USER`); it accepts a `compliance` consent array + `age`, records the ledger, and promotes the profile to `live` when the U18/consent gate passes. Under-18 onboarding is rejected (`400 U18_NOT_ALLOWED`)
+- `GET /api/v1/admin/participant` returns the caller-visible consent/lifecycle status (`user_consent`, per-item `profile_consent_accepted` + `lifecycle_status`); non-owning aggregators get no disclosure
+- `POST /api/v1/auth/u18-precheck` is a **public, unauthenticated** age hint for the signup UI (a hint, not the go-live control)
+- Under-18 guardian-consent routes live under `/api/v1/consent/u18/*` (`dob`, `status`, `guardian`, `guardian/verify`, `signup/guardian`(+`/verify`), `profile-consent`) plus `GET /api/v1/consent/profile-status`; a minor's profile only reaches `live` on a guardian's OTP-verified `source='guardian'` consent
+- `POST /api/v1/action/perform` performs a single action; `POST /api/v1/action/perform/bulk` submits an array and returns per-item results with partial-failure semantics
+- `GET /api/v1/action/:action_id/contact-details` returns the counterparty's contact/profile details, masked or unmasked depending on the action's status
 
 Item typing is schema-driven. `item_type` is not arbitrary; it should be a schema identifier defined by the network, for example `profile_1.0` or `profile_1.1`.
 
@@ -137,6 +144,12 @@ PEER_AUTH_MODE="permissive"      # permissive (default) | enforced
 # allowed: opens public self-registration.
 SELF_SIGNUP_MODE="gated"
 LOGIN_CHANNELS="phone,email"     # ordered subset of phone,email
+
+# Max profiles a single user may hold (default 5). A network.json domain's
+# max_profiles_per_user overrides this per-domain.
+MAX_PROFILES_PER_USER=5
+# XADD MAXLEN cap bounding the item-events Redis stream.
+INGEST_STREAM_MAXLEN=100000
 
 # Private-location (PII) jitter: the metre annulus a true coordinate is offset
 # into before storage. Keyed by SIGNALS_PII_KEY; bounds enforced 50–1000 m.
@@ -293,6 +306,14 @@ Consent now gates **discoverability**: a profile becomes network-visible
 used on write (with consent now true) and flips a `draft` item to `live`
 (`paused` is sticky; `live` is unchanged). A one-off deploy backfill,
 `pnpm db:backfill:consent:api`, re-classifies existing profiles against this gate.
+
+**U18 guardian gate.** On domains where `guardianConsentRequired` is true, a
+minor (`user.age <= 18` — an age snapshot captured at registration, #331)
+cannot reach `live` on their own self-consent; only a guardian's OTP-verified
+`source='guardian'` `profile_creation` row promotes it. The gate is
+fail-closed: a null `age` on a gated domain is never treated as adult. The
+server-to-server `/admin/participant` API rejects under-18 onboarding outright
+(`U18_NOT_ALLOWED`) — minors complete onboarding through the portal.
 
 Consent copy lives in a `consent.json` beside each network's `network.json`
 (brand overrides in a brand-named sub-folder), is loaded via
