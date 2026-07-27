@@ -248,11 +248,13 @@ export function ProfileCardModal({
           </div>
         )}
 
-        {state.status === 'success' && item && schema && (
+        {/* A retired profile shows only the notice (in the description) — its
+            leftover non-PII fields must not be rendered as a card (#347). */}
+        {state.status === 'success' && state.mode !== 'reveal_retired' && item && schema && (
           <DomainCard schema={schema} schemaName={item.item_domain} data={item.item_state} />
         )}
 
-        {state.status === 'success' && item && !schema && (
+        {state.status === 'success' && state.mode !== 'reveal_retired' && item && !schema && (
           <pre className="max-h-80 overflow-auto whitespace-pre-wrap break-words rounded-md bg-muted p-3 text-xs">
             {JSON.stringify(item.item_state, null, 2)}
           </pre>
