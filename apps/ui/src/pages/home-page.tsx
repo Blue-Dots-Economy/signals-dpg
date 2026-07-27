@@ -679,6 +679,13 @@ export function HomePage() {
   // and handleLocationSourceChange ignores it.)
   const [recenterNonce, setRecenterNonce] = React.useState(0);
 
+  // Bumped right before a marker popup's Connect/Apply action opens the
+  // consent modal, so the map provider closes the popup first — otherwise the
+  // popup (a map overlay in a high stacking context) sits on top of the
+  // modal's bottom-sheet Drawer on mobile, making the consent checkbox +
+  // Confirm unreachable (Issue #1).
+  const [closePopupNonce, setClosePopupNonce] = React.useState(0);
+
   const handleLocationSourceChange = React.useCallback(
     (next: PreferredLocationSource) => {
       setPreferredSource(next);
@@ -2105,6 +2112,7 @@ export function HomePage() {
                   items={mapItems}
                   focusPoint={userLocation}
                   focusNonce={recenterNonce}
+                  closePopupNonce={closePopupNonce}
                   filtersSlot={filtersPanel}
                   onViewportChange={setMapViewport}
                   emptyMessage={t('home.map_no_items_in_area')}
@@ -2140,6 +2148,9 @@ export function HomePage() {
                         localItem={myItem}
                         connectAction={connectAction}
                         onConnect={(itemId) => {
+                          // Close the marker popup first so it doesn't cover
+                          // the consent modal the action is about to open.
+                          setClosePopupNonce((n) => n + 1);
                           if (connectAction) triggerAction(connectAction.action_type, connectAction, itemId);
                         }}
                         onItemResolved={setMapDetailItem}

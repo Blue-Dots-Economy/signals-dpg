@@ -536,6 +536,7 @@ export function GoogleMapProvider({
   onMarkerClick,
   initialViewSet = false,
   focusNonce,
+  closePopupNonce,
   renderPopup,
   resolveIcon,
   resolveMarkerImage,
@@ -545,6 +546,21 @@ export function GoogleMapProvider({
   const isMobile = useIsMobile();
   const [activeMarker, setActiveMarker] = React.useState<MapMarker | null>(null);
   const apiKey = getRuntimeEnv('VITE_GOOGLE_MAPS_API_KEY');
+
+  // Closes the open marker popup (both the mobile portal overlay and the
+  // desktop InfoWindow key off `activeMarker`) when the caller bumps
+  // `closePopupNonce` — e.g. right before Connect/Apply opens the consent
+  // modal, so it isn't hidden behind the popup's high stacking context.
+  // Guarded with a ref (mirrors `focusNonce`'s handling in
+  // `MapViewController`/`SetView`) so mount / an unchanged nonce never fires a
+  // spurious close.
+  const prevClosePopupNonce = React.useRef<number | undefined>(closePopupNonce);
+  React.useEffect(() => {
+    if (prevClosePopupNonce.current !== closePopupNonce) {
+      setActiveMarker(null);
+    }
+    prevClosePopupNonce.current = closePopupNonce;
+  }, [closePopupNonce]);
 
   if (!apiKey) {
     return (

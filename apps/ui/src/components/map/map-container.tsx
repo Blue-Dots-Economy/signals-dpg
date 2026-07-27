@@ -35,6 +35,14 @@ interface MapViewProps {
    */
   focusNonce?: number;
   /**
+   * Monotonic counter bumped to close any open marker popup (e.g. right
+   * before an action like Connect/Apply opens a modal) — the marker popup is
+   * a map overlay in a high stacking context, so on mobile it would otherwise
+   * cover a bottom-sheet modal. Forwarded to the active provider, which clears
+   * whatever "active marker" state it holds internally.
+   */
+  closePopupNonce?: number;
+  /**
    * The Filters control. Rendered inside the map overlay ONLY when the map is
    * maximized (in normal mode the page header hosts it, but that header is
    * covered when the map goes fullscreen, so we surface it here too).
@@ -135,6 +143,7 @@ export function MapView({
   zoom = DEFAULT_ZOOM,
   focusPoint,
   focusNonce,
+  closePopupNonce,
   filtersSlot,
   renderPopup,
   resolveMarkerLabel,
@@ -292,6 +301,7 @@ export function MapView({
         onMarkerClick={onMarkerClick}
         initialViewSet={initialViewSet}
         focusNonce={focusNonce}
+        closePopupNonce={closePopupNonce}
         renderPopup={renderPopup}
         resolveIcon={resolveMarkerIcon}
         resolveMarkerImage={resolveMarkerImage}

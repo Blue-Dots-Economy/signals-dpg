@@ -71,6 +71,31 @@ function SetView({
 }
 
 /**
+ * Closes any open Leaflet popup when the caller bumps `closePopupNonce` (e.g.
+ * right before Connect/Apply opens the consent modal, so it isn't hidden
+ * behind the popup's high stacking context). Leaflet's `Map` tracks whichever
+ * popup is currently open internally (react-leaflet doesn't lift that into
+ * React state here), so `map.closePopup()` — which closes the open popup
+ * regardless of which marker it belongs to — is the correct imperative
+ * escape hatch. Guarded with a ref (mirrors `SetView`'s `focusNonce`
+ * handling) so mount / an unchanged nonce never fires a spurious close.
+ * Renders nothing — pure side-effect component, same shape as `SetView`.
+ */
+function ClosePopupOnNonce({ closePopupNonce }: { closePopupNonce?: number }) {
+  const map = useMap();
+  const prevNonce = React.useRef<number | undefined>(closePopupNonce);
+
+  React.useEffect(() => {
+    if (prevNonce.current !== closePopupNonce) {
+      map.closePopup();
+    }
+    prevNonce.current = closePopupNonce;
+  }, [closePopupNonce, map]);
+
+  return null;
+}
+
+/**
  * Reports the map's viewport (center + half-diagonal radius) to the caller on
  * debounced `moveend`. Only ever mounted when `onViewportChange` is provided
  * (see `LeafletMapProvider` below), so the tourist app — which never passes
@@ -314,6 +339,7 @@ export function LeafletMapProvider({
   onMarkerClick,
   initialViewSet = false,
   focusNonce,
+  closePopupNonce,
   renderPopup,
   resolveIcon,
   onViewportChange,
@@ -341,6 +367,7 @@ export function LeafletMapProvider({
       <FitBounds markers={markers} skip={initialViewSet || Boolean(onViewportChange)} />
       {initialViewSet && <SetView center={center} zoom={zoom} focusNonce={focusNonce} />}
       {onViewportChange && <ViewportReporter onViewportChange={onViewportChange} />}
+      <ClosePopupOnNonce closePopupNonce={closePopupNonce} />
       {/*
        * MarkerClusterGroup wraps all markers so that:
        *  - at low zoom levels, nearby markers collapse into a cluster badge
