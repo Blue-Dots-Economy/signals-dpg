@@ -105,6 +105,7 @@
   "actions.updater_title_default": "Update Status",
   "actions.updater_subtitle_fallback": "Update status for this {{actionType}} action",
   "actions.remarks_label": "Reason (optional)",
+  "actions.reason_shown_label": "Reason",
   "actions.remarks_placeholder": "Add a brief note (optional)",
   "actions.btn_submit": "Submit",
   "actions.btn_updating": "Updating...",

@@ -86,6 +86,7 @@
   "actions.updater_title_default": "स्थिति अपडेट करें",
   "actions.updater_subtitle_fallback": "इस {{actionType}} क्रिया की स्थिति अपडेट करें",
   "actions.remarks_label": "कारण (वैकल्पिक)",
+  "actions.reason_shown_label": "कारण",
   "actions.remarks_placeholder": "संक्षिप्त नोट जोड़ें (वैकल्पिक)",
   "actions.btn_submit": "जमा करें",
   "actions.btn_updating": "अपडेट हो रहा है...",

@@ -176,6 +176,9 @@ export interface Action {
   target_item_owner: string | null;
   target_item_locations?: Array<{ lat: number; lng: number; label?: string }>;
   requirements_snapshot: Record<string, unknown>;
+  // Reason attached when the action was rejected/cancelled — the actor's own
+  // remark, or a system remark (e.g. when the counterparty retired, #347).
+  remarks?: string | null;
   created_at: string;
   updated_at: string;
   ownership_roles: ('initiated' | 'received')[];

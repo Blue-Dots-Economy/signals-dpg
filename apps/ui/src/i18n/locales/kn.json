@@ -86,6 +86,7 @@
   "actions.updater_title_default": "ಸ್ಥಿತಿ ನವೀಕರಿಸಿ",
   "actions.updater_subtitle_fallback": "ಈ {{actionType}} ಕ್ರಿಯೆಯ ಸ್ಥಿತಿ ನವೀಕರಿಸಿ",
   "actions.remarks_label": "ಕಾರಣ (ಐಚ್ಛಿಕ)",
+  "actions.reason_shown_label": "ಕಾರಣ",
   "actions.remarks_placeholder": "ಸಂಕ್ಷಿಪ್ತ ಟಿಪ್ಪಣಿ ಸೇರಿಸಿ (ಐಚ್ಛಿಕ)",
   "actions.btn_submit": "ಸಲ್ಲಿಸಿ",
   "actions.btn_updating": "ನವೀಕರಿಸಲಾಗುತ್ತಿದೆ...",
