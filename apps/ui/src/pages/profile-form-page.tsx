@@ -47,7 +47,6 @@ import {
   createItem,
   fetchItems,
   updateItem,
-  setItemLifecycle,
   type CreateItemPayload,
   type UpdateItemPayload,
   type Item,
@@ -92,9 +91,6 @@ export function ProfileFormPage() {
   const [existingItem, setExistingItem] = React.useState<Item | null>(null);
   const [initialData, setInitialData] = React.useState<Record<string, unknown> | null>(null);
   const [isSubmitting, setIsSubmitting] = React.useState(false);
-  const [lifecycleBusy, setLifecycleBusy] = React.useState(false);
-  const [pauseConfirmOpen, setPauseConfirmOpen] = React.useState(false);
-  const [retireConfirmOpen, setRetireConfirmOpen] = React.useState(false);
   const [isLoading, setIsLoading] = React.useState(isEdit);
   const [availableNetworkIds, setAvailableNetworkIds] = React.useState<string[] | null>(null);
   const [isWalletModalOpen, setIsWalletModalOpen] = React.useState(false);
@@ -583,49 +579,6 @@ export function ProfileFormPage() {
     }
   };
 
-  // Pause (hide) / unpause (show) the profile the owner is editing. Pause is
-  // only offered on a `live` profile; unpause on a `paused` one. The server
-  // re-validates on unpause and may land the profile in `draft`. (#346)
-  const handleLifecycle = async (action: 'pause' | 'unpause') => {
-    if (!existingItem) return;
-    setLifecycleBusy(true);
-    try {
-      const res = await setItemLifecycle(existingItem.item_id, action);
-      setExistingItem({ ...existingItem, lifecycle_status: res.lifecycle_status });
-      toast.success(
-        action === 'pause'
-          ? t('profile.toast_paused', 'Profile paused — it is no longer discoverable in the network.')
-          : res.lifecycle_status === 'live'
-            ? t('profile.toast_unpaused_live', 'Profile resumed — discoverable in the network again.')
-            : t('profile.toast_unpaused_draft', 'Profile resumed, but it needs completing before it goes live.'),
-      );
-    } catch {
-      toast.error(t('profile.toast_lifecycle_failed', 'Could not update profile status. Try again.'));
-    } finally {
-      setLifecycleBusy(false);
-    }
-  };
-
-  // Retire (permanent removal) the profile the owner is editing (#347). This is
-  // terminal and irreversible: the server wipes PII, cancels open connections
-  // and de-indexes the profile. It then disappears from "My Profiles", so on
-  // success we leave the editor and return to home rather than re-render a gone
-  // profile.
-  const handleRetire = async () => {
-    if (!existingItem) return;
-    setLifecycleBusy(true);
-    try {
-      await setItemLifecycle(existingItem.item_id, 'retire');
-      toast.success(
-        t('profile.toast_retired', 'Profile retired — it has been permanently removed from the network.'),
-      );
-      navigate(`/?network=${resolvedNetwork?.id ?? ''}`);
-    } catch {
-      toast.error(t('profile.toast_lifecycle_failed', 'Could not update profile status. Try again.'));
-      setLifecycleBusy(false);
-    }
-  };
-
   if (availableNetworkIds === null || isLoading) {
     return (
       <div className="flex h-screen items-center justify-center">
@@ -751,47 +704,6 @@ export function ProfileFormPage() {
               </Alert>
             )}
 
-            {/* Pause control. Gated on the network's `pause_enabled` (default on).
-                When disabled, a live profile shows no control; an already-paused
-                profile still shows Resume so it can be recovered. */}
-            {isEdit && existingItem &&
-              (existingItem.lifecycle_status === 'paused' ||
-                (existingItem.lifecycle_status === 'live' &&
-                  network?.pause_enabled !== false)) && (
-                <div className="mb-4 flex items-center justify-between gap-3 rounded-md border border-border bg-muted/40 p-3">
-                  <p className="text-sm text-muted-foreground">
-                    {existingItem.lifecycle_status === 'paused'
-                      ? t('profile.visibility_hidden', 'This profile is paused — it is not discoverable in the network.')
-                      : t('profile.visibility_live', 'This profile is discoverable in the network.')}
-                  </p>
-                  <Button
-                    // Resume is the positive action (restores discovery) → brand
-                    // theme; Pause is neutral/hide → outline.
-                    variant={existingItem.lifecycle_status === 'paused' ? 'default' : 'outline'}
-                    size="sm"
-                    className={
-                      existingItem.lifecycle_status === 'paused'
-                        ? 'bg-brand-cta text-white hover:brightness-110'
-                        : undefined
-                    }
-                    disabled={lifecycleBusy}
-                    onClick={() => {
-                      // Resume is safe (restores discovery) — do it directly.
-                      // Pause removes the profile from discovery, so confirm first.
-                      if (existingItem.lifecycle_status === 'paused') {
-                        void handleLifecycle('unpause');
-                      } else {
-                        setPauseConfirmOpen(true);
-                      }
-                    }}
-                  >
-                    {existingItem.lifecycle_status === 'paused'
-                      ? t('profile.btn_unpause', 'Resume profile')
-                      : t('profile.btn_pause', 'Pause profile')}
-                  </Button>
-                </div>
-              )}
-
             {profileSchema && (
               <SchemaForm
                 id="profile-form"
@@ -868,26 +780,6 @@ export function ProfileFormPage() {
               </div>
             )}
 
-            {/* Danger zone (#347). Retire is terminal + irreversible, so it is
-                separated below the whole form — never inline among the fields.
-                Edit-only (no existing profile to retire while creating). */}
-            {isEdit && existingItem && (
-              <div className="mt-10 border-t border-destructive/20 pt-4">
-                <div className="flex items-center justify-between gap-3 rounded-md border border-destructive/30 bg-destructive/5 p-3">
-                  <p className="text-sm text-muted-foreground">
-                    {t('profile.retire_desc', 'Retiring permanently removes this profile. This cannot be undone.')}
-                  </p>
-                  <Button
-                    variant="destructive"
-                    size="sm"
-                    disabled={lifecycleBusy}
-                    onClick={() => setRetireConfirmOpen(true)}
-                  >
-                    {t('profile.btn_retire', 'Retire profile')}
-                  </Button>
-                </div>
-              </div>
-            )}
           </CardContent>
         </Card>
 
@@ -938,77 +830,6 @@ export function ProfileFormPage() {
                 }}
               >
                 {t('profile.guardian_confirm_proceed', 'Send code to guardian')}
-              </Button>
-            </DialogFooter>
-          </DialogContent>
-        </Dialog>
-
-        {/* Confirm before pausing — pausing removes the profile from discovery. */}
-        <Dialog open={pauseConfirmOpen} onOpenChange={setPauseConfirmOpen}>
-          <DialogContent>
-            <DialogHeader>
-              <DialogTitle>
-                {t('profile.pause_confirm_title', 'Pause this profile?')}
-              </DialogTitle>
-              <DialogDescription>
-                {t(
-                  'profile.pause_confirm_desc',
-                  'While paused, this profile will not be discoverable in the network. You can resume it any time.',
-                )}
-              </DialogDescription>
-            </DialogHeader>
-            <DialogFooter>
-              <Button
-                variant="outline"
-                disabled={lifecycleBusy}
-                onClick={() => setPauseConfirmOpen(false)}
-              >
-                {t('common.cancel', 'Cancel')}
-              </Button>
-              <Button
-                disabled={lifecycleBusy}
-                onClick={() => {
-                  setPauseConfirmOpen(false);
-                  void handleLifecycle('pause');
-                }}
-              >
-                {t('profile.pause_confirm_proceed', 'Pause profile')}
-              </Button>
-            </DialogFooter>
-          </DialogContent>
-        </Dialog>
-
-        {/* Confirm before retiring — terminal, irreversible, wipes PII (#347). */}
-        <Dialog open={retireConfirmOpen} onOpenChange={setRetireConfirmOpen}>
-          <DialogContent>
-            <DialogHeader>
-              <DialogTitle>
-                {t('profile.retire_confirm_title', 'Retire this profile?')}
-              </DialogTitle>
-              <DialogDescription>
-                {t(
-                  'profile.retire_confirm_desc',
-                  'This permanently removes your profile and cancels any open connections. It cannot be undone.',
-                )}
-              </DialogDescription>
-            </DialogHeader>
-            <DialogFooter>
-              <Button
-                variant="outline"
-                disabled={lifecycleBusy}
-                onClick={() => setRetireConfirmOpen(false)}
-              >
-                {t('common.cancel', 'Cancel')}
-              </Button>
-              <Button
-                variant="destructive"
-                disabled={lifecycleBusy}
-                onClick={() => {
-                  setRetireConfirmOpen(false);
-                  void handleRetire();
-                }}
-              >
-                {t('profile.retire_confirm_proceed', 'Retire permanently')}
               </Button>
             </DialogFooter>
           </DialogContent>

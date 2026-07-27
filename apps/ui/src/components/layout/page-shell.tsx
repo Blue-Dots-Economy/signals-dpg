@@ -18,6 +18,7 @@ interface PageShellProps {
   myItems?: Item[];
   activeProfileId?: string | null;
   onActiveProfileChange?: (profileId: string) => void;
+  onProfilesChanged?: () => void;
   userSchemas?: Record<string, RJSFSchema>;
   search: string;
   onSearchChange: (value: string) => void;
@@ -39,6 +40,7 @@ export function PageShell({
   myItems,
   activeProfileId,
   onActiveProfileChange,
+  onProfilesChanged,
   userSchemas,
   search,
   onSearchChange,
@@ -60,6 +62,7 @@ export function PageShell({
           myItems={myItems}
           activeProfileId={activeProfileId}
           onActiveProfileChange={onActiveProfileChange}
+          onProfilesChanged={onProfilesChanged}
           userSchemas={userSchemas}
         />
         <div className="flex h-svh flex-1 flex-col">

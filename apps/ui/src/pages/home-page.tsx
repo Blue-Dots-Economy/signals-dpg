@@ -238,6 +238,9 @@ export function HomePage() {
   const [selectedNetworkId, setSelectedNetworkId] = React.useState<string | null>(initialNetworkId);
   const [domainItems, setDomainItems] = React.useState<Record<string, Item[]>>({});
   const [myItems, setMyItems] = React.useState<Item[]>([]);
+  // Bumped after a per-profile lifecycle change (pause/resume/retire in the
+  // sidebar) to re-run the my-profiles fetch below.
+  const [profilesReloadKey, setProfilesReloadKey] = React.useState(0);
   const [activeProfileId, setActiveProfileId] = React.useState<string | null>(null);
   // Whether the active-profile lookup has settled. Until it has, profileLocation
   // is transiently null even for a user who has a profile location, so the
@@ -403,7 +406,7 @@ export function HomePage() {
     });
 
     return () => { controller.abort(); };
-  }, [network, user]);
+  }, [network, user, profilesReloadKey]);
 
   // Derive the active profile from myItems
   const myItem = React.useMemo(() => {
@@ -1336,6 +1339,7 @@ export function HomePage() {
       myItems={myItems}
       activeProfileId={activeProfileId}
       onActiveProfileChange={handleActiveProfileChange}
+      onProfilesChanged={() => setProfilesReloadKey((k) => k + 1)}
       userSchemas={userSchemas}
       search={search}
       onSearchChange={setSearch}
