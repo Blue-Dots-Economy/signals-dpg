@@ -83,22 +83,20 @@ function withGeoSearchRefinement<T extends z.ZodTypeAny>(schema: T) {
   return schema.refine(
     (rawData) => {
       const data = rawData as Partial<FetchItemsSchemaShape>;
-      const hasCoordinates =
-        data.item_latitude !== undefined || data.item_longitude !== undefined;
+      const hasLat = data.item_latitude !== undefined;
+      const hasLng = data.item_longitude !== undefined;
+      const hasRadius = data.radius_meters !== undefined;
 
-      if (!hasCoordinates) {
-        return true;
-      }
-
-      return (
-        data.item_latitude !== undefined &&
-        data.item_longitude !== undefined &&
-        data.radius_meters !== undefined
-      );
+      // lat/lng must be supplied as a pair.
+      if (hasLat !== hasLng) return false;
+      // radius filtering requires a center (lat+lng); radius alone is invalid.
+      if (hasRadius && !(hasLat && hasLng)) return false;
+      // lat+lng alone is valid (order-only); lat+lng+radius is valid (filter+order).
+      return true;
     },
     {
       message:
-        'item_latitude, item_longitude, and radius_meters must be provided together for geosearch',
+        'item_latitude and item_longitude must be provided together; radius_meters requires both',
       path: ['radius_meters'],
     }
   );
@@ -119,6 +117,27 @@ export const FetchItemsBodySchema = withGeoSearchRefinement(FetchItemsSchemaBase
   offset: z.number().int().min(0),
   cache_ttl_seconds: z.number().int().positive().optional(),
 }));
+
+const MarkersSchemaBase = FetchItemsSchemaBase.extend({
+  // Coords are cheap — allow a much higher cap than the 1000 full-fetch cap.
+  limit: z.coerce.number().int().min(1).max(25000).default(200),
+});
+
+export const MarkersQuerySchema = withGeoSearchRefinement(MarkersSchemaBase);
+export const MarkersBodySchema = withGeoSearchRefinement(
+  MarkersSchemaBase.extend({
+    limit: z.number().int().min(1).max(25000),
+    offset: z.number().int().min(0),
+    cache_ttl_seconds: z.number().int().positive().optional(),
+  })
+);
+
+export const MarkerResponseSchema = z.object({
+  item_id: z.uuid(),
+  item_domain: z.string(),
+  item_instance_url: z.url().nullable(),
+  item_locations: ItemLocationsArray,
+});
 
 export const UpdateItemParamsSchema = z.object({
   itemId: z.uuid(),

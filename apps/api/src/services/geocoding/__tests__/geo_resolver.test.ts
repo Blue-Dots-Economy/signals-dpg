@@ -1,4 +1,9 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
+vi.mock('@api/db/secondary/redis', () => ({ redis: { get: vi.fn(), set: vi.fn() } }));
+vi.mock('@/config', () => ({
+  geocodingConfig: { cache_ttl_seconds: 2592000, cache_negative_ttl_seconds: 3600 },
+}));
+
 import { parsePhotonFeatures, parseGoogleGeocode } from '../geo_resolver';
 
 describe('parsePhotonFeatures', () => {
