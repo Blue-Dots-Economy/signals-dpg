@@ -3,7 +3,7 @@ import { XIcon } from 'lucide-react';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { cn } from '@/lib/utils';
 import { Dialog, DialogContent } from '@/components/ui/dialog';
-import { Drawer, DrawerContent, DrawerClose } from '@/components/ui/drawer';
+import { Drawer, DrawerContent, DrawerClose, DrawerTitle } from '@/components/ui/drawer';
 
 export interface ResponsiveDialogProps {
   open: boolean;
@@ -11,6 +11,16 @@ export interface ResponsiveDialogProps {
   children: React.ReactNode;
   // forwarded to DialogContent on desktop; ignored by the Drawer body
   contentClassName?: string;
+  // Accessible name for the MOBILE Drawer only. vaul bundles its own
+  // @radix-ui/react-dialog instance, so a child DialogTitle (from this repo's
+  // `dialog.tsx`, a DIFFERENT module instance) registers with the wrong React
+  // context and never satisfies vaul's own DrawerContent's aria-labelledby —
+  // the sheet ends up with no accessible name at all on mobile, even though a
+  // visible title renders fine (it's an a11y-wiring gap, not a visual one).
+  // Rendered as a sr-only DrawerTitle (vaul's own Title, correct context) so
+  // it doesn't duplicate the visible title already inside `children`. Omit
+  // only if the dialog would visually have no title either (none here do).
+  title?: React.ReactNode;
   // Whether an X close affordance renders — honored on BOTH shapes (previously
   // silently dropped on the mobile Drawer, which also hid it in `view` mode).
   showCloseButton?: boolean;
@@ -36,6 +46,7 @@ export function ResponsiveDialog({
   onOpenChange,
   children,
   contentClassName,
+  title,
   showCloseButton = true,
   dismissible = true,
   onInteractOutside,
@@ -51,6 +62,7 @@ export function ResponsiveDialog({
           onInteractOutside={onInteractOutside}
           onEscapeKeyDown={onEscapeKeyDown}
         >
+          {title && <DrawerTitle className="sr-only">{title}</DrawerTitle>}
           {showCloseButton && (
             <DrawerClose className="absolute top-4 right-4 z-10 rounded-xs opacity-70 ring-offset-background transition-opacity hover:opacity-100 focus:ring-2 focus:ring-ring focus:ring-offset-2 focus:outline-hidden [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4">
               <XIcon />

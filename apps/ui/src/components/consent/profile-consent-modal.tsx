@@ -53,6 +53,11 @@ export function ProfileConsentModal({
       }}
       showCloseButton={false}
       dismissible={false}
+      title={
+        minor && minorNotice
+          ? t('consent.profile_title_minor', 'Guardian confirmation needed')
+          : t('consent.profile_title')
+      }
       contentClassName="max-w-lg"
       onInteractOutside={(e) => e.preventDefault()}
       onEscapeKeyDown={(e) => e.preventDefault()}

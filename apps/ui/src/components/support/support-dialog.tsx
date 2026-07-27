@@ -93,7 +93,12 @@ export function SupportDialog({ open, onOpenChange }: SupportDialogProps) {
   };
 
   return (
-    <ResponsiveDialog open={open} onOpenChange={onOpenChange} contentClassName="sm:max-w-md">
+    <ResponsiveDialog
+      open={open}
+      onOpenChange={onOpenChange}
+      title={t('support.dialog_title')}
+      contentClassName="sm:max-w-md"
+    >
       <div className="flex flex-col gap-4 overflow-y-auto p-6">
         <DialogHeader>
           <DialogTitle>{t('support.dialog_title')}</DialogTitle>

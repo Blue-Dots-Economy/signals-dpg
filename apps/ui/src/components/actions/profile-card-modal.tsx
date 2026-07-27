@@ -217,7 +217,7 @@ export function ProfileCardModal({
         : 'profile.card_desc_masked';
 
   return (
-    <ResponsiveDialog open={open} onOpenChange={onOpenChange} contentClassName="max-w-xl">
+    <ResponsiveDialog open={open} onOpenChange={onOpenChange} title={name} contentClassName="max-w-xl">
       <div className="flex flex-col gap-4 overflow-y-auto p-6">
         <DialogHeader>
           <DialogTitle>{name}</DialogTitle>

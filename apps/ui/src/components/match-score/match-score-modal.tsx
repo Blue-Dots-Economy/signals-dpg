@@ -122,6 +122,7 @@ export function MatchScoreModal({
     <ResponsiveDialog
       open={isOpen}
       onOpenChange={onClose}
+      title={t('match.modal_title')}
       contentClassName="sm:max-w-lg max-h-[90dvh] overflow-hidden p-0"
     >
         <DialogHeader className="px-6 pt-6 pb-4 border-b">

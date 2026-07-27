@@ -42,6 +42,7 @@ export function WalletImportModal({ open, onOpenChange, context, onImported }: W
     <ResponsiveDialog
       open={open}
       onOpenChange={onOpenChange}
+      title={t('wallet.import_title')}
       contentClassName="max-h-[85dvh] max-w-2xl overflow-hidden p-0 sm:max-h-[90dvh]"
     >
         <div className="flex max-h-[85dvh] flex-col sm:max-h-[90dvh]">

@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { render, fireEvent } from '@testing-library/react';
+import { render, screen, fireEvent } from '@testing-library/react';
 import { ResponsiveDialog } from '../responsive-dialog';
 
 const isMobile = vi.hoisted(() => ({ value: false }));
@@ -92,5 +92,21 @@ describe('ResponsiveDialog', () => {
     const content = baseElement.querySelector('[data-slot="drawer-content"]') as HTMLElement;
     fireEvent.keyDown(content, { key: 'Escape' });
     expect(onOpenChange).not.toHaveBeenCalled();
+  });
+
+  it('wires the `title` prop as the mobile Drawer\'s accessible name (vaul\'s own Title, not the child radix DialogTitle)', () => {
+    isMobile.value = true;
+    render(
+      <ResponsiveDialog open onOpenChange={() => {}} title="Some Title">
+        <p>body</p>
+      </ResponsiveDialog>,
+    );
+
+    // A child radix DialogTitle (from dialog.tsx's OWN @radix-ui/react-dialog
+    // instance) would render visible text but never satisfy vaul's
+    // aria-labelledby — vaul bundles a different module instance with its own
+    // context. Resolving the sheet by accessible name proves the `title` prop
+    // is wired through vaul's own DrawerTitle, in the right context.
+    expect(screen.getByRole('dialog', { name: 'Some Title' })).toBeTruthy();
   });
 });
