@@ -282,42 +282,6 @@ export const participant_handler = async (
   const existing = existingRows[0] ?? null;
   const user_exists = Boolean(existing);
 
-  // Effective age (#331): what this call supplies, else what's already on file.
-  const effectiveAge = body.age ?? existing?.age ?? null;
-
-  // U18 (#309/#331): a minor is NEVER onboarded via this server-to-server API.
-  // If we can tell the user is under 18, reject with an error and perform NO
-  // operation — no user/profile create, no update, no consent recorded. Minors
-  // complete onboarding through the portal (guardian OTP flow).
-  if (effectiveAge != null && isMinor(effectiveAge)) {
-    return reply.code(400).send({
-      error: 'U18_NOT_ALLOWED',
-      message: 'under-18 users cannot be onboarded via this API; use the portal',
-    });
-  }
-
-  // On guardian-gated domains, recording user consent requires a known age so we
-  // can confirm the user is an adult before recording consent / promoting. An age
-  // already on the user's record satisfies it; only a brand-new / age-less user
-  // must supply one. Runs after the lookup so a returning adult re-sending the
-  // consent pair isn't wrongly rejected.
-  if (hasUserTerms && hasUserPrivacy && effectiveAge == null) {
-    const gate_network = body.network ?? 'blue_dot';
-    const gate_domain = body.domain ?? 'seeker';
-    let gated = false;
-    try {
-      gated = guardianConsentRequired(await getNetworkConfigById(gate_network), gate_domain);
-    } catch (err) {
-      request.log.warn({ err, network: gate_network }, 'network config load failed during age gate check');
-    }
-    if (gated) {
-      return reply.code(400).send({
-        error: 'AGE_REQUIRED',
-        message: 'age is required with consent on this domain',
-      });
-    }
-  }
-
   // 2. Compute aggregator ownership and dispatch on the helper's verdict.
   const aggregator_owns_user = Boolean(
     request.acting_org &&
@@ -362,6 +326,50 @@ export const participant_handler = async (
       onboarded_at: null,
       items: [],
     });
+  }
+
+  // Age gates run ONLY after the ownership verdict, and only on branches that
+  // actually act on the user (owned aggregator / network_service / new-user
+  // onboarding). Evaluating them earlier — on the globally-matched user, before
+  // the aggregator_owned_elsewhere gate above — would let a non-owning aggregator
+  // probe another tenant's user: U18_NOT_ALLOWED would leak minor-status and
+  // AGE_REQUIRED would leak "no age on file". Placed here they still precede every
+  // DB write (all writes live in the branches below), so a minor is still a true
+  // no-op for legitimate onboarding.
+  //
+  // Effective age (#331): what this call supplies, else what's already on file.
+  const effectiveAge = body.age ?? existing?.age ?? null;
+
+  // U18 (#309/#331): a minor is NEVER onboarded via this server-to-server API.
+  // Reject with an error and perform NO operation — no create/update, no consent.
+  // Minors complete onboarding through the portal (guardian OTP flow).
+  if (effectiveAge != null && isMinor(effectiveAge)) {
+    return reply.code(400).send({
+      error: 'U18_NOT_ALLOWED',
+      message: 'under-18 users cannot be onboarded via this API; use the portal',
+    });
+  }
+
+  // On guardian-gated domains, recording user consent requires a known age so we
+  // can confirm the user is an adult before recording consent / promoting. An age
+  // already on the user's record satisfies it; only a brand-new / age-less user
+  // must supply one. Runs after the lookup so a returning adult re-sending the
+  // consent pair isn't wrongly rejected.
+  if (hasUserTerms && hasUserPrivacy && effectiveAge == null) {
+    const gate_network = body.network ?? 'blue_dot';
+    const gate_domain = body.domain ?? 'seeker';
+    let gated = false;
+    try {
+      gated = guardianConsentRequired(await getNetworkConfigById(gate_network), gate_domain);
+    } catch (err) {
+      request.log.warn({ err, network: gate_network }, 'network config load failed during age gate check');
+    }
+    if (gated) {
+      return reply.code(400).send({
+        error: 'AGE_REQUIRED',
+        message: 'age is required with consent on this domain',
+      });
+    }
   }
 
   if (verdict.kind === 'account_only') {

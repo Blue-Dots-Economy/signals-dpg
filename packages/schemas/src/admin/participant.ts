@@ -45,8 +45,9 @@ export const UpsertParticipantRequest = z
     name: z.string().min(1),
     // Age in years, stored as the `user.age` snapshot (#331). Integrating DPGs
     // derive it from the birth year and send the number (or numeric string).
-    // An explicit null / '' / non-numeric is treated as "not provided" (not 0),
-    // so it doesn't spuriously trip the U18 age gate (#309).
+    // null / '' / a non-string are treated as "not provided" (not coerced to 0),
+    // so they don't spuriously trip the U18 age gate (#309). A non-empty
+    // non-numeric string (e.g. "abc") still flows to coerce → NaN → .int() 400.
     age: z.preprocess(
       (v) =>
         typeof v === 'number' || (typeof v === 'string' && v.trim() !== '')
@@ -82,7 +83,8 @@ export const UpsertParticipantRequest = z
       .uuid()
       .optional()
       .describe(
-        'UUID. Only meaningful when acting_org is network_service AND user already exists. ' +
+        'UUID. Meaningful when the user already exists AND the caller owns them — ' +
+        'network_service, or the aggregator that onboarded the user (#309 activation). ' +
         'Targets that specific item for a PATCH-style update. Ignored otherwise.',
       ),
     network: z

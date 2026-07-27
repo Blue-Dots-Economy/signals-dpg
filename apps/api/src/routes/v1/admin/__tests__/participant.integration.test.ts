@@ -623,6 +623,60 @@ describeIf(`POST /api/v1/admin/participant (integration)${
     expect(body.items).toEqual([]);
   });
 
+  it("agg_B probing agg_A's MINOR user gets owned_elsewhere, never U18_NOT_ALLOWED (no cross-tenant minor-status leak)", async () => {
+    // Regression: the U18/AGE gates must run AFTER the ownership verdict, so a
+    // non-owning aggregator can't probe another tenant's minor-status/age. Seed a
+    // minor owned by agg_A directly in the DB — the API rejects onboarding a
+    // minor, so one can't be created through it.
+    const { user } = authSchema;
+    const minor_email = `int_minorprobe_${randomUUID().slice(0, 6)}@a.test`;
+    const seed = await app.inject({
+      method: 'POST',
+      url: '/api/v1/admin/participant',
+      headers: {
+        'x-api-key': agg_a.raw_key,
+        'x-acting-org-id': agg_a.org_id,
+        'content-type': 'application/json',
+      },
+      payload: {
+        email: minor_email,
+        name: 'Minor Owned By A',
+        channel: 'bulk',
+        network: primary.network,
+        domain: primary.domain,
+      },
+    });
+    expect(seed.statusCode).toBe(200);
+    const minor_user_id: string = seed.json().user_id;
+    onboarded_user_ids.push(minor_user_id);
+    // Force the stored age to a minor (can't be done via the API).
+    await db.update(user).set({ age: 15 }).where(eq(user.id, minor_user_id));
+
+    // agg_B probes with NO age → must get owned_elsewhere, not U18_NOT_ALLOWED.
+    const probe = await app.inject({
+      method: 'POST',
+      url: '/api/v1/admin/participant',
+      headers: {
+        'x-api-key': agg_b.raw_key,
+        'x-acting-org-id': agg_b.org_id,
+        'content-type': 'application/json',
+      },
+      payload: {
+        email: minor_email,
+        name: 'agg_b minor probe',
+        channel: 'bulk',
+        network: primary.network,
+        domain: primary.domain,
+      },
+    });
+    expect(probe.statusCode).toBe(200);
+    const probeBody = probe.json();
+    expect(probeBody.error).toBeUndefined();
+    expect(probeBody.owned_elsewhere).toBe(true);
+    expect(probeBody.user_existed).toBe(true);
+    expect(probeBody.items).toEqual([]);
+  });
+
   it('network_service with item_id from a different user → 403 ITEM_NOT_OWNED_BY_USER, no writes', async () => {
     // Seed a second user via agg_A so we have an item owned by someone
     // other than the canonical user.
