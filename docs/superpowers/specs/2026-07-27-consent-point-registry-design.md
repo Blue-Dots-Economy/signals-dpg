@@ -1,6 +1,6 @@
 # Consent-point registry — adding and removing consent points as configuration
 
-**Issue:** TBD (new, filed under epic [#99](https://github.com/Blue-Dots-Economy/signals-dpg/issues/99))
+**Issue:** [#372](https://github.com/Blue-Dots-Economy/signals-dpg/issues/372) — Consent-point registry (epic [#99](https://github.com/Blue-Dots-Economy/signals-dpg/issues/99))
 **Date:** 2026-07-27
 **Status:** Design — pending review.
 
