@@ -88,6 +88,16 @@ export function AppSidebar({
 
   const domainKeys = Object.keys(profilesByDomain);
 
+  // "My items" group label is domain-aware: a network can override the generic
+  // "My Profile(s)" heading per domain via `my_items_label` in network.json
+  // (e.g. blue_dot provider → "My Jobs"). Only applied when the group holds a
+  // single domain; otherwise the generic label covers the mix. Falls back to the
+  // generic label when the domain sets no override.
+  const soleDomainId = domainKeys.length === 1 ? domainKeys[0] : null;
+  const myItemsGroupLabel =
+    domains.find((d) => d.id === soleDomainId)?.my_items_label ??
+    t('nav.my_profiles_group');
+
   // Find which domain the active profile belongs to
   const activeDomain = myItems.find((i) => i.item_id === activeProfileId)?.item_domain ?? null;
 
@@ -194,7 +204,7 @@ export function AppSidebar({
           </>
         )}
         <SidebarGroup>
-          <SidebarGroupLabel>{t('nav.my_profiles_group')}</SidebarGroupLabel>
+          <SidebarGroupLabel>{myItemsGroupLabel}</SidebarGroupLabel>
           <SidebarGroupContent>
             {domainKeys.length === 0 ? (
               <SidebarMenu>
@@ -270,9 +280,25 @@ export function AppSidebar({
                                     }
                                   >
                                     <span className="truncate">{title}</span>
-                                    {isActiveProfile && (
-                                      <span className="ml-auto shrink-0 rounded-full bg-primary px-1.5 py-0.5 text-[10px] font-semibold text-primary-foreground leading-none">
-                                        {t('nav.active_badge')}
+                                    {/* Lifecycle state chip (selection is shown by the
+                                        row highlight): Active / Paused / Draft. */}
+                                    {profile.lifecycle_status && (
+                                      <span
+                                        className={[
+                                          'ml-auto shrink-0 rounded-full px-1.5 py-0.5 text-[10px] font-semibold leading-none capitalize',
+                                          profile.lifecycle_status === 'live'
+                                            ? 'bg-green-100 text-green-700 dark:bg-green-500/20 dark:text-green-300'
+                                            : profile.lifecycle_status === 'paused'
+                                              ? 'bg-amber-100 text-amber-800 dark:bg-amber-500/20 dark:text-amber-300'
+                                              : 'bg-muted text-muted-foreground',
+                                        ].join(' ')}
+                                      >
+                                        {t(
+                                          `nav.status_${profile.lifecycle_status}`,
+                                          profile.lifecycle_status === 'live'
+                                            ? 'Active'
+                                            : profile.lifecycle_status,
+                                        )}
                                       </span>
                                     )}
                                   </SidebarMenuButton>

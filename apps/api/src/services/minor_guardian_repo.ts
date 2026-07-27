@@ -90,34 +90,34 @@ export function guardianContactMatchesWard(args: {
   return emailMatch || phoneMatch;
 }
 
-/** The ward's date of birth (full date), stored on the user row. */
-export async function getWardDob(userId: string, exec: DbOrTx = db): Promise<Date | null> {
+/** The ward's stored age (years, snapshot at registration), or null. */
+export async function getWardAge(userId: string, exec: DbOrTx = db): Promise<number | null> {
   const [row] = await exec
-    .select({ dob: user.dateOfBirth })
+    .select({ age: user.age })
     .from(user)
     .where(eq(user.id, userId))
     .limit(1);
-  return row?.dob ?? null;
+  return row?.age ?? null;
 }
 
-/** Persist the ward's date of birth on the user row. */
-export async function setWardDob(userId: string, dob: Date, exec: DbOrTx = db): Promise<void> {
-  await exec.update(user).set({ dateOfBirth: dob, updatedAt: new Date() }).where(eq(user.id, userId));
+/** Persist the ward's age on the user row. */
+export async function setWardAge(userId: string, age: number, exec: DbOrTx = db): Promise<void> {
+  await exec.update(user).set({ age, updatedAt: new Date() }).where(eq(user.id, userId));
 }
 
 /**
- * The DOB-present + under-18 gate shared by the consent handlers. Returns the
- * DOB on success, or a typed reason (DOB_REQUIRED / NOT_A_MINOR) callers map to
+ * The age-present + under-18 gate shared by the consent handlers. Returns the
+ * age on success, or a typed reason (DOB_REQUIRED / NOT_A_MINOR) callers map to
  * 409 — so the pair isn't re-inlined per handler.
  */
 export type MinorWardCheck =
-  | { ok: true; dob: Date }
+  | { ok: true; age: number }
   | { ok: false; code: 'DOB_REQUIRED' | 'NOT_A_MINOR' };
 export async function requireMinorWard(userId: string, exec: DbOrTx = db): Promise<MinorWardCheck> {
-  const dob = await getWardDob(userId, exec);
-  if (!dob) return { ok: false, code: 'DOB_REQUIRED' };
-  if (!isMinor(dob)) return { ok: false, code: 'NOT_A_MINOR' };
-  return { ok: true, dob };
+  const age = await getWardAge(userId, exec);
+  if (age === null) return { ok: false, code: 'DOB_REQUIRED' };
+  if (!isMinor(age)) return { ok: false, code: 'NOT_A_MINOR' };
+  return { ok: true, age };
 }
 
 export async function getMinorGuardian(userId: string): Promise<{
@@ -208,6 +208,16 @@ export async function getGuardianContactPlaintext(
     contact: decryptGuardianField(row.guardianContact),
     contactType: row.guardianContactType as GuardianContactType,
   };
+}
+
+/** Decrypt the guardian's name for a transient use (email/SMS template var). */
+export async function getGuardianNamePlaintext(userId: string): Promise<string | null> {
+  const [row] = await db
+    .select({ guardianName: minor_guardian.guardianName })
+    .from(minor_guardian)
+    .where(eq(minor_guardian.userId, userId))
+    .limit(1);
+  return row?.guardianName ? decryptGuardianField(row.guardianName) : null;
 }
 
 export async function setGuardianVerified(userId: string): Promise<void> {

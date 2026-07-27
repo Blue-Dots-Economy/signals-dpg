@@ -5,11 +5,20 @@ vi.mock('@/config', async (importOriginal) => {
   return {
     ...actual,
     authConfig: { ...actual.authConfig, create_test_otp: false },
+    // Force the fallback so the SMS template assertion is deterministic (the
+    // env carries a placeholder SMS_TEMPLATE_ID in CI/local).
+    notification: { ...actual.notification, SMS_TEMPLATE_ID: undefined },
   };
 });
 
 const notify = vi.fn(
-  async (args: { channel: string; template_id: string; to: string; priority: string; variables: { otp: string } }) => {},
+  async (args: {
+    channel: string;
+    template_id: string;
+    to: string;
+    priority: string;
+    variables: Record<string, string>;
+  }) => {},
 );
 const getNotificationClient = vi.fn<() => { notify: typeof notify } | undefined>();
 vi.mock('@/utils/notificationClient', () => ({
@@ -30,7 +39,8 @@ describe('defaultGuardianOtpSend', () => {
     const payload = notify.mock.calls[0][0];
     expect(payload.channel).toBe('sms');
     expect(payload.to).toBe('+911');
-    expect(payload.variables.otp).toBe('123456');
+    // Single generic DLT OTP template — code only, via `message` (like login).
+    expect(payload.variables.message).toBe('123456');
   });
 
   it('sends an email OTP over the email channel', async () => {
@@ -45,5 +55,38 @@ describe('defaultGuardianOtpSend', () => {
     await expect(
       defaultGuardianOtpSend({ contact: 'a@b.co', contactType: 'email', otp: '123456' }),
     ).rejects.toBeInstanceOf(GuardianOtpError);
+  });
+
+  it('renders the email body in-repo via basic_email with the #294 copy', async () => {
+    await defaultGuardianOtpSend({
+      contact: 'a@b.co',
+      contactType: 'email',
+      otp: '123456',
+      scenario: { kind: 'action', actionType: 'apply', stage: 'accept' },
+      variables: { parentName: 'Asha', providerOrgName: 'Acme' },
+    });
+    const payload = notify.mock.calls[0][0];
+    expect(payload.channel).toBe('email');
+    expect(payload.template_id).toBe('basic_email');
+    expect(payload.variables.subject).toMatch(/OTP/i);
+    expect(payload.variables.html).toContain('Asha');
+    expect(payload.variables.html).toContain('Acme');
+    expect(payload.variables.html).toContain('123456');
+    expect(payload.variables.html).toMatch(/10 minutes/);
+  });
+
+  it('SMS always uses the single generic OTP template (code only), ignoring scenario/vars', async () => {
+    await defaultGuardianOtpSend({
+      contact: '+911',
+      contactType: 'phone',
+      otp: '000111',
+      scenario: { kind: 'action', actionType: 'connect', stage: 'initiate' },
+      variables: { parentName: 'Asha', providerOrgName: 'Acme' },
+    });
+    const payload = notify.mock.calls[0][0];
+    expect(payload.channel).toBe('sms');
+    expect(payload.template_id).toBe('login_otp');
+    // Only the code goes to SMS — no parent-facing vars (DLT template is fixed).
+    expect(payload.variables).toEqual({ message: '000111' });
   });
 });

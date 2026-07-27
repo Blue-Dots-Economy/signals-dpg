@@ -225,6 +225,7 @@ export const update_action_status_handler = async (
           actionType: existingAction.action_type,
           sourceItemId: existingAction.target_item_id,
           targetItemId: existingAction.source_item_id,
+          stage: 'accept',
           otp: body.guardian_otp,
         });
 

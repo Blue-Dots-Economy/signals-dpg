@@ -1,7 +1,11 @@
 name: build-images
+# Release + manual image builds. The gated :develop publish moved into ci.yaml
+# (`publish-images`, needs the CI checks) so a red build never ships :develop.
+# `main` and `v*` tag builds are the release path (CI does not run on those
+# refs); `workflow_dispatch` is the manual escape hatch.
 on:
   push:
-    branches: [develop, main]
+    branches: [main]
     tags: ['v*.*.*']
   workflow_dispatch:
 

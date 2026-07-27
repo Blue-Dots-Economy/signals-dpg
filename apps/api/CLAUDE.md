@@ -19,7 +19,7 @@ There is no single auth default a new route inherits. Three patterns coexist in 
 ## Two config-cache patterns, don't conflate them
 
 - **In-memory singleton promise** (`network_configs.ts`, `consent_configs.ts`): a module-level `let xPromise: Promise<...> | null = null`, populated on first call, reused after. No TTL, no invalidation path other than process restart.
-- **Disk-backed cache with boot-time wipe** (`network_schema_cache.ts`): schemas persist under `tmpdir()/dpg-network-schema-cache` and survive a restart. `server.ts:31-38` wipes and rebuilds it at boot **only when `NETWORK_CONFIG_SOURCE=local`** — in local dev the network is whatever file you point at, so a stale cache from a previously-configured network would otherwise keep being served after you switch. Remote mode keeps the cache (those schemas are expensive to refetch). Don't "fix" the local-mode wipe as if it were an accidental cache-bust — it's the thing that makes switching networks locally actually work.
+- **Disk-backed cache with boot-time wipe** (`network_schema_cache.ts`): schemas persist under `tmpdir()/dpg-network-schema-cache` and survive a restart. `app.ts:54-60` wipes and rebuilds it at boot **only when `NETWORK_CONFIG_SOURCE=local`** — in local dev the network is whatever file you point at, so a stale cache from a previously-configured network would otherwise keep being served after you switch. Remote mode keeps the cache (those schemas are expensive to refetch). The rebuild is additionally gated by `SCHEMA_CACHE_WARMUP_ENABLED` (default `true`) — set to `false` to skip the warmup DB query when no Postgres is reachable (used by `spec:dump`). Don't "fix" the local-mode wipe as if it were an accidental cache-bust — it's the thing that makes switching networks locally actually work.
 
 ## Item-fetch caching TTLs are two different numbers on purpose
 
@@ -39,6 +39,10 @@ Auth plugins (`auth_middleware.ts`, `validate_api_key.ts`, `validate_session.ts`
 - `src/support/build_support_email.ts`: unrelated, smaller — just an HTML-escaping email builder. `POST /api/v1/support` (authenticated) emails `SUPPORT_EMAIL` via the notification client and returns `503 SUPPORT_NOT_CONFIGURED` when the recipient or client is unset.
 
 Don't assume these share infrastructure — they're two independent, small pipelines that happen to both end up calling the notification-service client.
+
+## `action/perform` is single-object; bulk is a separate route
+
+`perform_action.ts` registers two routes (#296, Raya compat). `POST /perform` takes a **single action object** as the body — not an array. Array/batch submission has its own route, `POST /perform/bulk`, which runs items through `runBulk` (`@/utils/bulk_runner`, capped at `apiConfig.bulk_max_items`) and returns per-item results with `BulkItemFailure` entries rather than failing the whole request. Don't re-add array handling to `/perform` to "support both" — the split is deliberate so single-action callers get a flat success/error shape and bulk callers get partial-failure semantics.
 
 ## Test file placement
 

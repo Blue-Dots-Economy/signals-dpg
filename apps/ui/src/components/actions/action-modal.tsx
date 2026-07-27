@@ -10,6 +10,7 @@ import { ActionModalHeader } from './action-modal-header';
 import { ConsentCheckbox } from './consent-checkbox';
 import { getActionDisplay } from '@/lib/action-display';
 import { ACTION_CONSENT_SENTINEL } from '@/lib/action-api';
+import { renderConsentStatement } from '@/lib/consent-copy';
 import { cn } from '@/lib/utils';
 import { useConsentConfig } from '@/hooks/use-consent-config';
 import { useNetworkTheme } from '@/theme/theme-provider';
@@ -70,7 +71,12 @@ export function ActionModal({
   const actionType = actionSchema.action_type;
   const initDoc = config?.actions?.[actionType]?.initiate;
   const initVersion = initDoc?.versions.find((v) => v.version === initDoc.current_version);
-  const consentText = initVersion?.statement ?? '';
+  // Initiate stage: the actor shares details with the item they're connecting
+  // to, so the counterparty noun is the target domain.
+  const consentText = renderConsentStatement(
+    initVersion?.statement ?? '',
+    actionSchema.to_domain,
+  );
   const consentRequired = (actionSchema.reveals_pii_on_status?.length ?? 0) > 0;
   const [consentChecked, setConsentChecked] = useState(false);
 
@@ -204,10 +210,13 @@ export function ActionModal({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-[520px] max-h-[90vh] overflow-y-auto gap-0 p-6">
-        {header}
-        <div className="py-4">{formContent}</div>
-        {footer}
+      {/* Fixed header + footer, scrollable body — mirrors the mobile Drawer so a
+          long consent statement scrolls WITHIN the modal instead of squeezing
+          the statement/checkbox and pushing Cancel/Confirm off. */}
+      <DialogContent className="sm:max-w-[520px] max-h-[90vh] overflow-hidden gap-0 p-0 flex flex-col">
+        <div className="px-6 pt-6">{header}</div>
+        <div className="px-6 py-4 overflow-y-auto">{formContent}</div>
+        <div className="px-6 pb-6">{footer}</div>
       </DialogContent>
     </Dialog>
   );

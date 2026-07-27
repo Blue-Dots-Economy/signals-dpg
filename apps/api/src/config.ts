@@ -32,8 +32,10 @@ export const apiConfig = {
   allow_extra_schema_data: networkRuntime.ALLOW_EXTRA_SCHEMA_DATA,
   bulk_max_items: networkRuntime.BULK_MAX_ITEMS,
   max_wards_per_guardian: networkRuntime.MAX_WARDS_PER_GUARDIAN,
+  max_profiles_per_user: networkRuntime.MAX_PROFILES_PER_USER,
   schema_registry_url: schemaRegistry.SCHEMA_REGISTRY_URL,
   peer_fetch_timeout_ms: networkRuntime.PEER_FETCH_TIMEOUT_MS,
+  schema_cache_warmup_enabled: networkRuntime.SCHEMA_CACHE_WARMUP_ENABLED,
 };
 
 export const peerConfig = {
@@ -48,10 +50,6 @@ export const authConfig = {
     instance.INSTANCE_ENV === 'development'
       ? auth.AUTH_MIDDLEWARE_ENABLED
       : true,
-  url:
-    instance.INSTANCE_ENV === 'development'
-      ? `${apiConfig.domain}:${apiConfig.port}/api/auth`
-      : `${apiConfig.domain}/api/auth`,
   create_test_otp: auth.CREATE_TEST_OTP,
   allow_self_signup: auth.SELF_SIGNUP_MODE === 'allowed',
   login_channels: parseLoginChannels(auth.LOGIN_CHANNELS),
@@ -104,6 +102,16 @@ export const matchScoreConfig = {
   },
 };
 
+/**
+ * Serve the OpenAPI spec + Scalar reference UI at /api/reference. Secure by
+ * default: force-disabled when INSTANCE_ENV=production unless
+ * API_REFERENCE_FORCE opts back in. The always-available reference is the
+ * bluedots-docs site.
+ */
+export const apiReferenceEnabled: boolean =
+  api.API_REFERENCE_ENABLED &&
+  (instance.INSTANCE_ENV !== 'production' || api.API_REFERENCE_FORCE);
+
 export function getCurrentApiBaseUrl(): string {
   const parsedUrl = new URL(api.API_DOMAIN);
 
@@ -129,4 +137,5 @@ export const databasesConfig = {
   redis_password: databases.REDIS_PASSWORD,
   redis_port: databases.REDIS_PORT,
   ingest_stream: databases.INGEST_STREAM,
+  ingest_stream_maxlen: databases.INGEST_STREAM_MAXLEN,
 };

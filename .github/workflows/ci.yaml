@@ -2,9 +2,13 @@ name: CI
 
 on:
   pull_request:
-    branches: [develop, main]
+    branches: [develop, main, feature]
+  # feature: validate the merged integration state too — PRs into feature
+  # already run CI, but the post-merge result was unchecked. publish-images
+  # stays develop-only via its own `if` gate.
   push:
-    branches: [develop]
+    branches: [develop, feature]
+  workflow_dispatch:
 
 concurrency:
   group: ci-${{ github.ref }}
@@ -86,16 +90,19 @@ jobs:
 
   schema-parity:
     runs-on: ubuntu-latest
-    # Schema-parity verifies that drizzle-kit push and the bundled
-    # schema.sql produce identical PG schemas for the Drizzle-managed
-    # surface (auth + metrics tables).
+    # Schema-parity guards the local-dev SQL bundle (apps/api/db/postgres/
+    # schema.sql) after #287 unified the deploy schema under one Drizzle
+    # ledger. The bundle is now the RAW (non-Drizzle) layer only — the
+    # partitioned item/action/event tables + item_search — applied ON TOP
+    # of the Drizzle-owned tables (it FKs to "user"), NOT a standalone
+    # schema. So pg-sql must get the Drizzle push FIRST, then the bundle.
     #
-    # The partitioned tables (items, item_actions, action_events) live
-    # in packages/database/src/drizzle_ref_tables/ for type inference
-    # only — they're not in apps/api/drizzle.config.ts and can't be
-    # drizzle-pushed because pgTable doesn't model PARTITION BY. The
-    # SQL bundle owns them. The Diff schemas step below excludes them
-    # (--exclude-table) plus the extensions they depend on
+    # This job verifies: (a) the bundle is fresh (schema:bundle:check),
+    # (b) it applies cleanly and idempotently over the Drizzle push (FKs
+    # resolve), and (c) the Drizzle-managed surface is identical on both
+    # DBs. The partitioned tables + item_search live in the bundle only
+    # (pgTable can't model PARTITION BY / vector types), so the Diff step
+    # excludes them (--exclude-table) plus the extensions they depend on
     # (cube/earthdistance/pgcrypto) via a sed strip.
     services:
       pg-sql:
@@ -139,6 +146,14 @@ jobs:
 
       - name: Install psql client
         run: sudo apt-get update && sudo apt-get install -y postgresql-client
+
+      - name: Apply Drizzle push to pg-sql (creates the tables the bundle FKs to)
+        # The bundle FKs items.created_by → "user"; post-#287 the Drizzle-owned
+        # tables are not in the bundle, so push them here before applying it —
+        # mirrors local dev (db_init.ts: db:push:api then the bundle).
+        env:
+          POSTGRES_URL: ${{ env.PG_SQL_URL }}
+        run: pnpm --filter api exec drizzle-kit push --force
 
       - name: Apply bundled schema.sql to pg-sql
         run: |
@@ -207,3 +222,76 @@ jobs:
           done
 
           diff /tmp/sql.sql /tmp/drizzle.sql
+
+  spec-drift:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.1.2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: OpenAPI spec drift check
+        run: |
+          pnpm --filter api spec:dump
+          git diff --exit-code openapi.json || {
+            echo "::error::openapi.json is stale — run 'pnpm --filter api spec:dump' and commit"; exit 1; }
+
+  # Publish the :develop images (api, ui) ONLY after the blocking CI jobs pass,
+  # and only on a develop push. Previously build-images.yaml triggered directly
+  # on push to develop, so red tests still shipped :develop images. Gating this
+  # inside the CI run (needs the checks below) closes that gap with no
+  # default-branch/workflow_run caveat. Release images (main, v* tags) and
+  # manual runs stay in build-images.yaml. dep-cruise is continue-on-error, so
+  # it is intentionally not a gate here.
+  publish-images:
+    needs: [typecheck-api, typecheck-ui, test, schema-parity]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/develop'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      fail-fast: false
+      matrix:
+        service:
+          - name: api
+            context: .
+            dockerfile: apps/api/Dockerfile
+          - name: ui
+            context: .
+            dockerfile: apps/ui/Dockerfile
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify Dockerfile exists
+        run: |
+          if [ ! -f "${{ matrix.service.dockerfile }}" ]; then
+            echo "Dockerfile not found at ${{ matrix.service.dockerfile }} — skipping ${{ matrix.service.name }}"
+            exit 0
+          fi
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/metadata-action@v5
+        id: meta
+        with:
+          images: ghcr.io/blue-dots-economy/signals-dpg/${{ matrix.service.name }}
+          tags: |
+            type=ref,event=branch
+            type=sha,format=short
+      - uses: docker/build-push-action@v6
+        with:
+          context: ${{ matrix.service.context }}
+          file: ${{ matrix.service.dockerfile }}
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha,scope=${{ matrix.service.name }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.service.name }}

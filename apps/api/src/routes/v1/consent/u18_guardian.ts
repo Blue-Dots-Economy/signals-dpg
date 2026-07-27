@@ -8,7 +8,7 @@ import { auth_middleware_if_enabled } from '@api/plugins/auth/auth_middleware';
 import { apiConfig } from '@/config';
 import { isMinor } from '@/services/minor';
 import {
-  getWardDob,
+  getWardAge,
   upsertGuardianDetails,
   getGuardianContactPlaintext,
   resolveOtpChannel,
@@ -43,9 +43,9 @@ export const u18_guardian_handler = async (request: Req, reply: FastifyReply) =>
     return reply.code(400).send({ error: 'UNKNOWN_NETWORK', message: `Network "${body.network}" is not served` });
   }
 
-  const dob = await getWardDob(userId);
-  if (!dob) return reply.code(409).send({ error: 'DOB_REQUIRED', message: 'Submit date of birth before guardian details' });
-  if (!isMinor(dob)) {
+  const age = await getWardAge(userId);
+  if (age === null) return reply.code(409).send({ error: 'DOB_REQUIRED', message: 'Submit age before guardian details' });
+  if (!isMinor(age)) {
     return reply.code(409).send({ error: 'NOT_A_MINOR', message: 'Guardian flow applies only to under-18 users' });
   }
 
@@ -115,7 +115,13 @@ export const u18_guardian_handler = async (request: Req, reply: FastifyReply) =>
   if (!contact) return reply.code(500).send({ error: 'GUARDIAN_WRITE_FAILED', message: 'Guardian contact missing after write' });
 
   try {
-    await issueGuardianOtp({ scope: guardianOtpScope(userId), contact: contact.contact, contactType: contact.contactType });
+    await issueGuardianOtp({
+      scope: guardianOtpScope(userId),
+      contact: contact.contact,
+      contactType: contact.contactType,
+      scenario: { kind: 'account' },
+      variables: { parentName: body.guardianName },
+    });
   } catch (err) {
     const r = guardianOtpErrorReply(err);
     if (r) return reply.code(r.status).send({ error: r.error, message: r.message });

@@ -35,7 +35,7 @@ import {
   resolveOtpChannel,
   isGuardianWardLimitReached,
   guardianContactMatchesWard,
-  setWardDob,
+  setWardAge,
 } from '@/services/minor_guardian_repo';
 
 /** The ward's own signup identifier — exactly one of the two. */
@@ -83,7 +83,7 @@ const otpScope = (hash: string) => `signup_guardian:${hash}`;
 interface PendingSignupGuardian {
   network: string;
   domain: string;
-  dateOfBirth: string; // ISO — stored on user.date_of_birth at materialize
+  age: number; // stored on user.age at materialize
   guardianName: string; // already encrypted
   guardianContact: string; // already encrypted — the OTP channel
   guardianContactType: GuardianContactType;
@@ -116,7 +116,7 @@ export interface StartSignupGuardianInput {
   network: string;
   domain: string;
   identifier: SignupIdentifier;
-  dateOfBirth: Date;
+  age: number;
   guardianName: string;
   guardianEmail?: string;
   guardianPhone?: string;
@@ -141,7 +141,7 @@ export async function startSignupGuardian(input: StartSignupGuardianInput): Prom
     throw new SignupGuardianError('NOT_GATED');
   }
 
-  if (!isMinor(input.dateOfBirth)) {
+  if (!isMinor(input.age)) {
     throw new SignupGuardianError('NOT_A_MINOR');
   }
 
@@ -174,7 +174,7 @@ export async function startSignupGuardian(input: StartSignupGuardianInput): Prom
   const pending: PendingSignupGuardian = {
     network: input.network,
     domain: input.domain,
-    dateOfBirth: input.dateOfBirth.toISOString(),
+    age: input.age,
     guardianName: encryptGuardianField(input.guardianName),
     guardianContact: encryptGuardianField(channel.contact),
     guardianContactType: channel.contactType,
@@ -193,6 +193,8 @@ export async function startSignupGuardian(input: StartSignupGuardianInput): Prom
     scope: otpScope(hash),
     contact: channel.contact,
     contactType: channel.contactType,
+    scenario: { kind: 'account' },
+    variables: { parentName: input.guardianName, domain: input.domain },
   });
 }
 
@@ -270,8 +272,8 @@ export async function materializeSignupGuardian(user: MaterializeSignupGuardianU
       // Re-enforce the ward cap atomically at materialization (the pre-auth
       // start-time check can race across concurrent signups sharing a guardian).
       await assertWardLimitWithLock(tx, pending.guardianRef, user.id);
-      // DOB lives on the user row now (captured pre-auth in the pending record).
-      await setWardDob(user.id, new Date(pending.dateOfBirth), tx);
+      // Age lives on the user row now (captured pre-auth in the pending record).
+      await setWardAge(user.id, pending.age, tx);
       await writeEncryptedGuardian(
         user.id,
         {

@@ -12,6 +12,7 @@ import { ActionModalHeader } from './action-modal-header';
 import { ConsentCheckbox } from './consent-checkbox';
 import { GuardianOtpDialog } from './guardian-otp-dialog';
 import { getActionDisplay } from '@/lib/action-display';
+import { renderConsentStatement } from '@/lib/consent-copy';
 import { cn } from '@/lib/utils';
 import { useNetworkConfig } from '@/hooks/use-network-config';
 import { useConsentConfig } from '@/hooks/use-consent-config';
@@ -143,7 +144,12 @@ export function ActionStatusUpdater({
   const requiresConsent = revealStatuses.includes(targetStatus);
   const acceptDoc = config?.actions?.[action.action_type]?.accept;
   const acceptVersion = acceptDoc?.versions.find((v) => v.version === acceptDoc.current_version);
-  const consentText = acceptVersion?.statement ?? '';
+  // Accept stage: the accepter shares details with whoever initiated the
+  // request, so the counterparty noun is the source (requester) domain.
+  const consentText = renderConsentStatement(
+    acceptVersion?.statement ?? '',
+    action.source_item_domain,
+  );
 
   const handleSubmit = () => {
     if (!targetStatus) {

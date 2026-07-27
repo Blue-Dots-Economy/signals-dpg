@@ -117,6 +117,13 @@ export const ActionContactDetailsParamsSchema = z.object({
 export const ActionContactDetailsResponseSchema = z.object({
   action_id: z.uuid(),
   action_status: z.string().min(1),
+  // true → `item` carries the revealed contact PII; false → the masked
+  // pre-reveal view (a party's profile is not live, e.g. paused). See #273.
+  revealed: z.boolean(),
+  // When not revealed, whose profile blocked it: `self` = the viewer's own
+  // profile isn't live; `other` = the counterparty's. Lets the UI show the
+  // right message.
+  reveal_blocked_reason: z.enum(['self', 'other']).optional(),
   other_actor: z.object({
     item: ItemResponseSchema,
   }),

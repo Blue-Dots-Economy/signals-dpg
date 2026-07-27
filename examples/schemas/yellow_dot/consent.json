@@ -40,7 +40,7 @@
         "versions": [
           {
             "version": 1,
-            "statement": "I agree to share my contact details (name, email, phone) with this learner / educator if they accept my request. The request may be cancelled at any time.",
+            "statement": "I agree to share my contact details (name, email, phone) with this __COUNTERPARTY__ if they accept my request. The request may be cancelled at any time.",
             "effective_from": "2026-06-01"
           }
         ]
@@ -50,7 +50,7 @@
         "versions": [
           {
             "version": 1,
-            "statement": "I agree to share my contact details (name, email, phone) with this learner / educator.",
+            "statement": "I agree to share my contact details (name, email, phone) with this __COUNTERPARTY__.",
             "effective_from": "2026-06-01"
           }
         ]

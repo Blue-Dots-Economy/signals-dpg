@@ -18,6 +18,7 @@ better-auth configuration + the unified OTP plugin. Root `CLAUDE.md`'s "Auth mod
 - `generateOtp(isTest)` returns the fixed `'000000'` when `isTest` is true — this is the `CREATE_TEST_OTP` flag guarded by `assertCreateTestOtpSafe` (`packages/config/src/secrets.ts`'s startup guard) — never assume this path is reachable in production.
 - Storage is Redis-keyed: `otp:phone:<phoneNumber>` / `otp:email:<email>`, 5-minute TTL (`expiresInSec = 5 * 60`, `unified_otp.ts:361`), written via `ctx.context.secondaryStorage.set(key, otp, expiresInSec)`.
 - Verification deletes the key on success (one-time use) — a stored OTP is never reusable after a correct verify.
+- **Delivery is fail-loud (#1.14).** `requestOtp` routes the send through `deliverOtp` (`plugins/otp_delivery.ts`), which **awaits** `sendPhoneOtp`/`sendEmailOtp` (email was previously fire-and-forget) and, on any send rejection, drops the just-stored OTP and throws `APIError('BAD_GATEWAY', { code: 'OTP_DELIVERY_FAILED' })`. The send callbacks in `src/config.ts` no longer swallow notification-service errors — they log and rethrow. Net effect: a failed SMS/email send returns `502` instead of `{ ok: true }` for a code that never arrived, and no stale OTP is left stranded in Redis for its full TTL. `deliverOtp` takes its deps injected so it is unit-tested without a better-auth context (`plugins/__tests__/otp_delivery.test.ts`).
 
 ## `plugins/auth_guards.ts` — two small, load-bearing guard functions
 

@@ -9,6 +9,18 @@ export const InstanceSecretsSchema = z.object({
 export const ApiSecretsSchema = z.object({
   API_DOMAIN: z.string(),
   API_PORT: z.coerce.number().default(2742),
+  // Serve the OpenAPI spec + Scalar reference UI at /api/reference. Default
+  // on; apps/api/src/config.ts's apiReferenceEnabled force-disables it in
+  // production unless API_REFERENCE_FORCE opts back in.
+  API_REFERENCE_ENABLED: z
+    .string()
+    .default('true')
+    .transform((val) => val === 'true'),
+  // Opt back into serving the docs surface when INSTANCE_ENV=production.
+  API_REFERENCE_FORCE: z
+    .string()
+    .default('false')
+    .transform((val) => val === 'true'),
 });
 
 export const AuthSecretsSchema = z.object({
@@ -129,6 +141,9 @@ export const NetworkRuntimeSecretsSchema = z.object({
   BULK_MAX_ITEMS: z.coerce.number().int().positive().default(100),
   // Max wards that may share one guardian contact (U18). Best-effort cap.
   MAX_WARDS_PER_GUARDIAN: z.coerce.number().int().positive().default(6),
+  // Global default cap on profiles a single user may own per (network, domain,
+  // item_type). A network.json domain's `max_profiles_per_user` overrides this.
+  MAX_PROFILES_PER_USER: z.coerce.number().int().positive().default(5),
   // Per-peer fetch budget for inter-instance count/page fan-out. One slow
   // peer must not stall the aggregate; see inter_instance_fetch.ts.
   PEER_FETCH_TIMEOUT_MS: z.coerce.number().int().positive().default(10000),
@@ -139,6 +154,22 @@ export const NetworkRuntimeSecretsSchema = z.object({
   // bad/expired one, but allow a missing token (for peers not yet upgraded).
   // 'enforced': a valid token is required on every peer call.
   PEER_AUTH_MODE: z.enum(['permissive', 'enforced']).default('permissive'),
+  // In NETWORK_CONFIG_SOURCE=local mode, apps/api/src/app.ts wipes and
+  // rebuilds the on-disk network-schema cache at boot (see
+  // network_schema_cache.ts's refreshConsumedSchemas -> cacheReferencedItemSchemas),
+  // which queries the `items` table for every distinct item_schema_url on
+  // record. That query needs a reachable Postgres. Default true preserves
+  // that real-boot behavior unchanged. Callers that build the app without a
+  // database — the OpenAPI dump script (apps/api/scripts/dump_openapi.env)
+  // and any future boot-only smoke test — set this to false: route
+  // registration is fully static and never reads the schema cache at
+  // registration time (only a request-time handler, fetch_schemas.ts, reads
+  // it, lazily rebuilding on a cache miss), so skipping the warmup has no
+  // effect on the generated OpenAPI spec.
+  SCHEMA_CACHE_WARMUP_ENABLED: z
+    .string()
+    .default('true')
+    .transform((val) => val === 'true'),
 });
 
 export const DatabaseSecretsSchema = z.object({
@@ -154,6 +185,12 @@ export const DatabaseSecretsSchema = z.object({
   REDIS_PASSWORD: z.string(),
   REDIS_PORT: z.coerce.number().default(6370),
   INGEST_STREAM: z.string().default('signals:item-events'),
+  // Approximate cap on the item-events stream length. The publisher trims with
+  // `XADD MAXLEN ~` so the stream cannot grow unbounded in the shared Redis
+  // (which runs `noeviction` in prod — an untrimmed stream would eventually
+  // reject writes). Sized for consumer lag on signals-search; the sweep is the
+  // backstop for anything trimmed before it is consumed.
+  INGEST_STREAM_MAXLEN: z.coerce.number().int().positive().default(100_000),
 });
 
 export const PiiCryptoSecretsSchema = z.object({

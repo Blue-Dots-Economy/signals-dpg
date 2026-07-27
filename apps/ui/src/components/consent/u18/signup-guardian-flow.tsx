@@ -7,7 +7,6 @@ import {
   verifySignupGuardian,
   type SubmitGuardianBody,
 } from '@/lib/consent-api';
-import { toDateOnly } from '@/lib/guardian-consent';
 import { GuardianFormStep } from './guardian-form-step';
 import { GuardianOtpStep } from './guardian-otp-step';
 
@@ -20,8 +19,8 @@ export interface SignupGuardianFlowProps {
   brand?: string | null;
   /** The ward's own signup identifier (no account exists yet). */
   identifier: SignupIdentifier;
-  /** Ward's full date of birth captured on the DOB step. */
-  dateOfBirth: Date;
+  /** Ward's age captured on the birth-year step. */
+  age: number;
   /** Guardian OTP verified server-side — caller proceeds to the ward's own OTP. */
   onComplete: () => void;
 }
@@ -32,8 +31,8 @@ export interface SignupGuardianFlowProps {
  * page's content (inside AuthShell) — it REPLACES the signup form, matching
  * the DOB step, rather than stacking as a modal over it.
  *
- * DOB was already collected on the previous step, so there's no DOB step here:
- * guardian details → guardian OTP. The captured guardian + consent are
+ * Age was already collected on the previous step, so there's no birth-year step
+ * here: guardian details → guardian OTP. The captured guardian + consent are
  * materialized onto the new user id once better-auth creates it.
  */
 export function SignupGuardianFlow({
@@ -41,7 +40,7 @@ export function SignupGuardianFlow({
   domain,
   brand,
   identifier,
-  dateOfBirth,
+  age,
   onComplete,
 }: SignupGuardianFlowProps) {
   const { t } = useTranslation();
@@ -61,7 +60,7 @@ export function SignupGuardianFlow({
       network,
       domain,
       ...identifier,
-      dateOfBirth: toDateOnly(dateOfBirth),
+      age,
       guardianName: body.guardianName,
       ...(body.guardianEmail ? { guardianEmail: body.guardianEmail } : {}),
       ...(body.guardianPhone ? { guardianPhone: body.guardianPhone } : {}),
@@ -121,12 +120,12 @@ export function SignupGuardianFlow({
             <p className="text-sm text-foreground">
               {t(
                 'u18.guardian_verified_desc',
-                'Your guardian has confirmed. Next, verify your own number to finish creating your account.',
+                'Your guardian has confirmed. Next, verify your account to finish signing up.',
               )}
             </p>
           </div>
           <Button type="button" onClick={onComplete} className="w-full">
-            {t('u18.guardian_verified_continue', 'Verify my number to login')}
+            {t('u18.guardian_verified_continue', 'Continue')}
           </Button>
         </div>
       )}

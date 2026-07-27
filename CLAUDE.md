@@ -106,3 +106,7 @@ is in code comments at `queryKeys.browseItems` and `queryKeys.markers`.
 - **ESM only**, strict TS, no `any`. Use `import type` for type-only imports.
 - **No `console.log` in library packages** — go through `request.log` in app code.
 - **No `// TODO` comments** — open an issue instead.
+
+## Authoring pull requests
+
+When you open a PR, include an **In Plain Terms** section in the description: a short, jargon-free explanation a non-expert teammate can follow — what the problem was and what the change does, in everyday language — alongside the usual Summary / Release Notes. Skip it only for a pure chore with no behavioural effect. This lives here as a Claude authoring rule rather than in the GitHub PR template on purpose, so PRs opened from other tools/flows aren't forced through it.

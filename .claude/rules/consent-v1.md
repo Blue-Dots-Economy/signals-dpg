@@ -23,4 +23,23 @@ Two invariants worth internalising:
 
 `create_item` accepts an optional `consent` block to capture profile-creation consent atomically with the profile. `perform_action` / `update_action_status` gate on action-consent at `initiate` / `accept` stages.
 
+The `/admin/participant` endpoint also records the ledger for external
+channels: its `compliance` array maps to user-level `terms`/`privacy`
+(`source='signup'`) and item-level `profile_creation` (`source='profile'`),
+then promotes via `promoteItemOnProfileConsent`. The channel is captured in
+each row's `metadata.channel`. It never records guardian consent (that
+requires the OTP flow).
+
+The participant endpoint validates consent payloads: any `compliance` value
+`false` → `CONSENT_DECLINED`; `user_terms`/`user_privacy` are a both-or-none
+pair (`USER_LEVEL_INCOMPLETE`); on guardian-gated domains the pair requires
+`age` (integer years, stored as the `user.age` snapshot #331; `DOB_REQUIRED`,
+handler-level via `guardianConsentRequired`).
+Persisting `age` re-promotes all the user's eligible drafts
+(`promoteEligibleDraftsForUser`). `GET /admin/participant` surfaces consent
+status. It never records `source='guardian'` — U18 promotion still requires the
+guardian OTP flow.
+
 **Consent gates discoverability.** A profile is only network-visible (`lifecycle_status = live`) when its required fields are complete **and** `profile_creation` consent is accepted. Accepting profile consent (`routes/v1/consent/accept_profile_consent.ts`) calls `promoteItemOnProfileConsent` (`services/item_service.ts`), which re-runs the same `classify_item` completeness classifier used on write — with `consent_accepted: true` — and flips a `draft` item to `live`. Only `draft` is promoted: `paused` is sticky and `live` needs no change. Keep the completeness rules in the classifier, not duplicated in the consent path. The deploy migration for existing rows is a one-off backfill, `pnpm db:backfill:consent:api` (`apps/api` `db:backfill:consent`).
+
+**U18 guardian gate is the one age control on every go-live path.** For domains where `guardianConsentRequired(networkConfig, domain)` is true, a minor's profile cannot reach `live` on the ward's own self-consent — only a guardian's `source='guardian'` `profile_creation` row promotes it. `guardianGateBlocksGoLive` (`services/item_service.ts`) is **THE single source of truth**; it is called on *both* promotion paths (the create/consent-accept promote at `item_service.ts:441` and the item-update path at `:614`) — do not re-derive the age check inline in either. It is **fail-closed** on two fronts: a null `age` on a gated domain is never treated as adult (age capture is client-side, stored as the `user.age` snapshot #331; `u18_precheck` is a hint, not a control), and a minor with no guardian row stays `draft`. A proven adult, or any user on a non-gated domain, is never blocked. The bypass this closed (#311) was a promotion path that read `hasAcceptedProfileConsent` source-agnostically — any new go-live path must route through `guardianGateBlocksGoLive`, not a raw consent-presence check.

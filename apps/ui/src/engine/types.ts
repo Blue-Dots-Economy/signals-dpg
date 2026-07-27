@@ -71,6 +71,12 @@ export interface DotCardConfig {
 export interface DotNetworkDomain {
   id: string;
   description: string;
+  /**
+   * Optional per-domain override for the sidebar "My Profile(s)" group heading
+   * (e.g. "My Jobs" for a provider). Network-authored in network.json; falls
+   * back to the generic label when unset.
+   */
+  my_items_label?: string;
   default_item_schemas?: {
     profile: RJSFSchema;
   };
@@ -121,6 +127,11 @@ export interface DotNetworkSchema {
   display_name: string;
   description: string;
   schema_standard: string;
+  /**
+   * Network-wide toggle for the pause (voluntarily-hide) feature. When false,
+   * the UI hides the "Pause profile" control. Absent ⇒ enabled (default). (#346)
+   */
+  pause_enabled?: boolean;
   domains: DotNetworkDomain[];
   instances?: DotNetworkInstance[];
   actions: Record<string, DotNetworkAction>;
