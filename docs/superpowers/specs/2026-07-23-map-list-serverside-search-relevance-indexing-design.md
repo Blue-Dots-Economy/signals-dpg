@@ -54,7 +54,7 @@ Grounding for §4. A viewport is `center + zoom` ≡ a bbox; **both pan and zoom
 |---|---|---|---|
 | D1 | **Map query primitive = bbox** | radius (half-diagonal) | evolve `/markers` to accept a bbox (`ne`/`sw`); matches the screen exactly and is the natural, zoom-aware cache key (§4.1) |
 | D2 | **Refetch rule = contained-in-padded-bbox** | debounced `moveend` + viewport bucket | formalize containment; **zoom-in ⇒ no refetch, re-cluster only** (§4.2) |
-| D3 | **Display cap is zoom-dependent** | single `VITE_MAP_FETCH_LIMIT` (5000) | **1000 clustered / 500 individual**, tied to the cluster-disable zoom (§4.3) |
+| D3 | **Display cap is zoom-dependent** | single `VITE_MAP_FETCH_LIMIT` (**25000**) | **1000 clustered / 500 individual**, tied to the cluster-disable zoom (§4.3) |
 | D4 | **List powered by signals-search** | native `/network/item/fetch`, distance/recency; relevance P6 | list routes to **signals-search `/v1/search`** (semantic text + facet filters + relevance + `distanceMeters` + `meta.total`), via a public BFF, with native fallback (§5) |
 | D5 | **Server-side search/filter (both views)** | client-side over in-memory set | facet filters + text move server-side; map `/markers` gains filter params (§4.4, §5) |
 | D6 | **Indexing is first-class, Phase 1** | deferred non-goal | geo spatial index + facet GIN/expression indexes, driven by schema facet markers (§6) |
@@ -82,7 +82,9 @@ The React Query key carries the snapped bbox **and zoom band** (extends umbrella
 | Clustered | below cluster-disable zoom (~z<14) | **1000** | markers collapse into ~hundreds of cluster DOM nodes → more underlying points are cheap |
 | Individual pins | at/above cluster-disable zoom (~z≥14) | **500** | one-to-one DOM markers; ~500 is the smooth individual-marker ceiling and avoids crowding |
 
-Per-viewport fetch `limit = MAX_MAP_PINS + 1` for the active band. Replaces the single `VITE_MAP_FETCH_LIMIT=5000` with a two-value, zoom-banded cap (both env-overridable; `disableClusteringAtZoom` is the breakpoint).
+Per-viewport fetch `limit = MAX_MAP_PINS + 1` for the active band. Replaces the single `VITE_MAP_FETCH_LIMIT=25000` with a two-value, zoom-banded cap (both env-overridable; `disableClusteringAtZoom` is the breakpoint).
+
+> **Baseline correction.** Earlier drafts of this doc cited the shipped default as 5000. It is **25000** — `DEFAULT_MAP_FETCH_LIMIT` in `apps/ui/src/lib/network-api.ts`, matching `.env.example` and the server cap (`max(25000)` in `MarkersQuerySchema`/`MarkersBodySchema`). The umbrella PR's own summary also says 5000 in one place; the env table there is correct. This makes the caps above a **~25× reduction for clustered and ~50× for individual pins**, not the modest trim the 5000 figure implied — which strengthens rather than weakens the case for them. It also matters for mobile: on a ~390px viewport the shipped default is far past any usable pin density (see the mobile spec's finding F1, `docs/superpowers/specs/2026-07-27-ui-mobile-experience-design.md`).
 
 ### 4.4 Over-dense behavior (D8, Phase 1)
 Fetch returns `meta.total` for the bbox. If `meta.total > MAX_MAP_PINS` → render the returned nearest set, cluster it, and show **"N+ in this area — zoom in"** (umbrella §6 truncation indicator). **Native only; no signals-search.** Map facet/text filters (D5) are sent as `item_state.*` params on `/markers` so filtering happens server-side within the bbox — the indexes in §6 make this viable at 10k–50k.
