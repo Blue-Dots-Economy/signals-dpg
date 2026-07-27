@@ -28,9 +28,19 @@ export function ResponsiveDialog({
   const isMobile = useIsMobile();
 
   if (isMobile) {
+    // A guard (onInteractOutside/onEscapeKeyDown) means the caller wants
+    // dismissal blocked outright — mirror that on the Drawer via
+    // `dismissible={false}` (disables swipe/backdrop/esc close) in addition to
+    // forwarding the callbacks themselves, which vaul spreads onto the
+    // underlying radix Dialog.Content.
+    const guarded = Boolean(onInteractOutside || onEscapeKeyDown);
     return (
-      <Drawer open={open} onOpenChange={onOpenChange}>
-        <DrawerContent className="max-h-[90dvh] overflow-hidden p-0">
+      <Drawer open={open} onOpenChange={onOpenChange} dismissible={!guarded}>
+        <DrawerContent
+          className="max-h-[90dvh] overflow-hidden p-0"
+          onInteractOutside={onInteractOutside}
+          onEscapeKeyDown={onEscapeKeyDown}
+        >
           {children}
         </DrawerContent>
       </Drawer>
