@@ -2165,8 +2165,8 @@ export function HomePage() {
                     had no way to see the total. `fixed` + high z-index so it stays
                     above the map's own maximize overlay (z-[2000]). */}
                 {!user && mapMarkers.total > 0 && (
-                  <div className="pointer-events-none fixed bottom-6 left-1/2 z-[2100] -translate-x-1/2 px-4">
-                    <div className="rounded-full border border-border bg-background/95 px-3 py-1.5 text-xs font-medium text-foreground shadow-md backdrop-blur-sm">
+                  <div className="pointer-events-none fixed bottom-6 left-1/2 z-[2100] w-full max-w-[calc(100vw-2rem)] -translate-x-1/2 px-4">
+                    <div className="mx-auto w-fit max-w-full rounded-2xl border border-border bg-background/95 px-3 py-1.5 text-center text-xs font-medium text-foreground shadow-md backdrop-blur-sm">
                       {mapItems.length < mapMarkers.total
                         ? t('home.showing_x_of_y', { shown: mapItems.length, total: mapMarkers.total })
                         : t('header.listings', { count: mapMarkers.total })}
@@ -2178,8 +2178,8 @@ export function HomePage() {
                     `fixed` (not `absolute`) so it stays visible above the map's own
                     maximize overlay (z-[1000]) in both normal and maximized mode. */}
                 {mapMarkers.partial && (
-                  <div className="pointer-events-none fixed left-1/2 top-20 z-[2100] -translate-x-1/2 px-4">
-                    <p className="pointer-events-auto rounded-md bg-amber-50 px-3 py-1.5 text-xs font-medium text-amber-900 shadow-md ring-1 ring-amber-300 dark:bg-amber-950 dark:text-amber-100 dark:ring-amber-800">
+                  <div className="pointer-events-none fixed left-1/2 top-20 z-[2100] w-full max-w-[calc(100vw-2rem)] -translate-x-1/2 px-4">
+                    <p className="pointer-events-auto mx-auto w-fit max-w-full rounded-md bg-amber-50 px-3 py-1.5 text-center text-xs font-medium text-amber-900 shadow-md ring-1 ring-amber-300 dark:bg-amber-950 dark:text-amber-100 dark:ring-amber-800">
                       {t('home.map_partial')}
                     </p>
                   </div>
