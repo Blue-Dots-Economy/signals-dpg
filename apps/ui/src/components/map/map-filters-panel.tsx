@@ -305,7 +305,7 @@ export function MapFiltersPanel({
         <span className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">
           {t('filters.title')}
         </span>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 pointer-coarse:gap-4">
           {activeCount > 0 && (
             <button
               type="button"
