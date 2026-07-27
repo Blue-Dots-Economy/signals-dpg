@@ -293,7 +293,7 @@ function createClusterDivIcon(cluster: { getChildCount: () => number; getAllChil
       align-items: center;
       /* no width constraint — let badge row set the width */
     ">
-      <div style="
+      <div class="dpg-cluster-count" style="
         display: flex;
         align-items: center;
         justify-content: center;

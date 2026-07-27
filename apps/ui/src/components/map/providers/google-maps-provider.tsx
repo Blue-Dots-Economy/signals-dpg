@@ -75,6 +75,10 @@ function buildClusterContent(
 
   const size = total < 10 ? 38 : total < 100 ? 44 : 50;
   const circle = document.createElement('div');
+  // Stable class hook for the mobile-only legibility rule in index.css — no
+  // style is defined by this class name itself, so desktop rendering (which
+  // has no matching media query) is byte-identical.
+  circle.className = 'dpg-cluster-count';
   circle.style.cssText =
     `display:flex;align-items:center;justify-content:center;width:${size}px;height:${size}px;` +
     `background:${primary};color:#ffffff;border:2px solid #ffffff;border-radius:9999px;` +
