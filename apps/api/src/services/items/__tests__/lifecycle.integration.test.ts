@@ -1439,4 +1439,98 @@ describeIf(`lifecycle integration${can_run ? '' : ` — ${skip_reason}`}`, () =>
       .limit(1);
     expect(resumedRow?.action_status).toBe('accepted');
   });
+
+  // ---------------------------------------------------------------------------
+  // Scenario 13 (#347): retire is terminal — wipes PII, keeps the action row,
+  // and cannot be transitioned out of. A retired profile is also excluded from
+  // the owner's instance-local fetch ("My Profiles").
+  // ---------------------------------------------------------------------------
+
+  it('scenario 13: retire → retired, PII wiped, action row kept, second retire → 409', async () => {
+    const email = `lc_s13_${randomUUID().slice(0, 6)}@a.test`;
+    const full = generateMinimalItemState(primary.schema);
+    const create = await app.inject({
+      method: 'POST', url: '/api/v1/admin/participant', headers: adminHeaders(ns),
+      payload: {
+        email, name: 'LC S13', terms_accepted: true, privacy_accepted: true,
+        channel: 'bulk', network: primary.network, domain: primary.domain,
+        item_type: primary.item_type, item_state: full,
+      },
+    });
+    expect(create.statusCode).toBe(200);
+    const itemId = create.json().items[0].item_id as string;
+    const userId = create.json().user_id as string;
+    onboarded_user_ids.push(userId);
+    await makeLive(userId, itemId, primary.network);
+
+    // A pending action targeting the item — must survive retire (row kept).
+    const actionId = randomUUID();
+    await ensureActionPartition(db, primary.network, 'connect');
+    await db.insert(itemActionsTable).values({
+      action_type: 'connect', partition_network: primary.network, action_id: actionId,
+      action_status: 'created', update_count: 0,
+      source_item_network: primary.network, source_item_domain: primary.domain,
+      source_item_type: primary.item_type, source_item_id: randomUUID(),
+      source_item_instance_url: `http://localhost:${listen_port}`,
+      target_item_network: primary.network, target_item_domain: primary.domain,
+      target_item_type: primary.item_type, target_item_id: itemId,
+      target_item_instance_url: `http://localhost:${listen_port}`,
+      requirements_snapshot: {},
+    });
+    seeded_action_ids.push(actionId);
+
+    // Retire (network_service authorised).
+    const res = await app.inject({
+      method: 'POST', url: '/api/v1/item/lifecycle', headers: adminHeaders(ns),
+      payload: { item_id: itemId, action: 'retire' },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().lifecycle_status).toBe('retired');
+
+    // DB: retired + private blob cleared + no private field left in item_state.
+    const [row] = await db
+      .select({
+        lifecycle_status: itemsTable.lifecycle_status,
+        item_state: itemsTable.item_state,
+        item_private_state: itemsTable.item_private_state,
+      })
+      .from(itemsTable)
+      .where(eq(itemsTable.item_id, itemId))
+      .limit(1);
+    expect(row.lifecycle_status).toBe('retired');
+    expect(row.item_private_state).toBe('');
+    // Every private field defined by the schema is gone from the stored state.
+    const publicOnly = nonPrivateFields(primary.schema, full);
+    const stored = row.item_state as Record<string, unknown>;
+    for (const key of Object.keys(full)) {
+      if (!(key in publicOnly)) expect(key in stored).toBe(false);
+    }
+
+    // The action row is kept (bare id preserved for counterparty history).
+    const [actionRow] = await db
+      .select({ action_id: itemActionsTable.action_id })
+      .from(itemActionsTable)
+      .where(eq(itemActionsTable.action_id, actionId))
+      .limit(1);
+    expect(actionRow?.action_id).toBe(actionId);
+
+    // Terminal: a second lifecycle call is rejected.
+    const again = await app.inject({
+      method: 'POST', url: '/api/v1/item/lifecycle', headers: adminHeaders(ns),
+      payload: { item_id: itemId, action: 'retire' },
+    });
+    expect(again.statusCode).toBe(409);
+    expect(again.json().error).toBe('INVALID_LIFECYCLE_ACTION');
+
+    // Excluded from the owner's instance-local fetch ("My Profiles").
+    const fetchRes = await app.inject({
+      method: 'GET',
+      url: `/api/v1/item/fetch?item_network=${encodeURIComponent(primary.network)}&item_domain=${encodeURIComponent(primary.domain)}&limit=100&offset=0`,
+      headers: userHeaders(ns.raw_key),
+    });
+    if (fetchRes.statusCode === 200) {
+      const items = (fetchRes.json() as { items: Array<{ item_id: string }> }).items;
+      expect(items.some((i) => i.item_id === itemId)).toBe(false);
+    }
+  });
 });

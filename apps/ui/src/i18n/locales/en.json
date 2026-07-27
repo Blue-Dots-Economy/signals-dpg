@@ -542,6 +542,12 @@
   "profile.toast_lifecycle_failed": "Could not update profile status. Try again.",
   "profile.visibility_hidden": "This profile is paused — it is not discoverable in the network.",
   "profile.visibility_live": "This profile is discoverable in the network.",
+  "profile.btn_retire": "Retire profile",
+  "profile.retire_desc": "Retiring permanently removes this profile and its personal details. This cannot be undone.",
+  "profile.retire_confirm_title": "Retire this profile?",
+  "profile.retire_confirm_desc": "This permanently removes your profile and personal details, and cancels any open connections. It cannot be undone — you would need to create a new profile to return.",
+  "profile.retire_confirm_proceed": "Retire permanently",
+  "profile.toast_retired": "Profile retired — it has been permanently removed from the network.",
   "auth.signup_dob_label_ym": "Select your birth year",
   "u18.dob_label_ym": "Select your birth year"
 }

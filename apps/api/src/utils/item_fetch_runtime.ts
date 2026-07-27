@@ -1,4 +1,4 @@
-import { and, eq, sql } from 'drizzle-orm';
+import { and, eq, ne, sql } from 'drizzle-orm';
 import { db } from '@api/db/postgres/drizzle_config';
 import { items } from '@dpg/database';
 import { decryptItemPrivate } from './item_decrypt';
@@ -55,6 +55,12 @@ function buildWhereClause(filters: Omit<ItemFetchFilters, 'limit' | 'offset'>) {
 
   conditions.push(eq(items.item_network, filters.item_network));
   conditions.push(eq(items.item_domain, filters.item_domain));
+
+  // A retired profile is permanently removed (#347): never list it, even to its
+  // owner in "My Profiles" (this local fetch is the owner path). Discovery paths
+  // already restrict to live via lifecycle_filter, so this only affects the
+  // all-states owner listing.
+  conditions.push(ne(items.lifecycle_status, 'retired'));
 
   if (filters.item_type) {
     conditions.push(eq(items.item_type, filters.item_type));

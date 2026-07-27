@@ -94,6 +94,7 @@ export function ProfileFormPage() {
   const [isSubmitting, setIsSubmitting] = React.useState(false);
   const [lifecycleBusy, setLifecycleBusy] = React.useState(false);
   const [pauseConfirmOpen, setPauseConfirmOpen] = React.useState(false);
+  const [retireConfirmOpen, setRetireConfirmOpen] = React.useState(false);
   const [isLoading, setIsLoading] = React.useState(isEdit);
   const [availableNetworkIds, setAvailableNetworkIds] = React.useState<string[] | null>(null);
   const [isWalletModalOpen, setIsWalletModalOpen] = React.useState(false);
@@ -605,6 +606,26 @@ export function ProfileFormPage() {
     }
   };
 
+  // Retire (permanent removal) the profile the owner is editing (#347). This is
+  // terminal and irreversible: the server wipes PII, cancels open connections
+  // and de-indexes the profile. It then disappears from "My Profiles", so on
+  // success we leave the editor and return to home rather than re-render a gone
+  // profile.
+  const handleRetire = async () => {
+    if (!existingItem) return;
+    setLifecycleBusy(true);
+    try {
+      await setItemLifecycle(existingItem.item_id, 'retire');
+      toast.success(
+        t('profile.toast_retired', 'Profile retired — it has been permanently removed from the network.'),
+      );
+      navigate(`/?network=${resolvedNetwork?.id ?? ''}`);
+    } catch {
+      toast.error(t('profile.toast_lifecycle_failed', 'Could not update profile status. Try again.'));
+      setLifecycleBusy(false);
+    }
+  };
+
   if (availableNetworkIds === null || isLoading) {
     return (
       <div className="flex h-screen items-center justify-center">
@@ -763,6 +784,25 @@ export function ProfileFormPage() {
                   </Button>
                 </div>
               )}
+
+            {/* Retire control (#347). Available on any existing profile
+                (draft / live / paused). Terminal + irreversible, so it is
+                visually separated and confirmed before proceeding. */}
+            {isEdit && existingItem && (
+              <div className="mb-4 flex items-center justify-between gap-3 rounded-md border border-destructive/30 bg-destructive/5 p-3">
+                <p className="text-sm text-muted-foreground">
+                  {t('profile.retire_desc', 'Retiring permanently removes this profile and its personal details. This cannot be undone.')}
+                </p>
+                <Button
+                  variant="destructive"
+                  size="sm"
+                  disabled={lifecycleBusy}
+                  onClick={() => setRetireConfirmOpen(true)}
+                >
+                  {t('profile.btn_retire', 'Retire profile')}
+                </Button>
+              </div>
+            )}
 
             {profileSchema && (
               <SchemaForm
@@ -924,6 +964,42 @@ export function ProfileFormPage() {
                 }}
               >
                 {t('profile.pause_confirm_proceed', 'Pause profile')}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        {/* Confirm before retiring — terminal, irreversible, wipes PII (#347). */}
+        <Dialog open={retireConfirmOpen} onOpenChange={setRetireConfirmOpen}>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>
+                {t('profile.retire_confirm_title', 'Retire this profile?')}
+              </DialogTitle>
+              <DialogDescription>
+                {t(
+                  'profile.retire_confirm_desc',
+                  'This permanently removes your profile and personal details, and cancels any open connections. It cannot be undone — you would need to create a new profile to return.',
+                )}
+              </DialogDescription>
+            </DialogHeader>
+            <DialogFooter>
+              <Button
+                variant="outline"
+                disabled={lifecycleBusy}
+                onClick={() => setRetireConfirmOpen(false)}
+              >
+                {t('common.cancel', 'Cancel')}
+              </Button>
+              <Button
+                variant="destructive"
+                disabled={lifecycleBusy}
+                onClick={() => {
+                  setRetireConfirmOpen(false);
+                  void handleRetire();
+                }}
+              >
+                {t('profile.retire_confirm_proceed', 'Retire permanently')}
               </Button>
             </DialogFooter>
           </DialogContent>

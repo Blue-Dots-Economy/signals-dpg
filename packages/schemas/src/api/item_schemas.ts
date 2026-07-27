@@ -15,7 +15,7 @@ export const ItemResponseSchema = ItemSelectSchema.omit({
 }).extend({
   // Kept optional deliberately: response paths that do not project this column
   // (e.g. browse/fetch without lifecycle filter) must not cause a serialization 500.
-  lifecycle_status: z.enum(['draft', 'live', 'paused']).optional(),
+  lifecycle_status: z.enum(['draft', 'live', 'paused', 'retired']).optional(),
   item_locations: ItemLocationsArray,
 });
 export const ItemInsertSchema = createInsertSchema(items);
