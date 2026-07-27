@@ -553,5 +553,6 @@
   "auth.signup_dob_label_ym": "ನಿಮ್ಮ ಜನ್ಮ ವರ್ಷ ಆಯ್ಕೆಮಾಡಿ",
   "u18.dob_label_ym": "ನಿಮ್ಮ ಜನ್ಮ ವರ್ಷ ಆಯ್ಕೆಮಾಡಿ",
   "auth.dob_label_year": "ಜನ್ಮ ವರ್ಷ",
-  "auth.dob_year_placeholder": "ವರ್ಷ"
+  "auth.dob_year_placeholder": "ವರ್ಷ",
+  "a11y.skip_to_content": "ವಿಷಯಕ್ಕೆ ಹೋಗಿ"
 }

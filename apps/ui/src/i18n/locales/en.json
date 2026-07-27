@@ -543,5 +543,6 @@
   "profile.visibility_hidden": "This profile is paused — it is not discoverable in the network.",
   "profile.visibility_live": "This profile is discoverable in the network.",
   "auth.signup_dob_label_ym": "Select your birth year",
-  "u18.dob_label_ym": "Select your birth year"
+  "u18.dob_label_ym": "Select your birth year",
+  "a11y.skip_to_content": "Skip to content"
 }
