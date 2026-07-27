@@ -290,7 +290,7 @@ export function AppSidebar({
                                             ? 'bg-green-100 text-green-700 dark:bg-green-500/20 dark:text-green-300'
                                             : profile.lifecycle_status === 'paused'
                                               ? 'bg-amber-100 text-amber-800 dark:bg-amber-500/20 dark:text-amber-300'
-                                              : 'bg-muted text-muted-foreground',
+                                              : 'bg-slate-200 text-slate-700 dark:bg-slate-500/25 dark:text-slate-300',
                                         ].join(' ')}
                                       >
                                         {t(

@@ -114,22 +114,21 @@ const item_lifecycle_handler = async (
         return { invalidAction: 'UNPAUSE_REQUIRES_PAUSED' as const } as const;
       }
 
-      const { mergedState } = decryptItemPrivate({
-        item_state: existing.item_state as Record<string, unknown>,
-        item_private_state: existing.item_private_state ?? '',
-      });
-
-      const itemSchema = await getOrFetchSchemaByUrl({
-        schemaUrl: existing.item_schema_url,
-        network: existing.item_network,
-        domain: existing.item_domain,
-        itemType: existing.item_type,
-      });
-
       let next_status: 'draft' | 'live' | 'paused' | 'retired';
 
       if (action === 'retire') {
         next_status = 'retired';
+
+        // Schema drives the PII wipe (which fields are private). Note: retire
+        // deliberately does NOT decrypt item_private_state — it works off the
+        // stored (masked) item_state, so a corrupt/undecryptable private blob
+        // can't block the very action meant to wipe it.
+        const itemSchema = await getOrFetchSchemaByUrl({
+          schemaUrl: existing.item_schema_url,
+          network: existing.item_network,
+          domain: existing.item_domain,
+          itemType: existing.item_type,
+        });
 
         // PII wipe (#347 Q9): keep only non-PII public fields; drop every
         // private:true field + the standard identity keys; clear the encrypted
@@ -141,7 +140,16 @@ const item_lifecycle_handler = async (
 
         // End established connections (R9.3): cancel still-open actions on
         // either side; rows are kept for counterparty history (Q11).
-        await cancelItemConnections(tx, item_id, request.log);
+        await cancelItemConnections(
+          tx,
+          {
+            item_id,
+            item_network: existing.item_network,
+            item_domain: existing.item_domain,
+            item_type: existing.item_type,
+          },
+          request.log,
+        );
 
         await tx
           .update(items)
@@ -171,7 +179,18 @@ const item_lifecycle_handler = async (
       if (action === 'pause') {
         next_status = 'paused';
       } else {
-        // unpause: recompute draft/live from current data (non-sticky path).
+        // unpause: recompute draft/live from the current (decrypted) data —
+        // the only path that needs the private blob merged + the schema.
+        const { mergedState } = decryptItemPrivate({
+          item_state: existing.item_state as Record<string, unknown>,
+          item_private_state: existing.item_private_state ?? '',
+        });
+        const itemSchema = await getOrFetchSchemaByUrl({
+          schemaUrl: existing.item_schema_url,
+          network: existing.item_network,
+          domain: existing.item_domain,
+          itemType: existing.item_type,
+        });
         const consent_accepted = await hasAcceptedProfileConsent(tx, item_id);
         next_status = classify_item({
           schema: itemSchema as { required?: string[] },

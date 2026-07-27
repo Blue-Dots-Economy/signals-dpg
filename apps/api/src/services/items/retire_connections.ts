@@ -23,9 +23,25 @@ type WarnLogger = { warn: (obj: unknown, msg?: string) => void };
  */
 export async function cancelItemConnections(
   tx: DbOrTx,
-  itemId: string,
+  item: { item_id: string; item_network: string; item_domain: string; item_type: string },
   logger?: WarnLogger,
 ): Promise<number> {
+  // Match on the full item ref on each side so the query prunes to the right
+  // partition and uses the source/target composite indexes (which lead with the
+  // network) rather than scanning every network's partition (see
+  // .claude/rules/database-conventions.md).
+  const asSource = and(
+    eq(item_actions.source_item_network, item.item_network),
+    eq(item_actions.source_item_domain, item.item_domain),
+    eq(item_actions.source_item_type, item.item_type),
+    eq(item_actions.source_item_id, item.item_id),
+  );
+  const asTarget = and(
+    eq(item_actions.target_item_network, item.item_network),
+    eq(item_actions.target_item_domain, item.item_domain),
+    eq(item_actions.target_item_type, item.item_type),
+    eq(item_actions.target_item_id, item.item_id),
+  );
   const actions = await tx
     .select({
       partition_network: item_actions.partition_network,
@@ -40,9 +56,7 @@ export async function cancelItemConnections(
       target_item_type: item_actions.target_item_type,
     })
     .from(item_actions)
-    .where(
-      or(eq(item_actions.source_item_id, itemId), eq(item_actions.target_item_id, itemId)),
-    );
+    .where(or(asSource, asTarget));
 
   let cancelled = 0;
   for (const a of actions) {

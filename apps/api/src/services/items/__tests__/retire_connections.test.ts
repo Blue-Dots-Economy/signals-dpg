@@ -72,7 +72,7 @@ describe('cancelItemConnections', () => {
   it('cancels an open (created) action → first cancel status', async () => {
     const { tx, updates } = makeTx([action({ action_status: 'created' })]);
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const n = await cancelItemConnections(tx as any, 'item-1');
+    const n = await cancelItemConnections(tx as any, { item_id: 'item-1', item_network: 'blue_dot', item_domain: 'seeker', item_type: 'profile_1.0' });
     expect(n).toBe(1);
     expect(updates[0].action_status).toBe('cancelled');
   });
@@ -80,7 +80,7 @@ describe('cancelItemConnections', () => {
   it('cancels an accepted action too (non-terminal)', async () => {
     const { tx, updates } = makeTx([action({ action_status: 'accepted' })]);
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const n = await cancelItemConnections(tx as any, 'item-1');
+    const n = await cancelItemConnections(tx as any, { item_id: 'item-1', item_network: 'blue_dot', item_domain: 'seeker', item_type: 'profile_1.0' });
     expect(n).toBe(1);
     expect(updates[0].action_status).toBe('cancelled');
   });
@@ -91,7 +91,7 @@ describe('cancelItemConnections', () => {
       action({ action_id: 'c', action_status: 'cancelled' }),
     ]);
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const n = await cancelItemConnections(tx as any, 'item-1');
+    const n = await cancelItemConnections(tx as any, { item_id: 'item-1', item_network: 'blue_dot', item_domain: 'seeker', item_type: 'profile_1.0' });
     expect(n).toBe(0);
     expect(updates).toHaveLength(0);
   });
@@ -100,7 +100,7 @@ describe('cancelItemConnections', () => {
     getNetworkConfigById.mockRejectedValue(new Error('no config'));
     const { tx, updates } = makeTx([action({ action_status: 'created' })]);
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const n = await cancelItemConnections(tx as any, 'item-1');
+    const n = await cancelItemConnections(tx as any, { item_id: 'item-1', item_network: 'blue_dot', item_domain: 'seeker', item_type: 'profile_1.0' });
     expect(n).toBe(0);
     expect(updates).toHaveLength(0);
   });

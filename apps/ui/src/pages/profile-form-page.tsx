@@ -765,8 +765,15 @@ export function ProfileFormPage() {
                       : t('profile.visibility_live', 'This profile is discoverable in the network.')}
                   </p>
                   <Button
-                    variant="outline"
+                    // Resume is the positive action (restores discovery) → brand
+                    // theme; Pause is neutral/hide → outline.
+                    variant={existingItem.lifecycle_status === 'paused' ? 'default' : 'outline'}
                     size="sm"
+                    className={
+                      existingItem.lifecycle_status === 'paused'
+                        ? 'bg-brand-cta text-white hover:brightness-110'
+                        : undefined
+                    }
                     disabled={lifecycleBusy}
                     onClick={() => {
                       // Resume is safe (restores discovery) — do it directly.
@@ -784,25 +791,6 @@ export function ProfileFormPage() {
                   </Button>
                 </div>
               )}
-
-            {/* Retire control (#347). Available on any existing profile
-                (draft / live / paused). Terminal + irreversible, so it is
-                visually separated and confirmed before proceeding. */}
-            {isEdit && existingItem && (
-              <div className="mb-4 flex items-center justify-between gap-3 rounded-md border border-destructive/30 bg-destructive/5 p-3">
-                <p className="text-sm text-muted-foreground">
-                  {t('profile.retire_desc', 'Retiring permanently removes this profile and its personal details. This cannot be undone.')}
-                </p>
-                <Button
-                  variant="destructive"
-                  size="sm"
-                  disabled={lifecycleBusy}
-                  onClick={() => setRetireConfirmOpen(true)}
-                >
-                  {t('profile.btn_retire', 'Retire profile')}
-                </Button>
-              </div>
-            )}
 
             {profileSchema && (
               <SchemaForm
@@ -877,6 +865,27 @@ export function ProfileFormPage() {
                 >
                   {t('profile.btn_create')}
                 </button>
+              </div>
+            )}
+
+            {/* Danger zone (#347). Retire is terminal + irreversible, so it is
+                separated below the whole form — never inline among the fields.
+                Edit-only (no existing profile to retire while creating). */}
+            {isEdit && existingItem && (
+              <div className="mt-10 border-t border-destructive/20 pt-4">
+                <div className="flex items-center justify-between gap-3 rounded-md border border-destructive/30 bg-destructive/5 p-3">
+                  <p className="text-sm text-muted-foreground">
+                    {t('profile.retire_desc', 'Retiring permanently removes this profile. This cannot be undone.')}
+                  </p>
+                  <Button
+                    variant="destructive"
+                    size="sm"
+                    disabled={lifecycleBusy}
+                    onClick={() => setRetireConfirmOpen(true)}
+                  >
+                    {t('profile.btn_retire', 'Retire profile')}
+                  </Button>
+                </div>
               </div>
             )}
           </CardContent>
@@ -979,7 +988,7 @@ export function ProfileFormPage() {
               <DialogDescription>
                 {t(
                   'profile.retire_confirm_desc',
-                  'This permanently removes your profile and personal details, and cancels any open connections. It cannot be undone — you would need to create a new profile to return.',
+                  'This permanently removes your profile and cancels any open connections. It cannot be undone.',
                 )}
               </DialogDescription>
             </DialogHeader>
