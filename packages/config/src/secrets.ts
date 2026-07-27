@@ -215,6 +215,10 @@ export const GeocodingSecretsSchema = z
     // a 1000m ceiling keeps the point useful for proximity.
     PII_LOCATION_JITTER_MIN_METERS: z.coerce.number().min(50).max(1000).default(100),
     PII_LOCATION_JITTER_MAX_METERS: z.coerce.number().min(50).max(1000).default(250),
+    // Places cache TTLs (#196). Positive results are stable → long TTL;
+    // unresolvable strings cache briefly so they don't hammer the paid API.
+    GEO_CACHE_TTL_SECONDS: z.coerce.number().int().positive().default(2592000),
+    GEO_CACHE_NEGATIVE_TTL_SECONDS: z.coerce.number().int().positive().default(3600),
   })
   .refine((c) => c.PII_LOCATION_JITTER_MIN_METERS <= c.PII_LOCATION_JITTER_MAX_METERS, {
     message: 'PII_LOCATION_JITTER_MIN_METERS must be <= PII_LOCATION_JITTER_MAX_METERS',

@@ -1,4 +1,4 @@
-import type { FetchItemsQuery, FetchItemsResponse } from './item-api';
+import type { FetchItemsQuery, FetchItemsResponse, ItemLocation } from './item-api';
 import type { DotNetworkSchema } from '../engine/types';
 import { createApiClient } from './api-client';
 
@@ -30,8 +30,41 @@ export function resolveProfileFetchLimit(): number {
 
 export const PROFILE_FETCH_LIMIT = resolveProfileFetchLimit();
 
+const DEFAULT_PROFILE_PAGE_SIZE = 50;
+
+export function resolveProfilePageSize(): number {
+  const raw = import.meta.env.VITE_PROFILE_PAGE_SIZE;
+  if (raw === undefined || raw === '') return DEFAULT_PROFILE_PAGE_SIZE;
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed) || parsed <= 0) return DEFAULT_PROFILE_PAGE_SIZE;
+  return parsed;
+}
+
+export const PROFILE_PAGE_SIZE = resolveProfilePageSize();
+
+// Default cap for map-viewport marker fetches (Signals map/marker layer,
+// #203 P4). Override via `VITE_MAP_FETCH_LIMIT` (e.g. `"2000"`). Falls back
+// to 25000 when unset, empty, or invalid. Mirrors `resolveProfileFetchLimit`.
+// Must not exceed the server markers cap (`MarkersBodySchema` /
+// `MarkersQuerySchema` in `packages/schemas`, currently 25000) or the request
+// is rejected.
+const DEFAULT_MAP_FETCH_LIMIT = 25000;
+
+export function resolveMapFetchLimit(): number {
+  const raw = import.meta.env.VITE_MAP_FETCH_LIMIT;
+  if (raw === undefined || raw === '') return DEFAULT_MAP_FETCH_LIMIT;
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed) || parsed <= 0) return DEFAULT_MAP_FETCH_LIMIT;
+  return parsed;
+}
+
+export const MAP_FETCH_LIMIT = resolveMapFetchLimit();
+
 export interface FetchNetworkItemsQuery
   extends Omit<FetchItemsQuery, 'created_by_me'> {
+  item_latitude?: number;
+  item_longitude?: number;
+  radius_meters?: number;
   cache_ttl_seconds?: number;
 }
 
@@ -52,12 +85,95 @@ export async function fetchNetworkItems(
   if (query.item_schema_url) params.set('item_schema_url', query.item_schema_url);
   if (query.limit !== undefined) params.set('limit', String(query.limit));
   if (query.offset !== undefined) params.set('offset', String(query.offset));
+  if (query.item_latitude !== undefined) {
+    params.set('item_latitude', String(query.item_latitude));
+  }
+  if (query.item_longitude !== undefined) {
+    params.set('item_longitude', String(query.item_longitude));
+  }
+  if (query.radius_meters !== undefined) {
+    params.set('radius_meters', String(query.radius_meters));
+  }
   if (query.cache_ttl_seconds !== undefined) {
     params.set('cache_ttl_seconds', String(query.cache_ttl_seconds));
   }
 
   const response = await networkApiClient.get<FetchItemsResponse>(
     '/api/v1/network/item/fetch',
+    { params, signal }
+  );
+  return response.data;
+}
+
+export interface Marker {
+  item_id: string;
+  item_domain: string;
+  item_instance_url: string | null;
+  item_locations: ItemLocation[];
+}
+
+export interface MarkersResponse {
+  meta: {
+    total: number;
+    limit: number;
+    offset: number;
+    partial: boolean;
+    unavailable_instances: string[];
+  };
+  markers: Marker[];
+}
+
+export interface FetchNetworkMarkersQuery {
+  item_network: string;
+  item_domain: string;
+  item_type?: string;
+  item_latitude?: number;
+  item_longitude?: number;
+  radius_meters?: number;
+  item_state?: Record<string, unknown>;
+  limit?: number;
+  offset?: number;
+  cache_ttl_seconds?: number;
+}
+
+export async function fetchNetworkMarkers(
+  query: FetchNetworkMarkersQuery,
+  signal?: AbortSignal
+): Promise<MarkersResponse> {
+  const params = new URLSearchParams();
+
+  params.set('item_network', query.item_network);
+  params.set('item_domain', query.item_domain);
+
+  if (query.item_type) params.set('item_type', query.item_type);
+  if (query.item_latitude !== undefined) {
+    params.set('item_latitude', String(query.item_latitude));
+  }
+  if (query.item_longitude !== undefined) {
+    params.set('item_longitude', String(query.item_longitude));
+  }
+  if (query.radius_meters !== undefined) {
+    params.set('radius_meters', String(query.radius_meters));
+  }
+  // Serialize item_state as qs bracket notation (`item_state[field]=value`),
+  // which the server's `fastify-qs` parser decodes to a nested object that
+  // `MarkersQuerySchema.item_state` (a `z.record`) accepts and buildWhereClause
+  // applies as an `item_state @> jsonb` filter. Single value per field (the map
+  // enum filter's single-select case, #203 P4 §D1); multi-value-per-field
+  // filtering is a documented follow-up.
+  if (query.item_state !== undefined) {
+    for (const [field, value] of Object.entries(query.item_state)) {
+      params.set(`item_state[${field}]`, String(value));
+    }
+  }
+  if (query.limit !== undefined) params.set('limit', String(query.limit));
+  if (query.offset !== undefined) params.set('offset', String(query.offset));
+  if (query.cache_ttl_seconds !== undefined) {
+    params.set('cache_ttl_seconds', String(query.cache_ttl_seconds));
+  }
+
+  const response = await networkApiClient.get<MarkersResponse>(
+    '/api/v1/network/item/markers',
     { params, signal }
   );
   return response.data;

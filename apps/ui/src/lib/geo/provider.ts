@@ -3,6 +3,7 @@ import type { GeoProvider } from './types';
 import { createPhotonProvider } from './photon';
 import { createGooglePlacesProvider } from './google-places';
 import { looksLikePIIMask } from './pii-mask';
+import { withGeoCache } from './geo-cache';
 
 let cached: GeoProvider | null = null;
 
@@ -18,9 +19,11 @@ export function getGeoProvider(): GeoProvider {
   if (cached) return cached;
   const apiKey = getRuntimeEnv('VITE_GOOGLE_MAPS_API_KEY');
   const photonUrl = getRuntimeEnv('VITE_PHOTON_URL') as string | undefined;
-  const base = apiKey
-    ? createGooglePlacesProvider(apiKey)
-    : createPhotonProvider(photonUrl || undefined);
+  const base = withGeoCache(
+    apiKey
+      ? createGooglePlacesProvider(apiKey)
+      : createPhotonProvider(photonUrl || undefined),
+  );
   cached = {
     suggest: (query, signal) =>
       looksLikePIIMask(query) ? Promise.resolve([]) : base.suggest(query, signal),
