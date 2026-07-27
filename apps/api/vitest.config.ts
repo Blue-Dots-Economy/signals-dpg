@@ -23,6 +23,10 @@ export default defineConfig({
         .pathname,
       '@dpg/database': new URL('../../packages/database/src', import.meta.url)
         .pathname,
+      '@dpg/match_score': new URL(
+        '../../packages/match_score/src',
+        import.meta.url,
+      ).pathname,
     },
   },
 });

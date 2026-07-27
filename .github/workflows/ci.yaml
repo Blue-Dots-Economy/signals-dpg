@@ -3,8 +3,11 @@ name: CI
 on:
   pull_request:
     branches: [develop, main, feature]
+  # feature: validate the merged integration state too — PRs into feature
+  # already run CI, but the post-merge result was unchecked. publish-images
+  # stays develop-only via its own `if` gate.
   push:
-    branches: [develop]
+    branches: [develop, feature]
   workflow_dispatch:
 
 concurrency:
@@ -219,6 +222,24 @@ jobs:
           done
 
           diff /tmp/sql.sql /tmp/drizzle.sql
+
+  spec-drift:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.1.2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: OpenAPI spec drift check
+        run: |
+          pnpm --filter api spec:dump
+          git diff --exit-code openapi.json || {
+            echo "::error::openapi.json is stale — run 'pnpm --filter api spec:dump' and commit"; exit 1; }
 
   # Publish the :develop images (api, ui) ONLY after the blocking CI jobs pass,
   # and only on a develop push. Previously build-images.yaml triggered directly

@@ -1,6 +1,13 @@
 import { createAuth } from '@dpg/auth';
 import { allowed_origins, admin_domains } from '@dpg/config';
-import { api, instance, auth, notification, authConfig } from '@/config';
+import {
+  api,
+  instance,
+  auth,
+  notification,
+  authConfig,
+  getCurrentApiBaseUrl,
+} from '@/config';
 import { db } from '@api/db/postgres/drizzle_config';
 import { redis } from '@api/db/secondary/redis';
 import { getNotificationClient } from '@/utils/notificationClient';
@@ -10,10 +17,12 @@ export const authInstance = createAuth({
   appName: instance.INSTANCE_NAME ?? 'DPG',
   nodeEnv: instance.INSTANCE_ENV,
 
-  baseURL:
-    instance.INSTANCE_ENV === 'development'
-      ? `${api.API_DOMAIN}:${api.API_PORT}/api/auth`
-      : `${api.API_DOMAIN}/api/auth`,
+  // getCurrentApiBaseUrl() only appends API_PORT when API_DOMAIN doesn't
+  // already carry one; a naive `${api.API_DOMAIN}:${api.API_PORT}` (the
+  // prior form here) double-appended the port whenever API_DOMAIN was
+  // already a full origin like "http://localhost:2742", which better-auth's
+  // URL parsing rejects outright.
+  baseURL: `${getCurrentApiBaseUrl()}/api/auth`,
 
   secret: auth.AUTH_SECRET,
   apiDomain: api.API_DOMAIN,
