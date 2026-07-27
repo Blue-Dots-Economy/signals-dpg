@@ -6,6 +6,7 @@ import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { ResponsiveDialog } from '@/components/ui/responsive-dialog';
+import { DrawerTitle } from '@/components/ui/drawer';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { cn } from '@/lib/utils';
 import type { DotNetworkDomain, ViewMode } from '@/engine/types';
@@ -404,6 +405,11 @@ export function MapFiltersPanel({
       <>
         {renderTrigger(() => setOpen(true))}
         <ResponsiveDialog open={open} onOpenChange={setOpen} contentClassName="p-0">
+          {/* Radix's underlying Dialog requires an accessible name; the visible
+              "Filters" label lives in the panel's own sticky header (a plain
+              <span>, not a Dialog primitive), so give the sheet itself a
+              visually-hidden title rather than duplicating visible text. */}
+          <DrawerTitle className="sr-only">{t('filters.title')}</DrawerTitle>
           {panelBody}
         </ResponsiveDialog>
       </>

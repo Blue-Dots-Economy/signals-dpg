@@ -62,6 +62,7 @@ export function ConsentModal({
       open={open}
       onOpenChange={handleOpenChange}
       showCloseButton={mode === 'view'}
+      dismissible={mode !== 'gate'}
       contentClassName="flex flex-col max-w-2xl max-h-[90dvh] gap-0 p-0 overflow-hidden"
       onInteractOutside={(e) => {
         if (mode === 'gate') e.preventDefault();

@@ -47,4 +47,50 @@ describe('ResponsiveDialog', () => {
     expect(onEscapeKeyDown).toHaveBeenCalled();
     expect(onOpenChange).not.toHaveBeenCalled();
   });
+
+  it('view-mode-style mobile sheet (dismissible, showCloseButton) renders a working close affordance', () => {
+    isMobile.value = true;
+    const onOpenChange = vi.fn();
+    const { baseElement } = render(
+      <ResponsiveDialog
+        open
+        onOpenChange={onOpenChange}
+        dismissible
+        showCloseButton
+      >
+        <p>body</p>
+      </ResponsiveDialog>,
+    );
+
+    const closeButton = baseElement.querySelector('[aria-label="Close"]') as HTMLElement | null;
+    expect(closeButton).toBeTruthy();
+
+    fireEvent.click(closeButton!);
+    expect(onOpenChange).toHaveBeenCalledWith(false);
+  });
+
+  it('gate-mode-style mobile sheet (dismissible={false}, showCloseButton={false}) has no close affordance', () => {
+    isMobile.value = true;
+    const onOpenChange = vi.fn();
+    const { baseElement } = render(
+      <ResponsiveDialog
+        open
+        onOpenChange={onOpenChange}
+        dismissible={false}
+        showCloseButton={false}
+        onInteractOutside={(e) => e.preventDefault()}
+        onEscapeKeyDown={(e) => e.preventDefault()}
+      >
+        <p>body</p>
+      </ResponsiveDialog>,
+    );
+
+    // No X — the user must use the in-content action (e.g. an Accept button)
+    // to leave; nothing here should offer an implicit dismiss path.
+    expect(baseElement.querySelector('[aria-label="Close"]')).toBeFalsy();
+
+    const content = baseElement.querySelector('[data-slot="drawer-content"]') as HTMLElement;
+    fireEvent.keyDown(content, { key: 'Escape' });
+    expect(onOpenChange).not.toHaveBeenCalled();
+  });
 });

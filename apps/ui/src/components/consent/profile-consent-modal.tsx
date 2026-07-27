@@ -52,6 +52,7 @@ export function ProfileConsentModal({
         if (!next) return;
       }}
       showCloseButton={false}
+      dismissible={false}
       contentClassName="max-w-lg"
       onInteractOutside={(e) => e.preventDefault()}
       onEscapeKeyDown={(e) => e.preventDefault()}
