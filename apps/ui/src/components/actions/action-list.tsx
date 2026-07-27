@@ -108,7 +108,7 @@ export function ActionList({
                 // select mode so the selection never goes invisible/stale.
                 selection.exitSelect();
               }}
-              className={`rounded-lg px-3 py-1.5 text-xs font-medium transition ${
+              className={`rounded-lg px-3 py-1.5 text-xs font-medium transition pointer-coarse:min-h-11 ${
                 filter === f
                   ? 'bg-primary/10 text-primary'
                   : 'text-muted-foreground hover:text-foreground'

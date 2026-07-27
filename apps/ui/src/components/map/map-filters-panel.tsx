@@ -63,7 +63,8 @@ function Chip({ label, selected, onToggle, title, ariaLabel }: ChipProps) {
       aria-label={ariaLabel ?? label}
       aria-pressed={selected}
       className={cn(
-        'inline-flex cursor-pointer items-center rounded-full border px-2.5 py-1 text-[11px] font-medium leading-none transition-all duration-150',
+        'inline-flex cursor-pointer items-center rounded-full border px-2.5 py-1 text-xs font-medium leading-none transition-all duration-150',
+        'pointer-coarse:min-h-11',
         'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1',
         selected
           ? 'border-primary bg-primary text-primary-foreground hover:bg-primary/90'
@@ -88,7 +89,7 @@ function FilterGroup({ title, children }: FilterGroupProps) {
       <span className="block text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">
         {title}
       </span>
-      <div className="flex flex-wrap gap-1.5">{children}</div>
+      <div className="flex flex-wrap gap-1.5 pointer-coarse:gap-2">{children}</div>
     </div>
   );
 }
@@ -128,10 +129,10 @@ function MultiSelectGroup({ title, options, selected, onToggle }: MultiSelectGro
         aria-expanded={open}
         className="flex w-full items-center justify-between gap-2 text-left focus-visible:outline-none"
       >
-        <span className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">
+        <span className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">
           {title}
         </span>
-        <span className="flex items-center gap-1 text-[11px] text-muted-foreground">
+        <span className="flex items-center gap-1 text-xs text-muted-foreground">
           {count > 0 ? t('filters.selected', { count }) : t('filters.any')}
           <ChevronDown
             className={cn('size-3.5 transition-transform', open && 'rotate-180')}
@@ -309,7 +310,7 @@ export function MapFiltersPanel({
             <button
               type="button"
               onClick={handleClearAll}
-              className="text-[10px] font-medium text-muted-foreground underline-offset-2 hover:text-foreground hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              className="text-xs font-medium text-muted-foreground underline-offset-2 hover:text-foreground hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
               aria-label={t('filters.clear_all')}
             >
               {t('filters.clear_all')}
@@ -320,10 +321,13 @@ export function MapFiltersPanel({
             type="button"
             onClick={() => setOpen(false)}
             className={cn(
-              'flex size-5 items-center justify-center rounded-full',
+              'relative flex size-5 items-center justify-center rounded-full',
               'bg-muted text-muted-foreground transition-colors',
               'hover:bg-accent hover:text-accent-foreground',
               'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+              // Transparent, centered hit-area expansion for touch — mirrors the
+              // Button variant technique so the visual size-5 circle is unchanged.
+              "pointer-coarse:before:absolute pointer-coarse:before:left-1/2 pointer-coarse:before:top-1/2 pointer-coarse:before:size-11 pointer-coarse:before:-translate-x-1/2 pointer-coarse:before:-translate-y-1/2 pointer-coarse:before:content-['']",
             )}
             aria-label={t('filters.close')}
           >
