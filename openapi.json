@@ -4671,6 +4671,25 @@
                   "privacy_accepted": {
                     "type": "boolean"
                   },
+                  "compliance": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "key": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "value": {
+                          "type": "boolean"
+                        }
+                      },
+                      "required": [
+                        "key",
+                        "value"
+                      ]
+                    }
+                  },
                   "channel": {
                     "type": "string",
                     "enum": [
@@ -4685,12 +4704,12 @@
                     "minLength": 1
                   },
                   "item_state": {
-                    "description": "payload written to the items table; if absent OR an empty object {}, the route enters account_only mode (only the user is created/looked up, no item is written).",
+                    "description": "payload written to the items table. If absent OR an empty object {} with NO item_id, the route enters account_only mode (only the user is created/looked up, no item is written). If absent/empty WITH an item_id, that profile is targeted for a consent/DOB update without changing its fields.",
                     "type": "object",
                     "additionalProperties": {}
                   },
                   "item_id": {
-                    "description": "UUID. Only meaningful when acting_org is network_service AND user already exists. Targets that specific item for a PATCH-style update. Ignored otherwise.",
+                    "description": "UUID. Meaningful when the user already exists AND the caller owns them — network_service, or the aggregator that onboarded the user (#309 activation). Targets that specific item for a PATCH-style update. Ignored otherwise.",
                     "type": "string",
                     "format": "uuid",
                     "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
@@ -4713,8 +4732,6 @@
                 },
                 "required": [
                   "name",
-                  "terms_accepted",
-                  "privacy_accepted",
                   "channel"
                 ]
               }
@@ -4774,6 +4791,12 @@
                           "item_type": {
                             "type": "string"
                           },
+                          "lifecycle_status": {
+                            "type": "string"
+                          },
+                          "profile_consent_accepted": {
+                            "type": "boolean"
+                          },
                           "item_state": {
                             "type": "object",
                             "additionalProperties": {}
@@ -4827,6 +4850,11 @@
                         ],
                         "additionalProperties": false
                       }
+                    },
+                    "consent_recorded": {
+                      "type": "integer",
+                      "minimum": -9007199254740991,
+                      "maximum": 9007199254740991
                     }
                   },
                   "required": [
@@ -4889,6 +4917,26 @@
                       "nullable": true,
                       "type": "string"
                     },
+                    "user_consent": {
+                      "type": "object",
+                      "properties": {
+                        "terms_accepted": {
+                          "type": "boolean"
+                        },
+                        "privacy_accepted": {
+                          "type": "boolean"
+                        },
+                        "has_age": {
+                          "type": "boolean"
+                        }
+                      },
+                      "required": [
+                        "terms_accepted",
+                        "privacy_accepted",
+                        "has_age"
+                      ],
+                      "additionalProperties": false
+                    },
                     "items": {
                       "type": "array",
                       "items": {
@@ -4907,6 +4955,12 @@
                           },
                           "item_type": {
                             "type": "string"
+                          },
+                          "lifecycle_status": {
+                            "type": "string"
+                          },
+                          "profile_consent_accepted": {
+                            "type": "boolean"
                           },
                           "item_state": {
                             "type": "object",
@@ -4965,6 +5019,7 @@
                   },
                   "required": [
                     "user_id",
+                    "user_consent",
                     "items"
                   ],
                   "additionalProperties": false
