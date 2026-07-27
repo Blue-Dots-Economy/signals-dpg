@@ -34,6 +34,7 @@ export function ProfileRowActions({ profile, pauseEnabled, onEdit, onChanged }: 
   const { t } = useTranslation();
   const [busy, setBusy] = React.useState(false);
   const [pauseConfirm, setPauseConfirm] = React.useState(false);
+  const [resumeConfirm, setResumeConfirm] = React.useState(false);
   const [retireConfirm, setRetireConfirm] = React.useState(false);
 
   const status = profile.lifecycle_status;
@@ -61,6 +62,7 @@ export function ProfileRowActions({ profile, pauseEnabled, onEdit, onChanged }: 
     } finally {
       setBusy(false);
       setPauseConfirm(false);
+      setResumeConfirm(false);
       setRetireConfirm(false);
     }
   };
@@ -109,7 +111,7 @@ export function ProfileRowActions({ profile, pauseEnabled, onEdit, onChanged }: 
               aria-label={t('profile.btn_unpause', 'Resume profile')}
               className={iconBtn}
               disabled={busy}
-              onClick={(e) => { e.stopPropagation(); void run('unpause'); }}
+              onClick={(e) => { e.stopPropagation(); setResumeConfirm(true); }}
             >
               <Play className="h-3.5 w-3.5" />
             </button>
@@ -139,9 +141,15 @@ export function ProfileRowActions({ profile, pauseEnabled, onEdit, onChanged }: 
           <DialogHeader>
             <DialogTitle>{t('profile.pause_confirm_title', 'Pause this profile?')}</DialogTitle>
             <DialogDescription>
-              {t('profile.pause_confirm_desc', 'While paused, this profile will not be discoverable in the network. You can resume it any time.')}
+              {t('profile.pause_confirm_desc', 'While paused:')}
             </DialogDescription>
           </DialogHeader>
+          <ul className="list-disc space-y-1 pl-5 text-sm text-muted-foreground">
+            <li>{t('profile.pause_effect_discovery', 'It is hidden — not discoverable by anyone in the network.')}</li>
+            <li>{t('profile.pause_effect_actions', 'New connections or requests cannot be started, and any in-progress ones pause until you resume.')}</li>
+            <li>{t('profile.pause_effect_kept', 'Nothing is deleted — existing connections stay, but your contact details are hidden while paused.')}</li>
+            <li>{t('profile.pause_effect_recoverable', 'You can resume any time — the profile goes live and everything is restored.')}</li>
+          </ul>
           <DialogFooter>
             <Button variant="outline" disabled={busy} onClick={() => setPauseConfirm(false)}>
               {t('common.cancel', 'Cancel')}
@@ -153,15 +161,50 @@ export function ProfileRowActions({ profile, pauseEnabled, onEdit, onChanged }: 
         </DialogContent>
       </Dialog>
 
+      {/* Confirm before resuming — explain it becomes discoverable again (and may
+          land as a draft if still incomplete). */}
+      <Dialog open={resumeConfirm} onOpenChange={setResumeConfirm}>
+        <DialogContent onClick={(e) => e.stopPropagation()}>
+          <DialogHeader>
+            <DialogTitle>{t('profile.resume_confirm_title', 'Resume this profile?')}</DialogTitle>
+            <DialogDescription>
+              {t('profile.resume_confirm_desc', 'When you resume:')}
+            </DialogDescription>
+          </DialogHeader>
+          <ul className="list-disc space-y-1 pl-5 text-sm text-muted-foreground">
+            <li>{t('profile.resume_effect_discovery', 'It becomes discoverable in the network again.')}</li>
+            <li>{t('profile.resume_effect_actions', 'You can send and receive connections and actions on it again.')}</li>
+            <li>{t('profile.resume_effect_draft', 'If any required details are still missing, it stays a draft until you complete them.')}</li>
+          </ul>
+          <DialogFooter>
+            <Button variant="outline" disabled={busy} onClick={() => setResumeConfirm(false)}>
+              {t('common.cancel', 'Cancel')}
+            </Button>
+            <Button
+              className="bg-brand-cta text-white hover:brightness-110"
+              disabled={busy}
+              onClick={() => { void run('unpause'); }}
+            >
+              {t('profile.resume_confirm_proceed', 'Resume profile')}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       {/* Confirm before retiring — terminal, irreversible, wipes PII (#347). */}
       <Dialog open={retireConfirm} onOpenChange={setRetireConfirm}>
         <DialogContent onClick={(e) => e.stopPropagation()}>
           <DialogHeader>
             <DialogTitle>{t('profile.retire_confirm_title', 'Retire this profile?')}</DialogTitle>
             <DialogDescription>
-              {t('profile.retire_confirm_desc', 'This permanently removes your profile and cancels any open connections. It cannot be undone.')}
+              {t('profile.retire_confirm_desc', 'When you retire this profile:')}
             </DialogDescription>
           </DialogHeader>
+          <ul className="list-disc space-y-1 pl-5 text-sm text-muted-foreground">
+            <li>{t('profile.retire_effect_removed', "It's permanently removed and taken out of the network — no longer discoverable.")}</li>
+            <li>{t('profile.retire_effect_actions', 'Any open connections or requests on it are cancelled.')}</li>
+            <li>{t('profile.retire_effect_irreversible', 'This cannot be undone — the profile cannot be restored.')}</li>
+          </ul>
           <DialogFooter>
             <Button variant="outline" disabled={busy} onClick={() => setRetireConfirm(false)}>
               {t('common.cancel', 'Cancel')}

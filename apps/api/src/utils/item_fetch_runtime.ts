@@ -130,7 +130,11 @@ export async function fetchLocalItems(filters: ItemFetchFilters) {
     .select(itemResponseColumns)
     .from(items)
     .where(whereClause)
-    .orderBy(sql`${items.created_at} DESC`)
+    // Live profiles first, then newest-created within each group. So a live
+    // profile floats to the top of "My Profiles"; ties (and non-live items)
+    // fall back to created_at DESC. (Discovery paths are live_only, so the
+    // first key is a no-op there.)
+    .orderBy(sql`(${items.lifecycle_status} = 'live') DESC, ${items.created_at} DESC`)
     .limit(filters.limit)
     .offset(filters.offset);
 

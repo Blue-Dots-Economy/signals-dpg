@@ -272,38 +272,46 @@ export function AppSidebar({
                               const isActiveProfile = profile.item_id === activeProfileId;
 
                               return (
-                                <SidebarMenuItem key={profile.item_id} className="flex items-center gap-1 pr-1">
+                                <SidebarMenuItem
+                                  key={profile.item_id}
+                                  className={[
+                                    'flex items-center gap-1 rounded-md pr-1',
+                                    isActiveProfile
+                                      ? 'bg-primary/12 border-l-2 border-primary rounded-l-none hover:bg-primary/15'
+                                      : 'hover:bg-sidebar-accent',
+                                  ].join(' ')}
+                                >
                                   <SidebarMenuButton
                                     onClick={() => onActiveProfileChange?.(profile.item_id)}
                                     className={[
-                                      'min-w-0 flex-1',
-                                      isActiveProfile
-                                        ? 'bg-primary/12 text-primary font-medium border-l-2 border-primary rounded-l-none pl-2 hover:bg-primary/15'
-                                        : '',
+                                      'min-w-0 flex-1 bg-transparent hover:bg-transparent',
+                                      isActiveProfile ? 'text-primary font-medium pl-2' : '',
                                     ].join(' ')}
                                   >
                                     <span className="truncate">{title}</span>
+                                    {/* Lifecycle chip lives INSIDE the button pill
+                                        (Active / Paused / Draft) so it reads as part
+                                        of the profile, not floating on the row. */}
+                                    {profile.lifecycle_status && (
+                                      <span
+                                        className={[
+                                          'ml-auto shrink-0 rounded-full px-1.5 py-0.5 text-[10px] font-semibold leading-none capitalize',
+                                          profile.lifecycle_status === 'live'
+                                            ? 'bg-green-100 text-green-700 dark:bg-green-500/20 dark:text-green-300'
+                                            : profile.lifecycle_status === 'paused'
+                                              ? 'bg-amber-100 text-amber-800 dark:bg-amber-500/20 dark:text-amber-300'
+                                              : 'bg-slate-200 text-slate-700 dark:bg-slate-500/25 dark:text-slate-300',
+                                        ].join(' ')}
+                                      >
+                                        {t(
+                                          `nav.status_${profile.lifecycle_status}`,
+                                          profile.lifecycle_status === 'live'
+                                            ? 'Active'
+                                            : profile.lifecycle_status,
+                                        )}
+                                      </span>
+                                    )}
                                   </SidebarMenuButton>
-                                  {/* Lifecycle state chip: Active / Paused / Draft. */}
-                                  {profile.lifecycle_status && (
-                                    <span
-                                      className={[
-                                        'shrink-0 rounded-full px-1.5 py-0.5 text-[10px] font-semibold leading-none capitalize',
-                                        profile.lifecycle_status === 'live'
-                                          ? 'bg-green-100 text-green-700 dark:bg-green-500/20 dark:text-green-300'
-                                          : profile.lifecycle_status === 'paused'
-                                            ? 'bg-amber-100 text-amber-800 dark:bg-amber-500/20 dark:text-amber-300'
-                                            : 'bg-slate-200 text-slate-700 dark:bg-slate-500/25 dark:text-slate-300',
-                                      ].join(' ')}
-                                    >
-                                      {t(
-                                        `nav.status_${profile.lifecycle_status}`,
-                                        profile.lifecycle_status === 'live'
-                                          ? 'Active'
-                                          : profile.lifecycle_status,
-                                      )}
-                                    </span>
-                                  )}
                                   {/* Per-profile actions (Edit · Pause/Resume ·
                                       Retire), icon-only, always visible. */}
                                   <ProfileRowActions
