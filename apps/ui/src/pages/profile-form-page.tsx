@@ -681,7 +681,7 @@ export function ProfileFormPage() {
 
   return (
     <div className="min-h-svh bg-gradient-to-b from-[var(--brand-hero-to)]/8 to-background p-4 sm:p-6">
-      <div className="mx-auto max-w-2xl">
+      <main id="main-content" className="mx-auto max-w-2xl">
         {/* Branded hero strip — sits flush above the form Card */}
         <div className="relative overflow-hidden rounded-t-xl bg-brand-hero">
           <div className="pointer-events-none absolute inset-0 opacity-15">
@@ -706,9 +706,9 @@ export function ProfileFormPage() {
               <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-white/50">
                 {theme.portalLabel}
               </p>
-              <h2 className="text-xl font-bold text-white leading-tight truncate">
+              <h1 className="text-xl font-bold text-white leading-tight truncate">
                 {isEdit ? t('profile.edit_role_heading', { role: roleLabel }) : t('profile.create_role_heading', { role: roleLabel })}
-              </h2>
+              </h1>
               <p className="mt-0.5 text-xs text-white/70 leading-snug">
                 {selectedDomainInfo?.description ?? t('profile.fill_details')}
               </p>
@@ -969,7 +969,7 @@ export function ProfileFormPage() {
             onLogout={() => { void signOut(); }}
           />
         )}
-      </div>
+      </main>
     </div>
   );
 }
