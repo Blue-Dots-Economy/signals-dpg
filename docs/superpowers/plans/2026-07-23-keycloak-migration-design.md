@@ -87,7 +87,7 @@ The identity model is woven into domain data two ways:
 
 **One Keycloak deployment and one realm, `bluedots`, per environment — shared by aggregator and all signals networks.** Separation between DPGs is by **client and realm role**, not by realm:
 
-- **`bluedots` realm** — every human in the ecosystem: aggregator's coordinators/aggregators *and* signals participants across all networks and instances. It replaces today's `aggregator` realm (`aggregator-dpg/infra/keycloak/realms/aggregator-realm.json`), which must be renamed/re-imported and its existing users migrated — **aggregator-side work outside this repo**.
+- **`bluedots` realm** — every human in the ecosystem: aggregator's coordinators/aggregators *and* signals participants across all networks and instances. It replaces today's `aggregator` realm (`aggregator-dpg/infra/keycloak/realms/aggregator-realm.json`), which must be renamed/re-imported and its existing users migrated — **aggregator-side work outside this repo**, sequenced as rollout step **R0** (§7).
 - The product enforces one domain per user per network (`docs/superpowers/plans/2026-06-03-ui-single-domain-lock.md`), and aggregator already sets `registrationAllowed: false` exactly as signals' `gated` mode requires, so the two populations need no realm-level separation. One realm gives every human a single stable `sub` across both DPGs and avoids duplicating realm, client, and OTP flow config.
 - This is identical in **local-setup and production** — one Keycloak process, one realm. Local-setup's compose already runs a Keycloak service; this extends its realm import rather than adding a second realm.
 
@@ -276,7 +276,7 @@ This plan separates **implementation** (code written, merged, deployed — but i
 **Rule of thumb:**
 - Implementation runs continuously through **Build 0 → 4**, and every piece is safe to merge and deploy to production because it is flag-gated or a not-yet-run script.
 - **Build 5 (removal) is the one destructive change** — it deletes better-auth and drops tables, removing the rollback path. Its *code* may be written early, but it must **not be merged until the final rollout step**.
-- Production rollout is the ordered operator sequence **R1 → R8**; each step is reversible until R8.
+- Production rollout is the ordered operator sequence **R0 → R8**; each step is reversible until R8. **R0 is aggregator-side and blocks everything after it.**
 
 ---
 
@@ -285,7 +285,7 @@ This plan separates **implementation** (code written, merged, deployed — but i
 Additive, flag-gated work. Merging any of Build 0–4 to `main` and deploying it leaves production on better-auth and users unaffected (`AUTH_PROVIDER=betterauth`).
 
 #### Build 0 — Foundation (inert)
-- Add signals' clients to the shared `bluedots` realm in Keycloak (local-setup compose already runs Keycloak; extend the existing realm import rather than adding a second realm — see §3.1). Renaming `aggregator` → `bluedots` and migrating its users is aggregator-side work that must land first.
+- Add signals' clients to the shared `bluedots` realm in Keycloak (local-setup compose already runs Keycloak; extend the existing realm import rather than adding a second realm — see §3.1). Renaming `aggregator` → `bluedots` and migrating its users is aggregator-side work that must land first — rollout step **R0**.
 - Add Keycloak JWT-validation utility + JWKS caching in `apps/api`.
 - Add the `AUTH_PROVIDER` config (default `betterauth` — nothing changes yet).
 - **Files:** `packages/config/src/secrets.ts`, `turbo.json`, new `apps/api/src/utils/keycloak_token.ts`, Keycloak realm export under a new `infra/keycloak/` in signals (mirroring aggregator's layout).
@@ -327,7 +327,8 @@ Operator-driven sequence. Each step reversible until R8. Do not advance past a g
 
 | Step | Rollout act | Reversible? | Go/no-go gate |
 |---|---|---|---|
-| **R1** | Deploy Build 0–4 to prod; flag stays `betterauth` | n/a (no change) | Code confirmed inert in prod |
+| **R0** | **Aggregator-side realm rename (prerequisite, not signals work):** rename `aggregator` → `bluedots` in `aggregator-dpg/infra/keycloak/realms/aggregator-realm.json`, re-import, carry over the `aggregator-portal` / `aggregator-api` clients, the OTP browser flow, themes, and the `org_owner` role, and migrate aggregator's existing users (preserving their Keycloak ids). Then add signals' clients to that realm. Staging first, then prod. | Yes (re-import as `aggregator`; nothing signals-side depends on it until R4) | Aggregator login green against `bluedots` in staging **and** prod; realm export is the single source of truth for both DPGs; §6.3 spike 2 reconcile has been run and reports no email/phone conflicts between aggregator users and signals `user` rows |
+| **R1** | Deploy Build 0–4 to prod; flag stays `betterauth` | n/a (no change) | R0 green; code confirmed inert in prod |
 | **R2** | Enable `AUTH_PROVIDER=dual` in **staging**; validate Keycloak login + provisioning + acting-org | Yes (flip to `betterauth`) | Staging green (login, U18/guardian, member-join) |
 | **R3** | Enable `dual` in **production** (Keycloak tokens accepted alongside better-auth) | Yes | No error-rate/latency regression |
 | **R4** | **Run user migration** into Keycloak (preserve UUIDs) | Yes (Keycloak-side only; local data untouched) | Dry-run reconciles 1:1 |
@@ -337,7 +338,7 @@ Operator-driven sequence. Each step reversible until R8. Do not advance past a g
 | **R8** | **Merge/deploy Build 5:** remove better-auth, drop `account`/`verification`/`apikey` | **No — point of no return** | Everything above soaked in prod |
 
 ### Rollback
-Every rollout step **R1–R7** is reversible by flipping `AUTH_PROVIDER` back (and, for R5/R6, reverting the UI default / partner clients). The point of no easy return is **R8** (dependency + table removal); execute it only after `keycloak` has soaked in production at R7.
+Every rollout step **R0–R7** is reversible — **R1–R7** by flipping `AUTH_PROVIDER` back (and, for R5/R6, reverting the UI default / partner clients), **R0** by re-importing the realm as `aggregator` on the aggregator side, which stays clean only until signals migrates users at R4. The point of no easy return is **R8** (dependency + table removal); execute it only after `keycloak` has soaked in production at R7.
 
 ---
 
