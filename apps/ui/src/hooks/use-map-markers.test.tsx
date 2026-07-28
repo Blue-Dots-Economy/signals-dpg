@@ -236,6 +236,82 @@ describe('useMapMarkers', () => {
     await waitFor(() => expect(fetchNetworkMarkers).toHaveBeenCalledTimes(2));
   });
 
+  // #203 map-serverside-search Task 5: the padded-bbox + truncated-result
+  // refetch state machine. `bboxViewport` spans 0.5deg on each axis, so its
+  // padded bbox (25% inflate) is [18.9375, 19.5625] x [71.9375, 72.5625].
+  const containedBbox = {
+    ...bboxViewport,
+    minLat: bboxViewport.minLat + 0.01,
+    minLng: bboxViewport.minLng + 0.01,
+    maxLat: bboxViewport.maxLat - 0.01,
+    maxLng: bboxViewport.maxLng - 0.01,
+  };
+
+  it('does not refetch a contained zoom-in when the last result was complete (#203 Task 5)', async () => {
+    vi.mocked(fetchNetworkMarkers).mockResolvedValue({
+      meta: { total: 3, limit: 5000, offset: 0, partial: false, unavailable_instances: [] },
+      markers: [marker('a', 'student')],
+    });
+
+    const { result, rerender } = renderHook(
+      ({ vp }: { vp: typeof bboxViewport }) => useMapMarkers(network, [domains[0]], vp),
+      { wrapper, initialProps: { vp: bboxViewport } },
+    );
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+    expect(fetchNetworkMarkers).toHaveBeenCalledTimes(1);
+
+    rerender({ vp: containedBbox });
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+    // Held marker set is reused — no second network call.
+    expect(fetchNetworkMarkers).toHaveBeenCalledTimes(1);
+  });
+
+  it('refetches a contained zoom-in when the last result was truncated (#203 Task 5, HSR-layout case)', async () => {
+    vi.mocked(fetchNetworkMarkers).mockResolvedValue({
+      // Deliberately way over any plausible placeholder cap: a dense area
+      // (e.g. 20k profiles in Bangalore) whose held set can't be trusted for
+      // a zoomed-in sub-area.
+      meta: { total: 200_000, limit: 5000, offset: 0, partial: false, unavailable_instances: [] },
+      markers: [marker('a', 'student')],
+    });
+
+    const { result, rerender } = renderHook(
+      ({ vp }: { vp: typeof bboxViewport }) => useMapMarkers(network, [domains[0]], vp),
+      { wrapper, initialProps: { vp: bboxViewport } },
+    );
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+    expect(fetchNetworkMarkers).toHaveBeenCalledTimes(1);
+
+    rerender({ vp: containedBbox });
+    await waitFor(() => expect(fetchNetworkMarkers).toHaveBeenCalledTimes(2));
+  });
+
+  it('refetches a pan that escapes the padded bbox even when the last result was complete (#203 Task 5)', async () => {
+    vi.mocked(fetchNetworkMarkers).mockResolvedValue({
+      meta: { total: 3, limit: 5000, offset: 0, partial: false, unavailable_instances: [] },
+      markers: [marker('a', 'student')],
+    });
+
+    const { result, rerender } = renderHook(
+      ({ vp }: { vp: typeof bboxViewport }) => useMapMarkers(network, [domains[0]], vp),
+      { wrapper, initialProps: { vp: bboxViewport } },
+    );
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+    expect(fetchNetworkMarkers).toHaveBeenCalledTimes(1);
+
+    // Padded bbox is [18.9375, 19.5625] x [71.9375, 72.5625]; a +0.1 shift on
+    // every corner pushes maxLat to 19.6, escaping it.
+    const pannedOut = {
+      ...bboxViewport,
+      minLat: bboxViewport.minLat + 0.1,
+      minLng: bboxViewport.minLng + 0.1,
+      maxLat: bboxViewport.maxLat + 0.1,
+      maxLng: bboxViewport.maxLng + 0.1,
+    };
+    rerender({ vp: pannedOut });
+    await waitFor(() => expect(fetchNetworkMarkers).toHaveBeenCalledTimes(2));
+  });
+
   it('refetches when the active facet filters change, even with the same bbox and zoom', async () => {
     vi.mocked(fetchNetworkMarkers).mockResolvedValue({
       meta: { total: 0, limit: 5000, offset: 0, partial: false, unavailable_instances: [] },

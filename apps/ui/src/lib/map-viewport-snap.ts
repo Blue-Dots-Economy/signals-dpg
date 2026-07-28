@@ -124,3 +124,58 @@ export function snapViewportForKey(
     zoomBand: zoomBand(zoom ?? 0, clusterDisableZoom),
   };
 }
+
+/**
+ * Inflate a bbox by `factor` (default 0.25 = 25%) of its own span on each
+ * axis, split evenly between both sides. Used by Task 5's refetch state
+ * machine (`use-map-markers.ts`) to build the "padded" bbox that a zoom-in or
+ * small pan must stay inside to skip a refetch — generous enough that a
+ * genuine zoom-in still reads as "the same view", while a real pan (which
+ * moves the bbox rather than just shrinking it) escapes the padding and
+ * forces a refetch.
+ */
+export function padBbox(bbox: RawBbox, factor = 0.25): RawBbox {
+  const latPad = (Math.abs(bbox.maxLat - bbox.minLat) * factor) / 2;
+  const lngPad = (Math.abs(bbox.maxLng - bbox.minLng) * factor) / 2;
+  return {
+    minLat: bbox.minLat - latPad,
+    minLng: bbox.minLng - lngPad,
+    maxLat: bbox.maxLat + latPad,
+    maxLng: bbox.maxLng + lngPad,
+  };
+}
+
+/** Whether `inner` is fully contained within `outer` on both the lat and lng axes. */
+export function bboxContains(outer: RawBbox, inner: RawBbox): boolean {
+  return (
+    outer.minLat <= inner.minLat &&
+    inner.maxLat <= outer.maxLat &&
+    outer.minLng <= inner.minLng &&
+    inner.maxLng <= outer.maxLng
+  );
+}
+
+export interface RefetchDecisionInput {
+  /** The new viewport's raw (unsnapped) bbox. */
+  newBbox: RawBbox;
+  /** The padded bbox from the last fetch, or `null` before any fetch has happened. */
+  paddedBbox: RawBbox | null;
+  /** Whether the last fetch's result was truncated (`meta.total > cap`). */
+  lastTruncated: boolean;
+}
+
+/**
+ * The refetch decision (#203 map-serverside-search Task 5): refetch when
+ * there's no prior fetch to compare against, when the new bbox escapes the
+ * last fetch's padded bbox (a real pan, or a zoom-out), or when the last
+ * fetch's result was truncated — so zooming into a previously over-dense area
+ * (the "20k profiles in Bangalore → zoom into HSR Layout" case) always
+ * re-queries the server rather than filtering the held, possibly
+ * unrepresentative set. Otherwise (contained + the held set was complete),
+ * the caller should skip the fetch and reuse the held markers.
+ */
+export function shouldRefetch({ newBbox, paddedBbox, lastTruncated }: RefetchDecisionInput): boolean {
+  if (paddedBbox === null) return true;
+  if (lastTruncated) return true;
+  return !bboxContains(paddedBbox, newBbox);
+}

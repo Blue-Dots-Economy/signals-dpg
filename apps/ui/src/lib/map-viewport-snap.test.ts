@@ -1,5 +1,13 @@
 import { describe, it, expect } from 'vitest';
-import { snapBbox, zoomBand, snapViewportForKey, DEFAULT_CLUSTER_DISABLE_ZOOM } from './map-viewport-snap';
+import {
+  snapBbox,
+  zoomBand,
+  snapViewportForKey,
+  DEFAULT_CLUSTER_DISABLE_ZOOM,
+  padBbox,
+  bboxContains,
+  shouldRefetch,
+} from './map-viewport-snap';
 
 // Span 0.5deg → cell = 0.5/8 = 0.0625deg exactly (a power of two already, so
 // no bucketing rounding to reason about). All four corners are exact
@@ -135,5 +143,66 @@ describe('snapViewportForKey', () => {
     const b = snapViewportForKey({ ...BASE_BBOX, zoom: DEFAULT_CLUSTER_DISABLE_ZOOM });
     expect(a?.zoomBand).toBe('clustered');
     expect(b?.zoomBand).toBe('individual');
+  });
+});
+
+// #203 map-serverside-search Task 5: the refetch state machine's pure
+// building blocks (padded bbox + containment + the decision itself).
+describe('padBbox', () => {
+  it('inflates a bbox by 25% of its own span by default, split evenly on both sides', () => {
+    // Span 0.5deg on each axis → 25% = 0.125deg total → 0.0625deg per side.
+    expect(padBbox(BASE_BBOX)).toEqual({
+      minLat: BASE_BBOX.minLat - 0.0625,
+      minLng: BASE_BBOX.minLng - 0.0625,
+      maxLat: BASE_BBOX.maxLat + 0.0625,
+      maxLng: BASE_BBOX.maxLng + 0.0625,
+    });
+  });
+
+  it('honors a custom factor', () => {
+    expect(padBbox(BASE_BBOX, 1)).toEqual({
+      minLat: BASE_BBOX.minLat - 0.25,
+      minLng: BASE_BBOX.minLng - 0.25,
+      maxLat: BASE_BBOX.maxLat + 0.25,
+      maxLng: BASE_BBOX.maxLng + 0.25,
+    });
+  });
+});
+
+describe('bboxContains', () => {
+  it('is true when the inner bbox is fully inside the outer bbox', () => {
+    const inner = { minLat: 19.1, minLng: 72.1, maxLat: 19.4, maxLng: 72.4 };
+    expect(bboxContains(BASE_BBOX, inner)).toBe(true);
+  });
+
+  it('is true for an identical bbox (containment is inclusive)', () => {
+    expect(bboxContains(BASE_BBOX, { ...BASE_BBOX })).toBe(true);
+  });
+
+  it('is false when the inner bbox escapes any edge of the outer bbox', () => {
+    expect(bboxContains(BASE_BBOX, { ...BASE_BBOX, maxLat: BASE_BBOX.maxLat + 0.01 })).toBe(false);
+    expect(bboxContains(BASE_BBOX, { ...BASE_BBOX, minLng: BASE_BBOX.minLng - 0.01 })).toBe(false);
+  });
+});
+
+describe('shouldRefetch', () => {
+  const inner = { minLat: 19.1, minLng: 72.1, maxLat: 19.4, maxLng: 72.4 };
+  const paddedBbox = padBbox(BASE_BBOX);
+
+  it('refetches when there is no prior padded bbox to compare against', () => {
+    expect(shouldRefetch({ newBbox: inner, paddedBbox: null, lastTruncated: false })).toBe(true);
+  });
+
+  it('skips the refetch for a contained bbox when the last result was complete', () => {
+    expect(shouldRefetch({ newBbox: inner, paddedBbox, lastTruncated: false })).toBe(false);
+  });
+
+  it('refetches for a contained bbox when the last result was truncated', () => {
+    expect(shouldRefetch({ newBbox: inner, paddedBbox, lastTruncated: true })).toBe(true);
+  });
+
+  it('refetches when the new bbox escapes the padded bbox, even if the last result was complete', () => {
+    const outside = { ...inner, maxLat: paddedBbox.maxLat + 0.01 };
+    expect(shouldRefetch({ newBbox: outside, paddedBbox, lastTruncated: false })).toBe(true);
   });
 });
