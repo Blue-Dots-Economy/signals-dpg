@@ -41,8 +41,15 @@ import { ActionAbortedError } from '@/lib/action-abort';
 import { EmptyState } from '@/components/empty-state';
 import { useAuth } from '@/contexts/auth-context';
 import { apiConfig } from '@/lib/api-config';
-import { getEnumFilterFieldsForDomains, itemPassesEnumFilters } from '@/lib/enum-filters';
-import type { EnumFilterField } from '@/lib/enum-filters';
+import { getEnumFilterFieldsForDomains } from '@/lib/enum-filters';
+import {
+  deriveBrowseParams,
+  isDiscoverActive,
+  excludeOwnItems,
+  buildFilteredCardsForDomain,
+} from '@/lib/browse-discover';
+import type { DerivedBrowseParams } from '@/lib/browse-discover';
+import { NearMeToggle } from '@/components/browse/near-me-toggle';
 import { getServedScope } from '@/lib/served-binding';
 import { computeVisibleDomains } from '@/lib/visible-domains';
 import { useUserLocation } from '@/hooks/use-user-location';
@@ -69,20 +76,12 @@ import { useInfiniteBrowseItems } from '@/hooks/use-infinite-browse-items';
 import { useProfileConsentStatus } from '@/hooks/use-profile-consent-status';
 import { useMapMarkers } from '@/hooks/use-map-markers';
 import { useItemDetail } from '@/hooks/use-item-detail';
-import type { Marker as NetworkMarker } from '@/lib/network-api';
+import type { Marker as NetworkMarker, DiscoverFacetFilter } from '@/lib/network-api';
 import { useQueryClient } from '@tanstack/react-query';
 import { queryKeys } from '@/lib/query-keys';
 import { GuardianOtpDialog } from '@/components/actions/guardian-otp-dialog';
 import { U18GuardianFlow } from '@/components/consent/u18/u18-guardian-flow';
 import { isGuardianConsentRequiredDomain } from '@/lib/guardian-consent';
-
-function itemToCardItem(item: Item): { id: string; domain: string; data: Record<string, unknown> } {
-  return {
-    id: item.item_id,
-    domain: item.item_domain,
-    data: { ...item.item_state, item_locations: item.item_locations },
-  };
-}
 
 function getItemLocations(
   data: Record<string, unknown>,
@@ -103,50 +102,6 @@ function sortItemsByNearest<T>(
       nearestDistanceMeters(userLocation, getLocations(a)) -
       nearestDistanceMeters(userLocation, getLocations(b)),
   );
-}
-
-// Shared card filter: search text + enum-field filters + the map's domain
-// multi-select. Used by both the paged single-domain list (`singleDomainCards`)
-// and the "All" tab's merged paged union (`filteredAllDomainItems`), so the
-// predicate is defined exactly once (§Task5 constraint: reuse, do not
-// duplicate). (Task 7, #203 §5.2: the old full-fetch `filteredDomainItems`
-// caller was removed — the map reads viewport markers, not this filter.)
-function buildFilteredCardsForDomain(
-  domainId: string,
-  items: Item[],
-  opts: {
-    search: string;
-    mapSelectedDomains: string[];
-    activeFieldFilters: Record<string, string[]>;
-    enumFilterFields: EnumFilterField[];
-  },
-): Array<{ id: string; domain: string; data: Record<string, unknown> }> {
-  // Map domain filter: skip this domain entirely if filter is active and this
-  // domain is not selected.
-  if (opts.mapSelectedDomains.length > 0 && !opts.mapSelectedDomains.includes(domainId)) {
-    return [];
-  }
-
-  let cards = items.map(itemToCardItem);
-
-  // Text search filter
-  if (opts.search) {
-    cards = cards.filter((item) =>
-      Object.values(item.data).some((val) =>
-        String(val).toLowerCase().includes(opts.search.toLowerCase())
-      )
-    );
-  }
-
-  // Enum-field filters: AND across different fields, OR within a field's
-  // selected values. Absent fields on an item always pass (domain-safe).
-  if (Object.keys(opts.activeFieldFilters).length > 0) {
-    cards = cards.filter((item) =>
-      itemPassesEnumFilters(item.data, opts.activeFieldFilters, opts.enumFilterFields),
-    );
-  }
-
-  return cards;
 }
 
 // Bottom-sentinel scroll observer: fires `onIntersect` when the sentinel node
@@ -221,11 +176,16 @@ function DomainPagedFetch({
   network,
   domain,
   coords,
+  browseOpts,
   onItems,
 }: {
   network: DotNetworkSchema;
   domain: DotNetworkDomain;
   coords: { lat: number; lng: number } | null;
+  // #203 List PR Task 5: the discover params (q/filters/relevance) derived from
+  // the search box, facet panel, and "Near me" toggle. Passed identically for
+  // every visible domain so the whole "All" feed shares one discover mode.
+  browseOpts: { q?: string; filters: DiscoverFacetFilter[]; relevance: boolean };
   onItems: (
     domainId: string,
     items: Item[],
@@ -236,7 +196,7 @@ function DomainPagedFetch({
     partial: boolean,
   ) => void;
 }): null {
-  const list = useInfiniteBrowseItems(network, domain, coords);
+  const list = useInfiniteBrowseItems(network, domain, coords, browseOpts);
   // `list.items` is a fresh array on every render (the hook doesn't memoize
   // it), so this effect refires on every plain re-render too. That's fine:
   // `onItems` (`handleDomainItems`) is idempotent — it bails out of its
@@ -455,6 +415,10 @@ export function HomePage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const navigate = useNavigate();
   const [search, setSearch] = React.useState('');
+  // "Near me" toggle (#203 List PR Task 5). Default OFF = the ranked discover
+  // feed served globally (relevance mode, native fallback covers signals-search
+  // being down); ON = proximity (location-anchored). See `deriveBrowseParams`.
+  const [nearMe, setNearMe] = React.useState(false);
   const [viewMode, setViewMode] = React.useState<ViewMode>(
     (searchParams.get('view') as ViewMode) ?? resolveDefaultViewMode()
   );
@@ -955,27 +919,46 @@ export function HomePage() {
     [userLocation],
   );
 
+  const activeFieldFilters = React.useMemo(
+    () => Object.fromEntries(Object.entries(mapSelectedFields).filter(([, vals]) => vals.length > 0)),
+    [mapSelectedFields],
+  );
+
+  // Task 5 (#203 List PR): map the "Near me" toggle + search box + facet
+  // selections to the discover params both list paths share. Near me OFF (the
+  // default) = ranked discover globally (relevance, NO location); Near me ON =
+  // proximity (location passed, relevance unset). See `deriveBrowseParams` for
+  // why location is omitted in relevance mode.
+  const browseParams = React.useMemo<DerivedBrowseParams>(
+    () => deriveBrowseParams({ nearMe, search, activeFieldFilters }),
+    [nearMe, search, activeFieldFilters],
+  );
+  const browseLocation = browseParams.useLocation ? browseCoords : null;
+  const browseHookOpts = React.useMemo(
+    () => ({ q: browseParams.q, filters: browseParams.filters, relevance: browseParams.relevance }),
+    [browseParams],
+  );
+  // True when the active feed is served by the discover BFF (q OR filters OR
+  // relevance) — the server has already applied text + facet filtering, so the
+  // client-side filters in `buildFilteredCardsForDomain` must be bypassed.
+  const listDiscover = isDiscoverActive(browseParams);
+
   // Single-domain paged fetch. Enabled only while a specific domain tab is
   // selected; disabled (and thus inert) on the "All" tab.
   const singleDomainList = useInfiniteBrowseItems(
     network,
     selectedDomain ? selectedDomainObj : null,
-    browseCoords,
-    { enabled: selectedDomain !== null },
+    browseLocation,
+    { enabled: selectedDomain !== null, ...browseHookOpts },
   );
 
   // Own-item filtering is a view concern (mirrored below by
   // `allDomainItemsFiltered` for the "All" tab) — apply the same rule to the
   // paged feed so a viewer never sees their own profile in their own browse
-  // list.
+  // list. Runs UPSTREAM of the discover bypass so it applies in both modes.
   const singleDomainItems = React.useMemo(
-    () => singleDomainList.items.filter((it) => !localProfileItemIds.has(it.item_id)),
+    () => excludeOwnItems(singleDomainList.items, localProfileItemIds),
     [singleDomainList.items, localProfileItemIds],
-  );
-
-  const activeFieldFilters = React.useMemo(
-    () => Object.fromEntries(Object.entries(mapSelectedFields).filter(([, vals]) => vals.length > 0)),
-    [mapSelectedFields],
   );
 
   // Single-domain: bottom sentinel advances the paged fetch. Server already
@@ -1040,7 +1023,7 @@ export function HomePage() {
   const allDomainItemsFiltered = React.useMemo(() => {
     const result: Record<string, Item[]> = {};
     for (const [domainId, state] of Object.entries(allDomainPages)) {
-      result[domainId] = state.items.filter((it) => !localProfileItemIds.has(it.item_id));
+      result[domainId] = excludeOwnItems(state.items, localProfileItemIds);
     }
     return result;
   }, [allDomainPages, localProfileItemIds]);
@@ -1309,9 +1292,10 @@ export function HomePage() {
             mapSelectedDomains,
             activeFieldFilters,
             enumFilterFields,
+            discover: listDiscover,
           })
         : [],
-    [selectedDomain, singleDomainItems, search, mapSelectedDomains, activeFieldFilters, enumFilterFields],
+    [selectedDomain, singleDomainItems, search, mapSelectedDomains, activeFieldFilters, enumFilterFields, listDiscover],
   );
 
   // "All" tab: same filter applied per-domain to the accumulated paged union.
@@ -1323,10 +1307,11 @@ export function HomePage() {
         mapSelectedDomains,
         activeFieldFilters,
         enumFilterFields,
+        discover: listDiscover,
       });
     }
     return result;
-  }, [visibleDomains, allDomainItemsFiltered, search, mapSelectedDomains, activeFieldFilters, enumFilterFields]);
+  }, [visibleDomains, allDomainItemsFiltered, search, mapSelectedDomains, activeFieldFilters, enumFilterFields, listDiscover]);
 
   const handleDomainSelect = (domainId: string | null) => {
     setSelectedDomain(domainId);
@@ -1758,6 +1743,12 @@ export function HomePage() {
       viewMode={viewMode}
       onViewModeChange={handleViewModeChange}
       filtersSlot={filtersPanel}
+      // "Near me" is a LIST-view control: OFF (default) = ranked discover feed;
+      // ON = proximity. The map ignores it (it reads viewport markers), so only
+      // surface it in list view.
+      listControlsSlot={
+        viewMode === 'list' ? <NearMeToggle active={nearMe} onChange={setNearMe} /> : undefined
+      }
     >
       {!user ? (
         <GuestHero />
@@ -1782,7 +1773,8 @@ export function HomePage() {
             key={`count-${domain.id}`}
             network={network}
             domain={domain}
-            coords={browseCoords}
+            coords={browseLocation}
+            browseOpts={browseHookOpts}
             onItems={handleDomainItems}
           />
         ))}
@@ -1927,7 +1919,8 @@ export function HomePage() {
                         key={domain.id}
                         network={network}
                         domain={domain}
-                        coords={browseCoords}
+                        coords={browseLocation}
+                        browseOpts={browseHookOpts}
                         onItems={handleDomainItems}
                       />
                     ))}

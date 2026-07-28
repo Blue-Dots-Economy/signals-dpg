@@ -192,6 +192,7 @@
   "selection.n_selected_one": "{{count}} ಆಯ್ಕೆಯಾಗಿದೆ",
   "selection.n_selected_other": "{{count}} ಆಯ್ಕೆಯಾಗಿವೆ",
   "home.browse_all": "ಎಲ್ಲಾ ನೋಡಿ",
+  "home.near_me": "ಹತ್ತಿರ",
   "home.search_near_label": "ಹತ್ತಿರ ಹುಡುಕಿ",
   "home.search_near_profile": "ನನ್ನ ಪ್ರೊಫೈಲ್",
   "home.search_near_browser": "ಪ್ರಸ್ತುತ ಸ್ಥಳ",

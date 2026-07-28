@@ -192,6 +192,7 @@
   "selection.n_selected_one": "{{count}} चयनित",
   "selection.n_selected_other": "{{count}} चयनित",
   "home.browse_all": "सब देखें",
+  "home.near_me": "आस-पास",
   "home.search_near_label": "आस-पास खोजें",
   "home.search_near_profile": "मेरी प्रोफ़ाइल",
   "home.search_near_browser": "वर्तमान स्थान",

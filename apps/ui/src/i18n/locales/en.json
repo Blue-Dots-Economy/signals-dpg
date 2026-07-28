@@ -215,6 +215,7 @@
   "selection.n_selected_one": "{{count}} selected",
   "selection.n_selected_other": "{{count}} selected",
   "home.browse_all": "Browse All",
+  "home.near_me": "Near me",
   "home.search_near_label": "Search near",
   "home.search_near_profile": "My profile",
   "home.search_near_browser": "Current location",
