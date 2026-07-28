@@ -41,10 +41,12 @@ export async function cancelItemConnections(
   item: { item_id: string; item_network: string; item_domain: string; item_type: string },
   logger?: WarnLogger,
 ): Promise<number> {
-  // Match on the full item ref on each side so the query prunes to the right
-  // partition and uses the source/target composite indexes (which lead with the
-  // network) rather than scanning every network's partition (see
-  // .claude/rules/database-conventions.md).
+  // Match on the full item ref on each side so the query can use the
+  // source/target composite indexes (which lead with the item network) instead
+  // of scanning by id alone. NOTE: this does NOT prune partitions — item_actions
+  // is partitioned by `partition_network`, which isn't filtered here (a source-
+  // side action can live in a different network's partition), so this is an
+  // all-partition index scan, not a single-partition read. Correctness is fine.
   const asSource = and(
     eq(item_actions.source_item_network, item.item_network),
     eq(item_actions.source_item_domain, item.item_domain),

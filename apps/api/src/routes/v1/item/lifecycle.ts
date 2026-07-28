@@ -130,9 +130,12 @@ const item_lifecycle_handler = async (
           itemType: existing.item_type,
         });
 
-        // PII wipe (#347 Q9): keep only non-PII public fields; drop every
-        // private:true field + the standard identity keys; clear the encrypted
-        // private blob. Jittered location stays (item_locations column, kept).
+        // PII wipe (#347 Q9): keep only schema-declared, non-PII public fields;
+        // drop every private:true field + the standard identity keys (at any
+        // nesting) + unknown extra keys; clear the encrypted private blob and
+        // wipe item_locations entirely. (Action-embedded data —
+        // requirements_snapshot / event_payload — is handled separately via
+        // #392, not here.)
         const scrubbedState = buildRetiredItemState(
           itemSchema as Record<string, unknown>,
           existing.item_state as Record<string, unknown>,
@@ -159,6 +162,10 @@ const item_lifecycle_handler = async (
             // Clear the encrypted PII blob. The column is NOT NULL default '',
             // so empty string is the "no private state" value (see item create).
             item_private_state: '',
+            // Wipe locations entirely (#347): a non-private location field keeps
+            // exact coords, and jitter preserves the free-text label verbatim —
+            // both are residue after an irreversible erasure.
+            item_locations: [],
             // Stopgap for the retire moment until the telemetry pipeline lands
             // (marker below); `updated_at` freezes here since retired is terminal.
             updated_at: sql`now()`,

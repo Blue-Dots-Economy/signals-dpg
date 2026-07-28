@@ -1463,21 +1463,58 @@ describeIf(`lifecycle integration${can_run ? '' : ` — ${skip_reason}`}`, () =>
     onboarded_user_ids.push(userId);
     await makeLive(userId, itemId, primary.network);
 
-    // A pending action targeting the item — must survive retire (row kept).
-    const actionId = randomUUID();
-    await ensureActionPartition(db, primary.network, 'connect');
-    await db.insert(itemActionsTable).values({
-      action_type: 'connect', partition_network: primary.network, action_id: actionId,
-      action_status: 'created', update_count: 0,
-      source_item_network: primary.network, source_item_domain: primary.domain,
-      source_item_type: primary.item_type, source_item_id: randomUUID(),
-      source_item_instance_url: `http://localhost:${listen_port}`,
-      target_item_network: primary.network, target_item_domain: primary.domain,
-      target_item_type: primary.item_type, target_item_id: itemId,
-      target_item_instance_url: `http://localhost:${listen_port}`,
-      requirements_snapshot: {},
+    // Give the item a location with an exact coord + free-text label — retire
+    // must wipe item_locations entirely (not leave the label residue).
+    await db
+      .update(itemsTable)
+      .set({ item_locations: [{ lat: 12.34, lng: 56.78, label: '221B Baker Street' }] })
+      .where(eq(itemsTable.item_id, itemId));
+
+    // A second real profile to be the counterparty (item_actions has an FK on
+    // the TARGET item, so it must exist).
+    const otherCreate = await app.inject({
+      method: 'POST', url: '/api/v1/admin/participant', headers: adminHeaders(ns),
+      payload: {
+        email: `lc_s13_other_${randomUUID().slice(0, 6)}@a.test`, name: 'LC S13 other',
+        terms_accepted: true, privacy_accepted: true,
+        channel: 'bulk', network: primary.network, domain: primary.domain,
+        item_type: primary.item_type, item_state: generateMinimalItemState(primary.schema),
+      },
     });
-    seeded_action_ids.push(actionId);
+    expect(otherCreate.statusCode).toBe(200);
+    const otherItemId = otherCreate.json().items[0].item_id as string;
+    onboarded_user_ids.push(otherCreate.json().user_id as string);
+
+    // Two open actions referencing the item — one where it is the TARGET, one
+    // where it is the SOURCE. Both must be cancelled on retire (rows kept).
+    await ensureActionPartition(db, primary.network, 'connect');
+    const targetActionId = randomUUID();
+    const sourceActionId = randomUUID();
+    await db.insert(itemActionsTable).values([
+      {
+        action_type: 'connect', partition_network: primary.network, action_id: targetActionId,
+        action_status: 'created', update_count: 0,
+        source_item_network: primary.network, source_item_domain: primary.domain,
+        source_item_type: primary.item_type, source_item_id: otherItemId,
+        source_item_instance_url: `http://localhost:${listen_port}`,
+        target_item_network: primary.network, target_item_domain: primary.domain,
+        target_item_type: primary.item_type, target_item_id: itemId,
+        target_item_instance_url: `http://localhost:${listen_port}`,
+        requirements_snapshot: {},
+      },
+      {
+        action_type: 'connect', partition_network: primary.network, action_id: sourceActionId,
+        action_status: 'created', update_count: 0,
+        source_item_network: primary.network, source_item_domain: primary.domain,
+        source_item_type: primary.item_type, source_item_id: itemId,
+        source_item_instance_url: `http://localhost:${listen_port}`,
+        target_item_network: primary.network, target_item_domain: primary.domain,
+        target_item_type: primary.item_type, target_item_id: otherItemId,
+        target_item_instance_url: `http://localhost:${listen_port}`,
+        requirements_snapshot: {},
+      },
+    ]);
+    seeded_action_ids.push(targetActionId, sourceActionId);
 
     // Retire (network_service authorised).
     const res = await app.inject({
@@ -1487,18 +1524,20 @@ describeIf(`lifecycle integration${can_run ? '' : ` — ${skip_reason}`}`, () =>
     expect(res.statusCode).toBe(200);
     expect(res.json().lifecycle_status).toBe('retired');
 
-    // DB: retired + private blob cleared + no private field left in item_state.
+    // DB: retired + private blob cleared + no private field left + locations wiped.
     const [row] = await db
       .select({
         lifecycle_status: itemsTable.lifecycle_status,
         item_state: itemsTable.item_state,
         item_private_state: itemsTable.item_private_state,
+        item_locations: itemsTable.item_locations,
       })
       .from(itemsTable)
       .where(eq(itemsTable.item_id, itemId))
       .limit(1);
     expect(row.lifecycle_status).toBe('retired');
     expect(row.item_private_state).toBe('');
+    expect(row.item_locations).toEqual([]); // wiped, no label residue (#347)
     // Every private field defined by the schema is gone from the stored state.
     const publicOnly = nonPrivateFields(primary.schema, full);
     const stored = row.item_state as Record<string, unknown>;
@@ -1506,13 +1545,14 @@ describeIf(`lifecycle integration${can_run ? '' : ` — ${skip_reason}`}`, () =>
       if (!(key in publicOnly)) expect(key in stored).toBe(false);
     }
 
-    // The action row is kept (bare id preserved for counterparty history).
-    const [actionRow] = await db
-      .select({ action_id: itemActionsTable.action_id })
+    // Both actions are kept (bare ids for counterparty history) AND cancelled —
+    // target-side and source-side.
+    const actionRows = await db
+      .select({ action_id: itemActionsTable.action_id, action_status: itemActionsTable.action_status })
       .from(itemActionsTable)
-      .where(eq(itemActionsTable.action_id, actionId))
-      .limit(1);
-    expect(actionRow?.action_id).toBe(actionId);
+      .where(inArray(itemActionsTable.action_id, [targetActionId, sourceActionId]));
+    expect(actionRows).toHaveLength(2);
+    for (const a of actionRows) expect(a.action_status).toBe('cancelled');
 
     // Terminal: a second lifecycle call is rejected.
     const again = await app.inject({
@@ -1536,15 +1576,32 @@ describeIf(`lifecycle integration${can_run ? '' : ` — ${skip_reason}`}`, () =>
     expect(editRes.statusCode).toBe(409);
     expect(editRes.json().error).toBe('ITEM_RETIRED');
 
-    // Excluded from the owner's instance-local fetch ("My Profiles").
+    // Excluded from the OWNER's instance-local fetch ("My Profiles"). Mint an
+    // apikey for the owning user (not the svc user) so the fetch is scoped to
+    // their own items — otherwise the assertion is vacuous.
+    const ownerRawKey = `sk_signals_${randomBytes(24).toString('hex')}`;
+    await db.insert(authSchema.apikey).values({
+      id: `key_${randomUUID()}`,
+      name: 'lc-s13-owner',
+      key: hash_key(ownerRawKey),
+      userId,
+      referenceId: userId,
+      configId: 'default',
+      start: ownerRawKey.slice(0, 6),
+      prefix: 'sk_signals_',
+      enabled: true,
+      rateLimitEnabled: false,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    });
     const fetchRes = await app.inject({
       method: 'GET',
       url: `/api/v1/item/fetch?item_network=${encodeURIComponent(primary.network)}&item_domain=${encodeURIComponent(primary.domain)}&limit=100&offset=0`,
-      headers: userHeaders(ns.raw_key),
+      headers: userHeaders(ownerRawKey),
     });
-    if (fetchRes.statusCode === 200) {
-      const items = (fetchRes.json() as { items: Array<{ item_id: string }> }).items;
-      expect(items.some((i) => i.item_id === itemId)).toBe(false);
-    }
+    expect(fetchRes.statusCode).toBe(200);
+    const items = (fetchRes.json() as { items: Array<{ item_id: string }> }).items;
+    // The retired item is the owner's only profile → the list excludes it (empty).
+    expect(items.some((i) => i.item_id === itemId)).toBe(false);
   });
 });

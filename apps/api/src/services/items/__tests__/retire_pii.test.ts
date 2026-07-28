@@ -46,6 +46,39 @@ describe('buildRetiredItemState', () => {
     expect(buildRetiredItemState(publicSchema, stored)).toEqual({ headline: 'Tutor' });
   });
 
+  it('drops a NESTED non-private identity field (e.g. contact.name)', () => {
+    const nestedSchema = {
+      type: 'object',
+      properties: {
+        headline: { type: 'string' },
+        contact: {
+          type: 'object',
+          properties: {
+            name: { type: 'string' }, // nested, NOT private
+            city: { type: 'string' },
+          },
+        },
+      },
+    } as Record<string, unknown>;
+    const stored = { headline: 'Tutor', contact: { name: 'Asha', city: 'Pune' } };
+    expect(buildRetiredItemState(nestedSchema, stored)).toEqual({
+      headline: 'Tutor',
+      contact: { city: 'Pune' },
+    });
+  });
+
+  it('drops unknown/extra keys not declared in the schema', () => {
+    const stored = {
+      headline: 'Plumber',
+      skills: ['pipes'],
+      secret_note: 'call me at 99999', // not in schema → must be dropped
+    };
+    expect(buildRetiredItemState(schema, stored)).toEqual({
+      headline: 'Plumber',
+      skills: ['pipes'],
+    });
+  });
+
   it('returns an empty object when the schema is unknown (fail-safe, no leak)', () => {
     expect(buildRetiredItemState(null, { name: 'x', anything: 'y' })).toEqual({});
   });
