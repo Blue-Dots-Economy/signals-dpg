@@ -180,7 +180,7 @@ describe('searchSignals — HTTP call + response mapping', () => {
     expect(body.context.networkId).toBe('blue_dot');
   });
 
-  it('parses and returns items + meta from a successful response', async () => {
+  it('parses and returns full items (incl. item_instance_url etc.) + meta from a successful response', async () => {
     fetchMock.mockResolvedValue({
       ok: true,
       json: async () => ({
@@ -194,6 +194,12 @@ describe('searchSignals — HTTP call + response mapping', () => {
               item_id: 'item-1',
               item_state: { city: 'pune' },
               item_locations: [{ lat: 1, lng: 2 }],
+              item_instance_url: 'http://source.local',
+              item_schema_url: 'http://source.local/schema',
+              created_at: '2026-01-01T00:00:00.000Z',
+              updated_at: '2026-01-02T00:00:00.000Z',
+              created_by: 'usr_1',
+              lifecycle_status: 'live',
               score: 0.9,
               distanceMeters: 120,
             },
@@ -213,11 +219,83 @@ describe('searchSignals — HTTP call + response mapping', () => {
         item_id: 'item-1',
         item_state: { city: 'pune' },
         item_locations: [{ lat: 1, lng: 2 }],
+        item_instance_url: 'http://source.local',
+        item_schema_url: 'http://source.local/schema',
+        created_at: '2026-01-01T00:00:00.000Z',
+        updated_at: '2026-01-02T00:00:00.000Z',
+        created_by: 'usr_1',
+        lifecycle_status: 'live',
         score: 0.9,
         distanceMeters: 120,
       },
     ]);
     expect(result.meta).toEqual({ total: 1, limit: 20, offset: 0 });
+  });
+
+  it('parses item_instance_url/item_schema_url/created_by as null when signals-search sends null', async () => {
+    fetchMock.mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        context: {},
+        message: {
+          items: [
+            {
+              item_network: 'blue_dot',
+              item_domain: 'seeker',
+              item_type: 'profile_1.0',
+              item_id: 'item-1',
+              item_state: {},
+              item_locations: [],
+              item_instance_url: null,
+              item_schema_url: null,
+              created_at: '2026-01-01T00:00:00.000Z',
+              updated_at: '2026-01-01T00:00:00.000Z',
+              created_by: null,
+              lifecycle_status: 'live',
+            },
+          ],
+          meta: { total: 1, limit: 20, offset: 0 },
+        },
+      }),
+    });
+
+    const result = await searchSignals(baseInput);
+
+    expect(result.items[0]).toMatchObject({
+      item_instance_url: null,
+      item_schema_url: null,
+      created_by: null,
+    });
+  });
+
+  it('throws when a required full-item field (e.g. lifecycle_status) is missing from the response', async () => {
+    fetchMock.mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        context: {},
+        message: {
+          items: [
+            {
+              item_network: 'blue_dot',
+              item_domain: 'seeker',
+              item_type: 'profile_1.0',
+              item_id: 'item-1',
+              item_state: {},
+              item_locations: [],
+              item_instance_url: null,
+              item_schema_url: null,
+              created_at: '2026-01-01T00:00:00.000Z',
+              updated_at: '2026-01-01T00:00:00.000Z',
+              created_by: null,
+              // lifecycle_status intentionally omitted
+            },
+          ],
+          meta: { total: 1, limit: 20, offset: 0 },
+        },
+      }),
+    });
+
+    await expect(searchSignals(baseInput)).rejects.toThrow();
   });
 
   it('throws on a non-2xx response', async () => {

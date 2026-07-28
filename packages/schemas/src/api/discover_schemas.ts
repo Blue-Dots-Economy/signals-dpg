@@ -3,10 +3,12 @@ import { ItemResponseSchema } from './item_schemas';
 
 /**
  * Public `/network/item/discover` BFF (#203 List PR, P-follow-3). Ranks via
- * signals-search `/v1/search` then hydrates full item rows locally
- * (see `apps/api/src/routes/v1/network/item/discover.ts`) — single-instance,
- * live-only, so unlike `/network/item/fetch` there is no cross-instance
- * `partial`/`unavailable_instances` in the response meta.
+ * signals-search `/v1/search`, which (as of signals-search PR #87) returns
+ * the full item row per result — this BFF maps each result DIRECTLY to the
+ * DPG item response shape (see `apps/api/src/routes/v1/network/item/discover.ts`),
+ * no local-DB hydrate/re-read by id. Single-instance, live-only, so unlike
+ * `/network/item/fetch` there is no cross-instance `partial`/
+ * `unavailable_instances` in the response meta.
  *
  * Field naming mirrors the existing `FetchItemsBodySchema` /
  * `MarkersBodySchema` convention (`item_latitude`/`item_longitude`,
@@ -47,7 +49,22 @@ export const DiscoverItemsBodySchema = DiscoverItemsBodyBase.refine(
   }
 );
 
+// Overrides beyond ItemResponseSchema's DB-derived shape: signals-search's
+// item is a serialized-over-the-wire copy (ISO date strings, and it declares
+// item_instance_url/item_schema_url/created_by as nullable even though the
+// local `items` table itself never stores nulls there) rather than a live DB
+// row, so those fields are widened here to accept what signals-search
+// actually sends. `z.coerce.date()` accepts the ISO strings signals-search
+// sends while still serializing back to the same wire format as a native
+// Date-typed row (JSON.stringify(Date) => ISO string), so the UI sees an
+// identical shape either way.
 export const DiscoverResponseItemSchema = ItemResponseSchema.extend({
+  item_instance_url: z.string().nullable(),
+  item_schema_url: z.string().nullable(),
+  created_by: z.string().nullable(),
+  created_at: z.coerce.date(),
+  updated_at: z.coerce.date(),
+  lifecycle_status: z.string(),
   score: z.number().optional(),
   distanceMeters: z.number().optional(),
 });

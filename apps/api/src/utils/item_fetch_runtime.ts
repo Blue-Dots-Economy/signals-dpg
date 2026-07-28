@@ -1,4 +1,4 @@
-import { and, eq, inArray, ne, sql } from 'drizzle-orm';
+import { and, eq, ne, sql } from 'drizzle-orm';
 import { db } from '@api/db/postgres/drizzle_config';
 import { items } from '@dpg/database';
 import { decryptItemPrivate } from './item_decrypt';
@@ -226,44 +226,4 @@ export async function fetchLocalMarkers(filters: ItemFetchFilters) {
     },
     markers,
   };
-}
-
-/**
- * Hydrates full item rows by id for the discover BFF's rank-then-hydrate flow
- * (#203 List PR): signals-search ranks and returns `item_id`s, this fetches
- * the corresponding rows from the local partition (single-instance —
- * signals-search only ever indexes this instance's own served domains).
- *
- * Filters on `item_network` + `item_domain` (partition pruning, see
- * `.claude/rules/database-conventions.md`) in addition to the id list. Does
- * NOT preserve caller order itself — the caller (discover.ts) re-orders the
- * returned rows to match signals-search's ranked order and drops any id with
- * no matching row (item retired/removed since being indexed).
- */
-export async function fetchLocalItemsByIds(input: {
-  item_network: string;
-  item_domain: string;
-  item_ids: string[];
-  lifecycle_filter?: 'live_only' | 'all';
-}) {
-  if (input.item_ids.length === 0) {
-    return [];
-  }
-
-  const conditions = [
-    eq(items.item_network, input.item_network),
-    eq(items.item_domain, input.item_domain),
-    inArray(items.item_id, input.item_ids),
-  ];
-
-  if (input.lifecycle_filter === 'live_only') {
-    conditions.push(eq(items.lifecycle_status, 'live'));
-  }
-
-  const rows = await db
-    .select(itemResponseColumns)
-    .from(items)
-    .where(and(...conditions));
-
-  return rows.map(({ item_private_state: _item_private_state, ...responseItem }) => responseItem);
 }

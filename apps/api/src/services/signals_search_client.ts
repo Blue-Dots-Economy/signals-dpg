@@ -11,6 +11,11 @@ import { signalsSearchConfig } from '@/config';
  * + `openapi.json`, see `.superpowers/sdd/progress.md`): a Beckn-style
  * `context`/`message` request, single `s_dwithin` spatial clause max, filter
  * clauses targeting `item_state.<field>`.
+ *
+ * Response shape revised for signals-search PR #87: `/v1/search` now returns
+ * the FULL item row per result (not just `item_id` + masked `item_state`), so
+ * the discover BFF (`discover.ts`) maps each result directly to the DPG item
+ * response shape — no local-DB hydrate/re-read by id.
  */
 
 const SIGNALS_SEARCH_TIMEOUT_MS = 5000;
@@ -103,8 +108,18 @@ const SignalsSearchItemSchema = z.object({
   item_domain: z.string(),
   item_type: z.string(),
   item_id: z.string(),
+  // Masked public projection — signals-search never sees item_private_state.
   item_state: z.record(z.string(), z.unknown()),
   item_locations: z.array(SignalsSearchItemLocationSchema),
+  // Full item fields (PR #87 on signals-search): `/v1/search` now returns the
+  // whole item row, not just id + state, so the discover BFF can map directly
+  // to the DPG item response shape without a local-DB hydrate round trip.
+  item_instance_url: z.string().nullable(),
+  item_schema_url: z.string().nullable(),
+  created_at: z.string(),
+  updated_at: z.string(),
+  created_by: z.string().nullable(),
+  lifecycle_status: z.string(),
   score: z.number().optional(),
   distanceMeters: z.number().optional(),
 });

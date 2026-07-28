@@ -5,10 +5,9 @@ import {
   isServedDomainBinding,
   replyForUnservedDomain,
 } from '@/utils/served_domain_guard';
-import { fetchLocalItemsByIds } from '@/utils/item_fetch_runtime';
 import { resolveAllowedFacetFilters } from '@/utils/facet_guard';
 import { getNetworkConfigById } from '@/network_configs';
-import { searchSignals } from '@/services/signals_search_client';
+import { searchSignals, type SignalsSearchItem } from '@/services/signals_search_client';
 
 type DiscoverItemsRequest = FastifyRequest<{
   Body: z.infer<typeof DiscoverItemsBodySchema>;
@@ -19,17 +18,37 @@ type DiscoverItemsRequest = FastifyRequest<{
  * Mirrors `/network/item/fetch` in being unauthenticated (no `preHandler`) —
  * discovery of the masked public `item_state` needs no auth either way.
  *
- * RANK-THEN-HYDRATE: signals-search ranks (ids + score/distanceMeters), then
- * this handler hydrates the full item rows from the local DB, preserving
- * signals-search's order, so the response shape matches native
- * `/network/item/fetch` items (same fields, e.g. `item_instance_url`) plus
- * `score`/`distanceMeters`. Live-only, single-instance — see
- * `fetchLocalItemsByIds` for why there's no cross-instance aggregation here.
+ * DIRECT MAP (revised — signals-search PR #87): signals-search's `/v1/search`
+ * now returns the full item row per result, so each ranked result is mapped
+ * straight to the DPG item response shape below — no local-DB hydrate/
+ * re-read by id. signals-search's order is already the ranked order and is
+ * preserved as-is. Live-only, single-instance is now signals-search's own
+ * indexing invariant rather than something this BFF enforces via a lifecycle
+ * filter.
  *
  * This task's happy path always calls signals-search directly; Task 3 adds
  * the native-fallback + degraded flag when the search service is
  * unreachable/slow/misconfigured.
  */
+function mapSignalsSearchItemToDiscoverItem(item: SignalsSearchItem) {
+  return {
+    item_id: item.item_id,
+    item_network: item.item_network,
+    item_domain: item.item_domain,
+    item_type: item.item_type,
+    item_instance_url: item.item_instance_url,
+    item_schema_url: item.item_schema_url,
+    item_state: item.item_state,
+    item_locations: item.item_locations,
+    created_by: item.created_by,
+    created_at: item.created_at,
+    updated_at: item.updated_at,
+    lifecycle_status: item.lifecycle_status,
+    score: item.score,
+    distanceMeters: item.distanceMeters,
+  };
+}
+
 export const discover: FastifyPluginAsyncZod = async function (fastify) {
   fastify.route({
     url: '/item/discover',
@@ -80,29 +99,9 @@ const discover_items_handler = async (
       offset: body.offset,
     });
 
-    const rankedIds = searchResult.items.map((item) => item.item_id);
-    const rows = await fetchLocalItemsByIds({
-      item_network: body.item_network,
-      item_domain: body.item_domain,
-      item_ids: rankedIds,
-      lifecycle_filter: 'live_only',
-    });
-    const rowsById = new Map(rows.map((row) => [row.item_id, row]));
-
-    // Preserve signals-search's ranked order; drop any id with no local row
-    // (item retired/removed since being indexed — see fetchLocalItemsByIds).
-    const items = rankedIds.flatMap((itemId, index) => {
-      const row = rowsById.get(itemId);
-      if (!row) return [];
-      const rankedItem = searchResult.items[index];
-      return [
-        {
-          ...row,
-          score: rankedItem.score,
-          distanceMeters: rankedItem.distanceMeters,
-        },
-      ];
-    });
+    // signals-search's order is already the ranked order — mapped straight
+    // through, no local-DB hydrate/re-read by id (see module doc comment).
+    const items = searchResult.items.map(mapSignalsSearchItemToDiscoverItem);
 
     return reply.code(200).send({
       meta: {
