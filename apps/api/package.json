@@ -39,21 +39,21 @@
     "vitest": "^4.1.10"
   },
   "dependencies": {
-    "@fastify/cors": "^11.2.0",
-    "@fastify/swagger": "^9.6.1",
-    "@scalar/fastify-api-reference": "^1.57.2",
+    "@fastify/cors": "^11.3.0",
+    "@fastify/swagger": "^9.8.1",
+    "@scalar/fastify-api-reference": "^1.63.0",
     "auth": "workspace:*",
     "config": "workspace:*",
     "database": "workspace:*",
     "dotenv": "^17.4.2",
     "drizzle-orm": "^0.45.2",
-    "fastify": "^5.8.5",
+    "fastify": "^5.10.0",
     "fastify-qs": "^5.0.0",
-    "fastify-type-provider-zod": "^6.1.0",
-    "ioredis": "^5.9.2",
+    "fastify-type-provider-zod": "^7.0.0",
+    "ioredis": "^5.11.1",
     "match_score": "workspace:*",
     "notification": "workspace:*",
-    "pg": "^8.17.2",
+    "pg": "^8.22.0",
     "schemas": "workspace:*"
   }
 }
