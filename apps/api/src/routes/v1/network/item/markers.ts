@@ -158,5 +158,10 @@ const fetch_local_markers_handler = async (
 
   return reply
     .code(200)
-    .send(await fetchLocalMarkers({ ...body, lifecycle_filter: 'live_only' }));
+    .send(
+      await fetchLocalMarkers(
+        { ...body, lifecycle_filter: 'live_only' },
+        request.log
+      )
+    );
 };

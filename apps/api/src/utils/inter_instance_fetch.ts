@@ -13,6 +13,7 @@ import {
   fetchLocalItems,
   fetchLocalMarkers,
   type ItemFetchFilters,
+  type ItemFetchLog,
 } from '@/utils/item_fetch_runtime';
 import { mergeSortAndSlice, type MergeableRow } from '@/utils/instance_merge';
 import type { LatLng } from '@/utils/geo_distance';
@@ -197,6 +198,7 @@ export async function fetchItemsAcrossInstances(input: {
         instanceUrl: instance.instance_url,
         filters: input.filters,
         cacheTtlSeconds,
+        log: input.log,
       }),
     }))
   );
@@ -239,6 +241,7 @@ export async function fetchItemsAcrossInstances(input: {
             offset: slice.offset,
             limit: slice.limit,
           },
+          log: input.log,
         })
       )
     );
@@ -269,7 +272,7 @@ export async function fetchItemsAcrossInstances(input: {
         // for more.
         peerLimitMax: 1000,
         fetchPage: async ({ instanceUrl, filters }) =>
-          (await fetchInstancePage({ instanceUrl, filters })).items,
+          (await fetchInstancePage({ instanceUrl, filters, log: input.log })).items,
       });
 
     failedPages.forEach((instanceUrl) => {
@@ -376,6 +379,7 @@ export async function fetchMarkersAcrossInstances(input: {
         instanceUrl: instance.instance_url,
         filters: input.filters,
         cacheTtlSeconds,
+        log: input.log,
       }),
     }))
   );
@@ -418,6 +422,7 @@ export async function fetchMarkersAcrossInstances(input: {
             offset: slice.offset,
             limit: slice.limit,
           },
+          log: input.log,
         })
       )
     );
@@ -448,7 +453,7 @@ export async function fetchMarkersAcrossInstances(input: {
         // for more.
         peerLimitMax: 25000,
         fetchPage: async ({ instanceUrl, filters }) =>
-          (await fetchInstanceMarkers({ instanceUrl, filters })).markers,
+          (await fetchInstanceMarkers({ instanceUrl, filters, log: input.log })).markers,
       });
 
     failedPages.forEach((instanceUrl) => {
@@ -494,6 +499,7 @@ export async function getInstanceCount(input: {
   instanceUrl: string;
   filters: ItemFetchFilters;
   cacheTtlSeconds: number;
+  log?: ItemFetchLog;
 }) {
   const countCacheKey = buildCountCacheKey(input.filters, input.instanceUrl);
   const cachedCount = await redis.get(countCacheKey);
@@ -523,7 +529,7 @@ export async function getInstanceCount(input: {
   const count =
     input.instanceUrl === getCurrentApiBaseUrl() &&
     isServedDomainBinding(input.filters.item_network, input.filters.item_domain)
-      ? await countLocalItems(countFilters)
+      ? await countLocalItems(countFilters, input.log)
       : await fetchRemoteCount(input.instanceUrl, countFilters);
 
   await redis.set(countCacheKey, String(count), 'EX', input.cacheTtlSeconds);
@@ -534,12 +540,13 @@ export async function getInstanceCount(input: {
 async function fetchInstancePage(input: {
   instanceUrl: string;
   filters: ItemFetchFilters;
+  log?: ItemFetchLog;
 }) {
   if (
     input.instanceUrl === getCurrentApiBaseUrl() &&
     isServedDomainBinding(input.filters.item_network, input.filters.item_domain)
   ) {
-    return fetchLocalItems(input.filters);
+    return fetchLocalItems(input.filters, input.log);
   }
 
   return fetchRemotePage(input.instanceUrl, input.filters);
@@ -598,12 +605,13 @@ async function fetchRemotePage(instanceUrl: string, filters: ItemFetchFilters) {
 async function fetchInstanceMarkers(input: {
   instanceUrl: string;
   filters: ItemFetchFilters;
+  log?: ItemFetchLog;
 }) {
   if (
     input.instanceUrl === getCurrentApiBaseUrl() &&
     isServedDomainBinding(input.filters.item_network, input.filters.item_domain)
   ) {
-    return fetchLocalMarkers(input.filters);
+    return fetchLocalMarkers(input.filters, input.log);
   }
 
   return fetchRemoteMarkers(input.instanceUrl, input.filters);
@@ -681,13 +689,61 @@ function bucketGeoForCacheKey(filters: ItemFetchFilters): ItemFetchFilters {
   };
 }
 
+// #203 Task 3 follow-up to the radius bucketing above: once bbox actually
+// drives query results (Task 3's Option B WHERE), an unbucketed bbox key
+// would mint a fresh cache entry on every small pan/zoom — the map viewport
+// almost never reports byte-identical corners twice — leaving reuse at
+// effectively zero. Mirrors the radius approach: snap each corner to a grid
+// whose cell size scales with the bbox's own span (a tight, high-zoom bbox
+// gets a fine grid; a wide, low-zoom one gets a coarse grid), floored at
+// MIN_BBOX_BUCKET_STEP_DEG so a very small bbox doesn't bucket to a
+// vanishingly tiny (effectively unbucketed) step. Same accepted tolerance as
+// the radius case — the request actually sent to peers always uses the
+// caller's true, unbucketed bbox (see scatterGatherPage); only the key is
+// snapped, so a bucket populated by one true bbox may serve a nearby but
+// distinct true bbox until the cache entry expires.
+const BBOX_BUCKET_FRACTION = 0.2;
+const MIN_BBOX_BUCKET_STEP_DEG = 0.01; // ~1.1 km of latitude at the equator
+
+function bucketBboxForCacheKey(filters: ItemFetchFilters): ItemFetchFilters {
+  const { min_lat, min_lng, max_lat, max_lng } = filters;
+  if (
+    min_lat === undefined ||
+    min_lng === undefined ||
+    max_lat === undefined ||
+    max_lng === undefined
+  ) {
+    return filters;
+  }
+
+  const latSpan = max_lat - min_lat;
+  const lngSpan = max_lng - min_lng;
+  if (latSpan <= 0 || lngSpan <= 0) {
+    // Degenerate/inverted box — buildWhereClause (item_fetch_runtime.ts)
+    // already treats this as an empty result; leave the key as-is rather
+    // than bucketing against a non-positive span.
+    return filters;
+  }
+
+  const latStep = Math.max(latSpan * BBOX_BUCKET_FRACTION, MIN_BBOX_BUCKET_STEP_DEG);
+  const lngStep = Math.max(lngSpan * BBOX_BUCKET_FRACTION, MIN_BBOX_BUCKET_STEP_DEG);
+
+  return {
+    ...filters,
+    min_lat: Math.round(min_lat / latStep) * latStep,
+    min_lng: Math.round(min_lng / lngStep) * lngStep,
+    max_lat: Math.round(max_lat / latStep) * latStep,
+    max_lng: Math.round(max_lng / lngStep) * lngStep,
+  };
+}
+
 function buildPageCacheKey(filters: ItemFetchFilters, cacheTtlSeconds: number) {
   return [
     'item-page',
     filters.item_network,
     filters.item_domain,
     stableStringify({
-      ...bucketGeoForCacheKey(filters),
+      ...bucketBboxForCacheKey(bucketGeoForCacheKey(filters)),
       cacheTtlSeconds,
     }),
   ].join(':');
@@ -704,7 +760,7 @@ function buildMarkerPageCacheKey(
     filters.item_network,
     filters.item_domain,
     stableStringify({
-      ...bucketGeoForCacheKey(filters),
+      ...bucketBboxForCacheKey(bucketGeoForCacheKey(filters)),
       cacheTtlSeconds,
     }),
   ].join(':');
