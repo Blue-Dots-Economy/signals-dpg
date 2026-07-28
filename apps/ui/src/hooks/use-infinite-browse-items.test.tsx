@@ -8,9 +8,10 @@ import { useInfiniteBrowseItems } from './use-infinite-browse-items';
 
 vi.mock('@/lib/network-api', () => ({
   fetchNetworkItems: vi.fn(),
+  fetchDiscover: vi.fn(),
   PROFILE_PAGE_SIZE: 2,
 }));
-import { fetchNetworkItems } from '@/lib/network-api';
+import { fetchNetworkItems, fetchDiscover } from '@/lib/network-api';
 
 function wrapper({ children }: { children: React.ReactNode }) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -103,5 +104,102 @@ describe('useInfiniteBrowseItems', () => {
     expect(result.current.total).toBe(5);
     expect(result.current.hasNextPage).toBe(false);
     expect(fetchNetworkItems).toHaveBeenCalledTimes(1);
+  });
+
+  it('defaults source to native and degraded to false on the plain browse path', async () => {
+    vi.mocked(fetchNetworkItems).mockResolvedValue({
+      meta: { total: 1, limit: 2, offset: 0 },
+      items: [item('a')],
+    });
+    const { result } = renderHook(
+      () => useInfiniteBrowseItems(network, domain, null),
+      { wrapper },
+    );
+    await waitFor(() => expect(result.current.items.length).toBe(1));
+    expect(result.current.source).toBe('native');
+    expect(result.current.degraded).toBe(false);
+  });
+
+  // #203 List PR Task 4: a non-empty `q` routes to the discover BFF instead
+  // of the native paged browse, and a `q` change resets paging (distinct
+  // query key -> fresh offset-0 fetch) rather than appending to the old feed.
+  it('routes to fetchDiscover when q is set, and resets paging when q changes', async () => {
+    vi.mocked(fetchDiscover).mockImplementation(async (q) => ({
+      items: q.q === 'foo' ? [item('x')] : [item('y')],
+      meta: { total: 1, limit: 2, offset: q.offset ?? 0, source: 'signals_search', degraded: false },
+    }));
+    const { result, rerender } = renderHook(
+      ({ q }: { q: string }) => useInfiniteBrowseItems(network, domain, null, { q }),
+      { wrapper, initialProps: { q: 'foo' } },
+    );
+    await waitFor(() => expect(result.current.items.map((i) => i.item_id)).toEqual(['x']));
+    expect(fetchNetworkItems).not.toHaveBeenCalled();
+    expect(fetchDiscover).toHaveBeenCalledWith(
+      expect.objectContaining({ q: 'foo', offset: 0 }),
+      expect.anything(),
+    );
+
+    rerender({ q: 'bar' });
+    await waitFor(() => expect(result.current.items.map((i) => i.item_id)).toEqual(['y']));
+    expect(fetchDiscover).toHaveBeenLastCalledWith(
+      expect.objectContaining({ q: 'bar', offset: 0 }),
+      expect.anything(),
+    );
+  });
+
+  it('routes to fetchDiscover when facet filters are set, even without q', async () => {
+    vi.mocked(fetchDiscover).mockResolvedValue({
+      items: [item('z')],
+      meta: { total: 1, limit: 2, offset: 0, source: 'signals_search', degraded: false },
+    });
+    const { result } = renderHook(
+      () =>
+        useInfiniteBrowseItems(network, domain, null, {
+          filters: [{ field: 'skills', values: ['algebra'] }],
+        }),
+      { wrapper },
+    );
+    await waitFor(() => expect(result.current.items.map((i) => i.item_id)).toEqual(['z']));
+    expect(fetchNetworkItems).not.toHaveBeenCalled();
+    expect(fetchDiscover).toHaveBeenCalledWith(
+      expect.objectContaining({ filters: [{ field: 'skills', values: ['algebra'] }] }),
+      expect.anything(),
+    );
+  });
+
+  it('routes to fetchDiscover when relevance is forced, even with no q/filters', async () => {
+    vi.mocked(fetchDiscover).mockResolvedValue({
+      items: [item('r')],
+      meta: { total: 1, limit: 2, offset: 0, source: 'signals_search', degraded: false },
+    });
+    const { result } = renderHook(
+      () => useInfiniteBrowseItems(network, domain, null, { relevance: true }),
+      { wrapper },
+    );
+    await waitFor(() => expect(result.current.items.length).toBe(1));
+    expect(fetchNetworkItems).not.toHaveBeenCalled();
+    expect(fetchDiscover).toHaveBeenCalled();
+  });
+
+  it('surfaces source and degraded from the discover response (native_fallback case)', async () => {
+    vi.mocked(fetchDiscover).mockResolvedValue({
+      items: [item('a')],
+      meta: { total: 1, limit: 2, offset: 0, source: 'native_fallback', degraded: true },
+    });
+    const { result } = renderHook(
+      () => useInfiniteBrowseItems(network, domain, null, { q: 'x' }),
+      { wrapper },
+    );
+    await waitFor(() => expect(result.current.items.length).toBe(1));
+    expect(result.current.source).toBe('native_fallback');
+    expect(result.current.degraded).toBe(true);
+  });
+
+  it('does not call fetchDiscover when q is only whitespace and no filters/relevance are set', () => {
+    renderHook(
+      () => useInfiniteBrowseItems(network, domain, null, { q: '   ' }),
+      { wrapper },
+    );
+    expect(fetchDiscover).not.toHaveBeenCalled();
   });
 });

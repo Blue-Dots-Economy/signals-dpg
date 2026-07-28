@@ -48,6 +48,10 @@ export const queryKeys = {
    * Paged browse feed for ONE domain (spec §5.1). Key axes carried in filters:
    * - lat, lng (location, part of filter object; null when user has no location)
    * - limit (page size; PROFILE_PAGE_SIZE)
+   * - mode ('native' | 'discover'), q, filters (#203 List PR Task 4): the
+   *   discover BFF's search text / facet selections. Carried in the key so a
+   *   change to any of them resets paging (useInfiniteQuery starts a fresh
+   *   query at offset 0) instead of appending to the previous feed.
    * Offset/pagination is handled by useInfiniteQuery's pageParam.
    * DEFERRED axes (§8): instance/API base URL (no selectedApiUrl switcher
    * exists; wire cache busting when added), activeProfileId (only affects
