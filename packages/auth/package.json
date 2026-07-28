@@ -16,7 +16,7 @@
   "license": "ISC",
   "packageManager": "pnpm@11.1.2",
   "devDependencies": {
-    "vitest": "^4.1.7"
+    "vitest": "^4.1.10"
   },
   "dependencies": {
     "@better-auth/api-key": "^1.6.11",
