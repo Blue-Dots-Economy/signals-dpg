@@ -326,11 +326,20 @@ export async function fetchItemsAcrossInstances(input: {
  * pre-§4.4 `buildPagePlan` concat path frozen byte-identical. With >1 active
  * instance it fans out via the shared `scatterGatherPage` (same helper
  * `fetchItemsAcrossInstances` uses) so the merged page is globally
- * nearest-first across instances rather than a per-instance block. Markers
- * are always requested from a map viewport, which always supplies a
- * lat/lng center, so the merge's geo branch is the one that matters here;
- * slim marker rows carry no `created_at`, so `mergeSortAndSlice`'s recency
- * tie-break/fallback simply never engages for this caller.
+ * nearest-first across instances rather than a per-instance block WHEN a
+ * center is supplied. A located viewer's request carries `item_latitude`/
+ * `item_longitude`, so the merge sorts by haversine to that center; slim
+ * marker rows carry no `created_at`, so `mergeSortAndSlice`'s recency
+ * tie-break/fallback never engages for this caller.
+ *
+ * Caveat (no-center case): an anonymous / no-location viewer sends only the
+ * bbox with no center, so across >1 instance `scatterGatherPage`'s `center`
+ * is null and, with no `created_at` to fall back on, the merge cannot
+ * re-order — WHICH markers survive the render cap is then per-peer
+ * insertion order, i.e. unspecified. Acceptable for a capped "zoom in for
+ * more" map (the cap is a density guard, not a ranked page); a defined
+ * multi-instance truncation order would need a stable sort key in the slim
+ * marker projection.
  */
 export async function fetchMarkersAcrossInstances(input: {
   networkConfig: NetworkConfigDocument;

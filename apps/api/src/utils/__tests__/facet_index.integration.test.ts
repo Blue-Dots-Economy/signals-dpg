@@ -8,7 +8,7 @@
  *   pnpm db:init:api
  *   pnpm --filter api test:integration
  *
- * Verifies the `apps/api/drizzle/0006_facet_item_state_indexes.sql` custom
+ * Verifies the `apps/api/drizzle/0007_facet_item_state_indexes.sql` custom
  * migration (expression btree indexes on declared `filterable` facet paths,
  * e.g. `(item_state->>'gender')`) makes a partition-pruned facet filter query
  * use an index scan rather than a sequential scan, at a scale (several
