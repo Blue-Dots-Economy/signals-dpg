@@ -183,8 +183,18 @@ export function useInfiniteBrowseItems(
   const lastPage = query.data?.pages[query.data.pages.length - 1];
   const total = lastPage?.meta.total ?? 0;
   const partial = query.data?.pages.some((p) => p.meta.partial === true) ?? false;
-  const source: BrowseSource = lastPage?.meta.source ?? (useDiscover ? 'signals_search' : 'native');
-  const degraded = lastPage?.meta.degraded ?? false;
+  // `degraded`/`source` are STICKY across pages (like `partial`): once ANY
+  // loaded page fell back to native, the accumulated feed already contains
+  // unfiltered/unranked items, so the banner + paused-chips must stay on even
+  // if a later page's fetch happens to hit a recovered signals-search. Reading
+  // only the last page would flip the degraded UI off mid-scroll while stale
+  // fallback items are still shown above — exactly "unfiltered results shown as
+  // if filtered" (design §6), which we must avoid.
+  const degraded = query.data?.pages.some((p) => p.meta.degraded) ?? false;
+  const anyFallback = query.data?.pages.some((p) => p.meta.source === 'native_fallback') ?? false;
+  const source: BrowseSource = anyFallback
+    ? 'native_fallback'
+    : (lastPage?.meta.source ?? (useDiscover ? 'signals_search' : 'native'));
 
   return {
     items,

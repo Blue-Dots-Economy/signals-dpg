@@ -64,7 +64,13 @@ export const DiscoverResponseItemSchema = ItemResponseSchema.extend({
   created_by: z.string().nullable(),
   created_at: z.coerce.date(),
   updated_at: z.coerce.date(),
-  lifecycle_status: z.string(),
+  // Optional (defense-in-depth): the base `ItemResponseSchema` keeps
+  // `lifecycle_status` optional to avoid a serialization 500 if a row omits it.
+  // Both live paths project it today (native `itemResponseColumns`; discover
+  // forces `live_only` and signals-search always returns it), but keeping it
+  // optional here means a future native path that stops projecting the column
+  // can't turn the "never 5xx on outage" fallback into a serialization 500.
+  lifecycle_status: z.string().optional(),
   score: z.number().optional(),
   distanceMeters: z.number().optional(),
 });
