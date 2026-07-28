@@ -100,9 +100,11 @@ interface HeldBboxState {
  * `filters` is the active facet filter set (`item_state.*`, e.g.
  * `{ gender: ['female'] }`) — forwarded to the server as `item_state` and
  * folded into the query key so a filter change always produces a distinct
- * cache entry. Defaults to `{}` (no filters): the map filters panel isn't
- * wired to this hook yet (#203 map-serverside-search Task 7 does that); this
- * parameter exists from Task 4 on so the key shape is ready ahead of time.
+ * cache entry. Defaults to `{}` (no filters). `home-page.tsx` passes
+ * `MapFiltersPanel`'s `selectedFields` (as `activeFieldFilters`) here (#203
+ * map-serverside-search Task 7); this parameter's shape has been stable
+ * since Task 4, which wired the key ahead of the panel actually being
+ * connected to it.
  */
 export function useMapMarkers(
   network: DotNetworkSchema | null,

@@ -141,6 +141,13 @@ export interface FetchNetworkMarkersQuery {
   min_lng?: number;
   max_lat?: number;
   max_lng?: number;
+  /**
+   * Facet filter, one entry per `item_state.<field>`. A value is either a
+   * scalar (equality/containment match) or a `string[]` — the #203 Task 7
+   * multi-select case (`MapFiltersPanel`'s `selectedFields`) — serialized
+   * below as repeated params so the server parses it back into `string[]`
+   * (see the comment at the serialization site).
+   */
   item_state?: Record<string, unknown>;
   limit?: number;
   offset?: number;
@@ -171,14 +178,32 @@ export async function fetchNetworkMarkers(
   if (query.max_lat !== undefined) params.set('max_lat', String(query.max_lat));
   if (query.max_lng !== undefined) params.set('max_lng', String(query.max_lng));
   // Serialize item_state as qs bracket notation (`item_state[field]=value`),
-  // which the server's `fastify-qs` parser decodes to a nested object that
-  // `MarkersQuerySchema.item_state` (a `z.record`) accepts and buildWhereClause
-  // applies as an `item_state @> jsonb` filter. Single value per field (the map
-  // enum filter's single-select case, #203 P4 §D1); multi-value-per-field
-  // filtering is a documented follow-up.
+  // which the server's `fastify-qs` parser (backed by the `qs` library)
+  // decodes to a nested object that `MarkersQuerySchema.item_state` (a
+  // `z.record`) accepts. A SCALAR value serializes as a single param and
+  // buildWhereClause applies it as an `item_state @> jsonb` containment
+  // filter (unchanged, pre-#203 behavior).
+  //
+  // An ARRAY value (#203 Task 7 — the map's multi-select facet filters, e.g.
+  // `MapFiltersPanel`'s `selectedFields`) is the critical case: it MUST reach
+  // the server as a real array, not `String(value)` (which produced a single
+  // comma-joined `"a,b"` string — inert against buildWhereClause's
+  // `item_state ->> field = ANY(...)` facet filter, Task 3). The fix is to
+  // `append` the SAME bracket key once per selected value
+  // (`item_state[gender]=female&item_state[gender]=male`) instead of
+  // `set`-ing one joined string. `qs`'s default parser auto-arrays repeated
+  // keys — with or without a trailing `[]` — back into `item_state.gender:
+  // string[]`, which is exactly the shape `buildWhereClause`'s `= ANY(...)`
+  // facet path expects.
   if (query.item_state !== undefined) {
     for (const [field, value] of Object.entries(query.item_state)) {
-      params.set(`item_state[${field}]`, String(value));
+      if (Array.isArray(value)) {
+        for (const v of value) {
+          params.append(`item_state[${field}]`, String(v));
+        }
+      } else {
+        params.set(`item_state[${field}]`, String(value));
+      }
     }
   }
   if (query.limit !== undefined) params.set('limit', String(query.limit));

@@ -62,7 +62,18 @@ function extractEnumFields(schema: RJSFSchema): EnumFilterField[] {
   for (const [key, rawProp] of Object.entries(schema.properties)) {
     // JSON Schema properties can be boolean (true/false) when using additionalProperties
     if (typeof rawProp !== 'object' || rawProp === null) continue;
-    const prop = rawProp as RJSFSchema;
+    const prop = rawProp as RJSFSchema & { private?: boolean };
+
+    // Defense-in-depth (#203 Task 7): never offer a `private: true` field as
+    // a filter option, even though the server's facet guard
+    // (`resolveAllowedFacetFields`) would silently drop any filter request
+    // on one anyway. No currently-configured network schema declares both
+    // `private: true` and `enum` on the same property (verified across
+    // every `examples/schemas/*/network.json`), so this doesn't change any
+    // network's filter options today — it just stops a future schema edit
+    // from silently surfacing an inert-but-visible filter for a private
+    // field.
+    if (prop.private === true) continue;
 
     // Single-value enum: string or number property with a top-level `enum` array
     if (Array.isArray(prop.enum) && prop.enum.length > 0) {
