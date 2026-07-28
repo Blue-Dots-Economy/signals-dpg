@@ -45,6 +45,8 @@ import { getEnumFilterFieldsForDomains } from '@/lib/enum-filters';
 import {
   deriveBrowseParams,
   isDiscoverActive,
+  hasActiveSearchOrFilters,
+  resolveDegradedBanner,
   excludeOwnItems,
   buildFilteredCardsForDomain,
 } from '@/lib/browse-discover';
@@ -164,6 +166,12 @@ interface DomainPageState {
   // tab can show the same federation-degradation banner as the single-domain
   // list and the map (P4's `mapMarkers.partial`).
   partial: boolean;
+  // Task 6 (#203 §6): lifted from `useInfiniteBrowseItems`' `degraded` — true
+  // when the discover BFF fell back to native (signals-search unreachable/
+  // unconfigured/timed out) for this domain's page. Threaded through
+  // IDENTICALLY to `partial` above so the "All" tab can show the same
+  // degraded-search UX as the single-domain list.
+  degraded: boolean;
 }
 
 // Headless per-domain paged fetch for the "All" tab (Task 5 §5.1). React hooks
@@ -197,6 +205,7 @@ function DomainPagedFetch({
     isLoading: boolean,
     fetchNext: () => void,
     partial: boolean,
+    degraded: boolean,
   ) => void;
 }): null {
   const list = useInfiniteBrowseItems(network, domain, coords, browseOpts);
@@ -204,13 +213,33 @@ function DomainPagedFetch({
   // it), so this effect refires on every plain re-render too. That's fine:
   // `onItems` (`handleDomainItems`) is idempotent — it bails out of its
   // `setState` when the lifted data is unchanged (element-wise reference
-  // equality on `items`, plus `hasMore`/`total`/`isLoading`/`partial`), so a
-  // plain re-render never causes a further re-render here. This is what lets
-  // a same-length refetch (new item object refs, edited `item_state`) still
-  // get lifted — gating on `items.length` would silently drop that update.
+  // equality on `items`, plus `hasMore`/`total`/`isLoading`/`partial`/
+  // `degraded`), so a plain re-render never causes a further re-render here.
+  // This is what lets a same-length refetch (new item object refs, edited
+  // `item_state`) still get lifted — gating on `items.length` would silently
+  // drop that update.
   React.useEffect(() => {
-    onItems(domain.id, list.items, list.hasNextPage, list.total, list.isLoading, list.fetchNextPage, list.partial);
-  }, [domain.id, list.items, list.hasNextPage, list.total, list.isLoading, list.fetchNextPage, list.partial, onItems]);
+    onItems(
+      domain.id,
+      list.items,
+      list.hasNextPage,
+      list.total,
+      list.isLoading,
+      list.fetchNextPage,
+      list.partial,
+      list.degraded,
+    );
+  }, [
+    domain.id,
+    list.items,
+    list.hasNextPage,
+    list.total,
+    list.isLoading,
+    list.fetchNextPage,
+    list.partial,
+    list.degraded,
+    onItems,
+  ]);
   return null;
 }
 
@@ -997,6 +1026,7 @@ export function HomePage() {
       isLoading: boolean,
       fetchNext: () => void,
       partial: boolean,
+      degraded: boolean,
     ) => {
       setAllDomainPages((prev) => {
         const existing = prev[domainId];
@@ -1009,12 +1039,16 @@ export function HomePage() {
           existing.hasMore === hasMore &&
           existing.total === total &&
           existing.isLoading === isLoading &&
-          existing.partial === partial
+          existing.partial === partial &&
+          existing.degraded === degraded
         ) {
           // Same data (plain re-render): bail so React doesn't re-render → no loop.
           return prev;
         }
-        return { ...prev, [domainId]: { items, hasMore, total, isLoading, fetchNext, partial } };
+        return {
+          ...prev,
+          [domainId]: { items, hasMore, total, isLoading, fetchNext, partial, degraded },
+        };
       });
     },
     [],
@@ -1095,6 +1129,25 @@ export function HomePage() {
   // (mirrors the map's `mapMarkers.partial` from P4): single-domain tab reads
   // the one paged feed directly, "All" tab is the OR above.
   const listPartial = selectedDomain !== null ? singleDomainList.partial : allDomainsListPartial;
+
+  // Task 6 (#203 §6): mirrors `allDomainsListPartial`/`listPartial` exactly,
+  // but for the discover BFF's native-fallback signal instead of federation
+  // partiality — "All" tab is degraded if ANY visible domain's paged feed
+  // fell back to native.
+  const allDomainsListDegraded = visibleDomains.some(
+    (domain) => allDomainPages[domain.id]?.degraded ?? false,
+  );
+  // Single source of truth for the degraded-search UX: single-domain tab reads
+  // the one paged feed directly, "All" tab is the OR above.
+  const listDegraded = selectedDomain !== null ? singleDomainList.degraded : allDomainsListDegraded;
+  // Whether the user has an active search query OR facet filter (NOT the
+  // relevance default) — decides which degraded banner variant shows below,
+  // and whether the facet chips render as paused/not-applied.
+  const searchOrFiltersActive = hasActiveSearchOrFilters(browseParams);
+  const degradedBanner = resolveDegradedBanner({
+    degraded: listDegraded,
+    searchOrFiltersActive,
+  });
 
   // Active schema: from the selected browsing domain, or first visible domain
   const activeSchema = React.useMemo(() => {
@@ -1724,6 +1777,27 @@ export function HomePage() {
     />
   );
 
+  // Task 6 (#203 §6): the page-header mount of the filters panel (passed to
+  // `PageShell` below) — as opposed to `filtersPanel` above, which is also
+  // reused as MapView's OWN copy rendered only while the map is maximized
+  // (the header is covered in fullscreen; see `MapView`'s `filtersSlot` doc).
+  // Only THIS mount marks the selected facet chips paused/not-applied when
+  // the discover BFF fell back to native with an active search/filter — the
+  // map's maximized-mode copy is unaffected (it never sees the discover path).
+  const listFiltersPanel = (
+    <MapFiltersPanel
+      domains={visibleDomains}
+      filterFieldDomains={filterFieldDomains}
+      selectedDomains={mapSelectedDomains}
+      onDomainsChange={handleMapDomainsChange}
+      selectedFields={mapSelectedFields}
+      onFieldsChange={handleMapFieldsChange}
+      showDomainToggle={selectedDomain === null}
+      viewMode={viewMode}
+      paused={listDegraded && searchOrFiltersActive}
+    />
+  );
+
   return (
     <>
     <PageShell
@@ -1745,7 +1819,7 @@ export function HomePage() {
       onSearchChange={setSearch}
       viewMode={viewMode}
       onViewModeChange={handleViewModeChange}
-      filtersSlot={filtersPanel}
+      filtersSlot={listFiltersPanel}
       // "Near me" is a LIST-view control: OFF (default) = ranked discover feed;
       // ON = proximity. The map ignores it (it reads viewport markers), so only
       // surface it in list view.
@@ -1912,6 +1986,30 @@ export function HomePage() {
                 {listPartial && (
                   <p className="mb-3 rounded-md bg-amber-50 px-3 py-1.5 text-xs font-medium text-amber-900 shadow-sm ring-1 ring-amber-300 dark:bg-amber-950 dark:text-amber-100 dark:ring-amber-800">
                     {t('home.list_partial')}
+                  </p>
+                )}
+                {/* Degraded-search indicator (#203 §6): the discover BFF fell back to
+                    native (signals-search unreachable/unconfigured/timed out) —
+                    `meta.source: 'native_fallback'` / `degraded: true`, surfaced via
+                    `singleDomainList.degraded` / the "All" tab's per-domain OR
+                    (`listDegraded`). Native results are still shown below (the
+                    fallback DOES return native items) — this only warns that a
+                    search/filter the user set is NOT actually being applied.
+                    Two variants (`resolveDegradedBanner`): PROMINENT when the user
+                    has an active search query or facet filter (their expectation is
+                    violated — filters look selected but aren't applied server-side),
+                    subtle when browsing the plain relevance default (only ranking
+                    quality is reduced, results are still relevant/recent). "Near
+                    me"/proximity (native path) never sets `degraded`, so no banner
+                    shows there. */}
+                {degradedBanner === 'search_unavailable' && (
+                  <p className="mb-3 rounded-md bg-amber-100 px-3 py-2 text-sm font-semibold text-amber-950 shadow-sm ring-2 ring-amber-400 dark:bg-amber-900 dark:text-amber-50 dark:ring-amber-700">
+                    {t('home.list_search_unavailable')}
+                  </p>
+                )}
+                {degradedBanner === 'ranking_unavailable' && (
+                  <p className="mb-3 text-xs text-muted-foreground">
+                    {t('home.list_ranking_unavailable')}
                   </p>
                 )}
                 {selectedDomain === null ? (

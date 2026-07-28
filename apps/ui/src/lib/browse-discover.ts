@@ -51,6 +51,34 @@ export function isDiscoverActive(
   return params.relevance || Boolean(params.q) || params.filters.length > 0;
 }
 
+// #203 List PR Task 6: whether the user has an active search query OR facet
+// filter — deliberately EXCLUDES `relevance` (unlike `isDiscoverActive` above).
+// This is the signal that decides which degraded-search UX the list shows when
+// the discover BFF fell back to native: a query/filter that silently stopped
+// being applied needs a PROMINENT banner, whereas the plain relevance default
+// falling back to native recency only needs a subtle note (see
+// `resolveDegradedBanner`).
+export function hasActiveSearchOrFilters(
+  params: Pick<DerivedBrowseParams, 'filters'> & { q?: string },
+): boolean {
+  return Boolean(params.q) || params.filters.length > 0;
+}
+
+export type DegradedBannerVariant = 'search_unavailable' | 'ranking_unavailable';
+
+// #203 List PR Task 6: which degraded-search banner (if any) the list should
+// show. `degraded` comes from the discover BFF's native-fallback response
+// (`meta.degraded` / `source: 'native_fallback'`, threaded through
+// `useInfiniteBrowseItems`); `searchOrFiltersActive` is
+// `hasActiveSearchOrFilters` above. Not degraded → no banner at all.
+export function resolveDegradedBanner(input: {
+  degraded: boolean;
+  searchOrFiltersActive: boolean;
+}): DegradedBannerVariant | null {
+  if (!input.degraded) return null;
+  return input.searchOrFiltersActive ? 'search_unavailable' : 'ranking_unavailable';
+}
+
 // ─── Own-item filtering (runs UPSTREAM of buildFilteredCardsForDomain) ────────
 //
 // Hides the viewer's own profile from their own browse list. Kept as a distinct

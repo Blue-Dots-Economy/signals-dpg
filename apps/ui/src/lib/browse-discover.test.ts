@@ -4,6 +4,8 @@ import {
   buildFilteredCardsForDomain,
   excludeOwnItems,
   isDiscoverActive,
+  hasActiveSearchOrFilters,
+  resolveDegradedBanner,
 } from './browse-discover';
 import type { EnumFilterField } from './enum-filters';
 import type { Item } from './item-api';
@@ -92,6 +94,45 @@ describe('buildFilteredCardsForDomain discover bypass', () => {
       mapSelectedDomains: ['seeker'],
     });
     expect(cards).toHaveLength(0);
+  });
+});
+
+describe('hasActiveSearchOrFilters', () => {
+  it('true when q is set', () => {
+    expect(hasActiveSearchOrFilters({ q: 'teacher', filters: [] })).toBe(true);
+  });
+
+  it('true when filters is non-empty', () => {
+    expect(
+      hasActiveSearchOrFilters({ filters: [{ field: 'subject', values: ['math'] }] }),
+    ).toBe(true);
+  });
+
+  it('false for the relevance-only default (no q, no filters)', () => {
+    expect(hasActiveSearchOrFilters({ filters: [] })).toBe(false);
+  });
+
+  it('false for fully empty input', () => {
+    expect(hasActiveSearchOrFilters({ q: undefined, filters: [] })).toBe(false);
+  });
+});
+
+describe('resolveDegradedBanner', () => {
+  it('null when not degraded, regardless of search/filter state', () => {
+    expect(resolveDegradedBanner({ degraded: false, searchOrFiltersActive: true })).toBeNull();
+    expect(resolveDegradedBanner({ degraded: false, searchOrFiltersActive: false })).toBeNull();
+  });
+
+  it('"search_unavailable" when degraded AND search/filters active', () => {
+    expect(resolveDegradedBanner({ degraded: true, searchOrFiltersActive: true })).toBe(
+      'search_unavailable',
+    );
+  });
+
+  it('"ranking_unavailable" when degraded AND no search/filters active', () => {
+    expect(resolveDegradedBanner({ degraded: true, searchOrFiltersActive: false })).toBe(
+      'ranking_unavailable',
+    );
   });
 });
 
