@@ -4,7 +4,7 @@ import type {
   FastifyRequest,
 } from 'fastify';
 import { randomUUID } from 'node:crypto';
-import { and, desc, eq, inArray, or } from 'drizzle-orm';
+import { and, eq, inArray, or } from 'drizzle-orm';
 import { db } from '@api/db/postgres/drizzle_config';
 import { ensureItemPartition, items } from '@dpg/database';
 import { user } from '../../../../db/postgres/schema/auth.js';
@@ -20,6 +20,12 @@ import {
 } from '@dpg/schemas';
 import { decryptItemPrivate } from '@/utils/item_decrypt';
 import { resolve_upsert_action } from './_resolve_upsert_action.js';
+import {
+  recordParticipantConsent,
+  promoteEligibleDraftsForUser,
+} from '@/services/participant_consent';
+import { getNetworkConfigById } from '@/network_configs';
+import { guardianConsentRequired, isMinor } from '@/services/minor';
 
 /**
  * POST /api/v1/admin/participant
@@ -55,7 +61,7 @@ export const participant: FastifyPluginAsync = async (app) => {
 
 type OnboardingFields = {
   phone_norm: string | null;
-  date_of_birth: string | undefined;
+  age: number | undefined;
   acting_org_id: string;
   channel: UpsertBody['channel'];
   source_id: string | undefined;
@@ -65,9 +71,10 @@ type OnboardingFields = {
 const buildOnboardingSet = (f: OnboardingFields) => ({
   phoneNumber: f.phone_norm,
   phoneNumberVerified: false,
-  dateOfBirth: f.date_of_birth ? new Date(f.date_of_birth) : null,
-  termsAccepted: true,
-  privacyAccepted: true,
+  // Age snapshot (#331) — integrating DPGs derive it from the birth year and
+  // send the number; no birth date is accepted. (Deprecated terms/privacy
+  // booleans are intentionally NOT written — consent lives in the ledger, #309.)
+  age: f.age ?? null,
   onboardedByOrgId: f.acting_org_id,
   onboardedVia: f.channel,
   onboardedSourceId: f.source_id ?? null,
@@ -222,6 +229,7 @@ export const participant_handler = async (
   reply: FastifyReply,
 ) => {
   const body = request.body;
+  let consent_recorded = 0;
   const email_norm = body.email?.trim().toLowerCase() ?? null;
   const phone_norm = body.phone_number?.trim() ?? null;
 
@@ -230,6 +238,25 @@ export const participant_handler = async (
     return reply.code(400).send({
       error: 'MISSING_IDENTIFIER',
       message: 'either email or phone_number is required',
+    });
+  }
+
+  // --- Consent-payload validation (#309) ---
+  const compliance = body.compliance ?? [];
+  // Accept-only: any entry sent as false rejects the whole request.
+  if (compliance.some((c) => c.value === false)) {
+    return reply.code(400).send({
+      error: 'CONSENT_DECLINED',
+      message: 'consent cannot be declined — omit a key to skip it',
+    });
+  }
+  // user_terms + user_privacy are a both-or-none pair.
+  const hasUserTerms = compliance.some((c) => c.key === 'user_terms' && c.value === true);
+  const hasUserPrivacy = compliance.some((c) => c.key === 'user_privacy' && c.value === true);
+  if (hasUserTerms !== hasUserPrivacy) {
+    return reply.code(400).send({
+      error: 'USER_LEVEL_INCOMPLETE',
+      message: 'user_terms and user_privacy must be sent together',
     });
   }
 
@@ -246,6 +273,7 @@ export const participant_handler = async (
       email: user.email,
       phoneNumber: user.phoneNumber,
       onboardedByOrgId: user.onboardedByOrgId,
+      age: user.age,
     })
     .from(user)
     .where(whereClause!)
@@ -266,56 +294,16 @@ export const participant_handler = async (
     body.item_state && Object.keys(body.item_state).length > 0,
   );
 
-  // 3. Idempotent dedup lookup: when the user already exists, the caller
-  //    supplies item_state but NO item_id, and this org is allowed to write
-  //    (i.e. not aggregator_owned_elsewhere), look for an existing item of
-  //    the exact (item_network, item_domain, item_type) owned by this user.
-  //    If found, the resolver routes to update_item instead of insert_item,
-  //    making repeated onboard calls idempotent.
-  //
-  //    The lookup is skipped entirely when:
-  //      - user does not exist (no item can exist yet)
-  //      - body.item_id is set (caller already targeted a specific item)
-  //      - has_item_state is false (account_only path — no item write at all)
-  //      - aggregator and does NOT own the user (aggregator_owned_elsewhere
-  //        path — we must not leak the item_id to a foreign aggregator)
-  //
-  //    Partition pruning: filtering on item_network, item_domain, item_type
-  //    AND created_by lets the Postgres planner prune to the correct child
-  //    partition before scanning.
-  let existing_owned_item_id: string | undefined;
-  if (
-    user_exists &&
-    has_item_state &&
-    !body.item_id &&
-    !(request.acting_org?.org_type === 'aggregator' && !aggregator_owns_user)
-  ) {
-    const network = body.network ?? 'blue_dot';
-    const domain = body.domain ?? 'seeker';
-    const item_type = body.item_type ?? 'profile_1.0';
-    const existing_rows = await db
-      .select({ item_id: items.item_id })
-      .from(items)
-      .where(
-        and(
-          eq(items.created_by, existing!.id),
-          eq(items.item_network, network),
-          eq(items.item_domain, domain),
-          eq(items.item_type, item_type),
-        ),
-      )
-      .orderBy(desc(items.updated_at))
-      .limit(1);
-    existing_owned_item_id = existing_rows[0]?.item_id;
-  }
-
+  // 3. Dispatch. A create is always an insert (#349): item_state with no
+  //    item_id creates a NEW profile every call; item_id updates that specific
+  //    item. The per-user profile cap is enforced downstream in
+  //    createItemInternal (createProfileItem), so all creation paths share it.
   const verdict = resolve_upsert_action({
     acting_org: request.acting_org,
     user_exists,
     item_id_in_body: body.item_id,
     has_item_state,
     aggregator_owns_user,
-    existing_owned_item_id,
   });
 
   if (verdict.kind === 'rejected') {
@@ -340,16 +328,61 @@ export const participant_handler = async (
     });
   }
 
+  // Age gates run ONLY after the ownership verdict, and only on branches that
+  // actually act on the user (owned aggregator / network_service / new-user
+  // onboarding). Evaluating them earlier — on the globally-matched user, before
+  // the aggregator_owned_elsewhere gate above — would let a non-owning aggregator
+  // probe another tenant's user: U18_NOT_ALLOWED would leak minor-status and
+  // AGE_REQUIRED would leak "no age on file". Placed here they still precede every
+  // DB write (all writes live in the branches below), so a minor is still a true
+  // no-op for legitimate onboarding.
+  //
+  // Effective age (#331): what this call supplies, else what's already on file.
+  const effectiveAge = body.age ?? existing?.age ?? null;
+
+  // U18 (#309/#331): a minor is NEVER onboarded via this server-to-server API.
+  // Reject with an error and perform NO operation — no create/update, no consent.
+  // Minors complete onboarding through the portal (guardian OTP flow).
+  if (effectiveAge != null && isMinor(effectiveAge)) {
+    return reply.code(400).send({
+      error: 'U18_NOT_ALLOWED',
+      message: 'under-18 users cannot be onboarded via this API; use the portal',
+    });
+  }
+
+  // On guardian-gated domains, recording user consent requires a known age so we
+  // can confirm the user is an adult before recording consent / promoting. An age
+  // already on the user's record satisfies it; only a brand-new / age-less user
+  // must supply one. Runs after the lookup so a returning adult re-sending the
+  // consent pair isn't wrongly rejected.
+  if (hasUserTerms && hasUserPrivacy && effectiveAge == null) {
+    const gate_network = body.network ?? 'blue_dot';
+    const gate_domain = body.domain ?? 'seeker';
+    let gated = false;
+    try {
+      gated = guardianConsentRequired(await getNetworkConfigById(gate_network), gate_domain);
+    } catch (err) {
+      request.log.warn({ err, network: gate_network }, 'network config load failed during age gate check');
+    }
+    if (gated) {
+      return reply.code(400).send({
+        error: 'AGE_REQUIRED',
+        message: 'age is required with consent on this domain',
+      });
+    }
+  }
+
   if (verdict.kind === 'account_only') {
     if (!user_exists) {
       // New user — create account but skip item creation.
       const acting_org_id = request.acting_org!.org_id;
+      const network = body.network ?? 'blue_dot';
       const now = new Date();
       const email_for_signup = email_norm ?? `${randomUUID()}@no-email.local`;
 
       const fields: OnboardingFields = {
         phone_norm,
-        date_of_birth: body.date_of_birth,
+        age: body.age,
         acting_org_id,
         channel: body.channel,
         source_id: body.source_id,
@@ -362,10 +395,21 @@ export const participant_handler = async (
         fields,
         log: request.log,
         updateExecutor: async (user_id) => {
-          await db
-            .update(user)
-            .set(buildOnboardingSet(fields))
-            .where(eq(user.id, user_id));
+          await db.transaction(async (tx) => {
+            await tx
+              .update(user)
+              .set(buildOnboardingSet(fields))
+              .where(eq(user.id, user_id));
+            const consent = await recordParticipantConsent(tx, {
+              compliance: body.compliance,
+              userId: user_id,
+              network,
+              brand: null,
+              channel: body.channel,
+              acceptedAt: now,
+            });
+            consent_recorded = consent.recorded;
+          });
         },
       });
 
@@ -382,10 +426,52 @@ export const participant_handler = async (
         owned_elsewhere: false,
         onboarded_at: now.toISOString(),
         items: [],
+        consent_recorded,
       });
     }
 
-    // Existing user, no item_state — read and return their items.
+    // Existing user, no item_state — persist age / record user-level consent,
+    // then promote any drafts the new age unblocks.
+    const hasCompliance = Boolean(body.compliance && body.compliance.length > 0);
+    if (hasCompliance || body.age != null) {
+      const network = body.network ?? 'blue_dot';
+      try {
+        await db.transaction(async (tx) => {
+          if (body.age != null) {
+            await tx
+              .update(user)
+              .set({ age: body.age, updatedAt: new Date() })
+              .where(eq(user.id, existing!.id));
+          }
+          if (hasCompliance) {
+            const consent = await recordParticipantConsent(tx, {
+              compliance: body.compliance,
+              userId: existing!.id,
+              network,
+              brand: null,
+              channel: body.channel,
+              acceptedAt: new Date(),
+            });
+            consent_recorded = consent.recorded;
+          }
+          if (body.age != null) {
+            await promoteEligibleDraftsForUser(tx, existing!.id);
+          }
+        });
+      } catch (err) {
+        // Never surface the raw error message: a DB error's text can include the
+        // failed SQL + bound params. Log the full error, return a curated code.
+        request.log.error(
+          { err },
+          'participant existing-user consent/age update failed',
+        );
+        return reply.code(500).send({
+          error: 'CONSENT_WRITE_FAILED',
+          message: 'failed to record consent',
+        });
+      }
+    }
+
     const itemsList = await readItemsForUser(existing!.id);
     return reply.code(200).send({
       user_id: existing!.id,
@@ -393,6 +479,7 @@ export const participant_handler = async (
       owned_elsewhere: false,
       onboarded_at: null,
       items: itemsList,
+      consent_recorded,
     });
   }
 
@@ -411,15 +498,50 @@ export const participant_handler = async (
       });
     }
 
-    let updateResult: { row: { item_network: string; item_domain: string; item_type: string; item_id: string } } | undefined;
+    const hasItemState = Boolean(
+      body.item_state && Object.keys(body.item_state).length > 0,
+    );
+    let updateResult:
+      | {
+          row: {
+            item_network: string;
+            item_domain: string;
+            item_type: string;
+            item_id: string;
+          };
+        }
+      | undefined;
     try {
-      updateResult = await updateItemInternal(
-        db,
-        verdict.item_id,
-        existing!.id,
-        true, // isAdmin — ownership already verified above
-        { item_state: body.item_state ?? {} },
-      );
+      await db.transaction(async (tx) => {
+        if (hasItemState) {
+          updateResult = await updateItemInternal(
+            tx,
+            verdict.item_id,
+            existing!.id,
+            true, // isAdmin — ownership already verified above
+            { item_state: body.item_state ?? {} },
+          );
+        }
+        if (body.age != null) {
+          await tx
+            .update(user)
+            .set({ age: body.age, updatedAt: new Date() })
+            .where(eq(user.id, existing!.id));
+        }
+        const consent = await recordParticipantConsent(tx, {
+          compliance: body.compliance,
+          userId: existing!.id,
+          itemId: verdict.item_id,
+          network: body.network ?? 'blue_dot',
+          brand: null,
+          channel: body.channel,
+          acceptedAt: new Date(),
+        });
+        consent_recorded = consent.recorded;
+        if (body.age != null) {
+          await promoteEligibleDraftsForUser(tx, existing!.id);
+        }
+      });
     } catch (err) {
       const e = err as { statusCode?: number; errorCode?: string };
       const isClientError =
@@ -435,22 +557,23 @@ export const participant_handler = async (
       return reply.code(e.statusCode ?? 500).send({
         error: e.errorCode ?? 'UPDATE_FAILED',
         // Only surface a curated ItemServiceError message (errorCode set). A raw
-        // DB error's message includes the failed SQL + bound params — i.e. the
-        // participant's item_state (name/phone/email) — so never return it.
+        // DB error's message includes the failed SQL + bound params — never return it.
         message: e.errorCode ? (err as Error).message : 'item update failed',
       });
     }
 
-    await publishItemEvent(
-      {
-        item_network: updateResult.row.item_network,
-        item_domain: updateResult.row.item_domain,
-        item_type: updateResult.row.item_type,
-        item_id: updateResult.row.item_id,
-        op: 'upsert',
-      },
-      request.log,
-    );
+    if (updateResult) {
+      await publishItemEvent(
+        {
+          item_network: updateResult.row.item_network,
+          item_domain: updateResult.row.item_domain,
+          item_type: updateResult.row.item_type,
+          item_id: updateResult.row.item_id,
+          op: 'upsert',
+        },
+        request.log,
+      );
+    }
 
     const itemsList = await readItemsForUser(existing!.id);
     return reply.code(200).send({
@@ -459,6 +582,7 @@ export const participant_handler = async (
       owned_elsewhere: false,
       onboarded_at: null,
       items: itemsList,
+      consent_recorded,
     });
   }
 
@@ -480,15 +604,48 @@ export const participant_handler = async (
     }
     let insertedItemId: string | undefined;
     try {
-      const { item_id } = await create_profile_item({
-        tx: db,
-        user_id: existing!.id,
-        network,
-        domain,
-        item_type,
-        payload: body.item_state ?? {},
+      // Must run inside a transaction: createItemInternal's profile-cap guard
+      // takes a transaction-scoped advisory lock (pg_advisory_xact_lock) and
+      // then counts+inserts — on the plain pooled `db` (autocommit) that lock
+      // would release immediately, leaving the check→insert non-atomic and the
+      // cap racy. The same transaction also makes the consent write + promotion
+      // atomic with the item insert. Mirrors create_new_user + /item/create.
+      await db.transaction(async (tx) => {
+        // Persist age (#331) BEFORE recording consent so promoteItemOnProfileConsent
+        // sees the adult age and can flip the new profile live. Adding a profile to
+        // an existing user is this branch; without this write, an age supplied here
+        // is dropped and the profile is stuck draft under the guardian gate (#309).
+        if (body.age != null) {
+          await tx
+            .update(user)
+            .set({ age: body.age, updatedAt: new Date() })
+            .where(eq(user.id, existing!.id));
+        }
+        const { item_id } = await create_profile_item({
+          tx,
+          user_id: existing!.id,
+          network,
+          domain,
+          item_type,
+          payload: body.item_state ?? {},
+        });
+        insertedItemId = item_id;
+        const consent = await recordParticipantConsent(tx, {
+          compliance: body.compliance,
+          userId: existing!.id,
+          itemId: item_id,
+          network,
+          brand: null,
+          channel: body.channel,
+          acceptedAt: new Date(),
+        });
+        consent_recorded = consent.recorded;
+        // A newly-known age can also unblock the user's other consented drafts
+        // (age is user-level) — sweep them, mirroring the update_item branch.
+        if (body.age != null) {
+          await promoteEligibleDraftsForUser(tx, existing!.id);
+        }
       });
-      insertedItemId = item_id;
     } catch (err) {
       const e = err as { statusCode?: number; errorCode?: string };
       const isClientError =
@@ -518,6 +675,7 @@ export const participant_handler = async (
       owned_elsewhere: false,
       onboarded_at: null,
       items: itemsList,
+      consent_recorded,
     });
   }
 
@@ -545,7 +703,7 @@ export const participant_handler = async (
 
   const fields: OnboardingFields = {
     phone_norm,
-    date_of_birth: body.date_of_birth,
+    age: body.age,
     acting_org_id,
     channel: body.channel,
     source_id: body.source_id,
@@ -574,6 +732,17 @@ export const participant_handler = async (
           payload: body.item_state ?? {},
         });
         onboarded_item_id = item_id;
+
+        const consent = await recordParticipantConsent(tx, {
+          compliance: body.compliance,
+          userId: user_id,
+          itemId: item_id,
+          network,
+          brand: null,
+          channel: body.channel,
+          acceptedAt: now,
+        });
+        consent_recorded = consent.recorded;
       });
     },
   });
@@ -599,6 +768,7 @@ export const participant_handler = async (
     owned_elsewhere: false,
     onboarded_at: now.toISOString(),
     items: itemsList,
+    consent_recorded,
   });
 };
 
@@ -618,6 +788,7 @@ async function readItemsForUser(user_id: string) {
       item_network: items.item_network,
       item_domain: items.item_domain,
       item_type: items.item_type,
+      lifecycle_status: items.lifecycle_status,
       item_state: items.item_state,
       item_locations: items.item_locations,
       item_private_state: items.item_private_state,

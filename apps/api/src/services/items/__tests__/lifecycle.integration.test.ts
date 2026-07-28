@@ -32,7 +32,7 @@
  *   7. pause → paused; pending action survives (not cancelled)
  *   8. POST /item/lifecycle {action:'unpause'} on paused-but-complete item → live
  *   9. POST /network/action/perform against a non-live target → 409 + PROFILE_NOT_LIVE
- *  10. GET /action/:id/contact-details after source pauses → 403 + PROFILE_NOT_LIVE
+ *  10. GET /action/:id/contact-details after source pauses → 200 masked (revealed:false)
  *  11. GET /network/item/fetch lists only live items (draft item excluded)
  *  12. action gated while target paused RESUMES after unpause (accept succeeds)
  */
@@ -837,12 +837,18 @@ describeIf(`lifecycle integration${can_run ? '' : ` — ${skip_reason}`}`, () =>
     });
     expect(create.statusCode).toBe(200);
     const itemId = create.json().items[0].item_id as string;
-    onboarded_user_ids.push(create.json().user_id);
+    const bdUserId = create.json().user_id as string;
+    onboarded_user_ids.push(bdUserId);
 
-    await app.inject({
+    // Pause is only valid on a LIVE profile (R7.5 / #234 Q6) — bring the
+    // bulk-created draft live via consent first, then pause it.
+    await makeLive(bdUserId, itemId, primary.network);
+
+    const pauseRes = await app.inject({
       method: 'POST', url: '/api/v1/item/lifecycle', headers: adminHeaders(ns),
       payload: { item_id: itemId, action: 'pause' },
     });
+    expect(pauseRes.statusCode).toBe(200);
 
     const requiredKey = (primary.schema.required as string[])[0];
     const clear = await app.inject({
@@ -861,6 +867,34 @@ describeIf(`lifecycle integration${can_run ? '' : ` — ${skip_reason}`}`, () =>
     });
     expect(unpause.statusCode).toBe(200);
     expect(unpause.json().lifecycle_status).toBe('draft');
+  });
+
+  // ---------------------------------------------------------------------------
+  // Pause guard (#346 / R7.5): only a LIVE profile can be voluntarily hidden.
+  // ---------------------------------------------------------------------------
+
+  it('pause on a draft profile → 409 INVALID_LIFECYCLE_ACTION (pause requires live)', async () => {
+    const email = `lc_pd_${randomUUID().slice(0, 6)}@a.test`;
+    const full = generateMinimalItemState(primary.schema);
+    const create = await app.inject({
+      method: 'POST', url: '/api/v1/admin/participant', headers: adminHeaders(ns),
+      payload: {
+        email, name: 'LC PD', terms_accepted: true, privacy_accepted: true,
+        channel: 'bulk', network: primary.network, domain: primary.domain,
+        item_type: primary.item_type, item_state: full,
+      },
+    });
+    expect(create.statusCode).toBe(200);
+    const itemId = create.json().items[0].item_id as string;
+    onboarded_user_ids.push(create.json().user_id);
+
+    // Bulk create → draft (consent pending). Pausing a draft is rejected.
+    const res = await app.inject({
+      method: 'POST', url: '/api/v1/item/lifecycle', headers: adminHeaders(ns),
+      payload: { item_id: itemId, action: 'pause' },
+    });
+    expect(res.statusCode).toBe(409);
+    expect(res.json().error).toBe('INVALID_LIFECYCLE_ACTION');
   });
 
   // ---------------------------------------------------------------------------
@@ -1015,7 +1049,7 @@ describeIf(`lifecycle integration${can_run ? '' : ` — ${skip_reason}`}`, () =>
   //     the lifecycle gate), skip so the suite stays green on minimal networks.
   // ---------------------------------------------------------------------------
 
-  it('scenario 10: GET /action/:id/contact-details after source pauses → 403 PROFILE_NOT_LIVE', async (ctx) => {
+  it('scenario 10: GET /action/:id/contact-details after source pauses → 200 masked (revealed:false)', async (ctx) => {
     // Ensure both source and target items are live first.
     // The live_item_id belongs to live_user_id and should be live after scenario 9 restore.
     const [targetRow] = await db
@@ -1133,10 +1167,11 @@ describeIf(`lifecycle integration${can_run ? '' : ` — ${skip_reason}`}`, () =>
       return;
     }
 
-    // The endpoint checks caller's item lifecycle_status; paused → 403 PROFILE_NOT_LIVE.
-    expect(detailsRes.statusCode).toBe(403);
-    const detailsBody = detailsRes.json() as { error: string };
-    expect(detailsBody.error).toBe('PROFILE_NOT_LIVE');
+    // Paused caller → PII withheld, but the endpoint returns the MASKED
+    // pre-reveal view (#273), not an error.
+    expect(detailsRes.statusCode).toBe(200);
+    const detailsBody = detailsRes.json() as { revealed: boolean };
+    expect(detailsBody.revealed).toBe(false);
   });
 
   // ---------------------------------------------------------------------------

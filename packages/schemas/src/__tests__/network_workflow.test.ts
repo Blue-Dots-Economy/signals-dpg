@@ -40,6 +40,18 @@ const baseConfig = {
   },
 };
 
+describe('network_workflow pause_enabled', () => {
+  it('defaults to true when omitted', () => {
+    expect(parseNetworkConfigDocument(baseConfig).pause_enabled).toBe(true);
+  });
+
+  it('accepts an explicit false', () => {
+    expect(
+      parseNetworkConfigDocument({ ...baseConfig, pause_enabled: false }).pause_enabled,
+    ).toBe(false);
+  });
+});
+
 describe('network_workflow reveals_pii_on_status', () => {
   it('parses a valid reveals_pii_on_status list', () => {
     const parsed = parseNetworkConfigDocument(baseConfig);

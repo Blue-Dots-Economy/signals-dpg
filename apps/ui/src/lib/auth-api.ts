@@ -132,9 +132,9 @@ export interface U18PrecheckResponse {
 }
 
 /**
- * Public pre-OTP check: does this EXISTING user still need a DOB (they hold a
- * gated-domain profile and `date_of_birth` is unset)? Drives whether the login
- * flow shows the DOB → guardian steps BEFORE the user's own OTP.
+ * Public pre-OTP check: does this EXISTING user still need to give their age
+ * (they hold a gated-domain profile and `user.age` is unset)? Drives whether the
+ * login flow shows the birth-year → guardian steps BEFORE the user's own OTP.
  */
 export async function u18Precheck(
   network: string,

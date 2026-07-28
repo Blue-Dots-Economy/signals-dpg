@@ -19,13 +19,6 @@ export type ResolveUpsertActionInput = {
   has_item_state: boolean;
   /** Only meaningful when aggregator AND user_exists. */
   aggregator_owns_user: boolean;
-  /**
-   * The caller-resolved id of the user's existing item for this
-   * (item_network, item_domain, item_type) triple, if any.
-   * Only meaningful when user_exists && has_item_state && !item_id_in_body.
-   * When present, triggers idempotent dedup-to-update instead of insert.
-   */
-  existing_owned_item_id?: string | undefined;
 };
 
 /**
@@ -36,11 +29,14 @@ export type ResolveUpsertActionInput = {
  * No DB, no I/O. The handler runs this synchronously and then dispatches
  * on the verdict.
  *
+ * Semantics (#349): a create is ALWAYS an insert. Sending item_state without
+ * item_id creates a NEW profile every call (a user may hold multiple profiles,
+ * bounded by MAX_PROFILES_PER_USER enforced downstream). item_id targets a
+ * specific existing item for an update. There is no dedup-to-update.
+ *
  * Tail logic (user_exists && authorized):
- *   - item_id_in_body && has_item_state → update_item{item_id_in_body}
- *   - has_item_state && existing_owned_item_id → update_item{existing_owned_item_id}
- *     (idempotent re-onboard: caller resolved a pre-existing item for this type)
- *   - has_item_state → insert_item  (first profile for this network/domain/type)
+ *   - item_id_in_body → update_item{item_id_in_body}   (with or without item_state)
+ *   - has_item_state → insert_item   (always a new profile)
  *   - else → account_only
  *
  * The runtime check for "item belongs to this user" (which produces
@@ -48,7 +44,7 @@ export type ResolveUpsertActionInput = {
  * `update_item` — keeping this function pure.
  */
 export const resolve_upsert_action = (input: ResolveUpsertActionInput): UpsertVerdict => {
-  const { acting_org, user_exists, item_id_in_body, has_item_state, aggregator_owns_user, existing_owned_item_id } = input;
+  const { acting_org, user_exists, item_id_in_body, has_item_state, aggregator_owns_user } = input;
 
   if (!acting_org) {
     return { kind: 'rejected', status: 403, error: 'INVALID_ACTING_ORG' };
@@ -70,8 +66,10 @@ export const resolve_upsert_action = (input: ResolveUpsertActionInput): UpsertVe
     return { kind: 'aggregator_owned_elsewhere' };
   }
 
-  if (item_id_in_body && has_item_state) return { kind: 'update_item', item_id: item_id_in_body };
-  if (has_item_state && existing_owned_item_id) return { kind: 'update_item', item_id: existing_owned_item_id };
+  // item_id targets an existing profile — with or without item_state (#309):
+  // a consent-only / DOB-only activation can update that profile without
+  // re-sending its fields. item_state without item_id is still a new insert.
+  if (item_id_in_body) return { kind: 'update_item', item_id: item_id_in_body };
   if (has_item_state) return { kind: 'insert_item' };
   return { kind: 'account_only' };
 };

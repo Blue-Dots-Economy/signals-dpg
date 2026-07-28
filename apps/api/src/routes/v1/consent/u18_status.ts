@@ -8,17 +8,17 @@ import {
 import { auth_middleware_if_enabled } from '@api/plugins/auth/auth_middleware';
 import { apiConfig } from '@/config';
 import { isMinor } from '@/services/minor';
-import { getMinorGuardian, getWardDob } from '@/services/minor_guardian_repo';
+import { getMinorGuardian, getWardAge } from '@/services/minor_guardian_repo';
 
 type Req = FastifyRequest<{ Querystring: U18StatusQuery }>;
 
 /**
  * GET /u18/status — read-only U18 status for the authenticated ward.
  *
- * Derives everything from the stored `user.date_of_birth` (captured ONCE) plus
+ * Derives everything from the stored `user.age` (captured ONCE) plus
  * the `minor_guardian` guardian-verified flag. The UI reads this to decide
- * whether to run the guardian flow — and whether the DOB is already on file —
- * instead of re-asking the date of birth at profile-creation / action time.
+ * whether to run the guardian flow — and whether the age is already on file —
+ * instead of re-asking at profile-creation / action time.
  * The server stays authoritative; the client never supplies age or minor status.
  */
 export const u18_status: FastifyPluginAsyncZod = async (fastify) => {
@@ -46,11 +46,11 @@ export const u18_status_handler = async (request: Req, reply: FastifyReply) => {
     return reply.code(400).send({ error: 'UNKNOWN_NETWORK', message: `Network "${network}" is not served` });
   }
 
-  const dob = await getWardDob(userId);
+  const age = await getWardAge(userId);
   const mg = await getMinorGuardian(userId);
   return reply.code(200).send({
-    hasBirthData: dob !== null,
-    isMinor: dob !== null && isMinor(dob),
+    hasBirthData: age !== null,
+    isMinor: age !== null && isMinor(age),
     guardianVerified: mg?.guardianVerified ?? false,
   });
 };

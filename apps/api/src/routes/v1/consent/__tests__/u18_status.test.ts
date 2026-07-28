@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 const getMinorGuardian = vi.fn();
-const getWardDob = vi.fn();
+const getWardAge = vi.fn();
 
 vi.mock('@/config', () => ({
   apiConfig: { served_domains: [{ network: 'blue_dot', domain: 'seeker' }] },
@@ -11,7 +11,7 @@ vi.mock('@api/plugins/auth/auth_middleware', () => ({
 }));
 vi.mock('@/services/minor_guardian_repo', () => ({
   getMinorGuardian: (...a: unknown[]) => getMinorGuardian(...a),
-  getWardDob: (...a: unknown[]) => getWardDob(...a),
+  getWardAge: (...a: unknown[]) => getWardAge(...a),
 }));
 
 import { u18_status_handler } from '../u18_status';
@@ -53,24 +53,24 @@ describe('u18_status_handler', () => {
     expect((reply.body as { error: string }).error).toBe('UNKNOWN_NETWORK');
   });
 
-  it('no stored DOB → hasBirthData:false, isMinor:false', async () => {
-    getWardDob.mockResolvedValue(null);
+  it('no stored age → hasBirthData:false, isMinor:false', async () => {
+    getWardAge.mockResolvedValue(null);
     getMinorGuardian.mockResolvedValue(null);
     const reply = await call({ user: { id: 'u1' }, query: { network: 'blue_dot' } });
     expect(reply.statusCode).toBe(200);
     expect(reply.body).toEqual({ hasBirthData: false, isMinor: false, guardianVerified: false });
   });
 
-  it('stored minor DOB → hasBirthData:true, isMinor:true, carries guardianVerified', async () => {
-    getWardDob.mockResolvedValue(new Date('2015-05-10'));
+  it('stored minor age → hasBirthData:true, isMinor:true, carries guardianVerified', async () => {
+    getWardAge.mockResolvedValue(11);
     getMinorGuardian.mockResolvedValue({ guardianContactType: 'email', guardianVerified: true });
     const reply = await call({ user: { id: 'u1' }, query: { network: 'blue_dot' } });
     expect(reply.statusCode).toBe(200);
     expect(reply.body).toEqual({ hasBirthData: true, isMinor: true, guardianVerified: true });
   });
 
-  it('stored adult DOB → hasBirthData:true, isMinor:false', async () => {
-    getWardDob.mockResolvedValue(new Date('1990-05-10'));
+  it('stored adult age → hasBirthData:true, isMinor:false', async () => {
+    getWardAge.mockResolvedValue(36);
     getMinorGuardian.mockResolvedValue(null);
     const reply = await call({ user: { id: 'u1' }, query: { network: 'blue_dot' } });
     expect(reply.statusCode).toBe(200);

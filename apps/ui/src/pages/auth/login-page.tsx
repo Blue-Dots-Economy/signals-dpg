@@ -30,7 +30,7 @@ import type { DotNetworkDomain } from '@/engine/types';
 import { getServedScope } from '@/lib/served-binding';
 import type { SignupExtras } from '@/lib/signup-domain';
 import { SignupDobStep } from '@/components/consent/u18/signup-dob-step';
-import { isMinorFromDate, toDateOnly } from '@/lib/guardian-consent';
+import { isMinorFromAge } from '@/lib/guardian-consent';
 import { PhoneInput, toE164 } from '@/components/auth/phone-input';
 import {
   SignupGuardianFlow,
@@ -94,10 +94,10 @@ export function LoginPage() {
   const [signupGuardianGate, setSignupGuardianGate] = useState<{
     identifier: AuthIdentifier;
     domain: string;
-    dateOfBirth: Date;
+    age: number;
     resolvedName: string;
     resolvedSignupExtras: SignupExtras;
-    /** true = an EXISTING user backfilling DOB before login (not a new signup). */
+    /** true = an EXISTING user backfilling age before login (not a new signup). */
     exists: boolean;
   } | null>(null);
   // Set for a guardian-gated (u18-enabled) domain — renders the DOB step. For a
@@ -135,6 +135,16 @@ export function LoginPage() {
   const domainOptions = servedScope
     ? networkDomains.filter((d) => servedScope.domains.includes(d.id))
     : networkDomains;
+
+  // Single-domain / split portal: exactly one served domain means there is no
+  // choice to make. Auto-select it (so the signup still carries a domain and
+  // the guardian/DOB gating below still runs) and hide the picker in the JSX —
+  // a one-option toggle is meaningless and would force a pointless click.
+  useEffect(() => {
+    if (domainOptions.length === 1 && !domain) {
+      setDomain(domainOptions[0].id);
+    }
+  }, [domainOptions, domain]);
 
   const channels: LoginChannel[] = authCfg?.loginChannels ?? ['phone', 'email'];
   const onlyEmail = channels.length === 1 && channels[0] === 'email';
@@ -178,8 +188,8 @@ export function LoginPage() {
         name: resolvedName,
         redirectTo,
         pendingConsent: pendingConsent ?? null,
-        // Set for a new signup (domain + DOB) and for an existing user who
-        // backfilled DOB pre-OTP (dateOfBirth only). otp-page persists it.
+        // Set for a new signup (domain + age) and for an existing user who
+        // backfilled age pre-OTP (age only). otp-page persists it.
         signupExtras: resolvedSignupExtras,
       },
     });
@@ -267,21 +277,21 @@ export function LoginPage() {
     await proceedToOtp(ident, exists, resolvedName, resolvedSignupExtras);
   };
 
-  // Resolve the DOB step: minor -> guardian flow (before their own OTP);
-  // adult -> ordinary consent + OTP. DOB (month/year) rides along in
-  // signupExtras so otp-page persists it post-verify.
-  const handleSignupDob = async (date: Date) => {
+  // Resolve the birth-year step: minor -> guardian flow (before their own OTP);
+  // adult -> ordinary consent + OTP. Age rides along in signupExtras so
+  // otp-page persists it post-verify.
+  const handleSignupDob = async (age: number) => {
     const gate = signupDobGate;
     if (!gate) return;
-    const extras: SignupExtras = { domain: gate.domain, dateOfBirth: toDateOnly(date) };
+    const extras: SignupExtras = { domain: gate.domain, age };
     setSignupDobGate(null);
 
     // A brand-new minor signup captures the guardian pre-auth (materialized on
     // account creation — safe, same session owns the new identifier). An
     // EXISTING user must NOT designate a guardian before proving they own the
     // number (login OTP), so their guardian step runs post-login on the home
-    // page; here we only persist the DOB and proceed to the login OTP.
-    if (isMinorFromDate(date) && !gate.exists) {
+    // page; here we only persist the age and proceed to the login OTP.
+    if (isMinorFromAge(age) && !gate.exists) {
       toast.info(t('auth.minor_toast_title', "You're under 18"), {
         description: t(
           'auth.minor_toast_desc',
@@ -291,7 +301,7 @@ export function LoginPage() {
       setSignupGuardianGate({
         identifier: gate.identifier,
         domain: gate.domain,
-        dateOfBirth: date,
+        age,
         resolvedName: gate.resolvedName,
         resolvedSignupExtras: extras,
         exists: gate.exists,
@@ -350,11 +360,27 @@ export function LoginPage() {
       // served network's own schema — see the networkDomains effect above),
       // alongside the name. DOB is NOT asked here: it's a separate step shown
       // only for guardian-gated domains (below), never for a returning user.
-      if (!exists && (!name.trim() || !domain)) {
+      if (!exists && !name.trim()) {
         setIsLoading(false);
         toast.info(t('auth.toast_one_more_step'), {
           description: t('auth.toast_one_more_step_desc', { contactLabel }),
         });
+        return;
+      }
+      // Domain is required only when the picker is shown (multi-domain portal —
+      // a single-domain portal auto-selects it). Give a specific message rather
+      // than the generic "one more step" so the user knows exactly what's missing.
+      if (!exists && !domain) {
+        setIsLoading(false);
+        // No domain: either the multi-domain picker is shown but nothing was
+        // picked, OR the network config failed / hasn't loaded so there are no
+        // options at all (the picker is never rendered) — in the latter case
+        // surface a config error instead of "select your domain" with no picker.
+        toast.error(
+          domainOptions.length === 0
+            ? t('auth.signup_options_unavailable')
+            : t('auth.select_domain_required'),
+        );
         return;
       }
 
@@ -445,7 +471,7 @@ export function LoginPage() {
       )}
       <AuthShell>
         {signupDobGate ? (
-          <SignupDobStep existing={signupDobGate.exists} onSubmit={(date) => { void handleSignupDob(date); }} />
+          <SignupDobStep existing={signupDobGate.exists} onSubmit={(age) => { void handleSignupDob(age); }} />
         ) : signupGuardianGate ? (
           <SignupGuardianFlow
             network={themeId}
@@ -456,7 +482,7 @@ export function LoginPage() {
                 ? { email: signupGuardianGate.identifier.email }
                 : { phoneNumber: signupGuardianGate.identifier.phoneNumber }) as SignupIdentifier
             }
-            dateOfBirth={signupGuardianGate.dateOfBirth}
+            age={signupGuardianGate.age}
             onComplete={handleGuardianComplete}
           />
         ) : !showSignupForm ? null : (
@@ -511,6 +537,41 @@ export function LoginPage() {
             </div>
           )}
 
+          {/* Domain — grouped directly under the channel toggle above so the
+              two selectors read as one unit. Shown only when
+              creating an account AND there's a real choice (>1 served domain);
+              a single-domain portal auto-selects it and hides this. DOB is NOT
+              asked here — it's a separate step for guardian-gated domains. */}
+          {userExists === false && !signupBlocked && domainOptions.length > 1 && (
+            <div className="space-y-1.5">
+              <Label className="text-sm font-medium">
+                {t('auth.label_domain', 'Your Domain')}
+              </Label>
+              {/* Distinct outlined buttons (not a segmented pill) — nothing is
+                  pre-selected on a multi-domain portal, so each option must
+                  clearly read as a clickable button on its own; the chosen one
+                  fills with the brand colour. */}
+              <div className="flex flex-wrap gap-2 text-sm">
+                {domainOptions.map((d) => (
+                  <button
+                    key={d.id}
+                    type="button"
+                    onClick={() => setDomain(d.id)}
+                    disabled={isLoading}
+                    className={[
+                      'flex-1 rounded-full border py-2 px-3 font-medium transition-colors capitalize whitespace-nowrap',
+                      domain === d.id
+                        ? 'border-primary bg-primary text-primary-foreground shadow-sm'
+                        : 'border-border bg-background text-foreground hover:border-primary/60 hover:bg-muted',
+                    ].join(' ')}
+                  >
+                    {domainLabel(d)}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
           {/* Contact input */}
           <div className="space-y-1.5">
             <Label htmlFor="contact" className="text-sm font-medium">
@@ -554,36 +615,6 @@ export function LoginPage() {
                 required
                 className="h-11"
               />
-            </div>
-          )}
-
-          {/* Domain — confirmed at signup alongside the name (select populated
-              from the served network's own schema). DOB is NOT asked here: it's
-              a separate step shown only for guardian-gated domains. */}
-          {userExists === false && !signupBlocked && (
-            <div className="space-y-1.5">
-              <Label className="text-sm font-medium">
-                {t('auth.label_domain', 'Your Domain')}
-              </Label>
-              {/* Segmented toggle, same style as the phone/email pills. */}
-              <div className="flex flex-wrap gap-1 rounded-full border border-border bg-muted p-1 text-sm">
-                {domainOptions.map((d) => (
-                  <button
-                    key={d.id}
-                    type="button"
-                    onClick={() => setDomain(d.id)}
-                    disabled={isLoading}
-                    className={[
-                      'flex-1 rounded-full py-1.5 px-3 font-medium transition-colors capitalize whitespace-nowrap',
-                      domain === d.id
-                        ? 'bg-background text-foreground shadow-sm'
-                        : 'text-muted-foreground hover:text-foreground',
-                    ].join(' ')}
-                  >
-                    {domainLabel(d)}
-                  </button>
-                ))}
-              </div>
             </div>
           )}
 
