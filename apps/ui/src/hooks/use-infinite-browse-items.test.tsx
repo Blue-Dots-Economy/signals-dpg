@@ -195,6 +195,32 @@ describe('useInfiniteBrowseItems', () => {
     expect(result.current.degraded).toBe(true);
   });
 
+  // Final-review follow-up: `degraded`/`source` are STICKY across infinite-scroll
+  // pages (like `partial`). If page 0 fell back to native (signals-search down)
+  // its unfiltered/unranked items are already in the feed, so a later page that
+  // reaches a recovered signals-search must NOT flip the degraded banner off —
+  // that would show the accumulated fallback items as if the filters applied.
+  it('keeps degraded=true and source=native_fallback once any page fell back, even if a later page recovers', async () => {
+    vi.mocked(fetchDiscover).mockImplementation(async (q) => {
+      const offset = q.offset ?? 0;
+      return offset === 0
+        ? { items: [item('a'), item('b')], meta: { total: 3, limit: 2, offset, source: 'native_fallback' as const, degraded: true } }
+        : { items: [item('c')], meta: { total: 3, limit: 2, offset, source: 'signals_search' as const, degraded: false } };
+    });
+    const { result } = renderHook(
+      () => useInfiniteBrowseItems(network, domain, null, { q: 'x' }),
+      { wrapper },
+    );
+    await waitFor(() => expect(result.current.items.length).toBe(2));
+    expect(result.current.degraded).toBe(true);
+    expect(result.current.source).toBe('native_fallback');
+
+    act(() => result.current.fetchNextPage());
+    await waitFor(() => expect(result.current.items.length).toBe(3));
+    expect(result.current.degraded).toBe(true);
+    expect(result.current.source).toBe('native_fallback');
+  });
+
   it('does not call fetchDiscover when q is only whitespace and no filters/relevance are set', () => {
     renderHook(
       () => useInfiniteBrowseItems(network, domain, null, { q: '   ' }),

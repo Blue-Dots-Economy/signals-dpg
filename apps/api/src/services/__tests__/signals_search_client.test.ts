@@ -79,14 +79,18 @@ describe('buildSignalsSearchRequest — envelope construction', () => {
     ]);
   });
 
-  it('maps a single-value selection to op "in" with a one-element array, even for an array-valued field', () => {
+  it('maps a single-value selection on an array-valued facet to op "contains_any" (not "in", which would never match)', () => {
     const req = buildSignalsSearchRequest({
       ...baseInput,
       filters: [{ field: 'skills', values: ['plumbing'], arrayValued: true }],
     });
 
+    // signals-search `in` is `item_state->>field = ANY(...)` (scalar text
+    // compare); on an array field that extracts the serialized-array text and
+    // never equals a single value. `contains_any` (jsonb `?|`) is correct for
+    // one OR many values, so an array facet must always use it.
     expect(req.message.intent.filters).toEqual([
-      { op: 'in', target: 'item_state.skills', value: ['plumbing'] },
+      { op: 'contains_any', target: 'item_state.skills', value: ['plumbing'] },
     ]);
   });
 

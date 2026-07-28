@@ -28,9 +28,13 @@ export interface SignalsSearchFacetInput {
   field: string;
   values: FacetValue[];
   /**
-   * Whether `item_state.<field>` is a JSON Schema array. Multi-value
-   * selections on an array field map to `contains_any`; everything else
-   * (scalar fields, and any single-value selection) maps to `in`.
+   * Whether `item_state.<field>` is a JSON Schema array. Array fields ALWAYS
+   * map to `contains_any` (jsonb `?|` overlap — correct for one OR many
+   * values); scalar fields map to `in`. Op must not depend on the selection
+   * count: signals-search's `in` uses `item_state->>field = ANY(...)`, which
+   * extracts an array field as its serialized-array TEXT and so never matches
+   * a single scalar value — a one-value selection on an array facet would
+   * silently return zero results if it used `in`.
    */
   arrayValued?: boolean;
 }
@@ -152,7 +156,10 @@ function clampOffset(offset: number): number {
 }
 
 function buildFilterClause(facet: SignalsSearchFacetInput) {
-  const useContainsAny = Boolean(facet.arrayValued) && facet.values.length > 1;
+  // Array fields → `contains_any` regardless of how many values are selected
+  // (see SignalsSearchFacetInput.arrayValued): a single-value selection on an
+  // array facet must NOT use `in`, which would never match.
+  const useContainsAny = Boolean(facet.arrayValued);
 
   return {
     op: useContainsAny ? ('contains_any' as const) : ('in' as const),
