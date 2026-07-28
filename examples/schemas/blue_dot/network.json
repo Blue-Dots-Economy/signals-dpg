@@ -81,6 +81,7 @@
             "gender": {
               "type": "string",
               "title": "Gender",
+              "filterable": true,
               "enum": [
                 "Male",
                 "Female",
@@ -108,6 +109,7 @@
             },
             "workExperience": {
               "vectorize": true,
+              "filterable": true,
               "type": "string",
               "title": "Work Experience",
               "enum": [
@@ -139,6 +141,7 @@
             },
             "natureOfJobsInterestedIn": {
               "vectorize": true,
+              "filterable": true,
               "type": "string",
               "title": "Nature of Jobs Interested In",
               "enum": [

@@ -43,6 +43,13 @@
       "when": 1784888291508,
       "tag": "0005_age_location",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1785222800859,
+      "tag": "0006_facet_item_state_indexes",
+      "breakpoints": true
     }
   ]
 }
