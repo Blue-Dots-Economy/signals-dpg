@@ -56,11 +56,20 @@ export const queryKeys = {
   browseItems: (networkId: string, domain: string, filters: Record<string, unknown>) =>
     ['browse-items', networkId, domain, filters] as const,
   /**
-   * Map markers for visible domains within a viewport (spec §5.2 / §8). Key
-   * axes carried in filters:
-   * - latBucket, lngBucket, radiusBucket (rounded viewport; buckets prevent
-   *   cache busts on sub-pixel pans or small radius changes)
-   * - limit (MAP_FETCH_LIMIT)
+   * Map markers for visible domains within a viewport (spec §5.2 / §8; bbox
+   * axes #203 map-serverside-search Task 4). `filters` is built by
+   * `useMapMarkers` and carries:
+   * - `snappedBbox` + `zoomBand` (see `lib/map-viewport-snap.ts`) when the
+   *   viewport has a bbox — a snapped-grid bbox + a clustered/individual zoom
+   *   band, so a pan/zoom that stays within the same grid cell and band
+   *   reuses the cache entry while a real move/zoom-band-cross busts it.
+   * - `latBucket`/`lngBucket`/`radiusBucket` instead, for the older
+   *   radius-only viewport shape (hand-built viewports predating the bbox
+   *   work; still exercised by existing tests).
+   * - `filters` — the active facet filter set (`item_state.*`), wired end to
+   *   end starting Task 7; included here from Task 4 on so the key shape is
+   *   ready and a filter change always produces a distinct key.
+   * - `limit`.
    * DEFERRED axes (§8): instance/API base URL (no selectedApiUrl switcher
    * exists; wire cache busting when added), activeProfileId (only affects
    * results once relevance ranking §9 lands).

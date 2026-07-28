@@ -111,4 +111,146 @@ describe('useMapMarkers', () => {
     rerender({ vp: { ...cityVp, lat: cityVp.lat + 0.1 } });
     await waitFor(() => expect(fetchNetworkMarkers).toHaveBeenCalledTimes(2));
   });
+
+  // #203 map-serverside-search Task 4: once the viewport carries a bbox (both
+  // live providers populate it now), the map sends the bbox to the server
+  // instead of a client-computed radius, and the query key snaps on the bbox
+  // + zoom band + active filters rather than the old lat/lng/radius buckets.
+  const bboxViewport = {
+    lat: 19.076,
+    lng: 72.8777,
+    radiusMeters: 3000,
+    zoom: 8,
+    minLat: 19.0,
+    minLng: 72.0,
+    maxLat: 19.5,
+    maxLng: 72.5,
+  };
+
+  it('sends min_lat/min_lng/max_lat/max_lng (not lat/lng/radius) when the viewport has a bbox', async () => {
+    vi.mocked(fetchNetworkMarkers).mockResolvedValue({
+      meta: { total: 0, limit: 5000, offset: 0, partial: false, unavailable_instances: [] },
+      markers: [],
+    });
+
+    const { result } = renderHook(() => useMapMarkers(network, [domains[0]], bboxViewport), { wrapper });
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+
+    expect(fetchNetworkMarkers).toHaveBeenCalledWith(
+      expect.objectContaining({
+        min_lat: bboxViewport.minLat,
+        min_lng: bboxViewport.minLng,
+        max_lat: bboxViewport.maxLat,
+        max_lng: bboxViewport.maxLng,
+      }),
+      expect.anything(),
+    );
+    const call = vi.mocked(fetchNetworkMarkers).mock.calls[0][0];
+    expect(call).not.toHaveProperty('item_latitude');
+    expect(call).not.toHaveProperty('item_longitude');
+    expect(call).not.toHaveProperty('radius_meters');
+  });
+
+  it('forwards the active facet filters as item_state when provided', async () => {
+    vi.mocked(fetchNetworkMarkers).mockResolvedValue({
+      meta: { total: 0, limit: 5000, offset: 0, partial: false, unavailable_instances: [] },
+      markers: [],
+    });
+
+    renderHook(() => useMapMarkers(network, [domains[0]], bboxViewport, { gender: ['female'] }), {
+      wrapper,
+    });
+    await waitFor(() => expect(fetchNetworkMarkers).toHaveBeenCalled());
+
+    expect(fetchNetworkMarkers).toHaveBeenCalledWith(
+      expect.objectContaining({ item_state: { gender: ['female'] } }),
+      expect.anything(),
+    );
+  });
+
+  it('reuses the cache for a same/contained bbox + same zoom band + same filters', async () => {
+    vi.mocked(fetchNetworkMarkers).mockResolvedValue({
+      meta: { total: 0, limit: 5000, offset: 0, partial: false, unavailable_instances: [] },
+      markers: [],
+    });
+
+    const { result, rerender } = renderHook(
+      ({ vp, filters }: { vp: typeof bboxViewport; filters: Record<string, unknown> }) =>
+        useMapMarkers(network, [domains[0]], vp, filters),
+      { wrapper, initialProps: { vp: bboxViewport, filters: { gender: ['female'] } } },
+    );
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+    expect(fetchNetworkMarkers).toHaveBeenCalledTimes(1);
+
+    // Contained bbox, well within the same snapped grid cell, same filters → no refetch.
+    const contained = {
+      ...bboxViewport,
+      minLat: bboxViewport.minLat + 0.01,
+      minLng: bboxViewport.minLng + 0.01,
+      maxLat: bboxViewport.maxLat - 0.01,
+      maxLng: bboxViewport.maxLng - 0.01,
+    };
+    rerender({ vp: contained, filters: { gender: ['female'] } });
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+    expect(fetchNetworkMarkers).toHaveBeenCalledTimes(1);
+  });
+
+  it('refetches when a pan crosses a snapped grid cell', async () => {
+    vi.mocked(fetchNetworkMarkers).mockResolvedValue({
+      meta: { total: 0, limit: 5000, offset: 0, partial: false, unavailable_instances: [] },
+      markers: [],
+    });
+
+    const { result, rerender } = renderHook(
+      ({ vp }: { vp: typeof bboxViewport }) => useMapMarkers(network, [domains[0]], vp),
+      { wrapper, initialProps: { vp: bboxViewport } },
+    );
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+    expect(fetchNetworkMarkers).toHaveBeenCalledTimes(1);
+
+    const panned = {
+      ...bboxViewport,
+      minLat: bboxViewport.minLat + 0.1,
+      minLng: bboxViewport.minLng + 0.1,
+      maxLat: bboxViewport.maxLat + 0.1,
+      maxLng: bboxViewport.maxLng + 0.1,
+    };
+    rerender({ vp: panned });
+    await waitFor(() => expect(fetchNetworkMarkers).toHaveBeenCalledTimes(2));
+  });
+
+  it('refetches when zoom crosses the cluster-disable band, even with the same bbox', async () => {
+    vi.mocked(fetchNetworkMarkers).mockResolvedValue({
+      meta: { total: 0, limit: 5000, offset: 0, partial: false, unavailable_instances: [] },
+      markers: [],
+    });
+
+    const { result, rerender } = renderHook(
+      ({ vp }: { vp: typeof bboxViewport }) => useMapMarkers(network, [domains[0]], vp),
+      { wrapper, initialProps: { vp: { ...bboxViewport, zoom: 13 } } },
+    );
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+    expect(fetchNetworkMarkers).toHaveBeenCalledTimes(1);
+
+    rerender({ vp: { ...bboxViewport, zoom: 14 } });
+    await waitFor(() => expect(fetchNetworkMarkers).toHaveBeenCalledTimes(2));
+  });
+
+  it('refetches when the active facet filters change, even with the same bbox and zoom', async () => {
+    vi.mocked(fetchNetworkMarkers).mockResolvedValue({
+      meta: { total: 0, limit: 5000, offset: 0, partial: false, unavailable_instances: [] },
+      markers: [],
+    });
+
+    const { result, rerender } = renderHook(
+      ({ filters }: { filters: Record<string, unknown> }) =>
+        useMapMarkers(network, [domains[0]], bboxViewport, filters),
+      { wrapper, initialProps: { filters: { gender: ['female'] } } },
+    );
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+    expect(fetchNetworkMarkers).toHaveBeenCalledTimes(1);
+
+    rerender({ filters: { gender: ['male'] } });
+    await waitFor(() => expect(fetchNetworkMarkers).toHaveBeenCalledTimes(2));
+  });
 });

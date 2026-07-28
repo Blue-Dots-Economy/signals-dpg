@@ -130,6 +130,17 @@ export interface FetchNetworkMarkersQuery {
   item_latitude?: number;
   item_longitude?: number;
   radius_meters?: number;
+  /**
+   * Bbox alternative to `item_latitude`/`item_longitude`/`radius_meters`
+   * (#203 map-serverside-search Task 4) — mutually exclusive with the radius
+   * params on the server (`MarkersQuerySchema`'s refine). The map path sends
+   * these (from the viewport's `map.getBounds()` corners); the list's
+   * distance path and the tourist app keep sending the radius params.
+   */
+  min_lat?: number;
+  min_lng?: number;
+  max_lat?: number;
+  max_lng?: number;
   item_state?: Record<string, unknown>;
   limit?: number;
   offset?: number;
@@ -155,6 +166,10 @@ export async function fetchNetworkMarkers(
   if (query.radius_meters !== undefined) {
     params.set('radius_meters', String(query.radius_meters));
   }
+  if (query.min_lat !== undefined) params.set('min_lat', String(query.min_lat));
+  if (query.min_lng !== undefined) params.set('min_lng', String(query.min_lng));
+  if (query.max_lat !== undefined) params.set('max_lat', String(query.max_lat));
+  if (query.max_lng !== undefined) params.set('max_lng', String(query.max_lng));
   // Serialize item_state as qs bracket notation (`item_state[field]=value`),
   // which the server's `fastify-qs` parser decodes to a nested object that
   // `MarkersQuerySchema.item_state` (a `z.record`) accepts and buildWhereClause

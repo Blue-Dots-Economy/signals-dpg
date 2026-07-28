@@ -4,6 +4,7 @@ import { fetchNetworkMarkers, MAP_FETCH_LIMIT } from '@/lib/network-api';
 import type { Marker } from '@/lib/network-api';
 import type { DotNetworkSchema, DotNetworkDomain, MapViewport } from '@/engine/types';
 import { queryKeys } from '@/lib/query-keys';
+import { snapViewportForKey } from '@/lib/map-viewport-snap';
 
 // Map tier (spec §5.2 / §8): markers are lightweight pins, cached ~90s
 // client-side, mirrored by `cache_ttl_seconds` sent to the server so the
@@ -61,18 +62,33 @@ interface UseMapMarkersResult {
 /**
  * Fetch map markers (`/network/item/markers`) for the visible domains within
  * a viewport, one cached query per domain via `useQueries` (mirrors the
- * per-domain `useQueries` pattern). Map enum/state filtering is
- * DEFERRED in P4 (#203 scope decision) — this hook only ever sends viewport +
- * domain + type + limit; it must never take or forward `item_state`.
+ * per-domain `useQueries` pattern).
+ *
+ * `filters` is the active facet filter set (`item_state.*`, e.g.
+ * `{ gender: ['female'] }`) — forwarded to the server as `item_state` and
+ * folded into the query key so a filter change always produces a distinct
+ * cache entry. Defaults to `{}` (no filters): the map filters panel isn't
+ * wired to this hook yet (#203 map-serverside-search Task 7 does that); this
+ * parameter exists from Task 4 on so the key shape is ready ahead of time.
  */
 export function useMapMarkers(
   network: DotNetworkSchema | null,
   domains: DotNetworkDomain[],
   viewport: MapViewport | null,
+  filters: Record<string, unknown> = {},
 ): UseMapMarkersResult {
   const limit = MAP_FETCH_LIMIT;
   const active = network && viewport ? domains : [];
-  const buckets = viewport ? viewportBuckets(viewport) : null;
+
+  // Bbox path (#203 map-serverside-search Task 4): both live map providers
+  // now report `map.getBounds()` corners on every emit, so `viewport` has a
+  // bbox in practice. The snapped-bbox + zoom-band key axes replace the old
+  // lat/lng/radius buckets for this path — see `lib/map-viewport-snap.ts`.
+  const snappedKey = viewport ? snapViewportForKey(viewport) : null;
+  // Legacy radius-bucket fallback, kept for callers that hand-build a
+  // radius-only `MapViewport` (existing tests, anything predating the bbox
+  // work) — the request itself still sends the real, unrounded radius.
+  const buckets = viewport && !snappedKey ? viewportBuckets(viewport) : null;
   const latBucket = buckets?.latBucket ?? null;
   const lngBucket = buckets?.lngBucket ?? null;
   const radiusBucket = buckets?.radiusBucket ?? null;
@@ -81,22 +97,33 @@ export function useMapMarkers(
     queries: active.map((domain) => {
       const itemTypeKeys = domain.item_schemas ? Object.keys(domain.item_schemas) : [];
       const itemType = itemTypeKeys.length > 0 ? itemTypeKeys[0] : 'profile';
+      const keyFilters = snappedKey
+        ? { snappedBbox: snappedKey.snappedBbox, zoomBand: snappedKey.zoomBand, filters, limit }
+        : { latBucket, lngBucket, radiusBucket, filters, limit };
       return {
-        queryKey: queryKeys.markers(network!.id, domain.id, {
-          latBucket,
-          lngBucket,
-          radiusBucket,
-          limit,
-        }),
+        queryKey: queryKeys.markers(network!.id, domain.id, keyFilters),
         queryFn: async ({ signal }: { signal: AbortSignal }) =>
           fetchNetworkMarkers(
             {
               item_network: network!.id,
               item_domain: domain.id,
               item_type: itemType,
-              item_latitude: viewport!.lat,
-              item_longitude: viewport!.lng,
-              radius_meters: viewport!.radiusMeters,
+              // Bbox and radius are mutually exclusive on the server — send
+              // whichever the viewport actually has (bbox once both
+              // providers' first report has landed; radius otherwise).
+              ...(snappedKey
+                ? {
+                    min_lat: viewport!.minLat,
+                    min_lng: viewport!.minLng,
+                    max_lat: viewport!.maxLat,
+                    max_lng: viewport!.maxLng,
+                  }
+                : {
+                    item_latitude: viewport!.lat,
+                    item_longitude: viewport!.lng,
+                    radius_meters: viewport!.radiusMeters,
+                  }),
+              ...(Object.keys(filters).length > 0 ? { item_state: filters } : {}),
               limit,
               cache_ttl_seconds: MAP_CACHE_TTL_SECONDS,
             },
