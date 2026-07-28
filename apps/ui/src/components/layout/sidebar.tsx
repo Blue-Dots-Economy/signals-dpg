@@ -138,77 +138,186 @@ export function AppSidebar({
       </SidebarHeader>
       <SidebarContent>
         <nav aria-label="Primary" className="flex flex-1 flex-col gap-2">
-          {showNetworkSelector && (
+        {showNetworkSelector && (
+          <SidebarGroup>
+            <SidebarGroupLabel>{t('nav.networks_group')}</SidebarGroupLabel>
+            <SidebarGroupContent>
+              <SidebarMenu>
+                {networks.map((network) => (
+                  <SidebarMenuItem key={network.id}>
+                    <SidebarMenuButton
+                      isActive={selectedNetwork === network.id}
+                      onClick={() => onNetworkSelect?.(network.id)}
+                    >
+                      <Network className="h-4 w-4" />
+                      <span>{network.display_name || network.id}</span>
+                    </SidebarMenuButton>
+                  </SidebarMenuItem>
+                ))}
+              </SidebarMenu>
+            </SidebarGroupContent>
+          </SidebarGroup>
+        )}
+        {showNetworkSelector && <SidebarSeparator />}
+        {/* The Browse domain selector only appears when there is MORE THAN ONE
+            browseable domain (i.e. >1 distinct interaction `to_domain`). With a
+            single target domain there is no choice to make — a lone tab (and an
+            "All") is redundant — so the whole selector and its separator are
+            hidden, and that domain's listings render directly in the main view.
+            Driven by the network's interactions; not network-specific. */}
+        {domains.length > 1 && (
+          <>
             <SidebarGroup>
-              <SidebarGroupLabel>{t('nav.networks_group')}</SidebarGroupLabel>
+              <SidebarGroupLabel>{t('nav.browse_group')}</SidebarGroupLabel>
               <SidebarGroupContent>
                 <SidebarMenu>
-                  {networks.map((network) => (
-                    <SidebarMenuItem key={network.id}>
-                      <SidebarMenuButton
-                        isActive={selectedNetwork === network.id}
-                        onClick={() => onNetworkSelect?.(network.id)}
-                      >
-                        <Network className="h-4 w-4" />
-                        <span>{network.display_name || network.id}</span>
-                      </SidebarMenuButton>
-                    </SidebarMenuItem>
-                  ))}
+                  <SidebarMenuItem>
+                    <SidebarMenuButton
+                      isActive={selectedDomain === null}
+                      onClick={() => onDomainSelect(null)}
+                    >
+                      <LayoutGrid className="h-4 w-4" />
+                      <span>{t('common.all')}</span>
+                    </SidebarMenuButton>
+                  </SidebarMenuItem>
+                  {domains.map((domain) => {
+                    const Icon = getDomainIcon(domain.id, selectedNetwork);
+                    const label = domain.id
+                      .replace(/_/g, ' ')
+                      .replace(/\b\w/g, (c) => c.toUpperCase());
+                    return (
+                      <SidebarMenuItem key={domain.id}>
+                        <SidebarMenuButton
+                          isActive={selectedDomain === domain.id}
+                          onClick={() => onDomainSelect(domain.id)}
+                          title={domain.description}
+                        >
+                          <Icon className="h-4 w-4" />
+                          <span>{label}</span>
+                        </SidebarMenuButton>
+                      </SidebarMenuItem>
+                    );
+                  })}
                 </SidebarMenu>
               </SidebarGroupContent>
             </SidebarGroup>
-          )}
-          {showNetworkSelector && <SidebarSeparator />}
-          {/* The Browse domain selector only appears when there is MORE THAN ONE
-              browseable domain (i.e. >1 distinct interaction `to_domain`). With a
-              single target domain there is no choice to make — a lone tab (and an
-              "All") is redundant — so the whole selector and its separator are
-              hidden, and that domain's listings render directly in the main view.
-              Driven by the network's interactions; not network-specific. */}
-          {domains.length > 1 && (
-            <>
-              <SidebarGroup>
-                <SidebarGroupLabel>{t('nav.browse_group')}</SidebarGroupLabel>
-                <SidebarGroupContent>
-                  <SidebarMenu>
-                    <SidebarMenuItem>
-                      <SidebarMenuButton
-                        isActive={selectedDomain === null}
-                        onClick={() => onDomainSelect(null)}
-                      >
-                        <LayoutGrid className="h-4 w-4" />
-                        <span>{t('common.all')}</span>
-                      </SidebarMenuButton>
-                    </SidebarMenuItem>
-                    {domains.map((domain) => {
-                      const Icon = getDomainIcon(domain.id, selectedNetwork);
-                      const label = domain.id
-                        .replace(/_/g, ' ')
-                        .replace(/\b\w/g, (c) => c.toUpperCase());
-                      return (
-                        <SidebarMenuItem key={domain.id}>
-                          <SidebarMenuButton
-                            isActive={selectedDomain === domain.id}
-                            onClick={() => onDomainSelect(domain.id)}
-                            title={domain.description}
-                          >
-                            <Icon className="h-4 w-4" />
-                            <span>{label}</span>
-                          </SidebarMenuButton>
-                        </SidebarMenuItem>
-                      );
-                    })}
-                  </SidebarMenu>
-                </SidebarGroupContent>
-              </SidebarGroup>
-              <SidebarSeparator />
-            </>
-          )}
-          <SidebarGroup>
-            <SidebarGroupLabel>{myItemsGroupLabel}</SidebarGroupLabel>
-            <SidebarGroupContent>
-              {domainKeys.length === 0 ? (
-                <SidebarMenu>
+            <SidebarSeparator />
+          </>
+        )}
+        <SidebarGroup>
+          <SidebarGroupLabel>{myItemsGroupLabel}</SidebarGroupLabel>
+          <SidebarGroupContent>
+            {domainKeys.length === 0 ? (
+              <SidebarMenu>
+                <SidebarMenuItem>
+                  <SidebarMenuButton onClick={() => navigate(`/profile/new?network=${selectedNetwork ?? ''}`)}>
+                    <Plus className="h-4 w-4" />
+                    <span>{t('nav.create_profile')}</span>
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
+              </SidebarMenu>
+            ) : (
+              <div className="space-y-1">
+                {domainKeys.map((domainId) => {
+                  const profiles = profilesByDomain[domainId];
+                  const Icon = getDomainIcon(domainId, selectedNetwork);
+                  const label = getDomainLabel(domainId);
+                  // A single domain group (always the case in a domain-bound
+                  // portal) needs no accordion header — show its profiles
+                  // directly, always expanded.
+                  const singleGroup = domainKeys.length === 1;
+                  const isExpanded = singleGroup || expandedDomains.has(domainId);
+                  const hasActiveProfile = profiles.some((p) => p.item_id === activeProfileId);
+
+                  return (
+                    <div key={domainId}>
+                      {/* Accordion header — only when there's more than one
+                          domain group; a single group is shown flat. */}
+                      {!singleGroup && (
+                        <button
+                          onClick={() => toggleDomain(domainId)}
+                          className={[
+                            'flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-sm transition-colors',
+                            'hover:bg-sidebar-accent hover:text-sidebar-accent-foreground',
+                            hasActiveProfile
+                              ? 'font-semibold text-primary'
+                              : 'text-sidebar-foreground/70',
+                          ].join(' ')}
+                        >
+                          <Icon className="h-3.5 w-3.5 shrink-0" />
+                          <span className="flex-1 truncate text-left">{label}</span>
+                          <span className="text-xs text-muted-foreground tabular-nums">
+                            {profiles.length}
+                          </span>
+                          <ChevronRight
+                            className={[
+                              'h-3.5 w-3.5 shrink-0 transition-transform duration-200',
+                              isExpanded ? 'rotate-90' : '',
+                            ].join(' ')}
+                          />
+                        </button>
+                      )}
+
+                      {/* Accordion body */}
+                      {isExpanded && (
+                        <div className={singleGroup ? 'mt-0.5' : 'ml-3 mt-0.5 border-l border-border pl-2'}>
+                          <SidebarMenu>
+                            {profiles.map((profile) => {
+                              const schema = userSchemas?.[profile.item_domain];
+                              const titleKey = schema ? findTitleField(schema) : null;
+                              const title = titleKey
+                                ? String(profile.item_state[titleKey] ?? t('nav.profile_fallback'))
+                                : t('nav.profile_fallback');
+                              const isActiveProfile = profile.item_id === activeProfileId;
+
+                              return (
+                                <SidebarMenuItem key={profile.item_id}>
+                                  <SidebarMenuButton
+                                    onClick={() => onActiveProfileChange?.(profile.item_id)}
+                                    className={
+                                      isActiveProfile
+                                        ? 'relative bg-primary/12 text-primary font-medium border-l-2 border-primary rounded-l-none pl-2 hover:bg-primary/15'
+                                        : ''
+                                    }
+                                  >
+                                    <span className="truncate">{title}</span>
+                                    {/* Lifecycle state chip (selection is shown by the
+                                        row highlight): Active / Paused / Draft. */}
+                                    {profile.lifecycle_status && (
+                                      <span
+                                        className={[
+                                          'ml-auto shrink-0 rounded-full px-1.5 py-0.5 text-[10px] font-semibold leading-none capitalize',
+                                          profile.lifecycle_status === 'live'
+                                            ? 'bg-green-100 text-green-700 dark:bg-green-500/20 dark:text-green-300'
+                                            : profile.lifecycle_status === 'paused'
+                                              ? 'bg-amber-100 text-amber-800 dark:bg-amber-500/20 dark:text-amber-300'
+                                              : 'bg-muted text-muted-foreground',
+                                        ].join(' ')}
+                                      >
+                                        {t(
+                                          `nav.status_${profile.lifecycle_status}`,
+                                          profile.lifecycle_status === 'live'
+                                            ? 'Active'
+                                            : profile.lifecycle_status,
+                                        )}
+                                      </span>
+                                    )}
+                                  </SidebarMenuButton>
+                                  <SidebarMenuAction
+                                    onClick={() => navigate(`/profile/${profile.item_id}/edit?network=${encodeURIComponent(profile.item_network)}`)}
+                                  >
+                                    <Pencil className="h-4 w-4" />
+                                  </SidebarMenuAction>
+                                </SidebarMenuItem>
+                              );
+                            })}
+                          </SidebarMenu>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+                <SidebarMenu className="mt-1">
                   <SidebarMenuItem>
                     <SidebarMenuButton onClick={() => navigate(`/profile/new?network=${selectedNetwork ?? ''}`)}>
                       <Plus className="h-4 w-4" />
@@ -216,134 +325,25 @@ export function AppSidebar({
                     </SidebarMenuButton>
                   </SidebarMenuItem>
                 </SidebarMenu>
-              ) : (
-                <div className="space-y-1">
-                  {domainKeys.map((domainId) => {
-                    const profiles = profilesByDomain[domainId];
-                    const Icon = getDomainIcon(domainId, selectedNetwork);
-                    const label = getDomainLabel(domainId);
-                    // A single domain group (always the case in a domain-bound
-                    // portal) needs no accordion header — show its profiles
-                    // directly, always expanded.
-                    const singleGroup = domainKeys.length === 1;
-                    const isExpanded = singleGroup || expandedDomains.has(domainId);
-                    const hasActiveProfile = profiles.some((p) => p.item_id === activeProfileId);
-
-                    return (
-                      <div key={domainId}>
-                        {/* Accordion header — only when there's more than one
-                            domain group; a single group is shown flat. */}
-                        {!singleGroup && (
-                          <button
-                            onClick={() => toggleDomain(domainId)}
-                            className={[
-                              'flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-sm transition-colors',
-                              'hover:bg-sidebar-accent hover:text-sidebar-accent-foreground',
-                              hasActiveProfile
-                                ? 'font-semibold text-primary'
-                                : 'text-sidebar-foreground/70',
-                            ].join(' ')}
-                          >
-                            <Icon className="h-3.5 w-3.5 shrink-0" />
-                            <span className="flex-1 truncate text-left">{label}</span>
-                            <span className="text-xs text-muted-foreground tabular-nums">
-                              {profiles.length}
-                            </span>
-                            <ChevronRight
-                              className={[
-                                'h-3.5 w-3.5 shrink-0 transition-transform duration-200',
-                                isExpanded ? 'rotate-90' : '',
-                              ].join(' ')}
-                            />
-                          </button>
-                        )}
-
-                        {/* Accordion body */}
-                        {isExpanded && (
-                          <div className={singleGroup ? 'mt-0.5' : 'ml-3 mt-0.5 border-l border-border pl-2'}>
-                            <SidebarMenu>
-                              {profiles.map((profile) => {
-                                const schema = userSchemas?.[profile.item_domain];
-                                const titleKey = schema ? findTitleField(schema) : null;
-                                const title = titleKey
-                                  ? String(profile.item_state[titleKey] ?? t('nav.profile_fallback'))
-                                  : t('nav.profile_fallback');
-                                const isActiveProfile = profile.item_id === activeProfileId;
-
-                                return (
-                                  <SidebarMenuItem key={profile.item_id}>
-                                    <SidebarMenuButton
-                                      onClick={() => onActiveProfileChange?.(profile.item_id)}
-                                      className={
-                                        isActiveProfile
-                                          ? 'relative bg-primary/12 text-primary font-medium border-l-2 border-primary rounded-l-none pl-2 hover:bg-primary/15'
-                                          : ''
-                                      }
-                                    >
-                                      <span className="truncate">{title}</span>
-                                      {/* Lifecycle state chip (selection is shown by the
-                                          row highlight): Active / Paused / Draft. */}
-                                      {profile.lifecycle_status && (
-                                        <span
-                                          className={[
-                                            'ml-auto shrink-0 rounded-full px-1.5 py-0.5 text-[10px] font-semibold leading-none capitalize',
-                                            profile.lifecycle_status === 'live'
-                                              ? 'bg-green-100 text-green-700 dark:bg-green-500/20 dark:text-green-300'
-                                              : profile.lifecycle_status === 'paused'
-                                                ? 'bg-amber-100 text-amber-800 dark:bg-amber-500/20 dark:text-amber-300'
-                                                : 'bg-muted text-muted-foreground',
-                                          ].join(' ')}
-                                        >
-                                          {t(
-                                            `nav.status_${profile.lifecycle_status}`,
-                                            profile.lifecycle_status === 'live'
-                                              ? 'Active'
-                                              : profile.lifecycle_status,
-                                          )}
-                                        </span>
-                                      )}
-                                    </SidebarMenuButton>
-                                    <SidebarMenuAction
-                                      onClick={() => navigate(`/profile/${profile.item_id}/edit?network=${encodeURIComponent(profile.item_network)}`)}
-                                    >
-                                      <Pencil className="h-4 w-4" />
-                                    </SidebarMenuAction>
-                                  </SidebarMenuItem>
-                                );
-                              })}
-                            </SidebarMenu>
-                          </div>
-                        )}
-                      </div>
-                    );
-                  })}
-                  <SidebarMenu className="mt-1">
-                    <SidebarMenuItem>
-                      <SidebarMenuButton onClick={() => navigate(`/profile/new?network=${selectedNetwork ?? ''}`)}>
-                        <Plus className="h-4 w-4" />
-                        <span>{t('nav.create_profile')}</span>
-                      </SidebarMenuButton>
-                    </SidebarMenuItem>
-                  </SidebarMenu>
-                </div>
-              )}
-            </SidebarGroupContent>
-          </SidebarGroup>
-          <SidebarSeparator />
-          <SidebarGroup>
-            <SidebarGroupLabel>{t('nav.actions_group')}</SidebarGroupLabel>
-            <SidebarGroupContent>
-              <SidebarMenu>
-                <SidebarMenuItem>
-                  <SidebarMenuButton onClick={() => navigate('/my-actions')}>
-                    <Activity className="h-4 w-4" />
-                    <span>{t('nav.my_actions')}</span>
-                    <PendingActionsBadge />
-                  </SidebarMenuButton>
-                </SidebarMenuItem>
-              </SidebarMenu>
-            </SidebarGroupContent>
-          </SidebarGroup>
+              </div>
+            )}
+          </SidebarGroupContent>
+        </SidebarGroup>
+        <SidebarSeparator />
+        <SidebarGroup>
+          <SidebarGroupLabel>{t('nav.actions_group')}</SidebarGroupLabel>
+          <SidebarGroupContent>
+            <SidebarMenu>
+              <SidebarMenuItem>
+                <SidebarMenuButton onClick={() => navigate('/my-actions')}>
+                  <Activity className="h-4 w-4" />
+                  <span>{t('nav.my_actions')}</span>
+                  <PendingActionsBadge />
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+            </SidebarMenu>
+          </SidebarGroupContent>
+        </SidebarGroup>
         </nav>
       </SidebarContent>
     </ShadcnSidebar>

@@ -1614,7 +1614,7 @@ export function HomePage() {
   if (!network) {
     return (
       <>
-        <div className="flex h-screen flex-col">
+        <div className="flex h-svh flex-col">
         <div className="h-14 border-b bg-gradient-to-r from-background to-primary/5" />
         <div className="flex flex-1 overflow-hidden">
           <div className="hidden md:block w-64 shrink-0 border-r p-4 space-y-3">

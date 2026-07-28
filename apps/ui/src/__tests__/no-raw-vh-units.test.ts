@@ -14,9 +14,7 @@ function walk(dir: string): string[] {
       if (name === 'node_modules' || name === '__tests__') return [];
       return walk(p);
     }
-    // Skip home-page.tsx as it is owned by PR #295
-    if (p.endsWith('home-page.tsx')) return [];
-    return p.endsWith('.tsx') || p.endsWith('.ts') ? [p] : [];
+    return p.endsWith('.tsx') || p.endsWith('.ts') || p.endsWith('.css') ? [p] : [];
   });
 }
 
