@@ -185,7 +185,10 @@ function DomainPagedFetch({
   // #203 List PR Task 5: the discover params (q/filters/relevance) derived from
   // the search box, facet panel, and "Near me" toggle. Passed identically for
   // every visible domain so the whole "All" feed shares one discover mode.
-  browseOpts: { q?: string; filters: DiscoverFacetFilter[]; relevance: boolean };
+  // Omitted by the map-view count-only fetchers, which stay on the native
+  // browse path (the "Near me" toggle is a list-view control; the map is
+  // unaffected per spec §5.3).
+  browseOpts?: { q?: string; filters: DiscoverFacetFilter[]; relevance: boolean };
   onItems: (
     domainId: string,
     items: Item[],
@@ -1766,15 +1769,21 @@ export function HomePage() {
           DomainPagedFetch children. In list view the grid below mounts its own
           set; without this, map view never fetches those totals so the count
           stays hidden until the user visits the list once. Gated to map view
-          (viewMode !== 'list') so the two sets never double-mount. */}
+          (viewMode !== 'list') so the two sets never double-mount.
+
+          These count-only fetchers stay on the NATIVE browse path (no discover
+          opts, raw proximity coords) regardless of the list's "Near me" toggle:
+          the toggle is a list-view control and the map is unaffected (spec §5.3
+          — the map ignores search/filters/relevance entirely). Routing this
+          header count through discover would silently make it diverge from the
+          map's own marker total whenever the search index lags the live DB. */}
       {user && network && selectedDomain === null && viewMode !== 'list' &&
         visibleDomains.map((domain) => (
           <DomainPagedFetch
             key={`count-${domain.id}`}
             network={network}
             domain={domain}
-            coords={browseLocation}
-            browseOpts={browseHookOpts}
+            coords={browseCoords}
             onItems={handleDomainItems}
           />
         ))}
