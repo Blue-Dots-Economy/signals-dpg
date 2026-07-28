@@ -13,9 +13,9 @@ jobs:
   sync:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           repository: Blue-Dots-Economy/bluedots-docs
           token: ${{ secrets.DOCS_SYNC_TOKEN }}
@@ -27,7 +27,7 @@ jobs:
       # No-op when the JSON is byte-identical: create-pull-request opens no PR
       # if the copy produced no diff, and updates the existing PR otherwise.
       - name: Open or update sync PR
-        uses: peter-evans/create-pull-request@v7
+        uses: peter-evans/create-pull-request@v8
         with:
           path: docs-repo
           token: ${{ secrets.DOCS_SYNC_TOKEN }}

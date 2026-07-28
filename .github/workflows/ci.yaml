@@ -21,11 +21,11 @@ jobs:
   typecheck-api:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
         with:
           version: 11.1.2
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: '24'
           cache: pnpm
@@ -35,11 +35,11 @@ jobs:
   typecheck-ui:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
         with:
           version: 11.1.2
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: '24'
           cache: pnpm
@@ -52,11 +52,11 @@ jobs:
     # own test suites use a no-op `echo "no tests yet"` script so the
     # workspace-recursive run stays green.
     steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
         with:
           version: 11.1.2
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: '24'
           cache: pnpm
@@ -70,15 +70,15 @@ jobs:
     # evaluates those before the runner provisions a workspace, so there is
     # no filesystem yet. Guard at step level instead, after checkout.
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Note when dep-cruise config is absent
         if: hashFiles('.dependency-cruiser.cjs') == ''
         run: echo "::notice::No .dependency-cruiser.cjs found; skipping dep-cruise."
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v6
         if: hashFiles('.dependency-cruiser.cjs') != ''
         with:
           version: 11.1.2
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         if: hashFiles('.dependency-cruiser.cjs') != ''
         with:
           node-version: '24'
@@ -131,11 +131,11 @@ jobs:
       PG_SQL_URL: postgres://postgres:postgres@localhost:5432/postgres
       PG_DRIZZLE_URL: postgres://postgres:postgres@localhost:5433/postgres
     steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
         with:
           version: 11.1.2
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: '24'
           cache: pnpm
@@ -226,11 +226,11 @@ jobs:
   spec-drift:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
         with:
           version: 11.1.2
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: '24'
           cache: pnpm
@@ -266,27 +266,27 @@ jobs:
             context: .
             dockerfile: apps/ui/Dockerfile
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Verify Dockerfile exists
         run: |
           if [ ! -f "${{ matrix.service.dockerfile }}" ]; then
             echo "Dockerfile not found at ${{ matrix.service.dockerfile }} — skipping ${{ matrix.service.name }}"
             exit 0
           fi
-      - uses: docker/setup-buildx-action@v3
-      - uses: docker/login-action@v3
+      - uses: docker/setup-buildx-action@v4
+      - uses: docker/login-action@v4
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-      - uses: docker/metadata-action@v5
+      - uses: docker/metadata-action@v6
         id: meta
         with:
           images: ghcr.io/blue-dots-economy/signals-dpg/${{ matrix.service.name }}
           tags: |
             type=ref,event=branch
             type=sha,format=short
-      - uses: docker/build-push-action@v6
+      - uses: docker/build-push-action@v7
         with:
           context: ${{ matrix.service.context }}
           file: ${{ matrix.service.dockerfile }}
