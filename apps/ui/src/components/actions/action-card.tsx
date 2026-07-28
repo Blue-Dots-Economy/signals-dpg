@@ -238,6 +238,20 @@ export function ActionCard({ action, ownershipRole, onStatusUpdate, selectionMod
           </>
         )}
 
+        {/* Reason attached to a rejected/cancelled action — the actor's remark,
+            or a system remark (e.g. counterparty retired, #347). Rendered at the
+            card level so it shows even when the action has no requirements. */}
+        {action.remarks && (
+          <div className="mb-3 rounded-xl border border-border bg-muted/40 p-3.5">
+            <p className="mb-0.5 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+              {t('actions.reason_shown_label', 'Reason')}
+            </p>
+            <p className="text-[13px] leading-relaxed text-foreground [overflow-wrap:anywhere]">
+              {action.remarks}
+            </p>
+          </div>
+        )}
+
         {location && (
           <div className="mb-3 flex items-center gap-1.5 text-xs text-muted-foreground">
             <MapPin className="h-3 w-3" />

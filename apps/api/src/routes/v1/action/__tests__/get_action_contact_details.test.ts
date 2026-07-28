@@ -237,15 +237,30 @@ describe('GET /:action_id/contact-details', () => {
   });
 
   it.each(['created', 'pending', 'rejected', 'cancelled'])(
-    '403 PII_NOT_REVEALED when status is %s',
+    '403 PII_NOT_REVEALED when status is %s (live counterparty, non-reveal status)',
     async (status) => {
       app = buildApp({ id: SOURCE_OWNER });
       state.action = buildAction({ action_status: status });
+      // Counterparty exists + is live — the endpoint resolves it first, then the
+      // reveal-status gate returns PII_NOT_REVEALED (retired short-circuits earlier).
+      state.fetchedItems = [buildItem(TARGET_ITEM_ID, TARGET_OWNER)];
       const res = await app.inject({ method: 'GET', url: `/${ACTION_ID}/contact-details` });
       expect(res.statusCode).toBe(403);
       expect(res.json().error).toBe('PII_NOT_REVEALED');
     }
   );
+
+  it('200 retired notice when the counterparty is retired (cancelled action)', async () => {
+    app = buildApp({ id: SOURCE_OWNER });
+    state.action = buildAction({ action_status: 'cancelled' });
+    state.fetchedItems = [buildItem(TARGET_ITEM_ID, TARGET_OWNER, { lifecycle_status: 'retired' })];
+    const res = await app.inject({ method: 'GET', url: `/${ACTION_ID}/contact-details` });
+    expect(res.statusCode).toBe(200);
+    const body = res.json();
+    expect(body.revealed).toBe(false);
+    expect(body.reveal_blocked_reason).toBe('retired');
+    expect(body.other_actor.item.item_id).toBe(TARGET_ITEM_ID);
+  });
 
   it('200 when source owner calls on accepted — returns target item merged', async () => {
     app = buildApp({ id: SOURCE_OWNER });

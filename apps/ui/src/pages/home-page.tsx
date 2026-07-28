@@ -1749,6 +1749,9 @@ export function HomePage() {
       myItems={myItems}
       activeProfileId={activeProfileId}
       onActiveProfileChange={handleActiveProfileChange}
+      onProfilesChanged={() => {
+        if (network) queryClient.invalidateQueries({ queryKey: queryKeys.myItems(network.id) });
+      }}
       userSchemas={userSchemas}
       search={search}
       onSearchChange={setSearch}

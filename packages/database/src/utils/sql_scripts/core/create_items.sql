@@ -49,19 +49,15 @@ ON items USING GIN (item_state);
 ALTER TABLE items ADD COLUMN IF NOT EXISTS item_locations JSONB NOT NULL DEFAULT '[]'::jsonb;
 
 -- Lifecycle status (2026-06-03 spec).
+-- The allowed values (draft | live | paused | retired) are owned by the
+-- application (`LifecycleStatus` in apps/api services/items/classifier.ts).
+-- Deliberately NO CHECK constraint: only the classifier + lifecycle route write
+-- this column, and a DB enum would force a migration for every new state (#347).
 ALTER TABLE items
   ADD COLUMN IF NOT EXISTS lifecycle_status TEXT NOT NULL DEFAULT 'draft';
 
-DO $$
-BEGIN
-  IF NOT EXISTS (
-    SELECT 1 FROM pg_constraint WHERE conname = 'items_lifecycle_status_chk'
-  ) THEN
-    ALTER TABLE items
-      ADD CONSTRAINT items_lifecycle_status_chk
-      CHECK (lifecycle_status IN ('draft','live','paused'));
-  END IF;
-END$$;
+-- Drop the legacy CHECK if an older schema created it (superseded by #347).
+ALTER TABLE items DROP CONSTRAINT IF EXISTS items_lifecycle_status_chk;
 
 CREATE INDEX IF NOT EXISTS items_lifecycle_idx
   ON items (item_network, item_domain, lifecycle_status);

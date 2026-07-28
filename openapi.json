@@ -545,7 +545,8 @@
                             "enum": [
                               "draft",
                               "live",
-                              "paused"
+                              "paused",
+                              "retired"
                             ]
                           }
                         },
@@ -776,7 +777,8 @@
                           "enum": [
                             "draft",
                             "live",
-                            "paused"
+                            "paused",
+                            "retired"
                           ]
                         }
                       },
@@ -861,7 +863,8 @@
                     "type": "string",
                     "enum": [
                       "pause",
-                      "unpause"
+                      "unpause",
+                      "retire"
                     ]
                   }
                 },
@@ -891,7 +894,8 @@
                       "enum": [
                         "draft",
                         "live",
-                        "paused"
+                        "paused",
+                        "retired"
                       ]
                     }
                   },
@@ -2497,7 +2501,8 @@
                       "type": "string",
                       "enum": [
                         "self",
-                        "other"
+                        "other",
+                        "retired"
                       ]
                     },
                     "other_actor": {
@@ -2600,7 +2605,8 @@
                               "enum": [
                                 "draft",
                                 "live",
-                                "paused"
+                                "paused",
+                                "retired"
                               ]
                             }
                           },
@@ -3289,7 +3295,8 @@
                         "enum": [
                           "draft",
                           "live",
-                          "paused"
+                          "paused",
+                          "retired"
                         ]
                       },
                       "item_latitude": {
@@ -3375,7 +3382,8 @@
                         "enum": [
                           "draft",
                           "live",
-                          "paused"
+                          "paused",
+                          "retired"
                         ]
                       },
                       "item_latitude": {
@@ -3902,7 +3910,8 @@
                             "enum": [
                               "draft",
                               "live",
-                              "paused"
+                              "paused",
+                              "retired"
                             ]
                           }
                         },
@@ -4239,7 +4248,8 @@
                             "enum": [
                               "draft",
                               "live",
-                              "paused"
+                              "paused",
+                              "retired"
                             ]
                           }
                         },
