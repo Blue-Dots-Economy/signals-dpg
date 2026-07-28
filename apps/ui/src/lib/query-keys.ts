@@ -63,6 +63,12 @@ export const queryKeys = {
    *   viewport has a bbox — a snapped-grid bbox + a clustered/individual zoom
    *   band, so a pan/zoom that stays within the same grid cell and band
    *   reuses the cache entry while a real move/zoom-band-cross busts it.
+   * - `bboxToken` (bbox path only, #203 map-serverside-search Task 5) — a
+   *   counter `useMapMarkers` bumps to force this key to change when the
+   *   padded-bbox + truncated-result refetch rule decides a contained
+   *   zoom-in must still refetch (the held result was truncated) even
+   *   though the snapped bbox coincidentally rounds to the same grid cell as
+   *   the last fetch — see `lib/map-viewport-snap.ts`'s `shouldRefetch`.
    * - `latBucket`/`lngBucket`/`radiusBucket` instead, for the older
    *   radius-only viewport shape (hand-built viewports predating the bbox
    *   work; still exercised by existing tests).

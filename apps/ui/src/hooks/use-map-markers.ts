@@ -4,8 +4,8 @@ import { fetchNetworkMarkers, MAP_FETCH_LIMIT } from '@/lib/network-api';
 import type { Marker } from '@/lib/network-api';
 import type { DotNetworkSchema, DotNetworkDomain, MapViewport } from '@/engine/types';
 import { queryKeys } from '@/lib/query-keys';
-import { snapViewportForKey, padBbox, shouldRefetch } from '@/lib/map-viewport-snap';
-import type { RawBbox } from '@/lib/map-viewport-snap';
+import { snapViewportForKey, padBbox, shouldRefetch, zoomBand } from '@/lib/map-viewport-snap';
+import type { RawBbox, ZoomBand } from '@/lib/map-viewport-snap';
 
 // Map tier (spec §5.2 / §8): markers are lightweight pins, cached ~90s
 // client-side, mirrored by `cache_ttl_seconds` sent to the server so the
@@ -80,6 +80,17 @@ interface HeldBboxState {
   paddedBbox: RawBbox;
   /** Whether any domain's last fetch reported `meta.total > PLACEHOLDER_TRUNCATION_CAP`. */
   truncated: boolean;
+  /**
+   * The zoom band (`snapViewportForKey`'s `'clustered' | 'individual'`) the
+   * last fetch was made under. A zoom that crosses this band (e.g. smoothly
+   * zooming from clustered into individual pins) always forces a refetch at
+   * the CURRENT bbox — see the `bandChanged` check below. Without it, a
+   * band-crossing zoom-in whose tighter bbox happens to still be contained
+   * in the old padded bbox would advance the query key (since the key's
+   * zoom-band axis changed) but fetch the STALE wide bbox, because
+   * `effectiveBbox` would otherwise stay pinned to the held one.
+   */
+  zoomBand: ZoomBand;
 }
 
 /**
@@ -124,11 +135,22 @@ export function useMapMarkers(
   // only ever WRITTEN from the effect below (after a fetch settles), never
   // during render, so it always reflects the last completed fetch's outcome.
   const heldRef = React.useRef<HeldBboxState | null>(null);
+  // The REAL current zoom band (not the held one) — a band crossing (e.g.
+  // smoothly zooming from clustered into individual pins) must force a
+  // refetch at the current, tighter bbox even when that bbox is otherwise
+  // contained in the old padded one and the held result was complete: the
+  // query key already advances on a band change (`snappedKey.zoomBand`
+  // below), and if `effectiveBbox` didn't also advance here, the resulting
+  // fetch would be scoped to the STALE wide bbox instead of the viewport the
+  // user is actually looking at.
+  const currentZoomBand = zoomBand(viewport?.zoom ?? 0);
+  const bandChanged = heldRef.current !== null && currentZoomBand !== heldRef.current.zoomBand;
   const needsRefetch = !rawBbox
     ? false
     : !heldRef.current
       ? true // no prior fetch to compare against — must fetch
-      : shouldRefetch({
+      : bandChanged ||
+        shouldRefetch({
           newBbox: rawBbox,
           paddedBbox: heldRef.current.paddedBbox,
           lastTruncated: heldRef.current.truncated,
@@ -156,6 +178,14 @@ export function useMapMarkers(
   // these refs during render is the sanctioned "derived from a changed prop"
   // pattern (compare-then-conditionally-write), not an arbitrary side
   // effect — see https://react.dev/reference/react/useState#storing-information-from-previous-renders.
+  // Safe under Strict Mode's dev-only double-render: the guard reads
+  // `lastRawBboxKeyRef` BEFORE writing it, so if React invokes this render
+  // twice for the same commit (same `rawBbox`), the first invocation's write
+  // makes the second invocation's guard see `rawBboxKey === lastRawBboxKeyRef.current`
+  // and skip the body entirely — no double-increment. It only ever mutates
+  // once per commit that actually changed `rawBbox`, which is exactly the
+  // "did a genuinely new viewport arrive" signal this needs; a duplicate
+  // render for an unchanged `rawBbox` is a no-op both times.
   const bboxTokenRef = React.useRef(0);
   const lastRawBboxKeyRef = React.useRef<string | null | undefined>(undefined);
   if (rawBbox) {
@@ -267,8 +297,13 @@ export function useMapMarkers(
     if (results.some((r) => r.isLoading)) return;
     if (!results.some((r) => r.data)) return;
     const truncated = results.some((r) => r.data && r.data.meta.total > PLACEHOLDER_TRUNCATION_CAP);
-    heldRef.current = { bbox: effectiveBbox, paddedBbox: padBbox(effectiveBbox), truncated };
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- effectiveBboxSignature + dataSignature capture the relevant identity of effectiveBbox/results for this effect
+    heldRef.current = {
+      bbox: effectiveBbox,
+      paddedBbox: padBbox(effectiveBbox),
+      truncated,
+      zoomBand: currentZoomBand,
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- effectiveBboxSignature + dataSignature (+ currentZoomBand, captured via closure) capture the relevant identity of effectiveBbox/results for this effect
   }, [effectiveBboxSignature, dataSignature]);
 
   return { ...aggregated, isLoading: results.some((r) => r.isLoading) };

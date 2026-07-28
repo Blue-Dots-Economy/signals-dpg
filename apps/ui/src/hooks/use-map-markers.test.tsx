@@ -312,6 +312,39 @@ describe('useMapMarkers', () => {
     await waitFor(() => expect(fetchNetworkMarkers).toHaveBeenCalledTimes(2));
   });
 
+  it('refetches with the CURRENT (tighter) bbox when a zoom crosses the cluster-disable band, even if that bbox is still contained in the old padded bbox (#203 Task 5 fix)', async () => {
+    vi.mocked(fetchNetworkMarkers).mockResolvedValue({
+      meta: { total: 3, limit: 5000, offset: 0, partial: false, unavailable_instances: [] },
+      markers: [marker('a', 'student')],
+    });
+
+    const { result, rerender } = renderHook(
+      ({ vp }: { vp: typeof bboxViewport }) => useMapMarkers(network, [domains[0]], vp),
+      { wrapper, initialProps: { vp: bboxViewport } }, // zoom: 8 → 'clustered' band
+    );
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+    expect(fetchNetworkMarkers).toHaveBeenCalledTimes(1);
+
+    // `containedBbox` (shrunk by 0.01 on every corner) is still fully inside
+    // the old padded bbox [18.9375, 19.5625] x [71.9375, 72.5625] — a pure
+    // pan/zoom-in with an unchanged band would SKIP the refetch. Crossing
+    // into the 'individual' band (zoom 14) must force a refetch anyway, and
+    // that refetch must use THIS tighter bbox, not the original wide one.
+    const zoomedInAcrossBand = { ...containedBbox, zoom: 14 };
+    rerender({ vp: zoomedInAcrossBand });
+    await waitFor(() => expect(fetchNetworkMarkers).toHaveBeenCalledTimes(2));
+
+    const secondCall = vi.mocked(fetchNetworkMarkers).mock.calls[1][0];
+    expect(secondCall).toEqual(
+      expect.objectContaining({
+        min_lat: zoomedInAcrossBand.minLat,
+        min_lng: zoomedInAcrossBand.minLng,
+        max_lat: zoomedInAcrossBand.maxLat,
+        max_lng: zoomedInAcrossBand.maxLng,
+      }),
+    );
+  });
+
   it('refetches when the active facet filters change, even with the same bbox and zoom', async () => {
     vi.mocked(fetchNetworkMarkers).mockResolvedValue({
       meta: { total: 0, limit: 5000, offset: 0, partial: false, unavailable_instances: [] },
