@@ -69,11 +69,24 @@ export const DiscoverResponseItemSchema = ItemResponseSchema.extend({
   distanceMeters: z.number().optional(),
 });
 
+// `source`/`degraded` (#203 List PR, Task 3): signals-search is the happy
+// path; when it throws, times out, or is unconfigured, the BFF falls back to
+// the native `/network/item/fetch` path (distance/recency ordered) so a
+// search-service outage never surfaces as a 5xx. The native fallback has no
+// server-side facet/text-search support, so `q`/`filters` are NOT applied
+// when `source === 'native_fallback'` — the UI (Task 6) uses this flag,
+// together with whether it sent `q`/`filters`, to decide between a subtle
+// note (no filters requested) and a banner ("filters temporarily
+// unavailable").
+export const DiscoverSourceSchema = z.enum(['signals_search', 'native_fallback']);
+
 export const DiscoverResponseSchema = z.object({
   meta: z.object({
     total: z.number(),
     limit: z.number(),
     offset: z.number(),
+    source: DiscoverSourceSchema,
+    degraded: z.boolean(),
   }),
   items: DiscoverResponseItemSchema.array(),
 });

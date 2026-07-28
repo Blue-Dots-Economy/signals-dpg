@@ -50,12 +50,17 @@ vi.mock('@/network_configs', () => ({
   })),
 }));
 
-const { searchSignalsMock } = vi.hoisted(() => ({
+const { searchSignalsMock, fetchItemsAcrossInstancesMock } = vi.hoisted(() => ({
   searchSignalsMock: vi.fn(),
+  fetchItemsAcrossInstancesMock: vi.fn(),
 }));
 
 vi.mock('@/services/signals_search_client', () => ({
   searchSignals: searchSignalsMock,
+}));
+
+vi.mock('@/utils/inter_instance_fetch', () => ({
+  fetchItemsAcrossInstances: fetchItemsAcrossInstancesMock,
 }));
 
 // Imported after mocks.
@@ -119,6 +124,7 @@ describe('POST /api/v1/network/item/discover — direct map (revised, no hydrate
 
   beforeEach(() => {
     searchSignalsMock.mockReset();
+    fetchItemsAcrossInstancesMock.mockReset();
     app = buildApp();
   });
 
@@ -167,7 +173,13 @@ describe('POST /api/v1/network/item/discover — direct map (revised, no hydrate
       score: 0.4,
       distanceMeters: 500,
     });
-    expect(body.meta).toEqual({ total: 2, limit: 20, offset: 0 });
+    expect(body.meta).toEqual({
+      total: 2,
+      limit: 20,
+      offset: 0,
+      source: 'signals_search',
+      degraded: false,
+    });
   });
 
   it('passes q, geo, and pagination through to searchSignals (no DB involved)', async () => {
@@ -219,13 +231,151 @@ describe('POST /api/v1/network/item/discover — direct map (revised, no hydrate
 
     expect(res.statusCode).toBe(200);
     expect(res.json()).toEqual({
-      meta: { total: 0, limit: 20, offset: 0 },
+      meta: { total: 0, limit: 20, offset: 0, source: 'signals_search', degraded: false },
       items: [],
     });
   });
+});
 
-  it('returns a clean 500 (never throws) when signals-search fails', async () => {
+describe('POST /api/v1/network/item/discover — native fallback (#203 List PR, Task 3)', () => {
+  let app: FastifyInstance;
+
+  beforeEach(() => {
+    searchSignalsMock.mockReset();
+    fetchItemsAcrossInstancesMock.mockReset();
+    app = buildApp();
+  });
+
+  it('falls back to the native fetch path and sets meta.source=native_fallback when signals-search throws', async () => {
     searchSignalsMock.mockRejectedValueOnce(new Error('signals-search unreachable'));
+    fetchItemsAcrossInstancesMock.mockResolvedValueOnce({
+      meta: { total: 1, limit: 20, offset: 0, partial: false, unavailable_instances: [] },
+      items: [
+        {
+          item_network: NET,
+          item_domain: DOMAIN,
+          item_type: ITEM_TYPE,
+          item_id: FULL_ITEM_A.item_id,
+          item_instance_url: FULL_ITEM_A.item_instance_url,
+          item_schema_url: FULL_ITEM_A.item_schema_url,
+          item_state: FULL_ITEM_A.item_state,
+          item_locations: FULL_ITEM_A.item_locations,
+          created_by: FULL_ITEM_A.created_by,
+          created_at: FULL_ITEM_A.created_at,
+          updated_at: FULL_ITEM_A.updated_at,
+          lifecycle_status: 'live',
+        },
+      ],
+    });
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/v1/network/item/discover',
+      payload: baseBody(),
+    });
+
+    expect(res.statusCode).toBe(200);
+    const body = res.json() as {
+      meta: { total: number; limit: number; offset: number; source: string; degraded: boolean };
+      items: Array<Record<string, unknown>>;
+    };
+    expect(body.meta).toEqual({
+      total: 1,
+      limit: 20,
+      offset: 0,
+      source: 'native_fallback',
+      degraded: true,
+    });
+    expect(body.items).toHaveLength(1);
+    expect(body.items[0]).toMatchObject({ item_id: FULL_ITEM_A.item_id });
+    // Native fallback has no server-side facet/text search — score/distanceMeters
+    // are search-only fields and are never present on a fallback item.
+    expect(body.items[0]).not.toHaveProperty('score');
+    expect(body.items[0]).not.toHaveProperty('distanceMeters');
+  });
+
+  it('falls back when signals-search times out (AbortSignal-style rejection)', async () => {
+    const abortError = new DOMException('The operation was aborted.', 'TimeoutError');
+    searchSignalsMock.mockRejectedValueOnce(abortError);
+    fetchItemsAcrossInstancesMock.mockResolvedValueOnce({
+      meta: { total: 0, limit: 20, offset: 0, partial: false, unavailable_instances: [] },
+      items: [],
+    });
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/v1/network/item/discover',
+      payload: baseBody(),
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toMatchObject({
+      meta: { source: 'native_fallback', degraded: true },
+    });
+  });
+
+  it('falls back when signals-search is unconfigured (client throws a config error)', async () => {
+    searchSignalsMock.mockRejectedValueOnce(
+      new Error('signals-search is not configured (SIGNALS_SEARCH_URL/SIGNALS_SEARCH_API_KEY unset)')
+    );
+    fetchItemsAcrossInstancesMock.mockResolvedValueOnce({
+      meta: { total: 0, limit: 20, offset: 0, partial: false, unavailable_instances: [] },
+      items: [],
+    });
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/v1/network/item/discover',
+      payload: baseBody(),
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toMatchObject({
+      meta: { source: 'native_fallback', degraded: true },
+    });
+    expect(fetchItemsAcrossInstancesMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('honors page size/offset and the geo filters on the fallback call', async () => {
+    searchSignalsMock.mockRejectedValueOnce(new Error('signals-search unreachable'));
+    fetchItemsAcrossInstancesMock.mockResolvedValueOnce({
+      meta: { total: 0, limit: 10, offset: 5, partial: false, unavailable_instances: [] },
+      items: [],
+    });
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/v1/network/item/discover',
+      payload: baseBody({
+        item_latitude: 12.9716,
+        item_longitude: 77.5946,
+        distance_meters: 3000,
+        limit: 10,
+        offset: 5,
+      }),
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(fetchItemsAcrossInstancesMock).toHaveBeenCalledTimes(1);
+    const callArgs = fetchItemsAcrossInstancesMock.mock.calls[0][0] as {
+      filters: Record<string, unknown>;
+    };
+    expect(callArgs.filters).toMatchObject({
+      item_network: NET,
+      item_domain: DOMAIN,
+      item_type: ITEM_TYPE,
+      item_latitude: 12.9716,
+      item_longitude: 77.5946,
+      radius_meters: 3000,
+      limit: 10,
+      offset: 5,
+      lifecycle_filter: 'live_only',
+    });
+  });
+
+  it('returns a clean 500 (never throws) when BOTH signals-search and the native fallback fail', async () => {
+    searchSignalsMock.mockRejectedValueOnce(new Error('signals-search unreachable'));
+    fetchItemsAcrossInstancesMock.mockRejectedValueOnce(new Error('db unreachable'));
 
     const res = await app.inject({
       method: 'POST',

@@ -39,12 +39,24 @@ const pg_url = process.env.POSTGRES_URL ?? process.env.POSTGRES_USER;
 const can_run = Boolean(pg_url);
 const describeIf = can_run ? describe : describe.skip;
 
-const { searchSignalsMock } = vi.hoisted(() => ({
+const { searchSignalsMock, fetchItemsAcrossInstancesMock } = vi.hoisted(() => ({
   searchSignalsMock: vi.fn(),
+  fetchItemsAcrossInstancesMock: vi.fn(),
 }));
 
 vi.mock('@/services/signals_search_client', () => ({
   searchSignals: searchSignalsMock,
+}));
+
+// #203 List PR, Task 3: mocked here too — a real (unmocked)
+// fetchItemsAcrossInstances would hit the local DB and return 200 via the
+// native fallback instead of the genuine-double-failure 500 this suite's
+// "signals-search fails" case wants to prove. The native-fallback happy path
+// itself (real local DB read, mocked signals-search failure) is covered by
+// discover.test.ts, per this task's brief, given the worktree's known
+// integration-env flakiness (yellow_dot/PG-auth baseline failures).
+vi.mock('@/utils/inter_instance_fetch', () => ({
+  fetchItemsAcrossInstances: fetchItemsAcrossInstancesMock,
 }));
 
 // The real network config (NOT mocked) drives the facet guard here — the
@@ -110,6 +122,7 @@ describeIf(
 
     beforeEach(() => {
       searchSignalsMock.mockReset();
+      fetchItemsAcrossInstancesMock.mockReset();
     });
 
     function baseBody(extra: Record<string, unknown> = {}) {
@@ -151,8 +164,9 @@ describeIf(
       ]);
     });
 
-    it('returns a clean 500 (never throws) when signals-search fails', async () => {
+    it('returns a clean 500 (never throws) when BOTH signals-search and the native fallback fail', async () => {
       searchSignalsMock.mockRejectedValueOnce(new Error('signals-search unreachable'));
+      fetchItemsAcrossInstancesMock.mockRejectedValueOnce(new Error('db unreachable'));
 
       const res = await app.inject({
         method: 'POST',
@@ -162,6 +176,25 @@ describeIf(
 
       expect(res.statusCode).toBe(500);
       expect(res.json()).toMatchObject({ error: 'INTERNAL_SERVER_ERROR' });
+    });
+
+    it('falls back to native fetch (meta.source=native_fallback) when signals-search fails, never a 5xx', async () => {
+      searchSignalsMock.mockRejectedValueOnce(new Error('signals-search unreachable'));
+      fetchItemsAcrossInstancesMock.mockResolvedValueOnce({
+        meta: { total: 0, limit: 20, offset: 0, partial: false, unavailable_instances: [] },
+        items: [],
+      });
+
+      const res = await app.inject({
+        method: 'POST',
+        url: '/api/v1/network/item/discover',
+        payload: baseBody(),
+      });
+
+      expect(res.statusCode).toBe(200);
+      expect(res.json()).toMatchObject({
+        meta: { source: 'native_fallback', degraded: true },
+      });
     });
   },
 );

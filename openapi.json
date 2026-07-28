@@ -4813,12 +4813,24 @@
                         },
                         "offset": {
                           "type": "number"
+                        },
+                        "source": {
+                          "type": "string",
+                          "enum": [
+                            "signals_search",
+                            "native_fallback"
+                          ]
+                        },
+                        "degraded": {
+                          "type": "boolean"
                         }
                       },
                       "required": [
                         "total",
                         "limit",
-                        "offset"
+                        "offset",
+                        "source",
+                        "degraded"
                       ],
                       "additionalProperties": false
                     },
