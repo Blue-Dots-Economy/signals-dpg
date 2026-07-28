@@ -15,6 +15,14 @@ export type ItemFetchFilters = {
   item_latitude?: number;
   item_longitude?: number;
   radius_meters?: number;
+  // Bounding-box viewport search (#203 Task 2), mutually exclusive with the
+  // radius-center params above — see withGeoSearchRefinement in
+  // packages/schemas/src/api/item_schemas.ts. Passthrough only for now: the
+  // SQL that consumes these lands in Task 3 (buildWhereClause below).
+  min_lat?: number;
+  min_lng?: number;
+  max_lat?: number;
+  max_lng?: number;
   limit: number;
   offset: number;
   /**

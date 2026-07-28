@@ -513,6 +513,10 @@ export async function getInstanceCount(input: {
     item_latitude: input.filters.item_latitude,
     item_longitude: input.filters.item_longitude,
     radius_meters: input.filters.radius_meters,
+    min_lat: input.filters.min_lat,
+    min_lng: input.filters.min_lng,
+    max_lat: input.filters.max_lat,
+    max_lng: input.filters.max_lng,
     lifecycle_filter: input.filters.lifecycle_filter,
   };
 
