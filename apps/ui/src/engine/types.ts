@@ -195,6 +195,15 @@ export interface MapProviderProps {
    * is false.
    */
   focusNonce?: number;
+  /**
+   * Monotonic counter bumped by the caller to close any currently open marker
+   * popup (e.g. right before a Connect/Apply action opens a modal) — the
+   * marker popup renders in a high stacking context (a map overlay), so on
+   * mobile it would otherwise sit on top of a bottom-sheet modal. Mirrors
+   * `focusNonce`'s "bump signals intent" pattern, but the effect is closing
+   * the popup rather than recentering the map.
+   */
+  closePopupNonce?: number;
   children?: React.ReactNode;
   /** Optional custom popup renderer; falls back to the default MarkerPopupCard. */
   renderPopup?: (marker: MapMarker) => React.ReactNode;

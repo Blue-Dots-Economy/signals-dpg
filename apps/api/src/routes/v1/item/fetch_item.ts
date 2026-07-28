@@ -88,6 +88,9 @@ const fetch_items_handler = async (
       limit,
       offset,
       includePrivateState: true,
+      // Owner "My Profiles" list — never show a retired (permanently removed)
+      // profile here (#347).
+      exclude_retired: true,
     };
     const result = await getCachedLocalItemFetch(filters, () =>
       fetchLocalItems(filters)

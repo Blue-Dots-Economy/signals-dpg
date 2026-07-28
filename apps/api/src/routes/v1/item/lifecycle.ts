@@ -12,6 +12,9 @@ import { getNetworkConfigById } from '@/network_configs';
 import { classify_item } from '@/services/items/classifier';
 import { hasAcceptedProfileConsent } from '@/services/consent_acceptance';
 import { invalidateItemFetchCache } from '@/utils/item_fetch_cache_invalidate';
+import { buildRetiredItemState } from '@/services/items/retire_pii';
+import { cancelItemConnections } from '@/services/items/retire_connections';
+import { publishItemEvent } from '@/utils/publish_item_event';
 
 type ItemLifecycleRequest = FastifyRequest<{
   Body: z.infer<typeof ItemLifecycleBody>;
@@ -85,7 +88,13 @@ const item_lifecycle_handler = async (
         return { forbidden: true } as const;
       }
 
-      const current = existing.lifecycle_status as 'draft' | 'live' | 'paused';
+      const current = existing.lifecycle_status as 'draft' | 'live' | 'paused' | 'retired';
+
+      // Retire is terminal (#347): no transition out of `retired`, and any
+      // other transition on an already-retired item is meaningless.
+      if (current === 'retired') {
+        return { invalidAction: 'ALREADY_RETIRED' as const } as const;
+      }
 
       if (action === 'pause') {
         // Network-wide feature gate (#346). Resume stays allowed even when the
@@ -105,24 +114,90 @@ const item_lifecycle_handler = async (
         return { invalidAction: 'UNPAUSE_REQUIRES_PAUSED' as const } as const;
       }
 
-      const { mergedState } = decryptItemPrivate({
-        item_state: existing.item_state as Record<string, unknown>,
-        item_private_state: existing.item_private_state ?? '',
-      });
+      let next_status: 'draft' | 'live' | 'paused' | 'retired';
 
-      const itemSchema = await getOrFetchSchemaByUrl({
-        schemaUrl: existing.item_schema_url,
-        network: existing.item_network,
-        domain: existing.item_domain,
-        itemType: existing.item_type,
-      });
+      if (action === 'retire') {
+        next_status = 'retired';
 
-      let next_status: 'draft' | 'live' | 'paused';
+        // Schema drives the PII wipe (which fields are private). Note: retire
+        // deliberately does NOT decrypt item_private_state — it works off the
+        // stored (masked) item_state, so a corrupt/undecryptable private blob
+        // can't block the very action meant to wipe it.
+        const itemSchema = await getOrFetchSchemaByUrl({
+          schemaUrl: existing.item_schema_url,
+          network: existing.item_network,
+          domain: existing.item_domain,
+          itemType: existing.item_type,
+        });
+
+        // PII wipe (#347 Q9): keep only schema-declared, non-PII public fields;
+        // drop every private:true field + the standard identity keys (at any
+        // nesting) + unknown extra keys; clear the encrypted private blob and
+        // wipe item_locations entirely. (Action-embedded data —
+        // requirements_snapshot / event_payload — is handled separately via
+        // #392, not here.)
+        const scrubbedState = buildRetiredItemState(
+          itemSchema as Record<string, unknown>,
+          existing.item_state as Record<string, unknown>,
+        );
+
+        // End established connections (R9.3): cancel still-open actions on
+        // either side; rows are kept for counterparty history (Q11).
+        await cancelItemConnections(
+          tx,
+          {
+            item_id,
+            item_network: existing.item_network,
+            item_domain: existing.item_domain,
+            item_type: existing.item_type,
+          },
+          request.log,
+        );
+
+        await tx
+          .update(items)
+          .set({
+            lifecycle_status: next_status,
+            item_state: scrubbedState,
+            // Clear the encrypted PII blob. The column is NOT NULL default '',
+            // so empty string is the "no private state" value (see item create).
+            item_private_state: '',
+            // Wipe locations entirely (#347): a non-private location field keeps
+            // exact coords, and jitter preserves the free-text label verbatim —
+            // both are residue after an irreversible erasure.
+            item_locations: [],
+            // Stopgap for the retire moment until the telemetry pipeline lands
+            // (marker below); `updated_at` freezes here since retired is terminal.
+            updated_at: sql`now()`,
+          })
+          .where(eq(items.item_id, item_id));
+
+        return {
+          item_id,
+          item_network: existing.item_network,
+          item_domain: existing.item_domain,
+          item_type: existing.item_type,
+          previous_status: current,
+          lifecycle_status: next_status,
+          retired: true as const,
+        };
+      }
 
       if (action === 'pause') {
         next_status = 'paused';
       } else {
-        // unpause: recompute draft/live from current data (non-sticky path).
+        // unpause: recompute draft/live from the current (decrypted) data —
+        // the only path that needs the private blob merged + the schema.
+        const { mergedState } = decryptItemPrivate({
+          item_state: existing.item_state as Record<string, unknown>,
+          item_private_state: existing.item_private_state ?? '',
+        });
+        const itemSchema = await getOrFetchSchemaByUrl({
+          schemaUrl: existing.item_schema_url,
+          network: existing.item_network,
+          domain: existing.item_domain,
+          itemType: existing.item_type,
+        });
         const consent_accepted = await hasAcceptedProfileConsent(tx, item_id);
         next_status = classify_item({
           schema: itemSchema as { required?: string[] },
@@ -144,8 +219,10 @@ const item_lifecycle_handler = async (
         item_id,
         item_network: existing.item_network,
         item_domain: existing.item_domain,
+        item_type: existing.item_type,
         previous_status: current,
         lifecycle_status: next_status,
+        retired: false as const,
       };
     });
 
@@ -164,17 +241,18 @@ const item_lifecycle_handler = async (
     }
 
     if ('invalidAction' in result) {
+      const messages = {
+        PAUSE_NOT_ENABLED: 'Pause is not enabled for this network',
+        PAUSE_REQUIRES_LIVE: 'pause is only valid on a live item',
+        UNPAUSE_REQUIRES_PAUSED: 'unpause is only valid on a paused item',
+        ALREADY_RETIRED: 'this profile is retired and cannot change state',
+      } as const;
       return reply.code(409).send({
         error:
           result.invalidAction === 'PAUSE_NOT_ENABLED'
             ? 'PAUSE_NOT_ENABLED'
             : 'INVALID_LIFECYCLE_ACTION',
-        message:
-          result.invalidAction === 'PAUSE_NOT_ENABLED'
-            ? 'Pause is not enabled for this network'
-            : result.invalidAction === 'PAUSE_REQUIRES_LIVE'
-              ? 'pause is only valid on a live item'
-              : 'unpause is only valid on a paused item',
+        message: messages[result.invalidAction as keyof typeof messages],
       });
     }
 
@@ -182,18 +260,37 @@ const item_lifecycle_handler = async (
       (err) => request.log.warn({ err }, 'cache invalidation after lifecycle change failed'),
     );
 
-    // Lifecycle transitions (pause / unpause here, and the draft/live/retired
+    // De-index a retired profile from search (#347 R9.5): the item_search index
+    // is maintained by the signals-search service off item events, so publish a
+    // `delete` to drop it from discovery. Best-effort (never fails the retire).
+    if (result.retired) {
+      await publishItemEvent(
+        {
+          item_network: result.item_network,
+          item_domain: result.item_domain,
+          item_type: result.item_type,
+          item_id: result.item_id,
+          op: 'delete',
+        },
+        request.log,
+      );
+    }
+
+    // Lifecycle transitions (pause / unpause / retire here, and the draft/live
     // transitions elsewhere) must be emitted as audit/telemetry events —
     // #234 Q15 ("log every transition as an event") / business doc R10.3.
     // Deferred to the cross-cutting events/telemetry pipeline so all
     // transitions report through one emitter; wire this transition
     // (from `result.previous_status` → `result.lifecycle_status`, actor
     // `callerId`) in there. `previous_status` is carried on `result` for that.
+    // Until then, `updated_at` is bumped on the row as the retire timestamp.
 
     const {
       item_network: _n,
       item_domain: _d,
+      item_type: _t,
       previous_status: _p,
+      retired: _r,
       ...responseBody
     } = result;
     return reply.code(200).send(responseBody);

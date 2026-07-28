@@ -594,6 +594,18 @@ export async function updateItemInternal(
       );
     }
 
+    // Retire is terminal (#347): the row's PII was wiped and item_private_state
+    // cleared. Block any state/location mutation on a retired item — the owner
+    // still owns the row, so without this a PATCH would re-merge the body,
+    // re-encrypt private fields and silently re-introduce the PII retire erased.
+    if (existingItem.lifecycle_status === 'retired') {
+      throw new ItemServiceError(
+        409,
+        'ITEM_RETIRED',
+        'This profile is retired and can no longer be edited',
+      );
+    }
+
     const itemSchema = await getOrFetchSchemaByUrl({
       schemaUrl: existingItem.item_schema_url,
       network: existingItem.item_network,

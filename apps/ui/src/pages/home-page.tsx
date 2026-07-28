@@ -686,6 +686,13 @@ export function HomePage() {
   // and handleLocationSourceChange ignores it.)
   const [recenterNonce, setRecenterNonce] = React.useState(0);
 
+  // Bumped right before a marker popup's Connect/Apply action opens the
+  // consent modal, so the map provider closes the popup first — otherwise the
+  // popup (a map overlay in a high stacking context) sits on top of the
+  // modal's bottom-sheet Drawer on mobile, making the consent checkbox +
+  // Confirm unreachable (Issue #1).
+  const [closePopupNonce, setClosePopupNonce] = React.useState(0);
+
   const handleLocationSourceChange = React.useCallback(
     (next: PreferredLocationSource) => {
       setPreferredSource(next);
@@ -1661,7 +1668,7 @@ export function HomePage() {
   if (!network) {
     return (
       <>
-        <div className="flex h-screen flex-col">
+        <div className="flex h-svh flex-col">
         <div className="h-14 border-b bg-gradient-to-r from-background to-primary/5" />
         <div className="flex flex-1 overflow-hidden">
           <div className="hidden md:block w-64 shrink-0 border-r p-4 space-y-3">
@@ -1796,6 +1803,9 @@ export function HomePage() {
       myItems={myItems}
       activeProfileId={activeProfileId}
       onActiveProfileChange={handleActiveProfileChange}
+      onProfilesChanged={() => {
+        if (network) queryClient.invalidateQueries({ queryKey: queryKeys.myItems(network.id) });
+      }}
       userSchemas={userSchemas}
       search={search}
       onSearchChange={setSearch}
@@ -2159,6 +2169,7 @@ export function HomePage() {
                   items={mapItems}
                   focusPoint={userLocation}
                   focusNonce={recenterNonce}
+                  closePopupNonce={closePopupNonce}
                   filtersSlot={filtersPanel}
                   onViewportChange={setMapViewport}
                   emptyMessage={t('home.map_no_items_in_area')}
@@ -2194,6 +2205,9 @@ export function HomePage() {
                         localItem={myItem}
                         connectAction={connectAction}
                         onConnect={(itemId) => {
+                          // Close the marker popup first so it doesn't cover
+                          // the consent modal the action is about to open.
+                          setClosePopupNonce((n) => n + 1);
                           if (connectAction) triggerAction(connectAction.action_type, connectAction, itemId);
                         }}
                         onItemResolved={setMapDetailItem}
@@ -2223,8 +2237,8 @@ export function HomePage() {
                     `fixed` (not `absolute`) so it stays visible above the map's own
                     maximize overlay (z-[1000]) in both normal and maximized mode. */}
                 {mapMarkers.partial && (
-                  <div className="pointer-events-none fixed left-1/2 top-20 z-[2100] -translate-x-1/2 px-4">
-                    <p className="pointer-events-auto rounded-md bg-amber-50 px-3 py-1.5 text-xs font-medium text-amber-900 shadow-md ring-1 ring-amber-300 dark:bg-amber-950 dark:text-amber-100 dark:ring-amber-800">
+                  <div className="pointer-events-none fixed left-1/2 top-20 z-[2100] w-full max-w-[calc(100vw-2rem)] -translate-x-1/2 px-4">
+                    <p className="pointer-events-auto mx-auto w-fit max-w-full rounded-md bg-amber-50 px-3 py-1.5 text-center text-xs font-medium text-amber-900 shadow-md ring-1 ring-amber-300 dark:bg-amber-950 dark:text-amber-100 dark:ring-amber-800">
                       {t('home.map_partial')}
                     </p>
                   </div>

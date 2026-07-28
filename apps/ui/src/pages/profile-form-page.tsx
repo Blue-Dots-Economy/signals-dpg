@@ -48,7 +48,6 @@ import axios from 'axios';
 import {
   createItem,
   updateItem,
-  setItemLifecycle,
   type CreateItemPayload,
   type UpdateItemPayload,
   type Item,
@@ -91,13 +90,9 @@ export function ProfileFormPage() {
   const [existingItem, setExistingItem] = React.useState<Item | null>(null);
   const [initialData, setInitialData] = React.useState<Record<string, unknown> | null>(null);
   const [isSubmitting, setIsSubmitting] = React.useState(false);
-  // Pause/unpause (#346) UI state — kept from feature; the pause feature is
-  // orthogonal to #295's React Query data-loading below.
-  const [lifecycleBusy, setLifecycleBusy] = React.useState(false);
-  const [pauseConfirmOpen, setPauseConfirmOpen] = React.useState(false);
-  // NOTE: `isLoading`/`availableNetworkIds` useState from feature are dropped —
-  // #295 provides `editLoading` (React Query) and `availableNetworkIds` as a
-  // useMemo (from useNetworkConfigs) below.
+  // Lifecycle controls (pause/resume/retire, #346/#347) live on the "My
+  // Profiles" sidebar rows now — NOT in this editor — so no pause UI state here.
+  // `isLoading`/`availableNetworkIds` come from React Query (#295) below.
   const [isWalletModalOpen, setIsWalletModalOpen] = React.useState(false);
   const [formError, setFormError] = React.useState<{ title: string; description?: string } | null>(null);
   const [resolvedLocations, setResolvedLocations] = React.useState<
@@ -588,32 +583,9 @@ export function ProfileFormPage() {
     }
   };
 
-  // Pause (hide) / unpause (show) the profile the owner is editing. Pause is
-  // only offered on a `live` profile; unpause on a `paused` one. The server
-  // re-validates on unpause and may land the profile in `draft`. (#346)
-  const handleLifecycle = async (action: 'pause' | 'unpause') => {
-    if (!existingItem) return;
-    setLifecycleBusy(true);
-    try {
-      const res = await setItemLifecycle(existingItem.item_id, action);
-      setExistingItem({ ...existingItem, lifecycle_status: res.lifecycle_status });
-      toast.success(
-        action === 'pause'
-          ? t('profile.toast_paused', 'Profile paused — it is no longer discoverable in the network.')
-          : res.lifecycle_status === 'live'
-            ? t('profile.toast_unpaused_live', 'Profile resumed — discoverable in the network again.')
-            : t('profile.toast_unpaused_draft', 'Profile resumed, but it needs completing before it goes live.'),
-      );
-    } catch {
-      toast.error(t('profile.toast_lifecycle_failed', 'Could not update profile status. Try again.'));
-    } finally {
-      setLifecycleBusy(false);
-    }
-  };
-
   if (availableNetworkIds === null || editLoading) {
     return (
-      <div className="flex h-screen items-center justify-center">
+      <div className="flex h-svh items-center justify-center">
         <p className="text-muted-foreground">
           {editLoading ? t('profile.loading_profile') : t('profile.loading_schemas')}
         </p>
@@ -623,7 +595,7 @@ export function ProfileFormPage() {
 
   if (!targetNetworkId) {
     return (
-      <div className="flex h-screen items-center justify-center">
+      <div className="flex h-svh items-center justify-center">
         <p className="text-muted-foreground">{t('profile.no_networks')}</p>
       </div>
     );
@@ -631,7 +603,7 @@ export function ProfileFormPage() {
 
   if (!network) {
     return (
-      <div className="flex h-screen items-center justify-center">
+      <div className="flex h-svh items-center justify-center">
         <p className="text-muted-foreground">{t('profile.loading_schemas')}</p>
       </div>
     );
@@ -641,47 +613,60 @@ export function ProfileFormPage() {
   if (!selectedDomain && !isEdit) {
     return (
       <AuthShell>
-        <button
-          type="button"
-          onClick={() => navigate(`/?network=${targetNetworkId}`)}
-          className="mb-6 flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors"
-        >
-          <ArrowLeft className="h-4 w-4" />
-          {t('common.back')}
-        </button>
-        <div className="mb-6">
-          <p className="mb-2 inline-flex items-center rounded-full bg-primary/10 px-2.5 py-0.5 text-[10px] font-semibold uppercase tracking-[0.18em] text-primary">
-            {theme.portalLabel}
-          </p>
-          <h2 className="text-2xl font-bold">{t('profile.create_heading')}</h2>
-          <p className="text-muted-foreground mt-1">{t('profile.choose_role')}</p>
-          <p className="text-sm text-muted-foreground/80 mt-2">{theme.subline}</p>
-        </div>
-        <div className="grid gap-4 sm:grid-cols-2">
-          {selectableDomains.map((domain, idx) => {
-            const Icon = getDomainIcon(domain.id, network?.id);
-            const label = domain.id
-              .replace(/_/g, ' ')
-              .replace(/\b\w/g, (c) => c.toUpperCase());
-            return (
-              <RoleCard
-                key={domain.id}
-                icon={Icon}
-                title={label}
-                description={domain.description ?? ''}
-                onClick={() => setSelectedDomain(domain.id)}
-                variant={idx % 2 === 0 ? 'primary' : 'secondary'}
-              />
-            );
-          })}
-        </div>
+        <main id="main-content">
+          <button
+            type="button"
+            onClick={() => navigate(`/?network=${targetNetworkId}`)}
+            className="mb-6 flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors"
+          >
+            <ArrowLeft className="h-4 w-4" />
+            {t('common.back')}
+          </button>
+          <div className="mb-6">
+            <p className="mb-2 inline-flex items-center rounded-full bg-primary/10 px-2.5 py-0.5 text-[10px] font-semibold uppercase tracking-[0.18em] text-primary">
+              {theme.portalLabel}
+            </p>
+            {/* Only heading in this branch — safe to be a plain (visible) h1: no
+                deeper section headings (RoleCard renders plain text, not h3+),
+                so h1 here can't create a level skip. */}
+            <h1 className="text-2xl font-bold">{t('profile.create_heading')}</h1>
+            <p className="text-muted-foreground mt-1">{t('profile.choose_role')}</p>
+            <p className="text-sm text-muted-foreground/80 mt-2">{theme.subline}</p>
+          </div>
+          <div className="grid gap-4 sm:grid-cols-2">
+            {selectableDomains.map((domain, idx) => {
+              const Icon = getDomainIcon(domain.id, network?.id);
+              const label = domain.id
+                .replace(/_/g, ' ')
+                .replace(/\b\w/g, (c) => c.toUpperCase());
+              return (
+                <RoleCard
+                  key={domain.id}
+                  icon={Icon}
+                  title={label}
+                  description={domain.description ?? ''}
+                  onClick={() => setSelectedDomain(domain.id)}
+                  variant={idx % 2 === 0 ? 'primary' : 'secondary'}
+                />
+              );
+            })}
+          </div>
+        </main>
       </AuthShell>
     );
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-b from-[var(--brand-hero-to)]/8 to-background p-4 sm:p-6">
-      <div className="mx-auto max-w-2xl">
+    <div className="min-h-svh bg-gradient-to-b from-[var(--brand-hero-to)]/8 to-background p-4 sm:p-6">
+      <main id="main-content" className="mx-auto max-w-2xl">
+        {/* Visually-hidden page title: the shared SchemaForm renders its
+            section headings as <h3> (schema-form.tsx), so the visible hero
+            title just below must stay an <h2> to avoid an h1→h3 skip. This
+            sr-only <h1> keeps the accessible heading chain valid
+            (h1 → h2 hero → h3 form sections) without changing the look. */}
+        <h1 className="sr-only">
+          {isEdit ? t('profile.edit_role_heading', { role: roleLabel }) : t('profile.create_role_heading', { role: roleLabel })}
+        </h1>
         {/* Branded hero strip — sits flush above the form Card */}
         <div className="relative overflow-hidden rounded-t-xl bg-brand-hero">
           <div className="pointer-events-none absolute inset-0 opacity-15">
@@ -735,40 +720,6 @@ export function ProfileFormPage() {
                 {formError.description && <AlertDescription>{formError.description}</AlertDescription>}
               </Alert>
             )}
-
-            {/* Pause control. Gated on the network's `pause_enabled` (default on).
-                When disabled, a live profile shows no control; an already-paused
-                profile still shows Resume so it can be recovered. */}
-            {isEdit && existingItem &&
-              (existingItem.lifecycle_status === 'paused' ||
-                (existingItem.lifecycle_status === 'live' &&
-                  network?.pause_enabled !== false)) && (
-                <div className="mb-4 flex items-center justify-between gap-3 rounded-md border border-border bg-muted/40 p-3">
-                  <p className="text-sm text-muted-foreground">
-                    {existingItem.lifecycle_status === 'paused'
-                      ? t('profile.visibility_hidden', 'This profile is paused — it is not discoverable in the network.')
-                      : t('profile.visibility_live', 'This profile is discoverable in the network.')}
-                  </p>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    disabled={lifecycleBusy}
-                    onClick={() => {
-                      // Resume is safe (restores discovery) — do it directly.
-                      // Pause removes the profile from discovery, so confirm first.
-                      if (existingItem.lifecycle_status === 'paused') {
-                        void handleLifecycle('unpause');
-                      } else {
-                        setPauseConfirmOpen(true);
-                      }
-                    }}
-                  >
-                    {existingItem.lifecycle_status === 'paused'
-                      ? t('profile.btn_unpause', 'Resume profile')
-                      : t('profile.btn_pause', 'Pause profile')}
-                  </Button>
-                </div>
-              )}
 
             {profileSchema && (
               <SchemaForm
@@ -845,6 +796,7 @@ export function ProfileFormPage() {
                 </button>
               </div>
             )}
+
           </CardContent>
         </Card>
 
@@ -866,7 +818,7 @@ export function ProfileFormPage() {
             if (!guardianVerifiedForCreate) setConsentChecked(false);
           }}
         >
-          <DialogContent>
+          <DialogContent className="max-h-[90dvh] overflow-y-auto">
             <DialogHeader>
               <DialogTitle>
                 {t('profile.guardian_confirm_title', 'Guardian confirmation needed')}
@@ -895,41 +847,6 @@ export function ProfileFormPage() {
                 }}
               >
                 {t('profile.guardian_confirm_proceed', 'Send code to guardian')}
-              </Button>
-            </DialogFooter>
-          </DialogContent>
-        </Dialog>
-
-        {/* Confirm before pausing — pausing removes the profile from discovery. */}
-        <Dialog open={pauseConfirmOpen} onOpenChange={setPauseConfirmOpen}>
-          <DialogContent>
-            <DialogHeader>
-              <DialogTitle>
-                {t('profile.pause_confirm_title', 'Pause this profile?')}
-              </DialogTitle>
-              <DialogDescription>
-                {t(
-                  'profile.pause_confirm_desc',
-                  'While paused, this profile will not be discoverable in the network. You can resume it any time.',
-                )}
-              </DialogDescription>
-            </DialogHeader>
-            <DialogFooter>
-              <Button
-                variant="outline"
-                disabled={lifecycleBusy}
-                onClick={() => setPauseConfirmOpen(false)}
-              >
-                {t('common.cancel', 'Cancel')}
-              </Button>
-              <Button
-                disabled={lifecycleBusy}
-                onClick={() => {
-                  setPauseConfirmOpen(false);
-                  void handleLifecycle('pause');
-                }}
-              >
-                {t('profile.pause_confirm_proceed', 'Pause profile')}
               </Button>
             </DialogFooter>
           </DialogContent>
@@ -969,7 +886,7 @@ export function ProfileFormPage() {
             onLogout={() => { void signOut(); }}
           />
         )}
-      </div>
+      </main>
     </div>
   );
 }

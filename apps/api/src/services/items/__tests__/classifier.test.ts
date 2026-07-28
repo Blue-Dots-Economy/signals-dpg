@@ -117,4 +117,15 @@ describe('classify_item', () => {
       }),
     ).toEqual({ lifecycle_status: 'paused' });
   });
+
+  it('retired is terminal — never recomputes out (complete state + consent)', () => {
+    expect(
+      classify_item({
+        schema: schema(['a', 'b']),
+        merged_state: { a: 'x', b: 'y' },
+        current_status: 'retired',
+        consent_accepted: true,
+      }),
+    ).toEqual({ lifecycle_status: 'retired' });
+  });
 });

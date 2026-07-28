@@ -43,7 +43,7 @@ export interface Item {
   item_locations: ItemLocation[];
   created_at: string;
   updated_at: string;
-  lifecycle_status?: 'draft' | 'live' | 'paused';
+  lifecycle_status?: 'draft' | 'live' | 'paused' | 'retired';
 }
 
 export interface FetchItemsResponse {
@@ -107,17 +107,18 @@ export async function updateItem(itemId: string, payload: UpdateItemPayload): Pr
   return response.data;
 }
 
-export type ItemLifecycleAction = 'pause' | 'unpause';
+export type ItemLifecycleAction = 'pause' | 'unpause' | 'retire';
 
 export interface ItemLifecycleResponse {
   item_id: string;
-  lifecycle_status: 'draft' | 'live' | 'paused';
+  lifecycle_status: 'draft' | 'live' | 'paused' | 'retired';
 }
 
 /**
- * Pause (voluntarily hide) or unpause a profile the caller owns.
- * `pause` is only valid on a `live` profile; `unpause` re-validates
- * completeness and lands `live` or `draft`. (#346)
+ * Change a profile's lifecycle. `pause` (only valid on `live`) / `unpause`
+ * re-validate completeness (#346). `retire` (#347) is TERMINAL and
+ * irreversible: it wipes PII, cancels open connections, de-indexes the profile
+ * and removes it from the owner's list — there is no transition back.
  */
 export async function setItemLifecycle(
   itemId: string,
