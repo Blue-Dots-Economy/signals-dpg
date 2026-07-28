@@ -241,10 +241,19 @@ async function buildWhereClause(
   ) {
     // #203 Task 3 — bbox viewport search (Option B): join the GiST-indexed
     // `item_search.geo` (geography MultiPoint) rather than filtering
-    // `items.item_locations` directly. `&&` (bounding-box overlap) uses
-    // `item_search_geo_gist`; because `geo` is a MultiPoint covering every
-    // location of the item, this is "any location in the box" — correct for
-    // multi-location items — matching the radius branch above.
+    // `items.item_locations` directly. `&&` (bounding-box overlap) is what
+    // `item_search_geo_gist` accelerates, but `&&` only compares the
+    // ENVELOPE of `geo` (the bbox around every point of a multi-location
+    // item) against the viewport envelope — for a multi-location item whose
+    // individual points straddle the viewport such that their aggregate
+    // envelope overlaps it but no single point actually falls inside, `&&`
+    // alone false-positives (wrong pin + inflated meta.total). `&&` stays as
+    // the index-served pre-filter; `ST_Intersects` is the exact recheck that
+    // corrects it to genuine "any location in the box" — the same guarantee
+    // the radius branch above already gives via per-location `earth_box`/
+    // `earth_distance`. Single-location items were already exact under `&&`
+    // alone (a single point's envelope IS the point), so this only changes
+    // behavior for multi-location items.
     if (filters.min_lat >= filters.max_lat || filters.min_lng >= filters.max_lng) {
       // Inverted/degenerate box (e.g. swapped corners): defined as an empty
       // result rather than an error, so a malformed viewport never 500s —
@@ -258,6 +267,7 @@ async function buildWhereClause(
             WHERE s.item_network = ${items.item_network} AND s.item_id = ${items.item_id}
               AND s.lifecycle_status = 'live'
               AND s.geo && ST_MakeEnvelope(${filters.min_lng}, ${filters.min_lat}, ${filters.max_lng}, ${filters.max_lat}, 4326)::geography
+              AND ST_Intersects(s.geo, ST_MakeEnvelope(${filters.min_lng}, ${filters.min_lat}, ${filters.max_lng}, ${filters.max_lat}, 4326)::geography)
           )
         `
       );

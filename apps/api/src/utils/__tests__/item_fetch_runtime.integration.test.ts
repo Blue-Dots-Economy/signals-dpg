@@ -56,6 +56,17 @@ const inC = { lat: 25.02, lng: 80.01 }; // in box (used as the "in" half of a mu
 const outA = { lat: 26.0, lng: 82.0 }; // out of box
 const outB = { lat: 27.0, lng: 83.0 }; // out of box
 
+// #203 review fix: a multi-location item whose two points straddle the box on
+// opposite sides — same latitude (inside the box's lat range [MIN_LAT,
+// MAX_LAT]), one west of MIN_LNG and one east of MAX_LNG. Neither point is
+// individually inside the box, but the MultiPoint's AGGREGATE envelope
+// (lng [79.0, 81.0] x lat [25.0, 25.0]) overlaps the query envelope — the
+// exact geometry that makes `&&` alone (bounding-box overlap) false-positive.
+// Verified directly against Postgres before writing this: `&&` = true,
+// `ST_Intersects` = false for this pair against the MIN/MAX box below.
+const straddleWest = { lat: 25.0, lng: 79.0 }; // west of the box
+const straddleEast = { lat: 25.0, lng: 81.0 }; // east of the box
+
 type PlanNode = {
   'Node Type'?: string;
   'Index Name'?: string;
@@ -224,6 +235,11 @@ describeIf(
       const outAId = await seedItem('outA', [outA], facetValueA);
       const multiOneInId = await seedItem('multiOneIn', [outA, inC], facetValueA);
       const multiBothOutId = await seedItem('multiBothOut', [outA, outB], facetValueA);
+      const straddleId = await seedItem(
+        'straddle',
+        [straddleWest, straddleEast],
+        facetValueA
+      );
       // notIndexed: real in-box location, but deliberately NO item_search row
       // — characterizes Option B's coupling to search ingestion.
       await seedItem('notIndexed', [inA], facetValueA);
@@ -233,6 +249,7 @@ describeIf(
       await seedItemSearch(outAId, [outA]);
       await seedItemSearch(multiOneInId, [outA, inC]);
       await seedItemSearch(multiBothOutId, [outA, outB]);
+      await seedItemSearch(straddleId, [straddleWest, straddleEast]);
       // (notIndexed intentionally gets no item_search row)
 
       await db.execute(sql`
@@ -289,8 +306,36 @@ describeIf(
       expect(got.has(ids.outA)).toBe(false);
       expect(got.has(ids.multiBothOut)).toBe(false);
       expect(got.has(ids.notIndexed)).toBe(false); // no item_search row
+      // straddle: aggregate envelope overlaps the box (`&&` true) but neither
+      // individual point is inside — must be excluded (the ST_Intersects
+      // recheck, not `&&` alone, is what makes this correct).
+      expect(got.has(ids.straddle)).toBe(false);
       expect(res.markers.length).toBe(3);
       expect(res.meta.total).toBe(3);
+    });
+
+    it('multi-location false positive: aggregate envelope overlaps the viewport but no individual point is inside -> excluded, not counted', async () => {
+      // #203 review fix: `&&` alone (bounding-box overlap) is true for the
+      // straddle fixture (its aggregate envelope spans across the box), but
+      // neither of its two actual points falls inside — asserting this in
+      // isolation (rather than folded only into the broader bbox test above)
+      // so the false-positive geometry this bug was about has one test whose
+      // name states exactly what it guards against.
+      const res = await fetchLocalMarkers({
+        ...baseFilters(),
+        min_lat: MIN_LAT,
+        min_lng: MIN_LNG,
+        max_lat: MAX_LAT,
+        max_lng: MAX_LNG,
+      });
+
+      const got = new Set(res.markers.map((m) => m.item_id));
+      expect(got.has(ids.straddle)).toBe(false);
+      expect(res.meta.total).toBe(3); // straddle must not inflate the total either
+
+      // Positive control, same request: a genuine any-location-in-box
+      // multi-location item is still returned exactly once.
+      expect(res.markers.filter((m) => m.item_id === ids.multiOneIn).length).toBe(1);
     });
 
     it('meta.total reflects the full in-box count even when limit truncates the page', async () => {
