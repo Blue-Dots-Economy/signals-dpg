@@ -1,5 +1,5 @@
 # syntax=docker/dockerfile:1.7
-FROM node:24-alpine AS base
+FROM node:26-alpine AS base
 RUN apk add --no-cache libc6-compat && corepack enable
 ENV PNPM_HOME=/pnpm
 ENV PATH=$PNPM_HOME:$PATH

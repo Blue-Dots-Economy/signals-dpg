@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1.7
 
-FROM node:24-alpine AS base
+FROM node:26-alpine AS base
 
 # Shared base image: Corepack enables the pinned pnpm version and
 # libc6-compat avoids common Alpine runtime issues with native modules.
@@ -55,7 +55,7 @@ RUN --mount=type=cache,id=pnpm-store,target=/pnpm/store \
 RUN --mount=type=cache,id=pnpm-store,target=/pnpm/store \
   pnpm install --frozen-lockfile --prod
 
-FROM node:24-alpine AS runner
+FROM node:26-alpine AS runner
 
 RUN apk add --no-cache libc6-compat && corepack enable
 
