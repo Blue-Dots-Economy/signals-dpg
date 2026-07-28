@@ -137,7 +137,7 @@ export function ProfileRowActions({ profile, pauseEnabled, onEdit, onChanged }: 
 
       {/* Confirm before pausing — pausing removes the profile from discovery. */}
       <Dialog open={pauseConfirm} onOpenChange={setPauseConfirm}>
-        <DialogContent onClick={(e) => e.stopPropagation()}>
+        <DialogContent className="max-h-[90dvh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
           <DialogHeader>
             <DialogTitle>{t('profile.pause_confirm_title', 'Pause this profile?')}</DialogTitle>
             <DialogDescription>
@@ -164,7 +164,7 @@ export function ProfileRowActions({ profile, pauseEnabled, onEdit, onChanged }: 
       {/* Confirm before resuming — explain it becomes discoverable again (and may
           land as a draft if still incomplete). */}
       <Dialog open={resumeConfirm} onOpenChange={setResumeConfirm}>
-        <DialogContent onClick={(e) => e.stopPropagation()}>
+        <DialogContent className="max-h-[90dvh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
           <DialogHeader>
             <DialogTitle>{t('profile.resume_confirm_title', 'Resume this profile?')}</DialogTitle>
             <DialogDescription>
@@ -193,7 +193,7 @@ export function ProfileRowActions({ profile, pauseEnabled, onEdit, onChanged }: 
 
       {/* Confirm before retiring — terminal, irreversible, wipes PII (#347). */}
       <Dialog open={retireConfirm} onOpenChange={setRetireConfirm}>
-        <DialogContent onClick={(e) => e.stopPropagation()}>
+        <DialogContent className="max-h-[90dvh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
           <DialogHeader>
             <DialogTitle>{t('profile.retire_confirm_title', 'Retire this profile?')}</DialogTitle>
             <DialogDescription>
