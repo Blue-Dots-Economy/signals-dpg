@@ -111,6 +111,14 @@ export const MatchScoreSecretsSchema = z.object({
   DPG_SCORING_PROMPT_VERSION: z.string().optional(),
 });
 
+export const SignalsSearchSecretsSchema = z.object({
+  // Discover BFF -> signals-search (#203). Both optional: when either is
+  // unset, the discover BFF always falls back to the native (in-repo) search
+  // path, so absence must never crash boot.
+  SIGNALS_SEARCH_URL: z.string().optional(),
+  SIGNALS_SEARCH_API_KEY: z.string().optional(),
+});
+
 export const SchemaRegistrySecretsSchema = z.object({
   SCHEMA_REGISTRY_URL: z.string().min(1),
 });
