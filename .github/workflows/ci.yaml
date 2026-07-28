@@ -22,7 +22,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v6
         with:
           version: 11.1.2
       - uses: actions/setup-node@v4
@@ -36,7 +36,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v6
         with:
           version: 11.1.2
       - uses: actions/setup-node@v4
@@ -53,7 +53,7 @@ jobs:
     # workspace-recursive run stays green.
     steps:
       - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v6
         with:
           version: 11.1.2
       - uses: actions/setup-node@v4
@@ -74,7 +74,7 @@ jobs:
       - name: Note when dep-cruise config is absent
         if: hashFiles('.dependency-cruiser.cjs') == ''
         run: echo "::notice::No .dependency-cruiser.cjs found; skipping dep-cruise."
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v6
         if: hashFiles('.dependency-cruiser.cjs') != ''
         with:
           version: 11.1.2
@@ -132,7 +132,7 @@ jobs:
       PG_DRIZZLE_URL: postgres://postgres:postgres@localhost:5433/postgres
     steps:
       - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v6
         with:
           version: 11.1.2
       - uses: actions/setup-node@v4
@@ -227,7 +227,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v6
         with:
           version: 11.1.2
       - uses: actions/setup-node@v4
