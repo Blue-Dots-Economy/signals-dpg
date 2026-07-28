@@ -137,6 +137,7 @@ export function AppSidebar({
         <PortalHeader />
       </SidebarHeader>
       <SidebarContent>
+        <nav aria-label="Primary" className="flex flex-1 flex-col gap-2">
         {showNetworkSelector && (
           <SidebarGroup>
             <SidebarGroupLabel>{t('nav.networks_group')}</SidebarGroupLabel>
@@ -343,6 +344,7 @@ export function AppSidebar({
             </SidebarMenu>
           </SidebarGroupContent>
         </SidebarGroup>
+        </nav>
       </SidebarContent>
     </ShadcnSidebar>
   );

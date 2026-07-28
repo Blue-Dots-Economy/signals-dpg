@@ -14,7 +14,7 @@ export function RequireAuth({ children }: RequireAuthProps) {
 
   if (isLoading) {
     return (
-      <div className="flex h-screen items-center justify-center">
+      <div className="flex h-svh items-center justify-center">
         <p className="text-muted-foreground">{t('auth.checking_session')}</p>
       </div>
     );

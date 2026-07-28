@@ -97,7 +97,7 @@ export function ActionList({
     <div className="w-full space-y-5">
       {/* Toolbar: filter chips + refresh */}
       <div className="flex flex-wrap items-center gap-3">
-        <div className="inline-flex gap-1 rounded-xl border bg-card p-1">
+        <div className="inline-flex flex-wrap gap-1 rounded-xl border bg-card p-1">
           {FILTERS.map((f) => (
             <button
               key={f}
@@ -108,7 +108,7 @@ export function ActionList({
                 // select mode so the selection never goes invisible/stale.
                 selection.exitSelect();
               }}
-              className={`rounded-lg px-3 py-1.5 text-xs font-medium transition ${
+              className={`rounded-lg px-3 py-1.5 text-xs font-medium transition pointer-coarse:min-h-11 ${
                 filter === f
                   ? 'bg-primary/10 text-primary'
                   : 'text-muted-foreground hover:text-foreground'
