@@ -100,6 +100,8 @@
   "actions.profile_not_live_desc": "ನಿಮ್ಮ ಪ್ರೊಫೈಲ್ ಇನ್ನೂ ಡ್ರಾಫ್ಟ್ ಆಗಿದೆ. ಅದನ್ನು ಲೈವ್ ಮಾಡಲು ಅಗತ್ಯವಿರುವ ಕ್ಷೇತ್ರಗಳನ್ನು ಭರ್ತಿ ಮಾಡಿ, ನಂತರ ನೀವು ಯಾವುದೇ ಕ್ರಿಯೆಗಳನ್ನು ನಿರ್ವಹಿಸಬಹುದು.",
   "menu.sign_out": "ಸೈನ್ ಔಟ್",
   "menu.contact_support": "ಬೆಂಬಲವನ್ನು ಸಂಪರ್ಕಿಸಿ",
+  "menu.notifications": "ಅಧಿಸೂಚನೆಗಳು",
+  "menu.theme": "ಥೀಮ್",
   "support.dialog_title": "ಬೆಂಬಲವನ್ನು ಸಂಪರ್ಕಿಸಿ",
   "support.dialog_desc": "ಏನಾಗುತ್ತಿದೆ ಎಂದು ನಮಗೆ ತಿಳಿಸಿ, ನಾವು ನಿಮ್ಮನ್ನು ಸಂಪರ್ಕಿಸುತ್ತೇವೆ.",
   "support.label_name": "ಹೆಸರು",
@@ -579,5 +581,6 @@
   "auth.signup_dob_label_ym": "ನಿಮ್ಮ ಜನ್ಮ ವರ್ಷ ಆಯ್ಕೆಮಾಡಿ",
   "u18.dob_label_ym": "ನಿಮ್ಮ ಜನ್ಮ ವರ್ಷ ಆಯ್ಕೆಮಾಡಿ",
   "auth.dob_label_year": "ಜನ್ಮ ವರ್ಷ",
-  "auth.dob_year_placeholder": "ವರ್ಷ"
+  "auth.dob_year_placeholder": "ವರ್ಷ",
+  "a11y.skip_to_content": "ವಿಷಯಕ್ಕೆ ಹೋಗಿ"
 }

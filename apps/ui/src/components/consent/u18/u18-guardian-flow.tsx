@@ -1,12 +1,11 @@
 import * as React from 'react';
 import { useTranslation } from 'react-i18next';
 import {
-  Dialog,
-  DialogContent,
   DialogHeader,
   DialogTitle,
   DialogDescription,
 } from '@/components/ui/dialog';
+import { ResponsiveDialog } from '@/components/ui/responsive-dialog';
 import { submitGuardian, type SubmitGuardianBody } from '@/lib/consent-api';
 import { DobStep } from './dob-step';
 import { GuardianFormStep } from './guardian-form-step';
@@ -61,7 +60,7 @@ export function U18GuardianFlow({
   };
 
   return (
-    <Dialog
+    <ResponsiveDialog
       open
       onOpenChange={(next) => {
         // Blocking: never dismiss via the Dialog's own open-change. The whole
@@ -69,13 +68,14 @@ export function U18GuardianFlow({
         // guardian confirms.
         if (!next) return;
       }}
+      dismissible={false}
+      showCloseButton={false}
+      title={titles[step]}
+      contentClassName="max-w-lg"
+      onInteractOutside={(e) => e.preventDefault()}
+      onEscapeKeyDown={(e) => e.preventDefault()}
     >
-      <DialogContent
-        showCloseButton={false}
-        className="max-w-lg"
-        onInteractOutside={(e) => e.preventDefault()}
-        onEscapeKeyDown={(e) => e.preventDefault()}
-      >
+      <div className="flex flex-col gap-4 overflow-y-auto p-6">
         <DialogHeader>
           <DialogTitle>{titles[step]}</DialogTitle>
           <DialogDescription>
@@ -127,7 +127,7 @@ export function U18GuardianFlow({
             </button>
           </div>
         )}
-      </DialogContent>
-    </Dialog>
+      </div>
+    </ResponsiveDialog>
   );
 }

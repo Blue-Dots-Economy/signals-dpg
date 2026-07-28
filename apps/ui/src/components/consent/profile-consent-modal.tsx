@@ -1,10 +1,9 @@
 import * as React from 'react';
 import {
-  Dialog,
-  DialogContent,
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
+import { ResponsiveDialog } from '@/components/ui/responsive-dialog';
 import { ConsentCheckbox } from '@/components/actions/consent-checkbox';
 import { Button } from '@/components/ui/button';
 import { useTranslation } from 'react-i18next';
@@ -46,19 +45,24 @@ export function ProfileConsentModal({
   }, [open]);
 
   return (
-    <Dialog
+    <ResponsiveDialog
       open={open}
       onOpenChange={(next) => {
         // Blocking: never dismiss via the Dialog's own open-change.
         if (!next) return;
       }}
+      showCloseButton={false}
+      dismissible={false}
+      title={
+        minor && minorNotice
+          ? t('consent.profile_title_minor', 'Guardian confirmation needed')
+          : t('consent.profile_title')
+      }
+      contentClassName="max-w-lg"
+      onInteractOutside={(e) => e.preventDefault()}
+      onEscapeKeyDown={(e) => e.preventDefault()}
     >
-      <DialogContent
-        showCloseButton={false}
-        className="max-w-lg"
-        onInteractOutside={(e) => e.preventDefault()}
-        onEscapeKeyDown={(e) => e.preventDefault()}
-      >
+      <div className="flex flex-col gap-4 overflow-y-auto p-6">
         <DialogHeader>
           <DialogTitle>
             {minor && minorNotice
@@ -112,7 +116,7 @@ export function ProfileConsentModal({
             </Button>
           </div>
         )}
-      </DialogContent>
-    </Dialog>
+      </div>
+    </ResponsiveDialog>
   );
 }

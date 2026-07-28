@@ -186,7 +186,7 @@ export function ActionHandler({ children, onActionSubmit, guardianConfirmRequire
         open={!!pendingGuardianConfirm}
         onOpenChange={(open) => { if (!open) setPendingGuardianConfirm(null); }}
       >
-        <DialogContent>
+        <DialogContent className="max-h-[90dvh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>{t('actions.guardian_confirm_title')}</DialogTitle>
             <DialogDescription>{t('actions.guardian_confirm_desc')}</DialogDescription>

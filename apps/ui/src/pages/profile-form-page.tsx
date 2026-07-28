@@ -585,7 +585,7 @@ export function ProfileFormPage() {
 
   if (availableNetworkIds === null || editLoading) {
     return (
-      <div className="flex h-screen items-center justify-center">
+      <div className="flex h-svh items-center justify-center">
         <p className="text-muted-foreground">
           {editLoading ? t('profile.loading_profile') : t('profile.loading_schemas')}
         </p>
@@ -595,7 +595,7 @@ export function ProfileFormPage() {
 
   if (!targetNetworkId) {
     return (
-      <div className="flex h-screen items-center justify-center">
+      <div className="flex h-svh items-center justify-center">
         <p className="text-muted-foreground">{t('profile.no_networks')}</p>
       </div>
     );
@@ -603,7 +603,7 @@ export function ProfileFormPage() {
 
   if (!network) {
     return (
-      <div className="flex h-screen items-center justify-center">
+      <div className="flex h-svh items-center justify-center">
         <p className="text-muted-foreground">{t('profile.loading_schemas')}</p>
       </div>
     );
@@ -613,47 +613,60 @@ export function ProfileFormPage() {
   if (!selectedDomain && !isEdit) {
     return (
       <AuthShell>
-        <button
-          type="button"
-          onClick={() => navigate(`/?network=${targetNetworkId}`)}
-          className="mb-6 flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors"
-        >
-          <ArrowLeft className="h-4 w-4" />
-          {t('common.back')}
-        </button>
-        <div className="mb-6">
-          <p className="mb-2 inline-flex items-center rounded-full bg-primary/10 px-2.5 py-0.5 text-[10px] font-semibold uppercase tracking-[0.18em] text-primary">
-            {theme.portalLabel}
-          </p>
-          <h2 className="text-2xl font-bold">{t('profile.create_heading')}</h2>
-          <p className="text-muted-foreground mt-1">{t('profile.choose_role')}</p>
-          <p className="text-sm text-muted-foreground/80 mt-2">{theme.subline}</p>
-        </div>
-        <div className="grid gap-4 sm:grid-cols-2">
-          {selectableDomains.map((domain, idx) => {
-            const Icon = getDomainIcon(domain.id, network?.id);
-            const label = domain.id
-              .replace(/_/g, ' ')
-              .replace(/\b\w/g, (c) => c.toUpperCase());
-            return (
-              <RoleCard
-                key={domain.id}
-                icon={Icon}
-                title={label}
-                description={domain.description ?? ''}
-                onClick={() => setSelectedDomain(domain.id)}
-                variant={idx % 2 === 0 ? 'primary' : 'secondary'}
-              />
-            );
-          })}
-        </div>
+        <main id="main-content">
+          <button
+            type="button"
+            onClick={() => navigate(`/?network=${targetNetworkId}`)}
+            className="mb-6 flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors"
+          >
+            <ArrowLeft className="h-4 w-4" />
+            {t('common.back')}
+          </button>
+          <div className="mb-6">
+            <p className="mb-2 inline-flex items-center rounded-full bg-primary/10 px-2.5 py-0.5 text-[10px] font-semibold uppercase tracking-[0.18em] text-primary">
+              {theme.portalLabel}
+            </p>
+            {/* Only heading in this branch — safe to be a plain (visible) h1: no
+                deeper section headings (RoleCard renders plain text, not h3+),
+                so h1 here can't create a level skip. */}
+            <h1 className="text-2xl font-bold">{t('profile.create_heading')}</h1>
+            <p className="text-muted-foreground mt-1">{t('profile.choose_role')}</p>
+            <p className="text-sm text-muted-foreground/80 mt-2">{theme.subline}</p>
+          </div>
+          <div className="grid gap-4 sm:grid-cols-2">
+            {selectableDomains.map((domain, idx) => {
+              const Icon = getDomainIcon(domain.id, network?.id);
+              const label = domain.id
+                .replace(/_/g, ' ')
+                .replace(/\b\w/g, (c) => c.toUpperCase());
+              return (
+                <RoleCard
+                  key={domain.id}
+                  icon={Icon}
+                  title={label}
+                  description={domain.description ?? ''}
+                  onClick={() => setSelectedDomain(domain.id)}
+                  variant={idx % 2 === 0 ? 'primary' : 'secondary'}
+                />
+              );
+            })}
+          </div>
+        </main>
       </AuthShell>
     );
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-b from-[var(--brand-hero-to)]/8 to-background p-4 sm:p-6">
-      <div className="mx-auto max-w-2xl">
+    <div className="min-h-svh bg-gradient-to-b from-[var(--brand-hero-to)]/8 to-background p-4 sm:p-6">
+      <main id="main-content" className="mx-auto max-w-2xl">
+        {/* Visually-hidden page title: the shared SchemaForm renders its
+            section headings as <h3> (schema-form.tsx), so the visible hero
+            title just below must stay an <h2> to avoid an h1→h3 skip. This
+            sr-only <h1> keeps the accessible heading chain valid
+            (h1 → h2 hero → h3 form sections) without changing the look. */}
+        <h1 className="sr-only">
+          {isEdit ? t('profile.edit_role_heading', { role: roleLabel }) : t('profile.create_role_heading', { role: roleLabel })}
+        </h1>
         {/* Branded hero strip — sits flush above the form Card */}
         <div className="relative overflow-hidden rounded-t-xl bg-brand-hero">
           <div className="pointer-events-none absolute inset-0 opacity-15">
@@ -805,7 +818,7 @@ export function ProfileFormPage() {
             if (!guardianVerifiedForCreate) setConsentChecked(false);
           }}
         >
-          <DialogContent>
+          <DialogContent className="max-h-[90dvh] overflow-y-auto">
             <DialogHeader>
               <DialogTitle>
                 {t('profile.guardian_confirm_title', 'Guardian confirmation needed')}
@@ -873,7 +886,7 @@ export function ProfileFormPage() {
             onLogout={() => { void signOut(); }}
           />
         )}
-      </div>
+      </main>
     </div>
   );
 }

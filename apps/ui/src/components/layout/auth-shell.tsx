@@ -8,7 +8,7 @@ interface AuthShellProps {
 
 export function AuthShell({ children }: AuthShellProps) {
   return (
-    <div className="min-h-screen lg:h-screen lg:overflow-hidden grid grid-cols-1 lg:grid-cols-[1.1fr_1fr]">
+    <div className="min-h-svh lg:h-svh lg:overflow-hidden grid grid-cols-1 lg:grid-cols-[1.1fr_1fr]">
       {/* Left: branded hero panel (desktop only) — stays fixed while right scrolls */}
       <BrandHero />
 

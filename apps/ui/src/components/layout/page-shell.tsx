@@ -1,4 +1,5 @@
 import type { RJSFSchema } from '@rjsf/utils';
+import { useTranslation } from 'react-i18next';
 import { SidebarProvider } from '@/components/ui/sidebar';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import type { DotNetworkDomain, DotNetworkSchema, ViewMode } from '@/engine/types';
@@ -48,8 +49,15 @@ export function PageShell({
   onViewModeChange,
   filtersSlot,
 }: PageShellProps) {
+  const { t } = useTranslation();
   return (
     <TooltipProvider>
+      <a
+        href="#main-content"
+        className="sr-only focus:not-sr-only focus:absolute focus:left-4 focus:top-4 focus:z-50 focus:rounded-md focus:bg-background focus:px-4 focus:py-2 focus:shadow"
+      >
+        {t('a11y.skip_to_content')}
+      </a>
       <SidebarProvider>
         <AppSidebar
           networks={networks}
@@ -65,7 +73,7 @@ export function PageShell({
           onProfilesChanged={onProfilesChanged}
           userSchemas={userSchemas}
         />
-        <div className="flex h-svh flex-1 flex-col">
+        <div className="flex h-svh min-w-0 flex-1 flex-col">
           <TopBar
             search={search}
             onSearchChange={onSearchChange}
@@ -73,7 +81,12 @@ export function PageShell({
             onViewModeChange={onViewModeChange}
             filtersSlot={filtersSlot}
           />
-          <main className="flex-1 overflow-y-auto p-4 sm:p-6">{children}</main>
+          <main
+            id="main-content"
+            className="flex-1 overflow-y-auto p-4 max-md:overflow-x-clip sm:p-6"
+          >
+            {children}
+          </main>
         </div>
       </SidebarProvider>
     </TooltipProvider>

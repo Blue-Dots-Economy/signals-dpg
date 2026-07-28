@@ -2,12 +2,11 @@ import * as React from 'react';
 import { useTranslation } from 'react-i18next';
 import type { RJSFSchema } from '@rjsf/utils';
 import {
-  Dialog,
-  DialogContent,
   DialogHeader,
   DialogTitle,
   DialogDescription,
 } from '@/components/ui/dialog';
+import { ResponsiveDialog } from '@/components/ui/responsive-dialog';
 import { DomainCard } from '@/components/cards/domain-card';
 import { useNetworkConfig } from '@/hooks/use-network-config';
 import { getActionContactDetails } from '@/lib/action-api';
@@ -228,8 +227,8 @@ export function ProfileCardModal({
         : 'profile.card_desc_masked';
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-xl">
+    <ResponsiveDialog open={open} onOpenChange={onOpenChange} title={name} contentClassName="max-w-xl">
+      <div className="flex flex-col gap-4 overflow-y-auto p-6">
         <DialogHeader>
           <DialogTitle>{name}</DialogTitle>
           <DialogDescription>{t(descKey)}</DialogDescription>
@@ -259,7 +258,7 @@ export function ProfileCardModal({
             {JSON.stringify(item.item_state, null, 2)}
           </pre>
         )}
-      </DialogContent>
-    </Dialog>
+      </div>
+    </ResponsiveDialog>
   );
 }

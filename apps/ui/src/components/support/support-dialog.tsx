@@ -5,13 +5,12 @@ import axios from 'axios';
 import { Loader2 } from 'lucide-react';
 import { useAuth } from '@/contexts/auth-context';
 import {
-  Dialog,
-  DialogContent,
   DialogDescription,
   DialogFooter,
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
+import { ResponsiveDialog } from '@/components/ui/responsive-dialog';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Label } from '@/components/ui/label';
@@ -94,8 +93,13 @@ export function SupportDialog({ open, onOpenChange }: SupportDialogProps) {
   };
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-md">
+    <ResponsiveDialog
+      open={open}
+      onOpenChange={onOpenChange}
+      title={t('support.dialog_title')}
+      contentClassName="sm:max-w-md"
+    >
+      <div className="flex flex-col gap-4 overflow-y-auto p-6">
         <DialogHeader>
           <DialogTitle>{t('support.dialog_title')}</DialogTitle>
           <DialogDescription>{t('support.dialog_desc')}</DialogDescription>
@@ -194,7 +198,7 @@ export function SupportDialog({ open, onOpenChange }: SupportDialogProps) {
             </button>
           </DialogFooter>
         </form>
-      </DialogContent>
-    </Dialog>
+      </div>
+    </ResponsiveDialog>
   );
 }
