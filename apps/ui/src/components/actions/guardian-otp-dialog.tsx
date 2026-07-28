@@ -171,7 +171,7 @@ export function GuardianOtpDialog({ open, onOpenChange, onSubmitOtp, onLogout }:
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-[440px] gap-4 p-6">
+      <DialogContent className="sm:max-w-[440px] max-h-[90dvh] overflow-y-auto gap-4 p-6">
         <DialogHeader>
           <DialogTitle>{title}</DialogTitle>
         </DialogHeader>

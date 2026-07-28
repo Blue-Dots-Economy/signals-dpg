@@ -879,7 +879,7 @@ export function ProfileFormPage() {
             if (!guardianVerifiedForCreate) setConsentChecked(false);
           }}
         >
-          <DialogContent>
+          <DialogContent className="max-h-[90dvh] overflow-y-auto">
             <DialogHeader>
               <DialogTitle>
                 {t('profile.guardian_confirm_title', 'Guardian confirmation needed')}
@@ -915,7 +915,7 @@ export function ProfileFormPage() {
 
         {/* Confirm before pausing — pausing removes the profile from discovery. */}
         <Dialog open={pauseConfirmOpen} onOpenChange={setPauseConfirmOpen}>
-          <DialogContent>
+          <DialogContent className="max-h-[90dvh] overflow-y-auto">
             <DialogHeader>
               <DialogTitle>
                 {t('profile.pause_confirm_title', 'Pause this profile?')}
