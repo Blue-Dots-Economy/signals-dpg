@@ -891,14 +891,35 @@ export function HomePage() {
   // `buildWhereClause`'s `= ANY(...)` facet filter — see Task 3). Computed
   // here (not down at `singleDomainCards`/`filteredAllDomainItems` below, its
   // other consumer) so it's available before `useMapMarkers` needs it.
-  // Server-side, a filter on a field the domain hasn't declared
-  // `filterable`+non-private for is silently dropped (Task 3's security
-  // guard) — the panel only ever offers declared enum fields anyway (see
-  // `getEnumFilterFieldsForDomains`), so this never surfaces to a user as a
-  // filter that "does nothing."
   const activeFieldFilters = React.useMemo(
     () => Object.fromEntries(Object.entries(mapSelectedFields).filter(([, vals]) => vals.length > 0)),
     [mapSelectedFields],
+  );
+
+  // #203 Task 7 review fix: the server's facet guard
+  // (`resolveAllowedFacetFields`, Task 3) only honors fields declared
+  // `filterable: true` in a domain's network.json (Task 1) — NOT every
+  // schema-declared enum field. `MapFiltersPanel` itself now restricts what
+  // it OFFERS on the map to that same `filterable: true` set
+  // (`getEnumFilterFieldsForDomains(..., { filterableOnly: true })`, see
+  // `map-filters-panel.tsx`), so a map user can no longer select a facet the
+  // server will silently drop. But `mapSelectedFields` is shared state with
+  // the LIST (which still offers/filters every enum field) — a field
+  // selected while on the list tab is NOT automatically deselected when
+  // switching to the map tab (the panel simply stops rendering a chip for
+  // it). Without this second filter, that stale non-filterable selection
+  // would still be sent to the server as an inert `item_state` param.
+  // Restricting the map's OWN sent filters to the filterable set (in
+  // addition to the panel's offer-side restriction above) closes that gap:
+  // the map never sends a facet it can't apply, regardless of what's
+  // sitting in shared state from the list.
+  const mapFilterableFieldKeys = React.useMemo(
+    () => new Set(getEnumFilterFieldsForDomains(filterFieldDomains, { filterableOnly: true }).map((f) => f.key)),
+    [filterFieldDomains],
+  );
+  const mapActiveFieldFilters = React.useMemo(
+    () => Object.fromEntries(Object.entries(activeFieldFilters).filter(([key]) => mapFilterableFieldKeys.has(key))),
+    [activeFieldFilters, mapFilterableFieldKeys],
   );
 
   // Task 6 (#203 §5.2): the map view is now sourced from viewport-scoped
@@ -911,10 +932,18 @@ export function HomePage() {
   // out of this PR's scope on purpose (see the plan doc's "Out of scope").
   // `search` therefore keeps filtering only the LIST (`buildFilteredCardsForDomain`
   // below); the map ignores it. `MapFiltersPanel`'s enum-field facets, by
-  // contrast, DO now drive the map server-side (`activeFieldFilters` above) —
-  // only the domain multi-select (below, a client-side array-membership
-  // check on the already-fetched markers) and free-text search remain
-  // client/list-only.
+  // contrast, DO now drive the map server-side — but ONLY the subset
+  // declared `filterable: true` in network.json (Task 1), which is the set
+  // the server's facet guard (`resolveAllowedFacetFields`, Task 3) actually
+  // honors for `item_state` filtering; that's `mapActiveFieldFilters` above,
+  // not the full `activeFieldFilters` the list uses (see the comment there).
+  // Declaring more facets per network (+ indexing them, Task 1's pattern in
+  // `network.json`) is a config follow-up, not a code change here — most
+  // example networks currently declare zero filterable facets, so the map
+  // filter panel may show no enum groups at all for them until that's done.
+  // The domain multi-select (below, a client-side array-membership check on
+  // the already-fetched markers) and free-text search remain client/list-only
+  // regardless of facet config.
   //
   // Even at low zoom for an anonymous / no-location visitor we now fetch the
   // slim viewport markers (coords only, capped at MAP_FETCH_LIMIT) and cluster
@@ -933,7 +962,7 @@ export function HomePage() {
     () => (selectedDomain ? visibleDomains.filter((d) => d.id === selectedDomain) : visibleDomains),
     [selectedDomain, visibleDomains],
   );
-  const mapMarkers = useMapMarkers(network, mapDomains, mapViewport, activeFieldFilters);
+  const mapMarkers = useMapMarkers(network, mapDomains, mapViewport, mapActiveFieldFilters);
 
   // On the "All" tab the Filters-panel domain multi-select narrows which pins
   // show (client-side membership check — every `Marker` carries `item_domain`).
