@@ -24,6 +24,7 @@ import { ActionHandler } from '@/components/actions/action-handler';
 import { MapView } from '@/components/map/map-container';
 import { MapFiltersPanel } from '@/components/map/map-filters-panel';
 import { MarkerPopupCard } from '@/components/map/marker-popup-card';
+import { MapCountPill } from '@/components/map/map-count-pill';
 import { MatchScoreCard } from '@/components/match-score';
 import '@/components/map/providers';
 import { performAction, performActionsBulk, type Item } from '@/lib/item-api';
@@ -2147,21 +2148,23 @@ export function HomePage() {
                     );
                   }}
                 />
-                {/* Signed-out count pill (#203 §7, revised): logged-out map view
-                    has no header count badge (that's a logged-in ContentHeader),
-                    so this small non-blocking pill surfaces the result count for
-                    the current view at all zooms — anonymous visitors otherwise
-                    had no way to see the total. `fixed` + high z-index so it stays
-                    above the map's own maximize overlay (z-[2000]). */}
-                {!user && mapMarkers.total > 0 && (
-                  <div className="pointer-events-none fixed bottom-6 left-1/2 z-[2100] -translate-x-1/2 px-4">
-                    <div className="rounded-full border border-border bg-background/95 px-3 py-1.5 text-xs font-medium text-foreground shadow-md backdrop-blur-sm">
-                      {mapItems.length < mapMarkers.total
-                        ? t('home.showing_x_of_y', { shown: mapItems.length, total: mapMarkers.total })
-                        : t('header.listings', { count: mapMarkers.total })}
-                    </div>
-                  </div>
-                )}
+                {/* Map count pill (#203 §7, revised; extended by Task 6):
+                    logged-out map view has no header count badge (that's a
+                    logged-in ContentHeader), so this small non-blocking pill
+                    surfaces the result count for the current view at all
+                    zooms. Task 6 adds an over-dense "N+ in this area — zoom
+                    in" variant that shows for BOTH anon and signed-in
+                    visitors whenever the true total exceeds the active
+                    zoom-band marker cap (`mapMarkers.truncated`) — see
+                    `MapCountPill` for the two-variant logic. `fixed` + high
+                    z-index so it stays above the map's own maximize overlay
+                    (z-[2000]). */}
+                <MapCountPill
+                  total={mapMarkers.total}
+                  shown={mapItems.length}
+                  truncated={mapMarkers.truncated}
+                  signedIn={!!user}
+                />
                 {/* Federation-degradation indicator (#203 §6): some peer instances
                     didn't answer in time, so the viewport marker set is known-partial.
                     `fixed` (not `absolute`) so it stays visible above the map's own

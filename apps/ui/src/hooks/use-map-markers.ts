@@ -6,6 +6,7 @@ import type { DotNetworkSchema, DotNetworkDomain, MapViewport } from '@/engine/t
 import { queryKeys } from '@/lib/query-keys';
 import { snapViewportForKey, padBbox, shouldRefetch, zoomBand } from '@/lib/map-viewport-snap';
 import type { RawBbox, ZoomBand } from '@/lib/map-viewport-snap';
+import { capForZoom } from '@/lib/map-caps';
 
 // Map tier (spec §5.2 / §8): markers are lightweight pins, cached ~90s
 // client-side, mirrored by `cache_ttl_seconds` sent to the server so the
@@ -57,20 +58,18 @@ interface UseMapMarkersResult {
   markers: Marker[];
   total: number;
   partial: boolean;
+  /**
+   * Whether any active domain's `meta.total` (the server-side match count
+   * *before* the `limit` cutoff) exceeds the zoom-band cap for the current
+   * viewport (#203 map-serverside-search Task 6, `capForZoom`). Drives BOTH
+   * the Task 5 refetch-on-zoom-in state machine (see `heldRef` below) and the
+   * "N+ in this area — zoom in" over-dense indicator (`MapCountPill`) — a
+   * zoom-in that drops the true total under the cap flips this back to
+   * `false` on its own once the resulting refetch settles.
+   */
+  truncated: boolean;
   isLoading: boolean;
 }
-
-/**
- * PLACEHOLDER "was the last fetch truncated" cap (#203 map-serverside-search
- * Task 5). Task 6 owns the real per-zoom-band marker caps (clustered vs
- * individual, env-configurable alongside `DEFAULT_CLUSTER_DISABLE_ZOOM`) and
- * will replace this with them. This is a single, deliberately small
- * stand-in — `meta.total` is the server-side match count *before* the
- * `limit` cutoff, so a dense area (e.g. 20k profiles in a city) reports a
- * `total` far above this, marking the held set as "too dense to trust" so a
- * zoom-in into it always refetches rather than filtering the held markers.
- */
-const PLACEHOLDER_TRUNCATION_CAP = 1000;
 
 /** Refetch state held across renders for the bbox path (Task 5). */
 interface HeldBboxState {
@@ -78,7 +77,7 @@ interface HeldBboxState {
   bbox: RawBbox;
   /** That bbox, inflated ~25% — the new bbox must stay inside this to skip a refetch. */
   paddedBbox: RawBbox;
-  /** Whether any domain's last fetch reported `meta.total > PLACEHOLDER_TRUNCATION_CAP`. */
+  /** Whether any domain's last fetch reported `meta.total > capForZoom(zoom)`. */
   truncated: boolean;
   /**
    * The zoom band (`snapViewportForKey`'s `'clustered' | 'individual'`) the
@@ -111,7 +110,6 @@ export function useMapMarkers(
   viewport: MapViewport | null,
   filters: Record<string, unknown> = {},
 ): UseMapMarkersResult {
-  const limit = MAP_FETCH_LIMIT;
   const active = network && viewport ? domains : [];
 
   // Bbox path (#203 map-serverside-search Task 4): both live map providers
@@ -163,6 +161,18 @@ export function useMapMarkers(
   // held marker set and lets the map provider re-cluster it locally instead
   // of hitting the network.
   const effectiveBbox: RawBbox | null = !rawBbox ? null : needsRefetch ? rawBbox : heldRef.current!.bbox;
+
+  // Zoom-band marker cap (#203 map-serverside-search Task 6, `capForZoom`):
+  // the bbox (live-map) path fetches `cap + 1` — one more than the cap the
+  // truncation check below compares `meta.total` against, so a total that
+  // exactly equals the cap still comes back as a complete (non-truncated)
+  // set. The radius path (hand-built radius viewports — the list/tourist
+  // callers that predate the bbox work) keeps requesting the older, larger
+  // flat `MAP_FETCH_LIMIT` unchanged; unifying it into the zoom-band cap is
+  // out of scope here (it has no clustering/individual-pin distinction to
+  // band on).
+  const cap = capForZoom(viewport?.zoom ?? 0);
+  const limit = effectiveBbox ? cap + 1 : MAP_FETCH_LIMIT;
 
   // A snapped-bbox grid cell alone (Task 4) can't be trusted to force a new
   // query key here: a contained zoom-in can coincidentally snap to the SAME
@@ -266,29 +276,35 @@ export function useMapMarkers(
   // identity (`dataUpdatedAt`) so it recomputes only when a query's data
   // actually changes.
   const dataSignature = results.map((r) => `${r.status}:${r.dataUpdatedAt}`).join('|');
+  // `truncated` is decided per-domain and ORed together: if any active
+  // domain's `meta.total` exceeds the zoom-band cap (#203 Task 6,
+  // `capForZoom`), the whole aggregated result is treated as truncated —
+  // both for the Task 5 refetch-on-zoom-in decision below and for the
+  // over-dense "N+ in this area — zoom in" indicator this hook's caller
+  // renders, so neither trusts a set that's only representative for some
+  // domains.
   const aggregated = React.useMemo(() => {
     const markers: Marker[] = [];
     let total = 0;
     let partial = false;
+    let truncated = false;
     for (const result of results) {
       if (result.data) {
         markers.push(...result.data.markers);
         total += result.data.meta.total;
         partial = partial || result.data.meta.partial;
+        truncated = truncated || result.data.meta.total > cap;
       }
     }
-    return { markers, total, partial };
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- dataSignature captures the results' data identity
-  }, [dataSignature]);
+    return { markers, total, partial, truncated };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- dataSignature captures the results' data identity; cap is a cheap derived primitive listed explicitly
+  }, [dataSignature, cap]);
 
   // Update the held refetch state (Task 5) once every active domain's query
   // for `effectiveBbox` has settled — in an effect, not during render, so
-  // `heldRef` only ever reflects the LAST COMPLETED fetch's outcome.
-  // Truncation is decided per-domain and ORed together: if any active
-  // domain's `meta.total` exceeds the placeholder cap, the whole held set is
-  // treated as truncated, so the next contained zoom-in still forces a
-  // refetch for every domain rather than trusting a set that's only
-  // representative for some of them.
+  // `heldRef` only ever reflects the LAST COMPLETED fetch's outcome. Reuses
+  // `aggregated.truncated` (computed above from the same `results`) rather
+  // than recomputing it, so the two can never disagree.
   const effectiveBboxSignature = effectiveBbox
     ? `${effectiveBbox.minLat},${effectiveBbox.minLng},${effectiveBbox.maxLat},${effectiveBbox.maxLng}`
     : null;
@@ -296,15 +312,14 @@ export function useMapMarkers(
     if (!effectiveBbox || results.length === 0) return;
     if (results.some((r) => r.isLoading)) return;
     if (!results.some((r) => r.data)) return;
-    const truncated = results.some((r) => r.data && r.data.meta.total > PLACEHOLDER_TRUNCATION_CAP);
     heldRef.current = {
       bbox: effectiveBbox,
       paddedBbox: padBbox(effectiveBbox),
-      truncated,
+      truncated: aggregated.truncated,
       zoomBand: currentZoomBand,
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps -- effectiveBboxSignature + dataSignature (+ currentZoomBand, captured via closure) capture the relevant identity of effectiveBbox/results for this effect
-  }, [effectiveBboxSignature, dataSignature]);
+  }, [effectiveBboxSignature, dataSignature, aggregated.truncated]);
 
   return { ...aggregated, isLoading: results.some((r) => r.isLoading) };
 }

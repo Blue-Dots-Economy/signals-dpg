@@ -22,10 +22,11 @@ export type ZoomBand = 'clustered' | 'individual';
 
 /**
  * Zoom level at/above which the map disables clustering and shows individual
- * pins (spec: "cluster-disable zoom ~z14"). Task 6/7 make this
- * env-configurable (`MAP_CLUSTER_DISABLE_ZOOM`) and wire it into the actual
- * per-band marker caps; this constant is only the default used for the query
- * key's zoom band until that config lands.
+ * pins (spec: "cluster-disable zoom ~z14"). This module stays pure/env-unaware
+ * on purpose — it only owns the cache-key zoom band. `map-caps.ts` (#203
+ * map-serverside-search Task 6) reads the env-configurable version of this
+ * same threshold (`VITE_MAP_CLUSTER_DISABLE_ZOOM`, defaulting to this exact
+ * value) and uses it to pick the actual per-band marker cap (`capForZoom`).
  */
 export const DEFAULT_CLUSTER_DISABLE_ZOOM = 14;
 

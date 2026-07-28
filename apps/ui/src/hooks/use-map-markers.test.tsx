@@ -362,4 +362,68 @@ describe('useMapMarkers', () => {
     rerender({ filters: { gender: ['male'] } });
     await waitFor(() => expect(fetchNetworkMarkers).toHaveBeenCalledTimes(2));
   });
+
+  // #203 map-serverside-search Task 6: the zoom-band marker caps
+  // (`capForZoom`) replace the flat `MAP_FETCH_LIMIT` on the bbox path, and
+  // `meta.total` vs that same cap drives the exposed `truncated` flag the
+  // over-dense "N+ in this area — zoom in" indicator reads. `bboxViewport`
+  // (zoom: 8) bands as 'clustered' (cap 1000, so limit = 1001); zoom 14+
+  // bands as 'individual' (cap 500, so limit = 501) — see `map-caps.ts`'s
+  // defaults.
+  it('uses the clustered zoom-band cap (+1) as the limit on the bbox path, not the flat MAP_FETCH_LIMIT', async () => {
+    vi.mocked(fetchNetworkMarkers).mockResolvedValue({
+      meta: { total: 0, limit: 1001, offset: 0, partial: false, unavailable_instances: [] },
+      markers: [],
+    });
+
+    const { result } = renderHook(() => useMapMarkers(network, [domains[0]], bboxViewport), { wrapper });
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+
+    expect(fetchNetworkMarkers).toHaveBeenCalledWith(
+      expect.objectContaining({ limit: 1001 }),
+      expect.anything(),
+    );
+  });
+
+  it('uses the individual zoom-band cap (+1) once zoom is at/above the cluster-disable band', async () => {
+    vi.mocked(fetchNetworkMarkers).mockResolvedValue({
+      meta: { total: 0, limit: 501, offset: 0, partial: false, unavailable_instances: [] },
+      markers: [],
+    });
+
+    const { result } = renderHook(
+      () => useMapMarkers(network, [domains[0]], { ...bboxViewport, zoom: 14 }),
+      { wrapper },
+    );
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+
+    expect(fetchNetworkMarkers).toHaveBeenCalledWith(
+      expect.objectContaining({ limit: 501 }),
+      expect.anything(),
+    );
+  });
+
+  it('exposes truncated: true when a domain\'s meta.total exceeds the zoom-band cap', async () => {
+    vi.mocked(fetchNetworkMarkers).mockResolvedValue({
+      meta: { total: 1500, limit: 1001, offset: 0, partial: false, unavailable_instances: [] },
+      markers: [marker('a', 'student')],
+    });
+
+    const { result } = renderHook(() => useMapMarkers(network, [domains[0]], bboxViewport), { wrapper });
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+
+    expect(result.current.truncated).toBe(true);
+  });
+
+  it('exposes truncated: false when meta.total is within the zoom-band cap', async () => {
+    vi.mocked(fetchNetworkMarkers).mockResolvedValue({
+      meta: { total: 42, limit: 1001, offset: 0, partial: false, unavailable_instances: [] },
+      markers: [marker('a', 'student')],
+    });
+
+    const { result } = renderHook(() => useMapMarkers(network, [domains[0]], bboxViewport), { wrapper });
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+
+    expect(result.current.truncated).toBe(false);
+  });
 });
