@@ -15,6 +15,7 @@ vi.mock('@/config', () => ({
 import {
   buildSignalsSearchRequest,
   searchSignals,
+  SignalsSearchError,
   type SearchSignalsInput,
 } from '../signals_search_client';
 import { signalsSearchConfig } from '@/config';
@@ -92,6 +93,17 @@ describe('buildSignalsSearchRequest — envelope construction', () => {
     expect(req.message.intent.filters).toEqual([
       { op: 'contains_any', target: 'item_state.skills', value: ['plumbing'] },
     ]);
+  });
+
+  it('maps anchorItemId to intent.item.id, omitted when absent (#394 profile anchor relevance)', () => {
+    const withAnchor = buildSignalsSearchRequest({
+      ...baseInput,
+      anchorItemId: 'anchor-item-1',
+    });
+    expect(withAnchor.message.intent.item).toEqual({ id: 'anchor-item-1' });
+
+    const withoutAnchor = buildSignalsSearchRequest(baseInput);
+    expect(withoutAnchor.message.intent.item).toBeUndefined();
   });
 
   it('omits intent.filters when no filters are given', () => {
@@ -311,6 +323,28 @@ describe('searchSignals — HTTP call + response mapping', () => {
     });
 
     await expect(searchSignals(baseInput)).rejects.toThrow(/bad filter/);
+  });
+
+  it('throws a typed SignalsSearchError carrying status + code (upstream error) on a non-2xx response (#394)', async () => {
+    fetchMock.mockResolvedValue({
+      ok: false,
+      status: 404,
+      statusText: 'Not Found',
+      json: async () => ({ error: 'ANCHOR_NOT_FOUND', message: 'anchor item not found' }),
+    });
+
+    let caught: unknown;
+    try {
+      await searchSignals(baseInput);
+    } catch (err) {
+      caught = err;
+    }
+
+    expect(caught).toBeInstanceOf(SignalsSearchError);
+    const typedErr = caught as SignalsSearchError;
+    expect(typedErr.status).toBe(404);
+    expect(typedErr.code).toBe('ANCHOR_NOT_FOUND');
+    expect(typedErr.message).toMatch(/anchor item not found/);
   });
 
   it('throws when the response body fails schema validation', async () => {
