@@ -94,10 +94,13 @@ the React Query caches (browse/my-items/markers) and the client schema cache
 construction. The `resolvedNetwork(networkId, apiBaseUrl)` key already carries
 the API base URL. There is no switcher today, so no busting is wired yet.
 
-**Deferred — active profile id (caching-spec §8):** once relevance ranking
-(§9, cross-repo P6) lands, add `activeProfileId` to `browseItems` and `markers`
-keys because ranking results differ per profile. Not in keys today; placeholder
-is in code comments at `queryKeys.browseItems` and `queryKeys.markers`.
+**Active profile id in `browseItems` (caching-spec §8):** the selected
+own-profile item id now anchors the discover list — it's forwarded to
+signals-search as `anchor_item_id` and carried in the `browseItems` key in
+discover mode, so switching profiles re-ranks and refetches (#394). It remains
+**deferred for `markers`**: the map never calls discover, so relevance-ranked
+map pins (P-follow-5) are still pending. See code comments at
+`queryKeys.browseItems` and `queryKeys.markers`.
 
 ## Conventions worth highlighting
 
