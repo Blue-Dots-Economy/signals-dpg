@@ -50,10 +50,27 @@ describe('SignalsSearchClient', () => {
     expect(result.raw_response).toEqual({ score: 87.34 });
   });
 
-  it('throws on a non-2xx response', async () => {
-    vi.stubGlobal('fetch', vi.fn(async () => new Response('nope', { status: 404 })));
+  it('returns a scoreless result (not a throw) on 404 not-indexed', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('{"error":"RELEVANCE_ITEMS_NOT_INDEXED"}', { status: 404 })));
     const client = new SignalsSearchClient({ baseUrl: 'http://search:3100', apiKey: 'sk_test' });
-    await expect(client.calculate(req)).rejects.toThrow(/Match score service error 404/);
+    const result = await client.calculate(req);
+    expect(result.provider).toBe('signals_search');
+    expect(result.score).toBeUndefined();
+    expect(result.reasoning).toBe('not_indexed');
+  });
+
+  it('returns a scoreless result (not a throw) on 409 not-comparable', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('{"error":"RELEVANCE_NOT_COMPARABLE"}', { status: 409 })));
+    const client = new SignalsSearchClient({ baseUrl: 'http://search:3100', apiKey: 'sk_test' });
+    const result = await client.calculate(req);
+    expect(result.score).toBeUndefined();
+    expect(result.reasoning).toBe('not_comparable');
+  });
+
+  it('throws on a genuine (non-404/409) failure so the handler maps it to 502', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('upstream boom', { status: 503 })));
+    const client = new SignalsSearchClient({ baseUrl: 'http://search:3100', apiKey: 'sk_test' });
+    await expect(client.calculate(req)).rejects.toThrow(/Match score service error 503/);
   });
 
   it('honors a custom path override', async () => {

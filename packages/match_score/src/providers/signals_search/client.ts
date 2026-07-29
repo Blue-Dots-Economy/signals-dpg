@@ -50,6 +50,22 @@ export class SignalsSearchClient implements MatchScoreClient {
     const rawResponse = tryParseJson(rawText);
 
     if (!response.ok) {
+      // /v1/relevance returns two EXPECTED, non-exceptional states that must NOT
+      // read as an upstream outage: 404 (one/both items not live+indexed yet —
+      // signals-search indexes asynchronously, so this is common right after an
+      // item is created) and 409 (items embedded with different model versions →
+      // not comparable). Surface these as a scoreless result so this
+      // display-only endpoint shows "score unavailable" rather than a 502. Any
+      // other status (400/401/403/5xx) or a network error is a genuine failure
+      // and still throws → the handler maps it to 502.
+      if (response.status === 404 || response.status === 409) {
+        return {
+          provider: 'signals_search',
+          score: undefined,
+          reasoning: response.status === 404 ? 'not_indexed' : 'not_comparable',
+          raw_response: rawResponse,
+        };
+      }
       throw new Error(
         `Match score service error ${response.status}: ${rawText || response.statusText}`
       );
