@@ -89,6 +89,8 @@ export const geocodingConfig = {
   jitter_max_meters: geocoding.PII_LOCATION_JITTER_MAX_METERS,
   cache_ttl_seconds: geocoding.GEO_CACHE_TTL_SECONDS,
   cache_negative_ttl_seconds: geocoding.GEO_CACHE_NEGATIVE_TTL_SECONDS,
+  retry_attempts: geocoding.GEO_RETRY_ATTEMPTS,
+  retry_backoff_ms: geocoding.GEO_RETRY_BACKOFF_MS,
 };
 
 export const matchScoreConfig = {

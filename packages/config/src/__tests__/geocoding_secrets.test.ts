@@ -70,3 +70,28 @@ describe('GeocodingSecretsSchema cache TTLs', () => {
     ).toThrow();
   });
 });
+
+describe('GeocodingSecretsSchema transient-retry (#405)', () => {
+  it('defaults to 2 attempts / 300ms backoff when unset', () => {
+    const parsed = GeocodingSecretsSchema.parse({});
+    expect(parsed.GEO_RETRY_ATTEMPTS).toBe(2);
+    expect(parsed.GEO_RETRY_BACKOFF_MS).toBe(300);
+  });
+
+  it('coerces string env values to numbers', () => {
+    const parsed = GeocodingSecretsSchema.parse({
+      GEO_RETRY_ATTEMPTS: '3',
+      GEO_RETRY_BACKOFF_MS: '0',
+    });
+    expect(parsed.GEO_RETRY_ATTEMPTS).toBe(3);
+    expect(parsed.GEO_RETRY_BACKOFF_MS).toBe(0);
+  });
+
+  it('rejects fewer than 1 attempt', () => {
+    expect(() => GeocodingSecretsSchema.parse({ GEO_RETRY_ATTEMPTS: '0' })).toThrow();
+  });
+
+  it('rejects a negative backoff', () => {
+    expect(() => GeocodingSecretsSchema.parse({ GEO_RETRY_BACKOFF_MS: '-1' })).toThrow();
+  });
+});

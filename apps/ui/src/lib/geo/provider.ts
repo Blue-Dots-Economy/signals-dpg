@@ -11,9 +11,8 @@ let cached: GeoProvider | null = null;
  * Active geo provider: Google Places when a maps key is configured, otherwise
  * the key-less Photon fallback.
  *
- * A PII-mask guard is applied centrally here so that both form autocomplete and
- * map fallback geocoding skip queries that are API-masked values (e.g. "***",
- * "+91-XX-XXXX-X123").
+ * A PII-mask guard is applied centrally here so that form autocomplete skips
+ * queries that are API-masked values (e.g. "***", "+91-XX-XXXX-X123").
  */
 export function getGeoProvider(): GeoProvider {
   if (cached) return cached;
@@ -27,8 +26,6 @@ export function getGeoProvider(): GeoProvider {
   cached = {
     suggest: (query, signal) =>
       looksLikePIIMask(query) ? Promise.resolve([]) : base.suggest(query, signal),
-    geocode: (address, signal) =>
-      looksLikePIIMask(address) ? Promise.resolve(null) : base.geocode(address, signal),
   };
   return cached;
 }

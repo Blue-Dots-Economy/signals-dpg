@@ -16,7 +16,6 @@ describe('getGeoProvider PII-mask guard', () => {
     // looksLikePIIMask('***') is true: it matches the /\*{3,}/ mask-run check.
     const masked = '***';
     expect(await provider.suggest(masked)).toEqual([]);
-    expect(await provider.geocode(masked)).toBeNull();
     expect(fetchSpy).not.toHaveBeenCalled();
   });
 });

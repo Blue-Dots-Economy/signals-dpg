@@ -227,6 +227,14 @@ export const GeocodingSecretsSchema = z
     // unresolvable strings cache briefly so they don't hammer the paid API.
     GEO_CACHE_TTL_SECONDS: z.coerce.number().int().positive().default(2592000),
     GEO_CACHE_NEGATIVE_TTL_SECONDS: z.coerce.number().int().positive().default(3600),
+    // A geocode is retried on a TRANSIENT provider failure only (HTTP/network
+    // error or a soft rate-limit status such as OVER_QUERY_LIMIT) — a definitive
+    // not-found is never retried. This targets the 429 bursts a large bulk
+    // upload can trigger. Best-effort one-shot retry, not durable recovery:
+    // GEO_RETRY_ATTEMPTS is the TOTAL number of tries (2 = one initial + one
+    // retry); GEO_RETRY_BACKOFF_MS is the fixed pause between tries.
+    GEO_RETRY_ATTEMPTS: z.coerce.number().int().min(1).default(2),
+    GEO_RETRY_BACKOFF_MS: z.coerce.number().int().min(0).default(300),
   })
   .refine((c) => c.PII_LOCATION_JITTER_MIN_METERS <= c.PII_LOCATION_JITTER_MAX_METERS, {
     message: 'PII_LOCATION_JITTER_MIN_METERS must be <= PII_LOCATION_JITTER_MAX_METERS',

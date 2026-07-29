@@ -17,6 +17,8 @@ vi.mock('@/config', () => ({
     photon_url: 'https://photon.example',
     cache_ttl_seconds: 2592000,
     cache_negative_ttl_seconds: 3600,
+    retry_attempts: 2, // one initial + one retry
+    retry_backoff_ms: 0, // no real delay in tests
   },
 }));
 
@@ -54,7 +56,43 @@ describe('resolveCoordinates negative caching (#196 fix)', () => {
 
     expect(first).toBeNull();
     expect(second).toBeNull();
-    expect(fetchMock).toHaveBeenCalledTimes(2); // not cached → retried live
+    // Each lookup runs retry_attempts (2) provider tries, and a persistently
+    // transient failure is never cached → the second lookup retries live too.
+    expect(fetchMock).toHaveBeenCalledTimes(4);
+    vi.unstubAllGlobals();
+  });
+
+  it('retries a transient failure once and succeeds on the second attempt (#405)', async () => {
+    // First provider call fails transiently (HTTP 500 → throws), second succeeds.
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce({ ok: false, status: 500, json: async () => ({}) })
+      .mockResolvedValueOnce(googleOk);
+    vi.stubGlobal('fetch', fetchMock);
+
+    const coord = await resolveCoordinates('Bengaluru');
+
+    expect(coord).toEqual({ lat: 12.97, lng: 77.59 });
+    expect(fetchMock).toHaveBeenCalledTimes(2); // initial failed, retry succeeded
+    // The recovered result is cached → a repeat lookup makes no new call.
+    const again = await resolveCoordinates('Bengaluru');
+    expect(again).toEqual({ lat: 12.97, lng: 77.59 });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    vi.unstubAllGlobals();
+  });
+
+  it('does NOT retry a definitive ZERO_RESULTS (wrong address is not re-sent)', async () => {
+    // A definitive not-found returns null (not a throw) → the retry loop must
+    // not fire: exactly one provider call, then cached as a negative.
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue({ ok: true, json: async () => ({ status: 'ZERO_RESULTS', results: [] }) });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const coord = await resolveCoordinates('Definitely Not A Place 99999');
+
+    expect(coord).toBeNull();
+    expect(fetchMock).toHaveBeenCalledTimes(1); // no retry on a definitive miss
     vi.unstubAllGlobals();
   });
 
