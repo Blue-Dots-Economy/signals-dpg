@@ -149,12 +149,17 @@ export function ReferenceAutocompleteWidget({
   options,
 }: WidgetProps) {
   const opts = options as
-    | { source?: string; subtitleFields?: SubtitleField[] }
+    | { source?: string; subtitleFields?: string[] }
     | undefined;
   const source = opts?.source;
-  // An explicit (possibly empty) list wins; a missing config falls back to the
+  // Validate configured fields against the allowed set (unknown values dropped);
+  // an explicit (possibly empty) list wins, a missing config falls back to the
   // default. `[]` therefore means name-only.
-  const subtitleFields = opts?.subtitleFields ?? DEFAULT_SUBTITLE;
+  const subtitleFields: SubtitleField[] = Array.isArray(opts?.subtitleFields)
+    ? opts.subtitleFields.filter((f): f is SubtitleField =>
+        (SUBTITLE_FIELDS as readonly string[]).includes(f),
+      )
+    : DEFAULT_SUBTITLE;
   const [text, setText] = React.useState<string>((value as string) ?? '');
   const [dataset, setDataset] = React.useState<ReferenceOption[]>([]);
   const [open, setOpen] = React.useState(false);
