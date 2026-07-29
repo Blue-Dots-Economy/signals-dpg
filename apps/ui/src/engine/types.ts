@@ -204,6 +204,14 @@ export interface MapProviderProps {
    * the popup rather than recentering the map.
    */
   closePopupNonce?: number;
+  /**
+   * The user's own resolved location (profile OR browser geolocation — see
+   * `useUserLocation`). When set, the provider renders a single distinct
+   * "You are here" self-marker at this point, separate from the item pins and
+   * never clustered/clickable. Null/undefined → no self-marker (e.g. no profile
+   * location AND browser geolocation is denied/blocked).
+   */
+  selfLocation?: { lat: number; lng: number } | null;
   children?: React.ReactNode;
   /** Optional custom popup renderer; falls back to the default MarkerPopupCard. */
   renderPopup?: (marker: MapMarker) => React.ReactNode;

@@ -19,6 +19,7 @@ import { useIsMobile } from '@/hooks/use-mobile';
 import { getIconForDomain } from '../domain-icons';
 import { tallyDomains } from '../cluster-breakdown';
 import { MarkerPopupCard } from '../marker-popup-card';
+import { SelfMarkerContent, SELF_MARKER_GOOGLE_OFFSET_Y } from '../self-marker';
 import { getRuntimeEnv } from '@/lib/runtime-env';
 import { useViewportReportEmitter } from './use-viewport-report';
 
@@ -552,6 +553,7 @@ export function GoogleMapProvider({
   initialViewSet = false,
   focusNonce,
   closePopupNonce,
+  selfLocation,
   renderPopup,
   resolveIcon,
   resolveMarkerImage,
@@ -633,6 +635,27 @@ export function GoogleMapProvider({
           resolveIcon={resolveIcon}
           resolveMarkerImage={resolveMarkerImage}
         />
+        {/*
+         * "You are here" self-marker: the user's own resolved location (profile
+         * or browser geolocation). Rendered OUTSIDE ClustererManager so it is
+         * never registered with the MarkerClusterer (hence never clustered) and
+         * `clickable={false}` so it opens no InfoWindow and never swallows a
+         * click meant for an item pin. The content is shifted down by
+         * SELF_MARKER_GOOGLE_OFFSET_Y so AdvancedMarker's bottom-centre
+         * anchoring lands the dot's CENTRE on the point.
+         */}
+        {selfLocation && (
+          <AdvancedMarker
+            position={{ lat: selfLocation.lat, lng: selfLocation.lng }}
+            clickable={false}
+            zIndex={1000}
+            title={t('map.you_are_here_short')}
+          >
+            <div style={{ transform: `translateY(${SELF_MARKER_GOOGLE_OFFSET_Y}px)`, pointerEvents: 'none' }}>
+              <SelfMarkerContent label={t('map.you_are_here_short')} />
+            </div>
+          </AdvancedMarker>
+        )}
       </Map>
     </APIProvider>
   );

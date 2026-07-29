@@ -9,12 +9,14 @@ import {
 import MarkerClusterGroup from 'react-leaflet-cluster';
 import L from 'leaflet';
 import { renderToStaticMarkup } from 'react-dom/server';
+import { useTranslation } from 'react-i18next';
 import type { MapMarker, MapProviderProps, MapViewport } from '@/engine/types';
 import { registerMapProvider } from '@/engine/map/map-registry';
 import { getIconForDomain } from '../domain-icons';
 import { tallyDomains } from '../cluster-breakdown';
 import { FitBounds } from '../fit-bounds';
 import { MarkerPopupCard } from '../marker-popup-card';
+import { createSelfMarkerDivIcon } from '../self-marker';
 import { useViewportReportEmitter } from './use-viewport-report';
 
 import 'leaflet/dist/leaflet.css';
@@ -352,10 +354,12 @@ export function LeafletMapProvider({
   initialViewSet = false,
   focusNonce,
   closePopupNonce,
+  selfLocation,
   renderPopup,
   resolveIcon,
   onViewportChange,
 }: MapProviderProps) {
+  const { t } = useTranslation();
   return (
     <MapContainer
       center={center}
@@ -429,6 +433,22 @@ export function LeafletMapProvider({
           );
         })}
       </MarkerClusterGroup>
+      {/*
+       * "You are here" self-marker: the user's own resolved location (profile
+       * or browser geolocation). Rendered OUTSIDE MarkerClusterGroup so it is
+       * never folded into an item cluster, and `interactive={false}` so it has
+       * no popup and never intercepts clicks on the pins beneath it. A high
+       * zIndexOffset keeps it above item pins.
+       */}
+      {selfLocation && (
+        <Marker
+          position={[selfLocation.lat, selfLocation.lng]}
+          icon={createSelfMarkerDivIcon(t('map.you_are_here_short'))}
+          interactive={false}
+          keyboard={false}
+          zIndexOffset={1000}
+        />
+      )}
     </MapContainer>
   );
 }

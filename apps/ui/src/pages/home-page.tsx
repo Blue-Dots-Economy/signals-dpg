@@ -2260,6 +2260,7 @@ export function HomePage() {
                   focusPoint={userLocation}
                   focusNonce={recenterNonce}
                   closePopupNonce={closePopupNonce}
+                  selfLocation={userLocation}
                   filtersSlot={filtersPanel}
                   onViewportChange={setMapViewport}
                   emptyMessage={t('home.map_no_items_in_area')}

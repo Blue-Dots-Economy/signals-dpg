@@ -260,6 +260,7 @@
   "map.detail_unavailable": "Details unavailable.",
   "map.maximize": "Maximize map",
   "map.minimize": "Exit maximized map",
+  "map.you_are_here_short": "You",
   "map.no_results": "No items match the current filters.",
   "map.precision.exact": "Exact location",
   "map.precision.full_address": "From full address",
