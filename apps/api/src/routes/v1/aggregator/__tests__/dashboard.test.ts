@@ -486,13 +486,13 @@ describe('GET /aggregator/dashboard', () => {
 });
 
 describe('resolve_lifecycle_filter', () => {
-  it('defaults to live + paused when the param is absent', () => {
-    expect(resolve_lifecycle_filter(undefined)).toEqual(['live', 'paused']);
+  it('defaults to live + draft when the param is absent', () => {
+    expect(resolve_lifecycle_filter(undefined)).toEqual(['live', 'draft']);
   });
 
   it('defaults when the param is empty or whitespace-only', () => {
-    expect(resolve_lifecycle_filter('')).toEqual(['live', 'paused']);
-    expect(resolve_lifecycle_filter('  ,  ')).toEqual(['live', 'paused']);
+    expect(resolve_lifecycle_filter('')).toEqual(['live', 'draft']);
+    expect(resolve_lifecycle_filter('  ,  ')).toEqual(['live', 'draft']);
   });
 
   it('parses a comma list, trimming whitespace', () => {
@@ -508,7 +508,7 @@ describe('resolve_lifecycle_filter', () => {
   });
 
   it('defaults when every supplied value is invalid', () => {
-    expect(resolve_lifecycle_filter('nope,bogus')).toEqual(['live', 'paused']);
+    expect(resolve_lifecycle_filter('nope,bogus')).toEqual(['live', 'draft']);
   });
 
   it('accepts a single value', () => {

@@ -544,7 +544,7 @@ describeIf(`GET /aggregator/dashboard by_domain (integration)${
     }
   });
 
-  it('?lifecycle filters the rollup + items by lifecycle_status (default excludes draft + retired)', async () => {
+  it('?lifecycle filters the rollup + items by lifecycle_status (default excludes paused + retired)', async () => {
     // Assign a deterministic lifecycle to each of the 5 seeded seekers so the
     // filter assertions don't depend on the onboarding classifier:
     //   item[0] paused, item[1] retired, item[2] live, item[3..4] draft.
@@ -582,11 +582,11 @@ describeIf(`GET /aggregator/dashboard by_domain (integration)${
     const all = await call('&lifecycle=draft,live,paused,retired');
     expect(all.rollup.total_items).toBe(5);
 
-    // Default (live,paused) → draft + retired dropped → live(1) + paused(1) = 2.
+    // Default (live,draft) → paused + retired dropped → live(1) + draft(2) = 3.
     const def = await call('');
-    expect(def.rollup.total_items).toBe(2);
-    expect(def.total_matching).toBe(2);
-    expect(def.items.every((i) => i.lifecycle_status === 'live' || i.lifecycle_status === 'paused')).toBe(true);
+    expect(def.rollup.total_items).toBe(3);
+    expect(def.total_matching).toBe(3);
+    expect(def.items.every((i) => i.lifecycle_status === 'live' || i.lifecycle_status === 'draft')).toBe(true);
 
     // Single-value filters isolate each state.
     const live = await call('&lifecycle=live');
@@ -605,9 +605,9 @@ describeIf(`GET /aggregator/dashboard by_domain (integration)${
     expect(draft.rollup.total_items).toBe(2);
     expect(draft.items.every((i) => i.lifecycle_status === 'draft')).toBe(true);
 
-    // Invalid values are dropped → falls back to the default (live,paused).
+    // Invalid values are dropped → falls back to the default (live,draft).
     const bogus = await call('&lifecycle=nope');
-    expect(bogus.rollup.total_items).toBe(2);
+    expect(bogus.rollup.total_items).toBe(3);
   });
 
   it.todo(

@@ -45,12 +45,12 @@ type DashboardRequest = FastifyRequest<{ Querystring: DQ }>;
 /** Every lifecycle_status value an item can hold. */
 const ALL_LIFECYCLES = ['draft', 'live', 'paused', 'retired'] as const;
 /** Applied when the caller supplies no valid lifecycle value. */
-const DEFAULT_LIFECYCLES = ['live', 'paused'] as const;
+const DEFAULT_LIFECYCLES = ['live', 'draft'] as const;
 
 /**
  * Resolve the `?lifecycle=` query into a concrete set of lifecycle_status
  * values to filter on. Splits the comma list, trims, drops unknown values,
- * and falls back to the default (live + paused) when nothing valid remains
+ * and falls back to the default (live + draft) when nothing valid remains
  * (absent param, empty string, or all-invalid input).
  */
 export function resolve_lifecycle_filter(lifecycle: string | undefined): string[] {

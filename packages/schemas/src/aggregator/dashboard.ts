@@ -10,7 +10,7 @@ const LifecycleEnum = z.enum(['draft', 'live', 'paused', 'retired']);
  * page, limit  — offset pagination over item_metrics.
  * domain       — narrows the response to one of org.metadata.domains.
  * status       — filter item rows by profile_status.
- * lifecycle    — comma-separated lifecycle_status values; default 'live,paused'.
+ * lifecycle    — comma-separated lifecycle_status values; default 'live,draft'.
  * q            — free-text search (accepted, not yet wired).
  * refresh      — force recompute, bypass TTL, blocking advisory lock.
  */
@@ -20,7 +20,7 @@ export const DashboardRequestQuery = z.object({
   domain: z.string().min(1).optional(),
   status: StatusEnum.optional(),
   lifecycle: z.string().min(1).optional()
-    .describe("Comma-separated lifecycle_status values, e.g. 'live,paused'. Default: live,paused."),
+    .describe("Comma-separated lifecycle_status values, e.g. 'live,draft'. Default: live,draft."),
   q: z.string().min(1).max(200).optional(),
   refresh: z.enum(['true', 'false']).transform((v) => v === 'true').optional().default(false),
 });
