@@ -95,13 +95,10 @@ export const geocodingConfig = {
 
 export const matchScoreConfig = {
   provider: matchScore.MATCH_SCORE_PROVIDER,
-  dpg_scoring: {
-    endpoint: matchScore.DPG_SCORING_ENDPOINT,
-    key_id: matchScore.DPG_SCORING_KEY_ID,
-    secret: matchScore.DPG_SCORING_SECRET,
-    path: matchScore.DPG_SCORING_PATH,
-    version: matchScore.DPG_SCORING_VERSION,
-    prompt_version: matchScore.DPG_SCORING_PROMPT_VERSION,
+  signals_search: {
+    endpoint: matchScore.SIGNALS_SEARCH_ENDPOINT,
+    api_key: matchScore.SIGNALS_SEARCH_API_KEY,
+    path: matchScore.SIGNALS_SEARCH_RELEVANCE_PATH,
   },
 };
 

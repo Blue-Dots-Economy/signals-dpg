@@ -33,7 +33,7 @@ vi.mock('@/config', () => ({
     url: 'http://source.local/api/auth',
     create_test_otp: false,
   },
-  matchScoreConfig: { provider: 'noop', dpg_scoring: {} },
+  matchScoreConfig: { provider: 'noop', signals_search: {} },
   getCurrentApiBaseUrl: () => 'http://source.local',
   instance: { INSTANCE_NAME: 'test', INSTANCE_ENV: 'development' },
   api: { API_DOMAIN: 'http://source.local', API_PORT: 3000 },

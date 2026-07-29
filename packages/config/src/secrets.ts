@@ -102,13 +102,13 @@ export const NotificationSecretsSchema = z.object({
 });
 
 export const MatchScoreSecretsSchema = z.object({
-  MATCH_SCORE_PROVIDER: z.enum(['dpg_scoring']).optional(),
-  DPG_SCORING_ENDPOINT: z.string().optional(),
-  DPG_SCORING_KEY_ID: z.string().optional(),
-  DPG_SCORING_SECRET: z.string().optional(),
-  DPG_SCORING_PATH: z.string().optional(),
-  DPG_SCORING_VERSION: z.string().optional(),
-  DPG_SCORING_PROMPT_VERSION: z.string().optional(),
+  // signals_search provider: the in-network relevance service (POST /v1/relevance).
+  // ENDPOINT is the signals-search base URL; API_KEY is an x-api-key valid in the
+  // shared Signals apikey store; PATH optionally overrides 'v1/relevance'.
+  MATCH_SCORE_PROVIDER: z.enum(['signals_search']).optional(),
+  SIGNALS_SEARCH_ENDPOINT: z.string().optional(),
+  SIGNALS_SEARCH_API_KEY: z.string().optional(),
+  SIGNALS_SEARCH_RELEVANCE_PATH: z.string().optional(),
 });
 
 export const SignalsSearchSecretsSchema = z.object({
