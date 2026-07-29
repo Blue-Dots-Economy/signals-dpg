@@ -1327,6 +1327,7 @@
                     ]
                   },
                   "requirements_snapshot": {
+                    "default": {},
                     "type": "object",
                     "additionalProperties": {}
                   },
@@ -1369,8 +1370,7 @@
                 "required": [
                   "action_type",
                   "source_item",
-                  "target_item",
-                  "requirements_snapshot"
+                  "target_item"
                 ]
               }
             }
@@ -5237,6 +5237,7 @@
                     "minLength": 1
                   },
                   "requirements_snapshot": {
+                    "default": {},
                     "type": "object",
                     "additionalProperties": {}
                   },
@@ -5286,8 +5287,7 @@
                   "action_type",
                   "source_item",
                   "target_item",
-                  "source_item_owner",
-                  "requirements_snapshot"
+                  "source_item_owner"
                 ]
               }
             }
