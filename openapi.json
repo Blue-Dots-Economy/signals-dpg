@@ -386,6 +386,46 @@
           },
           {
             "schema": {
+              "type": "number",
+              "minimum": -90,
+              "maximum": 90
+            },
+            "in": "query",
+            "name": "min_lat",
+            "required": false
+          },
+          {
+            "schema": {
+              "type": "number",
+              "minimum": -180,
+              "maximum": 180
+            },
+            "in": "query",
+            "name": "min_lng",
+            "required": false
+          },
+          {
+            "schema": {
+              "type": "number",
+              "minimum": -90,
+              "maximum": 90
+            },
+            "in": "query",
+            "name": "max_lat",
+            "required": false
+          },
+          {
+            "schema": {
+              "type": "number",
+              "minimum": -180,
+              "maximum": 180
+            },
+            "in": "query",
+            "name": "max_lng",
+            "required": false
+          },
+          {
+            "schema": {
               "default": 20,
               "type": "integer",
               "minimum": 1,
@@ -3739,6 +3779,46 @@
           },
           {
             "schema": {
+              "type": "number",
+              "minimum": -90,
+              "maximum": 90
+            },
+            "in": "query",
+            "name": "min_lat",
+            "required": false
+          },
+          {
+            "schema": {
+              "type": "number",
+              "minimum": -180,
+              "maximum": 180
+            },
+            "in": "query",
+            "name": "min_lng",
+            "required": false
+          },
+          {
+            "schema": {
+              "type": "number",
+              "minimum": -90,
+              "maximum": 90
+            },
+            "in": "query",
+            "name": "max_lat",
+            "required": false
+          },
+          {
+            "schema": {
+              "type": "number",
+              "minimum": -180,
+              "maximum": 180
+            },
+            "in": "query",
+            "name": "max_lng",
+            "required": false
+          },
+          {
+            "schema": {
               "default": 20,
               "type": "integer",
               "minimum": 1,
@@ -3997,6 +4077,26 @@
                     "type": "number",
                     "minimum": 0,
                     "exclusiveMinimum": true
+                  },
+                  "min_lat": {
+                    "type": "number",
+                    "minimum": -90,
+                    "maximum": 90
+                  },
+                  "min_lng": {
+                    "type": "number",
+                    "minimum": -180,
+                    "maximum": 180
+                  },
+                  "max_lat": {
+                    "type": "number",
+                    "minimum": -90,
+                    "maximum": 90
+                  },
+                  "max_lng": {
+                    "type": "number",
+                    "minimum": -180,
+                    "maximum": 180
                   }
                 },
                 "required": [
@@ -4088,6 +4188,26 @@
                     "type": "number",
                     "minimum": 0,
                     "exclusiveMinimum": true
+                  },
+                  "min_lat": {
+                    "type": "number",
+                    "minimum": -90,
+                    "maximum": 90
+                  },
+                  "min_lng": {
+                    "type": "number",
+                    "minimum": -180,
+                    "maximum": 180
+                  },
+                  "max_lat": {
+                    "type": "number",
+                    "minimum": -90,
+                    "maximum": 90
+                  },
+                  "max_lng": {
+                    "type": "number",
+                    "minimum": -180,
+                    "maximum": 180
                   },
                   "limit": {
                     "type": "integer",
@@ -4382,6 +4502,46 @@
           },
           {
             "schema": {
+              "type": "number",
+              "minimum": -90,
+              "maximum": 90
+            },
+            "in": "query",
+            "name": "min_lat",
+            "required": false
+          },
+          {
+            "schema": {
+              "type": "number",
+              "minimum": -180,
+              "maximum": 180
+            },
+            "in": "query",
+            "name": "min_lng",
+            "required": false
+          },
+          {
+            "schema": {
+              "type": "number",
+              "minimum": -90,
+              "maximum": 90
+            },
+            "in": "query",
+            "name": "max_lat",
+            "required": false
+          },
+          {
+            "schema": {
+              "type": "number",
+              "minimum": -180,
+              "maximum": 180
+            },
+            "in": "query",
+            "name": "max_lng",
+            "required": false
+          },
+          {
+            "schema": {
               "default": 200,
               "type": "integer",
               "minimum": 1,
@@ -4573,6 +4733,26 @@
                     "type": "number",
                     "minimum": 0,
                     "exclusiveMinimum": true
+                  },
+                  "min_lat": {
+                    "type": "number",
+                    "minimum": -90,
+                    "maximum": 90
+                  },
+                  "min_lng": {
+                    "type": "number",
+                    "minimum": -180,
+                    "maximum": 180
+                  },
+                  "max_lat": {
+                    "type": "number",
+                    "minimum": -90,
+                    "maximum": 90
+                  },
+                  "max_lng": {
+                    "type": "number",
+                    "minimum": -180,
+                    "maximum": 180
                   },
                   "limit": {
                     "type": "integer",

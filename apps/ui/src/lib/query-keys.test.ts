@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { queryKeys } from './query-keys';
+import { snapViewportForKey } from './map-viewport-snap';
 
 describe('queryKeys', () => {
   it('preserves the existing network-config key value', () => {
@@ -40,5 +41,68 @@ describe('queryKeys', () => {
 
   it('defines the item-detail key (#203 P4 Task 3)', () => {
     expect(queryKeys.itemDetail('blue_dot', 'item-123')).toEqual(['item-detail', 'blue_dot', 'item-123']);
+  });
+
+  describe('markers key with snapped bbox + zoom band + filters (#203 map-serverside-search Task 4)', () => {
+    const bbox = { minLat: 19.0, minLng: 72.0, maxLat: 19.5, maxLng: 72.5 };
+    const buildFilters = (
+      viewport: Parameters<typeof snapViewportForKey>[0],
+      filters: Record<string, unknown>,
+    ) => {
+      const snapped = snapViewportForKey(viewport);
+      return { snappedBbox: snapped?.snappedBbox, zoomBand: snapped?.zoomBand, filters, limit: 500 };
+    };
+
+    it('produces an identical key for a same/contained bbox + same zoom band + same filters', () => {
+      const a = queryKeys.markers(
+        'blue_dot',
+        'seeker',
+        buildFilters({ ...bbox, zoom: 8 }, { gender: ['female'] }),
+      );
+      const contained = {
+        minLat: bbox.minLat + 0.01,
+        minLng: bbox.minLng + 0.01,
+        maxLat: bbox.maxLat - 0.01,
+        maxLng: bbox.maxLng - 0.01,
+      };
+      const b = queryKeys.markers(
+        'blue_dot',
+        'seeker',
+        buildFilters({ ...contained, zoom: 9 }, { gender: ['female'] }),
+      );
+      expect(a).toEqual(b);
+    });
+
+    it('produces a different key for a pan that crosses a grid cell', () => {
+      const a = queryKeys.markers('blue_dot', 'seeker', buildFilters({ ...bbox, zoom: 8 }, {}));
+      const panned = {
+        minLat: bbox.minLat + 0.1,
+        minLng: bbox.minLng + 0.1,
+        maxLat: bbox.maxLat + 0.1,
+        maxLng: bbox.maxLng + 0.1,
+      };
+      const b = queryKeys.markers('blue_dot', 'seeker', buildFilters({ ...panned, zoom: 8 }, {}));
+      expect(a).not.toEqual(b);
+    });
+
+    it('produces a different key for a zoom that crosses the cluster-disable band', () => {
+      const a = queryKeys.markers('blue_dot', 'seeker', buildFilters({ ...bbox, zoom: 13 }, {}));
+      const b = queryKeys.markers('blue_dot', 'seeker', buildFilters({ ...bbox, zoom: 14 }, {}));
+      expect(a).not.toEqual(b);
+    });
+
+    it('produces a different key for a filter change with the same bbox and zoom band', () => {
+      const a = queryKeys.markers(
+        'blue_dot',
+        'seeker',
+        buildFilters({ ...bbox, zoom: 8 }, { gender: ['female'] }),
+      );
+      const b = queryKeys.markers(
+        'blue_dot',
+        'seeker',
+        buildFilters({ ...bbox, zoom: 8 }, { gender: ['male'] }),
+      );
+      expect(a).not.toEqual(b);
+    });
   });
 });

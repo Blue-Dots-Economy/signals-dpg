@@ -82,6 +82,10 @@ const fetch_network_markers_handler = async (
     item_latitude,
     item_longitude,
     radius_meters,
+    min_lat,
+    min_lng,
+    max_lat,
+    max_lng,
     limit,
     offset,
     cache_ttl_seconds,
@@ -111,6 +115,10 @@ const fetch_network_markers_handler = async (
         item_latitude,
         item_longitude,
         radius_meters,
+        min_lat,
+        min_lng,
+        max_lat,
+        max_lng,
         limit,
         offset,
         lifecycle_filter: 'live_only',
@@ -150,5 +158,10 @@ const fetch_local_markers_handler = async (
 
   return reply
     .code(200)
-    .send(await fetchLocalMarkers({ ...body, lifecycle_filter: 'live_only' }));
+    .send(
+      await fetchLocalMarkers(
+        { ...body, lifecycle_filter: 'live_only' },
+        request.log
+      )
+    );
 };

@@ -2,6 +2,12 @@ import { and, eq, ne, sql } from 'drizzle-orm';
 import { db } from '@api/db/postgres/drizzle_config';
 import { items } from '@dpg/database';
 import { decryptItemPrivate } from './item_decrypt';
+import { getNetworkConfigById } from '@/network_configs';
+
+/** Minimal pino-compatible surface (`request.log`) for debug-level diagnostics. */
+export interface ItemFetchLog {
+  debug: (obj: Record<string, unknown>, msg: string) => void;
+}
 
 export type ItemFetchFilters = {
   item_id?: string;
@@ -11,10 +17,34 @@ export type ItemFetchFilters = {
   created_by?: string;
   item_instance_url?: string | null;
   item_schema_url?: string | null;
+  /**
+   * Per-field `item_state` filter values. A **scalar** value (string/number/
+   * boolean) keeps the original exact-match semantics — all such entries are
+   * combined into one `item_state @> {...}` containment check (unchanged
+   * behavior, pre-#203). An **array** value is a multi-value facet filter
+   * (#203 Task 3, closing the "documented follow-up" noted at
+   * `apps/ui/src/lib/network-api.ts`'s `item_state[field]` comment): it is
+   * applied as `item_state->>'field' = ANY(values)`, which only Task 1's
+   * per-field expression btree indexes accelerate (a `@>` containment check
+   * cannot express "any of these values" for one key). SECURITY: an array
+   * value is only honored when the network config declares that field
+   * `filterable: true` AND not `private: true` for the item's domain — see
+   * `resolveAllowedFacetFields` below — otherwise it is dropped silently
+   * (never surfaced as a 4xx) so a caller can't use found/not-found responses
+   * to enumerate a private field's values.
+   */
   item_state?: Record<string, unknown>;
   item_latitude?: number;
   item_longitude?: number;
   radius_meters?: number;
+  // Bounding-box viewport search (#203 Task 2 schema, Task 3 SQL), mutually
+  // exclusive with the radius-center params above — see
+  // withGeoSearchRefinement in packages/schemas/src/api/item_schemas.ts.
+  // Consumed by buildWhereClause below (Option B: item_search.geo join).
+  min_lat?: number;
+  min_lng?: number;
+  max_lat?: number;
+  max_lng?: number;
   limit: number;
   offset: number;
   /**
@@ -53,7 +83,60 @@ const itemResponseColumns = {
   lifecycle_status: items.lifecycle_status,
 };
 
-function buildWhereClause(filters: Omit<ItemFetchFilters, 'limit' | 'offset'>) {
+/**
+ * #203 Task 3 security guard: resolves the set of `item_state` field names a
+ * caller is allowed to facet-filter on for a given network/domain — exactly
+ * those schema properties (across every item_type declared for the domain)
+ * marked `filterable: true` AND NOT `private: true`. Sourced from the network
+ * config (the same `getNetworkConfigById` cache used elsewhere in the app),
+ * never from the request — a client cannot expand its own allowed facet set
+ * by naming more fields.
+ *
+ * Fails closed: an unconfigured network/domain (bad `item_network`/
+ * `item_domain`, or a network config load error) yields an empty set, so
+ * every facet filter for that request is dropped rather than applied
+ * unvalidated.
+ */
+async function resolveAllowedFacetFields(
+  networkId: string,
+  domain: string
+): Promise<Set<string>> {
+  const allowed = new Set<string>();
+
+  let networkConfig;
+  try {
+    networkConfig = await getNetworkConfigById(networkId);
+  } catch {
+    return allowed;
+  }
+
+  const domainConfig = networkConfig.domains.find((entry) => entry.id === domain);
+  if (!domainConfig) {
+    return allowed;
+  }
+
+  for (const schema of Object.values(domainConfig.item_schemas)) {
+    const properties = (schema as { properties?: unknown }).properties;
+    if (!properties || typeof properties !== 'object') continue;
+
+    for (const [field, definition] of Object.entries(
+      properties as Record<string, unknown>
+    )) {
+      if (!definition || typeof definition !== 'object') continue;
+      const declared = definition as { filterable?: unknown; private?: unknown };
+      if (declared.filterable === true && declared.private !== true) {
+        allowed.add(field);
+      }
+    }
+  }
+
+  return allowed;
+}
+
+async function buildWhereClause(
+  filters: Omit<ItemFetchFilters, 'limit' | 'offset'>,
+  log?: ItemFetchLog
+) {
   const conditions = [];
 
   if (filters.item_id) {
@@ -89,9 +172,61 @@ function buildWhereClause(filters: Omit<ItemFetchFilters, 'limit' | 'offset'>) {
   }
 
   if (filters.item_state) {
-    conditions.push(
-      sql`${items.item_state} @> ${JSON.stringify(filters.item_state)}::jsonb`
-    );
+    // Split the requested item_state entries: array values are a #203 Task 3
+    // multi-value facet filter (`= ANY`, guarded below); scalar values keep
+    // the pre-existing exact-match containment behavior.
+    const scalarState: Record<string, unknown> = {};
+    const facetEntries: Array<[string, unknown[]]> = [];
+
+    for (const [field, value] of Object.entries(filters.item_state)) {
+      if (Array.isArray(value)) {
+        facetEntries.push([field, value]);
+      } else {
+        scalarState[field] = value;
+      }
+    }
+
+    if (Object.keys(scalarState).length > 0) {
+      conditions.push(
+        sql`${items.item_state} @> ${JSON.stringify(scalarState)}::jsonb`
+      );
+    }
+
+    if (facetEntries.length > 0) {
+      const allowedFacetFields = await resolveAllowedFacetFields(
+        filters.item_network,
+        filters.item_domain
+      );
+
+      for (const [field, values] of facetEntries) {
+        if (!allowedFacetFields.has(field)) {
+          log?.debug(
+            {
+              item_network: filters.item_network,
+              item_domain: filters.item_domain,
+              field,
+            },
+            'Dropping item_state facet filter: field is not declared filterable and non-private for this domain'
+          );
+          continue;
+        }
+
+        if (values.length === 0) {
+          // An explicit empty value set matches nothing — distinct from
+          // "field not present", which applies no restriction at all.
+          conditions.push(sql`false`);
+          continue;
+        }
+
+        const valuesArrayLiteral = sql.join(
+          values.map((value) => sql`${value}`),
+          sql.raw(', ')
+        );
+        conditions.push(
+          sql`${items.item_state} ->> ${field} = ANY(ARRAY[${valuesArrayLiteral}])`
+        );
+      }
+    }
   }
 
   if (filters.lifecycle_filter === 'live_only') {
@@ -114,15 +249,55 @@ function buildWhereClause(filters: Omit<ItemFetchFilters, 'limit' | 'offset'>) {
         )
       `
     );
+  } else if (
+    filters.min_lat !== undefined &&
+    filters.min_lng !== undefined &&
+    filters.max_lat !== undefined &&
+    filters.max_lng !== undefined
+  ) {
+    // #203 Task 3 — bbox viewport search (Option B): join the GiST-indexed
+    // `item_search.geo` (geography MultiPoint) rather than filtering
+    // `items.item_locations` directly. `&&` (bounding-box overlap) is what
+    // `item_search_geo_gist` accelerates, but `&&` only compares the
+    // ENVELOPE of `geo` (the bbox around every point of a multi-location
+    // item) against the viewport envelope — for a multi-location item whose
+    // individual points straddle the viewport such that their aggregate
+    // envelope overlaps it but no single point actually falls inside, `&&`
+    // alone false-positives (wrong pin + inflated meta.total). `&&` stays as
+    // the index-served pre-filter; `ST_Intersects` is the exact recheck that
+    // corrects it to genuine "any location in the box" — the same guarantee
+    // the radius branch above already gives via per-location `earth_box`/
+    // `earth_distance`. Single-location items were already exact under `&&`
+    // alone (a single point's envelope IS the point), so this only changes
+    // behavior for multi-location items.
+    if (filters.min_lat >= filters.max_lat || filters.min_lng >= filters.max_lng) {
+      // Inverted/degenerate box (e.g. swapped corners): defined as an empty
+      // result rather than an error, so a malformed viewport never 500s —
+      // it just shows no markers.
+      conditions.push(sql`false`);
+    } else {
+      conditions.push(
+        sql`
+          EXISTS (
+            SELECT 1 FROM item_search s
+            WHERE s.item_network = ${items.item_network} AND s.item_id = ${items.item_id}
+              AND s.lifecycle_status = 'live'
+              AND s.geo && ST_MakeEnvelope(${filters.min_lng}, ${filters.min_lat}, ${filters.max_lng}, ${filters.max_lat}, 4326)::geography
+              AND ST_Intersects(s.geo, ST_MakeEnvelope(${filters.min_lng}, ${filters.min_lat}, ${filters.max_lng}, ${filters.max_lat}, 4326)::geography)
+          )
+        `
+      );
+    }
   }
 
   return conditions.length ? and(...conditions) : undefined;
 }
 
 export async function countLocalItems(
-  filters: Omit<ItemFetchFilters, 'limit' | 'offset' | 'includePrivateState'>
+  filters: Omit<ItemFetchFilters, 'limit' | 'offset' | 'includePrivateState'>,
+  log?: ItemFetchLog
 ) {
-  const whereClause = buildWhereClause(filters);
+  const whereClause = await buildWhereClause(filters, log);
   const [{ count }] = await db
     .select({
       count: sql<number>`count(*)`,
@@ -165,9 +340,9 @@ const markerColumns = {
   item_locations: items.item_locations,
 };
 
-export async function fetchLocalItems(filters: ItemFetchFilters) {
-  const whereClause = buildWhereClause(filters);
-  const total = await countLocalItems(filters);
+export async function fetchLocalItems(filters: ItemFetchFilters, log?: ItemFetchLog) {
+  const whereClause = await buildWhereClause(filters, log);
+  const total = await countLocalItems(filters, log);
   const result = await db
     .select(itemResponseColumns)
     .from(items)
@@ -207,9 +382,9 @@ export async function fetchLocalItems(filters: ItemFetchFilters) {
  * buildWhereClause / buildDistanceOrderBy) so filtering and nearest-first
  * ordering behave identically — just without the heavier item_state payload.
  */
-export async function fetchLocalMarkers(filters: ItemFetchFilters) {
-  const whereClause = buildWhereClause(filters);
-  const total = await countLocalItems(filters);
+export async function fetchLocalMarkers(filters: ItemFetchFilters, log?: ItemFetchLog) {
+  const whereClause = await buildWhereClause(filters, log);
+  const total = await countLocalItems(filters, log);
   const markers = await db
     .select(markerColumns)
     .from(items)

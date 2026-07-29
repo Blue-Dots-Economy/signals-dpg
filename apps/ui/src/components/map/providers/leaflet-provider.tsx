@@ -96,8 +96,9 @@ function ClosePopupOnNonce({ closePopupNonce }: { closePopupNonce?: number }) {
 }
 
 /**
- * Reports the map's viewport (center + half-diagonal radius) to the caller on
- * debounced `moveend`. Only ever mounted when `onViewportChange` is provided
+ * Reports the map's viewport (center + half-diagonal radius, plus the raw
+ * `map.getBounds()` corners — #203 map-serverside-search Task 4) to the
+ * caller on debounced `moveend`. Only ever mounted when `onViewportChange` is provided
  * (see `LeafletMapProvider` below), so the tourist app — which never passes
  * it — attaches no `moveend` listener at all and is completely unaffected.
  * Renders nothing — pure side-effect component, same shape as `SetView`.
@@ -122,8 +123,14 @@ function ViewportReporter({ onViewportChange }: { onViewportChange: (viewport: M
   React.useEffect(() => {
     const handleMoveEnd = () => {
       const center = map.getCenter();
-      const ne = map.getBounds().getNorthEast();
-      emit({ lat: center.lat, lng: center.lng }, { lat: ne.lat, lng: ne.lng }, map.getZoom());
+      const bounds = map.getBounds();
+      const ne = bounds.getNorthEast();
+      const sw = bounds.getSouthWest();
+      emit(
+        { lat: center.lat, lng: center.lng },
+        { ne: { lat: ne.lat, lng: ne.lng }, sw: { lat: sw.lat, lng: sw.lng } },
+        map.getZoom(),
+      );
     };
     map.on('moveend', handleMoveEnd);
 
@@ -131,7 +138,12 @@ function ViewportReporter({ onViewportChange }: { onViewportChange: (viewport: M
     if (bounds.isValid()) {
       const center = map.getCenter();
       const ne = bounds.getNorthEast();
-      emitNow({ lat: center.lat, lng: center.lng }, { lat: ne.lat, lng: ne.lng }, map.getZoom());
+      const sw = bounds.getSouthWest();
+      emitNow(
+        { lat: center.lat, lng: center.lng },
+        { ne: { lat: ne.lat, lng: ne.lng }, sw: { lat: sw.lat, lng: sw.lng } },
+        map.getZoom(),
+      );
     }
 
     return () => {

@@ -20,8 +20,18 @@ updates:
     groups:
       production:
         dependency-type: "production"
+        update-types: ["minor", "patch"]
       development:
         dependency-type: "development"
+        update-types: ["minor", "patch"]
+
+    ignore:
+      # typescript-eslint does not support TS 7 yet — hold the major.
+      - dependency-name: "typescript"
+        update-types: ["version-update:semver-major"]
+      # vitest 4 needs vite 6 in lockstep — hold the major.
+      - dependency-name: "vitest"
+        update-types: ["version-update:semver-major"]
 
   # GitHub Actions — keeps CI workflow action versions current
   - package-ecosystem: "github-actions"
@@ -42,6 +52,7 @@ updates:
     groups:
       github-actions:
         patterns: ["*"]
+        update-types: ["minor", "patch"]
 
   # Docker base images — one entry per directory containing a Dockerfile
   - package-ecosystem: "docker"
@@ -65,3 +76,4 @@ updates:
     groups:
       docker:
         patterns: ["*"]
+        update-types: ["minor", "patch"]

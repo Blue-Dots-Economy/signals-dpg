@@ -67,10 +67,27 @@ const FetchItemsSchemaBase = z.object({
 
   item_schema_url: z.url().nullable().optional(),
 
+  // Facet filter. Each entry's value is either a scalar (item_fetch_runtime's
+  // buildWhereClause applies it as an `item_state @> jsonb` containment
+  // check) or a `string[]` (#203 Task 3/7: applied as
+  // `item_state ->> field = ANY(...)`, gated by the filterable/non-private
+  // facet guard — see `resolveAllowedFacetFields`). Left as `z.unknown()`
+  // rather than a narrower union deliberately: this field is shared by every
+  // fetch/count/markers schema below, some of which allow arbitrary equality
+  // filters beyond the array-facet case this comment calls out.
   item_state: z.record(z.string(), z.unknown()).optional(),
   item_latitude: z.coerce.number().optional(),
   item_longitude: z.coerce.number().optional(),
   radius_meters: z.coerce.number().positive().optional(),
+
+  // Bounding-box viewport search (#203 Task 2). All four or none; mutually
+  // exclusive with the radius-center params above (item_latitude/
+  // item_longitude/radius_meters) — see withGeoSearchRefinement. The SQL that
+  // consumes these lands in Task 3; this is schema + passthrough only.
+  min_lat: z.coerce.number().min(-90).max(90).optional(),
+  min_lng: z.coerce.number().min(-180).max(180).optional(),
+  max_lat: z.coerce.number().min(-90).max(90).optional(),
+  max_lng: z.coerce.number().min(-180).max(180).optional(),
 
   limit: z.coerce.number().int().min(1).max(1000).default(20),
   offset: z.coerce.number().int().min(0).default(0),
@@ -86,17 +103,37 @@ function withGeoSearchRefinement<T extends z.ZodTypeAny>(schema: T) {
       const hasLat = data.item_latitude !== undefined;
       const hasLng = data.item_longitude !== undefined;
       const hasRadius = data.radius_meters !== undefined;
+      const hasRadiusCenter = hasLat && hasLng;
 
       // lat/lng must be supplied as a pair.
       if (hasLat !== hasLng) return false;
       // radius filtering requires a center (lat+lng); radius alone is invalid.
-      if (hasRadius && !(hasLat && hasLng)) return false;
-      // lat+lng alone is valid (order-only); lat+lng+radius is valid (filter+order).
+      if (hasRadius && !hasRadiusCenter) return false;
+
+      const bboxValues = [
+        data.min_lat,
+        data.min_lng,
+        data.max_lat,
+        data.max_lng,
+      ];
+      const bboxProvidedCount = bboxValues.filter(
+        (value) => value !== undefined
+      ).length;
+      const hasBbox = bboxProvidedCount === 4;
+      const hasPartialBbox = bboxProvidedCount > 0 && bboxProvidedCount < 4;
+
+      // bbox is all-four-or-none.
+      if (hasPartialBbox) return false;
+      // a radius center and a bbox are mutually exclusive viewport searches.
+      if (hasRadiusCenter && hasBbox) return false;
+
+      // lat+lng alone is valid (order-only); lat+lng+radius is valid (filter+order);
+      // a full bbox alone is valid (filter).
       return true;
     },
     {
       message:
-        'item_latitude and item_longitude must be provided together; radius_meters requires both',
+        'item_latitude and item_longitude must be provided together; radius_meters requires both; min_lat/min_lng/max_lat/max_lng must all be provided together and cannot be combined with a radius center',
       path: ['radius_meters'],
     }
   );

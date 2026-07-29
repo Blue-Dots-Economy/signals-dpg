@@ -249,6 +249,7 @@
   "home.bulk_connect_first_error": "First error: {{message}}",
   "home.map_partial": "Some sources are unavailable right now — the map may not show every listing.",
   "home.map_count_first": "{{count}} results in this area — zoom in or share your location to see them",
+  "home.map_zoom_in_for_more": "{{count}}+ in this area — zoom in",
   "home.list_partial": "Some sources are unavailable right now — results may be incomplete.",
   "home.list_search_unavailable": "Search and filters are temporarily unavailable — showing recent nearby listings.",
   "home.list_ranking_unavailable": "Relevance ranking is unavailable right now — showing recent nearby listings.",
