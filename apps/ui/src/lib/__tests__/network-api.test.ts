@@ -83,6 +83,61 @@ describe('fetchDiscover', () => {
     );
   });
 
+  // Task 2 (#394): the discover BFF's relevance-to-profile ranking keys off
+  // `anchor_item_id` (the selected profile's item id, forwarded server-side
+  // as `intent.item.id` to signals-search — Task 1). Same optional/omit-if-
+  // unset convention as every other optional discover field above.
+  it('includes anchor_item_id in the POST body when provided', async () => {
+    vi.resetModules();
+    const postMock = vi.fn().mockResolvedValue({
+      data: {
+        items: [],
+        meta: { total: 0, limit: 20, offset: 0, source: 'signals_search', degraded: false },
+      },
+    });
+    vi.doMock('../api-client', () => ({
+      createApiClient: () => ({ post: postMock, get: vi.fn() }),
+    }));
+    const { fetchDiscover } = await import('../network-api');
+
+    await fetchDiscover({
+      item_network: 'blue_dot',
+      item_domain: 'student',
+      item_type: 'profile_1.0',
+      anchor_item_id: 'profile-123',
+      limit: 20,
+      offset: 0,
+    });
+
+    const [, body] = postMock.mock.calls[0];
+    expect(body).toHaveProperty('anchor_item_id', 'profile-123');
+  });
+
+  it('omits anchor_item_id from the POST body when not provided', async () => {
+    vi.resetModules();
+    const postMock = vi.fn().mockResolvedValue({
+      data: {
+        items: [],
+        meta: { total: 0, limit: 20, offset: 0, source: 'signals_search', degraded: false },
+      },
+    });
+    vi.doMock('../api-client', () => ({
+      createApiClient: () => ({ post: postMock, get: vi.fn() }),
+    }));
+    const { fetchDiscover } = await import('../network-api');
+
+    await fetchDiscover({
+      item_network: 'blue_dot',
+      item_domain: 'student',
+      item_type: 'profile_1.0',
+      limit: 20,
+      offset: 0,
+    });
+
+    const [, body] = postMock.mock.calls[0];
+    expect(body).not.toHaveProperty('anchor_item_id');
+  });
+
   it('drops an empty filters array rather than sending filters: []', async () => {
     vi.resetModules();
     const postMock = vi.fn().mockResolvedValue({
