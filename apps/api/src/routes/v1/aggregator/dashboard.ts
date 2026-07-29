@@ -157,7 +157,7 @@ async function build_domain_block(
   log?: NameResolutionLog,
 ) {
   // Resolve the requested lifecycle set (comma-list → known values, default
-  // live+paused). `lifecycleList` is the SQL fragment for the raw rollup/mode
+  // live+draft). `lifecycleList` is the SQL fragment for the raw rollup/mode
   // queries; `lifecycleFilter` drives the query-builder `inArray` below.
   const lifecycleFilter = resolve_lifecycle_filter(lifecycle);
   const lifecycleList = sql.join(lifecycleFilter.map((s) => sql`${s}`), sql`, `);
