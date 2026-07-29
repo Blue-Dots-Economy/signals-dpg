@@ -11,14 +11,13 @@ import {
   SidebarGroupContent,
   SidebarGroupLabel,
   SidebarMenu,
-  SidebarMenuAction,
   SidebarMenuButton,
   SidebarMenuItem,
   SidebarHeader,
   SidebarSeparator,
 } from '@/components/ui/sidebar';
 import { PortalHeader } from './portal-header';
-import { LayoutGrid, Plus, Pencil, Network, ChevronRight, Activity } from 'lucide-react';
+import { LayoutGrid, Plus, Network, ChevronRight, Activity } from 'lucide-react';
 import { usePendingActionsCount } from '@/hooks/use-actions';
 
 interface AppSidebarProps {
@@ -32,10 +31,12 @@ interface AppSidebarProps {
   myItems?: Item[];
   activeProfileId?: string | null;
   onActiveProfileChange?: (profileId: string) => void;
+  onProfilesChanged?: () => void;
   userSchemas?: Record<string, RJSFSchema>;
 }
 
 import { getDomainIcon } from '@/lib/domain-icons';
+import { ProfileRowActions } from './profile-row-actions';
 
 function findTitleField(schema: RJSFSchema): string | null {
   if (!schema.properties) return null;
@@ -73,6 +74,7 @@ export function AppSidebar({
   myItems = [],
   activeProfileId,
   onActiveProfileChange,
+  onProfilesChanged,
   userSchemas,
 }: AppSidebarProps) {
   const navigate = useNavigate();
@@ -137,6 +139,7 @@ export function AppSidebar({
         <PortalHeader />
       </SidebarHeader>
       <SidebarContent>
+        <nav aria-label="Primary" className="flex flex-1 flex-col gap-2">
         {showNetworkSelector && (
           <SidebarGroup>
             <SidebarGroupLabel>{t('nav.networks_group')}</SidebarGroupLabel>
@@ -270,27 +273,56 @@ export function AppSidebar({
                               const isActiveProfile = profile.item_id === activeProfileId;
 
                               return (
-                                <SidebarMenuItem key={profile.item_id}>
+                                <SidebarMenuItem
+                                  key={profile.item_id}
+                                  className={[
+                                    'flex items-center gap-1 rounded-md pr-1',
+                                    isActiveProfile
+                                      ? 'bg-primary/12 border-l-2 border-primary rounded-l-none hover:bg-primary/15'
+                                      : 'hover:bg-sidebar-accent',
+                                  ].join(' ')}
+                                >
                                   <SidebarMenuButton
                                     onClick={() => onActiveProfileChange?.(profile.item_id)}
-                                    className={
-                                      isActiveProfile
-                                        ? 'relative bg-primary/12 text-primary font-medium border-l-2 border-primary rounded-l-none pl-2 hover:bg-primary/15'
-                                        : ''
-                                    }
+                                    className={[
+                                      'min-w-0 flex-1 bg-transparent hover:bg-transparent',
+                                      isActiveProfile ? 'text-primary font-medium pl-2' : '',
+                                    ].join(' ')}
                                   >
                                     <span className="truncate">{title}</span>
-                                    {isActiveProfile && (
-                                      <span className="ml-auto shrink-0 rounded-full bg-primary px-1.5 py-0.5 text-[10px] font-semibold text-primary-foreground leading-none">
-                                        {t('nav.active_badge')}
+                                    {/* Lifecycle chip lives INSIDE the button pill
+                                        (Active / Paused / Draft) so it reads as part
+                                        of the profile, not floating on the row. */}
+                                    {profile.lifecycle_status && (
+                                      <span
+                                        className={[
+                                          'ml-auto shrink-0 rounded-full px-1.5 py-0.5 text-[10px] font-semibold leading-none capitalize',
+                                          profile.lifecycle_status === 'live'
+                                            ? 'bg-green-100 text-green-700 dark:bg-green-500/20 dark:text-green-300'
+                                            : profile.lifecycle_status === 'paused'
+                                              ? 'bg-amber-100 text-amber-800 dark:bg-amber-500/20 dark:text-amber-300'
+                                              : 'bg-slate-200 text-slate-700 dark:bg-slate-500/25 dark:text-slate-300',
+                                        ].join(' ')}
+                                      >
+                                        {t(
+                                          `nav.status_${profile.lifecycle_status}`,
+                                          profile.lifecycle_status === 'live'
+                                            ? 'Active'
+                                            : profile.lifecycle_status,
+                                        )}
                                       </span>
                                     )}
                                   </SidebarMenuButton>
-                                  <SidebarMenuAction
-                                    onClick={() => navigate(`/profile/${profile.item_id}/edit?network=${encodeURIComponent(profile.item_network)}`)}
-                                  >
-                                    <Pencil className="h-4 w-4" />
-                                  </SidebarMenuAction>
+                                  {/* Per-profile actions (Edit · Pause/Resume ·
+                                      Retire), icon-only, always visible. */}
+                                  <ProfileRowActions
+                                    profile={profile}
+                                    pauseEnabled={
+                                      networks?.find((n) => n.id === profile.item_network)?.pause_enabled !== false
+                                    }
+                                    onEdit={() => navigate(`/profile/${profile.item_id}/edit?network=${encodeURIComponent(profile.item_network)}`)}
+                                    onChanged={() => onProfilesChanged?.()}
+                                  />
                                 </SidebarMenuItem>
                               );
                             })}
@@ -327,6 +359,7 @@ export function AppSidebar({
             </SidebarMenu>
           </SidebarGroupContent>
         </SidebarGroup>
+        </nav>
       </SidebarContent>
     </ShadcnSidebar>
   );

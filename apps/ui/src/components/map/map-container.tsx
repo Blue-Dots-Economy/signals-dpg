@@ -1,10 +1,8 @@
 import * as React from 'react';
 import { useTranslation } from 'react-i18next';
 import type { RJSFSchema } from '@rjsf/utils';
-import type { MapMarker } from '@/engine/types';
+import type { MapMarker, MapViewport } from '@/engine/types';
 import { getActiveMapProvider } from '@/engine/map/map-registry';
-import { parseLocationFields, buildLocationQueries } from '@dpg/schemas/location_fields';
-import { getGeoProvider } from '@/lib/geo/provider';
 import { Button } from '@/components/ui/button';
 import { Maximize2, Minimize2 } from 'lucide-react';
 
@@ -35,6 +33,14 @@ interface MapViewProps {
    */
   focusNonce?: number;
   /**
+   * Monotonic counter bumped to close any open marker popup (e.g. right
+   * before an action like Connect/Apply opens a modal) — the marker popup is
+   * a map overlay in a high stacking context, so on mobile it would otherwise
+   * cover a bottom-sheet modal. Forwarded to the active provider, which clears
+   * whatever "active marker" state it holds internally.
+   */
+  closePopupNonce?: number;
+  /**
    * The Filters control. Rendered inside the map overlay ONLY when the map is
    * maximized (in normal mode the page header hosts it, but that header is
    * covered when the map goes fullscreen, so we surface it here too).
@@ -55,7 +61,7 @@ interface MapViewProps {
   }) => string | undefined;
   /**
    * Tailwind height classes for the (non-maximized) map wrapper. Defaults to
-   * `h-[calc(100vh-8rem)] min-h-[400px]` to suit the signals page chrome.
+   * `h-[calc(100dvh-8rem)] min-h-[400px]` to suit the signals page chrome.
    * Callers with a different layout (e.g. the tourist app, whose header is
    * shorter) can pass `h-full` to fill their own flex container instead.
    */
@@ -72,6 +78,22 @@ interface MapViewProps {
    * instead of the icon pin. Unset for signals → unchanged behaviour.
    */
   resolveMarkerImage?: (marker: MapMarker) => string | null | undefined;
+  /**
+   * Optional viewport-change callback, fed by the active provider on
+   * debounced (~300ms) pan/zoom settle: `{lat, lng, radiusMeters}` where
+   * `radiusMeters` is the half-diagonal (center → a bounds corner). Feeds the
+   * home-page markers query with a viewport-scoped fetch (#203 §5.2). Unset
+   * for the tourist app → no listener is attached and behavior is unchanged.
+   */
+  onViewportChange?: (viewport: MapViewport) => void;
+  /**
+   * Overrides the empty-state text. The portal map is viewport-scoped (it fetches
+   * only the pins in view), so "no items" means "none in THIS area" — not that a
+   * filter excluded them; the home page passes an area-oriented message. Unset
+   * for the tourist app, which keeps the default `map.no_results` (it genuinely
+   * filters by search + fields).
+   */
+  emptyMessage?: string;
 }
 
 // Default map view when there is no user location / no profile location.
@@ -106,6 +128,8 @@ export function parseDefaultZoom(raw: string | undefined): number {
 const DEFAULT_CENTER: [number, number] = parseDefaultCenter(
   import.meta.env.VITE_MAP_DEFAULT_CENTER,
 );
+// The default zoom the map opens at before its first `onViewportChange`
+// report has landed (overridable via VITE_MAP_DEFAULT_ZOOM).
 const DEFAULT_ZOOM = parseDefaultZoom(import.meta.env.VITE_MAP_DEFAULT_ZOOM);
 const PROFILE_ZOOM = 12;
 
@@ -117,12 +141,15 @@ export function MapView({
   zoom = DEFAULT_ZOOM,
   focusPoint,
   focusNonce,
+  closePopupNonce,
   filtersSlot,
   renderPopup,
   resolveMarkerLabel,
-  heightClassName = 'h-[calc(100vh-8rem)] min-h-[400px]',
+  heightClassName = 'h-[calc(100dvh-8rem)] min-h-[400px]',
   resolveMarkerIcon,
   resolveMarkerImage,
+  onViewportChange,
+  emptyMessage,
 }: MapViewProps) {
   const { t } = useTranslation();
   const MapProviderComponent = getActiveMapProvider();
@@ -172,7 +199,7 @@ export function MapView({
       const titleField = findTitleField(schema);
 
       const resolved = await Promise.all(
-        items.map(async (item) => {
+        items.map((item) => {
           // Primary: use stored item_locations array (one marker per entry).
           const locs = Array.isArray(
             (item.data as Record<string, unknown>).item_locations
@@ -184,24 +211,10 @@ export function MapView({
               ).item_locations ?? []
             : [];
 
-          // Fallback: if the item has no stored locations, geocode the field query(ies).
-          let points: Array<{ lat: number; lng: number; label?: string }> = locs;
-          if (points.length === 0) {
-            const { primary } = parseLocationFields(schema as Record<string, unknown>);
-            const queries = buildLocationQueries(item.data, primary);
-            const geocoded: Array<{ lat: number; lng: number; label?: string }> = [];
-            for (const { query, label } of queries) {
-              const best = await getGeoProvider().geocode(query);
-              if (best) {
-                geocoded.push(
-                  label
-                    ? { lat: best.lat, lng: best.lng, label }
-                    : { lat: best.lat, lng: best.lng }
-                );
-              }
-            }
-            points = geocoded;
-          }
+          // Locations are resolved server-side (item_locations); the browser no
+          // longer geocodes (its Maps key is scoped to Maps JS + Places only).
+          // Items with no stored location simply produce no marker.
+          const points: Array<{ lat: number; lng: number; label?: string }> = locs;
 
           // Skip items with no resolvable location.
           if (points.length === 0) return [];
@@ -213,11 +226,8 @@ export function MapView({
             resolvedLabel ||
             (titleField ? String(item.data[titleField] ?? 'Item') : 'Item');
 
-          // Determine precision: stored locations are exact; geocoded are approximate.
-          const isGeocoded = locs.length === 0 && points.length > 0;
-          const precision: MapMarker['precision'] = isGeocoded
-            ? 'geocoded_full_address'
-            : 'exact';
+          // All coordinates come from server-resolved item_locations → exact.
+          const precision: MapMarker['precision'] = 'exact';
 
           return points.map(
             (p, i) =>
@@ -228,7 +238,7 @@ export function MapView({
                 label: p.label ? `${baseLabel} — ${p.label}` : baseLabel,
                 data: item.data,
                 precision,
-                geocodedFrom: isGeocoded ? (p.label ?? 'location') : undefined,
+                geocodedFrom: undefined,
                 domain: item.domain,
               }) satisfies MapMarker
           );
@@ -272,9 +282,11 @@ export function MapView({
         onMarkerClick={onMarkerClick}
         initialViewSet={initialViewSet}
         focusNonce={focusNonce}
+        closePopupNonce={closePopupNonce}
         renderPopup={renderPopup}
         resolveIcon={resolveMarkerIcon}
         resolveMarkerImage={resolveMarkerImage}
+        onViewportChange={onViewportChange}
       />
       {/* Top-right overlay: Filters (only while maximized — the page header
           hosts it normally but is hidden in fullscreen) + maximize toggle.
@@ -299,7 +311,7 @@ export function MapView({
           <p className="rounded-md bg-background/90 px-4 py-2 text-sm text-muted-foreground shadow-md backdrop-blur-sm">
             {loading
               ? t('map.loading')
-              : t('map.no_results')}
+              : (emptyMessage ?? t('map.no_results'))}
           </p>
         </div>
       )}

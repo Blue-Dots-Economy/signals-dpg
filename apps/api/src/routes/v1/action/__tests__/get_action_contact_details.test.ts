@@ -237,15 +237,30 @@ describe('GET /:action_id/contact-details', () => {
   });
 
   it.each(['created', 'pending', 'rejected', 'cancelled'])(
-    '403 PII_NOT_REVEALED when status is %s',
+    '403 PII_NOT_REVEALED when status is %s (live counterparty, non-reveal status)',
     async (status) => {
       app = buildApp({ id: SOURCE_OWNER });
       state.action = buildAction({ action_status: status });
+      // Counterparty exists + is live — the endpoint resolves it first, then the
+      // reveal-status gate returns PII_NOT_REVEALED (retired short-circuits earlier).
+      state.fetchedItems = [buildItem(TARGET_ITEM_ID, TARGET_OWNER)];
       const res = await app.inject({ method: 'GET', url: `/${ACTION_ID}/contact-details` });
       expect(res.statusCode).toBe(403);
       expect(res.json().error).toBe('PII_NOT_REVEALED');
     }
   );
+
+  it('200 retired notice when the counterparty is retired (cancelled action)', async () => {
+    app = buildApp({ id: SOURCE_OWNER });
+    state.action = buildAction({ action_status: 'cancelled' });
+    state.fetchedItems = [buildItem(TARGET_ITEM_ID, TARGET_OWNER, { lifecycle_status: 'retired' })];
+    const res = await app.inject({ method: 'GET', url: `/${ACTION_ID}/contact-details` });
+    expect(res.statusCode).toBe(200);
+    const body = res.json();
+    expect(body.revealed).toBe(false);
+    expect(body.reveal_blocked_reason).toBe('retired');
+    expect(body.other_actor.item.item_id).toBe(TARGET_ITEM_ID);
+  });
 
   it('200 when source owner calls on accepted — returns target item merged', async () => {
     app = buildApp({ id: SOURCE_OWNER });
@@ -256,6 +271,7 @@ describe('GET /:action_id/contact-details', () => {
     const body = res.json();
     expect(body.action_id).toBe(ACTION_ID);
     expect(body.action_status).toBe('accepted');
+    expect(body.revealed).toBe(true);
     expect(body.other_actor.item.item_id).toBe(TARGET_ITEM_ID);
     expect(res.headers['cache-control']).toBe('no-store');
   });
@@ -266,6 +282,7 @@ describe('GET /:action_id/contact-details', () => {
     state.fetchedItems = [buildItem(SOURCE_ITEM_ID, SOURCE_OWNER)];
     const res = await app.inject({ method: 'GET', url: `/${ACTION_ID}/contact-details` });
     expect(res.statusCode).toBe(200);
+    expect(res.json().revealed).toBe(true);
     expect(res.json().other_actor.item.item_id).toBe(SOURCE_ITEM_ID);
   });
 
@@ -288,31 +305,36 @@ describe('GET /:action_id/contact-details', () => {
     expect(res.json().error).toBe('OTHER_ITEM_NOT_FOUND');
   });
 
-  it('403 PROFILE_NOT_LIVE when other actor profile is not live', async () => {
+  it('200 revealed:false (masked) when other actor profile is not live (#273)', async () => {
     app = buildApp({ id: SOURCE_OWNER });
     state.action = buildAction();
     state.fetchedItems = [buildItem(TARGET_ITEM_ID, TARGET_OWNER, { lifecycle_status: 'draft' })];
     const res = await app.inject({ method: 'GET', url: `/${ACTION_ID}/contact-details` });
-    expect(res.statusCode).toBe(403);
-    expect(res.json().error).toBe('PROFILE_NOT_LIVE');
+    expect(res.statusCode).toBe(200);
+    const body = res.json();
+    expect(body.revealed).toBe(false);
+    expect(body.reveal_blocked_reason).toBe('other');
+    expect(body.other_actor.item.item_id).toBe(TARGET_ITEM_ID);
+    // Masked view is not a reveal → no audit row.
+    expect(auditInsertMock).not.toHaveBeenCalled();
   });
 
-  it('403 PROFILE_NOT_LIVE when caller own profile is not live', async () => {
+  it('200 revealed:false (masked) when caller own profile is not live (#273)', async () => {
     app = buildApp({ id: SOURCE_OWNER });
     state.action = buildAction();
     state.callerSnapshotLifecycle = 'draft';
     // other actor item is live — PII must still be withheld due to caller's own status
     state.fetchedItems = [buildItem(TARGET_ITEM_ID, TARGET_OWNER)];
     const res = await app.inject({ method: 'GET', url: `/${ACTION_ID}/contact-details` });
-    expect(res.statusCode).toBe(403);
-    expect(res.json().error).toBe('PROFILE_NOT_LIVE');
-    // No PII must be present in the response body
+    expect(res.statusCode).toBe(200);
     const body = res.json();
-    expect(body).not.toHaveProperty('other_actor');
+    expect(body.revealed).toBe(false);
+    expect(body.reveal_blocked_reason).toBe('self');
+    expect(body.other_actor.item.item_id).toBe(TARGET_ITEM_ID);
     expect(auditInsertMock).not.toHaveBeenCalled();
   });
 
-  it('writes one audit row on every 2xx', async () => {
+  it('writes one audit row on a revealed 2xx', async () => {
     app = buildApp({ id: SOURCE_OWNER });
     state.action = buildAction();
     state.fetchedItems = [buildItem(TARGET_ITEM_ID, TARGET_OWNER)];

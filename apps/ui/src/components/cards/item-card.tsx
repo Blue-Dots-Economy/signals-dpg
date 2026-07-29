@@ -209,11 +209,11 @@ export function ItemCard({
         //    the card.
         //  - width: a small 17rem on mobile (≤ 86vw) so the card leaves room to
         //    pan the map; a roomier 28rem on desktop.
-        //  - height: on mobile a compact 56vh so an opened card never fills the
+        //  - height: on mobile a compact 56dvh so an opened card never fills the
         //    screen; the whole body scrolls within it. On desktop ≤ 28rem (and
-        //    ≤ 60vh on short screens) with the footer pinned.
+        //    ≤ 60dvh on short screens) with the footer pinned.
         variant === 'popup' &&
-          'w-[min(17rem,86vw)] max-h-[56vh] sm:w-[min(28rem,90vw)] sm:max-h-[min(60vh,28rem)]',
+          'w-[min(17rem,86vw)] max-h-[56dvh] sm:w-[min(28rem,90vw)] sm:max-h-[min(60dvh,28rem)]',
         variant === 'list' &&
           'transition hover:shadow-md motion-safe:hover:-translate-y-0.5',
         className

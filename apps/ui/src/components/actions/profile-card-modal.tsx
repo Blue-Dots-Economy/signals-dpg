@@ -2,12 +2,11 @@ import * as React from 'react';
 import { useTranslation } from 'react-i18next';
 import type { RJSFSchema } from '@rjsf/utils';
 import {
-  Dialog,
-  DialogContent,
   DialogHeader,
   DialogTitle,
   DialogDescription,
 } from '@/components/ui/dialog';
+import { ResponsiveDialog } from '@/components/ui/responsive-dialog';
 import { DomainCard } from '@/components/cards/domain-card';
 import { useNetworkConfig } from '@/hooks/use-network-config';
 import { getActionContactDetails } from '@/lib/action-api';
@@ -81,8 +80,10 @@ interface ResolvedItem {
 }
 
 // masked → public profile, request not (yet) revealing; full → reveal succeeded;
-// reveal_unavailable → public profile because the reveal is unavailable here.
-type ViewMode = 'masked' | 'full' | 'reveal_unavailable';
+// reveal_unavailable → public profile because the OTHER party isn't live;
+// reveal_blocked_self → public profile because the VIEWER's own profile isn't live.
+// reveal_retired → the counterparty permanently removed their profile (#347).
+type ViewMode = 'masked' | 'full' | 'reveal_unavailable' | 'reveal_blocked_self' | 'reveal_retired';
 
 type ModalState =
   | { status: 'idle' }
@@ -141,28 +142,42 @@ export function ProfileCardModal({
     };
 
     const resolve = async (): Promise<{ item: ResolvedItem; mode: ViewMode }> => {
-      if (wantsUnmasked) {
-        try {
-          const data = await getActionContactDetails(actionId);
-          const it = data.other_actor.item;
-          return {
-            item: {
-              item_network: it.item_network,
-              item_domain: it.item_domain,
-              item_type: it.item_type,
-              item_state: it.item_state,
-            },
-            mode: 'full',
-          };
-        } catch (err) {
-          const code = (err as { code?: string }).code ?? 'INTERNAL_SERVER_ERROR';
-          // Only fall back to the public profile when the reveal is genuinely
-          // unavailable; re-throw real errors so they surface to the user.
-          if (!REVEAL_UNAVAILABLE_CODES.has(code)) throw err;
+      // Always ask the action's contact-details endpoint first — it's the only
+      // source that can resolve a NON-live counterparty (paused #273, or retired
+      // #347), which the network item fetch (live-only) can't see. It reveals
+      // PII when allowed, else returns the masked view + a reveal_blocked_reason.
+      try {
+        const data = await getActionContactDetails(actionId);
+        const it = data.other_actor.item;
+        return {
+          item: {
+            item_network: it.item_network,
+            item_domain: it.item_domain,
+            item_type: it.item_type,
+            item_state: it.item_state,
+          },
+          mode: data.revealed
+            ? 'full'
+            : data.reveal_blocked_reason === 'self'
+              ? 'reveal_blocked_self'
+              : data.reveal_blocked_reason === 'retired'
+                ? 'reveal_retired'
+                : 'reveal_unavailable',
+        };
+      } catch (err) {
+        const code = (err as { code?: string }).code ?? 'INTERNAL_SERVER_ERROR';
+        // PII_NOT_REVEALED: the action simply isn't at a revealing status and the
+        // counterparty is live — show the ordinary masked public profile.
+        if (code === 'PII_NOT_REVEALED') {
+          return { item: await fetchMasked(), mode: 'masked' };
+        }
+        // Other "reveal legitimately unavailable" codes → masked public + note.
+        if (REVEAL_UNAVAILABLE_CODES.has(code)) {
           return { item: await fetchMasked(), mode: 'reveal_unavailable' };
         }
+        // A real failure — surface it.
+        throw err;
       }
-      return { item: await fetchMasked(), mode: 'masked' };
     };
 
     async function run() {
@@ -200,16 +215,20 @@ export function ProfileCardModal({
     state.status === 'success'
       ? state.mode === 'full'
         ? 'profile.card_desc_full'
-        : state.mode === 'reveal_unavailable'
-          ? 'profile.card_desc_reveal_unavailable'
-          : 'profile.card_desc_masked'
+        : state.mode === 'reveal_retired'
+          ? 'profile.card_desc_reveal_retired'
+          : state.mode === 'reveal_blocked_self'
+            ? 'profile.card_desc_reveal_blocked_self'
+            : state.mode === 'reveal_unavailable'
+              ? 'profile.card_desc_reveal_unavailable'
+              : 'profile.card_desc_masked'
       : wantsUnmasked
         ? 'profile.card_desc_full'
         : 'profile.card_desc_masked';
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-xl">
+    <ResponsiveDialog open={open} onOpenChange={onOpenChange} title={name} contentClassName="max-w-xl">
+      <div className="flex flex-col gap-4 overflow-y-auto p-6">
         <DialogHeader>
           <DialogTitle>{name}</DialogTitle>
           <DialogDescription>{t(descKey)}</DialogDescription>
@@ -228,16 +247,18 @@ export function ProfileCardModal({
           </div>
         )}
 
-        {state.status === 'success' && item && schema && (
+        {/* A retired profile shows only the notice (in the description) — its
+            leftover non-PII fields must not be rendered as a card (#347). */}
+        {state.status === 'success' && state.mode !== 'reveal_retired' && item && schema && (
           <DomainCard schema={schema} schemaName={item.item_domain} data={item.item_state} />
         )}
 
-        {state.status === 'success' && item && !schema && (
+        {state.status === 'success' && state.mode !== 'reveal_retired' && item && !schema && (
           <pre className="max-h-80 overflow-auto whitespace-pre-wrap break-words rounded-md bg-muted p-3 text-xs">
             {JSON.stringify(item.item_state, null, 2)}
           </pre>
         )}
-      </DialogContent>
-    </Dialog>
+      </div>
+    </ResponsiveDialog>
   );
 }

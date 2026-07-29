@@ -138,8 +138,12 @@ content-type: application/json
 {
   "email": "user@example.com",
   "name": "Asha P",
-  "terms_accepted": true,
-  "privacy_accepted": true,
+  "age": 35,
+  "compliance": [
+    { "key": "user_terms", "value": true },
+    { "key": "user_privacy", "value": true },
+    { "key": "profile_creation", "value": true }
+  ],
   "channel": "bulk",
   "item_state": { ... item-schema-validated payload ... },
   "item_id": "optional-uuid-for-update-only",
@@ -150,6 +154,14 @@ content-type: application/json
 ```
 
 Identity rule: at least one of `email` or `phone_number` must be provided.
+
+**Consent (`compliance`).** Each entry names a consent the channel captured
+from the user; only `value: true` is recorded, into the `consent_record`
+ledger. Recognised keys: `user_terms`, `user_privacy` (user-level) and
+`profile_creation` (item-level). Unknown keys are ignored. Versions are
+derived server-side. See "Consent (`compliance`), age, and activation" below
+for validation rules, age requirements, and how a profile gets promoted to
+`live`.
 
 ### Response
 
@@ -164,17 +176,45 @@ Identity rule: at least one of `email` or `phone_number` must be provided.
       "item_network": "blue_dot",
       "item_domain": "seeker",
       "item_type": "profile_1.0",
+      "lifecycle_status": "live",
       "item_state": { ... },
       "created_at": "...",
       "updated_at": "..."
     }
-  ]
+  ],
+  "consent_recorded": 3
 }
 ```
 
 `onboarded_at` is set only when this call created a new user; null
 otherwise. `items` is scoped to the networks this Signals instance
-serves.
+serves. `lifecycle_status` tells the caller whether the profile is
+usable (`live`) or still incomplete/gated (`draft`, `paused`).
+`consent_recorded` is the number of `consent_record` rows written by
+this call from the `compliance` array (0 when `compliance` was absent
+or every entry was `false`/unrecognised).
+
+### Consent (`compliance`), age, and activation
+
+- `compliance` is an optional array of `{ key, value }`. Recognised keys:
+  `user_terms`, `user_privacy` (user-level), `profile_creation` (item-level).
+- **Accept-only:** any key sent as `false` → `400 CONSENT_DECLINED`; omit a key
+  to skip it.
+- **`user_terms` + `user_privacy` are a both-or-none pair** → one without the
+  other is `400 USER_LEVEL_INCOMPLETE`.
+- **On guardian-gated domains** (e.g. `seeker`), sending the consent pair
+  requires `age` (integer years, stored as the `user.age` snapshot, #331) →
+  else `400 DOB_REQUIRED`. Non-gated domains don't require it; an age already
+  on file satisfies it.
+- **Activation:** target an existing profile with `item_id` (no `item_state`
+  needed) to add `profile_creation` and/or `age` and promote it. A user-level
+  call with `age` and no item promotes all the user's eligible drafts.
+- The legacy `terms_accepted` / `privacy_accepted` booleans are accepted but
+  ignored (deprecated, #309).
+- `GET /admin/participant` returns `user_consent { terms_accepted,
+  privacy_accepted, has_age }` and per-item `profile_consent_accepted`
+  + `lifecycle_status` so callers can see what's outstanding and which profile
+  is usable.
 
 ### Error matrix (additions)
 

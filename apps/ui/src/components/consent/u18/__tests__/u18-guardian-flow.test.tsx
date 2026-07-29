@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, waitFor, fireEvent } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { Toaster } from 'sonner';
-import { pickDob } from '@/test/pick-dob';
+import { pickBirthYear } from '@/test/pick-dob';
 
 const submitU18Dob = vi.fn();
 const submitGuardian = vi.fn();
@@ -61,7 +61,7 @@ describe('U18GuardianFlow', () => {
     await renderFlow(onComplete, onNotMinor);
 
     // Step 1: DOB
-    await pickDob(/select date of birth/i, 2012, 5);
+    await pickBirthYear(2012);
     await userEvent.click(screen.getByRole('button', { name: /continue/i }));
 
     // Step 2: guardian details (name + a contact + both consents)
@@ -84,7 +84,7 @@ describe('U18GuardianFlow', () => {
     const onNotMinor = vi.fn();
     await renderFlow(onComplete, onNotMinor);
 
-    await pickDob(/select date of birth/i, 1990, 1);
+    await pickBirthYear(1990);
     await userEvent.click(screen.getByRole('button', { name: /continue/i }));
 
     await waitFor(() => expect(onNotMinor).toHaveBeenCalled());

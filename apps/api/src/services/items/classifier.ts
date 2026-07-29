@@ -1,14 +1,15 @@
 import { is_populated } from '../metrics/profile_completion.js';
 import type { JSONSchemaLike } from '../metrics/profile_completion.js';
 
-export type LifecycleStatus = 'draft' | 'live' | 'paused';
+export type LifecycleStatus = 'draft' | 'live' | 'paused' | 'retired';
 
 export interface ClassifierInput {
   schema: JSONSchemaLike | null | undefined;
   merged_state: Record<string, unknown> | null | undefined;
   /**
-   * Stored lifecycle_status BEFORE this write. `paused` is sticky — the
-   * classifier never flips out of it. For brand-new items pass `'draft'`.
+   * Stored lifecycle_status BEFORE this write. `paused` and `retired` are
+   * sticky — the classifier never flips out of them (`retired` is terminal).
+   * For brand-new items pass `'draft'`.
    */
   current_status: LifecycleStatus;
   /**
@@ -29,8 +30,8 @@ export interface ClassifierResult {
  * the merged post-write state. See
  * docs/superpowers/specs/2026-06-03-participant-onboarding-lifecycle-design.md §5.
  *
- * lifecycle_status: paused is sticky; otherwise live requires BOTH required
- * fields complete AND consent accepted, else draft.
+ * lifecycle_status: retired is terminal and paused is sticky; otherwise live
+ * requires BOTH required fields complete AND consent accepted, else draft.
  * (Completion % is no longer produced here — the single completion metric is
  * `item_metrics.profile_completion_pct`, computed required-only via
  * `profile_completion_pct`.)
@@ -38,6 +39,11 @@ export interface ClassifierResult {
 export const classify_item = (input: ClassifierInput): ClassifierResult => {
   const required = input.schema?.required ?? [];
   const state = input.merged_state ?? {};
+
+  // Terminal: a retired item is permanently removed — never recompute out of it.
+  if (input.current_status === 'retired') {
+    return { lifecycle_status: 'retired' };
+  }
 
   if (input.current_status === 'paused') {
     return { lifecycle_status: 'paused' };

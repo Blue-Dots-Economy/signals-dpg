@@ -212,9 +212,13 @@ const fetch_actions_handler = async (
       if (entry.kind === 'public') return entry.value;
       // Private field: schema-aware mask sits in item_state already; reveal
       // the real value only when this action's status is in the network's
-      // schema-declared reveals_pii_on_status for this interaction.
+      // schema-declared reveals_pii_on_status AND the named profile is live.
+      // A paused/draft profile keeps its name masked even on an accepted
+      // action — mirrors the contact-details reveal gate (#273).
       const revealStatuses = revealStatusesByAction.get(actionId) ?? [];
-      if (revealStatuses.includes(status)) return unmask(id) ?? entry.masked;
+      if (revealStatuses.includes(status) && entry.lifecycle_status === 'live') {
+        return unmask(id) ?? entry.masked;
+      }
       return entry.masked;
     };
 
@@ -274,6 +278,9 @@ type ResolvedName =
       fieldName: string;
       encrypted: string;
       publicState: Record<string, unknown>;
+      // Reveal the real name only when this item is live. A paused/draft
+      // profile keeps its name masked even on an accepted action (#273).
+      lifecycle_status: string;
     };
 
 // Conventional name properties to surface when an item schema declares no
@@ -315,6 +322,7 @@ async function resolveItemNames(
       item_type: items.item_type,
       item_state: items.item_state,
       item_private_state: items.item_private_state,
+      lifecycle_status: items.lifecycle_status,
     })
     .from(items)
     .where(inArray(items.item_id, [...ids]));
@@ -378,6 +386,7 @@ async function resolveItemNames(
         fieldName,
         encrypted: '',
         publicState,
+        lifecycle_status: item.lifecycle_status,
       });
       continue;
     }
@@ -387,6 +396,7 @@ async function resolveItemNames(
       fieldName,
       encrypted,
       publicState,
+      lifecycle_status: item.lifecycle_status,
     });
   }
 

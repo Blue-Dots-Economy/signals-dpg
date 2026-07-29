@@ -5,6 +5,9 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { ResponsiveDialog } from '@/components/ui/responsive-dialog';
+import { DrawerTitle } from '@/components/ui/drawer';
+import { useIsMobile } from '@/hooks/use-mobile';
 import { cn } from '@/lib/utils';
 import type { DotNetworkDomain, ViewMode } from '@/engine/types';
 import { getEnumFilterFieldsForDomains } from '@/lib/enum-filters';
@@ -40,6 +43,16 @@ export interface MapFiltersPanelProps {
   showDomainToggle?: boolean;
   /** Current browse view — tailors the help text (map markers vs listings). */
   viewMode?: ViewMode;
+  /**
+   * #203 List PR Task 6: when true, the currently-selected ENUM FIELD chips
+   * (facet filters) render dimmed with a "not applied" caption — the discover
+   * BFF fell back to native (signals-search down) while the user has an
+   * active facet filter, so the selection is no longer actually applied
+   * server-side. The user's picks are NOT cleared (they persist and
+   * re-apply automatically once search recovers) — this is purely visual.
+   * Defaults to false. The map's own filter-panel mount never passes this.
+   */
+  paused?: boolean;
 }
 
 // ─── Chip toggle button ────────────────────────────────────────────────────────
@@ -50,25 +63,39 @@ interface ChipProps {
   onToggle: () => void;
   title?: string;
   ariaLabel?: string;
+  /**
+   * #203 List PR Task 6: true when this SELECTED chip's filter is no longer
+   * actually applied server-side (discover BFF native-fallback). Only has a
+   * visual effect when `selected` is also true — an unselected chip has
+   * nothing to "pause". Dims the chip and swaps its title/aria-label to the
+   * "not applied" caption; the selection itself is untouched.
+   */
+  paused?: boolean;
 }
 
-function Chip({ label, selected, onToggle, title, ariaLabel }: ChipProps) {
+function Chip({ label, selected, onToggle, title, ariaLabel, paused }: ChipProps) {
+  const { t } = useTranslation();
+  const isPaused = selected && paused;
   return (
     <button
       type="button"
       onClick={onToggle}
-      title={title}
+      title={isPaused ? t('home.filters_paused') : title}
       aria-label={ariaLabel ?? label}
       aria-pressed={selected}
+      aria-disabled={isPaused || undefined}
       className={cn(
-        'inline-flex cursor-pointer items-center rounded-full border px-2.5 py-1 text-[11px] font-medium leading-none transition-all duration-150',
+        'inline-flex cursor-pointer items-center rounded-full border px-2.5 py-1 text-xs font-medium leading-none transition-all duration-150',
+        'pointer-coarse:min-h-11',
         'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1',
         selected
           ? 'border-primary bg-primary text-primary-foreground hover:bg-primary/90'
           : 'border-border bg-muted text-muted-foreground hover:border-primary/40 hover:bg-accent hover:text-accent-foreground',
+        isPaused && 'opacity-50',
       )}
     >
       {label}
+      {isPaused && <span className="sr-only"> ({t('home.filters_paused')})</span>}
     </button>
   );
 }
@@ -86,7 +113,7 @@ function FilterGroup({ title, children }: FilterGroupProps) {
       <span className="block text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">
         {title}
       </span>
-      <div className="flex flex-wrap gap-1.5">{children}</div>
+      <div className="flex flex-wrap gap-1.5 pointer-coarse:gap-2">{children}</div>
     </div>
   );
 }
@@ -104,9 +131,11 @@ interface MultiSelectGroupProps {
   options: string[];
   selected: string[];
   onToggle: (value: string) => void;
+  /** #203 List PR Task 6: see `MapFiltersPanelProps.paused`. */
+  paused?: boolean;
 }
 
-function MultiSelectGroup({ title, options, selected, onToggle }: MultiSelectGroupProps) {
+function MultiSelectGroup({ title, options, selected, onToggle, paused }: MultiSelectGroupProps) {
   const { t } = useTranslation();
   const [open, setOpen] = React.useState(false);
   const [query, setQuery] = React.useState('');
@@ -117,6 +146,7 @@ function MultiSelectGroup({ title, options, selected, onToggle }: MultiSelectGro
   }, [options, query]);
 
   const count = selected.length;
+  const isPaused = count > 0 && paused;
 
   return (
     <div className="space-y-2">
@@ -124,13 +154,19 @@ function MultiSelectGroup({ title, options, selected, onToggle }: MultiSelectGro
         type="button"
         onClick={() => setOpen((v) => !v)}
         aria-expanded={open}
-        className="flex w-full items-center justify-between gap-2 text-left focus-visible:outline-none"
+        aria-disabled={isPaused || undefined}
+        title={isPaused ? t('home.filters_paused') : undefined}
+        className={cn(
+          'flex w-full items-center justify-between gap-2 text-left focus-visible:outline-none',
+          isPaused && 'opacity-50',
+        )}
       >
-        <span className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">
+        <span className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">
           {title}
         </span>
-        <span className="flex items-center gap-1 text-[11px] text-muted-foreground">
+        <span className="flex items-center gap-1 text-xs text-muted-foreground">
           {count > 0 ? t('filters.selected', { count }) : t('filters.any')}
+          {isPaused && <span className="italic">({t('home.filters_paused')})</span>}
           <ChevronDown
             className={cn('size-3.5 transition-transform', open && 'rotate-180')}
           />
@@ -214,16 +250,27 @@ export function MapFiltersPanel({
   onFieldsChange,
   showDomainToggle = true,
   viewMode = 'map',
+  paused = false,
 }: MapFiltersPanelProps) {
   const { t } = useTranslation();
+  const isMobile = useIsMobile();
   const [open, setOpen] = React.useState(false);
 
   // Derive enum filter fields generically from the filter-field domains
   // (defaults to the visible domains) so the filters can reflect the
   // counterpart being browsed independently of the domain chip selector.
+  //
+  // #203 Task 7 review fix: on the MAP, only offer fields the server will
+  // actually act on — those declared `filterable: true` (Task 1's
+  // network.json marker), the set `resolveAllowedFacetFields` (Task 3)
+  // honors for the `item_state` facet path. Offering a non-filterable enum
+  // field on the map would let a user select it, see it silently dropped by
+  // the server, and get a map that doesn't change — confusing. The LIST
+  // keeps offering every enum field (`filterableOnly: false`), unchanged: it
+  // filters client-side and needs no server cooperation.
   const enumFilterFields: EnumFilterField[] = React.useMemo(
-    () => getEnumFilterFieldsForDomains(filterFieldDomains ?? domains),
-    [filterFieldDomains, domains],
+    () => getEnumFilterFieldsForDomains(filterFieldDomains ?? domains, { filterableOnly: viewMode === 'map' }),
+    [filterFieldDomains, domains, viewMode],
   );
 
   const showDomainGroup = showDomainToggle && domains.length > 1;
@@ -267,31 +314,166 @@ export function MapFiltersPanel({
   // Nothing to filter — don't render the pill at all
   if (!showDomainGroup && !showEnumGroups) return null;
 
+  const renderTrigger = (onClick?: () => void) => (
+    <Button
+      variant="outline"
+      size="sm"
+      onClick={onClick}
+      className={cn(
+        'h-8 gap-1.5 border border-input bg-background/95 text-xs shadow-md backdrop-blur-sm',
+        activeCount > 0 && 'border-primary/50 bg-primary/5',
+      )}
+      aria-label={t('filters.open')}
+    >
+      <SlidersHorizontal className="size-3.5" />
+      {/* Icon-only below sm so the mobile top bar's control row fits on one
+          line (the button keeps its aria-label for accessibility); the label
+          returns from sm up. */}
+      <span className="hidden sm:inline">{t('filters.title')}</span>
+      {activeCount > 0 && (
+        <Badge
+          variant="default"
+          className="size-4 rounded-full p-0 text-[10px] leading-none"
+          aria-label={t('filters.selected', { count: activeCount })}
+        >
+          {activeCount}
+        </Badge>
+      )}
+    </Button>
+  );
+
+  // ── Header + scrollable groups — shared between the desktop popover and the
+  // mobile bottom sheet; only the surrounding chrome (Popover vs Drawer) differs.
+  const panelBody = (
+    <>
+      {/* ── Sticky header ──────────────────────────────────────────────────── */}
+      <div className="sticky top-0 z-10 flex items-center justify-between rounded-t-xl border-b border-border bg-popover px-4 py-3">
+        <span className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">
+          {t('filters.title')}
+        </span>
+        <div className="flex items-center gap-2 pointer-coarse:gap-4">
+          {activeCount > 0 && (
+            <button
+              type="button"
+              onClick={handleClearAll}
+              className="text-xs font-medium text-muted-foreground underline-offset-2 hover:text-foreground hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              aria-label={t('filters.clear_all')}
+            >
+              {t('filters.clear_all')}
+            </button>
+          )}
+          {/* X close button */}
+          <button
+            type="button"
+            onClick={() => setOpen(false)}
+            className={cn(
+              'relative flex size-5 items-center justify-center rounded-full',
+              'bg-muted text-muted-foreground transition-colors',
+              'hover:bg-accent hover:text-accent-foreground',
+              'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+              // Transparent, centered hit-area expansion for touch — mirrors the
+              // Button variant technique so the visual size-5 circle is unchanged.
+              "pointer-coarse:before:absolute pointer-coarse:before:left-1/2 pointer-coarse:before:top-1/2 pointer-coarse:before:size-11 pointer-coarse:before:-translate-x-1/2 pointer-coarse:before:-translate-y-1/2 pointer-coarse:before:content-['']",
+            )}
+            aria-label={t('filters.close')}
+          >
+            <X className="size-3" />
+          </button>
+        </div>
+      </div>
+
+      {/* ── Scrollable filter groups ────────────────────────────────────────── */}
+      <div className="max-h-[75dvh] space-y-5 overflow-y-auto px-4 py-4">
+        {showDomainGroup && (
+          <FilterGroup title={t('filters.domain_group')}>
+            {domains.map((domain) => {
+              const label = domain.id
+                .replace(/_/g, ' ')
+                .replace(/\b\w/g, (c) => c.toUpperCase());
+              return (
+                <Chip
+                  key={domain.id}
+                  label={label}
+                  selected={selectedDomains.includes(domain.id)}
+                  onToggle={() => toggleDomain(domain.id)}
+                  ariaLabel={`Filter by domain: ${label}`}
+                />
+              );
+            })}
+          </FilterGroup>
+        )}
+
+        {enumFilterFields.map((field) => {
+          const fieldSelected = selectedFields[field.key] ?? [];
+
+          // Many options → compact searchable dropdown; few → inline chips.
+          if (field.options.length > CHIP_THRESHOLD) {
+            return (
+              <MultiSelectGroup
+                key={field.key}
+                title={field.label}
+                options={field.options}
+                selected={fieldSelected}
+                onToggle={(value) => toggleEnumValue(field.key, value)}
+                paused={paused}
+              />
+            );
+          }
+
+          return (
+            <FilterGroup key={field.key} title={field.label}>
+              {field.options.map((option) => (
+                <Chip
+                  key={option}
+                  label={option}
+                  selected={fieldSelected.includes(option)}
+                  onToggle={() => toggleEnumValue(field.key, option)}
+                  ariaLabel={`Filter by ${field.label}: ${option}`}
+                  paused={paused}
+                />
+              ))}
+            </FilterGroup>
+          );
+        })}
+
+        {activeCount === 0 && (
+          <p className="text-[10px] text-muted-foreground">
+            {t(viewMode === 'list' ? 'filters.help_list' : 'filters.help')}
+          </p>
+        )}
+      </div>
+    </>
+  );
+
+  // Mobile: the pill opens a bottom sheet (ResponsiveDialog renders a Drawer)
+  // instead of a popover — same header/groups markup, different chrome.
+  if (isMobile) {
+    return (
+      <>
+        {renderTrigger(() => setOpen(true))}
+        {/* The panel's own sticky header already has an X (below, in panelBody)
+            — suppress ResponsiveDialog's own close button so mobile doesn't
+            show two overlapping "Close" controls. */}
+        <ResponsiveDialog
+          open={open}
+          onOpenChange={setOpen}
+          contentClassName="p-0"
+          showCloseButton={false}
+        >
+          {/* Radix's underlying Dialog requires an accessible name; the visible
+              "Filters" label lives in the panel's own sticky header (a plain
+              <span>, not a Dialog primitive), so give the sheet itself a
+              visually-hidden title rather than duplicating visible text. */}
+          <DrawerTitle className="sr-only">{t('filters.title')}</DrawerTitle>
+          {panelBody}
+        </ResponsiveDialog>
+      </>
+    );
+  }
+
   return (
     <Popover open={open} onOpenChange={setOpen}>
-      <PopoverTrigger asChild>
-        <Button
-          variant="outline"
-          size="sm"
-          className={cn(
-            'h-8 gap-1.5 border border-input bg-background/95 text-xs shadow-md backdrop-blur-sm',
-            activeCount > 0 && 'border-primary/50 bg-primary/5',
-          )}
-          aria-label={t('filters.open')}
-        >
-          <SlidersHorizontal className="size-3.5" />
-          {t('filters.title')}
-          {activeCount > 0 && (
-            <Badge
-              variant="default"
-              className="size-4 rounded-full p-0 text-[10px] leading-none"
-              aria-label={t('filters.selected', { count: activeCount })}
-            >
-              {activeCount}
-            </Badge>
-          )}
-        </Button>
-      </PopoverTrigger>
+      <PopoverTrigger asChild>{renderTrigger()}</PopoverTrigger>
 
       <PopoverContent
         align="end"
@@ -301,97 +483,7 @@ export function MapFiltersPanel({
         // visible/clickable in maximized mode, and above normal overlays otherwise.
         style={{ zIndex: 2100 }}
       >
-        {/* ── Sticky header ──────────────────────────────────────────────────── */}
-        <div className="sticky top-0 z-10 flex items-center justify-between rounded-t-xl border-b border-border bg-popover px-4 py-3">
-          <span className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">
-            {t('filters.title')}
-          </span>
-          <div className="flex items-center gap-2">
-            {activeCount > 0 && (
-              <button
-                type="button"
-                onClick={handleClearAll}
-                className="text-[10px] font-medium text-muted-foreground underline-offset-2 hover:text-foreground hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                aria-label={t('filters.clear_all')}
-              >
-                {t('filters.clear_all')}
-              </button>
-            )}
-            {/* X close button */}
-            <button
-              type="button"
-              onClick={() => setOpen(false)}
-              className={cn(
-                'flex size-5 items-center justify-center rounded-full',
-                'bg-muted text-muted-foreground transition-colors',
-                'hover:bg-accent hover:text-accent-foreground',
-                'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
-              )}
-              aria-label={t('filters.close')}
-            >
-              <X className="size-3" />
-            </button>
-          </div>
-        </div>
-
-        {/* ── Scrollable filter groups ────────────────────────────────────────── */}
-        <div className="max-h-[75vh] space-y-5 overflow-y-auto px-4 py-4">
-          {showDomainGroup && (
-            <FilterGroup title={t('filters.domain_group')}>
-              {domains.map((domain) => {
-                const label = domain.id
-                  .replace(/_/g, ' ')
-                  .replace(/\b\w/g, (c) => c.toUpperCase());
-                return (
-                  <Chip
-                    key={domain.id}
-                    label={label}
-                    selected={selectedDomains.includes(domain.id)}
-                    onToggle={() => toggleDomain(domain.id)}
-                    ariaLabel={`Filter by domain: ${label}`}
-                  />
-                );
-              })}
-            </FilterGroup>
-          )}
-
-          {enumFilterFields.map((field) => {
-            const fieldSelected = selectedFields[field.key] ?? [];
-
-            // Many options → compact searchable dropdown; few → inline chips.
-            if (field.options.length > CHIP_THRESHOLD) {
-              return (
-                <MultiSelectGroup
-                  key={field.key}
-                  title={field.label}
-                  options={field.options}
-                  selected={fieldSelected}
-                  onToggle={(value) => toggleEnumValue(field.key, value)}
-                />
-              );
-            }
-
-            return (
-              <FilterGroup key={field.key} title={field.label}>
-                {field.options.map((option) => (
-                  <Chip
-                    key={option}
-                    label={option}
-                    selected={fieldSelected.includes(option)}
-                    onToggle={() => toggleEnumValue(field.key, option)}
-                    ariaLabel={`Filter by ${field.label}: ${option}`}
-                  />
-                ))}
-              </FilterGroup>
-            );
-          })}
-
-          {activeCount === 0 && (
-            <p className="text-[10px] text-muted-foreground">
-              {t(viewMode === 'list' ? 'filters.help_list' : 'filters.help')}
-            </p>
-          )}
-        </div>
+        {panelBody}
       </PopoverContent>
     </Popover>
   );

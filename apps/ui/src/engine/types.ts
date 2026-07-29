@@ -127,6 +127,11 @@ export interface DotNetworkSchema {
   display_name: string;
   description: string;
   schema_standard: string;
+  /**
+   * Network-wide toggle for the pause (voluntarily-hide) feature. When false,
+   * the UI hides the "Pause profile" control. Absent ⇒ enabled (default). (#346)
+   */
+  pause_enabled?: boolean;
   domains: DotNetworkDomain[];
   instances?: DotNetworkInstance[];
   actions: Record<string, DotNetworkAction>;
@@ -190,6 +195,15 @@ export interface MapProviderProps {
    * is false.
    */
   focusNonce?: number;
+  /**
+   * Monotonic counter bumped by the caller to close any currently open marker
+   * popup (e.g. right before a Connect/Apply action opens a modal) — the
+   * marker popup renders in a high stacking context (a map overlay), so on
+   * mobile it would otherwise sit on top of a bottom-sheet modal. Mirrors
+   * `focusNonce`'s "bump signals intent" pattern, but the effect is closing
+   * the popup rather than recentering the map.
+   */
+  closePopupNonce?: number;
   children?: React.ReactNode;
   /** Optional custom popup renderer; falls back to the default MarkerPopupCard. */
   renderPopup?: (marker: MapMarker) => React.ReactNode;
@@ -207,11 +221,52 @@ export interface MapProviderProps {
    * Returns null/undefined to fall back to the icon pin.
    */
   resolveMarkerImage?: (marker: MapMarker) => string | null | undefined;
+  /**
+   * Optional viewport-change callback. When provided, the active provider
+   * emits `{lat, lng, radiusMeters}` on debounced (~300ms) `moveend`/`idle`.
+   * Unset (e.g. the tourist app) → the provider attaches no listener at all,
+   * so panning/zooming behaves exactly as before this prop existed.
+   */
+  onViewportChange?: (viewport: MapViewport) => void;
 }
 
 export interface MapProvider {
   name: string;
   component: React.ComponentType<MapProviderProps>;
+}
+
+/**
+ * The map's current viewport, reported on debounced pan/zoom settle
+ * (Leaflet `moveend` / Google `idle`). `radiusMeters` is the half-diagonal —
+ * the great-circle distance from `center` to a corner of the current bounds —
+ * a simple, provider-agnostic proxy for "how much area is visible".
+ *
+ * `zoom` (#203 §7) is the native map zoom level at the moment of the report.
+ * Optional — additive on top of the original `{lat, lng, radiusMeters}` shape
+ * so callers that construct a `MapViewport` by hand (existing tests, the
+ * `useMapMarkers` bucketing logic) don't need to supply it. Both live map
+ * providers always populate it when emitting to `onViewportChange`; it is
+ * currently consumed only by the home-page's anonymous count-first gating.
+ *
+ * `minLat`/`minLng`/`maxLat`/`maxLng` (#203 map-serverside-search Task 4) are
+ * the current `map.getBounds()` corners — the bbox the server-side markers
+ * query filters by, replacing the client-computed radius for the map path.
+ * Optional for the same reason `zoom` is: both live providers always
+ * populate them alongside `zoom` on every emit going forward, but the list's
+ * distance path, the tourist app (never emits at all), and hand-built
+ * viewports in existing tests only ever have center + radius. Callers that
+ * need the bbox (`useMapMarkers`, the markers query key) fall back to the
+ * radius shape when these are unset.
+ */
+export interface MapViewport {
+  lat: number;
+  lng: number;
+  radiusMeters: number;
+  zoom?: number;
+  minLat?: number;
+  minLng?: number;
+  maxLat?: number;
+  maxLng?: number;
 }
 
 // ─── Plugin Types ──────────────────────────────────────────────

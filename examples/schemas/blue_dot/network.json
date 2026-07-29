@@ -2,6 +2,7 @@
   "display_name": "Blue Dot",
   "description": "Jobs and hiring network.",
   "schema_standard": "https://json-schema.org/draft/2020-12/schema",
+  "pause_enabled": true,
   "domains": [
     {
       "description": "People looking for jobs.",
@@ -80,6 +81,7 @@
             "gender": {
               "type": "string",
               "title": "Gender",
+              "filterable": true,
               "enum": [
                 "Male",
                 "Female",
@@ -107,6 +109,7 @@
             },
             "workExperience": {
               "vectorize": true,
+              "filterable": true,
               "type": "string",
               "title": "Work Experience",
               "enum": [
@@ -138,6 +141,7 @@
             },
             "natureOfJobsInterestedIn": {
               "vectorize": true,
+              "filterable": true,
               "type": "string",
               "title": "Nature of Jobs Interested In",
               "enum": [

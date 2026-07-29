@@ -13,13 +13,14 @@ import {
 } from '@vis.gl/react-google-maps';
 import type { AdvancedMarkerRef } from '@vis.gl/react-google-maps';
 import { MarkerClusterer, type Renderer, type Cluster } from '@googlemaps/markerclusterer';
-import type { MapMarker, MapProviderProps } from '@/engine/types';
+import type { MapMarker, MapProviderProps, MapViewport } from '@/engine/types';
 import { registerMapProvider } from '@/engine/map/map-registry';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { getIconForDomain } from '../domain-icons';
 import { tallyDomains } from '../cluster-breakdown';
 import { MarkerPopupCard } from '../marker-popup-card';
 import { getRuntimeEnv } from '@/lib/runtime-env';
+import { useViewportReportEmitter } from './use-viewport-report';
 
 /**
  * Module-level WeakMap: AdvancedMarkerElement → domain string.
@@ -74,6 +75,10 @@ function buildClusterContent(
 
   const size = total < 10 ? 38 : total < 100 ? 44 : 50;
   const circle = document.createElement('div');
+  // Stable class hook for the mobile-only legibility rule in index.css — no
+  // style is defined by this class name itself, so desktop rendering (which
+  // has no matching media query) is byte-identical.
+  circle.className = 'dpg-cluster-count';
   circle.style.cssText =
     `display:flex;align-items:center;justify-content:center;width:${size}px;height:${size}px;` +
     `background:${primary};color:#ffffff;border:2px solid #ffffff;border-radius:9999px;` +
@@ -376,6 +381,62 @@ function MapViewController({ center, zoom, initialViewSet, focusNonce }: MapView
   return null;
 }
 
+// ─── Viewport reporter component ─────────────────────────────────────────────
+// Lives inside <Map> so it can call useMap(). Reports the map's viewport
+// (center + half-diagonal radius, plus the raw `map.getBounds()` corners —
+// #203 map-serverside-search Task 4) to the caller on debounced `idle`
+// (Google's settle event, fired after pan/zoom/resize finish). Only ever mounted when
+// `onViewportChange` is provided (see `GoogleMapProvider` below), so the
+// tourist app — which never passes it — attaches no `idle` listener at all.
+//
+// Also emits the CURRENT viewport once on mount (bypassing the debounce), for
+// parity with the Leaflet provider's mount emit. Google's own `idle` normally
+// fires shortly after load regardless of a location fix, so this is a
+// fast-path here rather than a fix for a stuck-forever case — but it is
+// skipped if center/bounds aren't ready yet, since the first `idle` will
+// cover it in that case.
+//
+// Every emit also carries `map.getZoom()` (#203 §7, optional on Google's own
+// types) so the home-page can gate anonymous count-first browsing on the
+// zoom level without a separate event.
+
+function ViewportReporter({ onViewportChange }: { onViewportChange: (viewport: MapViewport) => void }) {
+  const map = useMap();
+  const { emit, emitNow } = useViewportReportEmitter(onViewportChange);
+
+  React.useEffect(() => {
+    if (!map) return;
+    const listener = map.addListener('idle', () => {
+      const center = map.getCenter();
+      const bounds = map.getBounds();
+      if (!center || !bounds) return;
+      const ne = bounds.getNorthEast();
+      const sw = bounds.getSouthWest();
+      emit(
+        { lat: center.lat(), lng: center.lng() },
+        { ne: { lat: ne.lat(), lng: ne.lng() }, sw: { lat: sw.lat(), lng: sw.lng() } },
+        map.getZoom(),
+      );
+    });
+
+    const center = map.getCenter();
+    const bounds = map.getBounds();
+    if (center && bounds) {
+      const ne = bounds.getNorthEast();
+      const sw = bounds.getSouthWest();
+      emitNow(
+        { lat: center.lat(), lng: center.lng() },
+        { ne: { lat: ne.lat(), lng: ne.lng() }, sw: { lat: sw.lat(), lng: sw.lng() } },
+        map.getZoom(),
+      );
+    }
+
+    return () => listener.remove();
+  }, [map, emit, emitNow]);
+
+  return null;
+}
+
 // ─── Clusterer manager component ─────────────────────────────────────────────
 // Lives inside <Map> so it can call useMap() from @vis.gl/react-google-maps.
 // Maintains a MarkerClusterer instance and keeps it in sync with the set of
@@ -490,14 +551,31 @@ export function GoogleMapProvider({
   onMarkerClick,
   initialViewSet = false,
   focusNonce,
+  closePopupNonce,
   renderPopup,
   resolveIcon,
   resolveMarkerImage,
+  onViewportChange,
 }: MapProviderProps) {
   const { t } = useTranslation();
   const isMobile = useIsMobile();
   const [activeMarker, setActiveMarker] = React.useState<MapMarker | null>(null);
   const apiKey = getRuntimeEnv('VITE_GOOGLE_MAPS_API_KEY');
+
+  // Closes the open marker popup (both the mobile portal overlay and the
+  // desktop InfoWindow key off `activeMarker`) when the caller bumps
+  // `closePopupNonce` — e.g. right before Connect/Apply opens the consent
+  // modal, so it isn't hidden behind the popup's high stacking context.
+  // Guarded with a ref (mirrors `focusNonce`'s handling in
+  // `MapViewController`/`SetView`) so mount / an unchanged nonce never fires a
+  // spurious close.
+  const prevClosePopupNonce = React.useRef<number | undefined>(closePopupNonce);
+  React.useEffect(() => {
+    if (prevClosePopupNonce.current !== closePopupNonce) {
+      setActiveMarker(null);
+    }
+    prevClosePopupNonce.current = closePopupNonce;
+  }, [closePopupNonce]);
 
   if (!apiKey) {
     return (
@@ -544,6 +622,7 @@ export function GoogleMapProvider({
          * panning or when "All items" / fit-all mode is active.
          */}
         <MapViewController center={center} zoom={zoom} initialViewSet={initialViewSet} focusNonce={focusNonce} />
+        {onViewportChange && <ViewportReporter onViewportChange={onViewportChange} />}
         <ClustererManager
           markers={markers}
           activeMarkerId={activeMarker?.id ?? null}

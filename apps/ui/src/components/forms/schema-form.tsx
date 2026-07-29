@@ -170,7 +170,7 @@ function SectionedObjectFieldTemplate(layout: FormLayout | undefined) {
               <div className="space-y-3">
                 {rows.map((row, ri) =>
                   row.length === 2 ? (
-                    <div key={ri} className="grid grid-cols-2 gap-3">
+                    <div key={ri} className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                       {row.map((el) => <div key={el.name}>{el.content}</div>)}
                     </div>
                   ) : (
