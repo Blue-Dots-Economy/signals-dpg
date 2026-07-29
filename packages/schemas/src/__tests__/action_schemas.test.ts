@@ -117,6 +117,46 @@ describe('PerformActionBodySchema with consent', () => {
   });
 });
 
+describe('requirements_snapshot is optional (defaults to {})', () => {
+  const base = {
+    action_type: 'connect',
+    source_item: { item_network: 'n', item_domain: 'd', item_type: 't', item_id: UUID_A },
+    target_item: {
+      item_network: 'n',
+      item_domain: 'd',
+      item_type: 't',
+      item_id: UUID_B,
+      item_instance_url: 'http://x.example.com',
+    },
+  };
+
+  it('PerformActionBodySchema: an omitted requirements_snapshot defaults to {}', () => {
+    const parsed = PerformActionBodySchema.parse(base);
+    expect(parsed.requirements_snapshot).toEqual({});
+  });
+
+  it('PerformActionBodySchema: a provided requirements_snapshot is preserved', () => {
+    const parsed = PerformActionBodySchema.parse({ ...base, requirements_snapshot: { years: 3 } });
+    expect(parsed.requirements_snapshot).toEqual({ years: 3 });
+  });
+
+  it('PerformNetworkActionBodySchema: an omitted requirements_snapshot defaults to {}', () => {
+    const parsed = PerformNetworkActionBodySchema.parse({
+      action_type: 'connect',
+      source_item: { ...base.source_item, item_instance_url: 'http://s.example.com' },
+      target_item: base.target_item,
+      source_item_owner: 'usr_1',
+    });
+    expect(parsed.requirements_snapshot).toEqual({});
+  });
+
+  it('each parse gets its own {} (no shared reference across parses)', () => {
+    const a = PerformActionBodySchema.parse(base);
+    const b = PerformActionBodySchema.parse(base);
+    expect(a.requirements_snapshot).not.toBe(b.requirements_snapshot);
+  });
+});
+
 describe('UpdateActionStatusBodySchema with consent', () => {
   it('accepts a body without consent', () => {
     const parsed = UpdateActionStatusBodySchema.parse({
