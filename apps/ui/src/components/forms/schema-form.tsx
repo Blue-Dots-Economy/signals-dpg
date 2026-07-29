@@ -5,6 +5,7 @@ import type { RJSFSchema, UiSchema, RegistryWidgetsType, ObjectFieldTemplateProp
 import { DatePickerWidget } from './custom-widgets/date-picker-widget';
 import { LocationAutocompleteWidget } from './custom-widgets/location-autocomplete-widget';
 import { MultiLocationAutocompleteWidget } from './custom-widgets/multi-location-autocomplete-widget';
+import { ReferenceAutocompleteWidget } from './custom-widgets/reference-autocomplete-widget';
 import CustomFieldTemplate from './custom-field-template';
 import { resolveFormLayout, type FormLayout } from '@/theme/form-layouts';
 import { resolveVisibleSchema } from '@/lib/show-if';
@@ -278,6 +279,37 @@ function generateUiSchema(
       };
     }
 
+    // External reference vocabulary (network.json `x-reference-source`): render
+    // an autocomplete backed by a reference dataset instead of an inline enum,
+    // so large lists (colleges/institutes/trades) stay out of the schema. The
+    // marker is either a bare `"source"` string or `{ source, subtitle }`, where
+    // `subtitle` is the ordered option fields shown under each result.
+    const referenceMarker = (typed as { 'x-reference-source'?: unknown })['x-reference-source'];
+    let referenceSource: string | undefined;
+    let subtitleFields: string[] | undefined;
+    if (typeof referenceMarker === 'string') {
+      referenceSource = referenceMarker;
+    } else if (referenceMarker && typeof referenceMarker === 'object') {
+      const m = referenceMarker as { source?: unknown; subtitle?: unknown };
+      if (typeof m.source === 'string') referenceSource = m.source;
+      if (Array.isArray(m.subtitle)) {
+        subtitleFields = m.subtitle.filter((s): s is string => typeof s === 'string');
+      }
+    }
+    if (referenceSource && referenceSource.length > 0) {
+      const existing = (uiSchema[key] as Record<string, unknown>) ?? {};
+      const existingOptions = (existing['ui:options'] as Record<string, unknown>) ?? {};
+      uiSchema[key] = {
+        ...existing,
+        'ui:widget': 'reference-autocomplete',
+        'ui:options': {
+          ...existingOptions,
+          source: referenceSource,
+          ...(subtitleFields ? { subtitleFields } : {}),
+        },
+      };
+    }
+
     const locationRole = (typed as { location?: unknown }).location;
     if (locationRole === 'primary' || locationRole === 'secondary') {
       const isArray = typed.type === 'array';
@@ -300,6 +332,7 @@ const widgets: RegistryWidgetsType = {
   date: DatePickerWidget,
   'location-autocomplete': LocationAutocompleteWidget,
   'location-multi': MultiLocationAutocompleteWidget,
+  'reference-autocomplete': ReferenceAutocompleteWidget,
 };
 
 function stripMetaSchema(schema: RJSFSchema): RJSFSchema {
@@ -345,6 +378,10 @@ function normalizeSchemaForRjsf(schema: RJSFSchema, rootSchema?: RJSFSchema): RJ
     // mapped to `ui:placeholder` by generateUiSchema, so ajv must not see it.
     // The `typeof string` guard avoids stripping a property NAMED "placeholder".
     if (key === 'placeholder' && typeof value === 'string') continue;
+    // Strip the custom `x-reference-source` marker (string or `{source,subtitle}`
+    // object) — it's mapped to the reference-autocomplete widget by
+    // generateUiSchema, so ajv must not see it.
+    if (key === 'x-reference-source') continue;
     result[key] = normalizeSchemaForRjsf(value as RJSFSchema, root);
   }
 
