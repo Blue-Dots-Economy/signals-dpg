@@ -237,6 +237,7 @@
   "map.detail_unavailable": "विवरण उपलब्ध नहीं है।",
   "map.maximize": "मैप बड़ा करें",
   "map.minimize": "बड़े मैप से बाहर निकलें",
+  "map.you_are_here_short": "आप",
   "map.no_results": "वर्तमान फ़िल्टर से कोई आइटम मेल नहीं खाता।",
   "map.precision.exact": "सटीक स्थान",
   "map.precision.full_address": "पूरे पते से",

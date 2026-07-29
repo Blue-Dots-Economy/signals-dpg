@@ -41,6 +41,13 @@ interface MapViewProps {
    */
   closePopupNonce?: number;
   /**
+   * The user's own resolved location (profile OR browser geolocation). Forwarded
+   * to the active provider, which renders a distinct "You are here" self-marker
+   * at this point. Null/undefined → no self-marker. Kept separate from
+   * `focusPoint` (a generic recenter anchor) so the two can diverge later.
+   */
+  selfLocation?: { lat: number; lng: number } | null;
+  /**
    * The Filters control. Rendered inside the map overlay ONLY when the map is
    * maximized (in normal mode the page header hosts it, but that header is
    * covered when the map goes fullscreen, so we surface it here too).
@@ -142,6 +149,7 @@ export function MapView({
   focusPoint,
   focusNonce,
   closePopupNonce,
+  selfLocation,
   filtersSlot,
   renderPopup,
   resolveMarkerLabel,
@@ -283,6 +291,7 @@ export function MapView({
         initialViewSet={initialViewSet}
         focusNonce={focusNonce}
         closePopupNonce={closePopupNonce}
+        selfLocation={selfLocation ?? null}
         renderPopup={renderPopup}
         resolveIcon={resolveMarkerIcon}
         resolveMarkerImage={resolveMarkerImage}
