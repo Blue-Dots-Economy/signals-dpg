@@ -42,7 +42,123 @@ export const AuthSecretsSchema = z.object({
   // Allowed login identifier channels, comma-separated (email / phone).
   // Parsed by parseLoginChannels(). Default: both.
   LOGIN_CHANNELS: z.string().default('phone,email'),
+  // Keycloak migration rollout flag (docs/superpowers/plans/
+  // 2026-07-23-keycloak-migration-design.md §7). Single rollback lever:
+  //   'betterauth' — today's behaviour; every Keycloak path stays dormant.
+  //   'dual'       — Keycloak tokens accepted alongside better-auth sessions.
+  //   'keycloak'   — Keycloak only.
+  // Default 'betterauth' so merging the build track changes nothing in prod.
+  AUTH_PROVIDER: z.enum(['betterauth', 'dual', 'keycloak']).default('betterauth'),
+  // Where the acting-org authorisation comes from (§5.1 of the Keycloak
+  // migration design). The `x-acting-org-id` header is unchanged in every mode —
+  // this only controls whether the asserted value has to be inside a grant the
+  // token carries:
+  //   'header'          — today's behaviour: the header authorises itself.
+  //   'claim_preferred' — enforce `signals_acting_orgs` WHEN the token has it;
+  //                       fall back to the header when it doesn't. The
+  //                       compatibility window while partners adopt the claim.
+  //   'claim_required'  — a token with no grant is refused on acting-org routes.
+  // Default 'header' so this lands inert.
+  ACTING_ORG_SOURCE: z
+    .enum(['header', 'claim_preferred', 'claim_required'])
+    .default('header'),
 });
+
+/**
+ * Keycloak connection + token-validation settings. Every field is optional or
+ * defaulted so the API still boots with AUTH_PROVIDER=betterauth and nothing
+ * Keycloak-related configured; assertKeycloakConfigured below is what makes
+ * the required ones required once the flag moves off 'betterauth'.
+ */
+export const KeycloakSecretsSchema = z.object({
+  // Browser-facing base URL, including any relative path Keycloak is served
+  // under (aggregator runs it at /auth via KC_HTTP_RELATIVE_PATH). The `iss`
+  // claim is derived from this, so it must match what Keycloak actually mints.
+  KEYCLOAK_BASE_URL: z.string().optional(),
+  // Server-to-server base URL for JWKS + Admin REST, when the API reaches
+  // Keycloak on an internal address (e.g. http://keycloak:8080/auth) that
+  // differs from the public issuer. Defaults to KEYCLOAK_BASE_URL.
+  KEYCLOAK_INTERNAL_BASE_URL: z.string().optional(),
+  // One shared realm per instance, holding both DPGs' clients (§3.1).
+  KEYCLOAK_REALM: z.string().default('bluedots'),
+  KEYCLOAK_UI_CLIENT_ID: z.string().default('signals-ui'),
+  KEYCLOAK_API_CLIENT_ID: z.string().default('signals-api'),
+  // Confidential client secret for signals-api (service account used for the
+  // provisioning sync + Admin REST user creation). Not needed to *validate*
+  // tokens, only to obtain them.
+  KEYCLOAK_API_CLIENT_SECRET: z.string().optional(),
+  // Comma-separated client ids whose tokens signals accepts on the HUMAN
+  // session path. Load-bearing: the realm is shared with aggregator, so an
+  // aggregator-issued token is realm-valid and signature/`iss` checks alone
+  // would let it through (R9). Parsed by parseKeycloakAcceptedClientIds().
+  KEYCLOAK_ACCEPTED_CLIENT_IDS: z.string().default('signals-ui,signals-api'),
+  // Comma-separated client ids of integrating DPGs allowed on the SERVICE
+  // path via client-credentials (§5). Kept separate from the list above, not
+  // merged into it, so the two populations cannot be confused: a token from
+  // the public `signals-ui` client must never be honoured as a service
+  // account, and an integrating DPG's token must never be provisioned as a
+  // human user. Empty by default — service auth stays on `x-api-key` until an
+  // operator names the clients.
+  //
+  // Each id must match the `organization.slug` of that DPG's service org in
+  // signals; that convention is how a client resolves to its service user.
+  KEYCLOAK_SERVICE_CLIENT_IDS: z.string().default(''),
+  // JWKS cache lifetime. jose refetches on an unknown `kid` regardless, so
+  // this only bounds how long a rotated-out key stays cached.
+  KEYCLOAK_JWKS_CACHE_MAX_AGE_MS: z.coerce
+    .number()
+    .int()
+    .positive()
+    .default(600_000),
+  KEYCLOAK_CLOCK_TOLERANCE_SECONDS: z.coerce
+    .number()
+    .int()
+    .nonnegative()
+    .default(30),
+});
+
+/**
+ * Startup guard: AUTH_PROVIDER=dual|keycloak without a Keycloak base URL would
+ * boot fine and then fail every login at runtime. Fail at boot instead.
+ *
+ * Pure, so it is directly unit-testable. Invoked once from
+ * apps/api/src/config.ts at module load, next to assertCreateTestOtpSafe.
+ */
+export function assertKeycloakConfigured(
+  authProvider: 'betterauth' | 'dual' | 'keycloak',
+  keycloak: { KEYCLOAK_BASE_URL?: string; KEYCLOAK_ACCEPTED_CLIENT_IDS: string }
+): void {
+  if (authProvider === 'betterauth') return;
+
+  if (!keycloak.KEYCLOAK_BASE_URL) {
+    throw new ConfigError(
+      `AUTH_PROVIDER=${authProvider} requires KEYCLOAK_BASE_URL (the ` +
+        "browser-facing Keycloak base URL, e.g. 'http://localhost:8080/auth'). " +
+        "Set it, or set AUTH_PROVIDER=betterauth to stay on the old provider."
+    );
+  }
+
+  if (parseKeycloakAcceptedClientIds(keycloak.KEYCLOAK_ACCEPTED_CLIENT_IDS).length === 0) {
+    throw new ConfigError(
+      `AUTH_PROVIDER=${authProvider} requires a non-empty ` +
+        'KEYCLOAK_ACCEPTED_CLIENT_IDS. The realm is shared with aggregator, so ' +
+        'signals must reject tokens issued to clients it does not serve — an ' +
+        'empty list would accept none, and removing the check would accept all.'
+    );
+  }
+}
+
+/** Split, trim and de-duplicate the comma-separated accepted-client list. */
+export function parseKeycloakAcceptedClientIds(value: string): string[] {
+  return [
+    ...new Set(
+      value
+        .split(',')
+        .map((entry) => entry.trim())
+        .filter(Boolean)
+    ),
+  ];
+}
 
 /**
  * Startup guard (D7): CREATE_TEST_OTP makes generateOtp() return the fixed

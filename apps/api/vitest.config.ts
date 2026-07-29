@@ -2,8 +2,17 @@ import { defineConfig } from 'vitest/config';
 
 export default defineConfig({
   test: {
-    include: ['src/**/__tests__/**/*.test.ts'],
-    exclude: ['src/**/__tests__/**/*.integration.test.ts'],
+    // `plugins/auth/` sits outside src/ (a structural quirk documented in
+    // apps/api/CLAUDE.md), so it was invisible to the runner and untestable in
+    // place. Included explicitly rather than relocating the auth plugins.
+    include: [
+      'src/**/__tests__/**/*.test.ts',
+      'plugins/**/__tests__/**/*.test.ts',
+    ],
+    exclude: [
+      'src/**/__tests__/**/*.integration.test.ts',
+      'plugins/**/__tests__/**/*.integration.test.ts',
+    ],
     environment: 'node',
     globals: false,
     setupFiles: ['./vitest.setup.ts'],

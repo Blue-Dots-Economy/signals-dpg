@@ -176,11 +176,74 @@ export async function getSession(): Promise<SessionResponse> {
   return response.data;
 }
 
+/** What `GET /api/v1/auth/me` returns — the local `user` mirror's view. */
+export interface MeResponse {
+  id: string;
+  email: string;
+  name: string;
+  role: string | null;
+}
+
+/**
+ * "Who am I", for the Keycloak login path. better-auth's `/get-session` does
+ * not serve OIDC sessions, so after the redirect the UI resolves its user this
+ * way instead. The request also triggers first-login provisioning of the local
+ * mirror on the API side, so it is the point at which a brand-new Keycloak
+ * subject becomes a signals user.
+ */
+export async function fetchMe(): Promise<MeResponse> {
+  const response = await apiClient.get<MeResponse>('/api/v1/auth/me');
+  return response.data;
+}
+
 export type LoginChannel = 'email' | 'phone';
+
+/** OIDC details the API advertises. Null when Keycloak isn't configured. */
+export interface KeycloakPublicConfig {
+  url: string;
+  realm: string;
+  clientId: string;
+}
 
 export interface AuthConfigResponse {
   selfSignupAllowed: boolean;
   loginChannels: LoginChannel[];
+  /**
+   * The instance's identity provider, per server env. The UI reads this to pick
+   * a login screen at runtime rather than having it compiled into the bundle —
+   * see lib/keycloak-config.ts for why.
+   *
+   * Optional on the type so a UI build can talk to an older API that doesn't
+   * send it yet; absent is treated as `betterauth`.
+   */
+  authProvider?: 'betterauth' | 'dual' | 'keycloak';
+  keycloak?: KeycloakPublicConfig | null;
+}
+
+export interface SignupResponse {
+  ok: true;
+  /** The identifier already belongs to someone — send them to sign in. */
+  alreadyRegistered: boolean;
+}
+
+/**
+ * Self-signup for Keycloak instances: creates the Keycloak identity only.
+ *
+ * The local signals user appears at first successful login, so nothing exists
+ * server-side until the person proves they own the identifier via OTP. Needed
+ * because the OTP authenticator SPI cannot create users and Keycloak's own
+ * registration form is password-based.
+ */
+export async function signupWithKeycloak(
+  body: { name: string; domain?: string; dateOfBirth?: string } & AuthIdentifier
+): Promise<SignupResponse> {
+  const response = await apiClient.post<SignupResponse>('/api/v1/auth/signup', {
+    name: body.name,
+    ...normalizeIdentifier(body),
+    ...(body.domain ? { domain: body.domain } : {}),
+    ...(body.dateOfBirth ? { dateOfBirth: body.dateOfBirth } : {}),
+  });
+  return response.data;
 }
 
 export async function fetchAuthConfig(): Promise<AuthConfigResponse> {

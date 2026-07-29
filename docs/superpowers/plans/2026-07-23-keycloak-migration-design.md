@@ -131,7 +131,7 @@ graph TB
 | Human login | `unified_otp` plugin issues a Redis session | Keycloak OTP flow issues an OIDC token; signals validates the JWT and provisions/refreshes the local `user` mirror |
 | Session validation | `authInstance.api.getSession()` | Verify Keycloak JWT (JWKS, `iss`/`aud`/`exp`); map `sub` → local `user` row |
 | Service auth | `verifyApiKey()` → service `user` | Verify client-credentials JWT; map client → service `user` + acting org |
-| Acting org | `x-acting-org-id` header + `organization.type` gate | **Unchanged mechanism** — header still sent; `organization`/`member` rows still read locally (populated by sync) |
+| Acting org | `x-acting-org-id` header + `organization.type` gate | **Authorised by token claim, selected by header** (§5.1). The header stays as the *selector*; the token now carries the set of orgs the caller may act for, and the API rejects anything outside it. `organization`/`member` rows still read locally |
 | Peer auth | HMAC | **Unchanged** |
 
 ### 3.3 The `request.user` / `request.acting_org` contract is preserved
@@ -193,7 +193,7 @@ What `unified_otp.ts` does today, and where each piece goes:
 `seed_service_users.ts` mints, per integrating DPG, an `organization` (`type=network_service`), a service `user`, a `member`, and one `apikey` row (SHA-256 hash stored, raw key printed once). Callers send `x-api-key: <raw>` + `x-acting-org-id: <org>`; `auth_middleware.ts:15-61` calls `verifyApiKey`, resolves the owning service user, sets `request.user`.
 
 ### Target
-- Each integrating DPG gets a **confidential Keycloak client**; it obtains an access token via client-credentials and sends `Authorization: Bearer <token>` (the `x-acting-org-id` header **stays** — acting-org is orthogonal to authentication).
+- Each integrating DPG gets a **confidential Keycloak client**; it obtains an access token via client-credentials and sends `Authorization: Bearer <token>`. The `x-acting-org-id` header **stays**, but it is no longer trusted on its own — see §5.1.
 - `auth_middleware.ts` validates the JWT; a client-id → service-user/org mapping (a claim or a small local lookup) replaces the apikey → user lookup. `request.user` / `request.acting_org` shapes are unchanged.
 - The `apikey` table and `@better-auth/api-key` dependency are removed.
 
@@ -202,6 +202,104 @@ What `unified_otp.ts` does today, and where each piece goes:
 - **aggregator-dpg:** switch its signals client from sending `x-api-key` to fetching+sending a client-credentials token. aggregator already speaks Keycloak, so it has the machinery.
 - **voice-dpg:** same change.
 - Contract doc `docs/operations/integrating-dpgs.md` must be rewritten (the two-header table at `:17-25`, the seed instructions at `:57-78`).
+
+### 5.1 Acting org: from unverified header to token claim
+
+*Added 2026-07-29, superseding this document's earlier "acting-org is orthogonal
+to authentication, the header just stays" position.*
+
+#### The problem with the header as it stands
+
+`acting_org_preHandler` (`apps/api/src/middleware/acting_org.ts`) validates three
+things about `x-acting-org-id`: the header is present, the org exists, and the
+org's `type` is one of `aggregator` | `voice` | `network_service`. It then checks
+that the caller is a member of **some** org:
+
+```ts
+.from(member).where(eq(member.userId, service_user_id)).limit(1)
+```
+
+**Membership of the *asserted* org is never checked.** Any authenticated service
+user who is a member of any one org can assert any other org's id. That matters
+because `participant_decrypt.ts:146` scopes decrypted PII by
+`user.onboardedByOrgId == acting.org_id` — so a caller asserting another
+aggregator's org id reads that aggregator's participants' decrypted profiles.
+
+Today this is held together by trust: the integrating DPG is documented as a
+"trusted intermediary". The bearer migration is the right moment to replace that
+trust with something the API can verify, because a JWT can carry a claim the
+caller cannot forge whereas a header is entirely caller-controlled.
+
+#### Why a pure claim cannot replace the header
+
+A claim is fixed at token-mint time. Whether that works depends on the caller,
+and the three callers differ:
+
+| Caller | Where the acting org comes from today | Fixed per token? |
+|---|---|---|
+| Human coordinator (aggregator portal) | `signalstack_org_id` Keycloak **user attribute**, already mapped into aggregator's tokens | **Yes** — one org per human |
+| aggregator-dpg service, aggregator upserts | `SIGNALSTACK_ACTING_ORG_ID`, fixed per deployment | **Yes** — one platform org per client |
+| aggregator-dpg service, worker + anonymous link submissions | `signalstackOrgId` read **per call** from the coordinator's row | **No** — varies per request |
+
+The third row is the blocker. A single service credential deliberately serves
+many aggregators; that is the intermediary model the contract doc describes.
+Making the acting org a static client claim would require either one Keycloak
+client per aggregator — unworkable, since aggregators are created dynamically
+via `POST /api/v1/admin/aggregator/upsert` — or RFC 8693 token exchange to mint
+a per-org token on each switch.
+
+#### Decision: the claim is the boundary, the header is the selector
+
+- **The token carries `signals_acting_orgs`** — the set of org ids this caller
+  may act for. For a human it is the single org from their user attribute. For a
+  service client it is the allowlist that client is entitled to.
+- **The header still selects** which of those orgs a given request acts for, and
+  the API **rejects any header value not in the claim**.
+- **When the claim names exactly one org and no header is sent**, that org is
+  used. This is what lets human callers drop the header entirely.
+- A platform-wide `network_service` client may carry `signals_acting_orgs: ["*"]`
+  to preserve today's behaviour for the one caller that genuinely needs it. That
+  wildcard is an explicit, auditable grant rather than an unstated default.
+
+This closes the hole above without breaking the intermediary model, and it is
+strictly stronger than today at every step: an assertion outside the grant is now
+rejected, where previously it was honoured.
+
+Should the header be removed entirely later, the path is token exchange (below),
+not per-aggregator clients.
+
+#### Where the claim comes from
+
+- **Human tokens:** a `oidc-usermodel-attribute-mapper` on `signals-ui`, reading
+  the same `signalstack_org_id` user attribute aggregator's realm already maps.
+  No new data — the attribute exists and is already populated by aggregator's
+  approval flow.
+- **Service tokens:** a hardcoded-claim mapper on each integrating DPG's client,
+  or `signals_acting_orgs: ["*"]` for `network_service`. Claims on a
+  client-credentials token come from the client, so this is realm config, not
+  per-request data.
+
+#### Rollout flag
+
+`ACTING_ORG_SOURCE` (`header` | `claim_preferred` | `claim_required`), mirroring
+`AUTH_PROVIDER`'s shape so this can land inert and be flipped per instance:
+
+- `header` — today's behaviour exactly. Default; safe to merge.
+- `claim_preferred` — the claim is enforced **when present**; a token without one
+  falls back to the header. This is the compatibility window: aggregator and
+  voice can adopt claims independently.
+- `claim_required` — a token with no `signals_acting_orgs` is rejected on any
+  acting-org route. Terminal state.
+
+#### What does not change
+
+`request.acting_org`'s shape (`org_id`, `org_type`, `service_user_id`) is
+unchanged, so every route, the `organization.type` capability gate, and the
+ownership joins in `participant_decrypt` are untouched. `organization` / `member`
+stay local and authoritative (§6.4) — this decision does **not** model orgs as
+Keycloak groups; it only carries an *authorisation grant* in the token. That
+answers open question 3 with "keep them local, but let the token bound which of
+them a caller may assert."
 
 ---
 
@@ -355,6 +453,7 @@ Every rollout step **R0–R7** is reversible — **R1–R7** by flipping `AUTH_P
 | **R8** | **`user.banned`/ban fields** (admin plugin) currently gate access. | Medium | Map to Keycloak `enabled=false` / disabled user; provisioning respects it. |
 | **R9** | **Shared realm collapses the DPG isolation boundary** — one realm per instance means an aggregator-issued token is realm-valid against signals, realm roles share one namespace, and `email`/`phone_number` are unique across both populations. | Medium | Validate `aud`/`azp` + required realm role on every signals token path, not just signature/`iss` (§3.1). Namespace signals' realm roles away from aggregator's `org_owner`. Check the shared email/phone space before migration (§6.3, spike 2). Upside: within an instance `sub` is common across both DPGs. |
 | **R10** | **`cookieCache` / cross-subdomain cookie behavior** currently tuned in `config.ts:30-63`. | Low | Re-derive cookie/redirect config for the OIDC flow; validate on the real domains. |
+| **R12** | **Acting-org assertion is unverified today** — `acting_org_preHandler` checks membership of *some* org, never the asserted one, so any service caller can assert any aggregator's org id and read its participants' decrypted PII (`participant_decrypt.ts:146`). Pre-existing, not introduced by this migration. | High | Carry `signals_acting_orgs` in the token and reject any header outside it (§5.1). Land behind `ACTING_ORG_SOURCE=header`, flip to `claim_preferred` once partners emit the claim, then `claim_required`. Until then the exposure is unchanged, so this should not be treated as *created* by the migration — but it should not survive it either. |
 | **R11** | **Notification coupling** — OTP delivery today goes through the notification service (`sendPhoneOtp`/`sendEmailOtp`). Keycloak's OTP SPI must reach the same delivery. | Medium | The aggregator OTP SPI already solves this; confirm it targets the same notification service/templates (`login_otp`, `basic_email`). |
 
 ---
@@ -378,7 +477,7 @@ Changes:
 
 1. **Keycloak topology** — *resolved:* **one Keycloak deployment and one `bluedots` realm per instance**, shared by that instance's signals and aggregator. Separation between DPGs is by client and realm role. Same layout in local-setup and production. Rationale in §3.1; costs in R9 (token `aud`/`azp` validation becomes load-bearing, realm roles share a namespace) and §6.3 spike 2 (the email/phone space is shared between the two populations).
 2. **Attribute ownership** — *resolved (§6):* signals-specific attributes (`domains`, `date_of_birth`, `terms_accepted`, onboarding attribution, `tags`) stay authoritative in the local `user` table; Keycloak owns credentials + identity claims (`sub`/email/phone/role/enabled) only, with email/phone/name/role mirrored locally for reads.
-3. **Are orgs modeled in Keycloak at all** — map `organization`/`member` to Keycloak groups/roles, or keep them purely local (recommended, since acting-org gating reads local tables and orgs are a signals domain concept)?
+3. **Are orgs modeled in Keycloak at all** — *resolved (§5.1):* `organization`/`member` stay **purely local and authoritative**; they are not Keycloak groups or roles. What the token carries is only an *authorisation grant* — `signals_acting_orgs`, the set of org ids a caller may assert — so the acting-org gate can verify the assertion instead of trusting it. The header remains the per-request selector.
 4. **Token transport in the UI / BFF** — keep bearer-in-`localStorage` (current, and what Build 2 assumes), move to secure cookies with the OIDC flow, or **fold a BFF into `signals-api`**? The BFF option is the strongest XSS posture: OIDC routes on `signals-api`, an httpOnly `sid` cookie plus a Redis token store, server-side code exchange and refresh, short access tokens with rotating refresh, RP-initiated logout — so **tokens never reach the browser**. Redis is already available (better-auth's `secondaryStorage`), but this is materially more work than Build 2 currently scopes, and it changes R5. Decide before Build 2 is sized.
 5. **Server-side revocation needs** — is immediate ban/logout enforcement required (drives token TTL + introspection strategy, R7)?
 6. **Ownership of the OTP SPI** — is the aggregator OTP JAR reusable as-is for the signals flow, or does it need signals-specific channel/template config? Separately: **who maintains the Java SPI artifact and the realm export** once both DPGs depend on them (they live in `aggregator-dpg/infra/keycloak/` today, and neither repo is an obvious owner)?

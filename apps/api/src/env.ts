@@ -4,6 +4,7 @@ import {
   DatabaseSecretsSchema,
   GeocodingSecretsSchema,
   InstanceSecretsSchema,
+  KeycloakSecretsSchema,
   MatchScoreSecretsSchema,
   NetworkRuntimeSecretsSchema,
   NotificationSecretsSchema,
@@ -16,6 +17,7 @@ export function loadEnv() {
   const instance = InstanceSecretsSchema.parse(process.env);
   const api = ApiSecretsSchema.parse(process.env);
   const auth = AuthSecretsSchema.parse(process.env);
+  const keycloak = KeycloakSecretsSchema.parse(process.env);
   const databases = DatabaseSecretsSchema.parse(process.env);
   const notification = NotificationSecretsSchema.parse(process.env);
   const matchScore = MatchScoreSecretsSchema.parse(process.env);
@@ -28,6 +30,7 @@ export function loadEnv() {
     instance,
     api,
     auth,
+    keycloak,
     databases,
     notification,
     matchScore,

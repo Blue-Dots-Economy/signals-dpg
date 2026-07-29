@@ -1,5 +1,7 @@
 import {
   assertCreateTestOtpSafe,
+  assertKeycloakConfigured,
+  parseKeycloakAcceptedClientIds,
   parseServedDomains,
   parseLoginChannels,
 } from '@dpg/config';
@@ -9,6 +11,7 @@ export const {
   instance,
   api,
   auth,
+  keycloak,
   databases,
   matchScore,
   notification,
@@ -20,6 +23,9 @@ export const {
 
 // Startup guard (D7): fail hard in prod, warn in dev, if CREATE_TEST_OTP is on.
 assertCreateTestOtpSafe(instance.INSTANCE_ENV, auth.CREATE_TEST_OTP);
+
+// Startup guard: don't boot into a Keycloak mode we aren't configured for.
+assertKeycloakConfigured(auth.AUTH_PROVIDER, keycloak);
 
 export const apiConfig = {
   domain: api.API_DOMAIN,
@@ -54,6 +60,74 @@ export const authConfig = {
   create_test_otp: auth.CREATE_TEST_OTP,
   allow_self_signup: auth.SELF_SIGNUP_MODE === 'allowed',
   login_channels: parseLoginChannels(auth.LOGIN_CHANNELS),
+  // Keycloak rollout flag (§7). Read this — never re-parse process.env.
+  provider: auth.AUTH_PROVIDER,
+  // Convenience predicates so call sites read as intent, not string compares.
+  keycloak_enabled: auth.AUTH_PROVIDER !== 'betterauth',
+  betterauth_enabled: auth.AUTH_PROVIDER !== 'keycloak',
+  /**
+   * Acting-org authorisation source (§5.1). The header is sent in every mode;
+   * this only decides whether it must fall inside the token's grant.
+   */
+  acting_org_source: auth.ACTING_ORG_SOURCE,
+  /** Check the grant when the token carries one. */
+  acting_org_claim_enforced: auth.ACTING_ORG_SOURCE !== 'header',
+  /** Refuse acting-org routes for a token with no grant at all. */
+  acting_org_claim_required: auth.ACTING_ORG_SOURCE === 'claim_required',
+};
+
+/**
+ * Keycloak connection settings, with the two derived URLs the rest of the code
+ * actually wants:
+ *
+ * - `issuer` is browser-facing and must equal the `iss` claim byte-for-byte.
+ * - `internal_base_url` is what *this process* dials for JWKS / Admin REST; in
+ *   containerised setups that is a service name, not the public hostname.
+ *
+ * Empty strings when AUTH_PROVIDER=betterauth — assertKeycloakConfigured above
+ * has already rejected the combination of a Keycloak mode and a missing URL,
+ * so any consumer running under `dual`/`keycloak` sees real values.
+ */
+const keycloakBaseUrl = (keycloak.KEYCLOAK_BASE_URL ?? '').replace(/\/$/, '');
+const keycloakInternalBaseUrl = (
+  keycloak.KEYCLOAK_INTERNAL_BASE_URL ?? keycloak.KEYCLOAK_BASE_URL ?? ''
+).replace(/\/$/, '');
+
+export const keycloakConfig = {
+  base_url: keycloakBaseUrl,
+  internal_base_url: keycloakInternalBaseUrl,
+  realm: keycloak.KEYCLOAK_REALM,
+  issuer: keycloakBaseUrl
+    ? `${keycloakBaseUrl}/realms/${keycloak.KEYCLOAK_REALM}`
+    : '',
+  jwks_uri: keycloakInternalBaseUrl
+    ? `${keycloakInternalBaseUrl}/realms/${keycloak.KEYCLOAK_REALM}/protocol/openid-connect/certs`
+    : '',
+  ui_client_id: keycloak.KEYCLOAK_UI_CLIENT_ID,
+  api_client_id: keycloak.KEYCLOAK_API_CLIENT_ID,
+  api_client_secret: keycloak.KEYCLOAK_API_CLIENT_SECRET,
+  /**
+   * Every client whose tokens pass the audience gate — the union of the human
+   * and service lists. `verifyKeycloakToken` checks membership here; which of
+   * the two lists a client is in then decides whether it may take the human
+   * path or the service path (see resolve_session.ts).
+   */
+  accepted_client_ids: [
+    ...new Set([
+      ...parseKeycloakAcceptedClientIds(keycloak.KEYCLOAK_ACCEPTED_CLIENT_IDS),
+      ...parseKeycloakAcceptedClientIds(keycloak.KEYCLOAK_SERVICE_CLIENT_IDS),
+    ]),
+  ],
+  /** Human/session clients only. */
+  session_client_ids: parseKeycloakAcceptedClientIds(
+    keycloak.KEYCLOAK_ACCEPTED_CLIENT_IDS
+  ),
+  /** Integrating-DPG clients allowed to use client-credentials service auth. */
+  service_client_ids: parseKeycloakAcceptedClientIds(
+    keycloak.KEYCLOAK_SERVICE_CLIENT_IDS
+  ),
+  jwks_cache_max_age_ms: keycloak.KEYCLOAK_JWKS_CACHE_MAX_AGE_MS,
+  clock_tolerance_seconds: keycloak.KEYCLOAK_CLOCK_TOLERANCE_SECONDS,
 };
 
 /**

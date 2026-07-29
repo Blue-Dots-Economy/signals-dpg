@@ -33,5 +33,17 @@ declare module 'fastify' {
       org_type: 'aggregator' | 'voice' | 'network_service';
       service_user_id: string;
     };
+    /**
+     * The acting-org grant carried by a verified Keycloak token — the set of
+     * org ids this caller may assert via `x-acting-org-id` (§5.1 of the Keycloak
+     * migration design). `['*']` means any.
+     *
+     * INTERNAL plumbing between the auth middleware and `acting_org.ts`; route
+     * handlers should keep reading `request.acting_org`, whose shape is
+     * unchanged. `undefined` means the token carried no grant at all — which
+     * `ACTING_ORG_SOURCE=claim_preferred` treats as "fall back to the header"
+     * and `claim_required` refuses.
+     */
+    acting_org_grant?: string[];
   }
 }

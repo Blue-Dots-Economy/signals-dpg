@@ -43,6 +43,19 @@ interface ImportMetaEnv {
   readonly VITE_TOURIST_APP_TITLE?: string;
   /** Dev/preview server port. Falls back to 5173. */
   readonly VITE_UI_PORT?: string;
+  /**
+   * Which login experience to serve: 'betterauth' (default, the OTP screens)
+   * or 'keycloak' (OIDC Authorization Code + PKCE). See lib/keycloak-config.ts.
+   */
+  readonly VITE_AUTH_PROVIDER?: 'betterauth' | 'keycloak';
+  /** Browser-facing Keycloak base URL, e.g. http://localhost:8080. */
+  readonly VITE_KEYCLOAK_URL?: string;
+  /** Shared realm. Falls back to 'bluedots'. */
+  readonly VITE_KEYCLOAK_REALM?: string;
+  /** Public OIDC client id. Falls back to 'signals-ui'. */
+  readonly VITE_KEYCLOAK_CLIENT_ID?: string;
+  /** Requested scopes. Falls back to 'openid profile email'. */
+  readonly VITE_KEYCLOAK_SCOPE?: string;
 }
 
 declare const __DEFAULT_NETWORK_THEME__: string;

@@ -1,0 +1,286 @@
+import { useEffect, useRef, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { Loader2, OctagonX } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
+import { toast } from 'sonner';
+import { AuthShell } from '@/components/layout/auth-shell';
+import { Alert, AlertTitle, AlertDescription } from '@/components/ui/alert';
+import { Button } from '@/components/ui/button';
+import { useAuth } from '@/contexts/auth-context';
+import { useAuthConfig } from '@/hooks/use-auth-config';
+import { takePendingConsent } from '@/lib/pending-consent';
+import { acceptConsent, fetchConsentConfigs, getConsentStatus } from '@/lib/consent-api';
+import { mergeConsentConfig } from '@/hooks/use-consent-config';
+import { ConsentModal } from '@/components/consent/consent-modal';
+import { useNetworkTheme } from '@/theme/theme-provider';
+import type { ConsentAcceptBody, ConsentConfigDocument } from '@dpg/schemas';
+
+/** How long to wait for the consent write before landing the user anyway. */
+const CONSENT_WRITE_TIMEOUT_MS = 8000;
+
+/** Reject after `ms` so a hanging request can't stall the redirect. */
+function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
+  let timer: ReturnType<typeof setTimeout>;
+  return Promise.race([
+    promise,
+    new Promise<never>((_, reject) => {
+      timer = setTimeout(() => reject(new Error('consent write timed out')), ms);
+    }),
+  ]).finally(() => clearTimeout(timer)) as Promise<T>;
+}
+
+/**
+ * Landing page for the Keycloak redirect (`/auth/callback`).
+ *
+ * Exchanges the authorization code, then asks the API who the resulting token
+ * belongs to — which is also what provisions the local `user` mirror on a
+ * first login. On success the user never really sees this page; on failure it
+ * is the only place that can explain what went wrong, so the API's own message
+ * is surfaced rather than a generic error.
+ */
+export function OidcCallbackPage() {
+  const navigate = useNavigate();
+  const { t } = useTranslation();
+  const { completeKeycloakLogin } = useAuth();
+  // The OIDC client is built from the server's advertised Keycloak details.
+  const { config: authCfg, isLoading: isConfigLoading } = useAuthConfig();
+  const { themeId, brand } = useNetworkTheme();
+  const [error, setError] = useState<string | null>(null);
+  /**
+   * Terms/privacy still outstanding for this user — the login-time gate.
+   *
+   * better-auth gates these on EVERY login (pre-OTP, by identifier). The
+   * Keycloak chooser has no identifier to pre-check, so the equivalent has to
+   * run here, once the session exists and the authenticated status endpoint can
+   * be used. Without it a migrated user, or anyone who signed up before a
+   * version bump, is never re-prompted.
+   */
+  const [consentGate, setConsentGate] = useState<{
+    config: ConsentConfigDocument;
+    pendingConsent: ConsentAcceptBody;
+    returnTo: string;
+  } | null>(null);
+
+  // The authorization code is single-use. React 18+ StrictMode double-invokes
+  // effects in development, and a second exchange of a spent code fails — so
+  // guard rather than letting dev see a phantom error.
+  const exchangeStarted = useRef(false);
+
+  useEffect(() => {
+    /**
+     * Wait for the auth config before touching the code.
+     *
+     * This page is reached by a full-page redirect from Keycloak, so the
+     * module-level UserManager built on the login page is gone and the OIDC
+     * client has to be rebuilt from the server's advertised Keycloak details.
+     * Exchanging before `/api/v1/auth/config` resolves means building it from
+     * `undefined` — which fails with "Keycloak is not configured" and, because
+     * the single-use guard below has already been set, never retries. The
+     * user then bounces: error → sign in → Keycloak's still-valid SSO cookie →
+     * straight back here.
+     */
+    if (isConfigLoading) return;
+    if (exchangeStarted.current) return;
+
+    // Config has loaded but names no Keycloak — either the API isn't in a
+    // Keycloak mode, or the request failed and React Query gave up. Say so
+    // rather than reporting it as a broken sign-in.
+    if (!authCfg?.keycloak) {
+      exchangeStarted.current = true;
+      setError(t('auth.oidc_error_unconfigured'));
+      return;
+    }
+
+    exchangeStarted.current = true;
+    let cancelled = false;
+
+    (async () => {
+      try {
+        const { completeOidcLogin } = await import('@/lib/oidc-client');
+        const { returnTo } = await completeOidcLogin(authCfg);
+        await completeKeycloakLogin();
+
+        // Write any consent accepted on the login screen. The accept endpoint is
+        // authenticated, so this is the first moment it can be persisted — the
+        // acceptance was parked across the Keycloak redirect.
+        //
+        // Deliberately after the session is established and deliberately
+        // non-fatal: the user is signed in either way, and a failed write means
+        // the gate re-prompts next login rather than stranding them here.
+        const pending = takePendingConsent();
+        if (pending) {
+          try {
+            // Bounded: a slow or hanging consent write must not hold the user on
+            // the spinner after they are already signed in.
+            await withTimeout(acceptConsent(pending), CONSENT_WRITE_TIMEOUT_MS);
+          } catch (consentErr) {
+            // eslint-disable-next-line no-console
+            console.error('could not persist accepted consent', consentErr);
+            toast.error(t('auth.toast_consent_persist_error'));
+          }
+        }
+
+        // Login-time terms/privacy gate. Runs AFTER the parked signup consent is
+        // flushed, so a fresh signup that just accepted has nothing outstanding.
+        const outstanding = await resolveOutstandingConsent(themeId, brand);
+        if (outstanding) {
+          setConsentGate({ ...outstanding, returnTo: returnTo ?? '/' });
+          return;
+        }
+
+        // Navigate unconditionally — NOT gated on `cancelled`.
+        //
+        // `completeKeycloakLogin` updates the session, which re-renders this page;
+        // if a dep identity changes in that render React runs this effect's
+        // cleanup. Gating the navigation on that flag stranded a fully
+        // authenticated user on the spinner. The flag's only legitimate job is
+        // avoiding a setState after unmount, which is why the catch below still
+        // honours it.
+        navigate(returnTo ?? '/', { replace: true });
+      } catch (err) {
+        if (cancelled) return;
+        setError(extractMessage(err) ?? t('auth.oidc_error_desc'));
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [authCfg, brand, completeKeycloakLogin, isConfigLoading, navigate, t, themeId]);
+
+  /**
+   * Accepted the login-time gate. The session already exists here, so unlike the
+   * signup path this writes straight through rather than parking anything.
+   * Non-fatal: the user is signed in regardless, and a failed write just means
+   * the gate re-prompts next login.
+   */
+  const handleConsentAccept = async () => {
+    if (!consentGate) return;
+    const { pendingConsent, returnTo } = consentGate;
+    setConsentGate(null);
+    try {
+      await withTimeout(acceptConsent(pendingConsent), CONSENT_WRITE_TIMEOUT_MS);
+    } catch (consentErr) {
+      // eslint-disable-next-line no-console
+      console.error('could not persist accepted consent', consentErr);
+      toast.error(t('auth.toast_consent_persist_error'));
+    }
+    navigate(returnTo, { replace: true });
+  };
+
+  if (consentGate) {
+    return (
+      <>
+        <ConsentModal
+          open={true}
+          mode="gate"
+          initialTab="privacy"
+          config={consentGate.config}
+          onAccept={() => {
+            void handleConsentAccept();
+          }}
+        />
+        <AuthShell>
+          <div className="mx-auto flex max-w-md flex-col items-center gap-3 py-16">
+            <Loader2 className="size-6 animate-spin text-muted-foreground" />
+            <p className="text-sm text-muted-foreground">{t('auth.oidc_signing_in')}</p>
+          </div>
+        </AuthShell>
+      </>
+    );
+  }
+
+  if (!error) {
+    return (
+      <AuthShell>
+        <div className="mx-auto flex max-w-md flex-col items-center gap-3 py-16">
+          <Loader2 className="size-6 animate-spin text-muted-foreground" />
+          <p className="text-sm text-muted-foreground">{t('auth.oidc_signing_in')}</p>
+        </div>
+      </AuthShell>
+    );
+  }
+
+  return (
+    <AuthShell>
+      <div className="mx-auto flex max-w-md flex-col gap-4 py-16">
+        <Alert variant="destructive">
+          <OctagonX className="size-4" />
+          <AlertTitle>{t('auth.oidc_error_title')}</AlertTitle>
+          <AlertDescription>{error}</AlertDescription>
+        </Alert>
+        <Button onClick={() => navigate('/auth/login', { replace: true })}>
+          {t('auth.oidc_retry')}
+        </Button>
+      </div>
+    </AuthShell>
+  );
+}
+
+/**
+ * Pull a human-readable reason out of whatever failed.
+ *
+ * Two very different error shapes reach here: an axios failure from
+ * `/api/v1/auth/me` (which carries the API's `{ code, error, message }` — this
+ * is how SELF_SIGNUP_DISABLED, USER_BANNED and friends become visible to the
+ * user), or an oidc-client-ts error from the code exchange itself.
+ */
+function extractMessage(err: unknown): string | null {
+  const apiMessage = (
+    err as { response?: { data?: { message?: unknown } } } | null
+  )?.response?.data?.message;
+  if (typeof apiMessage === 'string' && apiMessage.trim() !== '') return apiMessage;
+
+  if (err instanceof Error && err.message.trim() !== '') return err.message;
+  return null;
+}
+
+/**
+ * Which account consents this signed-in user still owes, if any.
+ *
+ * Uses the AUTHENTICATED status endpoint — the identifier-based variant the OTP
+ * login uses isn't available here, because the chooser never collects an
+ * identifier. Returns null when nothing is outstanding.
+ *
+ * Fails OPEN, matching the OTP flow's pre-check: a consent-service blip must not
+ * block a login that has already succeeded. The user is re-prompted next time.
+ */
+async function resolveOutstandingConsent(
+  network: string,
+  brand: string,
+): Promise<{ config: ConsentConfigDocument; pendingConsent: ConsentAcceptBody } | null> {
+  try {
+    const [status, configEntries] = await Promise.all([
+      getConsentStatus(network),
+      fetchConsentConfigs(network),
+    ]);
+
+    const networkDefault = configEntries.find((e) => e.brand === null);
+    if (!networkDefault) return null;
+
+    const brandEntry =
+      brand && brand !== 'standard' ? configEntries.find((e) => e.brand === brand) : undefined;
+    const config = mergeConsentConfig(networkDefault.schema, brandEntry?.schema);
+
+    const needed = (['terms', 'privacy'] as const).filter(
+      (c) => !status.statuses[c].includes(config.documents[c].current_version),
+    );
+    if (needed.length === 0) return null;
+
+    return {
+      config,
+      pendingConsent: {
+        network,
+        brand: brand !== 'standard' ? brand : null,
+        // 'login', not 'signup' — this is a returning user, or a version bump.
+        source: 'login',
+        items: needed.map((c) => ({
+          category: c,
+          version: config.documents[c].current_version,
+        })),
+      },
+    };
+  } catch {
+    return null;
+  }
+}
