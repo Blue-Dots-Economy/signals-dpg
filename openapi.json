@@ -5802,6 +5802,16 @@
           {
             "schema": {
               "type": "string",
+              "minLength": 1
+            },
+            "in": "query",
+            "name": "lifecycle",
+            "required": false,
+            "description": "Comma-separated lifecycle_status values, e.g. 'live,draft'. Default: live,draft."
+          },
+          {
+            "schema": {
+              "type": "string",
               "minLength": 1,
               "maxLength": 200
             },
@@ -5958,6 +5968,15 @@
                                     "active",
                                     "at_risk",
                                     "inactive"
+                                  ]
+                                },
+                                "lifecycle_status": {
+                                  "type": "string",
+                                  "enum": [
+                                    "draft",
+                                    "live",
+                                    "paused",
+                                    "retired"
                                   ]
                                 },
                                 "profile_completion_pct": {
