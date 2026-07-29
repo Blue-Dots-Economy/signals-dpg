@@ -148,7 +148,7 @@ vi.mock('@api/db/postgres/drizzle_config', () => {
 });
 
 // Import the plugin AFTER mocks are set up.
-import { aggregator_dashboard } from '../dashboard.js';
+import { aggregator_dashboard, resolve_lifecycle_filter } from '../dashboard.js';
 
 const buildApp = async (acting?: {
   org_id?: string;
@@ -177,6 +177,7 @@ const sample_list_row = (overrides: Record<string, unknown> = {}) => ({
   itemDomain: 'seeker',
   onboardedByOrgId: 'org_bbmp',
   onboardedVia: 'bulk',
+  lifecycleStatus: 'live',
   profileStatus: 'active',
   profileCompletionPct: 75,
   profileCreatedAt: new Date('2026-05-01T00:00:00Z'),
@@ -351,6 +352,7 @@ describe('GET /aggregator/dashboard', () => {
     expect(p.name).toBe('Test User');
     expect(p.item_type).toBe('profile_1.0');
     expect(p.profile_status).toBe('active');
+    expect(p.lifecycle_status).toBe('live');
     expect(p.profile_completion_pct).toBe(75);
     expect(p.profile_created_at).toBe('2026-05-01T00:00:00.000Z');
     expect(p.profile_last_updated_at).toBe('2026-05-20T00:00:00.000Z');
@@ -480,6 +482,37 @@ describe('GET /aggregator/dashboard', () => {
       url: '/dashboard?page=1&limit=50',
     });
     expect(res.json().by_domain.seeker.next_cursor).toBeNull();
+  });
+});
+
+describe('resolve_lifecycle_filter', () => {
+  it('defaults to live + paused when the param is absent', () => {
+    expect(resolve_lifecycle_filter(undefined)).toEqual(['live', 'paused']);
+  });
+
+  it('defaults when the param is empty or whitespace-only', () => {
+    expect(resolve_lifecycle_filter('')).toEqual(['live', 'paused']);
+    expect(resolve_lifecycle_filter('  ,  ')).toEqual(['live', 'paused']);
+  });
+
+  it('parses a comma list, trimming whitespace', () => {
+    expect(resolve_lifecycle_filter('live, paused , retired')).toEqual([
+      'live',
+      'paused',
+      'retired',
+    ]);
+  });
+
+  it('drops unknown values but keeps the valid ones', () => {
+    expect(resolve_lifecycle_filter('live,bogus,retired')).toEqual(['live', 'retired']);
+  });
+
+  it('defaults when every supplied value is invalid', () => {
+    expect(resolve_lifecycle_filter('nope,bogus')).toEqual(['live', 'paused']);
+  });
+
+  it('accepts a single value', () => {
+    expect(resolve_lifecycle_filter('retired')).toEqual(['retired']);
   });
 });
 
