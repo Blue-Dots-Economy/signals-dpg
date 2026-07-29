@@ -1,4 +1,4 @@
-import type { GeoProvider, GeoSuggestion, LatLng } from './types';
+import type { GeoProvider, GeoSuggestion } from './types';
 
 /** Default LRU cap for a memoized geo lookup (entries). */
 const DEFAULT_CACHE_CAP = 500;
@@ -100,19 +100,14 @@ export function memoizeGeoLookup<T>(
 }
 
 /**
- * Wraps a GeoProvider so `suggest`/`geocode` are transparently session-cached
- * (see memoizeGeoLookup). suggest results are cached only when non-empty and
- * geocode results only when non-null, so a transient empty/error result is not
- * stuck for the session.
+ * Wraps a GeoProvider so `suggest` is transparently session-cached (see
+ * memoizeGeoLookup). suggest results are cached only when non-empty, so a
+ * transient empty/error result is not stuck for the session.
  */
 export function withGeoCache(base: GeoProvider): GeoProvider {
   const cachedSuggest = memoizeGeoLookup<GeoSuggestion[]>(
     (q, signal) => base.suggest(q, signal),
     (results) => results.length > 0,
   );
-  const cachedGeocode = memoizeGeoLookup<LatLng | null>(
-    (q, signal) => base.geocode(q, signal),
-    (result) => result !== null,
-  );
-  return { suggest: cachedSuggest, geocode: cachedGeocode };
+  return { suggest: cachedSuggest };
 }

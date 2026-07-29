@@ -3,8 +3,6 @@ import { useTranslation } from 'react-i18next';
 import type { RJSFSchema } from '@rjsf/utils';
 import type { MapMarker, MapViewport } from '@/engine/types';
 import { getActiveMapProvider } from '@/engine/map/map-registry';
-import { parseLocationFields, buildLocationQueries } from '@dpg/schemas/location_fields';
-import { getGeoProvider } from '@/lib/geo/provider';
 import { Button } from '@/components/ui/button';
 import { Maximize2, Minimize2 } from 'lucide-react';
 
@@ -201,7 +199,7 @@ export function MapView({
       const titleField = findTitleField(schema);
 
       const resolved = await Promise.all(
-        items.map(async (item) => {
+        items.map((item) => {
           // Primary: use stored item_locations array (one marker per entry).
           const locs = Array.isArray(
             (item.data as Record<string, unknown>).item_locations
@@ -213,24 +211,10 @@ export function MapView({
               ).item_locations ?? []
             : [];
 
-          // Fallback: if the item has no stored locations, geocode the field query(ies).
-          let points: Array<{ lat: number; lng: number; label?: string }> = locs;
-          if (points.length === 0) {
-            const { primary } = parseLocationFields(schema as Record<string, unknown>);
-            const queries = buildLocationQueries(item.data, primary);
-            const geocoded: Array<{ lat: number; lng: number; label?: string }> = [];
-            for (const { query, label } of queries) {
-              const best = await getGeoProvider().geocode(query);
-              if (best) {
-                geocoded.push(
-                  label
-                    ? { lat: best.lat, lng: best.lng, label }
-                    : { lat: best.lat, lng: best.lng }
-                );
-              }
-            }
-            points = geocoded;
-          }
+          // Locations are resolved server-side (item_locations); the browser no
+          // longer geocodes (its Maps key is scoped to Maps JS + Places only).
+          // Items with no stored location simply produce no marker.
+          const points: Array<{ lat: number; lng: number; label?: string }> = locs;
 
           // Skip items with no resolvable location.
           if (points.length === 0) return [];
@@ -242,11 +226,8 @@ export function MapView({
             resolvedLabel ||
             (titleField ? String(item.data[titleField] ?? 'Item') : 'Item');
 
-          // Determine precision: stored locations are exact; geocoded are approximate.
-          const isGeocoded = locs.length === 0 && points.length > 0;
-          const precision: MapMarker['precision'] = isGeocoded
-            ? 'geocoded_full_address'
-            : 'exact';
+          // All coordinates come from server-resolved item_locations → exact.
+          const precision: MapMarker['precision'] = 'exact';
 
           return points.map(
             (p, i) =>
@@ -257,7 +238,7 @@ export function MapView({
                 label: p.label ? `${baseLabel} — ${p.label}` : baseLabel,
                 data: item.data,
                 precision,
-                geocodedFrom: isGeocoded ? (p.label ?? 'location') : undefined,
+                geocodedFrom: undefined,
                 domain: item.domain,
               }) satisfies MapMarker
           );
