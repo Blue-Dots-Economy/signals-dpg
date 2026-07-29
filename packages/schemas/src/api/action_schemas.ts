@@ -32,7 +32,14 @@ export const PerformActionBodySchema = z.object({
   action_type: z.string().min(1),
   source_item: ActionItemRefSchema,
   target_item: ActionTargetItemRefSchema,
-  requirements_snapshot: z.record(z.string(), z.unknown()),
+  // Optional at the transport level (defaults to `{}`): an action with no
+  // requirements — e.g. blue_dot seeker→provider — carries an empty snapshot,
+  // and some external callers cannot serialise an empty object, so they omit
+  // the field entirely. The action's OWN requirements are still enforced
+  // downstream against `interaction.requirement_schema` via
+  // `validateAgainstJsonSchema`, so an action that DOES require fields (e.g.
+  // provider→seeker) still fails there if they're missing.
+  requirements_snapshot: z.record(z.string(), z.unknown()).default({}),
   acting_as_user_id: z.string().min(1).optional(),
   consent: ConsentAckSchema.optional(),
   guardian_otp: z.string().length(6).optional(),
@@ -43,7 +50,12 @@ export const PerformNetworkActionBodySchema = z.object({
   source_item: ActionItemRefWithInstanceSchema,
   target_item: ActionItemRefWithInstanceSchema,
   source_item_owner: z.string().min(1),
-  requirements_snapshot: z.record(z.string(), z.unknown()),
+  // Defaults to `{}` for symmetry with PerformActionBodySchema (above). The
+  // /action/perform proxy always forwards a (merged) snapshot, so this default
+  // is a no-op for that path; it only matters if a peer instance omits the
+  // field for a no-requirements action. Per-action requirements are still
+  // enforced here via `validateAgainstJsonSchema`.
+  requirements_snapshot: z.record(z.string(), z.unknown()).default({}),
   performed_by_org_id: z.string().min(1).nullable().optional(),
   performed_by_service_user_id: z.string().min(1).nullable().optional(),
   consent: ConsentAckSchema.optional(),

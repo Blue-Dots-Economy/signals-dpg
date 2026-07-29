@@ -653,7 +653,7 @@ describe('POST /api/v1/action/perform — on-behalf-of (bulk)', () => {
       expect(res.json().results[0]).toMatchObject({ status: 'error', error: 'DUPLICATE_ACTION' });
     });
 
-    it('422 INVALID_PAYLOAD when item is missing required source_item/target_item/requirements_snapshot', async () => {
+    it('422 INVALID_PAYLOAD when item is missing required source_item/target_item', async () => {
       const app = buildApp(undefined, { id: 'usr_agg_owned' });
       const res = await app.inject({
         method: 'POST',
@@ -663,6 +663,23 @@ describe('POST /api/v1/action/perform — on-behalf-of (bulk)', () => {
       expect(res.statusCode).toBe(422);
       expect(res.json().results[0]).toMatchObject({ status: 'error', error: 'INVALID_PAYLOAD' });
       expect(fetchCalls).toHaveLength(0);
+    });
+
+    it('201 when requirements_snapshot is omitted → defaults to {} and forwards it', async () => {
+      // A no-requirements action (e.g. blue_dot seeker→provider) carries an
+      // empty snapshot; external callers that cannot serialise an empty object
+      // omit the field. It must be accepted and forwarded as {}.
+      const { requirements_snapshot: _omitted, ...bodyWithoutSnapshot } = VALID_BODY;
+      const app = buildApp(undefined, { id: 'usr_agg_owned' });
+      const res = await app.inject({
+        method: 'POST',
+        url: '/perform/bulk',
+        payload: [bodyWithoutSnapshot],
+      });
+      expect(res.statusCode).toBe(201);
+      expect(res.json().results[0]).toMatchObject({ status: 'success' });
+      expect(fetchCalls).toHaveLength(1);
+      expect(fetchCalls[0].body.requirements_snapshot).toEqual({});
     });
 
     it('422 TARGET_INSTANCE_UNAVAILABLE when target instance returns a non-JSON body (Fix 1)', async () => {
