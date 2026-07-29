@@ -166,6 +166,7 @@ export interface SearchSignalsResult {
 export class SignalsSearchError extends Error {
   status?: number;
   code?: string;
+  override name = 'SignalsSearchError';
 }
 
 function clampLimit(limit: number): number {
