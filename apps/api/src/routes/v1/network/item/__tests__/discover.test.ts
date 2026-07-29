@@ -387,3 +387,26 @@ describe('POST /api/v1/network/item/discover — native fallback (#203 List PR, 
     expect(res.json()).toMatchObject({ error: 'INTERNAL_SERVER_ERROR' });
   });
 });
+
+describe('POST /api/v1/network/item/discover — input validation (#419 should-fix)', () => {
+  let app: FastifyInstance;
+
+  beforeEach(() => {
+    searchSignalsMock.mockReset();
+    fetchItemsAcrossInstancesMock.mockReset();
+    app = buildApp();
+  });
+
+  it('returns 400 INVALID_ITEM_TYPE (not 500) for an item_type not declared on the domain, without calling searchSignals', async () => {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/v1/network/item/discover',
+      payload: baseBody({ item_type: 'not_a_real_type' }),
+    });
+
+    expect(res.statusCode).toBe(400);
+    expect(res.json()).toMatchObject({ error: 'INVALID_ITEM_TYPE' });
+    expect(searchSignalsMock).not.toHaveBeenCalled();
+    expect(fetchItemsAcrossInstancesMock).not.toHaveBeenCalled();
+  });
+});

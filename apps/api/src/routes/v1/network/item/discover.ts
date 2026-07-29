@@ -111,6 +111,22 @@ const discover_items_handler = async (
   try {
     const networkConfig = await getNetworkConfigById(body.item_network);
 
+    // Validate item_type up-front (should-fix, PR #419 review): an unknown
+    // item_type otherwise throws inside resolveAllowedFacetFilters →
+    // getDomainItemSchema → the outer catch → a 500 that logs the client's
+    // request body at error level. Treat a bogus item_type as a 400 bad
+    // request, mirroring the served-domain guard's early return, and don't
+    // log client input at error for it.
+    const domainConfig = networkConfig.domains.find(
+      (entry) => entry.id === body.item_domain
+    );
+    if (!domainConfig || domainConfig.item_schemas?.[body.item_type] === undefined) {
+      return reply.code(400).send({
+        error: 'INVALID_ITEM_TYPE',
+        message: `item_type "${body.item_type}" is not defined for domain "${body.item_domain}" in network "${body.item_network}".`,
+      });
+    }
+
     // Server-resolved: the client's field list is never trusted, even though
     // item_state is already the masked public projection (defense-in-depth).
     const allowedFilters = resolveAllowedFacetFilters(
