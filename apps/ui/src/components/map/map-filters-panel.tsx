@@ -43,6 +43,16 @@ export interface MapFiltersPanelProps {
   showDomainToggle?: boolean;
   /** Current browse view — tailors the help text (map markers vs listings). */
   viewMode?: ViewMode;
+  /**
+   * #203 List PR Task 6: when true, the currently-selected ENUM FIELD chips
+   * (facet filters) render dimmed with a "not applied" caption — the discover
+   * BFF fell back to native (signals-search down) while the user has an
+   * active facet filter, so the selection is no longer actually applied
+   * server-side. The user's picks are NOT cleared (they persist and
+   * re-apply automatically once search recovers) — this is purely visual.
+   * Defaults to false. The map's own filter-panel mount never passes this.
+   */
+  paused?: boolean;
 }
 
 // ─── Chip toggle button ────────────────────────────────────────────────────────
@@ -53,16 +63,27 @@ interface ChipProps {
   onToggle: () => void;
   title?: string;
   ariaLabel?: string;
+  /**
+   * #203 List PR Task 6: true when this SELECTED chip's filter is no longer
+   * actually applied server-side (discover BFF native-fallback). Only has a
+   * visual effect when `selected` is also true — an unselected chip has
+   * nothing to "pause". Dims the chip and swaps its title/aria-label to the
+   * "not applied" caption; the selection itself is untouched.
+   */
+  paused?: boolean;
 }
 
-function Chip({ label, selected, onToggle, title, ariaLabel }: ChipProps) {
+function Chip({ label, selected, onToggle, title, ariaLabel, paused }: ChipProps) {
+  const { t } = useTranslation();
+  const isPaused = selected && paused;
   return (
     <button
       type="button"
       onClick={onToggle}
-      title={title}
+      title={isPaused ? t('home.filters_paused') : title}
       aria-label={ariaLabel ?? label}
       aria-pressed={selected}
+      aria-disabled={isPaused || undefined}
       className={cn(
         'inline-flex cursor-pointer items-center rounded-full border px-2.5 py-1 text-xs font-medium leading-none transition-all duration-150',
         'pointer-coarse:min-h-11',
@@ -70,9 +91,11 @@ function Chip({ label, selected, onToggle, title, ariaLabel }: ChipProps) {
         selected
           ? 'border-primary bg-primary text-primary-foreground hover:bg-primary/90'
           : 'border-border bg-muted text-muted-foreground hover:border-primary/40 hover:bg-accent hover:text-accent-foreground',
+        isPaused && 'opacity-50',
       )}
     >
       {label}
+      {isPaused && <span className="sr-only"> ({t('home.filters_paused')})</span>}
     </button>
   );
 }
@@ -108,9 +131,11 @@ interface MultiSelectGroupProps {
   options: string[];
   selected: string[];
   onToggle: (value: string) => void;
+  /** #203 List PR Task 6: see `MapFiltersPanelProps.paused`. */
+  paused?: boolean;
 }
 
-function MultiSelectGroup({ title, options, selected, onToggle }: MultiSelectGroupProps) {
+function MultiSelectGroup({ title, options, selected, onToggle, paused }: MultiSelectGroupProps) {
   const { t } = useTranslation();
   const [open, setOpen] = React.useState(false);
   const [query, setQuery] = React.useState('');
@@ -121,6 +146,7 @@ function MultiSelectGroup({ title, options, selected, onToggle }: MultiSelectGro
   }, [options, query]);
 
   const count = selected.length;
+  const isPaused = count > 0 && paused;
 
   return (
     <div className="space-y-2">
@@ -128,13 +154,19 @@ function MultiSelectGroup({ title, options, selected, onToggle }: MultiSelectGro
         type="button"
         onClick={() => setOpen((v) => !v)}
         aria-expanded={open}
-        className="flex w-full items-center justify-between gap-2 text-left focus-visible:outline-none"
+        aria-disabled={isPaused || undefined}
+        title={isPaused ? t('home.filters_paused') : undefined}
+        className={cn(
+          'flex w-full items-center justify-between gap-2 text-left focus-visible:outline-none',
+          isPaused && 'opacity-50',
+        )}
       >
         <span className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">
           {title}
         </span>
         <span className="flex items-center gap-1 text-xs text-muted-foreground">
           {count > 0 ? t('filters.selected', { count }) : t('filters.any')}
+          {isPaused && <span className="italic">({t('home.filters_paused')})</span>}
           <ChevronDown
             className={cn('size-3.5 transition-transform', open && 'rotate-180')}
           />
@@ -218,6 +250,7 @@ export function MapFiltersPanel({
   onFieldsChange,
   showDomainToggle = true,
   viewMode = 'map',
+  paused = false,
 }: MapFiltersPanelProps) {
   const { t } = useTranslation();
   const isMobile = useIsMobile();
@@ -382,6 +415,7 @@ export function MapFiltersPanel({
                 options={field.options}
                 selected={fieldSelected}
                 onToggle={(value) => toggleEnumValue(field.key, value)}
+                paused={paused}
               />
             );
           }
@@ -395,6 +429,7 @@ export function MapFiltersPanel({
                   selected={fieldSelected.includes(option)}
                   onToggle={() => toggleEnumValue(field.key, option)}
                   ariaLabel={`Filter by ${field.label}: ${option}`}
+                  paused={paused}
                 />
               ))}
             </FilterGroup>

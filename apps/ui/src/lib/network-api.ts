@@ -1,4 +1,4 @@
-import type { FetchItemsQuery, FetchItemsResponse, ItemLocation } from './item-api';
+import type { FetchItemsQuery, FetchItemsResponse, Item, ItemLocation } from './item-api';
 import type { DotNetworkSchema } from '../engine/types';
 import { createApiClient } from './api-client';
 
@@ -215,6 +215,77 @@ export async function fetchNetworkMarkers(
   const response = await networkApiClient.get<MarkersResponse>(
     '/api/v1/network/item/markers',
     { params, signal }
+  );
+  return response.data;
+}
+
+// The discover BFF's per-field facet selection (#203 List PR Task 4). Shape
+// mirrors `DiscoverFacetFilterSchema` in `packages/schemas/src/api/discover_schemas.ts`
+// exactly (`field` + a non-empty `values` array) — the BFF re-validates the
+// field against the schema's declared, non-private facets server-side
+// (`resolveAllowedFacetFilters`) and maps the array to an `in`/`contains_any`
+// op depending on whether the field itself is array-valued, so the client
+// only ever sends the raw value set, never an op.
+export interface DiscoverFacetFilter {
+  field: string;
+  values: (string | number | boolean)[];
+}
+
+export interface FetchDiscoverQuery {
+  item_network: string;
+  item_domain: string;
+  item_type: string;
+  q?: string;
+  filters?: DiscoverFacetFilter[];
+  item_latitude?: number;
+  item_longitude?: number;
+  distance_meters?: number;
+  limit?: number;
+  offset?: number;
+}
+
+export type DiscoverSource = 'signals_search' | 'native_fallback';
+
+export interface DiscoverResponse {
+  items: Item[];
+  meta: {
+    total: number;
+    limit: number;
+    offset: number;
+    source: DiscoverSource;
+    degraded: boolean;
+  };
+}
+
+/**
+ * POST `/api/v1/network/item/discover` (#203 List PR Task 4). Field names
+ * mirror the BFF's `DiscoverItemsBodySchema` exactly (`item_latitude`/
+ * `item_longitude`/`distance_meters`, `limit`/`offset`), same convention as
+ * `fetchNetworkItems`'s query params. `items` are the SAME `Item` shape
+ * `fetchNetworkItems` returns — the list renders both uniformly.
+ */
+export async function fetchDiscover(
+  query: FetchDiscoverQuery,
+  signal?: AbortSignal
+): Promise<DiscoverResponse> {
+  const body: Record<string, unknown> = {
+    item_network: query.item_network,
+    item_domain: query.item_domain,
+    item_type: query.item_type,
+  };
+
+  if (query.q) body.q = query.q;
+  if (query.filters !== undefined && query.filters.length > 0) body.filters = query.filters;
+  if (query.item_latitude !== undefined) body.item_latitude = query.item_latitude;
+  if (query.item_longitude !== undefined) body.item_longitude = query.item_longitude;
+  if (query.distance_meters !== undefined) body.distance_meters = query.distance_meters;
+  if (query.limit !== undefined) body.limit = query.limit;
+  if (query.offset !== undefined) body.offset = query.offset;
+
+  const response = await networkApiClient.post<DiscoverResponse>(
+    '/api/v1/network/item/discover',
+    body,
+    { signal }
   );
   return response.data;
 }

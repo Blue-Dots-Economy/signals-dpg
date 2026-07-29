@@ -15,6 +15,7 @@ export const {
   networkRuntime,
   schemaRegistry,
   geocoding,
+  signalsSearch,
 } = loadEnv();
 
 // Startup guard (D7): fail hard in prod, warn in dev, if CREATE_TEST_OTP is on.
@@ -100,6 +101,17 @@ export const matchScoreConfig = {
     version: matchScore.DPG_SCORING_VERSION,
     prompt_version: matchScore.DPG_SCORING_PROMPT_VERSION,
   },
+};
+
+/**
+ * Discover BFF -> signals-search (#203). Both fields optional and undefined
+ * when unset — no consumer yet (Task 2); the eventual BFF falls back to the
+ * native search path whenever either is missing, so absence must not crash
+ * boot.
+ */
+export const signalsSearchConfig = {
+  url: signalsSearch.SIGNALS_SEARCH_URL,
+  api_key: signalsSearch.SIGNALS_SEARCH_API_KEY,
 };
 
 /**

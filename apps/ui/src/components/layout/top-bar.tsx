@@ -21,6 +21,8 @@ interface TopBarProps {
   onViewModeChange: (mode: ViewMode) => void;
   /** Optional Filters control rendered next to the search bar (home/browse only). */
   filtersSlot?: React.ReactNode;
+  /** Optional list-only control (the "Near me" toggle) rendered next to the view toggle. */
+  listControlsSlot?: React.ReactNode;
 }
 
 function NotificationBell() {
@@ -52,6 +54,7 @@ export function TopBar({
   viewMode,
   onViewModeChange,
   filtersSlot,
+  listControlsSlot,
 }: TopBarProps) {
   const navigate = useNavigate();
   const { t } = useTranslation();
@@ -77,6 +80,7 @@ export function TopBar({
       {/* Filters control sits immediately to the right of the search bar. */}
       {filtersSlot}
       <div className="ml-auto flex items-center gap-2">
+        {listControlsSlot}
         <ToggleGroup
           type="single"
           value={viewMode}

@@ -27,6 +27,8 @@ interface PageShellProps {
   onViewModeChange: (mode: ViewMode) => void;
   /** Optional Filters control surfaced in the top bar next to the search input. */
   filtersSlot?: React.ReactNode;
+  /** Optional list-only control (the "Near me" toggle) rendered next to the view toggle. */
+  listControlsSlot?: React.ReactNode;
 }
 
 export function PageShell({
@@ -48,6 +50,7 @@ export function PageShell({
   viewMode,
   onViewModeChange,
   filtersSlot,
+  listControlsSlot,
 }: PageShellProps) {
   const { t } = useTranslation();
   return (
@@ -80,6 +83,7 @@ export function PageShell({
             viewMode={viewMode}
             onViewModeChange={onViewModeChange}
             filtersSlot={filtersSlot}
+            listControlsSlot={listControlsSlot}
           />
           <main
             id="main-content"

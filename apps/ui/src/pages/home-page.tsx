@@ -42,8 +42,17 @@ import { ActionAbortedError } from '@/lib/action-abort';
 import { EmptyState } from '@/components/empty-state';
 import { useAuth } from '@/contexts/auth-context';
 import { apiConfig } from '@/lib/api-config';
-import { getEnumFilterFieldsForDomains, itemPassesEnumFilters } from '@/lib/enum-filters';
-import type { EnumFilterField } from '@/lib/enum-filters';
+import { getEnumFilterFieldsForDomains } from '@/lib/enum-filters';
+import {
+  deriveBrowseParams,
+  isDiscoverActive,
+  hasActiveSearchOrFilters,
+  resolveDegradedBanner,
+  excludeOwnItems,
+  buildFilteredCardsForDomain,
+} from '@/lib/browse-discover';
+import type { DerivedBrowseParams } from '@/lib/browse-discover';
+import { NearMeToggle } from '@/components/browse/near-me-toggle';
 import { getServedScope } from '@/lib/served-binding';
 import { computeVisibleDomains } from '@/lib/visible-domains';
 import { useUserLocation } from '@/hooks/use-user-location';
@@ -70,20 +79,12 @@ import { useInfiniteBrowseItems } from '@/hooks/use-infinite-browse-items';
 import { useProfileConsentStatus } from '@/hooks/use-profile-consent-status';
 import { useMapMarkers } from '@/hooks/use-map-markers';
 import { useItemDetail } from '@/hooks/use-item-detail';
-import type { Marker as NetworkMarker } from '@/lib/network-api';
+import type { Marker as NetworkMarker, DiscoverFacetFilter } from '@/lib/network-api';
 import { useQueryClient } from '@tanstack/react-query';
 import { queryKeys } from '@/lib/query-keys';
 import { GuardianOtpDialog } from '@/components/actions/guardian-otp-dialog';
 import { U18GuardianFlow } from '@/components/consent/u18/u18-guardian-flow';
 import { isGuardianConsentRequiredDomain } from '@/lib/guardian-consent';
-
-function itemToCardItem(item: Item): { id: string; domain: string; data: Record<string, unknown> } {
-  return {
-    id: item.item_id,
-    domain: item.item_domain,
-    data: { ...item.item_state, item_locations: item.item_locations },
-  };
-}
 
 function getItemLocations(
   data: Record<string, unknown>,
@@ -104,56 +105,6 @@ function sortItemsByNearest<T>(
       nearestDistanceMeters(userLocation, getLocations(a)) -
       nearestDistanceMeters(userLocation, getLocations(b)),
   );
-}
-
-// Shared card filter: search text + enum-field filters + the map's domain
-// multi-select. Used ONLY by the LIST — the paged single-domain list
-// (`singleDomainCards`) and the "All" tab's merged paged union
-// (`filteredAllDomainItems`), so the predicate is defined exactly once
-// (§Task5 constraint: reuse, do not duplicate). (Caching-epic #203 §5.2 Task
-// 7: the old full-fetch `filteredDomainItems` caller was removed — the map
-// reads viewport markers, not this filter.) The MAP no longer runs this
-// in-memory filter at all for its enum-field facets: map-serverside-search
-// epic #203 Task 7 sends the same `activeFieldFilters` to the server instead
-// (`item_state.*` on `/markers`, see the `useMapMarkers` call site above) —
-// the list intentionally keeps filtering client-side here until the List PR
-// moves it server-side too (issue #2, the documented list-fallback caveat).
-function buildFilteredCardsForDomain(
-  domainId: string,
-  items: Item[],
-  opts: {
-    search: string;
-    mapSelectedDomains: string[];
-    activeFieldFilters: Record<string, string[]>;
-    enumFilterFields: EnumFilterField[];
-  },
-): Array<{ id: string; domain: string; data: Record<string, unknown> }> {
-  // Map domain filter: skip this domain entirely if filter is active and this
-  // domain is not selected.
-  if (opts.mapSelectedDomains.length > 0 && !opts.mapSelectedDomains.includes(domainId)) {
-    return [];
-  }
-
-  let cards = items.map(itemToCardItem);
-
-  // Text search filter
-  if (opts.search) {
-    cards = cards.filter((item) =>
-      Object.values(item.data).some((val) =>
-        String(val).toLowerCase().includes(opts.search.toLowerCase())
-      )
-    );
-  }
-
-  // Enum-field filters: AND across different fields, OR within a field's
-  // selected values. Absent fields on an item always pass (domain-safe).
-  if (Object.keys(opts.activeFieldFilters).length > 0) {
-    cards = cards.filter((item) =>
-      itemPassesEnumFilters(item.data, opts.activeFieldFilters, opts.enumFilterFields),
-    );
-  }
-
-  return cards;
 }
 
 // Bottom-sentinel scroll observer: fires `onIntersect` when the sentinel node
@@ -216,6 +167,12 @@ interface DomainPageState {
   // tab can show the same federation-degradation banner as the single-domain
   // list and the map (P4's `mapMarkers.partial`).
   partial: boolean;
+  // Task 6 (#203 §6): lifted from `useInfiniteBrowseItems`' `degraded` — true
+  // when the discover BFF fell back to native (signals-search unreachable/
+  // unconfigured/timed out) for this domain's page. Threaded through
+  // IDENTICALLY to `partial` above so the "All" tab can show the same
+  // degraded-search UX as the single-domain list.
+  degraded: boolean;
 }
 
 // Headless per-domain paged fetch for the "All" tab (Task 5 §5.1). React hooks
@@ -228,11 +185,19 @@ function DomainPagedFetch({
   network,
   domain,
   coords,
+  browseOpts,
   onItems,
 }: {
   network: DotNetworkSchema;
   domain: DotNetworkDomain;
   coords: { lat: number; lng: number } | null;
+  // #203 List PR Task 5: the discover params (q/filters/relevance) derived from
+  // the search box, facet panel, and "Near me" toggle. Passed identically for
+  // every visible domain so the whole "All" feed shares one discover mode.
+  // Omitted by the map-view count-only fetchers, which stay on the native
+  // browse path (the "Near me" toggle is a list-view control; the map is
+  // unaffected per spec §5.3).
+  browseOpts?: { q?: string; filters: DiscoverFacetFilter[]; relevance: boolean };
   onItems: (
     domainId: string,
     items: Item[],
@@ -241,20 +206,41 @@ function DomainPagedFetch({
     isLoading: boolean,
     fetchNext: () => void,
     partial: boolean,
+    degraded: boolean,
   ) => void;
 }): null {
-  const list = useInfiniteBrowseItems(network, domain, coords);
+  const list = useInfiniteBrowseItems(network, domain, coords, browseOpts);
   // `list.items` is a fresh array on every render (the hook doesn't memoize
   // it), so this effect refires on every plain re-render too. That's fine:
   // `onItems` (`handleDomainItems`) is idempotent — it bails out of its
   // `setState` when the lifted data is unchanged (element-wise reference
-  // equality on `items`, plus `hasMore`/`total`/`isLoading`/`partial`), so a
-  // plain re-render never causes a further re-render here. This is what lets
-  // a same-length refetch (new item object refs, edited `item_state`) still
-  // get lifted — gating on `items.length` would silently drop that update.
+  // equality on `items`, plus `hasMore`/`total`/`isLoading`/`partial`/
+  // `degraded`), so a plain re-render never causes a further re-render here.
+  // This is what lets a same-length refetch (new item object refs, edited
+  // `item_state`) still get lifted — gating on `items.length` would silently
+  // drop that update.
   React.useEffect(() => {
-    onItems(domain.id, list.items, list.hasNextPage, list.total, list.isLoading, list.fetchNextPage, list.partial);
-  }, [domain.id, list.items, list.hasNextPage, list.total, list.isLoading, list.fetchNextPage, list.partial, onItems]);
+    onItems(
+      domain.id,
+      list.items,
+      list.hasNextPage,
+      list.total,
+      list.isLoading,
+      list.fetchNextPage,
+      list.partial,
+      list.degraded,
+    );
+  }, [
+    domain.id,
+    list.items,
+    list.hasNextPage,
+    list.total,
+    list.isLoading,
+    list.fetchNextPage,
+    list.partial,
+    list.degraded,
+    onItems,
+  ]);
   return null;
 }
 
@@ -462,6 +448,10 @@ export function HomePage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const navigate = useNavigate();
   const [search, setSearch] = React.useState('');
+  // "Near me" toggle (#203 List PR Task 5). Default OFF = the ranked discover
+  // feed served globally (relevance mode, native fallback covers signals-search
+  // being down); ON = proximity (location-anchored). See `deriveBrowseParams`.
+  const [nearMe, setNearMe] = React.useState(false);
   const [viewMode, setViewMode] = React.useState<ViewMode>(
     (searchParams.get('view') as ViewMode) ?? resolveDefaultViewMode()
   );
@@ -1010,27 +1000,42 @@ export function HomePage() {
     [userLocation],
   );
 
+  // Task 5 (#203 List PR): map the "Near me" toggle + search box + facet
+  // selections to the discover params both list paths share. Near me OFF (the
+  // default) = ranked discover globally (relevance, NO location); Near me ON =
+  // proximity (location passed, relevance unset). See `deriveBrowseParams` for
+  // why location is omitted in relevance mode.
+  const browseParams = React.useMemo<DerivedBrowseParams>(
+    () => deriveBrowseParams({ nearMe, search, activeFieldFilters }),
+    [nearMe, search, activeFieldFilters],
+  );
+  const browseLocation = browseParams.useLocation ? browseCoords : null;
+  const browseHookOpts = React.useMemo(
+    () => ({ q: browseParams.q, filters: browseParams.filters, relevance: browseParams.relevance }),
+    [browseParams],
+  );
+  // True when the active feed is served by the discover BFF (q OR filters OR
+  // relevance) — the server has already applied text + facet filtering, so the
+  // client-side filters in `buildFilteredCardsForDomain` must be bypassed.
+  const listDiscover = isDiscoverActive(browseParams);
+
   // Single-domain paged fetch. Enabled only while a specific domain tab is
   // selected; disabled (and thus inert) on the "All" tab.
   const singleDomainList = useInfiniteBrowseItems(
     network,
     selectedDomain ? selectedDomainObj : null,
-    browseCoords,
-    { enabled: selectedDomain !== null },
+    browseLocation,
+    { enabled: selectedDomain !== null, ...browseHookOpts },
   );
 
   // Own-item filtering is a view concern (mirrored below by
   // `allDomainItemsFiltered` for the "All" tab) — apply the same rule to the
   // paged feed so a viewer never sees their own profile in their own browse
-  // list.
+  // list. Runs UPSTREAM of the discover bypass so it applies in both modes.
   const singleDomainItems = React.useMemo(
-    () => singleDomainList.items.filter((it) => !localProfileItemIds.has(it.item_id)),
+    () => excludeOwnItems(singleDomainList.items, localProfileItemIds),
     [singleDomainList.items, localProfileItemIds],
   );
-
-  // `activeFieldFilters` itself is computed earlier (right before
-  // `useMapMarkers`, which is now also a consumer, #203 Task 7) — reused here
-  // unchanged by the LIST's client-side `buildFilteredCardsForDomain`.
 
   // Single-domain: bottom sentinel advances the paged fetch. Server already
   // orders nearest-first (§4.1), so no client `sortByNearest` for this path.
@@ -1065,6 +1070,7 @@ export function HomePage() {
       isLoading: boolean,
       fetchNext: () => void,
       partial: boolean,
+      degraded: boolean,
     ) => {
       setAllDomainPages((prev) => {
         const existing = prev[domainId];
@@ -1077,12 +1083,16 @@ export function HomePage() {
           existing.hasMore === hasMore &&
           existing.total === total &&
           existing.isLoading === isLoading &&
-          existing.partial === partial
+          existing.partial === partial &&
+          existing.degraded === degraded
         ) {
           // Same data (plain re-render): bail so React doesn't re-render → no loop.
           return prev;
         }
-        return { ...prev, [domainId]: { items, hasMore, total, isLoading, fetchNext, partial } };
+        return {
+          ...prev,
+          [domainId]: { items, hasMore, total, isLoading, fetchNext, partial, degraded },
+        };
       });
     },
     [],
@@ -1094,7 +1104,7 @@ export function HomePage() {
   const allDomainItemsFiltered = React.useMemo(() => {
     const result: Record<string, Item[]> = {};
     for (const [domainId, state] of Object.entries(allDomainPages)) {
-      result[domainId] = state.items.filter((it) => !localProfileItemIds.has(it.item_id));
+      result[domainId] = excludeOwnItems(state.items, localProfileItemIds);
     }
     return result;
   }, [allDomainPages, localProfileItemIds]);
@@ -1163,6 +1173,25 @@ export function HomePage() {
   // (mirrors the map's `mapMarkers.partial` from P4): single-domain tab reads
   // the one paged feed directly, "All" tab is the OR above.
   const listPartial = selectedDomain !== null ? singleDomainList.partial : allDomainsListPartial;
+
+  // Task 6 (#203 §6): mirrors `allDomainsListPartial`/`listPartial` exactly,
+  // but for the discover BFF's native-fallback signal instead of federation
+  // partiality — "All" tab is degraded if ANY visible domain's paged feed
+  // fell back to native.
+  const allDomainsListDegraded = visibleDomains.some(
+    (domain) => allDomainPages[domain.id]?.degraded ?? false,
+  );
+  // Single source of truth for the degraded-search UX: single-domain tab reads
+  // the one paged feed directly, "All" tab is the OR above.
+  const listDegraded = selectedDomain !== null ? singleDomainList.degraded : allDomainsListDegraded;
+  // Whether the user has an active search query OR facet filter (NOT the
+  // relevance default) — decides which degraded banner variant shows below,
+  // and whether the facet chips render as paused/not-applied.
+  const searchOrFiltersActive = hasActiveSearchOrFilters(browseParams);
+  const degradedBanner = resolveDegradedBanner({
+    degraded: listDegraded,
+    searchOrFiltersActive,
+  });
 
   // Active schema: from the selected browsing domain, or first visible domain
   const activeSchema = React.useMemo(() => {
@@ -1363,9 +1392,10 @@ export function HomePage() {
             mapSelectedDomains,
             activeFieldFilters,
             enumFilterFields,
+            discover: listDiscover,
           })
         : [],
-    [selectedDomain, singleDomainItems, search, mapSelectedDomains, activeFieldFilters, enumFilterFields],
+    [selectedDomain, singleDomainItems, search, mapSelectedDomains, activeFieldFilters, enumFilterFields, listDiscover],
   );
 
   // "All" tab: same filter applied per-domain to the accumulated paged union.
@@ -1377,10 +1407,11 @@ export function HomePage() {
         mapSelectedDomains,
         activeFieldFilters,
         enumFilterFields,
+        discover: listDiscover,
       });
     }
     return result;
-  }, [visibleDomains, allDomainItemsFiltered, search, mapSelectedDomains, activeFieldFilters, enumFilterFields]);
+  }, [visibleDomains, allDomainItemsFiltered, search, mapSelectedDomains, activeFieldFilters, enumFilterFields, listDiscover]);
 
   const handleDomainSelect = (domainId: string | null) => {
     setSelectedDomain(domainId);
@@ -1790,6 +1821,27 @@ export function HomePage() {
     />
   );
 
+  // Task 6 (#203 §6): the page-header mount of the filters panel (passed to
+  // `PageShell` below) — as opposed to `filtersPanel` above, which is also
+  // reused as MapView's OWN copy rendered only while the map is maximized
+  // (the header is covered in fullscreen; see `MapView`'s `filtersSlot` doc).
+  // Only THIS mount marks the selected facet chips paused/not-applied when
+  // the discover BFF fell back to native with an active search/filter — the
+  // map's maximized-mode copy is unaffected (it never sees the discover path).
+  const listFiltersPanel = (
+    <MapFiltersPanel
+      domains={visibleDomains}
+      filterFieldDomains={filterFieldDomains}
+      selectedDomains={mapSelectedDomains}
+      onDomainsChange={handleMapDomainsChange}
+      selectedFields={mapSelectedFields}
+      onFieldsChange={handleMapFieldsChange}
+      showDomainToggle={selectedDomain === null}
+      viewMode={viewMode}
+      paused={listDegraded && searchOrFiltersActive}
+    />
+  );
+
   return (
     <>
     <PageShell
@@ -1811,7 +1863,13 @@ export function HomePage() {
       onSearchChange={setSearch}
       viewMode={viewMode}
       onViewModeChange={handleViewModeChange}
-      filtersSlot={filtersPanel}
+      filtersSlot={listFiltersPanel}
+      // "Near me" is a LIST-view control: OFF (default) = ranked discover feed;
+      // ON = proximity. The map ignores it (it reads viewport markers), so only
+      // surface it in list view.
+      listControlsSlot={
+        viewMode === 'list' ? <NearMeToggle active={nearMe} onChange={setNearMe} /> : undefined
+      }
     >
       {!user ? (
         <GuestHero />
@@ -1829,7 +1887,14 @@ export function HomePage() {
           DomainPagedFetch children. In list view the grid below mounts its own
           set; without this, map view never fetches those totals so the count
           stays hidden until the user visits the list once. Gated to map view
-          (viewMode !== 'list') so the two sets never double-mount. */}
+          (viewMode !== 'list') so the two sets never double-mount.
+
+          These count-only fetchers stay on the NATIVE browse path (no discover
+          opts, raw proximity coords) regardless of the list's "Near me" toggle:
+          the toggle is a list-view control and the map is unaffected (spec §5.3
+          — the map ignores search/filters/relevance entirely). Routing this
+          header count through discover would silently make it diverge from the
+          map's own marker total whenever the search index lags the live DB. */}
       {user && network && selectedDomain === null && viewMode !== 'list' &&
         visibleDomains.map((domain) => (
           <DomainPagedFetch
@@ -1967,6 +2032,30 @@ export function HomePage() {
                     {t('home.list_partial')}
                   </p>
                 )}
+                {/* Degraded-search indicator (#203 §6): the discover BFF fell back to
+                    native (signals-search unreachable/unconfigured/timed out) —
+                    `meta.source: 'native_fallback'` / `degraded: true`, surfaced via
+                    `singleDomainList.degraded` / the "All" tab's per-domain OR
+                    (`listDegraded`). Native results are still shown below (the
+                    fallback DOES return native items) — this only warns that a
+                    search/filter the user set is NOT actually being applied.
+                    Two variants (`resolveDegradedBanner`): PROMINENT when the user
+                    has an active search query or facet filter (their expectation is
+                    violated — filters look selected but aren't applied server-side),
+                    subtle when browsing the plain relevance default (only ranking
+                    quality is reduced, results are still relevant/recent). "Near
+                    me"/proximity (native path) never sets `degraded`, so no banner
+                    shows there. */}
+                {degradedBanner === 'search_unavailable' && (
+                  <p className="mb-3 rounded-md bg-amber-100 px-3 py-2 text-sm font-semibold text-amber-950 shadow-sm ring-2 ring-amber-400 dark:bg-amber-900 dark:text-amber-50 dark:ring-amber-700">
+                    {t('home.list_search_unavailable')}
+                  </p>
+                )}
+                {degradedBanner === 'ranking_unavailable' && (
+                  <p className="mb-3 text-xs text-muted-foreground">
+                    {t('home.list_ranking_unavailable')}
+                  </p>
+                )}
                 {selectedDomain === null ? (
               // All tab: flat grid across all domains, each card uses its own schema.
               // Each visible domain gets a headless <DomainPagedFetch> that fetches
@@ -1981,7 +2070,8 @@ export function HomePage() {
                         key={domain.id}
                         network={network}
                         domain={domain}
-                        coords={browseCoords}
+                        coords={browseLocation}
+                        browseOpts={browseHookOpts}
                         onItems={handleDomainItems}
                       />
                     ))}
