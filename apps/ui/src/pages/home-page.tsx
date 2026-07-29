@@ -24,6 +24,7 @@ import { ActionHandler } from '@/components/actions/action-handler';
 import { MapView } from '@/components/map/map-container';
 import { MapFiltersPanel } from '@/components/map/map-filters-panel';
 import { MarkerPopupCard } from '@/components/map/marker-popup-card';
+import { MapCountPill } from '@/components/map/map-count-pill';
 import { MatchScoreCard } from '@/components/match-score';
 import '@/components/map/providers';
 import { performAction, performActionsBulk, type Item } from '@/lib/item-api';
@@ -106,11 +107,17 @@ function sortItemsByNearest<T>(
 }
 
 // Shared card filter: search text + enum-field filters + the map's domain
-// multi-select. Used by both the paged single-domain list (`singleDomainCards`)
-// and the "All" tab's merged paged union (`filteredAllDomainItems`), so the
-// predicate is defined exactly once (§Task5 constraint: reuse, do not
-// duplicate). (Task 7, #203 §5.2: the old full-fetch `filteredDomainItems`
-// caller was removed — the map reads viewport markers, not this filter.)
+// multi-select. Used ONLY by the LIST — the paged single-domain list
+// (`singleDomainCards`) and the "All" tab's merged paged union
+// (`filteredAllDomainItems`), so the predicate is defined exactly once
+// (§Task5 constraint: reuse, do not duplicate). (Caching-epic #203 §5.2 Task
+// 7: the old full-fetch `filteredDomainItems` caller was removed — the map
+// reads viewport markers, not this filter.) The MAP no longer runs this
+// in-memory filter at all for its enum-field facets: map-serverside-search
+// epic #203 Task 7 sends the same `activeFieldFilters` to the server instead
+// (`item_state.*` on `/markers`, see the `useMapMarkers` call site above) —
+// the list intentionally keeps filtering client-side here until the List PR
+// moves it server-side too (issue #2, the documented list-fallback caveat).
 function buildFilteredCardsForDomain(
   domainId: string,
   items: Item[],
@@ -883,19 +890,67 @@ export function HomePage() {
     }
   }, [network, selectedDomain, visibleDomains, setSearchParams]);
 
+  // #203 Task 7: the enum-field facet filters (`mapSelectedFields`, driven by
+  // `MapFiltersPanel`) now reach the server on the MAP path — sent as
+  // `item_state.<field>` markers params (`network-api.ts`'s `fetchNetworkMarkers`
+  // serializes each field's selected values as REPEATED query params, which
+  // the server's `qs`-based parser auto-arrays into `string[]`, matching
+  // `buildWhereClause`'s `= ANY(...)` facet filter — see Task 3). Computed
+  // here (not down at `singleDomainCards`/`filteredAllDomainItems` below, its
+  // other consumer) so it's available before `useMapMarkers` needs it.
+  const activeFieldFilters = React.useMemo(
+    () => Object.fromEntries(Object.entries(mapSelectedFields).filter(([, vals]) => vals.length > 0)),
+    [mapSelectedFields],
+  );
+
+  // #203 Task 7 review fix: the server's facet guard
+  // (`resolveAllowedFacetFields`, Task 3) only honors fields declared
+  // `filterable: true` in a domain's network.json (Task 1) — NOT every
+  // schema-declared enum field. `MapFiltersPanel` itself now restricts what
+  // it OFFERS on the map to that same `filterable: true` set
+  // (`getEnumFilterFieldsForDomains(..., { filterableOnly: true })`, see
+  // `map-filters-panel.tsx`), so a map user can no longer select a facet the
+  // server will silently drop. But `mapSelectedFields` is shared state with
+  // the LIST (which still offers/filters every enum field) — a field
+  // selected while on the list tab is NOT automatically deselected when
+  // switching to the map tab (the panel simply stops rendering a chip for
+  // it). Without this second filter, that stale non-filterable selection
+  // would still be sent to the server as an inert `item_state` param.
+  // Restricting the map's OWN sent filters to the filterable set (in
+  // addition to the panel's offer-side restriction above) closes that gap:
+  // the map never sends a facet it can't apply, regardless of what's
+  // sitting in shared state from the list.
+  const mapFilterableFieldKeys = React.useMemo(
+    () => new Set(getEnumFilterFieldsForDomains(filterFieldDomains, { filterableOnly: true }).map((f) => f.key)),
+    [filterFieldDomains],
+  );
+  const mapActiveFieldFilters = React.useMemo(
+    () => Object.fromEntries(Object.entries(activeFieldFilters).filter(([key]) => mapFilterableFieldKeys.has(key))),
+    [activeFieldFilters, mapFilterableFieldKeys],
+  );
+
   // Task 6 (#203 §5.2): the map view is now sourced from viewport-scoped
   // markers rather than a full per-domain browse feed (that full fetch was
-  // removed from this page entirely in Task 7). Map enum-field
-  // filtering (mapSelectedFields) AND the top-bar free-text `search` are BOTH
-  // DEFERRED for the map in P4: viewport markers are slim (coords only, no
-  // item_state), so neither the enum-field filter nor a text match can run
-  // client-side, and the markers endpoint has no text-search — both need
-  // server-side support (relevance/search, spec §9). `useMapMarkers` is
-  // therefore never given `item_state`/enum fields or `search`; the map shows
-  // all viewport markers for the visible domains. `MapFiltersPanel` and the
-  // search box stay mounted (they still filter the LIST view), but have no
-  // effect on which markers are fetched. Only domain multi-select (below) —
-  // an array membership check needing no server support — still narrows pins.
+  // removed from this page entirely in Task 7 of the caching epic). The
+  // top-bar free-text `search` is DEFERRED for the map (issue #5, spec §9):
+  // viewport markers are slim (coords only), and the server has no free-text
+  // match on `/markers` today — building one is real search-relevance surface
+  // (guarding which fields are searchable, private-field safety, ranking),
+  // out of this PR's scope on purpose (see the plan doc's "Out of scope").
+  // `search` therefore keeps filtering only the LIST (`buildFilteredCardsForDomain`
+  // below); the map ignores it. `MapFiltersPanel`'s enum-field facets, by
+  // contrast, DO now drive the map server-side — but ONLY the subset
+  // declared `filterable: true` in network.json (Task 1), which is the set
+  // the server's facet guard (`resolveAllowedFacetFields`, Task 3) actually
+  // honors for `item_state` filtering; that's `mapActiveFieldFilters` above,
+  // not the full `activeFieldFilters` the list uses (see the comment there).
+  // Declaring more facets per network (+ indexing them, Task 1's pattern in
+  // `network.json`) is a config follow-up, not a code change here — most
+  // example networks currently declare zero filterable facets, so the map
+  // filter panel may show no enum groups at all for them until that's done.
+  // The domain multi-select (below, a client-side array-membership check on
+  // the already-fetched markers) and free-text search remain client/list-only
+  // regardless of facet config.
   //
   // Even at low zoom for an anonymous / no-location visitor we now fetch the
   // slim viewport markers (coords only, capped at MAP_FETCH_LIMIT) and cluster
@@ -914,7 +969,7 @@ export function HomePage() {
     () => (selectedDomain ? visibleDomains.filter((d) => d.id === selectedDomain) : visibleDomains),
     [selectedDomain, visibleDomains],
   );
-  const mapMarkers = useMapMarkers(network, mapDomains, mapViewport);
+  const mapMarkers = useMapMarkers(network, mapDomains, mapViewport, mapActiveFieldFilters);
 
   // On the "All" tab the Filters-panel domain multi-select narrows which pins
   // show (client-side membership check — every `Marker` carries `item_domain`).
@@ -973,10 +1028,9 @@ export function HomePage() {
     [singleDomainList.items, localProfileItemIds],
   );
 
-  const activeFieldFilters = React.useMemo(
-    () => Object.fromEntries(Object.entries(mapSelectedFields).filter(([, vals]) => vals.length > 0)),
-    [mapSelectedFields],
-  );
+  // `activeFieldFilters` itself is computed earlier (right before
+  // `useMapMarkers`, which is now also a consumer, #203 Task 7) — reused here
+  // unchanged by the LIST's client-side `buildFilteredCardsForDomain`.
 
   // Single-domain: bottom sentinel advances the paged fetch. Server already
   // orders nearest-first (§4.1), so no client `sortByNearest` for this path.
@@ -2161,21 +2215,23 @@ export function HomePage() {
                     );
                   }}
                 />
-                {/* Signed-out count pill (#203 §7, revised): logged-out map view
-                    has no header count badge (that's a logged-in ContentHeader),
-                    so this small non-blocking pill surfaces the result count for
-                    the current view at all zooms — anonymous visitors otherwise
-                    had no way to see the total. `fixed` + high z-index so it stays
-                    above the map's own maximize overlay (z-[2000]). */}
-                {!user && mapMarkers.total > 0 && (
-                  <div className="pointer-events-none fixed bottom-6 left-1/2 z-[2100] w-full max-w-[calc(100vw-2rem)] -translate-x-1/2 px-4">
-                    <div className="mx-auto w-fit max-w-full rounded-2xl border border-border bg-background/95 px-3 py-1.5 text-center text-xs font-medium text-foreground shadow-md backdrop-blur-sm">
-                      {mapItems.length < mapMarkers.total
-                        ? t('home.showing_x_of_y', { shown: mapItems.length, total: mapMarkers.total })
-                        : t('header.listings', { count: mapMarkers.total })}
-                    </div>
-                  </div>
-                )}
+                {/* Map count pill (#203 §7, revised; extended by Task 6):
+                    logged-out map view has no header count badge (that's a
+                    logged-in ContentHeader), so this small non-blocking pill
+                    surfaces the result count for the current view at all
+                    zooms. Task 6 adds an over-dense "N+ in this area — zoom
+                    in" variant that shows for BOTH anon and signed-in
+                    visitors whenever the true total exceeds the active
+                    zoom-band marker cap (`mapMarkers.truncated`) — see
+                    `MapCountPill` for the two-variant logic. `fixed` + high
+                    z-index so it stays above the map's own maximize overlay
+                    (z-[2000]). */}
+                <MapCountPill
+                  total={mapMarkers.total}
+                  shown={mapItems.length}
+                  truncated={mapMarkers.truncated}
+                  signedIn={!!user}
+                />
                 {/* Federation-degradation indicator (#203 §6): some peer instances
                     didn't answer in time, so the viewport marker set is known-partial.
                     `fixed` (not `absolute`) so it stays visible above the map's own

@@ -247,12 +247,26 @@ export interface MapProvider {
  * `useMapMarkers` bucketing logic) don't need to supply it. Both live map
  * providers always populate it when emitting to `onViewportChange`; it is
  * currently consumed only by the home-page's anonymous count-first gating.
+ *
+ * `minLat`/`minLng`/`maxLat`/`maxLng` (#203 map-serverside-search Task 4) are
+ * the current `map.getBounds()` corners — the bbox the server-side markers
+ * query filters by, replacing the client-computed radius for the map path.
+ * Optional for the same reason `zoom` is: both live providers always
+ * populate them alongside `zoom` on every emit going forward, but the list's
+ * distance path, the tourist app (never emits at all), and hand-built
+ * viewports in existing tests only ever have center + radius. Callers that
+ * need the bbox (`useMapMarkers`, the markers query key) fall back to the
+ * radius shape when these are unset.
  */
 export interface MapViewport {
   lat: number;
   lng: number;
   radiusMeters: number;
   zoom?: number;
+  minLat?: number;
+  minLng?: number;
+  maxLat?: number;
+  maxLng?: number;
 }
 
 // ─── Plugin Types ──────────────────────────────────────────────

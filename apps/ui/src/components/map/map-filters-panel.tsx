@@ -226,9 +226,18 @@ export function MapFiltersPanel({
   // Derive enum filter fields generically from the filter-field domains
   // (defaults to the visible domains) so the filters can reflect the
   // counterpart being browsed independently of the domain chip selector.
+  //
+  // #203 Task 7 review fix: on the MAP, only offer fields the server will
+  // actually act on — those declared `filterable: true` (Task 1's
+  // network.json marker), the set `resolveAllowedFacetFields` (Task 3)
+  // honors for the `item_state` facet path. Offering a non-filterable enum
+  // field on the map would let a user select it, see it silently dropped by
+  // the server, and get a map that doesn't change — confusing. The LIST
+  // keeps offering every enum field (`filterableOnly: false`), unchanged: it
+  // filters client-side and needs no server cooperation.
   const enumFilterFields: EnumFilterField[] = React.useMemo(
-    () => getEnumFilterFieldsForDomains(filterFieldDomains ?? domains),
-    [filterFieldDomains, domains],
+    () => getEnumFilterFieldsForDomains(filterFieldDomains ?? domains, { filterableOnly: viewMode === 'map' }),
+    [filterFieldDomains, domains, viewMode],
   );
 
   const showDomainGroup = showDomainToggle && domains.length > 1;

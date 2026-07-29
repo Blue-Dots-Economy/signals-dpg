@@ -89,6 +89,17 @@ ALTER TABLE items DROP CONSTRAINT IF EXISTS items_lifecycle_status_chk;
 CREATE INDEX IF NOT EXISTS items_lifecycle_idx
   ON items (item_network, item_domain, lifecycle_status);
 
+-- Facet filter indexes (#203, drizzle/0006_facet_item_state_indexes.sql).
+-- Expression btree per declared `filterable` facet path, NOT a blanket GIN —
+-- a GIN on item_state only accelerates `@>`/`?` operators, not the
+-- `item_state->>'field' = ANY(...)` pattern the map/list facet filters use.
+CREATE INDEX IF NOT EXISTS items_item_state_gender_idx
+  ON items ((item_state ->> 'gender'));
+CREATE INDEX IF NOT EXISTS items_item_state_work_experience_idx
+  ON items ((item_state ->> 'workExperience'));
+CREATE INDEX IF NOT EXISTS items_item_state_nature_of_jobs_interested_in_idx
+  ON items ((item_state ->> 'natureOfJobsInterestedIn'));
+
 -- ── item_search (Signals search engine V1) ──────────────────────────────────
 -- Search/discovery index maintained by the signals-search service.
 -- DDL authority lives here (shared dpg DB); the signals-search repo carries an
