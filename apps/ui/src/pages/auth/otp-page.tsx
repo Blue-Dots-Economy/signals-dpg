@@ -14,7 +14,6 @@ import { toast } from 'sonner';
 import { acceptConsent, submitU18Dob, getU18Status } from '@/lib/consent-api';
 import type { ConsentAcceptBody } from '@dpg/schemas';
 import { U18GuardianFlow } from '@/components/consent/u18/u18-guardian-flow';
-import { isMinorFromAge } from '@/lib/guardian-consent';
 import { useNetworkTheme } from '@/theme/theme-provider';
 import { setStoredSignupDomain, type SignupExtras } from '@/lib/signup-domain';
 import { setUserDomains } from '@/lib/user-api';
@@ -225,19 +224,6 @@ export function OtpPage() {
           {t('auth.otp_sub')}{' '}
           <span className="font-medium text-foreground">{identifierLabel}</span>
         </p>
-        {/* Existing minor (picked a u18 year pre-OTP): tell them the guardian
-            step comes AFTER verifying, so the OTP page doesn't read as a
-            mismatch with the "you're under 18" toast. */}
-        {state?.userExists &&
-          state.signupExtras?.age != null &&
-          isMinorFromAge(state.signupExtras.age) && (
-            <p className="mt-2 text-sm text-muted-foreground">
-              {t(
-                'auth.otp_minor_guardian_next',
-                'After verifying, a guardian will confirm your account.',
-              )}
-            </p>
-          )}
       </div>
 
       {/* OTP input — left-aligned so the box row shares the form column's
