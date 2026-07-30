@@ -71,6 +71,13 @@
       "when": 1785308841219,
       "tag": "0009_backfill_item_metrics_lifecycle",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1785394341123,
+      "tag": "0010_job_posting_facet_indexes",
+      "breakpoints": true
     }
   ]
 }
