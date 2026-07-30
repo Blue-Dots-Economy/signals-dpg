@@ -22,6 +22,7 @@ export type GateInput = {
   sourceItemId: string;
   targetItemId: string;
   stage?: 'initiate' | 'accept'; // perform → initiate (default), accept-status → accept
+  channel: 'self' | 'external'; // Boolean(request.acting_org): UI self-session vs on-behalf (#395)
   otp?: string; // body.guardian_otp
 };
 
@@ -32,7 +33,8 @@ export type GateResult =
   | { status: 'invalid_otp' }
   | { status: 'throttled' }
   | { status: 'rate_limited' }
-  | { status: 'no_provider' };
+  | { status: 'no_provider' }
+  | { status: 'external_minor_blocked'; reason: 'minor' | 'age_unknown' }; // U18 on external channel (#395)
 
 /**
  * U18 guardian-consent gate for actions (Phase 5b). Detects whether the ward
@@ -47,6 +49,21 @@ export async function guardianActionGate(input: GateInput): Promise<GateResult> 
   }
 
   const age = await getWardAge(input.wardUserId);
+
+  // External / on-behalf channel (#395): there is no guardian-OTP path over
+  // voice/aggregator for now, so a minor — or, fail-closed, an age-unknown
+  // ward — is blocked outright and must complete the action in the app (the
+  // `self` path below). A confirmed adult proceeds unchanged. The `reason`
+  // (`minor` | `age_unknown`) rides on the result for support triage; the
+  // caller's client-facing message never leaks it (see guardianGateFailure).
+  if (input.channel === 'external') {
+    if (age !== null && !isMinor(age)) {
+      return { status: 'not_required' };
+    }
+    return { status: 'external_minor_blocked', reason: age === null ? 'age_unknown' : 'minor' };
+  }
+
+  // channel === 'self' (UI): existing behavior verbatim.
   if (age === null || !isMinor(age)) {
     return { status: 'not_required' };
   }
@@ -125,6 +142,13 @@ export function guardianGateFailure(gate: GateResult): BulkItemFailure | null {
       return new BulkItemFailure(
         'OTP_PROVIDER_UNAVAILABLE',
         'No verified contact channel is available to send the guardian OTP.',
+      );
+    case 'external_minor_blocked':
+      // reason (`minor` | `age_unknown`) is carried on the gate result for
+      // support triage; the client message deliberately does not leak it.
+      return new BulkItemFailure(
+        'MINOR_ACTION_CHANNEL_BLOCKED',
+        "This participant is a minor; actions for minors must be completed in the app and can't be performed via this channel.",
       );
     default:
       return null; // not_required | verified → proceed
