@@ -648,6 +648,12 @@ export function GoogleMapProvider({
           <AdvancedMarker
             position={{ lat: selfLocation.lat, lng: selfLocation.lng }}
             clickable={false}
+            // `clickable={false}` disables the library's own click handling,
+            // but its wrapper div's pointer-events behavior when non-clickable
+            // is an unverified library default. Setting this explicitly
+            // guarantees the self-marker never intercepts a click meant for a
+            // co-located item pin underneath it (#394).
+            style={{ pointerEvents: 'none' }}
             zIndex={1000}
             title={t('map.you_are_here_short')}
           >

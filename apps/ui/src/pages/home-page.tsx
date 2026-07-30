@@ -45,15 +45,14 @@ import { apiConfig } from '@/lib/api-config';
 import { getEnumFilterFieldsForDomains } from '@/lib/enum-filters';
 import {
   deriveBrowseParams,
-  deriveAnchorItemId,
+  anchorItemIdForTarget,
+  domainsInteract,
   isDiscoverActive,
-  hasActiveSearchOrFilters,
-  resolveDegradedBanner,
+  resolveListNote,
   excludeOwnItems,
   buildFilteredCardsForDomain,
 } from '@/lib/browse-discover';
 import type { DerivedBrowseParams } from '@/lib/browse-discover';
-import { NearMeToggle } from '@/components/browse/near-me-toggle';
 import { getServedScope } from '@/lib/served-binding';
 import { computeVisibleDomains } from '@/lib/visible-domains';
 import { useUserLocation } from '@/hooks/use-user-location';
@@ -174,6 +173,10 @@ interface DomainPageState {
   // IDENTICALLY to `partial` above so the "All" tab can show the same
   // degraded-search UX as the single-domain list.
   degraded: boolean;
+  // #394: lifted from `useInfiniteBrowseItems`' `distanceMeters` (the discover
+  // BFF's `meta.distance_meters`) so the "All" tab's list note can show the
+  // same "within X km" wording as the single-domain list.
+  distanceMeters?: number;
 }
 
 // Headless per-domain paged fetch for the "All" tab (Task 5 §5.1). React hooks
@@ -192,13 +195,17 @@ function DomainPagedFetch({
   network: DotNetworkSchema;
   domain: DotNetworkDomain;
   coords: { lat: number; lng: number } | null;
-  // #203 List PR Task 5: the discover params (q/filters/relevance) derived from
-  // the search box, facet panel, and "Near me" toggle. Passed identically for
-  // every visible domain so the whole "All" feed shares one discover mode.
-  // Omitted by the map-view count-only fetchers, which stay on the native
-  // browse path (the "Near me" toggle is a list-view control; the map is
-  // unaffected per spec §5.3). `anchorItemId` (#394) rides along the same way —
-  // `useInfiniteBrowseItems` only forwards it on the discover path.
+  // #394: the discover params (q/filters/relevance) derived from the search
+  // box and facet panel. Passed identically for every visible domain so the
+  // whole "All" feed shares one discover mode — the list always uses discover
+  // now, there is no more "Near me" toggle. Omitted by the map-view
+  // count-only fetchers, which stay on the native browse path (unaffected by
+  // list-view discover concerns per spec §5.3). `anchorItemId` (#394) is NOT
+  // shared across domains like the rest of this object — the caller computes
+  // it per-domain (`anchorFor(domain.id)`) since whether it's safe to send
+  // depends on the schema's interaction matrix between the anchor's own
+  // domain and each individual browsed domain (e.g. a seeker's anchor is sent
+  // for the provider slice of "All" but withheld for the seeker slice).
   browseOpts?: {
     q?: string;
     filters: DiscoverFacetFilter[];
@@ -214,6 +221,7 @@ function DomainPagedFetch({
     fetchNext: () => void,
     partial: boolean,
     degraded: boolean,
+    distanceMeters: number | undefined,
   ) => void;
 }): null {
   const list = useInfiniteBrowseItems(network, domain, coords, browseOpts);
@@ -222,10 +230,10 @@ function DomainPagedFetch({
   // `onItems` (`handleDomainItems`) is idempotent — it bails out of its
   // `setState` when the lifted data is unchanged (element-wise reference
   // equality on `items`, plus `hasMore`/`total`/`isLoading`/`partial`/
-  // `degraded`), so a plain re-render never causes a further re-render here.
-  // This is what lets a same-length refetch (new item object refs, edited
-  // `item_state`) still get lifted — gating on `items.length` would silently
-  // drop that update.
+  // `degraded`/`distanceMeters`), so a plain re-render never causes a further
+  // re-render here. This is what lets a same-length refetch (new item object
+  // refs, edited `item_state`) still get lifted — gating on `items.length`
+  // would silently drop that update.
   React.useEffect(() => {
     onItems(
       domain.id,
@@ -236,6 +244,7 @@ function DomainPagedFetch({
       list.fetchNextPage,
       list.partial,
       list.degraded,
+      list.distanceMeters,
     );
   }, [
     domain.id,
@@ -246,6 +255,7 @@ function DomainPagedFetch({
     list.fetchNextPage,
     list.partial,
     list.degraded,
+    list.distanceMeters,
     onItems,
   ]);
   return null;
@@ -455,10 +465,6 @@ export function HomePage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const navigate = useNavigate();
   const [search, setSearch] = React.useState('');
-  // "Near me" toggle (#203 List PR Task 5). Default OFF = the ranked discover
-  // feed served globally (relevance mode, native fallback covers signals-search
-  // being down); ON = proximity (location-anchored). See `deriveBrowseParams`.
-  const [nearMe, setNearMe] = React.useState(false);
   const [viewMode, setViewMode] = React.useState<ViewMode>(
     (searchParams.get('view') as ViewMode) ?? resolveDefaultViewMode()
   );
@@ -908,54 +914,26 @@ export function HomePage() {
     [mapSelectedFields],
   );
 
-  // #203 Task 7 review fix: the server's facet guard
-  // (`resolveAllowedFacetFields`, Task 3) only honors fields declared
-  // `filterable: true` in a domain's network.json (Task 1) — NOT every
-  // schema-declared enum field. `MapFiltersPanel` itself now restricts what
-  // it OFFERS on the map to that same `filterable: true` set
-  // (`getEnumFilterFieldsForDomains(..., { filterableOnly: true })`, see
-  // `map-filters-panel.tsx`), so a map user can no longer select a facet the
-  // server will silently drop. But `mapSelectedFields` is shared state with
-  // the LIST (which still offers/filters every enum field) — a field
-  // selected while on the list tab is NOT automatically deselected when
-  // switching to the map tab (the panel simply stops rendering a chip for
-  // it). Without this second filter, that stale non-filterable selection
-  // would still be sent to the server as an inert `item_state` param.
-  // Restricting the map's OWN sent filters to the filterable set (in
-  // addition to the panel's offer-side restriction above) closes that gap:
-  // the map never sends a facet it can't apply, regardless of what's
-  // sitting in shared state from the list.
-  const mapFilterableFieldKeys = React.useMemo(
-    () => new Set(getEnumFilterFieldsForDomains(filterFieldDomains, { filterableOnly: true }).map((f) => f.key)),
-    [filterFieldDomains],
-  );
-  const mapActiveFieldFilters = React.useMemo(
-    () => Object.fromEntries(Object.entries(activeFieldFilters).filter(([key]) => mapFilterableFieldKeys.has(key))),
-    [activeFieldFilters, mapFilterableFieldKeys],
-  );
-
   // Task 6 (#203 §5.2): the map view is now sourced from viewport-scoped
   // markers rather than a full per-domain browse feed (that full fetch was
   // removed from this page entirely in Task 7 of the caching epic). The
-  // top-bar free-text `search` is DEFERRED for the map (issue #5, spec §9):
-  // viewport markers are slim (coords only), and the server has no free-text
-  // match on `/markers` today — building one is real search-relevance surface
-  // (guarding which fields are searchable, private-field safety, ranking),
-  // out of this PR's scope on purpose (see the plan doc's "Out of scope").
-  // `search` therefore keeps filtering only the LIST (`buildFilteredCardsForDomain`
-  // below); the map ignores it. `MapFiltersPanel`'s enum-field facets, by
-  // contrast, DO now drive the map server-side — but ONLY the subset
-  // declared `filterable: true` in network.json (Task 1), which is the set
-  // the server's facet guard (`resolveAllowedFacetFields`, Task 3) actually
-  // honors for `item_state` filtering; that's `mapActiveFieldFilters` above,
-  // not the full `activeFieldFilters` the list uses (see the comment there).
-  // Declaring more facets per network (+ indexing them, Task 1's pattern in
-  // `network.json`) is a config follow-up, not a code change here — most
-  // example networks currently declare zero filterable facets, so the map
-  // filter panel may show no enum groups at all for them until that's done.
-  // The domain multi-select (below, a client-side array-membership check on
-  // the already-fetched markers) and free-text search remain client/list-only
-  // regardless of facet config.
+  // top-bar free-text `search` now ALSO filters the map (map-native-text-search,
+  // #394): it's forwarded to `useMapMarkers` below, which sends it to the
+  // server as `/markers?q=` — a value-match against public (non-private)
+  // `item_state` fields, viewport-scoped, same as the list's search. The list
+  // still applies `search` itself via `buildFilteredCardsForDomain` below;
+  // the two are independent filters over the same query, not one deriving
+  // from the other. `MapFiltersPanel`'s enum-field facets, by contrast,
+  // drive the map server-side directly via `activeFieldFilters` — #394
+  // removed the `filterable: true` gate that used to additionally restrict
+  // this to a network.json-marked subset; every declared, non-private enum
+  // field the panel offers (the same full set the list uses,
+  // `getEnumFilterFieldsForDomains`) is now sent and applied by the server's
+  // facet guard (`resolveAllowedFacetFields`). See #360 for the proper
+  // long-term schema-driven search/filter declaration. The domain
+  // multi-select below (a client-side array-membership check on the
+  // already-fetched markers) remains client/list-only; free-text search, per
+  // the comment above, is sent to the server for both the map and the list.
   //
   // Even at low zoom for an anonymous / no-location visitor we now fetch the
   // slim viewport markers (coords only, capped at MAP_FETCH_LIMIT) and cluster
@@ -974,7 +952,7 @@ export function HomePage() {
     () => (selectedDomain ? visibleDomains.filter((d) => d.id === selectedDomain) : visibleDomains),
     [selectedDomain, visibleDomains],
   );
-  const mapMarkers = useMapMarkers(network, mapDomains, mapViewport, mapActiveFieldFilters);
+  const mapMarkers = useMapMarkers(network, mapDomains, mapViewport, activeFieldFilters, search);
 
   // On the "All" tab the Filters-panel domain multi-select narrows which pins
   // show (client-side membership check — every `Marker` carries `item_domain`).
@@ -1015,35 +993,53 @@ export function HomePage() {
     [userLocation],
   );
 
-  // Task 5 (#203 List PR): map the "Near me" toggle + search box + facet
-  // selections to the discover params both list paths share. Near me OFF (the
-  // default) = ranked discover globally (relevance, NO location); Near me ON =
-  // proximity (location passed, relevance unset). See `deriveBrowseParams` for
-  // why location is omitted in relevance mode.
+  // #394: the list ALWAYS uses the discover BFF now — map the search box +
+  // facet selections to the shared discover params (see `deriveBrowseParams`;
+  // `relevance` is unconditionally true, there is no more ranked/proximity
+  // split). The resolved viewer location (`browseCoords`, from
+  // `LocationSourceToggle`/`preferredSource`) is ALWAYS forwarded too — it's
+  // `null` when none is available (no profile location AND browser location
+  // denied/unsupported), in which case discover just runs anchor-only (or
+  // fully unranked-by-location for a signed-out viewer).
   const browseParams = React.useMemo<DerivedBrowseParams>(
-    () => deriveBrowseParams({ nearMe, search, activeFieldFilters }),
-    [nearMe, search, activeFieldFilters],
+    () => deriveBrowseParams({ search, activeFieldFilters }),
+    [search, activeFieldFilters],
   );
-  const browseLocation = browseParams.useLocation ? browseCoords : null;
-  // #394: anchor both list paths (below) to the viewer's selected own-profile
-  // item — `useInfiniteBrowseItems` only sends this to signals-search on the
-  // discover path (mirrors `deriveBrowseParams` above: native/proximity mode
-  // and the map are unaffected). Switching the selected profile produces a new
-  // `browseHookOpts` object, which produces a new query key in discover mode
-  // (Task 2), which re-queries with the new anchor.
+  const browseLocation = browseCoords;
+  // #394: shared discover params for both list paths — q/filters/relevance are
+  // the same regardless of which domain is being browsed. `anchorItemId` is
+  // deliberately NOT included here: signals-search enforces the network's
+  // interaction matrix and 403s (`INTERACTION_NOT_ALLOWED`) when the anchor's
+  // domain has no defined interaction with the browsed domain (e.g. a seeker
+  // browsing seekers), so the anchor must be computed PER target domain (see
+  // `anchorFor` below) rather than shared.
   const browseHookOpts = React.useMemo(
     () => ({
       q: browseParams.q,
       filters: browseParams.filters,
       relevance: browseParams.relevance,
-      anchorItemId: deriveAnchorItemId(activeProfileId),
     }),
-    [browseParams, activeProfileId],
+    [browseParams],
   );
   // True when the active feed is served by the discover BFF (q OR filters OR
   // relevance) — the server has already applied text + facet filtering, so the
   // client-side filters in `buildFilteredCardsForDomain` must be bypassed.
   const listDiscover = isDiscoverActive(browseParams);
+
+  // #394: per-target-domain anchor. `myItem` (the resolved active profile,
+  // defined above) supplies the anchor's own domain; `anchorItemIdForTarget`
+  // consults the schema's interaction matrix (`network.actions[].interactions`)
+  // to decide whether that domain may anchor discover calls for `targetDomain`.
+  const anchorFor = React.useCallback(
+    (targetDomain: string): string | undefined =>
+      anchorItemIdForTarget({
+        activeProfileId,
+        activeProfileDomain: myItem?.item_domain ?? null,
+        targetDomain,
+        actions: network?.actions ?? {},
+      }),
+    [activeProfileId, myItem, network],
+  );
 
   // Single-domain paged fetch. Enabled only while a specific domain tab is
   // selected; disabled (and thus inert) on the "All" tab.
@@ -1051,7 +1047,11 @@ export function HomePage() {
     network,
     selectedDomain ? selectedDomainObj : null,
     browseLocation,
-    { enabled: selectedDomain !== null, ...browseHookOpts },
+    {
+      enabled: selectedDomain !== null,
+      ...browseHookOpts,
+      anchorItemId: selectedDomain ? anchorFor(selectedDomain) : undefined,
+    },
   );
 
   // Own-item filtering is a view concern (mirrored below by
@@ -1097,6 +1097,7 @@ export function HomePage() {
       fetchNext: () => void,
       partial: boolean,
       degraded: boolean,
+      distanceMeters: number | undefined,
     ) => {
       setAllDomainPages((prev) => {
         const existing = prev[domainId];
@@ -1110,14 +1111,15 @@ export function HomePage() {
           existing.total === total &&
           existing.isLoading === isLoading &&
           existing.partial === partial &&
-          existing.degraded === degraded
+          existing.degraded === degraded &&
+          existing.distanceMeters === distanceMeters
         ) {
           // Same data (plain re-render): bail so React doesn't re-render → no loop.
           return prev;
         }
         return {
           ...prev,
-          [domainId]: { items, hasMore, total, isLoading, fetchNext, partial, degraded },
+          [domainId]: { items, hasMore, total, isLoading, fetchNext, partial, degraded, distanceMeters },
         };
       });
     },
@@ -1210,13 +1212,48 @@ export function HomePage() {
   // Single source of truth for the degraded-search UX: single-domain tab reads
   // the one paged feed directly, "All" tab is the OR above.
   const listDegraded = selectedDomain !== null ? singleDomainList.degraded : allDomainsListDegraded;
-  // Whether the user has an active search query OR facet filter (NOT the
-  // relevance default) — decides which degraded banner variant shows below,
-  // and whether the facet chips render as paused/not-applied.
-  const searchOrFiltersActive = hasActiveSearchOrFilters(browseParams);
-  const degradedBanner = resolveDegradedBanner({
+
+  // #394: the effective spatial radius (`meta.distance_meters`), same
+  // single-domain-vs-"All" split as `listPartial`/`listDegraded` above. On the
+  // "All" tab every visible domain shares the same location + radius config,
+  // so the first domain to report one is representative of all of them.
+  const allDomainsDistanceMeters = visibleDomains
+    .map((domain) => allDomainPages[domain.id]?.distanceMeters)
+    .find((value) => value !== undefined);
+  const listDistanceMeters =
+    selectedDomain !== null ? singleDomainList.distanceMeters : allDomainsDistanceMeters;
+
+  // #394 (review fix): whether the viewer actually has a profile anchor being
+  // sent for the browsed domain(s) — derived from the SAME rule that gates
+  // the anchor itself (`anchorFor`/`anchorItemIdForTarget`, both built on
+  // `domainsInteract`), not the looser "signed in with an active profile"
+  // check this used to be. A directory-style network can have a selected (or,
+  // on "All", every visible) domain with NO interaction edge to the viewer's
+  // own profile domain — no anchor is sent for that view at all, and the note
+  // must not claim profile-relevance when nothing was actually anchored.
+  // Single-domain tab: gate on that one target domain via `anchorFor` (the
+  // exact function `singleDomainList` calls above). "All"/no-selection view:
+  // true iff the viewer's profile domain interacts with at least one visible
+  // domain (mirrors `computeVisibleDomains`' own per-domain anchor gating).
+  const activeProfileDomain = myItem?.item_domain ?? null;
+  const hasProfileAnchor =
+    selectedDomain !== null
+      ? anchorFor(selectedDomain) !== undefined
+      : Boolean(
+          activeProfileId &&
+            activeProfileDomain &&
+            visibleDomains.some((domain) =>
+              domainsInteract(network?.actions ?? {}, activeProfileDomain, domain.id),
+            ),
+        );
+  // Whether a location is actually being sent as the discover spatial filter.
+  const hasLocation = browseLocation !== null;
+  const listNote = resolveListNote({
+    hasProfileAnchor,
+    hasLocation,
     degraded: listDegraded,
-    searchOrFiltersActive,
+    distanceMeters: listDistanceMeters,
+    locationSource: preferredSource,
   });
 
   // Active schema: from the selected browsing domain, or first visible domain
@@ -1894,9 +1931,10 @@ export function HomePage() {
   // `PageShell` below) — as opposed to `filtersPanel` above, which is also
   // reused as MapView's OWN copy rendered only while the map is maximized
   // (the header is covered in fullscreen; see `MapView`'s `filtersSlot` doc).
-  // Only THIS mount marks the selected facet chips paused/not-applied when
-  // the discover BFF fell back to native with an active search/filter — the
-  // map's maximized-mode copy is unaffected (it never sees the discover path).
+  // #394: previously this mount marked the selected facet chips
+  // paused/not-applied when the discover BFF fell back to native — since the
+  // fallback now applies facet filters natively, that pausing no longer
+  // applies and this is identical to `filtersPanel` above.
   const listFiltersPanel = (
     <MapFiltersPanel
       domains={visibleDomains}
@@ -1907,7 +1945,6 @@ export function HomePage() {
       onFieldsChange={handleMapFieldsChange}
       showDomainToggle={selectedDomain === null}
       viewMode={viewMode}
-      paused={listDegraded && searchOrFiltersActive}
     />
   );
 
@@ -1933,12 +1970,6 @@ export function HomePage() {
       viewMode={viewMode}
       onViewModeChange={handleViewModeChange}
       filtersSlot={listFiltersPanel}
-      // "Near me" is a LIST-view control: OFF (default) = ranked discover feed;
-      // ON = proximity. The map ignores it (it reads viewport markers), so only
-      // surface it in list view.
-      listControlsSlot={
-        viewMode === 'list' ? <NearMeToggle active={nearMe} onChange={setNearMe} /> : undefined
-      }
     >
       {!user ? (
         <GuestHero />
@@ -1959,11 +1990,13 @@ export function HomePage() {
           (viewMode !== 'list') so the two sets never double-mount.
 
           These count-only fetchers stay on the NATIVE browse path (no discover
-          opts, raw proximity coords) regardless of the list's "Near me" toggle:
-          the toggle is a list-view control and the map is unaffected (spec §5.3
-          — the map ignores search/filters/relevance entirely). Routing this
-          header count through discover would silently make it diverge from the
-          map's own marker total whenever the search index lags the live DB. */}
+          opts, raw proximity coords) regardless of the list's own always-on
+          discover mode: those are list-view concerns and must not route this
+          count through discover — doing so would make it diverge from the map's
+          own marker total whenever the search index lags the live DB. (The map
+          view itself DOES honor facet filters and free-text search via its own
+          `/markers` fetch — see `useMapMarkers`; this note is only about the
+          header-count fetchers, which are a separate native path.) */}
       {user && network && selectedDomain === null && viewMode !== 'list' &&
         visibleDomains.map((domain) => (
           <DomainPagedFetch
@@ -2101,28 +2134,24 @@ export function HomePage() {
                     {t('home.list_partial')}
                   </p>
                 )}
-                {/* Degraded-search indicator (#203 §6): the discover BFF fell back to
-                    native (signals-search unreachable/unconfigured/timed out) —
-                    `meta.source: 'native_fallback'` / `degraded: true`, surfaced via
-                    `singleDomainList.degraded` / the "All" tab's per-domain OR
-                    (`listDegraded`). Native results are still shown below (the
-                    fallback DOES return native items) — this only warns that a
-                    search/filter the user set is NOT actually being applied.
-                    Two variants (`resolveDegradedBanner`): PROMINENT when the user
-                    has an active search query or facet filter (their expectation is
-                    violated — filters look selected but aren't applied server-side),
-                    subtle when browsing the plain relevance default (only ranking
-                    quality is reduced, results are still relevant/recent). "Near
-                    me"/proximity (native path) never sets `degraded`, so no banner
-                    shows there. */}
-                {degradedBanner === 'search_unavailable' && (
-                  <p className="mb-3 rounded-md bg-amber-100 px-3 py-2 text-sm font-semibold text-amber-950 shadow-sm ring-2 ring-amber-400 dark:bg-amber-900 dark:text-amber-50 dark:ring-amber-700">
-                    {t('home.list_search_unavailable')}
-                  </p>
-                )}
-                {degradedBanner === 'ranking_unavailable' && (
+                {/* List note (#394): the list always calls discover now (profile
+                    anchor + resolved viewer location when available), so this
+                    explains what's driving the results — relevance-to-profile,
+                    proximity, both, or (when the discover BFF fell back to
+                    native — signals-search unreachable/unconfigured/timed out)
+                    that ranking itself is temporarily unavailable. Exactly one
+                    variant renders at a time; see `resolveListNote`. */}
+                {listNote && (
                   <p className="mb-3 text-xs text-muted-foreground">
-                    {t('home.list_ranking_unavailable')}
+                    {t(
+                      listNote.key,
+                      listNote.values
+                        ? {
+                            km: listNote.values.km,
+                            locationSource: t(`home.location_source_${listNote.values.locationSource}`),
+                          }
+                        : undefined,
+                    )}
                   </p>
                 )}
                 {selectedDomain === null ? (
@@ -2140,7 +2169,7 @@ export function HomePage() {
                         network={network}
                         domain={domain}
                         coords={browseLocation}
-                        browseOpts={browseHookOpts}
+                        browseOpts={{ ...browseHookOpts, anchorItemId: anchorFor(domain.id) }}
                         onItems={handleDomainItems}
                       />
                     ))}

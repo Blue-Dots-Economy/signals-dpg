@@ -277,6 +277,48 @@ describe('useInfiniteBrowseItems', () => {
     );
   });
 
+  // #394 Task 2: the discover BFF reports the effective spatial radius as
+  // `meta.distance_meters` (present only when the request carried a
+  // location) so the list note above the results can show "within X km".
+  it('surfaces distanceMeters from the discover response meta.distance_meters', async () => {
+    vi.mocked(fetchDiscover).mockResolvedValue({
+      items: [item('a')],
+      meta: { total: 1, limit: 2, offset: 0, source: 'signals_search', degraded: false, distance_meters: 30000 },
+    });
+    const { result } = renderHook(
+      () => useInfiniteBrowseItems(network, domain, { lat: 19, lng: 72 }, { relevance: true }),
+      { wrapper },
+    );
+    await waitFor(() => expect(result.current.items.length).toBe(1));
+    expect(result.current.distanceMeters).toBe(30000);
+  });
+
+  it('leaves distanceMeters undefined when the discover response omits it (no location sent)', async () => {
+    vi.mocked(fetchDiscover).mockResolvedValue({
+      items: [item('a')],
+      meta: { total: 1, limit: 2, offset: 0, source: 'signals_search', degraded: false },
+    });
+    const { result } = renderHook(
+      () => useInfiniteBrowseItems(network, domain, null, { relevance: true }),
+      { wrapper },
+    );
+    await waitFor(() => expect(result.current.items.length).toBe(1));
+    expect(result.current.distanceMeters).toBeUndefined();
+  });
+
+  it('leaves distanceMeters undefined on the plain native browse path', async () => {
+    vi.mocked(fetchNetworkItems).mockResolvedValue({
+      meta: { total: 1, limit: 2, offset: 0 },
+      items: [item('a')],
+    });
+    const { result } = renderHook(
+      () => useInfiniteBrowseItems(network, domain, { lat: 19, lng: 72 }),
+      { wrapper },
+    );
+    await waitFor(() => expect(result.current.items.length).toBe(1));
+    expect(result.current.distanceMeters).toBeUndefined();
+  });
+
   it('does not send anchor_item_id in native mode and its key is unaffected by anchorItemId', async () => {
     vi.mocked(fetchNetworkItems).mockResolvedValue({
       meta: { total: 1, limit: 2, offset: 0 },

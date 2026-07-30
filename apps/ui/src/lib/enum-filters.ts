@@ -27,20 +27,6 @@ export interface EnumFilterField {
    * per item). `false` when it is a simple `enum` (single value per item).
    */
   isArray: boolean;
-  /**
-   * `true` when the field's config declares `filterable: true` (Task 1,
-   * #203) in at least one of the unioned schemas. This is a DIFFERENT gate
-   * than "is an enum" (every field returned by `extractEnumFields` already
-   * has an `enum`): `filterable` is what the SERVER's facet guard
-   * (`resolveAllowedFacetFields` in `apps/api/src/utils/item_fetch_runtime.ts`)
-   * actually honors for the `= ANY(...)` map facet path (#203 Task 3) — an
-   * enum field with no `filterable: true` marker is a normal form field the
-   * server will silently drop as a facet filter. `getEnumFilterFieldsForDomains`'s
-   * `filterableOnly` option uses this to scope the MAP's offered/sent
-   * facets to only fields the server will actually act on, while the LIST
-   * keeps offering every enum field regardless (#203 Task 7 review fix).
-   */
-  filterable: boolean;
 }
 
 // ─── Humanization ─────────────────────────────────────────────────────────────
@@ -76,18 +62,21 @@ function extractEnumFields(schema: RJSFSchema): EnumFilterField[] {
   for (const [key, rawProp] of Object.entries(schema.properties)) {
     // JSON Schema properties can be boolean (true/false) when using additionalProperties
     if (typeof rawProp !== 'object' || rawProp === null) continue;
-    const prop = rawProp as RJSFSchema & { private?: boolean; filterable?: boolean };
-    const filterable = prop.filterable === true;
+    const prop = rawProp as RJSFSchema & { private?: boolean };
 
-    // Defense-in-depth (#203 Task 7): never offer a `private: true` field as
-    // a filter option, even though the server's facet guard
-    // (`resolveAllowedFacetFields`) would silently drop any filter request
-    // on one anyway. No currently-configured network schema declares both
-    // `private: true` and `enum` on the same property (verified across
-    // every `examples/schemas/*/network.json`), so this doesn't change any
-    // network's filter options today — it just stops a future schema edit
-    // from silently surfacing an inert-but-visible filter for a private
-    // field.
+    // Defense-in-depth (#203 Task 7, restated #394): never offer a
+    // `private: true` field as a filter option, even though the server's
+    // facet guard (`resolveAllowedFacetFields`) would silently drop any
+    // filter request on one anyway. No currently-configured network schema
+    // declares both `private: true` and `enum` on the same property
+    // (verified across every `examples/schemas/*/network.json`), so this
+    // doesn't change any network's filter options today — it just stops a
+    // future schema edit from silently surfacing an inert-but-visible filter
+    // for a private field. This is the ONLY gate now — #394 removed the
+    // separate `filterable: true` marker that used to additionally restrict
+    // the map's offered/sent facets; every declared, non-private enum field
+    // is a filter again in both views. Proper schema-driven search/filter
+    // declaration is tracked in #360.
     if (prop.private === true) continue;
 
     // Single-value enum: string or number property with a top-level `enum` array
@@ -101,7 +90,6 @@ function extractEnumFields(schema: RJSFSchema): EnumFilterField[] {
           label: typeof prop.title === 'string' && prop.title.trim() ? prop.title.trim() : humanizeKey(key),
           options,
           isArray: false,
-          filterable,
         });
       }
       continue;
@@ -125,7 +113,6 @@ function extractEnumFields(schema: RJSFSchema): EnumFilterField[] {
             label: typeof prop.title === 'string' && prop.title.trim() ? prop.title.trim() : humanizeKey(key),
             options,
             isArray: true,
-            filterable,
           });
         }
       }
@@ -145,17 +132,6 @@ function extractEnumFields(schema: RJSFSchema): EnumFilterField[] {
  *   - The `label` from the first occurrence is used.
  *   - `options` are unioned (preserving first-seen order, deduped by value).
  *   - `isArray` from the first occurrence wins.
- *   - `filterable` is OR'd across occurrences — a field counts as filterable
- *     if ANY unioned schema (e.g. any domain's item_type) declares
- *     `filterable: true` for it, matching the permissive "union" spirit of
- *     `options`/`isArray` above. Note this is a coarser grain than the
- *     server's own per-domain guard (`resolveAllowedFacetFields` resolves
- *     filterable-ness per NETWORK+DOMAIN, not globally): in the rare case a
- *     field is `filterable` in one domain's schema but not another's, this
- *     union will still offer/send it, and the server will apply it for the
- *     domain(s) that declare it filterable and silently drop it for the
- *     domain(s) that don't (Task 3's existing per-domain-request behavior,
- *     unchanged) — no domain ever gets a filter applied it didn't declare.
  *
  * Fields are returned in declaration order across schemas (first schema first).
  */
@@ -163,7 +139,7 @@ export function getEnumFilterFields(schemas: RJSFSchema[]): EnumFilterField[] {
   // Map from key → accumulated field (mutable during the loop)
   const byKey = new Map<
     string,
-    { label: string; optionsSet: Set<string>; options: string[]; isArray: boolean; filterable: boolean }
+    { label: string; optionsSet: Set<string>; options: string[]; isArray: boolean }
   >();
 
   for (const schema of schemas) {
@@ -175,7 +151,6 @@ export function getEnumFilterFields(schemas: RJSFSchema[]): EnumFilterField[] {
           optionsSet: new Set(field.options),
           options: [...field.options],
           isArray: field.isArray,
-          filterable: field.filterable,
         });
       } else {
         // Union options, preserving insertion order, deduping by value
@@ -185,40 +160,27 @@ export function getEnumFilterFields(schemas: RJSFSchema[]): EnumFilterField[] {
             existing.options.push(opt);
           }
         }
-        existing.filterable = existing.filterable || field.filterable;
       }
     }
   }
 
-  return Array.from(byKey.entries()).map(([key, { label, options, isArray, filterable }]) => ({
+  return Array.from(byKey.entries()).map(([key, { label, options, isArray }]) => ({
     key,
     label,
     options,
     isArray,
-    filterable,
   }));
-}
-
-export interface GetEnumFilterFieldsForDomainsOptions {
-  /**
-   * When `true`, only return fields with `filterable: true` (Task 1's
-   * network.json marker) — the set the server's facet guard
-   * (`resolveAllowedFacetFields`, #203 Task 3) will actually honor as an
-   * `item_state` MAP filter. When `false`/omitted, returns every enum field
-   * (the LIST's behavior, unchanged — the list filters client-side and
-   * needs no server cooperation, #203 Task 7 review fix).
-   */
-  filterableOnly?: boolean;
 }
 
 /**
  * Convenience helper: extract all item_schemas from the given visible domains,
- * then derive enum filter fields.
+ * then derive enum filter fields. Both the map and list views use this same
+ * full set — every declared, non-private enum field is a filter in both
+ * (#394 dropped the `filterable: true` gate that used to additionally
+ * restrict what the map offered/sent; proper schema-driven search/filter
+ * declaration is tracked in #360).
  */
-export function getEnumFilterFieldsForDomains(
-  domains: DotNetworkDomain[],
-  options?: GetEnumFilterFieldsForDomainsOptions,
-): EnumFilterField[] {
+export function getEnumFilterFieldsForDomains(domains: DotNetworkDomain[]): EnumFilterField[] {
   const schemas: RJSFSchema[] = [];
   for (const domain of domains) {
     if (domain.item_schemas) {
@@ -231,8 +193,7 @@ export function getEnumFilterFieldsForDomains(
       schemas.push(domain.default_item_schemas.profile);
     }
   }
-  const fields = getEnumFilterFields(schemas);
-  return options?.filterableOnly ? fields.filter((f) => f.filterable) : fields;
+  return getEnumFilterFields(schemas);
 }
 
 // ─── Filter application ───────────────────────────────────────────────────────

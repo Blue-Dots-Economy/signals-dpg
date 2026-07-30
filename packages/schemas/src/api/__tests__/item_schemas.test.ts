@@ -138,3 +138,63 @@ describe('item_state multi-value facet arrays (#203 Task 7)', () => {
     }
   });
 });
+
+describe('q free-text value-match search (#394 map native text search)', () => {
+  it('MarkersQuerySchema accepts a q and preserves it', () => {
+    const result = MarkersQuerySchema.safeParse({ ...base, q: 'plumber' });
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.q).toBe('plumber');
+    }
+  });
+
+  it('MarkersQuerySchema trims surrounding whitespace off q', () => {
+    const result = MarkersQuerySchema.safeParse({ ...base, q: '  plumber  ' });
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.q).toBe('plumber');
+    }
+  });
+
+  it('MarkersQuerySchema rejects an empty/whitespace-only q rather than silently treating it as no search', () => {
+    expect(MarkersQuerySchema.safeParse({ ...base, q: '' }).success).toBe(false);
+    expect(MarkersQuerySchema.safeParse({ ...base, q: '   ' }).success).toBe(false);
+  });
+
+  it('MarkersQuerySchema treats q as optional (bare bbox/facet requests are unaffected)', () => {
+    expect(MarkersQuerySchema.safeParse({ ...base }).success).toBe(true);
+  });
+
+  it('MarkersQuerySchema accepts q combined with a bbox (the map path)', () => {
+    const result = MarkersQuerySchema.safeParse({ ...base, ...bbox, q: 'plumber' });
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.q).toBe('plumber');
+      expect(result.data.min_lat).toBe(18);
+    }
+  });
+
+  it('MarkersBodySchema (the inter-instance peer body) accepts and preserves q', () => {
+    const result = MarkersBodySchema.safeParse({
+      ...base,
+      q: 'plumber',
+      limit: 200,
+      offset: 0,
+    });
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.q).toBe('plumber');
+    }
+  });
+
+  it('FetchItemsQuerySchema (list/discover, not the map) has no q field of its own', () => {
+    // q lives on MarkersSchemaBase specifically — the map stays native while
+    // list/discover text search goes through signals-search's own `q`
+    // (DiscoverItemsBodySchema), a distinct schema entirely.
+    const result = FetchItemsQuerySchema.safeParse({ ...base, q: 'plumber' });
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect((result.data as Record<string, unknown>).q).toBeUndefined();
+    }
+  });
+});

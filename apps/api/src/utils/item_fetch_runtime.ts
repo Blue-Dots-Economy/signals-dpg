@@ -18,22 +18,42 @@ export type ItemFetchFilters = {
   item_instance_url?: string | null;
   item_schema_url?: string | null;
   /**
-   * Per-field `item_state` filter values. A **scalar** value (string/number/
-   * boolean) keeps the original exact-match semantics — all such entries are
-   * combined into one `item_state @> {...}` containment check (unchanged
-   * behavior, pre-#203). An **array** value is a multi-value facet filter
+   * Per-field `item_state` filter values. Both a **scalar** value (string/
+   * number/boolean) and an **array** value are facet filters applied via the
+   * SAME guarded path: a scalar `v` is normalized to `[v]`, then every value
+   * set (single or multi) is applied as `item_state->>'field' = ANY(values)`
    * (#203 Task 3, closing the "documented follow-up" noted at
-   * `apps/ui/src/lib/network-api.ts`'s `item_state[field]` comment): it is
-   * applied as `item_state->>'field' = ANY(values)`, which only Task 1's
-   * per-field expression btree indexes accelerate (a `@>` containment check
-   * cannot express "any of these values" for one key). SECURITY: an array
-   * value is only honored when the network config declares that field
-   * `filterable: true` AND not `private: true` for the item's domain — see
-   * `resolveAllowedFacetFields` below — otherwise it is dropped silently
-   * (never surfaced as a 4xx) so a caller can't use found/not-found responses
-   * to enumerate a private field's values.
+   * `apps/ui/src/lib/network-api.ts`'s `item_state[field]` comment), which
+   * only Task 1's per-field expression btree indexes accelerate (a `@>`
+   * containment check cannot express "any of these values" for one key).
+   * SECURITY (#394): a value is only honored when the field is declared in
+   * the network config's schema `properties` AND not `private: true` for the
+   * item's domain — see `resolveAllowedFacetFields` below — otherwise it is
+   * dropped silently (never surfaced as a 4xx) so a caller can't use
+   * found/not-found responses to enumerate a private/undeclared field's
+   * values. This guard used to apply ONLY to array values; a scalar value
+   * went through an unguarded `item_state @> {...}` containment check
+   * instead, which let a single-value filter enumerate a private/undeclared
+   * field — #394 closed that hole by unifying both shapes onto this one
+   * guarded `= ANY` path, with no remaining unguarded branch. (There used to
+   * be an additional `filterable: true` marker gating this further; a prior
+   * #394 change dropped it — every declared, non-private field is a filter
+   * again. The proper schema-driven search/filter declaration is tracked in
+   * #360.)
    */
   item_state?: Record<string, unknown>;
+  /**
+   * Free-text value-match search (#394 map native text search). `q` is the
+   * raw search term; `fields` is the SERVER-resolved allowlist of non-private
+   * `item_state` field keys to match against — resolved by the route handler
+   * via `resolveAllowedFacetFields` (facet_guard.ts) from the network
+   * config, never from the client. `buildWhereClause` below ANDs this into
+   * whatever bbox/radius condition is already present, so a text match is
+   * inherently viewport-scoped — no separate geo logic needed here. An empty
+   * `fields` (no non-private field declared for the domain/item_type) makes
+   * the match unsatisfiable by design rather than matching everything.
+   */
+  text_search?: { q: string; fields: string[] };
   item_latitude?: number;
   item_longitude?: number;
   radius_meters?: number;
@@ -85,12 +105,21 @@ const itemResponseColumns = {
 
 /**
  * #203 Task 3 security guard: resolves the set of `item_state` field names a
- * caller is allowed to facet-filter on for a given network/domain — exactly
- * those schema properties (across every item_type declared for the domain)
- * marked `filterable: true` AND NOT `private: true`. Sourced from the network
- * config (the same `getNetworkConfigById` cache used elsewhere in the app),
- * never from the request — a client cannot expand its own allowed facet set
- * by naming more fields.
+ * caller is allowed to facet-filter on for a given network/domain — every
+ * schema property (across every item_type declared for the domain) that is
+ * declared at all AND NOT `private: true`. Sourced from the network config
+ * (the same `getNetworkConfigById` cache used elsewhere in the app), never
+ * from the request — a client cannot expand its own allowed facet set by
+ * naming more fields.
+ *
+ * #394: this used to additionally require `filterable: true` (a per-field
+ * marker in network.json). That gate has been removed — every declared,
+ * non-private enum field is a filter again in both the map and list views
+ * (restoring pre-Map-PR behavior). The `private !== true` check below is the
+ * enumeration guard and MUST stay: it is the only thing standing between a
+ * client and using found/not-found responses to enumerate a private field's
+ * values. The proper long-term schema-driven search/filter declaration is
+ * tracked in #360 — this function is the code to revisit when that lands.
  *
  * Fails closed: an unconfigured network/domain (bad `item_network`/
  * `item_domain`, or a network config load error) yields an empty set, so
@@ -123,8 +152,8 @@ async function resolveAllowedFacetFields(
       properties as Record<string, unknown>
     )) {
       if (!definition || typeof definition !== 'object') continue;
-      const declared = definition as { filterable?: unknown; private?: unknown };
-      if (declared.filterable === true && declared.private !== true) {
+      const declared = definition as { private?: unknown };
+      if (declared.private !== true) {
         allowed.add(field);
       }
     }
@@ -172,25 +201,26 @@ async function buildWhereClause(
   }
 
   if (filters.item_state) {
-    // Split the requested item_state entries: array values are a #203 Task 3
-    // multi-value facet filter (`= ANY`, guarded below); scalar values keep
-    // the pre-existing exact-match containment behavior.
-    const scalarState: Record<string, unknown> = {};
-    const facetEntries: Array<[string, unknown[]]> = [];
-
-    for (const [field, value] of Object.entries(filters.item_state)) {
-      if (Array.isArray(value)) {
-        facetEntries.push([field, value]);
-      } else {
-        scalarState[field] = value;
-      }
-    }
-
-    if (Object.keys(scalarState).length > 0) {
-      conditions.push(
-        sql`${items.item_state} @> ${JSON.stringify(scalarState)}::jsonb`
-      );
-    }
+    // Every requested item_state entry — scalar or array — is normalized to
+    // an array and routed through the SAME guarded `= ANY` path (#394 fix): a
+    // scalar `v` becomes `[v]`, which matches exactly like the old
+    // `@> {field: v}` containment check for an allowed field, but (unlike the
+    // old unguarded scalar branch) is dropped when the field isn't declared
+    // and non-private for this domain. Single- and multi-value facets are
+    // therefore identical from here on — there is no separate scalar
+    // containment branch any more.
+    //
+    // Caveat: "matches exactly" holds for STRING values — every configured
+    // facet today is a string enum, and `->> field` extracts JSON text, so
+    // `= ANY(ARRAY[...])` compares text to text just like the old containment
+    // check did. A numeric or boolean scalar facet would NOT be exact: `->>`
+    // still yields text (e.g. `'true'`, `'42'`), so the comparison becomes a
+    // text comparison rather than the JSON-typed equality `@>` used to do.
+    // Not an issue while facets stay string enums; revisit if a non-string
+    // facet is ever declared.
+    const facetEntries: Array<[string, unknown[]]> = Object.entries(
+      filters.item_state
+    ).map(([field, value]) => [field, Array.isArray(value) ? value : [value]]);
 
     if (facetEntries.length > 0) {
       const allowedFacetFields = await resolveAllowedFacetFields(
@@ -206,7 +236,7 @@ async function buildWhereClause(
               item_domain: filters.item_domain,
               field,
             },
-            'Dropping item_state facet filter: field is not declared filterable and non-private for this domain'
+            'Dropping item_state facet filter: field is not declared and non-private for this domain'
           );
           continue;
         }
@@ -226,6 +256,36 @@ async function buildWhereClause(
           sql`${items.item_state} ->> ${field} = ANY(ARRAY[${valuesArrayLiteral}])`
         );
       }
+    }
+  }
+
+  if (filters.text_search) {
+    const { q, fields } = filters.text_search;
+
+    if (fields.length === 0) {
+      // No non-private field is declared for this domain/item_type (e.g. an
+      // unconfigured item_type, or a schema with no public fields at all) —
+      // the match is unsatisfiable rather than silently matching every row.
+      conditions.push(sql`false`);
+    } else {
+      // Escape LIKE/ILIKE metacharacters (`\`, `%`, `_`) in the raw user
+      // query so `q` can never inject its own wildcards into the pattern —
+      // only a literal substring match is ever performed.
+      const likePattern = `%${q.replace(/[\\%_]/g, (char) => `\\${char}`)}%`;
+      const fieldsArrayLiteral = sql.join(
+        fields.map((field) => sql`${field}`),
+        sql.raw(', ')
+      );
+
+      conditions.push(
+        sql`
+          EXISTS (
+            SELECT 1 FROM jsonb_each_text(${items.item_state}) e
+            WHERE e.key = ANY(ARRAY[${fieldsArrayLiteral}])
+              AND e.value ILIKE ${likePattern} ESCAPE '\\'
+          )
+        `
+      );
     }
   }
 

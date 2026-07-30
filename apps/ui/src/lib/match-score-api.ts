@@ -33,6 +33,12 @@ export interface MatchScoreResult {
   reasoning?: string;
   signals?: MatchScoreSignal[];
   raw_response?: unknown;
+  // #394: set only on the value `useMatchScore` seeds from the discover
+  // response's `Item.score` (see `item-api.ts`), before any click hits
+  // `/api/v1/match-score/calculate` — distinguishes "upfront, no confidence/
+  // signals/reasoning yet" from a real `/v1/relevance` result, which never
+  // sets this field.
+  source?: 'discover';
 }
 
 export interface CalculateMatchScorePayload {
