@@ -45,7 +45,7 @@ import { apiConfig } from '@/lib/api-config';
 import { getEnumFilterFieldsForDomains } from '@/lib/enum-filters';
 import {
   deriveBrowseParams,
-  deriveAnchorItemId,
+  anchorItemIdForTarget,
   isDiscoverActive,
   resolveDegradedBanner,
   excludeOwnItems,
@@ -196,8 +196,12 @@ function DomainPagedFetch({
   // every visible domain so the whole "All" feed shares one discover mode.
   // Omitted by the map-view count-only fetchers, which stay on the native
   // browse path (the "Near me" toggle is a list-view control; the map is
-  // unaffected per spec §5.3). `anchorItemId` (#394) rides along the same way —
-  // `useInfiniteBrowseItems` only forwards it on the discover path.
+  // unaffected per spec §5.3). `anchorItemId` (#394) is NOT shared across
+  // domains like the rest of this object — the caller computes it per-domain
+  // (`anchorFor(domain.id)`) since whether it's safe to send depends on the
+  // schema's interaction matrix between the anchor's own domain and each
+  // individual browsed domain (e.g. a seeker's anchor is sent for the
+  // provider slice of "All" but withheld for the seeker slice).
   browseOpts?: {
     q?: string;
     filters: DiscoverFacetFilter[];
@@ -988,25 +992,40 @@ export function HomePage() {
     [nearMe, search, activeFieldFilters],
   );
   const browseLocation = browseParams.useLocation ? browseCoords : null;
-  // #394: anchor both list paths (below) to the viewer's selected own-profile
-  // item — `useInfiniteBrowseItems` only sends this to signals-search on the
-  // discover path (mirrors `deriveBrowseParams` above: native/proximity mode
-  // and the map are unaffected). Switching the selected profile produces a new
-  // `browseHookOpts` object, which produces a new query key in discover mode
-  // (Task 2), which re-queries with the new anchor.
+  // #394: shared discover params for both list paths — q/filters/relevance are
+  // the same regardless of which domain is being browsed. `anchorItemId` is
+  // deliberately NOT included here: signals-search enforces the network's
+  // interaction matrix and 403s (`INTERACTION_NOT_ALLOWED`) when the anchor's
+  // domain has no defined interaction with the browsed domain (e.g. a seeker
+  // browsing seekers), so the anchor must be computed PER target domain (see
+  // `anchorFor` below) rather than shared.
   const browseHookOpts = React.useMemo(
     () => ({
       q: browseParams.q,
       filters: browseParams.filters,
       relevance: browseParams.relevance,
-      anchorItemId: deriveAnchorItemId(activeProfileId),
     }),
-    [browseParams, activeProfileId],
+    [browseParams],
   );
   // True when the active feed is served by the discover BFF (q OR filters OR
   // relevance) — the server has already applied text + facet filtering, so the
   // client-side filters in `buildFilteredCardsForDomain` must be bypassed.
   const listDiscover = isDiscoverActive(browseParams);
+
+  // #394: per-target-domain anchor. `myItem` (the resolved active profile,
+  // defined above) supplies the anchor's own domain; `anchorItemIdForTarget`
+  // consults the schema's interaction matrix (`network.actions[].interactions`)
+  // to decide whether that domain may anchor discover calls for `targetDomain`.
+  const anchorFor = React.useCallback(
+    (targetDomain: string): string | undefined =>
+      anchorItemIdForTarget({
+        activeProfileId,
+        activeProfileDomain: myItem?.item_domain ?? null,
+        targetDomain,
+        actions: network?.actions ?? {},
+      }),
+    [activeProfileId, myItem, network],
+  );
 
   // Single-domain paged fetch. Enabled only while a specific domain tab is
   // selected; disabled (and thus inert) on the "All" tab.
@@ -1014,7 +1033,11 @@ export function HomePage() {
     network,
     selectedDomain ? selectedDomainObj : null,
     browseLocation,
-    { enabled: selectedDomain !== null, ...browseHookOpts },
+    {
+      enabled: selectedDomain !== null,
+      ...browseHookOpts,
+      anchorItemId: selectedDomain ? anchorFor(selectedDomain) : undefined,
+    },
   );
 
   // Own-item filtering is a view concern (mirrored below by
@@ -2050,7 +2073,7 @@ export function HomePage() {
                         network={network}
                         domain={domain}
                         coords={browseLocation}
-                        browseOpts={browseHookOpts}
+                        browseOpts={{ ...browseHookOpts, anchorItemId: anchorFor(domain.id) }}
                         onItems={handleDomainItems}
                       />
                     ))}

@@ -69,12 +69,49 @@ export function resolveDegradedBanner(input: { degraded: boolean }): DegradedBan
 //
 // The viewer's selected own-profile item id doubles as the discover "anchor"
 // (`useInfiniteBrowseItems`'s `opts.anchorItemId`, threaded to signals-search's
-// `intent.item.id`). `activeProfileId` is `string | null` (React state); the
-// hook opt is `string | undefined`. Kept as its own tiny pure function (rather
-// than inlined at the call site) so the null→undefined mapping is unit-tested
-// without mounting `home-page.tsx`.
-export function deriveAnchorItemId(activeProfileId: string | null): string | undefined {
-  return activeProfileId ?? undefined;
+// `intent.item.id`). But signals-search enforces the network's interaction
+// matrix (`network.actions[].interactions`, each with `from_domain`/
+// `to_domain`) and 403s with `INTERACTION_NOT_ALLOWED` when the anchor's
+// domain has no defined interaction with the browsed (target) domain — e.g. a
+// seeker browsing seekers. So the anchor must only be sent when the viewer's
+// domain and the browsed domain actually interact per the schema.
+
+/** Minimal shape of `DotNetworkSchema['actions']` this module needs — kept
+ * narrow (rather than importing the full engine type) so it stays
+ * unit-testable without pulling in RJSF/engine types. */
+export type NetworkInteractionActions = Record<
+  string,
+  { interactions: ReadonlyArray<{ from_domain: string; to_domain: string }> }
+>;
+
+// Schema-driven: true iff ANY action defines an interaction between `a` and
+// `b` in either direction. Same-domain pairs are `false` unless the schema
+// explicitly defines a self-interaction (none of today's networks do).
+export function domainsInteract(actions: NetworkInteractionActions, a: string, b: string): boolean {
+  return Object.values(actions).some((action) =>
+    action.interactions.some(
+      (interaction) =>
+        (interaction.from_domain === a && interaction.to_domain === b) ||
+        (interaction.from_domain === b && interaction.to_domain === a),
+    ),
+  );
+}
+
+export interface AnchorItemIdForTargetInput {
+  activeProfileId: string | null;
+  activeProfileDomain: string | null;
+  targetDomain: string;
+  actions: NetworkInteractionActions;
+}
+
+// The anchor to send for a given browsed (target) domain: the viewer's
+// selected profile id, but ONLY when they have one AND its domain is
+// schema-permitted to interact with the target domain. Otherwise `undefined`
+// (plain ranked/recency, no anchor — avoids the 403 round-trip entirely).
+export function anchorItemIdForTarget(input: AnchorItemIdForTargetInput): string | undefined {
+  if (!input.activeProfileId || !input.activeProfileDomain) return undefined;
+  if (!domainsInteract(input.actions, input.activeProfileDomain, input.targetDomain)) return undefined;
+  return input.activeProfileId;
 }
 
 // ─── Own-item filtering (runs UPSTREAM of buildFilteredCardsForDomain) ────────

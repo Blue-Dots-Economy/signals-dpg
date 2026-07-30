@@ -1,12 +1,14 @@
 import { describe, it, expect } from 'vitest';
 import {
   deriveBrowseParams,
-  deriveAnchorItemId,
+  domainsInteract,
+  anchorItemIdForTarget,
   buildFilteredCardsForDomain,
   excludeOwnItems,
   isDiscoverActive,
   resolveDegradedBanner,
 } from './browse-discover';
+import type { NetworkInteractionActions } from './browse-discover';
 import type { EnumFilterField } from './enum-filters';
 import type { Item } from './item-api';
 
@@ -25,13 +27,73 @@ function makeItem(id: string, state: Record<string, unknown>, domain = 'provider
   };
 }
 
-describe('deriveAnchorItemId (#394)', () => {
-  it('returns the selected profile id when one is selected', () => {
-    expect(deriveAnchorItemId('profile-123')).toBe('profile-123');
+// A minimal two-domain network mirroring the seeker/provider interaction
+// matrix: seekers can `apply`/`connect` to providers (both directions
+// represented across two actions), but there is no interaction that involves
+// seeker→seeker or provider→provider.
+const seekerProviderActions: NetworkInteractionActions = {
+  apply: {
+    interactions: [{ from_domain: 'seeker', to_domain: 'provider' }],
+  },
+  connect: {
+    interactions: [{ from_domain: 'provider', to_domain: 'seeker' }],
+  },
+};
+
+describe('domainsInteract (#394)', () => {
+  it('true for an interacting pair in schema order (seeker -> provider)', () => {
+    expect(domainsInteract(seekerProviderActions, 'seeker', 'provider')).toBe(true);
   });
 
-  it('returns undefined when no profile is selected', () => {
-    expect(deriveAnchorItemId(null)).toBeUndefined();
+  it('true for an interacting pair queried in reverse (provider, seeker)', () => {
+    expect(domainsInteract(seekerProviderActions, 'provider', 'seeker')).toBe(true);
+  });
+
+  it('false for a same-domain pair with no defined self-interaction (seeker <-> seeker)', () => {
+    expect(domainsInteract(seekerProviderActions, 'seeker', 'seeker')).toBe(false);
+  });
+
+  it('false for a domain unknown to the schema', () => {
+    expect(domainsInteract(seekerProviderActions, 'seeker', 'ghost')).toBe(false);
+  });
+
+  it('false when there are no actions at all', () => {
+    expect(domainsInteract({}, 'seeker', 'provider')).toBe(false);
+  });
+});
+
+describe('anchorItemIdForTarget (#394)', () => {
+  it('returns the profile id when a profile is selected and the domains interact', () => {
+    expect(
+      anchorItemIdForTarget({
+        activeProfileId: 'profile-123',
+        activeProfileDomain: 'seeker',
+        targetDomain: 'provider',
+        actions: seekerProviderActions,
+      }),
+    ).toBe('profile-123');
+  });
+
+  it('returns undefined when the domains do not interact (seeker browsing seekers)', () => {
+    expect(
+      anchorItemIdForTarget({
+        activeProfileId: 'profile-123',
+        activeProfileDomain: 'seeker',
+        targetDomain: 'seeker',
+        actions: seekerProviderActions,
+      }),
+    ).toBeUndefined();
+  });
+
+  it('returns undefined when there is no selected profile', () => {
+    expect(
+      anchorItemIdForTarget({
+        activeProfileId: null,
+        activeProfileDomain: null,
+        targetDomain: 'provider',
+        actions: seekerProviderActions,
+      }),
+    ).toBeUndefined();
   });
 });
 
