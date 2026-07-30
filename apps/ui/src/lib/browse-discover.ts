@@ -13,9 +13,16 @@ import { itemPassesEnumFilters } from '@/lib/enum-filters';
 // three ways to activate discover; it is unconditionally `true` here. The
 // caller (home-page) now ALWAYS forwards the resolved viewer location too
 // (`browseCoords`, from the `LocationSourceToggle`/`preferredSource` — profile
-// location or browser geolocation) — there is no `useLocation` gate anymore;
-// signals-search treats a spatial clause as a filter with its own default
-// radius applied when no location is sent at all.
+// location or browser geolocation) — there is no `useLocation` gate anymore.
+//
+// DEFAULT-BEHAVIOUR NOTE (#394, intended): signals-search treats the spatial
+// clause as a HARD filter (s_dwithin), so a signed-in user with a location
+// gets a list bounded to the effective radius (~30km default, configurable via
+// SIGNALS_SEARCH_DISTANCE_METERS) — results beyond it are excluded, and there
+// is NO global-ranked opt-out (the removed "Near me OFF" used to give one).
+// The "within X km" list note surfaces this to the user. A "search wider"
+// affordance (larger radius / omit-spatial "search anywhere") is a possible
+// follow-up. When no location is available at all, no spatial clause is sent.
 export interface DeriveBrowseParamsInput {
   search: string;
   activeFieldFilters: Record<string, string[]>;
