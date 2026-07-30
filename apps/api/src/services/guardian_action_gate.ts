@@ -30,7 +30,7 @@ export type GateInput = {
 export type GateResult =
   | { status: 'not_required' } // adult or ungated → proceed normally
   | { status: 'challenge_issued' } // OTP sent; caller fails the item GUARDIAN_OTP_REQUIRED
-  | { status: 'verified' } // OTP ok; caller writes guardian action row + proceeds
+  | { status: 'verified'; scope: string } // OTP ok; caller writes guardian action row + proceeds
   | { status: 'invalid_otp' }
   | { status: 'throttled' }
   | { status: 'rate_limited' }
@@ -117,7 +117,7 @@ export async function guardianActionGate(input: GateInput): Promise<GateResult> 
   }
 
   const ok = await verifyGuardianOtp({ scope, otp: input.otp });
-  return ok ? { status: 'verified' } : { status: 'invalid_otp' };
+  return ok ? { status: 'verified', scope } : { status: 'invalid_otp' };
 }
 
 /** One entry the bulk gate must consider — carries the item's batch index so
@@ -258,7 +258,7 @@ export async function guardianBulkActionGate(args: {
     // Verify + CONSUME once for the whole group — a single correct OTP unlocks
     // every gated item in the batch.
     const ok = await verifyGuardianOtp({ scope, otp: args.otp });
-    assign(ok ? { status: 'verified' } : { status: 'invalid_otp' });
+    assign(ok ? { status: 'verified', scope } : { status: 'invalid_otp' });
   }
 
   return results;
