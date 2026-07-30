@@ -34,6 +34,12 @@ export interface U18GuardianFlowProps {
    * lets a ward who can't get through (wrong account, backend outage) sign out.
    */
   onLogout?: () => void;
+  /**
+   * Render the steps INLINE (plain content, no blocking Dialog) instead of the
+   * default modal. Used inside the auth flow's right panel post-login (#453),
+   * matching SignupGuardianFlow; the home page keeps the modal presentation.
+   */
+  inline?: boolean;
 }
 
 /**
@@ -48,6 +54,7 @@ export function U18GuardianFlow({
   onNotMinor,
   initialStep = 'dob',
   onLogout,
+  inline = false,
 }: U18GuardianFlowProps) {
   const { t } = useTranslation();
   const [step, setStep] = React.useState<U18Step>(initialStep);
@@ -58,6 +65,74 @@ export function U18GuardianFlow({
     guardian: t('u18.step_title_guardian', 'Guardian details'),
     otp: t('u18.step_title_otp', 'Confirm with your guardian'),
   };
+
+  const subtitle = t(
+    'u18.step_subtitle',
+    "You're under 18, so a parent or guardian needs to confirm this account.",
+  );
+
+  const steps = (
+    <>
+      {step === 'dob' && (
+        <DobStep
+          network={network}
+          onResolved={(isMinor) => {
+            if (isMinor) setStep('guardian');
+            else onNotMinor();
+          }}
+        />
+      )}
+
+      {step === 'guardian' && (
+        <GuardianFormStep
+          network={network}
+          brand={brand}
+          onSubmitted={(body) => {
+            setGuardianBody(body);
+            setStep('otp');
+          }}
+        />
+      )}
+
+      {step === 'otp' && (
+        <GuardianOtpStep
+          network={network}
+          brand={brand}
+          onVerified={onComplete}
+          onResend={async () => {
+            if (!guardianBody) return;
+            await submitGuardian(guardianBody);
+          }}
+        />
+      )}
+
+      {onLogout && (
+        <div className="text-center">
+          <button
+            type="button"
+            onClick={onLogout}
+            className="text-sm text-muted-foreground underline underline-offset-4 hover:text-foreground"
+          >
+            {t('u18.logout', 'Not you? Log out')}
+          </button>
+        </div>
+      )}
+    </>
+  );
+
+  // Inline (#453): render the steps directly in the auth flow's right panel,
+  // matching the login/OTP form + SignupGuardianFlow — no blocking Dialog.
+  if (inline) {
+    return (
+      <div className="flex flex-col gap-4">
+        <div>
+          <h2 className="text-2xl font-bold text-foreground">{titles[step]}</h2>
+          <p className="mt-1 text-sm text-muted-foreground">{subtitle}</p>
+        </div>
+        {steps}
+      </div>
+    );
+  }
 
   return (
     <ResponsiveDialog
@@ -78,55 +153,10 @@ export function U18GuardianFlow({
       <div className="flex flex-col gap-4 overflow-y-auto p-6">
         <DialogHeader>
           <DialogTitle>{titles[step]}</DialogTitle>
-          <DialogDescription>
-            {t('u18.step_subtitle', "You're under 18, so a parent or guardian needs to confirm this account.")}
-          </DialogDescription>
+          <DialogDescription>{subtitle}</DialogDescription>
         </DialogHeader>
 
-        {step === 'dob' && (
-          <DobStep
-            network={network}
-            onResolved={(isMinor) => {
-              if (isMinor) setStep('guardian');
-              else onNotMinor();
-            }}
-          />
-        )}
-
-        {step === 'guardian' && (
-          <GuardianFormStep
-            network={network}
-            brand={brand}
-            onSubmitted={(body) => {
-              setGuardianBody(body);
-              setStep('otp');
-            }}
-          />
-        )}
-
-        {step === 'otp' && (
-          <GuardianOtpStep
-            network={network}
-            brand={brand}
-            onVerified={onComplete}
-            onResend={async () => {
-              if (!guardianBody) return;
-              await submitGuardian(guardianBody);
-            }}
-          />
-        )}
-
-        {onLogout && (
-          <div className="text-center">
-            <button
-              type="button"
-              onClick={onLogout}
-              className="text-sm text-muted-foreground underline underline-offset-4 hover:text-foreground"
-            >
-              {t('u18.logout', 'Not you? Log out')}
-            </button>
-          </div>
-        )}
+        {steps}
       </div>
     </ResponsiveDialog>
   );
