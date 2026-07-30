@@ -85,7 +85,7 @@ export function SignupGuardianFlow({
         </h2>
         {step === 'guardian' && (
           <p className="mt-1 text-sm text-muted-foreground">
-            {t('u18.step_subtitle', "You're under 18, so a parent or guardian needs to confirm this account.")}
+            {t('u18.step_subtitle', "You're under 18, so a guardian needs to confirm this account.")}
           </p>
         )}
       </div>
