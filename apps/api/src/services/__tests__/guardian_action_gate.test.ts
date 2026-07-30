@@ -123,14 +123,14 @@ describe('guardianActionGate', () => {
     );
   });
 
-  it('returns verified with the scope when the supplied otp checks out', async () => {
+  it('returns verified when the supplied otp checks out (OTP scoped to the action)', async () => {
     getWardAge.mockResolvedValue(11);
     assertVerifyAttemptAllowed.mockResolvedValue(undefined);
     verifyGuardianOtp.mockResolvedValue(true);
 
     const result = await guardianActionGate({ ...baseInput, otp: '123456' });
 
-    expect(result).toEqual({ status: 'verified', scope: EXPECTED_SCOPE });
+    expect(result).toEqual({ status: 'verified' });
     expect(verifyGuardianOtp).toHaveBeenCalledWith({ scope: EXPECTED_SCOPE, otp: '123456' });
   });
 
