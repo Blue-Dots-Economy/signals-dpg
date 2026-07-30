@@ -180,6 +180,13 @@ export function ActionHandler({ children, onActionSubmit, guardianConfirmRequire
         open={!!gate.challenge}
         onOpenChange={(open) => !open && gate.setChallenge(null)}
         onSubmitOtp={gate.submitOtp}
+        purpose={
+          gate.challenge
+            ? gate.challenge.type === 'connect'
+              ? { kind: 'connect' }
+              : { kind: 'apply' }
+            : undefined
+        }
         onLogout={() => { void signOut(); }}
       />
       <Dialog

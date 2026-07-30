@@ -109,6 +109,7 @@ export function SignupGuardianFlow({
           network={network}
           brand={brand}
           verify={verify}
+          purpose={{ kind: 'account' }}
           onVerified={() => setStep('verified')}
           onResend={async () => {
             if (!guardianBody) return;

@@ -1598,6 +1598,7 @@ export function HomePage() {
     <U18GuardianFlow
       network={network.id}
       brand={brand === 'standard' ? null : brand}
+      purpose={{ kind: 'profile' }}
       // Skip the DOB step when birth data is already stored (captured at
       // login) — we never re-ask the date of birth at profile-creation time.
       initialStep={u18InitialStep}
@@ -1657,6 +1658,7 @@ export function HomePage() {
     <U18GuardianFlow
       network={network.id}
       brand={brand === 'standard' ? null : brand}
+      purpose={{ kind: 'profile' }}
       initialStep="guardian"
       onComplete={() => {
         const ref = guardianSetupRef;
