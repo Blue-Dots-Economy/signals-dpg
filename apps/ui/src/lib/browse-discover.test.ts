@@ -6,7 +6,6 @@ import {
   buildFilteredCardsForDomain,
   excludeOwnItems,
   isDiscoverActive,
-  resolveDegradedBanner,
   resolveListNote,
 } from './browse-discover';
 import type { NetworkInteractionActions } from './browse-discover';
@@ -164,20 +163,6 @@ describe('buildFilteredCardsForDomain discover bypass', () => {
       mapSelectedDomains: ['seeker'],
     });
     expect(cards).toHaveLength(0);
-  });
-});
-
-describe('resolveDegradedBanner', () => {
-  it('null when not degraded', () => {
-    expect(resolveDegradedBanner({ degraded: false })).toBeNull();
-  });
-
-  it('"ranking_unavailable" when degraded, with an active search/filter', () => {
-    expect(resolveDegradedBanner({ degraded: true })).toBe('ranking_unavailable');
-  });
-
-  it('"ranking_unavailable" when degraded, with no active search/filter', () => {
-    expect(resolveDegradedBanner({ degraded: true })).toBe('ranking_unavailable');
   });
 });
 

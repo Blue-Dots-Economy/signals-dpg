@@ -53,20 +53,6 @@ export function isDiscoverActive(params: {
   return params.relevance || Boolean(params.q) || params.filters.length > 0;
 }
 
-export type DegradedBannerVariant = 'ranking_unavailable';
-
-// #394: which degraded-search banner (if any) the list should show. `degraded`
-// comes from the discover BFF's native-fallback response (`meta.degraded` /
-// `source: 'native_fallback'`, threaded through `useInfiniteBrowseItems`).
-// Since backend commit dab25115, the native fallback APPLIES search + facet
-// filters natively (value-match on public fields + facet filtering) — only
-// relevance RANKING is unavailable, regardless of whether the user has an
-// active search/filter. So there is a single subtle variant, shown whenever
-// degraded; not degraded → no banner at all.
-export function resolveDegradedBanner(input: { degraded: boolean }): DegradedBannerVariant | null {
-  return input.degraded ? 'ranking_unavailable' : null;
-}
-
 // ─── List note above the results (#394) ─────────────────────────────────────
 //
 // Now that the list ALWAYS calls discover with the profile anchor (when one

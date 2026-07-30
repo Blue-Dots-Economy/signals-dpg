@@ -861,4 +861,75 @@ describe('POST /api/v1/network/item/discover — configurable spatial radius (#3
     const body = res.json() as { meta: Record<string, unknown> };
     expect(body.meta.distance_meters).toBeUndefined();
   });
+
+  // Whole-branch review fix: the native fallback must apply (be bounded by)
+  // the SAME radius it reports in `meta.distance_meters`. The UI never sends
+  // `distance_meters` itself (only lat/lng), so gating the fallback's
+  // `radius_meters` on the raw request field silently omitted the spatial
+  // bound while `meta.distance_meters` still claimed one was applied.
+  it('bounds the native fallback to effectiveDistanceMeters (env-set) — not left unbounded', async () => {
+    signalsSearchConfig.distanceMeters = 8000;
+    searchSignalsMock.mockRejectedValueOnce(new Error('signals-search unreachable'));
+    fetchItemsAcrossInstancesMock.mockResolvedValueOnce({
+      meta: { total: 0, limit: 20, offset: 0, partial: false, unavailable_instances: [] },
+      items: [],
+    });
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/v1/network/item/discover',
+      payload: baseBody({ item_latitude: 12.9716, item_longitude: 77.5946 }),
+    });
+
+    expect(res.statusCode).toBe(200);
+    const callArgs = fetchItemsAcrossInstancesMock.mock.calls[0][0] as {
+      filters: Record<string, unknown>;
+    };
+    // effectiveDistanceMeters (8000, from the env) — never body.distance_meters
+    // (undefined here, since the UI doesn't send it).
+    expect(callArgs.filters.radius_meters).toBe(8000);
+    expect(res.json()).toMatchObject({ meta: { distance_meters: 8000 } });
+  });
+
+  it('bounds the native fallback to the 30000 default when SIGNALS_SEARCH_DISTANCE_METERS is unset', async () => {
+    searchSignalsMock.mockRejectedValueOnce(new Error('signals-search unreachable'));
+    fetchItemsAcrossInstancesMock.mockResolvedValueOnce({
+      meta: { total: 0, limit: 20, offset: 0, partial: false, unavailable_instances: [] },
+      items: [],
+    });
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/v1/network/item/discover',
+      payload: baseBody({ item_latitude: 12.9716, item_longitude: 77.5946 }),
+    });
+
+    expect(res.statusCode).toBe(200);
+    const callArgs = fetchItemsAcrossInstancesMock.mock.calls[0][0] as {
+      filters: Record<string, unknown>;
+    };
+    expect(callArgs.filters.radius_meters).toBe(30000);
+    expect(res.json()).toMatchObject({ meta: { distance_meters: 30000 } });
+  });
+
+  it('leaves the native fallback radius_meters undefined when no location was sent', async () => {
+    signalsSearchConfig.distanceMeters = 8000;
+    searchSignalsMock.mockRejectedValueOnce(new Error('signals-search unreachable'));
+    fetchItemsAcrossInstancesMock.mockResolvedValueOnce({
+      meta: { total: 0, limit: 20, offset: 0, partial: false, unavailable_instances: [] },
+      items: [],
+    });
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/v1/network/item/discover',
+      payload: baseBody(),
+    });
+
+    expect(res.statusCode).toBe(200);
+    const callArgs = fetchItemsAcrossInstancesMock.mock.calls[0][0] as {
+      filters: Record<string, unknown>;
+    };
+    expect(callArgs.filters.radius_meters).toBeUndefined();
+  });
 });

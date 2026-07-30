@@ -46,6 +46,7 @@ import { getEnumFilterFieldsForDomains } from '@/lib/enum-filters';
 import {
   deriveBrowseParams,
   anchorItemIdForTarget,
+  domainsInteract,
   isDiscoverActive,
   resolveListNote,
   excludeOwnItems,
@@ -1214,13 +1215,29 @@ export function HomePage() {
   const listDistanceMeters =
     selectedDomain !== null ? singleDomainList.distanceMeters : allDomainsDistanceMeters;
 
-  // #394: whether the viewer actually has a profile anchor being sent for the
-  // browsed domain(s). For a signed-in viewer every domain `visibleDomains`
-  // shows them is one their profile interacts with (`computeVisibleDomains`
-  // returns exactly their interacting `to_domains`), so this reduces to
-  // "signed in with an active profile" — simple and correct for both the
-  // single-domain and "All" views.
-  const hasProfileAnchor = Boolean(activeProfileId && myItem?.item_domain);
+  // #394 (review fix): whether the viewer actually has a profile anchor being
+  // sent for the browsed domain(s) — derived from the SAME rule that gates
+  // the anchor itself (`anchorFor`/`anchorItemIdForTarget`, both built on
+  // `domainsInteract`), not the looser "signed in with an active profile"
+  // check this used to be. A directory-style network can have a selected (or,
+  // on "All", every visible) domain with NO interaction edge to the viewer's
+  // own profile domain — no anchor is sent for that view at all, and the note
+  // must not claim profile-relevance when nothing was actually anchored.
+  // Single-domain tab: gate on that one target domain via `anchorFor` (the
+  // exact function `singleDomainList` calls above). "All"/no-selection view:
+  // true iff the viewer's profile domain interacts with at least one visible
+  // domain (mirrors `computeVisibleDomains`' own per-domain anchor gating).
+  const activeProfileDomain = myItem?.item_domain ?? null;
+  const hasProfileAnchor =
+    selectedDomain !== null
+      ? anchorFor(selectedDomain) !== undefined
+      : Boolean(
+          activeProfileId &&
+            activeProfileDomain &&
+            visibleDomains.some((domain) =>
+              domainsInteract(network?.actions ?? {}, activeProfileDomain, domain.id),
+            ),
+        );
   // Whether a location is actually being sent as the discover spatial filter.
   const hasLocation = browseLocation !== null;
   const listNote = resolveListNote({

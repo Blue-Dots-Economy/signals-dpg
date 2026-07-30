@@ -219,6 +219,14 @@ const discover_items_handler = async (
     // only relevance RANKING is unavailable; `meta.source: 'native_fallback'`/
     // `degraded: true` tell the UI to show the "basic matches" note.
     //
+    // Radius honesty (#394 review fix): `radius_meters` below is
+    // `effectiveDistanceMeters`, NOT `body.distance_meters` — the UI never
+    // sends `distance_meters` (only lat/lng), so gating on the raw body field
+    // would silently skip the radius bound in `buildWhereClause` while
+    // `meta.distance_meters` still reported a radius as if it were applied.
+    // `effectiveDistanceMeters` is undefined exactly when no location was
+    // sent, matching `buildWhereClause`'s own radius-clause gate.
+    //
     // Multi-instance limitation (single-instance is the target): the facet
     // `item_state` filter forwards to peers (each re-guards it), but `q` does
     // NOT (the peer `/fetch_local` body has no `q`), so on a federated network
@@ -238,7 +246,7 @@ const discover_items_handler = async (
           item_type: body.item_type,
           item_latitude: body.item_latitude,
           item_longitude: body.item_longitude,
-          radius_meters: body.distance_meters,
+          radius_meters: effectiveDistanceMeters,
           limit: body.limit,
           offset: body.offset,
           lifecycle_filter: 'live_only',

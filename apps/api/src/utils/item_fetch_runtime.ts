@@ -209,6 +209,15 @@ async function buildWhereClause(
     // and non-private for this domain. Single- and multi-value facets are
     // therefore identical from here on — there is no separate scalar
     // containment branch any more.
+    //
+    // Caveat: "matches exactly" holds for STRING values — every configured
+    // facet today is a string enum, and `->> field` extracts JSON text, so
+    // `= ANY(ARRAY[...])` compares text to text just like the old containment
+    // check did. A numeric or boolean scalar facet would NOT be exact: `->>`
+    // still yields text (e.g. `'true'`, `'42'`), so the comparison becomes a
+    // text comparison rather than the JSON-typed equality `@>` used to do.
+    // Not an issue while facets stay string enums; revisit if a non-string
+    // facet is ever declared.
     const facetEntries: Array<[string, unknown[]]> = Object.entries(
       filters.item_state
     ).map(([field, value]) => [field, Array.isArray(value) ? value : [value]]);
