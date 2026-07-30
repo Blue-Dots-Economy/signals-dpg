@@ -20,6 +20,14 @@ import { CardGrid } from '@/components/cards/card-grid';
 import { DomainCard } from '@/components/cards/domain-card';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Button } from '@/components/ui/button';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
 import { ActionHandler } from '@/components/actions/action-handler';
 import { MapView } from '@/components/map/map-container';
 import { MapFiltersPanel } from '@/components/map/map-filters-panel';
@@ -535,6 +543,10 @@ export function HomePage() {
     payloads: PerformActionPayload[];
     sourceInstanceUrl?: string;
   } | null>(null);
+  // Minor ward: the "a code will be sent to your guardian — proceed?" confirm
+  // shown BEFORE a bulk action dispatches the OTP (mirrors the single-action
+  // confirm). Holds the deferred bulk submit.
+  const [bulkGuardianConfirm, setBulkGuardianConfirm] = React.useState<(() => void) | null>(null);
 
   // Networks list + resolved selected network (config tier). Replaces the raw
   // mount-fetch + resolve effects; `allNetworks`/`network` are now query-derived.
@@ -1273,11 +1285,25 @@ export function HomePage() {
   );
 
   const handleBulkConnect = React.useCallback(
-    async (actionType: string, formData: Record<string, unknown>) => {
+    async (actionType: string, formData: Record<string, unknown>, confirmed = false) => {
       if (!myItem || !network) return;
       // Draft source profile can't act — prompt to complete it, don't submit.
       if (promptCompleteDraftProfile(myItem)) {
         setBulkConnectOpen(false);
+        return;
+      }
+      // Minor ward: confirm before the guardian OTP is dispatched (the bulk
+      // perform below is what sends it) — same "proceed?" step as single actions.
+      if (
+        !confirmed &&
+        u18Status?.isMinor === true &&
+        !!wardDomain &&
+        isGuardianConsentRequiredDomain(network, wardDomain)
+      ) {
+        setBulkConnectOpen(false);
+        setBulkGuardianConfirm(() => () => {
+          void handleBulkConnect(actionType, formData, true);
+        });
         return;
       }
       setBulkConnectBusy(true);
@@ -1400,6 +1426,8 @@ export function HomePage() {
       browseSelection.exitSelect,
       browseSelection.setSelected,
       promptCompleteDraftProfile,
+      u18Status,
+      wardDomain,
       t,
     ],
   );
@@ -1711,6 +1739,7 @@ export function HomePage() {
     <GuardianOtpDialog
       open={!!guardianProfileRef}
       onOpenChange={(open) => { if (!open) setGuardianProfileRef(null); }}
+      purpose={{ kind: 'profile' }}
       onLogout={() => { void signOut(); }}
       onSubmitOtp={async (otp) => {
         const ref = guardianProfileRef;
@@ -1739,10 +1768,41 @@ export function HomePage() {
 
   // Guardian OTP challenge for a MINOR's BULK action (#453). One dialog for the
   // whole batch; the code resubmits the stashed payloads via performActionsBulk.
+  // "A code will be sent to your guardian — proceed?" confirm before a minor's
+  // bulk action dispatches the OTP (mirrors the single-action confirm).
+  const bulkGuardianConfirmModal = (
+    <Dialog
+      open={!!bulkGuardianConfirm}
+      onOpenChange={(open) => { if (!open) setBulkGuardianConfirm(null); }}
+    >
+      <DialogContent className="max-h-[90dvh] overflow-y-auto">
+        <DialogHeader>
+          <DialogTitle>{t('actions.guardian_confirm_title')}</DialogTitle>
+          <DialogDescription>{t('actions.guardian_confirm_desc')}</DialogDescription>
+        </DialogHeader>
+        <DialogFooter>
+          <Button variant="outline" onClick={() => setBulkGuardianConfirm(null)}>
+            {t('actions.guardian_confirm_cancel')}
+          </Button>
+          <Button
+            onClick={() => {
+              const run = bulkGuardianConfirm;
+              setBulkGuardianConfirm(null);
+              run?.();
+            }}
+          >
+            {t('actions.guardian_confirm_proceed')}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+
   const bulkGuardianOtpModal = (
     <GuardianOtpDialog
       open={!!bulkGuardianChallenge}
       onOpenChange={(open) => { if (!open) setBulkGuardianChallenge(null); }}
+      purpose={{ kind: 'bulk', count: bulkGuardianChallenge?.payloads.length ?? 0 }}
       onLogout={() => { void signOut(); }}
       onSubmitOtp={async (otp) => {
         const ch = bulkGuardianChallenge;
@@ -1791,6 +1851,7 @@ export function HomePage() {
         {guardianSetupForProfileModal}
         {profileConsentModal}
         {guardianProfileConsentModal}
+        {bulkGuardianConfirmModal}
         {bulkGuardianOtpModal}
       </>
     );
@@ -2412,6 +2473,7 @@ export function HomePage() {
     {guardianSetupForProfileModal}
     {profileConsentModal}
         {guardianProfileConsentModal}
+        {bulkGuardianConfirmModal}
         {bulkGuardianOtpModal}
     </>
   );

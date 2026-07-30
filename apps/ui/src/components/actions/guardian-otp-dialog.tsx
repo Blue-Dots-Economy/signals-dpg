@@ -5,6 +5,7 @@ import { useIsMobile } from '@/hooks/use-mobile';
 import { Alert, AlertTitle, AlertDescription } from '@/components/ui/alert';
 import { OtpInput } from '@/components/auth/otp-input';
 import { guardianOtpErrorFromThrown, type GuardianOtpErrorCode } from '@/lib/action-api';
+import { GuardianOtpPurpose, type GuardianPurpose } from '@/components/consent/u18/guardian-otp-purpose';
 
 // Desktop: Dialog
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
@@ -32,6 +33,9 @@ export interface GuardianOtpDialogProps {
   /** Optional escape hatch — a stuck ward can sign out (wrong account / can't
    * reach the guardian). When provided, a "Not you? Log out" link is shown. */
   onLogout?: () => void;
+  /** What this OTP authorises — renders the highlighted "Guardian approval for"
+   * panel so the ward + guardian see the exact purpose (apply, profile, …). */
+  purpose?: GuardianPurpose;
 }
 
 interface InlineErrorState {
@@ -81,7 +85,7 @@ function messageForCode(
   }
 }
 
-export function GuardianOtpDialog({ open, onOpenChange, onSubmitOtp, onLogout }: GuardianOtpDialogProps) {
+export function GuardianOtpDialog({ open, onOpenChange, onSubmitOtp, onLogout, purpose }: GuardianOtpDialogProps) {
   const { t } = useTranslation();
   const isMobile = useIsMobile();
   const [isSubmitting, setIsSubmitting] = React.useState(false);
@@ -122,6 +126,7 @@ export function GuardianOtpDialog({ open, onOpenChange, onSubmitOtp, onLogout }:
 
   const body = (
     <div className="flex flex-col gap-4">
+      {purpose && <GuardianOtpPurpose purpose={purpose} />}
       <p className="text-sm text-muted-foreground">{description}</p>
 
       <div className="flex justify-center">
