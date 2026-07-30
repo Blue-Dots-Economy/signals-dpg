@@ -3,30 +3,28 @@ import type { DiscoverFacetFilter } from '@/lib/network-api';
 import type { EnumFilterField } from '@/lib/enum-filters';
 import { itemPassesEnumFilters } from '@/lib/enum-filters';
 
-// ─── Toggle → discover params ───────────────────────────────────────────────
+// ─── Search box + facets → discover params ──────────────────────────────────
 //
-// Maps the LIST view's "Near me" toggle + search box + facet selections to the
-// `useInfiniteBrowseItems` opts (#203 List PR Task 5). Two modes:
-//
-//   • Near me ON  → PROXIMITY: pass the user's location, `relevance` unset. With
-//     no q/filters this stays the native distance/recency path; with q/filters
-//     it runs discover WITH location (nearby search/filter).
-//   • Near me OFF → RELEVANCE (the default): `relevance: true` and NO location.
-//     signals-search treats any spatial clause as a HARD filter (falling back to
-//     a default radius when no distance is given), so sending location here
-//     would silently geo-constrain the "global" ranked feed — hence
-//     `useLocation:false`. Runs discover ranked, globally.
+// Maps the LIST view's search box + facet selections to the
+// `useInfiniteBrowseItems` opts. #394: the list ALWAYS uses the discover BFF —
+// there is no more ranked-vs-proximity toggle ("Near me" is gone). `relevance`
+// stays a field (rather than being dropped) purely because
+// `useInfiniteBrowseItems`/`isDiscoverActive` already key off it as one of
+// three ways to activate discover; it is unconditionally `true` here. The
+// caller (home-page) now ALWAYS forwards the resolved viewer location too
+// (`browseCoords`, from the `LocationSourceToggle`/`preferredSource` — profile
+// location or browser geolocation) — there is no `useLocation` gate anymore;
+// signals-search treats a spatial clause as a filter with its own default
+// radius applied when no location is sent at all.
 export interface DeriveBrowseParamsInput {
-  nearMe: boolean;
   search: string;
   activeFieldFilters: Record<string, string[]>;
 }
 
 export interface DerivedBrowseParams {
-  relevance: boolean;
+  relevance: true;
   q?: string;
   filters: DiscoverFacetFilter[];
-  useLocation: boolean;
 }
 
 export function deriveBrowseParams(input: DeriveBrowseParamsInput): DerivedBrowseParams {
@@ -35,19 +33,23 @@ export function deriveBrowseParams(input: DeriveBrowseParamsInput): DerivedBrows
     ([field, values]) => ({ field, values }),
   );
   return {
-    relevance: !input.nearMe,
+    relevance: true,
     ...(q ? { q } : {}),
     filters,
-    useLocation: input.nearMe,
   };
 }
 
 // Mirrors `useInfiniteBrowseItems`' own "discover" activation condition: q OR
 // filters OR relevance. When true the feed is server-filtered (text + facets),
-// so the client-side filtering below must be bypassed.
-export function isDiscoverActive(
-  params: Pick<DerivedBrowseParams, 'relevance' | 'filters'> & { q?: string },
-): boolean {
+// so the client-side filtering below must be bypassed. Typed with a plain
+// `boolean` for `relevance` (rather than picking it from `DerivedBrowseParams`,
+// whose `relevance` is now the literal `true`) so this stays independently
+// testable/usable with any relevance value.
+export function isDiscoverActive(params: {
+  relevance: boolean;
+  filters: DiscoverFacetFilter[];
+  q?: string;
+}): boolean {
   return params.relevance || Boolean(params.q) || params.filters.length > 0;
 }
 
@@ -63,6 +65,78 @@ export type DegradedBannerVariant = 'ranking_unavailable';
 // degraded; not degraded → no banner at all.
 export function resolveDegradedBanner(input: { degraded: boolean }): DegradedBannerVariant | null {
   return input.degraded ? 'ranking_unavailable' : null;
+}
+
+// ─── List note above the results (#394) ─────────────────────────────────────
+//
+// Now that the list ALWAYS calls discover with the profile anchor (when one
+// interacts with the browsed domain) and the resolved viewer location (when
+// available), the page shows one short explanatory note above the grid so
+// "why am I seeing these results, in this order" is never a mystery. Exactly
+// one of five variants applies at a time:
+//
+//   1. `degraded` (signals-search down, native fallback in play): reuses the
+//      existing "basic matches — ranking unavailable" copy and nothing else —
+//      the relevance/location wording below would be misleading since no
+//      ranking actually happened.
+//   2. profile anchor + location: "relevant to your profile, within X km".
+//   3. profile anchor, no location: "relevant to your profile" only.
+//   4. no anchor (signed out / no interacting profile) + location: "within X
+//      km" only.
+//   5. no anchor, no location: nothing to say — no note.
+//
+// `locationSource` mirrors the `LocationSourceToggle`/`PreferredLocationSource`
+// value ('profile' | 'browser'), translated here to the word the copy uses
+// ('profile' | 'current'); the i18n VALUE itself is resolved by the caller
+// (home-page) via `home.location_source_${locationSource}` so the word stays
+// localized rather than hardcoded English inside an interpolation value.
+export type ListNoteLocationSource = 'profile' | 'browser';
+
+export interface ResolveListNoteInput {
+  // Whether the viewer has an active profile that interacts with the browsed
+  // domain and its item id is actually being sent as the discover anchor —
+  // see `anchorItemIdForTarget`. For a signed-in viewer this is true for
+  // every domain `computeVisibleDomains` shows them (their own interacting
+  // `to_domains`), so in practice it reduces to "signed in with an active
+  // profile", but the caller wires it from the real anchor-sent condition
+  // rather than re-deriving that rule here.
+  hasProfileAnchor: boolean;
+  // Whether a location is being sent as the discover spatial filter (i.e. the
+  // `LocationSourceToggle`-resolved coordinate resolved to something, not
+  // null). Combined with `distanceMeters` below to decide whether a truthful
+  // "within X km" can be shown.
+  hasLocation: boolean;
+  degraded: boolean;
+  // The discover response's `meta.distance_meters` (the effective radius
+  // actually applied) — undefined on a non-geo search. Required (alongside
+  // `hasLocation`) to show a km figure; if location is on but this hasn't
+  // arrived yet, the note degrades to the no-location variant rather than
+  // showing a fabricated distance.
+  distanceMeters?: number;
+  locationSource: ListNoteLocationSource;
+}
+
+export interface ListNoteResult {
+  key: string;
+  values?: { km: number; locationSource: 'profile' | 'current' };
+}
+
+export function resolveListNote(input: ResolveListNoteInput): ListNoteResult | null {
+  if (input.degraded) return { key: 'home.list_ranking_unavailable' };
+
+  const hasKm = input.hasLocation && input.distanceMeters !== undefined;
+  if (hasKm) {
+    const km = Math.round(input.distanceMeters! / 1000);
+    const locationSource = input.locationSource === 'browser' ? 'current' : 'profile';
+    return {
+      key: input.hasProfileAnchor ? 'home.list_note_anchor_location' : 'home.list_note_location_only',
+      values: { km, locationSource },
+    };
+  }
+
+  if (input.hasProfileAnchor) return { key: 'home.list_note_anchor_only' };
+
+  return null;
 }
 
 // ─── Selected profile → discover anchor (#394) ──────────────────────────────

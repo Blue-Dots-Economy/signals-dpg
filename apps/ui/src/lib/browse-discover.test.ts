@@ -7,6 +7,7 @@ import {
   excludeOwnItems,
   isDiscoverActive,
   resolveDegradedBanner,
+  resolveListNote,
 } from './browse-discover';
 import type { NetworkInteractionActions } from './browse-discover';
 import type { EnumFilterField } from './enum-filters';
@@ -97,22 +98,19 @@ describe('anchorItemIdForTarget (#394)', () => {
   });
 });
 
-describe('deriveBrowseParams', () => {
-  it('Near me ON → proximity: useLocation true, relevance false', () => {
-    const p = deriveBrowseParams({ nearMe: true, search: '', activeFieldFilters: {} });
-    expect(p.useLocation).toBe(true);
-    expect(p.relevance).toBe(false);
+describe('deriveBrowseParams (#394: list always uses discover, no more Near me toggle)', () => {
+  it('relevance is always true — there is no ranked/proximity mode split anymore', () => {
+    const p = deriveBrowseParams({ search: '', activeFieldFilters: {} });
+    expect(p.relevance).toBe(true);
   });
 
-  it('Near me OFF → relevance: useLocation false, relevance true', () => {
-    const p = deriveBrowseParams({ nearMe: false, search: '', activeFieldFilters: {} });
-    expect(p.useLocation).toBe(false);
-    expect(p.relevance).toBe(true);
+  it('has no useLocation field — location is now always forwarded by the caller, not gated here', () => {
+    const p = deriveBrowseParams({ search: '', activeFieldFilters: {} });
+    expect(p).not.toHaveProperty('useLocation');
   });
 
   it('trims search into q and maps activeFieldFilters to a DiscoverFacetFilter[]', () => {
     const p = deriveBrowseParams({
-      nearMe: false,
       search: '  teacher  ',
       activeFieldFilters: { subject: ['math', 'science'] },
     });
@@ -121,7 +119,7 @@ describe('deriveBrowseParams', () => {
   });
 
   it('empty inputs → no q and empty filters', () => {
-    const p = deriveBrowseParams({ nearMe: true, search: '   ', activeFieldFilters: {} });
+    const p = deriveBrowseParams({ search: '   ', activeFieldFilters: {} });
     expect(p.q).toBeUndefined();
     expect(p.filters).toEqual([]);
   });
@@ -180,6 +178,117 @@ describe('resolveDegradedBanner', () => {
 
   it('"ranking_unavailable" when degraded, with no active search/filter', () => {
     expect(resolveDegradedBanner({ degraded: true })).toBe('ranking_unavailable');
+  });
+});
+
+describe('resolveListNote (#394: always-discover list note above the results)', () => {
+  it('degraded takes priority over everything else, and carries no values (reuses home.list_ranking_unavailable)', () => {
+    expect(
+      resolveListNote({
+        hasProfileAnchor: true,
+        hasLocation: true,
+        degraded: true,
+        distanceMeters: 12345,
+        locationSource: 'profile',
+      }),
+    ).toEqual({ key: 'home.list_ranking_unavailable' });
+  });
+
+  it('anchor + location: rounds km and resolves the profile location source', () => {
+    expect(
+      resolveListNote({
+        hasProfileAnchor: true,
+        hasLocation: true,
+        degraded: false,
+        distanceMeters: 12345,
+        locationSource: 'profile',
+      }),
+    ).toEqual({
+      key: 'home.list_note_anchor_location',
+      values: { km: 12, locationSource: 'profile' },
+    });
+  });
+
+  it('anchor + location: maps the browser preferred source to "current"', () => {
+    expect(
+      resolveListNote({
+        hasProfileAnchor: true,
+        hasLocation: true,
+        degraded: false,
+        distanceMeters: 30000,
+        locationSource: 'browser',
+      }),
+    ).toEqual({
+      key: 'home.list_note_anchor_location',
+      values: { km: 30, locationSource: 'current' },
+    });
+  });
+
+  it('rounds km to the nearest whole number', () => {
+    const note = resolveListNote({
+      hasProfileAnchor: true,
+      hasLocation: true,
+      degraded: false,
+      distanceMeters: 12499,
+      locationSource: 'profile',
+    });
+    expect(note?.values).toEqual({ km: 12, locationSource: 'profile' });
+  });
+
+  it('anchor, no location → anchor-only note with no values', () => {
+    expect(
+      resolveListNote({
+        hasProfileAnchor: true,
+        hasLocation: false,
+        degraded: false,
+        locationSource: 'profile',
+      }),
+    ).toEqual({ key: 'home.list_note_anchor_only' });
+  });
+
+  it('no anchor (signed out), location present → location-only note', () => {
+    expect(
+      resolveListNote({
+        hasProfileAnchor: false,
+        hasLocation: true,
+        degraded: false,
+        distanceMeters: 5000,
+        locationSource: 'browser',
+      }),
+    ).toEqual({
+      key: 'home.list_note_location_only',
+      values: { km: 5, locationSource: 'current' },
+    });
+  });
+
+  it('no anchor, no location → no note at all', () => {
+    expect(
+      resolveListNote({
+        hasProfileAnchor: false,
+        hasLocation: false,
+        degraded: false,
+        locationSource: 'profile',
+      }),
+    ).toBeNull();
+  });
+
+  it('hasLocation true but distanceMeters missing (defensive: cannot report a truthful km) → treated as no location', () => {
+    expect(
+      resolveListNote({
+        hasProfileAnchor: false,
+        hasLocation: true,
+        degraded: false,
+        locationSource: 'profile',
+      }),
+    ).toBeNull();
+    expect(
+      resolveListNote({
+        hasProfileAnchor: true,
+        hasLocation: true,
+        degraded: false,
+        locationSource: 'profile',
+      }),
+    ).toEqual({ key: 'home.list_note_anchor_only' });
   });
 });
 

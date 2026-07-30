@@ -21,7 +21,7 @@ interface TopBarProps {
   onViewModeChange: (mode: ViewMode) => void;
   /** Optional Filters control rendered next to the search bar (home/browse only). */
   filtersSlot?: React.ReactNode;
-  /** Optional list-only control (the "Near me" toggle) rendered next to the view toggle. */
+  /** Optional list-only control rendered next to the view toggle. */
   listControlsSlot?: React.ReactNode;
 }
 

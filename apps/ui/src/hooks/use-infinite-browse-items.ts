@@ -60,6 +60,12 @@ interface UseInfiniteBrowseItemsResult {
   // unavailable/unconfigured/timed out) — q/filters were NOT honored
   // server-side in that case. Always false on the native browse path.
   degraded: boolean;
+  // #394: the discover BFF's `meta.distance_meters` — the effective spatial
+  // radius actually applied (request override > configured env > the
+  // documented default), so the list note above the results can show
+  // "within X km". Undefined on the native browse path (no such concept) and
+  // on discover when no location was sent (a non-geo search has no radius).
+  distanceMeters?: number;
 }
 
 interface BrowsePage {
@@ -71,6 +77,7 @@ interface BrowsePage {
     source: BrowseSource;
     degraded: boolean;
     partial?: boolean;
+    distanceMeters?: number;
   };
 }
 
@@ -153,6 +160,7 @@ export function useInfiniteBrowseItems(
             offset: res.meta.offset,
             source: res.meta.source,
             degraded: res.meta.degraded,
+            distanceMeters: res.meta.distance_meters,
           },
         };
       }
@@ -225,5 +233,10 @@ export function useInfiniteBrowseItems(
     partial,
     source,
     degraded,
+    // Not sticky like `partial`/`degraded`/`source`: the effective radius is
+    // a static property of the request (location + config), not something
+    // that can meaningfully change page-to-page within the same feed, so the
+    // latest loaded page's value is the correct one to surface.
+    distanceMeters: lastPage?.meta.distanceMeters,
   };
 }

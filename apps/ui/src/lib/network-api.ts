@@ -268,6 +268,11 @@ export interface DiscoverResponse {
     offset: number;
     source: DiscoverSource;
     degraded: boolean;
+    // Effective spatial radius (meters, #394) actually applied to this
+    // search — only present when the request carried a location (see
+    // `DiscoverResponseSchema` in `@dpg/schemas`). The list note above the
+    // results (`resolveListNote`) uses this to show "within X km".
+    distance_meters?: number;
   };
 }
 

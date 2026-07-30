@@ -27,7 +27,7 @@ interface PageShellProps {
   onViewModeChange: (mode: ViewMode) => void;
   /** Optional Filters control surfaced in the top bar next to the search input. */
   filtersSlot?: React.ReactNode;
-  /** Optional list-only control (the "Near me" toggle) rendered next to the view toggle. */
+  /** Optional list-only control rendered next to the view toggle. */
   listControlsSlot?: React.ReactNode;
 }
 
