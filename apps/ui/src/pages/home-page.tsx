@@ -672,11 +672,11 @@ export function HomePage() {
   const [preferredSource, setPreferredSource] =
     React.useState<PreferredLocationSource>('profile');
 
-  const { location: userLocation, browser: browserLocation } = useUserLocation(
-    profileLocation,
-    profilesResolved,
-    preferredSource,
-  );
+  const {
+    location: userLocation,
+    source: resolvedLocationSource,
+    browser: browserLocation,
+  } = useUserLocation(profileLocation, profilesResolved, preferredSource);
   const geoPermission = useGeolocationPermission();
 
   // The toggle only makes sense when there's a profile location to switch away
@@ -1256,7 +1256,14 @@ export function HomePage() {
     hasLocation,
     degraded: listDegraded,
     distanceMeters: listDistanceMeters,
-    locationSource: preferredSource,
+    // The EFFECTIVE source of the coordinate actually sent (not the toggle
+    // preference): logged out / no profile → useUserLocation falls back to the
+    // browser coordinate, so the note must say "current location", not "your
+    // profile location". `preferredSource` stays 'profile' by default even when
+    // no profile exists, which produced the wrong wording. 'none' can't reach
+    // the km-bearing note branch (hasLocation would be false), so map it to the
+    // 'profile' default harmlessly.
+    locationSource: resolvedLocationSource === 'browser' ? 'browser' : 'profile',
   });
 
   // Active schema: from the selected browsing domain, or first visible domain
