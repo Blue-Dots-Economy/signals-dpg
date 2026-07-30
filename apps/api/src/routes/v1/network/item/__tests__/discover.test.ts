@@ -373,6 +373,115 @@ describe('POST /api/v1/network/item/discover — native fallback (#203 List PR, 
     });
   });
 
+  it('applies q as a native text_search (public, non-private field allowlist) on the fallback call', async () => {
+    searchSignalsMock.mockRejectedValueOnce(new Error('signals-search unreachable'));
+    fetchItemsAcrossInstancesMock.mockResolvedValueOnce({
+      meta: { total: 0, limit: 20, offset: 0, partial: false, unavailable_instances: [] },
+      items: [],
+    });
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/v1/network/item/discover',
+      payload: baseBody({ q: 'plumber' }),
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(fetchItemsAcrossInstancesMock).toHaveBeenCalledTimes(1);
+    const callArgs = fetchItemsAcrossInstancesMock.mock.calls[0][0] as {
+      filters: { text_search?: { q: string; fields: string[] } };
+    };
+    expect(callArgs.filters.text_search).toBeDefined();
+    expect(callArgs.filters.text_search?.q).toBe('plumber');
+    // 'city' and 'skills' are non-private on the mocked schema; 'phone' is
+    // private and must never appear in the allowlist.
+    expect(callArgs.filters.text_search?.fields.sort()).toEqual(['city', 'skills']);
+  });
+
+  it('does not set text_search on the fallback call when no q was given', async () => {
+    searchSignalsMock.mockRejectedValueOnce(new Error('signals-search unreachable'));
+    fetchItemsAcrossInstancesMock.mockResolvedValueOnce({
+      meta: { total: 0, limit: 20, offset: 0, partial: false, unavailable_instances: [] },
+      items: [],
+    });
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/v1/network/item/discover',
+      payload: baseBody(),
+    });
+
+    expect(res.statusCode).toBe(200);
+    const callArgs = fetchItemsAcrossInstancesMock.mock.calls[0][0] as {
+      filters: Record<string, unknown>;
+    };
+    expect(callArgs.filters.text_search).toBeUndefined();
+  });
+
+  it('applies facet filters as native item_state on the fallback call', async () => {
+    searchSignalsMock.mockRejectedValueOnce(new Error('signals-search unreachable'));
+    fetchItemsAcrossInstancesMock.mockResolvedValueOnce({
+      meta: { total: 0, limit: 20, offset: 0, partial: false, unavailable_instances: [] },
+      items: [],
+    });
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/v1/network/item/discover',
+      payload: baseBody({
+        filters: [
+          { field: 'city', values: ['pune'] },
+          { field: 'phone', values: ['555'] }, // private — must be dropped
+        ],
+      }),
+    });
+
+    expect(res.statusCode).toBe(200);
+    const callArgs = fetchItemsAcrossInstancesMock.mock.calls[0][0] as {
+      filters: { item_state?: Record<string, unknown> };
+    };
+    expect(callArgs.filters.item_state).toEqual({ city: ['pune'] });
+  });
+
+  it('does not set item_state on the fallback call when no filters were given', async () => {
+    searchSignalsMock.mockRejectedValueOnce(new Error('signals-search unreachable'));
+    fetchItemsAcrossInstancesMock.mockResolvedValueOnce({
+      meta: { total: 0, limit: 20, offset: 0, partial: false, unavailable_instances: [] },
+      items: [],
+    });
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/v1/network/item/discover',
+      payload: baseBody(),
+    });
+
+    expect(res.statusCode).toBe(200);
+    const callArgs = fetchItemsAcrossInstancesMock.mock.calls[0][0] as {
+      filters: Record<string, unknown>;
+    };
+    expect(callArgs.filters.item_state).toBeUndefined();
+  });
+
+  it('never leaks text_search/item_state into the happy-path searchSignals call', async () => {
+    searchSignalsMock.mockResolvedValueOnce({
+      items: [],
+      meta: { total: 0, limit: 20, offset: 0 },
+    });
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/v1/network/item/discover',
+      payload: baseBody({ q: 'plumber', filters: [{ field: 'city', values: ['pune'] }] }),
+    });
+
+    expect(res.statusCode).toBe(200);
+    const callArgs = searchSignalsMock.mock.calls[0][0] as Record<string, unknown>;
+    expect(callArgs).not.toHaveProperty('text_search');
+    expect(callArgs).not.toHaveProperty('item_state');
+    expect(fetchItemsAcrossInstancesMock).not.toHaveBeenCalled();
+  });
+
   it('returns a clean 500 (never throws) when BOTH signals-search and the native fallback fail', async () => {
     searchSignalsMock.mockRejectedValueOnce(new Error('signals-search unreachable'));
     fetchItemsAcrossInstancesMock.mockRejectedValueOnce(new Error('db unreachable'));

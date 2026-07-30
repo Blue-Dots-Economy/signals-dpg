@@ -1,4 +1,8 @@
-import { getDomainItemSchema, type NetworkConfigDocument } from '@dpg/schemas';
+import {
+  getDomainItemSchema,
+  getDomainItemTypes,
+  type NetworkConfigDocument,
+} from '@dpg/schemas';
 import type {
   FacetValue,
   SignalsSearchFacetInput,
@@ -68,4 +72,54 @@ export function resolveAllowedFacetFilters(
       values: selection.values,
       arrayValued: allowed.get(selection.field)?.arrayValued,
     }));
+}
+
+/**
+ * #394 map native text search (moved here unchanged from `markers.ts` for
+ * #203 List PR Task 3 reuse by the discover BFF's native fallback): resolves
+ * the SERVER-known allowlist of non-private `item_state` field keys a
+ * free-text `q` may match against, for a given network/domain (+ optional
+ * item_type). Reuses `resolveAllowedFacetFields` above — the same
+ * `private: true` convention every other item_state guard in this codebase
+ * already trusts — never the client's own field list, so a client can't
+ * expand its match surface by naming more fields.
+ *
+ * `item_type` is optional for callers whose request can span every item_type
+ * in a domain (e.g. a map viewport), so when it's omitted this unions the
+ * non-private fields across every item_type declared for the domain — the
+ * same "no single item_type" treatment item_fetch_runtime.ts's own
+ * (differently-scoped, array-facet) `resolveAllowedFacetFields` already
+ * gives. A network/domain/item_type this instance doesn't actually define
+ * contributes no fields — fails closed via `buildWhereClause`'s
+ * `fields.length === 0` branch (unsatisfiable match), never a throw or a 500.
+ */
+export function resolveTextSearchFields(
+  networkConfig: NetworkConfigDocument,
+  domain: string,
+  itemType: string | undefined
+): string[] {
+  let itemTypes: string[];
+  try {
+    itemTypes = itemType ? [itemType] : getDomainItemTypes(networkConfig, domain);
+  } catch {
+    return [];
+  }
+
+  const fields = new Set<string>();
+  for (const type of itemTypes) {
+    let schema: Record<string, unknown>;
+    try {
+      schema = getDomainItemSchema(networkConfig, domain, type) as Record<
+        string,
+        unknown
+      >;
+    } catch {
+      continue;
+    }
+    for (const field of resolveAllowedFacetFields(schema).keys()) {
+      fields.add(field);
+    }
+  }
+
+  return [...fields];
 }

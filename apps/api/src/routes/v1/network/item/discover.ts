@@ -5,7 +5,10 @@ import {
   isServedDomainBinding,
   replyForUnservedDomain,
 } from '@/utils/served_domain_guard';
-import { resolveAllowedFacetFilters } from '@/utils/facet_guard';
+import {
+  resolveAllowedFacetFilters,
+  resolveTextSearchFields,
+} from '@/utils/facet_guard';
 import { getNetworkConfigById } from '@/network_configs';
 import { searchSignals, type SignalsSearchItem } from '@/services/signals_search_client';
 import { fetchItemsAcrossInstances } from '@/utils/inter_instance_fetch';
@@ -27,17 +30,22 @@ type DiscoverItemsRequest = FastifyRequest<{
  * indexing invariant rather than something this BFF enforces via a lifecycle
  * filter.
  *
- * NATIVE FALLBACK (#203 List PR, Task 3): `searchSignals` throws when
- * signals-search is unconfigured (`SIGNALS_SEARCH_URL`/`SIGNALS_SEARCH_API_KEY`
- * unset), when the call times out (`AbortSignal.timeout` in the client), or
- * on any non-2xx/invalid response — all three collapse to the same catch
- * below. On catch, this BFF falls back to the native
- * `fetchItemsAcrossInstances` path (the same distance/recency-ordered,
+ * NATIVE FALLBACK (#394, revising #203 List PR Task 3): `searchSignals` throws
+ * when signals-search is unconfigured (`SIGNALS_SEARCH_URL`/
+ * `SIGNALS_SEARCH_API_KEY` unset), when the call times out (`AbortSignal.
+ * timeout` in the client), or on any non-2xx/invalid response — all three
+ * collapse to the same catch below. On catch, this BFF falls back to the
+ * native `fetchItemsAcrossInstances` path (the same distance/recency-ordered,
  * live-only, paged fetch `/network/item/fetch` uses) so a search-service
- * outage degrades the list rather than 5xx-ing it. IMPORTANT: the native
- * fetch has no server-side facet/text-search support, so `q`/`filters` are
- * silently NOT applied when the fallback fires — `meta.source` is what lets
- * the UI (Task 6) tell the user their filters/search weren't honored.
+ * outage degrades the list rather than 5xx-ing it. `q`/`filters` ARE now
+ * applied on this path too — the same value-match-on-public-`item_state`
+ * (`text_search`) and facet (`item_state`) mechanisms the map's `/markers`
+ * already uses (see `resolveTextSearchFields`/`resolveAllowedFacetFilters` in
+ * `facet_guard.ts`, applied by `buildWhereClause` in
+ * `item_fetch_runtime.ts`) — only relevance RANKING is unavailable without
+ * signals-search. `meta.source: 'native_fallback'`/`degraded: true` are what
+ * let the UI (Task 6) tell the user ranking (not search/filtering itself)
+ * isn't available.
  */
 function mapSignalsSearchItemToDiscoverItem(item: SignalsSearchItem) {
   return {
@@ -165,18 +173,21 @@ const discover_items_handler = async (
         items,
       });
     } catch (searchErr) {
-      // Native fallback (Task 3): thrown for a request timeout, a non-2xx/
-      // invalid response, OR signals-search being unconfigured (the client
-      // throws for all three — see searchSignals' doc comment). A
-      // search-service outage must never surface as a 5xx, so this falls
-      // back to the same native, distance/recency-ordered paged fetch
-      // `/network/item/fetch` uses. That native fetch has no server-side
-      // facet/text-search, so `q`/`filters` are NOT applied on this path —
-      // `meta.source: 'native_fallback'` is what lets the UI (Task 6) show
-      // the right degraded-list message.
+      // Native fallback (#394, revising Task 3): thrown for a request
+      // timeout, a non-2xx/invalid response, OR signals-search being
+      // unconfigured (the client throws for all three — see searchSignals'
+      // doc comment). A search-service outage must never surface as a 5xx,
+      // so this falls back to the native, distance/recency-ordered paged
+      // fetch `/network/item/fetch` uses — but now applying `q`/`filters`
+      // natively too (value-match on public item_state + filterable facets),
+      // the same mechanisms `/markers` already uses. `allowedFilters` was
+      // already server-resolved above for the signals-search call, so it's
+      // reused here rather than re-resolved. `meta.source: 'native_fallback'`
+      // is what lets the UI (Task 6) show that ranking (not search/filtering)
+      // is degraded.
       request.log.warn(
         { err: searchErr, body },
-        'signals-search unavailable; falling back to native item fetch for discover (filters/q not applied)'
+        'signals-search unavailable; falling back to native item fetch for discover (search/filters applied natively, no ranking)'
       );
 
       const nativeResult = await fetchItemsAcrossInstances({
@@ -191,6 +202,22 @@ const discover_items_handler = async (
           limit: body.limit,
           offset: body.offset,
           lifecycle_filter: 'live_only',
+          item_state:
+            allowedFilters.length > 0
+              ? Object.fromEntries(
+                  allowedFilters.map((filter) => [filter.field, filter.values])
+                )
+              : undefined,
+          text_search: body.q
+            ? {
+                q: body.q,
+                fields: resolveTextSearchFields(
+                  networkConfig,
+                  body.item_domain,
+                  body.item_type
+                ),
+              }
+            : undefined,
         },
         log: request.log,
       });
