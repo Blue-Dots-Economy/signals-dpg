@@ -286,26 +286,42 @@ export function LoginPage() {
     const extras: SignupExtras = { domain: gate.domain, age };
     setSignupDobGate(null);
 
-    // A brand-new minor signup captures the guardian pre-auth (materialized on
-    // account creation — safe, same session owns the new identifier). An
-    // EXISTING user must NOT designate a guardian before proving they own the
-    // number (login OTP), so their guardian step runs post-login on the home
-    // page; here we only persist the age and proceed to the login OTP.
-    if (isMinorFromAge(age) && !gate.exists) {
+    // A minor never sees the adult terms/privacy consent checkbox — the guardian
+    // flow records their consent instead. A brand-new minor captures the guardian
+    // pre-auth (materialized on account creation — safe, same session owns the
+    // new identifier). An EXISTING minor must NOT designate a guardian before
+    // proving they own the number (login OTP), so we skip the adult consent step
+    // and send the login OTP; their guardian flow runs post-login (#453,
+    // otp-page) and records the u18 consent there.
+    if (isMinorFromAge(age)) {
       toast.info(t('auth.minor_toast_title', "You're under 18"), {
         description: t(
           'auth.minor_toast_desc',
           'A parent or guardian needs to confirm your account before you can continue.',
         ),
       });
-      setSignupGuardianGate({
-        identifier: gate.identifier,
-        domain: gate.domain,
-        age,
-        resolvedName: gate.resolvedName,
-        resolvedSignupExtras: extras,
-        exists: gate.exists,
-      });
+      if (!gate.exists) {
+        setSignupGuardianGate({
+          identifier: gate.identifier,
+          domain: gate.domain,
+          age,
+          resolvedName: gate.resolvedName,
+          resolvedSignupExtras: extras,
+          exists: gate.exists,
+        });
+        return;
+      }
+      setIsLoading(true);
+      try {
+        // proceedToOtp with no pendingConsent → no adult consent gate.
+        await proceedToOtp(gate.identifier, gate.exists, gate.resolvedName, extras);
+      } catch {
+        toast.error(t('auth.toast_send_code_error'), {
+          description: t('auth.toast_send_code_error_desc'),
+        });
+      } finally {
+        setIsLoading(false);
+      }
       return;
     }
 
