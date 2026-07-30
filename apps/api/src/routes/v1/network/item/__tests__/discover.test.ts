@@ -309,6 +309,32 @@ describe('POST /api/v1/network/item/discover — profile anchor relevance (#394)
     expect(body.items[0]).toMatchObject({ item_id: FULL_ITEM_A.item_id });
   });
 
+  it('retries WITHOUT the anchor on INTERACTION_NOT_ALLOWED (403) — e.g. seeker→seeker — returning source:signals_search / degraded:false', async () => {
+    const interactionErr = new SignalsSearchError('seeker → seeker not permitted');
+    interactionErr.status = 403;
+    interactionErr.code = 'INTERACTION_NOT_ALLOWED';
+
+    searchSignalsMock.mockRejectedValueOnce(interactionErr);
+    searchSignalsMock.mockResolvedValueOnce({
+      items: [FULL_ITEM_A],
+      meta: { total: 1, limit: 20, offset: 0 },
+    });
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/v1/network/item/discover',
+      payload: baseBody({ anchor_item_id: ANCHOR_ITEM_ID }),
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(searchSignalsMock).toHaveBeenCalledTimes(2);
+    expect((searchSignalsMock.mock.calls[1][0] as Record<string, unknown>).anchorItemId).toBeUndefined();
+    expect(fetchItemsAcrossInstancesMock).not.toHaveBeenCalled();
+    const body = res.json() as { meta: { source: string; degraded: boolean } };
+    expect(body.meta.source).toBe('signals_search');
+    expect(body.meta.degraded).toBe(false);
+  });
+
   it('falls back to native when the anchor retry ALSO fails', async () => {
     const notFoundErr = new SignalsSearchError('anchor not found');
     notFoundErr.status = 404;
