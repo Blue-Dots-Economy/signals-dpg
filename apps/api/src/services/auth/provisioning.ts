@@ -706,16 +706,13 @@ async function applySignupExtras(
 
     const updates: Partial<typeof userTable.$inferInsert> = {};
     if (extras.domain) updates.domains = [extras.domain];
-    if (extras.dateOfBirth) {
-      const dob = new Date(extras.dateOfBirth);
-      if (!Number.isNaN(dob.getTime())) updates.dateOfBirth = dob;
-    }
+    if (typeof extras.age === 'number') updates.age = extras.age;
     if (Object.keys(updates).length === 0) return;
 
     updates.updatedAt = new Date();
     await db.update(userTable).set(updates).where(eq(userTable.id, userId));
     log.info(
-      { user_id: userId, domain: extras.domain ?? null, dob: Boolean(extras.dateOfBirth) },
+      { user_id: userId, domain: extras.domain ?? null, age: extras.age ?? null },
       'provisioning: applied parked signup details',
     );
   } catch (err) {

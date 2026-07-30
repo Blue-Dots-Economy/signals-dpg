@@ -10,6 +10,8 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
  * and unhappy paths of the Keycloak screen itself.
  */
 
+const CURRENT_YEAR = new Date().getFullYear();
+
 // The login screen is now chosen from the API's auth config, not a build-time
 // env var, so the hook is what gets stubbed.
 let keycloakEnabled = false;
@@ -78,7 +80,7 @@ type SignupBody = {
   email?: string;
   phoneNumber?: string;
   domain?: string;
-  dateOfBirth?: string;
+  age?: number;
 };
 const signupWithKeycloak =
   vi.fn<(body: SignupBody) => Promise<{ ok: true; alreadyRegistered: boolean }>>();
@@ -104,7 +106,7 @@ const guardianComplete = vi.fn();
 vi.mock('@/components/consent/u18/signup-guardian-flow', () => ({
   SignupGuardianFlow: (props: {
     domain: string;
-    dateOfBirth: Date;
+    age: number;
     identifier: { email?: string; phoneNumber?: string };
     onComplete: () => void;
   }) => {
@@ -113,7 +115,7 @@ vi.mock('@/components/consent/u18/signup-guardian-flow', () => ({
       <div
         data-testid="signup-guardian-flow"
         data-domain={props.domain}
-        data-birth-year={String(props.dateOfBirth.getFullYear())}
+        data-age={String(props.age)}
         data-identifier={props.identifier.email ?? props.identifier.phoneNumber ?? ''}
       >
         <button type="button" onClick={props.onComplete}>guardian done</button>
@@ -408,7 +410,7 @@ describe('KeycloakLoginPanel — existing vs new user chooser', () => {
     const [body] = signupWithKeycloak.mock.calls[0];
     expect(body.name).toBe('Asha Rao');
     expect(body.phoneNumber).toContain('9876543210');
-    expect(body.dateOfBirth).toBe('2005-04-02');
+    expect(body.age).toBe(CURRENT_YEAR - 2005);
     // Signup is followed immediately by the normal OIDC login.
     await waitFor(() => expect(startKeycloakLogin).toHaveBeenCalled());
   });
@@ -650,7 +652,7 @@ describe('U18 guardian capture on the Keycloak signup path', () => {
 
     const flow = await screen.findByTestId('signup-guardian-flow');
     expect(flow.getAttribute('data-domain')).toBe('seeker');
-    expect(flow.getAttribute('data-birth-year')).toBe('2015');
+    expect(flow.getAttribute('data-age')).toBe(String(CURRENT_YEAR - 2015));
     // Ordering is the point: nothing exists until the guardian is verified.
     expect(signupWithKeycloak).not.toHaveBeenCalled();
     expect(startKeycloakLogin).not.toHaveBeenCalled();

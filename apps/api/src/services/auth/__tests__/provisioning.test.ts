@@ -73,7 +73,7 @@ const materializeSignupGuardian = vi.fn(async () => {});
 vi.mock('@/services/signup_guardian', () => ({ materializeSignupGuardian }));
 
 // Signup extras parked by the Keycloak self-signup path.
-const takeSignupExtras = vi.fn<() => Promise<{ domain?: string; dateOfBirth?: string } | null>>();
+const takeSignupExtras = vi.fn<() => Promise<{ domain?: string; age?: number } | null>>();
 vi.mock('@/services/auth/signup_extras', () => ({
   takeSignupExtras: (...a: unknown[]) => takeSignupExtras(...(a as [])),
 }));
@@ -125,7 +125,7 @@ function existingUser(overrides: Record<string, unknown> = {}) {
     banExpires: null,
     phoneNumber: null,
     phoneNumberVerified: null,
-    dateOfBirth: null,
+    age: null,
     domains: null,
     termsAccepted: true,
     privacyAccepted: true,
@@ -201,8 +201,8 @@ describe('first login — creating the mirror', () => {
     expect(insert.values.privacyAccepted).toBe(true);
     expect(insert.values.role).toBe('user');
     expect(insert.values.banned).toBe(false);
-    // DOB is captured post-login or by guardian materialization, never guessed.
-    expect(insert.values.dateOfBirth).toBeUndefined();
+    // Age is captured post-login or by guardian materialization, never guessed.
+    expect(insert.values.age).toBeUndefined();
   });
 
   it('accepts phone_number_verified as the string Keycloak attributes produce', async () => {
@@ -404,7 +404,7 @@ describe('mirror refresh — Keycloak is authoritative for identity claims', () 
     const [update] = updatesTo(userTable);
     for (const column of [
       'domains',
-      'dateOfBirth',
+      'age',
       'tags',
       'onboardedByOrgId',
       'onboardedVia',
@@ -625,18 +625,18 @@ describe('database failures', () => {
 });
 
 describe('parked signup details (Keycloak self-signup)', () => {
-  it('applies the domain and DOB onto the new mirror row', async () => {
+  it('applies the domain and age onto the new mirror row', async () => {
     // The Keycloak signup path creates the identity before the local row exists,
-    // so `domains` and DOB are parked against the identifier until first login.
+    // so `domains` and age are parked against the identifier until first login.
     queueSelect(userTable, []);
     queueSelect(userTable, []);
-    takeSignupExtras.mockResolvedValue({ domain: 'seeker', dateOfBirth: '2005-04-02' });
+    takeSignupExtras.mockResolvedValue({ domain: 'seeker', age: 20 });
 
     await provisionUserFromClaims(claims(), makeLog());
 
     const update = updatesTo(userTable).at(-1);
     expect(update?.set.domains).toEqual(['seeker']);
-    expect(update?.set.dateOfBirth).toBeInstanceOf(Date);
+    expect(update?.set.age).toBe(20);
   });
 
   it('is a no-op for a user with nothing parked (migrated / admin-onboarded)', async () => {
@@ -650,13 +650,13 @@ describe('parked signup details (Keycloak self-signup)', () => {
 
   it('applies the stash BEFORE guardian materialization', async () => {
     // For a gated minor the guardian capture is the OTP-verified record and must
-    // win on DOB, so it has to run second.
+    // win on age, so it has to run second.
     const order: string[] = [];
     queueSelect(userTable, []);
     queueSelect(userTable, []);
     takeSignupExtras.mockImplementation(async () => {
       order.push('extras');
-      return { dateOfBirth: '2005-04-02' };
+      return { age: 20 };
     });
     materializeSignupGuardian.mockImplementation(async () => {
       order.push('guardian');
@@ -679,10 +679,12 @@ describe('parked signup details (Keycloak self-signup)', () => {
     expect(log.error).toHaveBeenCalled();
   });
 
-  it('ignores an unparseable stashed date rather than writing garbage', async () => {
+  it('ignores a non-numeric stashed age rather than writing garbage', async () => {
     queueSelect(userTable, []);
     queueSelect(userTable, []);
-    takeSignupExtras.mockResolvedValue({ dateOfBirth: 'not-a-date' });
+    takeSignupExtras.mockResolvedValue({
+      age: 'not-a-number' as unknown as number,
+    });
 
     await provisionUserFromClaims(claims(), makeLog());
 

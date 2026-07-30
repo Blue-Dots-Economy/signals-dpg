@@ -23,7 +23,7 @@ import { mergeConsentConfig } from '@/hooks/use-consent-config';
 import { ConsentModal } from '@/components/consent/consent-modal';
 import { setPendingConsent } from '@/lib/pending-consent';
 import { fetchNetworkConfig } from '@/lib/network-api';
-import { isMinorFromDate } from '@/lib/guardian-consent';
+import { ageFromBirthYear, isMinorFromAge } from '@/lib/guardian-consent';
 import {
   SignupGuardianFlow,
   type SignupIdentifier,
@@ -31,6 +31,18 @@ import {
 import { getServedScope } from '@/lib/served-binding';
 import type { DotNetworkDomain } from '@/engine/types';
 import type { ConsentAcceptBody, ConsentConfigDocument } from '@dpg/schemas';
+
+/**
+ * Derive the birth-year age (#331) from the signup form's `<input type="date">`
+ * value. Whole-year only, matching `ageFromBirthYear` everywhere else in the
+ * app — the day/month collected here is UX only and never leaves the client.
+ */
+function ageFromDateInput(value: string): number | undefined {
+  if (!value) return undefined;
+  const dob = new Date(value);
+  if (Number.isNaN(dob.getTime())) return undefined;
+  return ageFromBirthYear(dob.getFullYear());
+}
 
 /**
  * The login screen for deployments where the API reports `authProvider:
@@ -84,7 +96,7 @@ export function KeycloakLoginPanel() {
   const [guardianGate, setGuardianGate] = useState<{
     identifier: AuthIdentifier;
     domain: string;
-    dateOfBirth: Date;
+    age: number;
   } | null>(null);
   // Set when terms/privacy need accepting before the account is created —
   // mirrors the OTP screen's gate (`runConsentThenOtp` in login-page.tsx).
@@ -170,12 +182,10 @@ export function KeycloakLoginPanel() {
     // rejects an adult with NOT_A_MINOR.
     const domainIsGated =
       networkDomains.find((d) => d.id === domain)?.guardian_consent_required ?? false;
-    if (domain && domainIsGated && dateOfBirth) {
-      const dob = new Date(dateOfBirth);
-      if (!Number.isNaN(dob.getTime()) && isMinorFromDate(dob)) {
-        setGuardianGate({ identifier, domain, dateOfBirth: dob });
-        return;
-      }
+    const age = ageFromDateInput(dateOfBirth);
+    if (domain && domainIsGated && age !== undefined && isMinorFromAge(age)) {
+      setGuardianGate({ identifier, domain, age });
+      return;
     }
 
     setIsSigningUp(true);
@@ -268,11 +278,12 @@ export function KeycloakLoginPanel() {
 
   const createAccountAndSignIn = async (identifier: AuthIdentifier) => {
     try {
+      const age = ageFromDateInput(dateOfBirth);
       const result = await signupWithKeycloak({
         name: name.trim(),
         ...identifier,
         ...(domain ? { domain } : {}),
-        ...(dateOfBirth ? { dateOfBirth } : {}),
+        ...(age !== undefined ? { age } : {}),
       });
 
       // Either way the next step is the same — sign in. An identifier that is
@@ -355,7 +366,7 @@ export function KeycloakLoginPanel() {
               ? { email: guardianGate.identifier.email }
               : { phoneNumber: guardianGate.identifier.phoneNumber }) as SignupIdentifier
           }
-          dateOfBirth={guardianGate.dateOfBirth}
+          age={guardianGate.age}
           onComplete={() => {
             void handleGuardianComplete();
           }}

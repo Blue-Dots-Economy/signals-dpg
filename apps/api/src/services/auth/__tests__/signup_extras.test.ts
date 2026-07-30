@@ -39,11 +39,11 @@ beforeEach(() => {
 
 describe('stash / take round-trip', () => {
   it('parks and returns the extras for an email signup', async () => {
-    await stashSignupExtras({ email: EMAIL }, { domain: 'seeker', dateOfBirth: '2005-04-02' });
+    await stashSignupExtras({ email: EMAIL }, { domain: 'seeker', age: 20 });
 
     expect(await takeSignupExtras({ email: EMAIL })).toEqual({
       domain: 'seeker',
-      dateOfBirth: '2005-04-02',
+      age: 20,
     });
   });
 

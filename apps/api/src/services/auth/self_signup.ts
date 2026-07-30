@@ -43,8 +43,8 @@ export interface SelfSignupInput {
   phoneNumber?: string | null;
   /** Network domain to join. Validated against this instance's served domains. */
   domain?: string | null;
-  /** ISO date string. Parked for provisioning to apply at first login. */
-  dateOfBirth?: string | null;
+  /** Age in years (0..120), derived from the birth year on the client (#331). Parked for provisioning to apply at first login. */
+  age?: number | null;
   /** Caller IP, for rate limiting. */
   clientIp?: string;
 }
@@ -59,7 +59,7 @@ export type SelfSignupErrorCode =
   | 'SIGNUP_RATE_LIMITED'
   /** Domain isn't one this instance serves. */
   | 'DOMAIN_NOT_SERVED'
-  | 'INVALID_DATE_OF_BIRTH'
+  | 'INVALID_AGE'
   | 'SIGNUP_FAILED';
 
 export type SelfSignupResult =
@@ -193,16 +193,13 @@ export async function selfSignup(
     };
   }
 
-  const dateOfBirth = input.dateOfBirth?.trim() || null;
-  if (dateOfBirth) {
-    const parsed = new Date(dateOfBirth);
-    if (Number.isNaN(parsed.getTime()) || parsed.getTime() > Date.now()) {
-      return {
-        ok: false,
-        code: 'INVALID_DATE_OF_BIRTH',
-        message: 'Enter a valid date of birth.',
-      };
-    }
+  const age = typeof input.age === 'number' ? input.age : null;
+  if (age !== null && (!Number.isInteger(age) || age < 0 || age > 120)) {
+    return {
+      ok: false,
+      code: 'INVALID_AGE',
+      message: 'Enter a valid age.',
+    };
   }
 
   const client = getAdminClient();
@@ -273,7 +270,7 @@ export async function selfSignup(
         try {
           await stashSignupExtras(
             { email, phoneNumber },
-            { ...(domain ? { domain } : {}), ...(dateOfBirth ? { dateOfBirth } : {}) }
+            { ...(domain ? { domain } : {}), ...(age !== null ? { age } : {}) }
           );
         } catch (err) {
           log.error({ err, user_id: id }, 'self-signup: could not stash signup extras');

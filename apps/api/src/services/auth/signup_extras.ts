@@ -4,7 +4,7 @@
  * Under Keycloak, self-signup creates the identity but the local `user` row only
  * appears at first successful login (see `self_signup.ts` for why). So the
  * signals-specific fields collected on the signup form — the domain the person
- * is joining, and their date of birth — have to be parked somewhere in between.
+ * is joining, and their age — have to be parked somewhere in between.
  *
  * Keyed on the signup identifier and held in Redis with a short TTL, exactly the
  * pattern the pre-auth guardian capture already uses
@@ -28,8 +28,8 @@ const EXTRAS_TTL_SEC = 1800;
 export interface SignupExtras {
   /** Network domain the user chose to join, e.g. 'seeker'. Validated at signup. */
   domain?: string;
-  /** ISO date string. Drives U18 gating once it reaches the `user` row. */
-  dateOfBirth?: string;
+  /** Age in years (0..120). Drives U18 gating once it reaches `user.age`. */
+  age?: number;
 }
 
 /**
@@ -87,7 +87,7 @@ export async function stashSignupExtras(
   identifiers: ExtrasIdentifiers,
   extras: SignupExtras
 ): Promise<void> {
-  if (!extras.domain && !extras.dateOfBirth) return;
+  if (!extras.domain && extras.age === undefined) return;
 
   const keys = keysFor(identifiers);
   if (keys.length === 0) return;

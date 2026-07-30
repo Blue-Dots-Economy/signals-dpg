@@ -8,8 +8,8 @@ const SignupBody = z.object({
   phoneNumber: z.string().min(1).optional(),
   /** Network domain to join. Validated against served domains server-side. */
   domain: z.string().min(1).optional(),
-  /** ISO date (YYYY-MM-DD or full ISO). Drives U18 gating once applied. */
-  dateOfBirth: z.string().min(1).optional(),
+  /** Age in years, derived from the birth year on the client (#331). Drives U18 gating once applied. */
+  age: z.coerce.number().int().min(0).max(120).optional(),
 });
 
 const SignupResponse = z.object({
@@ -33,7 +33,7 @@ const STATUS: Record<string, ErrorStatus> = {
   LOGIN_CHANNEL_DISABLED: 403,
   SIGNUP_RATE_LIMITED: 429,
   DOMAIN_NOT_SERVED: 400,
-  INVALID_DATE_OF_BIRTH: 400,
+  INVALID_AGE: 400,
   SIGNUP_FAILED: 500,
 };
 

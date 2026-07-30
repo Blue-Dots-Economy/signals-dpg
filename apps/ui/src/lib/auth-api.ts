@@ -235,13 +235,13 @@ export interface SignupResponse {
  * registration form is password-based.
  */
 export async function signupWithKeycloak(
-  body: { name: string; domain?: string; dateOfBirth?: string } & AuthIdentifier
+  body: { name: string; domain?: string; age?: number } & AuthIdentifier
 ): Promise<SignupResponse> {
   const response = await apiClient.post<SignupResponse>('/api/v1/auth/signup', {
     name: body.name,
     ...normalizeIdentifier(body),
     ...(body.domain ? { domain: body.domain } : {}),
-    ...(body.dateOfBirth ? { dateOfBirth: body.dateOfBirth } : {}),
+    ...(body.age !== undefined ? { age: body.age } : {}),
   });
   return response.data;
 }
