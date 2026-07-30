@@ -10,6 +10,14 @@ interface ImportMetaEnv {
   readonly VITE_DEFAULT_API_URL: string;
   readonly VITE_SHOW_INSTANCE_SELECTOR: string;
   readonly VITE_NETWORK_ID: string;
+  /** Per-deployment college/institute region code ("ka" | "up") selecting which
+   * state's list backs the reference-autocomplete college field. Maps to
+   * public/reference/colleges-<code>.json. Falls back to "ka". */
+  readonly VITE_COLLEGE_DATASET?: string;
+  /** Per-deployment base URL the reference datasets are fetched from (set via
+   * ConfigMap). Falls back to the UI's own "/reference/". Lets the college
+   * lists be hosted/updated independently of the UI image, like network.json. */
+  readonly VITE_REFERENCE_BASE_URL?: string;
   readonly VITE_SERVED_BINDINGS?: string;
   readonly VITE_DEFAULT_NETWORK_THEME?: string;
   readonly VITE_DEFAULT_BRAND?: string;
