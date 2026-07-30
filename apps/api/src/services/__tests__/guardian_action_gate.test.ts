@@ -240,7 +240,7 @@ describe('guardianGateFailure', () => {
 
   it('returns null for not_required and verified', () => {
     expect(guardianGateFailure({ status: 'not_required' })).toBeNull();
-    expect(guardianGateFailure({ status: 'verified', scope: 's' })).toBeNull();
+    expect(guardianGateFailure({ status: 'verified' })).toBeNull();
   });
 });
 
