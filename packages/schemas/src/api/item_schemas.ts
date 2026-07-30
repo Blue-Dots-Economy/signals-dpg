@@ -158,6 +158,19 @@ export const FetchItemsBodySchema = withGeoSearchRefinement(FetchItemsSchemaBase
 const MarkersSchemaBase = FetchItemsSchemaBase.extend({
   // Coords are cheap — allow a much higher cap than the 1000 full-fetch cap.
   limit: z.coerce.number().int().min(1).max(25000).default(200),
+
+  // Free-text value-match search (#394 map native text search). Matched
+  // server-side against the PUBLIC (non-private) item_state field values
+  // only — see `resolveAllowedFacetFields` (facet_guard.ts) and
+  // `buildWhereClause`'s `text_search` branch (item_fetch_runtime.ts) — and
+  // is AND-ed with whatever bbox/radius viewport the rest of this request
+  // already carries, so it's inherently scoped to the visible map area. Kept
+  // on this schema (not the shared FetchItemsSchemaBase) because the map
+  // stays native; list/discover text search goes through signals-search
+  // instead. On `MarkersBodySchema` (forwarded peer-to-peer), only the raw
+  // `q` travels — never a resolved field allowlist — each instance resolves
+  // its own non-private fields from its own network config.
+  q: z.string().trim().min(1).optional(),
 });
 
 export const MarkersQuerySchema = withGeoSearchRefinement(MarkersSchemaBase);

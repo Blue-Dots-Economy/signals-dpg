@@ -4572,6 +4572,15 @@
             "in": "query",
             "name": "cache_ttl_seconds",
             "required": false
+          },
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            },
+            "in": "query",
+            "name": "q",
+            "required": false
           }
         ],
         "responses": {
@@ -4769,6 +4778,10 @@
                     "minimum": 0,
                     "exclusiveMinimum": true,
                     "maximum": 9007199254740991
+                  },
+                  "q": {
+                    "type": "string",
+                    "minLength": 1
                   }
                 },
                 "required": [

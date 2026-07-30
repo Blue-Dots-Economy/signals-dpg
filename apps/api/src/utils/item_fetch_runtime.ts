@@ -34,6 +34,18 @@ export type ItemFetchFilters = {
    * to enumerate a private field's values.
    */
   item_state?: Record<string, unknown>;
+  /**
+   * Free-text value-match search (#394 map native text search). `q` is the
+   * raw search term; `fields` is the SERVER-resolved allowlist of non-private
+   * `item_state` field keys to match against — resolved by the route handler
+   * via `resolveAllowedFacetFields` (facet_guard.ts) from the network
+   * config, never from the client. `buildWhereClause` below ANDs this into
+   * whatever bbox/radius condition is already present, so a text match is
+   * inherently viewport-scoped — no separate geo logic needed here. An empty
+   * `fields` (no non-private field declared for the domain/item_type) makes
+   * the match unsatisfiable by design rather than matching everything.
+   */
+  text_search?: { q: string; fields: string[] };
   item_latitude?: number;
   item_longitude?: number;
   radius_meters?: number;
@@ -226,6 +238,36 @@ async function buildWhereClause(
           sql`${items.item_state} ->> ${field} = ANY(ARRAY[${valuesArrayLiteral}])`
         );
       }
+    }
+  }
+
+  if (filters.text_search) {
+    const { q, fields } = filters.text_search;
+
+    if (fields.length === 0) {
+      // No non-private field is declared for this domain/item_type (e.g. an
+      // unconfigured item_type, or a schema with no public fields at all) —
+      // the match is unsatisfiable rather than silently matching every row.
+      conditions.push(sql`false`);
+    } else {
+      // Escape LIKE/ILIKE metacharacters (`\`, `%`, `_`) in the raw user
+      // query so `q` can never inject its own wildcards into the pattern —
+      // only a literal substring match is ever performed.
+      const likePattern = `%${q.replace(/[\\%_]/g, (char) => `\\${char}`)}%`;
+      const fieldsArrayLiteral = sql.join(
+        fields.map((field) => sql`${field}`),
+        sql.raw(', ')
+      );
+
+      conditions.push(
+        sql`
+          EXISTS (
+            SELECT 1 FROM jsonb_each_text(${items.item_state}) e
+            WHERE e.key = ANY(ARRAY[${fieldsArrayLiteral}])
+              AND e.value ILIKE ${likePattern} ESCAPE '\\'
+          )
+        `
+      );
     }
   }
 

@@ -525,6 +525,14 @@ export async function getInstanceCount(input: {
     item_instance_url: input.filters.item_instance_url,
     item_schema_url: input.filters.item_schema_url,
     item_state: input.filters.item_state,
+    // #394: text_search flows through to the LOCAL count path (this instance
+    // calling countLocalItems in-process, same object — see buildWhereClause)
+    // so meta.total reflects the filtered count for the single-instance case
+    // this feature targets. A remote peer's /item/count_local body is
+    // validated against FetchItemsCountBodySchema, which has no text_search
+    // field, so this is a no-op (stripped) on that path — cross-instance
+    // count-scoping by q is a known follow-up, not covered here.
+    text_search: input.filters.text_search,
     item_latitude: input.filters.item_latitude,
     item_longitude: input.filters.item_longitude,
     radius_meters: input.filters.radius_meters,
