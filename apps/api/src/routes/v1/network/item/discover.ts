@@ -179,8 +179,10 @@ const discover_items_handler = async (
       // doc comment). A search-service outage must never surface as a 5xx,
       // so this falls back to the native, distance/recency-ordered paged
       // fetch `/network/item/fetch` uses — but now applying `q`/`filters`
-      // natively too (value-match on public item_state + filterable facets),
-      // the same mechanisms `/markers` already uses. `allowedFilters` was
+      // natively too (value-match on public item_state + declared,
+      // non-private facet fields — #394 dropped the separate `filterable`
+      // gate, see `resolveAllowedFacetFields`), the same mechanisms
+      // `/markers` already uses. `allowedFilters` was
       // already server-resolved above for the signals-search call, so it's
       // reused here rather than re-resolved. `meta.source: 'native_fallback'`
       // is what lets the UI (Task 6) show that ranking (not search/filtering)

@@ -65,7 +65,7 @@ describe('isDiscoverActive', () => {
 
 describe('buildFilteredCardsForDomain discover bypass', () => {
   const enumFields: EnumFilterField[] = [
-    { key: 'subject', label: 'Subject', options: ['math', 'science'], isArray: false, filterable: true },
+    { key: 'subject', label: 'Subject', options: ['math', 'science'], isArray: false },
   ];
   // Item text has neither the search substring "welder" nor the selected enum
   // value "science" — a valid semantic-search hit that the client MUST NOT drop.

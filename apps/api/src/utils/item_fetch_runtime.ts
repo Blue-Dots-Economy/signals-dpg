@@ -27,11 +27,14 @@ export type ItemFetchFilters = {
    * applied as `item_state->>'field' = ANY(values)`, which only Task 1's
    * per-field expression btree indexes accelerate (a `@>` containment check
    * cannot express "any of these values" for one key). SECURITY: an array
-   * value is only honored when the network config declares that field
-   * `filterable: true` AND not `private: true` for the item's domain — see
+   * value is only honored when the field is declared in the network config's
+   * schema `properties` AND not `private: true` for the item's domain — see
    * `resolveAllowedFacetFields` below — otherwise it is dropped silently
    * (never surfaced as a 4xx) so a caller can't use found/not-found responses
-   * to enumerate a private field's values.
+   * to enumerate a private/undeclared field's values. (There used to be an
+   * additional `filterable: true` marker gating this further; #394 dropped
+   * it — every declared, non-private field is a filter again. The proper
+   * schema-driven search/filter declaration is tracked in #360.)
    */
   item_state?: Record<string, unknown>;
   /**
@@ -97,12 +100,21 @@ const itemResponseColumns = {
 
 /**
  * #203 Task 3 security guard: resolves the set of `item_state` field names a
- * caller is allowed to facet-filter on for a given network/domain — exactly
- * those schema properties (across every item_type declared for the domain)
- * marked `filterable: true` AND NOT `private: true`. Sourced from the network
- * config (the same `getNetworkConfigById` cache used elsewhere in the app),
- * never from the request — a client cannot expand its own allowed facet set
- * by naming more fields.
+ * caller is allowed to facet-filter on for a given network/domain — every
+ * schema property (across every item_type declared for the domain) that is
+ * declared at all AND NOT `private: true`. Sourced from the network config
+ * (the same `getNetworkConfigById` cache used elsewhere in the app), never
+ * from the request — a client cannot expand its own allowed facet set by
+ * naming more fields.
+ *
+ * #394: this used to additionally require `filterable: true` (a per-field
+ * marker in network.json). That gate has been removed — every declared,
+ * non-private enum field is a filter again in both the map and list views
+ * (restoring pre-Map-PR behavior). The `private !== true` check below is the
+ * enumeration guard and MUST stay: it is the only thing standing between a
+ * client and using found/not-found responses to enumerate a private field's
+ * values. The proper long-term schema-driven search/filter declaration is
+ * tracked in #360 — this function is the code to revisit when that lands.
  *
  * Fails closed: an unconfigured network/domain (bad `item_network`/
  * `item_domain`, or a network config load error) yields an empty set, so
@@ -135,8 +147,8 @@ async function resolveAllowedFacetFields(
       properties as Record<string, unknown>
     )) {
       if (!definition || typeof definition !== 'object') continue;
-      const declared = definition as { filterable?: unknown; private?: unknown };
-      if (declared.filterable === true && declared.private !== true) {
+      const declared = definition as { private?: unknown };
+      if (declared.private !== true) {
         allowed.add(field);
       }
     }
@@ -218,7 +230,7 @@ async function buildWhereClause(
               item_domain: filters.item_domain,
               field,
             },
-            'Dropping item_state facet filter: field is not declared filterable and non-private for this domain'
+            'Dropping item_state facet filter: field is not declared and non-private for this domain'
           );
           continue;
         }

@@ -13,13 +13,21 @@
  * Uses `resolveBindings()` (the same helper `routes/v1/**` integration suites
  * use) to find the actually-served network/domain rather than hardcoding
  * "blue_dot" — but then reads that domain's real JSON-schema `properties` to
- * find a genuine `filterable`+non-private facet field and a genuine
+ * find a genuine declared+non-private facet field and a genuine
  * `private: true` field, so the security-guard assertions exercise the real
- * Task 1 markers (`examples/schemas/blue_dot/network.json`'s `gender` /
+ * network.json markers (`examples/schemas/blue_dot/network.json`'s `gender` /
  * `name`) rather than a fabricated schema. Seeds a dedicated `item_type`
  * probe string + owner so this suite never collides with other data in the
  * same partition; cleans up in afterAll. Skips when POSTGRES_URL /
  * POSTGRES_USER is unset.
+ *
+ * #394: the `filterable: true` network.json marker (and the guard's
+ * additional requirement of it) has been removed — `resolveAllowedFacetFields`
+ * (`../item_fetch_runtime.ts`) now allows every declared, non-private field.
+ * This suite's "filterable" field and its "second, also-declared,
+ * non-private" field therefore behave IDENTICALLY (both applied); only the
+ * `private: true` field remains guarded. See #360 for the proper long-term
+ * schema-driven search/filter declaration.
  *
  * `item_search` rows (the Option B join target) are seeded directly via raw
  * SQL — in production these come from the signals-search ingestion pipeline,
@@ -89,7 +97,9 @@ function extractRows<T>(result: unknown): T[] {
     : ((result as { rows?: T[] }).rows ?? []);
 }
 
-function findFilterableField(
+// #394: no `filterable` requirement any more — any declared, non-private,
+// >=2-value enum field is a valid facet field now.
+function findFacetField(
   schema: Record<string, unknown>
 ): { field: string; values: [string, string] } {
   const properties = schema.properties as
@@ -99,16 +109,12 @@ function findFilterableField(
     throw new Error('resolved binding schema has no properties');
   }
   const entry = Object.entries(properties).find(
-    ([, def]) =>
-      def.filterable === true &&
-      def.private !== true &&
-      Array.isArray(def.enum) &&
-      def.enum.length >= 2
+    ([, def]) => def.private !== true && Array.isArray(def.enum) && def.enum.length >= 2
   );
   if (!entry) {
     throw new Error(
-      'no filterable, non-private, >=2-value enum field found on the resolved binding — ' +
-        'expected Task 1 (#203) markers (e.g. blue_dot seeker "gender") to be present'
+      'no non-private, >=2-value enum field found on the resolved binding — ' +
+        'expected e.g. blue_dot seeker "gender" to be present'
     );
   }
   const [field, def] = entry;
@@ -130,7 +136,14 @@ function findPrivateField(schema: Record<string, unknown>): string {
   return entry[0];
 }
 
-function findNonFilterableNonPrivateField(schema: Record<string, unknown>): string {
+// #394: a SECOND declared, non-private, >=2-value enum field, distinct from
+// the first — used to prove a field that previously had no `filterable: true`
+// marker (e.g. blue_dot seeker "educationCategory") is now ALSO applied by
+// the native facet filter, not silently dropped.
+function findSecondFacetField(
+  schema: Record<string, unknown>,
+  excludeField: string
+): { field: string; values: [string, string] } {
   const properties = schema.properties as
     | Record<string, Record<string, unknown>>
     | undefined;
@@ -138,12 +151,20 @@ function findNonFilterableNonPrivateField(schema: Record<string, unknown>): stri
     throw new Error('resolved binding schema has no properties');
   }
   const entry = Object.entries(properties).find(
-    ([, def]) => def.filterable !== true && def.private !== true
+    ([field, def]) =>
+      field !== excludeField &&
+      def.private !== true &&
+      Array.isArray(def.enum) &&
+      def.enum.length >= 2
   );
   if (!entry) {
-    throw new Error('no non-filterable, non-private field found on the resolved binding');
+    throw new Error(
+      'no second non-private, >=2-value enum field (distinct from the first) found on the resolved binding'
+    );
   }
-  return entry[0];
+  const [field, def] = entry;
+  const enumValues = def.enum as string[];
+  return { field, values: [enumValues[0], enumValues[1]] };
 }
 
 describeIf(
@@ -158,14 +179,23 @@ describeIf(
     let facetValueA: string;
     let facetValueB: string;
     let privateField: string;
-    let nonFilterableField: string;
+    // #394: the "second" field is a distinct declared, non-private enum
+    // field that never carried a `filterable: true` marker (e.g. blue_dot
+    // seeker "educationCategory") — every seeded item gets `secondValueA`
+    // except `inB`, which gets `secondValueB`, mirroring the
+    // facetField/facetValueA/facetValueB pattern above so a filter on this
+    // field can be proven to narrow the bbox result exactly like the first.
+    let secondFacetField: string;
+    let secondValueA: string;
+    let secondValueB: string;
 
     const ids: Record<string, string> = {};
 
     async function seedItem(
       key: string,
       locations: Array<{ lat: number; lng: number }>,
-      gender: string
+      gender: string,
+      secondValue: string = secondValueA
     ): Promise<string> {
       const [row] = await db
         .insert(items)
@@ -177,7 +207,7 @@ describeIf(
           item_schema_url: 'http://localhost:2742/schema',
           created_by: OWNER_ID,
           item_locations: locations,
-          item_state: { [facetField]: gender },
+          item_state: { [facetField]: gender, [secondFacetField]: secondValue },
           lifecycle_status: 'live',
         })
         .returning({ item_id: items.item_id });
@@ -221,17 +251,19 @@ describeIf(
       NET = primary.network;
       DOMAIN = primary.domain;
 
-      const found = findFilterableField(primary.schema);
+      const found = findFacetField(primary.schema);
       facetField = found.field;
       [facetValueA, facetValueB] = found.values;
       privateField = findPrivateField(primary.schema);
-      nonFilterableField = findNonFilterableNonPrivateField(primary.schema);
+      const foundSecond = findSecondFacetField(primary.schema, facetField);
+      secondFacetField = foundSecond.field;
+      [secondValueA, secondValueB] = foundSecond.values;
 
       await ensureItemPartition(db, NET, DOMAIN);
       await db.insert(user).values({ id: OWNER_ID, name: 'Map Probe Suite' });
 
       const inAId = await seedItem('inA', [inA], facetValueA);
-      const inBId = await seedItem('inB', [inB], facetValueB);
+      const inBId = await seedItem('inB', [inB], facetValueB, secondValueB);
       const outAId = await seedItem('outA', [outA], facetValueA);
       const multiOneInId = await seedItem('multiOneIn', [outA, inC], facetValueA);
       const multiBothOutId = await seedItem('multiBothOut', [outA, outB], facetValueA);
@@ -391,18 +423,27 @@ describeIf(
       expect(res.meta.total).toBe(3);
     });
 
-    it('a filter on a non-filterable (but non-private) field is also IGNORED', async () => {
+    it('#394: a filter on a SECOND declared, non-private field (no former filterable marker) is now APPLIED, not ignored', async () => {
       const res = await fetchLocalMarkers({
         ...baseFilters(),
         min_lat: MIN_LAT,
         min_lng: MIN_LNG,
         max_lat: MAX_LAT,
         max_lng: MAX_LNG,
-        item_state: { [nonFilterableField]: ['anything-at-all'] },
+        item_state: { [secondFacetField]: [secondValueB] },
       });
 
-      expect(res.markers.length).toBe(3);
-      expect(res.meta.total).toBe(3);
+      // Only `inB` was seeded with `secondValueB` (every other in-box item got
+      // `secondValueA`) — a dropped/ignored filter would return all 3 in-box
+      // items, same as the unfiltered bbox result above. Narrowing to exactly
+      // `inB` proves this field is genuinely applied by `buildWhereClause`'s
+      // `= ANY(...)` facet path now that the `filterable: true` gate is gone.
+      const got = new Set(res.markers.map((m) => m.item_id));
+      expect(got.has(ids.inB)).toBe(true);
+      expect(got.has(ids.inA)).toBe(false);
+      expect(got.has(ids.multiOneIn)).toBe(false);
+      expect(res.markers.length).toBe(1);
+      expect(res.meta.total).toBe(1);
     });
 
     it('an inverted/degenerate bbox yields an empty result (not an error)', async () => {

@@ -70,8 +70,10 @@ const FetchItemsSchemaBase = z.object({
   // Facet filter. Each entry's value is either a scalar (item_fetch_runtime's
   // buildWhereClause applies it as an `item_state @> jsonb` containment
   // check) or a `string[]` (#203 Task 3/7: applied as
-  // `item_state ->> field = ANY(...)`, gated by the filterable/non-private
-  // facet guard — see `resolveAllowedFacetFields`). Left as `z.unknown()`
+  // `item_state ->> field = ANY(...)`, gated by the declared/non-private
+  // facet guard — see `resolveAllowedFacetFields`; #394 dropped the
+  // additional `filterable` marker that guard used to also require). Left as
+  // `z.unknown()`
   // rather than a narrower union deliberately: this field is shared by every
   // fetch/count/markers schema below, some of which allow arbitrary equality
   // filters beyond the array-facet case this comment calls out.
