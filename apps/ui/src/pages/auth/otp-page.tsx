@@ -24,8 +24,8 @@ interface AuthState extends AuthIdentifier {
   redirectTo?: string;
   pendingConsent?: ConsentAcceptBody | null;
   /** Carries the age (+ chosen domain for new signups) captured in the auth
-   * flow before this OTP: set for a brand-new signup, and for an existing user
-   * who backfilled their age pre-OTP (see login-page.tsx). Null otherwise. */
+   * flow before this OTP: set for a brand-new signup, and for an existing minor
+   * who picked their year of birth pre-OTP (see login-page.tsx). Null otherwise. */
   signupExtras?: SignupExtras | null;
 }
 
@@ -131,12 +131,17 @@ export function OtpPage() {
       // users. Best-effort: if the status lookup fails, fall through to home;
       // the home-page guardian gate remains as a backstop, and the API gate is
       // the real fail-closed control regardless.
+      // An existing minor picked their year of birth pre-OTP; it's persisted
+      // just above (signupExtras → submitU18Dob), so u18/status now reports
+      // isMinor. Run the AUTHENTICATED guardian flow here — before home — since
+      // the guardian APIs need this session. Starts at the guardian step (DOB
+      // already known). onComplete/onNotMinor calls finishSignIn.
       if (state.userExists) {
         try {
           const u18 = await getU18Status(themeId);
           if (u18.isMinor && !u18.guardianVerified) {
             setGuardianGate({ initialStep: u18.hasBirthData ? 'guardian' : 'dob' });
-            return; // hold on the guardian flow; its onComplete calls finishSignIn
+            return;
           }
         } catch {
           // fall through to finishSignIn
