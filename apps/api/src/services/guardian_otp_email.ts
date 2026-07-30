@@ -42,7 +42,9 @@ function bodyLine(scenario: GuardianOtpScenario, vars: GuardianOtpVariables): st
       const list = scenario.providerOrgNames.length
         ? `<ol>${scenario.providerOrgNames.map((n) => `<li>${esc(n)}</li>`).join('')}</ol>`
         : '<p>the selected organisations</p>';
-      return `Your ward has requested to apply to ${noun} provided by ${list}This application will share your ward's profile details, along with name, phone, and email with the organisations. Use the given OTP to allow provider organisations to access your ward's details.`;
+      const tail =
+        "This application will share your ward's profile details, along with name, phone, and email with the organisations. Use the given OTP to allow provider organisations to access your ward's details.";
+      return `Your ward has requested to apply to ${noun} provided by:${list}<p>${tail}</p>`;
     }
   }
 }
