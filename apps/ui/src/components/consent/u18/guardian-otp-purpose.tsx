@@ -61,7 +61,7 @@ function describe(purpose: GuardianPurpose, t: TFn): { value: string; shares?: s
         value:
           purpose.action === 'connect'
             ? t('u18.otp_purpose_bulk_connect', {
-                defaultValue: 'Connecting with {{count}} organisations',
+                defaultValue: 'Connecting with {{count}} profiles',
                 count: purpose.count,
               })
             : t('u18.otp_purpose_bulk_apply', {
