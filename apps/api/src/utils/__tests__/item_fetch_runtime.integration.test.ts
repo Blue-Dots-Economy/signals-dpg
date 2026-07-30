@@ -423,6 +423,70 @@ describeIf(
       expect(res.meta.total).toBe(3);
     });
 
+    it('#394 vuln repro: a SINGLE-VALUE (scalar) filter on a private field is IGNORED, not applied via @> containment', async () => {
+      // Pre-fix this used the unguarded `item_state @> {...}::jsonb` branch —
+      // ANY scalar value narrowed the result even for a `private: true`
+      // field, since only the array-valued facet path checked
+      // `resolveAllowedFacetFields`. Same expectation as the array-value
+      // private-field test above: unfiltered bbox result (3 items), not
+      // narrowed.
+      const res = await fetchLocalMarkers({
+        ...baseFilters(),
+        min_lat: MIN_LAT,
+        min_lng: MIN_LNG,
+        max_lat: MAX_LAT,
+        max_lng: MAX_LNG,
+        item_state: { [privateField]: 'anything-at-all' },
+      });
+
+      const got = new Set(res.markers.map((m) => m.item_id));
+      expect(got.has(ids.inA)).toBe(true);
+      expect(got.has(ids.inB)).toBe(true);
+      expect(got.has(ids.multiOneIn)).toBe(true);
+      expect(res.markers.length).toBe(3);
+      expect(res.meta.total).toBe(3);
+    });
+
+    it('a SINGLE-VALUE (scalar) filter on an UNDECLARED field is IGNORED, not applied', async () => {
+      const res = await fetchLocalMarkers({
+        ...baseFilters(),
+        min_lat: MIN_LAT,
+        min_lng: MIN_LNG,
+        max_lat: MAX_LAT,
+        max_lng: MAX_LNG,
+        item_state: { totally_undeclared_field_xyz: 'anything-at-all' },
+      });
+
+      const got = new Set(res.markers.map((m) => m.item_id));
+      expect(got.has(ids.inA)).toBe(true);
+      expect(got.has(ids.inB)).toBe(true);
+      expect(got.has(ids.multiOneIn)).toBe(true);
+      expect(res.markers.length).toBe(3);
+      expect(res.meta.total).toBe(3);
+    });
+
+    it('a SINGLE-VALUE (scalar) filter on a declared, non-private field still narrows results (unified with the array `= ANY` path)', async () => {
+      // Same narrowing as the array-value facet-filter test above
+      // (`item_state: { [facetField]: [facetValueA] }`), but with a bare
+      // scalar value — proves single- and multi-select now share one guarded
+      // code path with identical semantics for an allowed field.
+      const res = await fetchLocalMarkers({
+        ...baseFilters(),
+        min_lat: MIN_LAT,
+        min_lng: MIN_LNG,
+        max_lat: MAX_LAT,
+        max_lng: MAX_LNG,
+        item_state: { [facetField]: facetValueA },
+      });
+
+      const got = new Set(res.markers.map((m) => m.item_id));
+      expect(got.has(ids.inA)).toBe(true); // facetValueA
+      expect(got.has(ids.multiOneIn)).toBe(true); // facetValueA
+      expect(got.has(ids.inB)).toBe(false); // facetValueB — filtered out
+      expect(res.markers.length).toBe(2);
+      expect(res.meta.total).toBe(2);
+    });
+
     it('#394: a filter on a SECOND declared, non-private field (no former filterable marker) is now APPLIED, not ignored', async () => {
       const res = await fetchLocalMarkers({
         ...baseFilters(),

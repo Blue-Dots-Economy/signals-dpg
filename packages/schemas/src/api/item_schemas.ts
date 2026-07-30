@@ -67,16 +67,17 @@ const FetchItemsSchemaBase = z.object({
 
   item_schema_url: z.url().nullable().optional(),
 
-  // Facet filter. Each entry's value is either a scalar (item_fetch_runtime's
-  // buildWhereClause applies it as an `item_state @> jsonb` containment
-  // check) or a `string[]` (#203 Task 3/7: applied as
+  // Facet filter. Each entry's value may be a scalar or a `string[]` —
+  // item_fetch_runtime's buildWhereClause normalizes a scalar `v` to `[v]`
+  // and applies EVERY entry (scalar or array) the same guarded way:
   // `item_state ->> field = ANY(...)`, gated by the declared/non-private
-  // facet guard — see `resolveAllowedFacetFields`; #394 dropped the
-  // additional `filterable` marker that guard used to also require). Left as
-  // `z.unknown()`
-  // rather than a narrower union deliberately: this field is shared by every
-  // fetch/count/markers schema below, some of which allow arbitrary equality
-  // filters beyond the array-facet case this comment calls out.
+  // facet guard (see `resolveAllowedFacetFields`; #394 dropped the additional
+  // `filterable` marker that guard used to also require, and separately
+  // closed a hole where a scalar value bypassed the guard entirely via an
+  // unguarded `item_state @> jsonb` containment check — there is no such
+  // unguarded branch any more). Left as `z.unknown()` rather than a narrower
+  // union deliberately: this field is shared by every fetch/count/markers
+  // schema below.
   item_state: z.record(z.string(), z.unknown()).optional(),
   item_latitude: z.coerce.number().optional(),
   item_longitude: z.coerce.number().optional(),
