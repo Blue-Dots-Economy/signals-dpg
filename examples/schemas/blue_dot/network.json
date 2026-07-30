@@ -902,7 +902,6 @@
             },
             "natureOfJob": {
               "vectorize": true,
-              "filterable": true,
               "type": "string",
               "title": "Nature of Job",
               "enum": [
@@ -945,7 +944,6 @@
             },
             "candidateExperienceType": {
               "vectorize": true,
-              "filterable": true,
               "type": "string",
               "title": "Type of Candidate",
               "description": "Please select the option that best describes the type of candidate you want to hire based on their previous work experience",
@@ -973,7 +971,6 @@
             "workExperienceYears": {
               "type": "string",
               "title": "Work Experience (Years)",
-              "filterable": true,
               "description": "Preferred minimum years of work experience",
               "enum": [
                 "0",

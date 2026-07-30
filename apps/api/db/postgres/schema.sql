@@ -100,17 +100,6 @@ CREATE INDEX IF NOT EXISTS items_item_state_work_experience_idx
 CREATE INDEX IF NOT EXISTS items_item_state_nature_of_jobs_interested_in_idx
   ON items ((item_state ->> 'natureOfJobsInterestedIn'));
 
--- Provider (job_posting) facet filter indexes (#394,
--- drizzle/0010_job_posting_facet_indexes.sql). Same expression-btree
--- rationale as the seeker facets above, for the blue_dot job_posting_1.0
--- fields declared `filterable: true`.
-CREATE INDEX IF NOT EXISTS items_item_state_nature_of_job_idx
-  ON items ((item_state ->> 'natureOfJob'));
-CREATE INDEX IF NOT EXISTS items_item_state_candidate_experience_type_idx
-  ON items ((item_state ->> 'candidateExperienceType'));
-CREATE INDEX IF NOT EXISTS items_item_state_work_experience_years_idx
-  ON items ((item_state ->> 'workExperienceYears'));
-
 -- ── item_search (Signals search engine V1) ──────────────────────────────────
 -- Search/discovery index maintained by the signals-search service.
 -- DDL authority lives here (shared dpg DB); the signals-search repo carries an
