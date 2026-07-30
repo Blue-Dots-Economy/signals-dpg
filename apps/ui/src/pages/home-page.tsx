@@ -92,6 +92,7 @@ import type { Marker as NetworkMarker, DiscoverFacetFilter } from '@/lib/network
 import { useQueryClient } from '@tanstack/react-query';
 import { queryKeys } from '@/lib/query-keys';
 import { GuardianOtpDialog } from '@/components/actions/guardian-otp-dialog';
+import { GuardianOtpPurpose } from '@/components/consent/u18/guardian-otp-purpose';
 import { U18GuardianFlow } from '@/components/consent/u18/u18-guardian-flow';
 import { isGuardianConsentRequiredDomain } from '@/lib/guardian-consent';
 
@@ -1782,6 +1783,7 @@ export function HomePage() {
           <DialogTitle>{t('actions.guardian_confirm_title')}</DialogTitle>
           <DialogDescription>{t('actions.guardian_confirm_desc')}</DialogDescription>
         </DialogHeader>
+        <GuardianOtpPurpose purpose={{ kind: 'bulk', count: browseSelection.selected.size }} />
         <DialogFooter>
           <Button variant="outline" onClick={() => setBulkGuardianConfirm(null)}>
             {t('actions.guardian_confirm_cancel')}

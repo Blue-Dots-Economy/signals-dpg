@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next';
 import type { DotActionSchema } from '@/engine/types';
 import { ActionModal } from './action-modal';
 import { GuardianOtpDialog } from './guardian-otp-dialog';
+import { GuardianOtpPurpose, type GuardianPurpose } from '@/components/consent/u18/guardian-otp-purpose';
 import { ActionAbortedError } from '@/lib/action-abort';
 import { useGuardianOtpGate } from '@/hooks/use-guardian-otp-gate';
 import { toast } from 'sonner';
@@ -84,7 +85,9 @@ export function ActionHandler({ children, onActionSubmit, guardianConfirmRequire
     // Success toast is owned by the onActionSubmit callback (action-specific).
   });
   // Deferred submit awaiting the ward's "send OTP to my guardian?" confirmation.
-  const [pendingGuardianConfirm, setPendingGuardianConfirm] = React.useState<(() => void) | null>(null);
+  const [pendingGuardianConfirm, setPendingGuardianConfirm] = React.useState<
+    { run: () => void; purpose: GuardianPurpose } | null
+  >(null);
 
   const triggerAction = React.useCallback(
     (type: string, schema: DotActionSchema, targetItemId: string) => {
@@ -142,8 +145,11 @@ export function ActionHandler({ children, onActionSubmit, guardianConfirmRequire
 
   // Gate the submit behind the guardian-confirm step for a minor: stash the
   // deferred submit and show the confirm; otherwise run immediately.
-  const gateSubmit = (run: () => void) => {
-    if (guardianConfirmRequired) setPendingGuardianConfirm(() => run);
+  const purposeForType = (type: string): GuardianPurpose =>
+    type === 'connect' ? { kind: 'connect' } : { kind: 'apply' };
+
+  const gateSubmit = (run: () => void, purpose: GuardianPurpose) => {
+    if (guardianConfirmRequired) setPendingGuardianConfirm({ run, purpose });
     else run();
   };
 
@@ -152,7 +158,7 @@ export function ActionHandler({ children, onActionSubmit, guardianConfirmRequire
     schema: DotActionSchema,
     targetItemId: string
   ) => {
-    gateSubmit(() => { void performSubmit(type, schema, {}, targetItemId); });
+    gateSubmit(() => { void performSubmit(type, schema, {}, targetItemId); }, purposeForType(type));
   };
 
   const handleModalSubmit = (formData: Record<string, unknown>) => {
@@ -160,7 +166,7 @@ export function ActionHandler({ children, onActionSubmit, guardianConfirmRequire
     const { type, schema, targetItemId } = activeAction;
     // Close the form first so only one dialog (confirm or OTP) is visible.
     setActiveAction(null);
-    gateSubmit(() => { void performSubmit(type, schema, formData, targetItemId); });
+    gateSubmit(() => { void performSubmit(type, schema, formData, targetItemId); }, purposeForType(type));
   };
 
   return (
@@ -198,13 +204,14 @@ export function ActionHandler({ children, onActionSubmit, guardianConfirmRequire
             <DialogTitle>{t('actions.guardian_confirm_title')}</DialogTitle>
             <DialogDescription>{t('actions.guardian_confirm_desc')}</DialogDescription>
           </DialogHeader>
+          {pendingGuardianConfirm && <GuardianOtpPurpose purpose={pendingGuardianConfirm.purpose} />}
           <DialogFooter>
             <Button variant="outline" onClick={() => setPendingGuardianConfirm(null)}>
               {t('actions.guardian_confirm_cancel')}
             </Button>
             <Button
               onClick={() => {
-                const run = pendingGuardianConfirm;
+                const run = pendingGuardianConfirm?.run;
                 setPendingGuardianConfirm(null);
                 run?.();
               }}
