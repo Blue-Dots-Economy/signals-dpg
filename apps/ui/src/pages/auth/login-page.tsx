@@ -289,15 +289,17 @@ export function LoginPage() {
     // A minor never sees the adult terms/privacy consent checkbox — the guardian
     // flow records their consent instead.
     if (isMinorFromAge(age)) {
-      toast.info(t('auth.minor_toast_title', "You're under 18"), {
-        description: t(
-          'auth.minor_toast_desc',
-          'A parent or guardian needs to confirm your account before you can continue.',
-        ),
-      });
       if (!gate.exists) {
-        // NEW minor: guardian pre-auth is safe (account materializes on
-        // creation, same session owns the new identifier).
+        // NEW minor: the guardian flow is the very next screen, so the toast
+        // matches what they see next.
+        toast.info(t('auth.minor_toast_title', "You're under 18"), {
+          description: t(
+            'auth.minor_toast_desc',
+            'A parent or guardian needs to confirm your account before you can continue.',
+          ),
+        });
+        // Guardian pre-auth is safe (account materializes on creation, same
+        // session owns the new identifier).
         setSignupGuardianGate({
           identifier: gate.identifier,
           domain: gate.domain,
@@ -311,7 +313,15 @@ export function LoginPage() {
       // EXISTING minor: the guardian APIs are session-scoped, so the guardian
       // step must run AFTER the login OTP. Skip the adult consent and send the
       // OTP; the post-login authed guardian flow (otp-page) records their u18
-      // consent. Age rides in signupExtras and is persisted post-verify.
+      // consent. Age rides in signupExtras and is persisted post-verify. Set the
+      // two-step expectation here so the OTP page (not the guardian step) coming
+      // next doesn't read as a mismatch.
+      toast.info(t('auth.minor_toast_title', "You're under 18"), {
+        description: t(
+          'auth.minor_verify_then_guardian_desc',
+          'First verify your number, then a parent or guardian will confirm your account.',
+        ),
+      });
       setIsLoading(true);
       try {
         await proceedToOtp(gate.identifier, gate.exists, gate.resolvedName, extras);
