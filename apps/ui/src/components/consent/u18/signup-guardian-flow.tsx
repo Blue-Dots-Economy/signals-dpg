@@ -23,6 +23,8 @@ export interface SignupGuardianFlowProps {
   age: number;
   /** Guardian OTP verified server-side — caller proceeds to the ward's own OTP. */
   onComplete: () => void;
+  /** Back to the birth-year step (rendered on the previous screen). */
+  onBack?: () => void;
 }
 
 /**
@@ -42,6 +44,7 @@ export function SignupGuardianFlow({
   identifier,
   age,
   onComplete,
+  onBack,
 }: SignupGuardianFlowProps) {
   const { t } = useTranslation();
   // 'verified' is an explicit hand-off step AFTER the guardian OTP: the ward's
@@ -97,6 +100,7 @@ export function SignupGuardianFlow({
             setGuardianBody(body);
             setStep('otp');
           }}
+          onBack={onBack}
         />
       )}
 

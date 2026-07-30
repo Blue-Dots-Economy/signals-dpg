@@ -286,13 +286,9 @@ export function LoginPage() {
     const extras: SignupExtras = { domain: gate.domain, age };
     setSignupDobGate(null);
 
-    // A minor never sees the adult terms/privacy consent checkbox — the guardian
-    // flow records their consent instead. A brand-new minor captures the guardian
-    // pre-auth (materialized on account creation — safe, same session owns the
-    // new identifier). An EXISTING minor must NOT designate a guardian before
-    // proving they own the number (login OTP), so we skip the adult consent step
-    // and send the login OTP; their guardian flow runs post-login (#453,
-    // otp-page) and records the u18 consent there.
+    // This step only runs for a brand-new signup now (an existing user's DOB is
+    // collected post-OTP, #453). A new minor captures the guardian pre-auth and
+    // never sees the adult consent checkbox — the guardian flow records consent.
     if (isMinorFromAge(age)) {
       toast.info(t('auth.minor_toast_title', "You're under 18"), {
         description: t(
@@ -300,28 +296,14 @@ export function LoginPage() {
           'A parent or guardian needs to confirm your account before you can continue.',
         ),
       });
-      if (!gate.exists) {
-        setSignupGuardianGate({
-          identifier: gate.identifier,
-          domain: gate.domain,
-          age,
-          resolvedName: gate.resolvedName,
-          resolvedSignupExtras: extras,
-          exists: gate.exists,
-        });
-        return;
-      }
-      setIsLoading(true);
-      try {
-        // proceedToOtp with no pendingConsent → no adult consent gate.
-        await proceedToOtp(gate.identifier, gate.exists, gate.resolvedName, extras);
-      } catch {
-        toast.error(t('auth.toast_send_code_error'), {
-          description: t('auth.toast_send_code_error_desc'),
-        });
-      } finally {
-        setIsLoading(false);
-      }
+      setSignupGuardianGate({
+        identifier: gate.identifier,
+        domain: gate.domain,
+        age,
+        resolvedName: gate.resolvedName,
+        resolvedSignupExtras: extras,
+        exists: gate.exists,
+      });
       return;
     }
 
@@ -414,21 +396,21 @@ export function LoginPage() {
         return; // DOB step renders next; no OTP yet.
       }
 
-      // EXISTING user missing a DOB on a gated domain: collect DOB (+ guardian,
-      // for minors) BEFORE the login OTP — same steps as signup, but the
-      // capture is materialized onto the existing user right after OTP verify.
+      // EXISTING user missing a DOB on a gated domain (#453): do NOT ask DOB or
+      // consent before the OTP — we can't yet tell minor vs adult, and a minor
+      // must never see the adult consent checkbox. Send the login OTP straight
+      // away; the post-login gate (otp-page) collects year-of-birth, then runs
+      // the guardian flow for a minor, or hands an adult to home where the
+      // consent gate applies. Ownership (OTP) is proven before any DOB/guardian.
       if (exists) {
         try {
           const pre = await u18Precheck(themeId, identifier);
           if (pre.requiresDob) {
-            // DOB only (no domain needed) — the guardian step, if any, runs
-            // post-login on the home page once the login OTP proves ownership.
-            setSignupDobGate({ identifier, domain: '', resolvedName: '', exists: true });
-            setIsLoading(false);
-            return; // DOB step renders next; no OTP yet.
+            await proceedToOtp(identifier, exists, '', null);
+            return; // OTP page next; year-of-birth + guardian run post-verify.
           }
         } catch {
-          // Fail-open: precheck failure must not block login — the home-page
+          // Fail-open: precheck failure must not block login — the post-login
           // gate still catches a minor who slips through.
         }
       }
@@ -500,6 +482,19 @@ export function LoginPage() {
             }
             age={signupGuardianGate.age}
             onComplete={handleGuardianComplete}
+            onBack={() => {
+              // Return to the birth-year step: rebuild its gate from the
+              // guardian gate, then clear the guardian gate.
+              const g = signupGuardianGate;
+              if (!g) return;
+              setSignupGuardianGate(null);
+              setSignupDobGate({
+                identifier: g.identifier,
+                domain: g.domain,
+                resolvedName: g.resolvedName,
+                exists: g.exists,
+              });
+            }}
           />
         ) : !showSignupForm ? null : (
         <>

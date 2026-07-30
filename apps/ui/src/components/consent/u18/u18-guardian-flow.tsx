@@ -91,6 +91,10 @@ export function U18GuardianFlow({
             setGuardianBody(body);
             setStep('otp');
           }}
+          // Back to the year-of-birth step only when this flow owns one (existing
+          // user, post-login #453). When it started at 'guardian' (DOB known)
+          // there's nowhere to go back to.
+          onBack={initialStep === 'dob' ? () => setStep('dob') : undefined}
         />
       )}
 
