@@ -14,6 +14,8 @@ import { hasAcceptedProfileConsent } from '@/services/consent_acceptance';
 import { invalidateItemFetchCache } from '@/utils/item_fetch_cache_invalidate';
 import { buildRetiredItemState } from '@/services/items/retire_pii';
 import { cancelItemConnections } from '@/services/items/retire_connections';
+import type { RetireCancelledCounterparty } from '@/services/items/retire_connections';
+import { dispatchRetireCancelNotifications } from '@/notifications/notify_retire';
 import { publishItemEvent } from '@/utils/publish_item_event';
 
 type ItemLifecycleRequest = FastifyRequest<{
@@ -142,8 +144,9 @@ const item_lifecycle_handler = async (
         );
 
         // End established connections (R9.3): cancel still-open actions on
-        // either side; rows are kept for counterparty history (Q11).
-        await cancelItemConnections(
+        // either side; rows are kept for counterparty history (Q11). The
+        // returned counterparties are notified AFTER commit (#418).
+        const cancelledCounterparties = await cancelItemConnections(
           tx,
           {
             item_id,
@@ -180,6 +183,7 @@ const item_lifecycle_handler = async (
           previous_status: current,
           lifecycle_status: next_status,
           retired: true as const,
+          counterparties: cancelledCounterparties,
         };
       }
 
@@ -223,6 +227,7 @@ const item_lifecycle_handler = async (
         previous_status: current,
         lifecycle_status: next_status,
         retired: false as const,
+        counterparties: [] as RetireCancelledCounterparty[],
       };
     });
 
@@ -274,6 +279,16 @@ const item_lifecycle_handler = async (
         },
         request.log,
       );
+
+      // Notify the counterparties whose connections were cancelled by the
+      // retire (#418). Fire-and-forget, AFTER commit — never blocks or fails
+      // the retire. No-op when notifications are unconfigured or a counterparty
+      // has no local email.
+      void dispatchRetireCancelNotifications(
+        result.counterparties,
+        result.item_network,
+        request.log,
+      );
     }
 
     // Lifecycle transitions (pause / unpause / retire here, and the draft/live
@@ -291,6 +306,7 @@ const item_lifecycle_handler = async (
       item_type: _t,
       previous_status: _p,
       retired: _r,
+      counterparties: _c,
       ...responseBody
     } = result;
     return reply.code(200).send(responseBody);

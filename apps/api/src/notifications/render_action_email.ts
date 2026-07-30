@@ -1,5 +1,6 @@
 import {
   FALLBACK_SERVICE_NAME,
+  RETIRE_CANCEL_COPY,
   resolveActionEmailCopy,
   resolveCopyGroup,
   resolveRecipientRole,
@@ -88,4 +89,31 @@ export function renderActionEmail(input: RenderActionEmailInput): RenderedEmail 
     brandName,
   });
   return { subject, html };
+}
+
+export interface RenderRetireCancelEmailInput {
+  /** Network id — picks the per-network CTA button colour. */
+  network: string;
+  /** Brand / dot-network display name for the sign-off. */
+  brandName: string;
+  /** Generic CTA link (Phase 1: FRONTEND_BASE_URL + /auth/login). */
+  ctaUrl: string;
+}
+
+/**
+ * Renders the retire → counterparty email (#418) using the shared branded shell.
+ * PII-safe: `RETIRE_CANCEL_COPY` carries no `{name}` token, so nothing about the
+ * retired (scrubbed) profile is surfaced.
+ */
+export function renderRetireCancelEmail(
+  input: RenderRetireCancelEmailInput,
+): RenderedEmail {
+  const html = renderEmailShell({
+    introHtml: RETIRE_CANCEL_COPY.body,
+    ctaUrl: input.ctaUrl,
+    ctaLabel: RETIRE_CANCEL_COPY.ctaLabel,
+    ctaColor: resolveBrandColor(input.network),
+    brandName: input.brandName,
+  });
+  return { subject: RETIRE_CANCEL_COPY.subject, html };
 }
