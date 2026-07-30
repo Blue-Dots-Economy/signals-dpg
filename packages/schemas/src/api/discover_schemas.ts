@@ -35,6 +35,10 @@ const DiscoverItemsBodyBase = z.object({
   item_latitude: z.number().min(-90).max(90).optional(),
   item_longitude: z.number().min(-180).max(180).optional(),
   distance_meters: z.number().positive().optional(),
+  // The viewer's own profile item_id (#394), forwarded to signals-search as
+  // the Beckn `intent.item.id` anchor for profile-relevance ranking. Optional
+  // — omitted entirely means "no anchor," not ranked-by-relevance-to-nothing.
+  anchor_item_id: z.string().uuid().optional(),
   // Capped at 100 to match the signals-search /v1/search pagination limit —
   // reject oversized requests at the door rather than silently clamping.
   limit: z.number().int().min(1).max(100).default(20),

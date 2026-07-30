@@ -228,4 +228,73 @@ describe('useInfiniteBrowseItems', () => {
     );
     expect(fetchDiscover).not.toHaveBeenCalled();
   });
+
+  // #394 Task 2: threading the profile anchor (Task 1's backend-side
+  // `anchor_item_id` -> `intent.item.id` relevance ranking) through the
+  // discover data layer. Discover mode must forward it; a change must reset
+  // paging (new query key) since switching the selected profile re-ranks.
+  it('passes anchor_item_id to fetchDiscover in discover mode', async () => {
+    vi.mocked(fetchDiscover).mockResolvedValue({
+      items: [item('a')],
+      meta: { total: 1, limit: 2, offset: 0, source: 'signals_search', degraded: false },
+    });
+    const { result } = renderHook(
+      () =>
+        useInfiniteBrowseItems(network, domain, null, {
+          relevance: true,
+          anchorItemId: 'profile-123',
+        }),
+      { wrapper },
+    );
+    await waitFor(() => expect(result.current.items.length).toBe(1));
+    expect(fetchDiscover).toHaveBeenCalledWith(
+      expect.objectContaining({ anchor_item_id: 'profile-123' }),
+      expect.anything(),
+    );
+  });
+
+  it('resets paging and refetches with the new anchor when anchorItemId changes in discover mode', async () => {
+    vi.mocked(fetchDiscover).mockImplementation(async (q) => ({
+      items: q.anchor_item_id === 'profile-a' ? [item('x')] : [item('y')],
+      meta: { total: 1, limit: 2, offset: q.offset ?? 0, source: 'signals_search', degraded: false },
+    }));
+    const { result, rerender } = renderHook(
+      ({ anchorItemId }: { anchorItemId: string }) =>
+        useInfiniteBrowseItems(network, domain, null, { relevance: true, anchorItemId }),
+      { wrapper, initialProps: { anchorItemId: 'profile-a' } },
+    );
+    await waitFor(() => expect(result.current.items.map((i) => i.item_id)).toEqual(['x']));
+    expect(fetchDiscover).toHaveBeenCalledWith(
+      expect.objectContaining({ anchor_item_id: 'profile-a', offset: 0 }),
+      expect.anything(),
+    );
+
+    rerender({ anchorItemId: 'profile-b' });
+    await waitFor(() => expect(result.current.items.map((i) => i.item_id)).toEqual(['y']));
+    expect(fetchDiscover).toHaveBeenLastCalledWith(
+      expect.objectContaining({ anchor_item_id: 'profile-b', offset: 0 }),
+      expect.anything(),
+    );
+  });
+
+  it('does not send anchor_item_id in native mode and its key is unaffected by anchorItemId', async () => {
+    vi.mocked(fetchNetworkItems).mockResolvedValue({
+      meta: { total: 1, limit: 2, offset: 0 },
+      items: [item('a')],
+    });
+    const { result, rerender } = renderHook(
+      ({ anchorItemId }: { anchorItemId: string }) =>
+        useInfiniteBrowseItems(network, domain, null, { anchorItemId }),
+      { wrapper, initialProps: { anchorItemId: 'profile-a' } },
+    );
+    await waitFor(() => expect(result.current.items.length).toBe(1));
+    expect(fetchDiscover).not.toHaveBeenCalled();
+    expect(fetchNetworkItems).toHaveBeenCalledTimes(1);
+
+    rerender({ anchorItemId: 'profile-b' });
+    // Same key in native mode -> no refetch triggered by the anchor change.
+    await new Promise((r) => setTimeout(r, 0));
+    expect(fetchNetworkItems).toHaveBeenCalledTimes(1);
+    expect(fetchDiscover).not.toHaveBeenCalled();
+  });
 });

@@ -55,9 +55,15 @@ const { searchSignalsMock, fetchItemsAcrossInstancesMock } = vi.hoisted(() => ({
   fetchItemsAcrossInstancesMock: vi.fn(),
 }));
 
-vi.mock('@/services/signals_search_client', () => ({
-  searchSignals: searchSignalsMock,
-}));
+vi.mock('@/services/signals_search_client', async () => {
+  const actual = await vi.importActual<
+    typeof import('@/services/signals_search_client')
+  >('@/services/signals_search_client');
+  return {
+    ...actual,
+    searchSignals: searchSignalsMock,
+  };
+});
 
 vi.mock('@/utils/inter_instance_fetch', () => ({
   fetchItemsAcrossInstances: fetchItemsAcrossInstancesMock,
@@ -65,6 +71,7 @@ vi.mock('@/utils/inter_instance_fetch', () => ({
 
 // Imported after mocks.
 import { discover } from '../discover.js';
+import { SignalsSearchError } from '@/services/signals_search_client';
 
 function buildApp(): FastifyInstance {
   const app = Fastify().withTypeProvider<ZodTypeProvider>();
@@ -233,6 +240,144 @@ describe('POST /api/v1/network/item/discover — direct map (revised, no hydrate
     expect(res.json()).toEqual({
       meta: { total: 0, limit: 20, offset: 0, source: 'signals_search', degraded: false },
       items: [],
+    });
+  });
+});
+
+describe('POST /api/v1/network/item/discover — profile anchor relevance (#394)', () => {
+  let app: FastifyInstance;
+  const ANCHOR_ITEM_ID = '22222222-2222-4222-8222-222222222222';
+
+  beforeEach(() => {
+    searchSignalsMock.mockReset();
+    fetchItemsAcrossInstancesMock.mockReset();
+    app = buildApp();
+  });
+
+  it('passes anchor_item_id through to searchSignals as anchorItemId', async () => {
+    searchSignalsMock.mockResolvedValueOnce({
+      items: [],
+      meta: { total: 0, limit: 20, offset: 0 },
+    });
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/v1/network/item/discover',
+      payload: baseBody({ anchor_item_id: ANCHOR_ITEM_ID }),
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(searchSignalsMock).toHaveBeenCalledTimes(1);
+    const callArgs = searchSignalsMock.mock.calls[0][0] as Record<string, unknown>;
+    expect(callArgs).toMatchObject({ anchorItemId: ANCHOR_ITEM_ID });
+  });
+
+  it('retries searchSignals once WITHOUT the anchor on ANCHOR_NOT_FOUND (404), returning source:signals_search / degraded:false — not native_fallback', async () => {
+    const notFoundErr = new SignalsSearchError('anchor not found');
+    notFoundErr.status = 404;
+    notFoundErr.code = 'ANCHOR_NOT_FOUND';
+
+    searchSignalsMock.mockRejectedValueOnce(notFoundErr);
+    searchSignalsMock.mockResolvedValueOnce({
+      items: [FULL_ITEM_A],
+      meta: { total: 1, limit: 20, offset: 0 },
+    });
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/v1/network/item/discover',
+      payload: baseBody({ anchor_item_id: ANCHOR_ITEM_ID }),
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(searchSignalsMock).toHaveBeenCalledTimes(2);
+    const secondCallArgs = searchSignalsMock.mock.calls[1][0] as Record<string, unknown>;
+    expect(secondCallArgs.anchorItemId).toBeUndefined();
+    expect(fetchItemsAcrossInstancesMock).not.toHaveBeenCalled();
+
+    const body = res.json() as {
+      meta: { total: number; limit: number; offset: number; source: string; degraded: boolean };
+      items: Array<Record<string, unknown>>;
+    };
+    expect(body.meta).toEqual({
+      total: 1,
+      limit: 20,
+      offset: 0,
+      source: 'signals_search',
+      degraded: false,
+    });
+    expect(body.items[0]).toMatchObject({ item_id: FULL_ITEM_A.item_id });
+  });
+
+  it('falls back to native when the anchor retry ALSO fails', async () => {
+    const notFoundErr = new SignalsSearchError('anchor not found');
+    notFoundErr.status = 404;
+    notFoundErr.code = 'ANCHOR_NOT_FOUND';
+
+    searchSignalsMock.mockRejectedValueOnce(notFoundErr);
+    searchSignalsMock.mockRejectedValueOnce(new Error('signals-search unreachable'));
+    fetchItemsAcrossInstancesMock.mockResolvedValueOnce({
+      meta: { total: 0, limit: 20, offset: 0, partial: false, unavailable_instances: [] },
+      items: [],
+    });
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/v1/network/item/discover',
+      payload: baseBody({ anchor_item_id: ANCHOR_ITEM_ID }),
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(searchSignalsMock).toHaveBeenCalledTimes(2);
+    expect(fetchItemsAcrossInstancesMock).toHaveBeenCalledTimes(1);
+    expect(res.json()).toMatchObject({
+      meta: { source: 'native_fallback', degraded: true },
+    });
+  });
+
+  it('does NOT retry (goes straight to native fallback) on a non-anchor search error even when anchor_item_id is set', async () => {
+    searchSignalsMock.mockRejectedValueOnce(new Error('signals-search unreachable'));
+    fetchItemsAcrossInstancesMock.mockResolvedValueOnce({
+      meta: { total: 0, limit: 20, offset: 0, partial: false, unavailable_instances: [] },
+      items: [],
+    });
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/v1/network/item/discover',
+      payload: baseBody({ anchor_item_id: ANCHOR_ITEM_ID }),
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(searchSignalsMock).toHaveBeenCalledTimes(1);
+    expect(fetchItemsAcrossInstancesMock).toHaveBeenCalledTimes(1);
+    expect(res.json()).toMatchObject({
+      meta: { source: 'native_fallback', degraded: true },
+    });
+  });
+
+  it('does NOT retry on a SignalsSearchError with a non-404 status even when anchor_item_id is set', async () => {
+    const serverErr = new SignalsSearchError('upstream error');
+    serverErr.status = 500;
+    serverErr.code = 'INTERNAL_ERROR';
+
+    searchSignalsMock.mockRejectedValueOnce(serverErr);
+    fetchItemsAcrossInstancesMock.mockResolvedValueOnce({
+      meta: { total: 0, limit: 20, offset: 0, partial: false, unavailable_instances: [] },
+      items: [],
+    });
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/v1/network/item/discover',
+      payload: baseBody({ anchor_item_id: ANCHOR_ITEM_ID }),
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(searchSignalsMock).toHaveBeenCalledTimes(1);
+    expect(fetchItemsAcrossInstancesMock).toHaveBeenCalledTimes(1);
+    expect(res.json()).toMatchObject({
+      meta: { source: 'native_fallback', degraded: true },
     });
   });
 });

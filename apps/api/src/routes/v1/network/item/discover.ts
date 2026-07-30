@@ -7,7 +7,12 @@ import {
 } from '@/utils/served_domain_guard';
 import { resolveAllowedFacetFilters } from '@/utils/facet_guard';
 import { getNetworkConfigById } from '@/network_configs';
-import { searchSignals, type SignalsSearchItem } from '@/services/signals_search_client';
+import {
+  searchSignals,
+  SignalsSearchError,
+  type SearchSignalsInput,
+  type SignalsSearchItem,
+} from '@/services/signals_search_client';
 import { fetchItemsAcrossInstances } from '@/utils/inter_instance_fetch';
 
 type DiscoverItemsRequest = FastifyRequest<{
@@ -38,6 +43,17 @@ type DiscoverItemsRequest = FastifyRequest<{
  * fetch has no server-side facet/text-search support, so `q`/`filters` are
  * silently NOT applied when the fallback fires — `meta.source` is what lets
  * the UI (Task 6) tell the user their filters/search weren't honored.
+ *
+ * PROFILE ANCHOR RELEVANCE (#394): `body.anchor_item_id` (the viewer's own
+ * profile item) is forwarded to signals-search as `intent.item`. signals-
+ * search 404s with `ANCHOR_NOT_FOUND` when that anchor isn't indexed yet or
+ * is an invalid cross-domain pairing — that is NOT a search-service outage,
+ * so it must not degrade to the native fallback (which drops q/filters and
+ * loses ranking entirely). Instead, an anchor-specific 404/`ANCHOR_NOT_FOUND`
+ * triggers exactly one retry of `searchSignals` with the anchor removed,
+ * still resolving as `source: 'signals_search'`, `degraded: false`. Only a
+ * failure of THAT retry (or any other non-anchor error) falls through to the
+ * native fallback below.
  */
 function mapSignalsSearchItemToDiscoverItem(item: SignalsSearchItem) {
   return {
@@ -136,46 +152,32 @@ const discover_items_handler = async (
       body.filters ?? []
     );
 
-    try {
-      const searchResult = await searchSignals({
-        network: body.item_network,
-        domain: body.item_domain,
-        itemType: body.item_type,
-        q: body.q,
-        filters: allowedFilters,
-        lat: body.item_latitude,
-        lng: body.item_longitude,
-        distanceMeters: body.distance_meters,
-        limit: body.limit,
-        offset: body.offset,
-      });
+    const searchInput: SearchSignalsInput = {
+      network: body.item_network,
+      domain: body.item_domain,
+      itemType: body.item_type,
+      q: body.q,
+      filters: allowedFilters,
+      lat: body.item_latitude,
+      lng: body.item_longitude,
+      distanceMeters: body.distance_meters,
+      limit: body.limit,
+      offset: body.offset,
+      anchorItemId: body.anchor_item_id,
+    };
 
-      // signals-search's order is already the ranked order — mapped straight
-      // through, no local-DB hydrate/re-read by id (see module doc comment).
-      const items = searchResult.items.map(mapSignalsSearchItemToDiscoverItem);
-
-      return reply.code(200).send({
-        meta: {
-          total: searchResult.meta.total,
-          limit: searchResult.meta.limit,
-          offset: searchResult.meta.offset,
-          source: 'signals_search' as const,
-          degraded: false,
-        },
-        items,
-      });
-    } catch (searchErr) {
-      // Native fallback (Task 3): thrown for a request timeout, a non-2xx/
-      // invalid response, OR signals-search being unconfigured (the client
-      // throws for all three — see searchSignals' doc comment). A
-      // search-service outage must never surface as a 5xx, so this falls
-      // back to the same native, distance/recency-ordered paged fetch
-      // `/network/item/fetch` uses. That native fetch has no server-side
-      // facet/text-search, so `q`/`filters` are NOT applied on this path —
-      // `meta.source: 'native_fallback'` is what lets the UI (Task 6) show
-      // the right degraded-list message.
+    // Native fallback (Task 3): thrown for a request timeout, a non-2xx/
+    // invalid response, OR signals-search being unconfigured (the client
+    // throws for all three — see searchSignals' doc comment). A
+    // search-service outage must never surface as a 5xx, so this falls back
+    // to the same native, distance/recency-ordered paged fetch
+    // `/network/item/fetch` uses. That native fetch has no server-side
+    // facet/text-search, so `q`/`filters` are NOT applied on this path —
+    // `meta.source: 'native_fallback'` is what lets the UI (Task 6) show the
+    // right degraded-list message.
+    const fallBackToNative = async (logErr: unknown) => {
       request.log.warn(
-        { err: searchErr, body },
+        { err: logErr, body },
         'signals-search unavailable; falling back to native item fetch for discover (filters/q not applied)'
       );
 
@@ -207,6 +209,62 @@ const discover_items_handler = async (
         },
         items,
       });
+    };
+
+    try {
+      const searchResult = await searchSignals(searchInput);
+
+      // signals-search's order is already the ranked order — mapped straight
+      // through, no local-DB hydrate/re-read by id (see module doc comment).
+      const items = searchResult.items.map(mapSignalsSearchItemToDiscoverItem);
+
+      return reply.code(200).send({
+        meta: {
+          total: searchResult.meta.total,
+          limit: searchResult.meta.limit,
+          offset: searchResult.meta.offset,
+          source: 'signals_search' as const,
+          degraded: false,
+        },
+        items,
+      });
+    } catch (searchErr) {
+      // Anchor relevance (#394): an unindexed/invalid-pairing anchor is a
+      // client-input condition, not a search-service outage — retry ONCE
+      // without the anchor rather than degrading to the native fallback
+      // (which would silently drop q/filters and all ranking). Any other
+      // error (no anchor sent, or a non-404/non-ANCHOR_NOT_FOUND failure)
+      // falls straight through to the native fallback below.
+      const isAnchorNotFound =
+        body.anchor_item_id !== undefined &&
+        searchErr instanceof SignalsSearchError &&
+        (searchErr.status === 404 || searchErr.code === 'ANCHOR_NOT_FOUND');
+
+      if (isAnchorNotFound) {
+        try {
+          const retryResult = await searchSignals({
+            ...searchInput,
+            anchorItemId: undefined,
+          });
+
+          const items = retryResult.items.map(mapSignalsSearchItemToDiscoverItem);
+
+          return reply.code(200).send({
+            meta: {
+              total: retryResult.meta.total,
+              limit: retryResult.meta.limit,
+              offset: retryResult.meta.offset,
+              source: 'signals_search' as const,
+              degraded: false,
+            },
+            items,
+          });
+        } catch (retryErr) {
+          return await fallBackToNative(retryErr);
+        }
+      }
+
+      return await fallBackToNative(searchErr);
     }
   } catch (err) {
     request.log.error(

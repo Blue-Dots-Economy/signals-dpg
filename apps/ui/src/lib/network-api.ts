@@ -242,6 +242,12 @@ export interface FetchDiscoverQuery {
   distance_meters?: number;
   limit?: number;
   offset?: number;
+  // The active profile's item id (#394 Task 2, threading Task 1's backend
+  // anchor through the UI data layer). Forwarded verbatim as `anchor_item_id`
+  // in the BFF body; the BFF re-maps it to `intent.item.id` for signals-search
+  // relevance-to-profile ranking. Omitted entirely when unset (Task 3 is what
+  // wires an actual profile id in from the page).
+  anchor_item_id?: string;
 }
 
 export type DiscoverSource = 'signals_search' | 'native_fallback';
@@ -281,6 +287,7 @@ export async function fetchDiscover(
   if (query.distance_meters !== undefined) body.distance_meters = query.distance_meters;
   if (query.limit !== undefined) body.limit = query.limit;
   if (query.offset !== undefined) body.offset = query.offset;
+  if (query.anchor_item_id) body.anchor_item_id = query.anchor_item_id;
 
   const response = await networkApiClient.post<DiscoverResponse>(
     '/api/v1/network/item/discover',
