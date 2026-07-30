@@ -636,7 +636,16 @@ async function fetchInstanceMarkers(input: {
 
 async function fetchRemoteMarkers(instanceUrl: string, filters: ItemFetchFilters) {
   const target = new URL('/api/v1/network/item/markers_local', instanceUrl);
-  const requestBody = JSON.stringify(filters);
+  // #394: `filters.text_search.q` (never `.fields` — the peer resolves its
+  // OWN non-private field allowlist from its own network config, see
+  // fetch_local_markers_handler in routes/v1/network/item/markers.ts) must be
+  // forwarded as the top-level `q` that MarkersBodySchema actually validates.
+  // Without this, the peer's `body.q` is undefined, text_search is never
+  // built, and the peer returns every marker in the viewport unfiltered.
+  const requestBody = JSON.stringify({
+    ...filters,
+    ...(filters.text_search?.q ? { q: filters.text_search.q } : {}),
+  });
   const response = await fetch(target, {
     method: 'POST',
     headers: {

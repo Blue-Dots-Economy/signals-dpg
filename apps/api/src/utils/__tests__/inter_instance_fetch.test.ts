@@ -482,6 +482,47 @@ describe('fetchItemsAcrossInstances — scatter-gather ordering (Part B, >1 acti
   });
 });
 
+describe('fetchRemoteMarkers — forwards q to the peer body (#394 review fix)', () => {
+  it('includes a top-level q in the outgoing /markers_local body when filters.text_search.q is set', async () => {
+    // Single active instance so this exercises the frozen buildPagePlan path
+    // (fetchInstanceMarkers → fetchRemoteMarkers), not scatter-gather.
+    const requestBodies: Array<{ url: string; body: unknown }> = [];
+    vi.stubGlobal(
+      'fetch',
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      vi.fn(async (url: any, opts: any) => {
+        const u = url instanceof URL ? url : new URL(String(url));
+        if (opts?.body) {
+          requestBodies.push({ url: u.hostname + u.pathname, body: JSON.parse(opts.body) });
+        }
+        return u.pathname.endsWith('/count_local') ? countBody(1) : geoMarkersPageBody([]);
+      })
+    );
+
+    const singleInstanceNetworkConfig = {
+      instances: [{ domain_id: 'student', instance_url: A }],
+      domains: [{ id: 'student' }],
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    } as any;
+
+    await fetchMarkersAcrossInstances({
+      networkConfig: singleInstanceNetworkConfig,
+      filters: { ...filters, text_search: { q: 'jane', fields: ['name'] } },
+      log,
+    });
+
+    const markerRequest = requestBodies.find((r) => r.url.endsWith('/markers_local'));
+    expect(markerRequest).toBeDefined();
+    // The peer's MarkersBodySchema validates a top-level `q`, not
+    // `text_search` — without forwarding it, the peer's body.q is undefined
+    // and it silently returns every marker in the viewport unfiltered.
+    expect((markerRequest?.body as { q?: string }).q).toBe('jane');
+    // `fields` must never be forwarded — each peer resolves its own
+    // non-private allowlist from its own network config.
+    expect((markerRequest?.body as { fields?: unknown }).fields).toBeUndefined();
+  });
+});
+
 describe('fetchMarkersAcrossInstances — scatter-gather ordering (>1 active instance)', () => {
   const geoFilters = {
     ...filters,

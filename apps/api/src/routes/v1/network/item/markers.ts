@@ -213,29 +213,41 @@ const fetch_local_markers_handler = async (
     );
   }
 
-  // The peer body carries only the raw `q` (#394) — never a resolved field
-  // allowlist (see MarkersSchemaBase's doc comment). This instance resolves
-  // its OWN non-private field set from its OWN network config rather than
-  // trusting anything the requesting peer computed, mirroring every other
-  // item_state guard in this file/module.
-  let textSearchFields: string[] = [];
-  if (body.q) {
-    const networkConfig = await getNetworkConfigById(body.item_network);
-    textSearchFields = resolveTextSearchFields(
-      networkConfig,
-      body.item_domain,
-      body.item_type
-    );
-  }
+  try {
+    // The peer body carries only the raw `q` (#394) — never a resolved field
+    // allowlist (see MarkersSchemaBase's doc comment). This instance resolves
+    // its OWN non-private field set from its OWN network config rather than
+    // trusting anything the requesting peer computed, mirroring every other
+    // item_state guard in this file/module.
+    let textSearchFields: string[] = [];
+    if (body.q) {
+      const networkConfig = await getNetworkConfigById(body.item_network);
+      textSearchFields = resolveTextSearchFields(
+        networkConfig,
+        body.item_domain,
+        body.item_type
+      );
+    }
 
-  return reply.code(200).send(
-    await fetchLocalMarkers(
-      {
-        ...body,
-        lifecycle_filter: 'live_only',
-        text_search: body.q ? { q: body.q, fields: textSearchFields } : undefined,
-      },
-      request.log
-    )
-  );
+    return reply.code(200).send(
+      await fetchLocalMarkers(
+        {
+          ...body,
+          lifecycle_filter: 'live_only',
+          text_search: body.q ? { q: body.q, fields: textSearchFields } : undefined,
+        },
+        request.log
+      )
+    );
+  } catch (err) {
+    request.log.error(
+      { err, body: request.body },
+      'Failed to fetch local markers'
+    );
+
+    return reply.code(500).send({
+      error: 'INTERNAL_SERVER_ERROR',
+      message: 'Failed to fetch local markers',
+    });
+  }
 };

@@ -26,6 +26,9 @@ const NET = 'blue_dot';
 const DOMAIN = 'seeker';
 const ITEM_TYPE = 'profile_1.0';
 const OTHER_ITEM_TYPE = 'profile_2.0';
+// A network id `getNetworkConfigById` doesn't recognize (#394 review fix —
+// fetch_local_markers_handler must not let this throw unhandled).
+const UNKNOWN_NET = 'unknown_network';
 
 vi.mock('@/utils/served_domain_guard', () => ({
   isServedDomainBinding: () => true,
@@ -33,31 +36,36 @@ vi.mock('@/utils/served_domain_guard', () => ({
 }));
 
 vi.mock('@/network_configs', () => ({
-  getNetworkConfigById: vi.fn(async () => ({
-    id: NET,
-    domains: [
-      {
-        id: DOMAIN,
-        item_schemas: {
-          [ITEM_TYPE]: {
-            type: 'object',
-            properties: {
-              city: { type: 'string' },
-              skills: { type: 'array', items: { type: 'string' } },
-              phone: { type: 'string', private: true },
+  getNetworkConfigById: vi.fn(async (networkId: string) => {
+    if (networkId === 'unknown_network') {
+      throw new Error('Network config not found');
+    }
+    return {
+      id: NET,
+      domains: [
+        {
+          id: DOMAIN,
+          item_schemas: {
+            [ITEM_TYPE]: {
+              type: 'object',
+              properties: {
+                city: { type: 'string' },
+                skills: { type: 'array', items: { type: 'string' } },
+                phone: { type: 'string', private: true },
+              },
             },
-          },
-          [OTHER_ITEM_TYPE]: {
-            type: 'object',
-            properties: {
-              age: { type: 'number' },
-              ssn: { type: 'string', private: true },
+            [OTHER_ITEM_TYPE]: {
+              type: 'object',
+              properties: {
+                age: { type: 'number' },
+                ssn: { type: 'string', private: true },
+              },
             },
           },
         },
-      },
-    ],
-  })),
+      ],
+    };
+  }),
 }));
 
 const { fetchMarkersAcrossInstancesMock } = vi.hoisted(() => ({
@@ -160,5 +168,33 @@ describe('GET /api/v1/network/item/markers — q → text_search.fields resoluti
 
     expect(res.statusCode).toBe(400);
     expect(fetchMarkersAcrossInstancesMock).not.toHaveBeenCalled();
+  });
+});
+
+describe('POST /api/v1/network/item/markers_local — never throws (review fix)', () => {
+  let app: FastifyInstance;
+
+  beforeEach(() => {
+    app = buildApp();
+  });
+
+  it('replies a clean 500 {error,message} for an unknown/unconfigured item_network instead of an unhandled throw', async () => {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/v1/network/item/markers_local',
+      payload: {
+        item_network: UNKNOWN_NET,
+        item_domain: DOMAIN,
+        limit: 20,
+        offset: 0,
+        q: 'pune',
+      },
+    });
+
+    expect(res.statusCode).toBe(500);
+    expect(JSON.parse(res.body)).toEqual({
+      error: 'INTERNAL_SERVER_ERROR',
+      message: 'Failed to fetch local markers',
+    });
   });
 });
