@@ -922,14 +922,14 @@ export function HomePage() {
   // Task 6 (#203 §5.2): the map view is now sourced from viewport-scoped
   // markers rather than a full per-domain browse feed (that full fetch was
   // removed from this page entirely in Task 7 of the caching epic). The
-  // top-bar free-text `search` is DEFERRED for the map (issue #5, spec §9):
-  // viewport markers are slim (coords only), and the server has no free-text
-  // match on `/markers` today — building one is real search-relevance surface
-  // (guarding which fields are searchable, private-field safety, ranking),
-  // out of this PR's scope on purpose (see the plan doc's "Out of scope").
-  // `search` therefore keeps filtering only the LIST (`buildFilteredCardsForDomain`
-  // below); the map ignores it. `MapFiltersPanel`'s enum-field facets, by
-  // contrast, DO now drive the map server-side — but ONLY the subset
+  // top-bar free-text `search` now ALSO filters the map (map-native-text-search,
+  // #394): it's forwarded to `useMapMarkers` below, which sends it to the
+  // server as `/markers?q=` — a value-match against public (non-private)
+  // `item_state` fields, viewport-scoped, same as the list's search. The list
+  // still applies `search` itself via `buildFilteredCardsForDomain` below;
+  // the two are independent filters over the same query, not one deriving
+  // from the other. `MapFiltersPanel`'s enum-field facets, by
+  // contrast, drive the map server-side — but ONLY the subset
   // declared `filterable: true` in network.json (Task 1), which is the set
   // the server's facet guard (`resolveAllowedFacetFields`, Task 3) actually
   // honors for `item_state` filtering; that's `mapActiveFieldFilters` above,
@@ -938,9 +938,10 @@ export function HomePage() {
   // `network.json`) is a config follow-up, not a code change here — most
   // example networks currently declare zero filterable facets, so the map
   // filter panel may show no enum groups at all for them until that's done.
-  // The domain multi-select (below, a client-side array-membership check on
-  // the already-fetched markers) and free-text search remain client/list-only
-  // regardless of facet config.
+  // The domain multi-select below (a client-side array-membership check on
+  // the already-fetched markers) remains client/list-only regardless of
+  // facet config; free-text search, per the comment above, is now sent to
+  // the server for both the map and the list.
   //
   // Even at low zoom for an anonymous / no-location visitor we now fetch the
   // slim viewport markers (coords only, capped at MAP_FETCH_LIMIT) and cluster
@@ -959,7 +960,7 @@ export function HomePage() {
     () => (selectedDomain ? visibleDomains.filter((d) => d.id === selectedDomain) : visibleDomains),
     [selectedDomain, visibleDomains],
   );
-  const mapMarkers = useMapMarkers(network, mapDomains, mapViewport, mapActiveFieldFilters);
+  const mapMarkers = useMapMarkers(network, mapDomains, mapViewport, mapActiveFieldFilters, search);
 
   // On the "All" tab the Filters-panel domain multi-select narrows which pins
   // show (client-side membership check — every `Marker` carries `item_domain`).

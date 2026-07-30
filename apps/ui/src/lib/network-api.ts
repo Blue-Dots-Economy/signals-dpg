@@ -149,6 +149,13 @@ export interface FetchNetworkMarkersQuery {
    * (see the comment at the serialization site).
    */
   item_state?: Record<string, unknown>;
+  /**
+   * Free-text search (map-native-text-search). Value-matches public
+   * (non-private) `item_state` fields, viewport-scoped — mirrors the list's
+   * top-bar search box, now wired through to the map's `/markers` fetch too
+   * (see `useMapMarkers`'s `search` param).
+   */
+  q?: string;
   limit?: number;
   offset?: number;
   cache_ttl_seconds?: number;
@@ -206,6 +213,7 @@ export async function fetchNetworkMarkers(
       }
     }
   }
+  if (query.q) params.set('q', query.q);
   if (query.limit !== undefined) params.set('limit', String(query.limit));
   if (query.offset !== undefined) params.set('offset', String(query.offset));
   if (query.cache_ttl_seconds !== undefined) {
