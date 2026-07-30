@@ -46,7 +46,6 @@ import { getEnumFilterFieldsForDomains } from '@/lib/enum-filters';
 import {
   deriveBrowseParams,
   isDiscoverActive,
-  hasActiveSearchOrFilters,
   resolveDegradedBanner,
   excludeOwnItems,
   buildFilteredCardsForDomain,
@@ -1185,14 +1184,11 @@ export function HomePage() {
   // Single source of truth for the degraded-search UX: single-domain tab reads
   // the one paged feed directly, "All" tab is the OR above.
   const listDegraded = selectedDomain !== null ? singleDomainList.degraded : allDomainsListDegraded;
-  // Whether the user has an active search query OR facet filter (NOT the
-  // relevance default) — decides which degraded banner variant shows below,
-  // and whether the facet chips render as paused/not-applied.
-  const searchOrFiltersActive = hasActiveSearchOrFilters(browseParams);
-  const degradedBanner = resolveDegradedBanner({
-    degraded: listDegraded,
-    searchOrFiltersActive,
-  });
+  // #394: the discover BFF's native fallback now applies search/filters
+  // natively (only relevance ranking is unavailable), so the degraded note is
+  // a single subtle variant shown whenever the feed fell back, regardless of
+  // whether the user has an active search/filter.
+  const degradedBanner = resolveDegradedBanner({ degraded: listDegraded });
 
   // Active schema: from the selected browsing domain, or first visible domain
   const activeSchema = React.useMemo(() => {
@@ -1826,9 +1822,10 @@ export function HomePage() {
   // `PageShell` below) — as opposed to `filtersPanel` above, which is also
   // reused as MapView's OWN copy rendered only while the map is maximized
   // (the header is covered in fullscreen; see `MapView`'s `filtersSlot` doc).
-  // Only THIS mount marks the selected facet chips paused/not-applied when
-  // the discover BFF fell back to native with an active search/filter — the
-  // map's maximized-mode copy is unaffected (it never sees the discover path).
+  // #394: previously this mount marked the selected facet chips
+  // paused/not-applied when the discover BFF fell back to native — since the
+  // fallback now applies facet filters natively, that pausing no longer
+  // applies and this is identical to `filtersPanel` above.
   const listFiltersPanel = (
     <MapFiltersPanel
       domains={visibleDomains}
@@ -1839,7 +1836,6 @@ export function HomePage() {
       onFieldsChange={handleMapFieldsChange}
       showDomainToggle={selectedDomain === null}
       viewMode={viewMode}
-      paused={listDegraded && searchOrFiltersActive}
     />
   );
 
@@ -2035,25 +2031,16 @@ export function HomePage() {
                     {t('home.list_partial')}
                   </p>
                 )}
-                {/* Degraded-search indicator (#203 §6): the discover BFF fell back to
+                {/* Degraded-search indicator (#394): the discover BFF fell back to
                     native (signals-search unreachable/unconfigured/timed out) —
                     `meta.source: 'native_fallback'` / `degraded: true`, surfaced via
                     `singleDomainList.degraded` / the "All" tab's per-domain OR
-                    (`listDegraded`). Native results are still shown below (the
-                    fallback DOES return native items) — this only warns that a
-                    search/filter the user set is NOT actually being applied.
-                    Two variants (`resolveDegradedBanner`): PROMINENT when the user
-                    has an active search query or facet filter (their expectation is
-                    violated — filters look selected but aren't applied server-side),
-                    subtle when browsing the plain relevance default (only ranking
-                    quality is reduced, results are still relevant/recent). "Near
-                    me"/proximity (native path) never sets `degraded`, so no banner
-                    shows there. */}
-                {degradedBanner === 'search_unavailable' && (
-                  <p className="mb-3 rounded-md bg-amber-100 px-3 py-2 text-sm font-semibold text-amber-950 shadow-sm ring-2 ring-amber-400 dark:bg-amber-900 dark:text-amber-50 dark:ring-amber-700">
-                    {t('home.list_search_unavailable')}
-                  </p>
-                )}
+                    (`listDegraded`). The native fallback still applies the user's
+                    search/filters NATIVELY (value-match on public fields + facet
+                    filtering) — only relevance ranking is unavailable — so this is
+                    a single subtle note, shown regardless of whether a
+                    search/filter is active. "Near me"/proximity (native path)
+                    never sets `degraded`, so no banner shows there. */}
                 {degradedBanner === 'ranking_unavailable' && (
                   <p className="mb-3 text-xs text-muted-foreground">
                     {t('home.list_ranking_unavailable')}
