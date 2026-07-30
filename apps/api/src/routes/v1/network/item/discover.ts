@@ -187,6 +187,17 @@ const discover_items_handler = async (
       // reused here rather than re-resolved. `meta.source: 'native_fallback'`
       // is what lets the UI (Task 6) show that ranking (not search/filtering)
       // is degraded.
+      //
+      // Multi-instance limitation (single-instance is the target for this
+      // path): `fetchItemsAcrossInstances` forwards the facet `item_state`
+      // filter to peer instances (each re-guards it), but `q` is NOT forwarded
+      // — the peer `/fetch_local` body schema has no `q`, so on a genuinely
+      // federated (>1 active instance) network with signals-search down, a
+      // text query is applied only to THIS instance's rows; peers contribute
+      // unfiltered-by-text (but live, public, facet-filtered) rows. Not a leak
+      // or crash, and strictly better than the pre-#394 fallback (which
+      // applied neither q nor filters). Forwarding `q` to peers is a follow-up
+      // (mirrors the count-skew note in inter_instance_fetch.ts).
       request.log.warn(
         { err: searchErr, body },
         'signals-search unavailable; falling back to native item fetch for discover (search/filters applied natively, no ranking)'
