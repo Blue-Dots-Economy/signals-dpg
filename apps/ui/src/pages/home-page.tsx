@@ -1891,11 +1891,13 @@ export function HomePage() {
           (viewMode !== 'list') so the two sets never double-mount.
 
           These count-only fetchers stay on the NATIVE browse path (no discover
-          opts, raw proximity coords) regardless of the list's "Near me" toggle:
-          the toggle is a list-view control and the map is unaffected (spec §5.3
-          — the map ignores search/filters/relevance entirely). Routing this
-          header count through discover would silently make it diverge from the
-          map's own marker total whenever the search index lags the live DB. */}
+          opts, raw proximity coords) regardless of the list's "Near me" toggle
+          or relevance: those are list-view concerns and must not route this
+          count through discover — doing so would make it diverge from the map's
+          own marker total whenever the search index lags the live DB. (The map
+          view itself DOES honor facet filters and free-text search via its own
+          `/markers` fetch — see `useMapMarkers`; this note is only about the
+          header-count fetchers, which are a separate native path.) */}
       {user && network && selectedDomain === null && viewMode !== 'list' &&
         visibleDomains.map((domain) => (
           <DomainPagedFetch
