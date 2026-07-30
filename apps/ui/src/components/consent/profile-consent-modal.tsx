@@ -6,6 +6,7 @@ import {
 import { ResponsiveDialog } from '@/components/ui/responsive-dialog';
 import { ConsentCheckbox } from '@/components/actions/consent-checkbox';
 import { Button } from '@/components/ui/button';
+import { ShieldCheck } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 
 export interface ProfileConsentModalProps {
@@ -80,18 +81,24 @@ export function ProfileConsentModal({
         {minor && minorNotice ? (
           // Under-18 notice: shown AFTER the ward ticks the consent, before the
           // guardian OTP is dispatched (onAccept issues the code).
-          <div className="flex flex-col gap-4 py-2">
-            <p className="text-sm text-muted-foreground">
-              {t(
-                'consent.profile_minor_notice',
-                "You're under 18, so a parent or guardian needs to verify this profile creation. We'll send them a one-time code to confirm.",
-              )}
-            </p>
+          <div className="flex flex-col gap-5 py-1">
+            <div className="flex items-start gap-3 rounded-xl border bg-muted/50 p-4">
+              <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border bg-background text-[var(--brand-cta)]">
+                <ShieldCheck className="h-5 w-5" />
+              </span>
+              <p className="text-sm leading-relaxed text-muted-foreground">
+                {t(
+                  'consent.profile_minor_notice',
+                  "You're under 18, so a guardian needs to verify this profile creation. We'll send them a one-time code to confirm.",
+                )}
+              </p>
+            </div>
             <Button
               type="button"
               onClick={onAccept}
-              className="w-full bg-brand-cta text-[var(--brand-cta-foreground)] hover:brightness-110"
+              className="w-full gap-2 bg-brand-cta text-[var(--brand-cta-foreground)] hover:brightness-110"
             >
+              <ShieldCheck className="h-4 w-4" />
               {t('consent.profile_minor_verify', 'Verify with guardian')}
             </Button>
           </div>
