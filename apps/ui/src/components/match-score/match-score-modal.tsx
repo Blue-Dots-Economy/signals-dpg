@@ -98,7 +98,10 @@ export function MatchScoreModal({
   // Animate progress bar when score changes
   React.useEffect(() => {
     if (score?.score !== undefined && !isLoading) {
-      const targetValue = Math.round(score.score * 100);
+      // Backend returns scores on a 0-10 scale; normalize to a 0-100 percent
+      // before animating the progress bar (was `score.score * 100`, which
+      // rendered e.g. 710 for a score of 7.1).
+      const targetValue = Math.round((score.score / 10) * 100);
       const duration = 600;
       const startTime = performance.now();
 
