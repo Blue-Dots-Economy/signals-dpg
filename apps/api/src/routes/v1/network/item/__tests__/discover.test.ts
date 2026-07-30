@@ -29,6 +29,17 @@ vi.mock('@/utils/served_domain_guard', () => ({
   replyForUnservedDomain: vi.fn(),
 }));
 
+// Mutable so individual tests can flip SIGNALS_SEARCH_DISTANCE_METERS
+// on/off (#394) — mirrors the mutation pattern in
+// services/__tests__/signals_search_client.test.ts.
+vi.mock('@/config', () => ({
+  signalsSearchConfig: {
+    url: 'https://signals-search.example.com',
+    api_key: 'test-key',
+    distanceMeters: undefined as number | undefined,
+  },
+}));
+
 vi.mock('@/network_configs', () => ({
   getNetworkConfigById: vi.fn(async () => ({
     id: NET,
@@ -72,6 +83,7 @@ vi.mock('@/utils/inter_instance_fetch', () => ({
 // Imported after mocks.
 import { discover } from '../discover.js';
 import { SignalsSearchError } from '@/services/signals_search_client';
+import { signalsSearchConfig } from '@/config';
 
 function buildApp(): FastifyInstance {
   const app = Fastify().withTypeProvider<ZodTypeProvider>();
@@ -688,5 +700,165 @@ describe('POST /api/v1/network/item/discover — input validation (#419 should-f
     expect(res.json()).toMatchObject({ error: 'INVALID_ITEM_TYPE' });
     expect(searchSignalsMock).not.toHaveBeenCalled();
     expect(fetchItemsAcrossInstancesMock).not.toHaveBeenCalled();
+  });
+});
+
+describe('POST /api/v1/network/item/discover — configurable spatial radius (#394)', () => {
+  let app: FastifyInstance;
+
+  beforeEach(() => {
+    searchSignalsMock.mockReset();
+    fetchItemsAcrossInstancesMock.mockReset();
+    signalsSearchConfig.distanceMeters = undefined;
+    app = buildApp();
+  });
+
+  it('with a location + SIGNALS_SEARCH_DISTANCE_METERS set, sends distanceMeters to searchSignals and reports it in meta', async () => {
+    signalsSearchConfig.distanceMeters = 5000;
+    searchSignalsMock.mockResolvedValueOnce({
+      items: [],
+      meta: { total: 0, limit: 20, offset: 0 },
+    });
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/v1/network/item/discover',
+      payload: baseBody({ item_latitude: 12.9716, item_longitude: 77.5946 }),
+    });
+
+    expect(res.statusCode).toBe(200);
+    const callArgs = searchSignalsMock.mock.calls[0][0] as Record<string, unknown>;
+    expect(callArgs.distanceMeters).toBe(5000);
+    expect(res.json()).toMatchObject({ meta: { distance_meters: 5000 } });
+  });
+
+  it('with a location + SIGNALS_SEARCH_DISTANCE_METERS unset, omits distanceMeters from searchSignals but reports the 30000 default', async () => {
+    searchSignalsMock.mockResolvedValueOnce({
+      items: [],
+      meta: { total: 0, limit: 20, offset: 0 },
+    });
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/v1/network/item/discover',
+      payload: baseBody({ item_latitude: 12.9716, item_longitude: 77.5946 }),
+    });
+
+    expect(res.statusCode).toBe(200);
+    const callArgs = searchSignalsMock.mock.calls[0][0] as Record<string, unknown>;
+    expect(callArgs.distanceMeters).toBeUndefined();
+    expect(res.json()).toMatchObject({ meta: { distance_meters: 30000 } });
+  });
+
+  it('a request-body distance_meters override wins over the env default', async () => {
+    signalsSearchConfig.distanceMeters = 5000;
+    searchSignalsMock.mockResolvedValueOnce({
+      items: [],
+      meta: { total: 0, limit: 20, offset: 0 },
+    });
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/v1/network/item/discover',
+      payload: baseBody({
+        item_latitude: 12.9716,
+        item_longitude: 77.5946,
+        distance_meters: 1500,
+      }),
+    });
+
+    expect(res.statusCode).toBe(200);
+    const callArgs = searchSignalsMock.mock.calls[0][0] as Record<string, unknown>;
+    expect(callArgs.distanceMeters).toBe(1500);
+    expect(res.json()).toMatchObject({ meta: { distance_meters: 1500 } });
+  });
+
+  it('with NO location, sends no actual spatial clause (lat/lng absent means distanceMeters is never applied) and omits meta.distance_meters, regardless of env', async () => {
+    signalsSearchConfig.distanceMeters = 5000;
+    searchSignalsMock.mockResolvedValueOnce({
+      items: [],
+      meta: { total: 0, limit: 20, offset: 0 },
+    });
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/v1/network/item/discover',
+      payload: baseBody(),
+    });
+
+    expect(res.statusCode).toBe(200);
+    // No lat/lng means buildSpatialClause (signals_search_client.ts) never
+    // builds a spatial clause at all, regardless of what distanceMeters is
+    // set to on the input — so no location sent is the real invariant here.
+    const callArgs = searchSignalsMock.mock.calls[0][0] as Record<string, unknown>;
+    expect(callArgs.lat).toBeUndefined();
+    expect(callArgs.lng).toBeUndefined();
+    const body = res.json() as { meta: Record<string, unknown> };
+    expect(body.meta.distance_meters).toBeUndefined();
+  });
+
+  it('reports meta.distance_meters correctly on the anchor-retry success path', async () => {
+    signalsSearchConfig.distanceMeters = 5000;
+    const notFoundErr = new SignalsSearchError('anchor not found');
+    notFoundErr.status = 404;
+    notFoundErr.code = 'ANCHOR_NOT_FOUND';
+
+    searchSignalsMock.mockRejectedValueOnce(notFoundErr);
+    searchSignalsMock.mockResolvedValueOnce({
+      items: [],
+      meta: { total: 0, limit: 20, offset: 0 },
+    });
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/v1/network/item/discover',
+      payload: baseBody({
+        item_latitude: 12.9716,
+        item_longitude: 77.5946,
+        anchor_item_id: '22222222-2222-4222-8222-222222222222',
+      }),
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toMatchObject({
+      meta: { source: 'signals_search', degraded: false, distance_meters: 5000 },
+    });
+  });
+
+  it('reports meta.distance_meters on the native_fallback path when a location was sent', async () => {
+    searchSignalsMock.mockRejectedValueOnce(new Error('signals-search unreachable'));
+    fetchItemsAcrossInstancesMock.mockResolvedValueOnce({
+      meta: { total: 0, limit: 20, offset: 0, partial: false, unavailable_instances: [] },
+      items: [],
+    });
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/v1/network/item/discover',
+      payload: baseBody({ item_latitude: 12.9716, item_longitude: 77.5946 }),
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toMatchObject({
+      meta: { source: 'native_fallback', degraded: true, distance_meters: 30000 },
+    });
+  });
+
+  it('omits meta.distance_meters on the native_fallback path when no location was sent', async () => {
+    searchSignalsMock.mockRejectedValueOnce(new Error('signals-search unreachable'));
+    fetchItemsAcrossInstancesMock.mockResolvedValueOnce({
+      meta: { total: 0, limit: 20, offset: 0, partial: false, unavailable_instances: [] },
+      items: [],
+    });
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/v1/network/item/discover',
+      payload: baseBody(),
+    });
+
+    expect(res.statusCode).toBe(200);
+    const body = res.json() as { meta: Record<string, unknown> };
+    expect(body.meta.distance_meters).toBeUndefined();
   });
 });

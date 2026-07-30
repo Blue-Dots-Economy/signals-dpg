@@ -5021,6 +5021,9 @@
                         },
                         "degraded": {
                           "type": "boolean"
+                        },
+                        "distance_meters": {
+                          "type": "number"
                         }
                       },
                       "required": [

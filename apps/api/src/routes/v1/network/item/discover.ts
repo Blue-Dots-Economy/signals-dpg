@@ -17,6 +17,14 @@ import {
   type SignalsSearchItem,
 } from '@/services/signals_search_client';
 import { fetchItemsAcrossInstances } from '@/utils/inter_instance_fetch';
+import { signalsSearchConfig } from '@/config';
+
+// Mirrors signals-search's own default `s_dwithin` radius (#394). Used ONLY
+// to REPORT the effective radius in `meta.distance_meters` when
+// SIGNALS_SEARCH_DISTANCE_METERS is unset and the request didn't override it
+// — we never send this value to signals-search ourselves in that case;
+// signals-search applies its own default when `distance_meters` is omitted.
+const DEFAULT_SEARCH_DISTANCE_METERS = 30000;
 
 type DiscoverItemsRequest = FastifyRequest<{
   Body: z.infer<typeof DiscoverItemsBodySchema>;
@@ -63,6 +71,17 @@ type DiscoverItemsRequest = FastifyRequest<{
  * domain pairs in the first place (schema-driven, see `home-page`); this
  * retry is the server-side safety net. Only a failure of THAT retry (or any
  * other non-anchor error) falls through to the native fallback.
+ *
+ * CONFIGURABLE SPATIAL RADIUS (#394): `SIGNALS_SEARCH_DISTANCE_METERS`
+ * (optional env, `signalsSearchConfig.distanceMeters`) is forwarded to
+ * signals-search as `distance_meters` whenever the request doesn't already
+ * override it — omitted entirely (not sent) when unset, so signals-search's
+ * own ~30km `s_dwithin` default applies. `meta.distance_meters` on every
+ * return path reports the EFFECTIVE radius (request override > env >
+ * `DEFAULT_SEARCH_DISTANCE_METERS`) so the UI's "within X km" note stays
+ * accurate even when nothing was actually sent over the wire. Only present
+ * when the request carried a location — a non-geo search has no radius to
+ * report.
  */
 function mapSignalsSearchItemToDiscoverItem(item: SignalsSearchItem) {
   return {
@@ -169,11 +188,24 @@ const discover_items_handler = async (
       filters: allowedFilters,
       lat: body.item_latitude,
       lng: body.item_longitude,
-      distanceMeters: body.distance_meters,
+      distanceMeters: body.distance_meters ?? signalsSearchConfig.distanceMeters,
       limit: body.limit,
       offset: body.offset,
       anchorItemId: body.anchor_item_id,
     };
+
+    // Effective reported radius (#394): only meaningful when a location was
+    // actually sent (no spatial clause is built otherwise, on either the
+    // signals-search or native-fallback path). Precedence: the request's own
+    // override, then the configured env, then the documented constant that
+    // mirrors signals-search's own default — so the UI's "within X km" note
+    // is accurate whether or not SIGNALS_SEARCH_DISTANCE_METERS is set.
+    const effectiveDistanceMeters =
+      body.item_latitude !== undefined && body.item_longitude !== undefined
+        ? (body.distance_meters ??
+          signalsSearchConfig.distanceMeters ??
+          DEFAULT_SEARCH_DISTANCE_METERS)
+        : undefined;
 
     // Native fallback (#394, revising Task 3): thrown for a request timeout, a
     // non-2xx/invalid response, OR signals-search being unconfigured (the
@@ -239,6 +271,7 @@ const discover_items_handler = async (
           offset: nativeResult.meta.offset,
           source: 'native_fallback' as const,
           degraded: true,
+          distance_meters: effectiveDistanceMeters,
         },
         items,
       });
@@ -258,6 +291,7 @@ const discover_items_handler = async (
           offset: searchResult.meta.offset,
           source: 'signals_search' as const,
           degraded: false,
+          distance_meters: effectiveDistanceMeters,
         },
         items,
       });
@@ -296,6 +330,7 @@ const discover_items_handler = async (
               offset: retryResult.meta.offset,
               source: 'signals_search' as const,
               degraded: false,
+              distance_meters: effectiveDistanceMeters,
             },
             items,
           });

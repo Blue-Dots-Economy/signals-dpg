@@ -97,6 +97,13 @@ export const DiscoverResponseSchema = z.object({
     offset: z.number(),
     source: DiscoverSourceSchema,
     degraded: z.boolean(),
+    // Effective spatial radius (meters, #394) actually applied to this
+    // search — the configured `SIGNALS_SEARCH_DISTANCE_METERS` env, the
+    // request's own `distance_meters` override, or DEFAULT_SEARCH_DISTANCE_METERS
+    // when neither is set (mirroring signals-search's own default). Only
+    // present when the request carried a location; omitted otherwise so the
+    // UI never shows a spurious "within X km" note for a non-geo search.
+    distance_meters: z.number().optional(),
   }),
   items: DiscoverResponseItemSchema.array(),
 });
