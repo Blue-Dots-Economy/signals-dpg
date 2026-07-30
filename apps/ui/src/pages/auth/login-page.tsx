@@ -295,7 +295,7 @@ export function LoginPage() {
         toast.info(t('auth.minor_toast_title', "You're under 18"), {
           description: t(
             'auth.minor_toast_desc',
-            'A parent or guardian needs to confirm your account before you can continue.',
+            'A guardian needs to confirm your account before you can continue.',
           ),
         });
         // Guardian pre-auth is safe (account materializes on creation, same
@@ -319,7 +319,7 @@ export function LoginPage() {
       toast.info(t('auth.minor_toast_title', "You're under 18"), {
         description: t(
           'auth.minor_verify_then_guardian_desc',
-          'First verify your number, then a parent or guardian will confirm your account.',
+          'First verify your number, then a guardian will confirm your account.',
         ),
       });
       setIsLoading(true);

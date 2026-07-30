@@ -234,7 +234,7 @@ export function OtpPage() {
             <p className="mt-2 text-sm text-muted-foreground">
               {t(
                 'auth.otp_minor_guardian_next',
-                'After verifying, a parent or guardian will confirm your account.',
+                'After verifying, a guardian will confirm your account.',
               )}
             </p>
           )}
