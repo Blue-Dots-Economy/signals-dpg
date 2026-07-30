@@ -184,6 +184,7 @@ export function OtpPage() {
     return (
       <AuthShell>
         <U18GuardianFlow
+          inline
           network={themeId}
           brand={brand === 'standard' ? null : brand}
           initialStep={guardianGate.initialStep}
