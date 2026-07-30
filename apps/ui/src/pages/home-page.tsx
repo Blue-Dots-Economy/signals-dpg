@@ -543,11 +543,14 @@ export function HomePage() {
   const [bulkGuardianChallenge, setBulkGuardianChallenge] = React.useState<{
     payloads: PerformActionPayload[];
     sourceInstanceUrl?: string;
+    actionType: string;
   } | null>(null);
   // Minor ward: the "a code will be sent to your guardian — proceed?" confirm
   // shown BEFORE a bulk action dispatches the OTP (mirrors the single-action
-  // confirm). Holds the deferred bulk submit.
-  const [bulkGuardianConfirm, setBulkGuardianConfirm] = React.useState<(() => void) | null>(null);
+  // confirm). Holds the deferred bulk submit + its action type (for the panel).
+  const [bulkGuardianConfirm, setBulkGuardianConfirm] = React.useState<
+    { run: () => void; actionType: string } | null
+  >(null);
 
   // Networks list + resolved selected network (config tier). Replaces the raw
   // mount-fetch + resolve effects; `allNetworks`/`network` are now query-derived.
@@ -1302,8 +1305,9 @@ export function HomePage() {
         isGuardianConsentRequiredDomain(network, wardDomain)
       ) {
         setBulkConnectOpen(false);
-        setBulkGuardianConfirm(() => () => {
-          void handleBulkConnect(actionType, formData, true);
+        setBulkGuardianConfirm({
+          actionType,
+          run: () => { void handleBulkConnect(actionType, formData, true); },
         });
         return;
       }
@@ -1390,6 +1394,7 @@ export function HomePage() {
             setBulkGuardianChallenge({
               payloads: guardianResults.map((r) => payloads[r.index]),
               sourceInstanceUrl: sourceItemInstanceUrl,
+              actionType,
             });
             return; // the guardian OTP dialog owns the resubmit
           }
@@ -1783,14 +1788,20 @@ export function HomePage() {
           <DialogTitle>{t('actions.guardian_confirm_title')}</DialogTitle>
           <DialogDescription>{t('actions.guardian_confirm_desc')}</DialogDescription>
         </DialogHeader>
-        <GuardianOtpPurpose purpose={{ kind: 'bulk', count: browseSelection.selected.size }} />
+        <GuardianOtpPurpose
+          purpose={{
+            kind: 'bulk',
+            action: bulkGuardianConfirm?.actionType === 'connect' ? 'connect' : 'apply',
+            count: browseSelection.selected.size,
+          }}
+        />
         <DialogFooter>
           <Button variant="outline" onClick={() => setBulkGuardianConfirm(null)}>
             {t('actions.guardian_confirm_cancel')}
           </Button>
           <Button
             onClick={() => {
-              const run = bulkGuardianConfirm;
+              const run = bulkGuardianConfirm?.run;
               setBulkGuardianConfirm(null);
               run?.();
             }}
@@ -1806,7 +1817,11 @@ export function HomePage() {
     <GuardianOtpDialog
       open={!!bulkGuardianChallenge}
       onOpenChange={(open) => { if (!open) setBulkGuardianChallenge(null); }}
-      purpose={{ kind: 'bulk', count: bulkGuardianChallenge?.payloads.length ?? 0 }}
+      purpose={{
+        kind: 'bulk',
+        action: bulkGuardianChallenge?.actionType === 'connect' ? 'connect' : 'apply',
+        count: bulkGuardianChallenge?.payloads.length ?? 0,
+      }}
       onLogout={() => { void signOut(); }}
       onSubmitOtp={async (otp) => {
         const ch = bulkGuardianChallenge;

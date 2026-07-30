@@ -13,7 +13,7 @@ export type GuardianPurpose =
   | { kind: 'profile'; name?: string }
   | { kind: 'apply'; provider?: string }
   | { kind: 'connect'; provider?: string }
-  | { kind: 'bulk'; count: number }
+  | { kind: 'bulk'; action: 'apply' | 'connect'; count: number }
   | { kind: 'accept'; provider?: string };
 
 type TFn = ReturnType<typeof useTranslation>['t'];
@@ -45,7 +45,7 @@ function describe(purpose: GuardianPurpose, t: TFn): { value: string; shares?: s
     case 'apply': {
       const who = org(purpose.provider);
       return {
-        value: t('u18.otp_purpose_apply', { defaultValue: 'Application to {{who}}', who }),
+        value: t('u18.otp_purpose_apply', { defaultValue: 'Applying to {{who}}', who }),
         shares: shareWith(who),
       };
     }
@@ -58,10 +58,16 @@ function describe(purpose: GuardianPurpose, t: TFn): { value: string; shares?: s
     }
     case 'bulk':
       return {
-        value: t('u18.otp_purpose_bulk', {
-          defaultValue: 'Applications to {{count}} organisations',
-          count: purpose.count,
-        }),
+        value:
+          purpose.action === 'connect'
+            ? t('u18.otp_purpose_bulk_connect', {
+                defaultValue: 'Connecting with {{count}} organisations',
+                count: purpose.count,
+              })
+            : t('u18.otp_purpose_bulk_apply', {
+                defaultValue: 'Applying to {{count}} organisations',
+                count: purpose.count,
+              }),
         shares: t(
           'u18.otp_purpose_shares_them',
           'Shares your name, phone and email with them.',
