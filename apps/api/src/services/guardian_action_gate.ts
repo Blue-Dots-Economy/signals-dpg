@@ -29,7 +29,7 @@ export type GateInput = {
 export type GateResult =
   | { status: 'not_required' } // adult or ungated → proceed normally
   | { status: 'challenge_issued' } // OTP sent; caller fails the item GUARDIAN_OTP_REQUIRED
-  | { status: 'verified'; scope: string } // OTP ok; caller writes guardian action row + proceeds
+  | { status: 'verified' } // OTP ok; caller writes guardian action row + proceeds
   | { status: 'invalid_otp' }
   | { status: 'throttled' }
   | { status: 'rate_limited' }
@@ -116,7 +116,7 @@ export async function guardianActionGate(input: GateInput): Promise<GateResult> 
   }
 
   const ok = await verifyGuardianOtp({ scope, otp: input.otp });
-  return ok ? { status: 'verified', scope } : { status: 'invalid_otp' };
+  return ok ? { status: 'verified' } : { status: 'invalid_otp' };
 }
 
 /**
