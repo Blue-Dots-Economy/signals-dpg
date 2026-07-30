@@ -45,6 +45,7 @@ import { apiConfig } from '@/lib/api-config';
 import { getEnumFilterFieldsForDomains } from '@/lib/enum-filters';
 import {
   deriveBrowseParams,
+  deriveAnchorItemId,
   isDiscoverActive,
   resolveDegradedBanner,
   excludeOwnItems,
@@ -195,8 +196,14 @@ function DomainPagedFetch({
   // every visible domain so the whole "All" feed shares one discover mode.
   // Omitted by the map-view count-only fetchers, which stay on the native
   // browse path (the "Near me" toggle is a list-view control; the map is
-  // unaffected per spec §5.3).
-  browseOpts?: { q?: string; filters: DiscoverFacetFilter[]; relevance: boolean };
+  // unaffected per spec §5.3). `anchorItemId` (#394) rides along the same way —
+  // `useInfiniteBrowseItems` only forwards it on the discover path.
+  browseOpts?: {
+    q?: string;
+    filters: DiscoverFacetFilter[];
+    relevance: boolean;
+    anchorItemId?: string;
+  };
   onItems: (
     domainId: string,
     items: Item[],
@@ -981,9 +988,20 @@ export function HomePage() {
     [nearMe, search, activeFieldFilters],
   );
   const browseLocation = browseParams.useLocation ? browseCoords : null;
+  // #394: anchor both list paths (below) to the viewer's selected own-profile
+  // item — `useInfiniteBrowseItems` only sends this to signals-search on the
+  // discover path (mirrors `deriveBrowseParams` above: native/proximity mode
+  // and the map are unaffected). Switching the selected profile produces a new
+  // `browseHookOpts` object, which produces a new query key in discover mode
+  // (Task 2), which re-queries with the new anchor.
   const browseHookOpts = React.useMemo(
-    () => ({ q: browseParams.q, filters: browseParams.filters, relevance: browseParams.relevance }),
-    [browseParams],
+    () => ({
+      q: browseParams.q,
+      filters: browseParams.filters,
+      relevance: browseParams.relevance,
+      anchorItemId: deriveAnchorItemId(activeProfileId),
+    }),
+    [browseParams, activeProfileId],
   );
   // True when the active feed is served by the discover BFF (q OR filters OR
   // relevance) — the server has already applied text + facet filtering, so the

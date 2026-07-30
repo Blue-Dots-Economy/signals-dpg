@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   deriveBrowseParams,
+  deriveAnchorItemId,
   buildFilteredCardsForDomain,
   excludeOwnItems,
   isDiscoverActive,
@@ -23,6 +24,16 @@ function makeItem(id: string, state: Record<string, unknown>, domain = 'provider
     updated_at: '2026-01-01T00:00:00Z',
   };
 }
+
+describe('deriveAnchorItemId (#394)', () => {
+  it('returns the selected profile id when one is selected', () => {
+    expect(deriveAnchorItemId('profile-123')).toBe('profile-123');
+  });
+
+  it('returns undefined when no profile is selected', () => {
+    expect(deriveAnchorItemId(null)).toBeUndefined();
+  });
+});
 
 describe('deriveBrowseParams', () => {
   it('Near me ON → proximity: useLocation true, relevance false', () => {

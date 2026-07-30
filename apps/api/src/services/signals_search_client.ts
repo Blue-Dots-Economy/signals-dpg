@@ -50,6 +50,13 @@ export interface SearchSignalsInput {
   distanceMeters?: number;
   limit: number;
   offset: number;
+  /**
+   * The viewer's own profile `item_id`, sent as `intent.item.id` (Beckn anchor)
+   * so signals-search ranks results by relevance to that profile rather than
+   * plain recency/proximity. Omitted entirely (not `null`) when there is no
+   * anchor — see `buildSignalsSearchRequest`.
+   */
+  anchorItemId?: string;
 }
 
 const SignalsSearchFilterClauseSchema = z.object({
@@ -91,6 +98,7 @@ const SignalsSearchRequestSchema = z.object({
       textSearch: z.string().optional(),
       filters: z.array(SignalsSearchFilterClauseSchema).optional(),
       spatial: z.array(SignalsSearchSpatialClauseSchema).max(1).optional(),
+      item: z.object({ id: z.string() }).optional(),
     }),
     pagination: z.object({
       limit: z.number().int().min(1).max(MAX_PAGE_SIZE),
@@ -145,6 +153,20 @@ const SignalsSearchResponseSchema = z.object({
 export interface SearchSignalsResult {
   items: SignalsSearchItem[];
   meta: { total: number; limit: number; offset: number };
+}
+
+/**
+ * Thrown by `searchSignals` for a non-2xx `/v1/search` response. Carries the
+ * upstream HTTP `status` and the upstream `error` code (e.g.
+ * `'ANCHOR_NOT_FOUND'` for an unindexed/invalid anchor `item_id`) so callers
+ * — specifically the discover BFF's anchor-retry (#394) — can distinguish
+ * "anchor not found, retry without it" from any other search failure without
+ * string-matching the message.
+ */
+export class SignalsSearchError extends Error {
+  status?: number;
+  code?: string;
+  override name = 'SignalsSearchError';
 }
 
 function clampLimit(limit: number): number {
@@ -210,6 +232,7 @@ export function buildSignalsSearchRequest(
         ...(input.q ? { textSearch: input.q } : {}),
         ...(filters.length > 0 ? { filters } : {}),
         ...(spatial ? { spatial: [spatial] } : {}),
+        ...(input.anchorItemId ? { item: { id: input.anchorItemId } } : {}),
       },
       pagination: {
         limit: clampLimit(input.limit),
@@ -251,11 +274,14 @@ export async function searchSignals(
     const errorBody = (await response.json().catch(() => null)) as
       | { error?: string; message?: string }
       | null;
-    throw new Error(
+    const searchError = new SignalsSearchError(
       `signals-search /v1/search error ${response.status}: ${
         errorBody?.message ?? response.statusText
       }`
     );
+    searchError.status = response.status;
+    searchError.code = errorBody?.error;
+    throw searchError;
   }
 
   const parsed = SignalsSearchResponseSchema.parse(await response.json());

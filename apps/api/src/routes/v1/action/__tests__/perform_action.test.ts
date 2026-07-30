@@ -160,8 +160,9 @@ vi.mock('@/network_configs', () => ({
 // deps on this route are already mocked above.
 vi.mock('@/services/guardian_action_gate', () => ({
   guardianActionGate: vi.fn(async () => ({ status: 'not_required' })),
-  // Gate is always not_required in these tests, so the mapper only ever returns null.
-  guardianGateFailure: () => null,
+  // Defaults to null (adult/ungated proceed); U18 tests override it per-case
+  // with a real BulkItemFailure so runBulk records the per-item error.
+  guardianGateFailure: vi.fn(() => null),
 }));
 
 vi.mock('@dpg/schemas', async () => {
@@ -185,6 +186,8 @@ vi.mock('@dpg/schemas', async () => {
 
 // Imported after mocks.
 import { perform_action } from '../perform_action.js';
+import { BulkItemFailure } from '@/utils/bulk_runner';
+import { guardianActionGate, guardianGateFailure } from '@/services/guardian_action_gate';
 
 // Valid v4 UUIDs (the "4" in the third group and "8/9/a/b" in the fourth
 // satisfy z.uuid() across zod variants that gate on the variant nibble).
@@ -591,6 +594,90 @@ describe('POST /api/v1/action/perform — on-behalf-of (bulk)', () => {
       expect(res.statusCode).toBe(422);
       expect(res.json().results[0]).toMatchObject({ status: 'error', error: 'USER_NOT_FOUND' });
       expect(fetchCalls).toHaveLength(0);
+    });
+  });
+
+  // U18 action channel block (#395): the gate is mocked at its seam (as
+  // everywhere in this suite), so these assert the wiring — perform passes the
+  // correct `channel` and the gate's external_minor_blocked outcome flows
+  // through guardianGateFailure into a per-item error with no relay fetch.
+  describe('U18 action channel block (#395)', () => {
+    it('on-behalf + minor on a gated domain → per-item MINOR_ACTION_CHANNEL_BLOCKED, no relay fetch', async () => {
+      dbState.userRows = [{ id: 'usr_agg_owned', onboardedByOrgId: 'org_agg_1' }];
+      vi.mocked(guardianActionGate).mockResolvedValueOnce({
+        status: 'external_minor_blocked',
+        reason: 'minor',
+      });
+      vi.mocked(guardianGateFailure).mockReturnValueOnce(
+        new BulkItemFailure(
+          'MINOR_ACTION_CHANNEL_BLOCKED',
+          "This participant is a minor; actions for minors must be completed in the app and can't be performed via this channel.",
+        ),
+      );
+      const app = buildApp({
+        org_id: 'org_agg_1',
+        org_type: 'aggregator',
+        service_user_id: 'svc_agg_1',
+      });
+      const res = await app.inject({
+        method: 'POST',
+        url: '/perform/bulk',
+        payload: [{ ...VALID_BODY, acting_as_user_id: 'usr_agg_owned' }],
+      });
+      expect(res.statusCode).toBe(422);
+      expect(res.json().results[0]).toMatchObject({
+        status: 'error',
+        error: 'MINOR_ACTION_CHANNEL_BLOCKED',
+      });
+      expect(fetchCalls).toHaveLength(0);
+      expect(vi.mocked(guardianActionGate)).toHaveBeenCalledWith(
+        expect.objectContaining({ channel: 'external', wardUserId: 'usr_agg_owned' }),
+      );
+    });
+
+    it('on-behalf + adult → gate resolves not_required, action proceeds (201)', async () => {
+      dbState.userRows = [{ id: 'usr_agg_owned', onboardedByOrgId: 'org_agg_1' }];
+      const app = buildApp({
+        org_id: 'org_agg_1',
+        org_type: 'aggregator',
+        service_user_id: 'svc_agg_1',
+      });
+      const res = await app.inject({
+        method: 'POST',
+        url: '/perform/bulk',
+        payload: [{ ...VALID_BODY, acting_as_user_id: 'usr_agg_owned' }],
+      });
+      expect(res.statusCode).toBe(201);
+      expect(res.json().results[0]).toMatchObject({ status: 'success' });
+      expect(fetchCalls).toHaveLength(1);
+      expect(vi.mocked(guardianActionGate)).toHaveBeenCalledWith(
+        expect.objectContaining({ channel: 'external' }),
+      );
+    });
+
+    it('self-session + minor → guardian-OTP flow unchanged (channel self, GUARDIAN_OTP_REQUIRED, no relay fetch)', async () => {
+      vi.mocked(guardianActionGate).mockResolvedValueOnce({ status: 'challenge_issued' });
+      vi.mocked(guardianGateFailure).mockReturnValueOnce(
+        new BulkItemFailure(
+          'GUARDIAN_OTP_REQUIRED',
+          'Guardian OTP sent; resubmit with guardian_otp to confirm this action.',
+        ),
+      );
+      const app = buildApp(undefined, { id: 'usr_agg_owned' });
+      const res = await app.inject({
+        method: 'POST',
+        url: '/perform/bulk',
+        payload: [VALID_BODY],
+      });
+      expect(res.statusCode).toBe(422);
+      expect(res.json().results[0]).toMatchObject({
+        status: 'error',
+        error: 'GUARDIAN_OTP_REQUIRED',
+      });
+      expect(fetchCalls).toHaveLength(0);
+      expect(vi.mocked(guardianActionGate)).toHaveBeenCalledWith(
+        expect.objectContaining({ channel: 'self' }),
+      );
     });
   });
 

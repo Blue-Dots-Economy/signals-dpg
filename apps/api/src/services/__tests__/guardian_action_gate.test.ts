@@ -45,7 +45,7 @@ vi.mock('@/services/guardian_otp', () => ({
   GuardianOtpError,
 }));
 
-import { guardianActionGate } from '@/services/guardian_action_gate';
+import { guardianActionGate, guardianGateFailure } from '@/services/guardian_action_gate';
 
 const gatedCfg = {
   id: 'blue_dot',
@@ -62,6 +62,7 @@ const baseInput = {
   actionType: 'apply',
   sourceItemId: 'item-src',
   targetItemId: 'item-tgt',
+  channel: 'self' as const,
 };
 
 const EXPECTED_SCOPE = 'guardian_action:ward-1:apply:item-src:item-tgt';
@@ -181,5 +182,64 @@ describe('guardianActionGate', () => {
 
     expect(result).toEqual({ status: 'no_provider' });
     expect(issueGuardianOtp).not.toHaveBeenCalled();
+  });
+
+  // External / on-behalf channel (#395): no guardian-OTP path over
+  // voice/aggregator — a minor / age-unknown ward is blocked, an adult
+  // proceeds unchanged, and an ungated domain short-circuits before age.
+  describe('external channel', () => {
+    const externalInput = { ...baseInput, channel: 'external' as const };
+
+    it('blocks a gated minor with reason "minor"', async () => {
+      getWardAge.mockResolvedValue(11);
+
+      const result = await guardianActionGate(externalInput);
+
+      expect(result).toEqual({ status: 'external_minor_blocked', reason: 'minor' });
+      expect(issueGuardianOtp).not.toHaveBeenCalled();
+    });
+
+    it('blocks a gated age-unknown ward with reason "age_unknown" (fail-closed)', async () => {
+      getWardAge.mockResolvedValue(null);
+
+      const result = await guardianActionGate(externalInput);
+
+      expect(result).toEqual({ status: 'external_minor_blocked', reason: 'age_unknown' });
+      expect(issueGuardianOtp).not.toHaveBeenCalled();
+    });
+
+    it('lets a gated adult proceed (not_required)', async () => {
+      getWardAge.mockResolvedValue(36);
+
+      const result = await guardianActionGate(externalInput);
+
+      expect(result).toEqual({ status: 'not_required' });
+    });
+
+    it('short-circuits to not_required on an ungated domain before checking age', async () => {
+      const result = await guardianActionGate({ ...externalInput, sourceDomain: 'provider' });
+
+      expect(result).toEqual({ status: 'not_required' });
+      expect(getWardAge).not.toHaveBeenCalled();
+    });
+  });
+});
+
+describe('guardianGateFailure', () => {
+  it('maps external_minor_blocked to MINOR_ACTION_CHANNEL_BLOCKED without leaking the reason', () => {
+    const failure = guardianGateFailure({ status: 'external_minor_blocked', reason: 'age_unknown' });
+
+    expect(failure).not.toBeNull();
+    expect(failure!.errorCode).toBe('MINOR_ACTION_CHANNEL_BLOCKED');
+    // The reason value never reaches the client-facing message.
+    expect(failure!.message).not.toContain('age_unknown');
+    expect(failure!.message).toBe(
+      "This participant is a minor; actions for minors must be completed in the app and can't be performed via this channel.",
+    );
+  });
+
+  it('returns null for not_required and verified', () => {
+    expect(guardianGateFailure({ status: 'not_required' })).toBeNull();
+    expect(guardianGateFailure({ status: 'verified', scope: 's' })).toBeNull();
   });
 });

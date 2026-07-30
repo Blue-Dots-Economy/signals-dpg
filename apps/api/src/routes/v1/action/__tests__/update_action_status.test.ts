@@ -91,8 +91,9 @@ vi.mock('@/services/consent_version', () => ({
 // issue Task 2 hit wiring the gate into perform_action).
 vi.mock('@/services/guardian_action_gate', () => ({
   guardianActionGate: vi.fn(async () => ({ status: 'not_required' })),
-  // Gate is always not_required in these tests, so the mapper only ever returns null.
-  guardianGateFailure: () => null,
+  // Defaults to null (adult/ungated proceed); the U18 test overrides it to the
+  // self-path OTP failure to prove the external block never fires here.
+  guardianGateFailure: vi.fn(() => null),
 }));
 
 vi.mock('@api/db/postgres/drizzle_config', () => {
@@ -204,6 +205,8 @@ vi.mock('@dpg/schemas', async () => {
 
 // Imported after mocks.
 import { update_action_status } from '../update_action_status.js';
+import { BulkItemFailure } from '@/utils/bulk_runner';
+import { guardianActionGate, guardianGateFailure } from '@/services/guardian_action_gate';
 
 const EXISTING_ACTION = {
   action_id: KNOWN_ACTION_ID,
@@ -609,6 +612,81 @@ describe('POST /api/v1/action/update-status (bulk, self-acted only)', () => {
       });
       expect(res.statusCode).toBe(200);
       expect(dbState.updates).toHaveLength(1);
+    });
+  });
+
+  // U18 guardian gate is self-acted only here (#395): on-behalf was removed, so
+  // the gate must always be called with channel 'self' and the external block
+  // can never fire — a minor acceptor still gets the guardian-OTP flow.
+  describe('U18 guardian gate — always self channel (#395)', () => {
+    // A prior cancellation test sets a persistent `paused` snapshot via
+    // mockResolvedValue; restore the live default so the accept path proceeds.
+    const restoreLiveSnapshot = async () => {
+      const { fetchLocalItemSnapshot } = await import('@/utils/action_event_runtime');
+      (fetchLocalItemSnapshot as ReturnType<typeof vi.fn>).mockResolvedValue({
+        created_by: 'usr_agg_owned',
+        item_id: 'target_item_1',
+        item_locations: [],
+        private_state: {},
+        lifecycle_status: 'live',
+      });
+    };
+
+    it('passes channel "self" to the gate on a consent-gated accept', async () => {
+      await restoreLiveSnapshot();
+      const { getActionInteraction } = await import('@dpg/schemas');
+      (getActionInteraction as ReturnType<typeof vi.fn>).mockReturnValueOnce({
+        event_schema: {},
+        reveals_pii_on_status: ['accepted'],
+      });
+      const res = await buildApp(undefined, { id: 'usr_agg_owned' }).inject({
+        method: 'POST',
+        url: '/update-status',
+        payload: [
+          {
+            action_id: EXISTING_ACTION.action_id,
+            action_status: 'accepted',
+            consent: { acknowledged: true, version: 1 },
+          },
+        ],
+      });
+      expect(res.statusCode).toBe(200);
+      expect(vi.mocked(guardianActionGate)).toHaveBeenCalledWith(
+        expect.objectContaining({ channel: 'self' }),
+      );
+    });
+
+    it('a self minor acceptor gets the guardian-OTP flow, never MINOR_ACTION_CHANNEL_BLOCKED', async () => {
+      await restoreLiveSnapshot();
+      const { getActionInteraction } = await import('@dpg/schemas');
+      (getActionInteraction as ReturnType<typeof vi.fn>).mockReturnValueOnce({
+        event_schema: {},
+        reveals_pii_on_status: ['accepted'],
+      });
+      vi.mocked(guardianActionGate).mockResolvedValueOnce({ status: 'challenge_issued' });
+      vi.mocked(guardianGateFailure).mockReturnValueOnce(
+        new BulkItemFailure(
+          'GUARDIAN_OTP_REQUIRED',
+          'Guardian OTP sent; resubmit with guardian_otp to confirm this action.',
+        ),
+      );
+      const res = await buildApp(undefined, { id: 'usr_agg_owned' }).inject({
+        method: 'POST',
+        url: '/update-status',
+        payload: [
+          {
+            action_id: EXISTING_ACTION.action_id,
+            action_status: 'accepted',
+            consent: { acknowledged: true, version: 1 },
+          },
+        ],
+      });
+      expect(res.statusCode).toBe(422);
+      expect(res.json().results[0]).toMatchObject({ status: 'error', error: 'GUARDIAN_OTP_REQUIRED' });
+      expect(dbState.updates).toHaveLength(0);
+      expect(vi.mocked(guardianActionGate)).toHaveBeenCalledWith(
+        expect.objectContaining({ channel: 'self' }),
+      );
     });
   });
 });

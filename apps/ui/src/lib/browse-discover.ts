@@ -65,6 +65,18 @@ export function resolveDegradedBanner(input: { degraded: boolean }): DegradedBan
   return input.degraded ? 'ranking_unavailable' : null;
 }
 
+// ─── Selected profile → discover anchor (#394) ──────────────────────────────
+//
+// The viewer's selected own-profile item id doubles as the discover "anchor"
+// (`useInfiniteBrowseItems`'s `opts.anchorItemId`, threaded to signals-search's
+// `intent.item.id`). `activeProfileId` is `string | null` (React state); the
+// hook opt is `string | undefined`. Kept as its own tiny pure function (rather
+// than inlined at the call site) so the null→undefined mapping is unit-tested
+// without mounting `home-page.tsx`.
+export function deriveAnchorItemId(activeProfileId: string | null): string | undefined {
+  return activeProfileId ?? undefined;
+}
+
 // ─── Own-item filtering (runs UPSTREAM of buildFilteredCardsForDomain) ────────
 //
 // Hides the viewer's own profile from their own browse list. Kept as a distinct

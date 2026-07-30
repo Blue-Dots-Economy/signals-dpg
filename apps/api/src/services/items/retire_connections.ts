@@ -7,6 +7,23 @@ import type { DbOrTx } from '@/services/item_service';
 type WarnLogger = { warn: (obj: unknown, msg?: string) => void };
 
 /**
+ * The counterparty side of a connection cancelled by retire — the item that is
+ * NOT the retired one. Returned so the caller can notify them (#418) after the
+ * retire transaction commits. `ownerUserId` is null for owner-less items and
+ * for counterparties hosted on another instance (their user isn't local), which
+ * is how the v1 "local counterparties only" rule falls out — those are simply
+ * un-emailable and skipped downstream.
+ */
+export interface RetireCancelledCounterparty {
+  actionId: string;
+  actionType: string;
+  ownerUserId: string | null;
+  itemId: string;
+  domain: string;
+  network: string;
+}
+
+/**
  * Fallback cancel status for interactions the network does not track
  * (`metric_categories` null / no `cancel` bucket). Matches the conventional
  * `cancel` value used by tracked interactions.
@@ -28,19 +45,19 @@ const RETIRE_CANCEL_REMARK = 'This profile is retired and no longer available.';
  * action is flipped to the interaction's first `cancel` status.
  *
  * The action ROWS are kept (only the status changes) so the counterparty
- * retains their history with the bare id (Q11). Counterparties are NOT notified
- * (Q12 — deferred). Untracked interactions (no `metric_categories`, or no
- * `cancel` status defined) are skipped — there is no defined cancel status to
- * move them to.
+ * retains their history with the bare id (Q11). Untracked interactions (no
+ * `metric_categories`, or no `cancel` status defined) are skipped — there is no
+ * defined cancel status to move them to.
  *
- * Runs inside the retire transaction (`tx`). Returns the number of actions
- * cancelled (for logging/telemetry).
+ * Runs inside the retire transaction (`tx`). Returns the counterparty side of
+ * each cancelled connection so the caller can notify them AFTER commit (#418);
+ * `.length` is the cancelled count for logging/telemetry.
  */
 export async function cancelItemConnections(
   tx: DbOrTx,
   item: { item_id: string; item_network: string; item_domain: string; item_type: string },
   logger?: WarnLogger,
-): Promise<number> {
+): Promise<RetireCancelledCounterparty[]> {
   // Match on the full item ref on each side so the query can use the
   // source/target composite indexes (which lead with the item network) instead
   // of scanning by id alone. NOTE: this does NOT prune partitions — item_actions
@@ -66,9 +83,13 @@ export async function cancelItemConnections(
       action_id: item_actions.action_id,
       action_status: item_actions.action_status,
       remarks: item_actions.remarks,
+      source_item_id: item_actions.source_item_id,
+      source_item_owner: item_actions.source_item_owner,
       source_item_network: item_actions.source_item_network,
       source_item_domain: item_actions.source_item_domain,
       source_item_type: item_actions.source_item_type,
+      target_item_id: item_actions.target_item_id,
+      target_item_owner: item_actions.target_item_owner,
       target_item_network: item_actions.target_item_network,
       target_item_domain: item_actions.target_item_domain,
       target_item_type: item_actions.target_item_type,
@@ -76,7 +97,7 @@ export async function cancelItemConnections(
     .from(item_actions)
     .where(or(asSource, asTarget));
 
-  let cancelled = 0;
+  const counterparties: RetireCancelledCounterparty[] = [];
   for (const a of actions) {
     // Resolve the interaction to read its cancel/terminal buckets. If it's no
     // longer defined in config, fall through with no categories — retire still
@@ -129,8 +150,32 @@ export async function cancelItemConnections(
           eq(item_actions.action_id, a.action_id),
         ),
       );
-    cancelled += 1;
+
+    // The counterparty is the side that is NOT the retired item. A self-domain
+    // interaction (both sides the same item) has no external counterparty →
+    // skip so we never email the retiring owner about their own retire.
+    const retiredIsSource = a.source_item_id === item.item_id;
+    const cp = retiredIsSource
+      ? {
+          ownerUserId: a.target_item_owner,
+          itemId: a.target_item_id,
+          domain: a.target_item_domain,
+          network: a.target_item_network,
+        }
+      : {
+          ownerUserId: a.source_item_owner,
+          itemId: a.source_item_id,
+          domain: a.source_item_domain,
+          network: a.source_item_network,
+        };
+    if (cp.itemId !== item.item_id) {
+      counterparties.push({
+        actionId: a.action_id,
+        actionType: a.action_type,
+        ...cp,
+      });
+    }
   }
 
-  return cancelled;
+  return counterparties;
 }

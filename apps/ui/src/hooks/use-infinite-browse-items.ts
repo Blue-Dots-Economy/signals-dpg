@@ -27,6 +27,15 @@ interface UseInfiniteBrowseItemsOpts {
   // "sort by relevance" toggle). Defaults to false — plain proximity/recency
   // browse (native) stays the default when nothing else requests discover.
   relevance?: boolean;
+  // The active profile's item id (#394 Task 2). Forwarded to the discover BFF
+  // as `anchor_item_id` (relevance-to-profile ranking, Task 1) ONLY on the
+  // discover path — plain native browse has no ranking concept, so it's
+  // neither sent nor part of that path's query key (a profile switch during
+  // plain proximity browse must not cause a needless refetch). On the
+  // discover path it IS part of the key: switching the selected profile must
+  // re-rank, so paging resets and the feed refetches (Task 3 wires the real
+  // value in from the page).
+  anchorItemId?: string;
 }
 
 interface UseInfiniteBrowseItemsResult {
@@ -90,11 +99,17 @@ export function useInfiniteBrowseItems(
   const q = opts?.q?.trim() ?? '';
   const filters = opts?.filters ?? [];
   const useDiscover = q.length > 0 || filters.length > 0 || (opts?.relevance ?? false);
+  const anchorItemId = opts?.anchorItemId;
 
   // Location + q/filters/mode are all part of the key so any change resets
   // paging (spec §5.1; #203 List PR Task 4 extends this to discover inputs) —
   // useInfiniteQuery starts a fresh query (pageParam back at 0) rather than
-  // appending to the previous feed whenever the key changes.
+  // appending to the previous feed whenever the key changes. `anchorItemId`
+  // (#394 Task 2) is included ONLY in discover mode: it has no effect on the
+  // native path, so leaving it out of that path's key means a profile switch
+  // during plain proximity browse doesn't trigger a needless refetch, while a
+  // profile switch during discover DOES change the key (re-ranking depends
+  // on the anchor).
   const filterKey = {
     limit: PROFILE_PAGE_SIZE,
     lat: userLocation?.lat ?? null,
@@ -102,6 +117,7 @@ export function useInfiniteBrowseItems(
     mode: useDiscover ? ('discover' as const) : ('native' as const),
     q,
     filters,
+    ...(useDiscover ? { anchorItemId: anchorItemId ?? null } : {}),
   };
 
   const query = useInfiniteQuery({
@@ -125,6 +141,7 @@ export function useInfiniteBrowseItems(
             ...(userLocation
               ? { item_latitude: userLocation.lat, item_longitude: userLocation.lng }
               : {}),
+            ...(anchorItemId ? { anchor_item_id: anchorItemId } : {}),
           },
           signal,
         );

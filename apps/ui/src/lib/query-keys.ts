@@ -53,9 +53,13 @@ export const queryKeys = {
    *   change to any of them resets paging (useInfiniteQuery starts a fresh
    *   query at offset 0) instead of appending to the previous feed.
    * Offset/pagination is handled by useInfiniteQuery's pageParam.
+   * - anchorItemId (#394 Task 3): the viewer's selected own-profile item id,
+   *   forwarded to `useInfiniteBrowseItems` as the discover anchor and carried
+   *   in `filters` in discover mode ONLY — a profile switch during plain
+   *   native browse must not bust the key. Landed (no longer deferred).
    * DEFERRED axes (§8): instance/API base URL (no selectedApiUrl switcher
-   * exists; wire cache busting when added), activeProfileId (only affects
-   * results once relevance ranking §9 lands).
+   * exists; wire cache busting when added). `activeProfileId` remains
+   * deferred for `markers` (map relevance ranking, P-follow-5) — see below.
    */
   browseItems: (networkId: string, domain: string, filters: Record<string, unknown>) =>
     ['browse-items', networkId, domain, filters] as const,
@@ -81,8 +85,9 @@ export const queryKeys = {
    *   ready and a filter change always produces a distinct key.
    * - `limit`.
    * DEFERRED axes (§8): instance/API base URL (no selectedApiUrl switcher
-   * exists; wire cache busting when added), activeProfileId (only affects
-   * results once relevance ranking §9 lands).
+   * exists; wire cache busting when added), activeProfileId (map never calls
+   * discover; still deferred pending relevance-ranked map pins, P-follow-5 —
+   * contrast `browseItems` above, where the anchor landed in #394).
    */
   markers: (networkId: string, domain: string, filters: Record<string, unknown>) =>
     ['markers', networkId, domain, filters] as const,

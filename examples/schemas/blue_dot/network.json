@@ -692,7 +692,8 @@
               "type": "string",
               "title": "College / Institute Name",
               "description": "Please specify your college or institute name",
-              "placeholder": "Please specify your college or institute name"
+              "placeholder": "Please specify your college or institute name",
+              "x-reference-source": { "source": "colleges", "subtitle": ["district"] }
             },
             "nameOfLastRoleHeld": {
               "type": "string",

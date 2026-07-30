@@ -226,6 +226,10 @@ export const update_action_status_handler = async (
           sourceItemId: existingAction.target_item_id,
           targetItemId: existingAction.source_item_id,
           stage: 'accept',
+          // Self-acted only (on-behalf was removed) — the external block must
+          // never fire here. Passing 'self' locks that invariant: if on-behalf
+          // is ever re-added, minors are blocked automatically (#395).
+          channel: 'self',
           otp: body.guardian_otp,
         });
 

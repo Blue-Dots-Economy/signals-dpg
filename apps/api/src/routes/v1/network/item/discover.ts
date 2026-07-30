@@ -10,7 +10,12 @@ import {
   resolveTextSearchFields,
 } from '@/utils/facet_guard';
 import { getNetworkConfigById } from '@/network_configs';
-import { searchSignals, type SignalsSearchItem } from '@/services/signals_search_client';
+import {
+  searchSignals,
+  SignalsSearchError,
+  type SearchSignalsInput,
+  type SignalsSearchItem,
+} from '@/services/signals_search_client';
 import { fetchItemsAcrossInstances } from '@/utils/inter_instance_fetch';
 
 type DiscoverItemsRequest = FastifyRequest<{
@@ -38,14 +43,26 @@ type DiscoverItemsRequest = FastifyRequest<{
  * native `fetchItemsAcrossInstances` path (the same distance/recency-ordered,
  * live-only, paged fetch `/network/item/fetch` uses) so a search-service
  * outage degrades the list rather than 5xx-ing it. `q`/`filters` ARE now
- * applied on this path too — the same value-match-on-public-`item_state`
- * (`text_search`) and facet (`item_state`) mechanisms the map's `/markers`
- * already uses (see `resolveTextSearchFields`/`resolveAllowedFacetFilters` in
- * `facet_guard.ts`, applied by `buildWhereClause` in
- * `item_fetch_runtime.ts`) — only relevance RANKING is unavailable without
- * signals-search. `meta.source: 'native_fallback'`/`degraded: true` are what
- * let the UI (Task 6) tell the user ranking (not search/filtering itself)
- * isn't available.
+ * applied on this native path too (#394) — the same value-match-on-public-
+ * `item_state` (`text_search`) and facet (`item_state`) mechanisms the map's
+ * `/markers` uses (see `resolveTextSearchFields`/`resolveAllowedFacetFilters`
+ * in `facet_guard.ts`, applied by `buildWhereClause`) — so only relevance
+ * RANKING is unavailable without signals-search. `meta.source:
+ * 'native_fallback'`/`degraded: true` let the UI (Task 6) show the "basic
+ * matches" note.
+ *
+ * PROFILE ANCHOR RELEVANCE (#394): `body.anchor_item_id` (the viewer's own
+ * profile item) is forwarded to signals-search as `intent.item`. signals-
+ * search returns an anchor error (`404 ANCHOR_NOT_FOUND` when the anchor isn't
+ * indexed yet, or `403 INTERACTION_NOT_ALLOWED` when the anchor's domain has
+ * no interaction with the browsed domain per the network's interaction matrix
+ * — e.g. seeker→seeker) — neither is a search-service outage, so instead of
+ * degrading to the native fallback, this retries `searchSignals` exactly once
+ * with the anchor removed, still resolving as `source: 'signals_search'`,
+ * `degraded: false`. The UI also avoids sending an anchor for non-interacting
+ * domain pairs in the first place (schema-driven, see `home-page`); this
+ * retry is the server-side safety net. Only a failure of THAT retry (or any
+ * other non-anchor error) falls through to the native fallback.
  */
 function mapSignalsSearchItemToDiscoverItem(item: SignalsSearchItem) {
   return {
@@ -144,62 +161,40 @@ const discover_items_handler = async (
       body.filters ?? []
     );
 
-    try {
-      const searchResult = await searchSignals({
-        network: body.item_network,
-        domain: body.item_domain,
-        itemType: body.item_type,
-        q: body.q,
-        filters: allowedFilters,
-        lat: body.item_latitude,
-        lng: body.item_longitude,
-        distanceMeters: body.distance_meters,
-        limit: body.limit,
-        offset: body.offset,
-      });
+    const searchInput: SearchSignalsInput = {
+      network: body.item_network,
+      domain: body.item_domain,
+      itemType: body.item_type,
+      q: body.q,
+      filters: allowedFilters,
+      lat: body.item_latitude,
+      lng: body.item_longitude,
+      distanceMeters: body.distance_meters,
+      limit: body.limit,
+      offset: body.offset,
+      anchorItemId: body.anchor_item_id,
+    };
 
-      // signals-search's order is already the ranked order — mapped straight
-      // through, no local-DB hydrate/re-read by id (see module doc comment).
-      const items = searchResult.items.map(mapSignalsSearchItemToDiscoverItem);
-
-      return reply.code(200).send({
-        meta: {
-          total: searchResult.meta.total,
-          limit: searchResult.meta.limit,
-          offset: searchResult.meta.offset,
-          source: 'signals_search' as const,
-          degraded: false,
-        },
-        items,
-      });
-    } catch (searchErr) {
-      // Native fallback (#394, revising Task 3): thrown for a request
-      // timeout, a non-2xx/invalid response, OR signals-search being
-      // unconfigured (the client throws for all three — see searchSignals'
-      // doc comment). A search-service outage must never surface as a 5xx,
-      // so this falls back to the native, distance/recency-ordered paged
-      // fetch `/network/item/fetch` uses — but now applying `q`/`filters`
-      // natively too (value-match on public item_state + declared,
-      // non-private facet fields — #394 dropped the separate `filterable`
-      // gate, see `resolveAllowedFacetFields`), the same mechanisms
-      // `/markers` already uses. `allowedFilters` was
-      // already server-resolved above for the signals-search call, so it's
-      // reused here rather than re-resolved. `meta.source: 'native_fallback'`
-      // is what lets the UI (Task 6) show that ranking (not search/filtering)
-      // is degraded.
-      //
-      // Multi-instance limitation (single-instance is the target for this
-      // path): `fetchItemsAcrossInstances` forwards the facet `item_state`
-      // filter to peer instances (each re-guards it), but `q` is NOT forwarded
-      // — the peer `/fetch_local` body schema has no `q`, so on a genuinely
-      // federated (>1 active instance) network with signals-search down, a
-      // text query is applied only to THIS instance's rows; peers contribute
-      // unfiltered-by-text (but live, public, facet-filtered) rows. Not a leak
-      // or crash, and strictly better than the pre-#394 fallback (which
-      // applied neither q nor filters). Forwarding `q` to peers is a follow-up
-      // (mirrors the count-skew note in inter_instance_fetch.ts).
+    // Native fallback (#394, revising Task 3): thrown for a request timeout, a
+    // non-2xx/invalid response, OR signals-search being unconfigured (the
+    // client throws for all three). A search-service outage must never surface
+    // as a 5xx, so this falls back to the native, distance/recency-ordered
+    // paged fetch `/network/item/fetch` uses — but now applying `q`/`filters`
+    // natively too (value-match on public item_state + declared, non-private
+    // facet fields; #394 dropped the `filterable` gate — see
+    // `resolveTextSearchFields`/`resolveAllowedFacetFilters` in `facet_guard.ts`,
+    // applied by `buildWhereClause`), the same mechanisms `/markers` uses. So
+    // only relevance RANKING is unavailable; `meta.source: 'native_fallback'`/
+    // `degraded: true` tell the UI to show the "basic matches" note.
+    //
+    // Multi-instance limitation (single-instance is the target): the facet
+    // `item_state` filter forwards to peers (each re-guards it), but `q` does
+    // NOT (the peer `/fetch_local` body has no `q`), so on a federated network
+    // a text query filters only this instance's rows; peers contribute live,
+    // public, facet-filtered (but not text-filtered) rows. Documented follow-up.
+    const fallBackToNative = async (logErr: unknown) => {
       request.log.warn(
-        { err: searchErr, body },
+        { err: logErr, body },
         'signals-search unavailable; falling back to native item fetch for discover (search/filters applied natively, no ranking)'
       );
 
@@ -247,6 +242,69 @@ const discover_items_handler = async (
         },
         items,
       });
+    };
+
+    try {
+      const searchResult = await searchSignals(searchInput);
+
+      // signals-search's order is already the ranked order — mapped straight
+      // through, no local-DB hydrate/re-read by id (see module doc comment).
+      const items = searchResult.items.map(mapSignalsSearchItemToDiscoverItem);
+
+      return reply.code(200).send({
+        meta: {
+          total: searchResult.meta.total,
+          limit: searchResult.meta.limit,
+          offset: searchResult.meta.offset,
+          source: 'signals_search' as const,
+          degraded: false,
+        },
+        items,
+      });
+    } catch (searchErr) {
+      // Anchor relevance (#394): an anchor signals-search can't use is a
+      // client-input condition, not a search-service outage — retry ONCE
+      // without the anchor rather than degrading to the native fallback
+      // (which loses ranking). Two anchor cases: `404 ANCHOR_NOT_FOUND` (the
+      // anchor isn't indexed yet) and `403 INTERACTION_NOT_ALLOWED` (the
+      // anchor's domain has no interaction with the browsed domain per the
+      // network's interaction matrix — e.g. a seeker anchor browsing seekers;
+      // the UI already avoids sending the anchor for such pairs, this is the
+      // server-side safety net). Any other error (no anchor sent, or a real
+      // search failure) falls straight through to the native fallback below.
+      const isRecoverableAnchorError =
+        body.anchor_item_id !== undefined &&
+        searchErr instanceof SignalsSearchError &&
+        (searchErr.status === 404 ||
+          searchErr.status === 403 ||
+          searchErr.code === 'ANCHOR_NOT_FOUND' ||
+          searchErr.code === 'INTERACTION_NOT_ALLOWED');
+
+      if (isRecoverableAnchorError) {
+        try {
+          const retryResult = await searchSignals({
+            ...searchInput,
+            anchorItemId: undefined,
+          });
+
+          const items = retryResult.items.map(mapSignalsSearchItemToDiscoverItem);
+
+          return reply.code(200).send({
+            meta: {
+              total: retryResult.meta.total,
+              limit: retryResult.meta.limit,
+              offset: retryResult.meta.offset,
+              source: 'signals_search' as const,
+              degraded: false,
+            },
+            items,
+          });
+        } catch (retryErr) {
+          return await fallBackToNative(retryErr);
+        }
+      }
+
+      return await fallBackToNative(searchErr);
     }
   } catch (err) {
     request.log.error(

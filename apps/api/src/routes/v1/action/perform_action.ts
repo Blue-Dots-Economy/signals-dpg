@@ -137,6 +137,7 @@ async function runPerformActions(
         actionType: body.action_type,
         sourceItemId: body.source_item.item_id,
         targetItemId: body.target_item.item_id,
+        channel: request.acting_org ? 'external' : 'self',
         otp: body.guardian_otp,
       });
       const guardianGateFail = guardianGateFailure(guardianGate);
