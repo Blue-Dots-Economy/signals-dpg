@@ -155,6 +155,35 @@ export class KeycloakAdminClient {
     return (await res.json()) as Array<{ id: string; username?: string }>;
   }
 
+  /**
+   * The realm roles actually assigned to a user.
+   *
+   * Exists so callers can *verify* rather than assume: `partialImport` carries
+   * `realmRoles` in the user representation, but whether Keycloak honours them
+   * is a property of the import, not something the response body confirms. The
+   * admin-bootstrap script (`scripts/create_admin_user.ts`) checks this after
+   * writing, because a silently-unassigned `signals_admin` would make a real
+   * admin invisible to any realm-role → `user.role` sync.
+   */
+  async realmRolesFor(id: string): Promise<string[]> {
+    const res = await this.request(
+      `/users/${encodeURIComponent(id)}/role-mappings/realm`,
+      { method: 'GET' }
+    );
+    if (res.status === 404) return [];
+    if (!res.ok) {
+      throw new KeycloakAdminError(
+        `Failed to read realm roles for Keycloak user ${id}`,
+        res.status,
+        await safeText(res)
+      );
+    }
+    const roles = (await res.json()) as Array<{ name?: string }>;
+    return roles
+      .map((r) => r.name)
+      .filter((n): n is string => typeof n === 'string' && n !== '');
+  }
+
   /** Search by the `phoneNumber` user attribute. */
   async findByPhone(phone: string): Promise<Array<{ id: string; username?: string }>> {
     const query = new URLSearchParams({ q: `phoneNumber:${phone}`, max: '5' });
