@@ -174,7 +174,7 @@
               "enum": [
                 "School",
                 "College",
-                "ITI / Other Vocational Trainings",
+                "ITI",
                 "Polytechnic / Diploma",
                 "Certification",
                 "Learned Informally",
@@ -183,7 +183,7 @@
               "enumNames": [
                 "School",
                 "College",
-                "ITI / Other Vocational Trainings",
+                "ITI",
                 "Polytechnic / Diploma",
                 "Certification",
                 "Learned Informally",
@@ -610,7 +610,7 @@
               ],
               "x-show-if": {
                 "educationCategory": [
-                  "ITI / Other Vocational Trainings"
+                  "ITI"
                 ]
               }
             },
@@ -693,7 +693,7 @@
               "title": "College / Institute Name",
               "description": "Please specify your college or institute name",
               "placeholder": "Please specify your college or institute name",
-              "x-reference-source": { "source": "colleges", "subtitle": ["district"] }
+              "x-reference-source": { "source": "colleges", "subtitle": ["district", "state"] }
             },
             "nameOfLastRoleHeld": {
               "type": "string",
