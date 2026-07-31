@@ -32,6 +32,17 @@ let betterauthEnabled = true;
 vi.stubEnv('MATCH_SCORE_PROVIDER', 'signals_search');
 // The API-reference plugin is irrelevant here and heavy to register.
 vi.stubEnv('API_REFERENCE_ENABLED', 'false');
+/**
+ * **Required, not an optimisation.** In `local` network-config mode `buildApp`
+ * rebuilds the schema cache, and `cacheReferencedItemSchemas` queries the
+ * `items` table — so building the app reaches for Postgres. This is a unit test
+ * with no database, and CI has none either: without this the four tests below
+ * fail with `ECONNREFUSED 127.0.0.1:5432`, and they pass locally only when a dev
+ * Postgres happens to be running. Same escape hatch `scripts/dump_openapi.ts`
+ * uses, and safe here because route registration is fully static and never
+ * reads the schema cache.
+ */
+vi.stubEnv('SCHEMA_CACHE_WARMUP_ENABLED', 'false');
 
 vi.mock('@/config', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/config')>();
