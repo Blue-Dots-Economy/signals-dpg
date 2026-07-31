@@ -141,8 +141,14 @@ export function useUpdateActionStatus() {
 export function useUpdateActionStatusBulk() {
   const queryClient = useQueryClient();
 
-  return useMutation<BulkEnvelope<UpdateActionStatusResponse>, Error, UpdateActionStatusPayload[]>({
-    mutationFn: (payloads) => updateActionStatusBulk(payloads),
+  return useMutation<
+    BulkEnvelope<UpdateActionStatusResponse>,
+    Error,
+    // `guardianOtp` (when a minor resubmits the batch after GUARDIAN_OTP_REQUIRED)
+    // rides on every payload so one code clears the whole accept batch (#393).
+    { payloads: UpdateActionStatusPayload[]; guardianOtp?: string }
+  >({
+    mutationFn: ({ payloads, guardianOtp }) => updateActionStatusBulk(payloads, guardianOtp),
     onSettled: () => {
       queryClient.invalidateQueries({ queryKey: actionKeys.all });
     },

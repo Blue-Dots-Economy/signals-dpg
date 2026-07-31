@@ -9,11 +9,15 @@
  *   pnpm --filter api test:integration
  *
  * Verifies the `apps/api/drizzle/0007_facet_item_state_indexes.sql` custom
- * migration (expression btree indexes on declared `filterable` facet paths,
- * e.g. `(item_state->>'gender')`) makes a partition-pruned facet filter query
- * use an index scan rather than a sequential scan, at a scale (several
- * thousand rows in one leaf partition) where the seq-scan cost would
- * otherwise dominate.
+ * migration (expression btree indexes on specific facet paths, e.g.
+ * `(item_state->>'gender')`) makes a partition-pruned facet filter query use
+ * an index scan rather than a sequential scan, at a scale (several thousand
+ * rows in one leaf partition) where the seq-scan cost would otherwise
+ * dominate. These indexes were originally added for fields marked
+ * `filterable: true` in network.json; #394 removed that gate (every
+ * declared, non-private field is a facet filter again), but the index still
+ * exists and still accelerates these same 3 seeder fields' queries — this
+ * test is unaffected by that change.
  *
  * Deliberately NOT a GIN-on-the-whole-column test: a jsonb GIN index (either
  * opclass) only accelerates the `@>`/`?`/`?|`/`?&` operators, never the

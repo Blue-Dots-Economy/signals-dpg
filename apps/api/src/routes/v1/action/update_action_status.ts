@@ -27,7 +27,13 @@ import {
 } from '@/utils/action_event_runtime';
 import { runBulk, BulkItemFailure } from '@/utils/bulk_runner';
 import { dispatchActionNotifications } from '@/notifications/notify_actions';
-import { guardianActionGate, guardianGateFailure, type GateResult } from '@/services/guardian_action_gate';
+import {
+  guardianActionGate,
+  guardianBulkActionGate,
+  guardianGateFailure,
+  type BulkGateItem,
+  type GateResult,
+} from '@/services/guardian_action_gate';
 import { guardianActionConsentRow, actionConsentRow } from '@/services/guardian_consent_rows';
 
 const BulkUpdateActionStatusBodySchema = z.array(z.unknown());
@@ -59,6 +65,76 @@ export const update_action_status: FastifyPluginAsyncZod = async function (fasti
 };
 
 /**
+ * Pre-pass for the bulk update-status route (#393, accept side): resolve each
+ * row far enough to know whether accepting it reveals the caller's PII (the
+ * same `requiresReceiverConsent` condition the main loop applies), and gate the
+ * gated subset with ONE guardian OTP + ONE email instead of one per row —
+ * mirroring perform_action's initiator-side batch pre-pass. Only rows where the
+ * caller is the accepting party (target item owner) and the transition reveals
+ * PII are batched; everything else falls back to the per-item gate below (a
+ * cheap `not_required`). The single OTP is read from the first row carrying
+ * `guardian_otp` (the client puts one code on the resubmitted batch). The gate
+ * scope mirrors the single call: the accepting minor's own item is the *source*
+ * of the scope, the counterparty's item the *target*.
+ */
+async function buildBulkGuardianAcceptGate(
+  items: unknown[],
+  callerId: string,
+): Promise<Map<number, GateResult>> {
+  const gateItems: BulkGateItem[] = [];
+  let otp: string | undefined;
+  for (let index = 0; index < items.length; index++) {
+    const parsed = UpdateActionStatusBodySchema.safeParse(items[index]);
+    if (!parsed.success) continue;
+    const body = parsed.data;
+    if (!otp && body.guardian_otp) otp = body.guardian_otp;
+
+    const [existingAction] = await db
+      .select()
+      .from(item_actions)
+      .where(eq(item_actions.action_id, body.action_id))
+      .limit(1);
+    if (!existingAction) continue;
+    // Only the accepting party (target item owner) is gated here.
+    if (existingAction.target_item_owner !== callerId) continue;
+
+    let interaction: ReturnType<typeof getActionInteraction>;
+    try {
+      const networkConfig = await getNetworkConfigById(existingAction.target_item_network);
+      interaction = getActionInteraction(networkConfig, {
+        actionType: existingAction.action_type,
+        fromNetwork: existingAction.source_item_network,
+        fromDomain: existingAction.source_item_domain,
+        fromItemType: existingAction.source_item_type,
+        toNetwork: existingAction.target_item_network,
+        toDomain: existingAction.target_item_domain,
+        toItemType: existingAction.target_item_type,
+      });
+    } catch {
+      continue; // the per-item handler surfaces the real INVALID_ACTION_EVENT
+    }
+
+    const cancelStatuses = interaction.metric_categories?.cancel ?? [];
+    const isCancellation = cancelStatuses.includes(body.action_status);
+    const requiresReceiverConsent =
+      !isCancellation && interaction.reveals_pii_on_status.includes(body.action_status);
+    if (!requiresReceiverConsent) continue;
+
+    gateItems.push({
+      index,
+      wardUserId: callerId,
+      network: existingAction.target_item_network,
+      sourceDomain: existingAction.target_item_domain,
+      actionType: existingAction.action_type,
+      sourceItemId: existingAction.target_item_id,
+      targetItemId: existingAction.source_item_id,
+    });
+  }
+  if (gateItems.length === 0) return new Map();
+  return guardianBulkActionGate({ items: gateItems, stage: 'accept', otp });
+}
+
+/**
  * Self-acted only. For receiver responses (accept/reject/…) the caller
  * (session cookie or apikey-as-self) must be the target item's owner. The one
  * exception is a cancellation (a status bucketed under metric_categories.cancel):
@@ -73,6 +149,24 @@ export const update_action_status_handler = async (
   reply: FastifyReply,
 ) => {
   const callerId = request.user.id;
+
+  // Only a genuine batch (>1 row) within the bulk limit uses the one-OTP-per-
+  // batch accept gate; a single update keeps the per-item gate untouched, and an
+  // over-limit batch is left for runBulk to reject before any gating work.
+  // Fail-safe: if the pre-pass errors, fall back to the per-item gate (still
+  // fail-closed) rather than failing the whole request.
+  let batchGate: Map<number, GateResult> | undefined;
+  if (request.body.length > 1 && request.body.length <= apiConfig.bulk_max_items) {
+    try {
+      batchGate = await buildBulkGuardianAcceptGate(request.body, callerId);
+    } catch (err) {
+      request.log.error(
+        { err },
+        'bulk guardian accept pre-pass failed; falling back to per-action gate',
+      );
+      batchGate = undefined;
+    }
+  }
 
   const outcome = await runBulk(
     request.body,
@@ -218,20 +312,25 @@ export const update_action_status_handler = async (
       // and the rest of this handler runs exactly as it does today.
       let guardianGate: GateResult = { status: 'not_required' };
       if (requiresReceiverConsent) {
-        guardianGate = await guardianActionGate({
-          wardUserId: callerId,
-          network: existingAction.target_item_network,
-          sourceDomain: existingAction.target_item_domain,
-          actionType: existingAction.action_type,
-          sourceItemId: existingAction.target_item_id,
-          targetItemId: existingAction.source_item_id,
-          stage: 'accept',
-          // Self-acted only (on-behalf was removed) — the external block must
-          // never fire here. Passing 'self' locks that invariant: if on-behalf
-          // is ever re-added, minors are blocked automatically (#395).
-          channel: 'self',
-          otp: body.guardian_otp,
-        });
+        // In a bulk submit (#393) the accept pre-pass already produced this
+        // row's result (one OTP for the whole batch); fall back to the
+        // per-action gate for a single update or an unbatched row.
+        guardianGate =
+          batchGate?.get(index) ??
+          (await guardianActionGate({
+            wardUserId: callerId,
+            network: existingAction.target_item_network,
+            sourceDomain: existingAction.target_item_domain,
+            actionType: existingAction.action_type,
+            sourceItemId: existingAction.target_item_id,
+            targetItemId: existingAction.source_item_id,
+            stage: 'accept',
+            // Self-acted only (on-behalf was removed) — the external block must
+            // never fire here. Passing 'self' locks that invariant: if on-behalf
+            // is ever re-added, minors are blocked automatically (#395).
+            channel: 'self',
+            otp: body.guardian_otp,
+          }));
 
         // Per-item BulkItemFailure (mirrors perform_action.ts, commit
         // bc87fd0) — NOT a mid-loop reply.send. runBulk is sequential
