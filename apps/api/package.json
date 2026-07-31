@@ -23,6 +23,7 @@
     "db:seed:purple_dot": "tsx scripts/seed_purple_dot.ts",
     "db:seed:services": "tsx scripts/seed_service_users.ts",
     "db:backfill:consent": "tsx scripts/backfill_demote_consentless.ts",
+    "spec:dump": "tsx scripts/dump_openapi.ts",
     "test": "vitest run --passWithNoTests",
     "test:watch": "vitest",
     "test:integration": "vitest run --config vitest.integration.config.ts"
@@ -34,8 +35,8 @@
   "devDependencies": {
     "@types/pg": "^8.15.5",
     "drizzle-kit": "^0.31.8",
-    "tsx": "^4.22.1",
-    "vitest": "^4.1.7"
+    "tsx": "^4.23.1",
+    "vitest": "^4.1.10"
   },
   "dependencies": {
     "@fastify/cors": "^11.2.0",

@@ -3,21 +3,18 @@ import { matchScoreConfig } from '@/config';
 
 export const getMatchScoreClient = () => {
   switch (matchScoreConfig.provider) {
-    case 'dpg_scoring': {
-      const dpgScoring = matchScoreConfig.dpg_scoring;
+    case 'signals_search': {
+      const signalsSearch = matchScoreConfig.signals_search;
 
-      if (!dpgScoring.endpoint || !dpgScoring.key_id || !dpgScoring.secret) {
+      if (!signalsSearch.endpoint || !signalsSearch.api_key) {
         return undefined;
       }
 
       return createMatchScoreClient({
-        provider: 'dpg_scoring',
-        baseUrl: dpgScoring.endpoint,
-        keyId: dpgScoring.key_id,
-        secret: dpgScoring.secret,
-        path: dpgScoring.path,
-        version: dpgScoring.version,
-        promptVersion: dpgScoring.prompt_version,
+        provider: 'signals_search',
+        baseUrl: signalsSearch.endpoint,
+        apiKey: signalsSearch.api_key,
+        path: signalsSearch.path,
       });
     }
 

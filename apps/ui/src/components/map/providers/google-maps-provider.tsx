@@ -13,13 +13,15 @@ import {
 } from '@vis.gl/react-google-maps';
 import type { AdvancedMarkerRef } from '@vis.gl/react-google-maps';
 import { MarkerClusterer, type Renderer, type Cluster } from '@googlemaps/markerclusterer';
-import type { MapMarker, MapProviderProps } from '@/engine/types';
+import type { MapMarker, MapProviderProps, MapViewport } from '@/engine/types';
 import { registerMapProvider } from '@/engine/map/map-registry';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { getIconForDomain } from '../domain-icons';
 import { tallyDomains } from '../cluster-breakdown';
 import { MarkerPopupCard } from '../marker-popup-card';
+import { SelfMarkerContent, SELF_MARKER_GOOGLE_OFFSET_Y } from '../self-marker';
 import { getRuntimeEnv } from '@/lib/runtime-env';
+import { useViewportReportEmitter } from './use-viewport-report';
 
 /**
  * Module-level WeakMap: AdvancedMarkerElement → domain string.
@@ -28,6 +30,13 @@ import { getRuntimeEnv } from '@/lib/runtime-env';
  * WeakMap ensures entries are GC-eligible alongside the element object.
  */
 const markerDomainMap = new WeakMap<object, string>();
+
+// Cluster-click zoom (see onClusterClick): a fixed, small zoom-in step keeps
+// the animation smooth and identical for every cluster (a large one-shot delta
+// snaps without a tween); capped so a tight cluster can't over-zoom past the
+// map's own max.
+const CLUSTER_CLICK_ZOOM_STEP = 3;
+const CLUSTER_CLICK_MAX_ZOOM = 18;
 
 /**
  * Resolves a CSS custom property (e.g. --primary) to a concrete rgb/hex string.
@@ -74,6 +83,10 @@ function buildClusterContent(
 
   const size = total < 10 ? 38 : total < 100 ? 44 : 50;
   const circle = document.createElement('div');
+  // Stable class hook for the mobile-only legibility rule in index.css — no
+  // style is defined by this class name itself, so desktop rendering (which
+  // has no matching media query) is byte-identical.
+  circle.className = 'dpg-cluster-count';
   circle.style.cssText =
     `display:flex;align-items:center;justify-content:center;width:${size}px;height:${size}px;` +
     `background:${primary};color:#ffffff;border:2px solid #ffffff;border-radius:9999px;` +
@@ -376,6 +389,62 @@ function MapViewController({ center, zoom, initialViewSet, focusNonce }: MapView
   return null;
 }
 
+// ─── Viewport reporter component ─────────────────────────────────────────────
+// Lives inside <Map> so it can call useMap(). Reports the map's viewport
+// (center + half-diagonal radius, plus the raw `map.getBounds()` corners —
+// #203 map-serverside-search Task 4) to the caller on debounced `idle`
+// (Google's settle event, fired after pan/zoom/resize finish). Only ever mounted when
+// `onViewportChange` is provided (see `GoogleMapProvider` below), so the
+// tourist app — which never passes it — attaches no `idle` listener at all.
+//
+// Also emits the CURRENT viewport once on mount (bypassing the debounce), for
+// parity with the Leaflet provider's mount emit. Google's own `idle` normally
+// fires shortly after load regardless of a location fix, so this is a
+// fast-path here rather than a fix for a stuck-forever case — but it is
+// skipped if center/bounds aren't ready yet, since the first `idle` will
+// cover it in that case.
+//
+// Every emit also carries `map.getZoom()` (#203 §7, optional on Google's own
+// types) so the home-page can gate anonymous count-first browsing on the
+// zoom level without a separate event.
+
+function ViewportReporter({ onViewportChange }: { onViewportChange: (viewport: MapViewport) => void }) {
+  const map = useMap();
+  const { emit, emitNow } = useViewportReportEmitter(onViewportChange);
+
+  React.useEffect(() => {
+    if (!map) return;
+    const listener = map.addListener('idle', () => {
+      const center = map.getCenter();
+      const bounds = map.getBounds();
+      if (!center || !bounds) return;
+      const ne = bounds.getNorthEast();
+      const sw = bounds.getSouthWest();
+      emit(
+        { lat: center.lat(), lng: center.lng() },
+        { ne: { lat: ne.lat(), lng: ne.lng() }, sw: { lat: sw.lat(), lng: sw.lng() } },
+        map.getZoom(),
+      );
+    });
+
+    const center = map.getCenter();
+    const bounds = map.getBounds();
+    if (center && bounds) {
+      const ne = bounds.getNorthEast();
+      const sw = bounds.getSouthWest();
+      emitNow(
+        { lat: center.lat(), lng: center.lng() },
+        { ne: { lat: ne.lat(), lng: ne.lng() }, sw: { lat: sw.lat(), lng: sw.lng() } },
+        map.getZoom(),
+      );
+    }
+
+    return () => listener.remove();
+  }, [map, emit, emitNow]);
+
+  return null;
+}
+
 // ─── Clusterer manager component ─────────────────────────────────────────────
 // Lives inside <Map> so it can call useMap() from @vis.gl/react-google-maps.
 // Maintains a MarkerClusterer instance and keeps it in sync with the set of
@@ -410,14 +479,39 @@ function ClustererManager({
   // Stable ref to the MarkerClusterer instance
   const clustererRef = React.useRef<MarkerClusterer | null>(null);
 
+  // Pending handle for the rAF-batched clusterer render (see scheduleRender).
+  const renderRafRef = React.useRef<number | null>(null);
+
   // Create the clusterer once the map is ready.
   React.useEffect(() => {
     if (!map) return;
 
-    const clusterer = new MarkerClusterer({ map, renderer: clusterRenderer });
+    const clusterer = new MarkerClusterer({
+      map,
+      renderer: clusterRenderer,
+      // Consistent smooth zoom on EVERY cluster click. The default handler does
+      // `map.fitBounds(cluster.bounds)`, which animates nicely for a spread-out
+      // cluster but SNAPS instantly for a tight one (near-zero bounds → a huge
+      // one-shot zoom delta Google renders without a tween). Instead, pan to the
+      // cluster centre and zoom in by a fixed, capped STEP — a small delta always
+      // animates, so a dense "240" and a tight "3" drill in identically. Repeated
+      // clicks keep drilling until the pins separate.
+      onClusterClick: (_event, cluster, clusterMap) => {
+        const current = clusterMap.getZoom() ?? 12;
+        const maxZoom = clusterMap.get('maxZoom') ?? CLUSTER_CLICK_MAX_ZOOM;
+        clusterMap.panTo(cluster.position);
+        clusterMap.setZoom(Math.min(current + CLUSTER_CLICK_ZOOM_STEP, maxZoom));
+      },
+    });
     clustererRef.current = clusterer;
 
     return () => {
+      // Cancel any pending batched render so it can't fire against a
+      // torn-down clusterer.
+      if (renderRafRef.current != null) {
+        cancelAnimationFrame(renderRafRef.current);
+        renderRafRef.current = null;
+      }
       // clearMarkers() removes all pins from the clusterer, then setMap(null)
       // detaches the OverlayView from the map — the correct teardown sequence.
       // onRemove() is an internal OverlayView lifecycle callback and must NOT
@@ -431,6 +525,22 @@ function ClustererManager({
     };
   }, [map]);
 
+  // Coalesce re-clustering into ONE render per frame. Each ClusteredMarker
+  // registers its element separately as it mounts, and MarkerClusterer's
+  // addMarker/removeMarker re-cluster + redraw the ENTIRE set by default on
+  // every call. With N markers registering one-by-one that is O(n²) (~125k
+  // clustering passes for 500 pins) — the multi-second freeze where the map is
+  // blank even though the /markers response already landed. So every add/remove
+  // is done with noDraw=true and a single requestAnimationFrame-batched
+  // render() draws the final set once the burst settles → O(n).
+  const scheduleRender = React.useCallback(() => {
+    if (renderRafRef.current != null) return; // already scheduled this frame
+    renderRafRef.current = requestAnimationFrame(() => {
+      renderRafRef.current = null;
+      clustererRef.current?.render();
+    });
+  }, []);
+
   // Callback for each ClusteredMarker to register / deregister its element.
   const handleMarkerReady = React.useCallback(
     (id: string, el: NonNullable<AdvancedMarkerRef> | null) => {
@@ -440,10 +550,11 @@ function ClustererManager({
       const prev = markerElsRef.current.get(id);
 
       if (el === null) {
-        // Marker unmounted — remove from clusterer.
+        // Marker unmounted — remove from clusterer (noDraw; batched render below).
         if (prev) {
-          clusterer.removeMarker(prev);
+          clusterer.removeMarker(prev, true);
           markerElsRef.current.delete(id);
+          scheduleRender();
         }
         return;
       }
@@ -452,13 +563,14 @@ function ClustererManager({
 
       // Remove stale entry if element reference changed.
       if (prev) {
-        clusterer.removeMarker(prev);
+        clusterer.removeMarker(prev, true);
       }
 
       markerElsRef.current.set(id, el);
-      clusterer.addMarker(el);
+      clusterer.addMarker(el, true);
+      scheduleRender();
     },
-    [],
+    [scheduleRender],
   );
 
   return (
@@ -490,14 +602,32 @@ export function GoogleMapProvider({
   onMarkerClick,
   initialViewSet = false,
   focusNonce,
+  closePopupNonce,
+  selfLocation,
   renderPopup,
   resolveIcon,
   resolveMarkerImage,
+  onViewportChange,
 }: MapProviderProps) {
   const { t } = useTranslation();
   const isMobile = useIsMobile();
   const [activeMarker, setActiveMarker] = React.useState<MapMarker | null>(null);
   const apiKey = getRuntimeEnv('VITE_GOOGLE_MAPS_API_KEY');
+
+  // Closes the open marker popup (both the mobile portal overlay and the
+  // desktop InfoWindow key off `activeMarker`) when the caller bumps
+  // `closePopupNonce` — e.g. right before Connect/Apply opens the consent
+  // modal, so it isn't hidden behind the popup's high stacking context.
+  // Guarded with a ref (mirrors `focusNonce`'s handling in
+  // `MapViewController`/`SetView`) so mount / an unchanged nonce never fires a
+  // spurious close.
+  const prevClosePopupNonce = React.useRef<number | undefined>(closePopupNonce);
+  React.useEffect(() => {
+    if (prevClosePopupNonce.current !== closePopupNonce) {
+      setActiveMarker(null);
+    }
+    prevClosePopupNonce.current = closePopupNonce;
+  }, [closePopupNonce]);
 
   if (!apiKey) {
     return (
@@ -544,6 +674,7 @@ export function GoogleMapProvider({
          * panning or when "All items" / fit-all mode is active.
          */}
         <MapViewController center={center} zoom={zoom} initialViewSet={initialViewSet} focusNonce={focusNonce} />
+        {onViewportChange && <ViewportReporter onViewportChange={onViewportChange} />}
         <ClustererManager
           markers={markers}
           activeMarkerId={activeMarker?.id ?? null}
@@ -554,6 +685,33 @@ export function GoogleMapProvider({
           resolveIcon={resolveIcon}
           resolveMarkerImage={resolveMarkerImage}
         />
+        {/*
+         * "You are here" self-marker: the user's own resolved location (profile
+         * or browser geolocation). Rendered OUTSIDE ClustererManager so it is
+         * never registered with the MarkerClusterer (hence never clustered) and
+         * `clickable={false}` so it opens no InfoWindow and never swallows a
+         * click meant for an item pin. The content is shifted down by
+         * SELF_MARKER_GOOGLE_OFFSET_Y so AdvancedMarker's bottom-centre
+         * anchoring lands the dot's CENTRE on the point.
+         */}
+        {selfLocation && (
+          <AdvancedMarker
+            position={{ lat: selfLocation.lat, lng: selfLocation.lng }}
+            clickable={false}
+            // `clickable={false}` disables the library's own click handling,
+            // but its wrapper div's pointer-events behavior when non-clickable
+            // is an unverified library default. Setting this explicitly
+            // guarantees the self-marker never intercepts a click meant for a
+            // co-located item pin underneath it (#394).
+            style={{ pointerEvents: 'none' }}
+            zIndex={1000}
+            title={t('map.you_are_here_short')}
+          >
+            <div style={{ transform: `translateY(${SELF_MARKER_GOOGLE_OFFSET_Y}px)`, pointerEvents: 'none' }}>
+              <SelfMarkerContent label={t('map.you_are_here_short')} />
+            </div>
+          </AdvancedMarker>
+        )}
       </Map>
     </APIProvider>
   );

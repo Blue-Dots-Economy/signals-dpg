@@ -74,7 +74,7 @@ export function MyActionsPage() {
   const selectedActions = sourceActions.filter((a) => selection.selected.has(a.action_id));
 
   return (
-    <div className="min-h-screen bg-background">
+    <div className="min-h-svh bg-background">
       {/* Header — brand chip + soft aura + page lockup */}
       <header className="relative overflow-hidden border-b bg-card">
         {/* Soft brand aura */}
@@ -85,7 +85,7 @@ export function MyActionsPage() {
               'radial-gradient(circle, color-mix(in oklch, var(--primary) 22%, transparent), transparent 65%)',
           }}
         />
-        <div className="relative mx-auto max-w-6xl px-6 py-6">
+        <div className="relative mx-auto max-w-6xl px-4 py-6 sm:px-6">
           <div className="flex items-center gap-4">
             <Button
               variant="outline"
@@ -109,7 +109,7 @@ export function MyActionsPage() {
       </header>
 
       {/* Main Content */}
-      <main className="mx-auto max-w-6xl px-6 py-8">
+      <main className="mx-auto max-w-6xl px-4 py-8 sm:px-6">
         <ActionList
           initiatedActions={initiatedActions}
           receivedActions={receivedActions}

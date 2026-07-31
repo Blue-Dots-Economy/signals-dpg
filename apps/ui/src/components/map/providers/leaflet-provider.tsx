@@ -9,12 +9,15 @@ import {
 import MarkerClusterGroup from 'react-leaflet-cluster';
 import L from 'leaflet';
 import { renderToStaticMarkup } from 'react-dom/server';
-import type { MapMarker, MapProviderProps } from '@/engine/types';
+import { useTranslation } from 'react-i18next';
+import type { MapMarker, MapProviderProps, MapViewport } from '@/engine/types';
 import { registerMapProvider } from '@/engine/map/map-registry';
 import { getIconForDomain } from '../domain-icons';
 import { tallyDomains } from '../cluster-breakdown';
 import { FitBounds } from '../fit-bounds';
 import { MarkerPopupCard } from '../marker-popup-card';
+import { createSelfMarkerDivIcon } from '../self-marker';
+import { useViewportReportEmitter } from './use-viewport-report';
 
 import 'leaflet/dist/leaflet.css';
 import 'react-leaflet-cluster/dist/assets/MarkerCluster.css';
@@ -65,6 +68,90 @@ function SetView({
     prevZoom.current = zoom;
     prevNonce.current = focusNonce;
   }, [center, zoom, focusNonce, map]);
+
+  return null;
+}
+
+/**
+ * Closes any open Leaflet popup when the caller bumps `closePopupNonce` (e.g.
+ * right before Connect/Apply opens the consent modal, so it isn't hidden
+ * behind the popup's high stacking context). Leaflet's `Map` tracks whichever
+ * popup is currently open internally (react-leaflet doesn't lift that into
+ * React state here), so `map.closePopup()` — which closes the open popup
+ * regardless of which marker it belongs to — is the correct imperative
+ * escape hatch. Guarded with a ref (mirrors `SetView`'s `focusNonce`
+ * handling) so mount / an unchanged nonce never fires a spurious close.
+ * Renders nothing — pure side-effect component, same shape as `SetView`.
+ */
+function ClosePopupOnNonce({ closePopupNonce }: { closePopupNonce?: number }) {
+  const map = useMap();
+  const prevNonce = React.useRef<number | undefined>(closePopupNonce);
+
+  React.useEffect(() => {
+    if (prevNonce.current !== closePopupNonce) {
+      map.closePopup();
+    }
+    prevNonce.current = closePopupNonce;
+  }, [closePopupNonce, map]);
+
+  return null;
+}
+
+/**
+ * Reports the map's viewport (center + half-diagonal radius, plus the raw
+ * `map.getBounds()` corners — #203 map-serverside-search Task 4) to the
+ * caller on debounced `moveend`. Only ever mounted when `onViewportChange` is provided
+ * (see `LeafletMapProvider` below), so the tourist app — which never passes
+ * it — attaches no `moveend` listener at all and is completely unaffected.
+ * Renders nothing — pure side-effect component, same shape as `SetView`.
+ *
+ * Also emits the CURRENT viewport once on mount (bypassing the debounce).
+ * Leaflet fires its own initial `moveend` during map construction — before
+ * this effect attaches the listener — so the only viewport-driven consumer
+ * (`useMapMarkers`, gated on a non-null viewport) would otherwise never see
+ * one until `SetView` runs, which only happens when a `focusPoint` /
+ * `userLocation` exists. A user with no location (denied/unavailable) would
+ * be stuck on the "no results" overlay forever. The mount emit is skipped if
+ * the map's bounds aren't valid yet (rare, only just-constructed); nothing is
+ * lost in that case because `moveend` will still fire normally later.
+ *
+ * Every emit also carries `map.getZoom()` (#203 §7) so the home-page can gate
+ * anonymous count-first browsing on the zoom level without a separate event.
+ */
+function ViewportReporter({ onViewportChange }: { onViewportChange: (viewport: MapViewport) => void }) {
+  const map = useMap();
+  const { emit, emitNow } = useViewportReportEmitter(onViewportChange);
+
+  React.useEffect(() => {
+    const handleMoveEnd = () => {
+      const center = map.getCenter();
+      const bounds = map.getBounds();
+      const ne = bounds.getNorthEast();
+      const sw = bounds.getSouthWest();
+      emit(
+        { lat: center.lat, lng: center.lng },
+        { ne: { lat: ne.lat, lng: ne.lng }, sw: { lat: sw.lat, lng: sw.lng } },
+        map.getZoom(),
+      );
+    };
+    map.on('moveend', handleMoveEnd);
+
+    const bounds = map.getBounds();
+    if (bounds.isValid()) {
+      const center = map.getCenter();
+      const ne = bounds.getNorthEast();
+      const sw = bounds.getSouthWest();
+      emitNow(
+        { lat: center.lat, lng: center.lng },
+        { ne: { lat: ne.lat, lng: ne.lng }, sw: { lat: sw.lat, lng: sw.lng } },
+        map.getZoom(),
+      );
+    }
+
+    return () => {
+      map.off('moveend', handleMoveEnd);
+    };
+  }, [map, emit, emitNow]);
 
   return null;
 }
@@ -220,7 +307,7 @@ function createClusterDivIcon(cluster: { getChildCount: () => number; getAllChil
       align-items: center;
       /* no width constraint — let badge row set the width */
     ">
-      <div style="
+      <div class="dpg-cluster-count" style="
         display: flex;
         align-items: center;
         justify-content: center;
@@ -266,9 +353,13 @@ export function LeafletMapProvider({
   onMarkerClick,
   initialViewSet = false,
   focusNonce,
+  closePopupNonce,
+  selfLocation,
   renderPopup,
   resolveIcon,
+  onViewportChange,
 }: MapProviderProps) {
+  const { t } = useTranslation();
   return (
     <MapContainer
       center={center}
@@ -280,8 +371,19 @@ export function LeafletMapProvider({
         attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
         url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
       />
-      <FitBounds markers={markers} skip={initialViewSet} />
+      {/*
+       * In viewport-markers mode (onViewportChange provided) the query itself
+       * drives what's shown for the current pan/zoom, so auto-fitting bounds
+       * on every `markers` change would fight it: fitBounds() fires moveend →
+       * onViewportChange → useMapMarkers refetches a tighter radius → new
+       * (fewer) markers → FitBounds fits tighter again — a jumpy, redundant
+       * fit↔fetch loop. Skip it whenever onViewportChange is set; the tourist
+       * app (no onViewportChange) keeps fitting bounds exactly as before.
+       */}
+      <FitBounds markers={markers} skip={initialViewSet || Boolean(onViewportChange)} />
       {initialViewSet && <SetView center={center} zoom={zoom} focusNonce={focusNonce} />}
+      {onViewportChange && <ViewportReporter onViewportChange={onViewportChange} />}
+      <ClosePopupOnNonce closePopupNonce={closePopupNonce} />
       {/*
        * MarkerClusterGroup wraps all markers so that:
        *  - at low zoom levels, nearby markers collapse into a cluster badge
@@ -331,6 +433,22 @@ export function LeafletMapProvider({
           );
         })}
       </MarkerClusterGroup>
+      {/*
+       * "You are here" self-marker: the user's own resolved location (profile
+       * or browser geolocation). Rendered OUTSIDE MarkerClusterGroup so it is
+       * never folded into an item cluster, and `interactive={false}` so it has
+       * no popup and never intercepts clicks on the pins beneath it. A high
+       * zIndexOffset keeps it above item pins.
+       */}
+      {selfLocation && (
+        <Marker
+          position={[selfLocation.lat, selfLocation.lng]}
+          icon={createSelfMarkerDivIcon(t('map.you_are_here_short'))}
+          interactive={false}
+          keyboard={false}
+          zIndexOffset={1000}
+        />
+      )}
     </MapContainer>
   );
 }

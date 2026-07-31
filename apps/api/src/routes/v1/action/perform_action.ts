@@ -26,7 +26,13 @@ import {
   lookup_user_for_acting,
 } from './_resolve_acting_actor.js';
 import { runBulk, BulkItemFailure } from '@/utils/bulk_runner';
-import { guardianActionGate, guardianGateFailure } from '@/services/guardian_action_gate';
+import {
+  guardianActionGate,
+  guardianBulkActionGate,
+  guardianGateFailure,
+  type BulkGateItem,
+  type GateResult,
+} from '@/services/guardian_action_gate';
 import { guardianActionConsentRow } from '@/services/guardian_consent_rows';
 import { resolveConsentVersion } from '@/services/consent_version';
 
@@ -70,12 +76,71 @@ export const perform_action: FastifyPluginAsyncZod = async function (fastify) {
   });
 };
 
+// Pre-pass for the bulk route (#393): resolve each item's ward + target enough
+// to gate the U18-gated subset with ONE guardian OTP + ONE email, returning a
+// GateResult per item index. Items that fail to parse / resolve are simply not
+// batched — the per-item handler still gates them individually and reports
+// their own errors. The batch OTP is read from the first item that carries
+// `guardian_otp` (the client puts the single code on the resubmitted batch).
+async function buildBulkGuardianGate(
+  items: unknown[],
+  request: FastifyRequest,
+): Promise<Map<number, GateResult>> {
+  const gateItems: BulkGateItem[] = [];
+  let otp: string | undefined;
+  for (let index = 0; index < items.length; index++) {
+    const parsed = PerformActionBodySchema.safeParse(items[index]);
+    if (!parsed.success) continue;
+    const body = parsed.data;
+    if (!otp && body.guardian_otp) otp = body.guardian_otp;
+    const actor = await resolve_acting_actor({
+      acting_org: request.acting_org,
+      request_user_id: request.user?.id,
+      acting_as_user_id: body.acting_as_user_id,
+      lookup_user: lookup_user_for_acting,
+    });
+    if (!actor.ok) continue;
+    gateItems.push({
+      index,
+      wardUserId: actor.effective_user_id,
+      network: body.source_item.item_network,
+      sourceDomain: body.source_item.item_domain,
+      actionType: body.action_type,
+      sourceItemId: body.source_item.item_id,
+      targetItemId: body.target_item.item_id,
+    });
+  }
+  if (gateItems.length === 0) return new Map();
+  return guardianBulkActionGate({ items: gateItems, otp });
+}
+
 async function runPerformActions(
   items: unknown[],
   request: FastifyRequest,
   reply: FastifyReply,
 ) {
   const sourceInstanceUrl = getCurrentApiBaseUrl();
+
+  // Only a genuine batch (>1 item) within the bulk limit uses the one-OTP-per-
+  // batch gate; single /perform keeps the per-action gate untouched, and an
+  // over-limit batch is left for runBulk to reject with BULK_LIMIT_EXCEEDED
+  // before any gating work. Fail-safe: if the pre-pass errors, fall back to the
+  // per-item gate (still fail-closed) rather than failing the whole request.
+  //
+  // Skipped entirely on an external / on-behalf channel (`request.acting_org`,
+  // #450): the batch gate has no external-channel awareness, so running it there
+  // would hand a minor a guardian-OTP path that #450 deliberately withholds off
+  // the app. Skipping lets those items fall through to the per-action gate,
+  // which returns `external_minor_blocked` (MINOR_ACTION_CHANNEL_BLOCKED).
+  let batchGate: Map<number, GateResult> | undefined;
+  if (items.length > 1 && items.length <= apiConfig.bulk_max_items && !request.acting_org) {
+    try {
+      batchGate = await buildBulkGuardianGate(items, request);
+    } catch (err) {
+      request.log.error({ err }, 'bulk guardian pre-pass failed; falling back to per-action gate');
+      batchGate = undefined;
+    }
+  }
 
   const outcome = await runBulk(
     items,
@@ -128,17 +193,23 @@ async function runPerformActions(
       // U18 guardian gate (Phase 5b): no-op for adults / ungated domains
       // (`not_required`) — the rest of this handler runs byte-for-byte
       // unchanged for them. For a gated minor, this issues/verifies a guardian
-      // OTP scoped to this exact action; the guardian consent row is written
-      // below only after the action write succeeds.
-      const guardianGate = await guardianActionGate({
-        wardUserId: actor.effective_user_id,
-        network: body.source_item.item_network,
-        sourceDomain: body.source_item.item_domain,
-        actionType: body.action_type,
-        sourceItemId: body.source_item.item_id,
-        targetItemId: body.target_item.item_id,
-        otp: body.guardian_otp,
-      });
+      // OTP scoped to this action; the guardian consent row is written below
+      // only after the action write succeeds. In a bulk submit (#393) the batch
+      // pre-pass already produced this item's result (one OTP for the whole
+      // batch); fall back to the per-action gate otherwise. `channel` (#450)
+      // blocks U18 actions initiated on an external (aggregator) channel.
+      const guardianGate =
+        batchGate?.get(index) ??
+        (await guardianActionGate({
+          wardUserId: actor.effective_user_id,
+          network: body.source_item.item_network,
+          sourceDomain: body.source_item.item_domain,
+          actionType: body.action_type,
+          sourceItemId: body.source_item.item_id,
+          targetItemId: body.target_item.item_id,
+          channel: request.acting_org ? 'external' : 'self',
+          otp: body.guardian_otp,
+        }));
       const guardianGateFail = guardianGateFailure(guardianGate);
       if (guardianGateFail) throw guardianGateFail;
 

@@ -45,7 +45,7 @@ vi.mock('@/config', () => ({
     schema_registry_url: '',
   },
   authConfig: { secret: 'test', middleware_enabled: false, url: '', create_test_otp: false },
-  matchScoreConfig: { provider: 'noop', dpg_scoring: {} },
+  matchScoreConfig: { provider: 'noop', signals_search: {} },
   getCurrentApiBaseUrl: () => 'http://source.local',
   instance: { INSTANCE_NAME: 'test', INSTANCE_ENV: 'development' },
   notification: {

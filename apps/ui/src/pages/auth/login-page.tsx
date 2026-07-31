@@ -188,8 +188,8 @@ export function LoginPage() {
         name: resolvedName,
         redirectTo,
         pendingConsent: pendingConsent ?? null,
-        // Set for a new signup (domain + age) and for an existing user who
-        // backfilled age pre-OTP (age only). otp-page persists it.
+        // Set for a new signup (domain + age) and for an existing minor who
+        // picked their year of birth pre-OTP (age only). otp-page persists it.
         signupExtras: resolvedSignupExtras,
       },
     });
@@ -286,26 +286,52 @@ export function LoginPage() {
     const extras: SignupExtras = { domain: gate.domain, age };
     setSignupDobGate(null);
 
-    // A brand-new minor signup captures the guardian pre-auth (materialized on
-    // account creation — safe, same session owns the new identifier). An
-    // EXISTING user must NOT designate a guardian before proving they own the
-    // number (login OTP), so their guardian step runs post-login on the home
-    // page; here we only persist the age and proceed to the login OTP.
-    if (isMinorFromAge(age) && !gate.exists) {
+    // A minor never sees the adult terms/privacy consent checkbox — the guardian
+    // flow records their consent instead.
+    if (isMinorFromAge(age)) {
+      if (!gate.exists) {
+        // NEW minor: the guardian flow is the very next screen, so the toast
+        // matches what they see next.
+        toast.info(t('auth.minor_toast_title', "You're under 18"), {
+          description: t(
+            'auth.minor_toast_desc',
+            'A guardian needs to confirm your account before you can continue.',
+          ),
+        });
+        // Guardian pre-auth is safe (account materializes on creation, same
+        // session owns the new identifier).
+        setSignupGuardianGate({
+          identifier: gate.identifier,
+          domain: gate.domain,
+          age,
+          resolvedName: gate.resolvedName,
+          resolvedSignupExtras: extras,
+          exists: gate.exists,
+        });
+        return;
+      }
+      // EXISTING minor: the guardian APIs are session-scoped, so the guardian
+      // step must run AFTER the login OTP. Skip the adult consent and send the
+      // OTP; the post-login authed guardian flow (otp-page) records their u18
+      // consent. Age rides in signupExtras and is persisted post-verify. Set the
+      // two-step expectation here so the OTP page (not the guardian step) coming
+      // next doesn't read as a mismatch.
       toast.info(t('auth.minor_toast_title', "You're under 18"), {
         description: t(
-          'auth.minor_toast_desc',
-          'A parent or guardian needs to confirm your account before you can continue.',
+          'auth.minor_verify_then_guardian_desc',
+          'First verify your number, then a guardian will confirm your account.',
         ),
       });
-      setSignupGuardianGate({
-        identifier: gate.identifier,
-        domain: gate.domain,
-        age,
-        resolvedName: gate.resolvedName,
-        resolvedSignupExtras: extras,
-        exists: gate.exists,
-      });
+      setIsLoading(true);
+      try {
+        await proceedToOtp(gate.identifier, gate.exists, gate.resolvedName, extras);
+      } catch {
+        toast.error(t('auth.toast_send_code_error'), {
+          description: t('auth.toast_send_code_error_desc'),
+        });
+      } finally {
+        setIsLoading(false);
+      }
       return;
     }
 
@@ -398,21 +424,23 @@ export function LoginPage() {
         return; // DOB step renders next; no OTP yet.
       }
 
-      // EXISTING user missing a DOB on a gated domain: collect DOB (+ guardian,
-      // for minors) BEFORE the login OTP — same steps as signup, but the
-      // capture is materialized onto the existing user right after OTP verify.
+      // EXISTING user missing a DOB on a gated domain: collect the year of birth
+      // BEFORE the OTP (UI-only capture — no API call, no session yet). The
+      // branch happens here: an adult continues to consent + OTP; a minor is
+      // sent to the OTP first (ownership) and then, POST-login, the AUTHENTICATED
+      // guardian flow runs — the guardian APIs are session-scoped and must never
+      // be public for an existing account, so the guardian step can't precede
+      // the OTP. Age is persisted post-verify (otp-page) via signupExtras.
       if (exists) {
         try {
           const pre = await u18Precheck(themeId, identifier);
           if (pre.requiresDob) {
-            // DOB only (no domain needed) — the guardian step, if any, runs
-            // post-login on the home page once the login OTP proves ownership.
             setSignupDobGate({ identifier, domain: '', resolvedName: '', exists: true });
             setIsLoading(false);
-            return; // DOB step renders next; no OTP yet.
+            return; // year-of-birth step renders next; no OTP yet.
           }
         } catch {
-          // Fail-open: precheck failure must not block login — the home-page
+          // Fail-open: precheck failure must not block login — the post-login
           // gate still catches a minor who slips through.
         }
       }
@@ -484,6 +512,19 @@ export function LoginPage() {
             }
             age={signupGuardianGate.age}
             onComplete={handleGuardianComplete}
+            onBack={() => {
+              // Return to the birth-year step: rebuild its gate from the
+              // guardian gate, then clear the guardian gate.
+              const g = signupGuardianGate;
+              if (!g) return;
+              setSignupGuardianGate(null);
+              setSignupDobGate({
+                identifier: g.identifier,
+                domain: g.domain,
+                resolvedName: g.resolvedName,
+                exists: g.exists,
+              });
+            }}
           />
         ) : !showSignupForm ? null : (
         <>

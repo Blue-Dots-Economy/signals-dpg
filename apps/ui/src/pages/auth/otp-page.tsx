@@ -11,8 +11,9 @@ import { useAuth } from '@/contexts/auth-context';
 import { getServedScope } from '@/lib/served-binding';
 import { evaluateDomainGate, resolveHeldDomains } from '@/lib/domain-gate';
 import { toast } from 'sonner';
-import { acceptConsent, submitU18Dob } from '@/lib/consent-api';
+import { acceptConsent, submitU18Dob, getU18Status } from '@/lib/consent-api';
 import type { ConsentAcceptBody } from '@dpg/schemas';
+import { U18GuardianFlow } from '@/components/consent/u18/u18-guardian-flow';
 import { useNetworkTheme } from '@/theme/theme-provider';
 import { setStoredSignupDomain, type SignupExtras } from '@/lib/signup-domain';
 import { setUserDomains } from '@/lib/user-api';
@@ -23,8 +24,8 @@ interface AuthState extends AuthIdentifier {
   redirectTo?: string;
   pendingConsent?: ConsentAcceptBody | null;
   /** Carries the age (+ chosen domain for new signups) captured in the auth
-   * flow before this OTP: set for a brand-new signup, and for an existing user
-   * who backfilled their age pre-OTP (see login-page.tsx). Null otherwise. */
+   * flow before this OTP: set for a brand-new signup, and for an existing minor
+   * who picked their year of birth pre-OTP (see login-page.tsx). Null otherwise. */
   signupExtras?: SignupExtras | null;
 }
 
@@ -37,10 +38,14 @@ export function OtpPage() {
   const location = useLocation();
   const { verifyOtp, signOut } = useAuth();
   const { t } = useTranslation();
-  const { themeId } = useNetworkTheme();
+  const { themeId, brand } = useNetworkTheme();
   const [isLoading, setIsLoading] = useState(false);
   const { countdown, restart: restartCountdown } = useResendCountdown(60);
   const [inlineError, setInlineError] = useState<{ title: string; description: string } | null>(null);
+  // #453: an existing gated minor is held on a blocking guardian flow AFTER the
+  // login OTP (ownership proven) and BEFORE landing on home — never home-first.
+  // Null until the post-verify u18 check decides the ward needs it.
+  const [guardianGate, setGuardianGate] = useState<{ initialStep: 'dob' | 'guardian' } | null>(null);
 
   const state = location.state as AuthState | null;
   const identifierLabel = state?.email ?? state?.phoneNumber;
@@ -119,6 +124,29 @@ export function OtpPage() {
         }
       }
 
+      // Existing gated minor (#453): now that the login OTP has proven number
+      // ownership, run the guardian flow HERE — before home — instead of
+      // deferring it to the home page. New signups already cleared the pre-auth
+      // guardian flow (their signupExtras path), so this only affects returning
+      // users. Best-effort: if the status lookup fails, fall through to home;
+      // the home-page guardian gate remains as a backstop, and the API gate is
+      // the real fail-closed control regardless.
+      // An existing minor picked their year of birth pre-OTP; it's persisted
+      // just above (signupExtras → submitU18Dob), so u18/status now reports
+      // isMinor. Run the AUTHENTICATED guardian flow here — before home — since
+      // the guardian APIs need this session. Starts at the guardian step (DOB
+      // already known). onComplete/onNotMinor calls finishSignIn.
+      if (state.userExists) {
+        try {
+          const u18 = await getU18Status(themeId);
+          if (u18.isMinor && !u18.guardianVerified) {
+            setGuardianGate({ initialStep: u18.hasBirthData ? 'guardian' : 'dob' });
+            return;
+          }
+        } catch {
+          // fall through to finishSignIn
+        }
+      }
 
       finishSignIn();
     } catch {
@@ -152,6 +180,30 @@ export function OtpPage() {
   };
 
   if (!identifierLabel) return null;
+
+  // Blocking guardian gate for an existing minor (#453) — replaces the OTP form
+  // inside the same AuthShell (mirrors the pre-auth SignupGuardianFlow), so the
+  // ward never sees home until the guardian is verified. `onNotMinor` (DOB
+  // resolved adult) and `onComplete` (guardian verified) both proceed home.
+  if (guardianGate) {
+    return (
+      <AuthShell>
+        <U18GuardianFlow
+          inline
+          network={themeId}
+          brand={brand === 'standard' ? null : brand}
+          purpose={{ kind: 'login' }}
+          initialStep={guardianGate.initialStep}
+          onComplete={finishSignIn}
+          onNotMinor={finishSignIn}
+          onLogout={() => {
+            void signOut();
+            navigate('/auth/login', { replace: true });
+          }}
+        />
+      </AuthShell>
+    );
+  }
 
   return (
     <>

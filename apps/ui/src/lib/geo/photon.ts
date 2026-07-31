@@ -52,18 +52,5 @@ export function createPhotonProvider(baseUrl = DEFAULT_PHOTON_URL): GeoProvider 
         return [];
       }
     },
-    async geocode(address, signal) {
-      const q = address.trim();
-      if (!q) return null;
-      try {
-        const url = `${baseUrl.replace(/\/$/, '')}/api?q=${encodeURIComponent(q)}&limit=1`;
-        const res = await fetch(url, { signal });
-        if (!res.ok) return null;
-        const [first] = parsePhotonFeatures(await res.json());
-        return first ? { lat: first.lat, lng: first.lng } : null;
-      } catch {
-        return null;
-      }
-    },
   };
 }

@@ -9,7 +9,20 @@ interface ImportMetaEnv {
   readonly VITE_API_URLS: string;
   readonly VITE_DEFAULT_API_URL: string;
   readonly VITE_SHOW_INSTANCE_SELECTOR: string;
+  /** Gates the free-text / no-profile match score (the `/discover` relevance
+   * badge shown to signed-out viewers). Default ON; set 'false'/'0'/'off'/'no'
+   * to hide it. Profile-to-profile match score is never affected. See
+   * `lib/match-score-config.ts`. */
+  readonly VITE_FREETEXT_MATCH_SCORE_ENABLED?: string;
   readonly VITE_NETWORK_ID: string;
+  /** Per-deployment college/institute region code ("ka" | "up") selecting which
+   * state's list backs the reference-autocomplete college field. Maps to
+   * public/reference/colleges-<code>.json. Falls back to "ka". */
+  readonly VITE_COLLEGE_DATASET?: string;
+  /** Per-deployment base URL the reference datasets are fetched from (set via
+   * ConfigMap). Falls back to the UI's own "/reference/". Lets the college
+   * lists be hosted/updated independently of the UI image, like network.json. */
+  readonly VITE_REFERENCE_BASE_URL?: string;
   readonly VITE_SERVED_BINDINGS?: string;
   readonly VITE_DEFAULT_NETWORK_THEME?: string;
   readonly VITE_DEFAULT_BRAND?: string;
@@ -19,6 +32,12 @@ interface ImportMetaEnv {
   readonly VITE_MAP_DEFAULT_CENTER?: string;
   /** Per-deployment default map zoom (falls back to 12). */
   readonly VITE_MAP_DEFAULT_ZOOM?: string;
+  /** Marker cap while zoomed below the cluster-disable zoom (#203 Task 6). Falls back to 1000. */
+  readonly VITE_MAP_MARKER_CAP_CLUSTERED?: string;
+  /** Marker cap at/above the cluster-disable zoom, once pins render individually (#203 Task 6). Falls back to 500. */
+  readonly VITE_MAP_MARKER_CAP_INDIVIDUAL?: string;
+  /** Zoom level at/above which the map disables clustering (#203 Task 6). Falls back to 14. */
+  readonly VITE_MAP_CLUSTER_DISABLE_ZOOM?: string;
   readonly VITE_ACTION_POLL_INTERVAL_MS?: string;
   readonly VITE_VC_WALLET_URL: string;
   readonly VITE_VC_WALLET_API_KEY: string;
