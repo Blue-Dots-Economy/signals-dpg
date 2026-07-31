@@ -404,6 +404,33 @@ identity; admin-bootstrap approach agreed.
   - Answers open question 4: **restored, not withdrawn** — no new realm config
     needed, because the mapper already carries the value.
 
+### Phase 2/3/4 progress
+
+- **✅ Phase 3 — done.** `app.ts` registers `/api/auth/*` only when
+  `betterauth_enabled`. Under `keycloak` the whole better-auth surface is a 404,
+  including `unified-otp/verify`, which could otherwise still create users.
+  Mutation-tested: reverting the gate fails exactly the two absence assertions.
+- **✅ Phase 4 — done.** `AUTH_PROVIDER` is `betterauth | keycloak`;
+  `backfillKeycloakShell` and its ~275-line test file are deleted;
+  `resolveKeycloakSession` returns `fallthrough` only under `betterauth`;
+  `assertAuthProviderSupported` fails a `dual` instance at startup with an
+  actionable message rather than a bare Zod enum error. `.claude/rules/auth-model.md`
+  and `packages/auth/CLAUDE.md` updated — they documented `dual` as live.
+- **◐ Phase 2 — part 1 done.** `services/auth/user_writer.ts` now owns the `user`
+  insert, shared by `createMirror`, with an executor seam for transactions and an
+  id guard. **Part 2 (switching `participant.ts`) is held back** because it edits
+  `signUpAndOnboardUser`, which had uncommitted work in progress.
+
+### The local test suite was misleadingly red
+
+Every one of the "16 pre-existing API failures" traced to a single invalid value:
+the schema accepts `MATCH_SCORE_PROVIDER` as `'signals_search'` **or absent**, and
+a root `.env` carrying anything else fails the whole env parse at
+`src/config.ts` import — taking out every test whose module graph reaches config.
+With it corrected the suite is **88 files / 860 tests, zero failures**. Fix the
+`.env` line rather than working around it; `vitest.setup.ts` loads that file with
+`override: false`, so a bad value wins.
+
 ### Still open after this pass
 
 1. **G6** — does the OTP SPI flip `emailVerified` / `phoneNumberVerified`? Blocks
@@ -413,9 +440,11 @@ identity; admin-bootstrap approach agreed.
 3. **The realm-role → `user.role` follow-up** (G2's second half), safe to land in
    `createMirror` only.
 4. **The pre-existing admin-onboarding U18 bug** (§1) — its own issue.
-5. **Phases 2–4** — the direct user write, closing the `/api/auth/*` mount, and
-   removing `dual`. Note Phase 2 touches `participant.ts`, which had uncommitted
-   work in progress when this was written.
+5. **Phase 2, part 2** — point `signUpAndOnboardUser` at `insertLocalUser`,
+   collapsing its insert+update into one transactional insert, and pass
+   `email_norm` rather than `email_for_signup` into
+   `createParticipantKeycloakIdentity` so the realm identity stops carrying the
+   `@no-email.local` address. Blocked only on the in-flight work in that file.
 
 **Verification protocol for this work.** `pnpm --filter api test` and
 `pnpm --filter ui test` both have **pre-existing failures** unrelated to this
