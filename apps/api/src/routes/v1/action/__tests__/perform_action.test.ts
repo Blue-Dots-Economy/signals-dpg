@@ -160,6 +160,10 @@ vi.mock('@/network_configs', () => ({
 // deps on this route are already mocked above.
 vi.mock('@/services/guardian_action_gate', () => ({
   guardianActionGate: vi.fn(async () => ({ status: 'not_required' })),
+  // Bulk pre-pass (#393): default resolves an empty map (no gated subset). The
+  // external-channel test asserts it is never called (pre-pass skipped when
+  // request.acting_org is set, #450).
+  guardianBulkActionGate: vi.fn(async () => new Map()),
   // Defaults to null (adult/ungated proceed); U18 tests override it per-case
   // with a real BulkItemFailure so runBulk records the per-item error.
   guardianGateFailure: vi.fn(() => null),
@@ -187,7 +191,11 @@ vi.mock('@dpg/schemas', async () => {
 // Imported after mocks.
 import { perform_action } from '../perform_action.js';
 import { BulkItemFailure } from '@/utils/bulk_runner';
-import { guardianActionGate, guardianGateFailure } from '@/services/guardian_action_gate';
+import {
+  guardianActionGate,
+  guardianBulkActionGate,
+  guardianGateFailure,
+} from '@/services/guardian_action_gate';
 
 // Valid v4 UUIDs (the "4" in the third group and "8/9/a/b" in the fourth
 // satisfy z.uuid() across zod variants that gate on the variant nibble).
@@ -678,6 +686,46 @@ describe('POST /api/v1/action/perform — on-behalf-of (bulk)', () => {
       expect(vi.mocked(guardianActionGate)).toHaveBeenCalledWith(
         expect.objectContaining({ channel: 'self' }),
       );
+    });
+
+    it('external channel + minor ≥2-item bulk → each item MINOR_ACTION_CHANNEL_BLOCKED, batch gate skipped, no OTP (#450/#393)', async () => {
+      dbState.userRows = [{ id: 'usr_agg_owned', onboardedByOrgId: 'org_agg_1' }];
+      // Two items → the per-action gate runs twice (batch pre-pass is skipped on
+      // the external channel), each returning external_minor_blocked.
+      const blocked = new BulkItemFailure(
+        'MINOR_ACTION_CHANNEL_BLOCKED',
+        "This participant is a minor; actions for minors must be completed in the app and can't be performed via this channel.",
+      );
+      vi.mocked(guardianActionGate)
+        .mockResolvedValueOnce({ status: 'external_minor_blocked', reason: 'minor' })
+        .mockResolvedValueOnce({ status: 'external_minor_blocked', reason: 'minor' });
+      vi.mocked(guardianGateFailure).mockReturnValueOnce(blocked).mockReturnValueOnce(blocked);
+      const app = buildApp({
+        org_id: 'org_agg_1',
+        org_type: 'aggregator',
+        service_user_id: 'svc_agg_1',
+      });
+      const res = await app.inject({
+        method: 'POST',
+        url: '/perform/bulk',
+        payload: [
+          { ...VALID_BODY, acting_as_user_id: 'usr_agg_owned' },
+          { ...VALID_BODY, acting_as_user_id: 'usr_agg_owned' },
+        ],
+      });
+      expect(res.statusCode).toBe(422);
+      const results = res.json().results;
+      expect(results).toHaveLength(2);
+      for (const r of results) {
+        expect(r).toMatchObject({ status: 'error', error: 'MINOR_ACTION_CHANNEL_BLOCKED' });
+      }
+      // #450: the one-OTP batch path must NOT run on an external channel — the
+      // per-action gate does the blocking, with channel 'external'.
+      expect(vi.mocked(guardianBulkActionGate)).not.toHaveBeenCalled();
+      expect(vi.mocked(guardianActionGate)).toHaveBeenCalledWith(
+        expect.objectContaining({ channel: 'external', wardUserId: 'usr_agg_owned' }),
+      );
+      expect(fetchCalls).toHaveLength(0);
     });
   });
 
