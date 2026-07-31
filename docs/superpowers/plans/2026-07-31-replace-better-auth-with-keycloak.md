@@ -416,10 +416,18 @@ identity; admin-bootstrap approach agreed.
   `assertAuthProviderSupported` fails a `dual` instance at startup with an
   actionable message rather than a bare Zod enum error. `.claude/rules/auth-model.md`
   and `packages/auth/CLAUDE.md` updated — they documented `dual` as live.
-- **◐ Phase 2 — part 1 done.** `services/auth/user_writer.ts` now owns the `user`
-  insert, shared by `createMirror`, with an executor seam for transactions and an
-  id guard. **Part 2 (switching `participant.ts`) is held back** because it edits
-  `signUpAndOnboardUser`, which had uncommitted work in progress.
+- **✅ Phase 2 — done.** Part 1: `services/auth/user_writer.ts` owns the `user`
+  insert, shared by `createMirror`, with an executor seam and an id guard. Part 2:
+  `signUpAndOnboardUser` uses it under `keycloak`, collapsing the insert+update
+  into one transactional insert and passing `email_norm` — not the
+  `@no-email.local` placeholder — to both the row and the realm identity.
+  - Merged with the in-flight `participant_identity.ts` fix, which was the other
+    half of the same problem: that fix created the realm identity a participant
+    needs in order to log in at all, but fed it the placeholder address.
+  - The update-failure orphan cleanup is gone on the Keycloak branch (a rollback
+    leaves nothing to orphan, and deleting could hit a different row that reused
+    the id). It stays for better-auth, whose row commits outside the transaction,
+    and the Keycloak-identity compensating delete stays for both.
 
 ### The local test suite was misleadingly red
 
@@ -440,11 +448,10 @@ With it corrected the suite is **88 files / 860 tests, zero failures**. Fix the
 3. **The realm-role → `user.role` follow-up** (G2's second half), safe to land in
    `createMirror` only.
 4. **The pre-existing admin-onboarding U18 bug** (§1) — its own issue.
-5. **Phase 2, part 2** — point `signUpAndOnboardUser` at `insertLocalUser`,
-   collapsing its insert+update into one transactional insert, and pass
-   `email_norm` rather than `email_for_signup` into
-   `createParticipantKeycloakIdentity` so the realm identity stops carrying the
-   `@no-email.local` address. Blocked only on the in-flight work in that file.
+5. **Backfill the 24 existing artifacts** — the `@no-email.local` rows and their
+   dead `credential` account rows. New writes have stopped, but the existing ones
+   remain, and the fake address is also the **Keycloak username** on those
+   identities, so a full cleanup is two-sided. Still open question 5.
 
 **Verification protocol for this work.** `pnpm --filter api test` and
 `pnpm --filter ui test` both have **pre-existing failures** unrelated to this
