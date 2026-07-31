@@ -202,6 +202,7 @@
   "home.empty_create_heading": "अपनी प्रोफ़ाइल बनाएं",
   "home.empty_create_message": "दूसरों से जुड़ना शुरू करने के लिए प्रोफ़ाइल सेट करें।",
   "home.no_domain_listings": "इस नेटवर्क में {{domain}} की कोई लिस्टिंग नहीं मिली।",
+  "home.no_listings_in_radius": "आपके {{locationSource}} स्थान के {{km}} किमी के भीतर कोई लिस्टिंग नहीं — कोई दूसरा स्थान या मैप व्यू आज़माएँ।",
   "home.no_listings_yet": "इस नेटवर्क में अभी कोई लिस्टिंग नहीं है।",
   "home.no_search_results": "\"{{search}}\" के लिए कोई परिणाम नहीं",
   "home.showing_x_of_y": "{{total}} में से {{shown}} दिखाए जा रहे हैं",

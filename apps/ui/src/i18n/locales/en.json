@@ -225,6 +225,7 @@
   "home.empty_create_heading": "Create your profile",
   "home.empty_create_message": "Set up a profile to start connecting with others.",
   "home.no_domain_listings": "No {{domain}} listings found in this network.",
+  "home.no_listings_in_radius": "No listings within {{km}} km of your {{locationSource}} location — try a different location or the map view.",
   "home.no_listings_yet": "No listings in this network yet.",
   "home.no_search_results": "No results for \"{{search}}\"",
   "home.showing_x_of_y": "Showing {{shown}} of {{total}}",

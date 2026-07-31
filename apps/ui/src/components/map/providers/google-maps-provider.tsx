@@ -31,6 +31,13 @@ import { useViewportReportEmitter } from './use-viewport-report';
  */
 const markerDomainMap = new WeakMap<object, string>();
 
+// Cluster-click zoom (see onClusterClick): a fixed, small zoom-in step keeps
+// the animation smooth and identical for every cluster (a large one-shot delta
+// snaps without a tween); capped so a tight cluster can't over-zoom past the
+// map's own max.
+const CLUSTER_CLICK_ZOOM_STEP = 3;
+const CLUSTER_CLICK_MAX_ZOOM = 18;
+
 /**
  * Resolves a CSS custom property (e.g. --primary) to a concrete rgb/hex string.
  * The theme stores --primary as an `oklch(...)` value; an SVG data-URI `fill`
@@ -479,7 +486,23 @@ function ClustererManager({
   React.useEffect(() => {
     if (!map) return;
 
-    const clusterer = new MarkerClusterer({ map, renderer: clusterRenderer });
+    const clusterer = new MarkerClusterer({
+      map,
+      renderer: clusterRenderer,
+      // Consistent smooth zoom on EVERY cluster click. The default handler does
+      // `map.fitBounds(cluster.bounds)`, which animates nicely for a spread-out
+      // cluster but SNAPS instantly for a tight one (near-zero bounds → a huge
+      // one-shot zoom delta Google renders without a tween). Instead, pan to the
+      // cluster centre and zoom in by a fixed, capped STEP — a small delta always
+      // animates, so a dense "240" and a tight "3" drill in identically. Repeated
+      // clicks keep drilling until the pins separate.
+      onClusterClick: (_event, cluster, clusterMap) => {
+        const current = clusterMap.getZoom() ?? 12;
+        const maxZoom = clusterMap.get('maxZoom') ?? CLUSTER_CLICK_MAX_ZOOM;
+        clusterMap.panTo(cluster.position);
+        clusterMap.setZoom(Math.min(current + CLUSTER_CLICK_ZOOM_STEP, maxZoom));
+      },
+    });
     clustererRef.current = clusterer;
 
     return () => {

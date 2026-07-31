@@ -1903,6 +1903,24 @@ export function HomePage() {
         />
       );
     }
+    // Location-bounded discover returned nothing: the network may well have
+    // listings — just none within the (hard) radius. Say THAT, not "none in
+    // this network" (false) or nothing at all. Mirrors the map's area-scoped
+    // empty message; the "Search near" toggle makes trying another location
+    // actionable.
+    if (hasLocation && listDistanceMeters !== undefined) {
+      const km = Math.round(listDistanceMeters / 1000);
+      const locationSource = resolvedLocationSource === 'browser' ? 'current' : 'profile';
+      return (
+        <EmptyState
+          heading={t('home.nothing_here_heading')}
+          message={t('home.no_listings_in_radius', {
+            km,
+            locationSource: t(`home.location_source_${locationSource}`),
+          })}
+        />
+      );
+    }
     return (
       <EmptyState
         heading={t('home.nothing_here_heading')}
@@ -2174,7 +2192,12 @@ export function HomePage() {
                     native — signals-search unreachable/unconfigured/timed out)
                     that ranking itself is temporarily unavailable. Exactly one
                     variant renders at a time; see `resolveListNote`. */}
-                {listNote && (
+                {/* Suppress the "Showing profiles within X km…" note when the
+                    list is empty — it would falsely imply results are shown.
+                    The radius-aware empty state (buildEmptyState) carries the
+                    explanation in that case instead. Kept during loading
+                    (contentCount 0) is fine — the skeleton shows, no note. */}
+                {listNote && contentCount > 0 && (
                   <p className="mb-3 text-xs text-muted-foreground">
                     {t(
                       listNote.key,

@@ -202,6 +202,7 @@
   "home.empty_create_heading": "ನಿಮ್ಮ ಪ್ರೊಫೈಲ್ ರಚಿಸಿ",
   "home.empty_create_message": "ಇತರರೊಂದಿಗೆ ಸಂಪರ್ಕ ಪ್ರಾರಂಭಿಸಲು ಪ್ರೊಫೈಲ್ ಹೊಂದಿಸಿ.",
   "home.no_domain_listings": "ಈ ನೆಟ್‌ವರ್ಕ್‌ನಲ್ಲಿ {{domain}} ಲಿಸ್ಟಿಂಗ್‌ಗಳು ಕಂಡುಬಂದಿಲ್ಲ.",
+  "home.no_listings_in_radius": "ನಿಮ್ಮ {{locationSource}} ಸ್ಥಳದ {{km}} ಕಿಮೀ ವ್ಯಾಪ್ತಿಯಲ್ಲಿ ಯಾವುದೇ ಲಿಸ್ಟಿಂಗ್‌ಗಳಿಲ್ಲ — ಬೇರೆ ಸ್ಥಳ ಅಥವಾ ಮ್ಯಾಪ್ ವೀಕ್ಷಣೆ ಪ್ರಯತ್ನಿಸಿ.",
   "home.no_listings_yet": "ಈ ನೆಟ್‌ವರ್ಕ್‌ನಲ್ಲಿ ಇನ್ನೂ ಯಾವ ಲಿಸ್ಟಿಂಗ್‌ಗಳೂ ಇಲ್ಲ.",
   "home.no_search_results": "\"{{search}}\" ಗಾಗಿ ಯಾವ ಫಲಿತಾಂಶಗಳೂ ಇಲ್ಲ",
   "home.showing_x_of_y": "{{total}} ರಲ್ಲಿ {{shown}} ತೋರಿಸಲಾಗುತ್ತಿದೆ",
