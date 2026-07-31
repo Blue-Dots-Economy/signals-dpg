@@ -1706,6 +1706,13 @@ export function HomePage() {
             queryKeys.profileConsent(network.id),
             (prev) => new Set([...(prev ?? []), pending]),
           );
+          // Recording profile consent also flips a complete draft to `live`
+          // server-side (promoteItemOnProfileConsent, in the same transaction),
+          // so the cached my-items list is stale the moment this resolves — its
+          // `lifecycle_status` still reads `draft`. Without this the sidebar
+          // chip stays "Draft" until the next page load, which is what made the
+          // promotion look like it only happened on refresh.
+          void queryClient.invalidateQueries({ queryKey: queryKeys.myItems(network.id) });
           setActiveProfileId(pending);
           setStoredActiveProfileId(network.id, pending);
           setPendingConsentProfileId(null);
@@ -1740,6 +1747,10 @@ export function HomePage() {
           queryKeys.profileConsent(network.id),
           (prev) => new Set([...(prev ?? []), ref.item_id]),
         );
+        // Guardian verify promotes the ward's complete draft to `live` too
+        // (upsertGuardianProfileConsentAndPromote), so refresh my-items for the
+        // same reason as the adult accept handler above.
+        void queryClient.invalidateQueries({ queryKey: queryKeys.myItems(network.id) });
         setActiveProfileId(ref.item_id);
         setStoredActiveProfileId(network.id, ref.item_id);
         setGuardianProfileRef(null);
