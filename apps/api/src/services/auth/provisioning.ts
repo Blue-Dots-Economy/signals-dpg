@@ -42,6 +42,7 @@ import { authConfig } from '@/config';
 import { materializeSignupGuardian } from '@/services/signup_guardian';
 import { sendWelcomeNotifications } from '@/notifications/welcome';
 import { takeSignupExtras } from '@/services/auth/signup_extras';
+import { insertLocalUser } from '@/services/auth/user_writer';
 import { actingOrgGrant, grantIsWildcard } from '@/utils/keycloak_token';
 import type { KeycloakClaims } from '@/utils/keycloak_token';
 import { randomUUID } from 'node:crypto';
@@ -384,58 +385,45 @@ async function createMirror(
     };
   }
 
-  const now = new Date();
-  try {
-    await db.insert(userTable).values({
-      // The linchpin: the mirror's primary key IS the Keycloak subject.
+  // The insert itself lives in `user_writer.ts`, shared with admin onboarding so
+  // the two cannot drift. The linchpin — this row's primary key IS the Keycloak
+  // subject — is enforced there (it rejects anything that is not a bare UUID).
+  const written = await insertLocalUser(
+    {
       id: identity.sub,
       name: identity.name,
       email: identity.email,
       emailVerified: identity.emailVerified,
       phoneNumber: identity.phoneNumber,
       phoneNumberVerified: identity.phoneNumberVerified,
-      image: '',
-      role: 'user',
-      banned: false,
-      banReason: '',
-      banExpires: null,
-      // Parity with unified_otp's create: reaching a completed login means the
-      // consent screens were passed. DOB stays null here — it is captured
-      // post-login, or written by guardian materialization below.
-      termsAccepted: true,
-      privacyAccepted: true,
-      createdAt: now,
-      updatedAt: now,
-    });
-  } catch (err) {
-    if (pgErrorCode(err) === PG_UNIQUE_VIOLATION) {
-      // Two concurrent first-login requests. The other one won; re-read.
-      log.warn({ sub: identity.sub }, 'provisioning: concurrent first login, re-reading');
-      const [row] = await db
-        .select()
-        .from(userTable)
-        .where(eq(userTable.id, identity.sub))
-        .limit(1);
-      if (row) {
-        await ensureOrgMembership(row.id, identity, log);
-        return {
-          ok: true,
-          user: { id: row.id, email: row.email ?? '', name: row.name, role: row.role },
-          created: false,
-        };
-      }
-      return {
-        ok: false,
-        code: 'IDENTITY_CONFLICT',
-        message:
-          'This email or phone number is already registered under a different account.',
-      };
-    }
-    log.error({ err, sub: identity.sub }, 'provisioning: failed to create user mirror');
+      extra: {
+        // Parity with unified_otp's create: reaching a completed login means the
+        // consent screens were passed. Age stays null here — it is captured
+        // post-login, or written by guardian materialization below.
+        termsAccepted: true,
+        privacyAccepted: true,
+      },
+    },
+    log
+  );
+
+  if (!written.ok) {
     return {
       ok: false,
-      code: 'PROVISIONING_FAILED',
-      message: 'Could not create the local user record',
+      code: written.code === 'IDENTITY_CONFLICT' ? 'IDENTITY_CONFLICT' : 'PROVISIONING_FAILED',
+      message: written.message,
+    };
+  }
+
+  if (!written.created) {
+    // Two concurrent first logins; the other one won. Still ensure the org join,
+    // because that is checked on every login rather than only on create.
+    const row = written.existing;
+    await ensureOrgMembership(row.id, identity, log);
+    return {
+      ok: true,
+      user: { id: row.id, email: row.email ?? '', name: row.name, role: row.role },
+      created: false,
     };
   }
 
