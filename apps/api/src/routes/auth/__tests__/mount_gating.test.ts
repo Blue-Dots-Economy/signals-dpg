@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 /**
  * better-auth's `/api/auth/*` mount must exist under `AUTH_PROVIDER=betterauth`
@@ -10,46 +10,67 @@ import { describe, it, expect, vi, afterEach } from 'vitest';
  * so they could never log in. Asserting a 404 rather than "the handler refused"
  * is deliberate: the guarantee is that the route does not exist at all.
  *
- * `MATCH_SCORE_PROVIDER` is stubbed because `src/config.ts` Zod-validates the
- * whole env at module load and the schema accepts only `'signals_search'` or
- * absent. `vitest.setup.ts` loads the repo-root `.env` with `override: false`, so
- * a developer whose `.env` carries any other value would otherwise fail to build
- * the app here. Stubbed before the dynamic import, since config is read at import.
+ * ── Why this mocks rather than sets env ──────────────────────────────────────
+ * A first version drove the decision with `vi.stubEnv('AUTH_PROVIDER', …)` plus
+ * `vi.resetModules()`. It passed alone and failed intermittently in the full
+ * suite, because `process.env` is process-wide while module mocks are per-file,
+ * and because importing the real `@api/db/secondary/redis` opens an ioredis
+ * connection eagerly (`new Redis(url)` at module scope) — a real socket attempt
+ * that stalls for seconds under load.
+ *
+ * So the provider is injected through a `@/config` getter, which app.ts reads at
+ * `buildApp()` time, and Redis is stubbed out. Nothing here depends on ambient
+ * env or on the network, so it cannot be perturbed by whatever else is running.
  */
 
-function stubEnvForProvider(provider: 'betterauth' | 'keycloak'): void {
-  vi.stubEnv('MATCH_SCORE_PROVIDER', 'signals_search');
-  vi.stubEnv('AUTH_PROVIDER', provider);
-  // The startup guard requires both of these whenever Keycloak is enabled.
-  vi.stubEnv('KEYCLOAK_BASE_URL', 'http://localhost:8080');
-  vi.stubEnv('KEYCLOAK_ACCEPTED_CLIENT_IDS', 'signals-ui');
-  // Keep the API-reference plugin out of the way; it is irrelevant here and
-  // pulls a heavy dependency at registration time.
-  vi.stubEnv('API_REFERENCE_ENABLED', 'false');
-}
+/** Flipped per test; read through the getter below at buildApp() time. */
+let betterauthEnabled = true;
 
-/**
- * Build the real app for one provider. `resetModules` matters: `src/config.ts`
- * resolves its flags once at module load, so a second build in the same worker
- * would otherwise reuse the first provider's config.
- */
-async function buildFor(provider: 'betterauth' | 'keycloak') {
-  vi.resetModules();
-  stubEnvForProvider(provider);
-  const { buildApp } = await import('@/app');
+// `MATCH_SCORE_PROVIDER` must be valid before the real config module is
+// evaluated by `importOriginal`: the schema accepts only 'signals_search' or
+// absent, and `vitest.setup.ts` loads the repo-root .env with override:false.
+vi.stubEnv('MATCH_SCORE_PROVIDER', 'signals_search');
+// The API-reference plugin is irrelevant here and heavy to register.
+vi.stubEnv('API_REFERENCE_ENABLED', 'false');
+
+vi.mock('@/config', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/config')>();
+  return {
+    ...actual,
+    get authConfig() {
+      return { ...actual.authConfig, betterauth_enabled: betterauthEnabled };
+    },
+  };
+});
+
+// No real Redis. better-auth is constructed when `AuthRoutes` is imported —
+// which happens regardless of whether it ends up mounted — and its
+// `secondaryStorage` holds this client.
+vi.mock('@api/db/secondary/redis', () => ({
+  redis: {
+    get: vi.fn(async () => null),
+    set: vi.fn(async () => 'OK'),
+    del: vi.fn(async () => 1),
+    on: vi.fn(),
+  },
+}));
+
+const { buildApp } = await import('@/app');
+
+async function build() {
   const app = await buildApp();
   await app.ready();
   return app;
 }
 
-afterEach(() => {
-  vi.unstubAllEnvs();
-  vi.resetModules();
+beforeEach(() => {
+  betterauthEnabled = true;
 });
 
 describe('AUTH_PROVIDER=betterauth', () => {
   it('mounts the better-auth OTP surface', async () => {
-    const app = await buildFor('betterauth');
+    betterauthEnabled = true;
+    const app = await build();
     try {
       const res = await app.inject({
         method: 'POST',
@@ -57,7 +78,7 @@ describe('AUTH_PROVIDER=betterauth', () => {
         payload: { email: 'asha@example.org' },
       });
       // Anything but 404 proves the route is mounted. The handler's own answer
-      // depends on Redis/db, which this test deliberately does not provide.
+      // depends on state this test deliberately does not provide.
       expect(res.statusCode).not.toBe(404);
     } finally {
       await app.close();
@@ -66,8 +87,12 @@ describe('AUTH_PROVIDER=betterauth', () => {
 });
 
 describe('AUTH_PROVIDER=keycloak', () => {
+  beforeEach(() => {
+    betterauthEnabled = false;
+  });
+
   it('does not mount the OTP surface that could still create users', async () => {
-    const app = await buildFor('keycloak');
+    const app = await build();
     try {
       const res = await app.inject({
         method: 'POST',
@@ -83,7 +108,7 @@ describe('AUTH_PROVIDER=keycloak', () => {
   it('does not mount sign-out or get-session either', async () => {
     // The whole better-auth surface goes, not just the OTP endpoints — the UI
     // uses these only on the OTP screen, which Keycloak mode never renders.
-    const app = await buildFor('keycloak');
+    const app = await build();
     try {
       const signOut = await app.inject({ method: 'POST', url: '/api/auth/sign-out' });
       const session = await app.inject({ method: 'GET', url: '/api/auth/get-session' });
@@ -97,7 +122,7 @@ describe('AUTH_PROVIDER=keycloak', () => {
   it('still serves the rest of the API', async () => {
     // Guards against the gate being written so broadly it unmounts more than
     // better-auth — health is registered right beside it.
-    const app = await buildFor('keycloak');
+    const app = await build();
     try {
       const res = await app.inject({ method: 'GET', url: '/health/live' });
       expect(res.statusCode).toBe(200);
