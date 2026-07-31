@@ -192,6 +192,7 @@ export function OtpPage() {
           inline
           network={themeId}
           brand={brand === 'standard' ? null : brand}
+          purpose={{ kind: 'login' }}
           initialStep={guardianGate.initialStep}
           onComplete={finishSignIn}
           onNotMinor={finishSignIn}

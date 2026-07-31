@@ -257,6 +257,7 @@ export function ActionStatusUpdater({
       open={!!gate.challenge}
       onOpenChange={(o) => !o && gate.setChallenge(null)}
       onSubmitOtp={gate.submitOtp}
+      purpose={{ kind: 'accept' }}
     />
   );
 
