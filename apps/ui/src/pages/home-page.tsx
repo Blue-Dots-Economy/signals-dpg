@@ -28,7 +28,7 @@ import { MapCountPill } from '@/components/map/map-count-pill';
 import { MatchScoreCard } from '@/components/match-score';
 import '@/components/map/providers';
 import { performAction, performActionsBulk, type Item } from '@/lib/item-api';
-import { bulkFailureIndices, firstBulkError, BulkSingleError } from '@/lib/bulk';
+import { bulkFailureIndices, firstBulkError } from '@/lib/bulk';
 import { useCardSelection } from '@/hooks/use-card-selection';
 import { useEqualRowHeights } from '@/hooks/use-equal-row-heights';
 import { useNetworkConfigs, useResolvedNetwork } from '@/hooks/use-network-config';
@@ -37,7 +37,7 @@ import { BulkActionBar } from '@/components/selection/bulk-action-bar';
 import { ActionModal } from '@/components/actions/action-modal';
 import { CheckSquare } from 'lucide-react';
 import { getRuntimeEnv } from '@/lib/runtime-env';
-import { ACTION_CONSENT_SENTINEL, guardianOtpErrorOf, type PerformActionPayload } from '@/lib/action-api';
+import { ACTION_CONSENT_SENTINEL } from '@/lib/action-api';
 import { ActionAbortedError } from '@/lib/action-abort';
 import { EmptyState } from '@/components/empty-state';
 import { useAuth } from '@/contexts/auth-context';
@@ -533,14 +533,6 @@ export function HomePage() {
   const browseSelection = useCardSelection();
   const [bulkConnectOpen, setBulkConnectOpen] = React.useState(false);
   const [bulkConnectBusy, setBulkConnectBusy] = React.useState(false);
-  // Minor ward doing a bulk action (#393/#453): the gated items come back
-  // GUARDIAN_OTP_REQUIRED after one OTP is sent to the guardian. Stash the
-  // payloads to resubmit with the code — one guardian OTP dialog for the batch,
-  // mirroring the single-action flow (no raw error).
-  const [bulkGuardianChallenge, setBulkGuardianChallenge] = React.useState<{
-    payloads: PerformActionPayload[];
-    sourceInstanceUrl?: string;
-  } | null>(null);
 
   // Networks list + resolved selected network (config tier). Replaces the raw
   // mount-fetch + resolve effects; `allNetworks`/`network` are now query-derived.
@@ -1317,26 +1309,6 @@ export function HomePage() {
         setBulkConnectOpen(false);
         return;
       }
-      // Bulk is unavailable for a U18 ward while the batch guardian-OTP server
-      // change (#393) is held for review: the batch UI collects one code but the
-      // server gates per action, so a bulk submit can't complete. Degrade
-      // cleanly — ask them to act one at a time — rather than a stuck/spammy
-      // guardian-OTP dialog.
-      if (
-        u18Status?.isMinor === true &&
-        !!wardDomain &&
-        isGuardianConsentRequiredDomain(network, wardDomain)
-      ) {
-        setBulkConnectOpen(false);
-        browseSelection.exitSelect();
-        toast.info(
-          t(
-            'home.bulk_u18_unavailable',
-            "Bulk isn't available for under-18 accounts yet — please apply or connect one at a time.",
-          ),
-        );
-        return;
-      }
       setBulkConnectBusy(true);
       try {
         // Task 7 (#203 §5.2 cleanup): bulk-select only renders in the LIST
@@ -1408,21 +1380,6 @@ export function HomePage() {
           toast.success(t('home.bulk_connected_all', { count: env.summary.succeeded }));
           browseSelection.exitSelect();
         } else {
-          // Minor ward: if the failures are the guardian-OTP challenge, don't
-          // surface the raw message — open ONE guardian OTP dialog for the batch
-          // and resubmit those payloads with the code (mirrors single actions).
-          const failedResults = env.results.filter((r) => r.status === 'error');
-          const guardianResults = failedResults.filter(
-            (r) => guardianOtpErrorOf(r) === 'GUARDIAN_OTP_REQUIRED',
-          );
-          if (guardianResults.length > 0 && guardianResults.length === failedResults.length) {
-            setBulkConnectOpen(false);
-            setBulkGuardianChallenge({
-              payloads: guardianResults.map((r) => payloads[r.index]),
-              sourceInstanceUrl: sourceItemInstanceUrl,
-            });
-            return; // the guardian OTP dialog owns the resubmit
-          }
           const failedIdxs = bulkFailureIndices(env);
           const failedIds = failedIdxs.map((i) => targets[i].item_id);
           const firstErr = firstBulkError(env);
@@ -1457,8 +1414,6 @@ export function HomePage() {
       browseSelection.exitSelect,
       browseSelection.setSelected,
       promptCompleteDraftProfile,
-      u18Status,
-      wardDomain,
       t,
     ],
   );
@@ -1796,33 +1751,6 @@ export function HomePage() {
     />
   );
 
-  // Guardian OTP challenge for a MINOR's BULK action (#453). One dialog for the
-  // whole batch; the code resubmits the stashed payloads via performActionsBulk.
-  const bulkGuardianOtpModal = (
-    <GuardianOtpDialog
-      open={!!bulkGuardianChallenge}
-      onOpenChange={(open) => { if (!open) setBulkGuardianChallenge(null); }}
-      onLogout={() => { void signOut(); }}
-      onSubmitOtp={async (otp) => {
-        const ch = bulkGuardianChallenge;
-        if (!ch) return;
-        const env2 = await performActionsBulk(ch.payloads, ch.sourceInstanceUrl, otp);
-        queryClient.invalidateQueries({ queryKey: queryKeys.actions.all });
-        if (env2.summary.failed === 0) {
-          setBulkGuardianChallenge(null);
-          toast.success(t('home.bulk_connected_all', { count: env2.summary.succeeded }));
-          browseSelection.exitSelect();
-          return;
-        }
-        // Still failing (wrong/expired code, throttled …) — throw a classified
-        // error so GuardianOtpDialog shows the inline message and stays open.
-        const firstFail = env2.results.find((r) => r.status === 'error');
-        const code = guardianOtpErrorOf(firstFail) ?? 'GUARDIAN_OTP_INVALID';
-        throw new BulkSingleError(code, firstFail?.message ?? 'Guardian confirmation failed', 422);
-      }}
-    />
-  );
-
   if (!network) {
     return (
       <>
@@ -1850,7 +1778,6 @@ export function HomePage() {
         {guardianSetupForProfileModal}
         {profileConsentModal}
         {guardianProfileConsentModal}
-        {bulkGuardianOtpModal}
       </>
     );
   }
@@ -2463,7 +2390,6 @@ export function HomePage() {
     {guardianSetupForProfileModal}
     {profileConsentModal}
         {guardianProfileConsentModal}
-        {bulkGuardianOtpModal}
     </>
   );
 }
