@@ -1,4 +1,4 @@
-import { describe, it, expect, afterEach } from 'vitest';
+import { describe, it, expect, afterEach, vi } from 'vitest';
 import {
   capForZoom,
   resolveClusteredMarkerCap,
@@ -6,6 +6,16 @@ import {
   resolveClusterDisableZoomEnv,
 } from './map-caps';
 import { DEFAULT_CLUSTER_DISABLE_ZOOM } from './map-viewport-snap';
+import * as runtimeEnv from './runtime-env';
+
+/** Stub `getRuntimeEnv` (the runtime-env source the caps now read) so a test
+ * can inject a per-key value; any key not in `values` resolves to undefined
+ * (i.e. falls back to the default), mirroring an unset deployment. */
+function mockRuntimeEnv(values: Record<string, string | undefined>) {
+  vi.spyOn(runtimeEnv, 'getRuntimeEnv').mockImplementation(
+    ((k: string) => values[k]) as unknown as typeof runtimeEnv.getRuntimeEnv,
+  );
+}
 
 describe('capForZoom', () => {
   it('returns the clustered cap (1000) below the cluster-disable zoom', () => {
@@ -29,49 +39,38 @@ describe('capForZoom', () => {
   });
 });
 
-describe('env overrides (#203 Task 6: VITE_MAP_MARKER_CAP_CLUSTERED / _INDIVIDUAL / VITE_MAP_CLUSTER_DISABLE_ZOOM)', () => {
-  const keys = [
-    'VITE_MAP_MARKER_CAP_CLUSTERED',
-    'VITE_MAP_MARKER_CAP_INDIVIDUAL',
-    'VITE_MAP_CLUSTER_DISABLE_ZOOM',
-  ] as const;
-  const originals = Object.fromEntries(keys.map((k) => [k, import.meta.env[k]]));
-
+describe('runtime-env overrides (VITE_MAP_MARKER_CAP_CLUSTERED / _INDIVIDUAL / VITE_MAP_CLUSTER_DISABLE_ZOOM)', () => {
   afterEach(() => {
-    for (const k of keys) {
-      if (originals[k] === undefined) {
-        delete (import.meta.env as unknown as Record<string, string | undefined>)[k];
-      } else {
-        (import.meta.env as unknown as Record<string, string | undefined>)[k] = originals[k];
-      }
-    }
+    vi.restoreAllMocks();
   });
 
   it('resolveClusteredMarkerCap reads VITE_MAP_MARKER_CAP_CLUSTERED, falling back to 1000', () => {
+    mockRuntimeEnv({});
     expect(resolveClusteredMarkerCap()).toBe(1000);
-    (import.meta.env as unknown as Record<string, string>).VITE_MAP_MARKER_CAP_CLUSTERED = '2500';
+    mockRuntimeEnv({ VITE_MAP_MARKER_CAP_CLUSTERED: '2500' });
     expect(resolveClusteredMarkerCap()).toBe(2500);
   });
 
   it('resolveIndividualMarkerCap reads VITE_MAP_MARKER_CAP_INDIVIDUAL, falling back to 500', () => {
+    mockRuntimeEnv({});
     expect(resolveIndividualMarkerCap()).toBe(500);
-    (import.meta.env as unknown as Record<string, string>).VITE_MAP_MARKER_CAP_INDIVIDUAL = '750';
+    mockRuntimeEnv({ VITE_MAP_MARKER_CAP_INDIVIDUAL: '750' });
     expect(resolveIndividualMarkerCap()).toBe(750);
   });
 
   it('resolveClusterDisableZoomEnv reads VITE_MAP_CLUSTER_DISABLE_ZOOM, falling back to 14', () => {
+    mockRuntimeEnv({});
     expect(resolveClusterDisableZoomEnv()).toBe(14);
-    (import.meta.env as unknown as Record<string, string>).VITE_MAP_CLUSTER_DISABLE_ZOOM = '16';
+    mockRuntimeEnv({ VITE_MAP_CLUSTER_DISABLE_ZOOM: '16' });
     expect(resolveClusterDisableZoomEnv()).toBe(16);
   });
 
   it('ignores an invalid/empty/non-positive override and falls back to the default', () => {
-    const env = import.meta.env as unknown as Record<string, string>;
-    env.VITE_MAP_MARKER_CAP_CLUSTERED = '';
+    mockRuntimeEnv({ VITE_MAP_MARKER_CAP_CLUSTERED: '' });
     expect(resolveClusteredMarkerCap()).toBe(1000);
-    env.VITE_MAP_MARKER_CAP_CLUSTERED = 'not-a-number';
+    mockRuntimeEnv({ VITE_MAP_MARKER_CAP_CLUSTERED: 'not-a-number' });
     expect(resolveClusteredMarkerCap()).toBe(1000);
-    env.VITE_MAP_MARKER_CAP_CLUSTERED = '-5';
+    mockRuntimeEnv({ VITE_MAP_MARKER_CAP_CLUSTERED: '-5' });
     expect(resolveClusteredMarkerCap()).toBe(1000);
   });
 });

@@ -202,6 +202,9 @@ in `apps/ui/src/lib/api-config.ts`.
 | `VITE_SHOW_INSTANCE_SELECTOR` | optional | When `true`, surfaces the instance selector even outside `import.meta.env.DEV`. |
 | `VITE_NETWORK_ID` | optional | Comma-separated list of network IDs to scope the UI to. Parsed by `parseNetworkIds` (split on `,`, trimmed, empties dropped) in `apps/ui/src/pages/home-page.tsx` and `profile-form-page.tsx`. Empty/unset = no network filter applied. |
 | `VITE_FREETEXT_MATCH_SCORE_ENABLED` | optional | Gates the **free-text / no-profile** match score (the `/discover` relevance badge shown to signed-out viewers when they search). Default **ON**; set `false`/`0`/`off`/`no` to hide it. The profile-to-profile match score (signed-in viewer with a profile) is never affected. See `apps/ui/src/lib/match-score-config.ts`. |
+| `VITE_MAP_MARKER_CAP_CLUSTERED` | optional | Max map markers fetched/rendered **per domain** while zoomed out (clustering absorbs density). Fetch limit is `cap+1`; the "N+ in this area — zoom in" pill triggers past it. Default **1000**. Runtime-env (retunable per deploy, no rebuild). Lower it (e.g. 300) if the map janks on dense data. See `apps/ui/src/lib/map-caps.ts`. |
+| `VITE_MAP_MARKER_CAP_INDIVIDUAL` | optional | Same as above but for zoomed-**in** views (past `VITE_MAP_CLUSTER_DISABLE_ZOOM`). Default **500**; lower it (e.g. 150) for denser data. |
+| `VITE_MAP_CLUSTER_DISABLE_ZOOM` | optional | Zoom level at/above which the **individual** cap applies (below it, the **clustered** cap). Default **14**. Note: this selects which cap is used — it does **not** disable Leaflet's own 80px visual clustering. |
 
 In the default Helm install the UI's nginx reverse-proxies `/api/*` to
 `dpg-api:2742`, so `VITE_API_URL` is intentionally left empty in
