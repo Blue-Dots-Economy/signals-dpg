@@ -31,12 +31,83 @@ import { useViewportReportEmitter } from './use-viewport-report';
  */
 const markerDomainMap = new WeakMap<object, string>();
 
-// Cluster-click zoom (see onClusterClick): a fixed, small zoom-in step keeps
-// the animation smooth and identical for every cluster (a large one-shot delta
-// snaps without a tween); capped so a tight cluster can't over-zoom past the
-// map's own max.
-const CLUSTER_CLICK_ZOOM_STEP = 3;
-const CLUSTER_CLICK_MAX_ZOOM = 18;
+// Cluster-click zoom (see onClusterClick). One click smoothly zooms to the
+// level that reveals the cluster's contents — the SAME target Google's default
+// fitBounds would pick, but animated instead of snapping. For a cluster with no
+// inner sub-clusters (near-identical/co-located points) that target is the max
+// cap, so a single click drills straight to the item level — just smoothly.
+const CLUSTER_CLICK_MAX_ZOOM = 20;
+// Cluster-click zoom animation duration (ms). Runtime-env so the feel can be
+// tuned per deploy (config.js) without a rebuild; default 2000, 0 = instant.
+function resolveClusterZoomAnimMs(): number {
+  const raw = getRuntimeEnv('VITE_MAP_CLUSTER_ZOOM_ANIM_MS');
+  if (raw == null || String(raw).trim() === '') return 2000;
+  const n = Number(raw);
+  return Number.isFinite(n) && n >= 0 ? n : 2000;
+}
+const CLUSTER_ZOOM_ANIM_MS = resolveClusterZoomAnimMs();
+// World tile size (px) used by the standard "zoom to fit bounds" math.
+const WORLD_PX = 256;
+
+/**
+ * The (fractional) zoom at which `bounds` fills the given map pixel size — the
+ * same result google.maps fitBounds targets. Degenerate/near-zero bounds (a
+ * cluster of co-located points) yield the max cap, so clicking such a cluster
+ * zooms all the way to the individual items.
+ */
+function getBoundsZoomLevel(
+  bounds: google.maps.LatLngBounds,
+  dim: { width: number; height: number },
+): number {
+  const latRad = (lat: number) => {
+    const s = Math.sin((lat * Math.PI) / 180);
+    return Math.log((1 + s) / (1 - s)) / 2;
+  };
+  const zoomFor = (px: number, fraction: number) => Math.log(px / WORLD_PX / fraction) / Math.LN2;
+  const ne = bounds.getNorthEast();
+  const sw = bounds.getSouthWest();
+  const latFraction = (latRad(ne.lat()) - latRad(sw.lat())) / Math.PI;
+  const lngDiff = ne.lng() - sw.lng();
+  const lngFraction = (lngDiff < 0 ? lngDiff + 360 : lngDiff) / 360;
+  const latZoom = latFraction > 0 ? zoomFor(dim.height, latFraction) : CLUSTER_CLICK_MAX_ZOOM;
+  const lngZoom = lngFraction > 0 ? zoomFor(dim.width, lngFraction) : CLUSTER_CLICK_MAX_ZOOM;
+  return Math.min(latZoom, lngZoom, CLUSTER_CLICK_MAX_ZOOM);
+}
+
+/**
+ * Smoothly animate the map camera (center + fractional zoom) to a target over
+ * CLUSTER_ZOOM_ANIM_MS via requestAnimationFrame + moveCamera. We set a mapId
+ * (vector map), so moveCamera renders fractional zoom crisply — this turns the
+ * otherwise-instant large fitBounds jump into a smooth fly-in. `animRef` holds
+ * the in-flight rAF handle so a new click (or unmount) cancels the previous
+ * animation instead of fighting it.
+ */
+function animateMapCamera(
+  map: google.maps.Map,
+  target: { lat: number; lng: number; zoom: number },
+  animRef: React.MutableRefObject<number | null>,
+): void {
+  if (animRef.current != null) cancelAnimationFrame(animRef.current);
+  const startZoom = map.getZoom() ?? target.zoom;
+  const c = map.getCenter();
+  const startLat = c ? c.lat() : target.lat;
+  const startLng = c ? c.lng() : target.lng;
+  const start = performance.now();
+  const easeOutCubic = (t: number) => 1 - Math.pow(1 - t, 3);
+  const frame = (now: number) => {
+    const p = Math.min((now - start) / CLUSTER_ZOOM_ANIM_MS, 1);
+    const e = easeOutCubic(p);
+    map.moveCamera({
+      center: {
+        lat: startLat + (target.lat - startLat) * e,
+        lng: startLng + (target.lng - startLng) * e,
+      },
+      zoom: startZoom + (target.zoom - startZoom) * e,
+    });
+    animRef.current = p < 1 ? requestAnimationFrame(frame) : null;
+  };
+  animRef.current = requestAnimationFrame(frame);
+}
 
 /**
  * Resolves a CSS custom property (e.g. --primary) to a concrete rgb/hex string.
@@ -481,6 +552,8 @@ function ClustererManager({
 
   // Pending handle for the rAF-batched clusterer render (see scheduleRender).
   const renderRafRef = React.useRef<number | null>(null);
+  // Pending handle for the smooth cluster-click zoom animation (onClusterClick).
+  const cameraAnimRef = React.useRef<number | null>(null);
 
   // Create the clusterer once the map is ready.
   React.useEffect(() => {
@@ -489,28 +562,40 @@ function ClustererManager({
     const clusterer = new MarkerClusterer({
       map,
       renderer: clusterRenderer,
-      // Consistent smooth zoom on EVERY cluster click. The default handler does
-      // `map.fitBounds(cluster.bounds)`, which animates nicely for a spread-out
-      // cluster but SNAPS instantly for a tight one (near-zero bounds → a huge
-      // one-shot zoom delta Google renders without a tween). Instead, pan to the
-      // cluster centre and zoom in by a fixed, capped STEP — a small delta always
-      // animates, so a dense "240" and a tight "3" drill in identically. Repeated
-      // clicks keep drilling until the pins separate.
+      // One click smoothly zooms to reveal the cluster's contents. We compute
+      // the SAME target zoom Google's default `fitBounds(cluster.bounds)` would
+      // pick (via getBoundsZoomLevel) — for a cluster with no inner sub-clusters
+      // (co-located points) that's the max cap, i.e. straight to the item level
+      // — then ANIMATE the camera there (animateMapCamera) instead of the
+      // default's instant snap. This restores the original one-click-reveal
+      // behaviour, just smooth.
       onClusterClick: (_event, cluster, clusterMap) => {
+        const div = clusterMap.getDiv();
+        const dim = { width: div?.offsetWidth || 800, height: div?.offsetHeight || 600 };
         const current = clusterMap.getZoom() ?? 12;
-        const maxZoom = clusterMap.get('maxZoom') ?? CLUSTER_CLICK_MAX_ZOOM;
-        clusterMap.panTo(cluster.position);
-        clusterMap.setZoom(Math.min(current + CLUSTER_CLICK_ZOOM_STEP, maxZoom));
+        const fit = cluster.bounds ? getBoundsZoomLevel(cluster.bounds, dim) : current + 3;
+        // Always zoom IN at least one level; never past the cap.
+        const targetZoom = Math.min(Math.max(fit, current + 1), CLUSTER_CLICK_MAX_ZOOM);
+        const pos = cluster.position;
+        animateMapCamera(
+          clusterMap,
+          { lat: pos.lat(), lng: pos.lng(), zoom: targetZoom },
+          cameraAnimRef,
+        );
       },
     });
     clustererRef.current = clusterer;
 
     return () => {
-      // Cancel any pending batched render so it can't fire against a
-      // torn-down clusterer.
+      // Cancel any pending batched render + cluster-zoom animation so neither
+      // fires against a torn-down clusterer/map.
       if (renderRafRef.current != null) {
         cancelAnimationFrame(renderRafRef.current);
         renderRafRef.current = null;
+      }
+      if (cameraAnimRef.current != null) {
+        cancelAnimationFrame(cameraAnimRef.current);
+        cameraAnimRef.current = null;
       }
       // clearMarkers() removes all pins from the clusterer, then setMap(null)
       // detaches the OverlayView from the map — the correct teardown sequence.
