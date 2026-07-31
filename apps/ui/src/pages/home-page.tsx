@@ -26,6 +26,7 @@ import { MapFiltersPanel } from '@/components/map/map-filters-panel';
 import { MarkerPopupCard } from '@/components/map/marker-popup-card';
 import { MapCountPill } from '@/components/map/map-count-pill';
 import { MatchScoreCard } from '@/components/match-score';
+import { shouldRenderMatchScoreCard } from '@/lib/match-score-config';
 import '@/components/map/providers';
 import { performAction, performActionsBulk, type Item } from '@/lib/item-api';
 import { bulkFailureIndices, firstBulkError, BulkSingleError } from '@/lib/bulk';
@@ -2272,6 +2273,18 @@ export function HomePage() {
                         const fullItem = Object.values(allDomainItemsFiltered)
                           .flat()
                           .find((i) => i.item_id === item.id);
+                        const networkItem: Item = fullItem || {
+                          item_id: item.id,
+                          item_network: network?.id || '',
+                          item_domain: selectedDomain || '',
+                          item_type: 'profile',
+                          item_instance_url: null,
+                          item_schema_url: null,
+                          item_state: item.data,
+                          item_locations: [],
+                          created_at: new Date().toISOString(),
+                          updated_at: new Date().toISOString(),
+                        };
 
                         return (
                           <SelectableCard
@@ -2282,31 +2295,41 @@ export function HomePage() {
                             selectable={browseSelection.canSelect(item.domain ?? '')}
                             onToggle={(id) => browseSelection.toggle(id, item.domain ?? '')}
                           >
-                            <MatchScoreCard
-                              schema={schema!}
-                              schemaDescription={domainDescription}
-                              domainLabel={domainLabel}
-                              cardConfig={cardConfig}
-                              data={item.data}
-                              actions={domainActions}
-                              selectionMode={browseSelection.selectMode}
-                              onAction={(type, actionSchema) =>
-                                triggerAction(type, actionSchema, item.id)
-                              }
-                              localItem={myItem}
-                              networkItem={fullItem || {
-                                item_id: item.id,
-                                item_network: network?.id || '',
-                                item_domain: selectedDomain || '',
-                                item_type: 'profile',
-                                item_instance_url: null,
-                                item_schema_url: null,
-                                item_state: item.data,
-                                item_locations: [],
-                                created_at: new Date().toISOString(),
-                                updated_at: new Date().toISOString(),
-                              }}
-                            />
+                            {/* #394: same rule as the single-domain CardGrid so all
+                                three tabs behave identically — profile-to-profile
+                                match always shows; the free-text (no-profile) score
+                                is gated by the runtime-env flag. */}
+                            {shouldRenderMatchScoreCard(myItem, networkItem) ? (
+                              <MatchScoreCard
+                                schema={schema!}
+                                schemaDescription={domainDescription}
+                                domainLabel={domainLabel}
+                                cardConfig={cardConfig}
+                                data={item.data}
+                                actions={domainActions}
+                                selectionMode={browseSelection.selectMode}
+                                onAction={(type, actionSchema) =>
+                                  triggerAction(type, actionSchema, item.id)
+                                }
+                                localItem={myItem}
+                                networkItem={networkItem}
+                              />
+                            ) : (
+                              <DomainCard
+                                schema={schema!}
+                                schemaDescription={domainDescription}
+                                domainLabel={domainLabel}
+                                cardConfig={cardConfig}
+                                data={item.data}
+                                actions={domainActions}
+                                selectionMode={browseSelection.selectMode}
+                                onAction={(type, actionSchema) =>
+                                  triggerAction(type, actionSchema, item.id)
+                                }
+                                localItem={myItem}
+                                networkItem={networkItem}
+                              />
+                            )}
                           </SelectableCard>
                         );
                       })}

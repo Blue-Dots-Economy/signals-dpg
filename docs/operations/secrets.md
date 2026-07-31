@@ -201,6 +201,7 @@ in `apps/ui/src/lib/api-config.ts`.
 | `VITE_DEFAULT_API_URL` | optional | Wins over `VITE_API_URL` when set. |
 | `VITE_SHOW_INSTANCE_SELECTOR` | optional | When `true`, surfaces the instance selector even outside `import.meta.env.DEV`. |
 | `VITE_NETWORK_ID` | optional | Comma-separated list of network IDs to scope the UI to. Parsed by `parseNetworkIds` (split on `,`, trimmed, empties dropped) in `apps/ui/src/pages/home-page.tsx` and `profile-form-page.tsx`. Empty/unset = no network filter applied. |
+| `VITE_FREETEXT_MATCH_SCORE_ENABLED` | optional | Gates the **free-text / no-profile** match score (the `/discover` relevance badge shown to signed-out viewers when they search). Default **ON**; set `false`/`0`/`off`/`no` to hide it. The profile-to-profile match score (signed-in viewer with a profile) is never affected. See `apps/ui/src/lib/match-score-config.ts`. |
 
 In the default Helm install the UI's nginx reverse-proxies `/api/*` to
 `dpg-api:2742`, so `VITE_API_URL` is intentionally left empty in
