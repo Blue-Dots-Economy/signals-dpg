@@ -60,11 +60,20 @@ export const authConfig = {
   create_test_otp: auth.CREATE_TEST_OTP,
   allow_self_signup: auth.SELF_SIGNUP_MODE === 'allowed',
   login_channels: parseLoginChannels(auth.LOGIN_CHANNELS),
-  // Keycloak rollout flag (§7). Read this — never re-parse process.env.
+  // Identity provider. Read this — never re-parse process.env.
   provider: auth.AUTH_PROVIDER,
-  // Convenience predicates so call sites read as intent, not string compares.
-  keycloak_enabled: auth.AUTH_PROVIDER !== 'betterauth',
-  betterauth_enabled: auth.AUTH_PROVIDER !== 'keycloak',
+  /**
+   * Convenience predicates so call sites read as intent, not string compares.
+   *
+   * Exact complements now that `dual` is gone. Both are kept rather than
+   * collapsed to one, because the two names carry opposite intent at their call
+   * sites — `keycloak_enabled` guards Keycloak work, `betterauth_enabled` guards
+   * the legacy surface — and reading `!betterauth_enabled` to mean "Keycloak" was
+   * exactly the kind of double negative that made the three-mode code hard to
+   * follow.
+   */
+  keycloak_enabled: auth.AUTH_PROVIDER === 'keycloak',
+  betterauth_enabled: auth.AUTH_PROVIDER === 'betterauth',
   /**
    * Acting-org authorisation source (§5.1). The header is sent in every mode;
    * this only decides whether it must fall inside the token's grant.

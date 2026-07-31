@@ -1,20 +1,19 @@
 /**
- * Session resolution across both identity providers, shared by
- * `auth_middleware.ts` and `validate_session.ts` so the two cannot drift.
+ * Session resolution, shared by `auth_middleware.ts` and `validate_session.ts`
+ * so the two cannot drift.
  *
- * Which provider runs is decided entirely by `AUTH_PROVIDER`
- * (docs/superpowers/plans/2026-07-23-keycloak-migration-design.md §7):
+ * Which provider runs is decided entirely by `AUTH_PROVIDER`:
  *
- *   betterauth  today's behaviour, unchanged. The Keycloak branch is not even
- *               reached — this is what makes Build 1 safe to merge.
- *   dual        a bearer token that claims our Keycloak issuer is validated as
- *               a Keycloak token; anything else falls through to better-auth.
- *   keycloak    Keycloak only. No better-auth fallback.
+ *   betterauth  the Keycloak branch is not reached at all; the caller falls
+ *               through to better-auth's own session handling.
+ *   keycloak    Keycloak only. There is no better-auth fallback — a request that
+ *               carries no usable Keycloak token is simply unauthenticated.
  *
- * In `dual`, a token that *looks* like ours but fails validation is NOT retried
- * against better-auth. Falling through would turn a precise failure ("expired",
- * "wrong client") into a generic 401 and, worse, would let a rejected token get
- * a second evaluation by a different code path.
+ * A token that *looks* Keycloak-issued but fails validation is rejected outright
+ * rather than passed on. That mattered when a fallback existed (it would have
+ * turned a precise failure — "expired", "wrong client" — into a generic 401, and
+ * let a rejected token get a second evaluation by another code path), and it is
+ * retained now because the precise failure is still the more useful answer.
  */
 
 import type { FastifyReply, FastifyRequest } from 'fastify';
@@ -179,8 +178,10 @@ export type SessionResolution =
  * Try to resolve the request against Keycloak, populating `request.user` from
  * the local mirror on success.
  *
- * Returns `fallthrough` when this request is not ours to handle — either the
- * flag says better-auth, or the bearer token isn't a token from our realm.
+ * Returns `fallthrough` only under `AUTH_PROVIDER=betterauth`, meaning the caller
+ * should hand the request to better-auth. Under `keycloak` this either resolves
+ * the request or fails it — there is no second provider to defer to, so a request
+ * with no usable Keycloak token is unauthenticated rather than passed on.
  */
 export async function resolveKeycloakSession(
   request: FastifyRequest
@@ -190,9 +191,7 @@ export async function resolveKeycloakSession(
   const token = extractBearerToken(request.headers.authorization);
 
   if (!token || !looksLikeKeycloakToken(token)) {
-    // Under `keycloak` there is no other provider to fall through to.
-    if (!authConfig.betterauth_enabled) return { ok: false, failure: UNAUTHORIZED };
-    return { ok: false, fallthrough: true };
+    return { ok: false, failure: UNAUTHORIZED };
   }
 
   const verified = await verifyKeycloakToken(token);

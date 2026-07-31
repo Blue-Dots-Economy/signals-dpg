@@ -5,7 +5,6 @@ import { db } from '../../db/postgres/drizzle_config';
 import { user as userTable } from '../../db/postgres/schema/auth';
 import { eq } from 'drizzle-orm';
 import { resolveKeycloakSession, sendAuthFailure } from './resolve_session';
-import { backfillKeycloakShell } from '../../src/services/auth/provisioning';
 
 /**
  * Populates `request.user` from whichever credential the caller presented.
@@ -112,17 +111,6 @@ export async function auth_middleware(
   }
 
   request.user = session.user;
-
-  // JIT safety net (§6.2). This user just proved who they are on the OLD path,
-  // which is the only moment signals can still give a straggler a Keycloak
-  // shell — someone admin-onboarded after the R4 bulk run cannot present a
-  // Keycloak token at all, because Keycloak has no account for them yet.
-  //
-  // Deliberately not awaited: the login has already succeeded and a Keycloak
-  // outage must not slow it down or fail it. No-op unless AUTH_PROVIDER=dual.
-  if (session.user.id) {
-    void backfillKeycloakShell(session.user.id, request.log);
-  }
 }
 
 export async function auth_middleware_if_enabled(

@@ -38,14 +38,12 @@ import {
   organization as organizationTable,
   user as userTable,
 } from '@api/db/postgres/schema/auth';
-import { authConfig, keycloakConfig } from '@/config';
+import { authConfig } from '@/config';
 import { materializeSignupGuardian } from '@/services/signup_guardian';
 import { sendWelcomeNotifications } from '@/notifications/welcome';
 import { takeSignupExtras } from '@/services/auth/signup_extras';
 import { actingOrgGrant, grantIsWildcard } from '@/utils/keycloak_token';
 import type { KeycloakClaims } from '@/utils/keycloak_token';
-import { KeycloakAdminClient } from '@/services/auth/keycloak_admin';
-import { mapUserToKeycloak } from '@/services/auth/user_to_keycloak';
 import { randomUUID } from 'node:crypto';
 
 /** The shape the auth middleware puts on `request.user`. Unchanged contract. */
@@ -548,177 +546,6 @@ async function ensureOrgMembership(
       { err, user_id: userId, org_id: identity.orgId },
       'provisioning: failed to create org membership',
     );
-  }
-}
-
-// ───────────────────────────────────────────────────────────────────────────
-// JIT safety net (§6.2)
-// ───────────────────────────────────────────────────────────────────────────
-
-/**
- * Backfill a Keycloak identity shell for a local user who does not have one,
- * preserving their existing UUID.
- *
- * **Why this is triggered from the better-auth path, not a Keycloak token.**
- * The straggler case §6.2 describes is a user who exists locally but was not
- * in Keycloak at bulk-load time — e.g. admin-onboarded between the R4 run and
- * cutover. Such a user cannot present a Keycloak token at all: Keycloak has no
- * account for them, and realm registration is disabled, so its own OTP flow
- * rejects them before signals ever sees a request. The only moment signals both
- * knows who they are *and* can still fix it is when they log in the old way,
- * during the `dual` window. So that is where this hooks in.
- *
- * (The other direction — a Keycloak subject whose identifiers belong to a
- * different local user — is the §6.3 spike-2 collision, and is deliberately
- * refused as IDENTITY_CONFLICT rather than resolved here. Rekeying domain data
- * is exactly what this design exists to avoid.)
- *
- * Best-effort and non-blocking by construction:
- *   - never throws, so a caller can `void` it;
- *   - writes only to Keycloak, so it is reversible (the R4 gate);
- *   - deduped per process, so a returning user costs one Keycloak call once,
- *     not one per login.
- *
- * The bulk script remains the primary path — users who never log in still need
- * shells so admin queries stay complete, and this only ever sees people who do.
- */
-const shellBackfillAttempted = new Set<string>();
-let adminClient: KeycloakAdminClient | null = null;
-let adminClientUnavailableLogged = false;
-/**
- * Whether this realm actually retains the `phoneNumber` attribute. Checked once
- * per process, because Keycloak 26 ignores `kc.user.profile.config` on realm
- * import and then DISCARDS writes to undeclared attributes without erroring —
- * so a backfilled user would silently end up unable to receive a phone OTP.
- * null = not yet checked.
- */
-let attributesPersist: boolean | null = null;
-
-/** Test seam: forget the dedupe set, memoised admin client and probe result. */
-export function resetKeycloakShellBackfillState(): void {
-  shellBackfillAttempted.clear();
-  adminClient = null;
-  adminClientUnavailableLogged = false;
-  attributesPersist = null;
-}
-
-function getAdminClient(log: FastifyBaseLogger): KeycloakAdminClient | null {
-  if (adminClient) return adminClient;
-
-  if (!keycloakConfig.internal_base_url || !keycloakConfig.api_client_secret) {
-    if (!adminClientUnavailableLogged) {
-      adminClientUnavailableLogged = true;
-      log.warn(
-        'keycloak shell backfill is disabled: KEYCLOAK_API_CLIENT_SECRET (or ' +
-          'base URL) is not configured. Stragglers will need the bulk migration ' +
-          'script re-run instead.',
-      );
-    }
-    return null;
-  }
-
-  adminClient = new KeycloakAdminClient({
-    baseUrl: keycloakConfig.internal_base_url,
-    realm: keycloakConfig.realm,
-    clientId: keycloakConfig.api_client_id,
-    clientSecret: keycloakConfig.api_client_secret,
-  });
-  return adminClient;
-}
-
-export async function backfillKeycloakShell(
-  userId: string,
-  log: FastifyBaseLogger
-): Promise<void> {
-  // Only meaningful mid-migration. Under `betterauth` there is nothing to
-  // backfill into; under `keycloak` the old path no longer runs.
-  if (authConfig.provider !== 'dual') return;
-  if (shellBackfillAttempted.has(userId)) return;
-  shellBackfillAttempted.add(userId);
-
-  try {
-    const client = getAdminClient(log);
-    if (!client) return;
-
-    // Refuse to write a user whose phone attribute would be thrown away.
-    if (attributesPersist === null) {
-      attributesPersist = await client.attributesWillPersist('phoneNumber');
-      if (!attributesPersist) {
-        log.error(
-          'keycloak shell backfill disabled: this realm discards the ' +
-            '`phoneNumber` attribute, so backfilled users could not receive a ' +
-            'phone OTP. Run infra/keycloak/init/apply-user-profile.sh against ' +
-            'the realm, then restart.',
-        );
-      }
-    }
-    if (!attributesPersist) return;
-
-    if (await client.getUserById(userId)) return;
-
-    const [row] = await db
-      .select({
-        id: userTable.id,
-        name: userTable.name,
-        email: userTable.email,
-        emailVerified: userTable.emailVerified,
-        phoneNumber: userTable.phoneNumber,
-        phoneNumberVerified: userTable.phoneNumberVerified,
-        role: userTable.role,
-        banned: userTable.banned,
-        banReason: userTable.banReason,
-        banExpires: userTable.banExpires,
-      })
-      .from(userTable)
-      .where(eq(userTable.id, userId))
-      .limit(1);
-
-    if (!row) return;
-
-    const mapped = mapUserToKeycloak(row);
-    if (!mapped.ok) {
-      log.warn(
-        { user_id: userId, reason: mapped.message },
-        'keycloak shell backfill skipped: user row is not mappable',
-      );
-      return;
-    }
-
-    // partialImport, NOT POST /users: on KC 26.5.5 plain create ignores the
-    // supplied id, which would break the sub == user.id invariant this whole
-    // migration depends on.
-    const outcome = await client.createUserPreservingId(mapped.user);
-
-    switch (outcome.kind) {
-      case 'created':
-        log.info({ user_id: userId }, 'backfilled a Keycloak shell for a straggler');
-        return;
-      case 'already_exists':
-        return;
-      case 'conflict':
-        log.error(
-          { user_id: userId, detail: outcome.detail },
-          'keycloak shell backfill conflicted: another Keycloak user already holds ' +
-            'these identifiers (see §6.3 spike 2)',
-        );
-        return;
-      case 'created_with_different_id':
-        // The UUID-preservation invariant just broke. Remove the wrongly-keyed
-        // user immediately rather than leaving an identity whose sub does not
-        // match any local row.
-        log.error(
-          { user_id: userId, assigned_id: outcome.assignedId },
-          'keycloak shell backfill did NOT preserve the UUID — removing the ' +
-            'created user. This Keycloak ignores a supplied id; the migration ' +
-            'needs --strategy=import (§6.3 spike 1).',
-        );
-        await client.deleteUser(outcome.assignedId).catch(() => {});
-        return;
-    }
-  } catch (err) {
-    // Deliberately swallowed: this runs alongside a login that has already
-    // succeeded, and a Keycloak outage must not turn it into a failure.
-    log.error({ err, user_id: userId }, 'keycloak shell backfill failed');
   }
 }
 

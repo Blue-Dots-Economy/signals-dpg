@@ -17,7 +17,7 @@ const AuthConfigResponse = z.object({
    * The instance's identity provider, so the UI can pick a login screen at
    * RUNTIME instead of having it compiled into the bundle. See the note below.
    */
-  authProvider: z.enum(['betterauth', 'dual', 'keycloak']),
+  authProvider: z.enum(['betterauth', 'keycloak']),
   /**
    * OIDC connection details, or null when this instance isn't running Keycloak.
    * All three values are public by nature for a public OIDC client (the realm's

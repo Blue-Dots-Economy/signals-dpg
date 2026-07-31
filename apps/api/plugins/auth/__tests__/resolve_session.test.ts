@@ -10,7 +10,7 @@ import type { FastifyRequest } from 'fastify';
  */
 
 const mockAuthConfig = {
-  provider: 'betterauth' as 'betterauth' | 'dual' | 'keycloak',
+  provider: 'betterauth' as 'betterauth' | 'keycloak',
   keycloak_enabled: false,
   betterauth_enabled: true,
 };
@@ -59,7 +59,7 @@ vi.mock('../../../src/services/auth/service_account', () => ({
 
 const { resolveKeycloakSession, sendAuthFailure } = await import('../resolve_session.js');
 
-const setProvider = (provider: 'betterauth' | 'dual' | 'keycloak') => {
+const setProvider = (provider: 'betterauth' | 'keycloak') => {
   mockAuthConfig.provider = provider;
   mockAuthConfig.keycloak_enabled = provider !== 'betterauth';
   mockAuthConfig.betterauth_enabled = provider !== 'keycloak';
@@ -113,8 +113,8 @@ describe('AUTH_PROVIDER=betterauth — the Keycloak path is inert', () => {
   });
 });
 
-describe('AUTH_PROVIDER=dual', () => {
-  beforeEach(() => setProvider('dual'));
+describe('AUTH_PROVIDER=keycloak — token validation', () => {
+  beforeEach(() => setProvider('keycloak'));
 
   it('validates a Keycloak token and populates request.user from the mirror', async () => {
     const request = makeRequest('Bearer a.b.c');
@@ -132,23 +132,10 @@ describe('AUTH_PROVIDER=dual', () => {
     });
   });
 
-  it('falls through to better-auth for an opaque bearer token', async () => {
-    looksLikeKeycloakToken.mockReturnValue(false);
-
-    const result = await resolveKeycloakSession(makeRequest('Bearer opaque-token'));
-
-    expect(result).toEqual({ ok: false, fallthrough: true });
-    expect(verifyKeycloakToken).not.toHaveBeenCalled();
-  });
-
-  it('falls through when there is no bearer token', async () => {
-    const result = await resolveKeycloakSession(makeRequest());
-    expect(result).toEqual({ ok: false, fallthrough: true });
-  });
-
-  it('does NOT retry a failed Keycloak token against better-auth', async () => {
-    // Falling through would blur a precise failure into a generic 401 and give
-    // a rejected token a second evaluation by another code path.
+  it('surfaces the precise token failure rather than a generic 401', async () => {
+    // This began as "does not retry against better-auth" and outlived the
+    // fallback: reporting TOKEN_EXPIRED beats a bare 401 for anyone debugging a
+    // login, so the specific code is still the contract.
     verifyKeycloakToken.mockResolvedValue({
       ok: false,
       code: 'TOKEN_EXPIRED',
@@ -208,7 +195,7 @@ describe('AUTH_PROVIDER=keycloak — no better-auth fallback', () => {
 });
 
 describe('service vs human fork (Build 3)', () => {
-  beforeEach(() => setProvider('dual'));
+  beforeEach(() => setProvider('keycloak'));
 
   const serviceClaims = {
     sub: 'service-account-sub',
@@ -286,7 +273,7 @@ describe('service vs human fork (Build 3)', () => {
 });
 
 describe('failure mapping', () => {
-  beforeEach(() => setProvider('dual'));
+  beforeEach(() => setProvider('keycloak'));
 
   it.each([
     ['TOKEN_EXPIRED', 401],
@@ -381,7 +368,7 @@ describe('sendAuthFailure', () => {
 });
 
 describe('acting-org grant plumbing (§5.1)', () => {
-  beforeEach(() => setProvider('dual'));
+  beforeEach(() => setProvider('keycloak'));
 
   it('threads the grant off a human token onto the request', async () => {
     verifyKeycloakToken.mockResolvedValue({

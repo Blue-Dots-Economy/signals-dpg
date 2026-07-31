@@ -216,7 +216,7 @@ export interface AuthConfigResponse {
    * Optional on the type so a UI build can talk to an older API that doesn't
    * send it yet; absent is treated as `betterauth`.
    */
-  authProvider?: 'betterauth' | 'dual' | 'keycloak';
+  authProvider?: 'betterauth' | 'keycloak';
   keycloak?: KeycloakPublicConfig | null;
 }
 

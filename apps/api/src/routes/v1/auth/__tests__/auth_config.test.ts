@@ -14,7 +14,7 @@ import {
 const mockAuthConfig = {
   allow_self_signup: false,
   login_channels: ['email', 'phone'] as Array<'email' | 'phone'>,
-  provider: 'betterauth' as 'betterauth' | 'dual' | 'keycloak',
+  provider: 'betterauth' as 'betterauth' | 'keycloak',
   keycloak_enabled: false,
 };
 
@@ -79,18 +79,6 @@ describe('GET /api/v1/auth/config', () => {
     });
   });
 
-  it('reports dual mode, so the UI can keep the OTP screen during transition', async () => {
-    mockAuthConfig.provider = 'dual';
-    mockAuthConfig.keycloak_enabled = true;
-    mockKeycloakConfig.base_url = 'http://localhost:8080';
-
-    const res = await get();
-
-    expect(res.json().authProvider).toBe('dual');
-    // Details are still advertised — dual accepts Keycloak tokens — but the UI
-    // maps `dual` to the OTP screen (see lib/keycloak-config.ts).
-    expect(res.json().keycloak).not.toBeNull();
-  });
 
   it('withholds Keycloak details when the mode is on but no URL is configured', async () => {
     // A half-configured instance must not send the UI somewhere broken.

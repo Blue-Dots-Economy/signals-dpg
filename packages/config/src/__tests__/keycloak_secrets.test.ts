@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   AuthSecretsSchema,
   KeycloakSecretsSchema,
+  assertAuthProviderSupported,
   assertKeycloakConfigured,
   parseKeycloakAcceptedClientIds,
 } from '../secrets.js';
@@ -14,10 +15,30 @@ describe('AUTH_PROVIDER', () => {
     expect(AuthSecretsSchema.parse(REQUIRED_AUTH).AUTH_PROVIDER).toBe('betterauth');
   });
 
-  it.each(['betterauth', 'dual', 'keycloak'] as const)('accepts %s', (mode) => {
+  it.each(['betterauth', 'keycloak'] as const)('accepts %s', (mode) => {
     expect(
       AuthSecretsSchema.parse({ ...REQUIRED_AUTH, AUTH_PROVIDER: mode }).AUTH_PROVIDER
     ).toBe(mode);
+  });
+
+  it('rejects the removed dual mode', () => {
+    // Not merely unsupported — it used to be valid, so an instance may still be
+    // configured with it. The schema must refuse it rather than coerce.
+    expect(() =>
+      AuthSecretsSchema.parse({ ...REQUIRED_AUTH, AUTH_PROVIDER: 'dual' })
+    ).toThrow();
+  });
+
+  it('explains what to do when an instance is still set to dual', () => {
+    // Zod's own enum error says only "Invalid input", which tells an operator
+    // nothing about the user migration that is now a prerequisite.
+    expect(() => assertAuthProviderSupported('dual')).toThrow(ConfigError);
+    expect(() => assertAuthProviderSupported('dual')).toThrow(/has been removed/);
+    expect(() => assertAuthProviderSupported('dual')).toThrow(/keycloak:migrate:users/);
+  });
+
+  it.each([undefined, 'betterauth', 'keycloak'])('allows %s through', (value) => {
+    expect(() => assertAuthProviderSupported(value)).not.toThrow();
   });
 
   it('rejects an unknown provider rather than silently falling back', () => {
@@ -88,7 +109,7 @@ describe('assertKeycloakConfigured', () => {
     ).not.toThrow();
   });
 
-  it.each(['dual', 'keycloak'] as const)(
+  it.each(['keycloak'] as const)(
     'throws on %s when KEYCLOAK_BASE_URL is missing',
     (mode) => {
       expect(() =>
@@ -100,7 +121,7 @@ describe('assertKeycloakConfigured', () => {
     }
   );
 
-  it.each(['dual', 'keycloak'] as const)(
+  it.each(['keycloak'] as const)(
     'throws on %s when the accepted-client list is empty',
     (mode) => {
       expect(() =>
@@ -109,7 +130,7 @@ describe('assertKeycloakConfigured', () => {
     }
   );
 
-  it.each(['dual', 'keycloak'] as const)('passes on %s when configured', (mode) => {
+  it.each(['keycloak'] as const)('passes on %s when configured', (mode) => {
     expect(() => assertKeycloakConfigured(mode, configured)).not.toThrow();
   });
 });

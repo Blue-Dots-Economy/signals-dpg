@@ -45,11 +45,6 @@ describe('resolveUiAuthProvider — the server decides', () => {
     expect(resolveUiAuthProvider(serverConfig({ authProvider: 'keycloak' }))).toBe('keycloak');
   });
 
-  it('keeps the OTP screen while the API is in dual mode', () => {
-    // `dual` means the API accepts BOTH — the transition state where existing
-    // users must keep logging in the old way. Only `keycloak` flips the screen.
-    expect(resolveUiAuthProvider(serverConfig({ authProvider: 'dual' }))).toBe('betterauth');
-  });
 
   it('defaults to betterauth before the config has loaded', () => {
     // Safe default: never strand a user on a redirect the server never asked for.
@@ -69,7 +64,7 @@ describe('VITE_AUTH_PROVIDER override (R5 canary)', () => {
 
   it('can force keycloak ahead of the server', () => {
     env.VITE_AUTH_PROVIDER = 'keycloak';
-    expect(resolveUiAuthProvider(serverConfig({ authProvider: 'dual' }))).toBe('keycloak');
+    expect(resolveUiAuthProvider(serverConfig({ authProvider: 'betterauth' }))).toBe('keycloak');
   });
 
   it('can force betterauth even when the server says keycloak', () => {
@@ -154,9 +149,9 @@ describe('isKeycloakLoginEnabled', () => {
   });
 
   it('is false when details are advertised but the provider is not keycloak', () => {
-    expect(isKeycloakLoginEnabled(serverConfig({ authProvider: 'dual', keycloak: KC }))).toBe(
-      false
-    );
+    expect(
+      isKeycloakLoginEnabled(serverConfig({ authProvider: 'betterauth', keycloak: KC }))
+    ).toBe(false);
   });
 
   it('is true only when both hold', () => {
