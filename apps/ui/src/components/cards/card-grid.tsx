@@ -5,6 +5,7 @@ import { DomainCard } from './domain-card';
 import { MatchScoreCard } from '@/components/match-score';
 import { EmptyState } from '@/components/empty-state';
 import type { Item } from '@/lib/item-api';
+import { shouldRenderMatchScoreCard } from '@/lib/match-score-config';
 import { SelectableCard } from '@/components/selection/selectable-card';
 import { useEqualRowHeights } from '@/hooks/use-equal-row-heights';
 
@@ -94,7 +95,7 @@ export function CardGrid({
         };
 
         const cardElement =
-          localItem && networkItem ? (
+          shouldRenderMatchScoreCard(localItem, networkItem) ? (
             <MatchScoreCard
               schema={schema}
               schemaName={schemaName}
@@ -105,7 +106,7 @@ export function CardGrid({
               selectionMode={selection?.selectMode ?? false}
               onAction={(type, actionSchema) => onAction?.(item.id, type, actionSchema)}
               onClick={() => onItemClick?.(item.id)}
-              localItem={localItem}
+              localItem={localItem ?? null}
               networkItem={networkItem}
             />
           ) : (

@@ -34,6 +34,7 @@ import { MapFiltersPanel } from '@/components/map/map-filters-panel';
 import { MarkerPopupCard } from '@/components/map/marker-popup-card';
 import { MapCountPill } from '@/components/map/map-count-pill';
 import { MatchScoreCard } from '@/components/match-score';
+import { shouldRenderMatchScoreCard } from '@/lib/match-score-config';
 import '@/components/map/providers';
 import { performAction, performActionsBulk, type Item } from '@/lib/item-api';
 import { bulkFailureIndices, firstBulkError, BulkSingleError } from '@/lib/bulk';
@@ -688,11 +689,11 @@ export function HomePage() {
   const [preferredSource, setPreferredSource] =
     React.useState<PreferredLocationSource>('profile');
 
-  const { location: userLocation, browser: browserLocation } = useUserLocation(
-    profileLocation,
-    profilesResolved,
-    preferredSource,
-  );
+  const {
+    location: userLocation,
+    source: resolvedLocationSource,
+    browser: browserLocation,
+  } = useUserLocation(profileLocation, profilesResolved, preferredSource);
   const geoPermission = useGeolocationPermission();
 
   // The toggle only makes sense when there's a profile location to switch away
@@ -1272,7 +1273,14 @@ export function HomePage() {
     hasLocation,
     degraded: listDegraded,
     distanceMeters: listDistanceMeters,
-    locationSource: preferredSource,
+    // The EFFECTIVE source of the coordinate actually sent (not the toggle
+    // preference): logged out / no profile → useUserLocation falls back to the
+    // browser coordinate, so the note must say "current location", not "your
+    // profile location". `preferredSource` stays 'profile' by default even when
+    // no profile exists, which produced the wrong wording. 'none' can't reach
+    // the km-bearing note branch (hasLocation would be false), so map it to the
+    // 'profile' default harmlessly.
+    locationSource: resolvedLocationSource === 'browser' ? 'browser' : 'profile',
   });
 
   // Active schema: from the selected browsing domain, or first visible domain
@@ -1986,6 +1994,24 @@ export function HomePage() {
         />
       );
     }
+    // Location-bounded discover returned nothing: the network may well have
+    // listings — just none within the (hard) radius. Say THAT, not "none in
+    // this network" (false) or nothing at all. Mirrors the map's area-scoped
+    // empty message; the "Search near" toggle makes trying another location
+    // actionable.
+    if (hasLocation && listDistanceMeters !== undefined) {
+      const km = Math.round(listDistanceMeters / 1000);
+      const locationSource = resolvedLocationSource === 'browser' ? 'current' : 'profile';
+      return (
+        <EmptyState
+          heading={t('home.nothing_here_heading')}
+          message={t('home.no_listings_in_radius', {
+            km,
+            locationSource: t(`home.location_source_${locationSource}`),
+          })}
+        />
+      );
+    }
     return (
       <EmptyState
         heading={t('home.nothing_here_heading')}
@@ -2257,7 +2283,12 @@ export function HomePage() {
                     native — signals-search unreachable/unconfigured/timed out)
                     that ranking itself is temporarily unavailable. Exactly one
                     variant renders at a time; see `resolveListNote`. */}
-                {listNote && (
+                {/* Suppress the "Showing profiles within X km…" note when the
+                    list is empty — it would falsely imply results are shown.
+                    The radius-aware empty state (buildEmptyState) carries the
+                    explanation in that case instead. Kept during loading
+                    (contentCount 0) is fine — the skeleton shows, no note. */}
+                {listNote && contentCount > 0 && (
                   <p className="mb-3 text-xs text-muted-foreground">
                     {t(
                       listNote.key,
@@ -2356,6 +2387,18 @@ export function HomePage() {
                         const fullItem = Object.values(allDomainItemsFiltered)
                           .flat()
                           .find((i) => i.item_id === item.id);
+                        const networkItem: Item = fullItem || {
+                          item_id: item.id,
+                          item_network: network?.id || '',
+                          item_domain: selectedDomain || '',
+                          item_type: 'profile',
+                          item_instance_url: null,
+                          item_schema_url: null,
+                          item_state: item.data,
+                          item_locations: [],
+                          created_at: new Date().toISOString(),
+                          updated_at: new Date().toISOString(),
+                        };
 
                         return (
                           <SelectableCard
@@ -2366,31 +2409,41 @@ export function HomePage() {
                             selectable={browseSelection.canSelect(item.domain ?? '')}
                             onToggle={(id) => browseSelection.toggle(id, item.domain ?? '')}
                           >
-                            <MatchScoreCard
-                              schema={schema!}
-                              schemaDescription={domainDescription}
-                              domainLabel={domainLabel}
-                              cardConfig={cardConfig}
-                              data={item.data}
-                              actions={domainActions}
-                              selectionMode={browseSelection.selectMode}
-                              onAction={(type, actionSchema) =>
-                                triggerAction(type, actionSchema, item.id)
-                              }
-                              localItem={myItem}
-                              networkItem={fullItem || {
-                                item_id: item.id,
-                                item_network: network?.id || '',
-                                item_domain: selectedDomain || '',
-                                item_type: 'profile',
-                                item_instance_url: null,
-                                item_schema_url: null,
-                                item_state: item.data,
-                                item_locations: [],
-                                created_at: new Date().toISOString(),
-                                updated_at: new Date().toISOString(),
-                              }}
-                            />
+                            {/* #394: same rule as the single-domain CardGrid so all
+                                three tabs behave identically — profile-to-profile
+                                match always shows; the free-text (no-profile) score
+                                is gated by the runtime-env flag. */}
+                            {shouldRenderMatchScoreCard(myItem, networkItem) ? (
+                              <MatchScoreCard
+                                schema={schema!}
+                                schemaDescription={domainDescription}
+                                domainLabel={domainLabel}
+                                cardConfig={cardConfig}
+                                data={item.data}
+                                actions={domainActions}
+                                selectionMode={browseSelection.selectMode}
+                                onAction={(type, actionSchema) =>
+                                  triggerAction(type, actionSchema, item.id)
+                                }
+                                localItem={myItem}
+                                networkItem={networkItem}
+                              />
+                            ) : (
+                              <DomainCard
+                                schema={schema!}
+                                schemaDescription={domainDescription}
+                                domainLabel={domainLabel}
+                                cardConfig={cardConfig}
+                                data={item.data}
+                                actions={domainActions}
+                                selectionMode={browseSelection.selectMode}
+                                onAction={(type, actionSchema) =>
+                                  triggerAction(type, actionSchema, item.id)
+                                }
+                                localItem={myItem}
+                                networkItem={networkItem}
+                              />
+                            )}
                           </SelectableCard>
                         );
                       })}

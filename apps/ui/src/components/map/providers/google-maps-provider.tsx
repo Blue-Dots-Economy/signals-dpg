@@ -31,6 +31,13 @@ import { useViewportReportEmitter } from './use-viewport-report';
  */
 const markerDomainMap = new WeakMap<object, string>();
 
+// Cluster-click zoom (see onClusterClick): a fixed, small zoom-in step keeps
+// the animation smooth and identical for every cluster (a large one-shot delta
+// snaps without a tween); capped so a tight cluster can't over-zoom past the
+// map's own max.
+const CLUSTER_CLICK_ZOOM_STEP = 3;
+const CLUSTER_CLICK_MAX_ZOOM = 18;
+
 /**
  * Resolves a CSS custom property (e.g. --primary) to a concrete rgb/hex string.
  * The theme stores --primary as an `oklch(...)` value; an SVG data-URI `fill`
@@ -472,14 +479,39 @@ function ClustererManager({
   // Stable ref to the MarkerClusterer instance
   const clustererRef = React.useRef<MarkerClusterer | null>(null);
 
+  // Pending handle for the rAF-batched clusterer render (see scheduleRender).
+  const renderRafRef = React.useRef<number | null>(null);
+
   // Create the clusterer once the map is ready.
   React.useEffect(() => {
     if (!map) return;
 
-    const clusterer = new MarkerClusterer({ map, renderer: clusterRenderer });
+    const clusterer = new MarkerClusterer({
+      map,
+      renderer: clusterRenderer,
+      // Consistent smooth zoom on EVERY cluster click. The default handler does
+      // `map.fitBounds(cluster.bounds)`, which animates nicely for a spread-out
+      // cluster but SNAPS instantly for a tight one (near-zero bounds → a huge
+      // one-shot zoom delta Google renders without a tween). Instead, pan to the
+      // cluster centre and zoom in by a fixed, capped STEP — a small delta always
+      // animates, so a dense "240" and a tight "3" drill in identically. Repeated
+      // clicks keep drilling until the pins separate.
+      onClusterClick: (_event, cluster, clusterMap) => {
+        const current = clusterMap.getZoom() ?? 12;
+        const maxZoom = clusterMap.get('maxZoom') ?? CLUSTER_CLICK_MAX_ZOOM;
+        clusterMap.panTo(cluster.position);
+        clusterMap.setZoom(Math.min(current + CLUSTER_CLICK_ZOOM_STEP, maxZoom));
+      },
+    });
     clustererRef.current = clusterer;
 
     return () => {
+      // Cancel any pending batched render so it can't fire against a
+      // torn-down clusterer.
+      if (renderRafRef.current != null) {
+        cancelAnimationFrame(renderRafRef.current);
+        renderRafRef.current = null;
+      }
       // clearMarkers() removes all pins from the clusterer, then setMap(null)
       // detaches the OverlayView from the map — the correct teardown sequence.
       // onRemove() is an internal OverlayView lifecycle callback and must NOT
@@ -493,6 +525,22 @@ function ClustererManager({
     };
   }, [map]);
 
+  // Coalesce re-clustering into ONE render per frame. Each ClusteredMarker
+  // registers its element separately as it mounts, and MarkerClusterer's
+  // addMarker/removeMarker re-cluster + redraw the ENTIRE set by default on
+  // every call. With N markers registering one-by-one that is O(n²) (~125k
+  // clustering passes for 500 pins) — the multi-second freeze where the map is
+  // blank even though the /markers response already landed. So every add/remove
+  // is done with noDraw=true and a single requestAnimationFrame-batched
+  // render() draws the final set once the burst settles → O(n).
+  const scheduleRender = React.useCallback(() => {
+    if (renderRafRef.current != null) return; // already scheduled this frame
+    renderRafRef.current = requestAnimationFrame(() => {
+      renderRafRef.current = null;
+      clustererRef.current?.render();
+    });
+  }, []);
+
   // Callback for each ClusteredMarker to register / deregister its element.
   const handleMarkerReady = React.useCallback(
     (id: string, el: NonNullable<AdvancedMarkerRef> | null) => {
@@ -502,10 +550,11 @@ function ClustererManager({
       const prev = markerElsRef.current.get(id);
 
       if (el === null) {
-        // Marker unmounted — remove from clusterer.
+        // Marker unmounted — remove from clusterer (noDraw; batched render below).
         if (prev) {
-          clusterer.removeMarker(prev);
+          clusterer.removeMarker(prev, true);
           markerElsRef.current.delete(id);
+          scheduleRender();
         }
         return;
       }
@@ -514,13 +563,14 @@ function ClustererManager({
 
       // Remove stale entry if element reference changed.
       if (prev) {
-        clusterer.removeMarker(prev);
+        clusterer.removeMarker(prev, true);
       }
 
       markerElsRef.current.set(id, el);
-      clusterer.addMarker(el);
+      clusterer.addMarker(el, true);
+      scheduleRender();
     },
-    [],
+    [scheduleRender],
   );
 
   return (
