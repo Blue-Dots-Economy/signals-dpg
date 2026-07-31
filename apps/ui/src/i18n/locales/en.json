@@ -249,7 +249,7 @@
   "home.bulk_connect_first_error": "First error: {{message}}",
   "home.map_partial": "Some sources are unavailable right now — the map may not show every listing.",
   "home.map_count_first": "{{count}} results in this area — zoom in or share your location to see them",
-  "home.map_zoom_in_for_more": "{{count}}+ in this area — zoom in",
+  "home.map_zoom_in_for_more": "{{count}} in this area — zoom in",
   "home.list_partial": "Some sources are unavailable right now — results may be incomplete.",
   "home.list_ranking_unavailable": "Showing basic matches — relevance ranking is temporarily unavailable.",
   "home.list_note_anchor_location": "Showing profiles relevant to your profile, within {{km}} km of your {{locationSource}} location.",
