@@ -1317,6 +1317,26 @@ export function HomePage() {
         setBulkConnectOpen(false);
         return;
       }
+      // Bulk is unavailable for a U18 ward while the batch guardian-OTP server
+      // change (#393) is held for review: the batch UI collects one code but the
+      // server gates per action, so a bulk submit can't complete. Degrade
+      // cleanly — ask them to act one at a time — rather than a stuck/spammy
+      // guardian-OTP dialog.
+      if (
+        u18Status?.isMinor === true &&
+        !!wardDomain &&
+        isGuardianConsentRequiredDomain(network, wardDomain)
+      ) {
+        setBulkConnectOpen(false);
+        browseSelection.exitSelect();
+        toast.info(
+          t(
+            'home.bulk_u18_unavailable',
+            "Bulk isn't available for under-18 accounts yet — please apply or connect one at a time.",
+          ),
+        );
+        return;
+      }
       setBulkConnectBusy(true);
       try {
         // Task 7 (#203 §5.2 cleanup): bulk-select only renders in the LIST
@@ -1437,6 +1457,8 @@ export function HomePage() {
       browseSelection.exitSelect,
       browseSelection.setSelected,
       promptCompleteDraftProfile,
+      u18Status,
+      wardDomain,
       t,
     ],
   );

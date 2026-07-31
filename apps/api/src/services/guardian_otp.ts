@@ -27,18 +27,7 @@ export type GuardianContactType = 'phone' | 'email';
 export type GuardianOtpScenario =
   | { kind: 'account' } // ward wants to create an account (pre-auth signup)
   | { kind: 'profile' } // ward wants to create a profile
-  | { kind: 'action'; actionType: string; stage: 'initiate' | 'accept' } // connect/apply/etc.
-  // Bulk action (#393): the ward performs many actions at once; one OTP
-  // authorises the whole batch and the email lists every provider org.
-  // `jobs` picks the copy (Bluedots "jobs" vs generic "opportunities"). SMS is
-  // unaffected — it only carries the code, so the org list is email-only.
-  | {
-      kind: 'action_bulk';
-      actionType: string;
-      stage: 'initiate' | 'accept';
-      providerOrgNames: string[];
-      jobs: boolean;
-    };
+  | { kind: 'action'; actionType: string; stage: 'initiate' | 'accept' }; // connect/apply/etc.
 
 /** Extra template variables per scenario (parent name, domain, provider org). */
 export type GuardianOtpVariables = Record<string, string>;
