@@ -72,6 +72,12 @@ vi.mock('@/config', () => ({ authConfig: mockAuthConfig }));
 const materializeSignupGuardian = vi.fn(async () => {});
 vi.mock('@/services/signup_guardian', () => ({ materializeSignupGuardian }));
 
+// Welcome email/WhatsApp for a genuinely-new user (G1). Mocked at the module
+// seam rather than by widening the `@/config` fake, because the real one reaches
+// for notification-service credentials this suite has no business knowing about.
+const sendWelcomeNotifications = vi.fn(async () => {});
+vi.mock('@/notifications/welcome', () => ({ sendWelcomeNotifications }));
+
 // Signup extras parked by the Keycloak self-signup path.
 const takeSignupExtras = vi.fn<() => Promise<{ domain?: string; age?: number } | null>>();
 vi.mock('@/services/auth/signup_extras', () => ({
@@ -152,6 +158,8 @@ beforeEach(() => {
   mockAuthConfig.login_channels = ['phone', 'email'];
   materializeSignupGuardian.mockClear();
   materializeSignupGuardian.mockImplementation(async () => {});
+  sendWelcomeNotifications.mockClear();
+  sendWelcomeNotifications.mockImplementation(async () => {});
   takeSignupExtras.mockReset().mockResolvedValue(null);
 });
 
@@ -529,6 +537,61 @@ describe('guardian materialization (U18)', () => {
   });
 });
 
+describe('welcome notifications (G1 — the other half of afterUserCreate)', () => {
+  it('sends the welcome for a genuinely-new user, addressed by both identifiers', async () => {
+    queueSelect(userTable, []);
+    queueSelect(userTable, []);
+
+    await provisionUserFromClaims(
+      claims({ phone_number: '+911234567890' }),
+      makeLog()
+    );
+
+    expect(sendWelcomeNotifications).toHaveBeenCalledTimes(1);
+    const [recipient] = sendWelcomeNotifications.mock.calls[0] as unknown as [
+      { name: string; email: string | null; phoneNumber: string | null },
+    ];
+    expect(recipient.email).toBe('asha@example.org');
+    expect(recipient.phoneNumber).toBe('+911234567890');
+    expect(recipient.name).toBeTruthy();
+  });
+
+  it('does not re-send for a returning user', async () => {
+    // The whole point of it living in createMirror: a welcome message on every
+    // login would be spam.
+    queueSelect(userTable, [existingUser()]);
+
+    await provisionUserFromClaims(claims(), makeLog());
+
+    expect(sendWelcomeNotifications).not.toHaveBeenCalled();
+  });
+
+  it('runs even when guardian materialization failed', async () => {
+    // The two are independent best-effort steps; one failing must not silently
+    // swallow the other.
+    queueSelect(userTable, []);
+    queueSelect(userTable, []);
+    materializeSignupGuardian.mockRejectedValueOnce(new Error('boom'));
+
+    const result = await provisionUserFromClaims(claims(), makeLog());
+
+    expect(result.ok).toBe(true);
+    expect(sendWelcomeNotifications).toHaveBeenCalledTimes(1);
+  });
+
+  it('never blocks the login when it throws', async () => {
+    // Defence in depth: the real implementation swallows per-channel failures,
+    // but provisioning must survive it throwing anyway.
+    queueSelect(userTable, []);
+    queueSelect(userTable, []);
+    sendWelcomeNotifications.mockRejectedValueOnce(new Error('notify down'));
+
+    const result = await provisionUserFromClaims(claims(), makeLog());
+
+    expect(result.ok).toBe(true);
+  });
+});
+
 describe('org membership (the relocated joinOrg branch)', () => {
   it('creates the member row when the token names an org', async () => {
     queueSelect(userTable, []);
@@ -537,7 +600,7 @@ describe('org membership (the relocated joinOrg branch)', () => {
     queueSelect(memberTable, []);
 
     await provisionUserFromClaims(
-      claims({ signalstack_org_id: 'org_1' }),
+      claims({ signals_acting_orgs: 'org_1' }),
       makeLog()
     );
 
@@ -552,7 +615,7 @@ describe('org membership (the relocated joinOrg branch)', () => {
     queueSelect(organizationTable, [{ id: 'org_1' }]);
     queueSelect(memberTable, [{ id: 'member_1' }]);
 
-    await provisionUserFromClaims(claims({ signalstack_org_id: 'org_1' }), makeLog());
+    await provisionUserFromClaims(claims({ signals_acting_orgs: 'org_1' }), makeLog());
 
     expect(insertsInto(memberTable)).toHaveLength(0);
   });
@@ -572,7 +635,7 @@ describe('org membership (the relocated joinOrg branch)', () => {
     const log = makeLog();
 
     const result = await provisionUserFromClaims(
-      claims({ signalstack_org_id: 'org_missing' }),
+      claims({ signals_acting_orgs: 'org_missing' }),
       log
     );
 
@@ -589,12 +652,67 @@ describe('org membership (the relocated joinOrg branch)', () => {
     const log = makeLog();
 
     const result = await provisionUserFromClaims(
-      claims({ signalstack_org_id: 'org_1' }),
+      claims({ signals_acting_orgs: 'org_1' }),
       log
     );
 
     expect(result.ok).toBe(true);
     expect(log.error).toHaveBeenCalled();
+  });
+
+  // ── G5: the grant is read, and it is not the same thing as membership ────
+  //
+  // These pin the claim NAME as much as the behaviour. The previous code read a
+  // `signalstack_org_id` claim that no client emits — the `signals-ui` mapper
+  // reads that *user attribute* but emits it as `signals_acting_orgs` — so
+  // `ensureOrgMembership` silently never ran. A test asserting the old name
+  // passed while the feature was dead, which is what these replace.
+
+  it('ignores a wildcard grant rather than joining every org', async () => {
+    // `['*']` is the platform service grant: "may act for any org". Treating it
+    // as membership would join the user to whatever org happened to be found.
+    queueSelect(userTable, [existingUser()]);
+
+    const result = await provisionUserFromClaims(claims({ signals_acting_orgs: '*' }), makeLog());
+
+    expect(result.ok).toBe(true);
+    expect(insertsInto(memberTable)).toHaveLength(0);
+  });
+
+  it('ignores a multi-org grant, which says what a caller may act for', async () => {
+    // Two orgs is an authorisation grant, not a statement of membership; there
+    // is no principled way to pick one.
+    queueSelect(userTable, [existingUser()]);
+
+    const result = await provisionUserFromClaims(
+      claims({ signals_acting_orgs: 'org_1,org_2' }),
+      makeLog()
+    );
+
+    expect(result.ok).toBe(true);
+    expect(insertsInto(memberTable)).toHaveLength(0);
+  });
+
+  it('accepts a single concrete org, which for a human IS their org', async () => {
+    // Design §5.1: a human's grant is sourced from their own
+    // `signalstack_org_id` user attribute, so a single value is their org.
+    queueSelect(userTable, [existingUser()]);
+    queueSelect(organizationTable, [{ id: 'org_1' }]);
+    queueSelect(memberTable, []);
+
+    await provisionUserFromClaims(claims({ signals_acting_orgs: ' org_1 ' }), makeLog());
+
+    const [insert] = insertsInto(memberTable);
+    expect(insert.values.organizationId).toBe('org_1');
+  });
+
+  it('ignores an empty grant', async () => {
+    queueSelect(userTable, [existingUser()]);
+
+    const result = await provisionUserFromClaims(claims({ signals_acting_orgs: '' }), makeLog());
+
+    expect(result.ok).toBe(true);
+    expect(insertsInto(memberTable)).toHaveLength(0);
   });
 });
 

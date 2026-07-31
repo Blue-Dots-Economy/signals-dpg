@@ -40,7 +40,9 @@ import {
 } from '@api/db/postgres/schema/auth';
 import { authConfig, keycloakConfig } from '@/config';
 import { materializeSignupGuardian } from '@/services/signup_guardian';
+import { sendWelcomeNotifications } from '@/notifications/welcome';
 import { takeSignupExtras } from '@/services/auth/signup_extras';
+import { actingOrgGrant, grantIsWildcard } from '@/utils/keycloak_token';
 import type { KeycloakClaims } from '@/utils/keycloak_token';
 import { KeycloakAdminClient } from '@/services/auth/keycloak_admin';
 import { mapUserToKeycloak } from '@/services/auth/user_to_keycloak';
@@ -73,11 +75,31 @@ export type ProvisioningResult =
   | { ok: false; code: ProvisioningErrorCode; message: string };
 
 /**
- * The claim carrying a signals organization id, if the realm maps one.
- * aggregator already emits `signalstack_org_id` from a user attribute, so the
- * same mapper serves signals in the shared realm.
+ * Resolve the organization a human token says its subject belongs to.
+ *
+ * **This reads the `signals_acting_orgs` grant, not a `signalstack_org_id`
+ * claim.** It used to read the latter, which no client ever emits: the
+ * `signals-ui` mapper takes the `signalstack_org_id` *user attribute* and emits
+ * it under the claim name `signals_acting_orgs` (verified against the
+ * `bluedots` realm). So `orgId` was always null and `ensureOrgMembership` was
+ * dead code that looked live — gap G5 of
+ * `docs/superpowers/plans/2026-07-31-replace-better-auth-with-keycloak.md`.
+ *
+ * Reusing the grant is correct rather than a conflation, for the human path
+ * specifically: per design §5.1 a human's grant *is* "the single org from their
+ * user attribute". Service tokens never reach here — `resolve_session.ts` forks
+ * them to `resolveServiceAccount` first.
+ *
+ * Adopted only when the grant names exactly **one concrete** org. A wildcard
+ * (`['*']`, the platform service grant) or a multi-org grant says what a caller
+ * may *act for*, which is not the same as what they are a *member of*, and
+ * guessing one from the other would silently join people to orgs.
  */
-const ORG_ID_CLAIM = 'signalstack_org_id';
+function orgIdFromGrant(claims: KeycloakClaims): string | null {
+  const grant = actingOrgGrant(claims);
+  if (!grant || grant.length !== 1 || grantIsWildcard(grant)) return null;
+  return grant[0];
+}
 
 /** Postgres unique-violation. Provisioning races surface as this. */
 const PG_UNIQUE_VIOLATION = '23505';
@@ -122,8 +144,6 @@ function readIdentity(claims: KeycloakClaims): TokenIdentity {
     .trim();
   const name = claims.name?.trim() || joined || 'user';
 
-  const rawOrgId = claims[ORG_ID_CLAIM];
-
   return {
     sub: claims.sub,
     email,
@@ -133,7 +153,7 @@ function readIdentity(claims: KeycloakClaims): TokenIdentity {
     phoneNumberVerified:
       claims.phone_number_verified === true || claims.phone_number_verified === 'true',
     name,
-    orgId: typeof rawOrgId === 'string' && rawOrgId.trim() !== '' ? rawOrgId.trim() : null,
+    orgId: orgIdFromGrant(claims),
   };
 }
 
@@ -450,6 +470,24 @@ async function createMirror(
     });
   } catch (err) {
     log.error({ err, user_id: user.id }, 'materializeSignupGuardian failed');
+  }
+
+  // The other half of that same hook. Without this a Keycloak-provisioned user
+  // silently received no welcome message, where every better-auth signup did.
+  // It swallows each channel's failure internally; the try/catch is defence in
+  // depth, matching the guardian call above — a welcome message must never be
+  // the reason a login fails.
+  try {
+    await sendWelcomeNotifications(
+      {
+        name: user.name,
+        email: identity.email,
+        phoneNumber: identity.phoneNumber,
+      },
+      log
+    );
+  } catch (err) {
+    log.error({ err, user_id: user.id }, 'sendWelcomeNotifications failed');
   }
 
   return { ok: true, user, created: true };
