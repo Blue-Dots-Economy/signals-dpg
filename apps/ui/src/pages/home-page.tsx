@@ -540,6 +540,9 @@ export function HomePage() {
   const [bulkGuardianChallenge, setBulkGuardianChallenge] = React.useState<{
     payloads: PerformActionPayload[];
     sourceInstanceUrl?: string;
+    // Non-guardian failures from a mixed batch, carried through so they can be
+    // reselected once the guardian OTP dialog resolves (they still need a retry).
+    otherFailedIds?: string[];
   } | null>(null);
 
   // Networks list + resolved selected network (config tier). Replaces the raw
@@ -1395,11 +1398,19 @@ export function HomePage() {
           const guardianResults = failedResults.filter(
             (r) => guardianOtpErrorOf(r) === 'GUARDIAN_OTP_REQUIRED',
           );
-          if (guardianResults.length > 0 && guardianResults.length === failedResults.length) {
+          // Any GUARDIAN_OTP_REQUIRED failure means a code was already sent to the
+          // guardian — open the dialog for those items even in a mixed batch, so
+          // the sent OTP isn't wasted on the generic error path. Non-guardian
+          // failures ride along and are reselected once the dialog resolves.
+          if (guardianResults.length > 0) {
             setBulkConnectOpen(false);
+            const otherFailedIds = failedResults
+              .filter((r) => guardianOtpErrorOf(r) !== 'GUARDIAN_OTP_REQUIRED')
+              .map((r) => targets[r.index].item_id);
             setBulkGuardianChallenge({
               payloads: guardianResults.map((r) => payloads[r.index]),
               sourceInstanceUrl: sourceItemInstanceUrl,
+              otherFailedIds: otherFailedIds.length > 0 ? otherFailedIds : undefined,
             });
             return; // the guardian OTP dialog owns the resubmit
           }
@@ -1787,9 +1798,23 @@ export function HomePage() {
         const env2 = await performActionsBulk(ch.payloads, ch.sourceInstanceUrl, otp);
         queryClient.invalidateQueries({ queryKey: queryKeys.actions.all });
         if (env2.summary.failed === 0) {
+          const otherFailedIds = ch.otherFailedIds ?? [];
           setBulkGuardianChallenge(null);
-          toast.success(t('home.bulk_connected_all', { count: env2.summary.succeeded }));
-          browseSelection.exitSelect();
+          if (otherFailedIds.length > 0) {
+            // Mixed batch: the guardian-gated items went through, but other
+            // items failed for a non-guardian reason — keep those selected so
+            // the ward can retry them, and say so rather than claim "all done".
+            toast.warning(
+              t('home.bulk_connected_partial', {
+                succeeded: env2.summary.succeeded,
+                total: env2.summary.succeeded + otherFailedIds.length,
+              }),
+            );
+            browseSelection.setSelected(otherFailedIds);
+          } else {
+            toast.success(t('home.bulk_connected_all', { count: env2.summary.succeeded }));
+            browseSelection.exitSelect();
+          }
           return;
         }
         // Still failing (wrong/expired code, throttled …) — throw a classified
