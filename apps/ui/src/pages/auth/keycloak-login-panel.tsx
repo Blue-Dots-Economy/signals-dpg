@@ -22,6 +22,7 @@ import { fetchConsentConfigs, getConsentStatusByIdentifier } from '@/lib/consent
 import { mergeConsentConfig } from '@/hooks/use-consent-config';
 import { ConsentModal } from '@/components/consent/consent-modal';
 import { setPendingConsent } from '@/lib/pending-consent';
+import { setPendingSignupExtras } from '@/lib/pending-signup-extras';
 import { fetchNetworkConfig } from '@/lib/network-api';
 import { ageFromBirthYear, isMinorFromAge } from '@/lib/guardian-consent';
 import {
@@ -285,6 +286,14 @@ export function KeycloakLoginPanel() {
         ...(domain ? { domain } : {}),
         ...(age !== undefined ? { age } : {}),
       });
+
+      // Park the same fields client-side for the callback to write over an
+      // authenticated session. The server already stashed them in Redis, but
+      // that stash has a 30-minute TTL and fails silently — see
+      // lib/pending-signup-extras.ts. Both paths are idempotent.
+      if (domain) {
+        setPendingSignupExtras({ domain, ...(age !== undefined ? { age } : {}) });
+      }
 
       // Either way the next step is the same — sign in. An identifier that is
       // already taken isn't something the user needs to act on differently.

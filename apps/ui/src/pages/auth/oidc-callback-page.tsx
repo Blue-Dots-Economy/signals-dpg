@@ -9,10 +9,22 @@ import { Button } from '@/components/ui/button';
 import { useAuth } from '@/contexts/auth-context';
 import { useAuthConfig } from '@/hooks/use-auth-config';
 import { takePendingConsent } from '@/lib/pending-consent';
-import { acceptConsent, fetchConsentConfigs, getConsentStatus } from '@/lib/consent-api';
+import { takePendingSignupExtras } from '@/lib/pending-signup-extras';
+import {
+  acceptConsent,
+  fetchConsentConfigs,
+  getConsentStatus,
+  getU18Status,
+  submitU18Dob,
+} from '@/lib/consent-api';
 import { mergeConsentConfig } from '@/hooks/use-consent-config';
 import { ConsentModal } from '@/components/consent/consent-modal';
+import { U18GuardianFlow } from '@/components/consent/u18/u18-guardian-flow';
 import { useNetworkTheme } from '@/theme/theme-provider';
+import { getServedScope } from '@/lib/served-binding';
+import { evaluateDomainGate, resolveHeldDomains } from '@/lib/domain-gate';
+import { setStoredSignupDomain } from '@/lib/signup-domain';
+import { setUserDomains } from '@/lib/user-api';
 import type { ConsentAcceptBody, ConsentConfigDocument } from '@dpg/schemas';
 
 /** How long to wait for the consent write before landing the user anyway. */
@@ -41,7 +53,7 @@ function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
 export function OidcCallbackPage() {
   const navigate = useNavigate();
   const { t } = useTranslation();
-  const { completeKeycloakLogin } = useAuth();
+  const { completeKeycloakLogin, signOut } = useAuth();
   // The OIDC client is built from the server's advertised Keycloak details.
   const { config: authCfg, isLoading: isConfigLoading } = useAuthConfig();
   const { themeId, brand } = useNetworkTheme();
@@ -58,6 +70,17 @@ export function OidcCallbackPage() {
   const [consentGate, setConsentGate] = useState<{
     config: ConsentConfigDocument;
     pendingConsent: ConsentAcceptBody;
+    returnTo: string;
+  } | null>(null);
+  /**
+   * A gated minor held on a blocking guardian flow AFTER login (ownership
+   * proven by Keycloak) and BEFORE landing — never home-first. The OTP flow
+   * does the same in `otp-page.tsx`; `initialStep` is `'dob'` when no birth
+   * data is stored, because the Keycloak chooser had no pre-login step to
+   * collect it.
+   */
+  const [guardianGate, setGuardianGate] = useState<{
+    initialStep: 'dob' | 'guardian';
     returnTo: string;
   } | null>(null);
 
@@ -100,6 +123,24 @@ export function OidcCallbackPage() {
         const { returnTo } = await completeOidcLogin(authCfg);
         await completeKeycloakLogin();
 
+        // Per-domain UI gate (G7), ported from `otp-page.tsx`: block a user who
+        // already holds a profile in a domain this deployment does not serve —
+        // they must use that domain's portal. Runs first, before any write, so a
+        // wrong-portal user is turned away rather than partially onboarded.
+        const scope = getServedScope();
+        if (scope) {
+          const held = await resolveHeldDomains(scope.network);
+          const gate = evaluateDomainGate(held, scope.domains);
+          if (!gate.allow) {
+            await signOut();
+            navigate('/auth/login', {
+              replace: true,
+              state: { wrongPortalDomain: gate.heldDomain },
+            });
+            return;
+          }
+        }
+
         // Write any consent accepted on the login screen. The accept endpoint is
         // authenticated, so this is the first moment it can be persisted — the
         // acceptance was parked across the Keycloak redirect.
@@ -118,6 +159,57 @@ export function OidcCallbackPage() {
             console.error('could not persist accepted consent', consentErr);
             toast.error(t('auth.toast_consent_persist_error'));
           }
+        }
+
+        // Durable write of the signup form's domain/age (G3). The server parked
+        // these in Redis with a 30-minute TTL and swallows failures, so this
+        // authenticated write is the backstop that stops a user landing with
+        // `domains = null` / `age = null` — the latter being fail-closed
+        // server-side for a guardian-gated domain. Idempotent with the stash.
+        const signupExtras = takePendingSignupExtras();
+        if (signupExtras) {
+          // Hand the domain to profile-form-page (one-shot) as well as
+          // persisting it, exactly as the OTP flow does.
+          setStoredSignupDomain(themeId, signupExtras.domain);
+          try {
+            await setUserDomains([signupExtras.domain]);
+          } catch {
+            // Best-effort — profile-form falls back to held items if unset.
+          }
+          if (signupExtras.age !== undefined) {
+            try {
+              await submitU18Dob({ network: themeId, age: signupExtras.age });
+            } catch {
+              toast.error(t('auth.toast_consent_persist_error'));
+            }
+          }
+        }
+
+        // Authenticated U18 guardian gate (G4), ported from `otp-page.tsx`.
+        //
+        // The Keycloak chooser never collects an identifier, so the OTP flow's
+        // pre-login `u18Precheck` has no equivalent here — the DOB capture has to
+        // happen now instead, which is what `initialStep: 'dob'` is for when no
+        // birth data is stored yet.
+        //
+        // Runs BEFORE the adult terms/privacy gate below on purpose: a gated
+        // minor must not be shown the adult consent screens, because the guardian
+        // flow records their consent guardian-sourced instead (#453).
+        //
+        // Best-effort: a failed status lookup falls through to landing. The
+        // home-page gate is a backstop and the server-side go-live gate is the
+        // real fail-closed control.
+        try {
+          const u18 = await getU18Status(themeId);
+          if (u18.isMinor && !u18.guardianVerified) {
+            setGuardianGate({
+              initialStep: u18.hasBirthData ? 'guardian' : 'dob',
+              returnTo: returnTo ?? '/',
+            });
+            return;
+          }
+        } catch {
+          // fall through and land the user
         }
 
         // Login-time terms/privacy gate. Runs AFTER the parked signup consent is
@@ -146,7 +238,7 @@ export function OidcCallbackPage() {
     return () => {
       cancelled = true;
     };
-  }, [authCfg, brand, completeKeycloakLogin, isConfigLoading, navigate, t, themeId]);
+  }, [authCfg, brand, completeKeycloakLogin, isConfigLoading, navigate, signOut, t, themeId]);
 
   /**
    * Accepted the login-time gate. The session already exists here, so unlike the
@@ -167,6 +259,29 @@ export function OidcCallbackPage() {
     }
     navigate(returnTo, { replace: true });
   };
+
+  // Blocking guardian gate for a minor — replaces the spinner inside the same
+  // AuthShell, mirroring `otp-page.tsx`, so the ward never sees home until the
+  // guardian is verified. Both `onNotMinor` (DOB resolved adult) and
+  // `onComplete` (guardian verified) land the user.
+  if (guardianGate) {
+    return (
+      <AuthShell>
+        <U18GuardianFlow
+          inline
+          network={themeId}
+          brand={brand === 'standard' ? null : brand}
+          initialStep={guardianGate.initialStep}
+          onComplete={() => navigate(guardianGate.returnTo, { replace: true })}
+          onNotMinor={() => navigate(guardianGate.returnTo, { replace: true })}
+          onLogout={() => {
+            void signOut();
+            navigate('/auth/login', { replace: true });
+          }}
+        />
+      </AuthShell>
+    );
+  }
 
   if (consentGate) {
     return (
