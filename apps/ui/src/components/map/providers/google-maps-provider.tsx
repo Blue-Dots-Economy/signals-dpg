@@ -31,6 +31,16 @@ import { useViewportReportEmitter } from './use-viewport-report';
  */
 const markerDomainMap = new WeakMap<object, string>();
 
+// Marker stacking. The "You" self-marker is non-interactive decoration, so it
+// must sit BELOW item pins: otherwise, when an item shares the exact same point
+// as "You" (spreadCoLocatedMarkers fans it ~10m off, which is sub-pixel at low
+// zoom), the self-marker (previously z 1000) rendered on top and swallowed the
+// click — the item's card wouldn't open until fully zoomed in. Ordering:
+// self (0) < item pins (500) < clusters (1000 + count). A co-located item pin
+// now renders on top and is directly clickable.
+const SELF_MARKER_Z_INDEX = 0;
+const ITEM_MARKER_Z_INDEX = 500;
+
 // Cluster-click zoom (see onClusterClick). One click smoothly zooms to the
 // level that reveals the cluster's contents — the SAME target Google's default
 // fitBounds would pick, but animated instead of snapping. For a cluster with no
@@ -331,6 +341,9 @@ function ClusteredMarker({
         ref={markerRef}
         position={{ lat: marker.lat, lng: marker.lng }}
         title={marker.label}
+        // Above the non-interactive "You" self-marker so a co-located item is
+        // always clickable (see SELF_MARKER_Z_INDEX / ITEM_MARKER_Z_INDEX).
+        zIndex={ITEM_MARKER_Z_INDEX}
         onClick={() => {
           // Toggle: clicking the already-open marker closes its popup.
           if (isActive) {
@@ -789,7 +802,7 @@ export function GoogleMapProvider({
             // guarantees the self-marker never intercepts a click meant for a
             // co-located item pin underneath it (#394).
             style={{ pointerEvents: 'none' }}
-            zIndex={1000}
+            zIndex={SELF_MARKER_Z_INDEX}
             title={t('map.you_are_here_short')}
           >
             <div style={{ transform: `translateY(${SELF_MARKER_GOOGLE_OFFSET_Y}px)`, pointerEvents: 'none' }}>
