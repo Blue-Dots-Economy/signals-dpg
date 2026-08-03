@@ -18,7 +18,12 @@ export interface MatchScoreBadgeProps {
 }
 
 function getScoreStyles(score: number) {
-  if (score >= 0.85) {
+  // Backend returns scores on a 0-10 scale (mirrors `getMatchScoreBand` in
+  // `@/utils/match-score-cache`); normalize before comparing to the 0-1
+  // thresholds below. Without this, any real score >= 0.85 (i.e. almost any
+  // score above ~1 on the 0-10 scale) was misclassified "Excellent".
+  const normalizedScore = score / 10;
+  if (normalizedScore >= 0.85) {
     return {
       label: 'Excellent',
       bgColor: 'bg-emerald-500',
@@ -28,7 +33,7 @@ function getScoreStyles(score: number) {
       icon: Star,
     };
   }
-  if (score >= 0.70) {
+  if (normalizedScore >= 0.70) {
     return {
       label: 'Good',
       bgColor: 'bg-blue-500',
@@ -38,7 +43,7 @@ function getScoreStyles(score: number) {
       icon: TrendingUp,
     };
   }
-  if (score >= 0.50) {
+  if (normalizedScore >= 0.50) {
     return {
       label: 'Moderate',
       bgColor: 'bg-amber-500',
@@ -110,7 +115,11 @@ export function MatchScoreBadge({
         <TooltipContent side="top" className="max-w-xs">
           <div className="space-y-1">
             <p className="font-medium">{styles.label} Match</p>
-            {score.confidence && (
+            {/* Absent on a discover-seeded score (`source: 'discover'`,
+                #394) — only `/v1/relevance` results set `confidence`.
+                `!== undefined` (not truthy) so a real confidence of 0 still
+                renders instead of being hidden. */}
+            {score.confidence !== undefined && (
               <p className="text-xs text-muted-foreground">
                 Confidence: {Math.round(score.confidence * 100)}%
               </p>

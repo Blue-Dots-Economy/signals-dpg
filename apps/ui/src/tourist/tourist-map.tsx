@@ -33,6 +33,9 @@ export function TouristMap({ items, schema, cardConfig, focusPoint, center, zoom
       center={center}
       zoom={zoom}
       focusPoint={focusPoint}
+      // The tourist app has no profile — its `focusPoint` IS the browser
+      // geolocation, so it doubles as the "You are here" self-marker location.
+      selfLocation={focusPoint}
       filtersSlot={filtersSlot}
       // Fill the tourist app's flex container (its header is shorter than the
       // signals chrome the default height assumes), so no white space below.

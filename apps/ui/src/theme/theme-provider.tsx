@@ -4,6 +4,7 @@ import { resolveTheme, type NetworkTheme } from './network-themes';
 import { resolveBrand } from './resolve-brand';
 import { resolveBrandMeta, type BrandMeta } from './brand-meta';
 import { getServedScope } from '@/lib/served-binding';
+import { clearSchemaCache } from '@/engine';
 
 interface NetworkThemeContextValue {
   themeId: string;
@@ -206,6 +207,13 @@ export function NetworkThemeProvider({ children }: { children: React.ReactNode }
 
   React.useLayoutEffect(() => {
     applyThemeTokens(themeId, activeBrand);
+  }, [themeId, activeBrand]);
+
+  React.useEffect(() => {
+    // Only a network switch (via URL) triggers this at runtime; activeBrand is
+    // computed once and doesn't change. Correctness relies on schema resolution
+    // being async so this sync clear lands before any post-await cache read.
+    clearSchemaCache();
   }, [themeId, activeBrand]);
 
   const value = React.useMemo(

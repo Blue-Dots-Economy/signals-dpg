@@ -6,10 +6,13 @@ import { toast } from 'sonner';
 import { useTranslation } from 'react-i18next';
 import type {
   DotNetworkSchema,
+  DotNetworkDomain,
   DotActionSchema,
+  DotCardConfig,
+  MapMarker,
+  MapViewport,
   ViewMode,
 } from '@/engine/types';
-import { resolveNetworkRefs } from '@/engine/schema/resolve-schema';
 import { PageShell } from '@/components/layout/page-shell';
 import { ContentHeader } from '@/components/layout/content-header';
 import { GuestHero } from '@/components/layout/guest-hero';
@@ -17,28 +20,48 @@ import { CardGrid } from '@/components/cards/card-grid';
 import { DomainCard } from '@/components/cards/domain-card';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Button } from '@/components/ui/button';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
 import { ActionHandler } from '@/components/actions/action-handler';
 import { MapView } from '@/components/map/map-container';
 import { MapFiltersPanel } from '@/components/map/map-filters-panel';
 import { MarkerPopupCard } from '@/components/map/marker-popup-card';
+import { MapCountPill } from '@/components/map/map-count-pill';
 import { MatchScoreCard } from '@/components/match-score';
+import { shouldRenderMatchScoreCard } from '@/lib/match-score-config';
 import '@/components/map/providers';
-import { fetchItems, performAction, performActionsBulk, type Item } from '@/lib/item-api';
-import { bulkFailureIndices, firstBulkError } from '@/lib/bulk';
+import { performAction, performActionsBulk, type Item } from '@/lib/item-api';
+import { bulkFailureIndices, firstBulkError, BulkSingleError } from '@/lib/bulk';
 import { useCardSelection } from '@/hooks/use-card-selection';
 import { useEqualRowHeights } from '@/hooks/use-equal-row-heights';
+import { useNetworkConfigs, useResolvedNetwork } from '@/hooks/use-network-config';
 import { SelectableCard } from '@/components/selection/selectable-card';
 import { BulkActionBar } from '@/components/selection/bulk-action-bar';
 import { ActionModal } from '@/components/actions/action-modal';
 import { CheckSquare } from 'lucide-react';
 import { getRuntimeEnv } from '@/lib/runtime-env';
-import { ACTION_CONSENT_SENTINEL } from '@/lib/action-api';
+import { ACTION_CONSENT_SENTINEL, guardianOtpErrorOf, type PerformActionPayload } from '@/lib/action-api';
 import { ActionAbortedError } from '@/lib/action-abort';
 import { EmptyState } from '@/components/empty-state';
-import { fetchNetworkConfigs, fetchNetworkConfig, fetchNetworkItems, PROFILE_FETCH_LIMIT } from '@/lib/network-api';
 import { useAuth } from '@/contexts/auth-context';
 import { apiConfig } from '@/lib/api-config';
-import { getEnumFilterFieldsForDomains, itemPassesEnumFilters } from '@/lib/enum-filters';
+import { getEnumFilterFieldsForDomains } from '@/lib/enum-filters';
+import {
+  deriveBrowseParams,
+  anchorItemIdForTarget,
+  domainsInteract,
+  isDiscoverActive,
+  resolveListNote,
+  excludeOwnItems,
+  buildFilteredCardsForDomain,
+} from '@/lib/browse-discover';
+import type { DerivedBrowseParams } from '@/lib/browse-discover';
 import { getServedScope } from '@/lib/served-binding';
 import { computeVisibleDomains } from '@/lib/visible-domains';
 import { useUserLocation } from '@/hooks/use-user-location';
@@ -49,7 +72,6 @@ import { EnableLocationBanner } from '@/components/location/enable-location-bann
 import { nearestDistanceMeters } from '@/lib/geo/distance';
 import type { LatLng } from '@/lib/geo/types';
 import {
-  getProfileConsentStatus,
   acceptProfileConsent,
   getU18Status,
   issueProfileConsentOtp,
@@ -61,17 +83,18 @@ import { useConsentConfig } from '@/hooks/use-consent-config';
 import { useConsentGate } from '@/hooks/use-consent-gate';
 import { useNetworkTheme } from '@/theme/theme-provider';
 import { ProfileConsentModal } from '@/components/consent/profile-consent-modal';
+import { useMyItems } from '@/hooks/use-my-items';
+import { useInfiniteBrowseItems } from '@/hooks/use-infinite-browse-items';
+import { useProfileConsentStatus } from '@/hooks/use-profile-consent-status';
+import { useMapMarkers } from '@/hooks/use-map-markers';
+import { useItemDetail } from '@/hooks/use-item-detail';
+import type { Marker as NetworkMarker, DiscoverFacetFilter } from '@/lib/network-api';
+import { useQueryClient } from '@tanstack/react-query';
+import { queryKeys } from '@/lib/query-keys';
 import { GuardianOtpDialog } from '@/components/actions/guardian-otp-dialog';
+import { GuardianOtpPurpose } from '@/components/consent/u18/guardian-otp-purpose';
 import { U18GuardianFlow } from '@/components/consent/u18/u18-guardian-flow';
 import { isGuardianConsentRequiredDomain } from '@/lib/guardian-consent';
-
-function itemToCardItem(item: Item): { id: string; domain: string; data: Record<string, unknown> } {
-  return {
-    id: item.item_id,
-    domain: item.item_domain,
-    data: { ...item.item_state, item_locations: item.item_locations },
-  };
-}
 
 function getItemLocations(
   data: Record<string, unknown>,
@@ -94,10 +117,271 @@ function sortItemsByNearest<T>(
   );
 }
 
-function getItemTypeForDomain(network: DotNetworkSchema, domainId: string): string {
-  const domain = network.domains.find((d) => d.id === domainId);
-  const itemTypeKeys = domain?.item_schemas ? Object.keys(domain.item_schemas) : [];
-  return itemTypeKeys.length > 0 ? itemTypeKeys[0] : 'profile';
+// Bottom-sentinel scroll observer: fires `onIntersect` when the sentinel node
+// scrolls into view. Disconnects on cleanup / when disabled. Shared by the
+// single-domain list and the "All" tab merged list (Task 5 §5.1 paging).
+//
+// `onIntersect` is read through a ref (kept fresh every render) rather than
+// placed in the effect's dependency array — the hooks this drives
+// (`useInfiniteBrowseItems`) hand back a new closure identity on every render,
+// so depending on it directly would tear down and recreate the
+// IntersectionObserver (and re-fire its callback) on every unrelated
+// re-render instead of only on real intersection changes.
+function useLoadMoreSentinel(
+  onIntersect: () => void,
+  enabled: boolean,
+): (node: HTMLDivElement | null) => void {
+  const onIntersectRef = React.useRef(onIntersect);
+  onIntersectRef.current = onIntersect;
+  const enabledRef = React.useRef(enabled);
+  enabledRef.current = enabled;
+  const observerRef = React.useRef<IntersectionObserver | null>(null);
+
+  // Callback ref (stable, empty deps → runs only when the sentinel node itself
+  // mounts/unmounts, not every render). This re-attaches the observer to the
+  // *current* node: the "All" tab renders the sentinel in more than one branch,
+  // so the live node can swap without `enabled` changing — a useEffect([enabled])
+  // kept observing a stale, unmounted node and never fired (needed a tab switch
+  // to remount). rootMargin pre-triggers 200px before the 1px sentinel reaches
+  // the fold, so firing no longer depends on that exact pixel crossing the edge
+  // (flaky under max-scroll clamping / momentum scrolling).
+  return React.useCallback((node: HTMLDivElement | null) => {
+    if (observerRef.current) {
+      observerRef.current.disconnect();
+      observerRef.current = null;
+    }
+    if (!node) return;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (enabledRef.current && entries.some((entry) => entry.isIntersecting)) {
+          onIntersectRef.current();
+        }
+      },
+      { rootMargin: '200px' },
+    );
+    observer.observe(node);
+    observerRef.current = observer;
+  }, []);
+}
+
+interface DomainPageState {
+  items: Item[];
+  hasMore: boolean;
+  total: number;
+  // Task 7 (#203 §5.2 cleanup): lifted so the "All" tab's loading gate can
+  // read the paged hooks directly instead of the removed full `useBrowseItems`
+  // fetch (resolves the P3-deferred loading-flash minor).
+  isLoading: boolean;
+  fetchNext: () => void;
+  // P5 (#203 §6): lifted from `useInfiniteBrowseItems`' `partial` so the "All"
+  // tab can show the same federation-degradation banner as the single-domain
+  // list and the map (P4's `mapMarkers.partial`).
+  partial: boolean;
+  // Task 6 (#203 §6): lifted from `useInfiniteBrowseItems`' `degraded` — true
+  // when the discover BFF fell back to native (signals-search unreachable/
+  // unconfigured/timed out) for this domain's page. Threaded through
+  // IDENTICALLY to `partial` above so the "All" tab can show the same
+  // degraded-search UX as the single-domain list.
+  degraded: boolean;
+  // #394: lifted from `useInfiniteBrowseItems`' `distanceMeters` (the discover
+  // BFF's `meta.distance_meters`) so the "All" tab's list note can show the
+  // same "within X km" wording as the single-domain list.
+  distanceMeters?: number;
+}
+
+// Headless per-domain paged fetch for the "All" tab (Task 5 §5.1). React hooks
+// cannot be called in a loop, so each visible domain gets its own instance of
+// this component (one `useInfiniteBrowseItems` call each — legal), and lifts
+// its loaded page state up to the parent via `onItems` so the parent can
+// render ONE merged, nearest-first-sorted grid across all domains. Renders
+// nothing itself.
+function DomainPagedFetch({
+  network,
+  domain,
+  coords,
+  browseOpts,
+  onItems,
+}: {
+  network: DotNetworkSchema;
+  domain: DotNetworkDomain;
+  coords: { lat: number; lng: number } | null;
+  // #394: the discover params (q/filters/relevance) derived from the search
+  // box and facet panel. Passed identically for every visible domain so the
+  // whole "All" feed shares one discover mode — the list always uses discover
+  // now, there is no more "Near me" toggle. Omitted by the map-view
+  // count-only fetchers, which stay on the native browse path (unaffected by
+  // list-view discover concerns per spec §5.3). `anchorItemId` (#394) is NOT
+  // shared across domains like the rest of this object — the caller computes
+  // it per-domain (`anchorFor(domain.id)`) since whether it's safe to send
+  // depends on the schema's interaction matrix between the anchor's own
+  // domain and each individual browsed domain (e.g. a seeker's anchor is sent
+  // for the provider slice of "All" but withheld for the seeker slice).
+  browseOpts?: {
+    q?: string;
+    filters: DiscoverFacetFilter[];
+    relevance: boolean;
+    anchorItemId?: string;
+  };
+  onItems: (
+    domainId: string,
+    items: Item[],
+    hasMore: boolean,
+    total: number,
+    isLoading: boolean,
+    fetchNext: () => void,
+    partial: boolean,
+    degraded: boolean,
+    distanceMeters: number | undefined,
+  ) => void;
+}): null {
+  const list = useInfiniteBrowseItems(network, domain, coords, browseOpts);
+  // `list.items` is a fresh array on every render (the hook doesn't memoize
+  // it), so this effect refires on every plain re-render too. That's fine:
+  // `onItems` (`handleDomainItems`) is idempotent — it bails out of its
+  // `setState` when the lifted data is unchanged (element-wise reference
+  // equality on `items`, plus `hasMore`/`total`/`isLoading`/`partial`/
+  // `degraded`/`distanceMeters`), so a plain re-render never causes a further
+  // re-render here. This is what lets a same-length refetch (new item object
+  // refs, edited `item_state`) still get lifted — gating on `items.length`
+  // would silently drop that update.
+  React.useEffect(() => {
+    onItems(
+      domain.id,
+      list.items,
+      list.hasNextPage,
+      list.total,
+      list.isLoading,
+      list.fetchNextPage,
+      list.partial,
+      list.degraded,
+      list.distanceMeters,
+    );
+  }, [
+    domain.id,
+    list.items,
+    list.hasNextPage,
+    list.total,
+    list.isLoading,
+    list.fetchNextPage,
+    list.partial,
+    list.degraded,
+    list.distanceMeters,
+    onItems,
+  ]);
+  return null;
+}
+
+// Task 6 (#203 §5.2): a map marker's popup lazily fetches the full item only
+// once the popup is actually shown — the active `MapProvider` only invokes
+// `renderPopup(marker)` while a marker is selected/open (see
+// `google-maps-provider.tsx` / `leaflet-provider.tsx`), so this component's
+// `useItemDetail` call only fires for the marker the user clicked, not for
+// every viewport marker. Hooks can't be called inside the `renderPopup`
+// callback itself, hence a standalone component (mirrors the
+// `DomainPagedFetch` pattern above) rather than an inline hook call.
+function MarkerDetailPopup({
+  networkId,
+  marker,
+  sourceMarker,
+  itemType,
+  schema,
+  cardConfig,
+  localItem,
+  connectAction,
+  onConnect,
+  onItemResolved,
+}: {
+  networkId: string | null;
+  marker: MapMarker;
+  // The `Marker` (network-api) this popup's marker was derived from — carries
+  // `item_instance_url` for routed fetches, which the lightweight `MapMarker`
+  // shape does not.
+  sourceMarker: NetworkMarker | undefined;
+  // The clicked marker's domain item type (e.g. `job_posting_1.0`), derived by
+  // the parent from the network config — the by-id detail fetch filters on it.
+  itemType?: string;
+  schema?: RJSFSchema;
+  cardConfig?: DotCardConfig | null;
+  localItem: Item | null;
+  connectAction?: DotActionSchema;
+  onConnect?: (baseItemId: string) => void;
+  // Task 7 (#203 §5.2 cleanup): lifts this popup's already-fetched full item
+  // up to the parent. Home-page's `onActionSubmit` needs the full `Item`
+  // (network/domain/type/instance_url) to build a connect-action's
+  // `target_item`, but a map-only item (one loaded via viewport markers, never
+  // paged into the list feeds) has no other source now that the full
+  // `useBrowseItems` fetch is gone — this reuses the popup's own
+  // `useItemDetail` result instead of re-fetching or reintroducing a full
+  // browse feed.
+  onItemResolved?: (item: Item) => void;
+}) {
+  const { t } = useTranslation();
+  // Marker ids are `${item_id}#${locationIndex}` — strip the suffix to look up the item.
+  const baseItemId = marker.id.includes('#') ? marker.id.split('#')[0] : marker.id;
+  // Fetch from the clicked marker's OWN id + domain (always present on the map
+  // marker) — do NOT gate on finding `sourceMarker` in the live markers array,
+  // which churns as the viewport refetches and would otherwise leave the popup
+  // stuck on "Loading…" with no request ever firing. `sourceMarker` (when
+  // present) only supplies the optional owning-instance URL for a routed fetch;
+  // its absence just means the network fetch discovers the item by id.
+  const itemDomain = marker.domain ?? sourceMarker?.item_domain;
+
+  const { item, isLoading } = useItemDetail(
+    networkId,
+    itemDomain
+      ? {
+          item_id: baseItemId,
+          item_domain: itemDomain,
+          // The domain's item type (e.g. `profile_1.0` / `job_posting_1.0`).
+          // Slim markers don't carry it, so the parent derives it from the
+          // domain config and passes it in — without it the by-id fetch would
+          // filter on the wrong (default) type and match nothing.
+          item_type: itemType,
+          item_instance_url: sourceMarker?.item_instance_url,
+        }
+      : null,
+  );
+
+  React.useEffect(() => {
+    if (item) onItemResolved?.(item);
+  }, [item, onItemResolved]);
+
+  if (isLoading) {
+    return (
+      <div className="p-3 text-sm text-muted-foreground">{t('map.loading_detail')}</div>
+    );
+  }
+  if (!item) {
+    return (
+      <div className="p-3 text-sm text-muted-foreground">{t('map.detail_unavailable')}</div>
+    );
+  }
+
+  // The slim map marker carries no item_state (its `data` is just
+  // `{ item_locations }`) and only a generic `label`, so the popup card would
+  // render empty fields and an "Item — <place>" title. Enrich it with the
+  // fetched full item's state + real title so the card shows the actual profile
+  // / posting details. Keep the clicked marker's location/precision/domain.
+  const resolvedTitle = cardConfig?.title_field
+    ? String((item.item_state as Record<string, unknown>)[cardConfig.title_field] ?? '').trim()
+    : '';
+  const enrichedMarker: MapMarker = {
+    ...marker,
+    data: item.item_state,
+    label: resolvedTitle || marker.label,
+  };
+
+  return (
+    <MarkerPopupCard
+      marker={enrichedMarker}
+      schema={schema}
+      cardConfig={cardConfig}
+      actions={localItem && connectAction ? [connectAction] : []}
+      onConnect={localItem && connectAction ? () => onConnect?.(baseItemId) : undefined}
+      localItem={localItem}
+      networkItem={item}
+    />
+  );
 }
 
 function parseNetworkIds(networkEnv: string | undefined): string[] {
@@ -183,6 +467,7 @@ function resolveDefaultViewMode(): ViewMode {
   return 'map';
 }
 
+
 export function HomePage() {
   const { t } = useTranslation();
   const { user, signOut } = useAuth();
@@ -215,8 +500,17 @@ export function HomePage() {
     }
     return result;
   });
-  const [resolvedNetwork, setResolvedNetwork] = React.useState<DotNetworkSchema | null>(null);
-  const [allNetworks, setAllNetworks] = React.useState<DotNetworkSchema[]>([]);
+  // Map viewport (Task 6, #203 §5.2): null until the map reports its first
+  // `onViewportChange` (debounced pan/zoom settle). The map's own initial
+  // center/zoom comes from the existing `focusPoint`/`userLocation`/default
+  // logic below — this state only tracks what the map has told us it's
+  // actually showing, so `useMapMarkers` stays disabled (no markers query)
+  // until that first report lands.
+  const [mapViewport, setMapViewport] = React.useState<MapViewport | null>(null);
+  // The full `Item` most recently resolved by an open marker popup's
+  // `useItemDetail` fetch (Task 7, #203 §5.2 cleanup) — see
+  // `MarkerDetailPopup`'s `onItemResolved` doc comment for why this exists.
+  const [mapDetailItem, setMapDetailItem] = React.useState<Item | null>(null);
   const configuredNetworkIds = parseNetworkIds(import.meta.env.VITE_NETWORK_ID);
   // The set of domains this deployment serves (VITE_SERVED_BINDINGS), or null
   // when unset (serve all domains). When exactly ONE domain is served, that is
@@ -236,15 +530,7 @@ export function HomePage() {
       : (configuredNetworkIds[0] || null));
 
   const [selectedNetworkId, setSelectedNetworkId] = React.useState<string | null>(initialNetworkId);
-  const [domainItems, setDomainItems] = React.useState<Record<string, Item[]>>({});
-  const [myItems, setMyItems] = React.useState<Item[]>([]);
   const [activeProfileId, setActiveProfileId] = React.useState<string | null>(null);
-  // Whether the active-profile lookup has settled. Until it has, profileLocation
-  // is transiently null even for a user who has a profile location, so the
-  // browser-geo auto-prompt must wait for this to avoid a spurious permission prompt.
-  const [profilesResolved, setProfilesResolved] = React.useState(false);
-  const [consentedProfileIds, setConsentedProfileIds] = React.useState<Set<string>>(new Set());
-  const [consentLoaded, setConsentLoaded] = React.useState(false);
   const [pendingConsentProfileId, setPendingConsentProfileId] = React.useState<string | null>(null);
   // For a MINOR, profile_creation consent is guardian-given: an OTP is issued
   // to the guardian and this holds the item ref while the guardian-OTP dialog
@@ -254,10 +540,60 @@ export function HomePage() {
   // GUARDIAN_REQUIRED): holds the item ref while the guardian-capture flow
   // (details + setup OTP) runs, then the profile OTP is re-issued for it.
   const [guardianSetupRef, setGuardianSetupRef] = React.useState<ProfileConsentOtpItemRef | null>(null);
-  const [loading, setLoading] = React.useState(false);
   const browseSelection = useCardSelection();
   const [bulkConnectOpen, setBulkConnectOpen] = React.useState(false);
   const [bulkConnectBusy, setBulkConnectBusy] = React.useState(false);
+  // Minor ward doing a bulk action (#393/#453): the gated items come back
+  // GUARDIAN_OTP_REQUIRED after one OTP is sent to the guardian. Stash the
+  // payloads to resubmit with the code — one guardian OTP dialog for the batch,
+  // mirroring the single-action flow (no raw error).
+  const [bulkGuardianChallenge, setBulkGuardianChallenge] = React.useState<{
+    payloads: PerformActionPayload[];
+    sourceInstanceUrl?: string;
+    actionType: string;
+    // Non-guardian failures from a mixed batch, carried through so they can be
+    // reselected once the guardian OTP dialog resolves (they still need a retry).
+    otherFailedIds?: string[];
+  } | null>(null);
+  // Minor ward: the "a code will be sent to your guardian — proceed?" confirm
+  // shown BEFORE a bulk action dispatches the OTP (mirrors the single-action
+  // confirm). Holds the deferred bulk submit + its action type (for the panel).
+  const [bulkGuardianConfirm, setBulkGuardianConfirm] = React.useState<
+    { run: () => void; actionType: string } | null
+  >(null);
+
+  // Networks list + resolved selected network (config tier). Replaces the raw
+  // mount-fetch + resolve effects; `allNetworks`/`network` are now query-derived.
+  const { data: networksData } = useNetworkConfigs();
+  const allNetworks = React.useMemo<DotNetworkSchema[]>(() => {
+    if (!networksData) return [];
+    return configuredNetworkIds.length > 0
+      ? networksData.filter((n) => configuredNetworkIds.includes(n.id))
+      : networksData;
+  }, [networksData, configuredNetworkIds]);
+
+  const { data: resolvedNetwork } = useResolvedNetwork(selectedNetworkId);
+  const network = resolvedNetwork;
+
+  // My profiles across domains (own-data tier) + profile-consent status
+  // (config tier). Replace the coordinated raw fetch; the gate reads both.
+  const { data: myItems, isFetched: myItemsFetched } = useMyItems(network);
+  const consentQuery = useProfileConsentStatus(network);
+  const consentedProfileIds = consentQuery.data ?? new Set<string>();
+  // Settled = query resolved either way (fail-open: an error yields an empty set
+  // and still marks loaded, so the gate can prompt). Signed-out users have no
+  // profiles/consent to wait for — resolved immediately.
+  const profilesResolved = !user || myItemsFetched;
+  const consentLoaded = !user || consentQuery.isSuccess || consentQuery.isError;
+  const queryClient = useQueryClient();
+
+  // Default the selected network to the first available once the list loads
+  // (only when nothing is selected yet) — previously done in the mount fetch.
+  React.useEffect(() => {
+    if (selectedNetworkId) return;
+    const first = allNetworks[0]?.id;
+    if (first) setSelectedNetworkId(first);
+  }, [allNetworks, selectedNetworkId]);
 
   React.useEffect(() => {
     if (!selectedNetworkId) {
@@ -266,63 +602,6 @@ export function HomePage() {
     }
     setActiveProfileId(getStoredActiveProfileId(selectedNetworkId));
   }, [selectedNetworkId]);
-
-  // Fetch networks from API on mount
-  React.useEffect(() => {
-    const controller = new AbortController();
-
-    fetchNetworkConfigs()
-      .then((networks) => {
-        if (controller.signal.aborted) return;
-        
-        // Filter by configured networks if VITE_NETWORK_ID is set, otherwise use all
-        const targetNetworks = configuredNetworkIds.length > 0
-          ? networks.filter(n => configuredNetworkIds.includes(n.id))
-          : networks;
-        setAllNetworks(targetNetworks);
-
-        // Use first configured network, or first available
-        const defaultNetwork = targetNetworks[0]?.id;
-        if (defaultNetwork && !selectedNetworkId) {
-          setSelectedNetworkId(defaultNetwork);
-        }
-      })
-      .catch((err) => {
-        console.error('Failed to fetch networks:', err);
-      });
-
-    return () => { controller.abort(); };
-  }, []);
-
-  // Fetch and resolve the selected network
-  React.useEffect(() => {
-    if (!selectedNetworkId) return;
-
-    const controller = new AbortController();
-
-    setResolvedNetwork(null);
-    setDomainItems({});
-    setMyItems([]);
-    setProfilesResolved(false);
-
-    fetchNetworkConfig(selectedNetworkId)
-      .then((config) => {
-        if (controller.signal.aborted) return;
-        // Resolve any $ref in the network config
-        return resolveNetworkRefs(config, { baseUrl: apiConfig.getUrl() });
-      })
-      .then((resolved) => {
-        if (controller.signal.aborted || !resolved) return;
-        setResolvedNetwork(resolved as DotNetworkSchema);
-      })
-      .catch((err) => {
-        console.error('Failed to fetch network config:', err);
-      });
-
-    return () => { controller.abort(); };
-  }, [selectedNetworkId]);
-
-  const network = resolvedNetwork;
 
   // Resolve a map marker's label from its domain's card.title_field so titles
   // are correct even in the "All" view where markers span multiple domains.
@@ -338,72 +617,34 @@ export function HomePage() {
     [network]
   );
 
-  // Fetch all user profiles across all domains to discover their domain
+  // Restore or auto-select the active profile once per network, when my-profiles
+  // have settled. A ref guards against re-running on a background refetch
+  // (which must not reset the user's manual selection).
+  const restoredForNetwork = React.useRef<string | null>(null);
   React.useEffect(() => {
-    if (!network) return;
-    // Signed out (or no session): drop the previous user's profiles so the
-    // sidebar/active-profile clear immediately instead of lingering until refresh.
     if (!user) {
-      setMyItems([]);
+      // Signed out: clear selection + any open consent gate, and allow
+      // restoration to re-run on next sign-in.
       setActiveProfileId(null);
-      // A signed-out visitor has no profile to wait for — resolved immediately,
-      // so the browser-geo auto-prompt may fire.
-      setProfilesResolved(true);
+      setPendingConsentProfileId(null);
+      restoredForNetwork.current = null;
       return;
     }
+    if (!network || !myItemsFetched) return;
+    if (restoredForNetwork.current === network.id) return;
+    restoredForNetwork.current = network.id;
 
-    const controller = new AbortController();
-
-    const domainFetches = network.domains.map((domain) => {
-      const itemType = getItemTypeForDomain(network, domain.id);
-      return fetchItems({
-        item_network: network.id,
-        item_domain: domain.id,
-        item_type: itemType,
-        created_by_me: true,
-        limit: 100,
-      }, controller.signal)
-        .then((res) => res.items)
-        .catch(() => [] as Item[]);
-    });
-
-    // Fetch the profile-consent set in the SAME flow that loads profiles so
-    // consentedProfileIds + consentLoaded are set together with profilesResolved.
-    // This closes the transient window where a restored activeProfileId would be
-    // treated as "active" before consent status loaded, delaying the gate modal.
-    // Fail-open: an empty set on error still lets the gate prompt.
-    const consentFetch = getProfileConsentStatus(network.id)
-      .then((res) => new Set(res.consented_item_ids))
-      .catch(() => new Set<string>());
-
-    Promise.all([Promise.all(domainFetches), consentFetch]).then(([results, consentedIds]) => {
-      if (controller.signal.aborted) return;
-      const allProfiles = results.flat();
-      setMyItems(allProfiles);
-      // Consent status is known before profilesResolved is marked, so by the time
-      // activeProfileId is derived the gate effect can fire without a content flash.
-      setConsentedProfileIds(consentedIds);
-      setConsentLoaded(true);
-      // Profile lookup has settled — profileLocation is now authoritative, so the
-      // browser-geo auto-prompt may fire if there's still no profile location.
-      setProfilesResolved(true);
-
-      // Auto-select: use stored ID if valid, otherwise first profile
-      const storedId = getStoredActiveProfileId(network.id);
-      if (storedId && allProfiles.some((p) => p.item_id === storedId)) {
-        setActiveProfileId(storedId);
-      } else if (allProfiles.length > 0) {
-        setActiveProfileId(allProfiles[0].item_id);
-        setStoredActiveProfileId(network.id, allProfiles[0].item_id);
-      } else {
-        // No profiles for this user — clear any stale ID from a previous session
-        setActiveProfileId(null);
-        clearStoredActiveProfileId(network.id);
-      }
-    });
-
-    return () => { controller.abort(); };
-  }, [network, user]);
+    const storedId = getStoredActiveProfileId(network.id);
+    if (storedId && myItems.some((p) => p.item_id === storedId)) {
+      setActiveProfileId(storedId);
+    } else if (myItems.length > 0) {
+      setActiveProfileId(myItems[0].item_id);
+      setStoredActiveProfileId(network.id, myItems[0].item_id);
+    } else {
+      setActiveProfileId(null);
+      clearStoredActiveProfileId(network.id);
+    }
+  }, [user, network, myItemsFetched, myItems]);
 
   // Derive the active profile from myItems
   const myItem = React.useMemo(() => {
@@ -448,11 +689,11 @@ export function HomePage() {
   const [preferredSource, setPreferredSource] =
     React.useState<PreferredLocationSource>('profile');
 
-  const { location: userLocation, browser: browserLocation } = useUserLocation(
-    profileLocation,
-    profilesResolved,
-    preferredSource,
-  );
+  const {
+    location: userLocation,
+    source: resolvedLocationSource,
+    browser: browserLocation,
+  } = useUserLocation(profileLocation, profilesResolved, preferredSource);
   const geoPermission = useGeolocationPermission();
 
   // The toggle only makes sense when there's a profile location to switch away
@@ -475,6 +716,13 @@ export function HomePage() {
   // the already-active source can't happen: radix single-toggle deselects to ''
   // and handleLocationSourceChange ignores it.)
   const [recenterNonce, setRecenterNonce] = React.useState(0);
+
+  // Bumped right before a marker popup's Connect/Apply action opens the
+  // consent modal, so the map provider closes the popup first — otherwise the
+  // popup (a map overlay in a high stacking context) sits on top of the
+  // modal's bottom-sheet Drawer on mobile, making the consent checkbox +
+  // Confirm unreachable (Issue #1).
+  const [closePopupNonce, setClosePopupNonce] = React.useState(0);
 
   const handleLocationSourceChange = React.useCallback(
     (next: PreferredLocationSource) => {
@@ -506,6 +754,13 @@ export function HomePage() {
   // Gate the auto-selected profile: if it lacks profile_creation consent, prompt.
   React.useEffect(() => {
     if (
+      // Never gate a signed-out user. `activeProfileId` can briefly hold a
+      // stale localStorage value (from a prior session) after sign-out or when
+      // a different/no-profile user signs in — before the restore effect nulls
+      // it. Requiring `user` + that the id is a real OWNED profile in myItems
+      // stops the consent modal flashing for logged-out or profile-less users.
+      !user ||
+      !myItems.some((p) => p.item_id === activeProfileId) ||
       !profilesResolved ||
       !consentLoaded ||
       !profileConsentRequired ||
@@ -517,6 +772,8 @@ export function HomePage() {
     }
     setPendingConsentProfileId(activeProfileId);
   }, [
+    user,
+    myItems,
     profilesResolved,
     consentLoaded,
     profileConsentRequired,
@@ -612,14 +869,6 @@ export function HomePage() {
     !u18ResolvedAdult &&
     (u18NeededConsent.length > 0 || u18BirthUnresolved || u18MinorNeedsGuardian);
 
-  // Sort a card-item array (item_locations stored in .data) nearest-first when userLocation is known.
-  // Items without locations sort last (nearestDistanceMeters returns Infinity for empty/missing arrays).
-  const sortByNearest = React.useCallback(
-    <T extends { data: Record<string, unknown> }>(items: T[]): T[] =>
-      sortItemsByNearest(items, userLocation, (t) => getItemLocations(t.data)),
-    [userLocation],
-  );
-
   // Acting domain: ?as= test override → served binding → active profile →
   // network default. Drives the connect-action source (from_domain).
   const currentDomain =
@@ -672,51 +921,367 @@ export function HomePage() {
     }
   }, [network, selectedDomain, visibleDomains, setSearchParams]);
 
+  // #203 Task 7: the enum-field facet filters (`mapSelectedFields`, driven by
+  // `MapFiltersPanel`) now reach the server on the MAP path — sent as
+  // `item_state.<field>` markers params (`network-api.ts`'s `fetchNetworkMarkers`
+  // serializes each field's selected values as REPEATED query params, which
+  // the server's `qs`-based parser auto-arrays into `string[]`, matching
+  // `buildWhereClause`'s `= ANY(...)` facet filter — see Task 3). Computed
+  // here (not down at `singleDomainCards`/`filteredAllDomainItems` below, its
+  // other consumer) so it's available before `useMapMarkers` needs it.
+  const activeFieldFilters = React.useMemo(
+    () => Object.fromEntries(Object.entries(mapSelectedFields).filter(([, vals]) => vals.length > 0)),
+    [mapSelectedFields],
+  );
+
+  // Task 6 (#203 §5.2): the map view is now sourced from viewport-scoped
+  // markers rather than a full per-domain browse feed (that full fetch was
+  // removed from this page entirely in Task 7 of the caching epic). The
+  // top-bar free-text `search` now ALSO filters the map (map-native-text-search,
+  // #394): it's forwarded to `useMapMarkers` below, which sends it to the
+  // server as `/markers?q=` — a value-match against public (non-private)
+  // `item_state` fields, viewport-scoped, same as the list's search. The list
+  // still applies `search` itself via `buildFilteredCardsForDomain` below;
+  // the two are independent filters over the same query, not one deriving
+  // from the other. `MapFiltersPanel`'s enum-field facets, by contrast,
+  // drive the map server-side directly via `activeFieldFilters` — #394
+  // removed the `filterable: true` gate that used to additionally restrict
+  // this to a network.json-marked subset; every declared, non-private enum
+  // field the panel offers (the same full set the list uses,
+  // `getEnumFilterFieldsForDomains`) is now sent and applied by the server's
+  // facet guard (`resolveAllowedFacetFields`). See #360 for the proper
+  // long-term schema-driven search/filter declaration. The domain
+  // multi-select below (a client-side array-membership check on the
+  // already-fetched markers) remains client/list-only; free-text search, per
+  // the comment above, is sent to the server for both the map and the list.
+  //
+  // Even at low zoom for an anonymous / no-location visitor we now fetch the
+  // slim viewport markers (coords only, capped at MAP_FETCH_LIMIT) and cluster
+  // them, rather than the old count-only pull that showed just aggregate text.
+  // Clustering already bounds on-screen density, and a visitor needs to SEE
+  // where items are to know where to zoom — "N results, zoom in" gave no clue
+  // where. A small non-blocking count pill (below) keeps the aggregate visible.
+  // `meta.total` still reports the true match count regardless of the fetch cap.
+  // Scope the map to the active Browse tab: a single-domain tab (Seeker /
+  // Provider) fetches + shows only that domain's pins; the "All" tab shows every
+  // visible domain (further narrowed by the Filters-panel domain toggle below).
+  // Keeps the map consistent with the list + header count, which are already
+  // scoped to `selectedDomain` — previously the tab only filtered the list and
+  // the map kept showing all domains.
+  const mapDomains = React.useMemo(
+    () => (selectedDomain ? visibleDomains.filter((d) => d.id === selectedDomain) : visibleDomains),
+    [selectedDomain, visibleDomains],
+  );
+  const mapMarkers = useMapMarkers(network, mapDomains, mapViewport, activeFieldFilters, search);
+
+  // On the "All" tab the Filters-panel domain multi-select narrows which pins
+  // show (client-side membership check — every `Marker` carries `item_domain`).
+  // On a single-domain tab the fetch above is already scoped to that domain, so
+  // that multi-select (an "All"-tab control) does not apply.
+  const mapItems = React.useMemo(
+    () =>
+      mapMarkers.markers
+        .filter(
+          (m) =>
+            selectedDomain != null ||
+            mapSelectedDomains.length === 0 ||
+            mapSelectedDomains.includes(m.item_domain),
+        )
+        .map((m) => ({
+          id: m.item_id,
+          domain: m.item_domain,
+          data: { item_locations: m.item_locations },
+        })),
+    [selectedDomain, mapMarkers.markers, mapSelectedDomains],
+  );
+
   const localProfileItemIds = React.useMemo(
     () => new Set(myItems.filter((item) => item.item_domain === currentDomain).map((item) => item.item_id)),
     [myItems, currentDomain]
   );
 
-  // Fetch items for selected domain(s); when All tab (null) fetch all visible domains in parallel
-  React.useEffect(() => {
-    if (!network || visibleDomains.length === 0) {
-      setDomainItems({});
-      return;
-    }
+  // --- Task 5 (#203 §5.1): paged infinite-scroll list view ------------------
+  // The selected domain's full schema object (needed by the paged hook), and
+  // the coords used to drive server-side nearest ordering. Coords are omitted
+  // (null) when there is no known location — the hook then fetches unordered.
+  const selectedDomainObj = React.useMemo(
+    () => (selectedDomain ? (network?.domains.find((d) => d.id === selectedDomain) ?? null) : null),
+    [network, selectedDomain],
+  );
+  const browseCoords = React.useMemo(
+    () => (userLocation ? { lat: userLocation.lat, lng: userLocation.lng } : null),
+    [userLocation],
+  );
 
-    const controller = new AbortController();
-    setLoading(true);
+  // #394: the list ALWAYS uses the discover BFF now — map the search box +
+  // facet selections to the shared discover params (see `deriveBrowseParams`;
+  // `relevance` is unconditionally true, there is no more ranked/proximity
+  // split). The resolved viewer location (`browseCoords`, from
+  // `LocationSourceToggle`/`preferredSource`) is ALWAYS forwarded too — it's
+  // `null` when none is available (no profile location AND browser location
+  // denied/unsupported), in which case discover just runs anchor-only (or
+  // fully unranked-by-location for a signed-out viewer).
+  const browseParams = React.useMemo<DerivedBrowseParams>(
+    () => deriveBrowseParams({ search, activeFieldFilters }),
+    [search, activeFieldFilters],
+  );
+  const browseLocation = browseCoords;
+  // #394: shared discover params for both list paths — q/filters/relevance are
+  // the same regardless of which domain is being browsed. `anchorItemId` is
+  // deliberately NOT included here: signals-search enforces the network's
+  // interaction matrix and 403s (`INTERACTION_NOT_ALLOWED`) when the anchor's
+  // domain has no defined interaction with the browsed domain (e.g. a seeker
+  // browsing seekers), so the anchor must be computed PER target domain (see
+  // `anchorFor` below) rather than shared.
+  const browseHookOpts = React.useMemo(
+    () => ({
+      q: browseParams.q,
+      filters: browseParams.filters,
+      relevance: browseParams.relevance,
+    }),
+    [browseParams],
+  );
+  // True when the active feed is served by the discover BFF (q OR filters OR
+  // relevance) — the server has already applied text + facet filtering, so the
+  // client-side filters in `buildFilteredCardsForDomain` must be bypassed.
+  const listDiscover = isDiscoverActive(browseParams);
 
-    const domainsToFetch = selectedDomain === null
-      ? visibleDomains
-      : visibleDomains.filter((d) => d.id === selectedDomain);
+  // #394: per-target-domain anchor. `myItem` (the resolved active profile,
+  // defined above) supplies the anchor's own domain; `anchorItemIdForTarget`
+  // consults the schema's interaction matrix (`network.actions[].interactions`)
+  // to decide whether that domain may anchor discover calls for `targetDomain`.
+  const anchorFor = React.useCallback(
+    (targetDomain: string): string | undefined =>
+      anchorItemIdForTarget({
+        activeProfileId,
+        activeProfileDomain: myItem?.item_domain ?? null,
+        targetDomain,
+        actions: network?.actions ?? {},
+      }),
+    [activeProfileId, myItem, network],
+  );
 
-    Promise.all(
-      domainsToFetch.map((domain) => {
-        const itemType = getItemTypeForDomain(network, domain.id);
-        return fetchNetworkItems(
-          { item_network: network.id, item_domain: domain.id, item_type: itemType, limit: PROFILE_FETCH_LIMIT },
-          controller.signal
-        )
-          .then((res) => ({
-            domain: domain.id,
-            items: res.items.filter((item) => !localProfileItemIds.has(item.item_id)),
-          }))
-          .catch(() => ({ domain: domain.id, items: [] as Item[] }));
-      })
-    )
-      .then((results) => {
-        if (controller.signal.aborted) return;
-        const map: Record<string, Item[]> = {};
-        for (const r of results) map[r.domain] = r.items;
-        setDomainItems(map);
-      })
-      .finally(() => {
-        if (!controller.signal.aborted) setLoading(false);
+  // Single-domain paged fetch. Enabled only while a specific domain tab is
+  // selected; disabled (and thus inert) on the "All" tab.
+  const singleDomainList = useInfiniteBrowseItems(
+    network,
+    selectedDomain ? selectedDomainObj : null,
+    browseLocation,
+    {
+      enabled: selectedDomain !== null,
+      ...browseHookOpts,
+      anchorItemId: selectedDomain ? anchorFor(selectedDomain) : undefined,
+    },
+  );
+
+  // Own-item filtering is a view concern (mirrored below by
+  // `allDomainItemsFiltered` for the "All" tab) — apply the same rule to the
+  // paged feed so a viewer never sees their own profile in their own browse
+  // list. Runs UPSTREAM of the discover bypass so it applies in both modes.
+  const singleDomainItems = React.useMemo(
+    () => excludeOwnItems(singleDomainList.items, localProfileItemIds),
+    [singleDomainList.items, localProfileItemIds],
+  );
+
+  // Single-domain: bottom sentinel advances the paged fetch. Server already
+  // orders nearest-first (§4.1), so no client `sortByNearest` for this path.
+  // (`useLoadMoreSentinel` reads the callback through a ref, so passing the
+  // hook's non-memoized `fetchNextPage` directly is safe — see its comment.)
+  const singleDomainSentinelRef = useLoadMoreSentinel(
+    singleDomainList.fetchNextPage,
+    selectedDomain !== null && singleDomainList.hasNextPage,
+  );
+
+  // "All" tab: each visible domain's paged state, lifted up from its headless
+  // <DomainPagedFetch> child (one hook call per child — legal; hooks can't be
+  // called in a loop). Keyed by domain id.
+  const [allDomainPages, setAllDomainPages] = React.useState<Record<string, DomainPageState>>({});
+
+  // `DomainPagedFetch` re-invokes this on every one of its renders (its
+  // `list.items` array is never referentially stable — see its effect), so
+  // this lift must be idempotent itself: bail out of the `setState` when the
+  // domain's data hasn't actually changed, so React skips the re-render and
+  // the loop terminates. "Unchanged" is element-wise reference equality on
+  // `items` (individual item object refs ARE stable across a plain
+  // re-render, and only change when React Query actually refetches), plus
+  // `hasMore`/`total`/`isLoading`/`partial`. `fetchNext`'s identity always
+  // changes and is intentionally excluded from the comparison — we still
+  // store the latest one, just don't gate on it.
+  const handleDomainItems = React.useCallback(
+    (
+      domainId: string,
+      items: Item[],
+      hasMore: boolean,
+      total: number,
+      isLoading: boolean,
+      fetchNext: () => void,
+      partial: boolean,
+      degraded: boolean,
+      distanceMeters: number | undefined,
+    ) => {
+      setAllDomainPages((prev) => {
+        const existing = prev[domainId];
+        const itemsUnchanged =
+          existing !== undefined &&
+          existing.items.length === items.length &&
+          existing.items.every((it, i) => it === items[i]);
+        if (
+          itemsUnchanged &&
+          existing.hasMore === hasMore &&
+          existing.total === total &&
+          existing.isLoading === isLoading &&
+          existing.partial === partial &&
+          existing.degraded === degraded &&
+          existing.distanceMeters === distanceMeters
+        ) {
+          // Same data (plain re-render): bail so React doesn't re-render → no loop.
+          return prev;
+        }
+        return {
+          ...prev,
+          [domainId]: { items, hasMore, total, isLoading, fetchNext, partial, degraded, distanceMeters },
+        };
       });
+    },
+    [],
+  );
 
-    return () => { controller.abort(); };
-  }, [selectedDomain, visibleDomains, network, localProfileItemIds]);
+  // Own-item-filtered accumulated union across all "All"-tab domains (mirrors
+  // `singleDomainItems` above). The merged grid and its `fullItem` lookups
+  // read this.
+  const allDomainItemsFiltered = React.useMemo(() => {
+    const result: Record<string, Item[]> = {};
+    for (const [domainId, state] of Object.entries(allDomainPages)) {
+      result[domainId] = excludeOwnItems(state.items, localProfileItemIds);
+    }
+    return result;
+  }, [allDomainPages, localProfileItemIds]);
+
+  const fetchNextAllDomainPages = React.useCallback(() => {
+    for (const state of Object.values(allDomainPages)) {
+      if (state.hasMore) state.fetchNext();
+    }
+  }, [allDomainPages]);
+  // Iterate `visibleDomains` (not all of `allDomainPages`) so a domain that
+  // scrolled out of view (e.g. a domain-tab/served-scope change) doesn't keep
+  // inflating this via a stale entry that's no longer rendered (Fix C).
+  const anyAllDomainHasMore = visibleDomains.some((domain) => allDomainPages[domain.id]?.hasMore ?? false);
+  const allDomainsSentinelRef = useLoadMoreSentinel(
+    fetchNextAllDomainPages,
+    selectedDomain === null && anyAllDomainHasMore,
+  );
+  // --- end Task 5 -------------------------------------------------------------
+
+  // Task 6 (#203 §6): "All" tab total for the X-of-Y indicator is the sum of
+  // each visible domain's server-reported total (no single server call spans
+  // domains, so there's no one `meta.total` to read). P3 surfaces meta.total
+  // only — the federation-degradation banner (meta.partial/unavailable_instances)
+  // lands in P5 below.
+  // Sum only over `visibleDomains` — `allDomainPages` entries are never pruned
+  // when `visibleDomains` shrinks, so a no-longer-visible domain would keep
+  // inflating the "X of Y" if we reduced over all of `allDomainPages` instead.
+  const allDomainsTotalCount = React.useMemo(
+    () =>
+      visibleDomains.reduce((sum, domain) => {
+        const state = allDomainPages[domain.id];
+        return state ? sum + state.total : sum;
+      }, 0),
+    [visibleDomains, allDomainPages],
+  );
+  // Raw loaded count (mirrors the single-domain path's raw `items.length`):
+  // sums the unfiltered per-domain page items, NOT `allFlatItems.length`
+  // (which is post search/enum-filter). The indicator must reflect pagination
+  // truncation only, not client-side filtering.
+  const allDomainsLoadedCount = React.useMemo(
+    () =>
+      visibleDomains.reduce((sum, domain) => {
+        const state = allDomainPages[domain.id];
+        return state ? sum + state.items.length : sum;
+      }, 0),
+    [visibleDomains, allDomainPages],
+  );
+  // Task 7 (#203 §5.2 cleanup): the "All" tab's loading gate, re-sourced from
+  // the paged hooks (`allDomainPages`, lifted per-domain from
+  // `useInfiniteBrowseItems` via `DomainPagedFetch`) instead of the removed
+  // full `useBrowseItems` fetch's single `isLoading`. A domain missing from
+  // `allDomainPages` (its `DomainPagedFetch` child hasn't committed its first
+  // effect yet) counts as still loading, so the skeleton doesn't flash empty
+  // before every visible domain has reported in.
+  const allDomainsLoading = visibleDomains.some(
+    (domain) => allDomainPages[domain.id]?.isLoading ?? true,
+  );
+
+  // P5 (#203 §6): "All" tab is partial if ANY visible domain's paged feed is
+  // partial — mirrors `allDomainsTotalCount`'s "sum over `visibleDomains` only"
+  // rule so a domain that scrolled out of view can't keep the banner up.
+  const allDomainsListPartial = visibleDomains.some(
+    (domain) => allDomainPages[domain.id]?.partial ?? false,
+  );
+  // Single source of truth for the list federation-degradation banner
+  // (mirrors the map's `mapMarkers.partial` from P4): single-domain tab reads
+  // the one paged feed directly, "All" tab is the OR above.
+  const listPartial = selectedDomain !== null ? singleDomainList.partial : allDomainsListPartial;
+
+  // Task 6 (#203 §6): mirrors `allDomainsListPartial`/`listPartial` exactly,
+  // but for the discover BFF's native-fallback signal instead of federation
+  // partiality — "All" tab is degraded if ANY visible domain's paged feed
+  // fell back to native.
+  const allDomainsListDegraded = visibleDomains.some(
+    (domain) => allDomainPages[domain.id]?.degraded ?? false,
+  );
+  // Single source of truth for the degraded-search UX: single-domain tab reads
+  // the one paged feed directly, "All" tab is the OR above.
+  const listDegraded = selectedDomain !== null ? singleDomainList.degraded : allDomainsListDegraded;
+
+  // #394: the effective spatial radius (`meta.distance_meters`), same
+  // single-domain-vs-"All" split as `listPartial`/`listDegraded` above. On the
+  // "All" tab every visible domain shares the same location + radius config,
+  // so the first domain to report one is representative of all of them.
+  const allDomainsDistanceMeters = visibleDomains
+    .map((domain) => allDomainPages[domain.id]?.distanceMeters)
+    .find((value) => value !== undefined);
+  const listDistanceMeters =
+    selectedDomain !== null ? singleDomainList.distanceMeters : allDomainsDistanceMeters;
+
+  // #394 (review fix): whether the viewer actually has a profile anchor being
+  // sent for the browsed domain(s) — derived from the SAME rule that gates
+  // the anchor itself (`anchorFor`/`anchorItemIdForTarget`, both built on
+  // `domainsInteract`), not the looser "signed in with an active profile"
+  // check this used to be. A directory-style network can have a selected (or,
+  // on "All", every visible) domain with NO interaction edge to the viewer's
+  // own profile domain — no anchor is sent for that view at all, and the note
+  // must not claim profile-relevance when nothing was actually anchored.
+  // Single-domain tab: gate on that one target domain via `anchorFor` (the
+  // exact function `singleDomainList` calls above). "All"/no-selection view:
+  // true iff the viewer's profile domain interacts with at least one visible
+  // domain (mirrors `computeVisibleDomains`' own per-domain anchor gating).
+  const activeProfileDomain = myItem?.item_domain ?? null;
+  const hasProfileAnchor =
+    selectedDomain !== null
+      ? anchorFor(selectedDomain) !== undefined
+      : Boolean(
+          activeProfileId &&
+            activeProfileDomain &&
+            visibleDomains.some((domain) =>
+              domainsInteract(network?.actions ?? {}, activeProfileDomain, domain.id),
+            ),
+        );
+  // Whether a location is actually being sent as the discover spatial filter.
+  const hasLocation = browseLocation !== null;
+  const listNote = resolveListNote({
+    hasProfileAnchor,
+    hasLocation,
+    degraded: listDegraded,
+    distanceMeters: listDistanceMeters,
+    // The EFFECTIVE source of the coordinate actually sent (not the toggle
+    // preference): logged out / no profile → useUserLocation falls back to the
+    // browser coordinate, so the note must say "current location", not "your
+    // profile location". `preferredSource` stays 'profile' by default even when
+    // no profile exists, which produced the wrong wording. 'none' can't reach
+    // the km-bearing note branch (hasLocation would be false), so map it to the
+    // 'profile' default harmlessly.
+    locationSource: resolvedLocationSource === 'browser' ? 'browser' : 'profile',
+  });
 
   // Active schema: from the selected browsing domain, or first visible domain
   const activeSchema = React.useMemo(() => {
@@ -772,16 +1337,37 @@ export function HomePage() {
   );
 
   const handleBulkConnect = React.useCallback(
-    async (actionType: string, formData: Record<string, unknown>) => {
+    async (actionType: string, formData: Record<string, unknown>, confirmed = false) => {
       if (!myItem || !network) return;
       // Draft source profile can't act — prompt to complete it, don't submit.
       if (promptCompleteDraftProfile(myItem)) {
         setBulkConnectOpen(false);
         return;
       }
+      // Minor ward: confirm before the guardian OTP is dispatched (the bulk
+      // perform below is what sends it) — same "proceed?" step as single actions.
+      if (
+        !confirmed &&
+        u18Status?.isMinor === true &&
+        !!wardDomain &&
+        isGuardianConsentRequiredDomain(network, wardDomain)
+      ) {
+        setBulkConnectOpen(false);
+        setBulkGuardianConfirm({
+          actionType,
+          run: () => { void handleBulkConnect(actionType, formData, true); },
+        });
+        return;
+      }
       setBulkConnectBusy(true);
       try {
-        const allItems = Object.values(domainItems).flat();
+        // Task 7 (#203 §5.2 cleanup): bulk-select only renders in the LIST
+        // view (see `browseSelection.selectMode` below), so its candidates are
+        // always sourced from whichever paged list feed is currently active —
+        // never from the map/markers, so no `mapDetailItem` fallback is needed
+        // here (contrast `onActionSubmit` below).
+        const allItems =
+          selectedDomain === null ? Object.values(allDomainItemsFiltered).flat() : singleDomainItems;
         const ids = Array.from(browseSelection.selected);
         const targets = ids
           .map((id) => allItems.find((i) => i.item_id === id))
@@ -836,12 +1422,38 @@ export function HomePage() {
           });
 
         const env = await performActionsBulk(payloads, sourceItemInstanceUrl);
+        // New actions must surface without waiting for the 60s poll (§C5).
+        queryClient.invalidateQueries({ queryKey: queryKeys.actions.all });
         setBulkConnectOpen(false);
 
         if (env.summary.failed === 0) {
           toast.success(t('home.bulk_connected_all', { count: env.summary.succeeded }));
           browseSelection.exitSelect();
         } else {
+          // Minor ward: if the failures are the guardian-OTP challenge, don't
+          // surface the raw message — open ONE guardian OTP dialog for the batch
+          // and resubmit those payloads with the code (mirrors single actions).
+          const failedResults = env.results.filter((r) => r.status === 'error');
+          const guardianResults = failedResults.filter(
+            (r) => guardianOtpErrorOf(r) === 'GUARDIAN_OTP_REQUIRED',
+          );
+          // Any GUARDIAN_OTP_REQUIRED failure means a code was already sent to the
+          // guardian — open the dialog for those items even in a mixed batch, so
+          // the sent OTP isn't wasted on the generic error path. Non-guardian
+          // failures ride along and are reselected once the dialog resolves.
+          if (guardianResults.length > 0) {
+            setBulkConnectOpen(false);
+            const otherFailedIds = failedResults
+              .filter((r) => guardianOtpErrorOf(r) !== 'GUARDIAN_OTP_REQUIRED')
+              .map((r) => targets[r.index].item_id);
+            setBulkGuardianChallenge({
+              payloads: guardianResults.map((r) => payloads[r.index]),
+              sourceInstanceUrl: sourceItemInstanceUrl,
+              actionType,
+              otherFailedIds: otherFailedIds.length > 0 ? otherFailedIds : undefined,
+            });
+            return; // the guardian OTP dialog owns the resubmit
+          }
           const failedIdxs = bulkFailureIndices(env);
           const failedIds = failedIdxs.map((i) => targets[i].item_id);
           const firstErr = firstBulkError(env);
@@ -869,11 +1481,15 @@ export function HomePage() {
     [
       myItem,
       network,
-      domainItems,
+      selectedDomain,
+      allDomainItemsFiltered,
+      singleDomainItems,
       browseSelection.selected,
       browseSelection.exitSelect,
       browseSelection.setSelected,
       promptCompleteDraftProfile,
+      u18Status,
+      wardDomain,
       t,
     ],
   );
@@ -886,56 +1502,47 @@ export function HomePage() {
     return actions[0] ?? null;
   }, [getActionsForDomain, selectedDomain, visibleDomains]);
 
-  // Build per-domain card items filtered by search, domain, and status.
-  // The same filtered result is consumed by both the list view and the map view
-  // so both stay in sync without duplicating filter logic.
-  // Derive enum filter field metadata once (used in the memo below and in MapView)
+  // Build per-domain card items filtered by search, domain, and status, for
+  // the LIST view (the map view reads viewport markers instead — decoupled
+  // in Task 6/7, #203 §5.2).
+  // Derive enum filter field metadata once (used in the memos below and in MapView)
   const enumFilterFields = React.useMemo(
     () => (network ? getEnumFilterFieldsForDomains(network.domains) : []),
     [network],
   );
 
-  const filteredDomainItems = React.useMemo(() => {
+  // Task 5 (#203 §5.1): the search/enum/map-domain filter, applied to the
+  // paged feeds (the full-fetch `domainItems` snapshot this used to read from
+  // was removed in Task 7). Single-domain list cards (server already orders
+  // nearest-first — no client `sortByNearest`).
+  const singleDomainCards = React.useMemo(
+    () =>
+      selectedDomain
+        ? buildFilteredCardsForDomain(selectedDomain, singleDomainItems, {
+            search,
+            mapSelectedDomains,
+            activeFieldFilters,
+            enumFilterFields,
+            discover: listDiscover,
+          })
+        : [],
+    [selectedDomain, singleDomainItems, search, mapSelectedDomains, activeFieldFilters, enumFilterFields, listDiscover],
+  );
+
+  // "All" tab: same filter applied per-domain to the accumulated paged union.
+  const filteredAllDomainItems = React.useMemo(() => {
     const result: Record<string, { id: string; domain: string; data: Record<string, unknown> }[]> = {};
-
-    // Determine which enum-field filters are active (non-empty selected arrays)
-    const activeFieldFilters = Object.fromEntries(
-      Object.entries(mapSelectedFields).filter(([, vals]) => vals.length > 0),
-    );
-    const hasFieldFilters = Object.keys(activeFieldFilters).length > 0;
-
-    for (const [domainId, itemList] of Object.entries(domainItems)) {
-      // Map domain filter: skip this domain entirely if filter is active and
-      // this domain is not selected.
-      if (mapSelectedDomains.length > 0 && !mapSelectedDomains.includes(domainId)) {
-        result[domainId] = [];
-        continue;
-      }
-
-      let cards = itemList.map(itemToCardItem);
-
-      // Text search filter
-      if (search) {
-        cards = cards.filter((item) =>
-          Object.values(item.data).some((val) =>
-            String(val).toLowerCase().includes(search.toLowerCase())
-          )
-        );
-      }
-
-      // Enum-field filters: AND across different fields, OR within a field's
-      // selected values. Absent fields on an item always pass (domain-safe).
-      if (hasFieldFilters) {
-        cards = cards.filter((item) =>
-          itemPassesEnumFilters(item.data, activeFieldFilters, enumFilterFields),
-        );
-      }
-
-      result[domainId] = cards;
+    for (const domain of visibleDomains) {
+      result[domain.id] = buildFilteredCardsForDomain(domain.id, allDomainItemsFiltered[domain.id] ?? [], {
+        search,
+        mapSelectedDomains,
+        activeFieldFilters,
+        enumFilterFields,
+        discover: listDiscover,
+      });
     }
-
     return result;
-  }, [domainItems, search, mapSelectedDomains, mapSelectedFields, network, enumFilterFields]);
+  }, [visibleDomains, allDomainItemsFiltered, search, mapSelectedDomains, activeFieldFilters, enumFilterFields, listDiscover]);
 
   const handleDomainSelect = (domainId: string | null) => {
     setSelectedDomain(domainId);
@@ -1053,6 +1660,7 @@ export function HomePage() {
     <U18GuardianFlow
       network={network.id}
       brand={brand === 'standard' ? null : brand}
+      purpose={{ kind: 'profile' }}
       // Skip the DOB step when birth data is already stored (captured at
       // login) — we never re-ask the date of birth at profile-creation time.
       initialStep={u18InitialStep}
@@ -1112,6 +1720,7 @@ export function HomePage() {
     <U18GuardianFlow
       network={network.id}
       brand={brand === 'standard' ? null : brand}
+      purpose={{ kind: 'profile' }}
       initialStep="guardian"
       onComplete={() => {
         const ref = guardianSetupRef;
@@ -1165,7 +1774,23 @@ export function HomePage() {
             item_id: profile.item_id,
             version: profileDoc.current_version,
           });
-          setConsentedProfileIds((prev) => new Set([...prev, pending]));
+          // Update the consent-status cache directly (not invalidate) so the
+          // derived `consentedProfileIds` reflects the accepted profile in the
+          // same batched render as the activeProfileId/pendingConsentProfileId
+          // updates below — an invalidate-triggered refetch would leave a window
+          // where the gate effect sees the old (not-yet-consented) set and
+          // reopens the modal it was just told to close.
+          queryClient.setQueryData<Set<string>>(
+            queryKeys.profileConsent(network.id),
+            (prev) => new Set([...(prev ?? []), pending]),
+          );
+          // Recording profile consent also flips a complete draft to `live`
+          // server-side (promoteItemOnProfileConsent, in the same transaction),
+          // so the cached my-items list is stale the moment this resolves — its
+          // `lifecycle_status` still reads `draft`. Without this the sidebar
+          // chip stays "Draft" until the next page load, which is what made the
+          // promotion look like it only happened on refresh.
+          void queryClient.invalidateQueries({ queryKey: queryKeys.myItems(network.id) });
           setActiveProfileId(pending);
           setStoredActiveProfileId(network.id, pending);
           setPendingConsentProfileId(null);
@@ -1185,6 +1810,7 @@ export function HomePage() {
     <GuardianOtpDialog
       open={!!guardianProfileRef}
       onOpenChange={(open) => { if (!open) setGuardianProfileRef(null); }}
+      purpose={{ kind: 'profile' }}
       onLogout={() => { void signOut(); }}
       onSubmitOtp={async (otp) => {
         const ref = guardianProfileRef;
@@ -1192,7 +1818,18 @@ export function HomePage() {
         // Throws on an invalid/expired code → GuardianOtpDialog shows the inline
         // error and keeps itself open for a retry.
         await verifyProfileConsentOtp({ ...ref, otp });
-        setConsentedProfileIds((prev) => new Set([...prev, ref.item_id]));
+        // Reflect the now-consented profile in the derived `consentedProfileIds`
+        // immediately (React Query is the source of truth; there is no local
+        // setter) — mirrors the adult accept-consent handler above so the gate
+        // doesn't reopen during a refetch window.
+        queryClient.setQueryData<Set<string>>(
+          queryKeys.profileConsent(network.id),
+          (prev) => new Set([...(prev ?? []), ref.item_id]),
+        );
+        // Guardian verify promotes the ward's complete draft to `live` too
+        // (upsertGuardianProfileConsentAndPromote), so refresh my-items for the
+        // same reason as the adult accept handler above.
+        void queryClient.invalidateQueries({ queryKey: queryKeys.myItems(network.id) });
         setActiveProfileId(ref.item_id);
         setStoredActiveProfileId(network.id, ref.item_id);
         setGuardianProfileRef(null);
@@ -1204,10 +1841,93 @@ export function HomePage() {
     />
   );
 
+  // Guardian OTP challenge for a MINOR's BULK action (#453). One dialog for the
+  // whole batch; the code resubmits the stashed payloads via performActionsBulk.
+  // "A code will be sent to your guardian — proceed?" confirm before a minor's
+  // bulk action dispatches the OTP (mirrors the single-action confirm).
+  const bulkGuardianConfirmModal = (
+    <Dialog
+      open={!!bulkGuardianConfirm}
+      onOpenChange={(open) => { if (!open) setBulkGuardianConfirm(null); }}
+    >
+      <DialogContent className="max-h-[90dvh] overflow-y-auto">
+        <DialogHeader>
+          <DialogTitle>{t('actions.guardian_confirm_title')}</DialogTitle>
+          <DialogDescription>{t('actions.guardian_confirm_desc')}</DialogDescription>
+        </DialogHeader>
+        <GuardianOtpPurpose
+          purpose={{
+            kind: 'bulk',
+            action: bulkGuardianConfirm?.actionType === 'connect' ? 'connect' : 'apply',
+            count: browseSelection.selected.size,
+          }}
+        />
+        <DialogFooter>
+          <Button variant="outline" onClick={() => setBulkGuardianConfirm(null)}>
+            {t('actions.guardian_confirm_cancel')}
+          </Button>
+          <Button
+            onClick={() => {
+              const run = bulkGuardianConfirm?.run;
+              setBulkGuardianConfirm(null);
+              run?.();
+            }}
+          >
+            {t('actions.guardian_confirm_proceed')}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+
+  const bulkGuardianOtpModal = (
+    <GuardianOtpDialog
+      open={!!bulkGuardianChallenge}
+      onOpenChange={(open) => { if (!open) setBulkGuardianChallenge(null); }}
+      purpose={{
+        kind: 'bulk',
+        action: bulkGuardianChallenge?.actionType === 'connect' ? 'connect' : 'apply',
+        count: bulkGuardianChallenge?.payloads.length ?? 0,
+      }}
+      onLogout={() => { void signOut(); }}
+      onSubmitOtp={async (otp) => {
+        const ch = bulkGuardianChallenge;
+        if (!ch) return;
+        const env2 = await performActionsBulk(ch.payloads, ch.sourceInstanceUrl, otp);
+        queryClient.invalidateQueries({ queryKey: queryKeys.actions.all });
+        if (env2.summary.failed === 0) {
+          const otherFailedIds = ch.otherFailedIds ?? [];
+          setBulkGuardianChallenge(null);
+          if (otherFailedIds.length > 0) {
+            // Mixed batch: the guardian-gated items went through, but other
+            // items failed for a non-guardian reason — keep those selected so
+            // the ward can retry them, and say so rather than claim "all done".
+            toast.warning(
+              t('home.bulk_connected_partial', {
+                succeeded: env2.summary.succeeded,
+                total: env2.summary.succeeded + otherFailedIds.length,
+              }),
+            );
+            browseSelection.setSelected(otherFailedIds);
+          } else {
+            toast.success(t('home.bulk_connected_all', { count: env2.summary.succeeded }));
+            browseSelection.exitSelect();
+          }
+          return;
+        }
+        // Still failing (wrong/expired code, throttled …) — throw a classified
+        // error so GuardianOtpDialog shows the inline message and stays open.
+        const firstFail = env2.results.find((r) => r.status === 'error');
+        const code = guardianOtpErrorOf(firstFail) ?? 'GUARDIAN_OTP_INVALID';
+        throw new BulkSingleError(code, firstFail?.message ?? 'Guardian confirmation failed', 422);
+      }}
+    />
+  );
+
   if (!network) {
     return (
       <>
-        <div className="flex h-screen flex-col">
+        <div className="flex h-svh flex-col">
         <div className="h-14 border-b bg-gradient-to-r from-background to-primary/5" />
         <div className="flex flex-1 overflow-hidden">
           <div className="hidden md:block w-64 shrink-0 border-r p-4 space-y-3">
@@ -1231,6 +1951,8 @@ export function HomePage() {
         {guardianSetupForProfileModal}
         {profileConsentModal}
         {guardianProfileConsentModal}
+        {bulkGuardianConfirmModal}
+        {bulkGuardianOtpModal}
       </>
     );
   }
@@ -1245,9 +1967,15 @@ export function HomePage() {
   const contentDescription = headerDomain
     ? visibleDomains.find((d) => d.id === headerDomain)?.description
     : undefined;
-  const contentCount = headerDomain
-    ? (filteredDomainItems[headerDomain]?.length ?? 0)
-    : Object.values(filteredDomainItems).reduce((s, a) => s + a.length, 0);
+  // Task 7 (#203 §5.2 cleanup): re-sourced from the list totals — keyed on
+  // `selectedDomain` (which paged feed is actually driving the list), not
+  // `headerDomain` (a display-only label that can be non-null even on the
+  // "All" tab when exactly one domain is visible). This also resolves the
+  // P3-deferred header-count-vs-list-total mismatch: the header now reports
+  // the same server-side total the "Showing X of Y" list indicator uses,
+  // instead of a client-filtered card count.
+  const contentCount = selectedDomain !== null ? singleDomainList.total : allDomainsTotalCount;
+  const contentLoading = selectedDomain !== null ? singleDomainList.isLoading : allDomainsLoading;
 
   function buildEmptyState(domainLabel: string) {
     if (search) return <EmptyState message={t('home.no_search_results', { search })} />;
@@ -1263,6 +1991,24 @@ export function HomePage() {
               <Link to={`/profile/new?network=${selectedNetworkId ?? ''}`}>{t('nav.create_profile')}</Link>
             </Button>
           }
+        />
+      );
+    }
+    // Location-bounded discover returned nothing: the network may well have
+    // listings — just none within the (hard) radius. Say THAT, not "none in
+    // this network" (false) or nothing at all. Mirrors the map's area-scoped
+    // empty message; the "Search near" toggle makes trying another location
+    // actionable.
+    if (hasLocation && listDistanceMeters !== undefined) {
+      const km = Math.round(listDistanceMeters / 1000);
+      const locationSource = resolvedLocationSource === 'browser' ? 'current' : 'profile';
+      return (
+        <EmptyState
+          heading={t('home.nothing_here_heading')}
+          message={t('home.no_listings_in_radius', {
+            km,
+            locationSource: t(`home.location_source_${locationSource}`),
+          })}
         />
       );
     }
@@ -1323,6 +2069,27 @@ export function HomePage() {
     />
   );
 
+  // Task 6 (#203 §6): the page-header mount of the filters panel (passed to
+  // `PageShell` below) — as opposed to `filtersPanel` above, which is also
+  // reused as MapView's OWN copy rendered only while the map is maximized
+  // (the header is covered in fullscreen; see `MapView`'s `filtersSlot` doc).
+  // #394: previously this mount marked the selected facet chips
+  // paused/not-applied when the discover BFF fell back to native — since the
+  // fallback now applies facet filters natively, that pausing no longer
+  // applies and this is identical to `filtersPanel` above.
+  const listFiltersPanel = (
+    <MapFiltersPanel
+      domains={visibleDomains}
+      filterFieldDomains={filterFieldDomains}
+      selectedDomains={mapSelectedDomains}
+      onDomainsChange={handleMapDomainsChange}
+      selectedFields={mapSelectedFields}
+      onFieldsChange={handleMapFieldsChange}
+      showDomainToggle={selectedDomain === null}
+      viewMode={viewMode}
+    />
+  );
+
   return (
     <>
     <PageShell
@@ -1336,12 +2103,15 @@ export function HomePage() {
       myItems={myItems}
       activeProfileId={activeProfileId}
       onActiveProfileChange={handleActiveProfileChange}
+      onProfilesChanged={() => {
+        if (network) queryClient.invalidateQueries({ queryKey: queryKeys.myItems(network.id) });
+      }}
       userSchemas={userSchemas}
       search={search}
       onSearchChange={setSearch}
       viewMode={viewMode}
       onViewModeChange={handleViewModeChange}
-      filtersSlot={filtersPanel}
+      filtersSlot={listFiltersPanel}
     >
       {!user ? (
         <GuestHero />
@@ -1349,11 +2119,36 @@ export function HomePage() {
         <ContentHeader
           title={contentTitle}
           description={contentDescription}
-          count={loading ? undefined : contentCount}
+          count={contentLoading ? undefined : contentCount}
           noProfilePrompt={{ show: !myItem, networkId: selectedNetworkId ?? '' }}
           actions={headerActions}
         />
       )}
+      {/* All-tab header count ("X listings") is summed from each visible
+          domain's server-reported total, lifted by these headless
+          DomainPagedFetch children. In list view the grid below mounts its own
+          set; without this, map view never fetches those totals so the count
+          stays hidden until the user visits the list once. Gated to map view
+          (viewMode !== 'list') so the two sets never double-mount.
+
+          These count-only fetchers stay on the NATIVE browse path (no discover
+          opts, raw proximity coords) regardless of the list's own always-on
+          discover mode: those are list-view concerns and must not route this
+          count through discover — doing so would make it diverge from the map's
+          own marker total whenever the search index lags the live DB. (The map
+          view itself DOES honor facet filters and free-text search via its own
+          `/markers` fetch — see `useMapMarkers`; this note is only about the
+          header-count fetchers, which are a separate native path.) */}
+      {user && network && selectedDomain === null && viewMode !== 'list' &&
+        visibleDomains.map((domain) => (
+          <DomainPagedFetch
+            key={`count-${domain.id}`}
+            network={network}
+            domain={domain}
+            coords={browseCoords}
+            onItems={handleDomainItems}
+          />
+        ))}
       {showLocationBanner && (
         <EnableLocationBanner
           onEnable={() => void browserLocation.request()}
@@ -1391,8 +2186,18 @@ export function HomePage() {
               });
               throw new Error('No user');
             }
-            const allItems = Object.values(domainItems).flat();
-            const targetItem = allItems.find((i) => i.item_id === targetItemId);
+            // Task 7 (#203 §5.2 cleanup): this handler serves BOTH the list
+            // view (card actions) and the map view (a popup's connect button),
+            // so the target lookup must cover both. List-driven targets are
+            // always in one of the paged feeds; a map-driven target may be a
+            // viewport marker never paged into either list feed, so fall back
+            // to `mapDetailItem` — the full `Item` the open popup already
+            // resolved via `useItemDetail` (see `MarkerDetailPopup`).
+            const listItems =
+              selectedDomain === null ? Object.values(allDomainItemsFiltered).flat() : singleDomainItems;
+            const targetItem =
+              listItems.find((i) => i.item_id === targetItemId) ??
+              (mapDetailItem?.item_id === targetItemId ? mapDetailItem : undefined);
             if (!targetItem) {
               toast.error(t('home.toast_profile_not_found'), {
                 description: t('home.toast_profile_not_found_desc'),
@@ -1450,6 +2255,8 @@ export function HomePage() {
               sourceItemInstanceUrl, // Call the SOURCE instance (where myItem exists)
               guardianOtp
             );
+            // New actions must surface without waiting for the 60s poll (§C5).
+            queryClient.invalidateQueries({ queryKey: queryKeys.actions.all });
             toast.success(t('home.toast_action_sent', { action: actionType.charAt(0).toUpperCase() + actionType.slice(1) }), {
               description: t('home.toast_action_sent_desc'),
             });
@@ -1458,9 +2265,64 @@ export function HomePage() {
           {(triggerAction) =>
             viewMode === 'list' ? (
               <>
+                {/* Federation-degradation indicator (#203 §6): some peer instances
+                    didn't answer in time on at least one loaded page, so the list
+                    feed (single-domain or, on the "All" tab, at least one visible
+                    domain) is known-partial. Mirrors the map's `mapMarkers.partial`
+                    banner (P4) — same styling, in-flow above the grid instead of
+                    `fixed` (the list has no maximize overlay to sit above). */}
+                {listPartial && (
+                  <p className="mb-3 rounded-md bg-amber-50 px-3 py-1.5 text-xs font-medium text-amber-900 shadow-sm ring-1 ring-amber-300 dark:bg-amber-950 dark:text-amber-100 dark:ring-amber-800">
+                    {t('home.list_partial')}
+                  </p>
+                )}
+                {/* List note (#394): the list always calls discover now (profile
+                    anchor + resolved viewer location when available), so this
+                    explains what's driving the results — relevance-to-profile,
+                    proximity, both, or (when the discover BFF fell back to
+                    native — signals-search unreachable/unconfigured/timed out)
+                    that ranking itself is temporarily unavailable. Exactly one
+                    variant renders at a time; see `resolveListNote`. */}
+                {/* Suppress the "Showing profiles within X km…" note when the
+                    list is empty — it would falsely imply results are shown.
+                    The radius-aware empty state (buildEmptyState) carries the
+                    explanation in that case instead. Kept during loading
+                    (contentCount 0) is fine — the skeleton shows, no note. */}
+                {listNote && contentCount > 0 && (
+                  <p className="mb-3 text-xs text-muted-foreground">
+                    {t(
+                      listNote.key,
+                      listNote.values
+                        ? {
+                            km: listNote.values.km,
+                            locationSource: t(`home.location_source_${listNote.values.locationSource}`),
+                          }
+                        : undefined,
+                    )}
+                  </p>
+                )}
                 {selectedDomain === null ? (
-              // All tab: flat grid across all domains, each card uses its own schema
+              // All tab: flat grid across all domains, each card uses its own schema.
+              // Each visible domain gets a headless <DomainPagedFetch> that fetches
+              // its own pages server-ordered (nearest-first, §4.1) and lifts the
+              // loaded items up; the union is then merge-sorted client-side across
+              // domains (§5.1) since no single server call spans domains.
               (() => {
+                const pagedFetchers = (
+                  <>
+                    {visibleDomains.map((domain) => (
+                      <DomainPagedFetch
+                        key={domain.id}
+                        network={network}
+                        domain={domain}
+                        coords={browseLocation}
+                        browseOpts={{ ...browseHookOpts, anchorItemId: anchorFor(domain.id) }}
+                        onItems={handleDomainItems}
+                      />
+                    ))}
+                  </>
+                );
+
                 const allFlatItemsUnsorted = visibleDomains.flatMap((domain) => {
                   const domainSchema = domain.item_schemas
                     ? (Object.values(domain.item_schemas)[0] as import('@rjsf/utils').RJSFSchema)
@@ -1469,7 +2331,7 @@ export function HomePage() {
                   const domainLabel = domain.id
                     .replace(/_/g, ' ')
                     .replace(/\b\w/g, (c) => c.toUpperCase());
-                  return (filteredDomainItems[domain.id] ?? []).map((item) => ({
+                  return (filteredAllDomainItems[domain.id] ?? []).map((item) => ({
                     item,
                     schema: domainSchema,
                     domainActions,
@@ -1480,87 +2342,150 @@ export function HomePage() {
                 });
                 const allFlatItems = sortItemsByNearest(allFlatItemsUnsorted, userLocation, (x) => getItemLocations(x.item.data));
 
-                if (loading) {
+                if (allDomainsLoading) {
                   return (
-                    <div className="grid grid-cols-1 items-start gap-4 sm:grid-cols-2 lg:grid-cols-3">
-                      {Array.from({ length: 6 }).map((_, i) => (
-                        <DomainCard key={i} schema={{}} data={{}} loading />
-                      ))}
-                    </div>
+                    <>
+                      {pagedFetchers}
+                      <div className="grid grid-cols-1 items-start gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                        {Array.from({ length: 6 }).map((_, i) => (
+                          <DomainCard key={i} schema={{}} data={{}} loading />
+                        ))}
+                      </div>
+                    </>
                   );
                 }
 
                 if (allFlatItems.length === 0) {
-                  return buildEmptyState('All');
+                  return (
+                    <>
+                      {pagedFetchers}
+                      {buildEmptyState('All')}
+                      {/* Client search/enum filtering covers only loaded pages until
+                          server-side search (§9/#117) lands — keep the sentinel
+                          mounted here too so a filtered-to-empty grid with more
+                          server pages still auto-loads instead of dead-ending. */}
+                      {anyAllDomainHasMore && (
+                        <div ref={allDomainsSentinelRef} aria-hidden="true" className="h-px w-full" />
+                      )}
+                    </>
+                  );
                 }
 
                 return (
-                  <div ref={allCardsGridRef} className="grid grid-cols-1 items-start gap-4 sm:grid-cols-2 lg:grid-cols-3">
-                    {allFlatItems.map(({ item, schema, domainActions, domainDescription, domainLabel, cardConfig }) => {
-                      const fullItem = Object.values(domainItems)
-                        .flat()
-                        .find((i) => i.item_id === item.id);
+                  <>
+                    {pagedFetchers}
+                    {allDomainsTotalCount > 0 && (
+                      <p className="mb-2 text-xs text-muted-foreground">
+                        {t('home.showing_x_of_y', {
+                          shown: allDomainsLoadedCount,
+                          total: allDomainsTotalCount,
+                        })}
+                      </p>
+                    )}
+                    <div ref={allCardsGridRef} className="grid grid-cols-1 items-start gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                      {allFlatItems.map(({ item, schema, domainActions, domainDescription, domainLabel, cardConfig }) => {
+                        const fullItem = Object.values(allDomainItemsFiltered)
+                          .flat()
+                          .find((i) => i.item_id === item.id);
+                        const networkItem: Item = fullItem || {
+                          item_id: item.id,
+                          item_network: network?.id || '',
+                          item_domain: selectedDomain || '',
+                          item_type: 'profile',
+                          item_instance_url: null,
+                          item_schema_url: null,
+                          item_state: item.data,
+                          item_locations: [],
+                          created_at: new Date().toISOString(),
+                          updated_at: new Date().toISOString(),
+                        };
 
-                      return (
-                        <SelectableCard
-                          key={item.id}
-                          id={item.id}
-                          selectMode={browseSelection.selectMode}
-                          selected={browseSelection.isSelected(item.id)}
-                          selectable={browseSelection.canSelect(item.domain ?? '')}
-                          onToggle={(id) => browseSelection.toggle(id, item.domain ?? '')}
-                        >
-                          <MatchScoreCard
-                            schema={schema!}
-                            schemaDescription={domainDescription}
-                            domainLabel={domainLabel}
-                            cardConfig={cardConfig}
-                            data={item.data}
-                            actions={domainActions}
-                            selectionMode={browseSelection.selectMode}
-                            onAction={(type, actionSchema) =>
-                              triggerAction(type, actionSchema, item.id)
-                            }
-                            localItem={myItem}
-                            networkItem={fullItem || {
-                              item_id: item.id,
-                              item_network: network?.id || '',
-                              item_domain: selectedDomain || '',
-                              item_type: 'profile',
-                              item_instance_url: null,
-                              item_schema_url: null,
-                              item_state: item.data,
-                              item_locations: [],
-                              created_at: new Date().toISOString(),
-                              updated_at: new Date().toISOString(),
-                            }}
-                          />
-                        </SelectableCard>
-                      );
-                    })}
-                  </div>
+                        return (
+                          <SelectableCard
+                            key={item.id}
+                            id={item.id}
+                            selectMode={browseSelection.selectMode}
+                            selected={browseSelection.isSelected(item.id)}
+                            selectable={browseSelection.canSelect(item.domain ?? '')}
+                            onToggle={(id) => browseSelection.toggle(id, item.domain ?? '')}
+                          >
+                            {/* #394: same rule as the single-domain CardGrid so all
+                                three tabs behave identically — profile-to-profile
+                                match always shows; the free-text (no-profile) score
+                                is gated by the runtime-env flag. */}
+                            {shouldRenderMatchScoreCard(myItem, networkItem) ? (
+                              <MatchScoreCard
+                                schema={schema!}
+                                schemaDescription={domainDescription}
+                                domainLabel={domainLabel}
+                                cardConfig={cardConfig}
+                                data={item.data}
+                                actions={domainActions}
+                                selectionMode={browseSelection.selectMode}
+                                onAction={(type, actionSchema) =>
+                                  triggerAction(type, actionSchema, item.id)
+                                }
+                                localItem={myItem}
+                                networkItem={networkItem}
+                              />
+                            ) : (
+                              <DomainCard
+                                schema={schema!}
+                                schemaDescription={domainDescription}
+                                domainLabel={domainLabel}
+                                cardConfig={cardConfig}
+                                data={item.data}
+                                actions={domainActions}
+                                selectionMode={browseSelection.selectMode}
+                                onAction={(type, actionSchema) =>
+                                  triggerAction(type, actionSchema, item.id)
+                                }
+                                localItem={myItem}
+                                networkItem={networkItem}
+                              />
+                            )}
+                          </SelectableCard>
+                        );
+                      })}
+                    </div>
+                    {anyAllDomainHasMore && (
+                      <div ref={allDomainsSentinelRef} aria-hidden="true" className="h-px w-full" />
+                    )}
+                  </>
                 );
               })()
             ) : (
-              // Single domain tab: existing behaviour
-              <CardGrid
-                schema={activeSchema!}
-                schemaName={selectedDomain}
-                schemaDescription={currentDomainLabel}
-                cardConfig={network?.domains.find((d) => d.id === selectedDomain)?.card}
-                items={sortByNearest(filteredDomainItems[selectedDomain] ?? [])}
-                fullItems={domainItems[selectedDomain] ?? []}
-                actions={actions}
-                onAction={(itemId, _type, actionSchema) => {
-                  triggerAction(_type, actionSchema, itemId);
-                }}
-                loading={loading}
-                emptyState={buildEmptyState(currentDomainLabel ?? 'items')}
-                localItem={myItem}
-                networkId={network?.id}
-                selectedDomain={selectedDomain}
-                selection={browseSelection}
-              />
+              // Single domain tab: paged infinite scroll (§5.1). Server already
+              // orders nearest-first when coords are known, so no client sort here.
+              <>
+                {singleDomainList.total > 0 && (
+                  <p className="mb-2 text-xs text-muted-foreground">
+                    {t('home.showing_x_of_y', {
+                      shown: singleDomainList.items.length,
+                      total: singleDomainList.total,
+                    })}
+                  </p>
+                )}
+                <CardGrid
+                  schema={activeSchema!}
+                  schemaName={selectedDomain}
+                  schemaDescription={currentDomainLabel}
+                  cardConfig={network?.domains.find((d) => d.id === selectedDomain)?.card}
+                  items={singleDomainCards}
+                  fullItems={singleDomainItems}
+                  actions={actions}
+                  onAction={(itemId, _type, actionSchema) => {
+                    triggerAction(_type, actionSchema, itemId);
+                  }}
+                  loading={singleDomainList.isLoading}
+                  emptyState={buildEmptyState(currentDomainLabel ?? 'items')}
+                  localItem={myItem}
+                  networkId={network?.id}
+                  selectedDomain={selectedDomain}
+                  selection={browseSelection}
+                />
+                <div ref={singleDomainSentinelRef} aria-hidden="true" className="h-px w-full" />
+              </>
                 )}
                 {browseSelection.selectMode && (() => {
                   const lockDomain = browseSelection.lockKey ?? selectedDomain ?? '';
@@ -1594,46 +2519,89 @@ export function HomePage() {
                 })()}
               </>
             ) : (
-              <MapView
-                schema={activeSchema!}
-                resolveMarkerLabel={resolveMarkerLabel}
-                items={Object.values(filteredDomainItems).flat()}
-                focusPoint={userLocation}
-                focusNonce={recenterNonce}
-                filtersSlot={filtersPanel}
-                renderPopup={(marker) => {
-                  // Marker ids are `${item_id}#${locationIndex}` — strip the suffix to look up the item.
-                  const baseItemId = marker.id.includes('#') ? marker.id.split('#')[0] : marker.id;
-                  const fullItem =
-                    (marker.domain
-                      ? domainItems[marker.domain]
-                      : Object.values(domainItems).flat()
-                    )?.find((i) => i.item_id === baseItemId) ?? null;
-                  const domainActions = marker.domain ? getActionsForDomain(marker.domain) : [];
-                  const connectAction = domainActions[0];
-                  const markerDomain = marker.domain
-                    ? network?.domains.find((d) => d.id === marker.domain)
-                    : undefined;
-                  const markerSchema = markerDomain?.item_schemas
-                    ? (Object.values(markerDomain.item_schemas)[0] as import('@rjsf/utils').RJSFSchema)
-                    : activeSchema;
-                  return (
-                    <MarkerPopupCard
-                      marker={marker}
-                      schema={markerSchema}
-                      cardConfig={markerDomain?.card}
-                      actions={myItem && connectAction ? [connectAction] : []}
-                      onConnect={
-                        myItem && connectAction
-                          ? () => triggerAction(connectAction.action_type, connectAction, baseItemId)
-                          : undefined
-                      }
-                      localItem={myItem}
-                      networkItem={fullItem}
-                    />
-                  );
-                }}
-              />
+              <div className="relative h-full">
+                <MapView
+                  schema={activeSchema!}
+                  resolveMarkerLabel={resolveMarkerLabel}
+                  items={mapItems}
+                  focusPoint={userLocation}
+                  focusNonce={recenterNonce}
+                  closePopupNonce={closePopupNonce}
+                  selfLocation={userLocation}
+                  filtersSlot={filtersPanel}
+                  onViewportChange={setMapViewport}
+                  emptyMessage={t('home.map_no_items_in_area')}
+                  renderPopup={(marker) => {
+                    // Marker ids are `${item_id}#${locationIndex}` — strip the suffix to look up the item.
+                    const baseItemId = marker.id.includes('#') ? marker.id.split('#')[0] : marker.id;
+                    const sourceMarker = mapMarkers.markers.find(
+                      (m) =>
+                        m.item_id === baseItemId &&
+                        (!marker.domain || m.item_domain === marker.domain),
+                    );
+                    const domainActions = marker.domain ? getActionsForDomain(marker.domain) : [];
+                    const connectAction = domainActions[0];
+                    const markerDomain = marker.domain
+                      ? network?.domains.find((d) => d.id === marker.domain)
+                      : undefined;
+                    const markerSchema = markerDomain?.item_schemas
+                      ? (Object.values(markerDomain.item_schemas)[0] as import('@rjsf/utils').RJSFSchema)
+                      : activeSchema;
+                    // Domain's item type (e.g. `job_posting_1.0`) for the by-id
+                    // detail fetch — slim markers don't carry it.
+                    const markerItemType = markerDomain?.item_schemas
+                      ? Object.keys(markerDomain.item_schemas)[0]
+                      : undefined;
+                    return (
+                      <MarkerDetailPopup
+                        networkId={network?.id ?? null}
+                        marker={marker}
+                        sourceMarker={sourceMarker}
+                        itemType={markerItemType}
+                        schema={markerSchema}
+                        cardConfig={markerDomain?.card}
+                        localItem={myItem}
+                        connectAction={connectAction}
+                        onConnect={(itemId) => {
+                          // Close the marker popup first so it doesn't cover
+                          // the consent modal the action is about to open.
+                          setClosePopupNonce((n) => n + 1);
+                          if (connectAction) triggerAction(connectAction.action_type, connectAction, itemId);
+                        }}
+                        onItemResolved={setMapDetailItem}
+                      />
+                    );
+                  }}
+                />
+                {/* Map count pill (#203 §7, revised; extended by Task 6):
+                    logged-out map view has no header count badge (that's a
+                    logged-in ContentHeader), so this small non-blocking pill
+                    surfaces the result count for the current view at all
+                    zooms. Task 6 adds an over-dense "N+ in this area — zoom
+                    in" variant that shows for BOTH anon and signed-in
+                    visitors whenever the true total exceeds the active
+                    zoom-band marker cap (`mapMarkers.truncated`) — see
+                    `MapCountPill` for the two-variant logic. `fixed` + high
+                    z-index so it stays above the map's own maximize overlay
+                    (z-[2000]). */}
+                <MapCountPill
+                  total={mapMarkers.total}
+                  shown={mapItems.length}
+                  truncated={mapMarkers.truncated}
+                  signedIn={!!user}
+                />
+                {/* Federation-degradation indicator (#203 §6): some peer instances
+                    didn't answer in time, so the viewport marker set is known-partial.
+                    `fixed` (not `absolute`) so it stays visible above the map's own
+                    maximize overlay (z-[1000]) in both normal and maximized mode. */}
+                {mapMarkers.partial && (
+                  <div className="pointer-events-none fixed left-1/2 top-20 z-[2100] w-full max-w-[calc(100vw-2rem)] -translate-x-1/2 px-4">
+                    <p className="pointer-events-auto mx-auto w-fit max-w-full rounded-md bg-amber-50 px-3 py-1.5 text-center text-xs font-medium text-amber-900 shadow-md ring-1 ring-amber-300 dark:bg-amber-950 dark:text-amber-100 dark:ring-amber-800">
+                      {t('home.map_partial')}
+                    </p>
+                  </div>
+                )}
+              </div>
             )
           }
         </ActionHandler>
@@ -1642,6 +2610,8 @@ export function HomePage() {
     {guardianSetupForProfileModal}
     {profileConsentModal}
         {guardianProfileConsentModal}
+        {bulkGuardianConfirmModal}
+        {bulkGuardianOtpModal}
     </>
   );
 }

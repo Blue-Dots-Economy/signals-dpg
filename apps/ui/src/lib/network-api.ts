@@ -1,4 +1,4 @@
-import type { FetchItemsQuery, FetchItemsResponse } from './item-api';
+import type { FetchItemsQuery, FetchItemsResponse, Item, ItemLocation } from './item-api';
 import type { DotNetworkSchema } from '../engine/types';
 import { createApiClient } from './api-client';
 
@@ -30,8 +30,41 @@ export function resolveProfileFetchLimit(): number {
 
 export const PROFILE_FETCH_LIMIT = resolveProfileFetchLimit();
 
+const DEFAULT_PROFILE_PAGE_SIZE = 50;
+
+export function resolveProfilePageSize(): number {
+  const raw = import.meta.env.VITE_PROFILE_PAGE_SIZE;
+  if (raw === undefined || raw === '') return DEFAULT_PROFILE_PAGE_SIZE;
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed) || parsed <= 0) return DEFAULT_PROFILE_PAGE_SIZE;
+  return parsed;
+}
+
+export const PROFILE_PAGE_SIZE = resolveProfilePageSize();
+
+// Default cap for map-viewport marker fetches (Signals map/marker layer,
+// #203 P4). Override via `VITE_MAP_FETCH_LIMIT` (e.g. `"2000"`). Falls back
+// to 25000 when unset, empty, or invalid. Mirrors `resolveProfileFetchLimit`.
+// Must not exceed the server markers cap (`MarkersBodySchema` /
+// `MarkersQuerySchema` in `packages/schemas`, currently 25000) or the request
+// is rejected.
+const DEFAULT_MAP_FETCH_LIMIT = 25000;
+
+export function resolveMapFetchLimit(): number {
+  const raw = import.meta.env.VITE_MAP_FETCH_LIMIT;
+  if (raw === undefined || raw === '') return DEFAULT_MAP_FETCH_LIMIT;
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed) || parsed <= 0) return DEFAULT_MAP_FETCH_LIMIT;
+  return parsed;
+}
+
+export const MAP_FETCH_LIMIT = resolveMapFetchLimit();
+
 export interface FetchNetworkItemsQuery
   extends Omit<FetchItemsQuery, 'created_by_me'> {
+  item_latitude?: number;
+  item_longitude?: number;
+  radius_meters?: number;
   cache_ttl_seconds?: number;
 }
 
@@ -52,6 +85,15 @@ export async function fetchNetworkItems(
   if (query.item_schema_url) params.set('item_schema_url', query.item_schema_url);
   if (query.limit !== undefined) params.set('limit', String(query.limit));
   if (query.offset !== undefined) params.set('offset', String(query.offset));
+  if (query.item_latitude !== undefined) {
+    params.set('item_latitude', String(query.item_latitude));
+  }
+  if (query.item_longitude !== undefined) {
+    params.set('item_longitude', String(query.item_longitude));
+  }
+  if (query.radius_meters !== undefined) {
+    params.set('radius_meters', String(query.radius_meters));
+  }
   if (query.cache_ttl_seconds !== undefined) {
     params.set('cache_ttl_seconds', String(query.cache_ttl_seconds));
   }
@@ -59,6 +101,211 @@ export async function fetchNetworkItems(
   const response = await networkApiClient.get<FetchItemsResponse>(
     '/api/v1/network/item/fetch',
     { params, signal }
+  );
+  return response.data;
+}
+
+export interface Marker {
+  item_id: string;
+  item_domain: string;
+  item_instance_url: string | null;
+  item_locations: ItemLocation[];
+}
+
+export interface MarkersResponse {
+  meta: {
+    total: number;
+    limit: number;
+    offset: number;
+    partial: boolean;
+    unavailable_instances: string[];
+  };
+  markers: Marker[];
+}
+
+export interface FetchNetworkMarkersQuery {
+  item_network: string;
+  item_domain: string;
+  item_type?: string;
+  item_latitude?: number;
+  item_longitude?: number;
+  radius_meters?: number;
+  /**
+   * Bbox alternative to `item_latitude`/`item_longitude`/`radius_meters`
+   * (#203 map-serverside-search Task 4) — mutually exclusive with the radius
+   * params on the server (`MarkersQuerySchema`'s refine). The map path sends
+   * these (from the viewport's `map.getBounds()` corners); the list's
+   * distance path and the tourist app keep sending the radius params.
+   */
+  min_lat?: number;
+  min_lng?: number;
+  max_lat?: number;
+  max_lng?: number;
+  /**
+   * Facet filter, one entry per `item_state.<field>`. A value is either a
+   * scalar (equality/containment match) or a `string[]` — the #203 Task 7
+   * multi-select case (`MapFiltersPanel`'s `selectedFields`) — serialized
+   * below as repeated params so the server parses it back into `string[]`
+   * (see the comment at the serialization site).
+   */
+  item_state?: Record<string, unknown>;
+  /**
+   * Free-text search (map-native-text-search). Value-matches public
+   * (non-private) `item_state` fields, viewport-scoped — mirrors the list's
+   * top-bar search box, now wired through to the map's `/markers` fetch too
+   * (see `useMapMarkers`'s `search` param).
+   */
+  q?: string;
+  limit?: number;
+  offset?: number;
+  cache_ttl_seconds?: number;
+}
+
+export async function fetchNetworkMarkers(
+  query: FetchNetworkMarkersQuery,
+  signal?: AbortSignal
+): Promise<MarkersResponse> {
+  const params = new URLSearchParams();
+
+  params.set('item_network', query.item_network);
+  params.set('item_domain', query.item_domain);
+
+  if (query.item_type) params.set('item_type', query.item_type);
+  if (query.item_latitude !== undefined) {
+    params.set('item_latitude', String(query.item_latitude));
+  }
+  if (query.item_longitude !== undefined) {
+    params.set('item_longitude', String(query.item_longitude));
+  }
+  if (query.radius_meters !== undefined) {
+    params.set('radius_meters', String(query.radius_meters));
+  }
+  if (query.min_lat !== undefined) params.set('min_lat', String(query.min_lat));
+  if (query.min_lng !== undefined) params.set('min_lng', String(query.min_lng));
+  if (query.max_lat !== undefined) params.set('max_lat', String(query.max_lat));
+  if (query.max_lng !== undefined) params.set('max_lng', String(query.max_lng));
+  // Serialize item_state as qs bracket notation (`item_state[field]=value`),
+  // which the server's `fastify-qs` parser (backed by the `qs` library)
+  // decodes to a nested object that `MarkersQuerySchema.item_state` (a
+  // `z.record`) accepts. A SCALAR value serializes as a single param and
+  // buildWhereClause applies it as an `item_state @> jsonb` containment
+  // filter (unchanged, pre-#203 behavior).
+  //
+  // An ARRAY value (#203 Task 7 — the map's multi-select facet filters, e.g.
+  // `MapFiltersPanel`'s `selectedFields`) is the critical case: it MUST reach
+  // the server as a real array, not `String(value)` (which produced a single
+  // comma-joined `"a,b"` string — inert against buildWhereClause's
+  // `item_state ->> field = ANY(...)` facet filter, Task 3). The fix is to
+  // `append` the SAME bracket key once per selected value
+  // (`item_state[gender]=female&item_state[gender]=male`) instead of
+  // `set`-ing one joined string. `qs`'s default parser auto-arrays repeated
+  // keys — with or without a trailing `[]` — back into `item_state.gender:
+  // string[]`, which is exactly the shape `buildWhereClause`'s `= ANY(...)`
+  // facet path expects.
+  if (query.item_state !== undefined) {
+    for (const [field, value] of Object.entries(query.item_state)) {
+      if (Array.isArray(value)) {
+        for (const v of value) {
+          params.append(`item_state[${field}]`, String(v));
+        }
+      } else {
+        params.set(`item_state[${field}]`, String(value));
+      }
+    }
+  }
+  if (query.q) params.set('q', query.q);
+  if (query.limit !== undefined) params.set('limit', String(query.limit));
+  if (query.offset !== undefined) params.set('offset', String(query.offset));
+  if (query.cache_ttl_seconds !== undefined) {
+    params.set('cache_ttl_seconds', String(query.cache_ttl_seconds));
+  }
+
+  const response = await networkApiClient.get<MarkersResponse>(
+    '/api/v1/network/item/markers',
+    { params, signal }
+  );
+  return response.data;
+}
+
+// The discover BFF's per-field facet selection (#203 List PR Task 4). Shape
+// mirrors `DiscoverFacetFilterSchema` in `packages/schemas/src/api/discover_schemas.ts`
+// exactly (`field` + a non-empty `values` array) — the BFF re-validates the
+// field against the schema's declared, non-private facets server-side
+// (`resolveAllowedFacetFilters`) and maps the array to an `in`/`contains_any`
+// op depending on whether the field itself is array-valued, so the client
+// only ever sends the raw value set, never an op.
+export interface DiscoverFacetFilter {
+  field: string;
+  values: (string | number | boolean)[];
+}
+
+export interface FetchDiscoverQuery {
+  item_network: string;
+  item_domain: string;
+  item_type: string;
+  q?: string;
+  filters?: DiscoverFacetFilter[];
+  item_latitude?: number;
+  item_longitude?: number;
+  distance_meters?: number;
+  limit?: number;
+  offset?: number;
+  // The active profile's item id (#394 Task 2, threading Task 1's backend
+  // anchor through the UI data layer). Forwarded verbatim as `anchor_item_id`
+  // in the BFF body; the BFF re-maps it to `intent.item.id` for signals-search
+  // relevance-to-profile ranking. Omitted entirely when unset (Task 3 is what
+  // wires an actual profile id in from the page).
+  anchor_item_id?: string;
+}
+
+export type DiscoverSource = 'signals_search' | 'native_fallback';
+
+export interface DiscoverResponse {
+  items: Item[];
+  meta: {
+    total: number;
+    limit: number;
+    offset: number;
+    source: DiscoverSource;
+    degraded: boolean;
+    // Effective spatial radius (meters, #394) actually applied to this
+    // search — only present when the request carried a location (see
+    // `DiscoverResponseSchema` in `@dpg/schemas`). The list note above the
+    // results (`resolveListNote`) uses this to show "within X km".
+    distance_meters?: number;
+  };
+}
+
+/**
+ * POST `/api/v1/network/item/discover` (#203 List PR Task 4). Field names
+ * mirror the BFF's `DiscoverItemsBodySchema` exactly (`item_latitude`/
+ * `item_longitude`/`distance_meters`, `limit`/`offset`), same convention as
+ * `fetchNetworkItems`'s query params. `items` are the SAME `Item` shape
+ * `fetchNetworkItems` returns — the list renders both uniformly.
+ */
+export async function fetchDiscover(
+  query: FetchDiscoverQuery,
+  signal?: AbortSignal
+): Promise<DiscoverResponse> {
+  const body: Record<string, unknown> = {
+    item_network: query.item_network,
+    item_domain: query.item_domain,
+    item_type: query.item_type,
+  };
+
+  if (query.q) body.q = query.q;
+  if (query.filters !== undefined && query.filters.length > 0) body.filters = query.filters;
+  if (query.item_latitude !== undefined) body.item_latitude = query.item_latitude;
+  if (query.item_longitude !== undefined) body.item_longitude = query.item_longitude;
+  if (query.distance_meters !== undefined) body.distance_meters = query.distance_meters;
+  if (query.limit !== undefined) body.limit = query.limit;
+  if (query.offset !== undefined) body.offset = query.offset;
+  if (query.anchor_item_id) body.anchor_item_id = query.anchor_item_id;
+
+  const response = await networkApiClient.post<DiscoverResponse>(
+    '/api/v1/network/item/discover',
+    body,
+    { signal }
   );
   return response.data;
 }

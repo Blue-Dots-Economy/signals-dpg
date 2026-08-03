@@ -15,18 +15,11 @@ import {
 } from '@/lib/action-api';
 import type { BulkEnvelope } from '@/lib/bulk';
 import { useAuth } from '@/contexts/auth-context';
+import { queryKeys } from '@/lib/query-keys';
 
 // ─── Query Keys ───────────────────────────────────────────────────
 
-export const actionKeys = {
-  all: ['actions'] as const,
-  lists: () => [...actionKeys.all, 'list'] as const,
-  list: (filters: FetchMyActionsQuery) =>
-    [...actionKeys.lists(), filters] as const,
-  details: () => [...actionKeys.all, 'detail'] as const,
-  detail: (actionId: string) => [...actionKeys.details(), actionId] as const,
-  pendingCount: () => [...actionKeys.all, 'pendingCount'] as const,
-};
+export const actionKeys = queryKeys.actions;
 
 // ─── Constants ───────────────────────────────────────────────────
 
@@ -148,8 +141,14 @@ export function useUpdateActionStatus() {
 export function useUpdateActionStatusBulk() {
   const queryClient = useQueryClient();
 
-  return useMutation<BulkEnvelope<UpdateActionStatusResponse>, Error, UpdateActionStatusPayload[]>({
-    mutationFn: (payloads) => updateActionStatusBulk(payloads),
+  return useMutation<
+    BulkEnvelope<UpdateActionStatusResponse>,
+    Error,
+    // `guardianOtp` (when a minor resubmits the batch after GUARDIAN_OTP_REQUIRED)
+    // rides on every payload so one code clears the whole accept batch (#393).
+    { payloads: UpdateActionStatusPayload[]; guardianOtp?: string }
+  >({
+    mutationFn: ({ payloads, guardianOtp }) => updateActionStatusBulk(payloads, guardianOtp),
     onSettled: () => {
       queryClient.invalidateQueries({ queryKey: actionKeys.all });
     },

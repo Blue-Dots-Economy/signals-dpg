@@ -384,3 +384,17 @@ input:-webkit-autofill:active {
 .leaflet-popup.dpg-marker-popup .leaflet-popup-tip {
   background: var(--background) !important;
 }
+
+/*
+ * Cluster bubble count legibility (mobile only). The bubble stays white text
+ * on the network's `--primary` colour (brand colour untouched) on every
+ * viewport; on small screens a dark text-shadow is added so the number stays
+ * readable regardless of which network's --primary is active. Desktop has no
+ * matching media query, so this rule contributes nothing there — desktop
+ * rendering is unchanged.
+ */
+@media (max-width: 767px) {
+  .dpg-cluster-count {
+    text-shadow: 0 1px 2px rgba(0, 0, 0, 0.55), 0 0 2px rgba(0, 0, 0, 0.45);
+  }
+}

@@ -6,7 +6,7 @@ import type {
 import { db } from '@api/db/postgres/drizzle_config';
 import { item_metrics } from '../../../../db/postgres/schema/metrics.js';
 import { organization } from '../../../../db/postgres/schema/auth.js';
-import { eq, and, sql, desc, getTableColumns } from 'drizzle-orm';
+import { eq, and, sql, desc, getTableColumns, inArray } from 'drizzle-orm';
 import type { AnyPgColumn } from 'drizzle-orm/pg-core';
 import {
   resolve_private_display_names,
@@ -41,6 +41,23 @@ import {
  * domains; metadata.refreshed is true if any domain was refreshed.
  */
 type DashboardRequest = FastifyRequest<{ Querystring: DQ }>;
+
+/** Every lifecycle_status value an item can hold. */
+const ALL_LIFECYCLES = ['draft', 'live', 'paused', 'retired'] as const;
+/** Applied when the caller supplies no valid lifecycle value. */
+const DEFAULT_LIFECYCLES = ['live', 'draft'] as const;
+
+/**
+ * Resolve the `?lifecycle=` query into a concrete set of lifecycle_status
+ * values to filter on. Splits the comma list, trims, drops unknown values,
+ * and falls back to the default (live + draft) when nothing valid remains
+ * (absent param, empty string, or all-invalid input).
+ */
+export function resolve_lifecycle_filter(lifecycle: string | undefined): string[] {
+  const requested = lifecycle?.split(',').map((s) => s.trim()).filter(Boolean) ?? [];
+  const valid = requested.filter((s) => (ALL_LIFECYCLES as readonly string[]).includes(s));
+  return valid.length ? valid : [...DEFAULT_LIFECYCLES];
+}
 
 export const aggregator_dashboard: FastifyPluginAsync = async (app) => {
   app.route({
@@ -91,7 +108,7 @@ export const aggregator_dashboard_handler = async (
     });
   }
 
-  const { page, limit, domain: requested_domain, status, refresh } = request.query;
+  const { page, limit, domain: requested_domain, status, refresh, lifecycle } = request.query;
   let scope: string[] = configured_domains;
   if (requested_domain) {
     if (!configured_domains.includes(requested_domain)) {
@@ -117,7 +134,7 @@ export const aggregator_dashboard_handler = async (
 
   const by_domain: Record<string, unknown> = {};
   for (const d of scope) {
-    by_domain[d] = await build_domain_block(acting.org_id, d, page, limit, status, request.log);
+    by_domain[d] = await build_domain_block(acting.org_id, d, page, limit, status, lifecycle, request.log);
   }
 
   return {
@@ -136,11 +153,19 @@ async function build_domain_block(
   page: number,
   limit: number,
   status: string | undefined,
+  lifecycle: string | undefined,
   log?: NameResolutionLog,
 ) {
+  // Resolve the requested lifecycle set (comma-list → known values, default
+  // live+draft). `lifecycleList` is the SQL fragment for the raw rollup/mode
+  // queries; `lifecycleFilter` drives the query-builder `inArray` below.
+  const lifecycleFilter = resolve_lifecycle_filter(lifecycle);
+  const lifecycleList = sql.join(lifecycleFilter.map((s) => sql`${s}`), sql`, `);
+
   const base_where = and(
     eq(item_metrics.onboardedByOrgId, org_id),
     eq(item_metrics.itemDomain, domain),
+    inArray(item_metrics.lifecycleStatus, lifecycleFilter),
   );
   const filter_where = status
     ? and(base_where, eq(item_metrics.profileStatus, status))
@@ -185,7 +210,8 @@ async function build_domain_block(
       )::int AS engaged_users
     FROM ${item_metrics}
     WHERE ${item_metrics.onboardedByOrgId} = ${org_id}
-      AND ${item_metrics.itemDomain} = ${domain};
+      AND ${item_metrics.itemDomain} = ${domain}
+      AND ${item_metrics.lifecycleStatus} IN (${lifecycleList});
   `);
   const rollupRow: Record<string, number> = (Array.isArray(rollupRes)
     ? (rollupRes as Array<Record<string, number>>)[0]
@@ -196,6 +222,7 @@ async function build_domain_block(
     FROM ${item_metrics}
     WHERE ${item_metrics.onboardedByOrgId} = ${org_id}
       AND ${item_metrics.itemDomain} = ${domain}
+      AND ${item_metrics.lifecycleStatus} IN (${lifecycleList})
     GROUP BY ${item_metrics.onboardedVia};
   `);
   const modeRows: Array<{ via: string | null; n: number }> = Array.isArray(modeRes)
@@ -268,6 +295,7 @@ async function build_domain_block(
     onboarded_via: r.onboardedVia,
 
     profile_status: r.profileStatus as 'new' | 'active' | 'at_risk' | 'inactive' | null,
+    lifecycle_status: r.lifecycleStatus as 'draft' | 'live' | 'paused' | 'retired',
     profile_completion_pct: r.profileCompletionPct,
     profile_created_at: r.profileCreatedAt?.toISOString() ?? null,
     profile_last_updated_at: r.profileLastUpdatedAt?.toISOString() ?? null,

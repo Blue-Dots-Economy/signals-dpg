@@ -66,6 +66,9 @@ Important behavior:
 - Under-18 guardian-consent routes live under `/api/v1/consent/u18/*` (`dob`, `status`, `guardian`, `guardian/verify`, `signup/guardian`(+`/verify`), `profile-consent`) plus `GET /api/v1/consent/profile-status`; a minor's profile only reaches `live` on a guardian's OTP-verified `source='guardian'` consent
 - `POST /api/v1/action/perform` performs a single action; `POST /api/v1/action/perform/bulk` submits an array and returns per-item results with partial-failure semantics
 - `GET /api/v1/action/:action_id/contact-details` returns the counterparty's contact/profile details, masked or unmasked depending on the action's status
+- `POST /api/v1/item/lifecycle` transitions an item `pause`/`unpause`/`retire`. **Retire is permanent** — it scrubs the item's PII, de-indexes it from search, cancels every still-open connection, and notifies the affected counterparties
+- `POST /api/v1/network/item/discover` is the ranked/searchable/filterable list feed (backed by signals-search, with a native filter + radius fallback when signals-search is unavailable — only relevance ranking is lost); `POST /api/v1/network/item/markers` serves the map viewport. Free-text `q` and facet filters are restricted server-side to declared, non-private fields
+- Under-18 (minor) actions are blocked on external/aggregator channels (in-app only, **API-enforced fail-closed**); a minor's bulk action is gated by a single batch guardian OTP covering the whole selection
 
 Item typing is schema-driven. `item_type` is not arbitrary; it should be a schema identifier defined by the network, for example `profile_1.0` or `profile_1.1`.
 

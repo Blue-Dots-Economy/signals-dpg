@@ -35,6 +35,17 @@ function bodyLine(scenario: GuardianOtpScenario, vars: GuardianOtpVariables): st
       return `Your ward has requested to create a profile${domain ? ` on <b>${domain}</b>` : ''}. This profile will help your ward in discovering, and matching to relevant services and opportunities. Use the given OTP to agree to create their profile.`;
     case 'action':
       return `Your ward has requested to connect to <b>${org}</b>. This will share your ward's profile details, along with name, phone, and email with the organisation. Use the given OTP to allow <b>${org}</b> to access your ward's details.`;
+    case 'action_bulk': {
+      // Numbered list of every provider org in the batch; the trailing sentence
+      // matches #294's single-action wording ("share ... name, phone, email").
+      const noun = scenario.jobs ? 'jobs' : 'opportunities';
+      const list = scenario.providerOrgNames.length
+        ? `<ol>${scenario.providerOrgNames.map((n) => `<li>${esc(n)}</li>`).join('')}</ol>`
+        : '<p>the selected organisations</p>';
+      const tail =
+        "This application will share your ward's profile details, along with name, phone, and email with the organisations. Use the given OTP to allow provider organisations to access your ward's details.";
+      return `Your ward has requested to apply to ${noun} provided by:${list}<p>${tail}</p>`;
+    }
   }
 }
 
@@ -46,6 +57,8 @@ function subjectFor(scenario: GuardianOtpScenario): string {
       return "Approve your ward's profile — OTP";
     case 'action':
       return "Approve your ward's request — OTP";
+    case 'action_bulk':
+      return "Approve your ward's requests — OTP";
   }
 }
 

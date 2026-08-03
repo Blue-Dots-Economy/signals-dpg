@@ -2,6 +2,7 @@ import z from 'zod';
 
 const StatusEnum = z.enum(['new', 'active', 'at_risk', 'inactive']);
 const BucketEnum = z.enum(['create', 'accept', 'reject', 'cancel']);
+const LifecycleEnum = z.enum(['draft', 'live', 'paused', 'retired']);
 
 /**
  * Query parameters for GET /api/v1/aggregator/dashboard.
@@ -9,6 +10,7 @@ const BucketEnum = z.enum(['create', 'accept', 'reject', 'cancel']);
  * page, limit  — offset pagination over item_metrics.
  * domain       — narrows the response to one of org.metadata.domains.
  * status       — filter item rows by profile_status.
+ * lifecycle    — comma-separated lifecycle_status values; default 'live,draft'.
  * q            — free-text search (accepted, not yet wired).
  * refresh      — force recompute, bypass TTL, blocking advisory lock.
  */
@@ -17,6 +19,8 @@ export const DashboardRequestQuery = z.object({
   limit: z.coerce.number().int().min(1).max(500).default(50),
   domain: z.string().min(1).optional(),
   status: StatusEnum.optional(),
+  lifecycle: z.string().min(1).optional()
+    .describe("Comma-separated lifecycle_status values, e.g. 'live,draft'. Default: live,draft."),
   q: z.string().min(1).max(200).optional(),
   refresh: z.enum(['true', 'false']).transform((v) => v === 'true').optional().default(false),
 });
@@ -60,6 +64,7 @@ export const ItemRow = z.object({
   onboarded_via: z.string().nullable(),
 
   profile_status: StatusEnum.nullable(),
+  lifecycle_status: LifecycleEnum.optional(),
   profile_completion_pct: z.number().nullable(),
   profile_created_at: z.string().nullable(),
   profile_last_updated_at: z.string().nullable(),

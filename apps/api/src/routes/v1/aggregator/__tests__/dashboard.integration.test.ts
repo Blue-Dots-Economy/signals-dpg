@@ -412,9 +412,13 @@ describeIf(`GET /aggregator/dashboard by_domain (integration)${
   );
 
   it('GET /aggregator/dashboard returns by_domain with seeker + provider rollups (counts may be zero before action seeding)', async () => {
+    // Participants onboarded via /admin/participant land in `draft` (no
+    // profile-creation consent recorded on that path), which the default
+    // lifecycle filter (live,paused) hides. Pass the full lifecycle set so
+    // this shape/count assertion sees every seeded item regardless of state.
     const res = await app.inject({
       method: 'GET',
-      url: '/api/v1/aggregator/dashboard',
+      url: '/api/v1/aggregator/dashboard?lifecycle=draft,live,paused,retired',
       headers: {
         'x-api-key': agg.raw_key,
         'x-acting-org-id': agg.org_id,
@@ -538,6 +542,72 @@ describeIf(`GET /aggregator/dashboard by_domain (integration)${
     if (secondary) {
       expect(body.by_domain[secondary.domain]).toBeUndefined();
     }
+  });
+
+  it('?lifecycle filters the rollup + items by lifecycle_status (default excludes paused + retired)', async () => {
+    // Assign a deterministic lifecycle to each of the 5 seeded seekers so the
+    // filter assertions don't depend on the onboarding classifier:
+    //   item[0] paused, item[1] retired, item[2] live, item[3..4] draft.
+    // recompute mirrors items.lifecycle_status into item_metrics, so every
+    // refresh=true call re-seeds the rollup column before we filter on it.
+    const plan: Array<[number, string]> = [
+      [0, 'paused'],
+      [1, 'retired'],
+      [2, 'live'],
+      [3, 'draft'],
+      [4, 'draft'],
+    ];
+    for (const [i, ls] of plan) {
+      await db
+        .update(itemsTable)
+        .set({ lifecycle_status: ls })
+        .where(eq(itemsTable.item_id, seeker_item_ids[i]));
+    }
+
+    const call = async (qs: string) => {
+      const res = await app.inject({
+        method: 'GET',
+        url: `/api/v1/aggregator/dashboard?domain=${primary.domain}&refresh=true${qs}`,
+        headers: { 'x-api-key': agg.raw_key, 'x-acting-org-id': agg.org_id },
+      });
+      expect(res.statusCode).toBe(200);
+      return res.json().by_domain[primary.domain] as {
+        rollup: { total_items: number };
+        total_matching: number;
+        items: Array<{ lifecycle_status: string }>;
+      };
+    };
+
+    // All four lifecycles → all 5 seeded items.
+    const all = await call('&lifecycle=draft,live,paused,retired');
+    expect(all.rollup.total_items).toBe(5);
+
+    // Default (live,draft) → paused + retired dropped → live(1) + draft(2) = 3.
+    const def = await call('');
+    expect(def.rollup.total_items).toBe(3);
+    expect(def.total_matching).toBe(3);
+    expect(def.items.every((i) => i.lifecycle_status === 'live' || i.lifecycle_status === 'draft')).toBe(true);
+
+    // Single-value filters isolate each state.
+    const live = await call('&lifecycle=live');
+    expect(live.rollup.total_items).toBe(1);
+    expect(live.items[0].lifecycle_status).toBe('live');
+
+    const paused = await call('&lifecycle=paused');
+    expect(paused.rollup.total_items).toBe(1);
+    expect(paused.items[0].lifecycle_status).toBe('paused');
+
+    const retired = await call('&lifecycle=retired');
+    expect(retired.rollup.total_items).toBe(1);
+    expect(retired.items[0].lifecycle_status).toBe('retired');
+
+    const draft = await call('&lifecycle=draft');
+    expect(draft.rollup.total_items).toBe(2);
+    expect(draft.items.every((i) => i.lifecycle_status === 'draft')).toBe(true);
+
+    // Invalid values are dropped → falls back to the default (live,draft).
+    const bogus = await call('&lifecycle=nope');
+    expect(bogus.rollup.total_items).toBe(3);
   });
 
   it.todo(

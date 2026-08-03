@@ -22,6 +22,11 @@ export const item_metrics = pgTable('item_metrics', {
   itemNetwork: text('item_network').notNull(),
   itemDomain: text('item_domain').notNull(),
   itemType: text('item_type').notNull(),
+  // Item lifecycle (draft | live | paused | retired), mirrored from items at
+  // recompute time so the dashboard can filter without a cross-partition join.
+  // Refreshed on the TTL-driven recompute (dashboard read) — not on the
+  // lifecycle route itself, so it can lag a pause/retire by up to TTL_SECONDS.
+  lifecycleStatus: text('lifecycle_status').notNull().default('draft'),
   ownerUserId: text('owner_user_id').notNull(),
   onboardedByOrgId: text('onboarded_by_org_id').references(() => organization.id),
   onboardedVia: text('onboarded_via'),

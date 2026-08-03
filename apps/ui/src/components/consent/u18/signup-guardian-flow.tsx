@@ -23,6 +23,8 @@ export interface SignupGuardianFlowProps {
   age: number;
   /** Guardian OTP verified server-side — caller proceeds to the ward's own OTP. */
   onComplete: () => void;
+  /** Back to the birth-year step (rendered on the previous screen). */
+  onBack?: () => void;
 }
 
 /**
@@ -42,6 +44,7 @@ export function SignupGuardianFlow({
   identifier,
   age,
   onComplete,
+  onBack,
 }: SignupGuardianFlowProps) {
   const { t } = useTranslation();
   // 'verified' is an explicit hand-off step AFTER the guardian OTP: the ward's
@@ -82,7 +85,7 @@ export function SignupGuardianFlow({
         </h2>
         {step === 'guardian' && (
           <p className="mt-1 text-sm text-muted-foreground">
-            {t('u18.step_subtitle', "You're under 18, so a parent or guardian needs to confirm this account.")}
+            {t('u18.step_subtitle', "You're under 18, so a guardian needs to confirm this account.")}
           </p>
         )}
       </div>
@@ -97,6 +100,7 @@ export function SignupGuardianFlow({
             setGuardianBody(body);
             setStep('otp');
           }}
+          onBack={onBack}
         />
       )}
 
@@ -105,6 +109,7 @@ export function SignupGuardianFlow({
           network={network}
           brand={brand}
           verify={verify}
+          purpose={{ kind: 'account' }}
           onVerified={() => setStep('verified')}
           onResend={async () => {
             if (!guardianBody) return;

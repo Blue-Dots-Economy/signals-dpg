@@ -35,6 +35,9 @@ export interface GuardianFormStepProps {
    * passes the ward's signup identifier instead.
    */
   ownContact?: { email?: string | null; phoneNumber?: string | null };
+  /** Optional back handler — renders a "Back" control returning to the previous
+   * step (the birth-year step). Omitted when there's nowhere to go back to. */
+  onBack?: () => void;
 }
 
 function normalize(value: string): string {
@@ -47,6 +50,7 @@ export function GuardianFormStep({
   onSubmitted,
   submit = submitGuardian,
   ownContact,
+  onBack,
 }: GuardianFormStepProps) {
   const { t } = useTranslation();
   const { user } = useAuth();
@@ -249,6 +253,18 @@ export function GuardianFormStep({
         {isSubmitting && <Loader2 className="h-4 w-4 animate-spin" />}
         {t('u18.guardian_continue', 'Continue')}
       </Button>
+
+      {onBack && (
+        <Button
+          type="button"
+          variant="outline"
+          className="w-full"
+          disabled={isSubmitting}
+          onClick={onBack}
+        >
+          {t('common.back', 'Back')}
+        </Button>
+      )}
     </form>
     </>
   );

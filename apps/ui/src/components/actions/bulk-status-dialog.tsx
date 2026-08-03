@@ -1,7 +1,14 @@
 import * as React from 'react';
 import { useTranslation } from 'react-i18next';
 import { toast } from 'sonner';
-import type { Action } from '@/lib/action-api';
+import {
+  guardianOtpErrorOf,
+  type Action,
+  type UpdateActionStatusPayload,
+} from '@/lib/action-api';
+import { BulkSingleError } from '@/lib/bulk';
+import { useAuth } from '@/contexts/auth-context';
+import { GuardianOtpDialog } from './guardian-otp-dialog';
 import { useUpdateActionStatusBulk } from '@/hooks/use-actions';
 import { useNetworkConfig } from '@/hooks/use-network-config';
 import { useConsentConfig } from '@/hooks/use-consent-config';
@@ -11,7 +18,7 @@ import {
   renderConsentStatementWithNoun,
   formatBatchCounterpartyNoun,
 } from '@/lib/consent-copy';
-import { Dialog, DialogContent } from '@/components/ui/dialog';
+import { ResponsiveDialog } from '@/components/ui/responsive-dialog';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
@@ -35,9 +42,21 @@ export function BulkStatusDialog({
   onSettled,
 }: BulkStatusDialogProps) {
   const { t } = useTranslation();
+  const { signOut } = useAuth();
   const { mutateAsync, isPending } = useUpdateActionStatusBulk();
   const [remarks, setRemarks] = React.useState('');
   const [consentChecked, setConsentChecked] = React.useState(false);
+
+  // Minor acceptor doing a bulk accept (#393): gated rows come back
+  // GUARDIAN_OTP_REQUIRED after one OTP is sent to the guardian. Stash the
+  // gated payloads to resubmit with the single code — one guardian OTP dialog
+  // for the batch, mirroring the initiator-side bulk flow on the home page.
+  const [bulkGuardianChallenge, setBulkGuardianChallenge] = React.useState<{
+    payloads: UpdateActionStatusPayload[];
+    // Non-guardian failures from a mixed batch, reselected once the OTP dialog
+    // resolves (they still need a retry).
+    otherFailedIds?: string[];
+  } | null>(null);
 
   React.useEffect(() => {
     if (open) {
@@ -113,21 +132,43 @@ export function BulkStatusDialog({
     }));
 
     try {
-      const env = await mutateAsync(payloads);
-      const failedIdxs = new Set(
-        env.results.filter((r) => r.status === 'error').map((r) => r.index),
-      );
-      const failedIds = ids.filter((_, i) => failedIdxs.has(i));
+      const env = await mutateAsync({ payloads });
       if (env.summary.failed === 0) {
         toast.success(t('actions.bulk_done_all', { count: env.summary.succeeded }));
-      } else {
-        toast.warning(
-          t('actions.bulk_done_partial', {
-            succeeded: env.summary.succeeded,
-            total: env.summary.total,
-          }),
-        );
+        onOpenChange(false);
+        onSettled(env.summary.succeeded, env.summary.total, []);
+        return;
       }
+
+      const failedResults = env.results.filter((r) => r.status === 'error');
+      const guardianResults = failedResults.filter(
+        (r) => guardianOtpErrorOf(r) === 'GUARDIAN_OTP_REQUIRED',
+      );
+      // Any GUARDIAN_OTP_REQUIRED failure means a code was already sent to the
+      // guardian — open ONE dialog for those rows and resubmit the batch with
+      // the code, rather than surfacing the raw error. Non-guardian failures
+      // ride along and are reselected once the dialog resolves.
+      if (guardianResults.length > 0) {
+        const otherFailedIds = failedResults
+          .filter((r) => guardianOtpErrorOf(r) !== 'GUARDIAN_OTP_REQUIRED')
+          .map((r) => ids[r.index]);
+        setBulkGuardianChallenge({
+          payloads: guardianResults.map((r) => payloads[r.index]),
+          otherFailedIds: otherFailedIds.length > 0 ? otherFailedIds : undefined,
+        });
+        onOpenChange(false); // the guardian OTP dialog owns the resubmit
+        return;
+      }
+
+      const failedIds = ids.filter((_, i) =>
+        failedResults.some((r) => r.index === i),
+      );
+      toast.warning(
+        t('actions.bulk_done_partial', {
+          succeeded: env.summary.succeeded,
+          total: env.summary.total,
+        }),
+      );
       onOpenChange(false);
       onSettled(env.summary.succeeded, env.summary.total, failedIds);
     } catch (err) {
@@ -139,15 +180,58 @@ export function BulkStatusDialog({
 
   const confirmDisabled = isPending || (requiresConsent && !consentChecked) || actions.length === 0;
 
+  // One guardian OTP dialog for a MINOR acceptor's BULK accept (#393). The code
+  // resubmits the stashed payloads via updateActionStatusBulk with the OTP.
+  const bulkGuardianOtpModal = (
+    <GuardianOtpDialog
+      open={!!bulkGuardianChallenge}
+      onOpenChange={(next) => {
+        if (!next) setBulkGuardianChallenge(null);
+      }}
+      onLogout={() => {
+        void signOut();
+      }}
+      onSubmitOtp={async (otp) => {
+        const ch = bulkGuardianChallenge;
+        if (!ch) return;
+        const env2 = await mutateAsync({ payloads: ch.payloads, guardianOtp: otp });
+        if (env2.summary.failed === 0) {
+          const otherFailedIds = ch.otherFailedIds ?? [];
+          const total = env2.summary.succeeded + otherFailedIds.length;
+          setBulkGuardianChallenge(null);
+          if (otherFailedIds.length > 0) {
+            // Mixed batch: gated rows went through, others failed for a
+            // non-guardian reason — keep those selected for a retry.
+            toast.warning(
+              t('actions.bulk_done_partial', { succeeded: env2.summary.succeeded, total }),
+            );
+          } else {
+            toast.success(t('actions.bulk_done_all', { count: env2.summary.succeeded }));
+          }
+          onSettled(env2.summary.succeeded, total, otherFailedIds);
+          return;
+        }
+        // Still failing (wrong/expired code, throttled …) — throw a classified
+        // error so GuardianOtpDialog shows the inline message and stays open.
+        const firstFail = env2.results.find((r) => r.status === 'error');
+        const code = guardianOtpErrorOf(firstFail) ?? 'GUARDIAN_OTP_INVALID';
+        throw new BulkSingleError(code, firstFail?.message ?? 'Guardian confirmation failed', 422);
+      }}
+    />
+  );
+
   return (
-    <Dialog
+    <>
+    <ResponsiveDialog
       open={open}
       onOpenChange={(next) => {
         if (!next && isPending) return; // don't allow dismiss mid-submit
         onOpenChange(next);
       }}
+      title={t(titleKey, { count: actions.length })}
+      contentClassName="sm:max-w-[480px]"
     >
-      <DialogContent className="sm:max-w-[480px] gap-0 p-6">
+      <div className="flex flex-col gap-0 overflow-y-auto p-6">
         <h2 className="text-lg font-bold">{t(titleKey, { count: actions.length })}</h2>
         <div className="py-4">
           {requiresConsent ? (
@@ -176,7 +260,9 @@ export function BulkStatusDialog({
             {isPending ? t('actions.btn_updating') : t('actions.bulk_confirm_btn')}
           </Button>
         </div>
-      </DialogContent>
-    </Dialog>
+      </div>
+    </ResponsiveDialog>
+    {bulkGuardianOtpModal}
+    </>
   );
 }
