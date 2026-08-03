@@ -9,6 +9,14 @@ import { AppSidebar } from './sidebar';
 
 interface PageShellProps {
   children: React.ReactNode;
+  /** 'browse' (default) shows search/filters/view-toggle; 'form' shows a Back button + title instead. Forwarded to `TopBar`. */
+  variant?: 'browse' | 'form';
+  /** Shown next to the Back button when `variant === 'form'`. */
+  title?: string;
+  /** Optional secondary line under `title` when `variant === 'form'`. */
+  subtitle?: string;
+  /** Invoked by the Back button when `variant === 'form'`. */
+  onBack?: () => void;
   networks?: DotNetworkSchema[];
   selectedNetwork?: string | null;
   onNetworkSelect?: (networkId: string) => void;
@@ -21,16 +29,20 @@ interface PageShellProps {
   onActiveProfileChange?: (profileId: string) => void;
   onProfilesChanged?: () => void;
   userSchemas?: Record<string, RJSFSchema>;
-  search: string;
-  onSearchChange: (value: string) => void;
-  viewMode: ViewMode;
-  onViewModeChange: (mode: ViewMode) => void;
+  search?: string;
+  onSearchChange?: (value: string) => void;
+  viewMode?: ViewMode;
+  onViewModeChange?: (mode: ViewMode) => void;
   /** Optional Filters control surfaced in the top bar next to the search input. */
   filtersSlot?: React.ReactNode;
 }
 
 export function PageShell({
   children,
+  variant,
+  title,
+  subtitle,
+  onBack,
   networks,
   selectedNetwork,
   onNetworkSelect,
@@ -75,6 +87,10 @@ export function PageShell({
         />
         <div className="flex h-svh min-w-0 flex-1 flex-col">
           <TopBar
+            variant={variant}
+            title={title}
+            subtitle={subtitle}
+            onBack={onBack}
             search={search}
             onSearchChange={onSearchChange}
             viewMode={viewMode}
