@@ -553,18 +553,13 @@ export function ProfileFormPage() {
         }
 
         await updateItem(existingItem.item_id, updatePayload);
-        // Reflect the write immediately in cached lists (§C5).
-        queryClient.invalidateQueries({ queryKey: queryKeys.myItems(network.id) });
-        // Network-level prefix of the browse-items key (React Query matches
-        // prefixes) — invalidates every domain's browse cache for this network.
-        queryClient.invalidateQueries({ queryKey: ['browse-items', network.id] });
-        // Bust the by-id caches for THIS item too, else re-opening the editor
-        // within the 60s own-data window seeds the form from the pre-edit copy —
-        // and the seed-once guard above then pins that stale value so the
-        // background refetch can't correct it. removeQueries (not invalidate)
-        // for editItem so the next open has no stale copy to seed from and
-        // refetches fresh via the same masked read path; itemDetail (marker
-        // click-through / detail popup) can just be invalidated.
+        // Bust the by-id caches for THIS item, else re-opening the editor within
+        // the 60s own-data window seeds the form from the pre-edit copy — and the
+        // seed-once guard then pins that stale value so the background refetch
+        // can't correct it. removeQueries (not invalidate) for editItem so the
+        // next open has no stale copy to seed from and refetches fresh via the
+        // same masked read path; itemDetail (marker click-through / detail popup)
+        // can just be invalidated.
         queryClient.removeQueries({
           queryKey: queryKeys.editItem(network.id, existingItem.item_id),
         });
@@ -572,12 +567,23 @@ export function ProfileFormPage() {
           queryKey: queryKeys.itemDetail(network.id, existingItem.item_id),
         });
 
+        // Refresh the browse / my-items lists (§C5). IMPORTANT: when a draft is
+        // about to be promoted to live via consent below, do NOT invalidate
+        // my-items here — that kicks off a refetch of the still-`draft` status
+        // that wins the race and leaves the sidebar showing "Draft" even though
+        // the profile is live server-side. Invalidate only AFTER the promotion
+        // (in the accept flow's onDone). This mirrors the create path.
+        const refreshLists = () => {
+          queryClient.invalidateQueries({ queryKey: queryKeys.myItems(network.id) });
+          queryClient.invalidateQueries({ queryKey: ['browse-items', network.id] });
+        };
+
         // Editing a still-draft profile with a configured statement: record
         // profile_creation consent, which promotes the draft to live. For an
         // adult this resolves synchronously → `onDone`; for a minor on a gated
         // domain the hook opens the guardian-OTP flow and `onDone` runs only
-        // after OTP success. Either way navigation is deferred to `onDone`, so
-        // we return here rather than falling through to the sync navigate.
+        // after OTP success. Either way the list refresh + navigation are
+        // deferred to `onDone`, so we return here rather than falling through.
         if (needsConsent && profileDoc) {
           await acceptProfileConsentFlow({
             network: network.id,
@@ -598,13 +604,16 @@ export function ProfileFormPage() {
                 .catch(() => setU18IsMinor(null));
             },
             onDone: () => {
-              queryClient.invalidateQueries({ queryKey: queryKeys.myItems(network.id) });
+              refreshLists();
               navigate(`/?network=${resolvedNetwork?.id ?? ''}`);
             },
           });
           return;
         }
 
+        // Plain edit (already live / no statement configured): reflect the field
+        // edits in the lists now.
+        refreshLists();
         toast.success(t('profile.toast_updated'), {
           description: t('profile.toast_updated_desc'),
         });
