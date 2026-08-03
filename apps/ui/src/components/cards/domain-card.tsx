@@ -4,6 +4,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { ItemCard } from './item-card';
 import { ActionButton } from './action-button';
 import { MatchScoreButton } from '@/components/match-score';
+import { ShareProfileButton } from '@/components/share/share-profile-button';
 import type { Item } from '@/lib/item-api';
 import type { MatchScoreResult } from '@/lib/match-score-api';
 
@@ -29,6 +30,8 @@ interface DomainCardProps {
   onViewMatchDetails?: () => void;
   /** When true, hide the action/match footer (the card is a selection target). */
   selectionMode?: boolean;
+  /** When live, shows a Share button in the card header. Full item (for its key). */
+  shareItem?: Item | null;
 }
 
 export function DomainCard({
@@ -48,6 +51,7 @@ export function DomainCard({
   onCalculateMatch,
   onViewMatchDetails,
   selectionMode = false,
+  shareItem,
 }: DomainCardProps) {
   if (loading) {
     return (
@@ -107,6 +111,12 @@ export function DomainCard({
       domainLabel={domainLabel}
       onClick={onClick}
       actions={footer}
+      headerAction={
+        <ShareProfileButton
+          item={shareItem}
+          className="flex h-7 w-7 items-center justify-center rounded-full text-white hover:bg-white/25"
+        />
+      }
     />
   );
 }

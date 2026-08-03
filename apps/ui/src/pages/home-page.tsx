@@ -2442,6 +2442,7 @@ export function HomePage() {
                                 }
                                 localItem={myItem}
                                 networkItem={networkItem}
+                                shareItem={networkItem}
                               />
                             )}
                           </SelectableCard>

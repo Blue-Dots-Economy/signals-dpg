@@ -13,6 +13,7 @@ import {
 import { Button } from '@/components/ui/button';
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip';
 import { setItemLifecycle, type Item } from '@/lib/item-api';
+import { ShareProfileButton } from '@/components/share/share-profile-button';
 
 export interface ProfileRowActionsProps {
   profile: Item;
@@ -72,6 +73,7 @@ export function ProfileRowActions({ profile, pauseEnabled, onEdit, onChanged }: 
 
   return (
     <div className="flex items-center gap-0.5">
+      <ShareProfileButton item={profile} />
       <Tooltip>
         <TooltipTrigger asChild>
           <button
