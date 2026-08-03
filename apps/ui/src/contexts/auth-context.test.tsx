@@ -9,6 +9,11 @@ vi.mock('@/engine', () => ({ clearSchemaCache }));
 vi.mock('@/lib/auth-api', () => ({
   getSession: vi.fn().mockResolvedValue(null),
   signOut: vi.fn().mockResolvedValue(undefined),
+  fetchAuthConfig: vi.fn().mockResolvedValue({
+    selfSignupAllowed: false,
+    loginChannels: ['phone', 'email'],
+    authProvider: 'betterauth',
+  }),
 }));
 
 function createWrapper(client: QueryClient) {

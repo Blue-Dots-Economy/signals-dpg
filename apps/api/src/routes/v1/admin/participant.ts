@@ -10,8 +10,8 @@ import { ensureItemPartition, items } from '@dpg/database';
 import { user } from '../../../../db/postgres/schema/auth.js';
 import { authInstance } from '@/routes/auth/create_auth';
 import { create_profile_item } from '@/lib/profile_item';
-import { updateItemInternal } from '@/services/item_service';
-import { apiConfig } from '@/config';
+import { updateItemInternal, type DbOrTx } from '@/services/item_service';
+import { apiConfig, authConfig } from '@/config';
 import { publishItemEvent } from '@/utils/publish_item_event';
 import {
   UpsertParticipantRequest,
@@ -26,6 +26,8 @@ import {
 } from '@/services/participant_consent';
 import { getNetworkConfigById } from '@/network_configs';
 import { guardianConsentRequired, isMinor } from '@/services/minor';
+import { createParticipantKeycloakIdentity } from '@/services/auth/participant_identity';
+import { insertLocalUser } from '@/services/auth/user_writer';
 
 /**
  * POST /api/v1/admin/participant
@@ -85,98 +87,160 @@ const buildOnboardingSet = (f: OnboardingFields) => ({
 // ---------------------------------------------------------------------------
 // signUpAndOnboardUser
 //
-// Handles the signUpEmail call (incl. 23505-race → 409 early exit) and
-// the db.update for onboarding fields (incl. orphan cleanup on failure).
+// Creates the participant's local `user` row, applies the onboarding columns,
+// runs whatever else the caller needs in the same transaction, and finally mints
+// the Keycloak identity.
 //
-// Used by two branches:
-//   - account_only new-user: plain update, no item step.
-//   - create_new_user: update + create_profile_item wrapped in db.transaction.
-//     For that branch, pass `updateExecutor` to run inside the same transaction.
+// Two ways the row gets created, chosen by AUTH_PROVIDER:
 //
-// Returns:
-//   { ok: true; user_id: string }   – success
-//   { ok: false; reply: Response }  – caller must `return reply.code(...).send(...)`
-//                                     (use the already-sent reply object)
+//   keycloak    `insertLocalUser` writes it directly, INSIDE the transaction that
+//               also carries the onboarding columns and the caller's work. So a
+//               failure anywhere rolls the whole thing back and there is no
+//               orphan to clean up.
+//   betterauth  `signUpEmail` writes it first and outside any transaction (that
+//               is better-auth's own API), so the row is already committed when
+//               the transaction starts — and an orphan IS possible, hence the
+//               compensating delete below.
 //
-// Rationale: the two callers share signUpEmail error handling verbatim (~30 lines)
-// and the same onboarding columns. The only difference is the update executor
-// (plain db.update vs a transactional tx.update + create_profile_item). Passing
-// the executor as a callback keeps the distinction visible and avoids merging
-// incompatible error shapes.
+// Used by two branches: `account_only` (no item) and `create_new_user` (which
+// also creates the profile item). Both supply `withinTx`; neither owns a
+// transaction any more, because the user write has to be able to join it.
+//
+// Returns { ok: true, user_id } or a typed failure the caller turns into a reply.
 // ---------------------------------------------------------------------------
 
 type SignUpResult =
   | { ok: true; user_id: string }
   | { ok: false; statusCode: number; error: string; message: string };
 
+/** Shape both branches share for classifying a write failure. */
+function isUniqueViolation(err: unknown): boolean {
+  const e = err as { code?: string; cause?: { code?: string }; message?: string } | null;
+  const pg_code = e?.code ?? e?.cause?.code;
+  const message = String(e?.message ?? '');
+  return (
+    pg_code === '23505' ||
+    message.includes('duplicate key value') ||
+    message.includes('unique constraint')
+  );
+}
+
 async function signUpAndOnboardUser(params: {
-  email_for_signup: string;
+  /**
+   * The participant's real email, or null for a phone-only participant.
+   *
+   * Deliberately not a synthesised address. `signUpEmail` requires one, so the
+   * `<uuid>@no-email.local` placeholder is derived below and confined to that
+   * branch — it used to be computed by the callers and then leaked into both the
+   * `user` row and the Keycloak identity.
+   */
+  email_norm: string | null;
   name: string;
   fields: OnboardingFields;
   log: FastifyRequest['log'];
   /**
-   * Called with the new user_id to perform the DB update (and any extra
-   * work). Must throw on failure. The outer function handles orphan cleanup.
+   * Caller-specific work — consent, and the profile item for `create_new_user`.
+   * Runs inside the transaction that carries the onboarding columns. Must throw
+   * on failure.
    */
-  updateExecutor: (user_id: string) => Promise<void>;
+  withinTx: (tx: DbOrTx, user_id: string) => Promise<void>;
 }): Promise<SignUpResult> {
-  const { email_for_signup, name, fields, log, updateExecutor } = params;
+  const { email_norm, name, fields, log, withinTx } = params;
+  const keycloak = authConfig.keycloak_enabled;
 
-  let user_id: string;
-  try {
-    const signed_up = await authInstance.api.signUpEmail({
-      body: {
-        email: email_for_signup,
-        password: randomUUID(),
-        name,
-      },
-    });
-    user_id = signed_up.user.id;
-  } catch (signupErr: unknown) {
-    const e = signupErr as {
-      code?: string;
-      cause?: { code?: string };
-      message?: string;
-    } | null;
-    const pg_code = e?.code ?? e?.cause?.code;
-    const message = String(e?.message ?? '');
-    if (
-      pg_code === '23505' ||
-      message.includes('duplicate key value') ||
-      message.includes('unique constraint')
-    ) {
-      log.warn({ err: signupErr }, 'signUp race; user exists now');
+  // Under Keycloak signals owns the id, and it must be a bare UUID because it
+  // becomes the Keycloak `sub` (enforced by insertLocalUser).
+  let user_id: string = randomUUID();
+  /** Only ever true on the better-auth path — see the header note. */
+  let rowCommittedOutsideTx = false;
+
+  if (!keycloak) {
+    const email_for_signup = email_norm ?? `${randomUUID()}@no-email.local`;
+    try {
+      const signed_up = await authInstance.api.signUpEmail({
+        body: {
+          email: email_for_signup,
+          password: randomUUID(),
+          name,
+        },
+      });
+      user_id = signed_up.user.id;
+      rowCommittedOutsideTx = true;
+    } catch (signupErr: unknown) {
+      if (isUniqueViolation(signupErr)) {
+        log.warn({ err: signupErr }, 'signUp race; user exists now');
+        return {
+          ok: false,
+          statusCode: 409,
+          error: 'USER_ALREADY_EXISTS',
+          message: 'email or phone already in use (race) — retry the request',
+        };
+      }
+      log.error({ err: signupErr }, 'signUp failed during onboarding');
       return {
         ok: false,
-        statusCode: 409,
-        error: 'USER_ALREADY_EXISTS',
-        message: 'email or phone already in use (race) — retry the request',
+        statusCode: 500,
+        error: 'ONBOARD_FAILED',
+        message: 'could not onboard participant',
       };
     }
-    log.error({ err: signupErr }, 'signUp failed during onboarding');
-    return {
-      ok: false,
-      statusCode: 500,
-      error: 'ONBOARD_FAILED',
-      message: 'could not onboard participant',
-    };
   }
 
   try {
-    await updateExecutor(user_id);
+    await db.transaction(async (tx) => {
+      if (keycloak) {
+        // The row and its onboarding columns in one insert — there is no
+        // separate update to sequence, and nothing to orphan if the rest of the
+        // transaction fails. Consent booleans are deliberately not written here;
+        // consent lives in the ledger (#309), which `withinTx` records.
+        const written = await insertLocalUser(
+          {
+            id: user_id,
+            name,
+            email: email_norm,
+            // Onboarding by an aggregator proves nothing about the identifier;
+            // the OTP login is what verifies it.
+            emailVerified: false,
+            phoneNumber: fields.phone_norm,
+            phoneNumberVerified: false,
+            extra: buildOnboardingSet(fields),
+          },
+          log,
+          tx
+        );
+
+        if (!written.ok) {
+          // Thrown so the transaction rolls back; classified by the catch below.
+          throw Object.assign(new Error(written.message), {
+            statusCode: written.code === 'IDENTITY_CONFLICT' ? 409 : 500,
+            errorCode:
+              written.code === 'IDENTITY_CONFLICT' ? 'USER_ALREADY_EXISTS' : 'ONBOARD_FAILED',
+          });
+        }
+      } else {
+        await tx.update(user).set(buildOnboardingSet(fields)).where(eq(user.id, user_id));
+      }
+
+      await withinTx(tx, user_id);
+    });
   } catch (updateErr: unknown) {
-    // Orphan cleanup — best effort.
-    try {
-      await db.delete(user).where(eq(user.id, user_id));
-      log.warn(
-        { orphan_user_id: user_id },
-        'cleaned up orphan user after update/tx failed',
-      );
-    } catch (cleanupErr) {
-      log.error(
-        { cleanupErr, orphan_user_id: user_id },
-        'failed to clean up orphan user — manual cleanup needed',
-      );
+    // Orphan cleanup, better-auth path only. Under Keycloak the row was written
+    // inside the transaction that just rolled back, so deleting here would at
+    // best be a no-op and at worst remove a *different* row that happened to
+    // reuse the id.
+    if (rowCommittedOutsideTx) {
+      try {
+        await db.delete(user).where(eq(user.id, user_id));
+        log.warn(
+          { orphan_user_id: user_id },
+          'cleaned up orphan user after update/tx failed',
+        );
+      } catch (cleanupErr) {
+        log.error(
+          { cleanupErr, orphan_user_id: user_id },
+          'failed to clean up orphan user — manual cleanup needed',
+        );
+      }
     }
 
     const e = updateErr as {
@@ -187,7 +251,8 @@ async function signUpAndOnboardUser(params: {
       errorCode?: string;
     } | null;
 
-    // Propagate typed service errors (e.g. from create_profile_item).
+    // Propagate typed service errors (e.g. from create_profile_item, or the
+    // insert failure re-thrown above).
     if (e?.statusCode && e?.errorCode) {
       return {
         ok: false,
@@ -197,13 +262,7 @@ async function signUpAndOnboardUser(params: {
       };
     }
 
-    const pg_code = e?.code ?? e?.cause?.code;
-    const msg = String(e?.message ?? '');
-    if (
-      pg_code === '23505' ||
-      msg.includes('duplicate key value') ||
-      msg.includes('unique constraint')
-    ) {
+    if (isUniqueViolation(updateErr)) {
       return {
         ok: false,
         statusCode: 409,
@@ -218,6 +277,46 @@ async function signUpAndOnboardUser(params: {
       statusCode: 500,
       error: 'ONBOARD_FAILED',
       message: 'could not onboard participant',
+    };
+  }
+
+  // The realm identity comes last, once the local row is complete: under
+  // Keycloak the `user` row is only a mirror, and without a realm user the OTP
+  // login fails with `user_not_found` — the participant would be onboarded and
+  // permanently unable to sign in. Deliberately fails the whole request rather
+  // than logging and continuing; the orphan is cleaned up the same way an
+  // update failure is, so the caller can safely retry.
+  const identity = await createParticipantKeycloakIdentity({
+    userId: user_id,
+    name,
+    // The real email, or null. Passing the `@no-email.local` placeholder here is
+    // what made the realm identity's username an address nobody can receive mail
+    // at — their phone is then the only usable channel, and the fake address
+    // matches no lookup on either side.
+    email: email_norm,
+    phoneNumber: fields.phone_norm,
+    log,
+  });
+
+  if (!identity.ok) {
+    try {
+      await db.delete(user).where(eq(user.id, user_id));
+      log.warn(
+        { orphan_user_id: user_id, identity_error: identity.code },
+        'cleaned up orphan user after the Keycloak identity could not be created',
+      );
+    } catch (cleanupErr) {
+      log.error(
+        { cleanupErr, orphan_user_id: user_id },
+        'failed to clean up orphan user — manual cleanup needed',
+      );
+    }
+
+    return {
+      ok: false,
+      statusCode: identity.code === 'IDENTITY_CONFLICT' ? 409 : 500,
+      error: identity.code,
+      message: identity.message,
     };
   }
 
@@ -378,7 +477,6 @@ export const participant_handler = async (
       const acting_org_id = request.acting_org!.org_id;
       const network = body.network ?? 'blue_dot';
       const now = new Date();
-      const email_for_signup = email_norm ?? `${randomUUID()}@no-email.local`;
 
       const fields: OnboardingFields = {
         phone_norm,
@@ -390,26 +488,20 @@ export const participant_handler = async (
       };
 
       const result = await signUpAndOnboardUser({
-        email_for_signup,
+        email_norm,
         name: body.name,
         fields,
         log: request.log,
-        updateExecutor: async (user_id) => {
-          await db.transaction(async (tx) => {
-            await tx
-              .update(user)
-              .set(buildOnboardingSet(fields))
-              .where(eq(user.id, user_id));
-            const consent = await recordParticipantConsent(tx, {
-              compliance: body.compliance,
-              userId: user_id,
-              network,
-              brand: null,
-              channel: body.channel,
-              acceptedAt: now,
-            });
-            consent_recorded = consent.recorded;
+        withinTx: async (tx, user_id) => {
+          const consent = await recordParticipantConsent(tx, {
+            compliance: body.compliance,
+            userId: user_id,
+            network,
+            brand: null,
+            channel: body.channel,
+            acceptedAt: now,
           });
+          consent_recorded = consent.recorded;
         },
       });
 
@@ -699,7 +791,6 @@ export const participant_handler = async (
   }
 
   const now = new Date();
-  const email_for_signup = email_norm ?? `${randomUUID()}@no-email.local`;
 
   const fields: OnboardingFields = {
     phone_norm,
@@ -712,38 +803,31 @@ export const participant_handler = async (
 
   let onboarded_item_id: string | undefined;
   const result = await signUpAndOnboardUser({
-    email_for_signup,
+    email_norm,
     name: body.name,
     fields,
     log: request.log,
-    updateExecutor: async (user_id) => {
-      await db.transaction(async (tx) => {
-        await tx
-          .update(user)
-          .set(buildOnboardingSet(fields))
-          .where(eq(user.id, user_id));
-
-        const { item_id } = await create_profile_item({
-          tx,
-          user_id,
-          network,
-          domain,
-          item_type,
-          payload: body.item_state ?? {},
-        });
-        onboarded_item_id = item_id;
-
-        const consent = await recordParticipantConsent(tx, {
-          compliance: body.compliance,
-          userId: user_id,
-          itemId: item_id,
-          network,
-          brand: null,
-          channel: body.channel,
-          acceptedAt: now,
-        });
-        consent_recorded = consent.recorded;
+    withinTx: async (tx, user_id) => {
+      const { item_id } = await create_profile_item({
+        tx,
+        user_id,
+        network,
+        domain,
+        item_type,
+        payload: body.item_state ?? {},
       });
+      onboarded_item_id = item_id;
+
+      const consent = await recordParticipantConsent(tx, {
+        compliance: body.compliance,
+        userId: user_id,
+        itemId: item_id,
+        network,
+        brand: null,
+        channel: body.channel,
+        acceptedAt: now,
+      });
+      consent_recorded = consent.recorded;
     },
   });
 

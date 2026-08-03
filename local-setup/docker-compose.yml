@@ -25,6 +25,8 @@ name: signals-dpg
 #   Signals API   http://localhost:2742   (Swagger at /reference)
 #   Postgres      localhost:5432
 #   Redis         localhost:5555          (password-protected)
+#   Keycloak      localhost:8080          (opt-in: --profile keycloak)
+#   Mailpit UI    localhost:8025          (opt-in: catches email OTPs)
 # ═══════════════════════════════════════════════════════════════════════════
 
 services:
@@ -75,6 +77,157 @@ services:
       timeout: 3s
       retries: 20
 
+  # Keycloak — OPT-IN, behind the `keycloak` profile, so the default
+  # `docker compose up -d` is unchanged. Signals runs on better-auth until
+  # AUTH_PROVIDER is moved off 'betterauth', at which point you want this:
+  #
+  #     docker compose --profile keycloak up -d
+  #
+  # Imports infra/keycloak/realms/bluedots-realm.json and mounts the custom
+  # email/phone OTP authenticator SPI from infra/keycloak/providers/, so this is
+  # the real production login experience — not Keycloak's stock browser flow.
+  # `start-dev` indexes the mounted provider jar at boot. See
+  # ../infra/keycloak/README.md.
+  #
+  # Phone OTP goes to the Keycloak log by default (KC_SPI_SMS_PROVIDER=log) —
+  # grep the container logs for the code. Email OTP needs reachable SMTP.
+  #
+  # Storage is the dev-mode embedded database (no KC_DB), persisted in a volume
+  # so realm edits survive a restart. Local dev only.
+  keycloak:
+    profiles: ["keycloak"]
+    image: quay.io/keycloak/keycloak:26.5.5
+    container_name: signals-keycloak
+    restart: unless-stopped
+    entrypoint: ["/opt/keycloak/render-realm.sh"]
+    command: ["start-dev", "--import-realm"]
+    environment:
+      KC_BOOTSTRAP_ADMIN_USERNAME: ${KC_BOOTSTRAP_ADMIN_USERNAME:-admin}
+      # Defaulted, NOT required (`:?`). Compose interpolates the whole file
+      # before it applies profile filters, so a required variable here would
+      # break the plain `docker compose up -d` for everyone who never intends
+      # to run Keycloak. Local-dev only — this whole file is plain HTTP on
+      # localhost — but override it anywhere the host is reachable.
+      KC_BOOTSTRAP_ADMIN_PASSWORD: ${KC_BOOTSTRAP_ADMIN_PASSWORD:-admin}
+      KC_HOSTNAME_STRICT: "false"
+      KC_HTTP_ENABLED: "true"
+      KC_HEALTH_ENABLED: "true"
+      # Substituted into the realm JSON at boot (redirectUris, webOrigins,
+      # post.logout.redirect.uris). Must be the browser-facing UI base URL.
+      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-http://localhost:5173}
+      # ── OTP SPI (infra/keycloak/providers/keycloak-otp-*.jar) ────────────
+      # Phone channel. 'log' writes the code to the Keycloak container log,
+      # which is what you want locally — no SMS account needed:
+      #   docker compose logs -f keycloak | grep -i otp
+      # Switch to twilio / sns / msg91 once credentials are configured.
+      KC_SPI_SMS_PROVIDER: ${KC_SPI_SMS_PROVIDER:-log}
+      TWILIO_ACCOUNT_SID: ${TWILIO_ACCOUNT_SID:-}
+      TWILIO_AUTH_TOKEN: ${TWILIO_AUTH_TOKEN:-}
+      TWILIO_FROM_NUMBER: ${TWILIO_FROM_NUMBER:-}
+      AWS_REGION: ${AWS_REGION:-ap-south-1}
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-}
+      MSG91_AUTH_KEY: ${MSG91_AUTH_KEY:-}
+      MSG91_TEMPLATE_ID: ${MSG91_TEMPLATE_ID:-}
+      MSG91_SENDER_ID: ${MSG91_SENDER_ID:-}
+      MSG91_OTP_VAR_NAME: ${MSG91_OTP_VAR_NAME:-var}
+      # Email channel. render-realm.sh substitutes these into the realm's
+      # smtpServer block; keycloak-init re-applies them when the realm already
+      # exists. Without reachable SMTP, only the phone channel can deliver.
+      SMTP_HOST: ${SMTP_HOST:-mailpit}
+      SMTP_PORT: ${SMTP_PORT:-1025}
+      SMTP_FROM: ${SMTP_FROM:-no-reply@bluedots.local}
+      SMTP_FROM_DISPLAY: ${SMTP_FROM_DISPLAY:-Blue Dots}
+      SMTP_AUTH: ${SMTP_AUTH:-false}
+      SMTP_STARTTLS: ${SMTP_STARTTLS:-false}
+      SMTP_SSL: ${SMTP_SSL:-false}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+      # ── OTP login theme branding (infra/keycloak/themes/otp) ─────────────
+      # theme.properties reads these via ${env.VAR:default}; the defaults it
+      # ships say "Aggregator", so signals sets its own.
+      BRAND_SHORT_NAME: ${BRAND_SHORT_NAME:-Blue Dots}
+      BRAND_LONG_NAME: ${BRAND_LONG_NAME:-Blue Dots}
+      BRAND_LOGO_SLUG: ${BRAND_LOGO_SLUG:-blue-dot}
+      HERO_TITLE_LEAD: ${HERO_TITLE_LEAD:-Welcome to}
+      HERO_TITLE_HIGHLIGHT: ${HERO_TITLE_HIGHLIGHT:-the Signals}
+      HERO_TITLE_TAIL: ${HERO_TITLE_TAIL:-network.}
+      HERO_SUBTITLE: ${HERO_SUBTITLE:-Sign in to discover and connect across the network.}
+    volumes:
+      - ../infra/keycloak/render-realm.sh:/opt/keycloak/render-realm.sh:ro
+      - ../infra/keycloak/realms:/opt/keycloak/data/import-template:ro
+      # The OTP authenticator SPI. `start-dev` indexes whatever is here at boot,
+      # so no image rebuild is needed to pick up a new provider jar.
+      - ../infra/keycloak/providers:/opt/keycloak/providers:ro
+      # Disk theme overrides the jar-baked one, so the BRAND_* env above takes
+      # effect without rebaking the provider.
+      - ../infra/keycloak/themes:/opt/keycloak/themes:ro
+      # Mounted at data/, NOT data/h2/. The container runs as uid 1000 and
+      # `/opt/keycloak/data` exists in the image owned 1000:0 and
+      # group-writable, so a fresh named volume inherits that ownership.
+      # `data/h2` does NOT exist in the image, so mounting there gives Docker
+      # nothing to copy ownership from — it creates the dir root:root 0755 and
+      # Keycloak dies with
+      #   AccessDeniedException: /opt/keycloak/data/h2/keycloakdb.trace.db
+      - signals-keycloak-data:/opt/keycloak/data
+    ports:
+      - "${KEYCLOAK_PORT:-8080}:8080"
+    depends_on:
+      mailpit:
+        condition: service_started
+    healthcheck:
+      # 26.x serves health on the management port (9000); no curl in the image.
+      test: ["CMD-SHELL", "exec 3<>/dev/tcp/127.0.0.1/9000 && echo -e 'GET /health/ready HTTP/1.1\\r\\nHost: localhost\\r\\nConnection: close\\r\\n\\r\\n' >&3 && grep -q '\"UP\"' <&3"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 30s
+
+  # Mailpit — catches the email-OTP messages Keycloak sends, so the email
+  # channel actually works locally without real SMTP. Web UI on :8025.
+  # Part of the `keycloak` profile because nothing else in this stack sends mail
+  # (signals' own notifications go through the notification service).
+  mailpit:
+    profiles: ["keycloak"]
+    image: axllent/mailpit:latest
+    container_name: signals-mailpit
+    restart: unless-stopped
+    ports:
+      - "${MAILPIT_UI_PORT:-8025}:8025"
+    healthcheck:
+      test: ["CMD-SHELL", "exec 3<>/dev/tcp/127.0.0.1/8025 || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+
+  # One-shot post-import fixup. NOT optional when running Keycloak: KC 26
+  # ignores `kc.user.profile.config` from a realm import, so `phoneNumber`
+  # writes are silently DROPPED until this runs — which would leave migrated
+  # phone users unable to receive an OTP, with nothing in the logs. Verified
+  # against 26.5.5. See ../infra/keycloak/init/apply-user-profile.sh.
+  keycloak-init:
+    profiles: ["keycloak"]
+    image: alpine:3.20
+    container_name: signals-keycloak-init
+    depends_on:
+      keycloak:
+        condition: service_healthy
+    entrypoint:
+      - sh
+      - -lc
+      - |
+        apk add --no-cache curl jq >/dev/null
+        exec /init/apply-user-profile.sh
+    environment:
+      KC_URL: http://keycloak:8080
+      KC_REALM: ${KEYCLOAK_REALM:-bluedots}
+      KC_BOOTSTRAP_ADMIN_USERNAME: ${KC_BOOTSTRAP_ADMIN_USERNAME:-admin}
+      KC_BOOTSTRAP_ADMIN_PASSWORD: ${KC_BOOTSTRAP_ADMIN_PASSWORD:-admin}
+      UNMANAGED_POLICY: ENABLED
+    volumes:
+      - ../infra/keycloak/init:/init:ro
+    restart: "no"
+
   # ───────────────────────────────────────────────────────────────────────
   # signals-dpg
   # ───────────────────────────────────────────────────────────────────────
@@ -108,6 +261,7 @@ services:
       AUTH_MIDDLEWARE_ENABLED: "true"
       CREATE_TEST_OTP: "true"
       SERVED_DOMAINS: ${SERVED_DOMAINS:-blue_dot/seeker,blue_dot/provider}
+      SELF_SIGNUP_MODE: ${SELF_SIGNUP_MODE:-allowed}
       NETWORK_CONFIG_SOURCE: local
       # Relative to the container CWD (/app for the built API, /repo for the
       # bootstrap) — both have examples/ at that root.
@@ -124,6 +278,31 @@ services:
       REDIS_PASSWORD: ${REDIS_PASSWORD}
       REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379
       SIGNALS_PII_KEY: ${SIGNALS_PII_KEY:?SIGNALS_PII_KEY must be a base64-encoded 32-byte key}
+      # D6 inter-instance peer auth (HMAC). Required by NetworkRuntimeSecretsSchema
+      # (min 32 chars). Single local instance in permissive mode → a static dev
+      # default is fine; must be IDENTICAL across peers in a multi-instance setup.
+      INSTANCE_SHARED_SECRET: ${INSTANCE_SHARED_SECRET:-local-dev-instance-shared-secret-change-me}
+      PEER_AUTH_MODE: ${PEER_AUTH_MODE:-permissive}
+      # Keycloak migration flag. 'betterauth' (the default) keeps every
+      # Keycloak path dormant; the KEYCLOAK_* values below are inert until it
+      # moves to 'dual'/'keycloak', which also requires the `keycloak` profile.
+      AUTH_PROVIDER: ${AUTH_PROVIDER:-betterauth}
+      # Acting-org authorisation source (§5.1). 'header' = today's behaviour;
+      # 'claim_preferred' enforces the token's signals_acting_orgs grant when
+      # present; 'claim_required' refuses a grantless token. Inert by default.
+      ACTING_ORG_SOURCE: ${ACTING_ORG_SOURCE:-header}
+      # Public issuer — must match the `iss` Keycloak mints, i.e. the URL the
+      # browser uses. Internal URL is the compose service name.
+      KEYCLOAK_BASE_URL: ${KEYCLOAK_BASE_URL:-http://localhost:8080}
+      KEYCLOAK_INTERNAL_BASE_URL: http://keycloak:8080
+      KEYCLOAK_REALM: ${KEYCLOAK_REALM:-bluedots}
+      # Advertised to the UI via GET /api/v1/auth/config.
+      KEYCLOAK_UI_CLIENT_ID: ${KEYCLOAK_UI_CLIENT_ID:-signals-ui}
+      KEYCLOAK_API_CLIENT_SECRET: ${KEYCLOAK_API_CLIENT_SECRET:-signals-api-dev-secret-change-me}
+      # Integrating DPGs allowed to use client-credentials service auth. Empty
+      # by default: service auth stays on x-api-key until named here. Each id
+      # must match the organization.slug seeded by db:seed:services.
+      KEYCLOAK_SERVICE_CLIENT_IDS: ${KEYCLOAK_SERVICE_CLIENT_IDS:-}
     depends_on:
       postgres:
         condition: service_healthy
@@ -157,6 +336,11 @@ services:
       args:
         VITE_API_URL: http://localhost:2742
         VITE_NETWORK_NAME: ${SIGNALS_NETWORK:-blue_dot}
+        # No VITE_AUTH_PROVIDER / VITE_KEYCLOAK_* here on purpose: the login
+        # screen and OIDC details are served by the API at runtime
+        # (GET /api/v1/auth/config), so switching providers needs no UI rebuild
+        # and the UI cannot disagree with the API. Set AUTH_PROVIDER on the API
+        # side instead.
     image: signals-dpg/ui:local
     container_name: signals-ui
     restart: unless-stopped
@@ -172,3 +356,4 @@ services:
 volumes:
   signals-postgres-data:
   signals-redis-data:
+  signals-keycloak-data:
