@@ -769,6 +769,10 @@
       },
       "id": "seeker",
       "guardian_consent_required": true,
+      "profile_completion_prompt": {
+        "heading": "Complete your profile to get discovered",
+        "body": "Employers can find and connect with you only once your profile is live. Fill in the details below to start getting job opportunities."
+      },
       "card": {
         "title_field": "name",
         "avatar_from": "name",
@@ -1303,6 +1307,10 @@
       "id": "provider",
       "my_items_label": "My Jobs",
       "guardian_consent_required": false,
+      "profile_completion_prompt": {
+        "heading": "Complete your profile to start hiring",
+        "body": "Seekers can see and apply to your postings only once your profile is live. Add the details below to reach candidates."
+      },
       "card": {
         "title_field": "jobProviderName",
         "avatar_from": "jobProviderName",

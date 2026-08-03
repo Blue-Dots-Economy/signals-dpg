@@ -263,6 +263,8 @@
   "nav.sign_in_to_connect": "ಸಂಪರ್ಕಿಸಲು ಸೈನ್ ಇನ್",
   "profile.choose_different_role": "ಬೇರೆ ಪಾತ್ರ ಆಯ್ಕೆಮಾಡಿ",
   "profile.choose_role": "ನೆಟ್‌ವರ್ಕ್‌ನಲ್ಲಿ ನಿಮ್ಮ ಪಾತ್ರ ಆಯ್ಕೆಮಾಡಿ",
+  "profile.completion_prompt_default_heading": "ಕಂಡುಬರಲು ನಿಮ್ಮ ಪ್ರೊಫೈಲ್ ಪೂರ್ಣಗೊಳಿಸಿ",
+  "profile.completion_prompt_default_body": "ಪೂರ್ಣಗೊಂಡ ಮೇಲೆ ನಿಮ್ಮ ಪ್ರೊಫೈಲ್ ಲೈವ್ ಆಗುತ್ತದೆ, ಇದರಿಂದ ಇತರರು ನಿಮ್ಮನ್ನು ಹುಡುಕಿ ಸಂಪರ್ಕಿಸಬಹುದು. ಪ್ರಾರಂಭಿಸಲು ಕೆಳಗಿನ ವಿವರಗಳನ್ನು ಭರ್ತಿ ಮಾಡಿ.",
   "profile.create_heading": "ಪ್ರೊಫೈಲ್ ರಚಿಸಿ",
   "profile.create_role_heading": "{{role}} ಪ್ರೊಫೈಲ್ ರಚಿಸಿ",
   "profile.edit_role_heading": "{{role}} ಪ್ರೊಫೈಲ್ ಸಂಪಾದಿಸಿ",

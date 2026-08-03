@@ -286,6 +286,8 @@
   "nav.sign_in_to_connect": "Sign in to connect",
   "profile.choose_different_role": "Choose different role",
   "profile.choose_role": "Choose your role on the network",
+  "profile.completion_prompt_default_heading": "Complete your profile to get discovered",
+  "profile.completion_prompt_default_body": "Your profile goes live once it's complete, so others can find and connect with you. Fill in the details below to get started.",
   "profile.create_heading": "Create Profile",
   "profile.create_role_heading": "Create {{role}} Profile",
   "profile.edit_role_heading": "Edit {{role}} Profile",

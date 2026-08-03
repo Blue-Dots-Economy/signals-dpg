@@ -84,6 +84,11 @@ import { useConsentGate } from '@/hooks/use-consent-gate';
 import { useNetworkTheme } from '@/theme/theme-provider';
 import { ProfileConsentModal } from '@/components/consent/profile-consent-modal';
 import { useMyItems } from '@/hooks/use-my-items';
+import {
+  getStoredActiveProfileId,
+  setStoredActiveProfileId,
+  clearStoredActiveProfileId,
+} from '@/lib/active-profile-storage';
 import { useInfiniteBrowseItems } from '@/hooks/use-infinite-browse-items';
 import { useProfileConsentStatus } from '@/hooks/use-profile-consent-status';
 import { useMapMarkers } from '@/hooks/use-map-markers';
@@ -387,22 +392,6 @@ function MarkerDetailPopup({
 function parseNetworkIds(networkEnv: string | undefined): string[] {
   if (!networkEnv) return [];
   return networkEnv.split(',').map(n => n.trim()).filter(Boolean);
-}
-
-function getActiveProfileStorageKey(networkId: string): string {
-  return `activeProfileId:${networkId}`;
-}
-
-function getStoredActiveProfileId(networkId: string): string | null {
-  return localStorage.getItem(getActiveProfileStorageKey(networkId));
-}
-
-function setStoredActiveProfileId(networkId: string, profileId: string): void {
-  localStorage.setItem(getActiveProfileStorageKey(networkId), profileId);
-}
-
-function clearStoredActiveProfileId(networkId: string): void {
-  localStorage.removeItem(getActiveProfileStorageKey(networkId));
 }
 
 /**

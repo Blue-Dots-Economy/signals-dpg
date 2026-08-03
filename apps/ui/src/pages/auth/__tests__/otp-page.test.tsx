@@ -8,6 +8,7 @@ const verifyOtp = vi.fn();
 const signOut = vi.fn();
 const getU18Status = vi.fn();
 const navigateMock = vi.fn();
+const fetchMyProfilesLite = vi.fn();
 
 // Mutable location state the page reads (set per test before render).
 let currentState: Record<string, unknown> | null = null;
@@ -28,6 +29,11 @@ vi.mock('@/lib/consent-api', () => ({
 }));
 vi.mock('@/lib/served-binding', () => ({ getServedScope: () => null }));
 vi.mock('@/lib/user-api', () => ({ setUserDomains: vi.fn().mockResolvedValue(undefined) }));
+// #376: post-login profile check. Default (set in beforeEach) is a live
+// profile → lands on home; individual tests override to exercise the redirect.
+vi.mock('@/lib/login-profiles', () => ({
+  fetchMyProfilesLite: (...a: unknown[]) => fetchMyProfilesLite(...a),
+}));
 vi.mock('react-router-dom', async (orig) => ({
   ...(await orig<typeof import('react-router-dom')>()),
   useNavigate: () => navigateMock,
@@ -63,6 +69,10 @@ function renderPage() {
 beforeEach(() => {
   vi.clearAllMocks();
   verifyOtp.mockResolvedValue(undefined);
+  // Default: user already has a completed (live) profile → no redirect, land home.
+  fetchMyProfilesLite.mockResolvedValue([
+    { item_id: 'p1', item_domain: 'seeker', lifecycle_status: 'live' },
+  ]);
 });
 
 describe('OtpPage — existing-minor guardian gate (#453)', () => {
@@ -121,5 +131,32 @@ describe('OtpPage — existing-minor guardian gate (#453)', () => {
 
     await waitFor(() => expect(navigateMock).toHaveBeenCalledWith('/', { replace: true }));
     expect(getU18Status).not.toHaveBeenCalled();
+  });
+});
+
+describe('OtpPage — first-time profile redirect (#376)', () => {
+  it('sends a user with no completed profile to the create page', async () => {
+    currentState = { userExists: true, phoneNumber: '+911234' };
+    getU18Status.mockResolvedValue({ isMinor: false });
+    fetchMyProfilesLite.mockResolvedValue([]); // no profiles
+
+    renderPage();
+    await userEvent.click(screen.getByTestId('otp-submit'));
+
+    await waitFor(() => expect(navigateMock).toHaveBeenCalledWith('/profile/new', { replace: true }));
+    expect(navigateMock).not.toHaveBeenCalledWith('/', { replace: true });
+  });
+
+  it('sends a user with only a draft profile to that draft\'s edit page', async () => {
+    currentState = { userExists: true, phoneNumber: '+911234' };
+    getU18Status.mockResolvedValue({ isMinor: false });
+    fetchMyProfilesLite.mockResolvedValue([
+      { item_id: 'draft1', item_domain: 'seeker', lifecycle_status: 'draft' },
+    ]);
+
+    renderPage();
+    await userEvent.click(screen.getByTestId('otp-submit'));
+
+    await waitFor(() => expect(navigateMock).toHaveBeenCalledWith('/profile/draft1/edit', { replace: true }));
   });
 });

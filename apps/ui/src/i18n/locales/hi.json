@@ -263,6 +263,8 @@
   "nav.sign_in_to_connect": "जुड़ने के लिए साइन इन करें",
   "profile.choose_different_role": "अलग भूमिका चुनें",
   "profile.choose_role": "नेटवर्क पर अपनी भूमिका चुनें",
+  "profile.completion_prompt_default_heading": "खोजे जाने के लिए अपनी प्रोफ़ाइल पूरी करें",
+  "profile.completion_prompt_default_body": "पूरी होने पर आपकी प्रोफ़ाइल लाइव हो जाती है, ताकि दूसरे आपको ढूँढ और जुड़ सकें। शुरू करने के लिए नीचे विवरण भरें।",
   "profile.create_heading": "प्रोफ़ाइल बनाएं",
   "profile.create_role_heading": "{{role}} प्रोफ़ाइल बनाएं",
   "profile.edit_role_heading": "{{role}} प्रोफ़ाइल संपादित करें",

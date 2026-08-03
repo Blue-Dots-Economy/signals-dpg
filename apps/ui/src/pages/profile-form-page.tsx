@@ -348,6 +348,10 @@ export function ProfileFormPage() {
   const selectedDomainInfo = domains.find((d) => d.id === selectedDomain);
   const DomainIcon = getDomainIcon(selectedDomain, network?.id);
   const roleLabel = (selectedDomain ?? '').replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
+  // #376: the "why complete your profile" prompt — shown when creating, or when
+  // completing a still-draft profile (not when editing an already-live one).
+  const showCompletionPrompt = !isEdit || editItem.data?.lifecycle_status === 'draft';
+  const completionPrompt = selectedDomainInfo?.profile_completion_prompt;
 
   const canImportCredentials = React.useMemo(
     () => Boolean(profileSchema) && getConfiguredWalletProviders().length > 0,
@@ -704,6 +708,19 @@ export function ProfileFormPage() {
         {/* Form card — connects flush to the hero strip */}
         <Card className="rounded-t-none border-t-0 shadow-lg">
           <CardContent className="pt-6">
+            {/* #376: motivating "why complete your profile" prompt — per-domain
+                from network.json (role-specific), with a generic i18n fallback. */}
+            {showCompletionPrompt && selectedDomain && (
+              <div className="mb-5 rounded-lg border border-brand-cta/30 bg-brand-cta/[0.06] p-4">
+                <p className="text-sm font-semibold text-foreground">
+                  {completionPrompt?.heading ?? t('profile.completion_prompt_default_heading')}
+                </p>
+                <p className="mt-1 text-sm text-muted-foreground">
+                  {completionPrompt?.body ?? t('profile.completion_prompt_default_body')}
+                </p>
+              </div>
+            )}
+
             {canImportCredentials && (
               <div className="mb-4">
                 <Button variant="outline" size="sm" onClick={() => setIsWalletModalOpen(true)}>
