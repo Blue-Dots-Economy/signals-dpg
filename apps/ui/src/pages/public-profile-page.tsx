@@ -193,11 +193,11 @@ export function PublicProfilePage() {
       | RJSFSchema
       | undefined;
     const resolved = resolveCardFields(schema, liveItem.item_state, domainCfg?.card ?? null);
-    // Every non-empty resolved row, minus any masked-stub value (e.g. "H***",
-    // "1***") the API returns in place of a truly private field — the public
-    // page should only ever show genuinely public values.
+    // Every non-empty resolved row. Masked-stub values (e.g. "H***", "1***")
+    // the API returns for coarsened fields are shown as-is — they're the
+    // masked public projection, safe to display.
     const rows = [...resolved.defaultRows, ...resolved.extraRows].filter(
-      (row) => !row.isEmpty && !/\*{2,}/.test(formatCardValue(row.value, row.type))
+      (row) => !row.isEmpty
     );
 
     content = (
