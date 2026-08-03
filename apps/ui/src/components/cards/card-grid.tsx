@@ -143,7 +143,10 @@ export function CardGrid({
             id={item.id}
             selectMode={selection?.selectMode ?? false}
             selected={selection?.isSelected(item.id) ?? false}
-            selectable={selection?.canSelect(selectedDomain ?? '') ?? true}
+            // Not selectable in bulk mode if an action is already open for this
+            // pair — same one-open-per-pair rule as the CTA (#370/#422); the card
+            // dims and shows no checkbox.
+            selectable={(selection?.canSelect(selectedDomain ?? '') ?? true) && !actionsDisabled}
             onToggle={(id) => selection?.toggle(id, selectedDomain ?? '')}
           >
             {cardElement}

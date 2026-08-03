@@ -2432,7 +2432,9 @@ export function HomePage() {
                             id={item.id}
                             selectMode={browseSelection.selectMode}
                             selected={browseSelection.isSelected(item.id)}
-                            selectable={browseSelection.canSelect(item.domain ?? '')}
+                            // Not selectable if an action is already open for this
+                            // pair (one-open-per-pair, #370/#422) — mirrors the CTA.
+                            selectable={browseSelection.canSelect(item.domain ?? '') && !openActionItemIds.has(item.id)}
                             onToggle={(id) => browseSelection.toggle(id, item.domain ?? '')}
                           >
                             {/* #394: same rule as the single-domain CardGrid so all
