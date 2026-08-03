@@ -30,12 +30,15 @@ Product wants users to be able to **share a profile**. A live profile card gains
 ## Key decisions (locked)
 
 1. **Reuse the existing public fetch — no new backend for v1.** The public, no-auth, masked, jittered, **live-only** single-item fetch already exists and already supports keying by `item_id`.
-2. **Link = raw item key**, not a token: `/p/<network>/<domain>/<item_type>/<item_id>`. (Opaque-token alternative flagged for the reviewer — see Open questions.)
+2. **Link = raw item key**, not a token: `/p/<network>/<domain>/<item_type>/<item_id>`. The profile id is already public via map/discover, so the raw key exposes nothing new, and it works with the existing endpoint with zero backend. An opaque token (hiding the id, enabling revoke/expiry) is a possible *future* enhancement only if revocation/expiry is ever required — it is not built in v1 (no token store).
 3. **No owner opt-in** — any live profile is shareable by anyone. A live profile is already publicly discoverable via map/discover, so a share link exposes nothing new.
 4. **No minor gating** — a live profile is already public; minors' live profiles are shared with the same masking as everyone else's. (Minor status is user-level anyway and absent from the public item — see Constraints.)
 5. **Share button appears only on `lifecycle_status === 'live'` profiles**, at both call sites.
 6. **Recipient side is binary:** live item returned → render; empty result or error → "unavailable". We do not (and cannot) distinguish paused vs retired vs never-existed.
 7. **Approach: a new unauthenticated route in the existing portal SPA** (not the tourist app, not SSR).
+8. **Federation: no multi-server link routing in v1.** Single-instance today. The reused `GET /network/item/fetch` already fans out across all instances serving the domain and merges, so links keep resolving even if the network is split across servers later. Direct-to-owning-instance routing (via the profile's `item_instance_url`) is a *future performance optimization only*, not a v1 requirement.
+9. **Canonical host: build links from the current site's origin** (`window.location.origin`). The portal and the public-view page share one host today; a fixed canonical/branded domain is not needed for v1 (would be a config-sourced base URL if ever wanted).
+10. **OpenGraph / social link previews: not in v1.** The rich WhatsApp/social preview needs SSR / meta injection; deferred to a follow-up. The core flow (copy link → recipient sees the profile) does not depend on it.
 
 ---
 
@@ -111,7 +114,7 @@ Binary available/unavailable is intentional — the public endpoint returns only
   ```ts
   `${window.location.origin}/p/${item.item_network}/${item.item_domain}/${item.item_type}/${item.item_id}`
   ```
-  (Uses `window.location.origin` — correct for single-instance today; see Open questions for the canonical-host consideration.)
+  (Uses `window.location.origin` — the portal and public-view share one host today; see Key decisions #9.)
 - **Copy + toast** — a shared `useShareProfile()` hook wrapping:
   - `navigator.clipboard.writeText(link)` → success `toast()` ("Link copied", via **sonner**, already mounted app-wide in `app.tsx`).
   - **Fallback** when the Clipboard API is unavailable / permission-denied: hidden `<textarea>` + `document.execCommand('copy')`; if that also fails, surface the link in a prompt/toast so the user can copy manually. Mirrors the existing clipboard pattern in `apps/ui/src/components/wallet/providers/digilocker-provider.tsx`.
@@ -151,15 +154,6 @@ The target network comes from the **URL path**, not the env default. `PublicProf
   - `PublicProfilePage` — loading, live-render, empty→unavailable, malformed-key→unavailable, transient-error states; route requires no auth.
 - **API:** no new endpoint. Add/confirm a test asserting a keyed `item_id` fetch returns the **masked, live-only** projection (regression guard against ever exposing `item_private_state` on the keyed path).
 - **Manual / e2e:** a cold link in a fresh incognito session renders the live profile with masked data; a paused/retired profile's link shows unavailable; theming matches the link's network.
-
----
-
-## Open questions (for reviewer)
-
-1. **Link format — raw key vs opaque token.** v1 uses the raw item key (works with the existing endpoint, zero backend; ids are already public via map/discover). An **opaque share token** would hide the id and enable revocation/expiry/owner-opt-in, at the cost of a new token store + resolve endpoint. Recommend raw key for v1; note token as an upgrade path.
-2. **Federation / multi-instance.** Single-instance today, so `window.location.origin` + the existing fetch resolve locally. If a network is later split across instances, the link either (a) points at a canonical host and relies on `fetchItemsAcrossInstances` fan-out (works today), or (b) embeds the profile's `item_instance_url` to route directly. v1 assumes single instance; decision deferred.
-3. **Canonical host.** Building the link from `window.location.origin` assumes the portal host is also the public-view host. If a dedicated public/canonical host is desired, the base URL should come from config instead. Fine for v1.
-4. **OpenGraph previews.** Deferred (needs SSR/meta injection). Confirm not required for v1.
 
 ---
 
