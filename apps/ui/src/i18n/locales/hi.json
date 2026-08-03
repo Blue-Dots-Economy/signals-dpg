@@ -594,5 +594,11 @@
   "share.button": "प्रोफ़ाइल साझा करें",
   "share.copied": "लिंक क्लिपबोर्ड पर कॉपी हो गया",
   "share.copy_failed": "लिंक कॉपी नहीं हो सका",
+  "public_profile.loading": "प्रोफ़ाइल लोड हो रही है…",
+  "public_profile.unavailable_title": "प्रोफ़ाइल उपलब्ध नहीं",
+  "public_profile.unavailable_body": "यह प्रोफ़ाइल अब उपलब्ध नहीं है, या लिंक अमान्य है।",
+  "public_profile.error_title": "कुछ गलत हो गया",
+  "public_profile.error_body": "हम यह प्रोफ़ाइल लोड नहीं कर सके। कृपया पुनः प्रयास करें।",
+  "public_profile.retry": "पुनः प्रयास करें",
   "a11y.skip_to_content": "सामग्री पर जाएं"
 }

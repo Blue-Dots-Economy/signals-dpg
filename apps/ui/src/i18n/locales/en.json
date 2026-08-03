@@ -584,5 +584,11 @@
   "share.button": "Share profile",
   "share.copied": "Link copied to clipboard",
   "share.copy_failed": "Could not copy the link",
+  "public_profile.loading": "Loading profile…",
+  "public_profile.unavailable_title": "Profile unavailable",
+  "public_profile.unavailable_body": "This profile is no longer available, or the link is invalid.",
+  "public_profile.error_title": "Something went wrong",
+  "public_profile.error_body": "We couldn't load this profile. Please try again.",
+  "public_profile.retry": "Try again",
   "a11y.skip_to_content": "Skip to content"
 }

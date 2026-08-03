@@ -594,5 +594,11 @@
   "share.button": "ಪ್ರೊಫೈಲ್ ಹಂಚಿಕೊಳ್ಳಿ",
   "share.copied": "ಲಿಂಕ್ ಕ್ಲಿಪ್‌ಬೋರ್ಡ್‌ಗೆ ನಕಲಿಸಲಾಗಿದೆ",
   "share.copy_failed": "ಲಿಂಕ್ ನಕಲಿಸಲು ಸಾಧ್ಯವಾಗಲಿಲ್ಲ",
+  "public_profile.loading": "ಪ್ರೊಫೈಲ್ ಲೋಡ್ ಆಗುತ್ತಿದೆ…",
+  "public_profile.unavailable_title": "ಪ್ರೊಫೈಲ್ ಲಭ್ಯವಿಲ್ಲ",
+  "public_profile.unavailable_body": "ಈ ಪ್ರೊಫೈಲ್ ಇನ್ನು ಲಭ್ಯವಿಲ್ಲ, ಅಥವಾ ಲಿಂಕ್ ಅಮಾನ್ಯವಾಗಿದೆ.",
+  "public_profile.error_title": "ಏನೋ ತಪ್ಪಾಗಿದೆ",
+  "public_profile.error_body": "ನಾವು ಈ ಪ್ರೊಫೈಲ್ ಲೋಡ್ ಮಾಡಲಾಗಲಿಲ್ಲ. ದಯವಿಟ್ಟು ಮತ್ತೆ ಪ್ರಯತ್ನಿಸಿ.",
+  "public_profile.retry": "ಮತ್ತೆ ಪ್ರಯತ್ನಿಸಿ",
   "a11y.skip_to_content": "ವಿಷಯಕ್ಕೆ ಹೋಗಿ"
 }
