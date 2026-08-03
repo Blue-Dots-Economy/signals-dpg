@@ -1,5 +1,6 @@
 import * as React from 'react';
 import { useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom';
+import { setStoredActiveProfileId } from '@/lib/active-profile';
 import { useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { useTranslation } from 'react-i18next';
@@ -512,6 +513,10 @@ export function ProfileFormPage() {
         }
 
         const created = await createItem(createPayload);
+        // Make the freshly-created profile the active one so the home sidebar
+        // selects it (and the discover list anchors to it) instead of keeping
+        // the previously-stored profile. Home reads this on load.
+        setStoredActiveProfileId(network.id, created.item_id);
         // Reflect the write immediately in cached lists (§C5).
         queryClient.invalidateQueries({ queryKey: queryKeys.myItems(network.id) });
         // Network-level prefix of the browse-items key (React Query matches
