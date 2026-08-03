@@ -95,6 +95,13 @@ const NetworkDomainSchema = z.object({
   // (e.g. blue_dot provider → "My Jobs"). Network-authored content, not i18n
   // chrome; falls back to the generic label when unset.
   my_items_label: z.string().min(1).optional(),
+  // Optional per-domain "why complete your profile" prompt shown on the profile
+  // create/edit page (#376). Role-specific, network-authored content (a seeker's
+  // "why" ≠ a provider's); the UI falls back to a generic i18n message when
+  // unset. Presentational only — never part of item validation.
+  profile_completion_prompt: z
+    .object({ heading: z.string().min(1), body: z.string().min(1) })
+    .optional(),
   minimum_cache_ttl_seconds: z.number().int().positive().optional().default(300),
   // U18 spec D8: when true, this domain routes minors' consent through a
   // guardian. Server-read only; never trusted from the client. Defaults off.
