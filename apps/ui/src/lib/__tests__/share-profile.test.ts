@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, afterEach } from 'vitest';
 import { buildProfileShareUrl, copyTextToClipboard } from '../share-profile';
 
 const item = {
@@ -7,20 +7,6 @@ const item = {
   item_type: 'profile_1.0',
   item_id: '9b545eb9-5406-4bce-bc71-0cdac4b63bd0',
 };
-
-describe('buildProfileShareUrl', () => {
-  it('builds a /p/<network>/<domain>/<type>/<id>?network= URL from the given origin', () => {
-    expect(buildProfileShareUrl(item, 'https://signals.example.org')).toBe(
-      'https://signals.example.org/p/blue_dot/seeker/profile_1.0/9b545eb9-5406-4bce-bc71-0cdac4b63bd0?network=blue_dot',
-    );
-  });
-
-  it('defaults the origin to window.location.origin', () => {
-    // jsdom origin is http://localhost:3000 by default
-    expect(buildProfileShareUrl(item)).toContain('/p/blue_dot/seeker/profile_1.0/');
-    expect(buildProfileShareUrl(item)).toContain('?network=blue_dot');
-  });
-});
 
 describe('copyTextToClipboard', () => {
   afterEach(() => vi.restoreAllMocks());
@@ -43,5 +29,66 @@ describe('copyTextToClipboard', () => {
     expect(ok).toBe(true);
     expect(exec).toHaveBeenCalledWith('copy');
     vi.unstubAllGlobals();
+  });
+
+  it('falls through to textarea when clipboard.writeText rejects and returns true if execCommand succeeds', async () => {
+    const writeText = vi.fn().mockRejectedValue(new Error('denied'));
+    vi.stubGlobal('navigator', { clipboard: { writeText } });
+    const exec = vi.fn().mockReturnValue(true);
+    // @ts-expect-error test shim
+    document.execCommand = exec;
+    const ok = await copyTextToClipboard('hello');
+    expect(ok).toBe(true);
+    expect(exec).toHaveBeenCalledWith('copy');
+    vi.unstubAllGlobals();
+  });
+
+  it('returns false when execCommand returns false', async () => {
+    vi.stubGlobal('navigator', {});
+    const exec = vi.fn().mockReturnValue(false);
+    // @ts-expect-error test shim
+    document.execCommand = exec;
+    const ok = await copyTextToClipboard('hello');
+    expect(ok).toBe(false);
+    vi.unstubAllGlobals();
+  });
+
+  it('returns false and removes textarea when execCommand throws', async () => {
+    vi.stubGlobal('navigator', {});
+    const exec = vi.fn().mockImplementation(() => {
+      throw new Error('execCommand failed');
+    });
+    // @ts-expect-error test shim
+    document.execCommand = exec;
+    const ok = await copyTextToClipboard('hello');
+    expect(ok).toBe(false);
+    expect(document.querySelectorAll('textarea').length).toBe(0);
+    vi.unstubAllGlobals();
+  });
+});
+
+describe('buildProfileShareUrl', () => {
+  it('builds a /p/<network>/<domain>/<type>/<id>?network= URL from the given origin', () => {
+    expect(buildProfileShareUrl(item, 'https://signals.example.org')).toBe(
+      'https://signals.example.org/p/blue_dot/seeker/profile_1.0/9b545eb9-5406-4bce-bc71-0cdac4b63bd0?network=blue_dot',
+    );
+  });
+
+  it('defaults the origin to window.location.origin', () => {
+    // jsdom origin is http://localhost:3000 by default
+    expect(buildProfileShareUrl(item)).toContain('/p/blue_dot/seeker/profile_1.0/');
+    expect(buildProfileShareUrl(item)).toContain('?network=blue_dot');
+  });
+
+  it('percent-encodes spaces in item_domain in both path and query params', () => {
+    const itemWithSpaceDomain = {
+      item_network: 'blue_dot',
+      item_domain: 'a b',
+      item_type: 'profile_1.0',
+      item_id: '12345',
+    };
+    const url = buildProfileShareUrl(itemWithSpaceDomain, 'https://example.org');
+    expect(url).toContain('/p/blue_dot/a%20b/profile_1.0/12345');
+    expect(url).toContain('?network=blue_dot');
   });
 });
