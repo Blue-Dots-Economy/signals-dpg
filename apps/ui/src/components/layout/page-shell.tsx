@@ -39,6 +39,11 @@ interface PageShellProps {
   backLabel?: string;
   /** Hide the sidebar's Browse (domain selector) group — form pages. */
   hideBrowse?: boolean;
+  /** A pinned footer rendered BELOW the scroll area (not inside it). Used by the
+   * form pages for the action bar so it stays fixed at the column bottom while
+   * the form scrolls above it — a `sticky` element inside `<main>` floats when
+   * the content is shorter than the viewport, which this avoids. */
+  footerSlot?: React.ReactNode;
 }
 
 export function PageShell({
@@ -66,6 +71,7 @@ export function PageShell({
   filtersSlot,
   backLabel,
   hideBrowse,
+  footerSlot,
 }: PageShellProps) {
   const { t } = useTranslation();
   return (
@@ -111,6 +117,9 @@ export function PageShell({
           >
             {children}
           </main>
+          {footerSlot && (
+            <div className="flex-none border-t bg-background">{footerSlot}</div>
+          )}
         </div>
       </SidebarProvider>
     </TooltipProvider>

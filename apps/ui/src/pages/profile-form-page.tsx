@@ -812,11 +812,67 @@ export function ProfileFormPage() {
       (needsConsent && !consentChecked) ||
       (minorGatedCreate && !guardianVerifiedForCreate);
 
+  // Action bar rendered as PageShell's pinned footer (below the scroll area, via
+  // footerSlot) — NOT a sticky element inside the scroll, which floated
+  // mid-content when the form was short and produced a second scrollbar. The
+  // submit is `type=submit form=profile-form`, so it still drives the (hidden-
+  // submit) SchemaForm even though it now lives outside the form's DOM subtree.
+  const actionBar = (
+    <div
+      data-testid="profile-action-bar"
+      className="mx-auto flex max-w-[1040px] flex-wrap items-center gap-3 px-4 py-3 sm:px-6"
+    >
+      <div className="flex items-center gap-2 text-sm text-muted-foreground">
+        {formValid ? (
+          <span className="text-emerald-600">{t('profile.required_complete')}</span>
+        ) : (
+          <span className="text-amber-700">{t('profile.fill_required_hint')}</span>
+        )}
+      </div>
+      <div className="ml-auto flex flex-wrap items-center gap-2">
+        {/* Consent slot — shown for CREATE and EDIT-of-draft (the `needsConsent`
+            path). The minor pre-create interstitial is create-only; an edit-of-
+            draft minor is routed through the guardian flow by the accept hook. */}
+        {formValid && needsConsent && (
+          <ConsentCheckbox
+            text={statement}
+            checked={consentChecked}
+            onCheckedChange={(v) => {
+              setConsentChecked(v);
+              if (v && minorGatedCreate && !guardianVerifiedForCreate) {
+                setGuardianConfirmOpen(true);
+              }
+            }}
+          />
+        )}
+        {!isEdit && minorGatedCreate && consentChecked && (
+          <p className="text-sm text-muted-foreground">
+            {guardianVerifiedForCreate
+              ? t('u18.guardian_verified_for_create', 'Guardian verified. You can now create your profile.')
+              : t('u18.guardian_pending_for_create', "You're under 18 — your guardian must verify with a one-time code before you can create this profile.")}
+          </p>
+        )}
+        <Button variant="ghost" onClick={handleBack}>
+          {t('common.cancel')}
+        </Button>
+        <button
+          type="submit"
+          form="profile-form"
+          disabled={submitDisabled}
+          className="h-11 rounded-md bg-brand-cta px-5 font-semibold text-white disabled:opacity-50"
+        >
+          {primaryLabel}
+        </button>
+      </div>
+    </div>
+  );
+
   return (
     <PageShell
       variant="form"
       title={isEdit ? t('profile.edit_heading', { role: roleLabel }) : t('profile.create_heading')}
       onBack={handleBack}
+      footerSlot={actionBar}
       {...shellSidebarProps}
     >
       <div className="mx-auto max-w-[1040px]">
@@ -848,10 +904,9 @@ export function ProfileFormPage() {
           </div>
         </div>
 
-        {/* Form card — connects flush to the hero strip. Bottom padding clears
-            the sticky action bar so the last fields aren't hidden behind it. */}
+        {/* Form card — connects flush to the hero strip. */}
         <Card className="rounded-t-none border-t-0 shadow-lg">
-          <CardContent className="pt-6 pb-24">
+          <CardContent className="pt-6">
             {/* #376: motivating "why complete your profile" prompt — per-domain
                 from network.json (role-specific), with a generic i18n fallback. */}
             {showCompletionPrompt && selectedDomain && (
@@ -904,66 +959,6 @@ export function ProfileFormPage() {
 
           </CardContent>
         </Card>
-
-        {/* Option B — one sticky action bar for BOTH create and edit. The submit
-            is a `type=submit form=profile-form` button, so it drives the single
-            (hidden-submit) SchemaForm. Create keeps its exact consent gate: the
-            ConsentCheckbox + minor status live in the consent slot, and the same
-            guardian interstitial/OTP still promotes the fresh item to live. */}
-        <div
-          data-testid="profile-action-bar"
-          className="sticky bottom-0 z-30 mt-4 flex flex-wrap items-center gap-3 rounded-xl border bg-background p-3 shadow-[0_-6px_20px_rgba(15,23,42,0.06)] sm:px-4"
-        >
-          <div className="flex items-center gap-2 text-sm text-muted-foreground">
-            {formValid ? (
-              <span className="text-emerald-600">{t('profile.required_complete')}</span>
-            ) : (
-              <span className="text-amber-700">{t('profile.fill_required_hint')}</span>
-            )}
-          </div>
-          <div className="ml-auto flex flex-wrap items-center gap-2">
-            {/* Consent slot — shown for CREATE and for EDIT-of-draft (both are
-                the `needsConsent` path). The minor pre-create interstitial is
-                create-only (via `minorGatedCreate`); an edit-of-draft minor is
-                routed through the guardian flow by the accept hook at submit. */}
-            {formValid && needsConsent && (
-              <ConsentCheckbox
-                text={statement}
-                checked={consentChecked}
-                // For a minor on a gated domain, ticking the consent is the
-                // trigger: it fires the guardian OTP BEFORE the profile is
-                // created (no draft is written until "Create profile").
-                onCheckedChange={(v) => {
-                  setConsentChecked(v);
-                  // Don't fire the OTP straight away — show the "you're under 18,
-                  // a code goes to your guardian" interstitial first, then issue
-                  // on confirm.
-                  if (v && minorGatedCreate && !guardianVerifiedForCreate) {
-                    setGuardianConfirmOpen(true);
-                  }
-                }}
-              />
-            )}
-            {!isEdit && minorGatedCreate && consentChecked && (
-              <p className="text-sm text-muted-foreground">
-                {guardianVerifiedForCreate
-                  ? t('u18.guardian_verified_for_create', 'Guardian verified. You can now create your profile.')
-                  : t('u18.guardian_pending_for_create', "You're under 18 — your guardian must verify with a one-time code before you can create this profile.")}
-              </p>
-            )}
-            <Button variant="ghost" onClick={handleBack}>
-              {t('common.cancel')}
-            </Button>
-            <button
-              type="submit"
-              form="profile-form"
-              disabled={submitDisabled}
-              className="h-11 rounded-md bg-brand-cta px-5 font-semibold text-white disabled:opacity-50"
-            >
-              {primaryLabel}
-            </button>
-          </div>
-        </div>
 
         <WalletImportModal
           open={isWalletModalOpen}

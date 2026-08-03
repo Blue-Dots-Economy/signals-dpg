@@ -83,12 +83,20 @@ let consentConfigResult: { config: typeof CONSENT_CONFIG | null; isLoading: bool
 // single <main> + <h1>(title) so the page's own content structure is testable
 // without pulling in the real sidebar/top-bar (covered by Tasks 1–2 tests).
 vi.mock('@/components/layout/page-shell', () => ({
-  PageShell: (p: { variant?: string; title?: string; children: React.ReactNode }) => (
+  PageShell: (p: {
+    variant?: string;
+    title?: string;
+    children: React.ReactNode;
+    footerSlot?: React.ReactNode;
+  }) => (
     <div data-testid="shell" data-variant={p.variant}>
       <main id="main-content">
         <h1>{p.title}</h1>
         {p.children}
       </main>
+      {/* The action bar now lives in the shell's pinned footer, not in the
+          scroll area — render it so the tests still see `profile-action-bar`. */}
+      {p.footerSlot}
     </div>
   ),
 }));
