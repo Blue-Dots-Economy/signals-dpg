@@ -28,9 +28,6 @@ export interface FetchItemsQuery {
   item_instance_url?: string;
   item_schema_url?: string;
   created_by_me?: boolean;
-  /** Include retired profiles (default excludes them). Used by the login-redirect
-   * check so a retired-only user isn't treated as profile-less. */
-  include_retired?: boolean;
   limit?: number;
   offset?: number;
 }
@@ -110,7 +107,6 @@ export async function fetchItems(query: FetchItemsQuery, signal?: AbortSignal): 
   if (query.item_instance_url) params.set('item_instance_url', query.item_instance_url);
   if (query.item_schema_url) params.set('item_schema_url', query.item_schema_url);
   if (query.created_by_me) params.set('created_by_me', 'true');
-  if (query.include_retired) params.set('include_retired', 'true');
   if (query.limit !== undefined) params.set('limit', String(query.limit));
   if (query.offset !== undefined) params.set('offset', String(query.offset));
 
