@@ -17,6 +17,7 @@ import { PageShell } from '@/components/layout/page-shell';
 import { ContentHeader } from '@/components/layout/content-header';
 import { GuestHero } from '@/components/layout/guest-hero';
 import { CardGrid } from '@/components/cards/card-grid';
+import { useActions } from '@/hooks/use-actions';
 import { DomainCard } from '@/components/cards/domain-card';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Button } from '@/components/ui/button';
@@ -651,6 +652,31 @@ export function HomePage() {
     if (!myItems.length) return null;
     return myItems.find((i) => i.item_id === activeProfileId) ?? myItems[0] ?? null;
   }, [myItems, activeProfileId]);
+
+  // Item ids the active profile already has an OPEN action with — either
+  // direction (I initiated to them, or they to me). Their Connect/Apply CTA is
+  // disabled: at most one open action per pair (#370/#422). The server cap is
+  // the real guard; this just pre-empts the click. "Open" = not a terminal
+  // status; the same terminal set the backend frees a pair on.
+  const { data: myActionsData } = useActions('all', { enabled: !!user });
+  const openActionItemIds = React.useMemo(() => {
+    const TERMINAL = new Set([
+      'accepted',
+      'completed',
+      'cancelled',
+      'rejected',
+      'declined',
+      'withdrawn',
+    ]);
+    const set = new Set<string>();
+    if (!activeProfileId) return set;
+    for (const a of myActionsData?.actions ?? []) {
+      if (TERMINAL.has(a.action_status)) continue;
+      if (a.source_item_id === activeProfileId) set.add(a.target_item_id);
+      else if (a.target_item_id === activeProfileId) set.add(a.source_item_id);
+    }
+    return set;
+  }, [myActionsData, activeProfileId]);
 
   // A draft (incomplete) profile can't apply/connect — the API rejects it with
   // PROFILE_NOT_LIVE. Prompt the user to finish their profile (with a shortcut
@@ -2406,7 +2432,9 @@ export function HomePage() {
                             id={item.id}
                             selectMode={browseSelection.selectMode}
                             selected={browseSelection.isSelected(item.id)}
-                            selectable={browseSelection.canSelect(item.domain ?? '')}
+                            // Not selectable if an action is already open for this
+                            // pair (one-open-per-pair, #370/#422) — mirrors the CTA.
+                            selectable={browseSelection.canSelect(item.domain ?? '') && !openActionItemIds.has(item.id)}
                             onToggle={(id) => browseSelection.toggle(id, item.domain ?? '')}
                           >
                             {/* #394: same rule as the single-domain CardGrid so all
@@ -2427,6 +2455,8 @@ export function HomePage() {
                                 }
                                 localItem={myItem}
                                 networkItem={networkItem}
+                                actionsDisabled={openActionItemIds.has(item.id)}
+                                actionsDisabledReason={t('actions.pair_open_disabled', 'A request is already open with this profile.')}
                               />
                             ) : (
                               <DomainCard
@@ -2442,6 +2472,8 @@ export function HomePage() {
                                 }
                                 localItem={myItem}
                                 networkItem={networkItem}
+                                actionsDisabled={openActionItemIds.has(item.id)}
+                                actionsDisabledReason={t('actions.pair_open_disabled', 'A request is already open with this profile.')}
                               />
                             )}
                           </SelectableCard>
@@ -2482,6 +2514,8 @@ export function HomePage() {
                   localItem={myItem}
                   networkId={network?.id}
                   selectedDomain={selectedDomain}
+                  openActionItemIds={openActionItemIds}
+                  openActionReason={t('actions.pair_open_disabled', 'A request is already open with this profile.')}
                   selection={browseSelection}
                 />
                 <div ref={singleDomainSentinelRef} aria-hidden="true" className="h-px w-full" />

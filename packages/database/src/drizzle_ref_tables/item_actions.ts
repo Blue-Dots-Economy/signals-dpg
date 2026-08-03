@@ -61,5 +61,19 @@ export const item_actions = pgTable(
       table.target_item_owner,
       table.updated_at
     ),
+    // Per-pair action cap (#370/#422): the open-action recount matches the
+    // unordered {source, target} pair from either direction. Both orderings are
+    // indexed so `(source=A AND target=B) OR (source=B AND target=A)` is
+    // index-served either way. Created by drizzle/0010_action_pair_open_indexes.sql.
+    index('item_actions_pair_src_tgt_idx').on(
+      table.partition_network,
+      table.source_item_id,
+      table.target_item_id
+    ),
+    index('item_actions_pair_tgt_src_idx').on(
+      table.partition_network,
+      table.target_item_id,
+      table.source_item_id
+    ),
   ]
 );
