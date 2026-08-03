@@ -9,15 +9,23 @@ const useItemDetail = vi.fn();
 vi.mock('@/hooks/use-item-detail', () => ({ useItemDetail: (...a: unknown[]) => useItemDetail(...a) }));
 
 const resolvedNetwork = {
-  domains: [{ id: 'seeker', description: 'seekers', card: { title_field: 'name' }, item_schemas: { 'profile_1.0': { type: 'object', properties: { name: { type: 'string', title: 'Name' } } } } }],
+  display_name: 'Blue Dot',
+  domains: [
+    {
+      id: 'seeker',
+      description: 'seekers',
+      card: { title_field: 'name' },
+      item_schemas: {
+        'profile_1.0': {
+          type: 'object',
+          properties: { name: { type: 'string', title: 'Name' }, city: { type: 'string', title: 'City' } },
+        },
+      },
+    },
+  ],
 };
 const useResolvedNetwork = vi.fn();
 vi.mock('@/hooks/use-network-config', () => ({ useResolvedNetwork: (...a: unknown[]) => useResolvedNetwork(...a) }));
-
-// Render the real DomainCard would pull in many deps; stub it to a marker.
-vi.mock('@/components/cards/domain-card', () => ({
-  DomainCard: ({ data }: { data: Record<string, unknown> }) => <div data-testid="domain-card">{String(data.name ?? '')}</div>,
-}));
 
 const ID = '9b545eb9-5406-4bce-bc71-0cdac4b63bd0';
 
@@ -37,10 +45,23 @@ beforeEach(() => {
 });
 
 describe('PublicProfilePage', () => {
-  it('renders the profile card for a live item', () => {
-    useItemDetail.mockReturnValue({ item: { item_state: { name: 'Asha' }, lifecycle_status: 'live' }, isLoading: false, isError: false });
+  it('renders the resolved title and field labels for a live item', () => {
+    useItemDetail.mockReturnValue({
+      item: {
+        item_id: ID,
+        item_network: 'blue_dot',
+        item_domain: 'seeker',
+        item_type: 'profile_1.0',
+        item_state: { name: 'Asha', city: 'Pune' },
+        lifecycle_status: 'live',
+      },
+      isLoading: false,
+      isError: false,
+    });
     renderAt(`/p/blue_dot/seeker/profile_1.0/${ID}`);
-    expect(screen.getByTestId('domain-card')).toHaveTextContent('Asha');
+    expect(screen.getByRole('heading', { name: 'Asha' })).toBeInTheDocument();
+    expect(screen.getByText('City')).toBeInTheDocument();
+    expect(screen.getByText('Pune')).toBeInTheDocument();
   });
 
   it('shows the loading state', () => {

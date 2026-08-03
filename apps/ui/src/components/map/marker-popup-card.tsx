@@ -8,6 +8,7 @@ import type { Item } from '@/lib/item-api';
 import { useMatchScore } from '@/hooks/use-match-score';
 import { MatchScoreModal } from '@/components/match-score/match-score-modal';
 import { ItemCard } from '@/components/cards/item-card';
+import { ShareProfileButton } from '@/components/share/share-profile-button';
 
 interface PrecisionInfo {
   labelKey: string;
@@ -116,6 +117,12 @@ export function MarkerPopupCard({
         domainLabel={marker.domain ? titleCase(marker.domain) : undefined}
         precisionLabel={t(precisionInfo.labelKey)}
         actions={actionButtons}
+        headerAction={
+          <ShareProfileButton
+            item={networkItem}
+            className="flex h-7 w-7 items-center justify-center rounded-full text-white hover:bg-white/25"
+          />
+        }
       />
 
       {canMatch && (

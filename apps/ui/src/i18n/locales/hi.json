@@ -601,5 +601,9 @@
   "public_profile.error_title": "कुछ गलत हो गया",
   "public_profile.error_body": "हम यह प्रोफ़ाइल लोड नहीं कर सके। कृपया पुनः प्रयास करें।",
   "public_profile.retry": "पुनः प्रयास करें",
+  "public_profile.copy_link": "लिंक कॉपी करें",
+  "public_profile.open_in_app": "ब्लू डॉट्स में खोलें",
+  "public_profile.explore": "ब्लू डॉट्स एक्सप्लोर करें",
+  "public_profile.contact_note": "संपर्क विवरण केवल ब्लू डॉट्स पर जुड़ने के बाद साझा किए जाते हैं।",
   "a11y.skip_to_content": "सामग्री पर जाएं"
 }
