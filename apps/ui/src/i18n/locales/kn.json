@@ -51,6 +51,7 @@
   "auth.toast_signup_disabled": "ಬಳಕೆದಾರರು ಅಸ್ತಿತ್ವದಲ್ಲಿಲ್ಲ",
   "auth.toast_signup_disabled_desc": "ಆನ್‌ಬೋರ್ಡ್ ಆಗಲು ದಯವಿಟ್ಟು ನಿಮ್ಮ ನಿರ್ವಾಹಕರನ್ನು ಸಂಪರ್ಕಿಸಿ.",
   "auth.signup_disabled_message": "ಬಳಕೆದಾರರು ಅಸ್ತಿತ್ವದಲ್ಲಿಲ್ಲ. ಆನ್‌ಬೋರ್ಡ್ ಆಗಲು ದಯವಿಟ್ಟು ನಿಮ್ಮ ನಿರ್ವಾಹಕರನ್ನು ಸಂಪರ್ಕಿಸಿ.",
+  "actions.pair_open_disabled": "ಈ ಪ್ರೊಫೈಲ್‌ನೊಂದಿಗೆ ಈಗಾಗಲೇ ಒಂದು ವಿನಂತಿ ತೆರೆದಿದೆ.",
   "actions.my_actions_title": "ನನ್ನ ಕ್ರಿಯೆಗಳು",
   "actions.my_actions_subtitle": "ನೀವು ಆರಂಭಿಸಿದ ಮತ್ತು ಸ್ವೀಕರಿಸಿದ ವಿನಂತಿಗಳನ್ನು ನಿರ್ವಹಿಸಿ.",
   "actions.my_actions_back": "ಹಿಂದೆ",

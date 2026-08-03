@@ -32,6 +32,9 @@ interface DomainCardProps {
   selectionMode?: boolean;
   /** When live, shows a Share button in the card header. Full item (for its key). */
   shareItem?: Item | null;
+  /** Disable the action CTA(s) — an open action already exists for this pair (#370/#422). */
+  actionsDisabled?: boolean;
+  actionsDisabledReason?: string;
 }
 
 export function DomainCard({
@@ -52,6 +55,8 @@ export function DomainCard({
   onViewMatchDetails,
   selectionMode = false,
   shareItem,
+  actionsDisabled = false,
+  actionsDisabledReason,
 }: DomainCardProps) {
   if (loading) {
     return (
@@ -94,6 +99,8 @@ export function DomainCard({
             key={action.action_type}
             actionType={action.action_type}
             actionSchema={action}
+            disabled={actionsDisabled}
+            disabledReason={actionsDisabledReason}
             onAction={(type, actionSchema) => {
               onAction?.(type, actionSchema);
             }}

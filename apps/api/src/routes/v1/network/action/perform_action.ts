@@ -12,6 +12,12 @@ import {
   item_actions,
 } from '@dpg/database';
 import { consent_record } from '@api/db/postgres/schema';
+import {
+  assertPairCapAvailable,
+  maxActionsPerPair,
+  terminalStatuses,
+  ActionPairCapError,
+} from '@/services/action_pair_cap';
 import { resolveConsentVersion } from '@/services/consent_version';
 import { apiConfig, getCurrentApiBaseUrl } from '@/config';
 import { getNetworkConfigById } from '@/network_configs';
@@ -93,8 +99,9 @@ export const perform_network_action_handler = async (
   }
 
   let interaction: ReturnType<typeof getActionInteraction>;
+  let networkConfig: Awaited<ReturnType<typeof getNetworkConfigById>>;
   try {
-    const networkConfig = await getNetworkConfigById(
+    networkConfig = await getNetworkConfigById(
       body.target_item.item_network
     );
     interaction = getActionInteraction(networkConfig, {
@@ -213,8 +220,21 @@ export const perform_network_action_handler = async (
   // Action + initiate-consent are written in one transaction so a consent-write
   // failure rolls the action back too (fail-closed — never a PII-revealing
   // action without a consent row). The action event is emitted only after commit.
+  // Pair cap (#370/#422): at most `max_actions_per_pair` (default 1) OPEN
+  // actions between these two items, bidirectional + type-agnostic. Enforced
+  // HERE (the single write endpoint every perform — self, proxied, or
+  // inter-instance — funnels through) inside the insert txn with a pair-scoped
+  // advisory lock, so concurrent submits can't both land.
+  let capExceeded = false;
   const created = await db
     .transaction(async (tx) => {
+      await assertPairCapAvailable(tx, {
+        network: body.target_item.item_network,
+        sourceItemId: body.source_item.item_id,
+        targetItemId: body.target_item.item_id,
+        cap: maxActionsPerPair(networkConfig),
+        terminal: terminalStatuses(networkConfig),
+      });
       const [row] = await tx
         .insert(item_actions)
         .values({
@@ -288,9 +308,20 @@ export const perform_network_action_handler = async (
       return row;
     })
     .catch((err: unknown) => {
+      if (err instanceof ActionPairCapError) {
+        capExceeded = true;
+        return null;
+      }
       if (err instanceof ConsentWriteError) return null;
       throw err;
     });
+
+  if (capExceeded) {
+    return reply.code(409).send({
+      error: 'ACTION_LIMIT_REACHED',
+      message: 'An active request already exists between these two profiles.',
+    });
+  }
 
   if (created === null) {
     request.log.error(
