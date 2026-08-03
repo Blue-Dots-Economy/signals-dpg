@@ -17,6 +17,7 @@ import {
   isValidPhoneNumber,
   signupWithKeycloak,
   type AuthIdentifier,
+  type LoginChannel,
 } from '@/lib/auth-api';
 import { fetchConsentConfigs, getConsentStatusByIdentifier } from '@/lib/consent-api';
 import { mergeConsentConfig } from '@/hooks/use-consent-config';
@@ -111,10 +112,24 @@ export function KeycloakLoginPanel() {
   // as ?redirect=, and it must survive the round-trip through Keycloak.
   const redirectTo = searchParams.get('redirect') ?? '/';
 
-  const channels = config?.loginChannels ?? ['phone', 'email'];
+  const channels: LoginChannel[] = config?.loginChannels ?? ['phone', 'email'];
   const canSignup = config?.selfSignupAllowed === true;
-  // Phone first when both are enabled, matching the OTP screen's default.
-  const signupChannel = channels.includes('phone') ? 'phone' : 'email';
+
+  /**
+   * Which identifier the new account is created with. Phone is the default when
+   * both channels are enabled, matching the OTP screen — but it is a *default*,
+   * not the only option: a signup may use either channel the instance allows,
+   * exactly as `POST /api/v1/auth/signup` accepts either.
+   */
+  const [signupChannel, setSignupChannel] = useState<LoginChannel>('phone');
+
+  // The config arrives after first paint, so the default above can be a channel
+  // this instance doesn't run. Same correction the OTP screen applies to `mode`.
+  useEffect(() => {
+    if (config && !config.loginChannels.includes(signupChannel)) {
+      setSignupChannel(config.loginChannels[0]);
+    }
+  }, [config, signupChannel]);
 
   // Domain options come from the served network's own schema — not user input —
   // so a signup can only ever name a domain the network actually defines. The
@@ -156,7 +171,9 @@ export function KeycloakLoginPanel() {
       });
       return;
     }
-    if (signupChannel === 'email' && !email.trim()) {
+    // Same shape check the OTP screen applies — the API takes `z.email()`, so a
+    // malformed address is a 400 the user can't act on if it gets that far.
+    if (signupChannel === 'email' && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) {
       toast.error(t('auth.toast_invalid_email'), {
         description: t('auth.toast_invalid_email_desc'),
       });
@@ -415,6 +432,34 @@ export function KeycloakLoginPanel() {
         </div>
       ) : (
         <div className="space-y-4">
+          {/* Phone / Email pill toggle — the account can be created against
+              either identifier, so it is only hidden when the instance runs a
+              single channel and there is nothing to choose. Mirrors the OTP
+              screen's toggle. */}
+          {channels.length > 1 && (
+            <div className="flex rounded-full border border-border bg-muted p-1 text-sm">
+              {channels.map((c) => (
+                <button
+                  key={c}
+                  type="button"
+                  disabled={busy}
+                  onClick={() => {
+                    setSignupChannel(c);
+                    setError(null);
+                  }}
+                  className={[
+                    'flex-1 rounded-full py-1.5 font-medium transition-colors capitalize',
+                    signupChannel === c
+                      ? 'bg-background text-foreground shadow-sm'
+                      : 'text-muted-foreground hover:text-foreground',
+                  ].join(' ')}
+                >
+                  {c}
+                </button>
+              ))}
+            </div>
+          )}
+
           <div className="space-y-1.5">
             <Label htmlFor="signup-name">{t('auth.label_name')}</Label>
             <Input

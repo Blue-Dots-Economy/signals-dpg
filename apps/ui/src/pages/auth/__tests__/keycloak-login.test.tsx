@@ -17,11 +17,13 @@ const CURRENT_YEAR = new Date().getFullYear();
 let keycloakEnabled = false;
 let configLoading = false;
 let signupAllowed = true;
+/** Which channels the instance runs — drives the signup form's identifier choice. */
+let loginChannels: Array<'phone' | 'email'> = ['phone', 'email'];
 vi.mock('@/hooks/use-auth-config', () => ({
   useAuthConfig: () => ({
     config: {
       selfSignupAllowed: signupAllowed,
-      loginChannels: ['phone', 'email'],
+      loginChannels,
       authProvider: keycloakEnabled ? 'keycloak' : 'betterauth',
       keycloak: keycloakEnabled
         ? { url: 'http://localhost:8080', realm: 'bluedots', clientId: 'signals-ui' }
@@ -172,6 +174,7 @@ beforeEach(() => {
   keycloakEnabled = false;
   configLoading = false;
   signupAllowed = true;
+  loginChannels = ['phone', 'email'];
   startKeycloakLogin.mockClear().mockResolvedValue(undefined);
   completeKeycloakLogin.mockClear().mockResolvedValue(undefined);
   completeOidcLogin.mockClear().mockResolvedValue({ accessToken: 'tok', returnTo: undefined });
@@ -450,6 +453,108 @@ describe('KeycloakLoginPanel — existing vs new user chooser', () => {
     await userEvent.click(screen.getByRole('button', { name: /create account/i }));
 
     await waitFor(() => expect(startKeycloakLogin).toHaveBeenCalled());
+  });
+});
+
+/**
+ * The signup form used to hard-code phone whenever the phone channel was on, so
+ * an email-only person could not create an account on a phone+email instance —
+ * even though `POST /api/v1/auth/signup` has always accepted either identifier.
+ */
+describe('KeycloakLoginPanel — signup identifier channel', () => {
+  beforeEach(() => {
+    keycloakEnabled = true;
+  });
+
+  it('defaults to phone but offers email when both channels are on', async () => {
+    renderAt(<LoginPage />);
+    await userEvent.click(await screen.findByText(/new here/i));
+
+    expect(screen.getByLabelText(/mobile number/i)).toBeTruthy();
+    expect(screen.queryByLabelText(/^email$/i)).toBeNull();
+    // Both options are offered, not just the default.
+    expect(screen.getByRole('button', { name: /^phone$/i })).toBeTruthy();
+    expect(screen.getByRole('button', { name: /^email$/i })).toBeTruthy();
+  });
+
+  it('creates the account with an email when email is picked', async () => {
+    renderAt(<LoginPage />);
+    await userEvent.click(await screen.findByText(/new here/i));
+
+    await userEvent.click(screen.getByRole('button', { name: /^email$/i }));
+    await userEvent.type(screen.getByLabelText(/your name/i), 'Asha Rao');
+    await userEvent.type(screen.getByLabelText(/^email$/i), 'asha@example.com');
+    await userEvent.click(screen.getByRole('button', { name: /create account/i }));
+
+    await waitFor(() => expect(signupWithKeycloak).toHaveBeenCalled());
+    const [body] = signupWithKeycloak.mock.calls[0];
+    expect(body.email).toBe('asha@example.com');
+    expect(body.phoneNumber).toBeUndefined();
+    await waitFor(() => expect(startKeycloakLogin).toHaveBeenCalled());
+  });
+
+  it('sends only the phone when phone is picked, even after visiting email', async () => {
+    renderAt(<LoginPage />);
+    await userEvent.click(await screen.findByText(/new here/i));
+
+    // A half-typed address on the other tab must not leak onto the request.
+    await userEvent.click(screen.getByRole('button', { name: /^email$/i }));
+    await userEvent.type(screen.getByLabelText(/^email$/i), 'typo@');
+    await userEvent.click(screen.getByRole('button', { name: /^phone$/i }));
+    await userEvent.type(screen.getByLabelText(/your name/i), 'Asha Rao');
+    await userEvent.type(screen.getByLabelText(/mobile number/i), '9876543210');
+    await userEvent.click(screen.getByRole('button', { name: /create account/i }));
+
+    await waitFor(() => expect(signupWithKeycloak).toHaveBeenCalled());
+    const [body] = signupWithKeycloak.mock.calls[0];
+    expect(body.phoneNumber).toContain('9876543210');
+    expect(body.email).toBeUndefined();
+  });
+
+  it('refuses a malformed email instead of letting the API 400 it', async () => {
+    renderAt(<LoginPage />);
+    await userEvent.click(await screen.findByText(/new here/i));
+
+    await userEvent.click(screen.getByRole('button', { name: /^email$/i }));
+    await userEvent.type(screen.getByLabelText(/your name/i), 'Asha Rao');
+    await userEvent.type(screen.getByLabelText(/^email$/i), 'asha@example');
+    await userEvent.click(screen.getByRole('button', { name: /create account/i }));
+
+    expect(signupWithKeycloak).not.toHaveBeenCalled();
+  });
+
+  it('shows the email field with no toggle on an email-only instance', async () => {
+    loginChannels = ['email'];
+
+    renderAt(<LoginPage />);
+    await userEvent.click(await screen.findByText(/new here/i));
+
+    expect(screen.getByLabelText(/^email$/i)).toBeTruthy();
+    expect(screen.queryByLabelText(/mobile number/i)).toBeNull();
+    expect(screen.queryByRole('button', { name: /^phone$/i })).toBeNull();
+
+    await userEvent.type(screen.getByLabelText(/your name/i), 'Asha Rao');
+    await userEvent.type(screen.getByLabelText(/^email$/i), 'asha@example.com');
+    await userEvent.click(screen.getByRole('button', { name: /create account/i }));
+
+    await waitFor(() => expect(signupWithKeycloak).toHaveBeenCalled());
+    expect(signupWithKeycloak.mock.calls[0][0].email).toBe('asha@example.com');
+  });
+
+  it('keys the guardian capture on the email for a minor signing up by email', async () => {
+    renderAt(<LoginPage />);
+    await userEvent.click(await screen.findByText(/new here/i));
+
+    await userEvent.click(screen.getByRole('button', { name: /^email$/i }));
+    await userEvent.type(screen.getByLabelText(/your name/i), 'Minor Kid');
+    await userEvent.type(screen.getByLabelText(/^email$/i), 'kid@example.com');
+    await userEvent.click(screen.getByRole('button', { name: /seeker/i }));
+    await userEvent.type(screen.getByLabelText(/date of birth/i), `${CURRENT_YEAR - 15}-04-02`);
+    await userEvent.click(screen.getByRole('button', { name: /create account/i }));
+
+    const flow = await screen.findByTestId('signup-guardian-flow');
+    expect(flow.getAttribute('data-identifier')).toBe('kid@example.com');
+    expect(signupWithKeycloak).not.toHaveBeenCalled();
   });
 });
 
