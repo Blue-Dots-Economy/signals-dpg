@@ -964,6 +964,9 @@ export function ProfileFormPage() {
                 formData={initialData ?? undefined}
                 hideSubmit
                 onValidityChange={setFormValid}
+                // The page heading is the hero <h1>; render section titles as
+                // <h2> so the heading chain (h1 → h2) has no skip.
+                sectionHeadingLevel={2}
                 domainId={selectedDomain ?? undefined}
                 networkId={network?.id}
                 formContext={{

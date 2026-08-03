@@ -127,11 +127,12 @@ describe('ProfileFormPage landmarks + heading order (W5.4a)', () => {
     await waitFor(() => expect(screen.getAllByRole('heading', { level: 1 })).toHaveLength(1));
   });
 
-  it('has no heading-level skip once the shared SchemaForm renders its <h3> section titles', async () => {
+  it('has no heading-level skip: hero <h1> then the SchemaForm section title <h2>', async () => {
     // Reproduces the real page: a domain whose schema actually has fields, so
-    // SchemaForm mounts and renders a section title as <h3> (schema-form.tsx).
-    // Before the fix the hero title was promoted all the way to <h1>, which
-    // together with this <h3> is a level skip (h1 -> h3, no h2 in between).
+    // SchemaForm mounts and renders a section title. The app-bar title was
+    // dropped (it duplicated the hero), so the hero is the page <h1> and the
+    // form's section titles render as <h2> (sectionHeadingLevel=2) — h1 → h2,
+    // no skip.
     currentNetwork = buildNetwork([SCHEMA_DOMAIN]);
     getServedScope.mockReturnValue({ network: 'blue_dot', domains: ['seeker'] });
     await renderPage();
@@ -141,12 +142,10 @@ describe('ProfileFormPage landmarks + heading order (W5.4a)', () => {
     const headings = screen.getAllByRole('heading');
     const levels = headings.map((h) => Number(h.tagName.slice(1)));
 
-    // Sanity: the chain we're actually asserting on is present (an h1, an h2,
-    // and the section's h3) — otherwise a missing element could make the
-    // no-skip check below pass vacuously.
+    // Sanity: the chain we assert on is present (hero <h1> + section <h2>) so the
+    // no-skip check below can't pass vacuously.
     expect(levels).toContain(1);
     expect(levels).toContain(2);
-    expect(levels).toContain(3);
 
     for (let i = 1; i < levels.length; i++) {
       expect(levels[i] - levels[i - 1]).toBeLessThanOrEqual(1);
