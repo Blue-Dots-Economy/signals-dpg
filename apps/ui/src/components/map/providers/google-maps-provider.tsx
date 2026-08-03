@@ -6,6 +6,7 @@ import { useTranslation } from 'react-i18next';
 import {
   AdvancedMarker,
   APIProvider,
+  ColorScheme,
   InfoWindow,
   Map,
   useAdvancedMarkerRef,
@@ -16,6 +17,7 @@ import { MarkerClusterer, type Renderer, type Cluster } from '@googlemaps/marker
 import type { MapMarker, MapProviderProps, MapViewport } from '@/engine/types';
 import { registerMapProvider } from '@/engine/map/map-registry';
 import { useIsMobile } from '@/hooks/use-mobile';
+import { useThemeMode } from '@/theme/mode-provider';
 import { getIconForDomain } from '../domain-icons';
 import { tallyDomains } from '../cluster-breakdown';
 import { MarkerPopupCard } from '../marker-popup-card';
@@ -693,6 +695,31 @@ function ClustererManager({
 
 // ─── Main provider ───────────────────────────────────────────────────────────
 
+// Lives inside <Map> so it can call useMap(). Records the live camera
+// (center + zoom) on every 'idle' into a ref owned by GoogleMapProvider.
+// `colorScheme` is a construction-time Google Maps option, so switching
+// light/dark remounts <Map> (via its `key`); this lets the remounted map
+// restore the user's current view through defaultCenter/defaultZoom instead
+// of snapping back to the initial center.
+function CameraTracker({
+  cameraRef,
+}: {
+  cameraRef: React.MutableRefObject<{ center: { lat: number; lng: number }; zoom: number } | null>;
+}) {
+  const map = useMap();
+  React.useEffect(() => {
+    if (!map) return;
+    const update = () => {
+      const c = map.getCenter();
+      const z = map.getZoom();
+      if (c && z != null) cameraRef.current = { center: { lat: c.lat(), lng: c.lng() }, zoom: z };
+    };
+    const listener = map.addListener('idle', update);
+    return () => listener.remove();
+  }, [map, cameraRef]);
+  return null;
+}
+
 export function GoogleMapProvider({
   center,
   zoom,
@@ -709,8 +736,12 @@ export function GoogleMapProvider({
 }: MapProviderProps) {
   const { t } = useTranslation();
   const isMobile = useIsMobile();
+  const { resolved: themeMode } = useThemeMode();
   const [activeMarker, setActiveMarker] = React.useState<MapMarker | null>(null);
   const apiKey = getRuntimeEnv('VITE_GOOGLE_MAPS_API_KEY');
+  // Last live camera, so a colorScheme-driven <Map> remount (see below) keeps
+  // the user's current view instead of resetting to the initial center.
+  const liveCameraRef = React.useRef<{ center: { lat: number; lng: number }; zoom: number } | null>(null);
 
   // Closes the open marker popup (both the mobile portal overlay and the
   // desktop InfoWindow key off `activeMarker`) when the caller bumps
@@ -741,8 +772,14 @@ export function GoogleMapProvider({
   return (
     <APIProvider apiKey={apiKey}>
       <Map
-        defaultCenter={{ lat: center[0], lng: center[1] }}
-        defaultZoom={zoom}
+        // colorScheme is a construction-time option, so a light↔dark switch
+        // remounts <Map> via this key; reuseMaps' cache key already includes
+        // colorScheme, so the correctly-coloured instance is created/reused.
+        // CameraTracker + liveCameraRef preserve the view across the remount.
+        key={`gmap-${themeMode}`}
+        colorScheme={themeMode === 'dark' ? ColorScheme.DARK : ColorScheme.LIGHT}
+        defaultCenter={liveCameraRef.current?.center ?? { lat: center[0], lng: center[1] }}
+        defaultZoom={liveCameraRef.current?.zoom ?? zoom}
         gestureHandling="greedy"
         mapId="dpg-items-map"
         reuseMaps
@@ -773,6 +810,7 @@ export function GoogleMapProvider({
          */}
         <MapViewController center={center} zoom={zoom} initialViewSet={initialViewSet} focusNonce={focusNonce} />
         {onViewportChange && <ViewportReporter onViewportChange={onViewportChange} />}
+        <CameraTracker cameraRef={liveCameraRef} />
         <ClustererManager
           markers={markers}
           activeMarkerId={activeMarker?.id ?? null}

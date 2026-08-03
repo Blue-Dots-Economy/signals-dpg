@@ -1,6 +1,7 @@
 import * as React from 'react';
 import { useTranslation } from 'react-i18next';
 import type { RJSFSchema } from '@rjsf/utils';
+import type { DotCardConfig } from '@/engine/types';
 import {
   DialogHeader,
   DialogTitle,
@@ -209,6 +210,15 @@ export function ProfileCardModal({
     return (domain?.item_schemas?.[item.item_type] as RJSFSchema | undefined) ?? null;
   }, [item, networkConfig]);
 
+  // Per-domain card config (title_field / avatar_from / default_fields). Without
+  // it the card falls back to a best-guess title ("Untitled") and generic
+  // fields instead of the network's configured heading + fields.
+  const cardConfig = React.useMemo<DotCardConfig | null>(() => {
+    if (!item || !networkConfig) return null;
+    const domain = networkConfig.domains.find((d) => d.id === item.item_domain);
+    return (domain?.card as DotCardConfig | undefined) ?? null;
+  }, [item, networkConfig]);
+
   // Description keyed off the resolved mode. Before the fetch settles, guess
   // from the expected mode so the copy doesn't flash the wrong line.
   const descKey =
@@ -250,7 +260,7 @@ export function ProfileCardModal({
         {/* A retired profile shows only the notice (in the description) — its
             leftover non-PII fields must not be rendered as a card (#347). */}
         {state.status === 'success' && state.mode !== 'reveal_retired' && item && schema && (
-          <DomainCard schema={schema} schemaName={item.item_domain} data={item.item_state} />
+          <DomainCard schema={schema} cardConfig={cardConfig} schemaName={item.item_domain} data={item.item_state} />
         )}
 
         {state.status === 'success' && state.mode !== 'reveal_retired' && item && !schema && (

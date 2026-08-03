@@ -20,7 +20,7 @@
  * describe.skip'd so CI without a live DB stays green.
  */
 
-import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { describe, it, expect, beforeAll, afterEach, afterAll } from 'vitest';
 import Fastify, { type FastifyInstance } from 'fastify';
 import {
   serializerCompiler,
@@ -287,6 +287,15 @@ describeIf(`consent flow integration (purple_dot/connect)${
       createdAt: now,
       updatedAt: now,
     });
+  });
+
+  // One open action per pair (#370/#422): the cases file on the same seeded
+  // alice→bob pair, so clear the seeded participants' actions between tests
+  // (each `it` is self-contained). Scoped to seeded owners.
+  afterEach(async () => {
+    await db
+      .delete(itemActionsTable)
+      .where(inArray(itemActionsTable.source_item_owner, seeded_participant_ids));
   });
 
   afterAll(async () => {

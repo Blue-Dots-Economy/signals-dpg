@@ -254,6 +254,9 @@ export const NetworkConfigSchema = z.object({
   // (unpause) is always allowed so a profile paused before the feature was
   // turned off can still be recovered. Defaults on. (#346)
   pause_enabled: z.boolean().optional().default(true),
+  // Max concurrent OPEN actions between any two items — bidirectional, across
+  // action types (#370/#422). Omitted → 1 (one open apply/connect per pair).
+  max_actions_per_pair: z.number().int().positive().optional().default(1),
   domains: NetworkDomainSchema.array().default([]),
   instances: NetworkInstanceSchema.array().default([]),
   cross_network_origins: z

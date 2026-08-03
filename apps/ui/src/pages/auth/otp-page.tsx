@@ -19,7 +19,7 @@ import { setStoredSignupDomain, type SignupExtras } from '@/lib/signup-domain';
 import { setUserDomains } from '@/lib/user-api';
 import { fetchMyProfilesLite } from '@/lib/login-profiles';
 import { resolvePostLoginRedirect } from '@/lib/post-login-route';
-import { getStoredActiveProfileId } from '@/lib/active-profile-storage';
+import { getStoredActiveProfileId } from '@/lib/active-profile';
 
 interface AuthState extends AuthIdentifier {
   userExists: boolean;

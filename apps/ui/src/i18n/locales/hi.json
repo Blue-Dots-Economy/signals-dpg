@@ -51,6 +51,7 @@
   "auth.toast_signup_disabled": "उपयोगकर्ता मौजूद नहीं है",
   "auth.toast_signup_disabled_desc": "कृपया ऑनबोर्ड होने के लिए अपने व्यवस्थापक से संपर्क करें।",
   "auth.signup_disabled_message": "उपयोगकर्ता मौजूद नहीं है। कृपया ऑनबोर्ड होने के लिए अपने व्यवस्थापक से संपर्क करें।",
+  "actions.pair_open_disabled": "इस प्रोफ़ाइल के साथ पहले से ही एक अनुरोध खुला है।",
   "actions.my_actions_title": "मेरी क्रियाएं",
   "actions.my_actions_subtitle": "आपने जो अनुरोध शुरू किए और जो मिले हैं, उन्हें प्रबंधित करें।",
   "actions.my_actions_back": "वापस",

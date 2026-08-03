@@ -12,6 +12,7 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { useTranslation } from 'react-i18next';
 import type { MapMarker, MapProviderProps, MapViewport } from '@/engine/types';
 import { registerMapProvider } from '@/engine/map/map-registry';
+import { useThemeMode } from '@/theme/mode-provider';
 import { getIconForDomain } from '../domain-icons';
 import { tallyDomains } from '../cluster-breakdown';
 import { FitBounds } from '../fit-bounds';
@@ -360,6 +361,8 @@ export function LeafletMapProvider({
   onViewportChange,
 }: MapProviderProps) {
   const { t } = useTranslation();
+  const { resolved: themeMode } = useThemeMode();
+  const isDark = themeMode === 'dark';
   return (
     <MapContainer
       center={center}
@@ -367,9 +370,20 @@ export function LeafletMapProvider({
       className="h-full w-full rounded-lg"
       scrollWheelZoom
     >
+      {/* Dark basemap (CARTO dark_all) in dark mode, light OSM otherwise. `key`
+          forces a clean tile-layer swap on theme change. */}
       <TileLayer
-        attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
-        url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+        key={isDark ? 'dark' : 'light'}
+        attribution={
+          isDark
+            ? '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>'
+            : '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+        }
+        url={
+          isDark
+            ? 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png'
+            : 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png'
+        }
       />
       {/*
        * In viewport-markers mode (onViewportChange provided) the query itself

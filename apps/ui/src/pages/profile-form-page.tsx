@@ -20,7 +20,7 @@ import { Alert, AlertTitle, AlertDescription } from '@/components/ui/alert';
 import { PageShell } from '@/components/layout/page-shell';
 import { NetworkConstellation } from '@/components/layout/network-constellation';
 import { useMyItems } from '@/hooks/use-my-items';
-import { getStoredActiveProfileId, setStoredActiveProfileId } from '@/lib/active-profile-storage';
+import { getStoredActiveProfileId, setStoredActiveProfileId } from '@/lib/active-profile';
 import type { DotNetworkSchema } from '@/engine/types';
 import { RoleCard } from '@/components/cards/role-card';
 import { useNetworkTheme } from '@/theme/theme-provider';
@@ -646,6 +646,14 @@ export function ProfileFormPage() {
         }
 
         const created = await createItem(createPayload);
+        // Make the freshly-created profile the active one so the home sidebar
+        // selects it (and the discover list anchors to it) instead of keeping
+        // the previously-stored profile. Home reads this on load.
+        setStoredActiveProfileId(network.id, created.item_id);
+        // NOTE: my-items / browse-items invalidation runs AFTER
+        // finalizeProfileConsent below — NOT here. A minor's item is created
+        // `draft` and only flips to `live` in finalize; invalidating here would
+        // refetch the still-draft status and leave the sidebar showing "Draft".
         if (consentRequired && profileDoc) {
           // This create recorded profile_creation consent. Optimistically add
           // the new item to the profileConsent cache so returning to home sees

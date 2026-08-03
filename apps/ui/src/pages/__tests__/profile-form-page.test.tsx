@@ -154,7 +154,7 @@ vi.mock('@/hooks/use-my-items', () => ({
   useMyItems: () => ({ data: [] as Item[], isLoading: false, isFetched: true }),
 }));
 
-vi.mock('@/lib/active-profile-storage', () => ({
+vi.mock('@/lib/active-profile', () => ({
   getStoredActiveProfileId: () => null,
   setStoredActiveProfileId: vi.fn(),
   clearStoredActiveProfileId: vi.fn(),
