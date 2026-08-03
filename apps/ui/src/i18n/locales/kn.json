@@ -591,5 +591,8 @@
   "u18.dob_label_ym": "ನಿಮ್ಮ ಜನ್ಮ ವರ್ಷ ಆಯ್ಕೆಮಾಡಿ",
   "auth.dob_label_year": "ಜನ್ಮ ವರ್ಷ",
   "auth.dob_year_placeholder": "ವರ್ಷ",
+  "share.button": "ಪ್ರೊಫೈಲ್ ಹಂಚಿಕೊಳ್ಳಿ",
+  "share.copied": "ಲಿಂಕ್ ಕ್ಲಿಪ್‌ಬೋರ್ಡ್‌ಗೆ ನಕಲಿಸಲಾಗಿದೆ",
+  "share.copy_failed": "ಲಿಂಕ್ ನಕಲಿಸಲು ಸಾಧ್ಯವಾಗಲಿಲ್ಲ",
   "a11y.skip_to_content": "ವಿಷಯಕ್ಕೆ ಹೋಗಿ"
 }
