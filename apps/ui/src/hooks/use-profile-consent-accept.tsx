@@ -81,7 +81,10 @@ export function useProfileConsentAccept(): UseProfileConsentAcceptResult {
   // adult accept handler on home-page: seed the profile-consent set directly
   // (not invalidate, so the derived set reflects the accepted profile in the
   // same render the caller closes the prompt) and refresh my-items (a
-  // draft → live promotion leaves the cached list stale).
+  // draft → live promotion leaves the cached list stale). Runs for BOTH the
+  // adult self-accept and the post-guardian-OTP-success branches, so the
+  // success toast lives here — exactly once per completed acceptance — rather
+  // than in each caller.
   const recordAndFinish = React.useCallback(
     (network: string, itemId: string, onDone: () => void) => {
       queryClient.setQueryData<Set<string>>(
@@ -89,9 +92,12 @@ export function useProfileConsentAccept(): UseProfileConsentAcceptResult {
         (prev) => new Set([...(prev ?? []), itemId]),
       );
       void queryClient.invalidateQueries({ queryKey: queryKeys.myItems(network) });
+      toast.success(
+        t('profile.guardian_consent_recorded', 'Consent recorded — your profile is now live'),
+      );
       onDone();
     },
-    [queryClient],
+    [queryClient, t],
   );
 
   // Issue a MINOR's profile_creation guardian OTP for a ref and hand off to the
@@ -199,7 +205,6 @@ export function useProfileConsentAccept(): UseProfileConsentAcceptResult {
           await verifyProfileConsentOtp({ ...pending.ref, otp });
           recordAndFinish(pending.ref.network, pending.ref.item_id, pending.onDone);
           setGuardian(null);
-          toast.success(t('profile.guardian_consent_recorded', 'Guardian confirmed your profile'));
         }}
       />
       {guardianSetup && (

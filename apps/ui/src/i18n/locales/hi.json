@@ -548,7 +548,7 @@
     "guardian_error_same_contact_not_allowed": "आपके अभिभावक का संपर्क आपके अपने संपर्क के समान नहीं हो सकता। कृपया कोई अलग ईमेल या फ़ोन नंबर उपयोग करें।"
   },
   "profile": {
-    "guardian_consent_recorded": "अभिभावक ने आपकी प्रोफ़ाइल की पुष्टि की"
+    "guardian_consent_recorded": "सहमति दर्ज की गई — आपकी प्रोफ़ाइल अब लाइव है"
   },
   "u18.guardian_accept_both_prefix": "अपने वार्ड की ओर से, मैं स्वीकार करता/करती हूँ ",
   "u18.guardian_accept_both_join": " और ",

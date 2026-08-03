@@ -548,7 +548,7 @@
     "guardian_error_same_contact_not_allowed": "ನಿಮ್ಮ ರಕ್ಷಕರ ಸಂಪರ್ಕ ನಿಮ್ಮ ಸ್ವಂತ ಸಂಪರ್ಕದಂತೆ ಇರುವಂತಿಲ್ಲ. ದಯವಿಟ್ಟು ಬೇರೆ ಇಮೇಲ್ ಅಥವಾ ಫೋನ್ ಸಂಖ್ಯೆಯನ್ನು ಬಳಸಿ."
   },
   "profile": {
-    "guardian_consent_recorded": "ರಕ್ಷಕರು ನಿಮ್ಮ ಪ್ರೊಫೈಲ್ ಅನ್ನು ದೃಢೀಕರಿಸಿದ್ದಾರೆ"
+    "guardian_consent_recorded": "ಒಪ್ಪಿಗೆ ದಾಖಲಾಗಿದೆ — ನಿಮ್ಮ ಪ್ರೊಫೈಲ್ ಈಗ ಲೈವ್ ಆಗಿದೆ"
   },
   "u18.guardian_accept_both_prefix": "ನನ್ನ ವಾರ್ಡ್ ಪರವಾಗಿ, ನಾನು ಸ್ವೀಕರಿಸುತ್ತೇನೆ ",
   "u18.guardian_accept_both_join": " ಮತ್ತು ",

@@ -538,7 +538,7 @@
   "profile.guardian_confirm_proceed": "Send code to guardian",
   "auth.dob_title_existing": "Please confirm your birth year",
   "profile": {
-    "guardian_consent_recorded": "Guardian confirmed your profile"
+    "guardian_consent_recorded": "Consent recorded — your profile is now live"
   },
   "u18": {
     "dob_label": "Select date of birth",
