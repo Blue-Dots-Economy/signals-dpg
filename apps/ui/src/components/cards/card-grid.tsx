@@ -120,6 +120,7 @@ export function CardGrid({
               selectionMode={selection?.selectMode ?? false}
               onAction={(type, actionSchema) => onAction?.(item.id, type, actionSchema)}
               onClick={() => onItemClick?.(item.id)}
+              shareItem={networkItem}
             />
           );
 

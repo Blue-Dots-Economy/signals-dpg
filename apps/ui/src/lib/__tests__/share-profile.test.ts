@@ -23,7 +23,6 @@ describe('copyTextToClipboard', () => {
   it('falls back to execCommand when the Clipboard API is absent', async () => {
     vi.stubGlobal('navigator', {});
     const exec = vi.fn().mockReturnValue(true);
-    // @ts-expect-error test shim
     document.execCommand = exec;
     const ok = await copyTextToClipboard('hello');
     expect(ok).toBe(true);
@@ -35,7 +34,6 @@ describe('copyTextToClipboard', () => {
     const writeText = vi.fn().mockRejectedValue(new Error('denied'));
     vi.stubGlobal('navigator', { clipboard: { writeText } });
     const exec = vi.fn().mockReturnValue(true);
-    // @ts-expect-error test shim
     document.execCommand = exec;
     const ok = await copyTextToClipboard('hello');
     expect(ok).toBe(true);
@@ -46,7 +44,6 @@ describe('copyTextToClipboard', () => {
   it('returns false when execCommand returns false', async () => {
     vi.stubGlobal('navigator', {});
     const exec = vi.fn().mockReturnValue(false);
-    // @ts-expect-error test shim
     document.execCommand = exec;
     const ok = await copyTextToClipboard('hello');
     expect(ok).toBe(false);
@@ -58,7 +55,6 @@ describe('copyTextToClipboard', () => {
     const exec = vi.fn().mockImplementation(() => {
       throw new Error('execCommand failed');
     });
-    // @ts-expect-error test shim
     document.execCommand = exec;
     const ok = await copyTextToClipboard('hello');
     expect(ok).toBe(false);
