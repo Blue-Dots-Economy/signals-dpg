@@ -1,4 +1,10 @@
 import { Button } from '@/components/ui/button';
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from '@/components/ui/tooltip';
 import { Plug, Bookmark, Share2 } from 'lucide-react';
 import type { DotActionSchema } from '@/engine/types';
 
@@ -8,7 +14,7 @@ interface ActionButtonProps {
   onAction: (type: string, schema: DotActionSchema) => void;
   /** Disable the CTA (e.g. an action is already open for this pair, #370/#422). */
   disabled?: boolean;
-  /** Tooltip explaining why it's disabled. */
+  /** Shown on hover when disabled, so the user knows why. */
   disabledReason?: string;
 }
 
@@ -28,12 +34,11 @@ export function ActionButton({
   const Icon = actionIcons[actionType] ?? Plug;
   const label = actionType.charAt(0).toUpperCase() + actionType.slice(1);
 
-  return (
+  const button = (
     <Button
       variant="outline"
       size="sm"
       disabled={disabled}
-      title={disabled ? disabledReason : undefined}
       onClick={(e) => {
         e.stopPropagation();
         if (disabled) return;
@@ -44,5 +49,23 @@ export function ActionButton({
       <Icon className="h-3.5 w-3.5 shrink-0" />
       <span className="truncate">{label}</span>
     </Button>
+  );
+
+  // A native `disabled` button suppresses hover/title events, so wrap it in a
+  // span the tooltip can hook onto — that's how the user learns why it's off
+  // (an action is already open for this pair). No reason → plain button.
+  if (!disabled || !disabledReason) return button;
+
+  return (
+    <TooltipProvider>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <span className="inline-flex" tabIndex={0}>
+            {button}
+          </span>
+        </TooltipTrigger>
+        <TooltipContent side="top">{disabledReason}</TooltipContent>
+      </Tooltip>
+    </TooltipProvider>
   );
 }
