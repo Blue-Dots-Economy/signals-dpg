@@ -6,6 +6,10 @@ interface ActionButtonProps {
   actionType: string;
   actionSchema: DotActionSchema;
   onAction: (type: string, schema: DotActionSchema) => void;
+  /** Disable the CTA (e.g. an action is already open for this pair, #370/#422). */
+  disabled?: boolean;
+  /** Tooltip explaining why it's disabled. */
+  disabledReason?: string;
 }
 
 const actionIcons: Record<string, React.ComponentType<{ className?: string }>> = {
@@ -18,6 +22,8 @@ export function ActionButton({
   actionType,
   actionSchema,
   onAction,
+  disabled = false,
+  disabledReason,
 }: ActionButtonProps) {
   const Icon = actionIcons[actionType] ?? Plug;
   const label = actionType.charAt(0).toUpperCase() + actionType.slice(1);
@@ -26,8 +32,11 @@ export function ActionButton({
     <Button
       variant="outline"
       size="sm"
+      disabled={disabled}
+      title={disabled ? disabledReason : undefined}
       onClick={(e) => {
         e.stopPropagation();
+        if (disabled) return;
         onAction(actionType, actionSchema);
       }}
       className="gap-1.5 min-w-0 max-w-full"

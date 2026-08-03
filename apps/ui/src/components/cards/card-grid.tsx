@@ -26,6 +26,12 @@ interface CardGridProps {
   localItem?: Item | null;
   networkId?: string;
   selectedDomain?: string | null;
+  /**
+   * Item ids the active profile already has an OPEN action with (either
+   * direction). Their CTA is disabled — one open action per pair (#370/#422).
+   */
+  openActionItemIds?: Set<string>;
+  openActionReason?: string;
   /** Selection mode passthrough (browse bulk connect). */
   selection?: {
     selectMode: boolean;
@@ -51,6 +57,8 @@ export function CardGrid({
   localItem,
   networkId = '',
   selectedDomain,
+  openActionItemIds,
+  openActionReason,
   selection,
 }: CardGridProps) {
   const gridRef = useEqualRowHeights<HTMLDivElement>();
@@ -94,6 +102,8 @@ export function CardGrid({
           updated_at: new Date().toISOString(),
         };
 
+        const actionsDisabled = openActionItemIds?.has(item.id) ?? false;
+
         const cardElement =
           shouldRenderMatchScoreCard(localItem, networkItem) ? (
             <MatchScoreCard
@@ -108,6 +118,8 @@ export function CardGrid({
               onClick={() => onItemClick?.(item.id)}
               localItem={localItem ?? null}
               networkItem={networkItem}
+              actionsDisabled={actionsDisabled}
+              actionsDisabledReason={openActionReason}
             />
           ) : (
             <DomainCard
@@ -120,6 +132,8 @@ export function CardGrid({
               selectionMode={selection?.selectMode ?? false}
               onAction={(type, actionSchema) => onAction?.(item.id, type, actionSchema)}
               onClick={() => onItemClick?.(item.id)}
+              actionsDisabled={actionsDisabled}
+              actionsDisabledReason={openActionReason}
             />
           );
 

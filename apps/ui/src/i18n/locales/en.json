@@ -70,6 +70,7 @@
   "auth.toast_signup_disabled": "User doesn't exist",
   "auth.toast_signup_disabled_desc": "Please contact your administrator to get onboarded.",
   "auth.signup_disabled_message": "User doesn't exist. Please contact your administrator to get onboarded.",
+  "actions.pair_open_disabled": "A request is already open with this profile.",
   "actions.my_actions_title": "My Actions",
   "actions.my_actions_subtitle": "Manage requests you've initiated and the ones you've received.",
   "actions.my_actions_back": "Back",
