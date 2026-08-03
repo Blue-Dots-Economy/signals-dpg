@@ -26,6 +26,14 @@ export type ProfileConsentAcceptArgs = {
    * after a successful guardian OTP). Consumers use it to set the active profile
    * / clear the prompt. */
   onDone: () => void;
+  /**
+   * Called after the guardian-capture flow resolves — either a guardian was
+   * captured (`onComplete`) or the DOB step reclassified the ward as an adult
+   * (`onNotMinor`). Mirrors home-page's `setU18StatusReload` bumps: the consumer
+   * re-syncs its U18 status so the next accept runs with the corrected `isMinor`.
+   * Optional — a consumer that doesn't track U18 status can omit it.
+   */
+  onGuardianStatusChanged?: () => void;
 };
 
 export interface UseProfileConsentAcceptResult {
@@ -37,10 +45,13 @@ export interface UseProfileConsentAcceptResult {
 }
 
 /** The guardian branch keeps the item ref plus the caller's `onDone` so the OTP
- * success (which happens later, in the dialog) can run the same cache updates. */
+ * success (which happens later, in the dialog) can run the same cache updates,
+ * and the caller's `onGuardianStatusChanged` so the guardian-capture flow can
+ * signal a U18-status re-sync once it resolves. */
 interface GuardianPending {
   ref: ProfileConsentOtpItemRef;
   onDone: () => void;
+  onGuardianStatusChanged?: () => void;
 }
 
 /**
@@ -87,17 +98,17 @@ export function useProfileConsentAccept(): UseProfileConsentAcceptResult {
   // guardian-OTP dialog. No guardian on file (409 GUARDIAN_REQUIRED) → run the
   // capture flow, which re-invokes this for the same ref once a guardian exists.
   const issueOtp = React.useCallback(
-    async (ref: ProfileConsentOtpItemRef, onDone: () => void) => {
+    async (pending: GuardianPending) => {
       try {
-        const { otpSent } = await issueProfileConsentOtp(ref);
-        if (otpSent) setGuardian({ ref, onDone });
+        const { otpSent } = await issueProfileConsentOtp(pending.ref);
+        if (otpSent) setGuardian(pending);
       } catch (err) {
         const status = axios.isAxiosError(err) ? err.response?.status : undefined;
         const code = axios.isAxiosError(err)
           ? (err.response?.data as { error?: string } | undefined)?.error
           : undefined;
         if (status === 409 && code === 'GUARDIAN_REQUIRED') {
-          setGuardianSetup({ ref, onDone });
+          setGuardianSetup(pending);
         } else if (status === 429) {
           toast.error(
             t('u18.guardian_error_rate_limited', 'Too many attempts. Please try again shortly.'),
@@ -139,7 +150,11 @@ export function useProfileConsentAccept(): UseProfileConsentAcceptResult {
             ? isGuardianConsentRequiredDomain(netConfig, args.item.item_domain)
             : true;
           if (gated) {
-            await issueOtp(ref, args.onDone);
+            await issueOtp({
+              ref,
+              onDone: args.onDone,
+              onGuardianStatusChanged: args.onGuardianStatusChanged,
+            });
             return;
           }
         }
@@ -196,9 +211,21 @@ export function useProfileConsentAccept(): UseProfileConsentAcceptResult {
           onComplete={() => {
             const pending = guardianSetup;
             setGuardianSetup(null);
-            void issueOtp(pending.ref, pending.onDone);
+            // A guardian is now on file — mirror home-page's setU18StatusReload
+            // bump so the consumer re-syncs U18 status, then re-issue the OTP.
+            pending.onGuardianStatusChanged?.();
+            void issueOtp(pending);
           }}
-          onNotMinor={() => setGuardianSetup(null)}
+          onNotMinor={() => {
+            const pending = guardianSetup;
+            // The DOB step reclassified the ward as an adult. Close the flow (and
+            // any stale OTP dialog) cleanly and signal a U18-status re-sync so the
+            // consumer can re-drive `accept` with the corrected status — do NOT
+            // dead-end. The ward never self-accepts here; the caller decides.
+            setGuardianSetup(null);
+            setGuardian(null);
+            pending.onGuardianStatusChanged?.();
+          }}
           onLogout={() => {
             void signOut();
           }}
