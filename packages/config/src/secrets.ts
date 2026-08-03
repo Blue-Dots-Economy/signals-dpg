@@ -266,6 +266,12 @@ export const SignalsSearchSecretsSchema = z.object({
   // path, so absence must never crash boot.
   SIGNALS_SEARCH_URL: z.string().optional(),
   SIGNALS_SEARCH_API_KEY: z.string().optional(),
+  // Optional spatial radius (meters) the discover BFF sends to signals-search
+  // as `distance_meters` (#394). Unset -> the BFF sends nothing and
+  // signals-search's own ~30km `s_dwithin` default applies; the BFF still
+  // reports that default via DEFAULT_SEARCH_DISTANCE_METERS so the UI's
+  // "within X km" note stays accurate either way.
+  SIGNALS_SEARCH_DISTANCE_METERS: z.coerce.number().int().positive().optional(),
 });
 
 export const SchemaRegistrySecretsSchema = z.object({

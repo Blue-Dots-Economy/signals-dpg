@@ -255,14 +255,14 @@ export function MapView({
 
       if (!cancelled) {
         const valid: MapMarker[] = resolved.flat();
-        setMarkers(spreadCoLocatedMarkers(valid));
+        setMarkers(spreadCoLocatedMarkers(valid, selfLocation ?? null));
         setLoading(false);
       }
     }
 
     resolveMarkers();
     return () => { cancelled = true; };
-  }, [items, schema, resolveMarkerLabel]);
+  }, [items, schema, resolveMarkerLabel, selfLocation]);
 
   // The map and the maximize button always render. Loading and empty states are
   // shown as overlays ON TOP of the map rather than replacing it — otherwise a
@@ -342,6 +342,16 @@ export function MapView({
  * points are close enough to still cluster into a count; zoomed in they
  * separate into individually-clickable pins. The offset is tiny relative to a
  * city-centroid's inherent imprecision, so it does not misrepresent location.
+ *
+ * The viewer's own "You are here" self-marker (`selfLocation`) is rendered
+ * separately from `markers` (see `MapView`'s `selfLocation` prop) and is
+ * otherwise invisible to this grouping — an item sitting exactly on the
+ * viewer's own coordinate would be a "group of 1" and never get nudged,
+ * landing on the same pixel as the self-marker and becoming unclickable
+ * (#394). To fix that, `selfLocation` is treated as a virtual co-location
+ * member: any item group that sits on it is fanned out even when it has only
+ * one member, so it always ends up offset from "You". The self-marker itself
+ * is never moved — only item markers are.
  */
 /**
  * Stable hash of a string to a unit float in [0, 1) (FNV-1a, 32-bit). Used to
@@ -357,7 +367,10 @@ function hashToUnit(str: string): number {
   return (h >>> 0) / 4294967296;
 }
 
-function spreadCoLocatedMarkers(markers: MapMarker[]): MapMarker[] {
+export function spreadCoLocatedMarkers(
+  markers: MapMarker[],
+  selfLocation?: { lat: number; lng: number } | null,
+): MapMarker[] {
   // ~10 metres expressed in degrees of latitude (1° lat ≈ 111_320 m).
   const RADIUS_DEG = 10 / 111_320;
 
@@ -369,9 +382,21 @@ function spreadCoLocatedMarkers(markers: MapMarker[]): MapMarker[] {
     else groups.set(key, [marker]);
   }
 
+  // The coordinate key for the viewer's own "You" marker, if any — used below
+  // to treat it as a virtual co-location member (see the function doc comment
+  // above for why).
+  const selfKey = selfLocation
+    ? `${selfLocation.lat.toFixed(6)},${selfLocation.lng.toFixed(6)}`
+    : null;
+
   const result: MapMarker[] = [];
-  for (const group of groups.values()) {
-    if (group.length === 1) {
+  for (const [key, group] of groups) {
+    // A group needs fanning out when 2+ items share a coordinate (existing
+    // behavior), OR when a single item sits exactly on the self-marker's
+    // point — that item would otherwise render on top of "You" and be
+    // unclickable (#394).
+    const isAtSelfLocation = selfKey !== null && key === selfKey;
+    if (group.length === 1 && !isAtSelfLocation) {
       result.push(group[0]);
       continue;
     }

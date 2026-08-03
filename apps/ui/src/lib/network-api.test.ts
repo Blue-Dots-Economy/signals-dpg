@@ -96,3 +96,31 @@ describe('fetchNetworkMarkers item_state serialization (#203 Task 7)', () => {
     expect(params.get('item_domain')).toBe('seeker');
   });
 });
+
+describe('fetchNetworkMarkers free-text search (map-native-text-search)', () => {
+  beforeEach(() => {
+    mockGet.mockReset();
+    mockGet.mockResolvedValue({ data: emptyResponse });
+  });
+
+  it('sets q on the query string when a search term is provided', async () => {
+    await fetchNetworkMarkers({ item_network: 'blue_dot', item_domain: 'seeker', q: 'jane' });
+
+    const params = mockGet.mock.calls[0][1].params as URLSearchParams;
+    expect(params.get('q')).toBe('jane');
+  });
+
+  it('omits q entirely when not provided', async () => {
+    await fetchNetworkMarkers({ item_network: 'blue_dot', item_domain: 'seeker' });
+
+    const params = mockGet.mock.calls[0][1].params as URLSearchParams;
+    expect(params.has('q')).toBe(false);
+  });
+
+  it('omits q when it is an empty string', async () => {
+    await fetchNetworkMarkers({ item_network: 'blue_dot', item_domain: 'seeker', q: '' });
+
+    const params = mockGet.mock.calls[0][1].params as URLSearchParams;
+    expect(params.has('q')).toBe(false);
+  });
+});

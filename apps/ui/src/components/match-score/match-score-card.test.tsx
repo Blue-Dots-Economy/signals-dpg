@@ -62,4 +62,63 @@ describe('MatchScoreCard', () => {
     expect(screen.getByText(/match score details/i)).toBeInTheDocument();
     expect(screen.getByText(/calculating match score/i)).toBeInTheDocument();
   });
+
+  // #394: `/discover` already returns a per-item relevance score on the
+  // network item (`Item.score`), so the card should show the % upfront
+  // instead of requiring a click through to `/api/v1/match-score/calculate`.
+  it('shows the match-score % upfront when networkItem.score is present, without calling the match-score API', () => {
+    render(
+      <MatchScoreCard
+        schema={schema}
+        data={{ name: 'Dest' }}
+        localItem={item('mine')}
+        networkItem={{ ...item('dest'), score: 0.71 }}
+      />,
+    );
+
+    expect(screen.getByRole('button', { name: /71%/ })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /see match score/i })).toBeNull();
+    expect(calculateMatchScore).not.toHaveBeenCalled();
+  });
+
+  it('opens the modal pre-filled with the discover score on click (no API call)', async () => {
+    const user = userEvent.setup();
+    render(
+      <MatchScoreCard
+        schema={schema}
+        data={{ name: 'Dest' }}
+        localItem={item('mine')}
+        networkItem={{ ...item('dest'), score: 0.71 }}
+      />,
+    );
+
+    await user.click(screen.getByRole('button', { name: /71%/ }));
+
+    expect(await screen.findByRole('dialog')).toBeInTheDocument();
+    // Header score renders immediately — no loading state, no API call.
+    expect(screen.queryByText(/calculating match score/i)).toBeNull();
+    expect(screen.getAllByText('71%').length).toBeGreaterThan(0);
+    expect(calculateMatchScore).not.toHaveBeenCalled();
+  });
+
+  it('falls back to the click-to-fetch flow when networkItem.score is absent', async () => {
+    const user = userEvent.setup();
+    vi.mocked(calculateMatchScore).mockResolvedValue({ provider: 'signals_search', score: 6 });
+
+    render(
+      <MatchScoreCard
+        schema={schema}
+        data={{ name: 'Dest' }}
+        localItem={item('mine')}
+        networkItem={item('dest')}
+      />,
+    );
+
+    const seeScoreButton = screen.getByRole('button', { name: /see match score/i });
+    expect(calculateMatchScore).not.toHaveBeenCalled();
+
+    await user.click(seeScoreButton);
+
+    expect(calculateMatchScore).toHaveBeenCalledTimes(1);
+  });
 });

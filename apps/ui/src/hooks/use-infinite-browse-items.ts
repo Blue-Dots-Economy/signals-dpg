@@ -60,6 +60,12 @@ interface UseInfiniteBrowseItemsResult {
   // unavailable/unconfigured/timed out) — q/filters were NOT honored
   // server-side in that case. Always false on the native browse path.
   degraded: boolean;
+  // #394: the discover BFF's `meta.distance_meters` — the effective spatial
+  // radius actually applied (request override > configured env > the
+  // documented default), so the list note above the results can show
+  // "within X km". Undefined on the native browse path (no such concept) and
+  // on discover when no location was sent (a non-geo search has no radius).
+  distanceMeters?: number;
 }
 
 interface BrowsePage {
@@ -71,6 +77,7 @@ interface BrowsePage {
     source: BrowseSource;
     degraded: boolean;
     partial?: boolean;
+    distanceMeters?: number;
   };
 }
 
@@ -153,6 +160,7 @@ export function useInfiniteBrowseItems(
             offset: res.meta.offset,
             source: res.meta.source,
             degraded: res.meta.degraded,
+            distanceMeters: res.meta.distance_meters,
           },
         };
       }
@@ -201,12 +209,12 @@ export function useInfiniteBrowseItems(
   const total = lastPage?.meta.total ?? 0;
   const partial = query.data?.pages.some((p) => p.meta.partial === true) ?? false;
   // `degraded`/`source` are STICKY across pages (like `partial`): once ANY
-  // loaded page fell back to native, the accumulated feed already contains
-  // unfiltered/unranked items, so the banner + paused-chips must stay on even
-  // if a later page's fetch happens to hit a recovered signals-search. Reading
-  // only the last page would flip the degraded UI off mid-scroll while stale
-  // fallback items are still shown above — exactly "unfiltered results shown as
-  // if filtered" (design §6), which we must avoid.
+  // loaded page fell back to native, later pages that happen to hit a
+  // recovered signals-search must not flip the "basic matches" note off
+  // mid-scroll — the accumulated feed still mixes native (unranked) pages with
+  // ranked ones, so the note stays until a full refetch. (The native fallback
+  // DOES apply search + filters now — #394 list-native-fallback — so this is
+  // about ranking consistency, not "unfiltered shown as filtered".)
   const degraded = query.data?.pages.some((p) => p.meta.degraded) ?? false;
   const anyFallback = query.data?.pages.some((p) => p.meta.source === 'native_fallback') ?? false;
   const source: BrowseSource = anyFallback
@@ -225,5 +233,10 @@ export function useInfiniteBrowseItems(
     partial,
     source,
     degraded,
+    // Not sticky like `partial`/`degraded`/`source`: the effective radius is
+    // a static property of the request (location + config), not something
+    // that can meaningfully change page-to-page within the same feed, so the
+    // latest loaded page's value is the correct one to surface.
+    distanceMeters: lastPage?.meta.distanceMeters,
   };
 }

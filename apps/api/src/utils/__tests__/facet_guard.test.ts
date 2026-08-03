@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   resolveAllowedFacetFields,
   resolveAllowedFacetFilters,
+  resolveTextSearchFields,
 } from '../facet_guard';
 
 const itemSchema = {
@@ -82,5 +83,46 @@ describe('resolveAllowedFacetFilters', () => {
     ]);
 
     expect(result).toEqual([{ field: 'city', values: ['pune'], arrayValued: false }]);
+  });
+});
+
+describe('resolveTextSearchFields (#394, moved from markers.ts for reuse by discover.ts)', () => {
+  it('returns non-private field keys for a given item_type, excluding private fields', () => {
+    const fields = resolveTextSearchFields(networkConfig, 'seeker', 'profile_1.0');
+
+    expect(fields.sort()).toEqual(['city', 'skills']);
+    expect(fields).not.toContain('phone');
+    expect(fields).not.toContain('secret_notes');
+  });
+
+  it('unions non-private fields across every item_type declared for the domain when item_type is omitted', () => {
+    const multiTypeNetworkConfig = {
+      id: 'blue_dot',
+      domains: [
+        {
+          id: 'seeker',
+          item_schemas: {
+            'profile_1.0': itemSchema,
+            'profile_2.0': {
+              type: 'object',
+              properties: {
+                bio: { type: 'string' },
+                ssn: { type: 'string', private: true },
+              },
+            },
+          },
+        },
+      ],
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    } as any;
+
+    const fields = resolveTextSearchFields(multiTypeNetworkConfig, 'seeker', undefined);
+
+    expect(fields.sort()).toEqual(['bio', 'city', 'skills']);
+    expect(fields).not.toContain('ssn');
+  });
+
+  it('fails closed (empty array) for an undefined domain rather than throwing', () => {
+    expect(resolveTextSearchFields(networkConfig, 'not_a_domain', 'profile_1.0')).toEqual([]);
   });
 });

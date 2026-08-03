@@ -401,9 +401,15 @@ export async function performActionsBulk(
  */
 export async function updateActionStatusBulk(
   payloads: UpdateActionStatusPayload[],
+  guardianOtp?: string,
 ): Promise<BulkEnvelope<UpdateActionStatusResponse>> {
+  const body = guardianOtp
+    ? payloads.map((payload) => ({ ...payload, guardian_otp: guardianOtp }))
+    : payloads;
   return postBulkEnvelope<UpdateActionStatusResponse>(
-    apiClient.post<BulkEnvelope<UpdateActionStatusResponse>>('/api/v1/action/update-status', payloads),
+    // `body` carries the single guardian OTP on each payload when set, so a
+    // minor's whole accept batch clears with one code (#393).
+    apiClient.post<BulkEnvelope<UpdateActionStatusResponse>>('/api/v1/action/update-status', body),
   );
 }
 

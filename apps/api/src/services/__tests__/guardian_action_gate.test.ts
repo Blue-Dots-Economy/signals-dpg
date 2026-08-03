@@ -299,6 +299,21 @@ describe('guardianBulkActionGate (#393)', () => {
     expect(map.get(1)).toEqual({ status: 'invalid_otp' });
   });
 
+  it('passes stage:"accept" through to the OTP scenario for a bulk accept (#393 receiver side)', async () => {
+    getWardAge.mockResolvedValue(11);
+    getGuardianContactPlaintext.mockResolvedValue({ contact: 'g@x.co', contactType: 'email' });
+    resolveProviderServiceName.mockResolvedValue('Acme');
+    issueGuardianOtp.mockResolvedValue(undefined);
+
+    await guardianBulkActionGate({ items: bulkItems, stage: 'accept' });
+
+    expect(issueGuardianOtp).toHaveBeenCalledTimes(1);
+    expect(issueGuardianOtp.mock.calls[0][0].scenario).toMatchObject({
+      kind: 'action_bulk',
+      stage: 'accept',
+    });
+  });
+
   it('excludes ungated / adult items from the result map', async () => {
     getWardAge.mockResolvedValue(11);
     getGuardianContactPlaintext.mockResolvedValue({ contact: 'g@x.co', contactType: 'email' });

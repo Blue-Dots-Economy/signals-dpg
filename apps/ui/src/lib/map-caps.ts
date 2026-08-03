@@ -13,8 +13,10 @@
  * indicator (`MapCountPill`) reads the hook's resulting `truncated` flag
  * rather than calling this directly.
  *
- * All three knobs are env-configurable (UI build-time `VITE_*`, read via
- * `import.meta.env` — Task 7 finalizes any further runtime-config wiring):
+ * All three knobs are env-configurable via runtime-env (`getRuntimeEnv`, read
+ * from `window.__DPG_UI_CONFIG__` written into `/config.js` at deploy time, so
+ * one built image is retunable per deployment WITHOUT a rebuild — `config.js`
+ * loads before the app bundle, so a module-load read here sees it):
  *   - `VITE_MAP_MARKER_CAP_CLUSTERED` (default 1000)
  *   - `VITE_MAP_MARKER_CAP_INDIVIDUAL` (default 500)
  *   - `VITE_MAP_CLUSTER_DISABLE_ZOOM` (default 14, mirrors
@@ -26,6 +28,7 @@
  * lives here.
  */
 import { zoomBand, DEFAULT_CLUSTER_DISABLE_ZOOM } from './map-viewport-snap';
+import { getRuntimeEnv } from './runtime-env';
 
 const DEFAULT_CLUSTERED_MARKER_CAP = 1000;
 const DEFAULT_INDIVIDUAL_MARKER_CAP = 500;
@@ -39,12 +42,12 @@ function readPositiveIntEnv(raw: string | undefined, fallback: number): number {
 
 /** Reads `VITE_MAP_MARKER_CAP_CLUSTERED`, falling back to 1000. Exported for tests. */
 export function resolveClusteredMarkerCap(): number {
-  return readPositiveIntEnv(import.meta.env.VITE_MAP_MARKER_CAP_CLUSTERED, DEFAULT_CLUSTERED_MARKER_CAP);
+  return readPositiveIntEnv(getRuntimeEnv('VITE_MAP_MARKER_CAP_CLUSTERED'), DEFAULT_CLUSTERED_MARKER_CAP);
 }
 
 /** Reads `VITE_MAP_MARKER_CAP_INDIVIDUAL`, falling back to 500. Exported for tests. */
 export function resolveIndividualMarkerCap(): number {
-  return readPositiveIntEnv(import.meta.env.VITE_MAP_MARKER_CAP_INDIVIDUAL, DEFAULT_INDIVIDUAL_MARKER_CAP);
+  return readPositiveIntEnv(getRuntimeEnv('VITE_MAP_MARKER_CAP_INDIVIDUAL'), DEFAULT_INDIVIDUAL_MARKER_CAP);
 }
 
 /**
@@ -52,7 +55,7 @@ export function resolveIndividualMarkerCap(): number {
  * `DEFAULT_CLUSTER_DISABLE_ZOOM` (14). Exported for tests.
  */
 export function resolveClusterDisableZoomEnv(): number {
-  return readPositiveIntEnv(import.meta.env.VITE_MAP_CLUSTER_DISABLE_ZOOM, DEFAULT_CLUSTER_DISABLE_ZOOM);
+  return readPositiveIntEnv(getRuntimeEnv('VITE_MAP_CLUSTER_DISABLE_ZOOM'), DEFAULT_CLUSTER_DISABLE_ZOOM);
 }
 
 // Resolved once at module load (mirrors the `MAP_FETCH_LIMIT` /

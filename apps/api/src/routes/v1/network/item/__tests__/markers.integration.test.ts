@@ -241,27 +241,31 @@ const FACET_MAX_LNG = 77.7;
 const facetIn = { lat: 13.0, lng: 77.6 }; // in box
 const facetOut = { lat: 15.0, lng: 79.0 }; // out of box
 
+// #394: no `filterable` requirement any more — any declared, non-private
+// field is a valid facet field now.
 function findFacetField(schema: Record<string, unknown>): string {
   const properties = schema.properties as Record<string, Record<string, unknown>> | undefined;
   if (!properties) throw new Error('resolved binding schema has no properties');
-  const entry = Object.entries(properties).find(
-    ([, def]) => def.filterable === true && def.private !== true,
-  );
+  const entry = Object.entries(properties).find(([, def]) => def.private !== true);
   if (!entry) {
-    throw new Error(
-      'no filterable, non-private field found on the resolved binding — expected a Task 1 (#203) marker',
-    );
+    throw new Error('no non-private field found on the resolved binding');
   }
   return entry[0];
 }
 
-function findNonFacetField(schema: Record<string, unknown>): string {
+// #394: a SECOND declared, non-private field, distinct from the first — used
+// to prove a field that never carried a `filterable: true` marker (e.g.
+// blue_dot seeker "educationCategory") is now ALSO applied by the native
+// facet filter, not silently dropped.
+function findSecondFacetField(schema: Record<string, unknown>, excludeField: string): string {
   const properties = schema.properties as Record<string, Record<string, unknown>> | undefined;
   if (!properties) throw new Error('resolved binding schema has no properties');
   const entry = Object.entries(properties).find(
-    ([, def]) => def.filterable !== true && def.private !== true,
+    ([field, def]) => field !== excludeField && def.private !== true,
   );
-  if (!entry) throw new Error('no non-filterable, non-private field found on the resolved binding');
+  if (!entry) {
+    throw new Error('no second non-private field (distinct from the first) found on the resolved binding');
+  }
   return entry[0];
 }
 
@@ -277,12 +281,19 @@ describeIf(
     let NET: string;
     let DOMAIN: string;
     let facetField: string;
-    let nonFacetField: string;
+    // #394: distinct declared, non-private field that never carried a
+    // `filterable: true` marker — see the "now APPLIED" test below.
+    let secondFacetField: string;
     const TYPE = `markers_facet_probe_${randomUUID().slice(0, 8)}`;
     const OWNER_ID = `markers-facet-suite-user-${randomUUID().slice(0, 8)}`;
     const ids: Record<string, string> = {};
 
-    async function seedItem(key: string, loc: { lat: number; lng: number }, facetValue: string): Promise<string> {
+    async function seedItem(
+      key: string,
+      loc: { lat: number; lng: number },
+      facetValue: string,
+      secondValue = 'second-value-common',
+    ): Promise<string> {
       const [row] = await db
         .insert(itemsTable)
         .values({
@@ -293,7 +304,7 @@ describeIf(
           item_schema_url: 'http://localhost:2742/schema',
           created_by: OWNER_ID,
           item_locations: [loc],
-          item_state: { [facetField]: facetValue },
+          item_state: { [facetField]: facetValue, [secondFacetField]: secondValue },
           lifecycle_status: 'live',
         })
         .returning({ item_id: itemsTable.item_id });
@@ -325,7 +336,7 @@ describeIf(
       NET = primary.network;
       DOMAIN = primary.domain;
       facetField = findFacetField(primary.schema);
-      nonFacetField = findNonFacetField(primary.schema);
+      secondFacetField = findSecondFacetField(primary.schema, facetField);
 
       const { markers } = await import('../markers.js');
 
@@ -342,7 +353,14 @@ describeIf(
 
       const idA = await seedItem('valueA_inBox', facetIn, 'facet-value-a');
       const idB = await seedItem('valueB_inBox', facetIn, 'facet-value-b');
-      const idOther = await seedItem('otherValue_inBox', facetIn, 'facet-value-unselected');
+      // Distinguished by `secondFacetField`, not `facetField` — every other
+      // seeded item gets the default 'second-value-common'.
+      const idOther = await seedItem(
+        'otherValue_inBox',
+        facetIn,
+        'facet-value-unselected',
+        'second-value-distinct',
+      );
       const idOut = await seedItem('valueA_outOfBox', facetOut, 'facet-value-a');
 
       await seedItemSearch(idA, facetIn);
@@ -395,26 +413,28 @@ describeIf(
       expect(body.meta.total).toBe(2);
     });
 
-    it('a filter on a non-filterable field is silently ignored — bbox result is unnarrowed', async () => {
+    it('#394: a filter on a SECOND declared, non-private field (no former filterable marker) is now APPLIED, not ignored', async () => {
       // Two values (not one) so this exercises the ARRAY-facet code path —
-      // buildWhereClause's security guard only gates the `= ANY(...)` array
-      // branch (Task 3); a single scalar item_state value instead takes the
-      // pre-#203 `@> jsonb` containment branch, which isn't guarded at all
-      // and would (correctly, but irrelevantly to this assertion) exclude
-      // every seeded item since none of them set `nonFacetField`.
+      // buildWhereClause's security guard gates the `= ANY(...)` array branch
+      // (Task 3). Only `otherValue_inBox` was seeded with
+      // 'second-value-distinct' (every other item got the default
+      // 'second-value-common') — a dropped/ignored filter would return all 3
+      // in-box items, same as the unfiltered bbox result. Narrowing to
+      // exactly `otherValue_inBox` proves the field is genuinely applied now
+      // that the `filterable: true` gate is gone.
       const res = await app.inject({
         method: 'GET',
-        url: bboxFacetQuery(nonFacetField, ['anything-at-all', 'something-else']),
+        url: bboxFacetQuery(secondFacetField, ['second-value-distinct', 'some-other-unused-value']),
       });
       expect(res.statusCode).toBe(200);
       const body = res.json() as { meta: { total: number }; markers: Array<{ item_id: string }> };
 
       const got = new Set(body.markers.map((m) => m.item_id));
-      expect(got.has(ids.valueA_inBox)).toBe(true);
-      expect(got.has(ids.valueB_inBox)).toBe(true);
       expect(got.has(ids.otherValue_inBox)).toBe(true);
-      expect(body.markers.length).toBe(3);
-      expect(body.meta.total).toBe(3);
+      expect(got.has(ids.valueA_inBox)).toBe(false);
+      expect(got.has(ids.valueB_inBox)).toBe(false);
+      expect(body.markers.length).toBe(1);
+      expect(body.meta.total).toBe(1);
     });
   },
 );

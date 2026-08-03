@@ -1,13 +1,14 @@
 import { describe, it, expect } from 'vitest';
 import {
   deriveBrowseParams,
-  deriveAnchorItemId,
+  domainsInteract,
+  anchorItemIdForTarget,
   buildFilteredCardsForDomain,
   excludeOwnItems,
   isDiscoverActive,
-  hasActiveSearchOrFilters,
-  resolveDegradedBanner,
+  resolveListNote,
 } from './browse-discover';
+import type { NetworkInteractionActions } from './browse-discover';
 import type { EnumFilterField } from './enum-filters';
 import type { Item } from './item-api';
 
@@ -26,32 +27,89 @@ function makeItem(id: string, state: Record<string, unknown>, domain = 'provider
   };
 }
 
-describe('deriveAnchorItemId (#394)', () => {
-  it('returns the selected profile id when one is selected', () => {
-    expect(deriveAnchorItemId('profile-123')).toBe('profile-123');
+// A minimal two-domain network mirroring the seeker/provider interaction
+// matrix: seekers can `apply`/`connect` to providers (both directions
+// represented across two actions), but there is no interaction that involves
+// seeker→seeker or provider→provider.
+const seekerProviderActions: NetworkInteractionActions = {
+  apply: {
+    interactions: [{ from_domain: 'seeker', to_domain: 'provider' }],
+  },
+  connect: {
+    interactions: [{ from_domain: 'provider', to_domain: 'seeker' }],
+  },
+};
+
+describe('domainsInteract (#394)', () => {
+  it('true for an interacting pair in schema order (seeker -> provider)', () => {
+    expect(domainsInteract(seekerProviderActions, 'seeker', 'provider')).toBe(true);
   });
 
-  it('returns undefined when no profile is selected', () => {
-    expect(deriveAnchorItemId(null)).toBeUndefined();
+  it('true for an interacting pair queried in reverse (provider, seeker)', () => {
+    expect(domainsInteract(seekerProviderActions, 'provider', 'seeker')).toBe(true);
+  });
+
+  it('false for a same-domain pair with no defined self-interaction (seeker <-> seeker)', () => {
+    expect(domainsInteract(seekerProviderActions, 'seeker', 'seeker')).toBe(false);
+  });
+
+  it('false for a domain unknown to the schema', () => {
+    expect(domainsInteract(seekerProviderActions, 'seeker', 'ghost')).toBe(false);
+  });
+
+  it('false when there are no actions at all', () => {
+    expect(domainsInteract({}, 'seeker', 'provider')).toBe(false);
   });
 });
 
-describe('deriveBrowseParams', () => {
-  it('Near me ON → proximity: useLocation true, relevance false', () => {
-    const p = deriveBrowseParams({ nearMe: true, search: '', activeFieldFilters: {} });
-    expect(p.useLocation).toBe(true);
-    expect(p.relevance).toBe(false);
+describe('anchorItemIdForTarget (#394)', () => {
+  it('returns the profile id when a profile is selected and the domains interact', () => {
+    expect(
+      anchorItemIdForTarget({
+        activeProfileId: 'profile-123',
+        activeProfileDomain: 'seeker',
+        targetDomain: 'provider',
+        actions: seekerProviderActions,
+      }),
+    ).toBe('profile-123');
   });
 
-  it('Near me OFF → relevance: useLocation false, relevance true', () => {
-    const p = deriveBrowseParams({ nearMe: false, search: '', activeFieldFilters: {} });
-    expect(p.useLocation).toBe(false);
+  it('returns undefined when the domains do not interact (seeker browsing seekers)', () => {
+    expect(
+      anchorItemIdForTarget({
+        activeProfileId: 'profile-123',
+        activeProfileDomain: 'seeker',
+        targetDomain: 'seeker',
+        actions: seekerProviderActions,
+      }),
+    ).toBeUndefined();
+  });
+
+  it('returns undefined when there is no selected profile', () => {
+    expect(
+      anchorItemIdForTarget({
+        activeProfileId: null,
+        activeProfileDomain: null,
+        targetDomain: 'provider',
+        actions: seekerProviderActions,
+      }),
+    ).toBeUndefined();
+  });
+});
+
+describe('deriveBrowseParams (#394: list always uses discover, no more Near me toggle)', () => {
+  it('relevance is always true — there is no ranked/proximity mode split anymore', () => {
+    const p = deriveBrowseParams({ search: '', activeFieldFilters: {} });
     expect(p.relevance).toBe(true);
+  });
+
+  it('has no useLocation field — location is now always forwarded by the caller, not gated here', () => {
+    const p = deriveBrowseParams({ search: '', activeFieldFilters: {} });
+    expect(p).not.toHaveProperty('useLocation');
   });
 
   it('trims search into q and maps activeFieldFilters to a DiscoverFacetFilter[]', () => {
     const p = deriveBrowseParams({
-      nearMe: false,
       search: '  teacher  ',
       activeFieldFilters: { subject: ['math', 'science'] },
     });
@@ -60,7 +118,7 @@ describe('deriveBrowseParams', () => {
   });
 
   it('empty inputs → no q and empty filters', () => {
-    const p = deriveBrowseParams({ nearMe: true, search: '   ', activeFieldFilters: {} });
+    const p = deriveBrowseParams({ search: '   ', activeFieldFilters: {} });
     expect(p.q).toBeUndefined();
     expect(p.filters).toEqual([]);
   });
@@ -77,7 +135,7 @@ describe('isDiscoverActive', () => {
 
 describe('buildFilteredCardsForDomain discover bypass', () => {
   const enumFields: EnumFilterField[] = [
-    { key: 'subject', label: 'Subject', options: ['math', 'science'], isArray: false, filterable: true },
+    { key: 'subject', label: 'Subject', options: ['math', 'science'], isArray: false },
   ];
   // Item text has neither the search substring "welder" nor the selected enum
   // value "science" — a valid semantic-search hit that the client MUST NOT drop.
@@ -108,42 +166,114 @@ describe('buildFilteredCardsForDomain discover bypass', () => {
   });
 });
 
-describe('hasActiveSearchOrFilters', () => {
-  it('true when q is set', () => {
-    expect(hasActiveSearchOrFilters({ q: 'teacher', filters: [] })).toBe(true);
-  });
-
-  it('true when filters is non-empty', () => {
+describe('resolveListNote (#394: always-discover list note above the results)', () => {
+  it('degraded takes priority over everything else, and carries no values (reuses home.list_ranking_unavailable)', () => {
     expect(
-      hasActiveSearchOrFilters({ filters: [{ field: 'subject', values: ['math'] }] }),
-    ).toBe(true);
+      resolveListNote({
+        hasProfileAnchor: true,
+        hasLocation: true,
+        degraded: true,
+        distanceMeters: 12345,
+        locationSource: 'profile',
+      }),
+    ).toEqual({ key: 'home.list_ranking_unavailable' });
   });
 
-  it('false for the relevance-only default (no q, no filters)', () => {
-    expect(hasActiveSearchOrFilters({ filters: [] })).toBe(false);
+  it('anchor + location: rounds km and resolves the profile location source', () => {
+    expect(
+      resolveListNote({
+        hasProfileAnchor: true,
+        hasLocation: true,
+        degraded: false,
+        distanceMeters: 12345,
+        locationSource: 'profile',
+      }),
+    ).toEqual({
+      key: 'home.list_note_anchor_location',
+      values: { km: 12, locationSource: 'profile' },
+    });
   });
 
-  it('false for fully empty input', () => {
-    expect(hasActiveSearchOrFilters({ q: undefined, filters: [] })).toBe(false);
-  });
-});
-
-describe('resolveDegradedBanner', () => {
-  it('null when not degraded, regardless of search/filter state', () => {
-    expect(resolveDegradedBanner({ degraded: false, searchOrFiltersActive: true })).toBeNull();
-    expect(resolveDegradedBanner({ degraded: false, searchOrFiltersActive: false })).toBeNull();
-  });
-
-  it('"search_unavailable" when degraded AND search/filters active', () => {
-    expect(resolveDegradedBanner({ degraded: true, searchOrFiltersActive: true })).toBe(
-      'search_unavailable',
-    );
+  it('anchor + location: maps the browser preferred source to "current"', () => {
+    expect(
+      resolveListNote({
+        hasProfileAnchor: true,
+        hasLocation: true,
+        degraded: false,
+        distanceMeters: 30000,
+        locationSource: 'browser',
+      }),
+    ).toEqual({
+      key: 'home.list_note_anchor_location',
+      values: { km: 30, locationSource: 'current' },
+    });
   });
 
-  it('"ranking_unavailable" when degraded AND no search/filters active', () => {
-    expect(resolveDegradedBanner({ degraded: true, searchOrFiltersActive: false })).toBe(
-      'ranking_unavailable',
-    );
+  it('rounds km to the nearest whole number', () => {
+    const note = resolveListNote({
+      hasProfileAnchor: true,
+      hasLocation: true,
+      degraded: false,
+      distanceMeters: 12499,
+      locationSource: 'profile',
+    });
+    expect(note?.values).toEqual({ km: 12, locationSource: 'profile' });
+  });
+
+  it('anchor, no location → anchor-only note with no values', () => {
+    expect(
+      resolveListNote({
+        hasProfileAnchor: true,
+        hasLocation: false,
+        degraded: false,
+        locationSource: 'profile',
+      }),
+    ).toEqual({ key: 'home.list_note_anchor_only' });
+  });
+
+  it('no anchor (signed out), location present → location-only note', () => {
+    expect(
+      resolveListNote({
+        hasProfileAnchor: false,
+        hasLocation: true,
+        degraded: false,
+        distanceMeters: 5000,
+        locationSource: 'browser',
+      }),
+    ).toEqual({
+      key: 'home.list_note_location_only',
+      values: { km: 5, locationSource: 'current' },
+    });
+  });
+
+  it('no anchor, no location → no note at all', () => {
+    expect(
+      resolveListNote({
+        hasProfileAnchor: false,
+        hasLocation: false,
+        degraded: false,
+        locationSource: 'profile',
+      }),
+    ).toBeNull();
+  });
+
+  it('hasLocation true but distanceMeters missing (defensive: cannot report a truthful km) → treated as no location', () => {
+    expect(
+      resolveListNote({
+        hasProfileAnchor: false,
+        hasLocation: true,
+        degraded: false,
+        locationSource: 'profile',
+      }),
+    ).toBeNull();
+    expect(
+      resolveListNote({
+        hasProfileAnchor: true,
+        hasLocation: true,
+        degraded: false,
+        locationSource: 'profile',
+      }),
+    ).toEqual({ key: 'home.list_note_anchor_only' });
   });
 });
 

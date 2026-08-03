@@ -195,6 +195,19 @@ ON item_actions (
   created_at DESC
 );
 
+-- Per-pair action cap (#370/#422): open-action recount matches the unordered
+-- {source, target} pair from either direction, type-agnostic (no action_type
+-- filter). Both orderings indexed, partition_network-first, so the count's
+-- `(source=A AND target=B) OR (source=B AND target=A)` is index-served either
+-- way. The existing *_item_idx indexes lead with source/target network+domain+
+-- type (not constrained by that query) so they don't serve it. Mirrors
+-- drizzle/0010_action_pair_open_indexes.sql.
+CREATE INDEX IF NOT EXISTS item_actions_pair_src_tgt_idx
+ON item_actions (partition_network, source_item_id, target_item_id);
+
+CREATE INDEX IF NOT EXISTS item_actions_pair_tgt_src_idx
+ON item_actions (partition_network, target_item_id, source_item_id);
+
 CREATE INDEX IF NOT EXISTS item_actions_source_owner_idx
 ON item_actions (source_item_owner, updated_at DESC);
 

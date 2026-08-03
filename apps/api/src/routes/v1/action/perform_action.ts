@@ -126,8 +126,14 @@ async function runPerformActions(
   // over-limit batch is left for runBulk to reject with BULK_LIMIT_EXCEEDED
   // before any gating work. Fail-safe: if the pre-pass errors, fall back to the
   // per-item gate (still fail-closed) rather than failing the whole request.
+  //
+  // Skipped entirely on an external / on-behalf channel (`request.acting_org`,
+  // #450): the batch gate has no external-channel awareness, so running it there
+  // would hand a minor a guardian-OTP path that #450 deliberately withholds off
+  // the app. Skipping lets those items fall through to the per-action gate,
+  // which returns `external_minor_blocked` (MINOR_ACTION_CHANNEL_BLOCKED).
   let batchGate: Map<number, GateResult> | undefined;
-  if (items.length > 1 && items.length <= apiConfig.bulk_max_items) {
+  if (items.length > 1 && items.length <= apiConfig.bulk_max_items && !request.acting_org) {
     try {
       batchGate = await buildBulkGuardianGate(items, request);
     } catch (err) {

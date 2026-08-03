@@ -67,14 +67,17 @@ const FetchItemsSchemaBase = z.object({
 
   item_schema_url: z.url().nullable().optional(),
 
-  // Facet filter. Each entry's value is either a scalar (item_fetch_runtime's
-  // buildWhereClause applies it as an `item_state @> jsonb` containment
-  // check) or a `string[]` (#203 Task 3/7: applied as
-  // `item_state ->> field = ANY(...)`, gated by the filterable/non-private
-  // facet guard — see `resolveAllowedFacetFields`). Left as `z.unknown()`
-  // rather than a narrower union deliberately: this field is shared by every
-  // fetch/count/markers schema below, some of which allow arbitrary equality
-  // filters beyond the array-facet case this comment calls out.
+  // Facet filter. Each entry's value may be a scalar or a `string[]` —
+  // item_fetch_runtime's buildWhereClause normalizes a scalar `v` to `[v]`
+  // and applies EVERY entry (scalar or array) the same guarded way:
+  // `item_state ->> field = ANY(...)`, gated by the declared/non-private
+  // facet guard (see `resolveAllowedFacetFields`; #394 dropped the additional
+  // `filterable` marker that guard used to also require, and separately
+  // closed a hole where a scalar value bypassed the guard entirely via an
+  // unguarded `item_state @> jsonb` containment check — there is no such
+  // unguarded branch any more). Left as `z.unknown()` rather than a narrower
+  // union deliberately: this field is shared by every fetch/count/markers
+  // schema below.
   item_state: z.record(z.string(), z.unknown()).optional(),
   item_latitude: z.coerce.number().optional(),
   item_longitude: z.coerce.number().optional(),
@@ -158,6 +161,19 @@ export const FetchItemsBodySchema = withGeoSearchRefinement(FetchItemsSchemaBase
 const MarkersSchemaBase = FetchItemsSchemaBase.extend({
   // Coords are cheap — allow a much higher cap than the 1000 full-fetch cap.
   limit: z.coerce.number().int().min(1).max(25000).default(200),
+
+  // Free-text value-match search (#394 map native text search). Matched
+  // server-side against the PUBLIC (non-private) item_state field values
+  // only — see `resolveAllowedFacetFields` (facet_guard.ts) and
+  // `buildWhereClause`'s `text_search` branch (item_fetch_runtime.ts) — and
+  // is AND-ed with whatever bbox/radius viewport the rest of this request
+  // already carries, so it's inherently scoped to the visible map area. Kept
+  // on this schema (not the shared FetchItemsSchemaBase) because the map
+  // stays native; list/discover text search goes through signals-search
+  // instead. On `MarkersBodySchema` (forwarded peer-to-peer), only the raw
+  // `q` travels — never a resolved field allowlist — each instance resolves
+  // its own non-private fields from its own network config.
+  q: z.string().trim().min(1).optional(),
 });
 
 export const MarkersQuerySchema = withGeoSearchRefinement(MarkersSchemaBase);
