@@ -117,7 +117,13 @@ export function PageShell({
             // min-height:auto and refuses to shrink below its content, so a tall
             // form expands past the h-svh column and the whole page gets a second
             // (body) scrollbar instead of scrolling inside <main>.
-            className="min-h-0 flex-1 overflow-y-auto p-4 max-md:overflow-x-clip sm:p-6"
+            // `relative` is also load-bearing: it makes <main> the containing
+            // block for absolutely-positioned descendants (e.g. cmdk's
+            // visually-hidden `position:absolute` labels), so they anchor here and
+            // are clipped by this scroll container — otherwise they anchor to the
+            // initial containing block at their deep flow positions and stretch
+            // the document, producing a phantom second (body) scrollbar.
+            className="relative min-h-0 flex-1 overflow-y-auto p-4 max-md:overflow-x-clip sm:p-6"
           >
             {children}
           </main>

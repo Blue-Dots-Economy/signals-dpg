@@ -119,7 +119,27 @@ export function LocationAutocompleteWidget({
   // (`<main overflow-y-auto>`) an absolute dropdown is CLIPPED at the container
   // edge and hidden behind the pinned footer; a body portal escapes both.
   const menuOpen = open && suggestions.length > 0;
-  const rect = menuOpen ? inputRef.current?.getBoundingClientRect() : undefined;
+  const [menuRect, setMenuRect] = React.useState<DOMRect | null>(null);
+  React.useLayoutEffect(() => {
+    if (!menuOpen) {
+      setMenuRect(null);
+      return;
+    }
+    const update = () => {
+      const el = inputRef.current;
+      if (el) setMenuRect(el.getBoundingClientRect());
+    };
+    update();
+    // capture=true so this also fires for the scrolling <main> ancestor (scroll
+    // events don't bubble) — keeps the fixed dropdown glued to the input instead
+    // of detaching when the form is scrolled.
+    window.addEventListener('scroll', update, true);
+    window.addEventListener('resize', update);
+    return () => {
+      window.removeEventListener('scroll', update, true);
+      window.removeEventListener('resize', update);
+    };
+  }, [menuOpen]);
 
   return (
     <div className="relative space-y-2">
@@ -137,14 +157,14 @@ export function LocationAutocompleteWidget({
           blurRef.current = window.setTimeout(() => setOpen(false), 150);
         }}
       />
-      {menuOpen && rect &&
+      {menuOpen && menuRect &&
         createPortal(
           <ul
             style={{
               position: 'fixed',
-              top: rect.bottom + 4,
-              left: rect.left,
-              width: rect.width,
+              top: menuRect.bottom + 4,
+              left: menuRect.left,
+              width: menuRect.width,
               zIndex: 60,
             }}
             className="max-h-60 overflow-auto rounded-md border bg-popover shadow-md"
