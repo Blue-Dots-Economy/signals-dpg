@@ -113,7 +113,11 @@ export function PageShell({
           />
           <main
             id="main-content"
-            className="flex-1 overflow-y-auto p-4 max-md:overflow-x-clip sm:p-6"
+            // `min-h-0` is load-bearing: without it a flex child defaults to
+            // min-height:auto and refuses to shrink below its content, so a tall
+            // form expands past the h-svh column and the whole page gets a second
+            // (body) scrollbar instead of scrolling inside <main>.
+            className="min-h-0 flex-1 overflow-y-auto p-4 max-md:overflow-x-clip sm:p-6"
           >
             {children}
           </main>
