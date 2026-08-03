@@ -291,6 +291,8 @@
   "profile.create_heading": "Create Profile",
   "profile.create_role_heading": "Create {{role}} Profile",
   "profile.edit_role_heading": "Edit {{role}} Profile",
+  "profile.edit_heading": "Edit {{role}} Profile",
+  "profile.required_complete": "All required fields complete",
   "profile.error_already_exists": "Profile already exists",
   "profile.error_already_exists_desc": "You already have a profile for this role. Return to the home page to view or edit your existing profile.",
   "profile.error_create_failed": "Couldn't create your profile",

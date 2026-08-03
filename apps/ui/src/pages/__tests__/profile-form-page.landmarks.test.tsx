@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, waitFor, within } from '@testing-library/react';
+import { render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type { RJSFSchema } from '@rjsf/utils';
@@ -153,10 +153,10 @@ describe('ProfileFormPage landmarks + heading order (W5.4a)', () => {
     }
   });
 
-  it('domain-picker branch (no domain selected yet) has a main landmark and exactly one level-1 heading', async () => {
+  it('domain-picker branch (no domain selected yet) renders inside the shell with exactly one level-1 heading', async () => {
     // Two selectable domains + no served-binding scope => the auto-select
     // effect never fires (selectableDomains.length !== 1), so the page stays
-    // on the "choose your role" early-return branch (~lines 641-680).
+    // on the "choose your role" early-return branch.
     currentNetwork = buildNetwork([
       { id: 'seeker', description: 'Job seeker' },
       { id: 'provider', description: 'Job provider' },
@@ -164,14 +164,13 @@ describe('ProfileFormPage landmarks + heading order (W5.4a)', () => {
     getServedScope.mockReturnValue(null);
     await renderPage();
 
-    const main = await screen.findByRole('main');
-    // Scoped to `main`, not the whole document: this branch renders inside the
-    // shared `<AuthShell>`, whose sibling `BrandHero` panel carries its own
-    // (decorative, out-of-scope) tagline `<h1>` at desktop widths — a
-    // pre-existing AuthShell-level condition shared by every AuthShell
-    // consumer (login-page/otp-page too; flagged as a follow-up, not fixed
-    // here). What this test asserts is that profile-form-page's OWN content
-    // region has exactly one top-level heading.
-    expect(within(main).getAllByRole('heading', { level: 1 })).toHaveLength(1);
+    // Task 3: the picker now renders inside PageShell (variant='form'). The
+    // single page-level heading is the shell's TopBar title (an <h1>); the
+    // picker's own content carries NO duplicate <h1>. Assert exactly one
+    // level-1 heading document-wide, and that the picker content sits inside
+    // the shell's single <main> landmark.
+    await screen.findByRole('main');
+    expect(screen.getAllByRole('heading', { level: 1 })).toHaveLength(1);
+    expect(screen.getAllByRole('main')).toHaveLength(1);
   });
 });

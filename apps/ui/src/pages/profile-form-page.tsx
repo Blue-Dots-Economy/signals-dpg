@@ -3,7 +3,7 @@ import { useLocation, useNavigate, useParams, useSearchParams } from 'react-rout
 import { useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { useTranslation } from 'react-i18next';
-import { ArrowLeft, Wallet, OctagonX } from 'lucide-react';
+import { Wallet, OctagonX } from 'lucide-react';
 import type { RJSFSchema } from '@rjsf/utils';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
@@ -17,8 +17,11 @@ import {
 } from '@/components/ui/dialog';
 import { SchemaForm } from '@/components/forms/schema-form';
 import { Alert, AlertTitle, AlertDescription } from '@/components/ui/alert';
-import { AuthShell } from '@/components/layout/auth-shell';
+import { PageShell } from '@/components/layout/page-shell';
 import { NetworkConstellation } from '@/components/layout/network-constellation';
+import { useMyItems } from '@/hooks/use-my-items';
+import { getStoredActiveProfileId, setStoredActiveProfileId } from '@/lib/active-profile-storage';
+import type { DotNetworkSchema } from '@/engine/types';
 import { RoleCard } from '@/components/cards/role-card';
 import { useNetworkTheme } from '@/theme/theme-provider';
 import { useConsentConfig } from '@/hooks/use-consent-config';
@@ -353,6 +356,64 @@ export function ProfileFormPage() {
   const showCompletionPrompt = !isEdit || editItem.data?.lifecycle_status === 'draft';
   const completionPrompt = selectedDomainInfo?.profile_completion_prompt;
 
+  // ── App-shell sidebar props ──────────────────────────────────────────────
+  // The form now renders inside the main app shell (PageShell), so it feeds the
+  // same sidebar (networks / domains / "My Profiles") home-page does. Selecting
+  // anything in the sidebar navigates back to home — this page only edits the
+  // one profile it's opened for.
+  const allNetworks = React.useMemo<DotNetworkSchema[]>(() => {
+    if (!networksData) return [];
+    return configuredNetworkIds.length > 0
+      ? networksData.filter((n) => configuredNetworkIds.includes(n.id))
+      : networksData;
+  }, [networksData, configuredNetworkIds]);
+  const showNetworkSelector = !servedScope && allNetworks.length > 1;
+  const { data: myItems } = useMyItems(network ?? null);
+  const activeProfileId = getStoredActiveProfileId(network?.id ?? '');
+  const userSchemas = React.useMemo<Record<string, RJSFSchema>>(() => {
+    if (!network) return {};
+    const map: Record<string, RJSFSchema> = {};
+    for (const domain of network.domains) {
+      const schema = domain.item_schemas ? Object.values(domain.item_schemas)[0] : undefined;
+      if (schema) map[domain.id] = schema;
+    }
+    return map;
+  }, [network]);
+
+  // Back / Cancel: in a multi-role create flow, step back to the role picker;
+  // otherwise leave the form for home (mirrors the pre-shell back nav).
+  const handleBack = React.useCallback(() => {
+    if (selectedDomain && !isEdit && !roleLocked && !singleServedDomain) {
+      setSelectedDomain(null);
+    } else {
+      navigate(`/?network=${resolvedNetwork?.id ?? ''}`);
+    }
+  }, [selectedDomain, isEdit, roleLocked, singleServedDomain, navigate, resolvedNetwork?.id]);
+
+  const handleSidebarNetworkSelect = React.useCallback(
+    (networkId: string) => navigate(`/?network=${networkId}`),
+    [navigate],
+  );
+  const handleSidebarDomainSelect = React.useCallback(
+    (domainId: string | null) =>
+      navigate(
+        domainId
+          ? `/?network=${resolvedNetwork?.id ?? ''}&domain=${domainId}`
+          : `/?network=${resolvedNetwork?.id ?? ''}`,
+      ),
+    [navigate, resolvedNetwork?.id],
+  );
+  const handleSidebarProfileChange = React.useCallback(
+    (profileId: string) => {
+      if (network?.id) setStoredActiveProfileId(network.id, profileId);
+      navigate(`/?network=${resolvedNetwork?.id ?? ''}`);
+    },
+    [network?.id, navigate, resolvedNetwork?.id],
+  );
+  const handleProfilesChanged = React.useCallback(() => {
+    if (network) queryClient.invalidateQueries({ queryKey: queryKeys.myItems(network.id) });
+  }, [network, queryClient]);
+
   const canImportCredentials = React.useMemo(
     () => Boolean(profileSchema) && getConfiguredWalletProviders().length > 0,
     [profileSchema]
@@ -613,27 +674,37 @@ export function ProfileFormPage() {
     );
   }
 
+  // Shared sidebar wiring for both the role-picker and the form itself — the
+  // page lives inside the main app shell now (Task 3), so the sidebar mirrors
+  // home-page's; every selection navigates back to home.
+  const shellSidebarProps = {
+    networks: showNetworkSelector ? allNetworks : [],
+    selectedNetwork: targetNetworkId,
+    onNetworkSelect: handleSidebarNetworkSelect,
+    domains,
+    selectedDomain: null as string | null,
+    onDomainSelect: handleSidebarDomainSelect,
+    myItems,
+    activeProfileId,
+    onActiveProfileChange: handleSidebarProfileChange,
+    onProfilesChanged: handleProfilesChanged,
+    userSchemas,
+  };
+
   // Domain selection step
   if (!selectedDomain && !isEdit) {
     return (
-      <AuthShell>
-        <main id="main-content">
-          <button
-            type="button"
-            onClick={() => navigate(`/?network=${targetNetworkId}`)}
-            className="mb-6 flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors"
-          >
-            <ArrowLeft className="h-4 w-4" />
-            {t('common.back')}
-          </button>
+      <PageShell
+        variant="form"
+        title={t('profile.create_heading')}
+        onBack={handleBack}
+        {...shellSidebarProps}
+      >
+        <div className="mx-auto max-w-[1040px] pb-24">
           <div className="mb-6">
             <p className="mb-2 inline-flex items-center rounded-full bg-primary/10 px-2.5 py-0.5 text-[10px] font-semibold uppercase tracking-[0.18em] text-primary">
               {theme.portalLabel}
             </p>
-            {/* Only heading in this branch — safe to be a plain (visible) h1: no
-                deeper section headings (RoleCard renders plain text, not h3+),
-                so h1 here can't create a level skip. */}
-            <h1 className="text-2xl font-bold">{t('profile.create_heading')}</h1>
             <p className="text-muted-foreground mt-1">{t('profile.choose_role')}</p>
             <p className="text-sm text-muted-foreground/80 mt-2">{theme.subline}</p>
           </div>
@@ -655,39 +726,37 @@ export function ProfileFormPage() {
               );
             })}
           </div>
-        </main>
-      </AuthShell>
+        </div>
+      </PageShell>
     );
   }
 
+  const primaryLabel = isEdit ? t('profile.btn_update') : t('profile.btn_create');
+  const submitDisabled = isEdit
+    ? !formValid
+    : !formValid ||
+      consentLoading ||
+      (consentRequired && !consentChecked) ||
+      (minorGatedCreate && !guardianVerifiedForCreate);
+
   return (
-    <div className="min-h-svh bg-gradient-to-b from-[var(--brand-hero-to)]/8 to-background p-4 sm:p-6">
-      <main id="main-content" className="mx-auto max-w-2xl">
-        {/* Visually-hidden page title: the shared SchemaForm renders its
-            section headings as <h3> (schema-form.tsx), so the visible hero
-            title just below must stay an <h2> to avoid an h1→h3 skip. This
-            sr-only <h1> keeps the accessible heading chain valid
-            (h1 → h2 hero → h3 form sections) without changing the look. */}
-        <h1 className="sr-only">
-          {isEdit ? t('profile.edit_role_heading', { role: roleLabel }) : t('profile.create_role_heading', { role: roleLabel })}
-        </h1>
-        {/* Branded hero strip — sits flush above the form Card */}
+    <PageShell
+      variant="form"
+      title={isEdit ? t('profile.edit_heading', { role: roleLabel }) : t('profile.create_heading')}
+      onBack={handleBack}
+      {...shellSidebarProps}
+    >
+      <div className="mx-auto max-w-[1040px] pb-24">
+        {/* Branded hero strip — sits flush above the form Card. The visible page
+            title lives in the shell's TopBar (its <h1>); this hero heading is an
+            <h2>, keeping the chain h1(TopBar) → h2(hero) → h3(SchemaForm section)
+            skip-free. */}
         <div className="relative overflow-hidden rounded-t-xl bg-brand-hero">
           <div className="pointer-events-none absolute inset-0 opacity-15">
             <NetworkConstellation className="h-full w-full" />
           </div>
           <div className="pointer-events-none absolute inset-0 bg-gradient-to-r from-black/50 via-black/20 to-transparent" />
-          <div className="relative z-10 px-5 pt-4 sm:px-6">
-            <button
-              type="button"
-              onClick={() => (selectedDomain && !isEdit && !roleLocked && !singleServedDomain ? setSelectedDomain(null) : navigate(`/?network=${resolvedNetwork?.id ?? ''}`))}
-              className="flex items-center gap-1.5 text-sm text-white/70 hover:text-white transition-colors"
-            >
-              <ArrowLeft className="h-4 w-4" />
-              {selectedDomain && !isEdit && !roleLocked && !singleServedDomain ? t('profile.choose_different_role') : t('common.back')}
-            </button>
-          </div>
-          <div className="relative z-10 flex items-center gap-4 px-5 pb-6 pt-3 sm:px-6">
+          <div className="relative z-10 flex items-center gap-4 px-5 pb-6 pt-6 sm:px-6">
             <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-white/20 backdrop-blur-sm ring-1 ring-white/20">
               <DomainIcon className="h-6 w-6 text-white" />
             </div>
@@ -745,9 +814,8 @@ export function ProfileFormPage() {
                 onSubmit={handleSubmit}
                 disabled={isSubmitting}
                 formData={initialData ?? undefined}
-                submitButtonText={isEdit ? t('profile.btn_update') : undefined}
-                hideSubmit={!isEdit}
-                onValidityChange={!isEdit ? setFormValid : undefined}
+                hideSubmit
+                onValidityChange={setFormValid}
                 domainId={selectedDomain ?? undefined}
                 networkId={network?.id}
                 formContext={{
@@ -759,63 +827,65 @@ export function ProfileFormPage() {
               />
             )}
 
-            {!isEdit && (
-              <div className="mt-6 space-y-4">
-                {!formValid ? (
-                  <div className="flex items-center gap-2.5 rounded-md border border-amber-300 bg-amber-50 px-4 py-3 text-sm font-medium text-amber-800">
-                    <span
-                      aria-hidden="true"
-                      className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-amber-400 text-xs font-bold text-white"
-                    >
-                      !
-                    </span>
-                    {t('profile.fill_required_hint')}
-                  </div>
-                ) : (
-                  consentRequired && (
-                    <ConsentCheckbox
-                      text={statement}
-                      checked={consentChecked}
-                      // For a minor on a gated domain, ticking the consent is the
-                      // trigger: it fires the guardian OTP BEFORE the profile is
-                      // created (no draft is written until "Create profile").
-                      onCheckedChange={(v) => {
-                        setConsentChecked(v);
-                        // Don't fire the OTP straight away — show the "you're
-                        // under 18, a code goes to your guardian" interstitial
-                        // first, then issue on confirm.
-                        if (v && minorGatedCreate && !guardianVerifiedForCreate) {
-                          setGuardianConfirmOpen(true);
-                        }
-                      }}
-                    />
-                  )
-                )}
-                {minorGatedCreate && consentChecked && (
-                  <p className="text-sm text-muted-foreground">
-                    {guardianVerifiedForCreate
-                      ? t('u18.guardian_verified_for_create', 'Guardian verified. You can now create your profile.')
-                      : t('u18.guardian_pending_for_create', "You're under 18 — your guardian must verify with a one-time code before you can create this profile.")}
-                  </p>
-                )}
-                <button
-                  type="submit"
-                  form="profile-form"
-                  disabled={
-                    !formValid ||
-                    (!isEdit && consentLoading) ||
-                    (consentRequired && !consentChecked) ||
-                    (minorGatedCreate && !guardianVerifiedForCreate)
-                  }
-                  className="mt-2 h-12 w-full rounded-md text-base font-semibold bg-brand-cta hover:brightness-110 transition-all active:scale-95 shadow-md text-white disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                  {t('profile.btn_create')}
-                </button>
-              </div>
-            )}
-
           </CardContent>
         </Card>
+
+        {/* Option B — one sticky action bar for BOTH create and edit. The submit
+            is a `type=submit form=profile-form` button, so it drives the single
+            (hidden-submit) SchemaForm. Create keeps its exact consent gate: the
+            ConsentCheckbox + minor status live in the consent slot, and the same
+            guardian interstitial/OTP still promotes the fresh item to live. */}
+        <div
+          data-testid="profile-action-bar"
+          className="sticky bottom-0 z-30 mt-4 flex flex-wrap items-center gap-3 rounded-xl border bg-background/95 p-3 shadow-[0_-6px_20px_rgba(15,23,42,0.06)] backdrop-blur sm:px-4"
+        >
+          <div className="flex items-center gap-2 text-sm text-muted-foreground">
+            {formValid ? (
+              <span className="text-emerald-600">{t('profile.required_complete')}</span>
+            ) : (
+              <span className="text-amber-700">{t('profile.fill_required_hint')}</span>
+            )}
+          </div>
+          <div className="ml-auto flex flex-wrap items-center gap-2">
+            {/* Consent slot — CREATE only for now (edit consent arrives in Task 5). */}
+            {!isEdit && formValid && consentRequired && (
+              <ConsentCheckbox
+                text={statement}
+                checked={consentChecked}
+                // For a minor on a gated domain, ticking the consent is the
+                // trigger: it fires the guardian OTP BEFORE the profile is
+                // created (no draft is written until "Create profile").
+                onCheckedChange={(v) => {
+                  setConsentChecked(v);
+                  // Don't fire the OTP straight away — show the "you're under 18,
+                  // a code goes to your guardian" interstitial first, then issue
+                  // on confirm.
+                  if (v && minorGatedCreate && !guardianVerifiedForCreate) {
+                    setGuardianConfirmOpen(true);
+                  }
+                }}
+              />
+            )}
+            {!isEdit && minorGatedCreate && consentChecked && (
+              <p className="text-sm text-muted-foreground">
+                {guardianVerifiedForCreate
+                  ? t('u18.guardian_verified_for_create', 'Guardian verified. You can now create your profile.')
+                  : t('u18.guardian_pending_for_create', "You're under 18 — your guardian must verify with a one-time code before you can create this profile.")}
+              </p>
+            )}
+            <Button variant="ghost" onClick={handleBack}>
+              {t('common.cancel')}
+            </Button>
+            <button
+              type="submit"
+              form="profile-form"
+              disabled={submitDisabled}
+              className="h-11 rounded-md bg-brand-cta px-5 font-semibold text-white disabled:opacity-50"
+            >
+              {primaryLabel}
+            </button>
+          </div>
+        </div>
 
         <WalletImportModal
           open={isWalletModalOpen}
@@ -905,7 +975,7 @@ export function ProfileFormPage() {
             onLogout={() => { void signOut(); }}
           />
         )}
-      </main>
-    </div>
+      </div>
+    </PageShell>
   );
 }
