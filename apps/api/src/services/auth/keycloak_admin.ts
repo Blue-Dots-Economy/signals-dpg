@@ -112,19 +112,47 @@ export class KeycloakAdminClient {
     return this.token;
   }
 
+  /** Drop the cached token so the next call fetches a fresh one. */
+  private forgetToken(): void {
+    this.token = null;
+    this.tokenExpiresAt = 0;
+  }
+
+  /**
+   * One Admin-REST call, with a single retry on 401.
+   *
+   * The cached token can go stale before its `expires_in` says so — the realm's
+   * SSO session is revoked, the client secret is rotated, or Keycloak restarts
+   * with a fresh signing key. Without this, the cached token is reused until it
+   * expires and every call in that window fails: on a long migration run that is
+   * the whole rest of the run. The retry is capped at one, and only ever on a
+   * 401, so a genuinely unauthorised client still fails fast rather than
+   * looping.
+   *
+   * Bodies here are always strings (`JSON.stringify`), never streams, so the
+   * request is safe to replay.
+   */
   private async request(
     path: string,
     init: RequestInit & { method: string }
   ): Promise<Response> {
-    const token = await this.accessToken();
-    return this.fetchImpl(`${this.adminBase}${path}`, {
-      ...init,
-      headers: {
-        ...(init.body ? { 'content-type': 'application/json' } : {}),
-        ...init.headers,
-        authorization: `Bearer ${token}`,
-      },
-    });
+    const send = async (): Promise<Response> => {
+      const token = await this.accessToken();
+      return this.fetchImpl(`${this.adminBase}${path}`, {
+        ...init,
+        headers: {
+          ...(init.body ? { 'content-type': 'application/json' } : {}),
+          ...init.headers,
+          authorization: `Bearer ${token}`,
+        },
+      });
+    };
+
+    const res = await send();
+    if (res.status !== 401) return res;
+
+    this.forgetToken();
+    return send();
   }
 
   /** Fetch a user by id. null when absent. */

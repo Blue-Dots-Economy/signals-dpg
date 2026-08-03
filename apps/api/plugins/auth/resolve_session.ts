@@ -21,8 +21,10 @@ import { authConfig } from '../../src/config';
 import {
   actingOrgGrant,
   extractBearerToken,
+  hasRealmRole,
   isServiceAccountToken,
   looksLikeKeycloakToken,
+  realmRoles,
   verifyKeycloakToken,
   type KeycloakTokenErrorCode,
 } from '../../src/utils/keycloak_token';
@@ -160,6 +162,22 @@ const WRONG_PATH_FOR_CLIENT: AuthFailure = {
   message: 'This token was not issued for this kind of access',
 };
 
+/**
+ * A realm-valid token for an accepted client that carries none of the signals
+ * realm roles (`KEYCLOAK_REQUIRED_REALM_ROLES`).
+ *
+ * The second gate around the shared realm. The client allowlist alone rests on
+ * `azp`/`aud`, and an aggregator client given an `aud` mapper that names
+ * `signals-ui` would satisfy it; a role the signals provisioning paths stamp and
+ * aggregator's do not is not spoofable from the client side.
+ */
+const MISSING_REALM_ROLE: AuthFailure = {
+  status: 403,
+  code: 'TOKEN_ROLE_REJECTED',
+  error: 'Forbidden',
+  message: 'This account is not a participant of the Signals Stack',
+};
+
 export const UNAUTHORIZED: AuthFailure = {
   status: 401,
   code: 'UNAUTHORIZED',
@@ -241,12 +259,34 @@ export async function resolveKeycloakSession(
     return { ok: true };
   }
 
-  if (azp !== undefined && !keycloakConfig.session_client_ids.includes(azp)) {
+  /**
+   * The human path requires a *named* client, and a named client on the human
+   * list. A missing `azp` is a rejection, not a pass: the audience gate in
+   * `verifyKeycloakToken` accepts on an `aud` match alone, so a token with no
+   * `azp` but an `aud` naming an accepted client would otherwise skip this check
+   * entirely and reach provisioning unattributed. Keycloak always emits `azp`,
+   * so nothing legitimate lands here.
+   */
+  if (azp === undefined || !keycloakConfig.session_client_ids.includes(azp)) {
     request.log.warn(
-      { azp },
-      'keycloak token rejected: client may not use the human session path',
+      { azp: azp ?? null, aud: claims.aud },
+      azp === undefined
+        ? 'keycloak token rejected: no azp claim, so the human session path cannot attribute it to a client'
+        : 'keycloak token rejected: client may not use the human session path',
     );
     return { ok: false, failure: WRONG_PATH_FOR_CLIENT };
+  }
+
+  // Second gate on the shared realm (defence in depth). Skipped only when an
+  // operator has emptied KEYCLOAK_REQUIRED_REALM_ROLES.
+  const required = keycloakConfig.required_realm_roles;
+  if (required.length > 0 && !required.some((role) => hasRealmRole(claims, role))) {
+    request.log.warn(
+      { azp, roles: realmRoles(claims), required },
+      'keycloak token rejected: carries none of the required signals realm roles ' +
+        '(check the client\'s `roles` scope and that migration assigned the role)',
+    );
+    return { ok: false, failure: MISSING_REALM_ROLE };
   }
 
   const provisioned = await provisionUserFromClaims(claims, request.log);

@@ -16,8 +16,9 @@ const mockAuthConfig = {
 };
 
 const mockKeycloakConfig = {
-  session_client_ids: ['signals-ui', 'signals-api'],
+  session_client_ids: ['signals-ui'],
   service_client_ids: ['aggregator-dpg', 'voice-dpg'],
+  required_realm_roles: ['signals_participant', 'signals_admin'],
 };
 
 vi.mock('../../../src/config', () => ({
@@ -44,6 +45,10 @@ vi.mock('../../../src/utils/keycloak_token', async () => {
     // exercised rather than stubbed away.
     actingOrgGrant: actual.actingOrgGrant,
     ACTING_ORG_WILDCARD: actual.ACTING_ORG_WILDCARD,
+    // Realm-role gate: real claim reading, so the tests assert on the actual
+    // `realm_access` shape rather than a stub's idea of it.
+    hasRealmRole: actual.hasRealmRole,
+    realmRoles: actual.realmRoles,
   };
 });
 
@@ -71,12 +76,18 @@ const makeRequest = (authorization?: string): FastifyRequest =>
     log: { error: vi.fn(), warn: vi.fn(), info: vi.fn(), debug: vi.fn() },
   }) as unknown as FastifyRequest;
 
-const okClaims = { sub: 'user-1', email: 'asha@example.org', azp: 'signals-ui' };
+const okClaims = {
+  sub: 'user-1',
+  email: 'asha@example.org',
+  azp: 'signals-ui',
+  realm_access: { roles: ['signals_participant'] },
+};
 
 beforeEach(() => {
   setProvider('betterauth');
-  mockKeycloakConfig.session_client_ids = ['signals-ui', 'signals-api'];
+  mockKeycloakConfig.session_client_ids = ['signals-ui'];
   mockKeycloakConfig.service_client_ids = ['aggregator-dpg', 'voice-dpg'];
+  mockKeycloakConfig.required_realm_roles = ['signals_participant', 'signals_admin'];
   looksLikeKeycloakToken.mockReset().mockReturnValue(true);
   verifyKeycloakToken.mockReset().mockResolvedValue({ ok: true, claims: okClaims });
   isServiceAccountToken.mockReset().mockReturnValue(false);
@@ -254,6 +265,30 @@ describe('service vs human fork (Build 3)', () => {
     expect(provisionUserFromClaims).not.toHaveBeenCalled();
   });
 
+  it('refuses a human token that carries no azp at all', async () => {
+    // The audience gate in verifyKeycloakToken accepts on an `aud` match with no
+    // `azp` required, so treating a missing `azp` as "no client to check" let a
+    // token with a matching `aud` skip this gate and reach provisioning
+    // unattributed. Keycloak always emits `azp`; this must be a rejection.
+    verifyKeycloakToken.mockResolvedValue({
+      ok: true,
+      claims: {
+        sub: 'x',
+        email: 'someone@example.org',
+        aud: ['signals-ui'],
+        realm_access: { roles: ['signals_participant'] },
+      },
+    });
+
+    const result = await resolveKeycloakSession(makeRequest('Bearer a.b.c'));
+
+    expect(result.ok).toBe(false);
+    if (result.ok || !('failure' in result)) throw new Error('expected a failure');
+    expect(result.failure.status).toBe(403);
+    expect(result.failure.code).toBe('TOKEN_CLIENT_REJECTED');
+    expect(provisionUserFromClaims).not.toHaveBeenCalled();
+  });
+
   it.each([
     ['SERVICE_CLIENT_UNKNOWN', 401],
     ['SERVICE_CLIENT_NOT_ALLOWED', 403],
@@ -269,6 +304,85 @@ describe('service vs human fork (Build 3)', () => {
     if (result.ok || !('failure' in result)) throw new Error('expected a failure');
     expect(result.failure.status).toBe(status);
     expect(result.failure.code).toBe(code);
+  });
+});
+
+describe('realm-role gate on the human path (shared-realm defence in depth)', () => {
+  beforeEach(() => setProvider('keycloak'));
+
+  it('refuses an accepted-client token that carries no signals realm role', async () => {
+    // The scenario the client allowlist alone does not cover: a foreign-realm
+    // client whose `aud`/`azp` names a signals client. Signals stamps
+    // signals_participant / signals_admin on its own users; aggregator's do not
+    // carry either, and a client cannot mint itself a realm role.
+    verifyKeycloakToken.mockResolvedValue({
+      ok: true,
+      claims: {
+        sub: 'x',
+        azp: 'signals-ui',
+        email: 'someone@example.org',
+        realm_access: { roles: ['org_owner'] },
+      },
+    });
+
+    const result = await resolveKeycloakSession(makeRequest('Bearer a.b.c'));
+
+    expect(result.ok).toBe(false);
+    if (result.ok || !('failure' in result)) throw new Error('expected a failure');
+    expect(result.failure.status).toBe(403);
+    expect(result.failure.code).toBe('TOKEN_ROLE_REJECTED');
+    expect(provisionUserFromClaims).not.toHaveBeenCalled();
+  });
+
+  it('refuses a token with no realm_access claim at all', async () => {
+    verifyKeycloakToken.mockResolvedValue({
+      ok: true,
+      claims: { sub: 'x', azp: 'signals-ui', email: 'someone@example.org' },
+    });
+
+    const result = await resolveKeycloakSession(makeRequest('Bearer a.b.c'));
+
+    if (result.ok || !('failure' in result)) throw new Error('expected a failure');
+    expect(result.failure.code).toBe('TOKEN_ROLE_REJECTED');
+    expect(provisionUserFromClaims).not.toHaveBeenCalled();
+  });
+
+  it('accepts signals_admin as well as signals_participant', async () => {
+    verifyKeycloakToken.mockResolvedValue({
+      ok: true,
+      claims: { ...okClaims, realm_access: { roles: ['signals_admin'] } },
+    });
+
+    const result = await resolveKeycloakSession(makeRequest('Bearer a.b.c'));
+
+    expect(result.ok).toBe(true);
+    expect(provisionUserFromClaims).toHaveBeenCalled();
+  });
+
+  it('skips the gate when the required-role list is empty (operator opt-out)', async () => {
+    mockKeycloakConfig.required_realm_roles = [];
+    verifyKeycloakToken.mockResolvedValue({
+      ok: true,
+      claims: { sub: 'user-1', azp: 'signals-ui', email: 'asha@example.org' },
+    });
+
+    const result = await resolveKeycloakSession(makeRequest('Bearer a.b.c'));
+
+    expect(result.ok).toBe(true);
+  });
+
+  it('does not apply the role gate to service tokens', async () => {
+    // Service accounts carry realm-management roles, not signals_participant.
+    isServiceAccountToken.mockReturnValue(true);
+    verifyKeycloakToken.mockResolvedValue({
+      ok: true,
+      claims: { sub: 's', azp: 'aggregator-dpg', client_id: 'aggregator-dpg' },
+    });
+
+    const result = await resolveKeycloakSession(makeRequest('Bearer a.b.c'));
+
+    expect(result.ok).toBe(true);
+    expect(resolveServiceAccount).toHaveBeenCalled();
   });
 });
 

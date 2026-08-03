@@ -98,6 +98,20 @@ roles are prefixed to keep clear of aggregator's `org_owner`:
 - `signals_admin` — elevated signals operator; successor to the local
   `user.role` column better-auth's admin plugin populated.
 
+**One of these is required on the human session path** — `resolve_session.ts`
+checks the token against `KEYCLOAK_REQUIRED_REALM_ROLES` (default
+`signals_participant,signals_admin`) after the client allowlist, and answers
+`403 TOKEN_ROLE_REJECTED` if neither is present. It is the second gate around the
+shared realm: the allowlist rests on `azp`/`aud`, which an aggregator client
+given an `aud` mapper naming `signals-ui` would satisfy, whereas a realm role is
+assigned by the realm and not chosen by the client. Both signals provisioning
+paths stamp one (`user_to_keycloak.ts`), so every migrated or self-signed-up user
+has it — a token that reaches this and fails means either the client is missing
+the `roles` scope (no `realm_access` in the token at all) or the migration did not
+assign the role; `scripts/create_admin_user.ts` verifies assignment for exactly
+that reason. Setting the var empty disables the check, leaving the client
+allowlist as the only cross-DPG gate.
+
 ## Clients
 
 | Client | Type | Purpose |
@@ -112,6 +126,13 @@ roles are prefixed to keep clear of aggregator's `org_owner`:
 realm an aggregator-issued token is signature- and issuer-valid against signals,
 so this check is what keeps the two populations apart. See
 `apps/api/src/utils/keycloak_token.ts`.
+
+`signals-api` itself is **not** in the default human allowlist: it is the API's
+own Admin-REST client, and `resolveServiceAccount` rejects it on the service path
+too (it is not an integrating DPG). Listing it would have made the one client
+that can mint itself a token also a valid human session. The human path
+additionally requires a *named* client — a token with no `azp` is rejected, not
+waved through, since the audience gate accepts on an `aud` match alone.
 
 > **On `manage-realm`.** `signals-api`'s service account is granted it in
 > addition to the user-scoped roles, because the R4 user migration uses

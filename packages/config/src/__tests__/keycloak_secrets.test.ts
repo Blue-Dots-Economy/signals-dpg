@@ -55,9 +55,34 @@ describe('KeycloakSecretsSchema', () => {
     expect(parsed.KEYCLOAK_REALM).toBe('bluedots');
     expect(parsed.KEYCLOAK_UI_CLIENT_ID).toBe('signals-ui');
     expect(parsed.KEYCLOAK_API_CLIENT_ID).toBe('signals-api');
-    expect(parsed.KEYCLOAK_ACCEPTED_CLIENT_IDS).toBe('signals-ui,signals-api');
+    expect(parsed.KEYCLOAK_ACCEPTED_CLIENT_IDS).toBe('signals-ui');
     expect(parsed.KEYCLOAK_JWKS_CACHE_MAX_AGE_MS).toBe(600_000);
     expect(parsed.KEYCLOAK_CLOCK_TOLERANCE_SECONDS).toBe(30);
+  });
+
+  it('keeps signals-api off the human session allowlist by default', () => {
+    // signals-api is the API's own Admin-REST service client. It is rejected on
+    // the service path (not an integrating DPG), so listing it here would have
+    // made the one client that can mint its own token a valid human session too.
+    const parsed = KeycloakSecretsSchema.parse({});
+    expect(parseKeycloakAcceptedClientIds(parsed.KEYCLOAK_ACCEPTED_CLIENT_IDS)).toEqual([
+      'signals-ui',
+    ]);
+  });
+
+  it('requires a signals realm role on the human path by default', () => {
+    // Defence in depth for the shared realm: the client allowlist rests on
+    // azp/aud, which an aggregator client with an aud mapper could satisfy.
+    const parsed = KeycloakSecretsSchema.parse({});
+    expect(parseKeycloakAcceptedClientIds(parsed.KEYCLOAK_REQUIRED_REALM_ROLES)).toEqual([
+      'signals_participant',
+      'signals_admin',
+    ]);
+  });
+
+  it('treats an empty required-roles list as the documented opt-out', () => {
+    const parsed = KeycloakSecretsSchema.parse({ KEYCLOAK_REQUIRED_REALM_ROLES: '' });
+    expect(parseKeycloakAcceptedClientIds(parsed.KEYCLOAK_REQUIRED_REALM_ROLES)).toEqual([]);
   });
 
   it('defaults the service-client allowlist to empty', () => {

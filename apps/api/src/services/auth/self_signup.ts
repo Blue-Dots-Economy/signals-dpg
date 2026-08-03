@@ -107,9 +107,22 @@ async function overLimit(key: string, max: number, log: FastifyBaseLogger): Prom
 
 let adminClient: KeycloakAdminClient | null = null;
 
-/** Test seam: forget the memoised admin client. */
+/**
+ * Whether the realm retains a written `phoneNumber` attribute, memoised.
+ *
+ * The realm's user profile is deploy-time configuration, not per-request state,
+ * so one check per process is enough — and it must be memoised, because this
+ * endpoint is public and would otherwise turn every signup into an extra
+ * Admin-REST round trip. A failed check is not cached (stays null), so a
+ * transient Keycloak blip does not disable phone signup for the process
+ * lifetime.
+ */
+let phoneAttributePersists: boolean | null = null;
+
+/** Test seam: forget the memoised admin client and realm-profile probe. */
 export function resetSelfSignupState(): void {
   adminClient = null;
+  phoneAttributePersists = null;
 }
 
 function getAdminClient(): KeycloakAdminClient | null {
@@ -236,6 +249,29 @@ export async function selfSignup(
     ];
     if (inRealm.length > 0) return { ok: true, alreadyRegistered: true };
 
+    // A phone-only user whose `phoneNumber` attribute is silently dropped by the
+    // realm is created and then permanently unable to receive an OTP — the same
+    // false green the migration script guards against
+    // (`attributesWillPersist`), which live signup was missing. Refuse before
+    // creating rather than mint an account nobody can log into.
+    if (phoneNumber) {
+      if (phoneAttributePersists === null) {
+        phoneAttributePersists = await client.attributesWillPersist('phoneNumber');
+      }
+      if (!phoneAttributePersists) {
+        log.error(
+          'self-signup: the realm does not retain the phoneNumber attribute — ' +
+            'declare it in the user profile or enable unmanaged attributes, or ' +
+            'phone sign-ups can never receive an OTP'
+        );
+        return {
+          ok: false,
+          code: 'SIGNUP_NOT_AVAILABLE',
+          message: 'Sign-up is not available right now.',
+        };
+      }
+    }
+
     // The id minted here becomes the Keycloak `sub` AND, at first login, the
     // local `user.id` — the same invariant the migration preserves.
     const id = randomUUID();
@@ -279,11 +315,31 @@ export async function selfSignup(
         return { ok: true, alreadyRegistered: false };
       case 'already_exists':
         return { ok: true, alreadyRegistered: true };
-      default:
-        // A race, or an identifier held by a user the searches above missed.
-        log.warn({ detail: 'detail' in outcome ? outcome.detail : outcome.kind },
-          'self-signup: Keycloak refused to create the identity');
-        return { ok: true, alreadyRegistered: true };
+      default: {
+        // Creation failed and the pre-checks above found nothing, so this is
+        // either a race (someone claimed the identifier in between) or a real
+        // failure. Look again before answering: reporting `alreadyRegistered`
+        // unconditionally is the exact "sign-up says registered / sign-in says
+        // no such user" dead-end this migration exists to remove, and the user
+        // has no way out of it. Only a re-check that actually finds the
+        // identifier justifies that answer.
+        log.warn(
+          { detail: 'detail' in outcome ? outcome.detail : outcome.kind },
+          'self-signup: Keycloak refused to create the identity'
+        );
+
+        const nowInRealm = [
+          ...(email ? await client.findByEmail(email) : []),
+          ...(phoneNumber ? await client.findByPhone(phoneNumber) : []),
+        ];
+        if (nowInRealm.length > 0) return { ok: true, alreadyRegistered: true };
+
+        log.error(
+          { detail: 'detail' in outcome ? outcome.detail : outcome.kind },
+          'self-signup: identity was neither created nor found on re-check'
+        );
+        return { ok: false, code: 'SIGNUP_FAILED', message: 'Could not complete sign-up.' };
+      }
     }
   } catch (err) {
     log.error({ err }, 'self-signup failed');

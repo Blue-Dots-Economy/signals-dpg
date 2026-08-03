@@ -135,6 +135,13 @@ export const keycloakConfig = {
   service_client_ids: parseKeycloakAcceptedClientIds(
     keycloak.KEYCLOAK_SERVICE_CLIENT_IDS
   ),
+  /**
+   * Realm roles a human token must carry one of, on top of the client
+   * allowlist. Empty disables the check (see the env comment).
+   */
+  required_realm_roles: parseKeycloakAcceptedClientIds(
+    keycloak.KEYCLOAK_REQUIRED_REALM_ROLES
+  ),
   jwks_cache_max_age_ms: keycloak.KEYCLOAK_JWKS_CACHE_MAX_AGE_MS,
   clock_tolerance_seconds: keycloak.KEYCLOAK_CLOCK_TOLERANCE_SECONDS,
 };

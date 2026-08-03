@@ -305,6 +305,13 @@ export function realmRoles(claims: KeycloakClaims): string[] {
   return claims.realm_access?.roles ?? [];
 }
 
+/**
+ * Used by `resolve_session.ts` as the second gate on the human path
+ * (`KEYCLOAK_REQUIRED_REALM_ROLES`). The client allowlist above is checked
+ * against `azp`/`aud`; a realm role is assigned by the realm rather than named
+ * by the client, so it is the part of the shared-realm defence a misconfigured
+ * audience mapper cannot undo.
+ */
 export function hasRealmRole(claims: KeycloakClaims, role: string): boolean {
   return realmRoles(claims).includes(role);
 }

@@ -50,7 +50,11 @@ const mockKeycloakConfig = {
   api_client_id: 'signals-api',
   api_client_secret: 'shh' as string | undefined,
 };
+const mockApiConfig = {
+  served_domains: [{ domain: 'student' }, { domain: 'employer' }],
+};
 vi.mock('@/config', () => ({
+  apiConfig: mockApiConfig,
   authConfig: mockAuthConfig,
   keycloakConfig: mockKeycloakConfig,
 }));
@@ -65,12 +69,14 @@ type Rep = {
 };
 const createUserPreservingId =
   vi.fn<(user: Rep) => Promise<{ kind: string; detail?: string }>>();
+const attributesWillPersist = vi.fn(async (_attribute: string) => true);
 
 vi.mock('@/services/auth/keycloak_admin', () => ({
   KeycloakAdminClient: class {
     findByEmail = findByEmail;
     findByPhone = findByPhone;
     createUserPreservingId = createUserPreservingId;
+    attributesWillPersist = attributesWillPersist;
   },
 }));
 
@@ -92,9 +98,11 @@ beforeEach(() => {
   mockAuthConfig.allow_self_signup = true;
   mockAuthConfig.login_channels = ['phone', 'email'];
   mockKeycloakConfig.api_client_secret = 'shh';
+  mockApiConfig.served_domains = [{ domain: 'student' }, { domain: 'employer' }];
   findByEmail.mockReset().mockResolvedValue([]);
   findByPhone.mockReset().mockResolvedValue([]);
   createUserPreservingId.mockReset().mockResolvedValue({ kind: 'created' });
+  attributesWillPersist.mockReset().mockResolvedValue(true);
 });
 
 describe('gates', () => {
@@ -209,12 +217,97 @@ describe('existing identifiers — never duplicate a person', () => {
     expect(createUserPreservingId).not.toHaveBeenCalled();
   });
 
-  it('treats a create-time conflict as already registered, not an error', async () => {
+  it('treats a create-time conflict as already registered when a re-check finds the identifier', async () => {
+    // The honest race: someone claimed the identifier between the pre-check and
+    // the create.
     createUserPreservingId.mockResolvedValue({ kind: 'conflict', detail: 'taken' });
+    findByEmail.mockResolvedValueOnce([]).mockResolvedValueOnce([{ id: 'kc-racer' }]);
 
     const result = await selfSignup(INPUT, makeLog());
 
     expect(result).toEqual({ ok: true, alreadyRegistered: true });
+  });
+
+  it('reports SIGNUP_FAILED when the identity was neither created nor found', async () => {
+    // Answering `alreadyRegistered` here is the "sign-up says registered /
+    // sign-in says no such user" dead-end this migration exists to remove: the
+    // person is told to log in to an account that does not exist, with no way out.
+    createUserPreservingId.mockResolvedValue({ kind: 'conflict', detail: 'partialImport added=0' });
+    const log = makeLog();
+
+    const result = await selfSignup(INPUT, log);
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.code).toBe('SIGNUP_FAILED');
+    expect(log.error).toHaveBeenCalled();
+  });
+});
+
+describe('domain and age validation', () => {
+  it('refuses a domain this instance does not serve', async () => {
+    // A real authorization check, not input hygiene: `domains` gates profile
+    // creation downstream (user_domains.ts).
+    const result = await selfSignup({ ...INPUT, domain: 'astronaut' }, makeLog());
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.code).toBe('DOMAIN_NOT_SERVED');
+    expect(createUserPreservingId).not.toHaveBeenCalled();
+  });
+
+  it('accepts a served domain', async () => {
+    const result = await selfSignup({ ...INPUT, domain: 'student' }, makeLog());
+
+    expect(result).toEqual({ ok: true, alreadyRegistered: false });
+  });
+
+  it.each([-1, 121, 12.5])('refuses age %s', async (age) => {
+    const result = await selfSignup({ ...INPUT, age }, makeLog());
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.code).toBe('INVALID_AGE');
+    expect(createUserPreservingId).not.toHaveBeenCalled();
+  });
+
+  it('accepts an age within range', async () => {
+    const result = await selfSignup({ ...INPUT, age: 17 }, makeLog());
+    expect(result.ok).toBe(true);
+  });
+});
+
+describe('phone attributes must actually persist', () => {
+  it('refuses a phone signup when the realm drops the phoneNumber attribute', async () => {
+    // Otherwise the account is created and can never receive an OTP — the same
+    // false green the migration script already guards against.
+    attributesWillPersist.mockResolvedValue(false);
+    const log = makeLog();
+
+    const result = await selfSignup(
+      { name: 'Asha', phoneNumber: '+919876500001', clientIp: '10.0.0.1' },
+      log
+    );
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.code).toBe('SIGNUP_NOT_AVAILABLE');
+    expect(createUserPreservingId).not.toHaveBeenCalled();
+    expect(log.error).toHaveBeenCalled();
+  });
+
+  it('does not probe the realm profile for an email-only signup', async () => {
+    await selfSignup(INPUT, makeLog());
+
+    expect(attributesWillPersist).not.toHaveBeenCalled();
+    expect(createUserPreservingId).toHaveBeenCalled();
+  });
+
+  it('probes once per process, not once per signup', async () => {
+    await selfSignup({ name: 'A', phoneNumber: '+919876500001' }, makeLog());
+    await selfSignup({ name: 'B', phoneNumber: '+919876500002' }, makeLog());
+
+    expect(attributesWillPersist).toHaveBeenCalledOnce();
   });
 });
 

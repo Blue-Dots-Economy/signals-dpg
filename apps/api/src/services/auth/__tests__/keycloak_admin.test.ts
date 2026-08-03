@@ -99,6 +99,47 @@ describe('accessToken', () => {
   });
 });
 
+describe('a stale cached token', () => {
+  it('is dropped and refetched once when Keycloak answers 401', async () => {
+    // The cached token can die before `expires_in` says so — secret rotated,
+    // session revoked, Keycloak restarted. Without the retry, every call in the
+    // remaining lifetime fails; on a long migration run that is the whole run.
+    let tokensIssued = 0;
+    let userReads = 0;
+    handler = (url) => {
+      if (url === TOKEN_URL) {
+        tokensIssued += 1;
+        return json({ access_token: `t${tokensIssued}`, expires_in: 300 });
+      }
+      userReads += 1;
+      // First read rejects the stale token; the retry, with a fresh one, works.
+      if (userReads === 1) return new Response('stale', { status: 401 });
+      return json({ id: USER_ID, username: 'asha@example.org' });
+    };
+
+    const client = makeClient();
+
+    expect(await client.getUserById(USER_ID)).toEqual({
+      id: USER_ID,
+      username: 'asha@example.org',
+    });
+    expect(tokensIssued).toBe(2);
+    expect(userReads).toBe(2);
+  });
+
+  it('retries at most once, so an unauthorised client still fails fast', async () => {
+    let userReads = 0;
+    handler = (url) => {
+      if (url === TOKEN_URL) return json({ access_token: 't', expires_in: 300 });
+      userReads += 1;
+      return new Response('nope', { status: 401 });
+    };
+
+    await expect(makeClient().getUserById(USER_ID)).rejects.toThrow(KeycloakAdminError);
+    expect(userReads).toBe(2);
+  });
+});
+
 describe('createUser', () => {
   it('reports `created` when Keycloak honours the supplied id', async () => {
     handler = (url, init) => {

@@ -107,7 +107,7 @@ Two env vars gate this (both in `packages/config/src/secrets.ts`):
 
 | Var | Meaning |
 |---|---|
-| `AUTH_PROVIDER` | Must be `dual` or `keycloak` for bearer tokens to be considered at all. Default `betterauth` — bearer service auth is inert. |
+| `AUTH_PROVIDER` | Must be `keycloak` for bearer tokens to be considered at all (`dual` has been removed). Default `betterauth` — bearer service auth is inert. |
 | `KEYCLOAK_SERVICE_CLIENT_IDS` | Comma-separated client ids allowed on the service path, e.g. `aggregator-dpg,voice-dpg`. **Empty by default**, so no client can use service auth until an operator names it. |
 
 `KEYCLOAK_SERVICE_CLIENT_IDS` is deliberately separate from

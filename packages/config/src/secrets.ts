@@ -100,7 +100,27 @@ export const KeycloakSecretsSchema = z.object({
   // session path. Load-bearing: the realm is shared with aggregator, so an
   // aggregator-issued token is realm-valid and signature/`iss` checks alone
   // would let it through (R9). Parsed by parseKeycloakAcceptedClientIds().
-  KEYCLOAK_ACCEPTED_CLIENT_IDS: z.string().default('signals-ui,signals-api'),
+  //
+  // `signals-api` is deliberately NOT in this default: it is the confidential
+  // client the API uses for its own Admin-REST service account, and
+  // `resolveServiceAccount` rejects it on the service path too (it is not an
+  // integrating DPG). Listing it here would have made the one client that can
+  // mint itself a token also a valid human session.
+  KEYCLOAK_ACCEPTED_CLIENT_IDS: z.string().default('signals-ui'),
+  // Realm roles a human token must carry at least one of, checked on the
+  // session path after the client allowlist (defence in depth for the shared
+  // realm: a misconfigured `aud` mapper on an aggregator client would otherwise
+  // be the only thing between a foreign-realm token and a signals session).
+  // Both signals roles are stamped by `user_to_keycloak.ts`, so every migrated
+  // or self-signed-up user has one.
+  //
+  // Set to an empty string to disable the check — the escape hatch for a realm
+  // whose access tokens carry no `realm_access.roles` (no `roles` client scope
+  // on the client). Do that knowingly: the client allowlist becomes the only
+  // cross-DPG gate again.
+  KEYCLOAK_REQUIRED_REALM_ROLES: z
+    .string()
+    .default('signals_participant,signals_admin'),
   // Comma-separated client ids of integrating DPGs allowed on the SERVICE
   // path via client-credentials (§5). Kept separate from the list above, not
   // merged into it, so the two populations cannot be confused: a token from
