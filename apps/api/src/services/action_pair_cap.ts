@@ -1,6 +1,12 @@
 import { and, or, eq, notInArray, sql } from 'drizzle-orm';
 import { item_actions } from '@dpg/database';
 import type { NetworkConfig } from '@dpg/config';
+import { CANONICAL_BUCKETS } from '@/services/metrics/buckets';
+
+// The metric_categories buckets that mean an action is DONE (no longer open):
+// every canonical bucket except `create`. Reused from the metrics module so the
+// two stay in lockstep if the bucket set ever changes.
+const TERMINAL_BUCKETS = CANONICAL_BUCKETS.filter((b) => b !== 'create');
 
 /**
  * Max concurrent OPEN actions per item pair (#370, original #422). One rule for
@@ -49,7 +55,7 @@ export function terminalStatuses(cfg: NetworkConfig): string[] {
       const mc = (interaction as { metric_categories?: Record<string, string[] | undefined> | null })
         .metric_categories;
       if (!mc) continue;
-      for (const bucket of ['accept', 'reject', 'cancel'] as const) {
+      for (const bucket of TERMINAL_BUCKETS) {
         for (const status of mc[bucket] ?? []) set.add(status);
       }
     }
