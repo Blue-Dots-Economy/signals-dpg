@@ -79,7 +79,12 @@ export function LocationAutocompleteWidget({
 
   function handleInput(next: string) {
     setText(next);
-    onChange(next);
+    // Emit `undefined` (not "") when cleared, so a required location field goes
+    // back to invalid — an empty string counts as "present" for JSON-Schema
+    // `required`, which let an emptied location slip past validation (a normal
+    // text widget clears to undefined, which is why other required fields did
+    // invalidate on clear but this one didn't).
+    onChange(next === '' ? undefined : next);
     // The freshly typed text is no longer a resolved place — drop prior coords
     // so the submit-time fallback re-geocodes (or the next selection sets them).
     // Only the primary field feeds item_locations.

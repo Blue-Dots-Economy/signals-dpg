@@ -35,6 +35,10 @@ interface PageShellProps {
   onViewModeChange?: (mode: ViewMode) => void;
   /** Optional Filters control surfaced in the top bar next to the search input. */
   filtersSlot?: React.ReactNode;
+  /** Label for the form-variant Back control (defaults to "Back" in TopBar). */
+  backLabel?: string;
+  /** Hide the sidebar's Browse (domain selector) group — form pages. */
+  hideBrowse?: boolean;
 }
 
 export function PageShell({
@@ -60,6 +64,8 @@ export function PageShell({
   viewMode,
   onViewModeChange,
   filtersSlot,
+  backLabel,
+  hideBrowse,
 }: PageShellProps) {
   const { t } = useTranslation();
   return (
@@ -84,6 +90,7 @@ export function PageShell({
           onActiveProfileChange={onActiveProfileChange}
           onProfilesChanged={onProfilesChanged}
           userSchemas={userSchemas}
+          hideBrowse={hideBrowse}
         />
         <div className="flex h-svh min-w-0 flex-1 flex-col">
           <TopBar
@@ -91,6 +98,7 @@ export function PageShell({
             title={title}
             subtitle={subtitle}
             onBack={onBack}
+            backLabel={backLabel}
             search={search}
             onSearchChange={onSearchChange}
             viewMode={viewMode}

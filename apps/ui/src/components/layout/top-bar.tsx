@@ -23,6 +23,9 @@ interface TopBarProps {
   subtitle?: string;
   /** Invoked by the Back button when `variant === 'form'`. */
   onBack?: () => void;
+  /** Label for the Back control (defaults to "Back"). Form pages pass "Browse"
+   * since the control returns to the browse view, not the prior route. */
+  backLabel?: string;
   // browse-only — unused (and unneeded) when variant === 'form'
   search?: string;
   onSearchChange?: (value: string) => void;
@@ -60,6 +63,7 @@ export function TopBar({
   title,
   subtitle,
   onBack,
+  backLabel,
   search,
   onSearchChange,
   viewMode,
@@ -80,10 +84,10 @@ export function TopBar({
             size="sm"
             onClick={onBack}
             className="gap-1.5"
-            aria-label={t('common.back')}
+            aria-label={backLabel ?? t('common.back')}
           >
             <ArrowLeft className="h-4 w-4" />
-            <span className="hidden sm:inline">{t('common.back')}</span>
+            <span className="hidden sm:inline">{backLabel ?? t('common.back')}</span>
           </Button>
           <div className="min-w-0">
             <h1 className="truncate text-sm font-semibold text-foreground sm:text-[15px]">{title}</h1>

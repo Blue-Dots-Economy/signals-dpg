@@ -749,6 +749,11 @@ export function ProfileFormPage() {
     onActiveProfileChange: handleSidebarProfileChange,
     onProfilesChanged: handleProfilesChanged,
     userSchemas,
+    // On a create/edit form there is nothing to browse — hide the Browse
+    // (domain selector) group, and label the return control "Browse" (it goes
+    // to the browse view, not the prior route).
+    hideBrowse: true,
+    backLabel: t('nav.browse'),
   };
 
   // Domain selection step
@@ -814,12 +819,13 @@ export function ProfileFormPage() {
       onBack={handleBack}
       {...shellSidebarProps}
     >
-      <div className="mx-auto max-w-[1040px] pb-24">
+      <div className="mx-auto max-w-[1040px]">
         {/* Branded hero strip — sits flush above the form Card. The visible page
             title lives in the shell's TopBar (its <h1>); this hero heading is an
             <h2>, keeping the chain h1(TopBar) → h2(hero) → h3(SchemaForm section)
-            skip-free. */}
-        <div className="relative overflow-hidden rounded-t-xl bg-brand-hero">
+            skip-free. Uses the network's primary brand color (was a fixed dark
+            navy). */}
+        <div className="relative overflow-hidden rounded-t-xl bg-primary">
           <div className="pointer-events-none absolute inset-0 opacity-15">
             <NetworkConstellation className="h-full w-full" />
           </div>
@@ -842,9 +848,10 @@ export function ProfileFormPage() {
           </div>
         </div>
 
-        {/* Form card — connects flush to the hero strip */}
+        {/* Form card — connects flush to the hero strip. Bottom padding clears
+            the sticky action bar so the last fields aren't hidden behind it. */}
         <Card className="rounded-t-none border-t-0 shadow-lg">
-          <CardContent className="pt-6">
+          <CardContent className="pt-6 pb-24">
             {/* #376: motivating "why complete your profile" prompt — per-domain
                 from network.json (role-specific), with a generic i18n fallback. */}
             {showCompletionPrompt && selectedDomain && (
@@ -905,7 +912,7 @@ export function ProfileFormPage() {
             guardian interstitial/OTP still promotes the fresh item to live. */}
         <div
           data-testid="profile-action-bar"
-          className="sticky bottom-0 z-30 mt-4 flex flex-wrap items-center gap-3 rounded-xl border bg-background/95 p-3 shadow-[0_-6px_20px_rgba(15,23,42,0.06)] backdrop-blur sm:px-4"
+          className="sticky bottom-0 z-30 mt-4 flex flex-wrap items-center gap-3 rounded-xl border bg-background p-3 shadow-[0_-6px_20px_rgba(15,23,42,0.06)] sm:px-4"
         >
           <div className="flex items-center gap-2 text-sm text-muted-foreground">
             {formValid ? (
