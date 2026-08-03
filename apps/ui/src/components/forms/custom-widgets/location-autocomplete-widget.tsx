@@ -1,5 +1,4 @@
 import * as React from 'react';
-import { createPortal } from 'react-dom';
 import type { WidgetProps } from '@rjsf/utils';
 import { Input } from '@/components/ui/input';
 import { cn } from '@/lib/utils';
@@ -35,7 +34,6 @@ export function LocationAutocompleteWidget({
   const [suggestions, setSuggestions] = React.useState<GeoSuggestion[]>([]);
   const [open, setOpen] = React.useState(false);
   const provider = React.useMemo(() => getGeoProvider(), []);
-  const inputRef = React.useRef<HTMLInputElement>(null);
   const debounceRef = React.useRef<number | undefined>(undefined);
   const blurRef = React.useRef<number | undefined>(undefined);
   const abortRef = React.useRef<AbortController | null>(null);
@@ -114,37 +112,9 @@ export function LocationAutocompleteWidget({
     }
   }
 
-  // The suggestions list is rendered in a portal (fixed-positioned under the
-  // input) rather than as an absolute child. Inside a scrolling container
-  // (`<main overflow-y-auto>`) an absolute dropdown is CLIPPED at the container
-  // edge and hidden behind the pinned footer; a body portal escapes both.
-  const menuOpen = open && suggestions.length > 0;
-  const [menuRect, setMenuRect] = React.useState<DOMRect | null>(null);
-  React.useLayoutEffect(() => {
-    if (!menuOpen) {
-      setMenuRect(null);
-      return;
-    }
-    const update = () => {
-      const el = inputRef.current;
-      if (el) setMenuRect(el.getBoundingClientRect());
-    };
-    update();
-    // capture=true so this also fires for the scrolling <main> ancestor (scroll
-    // events don't bubble) — keeps the fixed dropdown glued to the input instead
-    // of detaching when the form is scrolled.
-    window.addEventListener('scroll', update, true);
-    window.addEventListener('resize', update);
-    return () => {
-      window.removeEventListener('scroll', update, true);
-      window.removeEventListener('resize', update);
-    };
-  }, [menuOpen]);
-
   return (
     <div className="relative space-y-2">
       <Input
-        ref={inputRef}
         id={id}
         value={text}
         disabled={disabled || readonly}
@@ -157,37 +127,26 @@ export function LocationAutocompleteWidget({
           blurRef.current = window.setTimeout(() => setOpen(false), 150);
         }}
       />
-      {menuOpen && menuRect &&
-        createPortal(
-          <ul
-            style={{
-              position: 'fixed',
-              top: menuRect.bottom + 4,
-              left: menuRect.left,
-              width: menuRect.width,
-              zIndex: 60,
-            }}
-            className="max-h-60 overflow-auto rounded-md border bg-popover shadow-md"
-          >
-            {suggestions.map((s, i) => (
-              <li key={`${s.lat},${s.lng},${i}`}>
-                <button
-                  type="button"
-                  className="block w-full px-3 py-2 text-left text-sm hover:bg-accent"
-                  // onMouseDown (not onClick) so selection runs before the input's
-                  // blur fires; preventDefault keeps focus from flicking away.
-                  onMouseDown={(e) => {
-                    e.preventDefault();
-                    void choose(s);
-                  }}
-                >
-                  {s.label}
-                </button>
-              </li>
-            ))}
-          </ul>,
-          document.body,
-        )}
+      {open && suggestions.length > 0 && (
+        <ul className="absolute z-50 mt-1 w-full rounded-md border bg-popover shadow-md">
+          {suggestions.map((s, i) => (
+            <li key={`${s.lat},${s.lng},${i}`}>
+              <button
+                type="button"
+                className="block w-full px-3 py-2 text-left text-sm hover:bg-accent"
+                // onMouseDown (not onClick) so selection runs before the input's
+                // blur fires; preventDefault keeps focus from flicking away.
+                onMouseDown={(e) => {
+                  e.preventDefault();
+                  void choose(s);
+                }}
+              >
+                {s.label}
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
       {rawErrors && rawErrors.length > 0 && (
         <p className="text-sm text-destructive">{rawErrors.join(', ')}</p>
       )}
