@@ -879,17 +879,17 @@ export function ProfileFormPage() {
   return (
     <PageShell
       variant="form"
-      title={isEdit ? t('profile.edit_heading', { role: roleLabel }) : t('profile.create_heading')}
+      // No app-bar title here: the branded hero strip below already shows the
+      // role heading, so a title in the bar would duplicate it. (The role-picker
+      // step above keeps its bar title — it has no hero.)
       onBack={handleBack}
       footerSlot={actionBar}
       {...shellSidebarProps}
     >
       <div className="mx-auto max-w-[1040px]">
-        {/* Branded hero strip — sits flush above the form Card. The visible page
-            title lives in the shell's TopBar (its <h1>); this hero heading is an
-            <h2>, keeping the chain h1(TopBar) → h2(hero) → h3(SchemaForm section)
-            skip-free. Uses the network's primary brand color (was a fixed dark
-            navy). */}
+        {/* Branded hero strip — sits flush above the form Card. This hero heading
+            is the page's <h1> now (the app-bar title was dropped to avoid
+            duplicating it). Uses the network's primary brand color. */}
         <div className="relative overflow-hidden rounded-t-xl bg-primary">
           <div className="pointer-events-none absolute inset-0 opacity-15">
             <NetworkConstellation className="h-full w-full" />
@@ -903,9 +903,9 @@ export function ProfileFormPage() {
               <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-white/50">
                 {theme.portalLabel}
               </p>
-              <h2 className="text-xl font-bold text-white leading-tight truncate">
+              <h1 className="text-xl font-bold text-white leading-tight truncate">
                 {isEdit ? t('profile.edit_role_heading', { role: roleLabel }) : t('profile.create_role_heading', { role: roleLabel })}
-              </h2>
+              </h1>
               <p className="mt-0.5 text-xs text-white/70 leading-snug">
                 {selectedDomainInfo?.description ?? t('profile.fill_details')}
               </p>

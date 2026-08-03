@@ -89,10 +89,12 @@ export function TopBar({
             <ArrowLeft className="h-4 w-4" />
             <span className="hidden sm:inline">{backLabel ?? t('common.back')}</span>
           </Button>
-          <div className="min-w-0">
-            <h1 className="truncate text-sm font-semibold text-foreground sm:text-[15px]">{title}</h1>
-            {subtitle && <p className="truncate text-xs text-muted-foreground">{subtitle}</p>}
-          </div>
+          {title && (
+            <div className="min-w-0">
+              <h1 className="truncate text-sm font-semibold text-foreground sm:text-[15px]">{title}</h1>
+              {subtitle && <p className="truncate text-xs text-muted-foreground">{subtitle}</p>}
+            </div>
+          )}
         </div>
       ) : (
         <>
