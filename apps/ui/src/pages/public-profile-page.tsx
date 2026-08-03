@@ -247,6 +247,20 @@ export function PublicProfilePage() {
                 </div>
               </div>
             ))}
+            {/* Odd field count → fill the empty trailing cell (sm+ two-col grid)
+                so the table's borders close cleanly instead of cutting off. */}
+            {rows.length % 2 === 1 && (
+              <div
+                aria-hidden="true"
+                className={[
+                  'hidden min-w-0 px-4 py-3 sm:block',
+                  rows.length >= 2 ? 'border-t border-border' : '',
+                  'sm:border-l sm:border-border',
+                ]
+                  .filter(Boolean)
+                  .join(' ')}
+              />
+            )}
           </div>
         </div>
 
