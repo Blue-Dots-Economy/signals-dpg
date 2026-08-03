@@ -637,11 +637,6 @@ export function ProfileFormPage() {
         }
 
         const created = await createItem(createPayload);
-        // Reflect the write immediately in cached lists (§C5).
-        queryClient.invalidateQueries({ queryKey: queryKeys.myItems(network.id) });
-        // Network-level prefix of the browse-items key (React Query matches
-        // prefixes) — invalidates every domain's browse cache for this network.
-        queryClient.invalidateQueries({ queryKey: ['browse-items', network.id] });
         if (consentRequired && profileDoc) {
           // This create recorded profile_creation consent. Optimistically add
           // the new item to the profileConsent cache so returning to home sees
@@ -668,6 +663,16 @@ export function ProfileFormPage() {
             item_id: created.item_id,
           });
         }
+        // Reflect the write in cached lists (§C5) — invalidate AFTER the minor
+        // promotion above, not right after createItem. A minor's item is created
+        // `draft` and only flips to `live` in finalizeProfileConsent; invalidating
+        // before that made my-items refetch the still-`draft` status, so the
+        // sidebar showed "Draft" until the next interaction even though the
+        // profile was live server-side.
+        queryClient.invalidateQueries({ queryKey: queryKeys.myItems(network.id) });
+        // Network-level prefix of the browse-items key (React Query matches
+        // prefixes) — invalidates every domain's browse cache for this network.
+        queryClient.invalidateQueries({ queryKey: ['browse-items', network.id] });
         toast.success(t('profile.toast_created'), {
           description: t('profile.toast_created_desc'),
         });
@@ -818,22 +823,15 @@ export function ProfileFormPage() {
   // submit is `type=submit form=profile-form`, so it still drives the (hidden-
   // submit) SchemaForm even though it now lives outside the form's DOM subtree.
   const actionBar = (
-    <div
-      data-testid="profile-action-bar"
-      className="mx-auto flex max-w-[1040px] flex-wrap items-center gap-3 px-4 py-3 sm:px-6"
-    >
-      <div className="flex items-center gap-2 text-sm text-muted-foreground">
-        {formValid ? (
-          <span className="text-emerald-600">{t('profile.required_complete')}</span>
-        ) : (
-          <span className="text-amber-700">{t('profile.fill_required_hint')}</span>
-        )}
-      </div>
-      <div className="ml-auto flex flex-wrap items-center gap-2">
-        {/* Consent slot — shown for CREATE and EDIT-of-draft (the `needsConsent`
-            path). The minor pre-create interstitial is create-only; an edit-of-
-            draft minor is routed through the guardian flow by the accept hook. */}
-        {formValid && needsConsent && (
+    <div data-testid="profile-action-bar" className="mx-auto max-w-[1040px] space-y-3 px-4 py-3 sm:px-6">
+      {/* Consent gets its OWN full-width row above the buttons — the
+          ConsentCheckbox is a bordered block, so cramming it into the horizontal
+          button cluster wrapped and broke the bar (esp. with the minor status
+          line). Shown for CREATE and EDIT-of-draft (the `needsConsent` path). The
+          minor pre-create interstitial is create-only; an edit-of-draft minor is
+          routed through the guardian flow by the accept hook. */}
+      {formValid && needsConsent && (
+        <div className="space-y-2">
           <ConsentCheckbox
             text={statement}
             checked={consentChecked}
@@ -844,25 +842,36 @@ export function ProfileFormPage() {
               }
             }}
           />
-        )}
-        {!isEdit && minorGatedCreate && consentChecked && (
-          <p className="text-sm text-muted-foreground">
-            {guardianVerifiedForCreate
-              ? t('u18.guardian_verified_for_create', 'Guardian verified. You can now create your profile.')
-              : t('u18.guardian_pending_for_create', "You're under 18 — your guardian must verify with a one-time code before you can create this profile.")}
-          </p>
-        )}
-        <Button variant="ghost" onClick={handleBack}>
-          {t('common.cancel')}
-        </Button>
-        <button
-          type="submit"
-          form="profile-form"
-          disabled={submitDisabled}
-          className="h-11 rounded-md bg-brand-cta px-5 font-semibold text-white disabled:opacity-50"
-        >
-          {primaryLabel}
-        </button>
+          {!isEdit && minorGatedCreate && consentChecked && (
+            <p className="text-sm text-muted-foreground">
+              {guardianVerifiedForCreate
+                ? t('u18.guardian_verified_for_create', 'Guardian verified. You can now create your profile.')
+                : t('u18.guardian_pending_for_create', "You're under 18 — your guardian must verify with a one-time code before you can create this profile.")}
+            </p>
+          )}
+        </div>
+      )}
+      <div className="flex flex-wrap items-center gap-3">
+        <div className="text-sm">
+          {formValid ? (
+            <span className="text-emerald-600">{t('profile.required_complete')}</span>
+          ) : (
+            <span className="text-amber-700">{t('profile.fill_required_hint')}</span>
+          )}
+        </div>
+        <div className="ml-auto flex items-center gap-2">
+          <Button variant="ghost" onClick={handleBack}>
+            {t('common.cancel')}
+          </Button>
+          <button
+            type="submit"
+            form="profile-form"
+            disabled={submitDisabled}
+            className="h-11 rounded-md bg-brand-cta px-5 font-semibold text-white disabled:opacity-50"
+          >
+            {primaryLabel}
+          </button>
+        </div>
       </div>
     </div>
   );
