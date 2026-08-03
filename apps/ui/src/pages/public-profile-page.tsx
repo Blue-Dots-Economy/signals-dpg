@@ -45,36 +45,34 @@ function TopBar({
   };
 
   return (
-    <header className="sticky top-0 z-10 border-b border-border bg-background/80 backdrop-blur">
-      <div className="mx-auto flex max-w-2xl items-center justify-between gap-3 px-4 py-3">
-        <div className="flex min-w-0 items-center gap-2">
-          <span
-            className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-xs font-bold text-white"
-            style={{ background: 'var(--primary)' }}
-            aria-hidden="true"
-          >
-            {brandName.charAt(0).toUpperCase()}
-          </span>
-          <span className="truncate text-sm font-semibold text-foreground">{brandName}</span>
-        </div>
-        <div className="flex shrink-0 items-center gap-2">
-          <button
-            type="button"
-            onClick={onCopyLink}
-            disabled={!item}
-            className="inline-flex items-center gap-1.5 rounded-lg border border-border px-3 py-1.5 text-sm font-medium text-foreground hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            <Copy className="h-4 w-4" aria-hidden="true" />
-            {t('public_profile.copy_link', 'Copy link')}
-          </button>
-          <a
-            href={`/?network=${encodeURIComponent(networkId ?? '')}`}
-            className="inline-flex items-center rounded-lg px-3 py-1.5 text-sm font-semibold text-primary-foreground hover:opacity-90"
-            style={{ background: 'var(--primary)' }}
-          >
-            {t('public_profile.open_in_app', 'Open in Blue Dots')}
-          </a>
-        </div>
+    <header className="sticky top-0 z-10 flex items-center justify-between gap-3 border-b border-border bg-background/90 px-5 py-3 backdrop-blur">
+      <div className="flex min-w-0 items-center gap-2">
+        <span
+          className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-xs font-bold text-white"
+          style={{ background: 'var(--primary)' }}
+          aria-hidden="true"
+        >
+          {brandName.charAt(0).toUpperCase()}
+        </span>
+        <span className="truncate text-sm font-semibold text-foreground">{brandName}</span>
+      </div>
+      <div className="flex shrink-0 items-center gap-2">
+        <button
+          type="button"
+          onClick={onCopyLink}
+          disabled={!item}
+          className="inline-flex items-center gap-1.5 rounded-lg border border-border px-3 py-1.5 text-sm font-medium text-foreground hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          <Copy className="h-4 w-4" aria-hidden="true" />
+          {t('public_profile.copy_link', 'Copy link')}
+        </button>
+        <a
+          href={`/?network=${encodeURIComponent(networkId ?? '')}`}
+          className="inline-flex items-center rounded-lg px-3 py-1.5 text-sm font-semibold text-primary-foreground hover:opacity-90"
+          style={{ background: 'var(--primary)' }}
+        >
+          {t('public_profile.open_in_app', 'Open in Blue Dots')}
+        </a>
       </div>
     </header>
   );
@@ -195,39 +193,61 @@ export function PublicProfilePage() {
       | RJSFSchema
       | undefined;
     const resolved = resolveCardFields(schema, liveItem.item_state, domainCfg?.card ?? null);
-    const rows = [...resolved.defaultRows, ...resolved.extraRows].filter((row) => !row.isEmpty);
+    // Every non-empty resolved row, minus any masked-stub value (e.g. "H***",
+    // "1***") the API returns in place of a truly private field — the public
+    // page should only ever show genuinely public values.
+    const rows = [...resolved.defaultRows, ...resolved.extraRows].filter(
+      (row) => !row.isEmpty && !/\*{2,}/.test(formatCardValue(row.value, row.type))
+    );
 
     content = (
-      <div className="mx-auto max-w-2xl px-4 py-10 sm:py-14">
-        {/* Hero */}
-        <div className="text-center">
+      <div className="mx-auto max-w-2xl px-5 py-10 sm:py-14">
+        {/* Hero — left-aligned avatar + title, with domain/meta below the title. */}
+        <div className="flex items-start gap-4">
           <div
-            className="mx-auto flex h-20 w-20 items-center justify-center rounded-full text-2xl font-bold text-white shadow-sm"
+            className="flex h-16 w-16 shrink-0 items-center justify-center rounded-full text-xl font-bold text-white shadow-sm"
             style={{ background: HERO_GRADIENT }}
             aria-hidden="true"
           >
             {resolved.initials}
           </div>
-          <h1 className="mt-4 text-2xl font-bold text-foreground sm:text-3xl">{resolved.title}</h1>
-          <span className="mt-3 inline-flex items-center rounded-full bg-muted px-3 py-1 text-xs font-semibold text-muted-foreground">
-            {titleCaseDomain(domain!)}
-          </span>
+          <div className="min-w-0 pt-1">
+            <h1 className="text-3xl font-bold leading-tight text-foreground">{resolved.title}</h1>
+            <div className="mt-2 flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
+              <span className="inline-flex items-center rounded-full bg-primary/10 px-3 py-1 text-xs font-semibold text-primary">
+                {titleCaseDomain(domain!)}
+              </span>
+              {resolved.subtitle && <span>{resolved.subtitle}</span>}
+            </div>
+          </div>
         </div>
 
-        {/* Details — every non-empty resolved row, schema-driven end to end. */}
-        <div className="mt-8 rounded-2xl border border-border bg-background p-5 shadow-sm sm:p-6">
-          <dl className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-            {rows.map((row) => (
-              <div key={row.key} className="min-w-0">
-                <dt className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+        {/* Details — every non-empty, non-masked resolved row, schema-driven end to end. */}
+        <p className="mt-8 mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+          {t('public_profile.details', 'Details')}
+        </p>
+        <div className="overflow-hidden rounded-xl border border-border">
+          <div className="grid grid-cols-1 sm:grid-cols-2">
+            {rows.map((row, index) => (
+              <div
+                key={row.key}
+                className={[
+                  'min-w-0 px-4 py-3',
+                  index >= 2 ? 'border-t border-border' : '',
+                  index % 2 === 1 ? 'sm:border-l sm:border-border' : '',
+                ]
+                  .filter(Boolean)
+                  .join(' ')}
+              >
+                <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
                   {row.label}
-                </dt>
-                <dd className="mt-1 text-sm text-foreground [overflow-wrap:anywhere]">
+                </div>
+                <div className="mt-1 text-sm font-semibold text-foreground [overflow-wrap:anywhere]">
                   {formatCardValue(row.value, row.type)}
-                </dd>
+                </div>
               </div>
             ))}
-          </dl>
+          </div>
         </div>
 
         <p className="mt-6 text-center text-xs text-muted-foreground">
