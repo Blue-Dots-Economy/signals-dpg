@@ -40,6 +40,7 @@ import { getUserDomains } from '@/lib/user-api';
 import { isGuardianConsentRequiredDomain } from '@/lib/guardian-consent';
 import { GuardianOtpDialog } from '@/components/actions/guardian-otp-dialog';
 import { U18GuardianFlow } from '@/components/consent/u18/u18-guardian-flow';
+import { useProfileConsentAccept } from '@/hooks/use-profile-consent-accept';
 import {
   getU18Status,
   issueProfilePrecreateOtp,
@@ -76,6 +77,11 @@ export function ProfileFormPage() {
   const queryClient = useQueryClient();
   const { theme, brand } = useNetworkTheme();
   const { config: consentConfig, isLoading: consentLoading } = useConsentConfig();
+  // Shared profile_creation-consent accept flow (adult self-accept OR minor
+  // guardian-OTP). Used by the EDIT-of-draft submit path below; `dialogs` is
+  // rendered once in the tree. Create keeps its own pre-create guardian flow.
+  const { accept: acceptProfileConsentFlow, dialogs: consentAcceptDialogs } =
+    useProfileConsentAccept();
   const isEdit = !!id;
   // The domains this deployment serves (VITE_SERVED_BINDINGS), or null = all.
   const servedScope = React.useMemo(() => getServedScope(), []);
@@ -282,17 +288,37 @@ export function ProfileFormPage() {
     return itemTypeKeys.length > 0 ? itemTypeKeys[0] : null;
   }, [selectedDomain, domains]);
 
-  // Consent config derivations — only relevant in create mode.
+  // Consent config derivations. `profile_creation` consent is captured on CREATE
+  // and now also when EDITing a still-draft profile (which promotes it to live).
   const profileDoc = consentConfig?.documents.profile_creation;
   const profileVersion = profileDoc?.versions.find((v) => v.version === profileDoc.current_version);
   const statement = profileVersion?.statement ?? '';
+  // Create-only flag, kept for the create submit branch's payload/optimistic
+  // cache below so that path behaves exactly as before.
   const consentRequired = !isEdit && !!statement;
 
-  // Stored U18 status: whether THIS ward is a minor. Fetched in create mode so
-  // the consent tick can route a minor through guardian verification before the
-  // profile row is ever written. Adults / edit mode are unaffected.
+  // Has THIS draft already recorded profile_creation consent? The home-page
+  // consent gate populates this set; read it (a plain cache read, no
+  // subscription) so re-opening an already-consented draft doesn't re-prompt.
+  const alreadyConsented = network
+    ? queryClient.getQueryData<Set<string>>(queryKeys.profileConsent(network.id))
+    : undefined;
+
+  // Create, or editing a not-yet-live (draft) profile. A live profile edit never
+  // re-captures consent.
+  const isDraft = !isEdit || editItem.data?.lifecycle_status === 'draft';
+  // Consent is needed when a statement is configured, we're on the draft path,
+  // and this specific item hasn't already consented. For create (existingItem
+  // null) this reduces to `!!statement`, matching the old `consentRequired`.
+  const needsConsent =
+    !!statement && isDraft && !(existingItem && alreadyConsented?.has(existingItem.item_id));
+
+  // Stored U18 status: whether THIS ward is a minor. Fetched whenever consent
+  // may be captured — create, OR editing a still-draft profile — so the accept
+  // flow routes a minor through guardian verification. A live edit (no consent)
+  // leaves it null.
   React.useEffect(() => {
-    if (isEdit || !user || !network) { setU18IsMinor(null); return; }
+    if (!isDraft || !user || !network) { setU18IsMinor(null); return; }
     let cancelled = false;
     getU18Status(network.id)
       .then((s) => { if (!cancelled) setU18IsMinor(s.isMinor); })
@@ -300,7 +326,7 @@ export function ProfileFormPage() {
       // transient error can't let a minor create a live profile ungated.
       .catch(() => { if (!cancelled) setU18IsMinor(null); });
     return () => { cancelled = true; };
-  }, [isEdit, user, network]);
+  }, [isDraft, user, network]);
 
   // A minor creating a profile on a guardian-gated domain: the consent tick
   // triggers guardian OTP; "Create profile" stays blocked until it's verified.
@@ -545,6 +571,40 @@ export function ProfileFormPage() {
         queryClient.invalidateQueries({
           queryKey: queryKeys.itemDetail(network.id, existingItem.item_id),
         });
+
+        // Editing a still-draft profile with a configured statement: record
+        // profile_creation consent, which promotes the draft to live. For an
+        // adult this resolves synchronously → `onDone`; for a minor on a gated
+        // domain the hook opens the guardian-OTP flow and `onDone` runs only
+        // after OTP success. Either way navigation is deferred to `onDone`, so
+        // we return here rather than falling through to the sync navigate.
+        if (needsConsent && profileDoc) {
+          await acceptProfileConsentFlow({
+            network: network.id,
+            brand: brand === 'standard' ? null : brand,
+            item: {
+              item_id: existingItem.item_id,
+              item_domain: selectedDomain,
+              item_type: existingItem.item_type,
+            },
+            version: profileDoc.current_version,
+            isMinor: u18IsMinor === true,
+            // The guardian flow may reclassify the ward as an adult (or capture a
+            // guardian); re-sync U18 status so a not-minor outcome doesn't
+            // dead-end and a retry runs with the corrected status.
+            onGuardianStatusChanged: () => {
+              getU18Status(network.id)
+                .then((s) => setU18IsMinor(s.isMinor))
+                .catch(() => setU18IsMinor(null));
+            },
+            onDone: () => {
+              queryClient.invalidateQueries({ queryKey: queryKeys.myItems(network.id) });
+              navigate(`/?network=${resolvedNetwork?.id ?? ''}`);
+            },
+          });
+          return;
+        }
+
         toast.success(t('profile.toast_updated'), {
           description: t('profile.toast_updated_desc'),
         });
@@ -731,12 +791,20 @@ export function ProfileFormPage() {
     );
   }
 
-  const primaryLabel = isEdit ? t('profile.btn_update') : t('profile.btn_create');
+  // When consent is being captured (create, or promoting a draft) the primary
+  // action publishes; otherwise it's a plain create/update.
+  const primaryLabel = needsConsent
+    ? t('profile.btn_save_publish')
+    : isEdit
+      ? t('profile.btn_update')
+      : t('profile.btn_create');
   const submitDisabled = isEdit
-    ? !formValid
+    ? // Live edit: unchanged (formValid only). Draft-with-consent: wait for the
+      // consent config to load, then require the acknowledgement tick.
+      !formValid || (isDraft && consentLoading) || (needsConsent && !consentChecked)
     : !formValid ||
       consentLoading ||
-      (consentRequired && !consentChecked) ||
+      (needsConsent && !consentChecked) ||
       (minorGatedCreate && !guardianVerifiedForCreate);
 
   return (
@@ -847,8 +915,11 @@ export function ProfileFormPage() {
             )}
           </div>
           <div className="ml-auto flex flex-wrap items-center gap-2">
-            {/* Consent slot — CREATE only for now (edit consent arrives in Task 5). */}
-            {!isEdit && formValid && consentRequired && (
+            {/* Consent slot — shown for CREATE and for EDIT-of-draft (both are
+                the `needsConsent` path). The minor pre-create interstitial is
+                create-only (via `minorGatedCreate`); an edit-of-draft minor is
+                routed through the guardian flow by the accept hook at submit. */}
+            {formValid && needsConsent && (
               <ConsentCheckbox
                 text={statement}
                 checked={consentChecked}
@@ -975,6 +1046,10 @@ export function ProfileFormPage() {
             onLogout={() => { void signOut(); }}
           />
         )}
+
+        {/* Guardian-OTP + capture dialogs for the EDIT-of-draft consent path
+            (driven by separate state from the create pre-create flow above). */}
+        {consentAcceptDialogs}
       </div>
     </PageShell>
   );
