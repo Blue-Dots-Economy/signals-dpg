@@ -105,13 +105,21 @@ interface HeldBboxState {
  * map-serverside-search Task 7); this parameter's shape has been stable
  * since Task 4, which wired the key ahead of the panel actually being
  * connected to it.
+ *
+ * `search` (map-native-text-search) is the top-bar free-text query. It's
+ * trimmed once, forwarded to the server as `q` (value-match against public
+ * `item_state` fields, viewport-scoped — same semantics as the list's search),
+ * and folded into the query key so a search change always produces a distinct
+ * cache entry, mirroring `filters` above. Defaults to `''` (no search).
  */
 export function useMapMarkers(
   network: DotNetworkSchema | null,
   domains: DotNetworkDomain[],
   viewport: MapViewport | null,
   filters: Record<string, unknown> = {},
+  search: string = '',
 ): UseMapMarkersResult {
+  const q = search.trim();
   const active = network && viewport ? domains : [];
 
   // Bbox path (#203 map-serverside-search Task 4): both live map providers
@@ -232,9 +240,10 @@ export function useMapMarkers(
             zoomBand: snappedKey.zoomBand,
             bboxToken: bboxTokenRef.current,
             filters,
+            q,
             limit,
           }
-        : { latBucket, lngBucket, radiusBucket, filters, limit };
+        : { latBucket, lngBucket, radiusBucket, filters, q, limit };
       return {
         queryKey: queryKeys.markers(network!.id, domain.id, keyFilters),
         queryFn: async ({ signal }: { signal: AbortSignal }) =>
@@ -261,6 +270,7 @@ export function useMapMarkers(
                     radius_meters: viewport!.radiusMeters,
                   }),
               ...(Object.keys(filters).length > 0 ? { item_state: filters } : {}),
+              ...(q ? { q } : {}),
               limit,
               cache_ttl_seconds: MAP_CACHE_TTL_SECONDS,
             },

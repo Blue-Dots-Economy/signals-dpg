@@ -52,14 +52,14 @@ describe('getEnumFilterFields — private field exclusion (#203 Task 7)', () => 
   });
 });
 
-// #203 map-serverside-search Task 7 review fix: the server's facet guard
-// (`resolveAllowedFacetFields`, apps/api's item_fetch_runtime.ts) only honors
-// fields declared `filterable: true` in network.json (Task 1) — a plain enum
-// field with no `filterable` marker is a normal form field the server drops
-// as a facet filter. `filterableOnly` scopes the returned fields to that set
-// so the MAP only offers/sends facets the server will actually act on, while
-// the LIST (filterableOnly omitted/false) keeps every enum field.
-describe('getEnumFilterFieldsForDomains — filterableOnly (#203 Task 7 review fix)', () => {
+// #394: dropped the `filterable: true` gate that used to additionally
+// restrict which enum fields `getEnumFilterFieldsForDomains` returned for the
+// MAP (a `{ filterableOnly: true }` option, removed). Every declared,
+// non-private enum field is now offered — in both the map and the list — via
+// this same function; the `filterable` marker no longer exists in
+// `EnumFilterField` or network.json. See #360 for the proper long-term
+// schema-driven search/filter declaration.
+describe('getEnumFilterFieldsForDomains — all declared enum fields, no filterable gate (#394)', () => {
   function domainWithSchema(id: string, properties: Record<string, unknown>): DotNetworkDomain {
     return {
       id,
@@ -70,54 +70,39 @@ describe('getEnumFilterFieldsForDomains — filterableOnly (#203 Task 7 review f
     } as DotNetworkDomain;
   }
 
-  it('blue_dot-style schema: filterableOnly returns only the filterable fields (mirrors the 3 real blue_dot markers)', () => {
+  it('blue_dot-style schema: returns every declared enum field regardless of any former filterable marker', () => {
     const domain = domainWithSchema('seeker', {
-      gender: { type: 'string', enum: ['female', 'male'], filterable: true },
-      work_experience: { type: 'string', enum: ['fresher', 'experienced'], filterable: true },
-      nature_of_job: { type: 'array', items: { enum: ['full_time', 'part_time'] }, filterable: true },
-      // A plain enum field with NO `filterable` marker — this is the bug the
-      // review caught: it must be OFFERED to the list but NOT to the map.
+      gender: { type: 'string', enum: ['female', 'male'] },
+      work_experience: { type: 'string', enum: ['fresher', 'experienced'] },
+      nature_of_job: { type: 'array', items: { enum: ['full_time', 'part_time'] } },
       preferred_language: { type: 'string', enum: ['en', 'hi', 'kn'] },
     });
 
-    const listFields = getEnumFilterFieldsForDomains([domain]);
-    expect(listFields.map((f) => f.key).sort()).toEqual(
+    const fields = getEnumFilterFieldsForDomains([domain]);
+    expect(fields.map((f) => f.key).sort()).toEqual(
       ['gender', 'nature_of_job', 'preferred_language', 'work_experience'].sort(),
     );
-
-    const mapFields = getEnumFilterFieldsForDomains([domain], { filterableOnly: true });
-    expect(mapFields.map((f) => f.key).sort()).toEqual(['gender', 'nature_of_job', 'work_experience'].sort());
-    expect(mapFields.map((f) => f.key)).not.toContain('preferred_language');
   });
 
-  it('a network with zero filterable fields (the common case today) returns an empty facet list for the map', () => {
-    const domain = domainWithSchema('student', {
+  it('a `private: true` field is still excluded (the one remaining, security-motivated gate)', () => {
+    const domain = domainWithSchema('seeker', {
       favourite_subject: { type: 'string', enum: ['math', 'science'] },
-      grade_level: { type: 'string', enum: ['primary', 'secondary'] },
+      ssn_last_four: { type: 'string', enum: ['1234', '5678'], private: true },
     });
 
-    const listFields = getEnumFilterFieldsForDomains([domain]);
-    expect(listFields.length).toBe(2); // list still offers both — no regression
-
-    const mapFields = getEnumFilterFieldsForDomains([domain], { filterableOnly: true });
-    expect(mapFields).toEqual([]);
+    const fields = getEnumFilterFieldsForDomains([domain]);
+    expect(fields.map((f) => f.key)).toEqual(['favourite_subject']);
   });
 
-  it('a field filterable in one domain but not another is still offered; a field filterable nowhere is excluded (documented coarser-than-server union)', () => {
+  it('a field declared in only one of several domains is still offered (union across domains)', () => {
     const seeker = domainWithSchema('seeker', {
-      gender: { type: 'string', enum: ['female', 'male'], filterable: true },
-      city: { type: 'string', enum: ['blr', 'del'] }, // not filterable in either domain
+      gender: { type: 'string', enum: ['female', 'male'] },
+      city: { type: 'string', enum: ['blr', 'del'] },
     });
     const provider = domainWithSchema('provider', {
-      gender: { type: 'string', enum: ['female', 'male'] }, // not filterable here
       city: { type: 'string', enum: ['blr', 'del'] },
     });
 
-    const mapFields = getEnumFilterFieldsForDomains([seeker, provider], { filterableOnly: true });
-    // `gender` survives (filterable in at least one domain); `city` — offered
-    // to the list (2 fields, unfiltered) — must NOT survive the map's
-    // filterableOnly union (it's filterable in neither domain).
-    expect(mapFields.map((f) => f.key)).toEqual(['gender']);
     expect(getEnumFilterFieldsForDomains([seeker, provider]).map((f) => f.key).sort()).toEqual(['city', 'gender']);
   });
 });

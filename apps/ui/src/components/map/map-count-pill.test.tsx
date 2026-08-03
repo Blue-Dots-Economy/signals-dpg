@@ -2,20 +2,20 @@ import { describe, it, expect } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import { MapCountPill } from './map-count-pill';
 
-// #203 map-serverside-search Task 6: the over-dense "N+ in this area — zoom
+// #203 map-serverside-search Task 6: the over-dense "N in this area — zoom
 // in" indicator must show for BOTH anonymous and signed-in visitors whenever
 // the viewport's true total exceeds the active zoom-band cap, and must not
 // regress the pre-existing signed-out-only plain count pill for the
 // non-truncated case.
 describe('MapCountPill', () => {
-  it('renders the over-dense "N+ zoom in" message with the true total when truncated, for a signed-out visitor', () => {
+  it('renders the over-dense "N zoom in" message with the true total when truncated, for a signed-out visitor', () => {
     render(<MapCountPill total={1500} shown={1000} truncated={true} signedIn={false} />);
-    expect(screen.getByText('1500+ in this area — zoom in')).toBeInTheDocument();
+    expect(screen.getByText('1500 in this area — zoom in')).toBeInTheDocument();
   });
 
-  it('renders the over-dense "N+ zoom in" message with the true total when truncated, for a SIGNED-IN visitor too', () => {
+  it('renders the over-dense "N zoom in" message with the true total when truncated, for a SIGNED-IN visitor too', () => {
     render(<MapCountPill total={1500} shown={1000} truncated={true} signedIn={true} />);
-    expect(screen.getByText('1500+ in this area — zoom in')).toBeInTheDocument();
+    expect(screen.getByText('1500 in this area — zoom in')).toBeInTheDocument();
   });
 
   it('hides entirely when not truncated and signed in (no regression: signed-in visitors get the header count, not this pill)', () => {

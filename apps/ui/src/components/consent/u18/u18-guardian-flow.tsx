@@ -10,6 +10,7 @@ import { submitGuardian, type SubmitGuardianBody } from '@/lib/consent-api';
 import { DobStep } from './dob-step';
 import { GuardianFormStep } from './guardian-form-step';
 import { GuardianOtpStep } from './guardian-otp-step';
+import { type GuardianPurpose } from './guardian-otp-purpose';
 
 type U18Step = 'dob' | 'guardian' | 'otp';
 
@@ -40,6 +41,8 @@ export interface U18GuardianFlowProps {
    * matching SignupGuardianFlow; the home page keeps the modal presentation.
    */
   inline?: boolean;
+  /** What this OTP authorises — passed to the guardian OTP step's purpose panel. */
+  purpose?: GuardianPurpose;
 }
 
 /**
@@ -55,6 +58,7 @@ export function U18GuardianFlow({
   initialStep = 'dob',
   onLogout,
   inline = false,
+  purpose,
 }: U18GuardianFlowProps) {
   const { t } = useTranslation();
   const [step, setStep] = React.useState<U18Step>(initialStep);
@@ -102,6 +106,7 @@ export function U18GuardianFlow({
         <GuardianOtpStep
           network={network}
           brand={brand}
+          purpose={purpose}
           onVerified={onComplete}
           onResend={async () => {
             if (!guardianBody) return;

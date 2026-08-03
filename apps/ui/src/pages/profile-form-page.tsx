@@ -855,6 +855,7 @@ export function ProfileFormPage() {
         {/* Pre-create guardian OTP: verified BEFORE the profile row is written. */}
         <GuardianOtpDialog
           open={guardianOtpOpen}
+          purpose={{ kind: 'profile' }}
           onOpenChange={(open) => {
             if (open) return;
             setGuardianOtpOpen(false);
@@ -877,6 +878,7 @@ export function ProfileFormPage() {
           <U18GuardianFlow
             network={network.id}
             brand={brand === 'standard' ? null : brand}
+            purpose={{ kind: 'profile' }}
             initialStep="guardian"
             onComplete={() => {
               setGuardianSetupOpen(false);

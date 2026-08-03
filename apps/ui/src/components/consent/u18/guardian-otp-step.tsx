@@ -8,6 +8,7 @@ import { OtpInput } from '@/components/auth/otp-input';
 import { verifyGuardian, type VerifyGuardianResponse } from '@/lib/consent-api';
 import { toastGuardianSendError } from '@/lib/guardian-consent';
 import { useResendCountdown } from '@/hooks/use-resend-countdown';
+import { GuardianOtpPurpose, type GuardianPurpose } from '@/components/consent/u18/guardian-otp-purpose';
 
 export interface GuardianOtpStepProps {
   network: string;
@@ -21,6 +22,8 @@ export interface GuardianOtpStepProps {
    * that verifies via POST /u18/signup/guardian/verify (no session yet).
    */
   verify?: (otp: string) => Promise<VerifyGuardianResponse>;
+  /** What this OTP authorises — renders the "Guardian approval for" panel. */
+  purpose?: GuardianPurpose;
 }
 
 export function GuardianOtpStep({
@@ -29,6 +32,7 @@ export function GuardianOtpStep({
   onVerified,
   onResend,
   verify = (otp) => verifyGuardian({ network, brand: brand ?? null, otp }),
+  purpose,
 }: GuardianOtpStepProps) {
   const { t } = useTranslation();
   const [isVerifying, setIsVerifying] = React.useState(false);
@@ -100,6 +104,7 @@ export function GuardianOtpStep({
 
   return (
     <div className="flex flex-col gap-4">
+      {purpose && <GuardianOtpPurpose purpose={purpose} />}
       <p className="text-sm text-muted-foreground">
         {t('u18.otp_desc', "We sent a code to your guardian. Ask them for it and enter it below.")}
       </p>

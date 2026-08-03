@@ -91,6 +91,10 @@ vi.mock('@/services/consent_version', () => ({
 // issue Task 2 hit wiring the gate into perform_action).
 vi.mock('@/services/guardian_action_gate', () => ({
   guardianActionGate: vi.fn(async () => ({ status: 'not_required' })),
+  // Bulk accept pre-pass (#393): this adult/ungated suite never has a gated
+  // subset, so the pre-pass resolves an empty map and the loop falls back to the
+  // per-item gate above.
+  guardianBulkActionGate: vi.fn(async () => new Map()),
   // Defaults to null (adult/ungated proceed); the U18 test overrides it to the
   // self-path OTP failure to prove the external block never fires here.
   guardianGateFailure: vi.fn(() => null),
@@ -343,8 +347,13 @@ describe('POST /api/v1/action/update-status (bulk, self-acted only)', () => {
   it('207 on a mixed batch (one ok, one not found)', async () => {
     dbState.existingAction = { ...EXISTING_ACTION };
     // Drive per-item lookup: first element uses EXISTING_ACTION.action_id (found),
-    // second uses an unknown id (not found).
+    // second uses an unknown id (not found). A multi-item (>1) batch reads
+    // item_actions TWICE per row — once in the bulk guardian-accept pre-pass
+    // (#393) and once in the main loop — so the queue lists both rows twice, in
+    // read order (pre-pass row0, row1; then loop row0, row1).
     dbState.actionIdQueue = [
+      EXISTING_ACTION.action_id,
+      '00000000-0000-4000-8000-0000000000ff',
       EXISTING_ACTION.action_id,
       '00000000-0000-4000-8000-0000000000ff',
     ];

@@ -426,4 +426,56 @@ describe('useMapMarkers', () => {
 
     expect(result.current.truncated).toBe(false);
   });
+
+  // map-native-text-search: free-text search now filters the map server-side
+  // via `/markers?q=`, mirroring the facet-filter (`filters`) wiring above.
+  describe('free-text search (map-native-text-search)', () => {
+    it('passes q into fetchNetworkMarkers when search is non-empty', async () => {
+      vi.mocked(fetchNetworkMarkers).mockResolvedValue({
+        meta: { total: 0, limit: 5000, offset: 0, partial: false, unavailable_instances: [] },
+        markers: [],
+      });
+
+      renderHook(() => useMapMarkers(network, [domains[0]], bboxViewport, {}, 'jane'), { wrapper });
+      await waitFor(() => expect(fetchNetworkMarkers).toHaveBeenCalled());
+
+      expect(fetchNetworkMarkers).toHaveBeenCalledWith(
+        expect.objectContaining({ q: 'jane' }),
+        expect.anything(),
+      );
+    });
+
+    it('sends no q when search is empty or whitespace-only', async () => {
+      vi.mocked(fetchNetworkMarkers).mockResolvedValue({
+        meta: { total: 0, limit: 5000, offset: 0, partial: false, unavailable_instances: [] },
+        markers: [],
+      });
+
+      renderHook(() => useMapMarkers(network, [domains[0]], bboxViewport, {}, '   '), { wrapper });
+      await waitFor(() => expect(fetchNetworkMarkers).toHaveBeenCalled());
+
+      const call = vi.mocked(fetchNetworkMarkers).mock.calls[0][0];
+      expect(call).not.toHaveProperty('q');
+    });
+
+    it('refetches when search changes, even with the same bbox and zoom', async () => {
+      vi.mocked(fetchNetworkMarkers).mockResolvedValue({
+        meta: { total: 0, limit: 5000, offset: 0, partial: false, unavailable_instances: [] },
+        markers: [],
+      });
+
+      const { result, rerender } = renderHook(
+        ({ search }: { search: string }) => useMapMarkers(network, [domains[0]], bboxViewport, {}, search),
+        { wrapper, initialProps: { search: 'jane' } },
+      );
+      await waitFor(() => expect(result.current.isLoading).toBe(false));
+      expect(fetchNetworkMarkers).toHaveBeenCalledTimes(1);
+
+      rerender({ search: 'john' });
+      await waitFor(() => expect(fetchNetworkMarkers).toHaveBeenCalledTimes(2));
+
+      const secondCall = vi.mocked(fetchNetworkMarkers).mock.calls[1][0];
+      expect(secondCall).toEqual(expect.objectContaining({ q: 'john' }));
+    });
+  });
 });

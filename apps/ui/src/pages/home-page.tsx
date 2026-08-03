@@ -17,15 +17,25 @@ import { PageShell } from '@/components/layout/page-shell';
 import { ContentHeader } from '@/components/layout/content-header';
 import { GuestHero } from '@/components/layout/guest-hero';
 import { CardGrid } from '@/components/cards/card-grid';
+import { useActions } from '@/hooks/use-actions';
 import { DomainCard } from '@/components/cards/domain-card';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Button } from '@/components/ui/button';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
 import { ActionHandler } from '@/components/actions/action-handler';
 import { MapView } from '@/components/map/map-container';
 import { MapFiltersPanel } from '@/components/map/map-filters-panel';
 import { MarkerPopupCard } from '@/components/map/marker-popup-card';
 import { MapCountPill } from '@/components/map/map-count-pill';
 import { MatchScoreCard } from '@/components/match-score';
+import { shouldRenderMatchScoreCard } from '@/lib/match-score-config';
 import '@/components/map/providers';
 import { performAction, performActionsBulk, type Item } from '@/lib/item-api';
 import { bulkFailureIndices, firstBulkError, BulkSingleError } from '@/lib/bulk';
@@ -45,15 +55,14 @@ import { apiConfig } from '@/lib/api-config';
 import { getEnumFilterFieldsForDomains } from '@/lib/enum-filters';
 import {
   deriveBrowseParams,
-  deriveAnchorItemId,
+  anchorItemIdForTarget,
+  domainsInteract,
   isDiscoverActive,
-  hasActiveSearchOrFilters,
-  resolveDegradedBanner,
+  resolveListNote,
   excludeOwnItems,
   buildFilteredCardsForDomain,
 } from '@/lib/browse-discover';
 import type { DerivedBrowseParams } from '@/lib/browse-discover';
-import { NearMeToggle } from '@/components/browse/near-me-toggle';
 import { getServedScope } from '@/lib/served-binding';
 import { computeVisibleDomains } from '@/lib/visible-domains';
 import { useUserLocation } from '@/hooks/use-user-location';
@@ -84,6 +93,7 @@ import type { Marker as NetworkMarker, DiscoverFacetFilter } from '@/lib/network
 import { useQueryClient } from '@tanstack/react-query';
 import { queryKeys } from '@/lib/query-keys';
 import { GuardianOtpDialog } from '@/components/actions/guardian-otp-dialog';
+import { GuardianOtpPurpose } from '@/components/consent/u18/guardian-otp-purpose';
 import { U18GuardianFlow } from '@/components/consent/u18/u18-guardian-flow';
 import { isGuardianConsentRequiredDomain } from '@/lib/guardian-consent';
 
@@ -174,6 +184,10 @@ interface DomainPageState {
   // IDENTICALLY to `partial` above so the "All" tab can show the same
   // degraded-search UX as the single-domain list.
   degraded: boolean;
+  // #394: lifted from `useInfiniteBrowseItems`' `distanceMeters` (the discover
+  // BFF's `meta.distance_meters`) so the "All" tab's list note can show the
+  // same "within X km" wording as the single-domain list.
+  distanceMeters?: number;
 }
 
 // Headless per-domain paged fetch for the "All" tab (Task 5 §5.1). React hooks
@@ -192,13 +206,17 @@ function DomainPagedFetch({
   network: DotNetworkSchema;
   domain: DotNetworkDomain;
   coords: { lat: number; lng: number } | null;
-  // #203 List PR Task 5: the discover params (q/filters/relevance) derived from
-  // the search box, facet panel, and "Near me" toggle. Passed identically for
-  // every visible domain so the whole "All" feed shares one discover mode.
-  // Omitted by the map-view count-only fetchers, which stay on the native
-  // browse path (the "Near me" toggle is a list-view control; the map is
-  // unaffected per spec §5.3). `anchorItemId` (#394) rides along the same way —
-  // `useInfiniteBrowseItems` only forwards it on the discover path.
+  // #394: the discover params (q/filters/relevance) derived from the search
+  // box and facet panel. Passed identically for every visible domain so the
+  // whole "All" feed shares one discover mode — the list always uses discover
+  // now, there is no more "Near me" toggle. Omitted by the map-view
+  // count-only fetchers, which stay on the native browse path (unaffected by
+  // list-view discover concerns per spec §5.3). `anchorItemId` (#394) is NOT
+  // shared across domains like the rest of this object — the caller computes
+  // it per-domain (`anchorFor(domain.id)`) since whether it's safe to send
+  // depends on the schema's interaction matrix between the anchor's own
+  // domain and each individual browsed domain (e.g. a seeker's anchor is sent
+  // for the provider slice of "All" but withheld for the seeker slice).
   browseOpts?: {
     q?: string;
     filters: DiscoverFacetFilter[];
@@ -214,6 +232,7 @@ function DomainPagedFetch({
     fetchNext: () => void,
     partial: boolean,
     degraded: boolean,
+    distanceMeters: number | undefined,
   ) => void;
 }): null {
   const list = useInfiniteBrowseItems(network, domain, coords, browseOpts);
@@ -222,10 +241,10 @@ function DomainPagedFetch({
   // `onItems` (`handleDomainItems`) is idempotent — it bails out of its
   // `setState` when the lifted data is unchanged (element-wise reference
   // equality on `items`, plus `hasMore`/`total`/`isLoading`/`partial`/
-  // `degraded`), so a plain re-render never causes a further re-render here.
-  // This is what lets a same-length refetch (new item object refs, edited
-  // `item_state`) still get lifted — gating on `items.length` would silently
-  // drop that update.
+  // `degraded`/`distanceMeters`), so a plain re-render never causes a further
+  // re-render here. This is what lets a same-length refetch (new item object
+  // refs, edited `item_state`) still get lifted — gating on `items.length`
+  // would silently drop that update.
   React.useEffect(() => {
     onItems(
       domain.id,
@@ -236,6 +255,7 @@ function DomainPagedFetch({
       list.fetchNextPage,
       list.partial,
       list.degraded,
+      list.distanceMeters,
     );
   }, [
     domain.id,
@@ -246,6 +266,7 @@ function DomainPagedFetch({
     list.fetchNextPage,
     list.partial,
     list.degraded,
+    list.distanceMeters,
     onItems,
   ]);
   return null;
@@ -455,10 +476,6 @@ export function HomePage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const navigate = useNavigate();
   const [search, setSearch] = React.useState('');
-  // "Near me" toggle (#203 List PR Task 5). Default OFF = the ranked discover
-  // feed served globally (relevance mode, native fallback covers signals-search
-  // being down); ON = proximity (location-anchored). See `deriveBrowseParams`.
-  const [nearMe, setNearMe] = React.useState(false);
   const [viewMode, setViewMode] = React.useState<ViewMode>(
     (searchParams.get('view') as ViewMode) ?? resolveDefaultViewMode()
   );
@@ -534,7 +551,17 @@ export function HomePage() {
   const [bulkGuardianChallenge, setBulkGuardianChallenge] = React.useState<{
     payloads: PerformActionPayload[];
     sourceInstanceUrl?: string;
+    actionType: string;
+    // Non-guardian failures from a mixed batch, carried through so they can be
+    // reselected once the guardian OTP dialog resolves (they still need a retry).
+    otherFailedIds?: string[];
   } | null>(null);
+  // Minor ward: the "a code will be sent to your guardian — proceed?" confirm
+  // shown BEFORE a bulk action dispatches the OTP (mirrors the single-action
+  // confirm). Holds the deferred bulk submit + its action type (for the panel).
+  const [bulkGuardianConfirm, setBulkGuardianConfirm] = React.useState<
+    { run: () => void; actionType: string } | null
+  >(null);
 
   // Networks list + resolved selected network (config tier). Replaces the raw
   // mount-fetch + resolve effects; `allNetworks`/`network` are now query-derived.
@@ -626,6 +653,31 @@ export function HomePage() {
     return myItems.find((i) => i.item_id === activeProfileId) ?? myItems[0] ?? null;
   }, [myItems, activeProfileId]);
 
+  // Item ids the active profile already has an OPEN action with — either
+  // direction (I initiated to them, or they to me). Their Connect/Apply CTA is
+  // disabled: at most one open action per pair (#370/#422). The server cap is
+  // the real guard; this just pre-empts the click. "Open" = not a terminal
+  // status; the same terminal set the backend frees a pair on.
+  const { data: myActionsData } = useActions('all', { enabled: !!user });
+  const openActionItemIds = React.useMemo(() => {
+    const TERMINAL = new Set([
+      'accepted',
+      'completed',
+      'cancelled',
+      'rejected',
+      'declined',
+      'withdrawn',
+    ]);
+    const set = new Set<string>();
+    if (!activeProfileId) return set;
+    for (const a of myActionsData?.actions ?? []) {
+      if (TERMINAL.has(a.action_status)) continue;
+      if (a.source_item_id === activeProfileId) set.add(a.target_item_id);
+      else if (a.target_item_id === activeProfileId) set.add(a.source_item_id);
+    }
+    return set;
+  }, [myActionsData, activeProfileId]);
+
   // A draft (incomplete) profile can't apply/connect — the API rejects it with
   // PROFILE_NOT_LIVE. Prompt the user to finish their profile (with a shortcut
   // to the edit form) instead of surfacing that error. Returns true when the
@@ -663,11 +715,11 @@ export function HomePage() {
   const [preferredSource, setPreferredSource] =
     React.useState<PreferredLocationSource>('profile');
 
-  const { location: userLocation, browser: browserLocation } = useUserLocation(
-    profileLocation,
-    profilesResolved,
-    preferredSource,
-  );
+  const {
+    location: userLocation,
+    source: resolvedLocationSource,
+    browser: browserLocation,
+  } = useUserLocation(profileLocation, profilesResolved, preferredSource);
   const geoPermission = useGeolocationPermission();
 
   // The toggle only makes sense when there's a profile location to switch away
@@ -908,54 +960,26 @@ export function HomePage() {
     [mapSelectedFields],
   );
 
-  // #203 Task 7 review fix: the server's facet guard
-  // (`resolveAllowedFacetFields`, Task 3) only honors fields declared
-  // `filterable: true` in a domain's network.json (Task 1) — NOT every
-  // schema-declared enum field. `MapFiltersPanel` itself now restricts what
-  // it OFFERS on the map to that same `filterable: true` set
-  // (`getEnumFilterFieldsForDomains(..., { filterableOnly: true })`, see
-  // `map-filters-panel.tsx`), so a map user can no longer select a facet the
-  // server will silently drop. But `mapSelectedFields` is shared state with
-  // the LIST (which still offers/filters every enum field) — a field
-  // selected while on the list tab is NOT automatically deselected when
-  // switching to the map tab (the panel simply stops rendering a chip for
-  // it). Without this second filter, that stale non-filterable selection
-  // would still be sent to the server as an inert `item_state` param.
-  // Restricting the map's OWN sent filters to the filterable set (in
-  // addition to the panel's offer-side restriction above) closes that gap:
-  // the map never sends a facet it can't apply, regardless of what's
-  // sitting in shared state from the list.
-  const mapFilterableFieldKeys = React.useMemo(
-    () => new Set(getEnumFilterFieldsForDomains(filterFieldDomains, { filterableOnly: true }).map((f) => f.key)),
-    [filterFieldDomains],
-  );
-  const mapActiveFieldFilters = React.useMemo(
-    () => Object.fromEntries(Object.entries(activeFieldFilters).filter(([key]) => mapFilterableFieldKeys.has(key))),
-    [activeFieldFilters, mapFilterableFieldKeys],
-  );
-
   // Task 6 (#203 §5.2): the map view is now sourced from viewport-scoped
   // markers rather than a full per-domain browse feed (that full fetch was
   // removed from this page entirely in Task 7 of the caching epic). The
-  // top-bar free-text `search` is DEFERRED for the map (issue #5, spec §9):
-  // viewport markers are slim (coords only), and the server has no free-text
-  // match on `/markers` today — building one is real search-relevance surface
-  // (guarding which fields are searchable, private-field safety, ranking),
-  // out of this PR's scope on purpose (see the plan doc's "Out of scope").
-  // `search` therefore keeps filtering only the LIST (`buildFilteredCardsForDomain`
-  // below); the map ignores it. `MapFiltersPanel`'s enum-field facets, by
-  // contrast, DO now drive the map server-side — but ONLY the subset
-  // declared `filterable: true` in network.json (Task 1), which is the set
-  // the server's facet guard (`resolveAllowedFacetFields`, Task 3) actually
-  // honors for `item_state` filtering; that's `mapActiveFieldFilters` above,
-  // not the full `activeFieldFilters` the list uses (see the comment there).
-  // Declaring more facets per network (+ indexing them, Task 1's pattern in
-  // `network.json`) is a config follow-up, not a code change here — most
-  // example networks currently declare zero filterable facets, so the map
-  // filter panel may show no enum groups at all for them until that's done.
-  // The domain multi-select (below, a client-side array-membership check on
-  // the already-fetched markers) and free-text search remain client/list-only
-  // regardless of facet config.
+  // top-bar free-text `search` now ALSO filters the map (map-native-text-search,
+  // #394): it's forwarded to `useMapMarkers` below, which sends it to the
+  // server as `/markers?q=` — a value-match against public (non-private)
+  // `item_state` fields, viewport-scoped, same as the list's search. The list
+  // still applies `search` itself via `buildFilteredCardsForDomain` below;
+  // the two are independent filters over the same query, not one deriving
+  // from the other. `MapFiltersPanel`'s enum-field facets, by contrast,
+  // drive the map server-side directly via `activeFieldFilters` — #394
+  // removed the `filterable: true` gate that used to additionally restrict
+  // this to a network.json-marked subset; every declared, non-private enum
+  // field the panel offers (the same full set the list uses,
+  // `getEnumFilterFieldsForDomains`) is now sent and applied by the server's
+  // facet guard (`resolveAllowedFacetFields`). See #360 for the proper
+  // long-term schema-driven search/filter declaration. The domain
+  // multi-select below (a client-side array-membership check on the
+  // already-fetched markers) remains client/list-only; free-text search, per
+  // the comment above, is sent to the server for both the map and the list.
   //
   // Even at low zoom for an anonymous / no-location visitor we now fetch the
   // slim viewport markers (coords only, capped at MAP_FETCH_LIMIT) and cluster
@@ -974,7 +998,7 @@ export function HomePage() {
     () => (selectedDomain ? visibleDomains.filter((d) => d.id === selectedDomain) : visibleDomains),
     [selectedDomain, visibleDomains],
   );
-  const mapMarkers = useMapMarkers(network, mapDomains, mapViewport, mapActiveFieldFilters);
+  const mapMarkers = useMapMarkers(network, mapDomains, mapViewport, activeFieldFilters, search);
 
   // On the "All" tab the Filters-panel domain multi-select narrows which pins
   // show (client-side membership check — every `Marker` carries `item_domain`).
@@ -1015,35 +1039,53 @@ export function HomePage() {
     [userLocation],
   );
 
-  // Task 5 (#203 List PR): map the "Near me" toggle + search box + facet
-  // selections to the discover params both list paths share. Near me OFF (the
-  // default) = ranked discover globally (relevance, NO location); Near me ON =
-  // proximity (location passed, relevance unset). See `deriveBrowseParams` for
-  // why location is omitted in relevance mode.
+  // #394: the list ALWAYS uses the discover BFF now — map the search box +
+  // facet selections to the shared discover params (see `deriveBrowseParams`;
+  // `relevance` is unconditionally true, there is no more ranked/proximity
+  // split). The resolved viewer location (`browseCoords`, from
+  // `LocationSourceToggle`/`preferredSource`) is ALWAYS forwarded too — it's
+  // `null` when none is available (no profile location AND browser location
+  // denied/unsupported), in which case discover just runs anchor-only (or
+  // fully unranked-by-location for a signed-out viewer).
   const browseParams = React.useMemo<DerivedBrowseParams>(
-    () => deriveBrowseParams({ nearMe, search, activeFieldFilters }),
-    [nearMe, search, activeFieldFilters],
+    () => deriveBrowseParams({ search, activeFieldFilters }),
+    [search, activeFieldFilters],
   );
-  const browseLocation = browseParams.useLocation ? browseCoords : null;
-  // #394: anchor both list paths (below) to the viewer's selected own-profile
-  // item — `useInfiniteBrowseItems` only sends this to signals-search on the
-  // discover path (mirrors `deriveBrowseParams` above: native/proximity mode
-  // and the map are unaffected). Switching the selected profile produces a new
-  // `browseHookOpts` object, which produces a new query key in discover mode
-  // (Task 2), which re-queries with the new anchor.
+  const browseLocation = browseCoords;
+  // #394: shared discover params for both list paths — q/filters/relevance are
+  // the same regardless of which domain is being browsed. `anchorItemId` is
+  // deliberately NOT included here: signals-search enforces the network's
+  // interaction matrix and 403s (`INTERACTION_NOT_ALLOWED`) when the anchor's
+  // domain has no defined interaction with the browsed domain (e.g. a seeker
+  // browsing seekers), so the anchor must be computed PER target domain (see
+  // `anchorFor` below) rather than shared.
   const browseHookOpts = React.useMemo(
     () => ({
       q: browseParams.q,
       filters: browseParams.filters,
       relevance: browseParams.relevance,
-      anchorItemId: deriveAnchorItemId(activeProfileId),
     }),
-    [browseParams, activeProfileId],
+    [browseParams],
   );
   // True when the active feed is served by the discover BFF (q OR filters OR
   // relevance) — the server has already applied text + facet filtering, so the
   // client-side filters in `buildFilteredCardsForDomain` must be bypassed.
   const listDiscover = isDiscoverActive(browseParams);
+
+  // #394: per-target-domain anchor. `myItem` (the resolved active profile,
+  // defined above) supplies the anchor's own domain; `anchorItemIdForTarget`
+  // consults the schema's interaction matrix (`network.actions[].interactions`)
+  // to decide whether that domain may anchor discover calls for `targetDomain`.
+  const anchorFor = React.useCallback(
+    (targetDomain: string): string | undefined =>
+      anchorItemIdForTarget({
+        activeProfileId,
+        activeProfileDomain: myItem?.item_domain ?? null,
+        targetDomain,
+        actions: network?.actions ?? {},
+      }),
+    [activeProfileId, myItem, network],
+  );
 
   // Single-domain paged fetch. Enabled only while a specific domain tab is
   // selected; disabled (and thus inert) on the "All" tab.
@@ -1051,7 +1093,11 @@ export function HomePage() {
     network,
     selectedDomain ? selectedDomainObj : null,
     browseLocation,
-    { enabled: selectedDomain !== null, ...browseHookOpts },
+    {
+      enabled: selectedDomain !== null,
+      ...browseHookOpts,
+      anchorItemId: selectedDomain ? anchorFor(selectedDomain) : undefined,
+    },
   );
 
   // Own-item filtering is a view concern (mirrored below by
@@ -1097,6 +1143,7 @@ export function HomePage() {
       fetchNext: () => void,
       partial: boolean,
       degraded: boolean,
+      distanceMeters: number | undefined,
     ) => {
       setAllDomainPages((prev) => {
         const existing = prev[domainId];
@@ -1110,14 +1157,15 @@ export function HomePage() {
           existing.total === total &&
           existing.isLoading === isLoading &&
           existing.partial === partial &&
-          existing.degraded === degraded
+          existing.degraded === degraded &&
+          existing.distanceMeters === distanceMeters
         ) {
           // Same data (plain re-render): bail so React doesn't re-render → no loop.
           return prev;
         }
         return {
           ...prev,
-          [domainId]: { items, hasMore, total, isLoading, fetchNext, partial, degraded },
+          [domainId]: { items, hasMore, total, isLoading, fetchNext, partial, degraded, distanceMeters },
         };
       });
     },
@@ -1210,13 +1258,55 @@ export function HomePage() {
   // Single source of truth for the degraded-search UX: single-domain tab reads
   // the one paged feed directly, "All" tab is the OR above.
   const listDegraded = selectedDomain !== null ? singleDomainList.degraded : allDomainsListDegraded;
-  // Whether the user has an active search query OR facet filter (NOT the
-  // relevance default) — decides which degraded banner variant shows below,
-  // and whether the facet chips render as paused/not-applied.
-  const searchOrFiltersActive = hasActiveSearchOrFilters(browseParams);
-  const degradedBanner = resolveDegradedBanner({
+
+  // #394: the effective spatial radius (`meta.distance_meters`), same
+  // single-domain-vs-"All" split as `listPartial`/`listDegraded` above. On the
+  // "All" tab every visible domain shares the same location + radius config,
+  // so the first domain to report one is representative of all of them.
+  const allDomainsDistanceMeters = visibleDomains
+    .map((domain) => allDomainPages[domain.id]?.distanceMeters)
+    .find((value) => value !== undefined);
+  const listDistanceMeters =
+    selectedDomain !== null ? singleDomainList.distanceMeters : allDomainsDistanceMeters;
+
+  // #394 (review fix): whether the viewer actually has a profile anchor being
+  // sent for the browsed domain(s) — derived from the SAME rule that gates
+  // the anchor itself (`anchorFor`/`anchorItemIdForTarget`, both built on
+  // `domainsInteract`), not the looser "signed in with an active profile"
+  // check this used to be. A directory-style network can have a selected (or,
+  // on "All", every visible) domain with NO interaction edge to the viewer's
+  // own profile domain — no anchor is sent for that view at all, and the note
+  // must not claim profile-relevance when nothing was actually anchored.
+  // Single-domain tab: gate on that one target domain via `anchorFor` (the
+  // exact function `singleDomainList` calls above). "All"/no-selection view:
+  // true iff the viewer's profile domain interacts with at least one visible
+  // domain (mirrors `computeVisibleDomains`' own per-domain anchor gating).
+  const activeProfileDomain = myItem?.item_domain ?? null;
+  const hasProfileAnchor =
+    selectedDomain !== null
+      ? anchorFor(selectedDomain) !== undefined
+      : Boolean(
+          activeProfileId &&
+            activeProfileDomain &&
+            visibleDomains.some((domain) =>
+              domainsInteract(network?.actions ?? {}, activeProfileDomain, domain.id),
+            ),
+        );
+  // Whether a location is actually being sent as the discover spatial filter.
+  const hasLocation = browseLocation !== null;
+  const listNote = resolveListNote({
+    hasProfileAnchor,
+    hasLocation,
     degraded: listDegraded,
-    searchOrFiltersActive,
+    distanceMeters: listDistanceMeters,
+    // The EFFECTIVE source of the coordinate actually sent (not the toggle
+    // preference): logged out / no profile → useUserLocation falls back to the
+    // browser coordinate, so the note must say "current location", not "your
+    // profile location". `preferredSource` stays 'profile' by default even when
+    // no profile exists, which produced the wrong wording. 'none' can't reach
+    // the km-bearing note branch (hasLocation would be false), so map it to the
+    // 'profile' default harmlessly.
+    locationSource: resolvedLocationSource === 'browser' ? 'browser' : 'profile',
   });
 
   // Active schema: from the selected browsing domain, or first visible domain
@@ -1273,11 +1363,26 @@ export function HomePage() {
   );
 
   const handleBulkConnect = React.useCallback(
-    async (actionType: string, formData: Record<string, unknown>) => {
+    async (actionType: string, formData: Record<string, unknown>, confirmed = false) => {
       if (!myItem || !network) return;
       // Draft source profile can't act — prompt to complete it, don't submit.
       if (promptCompleteDraftProfile(myItem)) {
         setBulkConnectOpen(false);
+        return;
+      }
+      // Minor ward: confirm before the guardian OTP is dispatched (the bulk
+      // perform below is what sends it) — same "proceed?" step as single actions.
+      if (
+        !confirmed &&
+        u18Status?.isMinor === true &&
+        !!wardDomain &&
+        isGuardianConsentRequiredDomain(network, wardDomain)
+      ) {
+        setBulkConnectOpen(false);
+        setBulkGuardianConfirm({
+          actionType,
+          run: () => { void handleBulkConnect(actionType, formData, true); },
+        });
         return;
       }
       setBulkConnectBusy(true);
@@ -1358,11 +1463,20 @@ export function HomePage() {
           const guardianResults = failedResults.filter(
             (r) => guardianOtpErrorOf(r) === 'GUARDIAN_OTP_REQUIRED',
           );
-          if (guardianResults.length > 0 && guardianResults.length === failedResults.length) {
+          // Any GUARDIAN_OTP_REQUIRED failure means a code was already sent to the
+          // guardian — open the dialog for those items even in a mixed batch, so
+          // the sent OTP isn't wasted on the generic error path. Non-guardian
+          // failures ride along and are reselected once the dialog resolves.
+          if (guardianResults.length > 0) {
             setBulkConnectOpen(false);
+            const otherFailedIds = failedResults
+              .filter((r) => guardianOtpErrorOf(r) !== 'GUARDIAN_OTP_REQUIRED')
+              .map((r) => targets[r.index].item_id);
             setBulkGuardianChallenge({
               payloads: guardianResults.map((r) => payloads[r.index]),
               sourceInstanceUrl: sourceItemInstanceUrl,
+              actionType,
+              otherFailedIds: otherFailedIds.length > 0 ? otherFailedIds : undefined,
             });
             return; // the guardian OTP dialog owns the resubmit
           }
@@ -1400,6 +1514,8 @@ export function HomePage() {
       browseSelection.exitSelect,
       browseSelection.setSelected,
       promptCompleteDraftProfile,
+      u18Status,
+      wardDomain,
       t,
     ],
   );
@@ -1570,6 +1686,7 @@ export function HomePage() {
     <U18GuardianFlow
       network={network.id}
       brand={brand === 'standard' ? null : brand}
+      purpose={{ kind: 'profile' }}
       // Skip the DOB step when birth data is already stored (captured at
       // login) — we never re-ask the date of birth at profile-creation time.
       initialStep={u18InitialStep}
@@ -1629,6 +1746,7 @@ export function HomePage() {
     <U18GuardianFlow
       network={network.id}
       brand={brand === 'standard' ? null : brand}
+      purpose={{ kind: 'profile' }}
       initialStep="guardian"
       onComplete={() => {
         const ref = guardianSetupRef;
@@ -1692,6 +1810,13 @@ export function HomePage() {
             queryKeys.profileConsent(network.id),
             (prev) => new Set([...(prev ?? []), pending]),
           );
+          // Recording profile consent also flips a complete draft to `live`
+          // server-side (promoteItemOnProfileConsent, in the same transaction),
+          // so the cached my-items list is stale the moment this resolves — its
+          // `lifecycle_status` still reads `draft`. Without this the sidebar
+          // chip stays "Draft" until the next page load, which is what made the
+          // promotion look like it only happened on refresh.
+          void queryClient.invalidateQueries({ queryKey: queryKeys.myItems(network.id) });
           setActiveProfileId(pending);
           setStoredActiveProfileId(network.id, pending);
           setPendingConsentProfileId(null);
@@ -1711,6 +1836,7 @@ export function HomePage() {
     <GuardianOtpDialog
       open={!!guardianProfileRef}
       onOpenChange={(open) => { if (!open) setGuardianProfileRef(null); }}
+      purpose={{ kind: 'profile' }}
       onLogout={() => { void signOut(); }}
       onSubmitOtp={async (otp) => {
         const ref = guardianProfileRef;
@@ -1726,6 +1852,10 @@ export function HomePage() {
           queryKeys.profileConsent(network.id),
           (prev) => new Set([...(prev ?? []), ref.item_id]),
         );
+        // Guardian verify promotes the ward's complete draft to `live` too
+        // (upsertGuardianProfileConsentAndPromote), so refresh my-items for the
+        // same reason as the adult accept handler above.
+        void queryClient.invalidateQueries({ queryKey: queryKeys.myItems(network.id) });
         setActiveProfileId(ref.item_id);
         setStoredActiveProfileId(network.id, ref.item_id);
         setGuardianProfileRef(null);
@@ -1739,10 +1869,52 @@ export function HomePage() {
 
   // Guardian OTP challenge for a MINOR's BULK action (#453). One dialog for the
   // whole batch; the code resubmits the stashed payloads via performActionsBulk.
+  // "A code will be sent to your guardian — proceed?" confirm before a minor's
+  // bulk action dispatches the OTP (mirrors the single-action confirm).
+  const bulkGuardianConfirmModal = (
+    <Dialog
+      open={!!bulkGuardianConfirm}
+      onOpenChange={(open) => { if (!open) setBulkGuardianConfirm(null); }}
+    >
+      <DialogContent className="max-h-[90dvh] overflow-y-auto">
+        <DialogHeader>
+          <DialogTitle>{t('actions.guardian_confirm_title')}</DialogTitle>
+          <DialogDescription>{t('actions.guardian_confirm_desc')}</DialogDescription>
+        </DialogHeader>
+        <GuardianOtpPurpose
+          purpose={{
+            kind: 'bulk',
+            action: bulkGuardianConfirm?.actionType === 'connect' ? 'connect' : 'apply',
+            count: browseSelection.selected.size,
+          }}
+        />
+        <DialogFooter>
+          <Button variant="outline" onClick={() => setBulkGuardianConfirm(null)}>
+            {t('actions.guardian_confirm_cancel')}
+          </Button>
+          <Button
+            onClick={() => {
+              const run = bulkGuardianConfirm?.run;
+              setBulkGuardianConfirm(null);
+              run?.();
+            }}
+          >
+            {t('actions.guardian_confirm_proceed')}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+
   const bulkGuardianOtpModal = (
     <GuardianOtpDialog
       open={!!bulkGuardianChallenge}
       onOpenChange={(open) => { if (!open) setBulkGuardianChallenge(null); }}
+      purpose={{
+        kind: 'bulk',
+        action: bulkGuardianChallenge?.actionType === 'connect' ? 'connect' : 'apply',
+        count: bulkGuardianChallenge?.payloads.length ?? 0,
+      }}
       onLogout={() => { void signOut(); }}
       onSubmitOtp={async (otp) => {
         const ch = bulkGuardianChallenge;
@@ -1750,9 +1922,23 @@ export function HomePage() {
         const env2 = await performActionsBulk(ch.payloads, ch.sourceInstanceUrl, otp);
         queryClient.invalidateQueries({ queryKey: queryKeys.actions.all });
         if (env2.summary.failed === 0) {
+          const otherFailedIds = ch.otherFailedIds ?? [];
           setBulkGuardianChallenge(null);
-          toast.success(t('home.bulk_connected_all', { count: env2.summary.succeeded }));
-          browseSelection.exitSelect();
+          if (otherFailedIds.length > 0) {
+            // Mixed batch: the guardian-gated items went through, but other
+            // items failed for a non-guardian reason — keep those selected so
+            // the ward can retry them, and say so rather than claim "all done".
+            toast.warning(
+              t('home.bulk_connected_partial', {
+                succeeded: env2.summary.succeeded,
+                total: env2.summary.succeeded + otherFailedIds.length,
+              }),
+            );
+            browseSelection.setSelected(otherFailedIds);
+          } else {
+            toast.success(t('home.bulk_connected_all', { count: env2.summary.succeeded }));
+            browseSelection.exitSelect();
+          }
           return;
         }
         // Still failing (wrong/expired code, throttled …) — throw a classified
@@ -1791,6 +1977,7 @@ export function HomePage() {
         {guardianSetupForProfileModal}
         {profileConsentModal}
         {guardianProfileConsentModal}
+        {bulkGuardianConfirmModal}
         {bulkGuardianOtpModal}
       </>
     );
@@ -1830,6 +2017,24 @@ export function HomePage() {
               <Link to={`/profile/new?network=${selectedNetworkId ?? ''}`}>{t('nav.create_profile')}</Link>
             </Button>
           }
+        />
+      );
+    }
+    // Location-bounded discover returned nothing: the network may well have
+    // listings — just none within the (hard) radius. Say THAT, not "none in
+    // this network" (false) or nothing at all. Mirrors the map's area-scoped
+    // empty message; the "Search near" toggle makes trying another location
+    // actionable.
+    if (hasLocation && listDistanceMeters !== undefined) {
+      const km = Math.round(listDistanceMeters / 1000);
+      const locationSource = resolvedLocationSource === 'browser' ? 'current' : 'profile';
+      return (
+        <EmptyState
+          heading={t('home.nothing_here_heading')}
+          message={t('home.no_listings_in_radius', {
+            km,
+            locationSource: t(`home.location_source_${locationSource}`),
+          })}
         />
       );
     }
@@ -1894,9 +2099,10 @@ export function HomePage() {
   // `PageShell` below) — as opposed to `filtersPanel` above, which is also
   // reused as MapView's OWN copy rendered only while the map is maximized
   // (the header is covered in fullscreen; see `MapView`'s `filtersSlot` doc).
-  // Only THIS mount marks the selected facet chips paused/not-applied when
-  // the discover BFF fell back to native with an active search/filter — the
-  // map's maximized-mode copy is unaffected (it never sees the discover path).
+  // #394: previously this mount marked the selected facet chips
+  // paused/not-applied when the discover BFF fell back to native — since the
+  // fallback now applies facet filters natively, that pausing no longer
+  // applies and this is identical to `filtersPanel` above.
   const listFiltersPanel = (
     <MapFiltersPanel
       domains={visibleDomains}
@@ -1907,7 +2113,6 @@ export function HomePage() {
       onFieldsChange={handleMapFieldsChange}
       showDomainToggle={selectedDomain === null}
       viewMode={viewMode}
-      paused={listDegraded && searchOrFiltersActive}
     />
   );
 
@@ -1933,12 +2138,6 @@ export function HomePage() {
       viewMode={viewMode}
       onViewModeChange={handleViewModeChange}
       filtersSlot={listFiltersPanel}
-      // "Near me" is a LIST-view control: OFF (default) = ranked discover feed;
-      // ON = proximity. The map ignores it (it reads viewport markers), so only
-      // surface it in list view.
-      listControlsSlot={
-        viewMode === 'list' ? <NearMeToggle active={nearMe} onChange={setNearMe} /> : undefined
-      }
     >
       {!user ? (
         <GuestHero />
@@ -1959,11 +2158,13 @@ export function HomePage() {
           (viewMode !== 'list') so the two sets never double-mount.
 
           These count-only fetchers stay on the NATIVE browse path (no discover
-          opts, raw proximity coords) regardless of the list's "Near me" toggle:
-          the toggle is a list-view control and the map is unaffected (spec §5.3
-          — the map ignores search/filters/relevance entirely). Routing this
-          header count through discover would silently make it diverge from the
-          map's own marker total whenever the search index lags the live DB. */}
+          opts, raw proximity coords) regardless of the list's own always-on
+          discover mode: those are list-view concerns and must not route this
+          count through discover — doing so would make it diverge from the map's
+          own marker total whenever the search index lags the live DB. (The map
+          view itself DOES honor facet filters and free-text search via its own
+          `/markers` fetch — see `useMapMarkers`; this note is only about the
+          header-count fetchers, which are a separate native path.) */}
       {user && network && selectedDomain === null && viewMode !== 'list' &&
         visibleDomains.map((domain) => (
           <DomainPagedFetch
@@ -2101,28 +2302,29 @@ export function HomePage() {
                     {t('home.list_partial')}
                   </p>
                 )}
-                {/* Degraded-search indicator (#203 §6): the discover BFF fell back to
-                    native (signals-search unreachable/unconfigured/timed out) —
-                    `meta.source: 'native_fallback'` / `degraded: true`, surfaced via
-                    `singleDomainList.degraded` / the "All" tab's per-domain OR
-                    (`listDegraded`). Native results are still shown below (the
-                    fallback DOES return native items) — this only warns that a
-                    search/filter the user set is NOT actually being applied.
-                    Two variants (`resolveDegradedBanner`): PROMINENT when the user
-                    has an active search query or facet filter (their expectation is
-                    violated — filters look selected but aren't applied server-side),
-                    subtle when browsing the plain relevance default (only ranking
-                    quality is reduced, results are still relevant/recent). "Near
-                    me"/proximity (native path) never sets `degraded`, so no banner
-                    shows there. */}
-                {degradedBanner === 'search_unavailable' && (
-                  <p className="mb-3 rounded-md bg-amber-100 px-3 py-2 text-sm font-semibold text-amber-950 shadow-sm ring-2 ring-amber-400 dark:bg-amber-900 dark:text-amber-50 dark:ring-amber-700">
-                    {t('home.list_search_unavailable')}
-                  </p>
-                )}
-                {degradedBanner === 'ranking_unavailable' && (
+                {/* List note (#394): the list always calls discover now (profile
+                    anchor + resolved viewer location when available), so this
+                    explains what's driving the results — relevance-to-profile,
+                    proximity, both, or (when the discover BFF fell back to
+                    native — signals-search unreachable/unconfigured/timed out)
+                    that ranking itself is temporarily unavailable. Exactly one
+                    variant renders at a time; see `resolveListNote`. */}
+                {/* Suppress the "Showing profiles within X km…" note when the
+                    list is empty — it would falsely imply results are shown.
+                    The radius-aware empty state (buildEmptyState) carries the
+                    explanation in that case instead. Kept during loading
+                    (contentCount 0) is fine — the skeleton shows, no note. */}
+                {listNote && contentCount > 0 && (
                   <p className="mb-3 text-xs text-muted-foreground">
-                    {t('home.list_ranking_unavailable')}
+                    {t(
+                      listNote.key,
+                      listNote.values
+                        ? {
+                            km: listNote.values.km,
+                            locationSource: t(`home.location_source_${listNote.values.locationSource}`),
+                          }
+                        : undefined,
+                    )}
                   </p>
                 )}
                 {selectedDomain === null ? (
@@ -2140,7 +2342,7 @@ export function HomePage() {
                         network={network}
                         domain={domain}
                         coords={browseLocation}
-                        browseOpts={browseHookOpts}
+                        browseOpts={{ ...browseHookOpts, anchorItemId: anchorFor(domain.id) }}
                         onItems={handleDomainItems}
                       />
                     ))}
@@ -2211,6 +2413,18 @@ export function HomePage() {
                         const fullItem = Object.values(allDomainItemsFiltered)
                           .flat()
                           .find((i) => i.item_id === item.id);
+                        const networkItem: Item = fullItem || {
+                          item_id: item.id,
+                          item_network: network?.id || '',
+                          item_domain: selectedDomain || '',
+                          item_type: 'profile',
+                          item_instance_url: null,
+                          item_schema_url: null,
+                          item_state: item.data,
+                          item_locations: [],
+                          created_at: new Date().toISOString(),
+                          updated_at: new Date().toISOString(),
+                        };
 
                         return (
                           <SelectableCard
@@ -2218,34 +2432,50 @@ export function HomePage() {
                             id={item.id}
                             selectMode={browseSelection.selectMode}
                             selected={browseSelection.isSelected(item.id)}
-                            selectable={browseSelection.canSelect(item.domain ?? '')}
+                            // Not selectable if an action is already open for this
+                            // pair (one-open-per-pair, #370/#422) — mirrors the CTA.
+                            selectable={browseSelection.canSelect(item.domain ?? '') && !openActionItemIds.has(item.id)}
                             onToggle={(id) => browseSelection.toggle(id, item.domain ?? '')}
                           >
-                            <MatchScoreCard
-                              schema={schema!}
-                              schemaDescription={domainDescription}
-                              domainLabel={domainLabel}
-                              cardConfig={cardConfig}
-                              data={item.data}
-                              actions={domainActions}
-                              selectionMode={browseSelection.selectMode}
-                              onAction={(type, actionSchema) =>
-                                triggerAction(type, actionSchema, item.id)
-                              }
-                              localItem={myItem}
-                              networkItem={fullItem || {
-                                item_id: item.id,
-                                item_network: network?.id || '',
-                                item_domain: selectedDomain || '',
-                                item_type: 'profile',
-                                item_instance_url: null,
-                                item_schema_url: null,
-                                item_state: item.data,
-                                item_locations: [],
-                                created_at: new Date().toISOString(),
-                                updated_at: new Date().toISOString(),
-                              }}
-                            />
+                            {/* #394: same rule as the single-domain CardGrid so all
+                                three tabs behave identically — profile-to-profile
+                                match always shows; the free-text (no-profile) score
+                                is gated by the runtime-env flag. */}
+                            {shouldRenderMatchScoreCard(myItem, networkItem) ? (
+                              <MatchScoreCard
+                                schema={schema!}
+                                schemaDescription={domainDescription}
+                                domainLabel={domainLabel}
+                                cardConfig={cardConfig}
+                                data={item.data}
+                                actions={domainActions}
+                                selectionMode={browseSelection.selectMode}
+                                onAction={(type, actionSchema) =>
+                                  triggerAction(type, actionSchema, item.id)
+                                }
+                                localItem={myItem}
+                                networkItem={networkItem}
+                                actionsDisabled={openActionItemIds.has(item.id)}
+                                actionsDisabledReason={t('actions.pair_open_disabled', 'A request is already open with this profile.')}
+                              />
+                            ) : (
+                              <DomainCard
+                                schema={schema!}
+                                schemaDescription={domainDescription}
+                                domainLabel={domainLabel}
+                                cardConfig={cardConfig}
+                                data={item.data}
+                                actions={domainActions}
+                                selectionMode={browseSelection.selectMode}
+                                onAction={(type, actionSchema) =>
+                                  triggerAction(type, actionSchema, item.id)
+                                }
+                                localItem={myItem}
+                                networkItem={networkItem}
+                                actionsDisabled={openActionItemIds.has(item.id)}
+                                actionsDisabledReason={t('actions.pair_open_disabled', 'A request is already open with this profile.')}
+                              />
+                            )}
                           </SelectableCard>
                         );
                       })}
@@ -2284,6 +2514,8 @@ export function HomePage() {
                   localItem={myItem}
                   networkId={network?.id}
                   selectedDomain={selectedDomain}
+                  openActionItemIds={openActionItemIds}
+                  openActionReason={t('actions.pair_open_disabled', 'A request is already open with this profile.')}
                   selection={browseSelection}
                 />
                 <div ref={singleDomainSentinelRef} aria-hidden="true" className="h-px w-full" />
@@ -2412,6 +2644,7 @@ export function HomePage() {
     {guardianSetupForProfileModal}
     {profileConsentModal}
         {guardianProfileConsentModal}
+        {bulkGuardianConfirmModal}
         {bulkGuardianOtpModal}
     </>
   );

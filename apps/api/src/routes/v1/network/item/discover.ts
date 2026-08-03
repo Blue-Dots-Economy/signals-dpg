@@ -5,7 +5,10 @@ import {
   isServedDomainBinding,
   replyForUnservedDomain,
 } from '@/utils/served_domain_guard';
-import { resolveAllowedFacetFilters } from '@/utils/facet_guard';
+import {
+  resolveAllowedFacetFilters,
+  resolveTextSearchFields,
+} from '@/utils/facet_guard';
 import { getNetworkConfigById } from '@/network_configs';
 import {
   searchSignals,
@@ -14,6 +17,14 @@ import {
   type SignalsSearchItem,
 } from '@/services/signals_search_client';
 import { fetchItemsAcrossInstances } from '@/utils/inter_instance_fetch';
+import { signalsSearchConfig } from '@/config';
+
+// Mirrors signals-search's own default `s_dwithin` radius (#394). Used ONLY
+// to REPORT the effective radius in `meta.distance_meters` when
+// SIGNALS_SEARCH_DISTANCE_METERS is unset and the request didn't override it
+// — we never send this value to signals-search ourselves in that case;
+// signals-search applies its own default when `distance_meters` is omitted.
+const DEFAULT_SEARCH_DISTANCE_METERS = 30000;
 
 type DiscoverItemsRequest = FastifyRequest<{
   Body: z.infer<typeof DiscoverItemsBodySchema>;
@@ -32,28 +43,45 @@ type DiscoverItemsRequest = FastifyRequest<{
  * indexing invariant rather than something this BFF enforces via a lifecycle
  * filter.
  *
- * NATIVE FALLBACK (#203 List PR, Task 3): `searchSignals` throws when
- * signals-search is unconfigured (`SIGNALS_SEARCH_URL`/`SIGNALS_SEARCH_API_KEY`
- * unset), when the call times out (`AbortSignal.timeout` in the client), or
- * on any non-2xx/invalid response — all three collapse to the same catch
- * below. On catch, this BFF falls back to the native
- * `fetchItemsAcrossInstances` path (the same distance/recency-ordered,
+ * NATIVE FALLBACK (#394, revising #203 List PR Task 3): `searchSignals` throws
+ * when signals-search is unconfigured (`SIGNALS_SEARCH_URL`/
+ * `SIGNALS_SEARCH_API_KEY` unset), when the call times out (`AbortSignal.
+ * timeout` in the client), or on any non-2xx/invalid response — all three
+ * collapse to the same catch below. On catch, this BFF falls back to the
+ * native `fetchItemsAcrossInstances` path (the same distance/recency-ordered,
  * live-only, paged fetch `/network/item/fetch` uses) so a search-service
- * outage degrades the list rather than 5xx-ing it. IMPORTANT: the native
- * fetch has no server-side facet/text-search support, so `q`/`filters` are
- * silently NOT applied when the fallback fires — `meta.source` is what lets
- * the UI (Task 6) tell the user their filters/search weren't honored.
+ * outage degrades the list rather than 5xx-ing it. `q`/`filters` ARE now
+ * applied on this native path too (#394) — the same value-match-on-public-
+ * `item_state` (`text_search`) and facet (`item_state`) mechanisms the map's
+ * `/markers` uses (see `resolveTextSearchFields`/`resolveAllowedFacetFilters`
+ * in `facet_guard.ts`, applied by `buildWhereClause`) — so only relevance
+ * RANKING is unavailable without signals-search. `meta.source:
+ * 'native_fallback'`/`degraded: true` let the UI (Task 6) show the "basic
+ * matches" note.
  *
  * PROFILE ANCHOR RELEVANCE (#394): `body.anchor_item_id` (the viewer's own
  * profile item) is forwarded to signals-search as `intent.item`. signals-
- * search 404s with `ANCHOR_NOT_FOUND` when that anchor isn't indexed yet or
- * is an invalid cross-domain pairing — that is NOT a search-service outage,
- * so it must not degrade to the native fallback (which drops q/filters and
- * loses ranking entirely). Instead, an anchor-specific 404/`ANCHOR_NOT_FOUND`
- * triggers exactly one retry of `searchSignals` with the anchor removed,
- * still resolving as `source: 'signals_search'`, `degraded: false`. Only a
- * failure of THAT retry (or any other non-anchor error) falls through to the
- * native fallback below.
+ * search returns an anchor error (`404 ANCHOR_NOT_FOUND` when the anchor isn't
+ * indexed yet, or `403 INTERACTION_NOT_ALLOWED` when the anchor's domain has
+ * no interaction with the browsed domain per the network's interaction matrix
+ * — e.g. seeker→seeker) — neither is a search-service outage, so instead of
+ * degrading to the native fallback, this retries `searchSignals` exactly once
+ * with the anchor removed, still resolving as `source: 'signals_search'`,
+ * `degraded: false`. The UI also avoids sending an anchor for non-interacting
+ * domain pairs in the first place (schema-driven, see `home-page`); this
+ * retry is the server-side safety net. Only a failure of THAT retry (or any
+ * other non-anchor error) falls through to the native fallback.
+ *
+ * CONFIGURABLE SPATIAL RADIUS (#394): `SIGNALS_SEARCH_DISTANCE_METERS`
+ * (optional env, `signalsSearchConfig.distanceMeters`) is forwarded to
+ * signals-search as `distance_meters` whenever the request doesn't already
+ * override it — omitted entirely (not sent) when unset, so signals-search's
+ * own ~30km `s_dwithin` default applies. `meta.distance_meters` on every
+ * return path reports the EFFECTIVE radius (request override > env >
+ * `DEFAULT_SEARCH_DISTANCE_METERS`) so the UI's "within X km" note stays
+ * accurate even when nothing was actually sent over the wire. Only present
+ * when the request carried a location — a non-geo search has no radius to
+ * report.
  */
 function mapSignalsSearchItemToDiscoverItem(item: SignalsSearchItem) {
   return {
@@ -160,25 +188,54 @@ const discover_items_handler = async (
       filters: allowedFilters,
       lat: body.item_latitude,
       lng: body.item_longitude,
-      distanceMeters: body.distance_meters,
+      distanceMeters: body.distance_meters ?? signalsSearchConfig.distanceMeters,
       limit: body.limit,
       offset: body.offset,
       anchorItemId: body.anchor_item_id,
     };
 
-    // Native fallback (Task 3): thrown for a request timeout, a non-2xx/
-    // invalid response, OR signals-search being unconfigured (the client
-    // throws for all three — see searchSignals' doc comment). A
-    // search-service outage must never surface as a 5xx, so this falls back
-    // to the same native, distance/recency-ordered paged fetch
-    // `/network/item/fetch` uses. That native fetch has no server-side
-    // facet/text-search, so `q`/`filters` are NOT applied on this path —
-    // `meta.source: 'native_fallback'` is what lets the UI (Task 6) show the
-    // right degraded-list message.
+    // Effective reported radius (#394): only meaningful when a location was
+    // actually sent (no spatial clause is built otherwise, on either the
+    // signals-search or native-fallback path). Precedence: the request's own
+    // override, then the configured env, then the documented constant that
+    // mirrors signals-search's own default — so the UI's "within X km" note
+    // is accurate whether or not SIGNALS_SEARCH_DISTANCE_METERS is set.
+    const effectiveDistanceMeters =
+      body.item_latitude !== undefined && body.item_longitude !== undefined
+        ? (body.distance_meters ??
+          signalsSearchConfig.distanceMeters ??
+          DEFAULT_SEARCH_DISTANCE_METERS)
+        : undefined;
+
+    // Native fallback (#394, revising Task 3): thrown for a request timeout, a
+    // non-2xx/invalid response, OR signals-search being unconfigured (the
+    // client throws for all three). A search-service outage must never surface
+    // as a 5xx, so this falls back to the native, distance/recency-ordered
+    // paged fetch `/network/item/fetch` uses — but now applying `q`/`filters`
+    // natively too (value-match on public item_state + declared, non-private
+    // facet fields; #394 dropped the `filterable` gate — see
+    // `resolveTextSearchFields`/`resolveAllowedFacetFilters` in `facet_guard.ts`,
+    // applied by `buildWhereClause`), the same mechanisms `/markers` uses. So
+    // only relevance RANKING is unavailable; `meta.source: 'native_fallback'`/
+    // `degraded: true` tell the UI to show the "basic matches" note.
+    //
+    // Radius honesty (#394 review fix): `radius_meters` below is
+    // `effectiveDistanceMeters`, NOT `body.distance_meters` — the UI never
+    // sends `distance_meters` (only lat/lng), so gating on the raw body field
+    // would silently skip the radius bound in `buildWhereClause` while
+    // `meta.distance_meters` still reported a radius as if it were applied.
+    // `effectiveDistanceMeters` is undefined exactly when no location was
+    // sent, matching `buildWhereClause`'s own radius-clause gate.
+    //
+    // Multi-instance limitation (single-instance is the target): the facet
+    // `item_state` filter forwards to peers (each re-guards it), but `q` does
+    // NOT (the peer `/fetch_local` body has no `q`), so on a federated network
+    // a text query filters only this instance's rows; peers contribute live,
+    // public, facet-filtered (but not text-filtered) rows. Documented follow-up.
     const fallBackToNative = async (logErr: unknown) => {
       request.log.warn(
         { err: logErr, body },
-        'signals-search unavailable; falling back to native item fetch for discover (filters/q not applied)'
+        'signals-search unavailable; falling back to native item fetch for discover (search/filters applied natively, no ranking)'
       );
 
       const nativeResult = await fetchItemsAcrossInstances({
@@ -189,10 +246,26 @@ const discover_items_handler = async (
           item_type: body.item_type,
           item_latitude: body.item_latitude,
           item_longitude: body.item_longitude,
-          radius_meters: body.distance_meters,
+          radius_meters: effectiveDistanceMeters,
           limit: body.limit,
           offset: body.offset,
           lifecycle_filter: 'live_only',
+          item_state:
+            allowedFilters.length > 0
+              ? Object.fromEntries(
+                  allowedFilters.map((filter) => [filter.field, filter.values])
+                )
+              : undefined,
+          text_search: body.q
+            ? {
+                q: body.q,
+                fields: resolveTextSearchFields(
+                  networkConfig,
+                  body.item_domain,
+                  body.item_type
+                ),
+              }
+            : undefined,
         },
         log: request.log,
       });
@@ -206,6 +279,7 @@ const discover_items_handler = async (
           offset: nativeResult.meta.offset,
           source: 'native_fallback' as const,
           degraded: true,
+          distance_meters: effectiveDistanceMeters,
         },
         items,
       });
@@ -225,22 +299,30 @@ const discover_items_handler = async (
           offset: searchResult.meta.offset,
           source: 'signals_search' as const,
           degraded: false,
+          distance_meters: effectiveDistanceMeters,
         },
         items,
       });
     } catch (searchErr) {
-      // Anchor relevance (#394): an unindexed/invalid-pairing anchor is a
+      // Anchor relevance (#394): an anchor signals-search can't use is a
       // client-input condition, not a search-service outage — retry ONCE
       // without the anchor rather than degrading to the native fallback
-      // (which would silently drop q/filters and all ranking). Any other
-      // error (no anchor sent, or a non-404/non-ANCHOR_NOT_FOUND failure)
-      // falls straight through to the native fallback below.
-      const isAnchorNotFound =
+      // (which loses ranking). Two anchor cases: `404 ANCHOR_NOT_FOUND` (the
+      // anchor isn't indexed yet) and `403 INTERACTION_NOT_ALLOWED` (the
+      // anchor's domain has no interaction with the browsed domain per the
+      // network's interaction matrix — e.g. a seeker anchor browsing seekers;
+      // the UI already avoids sending the anchor for such pairs, this is the
+      // server-side safety net). Any other error (no anchor sent, or a real
+      // search failure) falls straight through to the native fallback below.
+      const isRecoverableAnchorError =
         body.anchor_item_id !== undefined &&
         searchErr instanceof SignalsSearchError &&
-        (searchErr.status === 404 || searchErr.code === 'ANCHOR_NOT_FOUND');
+        (searchErr.status === 404 ||
+          searchErr.status === 403 ||
+          searchErr.code === 'ANCHOR_NOT_FOUND' ||
+          searchErr.code === 'INTERACTION_NOT_ALLOWED');
 
-      if (isAnchorNotFound) {
+      if (isRecoverableAnchorError) {
         try {
           const retryResult = await searchSignals({
             ...searchInput,
@@ -256,6 +338,7 @@ const discover_items_handler = async (
               offset: retryResult.meta.offset,
               source: 'signals_search' as const,
               degraded: false,
+              distance_meters: effectiveDistanceMeters,
             },
             items,
           });

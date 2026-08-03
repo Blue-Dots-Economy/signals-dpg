@@ -9,6 +9,11 @@ interface ImportMetaEnv {
   readonly VITE_API_URLS: string;
   readonly VITE_DEFAULT_API_URL: string;
   readonly VITE_SHOW_INSTANCE_SELECTOR: string;
+  /** Gates the free-text / no-profile match score (the `/discover` relevance
+   * badge shown to signed-out viewers). Default ON; set 'false'/'0'/'off'/'no'
+   * to hide it. Profile-to-profile match score is never affected. See
+   * `lib/match-score-config.ts`. */
+  readonly VITE_FREETEXT_MATCH_SCORE_ENABLED?: string;
   readonly VITE_NETWORK_ID: string;
   /** Per-deployment college/institute region code ("ka" | "up") selecting which
    * state's list backs the reference-autocomplete college field. Maps to
@@ -33,6 +38,8 @@ interface ImportMetaEnv {
   readonly VITE_MAP_MARKER_CAP_INDIVIDUAL?: string;
   /** Zoom level at/above which the map disables clustering (#203 Task 6). Falls back to 14. */
   readonly VITE_MAP_CLUSTER_DISABLE_ZOOM?: string;
+  /** Duration (ms) of the smooth cluster-click zoom animation. Falls back to 2000; 0 = instant. */
+  readonly VITE_MAP_CLUSTER_ZOOM_ANIM_MS?: string;
   readonly VITE_ACTION_POLL_INTERVAL_MS?: string;
   readonly VITE_VC_WALLET_URL: string;
   readonly VITE_VC_WALLET_API_KEY: string;

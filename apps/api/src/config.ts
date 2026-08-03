@@ -194,6 +194,10 @@ export const matchScoreConfig = {
 export const signalsSearchConfig = {
   url: signalsSearch.SIGNALS_SEARCH_URL,
   api_key: signalsSearch.SIGNALS_SEARCH_API_KEY,
+  // Optional configured spatial radius (meters, #394). Undefined -> the
+  // discover BFF sends no distance_meters to signals-search (its own default
+  // applies) but still reports DEFAULT_SEARCH_DISTANCE_METERS.
+  distanceMeters: signalsSearch.SIGNALS_SEARCH_DISTANCE_METERS,
 };
 
 /**

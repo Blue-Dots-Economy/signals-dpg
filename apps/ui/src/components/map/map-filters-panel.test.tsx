@@ -4,16 +4,14 @@ import type { RJSFSchema } from '@rjsf/utils';
 import type { DotNetworkDomain } from '@/engine/types';
 import { MapFiltersPanel } from './map-filters-panel';
 
-// #203 map-serverside-search Task 7 review fix: the server's facet guard
-// (`resolveAllowedFacetFields`, Task 3) only honors fields declared
-// `filterable: true` in network.json (Task 1) — a plain enum field is a
-// normal form field the server silently drops as a MAP facet filter. The
-// panel must therefore only OFFER filterable facets when `viewMode="map"`,
-// while still offering every enum facet when `viewMode="list"` (no
-// regression — the list filters client-side and needs no server
-// cooperation). A single domain (`domains.length === 1`) also hides the
-// domain chip group, isolating these assertions to the enum-field behavior.
-function domainWithNonFilterableEnum(): DotNetworkDomain {
+// #394: dropped the `filterable: true` gate that used to make the MAP
+// (`viewMode="map"`) offer a narrower facet set than the LIST. The panel now
+// offers the SAME full set of declared, non-private enum fields regardless of
+// `viewMode` — restoring pre-Map-PR behavior. A single domain
+// (`domains.length === 1`) also hides the domain chip group, isolating these
+// assertions to the enum-field behavior. See #360 for the proper long-term
+// schema-driven search/filter declaration.
+function domainWithPlainEnum(): DotNetworkDomain {
   return {
     id: 'seeker',
     description: 'seeker',
@@ -21,7 +19,6 @@ function domainWithNonFilterableEnum(): DotNetworkDomain {
       'profile_1.0': {
         type: 'object',
         properties: {
-          // No `filterable` marker at all — offered to the LIST, not the MAP.
           preferred_language: { type: 'string', enum: ['en', 'hi', 'kn'] },
         },
       } as RJSFSchema,
@@ -29,10 +26,10 @@ function domainWithNonFilterableEnum(): DotNetworkDomain {
   } as DotNetworkDomain;
 }
 
-describe('MapFiltersPanel — filterableOnly by viewMode (#203 Task 7 review fix)', () => {
-  it('renders nothing on the MAP when the only enum field is non-filterable (no facets to offer)', () => {
-    const domain = domainWithNonFilterableEnum();
-    const { container } = render(
+describe('MapFiltersPanel — same enum-field set on map and list (#394)', () => {
+  it('renders the Filters trigger on the MAP for a plain (non-private) enum field with no filterable marker', () => {
+    const domain = domainWithPlainEnum();
+    render(
       <MapFiltersPanel
         domains={[domain]}
         selectedDomains={[]}
@@ -42,11 +39,11 @@ describe('MapFiltersPanel — filterableOnly by viewMode (#203 Task 7 review fix
         viewMode="map"
       />,
     );
-    expect(container).toBeEmptyDOMElement();
+    expect(screen.getByRole('button', { name: /filters/i })).toBeInTheDocument();
   });
 
-  it('renders the Filters trigger on the LIST for that same non-filterable enum field (no regression)', () => {
-    const domain = domainWithNonFilterableEnum();
+  it('renders the Filters trigger on the LIST for that same enum field (no regression)', () => {
+    const domain = domainWithPlainEnum();
     render(
       <MapFiltersPanel
         domains={[domain]}
@@ -60,7 +57,7 @@ describe('MapFiltersPanel — filterableOnly by viewMode (#203 Task 7 review fix
     expect(screen.getByRole('button', { name: /filters/i })).toBeInTheDocument();
   });
 
-  it('renders the Filters trigger on the MAP once at least one field is declared filterable', () => {
+  it('renders nothing when the only enum field is `private: true` (the one remaining, security-motivated gate)', () => {
     const domain: DotNetworkDomain = {
       id: 'seeker',
       description: 'seeker',
@@ -68,13 +65,13 @@ describe('MapFiltersPanel — filterableOnly by viewMode (#203 Task 7 review fix
         'profile_1.0': {
           type: 'object',
           properties: {
-            gender: { type: 'string', enum: ['female', 'male'], filterable: true },
+            ssn_last_four: { type: 'string', enum: ['1234', '5678'], private: true },
           },
         } as RJSFSchema,
       },
     } as DotNetworkDomain;
 
-    render(
+    const { container } = render(
       <MapFiltersPanel
         domains={[domain]}
         selectedDomains={[]}
@@ -84,6 +81,6 @@ describe('MapFiltersPanel — filterableOnly by viewMode (#203 Task 7 review fix
         viewMode="map"
       />,
     );
-    expect(screen.getByRole('button', { name: /filters/i })).toBeInTheDocument();
+    expect(container).toBeEmptyDOMElement();
   });
 });
