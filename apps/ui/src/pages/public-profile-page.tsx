@@ -156,6 +156,13 @@ function ProfileTopBar({
 
   return (
     <header className="sticky top-0 z-10 flex h-14 items-center gap-3 border-b border-border bg-background/90 px-4 backdrop-blur sm:px-6">
+      {showLogo && <PortalHeader />}
+      {!showLogo && <SidebarTrigger className="md:hidden" />}
+      {/* Anonymous mode has the logo in the app bar (no sidebar edge), so add a
+          full-height divider after it — mirroring the sidebar's right border in
+          the authenticated layout. The back button + title then sit in the
+          "content" region, same slot as the logged-in view. */}
+      {showLogo && <span className="w-px shrink-0 self-stretch bg-border" aria-hidden="true" />}
       <button
         type="button"
         onClick={onBack}
@@ -165,12 +172,7 @@ function ProfileTopBar({
       >
         <ArrowLeft className="h-5 w-5" aria-hidden="true" />
       </button>
-      {showLogo ? <PortalHeader /> : <SidebarTrigger className="md:hidden" />}
-      {/* Anonymous mode has the logo in the app bar (no sidebar edge), so add a
-          divider between it and the title — the way the sidebar's right border
-          separates them in the authenticated layout. */}
-      {showLogo && <span className="h-8 w-px shrink-0 bg-border" aria-hidden="true" />}
-      <span className={`text-lg font-semibold text-foreground${showLogo ? '' : ' ml-2 sm:ml-4'}`}>
+      <span className="text-lg font-semibold text-foreground">
         {t('public_profile.app_bar_title', 'Profile preview')}
       </span>
       <div className="ml-auto flex shrink-0 items-center gap-2">
