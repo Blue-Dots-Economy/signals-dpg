@@ -80,6 +80,11 @@ vi.mock('@/lib/action-api', () => ({
   performAction: vi.fn(),
   ACTION_CONSENT_SENTINEL: '__consent',
 }));
+// The action row fetches the viewer's U18 status (guardian-confirm gate);
+// default to a resolved adult so the tests stay deterministic and offline.
+vi.mock('@/lib/consent-api', () => ({
+  getU18Status: vi.fn().mockResolvedValue({ hasBirthData: true, isMinor: false }),
+}));
 
 const ID = '9b545eb9-5406-4bce-bc71-0cdac4b63bd0';
 
@@ -322,6 +327,47 @@ describe('PublicProfilePage', () => {
     renderAt(`/public/blue_dot/seeker/profile_1.0/${ID}`);
     expect(
       screen.getByText('Switch to a compatible profile in the sidebar to apply or connect.'),
+    ).toBeInTheDocument();
+    expect(screen.queryByTestId('action-button')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('match-score-button')).not.toBeInTheDocument();
+  });
+
+  it('logged-in + not-own + DRAFT active profile shows the complete-profile hint, no buttons', () => {
+    useResolvedNetwork.mockReturnValue({ data: netWithActions, isLoading: false, isError: false });
+    useAuth.mockReturnValue({ isAuthenticated: true, isLoading: false, user: { id: 'u1', name: 'Seeker' } });
+    // Active profile is a seeker that CAN connect to a provider, but it is still
+    // a draft — completing it is the blocker, so the complete hint wins.
+    useMyItems.mockReturnValue({
+      data: [
+        {
+          item_id: SEEKER_ID,
+          item_network: 'blue_dot',
+          item_domain: 'seeker',
+          item_type: 'profile_1.0',
+          item_instance_url: null,
+          item_state: { name: 'Seeker' },
+          lifecycle_status: 'draft',
+        },
+      ],
+      isLoading: false,
+      isFetched: true,
+    });
+    useItemDetail.mockReturnValue({
+      item: {
+        item_id: ID,
+        item_network: 'blue_dot',
+        item_domain: 'provider',
+        item_type: 'profile_1.0',
+        item_instance_url: null,
+        item_state: { name: 'Acme', city: 'Pune' },
+        lifecycle_status: 'live',
+      },
+      isLoading: false,
+      isError: false,
+    });
+    renderAt(`/public/blue_dot/provider/profile_1.0/${ID}`);
+    expect(
+      screen.getByText('Complete your active profile to apply or connect.'),
     ).toBeInTheDocument();
     expect(screen.queryByTestId('action-button')).not.toBeInTheDocument();
     expect(screen.queryByTestId('match-score-button')).not.toBeInTheDocument();

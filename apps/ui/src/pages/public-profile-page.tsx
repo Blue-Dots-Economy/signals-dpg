@@ -19,6 +19,7 @@ import type { DotActionSchema, DotNetworkSchema } from '@/engine/types';
 import { performAction, ACTION_CONSENT_SENTINEL } from '@/lib/action-api';
 import { ActionAbortedError } from '@/lib/action-abort';
 import { isGuardianConsentRequiredDomain } from '@/lib/guardian-consent';
+import { getU18Status, type U18StatusResponse } from '@/lib/consent-api';
 import { apiConfig } from '@/lib/api-config';
 import { ActionHandler } from '@/components/actions/action-handler';
 import { ActionButton } from '@/components/cards/action-button';
@@ -237,6 +238,23 @@ function ProfileActionRow({
   const queryClient = useQueryClient();
   const [matchOpen, setMatchOpen] = React.useState(false);
 
+  // U18 minor status for the viewer (source profile owner), mirroring
+  // home-page.tsx: only an authenticated user on a network has stored birth
+  // data. On failure the status stays null (adult path) — never leave a minor
+  // ungated, which the server also enforces regardless of this UI signal.
+  const [u18Status, setU18Status] = React.useState<U18StatusResponse | null>(null);
+  React.useEffect(() => {
+    if (!user || !net) {
+      setU18Status(null);
+      return;
+    }
+    let cancelled = false;
+    getU18Status(net.id)
+      .then((s) => { if (!cancelled) setU18Status(s); })
+      .catch(() => { if (!cancelled) setU18Status(null); });
+    return () => { cancelled = true; };
+  }, [user, net]);
+
   const {
     score,
     isLoading: matchLoading,
@@ -351,7 +369,15 @@ function ProfileActionRow({
     <>
       <ActionHandler
         onActionSubmit={onActionSubmit}
-        guardianConfirmRequired={isGuardianConsentRequiredDomain(net!, activeItem.item_domain)}
+        // Parity with home-page: only confirm-before-OTP when the viewer is
+        // actually a minor AND their active-profile domain requires guardian
+        // consent — an adult on such a domain gets no extra dialog.
+        guardianConfirmRequired={
+          u18Status?.isMinor === true &&
+          !!net &&
+          !!activeItem &&
+          isGuardianConsentRequiredDomain(net, activeItem.item_domain)
+        }
       >
         {(triggerAction) => (
           <div className="mt-4 flex flex-wrap gap-2">
