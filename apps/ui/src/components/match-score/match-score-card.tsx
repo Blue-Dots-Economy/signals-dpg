@@ -109,6 +109,7 @@ export function MatchScoreCard({
         onClick={onClick}
         localItem={localItem}
         networkItem={networkItem}
+        shareItem={networkItem}
         selectionMode={selectionMode}
         actionsDisabled={actionsDisabled}
         actionsDisabledReason={actionsDisabledReason}

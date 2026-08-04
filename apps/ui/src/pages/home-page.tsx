@@ -51,6 +51,11 @@ import { ActionAbortedError } from '@/lib/action-abort';
 import { EmptyState } from '@/components/empty-state';
 import { useAuth } from '@/contexts/auth-context';
 import { apiConfig } from '@/lib/api-config';
+import {
+  getActionsForDomain as flattenInteractionActions,
+  resolveTargetInstanceUrl,
+  computeOpenActionItemIds,
+} from '@/lib/profile-actions';
 import { getEnumFilterFieldsForDomains } from '@/lib/enum-filters';
 import {
   deriveBrowseParams,
@@ -291,6 +296,8 @@ function MarkerDetailPopup({
   localItem,
   connectAction,
   onConnect,
+  connectDisabled,
+  connectDisabledReason,
   onItemResolved,
 }: {
   networkId: string | null;
@@ -307,6 +314,10 @@ function MarkerDetailPopup({
   localItem: Item | null;
   connectAction?: DotActionSchema;
   onConnect?: (baseItemId: string) => void;
+  // Disable the connect CTA when an action is already open for this pair
+  // (#370/#422) — parity with the list cards.
+  connectDisabled?: boolean;
+  connectDisabledReason?: string;
   // Task 7 (#203 §5.2 cleanup): lifts this popup's already-fetched full item
   // up to the parent. Home-page's `onActionSubmit` needs the full `Item`
   // (network/domain/type/instance_url) to build a connect-action's
@@ -380,6 +391,8 @@ function MarkerDetailPopup({
       cardConfig={cardConfig}
       actions={localItem && connectAction ? [connectAction] : []}
       onConnect={localItem && connectAction ? () => onConnect?.(baseItemId) : undefined}
+      connectDisabled={connectDisabled}
+      connectDisabledReason={connectDisabledReason}
       localItem={localItem}
       networkItem={item}
     />
@@ -398,52 +411,6 @@ function parseNetworkIds(networkEnv: string | undefined): string[] {
  * 2. Network config instances lookup by domain
  * 3. Current API base URL as fallback
  */
-function resolveTargetInstanceUrl(
-  targetItem: Item,
-  network: DotNetworkSchema | null,
-  currentApiUrl: string,
-  itemType: 'source' | 'target' = 'target'
-): string {
-  console.log(`🔍 Resolving ${itemType} instance URL:`, {
-    itemId: targetItem.item_id,
-    itemDomain: targetItem.item_domain,
-    itemInstanceUrl: targetItem.item_instance_url,
-    currentApiUrl,
-    networkInstances: network?.instances?.map(i => ({ domain: i.domain_id, url: i.instance_url })),
-  });
-
-  // Priority 1: Use item's instance URL if it exists and is valid (not localhost in production)
-  if (targetItem.item_instance_url) {
-    // Check if it's a valid URL (not just http://localhost in production)
-    const isLocalhost = targetItem.item_instance_url.includes('localhost') || 
-                        targetItem.item_instance_url.includes('127.0.0.1');
-    const isProduction = !currentApiUrl.includes('localhost') && 
-                         !currentApiUrl.includes('127.0.0.1');
-    
-    if (!isLocalhost || !isProduction) {
-      console.log(`✅ Using item's instance_url: ${targetItem.item_instance_url}`);
-      return targetItem.item_instance_url;
-    }
-    console.log(`⚠️ Item has localhost URL in production, skipping: ${targetItem.item_instance_url}`);
-    // If localhost in production, continue to fallback
-  }
-
-  // Priority 2: Lookup in network.instances by domain
-  if (network?.instances) {
-    const instanceConfig = network.instances.find(
-      (i) => i.domain_id === targetItem.item_domain
-    );
-    if (instanceConfig?.instance_url) {
-      console.log(`✅ Using network.instances lookup: ${instanceConfig.instance_url}`);
-      return instanceConfig.instance_url;
-    }
-  }
-
-  // Priority 3: Fallback to current API URL
-  console.log(`⚠️ Fallback to current API URL: ${currentApiUrl}`);
-  return currentApiUrl;
-}
-
 // Resolves the landing-page default view mode from VITE_DEFAULT_VIEW_MODE.
 // Falls back to 'map' when the env var is missing or holds an unrecognised
 // value, so a fresh install ships with the map-first experience.
@@ -636,24 +603,10 @@ export function HomePage() {
   // the real guard; this just pre-empts the click. "Open" = not a terminal
   // status; the same terminal set the backend frees a pair on.
   const { data: myActionsData } = useActions('all', { enabled: !!user });
-  const openActionItemIds = React.useMemo(() => {
-    const TERMINAL = new Set([
-      'accepted',
-      'completed',
-      'cancelled',
-      'rejected',
-      'declined',
-      'withdrawn',
-    ]);
-    const set = new Set<string>();
-    if (!activeProfileId) return set;
-    for (const a of myActionsData?.actions ?? []) {
-      if (TERMINAL.has(a.action_status)) continue;
-      if (a.source_item_id === activeProfileId) set.add(a.target_item_id);
-      else if (a.target_item_id === activeProfileId) set.add(a.source_item_id);
-    }
-    return set;
-  }, [myActionsData, activeProfileId]);
+  const openActionItemIds = React.useMemo(
+    () => computeOpenActionItemIds(myActionsData?.actions ?? [], activeProfileId),
+    [myActionsData, activeProfileId],
+  );
 
   // A draft (incomplete) profile can't apply/connect — the API rejects it with
   // PROFILE_NOT_LIVE. Prompt the user to finish their profile (with a shortcut
@@ -1318,35 +1271,11 @@ export function HomePage() {
   }, [network]);
 
   // Get all available actions for a given target domain
+  // Browse requires an active profile (myItem) as the source; the shared helper
+  // flattens the interaction matrix for currentDomain -> targetDomain.
   const getActionsForDomain = React.useCallback(
-    (targetDomainId: string): DotActionSchema[] => {
-      if (!network || !myItem) return [];
-
-      const actions: DotActionSchema[] = [];
-
-      // Iterate through all action types defined in the network schema
-      for (const [actionType, actionConfig] of Object.entries(network.actions)) {
-        if (!actionConfig?.interactions) continue;
-
-        // Find matching interactions for currentDomain -> targetDomain
-        const matchingInteractions = actionConfig.interactions.filter(
-          (i) => i.from_domain === currentDomain && i.to_domain === targetDomainId
-        );
-
-        for (const interaction of matchingInteractions) {
-          actions.push({
-            action_type: actionType,
-            from_domain: interaction.from_domain,
-            to_domain: interaction.to_domain,
-            requirement_schema: interaction.requirement_schema,
-            event_schema: interaction.event_schema,
-            reveals_pii_on_status: interaction.reveals_pii_on_status,
-          });
-        }
-      }
-
-      return actions;
-    },
+    (targetDomainId: string): DotActionSchema[] =>
+      myItem ? flattenInteractionActions(network, currentDomain, targetDomainId) : [],
     [network, currentDomain, myItem]
   );
 
@@ -1409,12 +1338,12 @@ export function HomePage() {
 
         const sourceItemInstanceUrl = myItem.item_instance_url?.includes('localhost')
           ? apiConfig.getUrl()
-          : resolveTargetInstanceUrl(myItem, network, apiConfig.getUrl(), 'source');
+          : resolveTargetInstanceUrl(myItem, network, apiConfig.getUrl());
 
         const payloads = targets.map((targetItem) => {
             const targetItemInstanceUrl = targetItem.item_instance_url?.includes('localhost')
               ? apiConfig.getUrl()
-              : resolveTargetInstanceUrl(targetItem, network, apiConfig.getUrl(), 'target');
+              : resolveTargetInstanceUrl(targetItem, network, apiConfig.getUrl());
             return {
               action_type: actionType,
               source_item: {
@@ -2120,13 +2049,13 @@ export function HomePage() {
             // it means it was created on the current API instance
             const sourceItemInstanceUrl = myItem.item_instance_url?.includes('localhost')
               ? apiConfig.getUrl()  // Use current API where the item was actually created
-              : resolveTargetInstanceUrl(myItem, network, apiConfig.getUrl(), 'source');
+              : resolveTargetInstanceUrl(myItem, network, apiConfig.getUrl());
 
             // Resolve target item instance URL dynamically
             // IMPORTANT: If target item has localhost, use current API as fallback
             const targetItemInstanceUrl = targetItem.item_instance_url?.includes('localhost')
               ? apiConfig.getUrl()  // Use current API where the item was actually fetched from
-              : resolveTargetInstanceUrl(targetItem, network, apiConfig.getUrl(), 'target');
+              : resolveTargetInstanceUrl(targetItem, network, apiConfig.getUrl());
 
             await performAction(
               {
@@ -2341,6 +2270,7 @@ export function HomePage() {
                                 }
                                 localItem={myItem}
                                 networkItem={networkItem}
+                                shareItem={networkItem}
                                 actionsDisabled={openActionItemIds.has(item.id)}
                                 actionsDisabledReason={t('actions.pair_open_disabled', 'A request is already open with this profile.')}
                               />
@@ -2465,6 +2395,8 @@ export function HomePage() {
                         cardConfig={markerDomain?.card}
                         localItem={myItem}
                         connectAction={connectAction}
+                        connectDisabled={openActionItemIds.has(baseItemId)}
+                        connectDisabledReason={t('actions.pair_open_disabled', 'A request is already open with this profile.')}
                         onConnect={(itemId) => {
                           // Close the marker popup first so it doesn't cover
                           // the consent modal the action is about to open.

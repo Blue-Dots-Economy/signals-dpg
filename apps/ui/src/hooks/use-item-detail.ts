@@ -19,6 +19,7 @@ export interface ItemDetailRef {
 interface UseItemDetailResult {
   item: Item | null;
   isLoading: boolean;
+  isError: boolean;
 }
 
 /**
@@ -59,5 +60,5 @@ export function useItemDetail(
     staleTime: ITEM_DETAIL_STALE_TIME_MS,
   });
 
-  return { item: query.data ?? null, isLoading: query.isLoading };
+  return { item: query.data ?? null, isLoading: query.isLoading, isError: query.isError };
 }

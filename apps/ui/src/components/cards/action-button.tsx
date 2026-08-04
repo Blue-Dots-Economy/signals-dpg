@@ -16,6 +16,12 @@ interface ActionButtonProps {
   disabled?: boolean;
   /** Shown on hover when disabled, so the user knows why. */
   disabledReason?: string;
+  /**
+   * Button visual variant. Defaults to `'outline'` so every existing card call
+   * site is unchanged; the public profile page passes `'default'` for a filled,
+   * theme-coloured Apply/Connect CTA.
+   */
+  variant?: React.ComponentProps<typeof Button>['variant'];
 }
 
 const actionIcons: Record<string, React.ComponentType<{ className?: string }>> = {
@@ -30,13 +36,14 @@ export function ActionButton({
   onAction,
   disabled = false,
   disabledReason,
+  variant = 'outline',
 }: ActionButtonProps) {
   const Icon = actionIcons[actionType] ?? Plug;
   const label = actionType.charAt(0).toUpperCase() + actionType.slice(1);
 
   const button = (
     <Button
-      variant="outline"
+      variant={variant}
       size="sm"
       disabled={disabled}
       onClick={(e) => {
