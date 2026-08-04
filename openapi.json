@@ -456,6 +456,18 @@
             "in": "query",
             "name": "cache_ttl_seconds",
             "required": false
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "true",
+                "false"
+              ]
+            },
+            "in": "query",
+            "name": "include_retired",
+            "required": false
           }
         ],
         "responses": {
@@ -3849,6 +3861,18 @@
             "in": "query",
             "name": "cache_ttl_seconds",
             "required": false
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "true",
+                "false"
+              ]
+            },
+            "in": "query",
+            "name": "include_retired",
+            "required": false
           }
         ],
         "security": [],
@@ -4097,6 +4121,13 @@
                     "type": "number",
                     "minimum": -180,
                     "maximum": 180
+                  },
+                  "include_retired": {
+                    "type": "string",
+                    "enum": [
+                      "true",
+                      "false"
+                    ]
                   }
                 },
                 "required": [
@@ -4224,6 +4255,13 @@
                     "minimum": 0,
                     "exclusiveMinimum": true,
                     "maximum": 9007199254740991
+                  },
+                  "include_retired": {
+                    "type": "string",
+                    "enum": [
+                      "true",
+                      "false"
+                    ]
                   }
                 },
                 "required": [
@@ -4576,6 +4614,18 @@
           {
             "schema": {
               "type": "string",
+              "enum": [
+                "true",
+                "false"
+              ]
+            },
+            "in": "query",
+            "name": "include_retired",
+            "required": false
+          },
+          {
+            "schema": {
+              "type": "string",
               "minLength": 1
             },
             "in": "query",
@@ -4778,6 +4828,13 @@
                     "minimum": 0,
                     "exclusiveMinimum": true,
                     "maximum": 9007199254740991
+                  },
+                  "include_retired": {
+                    "type": "string",
+                    "enum": [
+                      "true",
+                      "false"
+                    ]
                   },
                   "q": {
                     "type": "string",

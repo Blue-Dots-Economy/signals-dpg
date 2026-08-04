@@ -1,5 +1,4 @@
 import * as React from 'react';
-import axios from 'axios';
 import type { RJSFSchema } from '@rjsf/utils';
 import { useSearchParams, useNavigate, Link } from 'react-router-dom';
 import { toast } from 'sonner';
@@ -73,15 +72,12 @@ import { EnableLocationBanner } from '@/components/location/enable-location-bann
 import { nearestDistanceMeters } from '@/lib/geo/distance';
 import type { LatLng } from '@/lib/geo/types';
 import {
-  acceptProfileConsent,
   getU18Status,
-  issueProfileConsentOtp,
-  verifyProfileConsentOtp,
   type U18StatusResponse,
-  type ProfileConsentOtpItemRef,
 } from '@/lib/consent-api';
 import { useConsentConfig } from '@/hooks/use-consent-config';
 import { useConsentGate } from '@/hooks/use-consent-gate';
+import { useProfileConsentAccept } from '@/hooks/use-profile-consent-accept';
 import { useNetworkTheme } from '@/theme/theme-provider';
 import { ProfileConsentModal } from '@/components/consent/profile-consent-modal';
 import { useMyItems } from '@/hooks/use-my-items';
@@ -395,7 +391,6 @@ function parseNetworkIds(networkEnv: string | undefined): string[] {
   return networkEnv.split(',').map(n => n.trim()).filter(Boolean);
 }
 
-
 /**
  * Resolve the instance URL for a target item
  * Priority:
@@ -523,14 +518,6 @@ export function HomePage() {
   const [selectedNetworkId, setSelectedNetworkId] = React.useState<string | null>(initialNetworkId);
   const [activeProfileId, setActiveProfileId] = React.useState<string | null>(null);
   const [pendingConsentProfileId, setPendingConsentProfileId] = React.useState<string | null>(null);
-  // For a MINOR, profile_creation consent is guardian-given: an OTP is issued
-  // to the guardian and this holds the item ref while the guardian-OTP dialog
-  // is open (D13). null for adults (they self-accept via ProfileConsentModal).
-  const [guardianProfileRef, setGuardianProfileRef] = React.useState<ProfileConsentOtpItemRef | null>(null);
-  // Fallback for a minor with NO guardian on file yet (issue returns 409
-  // GUARDIAN_REQUIRED): holds the item ref while the guardian-capture flow
-  // (details + setup OTP) runs, then the profile OTP is re-issued for it.
-  const [guardianSetupRef, setGuardianSetupRef] = React.useState<ProfileConsentOtpItemRef | null>(null);
   const browseSelection = useCardSelection();
   const [bulkConnectOpen, setBulkConnectOpen] = React.useState(false);
   const [bulkConnectBusy, setBulkConnectBusy] = React.useState(false);
@@ -766,6 +753,17 @@ export function HomePage() {
   );
   const profileStatement = profileVersion?.statement ?? '';
   const profileConsentRequired = Boolean(profileStatement);
+
+  // Shared profile_creation-consent accept flow (adult self-accept OR minor
+  // guardian-OTP), extracted into a hook so it isn't duplicated with
+  // profile-form-page. `dialogs` hosts the guardian OTP/capture dialogs;
+  // `guardianActive` is true while one is open, so the ProfileConsentModal below
+  // hides itself instead of stacking.
+  const {
+    accept: acceptProfileConsentFlow,
+    dialogs: consentAcceptDialogs,
+    guardianActive,
+  } = useProfileConsentAccept();
 
   // Gate the auto-selected profile: if it lacks profile_creation consent, prompt.
   React.useEffect(() => {
@@ -1695,68 +1693,11 @@ export function HomePage() {
     />
   ) : null;
 
-  // Issue a MINOR's profile_creation guardian OTP for a given item ref and hand
-  // off to the guardian-OTP dialog. If no guardian is on file yet (409
-  // GUARDIAN_REQUIRED), fall back to the guardian-capture flow, then this is
-  // re-invoked for the same ref once a guardian exists.
-  const issueProfileOtp = React.useCallback(
-    async (ref: ProfileConsentOtpItemRef) => {
-      try {
-        const { otpSent } = await issueProfileConsentOtp(ref);
-        if (otpSent) {
-          // Keep pendingConsentProfileId set (nulling it re-triggers the prompt
-          // effect, which would reopen the consent modal over the OTP dialog).
-          // The OTP dialog takes over via guardianProfileRef.
-          setGuardianProfileRef(ref);
-        }
-      } catch (err) {
-        const status = axios.isAxiosError(err) ? err.response?.status : undefined;
-        const code = axios.isAxiosError(err)
-          ? (err.response?.data as { error?: string } | undefined)?.error
-          : undefined;
-        if (status === 409 && code === 'GUARDIAN_REQUIRED') {
-          // No guardian captured yet — run the capture flow, then retry.
-          setGuardianSetupRef(ref);
-        } else if (status === 429) {
-          toast.error(t('u18.guardian_error_rate_limited', 'Too many attempts. Please try again shortly.'));
-        } else if (status === 503) {
-          toast.error(t('u18.guardian_error_otp_unavailable', "Guardian confirmation isn't available on this instance right now."));
-        } else {
-          toast.error(t('profile.error_generic_desc'));
-        }
-      }
-    },
-    [t],
-  );
-
-  // Guardian-capture fallback: a minor whose profile_creation consent needs a
-  // guardian that isn't on file yet. Reuses the first-login flow starting at
-  // the details step; on completion the profile OTP is re-issued for the ref.
-  const guardianSetupForProfileModal = guardianSetupRef && network ? (
-    <U18GuardianFlow
-      network={network.id}
-      brand={brand === 'standard' ? null : brand}
-      purpose={{ kind: 'profile' }}
-      initialStep="guardian"
-      onComplete={() => {
-        const ref = guardianSetupRef;
-        setGuardianSetupRef(null);
-        setU18StatusReload((n) => n + 1);
-        void issueProfileOtp(ref);
-      }}
-      onNotMinor={() => {
-        setGuardianSetupRef(null);
-        setU18StatusReload((n) => n + 1);
-      }}
-      onLogout={() => { void signOut(); }}
-    />
-  ) : null;
-
   const profileConsentModal = (
     <ProfileConsentModal
-      // The U18 guardian gate takes priority — don't stack a second blocking
-      // dialog on top of it.
-      open={Boolean(pendingConsentProfileId) && !showU18GuardianFlow && !guardianProfileRef && !guardianSetupRef}
+      // The U18 first-login gate takes priority; and `guardianActive` hides this
+      // while the shared hook's guardian OTP/capture dialog is open (don't stack).
+      open={Boolean(pendingConsentProfileId) && !showU18GuardianFlow && !guardianActive}
       statement={profileStatement}
       profileLabel={pendingProfileLabel}
       minor={u18Status?.isMinor === true}
@@ -1768,91 +1709,30 @@ export function HomePage() {
           setPendingConsentProfileId(null);
           return;
         }
-        // A minor's profile_creation consent is GUARDIAN-given (D13): issue a
-        // guardian OTP and hand off to the guardian-OTP dialog instead of the
-        // ward self-accepting. Adults / ungated domains keep the self-accept path.
-        if (u18Status?.isMinor === true && isGuardianConsentRequiredDomain(network, profile.item_domain)) {
-          await issueProfileOtp({
-            network: network.id,
-            brand: brand === 'standard' ? null : brand,
+        // Adult self-accept OR a minor's guardian-OTP flow — the shared hook
+        // handles the branch, records consent, promotes draft→live, updates the
+        // profileConsent + my-items caches, and toasts once. For a minor, onDone
+        // runs only after the guardian OTP verifies. On failure the hook toasts
+        // and does NOT call onDone, so the prompt stays open for a retry.
+        await acceptProfileConsentFlow({
+          network: network.id,
+          brand: brand === 'standard' ? null : brand,
+          item: {
+            item_id: profile.item_id,
             item_domain: profile.item_domain,
             item_type: profile.item_type,
-            item_id: profile.item_id,
-          });
-          return;
-        }
-        try {
-          await acceptProfileConsent({
-            network: network.id,
-            brand: brand === 'standard' ? null : brand,
-            item_domain: profile.item_domain,
-            item_type: profile.item_type,
-            item_id: profile.item_id,
-            version: profileDoc.current_version,
-          });
-          // Update the consent-status cache directly (not invalidate) so the
-          // derived `consentedProfileIds` reflects the accepted profile in the
-          // same batched render as the activeProfileId/pendingConsentProfileId
-          // updates below — an invalidate-triggered refetch would leave a window
-          // where the gate effect sees the old (not-yet-consented) set and
-          // reopens the modal it was just told to close.
-          queryClient.setQueryData<Set<string>>(
-            queryKeys.profileConsent(network.id),
-            (prev) => new Set([...(prev ?? []), pending]),
-          );
-          // Recording profile consent also flips a complete draft to `live`
-          // server-side (promoteItemOnProfileConsent, in the same transaction),
-          // so the cached my-items list is stale the moment this resolves — its
-          // `lifecycle_status` still reads `draft`. Without this the sidebar
-          // chip stays "Draft" until the next page load, which is what made the
-          // promotion look like it only happened on refresh.
-          void queryClient.invalidateQueries({ queryKey: queryKeys.myItems(network.id) });
-          setActiveProfileId(pending);
-          setStoredActiveProfileId(network.id, pending);
-          setPendingConsentProfileId(null);
-        } catch {
-          toast.error(t('profile.error_generic_desc'));
-          // Keep the modal open so the user can retry.
-        }
-      }}
-    />
-  );
-
-  // Guardian OTP challenge for a MINOR's profile_creation consent (D13). The
-  // dialog resubmits the entered code via verifyProfileConsentOtp; on success
-  // the server records the guardian consent and (if fields complete) promotes
-  // the profile to live.
-  const guardianProfileConsentModal = (
-    <GuardianOtpDialog
-      open={!!guardianProfileRef}
-      onOpenChange={(open) => { if (!open) setGuardianProfileRef(null); }}
-      purpose={{ kind: 'profile' }}
-      onLogout={() => { void signOut(); }}
-      onSubmitOtp={async (otp) => {
-        const ref = guardianProfileRef;
-        if (!ref || !network?.id) return;
-        // Throws on an invalid/expired code → GuardianOtpDialog shows the inline
-        // error and keeps itself open for a retry.
-        await verifyProfileConsentOtp({ ...ref, otp });
-        // Reflect the now-consented profile in the derived `consentedProfileIds`
-        // immediately (React Query is the source of truth; there is no local
-        // setter) — mirrors the adult accept-consent handler above so the gate
-        // doesn't reopen during a refetch window.
-        queryClient.setQueryData<Set<string>>(
-          queryKeys.profileConsent(network.id),
-          (prev) => new Set([...(prev ?? []), ref.item_id]),
-        );
-        // Guardian verify promotes the ward's complete draft to `live` too
-        // (upsertGuardianProfileConsentAndPromote), so refresh my-items for the
-        // same reason as the adult accept handler above.
-        void queryClient.invalidateQueries({ queryKey: queryKeys.myItems(network.id) });
-        setActiveProfileId(ref.item_id);
-        setStoredActiveProfileId(network.id, ref.item_id);
-        setGuardianProfileRef(null);
-        // Clear the pending prompt too — it was kept set while the OTP dialog
-        // was open; the profile is now consented so it must not reopen.
-        setPendingConsentProfileId(null);
-        toast.success(t('profile.guardian_consent_recorded', 'Guardian confirmed your profile'));
+          },
+          version: profileDoc.current_version,
+          isMinor: u18Status?.isMinor === true,
+          // Guardian capture may reclassify the ward (or capture a guardian);
+          // re-sync U18 status so a retry runs with the corrected status.
+          onGuardianStatusChanged: () => setU18StatusReload((n) => n + 1),
+          onDone: () => {
+            setActiveProfileId(pending);
+            setStoredActiveProfileId(network.id, pending);
+            setPendingConsentProfileId(null);
+          },
+        });
       }}
     />
   );
@@ -1964,9 +1844,8 @@ export function HomePage() {
         </div>
         </div>
         {u18GuardianFlowModal}
-        {guardianSetupForProfileModal}
         {profileConsentModal}
-        {guardianProfileConsentModal}
+        {consentAcceptDialogs}
         {bulkGuardianConfirmModal}
         {bulkGuardianOtpModal}
       </>
@@ -2631,9 +2510,8 @@ export function HomePage() {
         </ActionHandler>
     </PageShell>
     {u18GuardianFlowModal}
-    {guardianSetupForProfileModal}
     {profileConsentModal}
-        {guardianProfileConsentModal}
+    {consentAcceptDialogs}
         {bulkGuardianConfirmModal}
         {bulkGuardianOtpModal}
     </>

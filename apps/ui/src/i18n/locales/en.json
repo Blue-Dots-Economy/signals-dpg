@@ -287,9 +287,12 @@
   "nav.sign_in_to_connect": "Sign in to connect",
   "profile.choose_different_role": "Choose different role",
   "profile.choose_role": "Choose your role on the network",
+  "profile.completion_prompt_default_heading": "Complete your profile to get discovered",
+  "profile.completion_prompt_default_body": "Your profile goes live once it's complete, so others can find and connect with you. Fill in the details below to get started.",
   "profile.create_heading": "Create Profile",
   "profile.create_role_heading": "Create {{role}} Profile",
   "profile.edit_role_heading": "Edit {{role}} Profile",
+  "profile.required_complete": "All required fields complete",
   "profile.error_already_exists": "Profile already exists",
   "profile.error_already_exists_desc": "You already have a profile for this role. Return to the home page to view or edit your existing profile.",
   "profile.error_create_failed": "Couldn't create your profile",
@@ -384,6 +387,7 @@
   "contact.loading": "Loading…",
   "profile.btn_update": "Update",
   "profile.btn_create": "Create Profile",
+  "profile.btn_save_publish": "Save & publish",
   "profile.fill_required_hint": "Please fill in all the required fields to continue.",
   "consent.title_gate": "Review & accept to continue",
   "consent.title_view": "Privacy Policy & Terms",
@@ -534,7 +538,7 @@
   "profile.guardian_confirm_proceed": "Send code to guardian",
   "auth.dob_title_existing": "Please confirm your birth year",
   "profile": {
-    "guardian_consent_recorded": "Guardian confirmed your profile"
+    "guardian_consent_recorded": "Consent recorded — your profile is now live"
   },
   "u18": {
     "dob_label": "Select date of birth",

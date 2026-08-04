@@ -264,9 +264,12 @@
   "nav.sign_in_to_connect": "ಸಂಪರ್ಕಿಸಲು ಸೈನ್ ಇನ್",
   "profile.choose_different_role": "ಬೇರೆ ಪಾತ್ರ ಆಯ್ಕೆಮಾಡಿ",
   "profile.choose_role": "ನೆಟ್‌ವರ್ಕ್‌ನಲ್ಲಿ ನಿಮ್ಮ ಪಾತ್ರ ಆಯ್ಕೆಮಾಡಿ",
+  "profile.completion_prompt_default_heading": "ಕಂಡುಬರಲು ನಿಮ್ಮ ಪ್ರೊಫೈಲ್ ಪೂರ್ಣಗೊಳಿಸಿ",
+  "profile.completion_prompt_default_body": "ಪೂರ್ಣಗೊಂಡ ಮೇಲೆ ನಿಮ್ಮ ಪ್ರೊಫೈಲ್ ಲೈವ್ ಆಗುತ್ತದೆ, ಇದರಿಂದ ಇತರರು ನಿಮ್ಮನ್ನು ಹುಡುಕಿ ಸಂಪರ್ಕಿಸಬಹುದು. ಪ್ರಾರಂಭಿಸಲು ಕೆಳಗಿನ ವಿವರಗಳನ್ನು ಭರ್ತಿ ಮಾಡಿ.",
   "profile.create_heading": "ಪ್ರೊಫೈಲ್ ರಚಿಸಿ",
   "profile.create_role_heading": "{{role}} ಪ್ರೊಫೈಲ್ ರಚಿಸಿ",
   "profile.edit_role_heading": "{{role}} ಪ್ರೊಫೈಲ್ ಸಂಪಾದಿಸಿ",
+  "profile.required_complete": "ಎಲ್ಲಾ ಅಗತ್ಯ ಕ್ಷೇತ್ರಗಳು ಪೂರ್ಣಗೊಂಡಿವೆ",
   "profile.error_already_exists": "ಪ್ರೊಫೈಲ್ ಈಗಾಗಲೇ ಇದೆ",
   "profile.error_already_exists_desc": "ಈ ಪಾತ್ರಕ್ಕೆ ನಿಮ್ಮ ಹತ್ತಿರ ಈಗಾಗಲೇ ಒಂದು ಪ್ರೊಫೈಲ್ ಇದೆ. ನಿಮ್ಮ ಅಸ್ತಿತ್ವದ ಪ್ರೊಫೈಲ್ ವೀಕ್ಷಿಸಲು ಅಥವಾ ಸಂಪಾದಿಸಲು ಮುಖಪುಟಕ್ಕೆ ಹಿಂತಿರುಗಿ.",
   "profile.error_create_failed": "ನಿಮ್ಮ ಪ್ರೊಫೈಲ್ ರಚಿಸಲು ಸಾಧ್ಯವಾಗಲಿಲ್ಲ",
@@ -351,6 +354,7 @@
   "contact.loading": "ಲೋಡ್ ಆಗುತ್ತಿದೆ…",
   "profile.btn_update": "ನವೀಕರಿಸಿ",
   "profile.btn_create": "ಪ್ರೊಫೈಲ್ ರಚಿಸಿ",
+  "profile.btn_save_publish": "ಉಳಿಸಿ ಮತ್ತು ಪ್ರಕಟಿಸಿ",
   "profile.fill_required_hint": "ಮುಂದುವರಿಯಲು ದಯವಿಟ್ಟು ಎಲ್ಲಾ ಅಗತ್ಯ ಕ್ಷೇತ್ರಗಳನ್ನು ಭರ್ತಿ ಮಾಡಿ.",
   "consent.title_gate": "ಮುಂದುವರಿಯಲು ಪರಿಶೀಲಿಸಿ ಮತ್ತು ಸ್ವೀಕರಿಸಿ",
   "consent.title_view": "ಗೌಪ್ಯತಾ ನೀತಿ ಮತ್ತು ನಿಯಮಗಳು",
@@ -544,7 +548,7 @@
     "guardian_error_same_contact_not_allowed": "ನಿಮ್ಮ ರಕ್ಷಕರ ಸಂಪರ್ಕ ನಿಮ್ಮ ಸ್ವಂತ ಸಂಪರ್ಕದಂತೆ ಇರುವಂತಿಲ್ಲ. ದಯವಿಟ್ಟು ಬೇರೆ ಇಮೇಲ್ ಅಥವಾ ಫೋನ್ ಸಂಖ್ಯೆಯನ್ನು ಬಳಸಿ."
   },
   "profile": {
-    "guardian_consent_recorded": "ರಕ್ಷಕರು ನಿಮ್ಮ ಪ್ರೊಫೈಲ್ ಅನ್ನು ದೃಢೀಕರಿಸಿದ್ದಾರೆ"
+    "guardian_consent_recorded": "ಒಪ್ಪಿಗೆ ದಾಖಲಾಗಿದೆ — ನಿಮ್ಮ ಪ್ರೊಫೈಲ್ ಈಗ ಲೈವ್ ಆಗಿದೆ"
   },
   "u18.guardian_accept_both_prefix": "ನನ್ನ ವಾರ್ಡ್ ಪರವಾಗಿ, ನಾನು ಸ್ವೀಕರಿಸುತ್ತೇನೆ ",
   "u18.guardian_accept_both_join": " ಮತ್ತು ",
