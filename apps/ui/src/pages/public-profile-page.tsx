@@ -18,6 +18,11 @@ import type { Item } from '@/lib/item-api';
 import type { User } from '@/lib/auth-api';
 import type { DotActionSchema, DotNetworkSchema } from '@/engine/types';
 import { performAction, ACTION_CONSENT_SENTINEL } from '@/lib/action-api';
+import {
+  getActionsForDomain,
+  resolveTargetInstanceUrl,
+  computeOpenActionItemIds,
+} from '@/lib/profile-actions';
 import { ActionAbortedError } from '@/lib/action-abort';
 import { isGuardianConsentRequiredDomain } from '@/lib/guardian-consent';
 import { getU18Status, type U18StatusResponse } from '@/lib/consent-api';
@@ -39,83 +44,8 @@ const UUID_RE =
 const HERO_GRADIENT =
   'linear-gradient(135deg, var(--primary), color-mix(in srgb, var(--primary), white 32%))';
 
-// Terminal action statuses that FREE a source/target pair for a new action.
-// A non-terminal action means one is already open, so the Apply/Connect CTA is
-// disabled (mirrors home-page's `openActionItemIds`; the server cap #370/#422
-// is the real guard — this just pre-empts the click).
-const OPEN_ACTION_TERMINAL_STATUSES = new Set([
-  'accepted',
-  'completed',
-  'cancelled',
-  'rejected',
-  'declined',
-  'withdrawn',
-]);
-
 function titleCaseDomain(id: string): string {
   return id.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
-}
-
-/**
- * Every action a source domain can initiate on a target domain, flattened from
- * the network's action/interaction matrix into `DotActionSchema[]`. Replicated
- * from home-page.tsx's `getActionsForDomain` (a DRY follow-up: both should move
- * to a shared helper) — here the source is the viewer's ACTIVE profile domain
- * and the target is the viewed profile's domain.
- */
-function getActionsForDomain(
-  network: DotNetworkSchema | null,
-  sourceDomainId: string,
-  targetDomainId: string,
-): DotActionSchema[] {
-  if (!network) return [];
-  const actions: DotActionSchema[] = [];
-  for (const [actionType, actionConfig] of Object.entries(network.actions ?? {})) {
-    if (!actionConfig?.interactions) continue;
-    const matching = actionConfig.interactions.filter(
-      (i) => i.from_domain === sourceDomainId && i.to_domain === targetDomainId,
-    );
-    for (const interaction of matching) {
-      actions.push({
-        action_type: actionType,
-        from_domain: interaction.from_domain,
-        to_domain: interaction.to_domain,
-        requirement_schema: interaction.requirement_schema,
-        event_schema: interaction.event_schema,
-        reveals_pii_on_status: interaction.reveals_pii_on_status,
-      });
-    }
-  }
-  return actions;
-}
-
-/**
- * Resolve the instance URL an item lives on. Replicated from home-page.tsx
- * (another DRY follow-up): item's own `item_instance_url` when it's usable
- * (not a localhost URL in a non-localhost deployment), else the network's
- * per-domain instance config, else the current API base URL. Single-instance
- * today, so this typically returns the current origin.
- */
-function resolveTargetInstanceUrl(
-  targetItem: Item,
-  network: DotNetworkSchema | null,
-  currentApiUrl: string,
-): string {
-  if (targetItem.item_instance_url) {
-    const isLocalhost =
-      targetItem.item_instance_url.includes('localhost') ||
-      targetItem.item_instance_url.includes('127.0.0.1');
-    const isProduction =
-      !currentApiUrl.includes('localhost') && !currentApiUrl.includes('127.0.0.1');
-    if (!isLocalhost || !isProduction) return targetItem.item_instance_url;
-  }
-  if (network?.instances) {
-    const instanceConfig = network.instances.find(
-      (i) => i.domain_id === targetItem.item_domain,
-    );
-    if (instanceConfig?.instance_url) return instanceConfig.instance_url;
-  }
-  return currentApiUrl;
 }
 
 /**
@@ -304,16 +234,9 @@ function ProfileActionRow({
   const { data: myActionsData } = useActions('all', { enabled: !!user });
   const hasOpenActionWithViewed = React.useMemo(() => {
     if (!activeItem) return false;
-    for (const a of myActionsData?.actions ?? []) {
-      if (OPEN_ACTION_TERMINAL_STATUSES.has(a.action_status)) continue;
-      if (
-        (a.source_item_id === activeItem.item_id && a.target_item_id === item.item_id) ||
-        (a.target_item_id === activeItem.item_id && a.source_item_id === item.item_id)
-      ) {
-        return true;
-      }
-    }
-    return false;
+    return computeOpenActionItemIds(myActionsData?.actions ?? [], activeItem.item_id).has(
+      item.item_id,
+    );
   }, [myActionsData, activeItem, item.item_id]);
 
   const onActionSubmit = React.useCallback(
@@ -481,13 +404,15 @@ function ProfileActionRow({
  * title, or location is hardcoded here. Never exposes PII or a raw error:
  * empty/invalid/non-live → "unavailable"; transient failure → "try again".
  *
- * Rendered inside the same Signals app shell (sidebar + lean top bar) as every
- * other page, in 3 auth-aware modes: anonymous (branding-only sidebar, no My
- * Profiles), signed in viewing someone else's profile (full AppSidebar), and
- * signed in viewing one's own shared link (full AppSidebar + an own-preview
- * banner). Data is the masked public projection in every mode — no PII, and
- * the route itself stays unauthenticated (no RequireAuth). Apply/Connect is a
- * separate later stage and is intentionally not built here.
+ * Rendered inside the Signals app shell (lean app bar + optional sidebar) in 3
+ * auth-aware modes: anonymous (app-bar-only, no sidebar), signed in viewing
+ * someone else's profile (full AppSidebar + an Apply/Connect + match-score
+ * action row sourced from the viewer's active profile), and signed in viewing
+ * one's own shared link (full AppSidebar + an own-preview banner, no actions).
+ * Data is the masked public projection in every mode — no PII, and the route
+ * itself stays unauthenticated (no RequireAuth). The action row runs only for
+ * an authenticated non-owner and goes through the normal server-guarded action
+ * flow; a share link is never a credential.
  */
 export function PublicProfilePage() {
   const { t } = useTranslation();
@@ -519,7 +444,7 @@ export function PublicProfilePage() {
 
   const keyValid = Boolean(network && domain && itemType && itemId && UUID_RE.test(itemId));
 
-  const { data: net, isLoading: netLoading } = useResolvedNetwork(keyValid ? network! : null);
+  const { data: net, isLoading: netLoading, isError: netError } = useResolvedNetwork(keyValid ? network! : null);
   const { item, isLoading: itemLoading, isError } = useItemDetail(
     keyValid ? network! : null,
     keyValid ? { item_id: itemId!, item_domain: domain!, item_type: itemType! } : null,
@@ -541,7 +466,10 @@ export function PublicProfilePage() {
     return map;
   }, [net]);
 
-  // Live-only endpoint: a returned item is live. Guard defensively anyway.
+  // Live-only endpoint: any returned item is already live. The masked public
+  // projection does NOT include `lifecycle_status`, so `=== 'live'` alone would
+  // wrongly reject every profile — treat a missing status as live (and still
+  // reject an explicit non-live status defensively).
   const isLive = Boolean(item && (!item.lifecycle_status || item.lifecycle_status === 'live'));
 
   let content: React.ReactNode;
@@ -557,6 +485,11 @@ export function PublicProfilePage() {
         </p>
       </StateWell>
     );
+  } else if (netError || !net) {
+    // Unknown / unresolvable network in the URL — we can't theme or build the
+    // schema-driven view, so treat it as unavailable rather than rendering an
+    // empty card. (No PII either way; this is just a cleaner dead-end.)
+    content = <UnavailableState networkId={network} />;
   } else if (isError) {
     content = (
       <StateWell>
