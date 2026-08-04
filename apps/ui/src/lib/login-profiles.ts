@@ -22,6 +22,10 @@ export async function fetchMyProfilesLite(networkId: string): Promise<ProfileLit
         item_domain: domain.id,
         item_type: itemType,
         created_by_me: true,
+        // Include retired so a retired-only user counts as "already set up" and
+        // stays on the map instead of being redirected to create (#376). The
+        // sidebar's own useMyItems fetch still excludes retired.
+        include_retired: true,
         limit: 100,
       })
         .then((res) =>

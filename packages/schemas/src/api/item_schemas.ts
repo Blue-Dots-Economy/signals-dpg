@@ -95,6 +95,12 @@ const FetchItemsSchemaBase = z.object({
   limit: z.coerce.number().int().min(1).max(1000).default(20),
   offset: z.coerce.number().int().min(0).default(0),
   cache_ttl_seconds: z.coerce.number().int().positive().optional(),
+
+  // Owner "My Profiles" reads exclude retired (permanently-removed) profiles by
+  // default. The first-time-login redirect check opts INTO retired so a
+  // retired-only user is recognized as "already set up" and stays on the map
+  // rather than being sent to the create page (#376). Absent → retired excluded.
+  include_retired: z.coerce.boolean().optional(),
 });
 
 type FetchItemsSchemaShape = z.infer<typeof FetchItemsSchemaBase>;

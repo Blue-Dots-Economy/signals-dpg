@@ -160,6 +160,22 @@ describe('OtpPage — first-time profile redirect (#376)', () => {
     await waitFor(() => expect(navigateMock).toHaveBeenCalledWith('/profile/draft1/edit', { replace: true }));
   });
 
+  it('a retired-only user stays on the map (retired counts as already set up)', async () => {
+    currentState = { userExists: true, phoneNumber: '+911234' };
+    getU18Status.mockResolvedValue({ isMinor: false });
+    // fetchMyProfilesLite includes retired (via include_retired), so a retired
+    // profile is seen here and the user is NOT nudged to create a new one.
+    fetchMyProfilesLite.mockResolvedValue([
+      { item_id: 'r1', item_domain: 'seeker', lifecycle_status: 'retired' },
+    ]);
+
+    renderPage();
+    await userEvent.click(screen.getByTestId('otp-submit'));
+
+    await waitFor(() => expect(navigateMock).toHaveBeenCalledWith('/', { replace: true }));
+    expect(navigateMock).not.toHaveBeenCalledWith('/profile/new', { replace: true });
+  });
+
   it('fails open: if the profile fetch rejects, lands normally (does not get stuck)', async () => {
     currentState = { userExists: true, phoneNumber: '+911234' };
     getU18Status.mockResolvedValue({ isMinor: false });
