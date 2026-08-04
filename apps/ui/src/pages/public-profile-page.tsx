@@ -11,6 +11,7 @@ import { useMyItems } from '@/hooks/use-my-items';
 import { useActiveProfile } from '@/hooks/use-active-profile';
 import { useActions } from '@/hooks/use-actions';
 import { useAuth } from '@/contexts/auth-context';
+import { useNetworkTheme } from '@/theme/theme-provider';
 import { resolveCardFields, formatCardValue } from '@/components/cards/resolve-card-fields';
 import { buildProfileShareUrl, copyTextToClipboard } from '@/lib/share-profile';
 import { queryKeys } from '@/lib/query-keys';
@@ -140,6 +141,7 @@ function StateWell({ children }: { children: React.ReactNode }) {
 
 function UnavailableState({ networkId }: { networkId?: string }) {
   const { t } = useTranslation();
+  const { theme } = useNetworkTheme();
   return (
     <StateWell>
       <AlertCircle className="mx-auto h-10 w-10 text-muted-foreground" aria-hidden="true" />
@@ -157,7 +159,7 @@ function UnavailableState({ networkId }: { networkId?: string }) {
         className="mt-5 inline-flex items-center rounded-lg px-4 py-2 text-sm font-semibold text-primary-foreground hover:opacity-90"
         style={{ background: 'var(--primary)' }}
       >
-        {t('public_profile.explore', 'Explore Blue Dots')}
+        {t('public_profile.explore', 'Explore {{brand}}', { brand: theme.name })}
       </a>
     </StateWell>
   );
@@ -422,6 +424,10 @@ export function PublicProfilePage() {
   const location = useLocation();
   const queryClient = useQueryClient();
   const { isAuthenticated, user } = useAuth();
+  // Network display name for copy that references the brand (e.g. the contact
+  // note) — resolves per the link's ?network= (Blue Dots / Purple Dot / …), so
+  // it's never hardcoded to one network.
+  const { theme } = useNetworkTheme();
 
   // Back button: return to the previous in-app page when the viewer navigated
   // here within the app (history exists); for a freshly-opened share link
@@ -620,7 +626,8 @@ export function PublicProfilePage() {
         <p className="mt-6 text-center text-xs text-muted-foreground">
           {t(
             'public_profile.contact_note',
-            'Contact details are shared only after you connect on Blue Dots.'
+            'Contact details are shared only after you connect on {{brand}}.',
+            { brand: theme.name }
           )}
         </p>
       </div>
