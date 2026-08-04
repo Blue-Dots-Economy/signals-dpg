@@ -138,9 +138,9 @@ function ProfileTopBar({
   };
 
   return (
-    <header className="sticky top-0 z-10 flex items-center gap-3 border-b border-border bg-background/90 px-5 py-3 backdrop-blur">
+    <header className="sticky top-0 z-10 flex h-14 items-center gap-3 border-b border-border bg-background/90 px-4 backdrop-blur sm:px-6">
       {showLogo ? <PortalHeader /> : <SidebarTrigger className="md:hidden" />}
-      <span className="text-sm font-semibold text-foreground">
+      <span className="ml-2 text-lg font-semibold text-foreground sm:ml-4">
         {t('public_profile.app_bar_title', 'Profile preview')}
       </span>
       <div className="ml-auto flex shrink-0 items-center gap-2">
