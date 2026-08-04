@@ -608,5 +608,9 @@
   "public_profile.details": "विवरण",
   "public_profile.sign_in": "साइन इन करें",
   "public_profile.own_preview": "यह वही सार्वजनिक दृश्य है जो आपकी प्रोफ़ाइल साझा करने पर दूसरे लोग देखते हैं — जब तक कोई जुड़ता नहीं, तब तक संपर्क विवरण छिपे रहते हैं।",
+  "public_profile.switch_profile_hint": "आवेदन या कनेक्ट करने के लिए साइडबार में किसी संगत प्रोफ़ाइल पर स्विच करें।",
+  "public_profile.complete_profile_hint": "आवेदन या कनेक्ट करने के लिए अपनी सक्रिय प्रोफ़ाइल पूरी करें।",
+  "public_profile.action_sent": "{{action}} अनुरोध भेजा गया",
+  "public_profile.your_profile": "आपकी प्रोफ़ाइल",
   "a11y.skip_to_content": "सामग्री पर जाएं"
 }

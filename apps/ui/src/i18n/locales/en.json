@@ -598,5 +598,9 @@
   "public_profile.details": "Details",
   "public_profile.sign_in": "Sign in",
   "public_profile.own_preview": "This is the public view others see when you share your profile — contact details stay hidden until someone connects.",
+  "public_profile.switch_profile_hint": "Switch to a compatible profile in the sidebar to apply or connect.",
+  "public_profile.complete_profile_hint": "Complete your active profile to apply or connect.",
+  "public_profile.action_sent": "{{action}} request sent",
+  "public_profile.your_profile": "Your Profile",
   "a11y.skip_to_content": "Skip to content"
 }

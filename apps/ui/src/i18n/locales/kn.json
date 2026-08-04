@@ -608,5 +608,9 @@
   "public_profile.details": "ವಿವರಗಳು",
   "public_profile.sign_in": "ಸೈನ್ ಇನ್ ಮಾಡಿ",
   "public_profile.own_preview": "ನಿಮ್ಮ ಪ್ರೊಫೈಲ್ ಹಂಚಿಕೊಂಡಾಗ ಇತರರು ನೋಡುವ ಸಾರ್ವಜನಿಕ ನೋಟ ಇದು — ಯಾರಾದರೂ ಸಂಪರ್ಕ ಸಾಧಿಸುವವರೆಗೆ ಸಂಪರ್ಕ ವಿವರಗಳು ಗೌಪ್ಯವಾಗಿರುತ್ತವೆ.",
+  "public_profile.switch_profile_hint": "ಅರ್ಜಿ ಸಲ್ಲಿಸಲು ಅಥವಾ ಸಂಪರ್ಕಿಸಲು ಸೈಡ್‌ಬಾರ್‌ನಲ್ಲಿ ಹೊಂದಾಣಿಕೆಯ ಪ್ರೊಫೈಲ್‌ಗೆ ಬದಲಾಯಿಸಿ.",
+  "public_profile.complete_profile_hint": "ಅರ್ಜಿ ಸಲ್ಲಿಸಲು ಅಥವಾ ಸಂಪರ್ಕಿಸಲು ನಿಮ್ಮ ಸಕ್ರಿಯ ಪ್ರೊಫೈಲ್ ಪೂರ್ಣಗೊಳಿಸಿ.",
+  "public_profile.action_sent": "{{action}} ವಿನಂತಿ ಕಳುಹಿಸಲಾಗಿದೆ",
+  "public_profile.your_profile": "ನಿಮ್ಮ ಪ್ರೊಫೈಲ್",
   "a11y.skip_to_content": "ವಿಷಯಕ್ಕೆ ಹೋಗಿ"
 }

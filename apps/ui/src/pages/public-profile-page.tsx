@@ -14,6 +14,16 @@ import { resolveCardFields, formatCardValue } from '@/components/cards/resolve-c
 import { buildProfileShareUrl, copyTextToClipboard } from '@/lib/share-profile';
 import { queryKeys } from '@/lib/query-keys';
 import type { Item } from '@/lib/item-api';
+import type { User } from '@/lib/auth-api';
+import type { DotActionSchema, DotNetworkSchema } from '@/engine/types';
+import { performAction, ACTION_CONSENT_SENTINEL } from '@/lib/action-api';
+import { ActionAbortedError } from '@/lib/action-abort';
+import { isGuardianConsentRequiredDomain } from '@/lib/guardian-consent';
+import { apiConfig } from '@/lib/api-config';
+import { ActionHandler } from '@/components/actions/action-handler';
+import { ActionButton } from '@/components/cards/action-button';
+import { MatchScoreButton, MatchScoreModal } from '@/components/match-score';
+import { useMatchScore } from '@/hooks/use-match-score';
 import { AppSidebar } from '@/components/layout/sidebar';
 import { PortalHeader } from '@/components/layout/portal-header';
 import { ThemeModeToggle } from '@/components/layout/theme-mode-toggle';
@@ -33,6 +43,68 @@ const HERO_GRADIENT =
 
 function titleCaseDomain(id: string): string {
   return id.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
+/**
+ * Every action a source domain can initiate on a target domain, flattened from
+ * the network's action/interaction matrix into `DotActionSchema[]`. Replicated
+ * from home-page.tsx's `getActionsForDomain` (a DRY follow-up: both should move
+ * to a shared helper) — here the source is the viewer's ACTIVE profile domain
+ * and the target is the viewed profile's domain.
+ */
+function getActionsForDomain(
+  network: DotNetworkSchema | null,
+  sourceDomainId: string,
+  targetDomainId: string,
+): DotActionSchema[] {
+  if (!network) return [];
+  const actions: DotActionSchema[] = [];
+  for (const [actionType, actionConfig] of Object.entries(network.actions ?? {})) {
+    if (!actionConfig?.interactions) continue;
+    const matching = actionConfig.interactions.filter(
+      (i) => i.from_domain === sourceDomainId && i.to_domain === targetDomainId,
+    );
+    for (const interaction of matching) {
+      actions.push({
+        action_type: actionType,
+        from_domain: interaction.from_domain,
+        to_domain: interaction.to_domain,
+        requirement_schema: interaction.requirement_schema,
+        event_schema: interaction.event_schema,
+        reveals_pii_on_status: interaction.reveals_pii_on_status,
+      });
+    }
+  }
+  return actions;
+}
+
+/**
+ * Resolve the instance URL an item lives on. Replicated from home-page.tsx
+ * (another DRY follow-up): item's own `item_instance_url` when it's usable
+ * (not a localhost URL in a non-localhost deployment), else the network's
+ * per-domain instance config, else the current API base URL. Single-instance
+ * today, so this typically returns the current origin.
+ */
+function resolveTargetInstanceUrl(
+  targetItem: Item,
+  network: DotNetworkSchema | null,
+  currentApiUrl: string,
+): string {
+  if (targetItem.item_instance_url) {
+    const isLocalhost =
+      targetItem.item_instance_url.includes('localhost') ||
+      targetItem.item_instance_url.includes('127.0.0.1');
+    const isProduction =
+      !currentApiUrl.includes('localhost') && !currentApiUrl.includes('127.0.0.1');
+    if (!isLocalhost || !isProduction) return targetItem.item_instance_url;
+  }
+  if (network?.instances) {
+    const instanceConfig = network.instances.find(
+      (i) => i.domain_id === targetItem.item_domain,
+    );
+    if (instanceConfig?.instance_url) return instanceConfig.instance_url;
+  }
+  return currentApiUrl;
 }
 
 /**
@@ -132,6 +204,196 @@ function UnavailableState({ networkId }: { networkId?: string }) {
 }
 
 /**
+ * Apply/Connect + See-Match-Score row shown to a logged-in viewer of SOMEONE
+ * ELSE's live profile, using their active profile as the source (full parity
+ * with the map/list card). Reuses the shared action flow (`ActionHandler` →
+ * `performAction`) and match-score wiring — all already themed with the app's
+ * Button variants, so colors match automatically.
+ *
+ * Renders one of three states, resolved from the active profile:
+ *  - no active profile / no compatible interaction → a muted "switch profile" hint,
+ *  - a draft active profile → a muted "complete profile" hint,
+ *  - otherwise → the Match Score control + one ActionButton per available action.
+ * Hooks run unconditionally above these branches. The route stays public and
+ * all data stays masked; the action itself goes through the authenticated
+ * server flow (interaction matrix + ownership + consent + guardian OTP).
+ */
+function ProfileActionRow({
+  net,
+  item,
+  activeItem,
+  viewedDomain,
+  user,
+  networkItemName,
+}: {
+  net: DotNetworkSchema | null;
+  item: Item;
+  activeItem: Item | null;
+  viewedDomain: string;
+  user: User | null;
+  networkItemName: string;
+}) {
+  const { t } = useTranslation();
+  const queryClient = useQueryClient();
+  const [matchOpen, setMatchOpen] = React.useState(false);
+
+  const {
+    score,
+    isLoading: matchLoading,
+    error: matchError,
+    calculate,
+    recalculate,
+  } = useMatchScore({ localItem: activeItem, networkItem: item });
+
+  const actions = React.useMemo(
+    () => getActionsForDomain(net, activeItem?.item_domain ?? '', viewedDomain),
+    [net, activeItem?.item_domain, viewedDomain],
+  );
+
+  const onActionSubmit = React.useCallback(
+    async (
+      actionType: string,
+      _actionSchema: DotActionSchema,
+      formData: Record<string, unknown>,
+      _targetItemId: string,
+      guardianOtp?: string,
+    ) => {
+      if (!activeItem) throw new ActionAbortedError('no active profile');
+      // Draft source profile can't act — surface the "complete your profile"
+      // hint and abort (ActionAbortedError suppresses the generic error toast).
+      if (activeItem.lifecycle_status === 'draft') {
+        toast.warning(
+          t('public_profile.complete_profile_hint', 'Complete your active profile to apply or connect.'),
+        );
+        throw new ActionAbortedError('source profile is draft');
+      }
+      if (!user) {
+        toast.error(t('public_profile.sign_in', 'Sign in'));
+        throw new Error('No user');
+      }
+
+      // Extract the consent sentinel ConsentCheckbox smuggled through the form
+      // data; it must not appear in requirements_snapshot sent to the server.
+      const { [ACTION_CONSENT_SENTINEL]: consentRaw, ...requirementsSnapshot } = formData;
+      const consent =
+        consentRaw &&
+        typeof consentRaw === 'object' &&
+        (consentRaw as { acknowledged?: unknown }).acknowledged === true &&
+        typeof (consentRaw as { version?: unknown }).version === 'number'
+          ? {
+              acknowledged: true as const,
+              version: (consentRaw as { version: number }).version,
+              brand: (consentRaw as { brand?: string | null }).brand,
+            }
+          : undefined;
+
+      const currentApiUrl = apiConfig.getUrl();
+      const sourceInstanceUrl = activeItem.item_instance_url?.includes('localhost')
+        ? currentApiUrl
+        : resolveTargetInstanceUrl(activeItem, net, currentApiUrl);
+      const targetInstanceUrl = item.item_instance_url?.includes('localhost')
+        ? currentApiUrl
+        : resolveTargetInstanceUrl(item, net, currentApiUrl);
+
+      await performAction(
+        {
+          action_type: actionType,
+          source_item: {
+            item_network: activeItem.item_network,
+            item_domain: activeItem.item_domain,
+            item_type: activeItem.item_type,
+            item_id: activeItem.item_id,
+          },
+          target_item: {
+            item_network: item.item_network,
+            item_domain: item.item_domain,
+            item_type: item.item_type,
+            item_id: item.item_id,
+            item_instance_url: targetInstanceUrl,
+          },
+          requirements_snapshot: requirementsSnapshot,
+          ...(consent ? { consent } : {}),
+        },
+        sourceInstanceUrl, // call the SOURCE instance (where the active profile lives)
+        guardianOtp,
+      );
+
+      // Surface the new action without waiting for the 60s poll.
+      queryClient.invalidateQueries({ queryKey: queryKeys.actions.all });
+      toast.success(
+        t('public_profile.action_sent', '{{action}} request sent', {
+          action: actionType.charAt(0).toUpperCase() + actionType.slice(1),
+        }),
+      );
+    },
+    [activeItem, item, net, user, queryClient, t],
+  );
+
+  // A draft active profile can't act at all — completing it is the blocker, so
+  // that hint takes precedence over the compatibility hint below.
+  if (activeItem && activeItem.lifecycle_status === 'draft') {
+    return (
+      <p className="mt-4 text-sm text-muted-foreground">
+        {t('public_profile.complete_profile_hint', 'Complete your active profile to apply or connect.')}
+      </p>
+    );
+  }
+
+  if (!activeItem || actions.length === 0) {
+    return (
+      <p className="mt-4 text-sm text-muted-foreground">
+        {t('public_profile.switch_profile_hint', 'Switch to a compatible profile in the sidebar to apply or connect.')}
+      </p>
+    );
+  }
+
+  return (
+    <>
+      <ActionHandler
+        onActionSubmit={onActionSubmit}
+        guardianConfirmRequired={isGuardianConsentRequiredDomain(net!, activeItem.item_domain)}
+      >
+        {(triggerAction) => (
+          <div className="mt-4 flex flex-wrap gap-2">
+            <MatchScoreButton
+              localItem={activeItem}
+              networkItem={item}
+              score={score}
+              isLoading={matchLoading}
+              error={matchError}
+              onCalculate={() => {
+                if (!score) void calculate();
+                setMatchOpen(true);
+              }}
+              onViewDetails={() => setMatchOpen(true)}
+              disabled={false}
+            />
+            {actions.map((a) => (
+              <ActionButton
+                key={a.action_type}
+                actionType={a.action_type}
+                actionSchema={a}
+                onAction={(type, schema) => triggerAction(type, schema, item.item_id)}
+              />
+            ))}
+          </div>
+        )}
+      </ActionHandler>
+      <MatchScoreModal
+        isOpen={matchOpen}
+        onClose={() => setMatchOpen(false)}
+        score={score}
+        isLoading={matchLoading}
+        localItemName={String(activeItem.item_state?.name ?? t('public_profile.your_profile', 'Your Profile'))}
+        networkItemName={networkItemName}
+        onRecalculate={() => void recalculate()}
+        onProceed={undefined}
+      />
+    </>
+  );
+}
+
+/**
  * Public, auth-aware single-profile view for a shared link
  * (`/public/:network/:domain/:itemType/:itemId`). Fetches the one profile via the
  * public, masked, jittered, live-only item endpoint (through `useItemDetail`)
@@ -153,7 +415,7 @@ export function PublicProfilePage() {
   const { network, domain, itemType, itemId } = useParams();
   const [searchParams, setSearchParams] = useSearchParams();
   const queryClient = useQueryClient();
-  const { isAuthenticated } = useAuth();
+  const { isAuthenticated, user } = useAuth();
 
   // Keep the theme aligned to the link's network (the theme provider reads the
   // `?network=` query param; our own links include it, but sync it defensively
@@ -175,7 +437,7 @@ export function PublicProfilePage() {
   );
 
   const { data: myItems } = useMyItems(net ?? null);
-  const { activeProfileId, setActiveProfile } = useActiveProfile(net ?? null, myItems ?? []);
+  const { activeProfileId, setActiveProfile, activeItem } = useActiveProfile(net ?? null, myItems ?? []);
   const isOwnProfile = isAuthenticated && !!itemId && (myItems ?? []).some((i) => i.item_id === itemId);
 
   // Build domain → schema map for the sidebar's own-profile title resolution
@@ -318,6 +580,20 @@ export function PublicProfilePage() {
             )}
           </div>
         </div>
+
+        {/* Apply/Connect + See Match Score — only for a logged-in viewer of
+            someone ELSE's profile, sourced from their active profile. Own
+            profile keeps the preview banner above; anonymous gets nothing. */}
+        {isAuthenticated && !isOwnProfile && (
+          <ProfileActionRow
+            net={net ?? null}
+            item={liveItem}
+            activeItem={activeItem}
+            viewedDomain={domain!}
+            user={user}
+            networkItemName={resolved.title}
+          />
+        )}
 
         <p className="mt-6 text-center text-xs text-muted-foreground">
           {t(
