@@ -157,6 +157,9 @@ describe('useProfileConsentAccept', () => {
     });
     await waitFor(() => expect(captured.otp).not.toBeNull());
     expect(acceptProfileConsent).not.toHaveBeenCalled();
+    // A guardian dialog is open → guardianActive is true (consumers gate their
+    // own blocking modal on !guardianActive so they don't stack).
+    expect(hookResult.guardianActive).toBe(true);
 
     // Guardian enters a valid code → the dialog's submit handler resolves.
     await act(async () => {
@@ -173,6 +176,8 @@ describe('useProfileConsentAccept', () => {
     // Guardian consent (not a ward self-accept) is what promotes the minor.
     expect(acceptProfileConsent).not.toHaveBeenCalled();
     expect(onDone).toHaveBeenCalled();
+    // Dialog closed after success → guardianActive returns to false.
+    await waitFor(() => expect(hookResult.guardianActive).toBe(false));
   });
 
   it('U18GuardianFlow onNotMinor does not dead-end: signals status change, no self-accept', async () => {

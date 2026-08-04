@@ -42,6 +42,10 @@ export interface UseProfileConsentAcceptResult {
    * capture flow used by the minor branch. */
   dialogs: React.ReactNode;
   isPending: boolean;
+  /** True while a guardian dialog (OTP or capture) is open. A consumer that
+   * shows its own blocking modal (e.g. home's ProfileConsentModal) gates on
+   * `!guardianActive` so the two don't stack. */
+  guardianActive: boolean;
 }
 
 /** The guardian branch keeps the item ref plus the caller's `onDone` so the OTP
@@ -250,5 +254,5 @@ export function useProfileConsentAccept(): UseProfileConsentAcceptResult {
     </>
   );
 
-  return { accept, dialogs, isPending };
+  return { accept, dialogs, isPending, guardianActive: !!guardian || !!guardianSetup };
 }
