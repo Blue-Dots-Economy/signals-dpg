@@ -155,7 +155,7 @@ describe('PublicProfilePage', () => {
     expect(screen.getByText('Profile unavailable')).toBeInTheDocument();
   });
 
-  it('anonymous mode shows Explore more + Sign in, and no My Profiles sidebar', () => {
+  it('anonymous mode shows Explore more + app-bar title, no Sign in, no My Profiles sidebar', () => {
     useAuth.mockReturnValue({ isAuthenticated: false, isLoading: false, user: null });
     useItemDetail.mockReturnValue({
       item: {
@@ -171,9 +171,13 @@ describe('PublicProfilePage', () => {
     });
     renderAt(`/public/blue_dot/seeker/profile_1.0/${ID}`);
     expect(screen.getByText('Explore more')).toBeInTheDocument();
-    expect(screen.getByText('Sign in')).toBeInTheDocument();
+    // App-bar title renders in every mode.
+    expect(screen.getByText('Profile preview')).toBeInTheDocument();
+    // The "Sign in" affordance was removed from the app bar entirely.
+    expect(screen.queryByText('Sign in')).not.toBeInTheDocument();
     expect(screen.queryByText('My Profiles')).not.toBeInTheDocument();
     expect(screen.queryByTestId('user-menu')).not.toBeInTheDocument();
+    // Anonymous view has no sidebar; the brand logo moved into the app bar.
     expect(screen.getByTestId('portal-header')).toBeInTheDocument();
   });
 
@@ -213,6 +217,8 @@ describe('PublicProfilePage', () => {
     ).toBeInTheDocument();
     expect(screen.getByTestId('app-sidebar')).toBeInTheDocument();
     expect(screen.getByTestId('user-menu')).toBeInTheDocument();
+    // App-bar title renders in the authenticated mode too.
+    expect(screen.getByText('Profile preview')).toBeInTheDocument();
     // Own profile: banner only, no Apply/Connect or Match Score row.
     expect(screen.queryByTestId('action-button')).not.toBeInTheDocument();
     expect(screen.queryByTestId('match-score-button')).not.toBeInTheDocument();

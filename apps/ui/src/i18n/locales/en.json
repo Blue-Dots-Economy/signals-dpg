@@ -585,6 +585,7 @@
   "share.button": "Share profile",
   "share.copied": "Link copied to clipboard",
   "share.copy_failed": "Could not copy the link",
+  "public_profile.app_bar_title": "Profile preview",
   "public_profile.loading": "Loading profile…",
   "public_profile.unavailable_title": "Profile unavailable",
   "public_profile.unavailable_body": "This profile is no longer available, or the link is invalid.",

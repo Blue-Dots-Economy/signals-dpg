@@ -1,5 +1,5 @@
 import * as React from 'react';
-import { useParams, useSearchParams, Link } from 'react-router-dom';
+import { useParams, useSearchParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
@@ -29,12 +29,7 @@ import { AppSidebar } from '@/components/layout/sidebar';
 import { PortalHeader } from '@/components/layout/portal-header';
 import { ThemeModeToggle } from '@/components/layout/theme-mode-toggle';
 import { UserMenu } from '@/components/auth/user-menu';
-import {
-  Sidebar,
-  SidebarHeader,
-  SidebarProvider,
-  SidebarTrigger,
-} from '@/components/ui/sidebar';
+import { SidebarProvider, SidebarTrigger } from '@/components/ui/sidebar';
 
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -120,10 +115,17 @@ function ProfileTopBar({
   networkId,
   item,
   isAuthenticated,
+  showLogo,
 }: {
   networkId?: string;
   item: Item | null;
   isAuthenticated: boolean;
+  /**
+   * Anonymous mode has no sidebar, so the brand logo lives in the app bar (left);
+   * the authenticated mode keeps the sidebar and shows the mobile sidebar trigger
+   * instead. The header title renders in both modes.
+   */
+  showLogo: boolean;
 }) {
   const { t } = useTranslation();
 
@@ -136,7 +138,10 @@ function ProfileTopBar({
 
   return (
     <header className="sticky top-0 z-10 flex items-center gap-3 border-b border-border bg-background/90 px-5 py-3 backdrop-blur">
-      <SidebarTrigger className="md:hidden" />
+      {showLogo ? <PortalHeader /> : <SidebarTrigger className="md:hidden" />}
+      <span className="text-sm font-semibold text-foreground">
+        {t('public_profile.app_bar_title', 'Profile preview')}
+      </span>
       <div className="ml-auto flex shrink-0 items-center gap-2">
         <ThemeModeToggle />
         <button
@@ -155,16 +160,7 @@ function ProfileTopBar({
         >
           {t('public_profile.open_in_app', 'Explore more')}
         </a>
-        {isAuthenticated ? (
-          <UserMenu />
-        ) : (
-          <Link
-            to="/auth/login"
-            className="inline-flex items-center rounded-lg border border-border px-3 py-1.5 text-sm font-medium text-foreground hover:bg-muted"
-          >
-            {t('public_profile.sign_in', 'Sign in')}
-          </Link>
-        )}
+        {isAuthenticated && <UserMenu />}
       </div>
     </header>
   );
@@ -380,7 +376,7 @@ function ProfileActionRow({
         }
       >
         {(triggerAction) => (
-          <div className="mt-4 flex flex-wrap gap-2">
+          <div className="mt-4 flex flex-wrap items-center justify-between gap-2">
             <MatchScoreButton
               localItem={activeItem}
               networkItem={item}
@@ -394,14 +390,17 @@ function ProfileActionRow({
               onViewDetails={() => setMatchOpen(true)}
               disabled={false}
             />
-            {actions.map((a) => (
-              <ActionButton
-                key={a.action_type}
-                actionType={a.action_type}
-                actionSchema={a}
-                onAction={(type, schema) => triggerAction(type, schema, item.item_id)}
-              />
-            ))}
+            <div className="flex flex-wrap gap-2">
+              {actions.map((a) => (
+                <ActionButton
+                  key={a.action_type}
+                  actionType={a.action_type}
+                  actionSchema={a}
+                  variant="default"
+                  onAction={(type, schema) => triggerAction(type, schema, item.item_id)}
+                />
+              ))}
+            </div>
           </div>
         )}
       </ActionHandler>
@@ -631,35 +630,47 @@ export function PublicProfilePage() {
     );
   }
 
+  // Anonymous view: no sidebar at all — an app-bar-only, full-width column with
+  // the brand logo moved into the app bar. Authenticated view keeps the full
+  // sidebar shell (AppSidebar + sidebar trigger) exactly as before.
+  if (!isAuthenticated) {
+    return (
+      <div className="flex h-svh min-w-0 flex-1 flex-col">
+        <ProfileTopBar
+          networkId={network}
+          item={isLive ? item : null}
+          isAuthenticated={false}
+          showLogo
+        />
+        <main id="main-content" className="flex-1 overflow-y-auto bg-muted/30">
+          {content}
+        </main>
+      </div>
+    );
+  }
+
   return (
     <SidebarProvider>
-      {isAuthenticated ? (
-        <AppSidebar
-          networks={[]}
-          domains={[]}
-          selectedDomain={null}
-          onDomainSelect={() => {}}
-          myItems={myItems ?? []}
-          activeProfileId={activeProfileId}
-          onActiveProfileChange={setActiveProfile}
-          userSchemas={userSchemas}
-          selectedNetwork={network ?? undefined}
-          onProfilesChanged={() => {
-            if (net) queryClient.invalidateQueries({ queryKey: queryKeys.myItems(net.id) });
-          }}
-        />
-      ) : (
-        <Sidebar>
-          <SidebarHeader className="flex h-14 justify-center border-b px-4">
-            <PortalHeader />
-          </SidebarHeader>
-        </Sidebar>
-      )}
+      <AppSidebar
+        networks={[]}
+        domains={[]}
+        selectedDomain={null}
+        onDomainSelect={() => {}}
+        myItems={myItems ?? []}
+        activeProfileId={activeProfileId}
+        onActiveProfileChange={setActiveProfile}
+        userSchemas={userSchemas}
+        selectedNetwork={network ?? undefined}
+        onProfilesChanged={() => {
+          if (net) queryClient.invalidateQueries({ queryKey: queryKeys.myItems(net.id) });
+        }}
+      />
       <div className="flex h-svh min-w-0 flex-1 flex-col">
         <ProfileTopBar
           networkId={network}
           item={isLive ? item : null}
           isAuthenticated={isAuthenticated}
+          showLogo={false}
         />
         <main id="main-content" className="flex-1 overflow-y-auto bg-muted/30">
           {content}
