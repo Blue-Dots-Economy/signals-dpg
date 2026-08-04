@@ -173,3 +173,29 @@ The target network comes from the **URL path**, not the env default. `PublicProf
 - API (reused): `apps/api/src/routes/v1/network/item/fetch_item.ts`, `apps/api/src/utils/item_fetch_runtime.ts`, `apps/api/src/utils/inter_instance_fetch.ts`, `apps/api/src/utils/item_decrypt.ts`, `apps/api/src/routes/v1/network/network_routes.ts`.
 - UI (reused): `apps/ui/src/app.tsx`, `apps/ui/src/hooks/use-item-detail.ts`, `apps/ui/src/components/cards/{domain-card,item-card,resolve-card-fields}.ts(x)`, `apps/ui/src/lib/{network-api,item-api}.ts`, `apps/ui/src/hooks/use-network-config.ts`, `apps/ui/src/theme/*`, `apps/ui/src/pages/home-page.tsx` (`MarkerDetailPopup` template), `apps/ui/src/components/wallet/providers/digilocker-provider.tsx` (clipboard pattern), `apps/ui/Dockerfile` (SPA fallback).
 - Related prior work: PR #398 (map server-side), PR #419 (list discover) — established the public masked-fetch model this builds on.
+
+---
+
+## Addendum (2026-08-04) — V2: public page inside the app shell, auth-aware + Apply/Connect
+
+After the initial standalone page shipped, product asked for the public profile view to look like the rest of Signals and to be actionable for signed-in users. The `/public/...` route (renamed from `/p/...`) stays **public (no `RequireAuth`)** but the component now renders **auth-aware** in three modes. Data is **always the masked public projection** in every mode; contact is still revealed only through the existing connect-acceptance flow (no new PII), and Apply/Connect goes through the authenticated action API (interaction-matrix + source-ownership enforced server-side).
+
+### Three modes (same route, same masked data)
+
+| Mode | Detection | Shell | Extra |
+|---|---|---|---|
+| **Anonymous** | no session | Signals shell **stripped** to the relevant chrome: logo (left) + **Theme toggle · "Explore more" (→ home `/?network=`) · "Sign in" (→ `/auth/login`)** (right); sidebar = branding only (no My Profiles / actions) | Copy link; no apply |
+| **Logged-in, own profile** | session + viewed `item_id` ∈ the user's own items | **full** shell (their sidebar incl. active-profile selection, app bar, logo) | banner: *"This is the public view others see when you share your profile — contact details stay hidden until someone connects."*; Copy link; no apply (it's theirs) |
+| **Logged-in, other profile** | session + not own | full shell | **Apply/Connect** using the user's **active profile** (`activeProfileId`) as the source — shown only when the active profile can act on the viewed profile (interaction matrix); hidden with a "switch to a compatible profile" hint otherwise. Copy link. **No Match Score** (it needs an unambiguous source pick). |
+
+### Layout
+- Content area (where the map/list normally sits) renders the schema-driven profile details (hero + table grid from `resolveCardFields`) — unchanged from V1, just placed inside the shell's main slot.
+- Uses the **same Blue Dots logo** as the rest of the UI (not a text initial).
+- The stripped top bar for the anonymous mode omits: search, Filters, map/list toggle, notifications, user menu, language switcher (per product — kept: theme, Explore more, Sign in).
+
+### Decisions locked
+- Rename route prefix `/p/` → **`/public/`**; the "Open in Blue Dots" CTA → **"Explore more"** (→ public home).
+- Own-profile view is intentionally **masked** (the point is to preview the shared view) + the explanatory banner.
+- Apply/Connect source = the app's **active profile**; the logged-in view exposes the normal sidebar so the user can switch it; incompatible active profile → action hidden.
+- Match Score is out of scope on this page.
+- Still no owner opt-in, no minor gating, still public route, no backend change (Apply/Connect reuses the existing authenticated action flow).
