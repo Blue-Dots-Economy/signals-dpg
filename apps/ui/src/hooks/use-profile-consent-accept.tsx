@@ -107,7 +107,18 @@ export function useProfileConsentAccept(): UseProfileConsentAcceptResult {
     async (pending: GuardianPending) => {
       try {
         const { otpSent } = await issueProfileConsentOtp(pending.ref);
-        if (otpSent) setGuardian(pending);
+        if (otpSent) {
+          setGuardian(pending);
+        } else {
+          // Server accepted the request but didn't send a code (nothing opens).
+          // Surface it instead of failing silently so the user isn't stuck.
+          toast.error(
+            t(
+              'u18.guardian_error_otp_unavailable',
+              "Guardian confirmation isn't available on this instance right now.",
+            ),
+          );
+        }
       } catch (err) {
         const status = axios.isAxiosError(err) ? err.response?.status : undefined;
         const code = axios.isAxiosError(err)

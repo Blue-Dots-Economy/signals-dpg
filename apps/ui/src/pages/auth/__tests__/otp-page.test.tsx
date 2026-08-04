@@ -159,4 +159,30 @@ describe('OtpPage — first-time profile redirect (#376)', () => {
 
     await waitFor(() => expect(navigateMock).toHaveBeenCalledWith('/profile/draft1/edit', { replace: true }));
   });
+
+  it('fails open: if the profile fetch rejects, lands normally (does not get stuck)', async () => {
+    currentState = { userExists: true, phoneNumber: '+911234' };
+    getU18Status.mockResolvedValue({ isMinor: false });
+    fetchMyProfilesLite.mockRejectedValue(new Error('network down'));
+
+    renderPage();
+    await userEvent.click(screen.getByTestId('otp-submit'));
+
+    // The redirect check is best-effort — a fetch failure must not block login;
+    // the user still lands on the normal destination (home here).
+    await waitFor(() => expect(navigateMock).toHaveBeenCalledWith('/', { replace: true }));
+    expect(navigateMock).not.toHaveBeenCalledWith('/profile/new', { replace: true });
+  });
+
+  it('the first-time redirect takes precedence over a stored redirectTo deep link', async () => {
+    currentState = { userExists: true, phoneNumber: '+911234', redirectTo: '/some/deep/link' };
+    getU18Status.mockResolvedValue({ isMinor: false });
+    fetchMyProfilesLite.mockResolvedValue([]); // no profiles → /profile/new
+
+    renderPage();
+    await userEvent.click(screen.getByTestId('otp-submit'));
+
+    await waitFor(() => expect(navigateMock).toHaveBeenCalledWith('/profile/new', { replace: true }));
+    expect(navigateMock).not.toHaveBeenCalledWith('/some/deep/link', { replace: true });
+  });
 });

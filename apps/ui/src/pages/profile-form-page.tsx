@@ -775,7 +775,7 @@ export function ProfileFormPage() {
     // (domain selector) group, and label the return control "Browse" (it goes
     // to the browse view, not the prior route).
     hideBrowse: true,
-    backLabel: t('nav.browse'),
+    backLabel: t('nav.browse_group'),
   };
 
   // Domain selection step
