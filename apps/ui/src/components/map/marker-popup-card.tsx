@@ -34,6 +34,10 @@ interface MarkerPopupCardProps {
   actions?: DotActionSchema[];
   /** Initiate the connect flow for this marker. */
   onConnect?: () => void;
+  /** Disable the connect CTA (an action is already open for this pair, #370/#422). */
+  connectDisabled?: boolean;
+  /** Shown on hover when the connect CTA is disabled. */
+  connectDisabledReason?: string;
   /** Local (own) profile item — required for match score. */
   localItem?: Item | null;
   /** Full network Item for this marker — required for match score. */
@@ -49,6 +53,8 @@ export function MarkerPopupCard({
   onViewDetails,
   actions = [],
   onConnect,
+  connectDisabled = false,
+  connectDisabledReason,
   localItem,
   networkItem,
   schema,
@@ -88,10 +94,23 @@ export function MarkerPopupCard({
           </Button>
         )}
         {canConnect && (
-          <Button size="sm" className="flex-1" onClick={onConnect}>
-            <Plug className="mr-1.5 h-3.5 w-3.5" />
-            {actionLabel}
-          </Button>
+          // Native-title span so the "already open" reason still shows on hover
+          // even though the button itself is disabled (no TooltipProvider needed
+          // in the map overlay).
+          <span
+            className="flex-1"
+            title={connectDisabled ? connectDisabledReason : undefined}
+          >
+            <Button
+              size="sm"
+              className="w-full"
+              disabled={connectDisabled}
+              onClick={onConnect}
+            >
+              <Plug className="mr-1.5 h-3.5 w-3.5" />
+              {actionLabel}
+            </Button>
+          </span>
         )}
       </>
     ) : onViewDetails ? (
@@ -135,7 +154,7 @@ export function MarkerPopupCard({
           networkItemName={marker.label}
           onRecalculate={() => void recalculate()}
           onProceed={
-            canConnect
+            canConnect && !connectDisabled
               ? () => {
                   setModalOpen(false);
                   onConnect?.();

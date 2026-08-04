@@ -9,6 +9,7 @@ import { useResolvedNetwork } from '@/hooks/use-network-config';
 import { useItemDetail } from '@/hooks/use-item-detail';
 import { useMyItems } from '@/hooks/use-my-items';
 import { useActiveProfile } from '@/hooks/use-active-profile';
+import { useActions } from '@/hooks/use-actions';
 import { useAuth } from '@/contexts/auth-context';
 import { resolveCardFields, formatCardValue } from '@/components/cards/resolve-card-fields';
 import { buildProfileShareUrl, copyTextToClipboard } from '@/lib/share-profile';
@@ -37,6 +38,19 @@ const UUID_RE =
 
 const HERO_GRADIENT =
   'linear-gradient(135deg, var(--primary), color-mix(in srgb, var(--primary), white 32%))';
+
+// Terminal action statuses that FREE a source/target pair for a new action.
+// A non-terminal action means one is already open, so the Apply/Connect CTA is
+// disabled (mirrors home-page's `openActionItemIds`; the server cap #370/#422
+// is the real guard — this just pre-empts the click).
+const OPEN_ACTION_TERMINAL_STATUSES = new Set([
+  'accepted',
+  'completed',
+  'cancelled',
+  'rejected',
+  'declined',
+  'withdrawn',
+]);
 
 function titleCaseDomain(id: string): string {
   return id.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
@@ -265,6 +279,25 @@ function ProfileActionRow({
     [net, activeItem?.item_domain, viewedDomain],
   );
 
+  // Disable Apply/Connect when the active profile already has an OPEN action
+  // (either direction) with the viewed item — parity with the list/map. Actions
+  // only fetch for a signed-in user (the endpoint 401s anonymously; the hook
+  // also self-gates on auth).
+  const { data: myActionsData } = useActions('all', { enabled: !!user });
+  const hasOpenActionWithViewed = React.useMemo(() => {
+    if (!activeItem) return false;
+    for (const a of myActionsData?.actions ?? []) {
+      if (OPEN_ACTION_TERMINAL_STATUSES.has(a.action_status)) continue;
+      if (
+        (a.source_item_id === activeItem.item_id && a.target_item_id === item.item_id) ||
+        (a.target_item_id === activeItem.item_id && a.source_item_id === item.item_id)
+      ) {
+        return true;
+      }
+    }
+    return false;
+  }, [myActionsData, activeItem, item.item_id]);
+
   const onActionSubmit = React.useCallback(
     async (
       actionType: string,
@@ -398,6 +431,8 @@ function ProfileActionRow({
                   actionType={a.action_type}
                   actionSchema={a}
                   variant="default"
+                  disabled={hasOpenActionWithViewed}
+                  disabledReason={t('actions.pair_open_disabled', 'A request is already open with this profile.')}
                   onAction={(type, schema) => triggerAction(type, schema, item.item_id)}
                 />
               ))}

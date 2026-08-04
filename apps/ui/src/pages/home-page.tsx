@@ -295,6 +295,8 @@ function MarkerDetailPopup({
   localItem,
   connectAction,
   onConnect,
+  connectDisabled,
+  connectDisabledReason,
   onItemResolved,
 }: {
   networkId: string | null;
@@ -311,6 +313,10 @@ function MarkerDetailPopup({
   localItem: Item | null;
   connectAction?: DotActionSchema;
   onConnect?: (baseItemId: string) => void;
+  // Disable the connect CTA when an action is already open for this pair
+  // (#370/#422) — parity with the list cards.
+  connectDisabled?: boolean;
+  connectDisabledReason?: string;
   // Task 7 (#203 §5.2 cleanup): lifts this popup's already-fetched full item
   // up to the parent. Home-page's `onActionSubmit` needs the full `Item`
   // (network/domain/type/instance_url) to build a connect-action's
@@ -384,6 +390,8 @@ function MarkerDetailPopup({
       cardConfig={cardConfig}
       actions={localItem && connectAction ? [connectAction] : []}
       onConnect={localItem && connectAction ? () => onConnect?.(baseItemId) : undefined}
+      connectDisabled={connectDisabled}
+      connectDisabledReason={connectDisabledReason}
       localItem={localItem}
       networkItem={item}
     />
@@ -2587,6 +2595,8 @@ export function HomePage() {
                         cardConfig={markerDomain?.card}
                         localItem={myItem}
                         connectAction={connectAction}
+                        connectDisabled={openActionItemIds.has(baseItemId)}
+                        connectDisabledReason={t('actions.pair_open_disabled', 'A request is already open with this profile.')}
                         onConnect={(itemId) => {
                           // Close the marker popup first so it doesn't cover
                           // the consent modal the action is about to open.
