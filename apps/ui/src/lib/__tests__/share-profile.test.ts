@@ -64,15 +64,15 @@ describe('copyTextToClipboard', () => {
 });
 
 describe('buildProfileShareUrl', () => {
-  it('builds a /p/<network>/<domain>/<type>/<id>?network= URL from the given origin', () => {
+  it('builds a /public/<network>/<domain>/<type>/<id>?network= URL from the given origin', () => {
     expect(buildProfileShareUrl(item, 'https://signals.example.org')).toBe(
-      'https://signals.example.org/p/blue_dot/seeker/profile_1.0/9b545eb9-5406-4bce-bc71-0cdac4b63bd0?network=blue_dot',
+      'https://signals.example.org/public/blue_dot/seeker/profile_1.0/9b545eb9-5406-4bce-bc71-0cdac4b63bd0?network=blue_dot',
     );
   });
 
   it('defaults the origin to window.location.origin', () => {
     // jsdom origin is http://localhost:3000 by default
-    expect(buildProfileShareUrl(item)).toContain('/p/blue_dot/seeker/profile_1.0/');
+    expect(buildProfileShareUrl(item)).toContain('/public/blue_dot/seeker/profile_1.0/');
     expect(buildProfileShareUrl(item)).toContain('?network=blue_dot');
   });
 
@@ -84,7 +84,7 @@ describe('buildProfileShareUrl', () => {
       item_id: '12345',
     };
     const url = buildProfileShareUrl(itemWithSpaceDomain, 'https://example.org');
-    expect(url).toContain('/p/blue_dot/a%20b/profile_1.0/12345');
+    expect(url).toContain('/public/blue_dot/a%20b/profile_1.0/12345');
     expect(url).toContain('?network=blue_dot');
   });
 });

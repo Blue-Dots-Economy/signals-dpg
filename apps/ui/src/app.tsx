@@ -34,7 +34,7 @@ export function App() {
             <Route path="/auth/otp" element={<OtpPage />} />
             <Route path="/privacy" element={<PrivacyPage />} />
             <Route path="/terms" element={<TermsPage />} />
-            <Route path="/p/:network/:domain/:itemType/:itemId" element={<PublicProfilePage />} />
+            <Route path="/public/:network/:domain/:itemType/:itemId" element={<PublicProfilePage />} />
             <Route path="/my-actions" element={<RequireAuth><MyActionsPage /></RequireAuth>} />
             <Route path="/my-actions/*" element={<RequireAuth><MyActionsPage /></RequireAuth>} />
           </Routes>

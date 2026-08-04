@@ -11,7 +11,7 @@ export function buildProfileShareUrl(
   origin: string = window.location.origin,
 ): string {
   const seg = (s: string) => encodeURIComponent(s);
-  const path = `/p/${seg(item.item_network)}/${seg(item.item_domain)}/${seg(item.item_type)}/${seg(item.item_id)}`;
+  const path = `/public/${seg(item.item_network)}/${seg(item.item_domain)}/${seg(item.item_type)}/${seg(item.item_id)}`;
   return `${origin}${path}?network=${seg(item.item_network)}`;
 }
 

@@ -114,7 +114,7 @@ function UnavailableState({ networkId }: { networkId?: string }) {
 
 /**
  * Public, unauthenticated single-profile view for a shared link
- * (`/p/:network/:domain/:itemType/:itemId`). Fetches the one profile via the
+ * (`/public/:network/:domain/:itemType/:itemId`). Fetches the one profile via the
  * public, masked, jittered, live-only item endpoint (through `useItemDetail`)
  * and renders a schema-driven hero + details grid built entirely from the
  * resolved network's card config and item schema — no field name, section

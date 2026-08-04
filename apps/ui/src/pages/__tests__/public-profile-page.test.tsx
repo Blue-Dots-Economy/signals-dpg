@@ -33,7 +33,7 @@ function renderAt(path: string) {
   return render(
     <MemoryRouter initialEntries={[path]}>
       <Routes>
-        <Route path="/p/:network/:domain/:itemType/:itemId" element={<PublicProfilePage />} />
+        <Route path="/public/:network/:domain/:itemType/:itemId" element={<PublicProfilePage />} />
       </Routes>
     </MemoryRouter>,
   );
@@ -58,7 +58,7 @@ describe('PublicProfilePage', () => {
       isLoading: false,
       isError: false,
     });
-    renderAt(`/p/blue_dot/seeker/profile_1.0/${ID}`);
+    renderAt(`/public/blue_dot/seeker/profile_1.0/${ID}`);
     expect(screen.getByRole('heading', { name: 'Asha' })).toBeInTheDocument();
     expect(screen.getByText('City')).toBeInTheDocument();
     expect(screen.getByText('Pune')).toBeInTheDocument();
@@ -66,25 +66,25 @@ describe('PublicProfilePage', () => {
 
   it('shows the loading state', () => {
     useItemDetail.mockReturnValue({ item: null, isLoading: true, isError: false });
-    renderAt(`/p/blue_dot/seeker/profile_1.0/${ID}`);
+    renderAt(`/public/blue_dot/seeker/profile_1.0/${ID}`);
     expect(screen.getByText('Loading profile…')).toBeInTheDocument();
   });
 
   it('shows unavailable when the item is empty', () => {
     useItemDetail.mockReturnValue({ item: null, isLoading: false, isError: false });
-    renderAt(`/p/blue_dot/seeker/profile_1.0/${ID}`);
+    renderAt(`/public/blue_dot/seeker/profile_1.0/${ID}`);
     expect(screen.getByText('Profile unavailable')).toBeInTheDocument();
   });
 
   it('shows the error state on a transient error', () => {
     useItemDetail.mockReturnValue({ item: null, isLoading: false, isError: true });
-    renderAt(`/p/blue_dot/seeker/profile_1.0/${ID}`);
+    renderAt(`/public/blue_dot/seeker/profile_1.0/${ID}`);
     expect(screen.getByText('Something went wrong')).toBeInTheDocument();
   });
 
   it('shows unavailable for a malformed item id (no fetch)', () => {
     useItemDetail.mockReturnValue({ item: null, isLoading: false, isError: false });
-    renderAt('/p/blue_dot/seeker/profile_1.0/not-a-uuid');
+    renderAt('/public/blue_dot/seeker/profile_1.0/not-a-uuid');
     expect(screen.getByText('Profile unavailable')).toBeInTheDocument();
   });
 });
