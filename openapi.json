@@ -459,7 +459,11 @@
           },
           {
             "schema": {
-              "type": "boolean"
+              "type": "string",
+              "enum": [
+                "true",
+                "false"
+              ]
             },
             "in": "query",
             "name": "include_retired",
@@ -3860,7 +3864,11 @@
           },
           {
             "schema": {
-              "type": "boolean"
+              "type": "string",
+              "enum": [
+                "true",
+                "false"
+              ]
             },
             "in": "query",
             "name": "include_retired",
@@ -4115,7 +4123,11 @@
                     "maximum": 180
                   },
                   "include_retired": {
-                    "type": "boolean"
+                    "type": "string",
+                    "enum": [
+                      "true",
+                      "false"
+                    ]
                   }
                 },
                 "required": [
@@ -4245,7 +4257,11 @@
                     "maximum": 9007199254740991
                   },
                   "include_retired": {
-                    "type": "boolean"
+                    "type": "string",
+                    "enum": [
+                      "true",
+                      "false"
+                    ]
                   }
                 },
                 "required": [
@@ -4597,7 +4613,11 @@
           },
           {
             "schema": {
-              "type": "boolean"
+              "type": "string",
+              "enum": [
+                "true",
+                "false"
+              ]
             },
             "in": "query",
             "name": "include_retired",
@@ -4810,7 +4830,11 @@
                     "maximum": 9007199254740991
                   },
                   "include_retired": {
-                    "type": "boolean"
+                    "type": "string",
+                    "enum": [
+                      "true",
+                      "false"
+                    ]
                   },
                   "q": {
                     "type": "string",

@@ -100,7 +100,7 @@ const FetchItemsSchemaBase = z.object({
   // default. The first-time-login redirect check opts INTO retired so a
   // retired-only user is recognized as "already set up" and stays on the map
   // rather than being sent to the create page (#376). Absent → retired excluded.
-  include_retired: z.coerce.boolean().optional(),
+  include_retired: z.enum(['true', 'false']).transform((v) => v === 'true').optional().default(false),
 });
 
 type FetchItemsSchemaShape = z.infer<typeof FetchItemsSchemaBase>;
