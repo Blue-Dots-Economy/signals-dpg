@@ -264,9 +264,12 @@
   "nav.sign_in_to_connect": "जुड़ने के लिए साइन इन करें",
   "profile.choose_different_role": "अलग भूमिका चुनें",
   "profile.choose_role": "नेटवर्क पर अपनी भूमिका चुनें",
+  "profile.completion_prompt_default_heading": "खोजे जाने के लिए अपनी प्रोफ़ाइल पूरी करें",
+  "profile.completion_prompt_default_body": "पूरी होने पर आपकी प्रोफ़ाइल लाइव हो जाती है, ताकि दूसरे आपको ढूँढ और जुड़ सकें। शुरू करने के लिए नीचे विवरण भरें।",
   "profile.create_heading": "प्रोफ़ाइल बनाएं",
   "profile.create_role_heading": "{{role}} प्रोफ़ाइल बनाएं",
   "profile.edit_role_heading": "{{role}} प्रोफ़ाइल संपादित करें",
+  "profile.required_complete": "सभी आवश्यक फ़ील्ड पूर्ण",
   "profile.error_already_exists": "प्रोफ़ाइल पहले से मौजूद है",
   "profile.error_already_exists_desc": "इस भूमिका के लिए आपकी पहले से एक प्रोफ़ाइल है। अपनी मौजूदा प्रोफ़ाइल देखने या संपादित करने के लिए होम पेज पर जाएं।",
   "profile.error_create_failed": "आपकी प्रोफ़ाइल नहीं बन सकी",
@@ -351,6 +354,7 @@
   "contact.loading": "लोड हो रहा है…",
   "profile.btn_update": "अपडेट करें",
   "profile.btn_create": "प्रोफ़ाइल बनाएँ",
+  "profile.btn_save_publish": "सहेजें और प्रकाशित करें",
   "profile.fill_required_hint": "जारी रखने के लिए कृपया सभी आवश्यक फ़ील्ड भरें।",
   "consent.title_gate": "जारी रखने के लिए समीक्षा करें और स्वीकार करें",
   "consent.title_view": "गोपनीयता नीति और शर्तें",
@@ -544,7 +548,7 @@
     "guardian_error_same_contact_not_allowed": "आपके अभिभावक का संपर्क आपके अपने संपर्क के समान नहीं हो सकता। कृपया कोई अलग ईमेल या फ़ोन नंबर उपयोग करें।"
   },
   "profile": {
-    "guardian_consent_recorded": "अभिभावक ने आपकी प्रोफ़ाइल की पुष्टि की"
+    "guardian_consent_recorded": "सहमति दर्ज की गई — आपकी प्रोफ़ाइल अब लाइव है"
   },
   "u18.guardian_accept_both_prefix": "अपने वार्ड की ओर से, मैं स्वीकार करता/करती हूँ ",
   "u18.guardian_accept_both_join": " और ",

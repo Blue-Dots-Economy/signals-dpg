@@ -96,6 +96,17 @@ export interface DotNetworkDomain {
    * network.json (see apps/api/src/services/minor.ts on the server side).
    */
   guardian_consent_required?: boolean;
+  /**
+   * Optional per-domain "why complete your profile" prompt shown at the top of
+   * the create/edit page (#376), to motivate a first-time user to finish. The
+   * message is role-specific (a seeker's "why" ≠ a provider's), so it's authored
+   * per domain in network.json; when unset, a generic i18n fallback is used.
+   * Presentational only — not part of item validation.
+   */
+  profile_completion_prompt?: {
+    heading: string;
+    body: string;
+  };
 }
 
 export interface DotNetworkInteraction {

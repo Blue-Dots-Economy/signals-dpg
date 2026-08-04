@@ -156,6 +156,10 @@
           }
         }
       },
+      "profile_completion_prompt": {
+        "heading": "Complete your profile to get discovered",
+        "body": "Employers can find and connect with you only once your profile is live. Fill in the details below to start getting job opportunities."
+      },
       "id": "seeker",
       "card": {
         "title_field": "name",
@@ -217,6 +221,10 @@
             }
           }
         }
+      },
+      "profile_completion_prompt": {
+        "heading": "Complete your profile to start hiring",
+        "body": "Seekers can see and apply to your postings only once your profile is live. Add the details below to reach candidates."
       },
       "id": "provider",
       "card": {

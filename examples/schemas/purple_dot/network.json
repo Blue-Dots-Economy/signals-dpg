@@ -203,6 +203,10 @@
           }
         }
       },
+      "profile_completion_prompt": {
+        "heading": "Complete your profile to find the right support",
+        "body": "Providers can find and connect with you only once your profile is live. Fill in the details below to get matched with the services and support you need."
+      },
       "id": "seeker",
       "guardian_consent_required": true,
       "card": {
@@ -410,6 +414,10 @@
             }
           }
         }
+      },
+      "profile_completion_prompt": {
+        "heading": "Complete your profile to reach people who need support",
+        "body": "People looking for services can discover and connect with you only once your profile is live. Add your details below to start helping."
       },
       "id": "provider",
       "card": {

@@ -82,6 +82,10 @@
           }
         }
       },
+      "profile_completion_prompt": {
+        "heading": "Complete your profile to find the right tutors",
+        "body": "Tutors and counsellors can find and connect with you only once your profile is live. Fill in the details below to get matched."
+      },
       "id": "student",
       "card": {
         "title_field": "Full Name",
@@ -190,6 +194,10 @@
             }
           }
         }
+      },
+      "profile_completion_prompt": {
+        "heading": "Complete your profile to reach students",
+        "body": "Students can find and connect with you only once your profile is live. Add your details below to start getting learners."
       },
       "id": "individual_tutor_weera_counsellor",
       "card": {
