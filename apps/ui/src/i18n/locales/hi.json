@@ -596,6 +596,7 @@
   "share.copied": "लिंक क्लिपबोर्ड पर कॉपी हो गया",
   "share.copy_failed": "लिंक कॉपी नहीं हो सका",
   "public_profile.app_bar_title": "प्रोफ़ाइल पूर्वावलोकन",
+  "public_profile.back": "मानचित्र पर वापस जाएँ",
   "public_profile.loading": "प्रोफ़ाइल लोड हो रही है…",
   "public_profile.unavailable_title": "प्रोफ़ाइल उपलब्ध नहीं",
   "public_profile.unavailable_body": "यह प्रोफ़ाइल अब उपलब्ध नहीं है, या लिंक अमान्य है।",

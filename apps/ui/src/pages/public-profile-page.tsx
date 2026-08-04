@@ -1,9 +1,9 @@
 import * as React from 'react';
-import { useParams, useSearchParams } from 'react-router-dom';
+import { useParams, useSearchParams, useNavigate, useLocation } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { AlertCircle, Copy, Loader2 } from 'lucide-react';
+import { AlertCircle, ArrowLeft, Copy, Loader2 } from 'lucide-react';
 import type { RJSFSchema } from '@rjsf/utils';
 import { useResolvedNetwork } from '@/hooks/use-network-config';
 import { useItemDetail } from '@/hooks/use-item-detail';
@@ -131,10 +131,13 @@ function ProfileTopBar({
   item,
   isAuthenticated,
   showLogo,
+  onBack,
 }: {
   networkId?: string;
   item: Item | null;
   isAuthenticated: boolean;
+  /** Navigate back to where the viewer came from (falls back to the map view). */
+  onBack: () => void;
   /**
    * Anonymous mode has no sidebar, so the brand logo lives in the app bar (left);
    * the authenticated mode keeps the sidebar and shows the mobile sidebar trigger
@@ -153,6 +156,15 @@ function ProfileTopBar({
 
   return (
     <header className="sticky top-0 z-10 flex h-14 items-center gap-3 border-b border-border bg-background/90 px-4 backdrop-blur sm:px-6">
+      <button
+        type="button"
+        onClick={onBack}
+        aria-label={t('public_profile.back', 'Back to map')}
+        title={t('public_profile.back', 'Back to map')}
+        className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-foreground hover:bg-muted"
+      >
+        <ArrowLeft className="h-5 w-5" aria-hidden="true" />
+      </button>
       {showLogo ? <PortalHeader /> : <SidebarTrigger className="md:hidden" />}
       <span className="ml-2 text-lg font-semibold text-foreground sm:ml-4">
         {t('public_profile.app_bar_title', 'Profile preview')}
@@ -475,8 +487,18 @@ export function PublicProfilePage() {
   const { t } = useTranslation();
   const { network, domain, itemType, itemId } = useParams();
   const [searchParams, setSearchParams] = useSearchParams();
+  const navigate = useNavigate();
+  const location = useLocation();
   const queryClient = useQueryClient();
   const { isAuthenticated, user } = useAuth();
+
+  // Back button: return to the previous in-app page when the viewer navigated
+  // here within the app (history exists); for a freshly-opened share link
+  // (no in-app history — `location.key === 'default'`) land on the map view.
+  const handleBack = React.useCallback(() => {
+    if (location.key !== 'default') navigate(-1);
+    else navigate(`/?network=${encodeURIComponent(network ?? '')}&view=map`);
+  }, [location.key, navigate, network]);
 
   // Keep the theme aligned to the link's network (the theme provider reads the
   // `?network=` query param; our own links include it, but sync it defensively
@@ -681,6 +703,7 @@ export function PublicProfilePage() {
             item={isLive ? item : null}
             isAuthenticated={false}
             showLogo
+            onBack={handleBack}
           />
           <main id="main-content" className="flex-1 overflow-y-auto bg-muted/30">
             {content}
@@ -712,6 +735,7 @@ export function PublicProfilePage() {
           item={isLive ? item : null}
           isAuthenticated={isAuthenticated}
           showLogo={false}
+          onBack={handleBack}
         />
         <main id="main-content" className="flex-1 overflow-y-auto bg-muted/30">
           {content}
