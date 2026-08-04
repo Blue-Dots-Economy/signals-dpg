@@ -30,6 +30,7 @@ import { PortalHeader } from '@/components/layout/portal-header';
 import { ThemeModeToggle } from '@/components/layout/theme-mode-toggle';
 import { UserMenu } from '@/components/auth/user-menu';
 import { SidebarProvider, SidebarTrigger } from '@/components/ui/sidebar';
+import { TooltipProvider } from '@/components/ui/tooltip';
 
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -634,18 +635,23 @@ export function PublicProfilePage() {
   // the brand logo moved into the app bar. Authenticated view keeps the full
   // sidebar shell (AppSidebar + sidebar trigger) exactly as before.
   if (!isAuthenticated) {
+    // No SidebarProvider here (anonymous has no sidebar), so its built-in
+    // TooltipProvider is gone too — the app-bar's ThemeModeToggle renders a
+    // Radix Tooltip that throws without a provider ancestor. Supply one.
     return (
-      <div className="flex h-svh min-w-0 flex-1 flex-col">
-        <ProfileTopBar
-          networkId={network}
-          item={isLive ? item : null}
-          isAuthenticated={false}
-          showLogo
-        />
-        <main id="main-content" className="flex-1 overflow-y-auto bg-muted/30">
-          {content}
-        </main>
-      </div>
+      <TooltipProvider>
+        <div className="flex h-svh min-w-0 flex-1 flex-col">
+          <ProfileTopBar
+            networkId={network}
+            item={isLive ? item : null}
+            isAuthenticated={false}
+            showLogo
+          />
+          <main id="main-content" className="flex-1 overflow-y-auto bg-muted/30">
+            {content}
+          </main>
+        </div>
+      </TooltipProvider>
     );
   }
 
