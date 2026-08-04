@@ -1,14 +1,29 @@
 import * as React from 'react';
-import { useParams, useSearchParams } from 'react-router-dom';
+import { useParams, useSearchParams, Link } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
+import { useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { AlertCircle, Copy, Loader2 } from 'lucide-react';
 import type { RJSFSchema } from '@rjsf/utils';
 import { useResolvedNetwork } from '@/hooks/use-network-config';
 import { useItemDetail } from '@/hooks/use-item-detail';
+import { useMyItems } from '@/hooks/use-my-items';
+import { useActiveProfile } from '@/hooks/use-active-profile';
+import { useAuth } from '@/contexts/auth-context';
 import { resolveCardFields, formatCardValue } from '@/components/cards/resolve-card-fields';
 import { buildProfileShareUrl, copyTextToClipboard } from '@/lib/share-profile';
+import { queryKeys } from '@/lib/query-keys';
 import type { Item } from '@/lib/item-api';
+import { AppSidebar } from '@/components/layout/sidebar';
+import { PortalHeader } from '@/components/layout/portal-header';
+import { ThemeModeToggle } from '@/components/layout/theme-mode-toggle';
+import { UserMenu } from '@/components/auth/user-menu';
+import {
+  Sidebar,
+  SidebarHeader,
+  SidebarProvider,
+  SidebarTrigger,
+} from '@/components/ui/sidebar';
 
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -21,19 +36,21 @@ function titleCaseDomain(id: string): string {
 }
 
 /**
- * Sticky top bar shared by every state on this page: a lightweight brand mark
- * (the resolved network's display name, or "Signals" before/without one) plus
- * the two share affordances. "Copy link" is disabled until a live item has
- * loaded — there is nothing shareable before then.
+ * Lean top bar shared by every state on this page — no search / view-toggle /
+ * filters / notifications, none of which are relevant on a single-profile
+ * page. Branding lives in the sidebar header (PortalHeader), so this is just
+ * the mobile sidebar trigger plus the share + explore + auth affordances.
+ * "Copy link" is disabled until a live item has loaded — there is nothing
+ * shareable before then.
  */
-function TopBar({
-  brandName,
+function ProfileTopBar({
   networkId,
   item,
+  isAuthenticated,
 }: {
-  brandName: string;
   networkId?: string;
   item: Item | null;
+  isAuthenticated: boolean;
 }) {
   const { t } = useTranslation();
 
@@ -45,18 +62,10 @@ function TopBar({
   };
 
   return (
-    <header className="sticky top-0 z-10 flex items-center justify-between gap-3 border-b border-border bg-background/90 px-5 py-3 backdrop-blur">
-      <div className="flex min-w-0 items-center gap-2">
-        <span
-          className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-xs font-bold text-white"
-          style={{ background: 'var(--primary)' }}
-          aria-hidden="true"
-        >
-          {brandName.charAt(0).toUpperCase()}
-        </span>
-        <span className="truncate text-sm font-semibold text-foreground">{brandName}</span>
-      </div>
-      <div className="flex shrink-0 items-center gap-2">
+    <header className="sticky top-0 z-10 flex items-center gap-3 border-b border-border bg-background/90 px-5 py-3 backdrop-blur">
+      <SidebarTrigger className="md:hidden" />
+      <div className="ml-auto flex shrink-0 items-center gap-2">
+        <ThemeModeToggle />
         <button
           type="button"
           onClick={onCopyLink}
@@ -71,8 +80,18 @@ function TopBar({
           className="inline-flex items-center rounded-lg px-3 py-1.5 text-sm font-semibold text-primary-foreground hover:opacity-90"
           style={{ background: 'var(--primary)' }}
         >
-          {t('public_profile.open_in_app', 'Open in Blue Dots')}
+          {t('public_profile.open_in_app', 'Explore more')}
         </a>
+        {isAuthenticated ? (
+          <UserMenu />
+        ) : (
+          <Link
+            to="/auth/login"
+            className="inline-flex items-center rounded-lg border border-border px-3 py-1.5 text-sm font-medium text-foreground hover:bg-muted"
+          >
+            {t('public_profile.sign_in', 'Sign in')}
+          </Link>
+        )}
       </div>
     </header>
   );
@@ -113,18 +132,28 @@ function UnavailableState({ networkId }: { networkId?: string }) {
 }
 
 /**
- * Public, unauthenticated single-profile view for a shared link
+ * Public, auth-aware single-profile view for a shared link
  * (`/public/:network/:domain/:itemType/:itemId`). Fetches the one profile via the
  * public, masked, jittered, live-only item endpoint (through `useItemDetail`)
  * and renders a schema-driven hero + details grid built entirely from the
  * resolved network's card config and item schema — no field name, section
  * title, or location is hardcoded here. Never exposes PII or a raw error:
  * empty/invalid/non-live → "unavailable"; transient failure → "try again".
+ *
+ * Rendered inside the same Signals app shell (sidebar + lean top bar) as every
+ * other page, in 3 auth-aware modes: anonymous (branding-only sidebar, no My
+ * Profiles), signed in viewing someone else's profile (full AppSidebar), and
+ * signed in viewing one's own shared link (full AppSidebar + an own-preview
+ * banner). Data is the masked public projection in every mode — no PII, and
+ * the route itself stays unauthenticated (no RequireAuth). Apply/Connect is a
+ * separate later stage and is intentionally not built here.
  */
 export function PublicProfilePage() {
   const { t } = useTranslation();
   const { network, domain, itemType, itemId } = useParams();
   const [searchParams, setSearchParams] = useSearchParams();
+  const queryClient = useQueryClient();
+  const { isAuthenticated } = useAuth();
 
   // Keep the theme aligned to the link's network (the theme provider reads the
   // `?network=` query param; our own links include it, but sync it defensively
@@ -145,7 +174,22 @@ export function PublicProfilePage() {
     keyValid ? { item_id: itemId!, item_domain: domain!, item_type: itemType! } : null,
   );
 
-  const brandName = net?.display_name || 'Signals';
+  const { data: myItems } = useMyItems(net ?? null);
+  const { activeProfileId, setActiveProfile } = useActiveProfile(net ?? null, myItems ?? []);
+  const isOwnProfile = isAuthenticated && !!itemId && (myItems ?? []).some((i) => i.item_id === itemId);
+
+  // Build domain → schema map for the sidebar's own-profile title resolution
+  // (first item_schema per domain), mirroring home-page's userSchemas.
+  const userSchemas = React.useMemo(() => {
+    if (!net) return {};
+    const map: Record<string, RJSFSchema> = {};
+    for (const d of net.domains) {
+      const schema = d.item_schemas ? Object.values(d.item_schemas)[0] : undefined;
+      if (schema) map[d.id] = schema;
+    }
+    return map;
+  }, [net]);
+
   // Live-only endpoint: a returned item is live. Guard defensively anyway.
   const isLive = Boolean(item && (!item.lifecycle_status || item.lifecycle_status === 'live'));
 
@@ -222,6 +266,17 @@ export function PublicProfilePage() {
           </div>
         </div>
 
+        {/* Own-profile preview banner — only shown to the signed-in owner of
+            this exact profile, so they know this is the masked view others see. */}
+        {isOwnProfile && (
+          <div className="mt-6 rounded-xl border border-primary/20 bg-primary/5 px-4 py-3 text-sm text-foreground">
+            {t(
+              'public_profile.own_preview',
+              'This is the public view others see when you share your profile — contact details stay hidden until someone connects.'
+            )}
+          </div>
+        )}
+
         {/* Details — every non-empty, non-masked resolved row, schema-driven end to end. */}
         <p className="mt-8 mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
           {t('public_profile.details', 'Details')}
@@ -275,10 +330,40 @@ export function PublicProfilePage() {
   }
 
   return (
-    <div className="min-h-dvh bg-muted/30">
-      <TopBar brandName={brandName} networkId={network} item={isLive ? item : null} />
-      {content}
-    </div>
+    <SidebarProvider>
+      {isAuthenticated ? (
+        <AppSidebar
+          networks={[]}
+          domains={[]}
+          selectedDomain={null}
+          onDomainSelect={() => {}}
+          myItems={myItems ?? []}
+          activeProfileId={activeProfileId}
+          onActiveProfileChange={setActiveProfile}
+          userSchemas={userSchemas}
+          selectedNetwork={network ?? undefined}
+          onProfilesChanged={() => {
+            if (net) queryClient.invalidateQueries({ queryKey: queryKeys.myItems(net.id) });
+          }}
+        />
+      ) : (
+        <Sidebar>
+          <SidebarHeader className="flex h-14 justify-center border-b px-4">
+            <PortalHeader />
+          </SidebarHeader>
+        </Sidebar>
+      )}
+      <div className="flex h-svh min-w-0 flex-1 flex-col">
+        <ProfileTopBar
+          networkId={network}
+          item={isLive ? item : null}
+          isAuthenticated={isAuthenticated}
+        />
+        <main id="main-content" className="flex-1 overflow-y-auto bg-muted/30">
+          {content}
+        </main>
+      </div>
+    </SidebarProvider>
   );
 }
 

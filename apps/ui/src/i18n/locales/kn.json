@@ -602,9 +602,11 @@
   "public_profile.error_body": "ನಾವು ಈ ಪ್ರೊಫೈಲ್ ಲೋಡ್ ಮಾಡಲಾಗಲಿಲ್ಲ. ದಯವಿಟ್ಟು ಮತ್ತೆ ಪ್ರಯತ್ನಿಸಿ.",
   "public_profile.retry": "ಮತ್ತೆ ಪ್ರಯತ್ನಿಸಿ",
   "public_profile.copy_link": "ಲಿಂಕ್ ನಕಲಿಸಿ",
-  "public_profile.open_in_app": "ಬ್ಲೂ ಡಾಟ್ಸ್‌ನಲ್ಲಿ ತೆರೆಯಿರಿ",
+  "public_profile.open_in_app": "ಇನ್ನಷ್ಟು ಅನ್ವೇಷಿಸಿ",
   "public_profile.explore": "ಬ್ಲೂ ಡಾಟ್ಸ್ ಅನ್ವೇಷಿಸಿ",
   "public_profile.contact_note": "ಸಂಪರ್ಕ ವಿವರಗಳನ್ನು ನೀವು ಬ್ಲೂ ಡಾಟ್ಸ್‌ನಲ್ಲಿ ಸಂಪರ್ಕ ಸಾಧಿಸಿದ ನಂತರವೇ ಹಂಚಿಕೊಳ್ಳಲಾಗುತ್ತದೆ.",
   "public_profile.details": "ವಿವರಗಳು",
+  "public_profile.sign_in": "ಸೈನ್ ಇನ್ ಮಾಡಿ",
+  "public_profile.own_preview": "ನಿಮ್ಮ ಪ್ರೊಫೈಲ್ ಹಂಚಿಕೊಂಡಾಗ ಇತರರು ನೋಡುವ ಸಾರ್ವಜನಿಕ ನೋಟ ಇದು — ಯಾರಾದರೂ ಸಂಪರ್ಕ ಸಾಧಿಸುವವರೆಗೆ ಸಂಪರ್ಕ ವಿವರಗಳು ಗೌಪ್ಯವಾಗಿರುತ್ತವೆ.",
   "a11y.skip_to_content": "ವಿಷಯಕ್ಕೆ ಹೋಗಿ"
 }
