@@ -66,7 +66,7 @@ The **My Actions** page lists the connect/apply requests a user has **received**
 ### 4.1 Per-profile scoping (D0) — the frame for everything
 
 - **Selection:** wrap `MyActionsPage` in `PageShell` and drive the rail with `useActiveProfile(network, liveItems)`. Because the store is shared, **the profile selected in the map/home view is already selected here** (and vice versa). Selecting a profile here updates the same store.
-- **Rail shows live-only:** pass `myItems.filter(i => i.lifecycle_status === 'live')` to `PageShell`. If the shared store points to a non-live profile (map left a paused/draft one selected), scope locally to the first live profile **without calling `setActiveProfile`** — so the shared selection is preserved for the map. If the user has **no live profile**, show an empty state ("Publish a profile to receive requests"); if exactly one, it's simply auto-selected.
+- **Rail shows live-only:** pass `myItems.filter(i => i.lifecycle_status === 'live')` to `PageShell`. If the shared store points to a non-live profile (map left a paused/draft one selected), scope locally to the first live profile **without calling `setActiveProfile`** — so the shared selection is preserved for the map. If the user has **no live profile**, no bespoke screen is needed — the rail's existing **"+ Create Profile"** affordance (the `My Profile(s)` section of `AppSidebar`) covers it, and the list area shows the existing empty state. If exactly one profile, it's auto-selected.
 - **Scoping the data:** thread `activeProfileId` into the action hooks as `item_id`. Server already maps `item_id`+`ownership_role` → `source_item_id` (initiated) / `target_item_id` (received). Add `item_id` to `actionKeys.list(...)` so per-profile caches don't collide.
 - **Server hardening:** add an explicit "is `item_id` owned by the caller?" check in `fetch_actions` returning `403`/`FORBIDDEN_ITEM` instead of today's silent empty list (defense-in-depth; UI only ever sends an id from `myItems`).
 - **Unambiguous reference point:** the selected profile *is* "my item", so distance and match-score comparisons across the list are apples-to-apples.
@@ -118,7 +118,7 @@ facets:        z.array(z.object({ field: z.string(), values: z.array(z.string())
 - **`action-api.ts`** — extend `FetchMyActionsQuery` (sort/facets/status[]/max_distance) and `Action` (`match_score?`, `distance_m?`); serialize arrays/facets like discover.
 - **New `components/actions/action-toolbar.tsx`** — status chips (multi), Sort dropdown (Match score / Newest / Oldest / Distance — **no Name**), Filters button + active-filter tokens + Clear all.
 - **New `components/actions/action-filters-sheet.tsx`** — slide-over (reuse `Sheet` + `map-filters-panel` patterns): Action type + schema-driven non-PII facets (`getEnumFilterFieldsForDomains` scoped to the **selected profile's** counterparty domain). **No distance filter** (D5 — distance is sort-only) and **no PII section** (D6).
-- **`action-list.tsx`** — drop client-side status filtering; render the infinite list + load-more sentinel; keep bulk selection.
+- **`action-list.tsx`** — drop client-side status filtering; render the infinite list + load-more sentinel; keep bulk selection and the **existing per-tab empty state** ("Nothing here yet / Requests … will appear here").
 - **`action-card.tsx`** — reuse the existing **`components/match-score/match-score-badge.tsx`** (`MatchScoreBadge`) so the score renders as a **percentage + band**, identical to the map/list cards (`domain-card`, `marker-popup-card`); it normalizes `score/10` and uses `formatScorePercentage`/`getMatchScoreBand` from `@/utils/match-score-cache`. Feed it the stored `match_score`; **hide the badge when null**. Add a distance line (km, one decimal, when `distance_m` present) and non-PII facet chips. Masking unchanged.
 - **Badge:** `usePendingActionsCount` stays **global** for the nav badge (v1); per-profile counts in the rail are **deferred**.
 - **i18n:** all new labels via `t()` in `locales/*.json` (en + hi).
@@ -220,11 +220,12 @@ facets:        z.array(z.object({ field: z.string(), values: z.array(z.string())
 - **Distance** → **sort only, no filter** (D5).
 - **PageShell chrome** → adopted (My Actions gains the standard TopBar + profile rail).
 
-**Confirm to fully close (small):**
-- **Null-score card** → show **"Not scored yet"** for v1. An on-demand **Compute** button is a **fast-follow** (display-only reuse of the discover `MatchScoreButton` → `/match-score/calculate` first; persisted-for-sort later). Confirm we defer the button.
-- **"No live profile" empty state** → proposed copy *"You don't have a published profile yet — publish one to send and receive requests,"* + a **"Go to My Profiles"** CTA. Confirm/tweak the copy + link target.
+- **Null-score card** → show **"Not scored yet"** for v1. The on-demand **Compute** button is a **fast-follow** (display-only reuse of the discover `MatchScoreButton` → `/match-score/calculate` first; persisted-for-sort later).
+- **Empty states** → **reuse existing**: the per-tab "Nothing here yet / Requests … will appear here" list state, and the sidebar's existing **"+ Create Profile"** affordance for users with no profile. No new "no live profile" screen or copy.
 
-**Defaults (unless told otherwise):** distance shown in km to one decimal.
+**Default:** distance shown in km to one decimal.
+
+Design is **locked** — no open questions remain.
 
 ---
 
