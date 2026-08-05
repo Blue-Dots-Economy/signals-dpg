@@ -23,6 +23,8 @@ import { U18GuardianFlow } from '@/components/consent/u18/u18-guardian-flow';
 import { useNetworkTheme } from '@/theme/theme-provider';
 import { getServedScope } from '@/lib/served-binding';
 import { evaluateDomainGate, resolveHeldDomains } from '@/lib/domain-gate';
+import { isGuardianConsentRequiredDomain } from '@/lib/guardian-consent';
+import { fetchNetworkConfig } from '@/lib/network-api';
 import { setStoredSignupDomain } from '@/lib/signup-domain';
 import { setUserDomains } from '@/lib/user-api';
 import type { ConsentAcceptBody, ConsentConfigDocument } from '@dpg/schemas';
@@ -127,9 +129,14 @@ export function OidcCallbackPage() {
         // already holds a profile in a domain this deployment does not serve —
         // they must use that domain's portal. Runs first, before any write, so a
         // wrong-portal user is turned away rather than partially onboarded.
+        // Reused by the U18 gate below, so a bound deployment resolves the
+        // user's held domains once per login rather than twice.
+        let heldDomains: string[] | null = null;
+
         const scope = getServedScope();
         if (scope) {
           const held = await resolveHeldDomains(scope.network);
+          heldDomains = held;
           const gate = evaluateDomainGate(held, scope.domains);
           if (!gate.allow) {
             await signOut();
@@ -201,12 +208,52 @@ export function OidcCallbackPage() {
         // real fail-closed control.
         try {
           const u18 = await getU18Status(themeId);
-          if (u18.isMinor && !u18.guardianVerified) {
-            setGuardianGate({
-              initialStep: u18.hasBirthData ? 'guardian' : 'dob',
-              returnTo: returnTo ?? '/',
-            });
-            return;
+          /**
+           * `isMinor` is `age !== null && isMinor(age)` server-side, so it is
+           * FALSE for a user whose age is unknown — which is every existing user
+           * onboarded by an aggregator (bulk upload / form link never captures
+           * one). Gating on `isMinor` alone therefore skipped exactly the
+           * population the `initialStep: 'dob'` branch above was written for,
+           * leaving that branch unreachable: those users fell through to the
+           * landing page and were then caught by home-page's `u18BirthUnresolved`
+           * backstop, which renders the DOB step on top of the map view.
+           *
+           * `!hasBirthData` is the missing condition. With it, DOB is captured
+           * here — before any navigation — which is what the OTP flow achieved
+           * via its pre-login `u18Precheck`.
+           */
+          const needsBirthData = !u18.hasBirthData;
+          const needsGuardian = u18.isMinor && !u18.guardianVerified;
+
+          if (needsBirthData || needsGuardian) {
+            /**
+             * Only gate inside a guardian-gated domain. A provider has no U18
+             * flow at all (`guardian_consent_required: false`), so asking them
+             * for a date of birth is pure friction.
+             *
+             * Keyed on the domains the user ALREADY holds a profile in, matching
+             * how home-page derives `wardDomain` from `myItem.item_domain` — a
+             * user with no profile yet has no domain to judge, and is gated later
+             * at profile creation once they pick one.
+             */
+            const held = heldDomains ?? (await resolveHeldDomains(themeId));
+            // No profile yet → no domain to judge, and nothing to fetch.
+            const inGatedDomain =
+              held.length > 0 &&
+              (await (async () => {
+                const network = await fetchNetworkConfig(themeId);
+                return held.some((domainId) =>
+                  isGuardianConsentRequiredDomain(network, domainId),
+                );
+              })());
+
+            if (inGatedDomain) {
+              setGuardianGate({
+                initialStep: u18.hasBirthData ? 'guardian' : 'dob',
+                returnTo: returnTo ?? '/',
+              });
+              return;
+            }
           }
         } catch {
           // fall through and land the user

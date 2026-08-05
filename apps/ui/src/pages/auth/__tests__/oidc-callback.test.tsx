@@ -58,6 +58,22 @@ vi.mock('@/lib/domain-gate', async (orig) => ({
   resolveHeldDomains: () => resolveHeldDomains(),
 }));
 
+/**
+ * The U18 gate is domain-scoped: only a domain with
+ * `guardian_consent_required` routes through the guardian flow, so a provider
+ * is never asked for a date of birth. `seeker` is gated here, `provider` is not.
+ */
+const fetchNetworkConfig = vi.fn(async () => ({
+  id: 'blue_dot',
+  domains: [
+    { id: 'seeker', guardian_consent_required: true },
+    { id: 'provider', guardian_consent_required: false },
+  ],
+}));
+vi.mock('@/lib/network-api', () => ({
+  fetchNetworkConfig: () => fetchNetworkConfig(),
+}));
+
 const takePendingSignupExtras =
   vi.fn<() => { domain: string; age?: number } | null>(() => null);
 vi.mock('@/lib/pending-signup-extras', () => ({
@@ -133,8 +149,12 @@ beforeEach(() => {
   takePendingConsent.mockReturnValue(null);
   setUserDomains.mockResolvedValue(['seeker']);
   submitU18Dob.mockResolvedValue({ ok: true });
+  // Default: a resolved ADULT, so tests that are not about the U18 gate never
+  // trip it. `hasBirthData: false` is now itself a gating condition (an unknown
+  // age must be captured), so leaving it as the default would hold every test
+  // on the guardian flow.
   getU18Status.mockResolvedValue({
-    hasBirthData: false,
+    hasBirthData: true,
     isMinor: false,
     guardianVerified: false,
   });
@@ -246,6 +266,12 @@ describe('G3 — durable domains/age write', () => {
 });
 
 describe('G4 — authenticated U18 guardian gate', () => {
+  // The gate keys on the domain of a profile the user already holds, mirroring
+  // how home-page derives `wardDomain` from `myItem.item_domain`.
+  beforeEach(() => {
+    resolveHeldDomains.mockResolvedValue(['seeker']);
+  });
+
   it('holds an unverified minor on the guardian flow instead of landing them', async () => {
     getU18Status.mockResolvedValue({
       hasBirthData: true,
@@ -274,6 +300,60 @@ describe('G4 — authenticated U18 guardian gate', () => {
 
     const flow = await screen.findByTestId('u18-guardian-flow');
     expect(flow.getAttribute('data-initial-step')).toBe('dob');
+  });
+
+  it('gates a user whose age is UNKNOWN, even though isMinor is false', async () => {
+    // The regression this guard exists for: `isMinor` is `age !== null &&
+    // isMinor(age)` server-side, so an aggregator-onboarded user (bulk upload /
+    // form link never captures an age) reports isMinor:false. Gating on isMinor
+    // alone let them land, and home-page's backstop then rendered the DOB step
+    // on top of the map view.
+    getU18Status.mockResolvedValue({
+      hasBirthData: false,
+      isMinor: false,
+      guardianVerified: false,
+    });
+
+    renderPage();
+
+    const flow = await screen.findByTestId('u18-guardian-flow');
+    expect(flow.getAttribute('data-initial-step')).toBe('dob');
+    expect(navigate).not.toHaveBeenCalledWith('/dashboard', { replace: true });
+  });
+
+  it('never asks a provider for a date of birth', async () => {
+    // `provider` has guardian_consent_required: false — no U18 flow applies, so
+    // an unknown age is not a reason to hold them.
+    resolveHeldDomains.mockResolvedValue(['provider']);
+    getU18Status.mockResolvedValue({
+      hasBirthData: false,
+      isMinor: false,
+      guardianVerified: false,
+    });
+
+    renderPage();
+
+    await waitFor(() =>
+      expect(navigate).toHaveBeenCalledWith('/dashboard', { replace: true })
+    );
+    expect(screen.queryByTestId('u18-guardian-flow')).toBeNull();
+  });
+
+  it('does not gate a user with no profile yet — there is no domain to judge', async () => {
+    // Gated later, at profile creation, once they pick a domain.
+    resolveHeldDomains.mockResolvedValue([]);
+    getU18Status.mockResolvedValue({
+      hasBirthData: false,
+      isMinor: false,
+      guardianVerified: false,
+    });
+
+    renderPage();
+
+    await waitFor(() =>
+      expect(navigate).toHaveBeenCalledWith('/dashboard', { replace: true })
+    );
+    expect(fetchNetworkConfig).not.toHaveBeenCalled();
   });
 
   it('does not gate a minor whose guardian is already verified', async () => {
