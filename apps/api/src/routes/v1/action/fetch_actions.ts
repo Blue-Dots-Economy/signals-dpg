@@ -81,27 +81,6 @@ const fetch_actions_handler = async (
     offset,
   } = request.query;
 
-  // Ownership guard (#439 Task 6, defense-in-depth): the owner filter below
-  // already fails closed to an empty page for a foreign item_id, but that's
-  // silent — a caller probing with someone else's item_id deserves a loud,
-  // explicit rejection instead of an empty-but-200 response. A missing
-  // item_id and a foreign one return the identical 403 body — no existence
-  // leak. Mirrors the ownership check in perform_action.ts
-  // (`sourceItemSnapshot.created_by === actor.effective_user_id`).
-  if (item_id) {
-    const [ownedItem] = await db
-      .select({ created_by: items.created_by })
-      .from(items)
-      .where(eq(items.item_id, item_id))
-      .limit(1);
-    if (!ownedItem || ownedItem.created_by !== userId) {
-      return reply.code(403).send({
-        error: 'FORBIDDEN_ITEM',
-        message: 'item_id is not owned by the caller',
-      });
-    }
-  }
-
   // Note: no partition pruning here (deliberate). This is an owner-scoped
   // fetch across the caller's own actions, not a single-network browse — there
   // is no one network to prune on, so we rely on the owner+status indexes
@@ -156,6 +135,30 @@ const fetch_actions_handler = async (
         : [desc(item_actions.updated_at), desc(item_actions.created_at)]; // 'recent' default (and 'distance' fallthrough)
 
   try {
+    // Ownership guard (#439 Task 6, defense-in-depth): the owner filter below
+    // already fails closed to an empty page for a foreign item_id, but that's
+    // silent — a caller probing with someone else's item_id deserves a loud,
+    // explicit rejection instead of an empty-but-200 response. A missing
+    // item_id and a foreign one return the identical 403 body — no existence
+    // leak. Mirrors the ownership check in perform_action.ts
+    // (`sourceItemSnapshot.created_by === actor.effective_user_id`). Runs
+    // inside this try (not before it) so a DB error from this query hits the
+    // same structured-500 + logged catch as the count/rows queries below,
+    // rather than rejecting unhandled (routes-never-throw).
+    if (item_id) {
+      const [ownedItem] = await db
+        .select({ created_by: items.created_by })
+        .from(items)
+        .where(eq(items.item_id, item_id))
+        .limit(1);
+      if (!ownedItem || ownedItem.created_by !== userId) {
+        return reply.code(403).send({
+          error: 'FORBIDDEN_ITEM',
+          message: 'item_id is not owned by the caller',
+        });
+      }
+    }
+
     const [{ count }] = await db
       .select({ count: sql<number>`count(*)` })
       .from(item_actions)
