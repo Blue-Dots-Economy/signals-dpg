@@ -115,7 +115,7 @@ export function ActionToolbar({
         {/* Filters button */}
         <Button variant="outline" size="sm" data-testid="filters-button" onClick={onOpenFilters}>
           <SlidersHorizontal className="h-3.5 w-3.5" />
-          {t('actions.filters')}
+          {t('filters.title', 'Filters')}
           {hasFacets && (
             <span
               data-testid="filters-count"
@@ -139,7 +139,7 @@ export function ActionToolbar({
               <button
                 type="button"
                 data-testid={`facet-remove-${facet.field}-${facet.value}`}
-                aria-label={t('actions.remove_filter', { defaultValue: 'Remove filter' })}
+                aria-label={t('actions.remove_filter', 'Remove filter')}
                 onClick={() => onRemoveFacet(facet.field, facet.value)}
                 className="ml-0.5 rounded-full p-0.5 hover:bg-primary/20"
               >
@@ -153,7 +153,7 @@ export function ActionToolbar({
             onClick={onClearFilters}
             className="font-semibold text-primary hover:underline"
           >
-            {t('actions.clear_all')}
+            {t('filters.clear_all', 'Clear all')}
           </button>
         </div>
       )}
