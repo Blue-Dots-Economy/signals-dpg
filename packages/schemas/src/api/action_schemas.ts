@@ -101,6 +101,15 @@ export const ActionSortKeySchema = z.enum(['recent', 'oldest', 'match_score', 'd
 
 const FetchOwnedRecordsQuerySchemaBase = z.object({
   action_id: z.uuid().optional(),
+  action_type: z.string().min(1).optional(),
+  action_status: z.string().min(1).optional(),
+  item_id: z.uuid().optional(),
+  ownership_role: ActionOwnershipRoleSchema.default('all'),
+  limit: z.coerce.number().int().min(1).max(100).default(20),
+  offset: z.coerce.number().int().min(0).default(0),
+});
+
+export const FetchOwnedActionsQuerySchema = FetchOwnedRecordsQuerySchemaBase.extend({
   action_type: z
     .union([z.string().min(1), z.array(z.string().min(1))])
     .optional()
@@ -109,17 +118,11 @@ const FetchOwnedRecordsQuerySchemaBase = z.object({
     .union([z.string().min(1), z.array(z.string().min(1))])
     .optional()
     .transform(toStringArray),
-  item_id: z.uuid().optional(),
-  ownership_role: ActionOwnershipRoleSchema.default('all'),
   sort: ActionSortKeySchema.default('recent'),
   facets: z
     .array(z.object({ field: z.string().min(1), values: z.array(z.string()).min(1) }))
     .optional(),
-  limit: z.coerce.number().int().min(1).max(100).default(20),
-  offset: z.coerce.number().int().min(0).default(0),
 });
-
-export const FetchOwnedActionsQuerySchema = FetchOwnedRecordsQuerySchemaBase;
 
 export const FetchOwnedEventsQuerySchema = FetchOwnedRecordsQuerySchemaBase.extend({
   update_count: z.coerce.number().int().nonnegative().optional(),
