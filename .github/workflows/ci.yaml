@@ -63,6 +63,32 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm -r test
 
+  sonar:
+    runs-on: ubuntu-latest
+    # Runs the full workspace test suite with coverage enabled, then feeds
+    # every package's lcov.info to the SonarCloud scan (paths declared in
+    # sonar-project.properties). continue-on-error on the coverage run: a
+    # red test here is already caught by the `test` job above — we still
+    # want the scan to run with whatever coverage numbers exist so the
+    # SonarCloud dashboard doesn't go stale on an unrelated flaky test.
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 11.1.2
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm -r run test -- --coverage
+        continue-on-error: true
+      - uses: SonarSource/sonarqube-scan-action@v5
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+
   dep-cruise:
     runs-on: ubuntu-latest
     continue-on-error: true

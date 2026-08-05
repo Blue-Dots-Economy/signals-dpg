@@ -23,5 +23,12 @@ export default defineConfig({
     // Pairs with the RTL asyncUtilTimeout bump in setup.ts.
     testTimeout: 15000,
     hookTimeout: 15000,
+    coverage: {
+      provider: 'v8',
+      reporter: ['text', 'lcov'],
+      reportsDirectory: './coverage',
+      include: ['src/**/*.{ts,tsx}'],
+      exclude: ['src/**/*.test.{ts,tsx}', 'src/test/**'],
+    },
   },
 });

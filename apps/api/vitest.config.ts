@@ -7,6 +7,13 @@ export default defineConfig({
     environment: 'node',
     globals: false,
     setupFiles: ['./vitest.setup.ts'],
+    coverage: {
+      provider: 'v8',
+      reporter: ['text', 'lcov'],
+      reportsDirectory: './coverage',
+      include: ['src/**/*.ts', 'plugins/**/*.ts'],
+      exclude: ['src/**/__tests__/**', 'plugins/**/__tests__/**'],
+    },
   },
   resolve: {
     alias: {

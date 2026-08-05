@@ -4,6 +4,11 @@ export default defineConfig({
   test: {
     include: ['src/**/__tests__/**/*.test.ts'],
     environment: 'node',
+    coverage: {
+      provider: 'v8',
+      reporter: ['text', 'lcov'],
+      reportsDirectory: './coverage',
+    },
   },
   resolve: {
     alias: {
