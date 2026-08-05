@@ -10,11 +10,19 @@ import { useNetworkConfigs, useResolvedNetwork } from '@/hooks/use-network-confi
 import { useCardSelection } from '@/hooks/use-card-selection';
 import { getServedScope } from '@/lib/served-binding';
 import { queryKeys } from '@/lib/query-keys';
+import { humanizeKey, getEnumFilterFieldsForDomains } from '@/lib/enum-filters';
 import { PageShell } from '@/components/layout/page-shell';
 import { ActionList } from '@/components/actions/action-list';
 import { ActionStatusUpdater } from '@/components/actions/action-status-updater';
 import { BulkStatusDialog } from '@/components/actions/bulk-status-dialog';
-import { Button } from '@/components/ui/button';
+import {
+  ACTION_STATUS_FILTERS,
+  FILTER_STATUSES,
+  type ActionStatusFilter,
+  type ActionSort,
+  type ActiveFacet,
+} from '@/components/actions/action-toolbar';
+import { ActionFiltersSheet, type ActionTypeFilter } from '@/components/actions/action-filters-sheet';
 import type { Action, FetchMyActionsQuery } from '@/lib/action-api';
 
 type TabValue = 'initiated' | 'received';
@@ -47,6 +55,7 @@ export function MyActionsPage() {
   const selection = useCardSelection();
   const [bulkOpen, setBulkOpen] = React.useState(false);
   const [bulkStatus, setBulkStatus] = React.useState<string>('');
+  const [filtersOpen, setFiltersOpen] = React.useState(false);
 
   // ── Network resolution (mirrors profile-form-page.tsx) ──────────────────
   const configuredNetworkIds = React.useMemo(
@@ -181,39 +190,171 @@ export function MyActionsPage() {
     return map;
   }, [network]);
 
-  // ── Filter/sort state (#439) — sourced straight from the URL, which is the
-  // single source of truth here. No control writes these yet (the toolbar/
-  // filters-sheet land in later tasks of this epic); once they do, they'll
-  // drive them via the same `setSearchParams` pattern used above for
-  // `profile`/`network`, and this page won't need to change.
-  const statusParam = searchParams.get('status');
-  const status = React.useMemo<FetchMyActionsQuery['action_status']>(
-    () => (statusParam ? statusParam.split(',').map((s) => s.trim()).filter(Boolean) : undefined),
-    [statusParam],
-  );
+  // ── Filter/sort state (#439 Task 13) — the URL is the single source of
+  // truth; every control below (`ActionToolbar`/`ActionFiltersSheet`) reads
+  // its value from here and writes back via `setSearchParams`, same pattern
+  // as `profile`/`network` above.
+
+  // Status: the toolbar works in CHIP terms (All/Pending/Accepted/Rejected),
+  // stored in the URL as `?status=<Chip>` (absent = All). `FILTER_STATUSES`
+  // (shared with `action-toolbar.tsx`) maps the chip to the raw
+  // `action_status` values the hook/API expect.
+  const statusChipParam = searchParams.get('status');
+  const statusChip: ActionStatusFilter = (ACTION_STATUS_FILTERS as readonly string[]).includes(
+    statusChipParam ?? '',
+  )
+    ? (statusChipParam as ActionStatusFilter)
+    : 'All';
+  const status = FILTER_STATUSES[statusChip] ?? undefined;
+
   const sortParam = searchParams.get('sort');
   const sort: FetchMyActionsQuery['sort'] = (
     ACTION_SORT_VALUES as readonly string[]
   ).includes(sortParam ?? '')
     ? (sortParam as FetchMyActionsQuery['sort'])
     : undefined;
+  // The toolbar always needs a concrete value to render as "active" — the
+  // hook itself defaults to 'recent' server-side when `sort` is undefined, so
+  // mirror that default here rather than writing it into the URL up front.
+  const toolbarSort: ActionSort = sort ?? 'recent';
+
   // Facet selections, `?f_<field>=value1,value2` — same URL convention as the
-  // map/discover facet filter (home-page.tsx's `mapSelectedFields`).
-  const facets = React.useMemo<FetchMyActionsQuery['facets']>(() => {
-    const result: Array<{ field: string; values: string[] }> = [];
+  // map/discover facet filter (home-page.tsx's `mapSelectedFields`). Kept as
+  // a `Record<field, values[]>` (the shape `ActionFiltersSheet.selected`
+  // wants) and derived into the hook's `Array<{field,values}>` shape below.
+  const selectedFacets = React.useMemo<Record<string, string[]>>(() => {
+    const result: Record<string, string[]> = {};
     for (const [param, value] of searchParams.entries()) {
       if (!param.startsWith('f_')) continue;
       const field = param.slice(2);
       if (!field) continue;
       const values = value.split(',').map((v) => decodeURIComponent(v.trim())).filter(Boolean);
-      if (values.length > 0) result.push({ field, values });
+      if (values.length > 0) result[field] = values;
     }
     return result;
   }, [searchParams]);
+  const facets = React.useMemo<FetchMyActionsQuery['facets']>(
+    () => Object.entries(selectedFacets).map(([field, values]) => ({ field, values })),
+    [selectedFacets],
+  );
+
+  // Action type — Connect/Apply — its own `?action_type=` param (distinct
+  // from the schema-derived `facets`, see `ActionFiltersSheetProps.selected`'s
+  // doc comment for why).
+  const actionTypeParam = searchParams.get('action_type');
+  const actionTypes = React.useMemo<ActionTypeFilter[]>(() => {
+    if (!actionTypeParam) return [];
+    return actionTypeParam
+      .split(',')
+      .map((v) => v.trim())
+      .filter((v): v is ActionTypeFilter => v === 'connect' || v === 'apply');
+  }, [actionTypeParam]);
+  const actionType: FetchMyActionsQuery['action_type'] = actionTypes.length > 0 ? actionTypes : undefined;
+
+  // ── Filters-sheet domains (#439 Task 13) — mirrors home-page.tsx's
+  // `filterFieldDomains`: the counterparty domain(s), i.e. every visible
+  // domain except the active profile's own, falling back to all domains when
+  // that would leave nothing (e.g. a self-only interaction domain).
+  const scopedItem = React.useMemo(
+    () => liveItems.find((i) => i.item_id === scopedId) ?? null,
+    [liveItems, scopedId],
+  );
+  const filterDomains = React.useMemo(() => {
+    if (!network) return [];
+    const counterparts = network.domains.filter((d) => d.id !== scopedItem?.item_domain);
+    return counterparts.length > 0 ? counterparts : network.domains;
+  }, [network, scopedItem]);
+  const enumFilterFields = React.useMemo(
+    () => getEnumFilterFieldsForDomains(filterDomains),
+    [filterDomains],
+  );
+  const facetLabelFor = React.useCallback(
+    (field: string) => enumFilterFields.find((f) => f.key === field)?.label ?? humanizeKey(field),
+    [enumFilterFields],
+  );
+  const activeFacetsForToolbar = React.useMemo<ActiveFacet[]>(() => {
+    const result: ActiveFacet[] = [];
+    for (const [field, values] of Object.entries(selectedFacets)) {
+      const label = facetLabelFor(field);
+      for (const value of values) result.push({ field, label, value });
+    }
+    return result;
+  }, [selectedFacets, facetLabelFor]);
+
+  // ── Write-path handlers — every control change round-trips through the URL
+  // (never local component state), so the filter/sort state stays shareable
+  // and a page refresh reproduces the same view.
+  const handleStatusChange = React.useCallback(
+    (chip: ActionStatusFilter) => {
+      selection.exitSelect();
+      setSearchParams((prev) => {
+        if (chip === 'All') prev.delete('status');
+        else prev.set('status', chip);
+        return prev;
+      });
+    },
+    [setSearchParams, selection],
+  );
+
+  const handleSortChange = React.useCallback(
+    (nextSort: ActionSort) => {
+      setSearchParams((prev) => {
+        prev.set('sort', nextSort);
+        return prev;
+      });
+    },
+    [setSearchParams],
+  );
+
+  const handleFacetsChange = React.useCallback(
+    (next: Record<string, string[]>) => {
+      setSearchParams((prev) => {
+        for (const key of Array.from(prev.keys())) {
+          if (key.startsWith('f_')) prev.delete(key);
+        }
+        for (const [field, values] of Object.entries(next)) {
+          if (values.length === 0) continue;
+          prev.set(`f_${field}`, values.map(encodeURIComponent).join(','));
+        }
+        return prev;
+      });
+    },
+    [setSearchParams],
+  );
+
+  const handleRemoveFacet = React.useCallback(
+    (field: string, value: string) => {
+      const current = selectedFacets[field] ?? [];
+      const next = { ...selectedFacets, [field]: current.filter((v) => v !== value) };
+      handleFacetsChange(next);
+    },
+    [selectedFacets, handleFacetsChange],
+  );
+
+  const handleActionTypesChange = React.useCallback(
+    (next: ActionTypeFilter[]) => {
+      setSearchParams((prev) => {
+        if (next.length === 0) prev.delete('action_type');
+        else prev.set('action_type', next.join(','));
+        return prev;
+      });
+    },
+    [setSearchParams],
+  );
+
+  const handleClearFilters = React.useCallback(() => {
+    setSearchParams((prev) => {
+      for (const key of Array.from(prev.keys())) {
+        if (key.startsWith('f_')) prev.delete(key);
+      }
+      prev.delete('action_type');
+      return prev;
+    });
+  }, [setSearchParams]);
 
   // ── Actions data (#439: scoped to `scopedId`, paged via useInfiniteQuery) ─
-  const initiatedQuery = useInitiatedActions(scopedId, { status, sort, facets });
-  const receivedQuery = useReceivedActions(scopedId, { status, sort, facets });
+  const initiatedQuery = useInitiatedActions(scopedId, { status, sort, facets, type: actionType });
+  const receivedQuery = useReceivedActions(scopedId, { status, sort, facets, type: actionType });
 
   const handleTabChange = (tab: TabValue) => {
     selection.exitSelect();
@@ -300,25 +441,29 @@ export function MyActionsPage() {
             setBulkStatus(targetStatus);
             setBulkOpen(true);
           }}
+          toolbarStatus={statusChip}
+          toolbarSort={toolbarSort}
+          activeFacets={activeFacetsForToolbar}
+          onStatusChange={handleStatusChange}
+          onSortChange={handleSortChange}
+          onOpenFilters={() => setFiltersOpen(true)}
+          onRemoveFacet={handleRemoveFacet}
+          onClearFilters={handleClearFilters}
+          hasNextPage={activeQuery.hasNextPage}
+          isFetchingNextPage={activeQuery.isFetchingNextPage}
+          onLoadMore={() => activeQuery.fetchNextPage()}
         />
-        {/* Reachable pagination for the now page-sized (20/request) queries —
-            a plain "Load more" for now; ActionList's own infinite-scroll UI
-            (dropping this button in favor of a scroll sentinel) is a later
-            task in this epic. */}
-        {activeQuery.hasNextPage && (
-          <div className="mt-6 flex justify-center">
-            <Button
-              variant="outline"
-              onClick={() => activeQuery.fetchNextPage()}
-              disabled={activeQuery.isFetchingNextPage}
-            >
-              {activeQuery.isFetchingNextPage
-                ? t('actions.loading_more')
-                : t('actions.load_more')}
-            </Button>
-          </div>
-        )}
       </div>
+
+      <ActionFiltersSheet
+        open={filtersOpen}
+        domains={filterDomains}
+        selected={selectedFacets}
+        onChange={handleFacetsChange}
+        actionTypes={actionTypes}
+        onActionTypesChange={handleActionTypesChange}
+        onClose={() => setFiltersOpen(false)}
+      />
 
       <ActionStatusUpdater
         action={selectedAction}

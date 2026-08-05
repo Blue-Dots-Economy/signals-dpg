@@ -31,6 +31,24 @@ export interface ActionToolbarProps {
 
 const STATUSES: ActionStatusFilter[] = ['All', 'Pending', 'Accepted', 'Rejected'];
 
+/** All status chip values, exported so callers can validate a URL-sourced chip. */
+export const ACTION_STATUS_FILTERS: ActionStatusFilter[] = STATUSES;
+
+/**
+ * Maps a status chip to the raw `action_status` values it should match on the
+ * server (`action_status` is an OR'd list — see `FetchMyActionsQuery`).
+ * `All` → `null` means "don't filter by status at all". Relocated here from
+ * `action-list.tsx` (#439 Task 9) so both the page (which builds the hook's
+ * query params from the chip) and any other status-chip consumer share one
+ * definition instead of duplicating it.
+ */
+export const FILTER_STATUSES: Record<ActionStatusFilter, string[] | null> = {
+  All: null,
+  Pending: ['created', 'pending'],
+  Accepted: ['accepted', 'completed'],
+  Rejected: ['rejected', 'cancelled'],
+};
+
 const SORT_OPTIONS: Array<{ value: ActionSort; key: string }> = [
   { value: 'match_score', key: 'actions.sort_match_score' },
   { value: 'recent', key: 'actions.sort_recent' },
