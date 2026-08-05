@@ -50,15 +50,19 @@ type ActionItemRef = z.infer<
 
 /**
  * Shape returned by `fetchLocalItemSnapshot` — carries item content
- * (`item_schema_url`, decrypted+merged `private_state`, `item_locations`)
- * but not the network/domain/type/id/instance-url identity, which lives on
- * the request body's item ref instead. Builds the full `ItemSnapshotLike`
- * the match-score service requires by merging the two.
+ * (`item_schema_url`, public `item_state`, decrypted+merged `private_state`,
+ * `item_locations`) but not the network/domain/type/id/instance-url
+ * identity, which lives on the request body's item ref instead. Builds the
+ * full `ItemSnapshotLike` the match-score service requires by merging the
+ * two. Uses the public `item_state` (never `private_state`) so decrypted PII
+ * never flows into the match-score input, matching the discover match-score
+ * flow.
  */
 function toMatchScoreSnapshot(
   ref: ActionItemRef,
   snapshot: {
     item_schema_url: string;
+    item_state: Record<string, unknown>;
     private_state: Record<string, unknown>;
     item_locations?: Array<{ lat: number; lng: number }> | null;
   } | null
@@ -71,7 +75,7 @@ function toMatchScoreSnapshot(
     item_id: ref.item_id,
     item_instance_url: ref.item_instance_url,
     item_schema_url: snapshot.item_schema_url,
-    item_state: snapshot.private_state,
+    item_state: snapshot.item_state,
     item_locations: snapshot.item_locations,
   };
 }

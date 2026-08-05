@@ -54,8 +54,16 @@ function decodeSnapshot<
     item_state: row.item_state as Record<string, unknown>,
     item_private_state: row.item_private_state,
   });
-  const { item_state: _drop, item_private_state: _drop2, ...rest } = row;
-  return { ...rest, private_state: mergedState };
+  const {
+    item_state: publicItemState,
+    item_private_state: _drop2,
+    ...rest
+  } = row;
+  return {
+    ...rest,
+    item_state: publicItemState as Record<string, unknown>,
+    private_state: mergedState,
+  };
 }
 
 export async function fetchLocalItemSnapshot(
