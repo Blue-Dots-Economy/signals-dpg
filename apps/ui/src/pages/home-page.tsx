@@ -602,7 +602,7 @@ export function HomePage() {
   // disabled: at most one open action per pair (#370/#422). The server cap is
   // the real guard; this just pre-empts the click. "Open" = not a terminal
   // status; the same terminal set the backend frees a pair on.
-  const { data: myActionsData } = useActions('all', { enabled: !!user });
+  const { data: myActionsData } = useActions('all', { enabled: !!user, limit: 100 });
   const openActionItemIds = React.useMemo(
     () => computeOpenActionItemIds(myActionsData?.actions ?? [], activeProfileId),
     [myActionsData, activeProfileId],
