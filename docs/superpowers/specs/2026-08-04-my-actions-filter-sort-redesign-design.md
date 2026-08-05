@@ -26,8 +26,8 @@ The **My Actions** page lists the connect/apply requests a user has **received**
 | D2 | Match score | **Compute at connect, store on the row** | Nullable `item_actions.match_score`, computed async on the write path; read as a plain column. No per-fetch scoring. |
 | D3 | Filter/sort placement | **Full server-side, backward-compatible** | New optional params on `/action/fetch`; existing callers unaffected. |
 | D4 | Non-PII profile facets | **Join at read (no denormalization)** | `items.item_state` is already loaded in the fetch; filter via `facet_guard`. No `item_state` copy on the action row. |
-| D5 | Distance | **Item-to-item, live at read** (defer "my location") | Compute from both items' `item_locations` at read; no stored column, no geolocation. |
-| D6 | PII in filter/sort | **Dropped entirely** | PII (name/mobile/email/address) is not filterable/sortable. Masking still gates **display** (unchanged). Distance stays (jittered/stored coords, non-PII). |
+| D5 | Distance | **Item-to-item, live at read — sort only (no distance filter)** | Compute from both items' `item_locations` at read; no stored column, no geolocation, no range filter. |
+| D6 | PII in filter/sort | **Dropped entirely** | PII (name/mobile/email/address) is not filterable/sortable. Masking still gates **display** (unchanged). Distance stays as a **sort** option only (jittered/stored coords, non-PII). |
 | D7 | Pagination | **Load-more / infinite** | `useInfiniteQuery`; exact per-profile counts. |
 | — | UI layout | **Layout A inside `PageShell`** | Left profile rail (live-only) + top toolbar (chips + Sort + Filters) + slide-over Filters sheet; redesigned card with score/distance/facet chips. |
 
@@ -75,6 +75,7 @@ The **My Actions** page lists the connect/apply requests a user has **received**
 
 - **Column:** add nullable `item_actions.match_score` (real/numeric).
 - **Where + when:** in `perform_network_action_handler`, **after** the action row commits, **fire-and-forget** (mirroring `dispatchActionNotifications`): build `itemA`/`itemB` from the two snapshots' `item_state` + primary `item_locations`, call `getMatchScoreClient().calculate(...)`, then `UPDATE item_actions SET match_score = … WHERE partition_network/action_type/action_id`. Connect latency is unaffected; a brand-new request briefly shows no score.
+- **Create-time only:** the score is computed **exactly once, at action create (connect)**, for **all interaction types**. `update_action_status` (accept / reject / cancel / complete) must **never** (re)compute or clear it — it's a create-time property of the pairing.
 - **Degrade / caveats:** compute only when **both** snapshots are available (source is local — the single-instance norm). Cross-instance source, or a relevance-service error/timeout, leaves `match_score = null` (logged). Score is a **connect-time snapshot**; recompute-on-profile-edit is **out of scope** for v1.
 - **Read:** My Actions reads the column directly; sort-by-score is a plain `ORDER BY match_score DESC NULLS LAST, updated_at DESC`.
 - **Backfill:** one-off script over existing **open** (non-terminal) actions where both items are local+live, populating `match_score`. (§11.)
@@ -89,9 +90,9 @@ const ActionSortKeySchema = z.enum(['recent','oldest','match_score','distance'])
 // widen the existing single-value filters to multi-select:
 action_status: z.union([z.string(), z.array(z.string())]).optional().transform(toStringArray),
 action_type:   z.union([z.string(), z.array(z.string())]).optional().transform(toStringArray),
-sort:          ActionSortKeySchema.default('recent'),
+sort:          ActionSortKeySchema.default('recent'),   // 'distance' = sort only
 facets:        z.array(z.object({ field: z.string(), values: z.array(z.string()).min(1) })).optional(),
-max_distance_m: z.coerce.number().int().positive().optional(),
+// NO max_distance_m — distance is a sort key only, not a filter (D5).
 // item_id (already present) carries the selected profile.
 ```
 
@@ -101,7 +102,7 @@ max_distance_m: z.coerce.number().int().positive().optional(),
 2. **SQL WHERE** — extend `conditions[]`: `action_status` → `inArray`, `action_type` → `inArray`, and add `partition_network` for partition pruning where derivable.
 3. **Choose the read path:**
    - **Fast path (pure SQL)** when `sort ∈ {recent, oldest, match_score}` **and** no `facets` **and** no `max_distance_m`: `ORDER BY` (score uses `NULLS LAST`) + `LIMIT/OFFSET`; `count(*)` exact. (`match_score` is a column, so score sort needs no enrichment.)
-   - **Enriched path** when a **facet filter or distance filter/sort** is present: load **all** rows matching the SQL WHERE (bounded — one profile's actions, further capped by the per-pair cap), batch-load both endpoints' `item_state` + `item_locations` (extend the existing `resolveItemNames` query to also select `item_locations`), then in memory: apply `facet_guard`-allow-listed facet filters against the counterparty `item_state`, compute item-to-item distance via `nearestDistanceMeters` (multi-location → nearest pairwise; missing location → `null`, excluded by `max_distance_m`, sorts last), sort, and slice `limit/offset`. `count` = filtered length.
+   - **Enriched path** when a **facet filter or `sort=distance`** is present: load **all** rows matching the SQL WHERE (bounded — one profile's actions, further capped by the per-pair cap), batch-load both endpoints' `item_state` + `item_locations` (extend the existing `resolveItemNames` query to also select `item_locations`), then in memory: apply `facet_guard`-allow-listed facet filters against the counterparty `item_state`, and for `sort=distance` compute item-to-item distance via `nearestDistanceMeters` (multi-location → nearest pairwise; missing location → `null`, sorts last), sort, and slice `limit/offset`. `count` = filtered length.
 4. **Display enrichment (always, page-sized):** compute `distance_m` and gather non-PII facet chips for the returned page from the already-loaded `item_state`/`item_locations`, regardless of path — so cards always show them even when not sorting/filtering by them.
 5. **PII masking (unchanged):** existing `revealStatusesByAction` + `lifecycle_status==='live'` fail-closed gate governs displayed names. **No PII is used for filter/sort** anywhere, so no decryption enters the query path.
 6. **Response:** `{ meta, actions }`; add `meta.applied` (echo of honoured sort/filters) + exact `meta.total`; add optional `match_score:number|null` and `distance_m:number|null` to `OwnedItemActionSchema`.
@@ -116,7 +117,7 @@ max_distance_m: z.coerce.number().int().positive().optional(),
 - **`use-actions.ts`** — accept `itemId` + the new params; thread into `FetchMyActionsQuery`; convert received/initiated to **`useInfiniteQuery`** (page = `offset`); add `item_id`/params to the query key. Keep the 60s refresh (refetch page 0) so async scores/new requests appear.
 - **`action-api.ts`** — extend `FetchMyActionsQuery` (sort/facets/status[]/max_distance) and `Action` (`match_score?`, `distance_m?`); serialize arrays/facets like discover.
 - **New `components/actions/action-toolbar.tsx`** — status chips (multi), Sort dropdown (Match score / Newest / Oldest / Distance — **no Name**), Filters button + active-filter tokens + Clear all.
-- **New `components/actions/action-filters-sheet.tsx`** — slide-over (reuse `Sheet` + `map-filters-panel` patterns): Action type, schema-driven non-PII facets (`getEnumFilterFieldsForDomains` scoped to the **selected profile's** counterparty domain), and a distance range. **No PII section** (D6).
+- **New `components/actions/action-filters-sheet.tsx`** — slide-over (reuse `Sheet` + `map-filters-panel` patterns): Action type + schema-driven non-PII facets (`getEnumFilterFieldsForDomains` scoped to the **selected profile's** counterparty domain). **No distance filter** (D5 — distance is sort-only) and **no PII section** (D6).
 - **`action-list.tsx`** — drop client-side status filtering; render the infinite list + load-more sentinel; keep bulk selection.
 - **`action-card.tsx`** — reuse the existing **`components/match-score/match-score-badge.tsx`** (`MatchScoreBadge`) so the score renders as a **percentage + band**, identical to the map/list cards (`domain-card`, `marker-popup-card`); it normalizes `score/10` and uses `formatScorePercentage`/`getMatchScoreBand` from `@/utils/match-score-cache`. Feed it the stored `match_score`; **hide the badge when null**. Add a distance line (km, one decimal, when `distance_m` present) and non-PII facet chips. Masking unchanged.
 - **Badge:** `usePendingActionsCount` stays **global** for the nav badge (v1); per-profile counts in the rail are **deferred**.
@@ -130,13 +131,13 @@ max_distance_m: z.coerce.number().int().positive().optional(),
 
 ---
 
-## 5. Data flow (received tab, profile = "My Tutoring", "pending, ≤10 km, by match score")
+## 5. Data flow (received tab, profile = "My Tutoring", "pending, looking_for = Maths, by match score")
 
-1. UI: selected profile from the shared store → `?profile=<tutorItemId>&status=Pending&sort=match_score&km=10`.
-2. `GET /action/fetch?ownership_role=received&item_id=<tutorItemId>&action_status=created&action_status=pending&sort=match_score&max_distance_m=10000`.
-3. API: owner + `target_item_id=<tutorItemId>` (+ owned-by-caller check); SQL WHERE `inArray(status,[created,pending])` + partition prune. `max_distance_m` present → **enriched path**: load the (small) matching set, batch-load both items' `item_state`+`item_locations`, compute distance, drop >10 km.
+1. UI: selected profile from the shared store → `?profile=<tutorItemId>&status=Pending&sort=match_score&f_looking_for=maths`.
+2. `GET /action/fetch?ownership_role=received&item_id=<tutorItemId>&action_status=created&action_status=pending&sort=match_score&facets=[{field:looking_for,values:[maths]}]`.
+3. API: owner + `target_item_id=<tutorItemId>` (+ owned-by-caller check); SQL WHERE `inArray(status,[created,pending])` + partition prune. A facet is present → **enriched path**: load the (small) matching set, batch-load both items' `item_state`+`item_locations`, apply the `facet_guard`-allow-listed `looking_for=maths` filter.
 4. Sort by `match_score DESC NULLS LAST` (score already on each row); slice page 0; exact count.
-5. PII: pending → names masked (no PII in filter/sort). Cards show `◆ score`, distance, facet chips.
+5. PII: pending → names masked (no PII in filter/sort). Cards show the % match badge, distance, facet chips.
 6. "Load more" → offset page 1, same params.
 
 ---
@@ -172,7 +173,7 @@ max_distance_m: z.coerce.number().int().positive().optional(),
 | Option | Effort | Entails |
 |--------|--------|---------|
 | Store `distance_m` at connect | S | Pure-SQL sort, but stale if either profile moves. |
-| **Join at read, item-to-item (chosen)** | **S** | Extend the items load with `item_locations`; compute live. Always current. |
+| **Join at read, item-to-item, sort only (chosen)** | **S** | Extend the items load with `item_locations`; compute live for ordering. Always current; no filter control. |
 | + "my current location" | +M | Geolocation/permission UX. **Deferred.** |
 
 ### D6 — PII in filter/sort · **Dropped (chosen)** — **S** (removes decryption from the query path; masking-for-display unchanged).
@@ -209,20 +210,21 @@ max_distance_m: z.coerce.number().int().positive().optional(),
 
 ---
 
-## 9. Review resolutions & the one remaining blocker
+## 9. Review resolutions
 
-**Resolved in review:**
-- **Score display** → reuse `MatchScoreBadge` (percentage + band, via `formatScorePercentage`/`getMatchScoreBand` in `@/utils/match-score-cache`) so cards match the map/list cards exactly; hide when `match_score` is null.
-- **Score freshness** → connect-time snapshot for v1; **no recompute on profile edit** — this MUST be called out in the PR description (§12).
-- **Facet source** → all declared non-`private` enum fields of the selected profile's counterparty schema (schema-driven, via `facet_guard`).
+**Resolved:**
+- **Match-score scope** → computed for **all interaction types**, **once at create (connect)** only; never on accept/reject/cancel/complete (§4.2).
+- **Score display** → reuse `MatchScoreBadge` (percentage + band, via `formatScorePercentage`/`getMatchScoreBand` in `@/utils/match-score-cache`) so cards match the map/list cards exactly.
+- **Score freshness** → connect-time snapshot for v1; **no recompute on profile edit** — MUST be in the PR description (§12).
+- **Facet source** → all declared non-`private` enum fields of the selected profile's counterparty schema (via `facet_guard`).
+- **Distance** → **sort only, no filter** (D5).
+- **PageShell chrome** → adopted (My Actions gains the standard TopBar + profile rail).
 
-**Blocker to confirm before Phase 2 (write-path scoring):**
-- **Which action types get a match score** — all interaction types vs `connect`-only. *User is deciding this before implementation.* Only the write-path compute (Phase 2) depends on it; every other phase can proceed meanwhile.
+**Confirm to fully close (small):**
+- **Null-score card** → show **"Not scored yet"** for v1. An on-demand **Compute** button is a **fast-follow** (display-only reuse of the discover `MatchScoreButton` → `/match-score/calculate` first; persisted-for-sort later). Confirm we defer the button.
+- **"No live profile" empty state** → proposed copy *"You don't have a published profile yet — publish one to send and receive requests,"* + a **"Go to My Profiles"** CTA. Confirm/tweak the copy + link target.
 
-**Minor (defaults unless told otherwise):**
-- Null `match_score` → hide the badge (no "—" placeholder).
-- Distance shown in km to one decimal (matching the card mockup).
-- "No live profile" empty state → message + CTA linking to profile create/publish (copy TBD with the team).
+**Defaults (unless told otherwise):** distance shown in km to one decimal.
 
 ---
 
