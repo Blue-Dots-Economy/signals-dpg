@@ -1,6 +1,7 @@
-import { and, desc, eq, inArray, or, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, inArray, or, sql } from 'drizzle-orm';
 import { item_actions, items } from '@dpg/database';
 import z, {
+  ActionSortKeySchema,
   FetchOwnedActionsQuerySchema,
   OwnedItemActionSchema,
   getInteractionPiiRevealStatuses,
@@ -22,6 +23,19 @@ const FetchOwnedActionsResponseSchema = z.object({
     total: z.number(),
     limit: z.number(),
     offset: z.number(),
+    // Echoes back the filters/sort/facets actually applied to this page, so
+    // the UI can render active-filter chips without re-deriving them from
+    // the request it sent (#439).
+    applied: z.object({
+      sort: ActionSortKeySchema,
+      statuses: z.string().array(),
+      types: z.string().array(),
+      facets: z
+        .array(
+          z.object({ field: z.string().min(1), values: z.array(z.string()).min(1) })
+        )
+        .default([]),
+    }),
   }),
   actions: OwnedItemActionSchema.array(),
 });
@@ -61,15 +75,43 @@ const fetch_actions_handler = async (
     action_status,
     item_id,
     ownership_role,
+    sort,
+    facets,
     limit,
     offset,
   } = request.query;
 
+  // Ownership guard (#439 Task 6, defense-in-depth): the owner filter below
+  // already fails closed to an empty page for a foreign item_id, but that's
+  // silent — a caller probing with someone else's item_id deserves a loud,
+  // explicit rejection instead of an empty-but-200 response. A missing
+  // item_id and a foreign one return the identical 403 body — no existence
+  // leak. Mirrors the ownership check in perform_action.ts
+  // (`sourceItemSnapshot.created_by === actor.effective_user_id`).
+  if (item_id) {
+    const [ownedItem] = await db
+      .select({ created_by: items.created_by })
+      .from(items)
+      .where(eq(items.item_id, item_id))
+      .limit(1);
+    if (!ownedItem || ownedItem.created_by !== userId) {
+      return reply.code(403).send({
+        error: 'FORBIDDEN_ITEM',
+        message: 'item_id is not owned by the caller',
+      });
+    }
+  }
+
+  // Note: no partition pruning here (deliberate). This is an owner-scoped
+  // fetch across the caller's own actions, not a single-network browse — there
+  // is no one network to prune on, so we rely on the owner+status indexes
+  // instead of inventing a network param.
   const conditions = [];
 
   if (action_id) conditions.push(eq(item_actions.action_id, action_id));
-  if (action_type) conditions.push(eq(item_actions.action_type, action_type));
-  if (action_status) conditions.push(eq(item_actions.action_status, action_status));
+  if (action_type?.length) conditions.push(inArray(item_actions.action_type, action_type));
+  if (action_status?.length)
+    conditions.push(inArray(item_actions.action_status, action_status));
 
   if (item_id) {
     if (ownership_role === 'initiated') {
@@ -101,6 +143,18 @@ const fetch_actions_handler = async (
 
   const whereClause = conditions.length ? and(...conditions) : undefined;
 
+  // Sort fast path (#439 Task 6). 'distance' has no SQL-orderable column
+  // here — distance is computed at read time from item locations in the
+  // Task 7 enrichment stage, which re-sorts the page after fetch — so it
+  // falls through to the 'recent' ordering below rather than getting its own
+  // branch.
+  const orderBy =
+    sort === 'oldest'
+      ? [asc(item_actions.updated_at), asc(item_actions.created_at)]
+      : sort === 'match_score'
+        ? [sql`${item_actions.match_score} DESC NULLS LAST`, desc(item_actions.updated_at)]
+        : [desc(item_actions.updated_at), desc(item_actions.created_at)]; // 'recent' default (and 'distance' fallthrough)
+
   try {
     const [{ count }] = await db
       .select({ count: sql<number>`count(*)` })
@@ -111,7 +165,7 @@ const fetch_actions_handler = async (
       .select()
       .from(item_actions)
       .where(whereClause)
-      .orderBy(desc(item_actions.updated_at), desc(item_actions.created_at))
+      .orderBy(...orderBy)
       .limit(limit)
       .offset(offset);
 
@@ -223,7 +277,17 @@ const fetch_actions_handler = async (
     };
 
     return reply.code(200).send({
-      meta: { total: Number(count), limit, offset },
+      meta: {
+        total: Number(count),
+        limit,
+        offset,
+        applied: {
+          sort,
+          statuses: action_status ?? [],
+          types: action_type ?? [],
+          facets: facets ?? [],
+        },
+      },
       actions: rows.map((row) => ({
         ...row,
         created_at:
@@ -248,6 +312,9 @@ const fetch_actions_handler = async (
           ...(row.source_item_owner === userId ? (['initiated'] as const) : []),
           ...(row.target_item_owner === userId ? (['received'] as const) : []),
         ],
+        // distance_m is computed at read time in the Task 7 enrichment stage
+        // from item locations — not present on this base path.
+        distance_m: null,
       })),
     });
   } catch (err) {
