@@ -113,6 +113,8 @@ facets:        z.array(z.object({ field: z.string(), values: z.array(z.string())
 
 ### 4.4 UI
 
+> **Approved reference prototype:** [`2026-08-04-my-actions-prototype.html`](./2026-08-04-my-actions-prototype.html) — the signed-off clickable mock (desktop + mobile: profile rail/drawer, tabs, status chips, sort menu, filters slide-over, card layout, percentage match badge, "Not scored yet", masked names). **Implementation should match this.**
+
 - **`my-actions-page.tsx`** — wrap in `PageShell`; own `{sort, statusChips, facets, maxDistance}` state, URL-synced (`?profile=`, `?status=`, `?sort=`, `?f_<key>=`, `?km=`) — `?profile` falls back to the shared store when absent. Feed `PageShell` the **live-only** `myItems`.
 - **`use-actions.ts`** — accept `itemId` + the new params; thread into `FetchMyActionsQuery`; convert received/initiated to **`useInfiniteQuery`** (page = `offset`); add `item_id`/params to the query key. Keep the 60s refresh (refetch page 0) so async scores/new requests appear.
 - **`action-api.ts`** — extend `FetchMyActionsQuery` (sort/facets/status[]/max_distance) and `Action` (`match_score?`, `distance_m?`); serialize arrays/facets like discover.
