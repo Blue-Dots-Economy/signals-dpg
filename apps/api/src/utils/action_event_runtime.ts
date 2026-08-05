@@ -73,6 +73,7 @@ export async function fetchLocalItemSnapshot(
     .select({
       item_id: items.item_id,
       item_instance_url: items.item_instance_url,
+      item_schema_url: items.item_schema_url,
       item_state: items.item_state,
       item_private_state: items.item_private_state,
       created_by: items.created_by,
@@ -97,6 +98,7 @@ export async function fetchLocalItemSnapshot(
     .select({
       item_id: items.item_id,
       item_instance_url: items.item_instance_url,
+      item_schema_url: items.item_schema_url,
       item_state: items.item_state,
       item_private_state: items.item_private_state,
       created_by: items.created_by,
