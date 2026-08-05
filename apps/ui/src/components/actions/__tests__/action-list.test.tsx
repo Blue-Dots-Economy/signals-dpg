@@ -135,6 +135,23 @@ describe('ActionList', () => {
     expect(screen.getByTestId('action-card-a3')).toBeInTheDocument();
   });
 
+  it('shows the passed *Total prop on the tab badge instead of the loaded-row count', () => {
+    const actions = [makeAction({ action_id: 'a1' }), makeAction({ action_id: 'a2' })];
+    render(<Harness {...baseProps} activeTab="received" receivedActions={actions} receivedTotal={57} />);
+
+    const receivedTab = screen.getByRole('button', { name: /actions\.tab_received/ });
+    expect(receivedTab).toHaveTextContent('57');
+    expect(receivedTab).not.toHaveTextContent('2');
+  });
+
+  it('falls back to the loaded-row count when no *Total prop is passed', () => {
+    const actions = [makeAction({ action_id: 'a1' }), makeAction({ action_id: 'a2' })];
+    render(<Harness {...baseProps} activeTab="received" receivedActions={actions} />);
+
+    const receivedTab = screen.getByRole('button', { name: /actions\.tab_received/ });
+    expect(receivedTab).toHaveTextContent('2');
+  });
+
   it('keeps bulk selection working: entering select mode and toggling a card surfaces the bulk bar', async () => {
     const user = userEvent.setup();
     const actions = [makeAction({ action_id: 'a1', action_status: 'created' })];

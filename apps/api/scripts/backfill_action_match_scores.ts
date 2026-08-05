@@ -52,63 +52,80 @@ async function main(): Promise<void> {
 
   let updated = 0;
   let skipped = 0;
+  let errored = 0;
 
   for (const row of rows) {
-    const terminal = await getTerminalStatusesFor(row.partition_network);
-    if (terminal.includes(row.action_status)) {
-      skipped++;
-      continue;
-    }
+    try {
+      const terminal = await getTerminalStatusesFor(row.partition_network);
+      if (terminal.includes(row.action_status)) {
+        skipped++;
+        continue;
+      }
 
-    const [src] = await db
-      .select(itemColumns)
-      .from(items)
-      .where(
-        and(
-          eq(items.item_network, row.source_item_network),
-          eq(items.item_domain, row.source_item_domain),
-          eq(items.item_type, row.source_item_type),
-          eq(items.item_id, row.source_item_id),
-        ),
+      const [src] = await db
+        .select(itemColumns)
+        .from(items)
+        .where(
+          and(
+            eq(items.item_network, row.source_item_network),
+            eq(items.item_domain, row.source_item_domain),
+            eq(items.item_type, row.source_item_type),
+            eq(items.item_id, row.source_item_id),
+          ),
+        );
+      const [tgt] = await db
+        .select(itemColumns)
+        .from(items)
+        .where(
+          and(
+            eq(items.item_network, row.target_item_network),
+            eq(items.item_domain, row.target_item_domain),
+            eq(items.item_type, row.target_item_type),
+            eq(items.item_id, row.target_item_id),
+          ),
+        );
+
+      if (!src || !tgt || src.lifecycle_status !== 'live' || tgt.lifecycle_status !== 'live') {
+        skipped++;
+        continue;
+      }
+
+      const score = await computeActionMatchScore(src, tgt, scriptLog);
+      if (score === null) {
+        skipped++;
+        continue;
+      }
+
+      await db
+        .update(item_actions)
+        .set({ match_score: score })
+        .where(
+          and(
+            eq(item_actions.partition_network, row.partition_network),
+            eq(item_actions.action_type, row.action_type),
+            eq(item_actions.action_id, row.action_id),
+          ),
+        );
+      updated++;
+    } catch (err) {
+      // A single row's `partition_network` resolving to an unconfigured
+      // network (`getNetworkConfigById` throws) — or any other per-row
+      // failure — must not abort the whole backfill. Log and move on; the
+      // row's `match_score` stays NULL, so it's picked up again (idempotent)
+      // once the network is configured or the underlying issue is fixed.
+      errored++;
+      // eslint-disable-next-line no-console
+      console.warn(
+        `backfill: skipping row (action_type=${row.action_type}, action_id=${row.action_id}, partition_network=${row.partition_network}) after error:`,
+        err,
       );
-    const [tgt] = await db
-      .select(itemColumns)
-      .from(items)
-      .where(
-        and(
-          eq(items.item_network, row.target_item_network),
-          eq(items.item_domain, row.target_item_domain),
-          eq(items.item_type, row.target_item_type),
-          eq(items.item_id, row.target_item_id),
-        ),
-      );
-
-    if (!src || !tgt || src.lifecycle_status !== 'live' || tgt.lifecycle_status !== 'live') {
-      skipped++;
-      continue;
     }
-
-    const score = await computeActionMatchScore(src, tgt, scriptLog);
-    if (score === null) {
-      skipped++;
-      continue;
-    }
-
-    await db
-      .update(item_actions)
-      .set({ match_score: score })
-      .where(
-        and(
-          eq(item_actions.partition_network, row.partition_network),
-          eq(item_actions.action_type, row.action_type),
-          eq(item_actions.action_id, row.action_id),
-        ),
-      );
-    updated++;
   }
 
   // eslint-disable-next-line no-console
-  console.log(`backfill: updated ${updated}/${rows.length} action match scores (${skipped} skipped)`);
+  console.log(
+    `backfill: updated ${updated}/${rows.length} action match scores (${skipped} skipped, ${errored} errored)`,
+  );
   process.exit(0);
 }
 

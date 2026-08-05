@@ -62,7 +62,26 @@ const liveItem: Item = {
 const useInitiatedActionsMock = vi.fn();
 const useReceivedActionsMock = vi.fn();
 
-function infiniteQueryStub() {
+// Mirrors the `{ actions, meta: { total, limit, offset } }` page shape
+// `useOwnedActionsInfinite` (`use-actions.ts`) resolves each page to.
+interface StubActionsPage {
+  actions: Array<{ action_id: string }>;
+  meta: { total: number; limit: number; offset: number };
+}
+
+interface InfiniteQueryStub {
+  data: { pages: StubActionsPage[] };
+  isLoading: boolean;
+  isError: boolean;
+  error: Error | null;
+  isRefetching: boolean;
+  hasNextPage: boolean;
+  isFetchingNextPage: boolean;
+  fetchNextPage: () => void;
+  refetch: () => void;
+}
+
+function infiniteQueryStub(): InfiniteQueryStub {
   return {
     data: { pages: [] },
     isLoading: false,
@@ -76,14 +95,20 @@ function infiniteQueryStub() {
   };
 }
 
+// Overridable per-test (default `undefined` → fall back to the plain
+// `infiniteQueryStub()`) so a test can supply `data.pages[0].meta.total`
+// without every other test having to care about the shape.
+let initiatedQueryOverride: InfiniteQueryStub | undefined;
+let receivedQueryOverride: InfiniteQueryStub | undefined;
+
 vi.mock('@/hooks/use-actions', () => ({
   useInitiatedActions: (itemId: unknown, params: unknown) => {
     useInitiatedActionsMock(itemId, params);
-    return infiniteQueryStub();
+    return initiatedQueryOverride ?? infiniteQueryStub();
   },
   useReceivedActions: (itemId: unknown, params: unknown) => {
     useReceivedActionsMock(itemId, params);
-    return infiniteQueryStub();
+    return receivedQueryOverride ?? infiniteQueryStub();
   },
 }));
 
@@ -136,11 +161,15 @@ vi.mock('@/components/actions/action-list', () => ({
     onOpenFilters: () => void;
     onRemoveFacet: (field: string, value: string) => void;
     onClearFilters: () => void;
+    initiatedTotal?: number;
+    receivedTotal?: number;
   }) => {
     return (
       <div data-testid="action-list-stub">
         <span data-testid="toolbar-status">{props.toolbarStatus}</span>
         <span data-testid="active-facets">{JSON.stringify(props.activeFacets)}</span>
+        <span data-testid="initiated-total">{String(props.initiatedTotal)}</span>
+        <span data-testid="received-total">{String(props.receivedTotal)}</span>
         <button data-testid="trigger-status-pending" onClick={() => props.onStatusChange('Pending')} />
         <button data-testid="trigger-open-filters" onClick={() => props.onOpenFilters()} />
         <button
@@ -197,6 +226,8 @@ beforeEach(() => {
   useInitiatedActionsMock.mockClear();
   useReceivedActionsMock.mockClear();
   lastFiltersSheetProps = null;
+  initiatedQueryOverride = undefined;
+  receivedQueryOverride = undefined;
 });
 
 describe('MyActionsPage — filter/sort write path (#439 Task 13)', () => {
@@ -307,5 +338,29 @@ describe('MyActionsPage — filter/sort write path (#439 Task 13)', () => {
       expect(params.facets).toEqual([]);
       expect(params.type).toBeUndefined();
     });
+  });
+
+  it('derives *Total from the first page meta.total, not the loaded-row count', async () => {
+    initiatedQueryOverride = {
+      ...infiniteQueryStub(),
+      data: {
+        pages: [
+          { actions: [{ action_id: 'a1' }], meta: { total: 12, limit: 1, offset: 0 } },
+        ],
+      },
+    };
+    receivedQueryOverride = {
+      ...infiniteQueryStub(),
+      data: {
+        pages: [
+          { actions: [{ action_id: 'b1' }, { action_id: 'b2' }], meta: { total: 34, limit: 2, offset: 0 } },
+        ],
+      },
+    };
+
+    renderPage();
+
+    await waitFor(() => expect(screen.getByTestId('received-total').textContent).toBe('34'));
+    expect(screen.getByTestId('initiated-total').textContent).toBe('12');
   });
 });

@@ -397,6 +397,14 @@ export function MyActionsPage() {
     [receivedQuery.data],
   );
 
+  // Tab badge counts (#439 follow-up): the infinite query only ever loads a
+  // page at a time, so `initiatedActions.length`/`receivedActions.length`
+  // undercounts once there's more than one page. The true total is on every
+  // page's `meta`, so the first page's is enough (it doesn't change as later
+  // pages load).
+  const initiatedTotal = initiatedQuery.data?.pages?.[0]?.meta.total;
+  const receivedTotal = receivedQuery.data?.pages?.[0]?.meta.total;
+
   const sourceActions = activeTab === 'initiated' ? initiatedActions : receivedActions;
   const selectedActions = sourceActions.filter((a) => selection.selected.has(a.action_id));
 
@@ -428,6 +436,8 @@ export function MyActionsPage() {
         <ActionList
           initiatedActions={initiatedActions}
           receivedActions={receivedActions}
+          initiatedTotal={initiatedTotal}
+          receivedTotal={receivedTotal}
           isLoading={isLoading}
           isError={isError}
           error={error}

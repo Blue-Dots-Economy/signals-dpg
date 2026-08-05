@@ -12,6 +12,12 @@ import type { Action } from '@/lib/action-api';
 interface ActionListProps {
   initiatedActions: Action[];
   receivedActions: Action[];
+  // Tab badge counts (#439 follow-up): the true server-side total for each
+  // tab, independent of how many rows the infinite query has loaded so far.
+  // Falls back to the loaded array length when undefined (e.g. tests that
+  // don't pass it, or a query that hasn't resolved a first page yet).
+  initiatedTotal?: number;
+  receivedTotal?: number;
   isLoading: boolean;
   isError: boolean;
   error: Error | null;
@@ -57,6 +63,8 @@ function actionClassFor(tab: 'initiated' | 'received', status: string): ActionCl
 export function ActionList({
   initiatedActions,
   receivedActions,
+  initiatedTotal,
+  receivedTotal,
   isLoading,
   isError,
   error,
@@ -91,8 +99,18 @@ export function ActionList({
   const hasSelectable = actions.some(isSelectable);
 
   const tabs = [
-    { id: 'initiated' as const, label: t('actions.tab_initiated'), Icon: Send, count: initiatedActions.length },
-    { id: 'received' as const, label: t('actions.tab_received'), Icon: Inbox, count: receivedActions.length },
+    {
+      id: 'initiated' as const,
+      label: t('actions.tab_initiated'),
+      Icon: Send,
+      count: initiatedTotal ?? initiatedActions.length,
+    },
+    {
+      id: 'received' as const,
+      label: t('actions.tab_received'),
+      Icon: Inbox,
+      count: receivedTotal ?? receivedActions.length,
+    },
   ];
   const activeIdx = tabs.findIndex((tab) => tab.id === activeTab);
 
