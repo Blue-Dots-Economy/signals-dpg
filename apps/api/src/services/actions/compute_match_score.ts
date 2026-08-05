@@ -39,9 +39,9 @@ export async function computeActionMatchScore(
   log: Pick<FastifyBaseLogger, 'warn'>,
 ): Promise<number | null> {
   if (!source || !target) return null;
-  const client = getMatchScoreClient();
-  if (!client) return null;
   try {
+    const client = getMatchScoreClient();
+    if (!client) return null;
     const result = await client.calculate({
       itemA: toMatchScoreItem(source),
       itemB: toMatchScoreItem(target),

@@ -1,10 +1,9 @@
 import { describe, it, expect, vi } from 'vitest';
 import { computeActionMatchScore } from '../compute_match_score';
 
+let mockClient: unknown;
 vi.mock('@/utils/match_score_client', () => ({
-  getMatchScoreClient: () => ({
-    calculate: vi.fn(async () => ({ provider: 'test', score: 7.4 })),
-  }),
+  getMatchScoreClient: () => mockClient,
 }));
 
 const log = { warn: vi.fn(), error: vi.fn() } as any;
@@ -20,6 +19,7 @@ const baseSnapshot = {
 
 describe('computeActionMatchScore', () => {
   it('returns the numeric score from the relevance client', async () => {
+    mockClient = { calculate: vi.fn(async () => ({ provider: 'test', score: 7.4 })) };
     const s = await computeActionMatchScore(
       { ...baseSnapshot, item_state: { a: 1 }, item_locations: [{ lat: 12.9, lng: 77.6 }] },
       { ...baseSnapshot, item_id: '6ba7b810-9dad-41d1-80b4-00c04fd430c8', item_state: { b: 2 }, item_locations: [] },
@@ -29,6 +29,42 @@ describe('computeActionMatchScore', () => {
   });
 
   it('returns null when either snapshot is missing', async () => {
+    mockClient = { calculate: vi.fn(async () => ({ provider: 'test', score: 7.4 })) };
     expect(await computeActionMatchScore(null as any, { ...baseSnapshot, item_state: {} }, log)).toBeNull();
+  });
+
+  it('returns null when the client is undefined', async () => {
+    mockClient = undefined;
+    const s = await computeActionMatchScore(
+      { ...baseSnapshot, item_state: {} },
+      { ...baseSnapshot, item_id: '6ba7b810-9dad-41d1-80b4-00c04fd430c8', item_state: {} },
+      log,
+    );
+    expect(s).toBeNull();
+  });
+
+  it('returns null and logs a warning when the client throws', async () => {
+    mockClient = {
+      calculate: vi.fn(async () => {
+        throw new Error('boom');
+      }),
+    };
+    const s = await computeActionMatchScore(
+      { ...baseSnapshot, item_state: {} },
+      { ...baseSnapshot, item_id: '6ba7b810-9dad-41d1-80b4-00c04fd430c8', item_state: {} },
+      log,
+    );
+    expect(s).toBeNull();
+    expect(log.warn).toHaveBeenCalled();
+  });
+
+  it('returns null when the client result has a non-numeric score', async () => {
+    mockClient = { calculate: vi.fn(async () => ({ provider: 'test' })) };
+    const s = await computeActionMatchScore(
+      { ...baseSnapshot, item_state: {} },
+      { ...baseSnapshot, item_id: '6ba7b810-9dad-41d1-80b4-00c04fd430c8', item_state: {} },
+      log,
+    );
+    expect(s).toBeNull();
   });
 });
