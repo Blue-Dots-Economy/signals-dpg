@@ -146,6 +146,18 @@ export function KeycloakLoginPanel() {
     ? networkDomains.filter((d) => servedScope.domains.includes(d.id))
     : networkDomains;
 
+  /**
+   * Whether the domain being signed up for routes minors through the guardian
+   * flow. Only such a domain has any use for a date of birth — a provider has no
+   * U18 flow at all, so asking them is pure friction. Drives both the field's
+   * visibility and the minor check in `handleSignup`, so the two cannot disagree.
+   *
+   * Unknown while the network config is still loading (`networkDomains` empty),
+   * which resolves to "not gated" and simply hides the field until it arrives.
+   */
+  const selectedDomainIsGated =
+    networkDomains.find((d) => d.id === domain)?.guardian_consent_required ?? false;
+
   const handleSignIn = async () => {
     setIsRedirecting(true);
     setError(null);
@@ -198,8 +210,7 @@ export function KeycloakLoginPanel() {
     // OTP-verified before the account exists — same ordering as the OTP flow.
     // Mirrors the server check in services/minor.ts; the server re-checks and
     // rejects an adult with NOT_A_MINOR.
-    const domainIsGated =
-      networkDomains.find((d) => d.id === domain)?.guardian_consent_required ?? false;
+    const domainIsGated = selectedDomainIsGated;
     const age = ageFromDateInput(dateOfBirth);
     if (domain && domainIsGated && age !== undefined && isMinorFromAge(age)) {
       setGuardianGate({ identifier, domain, age });
@@ -515,17 +526,21 @@ export function KeycloakLoginPanel() {
             </div>
           )}
 
-          <div className="space-y-1.5">
-            <Label htmlFor="signup-dob">{t('auth.label_dob')}</Label>
-            <Input
-              id="signup-dob"
-              type="date"
-              value={dateOfBirth}
-              max={new Date().toISOString().slice(0, 10)}
-              onChange={(e) => setDateOfBirth(e.target.value)}
-            />
-            <p className="text-xs text-muted-foreground">{t('auth.signup_dob_hint')}</p>
-          </div>
+          {/* Only a guardian-gated domain (e.g. seeker) needs an age; a provider
+              is never routed through the U18 flow, so the field is hidden. */}
+          {selectedDomainIsGated && (
+            <div className="space-y-1.5">
+              <Label htmlFor="signup-dob">{t('auth.label_dob')}</Label>
+              <Input
+                id="signup-dob"
+                type="date"
+                value={dateOfBirth}
+                max={new Date().toISOString().slice(0, 10)}
+                onChange={(e) => setDateOfBirth(e.target.value)}
+              />
+              <p className="text-xs text-muted-foreground">{t('auth.signup_dob_hint')}</p>
+            </div>
+          )}
 
           <Button
             className="w-full"
