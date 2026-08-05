@@ -81,6 +81,8 @@
   "actions.filter_accepted": "Accepted",
   "actions.filter_rejected": "Rejected",
   "actions.refresh": "Refresh",
+  "actions.load_more": "Load more",
+  "actions.loading_more": "Loading...",
   "actions.empty_initiated_heading": "Nothing here yet",
   "actions.empty_initiated_desc": "Requests you send will show up here.",
   "actions.empty_received_heading": "Nothing here yet",

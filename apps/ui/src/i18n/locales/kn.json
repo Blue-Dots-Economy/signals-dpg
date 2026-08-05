@@ -62,6 +62,8 @@
   "actions.filter_accepted": "ಸ್ವೀಕೃತ",
   "actions.filter_rejected": "ತಿರಸ್ಕೃತ",
   "actions.refresh": "ರಿಫ್ರೆಶ್",
+  "actions.load_more": "ಇನ್ನೂ ಲೋಡ್ ಮಾಡಿ",
+  "actions.loading_more": "ಲೋಡ್ ಆಗುತ್ತಿದೆ...",
   "actions.empty_initiated_heading": "ಇನ್ನೂ ಏನೂ ಇಲ್ಲ",
   "actions.empty_initiated_desc": "ನೀವು ಕಳುಹಿಸಿದ ವಿನಂತಿಗಳು ಇಲ್ಲಿ ತೋರಿಸಲ್ಪಡುತ್ತವೆ.",
   "actions.empty_received_heading": "ಇನ್ನೂ ಏನೂ ಇಲ್ಲ",

@@ -62,6 +62,8 @@
   "actions.filter_accepted": "स्वीकृत",
   "actions.filter_rejected": "अस्वीकृत",
   "actions.refresh": "रिफ्रेश",
+  "actions.load_more": "और लोड करें",
+  "actions.loading_more": "लोड हो रहा है...",
   "actions.empty_initiated_heading": "अभी कुछ नहीं",
   "actions.empty_initiated_desc": "आपके भेजे अनुरोध यहाँ दिखेंगे।",
   "actions.empty_received_heading": "अभी कुछ नहीं",
