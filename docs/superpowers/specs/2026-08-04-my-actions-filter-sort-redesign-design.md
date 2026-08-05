@@ -118,7 +118,7 @@ max_distance_m: z.coerce.number().int().positive().optional(),
 - **New `components/actions/action-toolbar.tsx`** — status chips (multi), Sort dropdown (Match score / Newest / Oldest / Distance — **no Name**), Filters button + active-filter tokens + Clear all.
 - **New `components/actions/action-filters-sheet.tsx`** — slide-over (reuse `Sheet` + `map-filters-panel` patterns): Action type, schema-driven non-PII facets (`getEnumFilterFieldsForDomains` scoped to the **selected profile's** counterparty domain), and a distance range. **No PII section** (D6).
 - **`action-list.tsx`** — drop client-side status filtering; render the infinite list + load-more sentinel; keep bulk selection.
-- **`action-card.tsx`** — add match-score badge (`◆ {score}`, hidden when null), distance line (when `distance_m` present), non-PII facet chips. Masking unchanged. Add a "profile paused — contact details stay hidden" note only if a paused profile is ever shown (normally not, since the rail is live-only).
+- **`action-card.tsx`** — reuse the existing **`components/match-score/match-score-badge.tsx`** (`MatchScoreBadge`) so the score renders as a **percentage + band**, identical to the map/list cards (`domain-card`, `marker-popup-card`); it normalizes `score/10` and uses `formatScorePercentage`/`getMatchScoreBand` from `@/utils/match-score-cache`. Feed it the stored `match_score`; **hide the badge when null**. Add a distance line (km, one decimal, when `distance_m` present) and non-PII facet chips. Masking unchanged.
 - **Badge:** `usePendingActionsCount` stays **global** for the nav badge (v1); per-profile counts in the rail are **deferred**.
 - **i18n:** all new labels via `t()` in `locales/*.json` (en + hi).
 
@@ -209,11 +209,20 @@ max_distance_m: z.coerce.number().int().positive().optional(),
 
 ---
 
-## 9. Open questions (small — remaining)
+## 9. Review resolutions & the one remaining blocker
 
-1. **Score recompute on profile edit** — v1 leaves it a connect-time snapshot. Confirm that's acceptable (recompute is a later enhancement).
-2. **Empty/one-profile UX copy** — confirm the "no live profile" empty-state message and CTA (link to profile create/publish).
-3. **Score display scale** — the relevance result carries `score` + `band`; confirm whether the card shows the number, a band label, or both.
+**Resolved in review:**
+- **Score display** → reuse `MatchScoreBadge` (percentage + band, via `formatScorePercentage`/`getMatchScoreBand` in `@/utils/match-score-cache`) so cards match the map/list cards exactly; hide when `match_score` is null.
+- **Score freshness** → connect-time snapshot for v1; **no recompute on profile edit** — this MUST be called out in the PR description (§12).
+- **Facet source** → all declared non-`private` enum fields of the selected profile's counterparty schema (schema-driven, via `facet_guard`).
+
+**Blocker to confirm before Phase 2 (write-path scoring):**
+- **Which action types get a match score** — all interaction types vs `connect`-only. *User is deciding this before implementation.* Only the write-path compute (Phase 2) depends on it; every other phase can proceed meanwhile.
+
+**Minor (defaults unless told otherwise):**
+- Null `match_score` → hide the badge (no "—" placeholder).
+- Distance shown in km to one decimal (matching the card mockup).
+- "No live profile" empty state → message + CTA linking to profile create/publish (copy TBD with the team).
 
 ---
 
@@ -239,3 +248,15 @@ max_distance_m: z.coerce.number().int().positive().optional(),
 6. **UI controls** — toolbar, filters sheet (no PII), card redesign (score/distance/facets), infinite scroll, i18n.
 
 Phases 1-3 already deliver per-profile scoping + status/type filter + recency/score sort (the core of the acceptance criteria); 4-6 add facets, distance, and the full UI.
+
+---
+
+## 12. PR-description notes (must include when the PR is raised)
+
+Per the repo's authoring rule (root `CLAUDE.md`), the PR needs an **In Plain Terms** section. Beyond that, explicitly call out:
+
+- **Match score is a connect-time snapshot** — it is computed once when the connection is made and **not recomputed** if either profile later edits its details. Recompute-on-edit is a deliberate v1 deferral, not an oversight (see §4.2 / §9).
+- **Distance is item-to-item and computed live** ("my current location" is deferred).
+- **PII is not filterable/sortable** — masking still governs display only.
+- **New column** `item_actions.match_score` + status indexes + a **one-off backfill** for existing open actions.
+- Any **cross-instance** action shows no score (single-instance is the target deployment).
