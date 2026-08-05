@@ -1,4 +1,12 @@
-import { createContext, useContext, useState, useEffect, useCallback, type ReactNode } from 'react';
+import {
+  createContext,
+  useContext,
+  useState,
+  useEffect,
+  useCallback,
+  useRef,
+  type ReactNode,
+} from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import {
   getSession,
@@ -79,6 +87,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
    * Waits for the auth config first — restoring the wrong way round would
    * either miss an OIDC session or fire a pointless better-auth request.
    */
+  /**
+   * `authCfg` is React Query data, so a refetch hands back a NEW object with
+   * identical contents. Depending on that identity re-ran the whole restore and
+   * re-derived `user` from storage on every refetch — turning any momentary
+   * "no usable token" (an expired access token whose renewal is still in
+   * flight) into a visible sign-out. Depend on the config's VALUES instead, and
+   * read the object through a ref so the callback stays stable.
+   */
+  const authCfgRef = useRef(authCfg);
+  authCfgRef.current = authCfg;
+  const keycloakConfigKey = authCfg?.keycloak
+    ? `${authCfg.keycloak.url}|${authCfg.keycloak.realm}|${authCfg.keycloak.clientId}`
+    : '';
+
   const fetchSession = useCallback(async () => {
     if (isConfigLoading) return;
     try {
@@ -86,7 +108,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         // Dynamic import so the OIDC library is not pulled into the bundle for
         // deployments still on the OTP login.
         const { restoreOidcSession } = await import('@/lib/oidc-client');
-        const token = await restoreOidcSession(authCfg);
+        const token = await restoreOidcSession(authCfgRef.current);
         if (!token) {
           setUser(null);
           return;
@@ -105,7 +127,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     } finally {
       setIsLoading(false);
     }
-  }, [authCfg, isConfigLoading, isKeycloakLogin]);
+  }, [keycloakConfigKey, isConfigLoading, isKeycloakLogin]);
 
   useEffect(() => {
     fetchSession();
