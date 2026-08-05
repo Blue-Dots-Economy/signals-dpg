@@ -1,249 +1,241 @@
-# My Actions — Filter & Sort Redesign (PII-aware, server-enforced)
+# My Actions — Per-Profile Filter & Sort Redesign (PII-aware, server-enforced)
 
 - **Issue:** [Blue-Dots-Economy/signals-dpg#439](https://github.com/Blue-Dots-Economy/signals-dpg/issues/439)
-- **Date:** 2026-08-04
+- **Date:** 2026-08-04 · **Revised:** 2026-08-05 (post-review — v3)
 - **Branch:** `feat/439-my-actions-filter-sort` (cut from `origin/feature`)
-- **Status:** Design — pending review
+- **Status:** Design v3 — revised after review; pending final sign-off
+
+> **What changed in v3 (after review):** match score is now **computed once at connect and stored on the action row** (not scored per-fetch); **distance and profile facets are read live via a join** (nothing denormalized — no `item_state` copy); **PII is dropped from filter/sort entirely** (kept only for display masking); **"my current location" distance is deferred** (item-to-item only); and the page gains a **per-profile selector** so the list, filters, and sort are scoped to one of the user's profiles at a time. Net schema change is **one nullable column** (`match_score`) + indexes.
 
 ---
 
 ## 1. Problem & goal
 
-The **My Actions** page lists the connect/apply requests a user has **received** and **initiated**. Today it fetches up to 100 rows per tab (`use-actions.ts` hardcodes `limit:100, offset:0`) and offers only a **client-side status filter** (All / Pending / Accepted / Rejected in `action-list.tsx`) and **no sorting** — server order is fixed `updated_at desc, created_at desc` (`fetch_actions.ts:114`).
+The **My Actions** page lists the connect/apply requests a user has **received** and **initiated**. Today it fetches up to 100 rows per tab (`use-actions.ts` hardcodes `limit:100, offset:0`), offers only a **client-side status filter**, has **no sorting** (fixed `updated_at desc`), and **mixes every profile the user owns into one list**. Because relevance and distance are inherently *item-to-item*, mixing profiles makes a "most relevant first" sort meaningless.
 
-As a user accumulates requests they need to **filter and sort** — e.g. "show me only pending full-time-tutor requests within 10 km, ordered by match score." Because these are 1-1 profile-to-profile actions, a **relevance/match score** is meaningful and should be shown and sortable.
-
-The hard constraint is **PII masking**: requester PII (name, mobile, email, full address) is revealed **only when the action reaches `accepted`** (`network.json` `reveals_pii_on_status: ["accepted"]`, plus the counterparty item must be `lifecycle_status === 'live'`). Filtering, sorting, and display must respect this **server-side** — the API must never return, filter on, or sort on PII for non-accepted actions, even if a client sends such a param.
-
-**Goal:** a full redesign of the My Actions page (UI + API) that adds server-enforced, PII-aware filtering and sorting to both tabs, with match score and distance surfaced on the cards.
+**Goal:** redesign My Actions (UI + API) so the user first **picks one of their profiles**, then filters and sorts *that profile's* received/initiated requests — with **match score** and **distance** surfaced on the cards, all enforced server-side, and PII masked until an action is accepted.
 
 ---
 
 ## 2. Scope decisions (locked)
 
-| # | Decision | Choice | Notes |
-|---|----------|--------|-------|
-| D1 | Which tabs | **Both tabs, received-first** | Received is the design lead (PII + match score matter most); Initiated gets the same controls minus PII-gated fields it never needs (an initiator already knows who they contacted). |
-| D2 | Match score | **Include, reuse search scoring** | Compute per-counterparty relevance via the existing match-score service; show a badge + allow sort-by-relevance. Non-PII → available across all statuses. |
-| D3 | Filter/sort placement | **Full server-side** | All filtering and sorting move into `GET /api/v1/action/fetch` via new query params; PII params rejected/ignored for non-accepted actions. |
-| D4 | Non-PII profile facets | **Curated set via join** | API joins the counterparty `item_state` and exposes a schema-driven, non-private facet set (category, looking-for, area) using the existing `facet_guard` machinery. |
-| D5 | Distance reference point | **Offer both, user toggles** | "My item" (item-to-item) or "My current location" (browser geolocation). Default = My item (no permission prompt). |
-| D6 | PII filter/sort scope for accepted | **OPEN QUESTION** — see §9 | Which PII fields are filterable/sortable once accepted. Display of PII on accepted cards is in scope regardless. |
-| D7 | Pagination UX | **Load-more / infinite scroll** | Server applies filter+sort across the whole dataset; UI loads pages incrementally via `useInfiniteQuery`. Counts still shown. |
-| — | UI layout | **Layout A** | Top toolbar (chips + Sort dropdown + Filters button) + right-side slide-over Filters sheet; redesigned card with match-score/distance/facet chips. |
+| # | Decision | Choice | How (v3) |
+|---|----------|--------|----------|
+| D0 | **Per-profile scoping** | **Yes — one profile at a time (no "All")** | Reuse the shared `useActiveProfile` store + `PageShell` rail; scope the list via the existing `item_id` param. |
+| D1 | Which tabs | **Both tabs, received-first** | Received + Initiated, each scoped to the selected profile. |
+| D2 | Match score | **Compute at connect, store on the row** | Nullable `item_actions.match_score`, computed async on the write path; read as a plain column. No per-fetch scoring. |
+| D3 | Filter/sort placement | **Full server-side, backward-compatible** | New optional params on `/action/fetch`; existing callers unaffected. |
+| D4 | Non-PII profile facets | **Join at read (no denormalization)** | `items.item_state` is already loaded in the fetch; filter via `facet_guard`. No `item_state` copy on the action row. |
+| D5 | Distance | **Item-to-item, live at read** (defer "my location") | Compute from both items' `item_locations` at read; no stored column, no geolocation. |
+| D6 | PII in filter/sort | **Dropped entirely** | PII (name/mobile/email/address) is not filterable/sortable. Masking still gates **display** (unchanged). Distance stays (jittered/stored coords, non-PII). |
+| D7 | Pagination | **Load-more / infinite** | `useInfiniteQuery`; exact per-profile counts. |
+| — | UI layout | **Layout A inside `PageShell`** | Left profile rail (live-only) + top toolbar (chips + Sort + Filters) + slide-over Filters sheet; redesigned card with score/distance/facet chips. |
 
 ---
 
-## 3. Current-state map (exact anchors we build on)
+## 3. Current-state map (exact anchors)
 
-**UI**
-- `apps/ui/src/pages/my-actions-page.tsx` — page shell; `activeTab` state (default `received`, line 18), eager fetch of both lists, status-update / bulk dialogs.
-- `apps/ui/src/hooks/use-actions.ts` — `useActions` (builds `FetchMyActionsQuery`, hardcoded `limit:100`, lines 64-68), `useInitiatedActions`, `useReceivedActions`, `usePendingActionsCount`, `useUpdateActionStatus(Bulk)`; `DEFAULT_POLLING_INTERVAL = 60000`.
-- `apps/ui/src/components/actions/action-list.tsx` — client-side `FILTERS`/`FILTER_STATUSES` (lines 29-38), `useMemo` filter (79-83), tabs, grid, bulk bar. **No sorting.**
-- `apps/ui/src/components/actions/action-card.tsx` — the card; masking already handled via `hasRealName`/`ProfileCardModal`.
-- `apps/ui/src/lib/action-api.ts` — `FetchMyActionsQuery` (line 148, no sort), `Action` (line 161), `fetchMyActions()`.
-- **Reuse:** `apps/ui/src/lib/enum-filters.ts` (`getEnumFilterFieldsForDomains`; skips `private:true` at line 80), `apps/ui/src/components/map/map-filters-panel.tsx` (facet-panel UI), `apps/ui/src/lib/geo/distance.ts` (`nearestDistanceMeters`) + `sortItemsByNearest` (home-page.tsx:109), `apps/ui/src/lib/match-score-api.ts` (`calculateMatchScore`, `itemToSnapshot`), home-page's URL-param filter convention (`?f_<key>=…`).
+**Profile-selection infra (reuse — almost all of D0 exists):**
+- `apps/ui/src/hooks/use-my-items.ts` — `useMyItems(network)`: the user's own items (`created_by_me:true`), **draft/live/paused, excludes retired**.
+- `apps/ui/src/hooks/use-active-profile.ts` — `useActiveProfile(network, myItems)` → `{activeProfileId, setActiveProfile, activeItem}`; localStorage-backed, per-network, **the same store the map/discover anchor uses**.
+- `apps/ui/src/lib/active-profile.ts` — `get/set/clearStoredActiveProfileId`. **Home/map persists here** (`home-page.tsx:587/1527/1661`, reads `548/582`), so cross-page selection sync is free.
+- `apps/ui/src/components/layout/page-shell.tsx` — `PageShell` accepts `myItems` / `activeProfileId` / `onActiveProfileChange` props (lines 27-29); renders `AppSidebar`.
+- `apps/ui/src/components/layout/sidebar.tsx` — `AppSidebar`: the profile rail (groups by domain, lifecycle chips, `ProfileRowActions`). `apps/ui/src/components/ui/sidebar.tsx` gives responsive behavior (persistent rail desktop → `Sheet` drawer mobile via `useIsMobile()`).
 
-**API**
-- `apps/api/src/routes/v1/action/fetch_actions.ts` — `GET /api/v1/action/fetch`. Builds `conditions[]` (lines 68-100), fixed `orderBy` (114), `count(*)` + paged `select` (105-116). PII: `resolveItemNames` (305) → `revealStatusesByAction` (151-175, fail-closed) → `displayName` (205, reveals only when `revealStatuses.includes(status) && lifecycle_status==='live'`) → memoised `unmask`/`decryptItemPrivate` (179-203). Response `meta + actions` with `ownership_roles` (247-250).
-- `packages/schemas/src/api/action_schemas.ts` — **`FetchOwnedRecordsQuerySchemaBase` (lines 92-100)** ← the schema we extend. `FetchOwnedActionsQuerySchema` (102), `OwnedItemActionSchema` (111, extends `ItemActionSelectSchema`), `ActionOwnershipRoleSchema` (89).
-- `apps/api/src/utils/facet_guard.ts` — **`resolveAllowedFacetFields(itemSchema)`, `resolveAllowedFacetFilters(...)`, `resolveTextSearchFields`, `buildWhereClause`** — the server-side, schema-driven, non-private facet allow-list + WHERE builder that `discover.ts` and `/markers` already use. This is the mechanism we mirror for D4.
-- `apps/api/src/routes/v1/network/item/discover.ts` — the reference implementation of server-side facet filtering (`resolveAllowedFacetFilters(... body.filters)` at line 176) + signals-search-with-native-fallback. **Read before implementing the join.**
-- `apps/api/src/utils/item_fetch_runtime.ts` — partition-pruning example (the "always filter on `item_network`+`item_domain`/`action_type`" contract) and its own `resolveAllowedFacetFields` at line 129.
-- `apps/api/src/routes/v1/match_score/calculate_match_score.ts` + `apps/api/src/utils/match_score_client.ts` — `getMatchScoreClient().calculate({ itemA, itemB })` → signals-search `/v1/relevance`. **Pairwise only — no batch endpoint.** Body = `MatchScoreRequestSchema`, resp = `MatchScoreResponseSchema` (`packages/match_score`).
-- `packages/database/src/drizzle_ref_tables/item_actions.ts` — `item_actions`, partitioned on `partition_network`; indexes `item_actions_source_owner_idx`/`_target_owner_idx` = `(owner, updated_at)` (56-63); **no `action_status` index**; `action_status` is free-form `text`.
-- `packages/schemas/src/network_workflow.ts` — `reveals_pii_on_status` + `getInteractionPiiRevealStatuses` (452).
+**My Actions (change target):**
+- `apps/ui/src/pages/my-actions-page.tsx` — renders its **own** header/`main` (NOT `PageShell`); `activeTab` default `received`; eager fetch of both lists.
+- `apps/ui/src/hooks/use-actions.ts` — `useActions(role)` builds `{ownership_role, limit:100, offset:0}`, **no `item_id`, no sort/filter**; `useInitiatedActions`/`useReceivedActions`; `usePendingActionsCount` (**global**, no `item_id`); 60s poll.
+- `apps/ui/src/components/actions/action-list.tsx` — client-side status filter (`FILTER_STATUSES`), tabs, grid, bulk bar; **no sorting**.
+- `apps/ui/src/components/actions/action-card.tsx` — the card; masking via `hasRealName`/`ProfileCardModal`.
+- `apps/ui/src/lib/action-api.ts` — `FetchMyActionsQuery` (**`item_id?` already exists**, no sort); `fetchMyActions` **already forwards `item_id`** (line 432); `Action` type.
+
+**API:**
+- `apps/api/src/routes/v1/action/fetch_actions.ts` — `GET /action/fetch`. `conditions[]` (68-100): maps `item_id`+`ownership_role` → `source/target_item_id` and always ANDs the owner filter (**`item_id` not validated as owned — fails closed to empty**). Fixed `orderBy` (114); `count(*)`+paged select. PII masking via `resolveItemNames` (305, **already selects `items.item_state`** at 323) → `revealStatusesByAction` (151-175, fail-closed) → `displayName` (205, reveals only when `status ∈ reveals_pii_on_status && lifecycle_status==='live'`).
+- `apps/api/src/routes/v1/network/action/perform_action.ts` — **`perform_network_action_handler`: the single write funnel** (self/proxied/inter-instance). Has `targetItemSnapshot` (always local) and `sourceItemSnapshot` (local only when source is on this instance; else `null`); both carry `item_state` + `item_locations`. Row insert at 238-269; consent in the same txn; notifications fire-and-forget after commit (357-385) — the pattern the async score compute mirrors.
+- `apps/api/src/routes/v1/action/perform_action.ts` — the `/perform` (+ `/perform/bulk`) proxy; forwards to the network handler above.
+- `apps/api/src/utils/facet_guard.ts` — `resolveAllowedFacetFields`/`resolveAllowedFacetFilters` (schema-driven, non-`private` allow-list; used by discover/markers).
+- `apps/api/src/utils/match_score_client.ts` — `getMatchScoreClient().calculate({itemA,itemB})` → signals-search `/v1/relevance`. Input `MatchScoreItem = {item_state, item_latitude?, item_longitude?}` (`packages/match_score/src/match_score.types.ts:8`). Pairwise, no batch.
+- `packages/database/src/drizzle_ref_tables/item_actions.ts` — `item_actions`: partitioned on `partition_network`; owner indexes `(owner, updated_at)`; **no `action_status` index, no score/location columns**.
+- `packages/database/src/drizzle_ref_tables/items.ts` — `items.item_locations` is a **jsonb column** (line 28) — the single coordinate source (same one the map uses; there is no separate location table).
+- `packages/schemas/src/api/action_schemas.ts` — `FetchOwnedRecordsQuerySchemaBase` (92-100) ← schema to extend; `OwnedItemActionSchema` (111).
 
 ---
 
-## 4. Architecture — what & how, per item
+## 4. Architecture — what & how
 
-### 4.1 API contract — `GET /api/v1/action/fetch` (extended, backward-compatible)
+### 4.1 Per-profile scoping (D0) — the frame for everything
 
-**How:** extend `FetchOwnedRecordsQuerySchemaBase` in `packages/schemas/src/api/action_schemas.ts`. Every new field is optional with a safe default, so existing callers (`usePendingActionsCount`, `useReceivedActionsByStatus`, aggregator peers) are unaffected. Proposed shape:
+- **Selection:** wrap `MyActionsPage` in `PageShell` and drive the rail with `useActiveProfile(network, liveItems)`. Because the store is shared, **the profile selected in the map/home view is already selected here** (and vice versa). Selecting a profile here updates the same store.
+- **Rail shows live-only:** pass `myItems.filter(i => i.lifecycle_status === 'live')` to `PageShell`. If the shared store points to a non-live profile (map left a paused/draft one selected), scope locally to the first live profile **without calling `setActiveProfile`** — so the shared selection is preserved for the map. If the user has **no live profile**, show an empty state ("Publish a profile to receive requests"); if exactly one, it's simply auto-selected.
+- **Scoping the data:** thread `activeProfileId` into the action hooks as `item_id`. Server already maps `item_id`+`ownership_role` → `source_item_id` (initiated) / `target_item_id` (received). Add `item_id` to `actionKeys.list(...)` so per-profile caches don't collide.
+- **Server hardening:** add an explicit "is `item_id` owned by the caller?" check in `fetch_actions` returning `403`/`FORBIDDEN_ITEM` instead of today's silent empty list (defense-in-depth; UI only ever sends an id from `myItems`).
+- **Unambiguous reference point:** the selected profile *is* "my item", so distance and match-score comparisons across the list are apples-to-apples.
+
+### 4.2 Match score at connect (D2)
+
+- **Column:** add nullable `item_actions.match_score` (real/numeric).
+- **Where + when:** in `perform_network_action_handler`, **after** the action row commits, **fire-and-forget** (mirroring `dispatchActionNotifications`): build `itemA`/`itemB` from the two snapshots' `item_state` + primary `item_locations`, call `getMatchScoreClient().calculate(...)`, then `UPDATE item_actions SET match_score = … WHERE partition_network/action_type/action_id`. Connect latency is unaffected; a brand-new request briefly shows no score.
+- **Degrade / caveats:** compute only when **both** snapshots are available (source is local — the single-instance norm). Cross-instance source, or a relevance-service error/timeout, leaves `match_score = null` (logged). Score is a **connect-time snapshot**; recompute-on-profile-edit is **out of scope** for v1.
+- **Read:** My Actions reads the column directly; sort-by-score is a plain `ORDER BY match_score DESC NULLS LAST, updated_at DESC`.
+- **Backfill:** one-off script over existing **open** (non-terminal) actions where both items are local+live, populating `match_score`. (§11.)
+- **All perform paths covered:** single `/perform`, `/perform/bulk`, and aggregator/voice on-behalf all funnel through the write handler, so all get scored.
+
+### 4.3 API — `GET /api/v1/action/fetch` (extended, backward-compatible)
+
+Extend `FetchOwnedRecordsQuerySchemaBase` (all optional, safe defaults → existing callers unaffected):
 
 ```ts
-// action_schemas.ts — additions to FetchOwnedRecordsQuerySchemaBase
-const ActionSortKeySchema = z.enum([
-  'recent',      // updated_at desc (default) — existing behaviour
-  'oldest',      // updated_at asc
-  'match_score', // relevance desc (enrichment)
-  'distance',    // near→far (enrichment or row-locations)
-  'name',        // PII — gated; see §9
-]);
-
-// action_status widened from single value → repeatable/CSV multi-select:
-action_status: z.union([z.string(), z.array(z.string())]).optional()
-  .transform(toStringArray),          // ['created','pending']
-action_type:   z.union([z.string(), z.array(z.string())]).optional()
-  .transform(toStringArray),
-sort:      ActionSortKeySchema.default('recent'),
-// Non-PII facets on the COUNTERPARTY item_state. Same wire shape discover uses
-// (array of {field, values}); server allow-lists via facet_guard.
-facets:    z.array(z.object({ field: z.string(), values: z.array(z.string()).min(1) })).optional(),
-// Distance
-distance_ref:   z.enum(['my_item', 'my_location']).default('my_item'),
-origin_lat:     z.coerce.number().optional(),   // required iff distance_ref==='my_location'
-origin_lng:     z.coerce.number().optional(),
+const ActionSortKeySchema = z.enum(['recent','oldest','match_score','distance']); // NO 'name' (D6)
+// widen the existing single-value filters to multi-select:
+action_status: z.union([z.string(), z.array(z.string())]).optional().transform(toStringArray),
+action_type:   z.union([z.string(), z.array(z.string())]).optional().transform(toStringArray),
+sort:          ActionSortKeySchema.default('recent'),
+facets:        z.array(z.object({ field: z.string(), values: z.array(z.string()).min(1) })).optional(),
 max_distance_m: z.coerce.number().int().positive().optional(),
+// item_id (already present) carries the selected profile.
 ```
 
-**Handler pipeline** (`fetch_actions_handler`), in order:
+**Handler pipeline:**
 
-1. **Auth + ownership** — unchanged (`userId`, `ownership_role` → `source/target_item_owner` conditions).
-2. **DB-stage WHERE** — extend the existing `conditions[]`:
-   - `action_status` → `inArray(item_actions.action_status, statuses)` (replaces the single `eq` at line 72).
-   - `action_type` → `inArray(...)`.
-   - Add `partition_network` to the WHERE when derivable (currently absent) so the planner prunes — per `.claude/rules/database-conventions.md`.
-3. **DB-stage ORDER + candidate window** — for `recent`/`oldest`, order in SQL (backed by the new index, §4.3) and paginate directly. For `match_score`/`distance`/facet-filtered queries that can't be fully expressed in SQL, fetch a bounded **candidate window** (see §7) ordered by `updated_at desc`, then finish in the enrichment stage.
-4. **Enrichment stage** (only when facets / score / `distance_ref==='my_location'` are requested) — reuse `resolveItemNames`'s existing batch `items` query (extend its `select` to also return `item_state` + `item_locations`, already partly selected at fetch_actions.ts:317-328):
-   - **Facets (D4):** resolve the counterparty item's `item_type` schema, call `resolveAllowedFacetFields`/`resolveAllowedFacetFilters` (`facet_guard.ts`) to **drop any non-declared or `private:true` field server-side**, then apply the allow-listed facet values against `item_state`. This is exactly discover's guard — a private/undeclared facet is silently dropped, never enumerable.
-   - **Distance:** `my_item` → distance between the two rows' `*_item_locations`; `my_location` → distance from `(origin_lat,origin_lng)` to the counterparty location. Reuse `nearestDistanceMeters`. Apply `max_distance_m` filter; attach `distance_m` to the row.
-   - **Match score (D2):** for each distinct counterparty item, call `getMatchScoreClient().calculate({ itemA: myItemSnapshot, itemB: counterpartySnapshot })`. **Pairwise → one call per counterparty**, so this stage must be **concurrency-limited + cached** (see §7). Attach `match_score` to the row.
-5. **PII gate (unchanged posture, extended to sort/filter):** the existing `revealStatusesByAction` + `lifecycle_status==='live'` gate (fail-closed) is the single source of truth. Any `sort==='name'` or PII-referencing facet is honoured **only for rows whose status ∈ reveals_pii_on_status**; for every other row the PII value is treated as absent — never decrypted, never returned, never used as a sort/filter key. A `sort=name` request orders non-accepted rows by the fallback key (`recent`) with names masked.
-6. **Sort + paginate** — apply the requested `sort` over the enriched window; slice `limit`/`offset`.
-7. **Response** — keep `{ meta, actions }`; **add** to `meta`: `applied` (the sort/filters actually honoured, so the UI can reconcile when a PII param was ignored) and optional per-facet `counts`; **add** optional `match_score:number|null` and `distance_m:number|null` to `OwnedItemActionSchema`. Document any candidate-window truncation in `meta` + `request.log`.
+1. **Auth + ownership + profile scope** — `userId`; `ownership_role` owner filter; `item_id` scope (+ the new owned-by-caller check).
+2. **SQL WHERE** — extend `conditions[]`: `action_status` → `inArray`, `action_type` → `inArray`, and add `partition_network` for partition pruning where derivable.
+3. **Choose the read path:**
+   - **Fast path (pure SQL)** when `sort ∈ {recent, oldest, match_score}` **and** no `facets` **and** no `max_distance_m`: `ORDER BY` (score uses `NULLS LAST`) + `LIMIT/OFFSET`; `count(*)` exact. (`match_score` is a column, so score sort needs no enrichment.)
+   - **Enriched path** when a **facet filter or distance filter/sort** is present: load **all** rows matching the SQL WHERE (bounded — one profile's actions, further capped by the per-pair cap), batch-load both endpoints' `item_state` + `item_locations` (extend the existing `resolveItemNames` query to also select `item_locations`), then in memory: apply `facet_guard`-allow-listed facet filters against the counterparty `item_state`, compute item-to-item distance via `nearestDistanceMeters` (multi-location → nearest pairwise; missing location → `null`, excluded by `max_distance_m`, sorts last), sort, and slice `limit/offset`. `count` = filtered length.
+4. **Display enrichment (always, page-sized):** compute `distance_m` and gather non-PII facet chips for the returned page from the already-loaded `item_state`/`item_locations`, regardless of path — so cards always show them even when not sorting/filtering by them.
+5. **PII masking (unchanged):** existing `revealStatusesByAction` + `lifecycle_status==='live'` fail-closed gate governs displayed names. **No PII is used for filter/sort** anywhere, so no decryption enters the query path.
+6. **Response:** `{ meta, actions }`; add `meta.applied` (echo of honoured sort/filters) + exact `meta.total`; add optional `match_score:number|null` and `distance_m:number|null` to `OwnedItemActionSchema`.
 
-**Error/edge posture** (per repo convention): unknown facet field → dropped (not 400); PII sort on non-accepted → downgraded to `recent` for those rows and reflected in `meta.applied`; match-score service down → `match_score:null` + fall back to `recent` ordering (mirror discover's degrade-don't-5xx behaviour).
+**Edge posture (repo convention):** unknown/private facet field → dropped (not 400); relevance-service state is irrelevant at read (score is a stored column); missing location → null distance, never an error.
 
-### 4.2 UI — what & how, per component
+> **Scale note:** because the list is scoped to **one profile** and bounded by the per-pair cap, the enriched path's "load all matching rows" is small — the old per-fetch scoring fan-out risk is gone entirely.
 
-- **`my-actions-page.tsx`** — becomes the state owner for `{ statusChips, sort, facets, distance_ref, origin, maxDistance }`, synced to the URL (`?status=`, `?sort=`, `?f_<key>=`, `?dist=`, `?km=`) following home-page's `f_<key>` convention so views are shareable/back-button-safe. Passes state into the hooks.
-- **`use-actions.ts`** — thread the new params into `FetchMyActionsQuery`; convert `useReceivedActions`/`useInitiatedActions` to **`useInfiniteQuery`** (page param = `offset`), exposing `fetchNextPage`/`hasNextPage`. Keys already namespace on the full query object, so filtered/sorted views are cache-isolated. Reconcile the 60s poll: refetch page 0 only, or switch to invalidate-on-write + a manual refresh button (keep the existing Refresh control).
-- **`action-api.ts`** — extend `FetchMyActionsQuery` (sort/facets/distance/status[]) and `Action` (`match_score?`, `distance_m?`); update `fetchMyActions` to serialize arrays/facets like discover does.
-- **New `components/actions/action-toolbar.tsx`** — status chips (multi-select), Sort `<DropdownMenu>` (Match score / Newest / Oldest / Distance / Name🔒), a **Filters · N** button (opens the sheet), and active-filter tokens with "Clear all". Pure presentational + callbacks; no fetching.
-- **New `components/actions/action-filters-sheet.tsx`** — right-side slide-over (reuse the app's `Sheet`/`Dialog` primitive + `map-filters-panel.tsx` patterns). Sections: Action type, schema-driven non-PII facets (from `getEnumFilterFieldsForDomains` over the served domains), Distance (reference-point toggle `my_item`/`my_location` + range; requests geolocation only when the user picks `my_location`, with a permission-denied fallback message), and a **disabled 🔒 Requester PII** section with the banner "Available only for accepted requests — enforced by the server." (enabled only when the active status filter is Accepted-only, and even then the server is the real gate).
-- **`action-list.tsx`** — drop the client-side `FILTER_STATUSES` `useMemo` (now server-driven); render the infinite list + a load-more sentinel / button; keep the bulk-selection machinery.
-- **`action-card.tsx`** — add a match-score badge (`◆ {score}`), a distance line (`📍 {km} away` when `distance_m` present), and non-PII facet chips derived from the counterparty `item_state` (category / looking-for). Name masking unchanged.
-- **i18n** — every new label via `t()` keys added to `apps/ui/src/locales/*.json` (en + hi at minimum, per the enabled-languages default).
+### 4.4 UI
 
-### 4.3 Database
+- **`my-actions-page.tsx`** — wrap in `PageShell`; own `{sort, statusChips, facets, maxDistance}` state, URL-synced (`?profile=`, `?status=`, `?sort=`, `?f_<key>=`, `?km=`) — `?profile` falls back to the shared store when absent. Feed `PageShell` the **live-only** `myItems`.
+- **`use-actions.ts`** — accept `itemId` + the new params; thread into `FetchMyActionsQuery`; convert received/initiated to **`useInfiniteQuery`** (page = `offset`); add `item_id`/params to the query key. Keep the 60s refresh (refetch page 0) so async scores/new requests appear.
+- **`action-api.ts`** — extend `FetchMyActionsQuery` (sort/facets/status[]/max_distance) and `Action` (`match_score?`, `distance_m?`); serialize arrays/facets like discover.
+- **New `components/actions/action-toolbar.tsx`** — status chips (multi), Sort dropdown (Match score / Newest / Oldest / Distance — **no Name**), Filters button + active-filter tokens + Clear all.
+- **New `components/actions/action-filters-sheet.tsx`** — slide-over (reuse `Sheet` + `map-filters-panel` patterns): Action type, schema-driven non-PII facets (`getEnumFilterFieldsForDomains` scoped to the **selected profile's** counterparty domain), and a distance range. **No PII section** (D6).
+- **`action-list.tsx`** — drop client-side status filtering; render the infinite list + load-more sentinel; keep bulk selection.
+- **`action-card.tsx`** — add match-score badge (`◆ {score}`, hidden when null), distance line (when `distance_m` present), non-PII facet chips. Masking unchanged. Add a "profile paused — contact details stay hidden" note only if a paused profile is ever shown (normally not, since the rail is live-only).
+- **Badge:** `usePendingActionsCount` stays **global** for the nav badge (v1); per-profile counts in the rail are **deferred**.
+- **i18n:** all new labels via `t()` in `locales/*.json` (en + hi).
 
-- **How:** edit the declarative schema in `apps/api/db/postgres/schema/` for `item_actions`, then `pnpm db:generate:api` (generated migration — **do not hand-edit**, per `.claude/rules/database-conventions.md` + `apps/api/drizzle/README.md`), then `pnpm schema:bundle` to refresh `schema.sql`.
-- **Indexes:** add composite indexes to back multi-status filtering + default recency sort on both owner paths:
-  - `(target_item_owner, action_status, updated_at desc)`
-  - `(source_item_owner, action_status, updated_at desc)`
-  These supersede reliance on the current `(owner, updated_at)` for filtered queries. (Partitioned table — indexes are created per-partition by the existing machinery.)
-- **No new columns** for score/distance (derived/joined at read time) — *unless* §7 chooses the snapshot-at-perform-time option for match score, in which case add a nullable `match_score` column populated in `perform_action`.
+### 4.5 Database
+
+- **Column:** add nullable `match_score` to `item_actions` (edit `apps/api/db/postgres/schema/…`, then `pnpm db:generate:api`, then `pnpm schema:bundle`; **never hand-edit generated migrations**).
+- **Indexes:** add `(target_item_owner, action_status, updated_at)` and `(source_item_owner, action_status, updated_at)` to back per-profile + multi-status filtering and recency sort.
+- **No** location or facet columns (both read live).
 
 ---
 
-## 5. Data flow (worked example — received tab, "pending tutors ≤10 km by match score")
+## 5. Data flow (received tab, profile = "My Tutoring", "pending, ≤10 km, by match score")
 
-1. UI state → `ownership_role=received&status=Pending&sort=match_score&f_category=tutor&dist=my_item&km=10`.
-2. `fetchMyActions` → `GET /action/fetch?ownership_role=received&action_status=created&action_status=pending&sort=match_score&facets=[{category:[tutor]}]&distance_ref=my_item&max_distance_m=10000`.
-3. API: ownership → `target_item_owner=userId`; DB WHERE `inArray(action_status,[created,pending])` + partition prune; candidate window ordered `updated_at desc`.
-4. Enrichment: batch-load counterparty items; `facet_guard` allow-lists `category` (declared, non-private) and applies `tutor`; compute item-to-item distance, drop >10 km; compute match score per counterparty (concurrency-limited, cached).
-5. PII gate: pending rows → names masked; no PII in sort/filter.
-6. Sort by `match_score desc`; slice page 0; respond with `match_score`/`distance_m`, masked names, `meta.applied`.
-7. UI renders cards; "load more" → offset page 1, same params.
+1. UI: selected profile from the shared store → `?profile=<tutorItemId>&status=Pending&sort=match_score&km=10`.
+2. `GET /action/fetch?ownership_role=received&item_id=<tutorItemId>&action_status=created&action_status=pending&sort=match_score&max_distance_m=10000`.
+3. API: owner + `target_item_id=<tutorItemId>` (+ owned-by-caller check); SQL WHERE `inArray(status,[created,pending])` + partition prune. `max_distance_m` present → **enriched path**: load the (small) matching set, batch-load both items' `item_state`+`item_locations`, compute distance, drop >10 km.
+4. Sort by `match_score DESC NULLS LAST` (score already on each row); slice page 0; exact count.
+5. PII: pending → names masked (no PII in filter/sort). Cards show `◆ score`, distance, facet chips.
+6. "Load more" → offset page 1, same params.
 
 ---
 
-## 6. Effort matrix (per decision — chosen path in **bold**)
+## 6. Effort matrix (per decision — chosen path in **bold**; v3)
 
-Rough T-shirt sizing. **S** ≈ ≤1 dev-day · **M** ≈ 2–3 · **L** ≈ 4–6 · **XL** ≈ 7+. Indicative, not commitments.
+**S** ≈ ≤1 dev-day · **M** ≈ 2–3 · **L** ≈ 4–6. Indicative.
 
-### D1 — Tab scope
-| Option | Effort | What it entails |
-|--------|--------|-----------------|
-| Received only | S–M | Toolbar/sheet + server params on received path only; Initiated untouched. |
-| **Both, received-first (chosen)** | **M** | Same machinery reused on Initiated; hide PII-only affordances there. Extra: per-tab default sort + count wiring. |
-| Both, fully symmetric | M+ | Also give Initiated PII affordances it doesn't need — extra edge cases for no user value. |
+### D0 — Per-profile scoping
+| Option | Effort | Entails |
+|--------|--------|---------|
+| No scoping (today) | — | Mixed list; relevance sort meaningless. |
+| **Reuse active-profile + PageShell (chosen)** | **S–M** | Wrap in `PageShell`, feed live-only `myItems`, thread `item_id`, query-key + owned-by-caller check. Rail/mobile/selection all already exist. |
+| Bespoke rail + new selection state | M | Reinvents what `AppSidebar`/`useActiveProfile` already do; also breaks map↔actions sync. |
 
 ### D2 — Match score
-| Option | Effort | What it entails |
-|--------|--------|-----------------|
-| Defer | S | Ship without score; add later. No score plumbing. |
-| Show only, no sort | M | Per-card score fetch + badge; no server sort — score computed client-side per visible card, cache in React Query. |
-| **Include + sort (chosen)** | **L** | Server-side pairwise `calculate` per counterparty (no batch), concurrency-limit + cache, score-aware sort over a candidate window, degrade-to-`recent` on outage. Scale risk (§7). Heaviest single piece. |
+| Option | Effort | Entails |
+|--------|--------|---------|
+| Per-fetch scoring (old v2) | L | Pairwise fan-out per list load; scale risk. **Rejected.** |
+| **Store at connect, async (chosen)** | **M** | One nullable column; fire-and-forget compute on the write path; backfill script; degrade to null. Read is pure SQL. |
+| Store at connect, synchronous | M | Same, but blocks connect on the relevance call. **Rejected (latency).** |
 
-### D3 — Filter/sort placement
-| Option | Effort | What it entails |
-|--------|--------|-----------------|
-| Hybrid (server for PII, client for rest) | M | Non-PII facets applied only over the fetched page; weak once pagination/large lists kick in; two filter code paths. |
-| **Full server-side (chosen)** | **L** | New query params + indexes + enrichment stage + PII enforcement in the query path. Required by the acceptance criteria; reuses `facet_guard`. |
+### D3 — Placement · **Full server-side (chosen), backward-compatible** — **M** (params + indexes; existing callers untouched).
 
-### D4 — Non-PII profile facets
-| Option | Effort | What it entails |
-|--------|--------|-----------------|
-| Action-level fields only | S | Filter/sort on row columns (status/date/type/distance) — no `items` join, no enrichment. |
-| **Curated set via join (chosen)** | **L** | Extend the existing `resolveItemNames` `items` query to carry `item_state`; apply `facet_guard`; schema-driven facet UI. Reuses discover's guard so the security surface is already-proven. |
+### D4 — Non-PII facets
+| Option | Effort | Entails |
+|--------|--------|---------|
+| Copy `item_state` onto the row | M+ | Heavy/duplicative/stale. **Rejected.** |
+| Snapshot only curated facet fields | M | Tiny jsonb, pure-SQL — but still stale; unnecessary at this scale. |
+| **Join at read (chosen)** | **S–M** | `item_state` already loaded; add `facet_guard` filter in memory over the bounded per-profile set. Live values, zero denormalization. |
 
-### D5 — Distance reference point
-| Option | Effort | What it entails |
-|--------|--------|-----------------|
-| Item-to-item only | S | Compute from the two rows' stored `*_item_locations`; no permission prompt, no origin params. |
-| My current location only | S–M | Browser geolocation + `origin_lat/lng` params + permission UX. |
-| **Both, user toggles (chosen)** | **M** | Both code paths + toggle UI + geolocation permission + denied-fallback empty state + `distance_ref` param branching. |
+### D5 — Distance
+| Option | Effort | Entails |
+|--------|--------|---------|
+| Store `distance_m` at connect | S | Pure-SQL sort, but stale if either profile moves. |
+| **Join at read, item-to-item (chosen)** | **S** | Extend the items load with `item_locations`; compute live. Always current. |
+| + "my current location" | +M | Geolocation/permission UX. **Deferred.** |
 
-### D6 — PII filter/sort scope *(OPEN — see §9)*
-| Option | Effort | What it entails |
-|--------|--------|-----------------|
-| Name only (sort + search) | S–M | Decrypt name in query path for accepted rows only (the `unmask` path already exists); alphabetical sort + name `contains`. |
-| Name + area/locality | M | Above + revealed-area facet for accepted (needs revealed-location handling, jitter-aware). |
-| Full PII set filterable | L | Name/mobile/email/address all filter/sortable — most decryption in the hot path, largest audit/sensitivity surface, low real-world value. |
+### D6 — PII in filter/sort · **Dropped (chosen)** — **S** (removes decryption from the query path; masking-for-display unchanged).
 
-### D7 — Pagination
-| Option | Effort | What it entails |
-|--------|--------|-----------------|
-| Numbered pages | S | Offset pages; simplest; clunky on mobile + with live polling. |
-| **Load-more / infinite (chosen)** | **M** | `useInfiniteQuery`, offset page param, load-more sentinel, count reconciliation with the 60s poll. |
+### D7 — Pagination · **Load-more/infinite (chosen)** — **M** (`useInfiniteQuery`, offset page, load-more; counts exact per profile).
 
 ---
 
-## 7. Cross-cutting concerns & risks
+## 7. Cross-cutting concerns & risks (v3)
 
-- **Match-score cost (primary risk).** The client is **pairwise (`calculate({itemA,itemB})`), no batch** — N counterparties = N `/v1/relevance` calls. Mitigations to decide in planning (§9.2): (a) concurrency-limited fan-out per request (e.g. p-limit), (b) cache per `(myItemId, counterpartyItemId)` with a short TTL aligned to the ~90s browse tier — the score is stable between profile edits, (c) **snapshot the score onto `item_actions` at perform-time** (adds a nullable column, removes read-time cost, but can go stale on profile edits). Recommendation: (b) + concurrency limit for v1; consider (c) if latency is unacceptable.
-- **Enrichment window / no silent caps.** When a sort/filter can't be pushed to SQL (score, some facets), the handler operates over a bounded candidate window. The window size must be explicit, and any truncation surfaced in `meta` + `request.log` — never silently cap (a truncated list must not read as "complete").
-- **Partition pruning.** `fetch_actions` currently omits `partition_network`, scanning the parent. Add it to the WHERE where derivable; this matters once filtered/sorted load grows.
-- **Polling vs load-more.** Reconcile the 60s `refetchInterval` with `useInfiniteQuery` (refetch page 0, or move to invalidate-on-write + manual Refresh).
-- **Lifecycle/retire fail-closed.** Enrichment (facets/score/distance) must also fail closed for non-`live` counterparties, consistent with the existing name-mask gate (#273/#347).
-- **Backward compatibility.** All new params optional; `usePendingActionsCount`, `useReceivedActionsByStatus`, and aggregator peers keep working unchanged.
+- **Connect-time scoring load (new, minor).** A burst of connects → a burst of async `/v1/relevance` calls. It's off the request path and one-per-connect (not per-list-load), so far lighter than v2; still, cap concurrency / let failures no-op to null.
+- **Score staleness (accepted).** `match_score` reflects the profiles at connect time. Recompute-on-edit is out of scope; documented, not hidden.
+- **Enriched-path bounds.** Per-profile + per-pair-cap keeps "load all matching rows" small; still `log()` if a single profile's set ever exceeds a sane cap (no silent truncation).
+- **Cross-instance source.** No source snapshot at write → `match_score` null for that row (single-instance is the target deployment). Distance/facets still work at read if the counterparty item is fetchable; otherwise null.
+- **Partition pruning.** Add `partition_network` to the fetch WHERE where derivable.
+- **Lifecycle/retire fail-closed.** Distance/facet enrichment fails closed (null) for non-live counterparties, matching the name-mask gate (#273/#347).
+- **Map↔actions selection coupling.** Sharing the store means selecting a profile in one view changes the other. Intended; the live-only local fallback avoids clobbering the store when the selected profile isn't live.
+- **Backward compatibility.** All new params optional; `usePendingActionsCount`/`useReceivedActionsByStatus`/aggregator peers unchanged.
 - **Testing.**
-  - *API unit* (`__tests__/fetch_actions.test.ts`): each new param; **security-critical** — assert a `sort=name` / PII-facet request returns non-accepted rows masked and unsorted-by-PII; assert unknown/private facet fields are dropped; assert score-service outage degrades to `recent` with `match_score:null`.
-  - *API integration* (`*.integration.test.ts`, db+redis): end-to-end no-PII-leak across filter/sort/counts.
-  - *UI*: toolbar chip/sort/token behaviour, filters-sheet PII-section disabled state, infinite scroll, URL-param round-trip.
+  - *API unit* (`__tests__/fetch_actions.test.ts`): multi-status/type; enriched-path facet/distance filter+sort; `match_score NULLS LAST`; owned-by-caller `item_id` check (403 vs empty); no PII in filter/sort output.
+  - *API unit* (`__tests__/perform_*`): async score compute updates the row; null on cross-instance/relevance-error; not blocking the 201.
+  - *API integration* (db+redis): per-profile scoping + no-PII-leak end-to-end.
+  - *UI*: rail live-only + shared-store sync (map→actions), toolbar/sort/tokens, filters sheet (no PII section), infinite scroll, URL round-trip incl. `?profile`.
 
 ---
 
 ## 8. Acceptance-criteria mapping (issue #439)
 
-- [ ] Received list supports filtering + sorting → §4.1 params + §4.2 toolbar/sheet.
-- [ ] Non-PII fields filterable/sortable across all statuses → D4 facets (via `facet_guard`) + status/date/type/distance/match-score.
-- [ ] PII fields filter/sort/visible **only** for accepted; masked otherwise → §4.1 step 5 + §9.1.
-- [ ] Server enforces masking (no leak via params, not UI-only) → §4.1 step 5, §7 tests.
-- [ ] Sensible default ordering → `sort` defaults to `recent` (most recent first).
+- [ ] Received list supports filtering + sorting → §4.3 + §4.4 (scoped per profile, §4.1).
+- [ ] Non-PII fields filterable/sortable across all statuses → status/type/date + facets (D4) + distance (D5) + match_score (D2).
+- [ ] PII fields filter/sort/visible **only** for accepted; masked otherwise → PII **removed** from filter/sort (stricter than asked); display masking unchanged (§4.3.5).
+- [ ] Server enforces masking (no leak via params) → no PII in the query path at all (§4.3.5); tests in §7.
+- [ ] Sensible default ordering → `sort` defaults to `recent`.
 
 ---
 
-## 9. Open questions (resolve before/at planning)
+## 9. Open questions (small — remaining)
 
-1. **PII filter/sort scope (D6).** Which PII fields become filterable/sortable once accepted — **name only** (recommended: alphabetical sort + name `contains`, reuses the existing `unmask` path), **name + area/locality**, or the **full set**? Drives how much decryption enters the hot query path. *Display* of PII on accepted cards is in scope regardless; this is only about **filter/sort dimensions.**
-2. **Match-score strategy (§7).** Live-cached per-fetch vs snapshot-at-perform-time (new nullable column)? Affects scale + schema.
-3. **Facet source of truth.** Confirm the non-PII facet set comes from declared non-`private` enum fields via `facet_guard`/`enum-filters` (as discover does), and whether actions need an explicit "filterable on actions" marker (cf. bluedots-allusecase-schemas #6 / #280, and #360 for schema-driven search/filter declaration).
-4. **Distance default & geolocation UX.** Confirm default `distance_ref = my_item` and the permission-denied fallback for `my_location`.
-5. **Match-score for masked profiles.** Confirm it's acceptable to compute/show a relevance score for a *pending* (masked) counterparty — the score is derived from non-PII `item_state`, so this should be fine, but confirm it isn't considered an information leak.
+1. **Score recompute on profile edit** — v1 leaves it a connect-time snapshot. Confirm that's acceptable (recompute is a later enhancement).
+2. **Empty/one-profile UX copy** — confirm the "no live profile" empty-state message and CTA (link to profile create/publish).
+3. **Score display scale** — the relevance result carries `score` + `band`; confirm whether the card shows the number, a band label, or both.
 
 ---
 
 ## 10. Out of scope / YAGNI
 
-- Changing the PII **reveal** flow itself (the audited `contact-details` endpoint stays as-is).
-- Saved filter presets / cross-session persistence beyond URL params.
-- Free-text search across requirement snapshots (unless it falls out of the facet work cheaply).
-- A batch match-score endpoint in signals-search (would help cost, but is a separate cross-repo change — note as a follow-up if v1 latency demands it).
-- Full PII filter set (unless §9.1 chooses it).
+- "My current location" distance + geolocation (D5 deferral).
+- Any PII field as a filter/sort dimension (D6).
+- Recompute of `match_score` on profile edit; a signals-search batch relevance endpoint.
+- Per-profile pending-count badges in the rail (nav badge stays global for v1).
+- An "All profiles" aggregate view.
+- Copying `item_state`/facets onto the action row.
+- Migrating Home's divergent local active-profile copy onto the shared hook (both already read/write the same store, so sync works; the refactor is separate).
 
 ---
 
-## 11. Suggested implementation phasing (for the plan)
+## 11. Suggested implementation phasing
 
-1. **Schema + DB** — extend `FetchOwnedRecordsQuerySchemaBase`; add indexes + migration; regen schema bundle.
-2. **API DB-stage** — multi-status/type filter, sort (`recent`/`oldest`), partition prune, load-more; response `meta.applied`. (Ships useful filtering/sorting on its own.)
-3. **API enrichment** — facets via `facet_guard` + item_state join; distance (both refs); `distance_m`/facet counts.
-4. **API match score** — concurrency-limited + cached pairwise scoring; `match_score`; degrade-to-`recent`.
-5. **API PII enforcement + tests** — name sort/filter per §9.1 decision; the no-leak test suite.
-6. **UI** — toolbar, filters sheet, card redesign, infinite scroll, URL sync, i18n.
+1. **DB** — add `match_score` column + status indexes; migration; schema bundle.
+2. **Write path** — async match-score compute + row `UPDATE` in `perform_network_action_handler`; backfill script for open actions.
+3. **API fetch** — extend schema; multi-status/type + sort + partition prune + owned-by-caller check; fast path (incl. `match_score` sort) + load-more; `meta.applied`.
+4. **API enrich** — extend the items load with `item_locations`; facet (`facet_guard`) + distance filter/sort over the bounded set; page-sized display enrichment.
+5. **UI shell** — wrap in `PageShell`, live-only rail via `useActiveProfile`, `item_id` threading, `?profile` URL/store sync, query keys.
+6. **UI controls** — toolbar, filters sheet (no PII), card redesign (score/distance/facets), infinite scroll, i18n.
 
-Each phase is independently reviewable; 1–2 alone already satisfy the "default ordering + status/type filter" part of the acceptance criteria.
+Phases 1-3 already deliver per-profile scoping + status/type filter + recency/score sort (the core of the acceptance criteria); 4-6 add facets, distance, and the full UI.
