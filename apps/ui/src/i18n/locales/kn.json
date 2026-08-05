@@ -341,6 +341,7 @@
   "actions.toast_status_completed_title": "ಪೂರ್ಣಗೊಂಡಿದೆ ಎಂದು ಗುರುತಿಸಲಾಗಿದೆ",
   "actions.toast_status_rejected_title": "ವಿನಂತಿ ತಿರಸ್ಕರಿಸಲಾಗಿದೆ",
   "actions.you_label": "ನೀವು ({{role}})",
+  "actions.not_scored_yet": "ಇನ್ನೂ ಸ್ಕೋರ್ ಮಾಡಿಲ್ಲ",
   "auth.contact_label_email": "ಇಮೇಲ್ ವಿಳಾಸ",
   "auth.contact_label_phone": "ಮೊಬೈಲ್ ಸಂಖ್ಯೆ",
   "contact.dialog_desc": "ಸಂಪರ್ಕವನ್ನು ಸ್ವೀಕರಿಸಿದ ನಂತರ ಹಂಚಿಕೊಳ್ಳಲಾಗುತ್ತದೆ.",

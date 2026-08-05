@@ -341,6 +341,7 @@
   "actions.toast_status_completed_title": "पूर्ण के रूप में चिह्नित",
   "actions.toast_status_rejected_title": "अनुरोध अस्वीकार किया गया",
   "actions.you_label": "आप ({{role}})",
+  "actions.not_scored_yet": "अभी तक स्कोर नहीं किया गया",
   "auth.contact_label_email": "ईमेल पता",
   "auth.contact_label_phone": "मोबाइल नंबर",
   "contact.dialog_desc": "कनेक्शन स्वीकार होने पर साझा किया जाता है।",

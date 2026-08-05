@@ -374,6 +374,7 @@
   "actions.toast_status_completed_title": "Marked complete",
   "actions.toast_status_rejected_title": "Request rejected",
   "actions.you_label": "You ({{role}})",
+  "actions.not_scored_yet": "Not scored yet",
   "auth.contact_label_email": "email address",
   "auth.contact_label_phone": "phone number",
   "contact.dialog_desc": "Shared once the connection is accepted.",
