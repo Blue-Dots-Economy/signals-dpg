@@ -367,6 +367,7 @@ export function MyActionsPage() {
           if (key.startsWith('f_')) prev.delete(key);
         }
         prev.delete('action_type');
+        prev.delete('status'); // reset status back to "All" too
         return prev;
       },
       { replace: true },
@@ -491,6 +492,8 @@ export function MyActionsPage() {
         domains={filterDomains}
         selected={selectedFacets}
         onChange={handleFacetsChange}
+        status={statusChip}
+        onStatusChange={handleStatusChange}
         actionTypes={actionTypes}
         onActionTypesChange={handleActionTypesChange}
         onClose={() => setFiltersOpen(false)}

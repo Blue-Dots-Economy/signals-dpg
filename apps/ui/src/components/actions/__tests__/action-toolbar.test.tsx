@@ -32,12 +32,12 @@ describe('ActionToolbar', () => {
     expect(onSortChange).toHaveBeenCalledWith('recent');
   });
 
-  it('calls onStatusChange with the clicked status chip', async () => {
+  it('shows a removable Status token (counted as a filter) when status is not All, and clearing it resets to All', async () => {
     const user = userEvent.setup();
     const onStatusChange = vi.fn();
     render(
       <ActionToolbar
-        status="All"
+        status="Accepted"
         sort="match_score"
         activeFacets={[]}
         onStatusChange={onStatusChange}
@@ -48,15 +48,19 @@ describe('ActionToolbar', () => {
       />,
     );
 
-    await user.click(screen.getByTestId('status-chip-Pending'));
+    // Status is no longer an inline chip group — it's a filter shown as a token.
+    expect(screen.queryByTestId('status-chip-Pending')).not.toBeInTheDocument();
+    expect(screen.getByTestId('status-token')).toBeInTheDocument();
+    expect(screen.getByTestId('filters-count')).toHaveTextContent('1'); // status counts as one active filter
 
-    expect(onStatusChange).toHaveBeenCalledWith('Pending');
+    await user.click(screen.getByTestId('status-remove'));
+    expect(onStatusChange).toHaveBeenCalledWith('All');
   });
 
-  it('marks the active status chip so it is visually distinguishable', () => {
+  it('shows no Status token and no count when status is All', () => {
     render(
       <ActionToolbar
-        status="Accepted"
+        status="All"
         sort="match_score"
         activeFacets={[]}
         onStatusChange={noop}
@@ -67,8 +71,25 @@ describe('ActionToolbar', () => {
       />,
     );
 
-    expect(screen.getByTestId('status-chip-Accepted')).toHaveAttribute('aria-pressed', 'true');
-    expect(screen.getByTestId('status-chip-All')).toHaveAttribute('aria-pressed', 'false');
+    expect(screen.queryByTestId('status-token')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('filters-count')).not.toBeInTheDocument();
+  });
+
+  it('counts status alongside facets in the Filters badge', () => {
+    render(
+      <ActionToolbar
+        status="Pending"
+        sort="match_score"
+        activeFacets={[{ field: 'subject', label: 'Subject', value: 'Maths' }]}
+        onStatusChange={noop}
+        onSortChange={noop}
+        onOpenFilters={noop}
+        onRemoveFacet={noop}
+        onClearFilters={noop}
+      />,
+    );
+
+    expect(screen.getByTestId('filters-count')).toHaveTextContent('2'); // status + 1 facet
   });
 
   it('shows the active-facet count on the Filters button, calls onOpenFilters, and removes a facet token via its ✕', async () => {

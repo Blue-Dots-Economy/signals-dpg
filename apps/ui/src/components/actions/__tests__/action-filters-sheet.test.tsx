@@ -3,7 +3,7 @@ import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import type { RJSFSchema } from '@rjsf/utils';
 import type { DotNetworkDomain } from '@/engine/types';
-import { ActionFiltersSheet } from '../action-filters-sheet';
+import { ActionFiltersSheet, type ActionFiltersSheetProps } from '../action-filters-sheet';
 
 vi.mock('react-i18next', () => ({
   useTranslation: () => ({ t: (key: string, defaultValue?: string) => defaultValue ?? key }),
@@ -29,94 +29,65 @@ const domainWithPrivateField: DotNetworkDomain = {
 
 function noop() {}
 
+const defaults: ActionFiltersSheetProps = {
+  open: true,
+  domains: [domainWithPrivateField],
+  selected: {},
+  onChange: noop,
+  status: 'All',
+  onStatusChange: noop,
+  actionTypes: [],
+  onActionTypesChange: noop,
+  onClose: noop,
+};
+
+const renderSheet = (overrides: Partial<ActionFiltersSheetProps> = {}) =>
+  render(<ActionFiltersSheet {...defaults} {...overrides} />);
+
 describe('ActionFiltersSheet', () => {
   it('renders a facet group for a schema-declared enum field with its options', () => {
-    render(
-      <ActionFiltersSheet
-        open
-        domains={[domainWithPrivateField]}
-        selected={{}}
-        onChange={noop}
-        actionTypes={[]}
-        onActionTypesChange={noop}
-        onClose={noop}
-      />,
-    );
-
+    renderSheet();
     expect(screen.getByText('mentor')).toBeInTheDocument();
     expect(screen.getByText('peer')).toBeInTheDocument();
     expect(screen.getByText('internship')).toBeInTheDocument();
   });
 
   it('never renders a private field, under any label', () => {
-    render(
-      <ActionFiltersSheet
-        open
-        domains={[domainWithPrivateField]}
-        selected={{}}
-        onChange={noop}
-        actionTypes={[]}
-        onActionTypesChange={noop}
-        onClose={noop}
-      />,
-    );
-
+    renderSheet();
     expect(screen.queryByText(/phone/i)).not.toBeInTheDocument();
   });
 
   it('calls onChange with the value added under its field key when a facet option is checked', async () => {
     const user = userEvent.setup();
     const onChange = vi.fn();
-    render(
-      <ActionFiltersSheet
-        open
-        domains={[domainWithPrivateField]}
-        selected={{}}
-        onChange={onChange}
-        actionTypes={[]}
-        onActionTypesChange={noop}
-        onClose={noop}
-      />,
-    );
-
+    renderSheet({ onChange });
     await user.click(screen.getByRole('checkbox', { name: 'mentor' }));
-
     expect(onChange).toHaveBeenCalledWith({ looking_for: ['mentor'] });
   });
 
   it('calls onChange with the value removed when an already-checked facet option is unchecked', async () => {
     const user = userEvent.setup();
     const onChange = vi.fn();
-    render(
-      <ActionFiltersSheet
-        open
-        domains={[domainWithPrivateField]}
-        selected={{ looking_for: ['mentor', 'peer'] }}
-        onChange={onChange}
-        actionTypes={[]}
-        onActionTypesChange={noop}
-        onClose={noop}
-      />,
-    );
-
+    renderSheet({ selected: { looking_for: ['mentor', 'peer'] }, onChange });
     await user.click(screen.getByRole('checkbox', { name: 'mentor' }));
-
     expect(onChange).toHaveBeenCalledWith({ looking_for: ['peer'] });
   });
 
-  it('renders no distance filter and no PII section', () => {
-    render(
-      <ActionFiltersSheet
-        open
-        domains={[domainWithPrivateField]}
-        selected={{}}
-        onChange={noop}
-        actionTypes={[]}
-        onActionTypesChange={noop}
-        onClose={noop}
-      />,
-    );
+  it('renders a single-select Status section and reports the chosen status', async () => {
+    const user = userEvent.setup();
+    const onStatusChange = vi.fn();
+    renderSheet({ status: 'All', onStatusChange });
 
+    // All four status options present, driven by props (not internal state).
+    expect(screen.getByTestId('status-option-All')).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByTestId('status-option-Pending')).toHaveAttribute('aria-pressed', 'false');
+
+    await user.click(screen.getByTestId('status-option-Accepted'));
+    expect(onStatusChange).toHaveBeenCalledWith('Accepted');
+  });
+
+  it('renders no distance filter and no PII section', () => {
+    renderSheet();
     expect(screen.queryByText(/distance/i)).not.toBeInTheDocument();
     expect(screen.queryByText(/personally identifiable/i)).not.toBeInTheDocument();
   });
@@ -124,17 +95,7 @@ describe('ActionFiltersSheet', () => {
   it('renders an Action type section with Connect/Apply checkboxes, kept separate from facet `selected`', async () => {
     const user = userEvent.setup();
     const onActionTypesChange = vi.fn();
-    render(
-      <ActionFiltersSheet
-        open
-        domains={[domainWithPrivateField]}
-        selected={{}}
-        onChange={noop}
-        actionTypes={['connect']}
-        onActionTypesChange={onActionTypesChange}
-        onClose={noop}
-      />,
-    );
+    renderSheet({ actionTypes: ['connect'], onActionTypesChange });
 
     const connectCheckbox = screen.getByRole('checkbox', { name: 'Connect' });
     const applyCheckbox = screen.getByRole('checkbox', { name: 'Apply' });
@@ -142,23 +103,11 @@ describe('ActionFiltersSheet', () => {
     expect(applyCheckbox).toHaveAttribute('data-state', 'unchecked');
 
     await user.click(applyCheckbox);
-
     expect(onActionTypesChange).toHaveBeenCalledWith(['connect', 'apply']);
   });
 
   it('does not render anything when closed', () => {
-    render(
-      <ActionFiltersSheet
-        open={false}
-        domains={[domainWithPrivateField]}
-        selected={{}}
-        onChange={noop}
-        actionTypes={[]}
-        onActionTypesChange={noop}
-        onClose={noop}
-      />,
-    );
-
+    renderSheet({ open: false });
     expect(screen.queryByText('mentor')).not.toBeInTheDocument();
   });
 });

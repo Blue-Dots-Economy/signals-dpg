@@ -507,7 +507,8 @@
     "guardian_otp_error_unavailable_title": "ದೃಢೀಕರಣ ಲಭ್ಯವಿಲ್ಲ",
     "guardian_otp_error_unavailable_desc": "ಈ ಇನ್‌ಸ್ಟೆನ್ಸ್‌ನಲ್ಲಿ ರಕ್ಷಕ ದೃಢೀಕರಣ ಲಭ್ಯವಿಲ್ಲ.",
     "guardian_otp_error_generic_title": "ಕೋಡ್ ದೃಢೀಕರಿಸಲಾಗಲಿಲ್ಲ",
-    "guardian_otp_error_generic_desc": "ನಿಮ್ಮ ರಕ್ಷಕರೊಂದಿಗೆ ದೃಢೀಕರಿಸುವಾಗ ಏನೋ ತಪ್ಪಾಯಿತು. ದಯವಿಟ್ಟು ಮತ್ತೆ ಪ್ರಯತ್ನಿಸಿ."
+    "guardian_otp_error_generic_desc": "ನಿಮ್ಮ ರಕ್ಷಕರೊಂದಿಗೆ ದೃಢೀಕರಿಸುವಾಗ ಏನೋ ತಪ್ಪಾಯಿತು. ದಯವಿಟ್ಟು ಮತ್ತೆ ಪ್ರಯತ್ನಿಸಿ.",
+    "status_group": "ಸ್ಥಿತಿ"
   },
   "u18": {
     "step_title_dob": "ನಿಮ್ಮ ಹುಟ್ಟುಹಬ್ಬ ಯಾವಾಗ?",

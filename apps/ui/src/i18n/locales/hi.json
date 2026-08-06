@@ -507,7 +507,8 @@
     "guardian_otp_error_unavailable_title": "पुष्टि उपलब्ध नहीं है",
     "guardian_otp_error_unavailable_desc": "इस इंस्टेंस पर अभिभावक पुष्टि उपलब्ध नहीं है।",
     "guardian_otp_error_generic_title": "कोड की पुष्टि नहीं हो सकी",
-    "guardian_otp_error_generic_desc": "आपके अभिभावक के साथ पुष्टि करने में कुछ गड़बड़ हुई। कृपया पुनः प्रयास करें।"
+    "guardian_otp_error_generic_desc": "आपके अभिभावक के साथ पुष्टि करने में कुछ गड़बड़ हुई। कृपया पुनः प्रयास करें।",
+    "status_group": "स्थिति"
   },
   "u18": {
     "step_title_dob": "आपका जन्मदिन कब है?",

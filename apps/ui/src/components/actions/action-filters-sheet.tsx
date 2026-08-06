@@ -12,6 +12,11 @@ import { Button } from '@/components/ui/button';
 import type { DotNetworkDomain } from '@/engine/types';
 import { getEnumFilterFieldsForDomains } from '@/lib/enum-filters';
 import { MultiSelectGroup, CHIP_THRESHOLD } from '@/components/filters/multi-select-group';
+import {
+  ACTION_STATUS_FILTERS,
+  STATUS_LABEL_KEYS,
+  type ActionStatusFilter,
+} from '@/components/actions/action-toolbar';
 
 /** The two action kinds a network action can be — see `action-modal.tsx`'s `action_type`. */
 export type ActionTypeFilter = 'connect' | 'apply';
@@ -42,6 +47,10 @@ export interface ActionFiltersSheetProps {
   selected: Record<string, string[]>;
   /** Called with the next `selected` map whenever a facet checkbox is toggled. */
   onChange: (next: Record<string, string[]>) => void;
+  /** Selected status filter (single-select: All / Pending / Accepted / Rejected). */
+  status: ActionStatusFilter;
+  /** Called with the next status when a status option is chosen. */
+  onStatusChange: (next: ActionStatusFilter) => void;
   /** Selected action types (Connect / Apply). */
   actionTypes: ActionTypeFilter[];
   /** Called with the next `actionTypes` array whenever an action-type checkbox is toggled. */
@@ -67,6 +76,8 @@ export function ActionFiltersSheet({
   domains,
   selected,
   onChange,
+  status,
+  onStatusChange,
   actionTypes,
   onActionTypesChange,
   onClose,
@@ -101,6 +112,34 @@ export function ActionFiltersSheet({
         </SheetHeader>
 
         <div className="flex-1 space-y-6 overflow-y-auto px-4">
+          {/* Status — single-select (All / Pending / Accepted / Rejected). Lives
+              here (My Actions only) rather than in the map/list filter panel,
+              since status is an action concept. */}
+          <section className="space-y-2" aria-labelledby="action-filters-status-heading">
+            <h3
+              id="action-filters-status-heading"
+              className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground"
+            >
+              {t('actions.status_group', 'Status')}
+            </h3>
+            <div className="inline-flex flex-wrap gap-1 rounded-xl border bg-card p-1">
+              {ACTION_STATUS_FILTERS.map((s) => (
+                <button
+                  key={s}
+                  type="button"
+                  data-testid={`status-option-${s}`}
+                  aria-pressed={s === status}
+                  onClick={() => onStatusChange(s)}
+                  className={`rounded-lg px-3 py-1.5 text-xs font-medium transition pointer-coarse:min-h-11 ${
+                    s === status ? 'bg-primary/10 text-primary' : 'text-muted-foreground hover:text-foreground'
+                  }`}
+                >
+                  {t(STATUS_LABEL_KEYS[s])}
+                </button>
+              ))}
+            </div>
+          </section>
+
           {/* Action type — fixed Connect/Apply, not schema-derived */}
           <section className="space-y-2" aria-labelledby="action-filters-type-heading">
             <h3
