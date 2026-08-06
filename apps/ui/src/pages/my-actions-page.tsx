@@ -149,25 +149,31 @@ export function MyActionsPage() {
   const handleActiveProfileChange = React.useCallback(
     (id: string) => {
       setActiveProfile(id);
-      setSearchParams((prev) => {
-        prev.set('profile', id);
-        return prev;
-      });
+      setSearchParams(
+        (prev) => {
+          prev.set('profile', id);
+          return prev;
+        },
+        { replace: true },
+      );
     },
     [setActiveProfile, setSearchParams],
   );
 
   const handleSidebarNetworkSelect = React.useCallback(
     (networkId: string) => {
-      setSearchParams((prev) => {
-        prev.set('network', networkId);
-        // The previous network's profile id has no meaning on the new
-        // network — drop it so `scopedId` re-resolves to that network's
-        // first live profile instead of failing the liveItems.some check
-        // silently (harmless either way, but keeps the URL honest).
-        prev.delete('profile');
-        return prev;
-      });
+      setSearchParams(
+        (prev) => {
+          prev.set('network', networkId);
+          // The previous network's profile id has no meaning on the new
+          // network — drop it so `scopedId` re-resolves to that network's
+          // first live profile instead of failing the liveItems.some check
+          // silently (harmless either way, but keeps the URL honest).
+          prev.delete('profile');
+          return prev;
+        },
+        { replace: true },
+      );
     },
     [setSearchParams],
   );
@@ -287,37 +293,46 @@ export function MyActionsPage() {
   const handleStatusChange = React.useCallback(
     (chip: ActionStatusFilter) => {
       selection.exitSelect();
-      setSearchParams((prev) => {
-        if (chip === 'All') prev.delete('status');
-        else prev.set('status', chip);
-        return prev;
-      });
+      setSearchParams(
+        (prev) => {
+          if (chip === 'All') prev.delete('status');
+          else prev.set('status', chip);
+          return prev;
+        },
+        { replace: true },
+      );
     },
     [setSearchParams, selection],
   );
 
   const handleSortChange = React.useCallback(
     (nextSort: ActionSort) => {
-      setSearchParams((prev) => {
-        prev.set('sort', nextSort);
-        return prev;
-      });
+      setSearchParams(
+        (prev) => {
+          prev.set('sort', nextSort);
+          return prev;
+        },
+        { replace: true },
+      );
     },
     [setSearchParams],
   );
 
   const handleFacetsChange = React.useCallback(
     (next: Record<string, string[]>) => {
-      setSearchParams((prev) => {
-        for (const key of Array.from(prev.keys())) {
-          if (key.startsWith('f_')) prev.delete(key);
-        }
-        for (const [field, values] of Object.entries(next)) {
-          if (values.length === 0) continue;
-          prev.set(`f_${field}`, values.map(encodeURIComponent).join(','));
-        }
-        return prev;
-      });
+      setSearchParams(
+        (prev) => {
+          for (const key of Array.from(prev.keys())) {
+            if (key.startsWith('f_')) prev.delete(key);
+          }
+          for (const [field, values] of Object.entries(next)) {
+            if (values.length === 0) continue;
+            prev.set(`f_${field}`, values.map(encodeURIComponent).join(','));
+          }
+          return prev;
+        },
+        { replace: true },
+      );
     },
     [setSearchParams],
   );
@@ -333,23 +348,29 @@ export function MyActionsPage() {
 
   const handleActionTypesChange = React.useCallback(
     (next: ActionTypeFilter[]) => {
-      setSearchParams((prev) => {
-        if (next.length === 0) prev.delete('action_type');
-        else prev.set('action_type', next.join(','));
-        return prev;
-      });
+      setSearchParams(
+        (prev) => {
+          if (next.length === 0) prev.delete('action_type');
+          else prev.set('action_type', next.join(','));
+          return prev;
+        },
+        { replace: true },
+      );
     },
     [setSearchParams],
   );
 
   const handleClearFilters = React.useCallback(() => {
-    setSearchParams((prev) => {
-      for (const key of Array.from(prev.keys())) {
-        if (key.startsWith('f_')) prev.delete(key);
-      }
-      prev.delete('action_type');
-      return prev;
-    });
+    setSearchParams(
+      (prev) => {
+        for (const key of Array.from(prev.keys())) {
+          if (key.startsWith('f_')) prev.delete(key);
+        }
+        prev.delete('action_type');
+        return prev;
+      },
+      { replace: true },
+    );
   }, [setSearchParams]);
 
   // ── Actions data (#439: scoped to `scopedId`, paged via useInfiniteQuery) ─
