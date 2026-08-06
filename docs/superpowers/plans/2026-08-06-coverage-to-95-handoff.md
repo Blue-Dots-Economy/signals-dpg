@@ -28,7 +28,7 @@ starting** — see "How to measure" below.
 
 | Package | Lines | Notes |
 |---|---|---|
-| `apps/api` | 57.8% (was 55.52%) | batch 1 landed; 706 tests passing |
+| `apps/api` | 60.00% (was 55.52%) | batch 1 landed; 751 tests passing |
 | `apps/ui` | 41.76% | untouched — the biggest remaining gap |
 | `packages/config` | 82.08% | small file count, quick wins |
 | `packages/schemas` | 78.45% | |
@@ -65,9 +65,25 @@ means a merge order matters.
   repo secret existed but no CI step ever called the scanner; the single analysis
   attempt on record failed in under a second. PR #486 adds
   `sonar-project.properties` + a `sonar` job in `.github/workflows/ci.yaml`.
-  **The CI scan has not been verified end-to-end yet** — confirm it authenticates
-  and reports once #486 merges. Dashboard:
+  The `sonar` job is now **verified working** — it passed on PR #486 in 2m50s and
+  the "SonarCloud Code Analysis" check passed. Dashboard:
   https://sonarcloud.io/project/overview?id=Blue-Dots-Economy_signals-dpg
+- **THE key SonarCloud constraint: the org's plan analyses the MAIN branch only.**
+  Branch and PR analysis is a paid feature. The PR-scoped dashboard explicitly
+  reports *"Not analyzed — your current plan does not include branch analysis"*,
+  and the project overview reports *`"main" branch has not been analyzed yet`*.
+  Consequences you must plan around:
+  - **Coverage numbers only appear on SonarCloud once code reaches `main`.** A PR
+    into `develop` or `feature` will never move the dashboard.
+  - CI originally had **no push trigger for `main`** (`push: [develop, feature]`),
+    so the default branch was never scanned at all. PR #486 adds `main` to the
+    push triggers — without that fix, no amount of added coverage would ever
+    surface as a SonarCloud number.
+  - Until something lands on `main`, **validate coverage locally** with the
+    commands below; treat the local lcov numbers as the source of truth and the
+    SonarCloud dashboard as a lagging indicator.
+  - Worth raising with the user: whether to upgrade the plan for branch analysis,
+    or accept main-only reporting.
 - **The single biggest reason coverage looks low:** a large amount of API logic is
   exercised *only* by `*.integration.test.ts` files, which `apps/api/vitest.config.ts`
   **excludes** from the default run (they need live Postgres + Redis). So the code
@@ -81,10 +97,13 @@ means a merge order matters.
   themselves finish in seconds. **Run every vitest command with
   `run_in_background: true`** and read the output file, or you will burn a
   2-minute timeout on every single verification.
-- **Subagent fan-out failed repeatedly here.** Seven parallel agents were
-  launched across two attempts; every one died on "Connection closed
-  mid-response" or a 600s stall, and one of them `git stash`-ed the main
-  thread's uncommitted work as "out of scope" (recovered via `git stash pop`).
+- **Subagent fan-out failed 8 times out of 8, across three separate attempts**
+  (batches of 4, 2 and 1, with progressively tighter prompts). Every one died on
+  "Connection closed mid-response" or a 600s stall, and one `git stash`-ed the
+  main thread's uncommitted work as "out of scope" (recovered via `git stash pop`).
+  Treat this as an environment constraint, not a prompting problem — the
+  single-agent retry with an explicit "report early, one file only" brief also
+  died before writing its file.
   **Recommendation: work inline.** If you must delegate, give each agent a
   strictly disjoint directory, and forbid: any `git` command, `pnpm install`,
   editing `package.json`/`vitest.config.ts`, and `--coverage` (concurrent
@@ -140,6 +159,17 @@ For drizzle db calls, fake the builder chain (`select→from→where→limit`); 
 `apps/api/src/services/__tests__/minor_guardian_repo.test.ts` (added in #487) for
 a queue-based fake that handles chains ending at either `.where()` or `.limit()`,
 and `apps/api/src/middleware/__tests__/acting_org.test.ts` for an older variant.
+
+**Two traps in that drizzle fake, both of which cost time here** — see
+`apps/api/src/routes/v1/consent/__tests__/consent_status_handlers.test.ts` for
+the corrected version:
+1. If `.where()` returns a **thenable**, its `then` MUST forward *both* callbacks
+   (`then(res, rej)`). Forwarding only `res` makes a rejected query hang the
+   `await` until the 5s test timeout instead of surfacing the error — so the
+   error-path test fails with a timeout that looks unrelated to the mock.
+2. Never simulate a DB failure by monkey-patching the shared row queue
+   (`rowQueue.shift = ...`). The override leaks into every subsequent test in the
+   file. Use a resettable flag (`dbState.failWith`) cleared in `beforeEach`.
 
 Repo conventions that shape assertions:
 - **Routes never throw.** They `return reply.code(N).send({ error, message })`
@@ -204,7 +234,7 @@ tests. Worth diagnosing — they may indicate unhandled rejections in tests.
 
 ### Honest expectation-setting
 
-Batch 1 was 96 tests for **+2.3pp** on api. The remaining gap is ~37pp on api and
+Batch 1 was 131 tests for **+4.5pp** on api (55.52% → 60.00%). The remaining gap is ~35pp on api and
 ~53pp on ui, over roughly **5,000 uncovered lines**. Linear extrapolation puts
 95% at **1,500+ additional tests** — a multi-week effort across many PRs, not a
 single session. Some of the remainder is also genuinely awkward to unit-test
