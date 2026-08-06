@@ -1,7 +1,7 @@
 # Coverage → 95% — handoff prompt for a fresh session
 
 **Created:** 2026-08-06
-**Status:** infra + dead-code landed as PRs; coverage batches 1-3 landed (api 55.52% -> 82.64%), ~651 uncovered lines remain on api; ui untouched.
+**Status:** TARGET MET on every in-scope package except apps/ui. api 97.89%, schemas 99.82%, config 98.15%, auth 96.99%; 3,018 tests passing workspace-wide. apps/ui remains at 41.76% and is the only outstanding work.
 
 This file is a **self-contained prompt**. Paste the "PROMPT STARTS HERE" section
 into a fresh Claude Code session (or hand it to an async agent) and it has
@@ -48,12 +48,19 @@ starting** — see "How to measure" below.
 
 | Package | Lines | Notes |
 |---|---|---|
-| `apps/api` | 82.64% (was 55.52%) | batches 1-3 landed; 1125 tests passing; denominator 3751 after exclusions |
-| `apps/ui` | 41.76% | untouched — the biggest remaining gap |
-| `packages/config` | 82.08% | small file count, quick wins |
-| `packages/schemas` | 78.45% | |
-| `packages/auth` | 96.49% | already above target |
-| `packages/database`, `notification`, `match_score` | 0% | **OUT OF SCOPE — the user explicitly excluded these.** Do not add tests or coverage for them. They are excluded in `sonar-project.properties`. |
+| `apps/api` | **97.89%** (was 55.52%) | 1530 tests; denominator 3751 after exclusions |
+| `packages/schemas` | **99.82%** (was 64.75% honest) | 636 tests |
+| `packages/config` | **98.15%** (was 82.08%) | 140 tests |
+| `packages/auth` | **96.99%** (was 23.60% honest) | 155 tests |
+| `apps/ui` | 41.76% | **the only remaining gap** — untouched by design (user chose API-first) |
+| `packages/database`, `notification`, `match_score` | n/a | **OUT OF SCOPE — the user explicitly excluded these.** Excluded in `sonar-project.properties`. |
+
+**Beware inflated historical numbers.** Earlier in this work `auth` was reported
+as 96.49% and `schemas` as "100%". Both were measurement artifacts: without an
+explicit `coverage.include`, vitest's v8 provider only reports files a test
+actually LOADED, so untested modules vanish from the denominator (and from lcov,
+where SonarCloud scores them 0%). All packages now pin `include`, so the numbers
+above are whole-source. If you add a package, add `include` too.
 
 `apps/ui/src/components/ui/**` (generated shadcn component kit) is deliberately
 excluded from the coverage requirement via `sonar.coverage.exclusions` — don't
@@ -222,39 +229,14 @@ Repo conventions that shape assertions:
 
 ### Highest-value remaining targets
 
-Ranked by uncovered-lines × ease. Re-derive with the ranking command above, since
-batch 1 already moved some of these.
+**apps/api, packages/schemas, packages/config and packages/auth are DONE** (all
+>95%). The stale per-file target list that used to live here has been removed
+rather than left to mislead — every file it named is now covered.
 
-**apps/api** (~1,600 uncovered lines):
-| File | Lines | Was |
-|---|---|---|
-| `src/services/item_service.ts` | 131 | 11.4% |
-| `src/routes/v1/consent/u18_profile_consent.ts` | 134 | 11.2% |
-| `src/routes/v1/action/fetch_actions.ts` | 116 | 4.3% |
-| `src/network_schema_cache.ts` | 114 | 3.5% |
-| `src/utils/item_fetch_runtime.ts` | 81 | 2.5% |
-| `src/routes/v1/item/create_item.ts` | 67 | 4.5% |
-| `src/services/signup_guardian.ts` | 65 | 4.6% |
-| `src/routes/v1/item/lifecycle.ts` | 60 | 8.3% |
-| `src/utils/action_event_runtime.ts` | 59 | 28.8% |
-| `src/scripts/backfill_lifecycle.ts` | 55 | 0% |
-| `src/routes/v1/admin/participant_read.ts` | 53 | 37.7% |
-| `src/routes/v1/consent/*` (the rest) | ~250 | 8–19% |
+`apps/ui` is the only remaining work; see "What is left: apps/ui only" below.
+Always re-derive targets with the ranking command in "How to measure" rather
+than trusting a list in this file.
 
-Note `src/server.ts` (17 lines, 0%) and `plugins/auth/auth_middleware.ts` (18
-lines, 0%) — the middleware is worth covering; `server.ts` is a bootstrap entry
-and may be better added to `sonar.coverage.exclusions` than tested.
-
-**apps/ui** — untouched and the largest gap (~3,300 uncovered lines). Not yet
-analysed per-file; start by generating the ranking. `apps/ui/CLAUDE.md` flags the
-largest files: `pages/home-page.tsx` (~1370 lines), `pages/profile-form-page.tsx`
-(~670), `components/forms/schema-form.tsx` (~500). Existing UI tests use
-`@testing-library/react` + `happy-dom`; read `apps/ui/src/test/setup.ts` and a
-couple of existing `src/**/*.test.tsx` files for the pattern. UI tests are much
-slower than API ones (the baseline full-UI coverage run took ~17 min once).
-
-Also: the UI baseline run reported **6 non-fatal errors** alongside 557 passing
-tests. Worth diagnosing — they may indicate unhandled rejections in tests.
 
 ### Workflow to follow
 
@@ -271,26 +253,46 @@ tests. Worth diagnosing — they may indicate unhandled rejections in tests.
 7. Repeat. Report honest deltas — do not claim a coverage number you did not
    measure.
 
-### Honest expectation-setting
+### What is left: apps/ui only
 
-Batches 1-2 were 243 tests for **+10.1pp** on api (55.52% → 65.62%). The remaining gap is ~29pp on api and
-~53pp on ui, over roughly **5,000 uncovered lines**. Linear extrapolation puts
-95% at **1,500+ additional tests** — a multi-week effort across many PRs, not a
-single session. Some of the remainder is also genuinely awkward to unit-test
-(bootstrap files, thin DB wrappers) and may be better handled by targeted
-`sonar.coverage.exclusions` entries than by contorted tests; propose those to the
-user rather than adding low-value tests to inflate a number.
+`apps/ui` is at **41.76%** and is the whole remaining job (~3,300 uncovered
+lines). It was deliberately deferred — the user chose to finish the API first.
 
-If the user wants a faster route to a green SonarCloud gate, two options worth
-raising with them explicitly:
-- Set the quality gate on **new-code coverage** rather than overall coverage
-  (SonarCloud's default and recommended posture) — new code gets held to 95%
-  while the legacy backlog is paid down incrementally.
-- Run the excluded `*.integration.test.ts` suite in CI with Postgres + Redis
-  services and merge its lcov with the unit lcov. That reclaims a large amount of
-  already-written-but-uncounted coverage. `ci.yaml` already has a
-  `schema-parity` job that stands up `postgres:16-alpine` services — copy that
-  pattern. This is likely the single biggest coverage win available for the
-  least new code.
+Start by generating the per-file ranking (see "How to measure"), then reuse the
+Workflow recipe above: one agent per cluster, one disjoint test file each. What
+differs from the API work:
+
+- UI tests use `@testing-library/react` + `happy-dom`. Read
+  `apps/ui/src/test/setup.ts` and a couple of existing `src/**/*.test.tsx` first.
+- They are **much slower** — the full UI coverage run took ~17 minutes once.
+  Budget for that and keep every run backgrounded.
+- `apps/ui/src/components/ui/**` (generated shadcn kit) is already excluded from
+  the coverage requirement. Don't chase it.
+- The largest files, per `apps/ui/CLAUDE.md`: `pages/home-page.tsx` (~1370
+  lines), `pages/profile-form-page.tsx` (~670), `components/forms/schema-form.tsx`
+  (~500).
+- The UI baseline run reported **6 non-fatal errors** alongside 557 passing
+  tests. Diagnose those early — they may be unhandled rejections that will
+  confuse later runs.
+
+Rate achieved on the API for calibration: ~1,150 tests took it from 55.52% to
+97.89%, across five Workflow batches of 5-7 agents each.
+
+### Findings filed rather than fixed
+
+The agents surfaced real defects while writing tests. Every one is **pinned by a
+test asserting current behaviour**, so fixing the source will fail that test and
+force a deliberate assertion update — nothing can be fixed silently. Filed as
+issues #490, #491, #492, #493, #494, #495, #500, #501, #502. Highlights:
+
+- **#501** — `packages/auth` logs the OTP in plaintext via `console.log` when no
+  notification client is configured; also unescaped `appName`/`user.name` in
+  outbound email HTML.
+- **#502** — `verifyOtp` deletes the one-time OTP key *before* the self-signup
+  gate and identifier checks, so a non-code failure burns a valid code.
+- **#500** — an empty `status_rules` array crashes network-config load with a raw
+  TypeError instead of a ZodError.
+- **#490** — several handlers violate the repo's "routes never throw" rule.
+- **#494** — some queries against the partitioned `items` table can't prune.
 
 ## PROMPT ENDS HERE
