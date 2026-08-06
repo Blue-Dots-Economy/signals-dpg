@@ -323,7 +323,7 @@ describe('upsertGuardianDetails', () => {
   it('encrypts name and contacts, resets verified, and enforces the cap in-transaction', async () => {
     dbSelectRows.push([{ n: 0 }]);
     const onConflictDoUpdate = vi.fn();
-    const values = vi.fn(() => ({ onConflictDoUpdate }));
+    const values = vi.fn((_row: Record<string, unknown>) => ({ onConflictDoUpdate }));
     txInsert.mockReturnValue({ values });
     dbTransaction.mockImplementation(
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -341,7 +341,7 @@ describe('upsertGuardianDetails', () => {
       guardianPhone: '111',
     });
 
-    const written = values.mock.calls[0][0] as Record<string, unknown>;
+    const written = values.mock.calls[0][0];
     expect(written.guardianName).toBe('enc(Guard Ian)');
     // Phone preferred as the OTP channel when both are supplied.
     expect(written.guardianContact).toBe('enc(111)');
@@ -354,7 +354,7 @@ describe('upsertGuardianDetails', () => {
   it('stores null for a contact the guardian did not supply', async () => {
     dbSelectRows.push([{ n: 0 }]);
     const onConflictDoUpdate = vi.fn();
-    const values = vi.fn(() => ({ onConflictDoUpdate }));
+    const values = vi.fn((_row: Record<string, unknown>) => ({ onConflictDoUpdate }));
     txInsert.mockReturnValue({ values });
     dbTransaction.mockImplementation(
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -371,7 +371,7 @@ describe('upsertGuardianDetails', () => {
       guardianEmail: 'g@x.com',
     });
 
-    const written = values.mock.calls[0][0] as Record<string, unknown>;
+    const written = values.mock.calls[0][0];
     expect(written.guardianPhone).toBeNull();
     expect(written.guardianContactType).toBe('email');
   });
@@ -454,7 +454,7 @@ describe('setGuardianVerified', () => {
 describe('writeEncryptedGuardian', () => {
   it('writes the pre-encrypted blob verbatim and marks verified true', async () => {
     const onConflictDoUpdate = vi.fn();
-    const values = vi.fn(() => ({ onConflictDoUpdate }));
+    const values = vi.fn((_row: Record<string, unknown>) => ({ onConflictDoUpdate }));
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const exec: any = { insert: () => ({ values }) };
 
@@ -469,7 +469,7 @@ describe('writeEncryptedGuardian', () => {
       exec,
     );
 
-    const written = values.mock.calls[0][0] as Record<string, unknown>;
+    const written = values.mock.calls[0][0];
     // No re-encryption: the pre-auth signup flow already encrypted these.
     expect(written.guardianName).toBe('ALREADY_ENC_NAME');
     expect(written.guardianContact).toBe('ALREADY_ENC_CONTACT');
@@ -479,7 +479,7 @@ describe('writeEncryptedGuardian', () => {
 
   it('defaults the optional encrypted contacts and ref to null', async () => {
     const onConflictDoUpdate = vi.fn();
-    const values = vi.fn(() => ({ onConflictDoUpdate }));
+    const values = vi.fn((_row: Record<string, unknown>) => ({ onConflictDoUpdate }));
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const exec: any = { insert: () => ({ values }) };
 
@@ -493,7 +493,7 @@ describe('writeEncryptedGuardian', () => {
       exec,
     );
 
-    const written = values.mock.calls[0][0] as Record<string, unknown>;
+    const written = values.mock.calls[0][0];
     expect(written.guardianEmail).toBeNull();
     expect(written.guardianPhone).toBeNull();
     expect(written.guardianRef).toBeNull();
