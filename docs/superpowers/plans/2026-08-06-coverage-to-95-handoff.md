@@ -1,7 +1,7 @@
 # Coverage → 95% — handoff prompt for a fresh session
 
 **Created:** 2026-08-06
-**Status:** infra + dead-code landed as PRs; coverage batches 1-2 landed (api 55.52% -> 65.62%), more remain.
+**Status:** infra + dead-code landed as PRs; coverage batches 1-3 landed (api 55.52% -> 82.64%), ~651 uncovered lines remain on api; ui untouched.
 
 This file is a **self-contained prompt**. Paste the "PROMPT STARTS HERE" section
 into a fresh Claude Code session (or hand it to an async agent) and it has
@@ -21,6 +21,26 @@ You are continuing a code-coverage push in `/Users/mahesh/Code/Blue-Dots/signals
 coverage toward **>95%** as reported by SonarCloud, continuing work already
 started. Read `CLAUDE.md` and `AGENTS.md` first — they are the canonical guides.
 
+### Decisions the user has already made — do not re-litigate these
+
+1. **SonarCloud stays on the main-only plan.** No upgrade for branch/PR analysis.
+   Consequence: coverage **cannot gate a PR**, and the dashboard only moves when
+   code reaches `main`. **Local lcov is the source of truth** for reporting
+   progress; quote measured local numbers, not the dashboard.
+2. **Integration tests ARE wired into CI** and their lcov is reported alongside
+   the unit lcov (`apps/api/coverage-integration/lcov.info`). Done — see the
+   `sonar` job in `ci.yaml`. Don't remove it; it reclaims ~25 suites' worth of
+   already-written coverage.
+3. **Finish `apps/api` to ~95% before starting `apps/ui`.** UI is the bigger gap
+   but far slower per test; API's mocking patterns are proven.
+4. **Genuinely untestable code is excluded from the denominator**, not tested:
+   `apps/api/src/server.ts` (bootstrap) and `apps/api/src/scripts/**` (one-off
+   CLI commands). Applied in BOTH `apps/api/vitest.config.ts` and
+   `sonar-project.properties` — **keep those two lists in sync** or the local
+   number and the SonarCloud number will disagree. Adding a further exclusion is
+   allowed but propose it with line counts first; don't quietly widen it to make
+   a number look better.
+
 ### Target and current state
 
 Baseline measured on the `feature` branch (2026-08-06). **Re-measure before
@@ -28,7 +48,7 @@ starting** — see "How to measure" below.
 
 | Package | Lines | Notes |
 |---|---|---|
-| `apps/api` | 65.62% (was 55.52%) | batches 1-2 landed; 863 tests passing |
+| `apps/api` | 82.64% (was 55.52%) | batches 1-3 landed; 1125 tests passing; denominator 3751 after exclusions |
 | `apps/ui` | 41.76% | untouched — the biggest remaining gap |
 | `packages/config` | 82.08% | small file count, quick wins |
 | `packages/schemas` | 78.45% | |
