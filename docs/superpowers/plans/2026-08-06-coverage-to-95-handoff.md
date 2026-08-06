@@ -1,7 +1,7 @@
 # Coverage → 95% — handoff prompt for a fresh session
 
 **Created:** 2026-08-06
-**Status:** infra + dead-code landed as PRs; coverage work is batch 1 of many.
+**Status:** infra + dead-code landed as PRs; coverage batches 1-2 landed (api 55.52% -> 65.62%), more remain.
 
 This file is a **self-contained prompt**. Paste the "PROMPT STARTS HERE" section
 into a fresh Claude Code session (or hand it to an async agent) and it has
@@ -28,7 +28,7 @@ starting** — see "How to measure" below.
 
 | Package | Lines | Notes |
 |---|---|---|
-| `apps/api` | 60.00% (was 55.52%) | batch 1 landed; 751 tests passing |
+| `apps/api` | 65.62% (was 55.52%) | batches 1-2 landed; 863 tests passing |
 | `apps/ui` | 41.76% | untouched — the biggest remaining gap |
 | `packages/config` | 82.08% | small file count, quick wins |
 | `packages/schemas` | 78.45% | |
@@ -56,7 +56,11 @@ means a merge order matters.
    all `workspace:*` deps, and the `turbo` devDependency (CLI-invoked).
 2. **PR #486** — `chore/coverage-sonar-infra`: the coverage plumbing. This is the
    **base branch** the test PRs stack on.
-3. **PR #487** — `test/coverage-api-batch-1`: batch 1, 96 tests, based on #486.
+3. **PR #487** — `test/coverage-api-batch-1`: batches 1-2, 243 tests, based on #486.
+   NOTE: a PR targeting `chore/coverage-sonar-infra` gets **zero CI checks** — `ci.yaml`
+   triggers `pull_request` only on `[develop, main, feature]`. GitHub auto-retargets
+   the base to `feature` when #486 merges, and CI runs then. Do not merge a stacked
+   PR while it shows `Checks 0`.
 
 ### Critical context you would otherwise waste time rediscovering
 
@@ -97,17 +101,32 @@ means a merge order matters.
   themselves finish in seconds. **Run every vitest command with
   `run_in_background: true`** and read the output file, or you will burn a
   2-minute timeout on every single verification.
-- **Subagent fan-out failed 8 times out of 8, across three separate attempts**
-  (batches of 4, 2 and 1, with progressively tighter prompts). Every one died on
-  "Connection closed mid-response" or a 600s stall, and one `git stash`-ed the
-  main thread's uncommitted work as "out of scope" (recovered via `git stash pop`).
-  Treat this as an environment constraint, not a prompting problem — the
-  single-agent retry with an explicit "report early, one file only" brief also
-  died before writing its file.
-  **Recommendation: work inline.** If you must delegate, give each agent a
-  strictly disjoint directory, and forbid: any `git` command, `pnpm install`,
-  editing `package.json`/`vitest.config.ts`, and `--coverage` (concurrent
-  coverage writes to the shared `coverage/` dir collide).
+- **Parallelise with the `Workflow` tool, NOT the `Agent` tool.** The bare `Agent`
+  tool failed **8 times out of 8** across three attempts (batches of 4, 2 and 1,
+  with progressively tighter prompts) — all "Connection closed mid-response" or
+  600s stalls, and one agent `git stash`-ed the main thread's uncommitted work.
+  Switching to `Workflow` with the same task decomposition succeeded **5/5 with
+  zero errors in ~3 minutes**. Use it. The working recipe:
+  - One agent per module, each owning **exactly one disjoint test file path** so
+    nothing contends in the shared tree.
+  - Forbid, explicitly and per-agent: any `git` command, `pnpm install`, editing
+    `package.json`/`vitest.config.ts`/tsconfig or any production source, and
+    `--coverage` (concurrent coverage writes to the shared `coverage/` dir
+    collide).
+  - Tell each agent to run vitest **in the background** writing to its own
+    `/tmp/<key>.log`, then poll that log — a foreground run looks like a stall
+    (see the exit-hang note above) and gets the agent killed.
+  - Use a `schema` so each agent returns `{testFile, testCount, allPassing,
+    summaryLine, skipped}`; the `skipped` field is where the genuinely useful
+    findings surface.
+  - The reusable script is at `.../workflows/scripts/coverage-batch-2-*.js` in the
+    session dir; the pattern is worth copying verbatim.
+- **Always run `pnpm --filter api exec tsc --noEmit` after adding tests.** Tests
+  passing does NOT mean the file typechecks, and CI's `typecheck-api` job compiles
+  test files too. Batch 1 shipped 8 type errors this way. The specific trap:
+  `vi.fn(() => ...)` infers a **zero-argument** signature, so `mock.calls[0][0]`
+  fails to typecheck and spreading through a `vi.mock` factory errors — declare
+  the mock's parameters (`vi.fn((_row: Record<string, unknown>) => ...)`).
 
 ### How to measure
 
@@ -234,7 +253,7 @@ tests. Worth diagnosing — they may indicate unhandled rejections in tests.
 
 ### Honest expectation-setting
 
-Batch 1 was 131 tests for **+4.5pp** on api (55.52% → 60.00%). The remaining gap is ~35pp on api and
+Batches 1-2 were 243 tests for **+10.1pp** on api (55.52% → 65.62%). The remaining gap is ~29pp on api and
 ~53pp on ui, over roughly **5,000 uncovered lines**. Linear extrapolation puts
 95% at **1,500+ additional tests** — a multi-week effort across many PRs, not a
 single session. Some of the remainder is also genuinely awkward to unit-test
