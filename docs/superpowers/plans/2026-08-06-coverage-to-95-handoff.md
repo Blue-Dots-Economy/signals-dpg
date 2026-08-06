@@ -1,7 +1,7 @@
 # Coverage → 95% — handoff prompt for a fresh session
 
 **Created:** 2026-08-06
-**Status:** TARGET MET on every in-scope package except apps/ui. api 97.89%, schemas 99.82%, config 98.15%, auth 96.99%; 3,018 tests passing workspace-wide. apps/ui remains at 41.76% and is the only outstanding work.
+**Status:** TARGET MET on every in-scope package. api 97.89%, schemas 99.82%, config 98.15%, auth 96.99%, ui 96.20%. 3,971 tests passing workspace-wide (`pnpm -r test` exit 0), `pnpm typecheck` clean. No coverage work outstanding.
 
 This file is a **self-contained prompt**. Paste the "PROMPT STARTS HERE" section
 into a fresh Claude Code session (or hand it to an async agent) and it has
@@ -52,7 +52,7 @@ starting** — see "How to measure" below.
 | `packages/schemas` | **99.82%** (was 64.75% honest) | 636 tests |
 | `packages/config` | **98.15%** (was 82.08%) | 140 tests |
 | `packages/auth` | **96.99%** (was 23.60% honest) | 155 tests |
-| `apps/ui` | 41.76% | **the only remaining gap** — untouched by design (user chose API-first) |
+| `apps/ui` | **96.20%** (was 41.00%) | 1510 tests; shadcn kit + the two Vite entries excluded |
 | `packages/database`, `notification`, `match_score` | n/a | **OUT OF SCOPE — the user explicitly excluded these.** Excluded in `sonar-project.properties`. |
 
 **Beware inflated historical numbers.** Earlier in this work `auth` was reported
@@ -253,37 +253,36 @@ than trusting a list in this file.
 7. Repeat. Report honest deltas — do not claim a coverage number you did not
    measure.
 
-### What is left: apps/ui only
+### What is left
 
-`apps/ui` is at **41.76%** and is the whole remaining job (~3,300 uncovered
-lines). It was deliberately deferred — the user chose to finish the API first.
+**Nothing on coverage.** All five in-scope packages are above 95% lines.
 
-Start by generating the per-file ranking (see "How to measure"), then reuse the
-Workflow recipe above: one agent per cluster, one disjoint test file each. What
-differs from the API work:
+If you pick this up to go further, the honest remaining targets are *branch*
+coverage (api 85.01%, ui 88.60%) rather than lines, and a chunk of what is left
+is genuinely unreachable defensive code — guards the UI already prevents
+reaching. The agents reported those explicitly instead of faking programmatic
+calls to hit them; do the same rather than contorting tests for a number.
 
-- UI tests use `@testing-library/react` + `happy-dom`. Read
-  `apps/ui/src/test/setup.ts` and a couple of existing `src/**/*.test.tsx` first.
-- They are **much slower** — the full UI coverage run took ~17 minutes once.
-  Budget for that and keep every run backgrounded.
-- `apps/ui/src/components/ui/**` (generated shadcn kit) is already excluded from
-  the coverage requirement. Don't chase it.
-- The largest files, per `apps/ui/CLAUDE.md`: `pages/home-page.tsx` (~1370
-  lines), `pages/profile-form-page.tsx` (~670), `components/forms/schema-form.tsx`
-  (~500).
-- The UI baseline run reported **6 non-fatal errors** alongside 557 passing
-  tests. Diagnose those early — they may be unhandled rejections that will
-  confuse later runs.
-
-Rate achieved on the API for calibration: ~1,150 tests took it from 55.52% to
-97.89%, across five Workflow batches of 5-7 agents each.
+apps/ui specifics, if you do return to it:
+- Tests use `@testing-library/react` + `happy-dom`. RJSF v6 form submit does NOT
+  fire under happy-dom — add `// @vitest-environment jsdom` as the file's first
+  line (see `components/forms/schema-form.test.tsx`).
+- sonner drops a toast published before `<Toaster />` subscribes, so render
+  `<Toaster />` BEFORE the component under test to assert a mount-effect toast.
+- RTL `waitFor` does not detect vitest fake timers — with fake timers drive via
+  `fireEvent` + `act`, or it hangs.
+- Radix Select is unreliable under happy-dom; assert the visible consequence
+  (placeholder, disabled state) instead of opening it.
+- Do NOT assert exact float equality on animated/interpolated values. An exact
+  `toEqual` on an rAF-interpolated map centre passed in isolation and flaked
+  only in the full parallel suite.
 
 ### Findings filed rather than fixed
 
 The agents surfaced real defects while writing tests. Every one is **pinned by a
 test asserting current behaviour**, so fixing the source will fail that test and
 force a deliberate assertion update — nothing can be fixed silently. Filed as
-issues #490, #491, #492, #493, #494, #495, #500, #501, #502. Highlights:
+issues #490, #491, #492, #493, #494, #495, #500, #501, #502, #504, #506. Highlights:
 
 - **#501** — `packages/auth` logs the OTP in plaintext via `console.log` when no
   notification client is configured; also unescaped `appName`/`user.name` in
@@ -294,5 +293,13 @@ issues #490, #491, #492, #493, #494, #495, #500, #501, #502. Highlights:
   TypeError instead of a ZodError.
 - **#490** — several handlers violate the repo's "routes never throw" rule.
 - **#494** — some queries against the partitioned `items` table can't prune.
+- **#504** (security) — the DigiLocker `postMessage` listener has no
+  `event.origin` check, and `detectCodeFromMessage` regex-scrapes a credential
+  code out of *any* nested payload, so any frame that can post to the window can
+  inject an authorization code.
+- **#506** — RJSF v6 no longer spreads `formContext` onto widget props, so
+  schema-form's location widgets never receive `onLocationResolved`; the exact
+  coordinate a user picks never reaches profile-form-page. TypeScript can't
+  catch it because `WidgetProps` has an index signature.
 
 ## PROMPT ENDS HERE
