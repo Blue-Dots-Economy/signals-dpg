@@ -84,6 +84,7 @@
   "actions.sort_recent": "Newest",
   "actions.sort_oldest": "Oldest",
   "actions.sort_distance": "Distance",
+  "actions.status_group": "Status",
   "actions.type_group": "Action type",
   "actions.type_connect": "Connect",
   "actions.type_apply": "Apply",
@@ -620,8 +621,5 @@
   "public_profile.complete_profile_hint": "Complete your active profile to apply or connect.",
   "public_profile.action_sent": "{{action}} request sent",
   "public_profile.your_profile": "Your Profile",
-  "a11y.skip_to_content": "Skip to content",
-  "actions": {
-    "status_group": "Status"
-  }
+  "a11y.skip_to_content": "Skip to content"
 }
