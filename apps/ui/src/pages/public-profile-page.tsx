@@ -233,7 +233,7 @@ function ProfileActionRow({
   // (either direction) with the viewed item — parity with the list/map. Actions
   // only fetch for a signed-in user (the endpoint 401s anonymously; the hook
   // also self-gates on auth).
-  const { data: myActionsData } = useActions('all', { enabled: !!user });
+  const { data: myActionsData } = useActions('all', { enabled: !!user, limit: 100 });
   const hasOpenActionWithViewed = React.useMemo(() => {
     if (!activeItem) return false;
     return computeOpenActionItemIds(myActionsData?.actions ?? [], activeItem.item_id).has(

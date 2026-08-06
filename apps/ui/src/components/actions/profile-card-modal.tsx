@@ -238,7 +238,7 @@ export function ProfileCardModal({
 
   return (
     <ResponsiveDialog open={open} onOpenChange={onOpenChange} title={name} contentClassName="max-w-xl">
-      <div className="flex flex-col gap-4 overflow-y-auto p-6">
+      <div className="flex max-h-[85dvh] min-h-0 flex-col gap-4 overflow-y-auto p-6">
         <DialogHeader>
           <DialogTitle>{name}</DialogTitle>
           <DialogDescription>{t(descKey)}</DialogDescription>

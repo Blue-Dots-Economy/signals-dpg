@@ -14,6 +14,12 @@ import type { FetchMyActionsQuery } from '@/lib/action-api';
 const actions = {
   all: ['actions'] as const,
   lists: () => [...actions.all, 'list'] as const,
+  // Keys on the FULL query object (not a destructured subset), so every
+  // `FetchMyActionsQuery` field — including #439's `sort`/`facets`/`item_id`/
+  // `action_status`/`action_type` — automatically busts/isolates the cache
+  // entry when it differs. Don't switch this to a destructured field list;
+  // that would silently stop cache-isolating any field added to the query
+  // type in future without a matching edit here.
   list: (filters: FetchMyActionsQuery) => [...actions.lists(), filters] as const,
   details: () => [...actions.all, 'detail'] as const,
   detail: (actionId: string) => [...actions.details(), actionId] as const,

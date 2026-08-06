@@ -1,5 +1,9 @@
 import { describe, it, expect } from 'vitest';
-import { haversineMeters, nearestLocationMeters } from '../geo_distance.js';
+import {
+  haversineMeters,
+  nearestLocationMeters,
+  nearestDistanceMeters,
+} from '../geo_distance.js';
 
 describe('haversineMeters', () => {
   it('returns 0 for identical points', () => {
@@ -61,5 +65,43 @@ describe('nearestLocationMeters', () => {
     const center = { lat: 12.9716, lng: 77.5946 };
     const far = { lat: 40, lng: -70 };
     expect(nearestLocationMeters(center, [far, center])).toBe(0);
+  });
+});
+
+// #439 Task 7: item-to-item nearest distance (both sides are arrays of
+// locations — a counterparty item can carry multiple points, unlike the
+// single-center `nearestLocationMeters` above used by the cross-instance
+// merge). Null-safe: returns null (never Infinity) when either side has no
+// locations, so the caller can render "distance unknown" instead of a sort
+// key that silently pushes the row to the back.
+describe('nearestDistanceMeters', () => {
+  it('returns the minimum pairwise haversine distance across both location sets', () => {
+    const mine = [{ lat: 0, lng: 0 }];
+    const theirsNear = { lat: 0.001, lng: 0 }; // ~111m
+    const theirsFar = { lat: 1, lng: 0 }; // ~111km
+    const theirs = [theirsFar, theirsNear];
+    expect(nearestDistanceMeters(mine, theirs)).toBeCloseTo(
+      haversineMeters(mine[0], theirsNear),
+      6
+    );
+  });
+
+  it('returns null when the first list is empty', () => {
+    expect(nearestDistanceMeters([], [{ lat: 0, lng: 0 }])).toBeNull();
+  });
+
+  it('returns null when the second list is empty', () => {
+    expect(nearestDistanceMeters([{ lat: 0, lng: 0 }], [])).toBeNull();
+  });
+
+  it('returns null when either list is null or undefined', () => {
+    expect(nearestDistanceMeters(null, [{ lat: 0, lng: 0 }])).toBeNull();
+    expect(nearestDistanceMeters([{ lat: 0, lng: 0 }], undefined)).toBeNull();
+    expect(nearestDistanceMeters(undefined, null)).toBeNull();
+  });
+
+  it('returns 0 when the same point appears in both lists', () => {
+    const p = { lat: 12.9716, lng: 77.5946 };
+    expect(nearestDistanceMeters([{ lat: 40, lng: -70 }, p], [p])).toBe(0);
   });
 });
