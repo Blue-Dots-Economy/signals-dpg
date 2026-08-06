@@ -586,7 +586,8 @@ describeIf('fetchLocalMarkers bbox fallback (empty item_search)', () => {
 
   async function seedItem(
     key: string,
-    locations: Array<{ lat: number; lng: number }>
+    locations: Array<{ lat: number; lng: number }>,
+    lifecycle_status: 'live' | 'draft' = 'live'
   ): Promise<string> {
     const [row] = await db
       .insert(items)
@@ -599,7 +600,7 @@ describeIf('fetchLocalMarkers bbox fallback (empty item_search)', () => {
         created_by: OWNER_ID,
         item_locations: locations,
         item_state: {},
-        lifecycle_status: 'live',
+        lifecycle_status,
       })
       .returning({ item_id: items.item_id });
     ids[key] = row.item_id;
@@ -626,6 +627,16 @@ describeIf('fetchLocalMarkers bbox fallback (empty item_search)', () => {
     await seedItem('fbIn', [inA]); // in box
     await seedItem('fbOut', [outA]); // out of box
     await seedItem('fbMultiOneIn', [outA, inC]); // one of two locations in box
+    // #review: an item with no locations at all has nothing for
+    // jsonb_array_elements to iterate, so the EXISTS is unsatisfiable —
+    // excluded regardless of box.
+    await seedItem('fbNoLoc', []);
+    // #review: locks in the live_only invariant noted on the fallback
+    // branch's comment in item_fetch_runtime.ts — the fallback condition
+    // itself has no lifecycle predicate, so a non-live item with a genuine
+    // in-box location must still be excluded via lifecycle_filter: 'live_only'
+    // (the items-side condition), not via the bbox condition.
+    await seedItem('fbDraft', [inA], 'draft');
   });
 
   afterAll(async () => {
@@ -633,6 +644,13 @@ describeIf('fetchLocalMarkers bbox fallback (empty item_search)', () => {
       .delete(items)
       .where(and(eq(items.item_network, NET), eq(items.item_type, TYPE)));
     // The index-path test below inserts one item_search row — remove it.
+    // This DELETE is domain-wide (item_network + item_domain only, no
+    // item_type scope), broader than the file's other, type-scoped
+    // cleanups above — safe today only because this suite owns the
+    // resolved network+domain's item_search rows for the duration of the
+    // run and vitest.integration.config.ts pins fileParallelism: false; it
+    // would clobber a sibling suite's rows for the same network+domain if
+    // file-level parallelism were ever turned on.
     await db.execute(
       sql`DELETE FROM item_search WHERE item_network = ${NET} AND item_domain = ${DOMAIN}`
     );
@@ -660,6 +678,15 @@ describeIf('fetchLocalMarkers bbox fallback (empty item_search)', () => {
     expect(got.has(ids.fbIn)).toBe(true);
     expect(got.has(ids.fbMultiOneIn)).toBe(true);
     expect(got.has(ids.fbOut)).toBe(false);
+    // fbNoLoc: no locations at all — nothing for jsonb_array_elements to
+    // iterate, so the EXISTS is unsatisfiable regardless of box.
+    expect(got.has(ids.fbNoLoc)).toBe(false);
+    // fbDraft: genuine in-box location but lifecycle_status = 'draft' — the
+    // fallback bbox condition itself has no lifecycle predicate (unlike the
+    // index branch's `s.lifecycle_status = 'live'`), so exclusion here comes
+    // from `lifecycle_filter: 'live_only'` in bboxFilters(), locking in that
+    // invariant.
+    expect(got.has(ids.fbDraft)).toBe(false);
     expect(res.meta.total).toBe(2);
   });
 

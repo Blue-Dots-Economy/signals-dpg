@@ -44,8 +44,11 @@ Add an automatic, per-request fallback inside `buildWhereClause`'s bbox branch:
    ```
 
    A bbox on lat/lng is a pure numeric range check — no `earth_distance`
-   needed. Semantics match the GiST path's `ST_Intersects` recheck: "any of
-   the item's locations inside the viewport".
+   needed. Equivalent modulo geodesic-vs-planar edge treatment, immaterial at
+   viewport scale, to the GiST path's `ST_Intersects` recheck ("any of the
+   item's locations inside the viewport"): geography `ST_Intersects` treats
+   the box's edges as geodesics, while this `BETWEEN` check treats them as
+   constant-coordinate lines.
 
 ### Alternatives considered
 
@@ -65,7 +68,12 @@ Add an automatic, per-request fallback inside `buildWhereClause`'s bbox branch:
   automatically.
 - **Counts stay consistent:** `countLocalItems` and `fetchLocalMarkers` share
   `buildWhereClause`, so `meta.total` and the page flip paths together (the
-  UI's zoom-band truncation logic sees coherent numbers).
+  UI's zoom-band truncation logic sees coherent numbers) — with one caveat:
+  the probe runs once per `buildWhereClause` call (once for the count, once
+  for the fetch), so a worker indexing its first row for the domain in the
+  window between those two calls can split them onto different paths for
+  that single request; self-correcting on the very next request since the
+  probe is re-run fresh each time.
 - **Everything else unchanged for free:** `lifecycle_status = 'live'` is a
   separate items-side condition the markers route always forces; the
   degenerate-box → `sql\`false\`` guard stays; `capForZoom`/`MAP_FETCH_LIMIT`
@@ -77,7 +85,13 @@ Add an automatic, per-request fallback inside `buildWhereClause`'s bbox branch:
 - **Accepted limitation:** the probe distinguishes *empty* vs *not empty*
   only. A partially lagging index (worker down for a while, some rows
   indexed) still trusts the index; the worker's ~60s reconciliation sweep is
-  the recovery path for that, as today.
+  the recovery path for that, as today. Same shape at narrower scope: a new
+  `item_type` rolled out in an otherwise-indexed domain that the worker
+  doesn't yet cover reproduces the zero-pins symptom for just that type,
+  since the probe is network+domain, deliberately not per `item_type` —
+  per-type probing would drop a healthy domain onto the slow jsonb path
+  every time a new type appears, which is worse than the narrow gap it would
+  close.
 - **Scale envelope:** fallback environments hold < ~10k items per
   network+domain. The jsonb pass over a domain's live rows is a few
   milliseconds at that size. The probe runs per `buildWhereClause` call
