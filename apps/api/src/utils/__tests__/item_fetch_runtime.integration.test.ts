@@ -559,3 +559,135 @@ describeIf(
     });
   }
 );
+
+// ── bbox fallback when item_search has no rows for the network+domain ───────
+// Spec: docs/superpowers/specs/2026-08-06-map-bbox-index-fallback-design.md.
+// When the signals-search worker has never indexed anything for a
+// network+domain (local dev, worker-less deploys, fresh data migrations),
+// the bbox filter falls back to gating on items.item_locations directly
+// instead of silently returning zero markers.
+//
+// Ordering note: this is a SEPARATE top-level describe that runs AFTER the
+// Option B suite above (describes execute in declaration order, and the
+// integration config sets fileParallelism: false). That suite deletes every
+// item_search row it seeded in its afterAll, so item_search is empty again
+// for the resolved network+domain when this block starts; the beforeAll
+// below also clears it defensively in case a prior aborted run left rows.
+describeIf('fetchLocalMarkers bbox fallback (empty item_search)', () => {
+  let NET: string;
+  let DOMAIN: string;
+  let TYPE: string;
+  const OWNER_ID = `map-fallback-owner-${randomUUID().slice(0, 8)}`;
+  const ids: Record<string, string> = {};
+
+  async function seedItem(
+    key: string,
+    locations: Array<{ lat: number; lng: number }>
+  ): Promise<string> {
+    const [row] = await db
+      .insert(items)
+      .values({
+        item_network: NET,
+        item_domain: DOMAIN,
+        item_type: TYPE,
+        item_instance_url: 'http://localhost:2742',
+        item_schema_url: 'http://localhost:2742/schema',
+        created_by: OWNER_ID,
+        item_locations: locations,
+        item_state: {},
+        lifecycle_status: 'live',
+      })
+      .returning({ item_id: items.item_id });
+    ids[key] = row.item_id;
+    return row.item_id;
+  }
+
+  beforeAll(async () => {
+    const { primary } = await resolveBindings();
+    NET = primary.network;
+    DOMAIN = primary.domain;
+    TYPE = primary.item_type;
+
+    await ensureItemPartition(db, NET, DOMAIN);
+    await db.insert(user).values({ id: OWNER_ID, name: 'Map Fallback Suite' });
+
+    // item_search is a rebuildable read-model (the signals-search sweep
+    // re-creates rows from `items` within a cycle), so clearing the resolved
+    // network+domain here is safe and guarantees the probe sees "empty"
+    // regardless of leftovers from an aborted earlier run.
+    await db.execute(
+      sql`DELETE FROM item_search WHERE item_network = ${NET} AND item_domain = ${DOMAIN}`
+    );
+
+    await seedItem('fbIn', [inA]); // in box
+    await seedItem('fbOut', [outA]); // out of box
+    await seedItem('fbMultiOneIn', [outA, inC]); // one of two locations in box
+  });
+
+  afterAll(async () => {
+    await db
+      .delete(items)
+      .where(and(eq(items.item_network, NET), eq(items.item_type, TYPE)));
+    // The index-path test below inserts one item_search row — remove it.
+    await db.execute(
+      sql`DELETE FROM item_search WHERE item_network = ${NET} AND item_domain = ${DOMAIN}`
+    );
+    await db.delete(user).where(eq(user.id, OWNER_ID));
+  });
+
+  function bboxFilters() {
+    return {
+      item_network: NET,
+      item_domain: DOMAIN,
+      item_type: TYPE,
+      limit: 100,
+      offset: 0,
+      lifecycle_filter: 'live_only' as const,
+      min_lat: MIN_LAT,
+      min_lng: MIN_LNG,
+      max_lat: MAX_LAT,
+      max_lng: MAX_LNG,
+    };
+  }
+
+  it('empty item_search: falls back to item_locations — in-box items (incl. any-location-in-box) returned, out-of-box excluded, meta.total matches', async () => {
+    const res = await fetchLocalMarkers(bboxFilters());
+    const got = new Set(res.markers.map((m) => m.item_id));
+    expect(got.has(ids.fbIn)).toBe(true);
+    expect(got.has(ids.fbMultiOneIn)).toBe(true);
+    expect(got.has(ids.fbOut)).toBe(false);
+    expect(res.meta.total).toBe(2);
+  });
+
+  it('empty item_search: degenerate (inverted) box still returns empty, not an error', async () => {
+    const res = await fetchLocalMarkers({
+      ...bboxFilters(),
+      min_lat: MAX_LAT,
+      max_lat: MIN_LAT,
+    });
+    expect(res.markers).toHaveLength(0);
+    expect(res.meta.total).toBe(0);
+  });
+
+  // MUST run last in this describe: it makes item_search non-empty for the
+  // domain, flipping every later bbox call back to the index-gated path.
+  it('one item_search row for the domain flips bbox back to the index-gated path', async () => {
+    await db.execute(sql`
+      INSERT INTO item_search (item_network, item_domain, item_type, item_id, geo, lifecycle_status)
+      VALUES (
+        ${NET}, ${DOMAIN}, ${TYPE}, ${ids.fbIn},
+        ST_GeogFromText(${`MULTIPOINT(${inA.lng} ${inA.lat})`}),
+        'live'
+      )
+    `);
+    const res = await fetchLocalMarkers(bboxFilters());
+    const got = new Set(res.markers.map((m) => m.item_id));
+    // fbIn is indexed and in-box → returned by the index path.
+    expect(got.has(ids.fbIn)).toBe(true);
+    // fbMultiOneIn has an in-box location but NO item_search row: with the
+    // probe now true, the index governs again and it is excluded — proving
+    // the switch is empty-vs-not-empty, not per-item.
+    expect(got.has(ids.fbMultiOneIn)).toBe(false);
+    expect(res.meta.total).toBe(1);
+  });
+});

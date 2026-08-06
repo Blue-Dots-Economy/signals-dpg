@@ -162,6 +162,33 @@ async function resolveAllowedFacetFields(
   return allowed;
 }
 
+/**
+ * Map bbox fallback (spec 2026-08-06-map-bbox-index-fallback-design): whether
+ * the signals-search ingestion worker has ever indexed anything for this
+ * network+domain. `item_search` is maintained ONLY by that worker; in
+ * environments without it (local dev, worker-less deploys, fresh data
+ * migrations) the table is empty and the bbox branch below would otherwise
+ * exclude every item. Index-only probe on the leading PK columns —
+ * sub-millisecond — so it runs per call with no cache and no config knob.
+ * Deliberately empty-vs-not-empty, not per-item: one indexed row means "a
+ * worker exists, trust the index" (its ~60s reconciliation sweep is the
+ * recovery path for partial lag).
+ */
+async function hasSearchIndexRows(
+  item_network: string,
+  item_domain: string
+): Promise<boolean> {
+  const result = await db.execute(sql`
+    SELECT EXISTS (
+      SELECT 1 FROM item_search
+      WHERE item_network = ${item_network} AND item_domain = ${item_domain}
+    ) AS has_rows
+  `);
+  const rows =
+    (result as unknown as { rows?: Array<{ has_rows: boolean }> }).rows ?? [];
+  return rows[0]?.has_rows === true;
+}
+
 async function buildWhereClause(
   filters: Omit<ItemFetchFilters, 'limit' | 'offset'>,
   log?: ItemFetchLog
@@ -333,9 +360,10 @@ async function buildWhereClause(
     if (filters.min_lat >= filters.max_lat || filters.min_lng >= filters.max_lng) {
       // Inverted/degenerate box (e.g. swapped corners): defined as an empty
       // result rather than an error, so a malformed viewport never 500s —
-      // it just shows no markers.
+      // it just shows no markers. Checked before the index probe so a
+      // malformed viewport never costs a query.
       conditions.push(sql`false`);
-    } else {
+    } else if (await hasSearchIndexRows(filters.item_network, filters.item_domain)) {
       conditions.push(
         sql`
           EXISTS (
@@ -344,6 +372,24 @@ async function buildWhereClause(
               AND s.lifecycle_status = 'live'
               AND s.geo && ST_MakeEnvelope(${filters.min_lng}, ${filters.min_lat}, ${filters.max_lng}, ${filters.max_lat}, 4326)::geography
               AND ST_Intersects(s.geo, ST_MakeEnvelope(${filters.min_lng}, ${filters.min_lat}, ${filters.max_lng}, ${filters.max_lat}, 4326)::geography)
+          )
+        `
+      );
+    } else {
+      // Fallback: item_search has NEVER been populated for this
+      // network+domain (see hasSearchIndexRows above), so gate on the item's
+      // own item_locations. A bbox on lat/lng is a pure numeric range check —
+      // same "any location inside the box" semantics as the ST_Intersects
+      // recheck, computed without the read-model. Fine at the <10k-item
+      // scale of worker-less environments; the moment the worker indexes its
+      // first row for the domain, the probe flips and the GiST path above
+      // takes over with no restart.
+      conditions.push(
+        sql`
+          EXISTS (
+            SELECT 1 FROM jsonb_array_elements(${items.item_locations}) loc
+            WHERE (loc->>'lat')::float8 BETWEEN ${filters.min_lat} AND ${filters.max_lat}
+              AND (loc->>'lng')::float8 BETWEEN ${filters.min_lng} AND ${filters.max_lng}
           )
         `
       );
