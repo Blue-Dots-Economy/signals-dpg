@@ -9,6 +9,8 @@ import {
   SheetFooter,
 } from '@/components/ui/sheet';
 import { Button } from '@/components/ui/button';
+import { ResponsiveDialog } from '@/components/ui/responsive-dialog';
+import { useIsMobile } from '@/hooks/use-mobile';
 import type { DotNetworkDomain } from '@/engine/types';
 import { getEnumFilterFieldsForDomains } from '@/lib/enum-filters';
 import { MultiSelectGroup, CHIP_THRESHOLD } from '@/components/filters/multi-select-group';
@@ -104,14 +106,23 @@ export function ActionFiltersSheet({
     onChange(updated);
   };
 
-  return (
-    <Sheet open={open} onOpenChange={(nextOpen) => { if (!nextOpen) onClose(); }}>
-      <SheetContent side="right" className="flex h-full w-full flex-col sm:max-w-sm">
-        <SheetHeader>
-          <SheetTitle>{t('filters.title', 'Filters')}</SheetTitle>
-        </SheetHeader>
+  const isMobile = useIsMobile();
 
-        <div className="flex-1 space-y-6 overflow-y-auto px-4">
+  const closeButton = (
+    <Button
+      type="button"
+      onClick={onClose}
+      data-testid="action-filters-done"
+      className={isMobile ? 'w-full' : undefined}
+    >
+      {t('filters.close', 'Close filters')}
+    </Button>
+  );
+
+  // Shared filter content (status + action type + facets), rendered inside a
+  // right Sheet on desktop and a bottom Drawer on mobile.
+  const filterBody = (
+    <>
           {/* Status — single-select (All / Pending / Accepted / Rejected). Lives
               here (My Actions only) rather than in the map/list filter panel,
               since status is an action concept. */}
@@ -214,13 +225,40 @@ export function ActionFiltersSheet({
               </section>
             );
           })}
-        </div>
+    </>
+  );
 
-        <SheetFooter>
-          <Button type="button" onClick={onClose} data-testid="action-filters-done">
-            {t('filters.close', 'Close filters')}
-          </Button>
-        </SheetFooter>
+  // Mobile: a bottom-sheet Drawer (ResponsiveDialog) — matches the map/list
+  // filters' mobile shape and avoids the full-screen right panel.
+  if (isMobile) {
+    return (
+      <ResponsiveDialog
+        open={open}
+        onOpenChange={(nextOpen) => {
+          if (!nextOpen) onClose();
+        }}
+        title={t('filters.title', 'Filters')}
+      >
+        <div className="flex max-h-[85svh] flex-col">
+          <div className="border-b px-4 py-4">
+            <h2 className="text-base font-semibold">{t('filters.title', 'Filters')}</h2>
+          </div>
+          <div className="flex-1 space-y-6 overflow-y-auto px-4 py-4">{filterBody}</div>
+          <div className="border-t p-4">{closeButton}</div>
+        </div>
+      </ResponsiveDialog>
+    );
+  }
+
+  // Desktop: right slide-over Sheet.
+  return (
+    <Sheet open={open} onOpenChange={(nextOpen) => { if (!nextOpen) onClose(); }}>
+      <SheetContent side="right" className="flex h-full w-full flex-col sm:max-w-sm">
+        <SheetHeader>
+          <SheetTitle>{t('filters.title', 'Filters')}</SheetTitle>
+        </SheetHeader>
+        <div className="flex-1 space-y-6 overflow-y-auto px-4">{filterBody}</div>
+        <SheetFooter>{closeButton}</SheetFooter>
       </SheetContent>
     </Sheet>
   );
