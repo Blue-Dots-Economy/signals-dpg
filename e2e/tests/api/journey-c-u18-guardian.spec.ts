@@ -1,8 +1,8 @@
 import { test, expect } from '../../src/fixtures.js';
-import { provisioningMethod } from '../../src/flows.js';
-import { signup, acceptCoreConsent, TEST_OTP, type Session } from '../../src/auth.js';
+import { freshIdentity, provisioningMethod } from '../../src/flows.js';
+import { signup, acceptCoreConsent, TEST_OTP, type AuthContext, type Session } from '../../src/auth.js';
 import { resolveBinding, buildMinimalItemState, type Binding } from '../../src/schema.js';
-import { newPhone, newName } from '../../src/identities.js';
+import { newName, newPhone } from '../../src/identities.js';
 import type { ApiClient } from '../../src/api-client.js';
 import type { E2EConfig } from '../../src/config.js';
 
@@ -31,8 +31,19 @@ async function fetchItem(session: Session, binding: Binding, itemId: string) {
 }
 
 /** Sign up a minor and create a profile in the gated domain; returns the draft item. */
-async function setupMinorDraft(api: ApiClient, cfg: E2EConfig, domainKey: string) {
-  const session = await signup(api, { channel: 'phone', value: newPhone() }, newName('Minor'));
+async function setupMinorDraft(
+  api: ApiClient,
+  cfg: E2EConfig,
+  domainKey: string,
+  authCtx: AuthContext,
+  provider: 'betterauth' | 'keycloak',
+) {
+  // A minor still self-signs-up here on purpose — Journey C is about the U18
+  // path a real minor takes, and service provisioning would skip the gate under
+  // test. Provider-aware so the identity lands on a channel whose OTP is
+  // readable (Keycloak: Mailpit for email, the container log for phone).
+  const identity = freshIdentity(cfg, 'minor', { provider });
+  const session = await signup(api, identity, newName('Minor'), authCtx, { age: 14 });
   await acceptCoreConsent(session, cfg.network, 'signup');
 
   const dob = await session.client.post<{ isMinor?: boolean }>('/api/v1/consent/u18/dob', {
@@ -63,8 +74,8 @@ test.describe('Journey C — U18 guardian consent', () => {
   test.skip(({ cfg, caps }) => provisioningMethod(cfg, caps) !== 'signup', 'C uses OTP self-signup (target must allow it)');
   test.skip(({ caps }) => !caps.testOtp, 'requires CREATE_TEST_OTP on the target');
 
-  test('a minor stays draft and self-consent does NOT promote (fail-closed)', async ({ api, cfg }) => {
-    const { session, binding, itemId, item } = await setupMinorDraft(api, cfg, cfg.servedDomains[0]);
+  test('a minor stays draft and self-consent does NOT promote (fail-closed)', async ({ api, cfg, authCtx, provider }) => {
+    const { session, binding, itemId, item } = await setupMinorDraft(api, cfg, cfg.servedDomains[0], authCtx, provider);
 
     expect(item?.lifecycle_status, 'a gated minor must not be live on create').not.toBe('live');
 
@@ -80,8 +91,8 @@ test.describe('Journey C — U18 guardian consent', () => {
     expect(after?.lifecycle_status, 'minor self-consent must NOT promote to live').not.toBe('live');
   });
 
-  test('a verified guardian promotes the minor profile to live', async ({ api, cfg }) => {
-    const { session, binding, itemId } = await setupMinorDraft(api, cfg, cfg.servedDomains[0]);
+  test('a verified guardian promotes the minor profile to live', async ({ api, cfg, authCtx, provider }) => {
+    const { session, binding, itemId } = await setupMinorDraft(api, cfg, cfg.servedDomains[0], authCtx, provider);
 
     // 1) register + verify the guardian (account-level guardian consent)
     const guardian = await session.client.post<{ otpSent?: boolean }>('/api/v1/consent/u18/guardian', {

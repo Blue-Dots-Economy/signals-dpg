@@ -15,8 +15,8 @@ test.describe('Journey G — PII masking & non-leakage', () => {
   test.skip(({ cfg, caps }) => provisioningMethod(cfg, caps) === null, 'no way to create users');
   test.skip(({ caps }) => !caps.testOtp, 'requires CREATE_TEST_OTP on the target');
 
-  test('private fields are real to the owner, masked to strangers; private_state never leaks', async ({ api, service, cfg, caps }) => {
-    const owner = await createLiveProfileUser(api, service, cfg, caps, { domainKey: cfg.servedDomains[0], label: 'pii' });
+  test('private fields are real to the owner, masked to strangers; private_state never leaks', async ({ api, service, cfg, caps, authCtx }) => {
+    const owner = await createLiveProfileUser(api, service, cfg, caps, { authCtx, domainKey: cfg.servedDomains[0], label: 'pii' });
     const { network, domain, item_type } = owner.binding;
 
     // pick a private field that was set (seeker's name/phone/location are private)
@@ -47,8 +47,8 @@ test.describe('Journey G — PII masking & non-leakage', () => {
     expect(JSON.stringify(net.body), 'no item_private_state in network response').not.toContain('item_private_state');
   });
 
-  test('a stranger read stays masked even after the owner has self-read (cache isolation)', async ({ api, service, cfg, caps }) => {
-    const owner = await createLiveProfileUser(api, service, cfg, caps, { domainKey: cfg.servedDomains[0], label: 'piic' });
+  test('a stranger read stays masked even after the owner has self-read (cache isolation)', async ({ api, service, cfg, caps, authCtx }) => {
+    const owner = await createLiveProfileUser(api, service, cfg, caps, { authCtx, domainKey: cfg.servedDomains[0], label: 'piic' });
     const { network, domain, item_type } = owner.binding;
     const key = ['name', 'phone', 'location'].find((k) => owner.itemState[k] !== undefined)!;
 

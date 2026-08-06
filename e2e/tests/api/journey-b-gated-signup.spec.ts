@@ -34,7 +34,7 @@ test.describe('Journey B — gated self-signup', () => {
     }
   });
 
-  test('the service-provisioning path onboards a participant who can then log in', async ({ api, service, cfg, caps }) => {
+  test('the service-provisioning path onboards a participant who can then log in', async ({ api, service, cfg, caps, authCtx }) => {
     requireCapabilities(test, caps, ['serviceAuth', 'testOtp']);
 
     const channel = cfg.loginChannels.includes('phone') ? 'phone' : 'email';
@@ -56,7 +56,7 @@ test.describe('Journey B — gated self-signup', () => {
     const check = await checkUser(api, identity);
     expect(check.body.userExists, 'provisioned user should exist').toBeTruthy();
 
-    const session = await login(api, identity);
+    const session = await login(api, identity, authCtx);
     expect(session.token, 'provisioned participant can log in').toBeTruthy();
   });
 });

@@ -12,8 +12,8 @@ test.describe('Journey L (UI) — support dialog', () => {
   test.skip(({ cfg, caps }) => provisioningMethod(cfg, caps) === null, 'no way to create users');
   test.skip(({ caps }) => !caps.testOtp, 'requires CREATE_TEST_OTP on the target');
 
-  test('a signed-in user can open and submit the support dialog', async ({ page, api, service, cfg, caps }) => {
-    const user = await createLiveProfileUser(api, service, cfg, caps, { domainKey: cfg.servedDomains[0], label: 'sup' });
+  test('a signed-in user can open and submit the support dialog', async ({ page, api, service, cfg, caps, authCtx }) => {
+    const user = await createLiveProfileUser(api, service, cfg, caps, { authCtx, domainKey: cfg.servedDomains[0], label: 'sup' });
     await uiLoginAs(page, user.session.token);
     await gotoEn(page, '/');
 

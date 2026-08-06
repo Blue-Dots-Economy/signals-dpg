@@ -22,12 +22,24 @@ export interface Capabilities {
   serviceAuth: boolean;
   /** A second peer instance is configured (G3). */
   peer: boolean;
+  /** A readable Mailpit inbox — the email oracle, and the Keycloak email OTP. */
+  mailpit: boolean;
+  /** The Keycloak container's log is readable, enabling phone-channel OTP. */
+  keycloakPhoneOtp: boolean;
 }
 
 export function capabilitiesFor(cfg: E2EConfig): Capabilities {
   return {
-    testOtp: cfg.otp.mode === 'test-otp' || (cfg.otp.mode === 'notification-stub' && !!cfg.notificationStubUrl),
-    notificationStub: !!cfg.notificationStubUrl,
+    // Mailpit also satisfies this: under Keycloak the login OTP is random and
+    // read back from the inbox, which is an OTP-retrieval mechanism just as much
+    // as CREATE_TEST_OTP's fixed code is.
+    testOtp:
+      cfg.otp.mode === 'test-otp' ||
+      (cfg.otp.mode === 'notification-stub' && !!cfg.notificationStubUrl) ||
+      !!cfg.mailpitUrl,
+    notificationStub: !!cfg.notificationStubUrl || !!cfg.mailpitUrl,
+    mailpit: !!cfg.mailpitUrl,
+    keycloakPhoneOtp: !!cfg.keycloakLogContainer,
     db: !!cfg.db.url,
     faultInjection: cfg.faultInjection,
     deterministicKey: cfg.deterministicPiiKey,
@@ -45,6 +57,9 @@ const REASONS: Record<keyof Capabilities, string> = {
   deterministicKey: 'requires a known SIGNALS_PII_KEY (config.deterministicPiiKey) — a local instance only',
   serviceAuth: 'requires service-caller credentials (config.auth.serviceApiKey + actingOrgId)',
   peer: 'requires a second peer instance (config.peer.apiBaseUrl) — G3 only',
+  mailpit: 'requires a readable Mailpit inbox (config.mailpitUrl) — a local instance only',
+  keycloakPhoneOtp:
+    'requires a readable Keycloak container log (config.keycloakLogContainer, KC_SPI_SMS_PROVIDER=log) — a local instance only',
 };
 
 /**

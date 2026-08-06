@@ -16,6 +16,14 @@
     "email"
   ],
   "peerAuthMode": "permissive",
+  "authProvider": "auto",
+  "keycloak": {
+    "baseUrl": "https://REPLACE-dev-keycloak.example",
+    "internalBaseUrl": "https://REPLACE-dev-keycloak.example",
+    "realm": "bluedots",
+    "uiClientId": "signals-ui",
+    "redirectUri": "https://REPLACE-dev.example/auth/callback"
+  },
   "action": {
     "type": "apply",
     "acceptStatus": "accepted"
@@ -28,6 +36,8 @@
     "mode": "test-otp"
   },
   "notificationStubUrl": null,
+  "mailpitUrl": null,
+  "keycloakLogContainer": null,
   "db": {
     "url": null
   },

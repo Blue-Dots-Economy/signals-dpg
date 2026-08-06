@@ -11,9 +11,9 @@ test.describe('Journey F — PII reveal', () => {
   test.skip(({ cfg, caps }) => provisioningMethod(cfg, caps) === null, 'no way to create users (gated target without service creds)');
   test.skip(({ caps }) => !caps.testOtp, 'requires OTP retrieval (CREATE_TEST_OTP on the target)');
 
-  test('contact details are revealed only to a participant after the reveal status', async ({ api, service, cfg, caps }) => {
-    const source = await createLiveProfileUser(api, service, cfg, caps, { domainKey: cfg.servedDomains[0], label: 'fsrc' });
-    const target = await createLiveProfileUser(api, service, cfg, caps, { domainKey: cfg.servedDomains[1] ?? cfg.servedDomains[0], label: 'ftgt' });
+  test('contact details are revealed only to a participant after the reveal status', async ({ api, service, cfg, caps, authCtx }) => {
+    const source = await createLiveProfileUser(api, service, cfg, caps, { authCtx, domainKey: cfg.servedDomains[0], label: 'fsrc' });
+    const target = await createLiveProfileUser(api, service, cfg, caps, { authCtx, domainKey: cfg.servedDomains[1] ?? cfg.servedDomains[0], label: 'ftgt' });
 
     const { actionId } = await performAction(source.session, {
       actionType: cfg.action.type,
@@ -31,7 +31,7 @@ test.describe('Journey F — PII reveal', () => {
     expect([401, 403], `unauthenticated must be rejected, got ${anon.status}`).toContain(anon.status);
 
     // a non-participant third user → 403 NOT_ACTION_PARTICIPANT
-    const stranger = await createLiveProfileUser(api, service, cfg, caps, { domainKey: cfg.servedDomains[0], label: 'fstr' });
+    const stranger = await createLiveProfileUser(api, service, cfg, caps, { authCtx, domainKey: cfg.servedDomains[0], label: 'fstr' });
     const strangerRes = await stranger.session.client.get<{ error?: string }>(path);
     expect(strangerRes.status).toBe(403);
     expect(strangerRes.body.error, JSON.stringify(strangerRes.body)).toBe('NOT_ACTION_PARTICIPANT');

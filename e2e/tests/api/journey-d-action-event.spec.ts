@@ -11,12 +11,12 @@ test.describe('Journey D — action → event', () => {
   test.skip(({ cfg, caps }) => provisioningMethod(cfg, caps) === null, 'no way to create users (gated target without service creds)');
   test.skip(({ caps }) => !caps.testOtp, 'requires OTP retrieval (CREATE_TEST_OTP on the target)');
 
-  test('a live source performs an action on a live target, which the target accepts', async ({ api, service, cfg, caps }) => {
+  test('a live source performs an action on a live target, which the target accepts', async ({ api, service, cfg, caps, authCtx }) => {
     const sourceDomain = cfg.servedDomains[0];
     const targetDomain = cfg.servedDomains[1] ?? cfg.servedDomains[0];
 
-    const source = await createLiveProfileUser(api, service, cfg, caps, { domainKey: sourceDomain, label: 'src' });
-    const target = await createLiveProfileUser(api, service, cfg, caps, { domainKey: targetDomain, label: 'tgt' });
+    const source = await createLiveProfileUser(api, service, cfg, caps, { authCtx, domainKey: sourceDomain, label: 'src' });
+    const target = await createLiveProfileUser(api, service, cfg, caps, { authCtx, domainKey: targetDomain, label: 'tgt' });
     expect(source.lifecycleStatus).toBe('live');
     expect(target.lifecycleStatus).toBe('live');
 
@@ -34,9 +34,9 @@ test.describe('Journey D — action → event', () => {
     expect(update.res.body.summary.succeeded).toBe(1);
   });
 
-  test('array body to /action/perform is rejected (batch belongs to /perform/bulk)', async ({ api, service, cfg, caps }) => {
-    const source = await createLiveProfileUser(api, service, cfg, caps, { domainKey: cfg.servedDomains[0], label: 'arr' });
-    const target = await createLiveProfileUser(api, service, cfg, caps, { domainKey: cfg.servedDomains[1] ?? cfg.servedDomains[0], label: 'arr2' });
+  test('array body to /action/perform is rejected (batch belongs to /perform/bulk)', async ({ api, service, cfg, caps, authCtx }) => {
+    const source = await createLiveProfileUser(api, service, cfg, caps, { authCtx, domainKey: cfg.servedDomains[0], label: 'arr' });
+    const target = await createLiveProfileUser(api, service, cfg, caps, { authCtx, domainKey: cfg.servedDomains[1] ?? cfg.servedDomains[0], label: 'arr2' });
 
     const res = await source.session.client.post<{ summary?: unknown }>('/api/v1/action/perform', [
       {
@@ -52,10 +52,10 @@ test.describe('Journey D — action → event', () => {
     expect(res.status, 'an array to the single-object endpoint must be a request-level 400').toBe(400);
   });
 
-  test('a non-participant cannot advance another action\'s status', async ({ api, service, cfg, caps }) => {
-    const source = await createLiveProfileUser(api, service, cfg, caps, { domainKey: cfg.servedDomains[0], label: 'dns' });
-    const target = await createLiveProfileUser(api, service, cfg, caps, { domainKey: cfg.servedDomains[1] ?? cfg.servedDomains[0], label: 'dnt' });
-    const stranger = await createLiveProfileUser(api, service, cfg, caps, { domainKey: cfg.servedDomains[0], label: 'dnstr' });
+  test('a non-participant cannot advance another action\'s status', async ({ api, service, cfg, caps, authCtx }) => {
+    const source = await createLiveProfileUser(api, service, cfg, caps, { authCtx, domainKey: cfg.servedDomains[0], label: 'dns' });
+    const target = await createLiveProfileUser(api, service, cfg, caps, { authCtx, domainKey: cfg.servedDomains[1] ?? cfg.servedDomains[0], label: 'dnt' });
+    const stranger = await createLiveProfileUser(api, service, cfg, caps, { authCtx, domainKey: cfg.servedDomains[0], label: 'dnstr' });
 
     const { actionId } = await performAction(source.session, {
       actionType: cfg.action.type,

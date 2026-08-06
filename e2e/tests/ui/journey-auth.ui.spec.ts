@@ -12,8 +12,8 @@ test.describe('Authenticated UI (provision + token injection)', () => {
   test.skip(({ cfg, caps }) => provisioningMethod(cfg, caps) === null, 'no way to create users');
   test.skip(({ caps }) => !caps.testOtp, 'requires CREATE_TEST_OTP on the target');
 
-  test('an injected session passes RequireAuth (profile-form loads, no login redirect)', async ({ page, api, service, cfg, caps }) => {
-    const user = await createLiveProfileUser(api, service, cfg, caps, { domainKey: cfg.servedDomains[0], label: 'uiauth' });
+  test('an injected session passes RequireAuth (profile-form loads, no login redirect)', async ({ page, api, service, cfg, caps, authCtx }) => {
+    const user = await createLiveProfileUser(api, service, cfg, caps, { authCtx, domainKey: cfg.servedDomains[0], label: 'uiauth' });
     await uiLoginAs(page, user.session.token);
 
     // /profile/new is behind RequireAuth — an unauthenticated visit redirects to

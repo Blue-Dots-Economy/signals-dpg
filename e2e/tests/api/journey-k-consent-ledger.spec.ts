@@ -1,7 +1,7 @@
 import { test, expect } from '../../src/fixtures.js';
-import { createLiveProfileUser, provisioningMethod } from '../../src/flows.js';
+import { createLiveProfileUser, freshIdentity, provisioningMethod } from '../../src/flows.js';
 import { signup, login, acceptCoreConsent, identityQuery, type Identity, type Session } from '../../src/auth.js';
-import { newName, newPhone, newEmail } from '../../src/identities.js';
+import { newName } from '../../src/identities.js';
 
 /**
  * Journey K — Consent ledger invariants (P0).
@@ -12,26 +12,31 @@ test.describe('Journey K — consent ledger', () => {
   test.skip(({ cfg, caps }) => provisioningMethod(cfg, caps) === null, 'no way to create users (gated target without service creds)');
   test.skip(({ caps }) => !caps.testOtp, 'requires OTP retrieval (CREATE_TEST_OTP on the target)');
 
-  test('a client-supplied consent version is ignored; the server records its own', async ({ api, service, cfg, caps }) => {
-    const channel = cfg.loginChannels.includes('phone') ? 'phone' : 'email';
-    const identity: Identity = channel === 'phone' ? { channel, value: newPhone() } : { channel, value: newEmail('k') };
+  test('a client-supplied consent version is ignored; the server records its own', async ({ api, service, cfg, caps, authCtx, provider }) => {
+    const identity: Identity = freshIdentity(cfg, 'k', { provider });
+    const channel = identity.channel;
 
     // create an authenticated user (signup on allowed targets; provision+login on gated)
     let session: Session;
     if (provisioningMethod(cfg, caps) === 'signup') {
-      session = await signup(api, identity, newName('Ledger'));
+      session = await signup(api, identity, newName('Ledger'), authCtx);
     } else {
       const idField = channel === 'phone' ? { phone_number: identity.value } : { email: identity.value };
       const prov = await service.post('/api/v1/admin/participant', {
         ...idField,
         name: newName('Ledger'),
-        terms_accepted: true,
-        privacy_accepted: true,
+        // age is mandatory whenever consent is sent (#331 age snapshot) —
+        // without it the route refuses with AGE_REQUIRED.
+        age: 35,
+        compliance: [
+          { key: 'user_terms', value: true },
+          { key: 'user_privacy', value: true },
+        ],
         channel: 'link',
         network: cfg.network,
       });
       expect(prov.status).toBe(200);
-      session = await login(api, identity);
+      session = await login(api, identity, authCtx);
     }
 
     const FORGED = 999_999;
@@ -57,17 +62,17 @@ test.describe('Journey K — consent ledger', () => {
     ).toBeFalsy();
   });
 
-  test('re-accepting terms is append-only and does not multiply the current version', async ({ api, service, cfg, caps }) => {
-    const channel = cfg.loginChannels.includes('phone') ? 'phone' : 'email';
-    const identity: Identity = channel === 'phone' ? { channel, value: newPhone() } : { channel, value: newEmail('k2') };
+  test('re-accepting terms is append-only and does not multiply the current version', async ({ api, service, cfg, caps, authCtx, provider }) => {
+    const identity: Identity = freshIdentity(cfg, 'k2', { provider });
+    const channel = identity.channel;
 
     let session: Session;
     if (provisioningMethod(cfg, caps) === 'signup') {
-      session = await signup(api, identity, newName('Ledger2'));
+      session = await signup(api, identity, newName('Ledger2'), authCtx);
     } else {
       const idField = channel === 'phone' ? { phone_number: identity.value } : { email: identity.value };
-      await service.post('/api/v1/admin/participant', { ...idField, name: newName('Ledger2'), terms_accepted: true, privacy_accepted: true, channel: 'link', network: cfg.network });
-      session = await login(api, identity);
+      await service.post('/api/v1/admin/participant', { ...idField, name: newName('Ledger2'), age: 35, compliance: [{ key: 'user_terms', value: true }, { key: 'user_privacy', value: true }], channel: 'link', network: cfg.network });
+      session = await login(api, identity, authCtx);
     }
 
     // accept terms + privacy twice
@@ -83,9 +88,9 @@ test.describe('Journey K — consent ledger', () => {
     expect(status.body.statuses.terms.filter((v) => v === current).length, 'current terms version appears once').toBe(1);
   });
 
-  test('profile_creation consent is idempotent (re-accept records nothing new)', async ({ api, service, cfg, caps }) => {
+  test('profile_creation consent is idempotent (re-accept records nothing new)', async ({ api, service, cfg, caps, authCtx }) => {
     test.skip(provisioningMethod(cfg, caps) === null, 'no way to create users');
-    const u = await createLiveProfileUser(api, service, cfg, caps, { domainKey: cfg.servedDomains[0], label: 'kidem' });
+    const u = await createLiveProfileUser(api, service, cfg, caps, { authCtx, domainKey: cfg.servedDomains[0], label: 'kidem' });
 
     // the profile is already live (consent recorded at create / promotion); a
     // repeat profile-accept for the same item must be a no-op (recorded 0).

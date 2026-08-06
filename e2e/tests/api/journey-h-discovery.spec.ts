@@ -10,8 +10,8 @@ test.describe('Journey H — discovery', () => {
   test.skip(({ cfg, caps }) => provisioningMethod(cfg, caps) === null, 'no way to create users (gated target without service creds)');
   test.skip(({ caps }) => !caps.testOtp, 'requires OTP retrieval (CREATE_TEST_OTP on the target)');
 
-  test('instance-local fetch is owner-scoped; network fetch discovers the live item', async ({ api, service, cfg, caps }) => {
-    const owner = await createLiveProfileUser(api, service, cfg, caps, { domainKey: cfg.servedDomains[0], label: 'disc' });
+  test('instance-local fetch is owner-scoped; network fetch discovers the live item', async ({ api, service, cfg, caps, authCtx }) => {
+    const owner = await createLiveProfileUser(api, service, cfg, caps, { authCtx, domainKey: cfg.servedDomains[0], label: 'disc' });
     const { network, domain, item_type } = owner.binding;
 
     // instance-local: the owner sees their own item
@@ -33,9 +33,9 @@ test.describe('Journey H — discovery', () => {
     expect(typeof net.body.meta.total, 'network fetch returns a meta.total').toBe('number');
   });
 
-  test('instance-local fetch does not leak another user\'s items to a caller', async ({ api, service, cfg, caps }) => {
-    const a = await createLiveProfileUser(api, service, cfg, caps, { domainKey: cfg.servedDomains[0], label: 'own-a' });
-    const b = await createLiveProfileUser(api, service, cfg, caps, { domainKey: cfg.servedDomains[0], label: 'own-b' });
+  test('instance-local fetch does not leak another user\'s items to a caller', async ({ api, service, cfg, caps, authCtx }) => {
+    const a = await createLiveProfileUser(api, service, cfg, caps, { authCtx, domainKey: cfg.servedDomains[0], label: 'own-a' });
+    const b = await createLiveProfileUser(api, service, cfg, caps, { authCtx, domainKey: cfg.servedDomains[0], label: 'own-b' });
 
     // b's local fetch must not contain a's item (owner-scoped)
     const bItems = await b.session.client.get<{ items: Array<{ item_id: string }> }>(

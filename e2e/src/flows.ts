@@ -2,12 +2,22 @@ import type { ApiClient } from './api-client.js';
 import type { E2EConfig } from './config.js';
 import type { Capabilities } from './capabilities.js';
 import { resolveBinding, buildMinimalItemState, type Binding } from './schema.js';
-import { acceptCoreConsent, login, signup, type Identity, type Session } from './auth.js';
+import {
+  acceptCoreConsent,
+  login,
+  resolveAuthProvider,
+  signup,
+  type AuthContext,
+  type Identity,
+  type Session,
+} from './auth.js';
 import { newEmail, newName, newPhone } from './identities.js';
 
 /** A proven-adult DOB so profiles in guardian-gated domains can go live
  *  (a null DOB on a gated domain is fail-closed → stays draft). */
 const ADULT_DOB = '1990-01-01';
+/** The same fact as an age snapshot (#331), which is what signup now takes. */
+const ADULT_AGE = 35;
 
 export interface ItemRef {
   item_network: string;
@@ -33,15 +43,67 @@ export interface LiveProfile {
   targetRef: ItemRef & { item_instance_url: string };
 }
 
-/** Which account-creation path the target supports, given config + capabilities. */
+/**
+ * Which account-creation path to use for a throwaway persona.
+ *
+ * Service provisioning is preferred whenever credentials exist, even on an
+ * `allowed` target. Public self-signup is rate-limited per IP
+ * (`MAX_PER_IP = 10` per hour in `services/auth/self_signup.ts`), which a suite
+ * that creates a fresh persona per test exhausts almost immediately — every
+ * later test then dies on `SIGNUP_RATE_LIMITED` for a reason that has nothing to
+ * do with what it was asserting. `POST /api/v1/admin/participant` is the
+ * intended bulk path and carries no such limit; under Keycloak it creates the
+ * realm identity too, so the persona can still log in.
+ *
+ * Journeys that are specifically ABOUT self-signup (A, B) call `signup()`
+ * directly and are unaffected by this preference.
+ */
 export function provisioningMethod(cfg: E2EConfig, caps: Capabilities): 'signup' | 'service' | null {
-  if (cfg.selfSignupMode === 'allowed') return 'signup';
   if (caps.serviceAuth) return 'service';
+  if (cfg.selfSignupMode === 'allowed') return 'signup';
   return null;
 }
 
-function freshIdentity(cfg: E2EConfig, label: string): Identity {
-  const channel = cfg.loginChannels.includes('phone') ? 'phone' : 'email';
+/**
+ * The provider, when an AuthContext is available. Without one the caller can
+ * only be on the better-auth path (the Keycloak driver needs the request
+ * context), so default there rather than making every call site pass it.
+ */
+async function resolveProvider(
+  api: ApiClient,
+  cfg: E2EConfig,
+  authCtx?: AuthContext,
+): Promise<'betterauth' | 'keycloak'> {
+  if (!authCtx) return 'betterauth';
+  return resolveAuthProvider(api, cfg);
+}
+
+/**
+ * Pick an identity channel the target can actually deliver an OTP on.
+ *
+ * Under Keycloak the login OTP is random and must be read back from its delivery
+ * channel: email → Mailpit, phone → the Keycloak container log. So when the
+ * provider is Keycloak, prefer whichever channel has a configured oracle and
+ * only fall back to phone when the log container is the one available.
+ */
+export function freshIdentity(
+  cfg: E2EConfig,
+  label: string,
+  opts: { provider?: 'betterauth' | 'keycloak' } = {},
+): Identity {
+  const emailAllowed = cfg.loginChannels.includes('email');
+  const phoneAllowed = cfg.loginChannels.includes('phone');
+
+  if (opts.provider === 'keycloak') {
+    if (emailAllowed && cfg.mailpitUrl) return { channel: 'email', value: newEmail(label) };
+    if (phoneAllowed && cfg.keycloakLogContainer) return { channel: 'phone', value: newPhone() };
+    throw new Error(
+      '[e2e] keycloak target has no readable OTP channel: set config.mailpitUrl (email) or config.keycloakLogContainer (phone)',
+    );
+  }
+
+  // better-auth: the code is the fixed CREATE_TEST_OTP value on either channel.
+  const channel = phoneAllowed ? 'phone' : 'email';
   return channel === 'phone' ? { channel, value: newPhone() } : { channel, value: newEmail(label) };
 }
 
@@ -77,7 +139,7 @@ export async function createLiveProfileUser(
   service: ApiClient,
   cfg: E2EConfig,
   caps: Capabilities,
-  opts: { domainKey?: string; label?: string } = {},
+  opts: { domainKey?: string; label?: string; authCtx?: AuthContext } = {},
 ): Promise<LiveProfile> {
   const label = opts.label ?? 'user';
   const displayName = newName(label);
@@ -85,13 +147,19 @@ export async function createLiveProfileUser(
   const itemState = buildMinimalItemState(binding.schema);
   const method = provisioningMethod(cfg, caps);
   if (!method) throw new Error('[e2e] cannot create users: target is gated and no service credentials configured');
+  const provider = await resolveProvider(api, cfg, opts.authCtx);
 
   let session: Session;
   let itemId: string;
 
   if (method === 'signup') {
-    const id = freshIdentity(cfg, label);
-    session = await signup(api, id, displayName);
+    const id = freshIdentity(cfg, label, { provider });
+    // The Keycloak path needs the domain + age at signup time (they are written
+    // onto the Keycloak identity); better-auth ignores the extra options.
+    session = await signup(api, id, displayName, opts.authCtx, {
+      domain: binding.domain,
+      age: ADULT_AGE,
+    });
     await acceptCoreConsent(session, binding.network, 'signup');
     // Establish a proven-adult DOB so guardian-gated domains (fail-closed on null
     // DOB) promote to live. Best-effort: older builds lack the u18 endpoint.
@@ -112,14 +180,23 @@ export async function createLiveProfileUser(
     itemId = create.body.item_id;
   } else {
     // service provisioning: create the participant + item, then log in as them.
-    const id = freshIdentity(cfg, label);
+    const id = freshIdentity(cfg, label, { provider });
     const idField = id.channel === 'phone' ? { phone_number: id.value } : { email: id.value };
+    // Consent goes through the `compliance` array (#309), NOT the older
+    // `terms_accepted` / `privacy_accepted` booleans — those are no longer read,
+    // so a participant provisioned with them comes back `consent_recorded: 0`
+    // and the profile stays `draft` forever. With all three keys the route
+    // records consent inline and the classifier promotes to `live` on create.
+    // Age is the stored snapshot (#331); date_of_birth is not persisted.
     const prov = await service.post<{ user_id: string; items: Array<{ item_id: string }> }>('/api/v1/admin/participant', {
       ...idField,
       name: displayName,
-      date_of_birth: ADULT_DOB,
-      terms_accepted: true,
-      privacy_accepted: true,
+      age: ADULT_AGE,
+      compliance: [
+        { key: 'user_terms', value: true },
+        { key: 'user_privacy', value: true },
+        { key: 'profile_creation', value: true },
+      ],
       channel: 'link',
       network: binding.network,
       domain: binding.domain,
@@ -130,7 +207,7 @@ export async function createLiveProfileUser(
       throw new Error(`[e2e] admin/participant provisioning failed: ${prov.status} ${JSON.stringify(prov.body)}`);
     }
     itemId = prov.body.items[0].item_id;
-    session = await login(api, id);
+    session = await login(api, id, opts.authCtx);
     await acceptCoreConsent(session, binding.network, 'login');
     // The guardian gate keys off the U18 birth data, not the user row's DOB from
     // provisioning — set it so a gated-domain adult profile can promote to live.
@@ -160,6 +237,15 @@ export async function createLiveProfileUser(
     }
   }
   if (!item) throw new Error(`[e2e] created item ${itemId} not found on own fetch`);
+  // Fail here, not three assertions later. A persona that silently comes back
+  // `draft` turns every downstream action into a confusing `PROFILE_NOT_LIVE`
+  // that looks like an action bug rather than a provisioning one.
+  if (item.lifecycle_status !== 'live') {
+    throw new Error(
+      `[e2e] persona "${label}" did not reach live (status="${item.lifecycle_status}", item=${itemId}, method=${method}). ` +
+        'Check that profile_creation consent was recorded and every required schema field is present.',
+    );
+  }
 
   const sourceRef: ItemRef = { item_network: binding.network, item_domain: binding.domain, item_type: binding.item_type, item_id: itemId };
   return {

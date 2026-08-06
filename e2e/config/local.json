@@ -10,12 +10,20 @@
   "brand": null,
   "servedBindingHost": null,
   "language": "en",
-  "selfSignupMode": "gated",
+  "selfSignupMode": "allowed",
   "loginChannels": [
     "phone",
     "email"
   ],
   "peerAuthMode": "permissive",
+  "authProvider": "auto",
+  "keycloak": {
+    "baseUrl": "http://localhost:8080",
+    "internalBaseUrl": "http://keycloak:8080",
+    "realm": "bluedots",
+    "uiClientId": "signals-ui",
+    "redirectUri": "http://localhost:5173/auth/callback"
+  },
   "action": {
     "type": "apply",
     "acceptStatus": "accepted"
@@ -28,6 +36,8 @@
     "mode": "test-otp"
   },
   "notificationStubUrl": null,
+  "mailpitUrl": "http://localhost:8025",
+  "keycloakLogContainer": "sd-keycloak",
   "db": {
     "url": null
   },

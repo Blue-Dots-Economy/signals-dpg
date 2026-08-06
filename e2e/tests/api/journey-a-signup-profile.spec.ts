@@ -1,7 +1,8 @@
 import { test, expect } from '../../src/fixtures.js';
-import { checkUser, signup, acceptCoreConsent } from '../../src/auth.js';
+import { checkUser, keycloakSelfSignup, signup, acceptCoreConsent } from '../../src/auth.js';
 import { resolveBinding, buildMinimalItemState } from '../../src/schema.js';
-import { newName, newPhone, newEmail } from '../../src/identities.js';
+import { freshIdentity } from '../../src/flows.js';
+import { newName } from '../../src/identities.js';
 
 /**
  * Journey A — Adult self-signup → schema-typed profile → discoverable (P0).
@@ -13,17 +14,32 @@ test.describe('Journey A — self-signup → profile → discoverable', () => {
   test.skip(({ cfg }) => cfg.selfSignupMode !== 'allowed', 'target is not self-signup allowed (see Journey B)');
   test.skip(({ caps }) => !caps.testOtp, 'requires OTP retrieval (CREATE_TEST_OTP on the target)');
 
-  test('new adult signs up, creates a profile, and it becomes discoverable', async ({ api, cfg }) => {
-    const channel = cfg.loginChannels.includes('phone') ? 'phone' : 'email';
-    const identity = channel === 'phone' ? { channel, value: newPhone() } as const : { channel, value: newEmail('a') } as const;
+  test('new adult signs up, creates a profile, and it becomes discoverable', async ({ api, cfg, authCtx, provider }) => {
+    const identity = freshIdentity(cfg, 'a', { provider });
+    const binding0 = await resolveBinding(api, cfg.servedDomains[0]);
 
-    // check-user reports new
-    const check = await checkUser(api, identity);
-    expect(check.status).toBe(200);
-    expect(check.body.userExists, 'a freshly generated identity must be new').toBeFalsy();
+    // "is this identifier already taken?" — a different endpoint per provider.
+    // better-auth answers it with check-user; under Keycloak that mount does not
+    // exist and self-signup reports it instead, via `alreadyRegistered`.
+    if (provider === 'betterauth') {
+      const check = await checkUser(api, identity);
+      expect(check.status).toBe(200);
+      expect(check.body.userExists, 'a freshly generated identity must be new').toBeFalsy();
+    } else {
+      const probe = await keycloakSelfSignup(api, identity, newName('Adult'), {
+        domain: binding0.domain,
+        age: 35,
+      });
+      expect(probe.status, JSON.stringify(probe.body)).toBe(200);
+      expect(probe.alreadyRegistered, 'a freshly generated identity must be new').toBeFalsy();
+    }
 
-    // signup (request+verify with fixed test OTP) and accept terms + privacy
-    const session = await signup(api, identity, newName('Adult'));
+    // signup and accept terms + privacy (signup is idempotent on an identity the
+    // probe above may already have created)
+    const session = await signup(api, identity, newName('Adult'), authCtx, {
+      domain: binding0.domain,
+      age: 35,
+    });
     expect(session.token).toBeTruthy();
     await acceptCoreConsent(session, cfg.network, 'signup');
 
@@ -64,13 +80,15 @@ test.describe('Journey A — self-signup → profile → discoverable', () => {
     expect(disc.body.items.some((i) => i.item_id === itemId), 'live profile must be discoverable').toBeTruthy();
   });
 
-  test('consent gates discoverability: a profile is not live/discoverable without profile consent', async ({ api, cfg }) => {
-    const channel = cfg.loginChannels.includes('phone') ? 'phone' : 'email';
-    const identity = channel === 'phone' ? { channel, value: newPhone() } as const : { channel, value: newEmail('a2') } as const;
-    const session = await signup(api, identity, newName('Adult'));
+  test('consent gates discoverability: a profile is not live/discoverable without profile consent', async ({ api, cfg, authCtx, provider }) => {
+    const identity = freshIdentity(cfg, 'a2', { provider });
+    const binding = await resolveBinding(api, cfg.servedDomains[0]);
+    const session = await signup(api, identity, newName('Adult'), authCtx, {
+      domain: binding.domain,
+      age: 35,
+    });
     await acceptCoreConsent(session, cfg.network, 'signup');
 
-    const binding = await resolveBinding(api, cfg.servedDomains[0]);
     const itemState = buildMinimalItemState(binding.schema);
 
     // create WITHOUT the consent block

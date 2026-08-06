@@ -83,9 +83,9 @@ test.describe('Journey I — service auth & participant', () => {
     expect(second.body.org_id).toBe(first.body.org_id);
   });
 
-  test('network_service performs an action on behalf of a user; negatives are enforced', async ({ api, service, cfg, caps }) => {
-    const a = await createLiveProfileUser(api, service, cfg, caps, { domainKey: cfg.servedDomains[0], label: 'oba' });
-    const b = await createLiveProfileUser(api, service, cfg, caps, { domainKey: cfg.servedDomains[1] ?? cfg.servedDomains[0], label: 'obb' });
+  test('network_service performs an action on behalf of a user; negatives are enforced', async ({ api, service, cfg, caps, authCtx }) => {
+    const a = await createLiveProfileUser(api, service, cfg, caps, { authCtx, domainKey: cfg.servedDomains[0], label: 'oba' });
+    const b = await createLiveProfileUser(api, service, cfg, caps, { authCtx, domainKey: cfg.servedDomains[1] ?? cfg.servedDomains[0], label: 'obb' });
     const base = {
       action_type: cfg.action.type,
       source_item: a.sourceRef,

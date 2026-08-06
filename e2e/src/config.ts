@@ -39,6 +39,28 @@ export interface E2EConfig {
   peerAuthMode: 'permissive' | 'enforced';
 
   /**
+   * Identity provider on the session path. `auto` (the default) reads
+   * `authProvider` from `GET /api/v1/auth/config` at run time, which is the
+   * honest answer — the server env is the single source of truth and the value
+   * flips without a redeploy. Pin it only to assert a specific mode.
+   */
+  authProvider: 'auto' | 'betterauth' | 'keycloak';
+
+  /**
+   * Keycloak coordinates, used only when the resolved provider is `keycloak`.
+   * `internalBaseUrl` is the hostname Keycloak renders into its own login-form
+   * actions (its name inside compose); the driver rewrites it to `baseUrl`,
+   * which is the one actually reachable from the test runner.
+   */
+  keycloak: {
+    baseUrl: string;
+    internalBaseUrl: string;
+    realm: string;
+    uiClientId: string;
+    redirectUri: string;
+  };
+
+  /**
    * Action semantics for this network (varies per network.json). `type` is the
    * interaction key (e.g. "connect"/"apply"); `acceptStatus` is the event status
    * that both advances the action and (typically) reveals PII.
@@ -60,6 +82,20 @@ export interface E2EConfig {
 
   /** Inspectable notification sink base URL; presence enables @needs-notification-stub. */
   notificationStubUrl: string | null;
+  /**
+   * Mailpit base URL (e.g. http://localhost:8025). This is the inbox the
+   * Keycloak OTP email lands in, and the oracle for every message signals
+   * renders and dispatches. Required for Keycloak login on the email channel:
+   * `CREATE_TEST_OTP` does NOT fix the login OTP under Keycloak (the flag never
+   * reaches the Keycloak container), so the code has to be read back out.
+   */
+  mailpitUrl: string | null;
+  /**
+   * Docker container name running Keycloak. With `KC_SPI_SMS_PROVIDER=log` the
+   * phone OTP is written to that container's log, so a local run can read it
+   * back. Null disables phone-channel Keycloak login.
+   */
+  keycloakLogContainer: string | null;
   /** DB connection string; presence enables the @needs-db introspection tier. */
   db: { url: string | null };
   /** True only when the target runs a KNOWN SIGNALS_PII_KEY (a local instance you control). */
@@ -100,6 +136,11 @@ function applyEnvOverrides(c: E2EConfig): E2EConfig {
   if (e.E2E_ACTING_ORG_ID) c.auth.actingOrgId = e.E2E_ACTING_ORG_ID;
   if (e.E2E_DB_URL) c.db.url = e.E2E_DB_URL;
   if (e.E2E_NOTIFICATION_STUB_URL) c.notificationStubUrl = e.E2E_NOTIFICATION_STUB_URL;
+  if (e.E2E_MAILPIT_URL) c.mailpitUrl = e.E2E_MAILPIT_URL;
+  if (e.E2E_KEYCLOAK_LOG_CONTAINER) c.keycloakLogContainer = e.E2E_KEYCLOAK_LOG_CONTAINER;
+  if (e.E2E_KEYCLOAK_BASE_URL) c.keycloak.baseUrl = e.E2E_KEYCLOAK_BASE_URL;
+  if (e.E2E_KEYCLOAK_REALM) c.keycloak.realm = e.E2E_KEYCLOAK_REALM;
+  if (e.E2E_AUTH_PROVIDER) c.authProvider = e.E2E_AUTH_PROVIDER as E2EConfig['authProvider'];
   if (e.E2E_PEER_API_BASE_URL) c.peer.apiBaseUrl = e.E2E_PEER_API_BASE_URL;
   if (e.E2E_ACTION_TYPE) c.action.type = e.E2E_ACTION_TYPE;
   if (e.E2E_ACTION_ACCEPT_STATUS) c.action.acceptStatus = e.E2E_ACTION_ACCEPT_STATUS;
@@ -128,10 +169,20 @@ export function loadConfig(): E2EConfig {
     selfSignupMode: raw.selfSignupMode ?? 'gated',
     loginChannels: raw.loginChannels ?? ['phone', 'email'],
     peerAuthMode: raw.peerAuthMode ?? 'permissive',
+    authProvider: raw.authProvider ?? 'auto',
+    keycloak: {
+      baseUrl: raw.keycloak?.baseUrl ?? 'http://localhost:8080',
+      internalBaseUrl: raw.keycloak?.internalBaseUrl ?? 'http://keycloak:8080',
+      realm: raw.keycloak?.realm ?? 'bluedots',
+      uiClientId: raw.keycloak?.uiClientId ?? 'signals-ui',
+      redirectUri: raw.keycloak?.redirectUri ?? `${raw.uiBaseUrl ?? 'http://localhost:5173'}/auth/callback`,
+    },
     action: { type: raw.action?.type ?? 'connect', acceptStatus: raw.action?.acceptStatus ?? 'accepted' },
     auth: { serviceApiKey: raw.auth?.serviceApiKey ?? null, actingOrgId: raw.auth?.actingOrgId ?? null },
     otp: { mode: raw.otp?.mode ?? 'test-otp' },
     notificationStubUrl: raw.notificationStubUrl ?? null,
+    mailpitUrl: raw.mailpitUrl ?? null,
+    keycloakLogContainer: raw.keycloakLogContainer ?? null,
     db: { url: raw.db?.url ?? null },
     deterministicPiiKey: raw.deterministicPiiKey ?? false,
     faultInjection: raw.faultInjection ?? false,

@@ -19,10 +19,10 @@ test.describe('Journey E — bulk actions', () => {
     consent: { acknowledged: true, version: 1 },
   });
 
-  test('all-valid bulk → 201 with every item succeeded', async ({ api, service, cfg, caps }) => {
-    const src = await createLiveProfileUser(api, service, cfg, caps, { domainKey: cfg.servedDomains[0], label: 'ebs' });
-    const t1 = await createLiveProfileUser(api, service, cfg, caps, { domainKey: cfg.servedDomains[1] ?? cfg.servedDomains[0], label: 'ebt1' });
-    const t2 = await createLiveProfileUser(api, service, cfg, caps, { domainKey: cfg.servedDomains[1] ?? cfg.servedDomains[0], label: 'ebt2' });
+  test('all-valid bulk → 201 with every item succeeded', async ({ api, service, cfg, caps, authCtx }) => {
+    const src = await createLiveProfileUser(api, service, cfg, caps, { authCtx, domainKey: cfg.servedDomains[0], label: 'ebs' });
+    const t1 = await createLiveProfileUser(api, service, cfg, caps, { authCtx, domainKey: cfg.servedDomains[1] ?? cfg.servedDomains[0], label: 'ebt1' });
+    const t2 = await createLiveProfileUser(api, service, cfg, caps, { authCtx, domainKey: cfg.servedDomains[1] ?? cfg.servedDomains[0], label: 'ebt2' });
 
     const res = await src.session.client.post<{ results: Array<{ status: string }>; summary: { total: number; succeeded: number; failed: number } }>(
       '/api/v1/action/perform/bulk',
@@ -35,9 +35,9 @@ test.describe('Journey E — bulk actions', () => {
     expect(res.body.summary.failed).toBe(0);
   });
 
-  test('mixed bulk → 207 partial with exact success/failure counts', async ({ api, service, cfg, caps }) => {
-    const src = await createLiveProfileUser(api, service, cfg, caps, { domainKey: cfg.servedDomains[0], label: 'ems' });
-    const t1 = await createLiveProfileUser(api, service, cfg, caps, { domainKey: cfg.servedDomains[1] ?? cfg.servedDomains[0], label: 'emt1' });
+  test('mixed bulk → 207 partial with exact success/failure counts', async ({ api, service, cfg, caps, authCtx }) => {
+    const src = await createLiveProfileUser(api, service, cfg, caps, { authCtx, domainKey: cfg.servedDomains[0], label: 'ems' });
+    const t1 = await createLiveProfileUser(api, service, cfg, caps, { authCtx, domainKey: cfg.servedDomains[1] ?? cfg.servedDomains[0], label: 'emt1' });
 
     const valid = action(src, t1, cfg.action.type);
     const bogus = { ...action(src, t1, cfg.action.type), target_item: { ...t1.targetRef, item_id: '00000000-0000-0000-0000-000000000000' } };
@@ -53,8 +53,8 @@ test.describe('Journey E — bulk actions', () => {
     expect(res.body.summary.failed).toBe(1);
   });
 
-  test('empty bulk array → 400 BULK_EMPTY_ARRAY', async ({ api, service, cfg, caps }) => {
-    const src = await createLiveProfileUser(api, service, cfg, caps, { domainKey: cfg.servedDomains[0], label: 'eempty' });
+  test('empty bulk array → 400 BULK_EMPTY_ARRAY', async ({ api, service, cfg, caps, authCtx }) => {
+    const src = await createLiveProfileUser(api, service, cfg, caps, { authCtx, domainKey: cfg.servedDomains[0], label: 'eempty' });
     const res = await src.session.client.post<{ error?: string }>('/api/v1/action/perform/bulk', []);
     test.skip(res.status === 404, 'target predates /action/perform/bulk');
     expect(res.status).toBe(400);
