@@ -1266,7 +1266,15 @@ describe('GoogleMapProvider', () => {
     // current zoom and landing on the cluster's own position.
     expect(gmap.moveCamera.mock.calls.length).toBeGreaterThan(2);
     expect(gmap.moveCamera.mock.calls[0][0].zoom).toBeLessThan(20);
-    expect(gmap.moveCamera.mock.calls.at(-1)?.[0].center).toEqual({ lat: 19.5, lng: 72.25 });
+    // Interpolated per rAF frame, so the final centre is only as exact as the
+    // last frame's easing value. Under a loaded box (the full suite running in
+    // parallel) the animation can settle a few nanodegrees short, which an
+    // exact toEqual turns into a flake. Match the toBeCloseTo already used for
+    // zoom above: 6 decimal places is ~0.1 m, far tighter than any real
+    // camera-positioning requirement.
+    const finalCenter = gmap.moveCamera.mock.calls.at(-1)?.[0].center;
+    expect(finalCenter?.lat).toBeCloseTo(19.5, 6);
+    expect(finalCenter?.lng).toBeCloseTo(72.25, 6);
   });
 
   it('still zooms in one level when the cluster already fills the viewport', async () => {
