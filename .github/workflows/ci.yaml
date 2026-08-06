@@ -6,8 +6,15 @@ on:
   # feature: validate the merged integration state too — PRs into feature
   # already run CI, but the post-merge result was unchecked. publish-images
   # stays develop-only via its own `if` gate.
+  #
+  # main: required for SonarCloud. The organization's plan analyses the MAIN
+  # branch only (branch/PR analysis is a paid feature), so without a push
+  # trigger here the default branch is never scanned and the dashboard reports
+  # `"main" branch has not been analyzed yet` no matter how many PRs land.
+  # publish-images is gated to develop by its own `if`, so main pushes only
+  # run the checks + the sonar scan.
   push:
-    branches: [develop, feature]
+    branches: [develop, feature, main]
   workflow_dispatch:
 
 concurrency:
