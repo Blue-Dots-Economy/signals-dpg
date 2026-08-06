@@ -55,7 +55,26 @@ export function getUserManager(serverConfig: AuthConfigResponse | null | undefin
     // user back through Keycloak; the in-flight PKCE verifier stays in
     // sessionStorage (the library's default) where it belongs.
     userStore: new WebStorageStateStore({ store: window.localStorage }),
-    automaticSilentRenew: false,
+    /**
+     * Renew in the background, using the refresh token.
+     *
+     * This was `false`, which combined badly with the realm's 300s
+     * `accessTokenLifespan`: five minutes after login the stored user reports
+     * `expired`, `getStoredOidcUser` returns null, and the next `authCfg`
+     * refetch (React Query returns a fresh object, re-running the restore in
+     * auth-context) resolved that as "logged out" — the top bar flipped to a
+     * Login button while React Query's cached data kept the rest of the page
+     * looking signed in. Clicking Login appeared to "work" only because the
+     * Keycloak SSO cookie was still valid.
+     *
+     * oidc-client-ts renews from the refresh token when one is present, so no
+     * silent-iframe route (`silent_redirect_uri`) is required. If the refresh
+     * token is gone or rejected, renewal fails and the user is treated as
+     * signed out — which is then correct rather than premature.
+     */
+    automaticSilentRenew: true,
+    // Renew a minute before expiry rather than racing the deadline.
+    accessTokenExpiringNotificationTimeInSeconds: 60,
   });
 
   return manager;

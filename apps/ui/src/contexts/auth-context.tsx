@@ -1,4 +1,12 @@
-import { createContext, useContext, useState, useEffect, useCallback, type ReactNode } from 'react';
+import {
+  createContext,
+  useContext,
+  useState,
+  useEffect,
+  useCallback,
+  useRef,
+  type ReactNode,
+} from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import {
   getSession,
@@ -79,33 +87,85 @@ export function AuthProvider({ children }: { children: ReactNode }) {
    * Waits for the auth config first — restoring the wrong way round would
    * either miss an OIDC session or fire a pointless better-auth request.
    */
+  /**
+   * `authCfg` is React Query data, so a refetch hands back a NEW object with
+   * identical contents. Depending on that identity re-ran the whole restore and
+   * re-derived `user` from storage on every refetch — turning any momentary
+   * "no usable token" (an expired access token whose renewal is still in
+   * flight) into a visible sign-out. Depend on the config's VALUES instead, and
+   * read the object through a ref so the callback stays stable.
+   */
+  const authCfgRef = useRef(authCfg);
+  // Synced in an effect rather than during render: a render-phase ref write is
+  // an impure render and misbehaves under concurrent rendering. Declared BEFORE
+  // the fetchSession effect so the ref is current by the time it runs, and
+  // seeded by useRef's initial value for the very first render.
+  useEffect(() => {
+    authCfgRef.current = authCfg;
+  }, [authCfg]);
+
+  const keycloakConfigKey = authCfg?.keycloak
+    ? `${authCfg.keycloak.url}|${authCfg.keycloak.realm}|${authCfg.keycloak.clientId}`
+    : '';
+
+  /**
+   * Bumped every time a login explicitly establishes the user (OIDC callback or
+   * OTP verify). `fetchSession` captures it before awaiting and discards its own
+   * result if it changed, because on a FIRST login the two race and the restore
+   * loses:
+   *
+   *   1. provider mounts, fetchSession waits for authCfg
+   *   2. authCfg lands, fetchSession calls restoreOidcSession — storage is still
+   *      EMPTY, the code exchange has not finished → resolves null
+   *   3. the callback page finishes the exchange, /me returns 200,
+   *      completeKeycloakLogin sets the user
+   *   4. step 2's await finally resolves and `setUser(null)` lands LAST
+   *
+   * The user ended up signed out with a perfectly valid token in storage: /me
+   * kept returning 200 and cached queries kept rendering, so only the top bar
+   * looked wrong. A second login "fixed" it because storage was populated by
+   * then, so the restore returned a token instead of null.
+   */
+  const authEpochRef = useRef(0);
+
   const fetchSession = useCallback(async () => {
     if (isConfigLoading) return;
+    const epoch = authEpochRef.current;
+    /** A login landed while we were awaiting — its user is newer than ours. */
+    const superseded = () => epoch !== authEpochRef.current;
     try {
       if (isKeycloakLogin) {
         // Dynamic import so the OIDC library is not pulled into the bundle for
         // deployments still on the OTP login.
         const { restoreOidcSession } = await import('@/lib/oidc-client');
-        const token = await restoreOidcSession(authCfg);
+        const token = await restoreOidcSession(authCfgRef.current);
+        if (superseded()) return;
         if (!token) {
           setUser(null);
           return;
         }
-        setUser(meToUser(await fetchMe()));
+        const me = meToUser(await fetchMe());
+        if (superseded()) return;
+        setUser(me);
         return;
       }
 
       const session = await getSession();
+      if (superseded()) return;
       if (session.token) {
         setAuthToken(session.token);
       }
       setUser(session.user);
     } catch {
+      if (superseded()) return;
       setUser(null);
     } finally {
-      setIsLoading(false);
+      // Superseded means a login already owns the state — including having
+      // cleared isLoading itself. Touching it here would be this run leaking
+      // past the guard it just respected.
+      if (!superseded()) setIsLoading(false);
     }
-  }, [authCfg, isConfigLoading, isKeycloakLogin]);
+  }, [keycloakConfigKey, isConfigLoading, isKeycloakLogin]);
 
   useEffect(() => {
     fetchSession();
@@ -126,6 +186,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const { verifyOtp: verifyOtpApi } = await import('@/lib/auth-api');
     const response = await verifyOtpApi(identifier, otp, name);
     setAuthToken(response.token);
+    // Same precedence claim as the OIDC path (see authEpochRef).
+    authEpochRef.current += 1;
     setUser(response.user);
   }, []);
 
@@ -143,7 +205,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
    * page) keeps the context the single owner of `user`.
    */
   const completeKeycloakLogin = useCallback(async (): Promise<void> => {
-    setUser(meToUser(await fetchMe()));
+    const me = meToUser(await fetchMe());
+    // Claim precedence over any restore still in flight (see authEpochRef).
+    authEpochRef.current += 1;
+    setUser(me);
+    setIsLoading(false);
   }, []);
 
   const signOut = useCallback(async () => {
