@@ -82,14 +82,17 @@ const baseProps = {
 };
 
 describe('ActionList', () => {
-  it('forwards a status chip click to onStatusChange (toolbar wiring)', async () => {
+  it('surfaces the active status as a removable token and clears it via the token ✕ (toolbar wiring)', async () => {
     const user = userEvent.setup();
     const onStatusChange = vi.fn();
-    render(<Harness {...baseProps} onStatusChange={onStatusChange} />);
+    // Status is no longer an inline chip — it's set in the filters sheet and
+    // shown here only as a token. With a non-"All" status, the toolbar renders
+    // the removable token; clicking its ✕ resets to "All".
+    render(<Harness {...baseProps} toolbarStatus="Pending" onStatusChange={onStatusChange} />);
 
-    await user.click(screen.getByTestId('status-chip-Pending'));
+    await user.click(screen.getByTestId('status-remove'));
 
-    expect(onStatusChange).toHaveBeenCalledWith('Pending');
+    expect(onStatusChange).toHaveBeenCalledWith('All');
   });
 
   it('calls fetchNextPage (onLoadMore) when "Load more" is clicked and hasNextPage is true', async () => {
