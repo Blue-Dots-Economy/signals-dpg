@@ -491,8 +491,12 @@ describe('POST /admin/participant', () => {
     expect(res.json().error).toBe('INVALID_ACTING_ORG');
   });
 
-  it('403 ACTING_ORG_TYPE_NOT_ALLOWED for voice', async () => {
-    const app = await buildApp({ org_type: 'voice' });
+  it('403 ACTING_ORG_TYPE_NOT_ALLOWED for an org type outside the allowed set', async () => {
+    // voice used to be the example; it is now an admitted integrating DPG, so
+    // the rejection case needs a type that genuinely is not allowed.
+    const app = await buildApp({
+      org_type: 'employer' as unknown as 'aggregator',
+    });
     const res = await app.inject({
       method: 'POST',
       url: '/participant',
@@ -500,6 +504,17 @@ describe('POST /admin/participant', () => {
     });
     expect(res.statusCode).toBe(403);
     expect(res.json().error).toBe('ACTING_ORG_TYPE_NOT_ALLOWED');
+  });
+
+  it('admits a voice acting org for participant upsert', async () => {
+    const app = await buildApp({ org_id: 'org_voice_1', org_type: 'voice' });
+    const res = await app.inject({
+      method: 'POST',
+      url: '/participant',
+      payload: baseBody(),
+    });
+    expect(res.statusCode).not.toBe(403);
+    expect(res.json().error).not.toBe('ACTING_ORG_TYPE_NOT_ALLOWED');
   });
 
   it('aggregator + new user + item_state → 200 user_existed:false, owned_elsewhere:false, items:[1], inserts:1', async () => {

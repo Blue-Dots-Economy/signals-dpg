@@ -317,7 +317,26 @@ describe('POST /api/v1/action/perform — on-behalf-of (bulk)', () => {
     expect(fetchCalls).toHaveLength(0);
   });
 
-  it('422 ACTING_ORG_TYPE_NOT_ALLOWED for voice acting_org', async () => {
+  it('422 ACTING_ORG_TYPE_NOT_ALLOWED for an org type outside the allowed set', async () => {
+    // voice used to be the example here; it is now an admitted integrating
+    // DPG, so this needs a type that genuinely is not allowed.
+    const app = buildApp({
+      org_id: 'org_employer_1',
+      org_type: 'employer' as unknown as 'aggregator',
+      service_user_id: 'svc_emp_1',
+    });
+    const res = await app.inject({
+      method: 'POST',
+      url: '/perform/bulk',
+      payload: [{ ...VALID_BODY, acting_as_user_id: 'usr_target' }],
+    });
+    expect(res.statusCode).toBe(422);
+    expect(res.json().results[0]).toMatchObject({ status: 'error', error: 'ACTING_ORG_TYPE_NOT_ALLOWED' });
+    expect(fetchCalls).toHaveLength(0);
+  });
+
+  it('accepts a voice acting_org acting on behalf of a user', async () => {
+    dbState.userRows = [{ id: 'usr_target', onboardedByOrgId: 'org_agg_2' }];
     const app = buildApp({
       org_id: 'org_voice_1',
       org_type: 'voice',
@@ -328,9 +347,15 @@ describe('POST /api/v1/action/perform — on-behalf-of (bulk)', () => {
       url: '/perform/bulk',
       payload: [{ ...VALID_BODY, acting_as_user_id: 'usr_target' }],
     });
-    expect(res.statusCode).toBe(422);
-    expect(res.json().results[0]).toMatchObject({ status: 'error', error: 'ACTING_ORG_TYPE_NOT_ALLOWED' });
-    expect(fetchCalls).toHaveLength(0);
+    // Not rejected on org type — voice reaches the action itself. The target
+    // is onboarded by a different org on purpose: voice is network-wide, so
+    // the aggregator's ownership rule must not apply to it.
+    expect(res.json().results[0]).not.toMatchObject({
+      error: 'ACTING_ORG_TYPE_NOT_ALLOWED',
+    });
+    expect(res.json().results[0]).not.toMatchObject({
+      error: 'NOT_AUTHORIZED_FOR_TARGET',
+    });
   });
 
   it('422 NOT_AUTHORIZED_FOR_TARGET when target onboarded by another aggregator', async () => {

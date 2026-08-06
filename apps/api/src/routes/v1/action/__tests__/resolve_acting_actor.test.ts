@@ -58,9 +58,37 @@ describe('resolve_acting_actor', () => {
   });
 
   describe('tier gate', () => {
-    it('403 ACTING_ORG_TYPE_NOT_ALLOWED for voice', async () => {
+    it('admits voice, and does NOT apply the aggregator ownership rule to it', async () => {
+      // voice-dpg is an integrating DPG on the same client-credentials footing
+      // as the aggregator. It behaves like network_service here: no
+      // onboarded_by_org_id check, because "the org that onboarded this user"
+      // has no voice equivalent — note the target below is onboarded by a
+      // DIFFERENT org and is still allowed.
       const result = await resolve_acting_actor({
         acting_org: voice,
+        request_user_id: 'svc',
+        acting_as_user_id: 'usr_target',
+        lookup_user: lookup_user_factory({
+          usr_target: { onboardedByOrgId: 'org_someone_else' },
+        }),
+      });
+      expect(result).toEqual({
+        ok: true,
+        effective_user_id: 'usr_target',
+        audit: {
+          performed_by_org_id: voice.org_id,
+          performed_by_service_user_id: voice.service_user_id,
+        },
+      });
+    });
+
+    it('still rejects an org type outside the allowed set', async () => {
+      const result = await resolve_acting_actor({
+        acting_org: {
+          org_id: 'org_employer_1',
+          org_type: 'employer' as unknown as typeof aggregator.org_type,
+          service_user_id: 'svc_emp',
+        },
         request_user_id: 'svc',
         acting_as_user_id: 'usr_target',
         lookup_user: lookup_user_factory({
