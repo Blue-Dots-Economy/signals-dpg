@@ -411,7 +411,7 @@ export const participant_handler = async (
       message:
         verdict.error === 'INVALID_ACTING_ORG'
           ? 'acting_org is required for /admin/participant'
-          : 'only aggregator or network_service acting orgs are allowed',
+          : 'only aggregator, network_service or voice acting orgs are allowed',
     });
   }
 
