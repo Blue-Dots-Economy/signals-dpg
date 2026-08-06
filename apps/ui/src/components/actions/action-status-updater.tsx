@@ -257,6 +257,7 @@ export function ActionStatusUpdater({
       open={!!gate.challenge}
       onOpenChange={(o) => !o && gate.setChallenge(null)}
       onSubmitOtp={gate.submitOtp}
+      purpose={{ kind: 'accept' }}
     />
   );
 
@@ -264,7 +265,7 @@ export function ActionStatusUpdater({
     return (
       <>
         <Drawer open={open} onOpenChange={onOpenChange}>
-          <DrawerContent className="max-h-[90vh] overflow-hidden p-0">
+          <DrawerContent className="max-h-[90dvh] overflow-hidden p-0">
             <div className="px-6 pt-6">{header}</div>
             <div className="px-6 pb-4 overflow-y-auto">{formContent}</div>
             <div className="border-t px-6 py-4">{footer}</div>
@@ -278,7 +279,7 @@ export function ActionStatusUpdater({
   return (
     <>
       <Dialog open={open} onOpenChange={onOpenChange}>
-        <DialogContent className="sm:max-w-[520px] max-h-[90vh] overflow-y-auto gap-0 p-6">
+        <DialogContent className="sm:max-w-[520px] max-h-[90dvh] overflow-y-auto gap-0 p-6">
           {header}
           <div className="py-4">{formContent}</div>
           {footer}

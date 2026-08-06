@@ -1,8 +1,14 @@
-import { describe, it, expect, vi } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { afterEach, describe, it, expect, vi } from 'vitest';
+import { render, screen, fireEvent } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import type { ConsentConfigDocument } from '@dpg/schemas';
 import { ConsentModal } from '@/components/consent/consent-modal';
+
+// Defaults to desktop (false) so every pre-existing test below keeps
+// exercising the real Dialog path unchanged; only the mobile-parity describe
+// block at the bottom flips this to true.
+const isMobile = vi.hoisted(() => ({ value: false }));
+vi.mock('@/hooks/use-mobile', () => ({ useIsMobile: () => isMobile.value }));
 
 const config: ConsentConfigDocument = {
   documents: {
@@ -147,5 +153,56 @@ describe('ConsentModal — view mode', () => {
     expect(
       screen.getByText('By using this service you agree to these terms.'),
     ).toBeInTheDocument();
+  });
+});
+
+describe('ConsentModal — mobile (Drawer) dismissal parity', () => {
+  afterEach(() => {
+    isMobile.value = false;
+  });
+
+  it('view mode on mobile shows a close control that closes the sheet', () => {
+    isMobile.value = true;
+    const onOpenChange = vi.fn();
+
+    const { baseElement } = render(
+      <ConsentModal
+        open
+        mode="view"
+        initialTab="terms"
+        config={config}
+        onOpenChange={onOpenChange}
+      />,
+    );
+
+    expect(baseElement.querySelector('[data-slot="drawer-content"]')).toBeTruthy();
+    const closeButton = baseElement.querySelector('[data-slot="drawer-close"]') as HTMLElement | null;
+    expect(closeButton).toBeTruthy();
+
+    fireEvent.click(closeButton!);
+    expect(onOpenChange).toHaveBeenCalledWith(false);
+  });
+
+  it('gate mode on mobile has no close control and cannot be dismissed via Escape', () => {
+    isMobile.value = true;
+    const onOpenChange = vi.fn();
+
+    const { baseElement } = render(
+      <ConsentModal
+        open
+        mode="gate"
+        initialTab="privacy"
+        config={config}
+        onAccept={vi.fn()}
+        onOpenChange={onOpenChange}
+      />,
+    );
+
+    expect(baseElement.querySelector('[data-slot="drawer-content"]')).toBeTruthy();
+    expect(baseElement.querySelector('[data-slot="drawer-close"]')).toBeFalsy();
+
+    const content = baseElement.querySelector('[data-slot="drawer-content"]') as HTMLElement;
+    fireEvent.keyDown(content, { key: 'Escape' });
+    expect(onOpenChange).not.toHaveBeenCalled();
   });
 });

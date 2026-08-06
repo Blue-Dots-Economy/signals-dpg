@@ -2,11 +2,10 @@ import * as React from 'react';
 import { RefreshCw, TrendingUp, MapPin, BookOpen, Award, Clock, AlertCircle, CheckCircle2, Star } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import {
-  Dialog,
-  DialogContent,
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
+import { ResponsiveDialog } from '@/components/ui/responsive-dialog';
 import { Button } from '@/components/ui/button';
 import { Progress } from '@/components/ui/progress';
 import { ScrollArea } from '@/components/ui/scroll-area';
@@ -99,7 +98,10 @@ export function MatchScoreModal({
   // Animate progress bar when score changes
   React.useEffect(() => {
     if (score?.score !== undefined && !isLoading) {
-      const targetValue = Math.round(score.score * 100);
+      // Backend returns scores on a 0-10 scale; normalize to a 0-100 percent
+      // before animating the progress bar (was `score.score * 100`, which
+      // rendered e.g. 710 for a score of 7.1).
+      const targetValue = Math.round((score.score / 10) * 100);
       const duration = 600;
       const startTime = performance.now();
 
@@ -120,15 +122,19 @@ export function MatchScoreModal({
   }, [score?.score, isLoading]);
 
   return (
-    <Dialog open={isOpen} onOpenChange={onClose}>
-      <DialogContent className="sm:max-w-lg max-h-[90vh] overflow-hidden p-0">
+    <ResponsiveDialog
+      open={isOpen}
+      onOpenChange={onClose}
+      title={t('match.modal_title')}
+      contentClassName="sm:max-w-lg max-h-[90dvh] overflow-hidden p-0"
+    >
         <DialogHeader className="px-6 pt-6 pb-4 border-b">
           <DialogTitle className="flex items-center gap-2">
             <span>{t('match.modal_title')}</span>
           </DialogTitle>
         </DialogHeader>
 
-        <ScrollArea className="max-h-[calc(90vh-180px)]">
+        <ScrollArea className="max-h-[calc(90dvh-180px)]">
           <div className="px-6 py-4 space-y-6">
             {isLoading ? (
               <div className="flex flex-col items-center justify-center py-12 space-y-4">
@@ -241,7 +247,6 @@ export function MatchScoreModal({
             )}
           </div>
         </div>
-      </DialogContent>
-    </Dialog>
+    </ResponsiveDialog>
   );
 }

@@ -42,6 +42,7 @@ interface AggregatedRow extends Record<string, unknown> {
   item_network: string;
   item_domain: string;
   item_type: string;
+  lifecycle_status: string;
   owner_user_id: string;
   onboarded_by_org_id: string | null;
   onboarded_via: string | null;
@@ -238,6 +239,7 @@ export const recompute_aggregator_domain_metrics = async (
       i.item_network       AS item_network,
       i.item_domain        AS item_domain,
       i.item_type          AS item_type,
+      i.lifecycle_status   AS lifecycle_status,
       i.created_by         AS owner_user_id,
       u.onboarded_by_org_id AS onboarded_by_org_id,
       u.onboarded_via      AS onboarded_via,
@@ -324,6 +326,7 @@ export const recompute_aggregator_domain_metrics = async (
       itemNetwork: r.item_network,
       itemDomain: r.item_domain,
       itemType: r.item_type,
+      lifecycleStatus: r.lifecycle_status,
       ownerUserId: r.owner_user_id,
       onboardedByOrgId: r.onboarded_by_org_id,
       onboardedVia: r.onboarded_via,
@@ -367,6 +370,7 @@ const flush = async (
         itemNetwork: sql`excluded.item_network`,
         itemDomain: sql`excluded.item_domain`,
         itemType: sql`excluded.item_type`,
+        lifecycleStatus: sql`excluded.lifecycle_status`,
         ownerUserId: sql`excluded.owner_user_id`,
         onboardedByOrgId: sql`excluded.onboarded_by_org_id`,
         onboardedVia: sql`excluded.onboarded_via`,

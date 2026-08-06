@@ -28,7 +28,11 @@ export const user = pgTable('user', {
   banExpires: timestamp('ban_expires'),
   phoneNumber: text('phone_number').unique(),
   phoneNumberVerified: boolean('phone_number_verified'),
-  dateOfBirth: timestamp('date_of_birth'),
+  // Age (years) captured at registration for U18 gating (#331). Snapshot, not
+  // a birthdate — a minor is age <= 18 (the boundary year is treated as u18,
+  // no month). Optional. `location` is an optional free-text account location.
+  age: integer('age'),
+  location: text('location'),
   // Domain roles the user signed up for / is allowed to create profiles in
   // (e.g. ['seeker'] now; ['seeker','provider'] once multi-role is enabled).
   // Persisted at signup; profile creation is restricted to these. Null/empty

@@ -1,0 +1,323 @@
+{
+  "realm": "bluedots",
+  "enabled": true,
+  "sslRequired": "none",
+  "displayName": "__BRAND_LONG_NAME__",
+  "registrationAllowed": false,
+  "loginWithEmailAllowed": true,
+  "duplicateEmailsAllowed": false,
+  "resetPasswordAllowed": false,
+  "rememberMe": false,
+  "verifyEmail": false,
+  "loginTheme": "otp",
+  "emailTheme": "otp",
+  "accountTheme": "keycloak.v3",
+  "adminTheme": "keycloak.v2",
+  "internationalizationEnabled": true,
+  "supportedLocales": [
+    "en"
+  ],
+  "defaultLocale": "en",
+  "bruteForceProtected": true,
+  "permanentLockout": false,
+  "maxFailureWaitSeconds": 900,
+  "waitIncrementSeconds": 60,
+  "failureFactor": 5,
+  "attributes": {
+    "phoneDefaultRegion": "IN",
+    "userProfileEnabled": "true",
+    "kc.user.profile.config": "{\"unmanagedAttributePolicy\":\"ENABLED\",\"attributes\":[{\"name\":\"username\",\"displayName\":\"${username}\",\"permissions\":{\"view\":[\"admin\",\"user\"],\"edit\":[\"admin\",\"user\"]}},{\"name\":\"email\",\"displayName\":\"${email}\",\"permissions\":{\"view\":[\"admin\",\"user\"],\"edit\":[\"admin\",\"user\"]}},{\"name\":\"firstName\",\"displayName\":\"${firstName}\",\"permissions\":{\"view\":[\"admin\",\"user\"],\"edit\":[\"admin\",\"user\"]}},{\"name\":\"lastName\",\"displayName\":\"${lastName}\",\"permissions\":{\"view\":[\"admin\",\"user\"],\"edit\":[\"admin\",\"user\"]}},{\"name\":\"phoneNumber\",\"displayName\":\"Phone Number\",\"permissions\":{\"view\":[\"admin\",\"user\"],\"edit\":[\"admin\",\"user\"]}},{\"name\":\"phoneNumberVerified\",\"displayName\":\"Phone Number Verified\",\"permissions\":{\"view\":[\"admin\",\"user\"],\"edit\":[\"admin\",\"user\"]}}]}"
+  },
+  "smtpServer": {
+    "host": "__SMTP_HOST__",
+    "port": "__SMTP_PORT__",
+    "from": "__SMTP_FROM__",
+    "fromDisplayName": "__SMTP_FROM_DISPLAY__",
+    "ssl": "__SMTP_SSL__",
+    "starttls": "__SMTP_STARTTLS__",
+    "auth": "__SMTP_AUTH__",
+    "user": "__SMTP_USER__",
+    "password": "__SMTP_PASSWORD__"
+  },
+  "authenticationFlows": [
+    {
+      "alias": "bluedots-otp-browser",
+      "description": "Browser flow: identifier (email/phone/username) then OTP via auto-routed channel",
+      "providerId": "basic-flow",
+      "topLevel": true,
+      "builtIn": false,
+      "authenticationExecutions": [
+        {
+          "authenticator": "auth-cookie",
+          "authenticatorFlow": false,
+          "requirement": "ALTERNATIVE",
+          "priority": 10
+        },
+        {
+          "authenticatorFlow": true,
+          "requirement": "ALTERNATIVE",
+          "priority": 20,
+          "flowAlias": "bluedots-otp-forms"
+        }
+      ]
+    },
+    {
+      "alias": "bluedots-otp-forms",
+      "description": "Identifier resolution then OTP channel choice + verify",
+      "providerId": "basic-flow",
+      "topLevel": false,
+      "builtIn": false,
+      "authenticationExecutions": [
+        {
+          "authenticator": "otp-identifier-form",
+          "authenticatorFlow": false,
+          "requirement": "REQUIRED",
+          "priority": 10
+        },
+        {
+          "authenticator": "otp-channel-choice-form",
+          "authenticatorFlow": false,
+          "requirement": "REQUIRED",
+          "priority": 20,
+          "authenticatorConfig": "bluedots-otp-choice-config"
+        }
+      ]
+    }
+  ],
+  "authenticatorConfig": [
+    {
+      "alias": "bluedots-otp-choice-config",
+      "config": {
+        "otpChoice.codeLength": "6",
+        "otpChoice.ttl": "300",
+        "otpChoice.maxRetries": "3",
+        "otpChoice.phoneAttribute": "phoneNumber"
+      }
+    }
+  ],
+  "browserFlow": "bluedots-otp-browser",
+  "directGrantFlow": "direct grant",
+  "clients": [
+    {
+      "clientId": "signals-ui",
+      "name": "Signals UI",
+      "description": "Public OIDC client for the signals React UI — Authorization Code + PKCE, no client secret. Redirect URIs cover the Vite dev server (5173) and the containerised local-setup UI.",
+      "enabled": true,
+      "publicClient": true,
+      "directAccessGrantsEnabled": false,
+      "standardFlowEnabled": true,
+      "implicitFlowEnabled": false,
+      "serviceAccountsEnabled": false,
+      "redirectUris": [
+        "http://localhost:5173/*",
+        "http://localhost:2742/*",
+        "__PUBLIC_BASE_URL__/*"
+      ],
+      "webOrigins": [
+        "http://localhost:5173",
+        "http://localhost:2742",
+        "__PUBLIC_BASE_URL__"
+      ],
+      "attributes": {
+        "pkce.code.challenge.method": "S256",
+        "post.logout.redirect.uris": "http://localhost:5173/##http://localhost:5173/auth/login##__PUBLIC_BASE_URL__/##__PUBLIC_BASE_URL__/auth/login"
+      },
+      "protocolMappers": [
+        {
+          "name": "phone_number",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-attribute-mapper",
+          "consentRequired": false,
+          "config": {
+            "user.attribute": "phoneNumber",
+            "claim.name": "phone_number",
+            "jsonType.label": "String",
+            "id.token.claim": "true",
+            "access.token.claim": "true",
+            "userinfo.token.claim": "true",
+            "multivalued": "false",
+            "aggregate.attrs": "false"
+          }
+        },
+        {
+          "name": "phone_number_verified",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-attribute-mapper",
+          "consentRequired": false,
+          "config": {
+            "user.attribute": "phoneNumberVerified",
+            "claim.name": "phone_number_verified",
+            "jsonType.label": "boolean",
+            "id.token.claim": "true",
+            "access.token.claim": "true",
+            "userinfo.token.claim": "true",
+            "multivalued": "false",
+            "aggregate.attrs": "false"
+          }
+        },
+        {
+          "name": "signals-api-audience",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "consentRequired": false,
+          "config": {
+            "included.client.audience": "signals-api",
+            "id.token.claim": "false",
+            "access.token.claim": "true"
+          }
+        },
+        {
+          "name": "signals_acting_orgs",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-attribute-mapper",
+          "consentRequired": false,
+          "config": {
+            "user.attribute": "signalstack_org_id",
+            "claim.name": "signals_acting_orgs",
+            "jsonType.label": "String",
+            "id.token.claim": "false",
+            "access.token.claim": "true",
+            "userinfo.token.claim": "false",
+            "multivalued": "false",
+            "aggregate.attrs": "false"
+          }
+        }
+      ]
+    },
+    {
+      "clientId": "signals-api",
+      "name": "Signals API (resource server + service account)",
+      "description": "Confidential client for apps/api. Validates access tokens issued in this realm, and holds a service account with realm-management roles for provisioning sync and admin participant creation (Build 1 / Build 4).",
+      "enabled": true,
+      "publicClient": false,
+      "clientAuthenticatorType": "client-secret",
+      "secret": "signals-api-dev-secret-change-me",
+      "directAccessGrantsEnabled": false,
+      "standardFlowEnabled": false,
+      "implicitFlowEnabled": false,
+      "serviceAccountsEnabled": true,
+      "authorizationServicesEnabled": false,
+      "attributes": {
+        "use.refresh.tokens": "false"
+      },
+      "protocolMappers": []
+    },
+    {
+      "clientId": "aggregator-dpg",
+      "name": "aggregator-dpg (service auth into signals)",
+      "description": "Client-credentials client replacing aggregator-dpg's x-api-key on the signals service path (§5). The x-acting-org-id header is unchanged — acting-org is orthogonal to authentication.",
+      "enabled": true,
+      "publicClient": false,
+      "clientAuthenticatorType": "client-secret",
+      "secret": "aggregator-dpg-signals-dev-secret-change-me",
+      "directAccessGrantsEnabled": false,
+      "standardFlowEnabled": false,
+      "implicitFlowEnabled": false,
+      "serviceAccountsEnabled": true,
+      "attributes": {
+        "use.refresh.tokens": "false"
+      },
+      "protocolMappers": [
+        {
+          "name": "signals-api-audience",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "consentRequired": false,
+          "config": {
+            "included.client.audience": "signals-api",
+            "id.token.claim": "false",
+            "access.token.claim": "true"
+          }
+        },
+        {
+          "name": "signals_acting_orgs",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-hardcoded-claim-mapper",
+          "consentRequired": false,
+          "config": {
+            "claim.name": "signals_acting_orgs",
+            "claim.value": "*",
+            "jsonType.label": "String",
+            "id.token.claim": "false",
+            "access.token.claim": "true",
+            "access.tokenResponse.claim": "false"
+          }
+        }
+      ]
+    },
+    {
+      "clientId": "voice-dpg",
+      "name": "voice-dpg (service auth into signals)",
+      "description": "Client-credentials client replacing voice-dpg's x-api-key on the signals service path (§5).",
+      "enabled": true,
+      "publicClient": false,
+      "clientAuthenticatorType": "client-secret",
+      "secret": "voice-dpg-signals-dev-secret-change-me",
+      "directAccessGrantsEnabled": false,
+      "standardFlowEnabled": false,
+      "implicitFlowEnabled": false,
+      "serviceAccountsEnabled": true,
+      "attributes": {
+        "use.refresh.tokens": "false"
+      },
+      "protocolMappers": [
+        {
+          "name": "signals-api-audience",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "consentRequired": false,
+          "config": {
+            "included.client.audience": "signals-api",
+            "id.token.claim": "false",
+            "access.token.claim": "true"
+          }
+        },
+        {
+          "name": "signals_acting_orgs",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-hardcoded-claim-mapper",
+          "consentRequired": false,
+          "config": {
+            "claim.name": "signals_acting_orgs",
+            "claim.value": "*",
+            "jsonType.label": "String",
+            "id.token.claim": "false",
+            "access.token.claim": "true",
+            "access.tokenResponse.claim": "false"
+          }
+        }
+      ]
+    }
+  ],
+  "users": [
+    {
+      "username": "service-account-signals-api",
+      "enabled": true,
+      "serviceAccountClientId": "signals-api",
+      "clientRoles": {
+        "realm-management": [
+          "view-users",
+          "manage-users",
+          "query-users",
+          "manage-realm"
+        ]
+      }
+    }
+  ],
+  "roles": {
+    "realm": [
+      {
+        "name": "signals_participant",
+        "description": "A human participant of the Signals Stack. Prefixed because realm roles are a shared namespace with aggregator in the bluedots realm (risk R9).",
+        "composite": false,
+        "clientRole": false
+      },
+      {
+        "name": "signals_admin",
+        "description": "Elevated signals operator. Successor to the local user.role column populated by better-auth's admin plugin.",
+        "composite": false,
+        "clientRole": false
+      }
+    ]
+  }
+}

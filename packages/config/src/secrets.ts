@@ -9,6 +9,18 @@ export const InstanceSecretsSchema = z.object({
 export const ApiSecretsSchema = z.object({
   API_DOMAIN: z.string(),
   API_PORT: z.coerce.number().default(2742),
+  // Serve the OpenAPI spec + Scalar reference UI at /api/reference. Default
+  // on; apps/api/src/config.ts's apiReferenceEnabled force-disables it in
+  // production unless API_REFERENCE_FORCE opts back in.
+  API_REFERENCE_ENABLED: z
+    .string()
+    .default('true')
+    .transform((val) => val === 'true'),
+  // Opt back into serving the docs surface when INSTANCE_ENV=production.
+  API_REFERENCE_FORCE: z
+    .string()
+    .default('false')
+    .transform((val) => val === 'true'),
 });
 
 export const AuthSecretsSchema = z.object({
@@ -30,7 +42,176 @@ export const AuthSecretsSchema = z.object({
   // Allowed login identifier channels, comma-separated (email / phone).
   // Parsed by parseLoginChannels(). Default: both.
   LOGIN_CHANNELS: z.string().default('phone,email'),
+  // Identity provider. Single rollback lever:
+  //   'betterauth' — better-auth only; every Keycloak path stays dormant.
+  //   'keycloak'   — Keycloak only; better-auth is not involved in any step.
+  // Default 'betterauth'.
+  //
+  // `dual` was removed: it existed so Keycloak tokens could be accepted
+  // alongside better-auth sessions during cutover, and it was the only thing
+  // that kept `backfillKeycloakShell` alive (the JIT straggler safety net, which
+  // only fired on a better-auth *login*). With it gone, running
+  // `scripts/migrate_users_to_keycloak.ts --apply` to completion is a hard
+  // prerequisite for flipping an instance to `keycloak` — see
+  // docs/superpowers/plans/2026-07-31-replace-better-auth-with-keycloak.md §2.1.
+  // Rollback is still per-instance: better-auth's code remains, and its
+  // passwordless OTP login needs no `account` row, so a Keycloak-created user can
+  // sign in again after a flip back.
+  AUTH_PROVIDER: z.enum(['betterauth', 'keycloak']).default('betterauth'),
+  // Where the acting-org authorisation comes from (§5.1 of the Keycloak
+  // migration design). The `x-acting-org-id` header is unchanged in every mode —
+  // this only controls whether the asserted value has to be inside a grant the
+  // token carries:
+  //   'header'          — today's behaviour: the header authorises itself.
+  //   'claim_preferred' — enforce `signals_acting_orgs` WHEN the token has it;
+  //                       fall back to the header when it doesn't. The
+  //                       compatibility window while partners adopt the claim.
+  //   'claim_required'  — a token with no grant is refused on acting-org routes.
+  // Default 'header' so this lands inert.
+  ACTING_ORG_SOURCE: z
+    .enum(['header', 'claim_preferred', 'claim_required'])
+    .default('header'),
 });
+
+/**
+ * Keycloak connection + token-validation settings. Every field is optional or
+ * defaulted so the API still boots with AUTH_PROVIDER=betterauth and nothing
+ * Keycloak-related configured; assertKeycloakConfigured below is what makes
+ * the required ones required once the flag moves off 'betterauth'.
+ */
+export const KeycloakSecretsSchema = z.object({
+  // Browser-facing base URL, including any relative path Keycloak is served
+  // under (aggregator runs it at /auth via KC_HTTP_RELATIVE_PATH). The `iss`
+  // claim is derived from this, so it must match what Keycloak actually mints.
+  KEYCLOAK_BASE_URL: z.string().optional(),
+  // Server-to-server base URL for JWKS + Admin REST, when the API reaches
+  // Keycloak on an internal address (e.g. http://keycloak:8080/auth) that
+  // differs from the public issuer. Defaults to KEYCLOAK_BASE_URL.
+  KEYCLOAK_INTERNAL_BASE_URL: z.string().optional(),
+  // One shared realm per instance, holding both DPGs' clients (§3.1).
+  KEYCLOAK_REALM: z.string().default('bluedots'),
+  KEYCLOAK_UI_CLIENT_ID: z.string().default('signals-ui'),
+  KEYCLOAK_API_CLIENT_ID: z.string().default('signals-api'),
+  // Confidential client secret for signals-api (service account used for the
+  // provisioning sync + Admin REST user creation). Not needed to *validate*
+  // tokens, only to obtain them.
+  KEYCLOAK_API_CLIENT_SECRET: z.string().optional(),
+  // Comma-separated client ids whose tokens signals accepts on the HUMAN
+  // session path. Load-bearing: the realm is shared with aggregator, so an
+  // aggregator-issued token is realm-valid and signature/`iss` checks alone
+  // would let it through (R9). Parsed by parseKeycloakAcceptedClientIds().
+  //
+  // `signals-api` is deliberately NOT in this default: it is the confidential
+  // client the API uses for its own Admin-REST service account, and
+  // `resolveServiceAccount` rejects it on the service path too (it is not an
+  // integrating DPG). Listing it here would have made the one client that can
+  // mint itself a token also a valid human session.
+  KEYCLOAK_ACCEPTED_CLIENT_IDS: z.string().default('signals-ui'),
+  // Realm roles a human token must carry at least one of, checked on the
+  // session path after the client allowlist (defence in depth for the shared
+  // realm: a misconfigured `aud` mapper on an aggregator client would otherwise
+  // be the only thing between a foreign-realm token and a signals session).
+  // Both signals roles are stamped by `user_to_keycloak.ts`, so every migrated
+  // or self-signed-up user has one.
+  //
+  // Set to an empty string to disable the check — the escape hatch for a realm
+  // whose access tokens carry no `realm_access.roles` (no `roles` client scope
+  // on the client). Do that knowingly: the client allowlist becomes the only
+  // cross-DPG gate again.
+  KEYCLOAK_REQUIRED_REALM_ROLES: z
+    .string()
+    .default('signals_participant,signals_admin'),
+  // Comma-separated client ids of integrating DPGs allowed on the SERVICE
+  // path via client-credentials (§5). Kept separate from the list above, not
+  // merged into it, so the two populations cannot be confused: a token from
+  // the public `signals-ui` client must never be honoured as a service
+  // account, and an integrating DPG's token must never be provisioned as a
+  // human user. Empty by default — service auth stays on `x-api-key` until an
+  // operator names the clients.
+  //
+  // Each id must match the `organization.slug` of that DPG's service org in
+  // signals; that convention is how a client resolves to its service user.
+  KEYCLOAK_SERVICE_CLIENT_IDS: z.string().default(''),
+  // JWKS cache lifetime. jose refetches on an unknown `kid` regardless, so
+  // this only bounds how long a rotated-out key stays cached.
+  KEYCLOAK_JWKS_CACHE_MAX_AGE_MS: z.coerce
+    .number()
+    .int()
+    .positive()
+    .default(600_000),
+  KEYCLOAK_CLOCK_TOLERANCE_SECONDS: z.coerce
+    .number()
+    .int()
+    .nonnegative()
+    .default(30),
+});
+
+/**
+ * Startup guard for the removed `dual` provider.
+ *
+ * `AUTH_PROVIDER` no longer accepts `dual`, so an instance still configured with
+ * it would fail on the Zod enum with "Invalid input" and no indication of what to
+ * do. This runs *before* the schema parse so the operator gets an actionable
+ * message and a pointer at the prerequisite they now have to satisfy.
+ *
+ * Pure, so it is directly unit-testable.
+ */
+export function assertAuthProviderSupported(rawAuthProvider: string | undefined): void {
+  if (rawAuthProvider !== 'dual') return;
+  throw new ConfigError(
+    "AUTH_PROVIDER='dual' has been removed. Use 'betterauth' or 'keycloak'.\n" +
+      'dual existed so Keycloak tokens could be accepted alongside better-auth ' +
+      'sessions during cutover, and it was the only mode in which the ' +
+      'just-in-time Keycloak shell backfill ran.\n' +
+      'Before setting AUTH_PROVIDER=keycloak, migrate every existing user into ' +
+      'the realm — `pnpm keycloak:migrate:users --apply` then `--reconcile` until ' +
+      'it reports 1:1. Without that, any user with no Keycloak identity is locked ' +
+      'out at the flip, because nothing creates one for them on the fly any more.'
+  );
+}
+
+/**
+ * Startup guard: AUTH_PROVIDER=keycloak without a Keycloak base URL would boot
+ * fine and then fail every login at runtime. Fail at boot instead.
+ *
+ * Pure, so it is directly unit-testable. Invoked once from
+ * apps/api/src/config.ts at module load, next to assertCreateTestOtpSafe.
+ */
+export function assertKeycloakConfigured(
+  authProvider: 'betterauth' | 'keycloak',
+  keycloak: { KEYCLOAK_BASE_URL?: string; KEYCLOAK_ACCEPTED_CLIENT_IDS: string }
+): void {
+  if (authProvider === 'betterauth') return;
+
+  if (!keycloak.KEYCLOAK_BASE_URL) {
+    throw new ConfigError(
+      `AUTH_PROVIDER=${authProvider} requires KEYCLOAK_BASE_URL (the ` +
+        "browser-facing Keycloak base URL, e.g. 'http://localhost:8080/auth'). " +
+        "Set it, or set AUTH_PROVIDER=betterauth to stay on the old provider."
+    );
+  }
+
+  if (parseKeycloakAcceptedClientIds(keycloak.KEYCLOAK_ACCEPTED_CLIENT_IDS).length === 0) {
+    throw new ConfigError(
+      `AUTH_PROVIDER=${authProvider} requires a non-empty ` +
+        'KEYCLOAK_ACCEPTED_CLIENT_IDS. The realm is shared with aggregator, so ' +
+        'signals must reject tokens issued to clients it does not serve — an ' +
+        'empty list would accept none, and removing the check would accept all.'
+    );
+  }
+}
+
+/** Split, trim and de-duplicate the comma-separated accepted-client list. */
+export function parseKeycloakAcceptedClientIds(value: string): string[] {
+  return [
+    ...new Set(
+      value
+        .split(',')
+        .map((entry) => entry.trim())
+        .filter(Boolean)
+    ),
+  ];
+}
 
 /**
  * Startup guard (D7): CREATE_TEST_OTP makes generateOtp() return the fixed
@@ -90,13 +271,27 @@ export const NotificationSecretsSchema = z.object({
 });
 
 export const MatchScoreSecretsSchema = z.object({
-  MATCH_SCORE_PROVIDER: z.enum(['dpg_scoring']).optional(),
-  DPG_SCORING_ENDPOINT: z.string().optional(),
-  DPG_SCORING_KEY_ID: z.string().optional(),
-  DPG_SCORING_SECRET: z.string().optional(),
-  DPG_SCORING_PATH: z.string().optional(),
-  DPG_SCORING_VERSION: z.string().optional(),
-  DPG_SCORING_PROMPT_VERSION: z.string().optional(),
+  // signals_search provider: the in-network relevance service (POST /v1/relevance).
+  // ENDPOINT is the signals-search base URL; API_KEY is an x-api-key valid in the
+  // shared Signals apikey store; PATH optionally overrides 'v1/relevance'.
+  MATCH_SCORE_PROVIDER: z.enum(['signals_search']).optional(),
+  SIGNALS_SEARCH_ENDPOINT: z.string().optional(),
+  SIGNALS_SEARCH_API_KEY: z.string().optional(),
+  SIGNALS_SEARCH_RELEVANCE_PATH: z.string().optional(),
+});
+
+export const SignalsSearchSecretsSchema = z.object({
+  // Discover BFF -> signals-search (#203). Both optional: when either is
+  // unset, the discover BFF always falls back to the native (in-repo) search
+  // path, so absence must never crash boot.
+  SIGNALS_SEARCH_URL: z.string().optional(),
+  SIGNALS_SEARCH_API_KEY: z.string().optional(),
+  // Optional spatial radius (meters) the discover BFF sends to signals-search
+  // as `distance_meters` (#394). Unset -> the BFF sends nothing and
+  // signals-search's own ~30km `s_dwithin` default applies; the BFF still
+  // reports that default via DEFAULT_SEARCH_DISTANCE_METERS so the UI's
+  // "within X km" note stays accurate either way.
+  SIGNALS_SEARCH_DISTANCE_METERS: z.coerce.number().int().positive().optional(),
 });
 
 export const SchemaRegistrySecretsSchema = z.object({
@@ -129,6 +324,9 @@ export const NetworkRuntimeSecretsSchema = z.object({
   BULK_MAX_ITEMS: z.coerce.number().int().positive().default(100),
   // Max wards that may share one guardian contact (U18). Best-effort cap.
   MAX_WARDS_PER_GUARDIAN: z.coerce.number().int().positive().default(6),
+  // Global default cap on profiles a single user may own per (network, domain,
+  // item_type). A network.json domain's `max_profiles_per_user` overrides this.
+  MAX_PROFILES_PER_USER: z.coerce.number().int().positive().default(5),
   // Per-peer fetch budget for inter-instance count/page fan-out. One slow
   // peer must not stall the aggregate; see inter_instance_fetch.ts.
   PEER_FETCH_TIMEOUT_MS: z.coerce.number().int().positive().default(10000),
@@ -139,6 +337,22 @@ export const NetworkRuntimeSecretsSchema = z.object({
   // bad/expired one, but allow a missing token (for peers not yet upgraded).
   // 'enforced': a valid token is required on every peer call.
   PEER_AUTH_MODE: z.enum(['permissive', 'enforced']).default('permissive'),
+  // In NETWORK_CONFIG_SOURCE=local mode, apps/api/src/app.ts wipes and
+  // rebuilds the on-disk network-schema cache at boot (see
+  // network_schema_cache.ts's refreshConsumedSchemas -> cacheReferencedItemSchemas),
+  // which queries the `items` table for every distinct item_schema_url on
+  // record. That query needs a reachable Postgres. Default true preserves
+  // that real-boot behavior unchanged. Callers that build the app without a
+  // database — the OpenAPI dump script (apps/api/scripts/dump_openapi.env)
+  // and any future boot-only smoke test — set this to false: route
+  // registration is fully static and never reads the schema cache at
+  // registration time (only a request-time handler, fetch_schemas.ts, reads
+  // it, lazily rebuilding on a cache miss), so skipping the warmup has no
+  // effect on the generated OpenAPI spec.
+  SCHEMA_CACHE_WARMUP_ENABLED: z
+    .string()
+    .default('true')
+    .transform((val) => val === 'true'),
 });
 
 export const DatabaseSecretsSchema = z.object({
@@ -154,6 +368,12 @@ export const DatabaseSecretsSchema = z.object({
   REDIS_PASSWORD: z.string(),
   REDIS_PORT: z.coerce.number().default(6370),
   INGEST_STREAM: z.string().default('signals:item-events'),
+  // Approximate cap on the item-events stream length. The publisher trims with
+  // `XADD MAXLEN ~` so the stream cannot grow unbounded in the shared Redis
+  // (which runs `noeviction` in prod — an untrimmed stream would eventually
+  // reject writes). Sized for consumer lag on signals-search; the sweep is the
+  // backstop for anything trimmed before it is consumed.
+  INGEST_STREAM_MAXLEN: z.coerce.number().int().positive().default(100_000),
 });
 
 export const PiiCryptoSecretsSchema = z.object({
@@ -178,6 +398,18 @@ export const GeocodingSecretsSchema = z
     // a 1000m ceiling keeps the point useful for proximity.
     PII_LOCATION_JITTER_MIN_METERS: z.coerce.number().min(50).max(1000).default(100),
     PII_LOCATION_JITTER_MAX_METERS: z.coerce.number().min(50).max(1000).default(250),
+    // Places cache TTLs (#196). Positive results are stable → long TTL;
+    // unresolvable strings cache briefly so they don't hammer the paid API.
+    GEO_CACHE_TTL_SECONDS: z.coerce.number().int().positive().default(2592000),
+    GEO_CACHE_NEGATIVE_TTL_SECONDS: z.coerce.number().int().positive().default(3600),
+    // A geocode is retried on a TRANSIENT provider failure only (HTTP/network
+    // error or a soft rate-limit status such as OVER_QUERY_LIMIT) — a definitive
+    // not-found is never retried. This targets the 429 bursts a large bulk
+    // upload can trigger. Best-effort one-shot retry, not durable recovery:
+    // GEO_RETRY_ATTEMPTS is the TOTAL number of tries (2 = one initial + one
+    // retry); GEO_RETRY_BACKOFF_MS is the fixed pause between tries.
+    GEO_RETRY_ATTEMPTS: z.coerce.number().int().min(1).default(2),
+    GEO_RETRY_BACKOFF_MS: z.coerce.number().int().min(0).default(300),
   })
   .refine((c) => c.PII_LOCATION_JITTER_MIN_METERS <= c.PII_LOCATION_JITTER_MAX_METERS, {
     message: 'PII_LOCATION_JITTER_MIN_METERS must be <= PII_LOCATION_JITTER_MAX_METERS',

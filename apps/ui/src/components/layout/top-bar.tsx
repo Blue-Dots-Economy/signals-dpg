@@ -11,6 +11,7 @@ import { ThemeModeToggle } from '@/components/layout/theme-mode-toggle';
 import { LanguageSwitcher } from '@/components/layout/language-switcher';
 import { useAuth } from '@/contexts/auth-context';
 import { usePendingActionsCount } from '@/hooks/use-actions';
+import { cn } from '@/lib/utils';
 import type { ViewMode } from '@/engine/types';
 
 interface TopBarProps {
@@ -57,12 +58,16 @@ export function TopBar({
   const { isAuthenticated, isLoading } = useAuth();
 
   return (
-    <header className="sticky top-0 z-40 flex h-14 items-center gap-3 border-b bg-gradient-to-r from-background to-primary/5 px-4 sm:px-6">
+    <header className="sticky top-0 z-40 flex min-h-14 flex-wrap items-center gap-x-3 gap-y-2 border-b bg-gradient-to-r from-background to-primary/5 px-4 py-2 sm:flex-nowrap sm:py-0 sm:px-6">
       <SidebarTrigger className="md:hidden" />
-      <div className="relative flex-1 max-w-md">
+      {/* On mobile the fixed right-hand controls consume the row, so the search
+          drops to its own full-width line (order-last + w-full). From sm up it
+          sits inline between the trigger and the controls as before. */}
+      <div className="relative order-last w-full min-w-0 sm:order-none sm:w-auto sm:flex-1 sm:max-w-md">
         <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
         <Input
           type="search"
+          aria-label={t('common.search')}
           placeholder={t('common.search')}
           className="pl-8"
           value={search}
@@ -87,13 +92,25 @@ export function TopBar({
           </ToggleGroupItem>
         </ToggleGroup>
 
-        <LanguageSwitcher />
-        <ThemeModeToggle />
+        {/* On mobile, Language + Theme move into the avatar dropdown once the
+            user is signed in (there's no dropdown to move them into for the
+            logged-out case, so they stay inline there). */}
+        <div className={cn('flex items-center gap-2', isAuthenticated && 'hidden md:flex')}>
+          {/* `compact` renders the switcher icon-only below sm and shows the
+              language label from sm up. On the logged-out mobile bar (where the
+              controls stay inline) this frees the ~90px "English" label so the
+              row no longer overflows and wraps to a third line. Desktop (sm+)
+              is unchanged — the full label still shows. */}
+          <LanguageSwitcher compact />
+          <ThemeModeToggle />
+        </div>
 
         {!isLoading && (
           isAuthenticated ? (
             <>
-              <NotificationBell />
+              <span className="hidden md:inline-flex">
+                <NotificationBell />
+              </span>
               <UserMenu />
             </>
           ) : (

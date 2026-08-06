@@ -3,6 +3,7 @@ import { useQuery } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
 import type { RJSFSchema } from '@rjsf/utils';
 import { fetchNetworkConfig, fetchNetworkItems, PROFILE_FETCH_LIMIT } from '@/lib/network-api';
+import { queryKeys } from '@/lib/query-keys';
 import type { Item } from '@/lib/item-api';
 import { useBrowserLocation } from '@/hooks/use-browser-location';
 import { useGeolocationPermission } from '@/hooks/use-geolocation-permission';
@@ -47,8 +48,9 @@ export function TouristApp() {
     : null;
 
   const configQuery = useQuery({
-    queryKey: ['tourist', 'config', ORANGE_NETWORK_ID],
+    queryKey: queryKeys.networkConfig(ORANGE_NETWORK_ID),
     queryFn: () => fetchNetworkConfig(ORANGE_NETWORK_ID),
+    staleTime: 5 * 60 * 1000,
   });
 
   const network = configQuery.data ?? null;
@@ -59,12 +61,21 @@ export function TouristApp() {
 
   const itemsQuery = useQuery({
     enabled: !!network,
-    queryKey: ['tourist', 'items', ORANGE_NETWORK_ID, ORANGE_DOMAIN_ID, itemType],
+    queryKey: queryKeys.browseItems(ORANGE_NETWORK_ID, ORANGE_DOMAIN_ID, {
+      limit: PROFILE_FETCH_LIMIT,
+    }),
     queryFn: ({ signal }) =>
       fetchNetworkItems(
-        { item_network: ORANGE_NETWORK_ID, item_domain: ORANGE_DOMAIN_ID, item_type: itemType, limit: PROFILE_FETCH_LIMIT },
+        {
+          item_network: ORANGE_NETWORK_ID,
+          item_domain: ORANGE_DOMAIN_ID,
+          item_type: itemType,
+          limit: PROFILE_FETCH_LIMIT,
+          cache_ttl_seconds: 90,
+        },
         signal,
       ),
+    staleTime: 90 * 1000,
   });
 
   const enumFields = React.useMemo(
@@ -98,7 +109,7 @@ export function TouristApp() {
   const locationDenied = browser.status === 'error' || !browser.isSupported;
 
   return (
-    <div className="flex h-screen flex-col">
+    <div className="flex h-svh flex-col">
       <TouristTopBar
         search={search}
         onSearchChange={setSearch}

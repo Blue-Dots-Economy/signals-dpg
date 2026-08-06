@@ -7,12 +7,12 @@ vi.mock('@/network_configs', () => ({
 }));
 
 const getMinorGuardian = vi.fn();
-const getWardDob = vi.fn();
+const getWardAge = vi.fn();
 const getGuardianContactPlaintext = vi.fn();
 const getGuardianNamePlaintext = vi.fn();
 vi.mock('@/services/minor_guardian_repo', () => ({
   getMinorGuardian: (...args: unknown[]) => getMinorGuardian(...args),
-  getWardDob: (...args: unknown[]) => getWardDob(...args),
+  getWardAge: (...args: unknown[]) => getWardAge(...args),
   getGuardianContactPlaintext: (...args: unknown[]) => getGuardianContactPlaintext(...args),
   getGuardianNamePlaintext: (...args: unknown[]) => getGuardianNamePlaintext(...args),
 }));
@@ -45,7 +45,7 @@ vi.mock('@/services/guardian_otp', () => ({
   GuardianOtpError,
 }));
 
-import { guardianActionGate } from '@/services/guardian_action_gate';
+import { guardianActionGate, guardianBulkActionGate, guardianGateFailure } from '@/services/guardian_action_gate';
 
 const gatedCfg = {
   id: 'blue_dot',
@@ -62,6 +62,7 @@ const baseInput = {
   actionType: 'apply',
   sourceItemId: 'item-src',
   targetItemId: 'item-tgt',
+  channel: 'self' as const,
 };
 
 const EXPECTED_SCOPE = 'guardian_action:ward-1:apply:item-src:item-tgt';
@@ -77,24 +78,24 @@ describe('guardianActionGate', () => {
   it('returns not_required when the source domain is ungated', async () => {
     const result = await guardianActionGate({ ...baseInput, sourceDomain: 'provider' });
     expect(result).toEqual({ status: 'not_required' });
-    expect(getWardDob).not.toHaveBeenCalled();
+    expect(getWardAge).not.toHaveBeenCalled();
   });
 
   it('returns not_required when gated but the ward is an adult (no minor_guardian row)', async () => {
-    getWardDob.mockResolvedValue(null);
+    getWardAge.mockResolvedValue(null);
     const result = await guardianActionGate(baseInput);
     expect(result).toEqual({ status: 'not_required' });
     expect(issueGuardianOtp).not.toHaveBeenCalled();
   });
 
-  it('returns not_required when gated but the ward is an adult (birth date says so)', async () => {
-    getWardDob.mockResolvedValue(new Date('1990-01-10'));
+  it('returns not_required when gated but the ward is an adult (age says so)', async () => {
+    getWardAge.mockResolvedValue(36);
     const result = await guardianActionGate(baseInput);
     expect(result).toEqual({ status: 'not_required' });
   });
 
   it('issues an OTP and returns challenge_issued for a gated minor with no otp supplied', async () => {
-    getWardDob.mockResolvedValue(new Date('2015-01-10'));
+    getWardAge.mockResolvedValue(11);
     getGuardianContactPlaintext.mockResolvedValue({ contact: '+911234', contactType: 'phone' });
     issueGuardianOtp.mockResolvedValue(undefined);
 
@@ -111,7 +112,7 @@ describe('guardianActionGate', () => {
   });
 
   it('passes the network.json action type + stage through as the scenario', async () => {
-    getWardDob.mockResolvedValue(new Date('2015-01-10'));
+    getWardAge.mockResolvedValue(11);
     getGuardianContactPlaintext.mockResolvedValue({ contact: 'g@x.co', contactType: 'email' });
     issueGuardianOtp.mockResolvedValue(undefined);
 
@@ -122,19 +123,19 @@ describe('guardianActionGate', () => {
     );
   });
 
-  it('returns verified with the scope when the supplied otp checks out', async () => {
-    getWardDob.mockResolvedValue(new Date('2015-01-10'));
+  it('returns verified when the supplied otp checks out (OTP scoped to the action)', async () => {
+    getWardAge.mockResolvedValue(11);
     assertVerifyAttemptAllowed.mockResolvedValue(undefined);
     verifyGuardianOtp.mockResolvedValue(true);
 
     const result = await guardianActionGate({ ...baseInput, otp: '123456' });
 
-    expect(result).toEqual({ status: 'verified', scope: EXPECTED_SCOPE });
+    expect(result).toEqual({ status: 'verified' });
     expect(verifyGuardianOtp).toHaveBeenCalledWith({ scope: EXPECTED_SCOPE, otp: '123456' });
   });
 
   it('returns invalid_otp when the supplied otp is wrong', async () => {
-    getWardDob.mockResolvedValue(new Date('2015-01-10'));
+    getWardAge.mockResolvedValue(11);
     assertVerifyAttemptAllowed.mockResolvedValue(undefined);
     verifyGuardianOtp.mockResolvedValue(false);
 
@@ -144,7 +145,7 @@ describe('guardianActionGate', () => {
   });
 
   it('returns throttled when verify attempts are exhausted', async () => {
-    getWardDob.mockResolvedValue(new Date('2015-01-10'));
+    getWardAge.mockResolvedValue(11);
     assertVerifyAttemptAllowed.mockRejectedValue(new GuardianOtpError('VERIFY_THROTTLED'));
 
     const result = await guardianActionGate({ ...baseInput, otp: '123456' });
@@ -154,7 +155,7 @@ describe('guardianActionGate', () => {
   });
 
   it('returns rate_limited when issuing throws RATE_LIMITED', async () => {
-    getWardDob.mockResolvedValue(new Date('2015-01-10'));
+    getWardAge.mockResolvedValue(11);
     getGuardianContactPlaintext.mockResolvedValue({ contact: '+911234', contactType: 'phone' });
     issueGuardianOtp.mockRejectedValue(new GuardianOtpError('RATE_LIMITED'));
 
@@ -164,7 +165,7 @@ describe('guardianActionGate', () => {
   });
 
   it('returns no_provider when issuing throws NO_OTP_PROVIDER', async () => {
-    getWardDob.mockResolvedValue(new Date('2015-01-10'));
+    getWardAge.mockResolvedValue(11);
     getGuardianContactPlaintext.mockResolvedValue({ contact: '+911234', contactType: 'phone' });
     issueGuardianOtp.mockRejectedValue(new GuardianOtpError('NO_OTP_PROVIDER'));
 
@@ -174,12 +175,160 @@ describe('guardianActionGate', () => {
   });
 
   it('returns no_provider when the guardian has no contact on file', async () => {
-    getWardDob.mockResolvedValue(new Date('2015-01-10'));
+    getWardAge.mockResolvedValue(11);
     getGuardianContactPlaintext.mockResolvedValue(null);
 
     const result = await guardianActionGate(baseInput);
 
     expect(result).toEqual({ status: 'no_provider' });
     expect(issueGuardianOtp).not.toHaveBeenCalled();
+  });
+
+  // External / on-behalf channel (#395): no guardian-OTP path over
+  // voice/aggregator — a minor / age-unknown ward is blocked, an adult
+  // proceeds unchanged, and an ungated domain short-circuits before age.
+  describe('external channel', () => {
+    const externalInput = { ...baseInput, channel: 'external' as const };
+
+    it('blocks a gated minor with reason "minor"', async () => {
+      getWardAge.mockResolvedValue(11);
+
+      const result = await guardianActionGate(externalInput);
+
+      expect(result).toEqual({ status: 'external_minor_blocked', reason: 'minor' });
+      expect(issueGuardianOtp).not.toHaveBeenCalled();
+    });
+
+    it('blocks a gated age-unknown ward with reason "age_unknown" (fail-closed)', async () => {
+      getWardAge.mockResolvedValue(null);
+
+      const result = await guardianActionGate(externalInput);
+
+      expect(result).toEqual({ status: 'external_minor_blocked', reason: 'age_unknown' });
+      expect(issueGuardianOtp).not.toHaveBeenCalled();
+    });
+
+    it('lets a gated adult proceed (not_required)', async () => {
+      getWardAge.mockResolvedValue(36);
+
+      const result = await guardianActionGate(externalInput);
+
+      expect(result).toEqual({ status: 'not_required' });
+    });
+
+    it('short-circuits to not_required on an ungated domain before checking age', async () => {
+      const result = await guardianActionGate({ ...externalInput, sourceDomain: 'provider' });
+
+      expect(result).toEqual({ status: 'not_required' });
+      expect(getWardAge).not.toHaveBeenCalled();
+    });
+  });
+});
+
+describe('guardianGateFailure', () => {
+  it('maps external_minor_blocked to MINOR_ACTION_CHANNEL_BLOCKED without leaking the reason', () => {
+    const failure = guardianGateFailure({ status: 'external_minor_blocked', reason: 'age_unknown' });
+
+    expect(failure).not.toBeNull();
+    expect(failure!.errorCode).toBe('MINOR_ACTION_CHANNEL_BLOCKED');
+    // The reason value never reaches the client-facing message.
+    expect(failure!.message).not.toContain('age_unknown');
+    expect(failure!.message).toBe(
+      "This participant is a minor; actions for minors must be completed in the app and can't be performed via this channel.",
+    );
+  });
+
+  it('returns null for not_required and verified', () => {
+    expect(guardianGateFailure({ status: 'not_required' })).toBeNull();
+    expect(guardianGateFailure({ status: 'verified' })).toBeNull();
+  });
+});
+
+describe('guardianBulkActionGate (#393)', () => {
+  const bulkItems = [
+    { index: 0, wardUserId: 'ward-1', network: 'blue_dot', sourceDomain: 'seeker', actionType: 'apply', sourceItemId: 'src', targetItemId: 'tgt-a' },
+    { index: 1, wardUserId: 'ward-1', network: 'blue_dot', sourceDomain: 'seeker', actionType: 'apply', sourceItemId: 'src', targetItemId: 'tgt-b' },
+  ];
+
+  it('issues ONE OTP listing every provider and challenges all gated items', async () => {
+    getWardAge.mockResolvedValue(11);
+    getGuardianContactPlaintext.mockResolvedValue({ contact: 'g@x.co', contactType: 'email' });
+    resolveProviderServiceName.mockImplementation((id: string) =>
+      Promise.resolve(id === 'tgt-a' ? 'Acme' : 'Globex'),
+    );
+    issueGuardianOtp.mockResolvedValue(undefined);
+
+    const map = await guardianBulkActionGate({ items: bulkItems });
+
+    expect(issueGuardianOtp).toHaveBeenCalledTimes(1);
+    const call = issueGuardianOtp.mock.calls[0][0];
+    expect(call.scenario).toMatchObject({
+      kind: 'action_bulk',
+      actionType: 'apply',
+      stage: 'initiate',
+      providerOrgNames: ['Acme', 'Globex'],
+      jobs: true,
+    });
+    expect(map.get(0)).toEqual({ status: 'challenge_issued' });
+    expect(map.get(1)).toEqual({ status: 'challenge_issued' });
+  });
+
+  it('verifies the single OTP once and marks every gated item verified', async () => {
+    getWardAge.mockResolvedValue(11);
+    getGuardianContactPlaintext.mockResolvedValue({ contact: 'g@x.co', contactType: 'email' });
+    assertVerifyAttemptAllowed.mockResolvedValue(undefined);
+    verifyGuardianOtp.mockResolvedValue(true);
+
+    const map = await guardianBulkActionGate({ items: bulkItems, otp: '000000' });
+
+    expect(verifyGuardianOtp).toHaveBeenCalledTimes(1);
+    expect(map.get(0)).toMatchObject({ status: 'verified' });
+    expect(map.get(1)).toMatchObject({ status: 'verified' });
+    expect(issueGuardianOtp).not.toHaveBeenCalled();
+  });
+
+  it('returns invalid_otp for every gated item when the OTP is wrong', async () => {
+    getWardAge.mockResolvedValue(11);
+    getGuardianContactPlaintext.mockResolvedValue({ contact: 'g@x.co', contactType: 'email' });
+    assertVerifyAttemptAllowed.mockResolvedValue(undefined);
+    verifyGuardianOtp.mockResolvedValue(false);
+
+    const map = await guardianBulkActionGate({ items: bulkItems, otp: 'wrong' });
+
+    expect(map.get(0)).toEqual({ status: 'invalid_otp' });
+    expect(map.get(1)).toEqual({ status: 'invalid_otp' });
+  });
+
+  it('passes stage:"accept" through to the OTP scenario for a bulk accept (#393 receiver side)', async () => {
+    getWardAge.mockResolvedValue(11);
+    getGuardianContactPlaintext.mockResolvedValue({ contact: 'g@x.co', contactType: 'email' });
+    resolveProviderServiceName.mockResolvedValue('Acme');
+    issueGuardianOtp.mockResolvedValue(undefined);
+
+    await guardianBulkActionGate({ items: bulkItems, stage: 'accept' });
+
+    expect(issueGuardianOtp).toHaveBeenCalledTimes(1);
+    expect(issueGuardianOtp.mock.calls[0][0].scenario).toMatchObject({
+      kind: 'action_bulk',
+      stage: 'accept',
+    });
+  });
+
+  it('excludes ungated / adult items from the result map', async () => {
+    getWardAge.mockResolvedValue(11);
+    getGuardianContactPlaintext.mockResolvedValue({ contact: 'g@x.co', contactType: 'email' });
+    resolveProviderServiceName.mockResolvedValue('Acme');
+    issueGuardianOtp.mockResolvedValue(undefined);
+
+    const map = await guardianBulkActionGate({
+      items: [
+        bulkItems[0],
+        // Ungated source domain → not gated → absent from the map.
+        { index: 2, wardUserId: 'ward-1', network: 'blue_dot', sourceDomain: 'provider', actionType: 'connect', sourceItemId: 'src2', targetItemId: 'tgt-c' },
+      ],
+    });
+
+    expect(map.has(0)).toBe(true);
+    expect(map.has(2)).toBe(false);
   });
 });

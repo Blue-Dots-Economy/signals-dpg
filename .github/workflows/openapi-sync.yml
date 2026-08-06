@@ -1,0 +1,39 @@
+name: OpenAPI sync → bluedots-docs
+
+on:
+  push:
+    branches: [main]
+    paths: [openapi.json]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/checkout@v7
+        with:
+          repository: Blue-Dots-Economy/bluedots-docs
+          token: ${{ secrets.DOCS_SYNC_TOKEN }}
+          path: docs-repo
+
+      - name: Copy spec into docs repo
+        run: cp openapi.json docs-repo/src/openapi/signals-dpg.json
+
+      # No-op when the JSON is byte-identical: create-pull-request opens no PR
+      # if the copy produced no diff, and updates the existing PR otherwise.
+      - name: Open or update sync PR
+        uses: peter-evans/create-pull-request@v8
+        with:
+          path: docs-repo
+          token: ${{ secrets.DOCS_SYNC_TOKEN }}
+          branch: openapi-sync/signals-dpg
+          title: 'openapi-sync: signals-dpg'
+          commit-message: 'chore: sync signals-dpg OpenAPI spec from source repo'
+          body: |
+            Automated OpenAPI sync from `Blue-Dots-Economy/signals-dpg` (`${{ github.sha }}`).
+            Review the contract diff, then merge to publish on the docs site.

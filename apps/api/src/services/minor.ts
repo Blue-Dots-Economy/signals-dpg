@@ -1,14 +1,14 @@
 import type { NetworkConfigDocument } from '@dpg/schemas';
 
 /**
- * Derived under-18 check (U18 spec D2). Birth is the ward's full date of birth,
- * stored on `user.date_of_birth`. Adult from the 18th birthday onward; minor
- * before it. `is_minor` is never stored — recompute from the DOB on every read.
+ * Under-18 check from the stored age (#331). Age is a snapshot captured at
+ * registration (derived from the birth year: `currentYear - birthYear`, no
+ * month). A minor is `age <= 18`: with no month we can't confirm someone in
+ * their 18th year has had their birthday, so the whole boundary year is treated
+ * as u18 — fail-closed. Adult only at 19+ by this rule.
  */
-export function isMinor(dateOfBirth: Date, now: Date = new Date()): boolean {
-  const adultThreshold = new Date(dateOfBirth);
-  adultThreshold.setFullYear(adultThreshold.getFullYear() + 18);
-  return now.getTime() < adultThreshold.getTime();
+export function isMinor(age: number): boolean {
+  return age <= 18;
 }
 
 /**

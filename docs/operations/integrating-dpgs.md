@@ -36,6 +36,178 @@ Notes on `auth_middleware`:
 - The middleware is gated by `AUTH_MIDDLEWARE_ENABLED` (defaults to `true`).
   See `docs/operations/secrets.md` for the env knob.
 
+## Migrating to Keycloak client-credentials (in progress)
+
+`x-api-key` is being replaced by a standard OAuth2 **client-credentials**
+bearer token, as part of the Keycloak migration
+(`docs/superpowers/plans/2026-07-23-keycloak-migration-design.md` §5).
+
+**Signals accepts both during the transition.** That compatibility window
+exists precisely because aggregator-dpg and voice-dpg live in separate repos
+and cannot cut over in the same deploy. `x-api-key` keeps working until every
+partner reports zero traffic on it (rollout step R6), and is only removed at
+R8. **Nothing about the old path changes today — no action is required to keep
+working.**
+
+### What changes, and what does not
+
+| | Today | After |
+|---|---|---|
+| Who is calling | `x-api-key: <key>` | `Authorization: Bearer <access token>` |
+| Who they act for | `x-acting-org-id: <org_id>` | **unchanged** — acting-org is orthogonal to authentication |
+| `request.user` / `request.acting_org` | — | **unchanged shape**, so every route behaves identically |
+
+Only the first row changes. The second header stays, and so does the mental
+model: the credential says who the messenger is, the header says who they are
+speaking for.
+
+### Obtaining a token
+
+Each integrating DPG gets its own **confidential client** in the shared
+`bluedots` realm and exchanges its client secret for an access token:
+
+```bash
+curl -X POST "$KEYCLOAK_URL/realms/bluedots/protocol/openid-connect/token" \
+  -d grant_type=client_credentials \
+  -d client_id=aggregator-dpg \
+  -d client_secret="$AGGREGATOR_DPG_CLIENT_SECRET"
+# -> { "access_token": "eyJ...", "expires_in": 300, ... }
+```
+
+Then call signals exactly as before, swapping the credential header:
+
+```bash
+curl -X POST http://localhost:2742/api/v1/admin/aggregator/upsert \
+  -H "Authorization: Bearer $ACCESS_TOKEN" \
+  -H 'x-acting-org-id: <aggregator-dpg network_service org id>' \
+  -H 'Content-Type: application/json' \
+  -d '{ "external_id": "agg_bbmp_001", "name": "BBMP", "slug": "bbmp" }'
+```
+
+Cache and reuse the token until shortly before `expires_in`; do not fetch one
+per request.
+
+### How a client maps to a service user
+
+**By convention: the Keycloak client id must equal the `organization.slug` of
+that DPG's service org in signals.** There is no new table and no extra claim
+— the client id is looked up as a slug, and the org's member with
+`role='service'` is the identity the request runs as. That is the same
+`organization` / `member` / `user` triple the seed script already creates, so
+an existing deployment needs no data migration; the service user id an
+integrating DPG resolves to is identical on both credentials.
+
+If the slugs and client ids do not line up, signals returns
+`403 SERVICE_ACCOUNT_NOT_PROVISIONED` and logs the client id it could not
+resolve.
+
+### Signals-side configuration
+
+Two env vars gate this (both in `packages/config/src/secrets.ts`):
+
+| Var | Meaning |
+|---|---|
+| `AUTH_PROVIDER` | Must be `keycloak` for bearer tokens to be considered at all (`dual` has been removed). Default `betterauth` — bearer service auth is inert. |
+| `KEYCLOAK_SERVICE_CLIENT_IDS` | Comma-separated client ids allowed on the service path, e.g. `aggregator-dpg,voice-dpg`. **Empty by default**, so no client can use service auth until an operator names it. |
+
+`KEYCLOAK_SERVICE_CLIENT_IDS` is deliberately separate from
+`KEYCLOAK_ACCEPTED_CLIENT_IDS` (the human/session clients). Because signals
+shares one realm with aggregator, keeping the two lists apart is what stops a
+token from the public `signals-ui` client being honoured as a service account,
+and stops an integrating DPG's token being provisioned as a human user.
+
+### Failure codes on the bearer path
+
+| Status | `code` | Meaning |
+|---|---|---|
+| 401 | `TOKEN_EXPIRED` | Token past `exp`. Fetch a new one. |
+| 401 | `UNAUTHORIZED` | Malformed token, bad signature, or wrong issuer. |
+| 403 | `TOKEN_CLIENT_REJECTED` | Valid realm token, but the client is not one signals serves. |
+| 403 | `SERVICE_CLIENT_NOT_ALLOWED` | Client is not in `KEYCLOAK_SERVICE_CLIENT_IDS`. |
+| 403 | `SERVICE_ACCOUNT_NOT_PROVISIONED` | No service org/user matches the client id (see the slug convention above). |
+| 503 | `IDENTITY_PROVIDER_UNAVAILABLE` | Signals could not reach Keycloak to verify. **Retryable** — this is not an auth failure. |
+
+Treat `503` differently from `401`: it means the token was never judged, so a
+retry with the *same* token is correct.
+
+### If both credentials are sent
+
+`x-api-key` wins. Precedence is unchanged from before the window, so a partner
+mid-migration sees identical behaviour on the old path. Send one or the other.
+
+## Acting org: the header is becoming a token-verified assertion
+
+**Nothing about the `x-acting-org-id` header changes** — same name, same value,
+still sent on every acting-org call. What changes is that signals will stop
+taking it on trust.
+
+### Why
+
+`acting_org_preHandler` today validates that the asserted org exists and is an
+allowed type, and that the caller is a member of *some* org. It never checks
+membership of the **asserted** org. Since `POST /api/v1/admin/participant/decrypt`
+scopes decrypted participant PII by `user.onboarded_by_org_id == acting_org.org_id`,
+a caller asserting another aggregator's org id reads that aggregator's
+participants. That has been held together by the trusted-intermediary model; a
+bearer token lets signals verify it instead, because a claim cannot be forged by
+the caller whereas a header can.
+
+### The model
+
+Your token carries **`signals_acting_orgs`** — the set of org ids you may act
+for. The header still selects which one a given request uses, and signals rejects
+any header value outside the set.
+
+| Your token's grant | `x-acting-org-id` | Result |
+|---|---|---|
+| `["*"]` | any existing org | allowed (today's behaviour) |
+| `["org_a","org_b"]` | `org_a` | allowed |
+| `["org_a","org_b"]` | `org_c` | **`403 ACTING_ORG_NOT_GRANTED`** |
+| `["org_a"]` | *omitted* | allowed — a single-org grant needs no header |
+| `["*"]` | *omitted* | `400 MISSING_ACTING_ORG` — a wildcard names no specific org |
+| *no claim* | `org_a` | allowed under `claim_preferred`; refused under `claim_required` |
+
+The grant authorises **which** org you may act for, not **what** you may do
+there — the `organization.type` capability gate still applies exactly as today.
+
+### Rollout: `ACTING_ORG_SOURCE`
+
+Signals-side flag, mirroring `AUTH_PROVIDER`:
+
+| Value | Behaviour |
+|---|---|
+| `header` | **Default today.** The header authorises itself; the grant is ignored even if present. Nothing to do. |
+| `claim_preferred` | The grant is enforced **when the token carries one**; a token without one falls back to the header. **This is the window** — adopt at your own pace. |
+| `claim_required` | A token with no grant is refused on acting-org routes. Terminal. |
+
+Because `claim_preferred` falls back, **you do not need to coordinate a
+simultaneous deploy.** An `x-api-key` caller carries no grant, so the old path
+keeps working until `claim_required`.
+
+### What you need to do
+
+Nothing, until signals moves off `header`. When it does:
+
+- Your Keycloak client needs a `signals_acting_orgs` mapper. Both DPG clients
+  currently ship with a hardcoded `"*"` — see
+  `infra/keycloak/realms/bluedots-realm.json` and
+  `infra/keycloak/init/apply-user-profile.sh`.
+- **`"*"` is provisional.** It preserves today's reach as an explicit, auditable
+  grant rather than an unstated default, but it should be narrowed to the orgs
+  each DPG legitimately serves. Tell us that set and we will enumerate it.
+- Keep sending `x-acting-org-id` exactly as you do now. Only drop it if your
+  grant names exactly one org.
+
+### New failure codes
+
+| Status | `code` | Meaning |
+|---|---|---|
+| 403 | `ACTING_ORG_NOT_GRANTED` | The asserted org is outside your token's grant. Not retryable — fix the grant or the assertion. |
+| 403 | `ACTING_ORG_CLAIM_MISSING` | `claim_required` is on and your token carries no grant. Add the mapper. |
+
+The existing `400 MISSING_ACTING_ORG`, `404 ACTING_ORG_NOT_FOUND` and
+`403 ACTING_ORG_TYPE_NOT_ALLOWED` are unchanged.
+
 ## Organization types
 
 The `organization.type` text column on the better-auth `organization` table
@@ -60,18 +232,23 @@ targets. Individual routes can narrow further — e.g.
 docker compose up -d db redis
 pnpm db:push:api          # apply better-auth + Drizzle schema to Postgres
 pnpm db:init:api          # apply the non-Drizzle SQL bootstrap (items / actions / events)
-pnpm db:seed:services:api # create aggregator-dpg + voice-dpg service users and apikeys
+pnpm db:seed:services:api # create the integrating-DPG service user and apikey
 ```
 
 The seed script (`apps/api/scripts/seed_service_users.ts`) is idempotent —
-re-running it does not mint new keys. For each of `aggregator-dpg` and
-`voice-dpg` it ensures:
+re-running it does not mint new keys. For each entry in its `SERVICES` list it
+ensures:
 
 1. An `organization` row with `type='network_service'` and the service slug.
 2. A `user` row for the service identity (e.g. `aggregator-dpg-svc@signals.local`).
 3. A `member` row linking that user to its network-service org with
    `role='service'`.
 4. An `apikey` row (prefix `sk_signals_`) owned by that user.
+
+> **`SERVICES` currently contains only `aggregator-dpg`.** Despite what the
+> rest of this document implies, `voice-dpg` is *not* seeded — add it to the
+> list when that DPG is wired up. This matters for the Keycloak migration too:
+> the slug created here is what a client-credentials client id must match.
 
 The minted apikeys print to stdout **on the first run only** — capture them
 then. If you lose a key, the recovery path is to delete the corresponding
@@ -138,8 +315,12 @@ content-type: application/json
 {
   "email": "user@example.com",
   "name": "Asha P",
-  "terms_accepted": true,
-  "privacy_accepted": true,
+  "age": 35,
+  "compliance": [
+    { "key": "user_terms", "value": true },
+    { "key": "user_privacy", "value": true },
+    { "key": "profile_creation", "value": true }
+  ],
   "channel": "bulk",
   "item_state": { ... item-schema-validated payload ... },
   "item_id": "optional-uuid-for-update-only",
@@ -150,6 +331,14 @@ content-type: application/json
 ```
 
 Identity rule: at least one of `email` or `phone_number` must be provided.
+
+**Consent (`compliance`).** Each entry names a consent the channel captured
+from the user; only `value: true` is recorded, into the `consent_record`
+ledger. Recognised keys: `user_terms`, `user_privacy` (user-level) and
+`profile_creation` (item-level). Unknown keys are ignored. Versions are
+derived server-side. See "Consent (`compliance`), age, and activation" below
+for validation rules, age requirements, and how a profile gets promoted to
+`live`.
 
 ### Response
 
@@ -164,17 +353,45 @@ Identity rule: at least one of `email` or `phone_number` must be provided.
       "item_network": "blue_dot",
       "item_domain": "seeker",
       "item_type": "profile_1.0",
+      "lifecycle_status": "live",
       "item_state": { ... },
       "created_at": "...",
       "updated_at": "..."
     }
-  ]
+  ],
+  "consent_recorded": 3
 }
 ```
 
 `onboarded_at` is set only when this call created a new user; null
 otherwise. `items` is scoped to the networks this Signals instance
-serves.
+serves. `lifecycle_status` tells the caller whether the profile is
+usable (`live`) or still incomplete/gated (`draft`, `paused`).
+`consent_recorded` is the number of `consent_record` rows written by
+this call from the `compliance` array (0 when `compliance` was absent
+or every entry was `false`/unrecognised).
+
+### Consent (`compliance`), age, and activation
+
+- `compliance` is an optional array of `{ key, value }`. Recognised keys:
+  `user_terms`, `user_privacy` (user-level), `profile_creation` (item-level).
+- **Accept-only:** any key sent as `false` → `400 CONSENT_DECLINED`; omit a key
+  to skip it.
+- **`user_terms` + `user_privacy` are a both-or-none pair** → one without the
+  other is `400 USER_LEVEL_INCOMPLETE`.
+- **On guardian-gated domains** (e.g. `seeker`), sending the consent pair
+  requires `age` (integer years, stored as the `user.age` snapshot, #331) →
+  else `400 DOB_REQUIRED`. Non-gated domains don't require it; an age already
+  on file satisfies it.
+- **Activation:** target an existing profile with `item_id` (no `item_state`
+  needed) to add `profile_creation` and/or `age` and promote it. A user-level
+  call with `age` and no item promotes all the user's eligible drafts.
+- The legacy `terms_accepted` / `privacy_accepted` booleans are accepted but
+  ignored (deprecated, #309).
+- `GET /admin/participant` returns `user_consent { terms_accepted,
+  privacy_accepted, has_age }` and per-item `profile_consent_accepted`
+  + `lifecycle_status` so callers can see what's outstanding and which profile
+  is usable.
 
 ### Error matrix (additions)
 

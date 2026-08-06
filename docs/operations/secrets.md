@@ -49,10 +49,11 @@ in each.
   next install run.
 - `templates/secrets.yaml` skips emitting a Secret if its password is empty,
   so `helm template` / `helm lint` stay clean before `install.sh` runs.
-- Notification-service and match-score (dpg-scoring) secrets follow the
-  same pattern — both have a `credentials.<chart>` block in `values.yaml`,
-  and the `keyId` / `secret` values must match the corresponding
-  `internal-secrets.json` / `auth.keys.json` files mounted into those pods.
+- Notification-service secrets follow the same pattern — a
+  `credentials.<chart>` block in `values.yaml` whose `keyId` / `secret`
+  values must match the `internal-secrets.json` file mounted into that pod.
+  (Match scoring now uses signals-search via a single `SIGNALS_SEARCH_API_KEY`
+  — see the Match score table below — not an HMAC key pair.)
 
 ## Kubernetes — AWS overlay (`dpg/values-aws.yaml`, charts repo)
 
@@ -155,20 +156,18 @@ All fields optional; if unset, OTP / SMS-template features are disabled.
 | `NOTIFICATION_SERVICE_SECRET` | optional | HMAC secret paired with `NOTIFICATION_SERVICE_KEY_ID`. `openssl rand -hex 32`. |
 | `SMS_TEMPLATE_ID` | optional | |
 
-**Match score / dpg-scoring (`MatchScoreSecretsSchema`)**
+**Match score / signals-search (`MatchScoreSecretsSchema`)**
 
-All fields optional; if unset, `match_score` API falls back to the no-op
-provider.
+All fields optional; if unset (or `SIGNALS_SEARCH_ENDPOINT` / `SIGNALS_SEARCH_API_KEY`
+missing), the `match_score` API is not configured and the calculate endpoint
+returns `503`.
 
 | Key | Required | Notes |
 |---|---|---|
-| `MATCH_SCORE_PROVIDER` | optional | Currently only `dpg_scoring`. |
-| `DPG_SCORING_ENDPOINT` | optional | E.g. `http://dpg-match-score:3000`. |
-| `DPG_SCORING_KEY_ID` | optional | Must match a key in `match-score`'s `auth.keys.json`. |
-| `DPG_SCORING_SECRET` | optional | HMAC secret paired with `DPG_SCORING_KEY_ID`. |
-| `DPG_SCORING_PATH` | optional | Empty → client uses default `api/v1/scores/match`. |
-| `DPG_SCORING_VERSION` | optional | |
-| `DPG_SCORING_PROMPT_VERSION` | optional | |
+| `MATCH_SCORE_PROVIDER` | optional | Only `signals_search` (the in-network relevance API). |
+| `SIGNALS_SEARCH_ENDPOINT` | optional | signals-search base URL, e.g. `http://signals-search:3100`. Required when `MATCH_SCORE_PROVIDER=signals_search`. |
+| `SIGNALS_SEARCH_API_KEY` | optional | `x-api-key` valid in the shared Signals `apikey` store. Required when `MATCH_SCORE_PROVIDER=signals_search`. |
+| `SIGNALS_SEARCH_RELEVANCE_PATH` | optional | Empty → client uses default `v1/relevance`. |
 
 **Not in the Zod schemas but read elsewhere**
 
@@ -202,6 +201,12 @@ in `apps/ui/src/lib/api-config.ts`.
 | `VITE_DEFAULT_API_URL` | optional | Wins over `VITE_API_URL` when set. |
 | `VITE_SHOW_INSTANCE_SELECTOR` | optional | When `true`, surfaces the instance selector even outside `import.meta.env.DEV`. |
 | `VITE_NETWORK_ID` | optional | Comma-separated list of network IDs to scope the UI to. Parsed by `parseNetworkIds` (split on `,`, trimmed, empties dropped) in `apps/ui/src/pages/home-page.tsx` and `profile-form-page.tsx`. Empty/unset = no network filter applied. |
+| `VITE_FREETEXT_MATCH_SCORE_ENABLED` | optional | Gates the **free-text / no-profile** match score (the `/discover` relevance badge shown to signed-out viewers when they search). Default **ON**; set `false`/`0`/`off`/`no` to hide it. The profile-to-profile match score (signed-in viewer with a profile) is never affected. See `apps/ui/src/lib/match-score-config.ts`. |
+| `VITE_MAP_MARKER_CAP_CLUSTERED` | optional | Max map markers fetched/rendered **per domain** while zoomed out (clustering absorbs density). Fetch limit is `cap+1`; the "N+ in this area — zoom in" pill triggers past it. Default **1000**. Runtime-env (retunable per deploy, no rebuild). Lower it (e.g. 300) if the map janks on dense data. See `apps/ui/src/lib/map-caps.ts`. |
+| `VITE_MAP_MARKER_CAP_INDIVIDUAL` | optional | Same as above but for zoomed-**in** views (past `VITE_MAP_CLUSTER_DISABLE_ZOOM`). Default **500**; lower it (e.g. 150) for denser data. |
+| `VITE_MAP_CLUSTER_DISABLE_ZOOM` | optional | Zoom level at/above which the **individual** cap applies (below it, the **clustered** cap). Default **14**. Note: this selects which cap is used — it does **not** disable Leaflet's own 80px visual clustering. |
+| `VITE_MAP_CLUSTER_ZOOM_ANIM_MS` | optional | Duration (ms) of the smooth zoom animation when a Google-map cluster is clicked. Default **2000**; `0` = instant (no animation). Runtime-env (retunable per deploy, no rebuild). See `apps/ui/src/components/map/providers/google-maps-provider.tsx`. |
+| `VITE_MAP_FETCH_LIMIT` | optional | **Legacy / radius-only fallback.** Flat marker-fetch cap used **only** when a viewport has *no* bbox (rare radius-only callers); the live map view (bbox path) uses the zoom-band caps above (`cap+1`), **not** this. Default **25000** (also the server's max markers cap). Build-time (`import.meta.env`), unlike the runtime caps above. In practice the live portal/tourist maps always send a bbox, so this doesn't bound the map you see — safe to omit from a deployment. See `apps/ui/src/lib/network-api.ts`. |
 
 In the default Helm install the UI's nginx reverse-proxies `/api/*` to
 `dpg-api:2742`, so `VITE_API_URL` is intentionally left empty in
@@ -216,10 +221,12 @@ In the default Helm install the UI's nginx reverse-proxies `/api/*` to
   responsibility. Update the relevant Secret (or `values.yaml` +
   `helm upgrade`), then trigger a rolling restart of the api pod (and the
   signal-processor pod once Plan 3 ships).
-- `NOTIFICATION_SERVICE_SECRET` / `DPG_SCORING_SECRET`: rotate the
-  corresponding key entry in `internal-secrets.json` /
-  `auth.keys.json` **and** the matching env var on the api pod in the same
-  deploy, otherwise HMAC verification will fail on one side.
+- `NOTIFICATION_SERVICE_SECRET`: rotate the corresponding key entry in
+  `internal-secrets.json` **and** the matching env var on the api pod in the
+  same deploy, otherwise HMAC verification will fail on one side.
+- `SIGNALS_SEARCH_API_KEY`: rotate the key in the shared Signals `apikey`
+  store (via better-auth) **and** the env var on the api pod together; a
+  mismatch makes signals-search reject match-score requests with `401`.
 
 ## Anti-patterns we've already hit
 

@@ -2,6 +2,7 @@ import { useQuery } from '@tanstack/react-query';
 import type { ConsentConfigDocument } from '@dpg/schemas';
 import { fetchConsentConfigs } from '@/lib/consent-api';
 import { useNetworkTheme } from '@/theme/theme-provider';
+import { queryKeys } from '@/lib/query-keys';
 
 export function mergeConsentConfig(
   networkDefault: ConsentConfigDocument,
@@ -29,7 +30,7 @@ export function useConsentConfig(): UseConsentConfigResult {
   const { themeId, brand } = useNetworkTheme();
 
   const { data, isLoading } = useQuery({
-    queryKey: ['consent-config', themeId, brand],
+    queryKey: queryKeys.consentConfig(themeId, brand),
     queryFn: async () => {
       const entries = await fetchConsentConfigs(themeId);
       const networkDefault = entries.find((e) => e.brand === null);

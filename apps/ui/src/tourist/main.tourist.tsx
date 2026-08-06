@@ -1,6 +1,7 @@
 import React from 'react';
 import ReactDOM from 'react-dom/client';
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { QueryClientProvider } from '@tanstack/react-query';
+import { createQueryClient } from '@/lib/query-client';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import { ThemeModeProvider } from '@/theme/mode-provider';
 import '../i18n';
@@ -25,7 +26,7 @@ const meta = applyNetworkBrand(TOURIST_NETWORK_ID, TOURIST_BRAND);
 //   3. neutral default 'Signals'
 document.title = meta.copy.title || getRuntimeEnv('VITE_TOURIST_APP_TITLE')?.trim() || 'Signals';
 
-const queryClient = new QueryClient({ defaultOptions: { queries: { staleTime: 0, retry: 2 } } });
+const queryClient = createQueryClient();
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>

@@ -196,7 +196,7 @@ function DhiwayWalletProvider({ context, onSuccess, onCancel }: WalletImportProv
       )}
 
       {step === 'credentials' && (
-        <div className="max-h-[52vh] space-y-3 overflow-y-auto pr-1">
+        <div className="max-h-[52dvh] space-y-3 overflow-y-auto pr-1">
           {credentialGroups.length === 0 ? (
             <p className="text-sm text-muted-foreground">{t('wallet.dhiway_no_credentials')}</p>
           ) : (

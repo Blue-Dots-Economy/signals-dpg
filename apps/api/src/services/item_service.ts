@@ -1,4 +1,4 @@
-import { and, eq, sql } from 'drizzle-orm';
+import { and, count, eq, sql } from 'drizzle-orm';
 import {
   getDomainItemSchema,
   getDomainItemTypes,
@@ -134,6 +134,12 @@ export interface CreateItemServiceParams {
    * POST /consent/profile-accept. Defaults to false.
    */
   consent_accepted?: boolean;
+  /**
+   * Skip the per-user profile cap (MAX_PROFILES_PER_USER / the domain's
+   * `max_profiles_per_user`). Set only by trusted internal callers such as
+   * seed scripts. Defaults to false — every real create path is capped.
+   */
+  skip_profile_limit?: boolean;
 }
 
 export interface UpdateItemServiceBody {
@@ -231,6 +237,67 @@ async function resolveSchema(params: {
   return { itemSchemaUrl, itemState, itemInstanceUrl, itemSchema };
 }
 
+/**
+ * Effective per-user profile cap for a (network, domain): the domain's
+ * `max_profiles_per_user` when set, otherwise the global
+ * `MAX_PROFILES_PER_USER` default. Returns null when no finite cap applies.
+ */
+async function resolveProfileLimit(
+  network: string,
+  domain: string,
+): Promise<number | null> {
+  let domainLimit: number | undefined;
+  try {
+    const cfg = await getNetworkConfigById(network);
+    domainLimit = cfg.domains.find((d) => d.id === domain)?.max_profiles_per_user;
+  } catch {
+    // Fall back to the global default if the config can't be read here.
+  }
+  const limit = domainLimit ?? apiConfig.max_profiles_per_user;
+  return typeof limit === 'number' && Number.isFinite(limit) ? limit : null;
+}
+
+/**
+ * Enforce the per-user profile cap atomically, inside the caller's transaction.
+ * Mirrors assertWardLimitWithLock: a transaction-scoped advisory lock keyed on
+ * the (user, network, domain, item_type) scope serializes concurrent creates so
+ * two racing inserts can't both pass a `count < limit` check. Throws 409
+ * PROFILE_LIMIT_REACHED when the user is already at the cap.
+ */
+async function assertProfileLimit(
+  exec: DbOrTx,
+  params: Pick<
+    CreateItemServiceParams,
+    'created_by' | 'item_network' | 'item_domain' | 'item_type'
+  >,
+): Promise<void> {
+  const limit = await resolveProfileLimit(params.item_network, params.item_domain);
+  if (limit === null) return;
+
+  const scope = `${params.created_by}:${params.item_network}:${params.item_domain}:${params.item_type}`;
+  await exec.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${scope}))`);
+
+  const [row] = await exec
+    .select({ n: count() })
+    .from(items)
+    .where(
+      and(
+        eq(items.created_by, params.created_by),
+        eq(items.item_network, params.item_network),
+        eq(items.item_domain, params.item_domain),
+        eq(items.item_type, params.item_type),
+      ),
+    );
+
+  if ((row?.n ?? 0) >= limit) {
+    throw new ItemServiceError(
+      409,
+      'PROFILE_LIMIT_REACHED',
+      `This user already has the maximum of ${limit} ${params.item_domain} profile(s) allowed. Delete an existing profile to create a new one.`,
+    );
+  }
+}
+
 export async function createItemInternal(
   exec: DbOrTx,
   params: CreateItemServiceParams
@@ -242,6 +309,13 @@ export async function createItemInternal(
     item_type: params.item_type,
     submittedItemState,
   });
+
+  // Per-user profile cap (#349). Enforced at this single choke point so every
+  // create path (item/create, admin/participant, aggregator bulk + reg-links)
+  // inherits it. Runs on the caller's transaction for an atomic check-then-insert.
+  if (!params.skip_profile_limit) {
+    await assertProfileLimit(exec, params);
+  }
 
   const masked = maskPrivateState(itemSchema, itemState.privateState);
   const itemStateForStorage = mergeMasksIntoPublic(itemState.publicState, masked);
@@ -331,14 +405,14 @@ export interface UpdateItemInternalResult {
  * promotion path (create self-consent, /consent/profile-accept, and item
  * update) — do not re-derive it inline. Fail-closed on two fronts:
  *
- *  - **null DOB on a gated domain → blocked.** A missing `date_of_birth` is
- *    never treated as "adult": DOB capture is client-side only (u18_precheck is
- *    a hint, not a control), so a minor account with no DOB must not be able to
+ *  - **null age on a gated domain → blocked.** A missing `user.age` is
+ *    never treated as "adult": age capture is client-side only (u18_precheck is
+ *    a hint, not a control), so a minor account with no age must not be able to
  *    self-consent to live.
  *  - **minor with no `source='guardian'` profile_creation row → blocked.** Only
  *    guardian consent promotes a minor; the ward's own self-consent row cannot.
  *
- * A proven adult (DOB present and not a minor), and ANY user on a non-gated
+ * A proven adult (age present and not a minor), and ANY user on a non-gated
  * domain, are never blocked.
  */
 export async function guardianGateBlocksGoLive(
@@ -349,14 +423,14 @@ export async function guardianGateBlocksGoLive(
   if (!guardianConsentRequired(networkConfig, item.item_domain)) return false;
 
   const [ward] = await exec
-    .select({ dob: user.dateOfBirth })
+    .select({ age: user.age })
     .from(user)
     .where(eq(user.id, item.created_by))
     .limit(1);
 
-  // Cannot prove adulthood without a DOB → fail-closed on a gated domain.
-  if (!ward?.dob) return true;
-  if (!isMinor(ward.dob)) return false;
+  // Cannot prove adulthood without an age → fail-closed on a gated domain.
+  if (ward?.age == null) return true;
+  if (!isMinor(ward.age)) return false;
 
   const [guardianRow] = await exec
     .select({ id: consent_record.id })
@@ -437,7 +511,7 @@ export async function promoteItemOnProfileConsent(
 
   if (lifecycle_status !== 'live') return false;
 
-  // U18 age gate (spec §7 / D11/D13). Fail-closed for a gated minor / null-DOB.
+  // U18 age gate (spec §7 / D11/D13). Fail-closed for a gated minor / null-age.
   if (await guardianGateBlocksGoLive(exec, item)) return false;
 
   await exec
@@ -517,6 +591,18 @@ export async function updateItemInternal(
         404,
         'ITEM_NOT_FOUND_OR_FORBIDDEN',
         'Item not found or does not belong to the authenticated user'
+      );
+    }
+
+    // Retire is terminal (#347): the row's PII was wiped and item_private_state
+    // cleared. Block any state/location mutation on a retired item — the owner
+    // still owns the row, so without this a PATCH would re-merge the body,
+    // re-encrypt private fields and silently re-introduce the PII retire erased.
+    if (existingItem.lifecycle_status === 'retired') {
+      throw new ItemServiceError(
+        409,
+        'ITEM_RETIRED',
+        'This profile is retired and can no longer be edited',
       );
     }
 

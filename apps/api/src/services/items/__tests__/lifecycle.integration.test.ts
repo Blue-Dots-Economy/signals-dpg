@@ -32,7 +32,7 @@
  *   7. pause → paused; pending action survives (not cancelled)
  *   8. POST /item/lifecycle {action:'unpause'} on paused-but-complete item → live
  *   9. POST /network/action/perform against a non-live target → 409 + PROFILE_NOT_LIVE
- *  10. GET /action/:id/contact-details after source pauses → 403 + PROFILE_NOT_LIVE
+ *  10. GET /action/:id/contact-details after source pauses → 200 masked (revealed:false)
  *  11. GET /network/item/fetch lists only live items (draft item excluded)
  *  12. action gated while target paused RESUMES after unpause (accept succeeds)
  */
@@ -837,12 +837,18 @@ describeIf(`lifecycle integration${can_run ? '' : ` — ${skip_reason}`}`, () =>
     });
     expect(create.statusCode).toBe(200);
     const itemId = create.json().items[0].item_id as string;
-    onboarded_user_ids.push(create.json().user_id);
+    const bdUserId = create.json().user_id as string;
+    onboarded_user_ids.push(bdUserId);
 
-    await app.inject({
+    // Pause is only valid on a LIVE profile (R7.5 / #234 Q6) — bring the
+    // bulk-created draft live via consent first, then pause it.
+    await makeLive(bdUserId, itemId, primary.network);
+
+    const pauseRes = await app.inject({
       method: 'POST', url: '/api/v1/item/lifecycle', headers: adminHeaders(ns),
       payload: { item_id: itemId, action: 'pause' },
     });
+    expect(pauseRes.statusCode).toBe(200);
 
     const requiredKey = (primary.schema.required as string[])[0];
     const clear = await app.inject({
@@ -861,6 +867,34 @@ describeIf(`lifecycle integration${can_run ? '' : ` — ${skip_reason}`}`, () =>
     });
     expect(unpause.statusCode).toBe(200);
     expect(unpause.json().lifecycle_status).toBe('draft');
+  });
+
+  // ---------------------------------------------------------------------------
+  // Pause guard (#346 / R7.5): only a LIVE profile can be voluntarily hidden.
+  // ---------------------------------------------------------------------------
+
+  it('pause on a draft profile → 409 INVALID_LIFECYCLE_ACTION (pause requires live)', async () => {
+    const email = `lc_pd_${randomUUID().slice(0, 6)}@a.test`;
+    const full = generateMinimalItemState(primary.schema);
+    const create = await app.inject({
+      method: 'POST', url: '/api/v1/admin/participant', headers: adminHeaders(ns),
+      payload: {
+        email, name: 'LC PD', terms_accepted: true, privacy_accepted: true,
+        channel: 'bulk', network: primary.network, domain: primary.domain,
+        item_type: primary.item_type, item_state: full,
+      },
+    });
+    expect(create.statusCode).toBe(200);
+    const itemId = create.json().items[0].item_id as string;
+    onboarded_user_ids.push(create.json().user_id);
+
+    // Bulk create → draft (consent pending). Pausing a draft is rejected.
+    const res = await app.inject({
+      method: 'POST', url: '/api/v1/item/lifecycle', headers: adminHeaders(ns),
+      payload: { item_id: itemId, action: 'pause' },
+    });
+    expect(res.statusCode).toBe(409);
+    expect(res.json().error).toBe('INVALID_LIFECYCLE_ACTION');
   });
 
   // ---------------------------------------------------------------------------
@@ -1015,7 +1049,7 @@ describeIf(`lifecycle integration${can_run ? '' : ` — ${skip_reason}`}`, () =>
   //     the lifecycle gate), skip so the suite stays green on minimal networks.
   // ---------------------------------------------------------------------------
 
-  it('scenario 10: GET /action/:id/contact-details after source pauses → 403 PROFILE_NOT_LIVE', async (ctx) => {
+  it('scenario 10: GET /action/:id/contact-details after source pauses → 200 masked (revealed:false)', async (ctx) => {
     // Ensure both source and target items are live first.
     // The live_item_id belongs to live_user_id and should be live after scenario 9 restore.
     const [targetRow] = await db
@@ -1133,10 +1167,11 @@ describeIf(`lifecycle integration${can_run ? '' : ` — ${skip_reason}`}`, () =>
       return;
     }
 
-    // The endpoint checks caller's item lifecycle_status; paused → 403 PROFILE_NOT_LIVE.
-    expect(detailsRes.statusCode).toBe(403);
-    const detailsBody = detailsRes.json() as { error: string };
-    expect(detailsBody.error).toBe('PROFILE_NOT_LIVE');
+    // Paused caller → PII withheld, but the endpoint returns the MASKED
+    // pre-reveal view (#273), not an error.
+    expect(detailsRes.statusCode).toBe(200);
+    const detailsBody = detailsRes.json() as { revealed: boolean };
+    expect(detailsBody.revealed).toBe(false);
   });
 
   // ---------------------------------------------------------------------------
@@ -1403,5 +1438,170 @@ describeIf(`lifecycle integration${can_run ? '' : ` — ${skip_reason}`}`, () =>
       .where(eq(itemActionsTable.action_id, action_id))
       .limit(1);
     expect(resumedRow?.action_status).toBe('accepted');
+  });
+
+  // ---------------------------------------------------------------------------
+  // Scenario 13 (#347): retire is terminal — wipes PII, keeps the action row,
+  // and cannot be transitioned out of. A retired profile is also excluded from
+  // the owner's instance-local fetch ("My Profiles").
+  // ---------------------------------------------------------------------------
+
+  it('scenario 13: retire → retired, PII wiped, action row kept, second retire → 409', async () => {
+    const email = `lc_s13_${randomUUID().slice(0, 6)}@a.test`;
+    const full = generateMinimalItemState(primary.schema);
+    const create = await app.inject({
+      method: 'POST', url: '/api/v1/admin/participant', headers: adminHeaders(ns),
+      payload: {
+        email, name: 'LC S13', terms_accepted: true, privacy_accepted: true,
+        channel: 'bulk', network: primary.network, domain: primary.domain,
+        item_type: primary.item_type, item_state: full,
+      },
+    });
+    expect(create.statusCode).toBe(200);
+    const itemId = create.json().items[0].item_id as string;
+    const userId = create.json().user_id as string;
+    onboarded_user_ids.push(userId);
+    await makeLive(userId, itemId, primary.network);
+
+    // Give the item a location with an exact coord + free-text label — retire
+    // must wipe item_locations entirely (not leave the label residue).
+    await db
+      .update(itemsTable)
+      .set({ item_locations: [{ lat: 12.34, lng: 56.78, label: '221B Baker Street' }] })
+      .where(eq(itemsTable.item_id, itemId));
+
+    // A second real profile to be the counterparty (item_actions has an FK on
+    // the TARGET item, so it must exist).
+    const otherCreate = await app.inject({
+      method: 'POST', url: '/api/v1/admin/participant', headers: adminHeaders(ns),
+      payload: {
+        email: `lc_s13_other_${randomUUID().slice(0, 6)}@a.test`, name: 'LC S13 other',
+        terms_accepted: true, privacy_accepted: true,
+        channel: 'bulk', network: primary.network, domain: primary.domain,
+        item_type: primary.item_type, item_state: generateMinimalItemState(primary.schema),
+      },
+    });
+    expect(otherCreate.statusCode).toBe(200);
+    const otherItemId = otherCreate.json().items[0].item_id as string;
+    onboarded_user_ids.push(otherCreate.json().user_id as string);
+
+    // Two open actions referencing the item — one where it is the TARGET, one
+    // where it is the SOURCE. Both must be cancelled on retire (rows kept).
+    await ensureActionPartition(db, primary.network, 'connect');
+    const targetActionId = randomUUID();
+    const sourceActionId = randomUUID();
+    await db.insert(itemActionsTable).values([
+      {
+        action_type: 'connect', partition_network: primary.network, action_id: targetActionId,
+        action_status: 'created', update_count: 0,
+        source_item_network: primary.network, source_item_domain: primary.domain,
+        source_item_type: primary.item_type, source_item_id: otherItemId,
+        source_item_instance_url: `http://localhost:${listen_port}`,
+        target_item_network: primary.network, target_item_domain: primary.domain,
+        target_item_type: primary.item_type, target_item_id: itemId,
+        target_item_instance_url: `http://localhost:${listen_port}`,
+        requirements_snapshot: {},
+      },
+      {
+        action_type: 'connect', partition_network: primary.network, action_id: sourceActionId,
+        action_status: 'created', update_count: 0,
+        source_item_network: primary.network, source_item_domain: primary.domain,
+        source_item_type: primary.item_type, source_item_id: itemId,
+        source_item_instance_url: `http://localhost:${listen_port}`,
+        target_item_network: primary.network, target_item_domain: primary.domain,
+        target_item_type: primary.item_type, target_item_id: otherItemId,
+        target_item_instance_url: `http://localhost:${listen_port}`,
+        requirements_snapshot: {},
+      },
+    ]);
+    seeded_action_ids.push(targetActionId, sourceActionId);
+
+    // Retire (network_service authorised).
+    const res = await app.inject({
+      method: 'POST', url: '/api/v1/item/lifecycle', headers: adminHeaders(ns),
+      payload: { item_id: itemId, action: 'retire' },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().lifecycle_status).toBe('retired');
+
+    // DB: retired + private blob cleared + no private field left + locations wiped.
+    const [row] = await db
+      .select({
+        lifecycle_status: itemsTable.lifecycle_status,
+        item_state: itemsTable.item_state,
+        item_private_state: itemsTable.item_private_state,
+        item_locations: itemsTable.item_locations,
+      })
+      .from(itemsTable)
+      .where(eq(itemsTable.item_id, itemId))
+      .limit(1);
+    expect(row.lifecycle_status).toBe('retired');
+    expect(row.item_private_state).toBe('');
+    expect(row.item_locations).toEqual([]); // wiped, no label residue (#347)
+    // Every private field defined by the schema is gone from the stored state.
+    const publicOnly = nonPrivateFields(primary.schema, full);
+    const stored = row.item_state as Record<string, unknown>;
+    for (const key of Object.keys(full)) {
+      if (!(key in publicOnly)) expect(key in stored).toBe(false);
+    }
+
+    // Both actions are kept (bare ids for counterparty history) AND cancelled —
+    // target-side and source-side.
+    const actionRows = await db
+      .select({ action_id: itemActionsTable.action_id, action_status: itemActionsTable.action_status })
+      .from(itemActionsTable)
+      .where(inArray(itemActionsTable.action_id, [targetActionId, sourceActionId]));
+    expect(actionRows).toHaveLength(2);
+    for (const a of actionRows) expect(a.action_status).toBe('cancelled');
+
+    // Terminal: a second lifecycle call is rejected.
+    const again = await app.inject({
+      method: 'POST', url: '/api/v1/item/lifecycle', headers: adminHeaders(ns),
+      payload: { item_id: itemId, action: 'retire' },
+    });
+    expect(again.statusCode).toBe(409);
+    expect(again.json().error).toBe('INVALID_LIFECYCLE_ACTION');
+
+    // A retired item cannot be edited — a state PATCH must not re-introduce the
+    // wiped PII (#347). The update path rejects with 409 ITEM_RETIRED.
+    const editRes = await app.inject({
+      method: 'POST', url: '/api/v1/admin/participant', headers: adminHeaders(ns),
+      payload: {
+        email, name: 'LC S13 edit', terms_accepted: true, privacy_accepted: true,
+        channel: 'bulk', network: primary.network, domain: primary.domain,
+        item_type: primary.item_type, item_id: itemId,
+        item_state: generateMinimalItemState(primary.schema),
+      },
+    });
+    expect(editRes.statusCode).toBe(409);
+    expect(editRes.json().error).toBe('ITEM_RETIRED');
+
+    // Excluded from the OWNER's instance-local fetch ("My Profiles"). Mint an
+    // apikey for the owning user (not the svc user) so the fetch is scoped to
+    // their own items — otherwise the assertion is vacuous.
+    const ownerRawKey = `sk_signals_${randomBytes(24).toString('hex')}`;
+    await db.insert(authSchema.apikey).values({
+      id: `key_${randomUUID()}`,
+      name: 'lc-s13-owner',
+      key: hash_key(ownerRawKey),
+      userId,
+      referenceId: userId,
+      configId: 'default',
+      start: ownerRawKey.slice(0, 6),
+      prefix: 'sk_signals_',
+      enabled: true,
+      rateLimitEnabled: false,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    });
+    const fetchRes = await app.inject({
+      method: 'GET',
+      url: `/api/v1/item/fetch?item_network=${encodeURIComponent(primary.network)}&item_domain=${encodeURIComponent(primary.domain)}&limit=100&offset=0`,
+      headers: userHeaders(ownerRawKey),
+    });
+    expect(fetchRes.statusCode).toBe(200);
+    const items = (fetchRes.json() as { items: Array<{ item_id: string }> }).items;
+    // The retired item is the owner's only profile → the list excludes it (empty).
+    expect(items.some((i) => i.item_id === itemId)).toBe(false);
   });
 });

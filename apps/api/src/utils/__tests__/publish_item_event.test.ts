@@ -2,7 +2,9 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 const { xadd } = vi.hoisted(() => ({ xadd: vi.fn() }));
 vi.mock('@api/db/secondary/redis', () => ({ redis: { xadd } }));
-vi.mock('@/config', () => ({ databasesConfig: { ingest_stream: 'signals:item-events' } }));
+vi.mock('@/config', () => ({
+  databasesConfig: { ingest_stream: 'signals:item-events', ingest_stream_maxlen: 100_000 },
+}));
 
 import { publishItemEvent } from '../publish_item_event.js';
 
@@ -17,13 +19,14 @@ const evt = {
 };
 
 describe('publishItemEvent', () => {
-  it('XADDs the event fields to the configured stream', async () => {
+  it('XADDs the event fields to the configured stream, approx-trimmed to MAXLEN', async () => {
     xadd.mockResolvedValueOnce('1-0');
     await publishItemEvent(evt);
     expect(xadd).toHaveBeenCalledTimes(1);
     const args = xadd.mock.calls[0];
     expect(args[0]).toBe('signals:item-events');
-    expect(args[1]).toBe('*');
+    // Bounded stream: MAXLEN ~ <cap> must precede the `*` id.
+    expect(args.slice(1, 5)).toEqual(['MAXLEN', '~', 100_000, '*']);
     expect(args).toContain('item_id');
     expect(args).toContain('5d2bcec7-3d5c-4182-a3fc-4d4c2f10addf');
     expect(args).toContain('op');

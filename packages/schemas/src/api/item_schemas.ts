@@ -15,7 +15,7 @@ export const ItemResponseSchema = ItemSelectSchema.omit({
 }).extend({
   // Kept optional deliberately: response paths that do not project this column
   // (e.g. browse/fetch without lifecycle filter) must not cause a serialization 500.
-  lifecycle_status: z.enum(['draft', 'live', 'paused']).optional(),
+  lifecycle_status: z.enum(['draft', 'live', 'paused', 'retired']).optional(),
   item_locations: ItemLocationsArray,
 });
 export const ItemInsertSchema = createInsertSchema(items);
@@ -67,10 +67,30 @@ const FetchItemsSchemaBase = z.object({
 
   item_schema_url: z.url().nullable().optional(),
 
+  // Facet filter. Each entry's value may be a scalar or a `string[]` —
+  // item_fetch_runtime's buildWhereClause normalizes a scalar `v` to `[v]`
+  // and applies EVERY entry (scalar or array) the same guarded way:
+  // `item_state ->> field = ANY(...)`, gated by the declared/non-private
+  // facet guard (see `resolveAllowedFacetFields`; #394 dropped the additional
+  // `filterable` marker that guard used to also require, and separately
+  // closed a hole where a scalar value bypassed the guard entirely via an
+  // unguarded `item_state @> jsonb` containment check — there is no such
+  // unguarded branch any more). Left as `z.unknown()` rather than a narrower
+  // union deliberately: this field is shared by every fetch/count/markers
+  // schema below.
   item_state: z.record(z.string(), z.unknown()).optional(),
   item_latitude: z.coerce.number().optional(),
   item_longitude: z.coerce.number().optional(),
   radius_meters: z.coerce.number().positive().optional(),
+
+  // Bounding-box viewport search (#203 Task 2). All four or none; mutually
+  // exclusive with the radius-center params above (item_latitude/
+  // item_longitude/radius_meters) — see withGeoSearchRefinement. The SQL that
+  // consumes these lands in Task 3; this is schema + passthrough only.
+  min_lat: z.coerce.number().min(-90).max(90).optional(),
+  min_lng: z.coerce.number().min(-180).max(180).optional(),
+  max_lat: z.coerce.number().min(-90).max(90).optional(),
+  max_lng: z.coerce.number().min(-180).max(180).optional(),
 
   limit: z.coerce.number().int().min(1).max(1000).default(20),
   offset: z.coerce.number().int().min(0).default(0),
@@ -83,22 +103,40 @@ function withGeoSearchRefinement<T extends z.ZodTypeAny>(schema: T) {
   return schema.refine(
     (rawData) => {
       const data = rawData as Partial<FetchItemsSchemaShape>;
-      const hasCoordinates =
-        data.item_latitude !== undefined || data.item_longitude !== undefined;
+      const hasLat = data.item_latitude !== undefined;
+      const hasLng = data.item_longitude !== undefined;
+      const hasRadius = data.radius_meters !== undefined;
+      const hasRadiusCenter = hasLat && hasLng;
 
-      if (!hasCoordinates) {
-        return true;
-      }
+      // lat/lng must be supplied as a pair.
+      if (hasLat !== hasLng) return false;
+      // radius filtering requires a center (lat+lng); radius alone is invalid.
+      if (hasRadius && !hasRadiusCenter) return false;
 
-      return (
-        data.item_latitude !== undefined &&
-        data.item_longitude !== undefined &&
-        data.radius_meters !== undefined
-      );
+      const bboxValues = [
+        data.min_lat,
+        data.min_lng,
+        data.max_lat,
+        data.max_lng,
+      ];
+      const bboxProvidedCount = bboxValues.filter(
+        (value) => value !== undefined
+      ).length;
+      const hasBbox = bboxProvidedCount === 4;
+      const hasPartialBbox = bboxProvidedCount > 0 && bboxProvidedCount < 4;
+
+      // bbox is all-four-or-none.
+      if (hasPartialBbox) return false;
+      // a radius center and a bbox are mutually exclusive viewport searches.
+      if (hasRadiusCenter && hasBbox) return false;
+
+      // lat+lng alone is valid (order-only); lat+lng+radius is valid (filter+order);
+      // a full bbox alone is valid (filter).
+      return true;
     },
     {
       message:
-        'item_latitude, item_longitude, and radius_meters must be provided together for geosearch',
+        'item_latitude and item_longitude must be provided together; radius_meters requires both; min_lat/min_lng/max_lat/max_lng must all be provided together and cannot be combined with a radius center',
       path: ['radius_meters'],
     }
   );
@@ -119,6 +157,40 @@ export const FetchItemsBodySchema = withGeoSearchRefinement(FetchItemsSchemaBase
   offset: z.number().int().min(0),
   cache_ttl_seconds: z.number().int().positive().optional(),
 }));
+
+const MarkersSchemaBase = FetchItemsSchemaBase.extend({
+  // Coords are cheap — allow a much higher cap than the 1000 full-fetch cap.
+  limit: z.coerce.number().int().min(1).max(25000).default(200),
+
+  // Free-text value-match search (#394 map native text search). Matched
+  // server-side against the PUBLIC (non-private) item_state field values
+  // only — see `resolveAllowedFacetFields` (facet_guard.ts) and
+  // `buildWhereClause`'s `text_search` branch (item_fetch_runtime.ts) — and
+  // is AND-ed with whatever bbox/radius viewport the rest of this request
+  // already carries, so it's inherently scoped to the visible map area. Kept
+  // on this schema (not the shared FetchItemsSchemaBase) because the map
+  // stays native; list/discover text search goes through signals-search
+  // instead. On `MarkersBodySchema` (forwarded peer-to-peer), only the raw
+  // `q` travels — never a resolved field allowlist — each instance resolves
+  // its own non-private fields from its own network config.
+  q: z.string().trim().min(1).optional(),
+});
+
+export const MarkersQuerySchema = withGeoSearchRefinement(MarkersSchemaBase);
+export const MarkersBodySchema = withGeoSearchRefinement(
+  MarkersSchemaBase.extend({
+    limit: z.number().int().min(1).max(25000),
+    offset: z.number().int().min(0),
+    cache_ttl_seconds: z.number().int().positive().optional(),
+  })
+);
+
+export const MarkerResponseSchema = z.object({
+  item_id: z.uuid(),
+  item_domain: z.string(),
+  item_instance_url: z.url().nullable(),
+  item_locations: ItemLocationsArray,
+});
 
 export const UpdateItemParamsSchema = z.object({
   itemId: z.uuid(),

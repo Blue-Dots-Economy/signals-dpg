@@ -1,25 +1,100 @@
 import { createContext, useContext, useState, useEffect, useCallback, type ReactNode } from 'react';
-import { getSession, signOut as apiSignOut, type AuthIdentifier, type User } from '@/lib/auth-api';
+import { useQueryClient } from '@tanstack/react-query';
+import {
+  getSession,
+  fetchMe,
+  signOut as apiSignOut,
+  type AuthIdentifier,
+  type MeResponse,
+  type User,
+} from '@/lib/auth-api';
 import { setAuthToken, clearAuthToken } from '@/lib/auth-token';
+import { clearSchemaCache } from '@/engine';
+import { useAuthConfig } from '@/hooks/use-auth-config';
 
 interface AuthContextType {
   user: User | null;
   isLoading: boolean;
   isAuthenticated: boolean;
+  /** True when this deployment logs in through Keycloak rather than OTP. */
+  isKeycloakLogin: boolean;
   checkUser: (identifier: AuthIdentifier) => Promise<boolean>;
   requestOtp: (identifier: AuthIdentifier) => Promise<void>;
   verifyOtp: (identifier: AuthIdentifier, otp: string, name?: string) => Promise<void>;
+  /** Redirect to Keycloak. Only meaningful when `isKeycloakLogin`. */
+  startKeycloakLogin: (returnTo?: string) => Promise<void>;
+  /** Adopt the session established by the OIDC callback page. */
+  completeKeycloakLogin: () => Promise<void>;
   signOut: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
+/**
+ * The UI's `User` is better-auth's shape. Under Keycloak the API returns the
+ * mirror's view (`/api/v1/auth/me`), which is deliberately narrower — identity
+ * plus role, no credential metadata. Fill the rest with values that describe
+ * what is actually true of a logged-in Keycloak user rather than leaving holes
+ * consumers have to null-check.
+ *
+ * Verified flags are `true` because Keycloak will not complete an OTP login
+ * against an unverified identifier, and `banned` is `false` because
+ * provisioning refuses a banned user before this point is reached.
+ */
+function meToUser(me: MeResponse): User {
+  const now = new Date().toISOString();
+  return {
+    id: me.id,
+    name: me.name,
+    email: me.email || null,
+    emailVerified: Boolean(me.email),
+    phoneNumber: null,
+    phoneNumberVerified: false,
+    image: '',
+    role: me.role ?? 'user',
+    banned: false,
+    banReason: null,
+    banExpires: null,
+    createdAt: now,
+    updatedAt: now,
+  };
+}
+
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const queryClient = useQueryClient();
+  // Which provider this instance runs is served by the API, not compiled in.
+  const {
+    config: authCfg,
+    isKeycloakLogin,
+    isLoading: isConfigLoading,
+  } = useAuthConfig();
 
+  /**
+   * Restore an existing session on mount. The two providers restore
+   * differently: better-auth asks the server for the session, whereas OIDC
+   * holds the tokens client-side and then asks the API who that token is.
+   *
+   * Waits for the auth config first — restoring the wrong way round would
+   * either miss an OIDC session or fire a pointless better-auth request.
+   */
   const fetchSession = useCallback(async () => {
+    if (isConfigLoading) return;
     try {
+      if (isKeycloakLogin) {
+        // Dynamic import so the OIDC library is not pulled into the bundle for
+        // deployments still on the OTP login.
+        const { restoreOidcSession } = await import('@/lib/oidc-client');
+        const token = await restoreOidcSession(authCfg);
+        if (!token) {
+          setUser(null);
+          return;
+        }
+        setUser(meToUser(await fetchMe()));
+        return;
+      }
+
       const session = await getSession();
       if (session.token) {
         setAuthToken(session.token);
@@ -30,7 +105,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     } finally {
       setIsLoading(false);
     }
-  }, []);
+  }, [authCfg, isConfigLoading, isKeycloakLogin]);
 
   useEffect(() => {
     fetchSession();
@@ -54,14 +129,53 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUser(response.user);
   }, []);
 
+  const startKeycloakLogin = useCallback(
+    async (returnTo?: string): Promise<void> => {
+      const { startOidcLogin } = await import('@/lib/oidc-client');
+      await startOidcLogin(authCfg, returnTo);
+    },
+    [authCfg]
+  );
+
+  /**
+   * Called by the callback page once the code exchange has succeeded and the
+   * access token is in place. Resolving the user here (rather than in the
+   * page) keeps the context the single owner of `user`.
+   */
+  const completeKeycloakLogin = useCallback(async (): Promise<void> => {
+    setUser(meToUser(await fetchMe()));
+  }, []);
+
   const signOut = useCallback(async () => {
+    if (isKeycloakLogin) {
+      setUser(null);
+      // Ends the Keycloak SSO session too, then redirects; clears the local
+      // token first, so a failure to reach Keycloak still logs out this app.
+      const { oidcLogout } = await import('@/lib/oidc-client');
+      await oidcLogout(authCfg);
+      return;
+    }
+
     try {
       await apiSignOut();
     } finally {
       clearAuthToken();
       setUser(null);
+      clearSchemaCache();
+      // Drop the signed-out user's cached data so it doesn't linger until
+      // gcTime and bleed into the next session (SPA sign-out does not reload
+      // the page). All four hold per-user data: my-items + edit-item are the
+      // user's own items; profile-consent is their accepted profiles; actions
+      // covers their applications/connections — including pendingCount, whose
+      // key is NOT network/user-scoped, so a stale count would otherwise show
+      // to the next user on re-login. browse-items/markers/*-config are public
+      // network-scoped data and can stay.
+      queryClient.removeQueries({ queryKey: ['my-items'] });
+      queryClient.removeQueries({ queryKey: ['profile-consent'] });
+      queryClient.removeQueries({ queryKey: ['edit-item'] });
+      queryClient.removeQueries({ queryKey: ['actions'] });
     }
-  }, []);
+  }, [authCfg, isKeycloakLogin, queryClient]);
 
   return (
     <AuthContext.Provider
@@ -69,9 +183,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         user,
         isLoading,
         isAuthenticated: !!user,
+        isKeycloakLogin,
         checkUser,
         requestOtp,
         verifyOtp,
+        startKeycloakLogin,
+        completeKeycloakLogin,
         signOut,
       }}
     >
