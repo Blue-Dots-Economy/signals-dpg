@@ -1,0 +1,33 @@
+{
+  "$comment": "Operations the E2E suite does not yet exercise. This list is a DEBT REGISTER, not a permission slip: it may only shrink. Adding a line means you shipped a route without a journey — see docs/testing/e2e-coverage-backlog.md and .claude/rules/e2e-coverage.md. Regenerate with: npm run coverage:baseline",
+  "allowUncovered": [
+    "DELETE /api/v1/item/{itemId}",
+    "GET /api/v1/action/fetch",
+    "GET /api/v1/admin/participant",
+    "GET /api/v1/consent/profile-status",
+    "GET /api/v1/consent/status",
+    "GET /api/v1/consent/u18/status",
+    "GET /api/v1/event/fetch",
+    "GET /api/v1/network/item/markers",
+    "GET /api/v1/network/schema/{network}/{domain}/{itemType}",
+    "GET /api/v1/user/domains",
+    "PATCH /api/v1/item/{itemId}",
+    "POST /api/v1/admin/participant/decrypt",
+    "POST /api/v1/auth/u18-precheck",
+    "POST /api/v1/consent/u18/profile-consent/finalize",
+    "POST /api/v1/consent/u18/profile-consent/precreate/issue",
+    "POST /api/v1/consent/u18/profile-consent/precreate/verify",
+    "POST /api/v1/consent/u18/signup/guardian",
+    "POST /api/v1/consent/u18/signup/guardian/verify",
+    "POST /api/v1/event/store",
+    "POST /api/v1/item/lifecycle",
+    "POST /api/v1/match-score/calculate",
+    "POST /api/v1/network/action/perform",
+    "POST /api/v1/network/item/count_local",
+    "POST /api/v1/network/item/discover",
+    "POST /api/v1/network/item/fetch_local",
+    "POST /api/v1/network/item/markers_local",
+    "POST /api/v1/network/refetch_schemas",
+    "POST /api/v1/user/domains"
+  ]
+}

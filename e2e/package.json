@@ -11,7 +11,10 @@
     "e2e:headed": "playwright test --headed",
     "e2e:report": "playwright show-report",
     "typecheck": "tsc --noEmit",
-    "preflight": "playwright test tests/preflight"
+    "preflight": "playwright test tests/preflight",
+    "coverage": "node scripts/check-coverage.mjs",
+    "coverage:json": "node scripts/check-coverage.mjs --json",
+    "coverage:baseline": "node scripts/check-coverage.mjs --update-baseline"
   },
   "devDependencies": {
     "@playwright/test": "^1.49.0",

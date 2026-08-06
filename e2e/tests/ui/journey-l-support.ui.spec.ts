@@ -7,6 +7,9 @@ import { uiLoginAs, gotoEn, initialsFor } from '../../src/ui.js';
  * a signed-in user opens the support dialog from the avatar menu, fills it, and
  * submits. Asserts a terminal toast (sent, or unavailable when SUPPORT_EMAIL
  * isn't configured) — both prove the form wired to POST /api/v1/support.
+ *
+ * @covers POST /api/v1/support/
+ *   (driven through the browser, not a direct client call — scripts/check-coverage.mjs)
  */
 test.describe('Journey L (UI) — support dialog', () => {
   test.skip(({ cfg, caps }) => provisioningMethod(cfg, caps) === null, 'no way to create users');

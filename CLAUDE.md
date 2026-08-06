@@ -24,6 +24,7 @@ Other load-bearing docs:
 - `.claude/rules/network-fetch.md` — instance-local vs inter-instance item reads, when to use which. Triggers on item/network routes and the inter-instance fetch utils.
 - `.claude/rules/database-conventions.md` — migration editing rule, partition pruning, `user.tags`, PII location jitter. Triggers on routes/services/utils, `packages/database`, `apps/api/db`.
 - `.claude/rules/env-vars.md` — the two-places-must-change-together rule for new env vars. Triggers on `packages/config/src/secrets.ts` and `turbo.json`.
+- `.claude/rules/e2e-coverage.md` — **the external E2E suite ships with the change.** New route / new error code / changed behaviour / deleted feature each have a required move in `e2e/`, enforced by `e2e/scripts/check-coverage.mjs` (route table from `openapi.json`). Triggers on API routes/services/middleware, UI pages/components, `packages/schemas`, and `e2e/**`.
 
 **Nested docs.** Auto-loaded when working inside their subtree — read the relevant one before making changes there: `apps/api/CLAUDE.md` (route auth wiring, config-cache patterns, notifications/support), `apps/api/src/services/metrics/README.md` (the recompute directionality model), `apps/ui/CLAUDE.md` (runtime-env config, theming/i18n, data fetching), `apps/ui/src/engine/README.md` (schema ref resolution), `packages/auth/CLAUDE.md` (better-auth wiring, OTP flow), `packages/config/CLAUDE.md` (network/consent config loading), `packages/database/src/utils/README.md` (partition management vs query pruning).
 

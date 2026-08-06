@@ -127,8 +127,11 @@ e2e/
     ui.ts                browser helpers (?lang=en pinning, UI signup flow)
   tests/
     preflight/           target readiness gate (runs first)
-    api/journey-*.spec.ts    A,B,D,F,H,I,K
-    ui/journey-*.ui.spec.ts  A,H,L (+ smoke)
+    api/journey-*.spec.ts    A–K
+    ui/journey-*.ui.spec.ts  A,H,L (+ auth enabler, smoke)
+  scripts/
+    check-coverage.mjs   route traceability gate (openapi.json vs the suite)
+  coverage-baseline.json known, parked coverage gaps — shrink-only
 ```
 
 ### UI (browser) journeys
@@ -151,6 +154,36 @@ accept + reveal + the full error matrix), **C** guardian UI (needs
 `SELF_SIGNUP_MODE=allowed` — minor self-signup can't run on a gated target), and
 the schema-driven profile form.
 
+## Keeping the suite current (the coverage gate)
+
+This suite is a **release gate**, so it has to track the product. The rule
+(strategy §10) is enforced by a check, not by good intentions:
+
+```bash
+npm run coverage            # fails if a route has no mapped test
+npm run coverage:json       # machine-readable, for CI
+npm run coverage:baseline   # re-park the current gaps (shrink-only)
+```
+
+`scripts/check-coverage.mjs` reads the repo-root `openapi.json` — the route table
+Fastify generates from the live routes (`pnpm --filter api spec:dump`) — and
+compares it against every `/api/...` path the suite calls. A route can't hide
+behind a plugin prefix.
+
+A spec declares coverage by **calling the path literally**, or by annotating it
+when the path is dynamic or driven through the browser:
+
+```ts
+// @covers GET /api/v1/action/{action_id}/contact-details
+```
+
+**Current state: 24/52 operations exercised (46%).** The other 28 are parked in
+[`coverage-baseline.json`](coverage-baseline.json) — a debt register that may only
+shrink. The burn-down plan, with proposed journeys R–Z, is in
+[`../docs/testing/e2e-coverage-backlog.md`](../docs/testing/e2e-coverage-backlog.md).
+Claude follows [`.claude/rules/e2e-coverage.md`](../.claude/rules/e2e-coverage.md),
+which loads automatically when routes, services, or UI files are edited.
+
 ## Adding a journey
 
 1. Add `tests/api/journey-<x>-<name>.spec.ts` (or `tests/ui/...`).
@@ -159,6 +192,8 @@ the schema-driven profile form.
    `requireCapabilities(test, caps, ['db'])`.
 4. Name the describe block after the journey in the strategy doc (§4) so the
    traceability matrix stays honest.
+5. Run `npm run coverage` and drop any route it now covers from
+   `coverage-baseline.json`.
 
 ## Scope note
 

@@ -6,6 +6,10 @@ import { performAction, updateActionStatus } from '../../src/actions.js';
  * Journey F — PII reveal on accepted action (P0).
  * Guards: reveal is participant + status gated · per-read recompute · the error
  * matrix (401 / 403 NOT_ACTION_PARTICIPANT / 403 PII_NOT_REVEALED) · no-store.
+ *
+ * @covers GET /api/v1/action/{action_id}/contact-details
+ *   (the path is built from a runtime actionId, so the traceability check can't
+ *   see it literally — scripts/check-coverage.mjs)
  */
 test.describe('Journey F — PII reveal', () => {
   test.skip(({ cfg, caps }) => provisioningMethod(cfg, caps) === null, 'no way to create users (gated target without service creds)');
