@@ -6,12 +6,12 @@ import {
   SheetContent,
   SheetHeader,
   SheetTitle,
-  SheetDescription,
   SheetFooter,
 } from '@/components/ui/sheet';
 import { Button } from '@/components/ui/button';
 import type { DotNetworkDomain } from '@/engine/types';
 import { getEnumFilterFieldsForDomains } from '@/lib/enum-filters';
+import { MultiSelectGroup, CHIP_THRESHOLD } from '@/components/filters/multi-select-group';
 
 /** The two action kinds a network action can be — see `action-modal.tsx`'s `action_type`. */
 export type ActionTypeFilter = 'connect' | 'apply';
@@ -98,12 +98,6 @@ export function ActionFiltersSheet({
       <SheetContent side="right" className="flex h-full w-full flex-col sm:max-w-sm">
         <SheetHeader>
           <SheetTitle>{t('filters.title', 'Filters')}</SheetTitle>
-          <SheetDescription>
-            {t(
-              'actions.filters_pii_caption',
-              'Facets come from the network schema. Personal details stay hidden until accepted, and are never used to filter.',
-            )}
-          </SheetDescription>
         </SheetHeader>
 
         <div className="flex-1 space-y-6 overflow-y-auto px-4">
@@ -135,13 +129,28 @@ export function ActionFiltersSheet({
             </div>
           </section>
 
-          {/* One checkbox group per schema-derived, non-private enum field */}
+          {/* One group per schema-derived, non-private enum field. Fields with
+              many options render as a compact searchable dropdown (shared with
+              the map/list filters) so the sheet stays short; small fields stay
+              as an inline checkbox list. Schema-provided labels are not
+              translated, per the repo's rule that schema content isn't localized. */}
           {enumFilterFields.map((field) => {
             const fieldSelected = selected[field.key] ?? [];
+
+            if (field.options.length > CHIP_THRESHOLD) {
+              return (
+                <MultiSelectGroup
+                  key={field.key}
+                  title={field.label}
+                  options={field.options}
+                  selected={fieldSelected}
+                  onToggle={(value) => toggleFacetValue(field.key, value)}
+                />
+              );
+            }
+
             return (
               <section key={field.key} className="space-y-2" aria-labelledby={`action-filters-${field.key}-heading`}>
-                {/* Schema-provided label — not translated, per the repo's rule
-                    that schema content isn't localized. */}
                 <h3
                   id={`action-filters-${field.key}-heading`}
                   className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground"
