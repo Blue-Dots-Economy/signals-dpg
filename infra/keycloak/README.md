@@ -11,10 +11,27 @@ An instance runs **one Keycloak deployment holding one realm, `bluedots`**,
 shared by that instance's signals API and aggregator (§3.1). Separation between
 the two DPGs is by **client and realm role**, not by realm.
 
-**This directory is the source of truth for that realm and for the OTP SPI.**
-Both were originally maintained in `aggregator-dpg/infra/keycloak/`; ownership
-moved here so the shared identity artifacts have one home (this settles open
-question 6 of the design doc, which left it unanswered).
+**This directory is the LOCAL-DEV source of truth for that realm and the OTP
+SPI.** Both were originally maintained in `aggregator-dpg/infra/keycloak/`;
+ownership moved here so the shared local identity artifacts have one home (this
+settles open question 6 of the design doc, which left it unanswered).
+
+> **Deployment is owned elsewhere.** Keycloak is now a shared common service, and
+> the **bluedots-automation** repo owns what reaches real environments:
+>
+> - the **deployment realm** — built from an app repo's local realm by
+>   `scripts/build-realm.sh` there (a hardening transform: localhost redirects
+>   stripped, `sslRequired: external`), then guarded by `scripts/assert-realm.sh`
+>   in CI. Not a verbatim copy of this file.
+> - the **server image** — `dockerfiles/keycloak/` → `ghcr.io/<owner>/keycloak-server`,
+>   which bakes the OTP SPI in and pre-runs `kc.sh build`. It ships OTP jar
+>   **1.1.0-SNAPSHOT**; this directory is on 1.0.0-SNAPSHOT.
+>
+> This tree is therefore developer-local and **not upstream of deployment**:
+> bumping the jar or editing the realm here changes nothing in any environment
+> until the matching change lands in bluedots-automation. `Dockerfile` in this
+> directory is a leftover of the old per-repo K8s build — no CI workflow builds it
+> and nothing deploys it.
 
 | Path | Purpose |
 |---|---|
