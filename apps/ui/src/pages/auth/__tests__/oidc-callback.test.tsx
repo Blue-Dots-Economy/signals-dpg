@@ -302,6 +302,23 @@ describe('G4 — authenticated U18 guardian gate', () => {
     expect(flow.getAttribute('data-initial-step')).toBe('dob');
   });
 
+  it('holds the user BEFORE navigating anywhere — the whole point of gating here', async () => {
+    // The defect this guards: the gate used to miss an unknown age, the user
+    // landed, and home-page's backstop then rendered the DOB step ON TOP OF the
+    // map. Asserting "the flow renders" is not enough — it has to render
+    // instead of a navigation, not after one.
+    getU18Status.mockResolvedValue({
+      hasBirthData: false,
+      isMinor: false,
+      guardianVerified: false,
+    });
+
+    renderPage();
+
+    await screen.findByTestId('u18-guardian-flow');
+    expect(navigate).not.toHaveBeenCalled();
+  });
+
   it('gates a user whose age is UNKNOWN, even though isMinor is false', async () => {
     // The regression this guard exists for: `isMinor` is `age !== null &&
     // isMinor(age)` server-side, so an aggregator-onboarded user (bulk upload /

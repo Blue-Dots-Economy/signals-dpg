@@ -237,15 +237,15 @@ export function OidcCallbackPage() {
              * at profile creation once they pick one.
              */
             const held = heldDomains ?? (await resolveHeldDomains(themeId));
-            // No profile yet → no domain to judge, and nothing to fetch.
-            const inGatedDomain =
-              held.length > 0 &&
-              (await (async () => {
-                const network = await fetchNetworkConfig(themeId);
-                return held.some((domainId) =>
-                  isGuardianConsentRequiredDomain(network, domainId),
-                );
-              })());
+
+            // No profile yet → no domain to judge, so nothing to fetch either.
+            let inGatedDomain = false;
+            if (held.length > 0) {
+              const network = await fetchNetworkConfig(themeId);
+              inGatedDomain = held.some((domainId) =>
+                isGuardianConsentRequiredDomain(network, domainId),
+              );
+            }
 
             if (inGatedDomain) {
               setGuardianGate({

@@ -96,7 +96,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
    * read the object through a ref so the callback stays stable.
    */
   const authCfgRef = useRef(authCfg);
-  authCfgRef.current = authCfg;
+  // Synced in an effect rather than during render: a render-phase ref write is
+  // an impure render and misbehaves under concurrent rendering. Declared BEFORE
+  // the fetchSession effect so the ref is current by the time it runs, and
+  // seeded by useRef's initial value for the very first render.
+  useEffect(() => {
+    authCfgRef.current = authCfg;
+  }, [authCfg]);
+
   const keycloakConfigKey = authCfg?.keycloak
     ? `${authCfg.keycloak.url}|${authCfg.keycloak.realm}|${authCfg.keycloak.clientId}`
     : '';
@@ -153,7 +160,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (superseded()) return;
       setUser(null);
     } finally {
-      setIsLoading(false);
+      // Superseded means a login already owns the state — including having
+      // cleared isLoading itself. Touching it here would be this run leaking
+      // past the guard it just respected.
+      if (!superseded()) setIsLoading(false);
     }
   }, [keycloakConfigKey, isConfigLoading, isKeycloakLogin]);
 
