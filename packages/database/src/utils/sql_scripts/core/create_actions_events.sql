@@ -25,6 +25,7 @@ CREATE TABLE IF NOT EXISTS item_actions (
 
   requirements_snapshot JSONB NOT NULL DEFAULT '{}'::jsonb,
   remarks TEXT,
+  match_score REAL,
 
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -47,6 +48,11 @@ PARTITION BY LIST (partition_network);
 -- Plan A: audit trail for on-behalf-of action filing.
 ALTER TABLE item_actions ADD COLUMN IF NOT EXISTS performed_by_org_id TEXT;
 ALTER TABLE item_actions ADD COLUMN IF NOT EXISTS performed_by_service_user_id TEXT;
+
+-- #439: connect-time relevance score (0-10) from the match_score service.
+-- Upgrade guard for databases created before this column was added to the
+-- CREATE TABLE above.
+ALTER TABLE item_actions ADD COLUMN IF NOT EXISTS match_score REAL;
 
 CREATE INDEX IF NOT EXISTS item_actions_source_item_idx
 ON item_actions (
@@ -84,6 +90,15 @@ ON item_actions (source_item_owner, updated_at DESC);
 
 CREATE INDEX IF NOT EXISTS item_actions_target_owner_idx
 ON item_actions (target_item_owner, updated_at DESC);
+
+-- My-Actions per-profile filter/sort (#439): page an owner's actions by
+-- status and recency from either side of the relation. Mirrors
+-- drizzle/0011_action_owner_status_indexes.sql.
+CREATE INDEX IF NOT EXISTS item_actions_target_owner_status_idx
+ON item_actions (target_item_owner, action_status, updated_at);
+
+CREATE INDEX IF NOT EXISTS item_actions_source_owner_status_idx
+ON item_actions (source_item_owner, action_status, updated_at);
 
 CREATE INDEX IF NOT EXISTS item_actions_status_idx
 ON item_actions (action_status, created_at DESC);

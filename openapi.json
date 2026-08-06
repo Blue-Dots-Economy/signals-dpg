@@ -981,8 +981,19 @@
           },
           {
             "schema": {
-              "type": "string",
-              "minLength": 1
+              "anyOf": [
+                {
+                  "type": "string",
+                  "minLength": 1
+                },
+                {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                }
+              ]
             },
             "in": "query",
             "name": "action_type",
@@ -990,8 +1001,19 @@
           },
           {
             "schema": {
-              "type": "string",
-              "minLength": 1
+              "anyOf": [
+                {
+                  "type": "string",
+                  "minLength": 1
+                },
+                {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                }
+              ]
             },
             "in": "query",
             "name": "action_status",
@@ -1045,6 +1067,49 @@
           },
           {
             "schema": {
+              "default": "recent",
+              "type": "string",
+              "enum": [
+                "recent",
+                "oldest",
+                "match_score",
+                "distance"
+              ]
+            },
+            "in": "query",
+            "name": "sort",
+            "required": false
+          },
+          {
+            "schema": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "field": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "values": {
+                    "minItems": 1,
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  }
+                },
+                "required": [
+                  "field",
+                  "values"
+                ]
+              }
+            },
+            "in": "query",
+            "name": "facets",
+            "required": false
+          },
+          {
+            "schema": {
               "type": "string"
             },
             "in": "header",
@@ -1072,12 +1137,71 @@
                         },
                         "offset": {
                           "type": "number"
+                        },
+                        "applied": {
+                          "type": "object",
+                          "properties": {
+                            "sort": {
+                              "type": "string",
+                              "enum": [
+                                "recent",
+                                "oldest",
+                                "match_score",
+                                "distance"
+                              ]
+                            },
+                            "statuses": {
+                              "type": "array",
+                              "items": {
+                                "type": "string"
+                              }
+                            },
+                            "types": {
+                              "type": "array",
+                              "items": {
+                                "type": "string"
+                              }
+                            },
+                            "facets": {
+                              "default": [],
+                              "type": "array",
+                              "items": {
+                                "type": "object",
+                                "properties": {
+                                  "field": {
+                                    "type": "string",
+                                    "minLength": 1
+                                  },
+                                  "values": {
+                                    "minItems": 1,
+                                    "type": "array",
+                                    "items": {
+                                      "type": "string"
+                                    }
+                                  }
+                                },
+                                "required": [
+                                  "field",
+                                  "values"
+                                ],
+                                "additionalProperties": false
+                              }
+                            }
+                          },
+                          "required": [
+                            "sort",
+                            "statuses",
+                            "types",
+                            "facets"
+                          ],
+                          "additionalProperties": false
                         }
                       },
                       "required": [
                         "total",
                         "limit",
-                        "offset"
+                        "offset",
+                        "applied"
                       ],
                       "additionalProperties": false
                     },
@@ -1191,6 +1315,10 @@
                             "nullable": true,
                             "type": "string"
                           },
+                          "match_score": {
+                            "nullable": true,
+                            "type": "number"
+                          },
                           "created_at": {
                             "type": "string",
                             "format": "date-time"
@@ -1217,6 +1345,10 @@
                           "target_item_name": {
                             "nullable": true,
                             "type": "string"
+                          },
+                          "distance_m": {
+                            "nullable": true,
+                            "type": "number"
                           }
                         },
                         "required": [
