@@ -35,7 +35,11 @@
  * coupling, see the plan's issue #1). One item is deliberately left
  * un-indexed (no item_search row) to characterize that coupling: an item
  * with a real in-box location but no item_search row is excluded from bbox
- * results.
+ * results — as long as item_search has at least one row for the
+ * network+domain. When it has none (no worker in the environment), the
+ * fallback describe at the end of this file applies: the bbox gates on
+ * items.item_locations directly (spec
+ * docs/superpowers/specs/2026-08-06-map-bbox-index-fallback-design.md).
  */
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { eq, and, sql } from 'drizzle-orm';

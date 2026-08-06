@@ -61,6 +61,9 @@ export type ItemFetchFilters = {
   // exclusive with the radius-center params above — see
   // withGeoSearchRefinement in packages/schemas/src/api/item_schemas.ts.
   // Consumed by buildWhereClause below (Option B: item_search.geo join).
+  // Bbox filtering gates on the item_search read-model when it has rows for
+  // the network+domain, and falls back to items.item_locations when it has
+  // none — see hasSearchIndexRows below.
   min_lat?: number;
   min_lng?: number;
   max_lat?: number;
