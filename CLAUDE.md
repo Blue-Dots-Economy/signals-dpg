@@ -14,6 +14,7 @@ Other load-bearing docs:
 - `SETUP.md` — full local walkthrough (Signals API + UI + optional aggregator-dpg integration); single root `.env`
 - `docs/operations/integrating-dpgs.md` — the two-header service-auth model used by aggregator-dpg / voice-dpg
 - `docs/operations/migrations.md`, `docs/operations/secrets.md`
+- `docs/operations/digilocker-integration.md` — what the DigiLocker wallet import does (pre-fills a profile form; not a login, not verification), the external "agent" service it depends on, and its current security caveats
 
 **Historical design docs.** `docs/superpowers/plans/` and `docs/superpowers/specs/` hold dated, per-feature plan/spec pairs (consent v1, metrics redesign, PII encryption, self-signup gating, etc.) — the "why" behind a subsystem when the current code doesn't make it obvious. `docs/design/*.md` covers UI-specific design (localization, network theming, bulk actions, map enhancements). Treat all of these as **point-in-time records, not living documentation** — a plan from three months ago may describe an approach the code has since moved past; when a plan and the code disagree, the code wins.
 
