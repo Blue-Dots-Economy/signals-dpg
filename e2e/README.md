@@ -100,6 +100,15 @@ Not every assertion can run against every target. Tests declare what they need v
 `requireCapabilities(test, caps, [...])`; unsupported ones skip with a visible
 reason. Config presence enables each capability:
 
+**`symmetricAction`** is a config field rather than a capability, but it gates a
+P0 assertion the same way. The action pair cap (#370/#422) is one budget per
+*unordered* pair, and proving that needs an interaction valid in **both**
+directions — i.e. whose `from`/`to` domains match. A directional action (blue_dot
+`apply` is seeker→provider) gets refused on interaction shape before the cap is
+consulted, so the reverse-direction assertion would pass vacuously. Set it to a
+symmetric interaction (blue_dot: `connect` between two `provider`s) or the
+bidirectionality test skips-and-reports.
+
 | Capability | Enabled when… | Typically |
 |---|---|---|
 | `testOtp` | `otp.mode = test-otp` or a notification sink is set | local ✅ / dev ✅ if enabled |

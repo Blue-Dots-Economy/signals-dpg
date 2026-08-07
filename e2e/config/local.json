@@ -28,6 +28,10 @@
     "type": "apply",
     "acceptStatus": "accepted"
   },
+  "symmetricAction": {
+    "type": "connect",
+    "domainKey": "blue_dot/provider"
+  },
   "auth": {
     "serviceApiKey": null,
     "actingOrgId": null

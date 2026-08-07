@@ -67,6 +67,21 @@ export interface E2EConfig {
    */
   action: { type: string; acceptStatus: string };
 
+  /**
+   * A **symmetric** interaction: one whose `from` and `to` are the same domain,
+   * so the same action is valid in both directions between two peers.
+   *
+   * Needed to prove the action pair cap is bidirectional (#370/#422) — one
+   * budget per unordered pair, not per direction. The default `action` is
+   * usually directional (blue_dot `apply` is seeker→provider only), so a reverse
+   * perform is refused on interaction shape and the cap is never reached, which
+   * proves nothing. Declare a symmetric one (blue_dot: `connect` between two
+   * `provider`s) to make that assertion runnable.
+   *
+   * `null` ⇒ the bidirectionality assertion skips-and-reports.
+   */
+  symmetricAction: { type: string; domainKey: string } | null;
+
   /** Service-caller credentials (P5/P6) — injected, never seeded by the suite. */
   auth: {
     serviceApiKey: string | null;
@@ -178,6 +193,9 @@ export function loadConfig(): E2EConfig {
       redirectUri: raw.keycloak?.redirectUri ?? `${raw.uiBaseUrl ?? 'http://localhost:5173'}/auth/callback`,
     },
     action: { type: raw.action?.type ?? 'connect', acceptStatus: raw.action?.acceptStatus ?? 'accepted' },
+    symmetricAction: raw.symmetricAction?.type && raw.symmetricAction?.domainKey
+      ? { type: raw.symmetricAction.type, domainKey: raw.symmetricAction.domainKey }
+      : null,
     auth: { serviceApiKey: raw.auth?.serviceApiKey ?? null, actingOrgId: raw.auth?.actingOrgId ?? null },
     otp: { mode: raw.otp?.mode ?? 'test-otp' },
     notificationStubUrl: raw.notificationStubUrl ?? null,

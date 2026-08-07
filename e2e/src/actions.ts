@@ -41,6 +41,32 @@ async function postPerform(session: Session, bodyObj: Record<string, unknown>): 
   return res;
 }
 
+/**
+ * Perform an action and return the envelope **without throwing on failure**.
+ *
+ * `performAction` throws when the action doesn't succeed, which is right for the
+ * happy paths but useless for the guards that are *supposed* to be refused
+ * (pair cap, U18 channel block). Those need to read `results[0].error`.
+ *
+ * Consent is acknowledged up front here rather than on retry: a caller
+ * asserting a specific refusal code doesn't want `CONSENT_REQUIRED` masking it.
+ */
+export async function tryPerformAction(
+  session: Session,
+  args: { actionType: string; source: ItemRef; target: ItemRef & { item_instance_url: string } },
+  opts: { consentVersion?: number; guardianOtp?: string } = {},
+): Promise<{ res: ApiResult<ActionEnvelope>; result?: ActionResultItem }> {
+  const res = await postPerform(session, {
+    action_type: args.actionType,
+    source_item: args.source,
+    target_item: args.target,
+    requirements_snapshot: {},
+    consent: { acknowledged: true, version: opts.consentVersion ?? 1 },
+    ...(opts.guardianOtp ? { guardian_otp: opts.guardianOtp } : {}),
+  });
+  return { res, result: firstResult(res) };
+}
+
 export async function performAction(
   session: Session,
   args: { actionType: string; source: ItemRef; target: ItemRef & { item_instance_url: string } },
