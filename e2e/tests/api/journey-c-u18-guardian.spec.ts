@@ -1,5 +1,5 @@
 import { test, expect } from '../../src/fixtures.js';
-import { freshIdentity, provisioningMethod } from '../../src/flows.js';
+import { freshIdentity } from '../../src/flows.js';
 import { signup, acceptCoreConsent, TEST_OTP, type AuthContext, type Session } from '../../src/auth.js';
 import { resolveBinding, buildMinimalItemState, type Binding } from '../../src/schema.js';
 import { newName, newPhone } from '../../src/identities.js';
@@ -17,17 +17,31 @@ import type { E2EConfig } from '../../src/config.js';
  * Skips-and-reports when the target predates the U18 endpoints or the domain
  * isn't guardian-gated there.
  */
-function minorDobIso(): string {
-  const d = new Date();
-  d.setFullYear(d.getFullYear() - 14); // ~14 years old ⇒ a minor
-  return d.toISOString().slice(0, 10);
-}
+/** Comfortably under 18 on any network's threshold. */
+const MINOR_AGE = 14;
 
 async function fetchItem(session: Session, binding: Binding, itemId: string) {
   const res = await session.client.get<{ items: Array<{ item_id: string; lifecycle_status?: string }> }>(
     `/api/v1/item/fetch?item_network=${binding.network}&item_domain=${binding.domain}&item_type=${binding.item_type}&limit=100`,
   );
   return res.body?.items?.find((i) => i.item_id === itemId);
+}
+
+/**
+ * Read the item until it reaches `want`, or give up.
+ *
+ * `/item/fetch` has a ~1s Redis cache, so a just-promoted item can still be
+ * served from its pre-promotion (draft) snapshot. A single read here produced a
+ * false failure even though the promote itself returned `promoted: true`.
+ * Mirrors the poll `flows.ts` already does for the adult path.
+ */
+async function waitForStatus(session: Session, binding: Binding, itemId: string, want: string) {
+  let item = await fetchItem(session, binding, itemId);
+  for (let i = 0; i < 5 && item?.lifecycle_status !== want; i++) {
+    await new Promise((r) => setTimeout(r, 1200));
+    item = await fetchItem(session, binding, itemId);
+  }
+  return item;
 }
 
 /** Sign up a minor and create a profile in the gated domain; returns the draft item. */
@@ -46,9 +60,12 @@ async function setupMinorDraft(
   const session = await signup(api, identity, newName('Minor'), authCtx, { age: 14 });
   await acceptCoreConsent(session, cfg.network, 'signup');
 
+  // #331: the route stores an AGE snapshot, not a date of birth. It previously
+  // took `dateOfBirth`; sending that now fails Zod validation with
+  // "body/age expected number, received NaN".
   const dob = await session.client.post<{ isMinor?: boolean }>('/api/v1/consent/u18/dob', {
     network: cfg.network,
-    dateOfBirth: minorDobIso(),
+    age: MINOR_AGE,
   });
   test.skip(dob.status === 404, 'target predates the U18 DOB endpoint');
   expect(dob.status, `u18/dob: ${JSON.stringify(dob.body)}`).toBe(200);
@@ -71,7 +88,13 @@ async function setupMinorDraft(
 }
 
 test.describe('Journey C — U18 guardian consent', () => {
-  test.skip(({ cfg, caps }) => provisioningMethod(cfg, caps) !== 'signup', 'C uses OTP self-signup (target must allow it)');
+  // Gate on self-signup being AVAILABLE, not on it being the preferred
+  // provisioning method. `provisioningMethod` returns 'service' whenever service
+  // credentials exist (to dodge the self-signup IP rate limit), so the old
+  // `!== 'signup'` check silently skipped this whole P0 journey on any target
+  // with service creds configured — i.e. the recommended setup. C deliberately
+  // self-signs-up because service provisioning would bypass the gate under test.
+  test.skip(({ cfg }) => cfg.selfSignupMode !== 'allowed', 'C uses OTP self-signup (target must allow it)');
   test.skip(({ caps }) => !caps.testOtp, 'requires CREATE_TEST_OTP on the target');
 
   test('a minor stays draft and self-consent does NOT promote (fail-closed)', async ({ api, cfg, authCtx, provider }) => {
@@ -130,7 +153,7 @@ test.describe('Journey C — U18 guardian consent', () => {
     expect(verify.status, `profile-consent/verify: ${JSON.stringify(verify.body)}`).toBe(200);
     expect(verify.body.promoted, 'guardian consent should promote the item').toBe(true);
 
-    const live = await fetchItem(session, binding, itemId);
+    const live = await waitForStatus(session, binding, itemId, 'live');
     expect(live?.lifecycle_status, 'guardian-sourced consent promotes minor to live').toBe('live');
   });
 });

@@ -13,10 +13,11 @@ import {
 } from './auth.js';
 import { newEmail, newName, newPhone } from './identities.js';
 
-/** A proven-adult DOB so profiles in guardian-gated domains can go live
- *  (a null DOB on a gated domain is fail-closed → stays draft). */
-const ADULT_DOB = '1990-01-01';
-/** The same fact as an age snapshot (#331), which is what signup now takes. */
+/**
+ * A proven-adult age so profiles in guardian-gated domains can go live (an
+ * unknown age on a gated domain is fail-closed → stays draft). #331 replaced the
+ * date of birth with this age snapshot everywhere, including `/consent/u18/dob`.
+ */
 const ADULT_AGE = 35;
 
 export interface ItemRef {
@@ -163,7 +164,7 @@ export async function createLiveProfileUser(
     await acceptCoreConsent(session, binding.network, 'signup');
     // Establish a proven-adult DOB so guardian-gated domains (fail-closed on null
     // DOB) promote to live. Best-effort: older builds lack the u18 endpoint.
-    await session.client.post('/api/v1/consent/u18/dob', { network: binding.network, dateOfBirth: ADULT_DOB });
+    await session.client.post('/api/v1/consent/u18/dob', { network: binding.network, age: ADULT_AGE });
     // No explicit domain registration needed: a fresh user has empty
     // user.domains, so the first item/create bootstraps their domain (see
     // create_item.ts single-role lock). Each test user creates one profile.
@@ -211,7 +212,7 @@ export async function createLiveProfileUser(
     await acceptCoreConsent(session, binding.network, 'login');
     // The guardian gate keys off the U18 birth data, not the user row's DOB from
     // provisioning — set it so a gated-domain adult profile can promote to live.
-    await session.client.post('/api/v1/consent/u18/dob', { network: binding.network, dateOfBirth: ADULT_DOB });
+    await session.client.post('/api/v1/consent/u18/dob', { network: binding.network, age: ADULT_AGE });
   }
 
   // Ensure the profile is live: promote via profile-accept if still draft.
