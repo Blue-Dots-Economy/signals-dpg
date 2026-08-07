@@ -83,7 +83,14 @@ export class ApiClient {
   }
 
   async delete<T = unknown>(path: string, opts?: { headers?: Record<string, string> }): Promise<ApiResult<T>> {
-    const raw = await this.request.delete(this.url(path), { headers: { ...this.defaultHeaders(), ...(opts?.headers ?? {}) } });
+    // No body ⇒ no content-type. Sending `application/json` with an empty body
+    // makes Fastify reject the request with FST_ERR_CTP_EMPTY_JSON_BODY (400)
+    // before the route is ever reached, so every DELETE looked like a 400
+    // regardless of what the endpoint actually does.
+    const { 'content-type': _drop, ...headers } = this.defaultHeaders();
+    const raw = await this.request.delete(this.url(path), {
+      headers: { ...headers, ...(opts?.headers ?? {}) },
+    });
     return this.wrap<T>(raw);
   }
 }
