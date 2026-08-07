@@ -12,6 +12,7 @@ on:
 permissions:
   contents: read
   packages: write
+  security-events: write   # Trivy image scan uploads SARIF to code-scanning
 
 concurrency:
   group: build-images-${{ github.ref }}
@@ -56,6 +57,7 @@ jobs:
             type=semver,pattern={{version}}
             type=sha,format=short
       - uses: docker/build-push-action@v7
+        id: build
         with:
           context: ${{ matrix.service.context }}
           file: ${{ matrix.service.dockerfile }}
@@ -64,3 +66,32 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha,scope=${{ matrix.service.name }}
           cache-to: type=gha,mode=max,scope=${{ matrix.service.name }}
+
+      # Image scanning (Sec-Audit A2 — Blue-Dots-Economy/signals-dpg#300).
+      # Scans the OS + system packages baked into the shipped artifact, which the
+      # source/lockfile scan in security.yml structurally cannot see (an outdated
+      # base-image openssl appears in no package.json).
+      #
+      # Scanned by digest, not by tag: buildx pushes straight to the registry
+      # without loading into the local docker image store, so `steps.build.outputs.imageid`
+      # is not resolvable by Trivy here. The digest also pins the exact artifact
+      # even if the tag is later moved. Registry auth comes from the docker/login-action
+      # above, which Trivy picks up via ~/.docker/config.json.
+      - name: Trivy image scan
+        if: steps.build.outputs.digest != ''
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          scan-type: image
+          image-ref: ghcr.io/blue-dots-economy/signals-dpg/${{ matrix.service.name }}@${{ steps.build.outputs.digest }}
+          format: sarif
+          output: trivy-image.sarif
+          severity: UNKNOWN,LOW,MEDIUM,HIGH,CRITICAL
+          exit-code: "0"   # Phase A: report-only, never fails the release build
+
+      - name: Upload Trivy image SARIF
+        if: always() && steps.build.outputs.digest != ''
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: trivy-image.sarif
+          # One category per image so api and ui alerts don't overwrite each other.
+          category: trivy-image-${{ matrix.service.name }}

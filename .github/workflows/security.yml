@@ -1,0 +1,55 @@
+# Security scanning (Sec-Audit A2 — Blue-Dots-Economy/signals-dpg#300)
+#
+# Thin caller. All scanning logic lives once in bluedots-automation so the six
+# in-scope repos can't drift apart; see that repo's
+# .github/workflows/security-scan.yml and docs/operations/security-scanning-a2*.md.
+#
+# What runs here (language: ts, no image-refs, gitleaks off):
+#   * trivy-fs    — dependency CVEs from pnpm-lock.yaml + Dockerfile/IaC
+#                   misconfig + filesystem secret detection -> SARIF
+#   * deps-audit  — `pnpm audit` as a second opinion (log only, no SARIF)
+#   * image-scan  — SKIPPED: no image-refs passed. The api/ui images are scanned
+#                   in build-images.yaml instead, against the freshly-built local
+#                   image, so we scan the exact artifact before it's published.
+#   * gitleaks    — SKIPPED: run-gitleaks defaults to false. Native GitHub secret
+#                   scanning covers this repo's history.
+#
+# Report-only (`block: false`): findings land in Security > Code scanning and the
+# job still passes. Green means "the scan ran", NOT "nothing found". Flip to
+# `block: true` (fail on HIGH/CRITICAL) only after Phase-B triage, otherwise the
+# pre-existing alert backlog would red-wall every PR.
+#
+# Pinned @feature: the reusable workflow currently only exists on that branch of
+# bluedots-automation. Repin to @main once it is promoted feature -> develop -> main.
+
+name: security
+
+on:
+  pull_request:
+    branches: [feature, develop, main]
+  push:
+    branches: [develop, main]
+  # Weekly sweep: new CVEs get published against code nobody has touched.
+  schedule:
+    - cron: "0 3 * * 1"
+  workflow_dispatch:
+
+concurrency:
+  group: security-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  scan:
+    # Declared here as well as in the reusable workflow: a called workflow cannot
+    # escalate beyond what the caller grants, so without security-events: write
+    # the SARIF upload fails with a 403 on repos whose default token is read-only.
+    permissions:
+      contents: read
+      security-events: write
+      packages: read
+    uses: Blue-Dots-Economy/bluedots-automation/.github/workflows/security-scan.yml@feature
+    with:
+      language: ts
+      node-version: "24"   # matches engines.node (>=24) and ci.yaml
+      block: false
+    secrets: inherit
