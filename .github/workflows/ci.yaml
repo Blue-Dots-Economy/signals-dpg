@@ -456,7 +456,7 @@ jobs:
       # local docker image store, so `imageid` is not resolvable by Trivy here.
       - name: Trivy image scan
         if: steps.build.outputs.digest != ''
-        uses: aquasecurity/trivy-action@v0.36.0
+        uses: aquasecurity/trivy-action@a9c7b0f06e461e9d4b4d1711f154ee024b8d7ab8 # v0.36.0
         with:
           scan-type: image
           image-ref: ghcr.io/blue-dots-economy/signals-dpg/${{ matrix.service.name }}@${{ steps.build.outputs.digest }}
