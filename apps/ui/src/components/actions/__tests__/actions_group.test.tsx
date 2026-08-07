@@ -135,6 +135,7 @@ vi.mock('@/lib/network-api', () => ({ fetchNetworkItems: mocks.fetchNetworkItems
 // Imported AFTER the mocks so the components pick them up.
 import { ActionCard } from '../action-card';
 import { ActionList } from '../action-list';
+import type { ActionSort, ActionStatusFilter, ActiveFacet } from '../action-toolbar';
 import { ActionModal } from '../action-modal';
 import { ActionStatusUpdater } from '../action-status-updater';
 import { BulkStatusDialog } from '../bulk-status-dialog';
@@ -498,6 +499,8 @@ describe('ActionCard', () => {
 interface ListHarnessProps {
   initiated?: Action[];
   received?: Action[];
+  initiatedTotal?: number;
+  receivedTotal?: number;
   activeTab?: 'initiated' | 'received';
   isLoading?: boolean;
   isError?: boolean;
@@ -507,20 +510,37 @@ interface ListHarnessProps {
   onBulkAction?: (targetStatus: string) => void;
   onRefresh?: () => void;
   onTabChange?: (tab: 'initiated' | 'received') => void;
+  // ── Toolbar + paging (#439): the page owns this state and the server does
+  // the filtering, so ActionList only forwards these. ─────────────────────
+  status?: ActionStatusFilter;
+  sort?: ActionSort;
+  activeFacets?: ActiveFacet[];
+  onStatusChange?: (status: ActionStatusFilter) => void;
+  onSortChange?: (sort: ActionSort) => void;
+  onOpenFilters?: () => void;
+  onRemoveFacet?: (field: string, value: string) => void;
+  onClearFilters?: () => void;
+  hasNextPage?: boolean;
+  isFetchingNextPage?: boolean;
+  onLoadMore?: () => void;
 }
 
 /**
  * Drives ActionList with the REAL `useCardSelection` and real tab state, so the
  * selection lock / bulk-bar behaviour is exercised end-to-end rather than
- * against a stubbed selection object.
+ * against a stubbed selection object. Toolbar status is held locally too (as
+ * the page does), so clearing the status token really re-renders with 'All'.
  */
 function ListHarness(props: ListHarnessProps) {
   const selection = useCardSelection();
   const [tab, setTab] = React.useState<'initiated' | 'received'>(props.activeTab ?? 'received');
+  const [status, setStatus] = React.useState<ActionStatusFilter>(props.status ?? 'All');
   return (
     <ActionList
       initiatedActions={props.initiated ?? []}
       receivedActions={props.received ?? []}
+      initiatedTotal={props.initiatedTotal}
+      receivedTotal={props.receivedTotal}
       isLoading={props.isLoading ?? false}
       isError={props.isError ?? false}
       error={props.error ?? null}
@@ -534,6 +554,20 @@ function ListHarness(props: ListHarnessProps) {
       isRefetching={props.isRefetching ?? false}
       selection={selection}
       onBulkAction={props.onBulkAction ?? (() => {})}
+      toolbarStatus={status}
+      toolbarSort={props.sort ?? 'recent'}
+      activeFacets={props.activeFacets ?? []}
+      onStatusChange={(next) => {
+        props.onStatusChange?.(next);
+        setStatus(next);
+      }}
+      onSortChange={props.onSortChange ?? (() => {})}
+      onOpenFilters={props.onOpenFilters ?? (() => {})}
+      onRemoveFacet={props.onRemoveFacet ?? (() => {})}
+      onClearFilters={props.onClearFilters ?? (() => {})}
+      hasNextPage={props.hasNextPage ?? false}
+      isFetchingNextPage={props.isFetchingNextPage ?? false}
+      onLoadMore={props.onLoadMore ?? (() => {})}
     />
   );
 }
@@ -618,34 +652,91 @@ describe('ActionList', () => {
     expect(screen.queryByText('Alice Seeker (Seeker)')).not.toBeInTheDocument();
   });
 
-  it('filters the visible cards by the status chips', async () => {
-    const user = userEvent.setup();
+  it('renders every row handed down even under an active filter (the server filtered, #439)', () => {
     renderWithClient(
-      <ListHarness received={[pendingReceived, acceptedReceived, rejectedReceived]} />,
+      <ListHarness
+        status="Pending"
+        activeFacets={[{ field: 'city', label: 'City', value: 'Pune' }]}
+        received={[pendingReceived, acceptedReceived, rejectedReceived]}
+      />,
     );
 
+    // No client-side re-filter: all three rows render despite status=Pending.
     expect(screen.getAllByRole('button', { name: /view profile/i })).toHaveLength(3);
-
-    await user.click(screen.getByRole('button', { name: 'Pending' }));
-    expect(screen.getAllByRole('button', { name: /view profile/i })).toHaveLength(1);
-    expect(screen.getByText('Alice Seeker (Seeker)')).toBeInTheDocument();
-    expect(screen.queryByText('Eve Rejected (Seeker)')).not.toBeInTheDocument();
-
-    await user.click(screen.getByRole('button', { name: 'Rejected' }));
-    expect(screen.getAllByRole('button', { name: /view profile/i })).toHaveLength(1);
-    expect(screen.getByText('Eve Rejected (Seeker)')).toBeInTheDocument();
-
-    // "Accepted" groups accepted + completed.
-    await user.click(screen.getByRole('button', { name: 'Accepted' }));
-    expect(screen.getByText('Dave Accepted (Seeker)')).toBeInTheDocument();
-    expect(screen.queryByText('Alice Seeker (Seeker)')).not.toBeInTheDocument();
+    // Status counts as one active filter alongside the facet.
+    expect(screen.getByTestId('filters-count')).toHaveTextContent('2');
+    expect(screen.getByTestId('status-token')).toBeInTheDocument();
   });
 
-  it('shows the empty state when a filter matches nothing', async () => {
+  it('hands the toolbar callbacks straight to the page', async () => {
     const user = userEvent.setup();
-    renderWithClient(<ListHarness received={[rejectedReceived]} />);
-    await user.click(screen.getByRole('button', { name: 'Pending' }));
+    const onStatusChange = vi.fn((_s: ActionStatusFilter) => {});
+    const onRemoveFacet = vi.fn((_field: string, _value: string) => {});
+    const onClearFilters = vi.fn();
+    const onOpenFilters = vi.fn();
+    renderWithClient(
+      <ListHarness
+        status="Pending"
+        activeFacets={[{ field: 'city', label: 'City', value: 'Pune' }]}
+        received={[pendingReceived]}
+        onStatusChange={onStatusChange}
+        onRemoveFacet={onRemoveFacet}
+        onClearFilters={onClearFilters}
+        onOpenFilters={onOpenFilters}
+      />,
+    );
+
+    await user.click(screen.getByTestId('filters-button'));
+    expect(onOpenFilters).toHaveBeenCalledTimes(1);
+
+    await user.click(screen.getByTestId('facet-remove-city-Pune'));
+    expect(onRemoveFacet).toHaveBeenCalledWith('city', 'Pune');
+
+    await user.click(screen.getByTestId('clear-filters'));
+    expect(onClearFilters).toHaveBeenCalledTimes(1);
+
+    // Clearing the status token asks the page for "All".
+    await user.click(screen.getByTestId('status-remove'));
+    expect(onStatusChange).toHaveBeenCalledWith('All');
+  });
+
+  it('shows the empty state when the filtered page comes back empty', () => {
+    renderWithClient(<ListHarness status="Pending" received={[]} />);
     expect(screen.getByText('Requests sent to you will appear here.')).toBeInTheDocument();
+  });
+
+  it('takes the tab counts from the server totals, not the loaded page length', () => {
+    renderWithClient(
+      <ListHarness
+        received={[pendingReceived]}
+        receivedTotal={42}
+        initiated={[makeAction({ action_id: 'i-1' })]}
+        initiatedTotal={7}
+      />,
+    );
+    expect(screen.getByRole('button', { name: /received/i })).toHaveTextContent('42');
+    expect(screen.getByRole('button', { name: /initiated/i })).toHaveTextContent('7');
+  });
+
+  it('Load more asks for the next page, and is disabled while one is in flight', async () => {
+    const user = userEvent.setup();
+    const onLoadMore = vi.fn();
+    const { unmount } = renderWithClient(
+      <ListHarness received={[pendingReceived]} hasNextPage onLoadMore={onLoadMore} />,
+    );
+    await user.click(screen.getByTestId('load-more-button'));
+    expect(onLoadMore).toHaveBeenCalledTimes(1);
+    unmount();
+
+    renderWithClient(
+      <ListHarness received={[pendingReceived]} hasNextPage isFetchingNextPage onLoadMore={onLoadMore} />,
+    );
+    expect(screen.getByTestId('load-more-button')).toBeDisabled();
+  });
+
+  it('offers no Load more button on the last page', () => {
+    renderWithClient(<ListHarness received={[pendingReceived]} />);
+    expect(screen.queryByTestId('load-more-button')).not.toBeInTheDocument();
   });
 
   it('disables the refresh button while refetching and calls onRefresh otherwise', async () => {
@@ -751,16 +842,20 @@ describe('ActionList', () => {
     expect(screen.getByRole('button', { name: /done/i })).toBeInTheDocument();
   });
 
-  it('changing the filter drops out of select mode so a hidden selection cannot go stale', async () => {
+  it('changing the status filter drops out of select mode so a hidden selection cannot go stale', async () => {
     const user = userEvent.setup();
-    renderWithClient(<ListHarness received={[pendingReceived, rejectedReceived]} />);
+    renderWithClient(
+      <ListHarness status="Pending" received={[pendingReceived, rejectedReceived]} />,
+    );
 
     await user.click(screen.getByRole('button', { name: /^select$/i }));
     const target = selectionTargets()[0];
     await user.click(target as HTMLElement);
     expect(screen.getByText('1 selected')).toBeInTheDocument();
 
-    await user.click(screen.getByRole('button', { name: 'Rejected' }));
+    // The status change goes out to the page (which refetches) — the component
+    // only has to make sure the now-possibly-hidden selection is dropped.
+    await user.click(screen.getByTestId('status-remove'));
     expect(screen.queryByText('1 selected')).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /done/i })).not.toBeInTheDocument();
   });

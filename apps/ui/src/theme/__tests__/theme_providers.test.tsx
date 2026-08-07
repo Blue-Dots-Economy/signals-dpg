@@ -46,6 +46,36 @@ function resetDom(): void {
   document.title = '';
 }
 
+/**
+ * Swap the `localStorage` global for one whose `getItem`/`setItem` throws, so
+ * the providers' "storage unavailable" branches are reachable.
+ *
+ * Deliberately NOT `vi.spyOn(globalThis.localStorage, …)`: happy-dom 20's
+ * Storage is Proxy-backed, so a spy installed on it is not undone by
+ * `vi.restoreAllMocks()` and leaks into every later test in this file (the
+ * throw then surfaces from an unrelated assertion). `vi.stubGlobal` replaces
+ * the binding outright and `vi.unstubAllGlobals()` in afterEach puts the real
+ * Storage back. Every other method still delegates to the real storage so a
+ * test can keep asserting on what was written.
+ */
+function breakStorage(method: 'getItem' | 'setItem', message: string): void {
+  const real = globalThis.localStorage;
+  const boom = (): never => {
+    throw new Error(message);
+  };
+  vi.stubGlobal('localStorage', {
+    get length() {
+      return real.length;
+    },
+    clear: () => real.clear(),
+    key: (index: number) => real.key(index),
+    removeItem: (key: string) => real.removeItem(key),
+    getItem: method === 'getItem' ? boom : (key: string) => real.getItem(key),
+    setItem:
+      method === 'setItem' ? boom : (key: string, value: string) => real.setItem(key, value),
+  } satisfies Storage);
+}
+
 beforeEach(() => {
   localStorage.clear();
   setRuntimeConfig(undefined);
@@ -59,6 +89,7 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.unstubAllEnvs();
+  vi.unstubAllGlobals();
   vi.restoreAllMocks();
   setRuntimeConfig(undefined);
   delete buildGlobals.__DEFAULT_NETWORK_THEME__;
@@ -291,9 +322,7 @@ describe('NetworkThemeProvider network resolution', () => {
   });
 
   it('survives an unreadable localStorage and still applies a theme', () => {
-    vi.spyOn(globalThis.localStorage, 'getItem').mockImplementation(() => {
-      throw new Error('storage disabled');
-    });
+    breakStorage('getItem', 'storage disabled');
     buildGlobals.__DEFAULT_NETWORK_THEME__ = 'pink_dot';
 
     renderTheme('/');
@@ -302,9 +331,7 @@ describe('NetworkThemeProvider network resolution', () => {
   });
 
   it('survives an unwritable localStorage when a network is chosen via URL', () => {
-    vi.spyOn(globalThis.localStorage, 'setItem').mockImplementation(() => {
-      throw new Error('quota exceeded');
-    });
+    breakStorage('setItem', 'quota exceeded');
 
     renderTheme('/?network=purple_dot');
 
@@ -572,9 +599,7 @@ describe('ThemeModeProvider', () => {
 
   it('falls back to system when localStorage cannot be read', () => {
     installMatchMedia(true);
-    vi.spyOn(globalThis.localStorage, 'getItem').mockImplementation(() => {
-      throw new Error('storage disabled');
-    });
+    breakStorage('getItem', 'storage disabled');
 
     renderMode();
 
@@ -585,9 +610,7 @@ describe('ThemeModeProvider', () => {
 
   it('still applies the theme class when localStorage cannot be written', () => {
     installMatchMedia(false);
-    vi.spyOn(globalThis.localStorage, 'setItem').mockImplementation(() => {
-      throw new Error('quota exceeded');
-    });
+    breakStorage('setItem', 'quota exceeded');
 
     renderMode();
 

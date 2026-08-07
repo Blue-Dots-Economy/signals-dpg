@@ -102,6 +102,7 @@ vi.mock('@/lib/match-score-api', async () => {
 // Imported AFTER the mocks so the modules under test pick them up.
 import { useBrowserLocation } from '@/hooks/use-browser-location';
 import {
+  ACTIONS_PAGE_SIZE,
   useActions,
   useInitiatedActions,
   usePendingActionsCount,
@@ -460,7 +461,7 @@ describe('use-actions', () => {
 
   it('useActions() fetches all ownership roles and exposes actions + meta', async () => {
     mocks.fetchMyActions.mockResolvedValue({
-      meta: { total: 1, limit: 100, offset: 0 },
+      meta: { total: 1, limit: ACTIONS_PAGE_SIZE, offset: 0 },
       actions: [
         {
           action_id: 'act-1',
@@ -490,11 +491,12 @@ describe('use-actions', () => {
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
     expect(result.current.data).toEqual({
       actions: [expect.objectContaining({ action_id: 'act-1' })],
-      meta: { total: 1, limit: 100, offset: 0 },
+      meta: { total: 1, limit: ACTIONS_PAGE_SIZE, offset: 0 },
     });
+    // #439 replaced the old hardcoded `limit: 100` with the shared page size.
     expect(mocks.fetchMyActions.mock.calls[0][0]).toEqual({
       ownership_role: 'all',
-      limit: 100,
+      limit: ACTIONS_PAGE_SIZE,
       offset: 0,
     });
   });
@@ -524,18 +526,34 @@ describe('use-actions', () => {
   });
 
   it('useInitiatedActions / useReceivedActions filter by ownership role', async () => {
-    const { result: initiated } = renderHook(() => useInitiatedActions(), {
+    const { result: initiated } = renderHook(() => useInitiatedActions('item-1'), {
       wrapper: queryWrapper(),
     });
     await waitFor(() => expect(initiated.current.isSuccess).toBe(true));
-    expect(mocks.fetchMyActions.mock.calls[0][0].ownership_role).toBe('initiated');
+    // #439: both hooks are now scoped to one profile and paged from offset 0.
+    expect(mocks.fetchMyActions.mock.calls[0][0]).toEqual({
+      ownership_role: 'initiated',
+      item_id: 'item-1',
+      limit: ACTIONS_PAGE_SIZE,
+      offset: 0,
+    });
 
     mocks.fetchMyActions.mockClear();
-    const { result: received } = renderHook(() => useReceivedActions(), {
+    const { result: received } = renderHook(() => useReceivedActions('item-1'), {
       wrapper: queryWrapper(),
     });
     await waitFor(() => expect(received.current.isSuccess).toBe(true));
     expect(mocks.fetchMyActions.mock.calls[0][0].ownership_role).toBe('received');
+  });
+
+  it('stays disabled until a profile id is resolvable (nothing to scope to)', async () => {
+    const { result } = renderHook(() => useReceivedActions(null), { wrapper: queryWrapper() });
+
+    expect(result.current.fetchStatus).toBe('idle');
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(mocks.fetchMyActions).not.toHaveBeenCalled();
   });
 
   it('useReceivedActionsByStatus narrows to received actions with the given status', async () => {

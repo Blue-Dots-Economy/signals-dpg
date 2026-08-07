@@ -27,10 +27,14 @@ vi.mock('sonner', () => ({
 const useInitiatedActions = vi.fn();
 const useReceivedActions = vi.fn();
 vi.mock('@/hooks/use-actions', () => ({
-  useInitiatedActions: () => useInitiatedActions(),
-  useReceivedActions: () => useReceivedActions(),
+  // Args forwarded so a test can assert the #439 scoping (`itemId` + filters)
+  // the page passes down.
+  useInitiatedActions: (...a: unknown[]) => useInitiatedActions(...a),
+  useReceivedActions: (...a: unknown[]) => useReceivedActions(...a),
   // Used by public-profile-page's action row (never rendered here).
   useActions: () => ({ data: { actions: [], meta: { total: 0 } } }),
+  // The shell's top-bar notification bell.
+  usePendingActionsCount: () => ({ data: 0, isLoading: false }),
 }));
 
 // The two dialogs the page owns are covered in depth by
@@ -92,8 +96,12 @@ vi.mock('@/hooks/use-item-detail', () => ({
   useItemDetail: (...a: unknown[]) => useItemDetail(...a),
 }));
 const useResolvedNetwork = vi.fn();
+const useNetworkConfigs = vi.fn();
 vi.mock('@/hooks/use-network-config', () => ({
   useResolvedNetwork: (...a: unknown[]) => useResolvedNetwork(...a),
+  // my-actions-page discovers which networks the deployment serves before it
+  // can resolve one (#439).
+  useNetworkConfigs: () => useNetworkConfigs(),
   useNetworkConfig: () => ({ data: undefined, isLoading: false, isError: false }),
 }));
 const useAuth = vi.fn();
@@ -181,27 +189,48 @@ function newClient(): QueryClient {
   return new QueryClient({ defaultOptions: { queries: { retry: false } } });
 }
 
+/**
+ * `useInitiatedActions`/`useReceivedActions` are `useInfiniteQuery`s since
+ * #439 — the page flattens `data.pages` and reads the tab badge count off the
+ * FIRST page's `meta.total`, so the fixture has to be page-shaped, not a bare
+ * `{ actions, meta }`.
+ */
 interface ActionsQueryState {
-  data: { actions: Action[]; meta: { total: number } };
+  data: { pages: Array<{ actions: Action[]; meta: { total: number; limit: number; offset: number } }> };
   isLoading: boolean;
   isError: boolean;
   error: Error | null;
   refetch: () => void;
   isRefetching: boolean;
+  hasNextPage: boolean;
+  isFetchingNextPage: boolean;
+  fetchNextPage: () => void;
 }
 
 const refetchInitiated = vi.fn();
 const refetchReceived = vi.fn();
 
-function actionsState(over: Partial<ActionsQueryState> = {}): ActionsQueryState {
+/**
+ * Builds one loaded page from `actions` (total defaults to what's there), then
+ * applies `over` — so a call site that only cares about a flag stays short.
+ */
+function actionsState(
+  over: Partial<Omit<ActionsQueryState, 'data'>> & { actions?: Action[]; total?: number } = {},
+): ActionsQueryState {
+  const { actions = [], total, ...rest } = over;
   return {
-    data: { actions: [], meta: { total: 0 } },
+    data: {
+      pages: [{ actions, meta: { total: total ?? actions.length, limit: 20, offset: 0 } }],
+    },
     isLoading: false,
     isError: false,
     error: null,
     refetch: () => {},
     isRefetching: false,
-    ...over,
+    hasNextPage: false,
+    isFetchingNextPage: false,
+    fetchNextPage: () => {},
+    ...rest,
   };
 }
 
@@ -255,17 +284,22 @@ describe('MyActionsPage', () => {
   beforeEach(() => {
     refetchInitiated.mockClear();
     refetchReceived.mockClear();
+    // #439 scoping deps: the page resolves a served network and a LIVE own
+    // profile before either actions query becomes enabled.
+    useNetworkConfigs.mockReturnValue({ data: [publicNetwork], isLoading: false, isError: false });
+    useResolvedNetwork.mockReturnValue({ data: publicNetwork, isLoading: false, isError: false });
+    useMyItems.mockReturnValue({ data: [makeItem()], isLoading: false, isFetched: true });
+    // The shell's top bar reads the session.
+    useAuth.mockReturnValue({
+      isAuthenticated: true,
+      isLoading: false,
+      user: { id: 'u1', name: 'Asha' },
+    });
     useInitiatedActions.mockReturnValue(
-      actionsState({
-        data: { actions: [INITIATED_PENDING], meta: { total: 1 } },
-        refetch: refetchInitiated,
-      }),
+      actionsState({ actions: [INITIATED_PENDING], refetch: refetchInitiated }),
     );
     useReceivedActions.mockReturnValue(
-      actionsState({
-        data: { actions: [RECEIVED_PENDING], meta: { total: 1 } },
-        refetch: refetchReceived,
-      }),
+      actionsState({ actions: [RECEIVED_PENDING], refetch: refetchReceived }),
     );
   });
 
@@ -312,7 +346,7 @@ describe('MyActionsPage', () => {
     );
     useReceivedActions.mockReturnValue(
       actionsState({
-        data: { actions: [RECEIVED_PENDING], meta: { total: 1 } },
+        actions: [RECEIVED_PENDING],
         isRefetching: true,
         refetch: refetchReceived,
       }),

@@ -63,6 +63,12 @@ vi.mock('@api/db/postgres/drizzle_config', () => {
                 res: (v: unknown) => unknown,
                 rej?: (e: unknown) => unknown,
               ) => next(n).then(res, rej),
+              // `.where(...).limit(1)` with no orderBy — the #439 item_id
+              // ownership pre-check.
+              limit: (l: number) => {
+                call.limit = l;
+                return next(n);
+              },
               orderBy: (...ob: unknown[]) => {
                 call.orderBy = ob;
                 return {
@@ -198,8 +204,22 @@ function primeDb(
   count: unknown,
   rows: unknown[],
   itemRows: unknown[] = [],
+  opts: { itemOwner?: string | null } = {},
 ): void {
+  // #439 Task 6: an `item_id` query runs an ownership pre-check on `items`
+  // BEFORE the count/page/items queries, so its result has to be queued first.
+  // `itemOwner: null` = no such row (the not-found → same-403 path).
+  if ('itemOwner' in opts) {
+    dbState.queue.push(
+      opts.itemOwner === null ? [] : [{ created_by: opts.itemOwner }],
+    );
+  }
   dbState.queue.push([{ count }], rows, itemRows);
+}
+
+/** Applied-filters echo the handler adds to `meta` (#439). Defaults = no filters. */
+function appliedMeta(over: Record<string, unknown> = {}) {
+  return { sort: 'recent', statuses: [], types: [], facets: [], ...over };
 }
 
 // --- harness ---------------------------------------------------------------
@@ -254,7 +274,13 @@ async function call(
 ): Promise<FakeReply> {
   const reply = makeReply();
   await handler(
-    { log, user: user ?? undefined, query: { limit: 20, offset: 0, ...query } },
+    {
+      log,
+      user: user ?? undefined,
+      // `sort` carries a Zod default the handler is called past here, so the
+      // harness supplies it exactly as validation would.
+      query: { limit: 20, offset: 0, sort: 'recent', ...query },
+    },
     reply,
   );
   return reply;
@@ -387,12 +413,14 @@ describe('fetch_actions_handler — filters', () => {
     expect(q.params).toEqual(['act-1', 'connect', 'accepted', USER, USER]);
   });
 
+  // The ownership pre-check is query 0 for every `item_id` request (#439), so
+  // the action WHERE these assert on is query 1.
   it('item_id alone matches the item on EITHER side of the action', async () => {
-    primeDb(1, []);
+    primeDb(1, [], [], { itemOwner: USER });
 
     await call({ item_id: 'src-1' });
 
-    const q = renderWhere(0);
+    const q = renderWhere(1);
     expect(q.sql).toContain('"source_item_id"');
     expect(q.sql).toContain('"target_item_id"');
     // item_id OR-pair, then the owner OR-pair.
@@ -400,25 +428,48 @@ describe('fetch_actions_handler — filters', () => {
   });
 
   it('item_id + initiated narrows to source_item_id', async () => {
-    primeDb(1, []);
+    primeDb(1, [], [], { itemOwner: USER });
 
     await call({ item_id: 'src-1', ownership_role: 'initiated' });
 
-    const q = renderWhere(0);
+    const q = renderWhere(1);
     expect(q.sql).toContain('"source_item_id"');
     expect(q.sql).not.toContain('"target_item_id"');
     expect(q.params).toEqual(['src-1', USER]);
   });
 
   it('item_id + received narrows to target_item_id', async () => {
-    primeDb(1, []);
+    primeDb(1, [], [], { itemOwner: USER });
 
     await call({ item_id: 'tgt-1', ownership_role: 'received' });
 
-    const q = renderWhere(0);
+    const q = renderWhere(1);
     expect(q.sql).toContain('"target_item_id"');
     expect(q.sql).not.toContain('"source_item_id"');
     expect(q.params).toEqual(['tgt-1', USER]);
+  });
+
+  it('403 FORBIDDEN_ITEM for an item_id the caller does not own, before any action query', async () => {
+    primeDb(1, [], [], { itemOwner: OTHER });
+
+    const reply = await call({ item_id: 'not-mine' });
+
+    expect(reply.statusCode).toBe(403);
+    expect(bodyOf(reply).error).toBe('FORBIDDEN_ITEM');
+    // Only the ownership probe ran — no count/page query leaked out.
+    expect(dbState.calls).toHaveLength(1);
+  });
+
+  it('an item_id that does not exist returns the SAME 403 body (no existence leak)', async () => {
+    primeDb(1, [], [], { itemOwner: null });
+
+    const reply = await call({ item_id: 'ghost' });
+
+    expect(reply.statusCode).toBe(403);
+    expect(bodyOf(reply)).toEqual({
+      error: 'FORBIDDEN_ITEM',
+      message: 'item_id is not owned by the caller',
+    });
   });
 
   it('count and page queries share the same where clause', async () => {
@@ -438,7 +489,12 @@ describe('fetch_actions_handler — pagination & meta', () => {
 
     expect(dbState.calls[1].limit).toBe(5);
     expect(dbState.calls[1].offset).toBe(10);
-    expect(bodyOf(reply).meta).toEqual({ total: 42, limit: 5, offset: 10 });
+    expect(bodyOf(reply).meta).toEqual({
+      total: 42,
+      limit: 5,
+      offset: 10,
+      applied: appliedMeta(),
+    });
   });
 
   it('orders by updated_at desc then created_at desc', async () => {
@@ -462,7 +518,7 @@ describe('fetch_actions_handler — pagination & meta', () => {
     const reply = await call({});
 
     expect(bodyOf(reply)).toEqual({
-      meta: { total: 0, limit: 20, offset: 0 },
+      meta: { total: 0, limit: 20, offset: 0, applied: appliedMeta() },
       actions: [],
     });
     // count + page rows only — resolveItemNames short-circuits.

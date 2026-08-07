@@ -533,18 +533,23 @@ describe('fetchLocalItemSnapshot', () => {
     decryptItemPrivate.mockClear();
   });
 
-  it('returns the exact-url row decoded, replacing state columns with private_state', async () => {
+  it('returns the exact-url row decoded, keeping the public state next to private_state', async () => {
     selectState.results = [[makeRow(CURRENT_URL)]];
 
     const snapshot = await fetchLocalItemSnapshot(makeSelectDb(), localRef);
 
     expect(selectState.queries).toBe(1);
+    // #483 kept `item_state` (the PUBLIC projection) on the snapshot instead of
+    // dropping it — the facet/geo filtering added by #439 reads it — while
+    // `item_private_state` (the ciphertext) is still swapped for the decrypted
+    // `private_state`.
     expect(snapshot).toEqual({
       item_id: localRef.item_id,
       item_instance_url: CURRENT_URL,
       created_by: 'user-1',
       item_locations: [],
       lifecycle_status: 'live',
+      item_state: { name: 'Ada' },
       private_state: { merged: true },
     });
     expect(decryptItemPrivate).toHaveBeenCalledWith({

@@ -13,6 +13,11 @@ const { dbState, queries, getNetworkConfigById, decryptItemPrivate } = vi.hoiste
       count: 0 as number | string,
       rows: [] as Record<string, unknown>[],
       failWith: null as Error | null,
+      // Whether `item_search` has any row for this network+domain, i.e. whether
+      // a signals-search worker has ever indexed here. The bbox branch probes
+      // this with `db.execute` and falls back to `items.item_locations` when
+      // it comes back empty.
+      searchIndexPopulated: true,
     },
     queries: [] as Array<{
       cols: unknown;
@@ -64,6 +69,9 @@ vi.mock('@dpg/database', () => ({
 
 vi.mock('@api/db/postgres/drizzle_config', () => ({
   db: {
+    // `hasSearchIndexRows` probes item_search with a raw `db.execute`.
+    execute: () =>
+      Promise.resolve({ rows: [{ has_rows: dbState.searchIndexPopulated }] }),
     select: (cols: unknown) => ({
       from: () => ({
         where: (where: unknown) => {
@@ -188,6 +196,7 @@ beforeEach(() => {
   dbState.count = 0;
   dbState.rows = [];
   dbState.failWith = null;
+  dbState.searchIndexPopulated = true;
   vi.clearAllMocks();
   getNetworkConfigById.mockResolvedValue(networkConfig());
   decryptItemPrivate.mockReturnValue({ mergedState: { merged: true } });
@@ -434,6 +443,23 @@ describe('geo refinement', () => {
     expect(text).toContain(
       'ST_Intersects(s.geo, ST_MakeEnvelope(77, 12, 78, 13, 4326)::geography)'
     );
+  });
+
+  it('falls back to the items.item_locations bbox when item_search has no rows for the domain', async () => {
+    dbState.searchIndexPopulated = false;
+
+    await countLocalItems({
+      ...base,
+      min_lat: 12,
+      min_lng: 77,
+      max_lat: 13,
+      max_lng: 78,
+    });
+
+    const text = whereText();
+    // No read-model join at all — the item's own locations are gated instead.
+    expect(text).not.toContain('FROM item_search s');
+    expect(text).toContain('jsonb_array_elements(items.item_locations) loc');
   });
 
   it('returns nothing for an inverted/degenerate bbox instead of erroring', async () => {
