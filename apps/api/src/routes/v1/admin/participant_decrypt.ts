@@ -15,6 +15,8 @@ import {
 } from '@dpg/schemas';
 import { decryptItemPrivate } from '@/utils/item_decrypt';
 import { apiConfig } from '@/config';
+import { getNetworkConfigById } from '@/network_configs';
+import { selectRequestedFields, type DomainContactContext } from '@/utils/contact_fields';
 
 /**
  * POST /api/v1/admin/participant/decrypt
@@ -63,6 +65,16 @@ const ITEM_COLUMNS = {
   updated_at: items.updated_at,
 } as const;
 
+// #237: the creator's account contact, selected alongside the item columns so
+// canonical name/email/phone selection can fall back to it when the domain's
+// item_state has no value for the mapped field (or no mapping at all).
+const SELECT_COLUMNS = {
+  ...ITEM_COLUMNS,
+  user_name: user.name,
+  user_email: user.email,
+  user_phone: user.phoneNumber,
+} as const;
+
 type DecryptableRow = {
   item_id: string;
   item_network: string;
@@ -72,6 +84,9 @@ type DecryptableRow = {
   item_private_state: string;
   created_at: Date;
   updated_at: Date;
+  user_name: string | null;
+  user_email: string | null;
+  user_phone: string | null;
 };
 
 /**
@@ -127,6 +142,56 @@ export const participant_decrypt_handler = async (
   const isAgg = acting.org_type === 'aggregator';
   const networks = servedNetworks();
   const body = request.body;
+  const fields = body.fields;
+
+  // #237: per-network config cache for the lifetime of this request — a batch
+  // of item_ids commonly spans a handful of networks/domains, not one per row.
+  const cfgCache = new Map<string, ReturnType<typeof getNetworkConfigById>>();
+  const getCfg = (network: string) => {
+    let cfg = cfgCache.get(network);
+    if (!cfg) {
+      cfg = getNetworkConfigById(network);
+      cfgCache.set(network, cfg);
+    }
+    return cfg;
+  };
+
+  /** Resolves the per-row domain contact-field context (name fallback =
+   * item-type display_name_field -> domain card.title_field). */
+  const contextFor = async (r: DecryptableRow): Promise<DomainContactContext> => {
+    const cfg = await getCfg(r.item_network);
+    const domainCfg = cfg.domains.find((d) => d.id === r.item_domain);
+    const schema = domainCfg?.item_schemas?.[r.item_type] as
+      | { display_name_field?: unknown }
+      | undefined;
+    const nameFallbackField =
+      (typeof schema?.display_name_field === 'string' ? schema.display_name_field : undefined) ??
+      domainCfg?.card?.title_field;
+    return {
+      network: r.item_network,
+      domain: r.item_domain,
+      itemType: r.item_type,
+      contactFields: domainCfg?.contact_fields,
+      ...(nameFallbackField ? { nameFallbackField } : {}),
+    };
+  };
+
+  /** When `fields` is requested, replaces the snapshot's item_state with the
+   * resolver's filtered output; a no-op (byte-for-byte unchanged path)
+   * otherwise. */
+  const applyFieldSelection = async (
+    snapshot: DecryptedProfileSnapshot,
+    r: DecryptableRow,
+  ): Promise<void> => {
+    if (!fields) return;
+    snapshot.item_state = selectRequestedFields(
+      snapshot.item_state as Record<string, unknown>,
+      { name: r.user_name, email: r.user_email, phone: r.user_phone },
+      fields,
+      await contextFor(r),
+      request.log,
+    );
+  };
 
   const profiles: DecryptedProfileSnapshot[] = [];
   let skipped: string[] = [];
@@ -136,7 +201,7 @@ export const participant_decrypt_handler = async (
     mode = 'item_ids';
     const requested = Array.from(new Set(body.item_ids));
     const rows = (await db
-      .select(ITEM_COLUMNS)
+      .select(SELECT_COLUMNS)
       .from(items)
       .innerJoin(user, eq(user.id, items.created_by))
       .where(
@@ -149,7 +214,10 @@ export const participant_decrypt_handler = async (
 
     for (const r of rows) {
       const snapshot = toSnapshotSafe(r, request.log);
-      if (snapshot) profiles.push(snapshot);
+      if (snapshot) {
+        await applyFieldSelection(snapshot, r);
+        profiles.push(snapshot);
+      }
     }
     // Not found, not owned, not in a served network, OR failed to decrypt — all
     // land in skipped, undifferentiated, so the response never leaks existence.
@@ -159,7 +227,7 @@ export const participant_decrypt_handler = async (
     mode = 'user_id';
     const userId = body.user_id!;
     const rows = (await db
-      .select(ITEM_COLUMNS)
+      .select(SELECT_COLUMNS)
       .from(items)
       .innerJoin(user, eq(user.id, items.created_by))
       .where(
@@ -173,8 +241,12 @@ export const participant_decrypt_handler = async (
 
     for (const r of rows) {
       const snapshot = toSnapshotSafe(r, request.log);
-      if (snapshot) profiles.push(snapshot);
-      else skipped.push(r.item_id);
+      if (snapshot) {
+        await applyFieldSelection(snapshot, r);
+        profiles.push(snapshot);
+      } else {
+        skipped.push(r.item_id);
+      }
     }
   }
 
@@ -188,6 +260,7 @@ export const participant_decrypt_handler = async (
     requested_count: body.item_ids ? new Set(body.item_ids).size : 1,
     returned_count: profiles.length,
     skipped_count: skipped.length,
+    fields_requested: fields?.length,
   });
 
   return reply.code(200).send({ profiles, skipped });
