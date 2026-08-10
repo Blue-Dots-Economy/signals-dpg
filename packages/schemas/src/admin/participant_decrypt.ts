@@ -24,9 +24,10 @@ export const DecryptParticipantRequest = z
     user_id: z.string().min(1).optional(),
     // Pure item_state projection. Omitted => full item_state (today's
     // behavior). Present => only these raw keys, read as-is from item_state.
-    // No canonical special-casing, no `user` (account) fallback — see
-    // `contact` below for that.
-    fields: z.array(z.string().min(1)).min(1).max(50).optional(),
+    // An EMPTY array (`[]`) => empty item_state (`{}`), so `{ fields: [],
+    // contact: true }` returns contact details only. No canonical
+    // special-casing, no `user` (account) fallback — see `contact` below.
+    fields: z.array(z.string().min(1)).max(50).optional(),
     // Canonical contact block (independent of `fields`). `true` = all three;
     // an array = that subset. Resolved via the domain contact_fields map with
     // account (user-table) fallback + provenance — see DecryptedProfileSnapshot.contact.

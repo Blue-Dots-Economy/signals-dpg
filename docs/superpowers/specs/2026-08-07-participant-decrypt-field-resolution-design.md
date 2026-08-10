@@ -94,6 +94,7 @@ Combinations:
 | omitted | `true` | – | full `item_state` + full `contact` block |
 | `["age"]` | `["phone"]` | – | `item_state`={age} + `contact`={phone} |
 | omitted | `true` | `true` | full `item_state` + `contact` + `locations` |
+| `[]` | `true` | – | **contact-only** — empty `item_state` (`{}`) + `contact` block |
 
 ## 6. Canonical→field mapping (the crux) — TWO OPTIONS (decide before implementation)
 

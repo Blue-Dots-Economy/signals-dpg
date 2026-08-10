@@ -6144,7 +6144,6 @@
                     "minLength": 1
                   },
                   "fields": {
-                    "minItems": 1,
                     "maxItems": 50,
                     "type": "array",
                     "items": {

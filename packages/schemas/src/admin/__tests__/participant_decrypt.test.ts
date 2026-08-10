@@ -61,6 +61,11 @@ describe('DecryptParticipantRequest.fields', () => {
     const r = DecryptParticipantRequest.parse({ item_ids: [crypto.randomUUID()], fields: ['name', 'phone'] });
     expect(r.fields).toEqual(['name', 'phone']);
   });
+
+  it('accepts an empty fields array (contact-only: empty item_state)', () => {
+    const r = DecryptParticipantRequest.parse({ item_ids: [crypto.randomUUID()], fields: [] });
+    expect(r.fields).toEqual([]);
+  });
   it('is valid when fields omitted (backward compatible)', () => {
     const r = DecryptParticipantRequest.parse({ item_ids: [crypto.randomUUID()] });
     expect(r.fields).toBeUndefined();

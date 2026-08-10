@@ -38,6 +38,10 @@ describe('projectItemState — pure item_state projection (#521)', () => {
     const out = projectItemState({ age: '23', gender: 'F', bio: 'hi' }, ['age', 'gender']);
     expect(out).toEqual({ age: '23', gender: 'F' });
   });
+
+  it('returns {} for an empty fields array (enables contact-only requests)', () => {
+    expect(projectItemState({ name: 'Asha', age: '23' }, [])).toEqual({});
+  });
 });
 
 describe('normalizeContact', () => {
