@@ -38,46 +38,62 @@ Today, when the aggregator asks Signals to decrypt a participant's profile, Sign
 
 ## 4. Requirements
 
-1. **New optional request field `fields: string[]`.**
-   - **Omitted** → return the **full `item_state`** exactly as today (backward-compatible; #579 depends on this).
-   - **Present** → return **only** the requested fields per profile (plus the item envelope: `item_id`, `item_network`, `item_domain`, `item_type`, `created_at`, `updated_at`). The raw `item_private_state` ciphertext is still never returned.
-2. **Canonical PII fields = `name`, `email`, `phone`.** When any of these appears in `fields`:
-   - Resolve the domain's real field name via the **canonical→field mapping** (§6) and read the (decrypted) value from `item_state`.
-   - If that value is **missing or empty**, **fall back** to the account record: `name → user.name`, `email → user.email`, `phone → user.phone_number`.
-   - Return the value under its **canonical key** (`name`/`email`/`phone`), so callers stay domain-agnostic.
-   - If unresolved in **both** item_state and `user` → return the key with value **`null`** (present-but-unavailable, so the caller can branch — e.g. #578 `skipped_no_email`, #577 `no_phone_available`).
-3. **Non-canonical requested fields** (any field name that isn't `name`/`email`/`phone`) → returned from `item_state` under their **raw key**, **no fallback**. Absent → simply omitted (or `null`; see §8).
-4. **User-table fallback applies to `name`/`email`/`phone` only.** No other field ever reads the `user` table.
-5. **No auth/ownership change.** Acting-org resolution and `onboarded_by` scoping are unchanged; `skipped` semantics unchanged (not-found / not-owned / undecryptable, undifferentiated).
+Three **independent, optional** request controls — deliberately decoupled so canonical contacts and locations are available regardless of the `item_state` projection (this is the fix for the three gaps: full-state-plus-contacts, provenance, and locations).
+
+1. **`fields?: string[]` — pure `item_state` projection.**
+   - **Omitted** → full merged `item_state` (backward-compatible; #579 depends on this).
+   - **Present** → only those `item_state` keys (raw keys), plus the envelope (`item_id`/`item_network`/`item_domain`/`item_type`/`created_at`/`updated_at`). Absent/empty keys are omitted. **No canonical special-casing, no `user` fallback** — `fields` only ever projects `item_state`.
+   - The raw `item_private_state` ciphertext is never returned (decrypted values are, merged into `item_state`).
+
+2. **`contact?: true | ("name"|"email"|"phone")[]` — canonical contact block (NEW, independent of `fields`).** When set, the response gains a `contact` object; for each requested canonical field:
+   - map canonical → the domain's real field (§6; `name` defaults to `display_name_field`/`card.title_field`), read the **decrypted** value from `item_state`;
+   - if missing/empty, **fall back** to the account row (`name→user.name`, `email→user.email`, `phone→user.phone_number`);
+   - return `{ value, source }` where `source ∈ "item" | "user" | null`; unresolved in both → `{ value: null, source: null }`.
+   - `true` = all three; an array = that subset.
+
+3. **`include_locations?: boolean` — item locations (NEW).** When `true`, the response gains `locations`: the item's geocoded `item_locations` as `[{lat,lng,label?}]`. Private primary-location fields are **jittered at storage**, so their point is the jittered one (exact for non-private). Omitted/false → no `locations`.
+
+4. **User-table fallback applies to `name`/`email`/`phone` only** (inside the `contact` block). Nothing else reads `user`.
+5. **No auth/ownership change.** Acting-org + `onboarded_by` scoping unchanged; `skipped` semantics unchanged. Never log field values / PII (counts only).
 6. Applies in **both** `item_ids` and `user_id` modes.
-7. **Mapping completeness is validated, not assumed.** For every served `(network, domain)`, the canonical map (§6) must be resolvable. On a missing/unmapped domain, emit a **PII-free warning** at resolution time (and, where practical, validate at config/schema load) so a config gap surfaces as a diagnosable warning rather than silently returning `null` and dropping participants from a campaign. This is the guard against the "silent missing contacts" failure mode.
-8. **Input guards.** `fields` entries are non-empty strings; cap the array length (reuse an existing bound or a small constant). The response `item_state` value type permits `null` (for unresolved canonical fields).
+7. **Mapping completeness validated** (for the `contact` block): a missing/unmapped `(network,domain)` for a requested `phone`/`email` emits a **PII-free warning** (never a silent wrong field). `name` has the `display_name_field`/`title_field` default.
+8. **Input guards.** `fields` and `contact`-array entries are non-empty strings; cap `fields` length; `contact` array values must be within `{name,email,phone}`.
 
 ## 5. Request / response schema (proposed)
 
 Request (`packages/schemas/src/admin/participant_decrypt.ts` — `DecryptParticipantRequest`):
 ```ts
 {
-  item_ids?: uuid[],        // exactly one of item_ids | user_id (unchanged)
+  item_ids?: uuid[],                               // exactly one of item_ids | user_id (unchanged)
   user_id?: string,
-  fields?: string[],        // NEW, optional. canonical: "name" | "email" | "phone"
-                            //   + any raw item_state field name. omitted => full item_state.
+  fields?: string[],                               // OPTIONAL — pure item_state projection; omitted => full item_state
+  contact?: boolean | ("name"|"email"|"phone")[],  // OPTIONAL — canonical contact block (fallback + provenance)
+  include_locations?: boolean,                     // OPTIONAL — include item_locations
 }
 ```
 
-Response (`DecryptedProfileSnapshot`): unchanged envelope; `item_state` semantics:
-- `fields` omitted → `item_state` = full merged state (today).
-- `fields` present → `item_state` = only the requested keys: canonical PII under canonical keys (`name`/`email`/`phone`, possibly `null`), non-canonical under raw keys.
+Response (`DecryptedProfileSnapshot`):
 ```jsonc
-// fields: ["name","phone","email"] against a blue_dot seeker (email is account-only)
 {
-  "item_id": "…", "item_network": "blue_dot", "item_domain": "seeker",
-  "item_type": "profile_1.0",
-  "item_state": { "name": "Asha Kumari", "phone": "+9190…", "email": "asha@example.com" },
-  //                ^ from item_state        ^ from item_state   ^ fell back to user.email
+  "item_id": "…", "item_network": "…", "item_domain": "…", "item_type": "…",
+  "item_state": { … },                 // full (fields omitted) or projected (fields present)
+  "contact": {                         // present iff `contact` requested
+    "name":  { "value": "Asha Kumari",      "source": "item" },
+    "phone": { "value": "+9190…",           "source": "item" },
+    "email": { "value": "asha@example.com", "source": "user" }   // not in profile → account fallback
+    // unresolved in both → { "value": null, "source": null }
+  },
+  "locations": [ { "lat": 12.9, "lng": 77.5, "label": "Bengaluru" } ],  // present iff include_locations
   "created_at": "…", "updated_at": "…"
 }
 ```
+Combinations:
+| `fields` | `contact` | `include_locations` | result |
+|---|---|---|---|
+| omitted | omitted | – | full `item_state` (today's default) |
+| omitted | `true` | – | full `item_state` + full `contact` block |
+| `["age"]` | `["phone"]` | – | `item_state`={age} + `contact`={phone} |
+| omitted | `true` | `true` | full `item_state` + `contact` + `locations` |
 
 ## 6. Canonical→field mapping (the crux) — TWO OPTIONS (decide before implementation)
 
@@ -107,57 +123,71 @@ blue_dot:
 
 > **DECISION: Option A (mapping in `network.json`).** Chosen to keep the mapping co-located with the schema and eliminate drift. Option B is retained above only as context for reviewers. The resolver (§7) reads the map through a single network-config accessor. Fallback default for `name` when unmapped: `display_name_field` / `card.title_field` (already available). The local `examples/schemas/*/network.json` get `contact_fields` in this change; the canonical bluedots-schemas copies are a cross-repo follow-up (§12).
 
-## 7. Resolver logic (per profile, when `fields` present)
+## 7. Resolver logic (per profile)
 
+Two independent steps, both reading the **decrypted merged** state (`mergedState` from `decryptItemPrivate`) — never the masked public `item_state` (which holds `+91***` placeholders for `private:true` fields).
+
+**(a) item_state projection — from `fields`:**
 ```
-out = {}
-for f in fields:
-  if f in {name, email, phone}:                     # canonical PII
-     field_name = mapping(network, domain)[f]        # §6; for name, default to display_name_field/title_field
-     v = item_state[field_name] (decrypted)          # may be undefined/empty
-     if v is empty/missing:
-        v = user[{name:name, email:email, phone:phone_number}[f]]   # account fallback
-     out[f] = v ?? null                               # canonical key
-  else:                                               # non-canonical
-     if f in item_state: out[f] = item_state[f]       # raw key, no fallback
-return { …envelope, item_state: out }
+item_state = fields
+  ? pick(mergedState, fields.filter(f => hasValue(mergedState[f])))   # raw keys, absent/empty omitted
+  : mergedState                                                       # full
 ```
-- `user` row is the item creator (already joined for ownership). Load `name/email/phone_number` in the same query.
-- **Read values from the DECRYPTED merged state (`mergedState` from `decryptItemPrivate`), never the raw public `item_state`** — the public state holds *masked* placeholders (`+91***`) for `private:true` fields, so reading it would export masked junk. The "empty?" check that triggers the account fallback also runs against the **decrypted** value.
-- Decryption path unchanged (`decryptItemPrivate`); a decrypt failure still lands the item in `skipped` (accepted — see §13).
-- Never log field values (PII) — counts only, as today.
+Pure projection: no canonical logic, no `user` read.
+
+**(b) contact block — from `contact`:**
+```
+for f in requestedContacts:                 # subset of {name,email,phone}
+  field = contactFieldMap(network,domain)[f]        # §6; name defaults to display_name_field/title_field
+  v = field ? mergedState[field] : undefined        # decrypted
+  if hasValue(v):  contact[f] = { value: v, source: "item" }          # profile wins
+  else:
+     if f in {phone,email} and !field: warn(PII-free, mapping missing)
+     a = account[f]                                 # user.name / user.email / user.phone_number
+     contact[f] = hasValue(a) ? { value: a, source: "user" }
+                              : { value: null,  source: null }
+```
+
+**(c) locations — from `include_locations`:** return the item's `item_locations` column as `locations` (jittered for a private primary field; §4.3).
+
+- The `user` row (item creator) is already joined for ownership; load `name/email/phone_number` **and** `item_locations` in the same query.
+- Decrypt failure still lands the item in `skipped` (accepted — §13).
+- Never log field values (PII) — counts only.
 
 ## 8. Edge cases & decisions
 
-- **Empty vs absent** for **canonical** fields → triggers fallback (missing OR empty string both fall back).
-- **Non-canonical** absent field → omit the key (do not emit `null`) to keep the object tight. *(Confirm; canonical uses `null`.)*
-- **Provider name ambiguity** (org name vs person `contact_name`) → resolved explicitly by the mapping (§6) — the map names the field we treat as canonical `name`.
-- **Multiple email-ish fields** → the mapping is authoritative; no `format:email` guessing.
-- **`user_id` mode** → same field resolution applied to every returned item.
-- **Unknown canonical field mapping** (network/domain not in the map) → `name` falls back to `display_name_field`/`title_field`; `phone`/`email` resolve to account fallback directly (nothing to read from item_state).
+- **`fields` projection:** absent OR empty item_state values are omitted (tight object); `fields` never emits `null` and never reads `user`.
+- **`contact` fallback:** a canonical value missing OR empty in item_state triggers the account fallback; unresolved in both → `{value:null, source:null}` (never omitted — callers branch on it: #578 skip-no-email, #577 no-phone).
+- **Profile-first precedence:** when a canonical value exists in *both* item_state and account, item_state wins (`source:"item"`).
+- **Provider name ambiguity** (org vs person) → resolved by the mapping (§6).
+- **Multiple email-ish fields** → mapping is authoritative; no `format:email` guessing.
+- **`user_id` mode** → projection + contact + locations applied to every returned item.
+- **Unknown mapping** for a domain → `name` falls back to `display_name_field`/`title_field`; `phone`/`email` go straight to account fallback (+ PII-free warn).
+- **Intentional overlap:** with full `item_state` + `contact`, `name`/`phone` may appear in both — `item_state` is the raw projection, `contact` is the normalized, provenance-tagged answer (and carries the account `email` that `item_state` lacks).
 
 ## 9. Backward compatibility
 
-- `fields` omitted ⇒ byte-for-byte today's behavior. #579 (export) and any existing caller are unaffected.
-- Additive request field; additive mapping. No response envelope change.
+- `fields` + `contact` + `include_locations` all omitted ⇒ byte-for-byte today's behavior (full `item_state`). #579 export and any existing caller unaffected.
+- **Reshape note (supersedes the earlier design):** canonical `name`/`email`/`phone` are **no longer injected into `item_state`** when listed in `fields`; `fields` is now a pure projection and canonical contacts moved to the dedicated `contact` block. Safe because PR #522 is a draft with no consumers yet.
 
 ## 10. Consumer usage (after this lands)
 
-- **#577 (voice):** `fields: ["phone", "name"]` → domain-agnostic phone (+ name) with account fallback.
-- **#578 (email):** `fields: ["email", "name"]` → domain-agnostic email (+ name); `null` email ⇒ aggregator marks `skipped_no_email`.
-- **#579 (export):** unchanged — no `fields`, full `item_state`.
+- **#577 (voice):** `contact: ["phone","name"]` → read `resp.contact.phone.value` (domain-agnostic, account fallback); `value:null` ⇒ `no_phone_available`.
+- **#578 (email):** `contact: ["email","name"]` → `resp.contact.email.value`; `value:null` ⇒ `skipped_no_email`.
+- **#579 (export):** unchanged — no `fields`/`contact` → full `item_state`; MAY add `include_locations: true` to include coords in the CSV.
 
 ## 11. Testing
 
-- `fields` omitted → identical full `item_state` (regression guard).
-- Canonical field present in item_state → returned from item_state, no `user` read.
-- Canonical field empty/absent in item_state → falls back to `user.*`.
-- Canonical field absent in both → `null`.
-- Non-canonical field → raw key from item_state; absent → omitted; never reads `user`.
-- Per-domain mapping correctness (blue_dot seeker vs provider; purple_dot seeker `beneficiary_name`/`mobile_number`/`email`).
-- **Profile-first precedence:** canonical field present in *both* item_state and account with different values → item_state value returned.
-- **Mapping gap:** unmapped `(network, domain)` for a canonical field → emits the PII-free warning (assert the warning fires; value resolves via account fallback or `null`, never a silent wrong field).
-- `user_id` mode with `fields`.
+- `fields`/`contact`/`include_locations` all omitted → identical full `item_state` (regression guard); no `contact`/`locations` keys in the response.
+- `fields:["age","gender"]` → only those keys; absent/empty omitted; no `user` read.
+- `contact:true` (no `fields`) → full `item_state` **plus** a `contact` block with all three.
+- contact resolution: canonical in item_state → `{source:"item"}`; empty/absent → account `{source:"user"}`; absent in both → `{value:null, source:null}`.
+- contact subset `["phone"]` → only `phone` in the block.
+- Profile-first: canonical present in *both* → `source:"item"`.
+- `include_locations:true` → `locations` present; false/omitted → absent.
+- Per-domain mapping (blue_dot seeker/provider; purple_dot `beneficiary_name`/`mobile_number`/`email`).
+- Mapping gap for `phone`/`email` → PII-free warning fires (never a silent wrong field).
+- `user_id` mode with `contact` + `include_locations`.
 - Ownership/`skipped` unchanged; no PII in logs.
 
 ## 12. Out of scope
