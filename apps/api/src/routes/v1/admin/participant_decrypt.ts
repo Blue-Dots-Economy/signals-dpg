@@ -16,7 +16,13 @@ import {
 import { decryptItemPrivate } from '@/utils/item_decrypt';
 import { apiConfig } from '@/config';
 import { getNetworkConfigById } from '@/network_configs';
-import { selectRequestedFields, type DomainContactContext } from '@/utils/contact_fields';
+import {
+  projectItemState,
+  resolveContact,
+  normalizeContact,
+  type CanonicalContact,
+  type DomainContactContext,
+} from '@/utils/contact_fields';
 
 /**
  * POST /api/v1/admin/participant/decrypt
@@ -61,13 +67,15 @@ const ITEM_COLUMNS = {
   item_type: items.item_type,
   item_state: items.item_state,
   item_private_state: items.item_private_state,
+  item_locations: items.item_locations,
   created_at: items.created_at,
   updated_at: items.updated_at,
 } as const;
 
-// #237: the creator's account contact, selected alongside the item columns so
-// canonical name/email/phone selection can fall back to it when the domain's
-// item_state has no value for the mapped field (or no mapping at all).
+// The creator's account contact, selected alongside the item columns so the
+// `contact` block's canonical name/email/phone resolution can fall back to it
+// when the domain's item_state has no value for the mapped field (or no
+// mapping at all).
 const SELECT_COLUMNS = {
   ...ITEM_COLUMNS,
   user_name: user.name,
@@ -82,6 +90,7 @@ type DecryptableRow = {
   item_type: string;
   item_state: unknown;
   item_private_state: string;
+  item_locations: Array<{ lat: number; lng: number; label?: string }>;
   created_at: Date;
   updated_at: Date;
   user_name: string | null;
@@ -90,28 +99,20 @@ type DecryptableRow = {
 };
 
 /**
- * Decrypts one row to a snapshot, isolating failures: a corrupt or wrong-key
- * `item_private_state` returns null (the id is reported as skipped) instead of
- * throwing and 500-ing the whole batch.
+ * Decrypts one row's private blob, isolating failures: a corrupt or
+ * wrong-key `item_private_state` returns null (the id is reported as
+ * skipped) instead of throwing and 500-ing the whole batch.
  */
-const toSnapshotSafe = (
+const decryptRowSafe = (
   r: DecryptableRow,
   log: FastifyRequest['log'],
-): DecryptedProfileSnapshot | null => {
+): Record<string, unknown> | null => {
   try {
     const { mergedState } = decryptItemPrivate({
       item_state: r.item_state as Record<string, unknown>,
       item_private_state: r.item_private_state,
     });
-    return {
-      item_id: r.item_id,
-      item_network: r.item_network,
-      item_domain: r.item_domain,
-      item_type: r.item_type,
-      item_state: mergedState,
-      created_at: r.created_at.toISOString(),
-      updated_at: r.updated_at.toISOString(),
-    };
+    return mergedState;
   } catch (err) {
     log.error(
       { operation: 'admin.participant.decrypt.row_failed', item_id: r.item_id, err },
@@ -142,12 +143,13 @@ function makeNetworkConfigCache(): NetworkConfigGetter {
  * item-type display_name_field -> domain card.title_field).
  *
  * #237 review fix: the config lookup is isolated the same way
- * `toSnapshotSafe` isolates decrypt failures — a rejection (transient
+ * `decryptRowSafe` isolates decrypt failures — a rejection (transient
  * schema-registry fetch failure, or a network id absent from the loaded
  * configs) degrades this row to an empty context instead of throwing the
- * whole request into a 500. With an empty context, `selectRequestedFields`
- * already falls back to the account contact for canonical fields and reads
- * non-canonical fields raw, so the row still resolves best-effort. */
+ * whole request into a 500. With an empty context, `resolveContact` already
+ * falls back to the account contact for every requested canonical field, so
+ * the row still resolves best-effort. Only reached when `contact` is
+ * requested — `fields` (pure projection) never needs domain config. */
 async function resolveDomainContext(
   r: DecryptableRow,
   getCfg: NetworkConfigGetter,
@@ -189,46 +191,70 @@ async function resolveDomainContext(
   };
 }
 
-/** When `fields` is requested, replaces the snapshot's item_state with the
- * resolver's filtered output; a no-op (byte-for-byte unchanged path)
- * otherwise. */
-async function applyFieldSelection(
-  snapshot: DecryptedProfileSnapshot,
-  r: DecryptableRow,
-  fields: string[] | undefined,
-  getCfg: NetworkConfigGetter,
-  log: FastifyRequest['log'],
-): Promise<void> {
-  if (!fields) return;
-  snapshot.item_state = selectRequestedFields(
-    snapshot.item_state as Record<string, unknown>,
-    { name: r.user_name, email: r.user_email, phone: r.user_phone },
-    fields,
-    await resolveDomainContext(r, getCfg, log),
-    log,
-  );
+/** Per-request options for the three independent, optional controls (#521). */
+interface SnapshotOptions {
+  fields: string[] | undefined;
+  contact: CanonicalContact[] | undefined; // already normalized (true => all three)
+  includeLocations: boolean;
 }
 
 /**
- * Decrypts every row and applies field selection, splitting rows into
- * resolved `profiles` and `failedIds` (rows that yielded no snapshot — a
- * decrypt failure isolated by `toSnapshotSafe`). Callers derive `skipped`
- * semantics themselves: item_ids mode diffs `failedIds` against the full
- * requested-but-not-found/not-owned set; user_id mode uses `failedIds` as-is.
+ * Builds one profile snapshot from an already-decrypted row: `item_state` is
+ * the full merged state, or (when `fields` is requested) a pure projection of
+ * it — never both, and never canonical-special-cased. `contact` and
+ * `locations` are attached independently when requested, regardless of the
+ * `fields` projection.
+ */
+async function buildSnapshot(
+  r: DecryptableRow,
+  mergedState: Record<string, unknown>,
+  opts: SnapshotOptions,
+  getCfg: NetworkConfigGetter,
+  log: FastifyRequest['log'],
+): Promise<DecryptedProfileSnapshot> {
+  const snapshot: DecryptedProfileSnapshot = {
+    item_id: r.item_id,
+    item_network: r.item_network,
+    item_domain: r.item_domain,
+    item_type: r.item_type,
+    item_state: opts.fields ? projectItemState(mergedState, opts.fields) : mergedState,
+    created_at: r.created_at.toISOString(),
+    updated_at: r.updated_at.toISOString(),
+  };
+  if (opts.contact) {
+    snapshot.contact = resolveContact(
+      mergedState,
+      { name: r.user_name, email: r.user_email, phone: r.user_phone },
+      opts.contact,
+      await resolveDomainContext(r, getCfg, log),
+      log,
+    );
+  }
+  if (opts.includeLocations) {
+    snapshot.locations = r.item_locations ?? [];
+  }
+  return snapshot;
+}
+
+/**
+ * Decrypts every row and builds its snapshot, splitting rows into resolved
+ * `profiles` and `failedIds` (rows whose decrypt failed — isolated by
+ * `decryptRowSafe`). Callers derive `skipped` semantics themselves: item_ids
+ * mode diffs `failedIds` against the full requested-but-not-found/not-owned
+ * set; user_id mode uses `failedIds` as-is.
  */
 async function collectProfiles(
   rows: DecryptableRow[],
-  fields: string[] | undefined,
+  opts: SnapshotOptions,
   getCfg: NetworkConfigGetter,
   log: FastifyRequest['log'],
 ): Promise<{ profiles: DecryptedProfileSnapshot[]; failedIds: string[] }> {
   const profiles: DecryptedProfileSnapshot[] = [];
   const failedIds: string[] = [];
   for (const r of rows) {
-    const snapshot = toSnapshotSafe(r, log);
-    if (snapshot) {
-      await applyFieldSelection(snapshot, r, fields, getCfg, log);
-      profiles.push(snapshot);
+    const mergedState = decryptRowSafe(r, log);
+    if (mergedState) {
+      profiles.push(await buildSnapshot(r, mergedState, opts, getCfg, log));
     } else {
       failedIds.push(r.item_id);
     }
@@ -268,6 +294,12 @@ export const participant_decrypt_handler = async (
   const networks = servedNetworks();
   const body = request.body;
   const fields = body.fields;
+  const contact = normalizeContact(body.contact);
+  const opts: SnapshotOptions = {
+    fields,
+    contact,
+    includeLocations: body.include_locations === true,
+  };
   const getCfg = makeNetworkConfigCache();
 
   let profiles: DecryptedProfileSnapshot[];
@@ -288,7 +320,7 @@ export const participant_decrypt_handler = async (
         ),
       )) as DecryptableRow[];
 
-    ({ profiles } = await collectProfiles(rows, fields, getCfg, request.log));
+    ({ profiles } = await collectProfiles(rows, opts, getCfg, request.log));
     // Not found, not owned, not in a served network, OR failed to decrypt — all
     // land in skipped, undifferentiated, so the response never leaks existence.
     const found = new Set(profiles.map((p) => p.item_id));
@@ -308,7 +340,7 @@ export const participant_decrypt_handler = async (
       )
       .orderBy(items.created_at)) as DecryptableRow[];
 
-    const collected = await collectProfiles(rows, fields, getCfg, request.log);
+    const collected = await collectProfiles(rows, opts, getCfg, request.log);
     profiles = collected.profiles;
     skipped = collected.failedIds;
   }
@@ -324,6 +356,8 @@ export const participant_decrypt_handler = async (
     returned_count: profiles.length,
     skipped_count: skipped.length,
     fields_requested: fields?.length,
+    contact_requested: contact?.length,
+    include_locations: opts.includeLocations,
   });
 
   return reply.code(200).send({ profiles, skipped });

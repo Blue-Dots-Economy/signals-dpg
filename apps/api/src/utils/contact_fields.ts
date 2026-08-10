@@ -1,13 +1,20 @@
 /**
- * Resolver for participant/decrypt field selection (#237). Pure functions:
- * given a decrypted merged item_state, the participant's account contact, the
- * requested fields, and the domain's contact-field context, produce the
- * filtered item_state. Canonical name/email/phone are mapped to the domain's
- * real field and fall back to the account row; other fields are read raw.
+ * Resolver for participant/decrypt's two independent, decrypted-state-derived
+ * concerns (#521 reshape of #237):
+ *
+ *  - `projectItemState` — a PURE `item_state` projection for the `fields`
+ *    request param. No canonical special-casing, no `user` (account) read.
+ *  - `resolveContact` — the canonical `contact` block: maps
+ *    name/email/phone to the domain's real field, reads the DECRYPTED value,
+ *    and falls back to the account row with provenance (`source`).
+ *
+ * These used to be one function (`selectRequestedFields`) that conflated the
+ * two; #521 decouples them so `fields` and `contact` can be requested
+ * independently (see docs/superpowers/specs/2026-08-07-participant-decrypt-field-resolution-design.md).
  */
 
 export type CanonicalContact = 'name' | 'email' | 'phone';
-const CANONICAL: readonly CanonicalContact[] = ['name', 'email', 'phone'];
+export const CANONICAL: readonly CanonicalContact[] = ['name', 'email', 'phone'];
 
 /** Minimal pino-compatible surface for PII-free warnings. */
 export interface ContactLog {
@@ -32,18 +39,24 @@ export interface AccountContact {
   phone?: string | null;
 }
 
+/** One resolved canonical contact value: where it came from, or unresolved. */
+export interface ContactResolution {
+  value: string | null;
+  source: 'item' | 'user' | null;
+}
+
 const isCanonical = (f: string): f is CanonicalContact =>
   (CANONICAL as readonly string[]).includes(f);
 
 /** True when a value is present and non-empty (empty string / whitespace = absent). */
-function hasValue(v: unknown): boolean {
+export function hasValue(v: unknown): boolean {
   if (v === null || v === undefined) return false;
   if (typeof v === 'string') return v.trim() !== '';
   return true;
 }
 
 /** The item_state field name for a canonical concept in this domain. */
-function mappedField(ctx: DomainContactContext, f: CanonicalContact): string | undefined {
+export function mappedField(ctx: DomainContactContext, f: CanonicalContact): string | undefined {
   const explicit = ctx.contactFields?.[f];
   if (explicit) return explicit;
   if (f === 'name') return ctx.nameFallbackField; // display_name_field / card.title_field
@@ -51,51 +64,75 @@ function mappedField(ctx: DomainContactContext, f: CanonicalContact): string | u
 }
 
 /**
- * Builds the filtered item_state for the requested `fields`.
+ * Normalizes the request's `contact` param to the concrete list of canonical
+ * fields to resolve. `true` => all three; `false`/`undefined` => no contact
+ * block (undefined signals "don't attach `contact` at all").
+ */
+export function normalizeContact(
+  contact: boolean | CanonicalContact[] | undefined,
+): CanonicalContact[] | undefined {
+  if (contact === true) return [...CANONICAL];
+  if (contact === false || contact === undefined) return undefined;
+  return contact;
+}
+
+/**
+ * Pure `item_state` projection for the `fields` request param: raw keys only,
+ * absent/empty values omitted. No canonical mapping, no `user` (account)
+ * read — `fields` never resolves anything beyond what is literally present in
+ * the decrypted merged state.
  *
  * @param mergedState - The DECRYPTED merged item_state (public + decrypted private).
- * @param account - The item creator's account contact (fallback source, 3 fields only).
- * @param fields - Requested field names (canonical name/email/phone + raw field names).
- * @param ctx - Domain contact-field context.
- * @param log - PII-free warning sink for missing canonical mappings.
- * @returns Filtered object: canonical under canonical keys (value or null),
- *   non-canonical under raw keys (omitted when absent).
+ * @param fields - Requested raw field names.
  */
-export function selectRequestedFields(
+export function projectItemState(
   mergedState: Record<string, unknown>,
-  account: AccountContact,
   fields: string[],
-  ctx: DomainContactContext,
-  log: ContactLog,
 ): Record<string, unknown> {
   const out: Record<string, unknown> = {};
   for (const f of fields) {
-    if (isCanonical(f)) {
-      // canonical: mapped profile field → account fallback → null
-      out[f] = resolveCanonicalField(f, mergedState, account, ctx, log);
-    } else if (hasValue(mergedState[f])) {
-      // non-canonical: raw item_state value, no fallback, omit when absent/empty
-      out[f] = mergedState[f];
-    }
+    if (hasValue(mergedState[f])) out[f] = mergedState[f];
   }
   return out;
 }
 
 /**
- * Resolves one canonical field: the mapped profile value wins; otherwise the
- * account value; otherwise `null`. Emits a PII-free warning when a phone/email
- * has no mapping (so it silently relies on the account fallback).
+ * Resolves the canonical `contact` block: for each requested canonical field,
+ * the mapped profile value wins over the account fallback; unresolved in both
+ * => `{ value: null, source: null }`. Emits a PII-free warning when a
+ * phone/email has no mapping (so it silently relies on the account fallback).
+ *
+ * @param mergedState - The DECRYPTED merged item_state (public + decrypted private).
+ * @param account - The item creator's account contact (fallback source, 3 fields only).
+ * @param requested - Subset of {name,email,phone} to resolve.
+ * @param ctx - Domain contact-field context.
+ * @param log - PII-free warning sink for missing canonical mappings.
  */
+export function resolveContact(
+  mergedState: Record<string, unknown>,
+  account: AccountContact,
+  requested: CanonicalContact[],
+  ctx: DomainContactContext,
+  log: ContactLog,
+): Partial<Record<CanonicalContact, ContactResolution>> {
+  const out: Partial<Record<CanonicalContact, ContactResolution>> = {};
+  for (const f of requested) {
+    if (!isCanonical(f)) continue; // defensive; schema already constrains this
+    out[f] = resolveCanonicalField(f, mergedState, account, ctx, log);
+  }
+  return out;
+}
+
 function resolveCanonicalField(
   f: CanonicalContact,
   mergedState: Record<string, unknown>,
   account: AccountContact,
   ctx: DomainContactContext,
   log: ContactLog,
-): unknown {
+): ContactResolution {
   const fieldName = mappedField(ctx, f);
   const fromState = fieldName ? mergedState[fieldName] : undefined;
-  if (hasValue(fromState)) return fromState; // profile wins
+  if (hasValue(fromState)) return { value: fromState as string, source: 'item' }; // profile wins
   if (!fieldName && (f === 'phone' || f === 'email')) {
     log.warn(
       { operation: 'participant.decrypt.contact_map_missing', network: ctx.network, domain: ctx.domain, field: f },
@@ -103,5 +140,5 @@ function resolveCanonicalField(
     );
   }
   const fromAccount = account[f];
-  return hasValue(fromAccount) ? fromAccount : null;
+  return hasValue(fromAccount) ? { value: fromAccount as string, source: 'user' } : { value: null, source: null };
 }

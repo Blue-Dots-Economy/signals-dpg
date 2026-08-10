@@ -7,16 +7,21 @@ import {
 } from 'fastify-type-provider-zod';
 
 /**
- * Unit tests for the #237 field-selection behaviour of
- * POST /api/v1/admin/participant/decrypt: when the request body carries
- * `fields`, each profile's `item_state` is replaced by
- * `selectRequestedFields`'s filtered output (see `utils/contact_fields.ts`);
- * when `fields` is omitted, the full merged `item_state` passes through
- * unchanged (today's behaviour — a regression guard).
+ * Unit tests for the #521 reshape of POST /api/v1/admin/participant/decrypt's
+ * `fields` / `contact` / `include_locations` controls (decoupled per
+ * docs/superpowers/specs/2026-08-07-participant-decrypt-field-resolution-design.md):
+ *
+ *  - `fields` (present) => a PURE `item_state` projection (raw keys only, no
+ *    canonical special-casing, no `user` fallback); omitted => full
+ *    `item_state` (regression guard).
+ *  - `contact` (independent of `fields`) => a `contact` block resolved via
+ *    the domain contact_fields map + account fallback, with provenance.
+ *  - `include_locations` => a `locations` array from the item's
+ *    `item_locations` column.
  *
  * `participant_decrypt.test.ts` (colocated) covers request-validation and
  * acting-org gating without ever reaching the db query; this file exercises
- * the actual row → snapshot → field-selection path with a chained
+ * the actual row → snapshot path with a chained
  * `select().from().innerJoin().where()` db stub, modeled on
  * `aggregator/__tests__/dashboard.test.ts`'s `makeChain` helper — no real
  * Postgres/Redis needed.
@@ -62,7 +67,7 @@ vi.mock('@/network_configs', () => ({
 }));
 
 // item_decrypt is exercised by the integration test; a passthrough merge here
-// keeps this file focused on field-selection, not decryption.
+// keeps this file focused on field/contact/locations resolution, not decryption.
 vi.mock('@/utils/item_decrypt', () => ({
   decryptItemPrivate: (row: { item_state: Record<string, unknown> }) => ({ mergedState: row.item_state }),
 }));
@@ -113,6 +118,7 @@ const baseRow = (overrides: Record<string, unknown> = {}) => ({
   item_type: 'profile_1.0',
   item_state: { full_name: 'Real Name', mobile: '+911234567890', bio: 'hi' },
   item_private_state: 'irrelevant-ciphertext',
+  item_locations: [{ lat: 12.9, lng: 77.5, label: 'Bengaluru' }],
   created_at: new Date('2026-01-01T00:00:00Z'),
   updated_at: new Date('2026-01-02T00:00:00Z'),
   user_name: 'Account Name',
@@ -136,7 +142,7 @@ const networkConfig = (domainOverrides: Record<string, unknown> = {}) => ({
   ],
 });
 
-describe('POST /api/v1/admin/participant/decrypt — field selection (#237)', () => {
+describe('POST /api/v1/admin/participant/decrypt — field/contact/locations resolution (#521)', () => {
   let app: FastifyInstance;
 
   beforeEach(async () => {
@@ -146,7 +152,7 @@ describe('POST /api/v1/admin/participant/decrypt — field selection (#237)', ()
     app = await buildApp();
   });
 
-  it('fields omitted → full merged item_state, unchanged (regression)', async () => {
+  it('fields/contact/include_locations all omitted → identical full item_state, no extra keys (regression)', async () => {
     state.rows = [baseRow()];
     const res = await app.inject({
       method: 'POST',
@@ -161,64 +167,93 @@ describe('POST /api/v1/admin/participant/decrypt — field selection (#237)', ()
       mobile: '+911234567890',
       bio: 'hi',
     });
+    expect(body.profiles[0]).not.toHaveProperty('contact');
+    expect(body.profiles[0]).not.toHaveProperty('locations');
   });
 
-  it('fields: ["name","phone"] → only those keys, real (profile) values', async () => {
+  it('fields: ["bio"] → a pure item_state projection, no canonical mapping applied', async () => {
+    state.rows = [baseRow()];
+    // No network_cfg fixture set at all: proves the fields path never calls
+    // getNetworkConfigById (it would throw "no network config fixture set").
+    const res = await app.inject({
+      method: 'POST',
+      url: '/participant/decrypt',
+      payload: { item_ids: [item_id], fields: ['bio', 'full_name'] },
+    });
+    expect(res.statusCode).toBe(200);
+    const body = res.json();
+    expect(body.profiles[0].item_state).toEqual({ bio: 'hi', full_name: 'Real Name' });
+    expect(body.profiles[0]).not.toHaveProperty('contact');
+  });
+
+  it('fields requesting the canonical key "name" reads it raw (no mapping, no user fallback)', async () => {
+    // The domain maps canonical name -> full_name, but `fields` never applies
+    // that mapping: item_state has no literal `name` key, so it's omitted.
+    state.rows = [baseRow()];
+    const res = await app.inject({
+      method: 'POST',
+      url: '/participant/decrypt',
+      payload: { item_ids: [item_id], fields: ['name'] },
+    });
+    expect(res.statusCode).toBe(200);
+    const body = res.json();
+    expect(body.profiles[0].item_state).toEqual({});
+  });
+
+  it('contact: true (no fields) → full item_state PLUS a contact block with all three', async () => {
     state.rows = [baseRow()];
     state.network_cfg = networkConfig();
     const res = await app.inject({
       method: 'POST',
       url: '/participant/decrypt',
-      payload: { item_ids: [item_id], fields: ['name', 'phone'] },
+      payload: { item_ids: [item_id], contact: true },
     });
     expect(res.statusCode).toBe(200);
     const body = res.json();
-    expect(body.profiles).toHaveLength(1);
     expect(body.profiles[0].item_state).toEqual({
-      name: 'Real Name',
-      phone: '+911234567890',
-    });
-  });
-
-  it('fields: ["email"] with no profile email → account email via fallback', async () => {
-    state.rows = [
-      baseRow({ item_state: { full_name: 'Real Name', mobile: '+911234567890' } }),
-    ];
-    state.network_cfg = networkConfig(); // no contact_fields.email mapping
-    const res = await app.inject({
-      method: 'POST',
-      url: '/participant/decrypt',
-      payload: { item_ids: [item_id], fields: ['email'] },
-    });
-    expect(res.statusCode).toBe(200);
-    const body = res.json();
-    expect(body.profiles).toHaveLength(1);
-    expect(body.profiles[0].item_state).toEqual({ email: 'account@example.com' });
-  });
-
-  it('#237 review fix: config-lookup rejection degrades the row instead of 500ing the request', async () => {
-    state.rows = [baseRow()];
-    state.network_cfg_reject = true; // getNetworkConfigById rejects for every network
-    const res = await app.inject({
-      method: 'POST',
-      url: '/participant/decrypt',
-      payload: { item_ids: [item_id], fields: ['name', 'phone', 'bio'] },
-    });
-    expect(res.statusCode).toBe(200);
-    const body = res.json();
-    expect(body.skipped).toEqual([]);
-    expect(body.profiles).toHaveLength(1);
-    // No usable context (config lookup failed) → canonical fields fall back
-    // to the account row rather than the real profile values, and the
-    // non-canonical field still comes through raw from item_state.
-    expect(body.profiles[0].item_state).toEqual({
-      name: 'Account Name',
-      phone: '+910000000000',
+      full_name: 'Real Name',
+      mobile: '+911234567890',
       bio: 'hi',
     });
+    expect(body.profiles[0].contact).toEqual({
+      name: { value: 'Real Name', source: 'item' },
+      phone: { value: '+911234567890', source: 'item' },
+      email: { value: 'account@example.com', source: 'user' }, // no email mapping → account fallback
+    });
   });
 
-  it('canonical field absent in both profile and account → null', async () => {
+  it('contact subset ["phone"] → only phone in the block', async () => {
+    state.rows = [baseRow()];
+    state.network_cfg = networkConfig();
+    const res = await app.inject({
+      method: 'POST',
+      url: '/participant/decrypt',
+      payload: { item_ids: [item_id], contact: ['phone'] },
+    });
+    expect(res.statusCode).toBe(200);
+    const body = res.json();
+    expect(body.profiles[0].contact).toEqual({
+      phone: { value: '+911234567890', source: 'item' },
+    });
+  });
+
+  it('contact + fields together: fields is a raw projection, contact is the normalized/provenanced answer', async () => {
+    state.rows = [baseRow()];
+    state.network_cfg = networkConfig();
+    const res = await app.inject({
+      method: 'POST',
+      url: '/participant/decrypt',
+      payload: { item_ids: [item_id], fields: ['bio'], contact: ['email'] },
+    });
+    expect(res.statusCode).toBe(200);
+    const body = res.json();
+    expect(body.profiles[0].item_state).toEqual({ bio: 'hi' });
+    expect(body.profiles[0].contact).toEqual({
+      email: { value: 'account@example.com', source: 'user' },
+    });
+  });
+
+  it('canonical field absent in both profile and account → {value:null, source:null}', async () => {
     state.rows = [
       baseRow({
         item_state: { full_name: 'Real Name', mobile: '+911234567890' },
@@ -229,11 +264,69 @@ describe('POST /api/v1/admin/participant/decrypt — field selection (#237)', ()
     const res = await app.inject({
       method: 'POST',
       url: '/participant/decrypt',
-      payload: { item_ids: [item_id], fields: ['email'] },
+      payload: { item_ids: [item_id], contact: ['email'] },
     });
     expect(res.statusCode).toBe(200);
     const body = res.json();
+    expect(body.profiles[0].contact).toEqual({ email: { value: null, source: null } });
+  });
+
+  it('include_locations: true → locations present from item_locations', async () => {
+    state.rows = [baseRow()];
+    const res = await app.inject({
+      method: 'POST',
+      url: '/participant/decrypt',
+      payload: { item_ids: [item_id], include_locations: true },
+    });
+    expect(res.statusCode).toBe(200);
+    const body = res.json();
+    expect(body.profiles[0].locations).toEqual([{ lat: 12.9, lng: 77.5, label: 'Bengaluru' }]);
+  });
+
+  it('include_locations omitted/false → no locations key', async () => {
+    state.rows = [baseRow()];
+    const res = await app.inject({
+      method: 'POST',
+      url: '/participant/decrypt',
+      payload: { item_ids: [item_id], include_locations: false },
+    });
+    expect(res.statusCode).toBe(200);
+    const body = res.json();
+    expect(body.profiles[0]).not.toHaveProperty('locations');
+  });
+
+  it('full combination: fields + contact + include_locations all together', async () => {
+    state.rows = [baseRow()];
+    state.network_cfg = networkConfig();
+    const res = await app.inject({
+      method: 'POST',
+      url: '/participant/decrypt',
+      payload: { item_ids: [item_id], fields: ['bio'], contact: true, include_locations: true },
+    });
+    expect(res.statusCode).toBe(200);
+    const body = res.json();
+    expect(body.profiles[0].item_state).toEqual({ bio: 'hi' });
+    expect(body.profiles[0].contact.name).toEqual({ value: 'Real Name', source: 'item' });
+    expect(body.profiles[0].locations).toEqual([{ lat: 12.9, lng: 77.5, label: 'Bengaluru' }]);
+  });
+
+  it('#237/#521 review fix: config-lookup rejection degrades the row instead of 500ing the request', async () => {
+    state.rows = [baseRow()];
+    state.network_cfg_reject = true; // getNetworkConfigById rejects for every network
+    const res = await app.inject({
+      method: 'POST',
+      url: '/participant/decrypt',
+      payload: { item_ids: [item_id], contact: ['name', 'phone'] },
+    });
+    expect(res.statusCode).toBe(200);
+    const body = res.json();
+    expect(body.skipped).toEqual([]);
     expect(body.profiles).toHaveLength(1);
-    expect(body.profiles[0].item_state).toEqual({ email: null });
+    // No usable context (config lookup failed) → canonical fields fall back
+    // to the account row rather than the real profile values.
+    expect(body.profiles[0].contact).toEqual({
+      name: { value: 'Account Name', source: 'user' },
+      phone: { value: '+910000000000', source: 'user' },
+    });
   });
 });

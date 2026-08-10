@@ -69,3 +69,92 @@ describe('DecryptParticipantRequest.fields', () => {
     expect(() => DecryptParticipantRequest.parse({ user_id: 'u1', fields: [''] })).toThrow();
   });
 });
+
+// #521: `contact` and `include_locations` are independent, optional controls
+// (see docs/superpowers/specs/2026-08-07-participant-decrypt-field-resolution-design.md §4/§8).
+describe('DecryptParticipantRequest.contact', () => {
+  it('accepts `true` (all three canonical fields)', () => {
+    const r = DecryptParticipantRequest.parse({ user_id: 'u1', contact: true });
+    expect(r.contact).toBe(true);
+  });
+  it('accepts a subset array', () => {
+    const r = DecryptParticipantRequest.parse({ user_id: 'u1', contact: ['phone'] });
+    expect(r.contact).toEqual(['phone']);
+  });
+  it('accepts `false` (explicitly no contact block)', () => {
+    const r = DecryptParticipantRequest.parse({ user_id: 'u1', contact: false });
+    expect(r.contact).toBe(false);
+  });
+  it('is valid when omitted', () => {
+    const r = DecryptParticipantRequest.parse({ user_id: 'u1' });
+    expect(r.contact).toBeUndefined();
+  });
+  it('rejects an empty array', () => {
+    expect(() => DecryptParticipantRequest.parse({ user_id: 'u1', contact: [] })).toThrow();
+  });
+  it('rejects a value outside {name,email,phone}', () => {
+    expect(() =>
+      DecryptParticipantRequest.parse({ user_id: 'u1', contact: ['address'] }),
+    ).toThrow();
+  });
+});
+
+describe('DecryptParticipantRequest.include_locations', () => {
+  it('accepts a boolean', () => {
+    expect(DecryptParticipantRequest.parse({ user_id: 'u1', include_locations: true }).include_locations).toBe(true);
+  });
+  it('is valid when omitted', () => {
+    expect(DecryptParticipantRequest.parse({ user_id: 'u1' }).include_locations).toBeUndefined();
+  });
+});
+
+describe('DecryptedProfileSnapshot.contact / locations', () => {
+  const uuid = '11111111-1111-4111-8111-111111111111';
+  const base = {
+    item_id: uuid,
+    item_network: 'blue_dot',
+    item_domain: 'seeker',
+    item_type: 'profile_1.0',
+    item_state: { name: 'Velu Murugan' },
+    created_at: '2026-06-26T12:03:04.686Z',
+    updated_at: '2026-06-26T12:03:04.686Z',
+  };
+
+  it('accepts a profile with no contact/locations (backward compatible)', () => {
+    const r = DecryptParticipantResponse.safeParse({ profiles: [base], skipped: [] });
+    expect(r.success).toBe(true);
+  });
+
+  it('accepts a contact block with value+source per canonical field, including nulls', () => {
+    const r = DecryptParticipantResponse.safeParse({
+      profiles: [
+        {
+          ...base,
+          contact: {
+            name: { value: 'Velu Murugan', source: 'item' },
+            phone: { value: null, source: null },
+            email: { value: 'v@example.com', source: 'user' },
+          },
+        },
+      ],
+      skipped: [],
+    });
+    expect(r.success).toBe(true);
+  });
+
+  it('accepts a locations array of {lat,lng,label?}', () => {
+    const r = DecryptParticipantResponse.safeParse({
+      profiles: [{ ...base, locations: [{ lat: 12.9, lng: 77.5, label: 'Bengaluru' }, { lat: 1, lng: 1 }] }],
+      skipped: [],
+    });
+    expect(r.success).toBe(true);
+  });
+
+  it('rejects an invalid contact source', () => {
+    const r = DecryptParticipantResponse.safeParse({
+      profiles: [{ ...base, contact: { name: { value: 'x', source: 'admin' } } }],
+      skipped: [],
+    });
+    expect(r.success).toBe(false);
+  });
+});
