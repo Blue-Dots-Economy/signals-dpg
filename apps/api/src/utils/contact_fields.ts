@@ -69,34 +69,39 @@ export function selectRequestedFields(
   log: ContactLog,
 ): Record<string, unknown> {
   const out: Record<string, unknown> = {};
-  const accountByCanonical: Record<CanonicalContact, string | null | undefined> = {
-    name: account.name,
-    email: account.email,
-    phone: account.phone,
-  };
-
   for (const f of fields) {
     if (isCanonical(f)) {
-      const fieldName = mappedField(ctx, f);
-      const fromState = fieldName ? mergedState[fieldName] : undefined;
-      if (hasValue(fromState)) {
-        out[f] = fromState; // profile wins
-        continue;
-      }
-      if (!fieldName && (f === 'phone' || f === 'email')) {
-        log.warn(
-          { operation: 'participant.decrypt.contact_map_missing', network: ctx.network, domain: ctx.domain, field: f },
-          'no contact_fields mapping for requested canonical field; using account fallback',
-        );
-      }
-      const fromAccount = accountByCanonical[f];
-      out[f] = hasValue(fromAccount) ? fromAccount : null;
-    } else {
-      // non-canonical: raw item_state value, no fallback, omit when absent
-      if (Object.prototype.hasOwnProperty.call(mergedState, f) && hasValue(mergedState[f])) {
-        out[f] = mergedState[f];
-      }
+      // canonical: mapped profile field → account fallback → null
+      out[f] = resolveCanonicalField(f, mergedState, account, ctx, log);
+    } else if (hasValue(mergedState[f])) {
+      // non-canonical: raw item_state value, no fallback, omit when absent/empty
+      out[f] = mergedState[f];
     }
   }
   return out;
+}
+
+/**
+ * Resolves one canonical field: the mapped profile value wins; otherwise the
+ * account value; otherwise `null`. Emits a PII-free warning when a phone/email
+ * has no mapping (so it silently relies on the account fallback).
+ */
+function resolveCanonicalField(
+  f: CanonicalContact,
+  mergedState: Record<string, unknown>,
+  account: AccountContact,
+  ctx: DomainContactContext,
+  log: ContactLog,
+): unknown {
+  const fieldName = mappedField(ctx, f);
+  const fromState = fieldName ? mergedState[fieldName] : undefined;
+  if (hasValue(fromState)) return fromState; // profile wins
+  if (!fieldName && (f === 'phone' || f === 'email')) {
+    log.warn(
+      { operation: 'participant.decrypt.contact_map_missing', network: ctx.network, domain: ctx.domain, field: f },
+      'no contact_fields mapping for requested canonical field; using account fallback',
+    );
+  }
+  const fromAccount = account[f];
+  return hasValue(fromAccount) ? fromAccount : null;
 }

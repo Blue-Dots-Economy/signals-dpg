@@ -121,6 +121,131 @@ const toSnapshotSafe = (
   }
 };
 
+/** Per-network config lookup, memoized for the lifetime of one request. */
+type NetworkConfigGetter = (network: string) => ReturnType<typeof getNetworkConfigById>;
+
+/** #237: per-network config cache for the lifetime of a request — a batch of
+ * item_ids commonly spans a handful of networks/domains, not one per row. */
+function makeNetworkConfigCache(): NetworkConfigGetter {
+  const cfgCache = new Map<string, ReturnType<typeof getNetworkConfigById>>();
+  return (network: string) => {
+    let cfg = cfgCache.get(network);
+    if (!cfg) {
+      cfg = getNetworkConfigById(network);
+      cfgCache.set(network, cfg);
+    }
+    return cfg;
+  };
+}
+
+/** Resolves the per-row domain contact-field context (name fallback =
+ * item-type display_name_field -> domain card.title_field).
+ *
+ * #237 review fix: the config lookup is isolated the same way
+ * `toSnapshotSafe` isolates decrypt failures — a rejection (transient
+ * schema-registry fetch failure, or a network id absent from the loaded
+ * configs) degrades this row to an empty context instead of throwing the
+ * whole request into a 500. With an empty context, `selectRequestedFields`
+ * already falls back to the account contact for canonical fields and reads
+ * non-canonical fields raw, so the row still resolves best-effort. */
+async function resolveDomainContext(
+  r: DecryptableRow,
+  getCfg: NetworkConfigGetter,
+  log: FastifyRequest['log'],
+): Promise<DomainContactContext> {
+  const emptyContext: DomainContactContext = {
+    network: r.item_network,
+    domain: r.item_domain,
+    itemType: r.item_type,
+  };
+  let cfg;
+  try {
+    cfg = await getCfg(r.item_network);
+  } catch (err) {
+    log.error(
+      {
+        operation: 'admin.participant.decrypt.config_lookup_failed',
+        network: r.item_network,
+        domain: r.item_domain,
+        err,
+      },
+      'failed to resolve network config for field selection; falling back to empty context',
+    );
+    return emptyContext;
+  }
+  const domainCfg = cfg.domains.find((d) => d.id === r.item_domain);
+  const schema = domainCfg?.item_schemas?.[r.item_type] as
+    | { display_name_field?: unknown }
+    | undefined;
+  const nameFallbackField =
+    (typeof schema?.display_name_field === 'string' ? schema.display_name_field : undefined) ??
+    domainCfg?.card?.title_field;
+  return {
+    network: r.item_network,
+    domain: r.item_domain,
+    itemType: r.item_type,
+    contactFields: domainCfg?.contact_fields,
+    ...(nameFallbackField ? { nameFallbackField } : {}),
+  };
+}
+
+/** When `fields` is requested, replaces the snapshot's item_state with the
+ * resolver's filtered output; a no-op (byte-for-byte unchanged path)
+ * otherwise. */
+async function applyFieldSelection(
+  snapshot: DecryptedProfileSnapshot,
+  r: DecryptableRow,
+  fields: string[] | undefined,
+  getCfg: NetworkConfigGetter,
+  log: FastifyRequest['log'],
+): Promise<void> {
+  if (!fields) return;
+  snapshot.item_state = selectRequestedFields(
+    snapshot.item_state as Record<string, unknown>,
+    { name: r.user_name, email: r.user_email, phone: r.user_phone },
+    fields,
+    await resolveDomainContext(r, getCfg, log),
+    log,
+  );
+}
+
+/**
+ * Decrypts every row and applies field selection, splitting rows into
+ * resolved `profiles` and `failedIds` (rows that yielded no snapshot — a
+ * decrypt failure isolated by `toSnapshotSafe`). Callers derive `skipped`
+ * semantics themselves: item_ids mode diffs `failedIds` against the full
+ * requested-but-not-found/not-owned set; user_id mode uses `failedIds` as-is.
+ */
+async function collectProfiles(
+  rows: DecryptableRow[],
+  fields: string[] | undefined,
+  getCfg: NetworkConfigGetter,
+  log: FastifyRequest['log'],
+): Promise<{ profiles: DecryptedProfileSnapshot[]; failedIds: string[] }> {
+  const profiles: DecryptedProfileSnapshot[] = [];
+  const failedIds: string[] = [];
+  for (const r of rows) {
+    const snapshot = toSnapshotSafe(r, log);
+    if (snapshot) {
+      await applyFieldSelection(snapshot, r, fields, getCfg, log);
+      profiles.push(snapshot);
+    } else {
+      failedIds.push(r.item_id);
+    }
+  }
+  return { profiles, failedIds };
+}
+
+/** Ownership/served-network scoping shared by both query modes: aggregators
+ * are restricted to items whose creator they onboarded; network_service sees
+ * all items in served networks. */
+function scopeConditions(isAgg: boolean, actingOrgId: string, networks: string[]) {
+  return [
+    networks.length > 0 ? inArray(items.item_network, networks) : undefined,
+    isAgg ? eq(user.onboardedByOrgId, actingOrgId) : undefined,
+  ] as const;
+}
+
 export const participant_decrypt_handler = async (
   request: DecryptRequestType,
   reply: FastifyReply,
@@ -143,85 +268,10 @@ export const participant_decrypt_handler = async (
   const networks = servedNetworks();
   const body = request.body;
   const fields = body.fields;
+  const getCfg = makeNetworkConfigCache();
 
-  // #237: per-network config cache for the lifetime of this request — a batch
-  // of item_ids commonly spans a handful of networks/domains, not one per row.
-  const cfgCache = new Map<string, ReturnType<typeof getNetworkConfigById>>();
-  const getCfg = (network: string) => {
-    let cfg = cfgCache.get(network);
-    if (!cfg) {
-      cfg = getNetworkConfigById(network);
-      cfgCache.set(network, cfg);
-    }
-    return cfg;
-  };
-
-  /** Resolves the per-row domain contact-field context (name fallback =
-   * item-type display_name_field -> domain card.title_field).
-   *
-   * #237 review fix: the config lookup is isolated the same way
-   * `toSnapshotSafe` isolates decrypt failures — a rejection (transient
-   * schema-registry fetch failure, or a network id absent from the loaded
-   * configs) degrades this row to an empty context instead of throwing the
-   * whole request into a 500. With an empty context, `selectRequestedFields`
-   * already falls back to the account contact for canonical fields and reads
-   * non-canonical fields raw, so the row still resolves best-effort. */
-  const contextFor = async (r: DecryptableRow): Promise<DomainContactContext> => {
-    const emptyContext: DomainContactContext = {
-      network: r.item_network,
-      domain: r.item_domain,
-      itemType: r.item_type,
-    };
-    let cfg;
-    try {
-      cfg = await getCfg(r.item_network);
-    } catch (err) {
-      request.log.error(
-        {
-          operation: 'admin.participant.decrypt.config_lookup_failed',
-          network: r.item_network,
-          domain: r.item_domain,
-          err,
-        },
-        'failed to resolve network config for field selection; falling back to empty context',
-      );
-      return emptyContext;
-    }
-    const domainCfg = cfg.domains.find((d) => d.id === r.item_domain);
-    const schema = domainCfg?.item_schemas?.[r.item_type] as
-      | { display_name_field?: unknown }
-      | undefined;
-    const nameFallbackField =
-      (typeof schema?.display_name_field === 'string' ? schema.display_name_field : undefined) ??
-      domainCfg?.card?.title_field;
-    return {
-      network: r.item_network,
-      domain: r.item_domain,
-      itemType: r.item_type,
-      contactFields: domainCfg?.contact_fields,
-      ...(nameFallbackField ? { nameFallbackField } : {}),
-    };
-  };
-
-  /** When `fields` is requested, replaces the snapshot's item_state with the
-   * resolver's filtered output; a no-op (byte-for-byte unchanged path)
-   * otherwise. */
-  const applyFieldSelection = async (
-    snapshot: DecryptedProfileSnapshot,
-    r: DecryptableRow,
-  ): Promise<void> => {
-    if (!fields) return;
-    snapshot.item_state = selectRequestedFields(
-      snapshot.item_state as Record<string, unknown>,
-      { name: r.user_name, email: r.user_email, phone: r.user_phone },
-      fields,
-      await contextFor(r),
-      request.log,
-    );
-  };
-
-  const profiles: DecryptedProfileSnapshot[] = [];
-  let skipped: string[] = [];
+  let profiles: DecryptedProfileSnapshot[];
+  let skipped: string[];
   let mode: 'item_ids' | 'user_id';
 
   if (body.item_ids) {
@@ -234,18 +284,11 @@ export const participant_decrypt_handler = async (
       .where(
         and(
           inArray(items.item_id, requested),
-          networks.length > 0 ? inArray(items.item_network, networks) : undefined,
-          isAgg ? eq(user.onboardedByOrgId, acting.org_id) : undefined,
+          ...scopeConditions(isAgg, acting.org_id, networks),
         ),
       )) as DecryptableRow[];
 
-    for (const r of rows) {
-      const snapshot = toSnapshotSafe(r, request.log);
-      if (snapshot) {
-        await applyFieldSelection(snapshot, r);
-        profiles.push(snapshot);
-      }
-    }
+    ({ profiles } = await collectProfiles(rows, fields, getCfg, request.log));
     // Not found, not owned, not in a served network, OR failed to decrypt — all
     // land in skipped, undifferentiated, so the response never leaks existence.
     const found = new Set(profiles.map((p) => p.item_id));
@@ -260,21 +303,14 @@ export const participant_decrypt_handler = async (
       .where(
         and(
           eq(items.created_by, userId),
-          networks.length > 0 ? inArray(items.item_network, networks) : undefined,
-          isAgg ? eq(user.onboardedByOrgId, acting.org_id) : undefined,
+          ...scopeConditions(isAgg, acting.org_id, networks),
         ),
       )
       .orderBy(items.created_at)) as DecryptableRow[];
 
-    for (const r of rows) {
-      const snapshot = toSnapshotSafe(r, request.log);
-      if (snapshot) {
-        await applyFieldSelection(snapshot, r);
-        profiles.push(snapshot);
-      } else {
-        skipped.push(r.item_id);
-      }
-    }
+    const collected = await collectProfiles(rows, fields, getCfg, request.log);
+    profiles = collected.profiles;
+    skipped = collected.failedIds;
   }
 
   // Audit: this endpoint returns decrypted PII to the caller, so every call is
