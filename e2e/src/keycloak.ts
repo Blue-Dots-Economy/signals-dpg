@@ -145,8 +145,13 @@ export class KeycloakLogin {
     const verifier = b64url(randomBytes(32));
     const challenge = b64url(createHash('sha256').update(verifier).digest());
 
-    // Clear the inbox first so a previous run's code can't be read back.
-    if (!opts.otpResolver && this.mailpit) await this.mailpit.clear();
+    // Snapshot this identifier's existing mail so a previous run's code can't be
+    // read back. This used to wipe the WHOLE inbox, which is shared by every
+    // worker — under parallel runs one login deleted another's unread OTP and
+    // that test then failed with "no OTP could be read". Scoping to the
+    // recipient's own message ids fixes the interference without a global write.
+    const seenMailIds =
+      !opts.otpResolver && this.mailpit ? await this.mailpit.idsFor(identifier) : undefined;
 
     const authUrl =
       `${this.kc.baseUrl}/realms/${this.kc.realm}/protocol/openid-connect/auth?` +
@@ -203,7 +208,7 @@ export class KeycloakLogin {
       opts.otpResolver ??
       (async () => {
         if (!this.mailpit) return undefined;
-        return this.mailpit.waitForOtp(identifier);
+        return this.mailpit.waitForOtp(identifier, { excludeIds: seenMailIds });
       });
     const otp = await resolve();
     if (!otp) {

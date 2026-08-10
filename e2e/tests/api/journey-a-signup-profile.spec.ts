@@ -3,6 +3,8 @@ import { checkUser, keycloakSelfSignup, signup, acceptCoreConsent } from '../../
 import { resolveBinding, buildMinimalItemState } from '../../src/schema.js';
 import { freshIdentity } from '../../src/flows.js';
 import { newName } from '../../src/identities.js';
+import { skipIfSignupExhausted } from '../../src/signup_budget.js';
+import { SignupRateLimitedError } from '../../src/auth.js';
 
 /**
  * Journey A — Adult self-signup → schema-typed profile → discoverable (P0).
@@ -30,6 +32,10 @@ test.describe('Journey A — self-signup → profile → discoverable', () => {
         domain: binding0.domain,
         age: 35,
       });
+      // NOTE: this probe *is* a signup, so this test spends two of the hourly
+      // per-IP budget, not one. Treat an exhausted budget the same as the helper
+      // does — an environment limit, not a regression.
+      if (probe.status === 429) skipIfSignupExhausted(test, new SignupRateLimitedError(identity.value));
       expect(probe.status, JSON.stringify(probe.body)).toBe(200);
       expect(probe.alreadyRegistered, 'a freshly generated identity must be new').toBeFalsy();
     }
@@ -39,7 +45,7 @@ test.describe('Journey A — self-signup → profile → discoverable', () => {
     const session = await signup(api, identity, newName('Adult'), authCtx, {
       domain: binding0.domain,
       age: 35,
-    });
+    }).catch((e) => skipIfSignupExhausted(test, e));
     expect(session.token).toBeTruthy();
     await acceptCoreConsent(session, cfg.network, 'signup');
 
@@ -86,7 +92,7 @@ test.describe('Journey A — self-signup → profile → discoverable', () => {
     const session = await signup(api, identity, newName('Adult'), authCtx, {
       domain: binding.domain,
       age: 35,
-    });
+    }).catch((e) => skipIfSignupExhausted(test, e));
     await acceptCoreConsent(session, cfg.network, 'signup');
 
     const itemState = buildMinimalItemState(binding.schema);

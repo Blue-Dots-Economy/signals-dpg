@@ -5,6 +5,7 @@ import { resolveBinding, buildMinimalItemState, type Binding } from '../../src/s
 import { newName, newPhone } from '../../src/identities.js';
 import type { ApiClient } from '../../src/api-client.js';
 import type { E2EConfig } from '../../src/config.js';
+import { skipIfSignupExhausted } from '../../src/signup_budget.js';
 
 /**
  * Journey C (API) — U18 minor + guardian consent (P0).
@@ -57,7 +58,9 @@ async function setupMinorDraft(
   // test. Provider-aware so the identity lands on a channel whose OTP is
   // readable (Keycloak: Mailpit for email, the container log for phone).
   const identity = freshIdentity(cfg, 'minor', { provider });
-  const session = await signup(api, identity, newName('Minor'), authCtx, { age: 14 });
+  const session = await signup(api, identity, newName('Minor'), authCtx, { age: MINOR_AGE }).catch(
+    (e) => skipIfSignupExhausted(test, e),
+  );
   await acceptCoreConsent(session, cfg.network, 'signup');
 
   // #331: the route stores an AGE snapshot, not a date of birth. It previously

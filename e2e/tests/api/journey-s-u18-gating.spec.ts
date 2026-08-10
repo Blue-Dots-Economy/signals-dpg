@@ -9,6 +9,7 @@ import type { ApiClient } from '../../src/api-client.js';
 import type { E2EConfig } from '../../src/config.js';
 import type { AuthContext, Session } from '../../src/auth.js';
 import type { Binding } from '../../src/schema.js';
+import { skipIfSignupExhausted } from '../../src/signup_budget.js';
 
 /**
  * Journey S — the U18 gating surface (P0).
@@ -92,7 +93,7 @@ async function createMinor(
   const session = await signup(api, id, newName(opts.label), authCtx, {
     domain: binding.domain,
     age: MINOR_AGE,
-  });
+  }).catch((e) => skipIfSignupExhausted(test, e));
   await acceptCoreConsent(session, binding.network, 'signup');
 
   const dob = await session.client.post<{ isMinor?: boolean }>('/api/v1/consent/u18/dob', {

@@ -37,9 +37,30 @@ export class Mailpit {
     private readonly baseUrl: string,
   ) {}
 
-  /** Delete every message in the inbox. Call before a flow to avoid reading a stale code. */
+  /**
+   * Delete every message in the inbox.
+   *
+   * **Not safe while anything else is running.** The inbox is shared by every
+   * worker, so a wipe destroys OTP emails other tests are still waiting on. Use
+   * {@link idsFor} + `excludeIds` to ignore stale messages instead; that is
+   * per-recipient and needs no global mutation. Kept only for single-worker
+   * local debugging.
+   */
   async clear(): Promise<void> {
     await this.request.delete(`${this.baseUrl}/api/v1/messages`).catch(() => undefined);
+  }
+
+  /**
+   * Snapshot the message ids currently addressed to `recipient`.
+   *
+   * Take this BEFORE triggering a new send, then pass it as `excludeIds` so the
+   * wait resolves only on a genuinely new message. Id-based rather than
+   * timestamp-based on purpose: there is no shared clock between this runner and
+   * the mail server, and a re-login for the same identifier can otherwise read
+   * back the previous code.
+   */
+  async idsFor(recipient: string): Promise<Set<string>> {
+    return new Set((await this.search(recipient)).map((m) => m.ID));
   }
 
   /** Messages addressed to `recipient`, newest first. */
@@ -64,11 +85,13 @@ export class Mailpit {
    */
   async waitForMessage(
     recipient: string,
-    opts: { timeoutMs?: number; subjectMatch?: RegExp } = {},
+    opts: { timeoutMs?: number; subjectMatch?: RegExp; excludeIds?: Set<string> } = {},
   ): Promise<MailpitMessage | undefined> {
     const deadline = Date.now() + (opts.timeoutMs ?? 20_000);
     while (Date.now() < deadline) {
-      const found = await this.search(recipient);
+      const found = (await this.search(recipient)).filter(
+        (m) => !opts.excludeIds?.has(m.ID),
+      );
       const candidate = opts.subjectMatch
         ? found.find((m) => opts.subjectMatch!.test(m.Subject))
         : found[0];
@@ -88,7 +111,10 @@ export class Mailpit {
    * 4-8 digit run in subject/text/html. Anchoring on exact copy would make the
    * suite fail on a wording change that broke nothing.
    */
-  async waitForOtp(recipient: string, opts: { timeoutMs?: number } = {}): Promise<string | undefined> {
+  async waitForOtp(
+    recipient: string,
+    opts: { timeoutMs?: number; excludeIds?: Set<string> } = {},
+  ): Promise<string | undefined> {
     const msg = await this.waitForMessage(recipient, opts);
     if (!msg) return undefined;
     return extractOtp(`${msg.Subject ?? ''} ${msg.Text ?? ''} ${stripTags(msg.HTML ?? '')}`);

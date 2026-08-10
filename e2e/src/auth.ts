@@ -20,6 +20,31 @@ import { readKeycloakLogOtp } from './keycloak_log.js';
  */
 export const TEST_OTP = '000000';
 
+/**
+ * Public self-signup refused this runner's IP.
+ *
+ * `POST /api/v1/auth/signup` allows `MAX_PER_IP = 10` per fixed hour
+ * (`services/auth/self_signup.ts`) — a hardcoded constant, not configurable, so
+ * a target cannot be tuned for testing. The suite spends ~7 signups per full API
+ * run (journeys A, C, S all genuinely need the self-signup path), which means a
+ * second run inside the same hour exhausts it.
+ *
+ * This is an environment limit, not a product regression, so it is worth
+ * distinguishing from a real failure — see `skipIfSignupExhausted`.
+ */
+export class SignupRateLimitedError extends Error {
+  constructor(identifier: string) {
+    super(
+      `[e2e] self-signup is rate-limited for this runner's IP (${identifier}). ` +
+        'POST /api/v1/auth/signup allows MAX_PER_IP = 10 per hour (services/auth/self_signup.ts), ' +
+        'which repeated local runs exhaust. Journeys that only NEED a persona use service ' +
+        'provisioning and are unaffected; only the self-signup journeys (A, C, S) hit this. ' +
+        'Wait out the 1h fixed window, or clear the `signup:ip:*` keys on the target\'s Redis.',
+    );
+    this.name = 'SignupRateLimitedError';
+  }
+}
+
 /** Which identity provider the target's session path actually runs. */
 export type AuthProvider = 'betterauth' | 'keycloak';
 
@@ -211,13 +236,7 @@ export async function signup(
   const created = await keycloakSelfSignup(api, id, name, opts);
   if (!created.ok) {
     if (created.status === 429) {
-      throw new Error(
-        `[e2e] self-signup is rate-limited for this runner's IP (${id.value}). ` +
-          'POST /api/v1/auth/signup allows MAX_PER_IP = 10 per hour (services/auth/self_signup.ts), ' +
-          'which repeated local runs exhaust. Journeys that only NEED a persona use service ' +
-          'provisioning and are unaffected; only the self-signup journeys (A, B) hit this. ' +
-          'Wait out the 1h fixed window, or clear the `signup:ip:*` keys on the target\'s Redis.',
-      );
+      throw new SignupRateLimitedError(id.value);
     }
     throw new Error(`[e2e] keycloak self-signup failed for ${id.value}: ${created.status} ${JSON.stringify(created.body)}`);
   }
