@@ -55,10 +55,15 @@ jobs:
       # dhi.io, which does not allow anonymous pulls even for the free
       # Apache-2.0 catalog. Credentials are a Docker Hub account; without this
       # step the build fails at the first FROM.
+      #
+      # Scoped to api: the ui image still builds on node/nginx from the public
+      # library namespace, which pulls anonymously. Without this guard a missing
+      # or expired token would fail the ui job for a registry it never touches.
       - uses: docker/login-action@v4
+        if: matrix.service.name == 'api'
         with:
           registry: dhi.io
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          username: ${{ vars.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
       - uses: docker/login-action@v4
         with:
