@@ -19,6 +19,9 @@ export const get_consent_status_by_identifier: FastifyPluginAsyncZod = async (fa
   fastify.route({
     url: '/status-by-identifier',
     method: 'GET',
+    // Public/pre-login enumeration surface (email/phone → registered or not) —
+    // throttled tighter than a typical read endpoint.
+    config: { rateLimit: { max: 20, timeWindow: '1 minute' } },
     schema: {
       tags: ['consent'],
       querystring: ConsentStatusByIdentifierQuerySchema,

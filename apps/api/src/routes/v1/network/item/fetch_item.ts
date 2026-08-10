@@ -30,6 +30,8 @@ export const fetch_item: FastifyPluginAsyncZod = async function (fastify) {
   fastify.route({
     url: '/item/fetch',
     method: 'GET',
+    // Public, unauthenticated network-wide read — throttled per IP.
+    config: { rateLimit: { max: 100, timeWindow: '1 minute' } },
     schema: {
       tags: ['network'],
       query: FetchItemsQuerySchema,
