@@ -102,6 +102,8 @@ export const perform_network_action: FastifyPluginAsyncZod = async function (
   fastify.route({
     url: '/action/perform',
     method: 'POST',
+    // Public, unauthenticated inter-instance action mirror — throttled per IP.
+    config: { rateLimit: { max: 100, timeWindow: '1 minute' } },
     schema: {
       tags: ['network'],
       body: PerformNetworkActionBodySchema,

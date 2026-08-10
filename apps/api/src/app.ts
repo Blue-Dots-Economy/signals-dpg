@@ -16,6 +16,8 @@ import {
 import cors from '@fastify/cors';
 import fastifyQs from 'fastify-qs';
 import fastifySwagger from '@fastify/swagger';
+import fastifyRateLimit from '@fastify/rate-limit';
+import { redis } from '@api/db/secondary/redis';
 import {
   allowed_origins,
   getAllowedInstanceOriginsFromNetworkConfig,
@@ -161,6 +163,11 @@ export async function buildApp(): Promise<FastifyInstance> {
 
   // Query string parser - supports bracket notation (e.g. itemState[userId]=value)
   await app.register(fastifyQs, {});
+
+  // Per-route rate limiting (opt-in via route-level `config.rateLimit`, not
+  // applied globally — sensitivity varies per endpoint). Backed by the same
+  // Redis connection used elsewhere so limits survive across instances/pods.
+  await app.register(fastifyRateLimit, { global: false, redis });
 
   // Documentation. Gated: the always-available reference is the
   // bluedots-docs site, so this is a secure-by-default local/dev convenience
