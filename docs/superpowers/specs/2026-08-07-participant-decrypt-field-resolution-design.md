@@ -105,7 +105,7 @@ blue_dot:
 - Pros: no schema-repo change; fast to iterate.
 - Cons: second place that can drift from the schemas; must be maintained per network.
 
-> **Decision pending.** Implementation will pick one; the resolver (§7) reads the map from a single accessor either way, so the choice is isolated to where the map is loaded from. Fallback default for `name` when unmapped: `display_name_field` / `card.title_field` (already available).
+> **DECISION: Option A (mapping in `network.json`).** Chosen to keep the mapping co-located with the schema and eliminate drift. Option B is retained above only as context for reviewers. The resolver (§7) reads the map through a single network-config accessor. Fallback default for `name` when unmapped: `display_name_field` / `card.title_field` (already available). The local `examples/schemas/*/network.json` get `contact_fields` in this change; the canonical bluedots-schemas copies are a cross-repo follow-up (§12).
 
 ## 7. Resolver logic (per profile, when `fields` present)
 
