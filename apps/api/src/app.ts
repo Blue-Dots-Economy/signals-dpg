@@ -29,6 +29,7 @@ import {
   clearNetworkSchemaCache,
   refreshConsumedSchemas,
 } from '@/network_schema_cache';
+import { registerSecurityHeaders } from '@/plugins/security_headers';
 
 const pkg = createRequire(import.meta.url)('../package.json') as {
   version: string;
@@ -110,6 +111,11 @@ export async function buildApp(): Promise<FastifyInstance> {
 
   // Echo the resolved correlation id back on every response.
   registerRequestIdEcho(app);
+
+  // Force no-store on any response from a successfully-authenticated
+  // request, regardless of route (issue #11 — PII must never end up in a
+  // shared proxy cache or browser history).
+  registerSecurityHeaders(app);
 
   // The schema cache lives on disk under tmpdir() and outlives a restart. In
   // local mode the network is driven by NETWORK_CONFIG_LOCAL_FILE, so a stale
