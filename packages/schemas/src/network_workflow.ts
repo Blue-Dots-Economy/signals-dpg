@@ -88,6 +88,22 @@ const CardConfigSchema = z.object({
   extra_fields: z.array(z.string().min(1)).optional(),
 }).strict();
 
+/**
+ * Canonical contact-field mapping for a domain (#237): maps the canonical
+ * name/email/phone to the domain's real item_state field name, since these
+ * are named differently per network/domain (e.g. `mobile_number`,
+ * `hiringManagerPhoneNumber`). Consumed by participant/decrypt field
+ * resolution. All optional — `name` falls back to display_name_field /
+ * card.title_field when unset.
+ */
+const ContactFieldsSchema = z
+  .object({
+    name: z.string().min(1).optional(),
+    email: z.string().min(1).optional(),
+    phone: z.string().min(1).optional(),
+  })
+  .strict();
+
 const NetworkDomainSchema = z.object({
   id: z.string().min(1),
   description: z.string().optional(),
@@ -121,6 +137,7 @@ const NetworkDomainSchema = z.object({
   status_rules: z.array(StatusRuleSchema).min(1),
   dashboard_tiles: DashboardTilesSchema.optional(),
   card: CardConfigSchema.optional(),
+  contact_fields: ContactFieldsSchema.optional(),
 }).superRefine((domain, ctx) => {
   const last = domain.status_rules[domain.status_rules.length - 1];
   if (last.when !== 'default') {
