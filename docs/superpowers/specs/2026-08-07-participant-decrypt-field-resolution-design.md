@@ -50,6 +50,8 @@ Today, when the aggregator asks Signals to decrypt a participant's profile, Sign
 4. **User-table fallback applies to `name`/`email`/`phone` only.** No other field ever reads the `user` table.
 5. **No auth/ownership change.** Acting-org resolution and `onboarded_by` scoping are unchanged; `skipped` semantics unchanged (not-found / not-owned / undecryptable, undifferentiated).
 6. Applies in **both** `item_ids` and `user_id` modes.
+7. **Mapping completeness is validated, not assumed.** For every served `(network, domain)`, the canonical map (§6) must be resolvable. On a missing/unmapped domain, emit a **PII-free warning** at resolution time (and, where practical, validate at config/schema load) so a config gap surfaces as a diagnosable warning rather than silently returning `null` and dropping participants from a campaign. This is the guard against the "silent missing contacts" failure mode.
+8. **Input guards.** `fields` entries are non-empty strings; cap the array length (reuse an existing bound or a small constant). The response `item_state` value type permits `null` (for unresolved canonical fields).
 
 ## 5. Request / response schema (proposed)
 
@@ -121,7 +123,8 @@ for f in fields:
 return { …envelope, item_state: out }
 ```
 - `user` row is the item creator (already joined for ownership). Load `name/email/phone_number` in the same query.
-- Decryption path unchanged (`decryptItemPrivate`); a decrypt failure still lands the item in `skipped`.
+- **Read values from the DECRYPTED merged state (`mergedState` from `decryptItemPrivate`), never the raw public `item_state`** — the public state holds *masked* placeholders (`+91***`) for `private:true` fields, so reading it would export masked junk. The "empty?" check that triggers the account fallback also runs against the **decrypted** value.
+- Decryption path unchanged (`decryptItemPrivate`); a decrypt failure still lands the item in `skipped` (accepted — see §13).
 - Never log field values (PII) — counts only, as today.
 
 ## 8. Edge cases & decisions
@@ -152,6 +155,8 @@ return { …envelope, item_state: out }
 - Canonical field absent in both → `null`.
 - Non-canonical field → raw key from item_state; absent → omitted; never reads `user`.
 - Per-domain mapping correctness (blue_dot seeker vs provider; purple_dot seeker `beneficiary_name`/`mobile_number`/`email`).
+- **Profile-first precedence:** canonical field present in *both* item_state and account with different values → item_state value returned.
+- **Mapping gap:** unmapped `(network, domain)` for a canonical field → emits the PII-free warning (assert the warning fires; value resolves via account fallback or `null`, never a silent wrong field).
 - `user_id` mode with `fields`.
 - Ownership/`skipped` unchanged; no PII in logs.
 
@@ -160,3 +165,18 @@ return { …envelope, item_state: out }
 - Aggregator-side wiring (the `signalstack-writer` query gains `fields`; #577/#578 consume it) — separate tickets.
 - The per-network mapping *content* (if Option A, edited in bluedots-schemas).
 - KC-token auth (aggregator-dpg#576).
+
+## 13. Risks & accepted decisions
+
+**Built into this change (correctness of the feature):**
+- **Resolve from decrypted state** (§7) — else masked values leak into the output. Test asserts the real, unmasked value.
+- **Mapping-completeness validation + warning** (§4.7) — a config gap must surface as a warning, not silent `null`/dropped participants. Favors **Option A** (mapping in `network.json`, co-located with the schema) to prevent drift.
+- **`fields`-omitted regression test** — proves the response is byte-for-byte today's full `item_state` (protects #579).
+- **Profile-first precedence** (decision): when a canonical field exists in **both** item_state and the account and they differ, the **item_state (profile) value wins**; the account is fallback only. Rationale: the profile field is the campaign-relevant contact.
+
+**Accepted / deferred (recorded, not mitigated in this change):**
+- **Retired-participant account fallback.** `retire` (#347) scrubs the *item* (`item_state` phone/email masked/removed) but not the `user`/account row, and `decrypt` does not filter retired items. So if a caller sends a **retired** item_id and requests a canonical field, the account fallback can return `user.email`/`user.phone_number` that retire meant to erase. **Accepted for the interim** — decrypt only returns an item the caller explicitly asks for, and callers are trusted/internal. **Known caveat:** the campaign prototype works off the twice-daily snapshot, so it could send an id retired *after* the snapshot without knowing. **Revisit before production** (e.g. skip the account fallback — or the item entirely — for retired items, or have retire also clear account contact). Tracked with the KC-token / production hardening (aggregator-dpg#576).
+- **Decrypt-failure skips the item.** A corrupt `item_private_state` blob lands the item in `skipped`, even for a canonical field that would have resolved from the account. Accepted (rare); revisit if it affects deliverability in practice.
+
+**Policy / observability:**
+- Returning account `email`/`phone` is a **new disclosure class** (login identity) beyond profile PII. The audit log should record when the **account fallback** was used and for which canonical fields; obtain the usual PII sign-off. (Consent gating remains out of scope for the interim, consistent with the aggregator side.)
