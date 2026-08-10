@@ -15,6 +15,11 @@ export const DecryptParticipantRequest = z
   .object({
     item_ids: z.array(z.uuid()).min(1).optional(),
     user_id: z.string().min(1).optional(),
+    // #237: optional field selector. Omitted => full item_state (today's
+    // behavior). Present => only these fields returned. Canonical name/email/
+    // phone are resolved via the domain contact_fields map with user-table
+    // fallback; other names are read from item_state as-is.
+    fields: z.array(z.string().min(1)).min(1).max(50).optional(),
   })
   .refine(
     (b) => (b.item_ids ? 1 : 0) + (b.user_id ? 1 : 0) === 1,
