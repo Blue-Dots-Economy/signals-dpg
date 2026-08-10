@@ -131,14 +131,24 @@ function resolveCanonicalField(
   log: ContactLog,
 ): ContactResolution {
   const fieldName = mappedField(ctx, f);
-  const fromState = fieldName ? mergedState[fieldName] : undefined;
-  if (hasValue(fromState)) return { value: fromState as string, source: 'item' }; // profile wins
+  const fromState = asContactString(fieldName ? mergedState[fieldName] : undefined);
+  if (fromState !== undefined) return { value: fromState, source: 'item' }; // profile wins
   if (!fieldName && (f === 'phone' || f === 'email')) {
     log.warn(
       { operation: 'participant.decrypt.contact_map_missing', network: ctx.network, domain: ctx.domain, field: f },
       'no contact_fields mapping for requested canonical field; using account fallback',
     );
   }
-  const fromAccount = account[f];
-  return hasValue(fromAccount) ? { value: fromAccount as string, source: 'user' } : { value: null, source: null };
+  const fromAccount = asContactString(account[f]);
+  return fromAccount !== undefined ? { value: fromAccount, source: 'user' } : { value: null, source: null };
+}
+
+/**
+ * A contact value is usable only if it's a non-empty string. Guards the
+ * strictly-typed `contact.value` (string | null) against a `contact_fields`
+ * mapping that points at a non-string item_state field: such a value degrades
+ * to the account fallback (or null) rather than a response-serialization 500.
+ */
+function asContactString(v: unknown): string | undefined {
+  return typeof v === 'string' && v.trim() !== '' ? v : undefined;
 }

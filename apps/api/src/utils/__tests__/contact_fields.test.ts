@@ -68,6 +68,21 @@ describe('resolveContact — canonical contact block (#521)', () => {
     });
   });
 
+  it('treats a non-string mapped item_state value as absent (guards the strict contact.value) → account fallback', () => {
+    const out = resolveContact(
+      { name: { first: 'Asha' }, phone: 12345 } as unknown as Record<string, unknown>,
+      { name: 'Account Name', email: 'a@x.com', phone: '+9100' },
+      ['name', 'phone'], ctxBlueSeeker, log,
+    );
+    expect(out).toEqual({
+      name: { value: 'Account Name', source: 'user' },
+      phone: { value: '+9100', source: 'user' },
+    });
+    // never leaks a non-string profile value into contact.value
+    expect(typeof out.name?.value).toBe('string');
+    expect(typeof out.phone?.value).toBe('string');
+  });
+
   it('falls back to the account when the canonical field is missing/empty in item_state', () => {
     const out = resolveContact(
       { name: 'Asha', phone: '' }, // phone empty, no email field in blue_dot seeker

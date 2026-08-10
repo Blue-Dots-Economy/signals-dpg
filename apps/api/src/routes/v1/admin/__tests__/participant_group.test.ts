@@ -173,7 +173,7 @@ vi.mock('@/network_configs', () => ({
   getNetworkConfigById: vi.fn(async () => {
     if (!networkCfgState.cfg) {
       throw new Error(
-        'participant_group.test.ts: no network_configs fixture set (only needed when body.fields is present)',
+        'participant_group.test.ts: no network_configs fixture set (only needed when body.contact is present)',
       );
     }
     return networkCfgState.cfg;
