@@ -25,6 +25,10 @@ import {
 const state = {
   rows: [] as Array<Record<string, unknown>>,
   network_cfg: null as Record<string, unknown> | null,
+  // #237 review fix: when set, the config-lookup mock rejects instead of
+  // resolving/throwing-not-configured, simulating a transient failure (e.g.
+  // schema-registry fetch) rather than a missing-network configuration error.
+  network_cfg_reject: false,
 };
 
 vi.mock('@/config', () => ({
@@ -49,6 +53,9 @@ vi.mock('@/config', () => ({
 
 vi.mock('@/network_configs', () => ({
   getNetworkConfigById: vi.fn(async (network: string) => {
+    if (state.network_cfg_reject) {
+      throw new Error(`transient config load failure for "${network}"`);
+    }
     if (!state.network_cfg) throw new Error(`no network config fixture set for "${network}"`);
     return state.network_cfg;
   }),
@@ -135,6 +142,7 @@ describe('POST /api/v1/admin/participant/decrypt — field selection (#237)', ()
   beforeEach(async () => {
     state.rows = [];
     state.network_cfg = null;
+    state.network_cfg_reject = false;
     app = await buildApp();
   });
 
@@ -186,6 +194,28 @@ describe('POST /api/v1/admin/participant/decrypt — field selection (#237)', ()
     const body = res.json();
     expect(body.profiles).toHaveLength(1);
     expect(body.profiles[0].item_state).toEqual({ email: 'account@example.com' });
+  });
+
+  it('#237 review fix: config-lookup rejection degrades the row instead of 500ing the request', async () => {
+    state.rows = [baseRow()];
+    state.network_cfg_reject = true; // getNetworkConfigById rejects for every network
+    const res = await app.inject({
+      method: 'POST',
+      url: '/participant/decrypt',
+      payload: { item_ids: [item_id], fields: ['name', 'phone', 'bio'] },
+    });
+    expect(res.statusCode).toBe(200);
+    const body = res.json();
+    expect(body.skipped).toEqual([]);
+    expect(body.profiles).toHaveLength(1);
+    // No usable context (config lookup failed) → canonical fields fall back
+    // to the account row rather than the real profile values, and the
+    // non-canonical field still comes through raw from item_state.
+    expect(body.profiles[0].item_state).toEqual({
+      name: 'Account Name',
+      phone: '+910000000000',
+      bio: 'hi',
+    });
   });
 
   it('canonical field absent in both profile and account → null', async () => {

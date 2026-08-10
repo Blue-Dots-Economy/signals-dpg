@@ -157,9 +157,36 @@ export const participant_decrypt_handler = async (
   };
 
   /** Resolves the per-row domain contact-field context (name fallback =
-   * item-type display_name_field -> domain card.title_field). */
+   * item-type display_name_field -> domain card.title_field).
+   *
+   * #237 review fix: the config lookup is isolated the same way
+   * `toSnapshotSafe` isolates decrypt failures — a rejection (transient
+   * schema-registry fetch failure, or a network id absent from the loaded
+   * configs) degrades this row to an empty context instead of throwing the
+   * whole request into a 500. With an empty context, `selectRequestedFields`
+   * already falls back to the account contact for canonical fields and reads
+   * non-canonical fields raw, so the row still resolves best-effort. */
   const contextFor = async (r: DecryptableRow): Promise<DomainContactContext> => {
-    const cfg = await getCfg(r.item_network);
+    const emptyContext: DomainContactContext = {
+      network: r.item_network,
+      domain: r.item_domain,
+      itemType: r.item_type,
+    };
+    let cfg;
+    try {
+      cfg = await getCfg(r.item_network);
+    } catch (err) {
+      request.log.error(
+        {
+          operation: 'admin.participant.decrypt.config_lookup_failed',
+          network: r.item_network,
+          domain: r.item_domain,
+          err,
+        },
+        'failed to resolve network config for field selection; falling back to empty context',
+      );
+      return emptyContext;
+    }
     const domainCfg = cfg.domains.find((d) => d.id === r.item_domain);
     const schema = domainCfg?.item_schemas?.[r.item_type] as
       | { display_name_field?: unknown }
