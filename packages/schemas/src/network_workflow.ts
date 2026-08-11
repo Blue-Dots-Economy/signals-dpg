@@ -140,7 +140,7 @@ const NetworkDomainSchema = z.object({
   const last = domain.status_rules[domain.status_rules.length - 1];
   if (last.when !== 'default') {
     ctx.addIssue({
-      code: z.ZodIssueCode.custom,
+      code: 'custom',
       message: 'status_rules must end with a `{ when: "default" }` tail rule',
       path: ['status_rules', domain.status_rules.length - 1, 'when'],
     });
@@ -154,7 +154,7 @@ const NetworkDomainSchema = z.object({
     !domain.go_live_required.includes('consent_required')
   ) {
     ctx.addIssue({
-      code: z.ZodIssueCode.custom,
+      code: 'custom',
       message:
         'a guardian_consent_required domain must keep "consent_required" in go_live_required',
       path: ['go_live_required'],
@@ -207,7 +207,7 @@ export const NetworkActionInteractionSchema = z
 
     if (!interaction.event_schema) {
       ctx.addIssue({
-        code: z.ZodIssueCode.custom,
+        code: 'custom',
         message:
           'reveals_pii_on_status requires event_schema with a status.enum to validate against',
         path: ['reveals_pii_on_status'],
@@ -218,7 +218,7 @@ export const NetworkActionInteractionSchema = z
     const statusEnum = extractStatusEnum(interaction.event_schema);
     if (!statusEnum) {
       ctx.addIssue({
-        code: z.ZodIssueCode.custom,
+        code: 'custom',
         message:
           'reveals_pii_on_status requires event_schema.properties.status.enum to be defined',
         path: ['reveals_pii_on_status'],
@@ -229,7 +229,7 @@ export const NetworkActionInteractionSchema = z
     for (const status of interaction.reveals_pii_on_status) {
       if (!statusEnum.includes(status)) {
         ctx.addIssue({
-          code: z.ZodIssueCode.custom,
+          code: 'custom',
           message: `reveals_pii_on_status value "${status}" is not in event_schema.properties.status.enum`,
           path: ['reveals_pii_on_status'],
         });
@@ -307,7 +307,7 @@ export const NetworkConfigSchema = z.object({
       if (field === undefined) continue;
       if (typeof field !== 'string') {
         ctx.addIssue({
-          code: z.ZodIssueCode.custom,
+          code: 'custom',
           message: `display_name_field must be a string`,
           path: ['domains', domainIdx, 'item_schemas', schemaName, 'display_name_field'],
         });
@@ -317,7 +317,7 @@ export const NetworkConfigSchema = z.object({
       const target = props[field];
       if (!target || typeof target !== 'object') {
         ctx.addIssue({
-          code: z.ZodIssueCode.custom,
+          code: 'custom',
           message: `display_name_field "${field}" does not exist in properties`,
           path: ['domains', domainIdx, 'item_schemas', schemaName, 'display_name_field'],
         });
@@ -326,13 +326,13 @@ export const NetworkConfigSchema = z.object({
       const t = target as Record<string, unknown>;
       if (t.private === true) {
         ctx.addIssue({
-          code: z.ZodIssueCode.custom,
+          code: 'custom',
           message: `display_name_field "${field}" points at a private property; pick a non-private field`,
           path: ['domains', domainIdx, 'item_schemas', schemaName, 'display_name_field'],
         });
       } else if (t.type !== 'string') {
         ctx.addIssue({
-          code: z.ZodIssueCode.custom,
+          code: 'custom',
           message: `display_name_field "${field}" must point at a property of type "string"`,
           path: ['domains', domainIdx, 'item_schemas', schemaName, 'display_name_field'],
         });
