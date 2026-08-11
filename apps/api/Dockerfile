@@ -83,9 +83,6 @@ COPY --from=pruner /repo/examples ./examples
 RUN --mount=type=cache,id=pnpm-store,target=/pnpm/store \
   pnpm install --prod --filter=api...
 
-# Writable scratch dir for the runtime (see TMPDIR in the runner stage).
-RUN mkdir -p /app/.tmp
-
 
 FROM dhi.io/node:24-alpine AS runner
 
@@ -96,19 +93,17 @@ WORKDIR /app
 
 ENV NODE_ENV=production
 ENV API_PORT=2742
-# `network_schema_cache.ts` mkdir -p's under os.tmpdir(). The hardened variant
-# ships alpine-baselayout-data but not alpine-baselayout, so a world-writable
-# /tmp is not guaranteed; as uid 1000 a fallback create at / would fail with
-# EACCES on the NETWORK_CONFIG_SOURCE=local warmup path. Point TMPDIR at a dir
-# we own instead of depending on the base image's FHS layout. If /tmp does turn
-# out to be present and writable, this line can be dropped.
-ENV TMPDIR=/app/.tmp
+# TMPDIR is deliberately NOT set. `network_schema_cache.ts` mkdir -p's under
+# os.tmpdir(); the hardened base ships /tmp at mode 1777, writable by the
+# unprivileged runtime user, so the default is correct. An earlier revision
+# pointed TMPDIR at /app/.tmp on the assumption /tmp might be absent — it is
+# not, and that dir landed root-owned (a COPY of an empty directory copies no
+# entries, so its --chown never applied), crashing the pod with EACCES.
 
 # The finished workspace (node_modules included) built by prod-deps. Copied as
 # root-owned and world-readable, matching the previous image, where the install
 # also ran as root before the USER switch.
 COPY --from=prod-deps /app ./
-COPY --from=prod-deps --chown=node:node /app/.tmp ./.tmp
 
 # Copy built output AFTER deps (important for layer caching)
 COPY --from=builder /app/apps/api/dist ./apps/api/dist
