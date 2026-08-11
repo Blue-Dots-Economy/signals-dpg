@@ -6154,7 +6154,10 @@
                   "contact": {
                     "anyOf": [
                       {
-                        "type": "boolean"
+                        "type": "boolean",
+                        "enum": [
+                          true
+                        ]
                       },
                       {
                         "minItems": 1,
