@@ -20,7 +20,9 @@ import {
   projectItemState,
   resolveContact,
   normalizeContact,
+  resolveNameFallbackField,
   type CanonicalContact,
+  type DomainConfigForName,
   type DomainContactContext,
 } from '@/utils/contact_fields';
 
@@ -60,28 +62,40 @@ const servedNetworks = (): string[] => {
   return Array.from(set);
 };
 
-const ITEM_COLUMNS = {
+// Base columns fetched for every request. `item_locations` and the creator's
+// account contact are added only when actually requested (see
+// `buildSelectColumns`), so the default path (no `contact`, no
+// `include_locations`) neither reads per-row jsonb locations nor pulls account
+// PII through the handler.
+const ITEM_COLUMNS_BASE = {
   item_id: items.item_id,
   item_network: items.item_network,
   item_domain: items.item_domain,
   item_type: items.item_type,
   item_state: items.item_state,
   item_private_state: items.item_private_state,
-  item_locations: items.item_locations,
   created_at: items.created_at,
   updated_at: items.updated_at,
 } as const;
 
-// The creator's account contact, selected alongside the item columns so the
-// `contact` block's canonical name/email/phone resolution can fall back to it
-// when the domain's item_state has no value for the mapped field (or no
-// mapping at all).
-const SELECT_COLUMNS = {
-  ...ITEM_COLUMNS,
-  user_name: user.name,
-  user_email: user.email,
-  user_phone: user.phoneNumber,
-} as const;
+/**
+ * Builds the SELECT column set for one request: base item columns always;
+ * `item_locations` only when `include_locations`; the creator's account
+ * name/email/phone (the `contact` block's fallback source) only when a
+ * `contact` block is requested.
+ *
+ * @param opts - The per-request snapshot options.
+ * @returns The Drizzle column selection for this request.
+ */
+function buildSelectColumns(opts: SnapshotOptions) {
+  return {
+    ...ITEM_COLUMNS_BASE,
+    ...(opts.includeLocations ? { item_locations: items.item_locations } : {}),
+    ...(opts.contact
+      ? { user_name: user.name, user_email: user.email, user_phone: user.phoneNumber }
+      : {}),
+  };
+}
 
 type DecryptableRow = {
   item_id: string;
@@ -90,12 +104,13 @@ type DecryptableRow = {
   item_type: string;
   item_state: unknown;
   item_private_state: string;
-  item_locations: Array<{ lat: number; lng: number; label?: string }>;
   created_at: Date;
   updated_at: Date;
-  user_name: string | null;
-  user_email: string | null;
-  user_phone: string | null;
+  // Present only when requested — see buildSelectColumns.
+  item_locations?: Array<{ lat: number; lng: number; label?: string }>;
+  user_name?: string | null;
+  user_email?: string | null;
+  user_phone?: string | null;
 };
 
 /**
@@ -122,47 +137,33 @@ const decryptRowSafe = (
   }
 };
 
-/** Per-network config lookup, memoized for the lifetime of one request. */
-type NetworkConfigGetter = (network: string) => ReturnType<typeof getNetworkConfigById>;
-
-/** #237: per-network config cache for the lifetime of a request — a batch of
- * item_ids commonly spans a handful of networks/domains, not one per row. */
-function makeNetworkConfigCache(): NetworkConfigGetter {
-  const cfgCache = new Map<string, ReturnType<typeof getNetworkConfigById>>();
-  return (network: string) => {
-    let cfg = cfgCache.get(network);
-    if (!cfg) {
-      cfg = getNetworkConfigById(network);
-      cfgCache.set(network, cfg);
-    }
-    return cfg;
-  };
-}
-
-/** Resolves the per-row domain contact-field context (name fallback =
- * item-type display_name_field -> domain card.title_field).
+/**
+ * Resolves the per-row domain contact-field context (name fallback =
+ * item-type display_name_field -> domain card.title_field, via the shared
+ * `resolveNameFallbackField`).
  *
- * #237 review fix: the config lookup is isolated the same way
- * `decryptRowSafe` isolates decrypt failures — a rejection (transient
- * schema-registry fetch failure, or a network id absent from the loaded
- * configs) degrades this row to an empty context instead of throwing the
- * whole request into a 500. With an empty context, `resolveContact` already
- * falls back to the account contact for every requested canonical field, so
- * the row still resolves best-effort. Only reached when `contact` is
- * requested — `fields` (pure projection) never needs domain config. */
+ * The config lookup is failure-isolated like `decryptRowSafe`: a rejection
+ * (transient schema-registry fetch failure, or a network id absent from the
+ * loaded configs) degrades this row to an empty context — `resolveContact`
+ * then falls back to the account contact for every requested canonical field —
+ * instead of 500-ing the whole batch. `getNetworkConfigById` is
+ * process-memoized (post-boot it's an in-memory array find) and self-heals on a
+ * transient load failure (network_configs.ts), so no per-request cache is
+ * needed. Only reached when `contact` is requested — `fields` (pure projection)
+ * never needs domain config.
+ */
 async function resolveDomainContext(
   r: DecryptableRow,
-  getCfg: NetworkConfigGetter,
   log: FastifyRequest['log'],
 ): Promise<DomainContactContext> {
-  const emptyContext: DomainContactContext = {
+  const base: DomainContactContext = {
     network: r.item_network,
     domain: r.item_domain,
     itemType: r.item_type,
   };
   let cfg;
   try {
-    cfg = await getCfg(r.item_network);
+    cfg = await getNetworkConfigById(r.item_network);
   } catch (err) {
     log.error(
       {
@@ -171,23 +172,34 @@ async function resolveDomainContext(
         domain: r.item_domain,
         err,
       },
-      'failed to resolve network config for field selection; falling back to empty context',
+      'failed to resolve network config for contact resolution; falling back to empty context (account contact)',
     );
-    return emptyContext;
+    return base;
   }
   const domainCfg = cfg.domains.find((d) => d.id === r.item_domain);
-  const schema = domainCfg?.item_schemas?.[r.item_type] as
-    | { display_name_field?: unknown }
-    | undefined;
-  const nameFallbackField =
-    (typeof schema?.display_name_field === 'string' ? schema.display_name_field : undefined) ??
-    domainCfg?.card?.title_field;
+  const nameFallbackField = resolveNameFallbackField(
+    domainCfg as DomainConfigForName | undefined,
+    r.item_type,
+  );
   return {
-    network: r.item_network,
-    domain: r.item_domain,
-    itemType: r.item_type,
+    ...base,
     contactFields: domainCfg?.contact_fields,
     ...(nameFallbackField ? { nameFallbackField } : {}),
+  };
+}
+
+/** Clamps a stored (possibly jitter-nudged) coordinate into the valid WGS84
+ * range so the validating response serializer (lat ±90 / lng ±180) can never
+ * 500 the whole batch on one out-of-range point. */
+function clampLocation(loc: { lat: number; lng: number; label?: string }): {
+  lat: number;
+  lng: number;
+  label?: string;
+} {
+  return {
+    lat: Math.max(-90, Math.min(90, loc.lat)),
+    lng: Math.max(-180, Math.min(180, loc.lng)),
+    ...(loc.label !== undefined ? { label: loc.label } : {}),
   };
 }
 
@@ -209,7 +221,6 @@ async function buildSnapshot(
   r: DecryptableRow,
   mergedState: Record<string, unknown>,
   opts: SnapshotOptions,
-  getCfg: NetworkConfigGetter,
   log: FastifyRequest['log'],
 ): Promise<DecryptedProfileSnapshot> {
   const snapshot: DecryptedProfileSnapshot = {
@@ -224,14 +235,14 @@ async function buildSnapshot(
   if (opts.contact) {
     snapshot.contact = resolveContact(
       mergedState,
-      { name: r.user_name, email: r.user_email, phone: r.user_phone },
+      { name: r.user_name ?? null, email: r.user_email ?? null, phone: r.user_phone ?? null },
       opts.contact,
-      await resolveDomainContext(r, getCfg, log),
+      await resolveDomainContext(r, log),
       log,
     );
   }
   if (opts.includeLocations) {
-    snapshot.locations = r.item_locations ?? [];
+    snapshot.locations = (r.item_locations ?? []).map(clampLocation);
   }
   return snapshot;
 }
@@ -246,7 +257,6 @@ async function buildSnapshot(
 async function collectProfiles(
   rows: DecryptableRow[],
   opts: SnapshotOptions,
-  getCfg: NetworkConfigGetter,
   log: FastifyRequest['log'],
 ): Promise<{ profiles: DecryptedProfileSnapshot[]; failedIds: string[] }> {
   const profiles: DecryptedProfileSnapshot[] = [];
@@ -254,12 +264,39 @@ async function collectProfiles(
   for (const r of rows) {
     const mergedState = decryptRowSafe(r, log);
     if (mergedState) {
-      profiles.push(await buildSnapshot(r, mergedState, opts, getCfg, log));
+      profiles.push(await buildSnapshot(r, mergedState, opts, log));
     } else {
       failedIds.push(r.item_id);
     }
   }
   return { profiles, failedIds };
+}
+
+/**
+ * Tallies account-fallback disclosures for the audit log: how many contact
+ * fields resolved to the login-identity (account) value (`source: 'user'`), and
+ * across how many profiles. A distinct disclosure class — login-identity
+ * contact leaves the system even when the profile itself had no value — so it
+ * is recorded separately from the request-shape counts.
+ *
+ * @param profiles - The resolved snapshots.
+ * @returns `{ fields, profiles }` account-fallback counts.
+ */
+function countAccountFallback(profiles: DecryptedProfileSnapshot[]): {
+  fields: number;
+  profiles: number;
+} {
+  let fields = 0;
+  let profilesWithFallback = 0;
+  for (const p of profiles) {
+    if (!p.contact) continue;
+    const used = Object.values(p.contact).filter((c) => c?.source === 'user').length;
+    if (used > 0) {
+      fields += used;
+      profilesWithFallback += 1;
+    }
+  }
+  return { fields, profiles: profilesWithFallback };
 }
 
 /** Ownership/served-network scoping shared by both query modes: aggregators
@@ -300,7 +337,7 @@ export const participant_decrypt_handler = async (
     contact,
     includeLocations: body.include_locations === true,
   };
-  const getCfg = makeNetworkConfigCache();
+  const selectColumns = buildSelectColumns(opts);
 
   let profiles: DecryptedProfileSnapshot[];
   let skipped: string[];
@@ -310,7 +347,7 @@ export const participant_decrypt_handler = async (
     mode = 'item_ids';
     const requested = Array.from(new Set(body.item_ids));
     const rows = (await db
-      .select(SELECT_COLUMNS)
+      .select(selectColumns)
       .from(items)
       .innerJoin(user, eq(user.id, items.created_by))
       .where(
@@ -320,7 +357,7 @@ export const participant_decrypt_handler = async (
         ),
       )) as DecryptableRow[];
 
-    ({ profiles } = await collectProfiles(rows, opts, getCfg, request.log));
+    ({ profiles } = await collectProfiles(rows, opts, request.log));
     // Not found, not owned, not in a served network, OR failed to decrypt — all
     // land in skipped, undifferentiated, so the response never leaks existence.
     const found = new Set(profiles.map((p) => p.item_id));
@@ -329,7 +366,7 @@ export const participant_decrypt_handler = async (
     mode = 'user_id';
     const userId = body.user_id!;
     const rows = (await db
-      .select(SELECT_COLUMNS)
+      .select(selectColumns)
       .from(items)
       .innerJoin(user, eq(user.id, items.created_by))
       .where(
@@ -340,13 +377,17 @@ export const participant_decrypt_handler = async (
       )
       .orderBy(items.created_at)) as DecryptableRow[];
 
-    const collected = await collectProfiles(rows, opts, getCfg, request.log);
+    const collected = await collectProfiles(rows, opts, request.log);
     profiles = collected.profiles;
     skipped = collected.failedIds;
   }
 
   // Audit: this endpoint returns decrypted PII to the caller, so every call is
   // recorded. The log entry itself carries counts only — never item_state values.
+  // account_fallback_* records the login-identity (account) contact disclosure
+  // class: how many contact fields, across how many profiles, were served from
+  // the account row rather than the profile.
+  const accountFallback = countAccountFallback(profiles);
   request.log.info({
     operation: 'admin.participant.decrypt',
     acting_org_id: acting.org_id,
@@ -358,6 +399,8 @@ export const participant_decrypt_handler = async (
     fields_requested: fields?.length,
     contact_requested: contact?.length,
     include_locations: opts.includeLocations,
+    account_fallback_fields: accountFallback.fields,
+    account_fallback_profiles: accountFallback.profiles,
   });
 
   return reply.code(200).send({ profiles, skipped });

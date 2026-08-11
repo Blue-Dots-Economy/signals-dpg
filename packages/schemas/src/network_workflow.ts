@@ -102,7 +102,12 @@ const ContactFieldsSchema = z
     email: z.string().min(1).optional(),
     phone: z.string().min(1).optional(),
   })
-  .strict();
+  // `.strip()` (not `.strict()`): an unknown/typo'd key here must not fail the
+  // whole network-config parse — that runs for every domain, including unserved
+  // siblings, and would take down boot (app.ts awaits config with no catch).
+  // A dropped typo degrades gracefully to the account fallback at resolve time
+  // (with a `contact_map_missing` warn), rather than a hard boot failure.
+  .strip();
 
 const NetworkDomainSchema = z.object({
   id: z.string().min(1),

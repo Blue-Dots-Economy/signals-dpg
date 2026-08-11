@@ -419,7 +419,7 @@ describe('network_configs.ts (singleton-promise config cache)', () => {
     expect(loadNetworkConfigsMock).toHaveBeenCalledTimes(1);
   });
 
-  it('caches a rejected load: a validation failure is sticky until refreshNetworkConfigs()', async () => {
+  it('does NOT cache a rejected load: the next call retries and self-heals (no refresh needed)', async () => {
     loadNetworkConfigsMock.mockImplementation(async () => docs());
     assertPrimaryMock.mockImplementation(() => {
       throw new Error('two primary location fields');
@@ -429,15 +429,20 @@ describe('network_configs.ts (singleton-promise config cache)', () => {
     await expect(mod.getNetworkConfigs()).rejects.toThrow(
       'two primary location fields',
     );
+    // A rejected promise must NOT be memoised — a second call re-invokes the
+    // loader rather than replaying the sticky failure (else one transient blip
+    // poisons every request for the process lifetime).
     await expect(mod.getNetworkConfigs()).rejects.toThrow(
       'two primary location fields',
     );
-    expect(loadNetworkConfigsMock).toHaveBeenCalledTimes(1);
-
-    assertPrimaryMock.mockImplementation(() => {});
-    const recovered = await mod.refreshNetworkConfigs();
-    expect(recovered.map((entry) => entry.id)).toEqual(['net_a', 'net_b']);
     expect(loadNetworkConfigsMock).toHaveBeenCalledTimes(2);
+
+    // Once the underlying issue clears, the very next getNetworkConfigs() recovers
+    // on its own — no refreshNetworkConfigs() required.
+    assertPrimaryMock.mockImplementation(() => {});
+    const recovered = await mod.getNetworkConfigs();
+    expect(recovered.map((entry) => entry.id)).toEqual(['net_a', 'net_b']);
+    expect(loadNetworkConfigsMock).toHaveBeenCalledTimes(3);
   });
 });
 

@@ -86,9 +86,8 @@ describe('DecryptParticipantRequest.contact', () => {
     const r = DecryptParticipantRequest.parse({ user_id: 'u1', contact: ['phone'] });
     expect(r.contact).toEqual(['phone']);
   });
-  it('accepts `false` (explicitly no contact block)', () => {
-    const r = DecryptParticipantRequest.parse({ user_id: 'u1', contact: false });
-    expect(r.contact).toBe(false);
+  it('rejects `false` (omit the key instead of sending a redundant value)', () => {
+    expect(() => DecryptParticipantRequest.parse({ user_id: 'u1', contact: false })).toThrow();
   });
   it('is valid when omitted', () => {
     const r = DecryptParticipantRequest.parse({ user_id: 'u1' });

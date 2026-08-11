@@ -3,6 +3,7 @@ import {
   projectItemState,
   resolveContact,
   normalizeContact,
+  resolveNameFallbackField,
   CANONICAL,
   type DomainContactContext,
 } from '../contact_fields.js';
@@ -49,8 +50,7 @@ describe('normalizeContact', () => {
     expect(normalizeContact(true)).toEqual([...CANONICAL]);
   });
 
-  it('false and undefined both normalize to undefined (no contact block)', () => {
-    expect(normalizeContact(false)).toBeUndefined();
+  it('undefined normalizes to undefined (no contact block)', () => {
     expect(normalizeContact(undefined)).toBeUndefined();
   });
 
@@ -149,5 +149,64 @@ describe('resolveContact — canonical contact block (#521)', () => {
     const ctx: DomainContactContext = { network: 'blue_dot', domain: 'seeker', itemType: 'profile_1.0' };
     resolveContact({}, { name: null, email: null, phone: null }, ['name'], ctx, log);
     expect(log.warn).not.toHaveBeenCalled();
+  });
+});
+
+describe('projectItemState — own-property / prototype safety (#521 review)', () => {
+  it('ignores inherited keys (only own enumerable keys count as present)', () => {
+    const out = projectItemState({ age: '23' }, ['toString', 'hasOwnProperty', 'age']);
+    expect(out).toEqual({ age: '23' });
+    expect(Object.prototype.hasOwnProperty.call(out, 'toString')).toBe(false);
+  });
+
+  it('does not pollute the output prototype via a literal __proto__ key', () => {
+    const malicious = JSON.parse('{"__proto__": "danger", "age": "23"}') as Record<string, unknown>;
+    const out = projectItemState(malicious, ['__proto__', 'age']);
+    // __proto__ becomes a real own data property, not a prototype mutation
+    expect(Object.getPrototypeOf(out)).toBe(Object.prototype);
+    expect(Object.getOwnPropertyDescriptor(out, '__proto__')?.value).toBe('danger');
+    expect(({} as Record<string, unknown>).danger).toBeUndefined();
+  });
+});
+
+describe('resolveContact — stale mapping observability (#521 review)', () => {
+  it('warns when a mapping points at an item_state field that is absent', () => {
+    log.warn.mockClear();
+    const ctx: DomainContactContext = {
+      network: 'blue_dot', domain: 'seeker', itemType: 'profile_1.0',
+      contactFields: { name: 'renamed_name' }, // points at a field the item lacks
+    };
+    const out = resolveContact({ name: 'Asha' }, { name: 'Acct', email: null, phone: null }, ['name'], ctx, log);
+    expect(out.name).toEqual({ value: 'Acct', source: 'user' });
+    expect(log.warn).toHaveBeenCalledTimes(1);
+    expect(log.warn.mock.calls[0]![0]).toMatchObject({
+      operation: 'participant.decrypt.contact_map_stale',
+      mapped_to: 'renamed_name',
+    });
+  });
+
+  it('does NOT warn when the mapped field is present but empty (normal data)', () => {
+    log.warn.mockClear();
+    const ctx: DomainContactContext = {
+      network: 'blue_dot', domain: 'seeker', itemType: 'profile_1.0',
+      contactFields: { phone: 'phone' },
+    };
+    resolveContact({ phone: '' }, { name: null, email: null, phone: '+9100' }, ['phone'], ctx, log);
+    expect(log.warn).not.toHaveBeenCalled();
+  });
+});
+
+describe('resolveNameFallbackField (#521 review)', () => {
+  it('prefers the item-type display_name_field', () => {
+    const cfg = { item_schemas: { 'profile_1.0': { display_name_field: 'beneficiary_name' } }, card: { title_field: 'card_title' } };
+    expect(resolveNameFallbackField(cfg, 'profile_1.0')).toBe('beneficiary_name');
+  });
+  it('falls back to card.title_field when display_name_field is unset/non-string', () => {
+    const cfg = { item_schemas: { 'profile_1.0': {} }, card: { title_field: 'card_title' } };
+    expect(resolveNameFallbackField(cfg, 'profile_1.0')).toBe('card_title');
+  });
+  it('returns undefined when neither is set', () => {
+    expect(resolveNameFallbackField({ item_schemas: {}, card: {} }, 'profile_1.0')).toBeUndefined();
+    expect(resolveNameFallbackField(undefined, 'profile_1.0')).toBeUndefined();
   });
 });

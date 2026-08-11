@@ -40,7 +40,15 @@ async function loadAndParseNetworkConfigs(): Promise<NetworkConfigDocument[]> {
 
 export async function getNetworkConfigs(): Promise<NetworkConfigDocument[]> {
   if (!networkConfigsPromise) {
-    networkConfigsPromise = loadAndParseNetworkConfigs();
+    // Do NOT memoize a rejected promise: a single transient failure (e.g. a
+    // schema-registry fetch blip) would otherwise poison the cache for the
+    // process lifetime, silently degrading every downstream caller. Clear the
+    // slot on rejection so the next call retries.
+    const pending = loadAndParseNetworkConfigs();
+    pending.catch(() => {
+      if (networkConfigsPromise === pending) networkConfigsPromise = null;
+    });
+    networkConfigsPromise = pending;
   }
 
   return networkConfigsPromise;

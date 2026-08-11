@@ -29,10 +29,12 @@ export const DecryptParticipantRequest = z
     // special-casing, no `user` (account) fallback — see `contact` below.
     fields: z.array(z.string().min(1)).max(50).optional(),
     // Canonical contact block (independent of `fields`). `true` = all three;
-    // an array = that subset. Resolved via the domain contact_fields map with
-    // account (user-table) fallback + provenance — see DecryptedProfileSnapshot.contact.
+    // an array = that subset; omit for no contact block. (`false` is not a
+    // distinct value — omitting the key is the way to say "no contact".)
+    // Resolved via the domain contact_fields map with account (user-table)
+    // fallback + provenance — see DecryptedProfileSnapshot.contact.
     contact: z
-      .union([z.boolean(), z.array(z.enum(['name', 'email', 'phone'])).min(1)])
+      .union([z.literal(true), z.array(z.enum(['name', 'email', 'phone'])).min(1)])
       .optional(),
     // Include the item's geocoded item_locations in the response.
     include_locations: z.boolean().optional(),

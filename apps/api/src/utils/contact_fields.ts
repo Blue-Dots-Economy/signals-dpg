@@ -63,16 +63,42 @@ export function mappedField(ctx: DomainContactContext, f: CanonicalContact): str
   return undefined; // phone/email have no default — mapping is required
 }
 
+/** Minimal domain-config shape needed to resolve the `name` fallback field. */
+export interface DomainConfigForName {
+  item_schemas?: Record<string, { display_name_field?: unknown } | undefined>;
+  card?: { title_field?: unknown } | undefined;
+}
+
+/**
+ * The item_state field a domain uses as the `name` fallback: the item-type's
+ * `display_name_field`, else the domain's `card.title_field`. Single, typed
+ * source for the precedence otherwise re-implemented (with raw casts) in the
+ * decrypt handler and `private_display_name`.
+ *
+ * @param domainCfg - The resolved domain config (may be undefined).
+ * @param itemType - The item type whose display field is wanted.
+ * @returns The fallback field name, or undefined when neither is set.
+ */
+export function resolveNameFallbackField(
+  domainCfg: DomainConfigForName | undefined,
+  itemType: string,
+): string | undefined {
+  const displayName = domainCfg?.item_schemas?.[itemType]?.display_name_field;
+  if (typeof displayName === 'string') return displayName;
+  const cardTitle = domainCfg?.card?.title_field;
+  return typeof cardTitle === 'string' ? cardTitle : undefined;
+}
+
 /**
  * Normalizes the request's `contact` param to the concrete list of canonical
- * fields to resolve. `true` => all three; `false`/`undefined` => no contact
- * block (undefined signals "don't attach `contact` at all").
+ * fields to resolve. `true` => all three; `undefined` => no contact block
+ * (don't attach `contact` at all); an array passes through as the subset.
  */
 export function normalizeContact(
-  contact: boolean | CanonicalContact[] | undefined,
+  contact: true | CanonicalContact[] | undefined,
 ): CanonicalContact[] | undefined {
   if (contact === true) return [...CANONICAL];
-  if (contact === false || contact === undefined) return undefined;
+  if (contact === undefined) return undefined;
   return contact;
 }
 
@@ -91,7 +117,15 @@ export function projectItemState(
 ): Record<string, unknown> {
   const out: Record<string, unknown> = {};
   for (const f of fields) {
-    if (hasValue(mergedState[f])) out[f] = mergedState[f];
+    // Own enumerable keys only: an inherited key (e.g. `toString`) must not read
+    // as present, and a participant-supplied literal `__proto__` key must not be
+    // treated as a real field.
+    if (!Object.hasOwn(mergedState, f)) continue;
+    const v = mergedState[f];
+    if (!hasValue(v)) continue;
+    // `defineProperty` (not `out[f] = v`) so a literal `__proto__` key becomes a
+    // plain own data property instead of mutating the output's prototype.
+    Object.defineProperty(out, f, { value: v, writable: true, enumerable: true, configurable: true });
   }
   return out;
 }
@@ -133,7 +167,24 @@ function resolveCanonicalField(
   const fieldName = mappedField(ctx, f);
   const fromState = asContactString(fieldName ? mergedState[fieldName] : undefined);
   if (fromState !== undefined) return { value: fromState, source: 'item' }; // profile wins
-  if (!fieldName && (f === 'phone' || f === 'email')) {
+  if (fieldName) {
+    // A mapping exists but resolved to nothing usable. If the mapped key is
+    // entirely ABSENT from item_state (vs present-but-empty, which is normal
+    // participant data), the mapping likely points at a renamed/mistyped field
+    // — surface it rather than silently returning the account value as `user`.
+    if (!Object.hasOwn(mergedState, fieldName)) {
+      log.warn(
+        {
+          operation: 'participant.decrypt.contact_map_stale',
+          network: ctx.network,
+          domain: ctx.domain,
+          field: f,
+          mapped_to: fieldName,
+        },
+        'contact_fields mapping points at a field absent from item_state; using account fallback',
+      );
+    }
+  } else if (f === 'phone' || f === 'email') {
     log.warn(
       { operation: 'participant.decrypt.contact_map_missing', network: ctx.network, domain: ctx.domain, field: f },
       'no contact_fields mapping for requested canonical field; using account fallback',
