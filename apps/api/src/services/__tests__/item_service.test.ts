@@ -92,6 +92,7 @@ vi.mock('@dpg/schemas', () => ({
 
 vi.mock('../items/classifier.js', () => ({
   classify_item: (...a: any[]) => classify_item(...a),
+  DEFAULT_GO_LIVE_GATES: ['schema_required'],
 }));
 
 vi.mock('../consent_acceptance.js', () => ({
@@ -668,12 +669,14 @@ describe('createItemInternal — storage shape', () => {
 
     await createItemInternal(exec, createParams({ item_state: { name: 'Asha' } }));
 
-    expect(classify_item).toHaveBeenCalledWith({
-      schema: { required: ['name'] },
-      merged_state: { name: 'Asha' },
-      current_status: 'draft',
-      consent_accepted: false,
-    });
+    expect(classify_item).toHaveBeenCalledWith(
+      expect.objectContaining({
+        schema: { required: ['name'] },
+        merged_state: { name: 'Asha' },
+        current_status: 'draft',
+        consent_accepted: false,
+      }),
+    );
   });
 
   it('defaults item_state to {} and item_locations to []', async () => {
@@ -822,8 +825,12 @@ describe('promoteItemOnProfileConsent', () => {
     );
   });
 
-  it('stays draft when the U18 guardian gate blocks go-live', async () => {
-    classify_item.mockReturnValue({ lifecycle_status: 'live' });
+  it('folds the U18 guardian block into consent_accepted=false, keeping a gated minor draft', async () => {
+    // Under the config-driven gates model the guardian check is folded into
+    // consent_accepted (not a separate post-classify override). A gated minor
+    // with no guardian row → consent_accepted:false → the consent_required gate
+    // fails → the real classifier returns draft (mocked here) → promote is a no-op.
+    classify_item.mockReturnValue({ lifecycle_status: 'draft' });
     guardianConsentRequired.mockReturnValue(true);
     const { exec, queue, rec } = makeExec();
     queue.push([draftItem]);
@@ -832,6 +839,9 @@ describe('promoteItemOnProfileConsent', () => {
 
     await expect(promoteItemOnProfileConsent(exec, 'i1')).resolves.toBe(false);
     expect(rec.updates).toHaveLength(0);
+    expect(classify_item).toHaveBeenCalledWith(
+      expect.objectContaining({ consent_accepted: false }),
+    );
   });
 });
 
@@ -1047,8 +1057,11 @@ describe('updateItemInternal — state edits', () => {
   });
 
   it('keeps a gated minor draft even though a self-consent row exists (#311)', async () => {
+    // A source-agnostic self-consent row must NOT satisfy the gate for a gated
+    // minor: the guardian block folds into consent_accepted:false, so the gate
+    // fails and the real classifier stays draft (mocked here).
     hasAcceptedProfileConsent.mockResolvedValue(true);
-    classify_item.mockReturnValue({ lifecycle_status: 'live' });
+    classify_item.mockReturnValue({ lifecycle_status: 'draft' });
     guardianConsentRequired.mockReturnValue(true);
     const { exec, queue, rec } = makeExec();
     queue.push([existingItem]);
@@ -1059,12 +1072,19 @@ describe('updateItemInternal — state edits', () => {
     await updateItemInternal(exec, 'i1', 'u1', false, { item_state: { name: 'Bee' } });
 
     expect(rec.updates[0].set.lifecycle_status).toBe('draft');
+    expect(classify_item).toHaveBeenCalledWith(
+      expect.objectContaining({ consent_accepted: false }),
+    );
   });
 
-  it('does not re-run the gate for an already-live item', async () => {
+  it('re-runs the gate on edit and keeps an already-live item live', async () => {
+    // The config-driven model re-runs classify on every state edit (no
+    // live-skip); the live-latch guards required-field removal. A live item
+    // whose consent is satisfied (adult / non-gated → guardian never blocks)
+    // stays live.
     hasAcceptedProfileConsent.mockResolvedValue(true);
     classify_item.mockReturnValue({ lifecycle_status: 'live' });
-    guardianConsentRequired.mockReturnValue(true);
+    guardianConsentRequired.mockReturnValue(false);
     const { exec, queue, rec } = makeExec();
     queue.push([{ ...existingItem, lifecycle_status: 'live' }]);
     queue.push([updatedRow]);
@@ -1072,7 +1092,9 @@ describe('updateItemInternal — state edits', () => {
     await updateItemInternal(exec, 'i1', 'u1', false, { item_state: { name: 'Bee' } });
 
     expect(rec.updates[0].set.lifecycle_status).toBe('live');
-    expect(guardianConsentRequired).not.toHaveBeenCalled();
+    expect(classify_item).toHaveBeenCalledWith(
+      expect.objectContaining({ current_status: 'live', consent_accepted: true }),
+    );
   });
 });
 

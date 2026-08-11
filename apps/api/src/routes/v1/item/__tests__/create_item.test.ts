@@ -18,6 +18,7 @@ const {
   invalidateItemFetchCache,
   publishItemEvent,
   createItemInternal,
+  resolveGoLiveGates,
   resolveLocationsForCreate,
   getWardAge,
   guardianConsentRequired,
@@ -66,6 +67,7 @@ const {
     invalidateItemFetchCache: vi.fn(),
     publishItemEvent: vi.fn(),
     createItemInternal: vi.fn(),
+    resolveGoLiveGates: vi.fn(),
     resolveLocationsForCreate: vi.fn(),
     getWardAge: vi.fn(),
     guardianConsentRequired: vi.fn(),
@@ -161,6 +163,7 @@ vi.mock('@/utils/publish_item_event', () => ({
 vi.mock('@/services/item_service', () => ({
   ItemServiceError: FakeItemServiceError,
   createItemInternal: (...a: unknown[]) => createItemInternal(...a),
+  resolveGoLiveGates: (...a: unknown[]) => resolveGoLiveGates(...a),
 }));
 
 vi.mock('@/services/geocoding/resolve_locations_for_create', () => ({
@@ -253,6 +256,9 @@ beforeEach(() => {
   ensureItemPartition.mockResolvedValue(undefined);
   resolveLocationsForCreate.mockResolvedValue([]);
   resolveConsentVersion.mockResolvedValue(3);
+  // Default: the domain gates go-live on consent_required, so the create-time
+  // CONSENT_REQUIRED guard is active (config-driven per #344 go_live_required).
+  resolveGoLiveGates.mockResolvedValue(['schema_required', 'consent_required']);
   guardianConsentRequired.mockReturnValue(false);
   getNetworkConfigById.mockResolvedValue({ id: 'blue_dot' });
   getWardAge.mockResolvedValue(30);
