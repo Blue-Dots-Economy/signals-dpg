@@ -76,22 +76,29 @@ ON items USING GIN (item_state);
 ALTER TABLE items ADD COLUMN IF NOT EXISTS item_locations JSONB NOT NULL DEFAULT '[]'::jsonb;
 
 -- Lifecycle status (2026-06-03 spec).
+-- The allowed values (draft | live | paused | retired) are owned by the
+-- application (`LifecycleStatus` in apps/api services/items/classifier.ts).
+-- Deliberately NO CHECK constraint: only the classifier + lifecycle route write
+-- this column, and a DB enum would force a migration for every new state (#347).
 ALTER TABLE items
   ADD COLUMN IF NOT EXISTS lifecycle_status TEXT NOT NULL DEFAULT 'draft';
 
-DO $$
-BEGIN
-  IF NOT EXISTS (
-    SELECT 1 FROM pg_constraint WHERE conname = 'items_lifecycle_status_chk'
-  ) THEN
-    ALTER TABLE items
-      ADD CONSTRAINT items_lifecycle_status_chk
-      CHECK (lifecycle_status IN ('draft','live','paused'));
-  END IF;
-END$$;
+-- Drop the legacy CHECK if an older schema created it (superseded by #347).
+ALTER TABLE items DROP CONSTRAINT IF EXISTS items_lifecycle_status_chk;
 
 CREATE INDEX IF NOT EXISTS items_lifecycle_idx
   ON items (item_network, item_domain, lifecycle_status);
+
+-- Facet filter indexes (#203, drizzle/0006_facet_item_state_indexes.sql).
+-- Expression btree per declared `filterable` facet path, NOT a blanket GIN —
+-- a GIN on item_state only accelerates `@>`/`?` operators, not the
+-- `item_state->>'field' = ANY(...)` pattern the map/list facet filters use.
+CREATE INDEX IF NOT EXISTS items_item_state_gender_idx
+  ON items ((item_state ->> 'gender'));
+CREATE INDEX IF NOT EXISTS items_item_state_work_experience_idx
+  ON items ((item_state ->> 'workExperience'));
+CREATE INDEX IF NOT EXISTS items_item_state_nature_of_jobs_interested_in_idx
+  ON items ((item_state ->> 'natureOfJobsInterestedIn'));
 
 -- ── item_search (Signals search engine V1) ──────────────────────────────────
 -- Search/discovery index maintained by the signals-search service.
@@ -147,6 +154,7 @@ CREATE TABLE IF NOT EXISTS item_actions (
 
   requirements_snapshot JSONB NOT NULL DEFAULT '{}'::jsonb,
   remarks TEXT,
+  match_score REAL,
 
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -170,6 +178,11 @@ PARTITION BY LIST (partition_network);
 ALTER TABLE item_actions ADD COLUMN IF NOT EXISTS performed_by_org_id TEXT;
 ALTER TABLE item_actions ADD COLUMN IF NOT EXISTS performed_by_service_user_id TEXT;
 
+-- #439: connect-time relevance score (0-10) from the match_score service.
+-- Upgrade guard for databases created before this column was added to the
+-- CREATE TABLE above.
+ALTER TABLE item_actions ADD COLUMN IF NOT EXISTS match_score REAL;
+
 CREATE INDEX IF NOT EXISTS item_actions_source_item_idx
 ON item_actions (
   source_item_network,
@@ -188,11 +201,33 @@ ON item_actions (
   created_at DESC
 );
 
+-- Per-pair action cap (#370/#422): open-action recount matches the unordered
+-- {source, target} pair from either direction, type-agnostic (no action_type
+-- filter). Both orderings indexed, partition_network-first, so the count's
+-- `(source=A AND target=B) OR (source=B AND target=A)` is index-served either
+-- way. The existing *_item_idx indexes lead with source/target network+domain+
+-- type (not constrained by that query) so they don't serve it. Mirrors
+-- drizzle/0010_action_pair_open_indexes.sql.
+CREATE INDEX IF NOT EXISTS item_actions_pair_src_tgt_idx
+ON item_actions (partition_network, source_item_id, target_item_id);
+
+CREATE INDEX IF NOT EXISTS item_actions_pair_tgt_src_idx
+ON item_actions (partition_network, target_item_id, source_item_id);
+
 CREATE INDEX IF NOT EXISTS item_actions_source_owner_idx
 ON item_actions (source_item_owner, updated_at DESC);
 
 CREATE INDEX IF NOT EXISTS item_actions_target_owner_idx
 ON item_actions (target_item_owner, updated_at DESC);
+
+-- My-Actions per-profile filter/sort (#439): page an owner's actions by
+-- status and recency from either side of the relation. Mirrors
+-- drizzle/0011_action_owner_status_indexes.sql.
+CREATE INDEX IF NOT EXISTS item_actions_target_owner_status_idx
+ON item_actions (target_item_owner, action_status, updated_at);
+
+CREATE INDEX IF NOT EXISTS item_actions_source_owner_status_idx
+ON item_actions (source_item_owner, action_status, updated_at);
 
 CREATE INDEX IF NOT EXISTS item_actions_status_idx
 ON item_actions (action_status, created_at DESC);

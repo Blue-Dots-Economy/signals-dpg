@@ -5,6 +5,7 @@ import { DomainCard } from './domain-card';
 import { MatchScoreCard } from '@/components/match-score';
 import { EmptyState } from '@/components/empty-state';
 import type { Item } from '@/lib/item-api';
+import { shouldRenderMatchScoreCard } from '@/lib/match-score-config';
 import { SelectableCard } from '@/components/selection/selectable-card';
 import { useEqualRowHeights } from '@/hooks/use-equal-row-heights';
 
@@ -25,6 +26,12 @@ interface CardGridProps {
   localItem?: Item | null;
   networkId?: string;
   selectedDomain?: string | null;
+  /**
+   * Item ids the active profile already has an OPEN action with (either
+   * direction). Their CTA is disabled — one open action per pair (#370/#422).
+   */
+  openActionItemIds?: Set<string>;
+  openActionReason?: string;
   /** Selection mode passthrough (browse bulk connect). */
   selection?: {
     selectMode: boolean;
@@ -50,6 +57,8 @@ export function CardGrid({
   localItem,
   networkId = '',
   selectedDomain,
+  openActionItemIds,
+  openActionReason,
   selection,
 }: CardGridProps) {
   const gridRef = useEqualRowHeights<HTMLDivElement>();
@@ -93,8 +102,10 @@ export function CardGrid({
           updated_at: new Date().toISOString(),
         };
 
+        const actionsDisabled = openActionItemIds?.has(item.id) ?? false;
+
         const cardElement =
-          localItem && networkItem ? (
+          shouldRenderMatchScoreCard(localItem, networkItem) ? (
             <MatchScoreCard
               schema={schema}
               schemaName={schemaName}
@@ -105,8 +116,10 @@ export function CardGrid({
               selectionMode={selection?.selectMode ?? false}
               onAction={(type, actionSchema) => onAction?.(item.id, type, actionSchema)}
               onClick={() => onItemClick?.(item.id)}
-              localItem={localItem}
+              localItem={localItem ?? null}
               networkItem={networkItem}
+              actionsDisabled={actionsDisabled}
+              actionsDisabledReason={openActionReason}
             />
           ) : (
             <DomainCard
@@ -119,6 +132,9 @@ export function CardGrid({
               selectionMode={selection?.selectMode ?? false}
               onAction={(type, actionSchema) => onAction?.(item.id, type, actionSchema)}
               onClick={() => onItemClick?.(item.id)}
+              shareItem={networkItem}
+              actionsDisabled={actionsDisabled}
+              actionsDisabledReason={openActionReason}
             />
           );
 
@@ -128,7 +144,10 @@ export function CardGrid({
             id={item.id}
             selectMode={selection?.selectMode ?? false}
             selected={selection?.isSelected(item.id) ?? false}
-            selectable={selection?.canSelect(selectedDomain ?? '') ?? true}
+            // Not selectable in bulk mode if an action is already open for this
+            // pair — same one-open-per-pair rule as the CTA (#370/#422); the card
+            // dims and shows no checkbox.
+            selectable={(selection?.canSelect(selectedDomain ?? '') ?? true) && !actionsDisabled}
             onToggle={(id) => selection?.toggle(id, selectedDomain ?? '')}
           >
             {cardElement}

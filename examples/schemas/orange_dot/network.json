@@ -160,6 +160,10 @@
           }
         }
       },
+      "profile_completion_prompt": {
+        "heading": "Complete your listing to get discovered",
+        "body": "Travellers can find and book your experience only once your listing is live. Add the details below to start reaching visitors."
+      },
       "id": "practitioner",
       "go_live_required": ["schema_required", "consent_required"],
       "card": {

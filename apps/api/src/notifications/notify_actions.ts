@@ -11,7 +11,7 @@ import type { NotifyRequest } from './dispatcher';
 import { resolveRecipientRole } from './action_copy';
 import { resolveOwnerEmail, resolveProviderServiceName } from './resolve_owner';
 
-interface NotifierConfig {
+export interface NotifierConfig {
   notify: (req: NotifyRequest) => Promise<unknown>;
   fromEmail: string;
   replyTo: string;
@@ -21,9 +21,10 @@ interface NotifierConfig {
 /**
  * Brand display name for the sign-off ("Team {name}"): the action network's
  * `display_name` (e.g. "Blue Dot"), falling back to INSTANCE_NAME when the
- * network config has none. Best-effort — never throws.
+ * network config has none. Best-effort — never throws. Reused by the retire
+ * notifier (#418).
  */
-async function resolveNetworkBrandName(networkId: string): Promise<string> {
+export async function resolveNetworkBrandName(networkId: string): Promise<string> {
   try {
     const config = await getNetworkConfigById(networkId);
     return resolveBrandName({
@@ -38,7 +39,11 @@ async function resolveNetworkBrandName(networkId: string): Promise<string> {
 // `undefined` = not yet resolved; `null` = resolved and not configured.
 let cachedConfig: NotifierConfig | null | undefined;
 
-function resolveConfig(): NotifierConfig | null {
+/**
+ * Memoised notifier config (NS client + from/reply/cta). `null` when
+ * notifications aren't configured. Shared with the retire notifier (#418) so
+ * both read the same config + reset. */
+export function resolveNotifierConfig(): NotifierConfig | null {
   if (cachedConfig !== undefined) return cachedConfig;
 
   const nc = getNotificationClient();
@@ -69,7 +74,7 @@ export async function dispatchActionNotifications(
   event: NotificationEvent,
   log: FastifyBaseLogger,
 ): Promise<void> {
-  const config = resolveConfig();
+  const config = resolveNotifierConfig();
   if (!config) return;
 
   // Brand name is per-network (the action's network display_name).

@@ -2,9 +2,20 @@ name: CI
 
 on:
   pull_request:
-    branches: [develop, main]
+    branches: [develop, main, feature]
+  # feature: validate the merged integration state too — PRs into feature
+  # already run CI, but the post-merge result was unchecked. publish-images
+  # stays develop-only via its own `if` gate.
+  #
+  # main: required for SonarCloud. The organization's plan analyses the MAIN
+  # branch only (branch/PR analysis is a paid feature), so without a push
+  # trigger here the default branch is never scanned and the dashboard reports
+  # `"main" branch has not been analyzed yet` no matter how many PRs land.
+  # publish-images is gated to develop by its own `if`, so main pushes only
+  # run the checks + the sonar scan.
   push:
-    branches: [develop]
+    branches: [develop, feature, main]
+  workflow_dispatch:
 
 concurrency:
   group: ci-${{ github.ref }}
@@ -17,11 +28,11 @@ jobs:
   typecheck-api:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
         with:
           version: 11.1.2
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: '24'
           cache: pnpm
@@ -31,11 +42,11 @@ jobs:
   typecheck-ui:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
         with:
           version: 11.1.2
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: '24'
           cache: pnpm
@@ -48,16 +59,157 @@ jobs:
     # own test suites use a no-op `echo "no tests yet"` script so the
     # workspace-recursive run stays green.
     steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
         with:
           version: 11.1.2
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: '24'
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm -r test
+
+  sonar:
+    runs-on: ubuntu-latest
+    # Runs the full workspace test suite with coverage enabled, then feeds
+    # every package's lcov.info to the SonarCloud scan (paths declared in
+    # sonar-project.properties). continue-on-error on the coverage run: a
+    # red test here is already caught by the `test` job above — we still
+    # want the scan to run with whatever coverage numbers exist so the
+    # SonarCloud dashboard doesn't go stale on an unrelated flaky test.
+    #
+    # The api suite is run TWICE and both lcov files are reported:
+    #   1. the default (unit-only) run — vitest.config.ts excludes
+    #      *.integration.test.ts because those need a live stack;
+    #   2. the integration run against real Postgres + Redis.
+    # Without (2), the ~25 integration suites' coverage counts for nothing even
+    # though the tests exist and pass, which understated api coverage
+    # substantially. Integration coverage is written to a SEPARATE directory so
+    # the two lcov files don't overwrite each other; SonarCloud merges the
+    # per-file hit counts across reportPaths.
+    #
+    # Postgres must be the repo's own image (docker/postgres) rather than a
+    # stock one: the schema needs pgvector AND postgis, which
+    # postgres:*-alpine ships neither of. It's built and run here as a plain
+    # container instead of a `services:` entry, because services: cannot use an
+    # image built earlier in the same job.
+    env:
+      # Non-secret, throwaway values for an ephemeral CI database. AUTH_SECRET
+      # and INSTANCE_SHARED_SECRET only need to satisfy their length checks;
+      # SIGNALS_PII_KEY must be base64-encoded 32 bytes (AES-256).
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres_ci_pw
+      POSTGRES_DB: postgres
+      POSTGRES_HOST: 127.0.0.1
+      DATABASE_PORT: 5432
+      REDIS_HOST: 127.0.0.1
+      REDIS_PORT: 6379
+      REDIS_PASSWORD: redis_ci_pw
+      INSTANCE_NAME: ci
+      INSTANCE_ENV: development
+      API_DOMAIN: localhost
+      API_PORT: 2742
+      AUTH_SECRET: ci-auth-secret-value
+      INSTANCE_SHARED_SECRET: ci-instance-shared-secret-at-least-32-chars
+      SIGNALS_PII_KEY: MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=
+      NETWORK_CONFIG_SOURCE: local
+      SCHEMA_REGISTRY_URL: http://127.0.0.1:9999
+      SERVED_DOMAINS: blue_dot/seeker
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 11.1.2
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+
+      # --- (1) unit coverage across every workspace ----------------------
+      - name: Unit tests with coverage (all workspaces)
+        run: pnpm -r run test -- --coverage
+        continue-on-error: true
+
+      # --- (2) api integration coverage against a real stack -------------
+      - name: Start Redis
+        run: |
+          docker run -d --name ci-redis -p 6379:6379 redis:7.2-alpine \
+            redis-server --requirepass "$REDIS_PASSWORD"
+
+      - name: Build and start Postgres (pgvector + postgis)
+        run: |
+          docker build -t dpg-ci-db ./docker/postgres
+          docker run -d --name ci-db -p 5432:5432 \
+            -e POSTGRES_USER="$POSTGRES_USER" \
+            -e POSTGRES_PASSWORD="$POSTGRES_PASSWORD" \
+            -e POSTGRES_DB="$POSTGRES_DB" \
+            dpg-ci-db
+
+      - name: Wait for Postgres and Redis
+        run: |
+          for i in $(seq 1 45); do
+            if docker exec ci-db pg_isready -U "$POSTGRES_USER" -d "$POSTGRES_DB" >/dev/null 2>&1; then
+              echo "postgres ready"; break
+            fi
+            sleep 2
+            if [ "$i" = 45 ]; then echo "::error::Postgres never became ready"; docker logs ci-db; exit 1; fi
+          done
+          for i in $(seq 1 30); do
+            if docker exec ci-redis redis-cli -a "$REDIS_PASSWORD" ping 2>/dev/null | grep -q PONG; then
+              echo "redis ready"; break
+            fi
+            sleep 2
+            if [ "$i" = 30 ]; then echo "::error::Redis never became ready"; docker logs ci-redis; exit 1; fi
+          done
+
+      - name: Apply schema (Drizzle push, then the raw SQL bundle)
+        # Mirrors local dev (scripts/db_init.ts): the Drizzle-owned tables go in
+        # first, then the bundle adds the partitioned/vector layer that FKs to
+        # them. The real image has pgvector + postgis, so unlike schema-parity
+        # nothing needs stripping here.
+        run: |
+          pnpm --filter api exec drizzle-kit push --force
+          sudo apt-get update && sudo apt-get install -y postgresql-client
+          psql "postgres://$POSTGRES_USER:$POSTGRES_PASSWORD@127.0.0.1:5432/$POSTGRES_DB" \
+            -v ON_ERROR_STOP=1 -f apps/api/db/postgres/schema.sql
+
+      - name: API integration tests with coverage
+        # Separate reportsDirectory so this lcov does not clobber the unit one.
+        # continue-on-error for the same reason as the unit run: keep the scan
+        # reporting rather than going stale on one flaky suite.
+        run: |
+          pnpm --filter api exec vitest run \
+            --config vitest.integration.config.ts \
+            --coverage.enabled \
+            --coverage.provider=v8 \
+            --coverage.reporter=lcov \
+            --coverage.reportsDirectory=./coverage-integration
+        continue-on-error: true
+
+      - name: Show which lcov reports were produced
+        # Cheap guard against silently scanning with a missing report: if a
+        # coverage step failed, the file is absent and the number would quietly
+        # drop rather than error.
+        if: always()
+        run: |
+          for f in apps/api/coverage/lcov.info apps/api/coverage-integration/lcov.info \
+                   apps/ui/coverage/lcov.info packages/auth/coverage/lcov.info \
+                   packages/config/coverage/lcov.info packages/schemas/coverage/lcov.info; do
+            if [ -f "$f" ]; then echo "found  $f ($(wc -l < "$f") lines)";
+            else echo "::warning::missing $f — its coverage will not be counted"; fi
+          done
+
+      - name: Stop containers
+        if: always()
+        run: docker rm -f ci-db ci-redis || true
+
+      - uses: SonarSource/sonarqube-scan-action@v5
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
 
   dep-cruise:
     runs-on: ubuntu-latest
@@ -66,15 +218,15 @@ jobs:
     # evaluates those before the runner provisions a workspace, so there is
     # no filesystem yet. Guard at step level instead, after checkout.
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Note when dep-cruise config is absent
         if: hashFiles('.dependency-cruiser.cjs') == ''
         run: echo "::notice::No .dependency-cruiser.cjs found; skipping dep-cruise."
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v6
         if: hashFiles('.dependency-cruiser.cjs') != ''
         with:
           version: 11.1.2
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         if: hashFiles('.dependency-cruiser.cjs') != ''
         with:
           node-version: '24'
@@ -127,11 +279,11 @@ jobs:
       PG_SQL_URL: postgres://postgres:postgres@localhost:5432/postgres
       PG_DRIZZLE_URL: postgres://postgres:postgres@localhost:5433/postgres
     steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
         with:
           version: 11.1.2
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: '24'
           cache: pnpm
@@ -219,6 +371,24 @@ jobs:
 
           diff /tmp/sql.sql /tmp/drizzle.sql
 
+  spec-drift:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 11.1.2
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: OpenAPI spec drift check
+        run: |
+          pnpm --filter api spec:dump
+          git diff --exit-code openapi.json || {
+            echo "::error::openapi.json is stale — run 'pnpm --filter api spec:dump' and commit"; exit 1; }
+
   # Publish the :develop images (api, ui) ONLY after the blocking CI jobs pass,
   # and only on a develop push. Previously build-images.yaml triggered directly
   # on push to develop, so red tests still shipped :develop images. Gating this
@@ -233,6 +403,7 @@ jobs:
     permissions:
       contents: read
       packages: write
+      security-events: write   # Trivy image scan uploads SARIF to code-scanning
     strategy:
       fail-fast: false
       matrix:
@@ -244,27 +415,28 @@ jobs:
             context: .
             dockerfile: apps/ui/Dockerfile
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Verify Dockerfile exists
         run: |
           if [ ! -f "${{ matrix.service.dockerfile }}" ]; then
             echo "Dockerfile not found at ${{ matrix.service.dockerfile }} — skipping ${{ matrix.service.name }}"
             exit 0
           fi
-      - uses: docker/setup-buildx-action@v3
-      - uses: docker/login-action@v3
+      - uses: docker/setup-buildx-action@v4
+      - uses: docker/login-action@v4
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-      - uses: docker/metadata-action@v5
+      - uses: docker/metadata-action@v6
         id: meta
         with:
           images: ghcr.io/blue-dots-economy/signals-dpg/${{ matrix.service.name }}
           tags: |
             type=ref,event=branch
             type=sha,format=short
-      - uses: docker/build-push-action@v6
+      - uses: docker/build-push-action@v7
+        id: build
         with:
           context: ${{ matrix.service.context }}
           file: ${{ matrix.service.dockerfile }}
@@ -273,3 +445,30 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha,scope=${{ matrix.service.name }}
           cache-to: type=gha,mode=max,scope=${{ matrix.service.name }}
+
+      # Image scanning (Sec-Audit A2 — Blue-Dots-Economy/signals-dpg#300).
+      # Mirrors build-images.yaml. Both publish paths need this: build-images.yaml
+      # covers main + v* tags, this covers the gated :develop publish — the stream
+      # that ships most often, so scanning only the release path would leave the
+      # busiest artifact unscanned.
+      #
+      # Scanned by digest: buildx pushes to the registry without loading into the
+      # local docker image store, so `imageid` is not resolvable by Trivy here.
+      - name: Trivy image scan
+        if: steps.build.outputs.digest != ''
+        uses: aquasecurity/trivy-action@a9c7b0f06e461e9d4b4d1711f154ee024b8d7ab8 # v0.36.0
+        with:
+          scan-type: image
+          image-ref: ghcr.io/blue-dots-economy/signals-dpg/${{ matrix.service.name }}@${{ steps.build.outputs.digest }}
+          format: sarif
+          output: trivy-image.sarif
+          severity: UNKNOWN,LOW,MEDIUM,HIGH,CRITICAL
+          exit-code: "0"   # Phase A: report-only, never blocks the :develop publish
+
+      - name: Upload Trivy image SARIF
+        if: always() && steps.build.outputs.digest != ''
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: trivy-image.sarif
+          # One category per image so api and ui alerts don't overwrite each other.
+          category: trivy-image-${{ matrix.service.name }}

@@ -11,20 +11,24 @@ import { useAuth } from '@/contexts/auth-context';
 import { getServedScope } from '@/lib/served-binding';
 import { evaluateDomainGate, resolveHeldDomains } from '@/lib/domain-gate';
 import { toast } from 'sonner';
-import { acceptConsent, submitU18Dob } from '@/lib/consent-api';
+import { acceptConsent, submitU18Dob, getU18Status } from '@/lib/consent-api';
 import type { ConsentAcceptBody } from '@dpg/schemas';
+import { U18GuardianFlow } from '@/components/consent/u18/u18-guardian-flow';
 import { useNetworkTheme } from '@/theme/theme-provider';
 import { setStoredSignupDomain, type SignupExtras } from '@/lib/signup-domain';
 import { setUserDomains } from '@/lib/user-api';
+import { fetchMyProfilesLite } from '@/lib/login-profiles';
+import { resolvePostLoginRedirect } from '@/lib/post-login-route';
+import { getStoredActiveProfileId } from '@/lib/active-profile';
 
 interface AuthState extends AuthIdentifier {
   userExists: boolean;
   name?: string;
   redirectTo?: string;
   pendingConsent?: ConsentAcceptBody | null;
-  /** Carries the DOB (+ chosen domain for new signups) captured in the auth
-   * flow before this OTP: set for a brand-new signup, and for an existing user
-   * who backfilled their DOB pre-OTP (see login-page.tsx). Null otherwise. */
+  /** Carries the age (+ chosen domain for new signups) captured in the auth
+   * flow before this OTP: set for a brand-new signup, and for an existing minor
+   * who picked their year of birth pre-OTP (see login-page.tsx). Null otherwise. */
   signupExtras?: SignupExtras | null;
 }
 
@@ -37,10 +41,14 @@ export function OtpPage() {
   const location = useLocation();
   const { verifyOtp, signOut } = useAuth();
   const { t } = useTranslation();
-  const { themeId } = useNetworkTheme();
+  const { themeId, brand } = useNetworkTheme();
   const [isLoading, setIsLoading] = useState(false);
   const { countdown, restart: restartCountdown } = useResendCountdown(60);
   const [inlineError, setInlineError] = useState<{ title: string; description: string } | null>(null);
+  // #453: an existing gated minor is held on a blocking guardian flow AFTER the
+  // login OTP (ownership proven) and BEFORE landing on home — never home-first.
+  // Null until the post-verify u18 check decides the ward needs it.
+  const [guardianGate, setGuardianGate] = useState<{ initialStep: 'dob' | 'guardian' } | null>(null);
 
   const state = location.state as AuthState | null;
   const identifierLabel = state?.email ?? state?.phoneNumber;
@@ -50,14 +58,28 @@ export function OtpPage() {
   }, [identifierLabel, navigate]);
 
   // Final step once verification (and, for a gated minor, the guardian flow)
-  // has settled: toast + land on home (or the original redirect target).
-  const finishSignIn = () => {
+  // has settled: toast + land. #376: if the user has no *completed* profile
+  // (none, or all still draft), route them straight to the profile create/edit
+  // page — instead of home, where they wouldn't know what to do. This takes
+  // precedence over `redirectTo` (a user with no live profile can't act on a
+  // deep link anyway). Fail-open: any error → normal landing.
+  const finishSignIn = async () => {
     if (!state) return;
     toast.success(state.userExists ? t('auth.toast_welcome_back') : t('auth.toast_account_created'), {
       description: state.userExists
         ? t('auth.toast_welcome_back_desc')
         : t('auth.toast_account_created_desc'),
     });
+    try {
+      const profiles = await fetchMyProfilesLite(themeId);
+      const redirect = resolvePostLoginRedirect(profiles, getStoredActiveProfileId(themeId));
+      if (redirect) {
+        navigate(redirect.path, { replace: true });
+        return;
+      }
+    } catch {
+      // Never block sign-in on the profile check.
+    }
     navigate(state.redirectTo ?? '/', { replace: true });
   };
 
@@ -92,12 +114,12 @@ export function OtpPage() {
         }
       }
 
-      // U18 DOB/guardian was collected in the auth flow BEFORE this OTP (signup
+      // U18 age/guardian was collected in the auth flow BEFORE this OTP (signup
       // gate, or the existing-user pre-check). Persist it now that the session
       // exists. Best-effort like the consent-accept write above — never block
       // sign-in on it.
       if (state.signupExtras) {
-        const { domain, dateOfBirth } = state.signupExtras;
+        const { domain, age } = state.signupExtras;
         // New signup: hand the chosen domain off to profile-form-page (one-shot)
         // AND persist it on the user so profile creation is restricted to it.
         if (!state.userExists) {
@@ -108,19 +130,42 @@ export function OtpPage() {
             // Best-effort — profile-form falls back to held items if unset.
           }
         }
-        // DOB only exists for guardian-gated flows; persist it for the now-auth
+        // Age only exists for guardian-gated flows; persist it for the now-auth
         // user (idempotent for a signup minor already materialized on create).
-        if (dateOfBirth) {
+        if (age !== undefined) {
           try {
-            await submitU18Dob({ network: themeId, dateOfBirth });
+            await submitU18Dob({ network: themeId, age });
           } catch {
             toast.error(t('auth.toast_consent_persist_error', 'Could not save your consent. You may be asked again next time.'));
           }
         }
       }
 
+      // Existing gated minor (#453): now that the login OTP has proven number
+      // ownership, run the guardian flow HERE — before home — instead of
+      // deferring it to the home page. New signups already cleared the pre-auth
+      // guardian flow (their signupExtras path), so this only affects returning
+      // users. Best-effort: if the status lookup fails, fall through to home;
+      // the home-page guardian gate remains as a backstop, and the API gate is
+      // the real fail-closed control regardless.
+      // An existing minor picked their year of birth pre-OTP; it's persisted
+      // just above (signupExtras → submitU18Dob), so u18/status now reports
+      // isMinor. Run the AUTHENTICATED guardian flow here — before home — since
+      // the guardian APIs need this session. Starts at the guardian step (DOB
+      // already known). onComplete/onNotMinor calls finishSignIn.
+      if (state.userExists) {
+        try {
+          const u18 = await getU18Status(themeId);
+          if (u18.isMinor && !u18.guardianVerified) {
+            setGuardianGate({ initialStep: u18.hasBirthData ? 'guardian' : 'dob' });
+            return;
+          }
+        } catch {
+          // fall through to finishSignIn
+        }
+      }
 
-      finishSignIn();
+      await finishSignIn();
     } catch {
       setInlineError({
         title: t('auth.otp_incorrect_title'),
@@ -152,6 +197,30 @@ export function OtpPage() {
   };
 
   if (!identifierLabel) return null;
+
+  // Blocking guardian gate for an existing minor (#453) — replaces the OTP form
+  // inside the same AuthShell (mirrors the pre-auth SignupGuardianFlow), so the
+  // ward never sees home until the guardian is verified. `onNotMinor` (DOB
+  // resolved adult) and `onComplete` (guardian verified) both proceed home.
+  if (guardianGate) {
+    return (
+      <AuthShell>
+        <U18GuardianFlow
+          inline
+          network={themeId}
+          brand={brand === 'standard' ? null : brand}
+          purpose={{ kind: 'login' }}
+          initialStep={guardianGate.initialStep}
+          onComplete={finishSignIn}
+          onNotMinor={finishSignIn}
+          onLogout={() => {
+            void signOut();
+            navigate('/auth/login', { replace: true });
+          }}
+        />
+      </AuthShell>
+    );
+  }
 
   return (
     <>

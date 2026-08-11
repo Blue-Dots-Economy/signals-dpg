@@ -7,7 +7,6 @@ import {
   verifySignupGuardian,
   type SubmitGuardianBody,
 } from '@/lib/consent-api';
-import { toDateOnly } from '@/lib/guardian-consent';
 import { GuardianFormStep } from './guardian-form-step';
 import { GuardianOtpStep } from './guardian-otp-step';
 
@@ -20,10 +19,12 @@ export interface SignupGuardianFlowProps {
   brand?: string | null;
   /** The ward's own signup identifier (no account exists yet). */
   identifier: SignupIdentifier;
-  /** Ward's full date of birth captured on the DOB step. */
-  dateOfBirth: Date;
+  /** Ward's age captured on the birth-year step. */
+  age: number;
   /** Guardian OTP verified server-side — caller proceeds to the ward's own OTP. */
   onComplete: () => void;
+  /** Back to the birth-year step (rendered on the previous screen). */
+  onBack?: () => void;
 }
 
 /**
@@ -32,8 +33,8 @@ export interface SignupGuardianFlowProps {
  * page's content (inside AuthShell) — it REPLACES the signup form, matching
  * the DOB step, rather than stacking as a modal over it.
  *
- * DOB was already collected on the previous step, so there's no DOB step here:
- * guardian details → guardian OTP. The captured guardian + consent are
+ * Age was already collected on the previous step, so there's no birth-year step
+ * here: guardian details → guardian OTP. The captured guardian + consent are
  * materialized onto the new user id once better-auth creates it.
  */
 export function SignupGuardianFlow({
@@ -41,8 +42,9 @@ export function SignupGuardianFlow({
   domain,
   brand,
   identifier,
-  dateOfBirth,
+  age,
   onComplete,
+  onBack,
 }: SignupGuardianFlowProps) {
   const { t } = useTranslation();
   // 'verified' is an explicit hand-off step AFTER the guardian OTP: the ward's
@@ -61,7 +63,7 @@ export function SignupGuardianFlow({
       network,
       domain,
       ...identifier,
-      dateOfBirth: toDateOnly(dateOfBirth),
+      age,
       guardianName: body.guardianName,
       ...(body.guardianEmail ? { guardianEmail: body.guardianEmail } : {}),
       ...(body.guardianPhone ? { guardianPhone: body.guardianPhone } : {}),
@@ -83,7 +85,7 @@ export function SignupGuardianFlow({
         </h2>
         {step === 'guardian' && (
           <p className="mt-1 text-sm text-muted-foreground">
-            {t('u18.step_subtitle', "You're under 18, so a parent or guardian needs to confirm this account.")}
+            {t('u18.step_subtitle', "You're under 18, so a guardian needs to confirm this account.")}
           </p>
         )}
       </div>
@@ -98,6 +100,7 @@ export function SignupGuardianFlow({
             setGuardianBody(body);
             setStep('otp');
           }}
+          onBack={onBack}
         />
       )}
 
@@ -106,6 +109,7 @@ export function SignupGuardianFlow({
           network={network}
           brand={brand}
           verify={verify}
+          purpose={{ kind: 'account' }}
           onVerified={() => setStep('verified')}
           onResend={async () => {
             if (!guardianBody) return;

@@ -1,9 +1,9 @@
-import * as React from 'react';
 import { useTranslation } from 'react-i18next';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
-import { RefreshCw, Inbox, Send, AlertCircle, CheckSquare } from 'lucide-react';
+import { RefreshCw, Inbox, Send, AlertCircle, CheckSquare, Loader2 } from 'lucide-react';
 import { ActionCard } from './action-card';
+import { ActionToolbar, type ActionStatusFilter, type ActionSort, type ActiveFacet } from './action-toolbar';
 import { SelectableCard } from '@/components/selection/selectable-card';
 import { BulkActionBar } from '@/components/selection/bulk-action-bar';
 import type { CardSelection } from '@/hooks/use-card-selection';
@@ -12,6 +12,12 @@ import type { Action } from '@/lib/action-api';
 interface ActionListProps {
   initiatedActions: Action[];
   receivedActions: Action[];
+  // Tab badge counts (#439 follow-up): the true server-side total for each
+  // tab, independent of how many rows the infinite query has loaded so far.
+  // Falls back to the loaded array length when undefined (e.g. tests that
+  // don't pass it, or a query that hasn't resolved a first page yet).
+  initiatedTotal?: number;
+  receivedTotal?: number;
   isLoading: boolean;
   isError: boolean;
   error: Error | null;
@@ -24,18 +30,22 @@ interface ActionListProps {
   selection: CardSelection;
   /** Open the bulk confirm dialog for the given target status. */
   onBulkAction: (targetStatus: string) => void;
+  // ── Toolbar (#439 Task 13) — all state/URL-wiring lives on the page; this
+  // component only renders `ActionToolbar` and forwards its callbacks. ──────
+  toolbarStatus: ActionStatusFilter;
+  toolbarSort: ActionSort;
+  activeFacets: ActiveFacet[];
+  onStatusChange: (status: ActionStatusFilter) => void;
+  onSortChange: (sort: ActionSort) => void;
+  onOpenFilters: () => void;
+  onRemoveFacet: (field: string, value: string) => void;
+  onClearFilters: () => void;
+  // ── Infinite scroll (#439 Task 13) — the server now does the filtering, so
+  // this component renders every row it's given (no client-side re-filter). ─
+  hasNextPage: boolean;
+  isFetchingNextPage: boolean;
+  onLoadMore: () => void;
 }
-
-const FILTERS = ['All', 'Pending', 'Accepted', 'Rejected'] as const;
-type Filter = (typeof FILTERS)[number];
-
-// Maps a filter chip to the raw action_status values it should match.
-const FILTER_STATUSES: Record<Filter, string[] | null> = {
-  All: null,
-  Pending: ['created', 'pending'],
-  Accepted: ['accepted', 'completed'],
-  Rejected: ['rejected', 'cancelled'],
-};
 
 // The actionable "class" of a card for the current tab — used as the selection
 // lock group. null = not actionable (can't be selected). The first card picked
@@ -53,6 +63,8 @@ function actionClassFor(tab: 'initiated' | 'received', status: string): ActionCl
 export function ActionList({
   initiatedActions,
   receivedActions,
+  initiatedTotal,
+  receivedTotal,
   isLoading,
   isError,
   error,
@@ -63,83 +75,82 @@ export function ActionList({
   isRefetching,
   selection,
   onBulkAction,
+  toolbarStatus,
+  toolbarSort,
+  activeFacets,
+  onStatusChange,
+  onSortChange,
+  onOpenFilters,
+  onRemoveFacet,
+  onClearFilters,
+  hasNextPage,
+  isFetchingNextPage,
+  onLoadMore,
 }: ActionListProps) {
   const { t } = useTranslation();
-  const [filter, setFilter] = React.useState<Filter>('All');
 
-  const filterLabels: Record<Filter, string> = {
-    All: t('actions.filter_all'),
-    Pending: t('actions.filter_pending'),
-    Accepted: t('actions.filter_accepted'),
-    Rejected: t('actions.filter_rejected'),
-  };
-
+  // The server already applied status/sort/facets (#439) — render every row
+  // handed down, no client-side re-filter.
   const actions = activeTab === 'initiated' ? initiatedActions : receivedActions;
-
-  const visible = React.useMemo(() => {
-    const allowed = FILTER_STATUSES[filter];
-    if (!allowed) return actions;
-    return actions.filter((a) => allowed.includes(a.action_status));
-  }, [actions, filter]);
 
   // A card is selectable when it has an actionable class for this tab. The
   // lock group is that class, so the first pick fixes pending-vs-accepted.
   const isSelectable = (a: Action) => actionClassFor(activeTab, a.action_status) !== null;
-  const hasSelectable = visible.some(isSelectable);
+  const hasSelectable = actions.some(isSelectable);
 
   const tabs = [
-    { id: 'initiated' as const, label: t('actions.tab_initiated'), Icon: Send, count: initiatedActions.length },
-    { id: 'received' as const, label: t('actions.tab_received'), Icon: Inbox, count: receivedActions.length },
+    {
+      id: 'initiated' as const,
+      label: t('actions.tab_initiated'),
+      Icon: Send,
+      count: initiatedTotal ?? initiatedActions.length,
+    },
+    {
+      id: 'received' as const,
+      label: t('actions.tab_received'),
+      Icon: Inbox,
+      count: receivedTotal ?? receivedActions.length,
+    },
   ];
   const activeIdx = tabs.findIndex((tab) => tab.id === activeTab);
 
   return (
     <div className="w-full space-y-5">
-      {/* Toolbar: filter chips + refresh */}
-      <div className="flex flex-wrap items-center gap-3">
-        <div className="inline-flex gap-1 rounded-xl border bg-card p-1">
-          {FILTERS.map((f) => (
-            <button
-              key={f}
-              type="button"
-              onClick={() => {
-                setFilter(f);
-                // Changing the filter can hide selected cards; drop out of
-                // select mode so the selection never goes invisible/stale.
-                selection.exitSelect();
-              }}
-              className={`rounded-lg px-3 py-1.5 text-xs font-medium transition ${
-                filter === f
-                  ? 'bg-primary/10 text-primary'
-                  : 'text-muted-foreground hover:text-foreground'
-              }`}
+      {/* Toolbar: status/sort/filters (server-driven, #439) + select/refresh */}
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <ActionToolbar
+          status={toolbarStatus}
+          sort={toolbarSort}
+          activeFacets={activeFacets}
+          onStatusChange={(status) => {
+            onStatusChange(status);
+            // Changing the status can hide selected cards; drop out of
+            // select mode so the selection never goes invisible/stale.
+            selection.exitSelect();
+          }}
+          onSortChange={onSortChange}
+          onOpenFilters={onOpenFilters}
+          onRemoveFacet={onRemoveFacet}
+          onClearFilters={onClearFilters}
+        />
+
+        <div className="flex items-center gap-2">
+          {(hasSelectable || selection.selectMode) && (
+            <Button
+              variant={selection.selectMode ? 'default' : 'outline'}
+              size="sm"
+              onClick={() => (selection.selectMode ? selection.exitSelect() : selection.enterSelect())}
             >
-              {filterLabels[f]}
-            </button>
-          ))}
-        </div>
+              <CheckSquare className="mr-2 h-4 w-4" />
+              {selection.selectMode ? t('selection.done') : t('selection.select')}
+            </Button>
+          )}
 
-        {(hasSelectable || selection.selectMode) && (
-          <Button
-            variant={selection.selectMode ? 'default' : 'outline'}
-            size="sm"
-            onClick={() => (selection.selectMode ? selection.exitSelect() : selection.enterSelect())}
-          >
-            <CheckSquare className="mr-2 h-4 w-4" />
-            {selection.selectMode ? t('selection.done') : t('selection.select')}
+          <Button variant="outline" size="sm" onClick={onRefresh} disabled={isRefetching}>
+            <RefreshCw className={`mr-2 h-4 w-4 ${isRefetching ? 'animate-spin' : ''}`} />
+            {t('actions.refresh')}
           </Button>
-        )}
-
-        <Button
-          variant="outline"
-          size="sm"
-          className="ml-auto"
-          onClick={onRefresh}
-          disabled={isRefetching}
-        >
-          <RefreshCw className={`mr-2 h-4 w-4 ${isRefetching ? 'animate-spin' : ''}`} />
-          {t('actions.refresh')}
-        </Button>
+        </div>
       </div>
 
       {/* Sliding-pill tabs */}
@@ -188,7 +199,7 @@ export function ActionList({
             {error?.message ?? t('actions.error_fallback')}
           </p>
         </div>
-      ) : visible.length === 0 ? (
+      ) : actions.length === 0 ? (
         <div className="flex flex-col items-center justify-center rounded-2xl border border-dashed py-14 text-center">
           <div className="mb-3 flex h-14 w-14 items-center justify-center rounded-2xl bg-primary/10 text-primary">
             {activeTab === 'initiated' ? <Send className="h-6 w-6" /> : <Inbox className="h-6 w-6" />}
@@ -203,28 +214,43 @@ export function ActionList({
           </p>
         </div>
       ) : (
-        <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
-          {visible.map((action) => {
-            const cls = actionClassFor(activeTab, action.action_status);
-            return (
-              <SelectableCard
-                key={action.action_id}
-                id={action.action_id}
-                selectMode={selection.selectMode}
-                selected={selection.isSelected(action.action_id)}
-                selectable={cls !== null && selection.canSelect(cls)}
-                onToggle={(id) => selection.toggle(id, cls ?? '')}
+        <>
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
+            {actions.map((action) => {
+              const cls = actionClassFor(activeTab, action.action_status);
+              return (
+                <SelectableCard
+                  key={action.action_id}
+                  id={action.action_id}
+                  selectMode={selection.selectMode}
+                  selected={selection.isSelected(action.action_id)}
+                  selectable={cls !== null && selection.canSelect(cls)}
+                  onToggle={(id) => selection.toggle(id, cls ?? '')}
+                >
+                  <ActionCard
+                    action={action}
+                    ownershipRole={activeTab}
+                    onStatusUpdate={onStatusUpdate}
+                    selectionMode={selection.selectMode}
+                  />
+                </SelectableCard>
+              );
+            })}
+          </div>
+          {hasNextPage && (
+            <div className="flex justify-center pt-2">
+              <Button
+                variant="outline"
+                data-testid="load-more-button"
+                onClick={onLoadMore}
+                disabled={isFetchingNextPage}
               >
-                <ActionCard
-                  action={action}
-                  ownershipRole={activeTab}
-                  onStatusUpdate={onStatusUpdate}
-                  selectionMode={selection.selectMode}
-                />
-              </SelectableCard>
-            );
-          })}
-        </div>
+                {isFetchingNextPage && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                {isFetchingNextPage ? t('actions.loading_more') : t('actions.load_more')}
+              </Button>
+            </div>
+          )}
+        </>
       )}
       {selection.selectMode && selection.selected.size > 0 && (
         <BulkActionBar count={selection.selected.size} onClear={selection.clear}>

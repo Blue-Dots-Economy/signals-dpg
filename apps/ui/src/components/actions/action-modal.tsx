@@ -199,7 +199,7 @@ export function ActionModal({
   if (isMobile) {
     return (
       <Drawer open={open} onOpenChange={onOpenChange}>
-        <DrawerContent className="max-h-[90vh] overflow-hidden p-0">
+        <DrawerContent className="max-h-[90dvh] overflow-hidden p-0">
           <div className="px-6 pt-6">{header}</div>
           <div className="px-6 pb-4 overflow-y-auto">{formContent}</div>
           <div className="border-t px-6 py-4">{footer}</div>
@@ -213,7 +213,7 @@ export function ActionModal({
       {/* Fixed header + footer, scrollable body — mirrors the mobile Drawer so a
           long consent statement scrolls WITHIN the modal instead of squeezing
           the statement/checkbox and pushing Cancel/Confirm off. */}
-      <DialogContent className="sm:max-w-[520px] max-h-[90vh] overflow-hidden gap-0 p-0 flex flex-col">
+      <DialogContent className="sm:max-w-[520px] max-h-[90dvh] overflow-hidden gap-0 p-0 flex flex-col">
         <div className="px-6 pt-6">{header}</div>
         <div className="px-6 py-4 overflow-y-auto">{formContent}</div>
         <div className="px-6 pb-6">{footer}</div>

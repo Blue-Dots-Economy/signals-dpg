@@ -2,7 +2,7 @@ import type { JSONSchemaLike } from '../metrics/profile_completion.js';
 import type { GoLiveGate } from '@dpg/schemas';
 import { passesGoLiveGates } from './go_live_gates.js';
 
-export type LifecycleStatus = 'draft' | 'live' | 'paused';
+export type LifecycleStatus = 'draft' | 'live' | 'paused' | 'retired';
 export type { GoLiveGate };
 
 /**
@@ -18,8 +18,9 @@ export interface ClassifierInput {
   schema: JSONSchemaLike | null | undefined;
   merged_state: Record<string, unknown> | null | undefined;
   /**
-   * Stored lifecycle_status BEFORE this write. `paused` is sticky — the
-   * classifier never flips out of it. For brand-new items pass `'draft'`.
+   * Stored lifecycle_status BEFORE this write. `paused` and `retired` are
+   * sticky — the classifier never flips out of them (`retired` is terminal).
+   * For brand-new items pass `'draft'`.
    */
   current_status: LifecycleStatus;
   /**
@@ -45,14 +46,19 @@ export interface ClassifierResult {
  * the merged post-write state. See
  * docs/superpowers/specs/2026-06-03-participant-onboarding-lifecycle-design.md §5.
  *
- * `paused` is sticky; otherwise `live` requires EVERY configured gate to pass,
- * else `draft`. The gate set is config-driven per domain (`go_live_required`),
- * defaulting to `schema_required` + `consent_required` (the historical rule).
+ * `retired` is terminal and `paused` is sticky; otherwise `live` requires
+ * EVERY configured gate to pass, else `draft`. The gate set is config-driven
+ * per domain (`go_live_required`), defaulting to `schema_required`.
  * (Completion % is not produced here — the single completion metric is
  * `item_metrics.profile_completion_pct`, computed required-only via
  * `profile_completion_pct`, and is intentionally independent of the gate set.)
  */
 export const classify_item = (input: ClassifierInput): ClassifierResult => {
+  // Terminal: a retired item is permanently removed — never recompute out of it.
+  if (input.current_status === 'retired') {
+    return { lifecycle_status: 'retired' };
+  }
+
   if (input.current_status === 'paused') {
     return { lifecycle_status: 'paused' };
   }

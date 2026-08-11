@@ -26,9 +26,9 @@ const PRECHECK_MAX_PER_WINDOW = 20;
 /**
  * PUBLIC, unauthenticated. Given a login identifier, tells the UI whether an
  * EXISTING user still needs to provide a date of birth before signing in (they
- * hold a profile in a guardian-gated domain and `user.date_of_birth` is unset).
- * Returns only `requiresDob`. New users (no match) and users who already have a
- * DOB return `false`. Rate-limited per IP.
+ * hold a profile in a guardian-gated domain and `user.age` is unset).
+ * Returns only `requiresDob`. New users (no match) and users who already have an
+ * age on file return `false`. Rate-limited per IP.
  */
 export const u18_precheck: FastifyPluginAsyncZod = async function (fastify) {
   fastify.route({
@@ -64,12 +64,12 @@ export const u18_precheck: FastifyPluginAsyncZod = async function (fastify) {
       if (!identifierCond) return reply.code(200).send({ requiresDob: false });
 
       const [row] = await db
-        .select({ id: user.id, dob: user.dateOfBirth })
+        .select({ id: user.id, age: user.age })
         .from(user)
         .where(identifierCond)
         .limit(1);
 
-      if (!row || row.dob) return reply.code(200).send({ requiresDob: false });
+      if (!row || row.age !== null) return reply.code(200).send({ requiresDob: false });
 
       const owned = await db
         .selectDistinct({ domain: items.item_domain })

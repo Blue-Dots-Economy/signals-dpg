@@ -1,0 +1,181 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>My Actions — clickable prototype (desktop + mobile)</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<style>
+  :root{ --primary:#2563eb; }
+  *{font-family:Inter,ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+  body{margin:0;background:#eef2f7;color:#0f172a}
+  .pill-indicator{transition:left .3s ease}
+  .sheet,.drawer{transition:transform .28s ease}
+  .fade{transition:opacity .2s ease}
+  ::-webkit-scrollbar{width:10px;height:10px}::-webkit-scrollbar-thumb{background:#cbd5e1;border-radius:8px}
+  /* phone frame */
+  #frame.mobile{width:400px;height:min(820px,94vh);margin:16px auto;border:10px solid #0f172a;border-radius:38px;overflow:hidden;box-shadow:0 20px 60px rgba(0,0,0,.3);position:relative}
+  #frame.desktop{width:100%;height:100vh}
+</style>
+</head>
+<body>
+
+<!-- View toggle -->
+<div class="fixed top-3 right-3 z-[60] flex items-center gap-1 rounded-full border bg-white p-1 shadow-lg text-xs font-semibold">
+  <button id="tgD" onclick="setView('desktop')" class="rounded-full px-3 py-1.5">🖥 Desktop</button>
+  <button id="tgM" onclick="setView('mobile')" class="rounded-full px-3 py-1.5">📱 Mobile</button>
+</div>
+
+<div id="frame" class="desktop"><div id="app" class="flex h-full w-full overflow-hidden bg-[#f8fafc]"></div>
+
+  <!-- Mobile drawer (left) -->
+  <div id="drawer" class="drawer absolute left-0 top-0 z-50 h-full w-64 -translate-x-full bg-white border-r shadow-2xl"></div>
+  <!-- Filters slide-over (right) -->
+  <aside id="sheet" class="sheet absolute right-0 top-0 z-50 h-full w-[300px] max-w-[88%] translate-x-full bg-white border-l shadow-2xl flex flex-col">
+    <div class="flex items-center justify-between px-5 py-4 border-b"><h3 class="text-[15px] font-bold">Filters</h3><button onclick="closeAll()" class="rounded-md p-1.5 hover:bg-slate-100 text-slate-500">✕</button></div>
+    <div id="sheetBody" class="flex-1 overflow-y-auto"></div>
+    <div class="border-t p-4 flex gap-2">
+      <button onclick="clearFilters()" class="flex-1 rounded-lg border py-2 text-sm font-semibold text-slate-600">Clear all</button>
+      <button onclick="closeAll()" class="flex-1 rounded-lg bg-[color:var(--primary)] py-2 text-sm font-semibold text-white">Show results</button>
+    </div>
+  </aside>
+  <!-- overlay (shared) -->
+  <div id="overlay" class="absolute inset-0 bg-black/30 opacity-0 pointer-events-none fade z-40" onclick="closeAll()"></div>
+</div>
+
+<script>
+const PROFILES=[{id:'p1',name:'My Tutoring',role:'Tutor',initial:'T'},{id:'p2',name:'Coaching Co',role:'Coaching Centre',initial:'C'}];
+const DATA={
+ p1:{received:[
+   {id:'a1',masked:'R***',real:'Ramesh R.',cRole:'Seeker',status:'created',ageH:2,score:84,band:'Strong',km:3.2,message:'Need weekend maths help for my daughter.',facets:{'Looking for':['Home tuition'],'Subject':['Maths','Physics'],'Class':['Class 10']}},
+   {id:'a2',masked:'S***',real:'Sana P.',cRole:'Seeker',status:'created',ageH:5,score:71,band:'Good',km:8.1,message:'Looking for a science tutor near Indiranagar.',facets:{'Looking for':['Home tuition'],'Subject':['Science'],'Class':['Class 9']}},
+   {id:'a3',masked:'A***',real:'Anita K.',cRole:'Seeker',status:'accepted',ageH:26,score:null,band:null,km:6.0,message:'Thanks for accepting!',facets:{'Looking for':['Online'],'Subject':['Maths'],'Class':['Class 10']}},
+   {id:'a4',masked:'M***',real:'Mohan T.',cRole:'Seeker',status:'accepted',ageH:50,score:63,band:'Fair',km:1.4,message:'Can we start next week?',facets:{'Looking for':['Home tuition'],'Subject':['Maths'],'Class':['Class 8']}},
+   {id:'a5',masked:'D***',real:'Divya N.',cRole:'Seeker',status:'rejected',ageH:72,score:40,band:'Weak',km:22.0,message:'',facets:{'Looking for':['Online'],'Subject':['English'],'Class':['Class 7']}},
+   {id:'a6',masked:'K***',real:'Kiran L.',cRole:'Seeker',status:'created',ageH:9,score:58,band:'Fair',km:null,message:'Flexible timings preferred.',facets:{'Looking for':['Online'],'Subject':['Physics'],'Class':['Class 12']}},
+ ],initiated:[
+   {id:'b1',masked:'',real:'Bright Coaching',cRole:'Provider',status:'created',ageH:3,score:77,band:'Good',km:4.5,message:'Interested in collaborating.',facets:{'Category':['Coaching Centre']}},
+ ]},
+ p2:{received:[
+   {id:'c1',masked:'V***',real:'Vikram S.',cRole:'Seeker',status:'created',ageH:1,score:90,band:'Strong',km:2.0,message:'Batch admission enquiry.',facets:{'Looking for':['Batch'],'Subject':['Maths'],'Class':['Class 11']}},
+   {id:'c2',masked:'P***',real:'Priya M.',cRole:'Seeker',status:'created',ageH:14,score:52,band:'Fair',km:11.3,message:'Fees details please.',facets:{'Looking for':['Batch'],'Subject':['Science'],'Class':['Class 10']}},
+ ],initiated:[]}
+};
+let state={view:'desktop',profileId:'p1',tab:'received',status:'All',sort:'match_score',facets:{}};
+const SG={All:null,Pending:['created'],Accepted:['accepted','completed'],Rejected:['rejected','cancelled']};
+const SS={created:{label:'Pending',cls:'bg-amber-50 text-amber-700',dot:'bg-amber-500'},accepted:{label:'Accepted',cls:'bg-emerald-50 text-emerald-700',dot:'bg-emerald-500'},completed:{label:'Completed',cls:'bg-emerald-50 text-emerald-700',dot:'bg-emerald-500'},rejected:{label:'Rejected',cls:'bg-red-50 text-red-700',dot:'bg-red-500'},cancelled:{label:'Cancelled',cls:'bg-slate-100 text-slate-600',dot:'bg-slate-400'}};
+const BAND={Strong:'bg-emerald-50 text-emerald-700',Good:'bg-violet-50 text-violet-700',Fair:'bg-amber-50 text-amber-700',Weak:'bg-slate-100 text-slate-500'};
+const isMobile=()=>state.view==='mobile';
+const list=()=>DATA[state.profileId]?.[state.tab]||[];
+const reveals=a=>a.status==='accepted'||a.status==='completed';
+const counts=()=>({received:(DATA[state.profileId]?.received||[]).length,initiated:(DATA[state.profileId]?.initiated||[]).length});
+function facetFields(){const f={};list().forEach(a=>Object.entries(a.facets||{}).forEach(([k,vs])=>{f[k]=f[k]||new Set();vs.forEach(v=>f[k].add(v))}));return Object.fromEntries(Object.entries(f).map(([k,s])=>[k,[...s]]))}
+const passFacets=a=>Object.entries(state.facets).every(([k,vals])=>!vals.length||(a.facets?.[k]||[]).some(v=>vals.includes(v)));
+function visible(){let r=list().filter(a=>{const g=SG[state.status];return !g||g.includes(a.status)}).filter(passFacets);const s=state.sort;return [...r].sort((x,y)=>{if(s==='recent')return x.ageH-y.ageH;if(s==='oldest')return y.ageH-x.ageH;if(s==='match_score'){if(x.score==null&&y.score==null)return x.ageH-y.ageH;if(x.score==null)return 1;if(y.score==null)return -1;return y.score-x.score}if(s==='distance'){if(x.km==null&&y.km==null)return x.ageH-y.ageH;if(x.km==null)return 1;if(y.km==null)return -1;return x.km-y.km}return 0})}
+const sortLabel=()=>({match_score:'Match score',recent:'Newest',oldest:'Oldest',distance:'Distance'})[state.sort];
+const activeFacetCount=()=>Object.values(state.facets).reduce((n,v)=>n+v.length,0);
+
+function profileListHTML(){return `
+  <div class="px-4 pt-3 pb-2 text-[10px] font-bold uppercase tracking-wide text-slate-400">My Profile(s)</div>
+  <div class="px-3 space-y-1">
+    ${PROFILES.map(pf=>`<button onclick="selectProfile('${pf.id}')" class="w-full flex items-center gap-2.5 rounded-lg px-2 py-2 text-left text-sm ${pf.id===state.profileId?'bg-blue-50 text-[color:var(--primary)] font-semibold shadow-[inset_2px_0_0_var(--primary)]':'text-slate-600 hover:bg-slate-50'}"><span class="h-7 w-7 rounded-full bg-blue-100 text-[color:var(--primary)] font-bold flex items-center justify-center text-xs">${pf.initial}</span><span class="flex-1 truncate">${pf.name}</span><span class="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-emerald-100 text-emerald-700">Live</span></button>`).join('')}
+    <button class="w-full flex items-center gap-2 rounded-lg px-2 py-2 text-left text-sm text-slate-500 hover:bg-slate-50 border-t mt-1 pt-3"><span class="text-lg leading-none">＋</span> Create Profile</button>
+  </div>`;}
+
+function render(){
+  const p=PROFILES.find(p=>p.id===state.profileId),c=counts(),mob=isMobile();
+  document.getElementById('tgD').className='rounded-full px-3 py-1.5 '+(!mob?'bg-[color:var(--primary)] text-white':'text-slate-500');
+  document.getElementById('tgM').className='rounded-full px-3 py-1.5 '+(mob?'bg-[color:var(--primary)] text-white':'text-slate-500');
+  document.getElementById('frame').className=mob?'mobile':'desktop';
+
+  document.getElementById('app').innerHTML=`
+  ${mob?'':`<div class="flex w-64 flex-none flex-col border-r bg-white">
+    <div class="flex items-center gap-2 px-4 h-14 border-b"><div class="h-7 w-7 rounded-lg bg-[color:var(--primary)] flex items-center justify-center text-white font-black text-sm">B</div><span class="font-bold">Blue Dots</span></div>
+    <div class="p-3"><div class="px-2 py-1.5 rounded-lg text-sm font-medium text-slate-500 hover:bg-slate-50 flex items-center gap-2">🔍 Browse</div><div class="px-2 py-1.5 rounded-lg text-sm font-semibold text-[color:var(--primary)] bg-blue-50 flex items-center gap-2">📥 My Actions</div></div>
+    ${profileListHTML()}
+  </div>`}
+
+  <div class="flex flex-1 min-w-0 flex-col">
+    <header class="sticky top-0 z-30 flex min-h-14 items-center gap-2.5 border-b bg-gradient-to-r from-white to-blue-50/60 px-3 sm:px-6">
+      ${mob?`<button onclick="openDrawer()" class="rounded-md p-2 hover:bg-slate-100 text-lg leading-none">☰</button>`:`<button class="rounded-md border p-1.5 hover:bg-slate-50 text-slate-600">←</button>`}
+      <div class="min-w-0"><h1 class="text-[15px] font-bold leading-tight">My Actions</h1><p class="truncate text-xs text-slate-500">Requests for <span class="font-medium text-slate-700">${p.name}</span></p></div>
+      <div class="ml-auto flex items-center gap-1 text-slate-500"><button class="relative rounded-md p-2 hover:bg-slate-100">🔔<span class="absolute -top-0.5 -right-0.5 h-4 w-4 rounded-full bg-[color:var(--primary)] text-[9px] text-white flex items-center justify-center font-bold">${c.received}</span></button>${mob?'':`<button class="rounded-md p-2 hover:bg-slate-100">🌗</button>`}<span class="h-7 w-7 rounded-full bg-slate-200 flex items-center justify-center text-xs font-bold text-slate-600">U</span></div>
+    </header>
+
+    <main class="flex-1 overflow-y-auto p-3 sm:p-6">
+      <div class="mx-auto max-w-5xl space-y-4 sm:space-y-5">
+        ${mob?`<div class="rounded-xl border bg-white px-3 py-2 flex items-center gap-2 text-sm"><span class="h-6 w-6 rounded-full bg-blue-100 text-[color:var(--primary)] font-bold flex items-center justify-center text-[11px]">${p.initial}</span><span class="font-semibold">${p.name}</span><button onclick="openDrawer()" class="ml-auto text-xs font-semibold text-[color:var(--primary)]">Switch ▾</button></div>`:''}
+
+        <div class="flex flex-wrap items-center gap-2 sm:gap-3">
+          <div class="inline-flex flex-wrap gap-1 rounded-xl border bg-white p-1">${Object.keys(SG).map(f=>`<button onclick="setStatus('${f}')" class="rounded-lg px-2.5 sm:px-3 py-1.5 text-xs font-medium ${state.status===f?'bg-blue-100 text-[color:var(--primary)]':'text-slate-500'}">${f}</button>`).join('')}</div>
+          <div class="relative"><button onclick="toggleSortMenu(event)" class="inline-flex items-center gap-1.5 rounded-lg border bg-white px-3 py-1.5 text-xs font-semibold text-slate-700">⇅ ${sortLabel()} ▾</button>
+            <div id="sortMenu" class="hidden absolute z-20 mt-1 w-52 rounded-xl border bg-white p-1.5 shadow-xl text-sm">${[['match_score','Match score'],['recent','Newest first'],['oldest','Oldest first'],['distance','Distance (near→far)']].map(([k,l])=>`<button onclick="setSort('${k}')" class="flex w-full items-center justify-between rounded-lg px-3 py-2 ${state.sort===k?'bg-blue-50 text-[color:var(--primary)] font-semibold':'hover:bg-slate-50'}">${l} ${state.sort===k?'✓':''}</button>`).join('')}</div>
+          </div>
+          <button onclick="openSheet()" class="inline-flex items-center gap-1.5 rounded-lg border bg-white px-3 py-1.5 text-xs font-semibold text-slate-700">⚙ Filters ${activeFacetCount()?`<span class="rounded-full bg-[color:var(--primary)] px-1.5 text-[10px] text-white">${activeFacetCount()}</span>`:''}</button>
+          ${mob?'':`<button class="ml-auto inline-flex items-center gap-1.5 rounded-lg border bg-white px-3 py-1.5 text-xs font-semibold text-slate-700">⟳ Refresh</button>`}
+        </div>
+
+        ${activeFacetCount()?`<div class="flex flex-wrap items-center gap-2 text-xs">${Object.entries(state.facets).flatMap(([k,vs])=>vs.map(v=>`<span class="inline-flex items-center gap-1 rounded-lg bg-indigo-50 px-2.5 py-1 font-medium text-indigo-700">${k}: ${v} <button onclick="removeFacet('${k}','${v}')">✕</button></span>`)).join('')}<button onclick="clearFilters()" class="font-semibold text-[color:var(--primary)]">Clear all</button></div>`:''}
+
+        <div class="relative flex rounded-2xl border bg-slate-100/70 p-1.5">
+          <div class="pill-indicator absolute bottom-1.5 top-1.5 rounded-xl bg-white shadow-sm" style="left:calc(${state.tab==='initiated'?0:50}% + 6px);width:calc(50% - 12px)"></div>
+          <button onclick="setTab('initiated')" class="relative z-10 flex flex-1 items-center justify-center gap-2 py-2.5 text-sm ${state.tab==='initiated'?'font-bold text-[color:var(--primary)]':'font-semibold text-slate-500'}">📤 Initiated <span class="inline-flex h-5 min-w-[22px] items-center justify-center rounded-full px-1.5 text-[11px] font-bold ${state.tab==='initiated'?'bg-[color:var(--primary)] text-white':'bg-slate-200 text-slate-500'}">${c.initiated}</span></button>
+          <button onclick="setTab('received')" class="relative z-10 flex flex-1 items-center justify-center gap-2 py-2.5 text-sm ${state.tab==='received'?'font-bold text-[color:var(--primary)]':'font-semibold text-slate-500'}">📥 Received <span class="inline-flex h-5 min-w-[22px] items-center justify-center rounded-full px-1.5 text-[11px] font-bold ${state.tab==='received'?'bg-[color:var(--primary)] text-white':'bg-slate-200 text-slate-500'}">${c.received}</span></button>
+        </div>
+
+        <div id="cards" class="grid grid-cols-1 gap-3 sm:gap-4 ${mob?'':'md:grid-cols-2'}">${renderCards()}</div>
+      </div>
+    </main>
+  </div>`;
+  document.getElementById('drawer').innerHTML=`<div class="flex items-center gap-2 px-4 h-14 border-b"><div class="h-7 w-7 rounded-lg bg-[color:var(--primary)] flex items-center justify-center text-white font-black text-sm">B</div><span class="font-bold">Blue Dots</span><button onclick="closeAll()" class="ml-auto text-slate-400">✕</button></div><div class="p-3"><div class="px-2 py-1.5 rounded-lg text-sm font-medium text-slate-500 flex items-center gap-2">🔍 Browse</div><div class="px-2 py-1.5 rounded-lg text-sm font-semibold text-[color:var(--primary)] bg-blue-50 flex items-center gap-2">📥 My Actions</div></div>${profileListHTML()}`;
+  renderSheet();
+}
+
+function renderCards(){
+  const rows=visible();
+  if(!rows.length)return `<div class="col-span-full flex flex-col items-center justify-center rounded-2xl border border-dashed py-14 text-center"><div class="mb-3 flex h-14 w-14 items-center justify-center rounded-2xl bg-blue-50 text-[color:var(--primary)] text-2xl">📥</div><h3 class="text-base font-bold">Nothing here yet</h3><p class="mt-1 text-sm text-slate-500">Requests ${state.tab==='received'?'sent to you':'you send'} will appear here.</p></div>`;
+  return rows.map(a=>{
+    const st=SS[a.status],rev=reveals(a),name=state.tab==='received'?(rev?a.real:a.masked):a.real,ini=(rev&&a.real?a.real:name).charAt(0).toUpperCase();
+    const meRole=PROFILES.find(p=>p.id===state.profileId).role;
+    const from=state.tab==='received'?`${name} (${a.cRole})`:`You (${meRole})`,to=state.tab==='received'?`You (${meRole})`:`${name} (${a.cRole})`;
+    const badge=a.score==null?`<span class="inline-flex items-center rounded-full bg-slate-100 px-2.5 py-1 text-[11px] font-semibold text-slate-400">Not scored yet</span>`:`<span class="inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[11px] font-bold ${BAND[a.band]}">${a.band} · ${a.score}%</span>`;
+    const chips=Object.entries(a.facets||{}).flatMap(([k,vs])=>vs.map(v=>`<span class="inline-flex items-center rounded-lg bg-indigo-50 px-2.5 py-1 text-xs font-medium text-indigo-700">${v}</span>`)).join('');
+    const canAct=state.tab==='received'&&a.status==='created';
+    return `<div class="relative overflow-hidden rounded-[18px] border bg-white shadow-sm"><div class="h-[3px] w-full bg-gradient-to-r from-blue-300 via-[color:var(--primary)] to-blue-500"></div><div class="p-4 sm:p-5">
+      <div class="mb-4 flex items-center justify-between gap-2"><span class="inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-semibold ${st.cls}"><span class="h-1.5 w-1.5 rounded-full ${st.dot}"></span>${st.label}</span><div class="flex items-center gap-2">${badge}<span class="text-xs text-slate-400">${a.ageH<24?a.ageH+'h':Math.round(a.ageH/24)+'d'} ago</span></div></div>
+      <div class="mb-3 flex items-center gap-3"><div class="flex h-11 w-11 items-center justify-center rounded-full bg-blue-100 text-[color:var(--primary)] font-bold">${ini}</div><div class="min-w-0 flex-1"><div class="flex flex-wrap items-center gap-x-1.5 text-sm font-semibold leading-snug"><span>${from}</span><span class="text-blue-400">→</span><span>${to}</span></div>${a.km!=null?`<div class="mt-1 text-xs text-slate-500">📍 ${a.km.toFixed(1)} km</div>`:''}</div></div>
+      ${a.message?`<div class="mb-3 rounded-xl border bg-slate-50/60 p-3 text-[13px] text-slate-700">${a.message}</div>`:''}
+      ${chips?`<div class="mb-3 flex flex-wrap gap-1.5">${chips}</div>`:''}
+      <div class="flex flex-wrap items-center gap-2 border-t pt-3"><button class="flex-1 rounded-lg border px-3 py-1.5 text-xs font-semibold text-slate-700">View profile</button>${canAct?`<button class="flex-1 rounded-lg border border-red-200 px-3 py-1.5 text-xs font-semibold text-red-600">Reject</button><button class="flex-1 rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white">Accept</button>`:''}</div>
+    </div></div>`;
+  }).join('');
+}
+
+function renderSheet(){
+  const f=facetFields();
+  document.getElementById('sheetBody').innerHTML=`
+    <div class="px-5 pt-3 pb-1 text-[11px] text-slate-400 italic">Facets below are derived live from the network schema's enum fields — same as the Browse/Map filters.</div>
+    <div class="px-5 py-4 border-b"><div class="text-[10px] font-bold uppercase tracking-wide text-slate-400 mb-2">Action type</div>${['Connect','Apply'].map(t=>`<label class="flex items-center gap-2 py-1 text-sm"><input type="checkbox" class="h-4 w-4"> ${t}</label>`).join('')}</div>
+    ${Object.entries(f).map(([k,vals])=>`<div class="px-5 py-4 border-b"><div class="text-[10px] font-bold uppercase tracking-wide text-slate-400 mb-2">${k}</div>${vals.map(v=>`<label class="flex items-center gap-2 py-1 text-sm"><input type="checkbox" ${(state.facets[k]||[]).includes(v)?'checked':''} onchange="toggleFacet('${k}','${v}')" class="h-4 w-4"> ${v}</label>`).join('')}</div>`).join('')}
+    <div class="px-5 py-4 text-xs text-slate-400">No distance filter (distance is a sort option). PII fields (name, contact) stay hidden until you accept, and are never used to filter or sort.</div>`;
+}
+
+function setView(v){state.view=v;closeAll();render();}
+function selectProfile(id){state.profileId=id;state.facets={};closeAll();render();}
+function setTab(t){state.tab=t;state.facets={};render();}
+function setStatus(s){state.status=s;render();}
+function setSort(s){state.sort=s;render();}
+function toggleSortMenu(e){e.stopPropagation();document.getElementById('sortMenu').classList.toggle('hidden');}
+function toggleFacet(k,v){const c=state.facets[k]||[];state.facets[k]=c.includes(v)?c.filter(x=>x!==v):[...c,v];if(!state.facets[k].length)delete state.facets[k];render();openSheetSilent();}
+function removeFacet(k,v){toggleFacet(k,v);}
+function clearFilters(){state.facets={};render();}
+function ov(on){const o=document.getElementById('overlay');o.style.opacity=on?'1':'0';o.style.pointerEvents=on?'auto':'none';}
+function openSheet(){renderSheet();document.getElementById('sheet').style.transform='translateX(0)';ov(true);}
+function openSheetSilent(){document.getElementById('sheet').style.transform='translateX(0)';ov(true);}
+function openDrawer(){document.getElementById('drawer').style.transform='translateX(0)';ov(true);}
+function closeAll(){document.getElementById('sheet').style.transform='translateX(100%)';document.getElementById('drawer').style.transform='translateX(-100%)';ov(false);}
+document.addEventListener('click',()=>document.getElementById('sortMenu')?.classList.add('hidden'));
+render();
+</script>
+</body>
+</html>

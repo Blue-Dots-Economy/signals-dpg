@@ -5,6 +5,7 @@ import type { RJSFSchema, UiSchema, RegistryWidgetsType, ObjectFieldTemplateProp
 import { DatePickerWidget } from './custom-widgets/date-picker-widget';
 import { LocationAutocompleteWidget } from './custom-widgets/location-autocomplete-widget';
 import { MultiLocationAutocompleteWidget } from './custom-widgets/multi-location-autocomplete-widget';
+import { ReferenceAutocompleteWidget } from './custom-widgets/reference-autocomplete-widget';
 import CustomFieldTemplate from './custom-field-template';
 import { resolveFormLayout, type FormLayout } from '@/theme/form-layouts';
 import { resolveVisibleSchema } from '@/lib/show-if';
@@ -100,11 +101,22 @@ interface SchemaFormProps {
    */
   networkId?: string;
   formContext?: Record<string, unknown>;
+  /**
+   * Heading level for section titles (default 3). The profile form passes 2
+   * because its page heading is the hero <h1>, so sections must be <h2> to avoid
+   * a heading-level skip; action-modal keeps the default <h3> under its <h2>
+   * dialog title.
+   */
+  sectionHeadingLevel?: 2 | 3;
 }
 
 // Root-only ObjectFieldTemplate that renders section headers + two-column grid.
 // For nested objects (non-root) it falls back to the default RJSF column layout.
-function SectionedObjectFieldTemplate(layout: FormLayout | undefined) {
+function SectionedObjectFieldTemplate(
+  layout: FormLayout | undefined,
+  headingLevel: 2 | 3 = 3,
+) {
+  const SectionHeading = headingLevel === 2 ? 'h2' : 'h3';
   return function ObjectFieldTemplate(props: ObjectFieldTemplateProps) {
     if (!layout) {
       // No layout config — render properties in a simple column
@@ -163,14 +175,14 @@ function SectionedObjectFieldTemplate(layout: FormLayout | undefined) {
                   <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-primary/10 text-xs font-bold text-primary">
                     {sectionNum}
                   </div>
-                  <h3 className="text-base font-semibold text-foreground tracking-tight">{section.title}</h3>
+                  <SectionHeading className="text-base font-semibold text-foreground tracking-tight">{section.title}</SectionHeading>
                 </div>
                 <div className="mt-3 h-px bg-gradient-to-r from-border via-border/60 to-transparent" />
               </div>
               <div className="space-y-3">
                 {rows.map((row, ri) =>
                   row.length === 2 ? (
-                    <div key={ri} className="grid grid-cols-2 gap-3">
+                    <div key={ri} className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                       {row.map((el) => <div key={el.name}>{el.content}</div>)}
                     </div>
                   ) : (
@@ -278,6 +290,37 @@ function generateUiSchema(
       };
     }
 
+    // External reference vocabulary (network.json `x-reference-source`): render
+    // an autocomplete backed by a reference dataset instead of an inline enum,
+    // so large lists (colleges/institutes/trades) stay out of the schema. The
+    // marker is either a bare `"source"` string or `{ source, subtitle }`, where
+    // `subtitle` is the ordered option fields shown under each result.
+    const referenceMarker = (typed as { 'x-reference-source'?: unknown })['x-reference-source'];
+    let referenceSource: string | undefined;
+    let subtitleFields: string[] | undefined;
+    if (typeof referenceMarker === 'string') {
+      referenceSource = referenceMarker;
+    } else if (referenceMarker && typeof referenceMarker === 'object') {
+      const m = referenceMarker as { source?: unknown; subtitle?: unknown };
+      if (typeof m.source === 'string') referenceSource = m.source;
+      if (Array.isArray(m.subtitle)) {
+        subtitleFields = m.subtitle.filter((s): s is string => typeof s === 'string');
+      }
+    }
+    if (referenceSource && referenceSource.length > 0) {
+      const existing = (uiSchema[key] as Record<string, unknown>) ?? {};
+      const existingOptions = (existing['ui:options'] as Record<string, unknown>) ?? {};
+      uiSchema[key] = {
+        ...existing,
+        'ui:widget': 'reference-autocomplete',
+        'ui:options': {
+          ...existingOptions,
+          source: referenceSource,
+          ...(subtitleFields ? { subtitleFields } : {}),
+        },
+      };
+    }
+
     const locationRole = (typed as { location?: unknown }).location;
     if (locationRole === 'primary' || locationRole === 'secondary') {
       const isArray = typed.type === 'array';
@@ -300,6 +343,7 @@ const widgets: RegistryWidgetsType = {
   date: DatePickerWidget,
   'location-autocomplete': LocationAutocompleteWidget,
   'location-multi': MultiLocationAutocompleteWidget,
+  'reference-autocomplete': ReferenceAutocompleteWidget,
 };
 
 function stripMetaSchema(schema: RJSFSchema): RJSFSchema {
@@ -345,6 +389,10 @@ function normalizeSchemaForRjsf(schema: RJSFSchema, rootSchema?: RJSFSchema): RJ
     // mapped to `ui:placeholder` by generateUiSchema, so ajv must not see it.
     // The `typeof string` guard avoids stripping a property NAMED "placeholder".
     if (key === 'placeholder' && typeof value === 'string') continue;
+    // Strip the custom `x-reference-source` marker (string or `{source,subtitle}`
+    // object) — it's mapped to the reference-autocomplete widget by
+    // generateUiSchema, so ajv must not see it.
+    if (key === 'x-reference-source') continue;
     result[key] = normalizeSchemaForRjsf(value as RJSFSchema, root);
   }
 
@@ -390,6 +438,7 @@ export function SchemaForm({
   domainId,
   networkId,
   formContext,
+  sectionHeadingLevel = 3,
 }: SchemaFormProps) {
   // Base schema (meta stripped) still carries `x-show-if` so the evaluator can read it.
   const baseSchema = React.useMemo(() => stripMetaSchema(schema), [schema]);
@@ -456,7 +505,7 @@ export function SchemaForm({
   const templates = {
     FieldTemplate: CustomFieldTemplate,
     ...(activeLayout
-      ? { ObjectFieldTemplate: SectionedObjectFieldTemplate(activeLayout) }
+      ? { ObjectFieldTemplate: SectionedObjectFieldTemplate(activeLayout, sectionHeadingLevel) }
       : {}),
   };
 

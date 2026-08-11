@@ -71,6 +71,76 @@ export const get_action_contact_details_handler = async (
     });
   }
 
+  const other = callerIsSource
+    ? {
+        network: action.target_item_network,
+        domain: action.target_item_domain,
+        type: action.target_item_type,
+        id: action.target_item_id,
+        instance_url: action.target_item_instance_url,
+        owner: action.target_item_owner,
+      }
+    : {
+        network: action.source_item_network,
+        domain: action.source_item_domain,
+        type: action.source_item_type,
+        id: action.source_item_id,
+        instance_url: action.source_item_instance_url,
+        owner: action.source_item_owner,
+      };
+
+  if (other.instance_url !== getCurrentApiBaseUrl()) {
+    return reply.code(501).send({
+      error: 'CROSS_INSTANCE_REVEAL_NOT_SUPPORTED',
+      message: 'Cross-instance contact-detail reveal is not yet supported',
+    });
+  }
+
+  // Fetch the masked (public) view of the counterparty first. It always exists
+  // locally and carries lifecycle_status; private state is only decrypted later
+  // (a second fetch) once we know a reveal is allowed. Retired items are
+  // included here (the owner-list exclusion is opt-in) so we can message the
+  // counterparty rather than 404/500.
+  const maskedResult = await fetchLocalItems({
+    item_id: other.id,
+    item_network: other.network,
+    item_domain: other.domain,
+    item_type: other.type,
+    item_instance_url: other.instance_url,
+    limit: 1,
+    offset: 0,
+    includePrivateState: false,
+  });
+
+  const [maskedItem] = maskedResult.items;
+  if (!maskedItem) {
+    return reply.code(404).send({
+      error: 'OTHER_ITEM_NOT_FOUND',
+      message: 'Other-actor item missing locally despite same instance',
+    });
+  }
+
+  const normalizeDates = <T extends { created_at: unknown; updated_at: unknown }>(item: T) => ({
+    ...item,
+    created_at: item.created_at instanceof Date ? item.created_at : new Date(item.created_at as string),
+    updated_at: item.updated_at instanceof Date ? item.updated_at : new Date(item.updated_at as string),
+  });
+
+  // Counterparty retired their profile (#347): PII is wiped and the connection
+  // was cancelled. Short-circuit to a clear "retired" state (masked public
+  // view, revealed:false) instead of the PII_NOT_REVEALED / error path — this
+  // must run BEFORE the reveal-status gate, since the action is now cancelled.
+  if (maskedItem.lifecycle_status === 'retired') {
+    reply.header('Cache-Control', 'no-store');
+    return reply.code(200).send({
+      action_id: action.action_id,
+      action_status: action.action_status,
+      revealed: false,
+      reveal_blocked_reason: 'retired',
+      other_actor: { item: normalizeDates(maskedItem) },
+    });
+  }
+
   let revealStatuses: readonly string[];
   try {
     const networkConfig = await getNetworkConfigById(action.target_item_network);
@@ -117,88 +187,58 @@ export const get_action_contact_details_handler = async (
       };
 
   const callerSnapshot = await fetchLocalItemSnapshot(db, callerItem);
-  if (callerSnapshot && callerSnapshot.lifecycle_status !== 'live') {
-    return reply.code(403).send({
-      error: 'PROFILE_NOT_LIVE',
-      message: 'Contact details hidden because your own profile is not live',
+  // A null snapshot (caller item not local) is treated as live — the gate can
+  // only apply to a locally-resolvable profile.
+  const callerLive = callerSnapshot ? callerSnapshot.lifecycle_status === 'live' : true;
+
+  const revealAllowed = callerLive && maskedItem.lifecycle_status === 'live';
+  // Why the reveal is blocked, so the client can say whose profile is the
+  // reason: `self` = the viewer's own profile isn't live (resume it to see
+  // details); `other` = the counterparty's profile isn't live. Self takes
+  // precedence — it's the one the viewer can act on.
+  const revealBlockedReason: 'self' | 'other' | undefined = revealAllowed
+    ? undefined
+    : !callerLive
+      ? 'self'
+      : 'other';
+  let otherItem = maskedItem;
+
+  // Audit only an actual PII reveal — the masked view discloses nothing.
+  if (revealAllowed) {
+    const revealedResult = await fetchLocalItems({
+      item_id: other.id,
+      item_network: other.network,
+      item_domain: other.domain,
+      item_type: other.type,
+      item_instance_url: other.instance_url,
+      limit: 1,
+      offset: 0,
+      includePrivateState: true,
     });
-  }
-
-  const other = callerIsSource
-    ? {
-        network: action.target_item_network,
-        domain: action.target_item_domain,
-        type: action.target_item_type,
-        id: action.target_item_id,
-        instance_url: action.target_item_instance_url,
-        owner: action.target_item_owner,
-      }
-    : {
-        network: action.source_item_network,
-        domain: action.source_item_domain,
-        type: action.source_item_type,
-        id: action.source_item_id,
-        instance_url: action.source_item_instance_url,
-        owner: action.source_item_owner,
-      };
-
-  if (other.instance_url !== getCurrentApiBaseUrl()) {
-    return reply.code(501).send({
-      error: 'CROSS_INSTANCE_REVEAL_NOT_SUPPORTED',
-      message: 'Cross-instance contact-detail reveal is not yet supported',
-    });
-  }
-
-  const result = await fetchLocalItems({
-    item_id: other.id,
-    item_network: other.network,
-    item_domain: other.domain,
-    item_type: other.type,
-    item_instance_url: other.instance_url,
-    limit: 1,
-    offset: 0,
-    includePrivateState: true,
-  });
-
-  const [otherItem] = result.items;
-  if (!otherItem) {
-    return reply.code(404).send({
-      error: 'OTHER_ITEM_NOT_FOUND',
-      message: 'Other-actor item missing locally despite same instance',
-    });
-  }
-
-  // Gate: the other actor's profile must also be live for PII to be revealed.
-  // Fail-closed: the other item is always local here (cross-instance is rejected at the 501
-  // guard above), and lifecycle_status is a notNull DB column always projected by
-  // fetchLocalItems. There is no legitimate undefined case in this path.
-  if (otherItem.lifecycle_status !== 'live') {
-    return reply.code(403).send({
-      error: 'PROFILE_NOT_LIVE',
-      message: 'Contact details hidden because the other actor profile is not live',
-    });
-  }
-
-  try {
-    await db.insert(pii_reveal_audit).values({
-      actionId: action.action_id,
-      viewerUserId: userId,
-      revealedItemId: other.id,
-      revealedItemOwner: other.owner ?? otherItem.created_by ?? '',
-      revealedActionType: action.action_type,
-      revealedActionStatusAtView: action.action_status,
-    });
-  } catch (err) {
-    request.log.error(
-      { err, action_id, viewer_user_id: userId, revealed_item_id: other.id },
-      'Failed to write pii_reveal_audit row'
-    );
+    otherItem = revealedResult.items[0] ?? maskedItem;
+    try {
+      await db.insert(pii_reveal_audit).values({
+        actionId: action.action_id,
+        viewerUserId: userId,
+        revealedItemId: other.id,
+        revealedItemOwner: other.owner ?? otherItem.created_by ?? '',
+        revealedActionType: action.action_type,
+        revealedActionStatusAtView: action.action_status,
+      });
+    } catch (err) {
+      request.log.error(
+        { err, action_id, viewer_user_id: userId, revealed_item_id: other.id },
+        'Failed to write pii_reveal_audit row'
+      );
+    }
   }
 
   reply.header('Cache-Control', 'no-store');
   return reply.code(200).send({
     action_id: action.action_id,
     action_status: action.action_status,
+    revealed: revealAllowed,
+    reveal_blocked_reason: revealBlockedReason,
     other_actor: {
       item: {
         ...otherItem,

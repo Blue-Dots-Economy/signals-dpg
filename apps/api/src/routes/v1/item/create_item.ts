@@ -17,7 +17,7 @@ import { invalidateItemFetchCache } from '@/utils/item_fetch_cache_invalidate';
 import { publishItemEvent } from '@/utils/publish_item_event';
 import { createItemInternal, ItemServiceError, resolveGoLiveGates } from '@/services/item_service';
 import { resolveLocationsForCreate } from '@/services/geocoding/resolve_locations_for_create';
-import { getWardDob } from '@/services/minor_guardian_repo';
+import { getWardAge } from '@/services/minor_guardian_repo';
 import { isMinor, guardianConsentRequired } from '@/services/minor';
 import { getNetworkConfigById } from '@/network_configs';
 
@@ -193,11 +193,11 @@ export const create_item_handler = async (
     const networkConfig = await getNetworkConfigById(body.item_network);
     if (guardianConsentRequired(networkConfig, body.item_domain)) {
       // Gated domain is fail-closed: only a PROVEN adult self-promotes to live.
-      // A minor needs guardian consent; a null DOB cannot prove adulthood (DOB
+      // A minor needs guardian consent; a null age cannot prove adulthood (age
       // capture is client-side only) → both stay draft. Mirrors
       // guardianGateBlocksGoLive on the promote/update paths.
-      const dob = await getWardDob(userId);
-      if (!dob || isMinor(dob)) selfConsentPromotes = false;
+      const age = await getWardAge(userId);
+      if (age === null || isMinor(age)) selfConsentPromotes = false;
     }
   }
 

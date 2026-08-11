@@ -156,3 +156,17 @@ export function resolveActionEmailCopy(
 ): ActionEmailCopy {
   return COPY[group][role][shape];
 }
+
+/**
+ * Copy for the retire → counterparty notification (#418). Deliberately NOT part
+ * of the (group × role × shape) table above: those status shapes are worded as
+ * "the other party responded", which is misleading for a retire auto-cancel
+ * (nobody responded). This is a single, role-agnostic, PII-safe message — the
+ * retired profile's name is already wiped, so it names nothing about that user.
+ * No `{name}` token.
+ */
+export const RETIRE_CANCEL_COPY: ActionEmailCopy = {
+  subject: 'A connection has been cancelled',
+  body: 'A profile you were connected with has been retired and is no longer available, so your active connection with it has been cancelled. No action is needed on your part.',
+  ctaLabel: 'View your connections',
+};

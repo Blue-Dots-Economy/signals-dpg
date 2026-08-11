@@ -1,0 +1,1 @@
+ALTER TABLE "item_metrics" ADD COLUMN "lifecycle_status" text DEFAULT 'draft' NOT NULL;

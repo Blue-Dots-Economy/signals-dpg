@@ -1,8 +1,9 @@
 import * as React from 'react';
 import { useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom';
+import { useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { useTranslation } from 'react-i18next';
-import { ArrowLeft, Wallet, OctagonX } from 'lucide-react';
+import { Wallet, OctagonX } from 'lucide-react';
 import type { RJSFSchema } from '@rjsf/utils';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
@@ -16,25 +17,30 @@ import {
 } from '@/components/ui/dialog';
 import { SchemaForm } from '@/components/forms/schema-form';
 import { Alert, AlertTitle, AlertDescription } from '@/components/ui/alert';
-import { AuthShell } from '@/components/layout/auth-shell';
+import { PageShell } from '@/components/layout/page-shell';
 import { NetworkConstellation } from '@/components/layout/network-constellation';
+import { useMyItems } from '@/hooks/use-my-items';
+import { getStoredActiveProfileId, setStoredActiveProfileId } from '@/lib/active-profile';
+import type { DotNetworkSchema } from '@/engine/types';
 import { RoleCard } from '@/components/cards/role-card';
 import { useNetworkTheme } from '@/theme/theme-provider';
 import { useConsentConfig } from '@/hooks/use-consent-config';
 import { ConsentCheckbox } from '@/components/actions/consent-checkbox';
 import { WalletImportModal } from '@/components/wallet/wallet-import-modal';
-import { resolveNetworkRefs } from '@/engine/schema/resolve-schema';
-import type { DotNetworkSchema } from '@/engine/types';
 import { getConfiguredWalletProviders } from '@/engine/wallet/wallet-registry';
 import type { WalletImportResult } from '@/engine/wallet/types';
 import { useAuth } from '@/contexts/auth-context';
 import { mergeImportedDataIntoSchema } from '@/lib/import-mapping';
 import { getServedScope } from '@/lib/served-binding';
+import { useNetworkConfigs, useResolvedNetwork } from '@/hooks/use-network-config';
+import { useEditItem } from '@/hooks/use-edit-item';
+import { queryKeys } from '@/lib/query-keys';
 import { getStoredSignupDomain, clearStoredSignupDomain } from '@/lib/signup-domain';
 import { getUserDomains } from '@/lib/user-api';
 import { isGuardianConsentRequiredDomain } from '@/lib/guardian-consent';
 import { GuardianOtpDialog } from '@/components/actions/guardian-otp-dialog';
 import { U18GuardianFlow } from '@/components/consent/u18/u18-guardian-flow';
+import { useProfileConsentAccept } from '@/hooks/use-profile-consent-accept';
 import {
   getU18Status,
   issueProfilePrecreateOtp,
@@ -45,17 +51,14 @@ import axios from 'axios';
 
 import {
   createItem,
-  fetchItems,
   updateItem,
   type CreateItemPayload,
   type UpdateItemPayload,
   type Item,
 } from '@/lib/item-api';
-import { fetchNetworkConfig, fetchNetworkConfigs } from '@/lib/network-api';
 import { parseLocationFields, buildLocationQueries } from '@dpg/schemas/location_fields';
 import { getGeoProvider } from '@/lib/geo/provider';
 import type { GeoComponents } from '@/lib/geo/types';
-import { apiConfig } from '@/lib/api-config';
 
 function parseNetworkIds(networkEnv: string | undefined): string[] {
   if (!networkEnv) return [];
@@ -71,8 +74,14 @@ export function ProfileFormPage() {
   const { id } = useParams();
   const [searchParams] = useSearchParams();
   const { user, signOut } = useAuth();
+  const queryClient = useQueryClient();
   const { theme, brand } = useNetworkTheme();
   const { config: consentConfig, isLoading: consentLoading } = useConsentConfig();
+  // Shared profile_creation-consent accept flow (adult self-accept OR minor
+  // guardian-OTP). Used by the EDIT-of-draft submit path below; `dialogs` is
+  // rendered once in the tree. Create keeps its own pre-create guardian flow.
+  const { accept: acceptProfileConsentFlow, dialogs: consentAcceptDialogs } =
+    useProfileConsentAccept();
   const isEdit = !!id;
   // The domains this deployment serves (VITE_SERVED_BINDINGS), or null = all.
   const servedScope = React.useMemo(() => getServedScope(), []);
@@ -87,12 +96,12 @@ export function ProfileFormPage() {
   const [selectedDomain, setSelectedDomain] = React.useState<string | null>(
     () => (!isEdit && singleServedDomain ? singleServedDomain : null),
   );
-  const [resolvedNetwork, setResolvedNetwork] = React.useState<DotNetworkSchema | null>(null);
   const [existingItem, setExistingItem] = React.useState<Item | null>(null);
   const [initialData, setInitialData] = React.useState<Record<string, unknown> | null>(null);
   const [isSubmitting, setIsSubmitting] = React.useState(false);
-  const [isLoading, setIsLoading] = React.useState(isEdit);
-  const [availableNetworkIds, setAvailableNetworkIds] = React.useState<string[] | null>(null);
+  // Lifecycle controls (pause/resume/retire, #346/#347) live on the "My
+  // Profiles" sidebar rows now — NOT in this editor — so no pause UI state here.
+  // `isLoading`/`availableNetworkIds` come from React Query (#295) below.
   const [isWalletModalOpen, setIsWalletModalOpen] = React.useState(false);
   const [formError, setFormError] = React.useState<{ title: string; description?: string } | null>(null);
   const [resolvedLocations, setResolvedLocations] = React.useState<
@@ -131,26 +140,21 @@ export function ProfileFormPage() {
   );
   const networkFromUrl = searchParams.get('network');
 
-  React.useEffect(() => {
-    const controller = new AbortController();
+  // Networks list (config tier) — discover which network ids are available.
+  const {
+    data: networksData,
+    isError: networksError,
+  } = useNetworkConfigs();
 
-    fetchNetworkConfigs()
-      .then((networks) => {
-        if (controller.signal.aborted) return;
-        const filteredNetworks = configuredNetworkIds.length > 0
-          ? networks.filter((network) => configuredNetworkIds.includes(network.id))
-          : networks;
-        setAvailableNetworkIds(filteredNetworks.map((network) => network.id));
-      })
-      .catch((err) => {
-        if (controller.signal.aborted) return;
-        console.error('Failed to fetch networks:', err);
-        setAvailableNetworkIds([]);
-        setIsLoading(false);
-      });
-
-    return () => { controller.abort(); };
-  }, [configuredNetworkIds]);
+  const availableNetworkIds = React.useMemo<string[] | null>(() => {
+    if (networksError) return [];
+    if (!networksData) return null;
+    const filtered =
+      configuredNetworkIds.length > 0
+        ? networksData.filter((network) => configuredNetworkIds.includes(network.id))
+        : networksData;
+    return filtered.map((network) => network.id);
+  }, [networksData, networksError, configuredNetworkIds]);
 
   const targetNetworkId = React.useMemo(() => {
     if (servedScope?.network) return servedScope.network;
@@ -161,87 +165,60 @@ export function ProfileFormPage() {
     return availableNetworkIds[0] ?? null;
   }, [servedScope?.network, availableNetworkIds, networkFromUrl]);
 
-  // Fetch and resolve network config from API
-  React.useEffect(() => {
-    if (!targetNetworkId) return;
-
-    const controller = new AbortController();
-    setResolvedNetwork(null);
-
-    fetchNetworkConfig(targetNetworkId)
-      .then((config) => {
-        if (controller.signal.aborted) return;
-        return resolveNetworkRefs(config, { baseUrl: apiConfig.getUrl() });
-      })
-      .then((resolved) => {
-        if (controller.signal.aborted || !resolved) return;
-        setResolvedNetwork(resolved as DotNetworkSchema);
-      })
-      .catch((err) => {
-        console.error('Failed to fetch network config:', err);
-        setIsLoading(false);
-      });
-
-    return () => { controller.abort(); };
-  }, [targetNetworkId]);
-
-  // Fetch existing profile for edit mode
-  React.useEffect(() => {
-    if (!isEdit || !id || !resolvedNetwork) return;
-
-    let cancelled = false;
-
-    const loadExistingProfile = async () => {
-      try {
-        let foundItem = false;
-        // Search across all domains to find the item
-        for (const domain of resolvedNetwork.domains ?? []) {
-          const itemTypeKeys = domain.item_schemas ? Object.keys(domain.item_schemas) : [];
-          const itemType = itemTypeKeys.length > 0 ? itemTypeKeys[0] : 'profile';
-
-          const response = await fetchItems({
-            item_network: resolvedNetwork.id,
-            item_domain: domain.id,
-            item_type: itemType,
-            item_id: id,
-            limit: 1,
-          });
-
-          if (response.items.length > 0) {
-            if (cancelled) return;
-            const item = response.items[0];
-            setExistingItem(item);
-            setSelectedDomain(item.item_domain);
-            setInitialData(item.item_state);
-            foundItem = true;
-            break;
-          }
-        }
-
-        if (!cancelled && !foundItem) {
-          toast.error(t('home.toast_profile_not_found'), {
-            description: t('profile.toast_not_found_desc'),
-          });
-          navigate(`/?network=${resolvedNetwork.id}`);
-        }
-      } catch (err) {
-        if (!cancelled) {
-          console.error('Failed to load profile:', err);
-          toast.error(t('profile.toast_load_error'), {
-            description: t('profile.toast_load_error_desc'),
-          });
-        }
-      } finally {
-        if (!cancelled) setIsLoading(false);
-      }
-    };
-
-    loadExistingProfile();
-    return () => { cancelled = true; };
-  }, [isEdit, id, resolvedNetwork]);
-
+  // Resolved network config (config tier) — fetch + $ref resolution, cached.
+  const { data: resolvedNetwork, isError: resolvedNetworkError } = useResolvedNetwork(targetNetworkId);
   const network = resolvedNetwork;
   const domains = network?.domains ?? [];
+
+  // Existing profile for edit mode.
+  const editItem = useEditItem(network, isEdit ? (id ?? null) : null);
+
+  // Edit-mode loading screen: shown from mount through the networks-list and
+  // network-config-resolve phases and while the item itself loads (old
+  // `isLoading` was seeded to `isEdit` and cleared only once the item load
+  // settled). Goes false when the networks-list fetch or the network resolve
+  // errors, so a failure falls through to the terminal "no networks" /
+  // "loading schemas" guards exactly as before.
+  const editLoading =
+    isEdit &&
+    !networksError &&
+    !resolvedNetworkError &&
+    !editItem.isSuccess &&
+    !editItem.isError;
+
+  // Seed the edit form from the fetched item; redirect on a genuine miss.
+  React.useEffect(() => {
+    if (!isEdit) return;
+    const item = editItem.data;
+    if (item) {
+      // Seed once per item — a background refetch of the same item must not
+      // clobber the user's in-progress form edits.
+      if (existingItem?.item_id === item.item_id) return;
+      setExistingItem(item);
+      setSelectedDomain(item.item_domain);
+      setInitialData(item.item_state);
+    } else if (editItem.isSuccess && item === null && !existingItem) {
+      toast.error(t('home.toast_profile_not_found'), {
+        description: t('profile.toast_not_found_desc'),
+      });
+      navigate(`/?network=${resolvedNetwork?.id ?? ''}`);
+    } else if (editItem.isError && !existingItem) {
+      console.error('Failed to load profile:', editItem.error);
+      toast.error(t('profile.toast_load_error'), {
+        description: t('profile.toast_load_error_desc'),
+      });
+    }
+  }, [
+    isEdit,
+    editItem.data,
+    editItem.isSuccess,
+    editItem.isError,
+    editItem.error,
+    existingItem,
+    resolvedNetwork?.id,
+    navigate,
+    t,
+  ]);
 
   // The user's role(s), persisted on `user.domains` — the single source of
   // truth for which domain they may create profiles in (set at signup /
@@ -311,7 +288,8 @@ export function ProfileFormPage() {
     return itemTypeKeys.length > 0 ? itemTypeKeys[0] : null;
   }, [selectedDomain, domains]);
 
-  // Consent config derivations — only relevant in create mode.
+  // Consent config derivations. `profile_creation` consent is captured on CREATE
+  // and now also when EDITing a still-draft profile (which promotes it to live).
   const profileDoc = consentConfig?.documents.profile_creation;
   const profileVersion = profileDoc?.versions.find((v) => v.version === profileDoc.current_version);
   const statement = profileVersion?.statement ?? '';
@@ -328,11 +306,28 @@ export function ProfileFormPage() {
     : true;
   const consentRequired = !isEdit && !!statement && domainNeedsConsent;
 
-  // Stored U18 status: whether THIS ward is a minor. Fetched in create mode so
-  // the consent tick can route a minor through guardian verification before the
-  // profile row is ever written. Adults / edit mode are unaffected.
+  // Has THIS draft already recorded profile_creation consent? The home-page
+  // consent gate populates this set; read it (a plain cache read, no
+  // subscription) so re-opening an already-consented draft doesn't re-prompt.
+  const alreadyConsented = network
+    ? queryClient.getQueryData<Set<string>>(queryKeys.profileConsent(network.id))
+    : undefined;
+
+  // Create, or editing a not-yet-live (draft) profile. A live profile edit never
+  // re-captures consent.
+  const isDraft = !isEdit || editItem.data?.lifecycle_status === 'draft';
+  // Consent is needed when a statement is configured, we're on the draft path,
+  // and this specific item hasn't already consented. For create (existingItem
+  // null) this reduces to `!!statement`, matching the old `consentRequired`.
+  const needsConsent =
+    !!statement && isDraft && !(existingItem && alreadyConsented?.has(existingItem.item_id));
+
+  // Stored U18 status: whether THIS ward is a minor. Fetched whenever consent
+  // may be captured — create, OR editing a still-draft profile — so the accept
+  // flow routes a minor through guardian verification. A live edit (no consent)
+  // leaves it null.
   React.useEffect(() => {
-    if (isEdit || !user || !network) { setU18IsMinor(null); return; }
+    if (!isDraft || !user || !network) { setU18IsMinor(null); return; }
     let cancelled = false;
     getU18Status(network.id)
       .then((s) => { if (!cancelled) setU18IsMinor(s.isMinor); })
@@ -340,7 +335,7 @@ export function ProfileFormPage() {
       // transient error can't let a minor create a live profile ungated.
       .catch(() => { if (!cancelled) setU18IsMinor(null); });
     return () => { cancelled = true; };
-  }, [isEdit, user, network]);
+  }, [isDraft, user, network]);
 
   // A minor creating a profile on a guardian-gated domain: the consent tick
   // triggers guardian OTP; "Create profile" stays blocked until it's verified.
@@ -391,6 +386,68 @@ export function ProfileFormPage() {
   const selectedDomainInfo = domains.find((d) => d.id === selectedDomain);
   const DomainIcon = getDomainIcon(selectedDomain, network?.id);
   const roleLabel = (selectedDomain ?? '').replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
+  // #376: the "why complete your profile" prompt — shown when creating, or when
+  // completing a still-draft profile (not when editing an already-live one).
+  const showCompletionPrompt = !isEdit || editItem.data?.lifecycle_status === 'draft';
+  const completionPrompt = selectedDomainInfo?.profile_completion_prompt;
+
+  // ── App-shell sidebar props ──────────────────────────────────────────────
+  // The form now renders inside the main app shell (PageShell), so it feeds the
+  // same sidebar (networks / domains / "My Profiles") home-page does. Selecting
+  // anything in the sidebar navigates back to home — this page only edits the
+  // one profile it's opened for.
+  const allNetworks = React.useMemo<DotNetworkSchema[]>(() => {
+    if (!networksData) return [];
+    return configuredNetworkIds.length > 0
+      ? networksData.filter((n) => configuredNetworkIds.includes(n.id))
+      : networksData;
+  }, [networksData, configuredNetworkIds]);
+  const showNetworkSelector = !servedScope && allNetworks.length > 1;
+  const { data: myItems } = useMyItems(network ?? null);
+  const activeProfileId = getStoredActiveProfileId(network?.id ?? '');
+  const userSchemas = React.useMemo<Record<string, RJSFSchema>>(() => {
+    if (!network) return {};
+    const map: Record<string, RJSFSchema> = {};
+    for (const domain of network.domains) {
+      const schema = domain.item_schemas ? Object.values(domain.item_schemas)[0] : undefined;
+      if (schema) map[domain.id] = schema;
+    }
+    return map;
+  }, [network]);
+
+  // Back / Cancel: in a multi-role create flow, step back to the role picker;
+  // otherwise leave the form for home (mirrors the pre-shell back nav).
+  const handleBack = React.useCallback(() => {
+    if (selectedDomain && !isEdit && !roleLocked && !singleServedDomain) {
+      setSelectedDomain(null);
+    } else {
+      navigate(`/?network=${resolvedNetwork?.id ?? ''}`);
+    }
+  }, [selectedDomain, isEdit, roleLocked, singleServedDomain, navigate, resolvedNetwork?.id]);
+
+  const handleSidebarNetworkSelect = React.useCallback(
+    (networkId: string) => navigate(`/?network=${networkId}`),
+    [navigate],
+  );
+  const handleSidebarDomainSelect = React.useCallback(
+    (domainId: string | null) =>
+      navigate(
+        domainId
+          ? `/?network=${resolvedNetwork?.id ?? ''}&domain=${domainId}`
+          : `/?network=${resolvedNetwork?.id ?? ''}`,
+      ),
+    [navigate, resolvedNetwork?.id],
+  );
+  const handleSidebarProfileChange = React.useCallback(
+    (profileId: string) => {
+      if (network?.id) setStoredActiveProfileId(network.id, profileId);
+      navigate(`/?network=${resolvedNetwork?.id ?? ''}`);
+    },
+    [network?.id, navigate, resolvedNetwork?.id],
+  );
+  const handleProfilesChanged = React.useCallback(() => {
+    if (network) queryClient.invalidateQueries({ queryKey: queryKeys.myItems(network.id) });
+  }, [network, queryClient]);
 
   const canImportCredentials = React.useMemo(
     () => Boolean(profileSchema) && getConfiguredWalletProviders().length > 0,
@@ -505,6 +562,67 @@ export function ProfileFormPage() {
         }
 
         await updateItem(existingItem.item_id, updatePayload);
+        // Bust the by-id caches for THIS item, else re-opening the editor within
+        // the 60s own-data window seeds the form from the pre-edit copy — and the
+        // seed-once guard then pins that stale value so the background refetch
+        // can't correct it. removeQueries (not invalidate) for editItem so the
+        // next open has no stale copy to seed from and refetches fresh via the
+        // same masked read path; itemDetail (marker click-through / detail popup)
+        // can just be invalidated.
+        queryClient.removeQueries({
+          queryKey: queryKeys.editItem(network.id, existingItem.item_id),
+        });
+        queryClient.invalidateQueries({
+          queryKey: queryKeys.itemDetail(network.id, existingItem.item_id),
+        });
+
+        // Refresh the browse / my-items lists (§C5). IMPORTANT: when a draft is
+        // about to be promoted to live via consent below, do NOT invalidate
+        // my-items here — that kicks off a refetch of the still-`draft` status
+        // that wins the race and leaves the sidebar showing "Draft" even though
+        // the profile is live server-side. Invalidate only AFTER the promotion
+        // (in the accept flow's onDone). This mirrors the create path.
+        const refreshLists = () => {
+          queryClient.invalidateQueries({ queryKey: queryKeys.myItems(network.id) });
+          queryClient.invalidateQueries({ queryKey: ['browse-items', network.id] });
+        };
+
+        // Editing a still-draft profile with a configured statement: record
+        // profile_creation consent, which promotes the draft to live. For an
+        // adult this resolves synchronously → `onDone`; for a minor on a gated
+        // domain the hook opens the guardian-OTP flow and `onDone` runs only
+        // after OTP success. Either way the list refresh + navigation are
+        // deferred to `onDone`, so we return here rather than falling through.
+        if (needsConsent && profileDoc) {
+          await acceptProfileConsentFlow({
+            network: network.id,
+            brand: brand === 'standard' ? null : brand,
+            item: {
+              item_id: existingItem.item_id,
+              item_domain: selectedDomain,
+              item_type: existingItem.item_type,
+            },
+            version: profileDoc.current_version,
+            isMinor: u18IsMinor === true,
+            // The guardian flow may reclassify the ward as an adult (or capture a
+            // guardian); re-sync U18 status so a not-minor outcome doesn't
+            // dead-end and a retry runs with the corrected status.
+            onGuardianStatusChanged: () => {
+              getU18Status(network.id)
+                .then((s) => setU18IsMinor(s.isMinor))
+                .catch(() => setU18IsMinor(null));
+            },
+            onDone: () => {
+              refreshLists();
+              navigate(`/?network=${resolvedNetwork?.id ?? ''}`);
+            },
+          });
+          return;
+        }
+
+        // Plain edit (already live / no statement configured): reflect the field
+        // edits in the lists now.
+        refreshLists();
         toast.success(t('profile.toast_updated'), {
           description: t('profile.toast_updated_desc'),
         });
@@ -537,6 +655,27 @@ export function ProfileFormPage() {
         }
 
         const created = await createItem(createPayload);
+        // Make the freshly-created profile the active one so the home sidebar
+        // selects it (and the discover list anchors to it) instead of keeping
+        // the previously-stored profile. Home reads this on load.
+        setStoredActiveProfileId(network.id, created.item_id);
+        // NOTE: my-items / browse-items invalidation runs AFTER
+        // finalizeProfileConsent below — NOT here. A minor's item is created
+        // `draft` and only flips to `live` in finalize; invalidating here would
+        // refetch the still-draft status and leave the sidebar showing "Draft".
+        if (consentRequired && profileDoc) {
+          // This create recorded profile_creation consent. Optimistically add
+          // the new item to the profileConsent cache so returning to home sees
+          // it as consented IMMEDIATELY. A plain invalidate is not enough: the
+          // profileConsent query is stale-while-revalidate, so the home gate
+          // would read the old set (without this profile) during the refetch
+          // window and spuriously re-prompt. Mirrors the accept handler's
+          // setQueryData approach.
+          queryClient.setQueryData<Set<string>>(
+            queryKeys.profileConsent(network.id),
+            (prev) => new Set([...(prev ?? []), created.item_id]),
+          );
+        }
         // Minor on a gated domain: the guardian already OTP-verified a
         // pre-create token at the consent tick. Consume it now to record the
         // GUARDIAN profile_creation consent and promote the fresh item to live
@@ -550,6 +689,16 @@ export function ProfileFormPage() {
             item_id: created.item_id,
           });
         }
+        // Reflect the write in cached lists (§C5) — invalidate AFTER the minor
+        // promotion above, not right after createItem. A minor's item is created
+        // `draft` and only flips to `live` in finalizeProfileConsent; invalidating
+        // before that made my-items refetch the still-`draft` status, so the
+        // sidebar showed "Draft" until the next interaction even though the
+        // profile was live server-side.
+        queryClient.invalidateQueries({ queryKey: queryKeys.myItems(network.id) });
+        // Network-level prefix of the browse-items key (React Query matches
+        // prefixes) — invalidates every domain's browse cache for this network.
+        queryClient.invalidateQueries({ queryKey: ['browse-items', network.id] });
         toast.success(t('profile.toast_created'), {
           description: t('profile.toast_created_desc'),
         });
@@ -590,11 +739,11 @@ export function ProfileFormPage() {
     }
   };
 
-  if (availableNetworkIds === null || isLoading) {
+  if (availableNetworkIds === null || editLoading) {
     return (
-      <div className="flex h-screen items-center justify-center">
+      <div className="flex h-svh items-center justify-center">
         <p className="text-muted-foreground">
-          {isLoading ? t('profile.loading_profile') : t('profile.loading_schemas')}
+          {editLoading ? t('profile.loading_profile') : t('profile.loading_schemas')}
         </p>
       </div>
     );
@@ -602,7 +751,7 @@ export function ProfileFormPage() {
 
   if (!targetNetworkId) {
     return (
-      <div className="flex h-screen items-center justify-center">
+      <div className="flex h-svh items-center justify-center">
         <p className="text-muted-foreground">{t('profile.no_networks')}</p>
       </div>
     );
@@ -610,74 +759,169 @@ export function ProfileFormPage() {
 
   if (!network) {
     return (
-      <div className="flex h-screen items-center justify-center">
+      <div className="flex h-svh items-center justify-center">
         <p className="text-muted-foreground">{t('profile.loading_schemas')}</p>
       </div>
     );
   }
 
+  // Shared sidebar wiring for both the role-picker and the form itself — the
+  // page lives inside the main app shell now (Task 3), so the sidebar mirrors
+  // home-page's; every selection navigates back to home.
+  const shellSidebarProps = {
+    networks: showNetworkSelector ? allNetworks : [],
+    selectedNetwork: targetNetworkId,
+    onNetworkSelect: handleSidebarNetworkSelect,
+    domains,
+    selectedDomain: null as string | null,
+    onDomainSelect: handleSidebarDomainSelect,
+    myItems,
+    activeProfileId,
+    onActiveProfileChange: handleSidebarProfileChange,
+    onProfilesChanged: handleProfilesChanged,
+    userSchemas,
+    // On a create/edit form there is nothing to browse — hide the Browse
+    // (domain selector) group, and label the return control "Browse" (it goes
+    // to the browse view, not the prior route).
+    hideBrowse: true,
+    backLabel: t('nav.browse_group'),
+  };
+
   // Domain selection step
   if (!selectedDomain && !isEdit) {
     return (
-      <AuthShell>
-        <button
-          type="button"
-          onClick={() => navigate(`/?network=${targetNetworkId}`)}
-          className="mb-6 flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors"
-        >
-          <ArrowLeft className="h-4 w-4" />
-          {t('common.back')}
-        </button>
-        <div className="mb-6">
-          <p className="mb-2 inline-flex items-center rounded-full bg-primary/10 px-2.5 py-0.5 text-[10px] font-semibold uppercase tracking-[0.18em] text-primary">
-            {theme.portalLabel}
-          </p>
-          <h2 className="text-2xl font-bold">{t('profile.create_heading')}</h2>
-          <p className="text-muted-foreground mt-1">{t('profile.choose_role')}</p>
-          <p className="text-sm text-muted-foreground/80 mt-2">{theme.subline}</p>
+      <PageShell
+        variant="form"
+        title={t('profile.create_heading')}
+        onBack={handleBack}
+        {...shellSidebarProps}
+      >
+        <div className="mx-auto max-w-[1040px] pb-24">
+          <div className="mb-6">
+            <p className="mb-2 inline-flex items-center rounded-full bg-primary/10 px-2.5 py-0.5 text-[10px] font-semibold uppercase tracking-[0.18em] text-primary">
+              {theme.portalLabel}
+            </p>
+            <p className="text-muted-foreground mt-1">{t('profile.choose_role')}</p>
+            <p className="text-sm text-muted-foreground/80 mt-2">{theme.subline}</p>
+          </div>
+          <div className="grid gap-4 sm:grid-cols-2">
+            {selectableDomains.map((domain, idx) => {
+              const Icon = getDomainIcon(domain.id, network?.id);
+              const label = domain.id
+                .replace(/_/g, ' ')
+                .replace(/\b\w/g, (c) => c.toUpperCase());
+              return (
+                <RoleCard
+                  key={domain.id}
+                  icon={Icon}
+                  title={label}
+                  description={domain.description ?? ''}
+                  onClick={() => setSelectedDomain(domain.id)}
+                  variant={idx % 2 === 0 ? 'primary' : 'secondary'}
+                />
+              );
+            })}
+          </div>
         </div>
-        <div className="grid gap-4 sm:grid-cols-2">
-          {selectableDomains.map((domain, idx) => {
-            const Icon = getDomainIcon(domain.id, network?.id);
-            const label = domain.id
-              .replace(/_/g, ' ')
-              .replace(/\b\w/g, (c) => c.toUpperCase());
-            return (
-              <RoleCard
-                key={domain.id}
-                icon={Icon}
-                title={label}
-                description={domain.description ?? ''}
-                onClick={() => setSelectedDomain(domain.id)}
-                variant={idx % 2 === 0 ? 'primary' : 'secondary'}
-              />
-            );
-          })}
-        </div>
-      </AuthShell>
+      </PageShell>
     );
   }
 
+  // When consent is being captured (create, or promoting a draft) the primary
+  // action publishes; otherwise it's a plain create/update.
+  const primaryLabel = needsConsent
+    ? t('profile.btn_save_publish')
+    : isEdit
+      ? t('profile.btn_update')
+      : t('profile.btn_create');
+  const submitDisabled = isEdit
+    ? // Live edit: unchanged (formValid only). Draft-with-consent: wait for the
+      // consent config to load, then require the acknowledgement tick.
+      !formValid || (isDraft && consentLoading) || (needsConsent && !consentChecked)
+    : !formValid ||
+      consentLoading ||
+      (needsConsent && !consentChecked) ||
+      (minorGatedCreate && !guardianVerifiedForCreate);
+
+  // Action bar rendered as PageShell's pinned footer (below the scroll area, via
+  // footerSlot) — NOT a sticky element inside the scroll, which floated
+  // mid-content when the form was short and produced a second scrollbar. The
+  // submit is `type=submit form=profile-form`, so it still drives the (hidden-
+  // submit) SchemaForm even though it now lives outside the form's DOM subtree.
+  const actionBar = (
+    <div data-testid="profile-action-bar" className="mx-auto max-w-[1040px] space-y-3 px-4 py-3 sm:px-6">
+      {/* Consent gets its OWN full-width row above the buttons — the
+          ConsentCheckbox is a bordered block, so cramming it into the horizontal
+          button cluster wrapped and broke the bar (esp. with the minor status
+          line). Shown for CREATE and EDIT-of-draft (the `needsConsent` path). The
+          minor pre-create interstitial is create-only; an edit-of-draft minor is
+          routed through the guardian flow by the accept hook. */}
+      {formValid && needsConsent && (
+        <div className="space-y-2">
+          <ConsentCheckbox
+            text={statement}
+            checked={consentChecked}
+            onCheckedChange={(v) => {
+              setConsentChecked(v);
+              if (v && minorGatedCreate && !guardianVerifiedForCreate) {
+                setGuardianConfirmOpen(true);
+              }
+            }}
+          />
+          {!isEdit && minorGatedCreate && consentChecked && (
+            <p className="text-sm text-muted-foreground">
+              {guardianVerifiedForCreate
+                ? t('u18.guardian_verified_for_create', 'Guardian verified. You can now create your profile.')
+                : t('u18.guardian_pending_for_create', "You're under 18 — your guardian must verify with a one-time code before you can create this profile.")}
+            </p>
+          )}
+        </div>
+      )}
+      <div className="flex flex-wrap items-center gap-3">
+        <div className="text-sm">
+          {formValid ? (
+            <span className="text-emerald-600">{t('profile.required_complete')}</span>
+          ) : (
+            <span className="text-amber-700">{t('profile.fill_required_hint')}</span>
+          )}
+        </div>
+        <div className="ml-auto flex items-center gap-2">
+          <Button variant="ghost" onClick={handleBack}>
+            {t('common.cancel')}
+          </Button>
+          <button
+            type="submit"
+            form="profile-form"
+            disabled={submitDisabled}
+            className="h-11 rounded-md bg-brand-cta px-5 font-semibold text-white disabled:opacity-50"
+          >
+            {primaryLabel}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+
   return (
-    <div className="min-h-screen bg-gradient-to-b from-[var(--brand-hero-to)]/8 to-background p-4 sm:p-6">
-      <div className="mx-auto max-w-2xl">
-        {/* Branded hero strip — sits flush above the form Card */}
-        <div className="relative overflow-hidden rounded-t-xl bg-brand-hero">
+    <PageShell
+      variant="form"
+      // No app-bar title here: the branded hero strip below already shows the
+      // role heading, so a title in the bar would duplicate it. (The role-picker
+      // step above keeps its bar title — it has no hero.)
+      onBack={handleBack}
+      footerSlot={actionBar}
+      {...shellSidebarProps}
+    >
+      <div className="mx-auto max-w-[1040px]">
+        {/* Branded hero strip — sits flush above the form Card. This hero heading
+            is the page's <h1> now (the app-bar title was dropped to avoid
+            duplicating it). Uses the network's primary brand color. */}
+        <div className="relative overflow-hidden rounded-t-xl bg-primary">
           <div className="pointer-events-none absolute inset-0 opacity-15">
             <NetworkConstellation className="h-full w-full" />
           </div>
           <div className="pointer-events-none absolute inset-0 bg-gradient-to-r from-black/50 via-black/20 to-transparent" />
-          <div className="relative z-10 px-5 pt-4 sm:px-6">
-            <button
-              type="button"
-              onClick={() => (selectedDomain && !isEdit && !roleLocked && !singleServedDomain ? setSelectedDomain(null) : navigate(`/?network=${resolvedNetwork?.id ?? ''}`))}
-              className="flex items-center gap-1.5 text-sm text-white/70 hover:text-white transition-colors"
-            >
-              <ArrowLeft className="h-4 w-4" />
-              {selectedDomain && !isEdit && !roleLocked && !singleServedDomain ? t('profile.choose_different_role') : t('common.back')}
-            </button>
-          </div>
-          <div className="relative z-10 flex items-center gap-4 px-5 pb-6 pt-3 sm:px-6">
+          <div className="relative z-10 flex items-center gap-4 px-5 pb-6 pt-6 sm:px-6">
             <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-white/20 backdrop-blur-sm ring-1 ring-white/20">
               <DomainIcon className="h-6 w-6 text-white" />
             </div>
@@ -685,9 +929,9 @@ export function ProfileFormPage() {
               <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-white/50">
                 {theme.portalLabel}
               </p>
-              <h2 className="text-xl font-bold text-white leading-tight truncate">
+              <h1 className="text-xl font-bold text-white leading-tight truncate">
                 {isEdit ? t('profile.edit_role_heading', { role: roleLabel }) : t('profile.create_role_heading', { role: roleLabel })}
-              </h2>
+              </h1>
               <p className="mt-0.5 text-xs text-white/70 leading-snug">
                 {selectedDomainInfo?.description ?? t('profile.fill_details')}
               </p>
@@ -695,9 +939,22 @@ export function ProfileFormPage() {
           </div>
         </div>
 
-        {/* Form card — connects flush to the hero strip */}
+        {/* Form card — connects flush to the hero strip. */}
         <Card className="rounded-t-none border-t-0 shadow-lg">
           <CardContent className="pt-6">
+            {/* #376: motivating "why complete your profile" prompt — per-domain
+                from network.json (role-specific), with a generic i18n fallback. */}
+            {showCompletionPrompt && selectedDomain && (
+              <div className="mb-5 rounded-lg border border-brand-cta/30 bg-brand-cta/[0.06] p-4">
+                <p className="text-sm font-semibold text-foreground">
+                  {completionPrompt?.heading ?? t('profile.completion_prompt_default_heading')}
+                </p>
+                <p className="mt-1 text-sm text-muted-foreground">
+                  {completionPrompt?.body ?? t('profile.completion_prompt_default_body')}
+                </p>
+              </div>
+            )}
+
             {canImportCredentials && (
               <div className="mb-4">
                 <Button variant="outline" size="sm" onClick={() => setIsWalletModalOpen(true)}>
@@ -722,9 +979,11 @@ export function ProfileFormPage() {
                 onSubmit={handleSubmit}
                 disabled={isSubmitting}
                 formData={initialData ?? undefined}
-                submitButtonText={isEdit ? t('profile.btn_update') : undefined}
-                hideSubmit={!isEdit}
-                onValidityChange={!isEdit ? setFormValid : undefined}
+                hideSubmit
+                onValidityChange={setFormValid}
+                // The page heading is the hero <h1>; render section titles as
+                // <h2> so the heading chain (h1 → h2) has no skip.
+                sectionHeadingLevel={2}
                 domainId={selectedDomain ?? undefined}
                 networkId={network?.id}
                 formContext={{
@@ -736,60 +995,6 @@ export function ProfileFormPage() {
               />
             )}
 
-            {!isEdit && (
-              <div className="mt-6 space-y-4">
-                {!formValid ? (
-                  <div className="flex items-center gap-2.5 rounded-md border border-amber-300 bg-amber-50 px-4 py-3 text-sm font-medium text-amber-800">
-                    <span
-                      aria-hidden="true"
-                      className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-amber-400 text-xs font-bold text-white"
-                    >
-                      !
-                    </span>
-                    {t('profile.fill_required_hint')}
-                  </div>
-                ) : (
-                  consentRequired && (
-                    <ConsentCheckbox
-                      text={statement}
-                      checked={consentChecked}
-                      // For a minor on a gated domain, ticking the consent is the
-                      // trigger: it fires the guardian OTP BEFORE the profile is
-                      // created (no draft is written until "Create profile").
-                      onCheckedChange={(v) => {
-                        setConsentChecked(v);
-                        // Don't fire the OTP straight away — show the "you're
-                        // under 18, a code goes to your guardian" interstitial
-                        // first, then issue on confirm.
-                        if (v && minorGatedCreate && !guardianVerifiedForCreate) {
-                          setGuardianConfirmOpen(true);
-                        }
-                      }}
-                    />
-                  )
-                )}
-                {minorGatedCreate && consentChecked && (
-                  <p className="text-sm text-muted-foreground">
-                    {guardianVerifiedForCreate
-                      ? t('u18.guardian_verified_for_create', 'Guardian verified. You can now create your profile.')
-                      : t('u18.guardian_pending_for_create', "You're under 18 — your guardian must verify with a one-time code before you can create this profile.")}
-                  </p>
-                )}
-                <button
-                  type="submit"
-                  form="profile-form"
-                  disabled={
-                    !formValid ||
-                    (!isEdit && consentLoading) ||
-                    (consentRequired && !consentChecked) ||
-                    (minorGatedCreate && !guardianVerifiedForCreate)
-                  }
-                  className="mt-2 h-12 w-full rounded-md text-base font-semibold bg-brand-cta hover:brightness-110 transition-all active:scale-95 shadow-md text-white disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                  {t('profile.btn_create')}
-                </button>
-              </div>
-            )}
           </CardContent>
         </Card>
 
@@ -811,7 +1016,7 @@ export function ProfileFormPage() {
             if (!guardianVerifiedForCreate) setConsentChecked(false);
           }}
         >
-          <DialogContent>
+          <DialogContent className="max-h-[90dvh] overflow-y-auto">
             <DialogHeader>
               <DialogTitle>
                 {t('profile.guardian_confirm_title', 'Guardian confirmation needed')}
@@ -848,6 +1053,7 @@ export function ProfileFormPage() {
         {/* Pre-create guardian OTP: verified BEFORE the profile row is written. */}
         <GuardianOtpDialog
           open={guardianOtpOpen}
+          purpose={{ kind: 'profile' }}
           onOpenChange={(open) => {
             if (open) return;
             setGuardianOtpOpen(false);
@@ -870,6 +1076,7 @@ export function ProfileFormPage() {
           <U18GuardianFlow
             network={network.id}
             brand={brand === 'standard' ? null : brand}
+            purpose={{ kind: 'profile' }}
             initialStep="guardian"
             onComplete={() => {
               setGuardianSetupOpen(false);
@@ -879,7 +1086,11 @@ export function ProfileFormPage() {
             onLogout={() => { void signOut(); }}
           />
         )}
+
+        {/* Guardian-OTP + capture dialogs for the EDIT-of-draft consent path
+            (driven by separate state from the create pre-create flow above). */}
+        {consentAcceptDialogs}
       </div>
-    </div>
+    </PageShell>
   );
 }

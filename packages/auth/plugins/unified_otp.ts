@@ -17,7 +17,7 @@ const CheckUserInput = z.object({
     .meta({
       description: 'Phone number to sign in. Eg: "+911234567890"',
     }),
-  dateOfBirth: z.string().optional(),
+  age: z.coerce.number().int().min(0).max(120).optional(),
 });
 const RequestOtpInput = z.object({
   email: z.email('Please enter a valid Email').optional().meta({
@@ -49,7 +49,7 @@ const VerifyOtpInput = z.object({
   otp: z.string('Enter a valid 6 digit otp').length(6).meta({
     description: 'Six digit otp. Ex: "777666"',
   }),
-  dateOfBirth: z.date().or(z.string()).optional().nullable().default(null),
+  age: z.coerce.number().int().min(0).max(120).optional().nullable().default(null),
   rememberMe: z
     .boolean('If session should be remembered')
     .default(true)
@@ -86,7 +86,7 @@ const VerifyOtpInput = z.object({
 export interface UserWithPhoneNumber extends User {
   phoneNumber: string;
   phoneNumberVerified: boolean;
-  dateOfBirth?: string; // stored as ISO date or YYYY-MM-DD
+  age?: number; // years, snapshot at registration (#331)
   termsAccepted: boolean | null;
   privacyAccepted: boolean | null;
 }
@@ -143,7 +143,7 @@ export const unifiedOtp = ({
         email: { type: 'string', unique: true },
         phoneNumber: { type: 'string', required: false, unique: true },
         phoneNumberVerified: { type: 'boolean', required: false },
-        dateOfBirth: { type: 'date', required: false },
+        age: { type: 'number', required: false },
         termsAccepted: { type: 'boolean', required: false },
         privacyAccepted: { type: 'boolean', required: false },
       },
@@ -534,7 +534,7 @@ export const unifiedOtp = ({
           rememberMe,
           joinOrg,
           createAdmin,
-          dateOfBirth,
+          age,
         } = validator.data;
 
         if (!email && !phoneNumber) {
@@ -610,8 +610,8 @@ export const unifiedOtp = ({
             }
           }
 
-          const dob: Date | null =
-            typeof dateOfBirth === 'string' ? new Date(dateOfBirth) : null;
+          const ageValue: number | null =
+            typeof age === 'number' ? age : null;
 
           user = await ctx.context.adapter.create({
             model: 'user',
@@ -626,7 +626,7 @@ export const unifiedOtp = ({
               banned: false,
               banReason: '',
               banExpires: null,
-              dateOfBirth: dob,
+              age: ageValue,
               termsAccepted: true,
               privacyAccepted: true,
             },

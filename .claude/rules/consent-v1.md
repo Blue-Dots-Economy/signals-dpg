@@ -28,6 +28,23 @@ Two invariants worth internalising:
 - `schema_required` — all `schema.required` fields populated (completeness).
 - `consent_required` — `profile_creation` consent accepted **by the correct signer** (see U18 note below).
 
-Omitting `go_live_required` uses `DEFAULT_GO_LIVE_GATES` = `['schema_required']` — **consent is opt-in, not the default** (a change from the old "every network is consent-gated" rule). A domain that wants the historical behaviour lists both tokens. An empty array and unknown tokens are rejected at config load. `resolveGoLiveGates` (`item_service.ts`) resolves the effective set per (network, domain). Accepting profile consent (`routes/v1/consent/accept_profile_consent.ts`) calls `promoteItemOnProfileConsent`, which re-runs `classify_item` with the resolved gates and flips a `draft` item to `live`. Only `draft` is promoted: `paused` is sticky and `live` needs no change. **Profile completion % (`profile_completion_pct`) is intentionally independent of the gate set** — always required-only.
+Omitting `go_live_required` uses `DEFAULT_GO_LIVE_GATES` = `['schema_required']` — **consent is opt-in, not the default** (a change from the old "every network is consent-gated" rule). A domain that wants the historical behaviour lists both tokens. An empty array and unknown tokens are rejected at config load. `resolveGoLiveGates` (`item_service.ts`) resolves the effective set per (network, domain). Accepting profile consent (`routes/v1/consent/accept_profile_consent.ts`) calls `promoteItemOnProfileConsent`, which re-runs `classify_item` with the resolved gates and flips a `draft` item to `live`. Only `draft` is promoted: `paused` is sticky, `retired` is terminal, and `live` needs no change. **Profile completion % (`profile_completion_pct`) is intentionally independent of the gate set** — always required-only.
 
 **U18 guardian gate is folded into `consent_required`.** For domains where `guardianConsentRequired(networkConfig, domain)` is true, a minor's profile cannot reach `live` on the ward's own self-consent — only a guardian's `source='guardian'` `profile_creation` row satisfies the gate. `guardianGateBlocksGoLive` (`services/item_service.ts`) remains **THE single source of truth** for the age check; the go-live call sites (`promoteItemOnProfileConsent`, `updateItemInternal`) compute a guardian-aware `consent_accepted` (`hasAcceptedProfileConsent && !guardianGateBlocksGoLive`) and pass it as the `consent_required` gate value — do not re-derive the age check inline, and do not add a separate `if guardianGateBlocksGoLive` branch (it belongs inside the consent gate). It is **fail-closed**: a null `date_of_birth` on a gated domain is never treated as adult (DOB capture is client-side; `u18_precheck` is a hint, not a control), and a minor with no guardian row stays `draft`. So the age control can never be disabled by config, `resolveGoLiveGates` **force-adds `consent_required` for any guardian-gated domain**, and the config schema **rejects** a guardian-gated domain that declares `go_live_required` without `consent_required`. The bypass #311 closed (a source-agnostic `hasAcceptedProfileConsent` promotion) stays closed: guardian-awareness lives in the one gate value, not a raw consent-presence check.
+
+The `/admin/participant` endpoint also records the ledger for external
+channels: its `compliance` array maps to user-level `terms`/`privacy`
+(`source='signup'`) and item-level `profile_creation` (`source='profile'`),
+then promotes via `promoteItemOnProfileConsent`. The channel is captured in
+each row's `metadata.channel`. It never records guardian consent (that
+requires the OTP flow).
+
+The participant endpoint validates consent payloads: any `compliance` value
+`false` → `CONSENT_DECLINED`; `user_terms`/`user_privacy` are a both-or-none
+pair (`USER_LEVEL_INCOMPLETE`); on guardian-gated domains the pair requires
+`age` (integer years, stored as the `user.age` snapshot #331; `DOB_REQUIRED`,
+handler-level via `guardianConsentRequired`).
+Persisting `age` re-promotes all the user's eligible drafts
+(`promoteEligibleDraftsForUser`). `GET /admin/participant` surfaces consent
+status. It never records `source='guardian'` — U18 promotion still requires the
+guardian OTP flow.

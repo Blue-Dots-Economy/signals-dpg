@@ -890,6 +890,7 @@ async function insertDomainRecords(
             ? [{ lat: record.latitude, lng: record.longitude }]
             : [],
         created_by: identity.id,
+        skip_profile_limit: true,
       });
     } catch (err) {
       // ITEM_ALREADY_EXISTS is idempotent re-run noise; everything else surfaces.

@@ -84,6 +84,7 @@ describe('recompute_aggregator_domain_metrics', () => {
           item_network: 'purple_dot',
           item_domain: 'seeker',
           item_type: 'profile_1.0',
+          lifecycle_status: 'live',
           owner_user_id: 'u_1',
           onboarded_by_org_id: 'org_1',
           onboarded_via: 'bulk',
@@ -133,6 +134,7 @@ describe('recompute_aggregator_domain_metrics', () => {
           item_network: 'purple_dot',
           item_domain: 'seeker',
           item_type: 'profile_1.0',
+          lifecycle_status: 'paused',
           owner_user_id: 'u_2',
           onboarded_by_org_id: 'org_1',
           onboarded_via: 'bulk',
@@ -163,6 +165,7 @@ describe('recompute_aggregator_domain_metrics', () => {
     expect(result.processed).toBe(1);
 
     const inserted = valuesMock.mock.calls[0]![0][0]!;
+    expect(inserted.lifecycleStatus).toBe('paused');
     expect(inserted.initiated).toEqual({ create: 2, accept: 0, reject: 1, cancel: 0 });
     expect(inserted.received).toEqual({ create: 0, accept: 3, reject: 0, cancel: 0 });
     // Only buckets with a timestamp appear; absent buckets are omitted.

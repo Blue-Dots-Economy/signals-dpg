@@ -23,6 +23,7 @@
     "db:seed:purple_dot": "tsx scripts/seed_purple_dot.ts",
     "db:seed:services": "tsx scripts/seed_service_users.ts",
     "db:backfill:consent": "tsx scripts/backfill_demote_consentless.ts",
+    "spec:dump": "tsx scripts/dump_openapi.ts",
     "test": "vitest run --passWithNoTests",
     "test:watch": "vitest",
     "test:integration": "vitest run --config vitest.integration.config.ts"
@@ -33,26 +34,27 @@
   "packageManager": "pnpm@11.1.2",
   "devDependencies": {
     "@types/pg": "^8.15.5",
+    "@vitest/coverage-v8": "^4.1.10",
     "drizzle-kit": "^0.31.8",
-    "tsx": "^4.22.1",
-    "vitest": "^4.1.7"
+    "tsx": "^4.23.1",
+    "vitest": "^4.1.10"
   },
   "dependencies": {
-    "@fastify/cors": "^11.2.0",
-    "@fastify/swagger": "^9.6.1",
-    "@scalar/fastify-api-reference": "^1.57.2",
+    "@fastify/cors": "^11.3.0",
+    "@fastify/swagger": "^9.8.1",
+    "@scalar/fastify-api-reference": "^1.64.0",
     "auth": "workspace:*",
     "config": "workspace:*",
     "database": "workspace:*",
     "dotenv": "^17.4.2",
     "drizzle-orm": "^0.45.2",
-    "fastify": "^5.8.5",
+    "fastify": "^5.11.0",
     "fastify-qs": "^5.0.0",
     "fastify-type-provider-zod": "^6.1.0",
-    "ioredis": "^5.9.2",
+    "ioredis": "^5.11.1",
     "match_score": "workspace:*",
     "notification": "workspace:*",
-    "pg": "^8.17.2",
+    "pg": "^8.22.0",
     "schemas": "workspace:*"
   }
 }

@@ -59,6 +59,7 @@ const fetch_items_handler = async (
     radius_meters,
     limit,
     offset,
+    include_retired,
   } = request.query;
 
   if (!userId) {
@@ -88,6 +89,11 @@ const fetch_items_handler = async (
       limit,
       offset,
       includePrivateState: true,
+      // Owner "My Profiles" list — never show a retired (permanently removed)
+      // profile here (#347). The login-redirect check opts in via
+      // include_retired so a retired-only user counts as "already set up" and
+      // stays on the map instead of being sent to create (#376).
+      exclude_retired: !include_retired,
     };
     const result = await getCachedLocalItemFetch(filters, () =>
       fetchLocalItems(filters)

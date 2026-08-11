@@ -62,7 +62,22 @@ function extractEnumFields(schema: RJSFSchema): EnumFilterField[] {
   for (const [key, rawProp] of Object.entries(schema.properties)) {
     // JSON Schema properties can be boolean (true/false) when using additionalProperties
     if (typeof rawProp !== 'object' || rawProp === null) continue;
-    const prop = rawProp as RJSFSchema;
+    const prop = rawProp as RJSFSchema & { private?: boolean };
+
+    // Defense-in-depth (#203 Task 7, restated #394): never offer a
+    // `private: true` field as a filter option, even though the server's
+    // facet guard (`resolveAllowedFacetFields`) would silently drop any
+    // filter request on one anyway. No currently-configured network schema
+    // declares both `private: true` and `enum` on the same property
+    // (verified across every `examples/schemas/*/network.json`), so this
+    // doesn't change any network's filter options today — it just stops a
+    // future schema edit from silently surfacing an inert-but-visible filter
+    // for a private field. This is the ONLY gate now — #394 removed the
+    // separate `filterable: true` marker that used to additionally restrict
+    // the map's offered/sent facets; every declared, non-private enum field
+    // is a filter again in both views. Proper schema-driven search/filter
+    // declaration is tracked in #360.
+    if (prop.private === true) continue;
 
     // Single-value enum: string or number property with a top-level `enum` array
     if (Array.isArray(prop.enum) && prop.enum.length > 0) {
@@ -122,7 +137,10 @@ function extractEnumFields(schema: RJSFSchema): EnumFilterField[] {
  */
 export function getEnumFilterFields(schemas: RJSFSchema[]): EnumFilterField[] {
   // Map from key → accumulated field (mutable during the loop)
-  const byKey = new Map<string, { label: string; optionsSet: Set<string>; options: string[]; isArray: boolean }>();
+  const byKey = new Map<
+    string,
+    { label: string; optionsSet: Set<string>; options: string[]; isArray: boolean }
+  >();
 
   for (const schema of schemas) {
     for (const field of extractEnumFields(schema)) {
@@ -156,7 +174,11 @@ export function getEnumFilterFields(schemas: RJSFSchema[]): EnumFilterField[] {
 
 /**
  * Convenience helper: extract all item_schemas from the given visible domains,
- * then derive enum filter fields.
+ * then derive enum filter fields. Both the map and list views use this same
+ * full set — every declared, non-private enum field is a filter in both
+ * (#394 dropped the `filterable: true` gate that used to additionally
+ * restrict what the map offered/sent; proper schema-driven search/filter
+ * declaration is tracked in #360).
  */
 export function getEnumFilterFieldsForDomains(domains: DotNetworkDomain[]): EnumFilterField[] {
   const schemas: RJSFSchema[] = [];

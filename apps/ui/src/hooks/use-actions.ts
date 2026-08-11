@@ -1,5 +1,6 @@
 import {
   useQuery,
+  useInfiniteQuery,
   useMutation,
   useQueryClient,
   type UseQueryOptions,
@@ -15,18 +16,11 @@ import {
 } from '@/lib/action-api';
 import type { BulkEnvelope } from '@/lib/bulk';
 import { useAuth } from '@/contexts/auth-context';
+import { queryKeys } from '@/lib/query-keys';
 
 // ─── Query Keys ───────────────────────────────────────────────────
 
-export const actionKeys = {
-  all: ['actions'] as const,
-  lists: () => [...actionKeys.all, 'list'] as const,
-  list: (filters: FetchMyActionsQuery) =>
-    [...actionKeys.lists(), filters] as const,
-  details: () => [...actionKeys.all, 'detail'] as const,
-  detail: (actionId: string) => [...actionKeys.details(), actionId] as const,
-  pendingCount: () => [...actionKeys.all, 'pendingCount'] as const,
-};
+export const actionKeys = queryKeys.actions;
 
 // ─── Constants ───────────────────────────────────────────────────
 
@@ -53,26 +47,77 @@ function resolvePollingInterval(): number | false {
 
 const POLLING_INTERVAL = resolvePollingInterval();
 
+// Page size for BOTH the plain `useActions` query (when the caller doesn't
+// override it) and the paged `useReceivedActions`/`useInitiatedActions`
+// infinite queries below (#439). Replaces the old hardcoded `limit: 100,
+// offset: 0` — a small page + `useInfiniteQuery`'s `getNextPageParam` is what
+// makes "My Actions" pageable instead of fetching everything up front.
+export const ACTIONS_PAGE_SIZE = 20;
+
+// The query-shaping fields #439 adds on top of plain react-query options.
+// Kept as ONE merged options object (rather than a separate `params` arg) so
+// every existing `useActions('all', { enabled: !!user })` call site keeps
+// working unchanged.
+interface ActionQueryFields {
+  /** Scope to a single item's actions (either side) — the active profile. */
+  itemId?: string | null;
+  status?: FetchMyActionsQuery['action_status'];
+  type?: FetchMyActionsQuery['action_type'];
+  sort?: FetchMyActionsQuery['sort'];
+  facets?: FetchMyActionsQuery['facets'];
+  limit?: number;
+}
+
+type UseActionsOptions = ActionQueryFields &
+  Omit<
+    UseQueryOptions<{ actions: Action[]; meta: { total: number } }, Error>,
+    'queryKey' | 'queryFn'
+  >;
+
+/**
+ * Builds the FetchMyActionsQuery filter shape shared by `useActions` and the
+ * infinite `useReceivedActions`/`useInitiatedActions` below, WITHOUT `offset`
+ * — offset is either fixed (plain `useActions`) or driven by
+ * `useInfiniteQuery`'s pageParam (the infinite hooks), so it's applied by the
+ * caller, not baked into this shared shape (mirrors
+ * `useInfiniteBrowseItems`'s `filterKey` convention).
+ */
+function buildActionsFilterKey(
+  ownershipRole: 'initiated' | 'received' | 'all',
+  fields: ActionQueryFields,
+): Omit<FetchMyActionsQuery, 'offset'> {
+  return {
+    ownership_role: ownershipRole,
+    ...(fields.itemId ? { item_id: fields.itemId } : {}),
+    ...(fields.status !== undefined ? { action_status: fields.status } : {}),
+    ...(fields.type !== undefined ? { action_type: fields.type } : {}),
+    ...(fields.sort ? { sort: fields.sort } : {}),
+    ...(fields.facets && fields.facets.length > 0 ? { facets: fields.facets } : {}),
+    limit: fields.limit ?? ACTIONS_PAGE_SIZE,
+  };
+}
+
 // ─── Hooks ────────────────────────────────────────────────────────
 
 /**
  * Hook to fetch actions with auto-polling every 5 seconds
  * Use ownershipRole to filter: 'initiated' | 'received' | 'all'
+ *
+ * #439: now also accepts the same query-shaping fields as the infinite
+ * hooks below (`itemId`/`status`/`type`/`sort`/`facets`/`limit`) merged into
+ * the options object, so a caller that only wants "give me my recent
+ * actions" (e.g. the home-page/public-profile-page open-pair-check) keeps
+ * working unchanged while a caller that wants to scope/sort can opt in.
  */
 export function useActions(
   ownershipRole: 'initiated' | 'received' | 'all' = 'all',
-  options: Omit<
-    UseQueryOptions<{ actions: Action[]; meta: { total: number } }, Error>,
-    'queryKey' | 'queryFn'
-  > = {}
+  options: UseActionsOptions = {}
 ) {
   const { isAuthenticated } = useAuth();
-  const { enabled: callerEnabled, ...restOptions } = options;
-  const query: FetchMyActionsQuery = {
-    ownership_role: ownershipRole,
-    limit: 100,
-    offset: 0,
-  };
+  const { enabled: callerEnabled, itemId, status, type, sort, facets, limit, ...restOptions } =
+    options;
+  const filterKey = buildActionsFilterKey(ownershipRole, { itemId, status, type, sort, facets, limit });
+  const query: FetchMyActionsQuery = { ...filterKey, offset: 0 };
 
   return useQuery({
     queryKey: actionKeys.list(query),
@@ -148,8 +193,14 @@ export function useUpdateActionStatus() {
 export function useUpdateActionStatusBulk() {
   const queryClient = useQueryClient();
 
-  return useMutation<BulkEnvelope<UpdateActionStatusResponse>, Error, UpdateActionStatusPayload[]>({
-    mutationFn: (payloads) => updateActionStatusBulk(payloads),
+  return useMutation<
+    BulkEnvelope<UpdateActionStatusResponse>,
+    Error,
+    // `guardianOtp` (when a minor resubmits the batch after GUARDIAN_OTP_REQUIRED)
+    // rides on every payload so one code clears the whole accept batch (#393).
+    { payloads: UpdateActionStatusPayload[]; guardianOtp?: string }
+  >({
+    mutationFn: ({ payloads, guardianOtp }) => updateActionStatusBulk(payloads, guardianOtp),
     onSettled: () => {
       queryClient.invalidateQueries({ queryKey: actionKeys.all });
     },
@@ -194,25 +245,87 @@ export function useReceivedActionsByStatus(
 }
 
 /**
- * Hook to get initiated actions
+ * Query-shaping params `useReceivedActions`/`useInitiatedActions` accept on
+ * top of the required scoping `itemId` (#439: My Actions per-profile
+ * filter/sort — the page owns this state and passes it straight through).
  */
-export function useInitiatedActions(
-  options: Omit<
-    UseQueryOptions<{ actions: Action[]; meta: { total: number } }, Error>,
-    'queryKey' | 'queryFn'
-  > = {}
-) {
-  return useActions('initiated', options);
+export interface UseOwnedActionsParams {
+  status?: FetchMyActionsQuery['action_status'];
+  type?: FetchMyActionsQuery['action_type'];
+  sort?: FetchMyActionsQuery['sort'];
+  facets?: FetchMyActionsQuery['facets'];
+}
+
+interface ActionsPage {
+  actions: Action[];
+  meta: { total: number; limit: number; offset: number };
 }
 
 /**
- * Hook to get received actions
+ * Shared `useInfiniteQuery` builder for the received/initiated tabs (#439).
+ * `itemId` is REQUIRED to be a real id for the query to run — My Actions is
+ * now scoped to exactly one (live) profile, so with no resolvable profile
+ * there is nothing to scope to and the fetch stays disabled (an empty list
+ * is the correct end state, not "fetch everything unscoped" like the old
+ * behavior).
+ *
+ * The query key is built from `buildActionsFilterKey` (limit fixed at
+ * `ACTIONS_PAGE_SIZE`, NO offset) so paging within the same filter set
+ * appends pages via `fetchNextPage` instead of minting a new cache entry per
+ * page; changing any filter (status/sort/facets/itemId) changes the key and
+ * `useInfiniteQuery` restarts paging at offset 0, matching
+ * `useInfiniteBrowseItems`'s convention.
+ */
+function useOwnedActionsInfinite(
+  ownershipRole: 'initiated' | 'received',
+  itemId: string | null | undefined,
+  params: UseOwnedActionsParams = {},
+) {
+  const { isAuthenticated } = useAuth();
+  const filterKey = buildActionsFilterKey(ownershipRole, { itemId, ...params });
+
+  return useInfiniteQuery<ActionsPage>({
+    queryKey: actionKeys.list(filterKey),
+    initialPageParam: 0,
+    queryFn: async ({ pageParam, signal }) => {
+      const response = await fetchMyActions({ ...filterKey, offset: pageParam as number }, signal);
+      return { actions: response.actions, meta: response.meta };
+    },
+    getNextPageParam: (lastPage) => {
+      const nextOffset = lastPage.meta.offset + lastPage.meta.limit;
+      return nextOffset < lastPage.meta.total ? nextOffset : undefined;
+    },
+    // Same freshness behavior as before (60s default) — a refetch just
+    // re-requests the FIRST page's worth (react-query refetches every loaded
+    // page on an interval/invalidate, same as it always has for infinite
+    // queries), keeping the badge/list in sync without a full page reload.
+    refetchInterval: POLLING_INTERVAL,
+    refetchIntervalInBackground: false,
+    staleTime: POLLING_INTERVAL === false ? Infinity : POLLING_INTERVAL,
+    enabled: isAuthenticated && !!itemId,
+  });
+}
+
+/**
+ * Hook to get initiated actions, scoped to `itemId` (the active live
+ * profile) and paged via `useInfiniteQuery` (#439). See
+ * `useOwnedActionsInfinite` for the shared paging/scoping behavior.
+ */
+export function useInitiatedActions(
+  itemId: string | null | undefined,
+  params: UseOwnedActionsParams = {},
+) {
+  return useOwnedActionsInfinite('initiated', itemId, params);
+}
+
+/**
+ * Hook to get received actions, scoped to `itemId` (the active live
+ * profile) and paged via `useInfiniteQuery` (#439). See
+ * `useOwnedActionsInfinite` for the shared paging/scoping behavior.
  */
 export function useReceivedActions(
-  options: Omit<
-    UseQueryOptions<{ actions: Action[]; meta: { total: number } }, Error>,
-    'queryKey' | 'queryFn'
-  > = {}
+  itemId: string | null | undefined,
+  params: UseOwnedActionsParams = {},
 ) {
-  return useActions('received', options);
+  return useOwnedActionsInfinite('received', itemId, params);
 }

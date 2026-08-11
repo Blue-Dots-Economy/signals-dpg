@@ -20,6 +20,9 @@ export interface MatchScoreCardProps {
   localItem: Item | null;
   networkItem: Item;
   selectionMode?: boolean;
+  /** Disable the action CTA — an open action already exists for this pair (#370/#422). */
+  actionsDisabled?: boolean;
+  actionsDisabledReason?: string;
 }
 
 export function MatchScoreCard({
@@ -36,6 +39,8 @@ export function MatchScoreCard({
   localItem,
   networkItem,
   selectionMode = false,
+  actionsDisabled = false,
+  actionsDisabledReason,
 }: MatchScoreCardProps) {
   const [isModalOpen, setIsModalOpen] = React.useState(false);
   
@@ -74,11 +79,13 @@ export function MatchScoreCard({
 
   const handleProceed = React.useCallback(() => {
     setIsModalOpen(false);
+    // Blocked while an open action exists for the pair (#370/#422).
+    if (actionsDisabled) return;
     // Trigger the first action if available
     if (actions.length > 0 && onAction) {
       onAction(actions[0].action_type, actions[0]);
     }
-  }, [actions, onAction]);
+  }, [actions, onAction, actionsDisabled]);
 
   // Get title for items
   const titleKey = findTitleField(schema);
@@ -102,7 +109,10 @@ export function MatchScoreCard({
         onClick={onClick}
         localItem={localItem}
         networkItem={networkItem}
+        shareItem={networkItem}
         selectionMode={selectionMode}
+        actionsDisabled={actionsDisabled}
+        actionsDisabledReason={actionsDisabledReason}
         matchScore={score}
         matchScoreLoading={matchScoreLoading}
         matchScoreError={matchScoreError}

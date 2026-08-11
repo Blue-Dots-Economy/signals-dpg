@@ -37,17 +37,17 @@ export interface MatchScoreClient {
   calculate(input: MatchScoreRequest): Promise<MatchScoreResult>;
 }
 
-export type MatchScoreProvider = 'dpg_scoring';
+export type MatchScoreProvider = 'signals_search';
 
-export interface DpgScoringClientConfig {
+// signals-search's in-network relevance API (POST /v1/relevance). Authenticated
+// with a single x-api-key (validated against Signals' own apikey store).
+// `path` overrides the default 'v1/relevance'.
+export interface SignalsSearchClientConfig {
   baseUrl: string;
-  keyId: string;
-  secret: string;
+  apiKey: string;
   path?: string;
-  version?: string;
-  promptVersion?: string;
 }
 
 export type MatchScoreClientConfig = {
-  provider: 'dpg_scoring';
-} & DpgScoringClientConfig;
+  provider: 'signals_search';
+} & SignalsSearchClientConfig;

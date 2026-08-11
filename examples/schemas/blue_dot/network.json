@@ -2,6 +2,7 @@
   "display_name": "Blue Dot",
   "description": "Jobs and hiring network.",
   "schema_standard": "https://json-schema.org/draft/2020-12/schema",
+  "pause_enabled": true,
   "domains": [
     {
       "description": "People looking for jobs.",
@@ -173,7 +174,7 @@
               "enum": [
                 "School",
                 "College",
-                "ITI / Other Vocational Trainings",
+                "ITI",
                 "Polytechnic / Diploma",
                 "Certification",
                 "Learned Informally",
@@ -182,7 +183,7 @@
               "enumNames": [
                 "School",
                 "College",
-                "ITI / Other Vocational Trainings",
+                "ITI",
                 "Polytechnic / Diploma",
                 "Certification",
                 "Learned Informally",
@@ -609,7 +610,7 @@
               ],
               "x-show-if": {
                 "educationCategory": [
-                  "ITI / Other Vocational Trainings"
+                  "ITI"
                 ]
               }
             },
@@ -691,7 +692,8 @@
               "type": "string",
               "title": "College / Institute Name",
               "description": "Please specify your college or institute name",
-              "placeholder": "Please specify your college or institute name"
+              "placeholder": "Please specify your college or institute name",
+              "x-reference-source": { "source": "colleges", "subtitle": ["district", "state"] }
             },
             "nameOfLastRoleHeld": {
               "type": "string",
@@ -768,6 +770,10 @@
       "id": "seeker",
       "go_live_required": ["schema_required", "consent_required"],
       "guardian_consent_required": true,
+      "profile_completion_prompt": {
+        "heading": "Complete your profile to get discovered",
+        "body": "Employers can find and connect with you only once your profile is live. Fill in the details below to start getting job opportunities."
+      },
       "card": {
         "title_field": "name",
         "avatar_from": "name",
@@ -1303,6 +1309,10 @@
       "go_live_required": ["schema_required", "consent_required"],
       "my_items_label": "My Jobs",
       "guardian_consent_required": false,
+      "profile_completion_prompt": {
+        "heading": "Complete your profile to start hiring",
+        "body": "Seekers can see and apply to your postings only once your profile is live. Add the details below to reach candidates."
+      },
       "card": {
         "title_field": "jobProviderName",
         "avatar_from": "jobProviderName",

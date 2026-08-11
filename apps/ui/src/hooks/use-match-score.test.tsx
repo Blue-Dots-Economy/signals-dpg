@@ -12,7 +12,7 @@ vi.mock('@/lib/match-score-api', async () => {
 });
 import { calculateMatchScore } from '@/lib/match-score-api';
 
-const item = (id: string): Item =>
+const item = (id: string, overrides: Partial<Item> = {}): Item =>
   ({
     item_id: id,
     item_network: 'blue_dot',
@@ -22,6 +22,7 @@ const item = (id: string): Item =>
     item_schema_url: null,
     item_state: {},
     item_locations: [],
+    ...overrides,
   }) as unknown as Item;
 
 const result = (score: number): MatchScoreResult => ({
@@ -76,5 +77,47 @@ describe('useMatchScore', () => {
     // New object identity, same item_id → the pair is unchanged, keep the score.
     rerender({ local: item('profile-A') });
     expect(hook.current.score?.score).toBe(0.42);
+  });
+
+  // #394: `/discover` already returns a raw ~0-1 relevance score on the item
+  // (`Item.score`) — the SAME quantity `/v1/relevance` computes. Seed the
+  // badge from it, scaled to the 0-10 internal scale, without a click.
+  it('seeds the score from networkItem.score (0-1 discover scale → 0-10 internal) without calling the match-score API', () => {
+    const discoverDest = item('dest-2', { score: 0.71 } as Partial<Item>);
+
+    const { result: hook } = renderHook(() =>
+      useMatchScore({ localItem: item('profile-A'), networkItem: discoverDest }),
+    );
+
+    expect(hook.current.score).toEqual(
+      expect.objectContaining({ score: 7.1, source: 'discover' }),
+    );
+    expect(hook.current.score?.confidence).toBeUndefined();
+    expect(calculateMatchScore).not.toHaveBeenCalled();
+  });
+
+  it('does not seed a score when networkItem.score is absent (current click-to-fetch flow)', () => {
+    const { result: hook } = renderHook(() =>
+      useMatchScore({ localItem: item('profile-A'), networkItem: dest }),
+    );
+
+    expect(hook.current.score).toBeNull();
+    expect(calculateMatchScore).not.toHaveBeenCalled();
+  });
+
+  it('re-seeds the discover score when the (local, network) pair changes', () => {
+    const destA = item('dest-a', { score: 0.4 } as Partial<Item>);
+    const destB = item('dest-b', { score: 0.9 } as Partial<Item>);
+
+    const { result: hook, rerender } = renderHook(
+      ({ networkItem }: { networkItem: Item }) =>
+        useMatchScore({ localItem: item('profile-A'), networkItem }),
+      { initialProps: { networkItem: destA } },
+    );
+
+    expect(hook.current.score?.score).toBe(4);
+
+    rerender({ networkItem: destB });
+    expect(hook.current.score?.score).toBe(9);
   });
 });

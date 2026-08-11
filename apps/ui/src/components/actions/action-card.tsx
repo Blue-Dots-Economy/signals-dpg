@@ -17,6 +17,8 @@ import { useTranslation } from 'react-i18next';
 import { Button } from '@/components/ui/button';
 import type { Action } from '@/lib/action-api';
 import { ProfileCardModal } from '@/components/actions/profile-card-modal';
+import { MatchScoreBadge } from '@/components/match-score/match-score-badge';
+import type { MatchScoreResult } from '@/lib/match-score-api';
 
 interface ActionCardProps {
   action: Action;
@@ -61,6 +63,10 @@ function formatItemLocations(locs: Array<{ lat: number; lng: number; label?: str
   if (!locs || locs.length === 0) return '';
   const labels = locs.map((l) => l.label).filter((s): s is string => !!s && s.trim().length > 0);
   return labels.length > 0 ? labels.join(', ') : `${locs.length} location${locs.length > 1 ? 's' : ''}`;
+}
+
+function formatDistanceKm(distanceM: number): string {
+  return `${(distanceM / 1000).toFixed(1)} km`;
 }
 
 function formatRequirementValue(value: unknown): string {
@@ -149,6 +155,17 @@ export function ActionCard({ action, ownershipRole, onStatusUpdate, selectionMod
               <span className={`h-1.5 w-1.5 rounded-full ${status.dot}`} />
               {status.labelKey ? t(status.labelKey) : action.action_status}
             </span>
+            {action.match_score != null ? (
+              <MatchScoreBadge
+                score={{ score: action.match_score } as MatchScoreResult}
+                size="sm"
+                showLabel={false}
+              />
+            ) : (
+              <span className="inline-flex items-center rounded-full bg-slate-100 px-2.5 py-1 text-[11px] font-medium text-slate-500">
+                {t('actions.not_scored_yet', 'Not scored yet')}
+              </span>
+            )}
           </div>
           <span className="whitespace-nowrap text-xs font-medium text-muted-foreground">
             {formatDistanceToNow(new Date(action.created_at), { addSuffix: true })}
@@ -238,10 +255,31 @@ export function ActionCard({ action, ownershipRole, onStatusUpdate, selectionMod
           </>
         )}
 
+        {/* Reason attached to a rejected/cancelled action — the actor's remark,
+            or a system remark (e.g. counterparty retired, #347). Rendered at the
+            card level so it shows even when the action has no requirements. */}
+        {action.remarks && (
+          <div className="mb-3 rounded-xl border border-border bg-muted/40 p-3.5">
+            <p className="mb-0.5 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+              {t('actions.reason_shown_label', 'Reason')}
+            </p>
+            <p className="text-[13px] leading-relaxed text-foreground [overflow-wrap:anywhere]">
+              {action.remarks}
+            </p>
+          </div>
+        )}
+
         {location && (
           <div className="mb-3 flex items-center gap-1.5 text-xs text-muted-foreground">
             <MapPin className="h-3 w-3" />
             <span>{location}</span>
+          </div>
+        )}
+
+        {action.distance_m != null && (
+          <div className="mb-3 flex items-center gap-1.5 text-xs text-muted-foreground">
+            <MapPin className="h-3 w-3" />
+            <span>{formatDistanceKm(action.distance_m)}</span>
           </div>
         )}
 
