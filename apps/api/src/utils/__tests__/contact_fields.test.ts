@@ -169,19 +169,36 @@ describe('projectItemState — own-property / prototype safety (#521 review)', (
   });
 });
 
-describe('resolveContact — stale mapping observability (#521 review)', () => {
-  it('warns when a mapping points at an item_state field that is absent', () => {
+describe('resolveContact — mapping-anomaly observability (#521 review)', () => {
+  it('does NOT warn when a mapped field is absent (normal optional-unfilled data)', () => {
     log.warn.mockClear();
     const ctx: DomainContactContext = {
       network: 'blue_dot', domain: 'seeker', itemType: 'profile_1.0',
-      contactFields: { name: 'renamed_name' }, // points at a field the item lacks
+      contactFields: { name: 'renamed_name' }, // key the item happens to lack
     };
     const out = resolveContact({ name: 'Asha' }, { name: 'Acct', email: null, phone: null }, ['name'], ctx, log);
     expect(out.name).toEqual({ value: 'Acct', source: 'user' });
+    // an absent key is indistinguishable from a blank optional field → no per-row noise
+    expect(log.warn).not.toHaveBeenCalled();
+  });
+
+  it('warns when a mapped field holds a non-string value (schema/data-type mismatch)', () => {
+    log.warn.mockClear();
+    const ctx: DomainContactContext = {
+      network: 'blue_dot', domain: 'seeker', itemType: 'profile_1.0',
+      contactFields: { phone: 'phone' },
+    };
+    const out = resolveContact(
+      { phone: 12345 } as unknown as Record<string, unknown>,
+      { name: null, email: null, phone: '+9100' },
+      ['phone'], ctx, log,
+    );
+    expect(out.phone).toEqual({ value: '+9100', source: 'user' });
     expect(log.warn).toHaveBeenCalledTimes(1);
     expect(log.warn.mock.calls[0]![0]).toMatchObject({
-      operation: 'participant.decrypt.contact_map_stale',
-      mapped_to: 'renamed_name',
+      operation: 'participant.decrypt.contact_map_type_mismatch',
+      mapped_to: 'phone',
+      value_type: 'number',
     });
   });
 

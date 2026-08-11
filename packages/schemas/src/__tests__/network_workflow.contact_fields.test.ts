@@ -41,4 +41,25 @@ describe('network config contact_fields', () => {
     const cfg = parseNetworkConfigDocument(noContact);
     expect(cfg.domains[0]!.contact_fields).toBeUndefined();
   });
+
+  it('does NOT fail the whole parse on an empty-string mapping value (#521 review)', () => {
+    // An authoring slip like `"phone": ""` must not take down boot — an empty
+    // mapping is falsy and degrades to the account fallback at resolve time.
+    const withEmpty = {
+      ...base,
+      domains: [{ ...base.domains[0], contact_fields: { name: 'jobProviderName', phone: '' } }],
+    };
+    const cfg = parseNetworkConfigDocument(withEmpty);
+    expect(cfg.domains[0]!.contact_fields).toMatchObject({ name: 'jobProviderName', phone: '' });
+  });
+
+  it('strips an unknown contact_fields key rather than failing the parse (#521 review)', () => {
+    const withUnknown = {
+      ...base,
+      domains: [{ ...base.domains[0], contact_fields: { name: 'jobProviderName', bogus: 'x' } }],
+    };
+    const cfg = parseNetworkConfigDocument(withUnknown);
+    expect(cfg.domains[0]!.contact_fields).not.toHaveProperty('bogus');
+    expect(cfg.domains[0]!.contact_fields).toMatchObject({ name: 'jobProviderName' });
+  });
 });

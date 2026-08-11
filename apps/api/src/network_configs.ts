@@ -55,7 +55,15 @@ export async function getNetworkConfigs(): Promise<NetworkConfigDocument[]> {
 }
 
 export async function refreshNetworkConfigs(): Promise<NetworkConfigDocument[]> {
-  networkConfigsPromise = loadAndParseNetworkConfigs();
+  // Same non-poisoning contract as getNetworkConfigs: a failed refetch must not
+  // latch a rejected promise (this is the realistic runtime path — a periodic
+  // schema refetch blip would otherwise degrade every contact resolution to the
+  // account fallback until the next successful refresh or a restart).
+  const pending = loadAndParseNetworkConfigs();
+  pending.catch(() => {
+    if (networkConfigsPromise === pending) networkConfigsPromise = null;
+  });
+  networkConfigsPromise = pending;
   return networkConfigsPromise;
 }
 

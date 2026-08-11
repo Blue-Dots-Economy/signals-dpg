@@ -45,18 +45,15 @@ export interface ContactResolution {
   source: 'item' | 'user' | null;
 }
 
-const isCanonical = (f: string): f is CanonicalContact =>
-  (CANONICAL as readonly string[]).includes(f);
-
 /** True when a value is present and non-empty (empty string / whitespace = absent). */
-export function hasValue(v: unknown): boolean {
+function hasValue(v: unknown): boolean {
   if (v === null || v === undefined) return false;
   if (typeof v === 'string') return v.trim() !== '';
   return true;
 }
 
 /** The item_state field name for a canonical concept in this domain. */
-export function mappedField(ctx: DomainContactContext, f: CanonicalContact): string | undefined {
+function mappedField(ctx: DomainContactContext, f: CanonicalContact): string | undefined {
   const explicit = ctx.contactFields?.[f];
   if (explicit) return explicit;
   if (f === 'name') return ctx.nameFallbackField; // display_name_field / card.title_field
@@ -72,8 +69,9 @@ export interface DomainConfigForName {
 /**
  * The item_state field a domain uses as the `name` fallback: the item-type's
  * `display_name_field`, else the domain's `card.title_field`. Single, typed
- * source for the precedence otherwise re-implemented (with raw casts) in the
- * decrypt handler and `private_display_name`.
+ * source for this precedence — consumed by the decrypt handler and
+ * `private_display_name`. (fetch_actions/metrics use `resolve_display_name`,
+ * a deliberately different display_name_field-only rule with no card fallback.)
  *
  * @param domainCfg - The resolved domain config (may be undefined).
  * @param itemType - The item type whose display field is wanted.
@@ -133,8 +131,10 @@ export function projectItemState(
 /**
  * Resolves the canonical `contact` block: for each requested canonical field,
  * the mapped profile value wins over the account fallback; unresolved in both
- * => `{ value: null, source: null }`. Emits a PII-free warning when a
- * phone/email has no mapping (so it silently relies on the account fallback).
+ * => `{ value: null, source: null }`. Emits a PII-free warning for a genuine
+ * config/data anomaly — a required phone/email mapping missing, or a mapped
+ * field whose stored value is a non-string type — but NOT for the ordinary
+ * "optional field left blank/absent" case.
  *
  * @param mergedState - The DECRYPTED merged item_state (public + decrypted private).
  * @param account - The item creator's account contact (fallback source, 3 fields only).
@@ -151,7 +151,6 @@ export function resolveContact(
 ): Partial<Record<CanonicalContact, ContactResolution>> {
   const out: Partial<Record<CanonicalContact, ContactResolution>> = {};
   for (const f of requested) {
-    if (!isCanonical(f)) continue; // defensive; schema already constrains this
     out[f] = resolveCanonicalField(f, mergedState, account, ctx, log);
   }
   return out;
@@ -165,28 +164,37 @@ function resolveCanonicalField(
   log: ContactLog,
 ): ContactResolution {
   const fieldName = mappedField(ctx, f);
-  const fromState = asContactString(fieldName ? mergedState[fieldName] : undefined);
+  const raw = fieldName ? mergedState[fieldName] : undefined;
+  const fromState = asContactString(raw);
   if (fromState !== undefined) return { value: fromState, source: 'item' }; // profile wins
-  if (fieldName) {
-    // A mapping exists but resolved to nothing usable. If the mapped key is
-    // entirely ABSENT from item_state (vs present-but-empty, which is normal
-    // participant data), the mapping likely points at a renamed/mistyped field
-    // — surface it rather than silently returning the account value as `user`.
-    if (!Object.hasOwn(mergedState, fieldName)) {
-      log.warn(
-        {
-          operation: 'participant.decrypt.contact_map_stale',
-          network: ctx.network,
-          domain: ctx.domain,
-          field: f,
-          mapped_to: fieldName,
-        },
-        'contact_fields mapping points at a field absent from item_state; using account fallback',
-      );
-    }
-  } else if (f === 'phone' || f === 'email') {
+  if (fieldName && raw != null && typeof raw !== 'string') {
+    // The mapped field is PRESENT but not a string (e.g. a phone stored as a
+    // JSON number) — a schema/data-type mismatch, not the normal "participant
+    // left an optional field blank" case. Surface it rather than silently
+    // serving the account value as `user`. An ABSENT or empty key is treated as
+    // normal participant data and does NOT warn — otherwise every optional
+    // field a participant never filled would log a misleading warning per row.
     log.warn(
-      { operation: 'participant.decrypt.contact_map_missing', network: ctx.network, domain: ctx.domain, field: f },
+      {
+        operation: 'participant.decrypt.contact_map_type_mismatch',
+        network: ctx.network,
+        domain: ctx.domain,
+        item_type: ctx.itemType,
+        field: f,
+        mapped_to: fieldName,
+        value_type: typeof raw,
+      },
+      'contact_fields mapping resolved to a non-string value; using account fallback',
+    );
+  } else if (!fieldName && (f === 'phone' || f === 'email')) {
+    log.warn(
+      {
+        operation: 'participant.decrypt.contact_map_missing',
+        network: ctx.network,
+        domain: ctx.domain,
+        item_type: ctx.itemType,
+        field: f,
+      },
       'no contact_fields mapping for requested canonical field; using account fallback',
     );
   }

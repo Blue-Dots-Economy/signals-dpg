@@ -98,9 +98,13 @@ const CardConfigSchema = z.object({
  */
 const ContactFieldsSchema = z
   .object({
-    name: z.string().min(1).optional(),
-    email: z.string().min(1).optional(),
-    phone: z.string().min(1).optional(),
+    // `.optional()` WITHOUT `.min(1)`: an empty-string value ("phone": "") on a
+    // declared key must not fail the whole cross-network parse either — at
+    // resolve time an empty mapping is falsy, so it degrades to the account
+    // fallback exactly like an absent mapping (same rationale as `.strip()`).
+    name: z.string().optional(),
+    email: z.string().optional(),
+    phone: z.string().optional(),
   })
   // `.strip()` (not `.strict()`): an unknown/typo'd key here must not fail the
   // whole network-config parse — that runs for every domain, including unserved

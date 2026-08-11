@@ -37,7 +37,7 @@ const { rowQueue, queries, dbState, configState, decryptImpl, networkCfgState } 
       mergedState: {} as Record<string, unknown>,
     })),
     // #237: per-network config fixture, consumed by getNetworkConfigById only
-    // when a test's body carries `fields` — every other test in this file
+    // when a test's body carries `contact` — every other test in this file
     // leaves it null and never triggers the lookup.
     networkCfgState: { cfg: null as Record<string, unknown> | null },
   }));
@@ -166,8 +166,8 @@ vi.mock('@/utils/item_decrypt', () => ({
 }));
 
 // #237: participant_decrypt now imports getNetworkConfigById to resolve the
-// per-domain contact-field context, but only calls it when body.fields is
-// present — mocked here so the pre-existing (fields-omitted) tests in this
+// per-domain contact-field context, but only calls it when body.contact is
+// present — mocked here so the pre-existing (contact-omitted) tests in this
 // file never need a real network config.
 vi.mock('@/network_configs', () => ({
   getNetworkConfigById: vi.fn(async () => {
