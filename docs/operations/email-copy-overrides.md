@@ -3,7 +3,9 @@
 All email wording (subjects, bodies, button labels) lives in one properties
 file. The bundled default ships in the API image at
 `apps/api/src/notifications/email/messages.default.properties` (copied to
-`dist/` in the build). Ops can override any line without a code change:
+`dist/` in the build). Ops can override any line without a code change, and
+overrides can be scoped instance-wide, per network, or per brand — see
+"Layering" below for how the layers combine.
 
 > **Helm-managed environments:** this repo's deployments are managed by the
 > Helm chart in the separate charts repo (`values.yaml`, `install.sh` — see
@@ -13,6 +15,8 @@ file. The bundled default ships in the API image at
 > do **not** hand-edit the rendered Deployment, or `helm upgrade` will revert
 > it. The steps and raw `kubectl`/YAML below are the underlying mechanism the
 > chart needs to wire up; use them directly only on a non-Helm environment.
+
+## Instance-wide override (`EMAIL_MESSAGES_PATH`)
 
 1. Copy the bundled file into a ConfigMap:
    `kubectl create configmap signals-email-messages --from-file=messages.properties=messages.default.properties`
@@ -36,7 +40,42 @@ file. The bundled default ships in the API image at
 
 4. Restart the pods — the file is read once at boot.
 
-Rules (also documented in comments inside the file):
+## Layering: defaults < instance < network < brand
+
+Copy can also be overridden per network, and per brand within a network, on
+top of the instance-wide override above. Precedence, lowest to highest:
+
+1. **Bundled defaults** — `messages.default.properties`, always complete.
+2. **Instance override** — `EMAIL_MESSAGES_PATH`, as configured above.
+3. **Network file** — `messages.properties` sitting beside that network's
+   `network.json`.
+4. **Brand file** — `messages.properties` sitting beside that brand's
+   `consent.json` (an immediate sub-folder of the network, named for the
+   brand id).
+
+Each layer is **partial**: any key it doesn't set falls through to the layer
+below it, all the way down to the bundled default for that key. A request is
+resolved for the `(network, brand)` pair it's serving — brand wins over
+network, network wins over the instance override, the instance override wins
+over the bundled default; an unknown or absent network/brand simply resolves
+to the instance-wide (or bundled) copy.
+
+Network and brand `messages.properties` files ride the same discovery and
+delivery mechanism as `network.json` and `consent.json` — same directory,
+same ConfigMap/volume mount, same local-vs-remote config source. There is no
+separate deploy step: if you're already shipping a network's `network.json`
+or a brand's `consent.json` through a ConfigMap, add its `messages.properties`
+to that same file map and it's picked up automatically. Remote-mode delivery
+of these files is a follow-up (local mode only for now).
+
+Per-network/brand template files with this comment-only semantics live in
+`examples/schemas/<network>/messages.properties` and
+`examples/schemas/<network>/<brand>/messages.properties` — each ships no
+active keys, only the header/rule comments and a few commented-out example
+lines. Copy one in, uncomment, and edit only the keys you want to change for
+that network or brand.
+
+## Rules (also documented in comments inside the file)
 
 - Values are single-line HTML fragments; `<p> <b> <a> <ol> <li>` are fine.
   The outer layout (header, CTA button, colours) is fixed in code.
@@ -45,7 +84,11 @@ Rules (also documented in comments inside the file):
 - Placeholder VALUES are HTML-escaped automatically — a user's name can never
   inject markup.
 - A missing/unparseable file or a typo'd key can never break email: every bad
-  or absent key falls back to the bundled default, with a warning in the API
-  logs — `email messages override: …` for a bad line/key inside a file that
-  was read, `email messages: cannot read EMAIL_MESSAGES_PATH …` if the path
-  itself is missing/unreadable.
+  or absent key falls back to the layer below it, with a warning in the API
+  logs. Each layer's warnings say which layer produced them — `email
+  messages override: …` for the instance file, `email messages network
+  <network>: …` for a network file, `email messages network <network> brand
+  <brand>: …` for a brand file — plus a one-line summary per layer of how
+  many keys it overrode versus fell back. `email messages: cannot read
+  EMAIL_MESSAGES_PATH …` covers the instance path itself being
+  missing/unreadable.

@@ -37,7 +37,9 @@ Auth plugins (`auth_middleware.ts`, `validate_api_key.ts`, `validate_session.ts`
 
 `src/notifications/email/` (#529) is the single send path for every email the
 API sends: a messages file (`email/messages.default.properties`, overridable
-via `EMAIL_MESSAGES_PATH` — see `docs/operations/email-copy-overrides.md`) →
+via `EMAIL_MESSAGES_PATH`, and further layered per network/brand in local
+mode via `@dpg/config`'s `email_messages_loader.ts` — see
+`docs/operations/email-copy-overrides.md`) →
 loader (`email/messages.ts`) → case registry (`email/email_cases.ts`, one
 `EmailCaseDef` per case id: which properties keys, which `{{tokens}}`, which
 HTML shell, critical vs best-effort, and notification-service priority

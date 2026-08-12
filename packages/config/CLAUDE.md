@@ -2,6 +2,8 @@
 
 Zod env schemas, allowed-origins lists, network-config loader, consent-config loader. Root `CLAUDE.md` already has the load-bearing rule: **when adding an env var, update both `secrets.ts` and `turbo.json`'s `globalPassThroughEnv`.** This doc covers the two loaders' non-obvious behavior beyond that.
 
+`email_messages_loader.ts` (#529) mirrors `consent_config_loader.ts`'s local-mode discovery — a network's default `messages.properties` sits beside its `network.json`, brand overrides live in immediate sub-folders — but returns raw file text only (no parsing/merge); that lives in `apps/api/src/notifications/email/messages.ts`.
+
 ## `network_config_loader.ts` — local vs remote, and "one-hop" cross-network loading
 
 `loadNetworkConfigs` has two source modes (`NETWORK_CONFIG_SOURCE`):
