@@ -312,4 +312,18 @@ describe('getEmailMessages (singleton + EMAIL_MESSAGES_PATH + network/brand wiri
     expect(index.forContext('blue_dot').get('welcome.subject')).toBe('Blue Dot Hello');
     expect(index.forContext().get('welcome.subject')).toBe('Welcome!');
   });
+
+  it('falls back to instance/base copy and warns when loadEmailMessagesFiles rejects (e.g. a permissions error)', async () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    mockApiConfig.network_config_source = 'local';
+    mockApiConfig.network_config_local_file = '/fake/dir/network.json';
+    const readError = new Error('EACCES: permission denied');
+    mockLoadEmailMessagesFiles.mockRejectedValue(readError);
+
+    const index = await getEmailMessages();
+
+    expect(index.forContext().get('welcome.subject')).toBe('Welcome!');
+    expect(index.forContext('blue_dot').get('welcome.subject')).toBe('Welcome!');
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('EACCES'));
+  });
 });

@@ -208,11 +208,23 @@ export function getEmailMessages(): Promise<EmailMessagesIndex> {
     const networks = [
       ...new Set(apiConfig.served_domains.map((binding) => binding.network)),
     ];
-    const layers = await loadEmailMessagesFiles({
-      source: apiConfig.network_config_source,
-      networkLocalFile: apiConfig.network_config_local_file,
-      networks,
-    });
+    let layers: LoadedEmailMessagesFile[] = [];
+    try {
+      layers = await loadEmailMessagesFiles({
+        source: apiConfig.network_config_source,
+        networkLocalFile: apiConfig.network_config_local_file,
+        networks,
+      });
+    } catch (err) {
+      // Task 13's loader only swallows ENOENT/ENOTDIR — anything else (a
+      // permissions error, say) rethrows. A bad network/brand messages file
+      // must never take email down any more than a bad EMAIL_MESSAGES_PATH
+      // does (see the try/catch above): warn and fall back to instance/base
+      // copy only.
+      console.warn(
+        `email messages: cannot read network/brand messages files (${String(err)}) — using instance/base copy only`,
+      );
+    }
 
     return loadEmailMessagesIndex({ defaultsText, instanceOverrideText, layers });
   })().catch((err: unknown) => {
