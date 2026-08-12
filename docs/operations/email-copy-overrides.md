@@ -91,4 +91,9 @@ that network or brand.
   <brand>: …` for a brand file — plus a one-line summary per layer of how
   many keys it overrode versus fell back. `email messages: cannot read
   EMAIL_MESSAGES_PATH …` covers the instance path itself being
-  missing/unreadable.
+  missing/unreadable. If the network/brand file scan itself fails (e.g.
+  permission denied, not just a missing file) the API logs `email messages:
+  cannot read network/brand messages files (…) — using instance/base copy
+  only` and drops every network/brand layer for that boot, falling back to
+  the instance override (or bundled defaults) for all networks/brands —
+  coarser than the per-layer fallback above, but email still never breaks.
