@@ -40,7 +40,8 @@ API sends: a messages file (`email/messages.default.properties`, overridable
 via `EMAIL_MESSAGES_PATH` — see `docs/operations/email-copy-overrides.md`) →
 loader (`email/messages.ts`) → case registry (`email/email_cases.ts`, one
 `EmailCaseDef` per case id: which properties keys, which `{{tokens}}`, which
-HTML shell, critical vs best-effort) → `email/dispatch_email.ts`'s
+HTML shell, critical vs best-effort, and notification-service priority
+realtime/other) → `email/dispatch_email.ts`'s
 `dispatchEmail`, which looks up the case, substitutes tokens, wraps the shell,
 and posts to the notification service. Everything above that is a thin
 caller:

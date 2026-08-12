@@ -5,6 +5,15 @@ file. The bundled default ships in the API image at
 `apps/api/src/notifications/email/messages.default.properties` (copied to
 `dist/` in the build). Ops can override any line without a code change:
 
+> **Helm-managed environments:** this repo's deployments are managed by the
+> Helm chart in the separate charts repo (`values.yaml`, `install.sh` — see
+> `docs/operations/secrets.md`). On those environments, add the ConfigMap +
+> `volumeMount` + `EMAIL_MESSAGES_PATH` env through the chart (new
+> values/templates there), the same way `secrets.md` describes for secrets —
+> do **not** hand-edit the rendered Deployment, or `helm upgrade` will revert
+> it. The steps and raw `kubectl`/YAML below are the underlying mechanism the
+> chart needs to wire up; use them directly only on a non-Helm environment.
+
 1. Copy the bundled file into a ConfigMap:
    `kubectl create configmap signals-email-messages --from-file=messages.properties=messages.default.properties`
 2. Edit the wording you want to change. Keys you delete simply fall back to
@@ -37,4 +46,6 @@ Rules (also documented in comments inside the file):
   inject markup.
 - A missing/unparseable file or a typo'd key can never break email: every bad
   or absent key falls back to the bundled default, with a warning in the API
-  logs (`email messages override: …`).
+  logs — `email messages override: …` for a bad line/key inside a file that
+  was read, `email messages: cannot read EMAIL_MESSAGES_PATH …` if the path
+  itself is missing/unreadable.
