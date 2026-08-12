@@ -442,7 +442,7 @@ type HomeServedScope = ReturnType<typeof getServedScope>;
 
 /** The single served domain when exactly one is bound (the single-domain portal), else null. */
 function resolveBoundDomain(servedScope: HomeServedScope): string | null {
-  return servedScope && servedScope.domains.length === 1 ? servedScope.domains[0] : null;
+  return servedScope?.domains.length === 1 ? servedScope.domains[0] : null;
 }
 
 /**
@@ -582,7 +582,7 @@ function computeShowNetworkSelector(servedScope: HomeServedScope, networkCount: 
 /** Title-case a domain id for display (e.g. `student_profile` → `Student Profile`), or undefined when absent. */
 function formatDomainLabel(domainId: string | null | undefined): string | undefined {
   return domainId
-    ? domainId.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())
+    ? domainId.replaceAll('_', ' ').replaceAll(/\b\w/g, (c) => c.toUpperCase())
     : undefined;
 }
 
