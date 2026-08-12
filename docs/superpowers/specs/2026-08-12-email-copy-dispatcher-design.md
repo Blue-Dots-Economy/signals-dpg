@@ -56,6 +56,7 @@ Sending is equally scattered: ~6 call sites each call the notification client's
 | Placeholders | **Optional, best-effort** — documented as comments in the file; unrecognised `{{tokens}}` are left in the output as raw text, never an error |
 | Support email criticality | **Critical** (deliberate deviation from the issue's wording — see Error policy) |
 | Architecture | **Approach A** — loader/registry/dispatcher live in `apps/api`; `packages/auth` gets a send-callback injected through `AuthRuntimeConfig` |
+| Per-network/brand copy (added post-review) | **Consent.json-style layering** — partial `messages.properties` beside `network.json` + brand subdirs; per-key precedence defaults < `EMAIL_MESSAGES_PATH` < network < brand; shipped network/brand files are comment-only templates (content identical for now); discovery in `packages/config` mirrors the consent loader (local mode only) |
 
 ## Design
 
@@ -67,8 +68,30 @@ paragraphs with light inline HTML: `<p>`, `<b>`, `<a>`, `<ol>/<li>`).
 
 - **Bundled default:** `apps/api/src/notifications/email/messages.default.properties`,
   shipped in the image. This file is also the reference ops copy into a ConfigMap.
-- **Override:** `EMAIL_MESSAGES_PATH` (new env var, optional) points at the mounted
-  override file. Unset → bundled defaults only (local dev needs nothing).
+- **Override layers (per-key, most specific wins), consent.json-style:**
+
+  1. Bundled defaults (validated floor — must be complete).
+  2. `EMAIL_MESSAGES_PATH` (env var, optional) — instance-wide override file
+     (ConfigMap mount). The only override surface in remote network-config mode
+     (mirrors consent: remote layering is a follow-up).
+  3. `<network dir>/messages.properties` — network-level partial override, living
+     beside `network.json` and `consent.json` (e.g.
+     `examples/schemas/blue_dot/messages.properties`). Local network-config mode
+     only, discovered by `packages/config/src/email_messages_loader.ts`
+     (mirrors `consent_config_loader.ts`).
+  4. `<network dir>/<brand>/messages.properties` — brand-level partial override
+     in the brand subdirectory (like brand `consent.json`).
+
+  Every layer is partial: a key absent from a layer falls through to the layer
+  below. Shipped network/brand files are **comment-only templates** for now
+  (placeholder docs + commented example lines) so all networks share the bundled
+  copy with zero duplication; editors uncomment only the lines they change.
+- **Send-time resolution:** `dispatchEmail` resolves copy for
+  `(args.network ?? instance default network, args.brand)` and falls back
+  brand → network → instance base. The instance default network is the served
+  network when the instance serves exactly one (today's deployment reality).
+  No caller passes `brand` yet — the parameter is the hook for when brand is
+  resolvable at send time.
 
 Key layout — `<case>.<field>`:
 

@@ -2314,3 +2314,165 @@ git commit -m "docs: email copy override runbook + updated api notifications gui
 
 - Push the branch and open a **draft** PR into `feature` (`gh pr create --draft`), description = what changed (never "review fixes"), include an "In Plain Terms" section per root CLAUDE.md, and note the two deliberate behaviour decisions: support email stays critical (spec deviation from #529's wording), `welcome`/action emails best-effort; `DEFAULT_FROM_EMAIL` fallback preserves auth sends when `NOTIFICATION_FROM_EMAIL` is unset.
 - Manual QA once deployed locally (`/run-signals-dpg` skill): trigger a login OTP email, a support submission, and a connect action; verify copy renders, then repeat with an `EMAIL_MESSAGES_PATH` override file containing one changed key + one typo'd key and confirm the changed key applies and the typo warns + falls back.
+
+---
+
+# Addendum: consent.json-style per-network/brand copy layering (Tasks 13-16)
+
+Added after the initial 12 tasks landed on the branch. Goal: the messages file
+becomes layerable like `consent.json` — partial `messages.properties` beside
+`network.json` (+ brand subdirs), per-key precedence
+**defaults < EMAIL_MESSAGES_PATH < network < brand**, comment-only template
+files shipped for now (content identical everywhere). Spec section 1 was
+updated with this design — re-read it first.
+
+### Task 13: Discovery loader in packages/config
+
+**Files:**
+- Create: `packages/config/src/email_messages_loader.ts`
+- Modify: `packages/config/src/index.ts` (export it)
+- Test: `packages/config/src/__tests__/email_messages_loader.test.ts`
+
+**Interfaces (mirror `consent_config_loader.ts` exactly — read it first):**
+
+```ts
+export type LoadedEmailMessagesFile = {
+  network: string;
+  brand: string | null;
+  text: string;
+};
+
+export type LoadEmailMessagesFilesOptions = {
+  source: 'local' | 'remote';
+  /** Path to network.json — messages.properties sits beside it (consent pattern). */
+  networkLocalFile: string;
+  networks: string[];
+};
+
+export async function loadEmailMessagesFiles(
+  opts: LoadEmailMessagesFilesOptions
+): Promise<LoadedEmailMessagesFile[]>
+```
+
+Behaviour (all mirroring the consent loader): `source !== 'local'` returns `[]`
+(remote layering is a follow-up, same as consent). Local mode is
+single-network: use `opts.networks[0]`; empty list returns `[]`. `baseDir =
+dirname(resolve(process.cwd(), opts.networkLocalFile))`. Read
+`join(baseDir, 'messages.properties')` — ENOENT skips (no entry), other fs
+errors rethrow. Then scan immediate subdirectories (copy the small
+`listSubdirectories` helper from the consent loader — do not export-share it
+across loaders) and read `join(baseDir, brand, 'messages.properties')` per
+brand, ENOENT skips. Returns raw text only — no parsing here; the
+registry/merge semantics live in apps/api. TDD with `mkdtemp` fixture dirs
+(see how the consent loader tests do it). Commit:
+`feat(config): consent-style discovery of per-network/brand email messages files (#529)`.
+
+### Task 14: Layered messages index in apps/api
+
+**Files:**
+- Modify: `apps/api/src/notifications/email/messages.ts`
+- Test: extend `apps/api/src/notifications/email/__tests__/messages.test.ts`
+
+**Interfaces:**
+
+```ts
+export interface EmailMessages { get(key: string): string }
+export interface EmailMessagesIndex {
+  /** brand, then network, then instance-base fallback; unknown/null args fall through. */
+  forContext(network?: string | null, brand?: string | null): EmailMessages;
+}
+
+export function loadEmailMessagesIndex(opts: {
+  defaultsText: string;
+  instanceOverrideText?: string | null;   // EMAIL_MESSAGES_PATH layer
+  layers?: LoadedEmailMessagesFile[];     // network + brand layers from Task 13
+  warn?: (message: string) => void;
+}): EmailMessagesIndex
+
+export function getEmailMessages(): Promise<EmailMessagesIndex>  // singleton, boot-warmed
+export function resetEmailMessagesForTests(): void
+```
+
+Implementation: refactor the existing merge body into a reusable
+`mergeLayer(base: Map, overrideText: string, label: string, warn): Map` that
+keeps ALL current semantics (unknown-key warn + ignore, malformed-line warn
+with 1-based numbers, per-key wins). Run the `Object.hasOwn` placeholder lint
+once per FINAL map. Build maps: `base` = defaults (validated complete,
+boot-throw on hole) merged with instance override; per network layer:
+`mergeLayer(base, networkText, 'network <id>')`; per brand layer:
+`mergeLayer(networkMap, brandText, 'network <id> brand <b>')` (a brand file
+for a network with no network file merges over base). Store:
+`Map<string, EmailMessages>` keyed by network and network+brand;
+`forContext` tries brand key, then network key, then base. The existing
+`loadEmailMessages` export may be deleted IF all its callers/tests are updated
+to `loadEmailMessagesIndex(...).forContext()` — do not keep two parallel APIs.
+`getEmailMessages()` singleton: also calls
+`loadEmailMessagesFiles({ source: apiConfig.network_config_source,
+networkLocalFile: apiConfig.network_config_local_file, networks: <unique
+served_domains networks> })` — check the exact `apiConfig` field names in
+`apps/api/src/config.ts` and mirror `apps/api/src/consent_configs.ts`'s
+derivation of the networks list. Keep the rejected-promise-clearing behaviour
+and the boot warmup (app.ts) unchanged — the warmup now also surfaces
+network/brand-file warnings at boot.
+
+New tests: network layer overrides base for its network only; brand overrides
+network; unknown network/brand falls back; brand file without network file
+merges over base; per-layer unknown-key warns carry the layer label. Update
+existing tests mechanically to the new entry point (assert same behaviours).
+Commit: `feat(api): layered email messages index - instance/network/brand per-key merge (#529)`.
+
+### Task 15: Context-aware dispatch + caller wiring
+
+**Files:**
+- Modify: `apps/api/src/notifications/email/dispatch_email.ts`
+- Modify: `apps/api/src/notifications/notify_actions.ts` (sender construction)
+- Test: extend `apps/api/src/notifications/email/__tests__/dispatch_email.test.ts`
+
+Changes:
+- `DispatchEmailArgs` gains `brand?: string` (documented: no caller sets it yet;
+  hook for when brand is resolvable at send time).
+- `EmailSenderDeps`: `getMessages: () => Promise<EmailMessagesIndex>` and new
+  `defaultNetwork: string | null` (used when `args.network` is absent — the
+  instance-level emails: guardian/login OTP, welcome, support).
+- In `send()`: `const messages = (await deps.getMessages()).forContext(args.network ?? deps.defaultNetwork, args.brand);` — rest unchanged.
+- `getDefaultEmailSender()` and `resolveNotifierConfig()` (notify_actions)
+  compute `defaultNetwork`: the single distinct network across
+  `apiConfig.served_domains` bindings, else `null` (multi-network instances
+  keep base copy for instance-level emails; per-plan `args.network` still wins
+  for action/retire). Extract that computation once (small helper in
+  dispatch_email.ts, reused by notify_actions).
+- Tests: default-network used when args.network absent; args.network wins over
+  defaultNetwork; brand arg reaches forContext. Update the sender-building test
+  helper to the index API.
+
+Commit: `feat(api): dispatch email copy resolved per network/brand context (#529)`.
+
+### Task 16: Template files + docs + full verification
+
+**Files:**
+- Create: `messages.properties` comment-only template in EVERY
+  `examples/schemas/<network>/` dir that has a top-level `network.json`
+  (blue_dot, yellow_dot, purple_dot, orange_dot — confirm with `find`), and in
+  each existing brand subdir that has a `consent.json` (e.g.
+  `blue_dot/upsdm/`, `orange_dot/onetac/`).
+- Modify: `docs/operations/email-copy-overrides.md` (layering precedence
+  section: defaults < EMAIL_MESSAGES_PATH < network < brand; the network/brand
+  files live with network.json/consent.json and ride the same ConfigMap;
+  comment-only template semantics), `apps/api/CLAUDE.md` (one-line update to
+  the notifications section mentioning the layering).
+- Verify: full battery (api tests, auth tests, typecheck, build + dist ls,
+  copy-residue grep) all green.
+
+Template content (identical everywhere apart from the network/brand name in
+the header, ~15 lines): header comment explaining this file is a PARTIAL
+override of the bundled email copy for this network (or brand); per-key
+semantics ("uncomment and edit only the lines you want to change; anything
+absent falls back to the network file, then the instance file, then the
+bundled defaults"); placeholder rule ("{{tokens}} are optional; unrecognised
+ones render as literal text"); a pointer to
+`docs/operations/email-copy-overrides.md` and to
+`apps/api/src/notifications/email/messages.default.properties` for the full
+key list; plus 2-3 commented example lines, e.g.
+`# welcome.subject=Welcome to Blue Dot!`.
+
+Commit: `feat(examples): per-network/brand email messages templates + layering docs (#529)`.
