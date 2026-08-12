@@ -4,7 +4,6 @@ import { apiKey, type ApiKeyConfigurationOptions } from '@better-auth/api-key';
 import { unifiedOtp } from '../plugins/unified_otp';
 import type { AuthRuntimeConfig } from './types';
 import { drizzleAdapter } from 'better-auth/adapters/drizzle';
-import { emailOtpHtmlTemplate } from './templates/otp_email';
 
 export function createAuth(config: AuthRuntimeConfig) {
   const redis = config.redis;
@@ -141,26 +140,21 @@ export function createAuth(config: AuthRuntimeConfig) {
         },
 
         sendEmailOtp: async ({ email, otp, user }) => {
-          if (nc) {
+          if (config.sendEmail) {
             try {
-              await nc.notify({
-                channel: 'email',
-                template_id: 'basic_email',
+              await config.sendEmail({
+                caseId: 'login.otp',
                 to: email,
-                priority: 'realtime',
+                fromName: config.appName,
                 variables: {
-                  fromName: config.appName,
-                  fromEmail: 'hello@bluedotseconomy.org',
-                  replyTo: 'hello@bluedotseconomy.org',
-                  subject: `Your One-Time Password (OTP) for ${config.appName}`,
-                  html: emailOtpHtmlTemplate(otp, user, config.appName),
+                  otp,
+                  userName: user?.name?.toLowerCase() || 'user',
+                  signAction: user ? 'sign in' : 'sign up',
+                  appName: config.appName,
                 },
               });
             } catch (err) {
-              console.error(
-                'Failed to send email OTP via notification service:',
-                err
-              );
+              console.error('Failed to send email OTP via notification service:', err);
               // Propagate so the OTP endpoint can report the delivery failure
               // instead of returning ok:true for a code that never arrived.
               throw err;
@@ -169,28 +163,22 @@ export function createAuth(config: AuthRuntimeConfig) {
             console.log({
               to: email,
               subject: 'Your One-Time Password',
-              html: otp || user,
+              otp,
             });
           }
         },
 
         afterUserCreate: async (payload) => {
           if (nc) {
-            if (payload.user.email) {
+            if (payload.user.email && config.sendEmail) {
               try {
-                await nc.notify({
-                  channel: 'email',
-                  template_id: 'basic_email',
+                await config.sendEmail({
+                  caseId: 'welcome',
                   to: payload.user.email,
-                  priority: 'realtime',
+                  fromName: `Welcome to ${config.appName}`,
                   variables: {
-                    fromName: `Welcome to ${config.appName}`,
-                    fromEmail: 'hello@bluedotseconomy.org',
-                    replyTo: 'hello@bluedotseconomy.org',
-                    subject: 'Welcome!',
-                    html: `<div>
-                      <p>Congratulations ${payload.user.name}! You just went live with an account on ${config.appName}.</p>
-                    </div>`,
+                    userName: payload.user.name,
+                    appName: config.appName,
                   },
                 });
               } catch (err) {

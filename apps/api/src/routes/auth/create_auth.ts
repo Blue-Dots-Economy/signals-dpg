@@ -11,6 +11,7 @@ import {
 import { db } from '@api/db/postgres/drizzle_config';
 import { redis } from '@api/db/secondary/redis';
 import { getNotificationClient } from '@/utils/notificationClient';
+import { getDefaultEmailSender } from '@/notifications/email/dispatch_email';
 import { materializeSignupGuardian } from '@/services/signup_guardian';
 
 export const authInstance = createAuth({
@@ -36,6 +37,26 @@ export const authInstance = createAuth({
   createTestOTP: auth.CREATE_TEST_OTP,
   notificationClient: getNotificationClient(),
   smsTemplateId: notification.SMS_TEMPLATE_ID,
+
+  // Central email dispatch (#529): login-OTP + welcome copy live in the email
+  // messages file; criticality comes from the case registry (login.otp
+  // critical → throws → OTP_DELIVERY_FAILED 502; welcome best-effort → the
+  // sender swallows failures). Only wired when a notification client exists,
+  // preserving the package's console fallback for local dev.
+  ...(getNotificationClient()
+    ? {
+        sendEmail: async (args: {
+          caseId: 'login.otp' | 'welcome';
+          to: string;
+          fromName: string;
+          variables: Record<string, string>;
+        }) => {
+          const sender = getDefaultEmailSender();
+          if (!sender) throw new Error('email sender not configured');
+          await sender.dispatchEmail(args);
+        },
+      }
+    : {}),
 
   allowSelfSignup: authConfig.allow_self_signup,
   loginChannels: authConfig.login_channels,
