@@ -36,9 +36,9 @@ Auth plugins (`auth_middleware.ts`, `validate_api_key.ts`, `validate_session.ts`
 ## Notifications & support are separate small pipelines
 
 - `src/notifications/`: `build_notifications.ts` (turns a `NotificationEvent` into a `NotificationPlan`) → `dispatcher.ts` (takes injected `DispatcherDeps` — `sendEmail`, `resolveEmail`, `resolveCounterpartyName`, `brand` — so it's testable without a real notification-service call) → `action_copy.ts` resolves the (group × role) email case id → the central `email/dispatch_email.ts` sender looks up copy in `email/messages.default.properties` and renders it (#529).
-- `src/support/build_support_email.ts`: unrelated, smaller — just an HTML-escaping email builder. `POST /api/v1/support` (authenticated) emails `SUPPORT_EMAIL` via the notification client and returns `503 SUPPORT_NOT_CONFIGURED` when the recipient or client is unset.
+- `src/support/build_support_email.ts`: smaller, single-route — now just `generateSupportReference` plus `buildSupportDetailsTable` (the escaped `{{detailsTable}}` html token for the `support.request` case). `POST /api/v1/support` (authenticated) calls `getDefaultEmailSender().dispatchEmail({ caseId: 'support.request', ... })` directly (no `dispatcher.ts`/`action_copy.ts` in between) and returns `503 SUPPORT_NOT_CONFIGURED` when the recipient/fromEmail/sender is unset, `502 SUPPORT_SEND_FAILED` if the send throws (the case is critical).
 
-Don't assume these share infrastructure — they're two independent, small pipelines that happen to both end up calling the notification-service client.
+Both pipelines converge on the same `email/dispatch_email.ts` sender (#529) but stay independent above that: support has no `NotificationPlan`/`dispatcher.ts` layer, it builds its `DispatchEmailArgs` inline in the route handler.
 
 ## `action/perform` is single-object; bulk is a separate route
 

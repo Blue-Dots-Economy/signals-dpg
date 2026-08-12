@@ -1,67 +1,45 @@
 import { describe, it, expect } from 'vitest';
-import { buildSupportEmail, generateSupportReference } from '../build_support_email';
+import { buildSupportDetailsTable, generateSupportReference } from '../build_support_email';
 
 const base = {
-  type: 'complaint' as const,
-  name: 'Asha K',
-  email: 'asha@example.com',
-  phone: '+919000000000',
-  details: 'My profile broke',
   reference: 'SUP-20260709-AB12CD',
-  teamName: 'Blue Dot',
+  name: 'Asha K',
+  email: 'asha@example.com' as string | null,
+  phone: '+919000000000' as string | null,
   submittedAt: '2026-07-09T10:00:00.000Z',
 };
 
-describe('buildSupportEmail', () => {
-  it('builds the subject with reference, type label, name and link', () => {
-    const { subject } = buildSupportEmail({ ...base, linkBaseUrl: 'https://blue.example.org' });
-    expect(subject).toBe(
-      'Issue Number: SUP-20260709-AB12CD — Complaint from Asha K from https://blue.example.org'
-    );
-  });
-
-  it('omits the trailing link when no linkBaseUrl is given', () => {
-    const { subject } = buildSupportEmail(base);
-    expect(subject).toBe('Issue Number: SUP-20260709-AB12CD — Complaint from Asha K');
-  });
-
-  it('uses "Support Request" as the type label for support_request', () => {
-    const { subject, html } = buildSupportEmail({ ...base, type: 'support_request' });
-    expect(subject).toContain('Support Request from Asha K');
-    expect(html).toContain('Support Request has been raised by Asha K');
-  });
-
-  it('includes details, contact block, reference, consent and team sign-off in the html', () => {
-    const { html } = buildSupportEmail(base);
-    expect(html).toContain('The below Complaint has been raised by Asha K');
-    expect(html).toContain('My profile broke');
+describe('buildSupportDetailsTable', () => {
+  it('includes the reference, contact fields, submitted-at and consent row', () => {
+    const html = buildSupportDetailsTable(base);
+    expect(html).toContain('Contact details');
+    expect(html).toContain('SUP-20260709-AB12CD');
+    expect(html).toContain('Asha K');
     expect(html).toContain('asha@example.com');
     expect(html).toContain('+919000000000');
-    expect(html).toContain('SUP-20260709-AB12CD');
+    expect(html).toContain('2026-07-09T10:00:00.000Z');
     expect(html).toContain('Consent to share contact');
     expect(html).toContain('Yes');
-    expect(html).toContain('Team Blue Dot');
   });
 
   it('renders — for missing email/phone', () => {
-    const { html } = buildSupportEmail({ ...base, email: null, phone: null });
+    const html = buildSupportDetailsTable({ ...base, email: null, phone: null });
     expect(html).toContain('—');
   });
 
-  it('HTML-escapes user-supplied details and name', () => {
-    const { html } = buildSupportEmail({
-      ...base,
-      details: '<script>alert(1)</script>',
-      name: 'A<b>C',
-    });
-    expect(html).toContain('&lt;script&gt;alert(1)&lt;/script&gt;');
-    expect(html).not.toContain('<script>');
+  it('HTML-escapes user-supplied name', () => {
+    const html = buildSupportDetailsTable({ ...base, name: 'A<b>C' });
+    expect(html).not.toContain('<b>C');
     expect(html).toContain('A&lt;b&gt;C');
   });
 
-  it('flattens newlines in the subject so they cannot inject headers', () => {
-    const { subject } = buildSupportEmail({ ...base, name: 'line1\nline2' });
-    expect(subject).toBe('Issue Number: SUP-20260709-AB12CD — Complaint from line1 line2');
+  it('HTML-escapes contact fields', () => {
+    const html = buildSupportDetailsTable({
+      ...base,
+      email: '<script>alert(1)</script>@example.com',
+    });
+    expect(html).toContain('&lt;script&gt;alert(1)&lt;/script&gt;');
+    expect(html).not.toContain('<script>');
   });
 });
 
