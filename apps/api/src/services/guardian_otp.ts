@@ -2,7 +2,8 @@ import { randomInt, createHash } from 'node:crypto';
 import { redis } from '@api/db/secondary/redis';
 import { getNotificationClient } from '@/utils/notificationClient';
 import { authConfig, supportConfig, notification } from '@/config';
-import { renderGuardianOtpEmail } from '@/services/guardian_otp_email';
+import { renderOrgList } from '@/notifications/email/shells';
+import { getDefaultEmailSender } from '@/notifications/email/dispatch_email';
 
 /** Codes the primitive raises; callers map these to HTTP responses. */
 export class GuardianOtpError extends Error {
@@ -201,15 +202,45 @@ const CHANNEL_BY_CONTACT_TYPE: Record<GuardianContactType, 'sms' | 'email'> = {
 const GENERIC_SMS_TEMPLATE_ID = 'login_otp';
 
 /**
+ * Maps a guardian OTP scenario to its email case + variables (#529). Pure —
+ * fallback values are supplied here because the copy file has no
+ * conditionals: every declared placeholder always gets a value.
+ */
+export function buildGuardianEmailDispatch(args: {
+  scenario?: GuardianOtpScenario;
+  otp: string;
+  variables: GuardianOtpVariables;
+  teamName: string;
+}): { caseId: string; variables: Record<string, string> } {
+  const { scenario, otp, variables, teamName } = args;
+  if (!scenario) {
+    return { caseId: 'otp.generic', variables: { otp } };
+  }
+  const vars: Record<string, string> = {
+    otp,
+    parentName: variables.parentName || 'there',
+    domain: variables.domain || teamName,
+    org: variables.providerOrgName || 'the organisation',
+    teamName,
+  };
+  if (scenario.kind === 'action_bulk') {
+    vars.noun = scenario.jobs ? 'jobs' : 'opportunities';
+    vars.orgList = renderOrgList(scenario.providerOrgNames);
+  }
+  return { caseId: `guardian.${scenario.kind}`, variables: vars };
+}
+
+/**
  * Default dispatch: pick the channel from the guardian's contact type and send
  * via the shared notification client. Hard-fails when no provider is
  * configured — a guardian-required domain must not silently skip verification.
  *
- * Email: the body is rendered IN-REPO (`renderGuardianOtpEmail`, #294 copy) and
- * shipped via the generic `basic_email` template — same convention as the login
- * OTP + action emails, so the copy lives in signals. SMS: the DLT-approved body
- * lives in the notification service, so we send a per-scenario `template_id`
- * plus variables and let it render.
+ * Email: the case + variables are mapped by `buildGuardianEmailDispatch` and
+ * shipped through the central `dispatchEmail` sender (#529) — same convention
+ * as the login OTP + action emails, so the copy lives in the properties file,
+ * not in-repo HTML. SMS: the DLT-approved body lives in the notification
+ * service, so we send a per-scenario `template_id` plus variables and let it
+ * render.
  */
 export const defaultGuardianOtpSend: OtpSend = async ({ contact, contactType, otp, scenario, variables }) => {
   const client = getNotificationClient();
@@ -219,25 +250,24 @@ export const defaultGuardianOtpSend: OtpSend = async ({ contact, contactType, ot
   const channel = CHANNEL_BY_CONTACT_TYPE[contactType];
 
   if (channel === 'email') {
+    const sender = getDefaultEmailSender();
+    if (!sender) {
+      throw new GuardianOtpError('NO_OTP_PROVIDER');
+    }
     const teamName = supportConfig.teamName ?? 'Blue Dots';
-    const { subject, html } = scenario
-      ? renderGuardianOtpEmail({ scenario, otp, variables: variables ?? {}, teamName })
-      : {
-          subject: 'Your One-Time Password (OTP)',
-          html: `<p>Use this OTP: <b>${otp}</b></p><p>This OTP is valid for 10 minutes. Do not share it with anyone.</p>`,
-        };
-    await client.notify({
-      channel: 'email',
-      template_id: 'basic_email',
+    const dispatch = buildGuardianEmailDispatch({
+      scenario,
+      otp,
+      variables: variables ?? {},
+      teamName,
+    });
+    // Critical case: dispatchEmail rethrows on failure, so a lost guardian
+    // OTP surfaces to the caller exactly as the direct notify() did.
+    await sender.dispatchEmail({
+      caseId: dispatch.caseId,
       to: contact,
-      priority: 'realtime',
-      variables: {
-        fromName: teamName,
-        fromEmail: supportConfig.fromEmail ?? '',
-        replyTo: supportConfig.fromEmail ?? '',
-        subject,
-        html,
-      },
+      fromName: teamName,
+      variables: dispatch.variables,
     });
     return;
   }
