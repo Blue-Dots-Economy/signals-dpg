@@ -208,6 +208,7 @@
         "body": "Providers can find and connect with you only once your profile is live. Fill in the details below to get matched with the services and support you need."
       },
       "id": "seeker",
+      "go_live_required": ["schema_required", "consent_required"],
       "guardian_consent_required": true,
       "card": {
         "title_field": "beneficiary_name",
@@ -420,6 +421,7 @@
         "body": "People looking for services can discover and connect with you only once your profile is live. Add your details below to start helping."
       },
       "id": "provider",
+      "go_live_required": ["schema_required", "consent_required"],
       "card": {
         "title_field": "organisation_name",
         "avatar_from": "organisation_name",

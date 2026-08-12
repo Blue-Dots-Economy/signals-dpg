@@ -25,6 +25,7 @@
     "db:backfill:consent": "tsx scripts/backfill_demote_consentless.ts",
     "spec:dump": "tsx scripts/dump_openapi.ts",
     "test": "vitest run --passWithNoTests",
+    "test:coverage": "vitest run --passWithNoTests --coverage",
     "test:watch": "vitest",
     "test:integration": "vitest run --config vitest.integration.config.ts"
   },

@@ -87,6 +87,7 @@
         "body": "Tutors and counsellors can find and connect with you only once your profile is live. Fill in the details below to get matched."
       },
       "id": "student",
+      "go_live_required": ["schema_required", "consent_required"],
       "card": {
         "title_field": "Full Name",
         "avatar_from": "Full Name",
@@ -200,6 +201,7 @@
         "body": "Students can find and connect with you only once your profile is live. Add your details below to start getting learners."
       },
       "id": "individual_tutor_weera_counsellor",
+      "go_live_required": ["schema_required", "consent_required"],
       "card": {
         "title_field": "Full Name",
         "avatar_from": "Full Name",

@@ -2,8 +2,15 @@ import { describe, it, expect, vi } from 'vitest';
 import { config as loadEnv } from 'dotenv';
 import { fileURLToPath } from 'node:url';
 
-// Load the committed dump env BEFORE the config module is imported.
-loadEnv({ path: fileURLToPath(new URL('../../scripts/dump_openapi.env', import.meta.url)) });
+// Load the committed dump env BEFORE the config module is imported. `override`
+// is required: dotenv leaves an already-set process.env var untouched, so a
+// value leaked by an earlier-running test file (e.g. a bare `localhost`
+// API_DOMAIN) would otherwise survive and make getCurrentApiBaseUrl throw
+// `Invalid URL` when the config module is re-imported under the full suite.
+loadEnv({
+  path: fileURLToPath(new URL('../../scripts/dump_openapi.env', import.meta.url)),
+  override: true,
+});
 
 describe('OpenAPI spec generation', () => {
   it('builds a spec with real metadata and a non-empty path surface', async () => {

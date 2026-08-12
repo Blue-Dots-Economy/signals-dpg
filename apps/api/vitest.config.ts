@@ -23,6 +23,10 @@ export default defineConfig({
       provider: 'v8',
       reporter: ['text', 'lcov'],
       reportsDirectory: './coverage',
+      // Still emit the lcov report when some tests fail. Without this, a single
+      // failing test zeroes the entire api coverage upload — SonarCloud then
+      // reports 0% for every api file even though the rest of the suite ran.
+      reportOnFailure: true,
       include: ['src/**/*.ts', 'plugins/**/*.ts'],
       exclude: [
         'src/**/__tests__/**',
