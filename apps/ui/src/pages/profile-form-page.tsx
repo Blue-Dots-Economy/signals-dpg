@@ -293,9 +293,18 @@ export function ProfileFormPage() {
   const profileDoc = consentConfig?.documents.profile_creation;
   const profileVersion = profileDoc?.versions.find((v) => v.version === profileDoc.current_version);
   const statement = profileVersion?.statement ?? '';
-  // Create-only flag, kept for the create submit branch's payload/optimistic
-  // cache below so that path behaves exactly as before.
-  const consentRequired = !isEdit && !!statement;
+  // The profile_creation consent tick only applies when the selected domain
+  // gates go-live on `consent_required` (mirrors `go_live_required` in
+  // network.json). A domain that goes live on completeness alone (e.g. a
+  // provider configured `["schema_required"]`) shows no consent step. Absent
+  // config ⇒ require (safe default, matches the login/create-enforcement gates).
+  const selectedDomainGates = network?.domains.find(
+    (d) => d.id === selectedDomain,
+  )?.go_live_required;
+  const domainNeedsConsent = selectedDomainGates
+    ? selectedDomainGates.includes('consent_required')
+    : true;
+  const consentRequired = !isEdit && !!statement && domainNeedsConsent;
 
   // Has THIS draft already recorded profile_creation consent? The home-page
   // consent gate populates this set; read it (a plain cache read, no

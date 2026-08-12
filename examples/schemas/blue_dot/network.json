@@ -768,6 +768,7 @@
         }
       },
       "id": "seeker",
+      "go_live_required": ["schema_required", "consent_required"],
       "guardian_consent_required": true,
       "profile_completion_prompt": {
         "heading": "Complete your profile to get discovered",
@@ -1306,6 +1307,7 @@
         }
       },
       "id": "provider",
+      "go_live_required": ["schema_required", "consent_required"],
       "my_items_label": "My Jobs",
       "guardian_consent_required": false,
       "profile_completion_prompt": {

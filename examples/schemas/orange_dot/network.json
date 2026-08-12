@@ -166,6 +166,7 @@
       },
       "id": "practitioner",
       "contact_fields": { "name": "provider_name", "phone": "contact_phone", "email": "email" },
+      "go_live_required": ["schema_required"],
       "card": {
         "title_field": "product_name",
         "avatar_from": "product_name",

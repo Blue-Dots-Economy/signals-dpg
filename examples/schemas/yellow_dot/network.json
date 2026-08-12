@@ -88,6 +88,7 @@
       },
       "id": "student",
       "contact_fields": { "name": "Full Name", "phone": "Phone Number", "email": "Email Address" },
+      "go_live_required": ["schema_required", "consent_required"],
       "card": {
         "title_field": "Full Name",
         "avatar_from": "Full Name",
@@ -202,6 +203,7 @@
       },
       "id": "individual_tutor_weera_counsellor",
       "contact_fields": { "name": "Full Name", "phone": "Phone Number", "email": "Email Address" },
+      "go_live_required": ["schema_required", "consent_required"],
       "card": {
         "title_field": "Full Name",
         "avatar_from": "Full Name",

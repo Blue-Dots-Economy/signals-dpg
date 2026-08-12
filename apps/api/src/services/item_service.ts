@@ -12,7 +12,7 @@ import {
   splitItemStateByPrivacy,
   validateAgainstJsonSchema,
 } from '@dpg/schemas';
-import { classify_item } from './items/classifier.js';
+import { classify_item, DEFAULT_GO_LIVE_GATES, type GoLiveGate } from './items/classifier.js';
 import { hasAcceptedProfileConsent } from './consent_acceptance.js';
 import { is_populated } from './metrics/profile_completion.js';
 import { decryptPiiBlob, encryptPiiBlob, getPiiKey } from '@dpg/auth';
@@ -332,11 +332,16 @@ export async function createItemInternal(
   // MINOR the route passes `consent_accepted=false` (self-consent must not
   // promote a minor), so they stay draft until GUARDIAN consent promotes via
   // the finalize/accept path — see create_item.ts and promoteItemOnProfileConsent.
+  const goLiveGates = await resolveGoLiveGates(params.item_network, params.item_domain);
   const classification = classify_item({
     schema: itemSchema as { required?: string[] },
     merged_state: submittedItemState,
     current_status: 'draft',
+    // Guardian-aware already: create_item passes consent_accepted=false for a
+    // gated minor (self-consent must not promote), so no separate guardian
+    // check is needed on the create path.
     consent_accepted: params.consent_accepted ?? false,
+    gates: goLiveGates,
   });
 
   const itemLocations = locationsForStorage(params.item_locations ?? [], itemSchema);
@@ -396,6 +401,28 @@ export interface UpdateItemInternalResult {
     created_at: Date;
     updated_at: Date;
   };
+}
+
+/**
+ * The go-live gate set for a (network, domain), from the domain's
+ * `go_live_required` config, or `DEFAULT_GO_LIVE_GATES` when unset. Callers
+ * pass the result into `classify_item` and use it to decide whether the U18
+ * guardian check applies (it is part of the `consent_required` gate).
+ */
+export async function resolveGoLiveGates(
+  network: string,
+  domain: string,
+): Promise<readonly GoLiveGate[]> {
+  const networkConfig = await getNetworkConfigById(network);
+  const domainConfig = networkConfig.domains.find((d) => d.id === domain);
+  const gates = domainConfig?.go_live_required ?? DEFAULT_GO_LIVE_GATES;
+  // U18: the guardian age control folds into `consent_required`. A
+  // guardian-gated domain always enforces it, even if config omitted it or the
+  // default wouldn't include it — the age gate must never be droppable.
+  if (domainConfig?.guardian_consent_required && !gates.includes('consent_required')) {
+    return [...gates, 'consent_required'];
+  }
+  return gates;
 }
 
 /**
@@ -502,17 +529,22 @@ export async function promoteItemOnProfileConsent(
     priv
   );
 
+  const goLiveGates = await resolveGoLiveGates(item.item_network, item.item_domain);
+  // Reached only after the caller recorded profile_creation consent, so the
+  // consent row exists; the `consent_required` gate then reduces to the U18 age
+  // check (spec §7 / D11/D13) — fail-closed for a gated minor / null-DOB. The
+  // guardian result is folded into `consent_accepted`; the classifier just
+  // evaluates whichever gates the domain configured.
+  const consentSatisfied = !(await guardianGateBlocksGoLive(exec, item));
   const { lifecycle_status } = classify_item({
     schema: itemSchema as { required?: string[] },
     merged_state: mergedFullState,
     current_status: 'draft',
-    consent_accepted: true,
+    consent_accepted: consentSatisfied,
+    gates: goLiveGates,
   });
 
   if (lifecycle_status !== 'live') return false;
-
-  // U18 age gate (spec §7 / D11/D13). Fail-closed for a gated minor / null-age.
-  if (await guardianGateBlocksGoLive(exec, item)) return false;
 
   await exec
     .update(items)
@@ -548,6 +580,153 @@ export async function upsertGuardianProfileConsentAndPromote(
       },
     });
   return promoteItemOnProfileConsent(tx, args.itemId);
+}
+
+/** The existing-item fields `updateItemInternal`'s state/location helpers read. */
+interface ExistingItemForUpdate {
+  item_id: string;
+  item_network: string;
+  item_domain: string;
+  item_type: string;
+  item_schema_url: string | null;
+  item_state: unknown;
+  item_private_state: string;
+  lifecycle_status: string;
+  created_by: string;
+  item_locations: unknown;
+}
+
+/**
+ * Computes the `item_state` / `item_private_state` / `lifecycle_status` writes
+ * for a state-changing update: decrypt + merge the prior state, validate,
+ * enforce the live latch, split private fields, and re-classify go-live
+ * (guardian-aware consent folded in).
+ *
+ * @returns The merged full state + whether the primary address changed (for
+ *          downstream location resolution) and the column writes to apply.
+ * @throws {ItemServiceError} 400 INVALID_ITEM_STATE / 409 REQUIRED_FIELD_LOCKED_WHILE_LIVE.
+ */
+async function computeItemStateUpdate(
+  exec: DbOrTx,
+  existingItem: ExistingItemForUpdate,
+  itemSchema: Awaited<ReturnType<typeof getOrFetchSchemaByUrl>>,
+  bodyState: Record<string, unknown>,
+): Promise<{
+  mergedFullState: Record<string, unknown>;
+  addressChanged: boolean;
+  writes: { item_state: unknown; item_private_state: string; lifecycle_status: string };
+}> {
+  const priorPrivate =
+    existingItem.item_private_state === ''
+      ? {}
+      : (JSON.parse(decryptPiiBlob(existingItem.item_private_state, getPiiKey())) as Record<
+          string,
+          unknown
+        >);
+  const priorFullState = mergeItemStateWithPrivate(
+    existingItem.item_state as Record<string, unknown>,
+    priorPrivate,
+  );
+  const mergedFullState = { ...priorFullState, ...bodyState };
+  const addressChanged = primaryAddressChanged(
+    itemSchema as Record<string, unknown>,
+    bodyState,
+    priorFullState,
+  );
+
+  const requiredKeys = Array.isArray((itemSchema as { required?: unknown }).required)
+    ? ((itemSchema as { required?: string[] }).required as string[])
+    : [];
+
+  try {
+    validateAgainstJsonSchema(itemSchema, mergedFullState, 'item_state', {
+      allowAdditionalProperties: apiConfig.allow_extra_schema_data,
+      ignoredKeys: requiredKeys,
+    });
+  } catch (err) {
+    throw new ItemServiceError(
+      400,
+      'INVALID_ITEM_STATE',
+      err instanceof Error ? err.message : 'Invalid item_state',
+    );
+  }
+
+  // Live latch: a live profile must stay complete — reject an edit that empties
+  // a required field while live (see 2026-06-10-live-latch-design.md §6).
+  const unpopulatedRequired = requiredKeys.filter((k) => !is_populated(mergedFullState[k]));
+  if (unpopulatedRequired.length > 0 && existingItem.lifecycle_status === 'live') {
+    throw new ItemServiceError(
+      409,
+      'REQUIRED_FIELD_LOCKED_WHILE_LIVE',
+      `Required field(s) must stay populated on a live profile: ${unpopulatedRequired.join(', ')}; pause it first`,
+    );
+  }
+
+  const split = splitItemStateByPrivacy(itemSchema, mergedFullState);
+  const masked = maskPrivateState(itemSchema, split.privateState);
+  const item_state = mergeMasksIntoPublic(split.publicState, masked);
+  const item_private_state =
+    Object.keys(split.privateState).length === 0
+      ? ''
+      : encryptPiiBlob(JSON.stringify(split.privateState), getPiiKey());
+
+  // `consent_required` folds in the U18 guardian check so a minor's self-consent
+  // row can't flip the item live (the classifier just evaluates configured gates).
+  const goLiveGates = await resolveGoLiveGates(existingItem.item_network, existingItem.item_domain);
+  const consentSatisfied =
+    (await hasAcceptedProfileConsent(exec, existingItem.item_id)) &&
+    !(await guardianGateBlocksGoLive(exec, existingItem));
+  const classification = classify_item({
+    schema: itemSchema as { required?: string[] },
+    merged_state: mergedFullState,
+    current_status: existingItem.lifecycle_status as 'draft' | 'live' | 'paused',
+    consent_accepted: consentSatisfied,
+    gates: goLiveGates,
+  });
+
+  return {
+    mergedFullState,
+    addressChanged,
+    writes: { item_state, item_private_state, lifecycle_status: classification.lifecycle_status },
+  };
+}
+
+/**
+ * Resolves the `item_locations` write for an update, in precedence order:
+ * explicit non-empty client coords win (re-jitter unless echoed back); else an
+ * edited primary address re-geocodes (blank → wipe, geocode hit → store,
+ * geocode miss → keep existing); else leave unchanged.
+ *
+ * @returns The locations to write, or `undefined` to leave them unchanged.
+ */
+async function resolveLocationUpdate(
+  existingItem: ExistingItemForUpdate,
+  itemSchema: Awaited<ReturnType<typeof getOrFetchSchemaByUrl>>,
+  bodyLocations: ItemLocation[] | undefined,
+  mergedFullState: Record<string, unknown>,
+  addressChanged: boolean,
+): Promise<ItemLocation[] | undefined> {
+  const providedCoords =
+    Array.isArray(bodyLocations) && bodyLocations.length > 0 ? bodyLocations : null;
+  if (providedCoords) {
+    const stored = (existingItem.item_locations ?? []) as ItemLocation[];
+    return sameLocations(providedCoords, stored)
+      ? stored
+      : locationsForStorage(providedCoords, itemSchema as Record<string, unknown>);
+  }
+  if (addressChanged) {
+    if (isPrimaryAddressBlank(itemSchema as Record<string, unknown>, mergedFullState)) {
+      return [];
+    }
+    const geocoded = await geocodeLocationsFromState(
+      itemSchema as Record<string, unknown>,
+      mergedFullState,
+    );
+    if (geocoded.length > 0) {
+      return locationsForStorage(geocoded, itemSchema as Record<string, unknown>);
+    }
+  }
+  return undefined;
 }
 
 export async function updateItemInternal(
@@ -613,134 +792,34 @@ export async function updateItemInternal(
       itemType: existingItem.item_type,
     });
 
-    // Full prior + merged state, hoisted so location resolution (below, after
-    // the merge) can detect an address change. Populated only when item_state
-    // is part of this update.
-    let priorFullState: Record<string, unknown> = {};
+    // Merged full state + address-change flag, populated only when item_state is
+    // part of this update (needed below for location resolution).
     let mergedFullState: Record<string, unknown> = {};
     let addressChanged = false;
 
     if (body.item_state) {
-      // Decrypt existing private blob (empty string => no prior private fields)
-      // and reconstitute the full prior state (real values, not masks).
-      const priorPrivate =
-        existingItem.item_private_state === ''
-          ? {}
-          : (JSON.parse(
-              decryptPiiBlob(existingItem.item_private_state, getPiiKey())
-            ) as Record<string, unknown>);
-      priorFullState = mergeItemStateWithPrivate(
-        existingItem.item_state as Record<string, unknown>,
-        priorPrivate
-      );
-      // Layer the caller's partial update on top.
-      mergedFullState = { ...priorFullState, ...body.item_state };
-
-      addressChanged = primaryAddressChanged(
-        itemSchema as Record<string, unknown>,
-        body.item_state,
-        priorFullState,
-      );
-
-      const requiredKeys = Array.isArray((itemSchema as { required?: unknown }).required)
-        ? ((itemSchema as { required?: string[] }).required as string[])
-        : [];
-
-      try {
-        validateAgainstJsonSchema(itemSchema, mergedFullState, 'item_state', {
-          allowAdditionalProperties: apiConfig.allow_extra_schema_data,
-          ignoredKeys: requiredKeys,
-        });
-      } catch (err) {
-        throw new ItemServiceError(
-          400,
-          'INVALID_ITEM_STATE',
-          err instanceof Error ? err.message : 'Invalid item_state'
-        );
-      }
-
-      // Live latch: a profile that has reached `live` must stay complete. Reject
-      // any edit that would leave a required field unpopulated while the item is
-      // live. (Scope: live only — see 2026-06-10-live-latch-design.md §6.)
-      const unpopulatedRequired = requiredKeys.filter((k) => !is_populated(mergedFullState[k]));
-      if (unpopulatedRequired.length > 0 && existingItem.lifecycle_status === 'live') {
-        throw new ItemServiceError(
-          409,
-          'REQUIRED_FIELD_LOCKED_WHILE_LIVE',
-          `Required field(s) must stay populated on a live profile: ${unpopulatedRequired.join(', ')}; pause it first`,
-        );
-      }
-
-      const split = splitItemStateByPrivacy(itemSchema, mergedFullState);
-      const masked = maskPrivateState(itemSchema, split.privateState);
-      updateValues.item_state = mergeMasksIntoPublic(split.publicState, masked);
-      updateValues.item_private_state =
-        Object.keys(split.privateState).length === 0
-          ? ''
-          : encryptPiiBlob(JSON.stringify(split.privateState), getPiiKey());
-
-      const consent_accepted = await hasAcceptedProfileConsent(
+      const stateUpdate = await computeItemStateUpdate(
         exec,
-        existingItem.item_id,
+        existingItem,
+        itemSchema,
+        body.item_state,
       );
-
-      const classification = classify_item({
-        schema: itemSchema as { required?: string[] },
-        merged_state: mergedFullState,
-        current_status: existingItem.lifecycle_status as 'draft' | 'live' | 'paused',
-        consent_accepted,
-      });
-      // U18 age gate on the UPDATE path: `hasAcceptedProfileConsent` matches a
-      // profile_creation row of ANY source, so a minor's create-draft-then-edit
-      // would otherwise flip to `live` on their own self-consent row. Block the
-      // draft→live transition through the same server gate as promote/create;
-      // an already-live item is untouched (the live-latch handles those).
-      const wouldGoLive =
-        classification.lifecycle_status === 'live' && existingItem.lifecycle_status !== 'live';
-      if (wouldGoLive && (await guardianGateBlocksGoLive(exec, existingItem))) {
-        updateValues.lifecycle_status = existingItem.lifecycle_status;
-      } else {
-        updateValues.lifecycle_status = classification.lifecycle_status;
-      }
+      mergedFullState = stateUpdate.mergedFullState;
+      addressChanged = stateUpdate.addressChanged;
+      Object.assign(updateValues, stateUpdate.writes);
     }
 
-    // Location resolution precedence (runs after the state merge):
-    //  1. Explicit non-empty client coords win (e.g. user picked a map
-    //     suggestion). An empty `[]` is NOT explicit — it means "no coords".
-    //  2. Otherwise, if the primary address field was edited (present in the
-    //     partial update and changed vs prior):
-    //       a. cleared to blank/empty → wipe coords (`[]`).
-    //       b. non-blank → re-geocode from the merged state; only overwrite
-    //          when geocoding produced something, so a geocode FAILURE
-    //          preserves the existing coords rather than wiping them.
-    //  3. Otherwise leave item_locations unchanged.
-    const providedCoords =
-      Array.isArray(body.item_locations) && body.item_locations.length > 0
-        ? body.item_locations
-        : null;
-    if (providedCoords) {
-      const stored = (existingItem.item_locations ?? []) as ItemLocation[];
-      // Caller echoed back the already-stored (jittered) coords → leave as-is,
-      // so a read-modify-write update never re-jitters a jittered point.
-      updateValues.item_locations = sameLocations(providedCoords, stored)
-        ? stored
-        : locationsForStorage(providedCoords, itemSchema as Record<string, unknown>);
-    } else if (addressChanged) {
-      if (isPrimaryAddressBlank(itemSchema as Record<string, unknown>, mergedFullState)) {
-        // Address removed — wipe coords (distinct from a geocode failure).
-        updateValues.item_locations = [];
-      } else {
-        const geocoded = await geocodeLocationsFromState(
-          itemSchema as Record<string, unknown>,
-          mergedFullState
-        );
-        if (geocoded.length > 0) {
-          updateValues.item_locations = locationsForStorage(
-            geocoded,
-            itemSchema as Record<string, unknown>
-          );
-        }
-      }
+    // Location resolution runs after the state merge (see resolveLocationUpdate
+    // for the precedence). `undefined` → leave item_locations unchanged.
+    const locationUpdate = await resolveLocationUpdate(
+      existingItem,
+      itemSchema,
+      body.item_locations,
+      mergedFullState,
+      addressChanged,
+    );
+    if (locationUpdate !== undefined) {
+      updateValues.item_locations = locationUpdate;
     }
   }
 

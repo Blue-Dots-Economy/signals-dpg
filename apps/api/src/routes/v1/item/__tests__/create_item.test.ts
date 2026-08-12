@@ -18,6 +18,7 @@ const {
   invalidateItemFetchCache,
   publishItemEvent,
   createItemInternal,
+  resolveGoLiveGates,
   resolveLocationsForCreate,
   getWardAge,
   guardianConsentRequired,
@@ -66,6 +67,7 @@ const {
     invalidateItemFetchCache: vi.fn(),
     publishItemEvent: vi.fn(),
     createItemInternal: vi.fn(),
+    resolveGoLiveGates: vi.fn(),
     resolveLocationsForCreate: vi.fn(),
     getWardAge: vi.fn(),
     guardianConsentRequired: vi.fn(),
@@ -161,6 +163,7 @@ vi.mock('@/utils/publish_item_event', () => ({
 vi.mock('@/services/item_service', () => ({
   ItemServiceError: FakeItemServiceError,
   createItemInternal: (...a: unknown[]) => createItemInternal(...a),
+  resolveGoLiveGates: (...a: unknown[]) => resolveGoLiveGates(...a),
 }));
 
 vi.mock('@/services/geocoding/resolve_locations_for_create', () => ({
@@ -253,6 +256,9 @@ beforeEach(() => {
   ensureItemPartition.mockResolvedValue(undefined);
   resolveLocationsForCreate.mockResolvedValue([]);
   resolveConsentVersion.mockResolvedValue(3);
+  // Default: the domain gates go-live on consent_required, so the create-time
+  // CONSENT_REQUIRED guard is active (config-driven per #344 go_live_required).
+  resolveGoLiveGates.mockResolvedValue(['schema_required', 'consent_required']);
   guardianConsentRequired.mockReturnValue(false);
   getNetworkConfigById.mockResolvedValue({ id: 'blue_dot' });
   getWardAge.mockResolvedValue(30);
@@ -338,6 +344,23 @@ describe('create_item_handler guards', () => {
 
     expect(reply.statusCode).toBe(201);
     expect(createPayload().consent_accepted).toBe(false);
+  });
+
+  it('skips the CONSENT_REQUIRED guard when the domain does not gate on consent_required (#344)', async () => {
+    // Domain goes live on completeness alone (`go_live_required: ["schema_required"]`),
+    // so a self create with no consent is allowed even though a profile_creation
+    // version IS configured — the create-time guard is config-driven and must not
+    // demand consent, nor even resolve the version, on a consent-free domain.
+    resolveGoLiveGates.mockResolvedValue(['schema_required']);
+    resolveConsentVersion.mockResolvedValue(2);
+
+    const reply = await call({ user: { id: 'u1' }, body: baseBody() });
+
+    expect(reply.statusCode).toBe(201);
+    expect(bodyOf(reply).error).toBeUndefined();
+    // The consent-free gate set short-circuits before resolveConsentVersion.
+    expect(resolveConsentVersion).not.toHaveBeenCalled();
+    expect(resolveGoLiveGates).toHaveBeenCalledWith('blue_dot', 'student');
   });
 
   it('delegates to replyForUnservedDomain for an unserved network/domain binding', async () => {
