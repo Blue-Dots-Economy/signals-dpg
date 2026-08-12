@@ -35,7 +35,7 @@ Auth plugins (`auth_middleware.ts`, `validate_api_key.ts`, `validate_session.ts`
 
 ## Notifications & support are separate small pipelines
 
-- `src/notifications/`: `build_notifications.ts` (turns a `NotificationEvent` into a `NotificationPlan`) → `dispatcher.ts` (takes injected `DispatcherDeps` — `notify`, `resolveEmail`, `resolveCounterpartyName`, `brand` — so it's testable without a real notification-service call) → `render_action_email.ts` / `action_copy.ts` renders the actual HTML.
+- `src/notifications/`: `build_notifications.ts` (turns a `NotificationEvent` into a `NotificationPlan`) → `dispatcher.ts` (takes injected `DispatcherDeps` — `sendEmail`, `resolveEmail`, `resolveCounterpartyName`, `brand` — so it's testable without a real notification-service call) → `action_copy.ts` resolves the (group × role) email case id → the central `email/dispatch_email.ts` sender looks up copy in `email/messages.default.properties` and renders it (#529).
 - `src/support/build_support_email.ts`: unrelated, smaller — just an HTML-escaping email builder. `POST /api/v1/support` (authenticated) emails `SUPPORT_EMAIL` via the notification client and returns `503 SUPPORT_NOT_CONFIGURED` when the recipient or client is unset.
 
 Don't assume these share infrastructure — they're two independent, small pipelines that happen to both end up calling the notification-service client.

@@ -7,14 +7,14 @@ import { getNotificationClient } from '@/utils/notificationClient';
 import type { NotificationEvent, NotificationPlan } from './build_notifications';
 import { buildCtaUrl, resolveBrandName } from './brand';
 import { createDirectDispatcher } from './dispatcher';
-import type { NotifyRequest } from './dispatcher';
 import { resolveRecipientRole } from './action_copy';
+import { createEmailSender } from './email/dispatch_email';
+import type { EmailSender } from './email/dispatch_email';
+import { getEmailMessages } from './email/messages';
 import { resolveOwnerEmail, resolveProviderServiceName } from './resolve_owner';
 
 export interface NotifierConfig {
-  notify: (req: NotifyRequest) => Promise<unknown>;
-  fromEmail: string;
-  replyTo: string;
+  sender: EmailSender;
   ctaUrl: string;
 }
 
@@ -40,9 +40,11 @@ export async function resolveNetworkBrandName(networkId: string): Promise<string
 let cachedConfig: NotifierConfig | null | undefined;
 
 /**
- * Memoised notifier config (NS client + from/reply/cta). `null` when
- * notifications aren't configured. Shared with the retire notifier (#418) so
- * both read the same config + reset. */
+ * Memoised notifier config (email sender + cta). `null` when notifications
+ * aren't configured. Shared with the retire notifier (#418) so both read the
+ * same config + reset. Action emails stay gated on an explicit
+ * NOTIFICATION_FROM_EMAIL + FRONTEND_BASE_URL (unchanged from before #529).
+ */
 export function resolveNotifierConfig(): NotifierConfig | null {
   if (cachedConfig !== undefined) return cachedConfig;
 
@@ -56,9 +58,13 @@ export function resolveNotifierConfig(): NotifierConfig | null {
   }
 
   cachedConfig = {
-    notify: (req) => nc.notify(req),
-    fromEmail,
-    replyTo: notification.NOTIFICATION_REPLY_TO ?? fromEmail,
+    sender: createEmailSender({
+      notify: (req) => nc.notify(req),
+      getMessages: getEmailMessages,
+      fromEmail,
+      defaultReplyTo: notification.NOTIFICATION_REPLY_TO ?? fromEmail,
+      log: (message, meta) => console.warn(message, meta ?? {}),
+    }),
     ctaUrl: buildCtaUrl(frontendBaseUrl),
   };
   return cachedConfig;
@@ -81,7 +87,7 @@ export async function dispatchActionNotifications(
   const brandName = await resolveNetworkBrandName(event.target.network);
 
   const dispatcher = createDirectDispatcher({
-    notify: config.notify,
+    sendEmail: (args) => config.sender.dispatchEmail(args),
     resolveEmail: resolveOwnerEmail,
     // Seeker-facing copy uses the provider's service name; provider-facing
     // copy keeps the seeker generic. Use the same provider-like classification
@@ -91,12 +97,7 @@ export async function dispatchActionNotifications(
       resolveRecipientRole(plan.counterpartyDomain) === 'provider'
         ? resolveProviderServiceName(plan.counterpartyItemId, plan.counterpartyNetwork)
         : null,
-    brand: {
-      brandName,
-      fromEmail: config.fromEmail,
-      replyTo: config.replyTo,
-      ctaUrl: config.ctaUrl,
-    },
+    brand: { brandName, ctaUrl: config.ctaUrl },
     log: (message, meta) => log.warn(meta ?? {}, message),
     onSkip: (reason) => log.info({ reason }, 'action notification skipped'),
   });

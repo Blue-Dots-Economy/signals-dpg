@@ -49,5 +49,16 @@ describe('messages.default.properties', () => {
     expect(entries.get('action.apply.seeker.inbound_request.subject')).toBe(
       '{{name}} has shown interest in your profile',
     );
+    // Provider-facing copy keeps the seeker generic (no {{name}} token).
+    expect(entries.get('action.connect.provider.inbound_request.subject')).toBe(
+      'A seeker wants to avail your service',
+    );
+    expect(entries.get('action.apply.provider.inbound_request.subject')).toBe(
+      'A seeker has applied for your opportunity',
+    );
+    // Seeker-facing "apply" copy uses the {{name}} token.
+    expect(entries.get('action.apply.seeker.outbound_request.subject')).toBe(
+      'Your application has been sent to {{name}}',
+    );
   });
 });
