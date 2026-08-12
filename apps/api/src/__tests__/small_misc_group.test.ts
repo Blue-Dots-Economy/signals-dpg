@@ -97,6 +97,7 @@ const {
   resolveProviderServiceName,
   createEmailSender,
   getEmailMessages,
+  getInstanceDefaultNetwork,
   schemaEntries,
 } = vi.hoisted(() => ({
   getMatchScoreClient: vi.fn(),
@@ -148,6 +149,7 @@ const {
     dispatchEmail: vi.fn(async (_args: unknown) => ({ ok: true })),
   })),
   getEmailMessages: vi.fn(async () => ({ forContext: () => ({ get: (_key: string) => '' }) })),
+  getInstanceDefaultNetwork: vi.fn((): string | null => null),
   schemaEntries: [] as {
     kind: string;
     network: string;
@@ -205,6 +207,7 @@ vi.mock('@/notifications/action_copy', () => ({
 }));
 vi.mock('@/notifications/email/dispatch_email', () => ({
   createEmailSender: (deps: unknown) => createEmailSender(deps),
+  getInstanceDefaultNetwork: () => getInstanceDefaultNetwork(),
 }));
 vi.mock('@/notifications/email/messages', () => ({
   getEmailMessages: () => getEmailMessages(),
@@ -272,6 +275,7 @@ beforeEach(() => {
     dispatchEmail: vi.fn(async () => ({ ok: true })),
   }));
   getEmailMessages.mockImplementation(async () => ({ forContext: () => ({ get: () => '' }) }));
+  getInstanceDefaultNetwork.mockImplementation(() => null);
 
   cfgInstance.INSTANCE_NAME = 'test-instance';
   delete cfgNotification.NOTIFICATION_FROM_EMAIL;
@@ -620,6 +624,7 @@ describe('resolveNotifierConfig', () => {
   });
 
   it('builds the email sender with the from-email as default replyTo and delegates notify to the NS client', async () => {
+    getInstanceDefaultNetwork.mockImplementation(() => 'blue_dot');
     const notify = configureNotifications();
 
     const config = resolveNotifierConfig();
@@ -632,10 +637,15 @@ describe('resolveNotifierConfig', () => {
       notify: (req: unknown) => Promise<unknown>;
       fromEmail: string;
       defaultReplyTo: string;
+      defaultNetwork: string | null;
       getMessages: () => Promise<unknown>;
     };
     expect(senderDeps.fromEmail).toBe('from@dpg.test');
     expect(senderDeps.defaultReplyTo).toBe('from@dpg.test');
+    // defaultNetwork is the instance-default helper's result (#529 addendum),
+    // not derived independently here.
+    expect(senderDeps.defaultNetwork).toBe('blue_dot');
+    expect(getInstanceDefaultNetwork).toHaveBeenCalled();
 
     await expect(senderDeps.notify({ to: 'x@y.z' } as never)).resolves.toBe('queued');
     expect(notify).toHaveBeenCalledWith({ to: 'x@y.z' });

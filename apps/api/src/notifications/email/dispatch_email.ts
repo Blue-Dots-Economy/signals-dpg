@@ -1,4 +1,4 @@
-import { notification } from '@/config';
+import { apiConfig, notification } from '@/config';
 import { getNotificationClient } from '@/utils/notificationClient';
 
 import { resolveBrandColor } from '../brand';
@@ -43,6 +43,13 @@ export interface DispatchEmailArgs {
   /** cta-shell cases only: */
   ctaUrl?: string;
   network?: string;
+  /**
+   * Brand id for copy resolution (`forContext`'s brand layer). No caller sets
+   * this yet — brand isn't resolvable at send time anywhere in the system
+   * today; this is the hook for when it is (a per-plan brand, analogous to
+   * `network`).
+   */
+  brand?: string;
   /** Sign-off name in the cta shell; defaults to fromName. */
   brandName?: string;
   /** Per-call log override (route handlers pass request.log-backed fns). */
@@ -55,11 +62,17 @@ export interface EmailSender {
 
 export interface EmailSenderDeps {
   notify: (req: EmailNotifyRequest) => Promise<unknown>;
-  // Task 15 threads real (network, brand) context into forContext(); this
-  // task keeps behaviour identical by calling it with no arguments (base map).
   getMessages: () => Promise<EmailMessagesIndex>;
   fromEmail: string;
   defaultReplyTo: string;
+  /**
+   * Network used for context-free sends (guardian/login OTP, welcome,
+   * support — callers that pass no `args.network`): the instance's single
+   * served network, or `null` on a multi-network instance (those sends keep
+   * base copy rather than guessing). Per-plan `args.network` (action/retire)
+   * always wins over this when present — see `send()` below.
+   */
+  defaultNetwork: string | null;
   log: (message: string, meta?: Record<string, unknown>) => void;
 }
 
@@ -71,7 +84,10 @@ function oneLine(value: string): string {
 export function createEmailSender(deps: EmailSenderDeps): EmailSender {
   async function send(args: DispatchEmailArgs): Promise<void> {
     const def = getEmailCase(args.caseId);
-    const messages = (await deps.getMessages()).forContext();
+    const messages = (await deps.getMessages()).forContext(
+      args.network ?? deps.defaultNetwork,
+      args.brand,
+    );
 
     const vars: Record<string, string> = { ...(args.variables ?? {}) };
     // The styled OTP box is code-built (html token) even when the caller —
@@ -133,6 +149,23 @@ export function createEmailSender(deps: EmailSenderDeps): EmailSender {
 }
 
 /**
+ * Instance default network for context-free email sends (guardian/login OTP,
+ * welcome, support — the callers that never pass `args.network`): the single
+ * distinct network across `apiConfig.served_domains` bindings, mirroring how
+ * `consent_configs.ts`/`email/messages.ts` derive the served-networks set.
+ * `null` when the instance serves zero or more-than-one network — a
+ * multi-network instance has no single right default, so those sends keep
+ * base copy rather than guessing. Reused by `notify_actions.ts`'s
+ * `resolveNotifierConfig()`.
+ */
+export function getInstanceDefaultNetwork(): string | null {
+  const networks = [
+    ...new Set(apiConfig.served_domains.map((binding) => binding.network)),
+  ];
+  return networks.length === 1 ? networks[0] : null;
+}
+
+/**
  * Preserves the previously-hardcoded auth-email sender when
  * NOTIFICATION_FROM_EMAIL is unset, so no config permutation loses email.
  */
@@ -153,6 +186,7 @@ export function getDefaultEmailSender(): EmailSender | null {
     getMessages: getEmailMessages,
     fromEmail,
     defaultReplyTo: notification.NOTIFICATION_REPLY_TO ?? fromEmail,
+    defaultNetwork: getInstanceDefaultNetwork(),
     log: (message, meta) => console.warn(message, meta ?? {}),
   });
   return defaultSender;

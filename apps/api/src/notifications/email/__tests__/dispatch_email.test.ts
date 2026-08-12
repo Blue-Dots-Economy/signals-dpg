@@ -1,9 +1,22 @@
 import { describe, expect, it, vi } from 'vitest';
-import { createEmailSender } from '../dispatch_email';
+import type { LoadedEmailMessagesFile } from '@dpg/config';
+
+// getInstanceDefaultNetwork() (only) reads apiConfig.served_domains at call
+// time; mock just that field of `@/config` (the notification-copy tests below
+// never touch config, so this is inert for them).
+const mockApiConfig = vi.hoisted(() => ({
+  served_domains: [] as { network: string; domain: string; key: string }[],
+}));
+vi.mock('@/config', () => ({
+  apiConfig: mockApiConfig,
+  notification: {},
+}));
+
+import { createEmailSender, getInstanceDefaultNetwork } from '../dispatch_email';
 import { loadEmailMessagesIndex } from '../messages';
 import { requiredMessageKeys } from '../email_cases';
 
-function messagesWith(overrides: Record<string, string>) {
+function messagesWith(overrides: Record<string, string>, layers: LoadedEmailMessagesFile[] = []) {
   const defaults = requiredMessageKeys()
     .map((k) => `${k}=[${k}]`)
     .join('\n');
@@ -13,19 +26,24 @@ function messagesWith(overrides: Record<string, string>) {
   const index = loadEmailMessagesIndex({
     defaultsText: defaults,
     instanceOverrideText,
+    layers,
     warn: () => {},
   });
   return () => Promise.resolve(index);
 }
 
-function makeSender(overrides: Record<string, string> = {}) {
+function makeSender(
+  overrides: Record<string, string> = {},
+  opts: { layers?: LoadedEmailMessagesFile[]; defaultNetwork?: string | null } = {},
+) {
   const notify = vi.fn().mockResolvedValue(undefined);
   const log = vi.fn();
   const sender = createEmailSender({
     notify,
-    getMessages: messagesWith(overrides),
+    getMessages: messagesWith(overrides, opts.layers),
     fromEmail: 'noreply@x.example',
     defaultReplyTo: 'reply@x.example',
+    defaultNetwork: opts.defaultNetwork ?? null,
     log,
   });
   return { sender, notify, log };
@@ -149,4 +167,88 @@ describe('dispatchEmail', () => {
     });
     expect(notify.mock.calls[1][0].variables).not.toHaveProperty('cc');
   });
+
+  describe('network/brand context (#529 addendum)', () => {
+    it('uses deps.defaultNetwork when args.network is absent', async () => {
+      const layers: LoadedEmailMessagesFile[] = [
+        { network: 'blue_dot', brand: null, text: 'welcome.subject=Blue Dot Welcome' },
+      ];
+      const { sender, notify } = makeSender(
+        { 'welcome.body': '<p>hi</p>' },
+        { layers, defaultNetwork: 'blue_dot' },
+      );
+      await sender.dispatchEmail({
+        caseId: 'welcome',
+        to: 'u@x.example',
+        fromName: 'X',
+        variables: {},
+      });
+      expect(notify.mock.calls[0][0].variables.subject).toBe('Blue Dot Welcome');
+    });
+
+    it('args.network wins over deps.defaultNetwork when both are present', async () => {
+      const layers: LoadedEmailMessagesFile[] = [
+        { network: 'blue_dot', brand: null, text: 'welcome.subject=Blue Dot Welcome' },
+        { network: 'yellow_dot', brand: null, text: 'welcome.subject=Yellow Dot Welcome' },
+      ];
+      const { sender, notify } = makeSender(
+        { 'welcome.body': '<p>hi</p>' },
+        { layers, defaultNetwork: 'blue_dot' },
+      );
+      await sender.dispatchEmail({
+        caseId: 'welcome',
+        to: 'u@x.example',
+        fromName: 'X',
+        network: 'yellow_dot',
+        variables: {},
+      });
+      expect(notify.mock.calls[0][0].variables.subject).toBe('Yellow Dot Welcome');
+    });
+
+    it('passes args.brand through to forContext, picking up the brand-layer copy', async () => {
+      const layers: LoadedEmailMessagesFile[] = [
+        { network: 'blue_dot', brand: null, text: 'welcome.subject=Network Welcome' },
+        { network: 'blue_dot', brand: 'upsdm', text: 'welcome.subject=Brand Welcome' },
+      ];
+      const { sender, notify } = makeSender({ 'welcome.body': '<p>hi</p>' }, { layers });
+      await sender.dispatchEmail({
+        caseId: 'welcome',
+        to: 'u@x.example',
+        fromName: 'X',
+        network: 'blue_dot',
+        brand: 'upsdm',
+        variables: {},
+      });
+      expect(notify.mock.calls[0][0].variables.subject).toBe('Brand Welcome');
+    });
+  });
 });
+
+describe('getInstanceDefaultNetwork', () => {
+  it('returns the single served network', () => {
+    mockApiConfig.served_domains = [{ network: 'blue_dot', domain: 'blue.example', key: 'k' }];
+    expect(getInstanceDefaultNetwork()).toBe('blue_dot');
+  });
+
+  it('dedupes multiple domain bindings on the same network', () => {
+    mockApiConfig.served_domains = [
+      { network: 'blue_dot', domain: 'blue.example', key: 'k1' },
+      { network: 'blue_dot', domain: 'blue2.example', key: 'k2' },
+    ];
+    expect(getInstanceDefaultNetwork()).toBe('blue_dot');
+  });
+
+  it('returns null for a multi-network instance', () => {
+    mockApiConfig.served_domains = [
+      { network: 'blue_dot', domain: 'blue.example', key: 'k1' },
+      { network: 'yellow_dot', domain: 'yellow.example', key: 'k2' },
+    ];
+    expect(getInstanceDefaultNetwork()).toBeNull();
+  });
+
+  it('returns null when no domains are served', () => {
+    mockApiConfig.served_domains = [];
+    expect(getInstanceDefaultNetwork()).toBeNull();
+  });
+});
+

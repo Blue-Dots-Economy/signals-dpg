@@ -8,7 +8,7 @@ import type { NotificationEvent, NotificationPlan } from './build_notifications'
 import { buildCtaUrl, resolveBrandName } from './brand';
 import { createDirectDispatcher } from './dispatcher';
 import { resolveRecipientRole } from './action_copy';
-import { createEmailSender } from './email/dispatch_email';
+import { createEmailSender, getInstanceDefaultNetwork } from './email/dispatch_email';
 import type { EmailSender } from './email/dispatch_email';
 import { getEmailMessages } from './email/messages';
 import { resolveOwnerEmail, resolveProviderServiceName } from './resolve_owner';
@@ -63,6 +63,7 @@ export function resolveNotifierConfig(): NotifierConfig | null {
       getMessages: getEmailMessages,
       fromEmail,
       defaultReplyTo: notification.NOTIFICATION_REPLY_TO ?? fromEmail,
+      defaultNetwork: getInstanceDefaultNetwork(),
       log: (message, meta) => console.warn(message, meta ?? {}),
     }),
     ctaUrl: buildCtaUrl(frontendBaseUrl),
