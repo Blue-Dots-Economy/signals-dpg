@@ -4,7 +4,7 @@ import { getNotificationClient } from '@/utils/notificationClient';
 import { resolveBrandColor } from '../brand';
 import { getEmailCase } from './email_cases';
 import { getEmailMessages } from './messages';
-import type { EmailMessages } from './messages';
+import type { EmailMessagesIndex } from './messages';
 import { renderCtaShell, renderOtpBox, renderPlainShell } from './shells';
 import { substituteHtml, substitutePlain } from './substitute';
 
@@ -55,7 +55,9 @@ export interface EmailSender {
 
 export interface EmailSenderDeps {
   notify: (req: EmailNotifyRequest) => Promise<unknown>;
-  getMessages: () => Promise<EmailMessages>;
+  // Task 15 threads real (network, brand) context into forContext(); this
+  // task keeps behaviour identical by calling it with no arguments (base map).
+  getMessages: () => Promise<EmailMessagesIndex>;
   fromEmail: string;
   defaultReplyTo: string;
   log: (message: string, meta?: Record<string, unknown>) => void;
@@ -69,7 +71,7 @@ function oneLine(value: string): string {
 export function createEmailSender(deps: EmailSenderDeps): EmailSender {
   async function send(args: DispatchEmailArgs): Promise<void> {
     const def = getEmailCase(args.caseId);
-    const messages = await deps.getMessages();
+    const messages = (await deps.getMessages()).forContext();
 
     const vars: Record<string, string> = { ...(args.variables ?? {}) };
     // The styled OTP box is code-built (html token) even when the caller —

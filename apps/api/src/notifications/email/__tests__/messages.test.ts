@@ -1,18 +1,35 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { LoadedEmailMessagesFile } from '@dpg/config';
 import { requiredMessageKeys } from '../email_cases';
 
-// notification.EMAIL_MESSAGES_PATH is read once, at import time, by the
-// `@/config` module. vi.hoisted + vi.mock let us swap its value per test
-// without re-importing the whole config/env-parsing stack.
+// notification.EMAIL_MESSAGES_PATH and apiConfig fields are read once, at
+// import time, by the `@/config` module. vi.hoisted + vi.mock let us swap
+// their values per test without re-importing the whole config/env-parsing
+// stack.
 const mockNotification = vi.hoisted(() => ({
   EMAIL_MESSAGES_PATH: undefined as string | undefined,
 }));
 
-vi.mock('@/config', () => ({ notification: mockNotification }));
+const mockApiConfig = vi.hoisted(() => ({
+  served_domains: [{ network: 'blue_dot', domain: 'blue.example', key: 'k' }],
+  network_config_source: 'remote' as 'local' | 'remote',
+  network_config_local_file: '/nonexistent/network.json',
+}));
+
+const mockLoadEmailMessagesFiles = vi.hoisted(() => vi.fn());
+
+vi.mock('@/config', () => ({
+  notification: mockNotification,
+  apiConfig: mockApiConfig,
+}));
+
+vi.mock('@dpg/config', () => ({
+  loadEmailMessagesFiles: mockLoadEmailMessagesFiles,
+}));
 
 import {
   getEmailMessages,
-  loadEmailMessages,
+  loadEmailMessagesIndex,
   resetEmailMessagesForTests,
 } from '../messages';
 
@@ -23,34 +40,35 @@ function fullDefaults(): string {
     .join('\n');
 }
 
-describe('loadEmailMessages', () => {
+describe('loadEmailMessagesIndex (base layer: defaults + instance override)', () => {
   it('throws at load when the bundled defaults are incomplete', () => {
-    expect(() => loadEmailMessages({ defaultsText: 'welcome.subject=x' })).toThrow(
+    expect(() => loadEmailMessagesIndex({ defaultsText: 'welcome.subject=x' })).toThrow(
       /bundled email messages file is missing/,
     );
   });
 
   it('serves defaults when no override is given', () => {
-    const m = loadEmailMessages({ defaultsText: fullDefaults() });
-    expect(m.get('welcome.subject')).toBe('default welcome.subject');
+    const index = loadEmailMessagesIndex({ defaultsText: fullDefaults() });
+    expect(index.forContext().get('welcome.subject')).toBe('default welcome.subject');
   });
 
   it('merges per-key: override wins, everything else falls back', () => {
     const warn = vi.fn();
-    const m = loadEmailMessages({
+    const index = loadEmailMessagesIndex({
       defaultsText: fullDefaults(),
-      overrideText: 'welcome.subject=Custom hello!',
+      instanceOverrideText: 'welcome.subject=Custom hello!',
       warn,
     });
+    const m = index.forContext();
     expect(m.get('welcome.subject')).toBe('Custom hello!');
     expect(m.get('welcome.body')).toBe('default welcome.body');
   });
 
   it('warns about unknown override keys (typo catcher)', () => {
     const warn = vi.fn();
-    loadEmailMessages({
+    loadEmailMessagesIndex({
       defaultsText: fullDefaults(),
-      overrideText: 'welcom.subject=typo',
+      instanceOverrideText: 'welcom.subject=typo',
       warn,
     });
     expect(warn).toHaveBeenCalledWith(expect.stringContaining('welcom.subject'));
@@ -58,36 +76,178 @@ describe('loadEmailMessages', () => {
 
   it('warns about undeclared placeholders but keeps the value as written', () => {
     const warn = vi.fn();
-    const m = loadEmailMessages({
+    const index = loadEmailMessagesIndex({
       defaultsText: fullDefaults(),
-      overrideText: 'welcome.body=<p>{{otpp}}</p>',
+      instanceOverrideText: 'welcome.body=<p>{{otpp}}</p>',
       warn,
     });
+    const m = index.forContext();
     expect(m.get('welcome.body')).toBe('<p>{{otpp}}</p>');
     expect(warn).toHaveBeenCalledWith(expect.stringContaining('{{otpp}}'));
   });
 
   it('warns about malformed override lines and ignores them', () => {
     const warn = vi.fn();
-    const m = loadEmailMessages({
+    const index = loadEmailMessagesIndex({
       defaultsText: fullDefaults(),
-      overrideText: 'this line has no equals\nwelcome.subject=ok',
+      instanceOverrideText: 'this line has no equals\nwelcome.subject=ok',
       warn,
     });
-    expect(m.get('welcome.subject')).toBe('ok');
+    expect(index.forContext().get('welcome.subject')).toBe('ok');
     expect(warn).toHaveBeenCalledWith(expect.stringContaining('line 1'));
   });
 
   it('get() throws for unknown keys', () => {
-    const m = loadEmailMessages({ defaultsText: fullDefaults() });
-    expect(() => m.get('nope.nope')).toThrow('unknown email message key: nope.nope');
+    const index = loadEmailMessagesIndex({ defaultsText: fullDefaults() });
+    expect(() => index.forContext().get('nope.nope')).toThrow(
+      'unknown email message key: nope.nope',
+    );
   });
 });
 
-describe('getEmailMessages (singleton + EMAIL_MESSAGES_PATH wiring)', () => {
+describe('loadEmailMessagesIndex (network + brand layers)', () => {
+  it('network layer overrides base for its network only', () => {
+    const layers: LoadedEmailMessagesFile[] = [
+      { network: 'blue_dot', brand: null, text: 'welcome.subject=Blue Dot Hello' },
+    ];
+    const index = loadEmailMessagesIndex({ defaultsText: fullDefaults(), layers });
+
+    expect(index.forContext('blue_dot').get('welcome.subject')).toBe('Blue Dot Hello');
+    // Unaffected network: base only.
+    expect(index.forContext('yellow_dot').get('welcome.subject')).toBe(
+      'default welcome.subject',
+    );
+    // No network context at all: base only.
+    expect(index.forContext().get('welcome.subject')).toBe('default welcome.subject');
+  });
+
+  it('brand overrides network, which overrides base', () => {
+    const layers: LoadedEmailMessagesFile[] = [
+      { network: 'blue_dot', brand: null, text: 'welcome.subject=Network Hello' },
+      { network: 'blue_dot', brand: 'upsdm', text: 'welcome.subject=Brand Hello' },
+    ];
+    const index = loadEmailMessagesIndex({ defaultsText: fullDefaults(), layers });
+
+    expect(index.forContext('blue_dot', 'upsdm').get('welcome.subject')).toBe('Brand Hello');
+    expect(index.forContext('blue_dot').get('welcome.subject')).toBe('Network Hello');
+    expect(index.forContext().get('welcome.subject')).toBe('default welcome.subject');
+  });
+
+  it('brand override inherits non-overridden keys from its network, not just base', () => {
+    const layers: LoadedEmailMessagesFile[] = [
+      {
+        network: 'blue_dot',
+        brand: null,
+        text: 'welcome.subject=Network Hello\nwelcome.body=Network body',
+      },
+      { network: 'blue_dot', brand: 'upsdm', text: 'welcome.subject=Brand Hello' },
+    ];
+    const index = loadEmailMessagesIndex({ defaultsText: fullDefaults(), layers });
+
+    const m = index.forContext('blue_dot', 'upsdm');
+    expect(m.get('welcome.subject')).toBe('Brand Hello');
+    expect(m.get('welcome.body')).toBe('Network body');
+  });
+
+  it('unknown network falls back to base', () => {
+    const layers: LoadedEmailMessagesFile[] = [
+      { network: 'blue_dot', brand: null, text: 'welcome.subject=Blue Dot Hello' },
+    ];
+    const index = loadEmailMessagesIndex({ defaultsText: fullDefaults(), layers });
+
+    expect(index.forContext('yellow_dot').get('welcome.subject')).toBe(
+      'default welcome.subject',
+    );
+  });
+
+  it('unknown brand for a known network falls back to the network layer', () => {
+    const layers: LoadedEmailMessagesFile[] = [
+      { network: 'blue_dot', brand: null, text: 'welcome.subject=Network Hello' },
+      { network: 'blue_dot', brand: 'upsdm', text: 'welcome.subject=Brand Hello' },
+    ];
+    const index = loadEmailMessagesIndex({ defaultsText: fullDefaults(), layers });
+
+    expect(index.forContext('blue_dot', 'no_such_brand').get('welcome.subject')).toBe(
+      'Network Hello',
+    );
+  });
+
+  it('brand file for a network with no network file merges over base', () => {
+    const layers: LoadedEmailMessagesFile[] = [
+      { network: 'blue_dot', brand: 'upsdm', text: 'welcome.subject=Brand Only Hello' },
+    ];
+    const index = loadEmailMessagesIndex({ defaultsText: fullDefaults(), layers });
+
+    expect(index.forContext('blue_dot', 'upsdm').get('welcome.subject')).toBe(
+      'Brand Only Hello',
+    );
+    // No network layer was created, so context with only the network falls
+    // back to base.
+    expect(index.forContext('blue_dot').get('welcome.subject')).toBe(
+      'default welcome.subject',
+    );
+  });
+
+  it('instance override still applies underneath network/brand layers', () => {
+    const layers: LoadedEmailMessagesFile[] = [
+      { network: 'blue_dot', brand: null, text: 'welcome.body=Network body' },
+    ];
+    const index = loadEmailMessagesIndex({
+      defaultsText: fullDefaults(),
+      instanceOverrideText: 'welcome.subject=Instance subject',
+      layers,
+    });
+
+    const m = index.forContext('blue_dot');
+    expect(m.get('welcome.subject')).toBe('Instance subject');
+    expect(m.get('welcome.body')).toBe('Network body');
+  });
+
+  it('per-layer unknown-key warns carry the network layer label', () => {
+    const warn = vi.fn();
+    const layers: LoadedEmailMessagesFile[] = [
+      { network: 'blue_dot', brand: null, text: 'welcom.subject=typo' },
+    ];
+    loadEmailMessagesIndex({ defaultsText: fullDefaults(), layers, warn });
+
+    expect(warn).toHaveBeenCalledWith(
+      expect.stringMatching(/network blue_dot.*welcom\.subject/),
+    );
+  });
+
+  it('per-layer unknown-key warns carry the network+brand layer label', () => {
+    const warn = vi.fn();
+    const layers: LoadedEmailMessagesFile[] = [
+      { network: 'blue_dot', brand: null, text: 'welcome.subject=Network Hello' },
+      { network: 'blue_dot', brand: 'upsdm', text: 'welcom.subject=typo' },
+    ];
+    loadEmailMessagesIndex({ defaultsText: fullDefaults(), layers, warn });
+
+    expect(warn).toHaveBeenCalledWith(
+      expect.stringMatching(/network blue_dot brand upsdm.*welcom\.subject/),
+    );
+  });
+
+  it('per-layer malformed-line warns carry the layer label', () => {
+    const warn = vi.fn();
+    const layers: LoadedEmailMessagesFile[] = [
+      { network: 'blue_dot', brand: null, text: 'not a valid line' },
+    ];
+    loadEmailMessagesIndex({ defaultsText: fullDefaults(), layers, warn });
+
+    expect(warn).toHaveBeenCalledWith(expect.stringMatching(/network blue_dot.*line 1/));
+  });
+});
+
+describe('getEmailMessages (singleton + EMAIL_MESSAGES_PATH + network/brand wiring)', () => {
   beforeEach(() => {
     resetEmailMessagesForTests();
     mockNotification.EMAIL_MESSAGES_PATH = undefined;
+    mockApiConfig.served_domains = [{ network: 'blue_dot', domain: 'blue.example', key: 'k' }];
+    mockApiConfig.network_config_source = 'remote';
+    mockApiConfig.network_config_local_file = '/nonexistent/network.json';
+    mockLoadEmailMessagesFiles.mockReset();
+    mockLoadEmailMessagesFiles.mockResolvedValue([]);
   });
 
   afterEach(() => {
@@ -95,12 +255,12 @@ describe('getEmailMessages (singleton + EMAIL_MESSAGES_PATH wiring)', () => {
     resetEmailMessagesForTests();
   });
 
-  it('serves bundled defaults and warns nothing when no override path is set', async () => {
+  it('serves bundled defaults and warns nothing when no override path or layers are set', async () => {
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
 
-    const m = await getEmailMessages();
+    const index = await getEmailMessages();
 
-    expect(m.get('welcome.subject')).toBe('Welcome!');
+    expect(index.forContext().get('welcome.subject')).toBe('Welcome!');
     expect(warnSpy).not.toHaveBeenCalled();
   });
 
@@ -109,10 +269,10 @@ describe('getEmailMessages (singleton + EMAIL_MESSAGES_PATH wiring)', () => {
     const badPath = '/no/such/path/messages.override.properties';
     mockNotification.EMAIL_MESSAGES_PATH = badPath;
 
-    const m = await getEmailMessages();
+    const index = await getEmailMessages();
 
     expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining(badPath));
-    expect(m.get('welcome.subject')).toBe('Welcome!');
+    expect(index.forContext().get('welcome.subject')).toBe('Welcome!');
   });
 
   it('reuses the same instance across calls (singleton) without re-reading', async () => {
@@ -129,5 +289,27 @@ describe('getEmailMessages (singleton + EMAIL_MESSAGES_PATH wiring)', () => {
     resetEmailMessagesForTests();
     const m2 = await getEmailMessages();
     expect(m1).not.toBe(m2);
+  });
+
+  it('wires apiConfig fields into loadEmailMessagesFiles and threads the resulting layers', async () => {
+    mockApiConfig.network_config_source = 'local';
+    mockApiConfig.network_config_local_file = '/fake/dir/network.json';
+    mockApiConfig.served_domains = [
+      { network: 'blue_dot', domain: 'blue.example', key: 'k1' },
+      { network: 'blue_dot', domain: 'blue2.example', key: 'k2' },
+    ];
+    mockLoadEmailMessagesFiles.mockResolvedValue([
+      { network: 'blue_dot', brand: null, text: 'welcome.subject=Blue Dot Hello' },
+    ]);
+
+    const index = await getEmailMessages();
+
+    expect(mockLoadEmailMessagesFiles).toHaveBeenCalledWith({
+      source: 'local',
+      networkLocalFile: '/fake/dir/network.json',
+      networks: ['blue_dot'],
+    });
+    expect(index.forContext('blue_dot').get('welcome.subject')).toBe('Blue Dot Hello');
+    expect(index.forContext().get('welcome.subject')).toBe('Welcome!');
   });
 });

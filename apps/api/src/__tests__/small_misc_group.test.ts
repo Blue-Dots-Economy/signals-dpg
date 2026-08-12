@@ -147,7 +147,7 @@ const {
   createEmailSender: vi.fn((_deps: unknown) => ({
     dispatchEmail: vi.fn(async (_args: unknown) => ({ ok: true })),
   })),
-  getEmailMessages: vi.fn(async () => ({ get: (_key: string) => '' })),
+  getEmailMessages: vi.fn(async () => ({ forContext: () => ({ get: (_key: string) => '' }) })),
   schemaEntries: [] as {
     kind: string;
     network: string;
@@ -271,7 +271,7 @@ beforeEach(() => {
   createEmailSender.mockImplementation(() => ({
     dispatchEmail: vi.fn(async () => ({ ok: true })),
   }));
-  getEmailMessages.mockImplementation(async () => ({ get: () => '' }));
+  getEmailMessages.mockImplementation(async () => ({ forContext: () => ({ get: () => '' }) }));
 
   cfgInstance.INSTANCE_NAME = 'test-instance';
   delete cfgNotification.NOTIFICATION_FROM_EMAIL;

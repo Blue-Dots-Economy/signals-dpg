@@ -1,17 +1,21 @@
 import { describe, expect, it, vi } from 'vitest';
 import { createEmailSender } from '../dispatch_email';
-import { loadEmailMessages } from '../messages';
+import { loadEmailMessagesIndex } from '../messages';
 import { requiredMessageKeys } from '../email_cases';
 
 function messagesWith(overrides: Record<string, string>) {
   const defaults = requiredMessageKeys()
     .map((k) => `${k}=[${k}]`)
     .join('\n');
-  const overrideText = Object.entries(overrides)
+  const instanceOverrideText = Object.entries(overrides)
     .map(([k, v]) => `${k}=${v}`)
     .join('\n');
-  const m = loadEmailMessages({ defaultsText: defaults, overrideText, warn: () => {} });
-  return () => Promise.resolve(m);
+  const index = loadEmailMessagesIndex({
+    defaultsText: defaults,
+    instanceOverrideText,
+    warn: () => {},
+  });
+  return () => Promise.resolve(index);
 }
 
 function makeSender(overrides: Record<string, string> = {}) {
