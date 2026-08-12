@@ -69,6 +69,13 @@ const GATED_NETWORK_DOMAINS = [
   { id: 'provider', description: 'Job provider' },
 ];
 
+// A provider whose go-live gates omit `consent_required` (#344): a signup on it
+// must skip the terms/privacy pre-check and go straight to OTP.
+const CONSENT_FREE_NETWORK_DOMAINS = [
+  { id: 'seeker', description: 'Job seeker' },
+  { id: 'provider', description: 'Job provider', go_live_required: ['schema_required'] },
+];
+
 async function renderPage() {
   const { LoginPage } = await import('../login-page');
   const queryClient = new QueryClient({
@@ -245,6 +252,28 @@ describe('LoginPage', () => {
           state: expect.objectContaining({ signupExtras: { domain: 'provider' } }),
         }),
       ));
+    });
+
+    it('a signup on a consent-free domain skips the terms/privacy pre-check and goes straight to OTP (#344)', async () => {
+      const { getConsentStatusByIdentifier } = await import('@/lib/consent-api');
+      fetchAuthConfig.mockResolvedValue({ selfSignupAllowed: true, loginChannels: ['phone', 'email'] });
+      checkUser.mockResolvedValue({ userExists: false });
+      fetchNetworkConfig.mockResolvedValue({ id: 'blue_dot', domains: CONSENT_FREE_NETWORK_DOMAINS });
+      await renderPage();
+      await waitFor(() => expect(fetchAuthConfig).toHaveBeenCalled());
+
+      await userEvent.type(screen.getByLabelText(/mobile/i), '9876543210');
+      await userEvent.click(screen.getByRole('button', { name: /continue|send/i }));
+      await waitFor(() => expect(checkUser).toHaveBeenCalledTimes(1));
+
+      await userEvent.type(screen.getByLabelText(/your name/i), 'Ravi');
+      await userEvent.click(screen.getByRole('button', { name: /^provider$/i })); // consent-free
+      await userEvent.click(screen.getByRole('button', { name: /^continue$/i }));
+
+      // Straight to OTP — and the consent pre-check (only reached via
+      // runConsentThenOtp) is skipped because the domain omits consent_required.
+      await waitFor(() => expect(requestOtp).toHaveBeenCalled());
+      expect(vi.mocked(getConsentStatusByIdentifier)).not.toHaveBeenCalled();
     });
 
     it('a single-served-domain portal hides the picker and auto-carries that domain', async () => {

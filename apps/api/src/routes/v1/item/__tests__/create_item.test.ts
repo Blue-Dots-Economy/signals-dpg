@@ -346,6 +346,23 @@ describe('create_item_handler guards', () => {
     expect(createPayload().consent_accepted).toBe(false);
   });
 
+  it('skips the CONSENT_REQUIRED guard when the domain does not gate on consent_required (#344)', async () => {
+    // Domain goes live on completeness alone (`go_live_required: ["schema_required"]`),
+    // so a self create with no consent is allowed even though a profile_creation
+    // version IS configured — the create-time guard is config-driven and must not
+    // demand consent, nor even resolve the version, on a consent-free domain.
+    resolveGoLiveGates.mockResolvedValue(['schema_required']);
+    resolveConsentVersion.mockResolvedValue(2);
+
+    const reply = await call({ user: { id: 'u1' }, body: baseBody() });
+
+    expect(reply.statusCode).toBe(201);
+    expect(bodyOf(reply).error).toBeUndefined();
+    // The consent-free gate set short-circuits before resolveConsentVersion.
+    expect(resolveConsentVersion).not.toHaveBeenCalled();
+    expect(resolveGoLiveGates).toHaveBeenCalledWith('blue_dot', 'student');
+  });
+
   it('delegates to replyForUnservedDomain for an unserved network/domain binding', async () => {
     isServedDomainBinding.mockReturnValue(false);
     replyForUnservedDomain.mockImplementation(
