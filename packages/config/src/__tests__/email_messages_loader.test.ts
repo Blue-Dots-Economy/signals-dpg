@@ -39,7 +39,7 @@ describe('loadEmailMessagesFiles guard clauses', () => {
     ).resolves.toEqual([]);
   });
 
-  it('returns [] when the network has no messages.properties beside network.json', async () => {
+  it('returns [] when the network has no messages.properties and no brand sub-folders either', async () => {
     const { networkFile } = await makeNetworkDir();
 
     await expect(
@@ -49,6 +49,29 @@ describe('loadEmailMessagesFiles guard clauses', () => {
         networks: ['yellow_dot'],
       })
     ).resolves.toEqual([]);
+  });
+
+  it('still scans brand sub-folders when the network has no messages.properties beside network.json', async () => {
+    const { dir, networkFile } = await makeNetworkDir();
+    await mkdir(join(dir, 'upsdm'));
+    await writeFile(
+      join(dir, 'upsdm', 'messages.properties'),
+      'welcome.subject=UPSDM Hi there',
+      'utf8'
+    );
+
+    const loaded = await loadEmailMessagesFiles({
+      source: 'local',
+      networkLocalFile: networkFile,
+      networks: ['yellow_dot'],
+    });
+
+    expect(loaded).toHaveLength(1);
+    expect(loaded[0]).toEqual({
+      network: 'yellow_dot',
+      brand: 'upsdm',
+      text: 'welcome.subject=UPSDM Hi there',
+    });
   });
 
   it('uses only the first network entry (local mode is single-network)', async () => {

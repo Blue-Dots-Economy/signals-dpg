@@ -60,10 +60,15 @@ export async function loadEmailMessagesFiles(
   const results: LoadedEmailMessagesFile[] = [];
 
   const defaultText = await readMessagesText(join(baseDir, 'messages.properties'));
-  if (defaultText === null) return [];
+  if (defaultText !== null) {
+    results.push({ network, brand: null, text: defaultText });
+  }
 
-  results.push({ network, brand: null, text: defaultText });
-
+  // Unlike consent (where a brand partial requires the network base to
+  // partial-over), the bundled email defaults are always the base layer —
+  // apps/api's messages.ts merges a brand-only file straight over the
+  // instance base when no network file exists. So brand subdirectories must
+  // still be scanned even when the network-level file is absent.
   for (const brand of await listSubdirectories(baseDir)) {
     const brandText = await readMessagesText(join(baseDir, brand, 'messages.properties'));
     if (brandText === null) continue;

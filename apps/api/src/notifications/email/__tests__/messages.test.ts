@@ -228,6 +228,22 @@ describe('loadEmailMessagesIndex (network + brand layers)', () => {
     );
   });
 
+  it('pins all four tiers on one key: brand wins over network, network over instance override, override over defaults', () => {
+    const layers: LoadedEmailMessagesFile[] = [
+      { network: 'blue_dot', brand: null, text: 'welcome.subject=Network Hello' },
+      { network: 'blue_dot', brand: 'upsdm', text: 'welcome.subject=Brand Hello' },
+    ];
+    const index = loadEmailMessagesIndex({
+      defaultsText: fullDefaults(),
+      instanceOverrideText: 'welcome.subject=Instance Hello',
+      layers,
+    });
+
+    expect(index.forContext('blue_dot', 'upsdm').get('welcome.subject')).toBe('Brand Hello');
+    expect(index.forContext('blue_dot').get('welcome.subject')).toBe('Network Hello');
+    expect(index.forContext().get('welcome.subject')).toBe('Instance Hello');
+  });
+
   it('per-layer malformed-line warns carry the layer label', () => {
     const warn = vi.fn();
     const layers: LoadedEmailMessagesFile[] = [

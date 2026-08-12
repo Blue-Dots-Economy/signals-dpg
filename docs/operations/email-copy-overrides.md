@@ -60,6 +60,15 @@ network, network wins over the instance override, the instance override wins
 over the bundled default; an unknown or absent network/brand simply resolves
 to the instance-wide (or bundled) copy.
 
+Two resolution nuances worth knowing: action/retire emails resolve copy under
+the **counterparty item's network** (`plan.counterpartyNetwork` — the same
+network key that also drives the CTA button colour), which is not necessarily
+the network of the instance serving the request. And on an instance serving
+multiple networks, instance-level emails (OTP, welcome, support — anything
+sent with no per-plan network) always resolve to the instance/base copy, never
+a network file; only action/retire emails, which carry an explicit network,
+pick up network or brand layers on such an instance.
+
 Network and brand `messages.properties` files ride the same discovery and
 delivery mechanism as `network.json` and `consent.json` — same directory,
 same ConfigMap/volume mount, same local-vs-remote config source. There is no
