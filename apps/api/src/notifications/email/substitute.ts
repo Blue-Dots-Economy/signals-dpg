@@ -28,9 +28,15 @@ function substitute(
   escapeText: boolean,
 ): string {
   return template.replace(TOKEN_RE, (match, name: string) => {
+    // Object.hasOwn, not `name in tokens`/plain indexing: a placeholder named
+    // after a prototype member (e.g. {{toString}}, {{constructor}}) must not
+    // resolve to an inherited function — that's not a declared/provided
+    // token, it's an undeclared one, left verbatim like any other typo.
+    if (!Object.hasOwn(tokens, name) || !Object.hasOwn(variables, name)) {
+      return match;
+    }
     const type = tokens[name];
     const value = variables[name];
-    if (type === undefined || value === undefined) return match;
     if (type === 'html') return value;
     return escapeText ? escapeHtml(value) : value;
   });

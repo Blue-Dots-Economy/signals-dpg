@@ -35,7 +35,9 @@ describe('messages.default.properties', () => {
       )) {
         const value = entries.get(key) ?? '';
         for (const m of value.matchAll(/\{\{([A-Za-z][A-Za-z0-9_]*)\}\}/g)) {
-          if (!(m[1] in def.tokens)) offenders.push(`${key} -> {{${m[1]}}}`);
+          // Object.hasOwn, not `in`: `in` would treat {{toString}}/
+          // {{constructor}} as declared via the prototype chain.
+          if (!Object.hasOwn(def.tokens, m[1])) offenders.push(`${key} -> {{${m[1]}}}`);
         }
       }
     }

@@ -655,6 +655,25 @@ describe('afterUserCreate', () => {
     expect(nc.notify).not.toHaveBeenCalled();
   });
 
+  it('falls back userName to "user" when the new user has no name', async () => {
+    const nc = makeNotificationClient();
+    const sendEmail = makeSendEmail();
+    const { otpOptions } = build({
+      notificationClient: nc,
+      sendEmail,
+      appName: 'Signals',
+    });
+    await otpOptions.afterUserCreate({
+      user: user({ name: '', phoneNumber: null }),
+    });
+    expect(sendEmail).toHaveBeenCalledWith({
+      caseId: 'welcome',
+      to: 'alice@example.org',
+      fromName: 'Welcome to Signals',
+      variables: { userName: 'user', appName: 'Signals' },
+    });
+  });
+
   it('sends no welcome email when config.sendEmail is not wired, even with a notification client and an email', async () => {
     const nc = makeNotificationClient();
     const { otpOptions } = build({ notificationClient: nc });

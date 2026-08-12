@@ -177,7 +177,7 @@ export function createAuth(config: AuthRuntimeConfig) {
                   to: payload.user.email,
                   fromName: `Welcome to ${config.appName}`,
                   variables: {
-                    userName: payload.user.name,
+                    userName: payload.user.name || 'user',
                     appName: config.appName,
                   },
                 });

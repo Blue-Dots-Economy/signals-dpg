@@ -43,6 +43,14 @@ describe('substituteHtml', () => {
     const out = substituteHtml('{{org}} and {{org}}', { org: 'A&B' }, { org: 'text' });
     expect(out).toBe('A&amp;B and A&amp;B');
   });
+
+  it('leaves a prototype-chain placeholder name verbatim instead of throwing', () => {
+    // {{constructor}} resolves via Object.prototype under plain `in`/indexed
+    // lookups (to a function), which would then blow up escapeHtml. It must
+    // be treated as undeclared/unprovided, like any other typo'd token.
+    const out = substituteHtml('<p>{{constructor}}</p>', {}, { otp: 'text' });
+    expect(out).toBe('<p>{{constructor}}</p>');
+  });
 });
 
 describe('substitutePlain', () => {

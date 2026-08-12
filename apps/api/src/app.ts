@@ -29,6 +29,7 @@ import {
   clearNetworkSchemaCache,
   refreshConsumedSchemas,
 } from '@/network_schema_cache';
+import { getEmailMessages } from '@/notifications/email/messages';
 
 const pkg = createRequire(import.meta.url)('../package.json') as {
   version: string;
@@ -127,6 +128,16 @@ export async function buildApp(): Promise<FastifyInstance> {
     await clearNetworkSchemaCache();
     await refreshConsumedSchemas();
   }
+
+  // Boot-time email-copy load (#529): the bundled defaults file is required,
+  // so a build defect there throws here — crash-loud at startup rather than
+  // surfacing lazily on the first attempted send. An ops override
+  // (EMAIL_MESSAGES_PATH) is also read here so per-key fallback warnings land
+  // in deploy logs immediately. Unlike the schema-cache warmup above this has
+  // no DB/Redis dependency (fs only), so it runs unconditionally — including
+  // in NETWORK_CONFIG_SOURCE=remote mode and in the OpenAPI dump, where
+  // SCHEMA_CACHE_WARMUP_ENABLED=false only gates the DB-backed warmup.
+  await getEmailMessages();
 
   const networkConfigs = await getNetworkConfigs();
 

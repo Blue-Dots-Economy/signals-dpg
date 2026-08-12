@@ -33,7 +33,10 @@ function lintPlaceholders(
       const value = entries.get(key);
       if (!value) continue;
       for (const m of value.matchAll(TOKEN_RE)) {
-        if (!(m[1] in def.tokens)) {
+        // Object.hasOwn, not `in`: `in` walks the prototype chain, so a
+        // placeholder literally named {{toString}}/{{constructor}} would
+        // read as "declared" via Object.prototype and evade this warning.
+        if (!Object.hasOwn(def.tokens, m[1])) {
           warn(
             `email messages: "${key}" references unknown placeholder {{${m[1]}}} — it will appear in the email as literal text`,
           );
@@ -115,7 +118,13 @@ export function getEmailMessages(): Promise<EmailMessages> {
       }
     }
     return loadEmailMessages({ defaultsText, overrideText });
-  })();
+  })().catch((err: unknown) => {
+    // Don't let a transient fs error (or a bundled-file defect) cache a
+    // rejected promise forever — the next call gets a fresh attempt instead
+    // of email being permanently down until restart.
+    messagesPromise = null;
+    throw err;
+  });
   return messagesPromise;
 }
 
