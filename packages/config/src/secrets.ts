@@ -99,6 +99,10 @@ export const NotificationSecretsSchema = z.object({
   // Optional comma-separated CC list for support/contact-form submissions
   // (#283). Forwarded to nodemailer via the notification variables.
   SUPPORT_CC_EMAIL: z.string().optional(),
+  // Path to a mounted override of the bundled email messages file (#529).
+  // Unset = bundled defaults only. A bad/missing file at this path never
+  // breaks email — the loader falls back per key with warnings.
+  EMAIL_MESSAGES_PATH: z.string().optional(),
 });
 
 export const MatchScoreSecretsSchema = z.object({
