@@ -10,6 +10,7 @@
     "build:tourist": "tsc && VITE_APP=tourist VITE_NETWORK_ID=orange_dot vite build",
     "preview": "vite preview",
     "test": "vitest run",
+    "test:coverage": "vitest run --coverage",
     "test:watch": "vitest"
   },
   "dependencies": {
