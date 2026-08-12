@@ -143,8 +143,11 @@ Signals). Per case:
 - **copy keys** — which `subject`/`body`(/`cta`) keys it reads
 - **declared tokens** with a type: `text` (default; always HTML-escaped on
   substitution) or `html` (inserted raw; **only** code-built values assembled from
-  already-escaped parts). Exactly two `html` tokens exist: `{{orgList}}`
-  (guardian bulk `<ol>`) and `{{detailsTable}}` (support field table).
+  already-escaped parts). Three `html` tokens exist: `{{orgList}}` (guardian
+  bulk `<ol>`), `{{detailsTable}}` (support field table), and `{{otpBox}}`
+  (the styled OTP box) — `otpBox` isn't set by any caller; `dispatch_email.ts`
+  auto-derives it from `vars.otp` whenever a case declares the token, so
+  callers only ever pass the plain code.
 - **shell** — `cta` (branded shell: greeting, body, CTA button + fallback link,
   sign-off; today's `renderEmailShell`) or `plain` (body paragraphs + sign-off; for
   OTP/support-style mail)
