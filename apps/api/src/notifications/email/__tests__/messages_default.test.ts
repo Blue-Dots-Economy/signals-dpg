@@ -60,5 +60,11 @@ describe('messages.default.properties', () => {
     expect(entries.get('action.apply.seeker.outbound_request.subject')).toBe(
       'Your application has been sent to {{name}}',
     );
+    // Pins the support subject template (#529 migration) — a typo dropping
+    // {{type}} or {{fromSite}} here would otherwise pass the suite silently,
+    // since the substitution mechanics are only tested with fake templates.
+    expect(entries.get('support.request.subject')).toBe(
+      'Issue Number: {{reference}} — {{type}} from {{name}}{{fromSite}}',
+    );
   });
 });

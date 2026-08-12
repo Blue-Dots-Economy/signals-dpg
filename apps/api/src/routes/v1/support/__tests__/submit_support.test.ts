@@ -118,7 +118,12 @@ describe('POST /api/v1/support', () => {
       payload: { name: 'Asha', phone: '+919000000000', type: 'support_request', details: 'x', consent: true },
     });
     expect(res.statusCode).toBe(201);
-    expect(dispatchEmailMock.mock.calls[0][0].replyTo).toBe('from@org.com');
+    const arg = dispatchEmailMock.mock.calls[0][0];
+    expect(arg.replyTo).toBe('from@org.com');
+    // No linkBaseUrl configured here: fromSite must be empty, not omitted or
+    // a stray " from undefined" — this is the no-link branch of the subject.
+    expect(arg.variables.fromSite).toBe('');
+    expect(arg.variables.type).toBe('Support Request');
     await app.close();
   });
 
