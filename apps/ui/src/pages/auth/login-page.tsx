@@ -359,7 +359,7 @@ export function LoginPage() {
       });
       return false;
     }
-    if (mode === 'email' && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) {
+    if (mode === 'email' && !/^[^\s@]+@[^\s.@]+\.[^\s@]+$/.test(email.trim())) {
       toast.error(t('auth.toast_invalid_email'), {
         description: t('auth.toast_invalid_email_desc'),
       });

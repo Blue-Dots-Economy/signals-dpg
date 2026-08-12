@@ -437,6 +437,191 @@ function domainNeedsProfileConsent(
   return gates ? gates.includes('consent_required') : true;
 }
 
+/** The parsed served-domain scope, or null when the deployment serves all domains. */
+type HomeServedScope = ReturnType<typeof getServedScope>;
+
+/** The single served domain when exactly one is bound (the single-domain portal), else null. */
+function resolveBoundDomain(servedScope: HomeServedScope): string | null {
+  return servedScope && servedScope.domains.length === 1 ? servedScope.domains[0] : null;
+}
+
+/**
+ * Resolve the initial selected-network id: a served scope pins it, else a valid
+ * `?network=` URL param, else the first configured network id.
+ */
+function resolveInitialNetworkId(
+  servedScope: HomeServedScope,
+  networkFromUrl: string | null,
+  configuredNetworkIds: string[],
+): string | null {
+  if (servedScope?.network) return servedScope.network;
+  if (networkFromUrl && configuredNetworkIds.includes(networkFromUrl)) return networkFromUrl;
+  return configuredNetworkIds[0] || null;
+}
+
+/** Whether the location-source toggle applies (a profile location exists AND the browser can provide one). */
+function computeCanToggleLocation(profileLocation: LatLng | null, browserSupported: boolean): boolean {
+  return Boolean(profileLocation) && browserSupported;
+}
+
+/** Whether to offer the "enable location" banner (toggle applies, browser source picked, but it errored). */
+function computeShowLocationBanner(
+  canToggle: boolean,
+  preferredSource: PreferredLocationSource,
+  browserStatus: string,
+): boolean {
+  return canToggle && preferredSource === 'browser' && browserStatus === 'error';
+}
+
+/** Whether the active profile's domain gates go-live on profile_creation consent (absent config ⇒ require). */
+function computeProfileConsentRequired(
+  profileStatement: string,
+  domains: Parameters<typeof domainNeedsProfileConsent>[0],
+  itemDomain: string | undefined,
+): boolean {
+  return Boolean(profileStatement) && domainNeedsProfileConsent(domains, itemDomain);
+}
+
+/** Whether the ward's domain requires the U18 guardian gate (needs an authenticated user on a gated domain). */
+function computeRequiresGuardianGate(
+  user: unknown,
+  network: DotNetworkSchema | null | undefined,
+  wardDomain: string | null,
+): boolean {
+  return Boolean(user && network && wardDomain && isGuardianConsentRequiredDomain(network, wardDomain));
+}
+
+/**
+ * Derive the U18 guardian-flow display state from the stored status + gate signals.
+ *
+ * @returns The resolved-adult short-circuit, the DOB-vs-guardian entry step, the
+ *   birth/minor-guardian sub-flags, and whether the guardian flow should show.
+ */
+function deriveU18GuardianState(p: {
+  status: U18StatusResponse | null;
+  statusLoading: boolean;
+  gateLoading: boolean;
+  dismissed: boolean;
+  requiresGate: boolean;
+  neededConsentCount: number;
+}): {
+  resolvedAdult: boolean;
+  initialStep: 'dob' | 'guardian';
+  birthUnresolved: boolean;
+  minorNeedsGuardian: boolean;
+  showFlow: boolean;
+} {
+  const resolvedAdult = p.status?.hasBirthData === true && p.status.isMinor === false;
+  const initialStep: 'dob' | 'guardian' = p.status?.hasBirthData ? 'guardian' : 'dob';
+  const birthUnresolved = !p.statusLoading && p.status?.hasBirthData !== true;
+  const minorNeedsGuardian = p.status?.isMinor === true && p.status?.guardianVerified !== true;
+  const showFlow =
+    p.requiresGate &&
+    !p.gateLoading &&
+    !p.dismissed &&
+    !p.statusLoading &&
+    !resolvedAdult &&
+    (p.neededConsentCount > 0 || birthUnresolved || minorNeedsGuardian);
+  return { resolvedAdult, initialStep, birthUnresolved, minorNeedsGuardian, showFlow };
+}
+
+/** Pick the single-domain value on a specific domain tab, else the "All"-tab aggregate. */
+function selectByDomainScope<T>(selectedDomain: string | null, single: T, all: T): T {
+  return selectedDomain !== null ? single : all;
+}
+
+/** Whether the single-domain list's load-more sentinel is active. */
+function singleDomainSentinelEnabled(selectedDomain: string | null, hasNextPage: boolean): boolean {
+  return selectedDomain !== null && hasNextPage;
+}
+
+/** Whether the "All"-tab merged list's load-more sentinel is active. */
+function allDomainsSentinelEnabled(selectedDomain: string | null, anyHasMore: boolean): boolean {
+  return selectedDomain === null && anyHasMore;
+}
+
+/** The per-target discover anchor for the single-domain feed (undefined on the "All" tab). */
+function resolveSingleDomainAnchor(
+  selectedDomain: string | null,
+  anchorFor: (targetDomain: string) => string | undefined,
+): string | undefined {
+  return selectedDomain ? anchorFor(selectedDomain) : undefined;
+}
+
+/**
+ * Whether a profile anchor is actually being sent for the browsed domain(s) —
+ * gated by the schema interaction matrix, not merely "signed in with a profile".
+ */
+function computeHasProfileAnchor(p: {
+  selectedDomain: string | null;
+  anchorFor: (targetDomain: string) => string | undefined;
+  activeProfileId: string | null;
+  activeProfileDomain: string | null;
+  visibleDomains: DotNetworkDomain[];
+  networkActions: Parameters<typeof domainsInteract>[0];
+}): boolean {
+  if (p.selectedDomain !== null) return p.anchorFor(p.selectedDomain) !== undefined;
+  const { activeProfileDomain } = p;
+  return Boolean(
+    p.activeProfileId &&
+      activeProfileDomain &&
+      p.visibleDomains.some((domain) => domainsInteract(p.networkActions, activeProfileDomain, domain.id)),
+  );
+}
+
+/** The effective location source for the list note wording ('none' maps to 'profile' harmlessly). */
+function noteLocationSource(resolvedLocationSource: string): 'browser' | 'profile' {
+  return resolvedLocationSource === 'browser' ? 'browser' : 'profile';
+}
+
+/** Whether the network selector should render (no served scope, more than one network). */
+function computeShowNetworkSelector(servedScope: HomeServedScope, networkCount: number): boolean {
+  return !servedScope && networkCount > 1;
+}
+
+/** Title-case a domain id for display (e.g. `student_profile` → `Student Profile`), or undefined when absent. */
+function formatDomainLabel(domainId: string | null | undefined): string | undefined {
+  return domainId
+    ? domainId.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())
+    : undefined;
+}
+
+/** The dynamic actions to surface: the selected domain's, else the legacy single active action, else none. */
+function resolveDomainActions(
+  selectedDomain: string | null,
+  getActionsForDomain: (targetDomain: string) => DotActionSchema[],
+  activeAction: DotActionSchema | null,
+): DotActionSchema[] {
+  if (selectedDomain) return getActionsForDomain(selectedDomain);
+  return activeAction ? [activeAction] : [];
+}
+
+/** The header's display domain: the selected domain, else the sole visible domain, else null (the "All" header). */
+function resolveHeaderDomain(selectedDomain: string | null, visibleDomains: DotNetworkDomain[]): string | null {
+  return selectedDomain ?? (visibleDomains.length === 1 ? visibleDomains[0].id : null);
+}
+
+/** The header description for the display domain (undefined on the "All" header). */
+function resolveHeaderDescription(
+  headerDomain: string | null,
+  visibleDomains: DotNetworkDomain[],
+): string | undefined {
+  return headerDomain ? visibleDomains.find((d) => d.id === headerDomain)?.description : undefined;
+}
+
+/** Normalise a guardian-flow action type to the OTP-purpose kind ('connect' or 'apply'). */
+function guardianActionKind(actionType: string | undefined): 'connect' | 'apply' {
+  return actionType === 'connect' ? 'connect' : 'apply';
+}
+
+/** The network list the PageShell selector renders (empty unless the selector should show). */
+function pickNetworksForShell(
+  showNetworkSelector: boolean,
+  allNetworks: DotNetworkSchema[],
+): DotNetworkSchema[] {
+  return showNetworkSelector ? allNetworks : [];
+}
+
 export function HomePage() {
   const { t } = useTranslation();
   const { user, signOut } = useAuth();
@@ -487,16 +672,11 @@ export function HomePage() {
   // the acting domain is derived from the logged-in user (whitelisted combined
   // UI). Memoised — runtime config is fixed for the session's lifetime.
   const servedScope = React.useMemo(() => getServedScope(), []);
-  const boundDomain =
-    servedScope && servedScope.domains.length === 1 ? servedScope.domains[0] : null;
+  const boundDomain = resolveBoundDomain(servedScope);
 
   // Network: the served scope pins it; otherwise URL param, then env config.
   const networkFromUrl = searchParams.get('network');
-  const initialNetworkId =
-    servedScope?.network ??
-    (networkFromUrl && configuredNetworkIds.includes(networkFromUrl)
-      ? networkFromUrl
-      : (configuredNetworkIds[0] || null));
+  const initialNetworkId = resolveInitialNetworkId(servedScope, networkFromUrl, configuredNetworkIds);
 
   const [selectedNetworkId, setSelectedNetworkId] = React.useState<string | null>(initialNetworkId);
   const [activeProfileId, setActiveProfileId] = React.useState<string | null>(null);
@@ -670,16 +850,17 @@ export function HomePage() {
 
   // The toggle only makes sense when there's a profile location to switch away
   // from and the browser can actually provide the alternative.
-  const canToggleLocation = Boolean(profileLocation) && browserLocation.isSupported;
+  const canToggleLocation = computeCanToggleLocation(profileLocation, browserLocation.isSupported);
 
   // When the user picked "current location" but the browser request errored
   // (denied / unavailable), offer to enable it. Gated on canToggleLocation so
   // the banner only appears while a profile location exists — i.e. results are
   // still sorted by the profile fallback, which the banner copy reflects.
-  const showLocationBanner =
-    canToggleLocation &&
-    preferredSource === 'browser' &&
-    browserLocation.status === 'error';
+  const showLocationBanner = computeShowLocationBanner(
+    canToggleLocation,
+    preferredSource,
+    browserLocation.status,
+  );
 
   // Bumped whenever the user switches source so the map recenters on the chosen
   // anchor even when the resolved coordinate is unchanged — e.g. switching back
@@ -726,9 +907,11 @@ export function HomePage() {
   // completeness alone (e.g. a provider configured `["schema_required"]`) never
   // prompts for profile_creation consent. Absent config ⇒ require (safe default,
   // matches the login-gate behaviour).
-  const profileConsentRequired =
-    Boolean(profileStatement) &&
-    domainNeedsProfileConsent(network?.domains, myItem?.item_domain);
+  const profileConsentRequired = computeProfileConsentRequired(
+    profileStatement,
+    network?.domains,
+    myItem?.item_domain,
+  );
 
   // Shared profile_creation-consent accept flow (adult self-accept OR minor
   // guardian-OTP), extracted into a hook so it isn't duplicated with
@@ -780,9 +963,7 @@ export function HomePage() {
   // success) are routed through the guardian flow — everyone else (adults,
   // ungated domains, users with no profile yet) is unaffected.
   const wardDomain = myItem?.item_domain ?? null;
-  const requiresGuardianGate = Boolean(
-    user && network && wardDomain && isGuardianConsentRequiredDomain(network, wardDomain),
-  );
+  const requiresGuardianGate = computeRequiresGuardianGate(user, network, wardDomain);
   const {
     needed: u18NeededConsent,
     isLoading: u18GateLoading,
@@ -826,38 +1007,30 @@ export function HomePage() {
     return () => { cancelled = true; };
   }, [user, network, network?.id, u18StatusReload]);
 
-  // Stored data already resolves this ward as an adult → no guardian gate;
-  // the ordinary consent flow (ProfileConsentModal) handles terms/privacy.
-  const u18ResolvedAdult = u18Status?.hasBirthData === true && u18Status.isMinor === false;
-
-  // DOB is captured ONCE and reused — skip the DOB step when birth data is
-  // already stored; only capture it here when nothing is stored yet. Guardian
-  // verification itself is NOT skipped by a prior verify: the account
-  // terms/privacy flow shows whenever those consents are actually needed (e.g.
-  // a version bump, D15), and profile-creation / per-action guardian OTP are
-  // gated separately.
-  const u18InitialStep: 'dob' | 'guardian' = u18Status?.hasBirthData ? 'guardian' : 'dob';
-
-  // Minor status not yet resolved (no birth captured). Must run the flow (DOB
-  // step) even when terms/privacy is already satisfied — otherwise a bulk/form
-  // ward who self-accepted terms/privacy at login is never asked for DOB, so
-  // the server can't detect a minor and the guardian gate is bypassed.
-  const u18BirthUnresolved = !u18StatusLoading && u18Status?.hasBirthData !== true;
-
-  // A resolved minor who isn't guardian-verified yet must be gated even when
-  // terms/privacy already happen to be satisfied (e.g. an existing user who
-  // provided DOB pre-OTP but whose guardian step runs here, post-login) —
-  // otherwise they'd land in the app un-gated with no way to attach a guardian.
-  const u18MinorNeedsGuardian =
-    u18Status?.isMinor === true && u18Status?.guardianVerified !== true;
-
-  const showU18GuardianFlow =
-    requiresGuardianGate &&
-    !u18GateLoading &&
-    !guardianFlowDismissed &&
-    !u18StatusLoading &&
-    !u18ResolvedAdult &&
-    (u18NeededConsent.length > 0 || u18BirthUnresolved || u18MinorNeedsGuardian);
+  // U18 guardian-flow display state, derived from the stored status + gate
+  // signals. See `deriveU18GuardianState` for the per-flag rationale:
+  //  - resolvedAdult: stored data resolves the ward as an adult → no guardian
+  //    gate; the ordinary consent flow (ProfileConsentModal) handles T&P.
+  //  - initialStep: DOB is captured ONCE and reused — skip the DOB step when
+  //    birth data is already stored; capture it here only when nothing is stored.
+  //  - birthUnresolved: minor status not yet resolved (no birth captured) — must
+  //    run the flow (DOB step) even when T&P is already satisfied, else a
+  //    bulk/form ward who self-accepted T&P at login is never asked for DOB and
+  //    the server can't detect a minor, bypassing the gate.
+  //  - minorNeedsGuardian: a resolved minor who isn't guardian-verified yet must
+  //    be gated even when T&P happens to be satisfied, else they land in the app
+  //    un-gated with no way to attach a guardian.
+  const {
+    initialStep: u18InitialStep,
+    showFlow: showU18GuardianFlow,
+  } = deriveU18GuardianState({
+    status: u18Status,
+    statusLoading: u18StatusLoading,
+    gateLoading: u18GateLoading,
+    dismissed: guardianFlowDismissed,
+    requiresGate: requiresGuardianGate,
+    neededConsentCount: u18NeededConsent.length,
+  });
 
   // Acting domain: ?as= test override → served binding → active profile →
   // network default. Drives the connect-action source (from_domain).
@@ -1055,12 +1228,12 @@ export function HomePage() {
   // selected; disabled (and thus inert) on the "All" tab.
   const singleDomainList = useInfiniteBrowseItems(
     network,
-    selectedDomain ? selectedDomainObj : null,
+    selectedDomainObj,
     browseLocation,
     {
       enabled: selectedDomain !== null,
       ...browseHookOpts,
-      anchorItemId: selectedDomain ? anchorFor(selectedDomain) : undefined,
+      anchorItemId: resolveSingleDomainAnchor(selectedDomain, anchorFor),
     },
   );
 
@@ -1079,7 +1252,7 @@ export function HomePage() {
   // hook's non-memoized `fetchNextPage` directly is safe — see its comment.)
   const singleDomainSentinelRef = useLoadMoreSentinel(
     singleDomainList.fetchNextPage,
-    selectedDomain !== null && singleDomainList.hasNextPage,
+    singleDomainSentinelEnabled(selectedDomain, singleDomainList.hasNextPage),
   );
 
   // "All" tab: each visible domain's paged state, lifted up from its headless
@@ -1158,7 +1331,7 @@ export function HomePage() {
   const anyAllDomainHasMore = visibleDomains.some((domain) => allDomainPages[domain.id]?.hasMore ?? false);
   const allDomainsSentinelRef = useLoadMoreSentinel(
     fetchNextAllDomainPages,
-    selectedDomain === null && anyAllDomainHasMore,
+    allDomainsSentinelEnabled(selectedDomain, anyAllDomainHasMore),
   );
   // --- end Task 5 -------------------------------------------------------------
 
@@ -1210,7 +1383,7 @@ export function HomePage() {
   // Single source of truth for the list federation-degradation banner
   // (mirrors the map's `mapMarkers.partial` from P4): single-domain tab reads
   // the one paged feed directly, "All" tab is the OR above.
-  const listPartial = selectedDomain !== null ? singleDomainList.partial : allDomainsListPartial;
+  const listPartial = selectByDomainScope(selectedDomain, singleDomainList.partial, allDomainsListPartial);
 
   // Task 6 (#203 §6): mirrors `allDomainsListPartial`/`listPartial` exactly,
   // but for the discover BFF's native-fallback signal instead of federation
@@ -1221,7 +1394,7 @@ export function HomePage() {
   );
   // Single source of truth for the degraded-search UX: single-domain tab reads
   // the one paged feed directly, "All" tab is the OR above.
-  const listDegraded = selectedDomain !== null ? singleDomainList.degraded : allDomainsListDegraded;
+  const listDegraded = selectByDomainScope(selectedDomain, singleDomainList.degraded, allDomainsListDegraded);
 
   // #394: the effective spatial radius (`meta.distance_meters`), same
   // single-domain-vs-"All" split as `listPartial`/`listDegraded` above. On the
@@ -1230,8 +1403,11 @@ export function HomePage() {
   const allDomainsDistanceMeters = visibleDomains
     .map((domain) => allDomainPages[domain.id]?.distanceMeters)
     .find((value) => value !== undefined);
-  const listDistanceMeters =
-    selectedDomain !== null ? singleDomainList.distanceMeters : allDomainsDistanceMeters;
+  const listDistanceMeters = selectByDomainScope(
+    selectedDomain,
+    singleDomainList.distanceMeters,
+    allDomainsDistanceMeters,
+  );
 
   // #394 (review fix): whether the viewer actually has a profile anchor being
   // sent for the browsed domain(s) — derived from the SAME rule that gates
@@ -1246,16 +1422,14 @@ export function HomePage() {
   // true iff the viewer's profile domain interacts with at least one visible
   // domain (mirrors `computeVisibleDomains`' own per-domain anchor gating).
   const activeProfileDomain = myItem?.item_domain ?? null;
-  const hasProfileAnchor =
-    selectedDomain !== null
-      ? anchorFor(selectedDomain) !== undefined
-      : Boolean(
-          activeProfileId &&
-            activeProfileDomain &&
-            visibleDomains.some((domain) =>
-              domainsInteract(network?.actions ?? {}, activeProfileDomain, domain.id),
-            ),
-        );
+  const hasProfileAnchor = computeHasProfileAnchor({
+    selectedDomain,
+    anchorFor,
+    activeProfileId,
+    activeProfileDomain,
+    visibleDomains,
+    networkActions: network?.actions ?? {},
+  });
   // Whether a location is actually being sent as the discover spatial filter.
   const hasLocation = browseLocation !== null;
   const listNote = resolveListNote({
@@ -1270,7 +1444,7 @@ export function HomePage() {
     // no profile exists, which produced the wrong wording. 'none' can't reach
     // the km-bearing note branch (hasLocation would be false), so map it to the
     // 'profile' default harmlessly.
-    locationSource: resolvedLocationSource === 'browser' ? 'browser' : 'profile',
+    locationSource: noteLocationSource(resolvedLocationSource),
   });
 
   // Active schema: from the selected browsing domain, or first visible domain
@@ -1592,20 +1766,12 @@ export function HomePage() {
     });
   };
 
-  const showNetworkSelector = !servedScope && allNetworks.length > 1;
+  const showNetworkSelector = computeShowNetworkSelector(servedScope, allNetworks.length);
 
-  const currentDomainLabel = selectedDomain
-    ? selectedDomain
-        .replace(/_/g, ' ')
-        .replace(/\b\w/g, (c) => c.toUpperCase())
-    : undefined;
+  const currentDomainLabel = formatDomainLabel(selectedDomain);
 
   // Get dynamic actions for the selected domain
-  const actions = selectedDomain
-    ? getActionsForDomain(selectedDomain)
-    : activeAction
-      ? [activeAction]
-      : [];
+  const actions = resolveDomainActions(selectedDomain, getActionsForDomain, activeAction);
 
   // Label the pending profile so the user knows which profile the (repeating)
   // consent popup is for — reuses the sidebar's title-field candidates.
@@ -1622,28 +1788,32 @@ export function HomePage() {
     return value ? String(value) : profile.item_domain;
   }, [pendingConsentProfileId, myItems, userSchemas]);
 
-  const u18GuardianFlowModal = showU18GuardianFlow && network ? (
-    <U18GuardianFlow
-      network={network.id}
-      brand={brand === 'standard' ? null : brand}
-      purpose={{ kind: 'profile' }}
-      // Skip the DOB step when birth data is already stored (captured at
-      // login) — we never re-ask the date of birth at profile-creation time.
-      initialStep={u18InitialStep}
-      onComplete={() => {
-        setGuardianFlowDismissed(true);
-        // Re-read stored U18 status so guardianVerified/birth data are fresh —
-        // stops a later profile creation from re-asking the DOB.
-        setU18StatusReload((n) => n + 1);
-        void refetchU18Gate();
-      }}
-      onNotMinor={() => {
-        setGuardianFlowDismissed(true);
-        setU18StatusReload((n) => n + 1);
-      }}
-      onLogout={() => { void signOut(); }}
-    />
-  ) : null;
+  // Nested render fn (not a const element) so the guardian-gate + brand
+  // conditionals live inside a function, keeping HomePage's cognitive complexity
+  // within bounds (SonarCloud S3776); called from both return branches below.
+  const renderU18GuardianFlowModal = () =>
+    showU18GuardianFlow && network ? (
+      <U18GuardianFlow
+        network={network.id}
+        brand={brand === 'standard' ? null : brand}
+        purpose={{ kind: 'profile' }}
+        // Skip the DOB step when birth data is already stored (captured at
+        // login) — we never re-ask the date of birth at profile-creation time.
+        initialStep={u18InitialStep}
+        onComplete={() => {
+          setGuardianFlowDismissed(true);
+          // Re-read stored U18 status so guardianVerified/birth data are fresh —
+          // stops a later profile creation from re-asking the DOB.
+          setU18StatusReload((n) => n + 1);
+          void refetchU18Gate();
+        }}
+        onNotMinor={() => {
+          setGuardianFlowDismissed(true);
+          setU18StatusReload((n) => n + 1);
+        }}
+        onLogout={() => { void signOut(); }}
+      />
+    ) : null;
 
   const profileConsentModal = (
     <ProfileConsentModal
@@ -1706,7 +1876,7 @@ export function HomePage() {
         <GuardianOtpPurpose
           purpose={{
             kind: 'bulk',
-            action: bulkGuardianConfirm?.actionType === 'connect' ? 'connect' : 'apply',
+            action: guardianActionKind(bulkGuardianConfirm?.actionType),
             count: browseSelection.selected.size,
           }}
         />
@@ -1734,7 +1904,7 @@ export function HomePage() {
       onOpenChange={(open) => { if (!open) setBulkGuardianChallenge(null); }}
       purpose={{
         kind: 'bulk',
-        action: bulkGuardianChallenge?.actionType === 'connect' ? 'connect' : 'apply',
+        action: guardianActionKind(bulkGuardianChallenge?.actionType),
         count: bulkGuardianChallenge?.payloads.length ?? 0,
       }}
       onLogout={() => { void signOut(); }}
@@ -1795,7 +1965,7 @@ export function HomePage() {
           </div>
         </div>
         </div>
-        {u18GuardianFlowModal}
+        {renderU18GuardianFlowModal()}
         {profileConsentModal}
         {consentAcceptDialogs}
         {bulkGuardianConfirmModal}
@@ -1806,14 +1976,9 @@ export function HomePage() {
 
   // With a single browseable domain there's no "All" — the header names that
   // one domain (derived from visibleDomains, so it's generic, not per-network).
-  const headerDomain =
-    selectedDomain ?? (visibleDomains.length === 1 ? visibleDomains[0].id : null);
-  const contentTitle = headerDomain
-    ? headerDomain.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())
-    : t('home.browse_all');
-  const contentDescription = headerDomain
-    ? visibleDomains.find((d) => d.id === headerDomain)?.description
-    : undefined;
+  const headerDomain = resolveHeaderDomain(selectedDomain, visibleDomains);
+  const contentTitle = formatDomainLabel(headerDomain) ?? t('home.browse_all');
+  const contentDescription = resolveHeaderDescription(headerDomain, visibleDomains);
   // Task 7 (#203 §5.2 cleanup): re-sourced from the list totals — keyed on
   // `selectedDomain` (which paged feed is actually driving the list), not
   // `headerDomain` (a display-only label that can be non-null even on the
@@ -1821,8 +1986,8 @@ export function HomePage() {
   // P3-deferred header-count-vs-list-total mismatch: the header now reports
   // the same server-side total the "Showing X of Y" list indicator uses,
   // instead of a client-filtered card count.
-  const contentCount = selectedDomain !== null ? singleDomainList.total : allDomainsTotalCount;
-  const contentLoading = selectedDomain !== null ? singleDomainList.isLoading : allDomainsLoading;
+  const contentCount = selectByDomainScope(selectedDomain, singleDomainList.total, allDomainsTotalCount);
+  const contentLoading = selectByDomainScope(selectedDomain, singleDomainList.isLoading, allDomainsLoading);
 
   function buildEmptyState(domainLabel: string) {
     if (search) return <EmptyState message={t('home.no_search_results', { search })} />;
@@ -1871,35 +2036,53 @@ export function HomePage() {
   // the map is maximized, in the map overlay (the top bar is hidden in
   // fullscreen). Each location instantiates its own popover state; the filter
   // selection itself is controlled via the shared props below.
-  const selectButton =
-    myItem && viewMode === 'list' ? (
-      <Button
-        type="button"
-        variant={browseSelection.selectMode ? 'default' : 'outline'}
-        size="sm"
-        onClick={() =>
-          browseSelection.selectMode
-            ? browseSelection.exitSelect()
-            : browseSelection.enterSelect()
-        }
-      >
-        <CheckSquare className="mr-1.5 h-4 w-4" />
-        {browseSelection.selectMode ? t('selection.done') : t('selection.select')}
-      </Button>
-    ) : null;
+  // Nested render fn (not const elements) so the select-button / header-actions /
+  // guest-vs-signed-in conditionals live inside a function, keeping HomePage's
+  // cognitive complexity within bounds (SonarCloud S3776). Called each render, so
+  // no memo dependency array to keep in sync.
+  const renderPageHeader = () => {
+    const selectButton =
+      myItem && viewMode === 'list' ? (
+        <Button
+          type="button"
+          variant={browseSelection.selectMode ? 'default' : 'outline'}
+          size="sm"
+          onClick={() =>
+            browseSelection.selectMode
+              ? browseSelection.exitSelect()
+              : browseSelection.enterSelect()
+          }
+        >
+          <CheckSquare className="mr-1.5 h-4 w-4" />
+          {browseSelection.selectMode ? t('selection.done') : t('selection.select')}
+        </Button>
+      ) : null;
 
-  const headerActions =
-    canToggleLocation || selectButton ? (
-      <div className="flex items-center gap-2">
-        {canToggleLocation && (
-          <LocationSourceToggle
-            value={preferredSource}
-            onChange={handleLocationSourceChange}
-          />
-        )}
-        {selectButton}
-      </div>
-    ) : undefined;
+    const headerActions =
+      canToggleLocation || selectButton ? (
+        <div className="flex items-center gap-2">
+          {canToggleLocation && (
+            <LocationSourceToggle
+              value={preferredSource}
+              onChange={handleLocationSourceChange}
+            />
+          )}
+          {selectButton}
+        </div>
+      ) : undefined;
+
+    return !user ? (
+      <GuestHero />
+    ) : (
+      <ContentHeader
+        title={contentTitle}
+        description={contentDescription}
+        count={contentLoading ? undefined : contentCount}
+        noProfilePrompt={{ show: !myItem, networkId: selectedNetworkId ?? '' }}
+        actions={headerActions}
+      />
+    );
+  };
 
   const filtersPanel = (
     <MapFiltersPanel
@@ -1940,7 +2123,7 @@ export function HomePage() {
   return (
     <>
     <PageShell
-      networks={showNetworkSelector ? allNetworks : []}
+      networks={pickNetworksForShell(showNetworkSelector, allNetworks)}
       selectedNetwork={selectedNetworkId}
       onNetworkSelect={handleNetworkSelect}
       domains={visibleDomains}
@@ -1960,17 +2143,7 @@ export function HomePage() {
       onViewModeChange={handleViewModeChange}
       filtersSlot={listFiltersPanel}
     >
-      {!user ? (
-        <GuestHero />
-      ) : (
-        <ContentHeader
-          title={contentTitle}
-          description={contentDescription}
-          count={contentLoading ? undefined : contentCount}
-          noProfilePrompt={{ show: !myItem, networkId: selectedNetworkId ?? '' }}
-          actions={headerActions}
-        />
-      )}
+      {renderPageHeader()}
       {/* All-tab header count ("X listings") is summed from each visible
           domain's server-reported total, lifted by these headless
           DomainPagedFetch children. In list view the grid below mounts its own
@@ -2464,7 +2637,7 @@ export function HomePage() {
           }
         </ActionHandler>
     </PageShell>
-    {u18GuardianFlowModal}
+    {renderU18GuardianFlowModal()}
     {profileConsentModal}
     {consentAcceptDialogs}
         {bulkGuardianConfirmModal}
