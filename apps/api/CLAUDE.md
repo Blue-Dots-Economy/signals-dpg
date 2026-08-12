@@ -33,12 +33,42 @@ Auth plugins (`auth_middleware.ts`, `validate_api_key.ts`, `validate_session.ts`
 - `acting_org.ts` (`acting_org_preHandler`) — required acting-org, used by `admin_routes.ts` / `aggregator_routes.ts`.
 - `acting_org_optional.ts` (`acting_org_preHandler_optional`) — acting-org is optional, used only by `action_routes.ts` (a non-admin actor can perform an action without acting on behalf of an org).
 
-## Notifications & support are separate small pipelines
+## Notifications & support are separate small pipelines, one email sender underneath
 
-- `src/notifications/`: `build_notifications.ts` (turns a `NotificationEvent` into a `NotificationPlan`) → `dispatcher.ts` (takes injected `DispatcherDeps` — `sendEmail`, `resolveEmail`, `resolveCounterpartyName`, `brand` — so it's testable without a real notification-service call) → `action_copy.ts` resolves the (group × role) email case id → the central `email/dispatch_email.ts` sender looks up copy in `email/messages.default.properties` and renders it (#529).
-- `src/support/build_support_email.ts`: smaller, single-route — now just `generateSupportReference` plus `buildSupportDetailsTable` (the escaped `{{detailsTable}}` html token for the `support.request` case). `POST /api/v1/support` (authenticated) calls `getDefaultEmailSender().dispatchEmail({ caseId: 'support.request', ... })` directly (no `dispatcher.ts`/`action_copy.ts` in between) and returns `503 SUPPORT_NOT_CONFIGURED` when the recipient/fromEmail/sender is unset, `502 SUPPORT_SEND_FAILED` if the send throws (the case is critical).
+`src/notifications/email/` (#529) is the single send path for every email the
+API sends: a messages file (`email/messages.default.properties`, overridable
+via `EMAIL_MESSAGES_PATH` — see `docs/operations/email-copy-overrides.md`) →
+loader (`email/messages.ts`) → case registry (`email/email_cases.ts`, one
+`EmailCaseDef` per case id: which properties keys, which `{{tokens}}`, which
+HTML shell, critical vs best-effort) → `email/dispatch_email.ts`'s
+`dispatchEmail`, which looks up the case, substitutes tokens, wraps the shell,
+and posts to the notification service. Everything above that is a thin
+caller:
 
-Both pipelines converge on the same `email/dispatch_email.ts` sender (#529) but stay independent above that: support has no `NotificationPlan`/`dispatcher.ts` layer, it builds its `DispatchEmailArgs` inline in the route handler.
+- `src/notifications/`: `build_notifications.ts` (turns a `NotificationEvent`
+  into a `NotificationPlan`) → `dispatcher.ts` (takes injected
+  `DispatcherDeps` — `sendEmail`, `resolveEmail`, `resolveCounterpartyName`,
+  `brand` — so it's testable without a real notification-service call) still
+  plans action emails, but sends by calling into `email/dispatch_email.ts`.
+  `action_copy.ts` only resolves the **copy group** (`connect`/`apply`) and
+  **recipient role** (`seeker`/`provider`) for a notification — it's
+  `email/email_cases.ts`'s `actionCaseId()` that assembles those two into the
+  actual case id.
+- `src/support/build_support_email.ts`: smaller, single-route — now just
+  `generateSupportReference` plus `buildSupportDetailsTable` (the escaped
+  `{{detailsTable}}` html token for the `support.request` case).
+  `POST /api/v1/support` (authenticated) calls
+  `getDefaultEmailSender().dispatchEmail({ caseId: 'support.request', ... })`
+  directly (no `dispatcher.ts`/`action_copy.ts` in between) and returns
+  `503 SUPPORT_NOT_CONFIGURED` when the recipient/fromEmail/sender is unset,
+  `502 SUPPORT_SEND_FAILED` if the send throws (the case is critical).
+- Guardian OTP and login OTP emails are likewise thin callers straight into
+  `dispatchEmail` — see `docs/operations/guardian-otp-templates.md`.
+
+Support has no `NotificationPlan`/`dispatcher.ts` layer above it — it builds
+its `DispatchEmailArgs` inline in the route handler — but every pipeline
+converges on the same sender, so copy for every email in the system lives in
+one file and is overridable without a code change.
 
 ## `action/perform` is single-object; bulk is a separate route
 

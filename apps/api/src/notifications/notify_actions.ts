@@ -72,9 +72,11 @@ export function resolveNotifierConfig(): NotifierConfig | null {
 
 /**
  * Fire-and-forget entry point used by the action route seams. Resolves
- * recipients, renders branded HTML, and posts to the notification service.
- * Never throws and never blocks the route. No-op when notifications are not
- * configured (missing NS client / from-email / frontend base URL).
+ * recipients, builds the branded plan, and hands off to the central email
+ * sender (`email/dispatch_email.ts`, #529) to render and post to the
+ * notification service. Never throws and never blocks the route. No-op when
+ * notifications are not configured (missing NS client / from-email /
+ * frontend base URL).
  */
 export async function dispatchActionNotifications(
   event: NotificationEvent,
