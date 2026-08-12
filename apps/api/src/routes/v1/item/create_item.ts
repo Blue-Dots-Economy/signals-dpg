@@ -134,6 +134,37 @@ async function resolveSelfConsentPromotes(
   return !(age === null || isMinor(age));
 }
 
+/**
+ * Single-role lock (driven by `user.domains`, the source of truth): a user may
+ * create profiles only in the domain(s) on their row. Empty ⇒ not yet set, so
+ * any served domain is allowed (first create records it). Returns a
+ * machine-readable `DOMAIN_LOCKED` body when the requested domain is locked
+ * out, else `null`. Admin api-key callers bypass (the caller skips this).
+ */
+async function resolveDomainLockError(
+  userId: string,
+  requestedDomain: string,
+): Promise<{
+  error: 'DOMAIN_LOCKED';
+  message: string;
+  locked_domain: string;
+  requested_domain: string;
+} | null> {
+  const [row] = await db
+    .select({ domains: user.domains })
+    .from(user)
+    .where(eq(user.id, userId))
+    .limit(1);
+  const allowed = row?.domains ?? [];
+  if (allowed.length === 0 || allowed.includes(requestedDomain)) return null;
+  return {
+    error: 'DOMAIN_LOCKED',
+    message: `You are registered as "${allowed[0]}" and cannot create items under "${requestedDomain}".`,
+    locked_domain: allowed[0] as string,
+    requested_domain: requestedDomain,
+  };
+}
+
 export const create_item_handler = async (
   request: CreateItemRequest,
   reply: FastifyReply
@@ -207,20 +238,8 @@ export const create_item_handler = async (
   // domain is allowed and the first create records it. Admin api-key callers
   // bypass — they act on behalf of a user with explicit intent.
   if (!isAdminApiCaller) {
-    const [row] = await db
-      .select({ domains: user.domains })
-      .from(user)
-      .where(eq(user.id, userId))
-      .limit(1);
-    const allowed = row?.domains ?? [];
-    if (allowed.length > 0 && !allowed.includes(body.item_domain)) {
-      return reply.code(403).send({
-        error: 'DOMAIN_LOCKED',
-        message: `You are registered as "${allowed[0]}" and cannot create items under "${body.item_domain}".`,
-        locked_domain: allowed[0],
-        requested_domain: body.item_domain,
-      });
-    }
+    const lockError = await resolveDomainLockError(userId, body.item_domain);
+    if (lockError) return reply.code(403).send(lockError);
   }
 
   try {

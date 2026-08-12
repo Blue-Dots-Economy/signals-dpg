@@ -421,6 +421,22 @@ function resolveDefaultViewMode(): ViewMode {
 }
 
 
+/**
+ * Whether the active profile's domain still requires profile_creation consent
+ * before go-live, from its `go_live_required` gates (mirrors network.json). A
+ * domain that goes live on completeness alone (`["schema_required"]`) never
+ * prompts. Absent config ⇒ require (safe default, matches the login gate).
+ */
+function domainNeedsProfileConsent(
+  domains:
+    | ReadonlyArray<{ id: string; go_live_required?: Array<'schema_required' | 'consent_required'> }>
+    | undefined,
+  domainId: string | undefined,
+): boolean {
+  const gates = domains?.find((d) => d.id === domainId)?.go_live_required;
+  return gates ? gates.includes('consent_required') : true;
+}
+
 export function HomePage() {
   const { t } = useTranslation();
   const { user, signOut } = useAuth();
@@ -710,13 +726,9 @@ export function HomePage() {
   // completeness alone (e.g. a provider configured `["schema_required"]`) never
   // prompts for profile_creation consent. Absent config ⇒ require (safe default,
   // matches the login-gate behaviour).
-  const activeDomainGates = network?.domains.find(
-    (d) => d.id === myItem?.item_domain,
-  )?.go_live_required;
-  const activeDomainNeedsConsent = activeDomainGates
-    ? activeDomainGates.includes('consent_required')
-    : true;
-  const profileConsentRequired = Boolean(profileStatement) && activeDomainNeedsConsent;
+  const profileConsentRequired =
+    Boolean(profileStatement) &&
+    domainNeedsProfileConsent(network?.domains, myItem?.item_domain);
 
   // Shared profile_creation-consent accept flow (adult self-accept OR minor
   // guardian-OTP), extracted into a hook so it isn't duplicated with
