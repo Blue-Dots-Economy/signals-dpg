@@ -1,6 +1,20 @@
-import { describe, expect, it, vi } from 'vitest';
-import { loadEmailMessages } from '../messages';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { requiredMessageKeys } from '../email_cases';
+
+// notification.EMAIL_MESSAGES_PATH is read once, at import time, by the
+// `@/config` module. vi.hoisted + vi.mock let us swap its value per test
+// without re-importing the whole config/env-parsing stack.
+const mockNotification = vi.hoisted(() => ({
+  EMAIL_MESSAGES_PATH: undefined as string | undefined,
+}));
+
+vi.mock('@/config', () => ({ notification: mockNotification }));
+
+import {
+  getEmailMessages,
+  loadEmailMessages,
+  resetEmailMessagesForTests,
+} from '../messages';
 
 /** Minimal valid defaults: every required key present. */
 function fullDefaults(): string {
@@ -67,5 +81,53 @@ describe('loadEmailMessages', () => {
   it('get() throws for unknown keys', () => {
     const m = loadEmailMessages({ defaultsText: fullDefaults() });
     expect(() => m.get('nope.nope')).toThrow('unknown email message key: nope.nope');
+  });
+});
+
+describe('getEmailMessages (singleton + EMAIL_MESSAGES_PATH wiring)', () => {
+  beforeEach(() => {
+    resetEmailMessagesForTests();
+    mockNotification.EMAIL_MESSAGES_PATH = undefined;
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    resetEmailMessagesForTests();
+  });
+
+  it('serves bundled defaults and warns nothing when no override path is set', async () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    const m = await getEmailMessages();
+
+    expect(m.get('welcome.subject')).toBe('Welcome!');
+    expect(warnSpy).not.toHaveBeenCalled();
+  });
+
+  it('warns (with the path) and falls back to bundled defaults when the override file is unreadable', async () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const badPath = '/no/such/path/messages.override.properties';
+    mockNotification.EMAIL_MESSAGES_PATH = badPath;
+
+    const m = await getEmailMessages();
+
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining(badPath));
+    expect(m.get('welcome.subject')).toBe('Welcome!');
+  });
+
+  it('reuses the same instance across calls (singleton) without re-reading', async () => {
+    const p1 = getEmailMessages();
+    const p2 = getEmailMessages();
+    expect(p1).toBe(p2);
+
+    const [m1, m2] = await Promise.all([p1, p2]);
+    expect(m1).toBe(m2);
+  });
+
+  it('resetEmailMessagesForTests() clears the singleton so the next call re-loads', async () => {
+    const m1 = await getEmailMessages();
+    resetEmailMessagesForTests();
+    const m2 = await getEmailMessages();
+    expect(m1).not.toBe(m2);
   });
 });
