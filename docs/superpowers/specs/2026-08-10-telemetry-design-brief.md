@@ -2,8 +2,9 @@
 
 **Date:** 2026-08-10 (revised 2026-08-13 — OpenTelemetry, fixed attribute schema;
 review fixes §6.1–6.4 applied)
-**Full spec:** `2026-08-10-telemetry-design.md` *(still describes the superseded
-Sunbird v3 approach; being updated)*
+**Full spec:** `2026-08-10-telemetry-design.md` — same design in depth
+(code-level emit contract, failure modes, configuration)
+**Plan:** `../plans/2026-08-10-telemetry-implementation.md`
 **Review:** `telemetry-design-reconciliation-2026-08-13.md`
 
 What telemetry we generate, what each event carries, and how it stays correct
@@ -87,7 +88,7 @@ exists (`session.id`, `error.type`, `http.*`).
 
 | Attribute | Meaning |
 |---|---|
-| `event.name` | Static identifier, `signals.<area>.<verb>`. Never contains ids or dynamic values. |
+| `event.name` | Static identifier, `<area>.<verb>` — unprefixed. Never contains ids or dynamic values. |
 | `event.uid` | Deterministic dedup key derived from the domain natural key. |
 | `event.category` | `state_change` · `interaction` · `view` · `query` · `delivery` · `error` |
 | `event.parent_uid` | The `event.uid` that caused this one. Links a notification to the change that triggered it. |
@@ -186,10 +187,11 @@ single-sided event only `source.*` is set.
 key used in more than two places gets promoted into the core schema.** That keeps
 the hatch from quietly becoming the sprawl it exists to prevent.
 
-**On `event.name` values:** the `signals.` namespace stays there, and only there.
-Multiple producers publish to the same stream, and OTEL guidance is that event
-names be namespaced to avoid collision. It's one field, not a prefix repeated
-across every attribute.
+**On `event.name` values:** unprefixed dotted `<area>.<verb>` —
+`action.created`, `item.lifecycle_changed`. No product namespace anywhere. OTEL
+guidance is to namespace event names against collision when several producers
+share a stream, but `service.name` in the `Resource` already identifies the
+producer on every event, so a prefix would add nothing.
 
 ---
 
@@ -214,7 +216,7 @@ write, so it is the only emitter.
       { "key": "service.instance.id", "value": { "stringValue": "api-7f9c4b-x2m1" } }  // pod, not deployment
     ]},
     "scopeLogs": [{
-      "scope": { "name": "signals.domain", "version": "1.0.0" },
+      "scope": { "name": "@dpg/telemetry", "version": "1.0.0" },
       "logRecords": [{
         "timeUnixNano":         "1786665600123000000",
         "observedTimeUnixNano": "1786665600123000000",
@@ -222,7 +224,7 @@ write, so it is the only emitter.
         "traceId": "4bf92f3577b34da6a3ce929d0e0e4736",   // spans the cross-instance hop
         "spanId":  "00f067aa0ba902b7",
         "attributes": [
-          { "key": "event.name",     "value": { "stringValue": "signals.action.status_changed" } },
+          { "key": "event.name",     "value": { "stringValue": "action.status_changed" } },
           { "key": "event.uid",      "value": { "stringValue": "act:9f2c…:3" } },
           { "key": "event.category", "value": { "stringValue": "state_change" } },
           { "key": "network",        "value": { "stringValue": "yellow_dot" } },
@@ -271,7 +273,7 @@ you.
 
 ```jsonc
 {
-  "event.name": "signals.user.provisioned",
+  "event.name": "user.provisioned",
   "event.uid":  "usr:8d3f…:provisioned",
   "event.category": "state_change",
   "network": "yellow_dot", "channel": "otp_email",
@@ -303,7 +305,7 @@ subtype — not a separate event shape.
 
 ```jsonc
 {
-  "event.name": "signals.item.created",
+  "event.name": "item.created",
   "event.uid":  "itm:b71e…:1",
   "event.category": "state_change",
   "network": "yellow_dot", "channel": "in_app",
@@ -330,7 +332,7 @@ subtype — not a separate event shape.
 
 ```jsonc
 {
-  "event.name": "signals.item.updated",
+  "event.name": "item.updated",
   "event.uid":  "itm:b71e…:2",
   "event.category": "state_change",
   "network": "yellow_dot", "channel": "in_app",
@@ -359,7 +361,7 @@ actually enforces.
 
 ```jsonc
 {
-  "event.name": "signals.item.lifecycle_changed",
+  "event.name": "item.lifecycle_changed",
   "event.uid":  "itm:b71e…:3",
   "event.category": "state_change",
   "event.parent_uid": "csn:4f2a…",           // the consent that caused it
@@ -389,7 +391,7 @@ exactly that.
 
 ```jsonc
 {
-  "event.name": "signals.ui.page_viewed",
+  "event.name": "ui.page_viewed",
   "event.uid":  "ui:s_4a91…:18",
   "event.category": "view",
   "network": "yellow_dot", "channel": "in_app",
@@ -405,7 +407,7 @@ exactly that.
 
 ```jsonc
 {
-  "event.name": "signals.ui.interaction",
+  "event.name": "ui.interaction",
   "event.uid":  "ui:s_4a91…:19",
   "event.category": "interaction",
   "network": "yellow_dot", "channel": "in_app",
@@ -430,7 +432,7 @@ actually committed.
 
 ```jsonc
 {
-  "event.name": "signals.search.executed",
+  "event.name": "search.executed",
   "event.category": "query",
   "network": "yellow_dot", "channel": "in_app",
 
@@ -452,7 +454,7 @@ staying ad hoc.
 
 ```jsonc
 {
-  "event.name": "signals.notification.skipped",
+  "event.name": "notification.skipped",
   "event.uid":  "ntf:act:9f2c…:3:INBOUND_STATUS",
   "event.category": "delivery",
   "event.parent_uid": "act:9f2c…:3",       // the change that triggered it
@@ -475,7 +477,7 @@ dark-user rate rather than a log line.
 ```jsonc
 // span
 {
-  "name": "signals.action.forward_to_target_instance",
+  "name": "action.forward_to_target_instance",
   "traceId": "4bf92f3577b34da6a3ce929d0e0e4736",   // same trace as example 1
   "status": "Ok",
   "attributes": {
@@ -715,8 +717,8 @@ remain the compliance records of truth; telemetry mirrors them for analysis.
    metric model.
 2. **One fixed attribute schema for all events**, with `attr.*` as a bounded
    escape hatch and a promotion rule. No per-scenario fields.
-3. **`event.name` is a static `signals.*` namespace**; everything dynamic is an
-   attribute.
+3. **`event.name` is a static, unprefixed `<area>.<verb>`**; everything dynamic is
+   an attribute.
 4. **Deterministic `event.uid`** — the discipline that makes multi-instance
    correct. Prevent duplication at the emitter, identify it by uid, collapse it
    at the sink.
