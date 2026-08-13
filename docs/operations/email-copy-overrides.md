@@ -118,3 +118,26 @@ that network or brand.
   only` and drops every network/brand layer for that boot, falling back to
   the instance override (or bundled defaults) for all networks/brands —
   coarser than the per-layer fallback above, but email still never breaks.
+
+## Deployment settings that affect what recipients see
+
+Two existing env vars now shape every email's visible identity, so set both on
+each deployment:
+
+- **`NOTIFICATION_FROM_EMAIL` — the visible From (and default Reply-To) for
+  every email.** All email now shares one sender-resolution path, which falls
+  back to `hello@bluedotseconomy.org` only when this var is unset. Action and
+  support emails already required it (an unset value disables action emails
+  and returns `503 SUPPORT_NOT_CONFIGURED`), and guardian OTP previously sent
+  an **empty** From without it — so setting it is what keeps the visible From
+  the intended address rather than the fallback. Login-OTP and welcome emails
+  used to hardcode `hello@bluedotseconomy.org`; they now honour this var too,
+  which is the one deliberate From change (one consistent sender for all
+  email instead of two).
+- **`INSTANCE_NAME` — the "Team \<name\>" sign-off** in action/retire emails
+  (and the app name inside OTP/welcome copy). Set it to the operating org the
+  content sheet names: `EkStep` on Blue Dot, `ALIMCO` on Purple Dot. Leaving
+  it at a placeholder makes emails sign off "Team DPG".
+
+`NOTIFICATION_REPLY_TO` overrides Reply-To when it should differ from the From
+address; support emails always set Reply-To to the submitter regardless.
