@@ -209,6 +209,7 @@
       },
       "id": "seeker",
       "go_live_required": ["schema_required", "consent_required"],
+      "my_items_label": "My Actions",
       "guardian_consent_required": true,
       "card": {
         "title_field": "beneficiary_name",
@@ -423,6 +424,7 @@
       },
       "id": "provider",
       "go_live_required": ["schema_required", "consent_required"],
+      "my_items_label": "My Services",
       "card": {
         "title_field": "organisation_name",
         "avatar_from": "organisation_name",
