@@ -13,7 +13,17 @@ import { Toaster } from 'sonner';
 // NB: mock factories must not close over outer bindings (they are hoisted
 // above the imports), hence the bare `vi.fn()`s wired up per-test via
 // `vi.mocked(...)`.
-vi.mock('@/lib/support-api', () => ({ submitSupport: vi.fn() }));
+// fetchSupportConfig backs the dialog's attachment limits (#551); the real
+// defaults keep these tests exercising the same limits as production.
+vi.mock('@/lib/support-api', () => ({
+  submitSupport: vi.fn(),
+  fetchSupportConfig: vi.fn(async () => ({
+    enabled: true,
+    maxTotalBytes: 5 * 1024 * 1024,
+    maxFiles: 3,
+    allowedTypes: ['image/png', 'video/mp4', 'audio/mpeg'],
+  })),
+}));
 vi.mock('@/hooks/use-match-score', () => ({ useMatchScore: vi.fn() }));
 vi.mock('@/hooks/use-actions', () => ({ usePendingActionsCount: vi.fn() }));
 vi.mock('@/lib/auth-api', () => ({

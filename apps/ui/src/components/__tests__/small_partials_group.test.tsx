@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter, useLocation } from 'react-router-dom';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { Toaster } from 'sonner';
 import type { RJSFSchema } from '@rjsf/utils';
 
@@ -150,14 +151,18 @@ function PathProbe() {
 }
 
 function renderUserMenu() {
+  // UserMenu mounts SupportDialog, which reads its attachment limits through
+  // React Query (#551) — hence the provider even though nothing here fetches.
   return render(
-    <MemoryRouter initialEntries={['/']}>
-      <Toaster />
-      <TooltipProvider>
-        <UserMenu />
-      </TooltipProvider>
-      <PathProbe />
-    </MemoryRouter>,
+    <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
+      <MemoryRouter initialEntries={['/']}>
+        <Toaster />
+        <TooltipProvider>
+          <UserMenu />
+        </TooltipProvider>
+        <PathProbe />
+      </MemoryRouter>
+    </QueryClientProvider>,
   );
 }
 

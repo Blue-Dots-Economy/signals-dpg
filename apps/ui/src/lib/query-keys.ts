@@ -48,6 +48,9 @@ export const queryKeys = {
   // The user's profile-creation-consent status for a network (set of consented
   // item ids). Config-ish; invalidated on consent-accept.
   profileConsent: (networkId: string) => ['profile-consent', networkId] as const,
+  // Support-form capabilities (enabled + attachment limits). Instance-wide, not
+  // per network or user, so the key carries nothing.
+  supportConfig: () => ['support-config'] as const,
   actions,
   myItems: (networkId: string) => ['my-items', networkId] as const,
   /**
