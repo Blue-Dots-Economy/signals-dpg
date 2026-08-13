@@ -6142,6 +6142,39 @@
                   "user_id": {
                     "type": "string",
                     "minLength": 1
+                  },
+                  "fields": {
+                    "maxItems": 50,
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "minLength": 1
+                    }
+                  },
+                  "contact": {
+                    "anyOf": [
+                      {
+                        "type": "boolean",
+                        "enum": [
+                          true
+                        ]
+                      },
+                      {
+                        "minItems": 1,
+                        "type": "array",
+                        "items": {
+                          "type": "string",
+                          "enum": [
+                            "name",
+                            "email",
+                            "phone"
+                          ]
+                        }
+                      }
+                    ]
+                  },
+                  "include_locations": {
+                    "type": "boolean"
                   }
                 }
               }
@@ -6189,6 +6222,104 @@
                           "item_state": {
                             "type": "object",
                             "additionalProperties": {}
+                          },
+                          "contact": {
+                            "type": "object",
+                            "properties": {
+                              "name": {
+                                "type": "object",
+                                "properties": {
+                                  "value": {
+                                    "nullable": true,
+                                    "type": "string"
+                                  },
+                                  "source": {
+                                    "nullable": true,
+                                    "type": "string",
+                                    "enum": [
+                                      "item",
+                                      "user"
+                                    ]
+                                  }
+                                },
+                                "required": [
+                                  "value",
+                                  "source"
+                                ],
+                                "additionalProperties": false
+                              },
+                              "email": {
+                                "type": "object",
+                                "properties": {
+                                  "value": {
+                                    "nullable": true,
+                                    "type": "string"
+                                  },
+                                  "source": {
+                                    "nullable": true,
+                                    "type": "string",
+                                    "enum": [
+                                      "item",
+                                      "user"
+                                    ]
+                                  }
+                                },
+                                "required": [
+                                  "value",
+                                  "source"
+                                ],
+                                "additionalProperties": false
+                              },
+                              "phone": {
+                                "type": "object",
+                                "properties": {
+                                  "value": {
+                                    "nullable": true,
+                                    "type": "string"
+                                  },
+                                  "source": {
+                                    "nullable": true,
+                                    "type": "string",
+                                    "enum": [
+                                      "item",
+                                      "user"
+                                    ]
+                                  }
+                                },
+                                "required": [
+                                  "value",
+                                  "source"
+                                ],
+                                "additionalProperties": false
+                              }
+                            },
+                            "additionalProperties": false
+                          },
+                          "locations": {
+                            "type": "array",
+                            "items": {
+                              "type": "object",
+                              "properties": {
+                                "lat": {
+                                  "type": "number",
+                                  "minimum": -90,
+                                  "maximum": 90
+                                },
+                                "lng": {
+                                  "type": "number",
+                                  "minimum": -180,
+                                  "maximum": 180
+                                },
+                                "label": {
+                                  "type": "string"
+                                }
+                              },
+                              "required": [
+                                "lat",
+                                "lng"
+                              ],
+                              "additionalProperties": false
+                            }
                           },
                           "created_at": {
                             "type": "string",

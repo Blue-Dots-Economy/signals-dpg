@@ -165,6 +165,7 @@
         "body": "Travellers can find and book your experience only once your listing is live. Add the details below to start reaching visitors."
       },
       "id": "practitioner",
+      "contact_fields": { "name": "provider_name", "phone": "contact_phone", "email": "email" },
       "go_live_required": ["schema_required"],
       "card": {
         "title_field": "product_name",

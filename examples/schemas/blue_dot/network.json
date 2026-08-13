@@ -779,6 +779,7 @@
         "avatar_from": "name",
         "default_fields": ["location", "natureOfJobsInterestedIn", "educationCategory", "workExperience"]
       },
+      "contact_fields": { "name": "name", "phone": "phone" },
       "dashboard_tiles": {
         "profile": [
           { "field": "total_items", "label": "Profiles Registered" },
@@ -1318,6 +1319,7 @@
         "avatar_from": "jobProviderName",
         "default_fields": ["role", "jobProviderLocation", "natureOfJob", "positions"]
       },
+      "contact_fields": { "name": "jobProviderName", "phone": "hiringManagerPhoneNumber", "email": "hiringManagerEmail" },
       "dashboard_tiles": {
         "profile": [
           { "field": "total_items", "label": "Postings Registered" },

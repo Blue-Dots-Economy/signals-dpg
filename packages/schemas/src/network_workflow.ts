@@ -96,6 +96,31 @@ const CardConfigSchema = z.object({
   extra_fields: z.array(z.string().min(1)).optional(),
 }).strict();
 
+/**
+ * Canonical contact-field mapping for a domain (#237): maps the canonical
+ * name/email/phone to the domain's real item_state field name, since these
+ * are named differently per network/domain (e.g. `mobile_number`,
+ * `hiringManagerPhoneNumber`). Consumed by participant/decrypt field
+ * resolution. All optional — `name` falls back to display_name_field /
+ * card.title_field when unset.
+ */
+const ContactFieldsSchema = z
+  .object({
+    // `.optional()` WITHOUT `.min(1)`: an empty-string value ("phone": "") on a
+    // declared key must not fail the whole cross-network parse either — at
+    // resolve time an empty mapping is falsy, so it degrades to the account
+    // fallback exactly like an absent mapping (same rationale as `.strip()`).
+    name: z.string().optional(),
+    email: z.string().optional(),
+    phone: z.string().optional(),
+  })
+  // `.strip()` (not `.strict()`): an unknown/typo'd key here must not fail the
+  // whole network-config parse — that runs for every domain, including unserved
+  // siblings, and would take down boot (app.ts awaits config with no catch).
+  // A dropped typo degrades gracefully to the account fallback at resolve time
+  // (with a `contact_map_missing` warn), rather than a hard boot failure.
+  .strip();
+
 const NetworkDomainSchema = z.object({
   id: z.string().min(1),
   description: z.string().optional(),
@@ -136,6 +161,7 @@ const NetworkDomainSchema = z.object({
   status_rules: z.array(StatusRuleSchema).min(1),
   dashboard_tiles: DashboardTilesSchema.optional(),
   card: CardConfigSchema.optional(),
+  contact_fields: ContactFieldsSchema.optional(),
 }).superRefine((domain, ctx) => {
   const last = domain.status_rules[domain.status_rules.length - 1];
   if (last.when !== 'default') {
