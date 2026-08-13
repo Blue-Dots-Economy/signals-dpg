@@ -212,7 +212,7 @@ jobs:
         if: always()
         run: docker rm -f ci-db ci-redis || true
 
-      - uses: SonarSource/sonarqube-scan-action@v5
+      - uses: SonarSource/sonarqube-scan-action@v8
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
 
