@@ -71,8 +71,14 @@ const MAX_FILENAME_LENGTH = 120;
 export function decodedBase64Length(data: string): number {
   const compact = data.replace(/\s/g, '');
   if (compact.length === 0) return 0;
-  const padding = compact.endsWith('==') ? 2 : compact.endsWith('=') ? 1 : 0;
-  return Math.floor((compact.length * 3) / 4) - padding;
+  return Math.floor((compact.length * 3) / 4) - base64Padding(compact);
+}
+
+/** Number of `=` padding characters at the end of a base64 string (0, 1 or 2). */
+function base64Padding(compact: string): number {
+  if (compact.endsWith('==')) return 2;
+  if (compact.endsWith('=')) return 1;
+  return 0;
 }
 
 /**

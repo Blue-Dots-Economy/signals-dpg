@@ -69,15 +69,16 @@ export function validateAttachmentSelection(
 
 /**
  * Base64-encode a file for the JSON body. Chunked rather than one
- * `String.fromCharCode(...bytes)` call — spreading a multi-megabyte array into
- * arguments overflows the call stack.
+ * `String.fromCodePoint(...bytes)` call — spreading a multi-megabyte array into
+ * arguments overflows the call stack. Every byte is 0–255, so code points and
+ * char codes coincide here.
  */
 export async function fileToBase64(file: File): Promise<string> {
   const bytes = new Uint8Array(await file.arrayBuffer());
   const CHUNK_SIZE = 0x8000;
   let binary = '';
   for (let offset = 0; offset < bytes.length; offset += CHUNK_SIZE) {
-    binary += String.fromCharCode(...bytes.subarray(offset, offset + CHUNK_SIZE));
+    binary += String.fromCodePoint(...bytes.subarray(offset, offset + CHUNK_SIZE));
   }
   return btoa(binary);
 }

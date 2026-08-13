@@ -92,8 +92,8 @@ describe('fileToBase64', () => {
     // 0x8000 is the chunk size; go well past it.
     const bytes = new Uint8Array(200_000).fill(7);
     const encoded = await fileToBase64(new File([bytes], 'big.bin', { type: 'image/png' }));
-    expect(encoded.length).toBe(Math.ceil(200_000 / 3) * 4);
-    expect(atob(encoded).length).toBe(200_000);
+    expect(encoded).toHaveLength(Math.ceil(200_000 / 3) * 4);
+    expect(atob(encoded)).toHaveLength(200_000);
   });
 });
 

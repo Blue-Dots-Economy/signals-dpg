@@ -50,7 +50,7 @@ describe('sanitizeFilename', () => {
   });
 
   it('caps the length', () => {
-    expect(sanitizeFilename(`${'a'.repeat(500)}.png`).length).toBe(120);
+    expect(sanitizeFilename(`${'a'.repeat(500)}.png`)).toHaveLength(120);
   });
 
   it('keeps ordinary unicode names intact', () => {

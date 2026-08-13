@@ -28,6 +28,49 @@ interface SupportDialogProps {
   onOpenChange: (open: boolean) => void;
 }
 
+type Translate = (key: string, options?: Record<string, unknown>) => string;
+
+/**
+ * Maps a failed submit to the toast to show. Extracted from the submit handler
+ * so the status ladder lives in one readable place instead of inflating the
+ * handler, and so each failure keeps its own specific message rather than
+ * collapsing into "couldn't send".
+ */
+function resolveSubmitErrorToast(
+  err: unknown,
+  t: Translate,
+  maxTotalBytes: number,
+): { title: string; description?: string } {
+  const response = axios.isAxiosError(err) ? err.response : undefined;
+  const data = response?.data as { error?: unknown; message?: unknown } | undefined;
+
+  if (response?.status === 503) {
+    return { title: t('support.toast_unavailable'), description: t('support.toast_unavailable_desc') };
+  }
+  if (response?.status === 429) {
+    return { title: t('support.toast_rate_limited'), description: t('support.toast_rate_limited_desc') };
+  }
+  if (response?.status === 413) {
+    // The server's body limit, not its attachment check — a payload this far
+    // over the cap never reaches the handler's specific error codes.
+    return { title: t('support.validation_attachment_size', { size: formatBytes(maxTotalBytes) }) };
+  }
+  if (
+    response?.status === 400 &&
+    typeof data?.error === 'string' &&
+    data.error.startsWith('ATTACHMENT_')
+  ) {
+    // Server-side attachment rejection the client-side check didn't catch (e.g.
+    // limits lowered since the config was cached). Its message names the
+    // offending file, so surface it rather than a generic failure.
+    return {
+      title: t('support.toast_attachment_rejected'),
+      description: typeof data.message === 'string' ? data.message : undefined,
+    };
+  }
+  return { title: t('support.toast_error'), description: t('support.toast_error_desc') };
+}
+
 export function SupportDialog({ open, onOpenChange }: SupportDialogProps) {
   const { t } = useTranslation();
   const { user } = useAuth();
@@ -127,33 +170,8 @@ export function SupportDialog({ open, onOpenChange }: SupportDialogProps) {
       reset();
       onOpenChange(false);
     } catch (err) {
-      if (axios.isAxiosError(err) && err.response?.status === 503) {
-        toast.error(t('support.toast_unavailable'), { description: t('support.toast_unavailable_desc') });
-      } else if (axios.isAxiosError(err) && err.response?.status === 429) {
-        toast.error(t('support.toast_rate_limited'), {
-          description: t('support.toast_rate_limited_desc'),
-        });
-      } else if (axios.isAxiosError(err) && err.response?.status === 413) {
-        // The server's body limit, not its attachment check — a payload this far
-        // over the cap never reaches the handler's specific error codes.
-        toast.error(
-          t('support.validation_attachment_size', { size: formatBytes(config.maxTotalBytes) }),
-        );
-      } else if (
-        axios.isAxiosError(err) &&
-        err.response?.status === 400 &&
-        typeof err.response.data?.error === 'string' &&
-        err.response.data.error.startsWith('ATTACHMENT_')
-      ) {
-        // Server-side attachment rejection the client-side check didn't catch
-        // (e.g. limits lowered since the config was cached). Its message names
-        // the offending file, so surface it rather than a generic failure.
-        toast.error(t('support.toast_attachment_rejected'), {
-          description: err.response.data.message,
-        });
-      } else {
-        toast.error(t('support.toast_error'), { description: t('support.toast_error_desc') });
-      }
+      const { title, description } = resolveSubmitErrorToast(err, t, config.maxTotalBytes);
+      toast.error(title, description ? { description } : undefined);
     } finally {
       setIsSubmitting(false);
     }
