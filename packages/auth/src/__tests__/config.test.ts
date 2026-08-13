@@ -141,6 +141,10 @@ const makeNotificationClient = () => ({
   ),
 });
 
+/** Spy for the injected `AuthRuntimeConfig.sendEmail` central dispatcher (#529). */
+const makeSendEmail = () =>
+  vi.fn(async (_args: Record<string, unknown>): Promise<void> => {});
+
 type RuntimeConfig = Parameters<typeof createAuth>[0];
 
 const buildConfig = (overrides: Record<string, unknown> = {}) => {
@@ -542,56 +546,48 @@ describe('sendPhoneOtp', () => {
 });
 
 describe('sendEmailOtp', () => {
-  it('sends a realtime basic_email with an appName-stamped subject and the OTP in the html', async () => {
-    const nc = makeNotificationClient();
-    const { otpOptions } = build({ notificationClient: nc, appName: 'Signals' });
+  it('calls config.sendEmail with caseId "login.otp", fromName=appName and the otp/userName/signAction/appName variables', async () => {
+    const sendEmail = makeSendEmail();
+    const { otpOptions } = build({ sendEmail, appName: 'Signals' });
     await otpOptions.sendEmailOtp({
       email: 'alice@example.org',
       otp: '654321',
       user: { name: 'Alice' },
     });
-    const payload = nc.notify.mock.calls[0][0] as {
-      channel: string;
-      template_id: string;
-      to: string;
-      priority: string;
-      variables: Record<string, string>;
-    };
-    expect(payload.channel).toBe('email');
-    expect(payload.template_id).toBe('basic_email');
-    expect(payload.to).toBe('alice@example.org');
-    expect(payload.priority).toBe('realtime');
-    expect(payload.variables.fromName).toBe('Signals');
-    expect(payload.variables.fromEmail).toBe('hello@bluedotseconomy.org');
-    expect(payload.variables.replyTo).toBe('hello@bluedotseconomy.org');
-    expect(payload.variables.subject).toBe(
-      'Your One-Time Password (OTP) for Signals'
-    );
-    expect(payload.variables.html).toContain('654321');
-    expect(payload.variables.html).toContain('alice');
-    expect(payload.variables.html).toContain('sign in');
+    expect(sendEmail).toHaveBeenCalledWith({
+      caseId: 'login.otp',
+      to: 'alice@example.org',
+      fromName: 'Signals',
+      variables: {
+        otp: '654321',
+        userName: 'alice',
+        signAction: 'sign in',
+        appName: 'Signals',
+      },
+    });
   });
 
-  it('renders the sign-up copy when there is no existing user', async () => {
-    const nc = makeNotificationClient();
-    const { otpOptions } = build({ notificationClient: nc });
+  it('renders the sign-up variables when there is no existing user', async () => {
+    const sendEmail = makeSendEmail();
+    const { otpOptions } = build({ sendEmail });
     await otpOptions.sendEmailOtp({
       email: 'new@example.org',
       otp: '222222',
       user: null,
     });
-    const html = (
-      nc.notify.mock.calls[0][0] as { variables: { html: string } }
-    ).variables.html;
-    expect(html).toContain('sign up');
-    expect(html).not.toContain('sign in');
+    const { variables } = sendEmail.mock.calls[0][0] as {
+      variables: Record<string, string>;
+    };
+    expect(variables.signAction).toBe('sign up');
+    expect(variables.userName).toBe('user');
   });
 
-  it('logs AND rethrows a notification-service failure', async () => {
-    const nc = makeNotificationClient();
+  it('logs AND rethrows a sendEmail failure (fail-loud OTP delivery, #1.14)', async () => {
     const boom = new Error('smtp down');
-    nc.notify.mockRejectedValueOnce(boom);
-    const { otpOptions } = build({ notificationClient: nc });
+    const sendEmail = vi.fn(async (_args: Record<string, unknown>) => {
+      throw boom;
+    });
+    const { otpOptions } = build({ sendEmail });
     await expect(
       otpOptions.sendEmailOtp({ email: 'a@b.co', otp: '1', user: null })
     ).rejects.toBe(boom);
@@ -601,7 +597,7 @@ describe('sendEmailOtp', () => {
     );
   });
 
-  it('falls back to a console log when no notification client is configured', async () => {
+  it('falls back to a console log when config.sendEmail is not configured', async () => {
     const { otpOptions } = build();
     await expect(
       otpOptions.sendEmailOtp({ email: 'a@b.co', otp: '777777', user: null })
@@ -609,7 +605,19 @@ describe('sendEmailOtp', () => {
     expect(logSpy).toHaveBeenCalledWith({
       to: 'a@b.co',
       subject: 'Your One-Time Password',
-      html: '777777',
+      otp: '777777',
+    });
+  });
+
+  it('falls back to the console log even when a notification client is present but sendEmail is not wired', async () => {
+    const nc = makeNotificationClient();
+    const { otpOptions } = build({ notificationClient: nc });
+    await otpOptions.sendEmailOtp({ email: 'a@b.co', otp: '333333', user: null });
+    expect(nc.notify).not.toHaveBeenCalled();
+    expect(logSpy).toHaveBeenCalledWith({
+      to: 'a@b.co',
+      subject: 'Your One-Time Password',
+      otp: '333333',
     });
   });
 });

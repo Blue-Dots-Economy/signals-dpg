@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import Fastify from 'fastify';
 import { serializerCompiler, validatorCompiler } from 'fastify-type-provider-zod';
 
-const notifyMock = vi.fn();
+const dispatchEmailMock = vi.fn();
 
 function mockDeps(cfg: {
   recipients?: string;
@@ -17,8 +17,9 @@ function mockDeps(cfg: {
       req.user = { id: 'u1' };
     },
   }));
-  vi.doMock('@/utils/notificationClient', () => ({
-    getNotificationClient: () => (cfg.client === false ? undefined : { notify: notifyMock }),
+  vi.doMock('@/notifications/email/dispatch_email', () => ({
+    getDefaultEmailSender: () =>
+      cfg.client === false ? null : { dispatchEmail: dispatchEmailMock },
   }));
   vi.doMock('@/config', () => ({
     supportConfig: {
@@ -65,8 +66,8 @@ const validPayload = {
 describe('POST /api/v1/support', () => {
   beforeEach(() => {
     vi.resetModules();
-    notifyMock.mockReset();
-    notifyMock.mockResolvedValue(undefined);
+    dispatchEmailMock.mockReset();
+    dispatchEmailMock.mockResolvedValue({ ok: true });
   });
 
   it('sends the support email and returns 201 with a reference', async () => {
@@ -76,21 +77,24 @@ describe('POST /api/v1/support', () => {
     expect(res.statusCode).toBe(201);
     expect(res.json().ok).toBe(true);
     expect(res.json().reference).toMatch(/^SUP-\d{8}-/);
-    expect(notifyMock).toHaveBeenCalledTimes(1);
-    const arg = notifyMock.mock.calls[0][0];
+    expect(dispatchEmailMock).toHaveBeenCalledTimes(1);
+    const arg = dispatchEmailMock.mock.calls[0][0];
+    expect(arg.caseId).toBe('support.request');
     expect(arg.to).toBe('support@org.com');
-    expect(arg.variables.replyTo).toBe('asha@example.com');
-    expect(arg.variables.subject).toContain('Complaint from Asha');
-    expect(arg.variables.subject).toContain('https://x.org');
-    expect(arg.variables.html).toContain('It broke');
-    expect(arg.variables.cc).toBeUndefined();
-    // M1: dedupe_id is the per-submission reference so NS doesn't collapse
-    // two submissions to the same inbox within its dedupe TTL.
-    expect(arg.dedupe_id).toBe(res.json().reference);
+    expect(arg.replyTo).toBe('asha@example.com');
+    expect(arg.dedupeId).toBe(res.json().reference);
+    expect(arg.variables.reference).toBe(res.json().reference);
+    expect(arg.variables.type).toBe('Complaint');
+    expect(arg.variables.name).toBe('Asha');
+    expect(arg.variables.fromSite).toBe(' from https://x.org');
+    expect(arg.variables.details).toBe('It broke');
+    expect(arg.variables.teamName).toBe('Blue Dot');
+    expect(arg.variables.detailsTable).toContain('asha@example.com');
+    expect(arg.cc).toBeUndefined();
     await app.close();
   });
 
-  it('passes multiple recipients through to `to` and cc into variables', async () => {
+  it('passes multiple recipients through to `to` and cc into the call', async () => {
     mockDeps({
       recipients: 'a@org.com, b@org.com',
       cc: 'c@org.com, d@org.com',
@@ -99,9 +103,9 @@ describe('POST /api/v1/support', () => {
     const app = await buildApp();
     const res = await app.inject({ method: 'POST', url: '/api/v1/support', payload: validPayload });
     expect(res.statusCode).toBe(201);
-    const arg = notifyMock.mock.calls[0][0];
+    const arg = dispatchEmailMock.mock.calls[0][0];
     expect(arg.to).toBe('a@org.com, b@org.com');
-    expect(arg.variables.cc).toBe('c@org.com, d@org.com');
+    expect(arg.cc).toBe('c@org.com, d@org.com');
     await app.close();
   });
 
@@ -114,7 +118,12 @@ describe('POST /api/v1/support', () => {
       payload: { name: 'Asha', phone: '+919000000000', type: 'support_request', details: 'x', consent: true },
     });
     expect(res.statusCode).toBe(201);
-    expect(notifyMock.mock.calls[0][0].variables.replyTo).toBe('from@org.com');
+    const arg = dispatchEmailMock.mock.calls[0][0];
+    expect(arg.replyTo).toBe('from@org.com');
+    // No linkBaseUrl configured here: fromSite must be empty, not omitted or
+    // a stray " from undefined" — this is the no-link branch of the subject.
+    expect(arg.variables.fromSite).toBe('');
+    expect(arg.variables.type).toBe('Support Request');
     await app.close();
   });
 
@@ -128,7 +137,7 @@ describe('POST /api/v1/support', () => {
     });
     expect(res.statusCode).toBe(400);
     expect(res.json().error).toBe('CONTACT_REQUIRED');
-    expect(notifyMock).not.toHaveBeenCalled();
+    expect(dispatchEmailMock).not.toHaveBeenCalled();
     await app.close();
   });
 
@@ -141,7 +150,7 @@ describe('POST /api/v1/support', () => {
       payload: { ...validPayload, consent: false },
     });
     expect(res.statusCode).toBe(400);
-    expect(notifyMock).not.toHaveBeenCalled();
+    expect(dispatchEmailMock).not.toHaveBeenCalled();
     await app.close();
   });
 
@@ -166,7 +175,7 @@ describe('POST /api/v1/support', () => {
       payload: { ...validPayload, details: '   ' },
     });
     expect(res.statusCode).toBe(400);
-    expect(notifyMock).not.toHaveBeenCalled();
+    expect(dispatchEmailMock).not.toHaveBeenCalled();
     await app.close();
   });
 
@@ -176,23 +185,23 @@ describe('POST /api/v1/support', () => {
     const res = await app.inject({ method: 'POST', url: '/api/v1/support', payload: validPayload });
     expect(res.statusCode).toBe(503);
     expect(res.json().error).toBe('SUPPORT_NOT_CONFIGURED');
-    expect(notifyMock).not.toHaveBeenCalled();
+    expect(dispatchEmailMock).not.toHaveBeenCalled();
     await app.close();
   });
 
-  it('returns 503 SUPPORT_NOT_CONFIGURED when the notification client is unavailable', async () => {
+  it('returns 503 SUPPORT_NOT_CONFIGURED when the default email sender is unavailable', async () => {
     mockDeps({ recipients: 'support@org.com', fromEmail: 'from@org.com', client: false });
     const app = await buildApp();
     const res = await app.inject({ method: 'POST', url: '/api/v1/support', payload: validPayload });
     expect(res.statusCode).toBe(503);
     expect(res.json().error).toBe('SUPPORT_NOT_CONFIGURED');
-    expect(notifyMock).not.toHaveBeenCalled();
+    expect(dispatchEmailMock).not.toHaveBeenCalled();
     await app.close();
   });
 
-  it('returns 502 SUPPORT_SEND_FAILED when the notification send rejects', async () => {
+  it('returns 502 SUPPORT_SEND_FAILED when dispatchEmail rejects', async () => {
     mockDeps({ recipients: 'support@org.com', fromEmail: 'from@org.com' });
-    notifyMock.mockRejectedValue(new Error('smtp down'));
+    dispatchEmailMock.mockRejectedValue(new Error('smtp down'));
     const app = await buildApp();
     const res = await app.inject({ method: 'POST', url: '/api/v1/support', payload: validPayload });
     expect(res.statusCode).toBe(502);

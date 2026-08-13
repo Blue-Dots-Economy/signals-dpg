@@ -20,8 +20,10 @@
  * separately so a failed SMS still let the email through).
  */
 
-import { instance } from '@/config';
+import { instance, notification } from '@/config';
 import { getNotificationClient } from '@/utils/notificationClient';
+
+import { getDefaultEmailSender } from './email/dispatch_email';
 
 /**
  * The WhatsApp template this uses is a pre-approved Twilio content template;
@@ -29,8 +31,6 @@ import { getNotificationClient } from '@/utils/notificationClient';
  * the better-auth hook so both providers send an identical message.
  */
 const WELCOME_WHATSAPP_CONTENT_SID = 'HX3f2a5d7e4a18e5664124592a12a154eb';
-
-const FROM_EMAIL = 'hello@bluedotseconomy.org';
 
 /** Just enough of the user to address them. */
 export interface WelcomeRecipient {
@@ -72,20 +72,23 @@ export async function sendWelcomeNotifications(
   const appName = instance.INSTANCE_NAME ?? 'DPG';
 
   if (recipient.email) {
+    // Copy comes from the email messages file (#529) — `welcome.*`, overridable
+    // per network/brand — and the shared sender owns the from/reply-to address
+    // and the HTML shell. Best-effort by registry criticality, so the catch here
+    // is belt-and-braces: dispatchEmail already swallows a failed send.
     try {
-      await nc.notify({
-        channel: 'email',
-        template_id: 'basic_email',
+      const sender = getDefaultEmailSender();
+      await sender?.dispatchEmail({
+        caseId: 'welcome',
         to: recipient.email,
-        priority: 'realtime',
+        fromName: appName,
         variables: {
-          fromName: `Welcome to ${appName}`,
-          fromEmail: FROM_EMAIL,
-          replyTo: FROM_EMAIL,
-          subject: 'Welcome!',
-          html: `<div>
-                      <p>Congratulations ${recipient.name}! You just went live with an account on ${appName}.</p>
-                    </div>`,
+          userName: recipient.name || 'user',
+          appName,
+          ...(notification.FRONTEND_BASE_URL
+            ? { siteUrl: notification.FRONTEND_BASE_URL }
+            : {}),
+          teamName: appName,
         },
       });
     } catch (err) {

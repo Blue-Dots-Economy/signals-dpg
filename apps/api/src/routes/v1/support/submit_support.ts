@@ -6,8 +6,12 @@ import { db } from '@api/db/postgres/drizzle_config';
 import { user } from '@api/db/postgres/schema/auth';
 import { auth_middleware_if_enabled } from '@api/plugins/auth/auth_middleware';
 import { instance, supportConfig } from '@/config';
-import { getNotificationClient } from '@/utils/notificationClient';
-import { buildSupportEmail, generateSupportReference } from '@/support/build_support_email';
+import { getDefaultEmailSender } from '@/notifications/email/dispatch_email';
+import {
+  buildSupportDetailsTable,
+  generateSupportReference,
+  TYPE_LABELS,
+} from '@/support/build_support_email';
 
 const SubmitSupportBody = z.object({
   name: z.string().trim().min(1).max(200),
@@ -56,8 +60,8 @@ export const submit_support_handler = async (
     });
   }
 
-  const nc = getNotificationClient();
-  if (!supportConfig.recipients || !supportConfig.fromEmail || !nc) {
+  const sender = getDefaultEmailSender();
+  if (!supportConfig.recipients || !supportConfig.fromEmail || !sender) {
     return reply.code(503).send({
       error: 'SUPPORT_NOT_CONFIGURED',
       message: 'Support is not configured on this instance.',
@@ -76,39 +80,36 @@ export const submit_support_handler = async (
   }
 
   const reference = generateSupportReference(new Date());
-
-  const { subject, html } = buildSupportEmail({
-    type,
-    name,
-    email: submittedEmail ?? null,
-    phone: submittedPhone ?? null,
-    details,
-    reference,
-    linkBaseUrl: supportConfig.linkBaseUrl,
-    teamName: supportConfig.teamName ?? 'Support',
-    submittedAt: new Date().toISOString(),
-  });
+  const teamName = supportConfig.teamName ?? 'Support';
 
   try {
-    await nc.notify({
-      channel: 'email',
-      template_id: 'basic_email',
+    await sender.dispatchEmail({
+      caseId: 'support.request',
       to: supportConfig.recipients,
-      priority: 'other',
+      fromName: `${instance.INSTANCE_NAME ?? 'DPG'} Support`,
+      replyTo: submittedEmail ?? supportConfig.fromEmail,
+      ...(supportConfig.cc ? { cc: supportConfig.cc } : {}),
       // Per-submission dedupe key. Without it the notification-service falls
       // back to `${channel}:${to}:${template_id}` (constant per instance), so
       // two submissions to the same inbox within its dedupe TTL collapse and
       // the second is silently dropped. The unique reference closes that.
-      dedupe_id: reference,
+      dedupeId: reference,
       variables: {
-        fromName: `${instance.INSTANCE_NAME ?? 'DPG'} Support`,
-        fromEmail: supportConfig.fromEmail,
-        replyTo: submittedEmail ?? supportConfig.fromEmail,
-        subject,
-        html,
-        // nodemailer honours a raw `cc`; only include it when configured.
-        ...(supportConfig.cc ? { cc: supportConfig.cc } : {}),
+        reference,
+        type: TYPE_LABELS[type],
+        name,
+        fromSite: supportConfig.linkBaseUrl ? ` from ${supportConfig.linkBaseUrl}` : '',
+        details,
+        teamName,
+        detailsTable: buildSupportDetailsTable({
+          reference,
+          name,
+          email: submittedEmail ?? null,
+          phone: submittedPhone ?? null,
+          submittedAt: new Date().toISOString(),
+        }),
       },
+      log: (message, meta) => request.log.warn(meta ?? {}, message),
     });
   } catch (err) {
     request.log.error({ err }, 'support email send failed');

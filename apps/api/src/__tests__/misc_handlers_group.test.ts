@@ -1,14 +1,17 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 /**
- * Cross-directory unit tests for three small, otherwise integration-only
+ * Cross-directory unit tests for two small, otherwise integration-only
  * modules:
  *   - routes/v1/auth/u18_precheck.ts            (public pre-auth minor hint)
- *   - services/guardian_otp_email.ts            (guardian OTP email rendering)
  *   - services/geocoding/resolve_locations_for_create.ts
  *
  * They live in `src/__tests__/` because the file spans three directories; every
  * dependency (db, redis, network config, geocoder) is mocked.
+ *
+ * Guardian OTP email coverage moved with the #529 dispatchEmail migration:
+ * the pure mapper is `services/__tests__/guardian_otp_dispatch.test.ts` and the
+ * send path is `services/__tests__/guardian_otp_send.test.ts`.
  */
 
 // --- mocks (hoisted) -------------------------------------------------------
@@ -167,12 +170,10 @@ vi.mock('@/services/geocoding/geo_resolver', () => ({
 }));
 
 import { u18_precheck } from '@/routes/v1/auth/u18_precheck';
-import { renderGuardianOtpEmail } from '@/services/guardian_otp_email';
 import {
   resolveLocationsForCreate,
   geocodeLocationsFromState,
 } from '@/services/geocoding/resolve_locations_for_create';
-import type { GuardianOtpScenario } from '@/services/guardian_otp';
 
 // --- fake fastify / reply ---------------------------------------------------
 interface FakeReply {
@@ -438,140 +439,6 @@ describe('u18_precheck', () => {
     await expect(
       callPrecheck(route, { body: { network: 'blue_dot', email: 'a@b.com' } }),
     ).rejects.toThrow('db down');
-  });
-});
-
-// ===========================================================================
-// guardian_otp_email
-// ===========================================================================
-describe('renderGuardianOtpEmail', () => {
-  const base = { otp: '123456', teamName: 'Bluedots', variables: {} };
-
-  it('renders the account scenario with the domain in bold', () => {
-    const { subject, html } = renderGuardianOtpEmail({
-      ...base,
-      scenario: { kind: 'account' },
-      variables: { parentName: 'Asha', domain: 'student' },
-    });
-
-    expect(subject).toBe("Approve your ward's account — OTP");
-    expect(html).toContain('<p>Hi Asha,</p>');
-    expect(html).toContain('requested registration on <b>student</b>');
-    expect(html).toContain('agree to create their account');
-    expect(html).toContain('123456');
-    expect(html).toContain('<p>Team Bluedots</p>');
-    expect(html).toContain('valid for 10 minutes');
-  });
-
-  it('omits the domain clause and greets "there" when variables are absent', () => {
-    const { html } = renderGuardianOtpEmail({ ...base, scenario: { kind: 'account' } });
-
-    expect(html).toContain('<p>Hi there,</p>');
-    expect(html).toContain('requested registration. This website shows services');
-    expect(html).not.toContain('<b>');
-  });
-
-  it('renders the profile scenario', () => {
-    const { subject, html } = renderGuardianOtpEmail({
-      ...base,
-      scenario: { kind: 'profile' },
-      variables: { domain: 'student' },
-    });
-
-    expect(subject).toBe("Approve your ward's profile — OTP");
-    expect(html).toContain('requested to create a profile on <b>student</b>');
-    expect(html).toContain('agree to create their profile');
-  });
-
-  it('renders a single action with the provider org name twice', () => {
-    const { subject, html } = renderGuardianOtpEmail({
-      ...base,
-      scenario: { kind: 'action', actionType: 'apply', stage: 'initiate' },
-      variables: { providerOrgName: 'Acme Corp' },
-    });
-
-    expect(subject).toBe("Approve your ward's request — OTP");
-    expect(html).toContain('requested to connect to <b>Acme Corp</b>');
-    expect(html).toContain('allow <b>Acme Corp</b> to access');
-  });
-
-  it('falls back to "the organisation" when providerOrgName is missing', () => {
-    const { html } = renderGuardianOtpEmail({
-      ...base,
-      scenario: { kind: 'action', actionType: 'connect', stage: 'accept' },
-    });
-
-    expect(html).toContain('connect to <b>the organisation</b>');
-  });
-
-  it('does not vary the action copy by actionType or stage', () => {
-    const initiate = renderGuardianOtpEmail({
-      ...base,
-      scenario: { kind: 'action', actionType: 'apply', stage: 'initiate' },
-      variables: { providerOrgName: 'Acme' },
-    });
-    const accept = renderGuardianOtpEmail({
-      ...base,
-      scenario: { kind: 'action', actionType: 'connect', stage: 'accept' },
-      variables: { providerOrgName: 'Acme' },
-    });
-
-    expect(accept).toEqual(initiate);
-  });
-
-  it('lists every provider org for a bulk action and says "jobs" when jobs=true', () => {
-    const { subject, html } = renderGuardianOtpEmail({
-      ...base,
-      scenario: {
-        kind: 'action_bulk',
-        actionType: 'apply',
-        stage: 'initiate',
-        providerOrgNames: ['Acme & Co', 'Beta'],
-        jobs: true,
-      },
-    });
-
-    expect(subject).toBe("Approve your ward's requests — OTP");
-    expect(html).toContain('requested to apply to jobs provided by:');
-    expect(html).toContain('<ol><li>Acme &amp; Co</li><li>Beta</li></ol>');
-    expect(html).toContain('allow provider organisations to access');
-  });
-
-  it('says "opportunities" when jobs=false and falls back on an empty org list', () => {
-    const { html } = renderGuardianOtpEmail({
-      ...base,
-      scenario: {
-        kind: 'action_bulk',
-        actionType: 'apply',
-        stage: 'initiate',
-        providerOrgNames: [],
-        jobs: false,
-      },
-    });
-
-    expect(html).toContain('requested to apply to opportunities provided by:');
-    expect(html).toContain('<p>the selected organisations</p>');
-    expect(html).not.toContain('<ol>');
-  });
-
-  it('HTML-escapes every interpolated value', () => {
-    const scenario: GuardianOtpScenario = {
-      kind: 'action',
-      actionType: 'apply',
-      stage: 'initiate',
-    };
-    const { html } = renderGuardianOtpEmail({
-      scenario,
-      otp: '<12&34>',
-      teamName: `Team "O'Neil" & Co`,
-      variables: { parentName: '<script>alert(1)</script>', providerOrgName: 'A<B' },
-    });
-
-    expect(html).toContain('Hi &lt;script&gt;alert(1)&lt;/script&gt;,');
-    expect(html).toContain('&lt;12&amp;34&gt;');
-    expect(html).toContain('Team Team &quot;O&#39;Neil&quot; &amp; Co');
-    expect(html).toContain('<b>A&lt;B</b>');
-    expect(html).not.toContain('<script>');
   });
 });
 

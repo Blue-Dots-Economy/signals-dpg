@@ -23,7 +23,22 @@ vi.mock('@/utils/notificationClient', () => ({
   getNotificationClient: () => (clientConfigured ? { notify } : undefined),
 }));
 
-vi.mock('@/config', () => ({ instance: { INSTANCE_NAME: 'Blue Dots' } }));
+vi.mock('@/config', () => ({
+  instance: { INSTANCE_NAME: 'Blue Dots' },
+  notification: { FRONTEND_BASE_URL: 'https://blue.example' },
+}));
+
+/**
+ * The welcome EMAIL goes through the central dispatcher (#529) so its copy comes
+ * from the messages file; WhatsApp still uses the raw client (a pre-approved
+ * content template, not email copy). Both are mocked so this file keeps testing
+ * channel selection and failure isolation, not rendering.
+ */
+const dispatchEmail = vi.fn(async (_args: Record<string, unknown>) => ({ ok: true }));
+
+vi.mock('../email/dispatch_email', () => ({
+  getDefaultEmailSender: () => (clientConfigured ? { dispatchEmail } : null),
+}));
 
 const { sendWelcomeNotifications } = await import('../welcome.js');
 
@@ -31,9 +46,17 @@ const makeLog = () => ({ error: vi.fn() });
 
 const BOTH = { name: 'Asha', email: 'asha@example.org', phoneNumber: '+911234567890' };
 
+/** Channels actually attempted, in order — email via dispatcher, WhatsApp via notify. */
+const attempted = () => [
+  ...dispatchEmail.mock.calls.map(() => 'email'),
+  ...notify.mock.calls.map(([p]) => p.channel),
+];
+
 beforeEach(() => {
   notify.mockClear();
   notify.mockImplementation(async () => ({}));
+  dispatchEmail.mockClear();
+  dispatchEmail.mockImplementation(async () => ({ ok: true }));
   clientConfigured = true;
 });
 
@@ -41,8 +64,7 @@ describe('channel selection', () => {
   it('sends email and WhatsApp when the user has both identifiers', async () => {
     await sendWelcomeNotifications(BOTH, makeLog());
 
-    expect(notify).toHaveBeenCalledTimes(2);
-    expect(notify.mock.calls.map(([p]) => p.channel)).toEqual(['email', 'whatsapp']);
+    expect(attempted()).toEqual(['email', 'whatsapp']);
   });
 
   it('sends only WhatsApp for a phone-only user', async () => {
@@ -53,6 +75,7 @@ describe('channel selection', () => {
       makeLog()
     );
 
+    expect(dispatchEmail).not.toHaveBeenCalled();
     expect(notify).toHaveBeenCalledTimes(1);
     expect(notify.mock.calls[0][0].channel).toBe('whatsapp');
   });
@@ -63,14 +86,14 @@ describe('channel selection', () => {
       makeLog()
     );
 
-    expect(notify).toHaveBeenCalledTimes(1);
-    expect(notify.mock.calls[0][0].channel).toBe('email');
+    expect(dispatchEmail).toHaveBeenCalledTimes(1);
+    expect(notify).not.toHaveBeenCalled();
   });
 
   it('is a no-op for a user with neither identifier', async () => {
     await sendWelcomeNotifications({ name: 'Asha', email: null, phoneNumber: null }, makeLog());
 
-    expect(notify).not.toHaveBeenCalled();
+    expect(attempted()).toEqual([]);
   });
 
   it('is a no-op when no notification client is configured', async () => {
@@ -82,17 +105,18 @@ describe('channel selection', () => {
 
 describe('failure isolation', () => {
   it('still sends WhatsApp when the email send rejects', async () => {
-    notify.mockRejectedValueOnce(new Error('smtp down'));
+    dispatchEmail.mockRejectedValueOnce(new Error('smtp down'));
     const log = makeLog();
 
     await sendWelcomeNotifications(BOTH, log);
 
-    expect(notify).toHaveBeenCalledTimes(2);
-    expect(notify.mock.calls[1][0].channel).toBe('whatsapp');
+    expect(notify).toHaveBeenCalledTimes(1);
+    expect(notify.mock.calls[0][0].channel).toBe('whatsapp');
     expect(log.error).toHaveBeenCalledTimes(1);
   });
 
   it('never throws when every channel rejects', async () => {
+    dispatchEmail.mockRejectedValue(new Error('notification service down'));
     notify.mockRejectedValue(new Error('notification service down'));
     const log = makeLog();
 
@@ -105,15 +129,23 @@ describe('message content', () => {
   it('addresses the user by name and names the instance', async () => {
     await sendWelcomeNotifications(BOTH, makeLog());
 
-    const email = notify.mock.calls[0][0];
-    const emailVars = email.variables as { html: string; fromName: string };
-    expect(email.to).toBe('asha@example.org');
-    expect(emailVars.html).toContain('Asha');
-    expect(emailVars.html).toContain('Blue Dots');
-    expect(emailVars.fromName).toContain('Blue Dots');
+    // Copy itself lives in the messages file; what this asserts is that the
+    // dispatcher is handed the right case and the right substitution values.
+    expect(dispatchEmail).toHaveBeenCalledWith({
+      caseId: 'welcome',
+      to: 'asha@example.org',
+      fromName: 'Blue Dots',
+      variables: {
+        userName: 'Asha',
+        appName: 'Blue Dots',
+        siteUrl: 'https://blue.example',
+        teamName: 'Blue Dots',
+      },
+    });
 
     // WhatsApp is a pre-approved content template; the name is variable "1".
-    const wa = notify.mock.calls[1][0];
+    // It's the only `notify` call now that email goes via the dispatcher.
+    const wa = notify.mock.calls[0][0];
     const waVars = wa.variables as {
       contentSid: string;
       contentVariables: Record<string, string>;
