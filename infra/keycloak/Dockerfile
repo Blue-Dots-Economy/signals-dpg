@@ -37,5 +37,13 @@ ENV KC_DB=postgres \
 
 RUN /opt/keycloak/bin/kc.sh build
 
+# Ready-probe against the management interface (port 9000, which inherits
+# KC_HTTP_RELATIVE_PATH). The image ships no curl/wget, so this uses bash's
+# /dev/tcp as Keycloak's own docs recommend. Kubernetes ignores Docker
+# HEALTHCHECKs (its probes are configured in the chart); this serves plain
+# `docker run` users and image scanners.
+HEALTHCHECK --interval=30s --timeout=5s --start-period=60s --retries=3 \
+  CMD ["/bin/bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/9000 && echo -e 'GET /auth/health/ready HTTP/1.1\\r\\nHost: localhost\\r\\nConnection: close\\r\\n\\r\\n' >&3 && grep -q '\"status\": *\"UP\"' <&3"]
+
 ENTRYPOINT ["/opt/keycloak/bin/kc.sh"]
 CMD ["start", "--optimized", "--import-realm"]
