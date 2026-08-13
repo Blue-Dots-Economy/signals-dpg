@@ -637,7 +637,7 @@ describe('afterUserCreate', () => {
     await expect(otpOptions.afterUserCreate(payload)).resolves.toBe(payload);
   });
 
-  it('calls config.sendEmail with caseId "welcome", fromName="Welcome to <appName>" and the userName/appName variables', async () => {
+  it('calls config.sendEmail with caseId "welcome", fromName=appName and the userName/appName variables', async () => {
     const nc = makeNotificationClient();
     const sendEmail = makeSendEmail();
     const { otpOptions } = build({
@@ -649,7 +649,7 @@ describe('afterUserCreate', () => {
     expect(sendEmail).toHaveBeenCalledWith({
       caseId: 'welcome',
       to: 'alice@example.org',
-      fromName: 'Welcome to Signals',
+      fromName: 'Signals',
       variables: { userName: 'Alice', appName: 'Signals' },
     });
     expect(nc.notify).not.toHaveBeenCalled();
@@ -669,7 +669,7 @@ describe('afterUserCreate', () => {
     expect(sendEmail).toHaveBeenCalledWith({
       caseId: 'welcome',
       to: 'alice@example.org',
-      fromName: 'Welcome to Signals',
+      fromName: 'Signals',
       variables: { userName: 'user', appName: 'Signals' },
     });
   });

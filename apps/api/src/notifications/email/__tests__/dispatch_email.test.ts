@@ -34,7 +34,11 @@ function messagesWith(overrides: Record<string, string>, layers: LoadedEmailMess
 
 function makeSender(
   overrides: Record<string, string> = {},
-  opts: { layers?: LoadedEmailMessagesFile[]; defaultNetwork?: string | null } = {},
+  opts: {
+    layers?: LoadedEmailMessagesFile[];
+    defaultNetwork?: string | null;
+    teamName?: string;
+  } = {},
 ) {
   const notify = vi.fn().mockResolvedValue(undefined);
   const log = vi.fn();
@@ -44,6 +48,7 @@ function makeSender(
     fromEmail: 'noreply@x.example',
     defaultReplyTo: 'reply@x.example',
     defaultNetwork: opts.defaultNetwork ?? null,
+    ...(opts.teamName ? { teamName: opts.teamName } : {}),
     log,
   });
   return { sender, notify, log };
@@ -105,6 +110,28 @@ describe('dispatchEmail', () => {
     expect(req.variables.html).toContain('See connections');
     expect(req.variables.html).toContain('https://ui.example/auth/login');
     expect(req.variables.html).toContain('#2563eb');
+    // No deps.teamName in this sender: sign-off falls back to fromName.
+    expect(req.variables.html).toContain('Team Blue Dot');
+  });
+
+  it('signs off the cta shell with deps.teamName (operating org), not the brand/from name', async () => {
+    const { sender, notify } = makeSender(
+      { 'retire.cancel.body': '<p>gone</p>', 'retire.cancel.cta': 'See connections' },
+      { teamName: 'EkStep' },
+    );
+    await sender.dispatchEmail({
+      caseId: 'retire.cancel',
+      to: 'u@x.example',
+      fromName: 'Blue Dot',
+      brandName: 'Blue Dot',
+      network: 'blue_dot',
+      ctaUrl: 'https://ui.example/auth/login',
+    });
+    const html = notify.mock.calls[0][0].variables.html;
+    expect(html).toContain('Team EkStep');
+    expect(html).not.toContain('Team Blue Dot');
+    // The sender display name is untouched — only the sign-off changes.
+    expect(notify.mock.calls[0][0].variables.fromName).toBe('Blue Dot');
   });
 
   it('flattens newlines out of subjects (header-injection guard)', async () => {

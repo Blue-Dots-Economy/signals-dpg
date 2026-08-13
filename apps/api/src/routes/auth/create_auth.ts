@@ -53,7 +53,16 @@ export const authInstance = createAuth({
         }) => {
           const sender = getDefaultEmailSender();
           if (!sender) throw new Error('email sender not configured');
-          await sender.dispatchEmail(args);
+          await sender.dispatchEmail({
+            ...args,
+            variables: {
+              ...args.variables,
+              // App-side context the auth package can't know: the platform
+              // link and the "Team <name>" sign-off used by the copy file.
+              siteUrl: notification.FRONTEND_BASE_URL ?? '',
+              teamName: instance.INSTANCE_NAME ?? 'DPG',
+            },
+          });
         },
       }
     : {}),

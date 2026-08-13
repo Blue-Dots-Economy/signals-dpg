@@ -95,14 +95,35 @@ CASES.set(
   'login.otp',
   plainCase(
     'login.otp',
-    { userName: 'text', signAction: 'text', appName: 'text', otp: 'text', otpBox: 'html' },
+    {
+      userName: 'text',
+      signAction: 'text',
+      appName: 'text',
+      otp: 'text',
+      otpBox: 'html',
+      // Injected by the app-side sendEmail wiring (create_auth.ts): the
+      // frontend base URL and "Team <name>" sign-off name, so copy can carry
+      // a platform link and a per-deployment sign-off (email content sheet).
+      siteUrl: 'text',
+      teamName: 'text',
+    },
     'critical',
     'realtime',
   ),
 );
 CASES.set(
   'welcome',
-  plainCase('welcome', { userName: 'text', appName: 'text' }, 'best_effort', 'realtime'),
+  plainCase(
+    'welcome',
+    {
+      userName: 'text',
+      appName: 'text',
+      siteUrl: 'text',
+      teamName: 'text',
+    },
+    'best_effort',
+    'realtime',
+  ),
 );
 CASES.set(
   'support.request',

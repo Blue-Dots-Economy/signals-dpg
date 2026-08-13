@@ -1,4 +1,4 @@
-import { apiConfig, notification } from '@/config';
+import { apiConfig, instance, notification } from '@/config';
 import { getNotificationClient } from '@/utils/notificationClient';
 
 import { resolveBrandColor } from '../brand';
@@ -73,6 +73,13 @@ export interface EmailSenderDeps {
    * always wins over this when present — see `send()` below.
    */
   defaultNetwork: string | null;
+  /**
+   * "Team <name>" sign-off in the cta shell (the operating org, e.g.
+   * INSTANCE_NAME "EkStep"/"ALIMCO" — per the email content sheet), NOT the
+   * network display name. Falls back to `args.brandName ?? args.fromName`
+   * when unset so tests/legacy wiring keep their old sign-off.
+   */
+  teamName?: string;
   log: (message: string, meta?: Record<string, unknown>) => void;
 }
 
@@ -112,7 +119,7 @@ export function createEmailSender(deps: EmailSenderDeps): EmailSender {
               def.tokens,
             ),
             ctaColor: resolveBrandColor(args.network),
-            brandName: args.brandName ?? args.fromName,
+            brandName: deps.teamName ?? args.brandName ?? args.fromName,
           })
         : renderPlainShell(bodyHtml);
 
@@ -187,6 +194,7 @@ export function getDefaultEmailSender(): EmailSender | null {
     fromEmail,
     defaultReplyTo: notification.NOTIFICATION_REPLY_TO ?? fromEmail,
     defaultNetwork: getInstanceDefaultNetwork(),
+    teamName: instance.INSTANCE_NAME ?? 'DPG',
     log: (message, meta) => console.warn(message, meta ?? {}),
   });
   return defaultSender;

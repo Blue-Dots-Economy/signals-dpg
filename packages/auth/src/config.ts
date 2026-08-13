@@ -175,7 +175,7 @@ export function createAuth(config: AuthRuntimeConfig) {
                 await config.sendEmail({
                   caseId: 'welcome',
                   to: payload.user.email,
-                  fromName: `Welcome to ${config.appName}`,
+                  fromName: config.appName,
                   variables: {
                     userName: payload.user.name || 'user',
                     appName: config.appName,
