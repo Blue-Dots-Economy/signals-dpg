@@ -85,7 +85,12 @@ export async function assertPairCapAvailable(
 ): Promise<void> {
   // Stable, order-independent lock key for the pair (sorted so A→B and B→A map
   // to the same lock). hashtextextended → bigint for pg_advisory_xact_lock.
-  const [a, b] = [args.sourceItemId, args.targetItemId].sort();
+  // Explicit codepoint comparator (not the default `.sort()`, and not
+  // `localeCompare`): a lock key needs a locale-independent, stable total
+  // order, and it satisfies typescript:S2871.
+  const [a, b] = [args.sourceItemId, args.targetItemId].sort((x, y) =>
+    x < y ? -1 : x > y ? 1 : 0,
+  );
   const lockKey = `action_pair:${args.network}:${a}:${b}`;
   await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtextextended(${lockKey}, 0))`);
 
