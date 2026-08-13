@@ -235,6 +235,10 @@
           }
         }
       },
+      "profile_completion_prompt": {
+        "heading": "Complete your profile to find the right tutors",
+        "body": "Tutors and coaching centers can find and connect with you only once your profile is live. Fill in the details below to get matched."
+      },
       "id": "student",
       "card": {
         "title_field": "name",
@@ -290,6 +294,10 @@
           }
         }
       },
+      "profile_completion_prompt": {
+        "heading": "Complete your profile to reach students",
+        "body": "Students can discover and connect with you only once your profile is live. Add your details below to start getting learners."
+      },
       "id": "tutor",
       "card": {
         "title_field": "name",
@@ -339,6 +347,10 @@
             }
           }
         }
+      },
+      "profile_completion_prompt": {
+        "heading": "Complete your profile to reach students",
+        "body": "Students can discover your center only once your profile is live. Add your details below to start enrolling learners."
       },
       "id": "coaching_center",
       "card": {

@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, waitFor, within } from '@testing-library/react';
+import { render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type { RJSFSchema } from '@rjsf/utils';
@@ -127,11 +127,12 @@ describe('ProfileFormPage landmarks + heading order (W5.4a)', () => {
     await waitFor(() => expect(screen.getAllByRole('heading', { level: 1 })).toHaveLength(1));
   });
 
-  it('has no heading-level skip once the shared SchemaForm renders its <h3> section titles', async () => {
+  it('has no heading-level skip: hero <h1> then the SchemaForm section title <h2>', async () => {
     // Reproduces the real page: a domain whose schema actually has fields, so
-    // SchemaForm mounts and renders a section title as <h3> (schema-form.tsx).
-    // Before the fix the hero title was promoted all the way to <h1>, which
-    // together with this <h3> is a level skip (h1 -> h3, no h2 in between).
+    // SchemaForm mounts and renders a section title. The app-bar title was
+    // dropped (it duplicated the hero), so the hero is the page <h1> and the
+    // form's section titles render as <h2> (sectionHeadingLevel=2) — h1 → h2,
+    // no skip.
     currentNetwork = buildNetwork([SCHEMA_DOMAIN]);
     getServedScope.mockReturnValue({ network: 'blue_dot', domains: ['seeker'] });
     await renderPage();
@@ -141,22 +142,20 @@ describe('ProfileFormPage landmarks + heading order (W5.4a)', () => {
     const headings = screen.getAllByRole('heading');
     const levels = headings.map((h) => Number(h.tagName.slice(1)));
 
-    // Sanity: the chain we're actually asserting on is present (an h1, an h2,
-    // and the section's h3) — otherwise a missing element could make the
-    // no-skip check below pass vacuously.
+    // Sanity: the chain we assert on is present (hero <h1> + section <h2>) so the
+    // no-skip check below can't pass vacuously.
     expect(levels).toContain(1);
     expect(levels).toContain(2);
-    expect(levels).toContain(3);
 
     for (let i = 1; i < levels.length; i++) {
       expect(levels[i] - levels[i - 1]).toBeLessThanOrEqual(1);
     }
   });
 
-  it('domain-picker branch (no domain selected yet) has a main landmark and exactly one level-1 heading', async () => {
+  it('domain-picker branch (no domain selected yet) renders inside the shell with exactly one level-1 heading', async () => {
     // Two selectable domains + no served-binding scope => the auto-select
     // effect never fires (selectableDomains.length !== 1), so the page stays
-    // on the "choose your role" early-return branch (~lines 641-680).
+    // on the "choose your role" early-return branch.
     currentNetwork = buildNetwork([
       { id: 'seeker', description: 'Job seeker' },
       { id: 'provider', description: 'Job provider' },
@@ -164,14 +163,13 @@ describe('ProfileFormPage landmarks + heading order (W5.4a)', () => {
     getServedScope.mockReturnValue(null);
     await renderPage();
 
-    const main = await screen.findByRole('main');
-    // Scoped to `main`, not the whole document: this branch renders inside the
-    // shared `<AuthShell>`, whose sibling `BrandHero` panel carries its own
-    // (decorative, out-of-scope) tagline `<h1>` at desktop widths — a
-    // pre-existing AuthShell-level condition shared by every AuthShell
-    // consumer (login-page/otp-page too; flagged as a follow-up, not fixed
-    // here). What this test asserts is that profile-form-page's OWN content
-    // region has exactly one top-level heading.
-    expect(within(main).getAllByRole('heading', { level: 1 })).toHaveLength(1);
+    // Task 3: the picker now renders inside PageShell (variant='form'). The
+    // single page-level heading is the shell's TopBar title (an <h1>); the
+    // picker's own content carries NO duplicate <h1>. Assert exactly one
+    // level-1 heading document-wide, and that the picker content sits inside
+    // the shell's single <main> landmark.
+    await screen.findByRole('main');
+    expect(screen.getAllByRole('heading', { level: 1 })).toHaveLength(1);
+    expect(screen.getAllByRole('main')).toHaveLength(1);
   });
 });

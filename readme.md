@@ -26,7 +26,7 @@ This repository contains the current DPG API runtime, schema-driven UI app, exam
 - `packages/config`: env parsing, network config loading, and consent config loading
 - `packages/database`: database helpers and partitioning
 - `packages/schemas`: API request schemas and network schema parsing
-- `packages/auth`: auth integration
+- `packages/auth`: auth integration (better-auth + unified OTP; also carries a **dormant** Keycloak provider gated behind `AUTH_PROVIDER`)
 - `packages/notification`: notification service client for OTP and outbound messages
 - `packages/match_score`: match score service client for item comparison
 
@@ -81,8 +81,11 @@ Current UI responsibilities:
 - browse items by domain
 - create and edit schema-driven profiles
 - render public item cards
+- share a profile via a public link and open it on a public profile view page
+- filter and sort **My Actions** per profile (PII-aware, server-enforced)
+- first-time-login redirect into an in-shell profile form with inline consent
 - trigger action flows
-- show map-based views through a pluggable map provider layer
+- show map-based views through a pluggable map provider layer (follows the app's dark/light theme)
 
 UI runtime envs:
 
@@ -166,6 +169,18 @@ SUPPORT_EMAIL="hello@bluedotseconomy.org"
 # Grievances) in place of the __SUPPORT_EMAIL__ placeholder the consent.json
 # files ship. Distinct from SUPPORT_EMAIL above (the contact-form recipient).
 CONSENT_SUPPORT_EMAIL="hello@bluedotseconomy.org"
+
+# Optional override of the bundled email copy (subjects/bodies/CTA labels for
+# every email the API sends). Unset → bundled defaults; per-network/brand copy
+# also layers from a messages.properties beside network.json in local mode.
+# See docs/operations/email-copy-overrides.md.
+EMAIL_MESSAGES_PATH=""
+
+# Auth provider. betterauth (default) uses the in-repo better-auth + OTP flow;
+# keycloak switches the API to validate Keycloak-minted tokens instead. The
+# Keycloak path ships but is DORMANT under the default — flipping to keycloak
+# is migration-gated (see packages/auth/CLAUDE.md).
+AUTH_PROVIDER="betterauth"
 ```
 
 For remote network configs, use:
@@ -309,6 +324,12 @@ Consent now gates **discoverability**: a profile becomes network-visible
 used on write (with consent now true) and flips a `draft` item to `live`
 (`paused` is sticky; `live` is unchanged). A one-off deploy backfill,
 `pnpm db:backfill:consent:api`, re-classifies existing profiles against this gate.
+
+Which gates a profile must clear to go `live` is **configurable per domain** via
+`go_live_required` in `network.json` (`schema_required` and/or
+`consent_required`; default `schema_required`). A `guardian_consent_required`
+domain must keep `consent_required` in the list — config that dropped it would
+silently disable the U18 age control, so it is rejected at load.
 
 **U18 guardian gate.** On domains where `guardianConsentRequired` is true, a
 minor (`user.age <= 18` — an age snapshot captured at registration, #331)

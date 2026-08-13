@@ -113,6 +113,14 @@ vi.mock('@/services/consent_version', () => ({
 
 vi.mock('@api/db/postgres/drizzle_config', () => {
   const dbMock: Record<string, unknown> = {
+    // Pair-cap pre-pass (#370): advisory lock (execute) + open-action recount
+    // (select→from→where). 0 open → under the default cap of 1 → proceeds.
+    execute: vi.fn(async () => undefined),
+    select: vi.fn(() => ({
+      from: vi.fn(() => ({
+        where: vi.fn(async () => [{ open: 0 }]),
+      })),
+    })),
     insert: vi.fn(() => ({
       values: vi.fn(() => ({
         returning: vi.fn(async () => [

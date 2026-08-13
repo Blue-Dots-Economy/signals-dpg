@@ -1,0 +1,4 @@
+*.jar
+!.gitkeep
+# Pin specific provider JARs so Keycloak boots with them out of the box.
+!keycloak-otp-1.0.0-SNAPSHOT.jar

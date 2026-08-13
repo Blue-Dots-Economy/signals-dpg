@@ -46,3 +46,29 @@ export function nearestLocationMeters(
   }
   return min;
 }
+
+/**
+ * Minimum haversine distance between two items' location sets (#439 Task 7 —
+ * my-actions distance sort/display). Unlike `nearestLocationMeters` above
+ * (single center vs. an array, used by the cross-instance merge),
+ * `item_locations` on BOTH sides of an action can carry more than one point,
+ * so this checks every pairwise combination. Returns `null` — never
+ * `Infinity` — when either side has no locations, so a caller can
+ * distinguish "distance unknown" (render nothing) from a real, very-large
+ * distance, and so it never becomes a NULLS-FIRST sort key by accident.
+ */
+export function nearestDistanceMeters(
+  as: readonly LatLng[] | null | undefined,
+  bs: readonly LatLng[] | null | undefined
+): number | null {
+  if (!as || as.length === 0 || !bs || bs.length === 0) return null;
+
+  let min = Infinity;
+  for (const a of as) {
+    for (const b of bs) {
+      const d = haversineMeters(a, b);
+      if (d < min) min = d;
+    }
+  }
+  return min;
+}

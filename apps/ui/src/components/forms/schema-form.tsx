@@ -101,11 +101,22 @@ interface SchemaFormProps {
    */
   networkId?: string;
   formContext?: Record<string, unknown>;
+  /**
+   * Heading level for section titles (default 3). The profile form passes 2
+   * because its page heading is the hero <h1>, so sections must be <h2> to avoid
+   * a heading-level skip; action-modal keeps the default <h3> under its <h2>
+   * dialog title.
+   */
+  sectionHeadingLevel?: 2 | 3;
 }
 
 // Root-only ObjectFieldTemplate that renders section headers + two-column grid.
 // For nested objects (non-root) it falls back to the default RJSF column layout.
-function SectionedObjectFieldTemplate(layout: FormLayout | undefined) {
+function SectionedObjectFieldTemplate(
+  layout: FormLayout | undefined,
+  headingLevel: 2 | 3 = 3,
+) {
+  const SectionHeading = headingLevel === 2 ? 'h2' : 'h3';
   return function ObjectFieldTemplate(props: ObjectFieldTemplateProps) {
     if (!layout) {
       // No layout config — render properties in a simple column
@@ -164,7 +175,7 @@ function SectionedObjectFieldTemplate(layout: FormLayout | undefined) {
                   <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-primary/10 text-xs font-bold text-primary">
                     {sectionNum}
                   </div>
-                  <h3 className="text-base font-semibold text-foreground tracking-tight">{section.title}</h3>
+                  <SectionHeading className="text-base font-semibold text-foreground tracking-tight">{section.title}</SectionHeading>
                 </div>
                 <div className="mt-3 h-px bg-gradient-to-r from-border via-border/60 to-transparent" />
               </div>
@@ -427,7 +438,8 @@ export function SchemaForm({
   domainId,
   networkId,
   formContext,
-}: SchemaFormProps) {
+  sectionHeadingLevel = 3,
+}: Readonly<SchemaFormProps>) {
   // Base schema (meta stripped) still carries `x-show-if` so the evaluator can read it.
   const baseSchema = React.useMemo(() => stripMetaSchema(schema), [schema]);
 
@@ -493,7 +505,7 @@ export function SchemaForm({
   const templates = {
     FieldTemplate: CustomFieldTemplate,
     ...(activeLayout
-      ? { ObjectFieldTemplate: SectionedObjectFieldTemplate(activeLayout) }
+      ? { ObjectFieldTemplate: SectionedObjectFieldTemplate(activeLayout, sectionHeadingLevel) }
       : {}),
   };
 

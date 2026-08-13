@@ -5,6 +5,7 @@ import z, {
 } from '@dpg/schemas';
 import { type FastifyPluginAsyncZod } from 'fastify-type-provider-zod';
 import type { FastifyReply, FastifyRequest } from 'fastify';
+import { and, eq } from 'drizzle-orm';
 import { db } from '@api/db/postgres/drizzle_config';
 import {
   ensureActionEventPartition,
@@ -12,6 +13,16 @@ import {
   item_actions,
 } from '@dpg/database';
 import { consent_record } from '@api/db/postgres/schema';
+import {
+  computeActionMatchScore,
+  type ItemSnapshotLike,
+} from '@/services/actions/compute_match_score';
+import {
+  assertPairCapAvailable,
+  maxActionsPerPair,
+  terminalStatuses,
+  ActionPairCapError,
+} from '@/services/action_pair_cap';
 import { resolveConsentVersion } from '@/services/consent_version';
 import { apiConfig, getCurrentApiBaseUrl } from '@/config';
 import { getNetworkConfigById } from '@/network_configs';
@@ -32,6 +43,42 @@ import { dispatchActionNotifications } from '@/notifications/notify_actions';
 type PerformNetworkActionRequest = FastifyRequest<{
   Body: z.infer<typeof PerformNetworkActionBodySchema>;
 }>;
+
+type ActionItemRef = z.infer<
+  typeof PerformNetworkActionBodySchema
+>['source_item'];
+
+/**
+ * Shape returned by `fetchLocalItemSnapshot` — carries item content
+ * (`item_schema_url`, public `item_state`, decrypted+merged `private_state`,
+ * `item_locations`) but not the network/domain/type/id/instance-url
+ * identity, which lives on the request body's item ref instead. Builds the
+ * full `ItemSnapshotLike` the match-score service requires by merging the
+ * two. Uses the public `item_state` (never `private_state`) so decrypted PII
+ * never flows into the match-score input, matching the discover match-score
+ * flow.
+ */
+function toMatchScoreSnapshot(
+  ref: ActionItemRef,
+  snapshot: {
+    item_schema_url: string;
+    item_state: Record<string, unknown>;
+    private_state: Record<string, unknown>;
+    item_locations?: Array<{ lat: number; lng: number }> | null;
+  } | null
+): ItemSnapshotLike | null {
+  if (!snapshot) return null;
+  return {
+    item_network: ref.item_network,
+    item_domain: ref.item_domain,
+    item_type: ref.item_type,
+    item_id: ref.item_id,
+    item_instance_url: ref.item_instance_url,
+    item_schema_url: snapshot.item_schema_url,
+    item_state: snapshot.item_state,
+    item_locations: snapshot.item_locations,
+  };
+}
 
 /**
  * Thrown inside the create transaction when the initiate-consent row cannot be
@@ -93,8 +140,9 @@ export const perform_network_action_handler = async (
   }
 
   let interaction: ReturnType<typeof getActionInteraction>;
+  let networkConfig: Awaited<ReturnType<typeof getNetworkConfigById>>;
   try {
-    const networkConfig = await getNetworkConfigById(
+    networkConfig = await getNetworkConfigById(
       body.target_item.item_network
     );
     interaction = getActionInteraction(networkConfig, {
@@ -213,8 +261,21 @@ export const perform_network_action_handler = async (
   // Action + initiate-consent are written in one transaction so a consent-write
   // failure rolls the action back too (fail-closed — never a PII-revealing
   // action without a consent row). The action event is emitted only after commit.
+  // Pair cap (#370/#422): at most `max_actions_per_pair` (default 1) OPEN
+  // actions between these two items, bidirectional + type-agnostic. Enforced
+  // HERE (the single write endpoint every perform — self, proxied, or
+  // inter-instance — funnels through) inside the insert txn with a pair-scoped
+  // advisory lock, so concurrent submits can't both land.
+  let capExceeded = false;
   const created = await db
     .transaction(async (tx) => {
+      await assertPairCapAvailable(tx, {
+        network: body.target_item.item_network,
+        sourceItemId: body.source_item.item_id,
+        targetItemId: body.target_item.item_id,
+        cap: maxActionsPerPair(networkConfig),
+        terminal: terminalStatuses(networkConfig),
+      });
       const [row] = await tx
         .insert(item_actions)
         .values({
@@ -288,9 +349,20 @@ export const perform_network_action_handler = async (
       return row;
     })
     .catch((err: unknown) => {
+      if (err instanceof ActionPairCapError) {
+        capExceeded = true;
+        return null;
+      }
       if (err instanceof ConsentWriteError) return null;
       throw err;
     });
+
+  if (capExceeded) {
+    return reply.code(409).send({
+      error: 'ACTION_LIMIT_REACHED',
+      message: 'An active request already exists between these two profiles.',
+    });
+  }
 
   if (created === null) {
     request.log.error(
@@ -352,6 +424,32 @@ export const perform_network_action_handler = async (
       request.log.error({ err }, 'action notification dispatch failed'),
     );
   }
+
+  // Match score (#439): computed ONCE at create, for all interaction types,
+  // and stored on the row. Fire-and-forget so connect latency is unaffected;
+  // null when the source snapshot is unavailable (cross-instance) or the
+  // relevance service errors. Never recomputed on status change.
+  void computeActionMatchScore(
+    toMatchScoreSnapshot(body.source_item, sourceItemSnapshot),
+    toMatchScoreSnapshot(body.target_item, targetItemSnapshot),
+    request.log,
+  )
+    .then(async (score) => {
+      if (score === null) return;
+      await db
+        .update(item_actions)
+        .set({ match_score: score })
+        .where(
+          and(
+            eq(item_actions.partition_network, body.target_item.item_network),
+            eq(item_actions.action_type, created.action_type),
+            eq(item_actions.action_id, created.action_id),
+          ),
+        );
+    })
+    .catch((err) =>
+      request.log.error({ err, action_id: created.action_id }, 'match-score row update failed'),
+    );
 
   return reply.code(201).send(created);
 };

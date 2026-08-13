@@ -18,7 +18,18 @@ vi.mock('@/components/auth/user-menu', () => ({
   UserMenu: () => <div data-testid="user-menu" />,
 }));
 
-function renderBar() {
+vi.mock('@/components/layout/theme-mode-toggle', () => ({
+  ThemeModeToggle: () => <div data-testid="theme" />,
+}));
+
+vi.mock('@/components/layout/language-switcher', () => ({
+  LanguageSwitcher: () => <div data-testid="lang" />,
+}));
+
+// NOTE: SidebarTrigger (rendered unconditionally by TopBar) calls useSidebar(),
+// which throws outside a SidebarProvider — so every render here, including the
+// form-variant cases, must stay wrapped in one.
+function renderBar(props: Partial<React.ComponentProps<typeof TopBar>> = {}) {
   return render(
     <MemoryRouter>
       <SidebarProvider>
@@ -27,6 +38,7 @@ function renderBar() {
           onSearchChange={() => {}}
           viewMode="map"
           onViewModeChange={() => {}}
+          {...props}
         />
       </SidebarProvider>
     </MemoryRouter>,
@@ -45,16 +57,16 @@ describe('TopBar mobile decluttering (W1.3)', () => {
   it('hides the inline Language/Theme group on mobile only when authenticated', () => {
     mockUseAuth.mockReturnValue({ isAuthenticated: true, isLoading: false });
     renderBar();
-    const languageLabel = screen.getByLabelText(/language/i);
-    const wrapper = languageLabel.closest('div');
+    // LanguageSwitcher is mocked to a bare div, so its own tag can't be used
+    // as the closest('div') anchor (it would match itself) — go via parentElement.
+    const wrapper = screen.getByTestId('lang').parentElement;
     expect(wrapper).toHaveClass('hidden', 'md:flex');
   });
 
   it('keeps the inline Language/Theme group visible on mobile when logged out', () => {
     mockUseAuth.mockReturnValue({ isAuthenticated: false, isLoading: false });
     renderBar();
-    const languageLabel = screen.getByLabelText(/language/i);
-    const wrapper = languageLabel.closest('div');
+    const wrapper = screen.getByTestId('lang').parentElement;
     expect(wrapper).not.toHaveClass('hidden');
   });
 
@@ -63,5 +75,28 @@ describe('TopBar mobile decluttering (W1.3)', () => {
     renderBar();
     const bell = screen.getByRole('button', { name: /pending actions/i });
     expect(bell.closest('span')).toHaveClass('hidden', 'md:inline-flex');
+  });
+});
+
+describe('TopBar — form variant', () => {
+  it('hides browse controls and shows Back + title', () => {
+    mockUseAuth.mockReturnValue({ isAuthenticated: true, isLoading: false });
+    renderBar({ variant: 'form', title: 'Edit Provider Profile', onBack: vi.fn() });
+    expect(screen.getByText('Edit Provider Profile')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /back/i })).toBeInTheDocument();
+    expect(screen.queryByRole('searchbox')).not.toBeInTheDocument();
+    // view toggle (map/list) is gone
+    expect(screen.queryByRole('radio', { name: /map view/i })).not.toBeInTheDocument();
+    // account controls stay
+    expect(screen.getByTestId('user-menu')).toBeInTheDocument();
+    expect(screen.getByTestId('theme')).toBeInTheDocument();
+    expect(screen.getByTestId('lang')).toBeInTheDocument();
+  });
+
+  it('browse variant still renders search + view toggle', () => {
+    mockUseAuth.mockReturnValue({ isAuthenticated: true, isLoading: false });
+    renderBar({ variant: 'browse' });
+    expect(screen.getByRole('searchbox')).toBeInTheDocument();
+    expect(screen.getByRole('radio', { name: /map view/i })).toBeInTheDocument();
   });
 });

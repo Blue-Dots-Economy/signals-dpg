@@ -157,6 +157,10 @@ Open **http://localhost:5173** in your browser.
 - `SUPPORT_EMAIL` — recipient for the in-app "Contact support" form. Emails are sent via the
   notification service from `NOTIFICATION_FROM_EMAIL`, with Reply-To set to the submitting user.
   When unset, the form is disabled (API returns 503).
+- `EMAIL_MESSAGES_PATH` — optional path to a mounted override of the bundled email copy
+  (subjects/bodies/CTA labels for every email the API sends). Unset uses the bundled defaults;
+  see [`docs/operations/email-copy-overrides.md`](docs/operations/email-copy-overrides.md) for
+  the override workflow.
 
 ---
 

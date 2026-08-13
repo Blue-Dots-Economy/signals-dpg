@@ -23,6 +23,7 @@ import { items } from '@dpg/database';
 import { and, eq, inArray } from 'drizzle-orm';
 import { decryptItemPrivate } from '@/utils/item_decrypt';
 import { getNetworkConfigById } from '@/network_configs';
+import { resolveNameFallbackField, type DomainConfigForName } from '@/utils/contact_fields';
 
 /** Minimal pino-compatible surface (`request.log`) for PII-free warnings. */
 export interface NameResolutionLog {
@@ -87,19 +88,13 @@ export async function resolve_private_display_names(
     try {
       const cfg = await getNetworkConfigById(network);
       const domainCfg = cfg.domains.find((d) => d.id === domain);
-      const card_title = (domainCfg?.card as { title_field?: unknown } | undefined)?.title_field;
-      const fallback_field = typeof card_title === 'string' ? card_title : undefined;
       private_fields = Object.fromEntries(
         Object.entries(domainCfg?.item_schemas ?? {}).flatMap(([type, doc]) => {
-          const schema = doc as {
-            display_name_field?: unknown;
-            properties?: Record<string, { private?: unknown } | undefined>;
-          };
-          const field =
-            typeof schema.display_name_field === 'string'
-              ? schema.display_name_field
-              : fallback_field;
+          // Shared display-name precedence (display_name_field -> card.title_field).
+          const field = resolveNameFallbackField(domainCfg as DomainConfigForName | undefined, type);
           if (field === undefined) return [];
+          // Only schema fields marked `private: true` need read-time decryption.
+          const schema = doc as { properties?: Record<string, { private?: unknown } | undefined> };
           if (schema.properties?.[field]?.private !== true) return [];
           return [[type, field]];
         }),

@@ -3,12 +3,14 @@
 Email and SMS are handled differently — matching how the rest of signals already
 does OTP/notification:
 
-- **Email — body rendered IN-REPO.** `apps/api/src/services/guardian_otp_email.ts`
-  (`renderGuardianOtpEmail`) builds the subject + HTML from the scenario + the
-  #294 copy, and it ships via the generic **`basic_email`** template (same
-  convention as the login OTP `packages/auth/src/templates/otp_email.ts` and
-  action emails). **No notification-service email template to author** — the copy
-  lives here.
+- **Email — body rendered IN-REPO.** The #294 per-scenario copy lives as keys
+  in `apps/api/src/notifications/email/messages.default.properties`, sent via
+  the central dispatcher (`email/dispatch_email.ts`, #529) — same convention
+  as the login OTP and action emails, which resolve their copy from the same
+  file. It ships via the generic **`basic_email`** template. **No
+  notification-service email template to author** — the copy lives in that
+  properties file, overridable at deploy time (see
+  `docs/operations/email-copy-overrides.md`).
 - **SMS — same as the login OTP.** SMS bodies are DLT-registered and can't be
   composed in-app, and the instance has a single generic OTP template. So the
   guardian SMS reuses exactly what the login OTP uses: `template_id =

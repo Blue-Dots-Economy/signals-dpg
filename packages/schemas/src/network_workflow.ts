@@ -3,6 +3,14 @@ import { z } from 'zod';
 
 const JsonSchemaDocumentSchema = z.record(z.string(), z.unknown());
 
+// Go-live gate tokens (NOT field names). The single source of truth for the
+// gate vocabulary — apps/api's classifier imports these rather than redefining
+// them, so the config schema and the runtime evaluator can never drift.
+// `schema_required` is the baseline gate; `consent_required` is opt-in per
+// domain (a guardian-gated domain always enforces it — see the resolver).
+export const PROFILE_GO_LIVE_GATES = ['schema_required', 'consent_required'] as const;
+export type GoLiveGate = (typeof PROFILE_GO_LIVE_GATES)[number];
+
 // Canonical bucket + status enums. Duplicated here from
 // apps/api/src/services/metrics/buckets.ts because @dpg/schemas is upstream
 // of apps/api — the package can't import down the tree. Both must be updated
@@ -88,6 +96,31 @@ const CardConfigSchema = z.object({
   extra_fields: z.array(z.string().min(1)).optional(),
 }).strict();
 
+/**
+ * Canonical contact-field mapping for a domain (#237): maps the canonical
+ * name/email/phone to the domain's real item_state field name, since these
+ * are named differently per network/domain (e.g. `mobile_number`,
+ * `hiringManagerPhoneNumber`). Consumed by participant/decrypt field
+ * resolution. All optional — `name` falls back to display_name_field /
+ * card.title_field when unset.
+ */
+const ContactFieldsSchema = z
+  .object({
+    // `.optional()` WITHOUT `.min(1)`: an empty-string value ("phone": "") on a
+    // declared key must not fail the whole cross-network parse either — at
+    // resolve time an empty mapping is falsy, so it degrades to the account
+    // fallback exactly like an absent mapping (same rationale as `.strip()`).
+    name: z.string().optional(),
+    email: z.string().optional(),
+    phone: z.string().optional(),
+  })
+  // `.strip()` (not `.strict()`): an unknown/typo'd key here must not fail the
+  // whole network-config parse — that runs for every domain, including unserved
+  // siblings, and would take down boot (app.ts awaits config with no catch).
+  // A dropped typo degrades gracefully to the account fallback at resolve time
+  // (with a `contact_map_missing` warn), rather than a hard boot failure.
+  .strip();
+
 const NetworkDomainSchema = z.object({
   id: z.string().min(1),
   description: z.string().optional(),
@@ -95,10 +128,24 @@ const NetworkDomainSchema = z.object({
   // (e.g. blue_dot provider → "My Jobs"). Network-authored content, not i18n
   // chrome; falls back to the generic label when unset.
   my_items_label: z.string().min(1).optional(),
+  // Optional per-domain "why complete your profile" prompt shown on the profile
+  // create/edit page (#376). Role-specific, network-authored content (a seeker's
+  // "why" ≠ a provider's); the UI falls back to a generic i18n message when
+  // unset. Presentational only — never part of item validation.
+  profile_completion_prompt: z
+    .object({ heading: z.string().min(1), body: z.string().min(1) })
+    .optional(),
   minimum_cache_ttl_seconds: z.number().int().positive().optional().default(300),
   // U18 spec D8: when true, this domain routes minors' consent through a
   // guardian. Server-read only; never trusted from the client. Defaults off.
   guardian_consent_required: z.boolean().optional().default(false),
+  // Which gates a profile must clear before it goes `live` (discoverable) in
+  // this domain. Tokens — NOT field names — evaluated by `classify_item`
+  // (see `PROFILE_GO_LIVE_GATES`). Omit to use the baseline default (`schema_required`;
+  // a guardian-gated domain additionally always enforces `consent_required`).
+  // An empty array is rejected — a profile with no gates would go live
+  // instantly.
+  go_live_required: z.array(z.enum(PROFILE_GO_LIVE_GATES)).min(1).optional(),
   // Optional per-domain cap on how many profiles a single user may own in this
   // domain. Overrides the global MAX_PROFILES_PER_USER default when set (e.g.
   // seeker=3, provider=5). Unset ⇒ the global default applies.
@@ -114,13 +161,29 @@ const NetworkDomainSchema = z.object({
   status_rules: z.array(StatusRuleSchema).min(1),
   dashboard_tiles: DashboardTilesSchema.optional(),
   card: CardConfigSchema.optional(),
+  contact_fields: ContactFieldsSchema.optional(),
 }).superRefine((domain, ctx) => {
   const last = domain.status_rules[domain.status_rules.length - 1];
   if (last.when !== 'default') {
     ctx.addIssue({
-      code: z.ZodIssueCode.custom,
+      code: 'custom',
       message: 'status_rules must end with a `{ when: "default" }` tail rule',
       path: ['status_rules', domain.status_rules.length - 1, 'when'],
+    });
+  }
+  // The U18 guardian gate lives inside `consent_required`. A guardian-gated
+  // domain that drops that gate from `go_live_required` would silently disable
+  // the age control — reject it rather than let config turn off U18 protection.
+  if (
+    domain.guardian_consent_required &&
+    domain.go_live_required &&
+    !domain.go_live_required.includes('consent_required')
+  ) {
+    ctx.addIssue({
+      code: 'custom',
+      message:
+        'a guardian_consent_required domain must keep "consent_required" in go_live_required',
+      path: ['go_live_required'],
     });
   }
 }).transform((domain) => ({
@@ -170,7 +233,7 @@ export const NetworkActionInteractionSchema = z
 
     if (!interaction.event_schema) {
       ctx.addIssue({
-        code: z.ZodIssueCode.custom,
+        code: 'custom',
         message:
           'reveals_pii_on_status requires event_schema with a status.enum to validate against',
         path: ['reveals_pii_on_status'],
@@ -181,7 +244,7 @@ export const NetworkActionInteractionSchema = z
     const statusEnum = extractStatusEnum(interaction.event_schema);
     if (!statusEnum) {
       ctx.addIssue({
-        code: z.ZodIssueCode.custom,
+        code: 'custom',
         message:
           'reveals_pii_on_status requires event_schema.properties.status.enum to be defined',
         path: ['reveals_pii_on_status'],
@@ -192,7 +255,7 @@ export const NetworkActionInteractionSchema = z
     for (const status of interaction.reveals_pii_on_status) {
       if (!statusEnum.includes(status)) {
         ctx.addIssue({
-          code: z.ZodIssueCode.custom,
+          code: 'custom',
           message: `reveals_pii_on_status value "${status}" is not in event_schema.properties.status.enum`,
           path: ['reveals_pii_on_status'],
         });
@@ -247,6 +310,9 @@ export const NetworkConfigSchema = z.object({
   // (unpause) is always allowed so a profile paused before the feature was
   // turned off can still be recovered. Defaults on. (#346)
   pause_enabled: z.boolean().optional().default(true),
+  // Max concurrent OPEN actions between any two items — bidirectional, across
+  // action types (#370/#422). Omitted → 1 (one open apply/connect per pair).
+  max_actions_per_pair: z.number().int().positive().optional().default(1),
   domains: NetworkDomainSchema.array().default([]),
   instances: NetworkInstanceSchema.array().default([]),
   cross_network_origins: z
@@ -267,7 +333,7 @@ export const NetworkConfigSchema = z.object({
       if (field === undefined) continue;
       if (typeof field !== 'string') {
         ctx.addIssue({
-          code: z.ZodIssueCode.custom,
+          code: 'custom',
           message: `display_name_field must be a string`,
           path: ['domains', domainIdx, 'item_schemas', schemaName, 'display_name_field'],
         });
@@ -277,7 +343,7 @@ export const NetworkConfigSchema = z.object({
       const target = props[field];
       if (!target || typeof target !== 'object') {
         ctx.addIssue({
-          code: z.ZodIssueCode.custom,
+          code: 'custom',
           message: `display_name_field "${field}" does not exist in properties`,
           path: ['domains', domainIdx, 'item_schemas', schemaName, 'display_name_field'],
         });
@@ -286,13 +352,13 @@ export const NetworkConfigSchema = z.object({
       const t = target as Record<string, unknown>;
       if (t.private === true) {
         ctx.addIssue({
-          code: z.ZodIssueCode.custom,
+          code: 'custom',
           message: `display_name_field "${field}" points at a private property; pick a non-private field`,
           path: ['domains', domainIdx, 'item_schemas', schemaName, 'display_name_field'],
         });
       } else if (t.type !== 'string') {
         ctx.addIssue({
-          code: z.ZodIssueCode.custom,
+          code: 'custom',
           message: `display_name_field "${field}" must point at a property of type "string"`,
           path: ['domains', domainIdx, 'item_schemas', schemaName, 'display_name_field'],
         });

@@ -44,7 +44,7 @@
  * both), beforeAll throws a descriptive error.
  */
 
-import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { describe, it, expect, beforeAll, afterEach, afterAll } from 'vitest';
 import Fastify, { type FastifyInstance } from 'fastify';
 import {
   serializerCompiler,
@@ -338,6 +338,16 @@ describeIf(`POST /action/perform on-behalf-of (integration)${
     provider_item_id = providerBody.items[0].item_id;
     expect(providerBody.user_existed).toBe(false);
     seeded_participant_ids.push(provider_user_id);
+  });
+
+  // One open action per pair (#370/#422): every case files on the same seeded
+  // seeker→provider pair, so clear the seeded participants' actions between
+  // tests to keep each case starting from an empty pair (each `it` is
+  // self-contained). Scoped to seeded owners — never touches other data.
+  afterEach(async () => {
+    await db
+      .delete(itemActionsTable)
+      .where(inArray(itemActionsTable.source_item_owner, seeded_participant_ids));
   });
 
   afterAll(async () => {
