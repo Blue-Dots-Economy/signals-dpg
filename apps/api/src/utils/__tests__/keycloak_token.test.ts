@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeAll, afterAll, beforeEach } from 'vites
 import { createServer, type Server } from 'node:http';
 import { AddressInfo } from 'node:net';
 import { SignJWT, exportJWK, generateKeyPair } from 'jose';
-import type { JWK, KeyLike } from 'jose';
+import type { JWK } from 'jose';
 
 // keycloak_token imports keycloakConfig from '@/config' at module load; mock it
 // so we don't pull in loadEnv(). The object is mutable and read at call time,
@@ -40,9 +40,9 @@ const {
 
 const KID = 'test-signing-key';
 
-let privateKey: KeyLike;
+let privateKey: CryptoKey;
 /** A key that is NOT published in the served JWKS — the wrong-signature case. */
-let foreignPrivateKey: KeyLike;
+let foreignPrivateKey: CryptoKey;
 
 /**
  * jose's remote key set talks to the JWKS endpoint over node:http, not global
@@ -110,7 +110,7 @@ async function mintToken(
     aud?: string | string[];
     expiresIn?: string;
     claims?: Record<string, unknown>;
-    key?: KeyLike;
+    key?: CryptoKey;
   } = {}
 ): Promise<string> {
   const {
