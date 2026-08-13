@@ -5,7 +5,7 @@ import { resolveBrandColor } from '../brand';
 import { getEmailCase } from './email_cases';
 import { getEmailMessages } from './messages';
 import type { EmailMessagesIndex } from './messages';
-import { renderCtaShell, renderOtpBox, renderPlainShell } from './shells';
+import { renderCtaShell, renderOtpBox, renderPlainShell, renderSiteLink } from './shells';
 import { substituteHtml, substitutePlain } from './substitute';
 
 /**
@@ -99,6 +99,11 @@ export function createEmailSender(deps: EmailSenderDeps): EmailSender {
     // e.g. packages/auth — only knows the plain code.
     if (def.tokens.otpBox === 'html' && vars.otp !== undefined && vars.otpBox === undefined) {
       vars.otpBox = renderOtpBox(vars.otp);
+    }
+    // Same for the platform link: always resolved (to plain text when there is
+    // no URL) so copy can never render a dead anchor or a literal {{token}}.
+    if (def.tokens.siteLink === 'html' && vars.siteLink === undefined) {
+      vars.siteLink = renderSiteLink(vars.siteUrl);
     }
 
     const subject = oneLine(

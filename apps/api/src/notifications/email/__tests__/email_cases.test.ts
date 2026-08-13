@@ -44,7 +44,7 @@ describe('email case registry', () => {
     expect(getEmailCase('welcome').criticality).toBe('best_effort');
   });
 
-  it('only allowlists the three code-built html tokens', () => {
+  it('only allowlists the code-built html tokens', () => {
     const htmlTokens = new Set<string>();
     for (const id of EMAIL_CASE_IDS) {
       const def = getEmailCase(id);
@@ -52,7 +52,14 @@ describe('email case registry', () => {
         if (type === 'html') htmlTokens.add(name);
       }
     }
-    expect([...htmlTokens].sort()).toEqual(['detailsTable', 'orgList', 'otpBox']);
+    // Every one of these is assembled in code from escaped parts (shells.ts /
+    // build_support_email.ts) — that is what licenses inserting them raw.
+    expect([...htmlTokens].sort()).toEqual([
+      'detailsTable',
+      'orgList',
+      'otpBox',
+      'siteLink',
+    ]);
   });
 
   it('throws for unknown case ids', () => {

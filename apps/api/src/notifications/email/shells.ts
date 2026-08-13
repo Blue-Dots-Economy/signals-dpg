@@ -54,6 +54,21 @@ export function renderOtpBox(otp: string): string {
     ">${escapeHtml(otp)}</div>`;
 }
 
+/**
+ * The platform link for plain-shell emails (login OTP, welcome) as an `html`
+ * token, so copy never carries raw `href="{{token}}"` plumbing.
+ *
+ * Built here rather than substituted as text because an unset
+ * FRONTEND_BASE_URL must not leave a dead `<a href="">` or a user-visible
+ * `{{siteUrl}}` in a real email: with no URL there is simply no anchor, and
+ * the sentence still reads ("… sign in to the platform:").
+ */
+export function renderSiteLink(url: string | undefined): string {
+  if (!url) return 'the platform';
+  const safe = escapeHtml(url);
+  return `<a href="${safe}">${safe}</a>`;
+}
+
 /** Numbered provider-org list for the guardian bulk email (#393). */
 export function renderOrgList(names: string[]): string {
   if (names.length === 0) return '<p>the selected organisations</p>';

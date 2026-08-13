@@ -76,6 +76,32 @@ describe('dispatchEmail', () => {
     expect(req.variables.replyTo).toBe('reply@x.example');
   });
 
+  it('auto-builds the siteLink token — anchor when configured, plain words when not', async () => {
+    const { sender, notify } = makeSender({ 'login.otp.body': 'go to {{siteLink}}' });
+    await sender.dispatchEmail({
+      caseId: 'login.otp',
+      to: 'u@x.example',
+      fromName: 'X',
+      variables: { otp: '1', siteUrl: 'https://ui.example' },
+    });
+    expect(notify.mock.calls[0][0].variables.html).toContain(
+      '<a href="https://ui.example">https://ui.example</a>',
+    );
+
+    const bare = makeSender({ 'login.otp.body': 'go to {{siteLink}}' });
+    await bare.sender.dispatchEmail({
+      caseId: 'login.otp',
+      to: 'u@x.example',
+      fromName: 'X',
+      variables: { otp: '1' },
+    });
+    const html = bare.notify.mock.calls[0][0].variables.html;
+    // No URL configured: no dead anchor, and never a literal {{token}}.
+    expect(html).toContain('go to the platform');
+    expect(html).not.toContain('{{siteLink}}');
+    expect(html).not.toContain('<a');
+  });
+
   it('auto-builds the otpBox html token from vars.otp', async () => {
     const { sender, notify } = makeSender({
       'login.otp.body': '{{otpBox}}',

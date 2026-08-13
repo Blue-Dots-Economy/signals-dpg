@@ -105,6 +105,9 @@ CASES.set(
       // frontend base URL and "Team <name>" sign-off name, so copy can carry
       // a platform link and a per-deployment sign-off (email content sheet).
       siteUrl: 'text',
+      // Code-built anchor derived from siteUrl — what copy should use for a
+      // clickable platform link (degrades to plain text when unconfigured).
+      siteLink: 'html',
       teamName: 'text',
     },
     'critical',
@@ -119,6 +122,7 @@ CASES.set(
       userName: 'text',
       appName: 'text',
       siteUrl: 'text',
+      siteLink: 'html',
       teamName: 'text',
     },
     'best_effort',

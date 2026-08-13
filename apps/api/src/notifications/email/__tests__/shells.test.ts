@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { renderCtaShell, renderOrgList, renderOtpBox, renderPlainShell } from '../shells';
+import {
+  renderCtaShell,
+  renderOrgList,
+  renderOtpBox,
+  renderPlainShell,
+  renderSiteLink,
+} from '../shells';
 
 describe('renderCtaShell', () => {
   const args = {
@@ -34,6 +40,22 @@ describe('renderOtpBox', () => {
     const html = renderOtpBox('12<34');
     expect(html).toContain('12&lt;34');
     expect(html).toContain('Courier New');
+  });
+});
+
+describe('renderSiteLink', () => {
+  it('renders a clickable, escaped anchor when a URL is configured', () => {
+    expect(renderSiteLink('https://x.example/?a=1&b=2')).toBe(
+      '<a href="https://x.example/?a=1&amp;b=2">https://x.example/?a=1&amp;b=2</a>',
+    );
+  });
+
+  it('degrades to plain words when no URL is configured (no dead anchor)', () => {
+    for (const value of [undefined, '']) {
+      const out = renderSiteLink(value);
+      expect(out).toBe('the platform');
+      expect(out).not.toContain('<a');
+    }
   });
 });
 
