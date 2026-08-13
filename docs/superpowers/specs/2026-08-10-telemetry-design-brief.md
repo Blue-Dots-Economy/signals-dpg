@@ -1,8 +1,10 @@
 # Telemetry design — brief
 
-**Date:** 2026-08-10 (revised 2026-08-13 — OpenTelemetry, fixed attribute schema)
+**Date:** 2026-08-10 (revised 2026-08-13 — OpenTelemetry, fixed attribute schema;
+review fixes §6.1–6.4 applied)
 **Full spec:** `2026-08-10-telemetry-design.md` *(still describes the superseded
 Sunbird v3 approach; being updated)*
+**Review:** `telemetry-design-reconciliation-2026-08-13.md`
 
 What telemetry we generate, what each event carries, and how it stays correct
 when seeker and provider live on different instances.
@@ -44,9 +46,27 @@ So: **OpenTelemetry, OTLP wire format, one SDK.**
 | **Traces** (spans) | Request flow, propagated across instances | Latency, cross-instance correlation |
 | **Metrics** (counters/histograms) | Operational and derived business counters | Dashboards, alerting |
 
-All three share one `Resource` (`service.name`, `service.instance.id`,
-`service.version`, `deployment.environment.name`), so producer identity and
-environment are attached uniformly and can't be forgotten per event.
+All three share one `Resource`, so producer identity and environment are attached
+uniformly and can't be forgotten per event:
+
+| Resource attribute | Meaning |
+|---|---|
+| `service.name` | Producer and trust tier (`signals-api`, `signals-ui`, `aggregator-api`). |
+| `service.version` | Build version. |
+| `deployment.environment.name` | `production`, `staging`. |
+| `service.instance.id` | **Process identity** — the pod/replica, per OTEL semconv. Changes on restart. Operational debugging only. |
+| `dpg.instance` | **Deployment identity** — the stable DPG instance, same value space as `source.instance` / `target.instance`. |
+
+`service.instance.id` and `dpg.instance` are deliberately different things.
+Semconv's `service.instance.id` identifies a process, so it cycles with pods and
+differs per replica — grouping domain events by "which instance emitted this" on
+it would drift silently and would never join to `source.instance`. `dpg.instance`
+is the one to group and join on.
+
+Its value is the **normalised instance base URL** — the same value
+`item_instance_url` and `origin_instance_domain` already carry, so joins need no
+mapping table. A short slug is acceptable instead only if the mapping is 1:1 and
+stable.
 
 ---
 
@@ -90,12 +110,33 @@ exists (`session.id`, `error.type`, `http.*`).
 | `object.id` | Item id, action id, user id, route, element id. |
 | `object.type` | `item` · `action` · `user` · `consent` · `notification` · `page` · `element` · `query` |
 | `object.subtype` | Domain refinement: `profile_1.0`, `apply`, `terms`, `email`. |
-| `object.version` | Monotonic version — item revision or action `update_count`. |
+| `object.version` | Monotonic version — action `update_count`, or item `revision` (see the migration note below). |
 | `object.owner` | Pseudonymised owner of the object. |
+| `object.org` | **Attributing organisation** of the subject — the org a metric belongs to. |
 
 One `object.subtype` replaces what would otherwise be `item.type`,
 `action.type`, `consent.category`, and `notification.channel` as four separate
 fields.
+
+**`object.org` is not `actor.on_behalf_of`,** and conflating them silently breaks
+every per-aggregator number. `actor.on_behalf_of` is the org *acting right now*
+(an admin or aggregator operating for someone). `object.org` is the org the
+subject is *attributed to* — in Signals, the item owner's
+`user.onboarded_by_org_id`. A seeker onboarded by aggregator A who performs their
+own apply has an empty `actor.on_behalf_of`, but the metric still belongs to A.
+
+This is not hypothetical: `services/metrics/recompute.ts:131,254` scopes every
+dashboard tile in production by `(onboarded_by_org_id, domain)`. Without
+`object.org` no per-aggregator metric is derivable from the stream, so the parity
+gate that guards stream-maintained `item_metrics` could never be passed.
+
+**Migration note — `object.version` for items.** `items` has no monotonic column
+today: only `created_at`, `updated_at`, and `lifecycle_status`. So item
+`event.uid`s are not derivable yet, and `updated_at` cannot substitute without
+breaking the rule that a uid never derives from a timestamp. This needs a
+`revision integer not null default 1` on `items`, bumped in the same transaction
+as every mutation — which makes all six item write sites below load-bearing.
+Actions need nothing: `action_events.update_count` already exists.
 
 ### State — any transition
 
@@ -120,7 +161,7 @@ single-sided event only `source.*` is set.
 | `source.domain` / `target.domain` | Role in the network (`seeker`, `provider`). |
 | `source.item_type` / `target.item_type` | Schema id. |
 | `source.item_id` / `target.item_id` | Item ids. |
-| `source.instance` / `target.instance` | Instance hosting each side. |
+| `source.instance` / `target.instance` | DPG instance hosting each side — normalised base URL, same value space as `dpg.instance`. |
 
 ### Measures, flow, fields, outcome
 
@@ -167,9 +208,10 @@ write, so it is the only emitter.
   "resourceLogs": [{
     "resource": { "attributes": [
       { "key": "service.name",        "value": { "stringValue": "signals-api" } },
-      { "key": "service.instance.id", "value": { "stringValue": "in-blr-provider-1" } },
       { "key": "service.version",     "value": { "stringValue": "1.14.0" } },
-      { "key": "deployment.environment.name", "value": { "stringValue": "production" } }
+      { "key": "deployment.environment.name", "value": { "stringValue": "production" } },
+      { "key": "dpg.instance",        "value": { "stringValue": "https://provider.example.org" } },
+      { "key": "service.instance.id", "value": { "stringValue": "api-7f9c4b-x2m1" } }  // pod, not deployment
     ]},
     "scopeLogs": [{
       "scope": { "name": "signals.domain", "version": "1.0.0" },
@@ -193,6 +235,7 @@ write, so it is the only emitter.
           { "key": "object.type",    "value": { "stringValue": "action" } },
           { "key": "object.subtype", "value": { "stringValue": "apply" } },
           { "key": "object.version", "value": { "intValue": "3" } },
+          { "key": "object.org",     "value": { "stringValue": "org_agg_a" } },  // attribution
 
           { "key": "state.from",    "value": { "stringValue": "applied" } },
           { "key": "state.to",      "value": { "stringValue": "shortlisted" } },
@@ -202,11 +245,11 @@ write, so it is the only emitter.
           { "key": "source.domain",    "value": { "stringValue": "seeker" } },
           { "key": "source.item_type", "value": { "stringValue": "profile_1.0" } },
           { "key": "source.item_id",   "value": { "stringValue": "b71e…" } },
-          { "key": "source.instance",  "value": { "stringValue": "in-blr-seeker-1" } },
+          { "key": "source.instance",  "value": { "stringValue": "https://seeker.example.org" } },
           { "key": "target.domain",    "value": { "stringValue": "provider" } },
           { "key": "target.item_type", "value": { "stringValue": "job_1.0" } },
           { "key": "target.item_id",   "value": { "stringValue": "c88a…" } },
-          { "key": "target.instance",  "value": { "stringValue": "in-blr-provider-1" } },
+          { "key": "target.instance",  "value": { "stringValue": "https://provider.example.org" } },
 
           { "key": "outcome", "value": { "stringValue": "success" } }
         ]
@@ -238,10 +281,11 @@ you.
 
   "object.id": "px_7d41a9…", "object.type": "user", "object.subtype": "participant",
   "object.version": 1,
+  "object.org": "org_agg_a",          // onboarding org — attribution
 
   "state.to": "active", "state.trigger": "self_signup",
 
-  "source.domain": "seeker", "source.instance": "in-blr-seeker-1",
+  "source.domain": "seeker", "source.instance": "https://seeker.example.org",
   "flow.name": "signup", "flow.step": 3, "flow.outcome": "success",
   "outcome": "success"
 }
@@ -268,12 +312,12 @@ subtype — not a separate event shape.
 
   "object.id": "b71e…", "object.type": "item",
   "object.subtype": "profile_1.0", "object.version": 1,
-  "object.owner": "px_7d41a9…",
+  "object.owner": "px_7d41a9…", "object.org": "org_agg_a",
 
   "state.to": "draft", "state.trigger": "user_action",
 
   "source.domain": "seeker", "source.item_type": "profile_1.0",
-  "source.item_id": "b71e…", "source.instance": "in-blr-seeker-1",
+  "source.item_id": "b71e…", "source.instance": "https://seeker.example.org",
 
   "metric.score": 40,   // completion %
   "metric.count": 7,    // populated fields
@@ -294,6 +338,7 @@ subtype — not a separate event shape.
   "actor.id": "px_7d41a9…", "actor.type": "user",
   "object.id": "b71e…", "object.type": "item",
   "object.subtype": "profile_1.0", "object.version": 2,
+  "object.owner": "px_7d41a9…", "object.org": "org_agg_a",
 
   "state.from": "draft", "state.to": "draft", "state.trigger": "user_action",
 
@@ -323,12 +368,13 @@ actually enforces.
   "actor.id": "px_7d41a9…", "actor.type": "user",
   "object.id": "b71e…", "object.type": "item",
   "object.subtype": "profile_1.0", "object.version": 3,
+  "object.owner": "px_7d41a9…", "object.org": "org_agg_a",
 
   "state.from": "draft", "state.to": "live",
   "state.trigger": "profile_consent_accepted",
   "state.duration_ms": 864000000,
 
-  "source.domain": "seeker", "source.instance": "in-blr-seeker-1",
+  "source.domain": "seeker", "source.instance": "https://seeker.example.org",
   "outcome": "success"
 }
 ```
@@ -433,7 +479,7 @@ dark-user rate rather than a log line.
   "traceId": "4bf92f3577b34da6a3ce929d0e0e4736",   // same trace as example 1
   "status": "Ok",
   "attributes": {
-    "target.instance": "in-blr-provider-1",
+    "target.instance": "https://provider.example.org",
     "object.subtype":  "apply",
     "http.response.status_code": 201,
     "metric.duration_ms": 312
@@ -473,7 +519,7 @@ never from a timestamp or the producer:
 | Event | `event.uid` |
 |---|---|
 | Action created / status changed | `act:{action_id}:{update_count}` |
-| Item created / updated / lifecycle | `itm:{item_id}:{revision}` |
+| Item created / updated / lifecycle | `itm:{item_id}:{revision}` — **needs the `revision` migration** |
 | Consent accepted | `csn:{consent_record_id}` |
 | User provisioned | `usr:{user_id}:provisioned` |
 | Notification | `ntf:{parent_uid}:{shape}` |
@@ -483,12 +529,20 @@ duplicate is provably the same event and collapsible. This is a design
 discipline, not a format feature — which is why it survived the format change
 intact.
 
+**The action uid is already validated by the schema.** `action_events` has a
+unique index on `(partition_network, action_type, origin_instance_domain,
+action_id, update_count)`. The action `event.uid` is precisely that key *minus*
+`origin_instance_domain` — i.e. the key under which the authoritative row and the
+mirrored row collapse into one. The dedup discipline isn't a new invariant; it's
+the one the table already encodes.
+
 **3. Collapse — idempotent sink** keyed on `event.uid`.
 
-Two properties OTEL adds for free: `service.instance.id` makes every event
-attributable to its emitter, and because trace context propagates across the
-cross-instance hop, one apply is a single trace — so a duplicate appears as two
-events sharing a uid within one trace, which is trivially alertable.
+Two properties OTEL adds for free: `dpg.instance` makes every event attributable
+to its emitting deployment (not `service.instance.id`, which is per-pod and cycles
+on restart), and because trace context propagates across the cross-instance hop,
+one apply is a single trace — so a duplicate appears as two events sharing a uid
+within one trace, which is trivially alertable.
 
 **Ordering.** Timestamps are explicitly not used for ordering; instance clocks
 are independent. `object.version` is the monotonic tiebreak.
@@ -522,10 +576,51 @@ of record by accident.
 **Not sources:** `item_metrics` (a stale cache — telemetry flows *toward*
 metrics, never back) and request logs.
 
-Emission attaches to a handful of existing choke points rather than being
-sprinkled across routes, which is why this is a small change: one function
-already handles every action write *and* its mirror, and one already handles
-every item mutation.
+### Emit sites
+
+Actions have one write function; items do **not**. Getting this wrong is how the
+single-emitter rule gets violated in practice, so the sites are named here rather
+than left as "a handful of choke points."
+
+**Actions — one function, three callers, one of them the mirror receiver.**
+`insertActionEvent` (`utils/action_event_runtime.ts:121`) is genuinely the single
+write path, called from exactly three places:
+
+| Caller | Role |
+|---|---|
+| `routes/v1/network/action/perform_action.ts:352` | write authority |
+| `routes/v1/action/update_action_status.ts:607` | write authority |
+| `routes/v1/event/store_event.ts:109` | **mirror receiver** |
+
+Instrument the function naively and the source instance emits on mirror-receive —
+exactly the double emission the single-emitter rule forbids.
+
+Two mechanisms already in the code make this safe without inventing anything:
+
+- **Emit inside the existing `if (createdEvent)` guard.** `insertActionEvent` uses
+  `onConflictDoNothing(...).returning(...)` and returns `null` on a duplicate, so
+  retry-duplication is handled by the database for free.
+- **The single-emitter rule is a column comparison, not a convention.**
+  `origin_instance_domain` is set to `getCurrentApiBaseUrl()` at both authority
+  sites (`perform_action.ts:338`, `update_action_status.ts:578`) and carries the
+  *originating* instance on the mirror path. So the rule is: emit only when
+  `origin_instance_domain` normalises to this instance. That is checkable in one
+  expression, rather than a standing agreement about which routes not to
+  instrument.
+
+**Items — six write sites, and lifecycle bypasses the service layer.**
+
+| Site | Note |
+|---|---|
+| `services/item_service.ts:345` | create |
+| `services/item_service.ts:518`, `:748` | update |
+| `routes/v1/item/lifecycle.ts:161`, `:215` | writes `items` directly, bypassing `item_service` — this is the path behind the `lifecycle_changed` example (#5) |
+| `scripts/backfill_lifecycle.ts:144` | backfill script |
+
+All the runtime paths already run inside a transaction, so "emit in the same
+transaction as the write" needs no restructuring. But item instrumentation is six
+sites, not one — and each is also where the `revision` bump has to happen, so the
+two changes should land together.
 
 ---
 
@@ -625,12 +720,29 @@ remain the compliance records of truth; telemetry mirrors them for analysis.
 4. **Deterministic `event.uid`** — the discipline that makes multi-instance
    correct. Prevent duplication at the emitter, identify it by uid, collapse it
    at the sink.
-5. **Only the write authority emits**; every instance notifies its own users.
+5. **Only the write authority emits**, expressed as an
+   `origin_instance_domain == this instance` check rather than a convention;
+   every instance notifies its own users.
 6. **API is the only record-grade source.** Never the UI, never `item_metrics`.
+   Deployment identity is `dpg.instance`, not `service.instance.id`.
 7. **Record-grade events commit with the domain write**, so a notification can't
    be lost; everything else emits best-effort.
 8. **Raw and transformed Kafka topics are the boundary.** No analytics datastore
    is part of this design.
+9. **`object.org` carries subject attribution**, separate from
+   `actor.on_behalf_of`. Without it, per-aggregator metrics can't come from the
+   stream.
+
+## Prerequisites
+
+Two things must land before item events are implementable, both surfaced by the
+2026-08-13 review:
+
+1. **A `revision` column on `items`** — `integer not null default 1`, bumped in
+   the same transaction as every mutation, at all six write sites. Until then
+   item `event.uid`s and `object.version` have no source.
+2. **`object.org` resolution** — the item owner's `user.onboarded_by_org_id` must
+   be available at emit time on the item and action paths.
 
 ## Open questions
 
@@ -645,12 +757,16 @@ remain the compliance records of truth; telemetry mirrors them for analysis.
    retire it once telemetry carries the events. A live defect independent of
    telemetry; needs its own issue.
 4. Should the stream maintain `item_metrics` incrementally, or only pre-warm it?
-   Parity test before deciding.
+   Parity test before deciding — and blocked until `object.org` lands, since
+   without it the parity test cannot reproduce a single dashboard tile.
 5. Do aggregator bulk-create writes set `actor.on_behalf_of` for the acting org?
-   Cross-repo contract; confirm on the consumer side.
+   Cross-repo contract; resolve together with `object.org`, since the two org
+   fields are the easiest thing here to conflate.
 6. Should the transformed topic be split by trust tier, so tier-2 events can't be
    read into a metric of record by mistake? A filter on `service.name` works, but
    separate topics make it structural.
+7. What increments `items.revision`, and does the backfill script bump it too?
+   A migration decision that gates every item event.
 
 ## References
 
