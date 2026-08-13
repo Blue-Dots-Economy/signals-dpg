@@ -1,6 +1,6 @@
 # Telemetry design — brief
 
-**Date:** 2026-08-10 (revised 2026-08-12 — format changed to OpenTelemetry)
+**Date:** 2026-08-10 (revised 2026-08-13 — OpenTelemetry, fixed attribute schema)
 **Full spec:** `2026-08-10-telemetry-design.md` *(still describes the superseded
 Sunbird v3 approach; being updated)*
 
@@ -34,19 +34,7 @@ covering operations in it means hand-rolling latency and saturation data into
 cross-instance blind spot we're trying to close. OTEL covers domain events
 natively through **Events** (a log record carrying an `event.name`).
 
-So: **OpenTelemetry, OTLP wire format, one SDK.** Sunbird v3 was a reasonable
-candidate for the domain plane alone — it is not a candidate for both.
-
-What we gain over the alternative, concretely:
-
-- **Producer identity is stamped by the SDK,** not hand-filled per event
-  (`service.name`, `service.instance.id`, `service.version`).
-- **Correlation is structural.** Trace and span ids are native log-record fields
-  populated from context — not a self-managed correlation array.
-- **Named attributes instead of positional rollups.** `signals.actor.domain` and
-  `signals.object.domain` say what they are; `rollup.l2` does not.
-- **One taxonomy, not two.** A single `event.name` namespace replaces a fixed
-  event-type enum plus a subsystem field plus a verb field.
+So: **OpenTelemetry, OTLP wire format, one SDK.**
 
 ### The three signals
 
@@ -56,43 +44,118 @@ What we gain over the alternative, concretely:
 | **Traces** (spans) | Request flow, propagated across instances | Latency, cross-instance correlation |
 | **Metrics** (counters/histograms) | Operational and derived business counters | Dashboards, alerting |
 
-All three share one `Resource`, so instance identity and environment are
-attached uniformly and can't be forgotten per-event.
+All three share one `Resource` (`service.name`, `service.instance.id`,
+`service.version`, `deployment.environment.name`), so producer identity and
+environment are attached uniformly and can't be forgotten per event.
 
 ---
 
-## Naming conventions
+## Attribute schema
 
-**`event.name` is a static, dotted namespace we own** — `signals.<area>.<verb>`.
-It must never contain dynamic values (no ids, no element names, no network
-status strings). Those go in attributes.
+**Every event uses the same fixed set of attributes.** No scenario-invented
+fields. A new feature reuses this vocabulary or, in the rare case it genuinely
+can't, uses the bounded extension slot below.
 
-**Attributes are flat and prefixed `signals.*`.** This matters practically: the
-ingestion service flattens OTLP attribute arrays into flat maps, so each
-attribute becomes a column downstream. Flat, stable names are what make the
-dataset queryable.
+This matters more than it looks: attributes become columns downstream, so a fixed
+schema means one stable table for all events, uniform queries across unrelated
+flows, and no schema migration every time a feature ships.
 
-**Directionality uses two attribute sets**, not a positional hierarchy:
+Names are unprefixed and align with OTEL semantic conventions where one already
+exists (`session.id`, `error.type`, `http.*`).
 
-- `signals.actor.{network,domain,item_type,item_id}` — where the actor stood
-- `signals.object.{network,domain,item_type,item_id}` — the subject
+### Core — on every event
 
-For a seeker applying to a provider's job these differ, and that difference *is*
-the seeker→provider edge. Every directional metric is derivable from the event
-alone.
+| Attribute | Meaning |
+|---|---|
+| `event.name` | Static identifier, `signals.<area>.<verb>`. Never contains ids or dynamic values. |
+| `event.uid` | Deterministic dedup key derived from the domain natural key. |
+| `event.category` | `state_change` · `interaction` · `view` · `query` · `delivery` · `error` |
+| `event.parent_uid` | The `event.uid` that caused this one. Links a notification to the change that triggered it. |
+| `network` | Network id (`yellow_dot`). |
+| `channel` | How it originated: `in_app` · `external` · `admin` · `system` · `otp_email` · `otp_sms` |
 
-**One practical note:** OTLP has a native `eventName` field on log records, but
-tooling support is uneven, and our ingestion path flattens *attributes*. Emit
-`event.name` as an attribute so it reliably lands as a column; set the native
-field too where the SDK supports it.
+### Actor — who acted
+
+| Attribute | Meaning |
+|---|---|
+| `actor.id` | Pseudonymised principal id. |
+| `actor.type` | `user` · `system` · `org` · `guardian` · `peer` |
+| `actor.on_behalf_of` | Org id when acting for someone else (admin, aggregator). |
+| `actor.is_minor` | Flag only, never DOB. |
+
+### Object — what was acted on
+
+| Attribute | Meaning |
+|---|---|
+| `object.id` | Item id, action id, user id, route, element id. |
+| `object.type` | `item` · `action` · `user` · `consent` · `notification` · `page` · `element` · `query` |
+| `object.subtype` | Domain refinement: `profile_1.0`, `apply`, `terms`, `email`. |
+| `object.version` | Monotonic version — item revision or action `update_count`. |
+| `object.owner` | Pseudonymised owner of the object. |
+
+One `object.subtype` replaces what would otherwise be `item.type`,
+`action.type`, `consent.category`, and `notification.channel` as four separate
+fields.
+
+### State — any transition
+
+| Attribute | Meaning |
+|---|---|
+| `state.from` / `state.to` | Previous and new state. Either may be absent on creation. |
+| `state.bucket` | Normalised classification: `create` · `accept` · `reject` · `cancel` |
+| `state.trigger` | What caused it: `user_action` · `profile_consent_accepted` · `system` · `admin_upsert` |
+| `state.duration_ms` | Time spent in the previous state. |
+
+This one group covers action status changes, item lifecycle, consent, and user
+provisioning. `state.bucket` is what lets you aggregate across networks that use
+different status words.
+
+### Placement — the directional edge
+
+Both blocks describe the *items*; `actor.*` describes the *principal*. For a
+single-sided event only `source.*` is set.
+
+| Attribute | Meaning |
+|---|---|
+| `source.domain` / `target.domain` | Role in the network (`seeker`, `provider`). |
+| `source.item_type` / `target.item_type` | Schema id. |
+| `source.item_id` / `target.item_id` | Item ids. |
+| `source.instance` / `target.instance` | Instance hosting each side. |
+
+### Measures, flow, fields, outcome
+
+| Attribute | Meaning |
+|---|---|
+| `metric.count` | Any cardinal count — results, fields, recipients. |
+| `metric.duration_ms` | Any duration. |
+| `metric.score` | Any normalised score — completion %, match score. |
+| `metric.delta` | Change in count or score since the previous event. |
+| `flow.name` / `flow.step` | Position in a multi-step flow (`signup`, `profile_creation`, `bulk_upload`). |
+| `flow.outcome` | `success` · `validation_error` · `abandoned` · `blocked` |
+| `fields.changed` / `fields.error` / `fields.missing` | Field **names** only, never values. |
+| `outcome` | `success` · `failure` · `skipped` · `blocked` |
+| `outcome.reason` | `no_email` · `cap_exceeded` · `minor_channel_blocked` |
+| `session.id` | OTEL semconv. |
+| `ui.route` / `ui.element` / `ui.action` | UI surface only. |
+| `error.type` / `error.message` | OTEL semconv. Machine code plus a PII-free message. |
+
+### Extension slot
+
+`attr.*` is the escape hatch for something genuinely new. **Rule: any `attr.*`
+key used in more than two places gets promoted into the core schema.** That keeps
+the hatch from quietly becoming the sprawl it exists to prevent.
+
+**On `event.name` values:** the `signals.` namespace stays there, and only there.
+Multiple producers publish to the same stream, and OTEL guidance is that event
+names be namespaced to avoid collision. It's one field, not a prefix repeated
+across every attribute.
 
 ---
 
 ## Example events
 
-One event shown in full OTLP JSON for accuracy; the rest in the flattened form
-the ingestion service produces, which is both easier to read and what you'll
-actually query.
+One event in full OTLP JSON for accuracy; the rest in flattened form, which is
+easier to read and matches what you'll query.
 
 ### 1. Full OTLP shape — cross-instance action status change
 
@@ -117,28 +180,35 @@ write, so it is the only emitter.
         "traceId": "4bf92f3577b34da6a3ce929d0e0e4736",   // spans the cross-instance hop
         "spanId":  "00f067aa0ba902b7",
         "attributes": [
-          { "key": "event.name",        "value": { "stringValue": "signals.action.status_changed" } },
-          { "key": "signals.event.uid", "value": { "stringValue": "act:9f2c…:3" } },  // deterministic
-          { "key": "signals.actor.id",  "value": { "stringValue": "px_7d41a9…" } },   // pseudonym
-          { "key": "signals.actor.type","value": { "stringValue": "user" } },
+          { "key": "event.name",     "value": { "stringValue": "signals.action.status_changed" } },
+          { "key": "event.uid",      "value": { "stringValue": "act:9f2c…:3" } },
+          { "key": "event.category", "value": { "stringValue": "state_change" } },
+          { "key": "network",        "value": { "stringValue": "yellow_dot" } },
+          { "key": "channel",        "value": { "stringValue": "in_app" } },
 
-          { "key": "signals.action.id",         "value": { "stringValue": "9f2c…" } },
-          { "key": "signals.action.type",       "value": { "stringValue": "apply" } },
-          { "key": "signals.action.from_state", "value": { "stringValue": "applied" } },
-          { "key": "signals.action.to_state",   "value": { "stringValue": "shortlisted" } },
-          { "key": "signals.action.bucket",     "value": { "stringValue": "accept" } },
-          { "key": "signals.action.update_count","value": { "intValue": "3" } },
-          { "key": "signals.action.channel",    "value": { "stringValue": "in_app" } },
+          { "key": "actor.id",   "value": { "stringValue": "px_7d41a9…" } },
+          { "key": "actor.type", "value": { "stringValue": "user" } },
 
-          { "key": "signals.actor.network",   "value": { "stringValue": "yellow_dot" } },
-          { "key": "signals.actor.domain",    "value": { "stringValue": "provider" } },
-          { "key": "signals.actor.item_type", "value": { "stringValue": "job_1.0" } },
-          { "key": "signals.actor.item_id",   "value": { "stringValue": "c88a…" } },
-          { "key": "signals.object.network",  "value": { "stringValue": "yellow_dot" } },
-          { "key": "signals.object.domain",   "value": { "stringValue": "seeker" } },
-          { "key": "signals.object.item_type","value": { "stringValue": "profile_1.0" } },
-          { "key": "signals.object.item_id",  "value": { "stringValue": "b71e…" } },
-          { "key": "signals.object.instance", "value": { "stringValue": "in-blr-seeker-1" } }
+          { "key": "object.id",      "value": { "stringValue": "9f2c…" } },
+          { "key": "object.type",    "value": { "stringValue": "action" } },
+          { "key": "object.subtype", "value": { "stringValue": "apply" } },
+          { "key": "object.version", "value": { "intValue": "3" } },
+
+          { "key": "state.from",    "value": { "stringValue": "applied" } },
+          { "key": "state.to",      "value": { "stringValue": "shortlisted" } },
+          { "key": "state.bucket",  "value": { "stringValue": "accept" } },
+          { "key": "state.trigger", "value": { "stringValue": "user_action" } },
+
+          { "key": "source.domain",    "value": { "stringValue": "seeker" } },
+          { "key": "source.item_type", "value": { "stringValue": "profile_1.0" } },
+          { "key": "source.item_id",   "value": { "stringValue": "b71e…" } },
+          { "key": "source.instance",  "value": { "stringValue": "in-blr-seeker-1" } },
+          { "key": "target.domain",    "value": { "stringValue": "provider" } },
+          { "key": "target.item_type", "value": { "stringValue": "job_1.0" } },
+          { "key": "target.item_id",   "value": { "stringValue": "c88a…" } },
+          { "key": "target.instance",  "value": { "stringValue": "in-blr-provider-1" } },
+
+          { "key": "outcome", "value": { "stringValue": "success" } }
         ]
       }]
     }]
@@ -146,154 +216,235 @@ write, so it is the only emitter.
 }
 ```
 
-`signals.object.instance` differing from `service.instance.id` is what makes this
-event visibly cross-instance — the single most useful thing no current query can
-tell you.
+`actor` is the provider user who performed *this* transition; `source`/`target`
+describe the action's original direction. Keeping them separate is what lets you
+ask both "who decided" and "which way did the request flow."
+
+`source.instance` differing from `target.instance` is what makes this event
+visibly cross-instance — the single most useful thing no current query can tell
+you.
 
 ### 2. User creation
 
 ```jsonc
-// event.name: signals.user.provisioned
 {
-  "service.name": "signals-api", "service.instance.id": "in-blr-seeker-1",
-  "signals.event.uid":   "usr:8d3f…:provisioned",
-  "signals.actor.id":    "px_7d41a9…", "signals.actor.type": "system",
-  "signals.user.id":     "px_7d41a9…",
-  "signals.user.channel":"otp_email",       // how they arrived
-  "signals.user.self_signup": true,
-  "signals.user.is_minor":    false,        // flag only — never DOB
-  "signals.actor.network":    "yellow_dot",
-  "signals.actor.domain":     "seeker"
+  "event.name": "signals.user.provisioned",
+  "event.uid":  "usr:8d3f…:provisioned",
+  "event.category": "state_change",
+  "network": "yellow_dot", "channel": "otp_email",
+
+  "actor.type": "system",
+  "actor.is_minor": false,
+
+  "object.id": "px_7d41a9…", "object.type": "user", "object.subtype": "participant",
+  "object.version": 1,
+
+  "state.to": "active", "state.trigger": "self_signup",
+
+  "source.domain": "seeker", "source.instance": "in-blr-seeker-1",
+  "flow.name": "signup", "flow.step": 3, "flow.outcome": "success",
+  "outcome": "success"
 }
 ```
 
-`actor.type: system` because provisioning is performed *by* the platform, with
-`signals.user.id` naming the subject. When an admin onboards a participant,
-`actor.type` is `user` and `signals.on_behalf_of.org_id` is set.
+`actor.type: system` because provisioning is performed by the platform, with the
+subject in `object.*`. Admin onboarding instead sets `actor.type: user`,
+`actor.on_behalf_of: <org_id>`, `channel: admin`, `state.trigger: admin_upsert` —
+same schema, no new fields.
 
 ### 3. Profile creation
 
-Profiles are items here (`item_type: profile_1.0`), so this is an item event with
-an attribute — not a separate event type.
+Profiles are items (`item_type: profile_1.0`), so this is an item event with a
+subtype — not a separate event shape.
 
 ```jsonc
-// event.name: signals.item.created
 {
-  "service.instance.id": "in-blr-seeker-1",
-  "signals.event.uid":   "itm:b71e…:1",
-  "signals.actor.id":    "px_7d41a9…", "signals.actor.type": "user",
-  "signals.item.id":     "b71e…",
-  "signals.item.type":   "profile_1.0",
-  "signals.item.network":"yellow_dot",
-  "signals.item.domain": "seeker",
-  "signals.item.lifecycle_state": "draft",
-  "signals.item.revision":        1,
-  "signals.item.completion_pct":  40,       // derived, non-PII
-  "signals.item.field_count":     7
+  "event.name": "signals.item.created",
+  "event.uid":  "itm:b71e…:1",
+  "event.category": "state_change",
+  "network": "yellow_dot", "channel": "in_app",
+
+  "actor.id": "px_7d41a9…", "actor.type": "user",
+
+  "object.id": "b71e…", "object.type": "item",
+  "object.subtype": "profile_1.0", "object.version": 1,
+  "object.owner": "px_7d41a9…",
+
+  "state.to": "draft", "state.trigger": "user_action",
+
+  "source.domain": "seeker", "source.item_type": "profile_1.0",
+  "source.item_id": "b71e…", "source.instance": "in-blr-seeker-1",
+
+  "metric.score": 40,   // completion %
+  "metric.count": 7,    // populated fields
+  "flow.name": "profile_creation", "flow.step": 4,
+  "outcome": "success"
 }
 ```
 
 ### 4. Profile update
 
 ```jsonc
-// event.name: signals.item.updated
 {
-  "signals.event.uid":  "itm:b71e…:2",
-  "signals.item.id":    "b71e…", "signals.item.type": "profile_1.0",
-  "signals.item.revision": 2,
-  "signals.item.changed_fields": ["skills", "location"],  // names only, never values
-  "signals.item.completion_pct": 75,
-  "signals.item.completion_delta": 35
+  "event.name": "signals.item.updated",
+  "event.uid":  "itm:b71e…:2",
+  "event.category": "state_change",
+  "network": "yellow_dot", "channel": "in_app",
+
+  "actor.id": "px_7d41a9…", "actor.type": "user",
+  "object.id": "b71e…", "object.type": "item",
+  "object.subtype": "profile_1.0", "object.version": 2,
+
+  "state.from": "draft", "state.to": "draft", "state.trigger": "user_action",
+
+  "metric.score": 75, "metric.delta": 35,
+  "fields.changed": ["skills", "location"],   // names only, never values
+  "outcome": "success"
 }
 ```
 
-**`changed_fields` carries field names, never values** — that's what makes
-"which fields do people leave blank" answerable without touching PII.
+**`fields.changed` carries names, never values** — that's what makes "which
+fields do people leave blank" answerable without touching PII.
 
 ### 5. Onboarding — the profile goes live
 
 "Onboarded" is not its own event. It's the lifecycle promotion that consent
-acceptance triggers. Keeping it as a lifecycle change means telemetry can't drift
-from the transition the code actually enforces.
+acceptance triggers, so telemetry can't drift from the transition the code
+actually enforces.
 
 ```jsonc
-// event.name: signals.item.lifecycle_changed
 {
-  "signals.event.uid":  "itm:b71e…:3",
-  "signals.item.id":    "b71e…", "signals.item.type": "profile_1.0",
-  "signals.item.from_state": "draft",
-  "signals.item.to_state":   "live",
-  "signals.item.revision":   3,
-  "signals.item.trigger":    "profile_consent_accepted",
-  "signals.item.time_in_previous_state_ms": 864000000
+  "event.name": "signals.item.lifecycle_changed",
+  "event.uid":  "itm:b71e…:3",
+  "event.category": "state_change",
+  "event.parent_uid": "csn:4f2a…",           // the consent that caused it
+  "network": "yellow_dot", "channel": "in_app",
+
+  "actor.id": "px_7d41a9…", "actor.type": "user",
+  "object.id": "b71e…", "object.type": "item",
+  "object.subtype": "profile_1.0", "object.version": 3,
+
+  "state.from": "draft", "state.to": "live",
+  "state.trigger": "profile_consent_accepted",
+  "state.duration_ms": 864000000,
+
+  "source.domain": "seeker", "source.instance": "in-blr-seeker-1",
+  "outcome": "success"
 }
 ```
 
-Account creation (#2) and going live (#5) are deliberately separate events. Most
-onboarding drop-off happens *between* them, and a single "onboarded" event would
-hide exactly that.
+Account creation (#2) and going live (#5) stay separate events. Most onboarding
+drop-off happens *between* them, and a single "onboarded" event would hide
+exactly that.
 
 ### 6. UI interactions
 
-Two events cover the surface. `event.name` stays static; what was clicked is an
-attribute.
+`event.name` stays static; what was viewed or clicked is `object.id`.
 
 ```jsonc
-// event.name: signals.ui.page_viewed
 {
-  "service.name": "signals-ui",              // separate service — separate trust tier
-  "signals.ui.route":     "/profile/edit",
-  "signals.ui.flow":      "profile_creation",
-  "signals.ui.step":      2,
-  "signals.session.id":   "s_4a91…",
-  "signals.ui.referrer_route": "/profile",
-  "signals.ui.locale":    "en",
-  "signals.ui.viewport":  "mobile"
+  "event.name": "signals.ui.page_viewed",
+  "event.uid":  "ui:s_4a91…:18",
+  "event.category": "view",
+  "network": "yellow_dot", "channel": "in_app",
+
+  "actor.id": "px_7d41a9…", "actor.type": "user",
+  "object.id": "/profile/edit", "object.type": "page",
+
+  "session.id": "s_4a91…",
+  "ui.route": "/profile/edit",
+  "flow.name": "profile_creation", "flow.step": 2
 }
 ```
 
 ```jsonc
-// event.name: signals.ui.interaction
 {
-  "service.name": "signals-ui",
-  "signals.ui.element": "save_profile",      // stable id, not a label
-  "signals.ui.action":  "click",
-  "signals.ui.route":   "/profile/edit",
-  "signals.ui.flow":    "profile_creation",
-  "signals.ui.step":    2,
-  "signals.session.id": "s_4a91…",
-  "signals.ui.outcome": "validation_error",
-  "signals.ui.error_fields": ["date_of_birth"]   // names only
+  "event.name": "signals.ui.interaction",
+  "event.uid":  "ui:s_4a91…:19",
+  "event.category": "interaction",
+  "network": "yellow_dot", "channel": "in_app",
+
+  "actor.id": "px_7d41a9…", "actor.type": "user",
+  "object.id": "save_profile", "object.type": "element",   // stable id, not a label
+
+  "session.id": "s_4a91…",
+  "ui.route": "/profile/edit", "ui.element": "save_profile", "ui.action": "click",
+  "flow.name": "profile_creation", "flow.step": 2,
+  "flow.outcome": "validation_error",
+  "fields.error": ["date_of_birth"],
+  "outcome": "failure"
 }
 ```
 
-Pairing `signals.ui.flow` + `step` with the server-side events above is what
-turns a funnel into something diagnosable: the UI says where people stalled, the
-server says what actually committed.
+Because both UI and server events carry `flow.name` and `flow.step`, a funnel
+becomes diagnosable: the UI says where people stalled, the server says what
+actually committed.
 
-### 7. Operational — same SDK, other signals
-
-A span for the cross-instance hop, sharing the trace id with example 1:
+### 7. Search
 
 ```jsonc
-// span: signals.action.forward_to_target_instance
+{
+  "event.name": "signals.search.executed",
+  "event.category": "query",
+  "network": "yellow_dot", "channel": "in_app",
+
+  "actor.id": "px_7d41a9…", "actor.type": "user",
+  "object.type": "query", "object.subtype": "discover",
+
+  "metric.count": 42, "metric.duration_ms": 87,
+  "session.id": "s_4a91…",
+  "outcome": "success",
+  "attr.search_mode": "native_fallback"    // extension slot in use
+}
+```
+
+`attr.search_mode` shows the escape hatch working — and by the promotion rule,
+once a second and third use appears it becomes a core attribute rather than
+staying ad hoc.
+
+### 8. Notification
+
+```jsonc
+{
+  "event.name": "signals.notification.skipped",
+  "event.uid":  "ntf:act:9f2c…:3:INBOUND_STATUS",
+  "event.category": "delivery",
+  "event.parent_uid": "act:9f2c…:3",       // the change that triggered it
+  "network": "yellow_dot", "channel": "system",
+
+  "actor.type": "system",
+  "object.type": "notification", "object.subtype": "email",
+  "object.owner": "px_7d41a9…",
+
+  "outcome": "skipped", "outcome.reason": "no_email"
+}
+```
+
+`event.parent_uid` is what closes the loop: every notification is traceable to
+the domain change that caused it, and the skip reasons become a measurable
+dark-user rate rather than a log line.
+
+### 9. Operational — same SDK, other signals
+
+```jsonc
+// span
 {
   "name": "signals.action.forward_to_target_instance",
-  "traceId": "4bf92f3577b34da6a3ce929d0e0e4736",
+  "traceId": "4bf92f3577b34da6a3ce929d0e0e4736",   // same trace as example 1
   "status": "Ok",
   "attributes": {
-    "signals.peer.instance": "in-blr-provider-1",
-    "signals.action.type":   "apply",
+    "target.instance": "in-blr-provider-1",
+    "object.subtype":  "apply",
     "http.response.status_code": 201,
-    "signals.peer.duration_ms":  312
+    "metric.duration_ms": 312
   }
 }
 ```
 
-Metrics are ordinary instruments — `signals.peer.fetch.duration` (histogram),
-`signals.search.requests` (counter, with a `mode` attribute distinguishing
-signals-search from the native fallback), `signals.notification.sent` (counter).
-These replace the "publish derived rollups back as events" approach entirely.
+Metrics are ordinary instruments — a histogram for peer-fetch duration, counters
+for search requests and notifications sent — reusing the same attribute names as
+dimensions, so a metric and an event can be joined on `network`, `source.domain`,
+or `state.bucket` without a translation table.
 
 ---
 
@@ -316,22 +467,23 @@ Three layers, in order of importance:
 emits. The forwarding instance and the mirror-back path emit nothing. Duplication
 is prevented, not corrected.
 
-**2. Identify — deterministic `signals.event.uid`.** Derived from the domain
-natural key, never from a timestamp or the producer:
+**2. Identify — deterministic `event.uid`.** Derived from the domain natural key,
+never from a timestamp or the producer:
 
-| Event | `signals.event.uid` |
+| Event | `event.uid` |
 |---|---|
 | Action created / status changed | `act:{action_id}:{update_count}` |
 | Item created / updated / lifecycle | `itm:{item_id}:{revision}` |
 | Consent accepted | `csn:{consent_record_id}` |
 | User provisioned | `usr:{user_id}:provisioned` |
+| Notification | `ntf:{parent_uid}:{shape}` |
 
 The same change yields the same uid on every instance that observes it, so any
 duplicate is provably the same event and collapsible. This is a design
 discipline, not a format feature — which is why it survived the format change
 intact.
 
-**3. Collapse — idempotent sink** keyed on `signals.event.uid`.
+**3. Collapse — idempotent sink** keyed on `event.uid`.
 
 Two properties OTEL adds for free: `service.instance.id` makes every event
 attributable to its emitter, and because trace context propagates across the
@@ -339,8 +491,7 @@ cross-instance hop, one apply is a single trace — so a duplicate appears as tw
 events sharing a uid within one trace, which is trivially alertable.
 
 **Ordering.** Timestamps are explicitly not used for ordering; instance clocks
-are independent. `signals.action.update_count` and `signals.item.revision` are
-the monotonic tiebreaks.
+are independent. `object.version` is the monotonic tiebreak.
 
 ---
 
@@ -380,37 +531,30 @@ every item mutation.
 
 ## Pipeline
 
-Ingestion uses Obsrv's **`otel-service`** as the asynchronous Kafka bridge, so
-nothing in the request path talks to Kafka directly:
-
 ```
-signals-api  ─┐
-signals-ui   ─┼─ OTLP ──▶ otel-service ──▶ Kafka ──▶ Obsrv dataset
-aggregator   ─┘                              │
-                                             └─▶ raw topic (replay / audit)
+signals-api  ─┐                            ┌─▶ raw topic          (replay, audit)
+signals-ui   ─┼─ OTLP ──▶ OTLP→Kafka ──────┤
+aggregator   ─┘           bridge           └─▶ transformed topic  (analytics)
 ```
 
-`otel-service` accepts raw OTLP payloads over HTTP, auto-detects the signal type
-(`resourceLogs` / `resourceSpans` / `resourceMetrics`), flattens the nested
-attribute arrays into flat maps, promotes resource and scope fields to the top
-level, and publishes to two Kafka topics — the flattened stream
-(`{env}.{ingest_topic}`) that Obsrv datasets are built on, and the raw stream
-(`{env}.{otelingest_topic}`) kept for replay.
+Producers speak OTLP and nothing else. An OTLP→Kafka bridge — the OTEL
+Collector's Kafka exporter, or an equivalent service — publishes to two topics:
 
-Two consequences worth designing around:
+- **Raw topic** — OTLP payloads verbatim. Kept for replay and audit, and so a
+  downstream schema mistake is always recoverable.
+- **Transformed topic** — attribute arrays flattened to flat maps, resource and
+  scope fields promoted to top level. This is what analytics consumes.
 
-- **Flattening is why attribute names matter.** Each `signals.*` attribute
-  becomes a column in the Obsrv dataset. Flat, stable, prefixed names keep the
-  schema queryable; nested or dynamic names don't survive the trip.
-- **Obsrv's own samples carry `eid` and `producer` as resource attributes.** If
-  the datasets are shared with other Sunbird-ecosystem producers, adding an
-  `eid`-style resource attribute is a cheap compatibility affordance. `event.name`
-  stays the real discriminator.
+**Deliberately datastore-independent.** Nothing above the Kafka topics is part of
+this design. Any warehouse, OLAP store, or analytics platform can consume the
+transformed topic; swapping one for another changes no producer code and no event
+schema. The fixed attribute schema is what makes that portability real — flat,
+stable names map cleanly onto whatever table shape the sink prefers.
 
-**The durability gap to close.** An HTTP POST to `otel-service` is best-effort:
-if it is unavailable, those events are gone. That is fine for UI events, spans,
-and metrics. It is **not** fine for events that trigger notifications — a lost
-event means a lost email, which is the problem this design exists to fix. So
+**The durability gap to close.** Emitting OTLP over the network is best-effort:
+if the bridge is unavailable, those events are gone. That is fine for UI events,
+spans, and metrics. It is **not** fine for events that trigger notifications — a
+lost event means a lost email, which is the problem this design exists to fix. So
 record-grade events commit to a local durable store in the same transaction as
 the domain write and are relayed from there; everything else emits directly.
 Mechanics are in the full spec.
@@ -420,19 +564,22 @@ Mechanics are in the full spec.
 ## Metrics this unlocks
 
 - **Funnel per network and domain:** account created → profile created → profile
-  live → first action → accepted. The UI events fill in where people stalled
-  between those steps.
-- **Profile completion behaviour** — completion percentage over time, and which
-  fields are most often left blank, from `changed_fields` and `completion_delta`.
-- **Directional per item:** initiated vs received, the same split the dashboard
-  computes today, but from a stream instead of a full recompute scan.
-- **Cross-instance activity** — events where actor and object networks/domains
-  differ, grouped by emitting instance. Currently unanswerable.
-- **Time-to-decision** per action, and time-in-state per profile.
-- **Consent conversion** — acceptance through to the profile going live.
-- **Notification health** — sent / skipped / failed, and the dark-user rate.
-- **Search health** — the signals-search fallback rate.
-- **U18 gate** — blocked-action rate by channel, confirming the API gate rather
+  live → first action → accepted. `flow.name` and `flow.step` join the UI and
+  server sides, so you see where people stalled as well as what committed.
+- **Profile completion behaviour** — `metric.score` over time, and which fields
+  are most often left blank, from `fields.changed` and `fields.missing`.
+- **Directional per item:** initiated vs received, from `source.*` and
+  `target.*` — the same split the dashboard computes today, but from a stream
+  instead of a full recompute scan.
+- **Cross-instance activity** — events where `source.instance` differs from
+  `target.instance`, grouped by emitter. Currently unanswerable.
+- **Time-to-decision and time-in-state**, from `state.duration_ms`.
+- **Consent conversion** — acceptance through to the profile going live, joined
+  on `event.parent_uid`.
+- **Notification health** — `outcome` and `outcome.reason` give sent / skipped /
+  failed and the dark-user rate.
+- **Search health** — fallback rate and latency from `metric.duration_ms`.
+- **U18 gate** — blocked-action rate by `channel`, confirming the API gate rather
   than the UI is doing the blocking.
 
 `item_metrics` stays as the dashboard's read model; maintaining it incrementally
@@ -449,13 +596,17 @@ Telemetry must not become the leak.
 | Rule |
 |---|
 | No PII in attributes, ever — no email, phone, name, DOB, address, or free-text remarks. Action remarks are excluded, not copied. |
-| `signals.actor.id` is a keyed pseudonym: stable enough to join events, not reversible. Erasure is then a single-key delete. |
-| Field **names** yes, field **values** no. `changed_fields` and `error_fields` are what make form analytics possible without PII. |
+| `actor.id` and `object.owner` are keyed pseudonyms: stable enough to join events, not reversible. Erasure is then a single-key delete. |
+| Field **names** yes, field **values** no. `fields.changed` / `fields.error` / `fields.missing` are what make form analytics possible without PII. |
 | No coordinates, jittered or not. Coarse geohash only, and only where geography is genuinely needed. |
-| Search text is hashed by default; capturing raw queries is opt-in and off, because a query can contain a person's name. |
+| Search text is never an attribute; capturing raw queries is opt-in and off, because a query can contain a person's name. |
 | Facets restricted to the same declared, non-private fields the API already allows, so telemetry can't enumerate what the API refuses to expose. |
-| Minors: a flag, never DOB or guardian contact. Guardian OTP events carry a scope hash, never the OTP or the contact. |
-| Never put PII in span attributes either — the operational plane is not a loophole. |
+| Minors: `actor.is_minor` only, never DOB or guardian contact. Guardian OTP events carry a scope hash, never the OTP or the contact. |
+| `error.message` must be a safe message. Never put PII in span attributes either — the operational plane is not a loophole. |
+
+The fixed schema helps here too: with no free-form per-feature fields, a PII leak
+has to go through a named slot that review can check, rather than arriving in an
+attribute nobody was watching.
 
 Telemetry does not replace the consent ledger or the PII-reveal audit. Those
 remain the compliance records of truth; telemetry mirrors them for analysis.
@@ -467,17 +618,19 @@ remain the compliance records of truth; telemetry mirrors them for analysis.
 1. **OpenTelemetry as the single format** for domain and operational telemetry.
    The single-format requirement rules out Sunbird v3, which has no span or
    metric model.
-2. **`event.name` is a static `signals.*` namespace**; everything dynamic is an
+2. **One fixed attribute schema for all events**, with `attr.*` as a bounded
+   escape hatch and a promotion rule. No per-scenario fields.
+3. **`event.name` is a static `signals.*` namespace**; everything dynamic is an
    attribute.
-3. **Deterministic `signals.event.uid`** — the discipline that makes
-   multi-instance correct. Prevent duplication at the emitter, identify it by
-   uid, collapse it at the sink.
-4. **Only the write authority emits**; every instance notifies its own users.
-5. **API is the only record-grade source.** Never the UI, never `item_metrics`.
-6. **Record-grade events commit with the domain write**, so a notification can't
+4. **Deterministic `event.uid`** — the discipline that makes multi-instance
+   correct. Prevent duplication at the emitter, identify it by uid, collapse it
+   at the sink.
+5. **Only the write authority emits**; every instance notifies its own users.
+6. **API is the only record-grade source.** Never the UI, never `item_metrics`.
+7. **Record-grade events commit with the domain write**, so a notification can't
    be lost; everything else emits best-effort.
-7. **`otel-service` is the async Kafka bridge**, keeping Kafka out of the
-   request path.
+8. **Raw and transformed Kafka topics are the boundary.** No analytics datastore
+   is part of this design.
 
 ## Open questions
 
@@ -485,22 +638,22 @@ remain the compliance records of truth; telemetry mirrors them for analysis.
    JS logs SDK is still an experimental package. Wrap it behind a thin internal
    emitter so it can be swapped without touching call sites. Decide whether GA4
    stays during the transition.
-2. **Durable lane mechanics** for record-grade events — local outbox plus relay
-   is the proposal; confirm against how `otel-service` is deployed and whether it
-   can be reached reliably from every instance.
+2. **Durable lane mechanics** for record-grade events — a local outbox plus relay
+   is the proposal; confirm against how the OTLP→Kafka bridge is deployed and
+   whether it is reachable from every instance.
 3. The instance-to-instance mirror needs a decision — fix its authentication or
    retire it once telemetry carries the events. A live defect independent of
    telemetry; needs its own issue.
 4. Should the stream maintain `item_metrics` incrementally, or only pre-warm it?
    Parity test before deciding.
-5. Do aggregator bulk-create writes record the acting org as an on-behalf-of
-   marker on the actor? Cross-repo contract; confirm on the consumer side.
-6. One Obsrv dataset per signal type, or per trust tier? Tier separation matters
-   more than signal separation for query safety.
+5. Do aggregator bulk-create writes set `actor.on_behalf_of` for the acting org?
+   Cross-repo contract; confirm on the consumer side.
+6. Should the transformed topic be split by trust tier, so tier-2 events can't be
+   read into a metric of record by mistake? A filter on `service.name` works, but
+   separate topics make it structural.
 
 ## References
 
-- [Obsrv — OpenTelemetry (OTEL) integration](https://obsrv.sunbird.org/guides/example-datasets/opentelemetry-otel-integration)
-  and [`Sanketika-Obsrv/otel-service`](https://github.com/Sanketika-Obsrv/otel-service)
 - [OTEL semantic conventions for events](https://opentelemetry.io/docs/specs/semconv/general/events/)
 - [OTEL logs data model](https://opentelemetry.io/docs/specs/otel/logs/data-model/)
+- [OTEL Collector Kafka exporter](https://github.com/open-telemetry/opentelemetry-collector-contrib/tree/main/exporter/kafkaexporter)
