@@ -57,5 +57,6 @@ export function renderOtpBox(otp: string): string {
 /** Numbered provider-org list for the guardian bulk email (#393). */
 export function renderOrgList(names: string[]): string {
   if (names.length === 0) return '<p>the selected organisations</p>';
-  return `<ol>${names.map((n) => `<li>${escapeHtml(n)}</li>`).join('')}</ol>`;
+  const items = names.map((n) => '<li>' + escapeHtml(n) + '</li>').join('');
+  return `<ol>${items}</ol>`;
 }

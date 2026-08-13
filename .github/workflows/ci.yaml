@@ -130,8 +130,13 @@ jobs:
       - run: pnpm install --frozen-lockfile
 
       # --- (1) unit coverage across every workspace ----------------------
+      # Uses each package's dedicated `test:coverage` script (`vitest run
+      # --coverage`). Do NOT use `pnpm -r run test -- --coverage`: pnpm appends
+      # `-- --coverage`, and vitest reads everything after `--` as a positional
+      # test-name FILTER, so `--coverage` never enables coverage and no lcov is
+      # written — SonarCloud then imports 0% (overall AND new code).
       - name: Unit tests with coverage (all workspaces)
-        run: pnpm -r run test -- --coverage
+        run: pnpm -r run test:coverage
         continue-on-error: true
 
       # --- (2) api integration coverage against a real stack -------------
@@ -207,7 +212,7 @@ jobs:
         if: always()
         run: docker rm -f ci-db ci-redis || true
 
-      - uses: SonarSource/sonarqube-scan-action@v5
+      - uses: SonarSource/sonarqube-scan-action@v8
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
 

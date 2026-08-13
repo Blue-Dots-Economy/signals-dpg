@@ -13,6 +13,7 @@ import { redis } from '@api/db/secondary/redis';
 import { getNotificationClient } from '@/utils/notificationClient';
 import { getDefaultEmailSender } from '@/notifications/email/dispatch_email';
 import { materializeSignupGuardian } from '@/services/signup_guardian';
+import { sendWelcomeNotifications } from '@/notifications/welcome';
 
 export const authInstance = createAuth({
   appName: instance.INSTANCE_NAME ?? 'DPG',
@@ -76,15 +77,31 @@ export const authInstance = createAuth({
   allowSelfSignup: authConfig.allow_self_signup,
   loginChannels: authConfig.login_channels,
 
-  // Materialize a pre-auth signup-guardian capture (services/signup_guardian.ts)
-  // onto the new user id, only for genuinely new users. Never blocks signup —
-  // failures are caught and logged here (createAuth also wraps this call, so
-  // this is defense in depth, not the only safety net).
+  // Post-signup work for genuinely new users, both best-effort. Never blocks
+  // signup — failures are caught and logged here (createAuth also wraps this
+  // call, so this is defense in depth, not the only safety net).
+  //
+  //  1. Materialize a pre-auth signup-guardian capture
+  //     (services/signup_guardian.ts) onto the new user id.
+  //  2. Send the welcome notifications. These live in apps/api rather than in
+  //     packages/auth so the Keycloak path (which never runs better-auth) sends
+  //     the identical messages — see notifications/welcome.ts.
   afterUserCreate: async ({ user }) => {
     try {
       await materializeSignupGuardian(user);
     } catch (err) {
       console.error('materializeSignupGuardian failed:', err);
     }
+
+    await sendWelcomeNotifications(
+      {
+        name: user.name,
+        email: user.email ?? null,
+        phoneNumber: user.phoneNumber ?? null,
+      },
+      // No request context in a module-level hook, so failures go to the
+      // console here exactly as the surrounding code already does.
+      { error: (details, message) => console.error(message, details) }
+    );
   },
 });

@@ -5,6 +5,8 @@ export type NodeEnv = 'development' | 'production';
 /** Minimal shape `afterUserCreate` needs — a structural subset of better-auth's user row. */
 export interface AfterUserCreateUser {
   id: string;
+  /** Used to address the welcome notifications. Always set by the OTP create. */
+  name: string;
   email?: string | null;
   phoneNumber?: string | null;
 }

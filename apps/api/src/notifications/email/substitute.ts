@@ -14,15 +14,15 @@ export type TokenTypes = Record<string, 'text' | 'html'>;
  * The one `{{token}}` grammar, shared by the runtime substituter, the boot
  * placeholder lint (messages.ts), and tests — so they can never drift apart.
  */
-export const TOKEN_RE = /\{\{([A-Za-z][A-Za-z0-9_]*)\}\}/g;
+export const TOKEN_RE = /\{\{([A-Za-z]\w*)\}\}/g;
 
 export function escapeHtml(value: string): string {
   return value
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#39;');
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;')
+    .replaceAll("'", '&#39;');
 }
 
 function substitute(

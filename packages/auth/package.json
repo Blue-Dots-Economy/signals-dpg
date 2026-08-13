@@ -9,7 +9,8 @@
     ".": "./src/index.ts"
   },
   "scripts": {
-    "test": "vitest run"
+    "test": "vitest run",
+    "test:coverage": "vitest run --coverage"
   },
   "keywords": [],
   "author": "",
@@ -20,8 +21,8 @@
     "@vitest/coverage-v8": "^4.1.10"
   },
   "dependencies": {
-    "@better-auth/api-key": "^1.6.25",
-    "better-auth": "^1.6.25",
+    "@better-auth/api-key": "^1.6.26",
+    "better-auth": "^1.6.26",
     "notification": "workspace:*",
     "schemas": "workspace:*"
   }

@@ -21,7 +21,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 // --- mocks (hoisted) -------------------------------------------------------
 
-const { rowQueue, queries, dbState, configState, decryptImpl } =
+const { rowQueue, queries, dbState, configState, decryptImpl, networkCfgState } =
   vi.hoisted(() => ({
     // One shared FIFO of result sets; each drizzle chain shifts the next entry.
     rowQueue: [] as unknown[][],
@@ -36,6 +36,10 @@ const { rowQueue, queries, dbState, configState, decryptImpl } =
     decryptImpl: vi.fn((_row: { item_state: Record<string, unknown> }) => ({
       mergedState: {} as Record<string, unknown>,
     })),
+    // #237: per-network config fixture, consumed by getNetworkConfigById only
+    // when a test's body carries `contact` — every other test in this file
+    // leaves it null and never triggers the lookup.
+    networkCfgState: { cfg: null as Record<string, unknown> | null },
   }));
 
 function nextRows() {
@@ -161,6 +165,21 @@ vi.mock('@/utils/item_decrypt', () => ({
     decryptImpl(row),
 }));
 
+// #237: participant_decrypt now imports getNetworkConfigById to resolve the
+// per-domain contact-field context, but only calls it when body.contact is
+// present — mocked here so the pre-existing (contact-omitted) tests in this
+// file never need a real network config.
+vi.mock('@/network_configs', () => ({
+  getNetworkConfigById: vi.fn(async () => {
+    if (!networkCfgState.cfg) {
+      throw new Error(
+        'participant_group.test.ts: no network_configs fixture set (only needed when body.contact is present)',
+      );
+    }
+    return networkCfgState.cfg;
+  }),
+}));
+
 import { participant_read_handler } from '../participant_read';
 import { participant_decrypt_handler } from '../participant_decrypt';
 
@@ -188,7 +207,7 @@ function makeReply(): FakeReply {
   };
 }
 
-const log = { error: vi.fn(), info: vi.fn() };
+const log = { error: vi.fn(), info: vi.fn(), warn: vi.fn() };
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function call(handler: any, req: Record<string, unknown>) {
@@ -258,6 +277,7 @@ beforeEach(() => {
   queries.length = 0;
   dbState.failWith = null;
   configState.served_domains = [{ network: 'blue_dot', domain: 'seeker' }];
+  networkCfgState.cfg = null;
   vi.clearAllMocks();
   decryptImpl.mockImplementation((row: { item_state: Record<string, unknown> }) => ({
     mergedState: { ...row.item_state, phone: '+919999900000' },
@@ -638,17 +658,17 @@ describe('participant_read_handler — item + consent projection', () => {
     });
   });
 
-  it('403 ACTING_ORG_TYPE_NOT_ALLOWED for a voice acting org, before any read', async () => {
+  it('admits a voice acting org (treated as a service org; retire via #518)', async () => {
     const reply = await call(participant_read_handler, {
       acting_org: { org_id: 'org_voice', org_type: 'voice', service_user_id: 's' },
       query: { email: 'a@b.com' },
     });
 
-    expect(reply.statusCode).toBe(403);
-    expect((reply.body as { error: string }).error).toBe(
-      'ACTING_ORG_TYPE_NOT_ALLOWED',
-    );
-    expect(queries).toHaveLength(0);
+    // voice is admitted alongside aggregator/network_service — voice-dpg is a
+    // platform layer, not a restricted actor. The redundant `voice` org type is
+    // tracked for removal (model voice-dpg as network_service) in signals-dpg#518.
+    expect(reply.statusCode).not.toBe(403);
+    expect(queries.length).toBeGreaterThan(0);
   });
 
   it('propagates a DB failure instead of returning a 5xx body (no try/catch)', async () => {
@@ -901,5 +921,200 @@ describe('participant_decrypt_handler — user_id mode', () => {
         body: { user_id: 'u1' },
       }),
     ).rejects.toThrow('db down');
+  });
+});
+
+// --- participant_decrypt fields / contact / locations (#521) ---------------
+//
+// The fields/contact/locations-omitted path is exercised throughout the two
+// describe blocks above (none of those bodies set any of the three), which is
+// the regression this endpoint must never break. These cases cover the three
+// independent controls: `fields` (pure item_state projection, no canonical
+// mapping/user fallback), `contact` (canonical block resolved against a
+// per-domain contact_fields fixture + the row's account columns), and
+// `include_locations` (the row's item_locations column).
+
+describe('participant_decrypt_handler — fields / contact / locations (#521)', () => {
+  it('fields: ["full_name"] is a pure projection — no contact_fields mapping is consulted', async () => {
+    // networkCfgState.cfg is deliberately left null: getNetworkConfigById
+    // throws if called, so this also proves `fields` never triggers a config
+    // lookup (that's `contact`'s job).
+    decryptImpl.mockImplementationOnce(() => ({
+      mergedState: { full_name: 'Real Name', mobile: '+911234567890' },
+    }));
+    rowQueue.push([itemRow()]);
+
+    const reply = await call(participant_decrypt_handler, {
+      acting_org: NETSVC,
+      body: { item_ids: ['i1'], fields: ['full_name'] },
+    });
+
+    expect(reply.statusCode).toBe(200);
+    const body = reply.body as { profiles: { item_state: Record<string, unknown> }[] };
+    expect(body.profiles[0].item_state).toEqual({ full_name: 'Real Name' });
+  });
+
+  it('contact: ["name","phone"] resolve via contact_fields; profile value wins', async () => {
+    networkCfgState.cfg = {
+      domains: [
+        {
+          id: 'seeker',
+          item_schemas: { 'profile_1.0': { display_name_field: 'full_name' } },
+          card: { title_field: 'full_name' },
+          contact_fields: { name: 'full_name', phone: 'mobile' },
+        },
+      ],
+    };
+    decryptImpl.mockImplementationOnce(() => ({
+      mergedState: { full_name: 'Real Name', mobile: '+911234567890' },
+    }));
+    rowQueue.push([
+      itemRow({
+        user_name: 'Account Name',
+        user_email: 'account@example.com',
+        user_phone: '+910000000000',
+      }),
+    ]);
+
+    const reply = await call(participant_decrypt_handler, {
+      acting_org: NETSVC,
+      body: { item_ids: ['i1'], contact: ['name', 'phone'] },
+    });
+
+    expect(reply.statusCode).toBe(200);
+    const body = reply.body as {
+      profiles: {
+        item_state: Record<string, unknown>;
+        contact: Record<string, { value: string | null; source: string | null }>;
+      }[];
+    };
+    // fields was omitted -> item_state stays the full merged state, unaffected
+    // by the contact block.
+    expect(body.profiles[0].item_state).toEqual({ full_name: 'Real Name', mobile: '+911234567890' });
+    expect(body.profiles[0].contact).toEqual({
+      name: { value: 'Real Name', source: 'item' },
+      phone: { value: '+911234567890', source: 'item' },
+    });
+  });
+
+  it('contact: ["email"] with no profile mapping/value falls back to the account email', async () => {
+    networkCfgState.cfg = {
+      domains: [
+        {
+          id: 'seeker',
+          item_schemas: { 'profile_1.0': {} },
+          contact_fields: { name: 'full_name' }, // no `email` mapping
+        },
+      ],
+    };
+    decryptImpl.mockImplementationOnce(() => ({ mergedState: { full_name: 'Real Name' } }));
+    rowQueue.push([
+      itemRow({ user_name: 'Account Name', user_email: 'account@example.com', user_phone: null }),
+    ]);
+
+    const reply = await call(participant_decrypt_handler, {
+      acting_org: NETSVC,
+      body: { item_ids: ['i1'], contact: ['email'] },
+    });
+
+    expect(reply.statusCode).toBe(200);
+    const body = reply.body as { profiles: { contact: Record<string, unknown> }[] };
+    expect(body.profiles[0].contact).toEqual({ email: { value: 'account@example.com', source: 'user' } });
+  });
+
+  it('canonical field absent in both profile and account resolves to {value:null, source:null}', async () => {
+    networkCfgState.cfg = {
+      domains: [{ id: 'seeker', item_schemas: {}, contact_fields: {} }],
+    };
+    decryptImpl.mockImplementationOnce(() => ({ mergedState: { full_name: 'Real Name' } }));
+    rowQueue.push([
+      itemRow({ user_name: 'Account Name', user_email: null, user_phone: null }),
+    ]);
+
+    const reply = await call(participant_decrypt_handler, {
+      acting_org: NETSVC,
+      body: { item_ids: ['i1'], contact: ['email'] },
+    });
+
+    expect(reply.statusCode).toBe(200);
+    const body = reply.body as { profiles: { contact: Record<string, unknown> }[] };
+    expect(body.profiles[0].contact).toEqual({ email: { value: null, source: null } });
+  });
+
+  it('include_locations: true returns the row\'s item_locations, without touching contact/fields', async () => {
+    rowQueue.push([itemRow({ item_locations: [{ lat: 1, lng: 2, label: 'home' }] })]);
+
+    const reply = await call(participant_decrypt_handler, {
+      acting_org: NETSVC,
+      body: { item_ids: ['i1'], include_locations: true },
+    });
+
+    expect(reply.statusCode).toBe(200);
+    const body = reply.body as { profiles: { locations: unknown; contact?: unknown }[] };
+    expect(body.profiles[0].locations).toEqual([{ lat: 1, lng: 2, label: 'home' }]);
+    expect(body.profiles[0]).not.toHaveProperty('contact');
+  });
+
+  it('user_id mode applies contact + include_locations to every returned item', async () => {
+    networkCfgState.cfg = {
+      domains: [{ id: 'seeker', item_schemas: {}, contact_fields: { name: 'full_name' } }],
+    };
+    decryptImpl.mockImplementation((row: { item_state: Record<string, unknown> }) => ({
+      mergedState: { ...row.item_state },
+    }));
+    rowQueue.push([
+      itemRow({ item_id: 'i1', item_state: { full_name: 'A' }, item_locations: [{ lat: 1, lng: 1 }] }),
+      itemRow({ item_id: 'i2', item_state: { full_name: 'B' }, item_locations: [{ lat: 2, lng: 2 }] }),
+    ]);
+
+    const reply = await call(participant_decrypt_handler, {
+      acting_org: NETSVC,
+      body: { user_id: 'u1', contact: ['name'], include_locations: true },
+    });
+
+    expect(reply.statusCode).toBe(200);
+    const body = reply.body as {
+      profiles: { item_id: string; contact: Record<string, unknown>; locations: unknown }[];
+    };
+    expect(body.profiles.map((p) => [p.item_id, p.contact.name, p.locations])).toEqual([
+      ['i1', { value: 'A', source: 'item' }, [{ lat: 1, lng: 1 }]],
+      ['i2', { value: 'B', source: 'item' }, [{ lat: 2, lng: 2 }]],
+    ]);
+  });
+
+  it('audits fields_requested / contact_requested / include_locations as counts/booleans only, never values', async () => {
+    networkCfgState.cfg = {
+      domains: [
+        {
+          id: 'seeker',
+          item_schemas: {},
+          contact_fields: { name: 'full_name', phone: 'mobile' },
+        },
+      ],
+    };
+    rowQueue.push([itemRow({ user_name: 'Account Name' })]);
+
+    await call(participant_decrypt_handler, {
+      acting_org: NETSVC,
+      body: {
+        item_ids: ['i1'],
+        fields: ['full_name'],
+        contact: ['name', 'phone'],
+        include_locations: true,
+      },
+    });
+
+    expect(log.info).toHaveBeenCalledWith(
+      expect.objectContaining({
+        fields_requested: 1,
+        contact_requested: 2,
+        include_locations: true,
+      }),
+    );
+    const logged = log.info.mock.calls[0][0] as Record<string, unknown>;
+    expect(logged).not.toHaveProperty('fields');
+    expect(logged).not.toHaveProperty('contact');
+    expect(logged).not.toHaveProperty('item_state');
+    expect(logged).not.toHaveProperty('locations');
   });
 });

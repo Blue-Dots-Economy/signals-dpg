@@ -169,47 +169,21 @@ export function createAuth(config: AuthRuntimeConfig) {
         },
 
         afterUserCreate: async (payload) => {
-          if (nc) {
-            if (payload.user.email && config.sendEmail) {
-              try {
-                await config.sendEmail({
-                  caseId: 'welcome',
-                  to: payload.user.email,
-                  fromName: config.appName,
-                  variables: {
-                    userName: payload.user.name || 'user',
-                    appName: config.appName,
-                  },
-                });
-              } catch (err) {
-                console.error('Failed to send welcome email:', err);
-              }
-            }
+          // The welcome email + WhatsApp used to be sent inline here. They now
+          // live in apps/api's `sendWelcomeNotifications` and are invoked from
+          // the caller hook below, because a hook that only this plugin calls is
+          // unreachable once better-auth stops running — a user provisioned from
+          // a Keycloak token got no welcome at all (G1 of
+          // docs/superpowers/plans/2026-07-31-replace-better-auth-with-keycloak.md).
+          // Keeping them behind one shared hook is what stops the two identity
+          // paths sending different things. Its copy comes from the email
+          // messages file via the central dispatcher (#529).
 
-            if (payload.user.phoneNumber) {
-              try {
-                await nc.notify({
-                  channel: 'whatsapp',
-                  template_id: 'other',
-                  to: payload.user.phoneNumber,
-                  priority: 'realtime',
-                  variables: {
-                    contentSid: 'HX3f2a5d7e4a18e5664124592a12a154eb',
-                    contentVariables: {
-                      '1': payload.user.name,
-                    },
-                  },
-                });
-              } catch (err) {
-                console.error('Failed to send welcome WhatsApp:', err);
-              }
-            }
-          }
-
-          // Caller-supplied signup-completion hook (e.g. materializing a
-          // pre-auth signup-guardian capture onto the new user). Always runs,
-          // independent of whether a notification client is configured —
-          // never let a failure here block or fail the signup response.
+          // Caller-supplied signup-completion hook (materializing a pre-auth
+          // signup-guardian capture onto the new user, and the welcome
+          // notifications). Always runs, independent of whether a notification
+          // client is configured — never let a failure here block or fail the
+          // signup response.
           if (config.afterUserCreate) {
             try {
               await config.afterUserCreate(payload);

@@ -10,6 +10,7 @@ import AuthRoutes from '@/routes/auth';
 import {
   apiConfig,
   apiReferenceEnabled,
+  authConfig,
   getCurrentApiBaseUrl,
   instance,
 } from '@/config';
@@ -279,7 +280,30 @@ export async function buildApp(): Promise<FastifyInstance> {
     },
   });
   app.register(health_routes);
-  app.register(AuthRoutes);
+
+  /**
+   * better-auth's own HTTP surface (`/api/auth/*`) — mounted only when
+   * better-auth is the provider.
+   *
+   * Under `AUTH_PROVIDER=keycloak` this used to stay mounted, which meant
+   * `unified_otp`'s `verifyOtp` was still reachable and **still created users**
+   * (`packages/auth/plugins/unified_otp.ts`). Those users got a signals row with
+   * no Keycloak identity, landing them in the `user_not_found` /
+   * `already_registered` deadlock `services/auth/participant_identity.ts`
+   * documents. Nothing legitimate calls this mount under Keycloak: the UI uses it
+   * only for the OTP flow, sign-out and get-session (all replaced by the OIDC
+   * screen), api keys are minted by `scripts/seed_service_users.ts` writing
+   * directly, and `verifyApiKey` is an in-process call rather than a route — so
+   * `x-api-key` auth is unaffected.
+   *
+   * Not mounting beats guarding inside the handler: an absent route cannot be
+   * reached by a code path we failed to think of, whereas an in-handler check has
+   * to be correct for every one of better-auth's endpoints.
+   */
+  if (authConfig.betterauth_enabled) {
+    app.register(AuthRoutes);
+  }
+
   app.register(v1_routes, { prefix: '/api/v1' });
 
   return app;

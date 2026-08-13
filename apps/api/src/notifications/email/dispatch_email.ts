@@ -94,7 +94,7 @@ export function createEmailSender(deps: EmailSenderDeps): EmailSender {
       args.brand,
     );
 
-    const vars: Record<string, string> = { ...(args.variables ?? {}) };
+    const vars: Record<string, string> = { ...args.variables };
     // The styled OTP box is code-built (html token) even when the caller —
     // e.g. packages/auth — only knows the plain code.
     if (def.tokens.otpBox === 'html' && vars.otp !== undefined && vars.otpBox === undefined) {

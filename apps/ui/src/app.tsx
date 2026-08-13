@@ -8,6 +8,7 @@ import { HomePage } from './pages/home-page';
 import { ProfileFormPage } from './pages/profile-form-page';
 import { LoginPage } from './pages/auth/login-page';
 import { OtpPage } from './pages/auth/otp-page';
+import { OidcCallbackPage } from './pages/auth/oidc-callback-page';
 import { MyActionsPage } from './pages/my-actions-page';
 import { PrivacyPage } from './pages/legal/privacy-page';
 import { TermsPage } from './pages/legal/terms-page';
@@ -32,6 +33,10 @@ export function App() {
             <Route path="/profile/:id/edit" element={<RequireAuth><ProfileFormPage /></RequireAuth>} />
             <Route path="/auth/login" element={<LoginPage />} />
             <Route path="/auth/otp" element={<OtpPage />} />
+            {/* Keycloak redirect target. Registered unconditionally so the
+                route exists the moment VITE_AUTH_PROVIDER is flipped, without
+                a rebuild — the page is inert if nobody redirects here. */}
+            <Route path="/auth/callback" element={<OidcCallbackPage />} />
             <Route path="/privacy" element={<PrivacyPage />} />
             <Route path="/terms" element={<TermsPage />} />
             <Route path="/public/:network/:domain/:itemType/:itemId" element={<PublicProfilePage />} />

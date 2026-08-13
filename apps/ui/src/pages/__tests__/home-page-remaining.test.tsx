@@ -113,6 +113,16 @@ const blueDotGuarded: DotNetworkSchema = {
   ),
 };
 
+// A network whose seeker domain gates go-live on completeness alone
+// (`go_live_required: ["schema_required"]`, no consent gate) — so the profile
+// switcher must NOT prompt for profile_creation consent (#344).
+const blueDotConsentFree: DotNetworkSchema = {
+  ...blueDot,
+  domains: blueDot.domains.map((domain) =>
+    domain.id === 'seeker' ? { ...domain, go_live_required: ['schema_required'] } : domain,
+  ),
+};
+
 // A directory-style network whose only interaction is a self-edge: the viewer's
 // own domain is also the only browseable one, so there are no "counterpart"
 // domains to scope the filter fields to.
@@ -953,6 +963,26 @@ describe('HomePage — active profile switching', () => {
     // The switch itself is withheld until consent is recorded.
     expect(localStorage.getItem('activeProfileId:blue_dot')).toBe('me-1');
     expect(browseOptsFor('provider')?.anchorItemId).toBe('me-1');
+  });
+
+  it('does NOT gate the switch when the profile domain omits consent_required (#344)', async () => {
+    const user = userEvent.setup();
+    // Seeker domain gates go-live on completeness alone → no consent prompt,
+    // even though the picked profile (me-2) has no recorded consent.
+    state.networks = [blueDotConsentFree];
+    state.resolved = { blue_dot: blueDotConsentFree };
+    state.consentConfig = consentConfigFixture;
+    state.consentedProfileIds = new Set(['me-1']);
+    state.myItems = [myProfile, mySecondProfile];
+    state.browse = { provider: { items: [remoteProvider], total: 1 } };
+    renderHome('/?view=list&domain=provider');
+    await findCard('Acme Welding');
+
+    await user.click(screen.getByRole('button', { name: /My Second Seeker/ }));
+
+    // Switch goes through with no consent prompt withheld.
+    await waitFor(() => expect(localStorage.getItem('activeProfileId:blue_dot')).toBe('me-2'));
+    expect(screen.queryByText('Confirm your profile consent')).toBeNull();
   });
 
   it('falls back to the domain name when the profile schema has no title field', async () => {

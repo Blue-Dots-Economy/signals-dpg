@@ -93,6 +93,9 @@ function authValue(
     requestOtp: async () => {},
     verifyOtp: async () => {},
     signOut,
+    isKeycloakLogin: false,
+    startKeycloakLogin: async () => {},
+    completeKeycloakLogin: async () => {},
   };
 }
 

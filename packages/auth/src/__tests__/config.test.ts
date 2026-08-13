@@ -637,121 +637,11 @@ describe('afterUserCreate', () => {
     await expect(otpOptions.afterUserCreate(payload)).resolves.toBe(payload);
   });
 
-  it('calls config.sendEmail with caseId "welcome", fromName=appName and the userName/appName variables', async () => {
-    const nc = makeNotificationClient();
-    const sendEmail = makeSendEmail();
-    const { otpOptions } = build({
-      notificationClient: nc,
-      sendEmail,
-      appName: 'Signals',
-    });
-    await otpOptions.afterUserCreate({ user: user({ phoneNumber: null }) });
-    expect(sendEmail).toHaveBeenCalledWith({
-      caseId: 'welcome',
-      to: 'alice@example.org',
-      fromName: 'Signals',
-      variables: { userName: 'Alice', appName: 'Signals' },
-    });
-    expect(nc.notify).not.toHaveBeenCalled();
-  });
-
-  it('falls back userName to "user" when the new user has no name', async () => {
-    const nc = makeNotificationClient();
-    const sendEmail = makeSendEmail();
-    const { otpOptions } = build({
-      notificationClient: nc,
-      sendEmail,
-      appName: 'Signals',
-    });
-    await otpOptions.afterUserCreate({
-      user: user({ name: '', phoneNumber: null }),
-    });
-    expect(sendEmail).toHaveBeenCalledWith({
-      caseId: 'welcome',
-      to: 'alice@example.org',
-      fromName: 'Signals',
-      variables: { userName: 'user', appName: 'Signals' },
-    });
-  });
-
-  it('sends no welcome email when config.sendEmail is not wired, even with a notification client and an email', async () => {
-    const nc = makeNotificationClient();
-    const { otpOptions } = build({ notificationClient: nc });
-    await otpOptions.afterUserCreate({ user: user({ phoneNumber: null }) });
-    expect(nc.notify).not.toHaveBeenCalled();
-  });
-
-  it('sends a WhatsApp welcome with the templated content sid and name variable', async () => {
-    const nc = makeNotificationClient();
-    const { otpOptions } = build({ notificationClient: nc });
-    await otpOptions.afterUserCreate({ user: user({ email: null }) });
-    expect(nc.notify).toHaveBeenCalledTimes(1);
-    expect(nc.notify).toHaveBeenCalledWith({
-      channel: 'whatsapp',
-      template_id: 'other',
-      to: '+911234567890',
-      priority: 'realtime',
-      variables: {
-        contentSid: 'HX3f2a5d7e4a18e5664124592a12a154eb',
-        contentVariables: { '1': 'Alice' },
-      },
-    });
-  });
-
-  it('sends both a welcome email (via sendEmail) and a WhatsApp welcome (via the notification client) when the user has both', async () => {
-    const nc = makeNotificationClient();
-    const sendEmail = makeSendEmail();
-    const { otpOptions } = build({ notificationClient: nc, sendEmail });
-    await otpOptions.afterUserCreate({ user: user() });
-    expect(sendEmail).toHaveBeenCalledTimes(1);
-    expect(nc.notify).toHaveBeenCalledTimes(1);
-    expect((nc.notify.mock.calls[0][0] as { channel: string }).channel).toBe(
-      'whatsapp'
-    );
-  });
-
-  it('sends nothing when the user has neither an email nor a phone number', async () => {
-    const nc = makeNotificationClient();
-    const sendEmail = makeSendEmail();
-    const { otpOptions } = build({ notificationClient: nc, sendEmail });
-    await otpOptions.afterUserCreate({
-      user: user({ email: null, phoneNumber: null }),
-    });
-    expect(nc.notify).not.toHaveBeenCalled();
-    expect(sendEmail).not.toHaveBeenCalled();
-  });
-
-  it('SWALLOWS a welcome-email failure (unlike the OTP sends) and still attempts the WhatsApp', async () => {
-    const nc = makeNotificationClient();
-    const boom = new Error('smtp down');
-    const sendEmail = vi.fn(async (_args: Record<string, unknown>) => {
-      throw boom;
-    });
-    const { otpOptions } = build({ notificationClient: nc, sendEmail });
-    const payload = { user: user() };
-    await expect(otpOptions.afterUserCreate(payload)).resolves.toBe(payload);
-    expect(errorSpy).toHaveBeenCalledWith('Failed to send welcome email:', boom);
-    expect(sendEmail).toHaveBeenCalledTimes(1);
-    expect(nc.notify).toHaveBeenCalledTimes(1);
-    expect((nc.notify.mock.calls[0][0] as { channel: string }).channel).toBe(
-      'whatsapp'
-    );
-  });
-
-  it('swallows a welcome-WhatsApp failure', async () => {
-    const nc = makeNotificationClient();
-    nc.notify.mockRejectedValueOnce(new Error('whatsapp down'));
-    const sendEmail = makeSendEmail();
-    const { otpOptions } = build({ notificationClient: nc, sendEmail });
-    await expect(
-      otpOptions.afterUserCreate({ user: user() })
-    ).resolves.toBeDefined();
-    expect(errorSpy).toHaveBeenCalledWith(
-      'Failed to send welcome WhatsApp:',
-      expect.any(Error)
-    );
-  });
-
+  // The inline welcome email + WhatsApp were moved out of this hook to
+  // apps/api's `sendWelcomeNotifications` (invoked via the caller hook below) so
+  // both the better-auth and Keycloak signup paths send the same welcome — see
+  // apps/api/src/notifications/welcome.ts + welcome.test.ts for that coverage.
+  // What remains to test here is the hook passthrough itself.
   it('runs the caller-supplied hook with the payload even without a notification client', async () => {
     const hook = vi.fn(async (_data: { user: OtpUser }) => {});
     const { otpOptions } = build({ afterUserCreate: hook });
@@ -759,29 +649,6 @@ describe('afterUserCreate', () => {
     await otpOptions.afterUserCreate(payload);
     expect(hook).toHaveBeenCalledTimes(1);
     expect(hook.mock.calls[0][0]).toBe(payload);
-  });
-
-  it('runs the caller hook after the notifications when a client is configured', async () => {
-    const order: string[] = [];
-    const nc = {
-      notify: vi.fn(async (_p: Record<string, unknown>) => {
-        order.push('notify');
-        return { ok: true };
-      }),
-    };
-    const sendEmail = vi.fn(async (_args: Record<string, unknown>) => {
-      order.push('sendEmail');
-    });
-    const hook = vi.fn(async (_data: { user: OtpUser }) => {
-      order.push('hook');
-    });
-    const { otpOptions } = build({
-      notificationClient: nc,
-      sendEmail,
-      afterUserCreate: hook,
-    });
-    await otpOptions.afterUserCreate({ user: user({ phoneNumber: null }) });
-    expect(order).toEqual(['sendEmail', 'hook']);
   });
 
   it('never lets a hook failure fail signup — it logs and still resolves with the payload', async () => {

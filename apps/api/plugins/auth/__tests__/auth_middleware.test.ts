@@ -17,7 +17,7 @@ const {
   verifyApiKey: vi.fn((_args: any): Promise<any> => Promise.resolve({})),
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   getSession: vi.fn((_args: any): Promise<any> => Promise.resolve(null)),
-  authConfigState: { middleware_enabled: true },
+  authConfigState: { middleware_enabled: true, keycloak_enabled: false },
   // Set `failWith` to make the next query reject, without monkey-patching the
   // row queue (an override there leaks into every later test in the file).
   dbState: { failWith: null as Error | null },
@@ -42,7 +42,15 @@ vi.mock('@api/src/routes/auth/create_auth', () => ({
   },
 }));
 
-vi.mock('@api/src/config', () => ({ authConfig: authConfigState }));
+// authConfig drives the middleware; keycloakConfig/databasesConfig are only
+// imported by the (dormant) Keycloak path — resolveKeycloakSession short-circuits
+// to a better-auth fallthrough while `keycloak_enabled` is false, so empty
+// shapes suffice here.
+vi.mock('@api/src/config', () => ({
+  authConfig: authConfigState,
+  keycloakConfig: {},
+  databasesConfig: {},
+}));
 
 vi.mock('@api/db/postgres/drizzle_config', () => ({
   db: {
@@ -74,6 +82,15 @@ vi.mock('@api/db/postgres/schema/auth', () => ({
     name: 'user.name',
     role: 'user.role',
   },
+}));
+
+// These tests exercise the better-auth path (apikey + session). The Keycloak
+// branch has its own coverage in `resolve_session.test.ts`, so stub it to always
+// fall through — this also keeps the whole Keycloak graph (provisioning,
+// service_account, redis) out of this suite.
+vi.mock('../resolve_session', () => ({
+  resolveKeycloakSession: vi.fn(async () => ({ ok: false, fallthrough: true })),
+  sendAuthFailure: vi.fn(),
 }));
 
 vi.mock('drizzle-orm', () => ({
