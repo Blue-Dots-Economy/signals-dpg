@@ -69,7 +69,7 @@ export function TopBar({
   viewMode,
   onViewModeChange,
   filtersSlot,
-}: TopBarProps) {
+}: Readonly<TopBarProps>) {
   const navigate = useNavigate();
   const { t } = useTranslation();
   const { isAuthenticated, isLoading } = useAuth();

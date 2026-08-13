@@ -439,7 +439,7 @@ export function SchemaForm({
   networkId,
   formContext,
   sectionHeadingLevel = 3,
-}: SchemaFormProps) {
+}: Readonly<SchemaFormProps>) {
   // Base schema (meta stripped) still carries `x-show-if` so the evaluator can read it.
   const baseSchema = React.useMemo(() => stripMetaSchema(schema), [schema]);
 

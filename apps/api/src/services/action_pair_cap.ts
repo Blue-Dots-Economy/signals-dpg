@@ -88,9 +88,10 @@ export async function assertPairCapAvailable(
   // Explicit codepoint comparator (not the default `.sort()`, and not
   // `localeCompare`): a lock key needs a locale-independent, stable total
   // order, and it satisfies typescript:S2871.
-  const [a, b] = [args.sourceItemId, args.targetItemId].sort((x, y) =>
-    x < y ? -1 : x > y ? 1 : 0,
-  );
+  const [a, b] = [args.sourceItemId, args.targetItemId].sort((x, y) => {
+    if (x < y) return -1;
+    return x > y ? 1 : 0;
+  });
   const lockKey = `action_pair:${args.network}:${a}:${b}`;
   await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtextextended(${lockKey}, 0))`);
 

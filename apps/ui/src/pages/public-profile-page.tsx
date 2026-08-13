@@ -46,7 +46,7 @@ const HERO_GRADIENT =
   'linear-gradient(135deg, var(--primary), color-mix(in srgb, var(--primary), white 32%))';
 
 function titleCaseDomain(id: string): string {
-  return id.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
+  return id.replaceAll('_', ' ').replaceAll(/\b\w/g, (c) => c.toUpperCase());
 }
 
 /**
@@ -63,7 +63,7 @@ function ProfileTopBar({
   isAuthenticated,
   showLogo,
   onBack,
-}: {
+}: Readonly<{
   networkId?: string;
   item: Item | null;
   isAuthenticated: boolean;
@@ -75,7 +75,7 @@ function ProfileTopBar({
    * instead. The header title renders in both modes.
    */
   showLogo: boolean;
-}) {
+}>) {
   const { t } = useTranslation();
 
   const onCopyLink = async () => {
@@ -131,7 +131,7 @@ function ProfileTopBar({
 }
 
 /** Centered content well used by every non-hero state (loading / error / unavailable). */
-function StateWell({ children }: { children: React.ReactNode }) {
+function StateWell({ children }: Readonly<{ children: React.ReactNode }>) {
   return (
     <div className="flex min-h-[60dvh] items-center justify-center px-4 py-16">
       <div className="w-full max-w-sm text-center">{children}</div>
@@ -139,7 +139,7 @@ function StateWell({ children }: { children: React.ReactNode }) {
   );
 }
 
-function UnavailableState({ networkId }: { networkId?: string }) {
+function UnavailableState({ networkId }: Readonly<{ networkId?: string }>) {
   const { t } = useTranslation();
   const { theme } = useNetworkTheme();
   return (
@@ -187,14 +187,14 @@ function ProfileActionRow({
   viewedDomain,
   user,
   networkItemName,
-}: {
+}: Readonly<{
   net: DotNetworkSchema | null;
   item: Item;
   activeItem: Item | null;
   viewedDomain: string;
   user: User | null;
   networkItemName: string;
-}) {
+}>) {
   const { t } = useTranslation();
   const queryClient = useQueryClient();
   const [matchOpen, setMatchOpen] = React.useState(false);
@@ -322,7 +322,7 @@ function ProfileActionRow({
 
   // A draft active profile can't act at all — completing it is the blocker, so
   // that hint takes precedence over the compatibility hint below.
-  if (activeItem && activeItem.lifecycle_status === 'draft') {
+  if (activeItem?.lifecycle_status === 'draft') {
     return (
       <p className="mt-4 text-sm text-muted-foreground">
         {t('public_profile.complete_profile_hint', 'Complete your active profile to apply or connect.')}
@@ -388,7 +388,7 @@ function ProfileActionRow({
         onClose={() => setMatchOpen(false)}
         score={score}
         isLoading={matchLoading}
-        localItemName={String(activeItem.item_state?.name ?? t('public_profile.your_profile', 'Your Profile'))}
+        localItemName={String((activeItem.item_state?.name as string | number | undefined) ?? t('public_profile.your_profile', 'Your Profile'))}
         networkItemName={networkItemName}
         onRecalculate={() => void recalculate()}
         onProceed={undefined}

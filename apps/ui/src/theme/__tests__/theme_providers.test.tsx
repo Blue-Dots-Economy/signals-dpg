@@ -429,22 +429,26 @@ describe('NetworkThemeProvider document title', () => {
     expect(document.title).toBe('Purple Dot · Signal Stack');
   });
 
-  it('weaves in the domain for a single-domain deployment, title-casing it', () => {
-    setRuntimeConfig({ VITE_SERVED_BINDINGS: 'purple_dot/service_provider' });
+  it.each([
+    {
+      name: 'weaves in the domain for a single-domain deployment, title-casing it',
+      binding: 'purple_dot/service_provider',
+      expected: 'Purple Dot · Service Provider · Signal Stack',
+    },
+    {
+      name: 'omits the domain when the deployment serves several domains',
+      binding: 'purple_dot/provider,purple_dot/seeker',
+      expected: 'Purple Dot · Signal Stack',
+    },
+    {
+      name: 'omits the domain when the served binding is malformed',
+      binding: 'purple_dot',
+      expected: 'Purple Dot · Signal Stack',
+    },
+  ])('$name', ({ binding, expected }) => {
+    setRuntimeConfig({ VITE_SERVED_BINDINGS: binding });
     renderTheme('/?network=purple_dot');
-    expect(document.title).toBe('Purple Dot · Service Provider · Signal Stack');
-  });
-
-  it('omits the domain when the deployment serves several domains', () => {
-    setRuntimeConfig({ VITE_SERVED_BINDINGS: 'purple_dot/provider,purple_dot/seeker' });
-    renderTheme('/?network=purple_dot');
-    expect(document.title).toBe('Purple Dot · Signal Stack');
-  });
-
-  it('omits the domain when the served binding is malformed', () => {
-    setRuntimeConfig({ VITE_SERVED_BINDINGS: 'purple_dot' });
-    renderTheme('/?network=purple_dot');
-    expect(document.title).toBe('Purple Dot · Signal Stack');
+    expect(document.title).toBe(expected);
   });
 
   it('brand copy title wins over the network theme name', () => {

@@ -299,7 +299,7 @@ function MarkerDetailPopup({
   connectDisabled,
   connectDisabledReason,
   onItemResolved,
-}: {
+}: Readonly<{
   networkId: string | null;
   marker: MapMarker;
   // The `Marker` (network-api) this popup's marker was derived from — carries
@@ -327,7 +327,7 @@ function MarkerDetailPopup({
   // `useItemDetail` result instead of re-fetching or reintroducing a full
   // browse feed.
   onItemResolved?: (item: Item) => void;
-}) {
+}>) {
   const { t } = useTranslation();
   // Marker ids are `${item_id}#${locationIndex}` — strip the suffix to look up the item.
   const baseItemId = marker.id.includes('#') ? marker.id.split('#')[0] : marker.id;

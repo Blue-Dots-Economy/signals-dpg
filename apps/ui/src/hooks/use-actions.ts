@@ -61,10 +61,10 @@ export const ACTIONS_PAGE_SIZE = 20;
 interface ActionQueryFields {
   /** Scope to a single item's actions (either side) — the active profile. */
   itemId?: string | null;
-  status?: FetchMyActionsQuery['action_status'];
-  type?: FetchMyActionsQuery['action_type'];
-  sort?: FetchMyActionsQuery['sort'];
-  facets?: FetchMyActionsQuery['facets'];
+  status?: NonNullable<FetchMyActionsQuery['action_status']>;
+  type?: NonNullable<FetchMyActionsQuery['action_type']>;
+  sort?: NonNullable<FetchMyActionsQuery['sort']>;
+  facets?: NonNullable<FetchMyActionsQuery['facets']>;
   limit?: number;
 }
 
@@ -250,10 +250,10 @@ export function useReceivedActionsByStatus(
  * filter/sort — the page owns this state and passes it straight through).
  */
 export interface UseOwnedActionsParams {
-  status?: FetchMyActionsQuery['action_status'];
-  type?: FetchMyActionsQuery['action_type'];
-  sort?: FetchMyActionsQuery['sort'];
-  facets?: FetchMyActionsQuery['facets'];
+  status?: NonNullable<FetchMyActionsQuery['action_status']>;
+  type?: NonNullable<FetchMyActionsQuery['action_type']>;
+  sort?: NonNullable<FetchMyActionsQuery['sort']>;
+  facets?: NonNullable<FetchMyActionsQuery['facets']>;
 }
 
 interface ActionsPage {

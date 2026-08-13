@@ -80,7 +80,7 @@ export function AppSidebar({
   onProfilesChanged,
   userSchemas,
   hideBrowse = false,
-}: AppSidebarProps) {
+}: Readonly<AppSidebarProps>) {
   const navigate = useNavigate();
   const { t } = useTranslation();
 

@@ -250,9 +250,9 @@ describe('SignupGuardianFlow (pre-auth U18 signup)', () => {
     );
 
     // Step 2: guardian OTP.
-    await waitFor(() =>
-      expect(screen.getByRole('heading', { name: /confirm with your guardian/i })).toBeInTheDocument(),
-    );
+    expect(
+      await screen.findByRole('heading', { name: /confirm with your guardian/i }),
+    ).toBeInTheDocument();
     expect(screen.queryByLabelText(/guardian name/i)).not.toBeInTheDocument();
 
     typeOtp('123456');
@@ -266,9 +266,9 @@ describe('SignupGuardianFlow (pre-auth U18 signup)', () => {
 
     // Step 3: an EXPLICIT hand-off — the ward's own verification never starts
     // silently, they have to click Continue.
-    await waitFor(() =>
-      expect(screen.getByRole('heading', { name: /guardian confirmed/i })).toBeInTheDocument(),
-    );
+    expect(
+      await screen.findByRole('heading', { name: /guardian confirmed/i }),
+    ).toBeInTheDocument();
     expect(screen.getByText(/verify your account to finish signing up/i)).toBeInTheDocument();
     expect(onComplete).not.toHaveBeenCalled();
 
@@ -315,9 +315,9 @@ describe('SignupGuardianFlow (pre-auth U18 signup)', () => {
     await userEvent.click(screen.getByRole('button', { name: /accept & continue/i }));
 
     await waitFor(() => expect(startSignupGuardian).toHaveBeenCalledTimes(1));
-    await waitFor(() =>
-      expect(screen.getByRole('heading', { name: /confirm with your guardian/i })).toBeInTheDocument(),
-    );
+    expect(
+      await screen.findByRole('heading', { name: /confirm with your guardian/i }),
+    ).toBeInTheDocument();
     expect(screen.queryByText(/review & accept to continue/i)).not.toBeInTheDocument();
   });
 

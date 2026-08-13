@@ -72,7 +72,7 @@ export function PageShell({
   backLabel,
   hideBrowse,
   footerSlot,
-}: PageShellProps) {
+}: Readonly<PageShellProps>) {
   const { t } = useTranslation();
   return (
     <TooltipProvider>

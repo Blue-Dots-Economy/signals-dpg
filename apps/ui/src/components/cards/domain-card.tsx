@@ -57,7 +57,7 @@ export function DomainCard({
   shareItem,
   actionsDisabled = false,
   actionsDisabledReason,
-}: DomainCardProps) {
+}: Readonly<DomainCardProps>) {
   if (loading) {
     return (
       <div className="flex h-full flex-col overflow-hidden rounded-2xl bg-background shadow-sm">

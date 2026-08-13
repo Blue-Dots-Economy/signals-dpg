@@ -58,7 +58,7 @@ describe('copyTextToClipboard', () => {
     document.execCommand = exec;
     const ok = await copyTextToClipboard('hello');
     expect(ok).toBe(false);
-    expect(document.querySelectorAll('textarea').length).toBe(0);
+    expect(document.querySelectorAll('textarea')).toHaveLength(0);
     vi.unstubAllGlobals();
   });
 });

@@ -94,8 +94,10 @@ export const ActionOwnershipTagSchema = z.enum(['initiated', 'received']);
 // `undefined` (param absent) untouched. Keeps single-value callers (e.g.
 // usePendingActionsCount) working unchanged while allowing multi-value
 // filters (#439).
-const toStringArray = (v: string | string[] | undefined) =>
-  v === undefined ? undefined : Array.isArray(v) ? v : [v];
+const toStringArray = (v: string | string[] | undefined) => {
+  if (v === undefined) return undefined;
+  return Array.isArray(v) ? v : [v];
+};
 
 export const ActionSortKeySchema = z.enum(['recent', 'oldest', 'match_score', 'distance']);
 

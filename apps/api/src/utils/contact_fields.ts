@@ -63,7 +63,7 @@ function mappedField(ctx: DomainContactContext, f: CanonicalContact): string | u
 /** Minimal domain-config shape needed to resolve the `name` fallback field. */
 export interface DomainConfigForName {
   item_schemas?: Record<string, { display_name_field?: unknown } | undefined>;
-  card?: { title_field?: unknown } | undefined;
+  card?: { title_field?: unknown };
 }
 
 /**

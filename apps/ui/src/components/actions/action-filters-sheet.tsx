@@ -83,7 +83,7 @@ export function ActionFiltersSheet({
   actionTypes,
   onActionTypesChange,
   onClose,
-}: ActionFiltersSheetProps) {
+}: Readonly<ActionFiltersSheetProps>) {
   const { t } = useTranslation();
 
   const enumFilterFields = React.useMemo(() => getEnumFilterFieldsForDomains(domains), [domains]);

@@ -129,12 +129,14 @@ const fetch_actions_handler = async (
   // Task 7 enrichment stage, which re-sorts the page after fetch — so it
   // falls through to the 'recent' ordering below rather than getting its own
   // branch.
+  const nonOldestOrderBy =
+    sort === 'match_score'
+      ? [sql`${item_actions.match_score} DESC NULLS LAST`, desc(item_actions.updated_at)]
+      : [desc(item_actions.updated_at), desc(item_actions.created_at)]; // 'recent' default (and 'distance' fallthrough)
   const orderBy =
     sort === 'oldest'
       ? [asc(item_actions.updated_at), asc(item_actions.created_at)]
-      : sort === 'match_score'
-        ? [sql`${item_actions.match_score} DESC NULLS LAST`, desc(item_actions.updated_at)]
-        : [desc(item_actions.updated_at), desc(item_actions.created_at)]; // 'recent' default (and 'distance' fallthrough)
+      : nonOldestOrderBy;
 
   try {
     // Ownership guard (#439 Task 6, defense-in-depth): the owner filter below
@@ -153,7 +155,7 @@ const fetch_actions_handler = async (
         .from(items)
         .where(eq(items.item_id, item_id))
         .limit(1);
-      if (!ownedItem || ownedItem.created_by !== userId) {
+      if (ownedItem?.created_by !== userId) {
         return reply.code(403).send({
           error: 'FORBIDDEN_ITEM',
           message: 'item_id is not owned by the caller',
@@ -299,13 +301,16 @@ const fetch_actions_handler = async (
       const state = cMeta?.item_state ?? {};
       return allowed.every(({ field, values }) => {
         const raw = state[field];
-        const asArray = Array.isArray(raw)
-          ? raw.map(String)
-          : raw == null
-            ? []
-            : [String(raw)];
-        const wanted = values.map(String);
-        return asArray.some((v) => wanted.includes(v));
+        let asArray: string[];
+        if (Array.isArray(raw)) {
+          asArray = raw.map(String);
+        } else if (raw == null) {
+          asArray = [];
+        } else {
+          asArray = [String(raw as string | number | boolean)];
+        }
+        const wanted = new Set(values.map(String));
+        return asArray.some((v) => wanted.has(v));
       });
     };
 

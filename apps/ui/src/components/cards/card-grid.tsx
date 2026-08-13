@@ -60,7 +60,7 @@ export function CardGrid({
   openActionItemIds,
   openActionReason,
   selection,
-}: CardGridProps) {
+}: Readonly<CardGridProps>) {
   const gridRef = useEqualRowHeights<HTMLDivElement>();
 
   if (loading) {

@@ -25,7 +25,7 @@ export interface MultiSelectGroupProps {
  * enum filter fields with many options (> `CHIP_THRESHOLD`) so a long option
  * list doesn't blow out the filter panel's height.
  */
-export function MultiSelectGroup({ title, options, selected, onToggle }: MultiSelectGroupProps) {
+export function MultiSelectGroup({ title, options, selected, onToggle }: Readonly<MultiSelectGroupProps>) {
   const { t } = useTranslation();
   const [open, setOpen] = React.useState(false);
   const [query, setQuery] = React.useState('');

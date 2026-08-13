@@ -59,7 +59,7 @@ export function MarkerPopupCard({
   networkItem,
   schema,
   cardConfig,
-}: MarkerPopupCardProps) {
+}: Readonly<MarkerPopupCardProps>) {
   const { t } = useTranslation();
   const precisionInfo = getPrecisionInfo(marker.precision);
   const [modalOpen, setModalOpen] = React.useState(false);

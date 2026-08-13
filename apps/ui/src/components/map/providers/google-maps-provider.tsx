@@ -704,7 +704,7 @@ function ClustererManager({
 function CameraTracker({
   cameraRef,
 }: {
-  cameraRef: React.MutableRefObject<{ center: { lat: number; lng: number }; zoom: number } | null>;
+  cameraRef: React.RefObject<{ center: { lat: number; lng: number }; zoom: number } | null>;
 }) {
   const map = useMap();
   React.useEffect(() => {

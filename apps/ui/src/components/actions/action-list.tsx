@@ -86,7 +86,7 @@ export function ActionList({
   hasNextPage,
   isFetchingNextPage,
   onLoadMore,
-}: ActionListProps) {
+}: Readonly<ActionListProps>) {
   const { t } = useTranslation();
 
   // The server already applied status/sort/facets (#439) — render every row
@@ -113,6 +113,74 @@ export function ActionList({
     },
   ];
   const activeIdx = tabs.findIndex((tab) => tab.id === activeTab);
+
+  // Content region resolved without a nested ternary (empty → list, then
+  // error → that), extracted per typescript:S3358.
+  const emptyOrListContent =
+    actions.length === 0 ? (
+      <div className="flex flex-col items-center justify-center rounded-2xl border border-dashed py-14 text-center">
+        <div className="mb-3 flex h-14 w-14 items-center justify-center rounded-2xl bg-primary/10 text-primary">
+          {activeTab === 'initiated' ? <Send className="h-6 w-6" /> : <Inbox className="h-6 w-6" />}
+        </div>
+        <h3 className="text-base font-bold text-foreground">
+          {activeTab === 'initiated' ? t('actions.empty_initiated_heading') : t('actions.empty_received_heading')}
+        </h3>
+        <p className="mt-1 text-sm text-muted-foreground">
+          {activeTab === 'initiated'
+            ? t('actions.empty_initiated_desc')
+            : t('actions.empty_received_desc')}
+        </p>
+      </div>
+    ) : (
+      <>
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
+          {actions.map((action) => {
+            const cls = actionClassFor(activeTab, action.action_status);
+            return (
+              <SelectableCard
+                key={action.action_id}
+                id={action.action_id}
+                selectMode={selection.selectMode}
+                selected={selection.isSelected(action.action_id)}
+                selectable={cls !== null && selection.canSelect(cls)}
+                onToggle={(id) => selection.toggle(id, cls ?? '')}
+              >
+                <ActionCard
+                  action={action}
+                  ownershipRole={activeTab}
+                  onStatusUpdate={onStatusUpdate}
+                  selectionMode={selection.selectMode}
+                />
+              </SelectableCard>
+            );
+          })}
+        </div>
+        {hasNextPage && (
+          <div className="flex justify-center pt-2">
+            <Button
+              variant="outline"
+              data-testid="load-more-button"
+              onClick={onLoadMore}
+              disabled={isFetchingNextPage}
+            >
+              {isFetchingNextPage && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+              {isFetchingNextPage ? t('actions.loading_more') : t('actions.load_more')}
+            </Button>
+          </div>
+        )}
+      </>
+    );
+  const nonLoadingContent = isError ? (
+    <div className="flex flex-col items-center justify-center rounded-2xl border border-dashed py-14 text-center">
+      <AlertCircle className="mb-3 h-10 w-10 text-destructive" />
+      <h3 className="text-lg font-semibold text-destructive">{t('actions.error_heading')}</h3>
+      <p className="mt-1.5 max-w-md text-sm text-muted-foreground">
+        {error?.message ?? t('actions.error_fallback')}
+      </p>
+    </div>
+  ) : (
+    emptyOrListContent
+  );
 
   return (
     <div className="w-full space-y-5">
@@ -191,66 +259,8 @@ export function ActionList({
             <ActionCardSkeleton key={i} />
           ))}
         </div>
-      ) : isError ? (
-        <div className="flex flex-col items-center justify-center rounded-2xl border border-dashed py-14 text-center">
-          <AlertCircle className="mb-3 h-10 w-10 text-destructive" />
-          <h3 className="text-lg font-semibold text-destructive">{t('actions.error_heading')}</h3>
-          <p className="mt-1.5 max-w-md text-sm text-muted-foreground">
-            {error?.message ?? t('actions.error_fallback')}
-          </p>
-        </div>
-      ) : actions.length === 0 ? (
-        <div className="flex flex-col items-center justify-center rounded-2xl border border-dashed py-14 text-center">
-          <div className="mb-3 flex h-14 w-14 items-center justify-center rounded-2xl bg-primary/10 text-primary">
-            {activeTab === 'initiated' ? <Send className="h-6 w-6" /> : <Inbox className="h-6 w-6" />}
-          </div>
-          <h3 className="text-base font-bold text-foreground">
-            {activeTab === 'initiated' ? t('actions.empty_initiated_heading') : t('actions.empty_received_heading')}
-          </h3>
-          <p className="mt-1 text-sm text-muted-foreground">
-            {activeTab === 'initiated'
-              ? t('actions.empty_initiated_desc')
-              : t('actions.empty_received_desc')}
-          </p>
-        </div>
       ) : (
-        <>
-          <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
-            {actions.map((action) => {
-              const cls = actionClassFor(activeTab, action.action_status);
-              return (
-                <SelectableCard
-                  key={action.action_id}
-                  id={action.action_id}
-                  selectMode={selection.selectMode}
-                  selected={selection.isSelected(action.action_id)}
-                  selectable={cls !== null && selection.canSelect(cls)}
-                  onToggle={(id) => selection.toggle(id, cls ?? '')}
-                >
-                  <ActionCard
-                    action={action}
-                    ownershipRole={activeTab}
-                    onStatusUpdate={onStatusUpdate}
-                    selectionMode={selection.selectMode}
-                  />
-                </SelectableCard>
-              );
-            })}
-          </div>
-          {hasNextPage && (
-            <div className="flex justify-center pt-2">
-              <Button
-                variant="outline"
-                data-testid="load-more-button"
-                onClick={onLoadMore}
-                disabled={isFetchingNextPage}
-              >
-                {isFetchingNextPage && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                {isFetchingNextPage ? t('actions.loading_more') : t('actions.load_more')}
-              </Button>
-            </div>
-          )}
-        </>
+        nonLoadingContent
       )}
       {selection.selectMode && selection.selected.size > 0 && (
         <BulkActionBar count={selection.selected.size} onClear={selection.clear}>

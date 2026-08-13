@@ -27,7 +27,7 @@ describe('ConfigError', () => {
       }
     })();
 
-    expect(caught instanceof ConfigError).toBe(true);
-    expect(new Error('unsafe config') instanceof ConfigError).toBe(false);
+    expect(caught).toBeInstanceOf(ConfigError);
+    expect(new Error('unsafe config')).not.toBeInstanceOf(ConfigError);
   });
 });

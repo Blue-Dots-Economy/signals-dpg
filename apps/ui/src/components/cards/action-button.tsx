@@ -21,7 +21,7 @@ interface ActionButtonProps {
    * site is unchanged; the public profile page passes `'default'` for a filled,
    * theme-coloured Apply/Connect CTA.
    */
-  variant?: React.ComponentProps<typeof Button>['variant'];
+  variant?: NonNullable<React.ComponentProps<typeof Button>['variant']>;
 }
 
 const actionIcons: Record<string, React.ComponentType<{ className?: string }>> = {
@@ -37,7 +37,7 @@ export function ActionButton({
   disabled = false,
   disabledReason,
   variant = 'outline',
-}: ActionButtonProps) {
+}: Readonly<ActionButtonProps>) {
   const Icon = actionIcons[actionType] ?? Plug;
   const label = actionType.charAt(0).toUpperCase() + actionType.slice(1);
 

@@ -42,6 +42,6 @@ export async function copyTextToClipboard(text: string): Promise<boolean> {
   } catch {
     return false;
   } finally {
-    if (ta && ta.parentNode) ta.parentNode.removeChild(ta);
+    if (ta?.parentNode) ta.remove();
   }
 }

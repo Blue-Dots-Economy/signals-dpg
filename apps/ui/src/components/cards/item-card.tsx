@@ -114,7 +114,7 @@ export function ItemCard({
   variant = 'list',
   className,
   onClick,
-}: ItemCardProps) {
+}: Readonly<ItemCardProps>) {
   const { t } = useTranslation();
   const [open, setOpen] = React.useState(false);
 

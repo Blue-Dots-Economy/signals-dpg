@@ -829,11 +829,10 @@ export function ProfileFormPage() {
 
   // When consent is being captured (create, or promoting a draft) the primary
   // action publishes; otherwise it's a plain create/update.
+  const editPrimaryLabel = isEdit ? t('profile.btn_update') : t('profile.btn_create');
   const primaryLabel = needsConsent
     ? t('profile.btn_save_publish')
-    : isEdit
-      ? t('profile.btn_update')
-      : t('profile.btn_create');
+    : editPrimaryLabel;
   const submitDisabled = isEdit
     ? // Live edit: unchanged (formValid only). Draft-with-consent: wait for the
       // consent config to load, then require the acknowledgement tick.

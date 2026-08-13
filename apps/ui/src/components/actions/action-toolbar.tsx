@@ -80,7 +80,7 @@ export function ActionToolbar({
   onOpenFilters,
   onRemoveFacet,
   onClearFilters,
-}: ActionToolbarProps) {
+}: Readonly<ActionToolbarProps>) {
   const { t } = useTranslation();
   const activeSortOption = SORT_OPTIONS.find((option) => option.value === sort) ?? SORT_OPTIONS[0];
   const statusActive = status !== 'All';

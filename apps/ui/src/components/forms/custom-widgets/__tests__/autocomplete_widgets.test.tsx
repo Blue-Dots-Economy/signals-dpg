@@ -178,7 +178,7 @@ describe('ReferenceAutocompleteWidget — dataset URL resolution', () => {
     const fetchMock = stubFetch(FLAT_ONE);
     renderReference({ options: {} });
 
-    await waitFor(() => expect(screen.getByRole('textbox')).toBeInTheDocument());
+    expect(await screen.findByRole('textbox')).toBeInTheDocument();
     expect(fetchMock).not.toHaveBeenCalled();
   });
 });

@@ -41,7 +41,7 @@ export function MatchScoreCard({
   selectionMode = false,
   actionsDisabled = false,
   actionsDisabledReason,
-}: MatchScoreCardProps) {
+}: Readonly<MatchScoreCardProps>) {
   const [isModalOpen, setIsModalOpen] = React.useState(false);
   
   const {

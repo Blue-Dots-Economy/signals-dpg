@@ -223,9 +223,9 @@ describe('DigiLockerProvider', () => {
 
     await userEvent.click(screen.getByRole('button', { name: 'Open DigiLocker' }));
 
-    await waitFor(() =>
-      expect(screen.getByText(/^Waiting for DigiLocker to finish/)).toBeInTheDocument(),
-    );
+    expect(
+      await screen.findByText(/^Waiting for DigiLocker to finish/),
+    ).toBeInTheDocument();
     expect(openSpy).toHaveBeenCalledWith(
       'https://digilocker.example/start?r=1',
       'digilocker-auth',

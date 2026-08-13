@@ -1,6 +1,6 @@
 import * as React from 'react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, waitFor, fireEvent, act } from '@testing-library/react';
+import { render, screen, waitFor, fireEvent } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { Star } from 'lucide-react';
 import type { RJSFSchema } from '@rjsf/utils';
@@ -1071,9 +1071,7 @@ describe('MapFiltersPanel — mobile bottom sheet', () => {
 
     expect(baseElement.querySelector('[data-slot="drawer-content"]')).toBeFalsy();
 
-    await act(async () => {
-      fireEvent.click(screen.getByRole('button', { name: 'Open map filters' }));
-    });
+    fireEvent.click(screen.getByRole('button', { name: 'Open map filters' }));
 
     expect(baseElement.querySelector('[data-slot="drawer-content"]')).toBeTruthy();
     expect(baseElement.querySelector('[data-slot="popover-content"]')).toBeFalsy();

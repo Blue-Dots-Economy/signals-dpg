@@ -20,9 +20,9 @@ export interface ShareProfileButtonProps {
  * public share URL and toasts success/failure. Renders null for a missing or
  * non-live item, so call sites can drop it in unconditionally.
  */
-export function ShareProfileButton({ item, className }: ShareProfileButtonProps) {
+export function ShareProfileButton({ item, className }: Readonly<ShareProfileButtonProps>) {
   const { t } = useTranslation();
-  if (!item || item.lifecycle_status !== 'live') return null;
+  if (item?.lifecycle_status !== 'live') return null;
 
   const onShare = async (e: React.MouseEvent) => {
     e.stopPropagation();
