@@ -2,6 +2,8 @@ import type { FastifyRequest, FastifyReply } from 'fastify';
 import { eq } from 'drizzle-orm';
 import { db } from '@api/db/postgres/drizzle_config';
 import { organization, member } from '../../db/postgres/schema/auth.js';
+import { authConfig } from '@/config';
+import { ACTING_ORG_WILDCARD } from '@/utils/keycloak_token';
 
 const ALLOWED_ORG_TYPES = ['aggregator', 'voice', 'network_service'] as const;
 type AllowedOrgType = (typeof ALLOWED_ORG_TYPES)[number];
@@ -34,13 +36,62 @@ export const acting_org_preHandler = async (
   request: FastifyRequest,
   reply: FastifyReply,
 ): Promise<void> => {
-  const acting_org_id = get_header_value(
+  /**
+   * Acting-org authorisation (§5.1 of the Keycloak migration design).
+   *
+   * The header is unchanged in every mode and is still what SELECTS the org.
+   * What `ACTING_ORG_SOURCE` controls is whether the selection has to fall
+   * inside a grant the token carries (`signals_acting_orgs`), which is the
+   * difference between the caller authorising itself and the API verifying it.
+   *
+   * `undefined` grant means the token carried no claim at all — distinct from an
+   * empty grant, which authorises nothing.
+   */
+  const grant = request.acting_org_grant;
+  const grant_is_wildcard = grant?.includes(ACTING_ORG_WILDCARD) === true;
+
+  if (authConfig.acting_org_claim_required && grant === undefined) {
+    reply.code(403).send({
+      error: 'ACTING_ORG_CLAIM_MISSING',
+      message:
+        'this token carries no acting-org grant; ACTING_ORG_SOURCE=claim_required',
+    });
+    return;
+  }
+
+  let acting_org_id = get_header_value(
     request.headers['x-acting-org-id'] as string | string[] | undefined,
   );
+
+  // A grant naming exactly one org is unambiguous, so the header is optional.
+  // This is what lets human callers stop sending it entirely.
+  if (!acting_org_id && authConfig.acting_org_claim_enforced && grant?.length === 1 && !grant_is_wildcard) {
+    acting_org_id = grant[0];
+  }
+
   if (!acting_org_id) {
     reply.code(400).send({
       error: 'MISSING_ACTING_ORG',
       message: 'x-acting-org-id header is required',
+    });
+    return;
+  }
+
+  // The check this whole change exists for: an asserted org outside the grant is
+  // refused, where previously any existing org id was honoured.
+  if (
+    authConfig.acting_org_claim_enforced &&
+    grant !== undefined &&
+    !grant_is_wildcard &&
+    !grant.includes(acting_org_id)
+  ) {
+    request.log.warn(
+      { asserted_org_id: acting_org_id, grant },
+      'acting-org assertion refused: outside the token grant',
+    );
+    reply.code(403).send({
+      error: 'ACTING_ORG_NOT_GRANTED',
+      message: `this token may not act for org ${acting_org_id}`,
     });
     return;
   }

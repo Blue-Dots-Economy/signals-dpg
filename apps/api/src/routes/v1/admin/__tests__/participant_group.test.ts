@@ -658,17 +658,17 @@ describe('participant_read_handler — item + consent projection', () => {
     });
   });
 
-  it('403 ACTING_ORG_TYPE_NOT_ALLOWED for a voice acting org, before any read', async () => {
+  it('admits a voice acting org (treated as a service org; retire via #518)', async () => {
     const reply = await call(participant_read_handler, {
       acting_org: { org_id: 'org_voice', org_type: 'voice', service_user_id: 's' },
       query: { email: 'a@b.com' },
     });
 
-    expect(reply.statusCode).toBe(403);
-    expect((reply.body as { error: string }).error).toBe(
-      'ACTING_ORG_TYPE_NOT_ALLOWED',
-    );
-    expect(queries).toHaveLength(0);
+    // voice is admitted alongside aggregator/network_service — voice-dpg is a
+    // platform layer, not a restricted actor. The redundant `voice` org type is
+    // tracked for removal (model voice-dpg as network_service) in signals-dpg#518.
+    expect(reply.statusCode).not.toBe(403);
+    expect(queries.length).toBeGreaterThan(0);
   });
 
   it('propagates a DB failure instead of returning a 5xx body (no try/catch)', async () => {

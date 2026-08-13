@@ -29,15 +29,31 @@ describe('resolve_upsert_action', () => {
     expect(v).toEqual({ kind: 'rejected', status: 403, error: 'INVALID_ACTING_ORG' });
   });
 
-  it('rejects voice-typed acting_org', () => {
+  it('rejects an acting_org type outside the allowed set', () => {
     const v = resolve_upsert_action({
-      acting_org: voice,
+      acting_org: {
+        ...voice,
+        org_type: 'employer' as unknown as typeof voice.org_type,
+      },
       user_exists: false,
       item_id_in_body: undefined,
       has_item_state: false,
       aggregator_owns_user: false,
     });
     expect(v).toEqual({ kind: 'rejected', status: 403, error: 'ACTING_ORG_TYPE_NOT_ALLOWED' });
+  });
+
+  it('admits voice, and does NOT apply the aggregator ownership rule to it', () => {
+    // `aggregator_owns_user: false` would make an AGGREGATOR
+    // `aggregator_owned_elsewhere`; voice is network-wide, so it proceeds.
+    const v = resolve_upsert_action({
+      acting_org: voice,
+      user_exists: true,
+      item_id_in_body: undefined,
+      has_item_state: true,
+      aggregator_owns_user: false,
+    });
+    expect(v).toEqual({ kind: 'insert_item' });
   });
 
   it('aggregator + new user + item_state -> create_new_user', () => {

@@ -41,6 +41,14 @@ ARG VITE_API_URL
 ARG VITE_NETWORK_NAME
 ENV VITE_API_URL=$VITE_API_URL
 ENV VITE_NETWORK_NAME=$VITE_NETWORK_NAME
+
+# NOTE: there are deliberately no VITE_AUTH_PROVIDER / VITE_KEYCLOAK_* build
+# args. Which login screen to render, and the OIDC connection details, come from
+# GET /api/v1/auth/config at runtime — see apps/ui/src/lib/keycloak-config.ts.
+# Baking them in once caused a bundle built for Keycloak to redirect every user
+# into an OIDC flow while the API was still on better-auth. They can still be
+# overridden per-deployment through window.__DPG_UI_CONFIG__ (/config.js), which
+# cannot go stale inside an image.
 # Build BOTH UI variants into one image:
 #   - signals (default `build`)        -> apps/ui/dist            (served at /)
 #   - orange tourist (`build:tourist`) -> apps/ui/dist/tourist    (served at /tourist)

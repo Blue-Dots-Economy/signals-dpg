@@ -8,7 +8,6 @@ import { AuthShell } from '@/components/layout/auth-shell';
 import {
   checkUser,
   consentStatusIdentifier,
-  fetchAuthConfig,
   isValidPhoneNumber,
   requestOtp,
   u18Precheck,
@@ -32,6 +31,8 @@ import type { SignupExtras } from '@/lib/signup-domain';
 import { SignupDobStep } from '@/components/consent/u18/signup-dob-step';
 import { isMinorFromAge } from '@/lib/guardian-consent';
 import { PhoneInput, toE164 } from '@/components/auth/phone-input';
+import { useAuthConfig } from '@/hooks/use-auth-config';
+import { KeycloakLoginPanel } from './keycloak-login-panel';
 import {
   SignupGuardianFlow,
   type SignupIdentifier,
@@ -51,7 +52,35 @@ function domainLabel(domain: DotNetworkDomain): string {
 }
 
 
+/**
+ * Route entry for /auth/login. Picks the login experience for this deployment.
+ *
+ * Split as a wrapper rather than a branch inside `OtpLoginPage` so the OTP
+ * screen below is byte-for-byte unchanged, and so the choice happens before
+ * either component's hooks run.
+ *
+ * The choice comes from the API (`GET /api/v1/auth/config`), not from a
+ * build-time env var — see lib/keycloak-config.ts. That costs one render with
+ * no screen while the config loads; showing the OTP form first and then
+ * swapping it for a redirect button would be worse.
+ */
 export function LoginPage() {
+  const { isKeycloakLogin, isLoading } = useAuthConfig();
+
+  if (isLoading) {
+    return (
+      <AuthShell>
+        <div className="mx-auto flex max-w-md justify-center py-16">
+          <Loader2 className="size-6 animate-spin text-muted-foreground" />
+        </div>
+      </AuthShell>
+    );
+  }
+
+  return isKeycloakLogin ? <KeycloakLoginPanel /> : <OtpLoginPage />;
+}
+
+function OtpLoginPage() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const location = useLocation();
@@ -79,7 +108,13 @@ export function LoginPage() {
   const [userExists, setUserExists] = useState<boolean | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [consentGate, setConsentGate] = useState<ConsentGateState | null>(null);
-  const [authCfg, setAuthCfg] = useState<AuthConfigResponse | null>(null);
+  // Shared with the LoginPage wrapper above via React Query, so the instance's
+  // auth config is fetched once per session rather than once per component.
+  // The fail-safe default (gated + both channels) keeps the API authoritative
+  // if the request fails — see use-auth-config.ts.
+  const { config: fetchedAuthCfg } = useAuthConfig();
+  const authCfg: AuthConfigResponse | null =
+    fetchedAuthCfg ?? { selfSignupAllowed: false, loginChannels: ['phone', 'email'] };
   const [signupBlocked, setSignupBlocked] = useState(false);
   const [networkDomains, setNetworkDomains] = useState<DotNetworkDomain[]>([]);
   // Capture the checked identifier at the time of submission so the consent
@@ -111,13 +146,6 @@ export function LoginPage() {
   } | null>(null);
   const redirectTo = searchParams.get('redirect') ?? '/';
   const servedScope = useMemo(() => getServedScope(), []);
-
-  useEffect(() => {
-    fetchAuthConfig()
-      .then(setAuthCfg)
-      // Fail-safe: assume both channels + gated so the API stays authoritative.
-      .catch(() => setAuthCfg({ selfSignupAllowed: false, loginChannels: ['phone', 'email'] }));
-  }, []);
 
   // Domain options for the signup form's domain select. Fetched from the
   // served network's own schema (network.domains) — not user input — so the

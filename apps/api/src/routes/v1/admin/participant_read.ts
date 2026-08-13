@@ -74,13 +74,20 @@ export const participant_read_handler = async (
     });
   }
 
+  // `voice` is admitted alongside aggregator and network_service: voice-dpg is
+  // an integrating DPG that authenticates the same way (client-credentials
+  // token, service org whose slug matches its Keycloak client id), and the
+  // platform layers below already accept it (`SERVICE_ORG_TYPES`,
+  // `ALLOWED_ORG_TYPES`) — this list predates it.
   if (
     request.acting_org.org_type !== 'aggregator' &&
-    request.acting_org.org_type !== 'network_service'
+    request.acting_org.org_type !== 'network_service' &&
+    request.acting_org.org_type !== 'voice'
   ) {
     return reply.code(403).send({
       error: 'ACTING_ORG_TYPE_NOT_ALLOWED',
-      message: 'only aggregator or network_service acting orgs are allowed',
+      message:
+        'only aggregator, network_service or voice acting orgs are allowed',
     });
   }
 
