@@ -4,9 +4,12 @@ import { PageShell } from '../page-shell';
 
 // PageShell composes TopBar/AppSidebar, which pull in auth, i18n, routing and
 // data-fetching hooks that aren't relevant to this test — stub them out so
-// this file only exercises the shell's own overflow-containment classes.
+// this file only exercises the shell's own overflow-containment classes and
+// its prop pass-through to TopBar.
 vi.mock('../top-bar', () => ({
-  TopBar: () => <div data-testid="top-bar" />,
+  TopBar: (props: { variant?: string; title?: string }) => (
+    <div data-testid="top-bar" data-variant={props.variant} data-title={props.title} />
+  ),
 }));
 vi.mock('../sidebar', () => ({
   AppSidebar: () => <div data-testid="app-sidebar" />,
@@ -47,5 +50,27 @@ describe('PageShell overflow containment (mobile no-horizontal-scroll)', () => {
     // Desktop (md+) must not clip: no bare `overflow-x-clip` / `overflow-x-hidden`.
     expect(main).not.toHaveClass('overflow-x-clip');
     expect(main).not.toHaveClass('overflow-x-hidden');
+  });
+});
+
+describe('PageShell form variant pass-through', () => {
+  it('forwards form variant + title to TopBar and renders children + sidebar', () => {
+    render(
+      <PageShell
+        variant="form"
+        title="Edit Provider Profile"
+        onBack={() => {}}
+        domains={[]}
+        selectedDomain={null}
+        onDomainSelect={() => {}}
+      >
+        <div data-testid="child" />
+      </PageShell>,
+    );
+    const bar = screen.getByTestId('top-bar');
+    expect(bar.getAttribute('data-variant')).toBe('form');
+    expect(bar.getAttribute('data-title')).toBe('Edit Provider Profile');
+    expect(screen.getByTestId('app-sidebar')).toBeInTheDocument();
+    expect(screen.getByTestId('child')).toBeInTheDocument();
   });
 });

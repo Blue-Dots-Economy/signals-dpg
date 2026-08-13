@@ -42,3 +42,8 @@ data/
 scripts/e2e/.env
 scripts/e2e/scratch/
 .gstack/
+
+# Test coverage reports (generated; consumed by the SonarCloud CI scan)
+coverage/
+.superpowers/
+

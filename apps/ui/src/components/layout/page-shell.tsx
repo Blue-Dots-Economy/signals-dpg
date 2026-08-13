@@ -9,6 +9,14 @@ import { AppSidebar } from './sidebar';
 
 interface PageShellProps {
   children: React.ReactNode;
+  /** 'browse' (default) shows search/filters/view-toggle; 'form' shows a Back button + title instead. Forwarded to `TopBar`. */
+  variant?: 'browse' | 'form';
+  /** Shown next to the Back button when `variant === 'form'`. */
+  title?: string;
+  /** Optional secondary line under `title` when `variant === 'form'`. */
+  subtitle?: string;
+  /** Invoked by the Back button when `variant === 'form'`. */
+  onBack?: () => void;
   networks?: DotNetworkSchema[];
   selectedNetwork?: string | null;
   onNetworkSelect?: (networkId: string) => void;
@@ -21,16 +29,29 @@ interface PageShellProps {
   onActiveProfileChange?: (profileId: string) => void;
   onProfilesChanged?: () => void;
   userSchemas?: Record<string, RJSFSchema>;
-  search: string;
-  onSearchChange: (value: string) => void;
-  viewMode: ViewMode;
-  onViewModeChange: (mode: ViewMode) => void;
+  search?: string;
+  onSearchChange?: (value: string) => void;
+  viewMode?: ViewMode;
+  onViewModeChange?: (mode: ViewMode) => void;
   /** Optional Filters control surfaced in the top bar next to the search input. */
   filtersSlot?: React.ReactNode;
+  /** Label for the form-variant Back control (defaults to "Back" in TopBar). */
+  backLabel?: string;
+  /** Hide the sidebar's Browse (domain selector) group — form pages. */
+  hideBrowse?: boolean;
+  /** A pinned footer rendered BELOW the scroll area (not inside it). Used by the
+   * form pages for the action bar so it stays fixed at the column bottom while
+   * the form scrolls above it — a `sticky` element inside `<main>` floats when
+   * the content is shorter than the viewport, which this avoids. */
+  footerSlot?: React.ReactNode;
 }
 
 export function PageShell({
   children,
+  variant,
+  title,
+  subtitle,
+  onBack,
   networks,
   selectedNetwork,
   onNetworkSelect,
@@ -48,6 +69,9 @@ export function PageShell({
   viewMode,
   onViewModeChange,
   filtersSlot,
+  backLabel,
+  hideBrowse,
+  footerSlot,
 }: PageShellProps) {
   const { t } = useTranslation();
   return (
@@ -72,9 +96,15 @@ export function PageShell({
           onActiveProfileChange={onActiveProfileChange}
           onProfilesChanged={onProfilesChanged}
           userSchemas={userSchemas}
+          hideBrowse={hideBrowse}
         />
         <div className="flex h-svh min-w-0 flex-1 flex-col">
           <TopBar
+            variant={variant}
+            title={title}
+            subtitle={subtitle}
+            onBack={onBack}
+            backLabel={backLabel}
             search={search}
             onSearchChange={onSearchChange}
             viewMode={viewMode}
@@ -83,10 +113,23 @@ export function PageShell({
           />
           <main
             id="main-content"
-            className="flex-1 overflow-y-auto p-4 max-md:overflow-x-clip sm:p-6"
+            // `min-h-0` is load-bearing: without it a flex child defaults to
+            // min-height:auto and refuses to shrink below its content, so a tall
+            // form expands past the h-svh column and the whole page gets a second
+            // (body) scrollbar instead of scrolling inside <main>.
+            // `relative` is also load-bearing: it makes <main> the containing
+            // block for absolutely-positioned descendants (e.g. cmdk's
+            // visually-hidden `position:absolute` labels), so they anchor here and
+            // are clipped by this scroll container — otherwise they anchor to the
+            // initial containing block at their deep flow positions and stretch
+            // the document, producing a phantom second (body) scrollbar.
+            className="relative min-h-0 flex-1 overflow-y-auto p-4 max-md:overflow-x-clip sm:p-6"
           >
             {children}
           </main>
+          {footerSlot && (
+            <div className="flex-none border-t bg-background">{footerSlot}</div>
+          )}
         </div>
       </SidebarProvider>
     </TooltipProvider>

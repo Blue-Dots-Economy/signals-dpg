@@ -17,8 +17,8 @@
   "packageManager": "pnpm@11.1.2",
   "devDependencies": {},
   "dependencies": {
-    "@types/pg": "^8.20.0",
-    "pg": "^8.17.2",
+    "@types/pg": "^8.20.4",
+    "pg": "^8.22.0",
     "drizzle-orm": "^0.45.2"
   }
 }

@@ -12,6 +12,7 @@ import { OidcCallbackPage } from './pages/auth/oidc-callback-page';
 import { MyActionsPage } from './pages/my-actions-page';
 import { PrivacyPage } from './pages/legal/privacy-page';
 import { TermsPage } from './pages/legal/terms-page';
+import { PublicProfilePage } from './pages/public-profile-page';
 
 export function App() {
   return (
@@ -38,6 +39,7 @@ export function App() {
             <Route path="/auth/callback" element={<OidcCallbackPage />} />
             <Route path="/privacy" element={<PrivacyPage />} />
             <Route path="/terms" element={<TermsPage />} />
+            <Route path="/public/:network/:domain/:itemType/:itemId" element={<PublicProfilePage />} />
             <Route path="/my-actions" element={<RequireAuth><MyActionsPage /></RequireAuth>} />
             <Route path="/my-actions/*" element={<RequireAuth><MyActionsPage /></RequireAuth>} />
           </Routes>

@@ -5,6 +5,7 @@ import { ActionModal } from './action-modal';
 import { GuardianOtpDialog } from './guardian-otp-dialog';
 import { GuardianOtpPurpose, type GuardianPurpose } from '@/components/consent/u18/guardian-otp-purpose';
 import { ActionAbortedError } from '@/lib/action-abort';
+import { BulkSingleError } from '@/lib/bulk';
 import { useGuardianOtpGate } from '@/hooks/use-guardian-otp-gate';
 import { toast } from 'sonner';
 import { useAuth } from '@/contexts/auth-context';
@@ -33,8 +34,14 @@ function showActionError(err: unknown, t: (key: string) => string): void {
     });
     return;
   }
+  // Prefer the API's user-facing message when the failure came back as a
+  // per-item bulk error (e.g. HTTP 409 ACTION_LIMIT_REACHED → "An active
+  // request already exists between these two profiles."). The synthetic
+  // 'Request failed' placeholder isn't user-facing, so fall back to the
+  // generic description for it.
+  const apiMessage = err instanceof BulkSingleError ? err.response.data.message : undefined;
   toast.error(t('actions.handler_error_title'), {
-    description: t('actions.handler_error_desc'),
+    description: apiMessage && apiMessage !== 'Request failed' ? apiMessage : t('actions.handler_error_desc'),
   });
 }
 

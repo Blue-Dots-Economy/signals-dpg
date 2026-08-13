@@ -1,5 +1,4 @@
 import * as React from 'react';
-import axios from 'axios';
 import type { RJSFSchema } from '@rjsf/utils';
 import { useSearchParams, useNavigate, Link } from 'react-router-dom';
 import { toast } from 'sonner';
@@ -52,6 +51,11 @@ import { ActionAbortedError } from '@/lib/action-abort';
 import { EmptyState } from '@/components/empty-state';
 import { useAuth } from '@/contexts/auth-context';
 import { apiConfig } from '@/lib/api-config';
+import {
+  getActionsForDomain as flattenInteractionActions,
+  resolveTargetInstanceUrl,
+  computeOpenActionItemIds,
+} from '@/lib/profile-actions';
 import { getEnumFilterFieldsForDomains } from '@/lib/enum-filters';
 import {
   deriveBrowseParams,
@@ -73,18 +77,20 @@ import { EnableLocationBanner } from '@/components/location/enable-location-bann
 import { nearestDistanceMeters } from '@/lib/geo/distance';
 import type { LatLng } from '@/lib/geo/types';
 import {
-  acceptProfileConsent,
   getU18Status,
-  issueProfileConsentOtp,
-  verifyProfileConsentOtp,
   type U18StatusResponse,
-  type ProfileConsentOtpItemRef,
 } from '@/lib/consent-api';
 import { useConsentConfig } from '@/hooks/use-consent-config';
 import { useConsentGate } from '@/hooks/use-consent-gate';
+import { useProfileConsentAccept } from '@/hooks/use-profile-consent-accept';
 import { useNetworkTheme } from '@/theme/theme-provider';
 import { ProfileConsentModal } from '@/components/consent/profile-consent-modal';
 import { useMyItems } from '@/hooks/use-my-items';
+import {
+  getStoredActiveProfileId,
+  setStoredActiveProfileId,
+  clearStoredActiveProfileId,
+} from '@/lib/active-profile';
 import { useInfiniteBrowseItems } from '@/hooks/use-infinite-browse-items';
 import { useProfileConsentStatus } from '@/hooks/use-profile-consent-status';
 import { useMapMarkers } from '@/hooks/use-map-markers';
@@ -290,6 +296,8 @@ function MarkerDetailPopup({
   localItem,
   connectAction,
   onConnect,
+  connectDisabled,
+  connectDisabledReason,
   onItemResolved,
 }: {
   networkId: string | null;
@@ -306,6 +314,10 @@ function MarkerDetailPopup({
   localItem: Item | null;
   connectAction?: DotActionSchema;
   onConnect?: (baseItemId: string) => void;
+  // Disable the connect CTA when an action is already open for this pair
+  // (#370/#422) — parity with the list cards.
+  connectDisabled?: boolean;
+  connectDisabledReason?: string;
   // Task 7 (#203 §5.2 cleanup): lifts this popup's already-fetched full item
   // up to the parent. Home-page's `onActionSubmit` needs the full `Item`
   // (network/domain/type/instance_url) to build a connect-action's
@@ -379,6 +391,8 @@ function MarkerDetailPopup({
       cardConfig={cardConfig}
       actions={localItem && connectAction ? [connectAction] : []}
       onConnect={localItem && connectAction ? () => onConnect?.(baseItemId) : undefined}
+      connectDisabled={connectDisabled}
+      connectDisabledReason={connectDisabledReason}
       localItem={localItem}
       networkItem={item}
     />
@@ -390,22 +404,6 @@ function parseNetworkIds(networkEnv: string | undefined): string[] {
   return networkEnv.split(',').map(n => n.trim()).filter(Boolean);
 }
 
-function getActiveProfileStorageKey(networkId: string): string {
-  return `activeProfileId:${networkId}`;
-}
-
-function getStoredActiveProfileId(networkId: string): string | null {
-  return localStorage.getItem(getActiveProfileStorageKey(networkId));
-}
-
-function setStoredActiveProfileId(networkId: string, profileId: string): void {
-  localStorage.setItem(getActiveProfileStorageKey(networkId), profileId);
-}
-
-function clearStoredActiveProfileId(networkId: string): void {
-  localStorage.removeItem(getActiveProfileStorageKey(networkId));
-}
-
 /**
  * Resolve the instance URL for a target item
  * Priority:
@@ -413,52 +411,6 @@ function clearStoredActiveProfileId(networkId: string): void {
  * 2. Network config instances lookup by domain
  * 3. Current API base URL as fallback
  */
-function resolveTargetInstanceUrl(
-  targetItem: Item,
-  network: DotNetworkSchema | null,
-  currentApiUrl: string,
-  itemType: 'source' | 'target' = 'target'
-): string {
-  console.log(`🔍 Resolving ${itemType} instance URL:`, {
-    itemId: targetItem.item_id,
-    itemDomain: targetItem.item_domain,
-    itemInstanceUrl: targetItem.item_instance_url,
-    currentApiUrl,
-    networkInstances: network?.instances?.map(i => ({ domain: i.domain_id, url: i.instance_url })),
-  });
-
-  // Priority 1: Use item's instance URL if it exists and is valid (not localhost in production)
-  if (targetItem.item_instance_url) {
-    // Check if it's a valid URL (not just http://localhost in production)
-    const isLocalhost = targetItem.item_instance_url.includes('localhost') || 
-                        targetItem.item_instance_url.includes('127.0.0.1');
-    const isProduction = !currentApiUrl.includes('localhost') && 
-                         !currentApiUrl.includes('127.0.0.1');
-    
-    if (!isLocalhost || !isProduction) {
-      console.log(`✅ Using item's instance_url: ${targetItem.item_instance_url}`);
-      return targetItem.item_instance_url;
-    }
-    console.log(`⚠️ Item has localhost URL in production, skipping: ${targetItem.item_instance_url}`);
-    // If localhost in production, continue to fallback
-  }
-
-  // Priority 2: Lookup in network.instances by domain
-  if (network?.instances) {
-    const instanceConfig = network.instances.find(
-      (i) => i.domain_id === targetItem.item_domain
-    );
-    if (instanceConfig?.instance_url) {
-      console.log(`✅ Using network.instances lookup: ${instanceConfig.instance_url}`);
-      return instanceConfig.instance_url;
-    }
-  }
-
-  // Priority 3: Fallback to current API URL
-  console.log(`⚠️ Fallback to current API URL: ${currentApiUrl}`);
-  return currentApiUrl;
-}
-
 // Resolves the landing-page default view mode from VITE_DEFAULT_VIEW_MODE.
 // Falls back to 'map' when the env var is missing or holds an unrecognised
 // value, so a fresh install ships with the map-first experience.
@@ -468,6 +420,207 @@ function resolveDefaultViewMode(): ViewMode {
   return 'map';
 }
 
+
+/**
+ * Whether the active profile's domain still requires profile_creation consent
+ * before go-live, from its `go_live_required` gates (mirrors network.json). A
+ * domain that goes live on completeness alone (`["schema_required"]`) never
+ * prompts. Absent config ⇒ require (safe default, matches the login gate).
+ */
+function domainNeedsProfileConsent(
+  domains:
+    | ReadonlyArray<{ id: string; go_live_required?: Array<'schema_required' | 'consent_required'> }>
+    | undefined,
+  domainId: string | undefined,
+): boolean {
+  const gates = domains?.find((d) => d.id === domainId)?.go_live_required;
+  return gates ? gates.includes('consent_required') : true;
+}
+
+/** The parsed served-domain scope, or null when the deployment serves all domains. */
+type HomeServedScope = ReturnType<typeof getServedScope>;
+
+/** The single served domain when exactly one is bound (the single-domain portal), else null. */
+function resolveBoundDomain(servedScope: HomeServedScope): string | null {
+  return servedScope?.domains.length === 1 ? servedScope.domains[0] : null;
+}
+
+/**
+ * Resolve the initial selected-network id: a served scope pins it, else a valid
+ * `?network=` URL param, else the first configured network id.
+ */
+function resolveInitialNetworkId(
+  servedScope: HomeServedScope,
+  networkFromUrl: string | null,
+  configuredNetworkIds: string[],
+): string | null {
+  if (servedScope?.network) return servedScope.network;
+  if (networkFromUrl && configuredNetworkIds.includes(networkFromUrl)) return networkFromUrl;
+  return configuredNetworkIds[0] || null;
+}
+
+/** Whether the location-source toggle applies (a profile location exists AND the browser can provide one). */
+function computeCanToggleLocation(profileLocation: LatLng | null, browserSupported: boolean): boolean {
+  return Boolean(profileLocation) && browserSupported;
+}
+
+/** Whether to offer the "enable location" banner (toggle applies, browser source picked, but it errored). */
+function computeShowLocationBanner(
+  canToggle: boolean,
+  preferredSource: PreferredLocationSource,
+  browserStatus: string,
+): boolean {
+  return canToggle && preferredSource === 'browser' && browserStatus === 'error';
+}
+
+/** Whether the active profile's domain gates go-live on profile_creation consent (absent config ⇒ require). */
+function computeProfileConsentRequired(
+  profileStatement: string,
+  domains: Parameters<typeof domainNeedsProfileConsent>[0],
+  itemDomain: string | undefined,
+): boolean {
+  return Boolean(profileStatement) && domainNeedsProfileConsent(domains, itemDomain);
+}
+
+/** Whether the ward's domain requires the U18 guardian gate (needs an authenticated user on a gated domain). */
+function computeRequiresGuardianGate(
+  user: unknown,
+  network: DotNetworkSchema | null | undefined,
+  wardDomain: string | null,
+): boolean {
+  return Boolean(user && network && wardDomain && isGuardianConsentRequiredDomain(network, wardDomain));
+}
+
+/**
+ * Derive the U18 guardian-flow display state from the stored status + gate signals.
+ *
+ * @returns The resolved-adult short-circuit, the DOB-vs-guardian entry step, the
+ *   birth/minor-guardian sub-flags, and whether the guardian flow should show.
+ */
+function deriveU18GuardianState(p: {
+  status: U18StatusResponse | null;
+  statusLoading: boolean;
+  gateLoading: boolean;
+  dismissed: boolean;
+  requiresGate: boolean;
+  neededConsentCount: number;
+}): {
+  resolvedAdult: boolean;
+  initialStep: 'dob' | 'guardian';
+  birthUnresolved: boolean;
+  minorNeedsGuardian: boolean;
+  showFlow: boolean;
+} {
+  const resolvedAdult = p.status?.hasBirthData === true && p.status.isMinor === false;
+  const initialStep: 'dob' | 'guardian' = p.status?.hasBirthData ? 'guardian' : 'dob';
+  const birthUnresolved = !p.statusLoading && p.status?.hasBirthData !== true;
+  const minorNeedsGuardian = p.status?.isMinor === true && p.status?.guardianVerified !== true;
+  const showFlow =
+    p.requiresGate &&
+    !p.gateLoading &&
+    !p.dismissed &&
+    !p.statusLoading &&
+    !resolvedAdult &&
+    (p.neededConsentCount > 0 || birthUnresolved || minorNeedsGuardian);
+  return { resolvedAdult, initialStep, birthUnresolved, minorNeedsGuardian, showFlow };
+}
+
+/** Pick the single-domain value on a specific domain tab, else the "All"-tab aggregate. */
+function selectByDomainScope<T>(selectedDomain: string | null, single: T, all: T): T {
+  return selectedDomain !== null ? single : all;
+}
+
+/** Whether the single-domain list's load-more sentinel is active. */
+function singleDomainSentinelEnabled(selectedDomain: string | null, hasNextPage: boolean): boolean {
+  return selectedDomain !== null && hasNextPage;
+}
+
+/** Whether the "All"-tab merged list's load-more sentinel is active. */
+function allDomainsSentinelEnabled(selectedDomain: string | null, anyHasMore: boolean): boolean {
+  return selectedDomain === null && anyHasMore;
+}
+
+/** The per-target discover anchor for the single-domain feed (undefined on the "All" tab). */
+function resolveSingleDomainAnchor(
+  selectedDomain: string | null,
+  anchorFor: (targetDomain: string) => string | undefined,
+): string | undefined {
+  return selectedDomain ? anchorFor(selectedDomain) : undefined;
+}
+
+/**
+ * Whether a profile anchor is actually being sent for the browsed domain(s) —
+ * gated by the schema interaction matrix, not merely "signed in with a profile".
+ */
+function computeHasProfileAnchor(p: {
+  selectedDomain: string | null;
+  anchorFor: (targetDomain: string) => string | undefined;
+  activeProfileId: string | null;
+  activeProfileDomain: string | null;
+  visibleDomains: DotNetworkDomain[];
+  networkActions: Parameters<typeof domainsInteract>[0];
+}): boolean {
+  if (p.selectedDomain !== null) return p.anchorFor(p.selectedDomain) !== undefined;
+  const { activeProfileDomain } = p;
+  return Boolean(
+    p.activeProfileId &&
+      activeProfileDomain &&
+      p.visibleDomains.some((domain) => domainsInteract(p.networkActions, activeProfileDomain, domain.id)),
+  );
+}
+
+/** The effective location source for the list note wording ('none' maps to 'profile' harmlessly). */
+function noteLocationSource(resolvedLocationSource: string): 'browser' | 'profile' {
+  return resolvedLocationSource === 'browser' ? 'browser' : 'profile';
+}
+
+/** Whether the network selector should render (no served scope, more than one network). */
+function computeShowNetworkSelector(servedScope: HomeServedScope, networkCount: number): boolean {
+  return !servedScope && networkCount > 1;
+}
+
+/** Title-case a domain id for display (e.g. `student_profile` → `Student Profile`), or undefined when absent. */
+function formatDomainLabel(domainId: string | null | undefined): string | undefined {
+  return domainId
+    ? domainId.replaceAll('_', ' ').replaceAll(/\b\w/g, (c) => c.toUpperCase())
+    : undefined;
+}
+
+/** The dynamic actions to surface: the selected domain's, else the legacy single active action, else none. */
+function resolveDomainActions(
+  selectedDomain: string | null,
+  getActionsForDomain: (targetDomain: string) => DotActionSchema[],
+  activeAction: DotActionSchema | null,
+): DotActionSchema[] {
+  if (selectedDomain) return getActionsForDomain(selectedDomain);
+  return activeAction ? [activeAction] : [];
+}
+
+/** The header's display domain: the selected domain, else the sole visible domain, else null (the "All" header). */
+function resolveHeaderDomain(selectedDomain: string | null, visibleDomains: DotNetworkDomain[]): string | null {
+  return selectedDomain ?? (visibleDomains.length === 1 ? visibleDomains[0].id : null);
+}
+
+/** The header description for the display domain (undefined on the "All" header). */
+function resolveHeaderDescription(
+  headerDomain: string | null,
+  visibleDomains: DotNetworkDomain[],
+): string | undefined {
+  return headerDomain ? visibleDomains.find((d) => d.id === headerDomain)?.description : undefined;
+}
+
+/** Normalise a guardian-flow action type to the OTP-purpose kind ('connect' or 'apply'). */
+function guardianActionKind(actionType: string | undefined): 'connect' | 'apply' {
+  return actionType === 'connect' ? 'connect' : 'apply';
+}
+
+/** The network list the PageShell selector renders (empty unless the selector should show). */
+function pickNetworksForShell(
+  showNetworkSelector: boolean,
+  allNetworks: DotNetworkSchema[],
+): DotNetworkSchema[] {
+  return showNetworkSelector ? allNetworks : [];
+}
 
 export function HomePage() {
   const { t } = useTranslation();
@@ -519,28 +672,15 @@ export function HomePage() {
   // the acting domain is derived from the logged-in user (whitelisted combined
   // UI). Memoised — runtime config is fixed for the session's lifetime.
   const servedScope = React.useMemo(() => getServedScope(), []);
-  const boundDomain =
-    servedScope && servedScope.domains.length === 1 ? servedScope.domains[0] : null;
+  const boundDomain = resolveBoundDomain(servedScope);
 
   // Network: the served scope pins it; otherwise URL param, then env config.
   const networkFromUrl = searchParams.get('network');
-  const initialNetworkId =
-    servedScope?.network ??
-    (networkFromUrl && configuredNetworkIds.includes(networkFromUrl)
-      ? networkFromUrl
-      : (configuredNetworkIds[0] || null));
+  const initialNetworkId = resolveInitialNetworkId(servedScope, networkFromUrl, configuredNetworkIds);
 
   const [selectedNetworkId, setSelectedNetworkId] = React.useState<string | null>(initialNetworkId);
   const [activeProfileId, setActiveProfileId] = React.useState<string | null>(null);
   const [pendingConsentProfileId, setPendingConsentProfileId] = React.useState<string | null>(null);
-  // For a MINOR, profile_creation consent is guardian-given: an OTP is issued
-  // to the guardian and this holds the item ref while the guardian-OTP dialog
-  // is open (D13). null for adults (they self-accept via ProfileConsentModal).
-  const [guardianProfileRef, setGuardianProfileRef] = React.useState<ProfileConsentOtpItemRef | null>(null);
-  // Fallback for a minor with NO guardian on file yet (issue returns 409
-  // GUARDIAN_REQUIRED): holds the item ref while the guardian-capture flow
-  // (details + setup OTP) runs, then the profile OTP is re-issued for it.
-  const [guardianSetupRef, setGuardianSetupRef] = React.useState<ProfileConsentOtpItemRef | null>(null);
   const browseSelection = useCardSelection();
   const [bulkConnectOpen, setBulkConnectOpen] = React.useState(false);
   const [bulkConnectBusy, setBulkConnectBusy] = React.useState(false);
@@ -658,25 +798,11 @@ export function HomePage() {
   // disabled: at most one open action per pair (#370/#422). The server cap is
   // the real guard; this just pre-empts the click. "Open" = not a terminal
   // status; the same terminal set the backend frees a pair on.
-  const { data: myActionsData } = useActions('all', { enabled: !!user });
-  const openActionItemIds = React.useMemo(() => {
-    const TERMINAL = new Set([
-      'accepted',
-      'completed',
-      'cancelled',
-      'rejected',
-      'declined',
-      'withdrawn',
-    ]);
-    const set = new Set<string>();
-    if (!activeProfileId) return set;
-    for (const a of myActionsData?.actions ?? []) {
-      if (TERMINAL.has(a.action_status)) continue;
-      if (a.source_item_id === activeProfileId) set.add(a.target_item_id);
-      else if (a.target_item_id === activeProfileId) set.add(a.source_item_id);
-    }
-    return set;
-  }, [myActionsData, activeProfileId]);
+  const { data: myActionsData } = useActions('all', { enabled: !!user, limit: 100 });
+  const openActionItemIds = React.useMemo(
+    () => computeOpenActionItemIds(myActionsData?.actions ?? [], activeProfileId),
+    [myActionsData, activeProfileId],
+  );
 
   // A draft (incomplete) profile can't apply/connect — the API rejects it with
   // PROFILE_NOT_LIVE. Prompt the user to finish their profile (with a shortcut
@@ -724,16 +850,17 @@ export function HomePage() {
 
   // The toggle only makes sense when there's a profile location to switch away
   // from and the browser can actually provide the alternative.
-  const canToggleLocation = Boolean(profileLocation) && browserLocation.isSupported;
+  const canToggleLocation = computeCanToggleLocation(profileLocation, browserLocation.isSupported);
 
   // When the user picked "current location" but the browser request errored
   // (denied / unavailable), offer to enable it. Gated on canToggleLocation so
   // the banner only appears while a profile location exists — i.e. results are
   // still sorted by the profile fallback, which the banner copy reflects.
-  const showLocationBanner =
-    canToggleLocation &&
-    preferredSource === 'browser' &&
-    browserLocation.status === 'error';
+  const showLocationBanner = computeShowLocationBanner(
+    canToggleLocation,
+    preferredSource,
+    browserLocation.status,
+  );
 
   // Bumped whenever the user switches source so the map recenters on the chosen
   // anchor even when the resolved coordinate is unchanged — e.g. switching back
@@ -775,7 +902,27 @@ export function HomePage() {
     (v) => v.version === profileDoc.current_version,
   );
   const profileStatement = profileVersion?.statement ?? '';
-  const profileConsentRequired = Boolean(profileStatement);
+  // Whether the active profile's DOMAIN gates go-live on `consent_required`
+  // (mirrors `go_live_required` in network.json). A domain that goes live on
+  // completeness alone (e.g. a provider configured `["schema_required"]`) never
+  // prompts for profile_creation consent. Absent config ⇒ require (safe default,
+  // matches the login-gate behaviour).
+  const profileConsentRequired = computeProfileConsentRequired(
+    profileStatement,
+    network?.domains,
+    myItem?.item_domain,
+  );
+
+  // Shared profile_creation-consent accept flow (adult self-accept OR minor
+  // guardian-OTP), extracted into a hook so it isn't duplicated with
+  // profile-form-page. `dialogs` hosts the guardian OTP/capture dialogs;
+  // `guardianActive` is true while one is open, so the ProfileConsentModal below
+  // hides itself instead of stacking.
+  const {
+    accept: acceptProfileConsentFlow,
+    dialogs: consentAcceptDialogs,
+    guardianActive,
+  } = useProfileConsentAccept();
 
   // Gate the auto-selected profile: if it lacks profile_creation consent, prompt.
   React.useEffect(() => {
@@ -816,9 +963,7 @@ export function HomePage() {
   // success) are routed through the guardian flow — everyone else (adults,
   // ungated domains, users with no profile yet) is unaffected.
   const wardDomain = myItem?.item_domain ?? null;
-  const requiresGuardianGate = Boolean(
-    user && network && wardDomain && isGuardianConsentRequiredDomain(network, wardDomain),
-  );
+  const requiresGuardianGate = computeRequiresGuardianGate(user, network, wardDomain);
   const {
     needed: u18NeededConsent,
     isLoading: u18GateLoading,
@@ -862,38 +1007,30 @@ export function HomePage() {
     return () => { cancelled = true; };
   }, [user, network, network?.id, u18StatusReload]);
 
-  // Stored data already resolves this ward as an adult → no guardian gate;
-  // the ordinary consent flow (ProfileConsentModal) handles terms/privacy.
-  const u18ResolvedAdult = u18Status?.hasBirthData === true && u18Status.isMinor === false;
-
-  // DOB is captured ONCE and reused — skip the DOB step when birth data is
-  // already stored; only capture it here when nothing is stored yet. Guardian
-  // verification itself is NOT skipped by a prior verify: the account
-  // terms/privacy flow shows whenever those consents are actually needed (e.g.
-  // a version bump, D15), and profile-creation / per-action guardian OTP are
-  // gated separately.
-  const u18InitialStep: 'dob' | 'guardian' = u18Status?.hasBirthData ? 'guardian' : 'dob';
-
-  // Minor status not yet resolved (no birth captured). Must run the flow (DOB
-  // step) even when terms/privacy is already satisfied — otherwise a bulk/form
-  // ward who self-accepted terms/privacy at login is never asked for DOB, so
-  // the server can't detect a minor and the guardian gate is bypassed.
-  const u18BirthUnresolved = !u18StatusLoading && u18Status?.hasBirthData !== true;
-
-  // A resolved minor who isn't guardian-verified yet must be gated even when
-  // terms/privacy already happen to be satisfied (e.g. an existing user who
-  // provided DOB pre-OTP but whose guardian step runs here, post-login) —
-  // otherwise they'd land in the app un-gated with no way to attach a guardian.
-  const u18MinorNeedsGuardian =
-    u18Status?.isMinor === true && u18Status?.guardianVerified !== true;
-
-  const showU18GuardianFlow =
-    requiresGuardianGate &&
-    !u18GateLoading &&
-    !guardianFlowDismissed &&
-    !u18StatusLoading &&
-    !u18ResolvedAdult &&
-    (u18NeededConsent.length > 0 || u18BirthUnresolved || u18MinorNeedsGuardian);
+  // U18 guardian-flow display state, derived from the stored status + gate
+  // signals. See `deriveU18GuardianState` for the per-flag rationale:
+  //  - resolvedAdult: stored data resolves the ward as an adult → no guardian
+  //    gate; the ordinary consent flow (ProfileConsentModal) handles T&P.
+  //  - initialStep: DOB is captured ONCE and reused — skip the DOB step when
+  //    birth data is already stored; capture it here only when nothing is stored.
+  //  - birthUnresolved: minor status not yet resolved (no birth captured) — must
+  //    run the flow (DOB step) even when T&P is already satisfied, else a
+  //    bulk/form ward who self-accepted T&P at login is never asked for DOB and
+  //    the server can't detect a minor, bypassing the gate.
+  //  - minorNeedsGuardian: a resolved minor who isn't guardian-verified yet must
+  //    be gated even when T&P happens to be satisfied, else they land in the app
+  //    un-gated with no way to attach a guardian.
+  const {
+    initialStep: u18InitialStep,
+    showFlow: showU18GuardianFlow,
+  } = deriveU18GuardianState({
+    status: u18Status,
+    statusLoading: u18StatusLoading,
+    gateLoading: u18GateLoading,
+    dismissed: guardianFlowDismissed,
+    requiresGate: requiresGuardianGate,
+    neededConsentCount: u18NeededConsent.length,
+  });
 
   // Acting domain: ?as= test override → served binding → active profile →
   // network default. Drives the connect-action source (from_domain).
@@ -1091,12 +1228,12 @@ export function HomePage() {
   // selected; disabled (and thus inert) on the "All" tab.
   const singleDomainList = useInfiniteBrowseItems(
     network,
-    selectedDomain ? selectedDomainObj : null,
+    selectedDomainObj,
     browseLocation,
     {
       enabled: selectedDomain !== null,
       ...browseHookOpts,
-      anchorItemId: selectedDomain ? anchorFor(selectedDomain) : undefined,
+      anchorItemId: resolveSingleDomainAnchor(selectedDomain, anchorFor),
     },
   );
 
@@ -1115,7 +1252,7 @@ export function HomePage() {
   // hook's non-memoized `fetchNextPage` directly is safe — see its comment.)
   const singleDomainSentinelRef = useLoadMoreSentinel(
     singleDomainList.fetchNextPage,
-    selectedDomain !== null && singleDomainList.hasNextPage,
+    singleDomainSentinelEnabled(selectedDomain, singleDomainList.hasNextPage),
   );
 
   // "All" tab: each visible domain's paged state, lifted up from its headless
@@ -1194,7 +1331,7 @@ export function HomePage() {
   const anyAllDomainHasMore = visibleDomains.some((domain) => allDomainPages[domain.id]?.hasMore ?? false);
   const allDomainsSentinelRef = useLoadMoreSentinel(
     fetchNextAllDomainPages,
-    selectedDomain === null && anyAllDomainHasMore,
+    allDomainsSentinelEnabled(selectedDomain, anyAllDomainHasMore),
   );
   // --- end Task 5 -------------------------------------------------------------
 
@@ -1246,7 +1383,7 @@ export function HomePage() {
   // Single source of truth for the list federation-degradation banner
   // (mirrors the map's `mapMarkers.partial` from P4): single-domain tab reads
   // the one paged feed directly, "All" tab is the OR above.
-  const listPartial = selectedDomain !== null ? singleDomainList.partial : allDomainsListPartial;
+  const listPartial = selectByDomainScope(selectedDomain, singleDomainList.partial, allDomainsListPartial);
 
   // Task 6 (#203 §6): mirrors `allDomainsListPartial`/`listPartial` exactly,
   // but for the discover BFF's native-fallback signal instead of federation
@@ -1257,7 +1394,7 @@ export function HomePage() {
   );
   // Single source of truth for the degraded-search UX: single-domain tab reads
   // the one paged feed directly, "All" tab is the OR above.
-  const listDegraded = selectedDomain !== null ? singleDomainList.degraded : allDomainsListDegraded;
+  const listDegraded = selectByDomainScope(selectedDomain, singleDomainList.degraded, allDomainsListDegraded);
 
   // #394: the effective spatial radius (`meta.distance_meters`), same
   // single-domain-vs-"All" split as `listPartial`/`listDegraded` above. On the
@@ -1266,8 +1403,11 @@ export function HomePage() {
   const allDomainsDistanceMeters = visibleDomains
     .map((domain) => allDomainPages[domain.id]?.distanceMeters)
     .find((value) => value !== undefined);
-  const listDistanceMeters =
-    selectedDomain !== null ? singleDomainList.distanceMeters : allDomainsDistanceMeters;
+  const listDistanceMeters = selectByDomainScope(
+    selectedDomain,
+    singleDomainList.distanceMeters,
+    allDomainsDistanceMeters,
+  );
 
   // #394 (review fix): whether the viewer actually has a profile anchor being
   // sent for the browsed domain(s) — derived from the SAME rule that gates
@@ -1282,16 +1422,14 @@ export function HomePage() {
   // true iff the viewer's profile domain interacts with at least one visible
   // domain (mirrors `computeVisibleDomains`' own per-domain anchor gating).
   const activeProfileDomain = myItem?.item_domain ?? null;
-  const hasProfileAnchor =
-    selectedDomain !== null
-      ? anchorFor(selectedDomain) !== undefined
-      : Boolean(
-          activeProfileId &&
-            activeProfileDomain &&
-            visibleDomains.some((domain) =>
-              domainsInteract(network?.actions ?? {}, activeProfileDomain, domain.id),
-            ),
-        );
+  const hasProfileAnchor = computeHasProfileAnchor({
+    selectedDomain,
+    anchorFor,
+    activeProfileId,
+    activeProfileDomain,
+    visibleDomains,
+    networkActions: network?.actions ?? {},
+  });
   // Whether a location is actually being sent as the discover spatial filter.
   const hasLocation = browseLocation !== null;
   const listNote = resolveListNote({
@@ -1306,7 +1444,7 @@ export function HomePage() {
     // no profile exists, which produced the wrong wording. 'none' can't reach
     // the km-bearing note branch (hasLocation would be false), so map it to the
     // 'profile' default harmlessly.
-    locationSource: resolvedLocationSource === 'browser' ? 'browser' : 'profile',
+    locationSource: noteLocationSource(resolvedLocationSource),
   });
 
   // Active schema: from the selected browsing domain, or first visible domain
@@ -1330,35 +1468,11 @@ export function HomePage() {
   }, [network]);
 
   // Get all available actions for a given target domain
+  // Browse requires an active profile (myItem) as the source; the shared helper
+  // flattens the interaction matrix for currentDomain -> targetDomain.
   const getActionsForDomain = React.useCallback(
-    (targetDomainId: string): DotActionSchema[] => {
-      if (!network || !myItem) return [];
-
-      const actions: DotActionSchema[] = [];
-
-      // Iterate through all action types defined in the network schema
-      for (const [actionType, actionConfig] of Object.entries(network.actions)) {
-        if (!actionConfig?.interactions) continue;
-
-        // Find matching interactions for currentDomain -> targetDomain
-        const matchingInteractions = actionConfig.interactions.filter(
-          (i) => i.from_domain === currentDomain && i.to_domain === targetDomainId
-        );
-
-        for (const interaction of matchingInteractions) {
-          actions.push({
-            action_type: actionType,
-            from_domain: interaction.from_domain,
-            to_domain: interaction.to_domain,
-            requirement_schema: interaction.requirement_schema,
-            event_schema: interaction.event_schema,
-            reveals_pii_on_status: interaction.reveals_pii_on_status,
-          });
-        }
-      }
-
-      return actions;
-    },
+    (targetDomainId: string): DotActionSchema[] =>
+      myItem ? flattenInteractionActions(network, currentDomain, targetDomainId) : [],
     [network, currentDomain, myItem]
   );
 
@@ -1421,12 +1535,12 @@ export function HomePage() {
 
         const sourceItemInstanceUrl = myItem.item_instance_url?.includes('localhost')
           ? apiConfig.getUrl()
-          : resolveTargetInstanceUrl(myItem, network, apiConfig.getUrl(), 'source');
+          : resolveTargetInstanceUrl(myItem, network, apiConfig.getUrl());
 
         const payloads = targets.map((targetItem) => {
             const targetItemInstanceUrl = targetItem.item_instance_url?.includes('localhost')
               ? apiConfig.getUrl()
-              : resolveTargetInstanceUrl(targetItem, network, apiConfig.getUrl(), 'target');
+              : resolveTargetInstanceUrl(targetItem, network, apiConfig.getUrl());
             return {
               action_type: actionType,
               source_item: {
@@ -1652,20 +1766,12 @@ export function HomePage() {
     });
   };
 
-  const showNetworkSelector = !servedScope && allNetworks.length > 1;
+  const showNetworkSelector = computeShowNetworkSelector(servedScope, allNetworks.length);
 
-  const currentDomainLabel = selectedDomain
-    ? selectedDomain
-        .replace(/_/g, ' ')
-        .replace(/\b\w/g, (c) => c.toUpperCase())
-    : undefined;
+  const currentDomainLabel = formatDomainLabel(selectedDomain);
 
   // Get dynamic actions for the selected domain
-  const actions = selectedDomain
-    ? getActionsForDomain(selectedDomain)
-    : activeAction
-      ? [activeAction]
-      : [];
+  const actions = resolveDomainActions(selectedDomain, getActionsForDomain, activeAction);
 
   // Label the pending profile so the user knows which profile the (repeating)
   // consent popup is for — reuses the sidebar's title-field candidates.
@@ -1682,91 +1788,38 @@ export function HomePage() {
     return value ? String(value) : profile.item_domain;
   }, [pendingConsentProfileId, myItems, userSchemas]);
 
-  const u18GuardianFlowModal = showU18GuardianFlow && network ? (
-    <U18GuardianFlow
-      network={network.id}
-      brand={brand === 'standard' ? null : brand}
-      purpose={{ kind: 'profile' }}
-      // Skip the DOB step when birth data is already stored (captured at
-      // login) — we never re-ask the date of birth at profile-creation time.
-      initialStep={u18InitialStep}
-      onComplete={() => {
-        setGuardianFlowDismissed(true);
-        // Re-read stored U18 status so guardianVerified/birth data are fresh —
-        // stops a later profile creation from re-asking the DOB.
-        setU18StatusReload((n) => n + 1);
-        void refetchU18Gate();
-      }}
-      onNotMinor={() => {
-        setGuardianFlowDismissed(true);
-        setU18StatusReload((n) => n + 1);
-      }}
-      onLogout={() => { void signOut(); }}
-    />
-  ) : null;
-
-  // Issue a MINOR's profile_creation guardian OTP for a given item ref and hand
-  // off to the guardian-OTP dialog. If no guardian is on file yet (409
-  // GUARDIAN_REQUIRED), fall back to the guardian-capture flow, then this is
-  // re-invoked for the same ref once a guardian exists.
-  const issueProfileOtp = React.useCallback(
-    async (ref: ProfileConsentOtpItemRef) => {
-      try {
-        const { otpSent } = await issueProfileConsentOtp(ref);
-        if (otpSent) {
-          // Keep pendingConsentProfileId set (nulling it re-triggers the prompt
-          // effect, which would reopen the consent modal over the OTP dialog).
-          // The OTP dialog takes over via guardianProfileRef.
-          setGuardianProfileRef(ref);
-        }
-      } catch (err) {
-        const status = axios.isAxiosError(err) ? err.response?.status : undefined;
-        const code = axios.isAxiosError(err)
-          ? (err.response?.data as { error?: string } | undefined)?.error
-          : undefined;
-        if (status === 409 && code === 'GUARDIAN_REQUIRED') {
-          // No guardian captured yet — run the capture flow, then retry.
-          setGuardianSetupRef(ref);
-        } else if (status === 429) {
-          toast.error(t('u18.guardian_error_rate_limited', 'Too many attempts. Please try again shortly.'));
-        } else if (status === 503) {
-          toast.error(t('u18.guardian_error_otp_unavailable', "Guardian confirmation isn't available on this instance right now."));
-        } else {
-          toast.error(t('profile.error_generic_desc'));
-        }
-      }
-    },
-    [t],
-  );
-
-  // Guardian-capture fallback: a minor whose profile_creation consent needs a
-  // guardian that isn't on file yet. Reuses the first-login flow starting at
-  // the details step; on completion the profile OTP is re-issued for the ref.
-  const guardianSetupForProfileModal = guardianSetupRef && network ? (
-    <U18GuardianFlow
-      network={network.id}
-      brand={brand === 'standard' ? null : brand}
-      purpose={{ kind: 'profile' }}
-      initialStep="guardian"
-      onComplete={() => {
-        const ref = guardianSetupRef;
-        setGuardianSetupRef(null);
-        setU18StatusReload((n) => n + 1);
-        void issueProfileOtp(ref);
-      }}
-      onNotMinor={() => {
-        setGuardianSetupRef(null);
-        setU18StatusReload((n) => n + 1);
-      }}
-      onLogout={() => { void signOut(); }}
-    />
-  ) : null;
+  // Nested render fn (not a const element) so the guardian-gate + brand
+  // conditionals live inside a function, keeping HomePage's cognitive complexity
+  // within bounds (SonarCloud S3776); called from both return branches below.
+  const renderU18GuardianFlowModal = () =>
+    showU18GuardianFlow && network ? (
+      <U18GuardianFlow
+        network={network.id}
+        brand={brand === 'standard' ? null : brand}
+        purpose={{ kind: 'profile' }}
+        // Skip the DOB step when birth data is already stored (captured at
+        // login) — we never re-ask the date of birth at profile-creation time.
+        initialStep={u18InitialStep}
+        onComplete={() => {
+          setGuardianFlowDismissed(true);
+          // Re-read stored U18 status so guardianVerified/birth data are fresh —
+          // stops a later profile creation from re-asking the DOB.
+          setU18StatusReload((n) => n + 1);
+          void refetchU18Gate();
+        }}
+        onNotMinor={() => {
+          setGuardianFlowDismissed(true);
+          setU18StatusReload((n) => n + 1);
+        }}
+        onLogout={() => { void signOut(); }}
+      />
+    ) : null;
 
   const profileConsentModal = (
     <ProfileConsentModal
-      // The U18 guardian gate takes priority — don't stack a second blocking
-      // dialog on top of it.
-      open={Boolean(pendingConsentProfileId) && !showU18GuardianFlow && !guardianProfileRef && !guardianSetupRef}
+      // The U18 first-login gate takes priority; and `guardianActive` hides this
+      // while the shared hook's guardian OTP/capture dialog is open (don't stack).
+      open={Boolean(pendingConsentProfileId) && !showU18GuardianFlow && !guardianActive}
       statement={profileStatement}
       profileLabel={pendingProfileLabel}
       minor={u18Status?.isMinor === true}
@@ -1778,91 +1831,30 @@ export function HomePage() {
           setPendingConsentProfileId(null);
           return;
         }
-        // A minor's profile_creation consent is GUARDIAN-given (D13): issue a
-        // guardian OTP and hand off to the guardian-OTP dialog instead of the
-        // ward self-accepting. Adults / ungated domains keep the self-accept path.
-        if (u18Status?.isMinor === true && isGuardianConsentRequiredDomain(network, profile.item_domain)) {
-          await issueProfileOtp({
-            network: network.id,
-            brand: brand === 'standard' ? null : brand,
+        // Adult self-accept OR a minor's guardian-OTP flow — the shared hook
+        // handles the branch, records consent, promotes draft→live, updates the
+        // profileConsent + my-items caches, and toasts once. For a minor, onDone
+        // runs only after the guardian OTP verifies. On failure the hook toasts
+        // and does NOT call onDone, so the prompt stays open for a retry.
+        await acceptProfileConsentFlow({
+          network: network.id,
+          brand: brand === 'standard' ? null : brand,
+          item: {
+            item_id: profile.item_id,
             item_domain: profile.item_domain,
             item_type: profile.item_type,
-            item_id: profile.item_id,
-          });
-          return;
-        }
-        try {
-          await acceptProfileConsent({
-            network: network.id,
-            brand: brand === 'standard' ? null : brand,
-            item_domain: profile.item_domain,
-            item_type: profile.item_type,
-            item_id: profile.item_id,
-            version: profileDoc.current_version,
-          });
-          // Update the consent-status cache directly (not invalidate) so the
-          // derived `consentedProfileIds` reflects the accepted profile in the
-          // same batched render as the activeProfileId/pendingConsentProfileId
-          // updates below — an invalidate-triggered refetch would leave a window
-          // where the gate effect sees the old (not-yet-consented) set and
-          // reopens the modal it was just told to close.
-          queryClient.setQueryData<Set<string>>(
-            queryKeys.profileConsent(network.id),
-            (prev) => new Set([...(prev ?? []), pending]),
-          );
-          // Recording profile consent also flips a complete draft to `live`
-          // server-side (promoteItemOnProfileConsent, in the same transaction),
-          // so the cached my-items list is stale the moment this resolves — its
-          // `lifecycle_status` still reads `draft`. Without this the sidebar
-          // chip stays "Draft" until the next page load, which is what made the
-          // promotion look like it only happened on refresh.
-          void queryClient.invalidateQueries({ queryKey: queryKeys.myItems(network.id) });
-          setActiveProfileId(pending);
-          setStoredActiveProfileId(network.id, pending);
-          setPendingConsentProfileId(null);
-        } catch {
-          toast.error(t('profile.error_generic_desc'));
-          // Keep the modal open so the user can retry.
-        }
-      }}
-    />
-  );
-
-  // Guardian OTP challenge for a MINOR's profile_creation consent (D13). The
-  // dialog resubmits the entered code via verifyProfileConsentOtp; on success
-  // the server records the guardian consent and (if fields complete) promotes
-  // the profile to live.
-  const guardianProfileConsentModal = (
-    <GuardianOtpDialog
-      open={!!guardianProfileRef}
-      onOpenChange={(open) => { if (!open) setGuardianProfileRef(null); }}
-      purpose={{ kind: 'profile' }}
-      onLogout={() => { void signOut(); }}
-      onSubmitOtp={async (otp) => {
-        const ref = guardianProfileRef;
-        if (!ref || !network?.id) return;
-        // Throws on an invalid/expired code → GuardianOtpDialog shows the inline
-        // error and keeps itself open for a retry.
-        await verifyProfileConsentOtp({ ...ref, otp });
-        // Reflect the now-consented profile in the derived `consentedProfileIds`
-        // immediately (React Query is the source of truth; there is no local
-        // setter) — mirrors the adult accept-consent handler above so the gate
-        // doesn't reopen during a refetch window.
-        queryClient.setQueryData<Set<string>>(
-          queryKeys.profileConsent(network.id),
-          (prev) => new Set([...(prev ?? []), ref.item_id]),
-        );
-        // Guardian verify promotes the ward's complete draft to `live` too
-        // (upsertGuardianProfileConsentAndPromote), so refresh my-items for the
-        // same reason as the adult accept handler above.
-        void queryClient.invalidateQueries({ queryKey: queryKeys.myItems(network.id) });
-        setActiveProfileId(ref.item_id);
-        setStoredActiveProfileId(network.id, ref.item_id);
-        setGuardianProfileRef(null);
-        // Clear the pending prompt too — it was kept set while the OTP dialog
-        // was open; the profile is now consented so it must not reopen.
-        setPendingConsentProfileId(null);
-        toast.success(t('profile.guardian_consent_recorded', 'Guardian confirmed your profile'));
+          },
+          version: profileDoc.current_version,
+          isMinor: u18Status?.isMinor === true,
+          // Guardian capture may reclassify the ward (or capture a guardian);
+          // re-sync U18 status so a retry runs with the corrected status.
+          onGuardianStatusChanged: () => setU18StatusReload((n) => n + 1),
+          onDone: () => {
+            setActiveProfileId(pending);
+            setStoredActiveProfileId(network.id, pending);
+            setPendingConsentProfileId(null);
+          },
+        });
       }}
     />
   );
@@ -1884,7 +1876,7 @@ export function HomePage() {
         <GuardianOtpPurpose
           purpose={{
             kind: 'bulk',
-            action: bulkGuardianConfirm?.actionType === 'connect' ? 'connect' : 'apply',
+            action: guardianActionKind(bulkGuardianConfirm?.actionType),
             count: browseSelection.selected.size,
           }}
         />
@@ -1912,7 +1904,7 @@ export function HomePage() {
       onOpenChange={(open) => { if (!open) setBulkGuardianChallenge(null); }}
       purpose={{
         kind: 'bulk',
-        action: bulkGuardianChallenge?.actionType === 'connect' ? 'connect' : 'apply',
+        action: guardianActionKind(bulkGuardianChallenge?.actionType),
         count: bulkGuardianChallenge?.payloads.length ?? 0,
       }}
       onLogout={() => { void signOut(); }}
@@ -1973,10 +1965,9 @@ export function HomePage() {
           </div>
         </div>
         </div>
-        {u18GuardianFlowModal}
-        {guardianSetupForProfileModal}
+        {renderU18GuardianFlowModal()}
         {profileConsentModal}
-        {guardianProfileConsentModal}
+        {consentAcceptDialogs}
         {bulkGuardianConfirmModal}
         {bulkGuardianOtpModal}
       </>
@@ -1985,14 +1976,9 @@ export function HomePage() {
 
   // With a single browseable domain there's no "All" — the header names that
   // one domain (derived from visibleDomains, so it's generic, not per-network).
-  const headerDomain =
-    selectedDomain ?? (visibleDomains.length === 1 ? visibleDomains[0].id : null);
-  const contentTitle = headerDomain
-    ? headerDomain.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())
-    : t('home.browse_all');
-  const contentDescription = headerDomain
-    ? visibleDomains.find((d) => d.id === headerDomain)?.description
-    : undefined;
+  const headerDomain = resolveHeaderDomain(selectedDomain, visibleDomains);
+  const contentTitle = formatDomainLabel(headerDomain) ?? t('home.browse_all');
+  const contentDescription = resolveHeaderDescription(headerDomain, visibleDomains);
   // Task 7 (#203 §5.2 cleanup): re-sourced from the list totals — keyed on
   // `selectedDomain` (which paged feed is actually driving the list), not
   // `headerDomain` (a display-only label that can be non-null even on the
@@ -2000,8 +1986,8 @@ export function HomePage() {
   // P3-deferred header-count-vs-list-total mismatch: the header now reports
   // the same server-side total the "Showing X of Y" list indicator uses,
   // instead of a client-filtered card count.
-  const contentCount = selectedDomain !== null ? singleDomainList.total : allDomainsTotalCount;
-  const contentLoading = selectedDomain !== null ? singleDomainList.isLoading : allDomainsLoading;
+  const contentCount = selectByDomainScope(selectedDomain, singleDomainList.total, allDomainsTotalCount);
+  const contentLoading = selectByDomainScope(selectedDomain, singleDomainList.isLoading, allDomainsLoading);
 
   function buildEmptyState(domainLabel: string) {
     if (search) return <EmptyState message={t('home.no_search_results', { search })} />;
@@ -2050,35 +2036,53 @@ export function HomePage() {
   // the map is maximized, in the map overlay (the top bar is hidden in
   // fullscreen). Each location instantiates its own popover state; the filter
   // selection itself is controlled via the shared props below.
-  const selectButton =
-    myItem && viewMode === 'list' ? (
-      <Button
-        type="button"
-        variant={browseSelection.selectMode ? 'default' : 'outline'}
-        size="sm"
-        onClick={() =>
-          browseSelection.selectMode
-            ? browseSelection.exitSelect()
-            : browseSelection.enterSelect()
-        }
-      >
-        <CheckSquare className="mr-1.5 h-4 w-4" />
-        {browseSelection.selectMode ? t('selection.done') : t('selection.select')}
-      </Button>
-    ) : null;
+  // Nested render fn (not const elements) so the select-button / header-actions /
+  // guest-vs-signed-in conditionals live inside a function, keeping HomePage's
+  // cognitive complexity within bounds (SonarCloud S3776). Called each render, so
+  // no memo dependency array to keep in sync.
+  const renderPageHeader = () => {
+    const selectButton =
+      myItem && viewMode === 'list' ? (
+        <Button
+          type="button"
+          variant={browseSelection.selectMode ? 'default' : 'outline'}
+          size="sm"
+          onClick={() =>
+            browseSelection.selectMode
+              ? browseSelection.exitSelect()
+              : browseSelection.enterSelect()
+          }
+        >
+          <CheckSquare className="mr-1.5 h-4 w-4" />
+          {browseSelection.selectMode ? t('selection.done') : t('selection.select')}
+        </Button>
+      ) : null;
 
-  const headerActions =
-    canToggleLocation || selectButton ? (
-      <div className="flex items-center gap-2">
-        {canToggleLocation && (
-          <LocationSourceToggle
-            value={preferredSource}
-            onChange={handleLocationSourceChange}
-          />
-        )}
-        {selectButton}
-      </div>
-    ) : undefined;
+    const headerActions =
+      canToggleLocation || selectButton ? (
+        <div className="flex items-center gap-2">
+          {canToggleLocation && (
+            <LocationSourceToggle
+              value={preferredSource}
+              onChange={handleLocationSourceChange}
+            />
+          )}
+          {selectButton}
+        </div>
+      ) : undefined;
+
+    return !user ? (
+      <GuestHero />
+    ) : (
+      <ContentHeader
+        title={contentTitle}
+        description={contentDescription}
+        count={contentLoading ? undefined : contentCount}
+        noProfilePrompt={{ show: !myItem, networkId: selectedNetworkId ?? '' }}
+        actions={headerActions}
+      />
+    );
+  };
 
   const filtersPanel = (
     <MapFiltersPanel
@@ -2119,7 +2123,7 @@ export function HomePage() {
   return (
     <>
     <PageShell
-      networks={showNetworkSelector ? allNetworks : []}
+      networks={pickNetworksForShell(showNetworkSelector, allNetworks)}
       selectedNetwork={selectedNetworkId}
       onNetworkSelect={handleNetworkSelect}
       domains={visibleDomains}
@@ -2139,17 +2143,7 @@ export function HomePage() {
       onViewModeChange={handleViewModeChange}
       filtersSlot={listFiltersPanel}
     >
-      {!user ? (
-        <GuestHero />
-      ) : (
-        <ContentHeader
-          title={contentTitle}
-          description={contentDescription}
-          count={contentLoading ? undefined : contentCount}
-          noProfilePrompt={{ show: !myItem, networkId: selectedNetworkId ?? '' }}
-          actions={headerActions}
-        />
-      )}
+      {renderPageHeader()}
       {/* All-tab header count ("X listings") is summed from each visible
           domain's server-reported total, lifted by these headless
           DomainPagedFetch children. In list view the grid below mounts its own
@@ -2251,13 +2245,13 @@ export function HomePage() {
             // it means it was created on the current API instance
             const sourceItemInstanceUrl = myItem.item_instance_url?.includes('localhost')
               ? apiConfig.getUrl()  // Use current API where the item was actually created
-              : resolveTargetInstanceUrl(myItem, network, apiConfig.getUrl(), 'source');
+              : resolveTargetInstanceUrl(myItem, network, apiConfig.getUrl());
 
             // Resolve target item instance URL dynamically
             // IMPORTANT: If target item has localhost, use current API as fallback
             const targetItemInstanceUrl = targetItem.item_instance_url?.includes('localhost')
               ? apiConfig.getUrl()  // Use current API where the item was actually fetched from
-              : resolveTargetInstanceUrl(targetItem, network, apiConfig.getUrl(), 'target');
+              : resolveTargetInstanceUrl(targetItem, network, apiConfig.getUrl());
 
             await performAction(
               {
@@ -2472,6 +2466,7 @@ export function HomePage() {
                                 }
                                 localItem={myItem}
                                 networkItem={networkItem}
+                                shareItem={networkItem}
                                 actionsDisabled={openActionItemIds.has(item.id)}
                                 actionsDisabledReason={t('actions.pair_open_disabled', 'A request is already open with this profile.')}
                               />
@@ -2596,6 +2591,8 @@ export function HomePage() {
                         cardConfig={markerDomain?.card}
                         localItem={myItem}
                         connectAction={connectAction}
+                        connectDisabled={openActionItemIds.has(baseItemId)}
+                        connectDisabledReason={t('actions.pair_open_disabled', 'A request is already open with this profile.')}
                         onConnect={(itemId) => {
                           // Close the marker popup first so it doesn't cover
                           // the consent modal the action is about to open.
@@ -2640,10 +2637,9 @@ export function HomePage() {
           }
         </ActionHandler>
     </PageShell>
-    {u18GuardianFlowModal}
-    {guardianSetupForProfileModal}
+    {renderU18GuardianFlowModal()}
     {profileConsentModal}
-        {guardianProfileConsentModal}
+    {consentAcceptDialogs}
         {bulkGuardianConfirmModal}
         {bulkGuardianOtpModal}
     </>

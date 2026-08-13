@@ -221,7 +221,7 @@ export async function buildApp(): Promise<FastifyInstance> {
               name: 'x-api-key',
               description:
                 'Service API key used by integrating DPGs (aggregator-dpg, voice-dpg) and other ' +
-                'machine clients (apps/api/plugins/auth/validate_api_key.ts). Takes priority over ' +
+                'machine clients (apps/api/plugins/auth/auth_middleware.ts). Takes priority over ' +
                 'session auth: if present and invalid the request is rejected outright, with no ' +
                 'fallback to a session. Routes under /api/v1/admin and /api/v1/aggregator ' +
                 'additionally require an `x-acting-org-id` header identifying the organization the ' +
@@ -233,7 +233,7 @@ export async function buildApp(): Promise<FastifyInstance> {
               name: 'better-auth.session_token',
               description:
                 'Browser session cookie issued by better-auth after sign-in, used by the web UI ' +
-                '(apps/api/plugins/auth/validate_session.ts). Checked as a fallback only when ' +
+                '(apps/api/plugins/auth/auth_middleware.ts). Checked as a fallback only when ' +
                 'x-api-key is absent.',
             },
             peerAuth: {

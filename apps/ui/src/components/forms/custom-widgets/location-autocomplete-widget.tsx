@@ -33,6 +33,11 @@ export function LocationAutocompleteWidget({
   const [text, setText] = React.useState<string>((value as string) ?? '');
   const [suggestions, setSuggestions] = React.useState<GeoSuggestion[]>([]);
   const [open, setOpen] = React.useState(false);
+  // Open the list upward when the input is near the bottom of the viewport
+  // (e.g. sitting just above the pinned action-bar footer), so the suggestions
+  // aren't hidden below the fold.
+  const [dropUp, setDropUp] = React.useState(false);
+  const inputRef = React.useRef<HTMLInputElement>(null);
   const provider = React.useMemo(() => getGeoProvider(), []);
   const debounceRef = React.useRef<number | undefined>(undefined);
   const blurRef = React.useRef<number | undefined>(undefined);
@@ -73,13 +78,24 @@ export function LocationAutocompleteWidget({
         if (controller.signal.aborted) return;
         setSuggestions(results);
         setOpen(results.length > 0);
+        if (results.length > 0) {
+          // ~260px covers the list height + the footer; if there's less room
+          // below the input than that, flip the list upward.
+          const r = inputRef.current?.getBoundingClientRect();
+          setDropUp(!!r && window.innerHeight - r.bottom < 260);
+        }
       });
     }, 300);
   }
 
   function handleInput(next: string) {
     setText(next);
-    onChange(next);
+    // Emit `undefined` (not "") when cleared, so a required location field goes
+    // back to invalid — an empty string counts as "present" for JSON-Schema
+    // `required`, which let an emptied location slip past validation (a normal
+    // text widget clears to undefined, which is why other required fields did
+    // invalidate on clear but this one didn't).
+    onChange(next === '' ? undefined : next);
     // The freshly typed text is no longer a resolved place — drop prior coords
     // so the submit-time fallback re-geocodes (or the next selection sets them).
     // Only the primary field feeds item_locations.
@@ -110,6 +126,7 @@ export function LocationAutocompleteWidget({
   return (
     <div className="relative space-y-2">
       <Input
+        ref={inputRef}
         id={id}
         value={text}
         disabled={disabled || readonly}
@@ -123,7 +140,12 @@ export function LocationAutocompleteWidget({
         }}
       />
       {open && suggestions.length > 0 && (
-        <ul className="absolute z-50 mt-1 w-full rounded-md border bg-popover shadow-md">
+        <ul
+          className={cn(
+            'absolute left-0 z-50 max-h-60 w-full overflow-auto rounded-md border bg-popover shadow-md',
+            dropUp ? 'bottom-full mb-1' : 'top-full mt-1',
+          )}
+        >
           {suggestions.map((s, i) => (
             <li key={`${s.lat},${s.lng},${i}`}>
               <button

@@ -11,13 +11,13 @@
         "type": "apiKey",
         "in": "header",
         "name": "x-api-key",
-        "description": "Service API key used by integrating DPGs (aggregator-dpg, voice-dpg) and other machine clients (apps/api/plugins/auth/validate_api_key.ts). Takes priority over session auth: if present and invalid the request is rejected outright, with no fallback to a session. Routes under /api/v1/admin and /api/v1/aggregator additionally require an `x-acting-org-id` header identifying the organization the request acts on behalf of — see docs/operations/integrating-dpgs.md."
+        "description": "Service API key used by integrating DPGs (aggregator-dpg, voice-dpg) and other machine clients (apps/api/plugins/auth/auth_middleware.ts). Takes priority over session auth: if present and invalid the request is rejected outright, with no fallback to a session. Routes under /api/v1/admin and /api/v1/aggregator additionally require an `x-acting-org-id` header identifying the organization the request acts on behalf of — see docs/operations/integrating-dpgs.md."
       },
       "sessionAuth": {
         "type": "apiKey",
         "in": "cookie",
         "name": "better-auth.session_token",
-        "description": "Browser session cookie issued by better-auth after sign-in, used by the web UI (apps/api/plugins/auth/validate_session.ts). Checked as a fallback only when x-api-key is absent."
+        "description": "Browser session cookie issued by better-auth after sign-in, used by the web UI (apps/api/plugins/auth/auth_middleware.ts). Checked as a fallback only when x-api-key is absent."
       },
       "peerAuth": {
         "type": "apiKey",
@@ -455,6 +455,18 @@
             },
             "in": "query",
             "name": "cache_ttl_seconds",
+            "required": false
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "true",
+                "false"
+              ]
+            },
+            "in": "query",
+            "name": "include_retired",
             "required": false
           }
         ],
@@ -969,8 +981,19 @@
           },
           {
             "schema": {
-              "type": "string",
-              "minLength": 1
+              "anyOf": [
+                {
+                  "type": "string",
+                  "minLength": 1
+                },
+                {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                }
+              ]
             },
             "in": "query",
             "name": "action_type",
@@ -978,8 +1001,19 @@
           },
           {
             "schema": {
-              "type": "string",
-              "minLength": 1
+              "anyOf": [
+                {
+                  "type": "string",
+                  "minLength": 1
+                },
+                {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                }
+              ]
             },
             "in": "query",
             "name": "action_status",
@@ -1033,6 +1067,49 @@
           },
           {
             "schema": {
+              "default": "recent",
+              "type": "string",
+              "enum": [
+                "recent",
+                "oldest",
+                "match_score",
+                "distance"
+              ]
+            },
+            "in": "query",
+            "name": "sort",
+            "required": false
+          },
+          {
+            "schema": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "field": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "values": {
+                    "minItems": 1,
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  }
+                },
+                "required": [
+                  "field",
+                  "values"
+                ]
+              }
+            },
+            "in": "query",
+            "name": "facets",
+            "required": false
+          },
+          {
+            "schema": {
               "type": "string"
             },
             "in": "header",
@@ -1060,12 +1137,71 @@
                         },
                         "offset": {
                           "type": "number"
+                        },
+                        "applied": {
+                          "type": "object",
+                          "properties": {
+                            "sort": {
+                              "type": "string",
+                              "enum": [
+                                "recent",
+                                "oldest",
+                                "match_score",
+                                "distance"
+                              ]
+                            },
+                            "statuses": {
+                              "type": "array",
+                              "items": {
+                                "type": "string"
+                              }
+                            },
+                            "types": {
+                              "type": "array",
+                              "items": {
+                                "type": "string"
+                              }
+                            },
+                            "facets": {
+                              "default": [],
+                              "type": "array",
+                              "items": {
+                                "type": "object",
+                                "properties": {
+                                  "field": {
+                                    "type": "string",
+                                    "minLength": 1
+                                  },
+                                  "values": {
+                                    "minItems": 1,
+                                    "type": "array",
+                                    "items": {
+                                      "type": "string"
+                                    }
+                                  }
+                                },
+                                "required": [
+                                  "field",
+                                  "values"
+                                ],
+                                "additionalProperties": false
+                              }
+                            }
+                          },
+                          "required": [
+                            "sort",
+                            "statuses",
+                            "types",
+                            "facets"
+                          ],
+                          "additionalProperties": false
                         }
                       },
                       "required": [
                         "total",
                         "limit",
-                        "offset"
+                        "offset",
+                        "applied"
                       ],
                       "additionalProperties": false
                     },
@@ -1179,6 +1315,10 @@
                             "nullable": true,
                             "type": "string"
                           },
+                          "match_score": {
+                            "nullable": true,
+                            "type": "number"
+                          },
                           "created_at": {
                             "type": "string",
                             "format": "date-time"
@@ -1205,6 +1345,10 @@
                           "target_item_name": {
                             "nullable": true,
                             "type": "string"
+                          },
+                          "distance_m": {
+                            "nullable": true,
+                            "type": "number"
                           }
                         },
                         "required": [
@@ -3849,6 +3993,18 @@
             "in": "query",
             "name": "cache_ttl_seconds",
             "required": false
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "true",
+                "false"
+              ]
+            },
+            "in": "query",
+            "name": "include_retired",
+            "required": false
           }
         ],
         "security": [],
@@ -4097,6 +4253,13 @@
                     "type": "number",
                     "minimum": -180,
                     "maximum": 180
+                  },
+                  "include_retired": {
+                    "type": "string",
+                    "enum": [
+                      "true",
+                      "false"
+                    ]
                   }
                 },
                 "required": [
@@ -4224,6 +4387,13 @@
                     "minimum": 0,
                     "exclusiveMinimum": true,
                     "maximum": 9007199254740991
+                  },
+                  "include_retired": {
+                    "type": "string",
+                    "enum": [
+                      "true",
+                      "false"
+                    ]
                   }
                 },
                 "required": [
@@ -4576,6 +4746,18 @@
           {
             "schema": {
               "type": "string",
+              "enum": [
+                "true",
+                "false"
+              ]
+            },
+            "in": "query",
+            "name": "include_retired",
+            "required": false
+          },
+          {
+            "schema": {
+              "type": "string",
               "minLength": 1
             },
             "in": "query",
@@ -4778,6 +4960,13 @@
                     "minimum": 0,
                     "exclusiveMinimum": true,
                     "maximum": 9007199254740991
+                  },
+                  "include_retired": {
+                    "type": "string",
+                    "enum": [
+                      "true",
+                      "false"
+                    ]
                   },
                   "q": {
                     "type": "string",
@@ -5953,6 +6142,39 @@
                   "user_id": {
                     "type": "string",
                     "minLength": 1
+                  },
+                  "fields": {
+                    "maxItems": 50,
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "minLength": 1
+                    }
+                  },
+                  "contact": {
+                    "anyOf": [
+                      {
+                        "type": "boolean",
+                        "enum": [
+                          true
+                        ]
+                      },
+                      {
+                        "minItems": 1,
+                        "type": "array",
+                        "items": {
+                          "type": "string",
+                          "enum": [
+                            "name",
+                            "email",
+                            "phone"
+                          ]
+                        }
+                      }
+                    ]
+                  },
+                  "include_locations": {
+                    "type": "boolean"
                   }
                 }
               }
@@ -6000,6 +6222,104 @@
                           "item_state": {
                             "type": "object",
                             "additionalProperties": {}
+                          },
+                          "contact": {
+                            "type": "object",
+                            "properties": {
+                              "name": {
+                                "type": "object",
+                                "properties": {
+                                  "value": {
+                                    "nullable": true,
+                                    "type": "string"
+                                  },
+                                  "source": {
+                                    "nullable": true,
+                                    "type": "string",
+                                    "enum": [
+                                      "item",
+                                      "user"
+                                    ]
+                                  }
+                                },
+                                "required": [
+                                  "value",
+                                  "source"
+                                ],
+                                "additionalProperties": false
+                              },
+                              "email": {
+                                "type": "object",
+                                "properties": {
+                                  "value": {
+                                    "nullable": true,
+                                    "type": "string"
+                                  },
+                                  "source": {
+                                    "nullable": true,
+                                    "type": "string",
+                                    "enum": [
+                                      "item",
+                                      "user"
+                                    ]
+                                  }
+                                },
+                                "required": [
+                                  "value",
+                                  "source"
+                                ],
+                                "additionalProperties": false
+                              },
+                              "phone": {
+                                "type": "object",
+                                "properties": {
+                                  "value": {
+                                    "nullable": true,
+                                    "type": "string"
+                                  },
+                                  "source": {
+                                    "nullable": true,
+                                    "type": "string",
+                                    "enum": [
+                                      "item",
+                                      "user"
+                                    ]
+                                  }
+                                },
+                                "required": [
+                                  "value",
+                                  "source"
+                                ],
+                                "additionalProperties": false
+                              }
+                            },
+                            "additionalProperties": false
+                          },
+                          "locations": {
+                            "type": "array",
+                            "items": {
+                              "type": "object",
+                              "properties": {
+                                "lat": {
+                                  "type": "number",
+                                  "minimum": -90,
+                                  "maximum": 90
+                                },
+                                "lng": {
+                                  "type": "number",
+                                  "minimum": -180,
+                                  "maximum": 180
+                                },
+                                "label": {
+                                  "type": "string"
+                                }
+                              },
+                              "required": [
+                                "lat",
+                                "lng"
+                              ],
+                              "additionalProperties": false
+                            }
                           },
                           "created_at": {
                             "type": "string",
