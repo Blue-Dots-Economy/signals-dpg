@@ -81,12 +81,12 @@ const MAX_PER_IP = 10;
 
 function normalizeEmail(value: string | null | undefined): string | null {
   const trimmed = value?.trim().toLowerCase();
-  return trimmed ? trimmed : null;
+  return trimmed || null;
 }
 
 function normalizePhone(value: string | null | undefined): string | null {
   const trimmed = value?.trim();
-  return trimmed ? trimmed : null;
+  return trimmed || null;
 }
 
 /**
@@ -137,10 +137,23 @@ function getAdminClient(): KeycloakAdminClient | null {
   return adminClient;
 }
 
-export async function selfSignup(
+/** The validated inputs a signup proceeds with once every guard has passed. */
+interface PreparedSignup {
+  ok: true;
+  email: string | null;
+  phoneNumber: string | null;
+  domain: string | null;
+  age: number | null;
+  client: KeycloakAdminClient;
+}
+
+type SignupRejection = Extract<SelfSignupResult, { ok: false }>;
+
+/** Every up-front guard, in the order the endpoint has always applied them. */
+async function prepareSignup(
   input: SelfSignupInput,
   log: FastifyBaseLogger
-): Promise<SelfSignupResult> {
+): Promise<PreparedSignup | SignupRejection> {
   // Only meaningful when Keycloak is the identity provider. Under `betterauth`
   // the old OTP flow still owns signup.
   if (!authConfig.keycloak_enabled) {
@@ -225,122 +238,167 @@ export async function selfSignup(
     };
   }
 
+  return { ok: true, email, phoneNumber, domain, age, client };
+}
+
+/** Realm users holding this email or phone (either lookup may be skipped). */
+async function findInRealm(
+  client: KeycloakAdminClient,
+  email: string | null,
+  phoneNumber: string | null
+) {
+  return [
+    ...(email ? await client.findByEmail(email) : []),
+    ...(phoneNumber ? await client.findByPhone(phoneNumber) : []),
+  ];
+}
+
+/** True when the identifier already belongs to a signals user or realm user. */
+async function identifierAlreadyKnown(
+  client: KeycloakAdminClient,
+  email: string | null,
+  phoneNumber: string | null
+): Promise<boolean> {
+  // Already a signals user? Send them to sign in instead of minting a second
+  // identity for the same person.
+  const filters = [
+    email ? eq(userTable.email, email) : undefined,
+    phoneNumber ? eq(userTable.phoneNumber, phoneNumber) : undefined,
+  ].filter((f): f is NonNullable<typeof f> => f !== undefined);
+
+  const [localExisting] = await db
+    .select({ id: userTable.id })
+    .from(userTable)
+    .where(filters.length === 1 ? filters[0] : or(...filters))
+    .limit(1);
+
+  if (localExisting) return true;
+
+  // Already in the realm (e.g. an aggregator user, or a previous signup that
+  // never completed its first login)? Same answer — never create a duplicate.
+  const inRealm = await findInRealm(client, email, phoneNumber);
+  return inRealm.length > 0;
+}
+
+/**
+ * A phone-only user whose `phoneNumber` attribute is silently dropped by the
+ * realm is created and then permanently unable to receive an OTP — the same
+ * false green the migration script guards against (`attributesWillPersist`),
+ * which live signup was missing. Refuse before creating rather than mint an
+ * account nobody can log into.
+ */
+async function phoneAttributeWillPersist(
+  client: KeycloakAdminClient,
+  log: FastifyBaseLogger
+): Promise<boolean> {
+  phoneAttributePersists ??= await client.attributesWillPersist('phoneNumber');
+  if (!phoneAttributePersists) {
+    log.error(
+      'self-signup: the realm does not retain the phoneNumber attribute — ' +
+        'declare it in the user profile or enable unmanaged attributes, or ' +
+        'phone sign-ups can never receive an OTP'
+    );
+  }
+  return phoneAttributePersists;
+}
+
+/** Mints the identity in the realm and classifies Keycloak's answer. */
+async function createRealmIdentity(
+  prepared: PreparedSignup,
+  name: string | undefined,
+  log: FastifyBaseLogger
+): Promise<SelfSignupResult> {
+  const { client, email, phoneNumber, domain, age } = prepared;
+
+  // The id minted here becomes the Keycloak `sub` AND, at first login, the
+  // local `user.id` — the same invariant the migration preserves.
+  const id = randomUUID();
+  const mapped = mapUserToKeycloak({
+    id,
+    name: name?.trim() || 'user',
+    email,
+    // Unverified until the OTP login proves ownership.
+    emailVerified: false,
+    phoneNumber,
+    phoneNumberVerified: false,
+    role: 'user',
+    banned: false,
+    banReason: null,
+    banExpires: null,
+  });
+
+  if (!mapped.ok) {
+    log.warn({ reason: mapped.message }, 'self-signup: could not map the new user');
+    return { ok: false, code: 'NO_IDENTIFIER', message: 'Enter an email or phone number.' };
+  }
+
+  // partialImport, not POST /users: KC 26.5.5 ignores a supplied id on plain
+  // create, and `sub` must equal what will become the local user.id.
+  const outcome = await client.createUserPreservingId(mapped.user);
+
+  switch (outcome.kind) {
+    case 'created':
+      // Park the signals-only fields for provisioning to apply at first login;
+      // there is no local user row to write them to yet. Best-effort — losing
+      // them costs a re-selection, and must not fail a created account.
+      try {
+        await stashSignupExtras(
+          { email, phoneNumber },
+          { ...(domain ? { domain } : {}), ...(age !== null ? { age } : {}) }
+        );
+      } catch (err) {
+        log.error({ err, user_id: id }, 'self-signup: could not stash signup extras');
+      }
+      log.info({ user_id: id }, 'self-signup: created a Keycloak identity');
+      return { ok: true, alreadyRegistered: false };
+    case 'already_exists':
+      return { ok: true, alreadyRegistered: true };
+    default: {
+      // Creation failed and the pre-checks above found nothing, so this is
+      // either a race (someone claimed the identifier in between) or a real
+      // failure. Look again before answering: reporting `alreadyRegistered`
+      // unconditionally is the exact "sign-up says registered / sign-in says
+      // no such user" dead-end this migration exists to remove, and the user
+      // has no way out of it. Only a re-check that actually finds the
+      // identifier justifies that answer.
+      log.warn(
+        { detail: 'detail' in outcome ? outcome.detail : outcome.kind },
+        'self-signup: Keycloak refused to create the identity'
+      );
+
+      const nowInRealm = await findInRealm(client, email, phoneNumber);
+      if (nowInRealm.length > 0) return { ok: true, alreadyRegistered: true };
+
+      log.error(
+        { detail: 'detail' in outcome ? outcome.detail : outcome.kind },
+        'self-signup: identity was neither created nor found on re-check'
+      );
+      return { ok: false, code: 'SIGNUP_FAILED', message: 'Could not complete sign-up.' };
+    }
+  }
+}
+
+export async function selfSignup(
+  input: SelfSignupInput,
+  log: FastifyBaseLogger
+): Promise<SelfSignupResult> {
+  const prepared = await prepareSignup(input, log);
+  if (!prepared.ok) return prepared;
+
   try {
-    // Already a signals user? Send them to sign in instead of minting a second
-    // identity for the same person.
-    const filters = [
-      email ? eq(userTable.email, email) : undefined,
-      phoneNumber ? eq(userTable.phoneNumber, phoneNumber) : undefined,
-    ].filter((f): f is NonNullable<typeof f> => f !== undefined);
-
-    const [localExisting] = await db
-      .select({ id: userTable.id })
-      .from(userTable)
-      .where(filters.length === 1 ? filters[0] : or(...filters))
-      .limit(1);
-
-    if (localExisting) return { ok: true, alreadyRegistered: true };
-
-    // Already in the realm (e.g. an aggregator user, or a previous signup that
-    // never completed its first login)? Same answer — never create a duplicate.
-    const inRealm = [
-      ...(email ? await client.findByEmail(email) : []),
-      ...(phoneNumber ? await client.findByPhone(phoneNumber) : []),
-    ];
-    if (inRealm.length > 0) return { ok: true, alreadyRegistered: true };
-
-    // A phone-only user whose `phoneNumber` attribute is silently dropped by the
-    // realm is created and then permanently unable to receive an OTP — the same
-    // false green the migration script guards against
-    // (`attributesWillPersist`), which live signup was missing. Refuse before
-    // creating rather than mint an account nobody can log into.
-    if (phoneNumber) {
-      if (phoneAttributePersists === null) {
-        phoneAttributePersists = await client.attributesWillPersist('phoneNumber');
-      }
-      if (!phoneAttributePersists) {
-        log.error(
-          'self-signup: the realm does not retain the phoneNumber attribute — ' +
-            'declare it in the user profile or enable unmanaged attributes, or ' +
-            'phone sign-ups can never receive an OTP'
-        );
-        return {
-          ok: false,
-          code: 'SIGNUP_NOT_AVAILABLE',
-          message: 'Sign-up is not available right now.',
-        };
-      }
+    if (await identifierAlreadyKnown(prepared.client, prepared.email, prepared.phoneNumber)) {
+      return { ok: true, alreadyRegistered: true };
     }
 
-    // The id minted here becomes the Keycloak `sub` AND, at first login, the
-    // local `user.id` — the same invariant the migration preserves.
-    const id = randomUUID();
-    const mapped = mapUserToKeycloak({
-      id,
-      name: input.name?.trim() || 'user',
-      email,
-      // Unverified until the OTP login proves ownership.
-      emailVerified: false,
-      phoneNumber,
-      phoneNumberVerified: false,
-      role: 'user',
-      banned: false,
-      banReason: null,
-      banExpires: null,
-    });
-
-    if (!mapped.ok) {
-      log.warn({ reason: mapped.message }, 'self-signup: could not map the new user');
-      return { ok: false, code: 'NO_IDENTIFIER', message: 'Enter an email or phone number.' };
+    if (prepared.phoneNumber && !(await phoneAttributeWillPersist(prepared.client, log))) {
+      return {
+        ok: false,
+        code: 'SIGNUP_NOT_AVAILABLE',
+        message: 'Sign-up is not available right now.',
+      };
     }
 
-    // partialImport, not POST /users: KC 26.5.5 ignores a supplied id on plain
-    // create, and `sub` must equal what will become the local user.id.
-    const outcome = await client.createUserPreservingId(mapped.user);
-
-    switch (outcome.kind) {
-      case 'created':
-        // Park the signals-only fields for provisioning to apply at first login;
-        // there is no local user row to write them to yet. Best-effort — losing
-        // them costs a re-selection, and must not fail a created account.
-        try {
-          await stashSignupExtras(
-            { email, phoneNumber },
-            { ...(domain ? { domain } : {}), ...(age !== null ? { age } : {}) }
-          );
-        } catch (err) {
-          log.error({ err, user_id: id }, 'self-signup: could not stash signup extras');
-        }
-        log.info({ user_id: id }, 'self-signup: created a Keycloak identity');
-        return { ok: true, alreadyRegistered: false };
-      case 'already_exists':
-        return { ok: true, alreadyRegistered: true };
-      default: {
-        // Creation failed and the pre-checks above found nothing, so this is
-        // either a race (someone claimed the identifier in between) or a real
-        // failure. Look again before answering: reporting `alreadyRegistered`
-        // unconditionally is the exact "sign-up says registered / sign-in says
-        // no such user" dead-end this migration exists to remove, and the user
-        // has no way out of it. Only a re-check that actually finds the
-        // identifier justifies that answer.
-        log.warn(
-          { detail: 'detail' in outcome ? outcome.detail : outcome.kind },
-          'self-signup: Keycloak refused to create the identity'
-        );
-
-        const nowInRealm = [
-          ...(email ? await client.findByEmail(email) : []),
-          ...(phoneNumber ? await client.findByPhone(phoneNumber) : []),
-        ];
-        if (nowInRealm.length > 0) return { ok: true, alreadyRegistered: true };
-
-        log.error(
-          { detail: 'detail' in outcome ? outcome.detail : outcome.kind },
-          'self-signup: identity was neither created nor found on re-check'
-        );
-        return { ok: false, code: 'SIGNUP_FAILED', message: 'Could not complete sign-up.' };
-      }
-    }
+    return await createRealmIdentity(prepared, input.name, log);
   } catch (err) {
     log.error({ err }, 'self-signup failed');
     return { ok: false, code: 'SIGNUP_FAILED', message: 'Could not complete sign-up.' };

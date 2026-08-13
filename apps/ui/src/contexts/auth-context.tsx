@@ -4,6 +4,7 @@ import {
   useState,
   useEffect,
   useCallback,
+  useMemo,
   useRef,
   type ReactNode,
 } from 'react';
@@ -243,24 +244,35 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }, [authCfg, isKeycloakLogin, queryClient]);
 
-  return (
-    <AuthContext.Provider
-      value={{
-        user,
-        isLoading,
-        isAuthenticated: !!user,
-        isKeycloakLogin,
-        checkUser,
-        requestOtp,
-        verifyOtp,
-        startKeycloakLogin,
-        completeKeycloakLogin,
-        signOut,
-      }}
-    >
-      {children}
-    </AuthContext.Provider>
+  // Memoised so consumers only re-render when the session actually changes —
+  // every callback above is a stable useCallback reference.
+  const value = useMemo(
+    () => ({
+      user,
+      isLoading,
+      isAuthenticated: !!user,
+      isKeycloakLogin,
+      checkUser,
+      requestOtp,
+      verifyOtp,
+      startKeycloakLogin,
+      completeKeycloakLogin,
+      signOut,
+    }),
+    [
+      user,
+      isLoading,
+      isKeycloakLogin,
+      checkUser,
+      requestOtp,
+      verifyOtp,
+      startKeycloakLogin,
+      completeKeycloakLogin,
+      signOut,
+    ],
   );
+
+  return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }
 
 export function useAuth() {

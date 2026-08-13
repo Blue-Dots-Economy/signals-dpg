@@ -17,7 +17,7 @@
  */
 
 import type { FastifyReply, FastifyRequest } from 'fastify';
-import { authConfig } from '../../src/config';
+import { authConfig, keycloakConfig } from '../../src/config';
 import {
   actingOrgGrant,
   extractBearerToken,
@@ -26,13 +26,13 @@ import {
   looksLikeKeycloakToken,
   realmRoles,
   verifyKeycloakToken,
+  type KeycloakClaims,
   type KeycloakTokenErrorCode,
 } from '../../src/utils/keycloak_token';
 import { provisionUserFromClaims } from '../../src/services/auth/provisioning';
 import type { ProvisioningErrorCode } from '../../src/services/auth/provisioning';
 import { resolveServiceAccount } from '../../src/services/auth/service_account';
 import type { ServiceAccountErrorCode } from '../../src/services/auth/service_account';
-import { keycloakConfig } from '../../src/config';
 
 /** Shape every auth failure shares, matching the existing middleware replies. */
 interface AuthFailure {
@@ -214,22 +214,9 @@ export async function resolveKeycloakSession(
 
   const verified = await verifyKeycloakToken(token);
   if (!verified.ok) {
-    if (verified.code === 'KEYCLOAK_UNAVAILABLE' || verified.code === 'KEYCLOAK_NOT_CONFIGURED') {
-      request.log.error(
-        { code: verified.code, reason: verified.message },
-        'keycloak token verification could not complete',
-      );
-    } else {
-      request.log.warn(
-        { code: verified.code, reason: verified.message },
-        'keycloak token rejected',
-      );
-    }
+    logTokenFailure(request, verified.code, verified.message);
     return { ok: false, failure: TOKEN_FAILURES[verified.code] };
   }
-
-  const { claims } = verified;
-  const azp = typeof claims.azp === 'string' ? claims.azp : undefined;
 
   /**
    * Fork on what kind of caller this is. The audience gate in
@@ -242,31 +229,59 @@ export async function resolveKeycloakSession(
    * token from the public `signals-ui` client must never be honoured as an
    * integrating DPG's service identity.
    */
-  if (isServiceAccountToken(claims)) {
-    const service = await resolveServiceAccount(claims, request.log);
-    if (!service.ok) {
-      return { ok: false, failure: SERVICE_FAILURES[service.code] };
-    }
-    request.user = {
-      id: service.user.id,
-      email: service.user.email,
-      name: service.user.name,
-      role: service.user.role,
-    };
-    // Acting-org grant (§5.1). Carried to acting_org.ts, which decides whether
-    // to enforce it based on ACTING_ORG_SOURCE.
-    request.acting_org_grant = actingOrgGrant(claims);
-    return { ok: true };
-  }
+  return isServiceAccountToken(verified.claims)
+    ? resolveServiceSession(verified.claims, request)
+    : resolveHumanSession(verified.claims, request);
+}
 
-  /**
-   * The human path requires a *named* client, and a named client on the human
-   * list. A missing `azp` is a rejection, not a pass: the audience gate in
-   * `verifyKeycloakToken` accepts on an `aud` match alone, so a token with no
-   * `azp` but an `aud` naming an accepted client would otherwise skip this check
-   * entirely and reach provisioning unattributed. Keycloak always emits `azp`,
-   * so nothing legitimate lands here.
-   */
+function logTokenFailure(
+  request: FastifyRequest,
+  code: KeycloakTokenErrorCode,
+  reason: string,
+) {
+  if (code === 'KEYCLOAK_UNAVAILABLE' || code === 'KEYCLOAK_NOT_CONFIGURED') {
+    request.log.error({ code, reason }, 'keycloak token verification could not complete');
+  } else {
+    request.log.warn({ code, reason }, 'keycloak token rejected');
+  }
+}
+
+/** Client-credentials path: an integrating DPG's service identity. */
+async function resolveServiceSession(
+  claims: KeycloakClaims,
+  request: FastifyRequest,
+): Promise<SessionResolution> {
+  const service = await resolveServiceAccount(claims, request.log);
+  if (!service.ok) {
+    return { ok: false, failure: SERVICE_FAILURES[service.code] };
+  }
+  request.user = {
+    id: service.user.id,
+    email: service.user.email,
+    name: service.user.name,
+    role: service.user.role,
+  };
+  // Acting-org grant (§5.1). Carried to acting_org.ts, which decides whether
+  // to enforce it based on ACTING_ORG_SOURCE.
+  request.acting_org_grant = actingOrgGrant(claims);
+  return { ok: true };
+}
+
+/**
+ * Human path: named-client and realm-role gates, then the local user mirror.
+ *
+ * A missing `azp` is a rejection, not a pass: the audience gate in
+ * `verifyKeycloakToken` accepts on an `aud` match alone, so a token with no
+ * `azp` but an `aud` naming an accepted client would otherwise skip the client
+ * check entirely and reach provisioning unattributed. Keycloak always emits
+ * `azp`, so nothing legitimate lands there.
+ */
+async function resolveHumanSession(
+  claims: KeycloakClaims,
+  request: FastifyRequest,
+): Promise<SessionResolution> {
+  const azp = typeof claims.azp === 'string' ? claims.azp : undefined;
+
   if (azp === undefined || !keycloakConfig.session_client_ids.includes(azp)) {
     request.log.warn(
       { azp: azp ?? null, aud: claims.aud },

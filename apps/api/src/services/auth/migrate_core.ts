@@ -85,7 +85,9 @@ export function emptyTally(total: number): Tally {
 
 export function describe(err: unknown): string {
   if (err instanceof KeycloakAdminError) {
-    return `${err.message}${err.status ? ` (HTTP ${err.status})` : ''}${err.body ? `: ${err.body}` : ''}`;
+    const status = err.status ? ` (HTTP ${err.status})` : '';
+    const body = err.body ? `: ${err.body}` : '';
+    return `${err.message}${status}${body}`;
   }
   return err instanceof Error ? err.message : String(err);
 }
@@ -245,7 +247,29 @@ export async function runMigration(
   }
   logger.log('');
 
-  const ready: Array<{ row: SignalsUserRow; user: KeycloakUserRepresentation }> = [];
+  const ready = mapReadyUsers(users, tally, logger);
+
+  if (!apply) {
+    await dryRunPass(client, ready, tally, logger);
+    report(tally, apply, logger);
+    return { code: tally.conflicts > 0 || tally.failed > 0 ? 1 : 0, tally };
+  }
+
+  if (opts.strategy === 'import') {
+    await importPass(client, ready, opts.batch, tally, logger);
+    report(tally, apply, logger);
+    return { code: tally.failed > 0 ? 1 : 0, tally };
+  }
+
+  const aborted = await createPass(client, ready, tally, logger);
+  report(tally, apply, logger);
+  return { code: aborted || tally.failed > 0 || tally.conflicts > 0 ? 1 : 0, tally };
+}
+
+type ReadyUser = { row: SignalsUserRow; user: KeycloakUserRepresentation };
+
+function mapReadyUsers(users: SignalsUserRow[], tally: Tally, logger: Logger): ReadyUser[] {
+  const ready: ReadyUser[] = [];
   for (const row of users) {
     const rep = mapUserToKeycloak(row);
     if (rep.ok) {
@@ -255,58 +279,80 @@ export async function runMigration(
       logger.log(`  SKIP  ${row.id}  unmappable: ${rep.message}`);
     }
   }
+  return ready;
+}
 
-  if (!apply) {
-    // Dry run: report the collision case (§6.3 spike 2) without writing.
-    for (const { row } of ready) {
-      try {
-        const existing = await client.getUserById(row.id);
-        if (existing) {
-          tally.skipped += 1;
-          continue;
-        }
-        const clash = row.email
-          ? await client.findByEmail(row.email)
-          : row.phoneNumber
-            ? await client.findByPhone(row.phoneNumber)
-            : [];
-        const foreign = clash.filter((c) => c.id !== row.id);
-        if (foreign.length > 0) {
-          tally.conflicts += 1;
-          logger.log(
-            `  CONFLICT ${row.id}  identifiers already held by Keycloak user ${foreign[0].id}`
-          );
-          continue;
-        }
-        tally.created += 1;
-      } catch (err) {
-        tally.failed += 1;
-        logger.log(`  ERROR ${row.id}  ${describe(err)}`);
-      }
-    }
-    report(tally, apply, logger);
-    return { code: tally.conflicts > 0 || tally.failed > 0 ? 1 : 0, tally };
+/** Users already holding this row's email/phone under a DIFFERENT Keycloak id. */
+async function findIdentifierClashes(client: MigrationClient, row: SignalsUserRow) {
+  let clash: Awaited<ReturnType<MigrationClient['findByEmail']>> = [];
+  if (row.email) {
+    clash = await client.findByEmail(row.email);
+  } else if (row.phoneNumber) {
+    clash = await client.findByPhone(row.phoneNumber);
   }
+  return clash.filter((c) => c.id !== row.id);
+}
 
-  if (opts.strategy === 'import') {
-    for (let i = 0; i < ready.length; i += opts.batch) {
-      const batch = ready.slice(i, i + opts.batch).map((r) => r.user);
-      try {
-        const result = await client.partialImportUsers(batch);
-        tally.created += result.added;
-        tally.skipped += result.skipped;
+/** Dry run: report the collision case (§6.3 spike 2) without writing. */
+async function dryRunPass(
+  client: MigrationClient,
+  ready: ReadyUser[],
+  tally: Tally,
+  logger: Logger,
+): Promise<void> {
+  for (const { row } of ready) {
+    try {
+      const existing = await client.getUserById(row.id);
+      if (existing) {
+        tally.skipped += 1;
+        continue;
+      }
+      const foreign = await findIdentifierClashes(client, row);
+      if (foreign.length > 0) {
+        tally.conflicts += 1;
         logger.log(
-          `  batch ${i / opts.batch + 1}: added=${result.added} skipped=${result.skipped}`
+          `  CONFLICT ${row.id}  identifiers already held by Keycloak user ${foreign[0].id}`
         );
-      } catch (err) {
-        tally.failed += batch.length;
-        logger.log(`  ERROR batch ${i / opts.batch + 1}: ${describe(err)}`);
+        continue;
       }
+      tally.created += 1;
+    } catch (err) {
+      tally.failed += 1;
+      logger.log(`  ERROR ${row.id}  ${describe(err)}`);
     }
-    report(tally, apply, logger);
-    return { code: tally.failed > 0 ? 1 : 0, tally };
   }
+}
 
+async function importPass(
+  client: MigrationClient,
+  ready: ReadyUser[],
+  batchSize: number,
+  tally: Tally,
+  logger: Logger,
+): Promise<void> {
+  for (let i = 0; i < ready.length; i += batchSize) {
+    const batch = ready.slice(i, i + batchSize).map((r) => r.user);
+    try {
+      const result = await client.partialImportUsers(batch);
+      tally.created += result.added;
+      tally.skipped += result.skipped;
+      logger.log(
+        `  batch ${i / batchSize + 1}: added=${result.added} skipped=${result.skipped}`
+      );
+    } catch (err) {
+      tally.failed += batch.length;
+      logger.log(`  ERROR batch ${i / batchSize + 1}: ${describe(err)}`);
+    }
+  }
+}
+
+/** Per-user create. Returns true when the run must abort (id not honoured). */
+async function createPass(
+  client: MigrationClient,
+  ready: ReadyUser[],
+  tally: Tally,
+  logger: Logger,
+): Promise<boolean> {
   for (const { user } of ready) {
     try {
       const outcome = await client.createUser(user);
@@ -333,17 +379,14 @@ export async function runMigration(
           logger.error('  UUIDs are NOT being preserved. Aborting before more rows are');
           logger.error('  written. Delete the users created so far, then re-run with');
           logger.error('  --strategy=import. See §6.3 spike 1.');
-          report(tally, apply, logger);
-          return { code: 1, tally };
+          return true;
       }
     } catch (err) {
       tally.failed += 1;
       logger.log(`  ERROR ${user.id}  ${describe(err)}`);
     }
   }
-
-  report(tally, apply, logger);
-  return { code: tally.failed > 0 || tally.conflicts > 0 ? 1 : 0, tally };
+  return false;
 }
 
 export interface ReconcileResult {

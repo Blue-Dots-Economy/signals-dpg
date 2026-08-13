@@ -155,35 +155,10 @@ async function signUpAndOnboardUser(params: {
   let rowCommittedOutsideTx = false;
 
   if (!keycloak) {
-    const email_for_signup = email_norm ?? `${randomUUID()}@no-email.local`;
-    try {
-      const signed_up = await authInstance.api.signUpEmail({
-        body: {
-          email: email_for_signup,
-          password: randomUUID(),
-          name,
-        },
-      });
-      user_id = signed_up.user.id;
-      rowCommittedOutsideTx = true;
-    } catch (signupErr: unknown) {
-      if (isUniqueViolation(signupErr)) {
-        log.warn({ err: signupErr }, 'signUp race; user exists now');
-        return {
-          ok: false,
-          statusCode: 409,
-          error: 'USER_ALREADY_EXISTS',
-          message: 'email or phone already in use (race) — retry the request',
-        };
-      }
-      log.error({ err: signupErr }, 'signUp failed during onboarding');
-      return {
-        ok: false,
-        statusCode: 500,
-        error: 'ONBOARD_FAILED',
-        message: 'could not onboard participant',
-      };
-    }
+    const signedUp = await signUpViaBetterAuth(email_norm, name, log);
+    if (!signedUp.ok) return signedUp;
+    user_id = signedUp.user_id;
+    rowCommittedOutsideTx = true;
   }
 
   try {
@@ -229,55 +204,10 @@ async function signUpAndOnboardUser(params: {
     // best be a no-op and at worst remove a *different* row that happened to
     // reuse the id.
     if (rowCommittedOutsideTx) {
-      try {
-        await db.delete(user).where(eq(user.id, user_id));
-        log.warn(
-          { orphan_user_id: user_id },
-          'cleaned up orphan user after update/tx failed',
-        );
-      } catch (cleanupErr) {
-        log.error(
-          { cleanupErr, orphan_user_id: user_id },
-          'failed to clean up orphan user — manual cleanup needed',
-        );
-      }
+      await deleteOrphanUser(user_id, log, {}, 'cleaned up orphan user after update/tx failed');
     }
 
-    const e = updateErr as {
-      code?: string;
-      message?: string;
-      cause?: { code?: string };
-      statusCode?: number;
-      errorCode?: string;
-    } | null;
-
-    // Propagate typed service errors (e.g. from create_profile_item, or the
-    // insert failure re-thrown above).
-    if (e?.statusCode && e?.errorCode) {
-      return {
-        ok: false,
-        statusCode: e.statusCode,
-        error: e.errorCode,
-        message: e.message ?? 'request rejected',
-      };
-    }
-
-    if (isUniqueViolation(updateErr)) {
-      return {
-        ok: false,
-        statusCode: 409,
-        error: 'USER_ALREADY_EXISTS',
-        message: 'email or phone already in use (race)',
-      };
-    }
-
-    log.error({ err: updateErr }, 'participant onboard failed');
-    return {
-      ok: false,
-      statusCode: 500,
-      error: 'ONBOARD_FAILED',
-      message: 'could not onboard participant',
-    };
+    return classifyOnboardFailure(updateErr, log);
   }
 
   // The realm identity comes last, once the local row is complete: under
@@ -299,18 +229,12 @@ async function signUpAndOnboardUser(params: {
   });
 
   if (!identity.ok) {
-    try {
-      await db.delete(user).where(eq(user.id, user_id));
-      log.warn(
-        { orphan_user_id: user_id, identity_error: identity.code },
-        'cleaned up orphan user after the Keycloak identity could not be created',
-      );
-    } catch (cleanupErr) {
-      log.error(
-        { cleanupErr, orphan_user_id: user_id },
-        'failed to clean up orphan user — manual cleanup needed',
-      );
-    }
+    await deleteOrphanUser(
+      user_id,
+      log,
+      { identity_error: identity.code },
+      'cleaned up orphan user after the Keycloak identity could not be created',
+    );
 
     return {
       ok: false,
@@ -321,6 +245,102 @@ async function signUpAndOnboardUser(params: {
   }
 
   return { ok: true, user_id };
+}
+
+/** better-auth signup (writes the user row itself, outside any transaction). */
+async function signUpViaBetterAuth(
+  email_norm: string | null,
+  name: string,
+  log: FastifyRequest['log'],
+): Promise<SignUpResult> {
+  const email_for_signup = email_norm ?? `${randomUUID()}@no-email.local`;
+  try {
+    const signed_up = await authInstance.api.signUpEmail({
+      body: {
+        email: email_for_signup,
+        password: randomUUID(),
+        name,
+      },
+    });
+    return { ok: true, user_id: signed_up.user.id };
+  } catch (signupErr: unknown) {
+    if (isUniqueViolation(signupErr)) {
+      log.warn({ err: signupErr }, 'signUp race; user exists now');
+      return {
+        ok: false,
+        statusCode: 409,
+        error: 'USER_ALREADY_EXISTS',
+        message: 'email or phone already in use (race) — retry the request',
+      };
+    }
+    log.error({ err: signupErr }, 'signUp failed during onboarding');
+    return {
+      ok: false,
+      statusCode: 500,
+      error: 'ONBOARD_FAILED',
+      message: 'could not onboard participant',
+    };
+  }
+}
+
+/** Best-effort orphan removal; a failed delete is logged for manual cleanup. */
+async function deleteOrphanUser(
+  user_id: string,
+  log: FastifyRequest['log'],
+  warnFields: Record<string, unknown>,
+  warnMessage: string,
+): Promise<void> {
+  try {
+    await db.delete(user).where(eq(user.id, user_id));
+    log.warn({ orphan_user_id: user_id, ...warnFields }, warnMessage);
+  } catch (cleanupErr) {
+    log.error(
+      { cleanupErr, orphan_user_id: user_id },
+      'failed to clean up orphan user — manual cleanup needed',
+    );
+  }
+}
+
+/** Turns a transaction/update failure into the route's typed failure shape. */
+function classifyOnboardFailure(
+  updateErr: unknown,
+  log: FastifyRequest['log'],
+): Extract<SignUpResult, { ok: false }> {
+  const e = updateErr as {
+    code?: string;
+    message?: string;
+    cause?: { code?: string };
+    statusCode?: number;
+    errorCode?: string;
+  } | null;
+
+  // Propagate typed service errors (e.g. from create_profile_item, or the
+  // insert failure re-thrown above).
+  if (e?.statusCode && e?.errorCode) {
+    return {
+      ok: false,
+      statusCode: e.statusCode,
+      error: e.errorCode,
+      message: e.message ?? 'request rejected',
+    };
+  }
+
+  if (isUniqueViolation(updateErr)) {
+    return {
+      ok: false,
+      statusCode: 409,
+      error: 'USER_ALREADY_EXISTS',
+      message: 'email or phone already in use (race)',
+    };
+  }
+
+  log.error({ err: updateErr }, 'participant onboard failed');
+  return {
+    ok: false,
+    statusCode: 500,
+    error: 'ONBOARD_FAILED',
+    message: 'could not onboard participant',
+  };
 }
 
 export const participant_handler = async (

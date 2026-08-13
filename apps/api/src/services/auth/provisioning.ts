@@ -96,7 +96,7 @@ export type ProvisioningResult =
  */
 function orgIdFromGrant(claims: KeycloakClaims): string | null {
   const grant = actingOrgGrant(claims);
-  if (!grant || grant.length !== 1 || grantIsWildcard(grant)) return null;
+  if (grant?.length !== 1 || grantIsWildcard(grant)) return null;
   return grant[0];
 }
 
@@ -111,12 +111,12 @@ function pgErrorCode(err: unknown): string | undefined {
 /** Keycloak sends email/phone as claims; normalise the way signals stores them. */
 function normalizeEmail(value: string | undefined): string | null {
   const trimmed = value?.trim().toLowerCase();
-  return trimmed ? trimmed : null;
+  return trimmed || null;
 }
 
 function normalizePhone(value: string | undefined): string | null {
   const trimmed = value?.trim();
-  return trimmed ? trimmed : null;
+  return trimmed || null;
 }
 
 /** The identity a token asserts, reduced to what the mirror stores. */

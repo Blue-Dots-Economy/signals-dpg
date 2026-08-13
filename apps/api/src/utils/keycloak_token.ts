@@ -154,8 +154,12 @@ export function extractBearerToken(
 ): string | undefined {
   const header = Array.isArray(authorization) ? authorization[0] : authorization;
   if (!header) return undefined;
-  const match = /^Bearer\s+(.+)$/i.exec(header.trim());
-  return match?.[1]?.trim() || undefined;
+  const trimmed = header.trim();
+  // Match only the scheme prefix and slice the rest: a `(.+)$` capture after
+  // `\s+` is ambiguous (both match spaces) and backtracks super-linearly.
+  const scheme = /^Bearer\s+/i.exec(trimmed);
+  if (!scheme) return undefined;
+  return trimmed.slice(scheme[0].length).trim() || undefined;
 }
 
 /**
@@ -282,12 +286,14 @@ export function actingOrgGrant(claims: KeycloakClaims): string[] | undefined {
   const raw = claims[ACTING_ORG_CLAIM];
   if (raw === undefined || raw === null) return undefined;
 
-  const values = Array.isArray(raw)
-    ? raw
-    : typeof raw === 'string'
-      ? raw.split(',')
-      : undefined;
-  if (!values) return undefined;
+  let values: unknown[];
+  if (Array.isArray(raw)) {
+    values = raw;
+  } else if (typeof raw === 'string') {
+    values = raw.split(',');
+  } else {
+    return undefined;
+  }
 
   return values
     .filter((v): v is string => typeof v === 'string')

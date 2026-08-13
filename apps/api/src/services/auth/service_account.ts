@@ -39,7 +39,7 @@ import { keycloakConfig } from '@/config';
 import type { KeycloakClaims } from '@/utils/keycloak_token';
 
 /** Org types permitted to own a service identity — mirrors acting_org.ts. */
-const SERVICE_ORG_TYPES = ['network_service', 'aggregator', 'voice'];
+const SERVICE_ORG_TYPES = new Set(['network_service', 'aggregator', 'voice']);
 
 /** The `member.role` that marks the org's machine identity (see the seed). */
 const SERVICE_MEMBER_ROLE = 'service';
@@ -147,7 +147,7 @@ export async function resolveServiceAccount(
       };
     }
 
-    if (!row.orgType || !SERVICE_ORG_TYPES.includes(row.orgType)) {
+    if (!row.orgType || !SERVICE_ORG_TYPES.has(row.orgType)) {
       log.error(
         { client_id: clientId, org_type: row.orgType },
         'service auth: org matching this client is not a service org type',

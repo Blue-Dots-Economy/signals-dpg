@@ -266,7 +266,7 @@ describe('OidcCallbackPage', () => {
   it('exchanges the code, resolves the user, and lands on home', async () => {
     renderAt(<OidcCallbackPage />, '/auth/callback');
 
-    await waitFor(() => expect(screen.getByText('home')).toBeTruthy());
+    expect(await screen.findByText('home')).toBeTruthy();
     expect(completeOidcLogin).toHaveBeenCalledOnce();
     expect(completeKeycloakLogin).toHaveBeenCalledOnce();
   });
@@ -279,7 +279,7 @@ describe('OidcCallbackPage', () => {
 
     renderAt(<OidcCallbackPage />, '/auth/callback');
 
-    await waitFor(() => expect(screen.getByText('profile form')).toBeTruthy());
+    expect(await screen.findByText('profile form')).toBeTruthy();
   });
 
   it('exchanges the single-use code exactly once', async () => {
@@ -336,7 +336,7 @@ describe('OidcCallbackPage — the redirect-loop regression', () => {
     renderAt(<OidcCallbackPage />, '/auth/callback');
 
     // Still on the spinner, and crucially the single-use code is untouched.
-    await waitFor(() => expect(screen.getByText(/signing you in/i)).toBeTruthy());
+    expect(await screen.findByText(/signing you in/i)).toBeTruthy();
     expect(completeOidcLogin).not.toHaveBeenCalled();
     expect(screen.queryByText(/not configured/i)).toBeNull();
   });
@@ -655,13 +655,13 @@ describe('OidcCallbackPage — flushing the parked consent', () => {
     await waitFor(() => expect(acceptConsent).toHaveBeenCalledWith(parked));
     // Read-once: cleared so it can't be replayed onto a later login.
     expect(localStorage.getItem('pendingConsent')).toBeNull();
-    await waitFor(() => expect(screen.getByText('home')).toBeTruthy());
+    expect(await screen.findByText('home')).toBeTruthy();
   });
 
   it('does nothing when there is no parked consent', async () => {
     renderAt(<OidcCallbackPage />, '/auth/callback');
 
-    await waitFor(() => expect(screen.getByText('home')).toBeTruthy());
+    expect(await screen.findByText('home')).toBeTruthy();
     expect(acceptConsent).not.toHaveBeenCalled();
   });
 
@@ -675,7 +675,7 @@ describe('OidcCallbackPage — flushing the parked consent', () => {
     renderAt(<OidcCallbackPage />, '/auth/callback');
 
     // Signed in regardless — the gate re-prompts next login.
-    await waitFor(() => expect(screen.getByText('home')).toBeTruthy());
+    expect(await screen.findByText('home')).toBeTruthy();
   });
 });
 
@@ -706,7 +706,7 @@ describe('OidcCallbackPage — landing is not conditional on the effect survivin
     rerender(wrap(<OidcCallbackPage />, '/auth/callback'));
     resolveAccept({ ok: true });
 
-    await waitFor(() => expect(screen.getByText('home')).toBeTruthy());
+    expect(await screen.findByText('home')).toBeTruthy();
   });
 });
 
@@ -733,7 +733,7 @@ describe('OidcCallbackPage — consent write cannot stall the landing', () => {
 
     await vi.advanceTimersByTimeAsync(8500);
 
-    await waitFor(() => expect(screen.getByText('home')).toBeTruthy());
+    expect(await screen.findByText('home')).toBeTruthy();
   });
 });
 
@@ -863,7 +863,7 @@ describe('OidcCallbackPage — login-time consent re-prompt', () => {
     // A returning user, not a signup.
     expect(body.source).toBe('login');
     expect(body.items).toHaveLength(2);
-    await waitFor(() => expect(screen.getByText('home')).toBeTruthy());
+    expect(await screen.findByText('home')).toBeTruthy();
   });
 
   it('does not gate when the current versions are already accepted', async () => {
@@ -871,7 +871,7 @@ describe('OidcCallbackPage — login-time consent re-prompt', () => {
 
     renderAt(<OidcCallbackPage />, '/auth/callback');
 
-    await waitFor(() => expect(screen.getByText('home')).toBeTruthy());
+    expect(await screen.findByText('home')).toBeTruthy();
     expect(screen.queryByTestId('consent-modal')).toBeNull();
   });
 
@@ -880,7 +880,7 @@ describe('OidcCallbackPage — login-time consent re-prompt', () => {
 
     renderAt(<OidcCallbackPage />, '/auth/callback');
 
-    await waitFor(() => expect(screen.getByText('home')).toBeTruthy());
+    expect(await screen.findByText('home')).toBeTruthy();
     expect(screen.queryByTestId('consent-modal')).toBeNull();
   });
 
@@ -891,7 +891,7 @@ describe('OidcCallbackPage — login-time consent re-prompt', () => {
     renderAt(<OidcCallbackPage />, '/auth/callback');
     await userEvent.click(await screen.findByRole('button', { name: /accept consent/i }));
 
-    await waitFor(() => expect(screen.getByText('home')).toBeTruthy());
+    expect(await screen.findByText('home')).toBeTruthy();
   });
 });
 

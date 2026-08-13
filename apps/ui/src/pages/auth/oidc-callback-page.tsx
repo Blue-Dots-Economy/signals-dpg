@@ -44,6 +44,126 @@ function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
 }
 
 /**
+ * Write any consent accepted on the login screen. The accept endpoint is
+ * authenticated, so this is the first moment it can be persisted — the
+ * acceptance was parked across the Keycloak redirect.
+ *
+ * Deliberately non-fatal: the user is signed in either way, and a failed write
+ * means the gate re-prompts next login rather than stranding them here.
+ */
+async function flushPendingConsent(persistErrorMessage: string): Promise<void> {
+  const pending = takePendingConsent();
+  if (!pending) return;
+  try {
+    // Bounded: a slow or hanging consent write must not hold the user on
+    // the spinner after they are already signed in.
+    await withTimeout(acceptConsent(pending), CONSENT_WRITE_TIMEOUT_MS);
+  } catch (consentErr) {
+    // eslint-disable-next-line no-console
+    console.error('could not persist accepted consent', consentErr);
+    toast.error(persistErrorMessage);
+  }
+}
+
+/**
+ * Durable write of the signup form's domain/age (G3). The server parked
+ * these in Redis with a 30-minute TTL and swallows failures, so this
+ * authenticated write is the backstop that stops a user landing with
+ * `domains = null` / `age = null` — the latter being fail-closed
+ * server-side for a guardian-gated domain. Idempotent with the stash.
+ */
+async function flushPendingSignupExtras(
+  network: string,
+  persistErrorMessage: string,
+): Promise<void> {
+  const signupExtras = takePendingSignupExtras();
+  if (!signupExtras) return;
+  // Hand the domain to profile-form-page (one-shot) as well as
+  // persisting it, exactly as the OTP flow does.
+  setStoredSignupDomain(network, signupExtras.domain);
+  try {
+    await setUserDomains([signupExtras.domain]);
+  } catch {
+    // Best-effort — profile-form falls back to held items if unset.
+  }
+  if (signupExtras.age !== undefined) {
+    try {
+      await submitU18Dob({ network, age: signupExtras.age });
+    } catch {
+      toast.error(persistErrorMessage);
+    }
+  }
+}
+
+/**
+ * Authenticated U18 guardian gate (G4), ported from `otp-page.tsx`.
+ *
+ * The Keycloak chooser never collects an identifier, so the OTP flow's
+ * pre-login `u18Precheck` has no equivalent here — the DOB capture has to
+ * happen now instead, which is what the `'dob'` step is for when no birth data
+ * is stored yet. Returns the step the blocking guardian flow should open on,
+ * or null when the user is not gated.
+ *
+ * Best-effort: a failed status lookup resolves to null and the user lands. The
+ * home-page gate is a backstop and the server-side go-live gate is the real
+ * fail-closed control.
+ *
+ * `heldDomains` is the already-resolved held-domain list when the caller has
+ * one (a bound deployment resolves it once per login rather than twice).
+ */
+async function resolveGuardianGateStep(
+  network: string,
+  heldDomains: string[] | null,
+): Promise<'dob' | 'guardian' | null> {
+  try {
+    const u18 = await getU18Status(network);
+    /**
+     * `isMinor` is `age !== null && isMinor(age)` server-side, so it is
+     * FALSE for a user whose age is unknown — which is every existing user
+     * onboarded by an aggregator (bulk upload / form link never captures
+     * one). Gating on `isMinor` alone therefore skipped exactly the
+     * population the `'dob'` step was written for, leaving it unreachable:
+     * those users fell through to the landing page and were then caught by
+     * home-page's `u18BirthUnresolved` backstop, which renders the DOB step
+     * on top of the map view.
+     *
+     * `!hasBirthData` is the missing condition. With it, DOB is captured
+     * here — before any navigation — which is what the OTP flow achieved
+     * via its pre-login `u18Precheck`.
+     */
+    const needsBirthData = !u18.hasBirthData;
+    const needsGuardian = u18.isMinor && !u18.guardianVerified;
+    if (!needsBirthData && !needsGuardian) return null;
+
+    /**
+     * Only gate inside a guardian-gated domain. A provider has no U18
+     * flow at all (`guardian_consent_required: false`), so asking them
+     * for a date of birth is pure friction.
+     *
+     * Keyed on the domains the user ALREADY holds a profile in, matching
+     * how home-page derives `wardDomain` from `myItem.item_domain` — a
+     * user with no profile yet has no domain to judge, and is gated later
+     * at profile creation once they pick one.
+     */
+    const held = heldDomains ?? (await resolveHeldDomains(network));
+
+    // No profile yet → no domain to judge, so nothing to fetch either.
+    if (held.length === 0) return null;
+
+    const networkCfg = await fetchNetworkConfig(network);
+    const inGatedDomain = held.some((domainId) =>
+      isGuardianConsentRequiredDomain(networkCfg, domainId),
+    );
+    if (!inGatedDomain) return null;
+
+    return u18.hasBirthData ? 'guardian' : 'dob';
+  } catch {
+    // fall through and land the user
+    return null;
+  }
+}
+
+/**
  * Landing page for the Keycloak redirect (`/auth/callback`).
  *
  * Exchanges the authorization code, then asks the API who the resulting token
@@ -124,6 +244,7 @@ export function OidcCallbackPage() {
         const { completeOidcLogin } = await import('@/lib/oidc-client');
         const { returnTo } = await completeOidcLogin(authCfg);
         await completeKeycloakLogin();
+        const landing = returnTo ?? '/';
 
         // Per-domain UI gate (G7), ported from `otp-page.tsx`: block a user who
         // already holds a profile in a domain this deployment does not serve —
@@ -148,122 +269,29 @@ export function OidcCallbackPage() {
           }
         }
 
-        // Write any consent accepted on the login screen. The accept endpoint is
-        // authenticated, so this is the first moment it can be persisted — the
-        // acceptance was parked across the Keycloak redirect.
-        //
-        // Deliberately after the session is established and deliberately
-        // non-fatal: the user is signed in either way, and a failed write means
-        // the gate re-prompts next login rather than stranding them here.
-        const pending = takePendingConsent();
-        if (pending) {
-          try {
-            // Bounded: a slow or hanging consent write must not hold the user on
-            // the spinner after they are already signed in.
-            await withTimeout(acceptConsent(pending), CONSENT_WRITE_TIMEOUT_MS);
-          } catch (consentErr) {
-            // eslint-disable-next-line no-console
-            console.error('could not persist accepted consent', consentErr);
-            toast.error(t('auth.toast_consent_persist_error'));
-          }
-        }
+        // Write any consent accepted on the login screen — deliberately after
+        // the session is established, since the accept endpoint is
+        // authenticated. The acceptance was parked across the Keycloak redirect.
+        await flushPendingConsent(t('auth.toast_consent_persist_error'));
 
-        // Durable write of the signup form's domain/age (G3). The server parked
-        // these in Redis with a 30-minute TTL and swallows failures, so this
-        // authenticated write is the backstop that stops a user landing with
-        // `domains = null` / `age = null` — the latter being fail-closed
-        // server-side for a guardian-gated domain. Idempotent with the stash.
-        const signupExtras = takePendingSignupExtras();
-        if (signupExtras) {
-          // Hand the domain to profile-form-page (one-shot) as well as
-          // persisting it, exactly as the OTP flow does.
-          setStoredSignupDomain(themeId, signupExtras.domain);
-          try {
-            await setUserDomains([signupExtras.domain]);
-          } catch {
-            // Best-effort — profile-form falls back to held items if unset.
-          }
-          if (signupExtras.age !== undefined) {
-            try {
-              await submitU18Dob({ network: themeId, age: signupExtras.age });
-            } catch {
-              toast.error(t('auth.toast_consent_persist_error'));
-            }
-          }
-        }
+        // Durable write of the signup form's domain/age (G3).
+        await flushPendingSignupExtras(themeId, t('auth.toast_consent_persist_error'));
 
-        // Authenticated U18 guardian gate (G4), ported from `otp-page.tsx`.
-        //
-        // The Keycloak chooser never collects an identifier, so the OTP flow's
-        // pre-login `u18Precheck` has no equivalent here — the DOB capture has to
-        // happen now instead, which is what `initialStep: 'dob'` is for when no
-        // birth data is stored yet.
-        //
-        // Runs BEFORE the adult terms/privacy gate below on purpose: a gated
-        // minor must not be shown the adult consent screens, because the guardian
-        // flow records their consent guardian-sourced instead (#453).
-        //
-        // Best-effort: a failed status lookup falls through to landing. The
-        // home-page gate is a backstop and the server-side go-live gate is the
-        // real fail-closed control.
-        try {
-          const u18 = await getU18Status(themeId);
-          /**
-           * `isMinor` is `age !== null && isMinor(age)` server-side, so it is
-           * FALSE for a user whose age is unknown — which is every existing user
-           * onboarded by an aggregator (bulk upload / form link never captures
-           * one). Gating on `isMinor` alone therefore skipped exactly the
-           * population the `initialStep: 'dob'` branch above was written for,
-           * leaving that branch unreachable: those users fell through to the
-           * landing page and were then caught by home-page's `u18BirthUnresolved`
-           * backstop, which renders the DOB step on top of the map view.
-           *
-           * `!hasBirthData` is the missing condition. With it, DOB is captured
-           * here — before any navigation — which is what the OTP flow achieved
-           * via its pre-login `u18Precheck`.
-           */
-          const needsBirthData = !u18.hasBirthData;
-          const needsGuardian = u18.isMinor && !u18.guardianVerified;
-
-          if (needsBirthData || needsGuardian) {
-            /**
-             * Only gate inside a guardian-gated domain. A provider has no U18
-             * flow at all (`guardian_consent_required: false`), so asking them
-             * for a date of birth is pure friction.
-             *
-             * Keyed on the domains the user ALREADY holds a profile in, matching
-             * how home-page derives `wardDomain` from `myItem.item_domain` — a
-             * user with no profile yet has no domain to judge, and is gated later
-             * at profile creation once they pick one.
-             */
-            const held = heldDomains ?? (await resolveHeldDomains(themeId));
-
-            // No profile yet → no domain to judge, so nothing to fetch either.
-            let inGatedDomain = false;
-            if (held.length > 0) {
-              const network = await fetchNetworkConfig(themeId);
-              inGatedDomain = held.some((domainId) =>
-                isGuardianConsentRequiredDomain(network, domainId),
-              );
-            }
-
-            if (inGatedDomain) {
-              setGuardianGate({
-                initialStep: u18.hasBirthData ? 'guardian' : 'dob',
-                returnTo: returnTo ?? '/',
-              });
-              return;
-            }
-          }
-        } catch {
-          // fall through and land the user
+        // Authenticated U18 guardian gate (G4). Runs BEFORE the adult
+        // terms/privacy gate below on purpose: a gated minor must not be shown
+        // the adult consent screens, because the guardian flow records their
+        // consent guardian-sourced instead (#453).
+        const guardianStep = await resolveGuardianGateStep(themeId, heldDomains);
+        if (guardianStep) {
+          setGuardianGate({ initialStep: guardianStep, returnTo: landing });
+          return;
         }
 
         // Login-time terms/privacy gate. Runs AFTER the parked signup consent is
         // flushed, so a fresh signup that just accepted has nothing outstanding.
         const outstanding = await resolveOutstandingConsent(themeId, brand);
         if (outstanding) {
-          setConsentGate({ ...outstanding, returnTo: returnTo ?? '/' });
+          setConsentGate({ ...outstanding, returnTo: landing });
           return;
         }
 
@@ -275,7 +303,7 @@ export function OidcCallbackPage() {
         // authenticated user on the spinner. The flag's only legitimate job is
         // avoiding a setState after unmount, which is why the catch below still
         // honours it.
-        navigate(returnTo ?? '/', { replace: true });
+        navigate(landing, { replace: true });
       } catch (err) {
         if (cancelled) return;
         setError(extractMessage(err) ?? t('auth.oidc_error_desc'));

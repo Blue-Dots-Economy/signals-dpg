@@ -47,6 +47,27 @@ function ageFromDateInput(value: string): number | undefined {
 }
 
 /**
+ * Same shape as `local@rest` with an inner dot in `rest` — the check the OTP
+ * screen applies. Scanned with string operations rather than the equivalent
+ * `/^[^\s@]+@[^\s@]+\.[^\s@]+$/`, whose backtracking is super-linear.
+ */
+function hasEmailShape(value: string): boolean {
+  if (/\s/.test(value)) return false;
+  const at = value.indexOf('@');
+  if (at < 1 || value.includes('@', at + 1)) return false;
+  const rest = value.slice(at + 1);
+  const dot = rest.indexOf('.', 1);
+  return dot !== -1 && dot < rest.length - 1;
+}
+
+/** Re-narrow to the discriminated pair the guardian flow's props take. */
+function toSignupIdentifier(identifier: AuthIdentifier): SignupIdentifier {
+  return (identifier.email
+    ? { email: identifier.email }
+    : { phoneNumber: identifier.phoneNumber }) as SignupIdentifier;
+}
+
+/**
  * The login screen for deployments where the API reports `authProvider:
  * 'keycloak'`.
  *
@@ -185,7 +206,7 @@ export function KeycloakLoginPanel() {
     }
     // Same shape check the OTP screen applies — the API takes `z.email()`, so a
     // malformed address is a 400 the user can't act on if it gets that far.
-    if (signupChannel === 'email' && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) {
+    if (signupChannel === 'email' && !hasEmailShape(email.trim())) {
       toast.error(t('auth.toast_invalid_email'), {
         description: t('auth.toast_invalid_email_desc'),
       });
@@ -351,6 +372,160 @@ export function KeycloakLoginPanel() {
 
   const busy = isRedirecting || isSigningUp;
 
+  const modeBody =
+    mode === 'choose' ? (
+      <div className="space-y-3">
+        <ChoiceCard
+          icon={<LockKeyhole className="size-5" />}
+          title={t('auth.choose_existing_title')}
+          description={t('auth.choose_existing_desc')}
+          emphasised
+          disabled={busy}
+          busy={isRedirecting}
+          onClick={() => {
+            void handleSignIn();
+          }}
+        />
+
+        {canSignup && (
+          <ChoiceCard
+            icon={<UserPlus className="size-5" />}
+            title={t('auth.choose_new_title')}
+            description={t('auth.choose_new_desc')}
+            disabled={busy}
+            onClick={() => {
+              setError(null);
+              setMode('signup');
+            }}
+          />
+        )}
+
+        {!canSignup && (
+          <p className="pt-1 text-sm text-muted-foreground">
+            {t('auth.signup_disabled_message')}
+          </p>
+        )}
+      </div>
+    ) : (
+      <div className="space-y-4">
+        {/* Phone / Email pill toggle — the account can be created against
+            either identifier, so it is only hidden when the instance runs a
+            single channel and there is nothing to choose. Mirrors the OTP
+            screen's toggle. */}
+        {channels.length > 1 && (
+          <div className="flex rounded-full border border-border bg-muted p-1 text-sm">
+            {channels.map((c) => (
+              <button
+                key={c}
+                type="button"
+                disabled={busy}
+                onClick={() => {
+                  setSignupChannel(c);
+                  setError(null);
+                }}
+                className={[
+                  'flex-1 rounded-full py-1.5 font-medium transition-colors capitalize',
+                  signupChannel === c
+                    ? 'bg-background text-foreground shadow-sm'
+                    : 'text-muted-foreground hover:text-foreground',
+                ].join(' ')}
+              >
+                {c}
+              </button>
+            ))}
+          </div>
+        )}
+
+        <div className="space-y-1.5">
+          <Label htmlFor="signup-name">{t('auth.label_name')}</Label>
+          <Input
+            id="signup-name"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            placeholder={t('auth.placeholder_name')}
+            autoComplete="name"
+          />
+        </div>
+
+        {signupChannel === 'phone' ? (
+          <div className="space-y-1.5">
+            <Label htmlFor="signup-phone">{t('auth.label_mobile')}</Label>
+            <PhoneInput id="signup-phone" value={phoneNumber} onChange={setPhoneNumber} />
+          </div>
+        ) : (
+          <div className="space-y-1.5">
+            <Label htmlFor="signup-email">{t('auth.label_email')}</Label>
+            <Input
+              id="signup-email"
+              type="email"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              placeholder={t('auth.placeholder_email')}
+              autoComplete="email"
+            />
+          </div>
+        )}
+
+        {domainOptions.length > 0 && (
+          <div className="space-y-1.5">
+            <Label className="text-sm font-medium">{t('auth.label_domain')}</Label>
+            {/* Segmented toggle, matching the OTP signup form's domain picker. */}
+            <div className="flex flex-wrap gap-1 rounded-full border border-border bg-muted p-1 text-sm">
+              {domainOptions.map((d) => (
+                <button
+                  key={d.id}
+                  type="button"
+                  onClick={() => setDomain(d.id)}
+                  disabled={busy}
+                  className={[
+                    'flex-1 rounded-full py-1.5 px-3 font-medium transition-colors capitalize whitespace-nowrap',
+                    domain === d.id
+                      ? 'bg-background text-foreground shadow-sm'
+                      : 'text-muted-foreground hover:text-foreground',
+                  ].join(' ')}
+                >
+                  {d.id.replaceAll('_', ' ')}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Only a guardian-gated domain (e.g. seeker) needs an age; a provider
+            is never routed through the U18 flow, so the field is hidden. */}
+        {selectedDomainIsGated && (
+          <div className="space-y-1.5">
+            <Label htmlFor="signup-dob">{t('auth.label_dob')}</Label>
+            <Input
+              id="signup-dob"
+              type="date"
+              value={dateOfBirth}
+              max={new Date().toISOString().slice(0, 10)}
+              onChange={(e) => setDateOfBirth(e.target.value)}
+            />
+            <p className="text-xs text-muted-foreground">{t('auth.signup_dob_hint')}</p>
+          </div>
+        )}
+
+        <Button
+          className="w-full"
+          disabled={busy}
+          onClick={() => {
+            void handleSignup();
+          }}
+        >
+          {busy ? (
+            <>
+              <Loader2 className="size-4 animate-spin" />
+              {isSigningUp ? t('auth.signup_submitting') : t('auth.oidc_redirecting')}
+            </>
+          ) : (
+            t('auth.cta_create_account')
+          )}
+        </Button>
+      </div>
+    );
+
   return (
     <>
       {consentGate && (
@@ -398,167 +573,14 @@ export function KeycloakLoginPanel() {
           network={themeId}
           domain={guardianGate.domain}
           brand={brand !== 'standard' ? brand : null}
-          identifier={
-            (guardianGate.identifier.email
-              ? { email: guardianGate.identifier.email }
-              : { phoneNumber: guardianGate.identifier.phoneNumber }) as SignupIdentifier
-          }
+          identifier={toSignupIdentifier(guardianGate.identifier)}
           age={guardianGate.age}
           onComplete={() => {
             void handleGuardianComplete();
           }}
         />
-      ) : mode === 'choose' ? (
-        <div className="space-y-3">
-          <ChoiceCard
-            icon={<LockKeyhole className="size-5" />}
-            title={t('auth.choose_existing_title')}
-            description={t('auth.choose_existing_desc')}
-            emphasised
-            disabled={busy}
-            busy={isRedirecting}
-            onClick={() => {
-              void handleSignIn();
-            }}
-          />
-
-          {canSignup && (
-            <ChoiceCard
-              icon={<UserPlus className="size-5" />}
-              title={t('auth.choose_new_title')}
-              description={t('auth.choose_new_desc')}
-              disabled={busy}
-              onClick={() => {
-                setError(null);
-                setMode('signup');
-              }}
-            />
-          )}
-
-          {!canSignup && (
-            <p className="pt-1 text-sm text-muted-foreground">
-              {t('auth.signup_disabled_message')}
-            </p>
-          )}
-        </div>
       ) : (
-        <div className="space-y-4">
-          {/* Phone / Email pill toggle — the account can be created against
-              either identifier, so it is only hidden when the instance runs a
-              single channel and there is nothing to choose. Mirrors the OTP
-              screen's toggle. */}
-          {channels.length > 1 && (
-            <div className="flex rounded-full border border-border bg-muted p-1 text-sm">
-              {channels.map((c) => (
-                <button
-                  key={c}
-                  type="button"
-                  disabled={busy}
-                  onClick={() => {
-                    setSignupChannel(c);
-                    setError(null);
-                  }}
-                  className={[
-                    'flex-1 rounded-full py-1.5 font-medium transition-colors capitalize',
-                    signupChannel === c
-                      ? 'bg-background text-foreground shadow-sm'
-                      : 'text-muted-foreground hover:text-foreground',
-                  ].join(' ')}
-                >
-                  {c}
-                </button>
-              ))}
-            </div>
-          )}
-
-          <div className="space-y-1.5">
-            <Label htmlFor="signup-name">{t('auth.label_name')}</Label>
-            <Input
-              id="signup-name"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              placeholder={t('auth.placeholder_name')}
-              autoComplete="name"
-            />
-          </div>
-
-          {signupChannel === 'phone' ? (
-            <div className="space-y-1.5">
-              <Label htmlFor="signup-phone">{t('auth.label_mobile')}</Label>
-              <PhoneInput id="signup-phone" value={phoneNumber} onChange={setPhoneNumber} />
-            </div>
-          ) : (
-            <div className="space-y-1.5">
-              <Label htmlFor="signup-email">{t('auth.label_email')}</Label>
-              <Input
-                id="signup-email"
-                type="email"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                placeholder={t('auth.placeholder_email')}
-                autoComplete="email"
-              />
-            </div>
-          )}
-
-          {domainOptions.length > 0 && (
-            <div className="space-y-1.5">
-              <Label className="text-sm font-medium">{t('auth.label_domain')}</Label>
-              {/* Segmented toggle, matching the OTP signup form's domain picker. */}
-              <div className="flex flex-wrap gap-1 rounded-full border border-border bg-muted p-1 text-sm">
-                {domainOptions.map((d) => (
-                  <button
-                    key={d.id}
-                    type="button"
-                    onClick={() => setDomain(d.id)}
-                    disabled={busy}
-                    className={[
-                      'flex-1 rounded-full py-1.5 px-3 font-medium transition-colors capitalize whitespace-nowrap',
-                      domain === d.id
-                        ? 'bg-background text-foreground shadow-sm'
-                        : 'text-muted-foreground hover:text-foreground',
-                    ].join(' ')}
-                  >
-                    {d.id.replace(/_/g, ' ')}
-                  </button>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {/* Only a guardian-gated domain (e.g. seeker) needs an age; a provider
-              is never routed through the U18 flow, so the field is hidden. */}
-          {selectedDomainIsGated && (
-            <div className="space-y-1.5">
-              <Label htmlFor="signup-dob">{t('auth.label_dob')}</Label>
-              <Input
-                id="signup-dob"
-                type="date"
-                value={dateOfBirth}
-                max={new Date().toISOString().slice(0, 10)}
-                onChange={(e) => setDateOfBirth(e.target.value)}
-              />
-              <p className="text-xs text-muted-foreground">{t('auth.signup_dob_hint')}</p>
-            </div>
-          )}
-
-          <Button
-            className="w-full"
-            disabled={busy}
-            onClick={() => {
-              void handleSignup();
-            }}
-          >
-            {busy ? (
-              <>
-                <Loader2 className="size-4 animate-spin" />
-                {isSigningUp ? t('auth.signup_submitting') : t('auth.oidc_redirecting')}
-              </>
-            ) : (
-              t('auth.cta_create_account')
-            )}
-          </Button>
-        </div>
+        modeBody
       )}
       </AuthShell>
     </>
@@ -577,7 +599,7 @@ function ChoiceCard({
   disabled,
   busy = false,
   onClick,
-}: {
+}: Readonly<{
   icon: React.ReactNode;
   title: string;
   description: string;
@@ -585,7 +607,7 @@ function ChoiceCard({
   disabled?: boolean;
   busy?: boolean;
   onClick: () => void;
-}) {
+}>) {
   return (
     <button
       type="button"

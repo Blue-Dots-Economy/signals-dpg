@@ -668,24 +668,20 @@ describe('org membership (the relocated joinOrg branch)', () => {
   // `ensureOrgMembership` silently never ran. A test asserting the old name
   // passed while the feature was dead, which is what these replace.
 
-  it('ignores a wildcard grant rather than joining every org', async () => {
-    // `['*']` is the platform service grant: "may act for any org". Treating it
-    // as membership would join the user to whatever org happened to be found.
-    queueSelect(userTable, [existingUser()]);
-
-    const result = await provisionUserFromClaims(claims({ signals_acting_orgs: '*' }), makeLog());
-
-    expect(result.ok).toBe(true);
-    expect(insertsInto(memberTable)).toHaveLength(0);
-  });
-
-  it('ignores a multi-org grant, which says what a caller may act for', async () => {
-    // Two orgs is an authorisation grant, not a statement of membership; there
-    // is no principled way to pick one.
+  // Only a single concrete org is membership. A wildcard (`*`) is the platform
+  // service grant ("may act for any org") — treating it as membership would
+  // join the user to whatever org happened to be found. A multi-org grant is
+  // an authorisation grant, not a statement of membership; there is no
+  // principled way to pick one. And an empty grant simply names nothing.
+  it.each([
+    { kind: 'a wildcard grant', grant: '*' },
+    { kind: 'a multi-org grant', grant: 'org_1,org_2' },
+    { kind: 'an empty grant', grant: '' },
+  ])('ignores $kind ($grant) rather than treating it as membership', async ({ grant }) => {
     queueSelect(userTable, [existingUser()]);
 
     const result = await provisionUserFromClaims(
-      claims({ signals_acting_orgs: 'org_1,org_2' }),
+      claims({ signals_acting_orgs: grant }),
       makeLog()
     );
 
@@ -706,14 +702,6 @@ describe('org membership (the relocated joinOrg branch)', () => {
     expect(insert.values.organizationId).toBe('org_1');
   });
 
-  it('ignores an empty grant', async () => {
-    queueSelect(userTable, [existingUser()]);
-
-    const result = await provisionUserFromClaims(claims({ signals_acting_orgs: '' }), makeLog());
-
-    expect(result.ok).toBe(true);
-    expect(insertsInto(memberTable)).toHaveLength(0);
-  });
 });
 
 describe('database failures', () => {
