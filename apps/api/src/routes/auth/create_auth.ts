@@ -59,8 +59,14 @@ export const authInstance = createAuth({
               ...args.variables,
               // App-side context the auth package can't know: the platform
               // link and the "Team <name>" sign-off used by the copy file.
-              siteUrl: notification.FRONTEND_BASE_URL ?? '',
-              teamName: instance.INSTANCE_NAME ?? 'DPG',
+              // siteUrl is injected ONLY when configured — an empty value
+              // would render an invisible dead link, while omitting it leaves
+              // the literal {{siteUrl}} visible, which surfaces the missing
+              // FRONTEND_BASE_URL instead of hiding it.
+              ...(notification.FRONTEND_BASE_URL
+                ? { siteUrl: notification.FRONTEND_BASE_URL }
+                : {}),
+              teamName: instance.INSTANCE_NAME || 'DPG',
             },
           });
         },

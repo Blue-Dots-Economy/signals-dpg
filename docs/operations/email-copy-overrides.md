@@ -60,6 +60,18 @@ network, network wins over the instance override, the instance override wins
 over the bundled default; an unknown or absent network/brand simply resolves
 to the instance-wide (or bundled) copy.
 
+> **Brand layer status:** no email send resolves a *brand* yet — nothing in
+> the system can tell at send time which brand a recipient belongs to, so the
+> dispatcher's `brand` parameter has no caller. A brand-level
+> `messages.properties` is discovered, validated, and logged at boot ("N keys
+> overridden"), but it does **not** affect any email until brand resolution is
+> wired. Today the network-level file is the effective override surface;
+> brand files are forward-provisioning only.
+
+An empty value (`some.key=` with nothing after the `=`) never blanks an
+email: it is warned about and ignored, falling back to the layer below, the
+same as a missing key.
+
 Two resolution nuances worth knowing: action/retire emails resolve copy under
 the **counterparty item's network** (`plan.counterpartyNetwork` — the same
 network key that also drives the CTA button colour), which is not necessarily

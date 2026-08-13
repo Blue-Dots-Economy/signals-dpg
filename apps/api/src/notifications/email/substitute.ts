@@ -10,7 +10,11 @@
  */
 export type TokenTypes = Record<string, 'text' | 'html'>;
 
-const TOKEN_RE = /\{\{([A-Za-z][A-Za-z0-9_]*)\}\}/g;
+/**
+ * The one `{{token}}` grammar, shared by the runtime substituter, the boot
+ * placeholder lint (messages.ts), and tests — so they can never drift apart.
+ */
+export const TOKEN_RE = /\{\{([A-Za-z][A-Za-z0-9_]*)\}\}/g;
 
 export function escapeHtml(value: string): string {
   return value

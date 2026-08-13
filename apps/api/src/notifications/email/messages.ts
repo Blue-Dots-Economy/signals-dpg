@@ -6,6 +6,7 @@ import type { LoadedEmailMessagesFile } from '@dpg/config';
 
 import { EMAIL_CASE_IDS, getEmailCase, requiredMessageKeys } from './email_cases';
 import { parseProperties } from './parse_properties';
+import { TOKEN_RE } from './substitute';
 
 /**
  * Boot-time loader for the email messages layered index (#529). Bundled
@@ -25,8 +26,6 @@ export interface EmailMessagesIndex {
   /** brand, then network, then instance-base fallback; unknown/null args fall through. */
   forContext(network?: string | null, brand?: string | null): EmailMessages;
 }
-
-const TOKEN_RE = /\{\{([A-Za-z][A-Za-z0-9_]*)\}\}/g;
 
 /** Warn when a copy value references a placeholder its case never provides. */
 function lintPlaceholders(
@@ -82,6 +81,15 @@ function mergeLayer(
   for (const [key, value] of override.entries) {
     if (!known.has(key)) {
       warn(`email messages ${label}: unknown key "${key}" — ignored (typo?)`);
+      continue;
+    }
+    // An empty value (e.g. an accidental line-wrap leaving `key=`) would send
+    // an email with a blank subject/body — fall back instead, per the
+    // "a bad override can never silently break email" contract.
+    if (value === '') {
+      warn(
+        `email messages ${label}: empty value for "${key}" — ignored (falls back to the previous layer)`,
+      );
       continue;
     }
     merged.set(key, value);
@@ -209,6 +217,15 @@ export function getEmailMessages(): Promise<EmailMessagesIndex> {
       ...new Set(apiConfig.served_domains.map((binding) => binding.network)),
     ];
     let layers: LoadedEmailMessagesFile[] = [];
+    if (apiConfig.network_config_source !== 'local') {
+      // Make the skip loud: in remote network-config mode the per-network/
+      // brand messages.properties files are NOT discovered (remote layering
+      // is a follow-up, mirroring the consent loader) — without this line an
+      // operator's network copy would just silently disappear.
+      console.warn(
+        'email messages: network/brand copy files are not loaded when NETWORK_CONFIG_SOURCE is not "local" — EMAIL_MESSAGES_PATH is the only override surface on this instance',
+      );
+    }
     try {
       layers = await loadEmailMessagesFiles({
         source: apiConfig.network_config_source,

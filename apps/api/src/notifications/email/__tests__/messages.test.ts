@@ -97,6 +97,20 @@ describe('loadEmailMessagesIndex (base layer: defaults + instance override)', ()
     expect(warn).toHaveBeenCalledWith(expect.stringContaining('line 1'));
   });
 
+  it('ignores empty override values with a warning (never blanks an email)', () => {
+    const warn = vi.fn();
+    const index = loadEmailMessagesIndex({
+      defaultsText: fullDefaults(),
+      instanceOverrideText: 'welcome.subject=\nwelcome.body=Custom body',
+      warn,
+    });
+    expect(index.forContext().get('welcome.subject')).toBe('default welcome.subject');
+    expect(index.forContext().get('welcome.body')).toBe('Custom body');
+    expect(warn).toHaveBeenCalledWith(
+      expect.stringContaining('empty value for "welcome.subject"'),
+    );
+  });
+
   it('get() throws for unknown keys', () => {
     const index = loadEmailMessagesIndex({ defaultsText: fullDefaults() });
     expect(() => index.forContext().get('nope.nope')).toThrow(
@@ -273,11 +287,23 @@ describe('getEmailMessages (singleton + EMAIL_MESSAGES_PATH + network/brand wiri
 
   it('serves bundled defaults and warns nothing when no override path or layers are set', async () => {
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    mockApiConfig.network_config_source = 'local';
 
     const index = await getEmailMessages();
 
     expect(index.forContext().get('welcome.subject')).toBe('Welcome!');
     expect(warnSpy).not.toHaveBeenCalled();
+  });
+
+  it('warns that network/brand copy files are skipped in remote network-config mode', async () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    mockApiConfig.network_config_source = 'remote';
+
+    await getEmailMessages();
+
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringContaining('network/brand copy files are not loaded'),
+    );
   });
 
   it('warns (with the path) and falls back to bundled defaults when the override file is unreadable', async () => {

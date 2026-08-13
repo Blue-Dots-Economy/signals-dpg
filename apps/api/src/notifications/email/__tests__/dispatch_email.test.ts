@@ -123,7 +123,6 @@ describe('dispatchEmail', () => {
       caseId: 'retire.cancel',
       to: 'u@x.example',
       fromName: 'Blue Dot',
-      brandName: 'Blue Dot',
       network: 'blue_dot',
       ctaUrl: 'https://ui.example/auth/login',
     });

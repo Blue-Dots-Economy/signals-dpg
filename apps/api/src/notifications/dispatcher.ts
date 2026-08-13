@@ -68,7 +68,6 @@ export function createDirectDispatcher(deps: DispatcherDeps): DirectDispatcher {
       ),
       to: email,
       fromName: deps.brand.brandName,
-      brandName: deps.brand.brandName,
       network: plan.counterpartyNetwork,
       ctaUrl: deps.brand.ctaUrl,
       dedupeId: `${plan.actionId}:${plan.updateCount}:${plan.shape}`,

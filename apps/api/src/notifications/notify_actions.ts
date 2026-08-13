@@ -64,7 +64,7 @@ export function resolveNotifierConfig(): NotifierConfig | null {
       fromEmail,
       defaultReplyTo: notification.NOTIFICATION_REPLY_TO ?? fromEmail,
       defaultNetwork: getInstanceDefaultNetwork(),
-      teamName: instance.INSTANCE_NAME ?? 'DPG',
+      teamName: instance.INSTANCE_NAME || 'DPG',
       log: (message, meta) => console.warn(message, meta ?? {}),
     }),
     ctaUrl: buildCtaUrl(frontendBaseUrl),

@@ -61,7 +61,6 @@ describe('DirectDispatcher', () => {
       caseId: 'action.connect.provider.inbound_request',
       to: 'user-target@example.com',
       fromName: 'Blue Dot',
-      brandName: 'Blue Dot',
       dedupeId: 'action-1:0:INBOUND_REQUEST',
     });
     expect(inbound?.variables?.name).toBe('the service provider');

@@ -48,7 +48,6 @@ export async function dispatchRetireCancelNotifications(
         caseId: 'retire.cancel',
         to: email,
         fromName: brandName,
-        brandName,
         network: cp.network,
         ctaUrl: config.ctaUrl,
         dedupeId: `retire_cancel:${cp.actionId}:${cp.ownerUserId}`,

@@ -50,8 +50,6 @@ export interface DispatchEmailArgs {
    * `network`).
    */
   brand?: string;
-  /** Sign-off name in the cta shell; defaults to fromName. */
-  brandName?: string;
   /** Per-call log override (route handlers pass request.log-backed fns). */
   log?: (message: string, meta?: Record<string, unknown>) => void;
 }
@@ -76,8 +74,8 @@ export interface EmailSenderDeps {
   /**
    * "Team <name>" sign-off in the cta shell (the operating org, e.g.
    * INSTANCE_NAME "EkStep"/"ALIMCO" — per the email content sheet), NOT the
-   * network display name. Falls back to `args.brandName ?? args.fromName`
-   * when unset so tests/legacy wiring keep their old sign-off.
+   * network display name. Falls back to `args.fromName` when unset so
+   * sender-less test wiring keeps a sensible sign-off.
    */
   teamName?: string;
   log: (message: string, meta?: Record<string, unknown>) => void;
@@ -119,7 +117,7 @@ export function createEmailSender(deps: EmailSenderDeps): EmailSender {
               def.tokens,
             ),
             ctaColor: resolveBrandColor(args.network),
-            brandName: deps.teamName ?? args.brandName ?? args.fromName,
+            brandName: deps.teamName ?? args.fromName,
           })
         : renderPlainShell(bodyHtml);
 
@@ -194,7 +192,7 @@ export function getDefaultEmailSender(): EmailSender | null {
     fromEmail,
     defaultReplyTo: notification.NOTIFICATION_REPLY_TO ?? fromEmail,
     defaultNetwork: getInstanceDefaultNetwork(),
-    teamName: instance.INSTANCE_NAME ?? 'DPG',
+    teamName: instance.INSTANCE_NAME || 'DPG',
     log: (message, meta) => console.warn(message, meta ?? {}),
   });
   return defaultSender;
