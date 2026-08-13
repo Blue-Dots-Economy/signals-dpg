@@ -186,6 +186,11 @@ async function renderLogin() {
   const { LoginPage } = await import('../login-page');
   renderWithProviders(<LoginPage />);
   await waitFor(() => expect(mocks.fetchAuthConfig).toHaveBeenCalled());
+  // The LoginPage wrapper resolves the instance's auth provider before either
+  // login screen mounts (keycloak split), showing a spinner meanwhile. Wait
+  // for the OTP identifier step to actually be on screen; the generous timeout
+  // covers the hook's one retry (~1s backoff) when a test rejects the config.
+  await screen.findByRole('button', { name: /^continue$/i }, { timeout: 5000 });
 }
 
 async function renderOtp() {
@@ -206,6 +211,10 @@ beforeEach(() => {
   mocks.locationState = null;
   mocks.countdown = 60;
   mocks.getServedScope.mockReturnValue(null);
+  // Default auth config: null (not undefined — React Query rejects undefined
+  // data) so useAuthConfig falls back to gated + both channels, matching the
+  // old direct-fetch fail-safe. Tests that care override with a real value.
+  mocks.fetchAuthConfig.mockResolvedValue(null);
   mocks.requestOtp.mockResolvedValue({ ok: true, user: false });
   mocks.fetchNetworkConfig.mockResolvedValue({ id: 'blue_dot', domains: UNGATED_DOMAINS });
   // Default: consent config exists and both current versions are already

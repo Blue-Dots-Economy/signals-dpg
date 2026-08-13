@@ -31,6 +31,14 @@ export function useAuthConfig(): UseAuthConfigResult {
     queryFn: fetchAuthConfig,
     staleTime: Infinity,
     refetchOnWindowFocus: false,
+    // No retry when another consumer mounts an ERRORED query (staleTime only
+    // protects a query that has data). Without this, the LoginPage wrapper and
+    // the login screen it mounts flap forever on a config failure: the error
+    // mounts the screen, the screen's own useAuthConfig retries on mount and
+    // flips the query back to pending, the wrapper swaps back to the spinner
+    // and unmounts the screen, and the cycle repeats. One settled outcome per
+    // session, success or failure, is the contract here.
+    retryOnMount: false,
     // One retry: if the API is briefly unreachable we fall back to the OTP
     // screens, which is the safe default — never strand the user on a Keycloak
     // redirect the server never asked for.

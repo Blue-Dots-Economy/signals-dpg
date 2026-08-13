@@ -22,6 +22,15 @@ vi.mock('@/lib/auth-api', () => ({
   checkUser: vi.fn(),
   requestOtp: vi.fn(),
   verifyOtp: vi.fn(),
+  fetchMe: vi.fn(),
+  // The AuthProvider resolves the instance's auth provider before restoring a
+  // session (keycloak split): a resolved betterauth config keeps the OTP-path
+  // lifecycle below identical to before. Set here (not per-test) because
+  // clearAllMocks keeps implementations, only wiping calls.
+  fetchAuthConfig: vi.fn().mockResolvedValue({
+    selfSignupAllowed: false,
+    loginChannels: ['phone', 'email'],
+  }),
 }));
 
 import { submitSupport } from '@/lib/support-api';
@@ -188,7 +197,9 @@ describe('AuthProvider session lifecycle', () => {
       release(session());
     });
 
-    expect(screen.getByText('ready')).toBeInTheDocument();
+    // findBy: the session restore now runs behind the auth-config query
+    // (keycloak split), so the release lands one scheduler tick later.
+    expect(await screen.findByText('ready')).toBeInTheDocument();
     expect(screen.getByTestId('who')).toHaveTextContent('Asha K');
   });
 
