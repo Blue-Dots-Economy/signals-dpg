@@ -64,7 +64,21 @@ caller:
   `getDefaultEmailSender().dispatchEmail({ caseId: 'support.request', ... })`
   directly (no `dispatcher.ts`/`action_copy.ts` in between) and returns
   `503 SUPPORT_NOT_CONFIGURED` when the recipient/fromEmail/sender is unset,
-  `502 SUPPORT_SEND_FAILED` if the send throws (the case is critical).
+  `502 SUPPORT_SEND_FAILED` if the send throws (the case is critical),
+  `429 SUPPORT_RATE_LIMITED` past 5 submissions per user per hour (the counter
+  **fails open** — a Redis outage must not silence a complaint), and one of
+  `ATTACHMENT_COUNT_EXCEEDED` / `ATTACHMENT_TOO_LARGE` /
+  `ATTACHMENT_TYPE_NOT_ALLOWED` (400) from `src/support/attachments.ts` (#551).
+  Two things there are easy to trip over: the route sets its **own**
+  `bodyLimit`, derived from `SUPPORT_ATTACHMENT_MAX_TOTAL_BYTES` rather than
+  hardcoded (base64 inflates by 4/3, so a fixed limit would turn a raised cap
+  into a silent 413) — every other route keeps Fastify's 1 MB default; and the
+  MIME allowlist is a **code constant**, not env, deliberately. Attachments ride
+  in `dispatchEmail`'s `attachments` arg, never in `variables` — `variables` are
+  copy tokens that get substituted and HTML-escaped. `GET /api/v1/support/config`
+  serves `{enabled, maxTotalBytes, maxFiles, allowedTypes}` so the UI validates
+  against the server's numbers instead of its own copy; its `enabled` mirrors the
+  submit route's 503 condition exactly, and the two must be changed together.
 - Guardian OTP and login OTP emails are likewise thin callers straight into
   `dispatchEmail` — see `docs/operations/guardian-otp-templates.md`.
 

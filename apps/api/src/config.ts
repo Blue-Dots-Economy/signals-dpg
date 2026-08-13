@@ -170,6 +170,10 @@ export const supportConfig = {
   // available synchronously in config (ServedDomainBinding carries only
   // network/domain/key), so we use the instance name — no new env (#283).
   teamName: instance.INSTANCE_NAME,
+  // Attachment budget (#551). Also served to the UI so the form's own
+  // validation matches the server's.
+  attachmentMaxTotalBytes: notification.SUPPORT_ATTACHMENT_MAX_TOTAL_BYTES,
+  attachmentMaxFiles: notification.SUPPORT_ATTACHMENT_MAX_FILES,
 };
 
 export const geocodingConfig = {

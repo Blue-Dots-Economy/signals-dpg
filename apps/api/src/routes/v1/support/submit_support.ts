@@ -12,6 +12,11 @@ import {
   generateSupportReference,
   TYPE_LABELS,
 } from '@/support/build_support_email';
+import {
+  supportBodyLimitBytes,
+  validateSupportAttachments,
+} from '@/support/attachments';
+import { incrWithinWindow } from '@/utils/rate_window';
 
 const SubmitSupportBody = z.object({
   name: z.string().trim().min(1).max(200),
@@ -20,15 +25,37 @@ const SubmitSupportBody = z.object({
   type: z.enum(['complaint', 'support_request']),
   details: z.string().trim().min(1).max(5000),
   consent: z.literal(true),
+  // Count/size/type limits are enforced in the handler by
+  // validateSupportAttachments so each rejection gets its own error code and a
+  // message naming the offending file — a zod bound could only produce a
+  // generic 400 (#551).
+  attachments: z
+    .array(
+      z.object({
+        filename: z.string().min(1).max(255),
+        contentType: z.string().min(1).max(127),
+        /** Base64, no `data:` prefix. */
+        data: z.string().min(1),
+      }),
+    )
+    .optional(),
 });
 
 type Body = z.infer<typeof SubmitSupportBody>;
+
+/** Submissions allowed per user per window — the endpoint accepts multi-MB uploads. */
+const SUPPORT_MAX_PER_WINDOW = 5;
+const SUPPORT_WINDOW_SEC = 3600;
 
 export const submit_support: FastifyPluginAsyncZod = async (fastify) => {
   fastify.route({
     url: '/',
     method: 'POST',
     preHandler: auth_middleware_if_enabled,
+    // Fastify's 1 MB default applies per route; every other route keeps it.
+    // Derived from the attachment budget so raising
+    // SUPPORT_ATTACHMENT_MAX_TOTAL_BYTES cannot turn into a silent 413.
+    bodyLimit: supportBodyLimitBytes(supportConfig.attachmentMaxTotalBytes),
     schema: {
       tags: ['support'],
       body: SubmitSupportBody,
@@ -48,6 +75,15 @@ export const submit_support_handler = async (
 
   const { name, email, phone, type, details } = request.body;
 
+  const attachmentCheck = validateSupportAttachments(request.body.attachments, {
+    maxFiles: supportConfig.attachmentMaxFiles,
+    maxTotalBytes: supportConfig.attachmentMaxTotalBytes,
+  });
+  if (!attachmentCheck.ok) {
+    return reply.code(400).send({ error: attachmentCheck.error, message: attachmentCheck.message });
+  }
+  const attachments = attachmentCheck.attachments;
+
   // At least one contact channel is required so the team can respond. The
   // schema-level failures (missing consent, empty details) are 400'd by the
   // type provider; this rule returns the route's own {error,message} shape.
@@ -66,6 +102,23 @@ export const submit_support_handler = async (
       error: 'SUPPORT_NOT_CONFIGURED',
       message: 'Support is not configured on this instance.',
     });
+  }
+
+  // Per-user cap: the endpoint accepts multi-MB uploads that sit in the
+  // notification-service queue until delivered. Checked after the 503 so an
+  // unconfigured instance doesn't burn a user's quota. Fails OPEN on a Redis
+  // error — a rate-limit backend outage must not silence someone's complaint —
+  // which is why this is a try/catch rather than a bare await.
+  try {
+    const submissions = await incrWithinWindow(`support:rl:${userId}`, SUPPORT_WINDOW_SEC);
+    if (submissions > SUPPORT_MAX_PER_WINDOW) {
+      return reply.code(429).send({
+        error: 'SUPPORT_RATE_LIMITED',
+        message: 'Too many support submissions; please try again later.',
+      });
+    }
+  } catch (err) {
+    request.log.warn({ err }, 'support rate-limit check unavailable; allowing submission');
   }
 
   // The submitted contact details are the source of truth for the email; the
@@ -94,6 +147,15 @@ export const submit_support_handler = async (
       // two submissions to the same inbox within its dedupe TTL collapse and
       // the second is silently dropped. The unique reference closes that.
       dedupeId: reference,
+      ...(attachments.length
+        ? {
+            attachments: attachments.map(({ filename, contentType, data }) => ({
+              filename,
+              contentType,
+              data,
+            })),
+          }
+        : {}),
       variables: {
         reference,
         type: TYPE_LABELS[type],
@@ -107,6 +169,7 @@ export const submit_support_handler = async (
           email: submittedEmail ?? null,
           phone: submittedPhone ?? null,
           submittedAt: new Date().toISOString(),
+          attachments: attachments.map(({ filename, bytes }) => ({ filename, bytes })),
         }),
       },
       log: (message, meta) => request.log.warn(meta ?? {}, message),

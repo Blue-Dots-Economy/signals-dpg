@@ -2,6 +2,8 @@ import { randomBytes } from 'node:crypto';
 
 import { escapeHtml } from '@/notifications/email/substitute';
 
+import { formatBytes } from './attachments';
+
 export type SupportType = 'complaint' | 'support_request';
 
 export const TYPE_LABELS: Record<SupportType, string> = {
@@ -43,6 +45,8 @@ export function buildSupportDetailsTable(input: {
   email: string | null;
   phone: string | null;
   submittedAt: string;
+  /** Accepted attachments, for the "Attachments" row (#551). */
+  attachments?: Array<{ filename: string; bytes: number }>;
 }): string {
   const rows: Array<[string, string]> = [
     ['Reference', input.reference],
@@ -52,6 +56,15 @@ export function buildSupportDetailsTable(input: {
     ['Submitted at', input.submittedAt],
     ['Consent to share contact', 'Yes'],
   ];
+  // Listed in the body as well as carried as MIME parts, so a client that
+  // collapses or hides attachments still tells the agent what was sent — and an
+  // attachment lost in transit is visible as a discrepancy rather than silence.
+  if (input.attachments?.length) {
+    rows.push([
+      `Attachments (${input.attachments.length})`,
+      input.attachments.map((a) => `${a.filename} (${formatBytes(a.bytes)})`).join(', '),
+    ]);
+  }
   const detailRows = rows
     .map(
       ([label, value]) =>
