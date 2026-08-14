@@ -153,12 +153,14 @@ export function KeycloakLoginPanel() {
   }, [config, signupChannel]);
 
   /**
-   * Bumped to re-run the domain fetch below. A failed fetch leaves
-   * `networkDomains` empty, and since a signup now requires a domain that would
-   * otherwise be a dead end — the effect's other deps never change while the
-   * user sits on the form, so nothing would retry short of a page reload.
-   * Submitting again retries instead.
+   * Whether the domain list is known. Tracked explicitly rather than inferred
+   * from `networkDomains.length`, because an empty list has three very
+   * different meanings — still loading, the fetch failed, or it loaded and this
+   * network genuinely has no domain this portal can serve — and only the middle
+   * one is worth retrying.
    */
+  const [domainsLoad, setDomainsLoad] = useState<'loading' | 'loaded' | 'error'>('loading');
+  /** Bumped to re-run the fetch after a failure; see `handleSignup`. */
   const [domainsReloadNonce, setDomainsReloadNonce] = useState(0);
 
   // Domain options come from the served network's own schema — not user input —
@@ -167,12 +169,21 @@ export function KeycloakLoginPanel() {
   useEffect(() => {
     if (mode !== 'signup') return;
     let cancelled = false;
+    setDomainsLoad('loading');
     fetchNetworkConfig(themeId)
       .then((cfg) => {
-        if (!cancelled) setNetworkDomains(cfg.domains ?? []);
+        if (cancelled) return;
+        setNetworkDomains(cfg.domains ?? []);
+        setDomainsLoad('loaded');
       })
       .catch(() => {
-        if (!cancelled) setNetworkDomains([]);
+        // Deliberately does NOT clear `networkDomains`. `guardian_consent_required`
+        // is read out of this list, so an empty list reads as "this domain is not
+        // gated" — and because leaving and re-entering signup mode re-runs this
+        // effect while `domain` survives, a single failed refetch would otherwise
+        // silently disable the U18 gate for an already-selected gated domain.
+        // Keep the last known list and record the failure separately.
+        if (!cancelled) setDomainsLoad('error');
       });
     return () => {
       cancelled = true;
@@ -257,12 +268,31 @@ export function KeycloakLoginPanel() {
      * never binds, and (on a guardian-gated domain) the DOB/guardian branch
      * below is skipped because it keys off the selected domain.
      */
-    if (!domain) {
-      if (domainOptions.length === 0) {
-        // No options to choose from means the network-config fetch failed (it
-        // catches to an empty list). Retry it so a transient failure recovers
-        // on the next attempt rather than requiring a reload.
+    // Submitting mid-fetch must not bump the reload nonce below: that re-runs
+    // the effect, whose cleanup cancels the in-flight request — turning a fetch
+    // that was about to succeed into a failure.
+    if (domainsLoad === 'loading') {
+      toast.error(t('auth.signup_options_loading'));
+      return;
+    }
+
+    /**
+     * Resolve the selected domain against the list actually loaded. A miss must
+     * BLOCK: `guardian_consent_required` is read from this entry, so treating a
+     * miss as "not gated" is what lets a failed refetch quietly switch off the
+     * U18 gate for a domain that is still selected.
+     */
+    const selectedDomainMeta = networkDomains.find((d) => d.id === domain);
+    if (!domain || !selectedDomainMeta) {
+      if (domainsLoad === 'error') {
+        // Transient — retry, so a blip recovers on the next attempt instead of
+        // dead-ending signup until a page reload.
         setDomainsReloadNonce((n) => n + 1);
+        toast.error(t('auth.signup_options_unavailable'));
+      } else if (domainOptions.length === 0) {
+        // Loaded, but nothing is selectable: a config problem (the network
+        // defines no domains, or VITE_SERVED_BINDINGS names one it doesn't
+        // define). Retrying cannot fix that, so don't spin on it.
         toast.error(t('auth.signup_options_unavailable'));
       } else {
         toast.error(t('auth.select_domain_required'));
@@ -284,7 +314,10 @@ export function KeycloakLoginPanel() {
     const identifier: AuthIdentifier =
       signupChannel === 'phone' ? { phoneNumber: toE164(phoneNumber) } : { email: email.trim() };
 
-    const domainIsGated = selectedDomainIsGated;
+    // Read from the resolved entry, not the render-time flag: that one falls
+    // back to `false` for an unknown domain, which is fine for hiding a field
+    // but must never decide whether the U18 gate applies.
+    const domainIsGated = selectedDomainMeta.guardian_consent_required === true;
     const age = ageFromDateInput(dateOfBirth);
 
     /**

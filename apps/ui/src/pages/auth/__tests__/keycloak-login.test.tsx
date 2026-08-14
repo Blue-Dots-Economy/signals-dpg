@@ -554,6 +554,24 @@ describe('KeycloakLoginPanel — signup domain picker', () => {
     await waitFor(() => expect(signupWithKeycloak).toHaveBeenCalled());
     expect(signupWithKeycloak.mock.calls[0][0].domain).toBe('provider');
   });
+
+  it('does not retry when the config loaded but nothing is selectable', async () => {
+    // A served binding naming a domain this network doesn't define: the fetch
+    // succeeds, the option list is still empty, and no amount of retrying fixes
+    // it — so the failure path must not spin the fetch.
+    servedScope = { network: 'blue_dot', domains: ['not_a_real_domain'] };
+
+    renderAt(<LoginPage />);
+    await userEvent.click(await screen.findByText(/new here/i));
+    await userEvent.type(screen.getByLabelText(/your name/i), 'Asha Rao');
+    await userEvent.type(screen.getByLabelText(/mobile number/i), '9876543210');
+    await waitFor(() => expect(fetchNetworkConfig).toHaveBeenCalledTimes(1));
+
+    await userEvent.click(screen.getByRole('button', { name: /create account/i }));
+
+    expect(signupWithKeycloak).not.toHaveBeenCalled();
+    expect(fetchNetworkConfig).toHaveBeenCalledTimes(1);
+  });
 });
 
 describe('KeycloakLoginPanel — guardian-gated signup requires a DOB', () => {
@@ -577,6 +595,29 @@ describe('KeycloakLoginPanel — guardian-gated signup requires a DOB', () => {
     // Without this the blank date reads as `age === undefined`, the minor check
     // is skipped, and a minor is signed up as an adult.
     expect(await screen.findByLabelText(/date of birth/i)).toBeTruthy();
+    expect(signupWithKeycloak).not.toHaveBeenCalled();
+    expect(startKeycloakLogin).not.toHaveBeenCalled();
+  });
+
+  it('does not fall through the U18 gate when a later domain fetch fails', async () => {
+    renderAt(<LoginPage />);
+    await userEvent.click(await screen.findByText(/new here/i));
+    // First load succeeds: seeker is auto-selected and the DOB field appears.
+    expect(await screen.findByLabelText(/date of birth/i)).toBeTruthy();
+
+    // Back only flips the mode — `domain` stays 'seeker'. Re-entering signup
+    // refires the fetch, and this time it fails.
+    await userEvent.click(screen.getByRole('button', { name: /back/i }));
+    fetchNetworkConfig.mockRejectedValueOnce(new Error('offline'));
+    await userEvent.click(await screen.findByText(/new here/i));
+
+    await userEvent.type(screen.getByLabelText(/your name/i), 'Asha Rao');
+    await userEvent.type(screen.getByLabelText(/mobile number/i), '9876543210');
+    await userEvent.click(screen.getByRole('button', { name: /create account/i }));
+
+    // A domain is still selected, so the !domain guard passes. If the gating
+    // flag is inferred from an empty domain list it reads as "not gated", the
+    // blank-DOB guard is skipped, and a minor is signed up as an adult.
     expect(signupWithKeycloak).not.toHaveBeenCalled();
     expect(startKeycloakLogin).not.toHaveBeenCalled();
   });
