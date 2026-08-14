@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { ArrowLeft, ArrowRight, Loader2, LockKeyhole, OctagonX, UserPlus } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
@@ -162,10 +162,27 @@ export function KeycloakLoginPanel() {
       .catch(() => setNetworkDomains([]));
   }, [mode, themeId]);
 
-  const servedScope = getServedScope();
-  const domainOptions = servedScope
-    ? networkDomains.filter((d) => servedScope.domains.includes(d.id))
-    : networkDomains;
+  // Memoised (like the OTP screen) so the auto-select effect below has a stable
+  // dependency instead of re-running on every render.
+  const servedScope = useMemo(() => getServedScope(), []);
+  const domainOptions = useMemo(
+    () =>
+      servedScope
+        ? networkDomains.filter((d) => servedScope.domains.includes(d.id))
+        : networkDomains,
+    [servedScope, networkDomains],
+  );
+
+  // Single-domain / split portal: exactly one served domain means there is no
+  // choice to make. Auto-select it (so the signup still carries a domain and
+  // the guardian/DOB gating below still runs) and hide the picker in the JSX —
+  // a one-option toggle is meaningless and would force a pointless click.
+  // Mirrors login-page.tsx's OTP signup form.
+  useEffect(() => {
+    if (domainOptions.length === 1 && !domain) {
+      setDomain(domainOptions[0].id);
+    }
+  }, [domainOptions, domain]);
 
   /**
    * Whether the domain being signed up for routes minors through the guardian
@@ -210,6 +227,21 @@ export function KeycloakLoginPanel() {
       toast.error(t('auth.toast_invalid_email'), {
         description: t('auth.toast_invalid_email_desc'),
       });
+      return;
+    }
+    /**
+     * A signup must always carry a domain — the same guard the OTP screen
+     * applies. `domain` is optional on POST /auth/signup, so submitting without
+     * one creates an account with no `user.domains`: the single-domain lock
+     * never binds, and (on a guardian-gated domain) the DOB/guardian branch
+     * below is skipped because it keys off the selected domain.
+     */
+    if (!domain) {
+      toast.error(
+        domainOptions.length === 0
+          ? t('auth.signup_options_unavailable')
+          : t('auth.select_domain_required'),
+      );
       return;
     }
 
@@ -466,7 +498,9 @@ export function KeycloakLoginPanel() {
           </div>
         )}
 
-        {domainOptions.length > 0 && (
+        {/* Shown only when there is a real choice (>1 served domain); a
+            single-domain portal auto-selects it above and hides this. */}
+        {domainOptions.length > 1 && (
           <div className="space-y-1.5">
             <Label className="text-sm font-medium">{t('auth.label_domain')}</Label>
             {/* Segmented toggle, matching the OTP signup form's domain picker. */}

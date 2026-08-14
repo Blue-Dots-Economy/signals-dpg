@@ -76,6 +76,9 @@ vi.mock('@/lib/network-api', () => ({
     ],
   }),
 }));
+/** Which domains this deployment serves. null = all (the default here). */
+let servedScope: { network: string; domains: string[] } | null = null;
+vi.mock('@/lib/served-binding', () => ({ getServedScope: () => servedScope }));
 
 type SignupBody = {
   name: string;
@@ -170,10 +173,20 @@ const wrap = (ui: React.ReactElement, path: string) => (
 
 const renderAt = (ui: React.ReactElement, path = '/auth/login') => render(wrap(ui, path));
 
+/**
+ * Pick a domain on the signup form. The mocked network serves two domains, so
+ * the picker is shown and a signup cannot be submitted without a choice — the
+ * same rule the OTP screen applies. Tests that aren't *about* the domain still
+ * have to make one, exactly as a real user would.
+ */
+const pickDomain = async (name: RegExp = /^provider$/i) =>
+  userEvent.click(await screen.findByRole('button', { name }));
+
 beforeEach(() => {
   keycloakEnabled = false;
   configLoading = false;
   signupAllowed = true;
+  servedScope = null;
   loginChannels = ['phone', 'email'];
   startKeycloakLogin.mockClear().mockResolvedValue(undefined);
   completeKeycloakLogin.mockClear().mockResolvedValue(undefined);
@@ -439,6 +452,7 @@ describe('KeycloakLoginPanel — existing vs new user chooser', () => {
     await userEvent.click(await screen.findByText(/new here/i));
     await userEvent.type(screen.getByLabelText(/your name/i), 'Asha');
     await userEvent.type(screen.getByLabelText(/mobile number/i), '9876543210');
+    await pickDomain();
     await userEvent.click(screen.getByRole('button', { name: /create account/i }));
 
     expect(await screen.findByText(/too many sign-up attempts/i)).toBeTruthy();
@@ -452,9 +466,65 @@ describe('KeycloakLoginPanel — existing vs new user chooser', () => {
     await userEvent.click(await screen.findByText(/new here/i));
     await userEvent.type(screen.getByLabelText(/your name/i), 'Asha');
     await userEvent.type(screen.getByLabelText(/mobile number/i), '9876543210');
+    await pickDomain();
     await userEvent.click(screen.getByRole('button', { name: /create account/i }));
 
     await waitFor(() => expect(startKeycloakLogin).toHaveBeenCalled());
+  });
+});
+
+/**
+ * Domain picker parity with the OTP signup form (login-page.tsx). A per-domain
+ * portal must not ask a question with one answer, and a signup must never be
+ * submitted without a domain: `domain` is optional on POST /auth/signup, so a
+ * domainless signup creates an account with no `user.domains` — the
+ * single-domain lock then never binds, and the DOB/guardian branch (which keys
+ * off the selected domain) is skipped.
+ */
+describe('KeycloakLoginPanel — signup domain picker', () => {
+  beforeEach(() => {
+    keycloakEnabled = true;
+  });
+
+  it('hides the picker and auto-selects when the portal serves one domain', async () => {
+    servedScope = { network: 'blue_dot', domains: ['provider'] };
+
+    renderAt(<LoginPage />);
+    await userEvent.click(await screen.findByText(/new here/i));
+    await userEvent.type(screen.getByLabelText(/your name/i), 'Asha Rao');
+    await userEvent.type(screen.getByLabelText(/mobile number/i), '9876543210');
+
+    // No choice to make: the label and the one-option toggle are both absent.
+    await waitFor(() => expect(screen.queryByText(/your domain/i)).toBeNull());
+    expect(screen.queryByRole('button', { name: /^provider$/i })).toBeNull();
+
+    // …and the domain still reaches the API, without the user clicking anything.
+    await userEvent.click(screen.getByRole('button', { name: /create account/i }));
+    await waitFor(() => expect(signupWithKeycloak).toHaveBeenCalled());
+    expect(signupWithKeycloak.mock.calls[0][0].domain).toBe('provider');
+  });
+
+  it('still offers the picker when the portal serves several domains', async () => {
+    servedScope = { network: 'blue_dot', domains: ['seeker', 'provider'] };
+
+    renderAt(<LoginPage />);
+    await userEvent.click(await screen.findByText(/new here/i));
+
+    expect(await screen.findByRole('button', { name: /^seeker$/i })).toBeTruthy();
+    expect(screen.getByRole('button', { name: /^provider$/i })).toBeTruthy();
+  });
+
+  it('refuses to submit a signup with no domain chosen', async () => {
+    renderAt(<LoginPage />);
+    await userEvent.click(await screen.findByText(/new here/i));
+    await userEvent.type(screen.getByLabelText(/your name/i), 'Asha Rao');
+    await userEvent.type(screen.getByLabelText(/mobile number/i), '9876543210');
+    // Two served domains, nothing picked — the account must not be created.
+    await userEvent.click(screen.getByRole('button', { name: /create account/i }));
+
+    await waitFor(() => expect(screen.getByRole('button', { name: /^seeker$/i })).toBeTruthy());
+    expect(signupWithKeycloak).not.toHaveBeenCalled();
+    expect(startKeycloakLogin).not.toHaveBeenCalled();
   });
 });
 
@@ -486,6 +556,7 @@ describe('KeycloakLoginPanel — signup identifier channel', () => {
     await userEvent.click(screen.getByRole('button', { name: /^email$/i }));
     await userEvent.type(screen.getByLabelText(/your name/i), 'Asha Rao');
     await userEvent.type(screen.getByLabelText(/^email$/i), 'asha@example.com');
+    await pickDomain();
     await userEvent.click(screen.getByRole('button', { name: /create account/i }));
 
     await waitFor(() => expect(signupWithKeycloak).toHaveBeenCalled());
@@ -505,6 +576,7 @@ describe('KeycloakLoginPanel — signup identifier channel', () => {
     await userEvent.click(screen.getByRole('button', { name: /^phone$/i }));
     await userEvent.type(screen.getByLabelText(/your name/i), 'Asha Rao');
     await userEvent.type(screen.getByLabelText(/mobile number/i), '9876543210');
+    await pickDomain();
     await userEvent.click(screen.getByRole('button', { name: /create account/i }));
 
     await waitFor(() => expect(signupWithKeycloak).toHaveBeenCalled());
@@ -537,6 +609,7 @@ describe('KeycloakLoginPanel — signup identifier channel', () => {
 
     await userEvent.type(screen.getByLabelText(/your name/i), 'Asha Rao');
     await userEvent.type(screen.getByLabelText(/^email$/i), 'asha@example.com');
+    await pickDomain();
     await userEvent.click(screen.getByRole('button', { name: /create account/i }));
 
     await waitFor(() => expect(signupWithKeycloak).toHaveBeenCalled());
@@ -572,6 +645,7 @@ describe('terms & privacy gate on registration', () => {
     await userEvent.click(await screen.findByText(/new here/i));
     await userEvent.type(screen.getByLabelText(/your name/i), 'Asha Rao');
     await userEvent.type(screen.getByLabelText(/mobile number/i), '9876543210');
+    await pickDomain();
     await userEvent.click(screen.getByRole('button', { name: /create account/i }));
   };
 
