@@ -522,7 +522,10 @@ describe('KeycloakLoginPanel — signup domain picker', () => {
     // Two served domains, nothing picked — the account must not be created.
     await userEvent.click(screen.getByRole('button', { name: /create account/i }));
 
-    await waitFor(() => expect(screen.getByRole('button', { name: /^seeker$/i })).toBeTruthy());
+    // Still on the signup form with the picker waiting for a choice; awaiting a
+    // query here also flushes the click's microtasks before the negative
+    // assertions below, so "never called" means never, not "not yet".
+    expect(await screen.findByRole('button', { name: /^seeker$/i })).toBeTruthy();
     expect(signupWithKeycloak).not.toHaveBeenCalled();
     expect(startKeycloakLogin).not.toHaveBeenCalled();
   });
