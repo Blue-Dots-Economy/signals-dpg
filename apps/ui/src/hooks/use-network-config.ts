@@ -10,6 +10,8 @@ interface UseNetworkConfigResult {
   isLoading: boolean;
   isError: boolean;
   error: Error | null;
+  /** Re-run the query. For offering a user-initiated retry after a failure. */
+  refetch: () => void;
 }
 
 /**
@@ -18,7 +20,7 @@ interface UseNetworkConfigResult {
  * @returns Network config data and query state
  */
 export function useNetworkConfig(networkId: string | null): UseNetworkConfigResult {
-  const { data, isLoading, isError, error } = useQuery({
+  const { data, isLoading, isError, error, refetch } = useQuery({
     queryKey: networkId ? queryKeys.networkConfig(networkId) : ['network-config', null],
     queryFn: async () => {
       if (!networkId) return null;
@@ -33,6 +35,9 @@ export function useNetworkConfig(networkId: string | null): UseNetworkConfigResu
     isLoading,
     isError,
     error: error ?? null,
+    refetch: () => {
+      void refetch();
+    },
   };
 }
 

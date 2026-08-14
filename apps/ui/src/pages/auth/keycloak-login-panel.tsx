@@ -11,6 +11,7 @@ import { PhoneInput, toE164 } from '@/components/auth/phone-input';
 import { toast } from 'sonner';
 import { useAuth } from '@/contexts/auth-context';
 import { useAuthConfig } from '@/hooks/use-auth-config';
+import { useNetworkConfig } from '@/hooks/use-network-config';
 import { useNetworkTheme } from '@/theme/theme-provider';
 import {
   consentStatusIdentifier,
@@ -24,7 +25,6 @@ import { mergeConsentConfig } from '@/hooks/use-consent-config';
 import { ConsentModal } from '@/components/consent/consent-modal';
 import { setPendingConsent } from '@/lib/pending-consent';
 import { setPendingSignupExtras } from '@/lib/pending-signup-extras';
-import { fetchNetworkConfig } from '@/lib/network-api';
 import { ageFromBirthYear, isMinorFromAge } from '@/lib/guardian-consent';
 import {
   SignupGuardianFlow,
@@ -105,7 +105,6 @@ export function KeycloakLoginPanel() {
   const [phoneNumber, setPhoneNumber] = useState('');
   const [domain, setDomain] = useState('');
   const [dateOfBirth, setDateOfBirth] = useState('');
-  const [networkDomains, setNetworkDomains] = useState<DotNetworkDomain[]>([]);
   /**
    * Set only for a brand-new MINOR signing up into a guardian-gated domain.
    * Renders the pre-auth guardian capture BEFORE the account is created, exactly
@@ -153,42 +152,27 @@ export function KeycloakLoginPanel() {
   }, [config, signupChannel]);
 
   /**
-   * Whether the domain list is known. Tracked explicitly rather than inferred
-   * from `networkDomains.length`, because an empty list has three very
-   * different meanings — still loading, the fetch failed, or it loaded and this
-   * network genuinely has no domain this portal can serve — and only the middle
-   * one is worth retrying.
+   * Domain options come from the served network's own schema — not user input —
+   * so a signup can only ever name a domain the network actually defines. The
+   * API validates against served domains again; this is just the picker.
+   *
+   * Via React Query (the app's caching layer — see apps/ui/CLAUDE.md) rather
+   * than a hand-rolled effect, which buys three things that matter here:
+   * `isLoading` distinct from `isError` (an empty list otherwise cannot say
+   * whether it is still loading or failed), automatic retry, and retention of
+   * the last successful config across a failed refetch — so a blip can never
+   * empty the list that `guardian_consent_required` is read from.
+   *
+   * Passing `null` outside signup mode leaves the query disabled, matching the
+   * old effect's early return.
    */
-  const [domainsLoad, setDomainsLoad] = useState<'loading' | 'loaded' | 'error'>('loading');
-  /** Bumped to re-run the fetch after a failure; see `handleSignup`. */
-  const [domainsReloadNonce, setDomainsReloadNonce] = useState(0);
-
-  // Domain options come from the served network's own schema — not user input —
-  // so a signup can only ever name a domain the network actually defines. The
-  // API validates against served domains again; this is just the picker.
-  useEffect(() => {
-    if (mode !== 'signup') return;
-    let cancelled = false;
-    setDomainsLoad('loading');
-    fetchNetworkConfig(themeId)
-      .then((cfg) => {
-        if (cancelled) return;
-        setNetworkDomains(cfg.domains ?? []);
-        setDomainsLoad('loaded');
-      })
-      .catch(() => {
-        // Deliberately does NOT clear `networkDomains`. `guardian_consent_required`
-        // is read out of this list, so an empty list reads as "this domain is not
-        // gated" — and because leaving and re-entering signup mode re-runs this
-        // effect while `domain` survives, a single failed refetch would otherwise
-        // silently disable the U18 gate for an already-selected gated domain.
-        // Keep the last known list and record the failure separately.
-        if (!cancelled) setDomainsLoad('error');
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [mode, themeId, domainsReloadNonce]);
+  const {
+    data: networkConfig,
+    isLoading: domainsLoading,
+    isError: domainsError,
+    refetch: refetchNetworkConfig,
+  } = useNetworkConfig(mode === 'signup' ? themeId : null);
+  const networkDomains = useMemo(() => networkConfig?.domains ?? [], [networkConfig]);
 
   // Memoised (like the OTP screen) so the auto-select effect below has a stable
   // dependency instead of re-running on every render.
@@ -250,10 +234,9 @@ export function KeycloakLoginPanel() {
    * still selected.
    */
   const resolveSelectedDomain = (): DotNetworkDomain | null => {
-    // Submitting mid-fetch must not bump the reload nonce: that re-runs the
-    // effect, whose cleanup cancels the in-flight request — turning a fetch
-    // that was about to succeed into a failure.
-    if (domainsLoad === 'loading') {
+    // Submitting mid-fetch reports "still loading", not a failure — and does
+    // not retry, so the in-flight request is left to finish.
+    if (domainsLoading) {
       toast.error(t('auth.signup_options_loading'));
       return null;
     }
@@ -261,10 +244,10 @@ export function KeycloakLoginPanel() {
     const meta = domain ? networkDomains.find((d) => d.id === domain) : undefined;
     if (meta) return meta;
 
-    if (domainsLoad === 'error') {
-      // Transient — retry, so a blip recovers on the next attempt instead of
-      // dead-ending signup until a page reload.
-      setDomainsReloadNonce((n) => n + 1);
+    if (domainsError) {
+      // Transient — offer a retry, so a blip that outlived React Query's own
+      // retries recovers on the next attempt instead of needing a reload.
+      refetchNetworkConfig();
       toast.error(t('auth.signup_options_unavailable'));
     } else if (domainOptions.length === 0) {
       // Loaded, but nothing is selectable: a config problem (the network
