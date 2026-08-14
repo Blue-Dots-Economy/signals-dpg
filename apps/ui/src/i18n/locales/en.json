@@ -88,6 +88,7 @@
   "auth.cta_create_account": "Create account",
   "auth.signup_submitting": "Creating your account…",
   "auth.signup_name_required": "Please enter your name.",
+  "auth.signup_dob_required": "Please enter your date of birth to continue.",
   "auth.signup_created_title": "Account created",
   "auth.signup_created_desc": "Now sign in with the one-time code we'll send you.",
   "auth.signup_existing_title": "You already have an account",

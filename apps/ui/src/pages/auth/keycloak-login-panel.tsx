@@ -152,15 +152,32 @@ export function KeycloakLoginPanel() {
     }
   }, [config, signupChannel]);
 
+  /**
+   * Bumped to re-run the domain fetch below. A failed fetch leaves
+   * `networkDomains` empty, and since a signup now requires a domain that would
+   * otherwise be a dead end — the effect's other deps never change while the
+   * user sits on the form, so nothing would retry short of a page reload.
+   * Submitting again retries instead.
+   */
+  const [domainsReloadNonce, setDomainsReloadNonce] = useState(0);
+
   // Domain options come from the served network's own schema — not user input —
   // so a signup can only ever name a domain the network actually defines. The
   // API validates against served domains again; this is just the picker.
   useEffect(() => {
     if (mode !== 'signup') return;
+    let cancelled = false;
     fetchNetworkConfig(themeId)
-      .then((cfg) => setNetworkDomains(cfg.domains ?? []))
-      .catch(() => setNetworkDomains([]));
-  }, [mode, themeId]);
+      .then((cfg) => {
+        if (!cancelled) setNetworkDomains(cfg.domains ?? []);
+      })
+      .catch(() => {
+        if (!cancelled) setNetworkDomains([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [mode, themeId, domainsReloadNonce]);
 
   // Memoised (like the OTP screen) so the auto-select effect below has a stable
   // dependency instead of re-running on every render.
@@ -174,10 +191,14 @@ export function KeycloakLoginPanel() {
   );
 
   // Single-domain / split portal: exactly one served domain means there is no
-  // choice to make. Auto-select it (so the signup still carries a domain and
-  // the guardian/DOB gating below still runs) and hide the picker in the JSX —
-  // a one-option toggle is meaningless and would force a pointless click.
+  // choice to make. Auto-select it and hide the picker in the JSX — a
+  // one-option toggle is meaningless and would force a pointless click.
   // Mirrors login-page.tsx's OTP signup form.
+  //
+  // This makes the signup carry a domain, which is what lets `handleSignup`
+  // reach the gated-domain branch at all. Enforcing that branch is a separate
+  // guard there (a gated domain rejects a blank DOB); auto-selection alone
+  // would leave the U18 path reachable but skippable.
   useEffect(() => {
     if (domainOptions.length === 1 && !domain) {
       setDomain(domainOptions[0].id);
@@ -237,11 +258,15 @@ export function KeycloakLoginPanel() {
      * below is skipped because it keys off the selected domain.
      */
     if (!domain) {
-      toast.error(
-        domainOptions.length === 0
-          ? t('auth.signup_options_unavailable')
-          : t('auth.select_domain_required'),
-      );
+      if (domainOptions.length === 0) {
+        // No options to choose from means the network-config fetch failed (it
+        // catches to an empty list). Retry it so a transient failure recovers
+        // on the next attempt rather than requiring a reload.
+        setDomainsReloadNonce((n) => n + 1);
+        toast.error(t('auth.signup_options_unavailable'));
+      } else {
+        toast.error(t('auth.select_domain_required'));
+      }
       return;
     }
 
@@ -259,13 +284,29 @@ export function KeycloakLoginPanel() {
     const identifier: AuthIdentifier =
       signupChannel === 'phone' ? { phoneNumber: toE164(phoneNumber) } : { email: email.trim() };
 
+    const domainIsGated = selectedDomainIsGated;
+    const age = ageFromDateInput(dateOfBirth);
+
+    /**
+     * On a guardian-gated domain the age must be known BEFORE the account
+     * exists. The OTP screen enforces that with a blocking DOB step whose
+     * continue button stays disabled until a date is picked
+     * (`components/consent/u18/signup-dob-step.tsx`). Here the field is inline
+     * and optional, so without this guard a blank date yields
+     * `age === undefined`, the minor check below never fires, and a minor is
+     * signed up as an adult — the U18 path skipped entirely rather than
+     * merely deferred.
+     */
+    if (domainIsGated && age === undefined) {
+      toast.error(t('auth.signup_dob_required'));
+      return;
+    }
+
     // A minor in a guardian-gated domain must have a guardian captured and
     // OTP-verified before the account exists — same ordering as the OTP flow.
     // Mirrors the server check in services/minor.ts; the server re-checks and
     // rejects an adult with NOT_A_MINOR.
-    const domainIsGated = selectedDomainIsGated;
-    const age = ageFromDateInput(dateOfBirth);
-    if (domain && domainIsGated && age !== undefined && isMinorFromAge(age)) {
+    if (domainIsGated && age !== undefined && isMinorFromAge(age)) {
       setGuardianGate({ identifier, domain, age });
       return;
     }

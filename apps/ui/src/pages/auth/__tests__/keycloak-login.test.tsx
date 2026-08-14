@@ -67,14 +67,17 @@ vi.mock('@/lib/auth-api', async (orig) => ({
     .mockResolvedValue({ selfSignupAllowed: true, loginChannels: ['phone', 'email'] }),
   signupWithKeycloak: (body: SignupBody) => signupWithKeycloak(body),
 }));
+/** The served network's own schema, feeding the signup domain picker. */
+const NETWORK_CONFIG = {
+  id: 'blue_dot',
+  domains: [
+    { id: 'seeker', guardian_consent_required: true },
+    { id: 'provider', guardian_consent_required: false },
+  ],
+};
+const fetchNetworkConfig = vi.fn<() => Promise<typeof NETWORK_CONFIG>>();
 vi.mock('@/lib/network-api', () => ({
-  fetchNetworkConfig: vi.fn().mockResolvedValue({
-    id: 'blue_dot',
-    domains: [
-      { id: 'seeker', guardian_consent_required: true },
-      { id: 'provider', guardian_consent_required: false },
-    ],
-  }),
+  fetchNetworkConfig: () => fetchNetworkConfig(),
 }));
 /** Which domains this deployment serves. null = all (the default here). */
 let servedScope: { network: string; domains: string[] } | null = null;
@@ -187,6 +190,7 @@ beforeEach(() => {
   configLoading = false;
   signupAllowed = true;
   servedScope = null;
+  fetchNetworkConfig.mockReset().mockResolvedValue(NETWORK_CONFIG);
   loginChannels = ['phone', 'email'];
   startKeycloakLogin.mockClear().mockResolvedValue(undefined);
   completeKeycloakLogin.mockClear().mockResolvedValue(undefined);
@@ -528,6 +532,66 @@ describe('KeycloakLoginPanel — signup domain picker', () => {
     expect(await screen.findByRole('button', { name: /^seeker$/i })).toBeTruthy();
     expect(signupWithKeycloak).not.toHaveBeenCalled();
     expect(startKeycloakLogin).not.toHaveBeenCalled();
+  });
+
+  it('retries the domain fetch after it failed, instead of dead-ending', async () => {
+    // First load fails → no options at all, so nothing can be picked.
+    fetchNetworkConfig.mockRejectedValueOnce(new Error('offline'));
+
+    renderAt(<LoginPage />);
+    await userEvent.click(await screen.findByText(/new here/i));
+    await userEvent.type(screen.getByLabelText(/your name/i), 'Asha Rao');
+    await userEvent.type(screen.getByLabelText(/mobile number/i), '9876543210');
+
+    // Submitting is refused AND schedules a refetch...
+    await userEvent.click(screen.getByRole('button', { name: /create account/i }));
+    expect(signupWithKeycloak).not.toHaveBeenCalled();
+
+    // ...so the picker appears once the retry succeeds, with no page reload.
+    await userEvent.click(await screen.findByRole('button', { name: /^provider$/i }));
+    await userEvent.click(screen.getByRole('button', { name: /create account/i }));
+
+    await waitFor(() => expect(signupWithKeycloak).toHaveBeenCalled());
+    expect(signupWithKeycloak.mock.calls[0][0].domain).toBe('provider');
+  });
+});
+
+describe('KeycloakLoginPanel — guardian-gated signup requires a DOB', () => {
+  beforeEach(() => {
+    keycloakEnabled = true;
+    // A single-domain portal on the gated domain: the picker is hidden and the
+    // domain auto-selected, so the DOB field is the only thing left to fill.
+    servedScope = { network: 'blue_dot', domains: ['seeker'] };
+  });
+
+  it('refuses to create the account when the date of birth is blank', async () => {
+    renderAt(<LoginPage />);
+    await userEvent.click(await screen.findByText(/new here/i));
+    await userEvent.type(screen.getByLabelText(/your name/i), 'Asha Rao');
+    await userEvent.type(screen.getByLabelText(/mobile number/i), '9876543210');
+
+    // The DOB field is shown (gated domain) but left empty.
+    expect(await screen.findByLabelText(/date of birth/i)).toBeTruthy();
+    await userEvent.click(screen.getByRole('button', { name: /create account/i }));
+
+    // Without this the blank date reads as `age === undefined`, the minor check
+    // is skipped, and a minor is signed up as an adult.
+    expect(await screen.findByLabelText(/date of birth/i)).toBeTruthy();
+    expect(signupWithKeycloak).not.toHaveBeenCalled();
+    expect(startKeycloakLogin).not.toHaveBeenCalled();
+  });
+
+  it('still routes a minor to the guardian flow once a DOB is given', async () => {
+    renderAt(<LoginPage />);
+    await userEvent.click(await screen.findByText(/new here/i));
+    await userEvent.type(screen.getByLabelText(/your name/i), 'Asha Rao');
+    await userEvent.type(screen.getByLabelText(/mobile number/i), '9876543210');
+    await userEvent.type(await screen.findByLabelText(/date of birth/i), '2015-04-02');
+    await userEvent.click(screen.getByRole('button', { name: /create account/i }));
+
+    const flow = await screen.findByTestId('signup-guardian-flow');
+    expect(flow.getAttribute('data-domain')).toBe('seeker');
+    expect(signupWithKeycloak).not.toHaveBeenCalled();
   });
 });
 
