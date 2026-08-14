@@ -85,7 +85,8 @@ describe('dispatchEmail', () => {
       variables: { otp: '1', siteUrl: 'https://ui.example' },
     });
     expect(notify.mock.calls[0][0].variables.html).toContain(
-      '<a href="https://ui.example">https://ui.example</a>',
+      '<a href="https://ui.example" style="color: #1a56db; text-decoration: underline;">' +
+        'https://ui.example</a>',
     );
 
     const bare = makeSender({ 'login.otp.body': 'go to {{siteLink}}' });

@@ -66,7 +66,14 @@ export function renderOtpBox(otp: string): string {
 export function renderSiteLink(url: string | undefined): string {
   if (!url) return 'the platform';
   const safe = escapeHtml(url);
-  return `<a href="${safe}">${safe}</a>`;
+  // Inline colour + underline, not the browser default: several mail clients
+  // (Zoho and Outlook among them) drop the user-agent link styling and render
+  // an unstyled anchor in the surrounding body colour, so the URL reads as
+  // plain black text and nobody realises it is clickable. Email CSS has to be
+  // inline to survive sanitisers. A fixed accessible blue rather than the
+  // network's brand colour, which on the lighter palettes would be unreadable
+  // as body-sized text.
+  return `<a href="${safe}" style="color: #1a56db; text-decoration: underline;">${safe}</a>`;
 }
 
 /** Numbered provider-org list for the guardian bulk email (#393). */
