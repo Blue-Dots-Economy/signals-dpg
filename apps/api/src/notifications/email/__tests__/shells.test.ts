@@ -46,8 +46,16 @@ describe('renderOtpBox', () => {
 describe('renderSiteLink', () => {
   it('renders a clickable, escaped anchor when a URL is configured', () => {
     expect(renderSiteLink('https://x.example/?a=1&b=2')).toBe(
-      '<a href="https://x.example/?a=1&amp;b=2">https://x.example/?a=1&amp;b=2</a>',
+      '<a href="https://x.example/?a=1&amp;b=2" style="color: #1a56db; text-decoration: underline;">' +
+        'https://x.example/?a=1&amp;b=2</a>',
     );
+  });
+
+  it('styles the anchor inline, so clients that drop UA link styling still show a link', () => {
+    // Zoho and Outlook render an unstyled anchor in the body colour, which
+    // reads as plain black text; and sanitisers keep only inline CSS.
+    const out = renderSiteLink('https://x.example');
+    expect(out).toContain('style="color: #1a56db; text-decoration: underline;"');
   });
 
   it('degrades to plain words when no URL is configured (no dead anchor)', () => {
