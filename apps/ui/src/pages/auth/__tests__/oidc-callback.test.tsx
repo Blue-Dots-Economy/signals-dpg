@@ -128,6 +128,14 @@ vi.mock('@/components/layout/auth-shell', () => ({
   AuthShell: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
 }));
 
+// #558: the first-time-login profile check the callback now shares with the OTP
+// page. Default (set in beforeEach) is a live profile, so tests that are not
+// about the redirect land normally.
+const fetchMyProfilesLite = vi.fn();
+vi.mock('@/lib/login-profiles', () => ({
+  fetchMyProfilesLite: (networkId: string) => fetchMyProfilesLite(networkId),
+}));
+
 const { OidcCallbackPage } = await import('../oidc-callback-page');
 
 function renderPage() {
@@ -161,6 +169,11 @@ beforeEach(() => {
   getConsentStatus.mockResolvedValue({ statuses: { terms: [], privacy: [] } });
   fetchConsentConfigs.mockResolvedValue([]);
   completeOidcLogin.mockResolvedValue({ returnTo: '/dashboard' });
+  // A completed profile → no #376 redirect, so existing expectations hold.
+  fetchMyProfilesLite.mockResolvedValue([
+    { item_id: 'p1', item_domain: 'seeker', lifecycle_status: 'live' },
+  ]);
+  localStorage.clear();
 });
 
 describe('G7 — wrong-portal domain gate', () => {
@@ -454,5 +467,94 @@ describe('ordering', () => {
 
     await waitFor(() => expect(setUserDomains).toHaveBeenCalled());
     expect(order).toEqual(['domainGate', 'setUserDomains']);
+  });
+});
+
+/**
+ * #558 — the #376 first-time-login profile redirect, which previously lived
+ * only in `otp-page.tsx` and so never ran under `AUTH_PROVIDER=keycloak`.
+ * The decision itself is `resolvePostLoginRedirect` (unit-tested separately);
+ * these assert the callback *applies* it, and that it composes correctly with
+ * the gates that can hold a user before landing.
+ */
+describe('#558 — first-time-login profile redirect', () => {
+  it('sends a user with no profiles to the create page instead of the return url', async () => {
+    fetchMyProfilesLite.mockResolvedValue([]);
+
+    renderPage();
+
+    await waitFor(() =>
+      expect(navigate).toHaveBeenCalledWith('/profile/new', { replace: true })
+    );
+    // The redirect takes precedence over returnTo — a user with no completed
+    // profile can't act on a deep link anyway.
+    expect(navigate).not.toHaveBeenCalledWith('/dashboard', { replace: true });
+  });
+
+  it('sends a user whose profiles are all draft to the edit page', async () => {
+    fetchMyProfilesLite.mockResolvedValue([
+      { item_id: 'draft1', item_domain: 'seeker', lifecycle_status: 'draft' },
+    ]);
+
+    renderPage();
+
+    await waitFor(() =>
+      expect(navigate).toHaveBeenCalledWith('/profile/draft1/edit', { replace: true })
+    );
+  });
+
+  it('leaves a user with a completed profile on the normal landing', async () => {
+    fetchMyProfilesLite.mockResolvedValue([
+      { item_id: 'p1', item_domain: 'seeker', lifecycle_status: 'live' },
+    ]);
+
+    renderPage();
+
+    await waitFor(() =>
+      expect(navigate).toHaveBeenCalledWith('/dashboard', { replace: true })
+    );
+  });
+
+  it('still lands the user when the profile lookup fails — never blocks sign-in', async () => {
+    fetchMyProfilesLite.mockRejectedValue(new Error('network down'));
+
+    renderPage();
+
+    await waitFor(() =>
+      expect(navigate).toHaveBeenCalledWith('/dashboard', { replace: true })
+    );
+  });
+
+  it('holds a gated minor on the guardian flow FIRST, rather than the profile form', async () => {
+    // The gate keys on a domain the user already holds, so it needs one — as in
+    // the G4 block above.
+    resolveHeldDomains.mockResolvedValue(['seeker']);
+    fetchMyProfilesLite.mockResolvedValue([]);
+    getU18Status.mockResolvedValue({
+      hasBirthData: true,
+      isMinor: true,
+      guardianVerified: false,
+    });
+
+    renderPage();
+
+    await screen.findByTestId('u18-guardian-flow');
+    expect(navigate).not.toHaveBeenCalledWith('/profile/new', { replace: true });
+  });
+
+  it('resolves the landing only after the session exists — an authenticated read', async () => {
+    const order: string[] = [];
+    completeKeycloakLogin.mockImplementation(async () => {
+      order.push('session');
+    });
+    fetchMyProfilesLite.mockImplementation(async () => {
+      order.push('profiles');
+      return [];
+    });
+
+    renderPage();
+
+    await waitFor(() => expect(fetchMyProfilesLite).toHaveBeenCalled());
+    expect(order).toEqual(['session', 'profiles']);
   });
 });

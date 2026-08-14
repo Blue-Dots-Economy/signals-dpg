@@ -158,6 +158,15 @@ vi.mock('@/theme/theme-provider', async () => {
   };
 });
 
+// #558: the callback now resolves the first-time-login profile redirect before
+// landing. Unmocked, this would make a real request that never settles in jsdom
+// and hold the page on the spinner. Default is a completed profile, so the
+// landing assertions below are unaffected.
+const fetchMyProfilesLite = vi.fn();
+vi.mock('@/lib/login-profiles', () => ({
+  fetchMyProfilesLite: (networkId: string) => fetchMyProfilesLite(networkId),
+}));
+
 const { LoginPage } = await import('../login-page.js');
 const { OidcCallbackPage } = await import('../oidc-callback-page.js');
 
@@ -191,6 +200,9 @@ beforeEach(() => {
   signupAllowed = true;
   servedScope = null;
   fetchNetworkConfig.mockReset().mockResolvedValue(NETWORK_CONFIG);
+  fetchMyProfilesLite.mockReset().mockResolvedValue([
+    { item_id: 'p1', item_domain: 'seeker', lifecycle_status: 'live' },
+  ]);
   loginChannels = ['phone', 'email'];
   startKeycloakLogin.mockClear().mockResolvedValue(undefined);
   completeKeycloakLogin.mockClear().mockResolvedValue(undefined);

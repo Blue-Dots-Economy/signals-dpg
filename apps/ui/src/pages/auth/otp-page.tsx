@@ -17,9 +17,7 @@ import { U18GuardianFlow } from '@/components/consent/u18/u18-guardian-flow';
 import { useNetworkTheme } from '@/theme/theme-provider';
 import { setStoredSignupDomain, type SignupExtras } from '@/lib/signup-domain';
 import { setUserDomains } from '@/lib/user-api';
-import { fetchMyProfilesLite } from '@/lib/login-profiles';
-import { resolvePostLoginRedirect } from '@/lib/post-login-route';
-import { getStoredActiveProfileId } from '@/lib/active-profile';
+import { resolvePostLoginLanding } from '@/lib/post-login-landing';
 
 interface AuthState extends AuthIdentifier {
   userExists: boolean;
@@ -60,9 +58,10 @@ export function OtpPage() {
   // Final step once verification (and, for a gated minor, the guardian flow)
   // has settled: toast + land. #376: if the user has no *completed* profile
   // (none, or all still draft), route them straight to the profile create/edit
-  // page — instead of home, where they wouldn't know what to do. This takes
-  // precedence over `redirectTo` (a user with no live profile can't act on a
-  // deep link anyway). Fail-open: any error → normal landing.
+  // page — instead of home, where they wouldn't know what to do. That decision
+  // (including its precedence over `redirectTo` and its fail-open behaviour)
+  // now lives in `resolvePostLoginLanding`, shared with the OIDC callback so
+  // the two login paths can't drift (#558).
   const finishSignIn = async () => {
     if (!state) return;
     toast.success(state.userExists ? t('auth.toast_welcome_back') : t('auth.toast_account_created'), {
@@ -70,17 +69,8 @@ export function OtpPage() {
         ? t('auth.toast_welcome_back_desc')
         : t('auth.toast_account_created_desc'),
     });
-    try {
-      const profiles = await fetchMyProfilesLite(themeId);
-      const redirect = resolvePostLoginRedirect(profiles, getStoredActiveProfileId(themeId));
-      if (redirect) {
-        navigate(redirect.path, { replace: true });
-        return;
-      }
-    } catch {
-      // Never block sign-in on the profile check.
-    }
-    navigate(state.redirectTo ?? '/', { replace: true });
+    const landing = await resolvePostLoginLanding(themeId, state.redirectTo ?? '/');
+    navigate(landing, { replace: true });
   };
 
   const handleOtpComplete = async (otp: string) => {
