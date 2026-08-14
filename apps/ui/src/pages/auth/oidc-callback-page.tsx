@@ -27,6 +27,7 @@ import { isGuardianConsentRequiredDomain } from '@/lib/guardian-consent';
 import { fetchNetworkConfig } from '@/lib/network-api';
 import { setStoredSignupDomain } from '@/lib/signup-domain';
 import { setUserDomains } from '@/lib/user-api';
+import { resolvePostLoginLanding } from '@/lib/post-login-landing';
 import type { ConsentAcceptBody, ConsentConfigDocument } from '@dpg/schemas';
 
 /** How long to wait for the consent write before landing the user anyway. */
@@ -244,7 +245,6 @@ export function OidcCallbackPage() {
         const { completeOidcLogin } = await import('@/lib/oidc-client');
         const { returnTo } = await completeOidcLogin(authCfg);
         await completeKeycloakLogin();
-        const landing = returnTo ?? '/';
 
         // Per-domain UI gate (G7), ported from `otp-page.tsx`: block a user who
         // already holds a profile in a domain this deployment does not serve —
@@ -276,6 +276,15 @@ export function OidcCallbackPage() {
 
         // Durable write of the signup form's domain/age (G3).
         await flushPendingSignupExtras(themeId, t('auth.toast_consent_persist_error'));
+
+        // First-time-login profile redirect (#376), previously wired only into
+        // the OTP page and therefore dead under Keycloak (#558). Resolved ONCE
+        // here so all three exits below — guardian gate, consent gate and the
+        // direct navigate — inherit the same landing. Placed after the session
+        // is established (an authenticated read) and after the parked consent /
+        // signup writes are flushed, but BEFORE the gates, so a gated user
+        // still clears their gate first and only then lands on the form.
+        const landing = await resolvePostLoginLanding(themeId, returnTo ?? '/');
 
         // Authenticated U18 guardian gate (G4). Runs BEFORE the adult
         // terms/privacy gate below on purpose: a gated minor must not be shown
