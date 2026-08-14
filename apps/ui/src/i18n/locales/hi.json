@@ -8,6 +8,8 @@
   "common.something_went_wrong": "कुछ गलत हो गया",
   "auth.back": "वापस",
   "auth.select_domain_required": "जारी रखने के लिए कृपया अपना डोमेन चुनें।",
+  "auth.signup_dob_required": "जारी रखने के लिए कृपया अपनी जन्म तिथि दर्ज करें।",
+  "auth.signup_options_loading": "साइन-अप विकल्प अभी लोड हो रहे हैं। कृपया कुछ क्षण बाद पुनः प्रयास करें।",
   "auth.signup_options_unavailable": "साइन-अप विकल्प लोड नहीं हो सके। कृपया रीफ़्रेश करके पुनः प्रयास करें।",
   "auth.heading_sign_in": "साइन इन",
   "auth.heading_welcome_back": "वापस स्वागत है",

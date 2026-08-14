@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { ArrowLeft, ArrowRight, Loader2, LockKeyhole, OctagonX, UserPlus } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
@@ -11,6 +11,7 @@ import { PhoneInput, toE164 } from '@/components/auth/phone-input';
 import { toast } from 'sonner';
 import { useAuth } from '@/contexts/auth-context';
 import { useAuthConfig } from '@/hooks/use-auth-config';
+import { useNetworkConfig } from '@/hooks/use-network-config';
 import { useNetworkTheme } from '@/theme/theme-provider';
 import {
   consentStatusIdentifier,
@@ -24,7 +25,6 @@ import { mergeConsentConfig } from '@/hooks/use-consent-config';
 import { ConsentModal } from '@/components/consent/consent-modal';
 import { setPendingConsent } from '@/lib/pending-consent';
 import { setPendingSignupExtras } from '@/lib/pending-signup-extras';
-import { fetchNetworkConfig } from '@/lib/network-api';
 import { ageFromBirthYear, isMinorFromAge } from '@/lib/guardian-consent';
 import {
   SignupGuardianFlow,
@@ -105,7 +105,6 @@ export function KeycloakLoginPanel() {
   const [phoneNumber, setPhoneNumber] = useState('');
   const [domain, setDomain] = useState('');
   const [dateOfBirth, setDateOfBirth] = useState('');
-  const [networkDomains, setNetworkDomains] = useState<DotNetworkDomain[]>([]);
   /**
    * Set only for a brand-new MINOR signing up into a guardian-gated domain.
    * Renders the pre-auth guardian capture BEFORE the account is created, exactly
@@ -152,20 +151,54 @@ export function KeycloakLoginPanel() {
     }
   }, [config, signupChannel]);
 
-  // Domain options come from the served network's own schema — not user input —
-  // so a signup can only ever name a domain the network actually defines. The
-  // API validates against served domains again; this is just the picker.
-  useEffect(() => {
-    if (mode !== 'signup') return;
-    fetchNetworkConfig(themeId)
-      .then((cfg) => setNetworkDomains(cfg.domains ?? []))
-      .catch(() => setNetworkDomains([]));
-  }, [mode, themeId]);
+  /**
+   * Domain options come from the served network's own schema — not user input —
+   * so a signup can only ever name a domain the network actually defines. The
+   * API validates against served domains again; this is just the picker.
+   *
+   * Via React Query (the app's caching layer — see apps/ui/CLAUDE.md) rather
+   * than a hand-rolled effect, which buys three things that matter here:
+   * `isLoading` distinct from `isError` (an empty list otherwise cannot say
+   * whether it is still loading or failed), automatic retry, and retention of
+   * the last successful config across a failed refetch — so a blip can never
+   * empty the list that `guardian_consent_required` is read from.
+   *
+   * Passing `null` outside signup mode leaves the query disabled, matching the
+   * old effect's early return.
+   */
+  const {
+    data: networkConfig,
+    isLoading: domainsLoading,
+    isError: domainsError,
+    refetch: refetchNetworkConfig,
+  } = useNetworkConfig(mode === 'signup' ? themeId : null);
+  const networkDomains = useMemo(() => networkConfig?.domains ?? [], [networkConfig]);
 
-  const servedScope = getServedScope();
-  const domainOptions = servedScope
-    ? networkDomains.filter((d) => servedScope.domains.includes(d.id))
-    : networkDomains;
+  // Memoised (like the OTP screen) so the auto-select effect below has a stable
+  // dependency instead of re-running on every render.
+  const servedScope = useMemo(() => getServedScope(), []);
+  const domainOptions = useMemo(
+    () =>
+      servedScope
+        ? networkDomains.filter((d) => servedScope.domains.includes(d.id))
+        : networkDomains,
+    [servedScope, networkDomains],
+  );
+
+  // Single-domain / split portal: exactly one served domain means there is no
+  // choice to make. Auto-select it and hide the picker in the JSX — a
+  // one-option toggle is meaningless and would force a pointless click.
+  // Mirrors login-page.tsx's OTP signup form.
+  //
+  // This makes the signup carry a domain, which is what lets `handleSignup`
+  // reach the gated-domain branch at all. Enforcing that branch is a separate
+  // guard there (a gated domain rejects a blank DOB); auto-selection alone
+  // would leave the U18 path reachable but skippable.
+  useEffect(() => {
+    if (domainOptions.length === 1 && !domain) {
+      setDomain(domainOptions[0].id);
+    }
+  }, [domainOptions, domain]);
 
   /**
    * Whether the domain being signed up for routes minors through the guardian
@@ -191,6 +224,42 @@ export function KeycloakLoginPanel() {
     }
   };
 
+  /**
+   * The selected domain's entry in the list actually loaded, or null after
+   * telling the user why it can't be resolved.
+   *
+   * A miss must BLOCK rather than fall through: `guardian_consent_required` is
+   * read from this entry, so treating "not in the list" as "not gated" is what
+   * lets a failed refetch quietly switch off the U18 gate for a domain that is
+   * still selected.
+   */
+  const resolveSelectedDomain = (): DotNetworkDomain | null => {
+    // Submitting mid-fetch reports "still loading", not a failure — and does
+    // not retry, so the in-flight request is left to finish.
+    if (domainsLoading) {
+      toast.error(t('auth.signup_options_loading'));
+      return null;
+    }
+
+    const meta = domain ? networkDomains.find((d) => d.id === domain) : undefined;
+    if (meta) return meta;
+
+    if (domainsError) {
+      // Transient — offer a retry, so a blip that outlived React Query's own
+      // retries recovers on the next attempt instead of needing a reload.
+      refetchNetworkConfig();
+      toast.error(t('auth.signup_options_unavailable'));
+    } else if (domainOptions.length === 0) {
+      // Loaded, but nothing is selectable: a config problem (the network
+      // defines no domains, or VITE_SERVED_BINDINGS names one it doesn't
+      // define). Retrying cannot fix that, so don't spin on it.
+      toast.error(t('auth.signup_options_unavailable'));
+    } else {
+      toast.error(t('auth.select_domain_required'));
+    }
+    return null;
+  };
+
   const handleSignup = async () => {
     setError(null);
 
@@ -212,6 +281,15 @@ export function KeycloakLoginPanel() {
       });
       return;
     }
+    /**
+     * A signup must always carry a domain — the same guard the OTP screen
+     * applies. `domain` is optional on POST /auth/signup, so submitting without
+     * one creates an account with no `user.domains`: the single-domain lock
+     * never binds, and (on a guardian-gated domain) the DOB/guardian branch
+     * below is skipped because it keys off the selected domain.
+     */
+    const selectedDomainMeta = resolveSelectedDomain();
+    if (!selectedDomainMeta) return;
 
     /**
      * Normalise ONCE, here, and use this everywhere downstream.
@@ -227,13 +305,32 @@ export function KeycloakLoginPanel() {
     const identifier: AuthIdentifier =
       signupChannel === 'phone' ? { phoneNumber: toE164(phoneNumber) } : { email: email.trim() };
 
+    // Read from the resolved entry, not the render-time flag: that one falls
+    // back to `false` for an unknown domain, which is fine for hiding a field
+    // but must never decide whether the U18 gate applies.
+    const domainIsGated = selectedDomainMeta.guardian_consent_required === true;
+    const age = ageFromDateInput(dateOfBirth);
+
+    /**
+     * On a guardian-gated domain the age must be known BEFORE the account
+     * exists. The OTP screen enforces that with a blocking DOB step whose
+     * continue button stays disabled until a date is picked
+     * (`components/consent/u18/signup-dob-step.tsx`). Here the field is inline
+     * and optional, so without this guard a blank date yields
+     * `age === undefined`, the minor check below never fires, and a minor is
+     * signed up as an adult — the U18 path skipped entirely rather than
+     * merely deferred.
+     */
+    if (domainIsGated && age === undefined) {
+      toast.error(t('auth.signup_dob_required'));
+      return;
+    }
+
     // A minor in a guardian-gated domain must have a guardian captured and
     // OTP-verified before the account exists — same ordering as the OTP flow.
     // Mirrors the server check in services/minor.ts; the server re-checks and
     // rejects an adult with NOT_A_MINOR.
-    const domainIsGated = selectedDomainIsGated;
-    const age = ageFromDateInput(dateOfBirth);
-    if (domain && domainIsGated && age !== undefined && isMinorFromAge(age)) {
+    if (domainIsGated && age !== undefined && isMinorFromAge(age)) {
       setGuardianGate({ identifier, domain, age });
       return;
     }
@@ -466,7 +563,9 @@ export function KeycloakLoginPanel() {
           </div>
         )}
 
-        {domainOptions.length > 0 && (
+        {/* Shown only when there is a real choice (>1 served domain); a
+            single-domain portal auto-selects it above and hides this. */}
+        {domainOptions.length > 1 && (
           <div className="space-y-1.5">
             <Label className="text-sm font-medium">{t('auth.label_domain')}</Label>
             {/* Segmented toggle, matching the OTP signup form's domain picker. */}
