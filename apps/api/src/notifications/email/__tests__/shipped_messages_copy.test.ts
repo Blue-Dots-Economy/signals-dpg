@@ -17,6 +17,8 @@
 import { describe, it, expect } from 'vitest';
 import { readdirSync, readFileSync, existsSync } from 'node:fs';
 import path from 'node:path';
+import { EMAIL_CASE_IDS, getEmailCase } from '../email_cases';
+import { TOKEN_RE } from '../substitute';
 
 const SCHEMAS_DIR = path.resolve(import.meta.dirname, '../../../../../../examples/schemas');
 
@@ -76,6 +78,28 @@ describe('shipped per-network email copy', () => {
       for (const [key, value] of entries(file)) {
         if (/<a\s+href="\{\{\w+\}\}"/.test(value)) {
           offenders.push(`${path.relative(SCHEMAS_DIR, file)} → ${key}`);
+        }
+      }
+    }
+    expect(offenders).toEqual([]);
+  });
+
+  it('only uses tokens the corresponding case declares', () => {
+    // An undeclared token is left verbatim by the substituter, so a typo or a
+    // token borrowed from another case ships `{{like_this}}` to a real inbox.
+    const offenders: string[] = [];
+    for (const file of files) {
+      for (const [key, value] of entries(file)) {
+        const caseId = key.replace(/\.(subject|body|cta)$/, '');
+        if (!EMAIL_CASE_IDS.includes(caseId)) {
+          offenders.push(`${path.relative(SCHEMAS_DIR, file)} → ${key} (no such case)`);
+          continue;
+        }
+        const declared = getEmailCase(caseId).tokens;
+        for (const [, name] of value.matchAll(TOKEN_RE)) {
+          if (!Object.hasOwn(declared, name)) {
+            offenders.push(`${path.relative(SCHEMAS_DIR, file)} → ${key} uses {{${name}}}`);
+          }
         }
       }
     }
