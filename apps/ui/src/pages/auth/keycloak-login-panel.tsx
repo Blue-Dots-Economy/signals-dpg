@@ -240,6 +240,43 @@ export function KeycloakLoginPanel() {
     }
   };
 
+  /**
+   * The selected domain's entry in the list actually loaded, or null after
+   * telling the user why it can't be resolved.
+   *
+   * A miss must BLOCK rather than fall through: `guardian_consent_required` is
+   * read from this entry, so treating "not in the list" as "not gated" is what
+   * lets a failed refetch quietly switch off the U18 gate for a domain that is
+   * still selected.
+   */
+  const resolveSelectedDomain = (): DotNetworkDomain | null => {
+    // Submitting mid-fetch must not bump the reload nonce: that re-runs the
+    // effect, whose cleanup cancels the in-flight request — turning a fetch
+    // that was about to succeed into a failure.
+    if (domainsLoad === 'loading') {
+      toast.error(t('auth.signup_options_loading'));
+      return null;
+    }
+
+    const meta = domain ? networkDomains.find((d) => d.id === domain) : undefined;
+    if (meta) return meta;
+
+    if (domainsLoad === 'error') {
+      // Transient — retry, so a blip recovers on the next attempt instead of
+      // dead-ending signup until a page reload.
+      setDomainsReloadNonce((n) => n + 1);
+      toast.error(t('auth.signup_options_unavailable'));
+    } else if (domainOptions.length === 0) {
+      // Loaded, but nothing is selectable: a config problem (the network
+      // defines no domains, or VITE_SERVED_BINDINGS names one it doesn't
+      // define). Retrying cannot fix that, so don't spin on it.
+      toast.error(t('auth.signup_options_unavailable'));
+    } else {
+      toast.error(t('auth.select_domain_required'));
+    }
+    return null;
+  };
+
   const handleSignup = async () => {
     setError(null);
 
@@ -268,37 +305,8 @@ export function KeycloakLoginPanel() {
      * never binds, and (on a guardian-gated domain) the DOB/guardian branch
      * below is skipped because it keys off the selected domain.
      */
-    // Submitting mid-fetch must not bump the reload nonce below: that re-runs
-    // the effect, whose cleanup cancels the in-flight request — turning a fetch
-    // that was about to succeed into a failure.
-    if (domainsLoad === 'loading') {
-      toast.error(t('auth.signup_options_loading'));
-      return;
-    }
-
-    /**
-     * Resolve the selected domain against the list actually loaded. A miss must
-     * BLOCK: `guardian_consent_required` is read from this entry, so treating a
-     * miss as "not gated" is what lets a failed refetch quietly switch off the
-     * U18 gate for a domain that is still selected.
-     */
-    const selectedDomainMeta = networkDomains.find((d) => d.id === domain);
-    if (!domain || !selectedDomainMeta) {
-      if (domainsLoad === 'error') {
-        // Transient — retry, so a blip recovers on the next attempt instead of
-        // dead-ending signup until a page reload.
-        setDomainsReloadNonce((n) => n + 1);
-        toast.error(t('auth.signup_options_unavailable'));
-      } else if (domainOptions.length === 0) {
-        // Loaded, but nothing is selectable: a config problem (the network
-        // defines no domains, or VITE_SERVED_BINDINGS names one it doesn't
-        // define). Retrying cannot fix that, so don't spin on it.
-        toast.error(t('auth.signup_options_unavailable'));
-      } else {
-        toast.error(t('auth.select_domain_required'));
-      }
-      return;
-    }
+    const selectedDomainMeta = resolveSelectedDomain();
+    if (!selectedDomainMeta) return;
 
     /**
      * Normalise ONCE, here, and use this everywhere downstream.
