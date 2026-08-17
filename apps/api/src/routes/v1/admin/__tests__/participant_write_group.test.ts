@@ -118,7 +118,8 @@ vi.mock('@api/db/postgres/drizzle_config', () => {
   const classify = (proj: Record<string, unknown>) => {
     const keys = Object.keys(proj);
     if (keys.includes('onboardedByOrgId')) return 'user';
-    if (keys.length === 1 && keys[0] === 'created_by') return 'item_owner';
+    // The ownership pre-flight now also reads the item's key columns (#557).
+    if (keys.includes('created_by') && !keys.includes('item_state')) return 'item_owner';
     return 'items_list';
   };
 
@@ -133,7 +134,16 @@ vi.mock('@api/db/postgres/drizzle_config', () => {
               if (mode === 'user') return Promise.resolve(state.userRows);
               if (mode === 'item_owner') {
                 return Promise.resolve(
-                  state.itemOwner ? [{ created_by: state.itemOwner }] : [],
+                  state.itemOwner
+                    ? [
+                        {
+                          created_by: state.itemOwner,
+                          item_network: 'blue_dot',
+                          item_domain: 'seeker',
+                          item_type: 'profile_1.0',
+                        },
+                      ]
+                    : [],
                 );
               }
               return Promise.resolve([]);
@@ -200,14 +210,32 @@ vi.mock('@/services/participant_consent', () => ({
     if (state.consentFail) throw state.consentFail;
     return { recorded: state.consentRecorded, promoted: false };
   }),
+  // Returns the keys of the drafts it promoted (#557) — the route publishes one
+  // item event per key, so this must be an array, not void.
   promoteEligibleDraftsForUser: vi.fn(
-    async (_tx: unknown, _userId: string) => {},
+    async (_tx: unknown, _userId: string) => [] as Array<Record<string, string>>,
   ),
 }));
 
-vi.mock('@/utils/publish_item_event', () => ({
-  publishItemEvent: vi.fn(async (..._a: unknown[]) => {}),
-}));
+vi.mock('@/utils/publish_item_event', () => {
+  const publishItemEvent = vi.fn(async (..._a: unknown[]) => {});
+  return {
+    publishItemEvent,
+    // Real fan-out + de-dupe over the mocked single publish, so assertions on
+    // publishItemEvent still see exactly the events the route emitted.
+    publishItemEvents: vi.fn(
+      async (keys: Array<Record<string, string>>, op: string, logger?: unknown) => {
+        const seen = new Set<string>();
+        for (const k of keys) {
+          const id = `${k.item_network}/${k.item_domain}/${k.item_type}/${k.item_id}`;
+          if (seen.has(id)) continue;
+          seen.add(id);
+          await publishItemEvent({ ...k, op }, logger);
+        }
+      },
+    ),
+  };
+});
 
 vi.mock('@/utils/item_decrypt', () => ({
   decryptItemPrivate: vi.fn(
@@ -688,6 +716,18 @@ describe('POST /admin/participant — write/failure paths', () => {
   });
 
   // --- account_only existing user, age-only write -------------------------
+
+  // The handler's own identifier guard. Unreachable over HTTP (the Zod schema
+  // refine rejects the body first), so it can only be exercised by invoking the
+  // handler directly as this suite does — it exists as defence in depth for
+  // non-HTTP callers.
+  it('defensive guard: neither email nor phone_number → 400 MISSING_IDENTIFIER, no lookup', async () => {
+    const res = await run({ body: { email: undefined, phone_number: undefined } });
+
+    expect(res.statusCode).toBe(400);
+    expect(res.body.error).toBe('MISSING_IDENTIFIER');
+    expect(state.txCalls).toBe(0);
+  });
 
   it('account_only existing user with age only (no compliance) → age persisted, drafts promoted, no consent write', async () => {
     state.userRows = [{ ...EXISTING_USER }];

@@ -474,9 +474,34 @@ describe('item_lifecycle_handler — pause / unpause', () => {
     expect(updates[0]?.values).not.toHaveProperty('item_private_state');
     expect(updates[0]?.values).not.toHaveProperty('item_locations');
     expect(invalidateItemFetchCache).toHaveBeenCalledWith('blue_dot', 'student');
-    // Not a retire: no de-index, no counterparty notifications.
-    expect(publishItemEvent).not.toHaveBeenCalled();
+    // A paused item must drop out of search, so the transition is published as an
+    // `upsert` (the row stays, its lifecycle_status changes) — #557. Only retire
+    // de-indexes, and only retire notifies counterparties.
+    expect(publishItemEvent).toHaveBeenCalledWith(
+      {
+        item_network: 'blue_dot',
+        item_domain: 'student',
+        item_type: 'profile_1.0',
+        item_id: ITEM_ID,
+        op: 'upsert',
+      },
+      log,
+    );
     expect(dispatchRetireCancelNotifications).not.toHaveBeenCalled();
+  });
+
+  it('publishes an upsert event when unpause puts the item back live', async () => {
+    // Without this the search index keeps the pre-unpause lifecycle until the
+    // next reconciliation sweep tick — and if the sweep is blinded, forever (#557).
+    rowQueue.push([existingItem({ lifecycle_status: 'paused' })]);
+    classify_item.mockReturnValue({ lifecycle_status: 'live' });
+
+    await call(ownerRequest('unpause'));
+
+    expect(publishItemEvent).toHaveBeenCalledWith(
+      expect.objectContaining({ item_id: ITEM_ID, op: 'upsert' }),
+      log,
+    );
   });
 
   it('unpause recomputes draft/live from the decrypted merged state', async () => {

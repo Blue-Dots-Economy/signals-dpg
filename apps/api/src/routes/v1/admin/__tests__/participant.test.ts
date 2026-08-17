@@ -100,14 +100,39 @@ vi.mock('@dpg/database', async (importOriginal) => {
 });
 
 // --- mock publishItemEvent so Redis is never touched in unit tests ---
-vi.mock('@/utils/publish_item_event', () => ({
-  publishItemEvent: vi.fn(async () => {}),
-}));
+vi.mock('@/utils/publish_item_event', () => {
+  const publishItemEvent = vi.fn(async () => {});
+  return {
+    publishItemEvent,
+    // Keeps the real fan-out + de-dupe, delegating to the mocked single publish,
+    // so every assertion on `publishItemEvent` still sees exactly the events the
+    // route emitted — a no-op stub here would hide them all.
+    publishItemEvents: vi.fn(
+      async (
+        keys: Array<Record<string, string>>,
+        op: string,
+        logger?: unknown,
+      ) => {
+        const seen = new Set<string>();
+        for (const k of keys) {
+          const id = `${k.item_network}/${k.item_domain}/${k.item_type}/${k.item_id}`;
+          if (seen.has(id)) continue;
+          seen.add(id);
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          await (publishItemEvent as any)({ ...k, op }, logger);
+        }
+      },
+    ),
+  };
+});
 
 // --- mock the consent service: it is unit-tested separately; here we only
 //     assert the route calls it with the right args and stays green.
 vi.mock('@/services/participant_consent', () => ({
   recordParticipantConsent: vi.fn(async () => ({ recorded: 0, promoted: false })),
+  // Returns the keys of the drafts an age write promoted (#557) — the route has to
+  // publish an item event for each so signals-search re-indexes them.
+  promoteEligibleDraftsForUser: vi.fn(async () => [] as unknown[]),
 }));
 
 // --- mock @dpg/schemas: keep real exports + neutralize the merge helper for tests ---
@@ -188,7 +213,9 @@ const classifyProjection = (proj: Record<string, unknown> | undefined): SelectMo
   if (!proj) return 'unknown';
   const keys = Object.keys(proj);
   if (keys.includes('onboardedByOrgId')) return 'user';
-  if (keys.length === 1 && keys[0] === 'created_by') return 'item_owner';
+  // The ownership pre-flight now also reads the item's key columns (#557), so it is
+  // no longer a single-column projection.
+  if (keys.includes('created_by') && !keys.includes('item_state')) return 'item_owner';
   if (keys.length === 1 && keys[0] === 'item_id') return 'existing_item_lookup';
   if (keys.includes('item_state') && keys.includes('item_private_state')) {
     return 'items_list';
@@ -223,7 +250,19 @@ vi.mock('@api/db/postgres/drizzle_config', () => {
                 ? dbState.itemOwnerLookup.get(item_id)
                 : undefined;
               if (!owner) return Promise.resolve([]);
-              return Promise.resolve([{ created_by: owner }]);
+              // Key columns come from the item row when the test seeded one, so a
+              // published event carries that item's real identity.
+              const seeded = (dbState.itemsByUser.get(owner) ?? []).find(
+                (r) => r.item_id === item_id,
+              );
+              return Promise.resolve([
+                {
+                  created_by: owner,
+                  item_network: seeded?.item_network ?? 'blue_dot',
+                  item_domain: seeded?.item_domain ?? 'seeker',
+                  item_type: seeded?.item_type ?? 'profile_1.0',
+                },
+              ]);
             }
             return Promise.resolve([]);
           }),
@@ -1284,6 +1323,73 @@ describe('POST /admin/participant', () => {
     expect(event.item_type).toBe('profile_1.0');
   });
 
+  // #557: both of these branches publish the item the request named. An age write
+  // can ALSO promote drafts the request never named (age is user-level), and those
+  // need re-indexing too — previously they were silently left `draft` in the index.
+  it('update_item branch: publishes the updated item AND the drafts the age write promoted', async () => {
+    const user_id = 'usr_update_collateral';
+    dbState.existingUserRows = [
+      { id: user_id, email: VALID_EMAIL, phoneNumber: null, onboardedByOrgId: 'org_ns_1' },
+    ];
+    dbState.itemsByUser.set(user_id, [
+      {
+        item_id: VALID_UUID_A,
+        item_network: 'blue_dot',
+        item_domain: 'seeker',
+        item_type: 'profile_1.0',
+        item_state: { v: 1 },
+        item_private_state: '',
+        created_at: new Date('2026-01-01T00:00:00Z'),
+        updated_at: new Date('2026-01-01T00:00:00Z'),
+      },
+    ]);
+    dbState.itemOwnerLookup.set(VALID_UUID_A, user_id);
+    lastQueriedUserId = user_id;
+    lastQueriedItemId = VALID_UUID_A;
+    const { promoteEligibleDraftsForUser } = await import('@/services/participant_consent');
+    vi.mocked(promoteEligibleDraftsForUser).mockResolvedValueOnce([
+      { item_network: 'blue_dot', item_domain: 'provider', item_type: 'profile_1.0', item_id: 'itm_other_draft' },
+    ]);
+    const app = await buildApp({ org_id: 'org_ns_1', org_type: 'network_service' });
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/participant',
+      payload: baseBody({ item_id: VALID_UUID_A, item_state: { v: 2 }, age: 25 }),
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(vi.mocked(publishItemEvent).mock.calls.map(([e]) => e.item_id)).toEqual([
+      VALID_UUID_A,
+      'itm_other_draft',
+    ]);
+  });
+
+  it('insert_item branch: publishes the inserted item AND the drafts the age write promoted', async () => {
+    const user_id = 'usr_insert_collateral';
+    dbState.existingUserRows = [
+      { id: user_id, email: VALID_EMAIL, phoneNumber: null, onboardedByOrgId: 'org_ns_1' },
+    ];
+    dbState.itemsByUser.set(user_id, []);
+    lastQueriedUserId = user_id;
+    const { promoteEligibleDraftsForUser } = await import('@/services/participant_consent');
+    vi.mocked(promoteEligibleDraftsForUser).mockResolvedValueOnce([
+      { item_network: 'blue_dot', item_domain: 'provider', item_type: 'profile_1.0', item_id: 'itm_other_draft' },
+    ]);
+    const app = await buildApp({ org_id: 'org_ns_1', org_type: 'network_service' });
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/participant',
+      payload: baseBody({ network: 'blue_dot', domain: 'seeker', item_type: 'profile_1.0', age: 25 }),
+    });
+
+    expect(res.statusCode).toBe(200);
+    const ids = vi.mocked(publishItemEvent).mock.calls.map(([e]) => e.item_id);
+    expect(ids).toHaveLength(2);
+    expect(ids[1]).toBe('itm_other_draft');
+  });
+
   it('create_new_user branch: publishItemEvent called with op:upsert after tx commits', async () => {
     dbState.signUpUserId = 'usr_new_enqueue';
     lastQueriedUserId = 'usr_new_enqueue';
@@ -1303,6 +1409,100 @@ describe('POST /admin/participant', () => {
     expect(event.item_type).toBe('profile_1.0');
     expect(typeof event.item_id).toBe('string');
     expect(event.item_id.length).toBeGreaterThan(0);
+  });
+
+  // #557: `item_id` alone resolves to update_item "with or without item_state" —
+  // a consent-only activation. recordParticipantConsent then promotes that item
+  // draft → live inside the transaction, and its `promoted` flag is the ONLY signal
+  // for it: no item_state means no updateItemInternal row, and the item is no longer
+  // `draft` so promoteEligibleDraftsForUser cannot return it either. Without
+  // consuming that flag the promotion publishes nothing and the profile stays
+  // `draft` in item_search — the exact bug this PR fixes, via another door.
+  it('update_item branch: a consent-only activation (no item_state) publishes the promoted item', async () => {
+    const user_id = 'usr_consent_only_activation';
+    dbState.existingUserRows = [
+      { id: user_id, email: VALID_EMAIL, phoneNumber: null, onboardedByOrgId: 'org_ns_1' },
+    ];
+    dbState.itemsByUser.set(user_id, [
+      {
+        item_id: VALID_UUID_A,
+        item_network: 'blue_dot',
+        item_domain: 'seeker',
+        item_type: 'profile_1.0',
+        item_state: { v: 1 },
+        item_private_state: '',
+        created_at: new Date('2026-01-01T00:00:00Z'),
+        updated_at: new Date('2026-01-01T00:00:00Z'),
+      },
+    ]);
+    dbState.itemOwnerLookup.set(VALID_UUID_A, user_id);
+    lastQueriedUserId = user_id;
+    lastQueriedItemId = VALID_UUID_A;
+    vi.mocked(recordParticipantConsent).mockResolvedValueOnce({ recorded: 1, promoted: true });
+    const { updateItemInternal } = await import('@/services/item_service');
+    vi.mocked(updateItemInternal).mockClear();
+    const app = await buildApp({ org_id: 'org_ns_1', org_type: 'network_service' });
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/participant',
+      payload: baseBody({
+        item_id: VALID_UUID_A,
+        item_state: undefined,
+        compliance: [{ key: 'profile_creation', value: true }],
+      }),
+    });
+
+    expect(res.statusCode).toBe(200);
+    // No item write happened — the promotion is the only reason to publish.
+    expect(vi.mocked(updateItemInternal)).not.toHaveBeenCalled();
+    expect(vi.mocked(publishItemEvent)).toHaveBeenCalledTimes(1);
+    const [event] = vi.mocked(publishItemEvent).mock.calls[0];
+    expect(event.op).toBe('upsert');
+    expect(event.item_id).toBe(VALID_UUID_A);
+    expect(event.item_network).toBe('blue_dot');
+    expect(event.item_domain).toBe('seeker');
+    expect(event.item_type).toBe('profile_1.0');
+  });
+
+  // #557: an age write can promote drafts this request never mentions (age is
+  // user-level, so it can unblock several profiles at once). Those promotions
+  // changed what search must return, and the account_only branch published nothing
+  // at all — so the profiles stayed `draft` in item_search: invisible in every
+  // ranked feed and every map viewport while `items` said live.
+  it('account_only branch: publishes an upsert for each draft the age write promoted', async () => {
+    const user_id = 'usr_age_promotes_drafts';
+    dbState.existingUserRows = [
+      { id: user_id, email: VALID_EMAIL, phoneNumber: null, onboardedByOrgId: 'org_agg_1' },
+    ];
+    dbState.itemsByUser.set(user_id, []);
+    lastQueriedUserId = user_id;
+    const { promoteEligibleDraftsForUser } = await import('@/services/participant_consent');
+    vi.mocked(promoteEligibleDraftsForUser).mockResolvedValueOnce([
+      { item_network: 'blue_dot', item_domain: 'seeker', item_type: 'profile_1.0', item_id: 'itm_a' },
+      { item_network: 'blue_dot', item_domain: 'provider', item_type: 'profile_1.0', item_id: 'itm_b' },
+    ]);
+    const app = await buildApp({ org_id: 'org_agg_1', org_type: 'aggregator' });
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/participant',
+      payload: baseBody({
+        item_state: undefined,
+        age: 25,
+        compliance: [
+          { key: 'user_terms', value: true },
+          { key: 'user_privacy', value: true },
+        ],
+      }),
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(vi.mocked(publishItemEvent)).toHaveBeenCalledTimes(2);
+    expect(vi.mocked(publishItemEvent).mock.calls.map(([e]) => [e.item_id, e.op])).toEqual([
+      ['itm_a', 'upsert'],
+      ['itm_b', 'upsert'],
+    ]);
   });
 
   it('error branches: publishItemEvent NOT called when insert_item fails', async () => {

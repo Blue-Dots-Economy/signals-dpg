@@ -112,6 +112,14 @@ vi.mock('@dpg/schemas', () => ({
 
 vi.mock('@/config', () => ({ apiConfig }));
 
+// accept_profile_consent publishes an item event after a promotion (#557), which
+// pulls in the Redis client — mocked here so this unit suite never touches Redis
+// (and so the `@/config` mock above doesn't need to grow `databasesConfig`).
+vi.mock('@/utils/publish_item_event', () => ({
+  publishItemEvent: vi.fn(async (..._a: unknown[]) => {}),
+  publishItemEvents: vi.fn(async (..._a: unknown[]) => {}),
+}));
+
 vi.mock('@/services/consent_version', () => ({
   resolveConsentVersion: (...a: unknown[]) => resolveConsentVersion(...a),
 }));

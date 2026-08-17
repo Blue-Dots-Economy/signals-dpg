@@ -265,21 +265,26 @@ const item_lifecycle_handler = async (
       (err) => request.log.warn({ err }, 'cache invalidation after lifecycle change failed'),
     );
 
-    // De-index a retired profile from search (#347 R9.5): the item_search index
-    // is maintained by the signals-search service off item events, so publish a
-    // `delete` to drop it from discovery. Best-effort (never fails the retire).
-    if (result.retired) {
-      await publishItemEvent(
-        {
-          item_network: result.item_network,
-          item_domain: result.item_domain,
-          item_type: result.item_type,
-          item_id: result.item_id,
-          op: 'delete',
-        },
-        request.log,
-      );
+    // Tell search about EVERY transition, not just retire (#557). The item_search
+    // index is maintained by the signals-search service off item events, and
+    // `/v1/search` is live-only: a pause that isn't published keeps a paused
+    // profile in everyone's ranked feed, and an unpause keeps a live one out of it,
+    // until the next reconciliation sweep — or permanently, if the sweep misses it
+    // (signals-search#122). Retire de-indexes (`delete`); every other transition
+    // rewrites the row (`upsert`). Best-effort: publishItemEvent swallows and warns,
+    // so a Redis outage can never fail an already-committed transition.
+    await publishItemEvent(
+      {
+        item_network: result.item_network,
+        item_domain: result.item_domain,
+        item_type: result.item_type,
+        item_id: result.item_id,
+        op: result.retired ? 'delete' : 'upsert',
+      },
+      request.log,
+    );
 
+    if (result.retired) {
       // Notify the counterparties whose connections were cancelled by the
       // retire (#418). Fire-and-forget, AFTER commit — never blocks or fails
       // the retire. No-op when notifications are unconfigured or a counterparty
