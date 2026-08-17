@@ -4,6 +4,9 @@ import { getNotificationClient } from '@/utils/notificationClient';
 import { authConfig, supportConfig, notification } from '@/config';
 import { renderOrgList } from '@/notifications/email/shells';
 import { getDefaultEmailSender } from '@/notifications/email/dispatch_email';
+// The fixed-window counter used by the send rate-limit and the verify throttle
+// below; shared with the support route since #551.
+import { incrWithinWindow } from '@/utils/rate_window';
 
 /** Codes the primitive raises; callers map these to HTTP responses. */
 export class GuardianOtpError extends Error {
@@ -70,17 +73,6 @@ const verifyRateKey = (scope: string) => `guardian_otp:vrl:${scope}`;
 // contact so no PII lands in a Redis key.
 const contactRateKey = (contact: string, contactType: GuardianContactType) =>
   `guardian_otp:crl:${contactType}:${createHash('sha256').update(contact).digest('hex')}`;
-
-/**
- * Fixed-window counter: increment `key`, set the window TTL on the first hit,
- * return the running count. Shared by the send rate-limit and the verify
- * throttle — the caller decides the max + which error to throw.
- */
-async function incrWithinWindow(key: string, windowSec: number): Promise<number> {
-  const count = await redis.incr(key);
-  if (count === 1) await redis.expire(key, windowSec);
-  return count;
-}
 
 /**
  * Map a `GuardianOtpError` to its HTTP reply shape ({status, error, message}),

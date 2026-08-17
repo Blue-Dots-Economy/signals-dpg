@@ -268,6 +268,13 @@ export const NotificationSecretsSchema = z.object({
   // Optional comma-separated CC list for support/contact-form submissions
   // (#283). Forwarded to nodemailer via the notification variables.
   SUPPORT_CC_EMAIL: z.string().optional(),
+  // Attachment budget for the support form (#551): total decoded bytes across
+  // all attachments on one submission, and how many files it may carry. Both
+  // are served to the UI by GET /api/v1/support/config, so raising them needs
+  // no UI rebuild — but the notification service enforces its own
+  // NOTIFY_ATTACHMENT_* caps too, so raise those alongside.
+  SUPPORT_ATTACHMENT_MAX_TOTAL_BYTES: z.coerce.number().int().positive().default(5 * 1024 * 1024),
+  SUPPORT_ATTACHMENT_MAX_FILES: z.coerce.number().int().positive().default(3),
   // Path to a mounted override of the bundled email messages file (#529).
   // Unset = bundled defaults only. A bad/missing file at this path never
   // breaks email — the loader falls back per key with warnings.

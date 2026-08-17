@@ -13,6 +13,7 @@ import { auth_signup } from '@/routes/v1/auth/signup';
 import { u18_precheck } from '@/routes/v1/auth/u18_precheck';
 import { user_domains } from '@/routes/v1/user/user_domains';
 import { submit_support } from '@/routes/v1/support/submit_support';
+import { support_config } from '@/routes/v1/support/support_config';
 
 const v1_routes: FastifyPluginAsyncZod = async (fastify) => {
   fastify.register(item_routes, { prefix: '/item' });
@@ -29,6 +30,7 @@ const v1_routes: FastifyPluginAsyncZod = async (fastify) => {
   fastify.register(u18_precheck, { prefix: '/auth' });
   fastify.register(user_domains, { prefix: '/user' });
   fastify.register(submit_support, { prefix: '/support' });
+  fastify.register(support_config, { prefix: '/support' });
 };
 
 export default v1_routes;

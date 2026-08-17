@@ -15,6 +15,17 @@ import { substituteHtml, substitutePlain } from './substitute';
  * delivery failure (OTP 502s, support 502); best-effort sends never throw —
  * an email failure must never block the action that triggered it.
  */
+/**
+ * A file to attach to the email. Base64 rather than a Buffer because it travels
+ * to the notification service as JSON; the relay decodes it (#551).
+ */
+export interface EmailAttachment {
+  filename: string;
+  contentType: string;
+  /** Base64, no `data:` prefix. */
+  data: string;
+}
+
 export interface EmailNotifyRequest {
   channel: 'email';
   template_id: 'basic_email';
@@ -28,6 +39,7 @@ export interface EmailNotifyRequest {
     subject: string;
     html: string;
     cc?: string;
+    attachments?: EmailAttachment[];
   };
 }
 
@@ -40,6 +52,12 @@ export interface DispatchEmailArgs {
   dedupeId?: string;
   replyTo?: string;
   cc?: string;
+  /**
+   * Files to attach. Kept out of `variables` because those are copy tokens that
+   * get substituted and HTML-escaped; attachments are opaque payload and must
+   * never pass through substitution.
+   */
+  attachments?: EmailAttachment[];
   /** cta-shell cases only: */
   ctaUrl?: string;
   network?: string;
@@ -139,6 +157,7 @@ export function createEmailSender(deps: EmailSenderDeps): EmailSender {
         subject,
         html,
         ...(args.cc ? { cc: args.cc } : {}),
+        ...(args.attachments?.length ? { attachments: args.attachments } : {}),
       },
     });
   }

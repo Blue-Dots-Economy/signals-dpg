@@ -3,6 +3,8 @@ import Fastify from 'fastify';
 import { serializerCompiler, validatorCompiler } from 'fastify-type-provider-zod';
 
 const dispatchEmailMock = vi.fn();
+/** Running count the mocked fixed-window counter returns (rate-limit tests). */
+const incrWithinWindowMock = vi.fn(async () => 1);
 
 function mockDeps(cfg: {
   recipients?: string;
@@ -11,7 +13,10 @@ function mockDeps(cfg: {
   linkBaseUrl?: string;
   teamName?: string;
   client?: boolean;
+  attachmentMaxTotalBytes?: number;
+  attachmentMaxFiles?: number;
 }) {
+  vi.doMock('@/utils/rate_window', () => ({ incrWithinWindow: incrWithinWindowMock }));
   vi.doMock('@api/plugins/auth/auth_middleware', () => ({
     auth_middleware_if_enabled: async (req: { user?: { id: string } }) => {
       req.user = { id: 'u1' };
@@ -28,6 +33,8 @@ function mockDeps(cfg: {
       fromEmail: cfg.fromEmail,
       linkBaseUrl: cfg.linkBaseUrl,
       teamName: cfg.teamName ?? 'Blue Dot',
+      attachmentMaxTotalBytes: cfg.attachmentMaxTotalBytes ?? 5 * 1024 * 1024,
+      attachmentMaxFiles: cfg.attachmentMaxFiles ?? 3,
     },
     instance: { INSTANCE_NAME: 'Blue Dot' },
   }));
@@ -68,6 +75,8 @@ describe('POST /api/v1/support', () => {
     vi.resetModules();
     dispatchEmailMock.mockReset();
     dispatchEmailMock.mockResolvedValue({ ok: true });
+    incrWithinWindowMock.mockReset();
+    incrWithinWindowMock.mockResolvedValue(1);
   });
 
   it('sends the support email and returns 201 with a reference', async () => {
@@ -206,6 +215,226 @@ describe('POST /api/v1/support', () => {
     const res = await app.inject({ method: 'POST', url: '/api/v1/support', payload: validPayload });
     expect(res.statusCode).toBe(502);
     expect(res.json().error).toBe('SUPPORT_SEND_FAILED');
+    await app.close();
+  });
+});
+
+describe('POST /api/v1/support — attachments (#551)', () => {
+  const png = (bytes: number) => ({
+    filename: 'evidence.png',
+    contentType: 'image/png',
+    data: Buffer.alloc(bytes, 7).toString('base64'),
+  });
+
+  beforeEach(() => {
+    vi.resetModules();
+    dispatchEmailMock.mockReset();
+    dispatchEmailMock.mockResolvedValue({ ok: true });
+    incrWithinWindowMock.mockReset();
+    incrWithinWindowMock.mockResolvedValue(1);
+  });
+
+  it('forwards accepted attachments and lists them in the details table', async () => {
+    mockDeps({ recipients: 'support@org.com', fromEmail: 'from@org.com' });
+    const app = await buildApp();
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/v1/support',
+      payload: { ...validPayload, attachments: [png(2048)] },
+    });
+    expect(res.statusCode).toBe(201);
+    const arg = dispatchEmailMock.mock.calls[0][0];
+    expect(arg.attachments).toHaveLength(1);
+    expect(arg.attachments[0].filename).toBe('evidence.png');
+    expect(arg.attachments[0].contentType).toBe('image/png');
+    expect(arg.attachments[0].data).toBe(png(2048).data);
+    expect(arg.variables.detailsTable).toContain('Attachments (1)');
+    expect(arg.variables.detailsTable).toContain('evidence.png');
+    await app.close();
+  });
+
+  it('omits the attachments key when none are submitted', async () => {
+    mockDeps({ recipients: 'support@org.com', fromEmail: 'from@org.com' });
+    const app = await buildApp();
+    const res = await app.inject({ method: 'POST', url: '/api/v1/support', payload: validPayload });
+    expect(res.statusCode).toBe(201);
+    expect(dispatchEmailMock.mock.calls[0][0]).not.toHaveProperty('attachments');
+    expect(dispatchEmailMock.mock.calls[0][0].variables.detailsTable).not.toContain('Attachments');
+    await app.close();
+  });
+
+  it('strips a path from the submitted filename before it reaches the email', async () => {
+    mockDeps({ recipients: 'support@org.com', fromEmail: 'from@org.com' });
+    const app = await buildApp();
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/v1/support',
+      payload: {
+        ...validPayload,
+        attachments: [{ ...png(64), filename: '../../etc/passwd.png' }],
+      },
+    });
+    expect(res.statusCode).toBe(201);
+    expect(dispatchEmailMock.mock.calls[0][0].attachments[0].filename).toBe('passwd.png');
+    await app.close();
+  });
+
+  it('returns 400 ATTACHMENT_COUNT_EXCEEDED past the configured file count', async () => {
+    mockDeps({ recipients: 'support@org.com', fromEmail: 'from@org.com', attachmentMaxFiles: 2 });
+    const app = await buildApp();
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/v1/support',
+      payload: { ...validPayload, attachments: [png(16), png(16), png(16)] },
+    });
+    expect(res.statusCode).toBe(400);
+    expect(res.json().error).toBe('ATTACHMENT_COUNT_EXCEEDED');
+    expect(res.json().message).toContain('2 files');
+    expect(dispatchEmailMock).not.toHaveBeenCalled();
+    await app.close();
+  });
+
+  it('returns 400 ATTACHMENT_TOO_LARGE past the configured byte budget', async () => {
+    mockDeps({
+      recipients: 'support@org.com',
+      fromEmail: 'from@org.com',
+      attachmentMaxTotalBytes: 4096,
+    });
+    const app = await buildApp();
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/v1/support',
+      payload: { ...validPayload, attachments: [png(3000), png(3000)] },
+    });
+    expect(res.statusCode).toBe(400);
+    expect(res.json().error).toBe('ATTACHMENT_TOO_LARGE');
+    expect(dispatchEmailMock).not.toHaveBeenCalled();
+    await app.close();
+  });
+
+  it('returns 400 ATTACHMENT_TYPE_NOT_ALLOWED for a disallowed content type', async () => {
+    mockDeps({ recipients: 'support@org.com', fromEmail: 'from@org.com' });
+    const app = await buildApp();
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/v1/support',
+      payload: {
+        ...validPayload,
+        attachments: [{ filename: 'payload.exe', contentType: 'application/x-msdownload', data: 'eA==' }],
+      },
+    });
+    expect(res.statusCode).toBe(400);
+    expect(res.json().error).toBe('ATTACHMENT_TYPE_NOT_ALLOWED');
+    expect(res.json().message).toContain('payload.exe');
+    expect(dispatchEmailMock).not.toHaveBeenCalled();
+    await app.close();
+  });
+
+  it('returns 413 when the body exceeds the derived limit', async () => {
+    // 64KB budget => ~85KB base64 + 256KB headroom; a 512KB payload is over it.
+    mockDeps({
+      recipients: 'support@org.com',
+      fromEmail: 'from@org.com',
+      attachmentMaxTotalBytes: 64 * 1024,
+    });
+    const app = await buildApp();
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/v1/support',
+      payload: { ...validPayload, attachments: [png(512 * 1024)] },
+    });
+    expect(res.statusCode).toBe(413);
+    expect(dispatchEmailMock).not.toHaveBeenCalled();
+    await app.close();
+  });
+
+  it('counts an invalid submission against the quota, not just accepted ones', async () => {
+    // The body is already buffered and parsed by the time the handler runs, so a
+    // rejected submission costs the same as an accepted one. If only accepted
+    // ones counted, a caller could post oversized rubbish without limit.
+    mockDeps({ recipients: 'support@org.com', fromEmail: 'from@org.com', attachmentMaxFiles: 2 });
+    const app = await buildApp();
+    const png = {
+      filename: 'a.png',
+      contentType: 'image/png',
+      data: Buffer.alloc(16, 7).toString('base64'),
+    };
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/v1/support',
+      payload: { ...validPayload, attachments: [png, png, png] },
+    });
+    expect(res.statusCode).toBe(400);
+    expect(res.json().error).toBe('ATTACHMENT_COUNT_EXCEEDED');
+    expect(incrWithinWindowMock).toHaveBeenCalledTimes(1);
+    await app.close();
+  });
+
+  it('429s an over-quota caller before it even looks at the attachments', async () => {
+    incrWithinWindowMock.mockResolvedValue(6);
+    mockDeps({ recipients: 'support@org.com', fromEmail: 'from@org.com', attachmentMaxFiles: 1 });
+    const app = await buildApp();
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/v1/support',
+      payload: {
+        ...validPayload,
+        attachments: [
+          { filename: 'run.exe', contentType: 'application/x-msdownload', data: 'eA==' },
+        ],
+      },
+    });
+    expect(res.statusCode).toBe(429);
+    expect(dispatchEmailMock).not.toHaveBeenCalled();
+    await app.close();
+  });
+
+});
+
+describe('POST /api/v1/support — rate limit (#551)', () => {
+  beforeEach(() => {
+    vi.resetModules();
+    dispatchEmailMock.mockReset();
+    dispatchEmailMock.mockResolvedValue({ ok: true });
+    incrWithinWindowMock.mockReset();
+  });
+
+  it('returns 429 SUPPORT_RATE_LIMITED once the window max is passed', async () => {
+    incrWithinWindowMock.mockResolvedValue(6);
+    mockDeps({ recipients: 'support@org.com', fromEmail: 'from@org.com' });
+    const app = await buildApp();
+    const res = await app.inject({ method: 'POST', url: '/api/v1/support', payload: validPayload });
+    expect(res.statusCode).toBe(429);
+    expect(res.json().error).toBe('SUPPORT_RATE_LIMITED');
+    expect(dispatchEmailMock).not.toHaveBeenCalled();
+    await app.close();
+  });
+
+  it('allows the submission at the window max', async () => {
+    incrWithinWindowMock.mockResolvedValue(5);
+    mockDeps({ recipients: 'support@org.com', fromEmail: 'from@org.com' });
+    const app = await buildApp();
+    const res = await app.inject({ method: 'POST', url: '/api/v1/support', payload: validPayload });
+    expect(res.statusCode).toBe(201);
+    await app.close();
+  });
+
+  it('fails open when the counter backend is down, rather than blocking a complaint', async () => {
+    incrWithinWindowMock.mockRejectedValue(new Error('redis down'));
+    mockDeps({ recipients: 'support@org.com', fromEmail: 'from@org.com' });
+    const app = await buildApp();
+    const res = await app.inject({ method: 'POST', url: '/api/v1/support', payload: validPayload });
+    expect(res.statusCode).toBe(201);
+    expect(dispatchEmailMock).toHaveBeenCalledTimes(1);
+    await app.close();
+  });
+
+  it('does not consume quota when support is not configured', async () => {
+    mockDeps({ recipients: undefined, fromEmail: 'from@org.com' });
+    const app = await buildApp();
+    const res = await app.inject({ method: 'POST', url: '/api/v1/support', payload: validPayload });
+    expect(res.statusCode).toBe(503);
+    expect(incrWithinWindowMock).not.toHaveBeenCalled();
     await app.close();
   });
 });
