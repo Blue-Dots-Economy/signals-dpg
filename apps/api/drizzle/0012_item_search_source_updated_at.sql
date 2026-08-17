@@ -18,12 +18,31 @@
 -- for the recency sort and index-freshness monitoring.
 --
 -- NULL = indexed before this column existed; the sweep COALESCEs those to
--- `indexed_at`, preserving today's behaviour for old rows. Rows already corrupted
--- by the race are NOT self-healed by this migration (their `indexed_at` is still
--- ahead of the missed update) — repair them with:
---   UPDATE items SET updated_at = now() WHERE item_id IN (
---     SELECT i.item_id FROM items i
---     JOIN item_search s USING (item_network, item_domain, item_type, item_id)
---     WHERE i.lifecycle_status <> s.lifecycle_status);
+-- `indexed_at`, preserving today's behaviour for old rows.
+--
+-- ONE-TIME REPAIR for rows already corrupted before the fix. They are NOT
+-- self-healed: their `indexed_at` is still ahead of the update they missed, and a
+-- NULL `source_updated_at` COALESCEs straight back to it. Reset the marker instead,
+-- which makes every row look stale exactly once:
+--
+--   UPDATE item_search SET source_updated_at = '-infinity';
+--
+-- The sweep then re-selects the whole corpus once, batch by batch. Genuinely
+-- unchanged rows hit the ingest content-hash check, are skipped WITHOUT calling the
+-- embedder, and settle because the fixed worker advances the marker on a skip; only
+-- rows that actually diverged are re-embedded and rewritten. That is both cheaper
+-- and more complete than bumping `items.updated_at`, which repairs only the rows you
+-- can name, rewrites the recency signal behind the browse feeds, and — being keyed
+-- off `lifecycle_status` divergence — misses a row whose `item_state` or geo was
+-- corrupted by the same race.
+--
+-- ORDER MATTERS: run this only AFTER the signals-search build that advances the
+-- marker on skip is deployed. Against the older worker a skip writes nothing, so no
+-- row would ever settle and the sweep would re-scan the corpus forever.
+--
+-- Verify (expect 0):
+--   SELECT count(*) FROM items i
+--   JOIN item_search s USING (item_network, item_domain, item_type, item_id)
+--   WHERE i.lifecycle_status <> s.lifecycle_status;
 
 ALTER TABLE item_search ADD COLUMN IF NOT EXISTS source_updated_at timestamptz;

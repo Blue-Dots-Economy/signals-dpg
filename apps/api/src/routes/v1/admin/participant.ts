@@ -687,9 +687,18 @@ async function handleUpdateItem(
   let promotedDrafts: ItemEventKey[] = [];
 
   // Runtime ownership check — pre-flight ahead of updateItemInternal so
-  // mismatches produce 403 ITEM_NOT_OWNED_BY_USER rather than 404.
+  // mismatches produce 403 ITEM_NOT_OWNED_BY_USER rather than 404. Reads the item's
+  // key columns in the same query: this branch can publish an event for the named
+  // item even when no item_state was sent, and the key must come from the row —
+  // body.network / body.domain / body.item_type are optional and need not describe
+  // this item.
   const [ownerRow] = await db
-    .select({ created_by: items.created_by })
+    .select({
+      created_by: items.created_by,
+      item_network: items.item_network,
+      item_domain: items.item_domain,
+      item_type: items.item_type,
+    })
     .from(items)
     .where(eq(items.item_id, item_id))
     .limit(1);
@@ -699,24 +708,30 @@ async function handleUpdateItem(
       message: 'item_id does not belong to the resolved user',
     });
   }
+  const namedItem: ItemEventKey = {
+    item_network: ownerRow.item_network,
+    item_domain: ownerRow.item_domain,
+    item_type: ownerRow.item_type,
+    item_id,
+  };
 
   const hasItemState = Boolean(
     body.item_state && Object.keys(body.item_state).length > 0,
   );
-  let updatedRow:
-    | { item_network: string; item_domain: string; item_type: string; item_id: string }
-    | undefined;
+  // Either of these means the named item changed and search must hear about it.
+  let itemWritten = false;
+  let itemPromoted = false;
   try {
     await db.transaction(async (tx) => {
       if (hasItemState) {
-        const updateResult = await updateItemInternal(
+        await updateItemInternal(
           tx,
           item_id,
           existing.id,
           true, // isAdmin — ownership already verified above
           { item_state: body.item_state ?? {} },
         );
-        updatedRow = updateResult?.row;
+        itemWritten = true;
       }
       if (body.age != null) {
         await tx
@@ -734,6 +749,14 @@ async function handleUpdateItem(
         acceptedAt: new Date(),
       });
       consent_recorded = consent.recorded;
+      // `item_id` resolves to update_item with OR without item_state (#309): a
+      // consent-only activation sends no fields, and recordParticipantConsent
+      // promotes the named item draft → live itself. Its `promoted` flag is the only
+      // signal for that — there is no updateItemInternal row, and the item is no
+      // longer `draft`, so promoteEligibleDraftsForUser below cannot return it
+      // either. Dropping it here would leave the profile `draft` in item_search:
+      // #557 through another door.
+      itemPromoted = consent.promoted;
       if (body.age != null) {
         promotedDrafts = await promoteEligibleDraftsForUser(tx, existing.id);
       }
@@ -747,10 +770,10 @@ async function handleUpdateItem(
     });
   }
 
-  // The updated item, plus any OTHER draft the age write promoted (#557).
-  // De-duplicated, since the two sets can overlap.
+  // The named item when it was written or promoted, plus any OTHER draft the age
+  // write promoted (#557). De-duplicated, since the two sets can overlap.
   await publishItemEvents(
-    updatedRow ? [updatedRow, ...promotedDrafts] : promotedDrafts,
+    itemWritten || itemPromoted ? [namedItem, ...promotedDrafts] : promotedDrafts,
     'upsert',
     request.log,
   );

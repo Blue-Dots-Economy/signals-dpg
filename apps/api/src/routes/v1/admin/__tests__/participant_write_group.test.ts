@@ -118,7 +118,8 @@ vi.mock('@api/db/postgres/drizzle_config', () => {
   const classify = (proj: Record<string, unknown>) => {
     const keys = Object.keys(proj);
     if (keys.includes('onboardedByOrgId')) return 'user';
-    if (keys.length === 1 && keys[0] === 'created_by') return 'item_owner';
+    // The ownership pre-flight now also reads the item's key columns (#557).
+    if (keys.includes('created_by') && !keys.includes('item_state')) return 'item_owner';
     return 'items_list';
   };
 
@@ -133,7 +134,16 @@ vi.mock('@api/db/postgres/drizzle_config', () => {
               if (mode === 'user') return Promise.resolve(state.userRows);
               if (mode === 'item_owner') {
                 return Promise.resolve(
-                  state.itemOwner ? [{ created_by: state.itemOwner }] : [],
+                  state.itemOwner
+                    ? [
+                        {
+                          created_by: state.itemOwner,
+                          item_network: 'blue_dot',
+                          item_domain: 'seeker',
+                          item_type: 'profile_1.0',
+                        },
+                      ]
+                    : [],
                 );
               }
               return Promise.resolve([]);

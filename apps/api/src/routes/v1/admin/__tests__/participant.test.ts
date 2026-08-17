@@ -213,7 +213,9 @@ const classifyProjection = (proj: Record<string, unknown> | undefined): SelectMo
   if (!proj) return 'unknown';
   const keys = Object.keys(proj);
   if (keys.includes('onboardedByOrgId')) return 'user';
-  if (keys.length === 1 && keys[0] === 'created_by') return 'item_owner';
+  // The ownership pre-flight now also reads the item's key columns (#557), so it is
+  // no longer a single-column projection.
+  if (keys.includes('created_by') && !keys.includes('item_state')) return 'item_owner';
   if (keys.length === 1 && keys[0] === 'item_id') return 'existing_item_lookup';
   if (keys.includes('item_state') && keys.includes('item_private_state')) {
     return 'items_list';
@@ -248,7 +250,19 @@ vi.mock('@api/db/postgres/drizzle_config', () => {
                 ? dbState.itemOwnerLookup.get(item_id)
                 : undefined;
               if (!owner) return Promise.resolve([]);
-              return Promise.resolve([{ created_by: owner }]);
+              // Key columns come from the item row when the test seeded one, so a
+              // published event carries that item's real identity.
+              const seeded = (dbState.itemsByUser.get(owner) ?? []).find(
+                (r) => r.item_id === item_id,
+              );
+              return Promise.resolve([
+                {
+                  created_by: owner,
+                  item_network: seeded?.item_network ?? 'blue_dot',
+                  item_domain: seeded?.item_domain ?? 'seeker',
+                  item_type: seeded?.item_type ?? 'profile_1.0',
+                },
+              ]);
             }
             return Promise.resolve([]);
           }),
@@ -1395,6 +1409,60 @@ describe('POST /admin/participant', () => {
     expect(event.item_type).toBe('profile_1.0');
     expect(typeof event.item_id).toBe('string');
     expect(event.item_id.length).toBeGreaterThan(0);
+  });
+
+  // #557: `item_id` alone resolves to update_item "with or without item_state" —
+  // a consent-only activation. recordParticipantConsent then promotes that item
+  // draft → live inside the transaction, and its `promoted` flag is the ONLY signal
+  // for it: no item_state means no updateItemInternal row, and the item is no longer
+  // `draft` so promoteEligibleDraftsForUser cannot return it either. Without
+  // consuming that flag the promotion publishes nothing and the profile stays
+  // `draft` in item_search — the exact bug this PR fixes, via another door.
+  it('update_item branch: a consent-only activation (no item_state) publishes the promoted item', async () => {
+    const user_id = 'usr_consent_only_activation';
+    dbState.existingUserRows = [
+      { id: user_id, email: VALID_EMAIL, phoneNumber: null, onboardedByOrgId: 'org_ns_1' },
+    ];
+    dbState.itemsByUser.set(user_id, [
+      {
+        item_id: VALID_UUID_A,
+        item_network: 'blue_dot',
+        item_domain: 'seeker',
+        item_type: 'profile_1.0',
+        item_state: { v: 1 },
+        item_private_state: '',
+        created_at: new Date('2026-01-01T00:00:00Z'),
+        updated_at: new Date('2026-01-01T00:00:00Z'),
+      },
+    ]);
+    dbState.itemOwnerLookup.set(VALID_UUID_A, user_id);
+    lastQueriedUserId = user_id;
+    lastQueriedItemId = VALID_UUID_A;
+    vi.mocked(recordParticipantConsent).mockResolvedValueOnce({ recorded: 1, promoted: true });
+    const { updateItemInternal } = await import('@/services/item_service');
+    vi.mocked(updateItemInternal).mockClear();
+    const app = await buildApp({ org_id: 'org_ns_1', org_type: 'network_service' });
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/participant',
+      payload: baseBody({
+        item_id: VALID_UUID_A,
+        item_state: undefined,
+        compliance: [{ key: 'profile_creation', value: true }],
+      }),
+    });
+
+    expect(res.statusCode).toBe(200);
+    // No item write happened — the promotion is the only reason to publish.
+    expect(vi.mocked(updateItemInternal)).not.toHaveBeenCalled();
+    expect(vi.mocked(publishItemEvent)).toHaveBeenCalledTimes(1);
+    const [event] = vi.mocked(publishItemEvent).mock.calls[0];
+    expect(event.op).toBe('upsert');
+    expect(event.item_id).toBe(VALID_UUID_A);
+    expect(event.item_network).toBe('blue_dot');
+    expect(event.item_domain).toBe('seeker');
+    expect(event.item_type).toBe('profile_1.0');
   });
 
   // #557: an age write can promote drafts this request never mentions (age is
