@@ -109,8 +109,20 @@ cover Android camera and voice-recorder output. Omitting them would reject the
 most likely real-world submissions.
 
 Distinct error codes per rejection reason, not one generic 400:
-`ATTACHMENT_COUNT_EXCEEDED`, `ATTACHMENT_TOO_LARGE`, `ATTACHMENT_TYPE_NOT_ALLOWED`
-(Signals' `{error, message}` shape; aggregator's `httpError` catalogue).
+`ATTACHMENT_COUNT_EXCEEDED`, `ATTACHMENT_TOO_LARGE`, `ATTACHMENT_TYPE_NOT_ALLOWED`,
+`ATTACHMENT_INVALID_ENCODING` (Signals' `{error, message}` shape; aggregator's
+`httpError` catalogue).
+
+`ATTACHMENT_INVALID_ENCODING` exists because `Buffer.from(x, 'base64')` ignores
+every character outside the alphabet instead of failing: a `data:` URL prefix, a
+truncated upload or binary noise decodes to *something* and is mailed as a
+corrupt file, with nothing logged anywhere. So the `data` value is checked
+against the base64 alphabet before it is decoded — with a single character class
+plus a `length % 4` test rather than the grouped RFC-4648 pattern, which
+backtracks over every 4-char group when the tail fails and overflowed V8's regex
+stack on a max-legal 5 MB attachment. The two accept identical inputs (verified
+by differential comparison against the `z.base64()` the relay applies), so no
+payload can pass here and be rejected downstream.
 
 ## Configuration
 

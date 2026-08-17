@@ -152,3 +152,53 @@ describe('supportBodyLimitBytes', () => {
     );
   });
 });
+
+describe('base64 validation', () => {
+  const png = (data: string) => [{ filename: 'a.png', contentType: 'image/png', data }];
+
+  it('rejects payloads that are not base64, rather than mailing garbage bytes', () => {
+    // Buffer.from(x, 'base64') ignores anything outside the alphabet, so each of
+    // these would otherwise decode to something and be delivered as a corrupt
+    // file with no error raised.
+    for (const bad of [
+      'data:image/png;base64,aGVsbG8=', // a data: URL, as some clients send
+      'not base64 at all!!',
+      'aGVsbG8=extra',
+      '@@@@',
+      '   ',
+    ]) {
+      const result = validateSupportAttachments(png(bad), LIMITS);
+      expect(result).toMatchObject({ ok: false, error: 'ATTACHMENT_INVALID_ENCODING' });
+    }
+  });
+
+  it('names the offending file so the form can say which one', () => {
+    const result = validateSupportAttachments(
+      [{ filename: 'holiday snap.png', contentType: 'image/png', data: '@@@' }],
+      LIMITS,
+    );
+    if (result.ok) throw new Error('expected a rejection');
+    expect(result.message).toContain('holiday snap.png');
+  });
+
+  it('accepts base64 wrapped at column boundaries, and forwards it compacted', () => {
+    // Wrapping every 76 chars is legitimate; the notification service validates
+    // strictly, so what we forward must be canonical.
+    const raw = Buffer.alloc(200, 9).toString('base64');
+    const wrapped = raw.replace(/(.{40})/g, '$1\n');
+    const result = validateSupportAttachments(png(wrapped), LIMITS);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.attachments[0].data).toBe(raw);
+    expect(result.attachments[0].data).not.toContain('\n');
+    expect(result.attachments[0].bytes).toBe(200);
+  });
+
+  it('validates a max-legal payload without backtracking over it', () => {
+    // 5 MB of bytes is ~7 MB of base64. The grouped RFC-4648 pattern this check
+    // replaced overflowed V8's regex stack on exactly this input, turning a
+    // valid submission into a 500 — so the boundary is worth asserting.
+    const max = Buffer.alloc(LIMITS.maxTotalBytes, 7).toString('base64');
+    expect(validateSupportAttachments(png(max), LIMITS).ok).toBe(true);
+  });
+});

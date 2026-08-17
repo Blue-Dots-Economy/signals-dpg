@@ -18,7 +18,8 @@ export interface SupportAttachmentInput {
 export type SupportAttachmentErrorCode =
   | 'ATTACHMENT_COUNT_EXCEEDED'
   | 'ATTACHMENT_TOO_LARGE'
-  | 'ATTACHMENT_TYPE_NOT_ALLOWED';
+  | 'ATTACHMENT_TYPE_NOT_ALLOWED'
+  | 'ATTACHMENT_INVALID_ENCODING';
 
 export interface AcceptedSupportAttachment extends SupportAttachmentInput {
   /** Decoded size, for the email's attachment listing. */
@@ -111,6 +112,40 @@ export const SUPPORT_ALLOWED_EXTENSIONS: readonly string[] = [
 const MAX_FILENAME_LENGTH = 120;
 
 /**
+ * Base64 alphabet plus optional padding. Deliberately a single character class
+ * with no grouped quantifier: the obvious RFC-4648 pattern
+ * (`^(?:[A-Za-z0-9+/]{4})*(?:..[AEIMQUYcgkosw048]=|...)?$`) has to backtrack over
+ * every 4-char group when the tail fails to match, and on a max-legal 5 MB
+ * attachment that overflowed V8's regex stack — a valid submission became a 500.
+ * This form is linear in the input, so a 7 MB string costs the same whether it
+ * passes or fails.
+ *
+ * `length % 4` carries the rest of the rule (the grouped pattern got that from
+ * its `{4}` repetition). Together they accept exactly what the notification
+ * service's `z.base64()` accepts — verified by differential comparison — so this
+ * side can never wave through a payload the relay will reject.
+ */
+const BASE64_RE = /^[A-Za-z0-9+/]*={0,2}$/;
+
+/**
+ * Strips whitespace and checks the result really is base64.
+ *
+ * Worth doing rather than trusting the decoder: `Buffer.from(x, 'base64')`
+ * silently ignores anything outside the alphabet, so a `data:` URL prefix, a
+ * truncated upload or binary noise decodes to garbage and is mailed as a corrupt
+ * file with no error raised anywhere. Wrapped base64 (newlines every 76 chars)
+ * is legitimate, so it is compacted rather than rejected.
+ *
+ * @param data - Raw `data` value as submitted.
+ * @returns The compacted base64, or null when it is not base64 at all.
+ */
+export function normaliseBase64(data: string): string | null {
+  const compact = data.replace(/\s/g, '');
+  if (!compact || compact.length % 4 !== 0 || !BASE64_RE.test(compact)) return null;
+  return compact;
+}
+
+/**
  * Decoded byte length of a base64 string without decoding it, so an oversized
  * payload never costs a Buffer allocation. Whitespace is not counted.
  */
@@ -185,12 +220,24 @@ export function validateSupportAttachments(
         message: `${sanitizeFilename(item.filename)} is not an accepted file type. Attach an image, video or audio file.`,
       };
     }
-    const bytes = decodedBase64Length(item.data);
+    // Checked, not assumed: the decoder ignores anything outside the base64
+    // alphabet, so an unvalidated payload is mailed as a corrupt file with no
+    // error raised. The compacted form is what gets forwarded, so the
+    // notification service's strict base64 check never trips on wrapped input.
+    const data = normaliseBase64(item.data);
+    if (!data) {
+      return {
+        ok: false,
+        error: 'ATTACHMENT_INVALID_ENCODING',
+        message: `${sanitizeFilename(item.filename)} could not be read. Please attach the file again.`,
+      };
+    }
+    const bytes = decodedBase64Length(data);
     totalBytes += bytes;
     accepted.push({
       filename: sanitizeFilename(item.filename),
       contentType,
-      data: item.data,
+      data,
       bytes,
     });
   }
