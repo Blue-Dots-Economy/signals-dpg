@@ -71,6 +71,137 @@ stable.
 
 ---
 
+## What each service emits
+
+The whole design at a glance. Everything below is detailed later; this section is
+meant to be readable on its own.
+
+**OTEL has three signal types**, and every table below is labelled with which one
+it covers, because they are produced and consumed differently:
+
+| OTEL signal type | What it is | Produced as |
+|---|---|---|
+| **Event** | A log record carrying an `event.name` | One record per occurrence |
+| **Trace** | A span, with parent/child and trace context | One span per operation |
+| **Metric** | A counter, histogram, or gauge | Continuously aggregated |
+
+> **`event.category` is not the OTEL signal type.** It is a sub-classification
+> *within* Events (`state_change`, `interaction`, `view`, `query`, `delivery`,
+> `error`). Every row in an Events table below is an OTEL Event regardless of its
+> category.
+
+| Service | Events | Traces | Metrics | Trust tier |
+|---|---|---|---|---|
+| **signals-api** | ✓ all domain state changes | ✓ | ✓ | 1 — record. Notifications, metrics of record, audit, compliance |
+| **signals-ui** | ✓ UI only | — | — | 2 — behavioural. Funnel and UX analysis only |
+| **aggregator-ui** | ✓ UI only | — | — | 3 — federated. Its own surface only |
+
+The two UIs emit **Events only**. Browser tracing and client metrics are out of
+scope for now: client instrumentation is still experimental, and neither UI is
+trusted for anything measured (§ trust tiers below).
+
+### signals-api — Events
+
+OTEL signal type: **Event**. Every row is a server-side write, emitted by the
+instance that owns it, inside the same transaction. `N` marks events the
+notification consumer acts on.
+
+| `event.name` | `event.category` | Scenario |
+|---|---|---|
+| `action.created` | `state_change` | A seeker applies to / connects with a provider item. **N** |
+| `action.status_changed` | `state_change` | Provider accepts, shortlists, or rejects; either side withdraws or cancels. **N** |
+| `action.blocked` | `error` | Open-action cap reached for the pair, or a minor's action blocked on an external channel |
+| `action.contact_revealed` | `state_change` | Contact details revealed on an accepted action (mirrors the PII-reveal audit) |
+| `item.created` | `state_change` | Profile or item created — **profile creation** is this event with `object.subtype: profile_1.0` |
+| `item.updated` | `state_change` | **Profile / item edited**; `fields.changed` records which fields |
+| `item.lifecycle_changed` | `state_change` | `draft → live` (**onboarded**), pause, unpause, retire. **N** on `retired` |
+| `item.deleted` | `state_change` | Item removed |
+| `item.geotagged` | `state_change` | Location set or changed |
+| `consent.accepted` | `state_change` | Terms, privacy, or profile consent accepted |
+| `consent.action_recorded` | `state_change` | Consent captured at an action's initiate or accept stage |
+| `consent.guardian_otp_sent` | `delivery` | U18 guardian OTP issued. **N** |
+| `consent.guardian_otp_verified` / `_failed` | `state_change` | Guardian OTP outcome |
+| `consent.guardian_batch_verified` | `state_change` | One guardian OTP covering a bulk selection |
+| `user.provisioned` | `state_change` | **Account created** — self-signup or admin onboarding. **N** (welcome) |
+| `user.first_login` | `state_change` | First successful session |
+| `user.dob_captured` / `user.minor_detected` | `state_change` | Age gating; `actor.is_minor` flag only |
+| `user.signup_blocked` | `error` | Self-signup gate rejected the registration |
+| `search.executed` | `query` | Discover or map query; records result count, latency, and whether the fallback path served it |
+| `notification.requested` / `.sent` / `.skipped` / `.failed` | `delivery` | Emitted by the notification consumer; `event.parent_uid` links back to the change that triggered it |
+
+### signals-api — Traces
+
+OTEL signal type: **Trace** (spans). Fastify routes, `pg` queries, `ioredis`, and
+outbound HTTP are covered by auto-instrumentation. These are the hand-added spans,
+each chosen because a known failure mode lives there:
+
+| Span | Scenario |
+|---|---|
+| `action.forward_to_target_instance` | The cross-instance hop when a seeker's apply is forwarded to the provider's instance. Carries the trace across both instances. |
+| `peer.fetch` | One span per peer in the inter-instance fan-out, attributed with the peer and whether the aggregate came back complete |
+| `metrics.recompute` | The synchronous `item_metrics` recompute — a latency cliff for whichever request finds the cache stale |
+
+### signals-api — Metrics
+
+OTEL signal type: **Metric** (instruments). These replace publishing derived
+rollups back onto the event stream.
+
+| Instrument | Instrument type | Scenario |
+|---|---|---|
+| `peer.fetch.duration` | histogram | Inter-instance fetch latency, by peer |
+| `peer.fetch.incomplete` | counter | Fan-out returned a partial aggregate — invisible today |
+| `search.requests` | counter | Discover/map queries, by `mode` — gives the signals-search fallback rate |
+| `notification.delivery` | counter | Sent / skipped / failed, by reason |
+| `telemetry.outbox.depth` | gauge | Unpublished outbox rows |
+| `telemetry.outbox.lag` | gauge | Age of the oldest unpublished row — the alert that actually catches a stalled relay |
+| `partition.ddl` | counter | Runtime partition creation on the hot path |
+| `auth.token_renewal` | counter | Keycloak renewal outcomes |
+| `metrics.recompute.duration` | histogram | Recompute cost and row count |
+
+### signals-ui — Events
+
+OTEL signal type: **Event**. Behavioural only — never drives email, metrics of
+record, or compliance.
+
+| `event.name` | `event.category` | Scenario |
+|---|---|---|
+| `ui.page_viewed` | `view` | Any route view — browse, profile edit, action detail, map |
+| `ui.interaction` | `interaction` | Click, filter applied, bulk selection, CTA, form step advanced or abandoned |
+| `ui.error` | `error` | Client-side failure or form validation error; `fields.error` names the fields |
+
+`flow.name` + `flow.step` are carried on the signup and profile-creation flows,
+using the same values as the server events above — that pairing is what makes a
+funnel diagnosable rather than just countable.
+
+### aggregator-ui — Events
+
+OTEL signal type: **Event**.
+
+| `event.name` | `event.category` | Scenario |
+|---|---|---|
+| `ui.page_viewed` | `view` | Dashboard, participant list, reports |
+| `ui.interaction` | `interaction` | Dashboard filter, export triggered, bulk-upload step |
+| `ui.error` | `error` | Client-side failure, upload validation error |
+
+### Where aggregator server-side writes appear
+
+`aggregator-api` is deliberately **not** an emitter of Signals domain events. It
+has no direct write access to Signals state — its bulk-create and participant
+upserts go through the Signals API, so **signals-api owns those writes and emits
+them**, following the same "only the write authority emits" rule as everything
+else.
+
+Those events therefore appear in the `signals-api` table above, distinguished by
+`actor.on_behalf_of` (the acting aggregator org) and `channel: admin`. Attribution
+of the participant to their onboarding org rides separately in `object.org`.
+
+The practical consequence: **a bulk upload of 500 participants produces 500
+`item.created` events from signals-api, not from the aggregator** — so aggregator
+reporting reads them from the shared stream rather than emitting its own copy, and
+there is no double count.
+
+---
+
 ## Attribute schema
 
 **Every event uses the same fixed set of attributes.** No scenario-invented
@@ -556,13 +687,9 @@ are independent. `object.version` is the monotonic tiebreak.
 > The instance that owns the write emits, as part of the same database
 > transaction as the write.
 
-Three producers, distinguished by `service.name`, in ranked trust tiers:
-
-| Tier | `service.name` | Emits | Trusted for |
-|---|---|---|---|
-| 1 — record | `signals-api` | Domain events, spans, metrics | Notifications, metrics of record, audit, compliance |
-| 2 — behavioural | `signals-ui` | UI events, client errors | Funnel and UX analysis only |
-| 3 — federated | `aggregator-api` | Its own surface and bulk-create writes | Its own reporting |
+Producers, their events, and their trust tiers are tabulated in **What each
+service emits** above. This section covers only *why* the split is drawn there,
+and where the emit points sit in the code.
 
 **Why the API and not the UI** — three independent reasons, each sufficient:
 client events are lossy and spoofable, so they can't drive email or compliance;
