@@ -30,11 +30,18 @@ export type SupportAttachmentResult =
   | { ok: false; error: SupportAttachmentErrorCode; message: string };
 
 /**
- * Content types the support form accepts. Kept in code rather than in env on
- * purpose: an operator-editable type list is a short path to "the support inbox
- * now accepts executables", and adding a legitimate format is a one-line change
- * here that the UI picks up automatically (it reads this list from
- * `GET /support/config`).
+ * Content types the support form accepts.
+ *
+ * Scope, so nobody mistakes this for more than it is: `contentType` is declared
+ * by the client and never checked against the bytes, so this rejects an honest
+ * mistake (a PDF, a zip) but not a renamed executable sent with
+ * `contentType: image/png`. It is a UX filter, and the support mailbox must
+ * still scan what it receives — see docs/operations/support-attachments.md.
+ *
+ * Kept in code rather than in env because the list is a product decision about
+ * what the form is for, not a per-deployment knob; adding a legitimate format is
+ * a one-line change here that the UI picks up automatically (it reads this list
+ * from `GET /support/config`).
  *
  * The phone-produced formats are deliberate, not incidental: iPhones hand out
  * HEIC photos and `.m4a` voice memos, and Android cameras/voice recorders

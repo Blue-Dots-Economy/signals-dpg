@@ -75,6 +75,40 @@ export const submit_support_handler = async (
 
   const { name, email, phone, type, details } = request.body;
 
+  const sender = getDefaultEmailSender();
+  if (!supportConfig.recipients || !supportConfig.fromEmail || !sender) {
+    return reply.code(503).send({
+      error: 'SUPPORT_NOT_CONFIGURED',
+      message: 'Support is not configured on this instance.',
+    });
+  }
+
+  // Per-user cap: the endpoint accepts multi-MB uploads that sit in the
+  // notification-service queue until delivered.
+  //
+  // Counted BEFORE the body is validated, deliberately. Fastify has already
+  // buffered and parsed the payload by the time any of this runs, so a rejected
+  // submission has cost the same as an accepted one — if only accepted ones
+  // counted, a caller could post oversized rubbish (a fourth file, a disallowed
+  // content type) without limit and never spend a slot. The client validates the
+  // same rules before submitting, so a legitimate user does not reach here with
+  // an invalid body and rarely spends a slot on a mistake.
+  //
+  // Still after the 503: an instance with no support address should not burn
+  // anyone's quota. Fails OPEN on a Redis error — a rate-limit backend outage
+  // must not silence someone's complaint.
+  try {
+    const submissions = await incrWithinWindow(`support:rl:${userId}`, SUPPORT_WINDOW_SEC);
+    if (submissions > SUPPORT_MAX_PER_WINDOW) {
+      return reply.code(429).send({
+        error: 'SUPPORT_RATE_LIMITED',
+        message: 'Too many support submissions; please try again later.',
+      });
+    }
+  } catch (err) {
+    request.log.warn({ err }, 'support rate-limit check unavailable; allowing submission');
+  }
+
   const attachmentCheck = validateSupportAttachments(request.body.attachments, {
     maxFiles: supportConfig.attachmentMaxFiles,
     maxTotalBytes: supportConfig.attachmentMaxTotalBytes,
@@ -94,31 +128,6 @@ export const submit_support_handler = async (
       error: 'CONTACT_REQUIRED',
       message: 'Provide at least one contact: an email or a phone number.',
     });
-  }
-
-  const sender = getDefaultEmailSender();
-  if (!supportConfig.recipients || !supportConfig.fromEmail || !sender) {
-    return reply.code(503).send({
-      error: 'SUPPORT_NOT_CONFIGURED',
-      message: 'Support is not configured on this instance.',
-    });
-  }
-
-  // Per-user cap: the endpoint accepts multi-MB uploads that sit in the
-  // notification-service queue until delivered. Checked after the 503 so an
-  // unconfigured instance doesn't burn a user's quota. Fails OPEN on a Redis
-  // error — a rate-limit backend outage must not silence someone's complaint —
-  // which is why this is a try/catch rather than a bare await.
-  try {
-    const submissions = await incrWithinWindow(`support:rl:${userId}`, SUPPORT_WINDOW_SEC);
-    if (submissions > SUPPORT_MAX_PER_WINDOW) {
-      return reply.code(429).send({
-        error: 'SUPPORT_RATE_LIMITED',
-        message: 'Too many support submissions; please try again later.',
-      });
-    }
-  } catch (err) {
-    request.log.warn({ err }, 'support rate-limit check unavailable; allowing submission');
   }
 
   // The submitted contact details are the source of truth for the email; the

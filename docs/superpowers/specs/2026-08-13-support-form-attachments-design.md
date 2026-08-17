@@ -55,8 +55,16 @@ limit must exceed the cap. Deriving it means raising the cap can never turn into
 silent 413.
 
 **5. MIME allowlist enforced on both sides; the list stays a code constant.**
-An operator-editable type list is a short path to "the support inbox now accepts
-`.exe`". Adding a type is a one-line change in one shared list.
+The list is a product decision about what the form is for, not a per-deployment
+knob, so it lives in code; adding a type is a one-line change in one shared list.
+
+Scope of what this buys, recorded because the first draft of this doc overstated
+it: `contentType` is **client-declared and never checked against the bytes**, so
+the allowlist rejects an honest mistake (a PDF, a zip) but not a renamed
+executable sent as `image/png`. It is a UX filter. Content safety stays with the
+receiving mailbox, which must have attachment scanning enabled — written up in
+`docs/operations/support-attachments.md`. Magic-byte sniffing was considered and
+deliberately left out of v1; `attachments.ts` is where it would go.
 
 **6. Per-user rate limit on support submission, both APIs.**
 The endpoint becomes a multi-MB authenticated upload whose payload sits in Redis

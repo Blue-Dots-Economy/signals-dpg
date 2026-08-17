@@ -347,6 +347,48 @@ describe('POST /api/v1/support — attachments (#551)', () => {
     expect(dispatchEmailMock).not.toHaveBeenCalled();
     await app.close();
   });
+
+  it('counts an invalid submission against the quota, not just accepted ones', async () => {
+    // The body is already buffered and parsed by the time the handler runs, so a
+    // rejected submission costs the same as an accepted one. If only accepted
+    // ones counted, a caller could post oversized rubbish without limit.
+    mockDeps({ recipients: 'support@org.com', fromEmail: 'from@org.com', attachmentMaxFiles: 2 });
+    const app = await buildApp();
+    const png = {
+      filename: 'a.png',
+      contentType: 'image/png',
+      data: Buffer.alloc(16, 7).toString('base64'),
+    };
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/v1/support',
+      payload: { ...validPayload, attachments: [png, png, png] },
+    });
+    expect(res.statusCode).toBe(400);
+    expect(res.json().error).toBe('ATTACHMENT_COUNT_EXCEEDED');
+    expect(incrWithinWindowMock).toHaveBeenCalledTimes(1);
+    await app.close();
+  });
+
+  it('429s an over-quota caller before it even looks at the attachments', async () => {
+    incrWithinWindowMock.mockResolvedValue(6);
+    mockDeps({ recipients: 'support@org.com', fromEmail: 'from@org.com', attachmentMaxFiles: 1 });
+    const app = await buildApp();
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/v1/support',
+      payload: {
+        ...validPayload,
+        attachments: [
+          { filename: 'run.exe', contentType: 'application/x-msdownload', data: 'eA==' },
+        ],
+      },
+    });
+    expect(res.statusCode).toBe(429);
+    expect(dispatchEmailMock).not.toHaveBeenCalled();
+    await app.close();
+  });
+
 });
 
 describe('POST /api/v1/support — rate limit (#551)', () => {
