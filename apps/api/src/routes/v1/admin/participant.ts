@@ -693,7 +693,7 @@ async function handleUpdateItem(
     .from(items)
     .where(eq(items.item_id, item_id))
     .limit(1);
-  if (!ownerRow || ownerRow.created_by !== existing.id) {
+  if (ownerRow?.created_by !== existing.id) {
     return reply.code(403).send({
       error: 'ITEM_NOT_OWNED_BY_USER',
       message: 'item_id does not belong to the resolved user',
@@ -938,10 +938,8 @@ export const participant_handler = async (
 
   // 2. Compute aggregator ownership and dispatch on the helper's verdict.
   const aggregator_owns_user = Boolean(
-    request.acting_org &&
-    request.acting_org.org_type === 'aggregator' &&
-    existing &&
-    existing.onboardedByOrgId === request.acting_org.org_id,
+    request.acting_org?.org_type === 'aggregator' &&
+    existing?.onboardedByOrgId === request.acting_org?.org_id,
   );
 
   // 3. Dispatch. A create is always an insert (#349): item_state with no
