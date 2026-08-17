@@ -12,7 +12,11 @@ import { authInstance } from '@/routes/auth/create_auth';
 import { create_profile_item } from '@/lib/profile_item';
 import { updateItemInternal, type DbOrTx } from '@/services/item_service';
 import { apiConfig, authConfig } from '@/config';
-import { publishItemEvent } from '@/utils/publish_item_event';
+import {
+  publishItemEvent,
+  publishItemEvents,
+  type ItemEventKey,
+} from '@/utils/publish_item_event';
 import {
   UpsertParticipantRequest,
   UpsertParticipantResponse,
@@ -425,6 +429,12 @@ export const participant_handler = async (
     aggregator_owns_user,
   });
 
+  // Drafts promoted as a side effect of an age write (age is user-level, so it can
+  // unblock several of the user's profiles at once). Declared out here because
+  // three branches below fill it and each must publish an item event per promotion
+  // once its transaction commits (#557).
+  let promotedDrafts: ItemEventKey[] = [];
+
   if (verdict.kind === 'rejected') {
     return reply.code(verdict.status).send({
       error: verdict.error,
@@ -567,7 +577,7 @@ export const participant_handler = async (
             consent_recorded = consent.recorded;
           }
           if (body.age != null) {
-            await promoteEligibleDraftsForUser(tx, existing!.id);
+            promotedDrafts = await promoteEligibleDraftsForUser(tx, existing!.id);
           }
         });
       } catch (err) {
@@ -583,6 +593,13 @@ export const participant_handler = async (
         });
       }
     }
+
+    // An age write is user-level, so it can promote drafts this request never
+    // named. Each promotion changed what search must return (#557), and this
+    // branch touches no single item of its own — so these are the only events it
+    // has to publish. After the transaction, never inside it: an event published
+    // pre-commit lets the worker index the row before the promotion is visible.
+    await publishItemEvents(promotedDrafts, 'upsert', request.log);
 
     const itemsList = await readItemsForUser(existing!.id);
     return reply.code(200).send({
@@ -651,7 +668,7 @@ export const participant_handler = async (
         });
         consent_recorded = consent.recorded;
         if (body.age != null) {
-          await promoteEligibleDraftsForUser(tx, existing!.id);
+          promotedDrafts = await promoteEligibleDraftsForUser(tx, existing!.id);
         }
       });
     } catch (err) {
@@ -674,18 +691,26 @@ export const participant_handler = async (
       });
     }
 
-    if (updateResult) {
-      await publishItemEvent(
-        {
-          item_network: updateResult.row.item_network,
-          item_domain: updateResult.row.item_domain,
-          item_type: updateResult.row.item_type,
-          item_id: updateResult.row.item_id,
-          op: 'upsert',
-        },
-        request.log,
-      );
-    }
+    // The updated item, plus any OTHER draft the age write promoted (#557) — an
+    // age is user-level, so it can unblock profiles this request never named and
+    // those need re-indexing too. De-duplicated, since the two sets can overlap.
+    await publishItemEvents(
+      [
+        ...(updateResult
+          ? [
+              {
+                item_network: updateResult.row.item_network,
+                item_domain: updateResult.row.item_domain,
+                item_type: updateResult.row.item_type,
+                item_id: updateResult.row.item_id,
+              },
+            ]
+          : []),
+        ...promotedDrafts,
+      ],
+      'upsert',
+      request.log,
+    );
 
     const itemsList = await readItemsForUser(existing!.id);
     return reply.code(200).send({
@@ -755,7 +780,7 @@ export const participant_handler = async (
         // A newly-known age can also unblock the user's other consented drafts
         // (age is user-level) — sweep them, mirroring the update_item branch.
         if (body.age != null) {
-          await promoteEligibleDraftsForUser(tx, existing!.id);
+          promotedDrafts = await promoteEligibleDraftsForUser(tx, existing!.id);
         }
       });
     } catch (err) {
@@ -775,8 +800,13 @@ export const participant_handler = async (
       });
     }
 
-    await publishItemEvent(
-      { item_network: network, item_domain: domain, item_type, item_id: insertedItemId!, op: 'upsert' },
+    // The inserted item, plus any other draft the age write promoted (#557).
+    await publishItemEvents(
+      [
+        { item_network: network, item_domain: domain, item_type, item_id: insertedItemId! },
+        ...promotedDrafts,
+      ],
+      'upsert',
       request.log,
     );
 

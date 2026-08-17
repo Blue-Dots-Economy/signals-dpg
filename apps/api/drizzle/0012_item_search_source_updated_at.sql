@@ -1,0 +1,29 @@
+-- Custom migration: item_search.source_updated_at — the source row version that
+-- was actually indexed (signals-search#122). Custom because item_search is a raw
+-- (non-Drizzle) table co-owned by the signals-search service.
+--
+-- The reconciliation sweep decided staleness with
+-- `items.updated_at > item_search.indexed_at`, but `indexed_at` is stamped at
+-- WRITE time — after a ~200-400ms embedding round trip — while the row version it
+-- describes was READ before that. An update committed inside the embed window
+-- therefore carries an EARLIER `updated_at` than the index write that overwrote
+-- it, so the sweep saw the stale snapshot as newer than the fresh data and never
+-- re-selected the row: it stayed wrong permanently. That is what left U18
+-- profiles at `draft` in the index while `items` said `live`, making them
+-- invisible in every ranked feed and every map viewport.
+--
+-- `source_updated_at` records the `items.updated_at` of the version actually
+-- indexed, so the sweep compares VERSIONS instead of clocks and cannot be fooled
+-- by commit timing. `indexed_at` keeps its own meaning (when the write happened)
+-- for the recency sort and index-freshness monitoring.
+--
+-- NULL = indexed before this column existed; the sweep COALESCEs those to
+-- `indexed_at`, preserving today's behaviour for old rows. Rows already corrupted
+-- by the race are NOT self-healed by this migration (their `indexed_at` is still
+-- ahead of the missed update) — repair them with:
+--   UPDATE items SET updated_at = now() WHERE item_id IN (
+--     SELECT i.item_id FROM items i
+--     JOIN item_search s USING (item_network, item_domain, item_type, item_id)
+--     WHERE i.lifecycle_status <> s.lifecycle_status);
+
+ALTER TABLE item_search ADD COLUMN IF NOT EXISTS source_updated_at timestamptz;

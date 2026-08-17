@@ -100,14 +100,39 @@ vi.mock('@dpg/database', async (importOriginal) => {
 });
 
 // --- mock publishItemEvent so Redis is never touched in unit tests ---
-vi.mock('@/utils/publish_item_event', () => ({
-  publishItemEvent: vi.fn(async () => {}),
-}));
+vi.mock('@/utils/publish_item_event', () => {
+  const publishItemEvent = vi.fn(async () => {});
+  return {
+    publishItemEvent,
+    // Keeps the real fan-out + de-dupe, delegating to the mocked single publish,
+    // so every assertion on `publishItemEvent` still sees exactly the events the
+    // route emitted — a no-op stub here would hide them all.
+    publishItemEvents: vi.fn(
+      async (
+        keys: Array<Record<string, string>>,
+        op: string,
+        logger?: unknown,
+      ) => {
+        const seen = new Set<string>();
+        for (const k of keys) {
+          const id = `${k.item_network}/${k.item_domain}/${k.item_type}/${k.item_id}`;
+          if (seen.has(id)) continue;
+          seen.add(id);
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          await (publishItemEvent as any)({ ...k, op }, logger);
+        }
+      },
+    ),
+  };
+});
 
 // --- mock the consent service: it is unit-tested separately; here we only
 //     assert the route calls it with the right args and stays green.
 vi.mock('@/services/participant_consent', () => ({
   recordParticipantConsent: vi.fn(async () => ({ recorded: 0, promoted: false })),
+  // Returns the keys of the drafts an age write promoted (#557) — the route has to
+  // publish an item event for each so signals-search re-indexes them.
+  promoteEligibleDraftsForUser: vi.fn(async () => [] as unknown[]),
 }));
 
 // --- mock @dpg/schemas: keep real exports + neutralize the merge helper for tests ---
@@ -1303,6 +1328,46 @@ describe('POST /admin/participant', () => {
     expect(event.item_type).toBe('profile_1.0');
     expect(typeof event.item_id).toBe('string');
     expect(event.item_id.length).toBeGreaterThan(0);
+  });
+
+  // #557: an age write can promote drafts this request never mentions (age is
+  // user-level, so it can unblock several profiles at once). Those promotions
+  // changed what search must return, and the account_only branch published nothing
+  // at all — so the profiles stayed `draft` in item_search: invisible in every
+  // ranked feed and every map viewport while `items` said live.
+  it('account_only branch: publishes an upsert for each draft the age write promoted', async () => {
+    const user_id = 'usr_age_promotes_drafts';
+    dbState.existingUserRows = [
+      { id: user_id, email: VALID_EMAIL, phoneNumber: null, onboardedByOrgId: 'org_agg_1' },
+    ];
+    dbState.itemsByUser.set(user_id, []);
+    lastQueriedUserId = user_id;
+    const { promoteEligibleDraftsForUser } = await import('@/services/participant_consent');
+    vi.mocked(promoteEligibleDraftsForUser).mockResolvedValueOnce([
+      { item_network: 'blue_dot', item_domain: 'seeker', item_type: 'profile_1.0', item_id: 'itm_a' },
+      { item_network: 'blue_dot', item_domain: 'provider', item_type: 'profile_1.0', item_id: 'itm_b' },
+    ]);
+    const app = await buildApp({ org_id: 'org_agg_1', org_type: 'aggregator' });
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/participant',
+      payload: baseBody({
+        item_state: undefined,
+        age: 25,
+        compliance: [
+          { key: 'user_terms', value: true },
+          { key: 'user_privacy', value: true },
+        ],
+      }),
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(vi.mocked(publishItemEvent)).toHaveBeenCalledTimes(2);
+    expect(vi.mocked(publishItemEvent).mock.calls.map(([e]) => [e.item_id, e.op])).toEqual([
+      ['itm_a', 'upsert'],
+      ['itm_b', 'upsert'],
+    ]);
   });
 
   it('error branches: publishItemEvent NOT called when insert_item fails', async () => {

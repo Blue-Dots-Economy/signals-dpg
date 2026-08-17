@@ -5,7 +5,8 @@ const {
   isItemOwnedBy, requireMinorWard, getGuardianContactPlaintext, getGuardianNamePlaintext,
   getNetworkConfigById, guardianConsentRequired, resolveConsentVersion,
   issueGuardianOtp, verifyGuardianOtp, assertVerifyAttemptAllowed, guardianOtpErrorReply,
-  upsertGuardianProfileConsentAndPromote, redisMock, dbState,
+  upsertGuardianProfileConsentAndPromote, publishItemEvent, invalidateItemFetchCache,
+  redisMock, dbState,
 } = vi.hoisted(() => ({
   isItemOwnedBy: vi.fn(),
   requireMinorWard: vi.fn(),
@@ -19,6 +20,10 @@ const {
   assertVerifyAttemptAllowed: vi.fn(),
   guardianOtpErrorReply: vi.fn(),
   upsertGuardianProfileConsentAndPromote: vi.fn(),
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  publishItemEvent: vi.fn(async (..._a: any[]) => {}),
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  invalidateItemFetchCache: vi.fn(async (..._a: any[]) => {}),
   redisMock: { get: vi.fn(), set: vi.fn(), getdel: vi.fn() },
   // Resettable flag so a forced transaction failure never leaks into a later
   // test (monkey-patching the shared mock would).
@@ -68,6 +73,14 @@ vi.mock('@/services/consent_version', () => ({
   resolveConsentVersion: (...a: any[]) => resolveConsentVersion(...a),
 }));
 
+vi.mock('@/utils/publish_item_event', () => ({
+  publishItemEvent: (...a: any[]) => publishItemEvent(...a),
+}));
+
+vi.mock('@/utils/item_fetch_cache_invalidate', () => ({
+  invalidateItemFetchCache: (...a: any[]) => invalidateItemFetchCache(...a),
+}));
+
 vi.mock('@/services/guardian_otp', () => ({
   issueGuardianOtp: (...a: any[]) => issueGuardianOtp(...a),
   verifyGuardianOtp: (...a: any[]) => verifyGuardianOtp(...a),
@@ -98,7 +111,7 @@ function makeReply(): FakeReply {
 type Handler = (req: any, reply: any) => Promise<unknown>;
 
 const routes = new Map<string, Handler>();
-const log = { error: vi.fn() };
+const log = { error: vi.fn(), warn: vi.fn() };
 
 beforeAll(async () => {
   // The handlers aren't exported; register the plugin against a fake fastify
@@ -514,5 +527,59 @@ describe('profile-consent/verify', () => {
     expect(resolveConsentVersion).toHaveBeenCalledWith({
       network: 'blue_dot', brand: null, category: 'profile_creation', variant: 'u18',
     });
+  });
+});
+
+// --- search index + read caches after a guardian promotion (#557) -----------
+// This is the flow the bug was reported on: a U18 profile is created `draft`,
+// guardian consent promotes it to `live`, and nothing told signals-search — so
+// the profile stayed `draft` in item_search and was invisible to the network
+// while its owner's UI showed it as Active.
+describe.each([
+  ['/u18/profile-consent/verify', { ...ITEM, otp: '123456' }],
+  ['/u18/profile-consent/finalize', ITEM],
+])('%s — after a promotion', (url, body) => {
+  it('publishes an upsert item event so search re-indexes the now-live profile', async () => {
+    upsertGuardianProfileConsentAndPromote.mockResolvedValue(true);
+
+    const reply = await call(url, body);
+
+    expect(reply.statusCode).toBe(200);
+    expect(publishItemEvent).toHaveBeenCalledWith(
+      {
+        item_network: 'blue_dot',
+        item_domain: 'seeker',
+        item_type: 'profile_1.0',
+        item_id: ITEM.item_id,
+        op: 'upsert',
+      },
+      log,
+    );
+  });
+
+  it('sweeps the item-fetch caches, as the self-consent route already does', async () => {
+    upsertGuardianProfileConsentAndPromote.mockResolvedValue(true);
+
+    await call(url, body);
+
+    expect(invalidateItemFetchCache).toHaveBeenCalledWith('blue_dot', 'seeker');
+  });
+
+  it('does nothing when the guardian consent did not promote the item', async () => {
+    upsertGuardianProfileConsentAndPromote.mockResolvedValue(false);
+
+    await call(url, body);
+
+    expect(publishItemEvent).not.toHaveBeenCalled();
+    expect(invalidateItemFetchCache).not.toHaveBeenCalled();
+  });
+
+  it('still returns 200 when the publish fails — consent is already committed', async () => {
+    upsertGuardianProfileConsentAndPromote.mockResolvedValue(true);
+    publishItemEvent.mockRejectedValue(new Error('redis down'));
+
+    const reply = await call(url, body);
+
+    expect(reply.statusCode).toBe(200);
   });
 });

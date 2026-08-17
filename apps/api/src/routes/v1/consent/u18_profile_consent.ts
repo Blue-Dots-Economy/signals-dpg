@@ -19,6 +19,50 @@ import {
   issueGuardianOtp, verifyGuardianOtp, assertVerifyAttemptAllowed, guardianOtpErrorReply,
 } from '@/services/guardian_otp';
 import { isItemOwnedBy, upsertGuardianProfileConsentAndPromote } from '@/services/item_service';
+import { invalidateItemFetchCache } from '@/utils/item_fetch_cache_invalidate';
+import { publishItemEvent } from '@/utils/publish_item_event';
+
+/**
+ * After-commit side effects of a guardian promotion (#557). Both the verify and
+ * finalize handlers promote a `draft` profile to `live` and must do exactly this
+ * afterwards; the self-consent route (`accept_profile_consent.ts`) is the same
+ * shape.
+ *
+ * Both steps run AFTER the transaction, never inside it: an item event published
+ * pre-commit lets the search worker read the row before the promotion is visible
+ * and re-index the stale `draft` — the very race that made U18 profiles
+ * permanently invisible (signals-search#122).
+ *
+ * Best-effort throughout. The consent row and the lifecycle flip are already
+ * committed, so neither a Redis outage nor a cache miss may turn a successful
+ * promotion into a 500; the reconciliation sweep is the backstop.
+ */
+async function afterGuardianPromotion(
+  body: { network: string; item_domain: string; item_type: string; item_id: string },
+  log: FastifyRequest['log'],
+): Promise<void> {
+  // Both item read caches now hold a stale `draft`: the 1s local one behind the
+  // owner's "My Profiles" list, and the domain-TTL inter-instance ones that would
+  // otherwise keep the freshly-live profile out of everyone else's browse feed.
+  await invalidateItemFetchCache(body.network, body.item_domain).catch((err) =>
+    log.warn({ err }, 'cache invalidation after guardian profile-consent promotion failed'),
+  );
+  // item_search is maintained by signals-search off item events, and every read
+  // path there is live-only — an unpublished promotion leaves the profile out of
+  // every ranked feed and every map viewport while its owner's UI shows it Active.
+  await publishItemEvent(
+    {
+      item_network: body.network,
+      item_domain: body.item_domain,
+      item_type: body.item_type,
+      item_id: body.item_id,
+      op: 'upsert',
+    },
+    log,
+  ).catch((err) =>
+    log.warn({ err }, 'item event publish after guardian profile-consent promotion failed'),
+  );
+}
 
 const profileScope = (userId: string, itemId: string) => `${userId}:profile:${itemId}`;
 // Pre-create OTP is scoped to the ward + network + domain (no item yet). The
@@ -193,6 +237,7 @@ const finalize_handler = async (
     await redis.set(tokenKey, '1', 'EX', PRECREATE_TOKEN_TTL_SEC); // allow retry
     return reply.code(500).send({ error: 'CONSENT_WRITE_FAILED', message: 'Failed to record guardian profile consent' });
   }
+  if (promoted) await afterGuardianPromotion(body, request.log);
   return reply.code(200).send({ promoted });
 };
 
@@ -267,5 +312,6 @@ const verify_handler = async (request: VerifyReq, reply: FastifyReply) => {
     request.log.error({ err }, 'Failed to write guardian profile consent');
     return reply.code(500).send({ error: 'CONSENT_WRITE_FAILED', message: 'Failed to record guardian profile consent' });
   }
+  if (promoted) await afterGuardianPromotion(body, request.log);
   return reply.code(200).send({ verified: true, promoted });
 };

@@ -116,6 +116,13 @@ CREATE TABLE IF NOT EXISTS item_search (
   model_version    text,
   content_hash     text,
   indexed_at       timestamptz NOT NULL DEFAULT now(),
+  -- The items.updated_at of the row version actually indexed (signals-search#122).
+  -- The sweep's staleness check compares this against the live items.updated_at,
+  -- so it compares VERSIONS rather than clocks: indexed_at is stamped at write
+  -- time, after the embed, so an update committed during the embed window looks
+  -- OLDER than the stale write that overwrote it and was never re-swept.
+  -- NULL = indexed before this column existed (sweep COALESCEs to indexed_at).
+  source_updated_at timestamptz,
   PRIMARY KEY (item_network, item_domain, item_type, item_id)
 );
 

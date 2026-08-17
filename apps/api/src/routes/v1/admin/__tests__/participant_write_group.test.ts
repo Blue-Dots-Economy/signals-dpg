@@ -200,14 +200,32 @@ vi.mock('@/services/participant_consent', () => ({
     if (state.consentFail) throw state.consentFail;
     return { recorded: state.consentRecorded, promoted: false };
   }),
+  // Returns the keys of the drafts it promoted (#557) — the route publishes one
+  // item event per key, so this must be an array, not void.
   promoteEligibleDraftsForUser: vi.fn(
-    async (_tx: unknown, _userId: string) => {},
+    async (_tx: unknown, _userId: string) => [] as Array<Record<string, string>>,
   ),
 }));
 
-vi.mock('@/utils/publish_item_event', () => ({
-  publishItemEvent: vi.fn(async (..._a: unknown[]) => {}),
-}));
+vi.mock('@/utils/publish_item_event', () => {
+  const publishItemEvent = vi.fn(async (..._a: unknown[]) => {});
+  return {
+    publishItemEvent,
+    // Real fan-out + de-dupe over the mocked single publish, so assertions on
+    // publishItemEvent still see exactly the events the route emitted.
+    publishItemEvents: vi.fn(
+      async (keys: Array<Record<string, string>>, op: string, logger?: unknown) => {
+        const seen = new Set<string>();
+        for (const k of keys) {
+          const id = `${k.item_network}/${k.item_domain}/${k.item_type}/${k.item_id}`;
+          if (seen.has(id)) continue;
+          seen.add(id);
+          await publishItemEvent({ ...k, op }, logger);
+        }
+      },
+    ),
+  };
+});
 
 vi.mock('@/utils/item_decrypt', () => ({
   decryptItemPrivate: vi.fn(
