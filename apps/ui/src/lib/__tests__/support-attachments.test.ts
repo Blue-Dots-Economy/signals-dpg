@@ -4,6 +4,7 @@ import {
   fileToBase64,
   formatBytes,
   matchesAllowedType,
+  pickerAccept,
   validateAttachmentSelection,
 } from '../support-attachments';
 
@@ -116,5 +117,22 @@ describe('formatBytes', () => {
     expect(formatBytes(512)).toBe('512 B');
     expect(formatBytes(1024)).toBe('1.0 KB');
     expect(formatBytes(5 * 1024 * 1024)).toBe('5.0 MB');
+  });
+});
+
+describe('pickerAccept', () => {
+  it('lists extensions alongside MIME types', () => {
+    // macOS resolves `accept` through its UTI table, which does not map .m4a
+    // onto audio/mp4 — an iPhone voice memo showed up greyed out in the picker
+    // until the extensions were listed too.
+    const accept = pickerAccept({
+      allowedTypes: ['audio/mp4', 'image/png'],
+      allowedExtensions: ['.m4a', '.png'],
+    });
+    expect(accept.split(',')).toEqual(['audio/mp4', 'image/png', '.m4a', '.png']);
+  });
+
+  it('tolerates an API that does not serve extensions yet', () => {
+    expect(pickerAccept({ allowedTypes: ['image/png'] })).toBe('image/png');
   });
 });

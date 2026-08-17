@@ -4,7 +4,10 @@ import type { FastifyReply, FastifyRequest } from 'fastify';
 import { auth_middleware_if_enabled } from '@api/plugins/auth/auth_middleware';
 import { supportConfig } from '@/config';
 import { getDefaultEmailSender } from '@/notifications/email/dispatch_email';
-import { SUPPORT_ALLOWED_CONTENT_TYPES } from '@/support/attachments';
+import {
+  SUPPORT_ALLOWED_CONTENT_TYPES,
+  SUPPORT_ALLOWED_EXTENSIONS,
+} from '@/support/attachments';
 
 /**
  * `GET /api/v1/support/config` (#551) — what the support form is allowed to
@@ -23,6 +26,8 @@ const SupportConfigResponse = z.object({
   maxTotalBytes: z.number().int().positive(),
   maxFiles: z.number().int().positive(),
   allowedTypes: z.array(z.string()),
+  /** Picker hint only — validation is MIME-based. See attachments.ts. */
+  allowedExtensions: z.array(z.string()),
 });
 
 export const support_config: FastifyPluginAsyncZod = async (fastify) => {
@@ -54,5 +59,6 @@ export const support_config_handler = async (request: FastifyRequest, reply: Fas
     maxTotalBytes: supportConfig.attachmentMaxTotalBytes,
     maxFiles: supportConfig.attachmentMaxFiles,
     allowedTypes: [...SUPPORT_ALLOWED_CONTENT_TYPES],
+    allowedExtensions: [...SUPPORT_ALLOWED_EXTENSIONS],
   });
 };

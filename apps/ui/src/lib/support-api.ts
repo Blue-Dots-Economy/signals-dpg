@@ -32,6 +32,12 @@ export interface SupportConfig {
   maxTotalBytes: number;
   maxFiles: number;
   allowedTypes: string[];
+  /**
+   * Extensions for the picker's `accept`, served alongside the MIME list
+   * because macOS won't match `.m4a` against `audio/mp4` and greys it out.
+   * Optional so a UI build still works against an older API.
+   */
+  allowedExtensions?: string[];
 }
 
 export async function fetchSupportConfig(): Promise<SupportConfig> {

@@ -27,6 +27,18 @@ export function formatBytes(bytes: number): string {
 }
 
 /**
+ * The `accept` attribute for the picker: MIME types *and* extensions.
+ *
+ * Types alone leave real files unselectable — macOS resolves `accept` through
+ * its UTI table, which doesn't map `.m4a` (an iPhone voice memo) onto
+ * `audio/mp4`, so the file shows up greyed out. Extensions are matched
+ * literally, so listing both makes the picker agree with the API.
+ */
+export function pickerAccept(config: Pick<SupportConfig, 'allowedTypes' | 'allowedExtensions'>): string {
+  return [...config.allowedTypes, ...(config.allowedExtensions ?? [])].join(',');
+}
+
+/**
  * Whether a file's type is accepted. Handles both exact types
  * (`image/png`, what the API serves) and `type/*` wildcards, which the offline
  * fallback config uses.

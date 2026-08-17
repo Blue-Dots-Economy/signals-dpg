@@ -109,6 +109,10 @@ describe('validateSupportAttachments', () => {
     for (const phoneType of ['image/heic', 'video/3gpp', 'audio/amr']) {
       expect(SUPPORT_ALLOWED_CONTENT_TYPES).toContain(phoneType);
     }
+    // Chrome types a .m4a — an iPhone voice memo — as audio/x-m4a, not the
+    // canonical audio/mp4, so the picker greyed them out and the API refused
+    // them until this was listed.
+    expect(SUPPORT_ALLOWED_CONTENT_TYPES).toContain('audio/x-m4a');
   });
 
   it('normalises content-type case and surrounding whitespace', () => {

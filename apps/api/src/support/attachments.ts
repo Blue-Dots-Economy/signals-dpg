@@ -37,8 +37,14 @@ export type SupportAttachmentResult =
  * `GET /support/config`).
  *
  * The phone-produced formats are deliberate, not incidental: iPhones hand out
- * HEIC photos, and Android cameras/voice recorders produce 3GPP and AMR.
- * Leaving them out would reject the most likely real submissions.
+ * HEIC photos and `.m4a` voice memos, and Android cameras/voice recorders
+ * produce 3GPP and AMR. Leaving them out would reject the most likely real
+ * submissions.
+ *
+ * Note the `x-` variants. A browser picks the type from its own extension table,
+ * not from the file: Chrome reports `audio/x-m4a` for a `.m4a` (an iPhone voice
+ * memo, the commonest voice attachment there is) even though the container is
+ * MPEG-4 audio. Listing only the canonical `audio/mp4` rejected those.
  */
 export const SUPPORT_ALLOWED_CONTENT_TYPES: readonly string[] = [
   'image/jpeg',
@@ -51,8 +57,10 @@ export const SUPPORT_ALLOWED_CONTENT_TYPES: readonly string[] = [
   'video/quicktime',
   'video/webm',
   'video/3gpp',
+  'video/x-m4v',
   'audio/mpeg',
   'audio/mp4',
+  'audio/x-m4a',
   'audio/aac',
   'audio/wav',
   'audio/x-wav',
@@ -60,6 +68,37 @@ export const SUPPORT_ALLOWED_CONTENT_TYPES: readonly string[] = [
   'audio/webm',
   'audio/3gpp',
   'audio/amr',
+];
+
+/**
+ * Extensions for the file picker's `accept` attribute, alongside the MIME list.
+ *
+ * MIME types alone are not enough: macOS maps `accept="audio/mp4"` through its
+ * own UTI table, which does not claim `.m4a`, so a voice memo shows up greyed
+ * out in the picker even though the API would accept it. Extensions are matched
+ * literally by the browser and close that gap. They are a picker hint only —
+ * validation stays MIME-based on both sides.
+ */
+export const SUPPORT_ALLOWED_EXTENSIONS: readonly string[] = [
+  '.jpg',
+  '.jpeg',
+  '.png',
+  '.webp',
+  '.gif',
+  '.heic',
+  '.heif',
+  '.mp4',
+  '.m4v',
+  '.mov',
+  '.webm',
+  '.3gp',
+  '.mp3',
+  '.m4a',
+  '.aac',
+  '.wav',
+  '.ogg',
+  '.oga',
+  '.amr',
 ];
 
 const MAX_FILENAME_LENGTH = 120;

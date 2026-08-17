@@ -8442,13 +8442,20 @@
                       "items": {
                         "type": "string"
                       }
+                    },
+                    "allowedExtensions": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
                     }
                   },
                   "required": [
                     "enabled",
                     "maxTotalBytes",
                     "maxFiles",
-                    "allowedTypes"
+                    "allowedTypes",
+                    "allowedExtensions"
                   ],
                   "additionalProperties": false
                 }

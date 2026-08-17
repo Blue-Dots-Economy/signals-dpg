@@ -20,6 +20,7 @@ import { useSupportConfig } from '@/hooks/use-support-config';
 import {
   encodeAttachments,
   formatBytes,
+  pickerAccept,
   validateAttachmentSelection,
 } from '@/lib/support-attachments';
 
@@ -274,7 +275,7 @@ export function SupportDialog({ open, onOpenChange }: SupportDialogProps) {
               id="support-attachments"
               type="file"
               multiple
-              accept={config.allowedTypes.join(',')}
+              accept={pickerAccept(config)}
               onChange={handleFilesSelected}
               disabled={isSubmitting || attachments.length >= config.maxFiles}
               className="sr-only"

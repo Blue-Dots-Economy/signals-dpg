@@ -59,6 +59,9 @@ describe('GET /api/v1/support/config', () => {
     });
     expect(res.json().allowedTypes).toContain('image/png');
     expect(res.json().allowedTypes).toContain('audio/amr');
+    // Extensions ride along so the picker can match files macOS won't resolve
+    // from the MIME type alone (.m4a against audio/mp4).
+    expect(res.json().allowedExtensions).toContain('.m4a');
     await app.close();
   });
 

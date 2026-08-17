@@ -12,6 +12,7 @@ export const SUPPORT_CONFIG_FALLBACK: SupportConfig = {
   maxTotalBytes: 5 * 1024 * 1024,
   maxFiles: 3,
   allowedTypes: ['image/*', 'video/*', 'audio/*'],
+  allowedExtensions: [],
 };
 
 /**
