@@ -582,4 +582,17 @@ describe.each([
 
     expect(reply.statusCode).toBe(200);
   });
+
+  it('still publishes and returns 200 when the cache sweep fails', async () => {
+    // The consent row and the lifecycle flip are already committed, so a cache
+    // miss must neither fail the request nor skip the search re-index behind it.
+    upsertGuardianProfileConsentAndPromote.mockResolvedValue(true);
+    invalidateItemFetchCache.mockRejectedValue(new Error('redis down'));
+
+    const reply = await call(url, body);
+
+    expect(reply.statusCode).toBe(200);
+    expect(log.warn).toHaveBeenCalled();
+    expect(publishItemEvent).toHaveBeenCalledTimes(1);
+  });
 });

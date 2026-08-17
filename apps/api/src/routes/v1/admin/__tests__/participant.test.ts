@@ -1309,6 +1309,73 @@ describe('POST /admin/participant', () => {
     expect(event.item_type).toBe('profile_1.0');
   });
 
+  // #557: both of these branches publish the item the request named. An age write
+  // can ALSO promote drafts the request never named (age is user-level), and those
+  // need re-indexing too — previously they were silently left `draft` in the index.
+  it('update_item branch: publishes the updated item AND the drafts the age write promoted', async () => {
+    const user_id = 'usr_update_collateral';
+    dbState.existingUserRows = [
+      { id: user_id, email: VALID_EMAIL, phoneNumber: null, onboardedByOrgId: 'org_ns_1' },
+    ];
+    dbState.itemsByUser.set(user_id, [
+      {
+        item_id: VALID_UUID_A,
+        item_network: 'blue_dot',
+        item_domain: 'seeker',
+        item_type: 'profile_1.0',
+        item_state: { v: 1 },
+        item_private_state: '',
+        created_at: new Date('2026-01-01T00:00:00Z'),
+        updated_at: new Date('2026-01-01T00:00:00Z'),
+      },
+    ]);
+    dbState.itemOwnerLookup.set(VALID_UUID_A, user_id);
+    lastQueriedUserId = user_id;
+    lastQueriedItemId = VALID_UUID_A;
+    const { promoteEligibleDraftsForUser } = await import('@/services/participant_consent');
+    vi.mocked(promoteEligibleDraftsForUser).mockResolvedValueOnce([
+      { item_network: 'blue_dot', item_domain: 'provider', item_type: 'profile_1.0', item_id: 'itm_other_draft' },
+    ]);
+    const app = await buildApp({ org_id: 'org_ns_1', org_type: 'network_service' });
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/participant',
+      payload: baseBody({ item_id: VALID_UUID_A, item_state: { v: 2 }, age: 25 }),
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(vi.mocked(publishItemEvent).mock.calls.map(([e]) => e.item_id)).toEqual([
+      VALID_UUID_A,
+      'itm_other_draft',
+    ]);
+  });
+
+  it('insert_item branch: publishes the inserted item AND the drafts the age write promoted', async () => {
+    const user_id = 'usr_insert_collateral';
+    dbState.existingUserRows = [
+      { id: user_id, email: VALID_EMAIL, phoneNumber: null, onboardedByOrgId: 'org_ns_1' },
+    ];
+    dbState.itemsByUser.set(user_id, []);
+    lastQueriedUserId = user_id;
+    const { promoteEligibleDraftsForUser } = await import('@/services/participant_consent');
+    vi.mocked(promoteEligibleDraftsForUser).mockResolvedValueOnce([
+      { item_network: 'blue_dot', item_domain: 'provider', item_type: 'profile_1.0', item_id: 'itm_other_draft' },
+    ]);
+    const app = await buildApp({ org_id: 'org_ns_1', org_type: 'network_service' });
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/participant',
+      payload: baseBody({ network: 'blue_dot', domain: 'seeker', item_type: 'profile_1.0', age: 25 }),
+    });
+
+    expect(res.statusCode).toBe(200);
+    const ids = vi.mocked(publishItemEvent).mock.calls.map(([e]) => e.item_id);
+    expect(ids).toHaveLength(2);
+    expect(ids[1]).toBe('itm_other_draft');
+  });
+
   it('create_new_user branch: publishItemEvent called with op:upsert after tx commits', async () => {
     dbState.signUpUserId = 'usr_new_enqueue';
     lastQueriedUserId = 'usr_new_enqueue';
