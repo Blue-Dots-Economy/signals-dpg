@@ -472,7 +472,7 @@ jobs:
 
       - name: Upload Trivy image SARIF
         if: always() && steps.build.outputs.digest != ''
-        uses: github/codeql-action/upload-sarif@v3
+        uses: github/codeql-action/upload-sarif@v4
         with:
           sarif_file: trivy-image.sarif
           # One category per image so api and ui alerts don't overwrite each other.
