@@ -707,6 +707,18 @@ describe('POST /admin/participant — write/failure paths', () => {
 
   // --- account_only existing user, age-only write -------------------------
 
+  // The handler's own identifier guard. Unreachable over HTTP (the Zod schema
+  // refine rejects the body first), so it can only be exercised by invoking the
+  // handler directly as this suite does — it exists as defence in depth for
+  // non-HTTP callers.
+  it('defensive guard: neither email nor phone_number → 400 MISSING_IDENTIFIER, no lookup', async () => {
+    const res = await run({ body: { email: undefined, phone_number: undefined } });
+
+    expect(res.statusCode).toBe(400);
+    expect(res.body.error).toBe('MISSING_IDENTIFIER');
+    expect(state.txCalls).toBe(0);
+  });
+
   it('account_only existing user with age only (no compliance) → age persisted, drafts promoted, no consent write', async () => {
     state.userRows = [{ ...EXISTING_USER }];
     state.itemsRows = [itemRow()];
