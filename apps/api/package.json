@@ -55,7 +55,7 @@
     "fastify-qs": "^5.0.0",
     "fastify-type-provider-zod": "^6.1.0",
     "ioredis": "^6.0.0",
-    "jose": "^6.2.2",
+    "jose": "^6.2.8",
     "match_score": "workspace:*",
     "notification": "workspace:*",
     "pg": "^8.22.0",
