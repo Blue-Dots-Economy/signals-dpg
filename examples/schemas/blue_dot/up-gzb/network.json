@@ -84,9 +84,8 @@
           },
           "required": [
             "name",
-            "location",
-            "age",
-            "phone"
+            "phone",
+            "age"
           ],
           "properties": {
             "name": {
