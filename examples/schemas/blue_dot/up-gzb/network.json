@@ -982,6 +982,7 @@
                 "title": "Job Details",
                 "fields": [
                   "jobProviderName",
+                  "officialAddress",
                   "companyGstOrUdyamNumber",
                   "jobProviderLocation",
                   "role",
@@ -1633,6 +1634,13 @@
                 "Intermediate 1",
                 "Intermediate 2"
               ]
+            },
+            "officialAddress": {
+              "type": "string",
+              "title": "Official Address",
+              "description": "The company's registered address. Not shown on the discovery card or map.",
+              "location": "secondary",
+              "private": true
             }
           }
         }
