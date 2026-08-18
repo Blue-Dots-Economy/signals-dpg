@@ -23,7 +23,13 @@
             "sections": [
               {
                 "title": "Personal Details",
-                "fields": ["name", "age", "gender", "phone", "location"]
+                "fields": [
+                  "name",
+                  "age",
+                  "gender",
+                  "phone",
+                  "location"
+                ]
               },
               {
                 "title": "Work Experience & Preferences",
@@ -34,7 +40,10 @@
                   "natureOfJobsInterestedIn",
                   "nameOfJobRolesInterestedIn",
                   "languageSpoken",
-                  "otherHelpNeeded"
+                  "otherHelpNeeded",
+                  "typeOfJobPreferred",
+                  "preferredJobCategory",
+                  "needsDetails"
                 ]
               },
               {
@@ -131,9 +140,10 @@
                 "15+ Years",
                 "Other"
               ],
-               "x-show-if": {
+              "x-show-if": {
                 "workExperience": [
-                  "Worked before", "Returning after a break"
+                  "Worked before",
+                  "Returning after a break"
                 ]
               }
             },
@@ -157,14 +167,20 @@
             },
             "otherHelpNeeded": {
               "vectorize": true,
-              "type": "string",
+              "type": "array",
               "title": "Other Help Needed",
-              "enum": [
-                "Training",
-                "Accommodation",
-                "Travel",
-                "Other"
-              ]
+              "items": {
+                "type": "string",
+                "enum": [
+                  "Skilling & Vocational Training",
+                  "Job Placement Assistance",
+                  "Apprenticeship Program",
+                  "Career Counseling & Interview Prep",
+                  "Financial Aid / Scheme Enrolment",
+                  "Other Support (Accommodation / Travel)",
+                  "No Other Help Needed"
+                ]
+              }
             },
             "educationCategory": {
               "vectorize": true,
@@ -693,7 +709,13 @@
               "title": "College / Institute Name",
               "description": "Please specify your college or institute name",
               "placeholder": "Please specify your college or institute name",
-              "x-reference-source": { "source": "colleges", "subtitle": ["district", "state"] }
+              "x-reference-source": {
+                "source": "colleges",
+                "subtitle": [
+                  "district",
+                  "state"
+                ]
+              }
             },
             "nameOfLastRoleHeld": {
               "type": "string",
@@ -763,6 +785,44 @@
                   "Urdu (اردو)"
                 ]
               }
+            },
+            "needsDetails": {
+              "type": "string",
+              "title": "Needs Details",
+              "vectorize": true
+            },
+            "typeOfJobPreferred": {
+              "vectorize": true,
+              "type": "string",
+              "title": "Type of Job",
+              "enum": [
+                "WFH",
+                "Desk",
+                "On-Field",
+                "Standing"
+              ],
+              "x-show-if": {
+                "workExperience": [
+                  "Worked before"
+                ]
+              }
+            },
+            "preferredJobCategory": {
+              "vectorize": true,
+              "type": "string",
+              "title": "Preferred job category",
+              "enum": [
+                "Manufacturing",
+                "Retail",
+                "Field Sales",
+                "Telecalling",
+                "Accounts",
+                "Data Entry",
+                "Design - Web Design",
+                "Graphic Design",
+                "HR-Admin",
+                "Unskilled Labour"
+              ]
             }
           }
         }
@@ -777,7 +837,7 @@
       "card": {
         "title_field": "name",
         "avatar_from": "name",
-        "default_fields": ["location", "natureOfJobsInterestedIn", "educationCategory", "workExperience"]
+        "default_fields": ["location", "natureOfJobsInterestedIn", "educationCategory", "workExperience", "typeOfJobPreferred", "preferredJobCategory"]
       },
       "contact_fields": { "name": "name", "phone": "phone" },
       "dashboard_tiles": {
@@ -813,15 +873,37 @@
             "sections": [
               {
                 "title": "Job Details",
-                "fields": ["jobProviderName", "jobProviderLocation", "role", "title", "positions", "natureOfJob"]
+                "fields": [
+                  "jobProviderName",
+                  "companyGstOrUdyamNumber",
+                  "jobProviderLocation",
+                  "role",
+                  "title",
+                  "positions",
+                  "natureOfJob",
+                  "workingHours",
+                  "typeOfJob",
+                  "jobCategory"
+                ]
               },
               {
                 "title": "Hiring Contact",
-                "fields": ["hiringManagerName", "hiringManagerPhoneNumber", "hiringManagerEmail"]
+                "fields": [
+                  "hiringManagerName",
+                  "hiringManagerPhoneNumber",
+                  "hiringManagerEmail"
+                ]
               },
               {
                 "title": "Compensation",
-                "fields": ["stipendMin", "stipendMax", "salaryMin", "salaryMax", "taskRateMin", "taskRateMax"]
+                "fields": [
+                  "stipendMin",
+                  "stipendMax",
+                  "salaryMin",
+                  "salaryMax",
+                  "taskRateMin",
+                  "taskRateMax"
+                ]
               },
               {
                 "title": "Candidate Requirements",
@@ -838,7 +920,23 @@
                   "minQualificationPolytechnic",
                   "minQualificationPolytechnicOther",
                   "minQualificationCert",
-                  "minQualificationInformal"
+                  "minQualificationInformal",
+                  "employeeFriendliness"
+                ]
+              },
+              {
+                "title": "Additional Services Offered",
+                "fields": [
+                  "benefitsOffered",
+                  "servicesOffered",
+                  "serviceDetails"
+                ]
+              },
+              {
+                "title": "Support Needed",
+                "fields": [
+                  "needHelpAreas",
+                  "supportNeededDetails"
                 ]
               }
             ],
@@ -949,12 +1047,13 @@
             "candidateExperienceType": {
               "vectorize": true,
               "type": "string",
-              "title": "Type of Candidate",
+              "title": "Job Experience Requirement",
               "description": "Please select the option that best describes the type of candidate you want to hire based on their previous work experience",
               "enum": [
                 "Fresher",
                 "Worked before",
-                "Returning after a break"
+                "Returning after a break",
+                "No preference"
               ]
             },
             "minEducationalInstitute": {
@@ -970,7 +1069,7 @@
                 "Other Vocational Training",
                 "Certifications",
                 "Learned Informally"
-            ]
+              ]
             },
             "workExperienceYears": {
               "type": "string",
@@ -994,7 +1093,11 @@
               "title": "Name of last role held",
               "description": "Enter the names of roles the candidate should have last held",
               "placeholder": "Enter the names of roles the candidate should have last held",
-              "x-show-if": { "candidateExperienceType": ["Worked before"] },
+              "x-show-if": {
+                "candidateExperienceType": [
+                  "Worked before"
+                ]
+              },
               "vectorize": true
             },
             "title": {
@@ -1302,6 +1405,112 @@
                   "Learned Informally"
                 ]
               }
+            },
+            "workingHours": {
+              "type": "string",
+              "title": "Working Hours",
+              "vectorize": true
+            },
+            "typeOfJob": {
+              "vectorize": true,
+              "type": "string",
+              "title": "Type of Job",
+              "enum": [
+                "WFH",
+                "Desk",
+                "On-Field",
+                "Standing"
+              ]
+            },
+            "jobCategory": {
+              "vectorize": true,
+              "type": "string",
+              "title": "Job Category",
+              "enum": [
+                "Manufacturing",
+                "Retail",
+                "Field Sales",
+                "Telecalling",
+                "Accounts",
+                "Data Entry",
+                "Design - Web Design",
+                "Graphic Design",
+                "HR-Admin",
+                "Unskilled Labour"
+              ]
+            },
+            "benefitsOffered": {
+              "type": "string",
+              "title": "Benefits Offered",
+              "vectorize": true
+            },
+            "employeeFriendliness": {
+              "vectorize": true,
+              "type": "array",
+              "title": "Employee Friendliness",
+              "items": {
+                "type": "string",
+                "enum": [
+                  "Women Friendly",
+                  "Transgender Friendly",
+                  "Disability Friendly",
+                  "Night-Shift Friendly",
+                  "On Time Payments",
+                  "No Harassment Policy"
+                ]
+              }
+            },
+            "servicesOffered": {
+              "vectorize": true,
+              "type": "array",
+              "title": "Do you offer any of these services?",
+              "items": {
+                "type": "string",
+                "enum": [
+                  "Skilling & Vocational Training",
+                  "Job Placement Assistance",
+                  "Apprenticeship Program",
+                  "Career Counseling & Interview Prep",
+                  "Financial Aid / Scheme Enrolment",
+                  "Other Support (Accommodation / Travel)",
+                  "No Other Help Needed"
+                ]
+              }
+            },
+            "serviceDetails": {
+              "type": "string",
+              "title": "Share more details about the service, opportunity or support provided.",
+              "vectorize": true
+            },
+            "needHelpAreas": {
+              "vectorize": true,
+              "type": "array",
+              "title": "Do you need help in any of these areas?",
+              "items": {
+                "type": "string",
+                "enum": [
+                  "Hiring",
+                  "Candidate Verification",
+                  "Skill & Vocational Training",
+                  "IT & Tech Services",
+                  "Marketing & Sales Support",
+                  "Training & Coaching",
+                  "Engineering & Design",
+                  "Repair & Maintenance",
+                  "Construction & Building",
+                  "Admin & Document Support"
+                ]
+              }
+            },
+            "supportNeededDetails": {
+              "type": "string",
+              "title": "Share some details on what support you need.",
+              "vectorize": true
+            },
+            "companyGstOrUdyamNumber": {
+              "type": "string",
+              "title": "Company GST or Udyam Number",
+              "private": true
             }
           }
         }
@@ -1317,7 +1526,7 @@
       "card": {
         "title_field": "jobProviderName",
         "avatar_from": "jobProviderName",
-        "default_fields": ["role", "jobProviderLocation", "natureOfJob", "positions"]
+        "default_fields": ["role", "jobProviderLocation", "natureOfJob", "positions", "workingHours", "typeOfJob", "jobCategory", "benefitsOffered", "candidateExperienceType", "needHelpAreas", "supportNeededDetails"]
       },
       "contact_fields": { "name": "jobProviderName", "phone": "hiringManagerPhoneNumber", "email": "hiringManagerEmail" },
       "dashboard_tiles": {
@@ -1328,6 +1537,397 @@
         ],
         "user": [
           { "field": "total_users", "label": "Total Employers" },
+          { "field": "avg_items_per_user", "label": "Avg Profiles per User" },
+          { "field": "avg_actions_per_user", "label": "Avg Actions per User" }
+        ]
+      }
+    },
+    {
+      "description": "Training institutes, employment exchanges and support organisations offering skilling, placement and career services.",
+      "minimum_cache_ttl_seconds": 300,
+      "status_rules": [
+        { "status": "new",      "label": "New",      "description": "Listing created within the last 7 days",                     "when": { "item_age_days": { "lte": 7 } } },
+        { "status": "active",   "label": "Active",   "description": "Received enquiries and answered one in the last 30 days",    "when": { "all": [ { "count": { "buckets": ["create"], "gt": 0 } }, { "days_since_last": { "buckets": ["accept", "reject"], "lte": 30 } } ] } },
+        { "status": "at_risk",  "label": "At Risk",  "description": "No enquiry accepted or rejected for 30–90 days",             "when": { "all": [ { "count": { "buckets": ["create"], "gt": 0 } }, { "days_since_last": { "buckets": ["accept", "reject"], "between": [31, 90] } } ] } },
+        { "status": "inactive", "label": "Inactive", "description": "No activity for 90+ days",                                   "when": "default" }
+      ],
+      "item_schemas": {
+        "profile_1.0": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "title": "Service Provider Profile 1.0",
+          "display_name_field": "organisationName",
+          "type": "object",
+          "additionalProperties": false,
+          "x-form-layout": {
+            "sections": [
+              {
+                "title": "About the Organisation",
+                "fields": [
+                  "organisationName",
+                  "website",
+                  "ownershipType",
+                  "institutionType",
+                  "institutionSubTypeEducational",
+                  "institutionSubTypeNonEducational"
+                ]
+              },
+              {
+                "title": "Contact",
+                "fields": [
+                  "contactPersonName",
+                  "contactPhoneNumber",
+                  "contactEmail"
+                ]
+              },
+              {
+                "title": "Who You Serve",
+                "fields": [
+                  "whoCanContact",
+                  "targetSeekersEducational",
+                  "targetSeekersNonEducational"
+                ]
+              },
+              {
+                "title": "What You Offer",
+                "fields": [
+                  "servicesEducationalForSeekers",
+                  "servicesEducationalForProviders",
+                  "servicesNonEducationalForSeekers",
+                  "servicesNonEducationalForProviders",
+                  "costToBeneficiary",
+                  "serviceDescription"
+                ]
+              },
+              {
+                "title": "Where You Operate",
+                "fields": [
+                  "serviceAreas",
+                  "officialAddress"
+                ]
+              }
+            ],
+            "twoColumn": [
+              "contactPhoneNumber",
+              "contactEmail"
+            ]
+          },
+          "required": [
+            "contactPersonName",
+            "contactPhoneNumber"
+          ],
+          "properties": {
+            "contactPersonName": {
+              "type": "string",
+              "title": "Contact Person Name",
+              "minLength": 1,
+              "private": true
+            },
+            "contactPhoneNumber": {
+              "type": "string",
+              "title": "Contact Phone Number",
+              "private": true
+            },
+            "contactEmail": {
+              "type": "string",
+              "format": "email",
+              "title": "Contact Email",
+              "private": true
+            },
+            "organisationName": {
+              "type": "string",
+              "title": "Organisation Name",
+              "vectorize": true
+            },
+            "website": {
+              "vectorize": true,
+              "type": "string",
+              "format": "uri",
+              "title": "Website"
+            },
+            "ownershipType": {
+              "vectorize": true,
+              "type": "string",
+              "title": "Ownership / Management Type",
+              "enum": [
+                "Private",
+                "Government",
+                "NGO",
+                "Other"
+              ]
+            },
+            "institutionType": {
+              "vectorize": true,
+              "type": "array",
+              "title": "Institution Type",
+              "items": {
+                "type": "string",
+                "enum": [
+                  "Educational",
+                  "Non-Educational"
+                ]
+              }
+            },
+            "institutionSubTypeEducational": {
+              "vectorize": true,
+              "type": "array",
+              "title": "Institution Sub-Type (Educational)",
+              "items": {
+                "type": "string",
+                "enum": [
+                  "School",
+                  "PU College",
+                  "College",
+                  "ITI",
+                  "Other Vocational Training",
+                  "Polytechnic",
+                  "Diploma",
+                  "Certification",
+                  "Learned Informally",
+                  "Other"
+                ]
+              },
+              "x-show-if": {
+                "institutionType": [
+                  "Educational"
+                ]
+              }
+            },
+            "institutionSubTypeNonEducational": {
+              "vectorize": true,
+              "type": "array",
+              "title": "Institution Sub-Type (Non-Educational)",
+              "items": {
+                "type": "string",
+                "enum": [
+                  "Employment Exchange",
+                  "Placement Agency",
+                  "Community Group",
+                  "Individual Trainer / Counsellor",
+                  "Business consultants",
+                  "Financial-service providers",
+                  "Legal and compliance-service providers",
+                  "Marketing-service providers",
+                  "Technology providers",
+                  "Mentors",
+                  "Incubators",
+                  "Career counsellors",
+                  "Relevant gig and professional-service providers",
+                  "Background-verification providers",
+                  "Other"
+                ]
+              },
+              "x-show-if": {
+                "institutionType": [
+                  "Non-Educational"
+                ]
+              }
+            },
+            "whoCanContact": {
+              "vectorize": true,
+              "type": "array",
+              "title": "Who can contact you for services?",
+              "items": {
+                "type": "string",
+                "enum": [
+                  "Job Seekers",
+                  "Job Providers"
+                ]
+              }
+            },
+            "targetSeekersEducational": {
+              "vectorize": true,
+              "type": "array",
+              "title": "What type of job seekers are you looking to serve?",
+              "items": {
+                "type": "string",
+                "enum": [
+                  "School graduates (10th / 12th)",
+                  "ITI / Vocational graduates",
+                  "Polytechnic / Diploma holders",
+                  "College graduates",
+                  "Experienced workers",
+                  "All job seekers"
+                ]
+              },
+              "x-show-if": {
+                "institutionType": [
+                  "Educational"
+                ],
+                "whoCanContact": [
+                  "Job Seekers"
+                ]
+              }
+            },
+            "targetSeekersNonEducational": {
+              "vectorize": true,
+              "type": "array",
+              "title": "Who do you serve? (Non-Educational)",
+              "items": {
+                "type": "string",
+                "enum": [
+                  "MSMEs"
+                ]
+              },
+              "x-show-if": {
+                "institutionType": [
+                  "Non-Educational"
+                ],
+                "whoCanContact": [
+                  "Job Providers"
+                ]
+              }
+            },
+            "servicesEducationalForSeekers": {
+              "vectorize": true,
+              "type": "array",
+              "title": "What services do you offer to job seekers? (Educational)",
+              "items": {
+                "type": "string",
+                "enum": [
+                  "Skilling & Vocational Training",
+                  "Job Placement Assistance",
+                  "Career Counseling & Interview Prep",
+                  "Candidate Verification"
+                ]
+              },
+              "x-show-if": {
+                "institutionType": [
+                  "Educational"
+                ],
+                "whoCanContact": [
+                  "Job Seekers"
+                ]
+              },
+              "vector_weight": 2
+            },
+            "servicesEducationalForProviders": {
+              "vectorize": true,
+              "type": "array",
+              "title": "What services do you offer to job providers? (Educational)",
+              "items": {
+                "type": "string",
+                "enum": [
+                  "Skilling & Vocational Training",
+                  "Apprenticeship Program",
+                  "Career Counseling & Interview Prep",
+                  "Financial Aid / Scheme Enrolment",
+                  "Other Support (Accommodation / Travel)",
+                  "Hiring",
+                  "Candidate Verification"
+                ]
+              },
+              "x-show-if": {
+                "institutionType": [
+                  "Educational"
+                ],
+                "whoCanContact": [
+                  "Job Providers"
+                ]
+              },
+              "vector_weight": 2
+            },
+            "servicesNonEducationalForSeekers": {
+              "vectorize": true,
+              "type": "array",
+              "title": "What services do you offer to job seekers? (Non-Educational)",
+              "items": {
+                "type": "string",
+                "enum": [
+                  "Financial Aid / Scheme Enrolment",
+                  "Other Support (Accommodation / Travel)"
+                ]
+              },
+              "x-show-if": {
+                "institutionType": [
+                  "Non-Educational"
+                ],
+                "whoCanContact": [
+                  "Job Seekers"
+                ]
+              },
+              "vector_weight": 2
+            },
+            "servicesNonEducationalForProviders": {
+              "vectorize": true,
+              "type": "array",
+              "title": "What services do you offer to job providers? (Non-Educational)",
+              "items": {
+                "type": "string",
+                "enum": [
+                  "IT & Tech Services",
+                  "Marketing & Sales Support",
+                  "Training & Coaching",
+                  "Engineering & Design",
+                  "Repair & Maintenance",
+                  "Construction & Building",
+                  "Admin & Document Support"
+                ]
+              },
+              "x-show-if": {
+                "institutionType": [
+                  "Non-Educational"
+                ],
+                "whoCanContact": [
+                  "Job Providers"
+                ]
+              },
+              "vector_weight": 2
+            },
+            "serviceAreas": {
+              "vectorize": true,
+              "type": "array",
+              "title": "In which pincodes / areas / localities, and cities do you provide the service?",
+              "location": "primary",
+              "items": {
+                "type": "string"
+              }
+            },
+            "officialAddress": {
+              "type": "string",
+              "title": "What is your official address?",
+              "location": "secondary",
+              "private": true
+            },
+            "costToBeneficiary": {
+              "vectorize": true,
+              "type": "string",
+              "title": "Cost to Beneficiary",
+              "enum": [
+                "Free",
+                "Subsidised / Government-funded",
+                "Paid"
+              ]
+            },
+            "serviceDescription": {
+              "type": "string",
+              "title": "Share more details about the service, opportunity or support provided.",
+              "vectorize": true
+            }
+          }
+        }
+      },
+      "id": "service_provider",
+      "go_live_required": ["schema_required", "consent_required"],
+      "my_items_label": "My Services",
+      "guardian_consent_required": false,
+      "profile_completion_prompt": {
+        "heading": "Complete your listing to reach job seekers",
+        "body": "Seekers can find and contact your organisation only once your listing is live. Add the details below to appear on the discovery map."
+      },
+      "card": {
+        "title_field": "organisationName",
+        "avatar_from": "organisationName",
+        "default_fields": ["institutionType", "costToBeneficiary", "ownershipType", "serviceAreas"]
+      },
+      "contact_fields": { "name": "contactPersonName", "phone": "contactPhoneNumber", "email": "contactEmail" },
+      "dashboard_tiles": {
+        "profile": [
+          { "field": "total_items", "label": "Services Registered" },
+          { "field": "complete_profiles", "label": "Services Complete" },
+          { "field": "has_applications", "label": "Received Enquiries" }
+        ],
+        "user": [
+          { "field": "total_users", "label": "Total Service Providers" },
           { "field": "avg_items_per_user", "label": "Avg Profiles per User" },
           { "field": "avg_actions_per_user", "label": "Avg Actions per User" }
         ]
@@ -1346,6 +1946,12 @@
       "instance_url": "http://localhost:2742",
       "custom_item_schema_urls": {},
       "domain_id": "provider"
+    },
+    {
+      "instance_name": "Blue Dot Service Provider Local",
+      "instance_url": "http://localhost:2742",
+      "custom_item_schema_urls": {},
+      "domain_id": "service_provider"
     }
   ],
   "actions": {
@@ -1401,7 +2007,7 @@
       ]
     },
     "connect": {
-      "description": "Lets a provider connect with another provider (partnership / referral) or reach out to a seeker (interview invitation). Either party can initiate; the receiver can accept or reject.",
+      "description": "Lets participants reach out to one another outside the application flow: provider to provider (partnership / referral), provider to seeker (interview invitation), seeker to service provider (service enquiry), service provider to seeker (programme offer), and provider to service provider either way (sourcing trained candidates). Either party can initiate; the receiver can accept or reject.",
       "interactions": [
         {
           "from_network": "blue_dot",
@@ -1490,6 +2096,201 @@
           },
           "metric_categories": {
             "create": ["created", "invited"],
+            "accept": ["accepted"],
+            "reject": ["rejected"],
+            "cancel": ["cancelled"]
+          },
+          "reveals_pii_on_status": ["accepted"]
+        },
+        {
+          "from_network": "blue_dot",
+          "from_domain": "seeker",
+          "to_network": "blue_dot",
+          "to_domain": "service_provider",
+          "requirement_schema": {
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "title": "Service Enquiry Requirement",
+            "type": "object",
+            "additionalProperties": false,
+            "required": [],
+            "properties": {}
+          },
+          "event_schema": {
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "title": "Service Enquiry Event",
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "status",
+              "remark"
+            ],
+            "properties": {
+              "status": {
+                "type": "string",
+                "enum": [
+                  "created",
+                  "accepted",
+                  "rejected",
+                  "cancelled"
+                ]
+              },
+              "remark": {
+                "type": "string"
+              }
+            }
+          },
+          "metric_categories": {
+            "create": ["created"],
+            "accept": ["accepted"],
+            "reject": ["rejected"],
+            "cancel": ["cancelled"]
+          },
+          "reveals_pii_on_status": ["accepted"]
+        },
+        {
+          "from_network": "blue_dot",
+          "from_domain": "service_provider",
+          "to_network": "blue_dot",
+          "to_domain": "seeker",
+          "requirement_schema": {
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "title": "Service Offer Requirement",
+            "type": "object",
+            "additionalProperties": false,
+            "required": [],
+            "properties": {
+              "message": {
+                "type": "string",
+                "title": "Message to the job seeker"
+              }
+            }
+          },
+          "event_schema": {
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "title": "Service Offer Event",
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "status",
+              "remark"
+            ],
+            "properties": {
+              "status": {
+                "type": "string",
+                "enum": [
+                  "created",
+                  "accepted",
+                  "rejected",
+                  "cancelled"
+                ]
+              },
+              "remark": {
+                "type": "string"
+              }
+            }
+          },
+          "metric_categories": {
+            "create": ["created"],
+            "accept": ["accepted"],
+            "reject": ["rejected"],
+            "cancel": ["cancelled"]
+          },
+          "reveals_pii_on_status": ["accepted"]
+        },
+        {
+          "from_network": "blue_dot",
+          "from_domain": "provider",
+          "to_network": "blue_dot",
+          "to_domain": "service_provider",
+          "requirement_schema": {
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "title": "Employer To Service Provider Connect Requirement",
+            "type": "object",
+            "additionalProperties": false,
+            "required": [],
+            "properties": {
+              "message": {
+                "type": "string",
+                "title": "Message to the organisation"
+              }
+            }
+          },
+          "event_schema": {
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "title": "Employer To Service Provider Connect Event",
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "status",
+              "remark"
+            ],
+            "properties": {
+              "status": {
+                "type": "string",
+                "enum": [
+                  "created",
+                  "accepted",
+                  "rejected",
+                  "cancelled"
+                ]
+              },
+              "remark": {
+                "type": "string"
+              }
+            }
+          },
+          "metric_categories": {
+            "create": ["created"],
+            "accept": ["accepted"],
+            "reject": ["rejected"],
+            "cancel": ["cancelled"]
+          },
+          "reveals_pii_on_status": ["accepted"]
+        },
+        {
+          "from_network": "blue_dot",
+          "from_domain": "service_provider",
+          "to_network": "blue_dot",
+          "to_domain": "provider",
+          "requirement_schema": {
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "title": "Service Provider To Employer Connect Requirement",
+            "type": "object",
+            "additionalProperties": false,
+            "required": [],
+            "properties": {
+              "message": {
+                "type": "string",
+                "title": "Message to the employer"
+              }
+            }
+          },
+          "event_schema": {
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "title": "Service Provider To Employer Connect Event",
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "status",
+              "remark"
+            ],
+            "properties": {
+              "status": {
+                "type": "string",
+                "enum": [
+                  "created",
+                  "accepted",
+                  "rejected",
+                  "cancelled"
+                ]
+              },
+              "remark": {
+                "type": "string"
+              }
+            }
+          },
+          "metric_categories": {
+            "create": ["created"],
             "accept": ["accepted"],
             "reject": ["rejected"],
             "cancel": ["cancelled"]
