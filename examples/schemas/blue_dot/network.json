@@ -875,6 +875,7 @@
                 "title": "Job Details",
                 "fields": [
                   "jobProviderName",
+                  "companyGstOrUdyamNumber",
                   "jobProviderLocation",
                   "role",
                   "title",
@@ -1505,6 +1506,11 @@
               "type": "string",
               "title": "Share some details on what support you need.",
               "vectorize": true
+            },
+            "companyGstOrUdyamNumber": {
+              "type": "string",
+              "title": "Company GST or Udyam Number",
+              "private": true
             }
           }
         }
