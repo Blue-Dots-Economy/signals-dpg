@@ -1076,7 +1076,9 @@
               "type": "string",
               "title": "Job Location",
               "location": "primary",
-              "private": true
+              "private": true,
+              "description": "Please share the exact location of the job or the pincode, and area / locality and city of the job",
+              "placeholder": "Pincode, area / locality and city of the job"
             },
             "hiringManagerName": {
               "type": "string",
