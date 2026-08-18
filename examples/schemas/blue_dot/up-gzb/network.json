@@ -731,7 +731,8 @@
                   "district",
                   "state"
                 ]
-              }
+              },
+              "vectorize": true
             },
             "nameOfLastRoleHeld": {
               "type": "string",
