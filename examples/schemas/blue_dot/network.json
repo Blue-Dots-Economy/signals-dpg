@@ -794,13 +794,18 @@
             "typeOfJobPreferred": {
               "vectorize": true,
               "type": "string",
-              "title": "Type of job preferred",
+              "title": "Type of Job",
               "enum": [
                 "WFH",
                 "Desk",
                 "On-Field",
                 "Standing"
-              ]
+              ],
+              "x-show-if": {
+                "workExperience": [
+                  "Worked before"
+                ]
+              }
             },
             "preferredJobCategory": {
               "vectorize": true,
