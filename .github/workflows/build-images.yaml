@@ -7,11 +7,14 @@ on:
   push:
     branches: [main]
     # Release tags. Two schemes, both additive to the branch/dispatch paths above:
-    #   v*.*.*  semver releases        e.g. v1.2.0
-    #   GA-*    dated GA cuts          e.g. GA-12-08-2026
+    #   v*.*.*      semver releases   e.g. v1.2.0
+    #   20*-s*-rc*  sprint release    e.g. 202608-s1-rc1
+    #               <YYYYMM>-s<sprint>-rc<candidate>. A fix for an issue found
+    #               in -rc1 ships as -rc2, so every candidate is its own image.
+    #               Supersedes the dated GA-<date> scheme, no longer built here.
     # Note GitHub reads this workflow FROM THE TAGGED COMMIT, so a tag cut from a
     # branch that predates this change will not pick the new pattern up.
-    tags: ['v*.*.*', 'GA-*']
+    tags: ['v*.*.*', '20*-s*-rc*']
   workflow_dispatch:
 
 permissions:
@@ -58,9 +61,9 @@ jobs:
         with:
           images: ghcr.io/blue-dots-economy/signals-dpg/${{ matrix.service.name }}
           # `type=ref,event=tag` emits the tag VERBATIM, so the image tag equals
-          # the release tag (v1.2.0 -> v1.2.0, GA-12-08-2026 -> GA-12-08-2026).
+          # the release tag (v1.2.0 -> v1.2.0, 202608-s1-rc1 -> 202608-s1-rc1).
           # It is required in addition to type=semver, which strips the leading
-          # `v` (v1.2.0 -> 1.2.0) and cannot parse a GA-* tag at all — for those
+          # `v` (v1.2.0 -> 1.2.0) and cannot parse a 20*-s*-rc* tag at all — for those
           # it emits nothing and logs a warning, which is not a failure.
           # Comments stay OUT of the block scalar below: that value is passed to
           # the action verbatim, not parsed as YAML.
