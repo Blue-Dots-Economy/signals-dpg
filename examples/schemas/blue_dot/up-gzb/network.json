@@ -1521,8 +1521,7 @@
             },
             "workingHours": {
               "type": "string",
-              "title": "Working Hours",
-              "vectorize": true
+              "title": "Working Hours"
             },
             "typeOfJob": {
               "vectorize": true,
