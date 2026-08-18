@@ -1062,13 +1062,8 @@
             ]
           },
           "required": [
-            "jobProviderName",
-            "role",
-            "jobProviderLocation",
             "hiringManagerName",
-            "hiringManagerPhoneNumber",
-            "positions",
-            "natureOfJob"
+            "hiringManagerPhoneNumber"
           ],
           "properties": {
             "jobProviderName": {
