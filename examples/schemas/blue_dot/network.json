@@ -1664,7 +1664,7 @@
             "institutionSubTypeEducational": {
               "vectorize": true,
               "type": "array",
-              "title": "Institution Sub-Type",
+              "title": "Institution Sub-Type (Educational)",
               "items": {
                 "type": "string",
                 "enum": [
@@ -1689,7 +1689,7 @@
             "institutionSubTypeNonEducational": {
               "vectorize": true,
               "type": "array",
-              "title": "Institution Sub-Type",
+              "title": "Institution Sub-Type (Non-Educational)",
               "items": {
                 "type": "string",
                 "enum": [
@@ -1755,7 +1755,7 @@
             "targetSeekersNonEducational": {
               "vectorize": true,
               "type": "array",
-              "title": "What type of job seekers are you looking to serve?",
+              "title": "Who do you serve? (Non-Educational)",
               "items": {
                 "type": "string",
                 "enum": [
@@ -1774,7 +1774,7 @@
             "servicesEducationalForSeekers": {
               "vectorize": true,
               "type": "array",
-              "title": "What services do you offer?",
+              "title": "What services do you offer to job seekers? (Educational)",
               "items": {
                 "type": "string",
                 "enum": [
@@ -1797,7 +1797,7 @@
             "servicesEducationalForProviders": {
               "vectorize": true,
               "type": "array",
-              "title": "What services do you offer?",
+              "title": "What services do you offer to job providers? (Educational)",
               "items": {
                 "type": "string",
                 "enum": [
@@ -1823,7 +1823,7 @@
             "servicesNonEducationalForSeekers": {
               "vectorize": true,
               "type": "array",
-              "title": "What services do you offer?",
+              "title": "What services do you offer to job seekers? (Non-Educational)",
               "items": {
                 "type": "string",
                 "enum": [
@@ -1844,7 +1844,7 @@
             "servicesNonEducationalForProviders": {
               "vectorize": true,
               "type": "array",
-              "title": "What services do you offer?",
+              "title": "What services do you offer to job providers? (Non-Educational)",
               "items": {
                 "type": "string",
                 "enum": [
