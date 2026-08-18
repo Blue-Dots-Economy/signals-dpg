@@ -6,7 +6,12 @@ name: build-images
 on:
   push:
     branches: [main]
-    tags: ['v*.*.*']
+    # Release tags. Two schemes, both additive to the branch/dispatch paths above:
+    #   v*.*.*  semver releases        e.g. v1.2.0
+    #   GA-*    dated GA cuts          e.g. GA-12-08-2026
+    # Note GitHub reads this workflow FROM THE TAGGED COMMIT, so a tag cut from a
+    # branch that predates this change will not pick the new pattern up.
+    tags: ['v*.*.*', 'GA-*']
   workflow_dispatch:
 
 permissions:
@@ -52,8 +57,16 @@ jobs:
         id: meta
         with:
           images: ghcr.io/blue-dots-economy/signals-dpg/${{ matrix.service.name }}
+          # `type=ref,event=tag` emits the tag VERBATIM, so the image tag equals
+          # the release tag (v1.2.0 -> v1.2.0, GA-12-08-2026 -> GA-12-08-2026).
+          # It is required in addition to type=semver, which strips the leading
+          # `v` (v1.2.0 -> 1.2.0) and cannot parse a GA-* tag at all — for those
+          # it emits nothing and logs a warning, which is not a failure.
+          # Comments stay OUT of the block scalar below: that value is passed to
+          # the action verbatim, not parsed as YAML.
           tags: |
             type=ref,event=branch
+            type=ref,event=tag
             type=semver,pattern={{version}}
             type=sha,format=short
       - uses: docker/build-push-action@v7
