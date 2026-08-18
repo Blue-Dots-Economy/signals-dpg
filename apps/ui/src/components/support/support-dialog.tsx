@@ -72,6 +72,49 @@ function resolveSubmitErrorToast(
   return { title: t('support.toast_error'), description: t('support.toast_error_desc') };
 }
 
+/**
+ * Red asterisk marking a required field, matching the marker the schema-driven
+ * forms get from `custom-field-template.tsx` (#200) so hand-written forms don't
+ * look different from generated ones.
+ *
+ * Purely visual: the inputs it marks carry the native `required` attribute, which
+ * assistive tech already announces, so adding screen-reader text here would make
+ * it say "required" twice. It sits *beside* the `<label>` rather than inside it
+ * for the same reason — inside, the field's accessible name becomes "Details *"
+ * instead of "Details".
+ */
+function RequiredMark() {
+  return (
+    <span aria-hidden="true" className="ml-0.5 text-destructive">
+      *
+    </span>
+  );
+}
+
+/**
+ * Which requirement is still unmet, as the message to show — or null when the
+ * form is ready to send.
+ *
+ * Exists so the disabled Send button can say *why* it is disabled. Four separate
+ * conditions gate submission (name, details, one contact, consent) and none of
+ * them was visible: the button simply greyed out, and the "email or phone" rule
+ * in particular appears on neither field. Order matches the form's reading
+ * order, so the message points at the first gap rather than the last.
+ *
+ * The strings are the same ones the submit handler's guards use, so the hint and
+ * a submitted-anyway failure can't drift apart.
+ */
+function missingRequirementMessage(
+  state: { name: string; details: string; hasContact: boolean; consent: boolean },
+  t: Translate,
+): string | null {
+  if (!state.name) return t('support.validation_name_required');
+  if (!state.details) return t('support.validation_details_required');
+  if (!state.hasContact) return t('support.validation_contact_required');
+  if (!state.consent) return t('support.validation_consent_required');
+  return null;
+}
+
 export function SupportDialog({ open, onOpenChange }: SupportDialogProps) {
   const { t } = useTranslation();
   const { user } = useAuth();
@@ -136,8 +179,11 @@ export function SupportDialog({ open, onOpenChange }: SupportDialogProps) {
   const trimmedEmail = email.trim();
   const trimmedPhone = phone.trim();
   const hasContact = Boolean(trimmedEmail || trimmedPhone);
-  const canSubmit =
-    Boolean(trimmedName) && Boolean(details.trim()) && hasContact && consent && !isSubmitting;
+  const missingRequirement = missingRequirementMessage(
+    { name: trimmedName, details: details.trim(), hasContact, consent },
+    t,
+  );
+  const canSubmit = !missingRequirement && !isSubmitting;
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -192,7 +238,10 @@ export function SupportDialog({ open, onOpenChange }: SupportDialogProps) {
         </DialogHeader>
         <form onSubmit={handleSubmit} className="space-y-4">
           <div className="space-y-1.5">
-            <Label htmlFor="support-name">{t('support.label_name')}</Label>
+            <div className="flex items-center">
+              <Label htmlFor="support-name">{t('support.label_name')}</Label>
+              <RequiredMark />
+            </div>
             <Input
               id="support-name"
               value={name}
@@ -224,6 +273,10 @@ export function SupportDialog({ open, onOpenChange }: SupportDialogProps) {
               disabled={isSubmitting}
             />
           </div>
+          {/* The one rule a per-field marker can't carry: either contact will do,
+              but one of them is mandatory. Same wording pattern as the guardian
+              OTP form, which gates on the same either/or. */}
+          <p className="text-xs text-muted-foreground">{t('support.contact_hint')}</p>
           <fieldset className="space-y-1.5" disabled={isSubmitting}>
             <legend className="text-sm font-medium">{t('support.label_type')}</legend>
             <div className="flex gap-4">
@@ -250,7 +303,10 @@ export function SupportDialog({ open, onOpenChange }: SupportDialogProps) {
             </div>
           </fieldset>
           <div className="space-y-1.5">
-            <Label htmlFor="support-details">{t('support.label_details')}</Label>
+            <div className="flex items-center">
+              <Label htmlFor="support-details">{t('support.label_details')}</Label>
+              <RequiredMark />
+            </div>
             <Textarea
               id="support-details"
               value={details}
@@ -333,10 +389,19 @@ export function SupportDialog({ open, onOpenChange }: SupportDialogProps) {
               {t('support.consent_text')}
             </Label>
           </div>
+          {missingRequirement && (
+            <p id="support-submit-hint" className="text-xs text-muted-foreground">
+              {missingRequirement}
+            </p>
+          )}
           <DialogFooter>
+            {/* aria-describedby points at the hint above, so the reason the button
+                is unavailable is announced with it rather than being a purely
+                visual cue. */}
             <button
               type="submit"
               disabled={!canSubmit}
+              aria-describedby={missingRequirement ? 'support-submit-hint' : undefined}
               className="flex w-full items-center justify-center gap-2 rounded-md py-2.5 text-sm font-semibold transition-all disabled:opacity-60 bg-brand-cta"
             >
               {isSubmitting && <Loader2 className="h-4 w-4 animate-spin" />}

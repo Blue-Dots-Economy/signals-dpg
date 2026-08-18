@@ -21,10 +21,13 @@ vi.mock('@/hooks/use-support-config', () => ({
   useSupportConfig: () => ({ config: supportConfig, isLoading: false }),
 }));
 
+// Hoisted so the identity is stable, as it is in the real app (AuthProvider
+// memoises its context value). Returning a fresh object per call would make the
+// dialog's prefill effect — keyed on [open, user] — re-run on every render and
+// overwrite whatever the user had typed or cleared.
+const authUser = { name: 'Asha K', email: 'asha@example.com', phoneNumber: '+919000000000' };
 vi.mock('@/contexts/auth-context', () => ({
-  useAuth: () => ({
-    user: { name: 'Asha K', email: 'asha@example.com', phoneNumber: '+919000000000' },
-  }),
+  useAuth: () => ({ user: authUser }),
 }));
 
 // Sonner's toast.*() calls render into whatever <Toaster /> is mounted in the
@@ -85,6 +88,53 @@ describe('SupportDialog', () => {
         consent: true,
       }),
     );
+  });
+
+  it('marks the required fields, and only those', async () => {
+    await renderDialog();
+    // The asterisk sits beside the label, not inside it, so the field's
+    // accessible name stays "Name" rather than "Name *".
+    for (const label of ['Name', 'Details']) {
+      expect(screen.getByLabelText(label).closest('div')?.parentElement).toHaveTextContent(
+        new RegExp(`${label}\\s*\\*`),
+      );
+    }
+    expect(screen.getByText(/attachments \(optional\)/i)).toBeInTheDocument();
+  });
+
+  it('says why Send is disabled, naming the field that is missing', async () => {
+    await renderDialog();
+    const submit = screen.getByRole('button', { name: /send/i });
+
+    // The reported bug: Details is required but nothing said so, so a disabled
+    // Send button had no visible explanation.
+    expect(submit).toBeDisabled();
+    expect(screen.getByText(/please describe your issue/i)).toBeInTheDocument();
+    expect(submit).toHaveAttribute('aria-describedby', 'support-submit-hint');
+
+    await userEvent.type(screen.getByLabelText('Details'), 'It broke');
+    expect(screen.getByText(/please accept the consent/i)).toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole('checkbox'));
+    expect(submit).toBeEnabled();
+    expect(screen.queryByText(/please describe your issue/i)).not.toBeInTheDocument();
+    expect(submit).not.toHaveAttribute('aria-describedby');
+  });
+
+  it('explains the email-or-phone rule, which no single field can carry', async () => {
+    await renderDialog();
+    expect(screen.getByText(/at least one of email or phone/i)).toBeInTheDocument();
+
+    await userEvent.type(screen.getByLabelText('Details'), 'It broke');
+    await userEvent.click(screen.getByRole('checkbox'));
+    expect(screen.getByRole('button', { name: /send/i })).toBeEnabled();
+
+    // Clearing both prefilled contacts is the case that used to disable Send
+    // with no explanation anywhere on the form.
+    await userEvent.clear(screen.getByLabelText('Email'));
+    await userEvent.clear(screen.getByLabelText('Phone'));
+    expect(screen.getByRole('button', { name: /send/i })).toBeDisabled();
+    expect(screen.getByText(/please provide an email or phone number/i)).toBeInTheDocument();
   });
 
   it('shows the unavailable message on a 503 response', async () => {
