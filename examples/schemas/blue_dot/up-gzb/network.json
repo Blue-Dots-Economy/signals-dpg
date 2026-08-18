@@ -103,7 +103,8 @@
                 "Female",
                 "Other",
                 "Don't want to share"
-              ]
+              ],
+              "private": true
             },
             "location": {
               "type": "string",
