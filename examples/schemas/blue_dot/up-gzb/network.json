@@ -149,14 +149,18 @@
             },
             "natureOfJobsInterestedIn": {
               "vectorize": true,
-              "type": "string",
               "title": "Nature of Jobs Interested In",
-              "enum": [
-                "Internship",
-                "Apprenticeship",
-                "Full-time",
-                "Flexible"
-              ]
+              "type": "array",
+              "items": {
+                "type": "string",
+                "enum": [
+                  "Internship",
+                  "Apprenticeship",
+                  "Full-time",
+                  "Gig Work",
+                  "Flexible"
+                ]
+              }
             },
             "nameOfJobRolesInterestedIn": {
               "type": "string",
@@ -1011,6 +1015,7 @@
                 "Apprenticeship",
                 "Full-time",
                 "Flexible",
+                "Gig Work",
                 "Not Available"
               ]
             },
