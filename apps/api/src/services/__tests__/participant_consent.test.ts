@@ -23,7 +23,7 @@ vi.mock('@dpg/database', () => ({ items: { __table: 'items' } }));
 import { recordParticipantConsent } from '@/services/participant_consent';
 
 // helper to build a tx whose select().from().where() resolves to `draftRows`
-function makeSelectTx(draftRows: Array<{ item_id: string }>) {
+function makeSelectTx(draftRows: Array<Record<string, unknown>>) {
   return {
     select: vi.fn(() => ({
       from: vi.fn(() => ({
@@ -251,9 +251,37 @@ describe('recordParticipantConsent', () => {
     promoteItemOnProfileConsent.mockResolvedValue(true);
     const tx = makeSelectTx([{ item_id: 'has-consent' }, { item_id: 'no-consent' }]);
     const { promoteEligibleDraftsForUser } = await import('@/services/participant_consent');
-    const n = await promoteEligibleDraftsForUser(tx as never, 'u1');
-    expect(n).toBe(1);
+    const promoted = await promoteEligibleDraftsForUser(tx as never, 'u1');
+    expect(promoted).toHaveLength(1);
     expect(promoteItemOnProfileConsent).toHaveBeenCalledWith(tx, 'has-consent');
     expect(promoteItemOnProfileConsent).not.toHaveBeenCalledWith(tx, 'no-consent');
+  });
+
+  // #557: the caller has to publish an item event for each promoted draft so
+  // signals-search re-indexes it, and it cannot do that from a count — these
+  // promotions are collateral (an age write can unblock several profiles at once),
+  // so the caller doesn't otherwise know which items moved.
+  it('promoteEligibleDraftsForUser returns the full key of every item it promoted', async () => {
+    hasAcceptedProfileConsent.mockResolvedValue(true);
+    promoteItemOnProfileConsent.mockImplementation(
+      async (_tx: unknown, itemId: string) => itemId === 'promoted',
+    );
+    const tx = makeSelectTx([
+      { item_id: 'promoted', item_network: 'blue_dot', item_domain: 'seeker', item_type: 'profile_1.0' },
+      { item_id: 'blocked', item_network: 'blue_dot', item_domain: 'provider', item_type: 'profile_1.0' },
+    ]);
+    const { promoteEligibleDraftsForUser } = await import('@/services/participant_consent');
+
+    const promoted = await promoteEligibleDraftsForUser(tx as never, 'u1');
+
+    // Only the item that actually flipped to live, with the columns publishItemEvent needs.
+    expect(promoted).toEqual([
+      {
+        item_network: 'blue_dot',
+        item_domain: 'seeker',
+        item_type: 'profile_1.0',
+        item_id: 'promoted',
+      },
+    ]);
   });
 });

@@ -147,10 +147,19 @@ export interface UpdateActionStatusResponse {
  */
 export interface FetchMyActionsQuery {
   action_id?: string;
-  action_type?: string;
-  action_status?: string;
+  // A single value or multiple (OR'd) values — the server's
+  // FetchOwnedActionsQuerySchema accepts either and normalizes to an array
+  // (#439). Widened from a single string so "My Actions" can multi-select.
+  action_type?: string | string[];
+  action_status?: string | string[];
   item_id?: string;
   ownership_role?: 'all' | 'initiated' | 'received';
+  // #439: server-side sort key. Defaults to 'recent' server-side when omitted.
+  sort?: 'recent' | 'oldest' | 'match_score' | 'distance';
+  // #439: non-PII item_state facet selections (OR within a field, AND across
+  // fields), applied against the counterparty item on each action — same
+  // shape as the map/discover facet filter (`DiscoverFacetFilter`).
+  facets?: Array<{ field: string; values: string[] }>;
   limit?: number;
   offset?: number;
 }
@@ -186,6 +195,12 @@ export interface Action {
   // display_name_field (falls back to the item id when unavailable).
   source_item_name?: string | null;
   target_item_name?: string | null;
+  // #439: present when a match-score/facet/distance pipeline ran for this
+  // row's page (match_score fetch or `sort=distance`/facets enrichment
+  // path) — null when not computed (e.g. no location on one side for
+  // distance, or the score service wasn't consulted for this row).
+  match_score?: number | null;
+  distance_m?: number | null;
 }
 
 /**
@@ -414,6 +429,41 @@ export async function updateActionStatusBulk(
 }
 
 /**
+ * Appends a single-or-array query param as REPEATED keys (one `params.append`
+ * per value) — matches how the server's `FetchOwnedActionsQuerySchema`
+ * (`action_type`/`action_status`, #439) accepts either a lone value or a
+ * repeated one and normalizes both to an array server-side. A bare string
+ * still appends exactly once, so single-value callers are unaffected.
+ */
+function appendRepeated(params: URLSearchParams, key: string, value: string | string[] | undefined) {
+  if (value === undefined) return;
+  for (const v of Array.isArray(value) ? value : [value]) {
+    params.append(key, v);
+  }
+}
+
+/**
+ * Appends `facets` in the `qs` bracket-notation the API's `/action/fetch`
+ * route expects: `facets[0][field]=..&facets[0][values][0]=..&...`. The
+ * route registers `fastify-qs` specifically so this nested
+ * array-of-objects shape parses into `FetchOwnedActionsQuerySchema.facets`
+ * (see `apps/api/src/app.ts` + the route's enrich test) — plain
+ * `URLSearchParams`/JSON-encoding would NOT be parsed by the server's
+ * default querystring parser, so this must NOT be JSON.stringify'd (unlike
+ * discover's `filters`, which travels as a POST JSON body, not a query
+ * string).
+ */
+function appendFacets(params: URLSearchParams, facets: FetchMyActionsQuery['facets']) {
+  if (!facets?.length) return;
+  facets.forEach((facet, i) => {
+    params.append(`facets[${i}][field]`, facet.field);
+    facet.values.forEach((v, j) => {
+      params.append(`facets[${i}][values][${j}]`, v);
+    });
+  });
+}
+
+/**
  * Fetch my actions with filtering and pagination
  * Use ownership_role to filter: 'initiated' | 'received' | 'all'
  */
@@ -427,9 +477,11 @@ export async function fetchMyActions(
   params.set('ownership_role', query.ownership_role ?? 'all');
 
   if (query.action_id) params.set('action_id', query.action_id);
-  if (query.action_type) params.set('action_type', query.action_type);
-  if (query.action_status) params.set('action_status', query.action_status);
+  appendRepeated(params, 'action_type', query.action_type);
+  appendRepeated(params, 'action_status', query.action_status);
   if (query.item_id) params.set('item_id', query.item_id);
+  if (query.sort) params.set('sort', query.sort);
+  appendFacets(params, query.facets);
   if (query.limit !== undefined) params.set('limit', String(query.limit));
   if (query.offset !== undefined) params.set('offset', String(query.offset));
 

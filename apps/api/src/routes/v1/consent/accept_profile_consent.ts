@@ -13,6 +13,7 @@ import { resolveConsentVersion } from '@/services/consent_version';
 import { hasAcceptedTermsAndPrivacy } from '@/services/consent_acceptance';
 import { promoteItemOnProfileConsent, isItemOwnedBy } from '@/services/item_service';
 import { invalidateItemFetchCache } from '@/utils/item_fetch_cache_invalidate';
+import { publishItemEvent } from '@/utils/publish_item_event';
 
 const ProfileConsentAcceptResponseSchema = z.object({ recorded: z.number().int() });
 
@@ -191,6 +192,29 @@ export const accept_profile_consent_handler = async (
         { err },
         'cache invalidation after profile-consent promotion failed',
       ),
+    );
+
+    // The promotion also changed what search must return, and the search index is
+    // maintained by signals-search off item events (#557). Without this the
+    // profile stays `draft` in item_search while `items` says `live` — invisible
+    // in every ranked feed and every map viewport, with the owner's own UI showing
+    // it as Active — until the next reconciliation sweep, or permanently when the
+    // sweep can't see it (signals-search#122).
+    //
+    // AFTER the transaction, never inside it: an event published pre-commit lets
+    // the worker read the row before the promotion is visible and re-index the
+    // stale value, which is the very race that made this bug permanent.
+    await publishItemEvent(
+      {
+        item_network: body.network,
+        item_domain: body.item_domain,
+        item_type: body.item_type,
+        item_id: body.item_id,
+        op: 'upsert',
+      },
+      request.log,
+    ).catch((err) =>
+      request.log.warn({ err }, 'item event publish after profile-consent promotion failed'),
     );
   }
 

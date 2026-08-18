@@ -16,6 +16,19 @@ import {
  * the right side effects on the mocked DB / item helpers.
  */
 
+// Flipped per test. Declared before the factory so the mock closes over it —
+// `keycloak_enabled` decides whether the row is written directly or via
+// better-auth's signUpEmail.
+// `vi.hoisted` because `vi.mock` factories are hoisted above ordinary consts,
+// and this one is dereferenced when the factory runs rather than lazily.
+const mockAuthConfig = vi.hoisted(() => ({
+  secret: 'test-secret',
+  middleware_enabled: false,
+  url: 'http://source.local/api/auth',
+  create_test_otp: false,
+  keycloak_enabled: false,
+}));
+
 // --- mock @/config so loadEnv() never runs ---
 vi.mock('@/config', () => ({
   apiConfig: {
@@ -31,12 +44,7 @@ vi.mock('@/config', () => ({
     allow_extra_schema_data: true,
     schema_registry_url: '',
   },
-  authConfig: {
-    secret: 'test-secret',
-    middleware_enabled: false,
-    url: 'http://source.local/api/auth',
-    create_test_otp: false,
-  },
+  authConfig: mockAuthConfig,
   getCurrentApiBaseUrl: () => 'http://source.local',
   instance: { INSTANCE_NAME: 'test', INSTANCE_ENV: 'development' },
   api: { API_DOMAIN: 'http://source.local', API_PORT: 3000 },
@@ -68,6 +76,15 @@ vi.mock('@/routes/auth/create_auth', () => {
   };
 });
 
+// The realm-identity step. Mocked so no admin client is constructed, and so a
+// failure can be simulated to prove the compensating delete still runs.
+vi.mock('@/services/auth/participant_identity', () => ({
+  createParticipantKeycloakIdentity: vi.fn(async (input: { email: string | null }) => {
+    dbState.identityCalls.push({ email: input.email });
+    return dbState.identityResult;
+  }),
+}));
+
 vi.mock('@api/plugins/auth/auth_middleware', () => ({
   auth_middleware_if_enabled: vi.fn(async () => {}),
   auth_middleware: vi.fn(async () => {}),
@@ -83,14 +100,39 @@ vi.mock('@dpg/database', async (importOriginal) => {
 });
 
 // --- mock publishItemEvent so Redis is never touched in unit tests ---
-vi.mock('@/utils/publish_item_event', () => ({
-  publishItemEvent: vi.fn(async () => {}),
-}));
+vi.mock('@/utils/publish_item_event', () => {
+  const publishItemEvent = vi.fn(async () => {});
+  return {
+    publishItemEvent,
+    // Keeps the real fan-out + de-dupe, delegating to the mocked single publish,
+    // so every assertion on `publishItemEvent` still sees exactly the events the
+    // route emitted — a no-op stub here would hide them all.
+    publishItemEvents: vi.fn(
+      async (
+        keys: Array<Record<string, string>>,
+        op: string,
+        logger?: unknown,
+      ) => {
+        const seen = new Set<string>();
+        for (const k of keys) {
+          const id = `${k.item_network}/${k.item_domain}/${k.item_type}/${k.item_id}`;
+          if (seen.has(id)) continue;
+          seen.add(id);
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          await (publishItemEvent as any)({ ...k, op }, logger);
+        }
+      },
+    ),
+  };
+});
 
 // --- mock the consent service: it is unit-tested separately; here we only
 //     assert the route calls it with the right args and stays green.
 vi.mock('@/services/participant_consent', () => ({
   recordParticipantConsent: vi.fn(async () => ({ recorded: 0, promoted: false })),
+  // Returns the keys of the drafts an age write promoted (#557) — the route has to
+  // publish an item event for each so signals-search re-indexes them.
+  promoteEligibleDraftsForUser: vi.fn(async () => [] as unknown[]),
 }));
 
 // --- mock @dpg/schemas: keep real exports + neutralize the merge helper for tests ---
@@ -135,6 +177,15 @@ const dbState: {
    * Set per-test for the idempotent re-onboard scenario.
    */
   existingOwnedItemId: string | null;
+  /** `user` rows written directly by insertLocalUser (the Keycloak branch). */
+  userInserts: Array<Record<string, unknown>>;
+  /** Args seen by createParticipantKeycloakIdentity. */
+  identityCalls: Array<{ email: string | null }>;
+  identityResult: { ok: boolean; code?: string; message?: string };
+  /** When set, the direct user insert throws this. */
+  userInsertError: unknown;
+  /** user rows deleted (the orphan-cleanup path). */
+  userDeletes: number;
 } = {
   existingUserRows: [],
   itemsByUser: new Map(),
@@ -144,6 +195,11 @@ const dbState: {
   signUpMode: 'ok',
   signUpUserId: 'usr_new_default',
   existingOwnedItemId: null,
+  userInserts: [],
+  identityCalls: [],
+  identityResult: { ok: true },
+  userInsertError: null,
+  userDeletes: 0,
 };
 
 // Discriminate db.select() projections by their key set, so the same
@@ -151,10 +207,15 @@ const dbState: {
 // and the idempotent existing-owned-item lookup.
 type SelectMode = 'user' | 'items_list' | 'item_owner' | 'existing_item_lookup' | 'unknown';
 
-const classifyProjection = (proj: Record<string, unknown>): SelectMode => {
+const classifyProjection = (proj: Record<string, unknown> | undefined): SelectMode => {
+  // `insertLocalUser` re-reads with a bare `select()` (no projection) after a
+  // unique violation, so undefined is a real case, not a mistake.
+  if (!proj) return 'unknown';
   const keys = Object.keys(proj);
   if (keys.includes('onboardedByOrgId')) return 'user';
-  if (keys.length === 1 && keys[0] === 'created_by') return 'item_owner';
+  // The ownership pre-flight now also reads the item's key columns (#557), so it is
+  // no longer a single-column projection.
+  if (keys.includes('created_by') && !keys.includes('item_state')) return 'item_owner';
   if (keys.length === 1 && keys[0] === 'item_id') return 'existing_item_lookup';
   if (keys.includes('item_state') && keys.includes('item_private_state')) {
     return 'items_list';
@@ -174,7 +235,7 @@ let lastQueriedItemId: string | null = null;
 // test's user_id is fed via a side channel — the existingUserRows[0].id —
 // since each test only ever has one user in scope.
 vi.mock('@api/db/postgres/drizzle_config', () => {
-  const makeSelectChain = (proj: Record<string, unknown>) => {
+  const makeSelectChain = (proj?: Record<string, unknown>) => {
     const mode = classifyProjection(proj);
     return {
       from: vi.fn(() => ({
@@ -189,7 +250,19 @@ vi.mock('@api/db/postgres/drizzle_config', () => {
                 ? dbState.itemOwnerLookup.get(item_id)
                 : undefined;
               if (!owner) return Promise.resolve([]);
-              return Promise.resolve([{ created_by: owner }]);
+              // Key columns come from the item row when the test seeded one, so a
+              // published event carries that item's real identity.
+              const seeded = (dbState.itemsByUser.get(owner) ?? []).find(
+                (r) => r.item_id === item_id,
+              );
+              return Promise.resolve([
+                {
+                  created_by: owner,
+                  item_network: seeded?.item_network ?? 'blue_dot',
+                  item_domain: seeded?.item_domain ?? 'seeker',
+                  item_type: seeded?.item_type ?? 'profile_1.0',
+                },
+              ]);
             }
             return Promise.resolve([]);
           }),
@@ -228,7 +301,7 @@ vi.mock('@api/db/postgres/drizzle_config', () => {
     };
   };
 
-  const select = vi.fn((proj: Record<string, unknown>) =>
+  const select = vi.fn((proj?: Record<string, unknown>) =>
     makeSelectChain(proj),
   );
 
@@ -245,7 +318,18 @@ vi.mock('@api/db/postgres/drizzle_config', () => {
   }));
 
   const deleteFn = vi.fn(() => ({
-    where: vi.fn(() => Promise.resolve()),
+    where: vi.fn(() => {
+      dbState.userDeletes += 1;
+      return Promise.resolve();
+    }),
+  }));
+
+  const insertFn = vi.fn(() => ({
+    values: vi.fn((values: Record<string, unknown>) => {
+      if (dbState.userInsertError) return Promise.reject(dbState.userInsertError);
+      dbState.userInserts.push(values);
+      return Promise.resolve();
+    }),
   }));
 
   const transaction = vi.fn(
@@ -253,7 +337,7 @@ vi.mock('@api/db/postgres/drizzle_config', () => {
       const tx = {
         select,
         update,
-        insert: vi.fn(),
+        insert: insertFn,
       };
       return cb(tx);
     },
@@ -263,6 +347,7 @@ vi.mock('@api/db/postgres/drizzle_config', () => {
     db: {
       select,
       update,
+      insert: insertFn,
       transaction,
       delete: deleteFn,
     },
@@ -362,6 +447,7 @@ vi.mock('@/services/item_service', () => {
 import { participant } from '../participant.js';
 import { publishItemEvent } from '@/utils/publish_item_event';
 import { recordParticipantConsent } from '@/services/participant_consent';
+import { authInstance } from '@/routes/auth/create_auth';
 
 const VALID_EMAIL = 'demo@example.com';
 const VALID_PHONE = '+919876543210';
@@ -401,8 +487,8 @@ const buildApp = async (
 const VALID_UUID_A = '11111111-1111-4111-8111-111111111111';
 const VALID_UUID_B = '22222222-2222-4222-8222-222222222222';
 
-describe('POST /admin/participant', () => {
-  beforeEach(() => {
+/** Shared by both top-level describes; they must reset identically. */
+const resetDbState = () => {
     dbState.existingUserRows = [];
     dbState.itemsByUser = new Map();
     dbState.itemOwnerLookup = new Map();
@@ -411,6 +497,12 @@ describe('POST /admin/participant', () => {
     dbState.signUpMode = 'ok';
     dbState.signUpUserId = 'usr_new_default';
     dbState.existingOwnedItemId = null;
+    dbState.userInserts = [];
+    dbState.identityCalls = [];
+    dbState.identityResult = { ok: true };
+    dbState.userInsertError = null;
+    dbState.userDeletes = 0;
+    mockAuthConfig.keycloak_enabled = false;
     lastQueriedUserId = null;
     lastQueriedItemId = null;
     vi.mocked(publishItemEvent).mockClear();
@@ -421,7 +513,11 @@ describe('POST /admin/participant', () => {
       recorded: 0,
       promoted: false,
     });
-  });
+  vi.mocked(authInstance.api.signUpEmail).mockClear();
+};
+
+describe('POST /admin/participant', () => {
+  beforeEach(resetDbState);
 
   it('403 INVALID_ACTING_ORG when acting_org is missing', async () => {
     const app = await buildApp(null);
@@ -434,8 +530,12 @@ describe('POST /admin/participant', () => {
     expect(res.json().error).toBe('INVALID_ACTING_ORG');
   });
 
-  it('403 ACTING_ORG_TYPE_NOT_ALLOWED for voice', async () => {
-    const app = await buildApp({ org_type: 'voice' });
+  it('403 ACTING_ORG_TYPE_NOT_ALLOWED for an org type outside the allowed set', async () => {
+    // voice used to be the example; it is now an admitted integrating DPG, so
+    // the rejection case needs a type that genuinely is not allowed.
+    const app = await buildApp({
+      org_type: 'employer' as unknown as 'aggregator',
+    });
     const res = await app.inject({
       method: 'POST',
       url: '/participant',
@@ -443,6 +543,17 @@ describe('POST /admin/participant', () => {
     });
     expect(res.statusCode).toBe(403);
     expect(res.json().error).toBe('ACTING_ORG_TYPE_NOT_ALLOWED');
+  });
+
+  it('admits a voice acting org for participant upsert', async () => {
+    const app = await buildApp({ org_id: 'org_voice_1', org_type: 'voice' });
+    const res = await app.inject({
+      method: 'POST',
+      url: '/participant',
+      payload: baseBody(),
+    });
+    expect(res.statusCode).not.toBe(403);
+    expect(res.json().error).not.toBe('ACTING_ORG_TYPE_NOT_ALLOWED');
   });
 
   it('aggregator + new user + item_state → 200 user_existed:false, owned_elsewhere:false, items:[1], inserts:1', async () => {
@@ -1212,6 +1323,73 @@ describe('POST /admin/participant', () => {
     expect(event.item_type).toBe('profile_1.0');
   });
 
+  // #557: both of these branches publish the item the request named. An age write
+  // can ALSO promote drafts the request never named (age is user-level), and those
+  // need re-indexing too — previously they were silently left `draft` in the index.
+  it('update_item branch: publishes the updated item AND the drafts the age write promoted', async () => {
+    const user_id = 'usr_update_collateral';
+    dbState.existingUserRows = [
+      { id: user_id, email: VALID_EMAIL, phoneNumber: null, onboardedByOrgId: 'org_ns_1' },
+    ];
+    dbState.itemsByUser.set(user_id, [
+      {
+        item_id: VALID_UUID_A,
+        item_network: 'blue_dot',
+        item_domain: 'seeker',
+        item_type: 'profile_1.0',
+        item_state: { v: 1 },
+        item_private_state: '',
+        created_at: new Date('2026-01-01T00:00:00Z'),
+        updated_at: new Date('2026-01-01T00:00:00Z'),
+      },
+    ]);
+    dbState.itemOwnerLookup.set(VALID_UUID_A, user_id);
+    lastQueriedUserId = user_id;
+    lastQueriedItemId = VALID_UUID_A;
+    const { promoteEligibleDraftsForUser } = await import('@/services/participant_consent');
+    vi.mocked(promoteEligibleDraftsForUser).mockResolvedValueOnce([
+      { item_network: 'blue_dot', item_domain: 'provider', item_type: 'profile_1.0', item_id: 'itm_other_draft' },
+    ]);
+    const app = await buildApp({ org_id: 'org_ns_1', org_type: 'network_service' });
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/participant',
+      payload: baseBody({ item_id: VALID_UUID_A, item_state: { v: 2 }, age: 25 }),
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(vi.mocked(publishItemEvent).mock.calls.map(([e]) => e.item_id)).toEqual([
+      VALID_UUID_A,
+      'itm_other_draft',
+    ]);
+  });
+
+  it('insert_item branch: publishes the inserted item AND the drafts the age write promoted', async () => {
+    const user_id = 'usr_insert_collateral';
+    dbState.existingUserRows = [
+      { id: user_id, email: VALID_EMAIL, phoneNumber: null, onboardedByOrgId: 'org_ns_1' },
+    ];
+    dbState.itemsByUser.set(user_id, []);
+    lastQueriedUserId = user_id;
+    const { promoteEligibleDraftsForUser } = await import('@/services/participant_consent');
+    vi.mocked(promoteEligibleDraftsForUser).mockResolvedValueOnce([
+      { item_network: 'blue_dot', item_domain: 'provider', item_type: 'profile_1.0', item_id: 'itm_other_draft' },
+    ]);
+    const app = await buildApp({ org_id: 'org_ns_1', org_type: 'network_service' });
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/participant',
+      payload: baseBody({ network: 'blue_dot', domain: 'seeker', item_type: 'profile_1.0', age: 25 }),
+    });
+
+    expect(res.statusCode).toBe(200);
+    const ids = vi.mocked(publishItemEvent).mock.calls.map(([e]) => e.item_id);
+    expect(ids).toHaveLength(2);
+    expect(ids[1]).toBe('itm_other_draft');
+  });
+
   it('create_new_user branch: publishItemEvent called with op:upsert after tx commits', async () => {
     dbState.signUpUserId = 'usr_new_enqueue';
     lastQueriedUserId = 'usr_new_enqueue';
@@ -1231,6 +1409,100 @@ describe('POST /admin/participant', () => {
     expect(event.item_type).toBe('profile_1.0');
     expect(typeof event.item_id).toBe('string');
     expect(event.item_id.length).toBeGreaterThan(0);
+  });
+
+  // #557: `item_id` alone resolves to update_item "with or without item_state" —
+  // a consent-only activation. recordParticipantConsent then promotes that item
+  // draft → live inside the transaction, and its `promoted` flag is the ONLY signal
+  // for it: no item_state means no updateItemInternal row, and the item is no longer
+  // `draft` so promoteEligibleDraftsForUser cannot return it either. Without
+  // consuming that flag the promotion publishes nothing and the profile stays
+  // `draft` in item_search — the exact bug this PR fixes, via another door.
+  it('update_item branch: a consent-only activation (no item_state) publishes the promoted item', async () => {
+    const user_id = 'usr_consent_only_activation';
+    dbState.existingUserRows = [
+      { id: user_id, email: VALID_EMAIL, phoneNumber: null, onboardedByOrgId: 'org_ns_1' },
+    ];
+    dbState.itemsByUser.set(user_id, [
+      {
+        item_id: VALID_UUID_A,
+        item_network: 'blue_dot',
+        item_domain: 'seeker',
+        item_type: 'profile_1.0',
+        item_state: { v: 1 },
+        item_private_state: '',
+        created_at: new Date('2026-01-01T00:00:00Z'),
+        updated_at: new Date('2026-01-01T00:00:00Z'),
+      },
+    ]);
+    dbState.itemOwnerLookup.set(VALID_UUID_A, user_id);
+    lastQueriedUserId = user_id;
+    lastQueriedItemId = VALID_UUID_A;
+    vi.mocked(recordParticipantConsent).mockResolvedValueOnce({ recorded: 1, promoted: true });
+    const { updateItemInternal } = await import('@/services/item_service');
+    vi.mocked(updateItemInternal).mockClear();
+    const app = await buildApp({ org_id: 'org_ns_1', org_type: 'network_service' });
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/participant',
+      payload: baseBody({
+        item_id: VALID_UUID_A,
+        item_state: undefined,
+        compliance: [{ key: 'profile_creation', value: true }],
+      }),
+    });
+
+    expect(res.statusCode).toBe(200);
+    // No item write happened — the promotion is the only reason to publish.
+    expect(vi.mocked(updateItemInternal)).not.toHaveBeenCalled();
+    expect(vi.mocked(publishItemEvent)).toHaveBeenCalledTimes(1);
+    const [event] = vi.mocked(publishItemEvent).mock.calls[0];
+    expect(event.op).toBe('upsert');
+    expect(event.item_id).toBe(VALID_UUID_A);
+    expect(event.item_network).toBe('blue_dot');
+    expect(event.item_domain).toBe('seeker');
+    expect(event.item_type).toBe('profile_1.0');
+  });
+
+  // #557: an age write can promote drafts this request never mentions (age is
+  // user-level, so it can unblock several profiles at once). Those promotions
+  // changed what search must return, and the account_only branch published nothing
+  // at all — so the profiles stayed `draft` in item_search: invisible in every
+  // ranked feed and every map viewport while `items` said live.
+  it('account_only branch: publishes an upsert for each draft the age write promoted', async () => {
+    const user_id = 'usr_age_promotes_drafts';
+    dbState.existingUserRows = [
+      { id: user_id, email: VALID_EMAIL, phoneNumber: null, onboardedByOrgId: 'org_agg_1' },
+    ];
+    dbState.itemsByUser.set(user_id, []);
+    lastQueriedUserId = user_id;
+    const { promoteEligibleDraftsForUser } = await import('@/services/participant_consent');
+    vi.mocked(promoteEligibleDraftsForUser).mockResolvedValueOnce([
+      { item_network: 'blue_dot', item_domain: 'seeker', item_type: 'profile_1.0', item_id: 'itm_a' },
+      { item_network: 'blue_dot', item_domain: 'provider', item_type: 'profile_1.0', item_id: 'itm_b' },
+    ]);
+    const app = await buildApp({ org_id: 'org_agg_1', org_type: 'aggregator' });
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/participant',
+      payload: baseBody({
+        item_state: undefined,
+        age: 25,
+        compliance: [
+          { key: 'user_terms', value: true },
+          { key: 'user_privacy', value: true },
+        ],
+      }),
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(vi.mocked(publishItemEvent)).toHaveBeenCalledTimes(2);
+    expect(vi.mocked(publishItemEvent).mock.calls.map(([e]) => [e.item_id, e.op])).toEqual([
+      ['itm_a', 'upsert'],
+      ['itm_b', 'upsert'],
+    ]);
   });
 
   it('error branches: publishItemEvent NOT called when insert_item fails', async () => {
@@ -1376,5 +1648,180 @@ describe('POST /admin/participant', () => {
     expect(vi.mocked(recordParticipantConsent)).not.toHaveBeenCalled();
     expect(dbState.updates).toHaveLength(0);
     expect(dbState.inserts).toHaveLength(0);
+  });
+});
+
+/**
+ * The direct-write branch (Phase 2 of the Keycloak migration).
+ *
+ * Under `AUTH_PROVIDER=keycloak` the `user` row is written by `insertLocalUser`
+ * inside the onboarding transaction, instead of by better-auth's `signUpEmail`
+ * followed by a separate update. What these pin down is that the branch produces
+ * the same row without better-auth's artifacts, and that the failure handling
+ * survives the restructure.
+ */
+describe('POST /admin/participant — direct write under AUTH_PROVIDER=keycloak', () => {
+  beforeEach(() => {
+    resetDbState();
+    mockAuthConfig.keycloak_enabled = true;
+  });
+
+  const newUserBody = (over: Record<string, unknown> = {}) =>
+    baseBody({ item_state: undefined, ...over });
+
+  it('writes the row itself and never calls better-auth', async () => {
+    // The regression that matters most: a change that quietly kept using
+    // signUpEmail would otherwise still pass every other assertion here.
+    const app = await buildApp({ org_id: 'org_agg_1', org_type: 'aggregator' });
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/participant',
+      payload: newUserBody({ phone_number: VALID_PHONE, email: undefined }),
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(vi.mocked(authInstance.api.signUpEmail)).not.toHaveBeenCalled();
+    expect(dbState.userInserts).toHaveLength(1);
+  });
+
+  it('carries the onboarding columns in the insert, with no separate update', async () => {
+    const app = await buildApp({ org_id: 'org_agg_1', org_type: 'aggregator' });
+
+    await app.inject({
+      method: 'POST',
+      url: '/participant',
+      payload: newUserBody({ phone_number: VALID_PHONE, email: undefined }),
+    });
+
+    const [row] = dbState.userInserts;
+    expect(row).toMatchObject({
+      onboardedByOrgId: 'org_agg_1',
+      onboardedVia: 'bulk',
+      phoneNumber: VALID_PHONE,
+    });
+    // Insert + update collapsed into one write.
+    expect(dbState.updates).toHaveLength(0);
+  });
+
+  it('leaves the consent booleans unwritten — consent lives in the ledger', async () => {
+    const app = await buildApp({ org_id: 'org_agg_1', org_type: 'aggregator' });
+
+    await app.inject({
+      method: 'POST',
+      url: '/participant',
+      payload: newUserBody({ phone_number: VALID_PHONE, email: undefined }),
+    });
+
+    expect(dbState.userInserts[0]).not.toHaveProperty('termsAccepted');
+    expect(dbState.userInserts[0]).not.toHaveProperty('privacyAccepted');
+  });
+
+  it('gives a phone-only participant a NULL email, not a placeholder', async () => {
+    const app = await buildApp({ org_id: 'org_agg_1', org_type: 'aggregator' });
+
+    await app.inject({
+      method: 'POST',
+      url: '/participant',
+      payload: newUserBody({ phone_number: VALID_PHONE, email: undefined }),
+    });
+
+    expect(dbState.userInserts[0].email).toBeNull();
+  });
+
+  it('does not hand the Keycloak identity a placeholder address either', async () => {
+    // This is what made 24 of 25 realm users key on <uuid>@no-email.local.
+    const app = await buildApp({ org_id: 'org_agg_1', org_type: 'aggregator' });
+
+    await app.inject({
+      method: 'POST',
+      url: '/participant',
+      payload: newUserBody({ phone_number: VALID_PHONE, email: undefined }),
+    });
+
+    expect(dbState.identityCalls).toHaveLength(1);
+    expect(dbState.identityCalls[0].email).toBeNull();
+  });
+
+  it('passes a real email straight through to both the row and the identity', async () => {
+    const app = await buildApp({ org_id: 'org_agg_1', org_type: 'aggregator' });
+
+    await app.inject({
+      method: 'POST',
+      url: '/participant',
+      payload: newUserBody({ email: VALID_EMAIL, phone_number: undefined }),
+    });
+
+    expect(dbState.userInserts[0].email).toBe(VALID_EMAIL);
+    expect(dbState.identityCalls[0].email).toBe(VALID_EMAIL);
+  });
+
+  it('uses a bare UUID as the id, since it becomes the Keycloak subject', async () => {
+    const app = await buildApp({ org_id: 'org_agg_1', org_type: 'aggregator' });
+
+    await app.inject({
+      method: 'POST',
+      url: '/participant',
+      payload: newUserBody({ phone_number: VALID_PHONE, email: undefined }),
+    });
+
+    expect(dbState.userInserts[0].id).toMatch(
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+    );
+  });
+
+  it('rolls back instead of orphan-deleting when the insert fails', async () => {
+    // The row never committed, so issuing a delete would at best be a no-op and
+    // at worst remove a different row that reused the id.
+    dbState.userInsertError = Object.assign(new Error('duplicate key value'), {
+      code: '23505',
+    });
+    const app = await buildApp({ org_id: 'org_agg_1', org_type: 'aggregator' });
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/participant',
+      payload: newUserBody({ phone_number: VALID_PHONE, email: undefined }),
+    });
+
+    expect(res.statusCode).toBe(409);
+    expect(res.json().error).toBe('USER_ALREADY_EXISTS');
+    expect(dbState.userDeletes).toBe(0);
+  });
+
+  it('still deletes the row when the Keycloak identity cannot be created', async () => {
+    // That step is a remote call and cannot be in the transaction, so the
+    // compensating delete is still required — a participant with no realm
+    // identity could never sign in.
+    dbState.identityResult = {
+      ok: false,
+      code: 'IDENTITY_CONFLICT',
+      message: 'Another account already owns this email or phone number',
+    };
+    const app = await buildApp({ org_id: 'org_agg_1', org_type: 'aggregator' });
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/participant',
+      payload: newUserBody({ phone_number: VALID_PHONE, email: undefined }),
+    });
+
+    expect(res.statusCode).toBe(409);
+    expect(res.json().error).toBe('IDENTITY_CONFLICT');
+    expect(dbState.userDeletes).toBe(1);
+  });
+
+  it('creates the profile item in the same transaction as the user row', async () => {
+    const app = await buildApp({ org_id: 'org_agg_1', org_type: 'aggregator' });
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/participant',
+      payload: baseBody({ phone_number: VALID_PHONE, email: undefined }),
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(dbState.userInserts).toHaveLength(1);
+    expect(dbState.inserts).toHaveLength(1);
   });
 });

@@ -2,7 +2,6 @@ import type { FastifyBaseLogger } from 'fastify';
 
 import type { RetireCancelledCounterparty } from '@/services/items/retire_connections';
 import { resolveNetworkBrandName, resolveNotifierConfig } from './notify_actions';
-import { renderRetireCancelEmail } from './render_action_email';
 import { resolveOwnerEmail } from './resolve_owner';
 
 /**
@@ -11,8 +10,8 @@ import { resolveOwnerEmail } from './resolve_owner';
  * Called from the lifecycle route AFTER the retire transaction commits, with
  * the counterparties whose open connections `cancelItemConnections` ended. For
  * each, resolves the (local) owner email and sends one branded email using the
- * dedicated retire-cancel copy. Reuses the action-notifier config, brand
- * resolution, owner-email lookup, and render shell.
+ * dedicated `retire.cancel` email case. Reuses the action-notifier config,
+ * brand resolution, owner-email lookup, and the central email sender.
  *
  * Never throws and never blocks the route (mirrors `dispatchActionNotifications`).
  * No-op when notifications aren't configured. A counterparty with no local user
@@ -45,25 +44,14 @@ export async function dispatchRetireCancelNotifications(
       const email = await resolveOwnerEmail(cp.ownerUserId);
       if (!email) continue;
 
-      const { subject, html } = renderRetireCancelEmail({
-        network: cp.network,
-        brandName,
-        ctaUrl: config.ctaUrl,
-      });
-
-      await config.notify({
-        channel: 'email',
-        template_id: 'basic_email',
+      await config.sender.dispatchEmail({
+        caseId: 'retire.cancel',
         to: email,
-        priority: 'other',
-        dedupe_id: `retire_cancel:${cp.actionId}:${cp.ownerUserId}`,
-        variables: {
-          fromName: brandName,
-          fromEmail: config.fromEmail,
-          replyTo: config.replyTo,
-          subject,
-          html,
-        },
+        fromName: brandName,
+        network: cp.network,
+        ctaUrl: config.ctaUrl,
+        dedupeId: `retire_cancel:${cp.actionId}:${cp.ownerUserId}`,
+        log: (message, meta) => log.warn(meta ?? {}, message),
       });
     } catch (err) {
       log.warn(

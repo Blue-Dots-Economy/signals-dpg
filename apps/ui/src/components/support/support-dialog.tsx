@@ -1,8 +1,8 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { toast } from 'sonner';
 import axios from 'axios';
-import { Loader2 } from 'lucide-react';
+import { Loader2, Paperclip, X } from 'lucide-react';
 import { useAuth } from '@/contexts/auth-context';
 import {
   DialogDescription,
@@ -16,10 +16,60 @@ import { Textarea } from '@/components/ui/textarea';
 import { Label } from '@/components/ui/label';
 import { Checkbox } from '@/components/ui/checkbox';
 import { submitSupport, type SupportType } from '@/lib/support-api';
+import { useSupportConfig } from '@/hooks/use-support-config';
+import {
+  encodeAttachments,
+  formatBytes,
+  pickerAccept,
+  validateAttachmentSelection,
+} from '@/lib/support-attachments';
 
 interface SupportDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
+}
+
+type Translate = (key: string, options?: Record<string, unknown>) => string;
+
+/**
+ * Maps a failed submit to the toast to show. Extracted from the submit handler
+ * so the status ladder lives in one readable place instead of inflating the
+ * handler, and so each failure keeps its own specific message rather than
+ * collapsing into "couldn't send".
+ */
+function resolveSubmitErrorToast(
+  err: unknown,
+  t: Translate,
+  maxTotalBytes: number,
+): { title: string; description?: string } {
+  const response = axios.isAxiosError(err) ? err.response : undefined;
+  const data = response?.data as { error?: unknown; message?: unknown } | undefined;
+
+  if (response?.status === 503) {
+    return { title: t('support.toast_unavailable'), description: t('support.toast_unavailable_desc') };
+  }
+  if (response?.status === 429) {
+    return { title: t('support.toast_rate_limited'), description: t('support.toast_rate_limited_desc') };
+  }
+  if (response?.status === 413) {
+    // The server's body limit, not its attachment check — a payload this far
+    // over the cap never reaches the handler's specific error codes.
+    return { title: t('support.validation_attachment_size', { size: formatBytes(maxTotalBytes) }) };
+  }
+  if (
+    response?.status === 400 &&
+    typeof data?.error === 'string' &&
+    data.error.startsWith('ATTACHMENT_')
+  ) {
+    // Server-side attachment rejection the client-side check didn't catch (e.g.
+    // limits lowered since the config was cached). Its message names the
+    // offending file, so surface it rather than a generic failure.
+    return {
+      title: t('support.toast_attachment_rejected'),
+      description: typeof data.message === 'string' ? data.message : undefined,
+    };
+  }
+  return { title: t('support.toast_error'), description: t('support.toast_error_desc') };
 }
 
 export function SupportDialog({ open, onOpenChange }: SupportDialogProps) {
@@ -32,6 +82,11 @@ export function SupportDialog({ open, onOpenChange }: SupportDialogProps) {
   const [details, setDetails] = useState('');
   const [consent, setConsent] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [attachments, setAttachments] = useState<File[]>([]);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  // Limits come from the API so the form can never disagree with it; only
+  // fetched while the dialog is open.
+  const { config } = useSupportConfig(open);
 
   // Prefill contact fields from the logged-in user whenever the dialog opens.
   useEffect(() => {
@@ -45,7 +100,37 @@ export function SupportDialog({ open, onOpenChange }: SupportDialogProps) {
     setType('complaint');
     setDetails('');
     setConsent(false);
+    setAttachments([]);
   };
+
+  const handleFilesSelected = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const incoming = Array.from(e.target.files ?? []);
+    // Clear the input either way, so re-picking the same file still fires
+    // onChange and a rejected pick doesn't linger in the control.
+    e.target.value = '';
+    if (incoming.length === 0) return;
+
+    const result = validateAttachmentSelection(attachments, incoming, config);
+    if (!result.ok) {
+      if (result.reason === 'count') {
+        toast.error(t('support.validation_attachment_count', { count: config.maxFiles }));
+      } else if (result.reason === 'size') {
+        toast.error(
+          t('support.validation_attachment_size', { size: formatBytes(config.maxTotalBytes) }),
+        );
+      } else {
+        toast.error(t('support.validation_attachment_type', { name: result.filename }));
+      }
+      return;
+    }
+    setAttachments(result.files);
+  };
+
+  const removeAttachment = (index: number) => {
+    setAttachments((current) => current.filter((_, i) => i !== index));
+  };
+
+  const attachedBytes = attachments.reduce((sum, file) => sum + file.size, 0);
 
   const trimmedName = name.trim();
   const trimmedEmail = email.trim();
@@ -70,6 +155,9 @@ export function SupportDialog({ open, onOpenChange }: SupportDialogProps) {
     }
     setIsSubmitting(true);
     try {
+      // Encoding happens inside the submitting state: a multi-MB file takes long
+      // enough that the button must already be disabled and spinning.
+      const encoded = attachments.length ? await encodeAttachments(attachments) : undefined;
       await submitSupport({
         name: trimmedName,
         email: trimmedEmail || undefined,
@@ -77,16 +165,14 @@ export function SupportDialog({ open, onOpenChange }: SupportDialogProps) {
         type,
         details: details.trim(),
         consent: true,
+        ...(encoded ? { attachments: encoded } : {}),
       });
       toast.success(t('support.toast_sent'), { description: t('support.toast_sent_desc') });
       reset();
       onOpenChange(false);
     } catch (err) {
-      if (axios.isAxiosError(err) && err.response?.status === 503) {
-        toast.error(t('support.toast_unavailable'), { description: t('support.toast_unavailable_desc') });
-      } else {
-        toast.error(t('support.toast_error'), { description: t('support.toast_error_desc') });
-      }
+      const { title, description } = resolveSubmitErrorToast(err, t, config.maxTotalBytes);
+      toast.error(title, description ? { description } : undefined);
     } finally {
       setIsSubmitting(false);
     }
@@ -175,6 +261,66 @@ export function SupportDialog({ open, onOpenChange }: SupportDialogProps) {
               disabled={isSubmitting}
               required
             />
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="support-attachments">{t('support.label_attachments')}</Label>
+            <p className="text-xs text-muted-foreground">
+              {t('support.attachments_hint', {
+                count: config.maxFiles,
+                size: formatBytes(config.maxTotalBytes),
+              })}
+            </p>
+            <input
+              ref={fileInputRef}
+              id="support-attachments"
+              type="file"
+              multiple
+              accept={pickerAccept(config)}
+              onChange={handleFilesSelected}
+              disabled={isSubmitting || attachments.length >= config.maxFiles}
+              className="sr-only"
+            />
+            <button
+              type="button"
+              onClick={() => fileInputRef.current?.click()}
+              disabled={isSubmitting || attachments.length >= config.maxFiles}
+              className="flex items-center gap-2 rounded-md border px-3 py-2 text-sm disabled:opacity-60"
+            >
+              <Paperclip className="h-4 w-4" />
+              {t('support.attachments_add')}
+            </button>
+            {attachments.length > 0 && (
+              <ul className="space-y-1">
+                {attachments.map((file, index) => (
+                  <li
+                    key={`${file.name}-${index}`}
+                    className="flex items-center justify-between gap-2 rounded-md bg-muted px-2 py-1 text-sm"
+                  >
+                    <span className="truncate">{file.name}</span>
+                    <span className="flex shrink-0 items-center gap-2">
+                      <span className="text-xs text-muted-foreground">
+                        {formatBytes(file.size)}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => removeAttachment(index)}
+                        disabled={isSubmitting}
+                        aria-label={t('support.attachments_remove', { name: file.name })}
+                        className="rounded p-0.5 disabled:opacity-60"
+                      >
+                        <X className="h-3.5 w-3.5" />
+                      </button>
+                    </span>
+                  </li>
+                ))}
+                <li className="text-xs text-muted-foreground">
+                  {t('support.attachments_total', {
+                    used: formatBytes(attachedBytes),
+                    total: formatBytes(config.maxTotalBytes),
+                  })}
+                </li>
+              </ul>
+            )}
           </div>
           <div className="flex items-start gap-2">
             <Checkbox

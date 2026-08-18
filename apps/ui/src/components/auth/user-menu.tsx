@@ -10,6 +10,7 @@ import {
 import { LogOut, LifeBuoy, Bell } from 'lucide-react';
 import { toast } from 'sonner';
 import { SupportDialog } from '@/components/support/support-dialog';
+import { useSupportConfig } from '@/hooks/use-support-config';
 import { LanguageSwitcher } from '@/components/layout/language-switcher';
 import { ThemeModeToggle } from '@/components/layout/theme-mode-toggle';
 import { usePendingActionsCount } from '@/hooks/use-actions';
@@ -19,6 +20,9 @@ export function UserMenu() {
   const { t } = useTranslation();
   const navigate = useNavigate();
   const [supportOpen, setSupportOpen] = useState(false);
+  // Config-tier query (5 min), shared with the dialog by key — one request per
+  // session, not one per menu open.
+  const { config: supportConfig } = useSupportConfig();
   const [popoverOpen, setPopoverOpen] = useState(false);
   const { data: pendingCount = 0 } = usePendingActionsCount();
 
@@ -121,16 +125,23 @@ export function UserMenu() {
               <ThemeModeToggle />
             </div>
           </div>
-          <div className="border-t p-1">
-            <button
-              type="button"
-              onClick={() => setSupportOpen(true)}
-              className="flex w-full items-center gap-2 rounded-sm px-3 py-2 text-sm hover:bg-accent"
-            >
-              <LifeBuoy className="h-4 w-4" />
-              {t('menu.contact_support')}
-            </button>
-          </div>
+          {/* Hidden when the instance has no SUPPORT_EMAIL: without this the
+              form is reachable but every submit 503s, which the user only
+              discovers after typing out their complaint (#551). The fallback
+              config is `enabled: true`, so a slow/failed config fetch shows the
+              entry rather than hiding a working one. */}
+          {supportConfig.enabled && (
+            <div className="border-t p-1">
+              <button
+                type="button"
+                onClick={() => setSupportOpen(true)}
+                className="flex w-full items-center gap-2 rounded-sm px-3 py-2 text-sm hover:bg-accent"
+              >
+                <LifeBuoy className="h-4 w-4" />
+                {t('menu.contact_support')}
+              </button>
+            </div>
+          )}
           <div className="border-t p-1">
             <button
               onClick={handleSignOut}

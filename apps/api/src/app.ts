@@ -10,6 +10,7 @@ import AuthRoutes from '@/routes/auth';
 import {
   apiConfig,
   apiReferenceEnabled,
+  authConfig,
   getCurrentApiBaseUrl,
   instance,
 } from '@/config';
@@ -29,6 +30,7 @@ import {
   clearNetworkSchemaCache,
   refreshConsumedSchemas,
 } from '@/network_schema_cache';
+import { getEmailMessages } from '@/notifications/email/messages';
 
 const pkg = createRequire(import.meta.url)('../package.json') as {
   version: string;
@@ -128,6 +130,16 @@ export async function buildApp(): Promise<FastifyInstance> {
     await refreshConsumedSchemas();
   }
 
+  // Boot-time email-copy load (#529): the bundled defaults file is required,
+  // so a build defect there throws here — crash-loud at startup rather than
+  // surfacing lazily on the first attempted send. An ops override
+  // (EMAIL_MESSAGES_PATH) is also read here so per-key fallback warnings land
+  // in deploy logs immediately. Unlike the schema-cache warmup above this has
+  // no DB/Redis dependency (fs only), so it runs unconditionally — including
+  // in NETWORK_CONFIG_SOURCE=remote mode and in the OpenAPI dump, where
+  // SCHEMA_CACHE_WARMUP_ENABLED=false only gates the DB-backed warmup.
+  await getEmailMessages();
+
   const networkConfigs = await getNetworkConfigs();
 
   const networkAllowedOrigins = networkConfigs.flatMap((networkConfig) =>
@@ -220,7 +232,7 @@ export async function buildApp(): Promise<FastifyInstance> {
               name: 'x-api-key',
               description:
                 'Service API key used by integrating DPGs (aggregator-dpg, voice-dpg) and other ' +
-                'machine clients (apps/api/plugins/auth/validate_api_key.ts). Takes priority over ' +
+                'machine clients (apps/api/plugins/auth/auth_middleware.ts). Takes priority over ' +
                 'session auth: if present and invalid the request is rejected outright, with no ' +
                 'fallback to a session. Routes under /api/v1/admin and /api/v1/aggregator ' +
                 'additionally require an `x-acting-org-id` header identifying the organization the ' +
@@ -232,7 +244,7 @@ export async function buildApp(): Promise<FastifyInstance> {
               name: 'better-auth.session_token',
               description:
                 'Browser session cookie issued by better-auth after sign-in, used by the web UI ' +
-                '(apps/api/plugins/auth/validate_session.ts). Checked as a fallback only when ' +
+                '(apps/api/plugins/auth/auth_middleware.ts). Checked as a fallback only when ' +
                 'x-api-key is absent.',
             },
             peerAuth: {
@@ -268,7 +280,30 @@ export async function buildApp(): Promise<FastifyInstance> {
     },
   });
   app.register(health_routes);
-  app.register(AuthRoutes);
+
+  /**
+   * better-auth's own HTTP surface (`/api/auth/*`) — mounted only when
+   * better-auth is the provider.
+   *
+   * Under `AUTH_PROVIDER=keycloak` this used to stay mounted, which meant
+   * `unified_otp`'s `verifyOtp` was still reachable and **still created users**
+   * (`packages/auth/plugins/unified_otp.ts`). Those users got a signals row with
+   * no Keycloak identity, landing them in the `user_not_found` /
+   * `already_registered` deadlock `services/auth/participant_identity.ts`
+   * documents. Nothing legitimate calls this mount under Keycloak: the UI uses it
+   * only for the OTP flow, sign-out and get-session (all replaced by the OIDC
+   * screen), api keys are minted by `scripts/seed_service_users.ts` writing
+   * directly, and `verifyApiKey` is an in-process call rather than a route — so
+   * `x-api-key` auth is unaffected.
+   *
+   * Not mounting beats guarding inside the handler: an absent route cannot be
+   * reached by a code path we failed to think of, whereas an in-handler check has
+   * to be correct for every one of better-auth's endpoints.
+   */
+  if (authConfig.betterauth_enabled) {
+    app.register(AuthRoutes);
+  }
+
   app.register(v1_routes, { prefix: '/api/v1' });
 
   return app;

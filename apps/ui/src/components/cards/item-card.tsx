@@ -25,6 +25,8 @@ export interface ItemCardProps {
   precisionLabel?: string;
   /** Action buttons (Connect / See Match Score) rendered in the footer. */
   actions?: React.ReactNode;
+  /** Optional node rendered top-right of the coloured header (e.g. a Share button). */
+  headerAction?: React.ReactNode;
   /** When set, the avatar shows this image instead of the initials (e.g. a
    *  RubiX listing's favicon). */
   avatarImageUrl?: string;
@@ -107,11 +109,12 @@ export function ItemCard({
   domainLabel,
   precisionLabel,
   actions,
+  headerAction,
   avatarImageUrl,
   variant = 'list',
   className,
   onClick,
-}: ItemCardProps) {
+}: Readonly<ItemCardProps>) {
   const { t } = useTranslation();
   const [open, setOpen] = React.useState(false);
 
@@ -252,6 +255,7 @@ export function ItemCard({
             </p>
           )}
         </div>
+        {headerAction && <div className="ml-auto shrink-0">{headerAction}</div>}
       </div>
 
       {/* Body. Popup on mobile: fields + footer share ONE scroll area, so the

@@ -5,6 +5,8 @@ export type NodeEnv = 'development' | 'production';
 /** Minimal shape `afterUserCreate` needs — a structural subset of better-auth's user row. */
 export interface AfterUserCreateUser {
   id: string;
+  /** Used to address the welcome notifications. Always set by the OTP create. */
+  name: string;
   email?: string | null;
   phoneNumber?: string | null;
 }
@@ -26,6 +28,20 @@ export interface AuthRuntimeConfig {
   createTestOTP?: boolean;
   notificationClient?: NotificationClient;
   smsTemplateId?: string;
+
+  /**
+   * Central email dispatch (#529), injected by the app so copy/templates stay
+   * out of this package. caseId keys into the app's email case registry.
+   * When absent (no notification client / tests), the console fallback below
+   * is used instead. login.otp MUST rethrow on failure (fail-loud OTP, #1.14);
+   * welcome is best-effort and never throws in the app's implementation.
+   */
+  sendEmail?: (args: {
+    caseId: 'login.otp' | 'welcome';
+    to: string;
+    fromName: string;
+    variables: Record<string, string>;
+  }) => Promise<void>;
 
   allowSelfSignup: boolean;
   loginChannels: ('email' | 'phone')[];

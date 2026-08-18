@@ -33,12 +33,59 @@ Auth plugins (`auth_middleware.ts`, `validate_api_key.ts`, `validate_session.ts`
 - `acting_org.ts` (`acting_org_preHandler`) — required acting-org, used by `admin_routes.ts` / `aggregator_routes.ts`.
 - `acting_org_optional.ts` (`acting_org_preHandler_optional`) — acting-org is optional, used only by `action_routes.ts` (a non-admin actor can perform an action without acting on behalf of an org).
 
-## Notifications & support are separate small pipelines
+## Notifications & support are separate small pipelines, one email sender underneath
 
-- `src/notifications/`: `build_notifications.ts` (turns a `NotificationEvent` into a `NotificationPlan`) → `dispatcher.ts` (takes injected `DispatcherDeps` — `notify`, `resolveEmail`, `resolveCounterpartyName`, `brand` — so it's testable without a real notification-service call) → `render_action_email.ts` / `action_copy.ts` renders the actual HTML.
-- `src/support/build_support_email.ts`: unrelated, smaller — just an HTML-escaping email builder. `POST /api/v1/support` (authenticated) emails `SUPPORT_EMAIL` via the notification client and returns `503 SUPPORT_NOT_CONFIGURED` when the recipient or client is unset.
+`src/notifications/email/` (#529) is the single send path for every email the
+API sends: a messages file (`email/messages.default.properties`, overridable
+via `EMAIL_MESSAGES_PATH`, and further layered per network/brand in local
+mode via `@dpg/config`'s `email_messages_loader.ts` — see
+`docs/operations/email-copy-overrides.md`) →
+loader (`email/messages.ts`) → case registry (`email/email_cases.ts`, one
+`EmailCaseDef` per case id: which properties keys, which `{{tokens}}`, which
+HTML shell, critical vs best-effort, and notification-service priority
+realtime/other) → `email/dispatch_email.ts`'s
+`dispatchEmail`, which looks up the case, substitutes tokens, wraps the shell,
+and posts to the notification service. Everything above that is a thin
+caller:
 
-Don't assume these share infrastructure — they're two independent, small pipelines that happen to both end up calling the notification-service client.
+- `src/notifications/`: `build_notifications.ts` (turns a `NotificationEvent`
+  into a `NotificationPlan`) → `dispatcher.ts` (takes injected
+  `DispatcherDeps` — `sendEmail`, `resolveEmail`, `resolveCounterpartyName`,
+  `brand` — so it's testable without a real notification-service call) still
+  plans action emails, but sends by calling into `email/dispatch_email.ts`.
+  `action_copy.ts` only resolves the **copy group** (`connect`/`apply`) and
+  **recipient role** (`seeker`/`provider`) for a notification — it's
+  `email/email_cases.ts`'s `actionCaseId()` that assembles those two into the
+  actual case id.
+- `src/support/build_support_email.ts`: smaller, single-route — now just
+  `generateSupportReference` plus `buildSupportDetailsTable` (the escaped
+  `{{detailsTable}}` html token for the `support.request` case).
+  `POST /api/v1/support` (authenticated) calls
+  `getDefaultEmailSender().dispatchEmail({ caseId: 'support.request', ... })`
+  directly (no `dispatcher.ts`/`action_copy.ts` in between) and returns
+  `503 SUPPORT_NOT_CONFIGURED` when the recipient/fromEmail/sender is unset,
+  `502 SUPPORT_SEND_FAILED` if the send throws (the case is critical),
+  `429 SUPPORT_RATE_LIMITED` past 5 submissions per user per hour (the counter
+  **fails open** — a Redis outage must not silence a complaint), and one of
+  `ATTACHMENT_COUNT_EXCEEDED` / `ATTACHMENT_TOO_LARGE` /
+  `ATTACHMENT_TYPE_NOT_ALLOWED` (400) from `src/support/attachments.ts` (#551).
+  Two things there are easy to trip over: the route sets its **own**
+  `bodyLimit`, derived from `SUPPORT_ATTACHMENT_MAX_TOTAL_BYTES` rather than
+  hardcoded (base64 inflates by 4/3, so a fixed limit would turn a raised cap
+  into a silent 413) — every other route keeps Fastify's 1 MB default; and the
+  MIME allowlist is a **code constant**, not env, deliberately. Attachments ride
+  in `dispatchEmail`'s `attachments` arg, never in `variables` — `variables` are
+  copy tokens that get substituted and HTML-escaped. `GET /api/v1/support/config`
+  serves `{enabled, maxTotalBytes, maxFiles, allowedTypes}` so the UI validates
+  against the server's numbers instead of its own copy; its `enabled` mirrors the
+  submit route's 503 condition exactly, and the two must be changed together.
+- Guardian OTP and login OTP emails are likewise thin callers straight into
+  `dispatchEmail` — see `docs/operations/guardian-otp-templates.md`.
+
+Support has no `NotificationPlan`/`dispatcher.ts` layer above it — it builds
+its `DispatchEmailArgs` inline in the route handler — but every pipeline
+converges on the same sender, so copy for every email in the system lives in
+one file and is overridable without a code change.
 
 ## `action/perform` is single-object; bulk is a separate route
 

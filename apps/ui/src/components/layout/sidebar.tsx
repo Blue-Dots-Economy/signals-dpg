@@ -33,6 +33,9 @@ interface AppSidebarProps {
   onActiveProfileChange?: (profileId: string) => void;
   onProfilesChanged?: () => void;
   userSchemas?: Record<string, RJSFSchema>;
+  /** Hide the Browse (domain selector) group — used on the create/edit form
+   * page, where browsing has no meaning. */
+  hideBrowse?: boolean;
 }
 
 import { getDomainIcon } from '@/lib/domain-icons';
@@ -76,7 +79,8 @@ export function AppSidebar({
   onActiveProfileChange,
   onProfilesChanged,
   userSchemas,
-}: AppSidebarProps) {
+  hideBrowse = false,
+}: Readonly<AppSidebarProps>) {
   const navigate = useNavigate();
   const { t } = useTranslation();
 
@@ -167,7 +171,7 @@ export function AppSidebar({
             "All") is redundant — so the whole selector and its separator are
             hidden, and that domain's listings render directly in the main view.
             Driven by the network's interactions; not network-specific. */}
-        {domains.length > 1 && (
+        {!hideBrowse && domains.length > 1 && (
           <>
             <SidebarGroup>
               <SidebarGroupLabel>{t('nav.browse_group')}</SidebarGroupLabel>

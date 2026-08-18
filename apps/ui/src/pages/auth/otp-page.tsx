@@ -17,6 +17,7 @@ import { U18GuardianFlow } from '@/components/consent/u18/u18-guardian-flow';
 import { useNetworkTheme } from '@/theme/theme-provider';
 import { setStoredSignupDomain, type SignupExtras } from '@/lib/signup-domain';
 import { setUserDomains } from '@/lib/user-api';
+import { resolvePostLoginLanding } from '@/lib/post-login-landing';
 
 interface AuthState extends AuthIdentifier {
   userExists: boolean;
@@ -55,15 +56,21 @@ export function OtpPage() {
   }, [identifierLabel, navigate]);
 
   // Final step once verification (and, for a gated minor, the guardian flow)
-  // has settled: toast + land on home (or the original redirect target).
-  const finishSignIn = () => {
+  // has settled: toast + land. #376: if the user has no *completed* profile
+  // (none, or all still draft), route them straight to the profile create/edit
+  // page — instead of home, where they wouldn't know what to do. That decision
+  // (including its precedence over `redirectTo` and its fail-open behaviour)
+  // now lives in `resolvePostLoginLanding`, shared with the OIDC callback so
+  // the two login paths can't drift (#558).
+  const finishSignIn = async () => {
     if (!state) return;
     toast.success(state.userExists ? t('auth.toast_welcome_back') : t('auth.toast_account_created'), {
       description: state.userExists
         ? t('auth.toast_welcome_back_desc')
         : t('auth.toast_account_created_desc'),
     });
-    navigate(state.redirectTo ?? '/', { replace: true });
+    const landing = await resolvePostLoginLanding(themeId, state.redirectTo ?? '/');
+    navigate(landing, { replace: true });
   };
 
   const handleOtpComplete = async (otp: string) => {
@@ -148,7 +155,7 @@ export function OtpPage() {
         }
       }
 
-      finishSignIn();
+      await finishSignIn();
     } catch {
       setInlineError({
         title: t('auth.otp_incorrect_title'),

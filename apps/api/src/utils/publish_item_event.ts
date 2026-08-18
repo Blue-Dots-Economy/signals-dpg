@@ -11,6 +11,10 @@ export interface ItemEvent {
   op: ItemEventOp;
 }
 
+/** An item's identity without the operation — what a caller carries around when
+ *  it knows an item changed but not yet why. See `publishItemEvents`. */
+export type ItemEventKey = Omit<ItemEvent, 'op'>;
+
 type WarnLogger = { warn: (obj: unknown, msg?: string) => void };
 
 /**
@@ -36,5 +40,31 @@ export async function publishItemEvent(event: ItemEvent, logger?: WarnLogger): P
     );
   } catch (err) {
     (logger ?? console).warn({ err, item_id: event.item_id }, 'publishItemEvent failed (best-effort)');
+  }
+}
+
+/**
+ * Publish the same op for several items, de-duplicated by full key (#557).
+ *
+ * For paths that change more than one item in a request — e.g. an age write that
+ * promotes every eligible draft the user owns (`promoteEligibleDraftsForUser`)
+ * alongside the item the request itself touched. De-duplication matters because
+ * those two sets overlap: the worker is idempotent, but a duplicate event still
+ * costs a needless read.
+ *
+ * Sequential, and best-effort per item like `publishItemEvent` — one item's Redis
+ * failure must not stop the rest from being published.
+ */
+export async function publishItemEvents(
+  keys: readonly ItemEventKey[],
+  op: ItemEventOp,
+  logger?: WarnLogger,
+): Promise<void> {
+  const seen = new Set<string>();
+  for (const key of keys) {
+    const id = `${key.item_network}/${key.item_domain}/${key.item_type}/${key.item_id}`;
+    if (seen.has(id)) continue;
+    seen.add(id);
+    await publishItemEvent({ ...key, op }, logger);
   }
 }

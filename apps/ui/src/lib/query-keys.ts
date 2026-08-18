@@ -14,6 +14,12 @@ import type { FetchMyActionsQuery } from '@/lib/action-api';
 const actions = {
   all: ['actions'] as const,
   lists: () => [...actions.all, 'list'] as const,
+  // Keys on the FULL query object (not a destructured subset), so every
+  // `FetchMyActionsQuery` field — including #439's `sort`/`facets`/`item_id`/
+  // `action_status`/`action_type` — automatically busts/isolates the cache
+  // entry when it differs. Don't switch this to a destructured field list;
+  // that would silently stop cache-isolating any field added to the query
+  // type in future without a matching edit here.
   list: (filters: FetchMyActionsQuery) => [...actions.lists(), filters] as const,
   details: () => [...actions.all, 'detail'] as const,
   detail: (actionId: string) => [...actions.details(), actionId] as const,
@@ -42,6 +48,9 @@ export const queryKeys = {
   // The user's profile-creation-consent status for a network (set of consented
   // item ids). Config-ish; invalidated on consent-accept.
   profileConsent: (networkId: string) => ['profile-consent', networkId] as const,
+  // Support-form capabilities (enabled + attachment limits). Instance-wide, not
+  // per network or user, so the key carries nothing.
+  supportConfig: () => ['support-config'] as const,
   actions,
   myItems: (networkId: string) => ['my-items', networkId] as const,
   /**

@@ -8,7 +8,6 @@ import { AuthShell } from '@/components/layout/auth-shell';
 import {
   checkUser,
   consentStatusIdentifier,
-  fetchAuthConfig,
   isValidPhoneNumber,
   requestOtp,
   u18Precheck,
@@ -32,6 +31,8 @@ import type { SignupExtras } from '@/lib/signup-domain';
 import { SignupDobStep } from '@/components/consent/u18/signup-dob-step';
 import { isMinorFromAge } from '@/lib/guardian-consent';
 import { PhoneInput, toE164 } from '@/components/auth/phone-input';
+import { useAuthConfig } from '@/hooks/use-auth-config';
+import { KeycloakLoginPanel } from './keycloak-login-panel';
 import {
   SignupGuardianFlow,
   type SignupIdentifier,
@@ -51,7 +52,35 @@ function domainLabel(domain: DotNetworkDomain): string {
 }
 
 
+/**
+ * Route entry for /auth/login. Picks the login experience for this deployment.
+ *
+ * Split as a wrapper rather than a branch inside `OtpLoginPage` so the OTP
+ * screen below is byte-for-byte unchanged, and so the choice happens before
+ * either component's hooks run.
+ *
+ * The choice comes from the API (`GET /api/v1/auth/config`), not from a
+ * build-time env var — see lib/keycloak-config.ts. That costs one render with
+ * no screen while the config loads; showing the OTP form first and then
+ * swapping it for a redirect button would be worse.
+ */
 export function LoginPage() {
+  const { isKeycloakLogin, isLoading } = useAuthConfig();
+
+  if (isLoading) {
+    return (
+      <AuthShell>
+        <div className="mx-auto flex max-w-md justify-center py-16">
+          <Loader2 className="size-6 animate-spin text-muted-foreground" />
+        </div>
+      </AuthShell>
+    );
+  }
+
+  return isKeycloakLogin ? <KeycloakLoginPanel /> : <OtpLoginPage />;
+}
+
+function OtpLoginPage() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const location = useLocation();
@@ -79,7 +108,13 @@ export function LoginPage() {
   const [userExists, setUserExists] = useState<boolean | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [consentGate, setConsentGate] = useState<ConsentGateState | null>(null);
-  const [authCfg, setAuthCfg] = useState<AuthConfigResponse | null>(null);
+  // Shared with the LoginPage wrapper above via React Query, so the instance's
+  // auth config is fetched once per session rather than once per component.
+  // The fail-safe default (gated + both channels) keeps the API authoritative
+  // if the request fails — see use-auth-config.ts.
+  const { config: fetchedAuthCfg } = useAuthConfig();
+  const authCfg: AuthConfigResponse | null =
+    fetchedAuthCfg ?? { selfSignupAllowed: false, loginChannels: ['phone', 'email'] };
   const [signupBlocked, setSignupBlocked] = useState(false);
   const [networkDomains, setNetworkDomains] = useState<DotNetworkDomain[]>([]);
   // Capture the checked identifier at the time of submission so the consent
@@ -111,13 +146,6 @@ export function LoginPage() {
   } | null>(null);
   const redirectTo = searchParams.get('redirect') ?? '/';
   const servedScope = useMemo(() => getServedScope(), []);
-
-  useEffect(() => {
-    fetchAuthConfig()
-      .then(setAuthCfg)
-      // Fail-safe: assume both channels + gated so the API stays authoritative.
-      .catch(() => setAuthCfg({ selfSignupAllowed: false, loginChannels: ['phone', 'email'] }));
-  }, []);
 
   // Domain options for the signup form's domain select. Fetched from the
   // served network's own schema (network.domains) — not user input — so the
@@ -347,24 +375,88 @@ export function LoginPage() {
     }
   };
 
+  // Guards extracted from handleSubmit to keep its cognitive complexity within
+  // bounds (SonarCloud S3776) — each is a self-contained, side-effecting step.
+  // handleSubmit's `finally` owns `setIsLoading(false)`, so these never repeat it.
+
+  /** Contact-format guard. Toasts + returns false when the number/email is malformed. */
+  const validateContact = (): boolean => {
+    if (mode === 'phone' && !isValidPhoneNumber(fullPhone)) {
+      toast.error(t('auth.toast_invalid_phone'), {
+        description: t('auth.toast_invalid_phone_desc'),
+      });
+      return false;
+    }
+    if (mode === 'email' && !/^[^\s@]+@[^\s.@]+\.[^\s@]+$/.test(email.trim())) {
+      toast.error(t('auth.toast_invalid_email'), {
+        description: t('auth.toast_invalid_email_desc'),
+      });
+      return false;
+    }
+    return true;
+  };
+
+  /** Signup-only pre-flight guards (self-signup gate, name, domain). Halt = true. */
+  const signupPreflightHalts = (exists: boolean): boolean => {
+    if (!exists && authCfg && !authCfg.selfSignupAllowed) {
+      toast.error(t('auth.toast_signup_disabled'), {
+        description: t('auth.toast_signup_disabled_desc'),
+      });
+      setSignupBlocked(true);
+      return true;
+    }
+    if (!exists && !name.trim()) {
+      toast.info(t('auth.toast_one_more_step'), {
+        description: t('auth.toast_one_more_step_desc', { contactLabel }),
+      });
+      return true;
+    }
+    if (!exists && !domain) {
+      toast.error(
+        domainOptions.length === 0
+          ? t('auth.signup_options_unavailable')
+          : t('auth.select_domain_required'),
+      );
+      return true;
+    }
+    return false;
+  };
+
+  /**
+   * Existing-user U18 pre-check: opens the DOB step and returns true (halt
+   * before OTP) when a year-of-birth is required. Fail-open on precheck error —
+   * the post-login gate still catches a minor.
+   */
+  const resolveExistingDobGate = async (): Promise<boolean> => {
+    try {
+      const pre = await u18Precheck(themeId, identifier);
+      if (pre.requiresDob) {
+        setSignupDobGate({ identifier, domain: '', resolvedName: '', exists: true });
+        return true;
+      }
+    } catch {
+      // Fail-open: precheck failure must not block login.
+    }
+    return false;
+  };
+
+  /**
+   * Whether a brand-new signup's domain goes live on completeness alone
+   * (`go_live_required` without `consent_required`) — then the Terms/Privacy
+   * pre-check is skipped. Absent config ⇒ require consent (safe default).
+   */
+  const domainSkipsConsent = (): boolean => {
+    const domGates = networkDomains.find((d) => d.id === domain)?.go_live_required;
+    return domGates ? !domGates.includes('consent_required') : false;
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!contactValue.trim()) return;
 
     // Client-side validation — server won't crash on a malformed number
     // but the OTP send will fail silently. Surface a clean inline error.
-    if (mode === 'phone' && !isValidPhoneNumber(fullPhone)) {
-      toast.error(t('auth.toast_invalid_phone'), {
-        description: t('auth.toast_invalid_phone_desc'),
-      });
-      return;
-    }
-    if (mode === 'email' && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) {
-      toast.error(t('auth.toast_invalid_email'), {
-        description: t('auth.toast_invalid_email_desc'),
-      });
-      return;
-    }
+    if (!validateContact()) return;
 
     setIsLoading(true);
     try {
@@ -373,42 +465,9 @@ export function LoginPage() {
       setUserExists(exists);
       setSignupBlocked(false);
 
-      if (!exists && authCfg && !authCfg.selfSignupAllowed) {
-        setIsLoading(false);
-        toast.error(t('auth.toast_signup_disabled'), {
-          description: t('auth.toast_signup_disabled_desc'),
-        });
-        setSignupBlocked(true);
-        return;
-      }
-
-      // Domain is confirmed on the signup form (select populated from the
-      // served network's own schema — see the networkDomains effect above),
-      // alongside the name. DOB is NOT asked here: it's a separate step shown
-      // only for guardian-gated domains (below), never for a returning user.
-      if (!exists && !name.trim()) {
-        setIsLoading(false);
-        toast.info(t('auth.toast_one_more_step'), {
-          description: t('auth.toast_one_more_step_desc', { contactLabel }),
-        });
-        return;
-      }
-      // Domain is required only when the picker is shown (multi-domain portal —
-      // a single-domain portal auto-selects it). Give a specific message rather
-      // than the generic "one more step" so the user knows exactly what's missing.
-      if (!exists && !domain) {
-        setIsLoading(false);
-        // No domain: either the multi-domain picker is shown but nothing was
-        // picked, OR the network config failed / hasn't loaded so there are no
-        // options at all (the picker is never rendered) — in the latter case
-        // surface a config error instead of "select your domain" with no picker.
-        toast.error(
-          domainOptions.length === 0
-            ? t('auth.signup_options_unavailable')
-            : t('auth.select_domain_required'),
-        );
-        return;
-      }
+      // Signup-only pre-flight guards (self-signup gate, name, domain). DOB is
+      // NOT asked here — it's a separate step for guardian-gated domains (below).
+      if (signupPreflightHalts(exists)) return;
 
       const resolvedName = exists ? '' : name;
 
@@ -431,23 +490,22 @@ export function LoginPage() {
       // guardian flow runs — the guardian APIs are session-scoped and must never
       // be public for an existing account, so the guardian step can't precede
       // the OTP. Age is persisted post-verify (otp-page) via signupExtras.
-      if (exists) {
-        try {
-          const pre = await u18Precheck(themeId, identifier);
-          if (pre.requiresDob) {
-            setSignupDobGate({ identifier, domain: '', resolvedName: '', exists: true });
-            setIsLoading(false);
-            return; // year-of-birth step renders next; no OTP yet.
-          }
-        } catch {
-          // Fail-open: precheck failure must not block login — the post-login
-          // gate still catches a minor who slips through.
-        }
+      if (exists && (await resolveExistingDobGate())) return; // DOB step renders next; no OTP yet.
+
+      const resolvedSignupExtras: SignupExtras | null = exists ? null : { domain };
+
+      // The Terms/Privacy gate is tied to the domain's `consent_required`
+      // go-live gate. A brand-new signup on a domain that does NOT require
+      // consent (e.g. a provider configured `go_live_required: ["schema_required"]`)
+      // skips the consent pre-check and goes straight to OTP. Absent config ⇒
+      // require consent (safe default). Returning users keep the pre-check.
+      if (!exists && domainSkipsConsent()) {
+        await proceedToOtp(identifier, exists, resolvedName, resolvedSignupExtras);
+        return;
       }
 
       // Non-gated / returning user: runConsentThenOtp runs the same terms/privacy
       // pre-check (getConsentStatusByIdentifier) before sending the OTP.
-      const resolvedSignupExtras: SignupExtras | null = exists ? null : { domain };
       await runConsentThenOtp(identifier, exists, resolvedName, resolvedSignupExtras);
     } catch {
       toast.error(t('auth.toast_send_code_error'), {

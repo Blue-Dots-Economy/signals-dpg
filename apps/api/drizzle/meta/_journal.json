@@ -71,6 +71,27 @@
       "when": 1785308841219,
       "tag": "0009_backfill_item_metrics_lifecycle",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1785743613069,
+      "tag": "0010_action_pair_open_indexes",
+      "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1785923637952,
+      "tag": "0011_action_owner_status_indexes",
+      "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1786945625644,
+      "tag": "0012_item_search_source_updated_at",
+      "breakpoints": true
     }
   ]
 }

@@ -6,6 +6,7 @@ import {
   hasAcceptedTermsAndPrivacy,
 } from '@/services/consent_acceptance';
 import { promoteItemOnProfileConsent } from '@/services/item_service';
+import type { ItemEventKey as PromotedItemKey } from '@/utils/publish_item_event';
 import type { DbOrTx } from '@/services/item_service';
 import { consent_record } from '@api/db/postgres/schema';
 
@@ -176,22 +177,39 @@ export async function recordParticipantConsent(
  * persisting it can unblock several of the user's profiles at once — call this
  * after an age write. Idempotent: `promoteItemOnProfileConsent` no-ops on items
  * that are not `draft` or that the guardian/completeness gate still blocks.
- * Returns the number actually flipped to `live`.
+ *
+ * Returns the KEY of every item actually flipped to `live` (#557), not a count:
+ * the caller must publish an item event per promotion so signals-search
+ * re-indexes it, and these promotions are collateral — the caller has no other
+ * way to know which of the user's profiles moved. Publish AFTER the surrounding
+ * transaction commits, never inside it.
  */
 export async function promoteEligibleDraftsForUser(
   tx: DbOrTx,
   userId: string,
-): Promise<number> {
+): Promise<PromotedItemKey[]> {
   // Intentionally sweeps the user's drafts across all networks; each
   // promotion still passes the per-item guardian/completeness/consent gate.
   const drafts = await tx
-    .select({ item_id: items.item_id })
+    .select({
+      item_id: items.item_id,
+      item_network: items.item_network,
+      item_domain: items.item_domain,
+      item_type: items.item_type,
+    })
     .from(items)
     .where(and(eq(items.created_by, userId), eq(items.lifecycle_status, 'draft')));
-  let promoted = 0;
+  const promoted: PromotedItemKey[] = [];
   for (const d of drafts) {
     if (await hasAcceptedProfileConsent(tx, d.item_id)) {
-      if (await promoteItemOnProfileConsent(tx, d.item_id)) promoted += 1;
+      if (await promoteItemOnProfileConsent(tx, d.item_id)) {
+        promoted.push({
+          item_network: d.item_network,
+          item_domain: d.item_domain,
+          item_type: d.item_type,
+          item_id: d.item_id,
+        });
+      }
     }
   }
   return promoted;

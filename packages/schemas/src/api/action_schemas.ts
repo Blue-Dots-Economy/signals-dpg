@@ -89,6 +89,18 @@ export const StoreEventBodySchema = z.object({
 export const ActionOwnershipRoleSchema = z.enum(['all', 'initiated', 'received']);
 export const ActionOwnershipTagSchema = z.enum(['initiated', 'received']);
 
+// Normalizes a single value (from a query string with one occurrence of a
+// repeatable param) or an already-repeated array into a plain array, leaving
+// `undefined` (param absent) untouched. Keeps single-value callers (e.g.
+// usePendingActionsCount) working unchanged while allowing multi-value
+// filters (#439).
+const toStringArray = (v: string | string[] | undefined) => {
+  if (v === undefined) return undefined;
+  return Array.isArray(v) ? v : [v];
+};
+
+export const ActionSortKeySchema = z.enum(['recent', 'oldest', 'match_score', 'distance']);
+
 const FetchOwnedRecordsQuerySchemaBase = z.object({
   action_id: z.uuid().optional(),
   action_type: z.string().min(1).optional(),
@@ -99,7 +111,20 @@ const FetchOwnedRecordsQuerySchemaBase = z.object({
   offset: z.coerce.number().int().min(0).default(0),
 });
 
-export const FetchOwnedActionsQuerySchema = FetchOwnedRecordsQuerySchemaBase;
+export const FetchOwnedActionsQuerySchema = FetchOwnedRecordsQuerySchemaBase.extend({
+  action_type: z
+    .union([z.string().min(1), z.array(z.string().min(1))])
+    .optional()
+    .transform(toStringArray),
+  action_status: z
+    .union([z.string().min(1), z.array(z.string().min(1))])
+    .optional()
+    .transform(toStringArray),
+  sort: ActionSortKeySchema.default('recent'),
+  facets: z
+    .array(z.object({ field: z.string().min(1), values: z.array(z.string()).min(1) }))
+    .optional(),
+});
 
 export const FetchOwnedEventsQuerySchema = FetchOwnedRecordsQuerySchemaBase.extend({
   update_count: z.coerce.number().int().nonnegative().optional(),
@@ -116,6 +141,13 @@ export const OwnedItemActionSchema = ItemActionSelectSchema.extend({
   // raw ids.
   source_item_name: z.string().nullable().optional(),
   target_item_name: z.string().nullable().optional(),
+  // `match_score` is a real column on item_actions (#439 Task 1) and is
+  // already covered by ItemActionSelectSchema's generated shape; restated
+  // here for clarity/explicitness at the API boundary. `distance_m` is NOT a
+  // column — it's computed at read time from the viewer's/counterparty's
+  // item locations, so it only ever appears on the response row.
+  match_score: z.number().nullable().optional(),
+  distance_m: z.number().nullable().optional(),
 });
 
 export const OwnedActionEventSchema = ActionEventSelectSchema.extend({

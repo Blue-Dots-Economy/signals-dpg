@@ -203,13 +203,20 @@
           }
         }
       },
+      "profile_completion_prompt": {
+        "heading": "Complete your profile to find the right support",
+        "body": "Providers can find and connect with you only once your profile is live. Fill in the details below to get matched with the services and support you need."
+      },
       "id": "seeker",
+      "go_live_required": ["schema_required", "consent_required"],
+      "my_items_label": "My Actions",
       "guardian_consent_required": true,
       "card": {
         "title_field": "beneficiary_name",
         "avatar_from": "beneficiary_name",
         "default_fields": ["disability_type", "looking_for", "highest_qualification"]
       },
+      "contact_fields": { "name": "beneficiary_name", "phone": "mobile_number", "email": "email" },
       "dashboard_tiles": {
         "profile": [
           { "field": "total_items", "label": "Profiles Registered" },
@@ -411,12 +418,19 @@
           }
         }
       },
+      "profile_completion_prompt": {
+        "heading": "Complete your profile to reach people who need support",
+        "body": "People looking for services can discover and connect with you only once your profile is live. Add your details below to start helping."
+      },
       "id": "provider",
+      "go_live_required": ["schema_required", "consent_required"],
+      "my_items_label": "My Services",
       "card": {
         "title_field": "organisation_name",
         "avatar_from": "organisation_name",
         "default_fields": ["provider_category", "services_offered", "service_cities", "disabilities_served"]
       },
+      "contact_fields": { "name": "contact_name", "phone": "contact_phone", "email": "contact_email" },
       "dashboard_tiles": {
         "profile": [
           { "field": "total_items", "label": "Profiles Registered" },

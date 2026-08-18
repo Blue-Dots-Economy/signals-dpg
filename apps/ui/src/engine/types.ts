@@ -96,6 +96,25 @@ export interface DotNetworkDomain {
    * network.json (see apps/api/src/services/minor.ts on the server side).
    */
   guardian_consent_required?: boolean;
+  /**
+   * Go-live gate tokens for this domain (mirrors `go_live_required` in
+   * network.json). When present and it does NOT include `consent_required`,
+   * the UI skips the Terms/Privacy consent gate at signup for this domain —
+   * the profile goes live on completeness alone. Absent ⇒ treat as requiring
+   * consent (safe default).
+   */
+  go_live_required?: Array<'schema_required' | 'consent_required'>;
+  /**
+   * Optional per-domain "why complete your profile" prompt shown at the top of
+   * the create/edit page (#376), to motivate a first-time user to finish. The
+   * message is role-specific (a seeker's "why" ≠ a provider's), so it's authored
+   * per domain in network.json; when unset, a generic i18n fallback is used.
+   * Presentational only — not part of item validation.
+   */
+  profile_completion_prompt?: {
+    heading: string;
+    body: string;
+  };
 }
 
 export interface DotNetworkInteraction {
