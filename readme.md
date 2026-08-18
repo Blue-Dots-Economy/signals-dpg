@@ -43,7 +43,7 @@ Main route groups:
 - `/api/v1/admin` — service-to-service admin surface (requires `x-acting-org-id`)
 - `/api/v1/aggregator`
 - `/api/v1/auth` — public, unauthenticated auth-flow config (`GET /api/v1/auth/config`) and the U18 age precheck (`POST /api/v1/auth/u18-precheck`)
-- `/api/v1/support` — authenticated contact-support form (`POST /api/v1/support`)
+- `/api/v1/support` — authenticated contact-support form (`POST /api/v1/support`, with optional image/video/audio attachments) plus `GET /api/v1/support/config` for the client-visible limits
 - `GET /health/live` and `GET /health/ready` — Kubernetes probes at the **root** path (not `/api/v1`); `live` is pure process-liveness, `ready` actively probes Postgres + Redis
 
 Important behavior:
@@ -57,7 +57,7 @@ Important behavior:
 - `GET`/`POST /api/v1/consent/*` reads and records consent; the accepted document **version is always derived server-side** from the loaded `consent.json`, never trusted from the client
 - `POST /api/v1/admin/participant/decrypt` returns decrypted participant profile `item_state` for owned items (aggregator scoped to items it onboarded; `network_service` scoped to its served networks)
 - `GET /api/v1/auth/config` returns `{ selfSignupAllowed, loginChannels }` derived from server env — the UI uses it to render the login/signup flow; server env stays the single source of truth
-- `POST /api/v1/support` submits an in-app contact-support message (requires an authenticated user); it emails `SUPPORT_EMAIL` via the notification service, and returns `503 SUPPORT_NOT_CONFIGURED` when the recipient or notification client is unset
+- `POST /api/v1/support` submits an in-app contact-support message (requires an authenticated user); it emails `SUPPORT_EMAIL` via the notification service, and returns `503 SUPPORT_NOT_CONFIGURED` when the recipient or notification client is unset. It accepts optional `attachments` (base64 image/video/audio, server-side MIME allowlist + filename sanitisation, up to `SUPPORT_ATTACHMENT_MAX_FILES` files totalling `SUPPORT_ATTACHMENT_MAX_TOTAL_BYTES`), and is rate-limited per user (`429 SUPPORT_RATE_LIMITED`). `GET /api/v1/support/config` returns `{enabled, maxTotalBytes, maxFiles, allowedTypes, allowedExtensions}` so the form self-configures
 - `GET /api/v1/network/item/fetch` fans out to peer instances via the `*_local` peer routes (`item/count_local`, `item/fetch_local`), which require an HMAC instance token (see [Inter-instance peer auth](#inter-instance-peer-auth))
 - A profile is only network-discoverable once it is **live**: required fields must be complete **and** `profile_creation` consent accepted. Accepting profile consent runs `promoteItemOnProfileConsent`, which re-classifies a `draft` item to `live` (see [Consent](#consent))
 - `POST /api/v1/admin/participant` onboards/updates a participant from an integrating DPG (always-create profiles; per-user cap via `MAX_PROFILES_PER_USER`); it accepts a `compliance` consent array + `age`, records the ledger, and promotes the profile to `live` when the U18/consent gate passes. Under-18 onboarding is rejected (`400 U18_NOT_ALLOWED`)
@@ -164,6 +164,12 @@ PII_LOCATION_JITTER_MAX_METERS=250
 
 # Recipient for the in-app "Contact support" form; unset → 503 + button hidden.
 SUPPORT_EMAIL="hello@bluedotseconomy.org"
+
+# Contact-support attachment budget (image/video/audio). Enforced server-side on
+# the DECODED bytes; the per-route body limit is derived from these. Callers must
+# stay at or below the notification-service's NOTIFY_ATTACHMENT_* caps.
+SUPPORT_ATTACHMENT_MAX_FILES=3
+SUPPORT_ATTACHMENT_MAX_TOTAL_BYTES=5242880
 
 # Support/grievance address rendered into the CONSENT copy (T&C/Privacy/
 # Grievances) in place of the __SUPPORT_EMAIL__ placeholder the consent.json
