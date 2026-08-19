@@ -23,16 +23,25 @@ export function PortalHeader({ size = 'sm' }: PortalHeaderProps) {
   // are 'wordmark'. Height-driven sizing keeps a wide wordmark readable, but a
   // square mark stays tiny at h-7 — bump the height for square-ish brands so
   // the mark reads at parity (and doesn't overflow the header).
-  const isSquareishMark = resolveBrandMeta(themeId, brand).logoShape === 'square';
+  const logoShape = resolveBrandMeta(themeId, brand).logoShape;
 
+  // Height-driven sizing: a wide wordmark reads fine at h-7, but the same
+  // height leaves a squarer mark tiny. A `lockup` (a wordmark stacked over a
+  // "Seeded by …" strapline, ~3:1) sits between the two — at wordmark height
+  // its strapline line is too small to read, which is exactly how the up-gzb
+  // mark landed in the sidebar.
   const logoClass =
     size === 'lg'
-      ? isSquareishMark
-        ? 'h-16 w-auto max-w-[260px] shrink-0 object-contain sm:h-20 sm:max-w-[320px]'
-        : 'h-10 w-auto max-w-[220px] shrink-0 object-contain sm:h-12 sm:max-w-[260px]'
-      : isSquareishMark
-        ? 'h-12 w-auto max-w-[200px] shrink-0 object-contain'
-        : 'h-7 w-auto max-w-[150px] shrink-0 object-contain';
+      ? {
+          square: 'h-16 w-auto max-w-[260px] shrink-0 object-contain sm:h-20 sm:max-w-[320px]',
+          lockup: 'h-14 w-auto max-w-[240px] shrink-0 object-contain sm:h-16 sm:max-w-[300px]',
+          wordmark: 'h-10 w-auto max-w-[220px] shrink-0 object-contain sm:h-12 sm:max-w-[260px]',
+        }[logoShape]
+      : {
+          square: 'h-12 w-auto max-w-[200px] shrink-0 object-contain',
+          lockup: 'h-11 w-auto max-w-[190px] shrink-0 object-contain',
+          wordmark: 'h-7 w-auto max-w-[150px] shrink-0 object-contain',
+        }[logoShape];
 
   return (
     <div className="flex items-center gap-2.5">
