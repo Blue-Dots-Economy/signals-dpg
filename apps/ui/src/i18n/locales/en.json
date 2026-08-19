@@ -67,6 +67,7 @@
   "auth.toast_signup_disabled": "User doesn't exist",
   "auth.toast_signup_disabled_desc": "Please contact your administrator to get onboarded.",
   "auth.signup_disabled_message": "User doesn't exist. Please contact your administrator to get onboarded.",
+  "auth.signup_invite_only": "This instance is invite-only — accounts are created by an administrator. If you don't have one yet, ask yours to onboard you.",
   "auth.oidc_sub": "You'll be taken to a secure sign-in page to continue.",
   "auth.oidc_redirecting": "Taking you to sign in…",
   "auth.oidc_signing_in": "Signing you in…",
