@@ -7,8 +7,14 @@
 /** Display text longer than this is elided; the href always keeps the full value. */
 export const URI_DISPLAY_MAX_CHARS = 60;
 
-/** Any explicit `scheme:` prefix, e.g. `https:`, `javascript:`, `mailto:`. */
-const SCHEME_RE = /^[a-z][a-z0-9+.-]*:/i;
+/**
+ * Any explicit `scheme:` prefix, e.g. `https:`, `javascript:`, `mailto:`.
+ * Deliberately excludes `.` from the scheme character class: real URI schemes
+ * we care about never contain a dot, and allowing it would misclassify a
+ * scheme-less `host:port` value (e.g. `example.com:8080`) as an explicit,
+ * non-http scheme and reject it.
+ */
+const SCHEME_RE = /^[a-z][a-z0-9+-]*:/i;
 
 export function toSafeHref(value: string): string | null {
   const trimmed = value.trim();

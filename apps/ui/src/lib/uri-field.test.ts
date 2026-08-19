@@ -12,6 +12,11 @@ describe('toSafeHref', () => {
     expect(toSafeHref('www.example.com/a')).toBe('https://www.example.com/a');
   });
 
+  it('prefixes https:// on a scheme-less host:port, not mistaken for an explicit scheme', () => {
+    expect(toSafeHref('example.com:8080')).toBe('https://example.com:8080');
+    expect(toSafeHref('mysite.io:8080/path')).toBe('https://mysite.io:8080/path');
+  });
+
   it('trims surrounding whitespace', () => {
     expect(toSafeHref('  example.com  ')).toBe('https://example.com');
   });

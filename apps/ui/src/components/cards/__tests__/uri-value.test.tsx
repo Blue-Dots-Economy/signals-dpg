@@ -1,5 +1,6 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { render, screen } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { UriValue } from '../uri-value';
 
 describe('UriValue', () => {
@@ -47,5 +48,19 @@ describe('UriValue', () => {
   it('renders an em dash for an empty value', () => {
     render(<UriValue value={null} />);
     expect(screen.getByText('—')).toBeInTheDocument();
+  });
+
+  it('stops a link click from also triggering an ancestor card click handler', async () => {
+    const onCardClick = vi.fn();
+    render(
+      // eslint-disable-next-line jsx-a11y/click-events-have-key-events, jsx-a11y/no-static-element-interactions
+      <div onClick={onCardClick}>
+        <UriValue value="https://example.com" />
+      </div>,
+    );
+
+    await userEvent.click(screen.getByRole('link', { name: 'https://example.com' }));
+
+    expect(onCardClick).not.toHaveBeenCalled();
   });
 });
