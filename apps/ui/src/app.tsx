@@ -1,6 +1,7 @@
 import { BrowserRouter, Routes, Route } from 'react-router-dom';
 import { Toaster } from 'sonner';
 import { RequireAuth } from '@/components/auth/require-auth';
+import { WrongPortalToast } from '@/components/auth/wrong-portal-toast';
 import { AuthProvider } from '@/contexts/auth-context';
 import { NetworkThemeProvider } from '@/theme/theme-provider';
 import { ThemeModeProvider } from '@/theme/mode-provider';
@@ -27,6 +28,10 @@ export function App() {
             offset={20}
             toastOptions={{ duration: 5000 }}
           />
+          {/* Reports a domain-gate bounce that survived the Keycloak logout
+              redirect. Mounted here, outside <Routes>, because that redirect
+              lands on the site root rather than the login page. */}
+          <WrongPortalToast />
           <Routes>
             <Route path="/" element={<HomePage />} />
             <Route path="/profile/new" element={<RequireAuth><ProfileFormPage /></RequireAuth>} />
