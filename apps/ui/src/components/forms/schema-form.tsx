@@ -1,7 +1,15 @@
 import * as React from 'react';
 import Form from '@rjsf/shadcn';
 import validator from '@rjsf/validator-ajv8';
-import type { RJSFSchema, UiSchema, RegistryWidgetsType, ObjectFieldTemplateProps } from '@rjsf/utils';
+import { useTranslation } from 'react-i18next';
+import type {
+  RJSFSchema,
+  UiSchema,
+  RegistryWidgetsType,
+  ObjectFieldTemplateProps,
+  RJSFValidationError,
+} from '@rjsf/utils';
+import { applyUriPatterns, collectUriFieldKeys, URI_FIELD_MARKER } from '@dpg/schemas/uri_fields';
 import { DatePickerWidget } from './custom-widgets/date-picker-widget';
 import { LocationAutocompleteWidget } from './custom-widgets/location-autocomplete-widget';
 import { MultiLocationAutocompleteWidget } from './custom-widgets/multi-location-autocomplete-widget';
@@ -242,7 +250,11 @@ function generateUiSchema(
   };
 
   for (const [key, prop] of Object.entries(schema.properties ?? {})) {
-    const typed = prop as RJSFSchema & { private?: boolean; format?: string };
+    const typed = prop as RJSFSchema & {
+      private?: boolean;
+      format?: string;
+      [URI_FIELD_MARKER]?: unknown;
+    };
 
     if (mode === 'compact' && typed.private === true) {
       uiSchema[key] = { 'ui:widget': 'hidden' };
@@ -255,6 +267,13 @@ function generateUiSchema(
 
     if (typed.format === 'email') {
       uiSchema[key] = { 'ui:placeholder': 'email@example.com' };
+    }
+
+    // A link field (network.json `x-uri`) gets a sample URL as its prompt, so
+    // the expected shape is visible before the user types. Merged (not assigned)
+    // because earlier blocks in this loop may already have written this key.
+    if (typed[URI_FIELD_MARKER] === true) {
+      uiSchema[key] = { ...(uiSchema[key] as object), 'ui:placeholder': 'https://example.com' };
     }
 
     if (typed.enum && typed.type === 'string') {
@@ -393,6 +412,11 @@ function normalizeSchemaForRjsf(schema: RJSFSchema, rootSchema?: RJSFSchema): RJ
     // object) — it's mapped to the reference-autocomplete widget by
     // generateUiSchema, so ajv must not see it.
     if (key === 'x-reference-source') continue;
+    // Strip the custom `x-uri` marker — its effect is the `pattern` injected by
+    // applyUriPatterns before this point, plus the card-side link rendering.
+    // (RJSF's ajv runs strict:false so an unknown keyword would be tolerated,
+    // but every other custom marker is stripped here; keep it consistent.)
+    if (key === URI_FIELD_MARKER) continue;
     result[key] = normalizeSchemaForRjsf(value as RJSFSchema, root);
   }
 
@@ -440,6 +464,8 @@ export function SchemaForm({
   formContext,
   sectionHeadingLevel = 3,
 }: Readonly<SchemaFormProps>) {
+  const { t } = useTranslation();
+
   // Base schema (meta stripped) still carries `x-show-if` so the evaluator can read it.
   const baseSchema = React.useMemo(() => stripMetaSchema(schema), [schema]);
 
@@ -463,7 +489,9 @@ export function SchemaForm({
   const hiddenKey = resolved.hidden.join('|');
 
   const rjsfSchema = React.useMemo(
-    () => normalizeSchemaForRjsf(resolved.schema),
+    // applyUriPatterns FIRST: it injects `pattern` for `x-uri` fields, then
+    // normalizeSchemaForRjsf strips the marker so ajv only sees the pattern.
+    () => normalizeSchemaForRjsf(applyUriPatterns(resolved.schema)),
     // resolved.schema depends only on (schema, visible set); key on hiddenKey.
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [schema, hiddenKey],
@@ -475,6 +503,23 @@ export function SchemaForm({
     return ui;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [schema, hiddenKey, mode, hideSubmit, submitButtonText]);
+
+  // ajv reports a pattern failure as `must match pattern "^\s*$|^\s*(https?..."`,
+  // which is meaningless to a user. Rewrite it for `x-uri` fields only.
+  const uriFieldKeys = React.useMemo(() => new Set(collectUriFieldKeys(baseSchema)), [baseSchema]);
+  const transformErrors = React.useCallback(
+    (errors: RJSFValidationError[]) =>
+      errors.map((error) => {
+        if (error.name !== 'pattern') return error;
+        const field = (error.property ?? '').replace(/^\./, '').split('.')[0];
+        if (!uriFieldKeys.has(field)) return error;
+        return {
+          ...error,
+          message: t('form.invalid_url', 'Enter a valid link, e.g. https://example.com'),
+        };
+      }),
+    [uriFieldKeys, t],
+  );
 
   // Keep a ref to the latest onValidityChange so the validity effect below does
   // not depend on the callback's identity. This prevents a render loop when a
@@ -531,6 +576,7 @@ export function SchemaForm({
           if (submitted) onSubmit(submitted as Record<string, unknown>);
         }}
         onError={(errors) => onError?.(errors)}
+        transformErrors={transformErrors}
         focusOnFirstError={(error) =>
           focusErrorField(containerRef.current, error as RjsfError)
         }
