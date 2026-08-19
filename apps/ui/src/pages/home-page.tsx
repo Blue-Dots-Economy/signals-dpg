@@ -103,6 +103,19 @@ import { GuardianOtpPurpose } from '@/components/consent/u18/guardian-otp-purpos
 import { U18GuardianFlow } from '@/components/consent/u18/u18-guardian-flow';
 import { isGuardianConsentRequiredDomain } from '@/lib/guardian-consent';
 
+/**
+ * True when the map covers so much longitude that "zoom out" is not a usable
+ * instruction any more. 120° is roughly a continental view — well before the
+ * whole-world zoom, and comfortably inside the 180° span that used to break
+ * the server-side bbox query.
+ */
+const WIDE_VIEWPORT_LNG_SPAN_DEGREES = 120;
+
+export function isWideViewport(viewport: MapViewport | null): boolean {
+  if (!viewport || viewport.minLng === undefined || viewport.maxLng === undefined) return false;
+  return viewport.maxLng - viewport.minLng >= WIDE_VIEWPORT_LNG_SPAN_DEGREES;
+}
+
 function getItemLocations(
   data: Record<string, unknown>,
 ): Array<{ lat: number; lng: number; label?: string }> | undefined {
@@ -2559,7 +2572,16 @@ export function HomePage() {
                   selfLocation={userLocation}
                   filtersSlot={filtersPanel}
                   onViewportChange={setMapViewport}
-                  emptyMessage={t('home.map_no_items_in_area')}
+                  emptyMessage={t(
+                    // At a world-scale viewport "zoom out to find results" is
+                    // advice the user cannot act on — they are already as far
+                    // out as it goes, and zooming out is what emptied the map.
+                    // Point them at the controls that can actually change the
+                    // result instead.
+                    isWideViewport(mapViewport)
+                      ? 'home.map_no_items_wide'
+                      : 'home.map_no_items_in_area',
+                  )}
                   renderPopup={(marker) => {
                     // Marker ids are `${item_id}#${locationIndex}` — strip the suffix to look up the item.
                     const baseItemId = marker.id.includes('#') ? marker.id.split('#')[0] : marker.id;

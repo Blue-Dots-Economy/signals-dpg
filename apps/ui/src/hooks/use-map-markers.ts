@@ -80,6 +80,21 @@ interface HeldBboxState {
   /** Whether any domain's last fetch reported `meta.total > capForZoom(zoom)`. */
   truncated: boolean;
   /**
+   * Whether that fetch came back with NO markers at all.
+   *
+   * Logically a zero result is safe to hold — if a region truly has nothing,
+   * neither does any region inside it — so this is not about correctness of
+   * the reasoning but about the cost of being wrong. A held empty set is the
+   * one outcome the user cannot escape without reloading the page: every
+   * subsequent viewport is contained in the padded bbox, so the query key
+   * never advances and the map stays blank. That is exactly what a
+   * server-side bbox bug produced (a >180° viewport resolved to the
+   * complement of itself and answered `total: 0`), and it stranded the map
+   * until a refresh. Re-fetching after an empty result costs one request and
+   * removes the whole failure mode.
+   */
+  empty: boolean;
+  /**
    * The zoom band (`snapViewportForKey`'s `'clustered' | 'individual'`) the
    * last fetch was made under. A zoom that crosses this band (e.g. smoothly
    * zooming from clustered into individual pins) always forces a refetch at
@@ -158,6 +173,7 @@ export function useMapMarkers(
     : !heldRef.current
       ? true // no prior fetch to compare against — must fetch
       : bandChanged ||
+        heldRef.current.empty ||
         shouldRefetch({
           newBbox: rawBbox,
           paddedBbox: heldRef.current.paddedBbox,
@@ -212,7 +228,11 @@ export function useMapMarkers(
     const rawBboxKey = `${rawBbox.minLat},${rawBbox.minLng},${rawBbox.maxLat},${rawBbox.maxLng}`;
     if (rawBboxKey !== lastRawBboxKeyRef.current) {
       lastRawBboxKeyRef.current = rawBboxKey;
-      if (heldRef.current?.truncated === true) {
+      // Bumped for an EMPTY held result as well as a truncated one, and for
+      // the same reason: `needsRefetch` alone is not enough, because a
+      // contained zoom-in can snap to the SAME grid cell as the held bbox,
+      // leaving the query key unchanged and the refetch silently skipped.
+      if (heldRef.current?.truncated === true || heldRef.current?.empty === true) {
         bboxTokenRef.current += 1;
       }
     }
@@ -328,6 +348,7 @@ export function useMapMarkers(
       bbox: effectiveBbox,
       paddedBbox: padBbox(effectiveBbox),
       truncated: aggregated.truncated,
+      empty: aggregated.markers.length === 0,
       zoomBand: currentZoomBand,
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps -- effectiveBboxSignature + dataSignature (+ currentZoomBand, captured via closure) capture the relevant identity of effectiveBbox/results for this effect
