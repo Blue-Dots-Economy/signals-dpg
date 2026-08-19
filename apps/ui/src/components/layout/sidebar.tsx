@@ -19,6 +19,7 @@ import {
 import { PortalHeader } from './portal-header';
 import { LayoutGrid, Plus, Network, ChevronRight, Activity } from 'lucide-react';
 import { usePendingActionsCount } from '@/hooks/use-actions';
+import { getServedScope } from '@/lib/served-binding';
 
 interface AppSidebarProps {
   networks?: DotNetworkSchema[];
@@ -67,6 +68,30 @@ function PendingActionsBadge() {
   );
 }
 
+/**
+ * Which domain's `my_items_label` (network.json) should title the "My items"
+ * group — e.g. blue_dot provider → "My Jobs".
+ *
+ * The viewer's own profiles decide it when they are all in one domain. Before
+ * sign-in there are none, and the group used to fall back to the generic
+ * "My Profile(s)" — but a per-domain portal already knows its domain from
+ * VITE_SERVED_BINDINGS (the same signal the login form uses to auto-select the
+ * domain when only one is served), so a seeker portal can say "My Profiles"
+ * and a provider portal "My Jobs" to a signed-out visitor too.
+ *
+ * Own profiles win over the portal binding: a viewer holding items is the
+ * stronger signal, and the two can disagree while a mis-routed user is being
+ * bounced to the right portal.
+ */
+export function resolveMyItemsDomainId(
+  profileDomainIds: string[],
+  servedDomainIds: string[] | null,
+): string | null {
+  if (profileDomainIds.length === 1) return profileDomainIds[0];
+  if (profileDomainIds.length > 1) return null; // mixed — the generic label covers it
+  return servedDomainIds && servedDomainIds.length === 1 ? servedDomainIds[0] : null;
+}
+
 export function AppSidebar({
   networks = [],
   selectedNetwork,
@@ -99,9 +124,9 @@ export function AppSidebar({
   // (e.g. blue_dot provider → "My Jobs"). Only applied when the group holds a
   // single domain; otherwise the generic label covers the mix. Falls back to the
   // generic label when the domain sets no override.
-  const soleDomainId = domainKeys.length === 1 ? domainKeys[0] : null;
+  const labelDomainId = resolveMyItemsDomainId(domainKeys, getServedScope()?.domains ?? null);
   const myItemsGroupLabel =
-    domains.find((d) => d.id === soleDomainId)?.my_items_label ??
+    domains.find((d) => d.id === labelDomainId)?.my_items_label ??
     t('nav.my_profiles_group');
 
   // Find which domain the active profile belongs to

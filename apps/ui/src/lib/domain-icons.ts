@@ -20,6 +20,7 @@ export const domainIcons: Record<string, LucideIcon> = {
   // ── blue_dot / opportunities network ────────────────────────────────
   'blue_dot:seeker': Search,
   'blue_dot:provider': Briefcase,
+  'blue_dot:service_provider': Building2,
 
   // ── purple_dot / disability services network ────────────────────────
   'purple_dot:seeker': Accessibility,
@@ -38,6 +39,7 @@ export const domainIcons: Record<string, LucideIcon> = {
   // we don't imply disability for networks that aren't about that.
   seeker: Search,
   provider: Briefcase,
+  service_provider: Building2,
 };
 
 export function getDomainIcon(
