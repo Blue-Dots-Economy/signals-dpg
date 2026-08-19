@@ -74,11 +74,6 @@ export type SelfSignupResult =
     }
   | { ok: false; code: SelfSignupErrorCode; message: string };
 
-/** Signup attempts allowed per identifier and per IP, and over what window. */
-const RATE_LIMIT_WINDOW_SECONDS = 3600;
-const MAX_PER_IDENTIFIER = 3;
-const MAX_PER_IP = 10;
-
 function normalizeEmail(value: string | null | undefined): string | null {
   const trimmed = value?.trim().toLowerCase();
   return trimmed || null;
@@ -94,10 +89,15 @@ function normalizePhone(value: string | null | undefined): string | null {
  * creates Keycloak entries, so the point is to make bulk abuse impractical, not
  * to be precise. Fails OPEN — a Redis outage must not block legitimate signup.
  */
-async function overLimit(key: string, max: number, log: FastifyBaseLogger): Promise<boolean> {
+async function overLimit(
+  key: string,
+  max: number,
+  windowSeconds: number,
+  log: FastifyBaseLogger,
+): Promise<boolean> {
   try {
     const count = await redis.incr(key);
-    if (count === 1) await redis.expire(key, RATE_LIMIT_WINDOW_SECONDS);
+    if (count === 1) await redis.expire(key, windowSeconds);
     return count > max;
   } catch (err) {
     log.error({ err, key }, 'self-signup: rate-limit check failed; allowing the request');
@@ -196,9 +196,15 @@ async function prepareSignup(
   }
 
   const identifier = email ?? phoneNumber;
+  // Read at request time, not module scope: the limits are operator-tunable
+  // (SIGNUP_MAX_PER_IDENTIFIER / SIGNUP_MAX_PER_IP /
+  // SIGNUP_RATE_LIMIT_WINDOW_SECONDS) and reading them here keeps this file free
+  // of import-time config evaluation.
+  const { window_seconds, max_per_identifier, max_per_ip } = authConfig.signup_rate_limit;
   if (
-    (await overLimit(`signup:id:${identifier}`, MAX_PER_IDENTIFIER, log)) ||
-    (input.clientIp && (await overLimit(`signup:ip:${input.clientIp}`, MAX_PER_IP, log)))
+    (await overLimit(`signup:id:${identifier}`, max_per_identifier, window_seconds, log)) ||
+    (input.clientIp &&
+      (await overLimit(`signup:ip:${input.clientIp}`, max_per_ip, window_seconds, log)))
   ) {
     return {
       ok: false,

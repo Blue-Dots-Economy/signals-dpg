@@ -43,6 +43,12 @@ const mockAuthConfig = {
   keycloak_enabled: true,
   allow_self_signup: true,
   login_channels: ['phone', 'email'] as Array<'phone' | 'email'>,
+  // Mirrors the SIGNUP_* env defaults; the throttle reads these per request.
+  signup_rate_limit: {
+    window_seconds: 3600,
+    max_per_identifier: 3,
+    max_per_ip: 10,
+  },
 };
 const mockKeycloakConfig = {
   internal_base_url: 'http://keycloak:8080',
