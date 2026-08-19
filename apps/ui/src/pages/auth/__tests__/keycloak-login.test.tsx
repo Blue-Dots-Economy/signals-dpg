@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { act, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { pickBirthYear } from '@/test/pick-dob';
@@ -416,6 +416,33 @@ describe('KeycloakLoginPanel — existing vs new user chooser', () => {
 
     await waitFor(() => expect(startKeycloakLogin).toHaveBeenCalledWith('/'));
     expect(signupWithKeycloak).not.toHaveBeenCalled();
+  });
+
+  it('re-enables the choices when the page comes back from the bfcache', async () => {
+    // Clicking sign-in hands the browser to Keycloak, so the code after
+    // `startKeycloakLogin` never runs and `isRedirecting` stays true by
+    // design. Pressing Back restores this page from the back/forward cache
+    // with that flag intact, which left every choice disabled with a spinner
+    // until a manual reload. Modelled with a call that never settles — which
+    // is what a real navigation looks like to this component.
+    startKeycloakLogin.mockImplementationOnce(() => new Promise<void>(() => {}));
+
+    renderAt(<LoginPage />);
+    const existing = await screen.findByText(/existing user/i);
+    await userEvent.click(existing);
+
+    const choice = existing.closest('button');
+    await waitFor(() => expect(choice?.disabled).toBe(true));
+
+    // `persisted: true` is what marks a bfcache restore; a fresh load
+    // re-runs the module and resets the state on its own.
+    const event = new Event('pageshow') as Event & { persisted?: boolean };
+    Object.defineProperty(event, 'persisted', { value: true });
+    await act(async () => {
+      window.dispatchEvent(event);
+    });
+
+    await waitFor(() => expect(choice?.disabled).toBe(false));
   });
 
   it('hides the signup choice when the instance is gated', async () => {

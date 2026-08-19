@@ -218,6 +218,34 @@ export function KeycloakLoginPanel() {
     if (!selectedDomainIsGated) setAge(undefined);
   }, [selectedDomainIsGated]);
 
+  /**
+   * Clear the busy flags when this page comes BACK from the bfcache.
+   *
+   * Clicking "Sign in" sets `isRedirecting` and hands the browser to
+   * Keycloak — the code after `startKeycloakLogin` never runs, by design.
+   * Pressing Back then restores this page from the browser's back/forward
+   * cache with its JS heap intact, busy flags included, so every choice
+   * renders disabled with a spinner and stays that way until a manual
+   * reload.
+   *
+   * `pageshow` with `persisted: true` is the one signal that distinguishes a
+   * bfcache restore from a fresh load (a fresh load re-runs the module and
+   * resets the state on its own, which is why this only ever bites on Back).
+   *
+   * Not reproducible under `vite dev`: its HMR WebSocket makes the page
+   * ineligible for the bfcache, so Back re-executes the app instead of
+   * restoring it — the bug only appears on a deployed build.
+   */
+  useEffect(() => {
+    const onPageShow = (event: PageTransitionEvent) => {
+      if (!event.persisted) return;
+      setIsRedirecting(false);
+      setIsSigningUp(false);
+    };
+    window.addEventListener('pageshow', onPageShow);
+    return () => window.removeEventListener('pageshow', onPageShow);
+  }, []);
+
   const handleSignIn = async () => {
     setIsRedirecting(true);
     setError(null);
