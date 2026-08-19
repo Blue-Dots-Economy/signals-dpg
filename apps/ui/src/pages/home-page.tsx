@@ -112,8 +112,21 @@ import { isGuardianConsentRequiredDomain } from '@/lib/guardian-consent';
 const WIDE_VIEWPORT_LNG_SPAN_DEGREES = 120;
 
 export function isWideViewport(viewport: MapViewport | null): boolean {
-  if (!viewport || viewport.minLng === undefined || viewport.maxLng === undefined) return false;
+  if (viewport?.minLng === undefined || viewport?.maxLng === undefined) return false;
   return viewport.maxLng - viewport.minLng >= WIDE_VIEWPORT_LNG_SPAN_DEGREES;
+}
+
+/**
+ * Which empty-map message to show. Three distinct situations that used to
+ * share one string: a FAILED load is not an empty area, and at a world-scale
+ * viewport "zoom out to find results" is advice the user cannot act on —
+ * they are already as far out as it goes, and zooming out is what emptied the
+ * map.
+ */
+export function mapEmptyMessageKey(opts: { isError: boolean; wideViewport: boolean }): string {
+  if (opts.isError) return 'home.map_load_failed';
+  if (opts.wideViewport) return 'home.map_no_items_wide';
+  return 'home.map_no_items_in_area';
 }
 
 function getItemLocations(
@@ -2573,18 +2586,10 @@ export function HomePage() {
                   filtersSlot={filtersPanel}
                   onViewportChange={setMapViewport}
                   emptyMessage={t(
-                    // Three different situations previously shared one
-                    // message. A FAILED request is not an empty area — saying
-                    // "no listings" there states something the app has not
-                    // established. And at a world-scale viewport "zoom out to
-                    // find results" is advice the user cannot act on: they are
-                    // already as far out as it goes, and zooming out is what
-                    // emptied the map.
-                    mapMarkers.isError
-                      ? 'home.map_load_failed'
-                      : isWideViewport(mapViewport)
-                        ? 'home.map_no_items_wide'
-                        : 'home.map_no_items_in_area',
+                    mapEmptyMessageKey({
+                      isError: mapMarkers.isError,
+                      wideViewport: isWideViewport(mapViewport),
+                    }),
                   )}
                   renderPopup={(marker) => {
                     // Marker ids are `${item_id}#${locationIndex}` — strip the suffix to look up the item.

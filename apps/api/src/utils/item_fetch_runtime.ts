@@ -383,8 +383,14 @@ async function buildWhereClause(
           AND ST_Intersects(s.geo, ST_MakeEnvelope(${chunk.minLng}, ${filters.min_lat!}, ${chunk.maxLng}, ${filters.max_lat!}, 4326)::geography)
         )`
       );
-      const geoClause = chunkClauses.reduce((acc, clause, i) =>
-        i === 0 ? clause : sql`${acc} OR ${clause}`
+      // Seeded with `false` rather than relying on the first element:
+      // `splitLngRange` never returns an empty array today, but a no-initial
+      // `reduce` throws outright if that ever changes, and `false OR (...)` is
+      // both the correct identity for a disjunction and the right answer for
+      // no chunks at all.
+      const geoClause = chunkClauses.reduce(
+        (acc, clause) => sql`${acc} OR ${clause}`,
+        sql`false`
       );
       conditions.push(
         sql`
