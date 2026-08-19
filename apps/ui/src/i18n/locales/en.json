@@ -26,8 +26,6 @@
   "auth.select_domain_required": "Please select your domain to continue.",
   "auth.signup_options_unavailable": "Could not load sign-up options. Please refresh and try again.",
   "auth.domain_placeholder": "Select one",
-  "auth.label_dob": "Date of birth",
-  "auth.dob_placeholder": "Select date of birth",
   "auth.dob_label_year": "Birth year",
   "auth.dob_year_placeholder": "Year",
   "auth.hint_verify_email": "We'll send a one-time code to verify your email.",
@@ -39,7 +37,6 @@
   "auth.guardian_confirmed_title": "Guardian confirmed",
   "auth.guardian_confirmed_desc": "Now enter the code we're sending to your own {{contactLabel}} to finish creating your account.",
   "auth.signup_dob_title": "To create an account, please provide",
-  "auth.signup_dob_label": "Select date of birth",
   "auth.signup_dob_continue": "Continue",
   "auth.signup_dob_how_title": "How it works",
   "auth.signup_dob_how_desc": "Select your birth year. If you are over 18, we'll take you to the account creation page. If you are a minor, under 18, we'll first collect consent from your guardian.",
@@ -590,8 +587,6 @@
     "guardian_consent_recorded": "Consent recorded — your profile is now live"
   },
   "u18": {
-    "dob_label": "Select date of birth",
-    "dob_placeholder": "Select date of birth",
     "guardian_error_same_contact_not_allowed": "Your guardian's contact can't be the same as your own. Please use a different email or phone number."
   },
   "u18.guardian_accept_both_prefix": "On behalf of my ward, I accept the ",
