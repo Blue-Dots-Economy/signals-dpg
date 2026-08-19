@@ -25,26 +25,15 @@ import { mergeConsentConfig } from '@/hooks/use-consent-config';
 import { ConsentModal } from '@/components/consent/consent-modal';
 import { setPendingConsent } from '@/lib/pending-consent';
 import { setPendingSignupExtras } from '@/lib/pending-signup-extras';
-import { ageFromBirthYear, isMinorFromAge } from '@/lib/guardian-consent';
+import { isMinorFromAge } from '@/lib/guardian-consent';
 import {
   SignupGuardianFlow,
   type SignupIdentifier,
 } from '@/components/consent/u18/signup-guardian-flow';
+import { BirthYearSelect } from '@/components/consent/u18/birth-year-select';
 import { getServedScope } from '@/lib/served-binding';
 import type { DotNetworkDomain } from '@/engine/types';
 import type { ConsentAcceptBody, ConsentConfigDocument } from '@dpg/schemas';
-
-/**
- * Derive the birth-year age (#331) from the signup form's `<input type="date">`
- * value. Whole-year only, matching `ageFromBirthYear` everywhere else in the
- * app — the day/month collected here is UX only and never leaves the client.
- */
-function ageFromDateInput(value: string): number | undefined {
-  if (!value) return undefined;
-  const dob = new Date(value);
-  if (Number.isNaN(dob.getTime())) return undefined;
-  return ageFromBirthYear(dob.getFullYear());
-}
 
 /**
  * Same shape as `local@rest` with an inner dot in `rest` — the check the OTP
@@ -104,7 +93,13 @@ export function KeycloakLoginPanel() {
   const [email, setEmail] = useState('');
   const [phoneNumber, setPhoneNumber] = useState('');
   const [domain, setDomain] = useState('');
-  const [dateOfBirth, setDateOfBirth] = useState('');
+  /**
+   * Age snapshot derived from the birth YEAR the user picks (#331) — the day
+   * and month are never collected, here or anywhere else in the app. Undefined
+   * until a year is chosen; `BirthYearSelect` owns the year itself and hands
+   * back only `currentYear - birthYear`.
+   */
+  const [age, setAge] = useState<number | undefined>(undefined);
   /**
    * Set only for a brand-new MINOR signing up into a guardian-gated domain.
    * Renders the pre-auth guardian capture BEFORE the account is created, exactly
@@ -202,7 +197,7 @@ export function KeycloakLoginPanel() {
 
   /**
    * Whether the domain being signed up for routes minors through the guardian
-   * flow. Only such a domain has any use for a date of birth — a provider has no
+   * flow. Only such a domain has any use for a birth year — a provider has no
    * U18 flow at all, so asking them is pure friction. Drives both the field's
    * visibility and the minor check in `handleSignup`, so the two cannot disagree.
    *
@@ -211,6 +206,17 @@ export function KeycloakLoginPanel() {
    */
   const selectedDomainIsGated =
     networkDomains.find((d) => d.id === domain)?.guardian_consent_required ?? false;
+
+  /**
+   * The picker is unmounted whenever the chosen domain isn't guardian-gated,
+   * and `BirthYearSelect` owns the year internally — so switching seeker →
+   * provider → seeker would show an empty picker while a previously derived
+   * age still sat here and rode along with the signup. Clear it whenever the
+   * field is not on screen, so what's submitted is always what's displayed.
+   */
+  useEffect(() => {
+    if (!selectedDomainIsGated) setAge(undefined);
+  }, [selectedDomainIsGated]);
 
   const handleSignIn = async () => {
     setIsRedirecting(true);
@@ -309,14 +315,13 @@ export function KeycloakLoginPanel() {
     // back to `false` for an unknown domain, which is fine for hiding a field
     // but must never decide whether the U18 gate applies.
     const domainIsGated = selectedDomainMeta.guardian_consent_required === true;
-    const age = ageFromDateInput(dateOfBirth);
 
     /**
      * On a guardian-gated domain the age must be known BEFORE the account
      * exists. The OTP screen enforces that with a blocking DOB step whose
-     * continue button stays disabled until a date is picked
+     * continue button stays disabled until a year is picked
      * (`components/consent/u18/signup-dob-step.tsx`). Here the field is inline
-     * and optional, so without this guard a blank date yields
+     * and optional, so without this guard an unpicked year yields
      * `age === undefined`, the minor check below never fires, and a minor is
      * signed up as an adult — the U18 path skipped entirely rather than
      * merely deferred.
@@ -425,7 +430,6 @@ export function KeycloakLoginPanel() {
 
   const createAccountAndSignIn = async (identifier: AuthIdentifier) => {
     try {
-      const age = ageFromDateInput(dateOfBirth);
       const result = await signupWithKeycloak({
         name: name.trim(),
         ...identifier,
@@ -591,17 +595,13 @@ export function KeycloakLoginPanel() {
         )}
 
         {/* Only a guardian-gated domain (e.g. seeker) needs an age; a provider
-            is never routed through the U18 flow, so the field is hidden. */}
+            is never routed through the U18 flow, so the field is hidden. The
+            YEAR alone is collected (#331) — same control the OTP screen's DOB
+            step uses, so both signup entry points ask for the same thing. */}
         {selectedDomainIsGated && (
           <div className="space-y-1.5">
-            <Label htmlFor="signup-dob">{t('auth.label_dob')}</Label>
-            <Input
-              id="signup-dob"
-              type="date"
-              value={dateOfBirth}
-              max={new Date().toISOString().slice(0, 10)}
-              onChange={(e) => setDateOfBirth(e.target.value)}
-            />
+            <Label htmlFor="signup-dob-year">{t('auth.signup_dob_label_ym')}</Label>
+            <BirthYearSelect idPrefix="signup-dob" onChange={setAge} />
             <p className="text-xs text-muted-foreground">{t('auth.signup_dob_hint')}</p>
           </div>
         )}
