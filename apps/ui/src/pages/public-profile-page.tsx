@@ -13,6 +13,7 @@ import { useActions } from '@/hooks/use-actions';
 import { useAuth } from '@/contexts/auth-context';
 import { useNetworkTheme } from '@/theme/theme-provider';
 import { resolveCardFields, formatCardValue } from '@/components/cards/resolve-card-fields';
+import { UriValue } from '@/components/cards/uri-value';
 import { buildProfileShareUrl, copyTextToClipboard } from '@/lib/share-profile';
 import { queryKeys } from '@/lib/query-keys';
 import type { Item } from '@/lib/item-api';
@@ -588,7 +589,7 @@ export function PublicProfilePage() {
                   {row.label}
                 </div>
                 <div className="mt-1 text-sm font-semibold text-foreground [overflow-wrap:anywhere]">
-                  {formatCardValue(row.value, row.type)}
+                  {row.isUri ? <UriValue value={row.value} /> : formatCardValue(row.value, row.type)}
                 </div>
               </div>
             ))}
