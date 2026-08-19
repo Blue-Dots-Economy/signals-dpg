@@ -4,7 +4,7 @@ import { fetchNetworkMarkers, MAP_FETCH_LIMIT } from '@/lib/network-api';
 import type { Marker } from '@/lib/network-api';
 import type { DotNetworkSchema, DotNetworkDomain, MapViewport } from '@/engine/types';
 import { queryKeys } from '@/lib/query-keys';
-import { snapViewportForKey, padBbox, shouldRefetch, zoomBand } from '@/lib/map-viewport-snap';
+import { snapViewportForKey, padBbox, shouldRefetch, zoomBand, clampBbox } from '@/lib/map-viewport-snap';
 import type { RawBbox, ZoomBand } from '@/lib/map-viewport-snap';
 import { capForZoom } from '@/lib/map-caps';
 
@@ -69,6 +69,14 @@ interface UseMapMarkersResult {
    */
   truncated: boolean;
   isLoading: boolean;
+  /**
+   * True when a domain's markers request FAILED. Distinct from "no markers":
+   * a rejected or errored fetch previously rendered the same "no listings
+   * here" empty state, so a 400 from an out-of-range bbox was indistinguishable
+   * from an genuinely empty area — the map claimed a fact it had not
+   * established.
+   */
+  isError: boolean;
 }
 
 /** Refetch state held across renders for the bbox path (Task 5). */
@@ -146,12 +154,16 @@ export function useMapMarkers(
     viewport.minLng !== undefined &&
     viewport.maxLat !== undefined &&
     viewport.maxLng !== undefined
-      ? {
+      ? // Clamped before anything else touches it: a zoomed-out provider
+        // reports bounds beyond ±180° / ±90°, which the markers endpoint
+        // rejects with a 400 — so the fetch never happened and the map looked
+        // empty rather than broken.
+        clampBbox({
           minLat: viewport.minLat,
           minLng: viewport.minLng,
           maxLat: viewport.maxLat,
           maxLng: viewport.maxLng,
-        }
+        })
       : null;
 
   // Refetch state machine (#203 map-serverside-search Task 5). `heldRef` is
@@ -354,5 +366,9 @@ export function useMapMarkers(
     // eslint-disable-next-line react-hooks/exhaustive-deps -- effectiveBboxSignature + dataSignature (+ currentZoomBand, captured via closure) capture the relevant identity of effectiveBbox/results for this effect
   }, [effectiveBboxSignature, dataSignature, aggregated.truncated]);
 
-  return { ...aggregated, isLoading: results.some((r) => r.isLoading) };
+  return {
+    ...aggregated,
+    isLoading: results.some((r) => r.isLoading),
+    isError: results.some((r) => r.isError),
+  };
 }

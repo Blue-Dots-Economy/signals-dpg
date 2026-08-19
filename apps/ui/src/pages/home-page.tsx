@@ -2573,14 +2573,18 @@ export function HomePage() {
                   filtersSlot={filtersPanel}
                   onViewportChange={setMapViewport}
                   emptyMessage={t(
-                    // At a world-scale viewport "zoom out to find results" is
-                    // advice the user cannot act on — they are already as far
-                    // out as it goes, and zooming out is what emptied the map.
-                    // Point them at the controls that can actually change the
-                    // result instead.
-                    isWideViewport(mapViewport)
-                      ? 'home.map_no_items_wide'
-                      : 'home.map_no_items_in_area',
+                    // Three different situations previously shared one
+                    // message. A FAILED request is not an empty area — saying
+                    // "no listings" there states something the app has not
+                    // established. And at a world-scale viewport "zoom out to
+                    // find results" is advice the user cannot act on: they are
+                    // already as far out as it goes, and zooming out is what
+                    // emptied the map.
+                    mapMarkers.isError
+                      ? 'home.map_load_failed'
+                      : isWideViewport(mapViewport)
+                        ? 'home.map_no_items_wide'
+                        : 'home.map_no_items_in_area',
                   )}
                   renderPopup={(marker) => {
                     // Marker ids are `${item_id}#${locationIndex}` — strip the suffix to look up the item.

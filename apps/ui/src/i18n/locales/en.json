@@ -573,6 +573,7 @@
   "hero.orange_dot.subline": "A unified tourism, arts & culture network connecting travellers to verified practitioners — every orange dot is a guide, an artisan, a stay, an experience worth finding.",
   "home.map_no_items_in_area": "No listings in this area — zoom out or move the map to find results.",
   "home.map_no_items_wide": "No listings on the map right now — try clearing filters or searching for something else.",
+  "home.map_load_failed": "Couldn't load listings for this area — please try again.",
   "consent.profile_minor_notice": "You're under 18, so a guardian needs to verify this profile creation. We'll send them a one-time code to confirm.",
   "consent.profile_minor_verify": "Verify with guardian",
   "u18.guardian_verified_title": "Guardian confirmed",
