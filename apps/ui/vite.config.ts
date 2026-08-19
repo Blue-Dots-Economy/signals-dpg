@@ -180,7 +180,11 @@ function brandThemePlugin(): Plugin {
     if (brandJson?.faviconType === 'png' || brandJson?.faviconType === 'svg') {
       meta.faviconType = brandJson.faviconType;
     }
-    if (brandJson?.logoShape === 'square' || brandJson?.logoShape === 'wordmark') {
+    if (
+      brandJson?.logoShape === 'square' ||
+      brandJson?.logoShape === 'wordmark' ||
+      brandJson?.logoShape === 'lockup'
+    ) {
       meta.logoShape = brandJson.logoShape;
     }
     if (brandJson?.copy && typeof brandJson.copy === 'object' && !Array.isArray(brandJson.copy)) {

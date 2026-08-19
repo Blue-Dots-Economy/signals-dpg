@@ -3,6 +3,7 @@ import { db } from '@api/db/postgres/drizzle_config';
 import { items } from '@dpg/database';
 import { decryptItemPrivate } from './item_decrypt';
 import { getNetworkConfigById } from '@/network_configs';
+import { splitLngRange } from '@/utils/lng_chunks';
 
 /** Minimal pino-compatible surface (`request.log`) for debug-level diagnostics. */
 export interface ItemFetchLog {
@@ -368,14 +369,36 @@ async function buildWhereClause(
       // malformed viewport never costs a query.
       conditions.push(sql`false`);
     } else if (await hasSearchIndexRows(filters.item_network, filters.item_domain)) {
+      // Longitude is chunked (`splitLngRange`) before any envelope is built:
+      // `::geography` resolves a span wider than 180° as the SHORT way round
+      // the globe — the complement of the intended box — so a world-zoom
+      // viewport silently matched nothing (179.9° of span returned every
+      // marker, 180.1° returned zero). Every chunk is a normal geography
+      // polygon, so the GiST index still serves each `&&`; the chunks are
+      // OR-ed because an item need only fall in one of them.
+      const lngChunks = splitLngRange(filters.min_lng, filters.max_lng);
+      const chunkClauses = lngChunks.map(
+        (chunk) => sql`(
+          s.geo && ST_MakeEnvelope(${chunk.minLng}, ${filters.min_lat!}, ${chunk.maxLng}, ${filters.max_lat!}, 4326)::geography
+          AND ST_Intersects(s.geo, ST_MakeEnvelope(${chunk.minLng}, ${filters.min_lat!}, ${chunk.maxLng}, ${filters.max_lat!}, 4326)::geography)
+        )`
+      );
+      // Seeded with `false` rather than relying on the first element:
+      // `splitLngRange` never returns an empty array today, but a no-initial
+      // `reduce` throws outright if that ever changes, and `false OR (...)` is
+      // both the correct identity for a disjunction and the right answer for
+      // no chunks at all.
+      const geoClause = chunkClauses.reduce(
+        (acc, clause) => sql`${acc} OR ${clause}`,
+        sql`false`
+      );
       conditions.push(
         sql`
           EXISTS (
             SELECT 1 FROM item_search s
             WHERE s.item_network = ${items.item_network} AND s.item_id = ${items.item_id}
               AND s.lifecycle_status = 'live'
-              AND s.geo && ST_MakeEnvelope(${filters.min_lng}, ${filters.min_lat}, ${filters.max_lng}, ${filters.max_lat}, 4326)::geography
-              AND ST_Intersects(s.geo, ST_MakeEnvelope(${filters.min_lng}, ${filters.min_lat}, ${filters.max_lng}, ${filters.max_lat}, 4326)::geography)
+              AND (${geoClause})
           )
         `
       );

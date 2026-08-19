@@ -169,9 +169,13 @@ describe('useMapMarkers', () => {
   });
 
   it('reuses the cache for a same/contained bbox + same zoom band + same filters', async () => {
+    // Non-empty on purpose: an EMPTY held result now always forces a refetch
+    // (see the empty-result test below), so an empty payload here would be
+    // asserting the opposite of what this test is about. The cache-reuse
+    // behaviour under test is unchanged.
     vi.mocked(fetchNetworkMarkers).mockResolvedValue({
-      meta: { total: 0, limit: 5000, offset: 0, partial: false, unavailable_instances: [] },
-      markers: [],
+      meta: { total: 1, limit: 5000, offset: 0, partial: false, unavailable_instances: [] },
+      markers: [marker('a', 'student')],
     });
 
     const { result, rerender } = renderHook(
@@ -273,6 +277,27 @@ describe('useMapMarkers', () => {
       // a zoomed-in sub-area.
       meta: { total: 200_000, limit: 5000, offset: 0, partial: false, unavailable_instances: [] },
       markers: [marker('a', 'student')],
+    });
+
+    const { result, rerender } = renderHook(
+      ({ vp }: { vp: typeof bboxViewport }) => useMapMarkers(network, [domains[0]], vp),
+      { wrapper, initialProps: { vp: bboxViewport } },
+    );
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+    expect(fetchNetworkMarkers).toHaveBeenCalledTimes(1);
+
+    rerender({ vp: containedBbox });
+    await waitFor(() => expect(fetchNetworkMarkers).toHaveBeenCalledTimes(2));
+  });
+
+  it('refetches a contained zoom-in when the last result was EMPTY', async () => {
+    // The stranded-map case: a world-zoom fetch answered `total: 0` (the
+    // server's >180° bbox resolved to the complement of itself), so the held
+    // padded bbox covered every subsequent viewport and, being untruncated,
+    // suppressed every refetch — the map stayed blank until a page reload.
+    vi.mocked(fetchNetworkMarkers).mockResolvedValue({
+      meta: { total: 0, limit: 5000, offset: 0, partial: false, unavailable_instances: [] },
+      markers: [],
     });
 
     const { result, rerender } = renderHook(
