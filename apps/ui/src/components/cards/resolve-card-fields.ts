@@ -1,5 +1,6 @@
 import type { RJSFSchema } from '@rjsf/utils';
 import type { DotCardConfig } from '@/engine/types';
+import { isUriField } from '@dpg/schemas/uri_fields';
 
 /**
  * A single resolved card row. `isEmpty` is true when the item has no value for
@@ -11,6 +12,8 @@ export interface CardRow {
   label: string;
   value: unknown;
   type?: string;
+  /** Field is flagged `"x-uri": true` in network.json — render as a hyperlink. */
+  isUri: boolean;
   isEmpty: boolean;
 }
 
@@ -110,6 +113,7 @@ function makeRow(
     label: prop?.title ?? humaniseFieldKey(key),
     value,
     type: prop?.type as string | undefined,
+    isUri: isUriField(prop),
     isEmpty: isEmptyValue(value),
   };
 }
