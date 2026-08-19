@@ -42,6 +42,16 @@ export const AuthSecretsSchema = z.object({
   // Allowed login identifier channels, comma-separated (email / phone).
   // Parsed by parseLoginChannels(). Default: both.
   LOGIN_CHANNELS: z.string().default('phone,email'),
+  // Self-signup abuse ceiling (fixed window, counted in Redis by
+  // services/auth/self_signup.ts). Previously hardcoded, which made a legitimate
+  // onboarding retry indistinguishable from abuse and un-tunable per deployment:
+  // a field worker re-attempting the same identifier hits SIGNUP_RATE_LIMITED and
+  // the only remedy was deleting the `signup:id:<identifier>` Redis key by hand.
+  // Defaults reproduce the previous constants exactly, so behaviour is unchanged
+  // unless an operator opts in.
+  SIGNUP_RATE_LIMIT_WINDOW_SECONDS: z.coerce.number().int().positive().default(3600),
+  SIGNUP_MAX_PER_IDENTIFIER: z.coerce.number().int().positive().default(3),
+  SIGNUP_MAX_PER_IP: z.coerce.number().int().positive().default(10),
   // Identity provider. Single rollback lever:
   //   'betterauth' — better-auth only; every Keycloak path stays dormant.
   //   'keycloak'   — Keycloak only; better-auth is not involved in any step.
