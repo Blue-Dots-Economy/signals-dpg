@@ -513,10 +513,11 @@ export function SchemaForm({
         if (error.name !== 'pattern') return error;
         const field = (error.property ?? '').replace(/^\./, '').split('.')[0];
         if (!uriFieldKeys.has(field)) return error;
-        return {
-          ...error,
-          message: t('form.invalid_url', 'Enter a valid link, e.g. https://example.com'),
-        };
+        const message = t('form.invalid_url', 'Enter a valid link, e.g. https://example.com');
+        // `stack` is what RJSF's ErrorList template renders, so it has to be
+        // rewritten too — otherwise flipping `showErrorList` on would put the
+        // raw pattern back in front of the user.
+        return { ...error, message, stack: `${error.property} ${message}` };
       }),
     [uriFieldKeys, t],
   );

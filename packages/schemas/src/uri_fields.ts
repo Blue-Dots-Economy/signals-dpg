@@ -24,7 +24,11 @@ export const URI_FIELD_MARKER = 'x-uri' as const;
  * The one URL rule, enforced by the profile form AND the API.
  *
  *  - The scheme is optional: `example.com` is accepted and stored as typed;
- *    the card prefixes `https://` when it builds the href.
+ *    the card prefixes `https://` when it builds the href. When present it is
+ *    matched case-insensitively, so `HTTPS://example.com` is accepted — the
+ *    render-side href builder is case-insensitive too, and the two must agree.
+ *  - A query string or fragment may follow the host with no path in between:
+ *    `example.com?q=1` and `example.com#top` are accepted.
  *  - Surrounding whitespace is tolerated (users paste with a trailing space);
  *    the href builder trims.
  *  - The empty string is accepted — presence is `required[]`'s job, not the
@@ -38,7 +42,7 @@ export const URI_FIELD_MARKER = 'x-uri' as const;
  * `uri` format would reject the scheme-less input users actually type.
  */
 export const URL_PATTERN =
-  '^\\s*$|^\\s*(https?:\\/\\/)?([a-zA-Z0-9](?:[a-zA-Z0-9-]*[a-zA-Z0-9])?\\.)+[a-zA-Z]{2,}(:\\d{1,5})?(\\/[^\\s]*)?\\s*$';
+  '^\\s*$|^\\s*([hH][tT][tT][pP][sS]?:\\/\\/)?([a-zA-Z0-9](?:[a-zA-Z0-9-]*[a-zA-Z0-9])?\\.)+[a-zA-Z]{2,}(:\\d{1,5})?([\\/?#][^\\s]*)?\\s*$';
 
 function isPlainObject(value: unknown): value is JsonRecord {
   return typeof value === 'object' && value !== null && !Array.isArray(value);

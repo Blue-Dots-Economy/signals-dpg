@@ -77,13 +77,15 @@ One shared `URL_PATTERN`, injected as a JSON Schema `pattern` wherever
 `x-uri: true` is present and the author has not written their own `pattern`:
 
 ```
-^\s*$|^\s*(https?:\/\/)?([a-zA-Z0-9](?:[a-zA-Z0-9-]*[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}(:\d{1,5})?(\/[^\s]*)?\s*$
+^\s*$|^\s*([hH][tT][tT][pP][sS]?:\/\/)?([a-zA-Z0-9](?:[a-zA-Z0-9-]*[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}(:\d{1,5})?([\/?#][^\s]*)?\s*$
 ```
 
 | Input | Result |
 |---|---|
 | `example.com`, `www.example.com`, `my-site.org` | accept — scheme optional |
 | `https://example.com`, `http://a.co.uk/x?q=1#f`, `https://example.com:8443/x` | accept |
+| `https://example.com?q=1`, `https://example.com#top` | accept — a query or fragment may follow the host with no path in between |
+| `HTTPS://example.com`, `Http://example.com` | accept — the scheme is matched case-insensitively, matching the render-side href builder |
 | `  https://example.com  ` | accept — surrounding whitespace tolerated |
 | `""` | accept — presence is `required[]`'s job, not the pattern's |
 | `companyabc` | **reject** — no dot, cannot be a host |

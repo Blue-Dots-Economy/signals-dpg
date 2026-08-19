@@ -38,6 +38,14 @@ describe('toSafeHref', () => {
     expect(toSafeHref('   ')).toBeNull();
   });
 
+  // URL_PATTERN's port group is `(:\d{1,5})?`, so an out-of-range port passes
+  // form/API validation, but `new URL` rejects it. Accepted degrade: the value
+  // renders as plain text rather than a broken link.
+  it('returns null for an out-of-range port that the pattern accepts', () => {
+    expect(toSafeHref('example.com:99999')).toBeNull();
+    expect(toSafeHref('example.com:65536')).toBeNull();
+  });
+
   it('returns null for something that cannot be a URL', () => {
     expect(toSafeHref('companyabc')).toBeNull();
     expect(toSafeHref('foo bar')).toBeNull();

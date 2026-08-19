@@ -82,6 +82,35 @@ describe('SchemaForm with an x-uri field', () => {
     expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({ site: 'example.com' }));
   });
 
+  // The rewrite is scoped to `collectUriFieldKeys`. Every network.json already
+  // ships non-x-uri `pattern` constraints (10-digit contact phone, blue dot's
+  // job-title whitespace rule), whose errors now flow through the same
+  // transformErrors callback and must keep ajv's own wording.
+  it('leaves a non-x-uri pattern error with ajv’s original message', async () => {
+    const user = userEvent.setup();
+    const onSubmit = vi.fn();
+    render(
+      <SchemaForm
+        schema={
+          {
+            type: 'object',
+            properties: {
+              phone: { type: 'string', title: 'Phone', pattern: '^[0-9]{10}$' },
+              site: { type: 'string', title: 'Site', 'x-uri': true },
+            },
+          } as RJSFSchema
+        }
+        formData={{ phone: 'not-a-phone' }}
+        onSubmit={onSubmit}
+        submitButtonText="Save"
+      />,
+    );
+    await user.click(screen.getByRole('button', { name: 'Save' }));
+    expect(await screen.findByText(/must match pattern/i)).toBeInTheDocument();
+    expect(screen.queryByText(/Enter a valid link/i)).toBeNull();
+    expect(onSubmit).not.toHaveBeenCalled();
+  });
+
   it('uses the URL placeholder on the marked field', () => {
     render(<SchemaForm schema={schema} formData={{}} onSubmit={vi.fn()} submitButtonText="Save" />);
     expect(screen.getByLabelText(/Site/)).toHaveAttribute('placeholder', 'https://example.com');
