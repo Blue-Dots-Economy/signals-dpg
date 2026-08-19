@@ -69,10 +69,17 @@ differ from the network defaults.
 | Network | Brand slug | Logo folder |
 |---------|------------|-------------|
 | `blue_dot` | `upsdm` | `public/brand/blue-dot/upsdm/` |
+| `blue_dot` | `up-gzb` | `public/brand/blue-dot/up-gzb/` |
 | `orange_dot` | `onetac` | `public/brand/orange-dot/onetac/` |
 
 The base `blue_dot` / `orange_dot` folders are the standard (brand-agnostic)
 defaults for each network.
+
+`up-gzb` carries the **refreshed Blue Dots lockup** (uppercase wordmark, solid
+dot, "Seeded by EkStep") supplied for the Ghaziabad rollout, while the base
+`blue-dot/` folder keeps the current lockup every other deployment renders.
+Only the strapline lockup was supplied, so every variant here is that single
+artwork — see the note under Variant set.
 
 ## Variant set
 
@@ -86,6 +93,11 @@ defaults for each network.
 
 - **`logo.png` and `logo-light.png` are required** — the app has light/dark
   themes and auto-selects the light variant on dark backgrounds.
+- `up-gzb` ships the same strapline lockup for every variant: the designer
+  supplied only the with-strapline artwork (dark + light), and nothing in the
+  UI requests `withStrapline`/`onBrand` today — `portal-header.tsx` asks for
+  `default`/`light` only. Swap in a trimmed wordmark for `logo.png` if a
+  no-strapline version is ever supplied.
 - The others are recommended; omit `onBrand` if `logo.png` already reads well
   on the hero background.
 
