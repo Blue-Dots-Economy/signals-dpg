@@ -456,6 +456,23 @@ describe('KeycloakLoginPanel — existing vs new user chooser', () => {
     expect(screen.queryByText(/new here/i)).toBeNull();
   });
 
+  it('explains a gated instance without claiming the account was not found', async () => {
+    // The note renders on ARRIVAL, before any identifier is entered, so it
+    // must not assert a lookup result. The better-auth path says "User
+    // doesn't exist" only after one (login-page sets `signupBlocked` from
+    // `exists === false`); reusing that string here told every visitor their
+    // account was missing before they had typed anything.
+    keycloakEnabled = true;
+    signupAllowed = false;
+
+    renderAt(<LoginPage />);
+
+    // Matched on the explanatory clause, not "invite-only" alone — the
+    // auth footer already carries an "Invite-only · …" line.
+    expect(await screen.findByText(/created by an administrator/i)).toBeTruthy();
+    expect(screen.queryByText(/doesn't exist/i)).toBeNull();
+  });
+
   it('collects name, identifier, domain and birth year, then signs in', async () => {
     renderAt(<LoginPage />);
     await userEvent.click(await screen.findByText(/new here/i));

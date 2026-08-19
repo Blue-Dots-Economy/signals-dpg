@@ -529,9 +529,17 @@ export function KeycloakLoginPanel() {
           />
         )}
 
+        {/* Gated instance: explain why "Create an account" is missing. This
+            is shown on ARRIVAL, before any identifier is entered, so it must
+            not claim the account was looked up and not found — which is what
+            `auth.signup_disabled_message` says. That string is the
+            better-auth path's post-lookup result (login-page.tsx sets
+            `signupBlocked` only after `exists === false`), and reusing it
+            here told every visitor "User doesn't exist" before they had
+            typed anything. */}
         {!canSignup && (
           <p className="pt-1 text-sm text-muted-foreground">
-            {t('auth.signup_disabled_message')}
+            {t('auth.signup_invite_only')}
           </p>
         )}
       </div>
