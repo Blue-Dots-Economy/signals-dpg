@@ -22,6 +22,7 @@ import { ConsentModal } from '@/components/consent/consent-modal';
 import { U18GuardianFlow } from '@/components/consent/u18/u18-guardian-flow';
 import { useNetworkTheme } from '@/theme/theme-provider';
 import { getServedScope } from '@/lib/served-binding';
+import { setPendingWrongPortal } from '@/lib/pending-wrong-portal';
 import { evaluateDomainGate, resolveHeldDomains } from '@/lib/domain-gate';
 import { isGuardianConsentRequiredDomain } from '@/lib/guardian-consent';
 import { fetchNetworkConfig } from '@/lib/network-api';
@@ -260,7 +261,20 @@ export function OidcCallbackPage() {
           heldDomains = held;
           const gate = evaluateDomainGate(held, scope.domains);
           if (!gate.allow) {
+            // Park the reason BEFORE signing out. Under Keycloak `signOut()`
+            // hands off to `signoutRedirect()`, a full-page navigation to the
+            // end-session endpoint — this await never resolves, so the
+            // `navigate` below (and the router state it carries) never runs,
+            // and Keycloak returns the browser to the site root with a fresh
+            // document. Without this the user was correctly bounced but landed
+            // on the logged-out home page with no explanation. `WrongPortalToast`
+            // reads it back once the new document boots.
+            setPendingWrongPortal(gate.heldDomain);
             await signOut();
+            // Still reached when `signoutRedirect()` could not navigate (e.g.
+            // Keycloak unreachable, so `oidcLogout` falls back to a local
+            // `removeUser`). Both paths share the `wrong-portal-block` toast
+            // id, so the user sees one message, not two.
             navigate('/auth/login', {
               replace: true,
               state: { wrongPortalDomain: gate.heldDomain },

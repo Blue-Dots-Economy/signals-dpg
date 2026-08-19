@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { takePendingWrongPortal } from '@/lib/pending-wrong-portal';
 
 /**
  * The post-login completion steps the OTP flow performs in `otp-page.tsx` but
@@ -191,6 +192,30 @@ describe('G7 — wrong-portal domain gate', () => {
     // Nothing may be written for a user who is being turned away.
     expect(setUserDomains).not.toHaveBeenCalled();
     expect(getU18Status).not.toHaveBeenCalled();
+  });
+
+  /**
+   * The regression this file previously could not see: `signOut` is mocked as
+   * an instantly-resolving fn here, but under Keycloak it hands off to
+   * `signoutRedirect()` — a full-page navigation whose promise never settles.
+   * Everything after that await, including the `navigate` carrying
+   * `wrongPortalDomain`, never runs, and Keycloak returns the browser to the
+   * site root with a fresh document that has no router state. The user was
+   * bounced with no explanation.
+   *
+   * So the reason must be parked BEFORE `signOut` is awaited. Modelled here
+   * with a `signOut` that never resolves, which is what actually happens.
+   */
+  it('parks the reason before signing out, so a never-returning signOut still explains itself', async () => {
+    servedScope = { network: 'blue_dot', domains: ['provider'] };
+    resolveHeldDomains.mockResolvedValue(['seeker']);
+    signOut.mockImplementationOnce(() => new Promise<void>(() => {}));
+
+    renderPage();
+
+    await waitFor(() => expect(signOut).toHaveBeenCalled());
+    expect(navigate).not.toHaveBeenCalledWith('/auth/login', expect.anything());
+    expect(takePendingWrongPortal()).toBe('seeker');
   });
 
   it('lands a user who holds only served domains', async () => {
