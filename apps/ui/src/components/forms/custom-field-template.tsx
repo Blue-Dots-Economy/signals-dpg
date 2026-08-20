@@ -1,34 +1,8 @@
 import { type FieldTemplateProps, getTemplate, getUiOptions } from '@rjsf/utils';
 
 import { cn } from '@/lib/utils';
-import { SUBMIT_ATTEMPTED_KEY, TOUCHED_FIELDS_KEY } from './schema-form';
+import { shouldShowFieldErrors } from './field-error-visibility';
 
-/**
- * Whether this field's validation error should be shown yet.
- *
- * SchemaForm runs `liveValidate`, so AJV errors exist for every empty required
- * field from the first render. Painting those immediately would turn a pristine
- * form red, so an error surfaces only once the user has visited the field (blur)
- * or has tried to submit. After that it updates live, clearing as soon as the
- * value becomes valid.
- *
- * A container (object/array) counts as visited when any of its children is, so a
- * bad array entry still reddens the group it sits in.
- */
-function shouldShowErrors(
-  id: string,
-  formContext: unknown,
-): boolean {
-  const ctx = (formContext ?? {}) as Record<string, unknown>;
-  if (ctx[SUBMIT_ATTEMPTED_KEY] === true) return true;
-  const touched = ctx[TOUCHED_FIELDS_KEY];
-  if (!(touched instanceof Set)) return true; // no gate wired up: preserve prior behaviour
-  if (touched.has(id)) return true;
-  for (const touchedId of touched) {
-    if (typeof touchedId === 'string' && touchedId.startsWith(`${id}_`)) return true;
-  }
-  return false;
-}
 
 /**
  * FieldTemplate override of `@rjsf/shadcn`'s default. Identical layout, with one
@@ -67,7 +41,7 @@ export default function CustomFieldTemplate({
     uiOptions,
   );
   // Gate the error display (not the validation) on whether the user has been here.
-  const showErrors = shouldShowErrors(id, registry.formContext);
+  const showErrors = shouldShowFieldErrors(id, registry.formContext);
   const visibleRawErrors = showErrors ? rawErrors : [];
   if (hidden) {
     return <div className="hidden">{children}</div>;

@@ -10,6 +10,7 @@ import {
   PopoverTrigger,
 } from '@/components/ui/popover';
 import { cn } from '@/lib/utils';
+import { shouldShowFieldErrors } from '../field-error-visibility';
 
 export function DatePickerWidget({
   id,
@@ -18,7 +19,12 @@ export function DatePickerWidget({
   readonly,
   onChange,
   rawErrors,
+  registry,
 }: WidgetProps) {
+  // Errors are shown only once the user has visited this field (or tried to
+  // submit) — this widget renders its own error text, so it needs the same
+  // gate CustomFieldTemplate applies. See field-error-visibility.ts.
+  const visibleErrors = shouldShowFieldErrors(id, registry?.formContext) ? (rawErrors ?? []) : [];
   const [open, setOpen] = React.useState(false);
   const dateValue = value ? new Date(value as string) : undefined;
 
@@ -36,7 +42,7 @@ export function DatePickerWidget({
             className={cn(
               'w-full justify-start text-left font-normal',
               !dateValue && 'text-muted-foreground',
-              rawErrors && rawErrors.length > 0 && 'border-destructive'
+              visibleErrors.length > 0 && 'border-destructive'
             )}
           >
             <CalendarIcon className="mr-2 h-4 w-4" />
@@ -58,8 +64,8 @@ export function DatePickerWidget({
           />
         </PopoverContent>
       </Popover>
-      {rawErrors && rawErrors.length > 0 && (
-        <p className="text-sm text-destructive">{rawErrors.join(', ')}</p>
+      {visibleErrors.length > 0 && (
+        <p className="text-sm text-destructive">{visibleErrors.join(', ')}</p>
       )}
     </div>
   );

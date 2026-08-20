@@ -4,6 +4,7 @@ import { Input } from '@/components/ui/input';
 import { cn } from '@/lib/utils';
 import { getGeoProvider } from '@/lib/geo/provider';
 import type { GeoSuggestion } from '@/lib/geo/types';
+import { shouldShowFieldErrors } from '../field-error-visibility';
 
 interface LocationFormContext {
   onLocationsResolved?: (
@@ -57,9 +58,14 @@ export function MultiLocationAutocompleteWidget({
   onChange,
   schema,
   rawErrors,
+  registry,
   formContext,
   options,
 }: WidgetProps) {
+  // Errors are shown only once the user has visited this field (or tried to
+  // submit) — this widget renders its own error text, so it needs the same
+  // gate CustomFieldTemplate applies. See field-error-visibility.ts.
+  const visibleErrors = shouldShowFieldErrors(id, registry?.formContext) ? (rawErrors ?? []) : [];
   const ctx = (formContext ?? {}) as LocationFormContext;
   const isPrimary = (options as { isPrimaryLocation?: boolean } | undefined)?.isPrimaryLocation === true;
 
@@ -257,7 +263,7 @@ export function MultiLocationAutocompleteWidget({
                 disabled={isDisabled}
                 autoComplete="off"
                 placeholder="Search for a city…"
-                className={cn(rawErrors && rawErrors.length > 0 && 'border-destructive')}
+                className={cn(visibleErrors.length > 0 && 'border-destructive')}
                 onChange={(e) => handleInput(index, e.target.value)}
                 onFocus={() =>
                   updateSearch(index, { open: search.suggestions.length > 0 })
@@ -316,8 +322,8 @@ export function MultiLocationAutocompleteWidget({
         + Add city
       </button>
 
-      {rawErrors && rawErrors.length > 0 && (
-        <p className="text-sm text-destructive">{rawErrors.join(', ')}</p>
+      {visibleErrors.length > 0 && (
+        <p className="text-sm text-destructive">{visibleErrors.join(', ')}</p>
       )}
     </div>
   );

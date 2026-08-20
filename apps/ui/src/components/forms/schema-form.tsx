@@ -9,6 +9,7 @@ import { ReferenceAutocompleteWidget } from './custom-widgets/reference-autocomp
 import CustomFieldTemplate from './custom-field-template';
 import { resolveFormLayout, type FormLayout } from '@/theme/form-layouts';
 import { resolveVisibleSchema } from '@/lib/show-if';
+import { SUBMIT_ATTEMPTED_KEY, TOUCHED_FIELDS_KEY } from './field-error-visibility';
 
 interface RjsfError {
   property?: string;
@@ -476,9 +477,7 @@ export function getSchemaFormValidity(
   return { valid: errors.length === 0, missingRequired, invalidValues };
 }
 
-/** formContext keys SchemaForm adds for CustomFieldTemplate's error gating. */
-export const TOUCHED_FIELDS_KEY = '__touchedFieldIds';
-export const SUBMIT_ATTEMPTED_KEY = '__submitAttempted';
+
 
 export function SchemaForm({
   schema,
