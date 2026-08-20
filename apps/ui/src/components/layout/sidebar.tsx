@@ -206,9 +206,7 @@ export function AppSidebar({
                   </SidebarMenuItem>
                   {domains.map((domain) => {
                     const Icon = getDomainIcon(domain.id, selectedNetwork);
-                    const label = domain.id
-                      .replace(/_/g, ' ')
-                      .replace(/\b\w/g, (c) => c.toUpperCase());
+                    const label = formatDomainLabel(domain.id, domains);
                     return (
                       <SidebarMenuItem key={domain.id}>
                         <SidebarMenuButton
@@ -311,7 +309,7 @@ export function AppSidebar({
                                       isActiveProfile ? 'text-primary font-medium pl-2' : '',
                                     ].join(' ')}
                                   >
-                                    <span className="truncate">{title}</span>
+                                    <span className="truncate" title={title}>{title}</span>
                                     {/* Lifecycle chip lives INSIDE the button pill
                                         (Active / Paused / Draft) so it reads as part
                                         of the profile, not floating on the row. */}
