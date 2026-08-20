@@ -9,6 +9,8 @@ import { useMatchScore } from '@/hooks/use-match-score';
 import { MatchScoreModal } from '@/components/match-score/match-score-modal';
 import { ItemCard } from '@/components/cards/item-card';
 import { ShareProfileButton } from '@/components/share/share-profile-button';
+import { formatDomainLabel } from '@/lib/domain-icons';
+import { useNetworkConfig } from '@/hooks/use-network-config';
 
 interface PrecisionInfo {
   labelKey: string;
@@ -25,7 +27,6 @@ export function getPrecisionInfo(precision: string): PrecisionInfo {
   }
 }
 
-const titleCase = (s: string) => s.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
 
 interface MarkerPopupCardProps {
   marker: MapMarker;
@@ -63,6 +64,7 @@ export function MarkerPopupCard({
   const { t } = useTranslation();
   const precisionInfo = getPrecisionInfo(marker.precision);
   const [modalOpen, setModalOpen] = React.useState(false);
+  const { data: markerNetworkConfig } = useNetworkConfig(networkItem?.item_network ?? null);
 
   const canMatch = !!localItem && !!networkItem;
   const canConnect = actions.length > 0 && !!onConnect;
@@ -133,7 +135,7 @@ export function MarkerPopupCard({
         cardConfig={cardConfig}
         data={marker.data}
         title={marker.label}
-        domainLabel={marker.domain ? titleCase(marker.domain) : undefined}
+        domainLabel={marker.domain ? formatDomainLabel(marker.domain, markerNetworkConfig?.domains) : undefined}
         precisionLabel={t(precisionInfo.labelKey)}
         actions={actionButtons}
         headerAction={

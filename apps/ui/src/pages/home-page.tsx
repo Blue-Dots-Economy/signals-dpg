@@ -606,10 +606,15 @@ function computeShowNetworkSelector(servedScope: HomeServedScope, networkCount: 
 }
 
 /** Title-case a domain id for display (e.g. `student_profile` → `Student Profile`), or undefined when absent. */
-function formatDomainLabel(domainId: string | null | undefined): string | undefined {
-  return domainId
-    ? domainId.replaceAll('_', ' ').replaceAll(/\b\w/g, (c) => c.toUpperCase())
-    : undefined;
+function formatDomainLabel(
+  domainId: string | null | undefined,
+  domains?: ReadonlyArray<{ id: string; label?: string }> | null,
+): string | undefined {
+  if (!domainId) return undefined;
+  // Prefer the network.json display label (e.g. `provider` → "Service Provider").
+  const configured = domains?.find((d) => d.id === domainId)?.label?.trim();
+  if (configured) return configured;
+  return domainId.replaceAll('_', ' ').replaceAll(/\b\w/g, (c) => c.toUpperCase());
 }
 
 /** The dynamic actions to surface: the selected domain's, else the legacy single active action, else none. */
@@ -1794,7 +1799,7 @@ export function HomePage() {
 
   const showNetworkSelector = computeShowNetworkSelector(servedScope, allNetworks.length);
 
-  const currentDomainLabel = formatDomainLabel(selectedDomain);
+  const currentDomainLabel = formatDomainLabel(selectedDomain, network?.domains);
 
   // Get dynamic actions for the selected domain
   const actions = resolveDomainActions(selectedDomain, getActionsForDomain, activeAction);
@@ -2003,7 +2008,7 @@ export function HomePage() {
   // With a single browseable domain there's no "All" — the header names that
   // one domain (derived from visibleDomains, so it's generic, not per-network).
   const headerDomain = resolveHeaderDomain(selectedDomain, visibleDomains);
-  const contentTitle = formatDomainLabel(headerDomain) ?? t('home.browse_all');
+  const contentTitle = formatDomainLabel(headerDomain, visibleDomains) ?? t('home.browse_all');
   const contentDescription = resolveHeaderDescription(headerDomain, visibleDomains);
   // Task 7 (#203 §5.2 cleanup): re-sourced from the list totals — keyed on
   // `selectedDomain` (which paged feed is actually driving the list), not
@@ -2374,9 +2379,11 @@ export function HomePage() {
                     ? (Object.values(domain.item_schemas)[0] as import('@rjsf/utils').RJSFSchema)
                     : undefined;
                   const domainActions = getActionsForDomain(domain.id);
-                  const domainLabel = domain.id
-                    .replace(/_/g, ' ')
-                    .replace(/\b\w/g, (c) => c.toUpperCase());
+                  // Prefer the network.json display label (e.g. id `provider`
+                  // shown as "Service Provider"); else title-case the id.
+                  const domainLabel =
+                    domain.label?.trim() ||
+                    domain.id.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
                   return (filteredAllDomainItems[domain.id] ?? []).map((item) => ({
                     item,
                     schema: domainSchema,

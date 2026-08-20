@@ -9,6 +9,8 @@ interface ActionModalHeaderProps {
   description?: string;
   fromDomain?: string;
   toDomain?: string;
+  /** Network domains config — enables display labels (e.g. `provider` → "Service Provider"). */
+  domains?: ReadonlyArray<{ id: string; label?: string }> | null;
   className?: string;
 }
 
@@ -21,6 +23,7 @@ export function ActionModalHeader({
   description,
   fromDomain,
   toDomain,
+  domains,
   className,
 }: ActionModalHeaderProps) {
   const display = getActionDisplay(actionKey);
@@ -71,7 +74,7 @@ export function ActionModalHeader({
             {fromDomain && (
               <span className="inline-flex items-center gap-1.5 rounded-full bg-white/15 px-2.5 py-1 backdrop-blur-sm ring-1 ring-white/20">
                 <FromIcon className="h-3.5 w-3.5 text-white" />
-                <span className="text-xs font-semibold text-white">{formatDomainLabel(fromDomain)}</span>
+                <span className="text-xs font-semibold text-white">{formatDomainLabel(fromDomain, domains)}</span>
               </span>
             )}
             {fromDomain && toDomain && (
@@ -80,7 +83,7 @@ export function ActionModalHeader({
             {toDomain && (
               <span className="inline-flex items-center gap-1.5 rounded-full bg-white/15 px-2.5 py-1 backdrop-blur-sm ring-1 ring-white/20">
                 <ToIcon className="h-3.5 w-3.5 text-white" />
-                <span className="text-xs font-semibold text-white">{formatDomainLabel(toDomain)}</span>
+                <span className="text-xs font-semibold text-white">{formatDomainLabel(toDomain, domains)}</span>
               </span>
             )}
           </div>

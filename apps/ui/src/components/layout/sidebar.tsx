@@ -51,7 +51,14 @@ function findTitleField(schema: RJSFSchema): string | null {
   return Object.keys(schema.properties)[0] ?? null;
 }
 
-function getDomainLabel(domainId: string): string {
+function getDomainLabel(
+  domainId: string,
+  domains?: readonly DotNetworkDomain[],
+): string {
+  // Prefer the network.json display label when present (e.g. id `provider`
+  // shown as "Service Provider"); otherwise fall back to the title-cased id.
+  const configured = domains?.find((d) => d.id === domainId)?.label?.trim();
+  if (configured) return configured;
   return domainId
     .split('_')
     .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
@@ -252,7 +259,7 @@ export function AppSidebar({
                 {domainKeys.map((domainId) => {
                   const profiles = profilesByDomain[domainId];
                   const Icon = getDomainIcon(domainId, selectedNetwork);
-                  const label = getDomainLabel(domainId);
+                  const label = getDomainLabel(domainId, domains);
                   // A single domain group (always the case in a domain-bound
                   // portal) needs no accordion header — show its profiles
                   // directly, always expanded.
