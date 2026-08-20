@@ -84,9 +84,12 @@ vi.mock('@/utils/action_event_runtime', async () => {
   return {
     ...actual,
     isCurrentInstanceItem: vi.fn(() => true),
-    fetchLocalItemSnapshot: vi.fn(async () => ({
-      created_by: 'usr_provider',
-      item_id: '22222222-2222-4222-8222-222222222222',
+    // Distinct owners per item so the self-action guard doesn't trip (source
+    // seeker vs target provider — a real cross-owner action).
+    fetchLocalItemSnapshot: vi.fn(async (_db: unknown, item: { item_id: string }) => ({
+      created_by:
+        item.item_id === '11111111-1111-4111-8111-111111111111' ? 'usr_seeker' : 'usr_provider',
+      item_id: item.item_id,
       item_locations: [],
       lifecycle_status: 'live',
     })),

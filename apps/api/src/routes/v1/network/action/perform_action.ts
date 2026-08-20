@@ -209,6 +209,22 @@ export const perform_network_action_handler = async (
     }
   }
 
+  // Self-action guard: you cannot perform an action on your own profile. The UI
+  // filters the viewer's own pins from the map/list, but the API is the control
+  // — a crafted request (or a UI gap) must still be rejected here. Same item is
+  // unambiguously self; otherwise compare owners, preferring the DB-resolved
+  // source owner when the source is local over the caller-asserted one.
+  const sourceOwner = sourceItemSnapshot?.created_by ?? body.source_item_owner ?? null;
+  const isSelfAction =
+    body.source_item.item_id === body.target_item.item_id ||
+    (sourceOwner !== null && sourceOwner === targetItemSnapshot.created_by);
+  if (isSelfAction) {
+    return reply.code(400).send({
+      error: 'SELF_ACTION_NOT_ALLOWED',
+      message: 'You cannot perform this action on your own profile.',
+    });
+  }
+
   try {
     await ensureActionPartition(
       db,
