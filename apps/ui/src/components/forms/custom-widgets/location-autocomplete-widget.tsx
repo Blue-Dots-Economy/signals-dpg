@@ -4,7 +4,6 @@ import { Input } from '@/components/ui/input';
 import { cn } from '@/lib/utils';
 import { getGeoProvider } from '@/lib/geo/provider';
 import type { GeoComponents, GeoSuggestion } from '@/lib/geo/types';
-import { shouldShowFieldErrors } from '../field-error-visibility';
 
 /** A selected place reported to the form: the exact point plus the address
  * components, so the page can coarsen a private field to its city centroid
@@ -26,14 +25,9 @@ export function LocationAutocompleteWidget({
   readonly,
   onChange,
   rawErrors,
-  registry,
   formContext,
   options,
 }: WidgetProps) {
-  // Errors are shown only once the user has visited this field (or tried to
-  // submit) — this widget renders its own error text, so it needs the same
-  // gate CustomFieldTemplate applies. See field-error-visibility.ts.
-  const visibleErrors = shouldShowFieldErrors(id, registry?.formContext) ? (rawErrors ?? []) : [];
   const ctx = (formContext ?? {}) as LocationFormContext;
   const isPrimary = (options as { isPrimaryLocation?: boolean } | undefined)?.isPrimaryLocation === true;
   const [text, setText] = React.useState<string>((value as string) ?? '');
@@ -137,7 +131,7 @@ export function LocationAutocompleteWidget({
         value={text}
         disabled={disabled || readonly}
         autoComplete="off"
-        className={cn(visibleErrors.length > 0 && 'border-destructive')}
+        className={cn(rawErrors && rawErrors.length > 0 && 'border-destructive')}
         onChange={(e) => handleInput(e.target.value)}
         onFocus={() => setOpen(suggestions.length > 0)}
         onBlur={() => {
@@ -170,8 +164,8 @@ export function LocationAutocompleteWidget({
           ))}
         </ul>
       )}
-      {visibleErrors.length > 0 && (
-        <p className="text-sm text-destructive">{visibleErrors.join(', ')}</p>
+      {rawErrors && rawErrors.length > 0 && (
+        <p className="text-sm text-destructive">{rawErrors.join(', ')}</p>
       )}
     </div>
   );

@@ -111,6 +111,28 @@ describe('SchemaForm inline errors are gated on blur', () => {
     expect(screen.queryByText(/must have required property/i)).toBeNull();
   });
 
+  it('does not mark other required fields as errored when one field is typed in', async () => {
+    // The reported bug: typing a single letter in Name reddened Age, Gender and
+    // Mobile — fields the user had never been near. RJSF puts `rjsf-field-error`
+    // on a field it is displaying as invalid, and the theme's own input template
+    // reddens the border off that same signal, so this asserts the border too.
+    const user = userEvent.setup();
+    const wide = {
+      type: 'object',
+      required: ['name', 'age', 'phone'],
+      properties: {
+        name: { type: 'string', title: 'Name' },
+        age: { type: 'integer', title: 'Age' },
+        phone: { type: 'string', title: 'Phone', pattern: '^[0-9]{10}$' },
+      },
+    } as RJSFSchema;
+    const { container } = render(
+      <SchemaForm schema={wide} formData={{}} onSubmit={vi.fn()} submitButtonText="Save" />,
+    );
+    await user.type(screen.getByLabelText(/Name/), 's');
+    expect(container.querySelectorAll('.rjsf-field-error')).toHaveLength(0);
+  });
+
   it('reveals every error on a submit attempt, even for untouched fields', async () => {
     const user = userEvent.setup();
     render(<SchemaForm schema={schema} formData={{}} onSubmit={vi.fn()} submitButtonText="Save" />);

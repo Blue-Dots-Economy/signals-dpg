@@ -17,7 +17,7 @@ import { ReferenceAutocompleteWidget } from './custom-widgets/reference-autocomp
 import CustomFieldTemplate from './custom-field-template';
 import { resolveFormLayout, type FormLayout } from '@/theme/form-layouts';
 import { resolveVisibleSchema } from '@/lib/show-if';
-import { SUBMIT_ATTEMPTED_KEY, TOUCHED_FIELDS_KEY } from './field-error-visibility';
+import { filterErrorSchemaToVisited } from './field-error-visibility';
 
 interface RjsfError {
   property?: string;
@@ -598,10 +598,8 @@ export function SchemaForm({
   }, [rjsfSchema, data]);
 
   // Which fields the user has actually visited, by RJSF field id ("root_phone").
-  // `liveValidate` below means AJV errors exist for every empty required field
-  // from the first render; showing them all immediately would paint a pristine
-  // form red. CustomFieldTemplate therefore renders an error only for a field in
-  // this set — or for every field once a submit has been attempted.
+  // Only these fields' errors are handed to RJSF (see `extraErrors` below), so an
+  // untouched field is never told it is invalid and nothing renders it red.
   const [touchedFieldIds, setTouchedFieldIds] = React.useState<ReadonlySet<string>>(
     () => new Set(),
   );
@@ -623,15 +621,18 @@ export function SchemaForm({
     setSubmitAttempted(false);
   }, [schema]);
 
-  // The caller's formContext is spread first so these keys cannot be clobbered.
-  const mergedFormContext = React.useMemo(
-    () => ({
-      ...(formContext ?? {}),
-      [TOUCHED_FIELDS_KEY]: touchedFieldIds,
-      [SUBMIT_ATTEMPTED_KEY]: submitAttempted,
-    }),
-    [formContext, touchedFieldIds, submitAttempted],
-  );
+  // Display errors, fed to RJSF as `extraErrors`. `liveValidate` is deliberately
+  // OFF: it hands an error to every invalid field at once, and the theme's own
+  // input/select templates redden their borders straight off `rawErrors`, so a
+  // pristine form lit up as soon as anything was typed. Supplying only the
+  // visited fields' errors means an untouched field never receives one, so every
+  // renderer stays quiet without knowing about the rule. RJSF still validates
+  // natively on submit, so this cannot let invalid data through.
+  const extraErrors = React.useMemo(() => {
+    const { errorSchema } = validator.validateFormData(data, rjsfSchema);
+    return filterErrorSchemaToVisited(errorSchema ?? {}, touchedFieldIds, submitAttempted);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rjsfSchema, data, touchedFieldIds, submitAttempted]);
 
   // Section layout is schema-driven first: an `x-form-layout` block on the item
   // schema (network.json) is the single source of truth, so field add/remove/
@@ -663,7 +664,7 @@ export function SchemaForm({
         widgets={widgets}
         templates={templates}
         disabled={disabled}
-        formContext={mergedFormContext}
+        formContext={formContext}
         onChange={({ formData: next }) => {
           const nextData = resolveVisibleSchema(baseSchema, (next ?? {}) as Record<string, unknown>).formData;
           setData(nextData);
@@ -682,11 +683,8 @@ export function SchemaForm({
           focusErrorField(containerRef.current, error as RjsfError)
         }
         showErrorList={false}
-        // Validate continuously so a field's error clears the moment its value
-        // becomes valid, instead of only on submit. Which errors are DISPLAYED is
-        // gated by the touched set (see mergedFormContext) — validation itself is
-        // untouched, so a blocked submit stays blocked.
-        liveValidate
+        extraErrors={extraErrors}
+        liveValidate={false}
         noHtml5Validate
         omitExtraData
         liveOmit

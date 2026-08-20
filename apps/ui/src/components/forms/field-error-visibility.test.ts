@@ -1,42 +1,63 @@
 import { describe, it, expect } from 'vitest';
-import {
-  shouldShowFieldErrors,
-  SUBMIT_ATTEMPTED_KEY,
-  TOUCHED_FIELDS_KEY,
-} from './field-error-visibility';
+import type { ErrorSchema } from '@rjsf/utils';
+import { filterErrorSchemaToVisited, isFieldVisited } from './field-error-visibility';
 
-const ctx = (touched: string[], submitAttempted = false) => ({
-  [TOUCHED_FIELDS_KEY]: new Set(touched),
-  [SUBMIT_ATTEMPTED_KEY]: submitAttempted,
+const touched = (...ids: string[]) => new Set(ids);
+
+describe('isFieldVisited', () => {
+  it('is false for a field the user has never been to', () => {
+    expect(isFieldVisited('website', touched())).toBe(false);
+    expect(isFieldVisited('website', touched('root_email'))).toBe(false);
+  });
+
+  it('is true for the visited field itself', () => {
+    expect(isFieldVisited('website', touched('root_website'))).toBe(true);
+  });
+
+  it('counts a container as visited when one of its children is', () => {
+    expect(isFieldVisited('reference_links', touched('root_reference_links_0'))).toBe(true);
+  });
+
+  it('does not match on a mere name prefix', () => {
+    // `web` and `website` are different fields; only the `_` child separator counts.
+    expect(isFieldVisited('web', touched('root_website'))).toBe(false);
+  });
 });
 
-describe('shouldShowFieldErrors', () => {
-  it('hides an untouched field and shows a touched one', () => {
-    expect(shouldShowFieldErrors('root_website', ctx([]))).toBe(false);
-    expect(shouldShowFieldErrors('root_website', ctx(['root_website']))).toBe(true);
+describe('filterErrorSchemaToVisited', () => {
+  const full = {
+    name: { __errors: ["must have required property 'name'"] },
+    age: { __errors: ["must have required property 'age'"] },
+    website: { __errors: ['must match pattern "…"'] },
+  } as unknown as ErrorSchema;
+
+  it('hands back nothing for a pristine form', () => {
+    // The reported bug: typing one letter reddened every required field, because
+    // every invalid field had an error to render. An untouched field must get none.
+    expect(filterErrorSchemaToVisited(full, touched(), false)).toEqual({});
   });
 
-  it('does not leak between sibling fields', () => {
-    // The bug this guards: any blur anywhere used to reveal every field's error.
-    expect(shouldShowFieldErrors('root_address', ctx(['root_email']))).toBe(false);
+  it('passes through only the visited field, not its siblings', () => {
+    expect(filterErrorSchemaToVisited(full, touched('root_website'), false)).toEqual({
+      website: { __errors: ['must match pattern "…"'] },
+    });
   });
 
-  it('treats a container as visited when one of its children is', () => {
-    expect(shouldShowFieldErrors('root_reference_links', ctx(['root_reference_links_0']))).toBe(true);
+  it('supplies nothing once a submit has been attempted, so messages are not doubled', () => {
+    // RJSF validates natively on submit and renders every field's error itself;
+    // adding ours on top printed each message twice.
+    expect(filterErrorSchemaToVisited(full, touched(), true)).toEqual({});
   });
 
-  it('does not treat a field as visited on a mere name-prefix collision', () => {
-    // `root_web` is a different field from `root_website`; only the `_` child
-    // separator counts as containment.
-    expect(shouldShowFieldErrors('root_web', ctx(['root_website']))).toBe(false);
+  it('drops root-level __errors while filtering', () => {
+    const withRoot = { __errors: ['form is wrong'], website: { __errors: ['bad'] } } as unknown as ErrorSchema;
+    expect(filterErrorSchemaToVisited(withRoot, touched('root_website'), false)).toEqual({
+      website: { __errors: ['bad'] },
+    });
   });
 
-  it('shows everything once a submit has been attempted', () => {
-    expect(shouldShowFieldErrors('root_anything', ctx([], true))).toBe(true);
-  });
-
-  it('shows errors when no gate is present, so widgets used outside SchemaForm are unaffected', () => {
-    expect(shouldShowFieldErrors('root_website', undefined)).toBe(true);
-    expect(shouldShowFieldErrors('root_website', {})).toBe(true);
+  it('supplies nothing after a submit attempt even for root-level errors', () => {
+    const withRoot = { __errors: ['form is wrong'] } as unknown as ErrorSchema;
+    expect(filterErrorSchemaToVisited(withRoot, touched(), true)).toEqual({});
   });
 });
