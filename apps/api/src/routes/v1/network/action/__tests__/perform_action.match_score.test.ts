@@ -245,6 +245,26 @@ describe('POST /api/v1/network/action/perform — match_score compute (#439)', (
     expect(res.json()).toMatchObject({ error: 'SELF_ACTION_NOT_ALLOWED' });
   });
 
+  it('rejects a self-action across two different items of the same owner (owner-equality branch)', async () => {
+    // Different item ids, but both resolve to the same DB owner: the snapshot
+    // mock returns `usr_provider` for any id other than the seeker source, so a
+    // third source id shares the target's owner. Exercises the owner branch
+    // (not the same-item shortcut) — the two-profiles-of-one-user case.
+    const res = await buildApp().inject({
+      method: 'POST',
+      url: '/action/perform',
+      payload: {
+        ...VALID_BODY,
+        source_item: {
+          ...VALID_BODY.source_item,
+          item_id: '33333333-3333-4333-8333-333333333333',
+        },
+      },
+    });
+    expect(res.statusCode).toBe(400);
+    expect(res.json()).toMatchObject({ error: 'SELF_ACTION_NOT_ALLOWED' });
+  });
+
   it('does not update the row when the computed score is null', async () => {
     computeActionMatchScoreSpy.mockResolvedValueOnce(null);
 
