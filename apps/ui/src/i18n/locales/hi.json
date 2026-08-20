@@ -382,6 +382,7 @@
   "profile.btn_create": "प्रोफ़ाइल बनाएँ",
   "profile.btn_save_publish": "सहेजें और प्रकाशित करें",
   "profile.fill_required_hint": "जारी रखने के लिए कृपया सभी आवश्यक फ़ील्ड भरें।",
+  "profile.fix_invalid_hint": "कुछ प्रविष्टियाँ अभी मान्य नहीं हैं — चिह्नित फ़ील्ड जाँचें।",
   "form.invalid_url": "एक मान्य लिंक दर्ज करें, जैसे https://example.com",
   "consent.title_gate": "जारी रखने के लिए समीक्षा करें और स्वीकार करें",
   "consent.title_view": "गोपनीयता नीति और शर्तें",

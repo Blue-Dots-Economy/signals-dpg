@@ -1,6 +1,8 @@
 import { type FieldTemplateProps, getTemplate, getUiOptions } from '@rjsf/utils';
 
 import { cn } from '@/lib/utils';
+import { shouldShowFieldErrors } from './field-error-visibility';
+
 
 /**
  * FieldTemplate override of `@rjsf/shadcn`'s default. Identical layout, with one
@@ -38,6 +40,9 @@ export default function CustomFieldTemplate({
     registry,
     uiOptions,
   );
+  // Gate the error display (not the validation) on whether the user has been here.
+  const showErrors = shouldShowFieldErrors(id, registry.formContext);
+  const visibleRawErrors = showErrors ? rawErrors : [];
   if (hidden) {
     return <div className="hidden">{children}</div>;
   }
@@ -65,7 +70,7 @@ export default function CustomFieldTemplate({
           <label
             className={cn(
               'text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70',
-              { ' text-destructive': rawErrors.length > 0 },
+              { ' text-destructive': visibleRawErrors.length > 0 },
             )}
             htmlFor={id}
           >
@@ -84,13 +89,13 @@ export default function CustomFieldTemplate({
         {displayLabel && rawDescription && !isCheckbox && (
           <span
             className={cn('text-xs font-medium text-muted-foreground', {
-              ' text-destructive': rawErrors.length > 0,
+              ' text-destructive': visibleRawErrors.length > 0,
             })}
           >
             {description}
           </span>
         )}
-        {errors}
+        {showErrors ? errors : null}
         {help}
       </div>
     </WrapIfAdditionalTemplate>

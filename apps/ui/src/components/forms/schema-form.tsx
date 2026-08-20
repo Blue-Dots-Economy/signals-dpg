@@ -17,6 +17,7 @@ import { ReferenceAutocompleteWidget } from './custom-widgets/reference-autocomp
 import CustomFieldTemplate from './custom-field-template';
 import { resolveFormLayout, type FormLayout } from '@/theme/form-layouts';
 import { resolveVisibleSchema } from '@/lib/show-if';
+import { SUBMIT_ATTEMPTED_KEY, TOUCHED_FIELDS_KEY } from './field-error-visibility';
 
 interface RjsfError {
   property?: string;
@@ -100,7 +101,8 @@ interface SchemaFormProps {
    * Called with the AJV validity of the current form data whenever data changes
    * and once on mount. Only computed when this prop is provided.
    */
-  onValidityChange?: (isValid: boolean) => void;
+  /** `detail` says WHY it is invalid; the boolean stays first for existing callers. */
+  onValidityChange?: (isValid: boolean, detail?: SchemaFormValidity) => void;
   domainId?: string;
   /**
    * Network id, used with domainId to resolve the section layout. Domain ids
@@ -447,6 +449,60 @@ export function isSchemaFormValid(
   return v.isValid(schema, data, schema);
 }
 
+/** Why a form is invalid, so callers can say which of the two it is. */
+export interface SchemaFormValidity {
+  valid: boolean;
+  /** Required fields the user has not filled in. */
+  missingRequired: number;
+  /** Fields that hold a value which breaks its own rule (pattern, format, …). */
+  invalidValues: number;
+}
+
+/** Resolve an RJSF error `property` (".a", ".a.0") against the form data. */
+function valueAtProperty(data: Record<string, unknown>, property: string | undefined): unknown {
+  if (!property) return undefined;
+  const segments = property.replace(/\[(\w+)\]/g, '.$1').split('.').filter(Boolean);
+  let cursor: unknown = data;
+  for (const segment of segments) {
+    if (cursor === null || typeof cursor !== 'object') return undefined;
+    cursor = (cursor as Record<string, unknown>)[segment];
+  }
+  return cursor;
+}
+
+function isBlank(value: unknown): boolean {
+  if (value === null || value === undefined) return true;
+  if (typeof value === 'string') return value.trim().length === 0;
+  if (Array.isArray(value)) return value.length === 0;
+  return false;
+}
+
+/**
+ * Classify a form's AJV errors into "you have not filled this in" versus "what
+ * you typed is not valid". A single boolean cannot tell those apart, and the two
+ * need different copy — telling someone to "fill in all the required fields"
+ * when the field IS filled (just malformed) sends them looking in the wrong
+ * place. A blank-but-present value counts as missing rather than invalid: it
+ * trips `minLength` in AJV terms, but to the user it is simply not filled in.
+ */
+export function getSchemaFormValidity(
+  v: typeof validator,
+  schema: RJSFSchema,
+  data: Record<string, unknown>,
+): SchemaFormValidity {
+  const { errors } = v.validateFormData(data, schema);
+  let missingRequired = 0;
+  let invalidValues = 0;
+  for (const error of errors) {
+    const blank = isBlank(valueAtProperty(data, error.property));
+    if (error.name === 'required' || blank) missingRequired += 1;
+    else invalidValues += 1;
+  }
+  return { valid: errors.length === 0, missingRequired, invalidValues };
+}
+
+
+
 export function SchemaForm({
   schema,
   formData,
@@ -532,11 +588,50 @@ export function SchemaForm({
 
   // Report AJV validity to the consumer once on mount and whenever data or schema
   // changes. Depends only on [rjsfSchema, data] — not on the callback ref — so it
-  // never re-fires due to an unstable callback identity.
+  // never re-fires due to an unstable callback identity. The second argument says
+  // WHY it is invalid; the boolean stays first so existing callers are unaffected.
   React.useEffect(() => {
     const cb = onValidityChangeRef.current;
-    if (cb) cb(isSchemaFormValid(validator, rjsfSchema, data));
+    if (!cb) return;
+    const detail = getSchemaFormValidity(validator, rjsfSchema, data);
+    cb(detail.valid, detail);
   }, [rjsfSchema, data]);
+
+  // Which fields the user has actually visited, by RJSF field id ("root_phone").
+  // `liveValidate` below means AJV errors exist for every empty required field
+  // from the first render; showing them all immediately would paint a pristine
+  // form red. CustomFieldTemplate therefore renders an error only for a field in
+  // this set — or for every field once a submit has been attempted.
+  const [touchedFieldIds, setTouchedFieldIds] = React.useState<ReadonlySet<string>>(
+    () => new Set(),
+  );
+  const [submitAttempted, setSubmitAttempted] = React.useState(false);
+
+  const markTouched = React.useCallback((fieldId: string) => {
+    setTouchedFieldIds((prev) => {
+      if (prev.has(fieldId)) return prev;
+      const next = new Set(prev);
+      next.add(fieldId);
+      return next;
+    });
+  }, []);
+
+  // Re-arm on a schema swap (edit-mode load, or a different domain's form) so
+  // one form's touched set never suppresses or leaks into another's.
+  React.useEffect(() => {
+    setTouchedFieldIds(new Set());
+    setSubmitAttempted(false);
+  }, [schema]);
+
+  // The caller's formContext is spread first so these keys cannot be clobbered.
+  const mergedFormContext = React.useMemo(
+    () => ({
+      ...(formContext ?? {}),
+      [TOUCHED_FIELDS_KEY]: touchedFieldIds,
+      [SUBMIT_ATTEMPTED_KEY]: submitAttempted,
+    }),
+    [formContext, touchedFieldIds, submitAttempted],
+  );
 
   // Section layout is schema-driven first: an `x-form-layout` block on the item
   // schema (network.json) is the single source of truth, so field add/remove/
@@ -568,21 +663,30 @@ export function SchemaForm({
         widgets={widgets}
         templates={templates}
         disabled={disabled}
-        formContext={formContext}
+        formContext={mergedFormContext}
         onChange={({ formData: next }) => {
           const nextData = resolveVisibleSchema(baseSchema, (next ?? {}) as Record<string, unknown>).formData;
           setData(nextData);
         }}
+        onBlur={(fieldId) => markTouched(fieldId)}
         onSubmit={({ formData: submitted }) => {
+          setSubmitAttempted(true);
           if (submitted) onSubmit(submitted as Record<string, unknown>);
         }}
-        onError={(errors) => onError?.(errors)}
+        onError={(errors) => {
+          setSubmitAttempted(true);
+          onError?.(errors);
+        }}
         transformErrors={transformErrors}
         focusOnFirstError={(error) =>
           focusErrorField(containerRef.current, error as RjsfError)
         }
         showErrorList={false}
-        liveValidate={false}
+        // Validate continuously so a field's error clears the moment its value
+        // becomes valid, instead of only on submit. Which errors are DISPLAYED is
+        // gated by the touched set (see mergedFormContext) — validation itself is
+        // untouched, so a blocked submit stays blocked.
+        liveValidate
         noHtml5Validate
         omitExtraData
         liveOmit

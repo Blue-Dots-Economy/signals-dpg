@@ -3,6 +3,7 @@ import type { WidgetProps } from '@rjsf/utils';
 import { Input } from '@/components/ui/input';
 import { cn } from '@/lib/utils';
 import { getRuntimeEnv } from '@/lib/runtime-env';
+import { shouldShowFieldErrors } from '../field-error-visibility';
 
 /**
  * A schema-driven autocomplete backed by an EXTERNAL reference dataset rather
@@ -145,9 +146,14 @@ export function ReferenceAutocompleteWidget({
   readonly,
   onChange,
   rawErrors,
+  registry,
   placeholder,
   options,
 }: WidgetProps) {
+  // Errors are shown only once the user has visited this field (or tried to
+  // submit) — this widget renders its own error text, so it needs the same
+  // gate CustomFieldTemplate applies. See field-error-visibility.ts.
+  const visibleErrors = shouldShowFieldErrors(id, registry?.formContext) ? (rawErrors ?? []) : [];
   const opts = options as
     | { source?: string; subtitleFields?: string[] }
     | undefined;
@@ -231,7 +237,7 @@ export function ReferenceAutocompleteWidget({
         disabled={disabled || readonly}
         autoComplete="off"
         placeholder={placeholder}
-        className={cn(rawErrors && rawErrors.length > 0 && 'border-destructive')}
+        className={cn(visibleErrors.length > 0 && 'border-destructive')}
         onChange={(e) => handleInput(e.target.value)}
         onFocus={() => setOpen(suggestions.length > 0)}
         onBlur={() => {
@@ -262,8 +268,8 @@ export function ReferenceAutocompleteWidget({
           })}
         </ul>
       )}
-      {rawErrors && rawErrors.length > 0 && (
-        <p className="text-sm text-destructive">{rawErrors.join(', ')}</p>
+      {visibleErrors.length > 0 && (
+        <p className="text-sm text-destructive">{visibleErrors.join(', ')}</p>
       )}
     </div>
   );
