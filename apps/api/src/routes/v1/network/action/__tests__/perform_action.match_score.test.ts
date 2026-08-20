@@ -77,9 +77,13 @@ vi.mock('@/utils/action_event_runtime', async () => {
   return {
     ...actual,
     isCurrentInstanceItem: vi.fn(() => true),
-    fetchLocalItemSnapshot: vi.fn(async () => ({
-      created_by: 'usr_provider',
-      item_id: '22222222-2222-4222-8222-222222222222',
+    // Owner differs by item so the self-action guard (source owner === target
+    // owner) does not trip: the source (seeker) and target (provider) are held
+    // by different users, as in a real cross-domain action.
+    fetchLocalItemSnapshot: vi.fn(async (_db: unknown, item: { item_id: string }) => ({
+      created_by:
+        item.item_id === '11111111-1111-4111-8111-111111111111' ? 'usr_seeker' : 'usr_provider',
+      item_id: item.item_id,
       item_instance_url: BASE_URL,
       item_schema_url: 'https://schemas.test/job_posting_1.0.json',
       item_locations: [],
@@ -221,6 +225,24 @@ describe('POST /api/v1/network/action/perform — match_score compute (#439)', (
     expect(computeActionMatchScoreSpy).toHaveBeenCalledTimes(1);
     expect(updateSetSpy).toHaveBeenCalledWith({ match_score: 6.1 });
     expect(updateWhereSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it('rejects a self-action (source item === target item) with 400 SELF_ACTION_NOT_ALLOWED', async () => {
+    const res = await buildApp().inject({
+      method: 'POST',
+      url: '/action/perform',
+      // Acting on your own profile — source and target are the same item. The
+      // UI filters own pins from the map/list, but the API is the control.
+      payload: {
+        ...VALID_BODY,
+        source_item: {
+          ...VALID_BODY.source_item,
+          item_id: '22222222-2222-4222-8222-222222222222',
+        },
+      },
+    });
+    expect(res.statusCode).toBe(400);
+    expect(res.json()).toMatchObject({ error: 'SELF_ACTION_NOT_ALLOWED' });
   });
 
   it('does not update the row when the computed score is null', async () => {

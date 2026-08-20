@@ -1163,9 +1163,20 @@ export function HomePage() {
   // show (client-side membership check — every `Marker` carries `item_domain`).
   // On a single-domain tab the fetch above is already scoped to that domain, so
   // that multi-select (an "All"-tab control) does not apply.
+  // The viewer's own item ids across every domain — the map must never render
+  // the viewer's own pins. The list feed already drops them (`excludeOwnItems`),
+  // but the `/markers` path had no such filter, so an own profile showed on the
+  // map with a Connect button (you can't act on yourself). All domains, not just
+  // `currentDomain`, because the "All" map view spans domains.
+  const ownMapItemIds = React.useMemo(
+    () => new Set((myItems ?? []).map((it) => it.item_id)),
+    [myItems],
+  );
+
   const mapItems = React.useMemo(
     () =>
       mapMarkers.markers
+        .filter((m) => !ownMapItemIds.has(m.item_id))
         .filter(
           (m) =>
             selectedDomain != null ||
@@ -1177,7 +1188,7 @@ export function HomePage() {
           domain: m.item_domain,
           data: { item_locations: m.item_locations },
         })),
-    [selectedDomain, mapMarkers.markers, mapSelectedDomains],
+    [selectedDomain, mapMarkers.markers, mapSelectedDomains, ownMapItemIds],
   );
 
   const localProfileItemIds = React.useMemo(
