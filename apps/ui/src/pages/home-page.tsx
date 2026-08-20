@@ -40,7 +40,7 @@ import { performAction, performActionsBulk, type Item } from '@/lib/item-api';
 import { bulkFailureIndices, firstBulkError, BulkSingleError } from '@/lib/bulk';
 import { useCardSelection } from '@/hooks/use-card-selection';
 import { useEqualRowHeights } from '@/hooks/use-equal-row-heights';
-import { useNetworkConfigs, useResolvedNetwork } from '@/hooks/use-network-config';
+import { useNetworkConfigs, useResolvedNetwork, useNetworkConfig } from '@/hooks/use-network-config';
 import { SelectableCard } from '@/components/selection/selectable-card';
 import { BulkActionBar } from '@/components/selection/bulk-action-bar';
 import { ActionModal } from '@/components/actions/action-modal';
@@ -356,6 +356,7 @@ function MarkerDetailPopup({
   onItemResolved?: (item: Item) => void;
 }>) {
   const { t } = useTranslation();
+  const { data: popupNetworkConfig } = useNetworkConfig(networkId ?? null);
   // Marker ids are `${item_id}#${locationIndex}` — strip the suffix to look up the item.
   const baseItemId = marker.id.includes('#') ? marker.id.split('#')[0] : marker.id;
   // Fetch from the clicked marker's OWN id + domain (always present on the map
@@ -422,6 +423,7 @@ function MarkerDetailPopup({
       connectDisabledReason={connectDisabledReason}
       localItem={localItem}
       networkItem={item}
+      domains={popupNetworkConfig?.domains}
     />
   );
 }
