@@ -28,6 +28,7 @@ import { ActionAbortedError } from '@/lib/action-abort';
 import { isGuardianConsentRequiredDomain } from '@/lib/guardian-consent';
 import { getU18Status, type U18StatusResponse } from '@/lib/consent-api';
 import { apiConfig } from '@/lib/api-config';
+import { formatDomainLabel } from '@/lib/domain-icons';
 import { ActionHandler } from '@/components/actions/action-handler';
 import { ActionButton } from '@/components/cards/action-button';
 import { MatchScoreButton, MatchScoreModal } from '@/components/match-score';
@@ -45,9 +46,6 @@ const UUID_RE =
 const HERO_GRADIENT =
   'linear-gradient(135deg, var(--primary), color-mix(in srgb, var(--primary), white 32%))';
 
-function titleCaseDomain(id: string): string {
-  return id.replaceAll('_', ' ').replaceAll(/\b\w/g, (c) => c.toUpperCase());
-}
 
 /**
  * Lean top bar shared by every state on this page — no search / view-toggle /
@@ -549,7 +547,7 @@ export function PublicProfilePage() {
             <h1 className="text-3xl font-bold leading-tight text-foreground">{resolved.title}</h1>
             <div className="mt-2 flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
               <span className="inline-flex items-center rounded-full bg-primary/10 px-3 py-1 text-xs font-semibold text-primary">
-                {titleCaseDomain(domain!)}
+                {formatDomainLabel(domain!, net?.domains)}
               </span>
               {resolved.subtitle && <span>{resolved.subtitle}</span>}
             </div>

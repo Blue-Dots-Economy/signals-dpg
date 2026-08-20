@@ -46,6 +46,7 @@ import { BulkActionBar } from '@/components/selection/bulk-action-bar';
 import { ActionModal } from '@/components/actions/action-modal';
 import { CheckSquare } from 'lucide-react';
 import { getRuntimeEnv } from '@/lib/runtime-env';
+import { formatDomainLabel } from '@/lib/domain-icons';
 import { ACTION_CONSENT_SENTINEL, guardianOtpErrorOf, type PerformActionPayload } from '@/lib/action-api';
 import { ActionAbortedError } from '@/lib/action-abort';
 import { EmptyState } from '@/components/empty-state';
@@ -603,18 +604,6 @@ function noteLocationSource(resolvedLocationSource: string): 'browser' | 'profil
 /** Whether the network selector should render (no served scope, more than one network). */
 function computeShowNetworkSelector(servedScope: HomeServedScope, networkCount: number): boolean {
   return !servedScope && networkCount > 1;
-}
-
-/** Title-case a domain id for display (e.g. `student_profile` → `Student Profile`), or undefined when absent. */
-function formatDomainLabel(
-  domainId: string | null | undefined,
-  domains?: ReadonlyArray<{ id: string; label?: string }> | null,
-): string | undefined {
-  if (!domainId) return undefined;
-  // Prefer the network.json display label (e.g. `provider` → "Service Provider").
-  const configured = domains?.find((d) => d.id === domainId)?.label?.trim();
-  if (configured) return configured;
-  return domainId.replaceAll('_', ' ').replaceAll(/\b\w/g, (c) => c.toUpperCase());
 }
 
 /** The dynamic actions to surface: the selected domain's, else the legacy single active action, else none. */
@@ -1799,7 +1788,9 @@ export function HomePage() {
 
   const showNetworkSelector = computeShowNetworkSelector(servedScope, allNetworks.length);
 
-  const currentDomainLabel = formatDomainLabel(selectedDomain, network?.domains);
+  // `|| undefined` preserves the "absent → undefined" contract the downstream
+  // `?? 'items'` / prop defaults rely on (the shared resolver returns '').
+  const currentDomainLabel = formatDomainLabel(selectedDomain, network?.domains) || undefined;
 
   // Get dynamic actions for the selected domain
   const actions = resolveDomainActions(selectedDomain, getActionsForDomain, activeAction);
@@ -2008,7 +1999,7 @@ export function HomePage() {
   // With a single browseable domain there's no "All" — the header names that
   // one domain (derived from visibleDomains, so it's generic, not per-network).
   const headerDomain = resolveHeaderDomain(selectedDomain, visibleDomains);
-  const contentTitle = formatDomainLabel(headerDomain, visibleDomains) ?? t('home.browse_all');
+  const contentTitle = formatDomainLabel(headerDomain, visibleDomains) || t('home.browse_all');
   const contentDescription = resolveHeaderDescription(headerDomain, visibleDomains);
   // Task 7 (#203 §5.2 cleanup): re-sourced from the list totals — keyed on
   // `selectedDomain` (which paged feed is actually driving the list), not
@@ -2379,11 +2370,7 @@ export function HomePage() {
                     ? (Object.values(domain.item_schemas)[0] as import('@rjsf/utils').RJSFSchema)
                     : undefined;
                   const domainActions = getActionsForDomain(domain.id);
-                  // Prefer the network.json display label (e.g. id `provider`
-                  // shown as "Service Provider"); else title-case the id.
-                  const domainLabel =
-                    domain.label?.trim() ||
-                    domain.id.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
+                  const domainLabel = formatDomainLabel(domain.id, [domain]);
                   return (filteredAllDomainItems[domain.id] ?? []).map((item) => ({
                     item,
                     schema: domainSchema,
