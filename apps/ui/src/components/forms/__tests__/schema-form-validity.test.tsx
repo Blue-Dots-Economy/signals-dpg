@@ -56,7 +56,12 @@ describe('SchemaForm onValidityChange prop', () => {
       />,
     );
     await waitFor(() => {
-      expect(onValidityChange).toHaveBeenCalledWith(false);
+      // The boolean is still the first argument; a second argument now carries
+      // WHY it is invalid (see SchemaFormValidity).
+      expect(onValidityChange).toHaveBeenCalledWith(
+        false,
+        expect.objectContaining({ valid: false, missingRequired: 1 }),
+      );
     });
   });
 
@@ -71,7 +76,10 @@ describe('SchemaForm onValidityChange prop', () => {
       />,
     );
     await waitFor(() => {
-      expect(onValidityChange).toHaveBeenCalledWith(true);
+      expect(onValidityChange).toHaveBeenCalledWith(
+        true,
+        expect.objectContaining({ valid: true, missingRequired: 0, invalidValues: 0 }),
+      );
     });
   });
 

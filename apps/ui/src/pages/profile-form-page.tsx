@@ -108,6 +108,10 @@ export function ProfileFormPage() {
     Array<{ lat: number; lng: number; label?: string; components?: GeoComponents }>
   >([]);
   const [formValid, setFormValid] = React.useState(false);
+  // Why the form is invalid, so the hint can distinguish "you have not filled in
+  // the required fields" from "something you typed is not valid" — the latter used
+  // to show the former's copy, sending people to look at the wrong fields.
+  const [invalidValueCount, setInvalidValueCount] = React.useState(0);
   const [consentChecked, setConsentChecked] = React.useState(false);
 
   // U18 guardian gate, run at the consent tick (BEFORE the profile is created,
@@ -881,7 +885,11 @@ export function ProfileFormPage() {
           {formValid ? (
             <span className="text-emerald-600">{t('profile.required_complete')}</span>
           ) : (
-            <span className="text-amber-700">{t('profile.fill_required_hint')}</span>
+            <span className="text-amber-700">
+              {invalidValueCount > 0
+                ? t('profile.fix_invalid_hint')
+                : t('profile.fill_required_hint')}
+            </span>
           )}
         </div>
         <div className="ml-auto flex items-center gap-2">
@@ -979,7 +987,10 @@ export function ProfileFormPage() {
                 disabled={isSubmitting}
                 formData={initialData ?? undefined}
                 hideSubmit
-                onValidityChange={setFormValid}
+                onValidityChange={(valid, detail) => {
+                  setFormValid(valid);
+                  setInvalidValueCount(detail?.invalidValues ?? 0);
+                }}
                 // The page heading is the hero <h1>; render section titles as
                 // <h2> so the heading chain (h1 → h2) has no skip.
                 sectionHeadingLevel={2}
