@@ -18,6 +18,8 @@ import { Button } from '@/components/ui/button';
 import type { Action } from '@/lib/action-api';
 import { ProfileCardModal } from '@/components/actions/profile-card-modal';
 import { MatchScoreBadge } from '@/components/match-score/match-score-badge';
+import { formatDomainLabel } from '@/lib/domain-icons';
+import { useNetworkConfig } from '@/hooks/use-network-config';
 import type { MatchScoreResult } from '@/lib/match-score-api';
 
 interface ActionCardProps {
@@ -108,8 +110,9 @@ export function ActionCard({ action, ownershipRole, onStatusUpdate, selectionMod
   const myDomain =
     ownershipRole === 'initiated' ? action.source_item_domain : action.target_item_domain;
 
-  const otherRole = titleCase(otherParty.domain);
-  const myRole = titleCase(myDomain);
+  const { data: acNetworkConfig } = useNetworkConfig(otherParty.network ?? null);
+  const otherRole = formatDomainLabel(otherParty.domain, acNetworkConfig?.domains);
+  const myRole = formatDomainLabel(myDomain, acNetworkConfig?.domains);
   const hasRealName = !!otherParty.name && otherParty.name !== otherParty.itemId;
   const rawName = hasRealName
     ? otherParty.name!

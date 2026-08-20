@@ -54,7 +54,14 @@ export function getDomainIcon(
   return domainIcons[domainId] ?? Box;
 }
 
-export function formatDomainLabel(domainId: string | null | undefined): string {
+export function formatDomainLabel(
+  domainId: string | null | undefined,
+  domains?: ReadonlyArray<{ id: string; label?: string }> | null,
+): string {
   if (!domainId) return '';
+  // Prefer the network.json display label (e.g. id `provider` shown as
+  // "Service Provider"); else title-case the id.
+  const configured = domains?.find((d) => d.id === domainId)?.label?.trim();
+  if (configured) return configured;
   return domainId.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
 }

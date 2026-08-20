@@ -5,6 +5,7 @@ import { useTranslation } from 'react-i18next';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { AuthShell } from '@/components/layout/auth-shell';
+import { formatDomainLabel } from '@/lib/domain-icons';
 import {
   checkUser,
   consentStatusIdentifier,
@@ -48,7 +49,7 @@ interface ConsentGateState {
 }
 
 function domainLabel(domain: DotNetworkDomain): string {
-  return domain.id.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
+  return formatDomainLabel(domain.id, [domain]);
 }
 
 

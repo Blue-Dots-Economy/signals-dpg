@@ -234,6 +234,7 @@ export function ActionStatusUpdater({
       description={subtitle}
       fromDomain={action.source_item_domain}
       toDomain={action.target_item_domain}
+      domains={networkConfig?.domains}
     />
   );
 

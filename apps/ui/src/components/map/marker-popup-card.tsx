@@ -9,6 +9,7 @@ import { useMatchScore } from '@/hooks/use-match-score';
 import { MatchScoreModal } from '@/components/match-score/match-score-modal';
 import { ItemCard } from '@/components/cards/item-card';
 import { ShareProfileButton } from '@/components/share/share-profile-button';
+import { formatDomainLabel } from '@/lib/domain-icons';
 
 interface PrecisionInfo {
   labelKey: string;
@@ -25,7 +26,6 @@ export function getPrecisionInfo(precision: string): PrecisionInfo {
   }
 }
 
-const titleCase = (s: string) => s.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
 
 interface MarkerPopupCardProps {
   marker: MapMarker;
@@ -46,6 +46,8 @@ interface MarkerPopupCardProps {
   schema?: RJSFSchema | null;
   /** Per-domain card config from network.json. */
   cardConfig?: DotCardConfig | null;
+  /** Network domains config — enables display labels (e.g. `provider` → "Service Provider"). Passed by callers that already have query context; cluster popups omit it and fall back to title-case. */
+  domains?: ReadonlyArray<{ id: string; label?: string }> | null;
 }
 
 export function MarkerPopupCard({
@@ -59,6 +61,7 @@ export function MarkerPopupCard({
   networkItem,
   schema,
   cardConfig,
+  domains,
 }: Readonly<MarkerPopupCardProps>) {
   const { t } = useTranslation();
   const precisionInfo = getPrecisionInfo(marker.precision);
@@ -133,7 +136,7 @@ export function MarkerPopupCard({
         cardConfig={cardConfig}
         data={marker.data}
         title={marker.label}
-        domainLabel={marker.domain ? titleCase(marker.domain) : undefined}
+        domainLabel={marker.domain ? formatDomainLabel(marker.domain, domains) : undefined}
         precisionLabel={t(precisionInfo.labelKey)}
         actions={actionButtons}
         headerAction={
