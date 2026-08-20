@@ -8,6 +8,7 @@ import { ResponsiveDialog } from '@/components/ui/responsive-dialog';
 import { DrawerTitle } from '@/components/ui/drawer';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { cn } from '@/lib/utils';
+import { formatDomainLabel } from '@/lib/domain-icons';
 import type { DotNetworkDomain, ViewMode } from '@/engine/types';
 import { getEnumFilterFieldsForDomains } from '@/lib/enum-filters';
 import type { EnumFilterField } from '@/lib/enum-filters';
@@ -252,9 +253,7 @@ export function MapFiltersPanel({
         {showDomainGroup && (
           <FilterGroup title={t('filters.domain_group')}>
             {domains.map((domain) => {
-              const label = domain.id
-                .replace(/_/g, ' ')
-                .replace(/\b\w/g, (c) => c.toUpperCase());
+              const label = formatDomainLabel(domain.id, domains);
               return (
                 <Chip
                   key={domain.id}
