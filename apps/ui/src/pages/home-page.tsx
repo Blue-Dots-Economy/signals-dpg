@@ -40,12 +40,13 @@ import { performAction, performActionsBulk, type Item } from '@/lib/item-api';
 import { bulkFailureIndices, firstBulkError, BulkSingleError } from '@/lib/bulk';
 import { useCardSelection } from '@/hooks/use-card-selection';
 import { useEqualRowHeights } from '@/hooks/use-equal-row-heights';
-import { useNetworkConfigs, useResolvedNetwork } from '@/hooks/use-network-config';
+import { useNetworkConfigs, useResolvedNetwork, useNetworkConfig } from '@/hooks/use-network-config';
 import { SelectableCard } from '@/components/selection/selectable-card';
 import { BulkActionBar } from '@/components/selection/bulk-action-bar';
 import { ActionModal } from '@/components/actions/action-modal';
 import { CheckSquare } from 'lucide-react';
 import { getRuntimeEnv } from '@/lib/runtime-env';
+import { formatDomainLabel } from '@/lib/domain-icons';
 import { ACTION_CONSENT_SENTINEL, guardianOtpErrorOf, type PerformActionPayload } from '@/lib/action-api';
 import { ActionAbortedError } from '@/lib/action-abort';
 import { EmptyState } from '@/components/empty-state';
@@ -102,6 +103,32 @@ import { GuardianOtpDialog } from '@/components/actions/guardian-otp-dialog';
 import { GuardianOtpPurpose } from '@/components/consent/u18/guardian-otp-purpose';
 import { U18GuardianFlow } from '@/components/consent/u18/u18-guardian-flow';
 import { isGuardianConsentRequiredDomain } from '@/lib/guardian-consent';
+
+/**
+ * True when the map covers so much longitude that "zoom out" is not a usable
+ * instruction any more. 120° is roughly a continental view — well before the
+ * whole-world zoom, and comfortably inside the 180° span that used to break
+ * the server-side bbox query.
+ */
+const WIDE_VIEWPORT_LNG_SPAN_DEGREES = 120;
+
+export function isWideViewport(viewport: MapViewport | null): boolean {
+  if (viewport?.minLng === undefined || viewport?.maxLng === undefined) return false;
+  return viewport.maxLng - viewport.minLng >= WIDE_VIEWPORT_LNG_SPAN_DEGREES;
+}
+
+/**
+ * Which empty-map message to show. Three distinct situations that used to
+ * share one string: a FAILED load is not an empty area, and at a world-scale
+ * viewport "zoom out to find results" is advice the user cannot act on —
+ * they are already as far out as it goes, and zooming out is what emptied the
+ * map.
+ */
+export function mapEmptyMessageKey(opts: { isError: boolean; wideViewport: boolean }): string {
+  if (opts.isError) return 'home.map_load_failed';
+  if (opts.wideViewport) return 'home.map_no_items_wide';
+  return 'home.map_no_items_in_area';
+}
 
 function getItemLocations(
   data: Record<string, unknown>,
@@ -329,6 +356,7 @@ function MarkerDetailPopup({
   onItemResolved?: (item: Item) => void;
 }>) {
   const { t } = useTranslation();
+  const { data: popupNetworkConfig } = useNetworkConfig(networkId ?? null);
   // Marker ids are `${item_id}#${locationIndex}` — strip the suffix to look up the item.
   const baseItemId = marker.id.includes('#') ? marker.id.split('#')[0] : marker.id;
   // Fetch from the clicked marker's OWN id + domain (always present on the map
@@ -395,6 +423,7 @@ function MarkerDetailPopup({
       connectDisabledReason={connectDisabledReason}
       localItem={localItem}
       networkItem={item}
+      domains={popupNetworkConfig?.domains}
     />
   );
 }
@@ -577,13 +606,6 @@ function noteLocationSource(resolvedLocationSource: string): 'browser' | 'profil
 /** Whether the network selector should render (no served scope, more than one network). */
 function computeShowNetworkSelector(servedScope: HomeServedScope, networkCount: number): boolean {
   return !servedScope && networkCount > 1;
-}
-
-/** Title-case a domain id for display (e.g. `student_profile` → `Student Profile`), or undefined when absent. */
-function formatDomainLabel(domainId: string | null | undefined): string | undefined {
-  return domainId
-    ? domainId.replaceAll('_', ' ').replaceAll(/\b\w/g, (c) => c.toUpperCase())
-    : undefined;
 }
 
 /** The dynamic actions to surface: the selected domain's, else the legacy single active action, else none. */
@@ -1141,9 +1163,20 @@ export function HomePage() {
   // show (client-side membership check — every `Marker` carries `item_domain`).
   // On a single-domain tab the fetch above is already scoped to that domain, so
   // that multi-select (an "All"-tab control) does not apply.
+  // The viewer's own item ids across every domain — the map must never render
+  // the viewer's own pins. The list feed already drops them (`excludeOwnItems`),
+  // but the `/markers` path had no such filter, so an own profile showed on the
+  // map with a Connect button (you can't act on yourself). All domains, not just
+  // `currentDomain`, because the "All" map view spans domains.
+  const ownMapItemIds = React.useMemo(
+    () => new Set((myItems ?? []).map((it) => it.item_id)),
+    [myItems],
+  );
+
   const mapItems = React.useMemo(
     () =>
       mapMarkers.markers
+        .filter((m) => !ownMapItemIds.has(m.item_id))
         .filter(
           (m) =>
             selectedDomain != null ||
@@ -1155,7 +1188,7 @@ export function HomePage() {
           domain: m.item_domain,
           data: { item_locations: m.item_locations },
         })),
-    [selectedDomain, mapMarkers.markers, mapSelectedDomains],
+    [selectedDomain, mapMarkers.markers, mapSelectedDomains, ownMapItemIds],
   );
 
   const localProfileItemIds = React.useMemo(
@@ -1768,7 +1801,9 @@ export function HomePage() {
 
   const showNetworkSelector = computeShowNetworkSelector(servedScope, allNetworks.length);
 
-  const currentDomainLabel = formatDomainLabel(selectedDomain);
+  // `|| undefined` preserves the "absent → undefined" contract the downstream
+  // `?? 'items'` / prop defaults rely on (the shared resolver returns '').
+  const currentDomainLabel = formatDomainLabel(selectedDomain, network?.domains) || undefined;
 
   // Get dynamic actions for the selected domain
   const actions = resolveDomainActions(selectedDomain, getActionsForDomain, activeAction);
@@ -1977,7 +2012,7 @@ export function HomePage() {
   // With a single browseable domain there's no "All" — the header names that
   // one domain (derived from visibleDomains, so it's generic, not per-network).
   const headerDomain = resolveHeaderDomain(selectedDomain, visibleDomains);
-  const contentTitle = formatDomainLabel(headerDomain) ?? t('home.browse_all');
+  const contentTitle = formatDomainLabel(headerDomain, visibleDomains) || t('home.browse_all');
   const contentDescription = resolveHeaderDescription(headerDomain, visibleDomains);
   // Task 7 (#203 §5.2 cleanup): re-sourced from the list totals — keyed on
   // `selectedDomain` (which paged feed is actually driving the list), not
@@ -2348,9 +2383,7 @@ export function HomePage() {
                     ? (Object.values(domain.item_schemas)[0] as import('@rjsf/utils').RJSFSchema)
                     : undefined;
                   const domainActions = getActionsForDomain(domain.id);
-                  const domainLabel = domain.id
-                    .replace(/_/g, ' ')
-                    .replace(/\b\w/g, (c) => c.toUpperCase());
+                  const domainLabel = formatDomainLabel(domain.id, [domain]);
                   return (filteredAllDomainItems[domain.id] ?? []).map((item) => ({
                     item,
                     schema: domainSchema,
@@ -2559,7 +2592,12 @@ export function HomePage() {
                   selfLocation={userLocation}
                   filtersSlot={filtersPanel}
                   onViewportChange={setMapViewport}
-                  emptyMessage={t('home.map_no_items_in_area')}
+                  emptyMessage={t(
+                    mapEmptyMessageKey({
+                      isError: mapMarkers.isError,
+                      wideViewport: isWideViewport(mapViewport),
+                    }),
+                  )}
                   renderPopup={(marker) => {
                     // Marker ids are `${item_id}#${locationIndex}` — strip the suffix to look up the item.
                     const baseItemId = marker.id.includes('#') ? marker.id.split('#')[0] : marker.id;

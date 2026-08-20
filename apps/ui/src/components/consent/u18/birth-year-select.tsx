@@ -1,5 +1,12 @@
 import * as React from 'react';
 import { useTranslation } from 'react-i18next';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import { ageFromBirthYear } from '@/lib/guardian-consent';
 
 export interface BirthYearSelectProps {
@@ -21,33 +28,45 @@ const YEARS = Array.from({ length: 121 }, (_, i) => CURRENT_YEAR - i);
  * age snapshot (`currentYear - birthYear`) and hand it to the parent. No month
  * or day is collected — a boundary-year person (e.g. 2008 in 2026 → age 18) is
  * treated as u18, which is fail-closed.
+ *
+ * Uses the app's own Select rather than a native `<select>`: the list is 121
+ * options long, and a native select popup is sized by the browser — it opened
+ * as a full-height column running off the top and bottom of the window, with
+ * no usable scrollbar. This one is bounded and scrolls inside its own popup.
  */
 export function BirthYearSelect({ onChange, disabled, idPrefix = 'birth-year' }: BirthYearSelectProps) {
   const { t } = useTranslation();
-  const [year, setYear] = React.useState<number | undefined>(undefined);
+  const [year, setYear] = React.useState<string>('');
 
-  const selectClass =
-    'h-11 w-full rounded-md border border-border bg-background px-3 text-sm disabled:opacity-60';
-
-  // No visible label: callers (dob-step / signup-dob-step) already render one
-  // above this. Keep an aria-label so the control still has an accessible name.
   return (
-    <select
-      id={`${idPrefix}-year`}
-      aria-label={t('auth.dob_label_year', 'Birth year')}
-      className={selectClass}
+    <Select
+      value={year}
       disabled={disabled}
-      value={year ?? ''}
-      onChange={(e) => {
-        const y = e.target.value ? Number(e.target.value) : undefined;
-        setYear(y);
-        onChange(y === undefined ? undefined : ageFromBirthYear(y, NOW));
+      onValueChange={(value) => {
+        setYear(value);
+        onChange(value ? ageFromBirthYear(Number(value), NOW) : undefined);
       }}
     >
-      <option value="">{t('auth.dob_year_placeholder', 'Year')}</option>
-      {YEARS.map((y) => (
-        <option key={y} value={y}>{y}</option>
-      ))}
-    </select>
+      <SelectTrigger
+        id={`${idPrefix}-year`}
+        aria-label={t('auth.dob_label_year', 'Birth year')}
+        className="h-11 w-full"
+      >
+        <SelectValue placeholder={t('auth.dob_year_placeholder', 'Year')} />
+      </SelectTrigger>
+      {/* `position="popper"` is load-bearing, not decoration: SelectContent
+          defaults to Radix's "item-aligned" mode, which centres the selected
+          item over the trigger and so grows to fill the window — with 121
+          years that renders as a full-height column of dates. Popper anchors
+          the panel under the trigger instead, so `max-h-56` actually bounds it
+          (~8 rows) and the list scrolls inside its own box. */}
+      <SelectContent position="popper" className="max-h-56">
+        {YEARS.map((y) => (
+          <SelectItem key={y} value={String(y)}>
+            {y}
+          </SelectItem>
+        ))}
+      </SelectContent>
+    </Select>
   );
 }

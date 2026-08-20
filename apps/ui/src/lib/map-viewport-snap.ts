@@ -175,6 +175,35 @@ export interface RefetchDecisionInput {
  * unrepresentative set. Otherwise (contained + the held set was complete),
  * the caller should skip the fetch and reuse the held markers.
  */
+/**
+ * Clamp a viewport bbox to real-world coordinates.
+ *
+ * Map providers report bounds that run past the poles and, when zoomed out
+ * far enough to show more than one copy of the world, past ±180° of
+ * longitude — Leaflet and Google both do it. The markers endpoint validates
+ * `min_lng`/`max_lng` to [-180, 180] (`item_schemas.ts:90-93`), so those
+ * reports were rejected outright with
+ * `querystring/max_lng Too big: expected number to be <=180` and the map
+ * rendered as if the area were simply empty.
+ *
+ * A range that wraps the antimeridian (`minLng > maxLng`) or spans a full
+ * revolution collapses to the whole world, which is what the user is looking
+ * at in that situation anyway.
+ */
+export function clampBbox(bbox: RawBbox): RawBbox {
+  const minLat = Math.max(-90, Math.min(90, bbox.minLat));
+  const maxLat = Math.max(-90, Math.min(90, bbox.maxLat));
+  const spansWorld = bbox.maxLng - bbox.minLng >= 360 || bbox.minLng > bbox.maxLng;
+  return spansWorld
+    ? { minLat, minLng: -180, maxLat, maxLng: 180 }
+    : {
+        minLat,
+        maxLat,
+        minLng: Math.max(-180, Math.min(180, bbox.minLng)),
+        maxLng: Math.max(-180, Math.min(180, bbox.maxLng)),
+      };
+}
+
 export function shouldRefetch({ newBbox, paddedBbox, lastTruncated }: RefetchDecisionInput): boolean {
   if (paddedBbox === null) return true;
   if (lastTruncated) return true;

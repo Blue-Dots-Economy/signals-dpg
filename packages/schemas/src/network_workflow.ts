@@ -125,6 +125,12 @@ const ContactFieldsSchema = z
 const NetworkDomainSchema = z.object({
   id: z.string().min(1),
   description: z.string().optional(),
+  // Optional per-domain display label (e.g. id `provider` shown as "Service
+  // Provider"). Keeps the domain id stable — avoiding a data migration — while
+  // the UI renders the friendly label. Zod strips unknown keys, so this MUST be
+  // declared or the label never reaches the client (the UI resolver then falls
+  // back to title-casing the id). Presentational only; never part of validation.
+  label: z.string().min(1).optional(),
   // Optional per-domain override for the sidebar "My Profile(s)" group heading
   // (e.g. blue_dot provider → "My Jobs"). Network-authored content, not i18n
   // chrome; falls back to the generic label when unset.

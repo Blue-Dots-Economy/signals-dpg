@@ -72,6 +72,12 @@ export interface DotNetworkDomain {
   id: string;
   description: string;
   /**
+   * Optional display label (network.json). When present the UI shows this
+   * instead of title-casing the domain id — e.g. id `provider` shown as
+   * "Service Provider". Falls back to the title-cased id when unset.
+   */
+  label?: string;
+  /**
    * Optional per-domain override for the sidebar "My Profile(s)" group heading
    * (e.g. "My Jobs" for a provider). Network-authored in network.json; falls
    * back to the generic label when unset.

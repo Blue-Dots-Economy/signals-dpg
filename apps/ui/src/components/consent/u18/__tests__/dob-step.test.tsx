@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { pickBirthYear } from '@/test/pick-dob';
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { Toaster } from 'sonner';
@@ -29,7 +30,7 @@ describe('DobStep (birth year → age, #331)', () => {
     await renderDobStep(vi.fn());
     const submit = screen.getByRole('button', { name: /continue/i });
     expect(submit).toBeDisabled();
-    await userEvent.selectOptions(screen.getByRole('combobox', { name: /birth year/i }), '2012');
+    await pickBirthYear(2012);
     expect(screen.queryByRole('combobox', { name: /birth month/i })).toBeNull();
     expect(submit).toBeEnabled();
   });
@@ -39,7 +40,7 @@ describe('DobStep (birth year → age, #331)', () => {
     const onResolved = vi.fn();
     await renderDobStep(onResolved);
 
-    await userEvent.selectOptions(screen.getByRole('combobox', { name: /birth year/i }), '2012');
+    await pickBirthYear(2012);
     await userEvent.click(screen.getByRole('button', { name: /continue/i }));
 
     await waitFor(() =>
@@ -55,7 +56,7 @@ describe('DobStep (birth year → age, #331)', () => {
     const onResolved = vi.fn();
     await renderDobStep(onResolved);
 
-    await userEvent.selectOptions(screen.getByRole('combobox', { name: /birth year/i }), '1990');
+    await pickBirthYear(1990);
     await userEvent.click(screen.getByRole('button', { name: /continue/i }));
 
     await waitFor(() => expect(onResolved).toHaveBeenCalledWith(false));
@@ -66,7 +67,7 @@ describe('DobStep (birth year → age, #331)', () => {
     const onResolved = vi.fn();
     await renderDobStep(onResolved);
 
-    await userEvent.selectOptions(screen.getByRole('combobox', { name: /birth year/i }), '2012');
+    await pickBirthYear(2012);
     await userEvent.click(screen.getByRole('button', { name: /continue/i }));
 
     await waitFor(() => expect(screen.getByText(/couldn't save/i)).toBeInTheDocument());

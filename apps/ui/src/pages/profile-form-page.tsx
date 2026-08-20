@@ -65,7 +65,7 @@ function parseNetworkIds(networkEnv: string | undefined): string[] {
   return networkEnv.split(',').map(n => n.trim()).filter(Boolean);
 }
 
-import { getDomainIcon } from '@/lib/domain-icons';
+import { getDomainIcon, formatDomainLabel } from '@/lib/domain-icons';
 
 export function ProfileFormPage() {
   const { t } = useTranslation();
@@ -389,7 +389,7 @@ export function ProfileFormPage() {
 
   const selectedDomainInfo = domains.find((d) => d.id === selectedDomain);
   const DomainIcon = getDomainIcon(selectedDomain, network?.id);
-  const roleLabel = (selectedDomain ?? '').replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
+  const roleLabel = formatDomainLabel(selectedDomain, domains);
   // #376: the "why complete your profile" prompt — shown when creating, or when
   // completing a still-draft profile (not when editing an already-live one).
   const showCompletionPrompt = !isEdit || editItem.data?.lifecycle_status === 'draft';
@@ -811,9 +811,7 @@ export function ProfileFormPage() {
           <div className="grid gap-4 sm:grid-cols-2">
             {selectableDomains.map((domain, idx) => {
               const Icon = getDomainIcon(domain.id, network?.id);
-              const label = domain.id
-                .replace(/_/g, ' ')
-                .replace(/\b\w/g, (c) => c.toUpperCase());
+              const label = formatDomainLabel(domain.id, [domain]);
               return (
                 <RoleCard
                   key={domain.id}

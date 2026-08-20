@@ -1,13 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import {
-  snapBbox,
-  zoomBand,
-  snapViewportForKey,
-  DEFAULT_CLUSTER_DISABLE_ZOOM,
-  padBbox,
-  bboxContains,
-  shouldRefetch,
-} from './map-viewport-snap';
+import { snapBbox, zoomBand, snapViewportForKey, DEFAULT_CLUSTER_DISABLE_ZOOM, padBbox, bboxContains, shouldRefetch, clampBbox } from './map-viewport-snap';
 
 // Span 0.5deg → cell = 0.5/8 = 0.0625deg exactly (a power of two already, so
 // no bucketing rounding to reason about). All four corners are exact
@@ -204,5 +196,54 @@ describe('shouldRefetch', () => {
   it('refetches when the new bbox escapes the padded bbox, even if the last result was complete', () => {
     const outside = { ...inner, maxLat: paddedBbox.maxLat + 0.01 };
     expect(shouldRefetch({ newBbox: outside, paddedBbox, lastTruncated: false })).toBe(true);
+  });
+});
+
+describe('clampBbox', () => {
+  it('leaves an in-range bbox untouched', () => {
+    const bbox = { minLat: 8, minLng: 68, maxLat: 31, maxLng: 90 };
+    expect(clampBbox(bbox)).toEqual(bbox);
+  });
+
+  it('clamps the longitudes a zoomed-out provider reports past ±180', () => {
+    // The live 400: `querystring/max_lng Too big: expected number to be <=180`.
+    // The request was rejected outright, so the map looked empty rather than
+    // broken.
+    expect(clampBbox({ minLat: 8, minLng: -220, maxLat: 31, maxLng: 240 })).toEqual({
+      minLat: 8,
+      minLng: -180,
+      maxLat: 31,
+      maxLng: 180,
+    });
+  });
+
+  it('clamps latitudes past the poles', () => {
+    expect(clampBbox({ minLat: -120, minLng: 10, maxLat: 120, maxLng: 20 })).toEqual({
+      minLat: -90,
+      minLng: 10,
+      maxLat: 90,
+      maxLng: 20,
+    });
+  });
+
+  it('treats an antimeridian-wrapped range as the whole world', () => {
+    // minLng > maxLng means the viewport crosses ±180; there is no single
+    // envelope for that, and at the zoom where it happens the user is looking
+    // at the whole world anyway.
+    expect(clampBbox({ minLat: -10, minLng: 170, maxLat: 10, maxLng: -170 })).toEqual({
+      minLat: -10,
+      minLng: -180,
+      maxLat: 10,
+      maxLng: 180,
+    });
+  });
+
+  it('collapses a more-than-one-revolution span to the whole world', () => {
+    expect(clampBbox({ minLat: -10, minLng: -400, maxLat: 10, maxLng: 400 })).toEqual({
+      minLat: -10,
+      minLng: -180,
+      maxLat: 10,
+      maxLng: 180,
+    });
   });
 });

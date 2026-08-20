@@ -5,7 +5,15 @@
  * to safe defaults. Sourced from the build-time __BRAND_REGISTRY__.
  */
 export type FaviconType = 'png' | 'svg';
-export type LogoShape = 'square' | 'wordmark';
+/**
+ * How the brand's mark is proportioned, which drives its rendered height.
+ *
+ *  - `wordmark` ~5:1  — a wide horizontal wordmark (the blue/purple marks)
+ *  - `lockup`   ~3:1  — a wordmark stacked over a strapline; at wordmark
+ *                       height the strapline line is too small to read
+ *  - `square`   ~1:1  — a compact mark that needs the most height
+ */
+export type LogoShape = 'square' | 'wordmark' | 'lockup';
 
 export interface BrandMeta {
   faviconType: FaviconType;

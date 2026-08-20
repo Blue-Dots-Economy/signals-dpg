@@ -26,8 +26,6 @@
   "auth.select_domain_required": "Please select your domain to continue.",
   "auth.signup_options_unavailable": "Could not load sign-up options. Please refresh and try again.",
   "auth.domain_placeholder": "Select one",
-  "auth.label_dob": "Date of birth",
-  "auth.dob_placeholder": "Select date of birth",
   "auth.dob_label_year": "Birth year",
   "auth.dob_year_placeholder": "Year",
   "auth.hint_verify_email": "We'll send a one-time code to verify your email.",
@@ -39,7 +37,6 @@
   "auth.guardian_confirmed_title": "Guardian confirmed",
   "auth.guardian_confirmed_desc": "Now enter the code we're sending to your own {{contactLabel}} to finish creating your account.",
   "auth.signup_dob_title": "To create an account, please provide",
-  "auth.signup_dob_label": "Select date of birth",
   "auth.signup_dob_continue": "Continue",
   "auth.signup_dob_how_title": "How it works",
   "auth.signup_dob_how_desc": "Select your birth year. If you are over 18, we'll take you to the account creation page. If you are a minor, under 18, we'll first collect consent from your guardian.",
@@ -70,6 +67,7 @@
   "auth.toast_signup_disabled": "User doesn't exist",
   "auth.toast_signup_disabled_desc": "Please contact your administrator to get onboarded.",
   "auth.signup_disabled_message": "User doesn't exist. Please contact your administrator to get onboarded.",
+  "auth.signup_invite_only": "This instance is invite-only — accounts are created by an administrator. If you don't have one yet, ask yours to onboard you.",
   "auth.oidc_sub": "You'll be taken to a secure sign-in page to continue.",
   "auth.oidc_redirecting": "Taking you to sign in…",
   "auth.oidc_signing_in": "Signing you in…",
@@ -578,6 +576,8 @@
   "hero.orange_dot.tagline_tail": "for every traveller exploring.",
   "hero.orange_dot.subline": "A unified tourism, arts & culture network connecting travellers to verified practitioners — every orange dot is a guide, an artisan, a stay, an experience worth finding.",
   "home.map_no_items_in_area": "No listings in this area — zoom out or move the map to find results.",
+  "home.map_no_items_wide": "No listings on the map right now — try clearing filters or searching for something else.",
+  "home.map_load_failed": "Couldn't load listings for this area — please try again.",
   "consent.profile_minor_notice": "You're under 18, so a guardian needs to verify this profile creation. We'll send them a one-time code to confirm.",
   "consent.profile_minor_verify": "Verify with guardian",
   "u18.guardian_verified_title": "Guardian confirmed",
@@ -593,8 +593,6 @@
     "guardian_consent_recorded": "Consent recorded — your profile is now live"
   },
   "u18": {
-    "dob_label": "Select date of birth",
-    "dob_placeholder": "Select date of birth",
     "guardian_error_same_contact_not_allowed": "Your guardian's contact can't be the same as your own. Please use a different email or phone number."
   },
   "u18.guardian_accept_both_prefix": "On behalf of my ward, I accept the ",

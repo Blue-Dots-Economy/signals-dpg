@@ -31,7 +31,10 @@ const DOMAIN_ICON_RULES: Array<{ key: string; icon: LucideIcon }> = [
   { key: 'seeker',    icon: User },
   { key: 'learner',   icon: GraduationCap },
   { key: 'student',   icon: GraduationCap },
-  { key: 'provider',  icon: Building2 },
+  // service_provider must precede the 'provider' substring rule (it contains
+  // "provider") so it gets Building2, not the provider Briefcase.
+  { key: 'service_provider', icon: Building2 },
+  { key: 'provider',  icon: Briefcase },
   { key: 'tutor',     icon: Briefcase },
   { key: 'coach',     icon: Briefcase },
   { key: 'counsellor', icon: Briefcase },

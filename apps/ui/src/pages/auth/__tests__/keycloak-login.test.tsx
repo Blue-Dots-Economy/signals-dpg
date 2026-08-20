@@ -1,7 +1,8 @@
 import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { act, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
+import { pickBirthYear } from '@/test/pick-dob';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 
 /**
@@ -417,6 +418,33 @@ describe('KeycloakLoginPanel — existing vs new user chooser', () => {
     expect(signupWithKeycloak).not.toHaveBeenCalled();
   });
 
+  it('re-enables the choices when the page comes back from the bfcache', async () => {
+    // Clicking sign-in hands the browser to Keycloak, so the code after
+    // `startKeycloakLogin` never runs and `isRedirecting` stays true by
+    // design. Pressing Back restores this page from the back/forward cache
+    // with that flag intact, which left every choice disabled with a spinner
+    // until a manual reload. Modelled with a call that never settles — which
+    // is what a real navigation looks like to this component.
+    startKeycloakLogin.mockImplementationOnce(() => new Promise<void>(() => {}));
+
+    renderAt(<LoginPage />);
+    const existing = await screen.findByText(/existing user/i);
+    await userEvent.click(existing);
+
+    const choice = existing.closest('button');
+    await waitFor(() => expect(choice?.disabled).toBe(true));
+
+    // `persisted: true` is what marks a bfcache restore; a fresh load
+    // re-runs the module and resets the state on its own.
+    const event = new Event('pageshow') as Event & { persisted?: boolean };
+    Object.defineProperty(event, 'persisted', { value: true });
+    await act(async () => {
+      window.dispatchEvent(event);
+    });
+
+    await waitFor(() => expect(choice?.disabled).toBe(false));
+  });
+
   it('hides the signup choice when the instance is gated', async () => {
     // selfSignupAllowed comes from the API; a gated instance must not offer it.
     keycloakEnabled = true;
@@ -428,15 +456,32 @@ describe('KeycloakLoginPanel — existing vs new user chooser', () => {
     expect(screen.queryByText(/new here/i)).toBeNull();
   });
 
-  it('collects name, identifier, domain and DOB, then signs in', async () => {
+  it('explains a gated instance without claiming the account was not found', async () => {
+    // The note renders on ARRIVAL, before any identifier is entered, so it
+    // must not assert a lookup result. The better-auth path says "User
+    // doesn't exist" only after one (login-page sets `signupBlocked` from
+    // `exists === false`); reusing that string here told every visitor their
+    // account was missing before they had typed anything.
+    keycloakEnabled = true;
+    signupAllowed = false;
+
+    renderAt(<LoginPage />);
+
+    // Matched on the explanatory clause, not "invite-only" alone — the
+    // auth footer already carries an "Invite-only · …" line.
+    expect(await screen.findByText(/created by an administrator/i)).toBeTruthy();
+    expect(screen.queryByText(/doesn't exist/i)).toBeNull();
+  });
+
+  it('collects name, identifier, domain and birth year, then signs in', async () => {
     renderAt(<LoginPage />);
     await userEvent.click(await screen.findByText(/new here/i));
 
     await userEvent.type(screen.getByLabelText(/your name/i), 'Asha Rao');
     await userEvent.type(screen.getByLabelText(/mobile number/i), '9876543210');
-    // The DOB field only exists for a guardian-gated domain, so pick one first.
+    // The birth-year field only exists for a guardian-gated domain, so pick one first.
     await userEvent.click(await screen.findByRole('button', { name: /^seeker$/i }));
-    await userEvent.type(screen.getByLabelText(/date of birth/i), '2005-04-02');
+    await pickBirthYear(2005);
 
     await userEvent.click(screen.getByRole('button', { name: /create account/i }));
 
@@ -494,7 +539,7 @@ describe('KeycloakLoginPanel — existing vs new user chooser', () => {
  * portal must not ask a question with one answer, and a signup must never be
  * submitted without a domain: `domain` is optional on POST /auth/signup, so a
  * domainless signup creates an account with no `user.domains` — the
- * single-domain lock then never binds, and the DOB/guardian branch (which keys
+ * single-domain lock then never binds, and the age/guardian branch (which keys
  * off the selected domain) is skipped.
  */
 describe('KeycloakLoginPanel — signup domain picker', () => {
@@ -586,27 +631,27 @@ describe('KeycloakLoginPanel — signup domain picker', () => {
   });
 });
 
-describe('KeycloakLoginPanel — guardian-gated signup requires a DOB', () => {
+describe('KeycloakLoginPanel — guardian-gated signup requires a birth year', () => {
   beforeEach(() => {
     keycloakEnabled = true;
     // A single-domain portal on the gated domain: the picker is hidden and the
-    // domain auto-selected, so the DOB field is the only thing left to fill.
+    // domain auto-selected, so the birth year is the only thing left to fill.
     servedScope = { network: 'blue_dot', domains: ['seeker'] };
   });
 
-  it('refuses to create the account when the date of birth is blank', async () => {
+  it('refuses to create the account when the birth year is blank', async () => {
     renderAt(<LoginPage />);
     await userEvent.click(await screen.findByText(/new here/i));
     await userEvent.type(screen.getByLabelText(/your name/i), 'Asha Rao');
     await userEvent.type(screen.getByLabelText(/mobile number/i), '9876543210');
 
-    // The DOB field is shown (gated domain) but left empty.
-    expect(await screen.findByLabelText(/date of birth/i)).toBeTruthy();
+    // The birth-year field is shown (gated domain) but left unpicked.
+    expect(await screen.findByRole('combobox', { name: /birth year/i })).toBeTruthy();
     await userEvent.click(screen.getByRole('button', { name: /create account/i }));
 
-    // Without this the blank date reads as `age === undefined`, the minor check
-    // is skipped, and a minor is signed up as an adult.
-    expect(await screen.findByLabelText(/date of birth/i)).toBeTruthy();
+    // Without this the unpicked year reads as `age === undefined`, the minor
+    // check is skipped, and a minor is signed up as an adult.
+    expect(await screen.findByRole('combobox', { name: /birth year/i })).toBeTruthy();
     expect(signupWithKeycloak).not.toHaveBeenCalled();
     expect(startKeycloakLogin).not.toHaveBeenCalled();
   });
@@ -614,8 +659,8 @@ describe('KeycloakLoginPanel — guardian-gated signup requires a DOB', () => {
   it('does not fall through the U18 gate when a later domain fetch fails', async () => {
     renderAt(<LoginPage />);
     await userEvent.click(await screen.findByText(/new here/i));
-    // First load succeeds: seeker is auto-selected and the DOB field appears.
-    expect(await screen.findByLabelText(/date of birth/i)).toBeTruthy();
+    // First load succeeds: seeker is auto-selected and the birth-year field appears.
+    expect(await screen.findByRole('combobox', { name: /birth year/i })).toBeTruthy();
 
     // Back only flips the mode — `domain` stays 'seeker'. Re-entering signup
     // refires the fetch, and this time it fails.
@@ -629,17 +674,18 @@ describe('KeycloakLoginPanel — guardian-gated signup requires a DOB', () => {
 
     // A domain is still selected, so the !domain guard passes. If the gating
     // flag is inferred from an empty domain list it reads as "not gated", the
-    // blank-DOB guard is skipped, and a minor is signed up as an adult.
+    // blank-birth-year guard is skipped, and a minor is signed up as an adult.
     expect(signupWithKeycloak).not.toHaveBeenCalled();
     expect(startKeycloakLogin).not.toHaveBeenCalled();
   });
 
-  it('still routes a minor to the guardian flow once a DOB is given', async () => {
+  it('still routes a minor to the guardian flow once a birth year is given', async () => {
     renderAt(<LoginPage />);
     await userEvent.click(await screen.findByText(/new here/i));
     await userEvent.type(screen.getByLabelText(/your name/i), 'Asha Rao');
     await userEvent.type(screen.getByLabelText(/mobile number/i), '9876543210');
-    await userEvent.type(await screen.findByLabelText(/date of birth/i), '2015-04-02');
+    await screen.findByRole('combobox', { name: /birth year/i });
+    await pickBirthYear(2015);
     await userEvent.click(screen.getByRole('button', { name: /create account/i }));
 
     const flow = await screen.findByTestId('signup-guardian-flow');
@@ -744,7 +790,7 @@ describe('KeycloakLoginPanel — signup identifier channel', () => {
     await userEvent.type(screen.getByLabelText(/your name/i), 'Minor Kid');
     await userEvent.type(screen.getByLabelText(/^email$/i), 'kid@example.com');
     await userEvent.click(screen.getByRole('button', { name: /seeker/i }));
-    await userEvent.type(screen.getByLabelText(/date of birth/i), `${CURRENT_YEAR - 15}-04-02`);
+    await pickBirthYear(CURRENT_YEAR - 15);
     await userEvent.click(screen.getByRole('button', { name: /create account/i }));
 
     const flow = await screen.findByTestId('signup-guardian-flow');
@@ -936,23 +982,23 @@ describe('U18 guardian capture on the Keycloak signup path', () => {
     keycloakEnabled = true;
   });
 
-  // `dob` is optional because the field only exists for a guardian-gated domain.
-  const fillSignup = async (opts: { domain: string; dob?: string }) => {
+  // `birthYear` is optional because the field only exists for a guardian-gated domain.
+  const fillSignup = async (opts: { domain: string; birthYear?: number }) => {
     await userEvent.click(await screen.findByText(/new here/i));
     await userEvent.type(screen.getByLabelText(/your name/i), 'Asha Rao');
     await userEvent.type(screen.getByLabelText(/mobile number/i), '9876543210');
     await userEvent.click(
       await screen.findByRole('button', { name: new RegExp(`^${opts.domain}$`, 'i') })
     );
-    if (opts.dob !== undefined) {
-      await userEvent.type(screen.getByLabelText(/date of birth/i), opts.dob);
+    if (opts.birthYear !== undefined) {
+      await pickBirthYear(opts.birthYear);
     }
     await userEvent.click(screen.getByRole('button', { name: /create account/i }));
   };
 
   it('runs the guardian flow BEFORE creating the account for a gated minor', async () => {
     renderAt(<LoginPage />);
-    await fillSignup({ domain: 'seeker', dob: '2015-04-02' });
+    await fillSignup({ domain: 'seeker', birthYear: 2015 });
 
     const flow = await screen.findByTestId('signup-guardian-flow');
     expect(flow.getAttribute('data-domain')).toBe('seeker');
@@ -964,7 +1010,7 @@ describe('U18 guardian capture on the Keycloak signup path', () => {
 
   it('creates the account once the guardian is verified', async () => {
     renderAt(<LoginPage />);
-    await fillSignup({ domain: 'seeker', dob: '2015-04-02' });
+    await fillSignup({ domain: 'seeker', birthYear: 2015 });
     await userEvent.click(await screen.findByRole('button', { name: /guardian done/i }));
 
     await waitFor(() => expect(signupWithKeycloak).toHaveBeenCalled());
@@ -978,7 +1024,7 @@ describe('U18 guardian capture on the Keycloak signup path', () => {
     getConsentStatusByIdentifier.mockResolvedValue({ statuses: { terms: [], privacy: [] } });
 
     renderAt(<LoginPage />);
-    await fillSignup({ domain: 'seeker', dob: '2015-04-02' });
+    await fillSignup({ domain: 'seeker', birthYear: 2015 });
 
     expect(await screen.findByTestId('signup-guardian-flow')).toBeTruthy();
     expect(screen.queryByTestId('consent-modal')).toBeNull();
@@ -986,13 +1032,13 @@ describe('U18 guardian capture on the Keycloak signup path', () => {
 
   it('skips the guardian flow for an ADULT in a gated domain', async () => {
     renderAt(<LoginPage />);
-    await fillSignup({ domain: 'seeker', dob: '1990-04-02' });
+    await fillSignup({ domain: 'seeker', birthYear: 1990 });
 
     await waitFor(() => expect(signupWithKeycloak).toHaveBeenCalled());
     expect(screen.queryByTestId('signup-guardian-flow')).toBeNull();
   });
 
-  it('never asks an UNGATED domain for a date of birth, and skips the guardian flow', async () => {
+  it('never asks an UNGATED domain for a birth year, and skips the guardian flow', async () => {
     // `provider` has guardian_consent_required: false — no U18 flow applies, so
     // the field is not rendered at all and no age is submitted.
     renderAt(<LoginPage />);
@@ -1001,7 +1047,7 @@ describe('U18 guardian capture on the Keycloak signup path', () => {
     await userEvent.type(screen.getByLabelText(/mobile number/i), '9876543210');
     await userEvent.click(await screen.findByRole('button', { name: /^provider$/i }));
 
-    expect(screen.queryByLabelText(/date of birth/i)).toBeNull();
+    expect(screen.queryByRole('combobox', { name: /birth year/i })).toBeNull();
 
     await userEvent.click(screen.getByRole('button', { name: /create account/i }));
 
@@ -1011,19 +1057,19 @@ describe('U18 guardian capture on the Keycloak signup path', () => {
     expect(screen.queryByTestId('signup-guardian-flow')).toBeNull();
   });
 
-  it('shows the date of birth only once a GATED domain is selected', async () => {
+  it('shows the birth year only once a GATED domain is selected', async () => {
     renderAt(<LoginPage />);
     await userEvent.click(await screen.findByText(/new here/i));
 
     // No domain chosen yet → nothing to gate on, so no field.
-    expect(screen.queryByLabelText(/date of birth/i)).toBeNull();
+    expect(screen.queryByRole('combobox', { name: /birth year/i })).toBeNull();
 
     await userEvent.click(await screen.findByRole('button', { name: /^seeker$/i }));
-    expect(screen.getByLabelText(/date of birth/i)).toBeTruthy();
+    expect(screen.getByRole('combobox', { name: /birth year/i })).toBeTruthy();
 
     // Switching to an ungated domain withdraws it again.
     await userEvent.click(await screen.findByRole('button', { name: /^provider$/i }));
-    expect(screen.queryByLabelText(/date of birth/i)).toBeNull();
+    expect(screen.queryByRole('combobox', { name: /birth year/i })).toBeNull();
   });
 });
 
@@ -1107,7 +1153,7 @@ describe('guardian capture identifier normalisation', () => {
     await userEvent.type(screen.getByLabelText(/your name/i), 'Asha Rao');
     await userEvent.type(screen.getByLabelText(/mobile number/i), '9876543210');
     await userEvent.click(await screen.findByRole('button', { name: /^seeker$/i }));
-    await userEvent.type(screen.getByLabelText(/date of birth/i), '2015-04-02');
+    await pickBirthYear(2015);
     await userEvent.click(screen.getByRole('button', { name: /create account/i }));
 
     const flow = await screen.findByTestId('signup-guardian-flow');
