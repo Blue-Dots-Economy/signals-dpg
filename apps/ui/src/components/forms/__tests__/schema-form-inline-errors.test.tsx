@@ -9,7 +9,17 @@ import type { RJSFSchema } from '@rjsf/utils';
 import { SchemaForm, getSchemaFormValidity } from '../schema-form';
 
 vi.mock('react-i18next', () => ({
-  useTranslation: () => ({ t: (_k: string, d?: string) => d ?? _k }),
+  // Mirrors i18next's `t(key, defaultValue, options)` including {{placeholder}}
+  // interpolation — without it, copy under test reads as a literal "{{field}}".
+  useTranslation: () => ({
+    t: (_k: string, d?: string, o?: Record<string, unknown>) => {
+      let text = d ?? _k;
+      for (const [name, value] of Object.entries(o ?? {})) {
+        text = text.split(`{{${name}}}`).join(String(value));
+      }
+      return text;
+    },
+  }),
 }));
 
 beforeAll(() => {
@@ -66,7 +76,7 @@ describe('getSchemaFormValidity', () => {
 describe('SchemaForm inline errors are gated on blur', () => {
   it('shows no error for an untouched field on mount', () => {
     render(<SchemaForm schema={schema} formData={{}} onSubmit={vi.fn()} submitButtonText="Save" />);
-    expect(screen.queryByText(/must have required property|must match pattern/i)).toBeNull();
+    expect(screen.queryByText(/must have required property|Please enter a valid/i)).toBeNull();
   });
 
   it('shows an inline error for an invalid value once the field is blurred', async () => {
@@ -78,9 +88,9 @@ describe('SchemaForm inline errors are gated on blur', () => {
     await user.click(phone);
     await user.type(phone, '123');
     // Still typing — nothing should have turned red yet.
-    expect(screen.queryByText(/must match pattern/i)).toBeNull();
+    expect(screen.queryByText(/Please enter a valid Phone/i)).toBeNull();
     await user.tab();
-    expect(await screen.findByText(/must match pattern/i)).toBeInTheDocument();
+    expect(await screen.findByText(/Please enter a valid Phone/i)).toBeInTheDocument();
   });
 
   it('clears the inline error live once the value becomes valid', async () => {
@@ -92,11 +102,11 @@ describe('SchemaForm inline errors are gated on blur', () => {
     await user.click(phone);
     await user.type(phone, '123');
     await user.tab();
-    expect(await screen.findByText(/must match pattern/i)).toBeInTheDocument();
+    expect(await screen.findByText(/Please enter a valid Phone/i)).toBeInTheDocument();
 
     await user.click(phone);
     await user.type(phone, '4567890');
-    expect(screen.queryByText(/must match pattern/i)).toBeNull();
+    expect(screen.queryByText(/Please enter a valid Phone/i)).toBeNull();
   });
 
   it('does not leak an error onto a different, untouched field', async () => {
@@ -106,7 +116,7 @@ describe('SchemaForm inline errors are gated on blur', () => {
     await user.click(phone);
     await user.type(phone, '123');
     await user.tab();
-    expect(await screen.findByText(/must match pattern/i)).toBeInTheDocument();
+    expect(await screen.findByText(/Please enter a valid Phone/i)).toBeInTheDocument();
     // `name` is required and empty, but the user has never been there.
     expect(screen.queryByText(/must have required property/i)).toBeNull();
   });

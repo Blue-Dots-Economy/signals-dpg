@@ -18,6 +18,7 @@ import CustomFieldTemplate from './custom-field-template';
 import { resolveFormLayout, type FormLayout } from '@/theme/form-layouts';
 import { resolveVisibleSchema } from '@/lib/show-if';
 import { filterErrorSchemaToVisited } from './field-error-visibility';
+import { FIELD_ERROR_MESSAGE_MARKER, resolvePatternErrorMessage } from './field-error-message';
 
 interface RjsfError {
   property?: string;
@@ -414,6 +415,9 @@ function normalizeSchemaForRjsf(schema: RJSFSchema, rootSchema?: RJSFSchema): RJ
     // object) — it's mapped to the reference-autocomplete widget by
     // generateUiSchema, so ajv must not see it.
     if (key === 'x-reference-source') continue;
+    // Strip the custom `x-error-message` keyword (per-field copy for a failed
+    // `pattern`, consumed when building the error message) — ajv must not see it.
+    if (key === FIELD_ERROR_MESSAGE_MARKER) continue;
     // Strip the custom `x-uri` marker — its effect is the `pattern` injected by
     // applyUriPatterns before this point, plus the card-side link rendering.
     // (RJSF's ajv runs strict:false so an unknown keyword would be tolerated,
@@ -563,19 +567,37 @@ export function SchemaForm({
   // ajv reports a pattern failure as `must match pattern "^\s*$|^\s*(https?..."`,
   // which is meaningless to a user. Rewrite it for `x-uri` fields only.
   const uriFieldKeys = React.useMemo(() => new Set(collectUriFieldKeys(baseSchema)), [baseSchema]);
+
+  /**
+   * Readable copy for a failed `pattern`. AJV's own message is the raw regex, so
+   * it must never reach the user; the regex comes from network.json, so the copy
+   * is resolved from the field too (authored `x-error-message`, else the `x-uri`
+   * default, else a generic naming the field). Shared by both error paths below —
+   * `extraErrors` bypasses `transformErrors` entirely, so each needs it.
+   */
+  const patternMessageFor = React.useCallback(
+    (property: string): string => {
+      const properties = (baseSchema.properties ?? {}) as Record<string, Record<string, unknown>>;
+      return resolvePatternErrorMessage(properties[property], uriFieldKeys.has(property), {
+        uri: t('form.invalid_url', 'Enter a valid link, e.g. https://example.com'),
+        generic: (label) => t('form.invalid_format', 'Please enter a valid {{field}}.', { field: label }),
+      });
+    },
+    [baseSchema, uriFieldKeys, t],
+  );
+
   const transformErrors = React.useCallback(
     (errors: RJSFValidationError[]) =>
       errors.map((error) => {
         if (error.name !== 'pattern') return error;
         const field = (error.property ?? '').replace(/^\./, '').split('.')[0];
-        if (!uriFieldKeys.has(field)) return error;
-        const message = t('form.invalid_url', 'Enter a valid link, e.g. https://example.com');
+        const message = patternMessageFor(field);
         // `stack` is what RJSF's ErrorList template renders, so it has to be
         // rewritten too — otherwise flipping `showErrorList` on would put the
         // raw pattern back in front of the user.
         return { ...error, message, stack: `${error.property} ${message}` };
       }),
-    [uriFieldKeys, t],
+    [patternMessageFor],
   );
 
   // Keep a ref to the latest onValidityChange so the validity effect below does
@@ -629,10 +651,22 @@ export function SchemaForm({
   // renderer stays quiet without knowing about the rule. RJSF still validates
   // natively on submit, so this cannot let invalid data through.
   const extraErrors = React.useMemo(() => {
-    const { errorSchema } = validator.validateFormData(data, rjsfSchema);
-    return filterErrorSchemaToVisited(errorSchema ?? {}, touchedFieldIds, submitAttempted);
+    // Rewrite pattern messages BEFORE filtering: `extraErrors` never passes
+    // through `transformErrors`, so without this the raw regex is what renders.
+    const { errors, errorSchema } = validator.validateFormData(data, rjsfSchema);
+    const patternFields = new Set(
+      errors
+        .filter((error) => error.name === 'pattern')
+        .map((error) => (error.property ?? '').replace(/^\./, '').split('.')[0])
+        .filter(Boolean),
+    );
+    const readable: Record<string, unknown> = { ...(errorSchema ?? {}) };
+    for (const property of patternFields) {
+      readable[property] = { __errors: [patternMessageFor(property)] };
+    }
+    return filterErrorSchemaToVisited(readable as typeof errorSchema, touchedFieldIds, submitAttempted);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [rjsfSchema, data, touchedFieldIds, submitAttempted]);
+  }, [rjsfSchema, data, touchedFieldIds, submitAttempted, patternMessageFor]);
 
   // Section layout is schema-driven first: an `x-form-layout` block on the item
   // schema (network.json) is the single source of truth, so field add/remove/

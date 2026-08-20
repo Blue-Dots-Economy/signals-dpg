@@ -10,7 +10,17 @@ import { SchemaForm, isSchemaFormValid } from '../schema-form';
 import { applyUriPatterns } from '@dpg/schemas/uri_fields';
 
 vi.mock('react-i18next', () => ({
-  useTranslation: () => ({ t: (_k: string, d?: string) => d ?? _k }),
+  // Mirrors i18next's `t(key, defaultValue, options)` including {{placeholder}}
+  // interpolation — without it, copy under test reads as a literal "{{field}}".
+  useTranslation: () => ({
+    t: (_k: string, d?: string, o?: Record<string, unknown>) => {
+      let text = d ?? _k;
+      for (const [name, value] of Object.entries(o ?? {})) {
+        text = text.split(`{{${name}}}`).join(String(value));
+      }
+      return text;
+    },
+  }),
 }));
 
 // jsdom does not implement Element.prototype.scrollIntoView, which the form's
@@ -86,7 +96,7 @@ describe('SchemaForm with an x-uri field', () => {
   // ships non-x-uri `pattern` constraints (10-digit contact phone, blue dot's
   // job-title whitespace rule), whose errors now flow through the same
   // transformErrors callback and must keep ajv's own wording.
-  it('leaves a non-x-uri pattern error with ajv’s original message', async () => {
+  it('gives a non-x-uri pattern field its own copy, never the link message', async () => {
     const user = userEvent.setup();
     const onSubmit = vi.fn();
     render(
@@ -106,8 +116,11 @@ describe('SchemaForm with an x-uri field', () => {
       />,
     );
     await user.click(screen.getByRole('button', { name: 'Save' }));
-    expect(await screen.findByText(/must match pattern/i)).toBeInTheDocument();
+    // Readable copy naming the field — and crucially NOT the link message, which
+    // would be nonsense on a phone number. No raw regex either.
+    expect(await screen.findByText(/Please enter a valid Phone/i)).toBeInTheDocument();
     expect(screen.queryByText(/Enter a valid link/i)).toBeNull();
+    expect(screen.queryByText(/must match pattern/i)).toBeNull();
     expect(onSubmit).not.toHaveBeenCalled();
   });
 
