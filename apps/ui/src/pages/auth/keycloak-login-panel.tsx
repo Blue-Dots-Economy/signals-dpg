@@ -33,6 +33,7 @@ import {
 import { BirthYearSelect } from '@/components/consent/u18/birth-year-select';
 import { getServedScope } from '@/lib/served-binding';
 import type { DotNetworkDomain } from '@/engine/types';
+import { formatDomainLabel } from '@/lib/domain-icons';
 import type { ConsentAcceptBody, ConsentConfigDocument } from '@dpg/schemas';
 
 /**
@@ -623,7 +624,7 @@ export function KeycloakLoginPanel() {
                       : 'text-muted-foreground hover:text-foreground',
                   ].join(' ')}
                 >
-                  {d.id.replaceAll('_', ' ')}
+                  {formatDomainLabel(d.id, networkDomains)}
                 </button>
               ))}
             </div>
