@@ -660,7 +660,7 @@ export function SchemaForm({
         .map((error) => (error.property ?? '').replace(/^\./, '').split('.')[0])
         .filter(Boolean),
     );
-    const readable: Record<string, unknown> = { ...(errorSchema ?? {}) };
+    const readable: Record<string, unknown> = { ...errorSchema };
     for (const property of patternFields) {
       readable[property] = { __errors: [patternMessageFor(property)] };
     }

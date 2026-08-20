@@ -41,8 +41,7 @@ export const URI_FIELD_MARKER = 'x-uri' as const;
  * ignored by the API's ajv instance (no `ajv-formats` registered), and ajv's
  * `uri` format would reject the scheme-less input users actually type.
  */
-export const URL_PATTERN =
-  '^\\s*$|^\\s*([hH][tT][tT][pP][sS]?:\\/\\/)?([a-zA-Z0-9](?:[a-zA-Z0-9-]*[a-zA-Z0-9])?\\.)+[a-zA-Z]{2,}(:\\d{1,5})?([\\/?#][^\\s]*)?\\s*$';
+export const URL_PATTERN = String.raw`^\s*$|^\s*([hH][tT][tT][pP][sS]?:\/\/)?([a-zA-Z0-9](?:[a-zA-Z0-9-]*[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}(:\d{1,5})?([\/?#][^\s]*)?\s*$`;
 
 function isPlainObject(value: unknown): value is JsonRecord {
   return typeof value === 'object' && value !== null && !Array.isArray(value);

@@ -13,7 +13,7 @@ import { toSafeHref, URI_DISPLAY_MAX_CHARS } from '@/lib/uri-field';
 export function UriValue({ value, className }: Readonly<{ value: unknown; className?: string }>) {
   const entries = (Array.isArray(value) ? value : [value])
     .filter((entry) => entry !== null && entry !== undefined)
-    .map((entry) => String(entry))
+    .map(String)
     .filter((entry) => entry.trim().length > 0);
 
   if (entries.length === 0) return <>—</>;
