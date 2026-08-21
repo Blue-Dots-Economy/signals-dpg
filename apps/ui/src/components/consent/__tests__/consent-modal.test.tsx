@@ -399,8 +399,12 @@ describe('gate mode uses the guided read', () => {
     render(<ConsentModal open mode="gate" initialTab="privacy" config={config} />);
     const reader = screen.getByTestId('consent-reader');
     expect(reader).toHaveAttribute('tabindex', '0');
-    expect(reader).toHaveAttribute('role', 'region');
-    expect(reader.getAttribute('aria-label')).toBeTruthy();
+    // `<section>` carries an implicit `region` role once it has an
+    // accessible name — no explicit `role` attribute to assert on, so this
+    // confirms the computed role directly via `getByRole`.
+    const label = reader.getAttribute('aria-label');
+    expect(label).toBeTruthy();
+    expect(screen.getByRole('region', { name: label! })).toBe(reader);
   });
 });
 

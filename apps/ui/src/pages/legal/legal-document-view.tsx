@@ -124,7 +124,7 @@ function splitIntoSections(
       (current ?? preambleLines).push(line);
       continue;
     }
-    if (!inFence && /^(#{2,3})\s+(.*)$/.exec(line.trim())) {
+    if (!inFence && /^#{2,3}\s/.test(line.trim())) {
       current = [];
       bodies.push(current);
       continue;
@@ -245,7 +245,7 @@ const SCROLL_SETTLE_MS = 150;
  * @param props.doc - Which document this route lands the reader on:
  *   `privacy` or `terms`. Both documents render on the page either way.
  */
-export function LegalDocumentView({ doc }: { doc: LegalDoc }): React.JSX.Element {
+export function LegalDocumentView({ doc }: Readonly<{ doc: LegalDoc }>): React.JSX.Element {
   const { t } = useTranslation();
   const { config, isLoading } = useConsentConfig();
   const location = useLocation();

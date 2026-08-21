@@ -133,7 +133,7 @@ describe('<LegalDocumentView />', () => {
 
   it('shows the version and effective date for each document', () => {
     view('privacy');
-    expect(screen.getAllByText(/Version 1/).length).toBe(2);
+    expect(screen.getAllByText(/Version 1/)).toHaveLength(2);
   });
 
   it('does not repeat the document title as a second heading or as the rail\'s first section', () => {

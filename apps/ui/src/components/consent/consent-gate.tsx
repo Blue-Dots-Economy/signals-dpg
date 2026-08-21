@@ -44,9 +44,12 @@ export interface ConsentGateBodyProps {
  * @param props - Documents and the accept callback.
  * @returns The gate body.
  */
-export function ConsentGateBody({ docs, onAccept }: ConsentGateBodyProps): React.JSX.Element {
+export function ConsentGateBody({
+  docs,
+  onAccept,
+}: Readonly<ConsentGateBodyProps>): React.JSX.Element {
   const { t } = useTranslation();
-  const readerRef = useRef<HTMLDivElement>(null);
+  const readerRef = useRef<HTMLElement>(null);
   const [checked, setChecked] = useState(false);
   const docIds = useMemo(() => docs.map((d) => d.id), [docs]);
   const progress = useReadProgress(readerRef, docIds);
@@ -69,14 +72,13 @@ export function ConsentGateBody({ docs, onAccept }: ConsentGateBodyProps): React
        * deliberate: `-1` would make it focusable exactly once via an
        * imperative `.focus()` call but drop it out of the tab sequence, so
        * after tabbing forward to the checkbox a user could never tab BACK
-       * to keep reading — the same trap in a quieter form. `role="region"`
-       * plus an accessible name keeps this from announcing as an anonymous
-       * scroller to a screen reader.
+       * to keep reading — the same trap in a quieter form. A `<section>`
+       * with an accessible name carries the implicit `region` role, so this
+       * doesn't announce as an anonymous scroller to a screen reader.
        */}
-      <div
+      <section
         ref={readerRef}
         data-testid="consent-reader"
-        role="region"
         aria-label={t('consent.reader_label')}
         tabIndex={0}
         // `relative` is defense in depth, not the fix: read-progress.ts
@@ -99,7 +101,7 @@ export function ConsentGateBody({ docs, onAccept }: ConsentGateBodyProps): React
             <Markdown>{doc.body}</Markdown>
           </section>
         ))}
-      </div>
+      </section>
 
       <div className="flex shrink-0 flex-col gap-3 border-t border-border pt-3 sm:pt-4">
         <p

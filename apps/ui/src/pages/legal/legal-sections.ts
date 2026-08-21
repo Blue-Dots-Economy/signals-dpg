@@ -24,8 +24,9 @@ export interface LegalSection {
 function slugify(heading: string): string {
   return heading
     .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-+|-+$/g, '');
+    .split(/[^a-z0-9]+/)
+    .filter(Boolean)
+    .join('-');
 }
 
 /**
@@ -47,16 +48,17 @@ export function extractSections(markdown: string): LegalSection[] {
   let inFence = false;
 
   for (const line of markdown.split('\n')) {
-    if (line.trim().startsWith('```')) {
+    const trimmed = line.trim();
+    if (trimmed.startsWith('```')) {
       inFence = !inFence;
       continue;
     }
     if (inFence) continue;
 
-    const match = /^(#{2,3})\s+(.*)$/.exec(line.trim());
-    if (!match) continue;
+    const m = /^(#{2,3})\s/.exec(trimmed);
+    if (!m) continue;
 
-    const heading = match[2]!.trim();
+    const heading = trimmed.slice(m[1]!.length).trim();
     const base = slugify(heading);
     const count = (seen.get(base) ?? 0) + 1;
     seen.set(base, count);
@@ -64,7 +66,7 @@ export function extractSections(markdown: string): LegalSection[] {
     out.push({
       id: count === 1 ? base : `${base}-${count}`,
       heading,
-      level: match[1]!.length === 2 ? 2 : 3,
+      level: m[1]!.length === 2 ? 2 : 3,
     });
   }
   return out;
