@@ -60,6 +60,15 @@ export const authConfig = {
   create_test_otp: auth.CREATE_TEST_OTP,
   allow_self_signup: auth.SELF_SIGNUP_MODE === 'allowed',
   login_channels: parseLoginChannels(auth.LOGIN_CHANNELS),
+  /**
+   * Self-signup abuse ceiling. Read from here — never re-read process.env — so
+   * the limits stay one source of truth alongside the rest of the auth config.
+   */
+  signup_rate_limit: {
+    window_seconds: auth.SIGNUP_RATE_LIMIT_WINDOW_SECONDS,
+    max_per_identifier: auth.SIGNUP_MAX_PER_IDENTIFIER,
+    max_per_ip: auth.SIGNUP_MAX_PER_IP,
+  },
   // Identity provider. Read this — never re-parse process.env.
   provider: auth.AUTH_PROVIDER,
   /**
