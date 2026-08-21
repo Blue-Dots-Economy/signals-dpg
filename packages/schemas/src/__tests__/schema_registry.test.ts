@@ -59,6 +59,62 @@ describe('fetchSchema — plain documents', () => {
     expect(calls).toEqual([ROOT]);
   });
 
+  it('does no I/O until .ready or getSchema() is touched, so a failure can never go unhandled', async () => {
+    // Every URL 404s, so the load would reject if it were started eagerly.
+    const { fetchFn, calls } = makeFetch({});
+    const unhandled: unknown[] = [];
+    const onUnhandled = (reason: unknown) => unhandled.push(reason);
+    process.on('unhandledRejection', onUnhandled);
+
+    try {
+      const registry = new fetchSchema(ROOT, { fetchFn });
+      expect(registry.schema).toBeNull();
+
+      // Give the microtask + macrotask queues a chance to surface a rejection
+      // that nobody is awaiting. Constructing alone must not schedule one.
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      expect(calls).toEqual([]);
+      expect(unhandled).toEqual([]);
+
+      // The failure surfaces to whoever awaits it, as a rejected awaitable.
+      await expect(registry.getSchema()).rejects.toBeInstanceOf(SchemaFetchError);
+      expect(calls).toEqual([ROOT]);
+      expect(unhandled).toEqual([]);
+    } finally {
+      process.off('unhandledRejection', onUnhandled);
+    }
+  });
+
+  it('memoises the load: repeated .ready / getSchema() share one in-flight promise', async () => {
+    const document = { title: 'profile' };
+    const { fetchFn, calls } = makeFetch({ [ROOT]: document });
+
+    const registry = new fetchSchema(ROOT, { fetchFn });
+    expect(registry.ready).toBe(registry.ready);
+
+    const [a, b, c] = await Promise.all([
+      registry.ready,
+      registry.getSchema(),
+      registry.getSchema(),
+    ]);
+    expect(a).toEqual(document);
+    expect(b).toBe(a);
+    expect(c).toBe(a);
+    expect(calls).toEqual([ROOT]);
+  });
+
+  it('getSchema() returns the `schema` field it is named for', async () => {
+    const document = { title: 'profile' };
+    const { fetchFn } = makeFetch({ [ROOT]: document });
+
+    const registry = new fetchSchema(ROOT, { fetchFn });
+    const viaGetter = await registry.getSchema();
+
+    // Same object identity as the backing field, not a parallel value.
+    expect(viaGetter).toBe(registry.schema);
+    expect(viaGetter).toEqual(document);
+  });
+
   it('getSchema() returns the same resolved value as .ready', async () => {
     const { fetchFn } = makeFetch({ [ROOT]: { type: 'object' } });
     const registry = new fetchSchema(ROOT, { fetchFn });
