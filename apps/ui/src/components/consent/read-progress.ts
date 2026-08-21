@@ -2,10 +2,11 @@
  * Scroll-gating logic for the consent gate.
  *
  * All decisions live in {@link computeReadProgress}, a pure function over plain
- * numbers. jsdom performs no layout — every offset and scroll property reads 0
- * — so testing this through the DOM would mean stubbing geometry on every
- * element. Keeping the logic pure makes it directly testable; the hook only
- * measures and delegates.
+ * numbers. This repo's Vitest environment is happy-dom, which — like jsdom —
+ * performs no real layout: every offset and scroll property reads 0 unless a
+ * test stubs it — so testing this through the DOM would mean stubbing
+ * geometry on every element. Keeping the logic pure makes it directly
+ * testable; the hook only measures and delegates.
  *
  * @module apps/ui/src/components/consent/read-progress
  */
