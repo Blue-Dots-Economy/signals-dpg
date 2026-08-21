@@ -841,9 +841,13 @@ describe('terms & privacy gate on registration', () => {
     await userEvent.click(await screen.findByRole('button', { name: /accept consent/i }));
 
     await waitFor(() => expect(localStorage.getItem('pendingConsent')).not.toBeNull());
+    // Envelope is `{ body, at }` (see `pending-consent.ts`) — `at` is the
+    // staleness timestamp that stops an abandoned Keycloak redirect from
+    // being flushed onto a later, unrelated login.
     const parked = JSON.parse(localStorage.getItem('pendingConsent') as string);
-    expect(parked.source).toBe('signup');
-    expect(parked.items.map((i: { category: string }) => i.category).sort()).toEqual([
+    expect(typeof parked.at).toBe('number');
+    expect(parked.body.source).toBe('signup');
+    expect(parked.body.items.map((i: { category: string }) => i.category).sort()).toEqual([
       'privacy',
       'terms',
     ]);
@@ -888,7 +892,9 @@ describe('OidcCallbackPage — flushing the parked consent', () => {
       source: 'signup',
       items: [{ category: 'terms', version: 'v2' }],
     };
-    localStorage.setItem('pendingConsent', JSON.stringify(parked));
+    // Envelope is `{ body, at }` (see `pending-consent.ts`); `at` must be
+    // recent enough to survive the staleness check.
+    localStorage.setItem('pendingConsent', JSON.stringify({ body: parked, at: Date.now() }));
 
     renderAt(<OidcCallbackPage />, '/auth/callback');
 
@@ -908,7 +914,10 @@ describe('OidcCallbackPage — flushing the parked consent', () => {
   it('still signs the user in when persisting the consent fails', async () => {
     localStorage.setItem(
       'pendingConsent',
-      JSON.stringify({ network: 'blue_dot', brand: null, source: 'signup', items: [] })
+      JSON.stringify({
+        body: { network: 'blue_dot', brand: null, source: 'signup', items: [] },
+        at: Date.now(),
+      })
     );
     acceptConsent.mockRejectedValueOnce(new Error('write failed'));
 
@@ -916,6 +925,43 @@ describe('OidcCallbackPage — flushing the parked consent', () => {
 
     // Signed in regardless — the gate re-prompts next login.
     expect(await screen.findByText('home')).toBeTruthy();
+  });
+
+  /**
+   * Regression guard for a Critical found in the sibling aggregator repo
+   * (apps/web): a "Register another" affordance there reset the form but not
+   * the accepted-consent flag, so participant #2 onward inherited consent as
+   * already given with no documents shown. Signals has no such affordance,
+   * but `pendingConsent` (this describe block) has the equivalent risk: it
+   * survives a full-page redirect to Keycloak's hosted pages via
+   * `localStorage`, which — unlike router state — is shared by every tab and
+   * outlives an abandoned attempt. Without a staleness check, whichever
+   * Keycloak callback completes next on that device would have this consent
+   * flushed onto ITS session, regardless of whether it belongs to the person
+   * who actually accepted it.
+   */
+  it('drops a parked acceptance old enough to belong to an abandoned, unrelated login attempt', async () => {
+    const parked = {
+      network: 'blue_dot',
+      brand: null,
+      source: 'signup',
+      items: [{ category: 'terms', version: 'v2' }],
+    };
+    // Parked minutes ago — far past a normal Keycloak round-trip — as if some
+    // earlier, different signup attempt abandoned the redirect and someone
+    // else's login is completing now.
+    localStorage.setItem(
+      'pendingConsent',
+      JSON.stringify({ body: parked, at: Date.now() - 6 * 60 * 1000 })
+    );
+
+    renderAt(<OidcCallbackPage />, '/auth/callback');
+
+    expect(await screen.findByText('home')).toBeTruthy();
+    expect(acceptConsent).not.toHaveBeenCalled();
+    // Read-once even for a dropped entry — it must not linger to ambush a
+    // third login either.
+    expect(localStorage.getItem('pendingConsent')).toBeNull();
   });
 });
 
@@ -932,7 +978,10 @@ describe('OidcCallbackPage — landing is not conditional on the effect survivin
     // exposed.
     localStorage.setItem(
       'pendingConsent',
-      JSON.stringify({ network: 'blue_dot', brand: null, source: 'signup', items: [] })
+      JSON.stringify({
+        body: { network: 'blue_dot', brand: null, source: 'signup', items: [] },
+        at: Date.now(),
+      })
     );
     let resolveAccept: (v: { ok: boolean }) => void = () => {};
     acceptConsent.mockImplementationOnce(
@@ -963,7 +1012,10 @@ describe('OidcCallbackPage — consent write cannot stall the landing', () => {
   it('lands the user anyway when the consent write hangs', async () => {
     localStorage.setItem(
       'pendingConsent',
-      JSON.stringify({ network: 'blue_dot', brand: null, source: 'signup', items: [] })
+      JSON.stringify({
+        body: { network: 'blue_dot', brand: null, source: 'signup', items: [] },
+        at: Date.now(),
+      })
     );
     // Never resolves.
     acceptConsent.mockImplementationOnce(() => new Promise(() => {}));

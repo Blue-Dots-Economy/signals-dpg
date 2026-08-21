@@ -1,0 +1,235 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/><meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>Public legal page — three approaches · Blue Dots</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400;12..96,600;12..96,800&family=Noto+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+:root{
+  --ink:#0B1220;--ink-2:#334155;--muted:#64748B;--line:#E3EAF6;--line-2:#CBD7EA;
+  --canvas:#F6F9FF;--surface:#FFFFFF;--primary:#0074FF;--primary-700:#0053BD;
+  --r-lg:16px;--r-md:11px;--r-sm:8px;
+  --display:"Bricolage Grotesque",system-ui,sans-serif;--body:"Noto Sans",system-ui,sans-serif;
+}
+*{box-sizing:border-box} html,body{margin:0;padding:0}
+body{font-family:var(--body);color:var(--ink-2);background:var(--canvas);-webkit-font-smoothing:antialiased;line-height:1.6}
+
+/* prototype chrome */
+.bar{position:sticky;top:0;z-index:80;background:rgba(246,249,255,.9);backdrop-filter:blur(10px);border-bottom:1px solid var(--line)}
+.bar-in{max-width:1120px;margin:0 auto;padding:12px 20px;display:flex;gap:14px;align-items:center;flex-wrap:wrap}
+.mark{display:flex;align-items:center;gap:9px;font-family:var(--display);font-weight:800;color:var(--ink);font-size:15px;letter-spacing:-.02em}
+.mark i{width:10px;height:10px;border-radius:50%;background:var(--primary);box-shadow:0 0 0 4px rgba(0,116,255,.18)}
+.mark small{display:block;font-family:var(--body);font-weight:500;font-size:11px;color:var(--muted)}
+.sp{flex:1}
+.pills{display:flex;gap:4px;background:#fff;padding:4px;border-radius:12px;border:1px solid var(--line);flex-wrap:wrap}
+.pill{appearance:none;border:0;background:transparent;font:600 12.5px var(--body);color:var(--muted);padding:7px 12px;border-radius:8px;cursor:pointer;transition:.15s;white-space:nowrap}
+.pill[aria-pressed="true"]{background:var(--primary);color:#fff}
+.pill:focus-visible{outline:2px solid var(--primary);outline-offset:2px}
+
+.note{max-width:1120px;margin:20px auto 0;padding:0 20px}
+.note-in{background:#fff;border:1px solid var(--line);border-radius:var(--r-lg);padding:15px 18px}
+.note h4{font-family:var(--display);font-size:13.5px;color:var(--ink);margin:0 0 4px}
+.note p{margin:0;font-size:12.5px;color:var(--muted)}
+.note dl{display:grid;grid-template-columns:auto 1fr;gap:5px 11px;margin:11px 0 0;font-size:12.5px}
+.note dt{font-weight:700;white-space:nowrap} .note dd{margin:0}
+.g{color:#0E9F6E} .b{color:#B45309}
+
+/* ── the page under test ─────────────────────────────────────── */
+.frame{max-width:1120px;margin:18px auto 60px;padding:0 20px}
+.page{background:var(--surface);border:1px solid var(--line);border-radius:var(--r-lg);overflow:hidden;min-height:560px}
+
+.phead{border-bottom:1px solid var(--line);padding:16px 22px;display:flex;align-items:center;gap:14px;flex-wrap:wrap}
+.back{display:inline-flex;align-items:center;gap:6px;font:600 13px var(--body);color:var(--muted);text-decoration:none}
+.back:hover{color:var(--primary)}
+.utility{display:flex;gap:6px;align-items:center;margin-left:auto}
+.ubtn{font:500 12px var(--body);color:var(--muted);background:#F5F8FF;border:1px solid var(--line);border-radius:7px;padding:5px 9px;cursor:pointer}
+
+.ptitle{padding:26px 22px 0;max-width:760px}
+.ptitle h1{font-family:var(--display);font-weight:800;font-size:clamp(24px,3vw,32px);letter-spacing:-.028em;color:var(--ink);margin:0 0 8px;line-height:1.12}
+.meta{display:flex;gap:8px;align-items:center;flex-wrap:wrap;font-size:12px;color:var(--muted)}
+.chip{background:#EEF4FF;color:var(--primary-700);border-radius:999px;padding:3px 9px;font-weight:700;font-size:11px}
+
+/* segmented switcher (A) */
+.seg{display:inline-flex;gap:4px;background:#F1F5FC;padding:4px;border-radius:11px;margin:18px 22px 0}
+.seg button{appearance:none;border:0;background:transparent;font:600 13.5px var(--body);color:var(--muted);padding:9px 18px;border-radius:8px;cursor:pointer;transition:.15s}
+.seg button[aria-selected="true"]{background:#fff;color:var(--primary);box-shadow:0 1px 3px rgba(11,18,32,.1)}
+
+/* reading column */
+.read{padding:20px 22px 44px;max-width:720px}
+.read h2{font-family:var(--display);font-weight:700;font-size:19px;color:var(--ink);margin:30px 0 8px;letter-spacing:-.015em;scroll-margin-top:90px}
+.read h2:first-child{margin-top:6px}
+.read h3{font:700 14.5px var(--body);color:var(--ink);margin:22px 0 6px;scroll-margin-top:90px}
+.read p{margin:0 0 12px;font-size:14.5px;line-height:1.72}
+.read ul{margin:0 0 12px;padding-left:19px} .read li{font-size:14.5px;margin-bottom:7px;line-height:1.65}
+.read strong{color:var(--ink);font-weight:600}
+.docsep{margin:44px 0 0;border:0;border-top:1px solid var(--line-2)}
+
+/* sidebar (B) */
+.split{display:grid;grid-template-columns:236px 1fr;gap:0}
+.rail{border-right:1px solid var(--line);padding:22px 16px;position:sticky;top:0;align-self:start;max-height:100vh;overflow-y:auto}
+.rail-grp{margin-bottom:18px}
+.rail-doc{display:block;width:100%;text-align:left;appearance:none;border:0;background:transparent;cursor:pointer;
+  font:700 10.5px var(--body);text-transform:uppercase;letter-spacing:.1em;color:var(--muted);
+  padding:5px 9px;border-radius:7px;margin-bottom:5px;transition:.14s}
+.rail-doc:hover{color:var(--primary);background:#F5F8FF}
+.rail-doc[aria-current="true"]{color:var(--primary)}
+.rail-doc:focus-visible{outline:2px solid var(--primary);outline-offset:1px}
+/* Every section reads the same — none of them outranks the others. */
+.rail a{display:block;font-size:12.5px;color:var(--muted);text-decoration:none;padding:6px 9px 6px 13px;
+  border-radius:7px;border-left:2px solid transparent;transition:.14s}
+.rail a:hover{background:#F5F8FF;color:var(--primary)}
+.rail a.on{background:#EEF4FF;color:var(--primary);font-weight:600;border-left-color:var(--primary)}
+.rail-grp[data-active="false"] a{opacity:.75}
+
+/* scrollspy rail (C) */
+.spy{position:sticky;top:0;background:rgba(255,255,255,.94);backdrop-filter:blur(8px);border-bottom:1px solid var(--line);padding:10px 22px;display:flex;gap:7px;overflow-x:auto;z-index:5}
+.spy a{white-space:nowrap;font:600 12.5px var(--body);color:var(--muted);text-decoration:none;padding:6px 12px;border-radius:999px;border:1px solid var(--line);background:#fff;transition:.14s}
+.spy a.on{background:var(--primary);border-color:var(--primary);color:#fff}
+.spy a:hover:not(.on){color:var(--primary);border-color:var(--primary)}
+
+.pfoot{border-top:1px solid var(--line);padding:18px 22px;font-size:12.5px;color:var(--muted);background:#FBFCFF}
+.pfoot a{color:var(--primary);font-weight:600}
+
+@media (max-width:760px){
+  .split{grid-template-columns:1fr}
+  .rail{position:static;border-right:0;border-bottom:1px solid var(--line);max-height:none}
+  .read{padding:18px 16px 36px} .ptitle{padding:20px 16px 0} .phead{padding:13px 16px} .seg{margin:14px 16px 0}
+  .seg button{flex:1;padding:9px 10px} .seg{display:flex}
+  .spy{padding:9px 16px}
+}
+</style>
+</head>
+<body>
+
+<header class="bar"><div class="bar-in">
+  <div class="mark"><i></i><div>Public legal page<small>Three approaches · #636</small></div></div>
+  <div class="sp"></div>
+  <div class="pills" role="group" aria-label="Approach">
+    <button class="pill" data-ap="A" aria-pressed="false">A · Switcher</button>
+    <button class="pill" data-ap="B" aria-pressed="true">B · Contents rail ★ chosen</button>
+    <button class="pill" data-ap="C" aria-pressed="false">C · One page</button>
+  </div>
+  <div class="pills" role="group" aria-label="Entry point">
+    <button class="pill" data-entry="privacy" aria-pressed="true">Arrive via /privacy</button>
+    <button class="pill" data-entry="terms" aria-pressed="false">Arrive via /terms</button>
+  </div>
+</div></header>
+
+<div class="note"><div class="note-in" id="note"></div></div>
+<div class="frame"><div class="page" id="page"></div></div>
+
+<script>
+const DOCS={
+ privacy:{title:'Privacy Policy',version:1,eff:'1 January 2024',sections:[
+   {id:'p-intro',h:'Overview',lvl:2,html:`<p>This policy explains what <strong>Blue Dots</strong> (seeded by EkStep Foundation) collects, why, and the choices you have. We collect only what is needed to connect you with the right opportunities.</p>`},
+   {id:'p-collect',h:'What we collect',lvl:2,html:`<ul><li><strong>Contact details</strong> — your name, email, and phone number.</li><li><strong>Profile information</strong> you choose to provide — such as your role, skills, experience, and location.</li><li><strong>Activity</strong> on the network — the connections and applications you make.</li></ul>`},
+   {id:'p-why',h:'Why we use it',lvl:2,html:`<p>We use your information to <strong>match you with relevant opportunities, jobs, and providers</strong>, and to make your profile discoverable to relevant participants within the network.</p>`},
+   {id:'p-share',h:'When your contact details are shared',lvl:2,html:`<p>Your name, email, and phone number are shared with another seeker or organisation <strong>only when you initiate or accept a connection or application</strong> — and, for applications, only once it is accepted. <strong>We never sell your data</strong> or share it for advertising.</p>`},
+   {id:'p-control',h:'Your control',lvl:2,html:`<p>You can <strong>update</strong> your profile from the portal at any time. To have your information removed, contact us at <strong>hello@bluedotseconomy.org</strong>.</p>`},
+   {id:'p-retain',h:'Retention',lvl:2,html:`<p>We keep your information only for as long as it is needed to connect you within the network.</p>`},
+   {id:'p-griev',h:'Grievances',lvl:2,html:`<p>For any privacy question or request, contact <strong>hello@bluedotseconomy.org</strong>.</p>`}]},
+ terms:{title:'Terms of Service',version:1,eff:'1 January 2024',sections:[
+   {id:'t-intro',h:'Overview',lvl:2,html:`<p>Welcome to <strong>Blue Dots</strong>, a digital network — seeded by EkStep Foundation — that helps opportunity seekers, providers, and aggregators discover and connect with one another.</p>`},
+   {id:'t-who',h:'1. Who can use Blue Dots',lvl:2,html:`<p>Blue Dots is currently <strong>invite-only</strong>. By continuing you confirm that you are at least 18 years old and that any information you provide is accurate and belongs to you or to an organisation you are authorised to represent.</p>`},
+   {id:'t-what',h:'2. What Blue Dots is',lvl:2,html:`<p>Blue Dots is a <strong>discovery and matching network</strong>. We help you find relevant opportunities, jobs, and providers and make your profile discoverable to relevant participants. We are <strong>not a party</strong> to any engagement, employment, or transaction that results — those are solely between the participants involved.</p>`},
+   {id:'t-resp',h:'3. Your responsibilities',lvl:2,html:`<ul><li>Keep your profile accurate and up to date.</li><li>Use the network lawfully and treat other participants with respect.</li><li>Do not misuse contact details you receive, or share them beyond the purpose for which they were shared.</li></ul>`},
+   {id:'t-susp',h:'4. Suspension',lvl:2,html:`<p>We may pause or remove access for misuse, fraudulent listings, or activity that harms other participants.</p>`},
+   {id:'t-asis',h:'5. Service “as is”',lvl:2,html:`<p>Blue Dots is in active development and is provided on an “as is” and “as available” basis, without warranties. We work to keep it reliable but cannot guarantee uninterrupted service.</p>`},
+   {id:'t-law',h:'6. Governing law',lvl:2,html:`<p>These terms are governed by the laws of India. Questions or grievances: <strong>hello@bluedotseconomy.org</strong>.</p>`}]}
+};
+const ORDER=['privacy','terms'];
+const NOTES={
+ A:{h:'A · Document switcher',s:'One page, a segmented Privacy / Terms control at the top. /privacy and /terms each preselect their document. Closest to what exists today.',
+    d:[['Strength','Smallest change — the two routes already exist and keep working as deep links.','g'],
+       ['Strength','Only one document on screen, so the reading column stays uncluttered on a phone.','g'],
+       ['Cost','No way to see both at once, and no in-document navigation for a long policy.','b']]},
+ B:{h:'B · Contents rail',s:'A persistent rail listing both documents and every section inside them; the reading column sits alongside. Standard documentation layout.',
+    d:[['Strength','Every section is reachable in one click, and the reader always knows where they are.','g'],
+       ['Strength','Scales without redesign if a third document or a long policy arrives.','g'],
+       ['Strength','Deep-linkable to any individual section, not just the document.','g'],
+       ['Cost','Most markup, and the rail has to collapse to something sensible on a phone.','b']]},
+ C:{h:'C · One continuous page',s:'Both documents stacked on a single page with a sticky chip rail that tracks position. /privacy and /terms jump to anchors on the same page.',
+    d:[['Strength','Matches “one dedicated public page” most literally — one URL holds everything.','g'],
+       ['Strength','Ctrl-F finds anything across both documents; nothing is hidden behind a tab.','g'],
+       ['Cost','A long scroll, and arriving at /terms drops you mid-page, which can be disorienting.','b'],
+       ['Cost','The chip rail eats vertical space on a phone, where it matters most.','b']]}
+};
+
+let ap='B', entry='privacy';
+const $=s=>document.querySelector(s);
+const secHtml=d=>d.sections.map(s=>`<h${s.lvl} id="${s.id}">${s.h}</h${s.lvl}>${s.html}`).join('');
+const head=()=>`<div class="phead"><a class="back" href="#">← Back to sign in</a>
+  <div class="utility"><button class="ubtn">English ▾</button><button class="ubtn">◐</button></div></div>`;
+const foot=()=>`<div class="pfoot">Questions about any of this? Write to <a href="#">hello@bluedotseconomy.org</a>.</div>`;
+const meta=d=>`<div class="meta"><span class="chip">Version ${d.version}</span><span>In effect since ${d.eff}</span></div>`;
+
+function renderA(){
+  const d=DOCS[entry];
+  $('#page').innerHTML=`${head()}
+    <div class="ptitle"><h1>Legal</h1>${meta(d)}</div>
+    <div class="seg" role="tablist">${ORDER.map(k=>
+      `<button role="tab" data-doc="${k}" aria-selected="${k===entry}">${DOCS[k].title}</button>`).join('')}</div>
+    <div class="read">${secHtml(d)}</div>${foot()}`;
+  $('#page').querySelectorAll('[data-doc]').forEach(b=>b.onclick=()=>{entry=b.dataset.doc;syncEntry();render();});
+}
+
+function renderB(){
+  const d=DOCS[entry];
+  $('#page').innerHTML=`${head()}
+   <div class="split">
+     <nav class="rail">${ORDER.map(k=>`<div class="rail-grp" data-active="${k===entry}">
+       <button class="rail-doc" data-godoc="${k}" aria-current="${k===entry}">${DOCS[k].title}</button>
+       ${DOCS[k].sections.map((s,i)=>`<a href="#${s.id}" data-doc="${k}" data-sec="${s.id}"
+          class="${k===entry&&i===0?'on':''}">${s.h}</a>`).join('')}</div>`).join('')}</nav>
+     <div>
+       <div class="ptitle"><h1>${d.title}</h1>${meta(d)}</div>
+       <div class="read" id="reader">${secHtml(d)}</div>${foot()}
+     </div>
+   </div>`;
+  $('#page').querySelectorAll('[data-godoc]').forEach(b=>b.onclick=()=>{
+    // Standing in for router navigation to /privacy or /terms.
+    entry=b.dataset.godoc; syncEntry(); render();
+  });
+  $('#page').querySelectorAll('.rail a').forEach(a=>a.onclick=e=>{
+    e.preventDefault();
+    if(a.dataset.doc!==entry){entry=a.dataset.doc;syncEntry();render();}
+    setTimeout(()=>{
+      document.getElementById(a.dataset.sec)?.scrollIntoView({behavior:'smooth',block:'start'});
+      $('#page').querySelectorAll('.rail a').forEach(x=>x.classList.toggle('on',x.dataset.sec===a.dataset.sec));
+    },0);
+  });
+}
+
+function renderC(){
+  const chips=ORDER.flatMap(k=>[{id:k+'-top',h:DOCS[k].title}]);
+  $('#page').innerHTML=`${head()}
+    <div class="ptitle"><h1>Legal</h1><div class="meta"><span>Privacy Policy and Terms of Service — both documents, one page.</span></div></div>
+    <div class="spy">${chips.map((c,i)=>`<a href="#${c.id}" class="${i===ORDER.indexOf(entry)?'on':''}">${c.h}</a>`).join('')}</div>
+    <div class="read" id="reader">${ORDER.map((k,i)=>`
+      ${i?'<hr class="docsep"/>':''}
+      <h2 id="${k}-top" style="font-size:24px;margin-top:${i?'34px':'6px'}">${DOCS[k].title}</h2>
+      ${meta(DOCS[k])}
+      ${secHtml(DOCS[k])}`).join('')}</div>${foot()}`;
+  // Arriving via /terms lands you mid-page — demonstrate that honestly.
+  if(entry==='terms') setTimeout(()=>document.getElementById('terms-top')?.scrollIntoView({behavior:'smooth',block:'start'}),60);
+  const spy=[...$('#page').querySelectorAll('.spy a')];
+  const io=new IntersectionObserver(es=>es.forEach(e=>{
+    if(e.isIntersecting) spy.forEach(a=>a.classList.toggle('on',a.getAttribute('href')==='#'+e.target.id));
+  }),{rootMargin:'-20% 0px -70% 0px'});
+  ORDER.forEach(k=>{const el=document.getElementById(k+'-top'); if(el) io.observe(el);});
+  spy.forEach(a=>a.onclick=e=>{e.preventDefault();
+    document.querySelector(a.getAttribute('href'))?.scrollIntoView({behavior:'smooth',block:'start'});});
+}
+
+function render(){ ({A:renderA,B:renderB,C:renderC})[ap](); paintNote(); }
+function paintNote(){ const n=NOTES[ap];
+  $('#note').innerHTML=`<h4>${n.h}</h4><p>${n.s}</p><dl>${n.d.map(([k,v,t])=>`<dt class="${t}">${k}</dt><dd>${v}</dd>`).join('')}</dl>`; }
+function syncEntry(){ document.querySelectorAll('[data-entry]').forEach(b=>b.setAttribute('aria-pressed',String(b.dataset.entry===entry))); }
+
+document.querySelectorAll('[data-ap]').forEach(b=>b.onclick=()=>{
+  ap=b.dataset.ap; document.querySelectorAll('[data-ap]').forEach(x=>x.setAttribute('aria-pressed',String(x===b))); render(); });
+document.querySelectorAll('[data-entry]').forEach(b=>b.onclick=()=>{ entry=b.dataset.entry; syncEntry(); render(); });
+render();
+</script>
+</body></html>
