@@ -1,11 +1,16 @@
 # syntax=docker/dockerfile:1.7
 
-FROM node:24-alpine AS base
+# Build stages run on the DHI *dev* variant: it is the only one that carries a
+# shell, apk, corepack and npm. The runtime stage below uses the hardened
+# variant, which carries none of them — see the `runner` stage for why that
+# forces the production install to happen here rather than there.
+FROM dhi.io/node:24-alpine-dev AS base
 
-# Shared base image: Corepack enables the pinned pnpm version and
-# libc6-compat avoids common Alpine runtime issues with native modules.
-RUN apk add --no-cache libc6-compat \
-  && corepack enable
+# Corepack enables the pinned pnpm version. libc6-compat is deliberately NOT
+# installed: the dependency closure is pure JS (no node-gyp / prebuild-install
+# in the lockfile), so nothing links against glibc, and the hardened runtime
+# variant could not provide it anyway.
+RUN corepack enable
 
 ENV PNPM_HOME=/pnpm
 ENV PATH=$PNPM_HOME:$PATH
@@ -55,16 +60,15 @@ RUN --mount=type=cache,id=pnpm-store,target=/pnpm/store \
 RUN --mount=type=cache,id=pnpm-store,target=/pnpm/store \
   pnpm install --frozen-lockfile --prod
 
-FROM node:24-alpine AS runner
-
-RUN apk add --no-cache libc6-compat && corepack enable
+# Assemble the exact runtime tree — production node_modules included — while a
+# shell and pnpm are still available. Previously this install ran inside the
+# final image; the hardened runtime variant has no shell, so it has to happen
+# in a dev-variant stage and be copied across as a finished directory.
+# The inputs below are byte-for-byte what the old runner stage copied, and the
+# install command is unchanged, so the resulting dependency closure is identical.
+FROM base AS prod-deps
 
 WORKDIR /app
-
-ENV NODE_ENV=production
-ENV API_PORT=2742
-ENV PNPM_HOME=/pnpm
-ENV PATH=$PNPM_HOME:$PATH
 
 # Copy ONLY what is needed to install deps correctly
 COPY --from=builder /app/pnpm-lock.yaml ./pnpm-lock.yaml
@@ -79,13 +83,36 @@ COPY --from=pruner /repo/examples ./examples
 RUN --mount=type=cache,id=pnpm-store,target=/pnpm/store \
   pnpm install --prod --filter=api...
 
-# Copy built output AFTER install (important for layer caching)
+
+FROM dhi.io/node:24-alpine AS runner
+
+# Hardened runtime: no shell, no apk, no npm/corepack, runs as `node` (uid 1000).
+# That means no RUN instruction is possible past this line — everything the
+# image needs must arrive via COPY.
+WORKDIR /app
+
+ENV NODE_ENV=production
+ENV API_PORT=2742
+# TMPDIR is deliberately NOT set. `network_schema_cache.ts` mkdir -p's under
+# os.tmpdir(); the hardened base ships /tmp at mode 1777, writable by the
+# unprivileged runtime user, so the default is correct. An earlier revision
+# pointed TMPDIR at /app/.tmp on the assumption /tmp might be absent — it is
+# not, and that dir landed root-owned (a COPY of an empty directory copies no
+# entries, so its --chown never applied), crashing the pod with EACCES.
+
+# The finished workspace (node_modules included) built by prod-deps. Copied as
+# root-owned and world-readable, matching the previous image, where the install
+# also ran as root before the USER switch.
+COPY --from=prod-deps /app ./
+
+# Copy built output AFTER deps (important for layer caching)
 COPY --from=builder /app/apps/api/dist ./apps/api/dist
 
 # Deploy migration assets — the image self-migrates the DB via
-# `pnpm --filter api db:migrate:deploy` (apps/api/scripts/migrate.mjs): extension
-# preflight -> auto-baseline -> one drizzle migrate() over apps/api/drizzle/.
-# Prod deps only (drizzle-orm + pg) — no drizzle-kit.
+# `node apps/api/scripts/migrate.mjs`: extension preflight -> auto-baseline ->
+# one drizzle migrate() over apps/api/drizzle/. Invoked directly with node, not
+# through the `pnpm --filter api db:migrate:deploy` alias, because pnpm does not
+# exist in this image. Prod deps only (drizzle-orm + pg) — no drizzle-kit.
 COPY --from=builder /app/apps/api/scripts ./apps/api/scripts
 COPY --from=builder /app/apps/api/drizzle ./apps/api/drizzle
 
