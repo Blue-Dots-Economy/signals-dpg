@@ -42,7 +42,7 @@ export function ConsentProgressTracker({
   const inset = 50 / docs.length;
 
   return (
-    <div className="relative mx-auto flex max-w-[340px] items-start justify-between px-1.5 pt-0.5">
+    <div className="relative flex w-full items-start justify-between px-1.5 pt-0.5">
       <div
         data-testid="consent-progress-track"
         className="absolute top-[9px] h-0.5 overflow-hidden rounded-sm bg-border"
