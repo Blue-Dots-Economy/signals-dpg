@@ -4,6 +4,8 @@ import z, { SchemaFetchError } from '@dpg/schemas';
 
 import { auth_middleware_if_enabled } from '@api/plugins/auth/auth_middleware';
 import { refreshConsumedSchemas } from '@/network_schema_cache';
+import { require_admin_role } from '@/middleware/require_admin_role';
+import { refetch_schemas_rate_limit } from '@/utils/refetch_schemas_rate_limit';
 
 const ErrorResponseSchema = z.object({
   error: z.string(),
@@ -15,7 +17,11 @@ export const refetch_schema: FastifyPluginAsyncZod =
     fastify.route({
       url: '/refetch_schemas',
       method: 'POST',
-      preHandler: auth_middleware_if_enabled,
+      preHandler: [
+        auth_middleware_if_enabled,
+        require_admin_role,
+        refetch_schemas_rate_limit,
+      ],
       schema: {
         tags: ['network'],
         response: {
@@ -23,11 +29,23 @@ export const refetch_schema: FastifyPluginAsyncZod =
             refreshed: z.boolean(),
             schema_count: z.number(),
           }),
+          403: ErrorResponseSchema,
+          429: ErrorResponseSchema,
           502: ErrorResponseSchema,
           500: ErrorResponseSchema,
         },
       },
       handler: async (request, reply) => {
+        request.log.info(
+          {
+            operation: 'refetch_schema',
+            status: 'allowed',
+            user_id: request.user?.id,
+            role: request.user?.role,
+          },
+          'Schema refetch requested',
+        );
+
         try {
           const schemas = await refreshConsumedSchemas();
 

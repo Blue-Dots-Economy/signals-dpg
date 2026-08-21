@@ -77,6 +77,15 @@ vi.mock('@/config', () => ({
     },
   },
   getCurrentApiBaseUrl: () => configState.apiBaseUrl,
+  databasesConfig: { redis_url: 'redis://localhost:6379' },
+}));
+
+// refetch_schema.ts's rate limiter imports the real redis client module,
+// which connects eagerly at import time — mock it so importing this test
+// file doesn't attempt a real Redis connection, matching this repo's
+// established pattern (see e.g. publish_item_event.test.ts).
+vi.mock('@api/db/secondary/redis', () => ({
+  redis: { incr: async () => 1, expire: async () => 1 },
 }));
 
 vi.mock('@api/plugins/auth/auth_middleware', () => ({
@@ -130,7 +139,7 @@ async function loadRoute(
   return routes[0];
 }
 
-const log = { error: vi.fn() };
+const log = { error: vi.fn(), info: vi.fn() };
 
 async function call(
   route: CapturedRoute,
@@ -391,7 +400,10 @@ describe('refetch_schema (POST /refetch_schemas)', () => {
 
     expect(route.url).toBe('/refetch_schemas');
     expect(route.method).toBe('POST');
-    expect(route.preHandler).toBe(auth_middleware_if_enabled);
+    // Auth, then admin-role check, then rate limiting (GITHUB-ISSUES-COMPILATION.md #12).
+    expect(route.preHandler).toBeInstanceOf(Array);
+    expect((route.preHandler as unknown[])[0]).toBe(auth_middleware_if_enabled);
+    expect((route.preHandler as unknown[])).toHaveLength(3);
   });
 
   it('reports the refreshed schema count on success', async () => {
