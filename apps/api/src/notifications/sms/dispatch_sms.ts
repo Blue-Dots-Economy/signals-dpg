@@ -26,6 +26,27 @@ function maskPhone(to: string): string {
   return tail ? `****${tail}` : '****';
 }
 
+/**
+ * Project the caller's variables onto the template's declared `vars`: keep only
+ * declared keys (drop undeclared extras) and report any declared key the caller
+ * omitted. When a template declares no vars, forward the caller's map as-is.
+ */
+function selectDeclaredVars(
+  declared: string[],
+  provided: Record<string, string>,
+  onMissing: (missing: string[]) => void,
+): Record<string, string> {
+  if (declared.length === 0) return provided;
+  const out: Record<string, string> = {};
+  const missing: string[] = [];
+  for (const name of declared) {
+    if (Object.prototype.hasOwnProperty.call(provided, name)) out[name] = provided[name]!;
+    else missing.push(name);
+  }
+  if (missing.length) onMissing(missing);
+  return out;
+}
+
 export interface SmsNotifyRequest {
   channel: 'sms';
   template_id: string;
@@ -72,7 +93,13 @@ export function createSmsSender(deps: SmsSenderDeps): SmsSender {
           return { ok: false, skipped: true };
         }
 
-        const variables = args.variables ?? {};
+        // Enforce the declared variable contract: forward ONLY the vars the
+        // DLT template expects (dropping undeclared extras keeps stray PII off
+        // the wire), and surface any declared var the caller failed to supply
+        // — it would otherwise render blank in the delivered SMS.
+        const variables = selectDeclaredVars(entry.vars, args.variables ?? {}, (missing) =>
+          deps.log('sms missing declared variables', { caseId: args.caseId, missing }),
+        );
 
         // Dev preview only — the real text is rendered provider-side from the
         // DLT template; this shows what that will say. Never in prod.
@@ -89,7 +116,12 @@ export function createSmsSender(deps: SmsSenderDeps): SmsSender {
         });
         return { ok: true };
       } catch (err) {
-        deps.log('sms dispatch failed', { err, caseId: args.caseId });
+        // Log the message only — never the raw error object, which can
+        // serialize the provider request/response (phone, variables = PII).
+        deps.log('sms dispatch failed', {
+          caseId: args.caseId,
+          error: err instanceof Error ? err.message : String(err),
+        });
         return { ok: false };
       }
     },

@@ -41,6 +41,33 @@ describe('dispatchSms', () => {
     });
   });
 
+  it('forwards only declared vars, dropping undeclared extras', async () => {
+    const { sender, notify } = senderWith(CONFIGURED);
+    await sender.dispatchSms({
+      caseId: 'profile.create',
+      to: '+91900',
+      variables: { name: 'Asha', link: 'L', secret: 'drop-me' },
+    });
+    expect(notify).toHaveBeenCalledWith(
+      expect.objectContaining({ variables: { name: 'Asha', link: 'L' } }),
+    );
+  });
+
+  it('warns (and still sends) when a declared var is missing', async () => {
+    const { sender, notify, log } = senderWith(CONFIGURED);
+    const res = await sender.dispatchSms({
+      caseId: 'profile.create',
+      to: '+91900',
+      variables: { name: 'Asha' }, // link missing
+    });
+    expect(res).toEqual({ ok: true });
+    expect(log).toHaveBeenCalledWith(
+      'sms missing declared variables',
+      expect.objectContaining({ missing: ['link'] }),
+    );
+    expect(notify).toHaveBeenCalledWith(expect.objectContaining({ variables: { name: 'Asha' } }));
+  });
+
   it('forwards an explicit priority instead of the default', async () => {
     const { sender, notify } = senderWith(CONFIGURED);
     await sender.dispatchSms({ caseId: 'profile.create', to: '+91900', priority: 'realtime' });
@@ -86,6 +113,10 @@ describe('dispatchSms', () => {
     const sender = createSmsSender({ notify, getTemplates: () => index, defaultNetwork: null, log });
     const res = await sender.dispatchSms({ caseId: 'profile.create', to: '+91900' });
     expect(res).toEqual({ ok: false });
-    expect(log).toHaveBeenCalledWith('sms dispatch failed', expect.objectContaining({ caseId: 'profile.create' }));
+    // Message only — the raw error object (may carry phone/vars) is never logged.
+    expect(log).toHaveBeenCalledWith('sms dispatch failed', {
+      caseId: 'profile.create',
+      error: 'boom',
+    });
   });
 });
