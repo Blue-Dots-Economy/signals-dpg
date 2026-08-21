@@ -456,6 +456,7 @@
   "consent.profile_minor_continue": "Send code to guardian",
   "consent.profile_for": "This consent is for your profile: {{name}}",
   "consent.cancel": "Cancel",
+  "legal.version_effective": "Version {{version}} · Effective from {{date}}",
   "u18.step_title_dob": "When's your birthday?",
   "u18.step_title_guardian": "Guardian details",
   "u18.step_title_otp": "Confirm with your guardian",
