@@ -44,11 +44,11 @@ describe('resolveOwnerNameEmail', () => {
 
   it('returns name + email for a known user', async () => {
     rowQueue.push([{ name: 'Asha', email: 'a@b.com' }]);
-    expect(await resolveOwnerNameEmail('u1')).toEqual({ name: 'Asha', email: 'a@b.com' });
+    expect(await resolveOwnerNameEmail('u1')).toEqual({ found: true, name: 'Asha', email: 'a@b.com' });
   });
 
   it('returns nulls for an unknown user', async () => {
-    expect(await resolveOwnerNameEmail('missing')).toEqual({ name: null, email: null });
+    expect(await resolveOwnerNameEmail('missing')).toEqual({ found: false, name: null, email: null });
   });
 });
 

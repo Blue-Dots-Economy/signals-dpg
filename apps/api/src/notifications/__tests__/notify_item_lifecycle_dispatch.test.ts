@@ -50,7 +50,7 @@ describe('dispatchItemLifecycleNotification', () => {
 
   it('no-ops for a phone-only owner (no email)', async () => {
     configured();
-    resolveOwnerNameEmail.mockResolvedValue({ name: 'Asha', email: null });
+    resolveOwnerNameEmail.mockResolvedValue({ found: true,name: 'Asha', email: null });
     await dispatchItemLifecycleNotification(
       { op: 'create', ownerId: 'u1', domain: 'seeker', network: 'blue_dot' },
       log,
@@ -60,7 +60,7 @@ describe('dispatchItemLifecycleNotification', () => {
 
   it('sends profile.create for a self seeker create with the owner name', async () => {
     configured();
-    resolveOwnerNameEmail.mockResolvedValue({ name: 'Asha', email: 'a@x.com' });
+    resolveOwnerNameEmail.mockResolvedValue({ found: true,name: 'Asha', email: 'a@x.com' });
     await dispatchItemLifecycleNotification(
       { op: 'create', ownerId: 'u1', domain: 'seeker', network: 'blue_dot' },
       log,
@@ -73,12 +73,13 @@ describe('dispatchItemLifecycleNotification', () => {
       network: 'blue_dot',
       ctaUrl: 'https://app.example/home',
       variables: { name: 'Asha' },
+      log: expect.any(Function),
     });
   });
 
   it('sends offer.update for a provider update', async () => {
     configured();
-    resolveOwnerNameEmail.mockResolvedValue({ name: 'Acme', email: 'a@x.com' });
+    resolveOwnerNameEmail.mockResolvedValue({ found: true,name: 'Acme', email: 'a@x.com' });
     await dispatchItemLifecycleNotification(
       { op: 'update', ownerId: 'u1', domain: 'service_provider', network: 'purple_dot' },
       log,
@@ -88,7 +89,7 @@ describe('dispatchItemLifecycleNotification', () => {
 
   it('sends account.aggregator_init with the org name for an aggregator create', async () => {
     configured();
-    resolveOwnerNameEmail.mockResolvedValue({ name: 'Asha', email: 'a@x.com' });
+    resolveOwnerNameEmail.mockResolvedValue({ found: true,name: 'Asha', email: 'a@x.com' });
     await dispatchItemLifecycleNotification(
       {
         op: 'create',
@@ -103,12 +104,13 @@ describe('dispatchItemLifecycleNotification', () => {
     expect(dispatchEmail.mock.calls[0]![0]).toMatchObject({
       caseId: 'account.aggregator_init',
       variables: { name: 'Asha', aggregatorOrg: 'SkillBridge Network' },
+      log: expect.any(Function),
     });
   });
 
   it('falls back to the brand name when the aggregator org name is missing', async () => {
     configured();
-    resolveOwnerNameEmail.mockResolvedValue({ name: 'Asha', email: 'a@x.com' });
+    resolveOwnerNameEmail.mockResolvedValue({ found: true,name: 'Asha', email: 'a@x.com' });
     await dispatchItemLifecycleNotification(
       { op: 'create', ownerId: 'u1', domain: 'seeker', network: 'blue_dot', actingOrgType: 'aggregator' },
       log,
@@ -118,7 +120,7 @@ describe('dispatchItemLifecycleNotification', () => {
 
   it('greets a nameless owner as "there"', async () => {
     configured();
-    resolveOwnerNameEmail.mockResolvedValue({ name: null, email: 'a@x.com' });
+    resolveOwnerNameEmail.mockResolvedValue({ found: true,name: null, email: 'a@x.com' });
     await dispatchItemLifecycleNotification(
       { op: 'retire', ownerId: 'u1', domain: 'seeker', network: 'blue_dot' },
       log,
