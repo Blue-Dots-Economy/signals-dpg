@@ -448,6 +448,7 @@
   "consent.hint_done": "You have reached the end — you can agree now.",
   "consent.cap_privacy": "Privacy",
   "consent.cap_terms": "Terms",
+  "consent.reader_label": "Terms and privacy documents",
   "consent.agree_short": "I agree",
   "consent.profile_title": "Confirm your profile consent",
   "consent.profile_title_minor": "Guardian confirmation needed",

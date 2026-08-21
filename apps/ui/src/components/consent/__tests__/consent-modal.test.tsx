@@ -317,4 +317,47 @@ describe('gate mode uses the guided read', () => {
       screen.queryByText('By using this service you agree to these terms.'),
     ).not.toBeInTheDocument();
   });
+
+  /**
+   * Keyboard reachability regression guard. Fix round 1 found that with the
+   * checkbox/button disabled and no close button, Radix's own
+   * `@radix-ui/react-focus-scope` (unmocked here — this exercises the real
+   * library, not a stand-in) found no tabbable candidate on open and fell
+   * back to focusing the outer, non-scrollable dialog wrapper, actively
+   * swallowing Tab. This asserts the actual consequence of that autofocus
+   * pass: `document.activeElement` must be the reader itself once the gate
+   * dialog opens. This is genuine evidence, not an assertion of intent —
+   * before the `tabIndex={0}` fix on `consent-reader`, this test failed with
+   * `document.activeElement` pointing at `[data-slot="dialog-content"]`
+   * instead (confirmed by hand while diagnosing the bug).
+   *
+   * What this test does NOT prove: that pressing the physical Tab key
+   * cycles focus in a real browser. happy-dom/jsdom do not implement the
+   * browser's native Tab-key focus-traversal algorithm, so a `fireEvent`
+   * Tab keydown here would not exercise that path — only Radix's own
+   * FocusScope effects (autofocus-on-mount, and its keydown handler used
+   * for *cycling once already inside*) run for real. The autofocus part is
+   * exactly the part that was broken, and is what's asserted below.
+   */
+  it('gives keyboard focus to the reading pane on open, not the non-scrollable wrapper', () => {
+    render(<ConsentModal open mode="gate" initialTab="privacy" config={config} />);
+    const reader = screen.getByTestId('consent-reader');
+    expect(document.activeElement).toBe(reader);
+  });
+
+  /**
+   * Structural companion to the test above: the reader must actually be a
+   * tab stop (positive `tabIndex`, not `-1` — `-1` is reachable exactly once
+   * via an imperative `.focus()` but drops out of the Tab sequence, so a
+   * user who tabs forward to the checkbox could never tab back to keep
+   * reading) and must announce as a named landmark rather than an anonymous
+   * scroller.
+   */
+  it('makes the reading pane a real, named tab stop', () => {
+    render(<ConsentModal open mode="gate" initialTab="privacy" config={config} />);
+    const reader = screen.getByTestId('consent-reader');
+    expect(reader).toHaveAttribute('tabindex', '0');
+    expect(reader).toHaveAttribute('role', 'region');
+    expect(reader.getAttribute('aria-label')).toBeTruthy();
+  });
 });

@@ -55,9 +55,30 @@ export function ConsentGateBody({ docs, onAccept }: ConsentGateBodyProps): React
     <div className="flex min-h-0 flex-1 flex-col gap-3 sm:gap-4">
       <ConsentProgressTracker docs={docs} progress={progress} />
 
+      {/*
+       * Keyboard reachability: with the checkbox/button disabled until
+       * `progress.allRead`, and no close button in gate mode, this pane is
+       * the ONLY tabbable candidate inside the dialog on first open. A
+       * plain, tabindex-less div is invisible to
+       * @radix-ui/react-focus-scope's `getTabbableCandidates` (it only
+       * accepts `tabIndex >= 0`), so without this the dialog's FocusScope
+       * falls back to focusing its own non-scrollable container and Tab is
+       * swallowed (no candidates to cycle to) — a keyboard-only user could
+       * never reach or scroll the reading pane, and the gate cannot be
+       * completed without scrolling. `tabIndex={0}` (not `-1`) is
+       * deliberate: `-1` would make it focusable exactly once via an
+       * imperative `.focus()` call but drop it out of the tab sequence, so
+       * after tabbing forward to the checkbox a user could never tab BACK
+       * to keep reading — the same trap in a quieter form. `role="region"`
+       * plus an accessible name keeps this from announcing as an anonymous
+       * scroller to a screen reader.
+       */}
       <div
         ref={readerRef}
         data-testid="consent-reader"
+        role="region"
+        aria-label={t('consent.reader_label')}
+        tabIndex={0}
         className="min-h-0 flex-1 overflow-y-auto rounded-md border border-border bg-muted/20 p-4 sm:p-5"
       >
         {docs.map((doc, i) => (
