@@ -79,6 +79,6 @@ export function loadSmsTemplateIndex(layers: string[]): SmsTemplateIndex {
  */
 export function renderSmsPreview(body: string, variables: Record<string, string>): string {
   return body.replace(/\{\{(\w+)\}\}/g, (_m, name: string) =>
-    Object.prototype.hasOwnProperty.call(variables, name) ? variables[name]! : `{{${name}}}`,
+    Object.hasOwn(variables, name) ? variables[name]! : `{{${name}}}`,
   );
 }

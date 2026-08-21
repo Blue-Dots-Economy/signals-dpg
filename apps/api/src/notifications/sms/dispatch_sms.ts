@@ -40,7 +40,7 @@ function selectDeclaredVars(
   const out: Record<string, string> = {};
   const missing: string[] = [];
   for (const name of declared) {
-    if (Object.prototype.hasOwnProperty.call(provided, name)) out[name] = provided[name]!;
+    if (Object.hasOwn(provided, name)) out[name] = provided[name]!;
     else missing.push(name);
   }
   if (missing.length) onMissing(missing);
@@ -87,7 +87,7 @@ export function createSmsSender(deps: SmsSenderDeps): SmsSender {
         const index = await deps.getTemplates(network);
         const entry = index.get(args.caseId);
 
-        if (!entry || !entry.templateId) {
+        if (!entry?.templateId) {
           // Not configured / not yet DLT-approved — a no-op, not an error.
           deps.log('sms template not configured', { caseId: args.caseId, network });
           return { ok: false, skipped: true };
