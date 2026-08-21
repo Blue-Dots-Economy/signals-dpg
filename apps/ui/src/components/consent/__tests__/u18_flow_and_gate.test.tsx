@@ -311,6 +311,20 @@ describe('SignupGuardianFlow (pre-auth U18 signup)', () => {
     expect(screen.getByText('Guardian-facing under-18 terms.')).toBeInTheDocument();
     expect(screen.queryByText('Adult terms body.')).not.toBeInTheDocument();
 
+    // The checkbox only unlocks once the reader has scrolled through every
+    // document (`useReadProgress`); happy-dom lays nothing out, so stub the
+    // scroller as fully read, the same technique consent-gate.test.tsx uses.
+    const reader = screen.getByTestId('consent-reader');
+    Object.defineProperty(reader, 'scrollHeight', { value: 600, configurable: true });
+    Object.defineProperty(reader, 'clientHeight', { value: 200, configurable: true });
+    Object.defineProperty(reader, 'scrollTop', { value: 400, writable: true, configurable: true });
+    for (const [id, top] of [['privacy', 0], ['terms', 300]] as const) {
+      const section = reader.querySelector<HTMLElement>(`[data-consent-section="${id}"]`)!;
+      Object.defineProperty(section, 'offsetTop', { value: top, configurable: true });
+      Object.defineProperty(section, 'offsetHeight', { value: 300, configurable: true });
+    }
+    fireEvent.scroll(reader);
+
     await userEvent.click(screen.getByRole('checkbox'));
     await userEvent.click(screen.getByRole('button', { name: /accept & continue/i }));
 
