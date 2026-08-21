@@ -35,6 +35,15 @@ describe('loadSmsTemplateIndex', () => {
     expect(t?.body).toBe('brand copy');
   });
 
+  it('a later layer can introduce a case absent from the base', () => {
+    const index = loadSmsTemplateIndex([
+      'profile.create.template_id=BASE',
+      'offer.create.template_id=BRAND\noffer.create.vars=name', // new case, brand only
+    ]);
+    expect(index.get('profile.create')?.templateId).toBe('BASE');
+    expect(index.get('offer.create')).toEqual({ templateId: 'BRAND', body: '', vars: ['name'] });
+  });
+
   it('ignores keys without a known suffix', () => {
     const index = loadSmsTemplateIndex(['profile.create.subject=nope']);
     expect(index.has('profile.create')).toBe(false);

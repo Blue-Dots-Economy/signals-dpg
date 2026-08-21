@@ -41,6 +41,12 @@ describe('dispatchSms', () => {
     });
   });
 
+  it('forwards an explicit priority instead of the default', async () => {
+    const { sender, notify } = senderWith(CONFIGURED);
+    await sender.dispatchSms({ caseId: 'profile.create', to: '+91900', priority: 'realtime' });
+    expect(notify).toHaveBeenCalledWith(expect.objectContaining({ priority: 'realtime' }));
+  });
+
   it('skips (no-op) when the case has no approved template_id', async () => {
     const { sender, notify } = senderWith('profile.create.template_id=\nprofile.create.vars=name');
     const res = await sender.dispatchSms({ caseId: 'profile.create', to: '+91900' });
