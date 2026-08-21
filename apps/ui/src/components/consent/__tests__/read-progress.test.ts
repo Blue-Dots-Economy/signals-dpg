@@ -1,5 +1,7 @@
 import { describe, it, expect } from 'vitest';
-import { computeReadProgress, initialProgress } from '@/components/consent/read-progress';
+import { renderHook } from '@testing-library/react';
+import type { RefObject } from 'react';
+import { computeReadProgress, initialProgress, useReadProgress } from '@/components/consent/read-progress';
 
 // Three 300px sections stacked in a 200px-tall viewport.
 const sections = [
@@ -93,5 +95,25 @@ describe('initialProgress', () => {
     const oldBootstrap = computeReadProgress({ scrollTop: 0, clientHeight: 0, scrollHeight: 0 }, [], []);
     expect(oldBootstrap.allRead).toBe(true);
     expect(initialProgress(['privacy', 'terms']).allRead).toBe(false);
+  });
+});
+
+describe('useReadProgress', () => {
+  it('does not report allRead before the first measurement has happened', () => {
+    // A null ref means measure() and the mount effect both bail out, so the
+    // hook is observed at its bootstrap value. This is the only way to see
+    // the pre-measurement state: with a real element, RTL flushes the effect
+    // inside act() before renderHook returns, and the bootstrap value is gone.
+    const ref: RefObject<HTMLElement | null> = { current: null };
+    const { result } = renderHook(() => useReadProgress(ref, ['privacy', 'terms']));
+    expect(result.current.allRead).toBe(false);
+    expect(result.current.readIds).toEqual([]);
+    expect(result.current.currentId).toBe('privacy');
+  });
+
+  it('reports allRead for a genuinely empty document list so it cannot deadlock', () => {
+    const ref: RefObject<HTMLElement | null> = { current: null };
+    const { result } = renderHook(() => useReadProgress(ref, []));
+    expect(result.current.allRead).toBe(true);
   });
 });
