@@ -367,6 +367,32 @@ export const create_item_handler = async (
       request.log.warn({ err }, 'cache invalidation after create failed'),
     );
 
+    // Owner-facing create email (#531/#534). Fire-and-forget after commit —
+    // never blocks or fails the create. Lazy-imported so the notification/config
+    // chain stays out of this route's static module graph. An aggregator
+    // acting-org routes to the initiation email instead of the self create email.
+    // `userId` is the resolved OWNER on both paths — the session caller for a
+    // self create, and `body.created_by` for an admin-api create (validated
+    // above) — so it's the correct recipient regardless of who called.
+    // `lifecycleStatus` distinguishes a `live` create ("you're live") from a
+    // `draft` one ("complete your profile"): a create can commit draft
+    // (incomplete / gated minor) while still returning 201.
+    void import('@/notifications/notify_item_lifecycle')
+      .then(({ dispatchItemLifecycleNotification }) =>
+        dispatchItemLifecycleNotification(
+          {
+            op: 'create',
+            ownerId: userId,
+            domain: body.item_domain,
+            network: body.item_network,
+            actingOrgType: request.acting_org?.org_type ?? null,
+            lifecycleStatus: created.lifecycleStatus,
+          },
+          request.log,
+        ),
+      )
+      .catch((err) => request.log.warn({ err }, 'item-lifecycle notify (create) failed'));
+
     return reply.code(201).send({
       item_type: created.itemType,
       item_id: created.itemId,

@@ -18,6 +18,7 @@ const {
   invalidateItemFetchCache,
   publishItemEvent,
   createItemInternal,
+  dispatchItemLifecycleNotification,
   resolveGoLiveGates,
   resolveLocationsForCreate,
   getWardAge,
@@ -67,6 +68,7 @@ const {
     invalidateItemFetchCache: vi.fn(),
     publishItemEvent: vi.fn(),
     createItemInternal: vi.fn(),
+    dispatchItemLifecycleNotification: vi.fn(),
     resolveGoLiveGates: vi.fn(),
     resolveLocationsForCreate: vi.fn(),
     getWardAge: vi.fn(),
@@ -164,6 +166,11 @@ vi.mock('@/services/item_service', () => ({
   ItemServiceError: FakeItemServiceError,
   createItemInternal: (...a: unknown[]) => createItemInternal(...a),
   resolveGoLiveGates: (...a: unknown[]) => resolveGoLiveGates(...a),
+}));
+
+// The create seam lazy-imports this; the mock intercepts the dynamic import.
+vi.mock('@/notifications/notify_item_lifecycle', () => ({
+  dispatchItemLifecycleNotification: (...a: unknown[]) => dispatchItemLifecycleNotification(...a),
 }));
 
 vi.mock('@/services/geocoding/resolve_locations_for_create', () => ({
@@ -265,6 +272,7 @@ beforeEach(() => {
   createItemInternal.mockResolvedValue({
     itemId: 'item-1',
     itemType: 'profile_1.0',
+    lifecycleStatus: 'live',
   });
   publishItemEvent.mockResolvedValue(undefined);
   invalidateItemFetchCache.mockResolvedValue(undefined);
@@ -532,6 +540,46 @@ describe('server-owned fields', () => {
 
     expect(reply.statusCode).toBe(201);
     expect(log.warn).toHaveBeenCalled();
+  });
+});
+
+// --- lifecycle-email seam (#531/#534) --------------------------------------
+
+describe('create_item_handler — lifecycle notification seam', () => {
+  it('dispatches a create notification for the owner with the committed lifecycle status', async () => {
+    createItemInternal.mockResolvedValue({
+      itemId: 'item-1',
+      itemType: 'profile_1.0',
+      lifecycleStatus: 'draft', // e.g. incomplete profile — drives *.create_incomplete copy
+    });
+
+    const reply = await call({
+      user: { id: 'u1' },
+      body: baseBody({ consent: { category: 'profile_creation', version: 1 } }),
+    });
+    expect(reply.statusCode).toBe(201);
+
+    // Fire-and-forget after commit — flush the void-import microtask.
+    await vi.waitFor(() => expect(dispatchItemLifecycleNotification).toHaveBeenCalledTimes(1));
+    expect(dispatchItemLifecycleNotification.mock.calls[0]![0]).toMatchObject({
+      op: 'create',
+      ownerId: 'u1', // the resolved owner (session caller here)
+      network: 'blue_dot',
+      domain: 'student',
+      lifecycleStatus: 'draft',
+    });
+  });
+
+  it('still returns 201 when the create notification rejects (best-effort)', async () => {
+    dispatchItemLifecycleNotification.mockRejectedValueOnce(new Error('NS down'));
+
+    const reply = await call({
+      user: { id: 'u1' },
+      body: baseBody({ consent: { category: 'profile_creation', version: 1 } }),
+    });
+
+    expect(reply.statusCode).toBe(201); // route unaffected by the notify rejection
+    await vi.waitFor(() => expect(dispatchItemLifecycleNotification).toHaveBeenCalled());
   });
 });
 

@@ -18,7 +18,8 @@ vi.mock('@api/db/postgres/drizzle_config', () => ({
 }));
 
 vi.mock('@api/db/postgres/schema/auth', () => ({
-  user: { id: 'user.id', email: 'user.email' },
+  user: { id: 'user.id', email: 'user.email', name: 'user.name' },
+  organization: { id: 'organization.id', name: 'organization.name' },
 }));
 
 vi.mock('@dpg/database', () => ({
@@ -29,7 +30,45 @@ vi.mock('@dpg/database', () => ({
   },
 }));
 
-import { resolveOwnerEmail, resolveProviderServiceName } from '../resolve_owner';
+import {
+  resolveOwnerEmail,
+  resolveOwnerNameEmail,
+  resolveOrgName,
+  resolveProviderServiceName,
+} from '../resolve_owner';
+
+describe('resolveOwnerNameEmail', () => {
+  beforeEach(() => {
+    rowQueue.length = 0;
+  });
+
+  it('returns name + email for a known user', async () => {
+    rowQueue.push([{ name: 'Asha', email: 'a@b.com' }]);
+    expect(await resolveOwnerNameEmail('u1')).toEqual({ found: true, name: 'Asha', email: 'a@b.com' });
+  });
+
+  it('returns nulls for an unknown user', async () => {
+    expect(await resolveOwnerNameEmail('missing')).toEqual({ found: false, name: null, email: null });
+  });
+});
+
+describe('resolveOrgName', () => {
+  beforeEach(() => {
+    rowQueue.length = 0;
+  });
+
+  it('returns the org display name', async () => {
+    rowQueue.push([{ name: 'SkillBridge Network' }]);
+    expect(await resolveOrgName('org-1')).toBe('SkillBridge Network');
+  });
+
+  it('returns null for an unknown or blank org', async () => {
+    rowQueue.push([]);
+    expect(await resolveOrgName('missing')).toBeNull();
+    rowQueue.push([{ name: '  ' }]);
+    expect(await resolveOrgName('blank')).toBeNull();
+  });
+});
 
 describe('resolveOwnerEmail', () => {
   beforeEach(() => {
