@@ -27,6 +27,14 @@ vi.mock('../item_decrypt', () => ({
     decryptItemPrivate(row),
 }));
 
+// `mirrorActionEventToSourceInstance` runs its target URL through the SSRF
+// guard, which does a real DNS lookup — mock it so `peer.example.com`
+// (a non-resolvable placeholder host) deterministically resolves to a public
+// IP instead of depending on the test environment's actual DNS/network access.
+vi.mock('node:dns/promises', () => ({
+  lookup: vi.fn(async () => ({ address: '203.0.113.10', family: 4 })),
+}));
+
 import { apiConfig } from '@/config';
 import {
   buildActionEventPayload,
@@ -604,6 +612,7 @@ describe('fetchLocalItemSnapshot', () => {
 describe('mirrorActionEventToSourceInstance', () => {
   const makeLog = () => ({
     error: vi.fn((_obj: unknown, _msg?: string) => {}),
+    info: vi.fn((_obj: unknown, _msg?: string) => {}),
   });
   const asLog = (log: ReturnType<typeof makeLog>) =>
     log as unknown as Parameters<typeof mirrorActionEventToSourceInstance>[1];
