@@ -403,3 +403,88 @@ describe('gate mode uses the guided read', () => {
     expect(reader.getAttribute('aria-label')).toBeTruthy();
   });
 });
+
+/**
+ * Regression guard for a Critical found in the sibling aggregator repo
+ * (apps/web): there, `useReadProgress`'s mount effect bails because the gate
+ * body renders unconditionally while the dialog is closed, so the effect's
+ * `if (!el) return` fires on a scroll container that doesn't exist yet — and
+ * because `scrollRef` is a stable ref and `measure` is memoised on stable
+ * inputs, the effect never re-runs once the dialog opens and the container
+ * appears. No listener, no observer, no measurement, ever: `allRead` stays
+ * `false` forever and the gate cannot be completed.
+ *
+ * Signals' `ConsentGateBody` (and therefore `useReadProgress`) only exists
+ * inside `ResponsiveDialog`'s children, which both underlying primitives
+ * (`@radix-ui/react-dialog`'s `Dialog.Content` and vaul's `Drawer.Content`,
+ * which itself wraps the very same `Dialog.Content`) gate behind
+ * `<Presence present={forceMount || context.open}>` — verified by reading
+ * the installed `@radix-ui/react-dialog@1.1.23` and `vaul@1.1.2` bundles
+ * directly, not assumed from docs. Neither this repo's `dialog.tsx`,
+ * `drawer.tsx`, `responsive-dialog.tsx`, nor `consent-modal.tsx` ever passes
+ * `forceMount`, so `present` reduces to `context.open`: the whole subtree,
+ * `ConsentGateBody` included, is absent from the DOM while closed and is
+ * mounted FRESH the instant `open` flips true — never present-but-hidden.
+ * That means `useReadProgress`'s mount effect always runs with the reader
+ * already in the DOM, so it can never hit the aggregator's stale-closure
+ * trap.
+ *
+ * This test exercises exactly the sequence that hid the aggregator's bug:
+ * mount closed, flip to open, then scroll to the end. It must keep passing
+ * even if this component is refactored, or it has silently regressed to the
+ * aggregator's defect.
+ */
+describe('mount-closed-then-open parity (regression guard for aggregator Critical A)', () => {
+  beforeEach(() => {
+    vi.stubGlobal(
+      'ResizeObserver',
+      class {
+        observe() {}
+        disconnect() {}
+      },
+    );
+  });
+
+  it('measures and unlocks the checkbox after opening, even though the gate first mounted closed', async () => {
+    const user = userEvent.setup();
+    const onAccept = vi.fn();
+
+    const { rerender } = render(
+      <ConsentModal
+        open={false}
+        mode="gate"
+        initialTab="privacy"
+        config={config}
+        onAccept={onAccept}
+        onOpenChange={vi.fn()}
+      />,
+    );
+
+    // Precondition: the reader is genuinely absent while closed, not just
+    // hidden -- otherwise this test would not exercise the same mount
+    // sequence as the aggregator's defect.
+    expect(screen.queryByTestId('consent-reader')).not.toBeInTheDocument();
+
+    rerender(
+      <ConsentModal
+        open={true}
+        mode="gate"
+        initialTab="privacy"
+        config={config}
+        onAccept={onAccept}
+        onOpenChange={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByTestId('consent-reader')).toBeInTheDocument();
+
+    stubReaderAsFullyRead();
+
+    const checkbox = screen.getByRole('checkbox');
+    expect(checkbox).toBeEnabled();
+    await user.click(checkbox);
+
+    const acceptBtn = screen.getByRole('button', { name: /accept/i });
+    expect(acceptBtn).not.toBeDisabled();
+  });
+});
