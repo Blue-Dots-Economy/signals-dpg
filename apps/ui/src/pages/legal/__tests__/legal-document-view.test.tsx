@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { LegalDocumentView } from '@/pages/legal/legal-document-view';
@@ -315,5 +315,146 @@ describe('<LegalDocumentView /> deep-link and arrival scrolling', () => {
       'id',
       'governing-law',
     );
+  });
+
+  // Both documents open with intro prose before their first heading, so at
+  // scroll-top the scroll-spy has nothing "in view" to highlight on its own
+  // — without a fallback, the rail would land with no pill at all. Each
+  // route's first section must be pilled on arrival, and it must be that
+  // ROUTE's document's first section specifically (not merely whichever
+  // section happens to render first on the page, which is always Privacy's).
+  const BOTH_HAVE_SECTIONS = consentConfig({
+    privacyContent: '## Privacy Policy\n\nIntro.\n### Retention\nx',
+    termsContent: '## Terms of Service\n\nWelcome.\n### Governing law\nIndia.',
+  });
+
+  it('pills the first section on arrival at /privacy', () => {
+    mockUseConsentConfig.mockReturnValue(BOTH_HAVE_SECTIONS);
+    render(
+      <MemoryRouter initialEntries={['/privacy']}>
+        <LegalDocumentView doc="privacy" />
+      </MemoryRouter>,
+    );
+    expect(screen.getByRole('link', { name: 'Retention' })).toHaveAttribute(
+      'aria-current',
+      'true',
+    );
+    expect(screen.getByRole('link', { name: 'Governing law' })).not.toHaveAttribute(
+      'aria-current',
+    );
+  });
+
+  it('pills the first section on arrival at /terms — Terms\' own first section, not Privacy\'s', () => {
+    mockUseConsentConfig.mockReturnValue(BOTH_HAVE_SECTIONS);
+    render(
+      <MemoryRouter initialEntries={['/terms']}>
+        <LegalDocumentView doc="terms" />
+      </MemoryRouter>,
+    );
+    expect(screen.getByRole('link', { name: 'Governing law' })).toHaveAttribute(
+      'aria-current',
+      'true',
+    );
+    expect(screen.getByRole('link', { name: 'Retention' })).not.toHaveAttribute('aria-current');
+  });
+});
+
+describe('<LegalDocumentView /> click pins the highlight through its scroll', () => {
+  // Reproduction: a rail entry whose section body is short enough that the
+  // FOLLOWING heading also ends up within the scroll-spy's "passed the
+  // reading line" reach while the click's scroll is still in flight. Without
+  // a pin, that transient geometry would win and the pill would drift to the
+  // next entry down instead of staying on the one just clicked.
+  const SHORT_SECTION_SHAPE = consentConfig({
+    privacyContent:
+      '## Privacy Policy\n\nIntro.\n### First\nBody one.\n### Short\nx\n### Third\nBody three.',
+    termsContent: '## Terms of Service\n\nWelcome.',
+  });
+
+  function mockTop(id: string, top: number) {
+    const el = document.getElementById(id);
+    if (!el) throw new Error(`missing element #${id}`);
+    vi.spyOn(el, 'getBoundingClientRect').mockReturnValue({
+      top,
+      bottom: top + 20,
+      left: 0,
+      right: 0,
+      width: 0,
+      height: 20,
+      x: 0,
+      y: top,
+      toJSON: () => ({}),
+    } as DOMRect);
+  }
+
+  const originalMatchMedia = window.matchMedia;
+
+  beforeEach(() => {
+    mockUseConsentConfig.mockReturnValue(SHORT_SECTION_SHAPE);
+    Element.prototype.scrollIntoView = vi.fn() as unknown as typeof Element.prototype.scrollIntoView;
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    window.matchMedia = originalMatchMedia;
+  });
+
+  it('keeps the clicked (short) section highlighted through a misleading mid-scroll read, and after settling', () => {
+    vi.useFakeTimers();
+    view('privacy');
+
+    const shortLink = screen.getByRole('link', { name: 'Short' });
+    fireEvent.click(shortLink);
+    expect(shortLink).toHaveAttribute('aria-current', 'true');
+
+    // Mid-flight: geometry momentarily suggests "Third" has also passed the
+    // reading line (the short-section overshoot). A spy with no pin would
+    // jump to it right here.
+    mockTop('privacy-document', 0);
+    mockTop('first', -50);
+    mockTop('short', 10);
+    mockTop('third', 50);
+    fireEvent.scroll(window);
+
+    expect(screen.getByRole('link', { name: 'Short' })).toHaveAttribute('aria-current', 'true');
+    expect(screen.getByRole('link', { name: 'Third' })).not.toHaveAttribute('aria-current');
+
+    // Settled: the transient reading was transient — at rest, only "Short"
+    // has actually reached the reading line.
+    mockTop('third', 150);
+    vi.advanceTimersByTime(500);
+
+    expect(screen.getByRole('link', { name: 'Short' })).toHaveAttribute('aria-current', 'true');
+    expect(screen.getByRole('link', { name: 'Third' })).not.toHaveAttribute('aria-current');
+  });
+
+  it('releases the pin quickly under reduced motion, where there is no scroll animation in flight', () => {
+    window.matchMedia = ((query: string) => ({
+      matches: true,
+      media: query,
+      addEventListener: () => {},
+      removeEventListener: () => {},
+    })) as unknown as typeof window.matchMedia;
+
+    vi.useFakeTimers();
+    view('privacy');
+
+    const shortLink = screen.getByRole('link', { name: 'Short' });
+    fireEvent.click(shortLink);
+    expect(Element.prototype.scrollIntoView).toHaveBeenCalledWith(
+      expect.objectContaining({ behavior: 'auto' }),
+    );
+
+    // No further scroll events at all (an instant jump fires at most one) —
+    // the pin must still release on its own rather than staying stuck.
+    vi.advanceTimersByTime(500);
+
+    mockTop('privacy-document', 0);
+    mockTop('first', -50);
+    mockTop('short', 10);
+    mockTop('third', 150);
+    fireEvent.scroll(window);
+
+    expect(screen.getByRole('link', { name: 'Short' })).toHaveAttribute('aria-current', 'true');
   });
 });

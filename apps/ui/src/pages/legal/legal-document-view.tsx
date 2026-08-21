@@ -13,12 +13,13 @@
  * page does not surface), so unlike the sibling aggregator repo the rail
  * lists just the two documents and their sections — no audience grouping.
  */
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { ArrowLeft, Loader2 } from 'lucide-react';
 import { LanguageSwitcher } from '@/components/layout/language-switcher';
 import { ThemeModeToggle } from '@/components/layout/theme-mode-toggle';
+import { PortalHeader } from '@/components/layout/portal-header';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import { useConsentConfig } from '@/hooks/use-consent-config';
 import { Markdown } from '@/components/consent/markdown';
@@ -204,6 +205,38 @@ function prefersReducedMotion(): boolean {
 }
 
 /**
+ * The rail entry to highlight when no heading has actually scrolled past the
+ * reading line yet — either a document with no sections at all, or (see
+ * `computeActiveId` below) the very top of the page before any heading has
+ * passed. Shared by the arrival landing and the scroll-spy so both fall back
+ * to the same entry: the document's own first section, or its own heading if
+ * it has none.
+ */
+function pillFallbackId(renderableDoc: RenderableDoc | undefined, doc: LegalDoc): string {
+  return renderableDoc?.sections[0]?.id ?? docHeadingId(doc);
+}
+
+/**
+ * How close to the top of the viewport a heading must have scrolled to count
+ * as "passed" — matches the `scroll-mt-6` (24px) offset headings already
+ * carry, plus a little slack for the rest of the reading column's own top
+ * padding, so the highlighted entry is the one actually sitting at the top of
+ * the reading area, not one still a full viewport away.
+ */
+const READING_LINE_PX = 96;
+
+/**
+ * How long to wait, after the most recent scroll event, before treating a
+ * click-triggered scroll as settled and handing the highlight back to the
+ * spy. Deliberately a fixed debounce rather than a "smooth scroll finished"
+ * callback (no such event is universally available) — each scroll event
+ * in flight pushes the release out again, so a long smooth scroll is
+ * protected for its whole duration, while a reduced-motion jump (at most one
+ * scroll event) releases almost immediately.
+ */
+const SCROLL_SETTLE_MS = 150;
+
+/**
  * Renders the shared layout for `/privacy` and `/terms`: loading state,
  * unavailable fallback, the app bar (back link + language/theme controls),
  * the two-document contents rail, and the reading column holding both
@@ -238,6 +271,128 @@ export function LegalDocumentView({ doc }: { doc: LegalDoc }): React.JSX.Element
     [availableDocs],
   );
 
+  // Scroll-spy: the rail's highlight follows whichever heading has most
+  // recently scrolled past the reading line. Position-based (each heading's
+  // own `getBoundingClientRect().top`), not an IntersectionObserver
+  // percentage band — a band has to assume something about how tall a
+  // section is, and a section shorter than the band lets the *next* heading
+  // enter the band before the current one has genuinely been read, so the
+  // pill jumps to it early. Comparing raw top-edge position makes no such
+  // assumption: the active entry is just the last heading (in document
+  // order) at or above `READING_LINE_PX`, which holds regardless of section
+  // length.
+
+  // Kept alongside `activeId` so `computeActiveId`'s no-candidate branch (an
+  // empty page, defensively) has a same-render value to fall back to without
+  // needing `activeId` itself in its dependency list.
+  const activeIdRef = useRef(activeId);
+  activeIdRef.current = activeId;
+
+  const computeActiveId = useCallback((): string => {
+    const elements = spyTargetIds
+      .map((id) => document.getElementById(id))
+      .filter((el): el is HTMLElement => el !== null);
+    if (elements.length === 0) return activeIdRef.current;
+
+    // The last element (in document order) that has scrolled up past the
+    // reading line — a document's own heading counts here too, so this
+    // still finds something the moment a document's intro prose reaches the
+    // top, before any of its `##`/`###` headings have.
+    let lastPassed: HTMLElement | null = null;
+    for (const el of elements) {
+      if (el.getBoundingClientRect().top <= READING_LINE_PX) {
+        lastPassed = el;
+      } else {
+        break;
+      }
+    }
+
+    // Nothing has passed yet — genuinely at the very top of the page. Same
+    // "first document's first section" fallback as the "own heading, no
+    // section yet" branch below, just spelled out for the empty case.
+    if (!lastPassed) return pillFallbackId(availableDocs[0], DOC_ORDER[0]);
+
+    const currentDoc = availableDocs.find((d) => docHeadingId(d.doc) === lastPassed!.id);
+    if (!currentDoc) {
+      // `lastPassed` is a section id, not a document heading — it is
+      // already the entry to highlight.
+      return lastPassed.id;
+    }
+    // `lastPassed` is a document's own heading with none of its sections
+    // reached yet (its intro prose is still what's on screen) — highlight
+    // its first section instead of leaving the pill on a bare doc heading,
+    // which would be the same "nothing really highlighted" gap this whole
+    // fallback exists to close.
+    return pillFallbackId(currentDoc, currentDoc.doc);
+  }, [spyTargetIds, availableDocs]);
+
+  // A just-clicked rail entry, or a programmatic (arrival/deep-link) scroll,
+  // is pinned for the duration of its scroll — otherwise the effect below
+  // would recompute from transient mid-scroll geometry and the pill would
+  // flicker across whichever entries the scroll passes through before
+  // resting on the intended one.
+  const pinnedIdRef = useRef<string | null>(null);
+  const pinReleaseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const armPinRelease = useCallback(() => {
+    if (pinReleaseTimerRef.current) clearTimeout(pinReleaseTimerRef.current);
+    pinReleaseTimerRef.current = setTimeout(() => {
+      pinnedIdRef.current = null;
+      setActiveId(computeActiveId());
+    }, SCROLL_SETTLE_MS);
+  }, [computeActiveId]);
+
+  /**
+   * Scrolls `targetElId` into view (if it exists) and pins the rail's
+   * highlight to `pillId` for the duration of that scroll. The two can
+   * differ: a no-hash arrival at `/terms` scrolls to the *document* heading
+   * (`terms-document`) but pills its *first section* — otherwise the
+   * pinned value itself would be the bare doc heading the fallback above
+   * exists to avoid.
+   */
+  const scrollAndPin = useCallback(
+    (targetElId: string, pillId: string) => {
+      setActiveId(pillId);
+      pinnedIdRef.current = pillId;
+      armPinRelease();
+      const el = document.getElementById(targetElId);
+      if (el) {
+        el.scrollIntoView({ behavior: prefersReducedMotion() ? 'auto' : 'smooth', block: 'start' });
+      }
+    },
+    [armPinRelease],
+  );
+
+  useEffect(() => {
+    if (!contentReady || spyTargetIds.length === 0) return;
+
+    function handleScroll() {
+      if (pinnedIdRef.current) {
+        // Still mid-flight: keep pushing the release out rather than acting
+        // on this event, so a long smooth scroll stays pinned for its whole
+        // duration.
+        armPinRelease();
+        return;
+      }
+      setActiveId(computeActiveId());
+    }
+
+    window.addEventListener('scroll', handleScroll, { passive: true });
+    window.addEventListener('resize', handleScroll);
+    return () => {
+      window.removeEventListener('scroll', handleScroll);
+      window.removeEventListener('resize', handleScroll);
+    };
+  }, [contentReady, spyTargetIds, computeActiveId, armPinRelease]);
+
+  // Release a pin left over from an unmounted click (e.g. navigating away
+  // mid-scroll) rather than leaking the timer.
+  useEffect(() => {
+    return () => {
+      if (pinReleaseTimerRef.current) clearTimeout(pinReleaseTimerRef.current);
+    };
+  }, []);
+
   // Deep-link / arrival landing. Two ways a target section fails to scroll
   // into view without this:
   //   (a) a rail click is a same-page anchor, not a full navigation — so the
@@ -251,58 +406,40 @@ export function LegalDocumentView({ doc }: { doc: LegalDoc }): React.JSX.Element
   // route's own document heading — UNLESS that document is already the first
   // one on the page, in which case it is already at the top and there is
   // nothing to scroll to.
+  //
+  // No-hash arrival never highlights a section on its own: every document
+  // opens with intro prose before its first heading, so the scroll-spy
+  // has nothing "passed" at scroll-top and highlights nothing (see
+  // `pillFallbackId`). Rather than land with the rail showing no pill at
+  // all, default the highlight to the routed document's own first section
+  // (or its own heading, for a document with no sections) — the same
+  // fallback the spy uses once real scrolling starts. `scrollAndPin` also
+  // keeps the spy from fighting this scroll while it's in flight: a real
+  // browser fires genuine `scroll` events for a programmatic
+  // `scrollIntoView` exactly as it would for a user's own scrolling, and
+  // without the pin the spy would recompute mid-flight and briefly show
+  // whichever heading the animation happens to be passing through.
   useEffect(() => {
     if (!contentReady) return;
     const hashId = location.hash ? decodeURIComponent(location.hash.slice(1)) : null;
-    const targetId = hashId ?? (doc !== DOC_ORDER[0] ? docHeadingId(doc) : null);
-    if (!targetId) return;
-    const el = document.getElementById(targetId);
-    if (!el) return;
-    el.scrollIntoView({ behavior: prefersReducedMotion() ? 'auto' : 'smooth', block: 'start' });
-    setActiveId(targetId);
-  }, [location.hash, contentReady, doc]);
-
-  // Scroll-spy: the rail's highlight follows whichever heading is currently
-  // in view. `happy-dom` (the test environment) provides a stub
-  // `IntersectionObserver` that never actually fires — fine here, since
-  // clicking a rail entry sets `activeId` directly (below) and tests cover
-  // that path instead.
-  useEffect(() => {
-    if (!contentReady || spyTargetIds.length === 0) return;
-    const elements = spyTargetIds
-      .map((id) => document.getElementById(id))
-      .filter((el): el is HTMLElement => el !== null);
-    if (elements.length === 0) return;
-
-    const visible = new Set<string>();
-    const observer = new IntersectionObserver(
-      (entries) => {
-        for (const entry of entries) {
-          if (entry.isIntersecting) visible.add(entry.target.id);
-          else visible.delete(entry.target.id);
-        }
-        for (let i = elements.length - 1; i >= 0; i -= 1) {
-          if (visible.has(elements[i]!.id)) {
-            setActiveId(elements[i]!.id);
-            break;
-          }
-        }
-      },
-      { rootMargin: '-15% 0px -75% 0px', threshold: 0 },
-    );
-    elements.forEach((el) => observer.observe(el));
-    return () => observer.disconnect();
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- keyed on the id list, not element identity
-  }, [contentReady, spyTargetIds.join('|')]);
+    if (hashId) {
+      if (document.getElementById(hashId)) scrollAndPin(hashId, hashId);
+      return;
+    }
+    const routedDoc = availableDocs.find((d) => d.doc === doc);
+    const fallbackId = pillFallbackId(routedDoc, doc);
+    if (doc !== DOC_ORDER[0]) {
+      scrollAndPin(docHeadingId(doc), fallbackId);
+    } else {
+      // Already at the top — nothing to scroll to, so no pin needed either.
+      setActiveId(fallbackId);
+    }
+  }, [location.hash, contentReady, doc, availableDocs, scrollAndPin]);
 
   function handleRailClick(id: string) {
     return (event: React.MouseEvent) => {
       event.preventDefault();
-      const el = document.getElementById(id);
-      if (el) {
-        el.scrollIntoView({ behavior: prefersReducedMotion() ? 'auto' : 'smooth', block: 'start' });
-      }
-      setActiveId(id);
+      scrollAndPin(id, id);
     };
   }
 
@@ -325,134 +462,151 @@ export function LegalDocumentView({ doc }: { doc: LegalDoc }): React.JSX.Element
   }
 
   return (
-    <div className="min-h-svh bg-background px-6 py-8">
-      <div className="mx-auto max-w-5xl">
-        {/* App bar: a way back to sign-in (someone can land here mid-signup
-            with no other path back) plus the same language/theme controls
-            the app's top bar carries, separated from the content by a rule. */}
-        <div className="mb-8 flex items-center justify-between gap-4 border-b border-border pb-4">
+    <div className="min-h-svh bg-background">
+      <TooltipProvider>
+        {/* App bar: matches `TopBar`'s own height/padding/border (the app's
+            real bar elsewhere) rather than inventing new spacing, plus the
+            brand logo it was missing — this page previously had no branding
+            at all, which is what made it look foreign next to the rest of
+            the app. `TopBar` itself isn't reused wholesale: it pulls in
+            search, view-toggle, filters, notifications and login/user-menu
+            state via `useAuth`, none of which mean anything on a public,
+            unauthenticated legal page. `PortalHeader` is the piece that
+            actually carries the logo, so it's composed here directly with
+            the same language/theme controls, plus the back link — the only
+            way back for someone mid-signup. */}
+        <header className="sticky top-0 z-40 flex min-h-14 items-center gap-3 border-b bg-gradient-to-r from-background to-primary/5 px-4 py-2 sm:px-6">
+          <PortalHeader />
+          {/* Label drops below `sm` (icon-only) so a long wordmark plus
+              language/theme controls never wrap the row and overlap the
+              content underneath — same collapse `TopBar`'s own Back control
+              uses. The link stays reachable and named for screen readers via
+              `aria-label` either way. */}
           <Link
             to="/auth/login"
-            className="inline-flex items-center gap-1.5 text-sm font-semibold text-muted-foreground transition-colors hover:text-primary"
+            aria-label={t('legal.back_to_sign_in')}
+            className="inline-flex shrink-0 items-center gap-1.5 text-sm font-semibold text-muted-foreground transition-colors hover:text-primary"
           >
             <ArrowLeft className="h-4 w-4" aria-hidden="true" />
-            {t('legal.back_to_sign_in')}
+            <span className="hidden sm:inline">{t('legal.back_to_sign_in')}</span>
           </Link>
-          <TooltipProvider>
-            <div className="flex items-center gap-1">
-              <LanguageSwitcher compact />
-              <ThemeModeToggle />
-            </div>
-          </TooltipProvider>
-        </div>
+          <div className="ml-auto flex items-center gap-1">
+            <LanguageSwitcher compact />
+            <ThemeModeToggle />
+          </div>
+        </header>
+      </TooltipProvider>
 
-        <div className="grid gap-6 md:grid-cols-[236px_1fr] md:gap-10">
-          <nav
-            aria-label={t('legal.contents_label')}
-            className="border-b border-border pb-6 mb-6 md:sticky md:top-6 md:mb-0 md:self-start md:border-b-0 md:border-r md:pb-0 md:pr-6"
-          >
-            {availableDocs.map(({ doc: d, version, sections }) => {
-              const headingId = docHeadingId(d);
-              const isActiveDoc =
-                activeId === headingId || sections.some((s) => s.id === activeId);
+      <div className="px-6 py-8">
+        <div className="mx-auto max-w-5xl">
+          <div className="grid gap-6 md:grid-cols-[236px_1fr] md:gap-10">
+            <nav
+              aria-label={t('legal.contents_label')}
+              className="border-b border-border pb-6 mb-6 md:sticky md:top-6 md:mb-0 md:self-start md:border-b-0 md:border-r md:pb-0 md:pr-6"
+            >
+              {availableDocs.map(({ doc: d, version, sections }) => {
+                const headingId = docHeadingId(d);
+                const isActiveDoc =
+                  activeId === headingId || sections.some((s) => s.id === activeId);
 
-              return (
-                <div key={d} className={cn('mb-6', !isActiveDoc && 'opacity-75')}>
-                  <a
-                    href={`#${headingId}`}
-                    onClick={handleRailClick(headingId)}
-                    aria-current={isActiveDoc ? 'page' : undefined}
-                    className={cn(
-                      'block rounded-md px-3 py-1.5 text-[10.5px] font-bold uppercase tracking-[0.1em] transition-colors',
-                      isActiveDoc
-                        ? 'text-primary'
-                        : 'text-muted-foreground hover:bg-muted hover:text-primary',
-                    )}
-                  >
-                    {version.title}
-                  </a>
-                  <ul className="mt-1 space-y-0.5">
-                    {sections.map((section) => {
-                      const isActiveSection = activeId === section.id;
-                      return (
-                        <li key={section.id}>
-                          <a
-                            href={`#${section.id}`}
-                            onClick={handleRailClick(section.id)}
-                            aria-current={isActiveSection ? 'true' : undefined}
-                            className={cn(
-                              'block rounded-md border-l-2 py-1.5 pl-3 text-[12.5px] transition-colors',
-                              isActiveSection
-                                ? 'border-primary bg-primary/10 font-semibold text-primary'
-                                : 'border-transparent text-muted-foreground hover:bg-muted hover:text-primary',
-                            )}
+                return (
+                  <div key={d} className={cn('mb-6', !isActiveDoc && 'opacity-75')}>
+                    <a
+                      href={`#${headingId}`}
+                      onClick={handleRailClick(headingId)}
+                      aria-current={isActiveDoc ? 'page' : undefined}
+                      className={cn(
+                        'block rounded-md px-3 py-1.5 text-[10.5px] font-bold uppercase tracking-[0.1em] transition-colors',
+                        isActiveDoc
+                          ? 'text-primary'
+                          : 'text-muted-foreground hover:bg-muted hover:text-primary',
+                      )}
+                    >
+                      {version.title}
+                    </a>
+                    <ul className="mt-1 space-y-0.5">
+                      {sections.map((section) => {
+                        const isActiveSection = activeId === section.id;
+                        return (
+                          <li key={section.id}>
+                            <a
+                              href={`#${section.id}`}
+                              onClick={handleRailClick(section.id)}
+                              aria-current={isActiveSection ? 'true' : undefined}
+                              className={cn(
+                                'block rounded-md border-l-2 py-1.5 pl-3 text-[12.5px] transition-colors',
+                                isActiveSection
+                                  ? 'border-primary bg-primary/10 font-semibold text-primary'
+                                  : 'border-transparent text-muted-foreground hover:bg-muted hover:text-primary',
+                              )}
+                            >
+                              {section.heading}
+                            </a>
+                          </li>
+                        );
+                      })}
+                    </ul>
+                  </div>
+                );
+              })}
+            </nav>
+
+            <div className="min-w-0 max-w-[72ch]">
+              {availableDocs.map(({ doc: d, version, preamble, sections }, index) => {
+                const effectiveDate = new Date(version.effective_from).toLocaleDateString();
+                // The routed document (whichever one the reader arrived at) is
+                // the page's <h1> — there is only ever one per page. The other
+                // document, included below it for the continuous scroll, is an
+                // <h2>: a real heading, just not the page's primary one.
+                const DocHeading = d === doc ? 'h1' : 'h2';
+                return (
+                  <div key={d}>
+                    {index > 0 && <hr className="mt-11 border-t border-border" />}
+                    <DocHeading
+                      id={docHeadingId(d)}
+                      className={cn(
+                        'text-2xl font-bold text-foreground scroll-mt-6',
+                        index > 0 && 'mt-9',
+                      )}
+                    >
+                      {version.title}
+                    </DocHeading>
+                    <p className="mb-6 text-xs text-muted-foreground">
+                      {t('legal.version_effective', {
+                        version: version.version,
+                        date: effectiveDate,
+                      })}
+                    </p>
+
+                    {preamble && <Markdown>{preamble}</Markdown>}
+
+                    {sections.map((section) =>
+                      section.level === 2 ? (
+                        <div key={section.id}>
+                          <h2
+                            id={section.id}
+                            className="mt-8 mb-2 text-lg font-semibold text-foreground scroll-mt-6"
                           >
                             {section.heading}
-                          </a>
-                        </li>
-                      );
-                    })}
-                  </ul>
-                </div>
-              );
-            })}
-          </nav>
-
-          <div className="min-w-0 max-w-[72ch]">
-            {availableDocs.map(({ doc: d, version, preamble, sections }, index) => {
-              const effectiveDate = new Date(version.effective_from).toLocaleDateString();
-              // The routed document (whichever one the reader arrived at) is
-              // the page's <h1> — there is only ever one per page. The other
-              // document, included below it for the continuous scroll, is an
-              // <h2>: a real heading, just not the page's primary one.
-              const DocHeading = d === doc ? 'h1' : 'h2';
-              return (
-                <div key={d}>
-                  {index > 0 && <hr className="mt-11 border-t border-border" />}
-                  <DocHeading
-                    id={docHeadingId(d)}
-                    className={cn(
-                      'text-2xl font-bold text-foreground scroll-mt-6',
-                      index > 0 && 'mt-9',
+                          </h2>
+                          {section.body && <Markdown>{section.body}</Markdown>}
+                        </div>
+                      ) : (
+                        <div key={section.id}>
+                          <h3
+                            id={section.id}
+                            className="mt-6 mb-2 text-base font-semibold text-foreground scroll-mt-6"
+                          >
+                            {section.heading}
+                          </h3>
+                          {section.body && <Markdown>{section.body}</Markdown>}
+                        </div>
+                      ),
                     )}
-                  >
-                    {version.title}
-                  </DocHeading>
-                  <p className="mb-6 text-xs text-muted-foreground">
-                    {t('legal.version_effective', {
-                      version: version.version,
-                      date: effectiveDate,
-                    })}
-                  </p>
-
-                  {preamble && <Markdown>{preamble}</Markdown>}
-
-                  {sections.map((section) =>
-                    section.level === 2 ? (
-                      <div key={section.id}>
-                        <h2
-                          id={section.id}
-                          className="mt-8 mb-2 text-lg font-semibold text-foreground scroll-mt-6"
-                        >
-                          {section.heading}
-                        </h2>
-                        {section.body && <Markdown>{section.body}</Markdown>}
-                      </div>
-                    ) : (
-                      <div key={section.id}>
-                        <h3
-                          id={section.id}
-                          className="mt-6 mb-2 text-base font-semibold text-foreground scroll-mt-6"
-                        >
-                          {section.heading}
-                        </h3>
-                        {section.body && <Markdown>{section.body}</Markdown>}
-                      </div>
-                    ),
-                  )}
-                </div>
-              );
-            })}
+                  </div>
+                );
+              })}
+            </div>
           </div>
         </div>
       </div>
