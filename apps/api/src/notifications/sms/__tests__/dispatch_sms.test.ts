@@ -60,11 +60,15 @@ describe('dispatchSms', () => {
     const { sender } = senderWith(CONFIGURED, { previewLog });
     await sender.dispatchSms({
       caseId: 'profile.create',
-      to: '+91900',
+      to: '+919812345678',
       variables: { name: 'Asha', link: 'L' },
     });
     expect(previewLog).toHaveBeenCalledTimes(1);
-    expect(previewLog.mock.calls[0][0]).toContain('Ready Asha: L');
+    const line = previewLog.mock.calls[0][0];
+    expect(line).toContain('Ready Asha: L');
+    // Phone is masked — the full number never reaches a log-bound string.
+    expect(line).toContain('****5678');
+    expect(line).not.toContain('919812345678');
   });
 
   it('never throws — a notify failure is swallowed and reported as not-ok', async () => {

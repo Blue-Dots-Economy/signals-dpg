@@ -16,6 +16,16 @@ import { renderSmsPreview, type SmsTemplateIndex } from './sms_templates';
 
 export type SmsPriority = 'realtime' | 'other';
 
+/**
+ * Mask a phone to its last 4 digits for the dev preview log. The preview is
+ * non-prod only, but no raw phone (PII) is ever placed into a log-bound string
+ * — a mis-wired previewLog must not be able to leak a full number.
+ */
+function maskPhone(to: string): string {
+  const tail = to.replace(/\D/g, '').slice(-4);
+  return tail ? `****${tail}` : '****';
+}
+
 export interface SmsNotifyRequest {
   channel: 'sms';
   template_id: string;
@@ -67,7 +77,7 @@ export function createSmsSender(deps: SmsSenderDeps): SmsSender {
         // Dev preview only — the real text is rendered provider-side from the
         // DLT template; this shows what that will say. Never in prod.
         deps.previewLog?.(
-          `[sms:${args.caseId}] to=${args.to} template_id=${entry.templateId}  ${renderSmsPreview(entry.body, variables)}`,
+          `[sms:${args.caseId}] to=${maskPhone(args.to)} template_id=${entry.templateId}  ${renderSmsPreview(entry.body, variables)}`,
         );
 
         await deps.notify({
