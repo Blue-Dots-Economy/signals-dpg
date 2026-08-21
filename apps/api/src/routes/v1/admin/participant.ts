@@ -580,14 +580,20 @@ function notifyAggregatorInit(
   network: string,
   domain: string,
 ): void {
-  void import('@/notifications/notify_item_lifecycle')
-    .then(({ dispatchItemLifecycleNotification }) =>
-      dispatchItemLifecycleNotification(
-        { op: 'create', ownerId: userId, domain, network, actingOrgType: 'aggregator' },
-        ctx.request.log,
-      ),
-    )
-    .catch((err) => ctx.request.log.warn({ err }, 'aggregator-init notify failed'));
+  const orgId = ctx.request.acting_org?.org_id ?? null;
+  void (async () => {
+    const [{ dispatchItemLifecycleNotification }, { resolveOrgName }] = await Promise.all([
+      import('@/notifications/notify_item_lifecycle'),
+      import('@/notifications/resolve_owner'),
+    ]);
+    // Name the onboarding org in the email; fall back (dispatcher → network
+    // brand) when it can't be resolved.
+    const aggregatorOrgName = orgId ? await resolveOrgName(orgId) : null;
+    await dispatchItemLifecycleNotification(
+      { op: 'create', ownerId: userId, domain, network, actingOrgType: 'aggregator', aggregatorOrgName },
+      ctx.request.log,
+    );
+  })().catch((err) => ctx.request.log.warn({ err }, 'aggregator-init notify failed'));
 }
 
 /** `account_only`, new user: create the account, skip item creation. */

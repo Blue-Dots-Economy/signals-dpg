@@ -1,7 +1,7 @@
 import { and, eq } from 'drizzle-orm';
 
 import { db } from '@api/db/postgres/drizzle_config';
-import { user } from '@api/db/postgres/schema/auth';
+import { organization, user } from '@api/db/postgres/schema/auth';
 import { items } from '@dpg/database';
 
 /**
@@ -34,6 +34,21 @@ export async function resolveOwnerNameEmail(
     .where(eq(user.id, userId))
     .limit(1);
   return { name: rows[0]?.name ?? null, email: rows[0]?.email ?? null };
+}
+
+/**
+ * Resolves an org's display name by id (the `organization` table — `org_id`
+ * from the acting-org context). Used to name the onboarding aggregator in the
+ * initiation email. Null when unknown, so the caller can fall back.
+ */
+export async function resolveOrgName(orgId: string): Promise<string | null> {
+  const rows = await db
+    .select({ name: organization.name })
+    .from(organization)
+    .where(eq(organization.id, orgId))
+    .limit(1);
+  const name = rows[0]?.name;
+  return typeof name === 'string' && name.trim() ? name : null;
 }
 
 /**

@@ -47,12 +47,8 @@ export function itemLifecycleCaseId(event: ItemLifecycleEvent): string | null {
   if (event.op === 'create' && event.actingOrgType === 'aggregator') {
     return 'account.aggregator_init';
   }
-  // Offer = provider-like domains. `service_provider` (purple_dot/up-gzb) isn't
-  // in the shared PROVIDER_LIKE_DOMAINS set (a latent gap for its action emails
-  // too — flagged separately), so map it explicitly here.
-  const isOffer =
-    resolveRecipientRole(event.domain) === 'provider' || event.domain === 'service_provider';
-  const noun = isOffer ? 'offer' : 'profile';
+  // Offer = provider-like domains (incl. service_provider), profile otherwise.
+  const noun = resolveRecipientRole(event.domain) === 'provider' ? 'offer' : 'profile';
   switch (event.op) {
     case 'create':
       return `${noun}.create`;
