@@ -1,0 +1,116 @@
+import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { render, screen, fireEvent } from '@testing-library/react';
+import i18n from '@/i18n';
+import { ConsentGateBody } from '@/components/consent/consent-gate';
+
+const docs = [
+  { id: 'privacy', cap: 'Privacy', title: 'Privacy Policy', body: 'Privacy body' },
+  { id: 'terms', cap: 'Terms', title: 'Terms of Service', body: 'Terms body' },
+];
+
+/**
+ * happy-dom (this repo's Vitest environment — see the note in
+ * read-progress.ts) performs no real layout, so an unstubbed scroller reads
+ * 0x0 and computeReadProgress treats that as "unmeasured", not "unscrollable".
+ * Stub geometry to exercise the locked/unlocked paths deliberately.
+ */
+function stubScroller(scrollTop: number) {
+  const el = screen.getByTestId('consent-reader');
+  Object.defineProperty(el, 'scrollHeight', { value: 600, configurable: true });
+  Object.defineProperty(el, 'clientHeight', { value: 200, configurable: true });
+  Object.defineProperty(el, 'scrollTop', { value: scrollTop, writable: true, configurable: true });
+  docs.forEach((d, i) => {
+    const s = el.querySelector<HTMLElement>(`[data-consent-section="${d.id}"]`)!;
+    Object.defineProperty(s, 'offsetTop', { value: i * 300, configurable: true });
+    Object.defineProperty(s, 'offsetHeight', { value: 300, configurable: true });
+  });
+  return el;
+}
+
+beforeEach(() => {
+  vi.stubGlobal(
+    'ResizeObserver',
+    class {
+      observe() {}
+      disconnect() {}
+    },
+  );
+});
+
+describe('<ConsentGateBody />', () => {
+  it('keeps the checkbox and CTA locked until the end is reached', () => {
+    render(<ConsentGateBody docs={docs} onAccept={vi.fn()} />);
+    fireEvent.scroll(stubScroller(0));
+    expect(screen.getByRole('checkbox')).toBeDisabled();
+    expect(screen.getByRole('button', { name: /accept/i })).toBeDisabled();
+  });
+
+  it('unlocks the checkbox at the end, then the CTA once ticked', () => {
+    const onAccept = vi.fn();
+    render(<ConsentGateBody docs={docs} onAccept={onAccept} />);
+    fireEvent.scroll(stubScroller(400));
+
+    const box = screen.getByRole('checkbox');
+    expect(box).toBeEnabled();
+    const cta = screen.getByRole('button', { name: /accept/i });
+    expect(cta).toBeDisabled();
+    fireEvent.click(box);
+    expect(cta).toBeEnabled();
+    fireEvent.click(cta);
+    expect(onAccept).toHaveBeenCalledTimes(1);
+  });
+
+  it('treats content shorter than the viewport as read', () => {
+    render(
+      <ConsentGateBody
+        docs={[{ id: 'terms', cap: 'Terms', title: 'Terms', body: 'Short.' }]}
+        onAccept={vi.fn()}
+      />,
+    );
+    // A short, unscrollable document: clientHeight > 0 with
+    // scrollHeight <= clientHeight, the real-browser geometry for content
+    // that fits without scrolling. Deliberately NOT left at the default 0x0 —
+    // computeReadProgress treats 0x0 as unmeasured (nothing read), not
+    // unscrollable (all read), because read state is sticky and a premature
+    // 0x0 measurement would open the gate before it has been laid out at all.
+    const el = screen.getByTestId('consent-reader');
+    Object.defineProperty(el, 'scrollHeight', { value: 100, configurable: true });
+    Object.defineProperty(el, 'clientHeight', { value: 200, configurable: true });
+    const section = el.querySelector<HTMLElement>('[data-consent-section="terms"]')!;
+    Object.defineProperty(section, 'offsetTop', { value: 0, configurable: true });
+    Object.defineProperty(section, 'offsetHeight', { value: 100, configurable: true });
+    fireEvent.scroll(el);
+
+    expect(screen.getByRole('checkbox')).toBeEnabled();
+  });
+
+  it('renders every document in one scroll region rather than tabs', () => {
+    render(<ConsentGateBody docs={docs} onAccept={vi.fn()} />);
+    expect(screen.queryByRole('tab')).not.toBeInTheDocument();
+    const reader = screen.getByTestId('consent-reader');
+    expect(reader.querySelectorAll('[data-consent-section]')).toHaveLength(2);
+  });
+
+  it('prefers the consent.cap_* translation over the doc-supplied fallback label', () => {
+    // consent-progress-tracker.tsx looks up `consent.cap_<id>` and falls back
+    // to the doc's own `cap` only when the key is missing. Use a fallback
+    // that differs from the translation so a pass can only mean the key won.
+    expect(i18n.exists('consent.cap_privacy')).toBe(true);
+    expect(i18n.t('consent.cap_privacy')).toBe('Privacy');
+
+    render(
+      <ConsentGateBody
+        docs={[
+          { id: 'privacy', cap: 'Fallback Privacy Label', title: 'Privacy Policy', body: 'Privacy body' },
+          { id: 'terms', cap: 'Fallback Terms Label', title: 'Terms of Service', body: 'Terms body' },
+        ]}
+        onAccept={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText('Privacy')).toBeInTheDocument();
+    expect(screen.getByText('Terms')).toBeInTheDocument();
+    expect(screen.queryByText('Fallback Privacy Label')).not.toBeInTheDocument();
+    expect(screen.queryByText('Fallback Terms Label')).not.toBeInTheDocument();
+  });
+});
