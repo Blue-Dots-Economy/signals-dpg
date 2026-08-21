@@ -98,20 +98,51 @@ const config: ConsentConfigDocument = {
  * these tests stub the scroller as fully read — the same technique
  * `consent-gate.test.tsx`'s `stubScroller(400)` case uses — to reach the
  * "unlocked" state deterministically before exercising the checkbox/button.
+ *
+ * Stubbed via `getBoundingClientRect`, NOT `offsetTop`/`offsetHeight` — see
+ * the equivalent note in `consent-gate.test.tsx`: offsetTop is relative to
+ * the nearest *positioned* ancestor (this dialog's own `fixed` wrapper, not
+ * the scroller), which made the gate permanently unreachable in every real
+ * browser while offsetTop-based stubs here stayed green.
  */
-function stubReaderAsFullyRead() {
+const READER_VIEWPORT_TOP = 149;
+
+function stubRect(el: Element, top: number, height: number) {
+  Object.defineProperty(el, 'getBoundingClientRect', {
+    value: () =>
+      ({
+        top,
+        height,
+        bottom: top + height,
+        left: 0,
+        right: 0,
+        width: 0,
+        x: 0,
+        y: 0,
+        toJSON: () => ({}),
+      }) as DOMRect,
+    configurable: true,
+  });
+}
+
+function stubReader(scrollTop: number) {
   const el = screen.getByTestId('consent-reader');
   Object.defineProperty(el, 'scrollHeight', { value: 600, configurable: true });
   Object.defineProperty(el, 'clientHeight', { value: 200, configurable: true });
-  Object.defineProperty(el, 'scrollTop', { value: 400, writable: true, configurable: true });
+  Object.defineProperty(el, 'scrollTop', { value: scrollTop, writable: true, configurable: true });
+  stubRect(el, READER_VIEWPORT_TOP, 200);
   const privacy = el.querySelector<HTMLElement>('[data-consent-section="privacy"]')!;
-  Object.defineProperty(privacy, 'offsetTop', { value: 0, configurable: true });
-  Object.defineProperty(privacy, 'offsetHeight', { value: 300, configurable: true });
+  stubRect(privacy, READER_VIEWPORT_TOP + 0 - scrollTop, 300);
   const terms = el.querySelector<HTMLElement>('[data-consent-section="terms"]')!;
-  Object.defineProperty(terms, 'offsetTop', { value: 300, configurable: true });
-  Object.defineProperty(terms, 'offsetHeight', { value: 300, configurable: true });
+  stubRect(terms, READER_VIEWPORT_TOP + 300 - scrollTop, 300);
   fireEvent.scroll(el);
   return el;
+}
+
+// scrollTop 400 puts the viewport bottom past both 300px sections stacked in
+// a 600px-tall document behind a 200px-tall viewport -- fully read.
+function stubReaderAsFullyRead() {
+  return stubReader(400);
 }
 
 describe('ConsentModal — gate mode', () => {
@@ -132,6 +163,17 @@ describe('ConsentModal — gate mode', () => {
 
     const acceptBtn = screen.getByRole('button', { name: /accept/i });
     expect(acceptBtn).toBeDisabled();
+
+    // Fix round 3 regression pin: with REAL (non-zero, getBoundingClientRect
+    // -based) geometry and the reader genuinely NOT yet scrolled, the
+    // checkbox must stay locked. This is the assertion the earlier version
+    // of this test never made -- it went straight to stubReaderAsFullyRead()
+    // and only ever checked the unlocked side, which an offsetTop-based
+    // regression (reading position relative to the dialog's own `fixed`
+    // wrapper instead of the scroller) would have passed anyway, by
+    // coincidence, at every scroll position.
+    stubReader(0);
+    expect(screen.getByRole('checkbox')).toBeDisabled();
 
     stubReaderAsFullyRead();
 

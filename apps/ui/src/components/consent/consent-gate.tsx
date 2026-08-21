@@ -79,7 +79,15 @@ export function ConsentGateBody({ docs, onAccept }: ConsentGateBodyProps): React
         role="region"
         aria-label={t('consent.reader_label')}
         tabIndex={0}
-        className="min-h-0 flex-1 overflow-y-auto rounded-md border border-border bg-muted/20 p-4 sm:p-5"
+        // `relative` is defense in depth, not the fix: read-progress.ts
+        // measures section geometry with getBoundingClientRect deltas, which
+        // are correct regardless of the positioned ancestor. But this class
+        // makes THIS element that ancestor too, so offsetTop/offsetHeight
+        // (should anyone reach for them here again) resolve against the
+        // scroller, not the dialog/drawer's `fixed` wrapper several levels
+        // up — the mistake that made the gate unreachable in every real
+        // browser while every stubbed unit test stayed green.
+        className="relative min-h-0 flex-1 overflow-y-auto rounded-md border border-border bg-muted/20 p-4 sm:p-5"
       >
         {docs.map((doc, i) => (
           <section

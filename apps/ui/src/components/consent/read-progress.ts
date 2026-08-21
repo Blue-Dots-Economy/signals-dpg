@@ -145,10 +145,28 @@ export function useReadProgress(
   const measure = useCallback(() => {
     const el = scrollRef.current;
     if (!el) return;
+    // Section geometry via getBoundingClientRect, NOT offsetTop/offsetHeight.
+    // offsetTop is relative to the nearest *positioned* ancestor, which for
+    // this reader is the dialog/drawer's own `fixed` wrapper -- not the
+    // scroller -- because the reader itself has no `position`. That mixed
+    // offsetTop (dialog-relative) with `scrollTop + clientHeight` (scroller-
+    // content-relative): two different coordinate systems offset by a
+    // constant (the reader's distance from the dialog's top edge), so the
+    // last section's read check could never be satisfied — the gate was
+    // permanently unreachable in every real browser while every unit test,
+    // whose stubs set offsetTop directly, stayed green. A getBoundingClientRect
+    // delta is computed relative to the scroller's own rect, so it lands in
+    // the scroller's content space regardless of which ancestor happens to
+    // be positioned.
+    const readerRect = el.getBoundingClientRect();
     const sections: SectionBox[] = [];
     for (const id of docIds) {
       const node = el.querySelector<HTMLElement>(`[data-consent-section="${id}"]`);
-      if (node) sections.push({ id, top: node.offsetTop, height: node.offsetHeight });
+      if (node) {
+        const nodeRect = node.getBoundingClientRect();
+        const top = nodeRect.top - readerRect.top + el.scrollTop;
+        sections.push({ id, top, height: nodeRect.height });
+      }
     }
     const next = computeReadProgress(
       { scrollTop: el.scrollTop, clientHeight: el.clientHeight, scrollHeight: el.scrollHeight },

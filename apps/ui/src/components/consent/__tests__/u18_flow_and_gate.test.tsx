@@ -217,6 +217,36 @@ function typeOtp(digits: string) {
   });
 }
 
+/**
+ * Distance from a real desktop dialog's top edge to the reader (header +
+ * progress tracker + border + padding) — matches production geometry
+ * measured directly in Chromium (see task-3-report.md, fix round 3).
+ * Stubbed via `getBoundingClientRect`, NOT `offsetTop`/`offsetHeight`:
+ * offsetTop is relative to the nearest *positioned* ancestor (this dialog's
+ * own `fixed` wrapper, not the scroller), which made the gate permanently
+ * unreachable in every real browser while offsetTop-based stubs stayed
+ * green here.
+ */
+const READER_VIEWPORT_TOP = 149;
+
+function stubRect(el: Element, top: number, height: number) {
+  Object.defineProperty(el, 'getBoundingClientRect', {
+    value: () =>
+      ({
+        top,
+        height,
+        bottom: top + height,
+        left: 0,
+        right: 0,
+        width: 0,
+        x: 0,
+        y: 0,
+        toJSON: () => ({}),
+      }) as DOMRect,
+    configurable: true,
+  });
+}
+
 describe('SignupGuardianFlow (pre-auth U18 signup)', () => {
   afterEach(() => {
     vi.useRealTimers();
@@ -317,13 +347,30 @@ describe('SignupGuardianFlow (pre-auth U18 signup)', () => {
     const reader = screen.getByTestId('consent-reader');
     Object.defineProperty(reader, 'scrollHeight', { value: 600, configurable: true });
     Object.defineProperty(reader, 'clientHeight', { value: 200, configurable: true });
-    Object.defineProperty(reader, 'scrollTop', { value: 400, writable: true, configurable: true });
-    for (const [id, top] of [['privacy', 0], ['terms', 300]] as const) {
-      const section = reader.querySelector<HTMLElement>(`[data-consent-section="${id}"]`)!;
-      Object.defineProperty(section, 'offsetTop', { value: top, configurable: true });
-      Object.defineProperty(section, 'offsetHeight', { value: 300, configurable: true });
+
+    function stubReaderAt(scrollTop: number) {
+      Object.defineProperty(reader, 'scrollTop', {
+        value: scrollTop,
+        writable: true,
+        configurable: true,
+      });
+      stubRect(reader, READER_VIEWPORT_TOP, 200);
+      for (const [id, contentTop] of [['privacy', 0], ['terms', 300]] as const) {
+        const section = reader.querySelector<HTMLElement>(`[data-consent-section="${id}"]`)!;
+        stubRect(section, READER_VIEWPORT_TOP + contentTop - scrollTop, 300);
+      }
+      fireEvent.scroll(reader);
     }
-    fireEvent.scroll(reader);
+
+    // Fix round 3 regression pin: with REAL (non-zero, getBoundingClientRect
+    // -based) geometry and the reader genuinely NOT yet scrolled, the
+    // checkbox must stay locked -- an offsetTop-based regression (reading
+    // position relative to the dialog's own `fixed` wrapper instead of the
+    // scroller) would have unlocked it here regardless of scroll position.
+    stubReaderAt(0);
+    expect(screen.getByRole('checkbox')).toBeDisabled();
+
+    stubReaderAt(400);
 
     await userEvent.click(screen.getByRole('checkbox'));
     await userEvent.click(screen.getByRole('button', { name: /accept & continue/i }));

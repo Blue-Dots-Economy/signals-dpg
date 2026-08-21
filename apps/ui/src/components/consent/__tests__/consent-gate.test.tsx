@@ -13,16 +13,59 @@ const docs = [
  * read-progress.ts) performs no real layout, so an unstubbed scroller reads
  * 0x0 and computeReadProgress treats that as "unmeasured", not "unscrollable".
  * Stub geometry to exercise the locked/unlocked paths deliberately.
+ *
+ * Stubbed via `getBoundingClientRect`, NOT `offsetTop`/`offsetHeight`: fix
+ * round 3 found the real implementation had been measuring with offsetTop,
+ * which is relative to the nearest *positioned* ancestor -- the dialog's own
+ * `fixed` wrapper here, not the scroller -- and made the gate permanently
+ * unreachable in every real browser while these very stubs (which set
+ * offsetTop directly, in the scroller's own coordinate space) stayed green.
+ * A `getBoundingClientRect`-based stub is honest about which space the
+ * browser actually reports geometry in.
  */
+
+/**
+ * Viewport distance from the dialog's top edge to the reader, in a real
+ * desktop dialog (header + progress tracker + border + padding) --
+ * matches production geometry measured directly in Chromium (see
+ * task-3-report.md, fix round 3). Non-zero and reused for every section, so
+ * a regression back to reading raw offsetTop (dialog-relative, i.e. this
+ * same constant added into every section's top) would show up as every
+ * section becoming permanently unreadable, not as a silently-passing test.
+ */
+const READER_VIEWPORT_TOP = 149;
+
+function stubRect(el: Element, top: number, height: number) {
+  Object.defineProperty(el, 'getBoundingClientRect', {
+    value: () =>
+      ({
+        top,
+        height,
+        bottom: top + height,
+        left: 0,
+        right: 0,
+        width: 0,
+        x: 0,
+        y: 0,
+        toJSON: () => ({}),
+      }) as DOMRect,
+    configurable: true,
+  });
+}
+
 function stubScroller(scrollTop: number) {
   const el = screen.getByTestId('consent-reader');
   Object.defineProperty(el, 'scrollHeight', { value: 600, configurable: true });
   Object.defineProperty(el, 'clientHeight', { value: 200, configurable: true });
   Object.defineProperty(el, 'scrollTop', { value: scrollTop, writable: true, configurable: true });
+  stubRect(el, READER_VIEWPORT_TOP, 200);
   docs.forEach((d, i) => {
     const s = el.querySelector<HTMLElement>(`[data-consent-section="${d.id}"]`)!;
-    Object.defineProperty(s, 'offsetTop', { value: i * 300, configurable: true });
-    Object.defineProperty(s, 'offsetHeight', { value: 300, configurable: true });
+    const contentTop = i * 300;
+    // Viewport top = reader's own viewport top + this section's position in
+    // the (unscrolled) content, minus however much has already been
+    // scrolled -- the same relationship read-progress.ts's measure() inverts.
+    stubRect(s, READER_VIEWPORT_TOP + contentTop - scrollTop, 300);
   });
   return el;
 }
@@ -76,9 +119,9 @@ describe('<ConsentGateBody />', () => {
     const el = screen.getByTestId('consent-reader');
     Object.defineProperty(el, 'scrollHeight', { value: 100, configurable: true });
     Object.defineProperty(el, 'clientHeight', { value: 200, configurable: true });
+    stubRect(el, READER_VIEWPORT_TOP, 200);
     const section = el.querySelector<HTMLElement>('[data-consent-section="terms"]')!;
-    Object.defineProperty(section, 'offsetTop', { value: 0, configurable: true });
-    Object.defineProperty(section, 'offsetHeight', { value: 100, configurable: true });
+    stubRect(section, READER_VIEWPORT_TOP, 100);
     fireEvent.scroll(el);
 
     expect(screen.getByRole('checkbox')).toBeEnabled();
