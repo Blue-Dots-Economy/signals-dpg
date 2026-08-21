@@ -32,9 +32,11 @@ function slugify(heading: string): string {
  * Extracts `##` and `###` headings in document order.
  *
  * Fenced code blocks are skipped so a `#` inside an example is not mistaken
- * for a heading. Colliding slugs get a numeric suffix — both the Terms and
- * the Privacy Policy carry a "Grievances" section, so collisions happen in
- * practice, not just in theory.
+ * for a heading. Colliding slugs get a numeric suffix — defensive: dedup is
+ * scoped to a single call, so it only guards against one document repeating
+ * a heading (e.g. two "FAQ" subsections), not against two different
+ * documents sharing a heading name, which this function never sees at the
+ * same time anyway.
  *
  * @param markdown - The document body.
  * @returns Sections in order; empty when the document has no headings.

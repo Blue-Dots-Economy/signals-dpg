@@ -16,7 +16,7 @@ describe('extractSections', () => {
     expect(extractSections(md).map((s) => s.heading)).toEqual(['Real', 'Also real']);
   });
 
-  it('deduplicates colliding ids — both documents have a Grievances section', () => {
+  it('deduplicates colliding ids when a single document repeats a heading', () => {
     const md = '### Grievances\na\n### Grievances\nb';
     expect(extractSections(md).map((s) => s.id)).toEqual(['grievances', 'grievances-2']);
   });

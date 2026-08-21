@@ -37,15 +37,49 @@ interface RenderableSection extends LegalSection {
 }
 
 /**
+ * Normalizes heading text for a title comparison — case- and
+ * whitespace-insensitive, so "Privacy Policy", "privacy policy", and
+ * "Privacy   Policy" all match the same title.
+ */
+function normalizeHeadingText(value: string): string {
+  return value.trim().toLowerCase().replace(/\s+/g, ' ');
+}
+
+/**
+ * True when `heading` is the document's own title, repeated as a heading.
+ *
+ * Every real consent document's Markdown opens with a level-2 heading that
+ * repeats the document's `title` field verbatim (`## Privacy Policy`,
+ * `## Terms of Service`, …) — verified across all six network schemas.
+ * Rendering that heading as an ordinary section would duplicate the page's
+ * own `<h1>` and give the rail a first entry that just repeats its own group
+ * header. This checks the title specifically, not "is it the first heading"
+ * — a document that legitimately opens with `## Overview` keeps that
+ * section.
+ */
+function isDocumentTitleHeading(heading: string, title: string): boolean {
+  return normalizeHeadingText(heading) === normalizeHeadingText(title);
+}
+
+/**
  * Splits a document's markdown into its heading-delimited sections, pairing
  * each with the id `extractSections` would assign it. Rendering the headings
  * ourselves (rather than leaving them to `Markdown`/`ReactMarkdown`) is what
  * lets each one carry an `id` an anchor can land on.
  *
+ * The document's own leading title heading (see `isDocumentTitleHeading`) is
+ * dropped from the section list; any prose directly under it is folded into
+ * the preamble so it isn't lost.
+ *
  * @param markdown - The document body.
- * @returns Any content before the first heading, plus the sections in order.
+ * @param title - The document's title, so its own repeated heading can be
+ *   told apart from a real first section.
+ * @returns Any content before the first real section, plus the sections in order.
  */
-function splitIntoSections(markdown: string): { preamble: string; sections: RenderableSection[] } {
+function splitIntoSections(
+  markdown: string,
+  title: string,
+): { preamble: string; sections: RenderableSection[] } {
   const ids = extractSections(markdown);
   const lines = markdown.split('\n');
   let inFence = false;
@@ -67,12 +101,33 @@ function splitIntoSections(markdown: string): { preamble: string; sections: Rend
     (current ?? preambleLines).push(line);
   }
 
-  const sections: RenderableSection[] = ids.map((section, i) => ({
+  let sections: RenderableSection[] = ids.map((section, i) => ({
     ...section,
     body: (bodies[i] ?? []).join('\n').trim(),
   }));
+  let preamble = preambleLines.join('\n').trim();
 
-  return { preamble: preambleLines.join('\n').trim(), sections };
+  const [leading] = sections;
+  if (leading && isDocumentTitleHeading(leading.heading, title)) {
+    preamble = [preamble, leading.body].filter(Boolean).join('\n\n');
+    sections = sections.slice(1);
+  }
+
+  return { preamble, sections };
+}
+
+/**
+ * Sections for the rail: the document's own repeated title heading (see
+ * `isDocumentTitleHeading`) is dropped so the rail's first entry under a
+ * group header is a real section, not the header's own label again.
+ */
+function sectionsForRail(content: string, title: string): LegalSection[] {
+  const sections = extractSections(content);
+  const [leading] = sections;
+  if (leading && isDocumentTitleHeading(leading.heading, title)) {
+    return sections.slice(1);
+  }
+  return sections;
 }
 
 function getCurrentVersion(
@@ -147,7 +202,7 @@ export function LegalDocumentView({ doc }: { doc: LegalDoc }): React.JSX.Element
     );
   }
 
-  const { preamble, sections } = splitIntoSections(version.content);
+  const { preamble, sections } = splitIntoSections(version.content, version.title);
   const effectiveDate = new Date(version.effective_from).toLocaleDateString();
 
   return (
@@ -164,12 +219,15 @@ export function LegalDocumentView({ doc }: { doc: LegalDoc }): React.JSX.Element
         </TooltipProvider>
 
         <div className="grid gap-6 md:grid-cols-[236px_1fr] md:gap-10">
-          <nav aria-label="Contents" className="md:sticky md:top-6 md:self-start">
+          <nav
+            aria-label="Contents"
+            className="md:sticky md:top-6 md:self-start md:border-r md:border-border md:pr-6"
+          >
             {DOC_ORDER.map((d) => {
               const docVersion = getCurrentVersion(config?.documents[d]);
               if (!docVersion) return null;
               const isCurrent = d === doc;
-              const docSections = extractSections(docVersion.content);
+              const docSections = sectionsForRail(docVersion.content, docVersion.title);
 
               return (
                 <div key={d} className={cn('mb-5', !isCurrent && 'opacity-60')}>
