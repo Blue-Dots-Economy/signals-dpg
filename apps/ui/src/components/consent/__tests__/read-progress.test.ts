@@ -69,6 +69,54 @@ describe('computeReadProgress', () => {
   });
 });
 
+describe('computeReadProgress — exactly two documents (Signals is always exactly two)', () => {
+  // Two 300px sections in a 200px viewport — same shape as the three-section
+  // fixture above, minus one document.
+  const twoSections = [
+    { id: 'privacy', top: 0, height: 300 },
+    { id: 'terms', top: 300, height: 300 },
+  ];
+  const scrollTwo = (scrollTop: number) => ({ scrollTop, clientHeight: 200, scrollHeight: 600 });
+
+  it('does not saturate at 100% the instant the first of two documents finishes', () => {
+    // viewport bottom = 100 + 200 = 300 === privacy's bottom: privacy just
+    // read, terms not started at all yet. The N-1-gap model used for 3+
+    // documents would report 100% here (1 read / 1 gap) — wrong for a
+    // reader who hasn't seen a word of the second document.
+    const p = computeReadProgress(scrollTwo(100), twoSections, []);
+    expect(p.readIds).toEqual(['privacy']);
+    expect(p.currentId).toBe('terms');
+    expect(p.fillPercent).toBe(50);
+  });
+
+  it('advances the fill through the second document instead of staying pinned at 100%', () => {
+    // privacy read, halfway through terms.
+    const p = computeReadProgress(scrollTwo(250), twoSections, []);
+    expect(p.readIds).toEqual(['privacy']);
+    expect(p.fillPercent).toBeGreaterThan(50);
+    expect(p.fillPercent).toBeLessThan(100);
+  });
+
+  it('reaches 100% only once both documents are actually read', () => {
+    const p = computeReadProgress(scrollTwo(400), twoSections, []);
+    expect(p.readIds).toEqual(['privacy', 'terms']);
+    expect(p.allRead).toBe(true);
+    expect(p.fillPercent).toBe(100);
+  });
+});
+
+describe('computeReadProgress — three-or-more documents keep the pre-fix gap model', () => {
+  it('still reports 75% at 1 of 3 read, halfway through the 2nd (unchanged by the two-document fix)', () => {
+    // Same case the existing "advances fill continuously" test above
+    // exercises — pinned here explicitly as a three-document parity guard
+    // against the aggregator's identical tracker, which this repo
+    // intentionally does not want to diverge from.
+    const p = computeReadProgress(scroll(250), sections, []);
+    expect(p.readIds).toEqual(['privacy']);
+    expect(p.fillPercent).toBe(75);
+  });
+});
+
 describe('initialProgress', () => {
   it('reports allRead false for a non-empty document list before any measurement', () => {
     // Deliberately NOT computeReadProgress({...0x0...}, [], []): that hits the

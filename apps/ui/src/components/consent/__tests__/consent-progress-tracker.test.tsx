@@ -45,4 +45,26 @@ describe('ConsentProgressTracker', () => {
 
     expect(container).toBeEmptyDOMElement();
   });
+
+  it('insets the line to the two dots\' true centres (25%/75%), not the three-node 16.67% value', () => {
+    // With two flex-1 nodes the centres sit at 25% and 75%, not the
+    // 16.67%-per-side value that is only correct for exactly three nodes.
+    render(<ConsentProgressTracker docs={docs} progress={noProgress} />);
+    const track = screen.getByTestId('consent-progress-track');
+    expect(track).toHaveStyle({ left: '25%', right: '25%' });
+  });
+
+  it('insets the line to the three-dot centres (16.67%/16.67%) — aggregator parity', () => {
+    const threeDocs = [
+      { id: 'privacy', cap: 'Privacy' },
+      { id: 'terms', cap: 'Terms' },
+      { id: 'profile', cap: 'Profile' },
+    ];
+    render(<ConsentProgressTracker docs={threeDocs} progress={noProgress} />);
+    const track = screen.getByTestId('consent-progress-track');
+    expect(track).toHaveStyle({
+      left: `${50 / 3}%`,
+      right: `${50 / 3}%`,
+    });
+  });
 });

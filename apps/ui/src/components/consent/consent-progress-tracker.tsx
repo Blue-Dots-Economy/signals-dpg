@@ -30,9 +30,24 @@ export function ConsentProgressTracker({
   // A tracker with one node reports nothing the reader cannot already see.
   if (docs.length < 2) return null;
 
+  // The line spans from the first dot's centre to the last dot's centre.
+  // Each dot sits in its own `flex-1` node, so with `n` equal-width nodes,
+  // node `i`'s centre (0-indexed) is at `(i + 0.5) / n`; the first dot's
+  // centre is therefore `0.5 / n` = `50 / n` percent from the left, and the
+  // last dot's centre is the same distance from the right. `16.67%` was
+  // `50 / 3`, hardcoded for exactly three nodes — correct only there. With
+  // two nodes the true centres are at 25%/75%, so that hardcoded 16.67%
+  // reached past both dots. Computing it from `docs.length` keeps both node
+  // counts correct instead of just the one this happened to be built for.
+  const inset = 50 / docs.length;
+
   return (
     <div className="relative mx-auto flex max-w-[340px] items-start justify-between px-1.5 pt-0.5">
-      <div className="absolute left-[16.67%] right-[16.67%] top-[9px] h-0.5 overflow-hidden rounded-sm bg-border">
+      <div
+        data-testid="consent-progress-track"
+        className="absolute top-[9px] h-0.5 overflow-hidden rounded-sm bg-border"
+        style={{ left: `${inset}%`, right: `${inset}%` }}
+      >
         <div
           data-testid="consent-progress-fill"
           className="h-full bg-primary transition-[width] duration-100 ease-linear"
