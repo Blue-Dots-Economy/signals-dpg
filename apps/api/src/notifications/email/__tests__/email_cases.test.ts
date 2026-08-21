@@ -7,7 +7,7 @@ import {
 } from '../email_cases';
 
 describe('email case registry', () => {
-  it('has 16 action cases + 9 named cases', () => {
+  it('has 16 action cases + 18 named cases', () => {
     const actions = EMAIL_CASE_IDS.filter((id) => id.startsWith('action.'));
     expect(actions).toHaveLength(16);
     for (const id of [
@@ -20,10 +20,20 @@ describe('email case registry', () => {
       'login.otp',
       'welcome',
       'support.request',
+      // Item-lifecycle emails (#531/#534).
+      'profile.create',
+      'offer.create',
+      'profile.update',
+      'offer.update',
+      'account.aggregator_init',
+      'profile.pause',
+      'offer.pause',
+      'profile.retire',
+      'offer.retire',
     ]) {
       expect(EMAIL_CASE_IDS).toContain(id);
     }
-    expect(EMAIL_CASE_IDS).toHaveLength(25);
+    expect(EMAIL_CASE_IDS).toHaveLength(34);
   });
 
   it('maps plan fields to an action case id', () => {
@@ -68,8 +78,8 @@ describe('email case registry', () => {
 
   it('requiredMessageKeys covers subject+body(+cta) for every case', () => {
     const keys = requiredMessageKeys();
-    // 17 cta-shell cases × 3 keys + 8 plain cases × 2 keys = 67
-    expect(keys).toHaveLength(67);
+    // 26 cta-shell cases × 3 keys + 8 plain cases × 2 keys = 94
+    expect(keys).toHaveLength(94);
     expect(keys).toContain('retire.cancel.cta');
     expect(keys).toContain('welcome.body');
   });

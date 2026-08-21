@@ -75,6 +75,22 @@ export const update_item_handler = async (
       (err) => request.log.warn({ err }, 'cache invalidation after update failed'),
     );
 
+    // Owner-facing update email (#531/#534). Fire-and-forget after commit.
+    // Lazy-imported to keep the notification chain out of the static graph.
+    void import('@/notifications/notify_item_lifecycle')
+      .then(({ dispatchItemLifecycleNotification }) =>
+        dispatchItemLifecycleNotification(
+          {
+            op: 'update',
+            ownerId: updated.created_by,
+            domain: updated.item_domain,
+            network: updated.item_network,
+          },
+          request.log,
+        ),
+      )
+      .catch((err) => request.log.warn({ err }, 'item-lifecycle notify (update) failed'));
+
     // Surface real (decrypted) private values to the owner.
     const { mergedState } = decryptItemPrivate({
       item_state: updated.item_state as Record<string, unknown>,

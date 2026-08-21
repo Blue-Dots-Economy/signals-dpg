@@ -296,6 +296,21 @@ const item_lifecycle_handler = async (
       );
     }
 
+    // Owner-facing pause/retire email (#531/#534). Fire-and-forget after commit.
+    // Only owner-driven transitions notify; unpause/draft/live don't. Lazy-
+    // imported to keep the notification chain out of the static module graph.
+    if (action === 'pause' || action === 'retire') {
+      const op = action;
+      void import('@/notifications/notify_item_lifecycle')
+        .then(({ dispatchItemLifecycleNotification }) =>
+          dispatchItemLifecycleNotification(
+            { op, ownerId: callerId, domain: result.item_domain, network: result.item_network },
+            request.log,
+          ),
+        )
+        .catch((err) => request.log.warn({ err }, 'item-lifecycle notify (lifecycle) failed'));
+    }
+
     // Lifecycle transitions (pause / unpause / retire here, and the draft/live
     // transitions elsewhere) must be emitted as audit/telemetry events —
     // #234 Q15 ("log every transition as an event") / business doc R10.3.

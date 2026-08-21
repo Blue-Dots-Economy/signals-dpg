@@ -20,6 +20,23 @@ export async function resolveOwnerEmail(userId: string): Promise<string | null> 
 }
 
 /**
+ * Resolves an owner's display name + email in one lookup. Used by the
+ * item-lifecycle emails (#531/#534) which greet the owner by name and address
+ * the send to their email. Either field is null when unknown / not set
+ * (phone-only users have no email → the caller skips the email).
+ */
+export async function resolveOwnerNameEmail(
+  userId: string,
+): Promise<{ name: string | null; email: string | null }> {
+  const rows = await db
+    .select({ name: user.name, email: user.email })
+    .from(user)
+    .where(eq(user.id, userId))
+    .limit(1);
+  return { name: rows[0]?.name ?? null, email: rows[0]?.email ?? null };
+}
+
+/**
  * Resolves a provider item's public service name (`jobProviderName`) by item id.
  * Used to substitute `{name}` in seeker-facing action emails. Returns null when
  * unknown. The field is public (not a masked PII field).

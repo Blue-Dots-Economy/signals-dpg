@@ -70,6 +70,26 @@ for (const group of ACTION_GROUPS) {
 
 CASES.set('retire.cancel', ctaCase('retire.cancel', {}));
 
+// Item-lifecycle emails to the owner (#531/#534): profile = seeker, offer =
+// provider/service_provider. CTA shell (home link) + per-INSTANCE_NAME
+// sign-off, best-effort — a failed send never blocks the create/update/
+// lifecycle route. `account.aggregator_init` is the one sent when an
+// aggregator onboards a participant (in place of the self create/welcome
+// emails, which are gated off for aggregator-onboarded records).
+const ITEM_TOKENS: TokenTypes = { name: 'text' };
+CASES.set('profile.create', ctaCase('profile.create', ITEM_TOKENS));
+CASES.set('offer.create', ctaCase('offer.create', ITEM_TOKENS));
+CASES.set('profile.update', ctaCase('profile.update', ITEM_TOKENS));
+CASES.set('offer.update', ctaCase('offer.update', ITEM_TOKENS));
+CASES.set(
+  'account.aggregator_init',
+  ctaCase('account.aggregator_init', { name: 'text', aggregatorOrg: 'text' }),
+);
+CASES.set('profile.pause', ctaCase('profile.pause', ITEM_TOKENS));
+CASES.set('offer.pause', ctaCase('offer.pause', ITEM_TOKENS));
+CASES.set('profile.retire', ctaCase('profile.retire', ITEM_TOKENS));
+CASES.set('offer.retire', ctaCase('offer.retire', ITEM_TOKENS));
+
 const GUARDIAN_TOKENS: TokenTypes = {
   parentName: 'text',
   domain: 'text',
