@@ -231,16 +231,24 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       clearSchemaCache();
       // Drop the signed-out user's cached data so it doesn't linger until
       // gcTime and bleed into the next session (SPA sign-out does not reload
-      // the page). All four hold per-user data: my-items + edit-item are the
+      // the page). All five hold per-user data: my-items + edit-item are the
       // user's own items; profile-consent is their accepted profiles; actions
       // covers their applications/connections — including pendingCount, whose
       // key is NOT network/user-scoped, so a stale count would otherwise show
-      // to the next user on re-login. browse-items/markers/*-config are public
-      // network-scoped data and can stay.
+      // to the next user on re-login. consent-status
+      // (`['consent-status', themeId]`, see `use-consent-gate.ts`) is keyed
+      // only by network, not by user, and its endpoint reflects whichever
+      // session's token is attached when it resolves — without this, signing
+      // out and straight back in as someone else on the same device/tab would
+      // let the U18 guardian consent gate serve the FIRST user's cached
+      // "already consented" status to the second, skipping the documents
+      // until the background refetch corrects it. browse-items/markers/
+      // *-config are public network-scoped data and can stay.
       queryClient.removeQueries({ queryKey: ['my-items'] });
       queryClient.removeQueries({ queryKey: ['profile-consent'] });
       queryClient.removeQueries({ queryKey: ['edit-item'] });
       queryClient.removeQueries({ queryKey: ['actions'] });
+      queryClient.removeQueries({ queryKey: ['consent-status'] });
     }
   }, [authCfg, isKeycloakLogin, queryClient]);
 

@@ -56,7 +56,7 @@ describe('AuthProvider signOut', () => {
     expect(clearSchemaCache).toHaveBeenCalled();
   });
 
-  it('clears every per-user cache (my-items, profile-consent, edit-item, actions) on sign-out', async () => {
+  it('clears every per-user cache (my-items, profile-consent, edit-item, actions, consent-status) on sign-out', async () => {
     const client = new QueryClient();
     const spy = vi.spyOn(client, 'removeQueries');
     const { result } = renderHook(() => useAuth(), { wrapper: createWrapper(client) });
@@ -67,6 +67,38 @@ describe('AuthProvider signOut', () => {
     expect(spy).toHaveBeenCalledWith({ queryKey: ['profile-consent'] });
     expect(spy).toHaveBeenCalledWith({ queryKey: ['edit-item'] });
     expect(spy).toHaveBeenCalledWith({ queryKey: ['actions'] });
+    expect(spy).toHaveBeenCalledWith({ queryKey: ['consent-status'] });
+  });
+
+  /**
+   * Regression guard for a Critical found in the sibling aggregator repo
+   * (apps/web): there, a "Register another" affordance reset the form but not
+   * the accepted-consent flag, so participant #2 onward inherited consent as
+   * already given with no documents shown. Signals has no such affordance,
+   * but the equivalent risk here is `['consent-status', themeId]`
+   * (`use-consent-gate.ts`, feeding the U18 guardian consent gate on the home
+   * page): it is keyed ONLY by network, never by user, and its endpoint
+   * reflects whichever session's auth token is attached when the request
+   * resolves. Left uncleared across sign-out, the query cache — a store that
+   * outlives the single login attempt that populated it — would serve the
+   * first user's "already consented" snapshot to a second, different user who
+   * signs in on the same device/tab before the background refetch (staleTime
+   * 0) corrects it, skipping the documents for that window. Seeding the cache
+   * with an actual entry (not just spying on the call) proves the entry is
+   * genuinely gone afterwards, not merely that some `removeQueries` call was
+   * made with a key that happened to match.
+   */
+  it('actually evicts a seeded consent-status entry, not just calls removeQueries with that key', async () => {
+    const client = new QueryClient();
+    client.setQueryData(['consent-status', 'network-a'], { statuses: { terms: [1], privacy: [1] } });
+    expect(client.getQueryData(['consent-status', 'network-a'])).toBeDefined();
+
+    const { result } = renderHook(() => useAuth(), { wrapper: createWrapper(client) });
+    await act(async () => {
+      await result.current.signOut();
+    });
+
+    expect(client.getQueryData(['consent-status', 'network-a'])).toBeUndefined();
   });
 });
 
