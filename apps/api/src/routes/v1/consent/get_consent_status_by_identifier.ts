@@ -1,3 +1,4 @@
+import { createHmac } from 'node:crypto';
 import {
   ConsentStatusByIdentifierQuerySchema,
   ConsentStatusResponseSchema,
@@ -5,6 +6,7 @@ import {
 import type { FastifyPluginAsyncZod } from 'fastify-type-provider-zod';
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import { and, eq, inArray, or, type SQL } from 'drizzle-orm';
+import { getPiiKey } from '@dpg/auth';
 import { db } from '@api/db/postgres/drizzle_config';
 import { consent_record } from '@api/db/postgres/schema';
 import { user } from '@api/db/postgres/schema/auth';
@@ -14,6 +16,20 @@ type Req = FastifyRequest<{
 }>;
 
 const EMPTY_STATUSES = { statuses: { terms: [] as number[], privacy: [] as number[] } };
+
+/**
+ * One-way hash of the raw identifier for audit logging — never logs the raw
+ * email/phone. Keyed with the existing PII secret (domain-separated from its
+ * other uses, e.g. `jitter.ts`'s `location-jitter:` prefix) so the log entry
+ * is still correlatable across repeated lookups without exposing the PII
+ * itself, mitigating (not eliminating) issue #4/#14's enumeration oracle by
+ * giving anomaly detection something to key on.
+ */
+function hashIdentifierForAudit(identifier: string): string {
+  return createHmac('sha256', getPiiKey())
+    .update(`consent-status-lookup:${identifier}`)
+    .digest('hex');
+}
 
 export const get_consent_status_by_identifier: FastifyPluginAsyncZod = async (fastify) => {
   fastify.route({
@@ -35,6 +51,7 @@ export const get_consent_status_by_identifier_handler = async (
   reply: FastifyReply,
 ) => {
   const { network, phone, email } = request.query;
+  const identifierHash = hashIdentifierForAudit(email ?? phone ?? '');
 
   try {
     // Resolve the user from the identifier — no auth required (pre-login).
@@ -44,6 +61,10 @@ export const get_consent_status_by_identifier_handler = async (
     if (phone) identifierConditions.push(eq(user.phoneNumber, phone));
 
     if (identifierConditions.length === 0) {
+      request.log.info(
+        { identifierHash, network, found: false },
+        'consent status-by-identifier lookup',
+      );
       return reply.code(200).send(EMPTY_STATUSES);
     }
 
@@ -54,6 +75,10 @@ export const get_consent_status_by_identifier_handler = async (
       .limit(1);
 
     if (userRows.length === 0) {
+      request.log.info(
+        { identifierHash, network, found: false },
+        'consent status-by-identifier lookup',
+      );
       return reply.code(200).send(EMPTY_STATUSES);
     }
 
@@ -85,6 +110,10 @@ export const get_consent_status_by_identifier_handler = async (
       }
     }
 
+    request.log.info(
+      { identifierHash, network, found: true },
+      'consent status-by-identifier lookup',
+    );
     return reply.code(200).send({
       statuses: {
         terms: Array.from(termsSet).sort((a, b) => a - b),
