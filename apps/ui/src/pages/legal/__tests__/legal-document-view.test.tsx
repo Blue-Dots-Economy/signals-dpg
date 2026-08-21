@@ -97,12 +97,32 @@ describe('<LegalDocumentView />', () => {
     expect(screen.queryByRole('checkbox')).not.toBeInTheDocument();
   });
 
-  it('marks the routed document current on arrival, before any scrolling', () => {
+  it('never marks either document header current — only the section pill is a live indicator', () => {
+    // The rail used to tint/aria-current the routed document's own heading.
+    // Both documents are always on the page now, so the route must not
+    // affect the rail's appearance at all: neither header ever carries
+    // aria-current, on arrival or otherwise.
     view('privacy');
-    expect(screen.getByRole('link', { name: 'Privacy Policy' })).toHaveAttribute(
+    expect(screen.getByRole('link', { name: 'Privacy Policy' })).not.toHaveAttribute(
       'aria-current',
-      'page',
     );
+    expect(screen.getByRole('link', { name: 'Terms of Service' })).not.toHaveAttribute(
+      'aria-current',
+    );
+  });
+
+  it('renders both document headers identically — no route-derived tint or dimming', () => {
+    // /privacy and /terms used to render different-looking rails (the routed
+    // document's heading tinted, the other one dimmed via `opacity-75` on
+    // its wrapping group). Both documents are always present now, so the two
+    // routes' rails must be indistinguishable.
+    view('privacy');
+    const privacyHeader = screen.getByRole('link', { name: 'Privacy Policy' });
+    const termsHeader = screen.getByRole('link', { name: 'Terms of Service' });
+    expect(privacyHeader.className).toBe(termsHeader.className);
+    expect(privacyHeader.parentElement?.className).not.toMatch(/opacity/);
+    expect(termsHeader.parentElement?.className).not.toMatch(/opacity/);
+    expect(privacyHeader.parentElement?.className).toBe(termsHeader.parentElement?.className);
   });
 
   it('renders the heading it links to, so the anchor actually lands', () => {
@@ -220,7 +240,17 @@ describe('<LegalDocumentView />', () => {
     expect(link).toHaveAttribute('aria-current', 'true');
   });
 
-  it('clicking the other document\'s rail header scrolls to its heading and highlights it', () => {
+  it('clicking the other document\'s rail header scrolls to its heading and pills its first section', () => {
+    // The document header itself is never a pill target (no route/document-
+    // level highlighting) — clicking it scrolls to that document's heading
+    // and, like arriving at that document via its route, pins the highlight
+    // to its own first section instead.
+    mockUseConsentConfig.mockReturnValue(
+      consentConfig({
+        privacyContent: '## Privacy Policy\n\nIntro.\n### Retention\nx',
+        termsContent: '## Terms of Service\n\nWelcome.\n### Governing law\nIndia.',
+      }),
+    );
     const scrollIntoView = vi.fn();
     Element.prototype.scrollIntoView = scrollIntoView as unknown as typeof Element.prototype.scrollIntoView;
     view('privacy');
@@ -229,7 +259,11 @@ describe('<LegalDocumentView />', () => {
     fireEvent.click(termsHeader);
 
     expect(scrollIntoView).toHaveBeenCalled();
-    expect(termsHeader).toHaveAttribute('aria-current', 'page');
+    expect(termsHeader).not.toHaveAttribute('aria-current');
+    expect(screen.getByRole('link', { name: 'Governing law' })).toHaveAttribute(
+      'aria-current',
+      'true',
+    );
   });
 });
 

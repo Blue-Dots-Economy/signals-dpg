@@ -436,10 +436,18 @@ export function LegalDocumentView({ doc }: { doc: LegalDoc }): React.JSX.Element
     }
   }, [location.hash, contentReady, doc, availableDocs, scrollAndPin]);
 
-  function handleRailClick(id: string) {
+  /**
+   * `targetId` is what gets scrolled to; `pillId` (defaulting to the same
+   * value) is what the rail highlights meanwhile. They differ for a
+   * document-header click: it scrolls to that document's own heading, but
+   * pins the highlight to its first section — there is no rail entry for
+   * the bare heading itself to highlight, since document-level highlighting
+   * was removed (only section pills are a live indicator now).
+   */
+  function handleRailClick(targetId: string, pillId: string = targetId) {
     return (event: React.MouseEvent) => {
       event.preventDefault();
-      scrollAndPin(id, id);
+      scrollAndPin(targetId, pillId);
     };
   }
 
@@ -506,21 +514,13 @@ export function LegalDocumentView({ doc }: { doc: LegalDoc }): React.JSX.Element
             >
               {availableDocs.map(({ doc: d, version, sections }) => {
                 const headingId = docHeadingId(d);
-                const isActiveDoc =
-                  activeId === headingId || sections.some((s) => s.id === activeId);
 
                 return (
-                  <div key={d} className={cn('mb-6', !isActiveDoc && 'opacity-75')}>
+                  <div key={d} className="mb-6">
                     <a
                       href={`#${headingId}`}
-                      onClick={handleRailClick(headingId)}
-                      aria-current={isActiveDoc ? 'page' : undefined}
-                      className={cn(
-                        'block rounded-md px-3 py-1.5 text-[10.5px] font-bold uppercase tracking-[0.1em] transition-colors',
-                        isActiveDoc
-                          ? 'text-primary'
-                          : 'text-muted-foreground hover:bg-muted hover:text-primary',
-                      )}
+                      onClick={handleRailClick(headingId, sections[0]?.id ?? headingId)}
+                      className="block rounded-md px-3 py-1.5 text-[10.5px] font-bold uppercase tracking-[0.1em] text-muted-foreground transition-colors hover:bg-muted hover:text-primary"
                     >
                       {version.title}
                     </a>
