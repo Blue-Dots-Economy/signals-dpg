@@ -1,5 +1,6 @@
 import Ajv2020 from 'ajv/dist/2020.js';
 import { z } from 'zod';
+import { applyUriPatterns } from './uri_fields';
 
 const JsonSchemaDocumentSchema = z.record(z.string(), z.unknown());
 
@@ -636,9 +637,14 @@ export function validateAgainstJsonSchema(
   } = {}
 ) {
   const ignoredKeys = options.ignoredKeys ?? [];
+  // `x-uri` fields get the shared URL pattern injected before compilation. The
+  // API's ajv registers no `ajv-formats`, so `format` is ignored on every
+  // write — `pattern` is what actually bites here, and it is the SAME pattern
+  // the profile form applies client-side (packages/schemas/src/uri_fields.ts).
+  const schemaWithUriPatterns = applyUriPatterns(schema);
   const schemaForValidation = options.allowAdditionalProperties
-    ? allowAdditionalProperties(schema)
-    : schema;
+    ? allowAdditionalProperties(schemaWithUriPatterns)
+    : schemaWithUriPatterns;
   const finalSchema =
     ignoredKeys.length > 0
       ? omitRequiredSchemaKeys(schemaForValidation, ignoredKeys)

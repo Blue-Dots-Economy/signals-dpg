@@ -10,6 +10,7 @@ import {
   formatCardValue,
   type CardRow,
 } from './resolve-card-fields';
+import { UriValue } from './uri-value';
 
 export interface ItemCardProps {
   /** Item schema (drives field labels). May be absent for map markers. */
@@ -48,7 +49,9 @@ function FieldRow({ row, compact = false }: { row: CardRow; compact?: boolean })
   const { t } = useTranslation();
   const [expanded, setExpanded] = React.useState(false);
   const formatted = formatCardValue(row.value, row.type);
-  const isLong = formatted.length > LONG_VALUE_PREVIEW_CHARS;
+  // A link row skips the "Show more" toggle: UriValue elides its own display
+  // text and keeps the full value in the href + tooltip.
+  const isLong = !row.isUri && formatted.length > LONG_VALUE_PREVIEW_CHARS;
   const display =
     isLong && !expanded
       ? `${formatted.slice(0, LONG_VALUE_PREVIEW_CHARS).trimEnd()}… `
@@ -76,7 +79,7 @@ function FieldRow({ row, compact = false }: { row: CardRow; compact?: boolean })
           row.isEmpty ? 'text-muted-foreground/60' : 'text-foreground'
         )}
       >
-        {display}
+        {row.isUri ? <UriValue value={row.value} /> : display}
         {isLong && (
           <button
             type="button"

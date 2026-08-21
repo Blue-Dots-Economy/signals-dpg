@@ -15,6 +15,7 @@ export * from './admin/participant_decrypt';
 export * from './aggregator/dashboard';
 export * from './item_state_privacy';
 export * from './item_state_masking';
+export * from './uri_fields';
 export {
   findMetricCategoryAsymmetries,
   getActionInteraction,
