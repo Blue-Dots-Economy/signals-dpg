@@ -75,7 +75,7 @@ export function ConsentGateBody({ docs, onAccept }: ConsentGateBodyProps): React
       <div className="flex shrink-0 flex-col gap-3 border-t border-border pt-3 sm:pt-4">
         <p
           className={`flex items-center gap-1.5 text-xs ${
-            progress.allRead ? 'font-semibold text-primary' : 'text-muted-foreground'
+            progress.allRead ? 'font-semibold text-success' : 'text-muted-foreground'
           }`}
         >
           {progress.allRead ? (

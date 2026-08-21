@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { computeReadProgress } from '@/components/consent/read-progress';
+import { computeReadProgress, initialProgress } from '@/components/consent/read-progress';
 
 // Three 300px sections stacked in a 200px-tall viewport.
 const sections = [
@@ -64,5 +64,34 @@ describe('computeReadProgress', () => {
     expect(p.allRead).toBe(false);
     expect(p.readIds).toEqual([]);
     expect(p.currentId).toBe('privacy');
+  });
+});
+
+describe('initialProgress', () => {
+  it('reports allRead false for a non-empty document list before any measurement', () => {
+    // Deliberately NOT computeReadProgress({...0x0...}, [], []): that hits the
+    // pure function's empty-sections branch, which reports allRead: true so a
+    // genuinely empty document list cannot block forever. Bootstrapping a
+    // non-empty gate through that branch would render the checkbox enabled
+    // for the first frame, before useEffect ever measures anything.
+    const p = initialProgress(['privacy', 'terms']);
+    expect(p.allRead).toBe(false);
+    expect(p.readIds).toEqual([]);
+    expect(p.currentId).toBe('privacy');
+  });
+
+  it('reports allRead true for a genuinely empty document list', () => {
+    const p = initialProgress([]);
+    expect(p.allRead).toBe(true);
+    expect(p.currentId).toBeNull();
+  });
+
+  it('diverges from the old empty-sections bootstrap this replaces', () => {
+    // Sanity check that this test can actually fail: the expression this
+    // hook used to bootstrap its useState with reports allRead true for any
+    // doc list, which is the bug finding 1 fixes.
+    const oldBootstrap = computeReadProgress({ scrollTop: 0, clientHeight: 0, scrollHeight: 0 }, [], []);
+    expect(oldBootstrap.allRead).toBe(true);
+    expect(initialProgress(['privacy', 'terms']).allRead).toBe(false);
   });
 });

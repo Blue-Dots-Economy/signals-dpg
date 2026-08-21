@@ -103,6 +103,29 @@ export function computeReadProgress(
 }
 
 /**
+ * Bootstrap progress, before the first measurement has run.
+ *
+ * Deliberately NOT `computeReadProgress({...0x0...}, [], [])`: an empty
+ * `sections` array hits the pure function's empty-document-list branch,
+ * which reports `allRead: true` so a genuinely empty list cannot block
+ * forever. Here "no sections yet" means "not measured", the opposite — and
+ * an unmeasured gate must never render its checkbox enabled. `useEffect`
+ * runs after paint, so a wrong `true` here is briefly visible in a real
+ * browser before `measure()` ever runs.
+ *
+ * @param docIds - Ids of the documents the gate is about to render, in order.
+ * @returns Nothing-read progress, except for a genuinely empty `docIds` list.
+ */
+export function initialProgress(docIds: readonly string[]): ReadProgress {
+  return {
+    readIds: [],
+    currentId: docIds[0] ?? null,
+    fillPercent: 0,
+    allRead: docIds.length === 0,
+  };
+}
+
+/**
  * Tracks read progress for a scroll container holding `docIds` in order.
  *
  * Re-measures on scroll and on resize: a web-font swap, async Markdown render,
@@ -117,9 +140,7 @@ export function useReadProgress(
   docIds: string[],
 ): ReadProgress {
   const readRef = useRef<string[]>([]);
-  const [progress, setProgress] = useState<ReadProgress>(() =>
-    computeReadProgress({ scrollTop: 0, clientHeight: 0, scrollHeight: 0 }, [], []),
-  );
+  const [progress, setProgress] = useState<ReadProgress>(() => initialProgress(docIds));
 
   const measure = useCallback(() => {
     const el = scrollRef.current;
@@ -134,7 +155,12 @@ export function useReadProgress(
       sections,
       readRef.current,
     );
-    readRef.current = next.readIds;
+    // Union, don't replace: computeReadProgress only re-emits an id whose
+    // section was found in *this* call's `sections`. A transiently missing
+    // DOM node (remount, conditional render, a measurement racing layout)
+    // would otherwise silently drop that id from the bookkeeping and the
+    // tracker would go backwards. Stickiness is the whole guarantee.
+    readRef.current = Array.from(new Set([...readRef.current, ...next.readIds]));
     setProgress(next);
   }, [scrollRef, docIds]);
 
