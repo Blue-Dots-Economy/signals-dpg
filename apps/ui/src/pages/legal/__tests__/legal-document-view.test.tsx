@@ -134,3 +134,59 @@ describe('<LegalDocumentView />', () => {
     expect(screen.getByRole('link', { name: 'Overview' })).toHaveAttribute('href', '#overview');
   });
 });
+
+describe('<LegalDocumentView /> deep-link scrolling', () => {
+  let scrollIntoView: ReturnType<typeof vi.fn>;
+
+  beforeEach(() => {
+    scrollIntoView = vi.fn();
+    Element.prototype.scrollIntoView = scrollIntoView as unknown as typeof Element.prototype.scrollIntoView;
+  });
+
+  it('scrolls the hash target into view once its section has rendered', () => {
+    mockUseConsentConfig.mockReturnValue(REAL_SHAPE);
+    render(
+      <MemoryRouter initialEntries={['/privacy#retention']}>
+        <LegalDocumentView doc="privacy" />
+      </MemoryRouter>,
+    );
+    expect(scrollIntoView).toHaveBeenCalled();
+  });
+
+  it('scrolls once content arrives after mount, even though the hash was already set (cold-load ordering)', () => {
+    // Reproduces a cold `/privacy#retention` load: the consent-config fetch
+    // resolves well after the browser's own one-shot fragment-scroll attempt
+    // has already run and found nothing — so the effect must fire again when
+    // the CONTENT shows up, not only when the hash changes. An effect keyed
+    // on `location.hash` alone would miss this case entirely: the hash here
+    // never changes — it's present from the very first render, while
+    // `isLoading` is still true.
+    mockUseConsentConfig.mockReturnValue({ isLoading: true, config: null });
+    const { rerender } = render(
+      <MemoryRouter initialEntries={['/privacy#retention']}>
+        <LegalDocumentView doc="privacy" />
+      </MemoryRouter>,
+    );
+    expect(scrollIntoView).not.toHaveBeenCalled();
+
+    // The fetch resolves; same hash, content now available.
+    mockUseConsentConfig.mockReturnValue(REAL_SHAPE);
+    rerender(
+      <MemoryRouter initialEntries={['/privacy#retention']}>
+        <LegalDocumentView doc="privacy" />
+      </MemoryRouter>,
+    );
+
+    expect(scrollIntoView).toHaveBeenCalled();
+  });
+
+  it('does nothing when the URL carries no hash', () => {
+    mockUseConsentConfig.mockReturnValue(REAL_SHAPE);
+    render(
+      <MemoryRouter initialEntries={['/privacy']}>
+        <LegalDocumentView doc="privacy" />
+      </MemoryRouter>,
+    );
+    expect(scrollIntoView).not.toHaveBeenCalled();
+  });
+});

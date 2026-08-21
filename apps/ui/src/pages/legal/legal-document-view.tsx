@@ -8,7 +8,8 @@
  * page does not surface), so unlike the sibling aggregator repo the rail
  * lists just the two documents and their sections — no audience grouping.
  */
-import { Link } from 'react-router-dom';
+import { useEffect } from 'react';
+import { Link, useLocation } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { Loader2 } from 'lucide-react';
 import { LanguageSwitcher } from '@/components/layout/language-switcher';
@@ -181,6 +182,39 @@ function RailSections({
 export function LegalDocumentView({ doc }: { doc: LegalDoc }): React.JSX.Element {
   const { t } = useTranslation();
   const { config, isLoading } = useConsentConfig();
+  const location = useLocation();
+
+  const version = getCurrentVersion(config?.documents[doc]);
+  const { preamble, sections } = version
+    ? splitIntoSections(version.content, version.title)
+    : { preamble: '', sections: [] as ReturnType<typeof splitIntoSections>['sections'] };
+  // `sections` only carries ids once the content has actually resolved, so
+  // this doubles as the "content is available" signal below.
+  const contentReady = sections.length > 0 || Boolean(preamble);
+
+  // Deep-link landing. Two ways a hash-targeted section fails to scroll into
+  // view without this:
+  //   (a) a rail click on the OTHER document is a react-router `<Link>` — a
+  //       client-side transition, not a full navigation — so the browser's
+  //       own one-shot fragment-scroll never fires at all.
+  //   (b) a cold `/privacy#retention` load: the browser's fragment-scroll
+  //       DOES fire, but this content only renders once the consent-config
+  //       fetch resolves, which is almost always after that one-shot attempt
+  //       has already run and found nothing to scroll to.
+  // Depending on `location.hash` alone would fix (a) but not (b) — the hash
+  // is already present on the very first render, long before `contentReady`
+  // flips true, so it needs BOTH: re-run when the hash changes, and re-run
+  // when the content that owns the target id first shows up.
+  useEffect(() => {
+    if (!location.hash || !contentReady) return;
+    const id = decodeURIComponent(location.hash.slice(1));
+    const el = document.getElementById(id);
+    if (!el) return;
+    const prefersReducedMotion =
+      typeof window !== 'undefined' &&
+      window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+    el.scrollIntoView({ behavior: prefersReducedMotion ? 'auto' : 'smooth', block: 'start' });
+  }, [location.hash, contentReady]);
 
   if (isLoading) {
     return (
@@ -189,8 +223,6 @@ export function LegalDocumentView({ doc }: { doc: LegalDoc }): React.JSX.Element
       </div>
     );
   }
-
-  const version = getCurrentVersion(config?.documents[doc]);
 
   if (!version) {
     return (
@@ -202,7 +234,6 @@ export function LegalDocumentView({ doc }: { doc: LegalDoc }): React.JSX.Element
     );
   }
 
-  const { preamble, sections } = splitIntoSections(version.content, version.title);
   const effectiveDate = new Date(version.effective_from).toLocaleDateString();
 
   return (
