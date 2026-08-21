@@ -27,13 +27,18 @@ export async function resolveOwnerEmail(userId: string): Promise<string | null> 
  */
 export async function resolveOwnerNameEmail(
   userId: string,
-): Promise<{ name: string | null; email: string | null }> {
+): Promise<{ found: boolean; name: string | null; email: string | null }> {
   const rows = await db
     .select({ name: user.name, email: user.email })
     .from(user)
     .where(eq(user.id, userId))
     .limit(1);
-  return { name: rows[0]?.name ?? null, email: rows[0]?.email ?? null };
+  const row = rows[0];
+  // `found` distinguishes a phone-only owner (row exists, email null — benign
+  // skip) from a missing row (no match for `userId` — a real defect signal:
+  // a broken `created_by` or a wrong id threaded from the route). The caller
+  // logs the two differently rather than silently skipping both.
+  return { found: !!row, name: row?.name ?? null, email: row?.email ?? null };
 }
 
 /**

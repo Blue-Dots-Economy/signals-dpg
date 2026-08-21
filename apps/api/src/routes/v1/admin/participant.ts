@@ -571,6 +571,12 @@ async function existingUserOk(
  * place of the self create/welcome emails. Welcome is not a concern here: an
  * onboarded user's local row already exists (insertLocalUser), so
  * provisioning.createMirror is skipped on first login and never sends Welcome.
+ * `actingOrgType: 'aggregator'` is hard-coded deliberately: every service-org
+ * onboarder (aggregator, network_service, voice) lands here, and all get the
+ * initiation email — the self create/Welcome path is suppressed for all of
+ * them, so collapsing them to the aggregator copy prevents a missed onboarding
+ * email. (A network_service/voice onboard is thus described as an aggregator in
+ * the copy — accepted.)
  * Fire-and-forget, lazy-imported to keep the notification chain off this
  * route's static graph.
  */

@@ -42,6 +42,8 @@ function makeSender(teamName: string) {
 const CASES: Array<{ caseId: string; vars: Record<string, string> }> = [
   { caseId: 'profile.create', vars: { name: 'Asha' } },
   { caseId: 'offer.create', vars: { name: 'Acme Services' } },
+  { caseId: 'profile.create_incomplete', vars: { name: 'Asha' } },
+  { caseId: 'offer.create_incomplete', vars: { name: 'Acme Services' } },
   { caseId: 'profile.update', vars: { name: 'Asha' } },
   { caseId: 'offer.update', vars: { name: 'Acme Services' } },
   { caseId: 'account.aggregator_init', vars: { name: 'Asha', aggregatorOrg: 'SkillBridge Network' } },
@@ -84,6 +86,8 @@ describe('item-lifecycle email payload (pre-notification-service)', () => {
       expect((req as { template_id: string }).template_id).toBe('basic_email');
       expect(v.subject.length).toBeGreaterThan(0);
       expect(v.html).toContain('EkStep'); // per-INSTANCE_NAME sign-off in the shell
+      // CTA is wired on every case (guards a case→shell mis-wire).
+      expect(v.html).toContain('https://app.bluedots.example');
     });
 
     // Spot-check substitution + copy on a couple of cases.
@@ -95,6 +99,10 @@ describe('item-lifecycle email payload (pre-notification-service)', () => {
     expect(byCase('profile.create').variables.html).toContain('Asha');
     expect(byCase('account.aggregator_init').variables.html).toContain('SkillBridge Network');
     expect(byCase('account.aggregator_init').variables.subject).toBe('Activate your account');
+    // Draft-create copy must NOT claim "live"; it nudges completion (#1 review).
+    expect(byCase('profile.create_incomplete').variables.subject).toBe('Complete your profile');
+    expect(byCase('profile.create_incomplete').variables.html.toLowerCase()).not.toContain('is live');
+    expect(byCase('offer.create_incomplete').variables.subject).toBe('Complete your offer');
   });
 
   it('HTML-escapes owner-supplied names (no injection via user.name)', async () => {

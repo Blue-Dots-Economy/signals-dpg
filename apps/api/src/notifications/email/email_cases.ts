@@ -79,6 +79,10 @@ CASES.set('retire.cancel', ctaCase('retire.cancel', {}));
 const ITEM_TOKENS: TokenTypes = { name: 'text' };
 CASES.set('profile.create', ctaCase('profile.create', ITEM_TOKENS));
 CASES.set('offer.create', ctaCase('offer.create', ITEM_TOKENS));
+// A create that committed `draft` (incomplete / gated minor) is not yet live —
+// this "complete your profile" copy is sent instead of the live create copy.
+CASES.set('profile.create_incomplete', ctaCase('profile.create_incomplete', ITEM_TOKENS));
+CASES.set('offer.create_incomplete', ctaCase('offer.create_incomplete', ITEM_TOKENS));
 CASES.set('profile.update', ctaCase('profile.update', ITEM_TOKENS));
 CASES.set('offer.update', ctaCase('offer.update', ITEM_TOKENS));
 CASES.set(

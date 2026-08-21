@@ -40,6 +40,26 @@ describe('itemLifecycleCaseId', () => {
     ).toBe('account.aggregator_init');
   });
 
+  it('routes a draft create to *.create_incomplete, a live/absent-status create to *.create', () => {
+    const base = { ownerId: 'u1', network: 'blue_dot', op: 'create' } as const;
+    // Draft (incomplete / gated minor) → "complete your profile" copy.
+    expect(itemLifecycleCaseId({ ...base, domain: 'seeker', lifecycleStatus: 'draft' })).toBe(
+      'profile.create_incomplete',
+    );
+    expect(itemLifecycleCaseId({ ...base, domain: 'provider', lifecycleStatus: 'draft' })).toBe(
+      'offer.create_incomplete',
+    );
+    // Live → the standard create copy; absent status defaults to live.
+    expect(itemLifecycleCaseId({ ...base, domain: 'seeker', lifecycleStatus: 'live' })).toBe(
+      'profile.create',
+    );
+    expect(itemLifecycleCaseId({ ...base, domain: 'seeker' })).toBe('profile.create');
+    // Aggregator create ignores lifecycle status — always the initiation email.
+    expect(
+      itemLifecycleCaseId({ ...base, domain: 'seeker', lifecycleStatus: 'draft', actingOrgType: 'aggregator' }),
+    ).toBe('account.aggregator_init');
+  });
+
   it('does NOT re-route non-create ops even under an aggregator acting-org', () => {
     expect(
       itemLifecycleCaseId({

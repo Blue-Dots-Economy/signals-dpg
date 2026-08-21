@@ -36,6 +36,14 @@ export interface ItemLifecycleEvent {
   actingOrgType?: string | null;
   /** Onboarding org display name — substituted into the aggregator email. */
   aggregatorOrgName?: string | null;
+  /**
+   * The committed lifecycle status of the item, for `create` only. A create can
+   * commit `draft` (incomplete profile / gated minor) while still returning 201,
+   * so a `draft` create must NOT claim "your profile is live" — it routes to the
+   * `*.create_incomplete` ("complete your profile") copy instead. Absent/`live`
+   * → the standard create copy.
+   */
+  lifecycleStatus?: string | null;
 }
 
 /**
@@ -51,7 +59,12 @@ export function itemLifecycleCaseId(event: ItemLifecycleEvent): string | null {
   const noun = resolveRecipientRole(event.domain) === 'provider' ? 'offer' : 'profile';
   switch (event.op) {
     case 'create':
-      return `${noun}.create`;
+      // A create that committed `draft` (incomplete / gated minor) is not
+      // live/discoverable, so it gets the "complete your profile" copy rather
+      // than the "you're live" create copy. Absent status ⇒ assume live.
+      return event.lifecycleStatus && event.lifecycleStatus !== 'live'
+        ? `${noun}.create_incomplete`
+        : `${noun}.create`;
     case 'update':
       return `${noun}.update`;
     case 'pause':
@@ -77,10 +90,26 @@ export async function dispatchItemLifecycleNotification(
     if (!config) return;
 
     const caseId = itemLifecycleCaseId(event);
-    if (!caseId) return;
+    if (!caseId) {
+      // No mapping for this op — make it observable rather than a silent drop
+      // (guards a future op added without a case).
+      log.warn({ op: event.op, domain: event.domain }, 'item-lifecycle: no email case for op');
+      return;
+    }
 
-    const { name, email } = await resolveOwnerNameEmail(event.ownerId);
-    if (!email) return; // phone-only owner — no email to send to.
+    const { found, name, email } = await resolveOwnerNameEmail(event.ownerId);
+    if (!found) {
+      // Missing user row for a supposedly-valid owner id is a defect signal
+      // (broken created_by / wrong threaded id), not a benign skip.
+      log.warn({ ownerId: event.ownerId, op: event.op }, 'item-lifecycle: owner user row not found — email skipped');
+      return;
+    }
+    if (!email) {
+      // Phone-only owner — benign, but record it so a "missed email" is never
+      // fully silent. Non-PII: ownerId + op only.
+      log.info({ ownerId: event.ownerId, op: event.op }, 'item-lifecycle: owner has no email — skipped');
+      return;
+    }
 
     const brandName = await resolveNetworkBrandName(event.network);
 
@@ -89,14 +118,27 @@ export async function dispatchItemLifecycleNotification(
       variables.aggregatorOrg = event.aggregatorOrgName || brandName;
     }
 
-    await config.sender.dispatchEmail({
+    // These cases are best_effort: dispatchEmail catches internally and returns
+    // `{ ok: false }` rather than throwing, so a send failure would otherwise be
+    // invisible here. Pass the structured request logger through, and act on the
+    // result so a bulk-onboarding NS outage is logged (with op/network/ownerId),
+    // not a silent 200.
+    const { ok } = await config.sender.dispatchEmail({
       caseId,
       to: email,
       fromName: brandName,
       network: event.network,
       ctaUrl: config.ctaUrl,
       variables,
+      log: (message, meta) =>
+        log.warn({ ...meta, op: event.op, network: event.network, ownerId: event.ownerId }, message),
     });
+    if (!ok) {
+      log.warn(
+        { caseId, op: event.op, network: event.network, ownerId: event.ownerId },
+        'item-lifecycle email send failed (best_effort)',
+      );
+    }
   } catch (err) {
     // Best-effort: a lifecycle email must never fail the create/update/retire.
     log.warn({ err, op: event.op }, 'item-lifecycle notification failed');

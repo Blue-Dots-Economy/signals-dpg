@@ -371,10 +371,12 @@ export const create_item_handler = async (
     // never blocks or fails the create. Lazy-imported so the notification/config
     // chain stays out of this route's static module graph. An aggregator
     // acting-org routes to the initiation email instead of the self create email.
-    // `userId` IS the owner here: /item/create is self-serve (session caller =
-    // owner); admin/aggregator onboarding creates via /participant, not this
-    // route. If a non-owner ever creates here, revisit the recipient (cf.
-    // lifecycle, which threads result.created_by for the network_service case).
+    // `userId` is the resolved OWNER on both paths — the session caller for a
+    // self create, and `body.created_by` for an admin-api create (validated
+    // above) — so it's the correct recipient regardless of who called.
+    // `lifecycleStatus` distinguishes a `live` create ("you're live") from a
+    // `draft` one ("complete your profile"): a create can commit draft
+    // (incomplete / gated minor) while still returning 201.
     void import('@/notifications/notify_item_lifecycle')
       .then(({ dispatchItemLifecycleNotification }) =>
         dispatchItemLifecycleNotification(
@@ -384,6 +386,7 @@ export const create_item_handler = async (
             domain: body.item_domain,
             network: body.item_network,
             actingOrgType: request.acting_org?.org_type ?? null,
+            lifecycleStatus: created.lifecycleStatus,
           },
           request.log,
         ),
