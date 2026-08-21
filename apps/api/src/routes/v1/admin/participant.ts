@@ -564,6 +564,32 @@ async function existingUserOk(
   });
 }
 
+/**
+ * Aggregator-onboarding initiation email (#531/#534), NEW users only. Both
+ * onboarding channels (bulk + link) land on this route, so this is the single
+ * place the "you've been onboarded — activate your account" email is sent, in
+ * place of the self create/welcome emails. Welcome is not a concern here: an
+ * onboarded user's local row already exists (insertLocalUser), so
+ * provisioning.createMirror is skipped on first login and never sends Welcome.
+ * Fire-and-forget, lazy-imported to keep the notification chain off this
+ * route's static graph.
+ */
+function notifyAggregatorInit(
+  ctx: ParticipantCtx,
+  userId: string,
+  network: string,
+  domain: string,
+): void {
+  void import('@/notifications/notify_item_lifecycle')
+    .then(({ dispatchItemLifecycleNotification }) =>
+      dispatchItemLifecycleNotification(
+        { op: 'create', ownerId: userId, domain, network, actingOrgType: 'aggregator' },
+        ctx.request.log,
+      ),
+    )
+    .catch((err) => ctx.request.log.warn({ err }, 'aggregator-init notify failed'));
+}
+
 /** `account_only`, new user: create the account, skip item creation. */
 async function handleAccountOnlyNewUser(ctx: ParticipantCtx) {
   const { request, reply, body, email_norm, phone_norm } = ctx;
@@ -605,6 +631,8 @@ async function handleAccountOnlyNewUser(ctx: ParticipantCtx) {
       message: result.message,
     });
   }
+
+  notifyAggregatorInit(ctx, result.user_id, network, body.domain ?? 'seeker');
 
   return reply.code(200).send({
     user_id: result.user_id,
@@ -924,6 +952,8 @@ async function handleCreateNewUser(ctx: ParticipantCtx) {
       request.log,
     );
   }
+
+  notifyAggregatorInit(ctx, result.user_id, network, domain);
 
   const itemsList = await readItemsForUser(result.user_id);
   return reply.code(200).send({
