@@ -63,6 +63,12 @@ const item_lifecycle_handler = async (
   const isNetworkService = request.acting_org?.org_type === 'network_service';
   const { item_id, action } = request.body;
 
+  // The item owner (for the pause/retire email) — captured from the row inside
+  // the tx so the notify recipient is the owner, NOT the caller (a
+  // network_service acting-org can transition another user's item). Kept off
+  // the returned `result` so it never leaks into the HTTP response body.
+  let ownerCreatedBy: string | null = null;
+
   try {
     const result = await db.transaction(async (tx) => {
       const [existing] = await tx
@@ -89,6 +95,7 @@ const item_lifecycle_handler = async (
       if (!isOwner && !isNetworkService) {
         return { forbidden: true } as const;
       }
+      ownerCreatedBy = existing.created_by;
 
       const current = existing.lifecycle_status as 'draft' | 'live' | 'paused' | 'retired';
 
@@ -297,14 +304,17 @@ const item_lifecycle_handler = async (
     }
 
     // Owner-facing pause/retire email (#531/#534). Fire-and-forget after commit.
-    // Only owner-driven transitions notify; unpause/draft/live don't. Lazy-
-    // imported to keep the notification chain out of the static module graph.
-    if (action === 'pause' || action === 'retire') {
+    // Only pause/retire notify; unpause/draft/live don't. Recipient is the item
+    // OWNER (ownerCreatedBy), not the caller — a network_service acting-org may
+    // pause/retire another user's item, and the owner is who must be told.
+    // Lazy-imported to keep the notification chain out of the static graph.
+    if ((action === 'pause' || action === 'retire') && ownerCreatedBy) {
       const op = action;
+      const ownerId = ownerCreatedBy;
       void import('@/notifications/notify_item_lifecycle')
         .then(({ dispatchItemLifecycleNotification }) =>
           dispatchItemLifecycleNotification(
-            { op, ownerId: callerId, domain: result.item_domain, network: result.item_network },
+            { op, ownerId, domain: result.item_domain, network: result.item_network },
             request.log,
           ),
         )

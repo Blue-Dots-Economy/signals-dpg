@@ -96,4 +96,19 @@ describe('item-lifecycle email payload (pre-notification-service)', () => {
     expect(byCase('account.aggregator_init').variables.html).toContain('SkillBridge Network');
     expect(byCase('account.aggregator_init').variables.subject).toBe('Activate your account');
   });
+
+  it('HTML-escapes owner-supplied names (no injection via user.name)', async () => {
+    const { sender, notify } = makeSender('EkStep');
+    await sender.dispatchEmail({
+      caseId: 'profile.create',
+      to: 'owner@example.com',
+      fromName: 'Blue Dot',
+      network: 'blue_dot',
+      ctaUrl: 'https://app.bluedots.example',
+      variables: { name: '<script>alert(1)</script>' },
+    });
+    const html = (notify.mock.calls[0]![0] as { variables: { html: string } }).variables.html;
+    expect(html).not.toContain('<script>alert(1)</script>');
+    expect(html).toContain('&lt;script&gt;');
+  });
 });

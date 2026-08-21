@@ -371,6 +371,10 @@ export const create_item_handler = async (
     // never blocks or fails the create. Lazy-imported so the notification/config
     // chain stays out of this route's static module graph. An aggregator
     // acting-org routes to the initiation email instead of the self create email.
+    // `userId` IS the owner here: /item/create is self-serve (session caller =
+    // owner); admin/aggregator onboarding creates via /participant, not this
+    // route. If a non-owner ever creates here, revisit the recipient (cf.
+    // lifecycle, which threads result.created_by for the network_service case).
     void import('@/notifications/notify_item_lifecycle')
       .then(({ dispatchItemLifecycleNotification }) =>
         dispatchItemLifecycleNotification(
