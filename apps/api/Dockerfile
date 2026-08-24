@@ -81,32 +81,17 @@ COPY --from=builder /app/apps/api/package.json ./apps/api/package.json
 COPY --from=builder /app/packages ./packages
 COPY --from=pruner /repo/examples ./examples
 
-# better-auth declares drizzle-kit, tsx and vitest as OPTIONAL peer
-# dependencies (it supports many adapters — Drizzle, Prisma, Kysely, etc. —
-# and probes for whichever are present). pnpm satisfies an optional peer from
-# ANY visible dependency in the workspace graph, including a sibling
-# importer's devDependencies, even under `--prod` — so drizzle-kit/tsx
-# (apps/api's own devDependencies) and vitest (packages/auth's) all get
-# linked into better-auth's resolved tree and installed anyway. That drags in
-# three separate copies of esbuild (drizzle-kit and tsx each bundle their
-# own, vitest pulls one in via vite), accounting for ~96% of this image's
-# Trivy findings (#598) despite never running in production: the actual
-# adapter this app uses, `better-auth/adapters/drizzle` (wired up in
-# packages/auth/src/config.ts), only touches drizzle-orm — confirmed zero
-# references to drizzle-kit in that adapter's compiled output.
-#
-# Deleting devDependencies from every workspace package.json before the prod
-# install removes them from the graph pnpm resolves peers against, so the
-# optional peers go genuinely unmet (fine — they're optional) instead of
-# being satisfied by a devDependency that has no business shipping here.
+# better-auth lists drizzle-kit/tsx/vitest as OPTIONAL peer deps (adapter
+# probing); pnpm links an optional peer from any devDependency visible in the
+# workspace graph, even under --prod, pulling three copies of esbuild into
+# the image for tools that are never actually invoked at runtime (#598).
+# Deleting devDependencies first leaves those peers genuinely unmet.
 RUN find ./apps/api ./packages -maxdepth 2 -name package.json -exec \
   node -e "const fs=require('fs');const p=process.argv[1];const j=JSON.parse(fs.readFileSync(p));delete j.devDependencies;fs.writeFileSync(p,JSON.stringify(j));" {} \;
 
-# Install ONLY api production deps. --no-frozen-lockfile is required here,
-# not optional: CI=true (set above) makes pnpm default to --frozen-lockfile,
-# and the devDependencies deletion above is deliberate manifest/lockfile
-# drift — pinned versions still come from pnpm-lock.yaml for every dependency
-# that remains, only the removed devDependencies are unpinned from it.
+# Install ONLY api production deps. --no-frozen-lockfile: CI=true (above)
+# defaults pnpm to frozen-lockfile, which the devDependencies deletion above
+# deliberately violates.
 RUN --mount=type=cache,id=pnpm-store,target=/pnpm/store \
   pnpm install --prod --filter=api... --no-frozen-lockfile
 
