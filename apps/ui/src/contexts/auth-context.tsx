@@ -31,7 +31,7 @@ interface AuthContextType {
   requestOtp: (identifier: AuthIdentifier) => Promise<void>;
   verifyOtp: (identifier: AuthIdentifier, otp: string, name?: string) => Promise<void>;
   /** Redirect to Keycloak. Only meaningful when `isKeycloakLogin`. */
-  startKeycloakLogin: (returnTo?: string) => Promise<void>;
+  startKeycloakLogin: (returnTo?: string, consentAttempt?: string) => Promise<void>;
   /** Adopt the session established by the OIDC callback page. */
   completeKeycloakLogin: () => Promise<void>;
   signOut: () => Promise<void>;
@@ -193,9 +193,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const startKeycloakLogin = useCallback(
-    async (returnTo?: string): Promise<void> => {
+    async (returnTo?: string, consentAttempt?: string): Promise<void> => {
       const { startOidcLogin } = await import('@/lib/oidc-client');
-      await startOidcLogin(authCfg, returnTo);
+      await startOidcLogin(authCfg, returnTo, consentAttempt);
     },
     [authCfg]
   );

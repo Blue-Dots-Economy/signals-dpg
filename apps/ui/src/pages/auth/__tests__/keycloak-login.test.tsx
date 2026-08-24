@@ -53,8 +53,11 @@ vi.mock('@/contexts/auth-context', () => ({
   }),
 }));
 
+/** Stands in for the id minted per login attempt (see pending-consent.ts). */
+const PARKED_ATTEMPT = 'test-attempt-id';
+
 const completeOidcLogin =
-  vi.fn<() => Promise<{ accessToken: string; returnTo?: string }>>();
+  vi.fn<() => Promise<{ accessToken: string; returnTo?: string; consentAttempt?: string }>>();
 vi.mock('@/lib/oidc-client', () => ({
   completeOidcLogin: (...args: unknown[]) => completeOidcLogin(...(args as [])),
 }));
@@ -207,7 +210,9 @@ beforeEach(() => {
   loginChannels = ['phone', 'email'];
   startKeycloakLogin.mockClear().mockResolvedValue(undefined);
   completeKeycloakLogin.mockClear().mockResolvedValue(undefined);
-  completeOidcLogin.mockClear().mockResolvedValue({ accessToken: 'tok', returnTo: undefined });
+  completeOidcLogin
+    .mockClear()
+    .mockResolvedValue({ accessToken: 'tok', returnTo: undefined, consentAttempt: PARKED_ATTEMPT });
   signupWithKeycloak.mockClear().mockResolvedValue({ ok: true, alreadyRegistered: false });
   // Default: consent already accepted for the current version, so no gate.
   fetchConsentConfigs.mockReset().mockResolvedValue([]);
@@ -263,7 +268,7 @@ describe('KeycloakLoginPanel', () => {
 
     await userEvent.click(screen.getByRole('button', { name: /continue/i }));
 
-    await waitFor(() => expect(startKeycloakLogin).toHaveBeenCalledWith('/'));
+    await waitFor(() => expect(startKeycloakLogin).toHaveBeenCalledWith('/', undefined));
   });
 
   it('round-trips the ?redirect= target so a deep link survives login', async () => {
@@ -271,7 +276,7 @@ describe('KeycloakLoginPanel', () => {
 
     await userEvent.click(screen.getByRole('button', { name: /continue/i }));
 
-    await waitFor(() => expect(startKeycloakLogin).toHaveBeenCalledWith('/profile/new'));
+    await waitFor(() => expect(startKeycloakLogin).toHaveBeenCalledWith('/profile/new', undefined));
   });
 
   it('surfaces a redirect failure instead of hanging on a spinner', async () => {
@@ -414,7 +419,7 @@ describe('KeycloakLoginPanel — existing vs new user chooser', () => {
 
     await userEvent.click(await screen.findByText(/existing user/i));
 
-    await waitFor(() => expect(startKeycloakLogin).toHaveBeenCalledWith('/'));
+    await waitFor(() => expect(startKeycloakLogin).toHaveBeenCalledWith('/', undefined));
     expect(signupWithKeycloak).not.toHaveBeenCalled();
   });
 
@@ -841,11 +846,17 @@ describe('terms & privacy gate on registration', () => {
     await userEvent.click(await screen.findByRole('button', { name: /accept consent/i }));
 
     await waitFor(() => expect(localStorage.getItem('pendingConsent')).not.toBeNull());
-    // Envelope is `{ body, at }` (see `pending-consent.ts`) — `at` is the
-    // staleness timestamp that stops an abandoned Keycloak redirect from
-    // being flushed onto a later, unrelated login.
+    // Envelope is `{ body, at, attempt }` (see `pending-consent.ts`). `at`
+    // bounds how long an abandoned redirect lingers; `attempt` is what
+    // actually stops it being flushed onto a DIFFERENT login on this device,
+    // and must be handed to Keycloak so only this login's callback matches it.
     const parked = JSON.parse(localStorage.getItem('pendingConsent') as string);
     expect(typeof parked.at).toBe('number');
+    expect(typeof parked.attempt).toBe('string');
+    expect(parked.attempt).not.toBe('');
+    await waitFor(() =>
+      expect(startKeycloakLogin).toHaveBeenCalledWith(expect.anything(), parked.attempt)
+    );
     expect(parked.body.source).toBe('signup');
     expect(parked.body.items.map((i: { category: string }) => i.category).sort()).toEqual([
       'privacy',
@@ -894,7 +905,10 @@ describe('OidcCallbackPage — flushing the parked consent', () => {
     };
     // Envelope is `{ body, at }` (see `pending-consent.ts`); `at` must be
     // recent enough to survive the staleness check.
-    localStorage.setItem('pendingConsent', JSON.stringify({ body: parked, at: Date.now() }));
+    localStorage.setItem(
+      'pendingConsent',
+      JSON.stringify({ body: parked, at: Date.now(), attempt: PARKED_ATTEMPT })
+    );
 
     renderAt(<OidcCallbackPage />, '/auth/callback');
 
@@ -917,6 +931,7 @@ describe('OidcCallbackPage — flushing the parked consent', () => {
       JSON.stringify({
         body: { network: 'blue_dot', brand: null, source: 'signup', items: [] },
         at: Date.now(),
+        attempt: PARKED_ATTEMPT,
       })
     );
     acceptConsent.mockRejectedValueOnce(new Error('write failed'));
@@ -952,7 +967,7 @@ describe('OidcCallbackPage — flushing the parked consent', () => {
     // else's login is completing now.
     localStorage.setItem(
       'pendingConsent',
-      JSON.stringify({ body: parked, at: Date.now() - 6 * 60 * 1000 })
+      JSON.stringify({ body: parked, at: Date.now() - 6 * 60 * 1000, attempt: PARKED_ATTEMPT })
     );
 
     renderAt(<OidcCallbackPage />, '/auth/callback');
@@ -981,6 +996,7 @@ describe('OidcCallbackPage — landing is not conditional on the effect survivin
       JSON.stringify({
         body: { network: 'blue_dot', brand: null, source: 'signup', items: [] },
         at: Date.now(),
+        attempt: PARKED_ATTEMPT,
       })
     );
     let resolveAccept: (v: { ok: boolean }) => void = () => {};
@@ -1015,6 +1031,7 @@ describe('OidcCallbackPage — consent write cannot stall the landing', () => {
       JSON.stringify({
         body: { network: 'blue_dot', brand: null, source: 'signup', items: [] },
         at: Date.now(),
+        attempt: PARKED_ATTEMPT,
       })
     );
     // Never resolves.

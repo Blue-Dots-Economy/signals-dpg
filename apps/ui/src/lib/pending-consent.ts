@@ -25,10 +25,31 @@
  * onto whichever unrelated person's session happens to complete next. That
  * person never saw the documents this consent claims they accepted.
  *
- * Guarded exactly like `pending-wrong-portal.ts`'s abandoned-logout case,
- * which this mirrors: a timestamp, checked on read. The gap between parking
- * and landing is one Keycloak round-trip (seconds); anything older belongs to
- * an abandoned attempt and must not be handed to whoever logs in next.
+ * ## Why a timestamp alone is not enough
+ *
+ * A TTL narrows that window; it cannot close it. `ConsentAcceptBody` carries no
+ * subject — it is `{ network, brand, source, items }` — so nothing in the
+ * payload says WHO accepted. Within the TTL, a second person signing in on the
+ * same device lands on a callback that finds the first person's parked entry
+ * and posts it against the second person's authenticated session. Because the
+ * endpoint is authenticated and the body carries no subject, the server
+ * attributes it to whoever is signed in and cannot detect the substitution.
+ * That is manufactured evidence of consent, which is worse than no record at
+ * all — and QR/kiosk registration on shared phones is a core journey here, so
+ * it is not a theoretical ordering.
+ *
+ * So the entry is **bound to the login attempt that created it**. The caller
+ * mints an opaque `attempt` id, parks it alongside the body, and sends the same
+ * id through Keycloak in the OIDC `state` object (see `oidc-client.ts`). On the
+ * callback, `takePendingConsent` returns the body only if the id handed back by
+ * that specific login matches. A different person's login carries a different
+ * `state`, so it can never consume this entry — regardless of timing.
+ *
+ * The timestamp is retained as belt-and-braces (bounding how long an
+ * abandoned entry lingers at all), not as the primary defence.
+ *
+ * Entries written by an earlier version carry no `attempt` and are dropped on
+ * read rather than honoured, so an upgrade cannot inherit an unbound record.
  */
 
 import type { ConsentAcceptBody } from '@dpg/schemas';
@@ -41,17 +62,56 @@ const MAX_AGE_MS = 5 * 60 * 1000;
 interface StoredPendingConsent {
   body: ConsentAcceptBody;
   at: number;
+  /** Opaque id of the login attempt allowed to consume this. See module doc. */
+  attempt: string;
+}
+
+/**
+ * Mint an id for one login attempt.
+ *
+ * Unguessability is not the security property here — the id never leaves the
+ * device, and the entry is read-once — so this only has to be unique enough
+ * that two logins on one device cannot collide. `randomUUID` is used when
+ * available but cannot be relied on: it requires a secure context, and this app
+ * is served over plain http on a LAN address during field testing, where it is
+ * `undefined`. `getRandomValues` has no such restriction; the final branch
+ * exists so a missing `crypto` degrades to a re-prompt rather than a throw that
+ * would break sign-in itself.
+ */
+export function newConsentAttemptId(): string {
+  try {
+    if (typeof crypto !== 'undefined') {
+      if (typeof crypto.randomUUID === 'function') return crypto.randomUUID();
+      if (typeof crypto.getRandomValues === 'function') {
+        const bytes = crypto.getRandomValues(new Uint8Array(16));
+        return Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('');
+      }
+    }
+  } catch {
+    // Fall through to the non-crypto branch below.
+  }
+  return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
 }
 
 /**
  * Park the accepted consent immediately before redirecting to Keycloak.
  *
  * @param body - The consent acceptance to write once the session exists.
+ * @param attempt - Id of this login attempt, from {@link newConsentAttemptId}.
+ *   The same id must be routed through the OIDC `state` so the callback can
+ *   prove the entry belongs to the login that landed. See module doc.
  * @param now - Injectable clock for tests.
  */
-export function setPendingConsent(body: ConsentAcceptBody, now: number = Date.now()): void {
+export function setPendingConsent(
+  body: ConsentAcceptBody,
+  attempt: string,
+  now: number = Date.now(),
+): void {
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify({ body, at: now } satisfies StoredPendingConsent));
+    localStorage.setItem(
+      STORAGE_KEY,
+      JSON.stringify({ body, at: now, attempt } satisfies StoredPendingConsent),
+    );
   } catch {
     // Storage unavailable (private mode, quota). The consent gate will simply
     // re-prompt on the next login rather than the login failing.
@@ -61,11 +121,22 @@ export function setPendingConsent(body: ConsentAcceptBody, now: number = Date.no
 /**
  * Read and clear.
  *
+ * Always clears, including on every rejection path: an entry that this login
+ * is not entitled to must not be left behind for the next one to find.
+ *
+ * @param expectedAttempt - The attempt id carried back by the login that just
+ *   landed. A parked entry is honoured only when it matches. `undefined` — a
+ *   sign-in that parked no consent — never matches, which is the case that
+ *   stops one person's acceptance being written against another's session.
  * @param now - Injectable clock for tests.
  * @returns The parked acceptance, or null when there is nothing pending, it
- *   is too old to trust (see module doc), or the payload is corrupt.
+ *   belongs to a different login attempt, it is too old to trust, or the
+ *   payload is corrupt.
  */
-export function takePendingConsent(now: number = Date.now()): ConsentAcceptBody | null {
+export function takePendingConsent(
+  expectedAttempt: string | undefined,
+  now: number = Date.now(),
+): ConsentAcceptBody | null {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) return null;
@@ -73,6 +144,11 @@ export function takePendingConsent(now: number = Date.now()): ConsentAcceptBody 
     const parsed = JSON.parse(raw) as StoredPendingConsent;
     if (!parsed || typeof parsed.at !== 'number' || now - parsed.at > MAX_AGE_MS) return null;
     if (!parsed.body) return null;
+    // Identity check. Both sides must be present and equal — a blank or absent
+    // id on either side is a non-match, so neither a pre-upgrade entry (no
+    // `attempt`) nor a plain sign-in (no `expectedAttempt`) can consume this.
+    if (typeof parsed.attempt !== 'string' || parsed.attempt === '') return null;
+    if (!expectedAttempt || parsed.attempt !== expectedAttempt) return null;
     return parsed.body;
   } catch {
     // Corrupt payload — drop it rather than retrying forever.

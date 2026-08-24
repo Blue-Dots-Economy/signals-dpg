@@ -23,7 +23,7 @@ import {
 import { fetchConsentConfigs, getConsentStatusByIdentifier } from '@/lib/consent-api';
 import { mergeConsentConfig } from '@/hooks/use-consent-config';
 import { ConsentModal } from '@/components/consent/consent-modal';
-import { setPendingConsent } from '@/lib/pending-consent';
+import { newConsentAttemptId, setPendingConsent } from '@/lib/pending-consent';
 import { setPendingSignupExtras } from '@/lib/pending-signup-extras';
 import { isMinorFromAge } from '@/lib/guardian-consent';
 import {
@@ -247,11 +247,11 @@ export function KeycloakLoginPanel() {
     return () => window.removeEventListener('pageshow', onPageShow);
   }, []);
 
-  const handleSignIn = async () => {
+  const handleSignIn = async (consentAttempt?: string) => {
     setIsRedirecting(true);
     setError(null);
     try {
-      await startKeycloakLogin(redirectTo);
+      await startKeycloakLogin(redirectTo, consentAttempt);
       // On success the browser navigates to Keycloak and never gets here.
     } catch (err) {
       setIsRedirecting(false);
@@ -438,10 +438,15 @@ export function KeycloakLoginPanel() {
   const handleConsentAccept = async () => {
     if (!consentGate) return;
     const { pendingConsent, identifier } = consentGate;
-    setPendingConsent(pendingConsent);
+    // Bind the parked acceptance to THIS login. The same id is routed through
+    // Keycloak in the OIDC `state`, so only the callback for this redirect can
+    // consume it — without that, an abandoned round trip on a shared device
+    // gets written against whoever signs in next. See lib/pending-consent.ts.
+    const consentAttempt = newConsentAttemptId();
+    setPendingConsent(pendingConsent, consentAttempt);
     setConsentGate(null);
     setIsSigningUp(true);
-    await createAccountAndSignIn(identifier);
+    await createAccountAndSignIn(identifier, consentAttempt);
   };
 
   /**
@@ -457,7 +462,7 @@ export function KeycloakLoginPanel() {
     await createAccountAndSignIn(identifier);
   };
 
-  const createAccountAndSignIn = async (identifier: AuthIdentifier) => {
+  const createAccountAndSignIn = async (identifier: AuthIdentifier, consentAttempt?: string) => {
     try {
       const result = await signupWithKeycloak({
         name: name.trim(),
@@ -486,7 +491,7 @@ export function KeycloakLoginPanel() {
             : t('auth.signup_created_desc'),
         }
       );
-      await handleSignIn();
+      await handleSignIn(consentAttempt);
     } catch (err) {
       const apiMessage = (err as { response?: { data?: { message?: unknown } } } | null)
         ?.response?.data?.message;
