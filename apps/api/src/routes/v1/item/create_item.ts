@@ -383,6 +383,7 @@ export const create_item_handler = async (
           {
             op: 'create',
             ownerId: userId,
+            itemId: created.itemId,
             domain: body.item_domain,
             network: body.item_network,
             actingOrgType: request.acting_org?.org_type ?? null,

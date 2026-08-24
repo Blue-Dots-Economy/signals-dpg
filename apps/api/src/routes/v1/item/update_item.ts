@@ -83,6 +83,7 @@ export const update_item_handler = async (
           {
             op: 'update',
             ownerId: updated.created_by,
+            itemId: updated.item_id,
             domain: updated.item_domain,
             network: updated.item_network,
           },

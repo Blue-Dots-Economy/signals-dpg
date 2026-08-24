@@ -73,8 +73,20 @@ describe('dispatchItemLifecycleNotification', () => {
       network: 'blue_dot',
       ctaUrl: 'https://app.example/home',
       variables: { name: 'Asha' },
+      // No itemId on this event → dedupe key omits the item segment.
+      dedupeId: 'item_lifecycle:profile.create:u1',
       log: expect.any(Function),
     });
+  });
+
+  it('passes a per-(case,owner,item) dedupeId so NS does not drop it (#592 Blocker 1)', async () => {
+    configured();
+    resolveOwnerNameEmail.mockResolvedValue({ found: true, name: 'Asha', email: 'a@x.com' });
+    await dispatchItemLifecycleNotification(
+      { op: 'create', ownerId: 'u1', itemId: 'item-9', domain: 'seeker', network: 'blue_dot' },
+      log,
+    );
+    expect(dispatchEmail.mock.calls[0]![0].dedupeId).toBe('item_lifecycle:profile.create:u1:item-9');
   });
 
   it('sends offer.update for a provider update', async () => {

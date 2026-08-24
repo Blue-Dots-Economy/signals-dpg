@@ -314,7 +314,13 @@ const item_lifecycle_handler = async (
       void import('@/notifications/notify_item_lifecycle')
         .then(({ dispatchItemLifecycleNotification }) =>
           dispatchItemLifecycleNotification(
-            { op, ownerId, domain: result.item_domain, network: result.item_network },
+            {
+              op,
+              ownerId,
+              itemId: result.item_id,
+              domain: result.item_domain,
+              network: result.item_network,
+            },
             request.log,
           ),
         )

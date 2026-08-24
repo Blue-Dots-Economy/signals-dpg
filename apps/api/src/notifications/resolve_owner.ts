@@ -5,6 +5,26 @@ import { organization, user } from '@api/db/postgres/schema/auth';
 import { items } from '@dpg/database';
 
 /**
+ * Suffix of the synthetic address `/participant` (`participant.ts`) mints for a
+ * phone-only signup (`${randomUUID()}@no-email.local`) because better-auth's
+ * `signUpEmail` requires a non-null email. It is deliverable to nobody, so for
+ * notification purposes it is "no email" — treating it as a real address would
+ * hard-bounce thousands of sends from the OTP sender identity on a bulk
+ * phone-only onboard, damaging login sender reputation (#592 Blocker 2).
+ */
+const SYNTHETIC_EMAIL_SUFFIX = '@no-email.local';
+
+/**
+ * A deliverable email, or null. Folds the phone-only synthetic address
+ * ({@link SYNTHETIC_EMAIL_SUFFIX}) into null so callers skip the send.
+ */
+function deliverableEmail(email: string | null | undefined): string | null {
+  const e = email ?? null;
+  if (!e) return null;
+  return e.toLowerCase().endsWith(SYNTHETIC_EMAIL_SUFFIX) ? null : e;
+}
+
+/**
  * Resolves a local owner's email by better-auth user id. Returns null when the
  * user is unknown or has no email (phone-only). The email is used only to
  * address the notification-service request; it is never derived on the wire by
@@ -16,7 +36,7 @@ export async function resolveOwnerEmail(userId: string): Promise<string | null> 
     .from(user)
     .where(eq(user.id, userId))
     .limit(1);
-  return rows[0]?.email ?? null;
+  return deliverableEmail(rows[0]?.email);
 }
 
 /**
@@ -38,7 +58,9 @@ export async function resolveOwnerNameEmail(
   // skip) from a missing row (no match for `userId` — a real defect signal:
   // a broken `created_by` or a wrong id threaded from the route). The caller
   // logs the two differently rather than silently skipping both.
-  return { found: !!row, name: row?.name ?? null, email: row?.email ?? null };
+  // A phone-only owner may carry a synthetic `@no-email.local` address; fold it
+  // to null so the caller treats it as no-email (see {@link deliverableEmail}).
+  return { found: !!row, name: row?.name ?? null, email: deliverableEmail(row?.email) };
 }
 
 /**

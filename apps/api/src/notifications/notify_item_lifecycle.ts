@@ -29,6 +29,15 @@ export interface ItemLifecycleEvent {
   /** Item network — selects the copy layer + branded sign-off. */
   network: string;
   /**
+   * Item id — folded into the notification-service `dedupe_id` so the send is
+   * deduped per (case, owner, item) rather than per-recipient. Without an
+   * explicit `dedupe_id`, NS keys on `email:<recipient>:basic_email` for 5s,
+   * which silently drops this email when another email (e.g. the better-auth
+   * `welcome`) fires to the same address milliseconds earlier (#592 Blocker 1).
+   * Optional: `account.aggregator_init` is already unique per owner.
+   */
+  itemId?: string;
+  /**
    * The acting org for the create, when the item was created on someone's
    * behalf. `org_type === 'aggregator'` routes a create to the aggregator
    * initiation email instead of the self profile/offer create email.
@@ -130,6 +139,9 @@ export async function dispatchItemLifecycleNotification(
       network: event.network,
       ctaUrl: config.ctaUrl,
       variables,
+      // Per (case, owner, item) so this send is not deduped against a different
+      // email to the same recipient within NS's 5s window (#592 Blocker 1).
+      dedupeId: `item_lifecycle:${caseId}:${event.ownerId}${event.itemId ? `:${event.itemId}` : ''}`,
       log: (message, meta) =>
         log.warn({ ...meta, op: event.op, network: event.network, ownerId: event.ownerId }, message),
     });
