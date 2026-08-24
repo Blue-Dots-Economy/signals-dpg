@@ -217,17 +217,27 @@ yopmail-reachable credentials:
 | 4 | Seeker retires their profile | Cancelled provider counterparty's mail → `:5175` |
 | 5 | Brand-new signup on `:5175` | Welcome mail link → `:5175/auth/login` |
 
-**Row 5 needs self-signup enabled on this instance — check before you start.**
-During this session's Step 6 Path-B investigation, calling
-`/api/auth/unified-otp/request` against this running instance returned
-`SELF_SIGNUP_DISABLED`; self-signup was off by default here, which would
-block row 5 outright (no new user gets created, so no welcome mail is sent).
-Confirm whatever instance setting controls `SELF_SIGNUP_DISABLED` is turned
-on before attempting row 5. **Alternative if it can't be enabled:** use an
-already-provisioned / admin-onboarded account instead — but its welcome mail
-was already sent once, at provisioning time, so row 5 specifically (the
-welcome-mail CTA) cannot be re-observed that way; such an account is only
-useful for rows 1-4.
+**Row 5 (welcome mail) is NOT testable on this local stack** — and the reason
+is not the one an earlier draft of this runbook gave. Two things are in play:
+
+1. **This instance runs `AUTH_PROVIDER=betterauth`** (check with
+   `curl -s localhost:2742/api/v1/auth/config`). The welcome-mail fix threads the
+   signup domain through the **Keycloak** provisioning path
+   (`services/auth/provisioning.ts`), which is what deployed instances run. The
+   better-auth path calls `sendWelcomeNotifications` with no domain
+   (`routes/auth/create_auth.ts:96`), and better-auth's OTP request body has no
+   `domain` field at all — so here the welcome link correctly falls back to
+   `FRONTEND_BASE_URL` and there is nothing to observe. Verified: a real signup
+   on this stack produced a welcome mail linking to `http://localhost:9999`.
+2. `SELF_SIGNUP_MODE` ships as `gated` (the default in `packages/config/src/secrets.ts`
+   and in `.env.example`); set it to `allowed` to let a self-service signup
+   through at all. That does NOT make row 5 pass — it only gets you as far as
+   the fallback link above.
+
+To exercise row 5, run against Keycloak (`AUTH_PROVIDER=keycloak`), where signup
+goes through `POST /api/v1/auth/signup`, which carries the domain and parks it
+for `applySignupExtras` to apply at first login. **Rows 1-4 are unaffected by
+any of this and were verified on this stack.**
 
 Nothing may link to `http://localhost:9999` — that is the stand-in for the
 blocked front-door.
@@ -238,3 +248,65 @@ blocked front-door.
 kill %1 %2 %3 2>/dev/null   # or: pkill -f 'src/server.ts'; pkill -f 'npx vite'
 docker compose stop db redis
 ```
+
+## Verifying the mail without a mail provider (the way this was actually tested)
+
+An earlier draft of this runbook said there was no way to observe the CTA
+without notification-service credentials. **That was wrong**, and it was wrong
+in a specific way worth recording: it only checked the Signals API's own logs.
+Signals renders the COMPLETE email — subject and HTML, with the CTA `href`
+already resolved — and POSTs it to `<NOTIFICATION_SERVICE_ENDPOINT>/notify`.
+So standing a sink at that endpoint captures exactly the thing under test, with
+no SES, no Gmail, and no credentials.
+
+`local-mail-sink/sink.mjs` in this repo is that sink. It accepts any POST to
+`/notify`, ignores the HMAC headers (nothing verifies them), prints the
+recipient, subject and every `href` in the body, and writes each mail to
+`local-mail-sink/mail/`.
+
+```bash
+node local-mail-sink/sink.mjs > /tmp/mail-sink.log 2>&1 &
+```
+
+Point the API at it — the key id and secret can be any non-empty strings,
+because the sink does not verify the signature:
+
+```
+NOTIFICATION_SERVICE_ENDPOINT=http://localhost:4545
+NOTIFICATION_SERVICE_KEY_ID=local-sink
+NOTIFICATION_SERVICE_SECRET=local-sink-secret-does-not-need-to-verify
+NOTIFICATION_FROM_EMAIL=no-reply@localhost.test
+```
+
+`NOTIFICATION_FROM_EMAIL` is not optional decoration: without it
+`resolveNotifierConfig()` returns null and no action email is attempted at all.
+
+For a real inbox instead, run the `notification-service` repo with
+`SMTP_GMAIL=true` + `GMAIL_USER`/`GMAIL_PASS`, or `SMTP_AWS_SES=true` + AWS
+credentials — those are its only two transports (`src/lib/providers/email/sendMailCore.ts`
+throws "No valid mail transport configuration found" otherwise). `MAIL_LOG=true`
+only logs the recipient; it does NOT bypass sending.
+
+### Reusing the existing local database
+
+The `dpg-db` volume is shared with other checkouts. Its rows are encrypted with
+whatever `SIGNALS_PII_KEY` created them, so a freshly generated key makes every
+pre-existing profile fail to decrypt (`PiiCryptoError: PII blob decryption
+failed`, surfacing as `INTERNAL_SERVER_ERROR` on `/action/perform`). Copy
+`SIGNALS_PII_KEY`, `INSTANCE_SHARED_SECRET` and `AUTH_SECRET` from the main
+checkout's `.env` rather than generating new ones, or start from an empty DB.
+
+### Observed results
+
+Driving a real `apply` and a real status change through the API, against
+`FRONTEND_BASE_URL=http://localhost:9999` (a dead port standing in for the
+blocked combined front-door):
+
+| Mail | Recipient | CTA + fallback href |
+|---|---|---|
+| "Your application has been sent to …" | seeker | `http://localhost:5174/auth/login` |
+| "A job seeker has applied to the opportunity you posted" | provider | `http://localhost:5175/auth/login` |
+| "… has updated the status of your application" | seeker | `http://localhost:5174/auth/login` |
+| "Your response has been sent to the job seeker" | provider | `http://localhost:5175/auth/login` |
+
+Each party gets their OWN portal, and nothing resolves to `:9999`.
