@@ -217,6 +217,18 @@ yopmail-reachable credentials:
 | 4 | Seeker retires their profile | Cancelled provider counterparty's mail → `:5175` |
 | 5 | Brand-new signup on `:5175` | Welcome mail link → `:5175/auth/login` |
 
+**Row 5 needs self-signup enabled on this instance — check before you start.**
+During this session's Step 6 Path-B investigation, calling
+`/api/auth/unified-otp/request` against this running instance returned
+`SELF_SIGNUP_DISABLED`; self-signup was off by default here, which would
+block row 5 outright (no new user gets created, so no welcome mail is sent).
+Confirm whatever instance setting controls `SELF_SIGNUP_DISABLED` is turned
+on before attempting row 5. **Alternative if it can't be enabled:** use an
+already-provisioned / admin-onboarded account instead — but its welcome mail
+was already sent once, at provisioning time, so row 5 specifically (the
+welcome-mail CTA) cannot be re-observed that way; such an account is only
+useful for rows 1-4.
+
 Nothing may link to `http://localhost:9999` — that is the stand-in for the
 blocked front-door.
 
