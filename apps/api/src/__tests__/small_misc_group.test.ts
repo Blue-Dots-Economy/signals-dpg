@@ -87,9 +87,11 @@ const {
   peerGuard,
   cfgInstance,
   cfgNotification,
+  cfgUiHostBindings,
   getNotificationClient,
   buildCtaUrl,
   resolveBrandName,
+  createCtaUrlResolver,
   createDirectDispatcher,
   dispatch,
   resolveRecipientRole,
@@ -99,7 +101,9 @@ const {
   getEmailMessages,
   getInstanceDefaultNetwork,
   schemaEntries,
-} = vi.hoisted(() => ({
+} = vi.hoisted(() => {
+  const buildCtaUrl = vi.fn((_baseUrl: string) => 'https://app.test/login');
+  return {
   getMatchScoreClient: vi.fn(),
   isServedDomainBinding: vi.fn((_network: string, _domain: string) => true),
   replyForUnservedDomain: vi.fn(
@@ -126,10 +130,23 @@ const {
     NOTIFICATION_REPLY_TO?: string;
     FRONTEND_BASE_URL?: string;
   },
+  // Mutated in place by the notify_actions tests, same pattern as
+  // cfgNotification — a split-deployment config with per-domain hosts (#569).
+  cfgUiHostBindings: { byDomain: {} as Record<string, string>, warnings: [] as string[] },
   getNotificationClient: vi.fn(),
-  buildCtaUrl: vi.fn((_baseUrl: string) => 'https://app.test/login'),
+  buildCtaUrl,
   resolveBrandName: vi.fn(
     (_opts: { networkDisplayName?: string; instanceName?: string }) => 'BRAND',
+  ),
+  // Mirrors the real `createCtaUrlResolver`: per-domain lookup, falling back
+  // to the scalar base URL, routed through the (mocked) `buildCtaUrl` so
+  // existing `buildCtaUrl` assertions stay meaningful (#569).
+  createCtaUrlResolver: vi.fn(
+    (opts: { byDomain: Record<string, string>; fallbackBaseUrl?: string }) =>
+      (domain: string): string | undefined => {
+        const origin = opts.byDomain[domain] ?? opts.fallbackBaseUrl;
+        return origin ? buildCtaUrl(origin) : undefined;
+      },
   ),
   createDirectDispatcher: vi.fn(
     (_deps: unknown): { dispatch: (event: unknown) => Promise<undefined> } => ({
@@ -156,7 +173,8 @@ const {
     brand?: string | null;
     schema: unknown;
   }[],
-}));
+  };
+});
 
 vi.mock('@api/plugins/auth/auth_middleware', () => ({
   auth_middleware_if_enabled: async () => {},
@@ -190,6 +208,7 @@ vi.mock('@/middleware/peer_instance_guard', () => ({
 vi.mock('@/config', () => ({
   instance: cfgInstance,
   notification: cfgNotification,
+  uiHostBindings: cfgUiHostBindings,
 }));
 vi.mock('@/utils/notificationClient', () => ({
   getNotificationClient: () => getNotificationClient(),
@@ -198,6 +217,8 @@ vi.mock('@/notifications/brand', () => ({
   buildCtaUrl: (b: string) => buildCtaUrl(b),
   resolveBrandName: (o: { networkDisplayName?: string; instanceName?: string }) =>
     resolveBrandName(o),
+  createCtaUrlResolver: (opts: { byDomain: Record<string, string>; fallbackBaseUrl?: string }) =>
+    createCtaUrlResolver(opts),
 }));
 vi.mock('@/notifications/dispatcher', () => ({
   createDirectDispatcher: (deps: unknown) => createDirectDispatcher(deps),
@@ -265,6 +286,13 @@ beforeEach(() => {
   }));
   resolveTextSearchFields.mockImplementation(() => ['title', 'about']);
   buildCtaUrl.mockImplementation(() => 'https://app.test/login');
+  createCtaUrlResolver.mockImplementation(
+    (opts: { byDomain: Record<string, string>; fallbackBaseUrl?: string }) =>
+      (domain: string): string | undefined => {
+        const origin = opts.byDomain[domain] ?? opts.fallbackBaseUrl;
+        return origin ? buildCtaUrl(origin) : undefined;
+      },
+  );
   resolveBrandName.mockImplementation(() => 'BRAND');
   createDirectDispatcher.mockImplementation(() => ({ dispatch }));
   dispatch.mockImplementation(async () => undefined);
@@ -281,6 +309,8 @@ beforeEach(() => {
   delete cfgNotification.NOTIFICATION_FROM_EMAIL;
   delete cfgNotification.NOTIFICATION_REPLY_TO;
   delete cfgNotification.FRONTEND_BASE_URL;
+  cfgUiHostBindings.byDomain = {};
+  cfgUiHostBindings.warnings = [];
   getNotificationClient.mockImplementation(() => null);
   resetActionNotifierConfigForTests();
 
@@ -552,7 +582,8 @@ interface CapturedDeps {
   sendEmail: (args: { caseId: string; to: string }) => Promise<{ ok: boolean }>;
   resolveEmail: unknown;
   resolveCounterpartyName: (plan: NotificationPlan) => Promise<string | null>;
-  brand: { brandName: string; ctaUrl: string };
+  brand: { brandName: string };
+  resolveCtaUrl: (domain: string) => string | undefined;
   log: (message: string, meta?: Record<string, unknown>) => void;
   onSkip: (reason: string) => void;
 }
@@ -629,7 +660,7 @@ describe('resolveNotifierConfig', () => {
 
     const config = resolveNotifierConfig();
     expect(config).not.toBeNull();
-    expect(config?.ctaUrl).toBe('https://app.test/login');
+    expect(config?.resolveCtaUrl('seeker')).toBe('https://app.test/login');
     expect(buildCtaUrl).toHaveBeenCalledWith('https://app.test');
 
     expect(createEmailSender).toHaveBeenCalledTimes(1);
@@ -707,10 +738,8 @@ describe('dispatchActionNotifications', () => {
 
     expect(getNetworkConfigById).toHaveBeenCalledWith('blue_dot');
     const deps = createDirectDispatcher.mock.calls[0][0] as CapturedDeps;
-    expect(deps.brand).toEqual({
-      brandName: 'Blue Dot',
-      ctaUrl: 'https://app.test/login',
-    });
+    expect(deps.brand).toEqual({ brandName: 'Blue Dot' });
+    expect(deps.resolveCtaUrl('seeker')).toBe('https://app.test/login');
     expect(deps.resolveEmail).toBe(resolveOwnerEmail);
     expect(dispatch).toHaveBeenCalledWith(event);
   });
