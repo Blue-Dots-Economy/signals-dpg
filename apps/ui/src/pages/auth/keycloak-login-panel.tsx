@@ -23,7 +23,11 @@ import {
 import { fetchConsentConfigs, getConsentStatusByIdentifier } from '@/lib/consent-api';
 import { mergeConsentConfig } from '@/hooks/use-consent-config';
 import { ConsentModal } from '@/components/consent/consent-modal';
-import { newConsentAttemptId, setPendingConsent } from '@/lib/pending-consent';
+import {
+  clearPendingConsent,
+  newConsentAttemptId,
+  setPendingConsent,
+} from '@/lib/pending-consent';
 import { setPendingSignupExtras } from '@/lib/pending-signup-extras';
 import { isMinorFromAge } from '@/lib/guardian-consent';
 import {
@@ -443,10 +447,18 @@ export function KeycloakLoginPanel() {
     // consume it — without that, an abandoned round trip on a shared device
     // gets written against whoever signs in next. See lib/pending-consent.ts.
     const consentAttempt = newConsentAttemptId();
-    setPendingConsent(pendingConsent, consentAttempt);
+    if (consentAttempt) {
+      setPendingConsent(pendingConsent, consentAttempt);
+    } else {
+      // No CSPRNG, so the acceptance cannot be bound to this login. Park
+      // nothing rather than parking something any later login could claim —
+      // the gate re-prompts once signed in, which is the safe direction to
+      // fail. Also drop anything already sitting there for the same reason.
+      clearPendingConsent();
+    }
     setConsentGate(null);
     setIsSigningUp(true);
-    await createAccountAndSignIn(identifier, consentAttempt);
+    await createAccountAndSignIn(identifier, consentAttempt ?? undefined);
   };
 
   /**

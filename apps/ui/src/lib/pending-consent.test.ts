@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 import {
   newConsentAttemptId,
   setPendingConsent,
@@ -148,6 +148,33 @@ describe('pending-consent', () => {
 
     it('never returns an empty id, which would read as a wildcard', () => {
       expect(newConsentAttemptId()).not.toBe('');
+    });
+
+    /**
+     * There is deliberately no weak fallback. Where no CSPRNG exists the caller
+     * must decline to park the acceptance rather than bind it with something
+     * forgeable — so this returns null instead of degrading quietly.
+     */
+    it('returns null rather than a weak id when no CSPRNG is available', () => {
+      const real = globalThis.crypto;
+      // @ts-expect-error — deleting a readonly global for the duration of the test.
+      delete globalThis.crypto;
+      try {
+        expect(newConsentAttemptId()).toBeNull();
+      } finally {
+        Object.defineProperty(globalThis, 'crypto', { value: real, configurable: true });
+      }
+    });
+
+    it('returns null rather than a weak id when the CSPRNG throws', () => {
+      const spy = vi.spyOn(globalThis.crypto, 'getRandomValues').mockImplementation(() => {
+        throw new Error('blocked');
+      });
+      try {
+        expect(newConsentAttemptId()).toBeNull();
+      } finally {
+        spy.mockRestore();
+      }
     });
   });
 });

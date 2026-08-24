@@ -67,30 +67,33 @@ interface StoredPendingConsent {
 }
 
 /**
- * Mint an id for one login attempt.
+ * Mint an id for one login attempt, or null if this browser cannot do so
+ * securely.
  *
- * Unguessability is not the security property here — the id never leaves the
- * device, and the entry is read-once — so this only has to be unique enough
- * that two logins on one device cannot collide. `randomUUID` is used when
- * available but cannot be relied on: it requires a secure context, and this app
- * is served over plain http on a LAN address during field testing, where it is
- * `undefined`. `getRandomValues` has no such restriction; the final branch
- * exists so a missing `crypto` degrades to a re-prompt rather than a throw that
- * would break sign-in itself.
+ * `getRandomValues` and nothing else. `randomUUID` would read better but
+ * requires a secure context, and this app is served over plain http on a LAN
+ * address during field testing, where it is `undefined`; `getRandomValues`
+ * carries no such restriction, so one branch covers every browser we support.
+ *
+ * Deliberately no `Math.random()` fallback. It would only ever run where
+ * `crypto` is absent entirely — which is no browser this app targets — so it
+ * bought nothing, while making the weakest possible source the one used in the
+ * least understood environment. Returning null instead pushes that decision to
+ * the caller, which declines to park the acceptance at all: the user is
+ * re-prompted after login, which is the safe direction to fail. A binding is
+ * only worth having if it cannot be forged.
  */
-export function newConsentAttemptId(): string {
+export function newConsentAttemptId(): string | null {
   try {
-    if (typeof crypto !== 'undefined') {
-      if (typeof crypto.randomUUID === 'function') return crypto.randomUUID();
-      if (typeof crypto.getRandomValues === 'function') {
-        const bytes = crypto.getRandomValues(new Uint8Array(16));
-        return Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('');
-      }
+    if (typeof crypto === 'undefined' || typeof crypto.getRandomValues !== 'function') {
+      return null;
     }
+    const bytes = crypto.getRandomValues(new Uint8Array(16));
+    return Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('');
   } catch {
-    // Fall through to the non-crypto branch below.
+    // A throwing `crypto` is treated the same as an absent one.
+    return null;
   }
-  return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
 }
 
 /**
