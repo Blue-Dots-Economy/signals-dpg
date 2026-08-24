@@ -53,8 +53,15 @@ function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
  * Deliberately non-fatal: the user is signed in either way, and a failed write
  * means the gate re-prompts next login rather than stranding them here.
  */
-async function flushPendingConsent(persistErrorMessage: string): Promise<void> {
-  const pending = takePendingConsent();
+async function flushPendingConsent(
+  persistErrorMessage: string,
+  consentAttempt: string | undefined,
+): Promise<void> {
+  // `consentAttempt` comes back from the OIDC `state` of the login that just
+  // landed. A parked acceptance is honoured only if it was parked by that same
+  // login — otherwise it belongs to someone else's abandoned round trip on this
+  // device and must not be written against this session. See pending-consent.ts.
+  const pending = takePendingConsent(consentAttempt);
   if (!pending) return;
   try {
     // Bounded: a slow or hanging consent write must not hold the user on
@@ -244,7 +251,7 @@ export function OidcCallbackPage() {
     (async () => {
       try {
         const { completeOidcLogin } = await import('@/lib/oidc-client');
-        const { returnTo } = await completeOidcLogin(authCfg);
+        const { returnTo, consentAttempt } = await completeOidcLogin(authCfg);
         await completeKeycloakLogin();
 
         // Per-domain UI gate (G7), ported from `otp-page.tsx`: block a user who
@@ -286,7 +293,7 @@ export function OidcCallbackPage() {
         // Write any consent accepted on the login screen — deliberately after
         // the session is established, since the accept endpoint is
         // authenticated. The acceptance was parked across the Keycloak redirect.
-        await flushPendingConsent(t('auth.toast_consent_persist_error'));
+        await flushPendingConsent(t('auth.toast_consent_persist_error'), consentAttempt);
 
         // Durable write of the signup form's domain/age (G3).
         await flushPendingSignupExtras(themeId, t('auth.toast_consent_persist_error'));
