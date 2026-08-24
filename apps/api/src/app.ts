@@ -13,6 +13,7 @@ import {
   authConfig,
   getCurrentApiBaseUrl,
   instance,
+  uiHostBindings,
 } from '@/config';
 import cors from '@fastify/cors';
 import fastifyQs from 'fastify-qs';
@@ -21,6 +22,7 @@ import {
   allowed_origins,
   getAllowedInstanceOriginsFromNetworkConfig,
   mergeAllowedOrigins,
+  unknownBindingDomains,
 } from '@dpg/config';
 import v1_routes from '@/routes/v1/v1_routes';
 import { requestIdOptions, registerRequestIdEcho } from '@/request_id';
@@ -112,6 +114,23 @@ export async function buildApp(): Promise<FastifyInstance> {
 
   // Echo the resolved correlation id back on every response.
   registerRequestIdEcho(app);
+
+  // UI_HOST_BINDINGS is parsed at module load, before a logger exists (#569),
+  // so its warnings surface here. Malformed entries were already dropped; this
+  // is the only signal an operator gets that a portal link is misconfigured.
+  for (const warning of uiHostBindings.warnings) {
+    app.log.warn(warning);
+  }
+  const unknown = unknownBindingDomains(
+    uiHostBindings.byDomain,
+    apiConfig.served_domains.map((b) => b.domain)
+  );
+  if (unknown.length > 0) {
+    app.log.warn(
+      { domains: unknown },
+      'UI_HOST_BINDINGS names domains this instance does not serve — their emails will fall back to FRONTEND_BASE_URL'
+    );
+  }
 
   // The schema cache lives on disk under tmpdir() and outlives a restart. In
   // local mode the network is driven by NETWORK_CONFIG_LOCAL_FILE, so a stale

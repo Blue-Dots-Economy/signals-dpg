@@ -260,6 +260,13 @@ export const NotificationSecretsSchema = z.object({
   NOTIFICATION_REPLY_TO: z.string().optional(),
   // Base URL for the generic /auth/login CTA in action emails.
   FRONTEND_BASE_URL: z.string().optional(),
+  // Host -> "network/domain" map for this deployment, IDENTICAL to the string
+  // the UI ingress uses to derive VITE_SERVED_BINDINGS. Inverted at boot so an
+  // email CTA can point the recipient at their own portal rather than at the
+  // single FRONTEND_BASE_URL front-door, which is the combined front-door on a
+  // split deployment (#569). Empty = single-host install; FRONTEND_BASE_URL is
+  // then the only source and behaviour is unchanged.
+  UI_HOST_BINDINGS: z.string().default(''),
   // Recipient for support/contact-form submissions (#120). Optional so the API
   // still boots without it; the feature is gated on its presence (the endpoint
   // returns 503 and the UI hides/toasts when unset). Treated as a
