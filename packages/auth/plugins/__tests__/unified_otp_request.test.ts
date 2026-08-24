@@ -3,7 +3,8 @@ import { APIError } from 'better-auth/api';
 
 // `unified_otp.ts` imports Zod through the workspace alias `@dpg/schemas`, which
 import {
-  generateOtp,
+  generateLoginOtp,
+  generateTestOtp,
   unifiedOtp,
   type UserWithPhoneNumber,
   type unifiedOtpOptions,
@@ -80,29 +81,28 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-describe('generateOtp', () => {
-  it('returns the fixed test OTP when the test flag is set', () => {
-    expect(generateOtp(true)).toBe('000000');
+describe('OTP generation', () => {
+  it('generateTestOtp returns the fixed test OTP', () => {
+    expect(generateTestOtp()).toBe('000000');
   });
 
-  it('derives a six-digit code from Math.random when not in test mode', () => {
+  it('never falls back to Math.random for a live code', () => {
     const random = vi.spyOn(Math, 'random');
 
-    random.mockReturnValue(0);
-    expect(generateOtp(false)).toBe('100000');
+    const codes = Array.from({ length: 500 }, () => generateLoginOtp());
 
-    random.mockReturnValue(0.999999999);
-    expect(generateOtp(false)).toBe('999999');
-
-    random.mockReturnValue(0.5);
-    expect(generateOtp(false)).toBe('550000');
+    expect(random).not.toHaveBeenCalled();
+    for (const otp of codes) expect(otp).toMatch(/^\d{6}$/);
+    // A CSPRNG draw over 900k values should not repeat itself much in 500
+    // samples; a constant or tiny-period source would collapse this count.
+    expect(new Set(codes).size).toBeGreaterThan(400);
   });
 
-  it('never emits the fixed test OTP outside test mode', () => {
+  it('never emits the fixed test OTP from the live generator', () => {
     for (let i = 0; i < 200; i += 1) {
-      const otp = generateOtp(false);
+      const otp = generateLoginOtp();
       expect(otp).toMatch(/^\d{6}$/);
-      expect(otp).not.toBe('000000');
+      expect(otp).not.toBe(generateTestOtp());
       expect(Number(otp)).toBeGreaterThanOrEqual(100000);
       expect(Number(otp)).toBeLessThanOrEqual(999999);
     }

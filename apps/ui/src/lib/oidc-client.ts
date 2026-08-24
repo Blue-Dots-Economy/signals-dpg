@@ -88,7 +88,8 @@ export function resetUserManager(): void {
 /** Send the browser to Keycloak. Does not return — the page navigates away. */
 export async function startOidcLogin(
   serverConfig: AuthConfigResponse | null | undefined,
-  returnTo?: string
+  returnTo?: string,
+  consentAttempt?: string
 ): Promise<void> {
   const userManager = getUserManager(serverConfig);
   if (!userManager) throw new Error('Keycloak is not configured');
@@ -96,7 +97,14 @@ export async function startOidcLogin(
   await userManager.signinRedirect({
     // Round-tripped through Keycloak in `state` and handed back on the
     // callback, so a deep link survives the redirect.
-    state: returnTo ? { returnTo } : undefined,
+    //
+    // `consentAttempt` rides along for a different reason: it is what lets the
+    // callback prove a parked consent acceptance belongs to THIS login and not
+    // to an earlier person who abandoned the round trip on a shared device.
+    // See lib/pending-consent.ts. Because oidc-client-ts keys this payload by
+    // the `state` parameter Keycloak echoes back, another login cannot receive
+    // it — which is precisely the binding we need.
+    state: returnTo || consentAttempt ? { returnTo, consentAttempt } : undefined,
   });
 }
 
@@ -104,6 +112,12 @@ export interface OidcCallbackResult {
   accessToken: string;
   /** Where the user was headed before login, if anywhere. */
   returnTo?: string;
+  /**
+   * Id of the login attempt that started this redirect, when one parked a
+   * consent acceptance. Only this login may consume that entry — see
+   * lib/pending-consent.ts.
+   */
+  consentAttempt?: string;
 }
 
 /**
@@ -131,8 +145,12 @@ export async function completeOidcLogin(
 
   setAuthToken(user.access_token);
 
-  const state = user.state as { returnTo?: string } | undefined;
-  return { accessToken: user.access_token, returnTo: state?.returnTo };
+  const state = user.state as { returnTo?: string; consentAttempt?: string } | undefined;
+  return {
+    accessToken: user.access_token,
+    returnTo: state?.returnTo,
+    consentAttempt: state?.consentAttempt,
+  };
 }
 
 /**

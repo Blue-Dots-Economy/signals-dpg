@@ -244,6 +244,35 @@ describe('digilocker-api: configuration gate', () => {
   });
 });
 
+describe('digilocker-api: callback origin allowlist', () => {
+  it('always trusts the app origin and adds the configured agent origin', async () => {
+    const mod = await loadDigiLocker({ url: 'https://agent.example/base', token: 'tok' });
+
+    expect(mod.getDigiLockerCallbackOrigins()).toEqual([
+      window.location.origin,
+      'https://agent.example',
+    ]);
+  });
+
+  it('falls back to the app origin alone when the agent URL is relative or unset', async () => {
+    const relative = await loadDigiLocker({ url: '/agent', token: 'tok' });
+    expect(relative.getDigiLockerCallbackOrigins()).toEqual([window.location.origin]);
+
+    const unset = await loadDigiLocker({});
+    expect(unset.getDigiLockerCallbackOrigins()).toEqual([window.location.origin]);
+  });
+
+  it('never allowlists the opaque "null" origin', async () => {
+    // `new URL('mailto:…').origin` is the string "null", which is also what a
+    // sandboxed frame reports — allowlisting it would re-open the hole.
+    const mod = await loadDigiLocker({ url: 'mailto:agent@example.org', token: 'tok' });
+
+    const origins = mod.getDigiLockerCallbackOrigins();
+    expect(origins).not.toContain('null');
+    expect(origins).toEqual([window.location.origin]);
+  });
+});
+
 describe('digilocker-api: requests', () => {
   it('GETs the digilocker-request endpoint with the bearer token and trimmed base URL', async () => {
     const fetchMock = vi.fn((_input: string, _init?: RequestInit) =>

@@ -18,7 +18,8 @@ vi.mock('@api/db/postgres/drizzle_config', () => ({
 }));
 
 vi.mock('@api/db/postgres/schema/auth', () => ({
-  user: { id: 'user.id', email: 'user.email' },
+  user: { id: 'user.id', email: 'user.email', name: 'user.name' },
+  organization: { id: 'organization.id', name: 'organization.name' },
 }));
 
 vi.mock('@dpg/database', () => ({
@@ -29,7 +30,68 @@ vi.mock('@dpg/database', () => ({
   },
 }));
 
-import { resolveOwnerEmail, resolveProviderServiceName } from '../resolve_owner';
+import {
+  resolveOwnerEmail,
+  resolveOwnerNameEmail,
+  resolveOrgName,
+  resolveProviderServiceName,
+} from '../resolve_owner';
+
+describe('resolveOwnerNameEmail', () => {
+  beforeEach(() => {
+    rowQueue.length = 0;
+  });
+
+  it('returns name + email for a known user', async () => {
+    rowQueue.push([{ name: 'Asha', email: 'a@b.com' }]);
+    expect(await resolveOwnerNameEmail('u1')).toEqual({ found: true, name: 'Asha', email: 'a@b.com' });
+  });
+
+  it('returns nulls for an unknown user', async () => {
+    expect(await resolveOwnerNameEmail('missing')).toEqual({ found: false, name: null, email: null });
+  });
+
+  it('folds a synthetic @no-email.local address to null (found stays true) (#592 Blocker 2)', async () => {
+    rowQueue.push([{ name: 'Asha', email: 'abc-123@no-email.local' }]);
+    // Phone-only signup: better-auth persisted a synthetic address. It is
+    // deliverable to nobody, so the owner reads as no-email (found still true).
+    expect(await resolveOwnerNameEmail('u1')).toEqual({ found: true, name: 'Asha', email: null });
+  });
+});
+
+describe('resolveOwnerEmail', () => {
+  beforeEach(() => {
+    rowQueue.length = 0;
+  });
+
+  it('returns a real email', async () => {
+    rowQueue.push([{ email: 'a@b.com' }]);
+    expect(await resolveOwnerEmail('u1')).toBe('a@b.com');
+  });
+
+  it('folds a synthetic @no-email.local address to null (#592 Blocker 2)', async () => {
+    rowQueue.push([{ email: 'ABC-123@No-Email.Local' }]); // case-insensitive suffix
+    expect(await resolveOwnerEmail('u1')).toBeNull();
+  });
+});
+
+describe('resolveOrgName', () => {
+  beforeEach(() => {
+    rowQueue.length = 0;
+  });
+
+  it('returns the org display name', async () => {
+    rowQueue.push([{ name: 'SkillBridge Network' }]);
+    expect(await resolveOrgName('org-1')).toBe('SkillBridge Network');
+  });
+
+  it('returns null for an unknown or blank org', async () => {
+    rowQueue.push([]);
+    expect(await resolveOrgName('missing')).toBeNull();
+    rowQueue.push([{ name: '  ' }]);
+    expect(await resolveOrgName('blank')).toBeNull();
+  });
+});
 
 describe('resolveOwnerEmail', () => {
   beforeEach(() => {

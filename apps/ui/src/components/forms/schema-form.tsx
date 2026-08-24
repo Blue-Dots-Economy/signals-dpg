@@ -9,6 +9,7 @@ import { ReferenceAutocompleteWidget } from './custom-widgets/reference-autocomp
 import CustomFieldTemplate from './custom-field-template';
 import { resolveFormLayout, type FormLayout } from '@/theme/form-layouts';
 import { resolveVisibleSchema } from '@/lib/show-if';
+import { cn } from '@/lib/utils';
 
 interface RjsfError {
   property?: string;
@@ -512,7 +513,18 @@ export function SchemaForm({
   const containerRef = React.useRef<HTMLDivElement>(null);
 
   return (
-    <div className={className} ref={containerRef}>
+    <div
+      // Left-align enum/select triggers. `@rjsf/shadcn`'s `FancySelect` renders
+      // its trigger as a `<button>`, and Tailwind's preflight does not reset the
+      // UA `text-align: center` on buttons; its label span is `flex-1`, so it
+      // spans the full trigger width and the value/"Select..." placeholder lands
+      // dead-centre. Fixed here rather than in the vendored widget, and scoped to
+      // the select trigger via `aria-haspopup=listbox` so no other button in the
+      // form is affected. (Same fix as `filters/multi-select-group.tsx`, which
+      // sets `text-left` on its own justify-between trigger.)
+      className={cn('[&_button[aria-haspopup=listbox]]:text-left', className)}
+      ref={containerRef}
+    >
       <Form
         id={id}
         schema={rjsfSchema}

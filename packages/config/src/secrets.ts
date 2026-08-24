@@ -214,8 +214,9 @@ export function parseKeycloakAcceptedClientIds(value: string): string[] {
 }
 
 /**
- * Startup guard (D7): CREATE_TEST_OTP makes generateOtp() return the fixed
- * value "000000" for every account, so it must never be enabled in production.
+ * Startup guard (D7): CREATE_TEST_OTP routes login-code generation through
+ * generateTestOtp(), returning the fixed value "000000" for every account, so
+ * it must never be enabled in production.
  *
  * - production + enabled     -> throw ConfigError (boot fails, non-zero exit)
  * - non-production + enabled -> loud warning, continue

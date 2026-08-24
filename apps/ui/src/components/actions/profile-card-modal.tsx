@@ -238,7 +238,22 @@ export function ProfileCardModal({
 
   return (
     <ResponsiveDialog open={open} onOpenChange={onOpenChange} title={name} contentClassName="max-w-xl">
-      <div className="flex max-h-[85dvh] min-h-0 flex-col gap-4 overflow-y-auto p-6">
+      {/* Scroll region for the whole modal body. Deliberately a BLOCK, not a
+          flex column (#507): as a flex column, `DomainCard`'s root — which sets
+          `overflow-hidden` for its rounded header — became a flex item whose
+          automatic minimum size is 0 (that's what a non-visible overflow does),
+          so the card SHRANK below its content and clipped it itself. This
+          container then never overflowed, so it never got a scrollbar and the
+          card's "Hide details" toggle was unreachable. As block children, the
+          card keeps its full height and the overflow lands here, where it
+          scrolls. Height is bounded by `ResponsiveDialog` on both shapes, so no
+          cap is needed (or wanted) here — but the two bounds differ: 90dvh on
+          the desktop Dialog, and 80dvh on the mobile Drawer, where
+          `DrawerContent`'s own `data-[vaul-drawer-direction=bottom]:max-h-[80dvh]`
+          outranks the `max-h-[90dvh]` passed in (class+attribute, 0,2,0, beats a
+          plain class, 0,1,0) and vaul defaults to `direction="bottom"`. Tighter,
+          not looser, so the scroll fix holds on both. */}
+      <div className="space-y-4 overflow-y-auto p-6">
         <DialogHeader>
           <DialogTitle>{name}</DialogTitle>
           <DialogDescription>{t(descKey)}</DialogDescription>
