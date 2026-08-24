@@ -564,6 +564,44 @@ async function existingUserOk(
   });
 }
 
+/**
+ * Aggregator-onboarding initiation email (#531/#534), NEW users only. Both
+ * onboarding channels (bulk + link) land on this route, so this is the single
+ * place the "you've been onboarded — activate your account" email is sent, in
+ * place of the self create/welcome emails. Welcome is not a concern here: an
+ * onboarded user's local row already exists (insertLocalUser), so
+ * provisioning.createMirror is skipped on first login and never sends Welcome.
+ * `actingOrgType: 'aggregator'` is hard-coded deliberately: every service-org
+ * onboarder (aggregator, network_service, voice) lands here, and all get the
+ * initiation email — the self create/Welcome path is suppressed for all of
+ * them, so collapsing them to the aggregator copy prevents a missed onboarding
+ * email. (A network_service/voice onboard is thus described as an aggregator in
+ * the copy — accepted.)
+ * Fire-and-forget, lazy-imported to keep the notification chain off this
+ * route's static graph.
+ */
+function notifyAggregatorInit(
+  ctx: ParticipantCtx,
+  userId: string,
+  network: string,
+  domain: string,
+): void {
+  const orgId = ctx.request.acting_org?.org_id ?? null;
+  void (async () => {
+    const [{ dispatchItemLifecycleNotification }, { resolveOrgName }] = await Promise.all([
+      import('@/notifications/notify_item_lifecycle'),
+      import('@/notifications/resolve_owner'),
+    ]);
+    // Name the onboarding org in the email; fall back (dispatcher → network
+    // brand) when it can't be resolved.
+    const aggregatorOrgName = orgId ? await resolveOrgName(orgId) : null;
+    await dispatchItemLifecycleNotification(
+      { op: 'create', ownerId: userId, domain, network, actingOrgType: 'aggregator', aggregatorOrgName },
+      ctx.request.log,
+    );
+  })().catch((err) => ctx.request.log.warn({ err }, 'aggregator-init notify failed'));
+}
+
 /** `account_only`, new user: create the account, skip item creation. */
 async function handleAccountOnlyNewUser(ctx: ParticipantCtx) {
   const { request, reply, body, email_norm, phone_norm } = ctx;
@@ -605,6 +643,8 @@ async function handleAccountOnlyNewUser(ctx: ParticipantCtx) {
       message: result.message,
     });
   }
+
+  notifyAggregatorInit(ctx, result.user_id, network, body.domain ?? 'seeker');
 
   return reply.code(200).send({
     user_id: result.user_id,
@@ -924,6 +964,8 @@ async function handleCreateNewUser(ctx: ParticipantCtx) {
       request.log,
     );
   }
+
+  notifyAggregatorInit(ctx, result.user_id, network, domain);
 
   const itemsList = await readItemsForUser(result.user_id);
   return reply.code(200).send({
