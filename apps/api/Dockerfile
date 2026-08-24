@@ -6,11 +6,13 @@
 # forces the production install to happen here rather than there.
 FROM dhi.io/node:24-alpine-dev AS base
 
-# Corepack enables the pinned pnpm version. libc6-compat is deliberately NOT
-# installed: the dependency closure is pure JS (no node-gyp / prebuild-install
-# in the lockfile), so nothing links against glibc, and the hardened runtime
-# variant could not provide it anyway.
-RUN corepack enable
+# libc6-compat is kept here, same as apps/ui/Dockerfile: this stage execs
+# several tools that ship prebuilt glibc-only binaries (turbo, typescript's Go
+# tsc, @esbuild/*, @rolldown/*, @rollup/*, @tailwindcss/oxide-*) — "no
+# node-gyp/prebuild-install in the lockfile" only rules out addons compiled at
+# install time, not prebuilt executables. This is a build stage that never
+# ships, so the package costs nothing in the final image.
+RUN apk add --no-cache libc6-compat && corepack enable
 
 ENV PNPM_HOME=/pnpm
 ENV PATH=$PNPM_HOME:$PATH
