@@ -139,7 +139,13 @@ export type BulkGateItem = {
 function bulkScope(wardUserId: string, network: string, items: BulkGateItem[]): string {
   const tuples = items
     .map((i) => `${i.actionType}|${i.sourceItemId}|${i.targetItemId}`)
-    .sort()
+    // Code-point ordering, NOT localeCompare: this ordering is hashed into a
+    // Redis scope key that must match byte-for-byte across processes, locales
+    // and ICU versions.
+    .sort((a, b) => {
+      if (a < b) return -1;
+      return a > b ? 1 : 0;
+    })
     .join(',');
   const hash = createHash('sha256').update(tuples).digest('hex');
   return `guardian_action_bulk:${wardUserId}:${network}:${hash}`;
