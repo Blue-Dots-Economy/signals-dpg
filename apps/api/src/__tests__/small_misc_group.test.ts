@@ -102,7 +102,7 @@ const {
   getInstanceDefaultNetwork,
   schemaEntries,
 } = vi.hoisted(() => {
-  const buildCtaUrl = vi.fn((_baseUrl: string) => 'https://app.test/login');
+  const buildCtaUrl = vi.fn((baseUrl: string) => `${baseUrl}/login`);
   return {
   getMatchScoreClient: vi.fn(),
   isServedDomainBinding: vi.fn((_network: string, _domain: string) => true),
@@ -285,7 +285,7 @@ beforeEach(() => {
     domains: [{ id: 'student' }],
   }));
   resolveTextSearchFields.mockImplementation(() => ['title', 'about']);
-  buildCtaUrl.mockImplementation(() => 'https://app.test/login');
+  buildCtaUrl.mockImplementation((baseUrl: string) => `${baseUrl}/login`);
   createCtaUrlResolver.mockImplementation(
     (opts: { byDomain: Record<string, string>; fallbackBaseUrl?: string }) =>
       (domain: string): string | undefined => {
@@ -652,6 +652,23 @@ describe('resolveNotifierConfig', () => {
     getNotificationClient.mockImplementation(() => ({ notify: vi.fn() }));
 
     expect(resolveNotifierConfig()).toBeNull();
+  });
+
+  it('is configured on UI_HOST_BINDINGS alone, with FRONTEND_BASE_URL unset, and resolves via the map (#569)', () => {
+    // Regression guard for the split-deployment gate (design doc: a gate
+    // regression here is a silent TOTAL OUTAGE — every action email stops
+    // sending with no error anywhere, not a single degraded link. Reverting
+    // the gate to `!frontendBaseUrl`, or dropping `byDomain` from the
+    // resolver wiring, must fail one of the two assertions below.
+    cfgNotification.NOTIFICATION_FROM_EMAIL = 'from@dpg.test';
+    cfgUiHostBindings.byDomain = { seeker: 'https://s.test' };
+    getNotificationClient.mockImplementation(() => ({ notify: vi.fn() }));
+
+    // Fails if the gate regresses to requiring the FRONTEND_BASE_URL scalar.
+    const config = resolveNotifierConfig();
+    expect(config).not.toBeNull();
+    // Fails if `byDomain` isn't wired through to the resolver.
+    expect(config?.resolveCtaUrl('seeker')).toBe('https://s.test/login');
   });
 
   it('builds the email sender with the from-email as default replyTo and delegates notify to the NS client', async () => {
