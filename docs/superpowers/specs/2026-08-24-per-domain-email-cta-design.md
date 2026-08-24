@@ -217,7 +217,8 @@ absent in a built image.
 | Malformed entry in `UI_HOST_BINDINGS` | Skipped, warning at boot. Never fails boot. |
 | Duplicate domain across two hosts | First wins, warning names the domain. |
 | Key names no served domain | Warning at boot. Map used unchanged — never filtered. |
-| Domain has no mapping | Falls back to `FRONTEND_BASE_URL`. |
+| Domain has no mapping, `FRONTEND_BASE_URL` set | Falls back to `FRONTEND_BASE_URL`. |
+| Domain has no mapping, `FRONTEND_BASE_URL` unset | That recipient is **skipped and logged**. `dispatch_email.ts:136` renders `args.ctaUrl ?? ''`, so sending anyway would ship an `<a href="">` whose button does nothing. Reachable only because the gate accepts a map-only config. |
 | Neither map nor scalar set | Unchanged from today: action emails do not send; `siteUrl` is omitted from welcome. |
 
 **Known limitation, accepted.** On a split deployment `FRONTEND_BASE_URL` is the
