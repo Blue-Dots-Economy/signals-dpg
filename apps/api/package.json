@@ -37,10 +37,10 @@
   "packageManager": "pnpm@11.1.2",
   "devDependencies": {
     "@types/pg": "^8.20.4",
-    "@vitest/coverage-v8": "^4.1.10",
+    "@vitest/coverage-v8": "^4.1.11",
     "drizzle-kit": "^0.31.8",
     "tsx": "^4.23.11",
-    "vitest": "^4.1.10"
+    "vitest": "^4.1.11"
   },
   "dependencies": {
     "@fastify/cors": "^11.3.0",
