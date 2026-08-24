@@ -368,7 +368,7 @@ describe('SignupGuardianFlow (pre-auth U18 signup)', () => {
     // position relative to the dialog's own `fixed` wrapper instead of the
     // scroller) would have unlocked it here regardless of scroll position.
     stubReaderAt(0);
-    expect(screen.getByRole('checkbox')).toBeDisabled();
+    expect(screen.getByRole('checkbox')).toHaveAttribute('aria-disabled', 'true');
 
     stubReaderAt(400);
 

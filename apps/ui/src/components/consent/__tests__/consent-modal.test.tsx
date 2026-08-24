@@ -162,7 +162,7 @@ describe('ConsentModal — gate mode', () => {
     );
 
     const acceptBtn = screen.getByRole('button', { name: /accept/i });
-    expect(acceptBtn).toBeDisabled();
+    expect(acceptBtn).toHaveAttribute('aria-disabled', 'true');
 
     // Fix round 3 regression pin: with REAL (non-zero, getBoundingClientRect
     // -based) geometry and the reader genuinely NOT yet scrolled, the
@@ -173,15 +173,15 @@ describe('ConsentModal — gate mode', () => {
     // wrapper instead of the scroller) would have passed anyway, by
     // coincidence, at every scroll position.
     stubReader(0);
-    expect(screen.getByRole('checkbox')).toBeDisabled();
+    expect(screen.getByRole('checkbox')).toHaveAttribute('aria-disabled', 'true');
 
     stubReaderAsFullyRead();
 
     const checkbox = screen.getByRole('checkbox');
-    expect(checkbox).toBeEnabled();
+    expect(checkbox).toHaveAttribute('aria-disabled', 'false');
     await user.click(checkbox);
 
-    expect(acceptBtn).not.toBeDisabled();
+    expect(acceptBtn).toHaveAttribute('aria-disabled', 'false');
   });
 
   it('clicking Accept calls onAccept after reading to the end and checking the checkbox', async () => {
@@ -485,10 +485,10 @@ describe('mount-closed-then-open parity (regression guard for aggregator Critica
     stubReaderAsFullyRead();
 
     const checkbox = screen.getByRole('checkbox');
-    expect(checkbox).toBeEnabled();
+    expect(checkbox).toHaveAttribute('aria-disabled', 'false');
     await user.click(checkbox);
 
     const acceptBtn = screen.getByRole('button', { name: /accept/i });
-    expect(acceptBtn).not.toBeDisabled();
+    expect(acceptBtn).toHaveAttribute('aria-disabled', 'false');
   });
 });

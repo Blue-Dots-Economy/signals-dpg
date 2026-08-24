@@ -84,8 +84,11 @@ describe('<ConsentGateBody />', () => {
   it('keeps the checkbox and CTA locked until the end is reached', () => {
     render(<ConsentGateBody docs={docs} onAccept={vi.fn()} />);
     fireEvent.scroll(stubScroller(0));
-    expect(screen.getByRole('checkbox')).toBeDisabled();
-    expect(screen.getByRole('button', { name: /accept/i })).toBeDisabled();
+    // `aria-disabled`, not `disabled`: the controls stay in the accessibility
+    // tree so a screen-reader user can land on them and hear why they are
+    // locked. Enforcement is the handler guard, asserted below.
+    expect(screen.getByRole('checkbox')).toHaveAttribute('aria-disabled', 'true');
+    expect(screen.getByRole('button', { name: /accept/i })).toHaveAttribute('aria-disabled', 'true');
   });
 
   it('unlocks the checkbox at the end, then the CTA once ticked', () => {
@@ -94,11 +97,11 @@ describe('<ConsentGateBody />', () => {
     fireEvent.scroll(stubScroller(400));
 
     const box = screen.getByRole('checkbox');
-    expect(box).toBeEnabled();
+    expect(box).toHaveAttribute('aria-disabled', 'false');
     const cta = screen.getByRole('button', { name: /accept/i });
-    expect(cta).toBeDisabled();
+    expect(cta).toHaveAttribute('aria-disabled', 'true');
     fireEvent.click(box);
-    expect(cta).toBeEnabled();
+    expect(cta).toHaveAttribute('aria-disabled', 'false');
     fireEvent.click(cta);
     expect(onAccept).toHaveBeenCalledTimes(1);
   });
@@ -124,7 +127,70 @@ describe('<ConsentGateBody />', () => {
     stubRect(section, READER_VIEWPORT_TOP, 100);
     fireEvent.scroll(el);
 
-    expect(screen.getByRole('checkbox')).toBeEnabled();
+    expect(screen.getByRole('checkbox')).toHaveAttribute('aria-disabled', 'false');
+  });
+
+  /**
+   * The security half of the `disabled` -> `aria-disabled` change made for
+   * WCAG 2.2 4.1.3 (a locked control must stay in the accessibility tree so a
+   * screen-reader user can discover WHY they cannot proceed).
+   *
+   * `aria-disabled` is advisory only: unlike `disabled` it does NOT prevent
+   * activation, so the element is genuinely clickable and keyboard-activatable
+   * while locked. If the handlers were not guarded, this change would hand
+   * everyone a one-click bypass of the very gate the feature exists to
+   * enforce — strictly worse than the inline checkbox it replaced. These two
+   * tests are what stop that: they drive the controls exactly as a user could,
+   * and assert nothing happens.
+   */
+  it('cannot be accepted by clicking the locked CTA before reading', () => {
+    const onAccept = vi.fn();
+    render(<ConsentGateBody docs={docs} onAccept={onAccept} />);
+    fireEvent.scroll(stubScroller(0));
+
+    fireEvent.click(screen.getByRole('button', { name: /accept/i }));
+
+    expect(onAccept).not.toHaveBeenCalled();
+  });
+
+  it('cannot be ticked by clicking the locked checkbox before reading', () => {
+    render(<ConsentGateBody docs={docs} onAccept={vi.fn()} />);
+    fireEvent.scroll(stubScroller(0));
+
+    const box = screen.getByRole('checkbox');
+    fireEvent.click(box);
+
+    // Still unchecked, and the CTA still refuses — a bypass would need both.
+    expect(box).toHaveAttribute('aria-checked', 'false');
+    expect(screen.getByRole('button', { name: /accept/i })).toHaveAttribute(
+      'aria-disabled',
+      'true',
+    );
+  });
+
+  it('announces the unlock to screen readers via a live region', () => {
+    render(<ConsentGateBody docs={docs} onAccept={vi.fn()} />);
+    fireEvent.scroll(stubScroller(0));
+
+    const hint = document.getElementById('consent-scroll-hint');
+    expect(hint).not.toBeNull();
+    expect(hint).toHaveAttribute('aria-live', 'polite');
+    // Both controls point at it, so a locked control explains itself rather
+    // than being an unexplained dead end.
+    expect(screen.getByRole('checkbox')).toHaveAttribute(
+      'aria-describedby',
+      'consent-scroll-hint',
+    );
+    expect(screen.getByRole('button', { name: /accept/i })).toHaveAttribute(
+      'aria-describedby',
+      'consent-scroll-hint',
+    );
+
+    const locked = hint!.textContent;
+    fireEvent.scroll(stubScroller(400));
+    // The same live region now carries the unlocked message, so the transition
+    // is announced rather than happening silently.
+    expect(hint!.textContent).not.toBe(locked);
   });
 
   it('renders every document in one scroll region rather than tabs', () => {

@@ -53,6 +53,16 @@ export function ConsentGateBody({
   const [checked, setChecked] = useState(false);
   const docIds = useMemo(() => docs.map((d) => d.id), [docs]);
   const progress = useReadProgress(readerRef, docIds);
+  /**
+   * Single source of truth for "may this be actioned". Both controls below
+   * report it via `aria-disabled` AND guard their handler on it — they are
+   * deliberately not `disabled`, which would drop them out of the
+   * accessibility tree entirely and leave a screen-reader user with nothing to
+   * land on to discover WHY they cannot proceed (WCAG 2.2 4.1.3). Kept as one
+   * expression so the announced state and the enforced state cannot drift.
+   */
+  const canTick = progress.allRead;
+  const canAccept = progress.allRead && checked;
 
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-3 sm:gap-4">
@@ -104,7 +114,16 @@ export function ConsentGateBody({
       </section>
 
       <div className="flex shrink-0 flex-col gap-3 border-t border-border pt-3 sm:pt-4">
+        {/*
+          * Live region: the gate unlocking is a state change with no visual
+          * focus move, so without this a screen-reader user reads to the end,
+          * the controls silently become operable, and nothing tells them.
+          * `polite` and only two possible strings — it announces the
+          * transition once, not on every scroll tick.
+          */}
         <p
+          id="consent-scroll-hint"
+          aria-live="polite"
           className={`flex items-center gap-1.5 text-xs ${
             progress.allRead ? 'font-semibold text-success' : 'text-muted-foreground'
           }`}
@@ -121,8 +140,15 @@ export function ConsentGateBody({
           <Checkbox
             id="consent-agree"
             checked={checked}
-            disabled={!progress.allRead}
-            onCheckedChange={(value) => setChecked(value === true)}
+            aria-disabled={!canTick}
+            aria-describedby="consent-scroll-hint"
+            className="aria-disabled:cursor-not-allowed aria-disabled:opacity-50"
+            onCheckedChange={(value) => {
+              // Enforcement, not decoration: `aria-disabled` alone leaves the
+              // control operable, so the gate would be bypassable without this.
+              if (!canTick) return;
+              setChecked(value === true);
+            }}
           />
           <Label htmlFor="consent-agree" className="text-sm leading-snug cursor-pointer">
             {t('consent.agree_label')}
@@ -131,9 +157,14 @@ export function ConsentGateBody({
 
         <button
           type="button"
-          disabled={!progress.allRead || !checked}
-          onClick={onAccept}
-          className="flex w-full items-center justify-center rounded-md py-3 text-sm font-semibold text-[var(--brand-cta-foreground)] transition-all disabled:opacity-60 bg-brand-cta hover:brightness-110 h-11"
+          aria-disabled={!canAccept}
+          aria-describedby="consent-scroll-hint"
+          onClick={() => {
+            // See the checkbox: `aria-disabled` does not block activation.
+            if (!canAccept) return;
+            onAccept();
+          }}
+          className="flex w-full items-center justify-center rounded-md py-3 text-sm font-semibold text-[var(--brand-cta-foreground)] transition-all aria-disabled:opacity-60 aria-disabled:cursor-not-allowed bg-brand-cta hover:brightness-110 h-11"
         >
           {t('consent.accept_continue')}
         </button>
