@@ -37,6 +37,13 @@ sibling repos, no aggregator, no Keycloak. Run everything from **`local-setup/`*
 | **Node.js**              | ≥ 24 (22 works for dev) | Track B     | —                                         |
 | **pnpm**                 | 11.1.2 (pinned)         | Track B     | `corepack enable pnpm`                    |
 | **openssl**              | any                     | secrets     | pre-shipped on macOS/Linux                |
+| **`docker login dhi.io`** | —                      | **Track A** | Only for building images. See note below. |
+
+> **Track A needs a registry login.** The api and ui images build `FROM
+> dhi.io/...` (Docker Hardened Images), and dhi.io refuses anonymous pulls — so
+> `docker compose up -d --build` fails at the first `FROM` without
+> `docker login dhi.io` using a Docker Hub account. Track B needs no login: it
+> builds no app images. The same applies to `pnpm docker:api`.
 
 No external services are needed: signals uses **better-auth** with a test OTP
 (`CREATE_TEST_OTP=true`, codes print to the API logs), so there's no Keycloak,
@@ -106,8 +113,14 @@ docker compose logs -f signals-api         # API boot; test OTP codes print here
 1. http://localhost:5173  → the UI loads (browse is empty until you add data).
 2. Sign in with any test identity — the OTP code is printed to the API logs:
    docker compose logs signals-api | grep -i otp
-3. Optional demo data: docker compose exec signals-api \
-     sh -lc "cd /app && node apps/api/dist/scripts/... "   # or seed from source in Track B
+3. Optional demo data — note there is NO shell in the api image (it is a Docker
+   Hardened Image), so `exec ... sh -lc` fails. Use exec form, which runs the
+   node binary directly and needs no shell:
+     docker compose exec --workdir /app signals-api \
+       node apps/api/dist/scripts/...
+   Or run it through signals-bootstrap, which still has a shell:
+     docker compose run --rm signals-bootstrap sh -lc "pnpm --filter api ..."
+   In Track B, seed from source on the host instead.
 ```
 
 > Login uses better-auth with `CREATE_TEST_OTP=true`, so the OTP is written to

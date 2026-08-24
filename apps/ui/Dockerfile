@@ -73,7 +73,12 @@ FROM dhi.io/nginx:1.30-alpine AS runner
 #      with it the /docker-entrypoint.d/*.sh hook mechanism, exists ONLY in the
 #      `-dev` variant. Our startup hook therefore becomes the ENTRYPOINT itself.
 #   2. It runs as the unprivileged `nginx` user (uid 65532), which cannot bind a
-#      privileged port — hence 8080 rather than 80 throughout.
+#      privileged port on a host with the traditional sysctl. In practice the
+#      nodes we deploy to set net.ipv4.ip_unprivileged_port_start=0 (also the
+#      Docker default), so uid 65532 CAN bind 80 — verified serving HTTP 200
+#      with all capabilities dropped. So the port contract stays 80, unchanged
+#      from the pre-hardening image. If a host ever restores the traditional
+#      sysctl, this and the chart's service.targetPort move to 8080 together.
 #   3. busybox IS present (unlike the hardened node image), so /bin/sh exists and
 #      the config-generation script below still runs.
 # /etc/nginx is chowned to 65532 with g+w by the base image, so the entrypoint
@@ -140,11 +145,13 @@ else
   CONFIG_LOCATION="location = /config.js { alias /usr/share/nginx/html/config.js; }"
 fi
 
-# 8080, not 80: this image runs as uid 65532 and cannot bind a privileged port.
+# Port 80, unchanged from the pre-hardening image. This runs as uid 65532, which
+# can still bind 80 because the hosts set net.ipv4.ip_unprivileged_port_start=0.
+# Verified: HTTP 200 as uid 65532 with --cap-drop ALL.
 cat > /etc/nginx/conf.d/default.conf <<NGINXCONF
 ${MAP_BLOCK}
 server {
-    listen 8080;
+    listen 80;
     root ${ROOT};
     index index.html;
     ${CONFIG_LOCATION}
@@ -156,6 +163,6 @@ echo "[ui-variant] serving '${UI_VARIANT:-signals}' from ${ROOT}${UI_HOST_BINDIN
 # directly — the official entrypoint did the same after running its hooks.
 exec "$@"
 EOF
-EXPOSE 8080
+EXPOSE 80
 ENTRYPOINT ["/usr/local/bin/ui-variant-entrypoint.sh"]
 CMD ["nginx", "-g", "daemon off;"]

@@ -1,4 +1,20 @@
 version: 2
+
+# Docker Hardened Image bases live on dhi.io, which refuses anonymous pulls — so
+# without this Dependabot cannot read the manifests and base-image update PRs for
+# any Dockerfile using `FROM dhi.io/...` simply stop appearing. Nothing errors,
+# which is what makes it worth being explicit about.
+#
+# PREREQUISITE: these are DEPENDABOT secrets, a separate store from Actions
+# secrets — set them under Settings > Secrets and variables > Dependabot.
+# Note the username must be a secret here: Dependabot registry config cannot
+# reference `vars`, which is what the Actions workflows use for it.
+registries:
+  dhi:
+    type: docker-registry
+    url: dhi.io
+    username: ${{secrets.DOCKERHUB_USERNAME}}
+    password: ${{secrets.DOCKERHUB_TOKEN}}
 updates:
   # npm/pnpm — one entry at the workspace root covers all packages because
   # pnpm-lock.yaml holds the full dependency graph for the monorepo.
@@ -56,6 +72,9 @@ updates:
 
   # Docker base images — one entry per directory containing a Dockerfile
   - package-ecosystem: "docker"
+    # Needed to read dhi.io manifests; see the registries block at the top.
+    registries:
+      - dhi
     # Check manifests on and raise PRs against the integration branch;
     # security updates still target the default branch (GitHub limitation).
     target-branch: "feature"
