@@ -246,8 +246,13 @@ export function ProfileCardModal({
           container then never overflowed, so it never got a scrollbar and the
           card's "Hide details" toggle was unreachable. As block children, the
           card keeps its full height and the overflow lands here, where it
-          scrolls. Height is bounded by `ResponsiveDialog`'s `max-h-[90dvh]` on
-          both the Dialog and Drawer shapes — no cap is needed (or wanted) here. */}
+          scrolls. Height is bounded by `ResponsiveDialog` on both shapes, so no
+          cap is needed (or wanted) here — but the two bounds differ: 90dvh on
+          the desktop Dialog, and 80dvh on the mobile Drawer, where
+          `DrawerContent`'s own `data-[vaul-drawer-direction=bottom]:max-h-[80dvh]`
+          outranks the `max-h-[90dvh]` passed in (class+attribute, 0,2,0, beats a
+          plain class, 0,1,0) and vaul defaults to `direction="bottom"`. Tighter,
+          not looser, so the scroll fix holds on both. */}
       <div className="space-y-4 overflow-y-auto p-6">
         <DialogHeader>
           <DialogTitle>{name}</DialogTitle>
