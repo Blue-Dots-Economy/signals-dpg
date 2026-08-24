@@ -19,9 +19,8 @@ const SYNTHETIC_EMAIL_SUFFIX = '@no-email.local';
  * ({@link SYNTHETIC_EMAIL_SUFFIX}) into null so callers skip the send.
  */
 function deliverableEmail(email: string | null | undefined): string | null {
-  const e = email ?? null;
-  if (!e) return null;
-  return e.toLowerCase().endsWith(SYNTHETIC_EMAIL_SUFFIX) ? null : e;
+  if (!email) return null;
+  return email.toLowerCase().endsWith(SYNTHETIC_EMAIL_SUFFIX) ? null : email;
 }
 
 /**

@@ -122,6 +122,12 @@ export async function dispatchItemLifecycleNotification(
 
     const brandName = await resolveNetworkBrandName(event.network);
 
+    // Per (case, owner, item) dedupe key so this send is not deduped against a
+    // different email to the same recipient within NS's 5s window (#592 Blocker
+    // 1). `account.aggregator_init` has no itemId but is already unique per owner.
+    const itemSegment = event.itemId ? `:${event.itemId}` : '';
+    const dedupeId = `item_lifecycle:${caseId}:${event.ownerId}${itemSegment}`;
+
     const variables: Record<string, string> = { name: name || 'there' };
     if (caseId === 'account.aggregator_init') {
       variables.aggregatorOrg = event.aggregatorOrgName || brandName;
@@ -139,9 +145,7 @@ export async function dispatchItemLifecycleNotification(
       network: event.network,
       ctaUrl: config.ctaUrl,
       variables,
-      // Per (case, owner, item) so this send is not deduped against a different
-      // email to the same recipient within NS's 5s window (#592 Blocker 1).
-      dedupeId: `item_lifecycle:${caseId}:${event.ownerId}${event.itemId ? `:${event.itemId}` : ''}`,
+      dedupeId,
       log: (message, meta) =>
         log.warn({ ...meta, op: event.op, network: event.network, ownerId: event.ownerId }, message),
     });
