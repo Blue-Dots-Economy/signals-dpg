@@ -2,7 +2,7 @@
 # Build stages use the DHI *dev* variant — the only one carrying a shell, apk,
 # corepack and npm. The runtime stage below is hardened nginx; see it for why the
 # entrypoint and port had to change.
-FROM dhi.io/node:24-alpine-dev AS base
+FROM dhi.io/node:26-alpine-dev AS base
 # libc6-compat is kept here, unlike apps/api/Dockerfile which drops it. The api's
 # dependency closure is pure JS; the UI build is not — Vite/rolldown and esbuild
 # ship prebuilt platform binaries. This is a build stage that never ships, so the
