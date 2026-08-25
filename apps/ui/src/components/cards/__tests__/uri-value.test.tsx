@@ -7,7 +7,7 @@ describe('UriValue', () => {
   it('renders a safe link with the value as its text', () => {
     render(<UriValue value="https://example.com" />);
     const link = screen.getByRole('link', { name: 'https://example.com' });
-    expect(link).toHaveAttribute('href', 'https://example.com');
+    expect(link).toHaveAttribute('href', 'https://example.com/');
     expect(link).toHaveAttribute('target', '_blank');
     expect(link).toHaveAttribute('rel', 'noopener noreferrer');
   });
@@ -15,7 +15,7 @@ describe('UriValue', () => {
   it('prefixes a scheme-less value in the href but shows it as typed', () => {
     render(<UriValue value="example.com" />);
     const link = screen.getByRole('link', { name: 'example.com' });
-    expect(link).toHaveAttribute('href', 'https://example.com');
+    expect(link).toHaveAttribute('href', 'https://example.com/');
   });
 
   it('renders a masked value as plain text, not a link', () => {

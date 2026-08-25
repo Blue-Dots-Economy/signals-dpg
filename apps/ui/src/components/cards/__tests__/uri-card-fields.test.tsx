@@ -34,7 +34,7 @@ describe('ItemCard renders x-uri rows as links', () => {
   it('renders a flagged field as a hyperlink', () => {
     render(<ItemCard schema={schema} data={{ name: 'Asha', site: 'https://example.com' }} />);
     const link = screen.getByRole('link', { name: 'https://example.com' });
-    expect(link).toHaveAttribute('href', 'https://example.com');
+    expect(link).toHaveAttribute('href', 'https://example.com/');
     expect(link).toHaveAttribute('rel', 'noopener noreferrer');
   });
 

@@ -40,7 +40,21 @@ export function toSafeHref(value: string): string | null {
     const url = new URL(candidate);
     if (url.protocol !== 'http:' && url.protocol !== 'https:') return null;
     if (!url.hostname.includes('.')) return null;
-    return candidate;
+    // Reject userinfo. `https://trusted-looking-host.gov.in@evil.example/` opens
+    // `evil.example` — everything before the `@` is a username, not the host. The
+    // display text is head-truncated, so a long enough userinfo pushes the real
+    // host out of view and the link reads as somewhere it is not. `URL_PATTERN`
+    // rejects `@`, but this is the last line for values it never saw: a field
+    // that is `required` is not validated server-side at all, values predating a
+    // field being flagged are never re-checked, and an author-supplied `pattern`
+    // replaces ours. Nothing legitimate in a profile link carries userinfo.
+    if (url.username || url.password) return null;
+    // Return the PARSED form, so the href we hand the browser is the same thing
+    // these checks ran against. Returning the raw string let `//evil.com` through
+    // as `https:////evil.com`, and tabs/backslashes survive into the attribute;
+    // browsers normalise those to the same destination, so this is hardening
+    // rather than a fix, but it removes the gap between checked and used.
+    return url.href;
   } catch {
     return null;
   }
