@@ -57,7 +57,8 @@
     "SUPPORT_ATTACHMENT_MAX_FILES",
     "SUPPORT_ATTACHMENT_MAX_TOTAL_BYTES",
     "SUPPORT_CC_EMAIL",
-    "SUPPORT_EMAIL"
+    "SUPPORT_EMAIL",
+    "UI_HOST_BINDINGS"
   ],
   "tasks": {
     "build": {

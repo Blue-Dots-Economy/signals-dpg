@@ -138,12 +138,26 @@ export async function dispatchItemLifecycleNotification(
     // invisible here. Pass the structured request logger through, and act on the
     // result so a bulk-onboarding NS outage is logged (with op/network/ownerId),
     // not a silent 200.
+    // The recipient IS the item owner, so their own item domain decides which
+    // portal this links to — a split deployment serves seeker and provider from
+    // different hosts (#569). `dispatch_email` renders `args.ctaUrl ?? ''` into
+    // the shell, so an unresolved URL would ship `<a href="">`; send nothing
+    // rather than a mail whose only call to action is broken.
+    const ctaUrl = config.resolveCtaUrl(event.domain);
+    if (!ctaUrl) {
+      log.warn(
+        { caseId, op: event.op, network: event.network, domain: event.domain },
+        'item-lifecycle email skipped: no CTA url for the item domain',
+      );
+      return;
+    }
+
     const { ok } = await config.sender.dispatchEmail({
       caseId,
       to: email,
       fromName: brandName,
       network: event.network,
-      ctaUrl: config.ctaUrl,
+      ctaUrl,
       variables,
       dedupeId,
       log: (message, meta) =>

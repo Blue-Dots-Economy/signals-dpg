@@ -20,8 +20,12 @@ export interface DispatcherDeps {
   resolveCounterpartyName: (plan: NotificationPlan) => Promise<string | null>;
   brand: {
     brandName: string;
-    ctaUrl: string;
   };
+  /**
+   * The login URL for a recipient in `domain`. Per-recipient, not per-process:
+   * on a split deployment each domain has its own portal host (#569).
+   */
+  resolveCtaUrl: (domain: string) => string | undefined;
   log: (message: string, meta?: Record<string, unknown>) => void;
   /** Visibility hook for skipped (dark) recipients. */
   onSkip: (reason: string) => void;
@@ -58,6 +62,26 @@ export function createDirectDispatcher(deps: DispatcherDeps): DirectDispatcher {
       return;
     }
 
+    // `dispatch_email` renders `args.ctaUrl ?? ''` into the shell, so an
+    // unresolved URL ships an `<a href="">` whose button does nothing. That is
+    // now reachable: the gate below accepts a map-only config, so a domain
+    // missing from UI_HOST_BINDINGS with no FRONTEND_BASE_URL set has no
+    // answer. Send nothing rather than a mail whose only CTA is broken — the
+    // boot-time unknown-domain warning is the operator-facing signal.
+    //
+    // The RECIPIENT's own domain, never the counterparty's — keying off
+    // `counterpartyDomain` here would send each party to the other's portal.
+    const ctaUrl = deps.resolveCtaUrl(plan.recipientDomain);
+    if (!ctaUrl) {
+      deps.onSkip('no_cta_url');
+      deps.log('notification skipped: no CTA url for recipient domain', {
+        shape: plan.shape,
+        actionId: plan.actionId,
+        domain: plan.recipientDomain,
+      });
+      return;
+    }
+
     const counterpartyName = await deps.resolveCounterpartyName(plan);
 
     await deps.sendEmail({
@@ -69,7 +93,7 @@ export function createDirectDispatcher(deps: DispatcherDeps): DirectDispatcher {
       to: email,
       fromName: deps.brand.brandName,
       network: plan.counterpartyNetwork,
-      ctaUrl: deps.brand.ctaUrl,
+      ctaUrl,
       dedupeId: `${plan.actionId}:${plan.updateCount}:${plan.shape}`,
       variables: { name: counterpartyName?.trim() || FALLBACK_SERVICE_NAME },
       log: deps.log,

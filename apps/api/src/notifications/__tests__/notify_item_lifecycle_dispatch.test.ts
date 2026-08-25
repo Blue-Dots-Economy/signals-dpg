@@ -28,7 +28,12 @@ const log = { warn, info: vi.fn(), error: vi.fn() } as unknown as FastifyBaseLog
 function configured() {
   resolveNotifierConfig.mockReturnValue({
     sender: { dispatchEmail },
-    ctaUrl: 'https://app.example/home',
+    // Per-recipient now (#569): a split deployment serves each domain from its
+    // own host, and the item owner's domain is what picks the portal.
+    // Any domain maps to its own host, except the sentinel `unmapped` used by
+    // the skip test — so this cannot accidentally mask an unrelated domain.
+    resolveCtaUrl: (domain: string) =>
+      domain === 'unmapped' ? undefined : `https://${domain}.example.org/auth/login`,
   });
 }
 
@@ -71,7 +76,7 @@ describe('dispatchItemLifecycleNotification', () => {
       to: 'a@x.com',
       fromName: 'Blue Dot',
       network: 'blue_dot',
-      ctaUrl: 'https://app.example/home',
+      ctaUrl: 'https://seeker.example.org/auth/login',
       variables: { name: 'Asha' },
       // No itemId on this event → dedupe key omits the item segment.
       dedupeId: 'item_lifecycle:profile.create:u1',
@@ -151,5 +156,30 @@ describe('dispatchItemLifecycleNotification', () => {
     ).resolves.toBeUndefined();
     expect(warn).toHaveBeenCalled();
     expect(dispatchEmail).not.toHaveBeenCalled();
+  });
+  it('links a provider-owned item to the provider portal, not the seeker one (#569)', async () => {
+    configured();
+    resolveOwnerNameEmail.mockResolvedValue({ found: true, name: 'Asha', email: 'a@x.com' });
+
+    await dispatchItemLifecycleNotification(
+      { op: 'create', ownerId: 'u1', domain: 'provider', network: 'blue_dot' },
+      log,
+    );
+
+    expect(dispatchEmail).toHaveBeenCalledTimes(1);
+    expect(dispatchEmail.mock.calls[0][0].ctaUrl).toBe('https://provider.example.org/auth/login');
+  });
+
+  it('skips the send when the domain resolves to no URL rather than shipping a dead link', async () => {
+    configured();
+    resolveOwnerNameEmail.mockResolvedValue({ found: true, name: 'Asha', email: 'a@x.com' });
+
+    await dispatchItemLifecycleNotification(
+      { op: 'create', ownerId: 'u1', domain: 'unmapped', network: 'blue_dot' },
+      log,
+    );
+
+    expect(dispatchEmail).not.toHaveBeenCalled();
+    expect(warn).toHaveBeenCalled();
   });
 });

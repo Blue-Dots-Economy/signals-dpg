@@ -1,11 +1,11 @@
 import type { FastifyBaseLogger } from 'fastify';
 
-import { instance, notification } from '@/config';
+import { instance, notification, uiHostBindings } from '@/config';
 import { getNetworkConfigById } from '@/network_configs';
 import { getNotificationClient } from '@/utils/notificationClient';
 
 import type { NotificationEvent, NotificationPlan } from './build_notifications';
-import { buildCtaUrl, resolveBrandName } from './brand';
+import { createCtaUrlResolver, resolveBrandName } from './brand';
 import { createDirectDispatcher } from './dispatcher';
 import { resolveRecipientRole } from './action_copy';
 import { createEmailSender, getInstanceDefaultNetwork } from './email/dispatch_email';
@@ -15,7 +15,7 @@ import { resolveOwnerEmail, resolveProviderServiceName } from './resolve_owner';
 
 export interface NotifierConfig {
   sender: EmailSender;
-  ctaUrl: string;
+  resolveCtaUrl: (domain: string) => string | undefined;
 }
 
 /**
@@ -43,7 +43,8 @@ let cachedConfig: NotifierConfig | null | undefined;
  * Memoised notifier config (email sender + cta). `null` when notifications
  * aren't configured. Shared with the retire notifier (#418) so both read the
  * same config + reset. Action emails stay gated on an explicit
- * NOTIFICATION_FROM_EMAIL + FRONTEND_BASE_URL (unchanged from before #529).
+ * NOTIFICATION_FROM_EMAIL plus at least one URL source (UI_HOST_BINDINGS or
+ * FRONTEND_BASE_URL).
  */
 export function resolveNotifierConfig(): NotifierConfig | null {
   if (cachedConfig !== undefined) return cachedConfig;
@@ -51,8 +52,14 @@ export function resolveNotifierConfig(): NotifierConfig | null {
   const nc = getNotificationClient();
   const fromEmail = notification.NOTIFICATION_FROM_EMAIL;
   const frontendBaseUrl = notification.FRONTEND_BASE_URL;
+  const hasAnyUrl =
+    !!frontendBaseUrl || Object.keys(uiHostBindings.byDomain).length > 0;
 
-  if (!nc || !fromEmail || !frontendBaseUrl) {
+  // Gate on "some URL source exists", not on the scalar alone: a split
+  // deployment configures UI_HOST_BINDINGS and may leave FRONTEND_BASE_URL
+  // unset, and requiring the scalar would silently stop EVERY action email
+  // rather than degrade one link (#569).
+  if (!nc || !fromEmail || !hasAnyUrl) {
     cachedConfig = null;
     return cachedConfig;
   }
@@ -67,7 +74,10 @@ export function resolveNotifierConfig(): NotifierConfig | null {
       teamName: instance.INSTANCE_NAME || 'DPG',
       log: (message, meta) => console.warn(message, meta ?? {}),
     }),
-    ctaUrl: buildCtaUrl(frontendBaseUrl),
+    resolveCtaUrl: createCtaUrlResolver({
+      byDomain: uiHostBindings.byDomain,
+      fallbackBaseUrl: frontendBaseUrl,
+    }),
   };
   return cachedConfig;
 }
@@ -77,8 +87,8 @@ export function resolveNotifierConfig(): NotifierConfig | null {
  * recipients, builds the branded plan, and hands off to the central email
  * sender (`email/dispatch_email.ts`, #529) to render and post to the
  * notification service. Never throws and never blocks the route. No-op when
- * notifications are not configured (missing NS client / from-email /
- * frontend base URL).
+ * notifications are not configured (missing NS client / from-email / any
+ * URL source).
  */
 export async function dispatchActionNotifications(
   event: NotificationEvent,
@@ -101,7 +111,8 @@ export async function dispatchActionNotifications(
       resolveRecipientRole(plan.counterpartyDomain) === 'provider'
         ? resolveProviderServiceName(plan.counterpartyItemId, plan.counterpartyNetwork)
         : null,
-    brand: { brandName, ctaUrl: config.ctaUrl },
+    brand: { brandName },
+    resolveCtaUrl: config.resolveCtaUrl,
     log: (message, meta) => log.warn(meta ?? {}, message),
     onSkip: (reason) => log.info({ reason }, 'action notification skipped'),
   });
