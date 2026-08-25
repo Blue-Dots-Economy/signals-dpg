@@ -116,6 +116,8 @@ jobs:
       NETWORK_CONFIG_SOURCE: local
       SCHEMA_REGISTRY_URL: http://127.0.0.1:9999
       SERVED_DOMAINS: blue_dot/seeker
+      # Job-level, not step-level: a step's own `env:` isn't visible to its own `if:`.
+      SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -215,11 +217,11 @@ jobs:
       # SONAR_TOKEN is unavailable on Dependabot/fork pull_request runs (GitHub
       # withholds repo secrets from them); skip rather than fail so those PRs
       # don't show a red check for something they have no way to fix.
+      # SONAR_TOKEN comes from the job-level `env` above — a step's own `env:`
+      # block is not in scope for its own `if:`.
       - name: SonarCloud scan
         if: env.SONAR_TOKEN != ''
         uses: SonarSource/sonarqube-scan-action@v8
-        env:
-          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
         continue-on-error: true
 
   dep-cruise:
