@@ -31,10 +31,11 @@ export const PROFILE_QR_OPTIONS = Object.freeze({
  * like `blue_dot`) to a single `-`.
  */
 function kebabSegment(value: string): string {
-  return value
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-+|-+$/g, '');
+  // Split on runs of non-alphanumerics rather than replace-then-trim: the
+  // trailing-anchored `-+$` of the old trim backtracks super-linearly
+  // (SonarCloud typescript:S8786). Splitting is linear, and dropping the empty
+  // segments a leading/trailing separator produces removes the need to trim.
+  return value.toLowerCase().split(/[^a-z0-9]+/).filter(Boolean).join('-');
 }
 
 /**
