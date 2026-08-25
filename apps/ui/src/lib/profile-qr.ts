@@ -8,13 +8,19 @@ export type ProfileQrItem = Pick<Item, 'item_network' | 'item_domain' | 'item_ty
 /**
  * The ONE set of encoder options used for every profile QR, in every call site.
  *
- * These must stay fixed. The rendered image is a pure function of
- * (share URL, these options) — change any of them and every profile's QR
- * renders differently, so a code already printed on a poster, a badge or a
- * flyer would no longer match the one the app hands out today. Nothing about a
- * QR is stored anywhere (no DB column, no object storage, no server round
- * trip); "the same QR every time" is guaranteed by regenerating from the same
- * inputs, which only holds while these values are constant.
+ * What keeps an already-printed QR working is the encoded **URL**, not these
+ * options: a scanner reads the same URL at any width or error-correction
+ * level, so a poster printed today keeps resolving to the same profile even if
+ * these constants were changed tomorrow. Changing them is a visual change, not
+ * a data-loss event.
+ *
+ * They are still fixed deliberately. The rendered image is a pure function of
+ * (share URL, these options), so holding them constant is what makes
+ * "regenerating gives you the same image" true — which is why nothing is
+ * stored anywhere (no DB column, no object storage, no server round trip).
+ * Vary them per call site and you get two different-looking codes for one
+ * profile; both would scan correctly, but the promise gets harder to reason
+ * about and to test.
  *
  * Deliberately module-level and frozen rather than a prop/parameter: no call
  * site may pass its own width or error-correction level.

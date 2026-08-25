@@ -65,6 +65,13 @@ export function ShareProfileDialog({
     if (!open) return;
     let cancelled = false;
     setFailed(false);
+    // Clear the previous QR too, not just the error. If this instance ever saw
+    // a different `item` while open, a stale data URL would render — and
+    // download — the previous profile's QR under the new profile's filename.
+    // Not reachable today (card-grid keys on item.id, leaflet nests a popup per
+    // marker, and each ShareProfileButton owns its own dialog), so this is the
+    // component defending itself rather than a live bug.
+    setDataUrl(null);
     generateProfileQrDataUrl(qrItem)
       .then((url) => {
         if (!cancelled) setDataUrl(url);
