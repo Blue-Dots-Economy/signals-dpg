@@ -1,4 +1,20 @@
 version: 2
+
+# Docker Hardened Image bases live on dhi.io, which refuses anonymous pulls — so
+# without this Dependabot cannot read the manifests and base-image update PRs for
+# any Dockerfile using `FROM dhi.io/...` simply stop appearing. Nothing errors,
+# which is what makes it worth being explicit about.
+#
+# PREREQUISITE: these are DEPENDABOT secrets, a separate store from Actions
+# secrets — set them under Settings > Secrets and variables > Dependabot.
+# Note the username must be a secret here: Dependabot registry config cannot
+# reference `vars`, which is what the Actions workflows use for it.
+registries:
+  dhi:
+    type: docker-registry
+    url: dhi.io
+    username: ${{secrets.DOCKERHUB_USERNAME}}
+    password: ${{secrets.DOCKERHUB_TOKEN}}
 updates:
   # npm/pnpm — one entry at the workspace root covers all packages because
   # pnpm-lock.yaml holds the full dependency graph for the monorepo.
@@ -32,6 +48,25 @@ updates:
       # vitest 4 needs vite 6 in lockstep — hold the major.
       - dependency-name: "vitest"
         update-types: ["version-update:semver-major"]
+      # better-auth 1.7 breaks two contracts we'd have to migrate: SecondaryStorage
+      # gained required `getAndDelete`/`increment`, and `verifyApiKey` left the
+      # inferred API surface (#604). It is being removed once integrating DPGs move
+      # from `x-api-key` to Keycloak client-credentials bearer tokens, so the
+      # migration is deliberately deferred rather than done. Minor is held as well
+      # as major because the break shipped in a *minor* (1.6 -> 1.7); patches on the
+      # 1.6 line still land, which matters — `verifyApiKey` is still on the api-key
+      # auth path even under AUTH_PROVIDER=keycloak. Both packages are listed
+      # because they peer-depend on each other in lockstep
+      # (@better-auth/api-key@1.7.x requires better-auth ^1.7.x), so holding only
+      # one would just move the failure to a peer conflict.
+      # The matching `~1.6.29` pin in packages/auth/package.json is what actually
+      # binds resolution; this block only stops the PRs being raised.
+      - dependency-name: "better-auth"
+        update-types:
+          ["version-update:semver-major", "version-update:semver-minor"]
+      - dependency-name: "@better-auth/api-key"
+        update-types:
+          ["version-update:semver-major", "version-update:semver-minor"]
 
   # GitHub Actions — keeps CI workflow action versions current
   - package-ecosystem: "github-actions"
@@ -56,6 +91,9 @@ updates:
 
   # Docker base images — one entry per directory containing a Dockerfile
   - package-ecosystem: "docker"
+    # Needed to read dhi.io manifests; see the registries block at the top.
+    registries:
+      - dhi
     # Check manifests on and raise PRs against the integration branch;
     # security updates still target the default branch (GitHub limitation).
     target-branch: "feature"
