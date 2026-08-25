@@ -2,6 +2,7 @@ import '@/i18n';
 import '@testing-library/jest-dom/vitest';
 import { afterEach } from 'vitest';
 import { cleanup, configure } from '@testing-library/react';
+import { toast } from 'sonner';
 
 // happy-dom 20 (bumped for the CVE-2025-61927 VM-escape RCE fix) no longer
 // mirrors Storage onto the global scope the way real browsers and happy-dom 15
@@ -40,4 +41,20 @@ configure({ asyncUtilTimeout: 5000 });
 
 afterEach(() => {
   cleanup();
+  // sonner keeps its queue in a module-level singleton, outside React, so
+  // `cleanup()` unmounting the `<Toaster />` doesn't touch it. Since 2.0.8 a
+  // subscribing Toaster replays every still-active toast (so a toast fired
+  // before it mounted isn't lost) — which means the next test's Toaster
+  // inherits every toast an earlier test left undismissed, and unrelated
+  // "this message is absent" assertions start failing.
+  //
+  // Dismiss by id rather than via the argument-less `toast.dismiss()`: only the
+  // by-id branch marks the toast dismissed in the store on both 2.0.x lines.
+  // The bare call just notifies subscribers, and `cleanup()` has already
+  // unsubscribed the Toaster, so it would clear nothing.
+  //
+  // Suites that `vi.mock('sonner')` with a partial stub have neither function.
+  if (typeof toast?.getToasts === 'function' && typeof toast.dismiss === 'function') {
+    for (const active of toast.getToasts()) toast.dismiss(active.id);
+  }
 });
