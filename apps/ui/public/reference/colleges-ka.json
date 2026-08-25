@@ -8135,6 +8135,76 @@
               "address": "Vidyanagar, Hubballi",
               "state": "KARNATAKA",
               "district": "DHARWAD"
+            },
+            {
+              "name": "Mount Fharahan Polytechnic Hubli",
+              "code": "",
+              "slug": "mount-fharahan-polytechnic-hubli",
+              "type": "Private",
+              "location": "Urban",
+              "address": "Hubli",
+              "state": "KARNATAKA",
+              "district": "DHARWAD"
+            },
+            {
+              "name": "Jain College of Engineering & Technology, Hubballi",
+              "code": "",
+              "slug": "jain-college-of-engineering-technology-hubballi",
+              "type": "Private",
+              "location": "Urban",
+              "address": "Hubballi",
+              "state": "KARNATAKA",
+              "district": "DHARWAD"
+            },
+            {
+              "name": "SDM College of Engineering and Technology, Dharwad",
+              "code": "",
+              "slug": "sdm-college-of-engineering-and-technology-dharwad",
+              "type": "Private",
+              "location": "Urban",
+              "address": "Dharwad",
+              "state": "KARNATAKA",
+              "district": "DHARWAD"
+            },
+            {
+              "name": "KUD Dharwad",
+              "code": "",
+              "slug": "kud-dharwad",
+              "type": "Govt.",
+              "location": "Urban",
+              "address": "Dharwad",
+              "state": "KARNATAKA",
+              "district": "DHARWAD"
+            },
+            {
+              "name": "Govt College Dharwad",
+              "code": "",
+              "slug": "govt-college-dharwad",
+              "type": "Govt.",
+              "location": "Urban",
+              "address": "Dharwad",
+              "state": "KARNATAKA",
+              "district": "DHARWAD"
+            },
+            {
+              "name": "KCD College Dharwad",
+              "code": "",
+              "slug": "kcd-college-dharwad",
+              "type": "Govt.",
+              "location": "Urban",
+              "address": "Dharwad",
+              "state": "KARNATAKA",
+              "district": "DHARWAD"
+            },
+            {
+              "name": "JG College of Commerce",
+              "code": "",
+              "slug": "jg-college-of-commerce",
+              "type": "Private",
+              "location": "Urban",
+              "address": "Hubballi",
+              "state": "KARNATAKA",
+              "district": "DHARWAD"
             }
           ]
         },
