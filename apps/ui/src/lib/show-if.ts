@@ -96,5 +96,13 @@ export function resolveVisibleSchema(
     prunedSchema.required = (schema.required as string[]).filter((r) => !hidden.has(r));
   }
 
-  return { schema: prunedSchema, formData: working, hidden: [...hidden].sort() };
+  // Code-point ordering, NOT localeCompare: `hidden` is joined into the memo
+  // signature that keys the RJSF schema/uiSchema caches, so it must be a stable
+  // function of the visible set alone — never of the runtime locale.
+  const sortedHidden = [...hidden].sort((a, b) => {
+    if (a < b) return -1;
+    return a > b ? 1 : 0;
+  });
+
+  return { schema: prunedSchema, formData: working, hidden: sortedHidden };
 }

@@ -347,7 +347,10 @@ services:
     environment:
       UI_VARIANT: signals
     ports:
-      # MUST be 5173 — the Signals API's CORS allow-list is 3000/5173/2742 only.
+      # MUST be 5173 on the host — the Signals API's CORS allow-list is
+      # 3000/5173/2742 only. Container side stays 80: the hardened image runs
+      # as uid 65532, which can still bind 80 because the hosts set
+      # net.ipv4.ip_unprivileged_port_start=0 (see apps/ui/Dockerfile).
       - "5173:80"
     depends_on:
       signals-api:

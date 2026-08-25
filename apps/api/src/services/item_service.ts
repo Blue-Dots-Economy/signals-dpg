@@ -373,6 +373,10 @@ export async function createItemInternal(
       itemDomain: items.item_domain,
       itemType: items.item_type,
       itemId: items.item_id,
+      // Surfaced so callers know whether the create committed `live` or `draft`
+      // (an incomplete/gated create stays draft) — the create email copy differs
+      // ("your profile is live" vs "complete your profile"). See create_item.ts.
+      lifecycleStatus: items.lifecycle_status,
     });
 
   if (result.length === 0) {

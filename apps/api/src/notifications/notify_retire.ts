@@ -44,12 +44,26 @@ export async function dispatchRetireCancelNotifications(
       const email = await resolveOwnerEmail(cp.ownerUserId);
       if (!email) continue;
 
+      // `dispatch_email` renders `args.ctaUrl ?? ''` into the shell, so an
+      // unresolved URL ships an `<a href="">` whose button does nothing —
+      // guard the same dead-`href` case as the action dispatcher (#569).
+      const ctaUrl = config.resolveCtaUrl(cp.domain);
+      if (!ctaUrl) {
+        log.warn(
+          { actionId: cp.actionId, domain: cp.domain },
+          'retire notification skipped: no CTA url for counterparty domain',
+        );
+        continue;
+      }
+
       await config.sender.dispatchEmail({
         caseId: 'retire.cancel',
         to: email,
         fromName: brandName,
         network: cp.network,
-        ctaUrl: config.ctaUrl,
+        // The counterparty's own domain — this mail goes to THEM, so it links
+        // to their portal, not the retiring owner's (#569).
+        ctaUrl,
         dedupeId: `retire_cancel:${cp.actionId}:${cp.ownerUserId}`,
         log: (message, meta) => log.warn(meta ?? {}, message),
       });

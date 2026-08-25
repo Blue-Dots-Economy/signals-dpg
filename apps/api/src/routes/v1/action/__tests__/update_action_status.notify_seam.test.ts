@@ -53,6 +53,7 @@ vi.mock('@/config', () => ({
     NOTIFICATION_REPLY_TO: 'reply@test.local',
     FRONTEND_BASE_URL: 'http://fe.test',
   },
+  uiHostBindings: { byDomain: {}, warnings: [] },
 }));
 
 vi.mock('@/utils/notificationClient', () => ({

@@ -37,8 +37,11 @@ function makeDeps(overrides: Partial<DispatcherDeps> = {}): {
     resolveCounterpartyName: vi.fn(async () => null),
     brand: {
       brandName: 'Blue Dot',
-      ctaUrl: 'https://app.example.com/auth/login',
     },
+    resolveCtaUrl: (domain: string) =>
+      domain === 'seeker'
+        ? 'https://seeker.example.org/auth/login'
+        : 'https://provider.example.org/auth/login',
     log: vi.fn(),
     onSkip: vi.fn((reason: string) => {
       skips.push(reason);
@@ -134,5 +137,37 @@ describe('DirectDispatcher', () => {
 
     const inboundStatus = calls.find((c) => c.dedupeId?.endsWith('INBOUND_STATUS'));
     expect(inboundStatus?.variables?.name).toBe('the service provider');
+  });
+
+  it('sends each side to its OWN portal, not the counterparty portal', async () => {
+    const { deps, calls } = makeDeps();
+    // source = seeker, target = provider (see createEvent).
+    await createDirectDispatcher(deps).dispatch(createEvent());
+
+    const inbound = calls.find((c) => c.dedupeId?.endsWith('INBOUND_REQUEST'));
+    const outbound = calls.find((c) => c.dedupeId?.endsWith('OUTBOUND_REQUEST'));
+
+    // INBOUND_REQUEST goes to the TARGET (provider) → provider portal.
+    expect(inbound?.ctaUrl).toBe('https://provider.example.org/auth/login');
+    // OUTBOUND_REQUEST goes to the SOURCE (seeker) → seeker portal.
+    expect(outbound?.ctaUrl).toBe('https://seeker.example.org/auth/login');
+  });
+
+  it('skips a recipient whose domain resolves to no URL rather than sending a dead link', async () => {
+    // Reachable once the gate accepts a map-only config: UI_HOST_BINDINGS is
+    // set (so the gate passes) but FRONTEND_BASE_URL is not, and this
+    // recipient's domain is absent from the map. `dispatch_email` would render
+    // `ctaUrl: args.ctaUrl ?? ''` into `<a href="">` — an email whose only
+    // call to action is a broken button.
+    const { deps, calls, skips } = makeDeps({
+      resolveCtaUrl: (domain: string) =>
+        domain === 'seeker' ? 'https://seeker.example.org/auth/login' : undefined,
+    });
+
+    await createDirectDispatcher(deps).dispatch(createEvent());
+
+    expect(calls).toHaveLength(1);
+    expect(calls[0]?.ctaUrl).toBe('https://seeker.example.org/auth/login');
+    expect(skips).toContain('no_cta_url');
   });
 });

@@ -105,6 +105,23 @@ describe('resolveVisibleSchema', () => {
     expect(base.properties).toHaveProperty('schoolQualification');
   });
 
+  it('orders `hidden` by code point, not by locale collation', () => {
+    // `hidden` is joined into the memo key that keys the RJSF schema/uiSchema
+    // caches, so its order must be locale-independent. `localeCompare` would
+    // put 'alpha' before 'Beta' in en; code-point order puts 'Beta' first.
+    const schema = {
+      type: 'object',
+      properties: {
+        ctl: { type: 'string' },
+        alpha: { type: 'string', 'x-show-if': { ctl: ['yes'] } },
+        Beta: { type: 'string', 'x-show-if': { ctl: ['yes'] } },
+        _gamma: { type: 'string', 'x-show-if': { ctl: ['yes'] } },
+      },
+    } as RJSFSchema;
+    const { hidden } = resolveVisibleSchema(schema, { ctl: 'no' });
+    expect(hidden).toEqual(['Beta', '_gamma', 'alpha']);
+  });
+
   it('warns in dev when an x-show-if references an unknown control field', () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     const schema = {

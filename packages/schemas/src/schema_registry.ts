@@ -48,22 +48,51 @@ export class SchemaFetchError extends Error {
 
 export class fetchSchema {
   public readonly url: string;
-  public readonly ready: Promise<JsonValue | unknown>;
   public schema: JsonValue | unknown | null = null;
 
   private readonly fetchFn: FetchLike;
   private readonly resolveRefs: boolean;
   private readonly documentCache = new Map<string, Promise<JsonValue | unknown>>();
+  private pendingLoad: Promise<unknown> | null = null;
 
   constructor(url: string | URL, options: FetchSchemaOptions = {}) {
     this.url = url.toString();
     this.fetchFn = options.fetchFn ?? fetch;
     this.resolveRefs = options.resolveRefs ?? true;
-    this.ready = this.load();
   }
 
+  /**
+   * Starts the fetch/resolve on first access and memoises it, so the load runs
+   * exactly once per instance and every caller shares one promise.
+   *
+   * Deliberately NOT kicked off in the constructor: a constructor cannot hand
+   * its promise to anyone before `new` returns, so a failing fetch would become
+   * an unhandled rejection for a caller that merely constructed the registry.
+   * Starting here means the promise always has an owner — whoever touched
+   * `.ready` / `getSchema()` — and a fetch failure surfaces to them.
+   *
+   * The flip side of starting on access: `new fetchSchema(url)` does no I/O at
+   * all. Constructing a batch of registries and awaiting them in a later loop
+   * runs the fetches one after another. Construct and await in the same
+   * expression — `await new fetchSchema(url).getSchema()`, as every call site
+   * does — so a `Promise.all` over them stays genuinely parallel.
+   *
+   * A failed load is memoised as well: the rejection replays to every later
+   * caller and is never retried. Retry by constructing a new instance.
+   */
+  public get ready(): Promise<unknown> {
+    this.pendingLoad ??= this.load();
+    return this.pendingLoad;
+  }
+
+  /**
+   * The resolved schema document. Calling this is what starts the load, if
+   * nothing has touched `.ready` yet — see `ready` for the parallelism and
+   * retry notes.
+   */
   public async getSchema(): Promise<JsonValue | unknown> {
-    return this.ready;
+    await this.ready;
+    return this.schema;
   }
 
   private async load(): Promise<JsonValue | unknown> {
