@@ -516,7 +516,7 @@ describe('PublicProfilePage — retired / unresolvable / share + back affordance
     useMyItems.mockReturnValue({ data: [], isLoading: false, isFetched: true });
   });
 
-  it('treats a retired item as unavailable and disables the share button', () => {
+  it('treats a retired item as unavailable and offers no share affordance', () => {
     useItemDetail.mockReturnValue({
       item: makeItem({ lifecycle_status: 'retired', item_state: { name: 'Asha' } }),
       isLoading: false,
@@ -529,7 +529,8 @@ describe('PublicProfilePage — retired / unresolvable / share + back affordance
     ).toBeInTheDocument();
     // A retired profile's name must not leak into the page.
     expect(screen.queryByText('Asha')).not.toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /Copy link/ })).toBeDisabled();
+    // Share is live-only: a retired profile gets no share button, hence no QR.
+    expect(screen.queryByRole('button', { name: 'Share profile' })).not.toBeInTheDocument();
   });
 
   it('treats a paused item as unavailable too', () => {
@@ -547,8 +548,8 @@ describe('PublicProfilePage — retired / unresolvable / share + back affordance
     useItemDetail.mockReturnValue({ item: null, isLoading: false, isError: false });
     renderPublic([`/public/no_such_dot/seeker/profile_1.0/${ITEM_ID}?network=no_such_dot`]);
     expect(screen.getByRole('heading', { name: 'Profile unavailable' })).toBeInTheDocument();
-    // Copy link has nothing to share.
-    expect(screen.getByRole('button', { name: /Copy link/ })).toBeDisabled();
+    // Nothing to share, so no share button (and no QR) at all.
+    expect(screen.queryByRole('button', { name: 'Share profile' })).not.toBeInTheDocument();
   });
 
   it('renders the details grid for a live item with no explicit lifecycle status', () => {
@@ -562,10 +563,12 @@ describe('PublicProfilePage — retired / unresolvable / share + back affordance
     expect(screen.getByRole('heading', { name: 'Asha' })).toBeInTheDocument();
     expect(screen.getByText('Seeker')).toBeInTheDocument();
     expect(screen.getByText('Pune')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /Copy link/ })).toBeEnabled();
+    // The masked projection has no lifecycle_status, but the page's own live
+    // gate passed — the share button must still be offered.
+    expect(screen.getByRole('button', { name: 'Share profile' })).toBeEnabled();
   });
 
-  it('copies the canonical share URL to the clipboard and confirms it', async () => {
+  it('shares via a QR dialog that copies the canonical share URL', async () => {
     const user = userEvent.setup();
     const writeText = vi.fn((_text: string) => Promise.resolve());
     Object.defineProperty(navigator, 'clipboard', {
@@ -574,7 +577,12 @@ describe('PublicProfilePage — retired / unresolvable / share + back affordance
       writable: true,
     });
     renderPublic([LIVE_PATH]);
-    await user.click(screen.getByRole('button', { name: /Copy link/ }));
+    await user.click(screen.getByRole('button', { name: 'Share profile' }));
+    // The dialog previews the same link as a scannable QR…
+    const qr = await screen.findByAltText('QR code linking to this profile');
+    expect(qr.getAttribute('src')).toMatch(/^data:image\/png;base64,/);
+    // …and "Copy link" copies exactly that link.
+    await user.click(screen.getByRole('button', { name: 'Copy link' }));
     await waitFor(() => expect(writeText).toHaveBeenCalledTimes(1));
     expect(writeText.mock.calls[0][0]).toBe(
       `${window.location.origin}/public/blue_dot/seeker/profile_1.0/${ITEM_ID}?network=blue_dot`,
@@ -598,7 +606,8 @@ describe('PublicProfilePage — retired / unresolvable / share + back affordance
       writable: true,
     });
     renderPublic([LIVE_PATH]);
-    await user.click(screen.getByRole('button', { name: /Copy link/ }));
+    await user.click(screen.getByRole('button', { name: 'Share profile' }));
+    await user.click(await screen.findByRole('button', { name: 'Copy link' }));
     await waitFor(() => expect(toastCalls).toContainEqual(['error', 'Could not copy the link']));
     expect(toastCalls).not.toContainEqual(['success', 'Link copied to clipboard']);
   });
