@@ -115,3 +115,21 @@ updates:
       docker:
         patterns: ["*"]
         update-types: ["minor", "patch"]
+
+    ignore:
+      # Hold base-image bumps that cross a RELEASE CHANNEL. Both were proposed
+      # the moment the dhi.io registry config reached main (#618, #619) and both
+      # were closed — this stops them recurring while still letting patches land.
+      #
+      # node: even majors are LTS. 24 is Active LTS to 2028-04-30; 26 only
+      # becomes LTS on 2026-10-28. A major also has to move all 4 FROM lines
+      # plus ci.yaml's node-version and root engines together, so it is a
+      # deliberate PR, not a bump.
+      - dependency-name: "dhi.io/node"
+        update-types: ["version-update:semver-major"]
+      # nginx: even MINORS are the stable branch, odd are mainline (1.30 stable
+      # / 1.31 mainline). So minor is the channel-crossing one here, not major —
+      # holding both keeps the UI runtime on stable while 1.30.x patches land.
+      - dependency-name: "dhi.io/nginx"
+        update-types:
+          ["version-update:semver-minor", "version-update:semver-major"]
