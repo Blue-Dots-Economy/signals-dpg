@@ -389,6 +389,17 @@ services:
   tei-embeddings:
     profiles: ["search"]
     image: ghcr.io/blue-dots-economy/tei-bge-m3:cpu-1.7-bge-m3
+    # Both published images are amd64-only: signals-search's CI does not set
+    # `platforms:`, so it publishes just the ubuntu-latest runner's arch, and
+    # upstream HuggingFace TEI publishes no arm64 cpu-* tag at all. Without this
+    # line, `docker pull` on an arm64 machine (Apple Silicon) fails outright with
+    # "no matching manifest for linux/arm64/v8" and the profile cannot start.
+    #
+    # Emulation is viable, and measured, not assumed: on an M-series host this
+    # image loads bge-m3 and serves a 1024-dim embedding ~35s after start, and is
+    # not OOM-killed. Expect embeddings to be slower than on amd64 — fine for
+    # local development, and there is no native alternative to switch to.
+    platform: linux/amd64
     container_name: tei-embeddings
     restart: unless-stopped
     command:
@@ -415,6 +426,12 @@ services:
   signals-search-api:
     profiles: ["search"]
     image: ${SIGNALS_SEARCH_IMAGE:-ghcr.io/blue-dots-economy/signals-search:develop}
+    # amd64-only image (see the note on tei-embeddings). Overridable so a native
+    # build can be used instead of emulation on arm64:
+    #   SIGNALS_SEARCH_IMAGE=signals-search:local
+    #   SEARCH_PLATFORM=linux/arm64
+    # signals-search's Dockerfile builds cleanly on arm64, so that path is real.
+    platform: ${SEARCH_PLATFORM:-linux/amd64}
     container_name: signals-search-api
     restart: unless-stopped
     environment: &search-env
@@ -460,6 +477,12 @@ services:
   signals-search-worker:
     profiles: ["search"]
     image: ${SIGNALS_SEARCH_IMAGE:-ghcr.io/blue-dots-economy/signals-search:develop}
+    # amd64-only image (see the note on tei-embeddings). Overridable so a native
+    # build can be used instead of emulation on arm64:
+    #   SIGNALS_SEARCH_IMAGE=signals-search:local
+    #   SEARCH_PLATFORM=linux/arm64
+    # signals-search's Dockerfile builds cleanly on arm64, so that path is real.
+    platform: ${SEARCH_PLATFORM:-linux/amd64}
     container_name: signals-search-worker
     restart: unless-stopped
     command: ["node", "dist/worker/main.js"]

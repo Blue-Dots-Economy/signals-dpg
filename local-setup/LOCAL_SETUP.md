@@ -295,6 +295,8 @@ setup complaint.
 | `tei-embeddings` dies during startup, often without a clear error | Almost always memory. bge-m3 loads a ~2.3 GB ONNX model on CPU and its fp32 warmup at TEI's default `--max-batch-tokens 16384` gets OOM-killed **even with 8 GB available**. This compose already pins `4096`; check Docker Desktop → Resources → Memory has ≥4 GB spare on top of the base stack. `docker inspect tei-embeddings --format '{{.State.OOMKilled}}'` confirms it. |
 | `/v1/search` returns 200 but `results` is always empty | Nothing has been indexed. Either the worker is not running (`docker compose --profile search ps`), or the schema's fields are not marked `vectorize: true`, or the sweep has not caught up yet — it runs every `SWEEP_INTERVAL_MS` (default 60s). |
 | First `/v1/search` after `up` fails or hangs | TEI warms up for ~30-60s on CPU before serving. `docker compose logs -f tei-embeddings` until it reports ready. `/health` on signals-search is **unauthenticated and does not check the embedder**, so a 200 there does not mean the stack can serve a query. |
+| `no matching manifest for linux/arm64/v8` on `up`/`pull` | Both published images are amd64-only and you are on arm64. The compose pins `platform: linux/amd64` so this should not happen — if it does, your compose is older than that change, or `SEARCH_PLATFORM` has been overridden to an arch the image does not have. |
+| On arm64, the first `/v1/search` is very slow | Expected: TEI is running under emulation. Warmup is ~35s and each embed is slower than native. Build signals-search locally (`SIGNALS_SEARCH_IMAGE` + `SEARCH_PLATFORM=linux/arm64`) to make the *app* native; the embedder has no native option. |
 | Config change to a search var seems ignored | signals-search reads its config **once at boot**. Restart the service: `docker compose --profile search restart signals-search-api signals-search-worker`. |
 
 ---
@@ -332,6 +334,24 @@ The two images are **public on GHCR** — no `docker login`, and no
 | `signals-search-api` (`:3100`) | `ghcr.io/blue-dots-economy/signals-search:develop` |
 | `signals-search-worker` | same image, `node dist/worker/main.js` |
 | `tei-embeddings` (internal) | `ghcr.io/blue-dots-economy/tei-bge-m3:cpu-1.7-bge-m3` |
+
+> **On Apple Silicon / arm64 these run emulated.** Both images are **amd64-only**
+> — signals-search's CI does not set `platforms:`, so it publishes only the
+> runner's arch, and upstream HuggingFace TEI ships no arm64 `cpu-*` tag at all.
+> The compose therefore pins `platform: linux/amd64`; without it `docker pull`
+> fails outright with `no matching manifest for linux/arm64/v8`.
+>
+> Emulation is fine in practice — measured on an M-series host, TEI loads bge-m3
+> and serves a 1024-dim embedding ~35s after start, and is not OOM-killed —
+> just slower than native. There is no native embedder to switch to. For the
+> search **app** you can avoid emulation by building it locally, since its
+> Dockerfile builds cleanly on arm64:
+>
+> ```bash
+> # in .env.search
+> SIGNALS_SEARCH_IMAGE=signals-search:local
+> SEARCH_PLATFORM=linux/arm64
+> ```
 
 The TEI image has **BAAI/bge-m3 baked in**, so nothing downloads the model at
 runtime and there is no HuggingFace rate limit to hit. It is also the same model
