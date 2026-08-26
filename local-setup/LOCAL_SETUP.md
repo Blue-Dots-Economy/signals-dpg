@@ -293,7 +293,7 @@ setup complaint.
 | Worker logs `unexpected embedding dimension 1536, expected 1024` and nothing indexes | The embedding **model** emits a different width than `EMBEDDING_DIM` declares. `EMBEDDING_DIM` only declares what to expect — it does not resize the model. Items never index and search silently degrades to the native path. |
 | Postgres error `expected 1024 dimensions, not 1536` | The third, independent guard: pgvector rejecting the insert against the `vector(1024)` column typmod. |
 | `tei-embeddings` dies during startup, often without a clear error | Almost always memory. bge-m3 loads a ~2.3 GB ONNX model on CPU and its fp32 warmup at TEI's default `--max-batch-tokens 16384` gets OOM-killed **even with 8 GB available**. This compose already pins `4096`; check Docker Desktop → Resources → Memory has ≥4 GB spare on top of the base stack. `docker inspect tei-embeddings --format '{{.State.OOMKilled}}'` confirms it. |
-| `/v1/search` returns 200 but `results` is always empty | Nothing has been indexed. Either the worker is not running (`docker compose --profile search ps`), or the schema's fields are not marked `vectorize: true`, or the sweep has not caught up yet — it runs every `SWEEP_INTERVAL_MS` (default 60s). |
+| `/v1/search` returns 200 but `message.items` is always empty | Nothing has been indexed. Either the worker is not running (`docker compose --profile search ps`), or the schema's fields are not marked `vectorize: true`, or the sweep has not caught up yet — it runs every `SWEEP_INTERVAL_MS` (default 60s). |
 | First `/v1/search` after `up` fails or hangs | TEI warms up for ~30-60s on CPU before serving. `docker compose logs -f tei-embeddings` until it reports ready. `/health` on signals-search is **unauthenticated and does not check the embedder**, so a 200 there does not mean the stack can serve a query. |
 | `no matching manifest for linux/arm64/v8` on `up`/`pull` | Both published images are amd64-only and you are on arm64. The compose pins `platform: linux/amd64` so this should not happen — if it does, your compose is older than that change, or `SEARCH_PLATFORM` has been overridden to an arch the image does not have. |
 | On arm64, the first `/v1/search` is very slow | Expected: TEI is running under emulation. Warmup is ~35s and each embed is slower than native. Build signals-search locally (`SIGNALS_SEARCH_IMAGE` + `SEARCH_PLATFORM=linux/arm64`) to make the *app* native; the embedder has no native option. |
@@ -488,18 +488,32 @@ curl -sS -X POST http://localhost:3100/v1/search \
   -H 'content-type: application/json' \
   -H "x-api-key: $SIGNALS_SEARCH_API_KEY" \
   -d '{
-        "context": { "networkId": "blue_dot", "domain": "seeker" },
+        "context": {
+          "messageId": "local-smoke-1",
+          "networkId": "blue_dot",
+          "domain": "seeker",
+          "itemType": "job_1.0"
+        },
         "message": { "intent": { "text": "electrician in Ghaziabad" } }
       }'
 ```
 
-A `200` with a ranked `results` array means the whole chain works: apikey row →
-network config → embedder → pgvector index. Then confirm the ranking is actually
-reaching the UI (no "showing basic matches" banner) and that a match score
-resolves.
+All four `context` fields are **required** — omitting `messageId` or `itemType`
+gets you a `400 VALIDATION_ERROR`, not a 401, because validation runs before auth.
+`itemType` must be a type the mounted `network.json` actually declares for that
+domain.
 
-If `results` is empty, the index is simply not populated yet — the worker's sweep
-runs every `SWEEP_INTERVAL_MS` (default 60s) and backfills from `items`.
+A `200` with a `message.items` array means the whole chain worked: apikey row →
+network config → embedder → pgvector index. Verified responses look like:
+
+```json
+{"context":{...},"message":{"items":[],"meta":{"total":0,"limit":20,"offset":0}}}
+```
+
+An empty `items` on a fresh stack is expected — nothing is indexed yet. The
+worker's sweep runs every `SWEEP_INTERVAL_MS` (default 60s) and backfills from
+`items`. Then confirm the ranking reaches the UI (no "showing basic matches"
+banner) and that a match score resolves.
 
 ### 7.8 Track B (hybrid) with search
 
