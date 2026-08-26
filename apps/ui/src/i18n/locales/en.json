@@ -225,7 +225,7 @@
   "wallet.digilocker_manual_hint": "If automatic detection does not work, paste the redirect URL or the code below.",
   "wallet.digilocker_code_label": "Authorization code or redirect URL",
   "wallet.digilocker_code_placeholder": "Paste the code or redirect URL here",
-  "wallet.digilocker_bridge_hint": "Host a redirect bridge page like `public/digilocker-bridge.html` on the callback origin used by DigiLocker for automatic popup callbacks.",
+  "wallet.digilocker_bridge_hint": "Host a redirect bridge page like `docs/operations/digilocker-bridge.example.html` on the callback origin used by DigiLocker for automatic popup callbacks.",
   "wallet.digilocker_copy_url": "Copy launch URL",
   "wallet.digilocker_import_btn": "Import from DigiLocker",
   "wallet.digilocker_popup_blocked": "Popup blocked. Please allow popups for this site and try again.",

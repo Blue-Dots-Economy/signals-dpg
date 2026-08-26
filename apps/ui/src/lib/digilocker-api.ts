@@ -96,9 +96,11 @@ function originOf(value: string | null | undefined): string | null {
 /**
  * The only origins a DigiLocker callback `postMessage` may be trusted from:
  *
- * - this app's own origin — where the callback bridge page ships
- *   (`public/digilocker-bridge.html`) and where the popup lands on the
- *   `wallet-redirect?code=` URL the polling path reads; and
+ * - this app's own origin — where a deployment would host its callback bridge
+ *   page, and where the popup lands on the `wallet-redirect?code=` URL the
+ *   polling path reads. No bridge page ships with the app: the reference copy
+ *   lives at `docs/operations/digilocker-bridge.example.html` and is not served
+ *   (#600); and
  * - the origin of `VITE_AGENT_URL`, the agent service that mints the launch
  *   URL, for deployments that host the bridge alongside the agent.
  *

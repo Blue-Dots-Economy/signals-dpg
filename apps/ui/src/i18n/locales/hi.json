@@ -182,7 +182,7 @@
   "wallet.digilocker_manual_hint": "यदि स्वचालित पहचान काम नहीं करती, तो रीडायरेक्ट URL या कोड नीचे पेस्ट करें।",
   "wallet.digilocker_code_label": "प्राधिकरण कोड या रीडायरेक्ट URL",
   "wallet.digilocker_code_placeholder": "यहाँ कोड या रीडायरेक्ट URL पेस्ट करें",
-  "wallet.digilocker_bridge_hint": "DigiLocker स्वचालित पॉपअप कॉलबैक के लिए कॉलबैक ऑरिजिन पर `public/digilocker-bridge.html` जैसा रीडायरेक्ट ब्रिज पेज होस्ट करें।",
+  "wallet.digilocker_bridge_hint": "DigiLocker स्वचालित पॉपअप कॉलबैक के लिए कॉलबैक ऑरिजिन पर `docs/operations/digilocker-bridge.example.html` जैसा रीडायरेक्ट ब्रिज पेज होस्ट करें।",
   "wallet.digilocker_copy_url": "लॉन्च URL कॉपी करें",
   "wallet.digilocker_import_btn": "DigiLocker से आयात करें",
   "wallet.digilocker_popup_blocked": "पॉपअप ब्लॉक है। इस साइट के लिए पॉपअप की अनुमति दें और फिर कोशिश करें।",

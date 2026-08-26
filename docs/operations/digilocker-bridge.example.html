@@ -1,4 +1,30 @@
 <!DOCTYPE html>
+<!--
+  EXAMPLE ONLY — NOT SHIPPED, NOT WIRED UP, NOT SAFE TO HOST AS-IS.
+
+  This page used to live in apps/ui/public/, which Vite copies verbatim to the
+  served root — so every UI deployment served it at /digilocker-bridge.html even
+  though nothing in the app ever navigated to it. DigiLocker integration is not
+  active, so it was reachable dead weight. Moved here (Blue-Dots-Economy/signals-dpg#600)
+  so it stops being bundled and served; nothing executes it from this directory.
+
+  BEFORE ANY DEPLOYMENT HOSTS THIS FILE, fix the postMessage calls below.
+
+  All four pass '*' as the target origin while carrying the DigiLocker
+  authorization code — once in `code`, and again in `finalUrl`, which is
+  window.location.href and contains the code as a query parameter. '*' means the
+  browser delivers to whatever window opened this page, including an attacker's.
+  Replace '*' with the exact origin of the application that opened the popup
+  (window.location.origin if the bridge is served from that same origin), so the
+  browser drops the message when the opener is not that origin.
+
+  The receiving end (apps/ui/src/components/wallet/providers/digilocker-provider.tsx)
+  already validates event.origin against an allowlist, which protects the app
+  from a hostile *sender*. It cannot protect this page's *recipient* — that
+  direction is this file's responsibility, and it is the higher-severity one.
+
+  Docs: docs/operations/digilocker-integration.md
+-->
 <html lang="en">
 <head>
   <meta charset="UTF-8">
