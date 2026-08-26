@@ -43,14 +43,14 @@ jobs:
           # match-score, notification-service: packages today, no Dockerfiles
           # in this repo. Add to the matrix once their Dockerfiles land.
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Verify Dockerfile exists
         run: |
           if [ ! -f "${{ matrix.service.dockerfile }}" ]; then
             echo "Dockerfile not found at ${{ matrix.service.dockerfile }} — skipping ${{ matrix.service.name }}"
             exit 0
           fi
-      - uses: docker/setup-buildx-action@v4
+      - uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4.3.0
       # Docker Hardened Images base layers are pulled from dhi.io, which does not
       # allow anonymous pulls even for the free Apache-2.0 catalog. Credentials
       # are a Docker Hub account; without this step the build fails at the first
@@ -66,7 +66,7 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-      - uses: docker/metadata-action@v6
+      - uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
         id: meta
         with:
           images: ghcr.io/blue-dots-economy/signals-dpg/${{ matrix.service.name }}
@@ -82,7 +82,7 @@ jobs:
             type=ref,event=tag
             type=semver,pattern={{version}}
             type=sha,format=short
-      - uses: docker/build-push-action@v7
+      - uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
         id: build
         with:
           context: ${{ matrix.service.context }}
@@ -116,7 +116,7 @@ jobs:
 
       - name: Upload Trivy image SARIF
         if: always() && steps.build.outputs.digest != ''
-        uses: github/codeql-action/upload-sarif@v4
+        uses: github/codeql-action/upload-sarif@db488ddef3bf6cb639b32c2e9a7c0a7ea8271d28 # v4
         with:
           sarif_file: trivy-image.sarif
           # One category per image so api and ui alerts don't overwrite each other.
