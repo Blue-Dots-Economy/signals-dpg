@@ -9,6 +9,17 @@ Keycloak, no sibling repos.
 - **postgres** — Postgres 17 + pgvector + PostGIS (extensions `db:init` needs)
 - **redis** — password-protected (`:5555`)
 
+Opt-in, behind `--profile search` (§7 of the guide) — relevance-ranked discover
+and match scores instead of recency order:
+
+- **signals-search-api** — query API (`:3100`)
+- **signals-search-worker** — ingestion + sweep into the `item_search` read-model
+- **tei-embeddings** — BAAI/bge-m3 via TEI, internal only
+
+Opt-in because the embedding server loads a ~2.3 GB model on CPU and wants 3-4 GB
+to itself, which would double this stack's memory floor for anyone who only needs
+the API and UI.
+
 👉 **Full walkthrough: [`LOCAL_SETUP.md`](./LOCAL_SETUP.md)** (Track A = all-in-Docker,
 Track B = hybrid hot-reload).
 
@@ -21,14 +32,22 @@ docker compose up -d --build
 docker compose ps             # wait for signals-api
 ```
 
+With relevance ranking (adds ~3-4 GB — see the guide's §7):
+
+```bash
+cp .env.search.example .env.search    # mint the apikey per §7.4 first
+docker compose --profile search up -d
+```
+
 UI → http://localhost:5173 · API → http://localhost:2742 (`/reference` for Swagger)
 
 ## Contents
 
 | File | Purpose |
 |---|---|
-| `docker-compose.yml` | signals stack (API + UI + Postgres + Redis) |
+| `docker-compose.yml` | signals stack (API + UI + Postgres + Redis), plus the opt-in `search` profile |
 | `.env.example` | working dev defaults — copy to `.env` |
+| `.env.search.example` | signals-search wiring for signals-api — copy to `.env.search` (optional; nothing is injected when absent) |
 | `LOCAL_SETUP.md` | from-scratch guide, both run modes, troubleshooting |
 | `infra/postgres.Dockerfile` | Postgres 17 + pgvector + PostGIS image |
 | `infra/signals-bootstrap.Dockerfile` | one-shot schema + `db:init` tools image |
