@@ -182,7 +182,7 @@
   "wallet.digilocker_manual_hint": "ಸ್ವಯಂ ಪತ್ತೆ ಕಾರ್ಯಕಾರಿಯಾಗದಿದ್ದರೆ, ರೀಡೈರೆಕ್ಟ್ URL ಅಥವಾ ಕೋಡ್ ಅನ್ನು ಕೆಳಗೆ ಅಂಟಿಸಿ.",
   "wallet.digilocker_code_label": "ಅಧಿಕಾರ ಕೋಡ್ ಅಥವಾ ರೀಡೈರೆಕ್ಟ್ URL",
   "wallet.digilocker_code_placeholder": "ಕೋಡ್ ಅಥವಾ ರೀಡೈರೆಕ್ಟ್ URL ಇಲ್ಲಿ ಅಂಟಿಸಿ",
-  "wallet.digilocker_bridge_hint": "DigiLocker ಸ್ವಯಂ ಪಾಪ್‌ಅಪ್ ಕಾಲ್‌ಬ್ಯಾಕ್‌ಗಾಗಿ ಕಾಲ್‌ಬ್ಯಾಕ್ ಮೂಲದಲ್ಲಿ `public/digilocker-bridge.html` ನಂತಹ ರೀಡೈರೆಕ್ಟ್ ಬ್ರಿಡ್ಜ್ ಪುಟ ಹೋಸ್ಟ್ ಮಾಡಿ.",
+  "wallet.digilocker_bridge_hint": "DigiLocker ಸ್ವಯಂ ಪಾಪ್‌ಅಪ್ ಕಾಲ್‌ಬ್ಯಾಕ್‌ಗಾಗಿ ಕಾಲ್‌ಬ್ಯಾಕ್ ಮೂಲದಲ್ಲಿ `docs/operations/digilocker-bridge.example.html` ನಂತಹ ರೀಡೈರೆಕ್ಟ್ ಬ್ರಿಡ್ಜ್ ಪುಟ ಹೋಸ್ಟ್ ಮಾಡಿ.",
   "wallet.digilocker_copy_url": "ಲಾಂಚ್ URL ನಕಲಿಸಿ",
   "wallet.digilocker_import_btn": "DigiLocker ನಿಂದ ಆಮದು ಮಾಡಿ",
   "wallet.digilocker_popup_blocked": "ಪಾಪ್‌ಅಪ್ ನಿರ್ಬಂಧಿಸಲಾಗಿದೆ. ಈ ಸೈಟ್‌ಗಾಗಿ ಪಾಪ್‌ಅಪ್‌ಗಳನ್ನು ಅನುಮತಿಸಿ ಮತ್ತು ಮತ್ತೆ ಪ್ರಯತ್ನಿಸಿ.",
