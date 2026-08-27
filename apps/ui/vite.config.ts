@@ -362,6 +362,15 @@ export default defineConfig(({ mode }) => {
             '../../packages/schemas/src/location_fields.ts',
           ),
         },
+        // Same reasoning as location_fields above: a dependency-free subpath so
+        // the browser bundle never pulls the DB-bound @dpg/schemas barrel.
+        {
+          find: '@dpg/schemas/uri_fields',
+          replacement: path.resolve(
+            __dirname,
+            '../../packages/schemas/src/uri_fields.ts',
+          ),
+        },
         {
           find: /^@dpg\/(.*)$/,
           replacement: path.resolve(__dirname, '../../packages/$1/src'),

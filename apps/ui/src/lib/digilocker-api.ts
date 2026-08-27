@@ -71,3 +71,49 @@ export const digiLockerApi = AGENT_URL && AGENT_TOKEN ? new DigiLockerApi(AGENT_
 export function isDigiLockerConfigured(): boolean {
   return Boolean(AGENT_URL && AGENT_TOKEN);
 }
+
+/**
+ * A usable, comparable origin: never empty and never the opaque `"null"` that
+ * `URL.origin` yields for schemes such as `data:`/`mailto:` and that a
+ * sandboxed frame reports as its `MessageEvent.origin`. Allowlisting `"null"`
+ * would hand the trust back to exactly the senders the check exists to block.
+ */
+function isUsableOrigin(value: string | null | undefined): value is string {
+  return Boolean(value) && value !== 'null';
+}
+
+/** Origin of an absolute URL, or null when it can't be parsed as one. */
+function originOf(value: string | null | undefined): string | null {
+  if (!value) return null;
+  try {
+    const { origin } = new URL(value);
+    return isUsableOrigin(origin) ? origin : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * The only origins a DigiLocker callback `postMessage` may be trusted from:
+ *
+ * - this app's own origin — where a deployment would host its callback bridge
+ *   page, and where the popup lands on the `wallet-redirect?code=` URL the
+ *   polling path reads. No bridge page ships with the app: the reference copy
+ *   lives at `docs/operations/digilocker-bridge.example.html` and is not served
+ *   (#600); and
+ * - the origin of `VITE_AGENT_URL`, the agent service that mints the launch
+ *   URL, for deployments that host the bridge alongside the agent.
+ *
+ * A relative `VITE_AGENT_URL` contributes nothing beyond the app origin, which
+ * is already covered. Any other window posting to us is ignored.
+ */
+export function getDigiLockerCallbackOrigins(): string[] {
+  const origins = new Set<string>();
+  const appOrigin = typeof window === 'undefined' ? null : window.location?.origin;
+  if (isUsableOrigin(appOrigin)) {
+    origins.add(appOrigin);
+  }
+  const agentOrigin = originOf(AGENT_URL);
+  if (agentOrigin) origins.add(agentOrigin);
+  return [...origins];
+}

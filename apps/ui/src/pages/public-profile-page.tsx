@@ -3,7 +3,7 @@ import { useParams, useSearchParams, useNavigate, useLocation } from 'react-rout
 import { useTranslation } from 'react-i18next';
 import { useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { AlertCircle, ArrowLeft, Copy, Loader2 } from 'lucide-react';
+import { AlertCircle, ArrowLeft, Loader2 } from 'lucide-react';
 import type { RJSFSchema } from '@rjsf/utils';
 import { useResolvedNetwork } from '@/hooks/use-network-config';
 import { useItemDetail } from '@/hooks/use-item-detail';
@@ -13,7 +13,7 @@ import { useActions } from '@/hooks/use-actions';
 import { useAuth } from '@/contexts/auth-context';
 import { useNetworkTheme } from '@/theme/theme-provider';
 import { resolveCardFields, formatCardValue } from '@/components/cards/resolve-card-fields';
-import { buildProfileShareUrl, copyTextToClipboard } from '@/lib/share-profile';
+import { UriValue } from '@/components/cards/uri-value';
 import { queryKeys } from '@/lib/query-keys';
 import type { Item } from '@/lib/item-api';
 import type { User } from '@/lib/auth-api';
@@ -33,6 +33,7 @@ import { ActionHandler } from '@/components/actions/action-handler';
 import { ActionButton } from '@/components/cards/action-button';
 import { MatchScoreButton, MatchScoreModal } from '@/components/match-score';
 import { useMatchScore } from '@/hooks/use-match-score';
+import { ShareProfileButton } from '@/components/share/share-profile-button';
 import { AppSidebar } from '@/components/layout/sidebar';
 import { PortalHeader } from '@/components/layout/portal-header';
 import { ThemeModeToggle } from '@/components/layout/theme-mode-toggle';
@@ -52,8 +53,9 @@ const HERO_GRADIENT =
  * filters / notifications, none of which are relevant on a single-profile
  * page. Branding lives in the sidebar header (PortalHeader), so this is just
  * the mobile sidebar trigger plus the share + explore + auth affordances.
- * "Copy link" is disabled until a live item has loaded — there is nothing
- * shareable before then.
+ * The share affordance is the shared `ShareProfileButton` (link + QR), styled
+ * as this page's labelled pill; it renders nothing until a live item has
+ * loaded, since there is nothing shareable before then.
  */
 function ProfileTopBar({
   networkId,
@@ -76,12 +78,11 @@ function ProfileTopBar({
 }>) {
   const { t } = useTranslation();
 
-  const onCopyLink = async () => {
-    if (!item) return;
-    const ok = await copyTextToClipboard(buildProfileShareUrl(item));
-    if (ok) toast.success(t('share.copied', 'Link copied to clipboard'));
-    else toast.error(t('share.copy_failed', 'Could not copy the link'));
-  };
+  // The caller already applied this page's live gate (it passes null for a
+  // non-live/absent item). `ShareProfileButton` gates on `lifecycle_status`,
+  // which the masked public projection does NOT return — so state it here
+  // rather than let a live profile silently lose its share button.
+  const shareItem = item ? { ...item, lifecycle_status: 'live' as const } : null;
 
   return (
     <header className="sticky top-0 z-10 flex h-14 items-center gap-3 border-b border-border bg-background/90 px-4 backdrop-blur sm:px-6">
@@ -106,15 +107,11 @@ function ProfileTopBar({
       </span>
       <div className="ml-auto flex shrink-0 items-center gap-2">
         <ThemeModeToggle />
-        <button
-          type="button"
-          onClick={onCopyLink}
-          disabled={!item}
-          className="inline-flex items-center gap-1.5 rounded-lg border border-border px-3 py-1.5 text-sm font-medium text-foreground hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50"
-        >
-          <Copy className="h-4 w-4" aria-hidden="true" />
-          {t('public_profile.copy_link', 'Copy link')}
-        </button>
+        <ShareProfileButton
+          item={shareItem}
+          label={t('share.button', 'Share profile')}
+          className="inline-flex items-center gap-1.5 rounded-lg border border-border px-3 py-1.5 text-sm font-medium text-foreground hover:bg-muted"
+        />
         <a
           href={`/?network=${encodeURIComponent(networkId ?? '')}`}
           className="inline-flex items-center rounded-lg px-3 py-1.5 text-sm font-semibold text-primary-foreground hover:opacity-90"
@@ -586,7 +583,7 @@ export function PublicProfilePage() {
                   {row.label}
                 </div>
                 <div className="mt-1 text-sm font-semibold text-foreground [overflow-wrap:anywhere]">
-                  {formatCardValue(row.value, row.type)}
+                  {row.isUri ? <UriValue value={row.value} /> : formatCardValue(row.value, row.type)}
                 </div>
               </div>
             ))}

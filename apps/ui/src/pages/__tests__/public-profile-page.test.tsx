@@ -379,3 +379,61 @@ describe('PublicProfilePage', () => {
     expect(screen.queryByTestId('match-score-button')).not.toBeInTheDocument();
   });
 });
+
+describe('PublicProfilePage x-uri fields', () => {
+  const uriNetwork = {
+    ...resolvedNetwork,
+    domains: [
+      {
+        ...resolvedNetwork.domains[0],
+        item_schemas: {
+          'profile_1.0': {
+            type: 'object',
+            properties: {
+              name: { type: 'string', title: 'Name' },
+              site: { type: 'string', title: 'Site', 'x-uri': true },
+              notes: { type: 'string', title: 'Notes' },
+            },
+          },
+        },
+      },
+    ],
+  };
+
+  function renderWithSite(site: string, extra: Record<string, unknown> = {}) {
+    useResolvedNetwork.mockReturnValue({ data: uriNetwork, isLoading: false, isError: false });
+    useItemDetail.mockReturnValue({
+      item: {
+        item_id: ID,
+        item_network: 'blue_dot',
+        item_domain: 'seeker',
+        item_type: 'profile_1.0',
+        item_state: { name: 'Asha', site, ...extra },
+        lifecycle_status: 'live',
+      },
+      isLoading: false,
+      isError: false,
+    });
+    return renderAt(`/public/blue_dot/seeker/profile_1.0/${ID}`);
+  }
+
+  it('renders a flagged field as a hyperlink', () => {
+    renderWithSite('https://example.com');
+    const link = screen.getByRole('link', { name: 'https://example.com' });
+    expect(link).toHaveAttribute('href', 'https://example.com/');
+    expect(link).toHaveAttribute('target', '_blank');
+    expect(link).toHaveAttribute('rel', 'noopener noreferrer');
+  });
+
+  it('renders a masked flagged field as plain text', () => {
+    renderWithSite('https://***');
+    expect(screen.queryByRole('link', { name: /example/ })).toBeNull();
+    expect(screen.getByText('https://***')).toBeInTheDocument();
+  });
+
+  it('leaves an unflagged field holding a URL as plain text', () => {
+    renderWithSite('https://example.com', { notes: 'https://plain.example.org' });
+    expect(screen.queryByRole('link', { name: 'https://plain.example.org' })).toBeNull();
+    expect(screen.getByText('https://plain.example.org')).toBeInTheDocument();
+  });
+});

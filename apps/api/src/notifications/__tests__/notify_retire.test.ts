@@ -31,7 +31,10 @@ const cp = (o: Partial<RetireCancelledCounterparty> = {}): RetireCancelledCounte
 
 const CONFIG = {
   sender: { dispatchEmail },
-  ctaUrl: 'https://app/login',
+  resolveCtaUrl: (domain: string) =>
+    domain === 'seeker'
+      ? 'https://seeker.example.org/auth/login'
+      : 'https://provider.example.org/auth/login',
 };
 
 describe('dispatchRetireCancelNotifications', () => {
@@ -90,5 +93,49 @@ describe('dispatchRetireCancelNotifications', () => {
     ).resolves.toBeUndefined();
     expect(dispatchEmail).toHaveBeenCalledTimes(2);
     expect(log.warn).toHaveBeenCalled();
+  });
+
+  it('sends each cancelled counterparty to its own portal', async () => {
+    // Two counterparties in different domains on one retire.
+    const counterparties = [
+      { actionId: 'a1', actionType: 'connect', ownerUserId: 'u1', itemId: 'i1', domain: 'seeker', network: 'blue_dot' },
+      { actionId: 'a2', actionType: 'connect', ownerUserId: 'u2', itemId: 'i2', domain: 'provider', network: 'blue_dot' },
+    ];
+
+    await dispatchRetireCancelNotifications(counterparties, 'blue_dot', log);
+
+    const sent = dispatchEmail.mock.calls.map(
+      ([args]) => args as { dedupeId?: string; ctaUrl?: string },
+    );
+    const seeker = sent.find((s) => s.dedupeId?.includes('u1'));
+    const provider = sent.find((s) => s.dedupeId?.includes('u2'));
+    expect(seeker?.ctaUrl).toBe('https://seeker.example.org/auth/login');
+    expect(provider?.ctaUrl).toBe('https://provider.example.org/auth/login');
+  });
+
+  it('skips a counterparty whose domain resolves to no CTA url, but still sends the others (#569)', async () => {
+    // `dispatch_email` renders `args.ctaUrl ?? ''` into the shell, so an
+    // unresolved URL ships a dead `<a href="">`. The guard must skip only the
+    // affected counterparty, not abort the whole retire-cancel loop.
+    resolveNotifierConfig.mockReturnValue({
+      sender: { dispatchEmail },
+      resolveCtaUrl: (domain: string) =>
+        domain === 'seeker' ? 'https://seeker.example.org/auth/login' : undefined,
+    });
+
+    await dispatchRetireCancelNotifications(
+      [
+        cp({ actionId: 'a-1', ownerUserId: 'u1', domain: 'seeker' }),
+        cp({ actionId: 'a-2', ownerUserId: 'u2', domain: 'provider' }),
+      ],
+      'blue_dot',
+      log,
+    );
+
+    // Only the resolvable (seeker) counterparty is sent.
+    expect(dispatchEmail).toHaveBeenCalledTimes(1);
+    const req = dispatchEmail.mock.calls[0][0] as { dedupeId?: string; ctaUrl?: string };
+    expect(req.dedupeId).toBe('retire_cancel:a-1:u1');
+    expect(req.ctaUrl).toBe('https://seeker.example.org/auth/login');
   });
 });

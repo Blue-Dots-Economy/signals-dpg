@@ -1,9 +1,8 @@
 import * as React from 'react';
 import { useTranslation } from 'react-i18next';
-import { toast } from 'sonner';
 import { Share2 } from 'lucide-react';
 import type { Item } from '@/lib/item-api';
-import { buildProfileShareUrl, copyTextToClipboard } from '@/lib/share-profile';
+import { ShareProfileDialog } from '@/components/share/share-profile-dialog';
 
 export interface ShareProfileButtonProps {
   /** The profile to share. The button renders only when this is a LIVE item. */
@@ -13,36 +12,50 @@ export interface ShareProfileButtonProps {
     | undefined;
   /** Optional button styling override (e.g. white on a coloured card header). */
   className?: string;
+  /**
+   * Optional visible text next to the icon. Icon-only (the card/row default)
+   * when omitted; the public profile page passes a label because its share
+   * affordance is a labelled pill in the app bar.
+   */
+  label?: React.ReactNode;
 }
 
 /**
- * Copy-link Share affordance shown ONLY on live profiles. Copies the canonical
- * public share URL and toasts success/failure. Renders null for a missing or
- * non-live item, so call sites can drop it in unconditionally.
+ * Share affordance shown ONLY on live profiles. Opens `ShareProfileDialog`,
+ * which offers the profile's public link as a scannable QR plus "Copy link"
+ * and "Download QR". Renders null for a missing or non-live item, so call
+ * sites can drop it in unconditionally — a paused/retired/draft profile gets
+ * no share and no QR, matching the public page, which only serves live items
+ * (the item endpoint filters `live_only` server-side).
  */
-export function ShareProfileButton({ item, className }: Readonly<ShareProfileButtonProps>) {
+export function ShareProfileButton({ item, className, label }: Readonly<ShareProfileButtonProps>) {
   const { t } = useTranslation();
+  const [open, setOpen] = React.useState(false);
+
   if (item?.lifecycle_status !== 'live') return null;
 
-  const onShare = async (e: React.MouseEvent) => {
+  const onShare = (e: React.MouseEvent) => {
+    // Card and row call sites wrap the button in a clickable container.
     e.stopPropagation();
-    const ok = await copyTextToClipboard(buildProfileShareUrl(item));
-    if (ok) toast.success(t('share.copied', 'Link copied to clipboard'));
-    else toast.error(t('share.copy_failed', 'Could not copy the link'));
+    setOpen(true);
   };
 
   return (
-    <button
-      type="button"
-      onClick={onShare}
-      aria-label={t('share.button', 'Share profile')}
-      title={t('share.button', 'Share profile')}
-      className={
-        className ??
-        'flex h-6 w-6 items-center justify-center rounded text-muted-foreground hover:bg-sidebar-accent hover:text-foreground'
-      }
-    >
-      <Share2 className="h-4 w-4" />
-    </button>
+    <>
+      <button
+        type="button"
+        onClick={onShare}
+        aria-label={t('share.button', 'Share profile')}
+        title={t('share.button', 'Share profile')}
+        className={
+          className ??
+          'flex h-6 w-6 items-center justify-center rounded text-muted-foreground hover:bg-sidebar-accent hover:text-foreground'
+        }
+      >
+        <Share2 className="h-4 w-4" aria-hidden="true" />
+        {label}
+      </button>
+      <ShareProfileDialog item={item} open={open} onOpenChange={setOpen} />
+    </>
   );
 }

@@ -24,6 +24,7 @@ export function resolveCopyGroup(actionType: string): CopyGroup {
  */
 const PROVIDER_LIKE_DOMAINS = new Set([
   'provider',
+  'service_provider',
   'coaching_center',
   'tutor',
   'individual_tutor_weera_counsellor',

@@ -19,6 +19,7 @@ const {
   buildRetiredItemState,
   cancelItemConnections,
   dispatchRetireCancelNotifications,
+  dispatchItemLifecycleNotification,
   publishItemEvent,
   invalidateItemFetchCache,
 } = vi.hoisted(() => ({
@@ -53,6 +54,8 @@ const {
   cancelItemConnections: vi.fn(async (..._a: any[]) => [] as unknown[]),
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   dispatchRetireCancelNotifications: vi.fn(async (..._a: any[]) => {}),
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  dispatchItemLifecycleNotification: vi.fn(async (..._a: any[]) => {}),
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   publishItemEvent: vi.fn(async (..._a: any[]) => {}),
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -173,6 +176,12 @@ vi.mock('@/notifications/notify_retire', () => ({
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   dispatchRetireCancelNotifications: (...a: any[]) =>
     dispatchRetireCancelNotifications(...a),
+}));
+
+// The lifecycle seam lazy-imports this; the mock intercepts the dynamic import.
+vi.mock('@/notifications/notify_item_lifecycle', () => ({
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  dispatchItemLifecycleNotification: (...a: any[]) => dispatchItemLifecycleNotification(...a),
 }));
 
 vi.mock('@/utils/publish_item_event', () => ({
@@ -355,6 +364,46 @@ describe('item_lifecycle_handler — auth & ownership', () => {
 
     expect(reply.statusCode).toBe(200);
     expect(reply.body).toEqual({ item_id: ITEM_ID, lifecycle_status: 'paused' });
+  });
+
+  it('notifies the item OWNER, not the network_service caller who paused it (#531/#534)', async () => {
+    // Regression guard: a network_service org pauses a profile it does not own.
+    // The lifecycle email must reach the OWNER (created_by), not the actor —
+    // else the person whose profile was paused is never told.
+    rowQueue.push([existingItem({ created_by: 'someone-else' })]);
+
+    const reply = await call(
+      ownerRequest('pause', { acting_org: { org_type: 'network_service' } }),
+    );
+    expect(reply.statusCode).toBe(200);
+
+    // Fire-and-forget after commit — flush the void-import microtask.
+    await vi.waitFor(() => expect(dispatchItemLifecycleNotification).toHaveBeenCalledTimes(1));
+    const event = dispatchItemLifecycleNotification.mock.calls[0]![0] as {
+      op: string;
+      ownerId: string;
+    };
+    expect(event).toMatchObject({ op: 'pause', ownerId: 'someone-else' });
+    expect(event.ownerId).not.toBe(OWNER); // never the acting caller
+  });
+
+  it('does not send a lifecycle email on unpause (only pause/retire)', async () => {
+    rowQueue.push([existingItem({ lifecycle_status: 'paused' })]);
+
+    await call(ownerRequest('unpause'));
+    await Promise.resolve(); // let any stray microtask run
+
+    expect(dispatchItemLifecycleNotification).not.toHaveBeenCalled();
+  });
+
+  it('a failing lifecycle notification never fails the route (best-effort)', async () => {
+    dispatchItemLifecycleNotification.mockRejectedValueOnce(new Error('NS down'));
+    rowQueue.push([existingItem()]);
+
+    const reply = await call(ownerRequest('pause'));
+
+    expect(reply.statusCode).toBe(200); // route unaffected by the notify rejection
+    await vi.waitFor(() => expect(dispatchItemLifecycleNotification).toHaveBeenCalled());
   });
 
   it('a non-network_service acting-org does not bypass ownership', async () => {

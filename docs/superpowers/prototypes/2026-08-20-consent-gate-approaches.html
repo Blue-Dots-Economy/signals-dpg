@@ -1,0 +1,659 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Consent UI — four approaches · Blue Dots</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400;12..96,600;12..96,800&family=Noto+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+/* ────────────────────────────────────────────────────────────────
+   Tokens. Palette derives from the Blue Dots brand hex (#0074ff)
+   rather than a neutral default; the canvas is a cold blue tint so
+   the white consent surface reads as "lifted out of" the network.
+   ──────────────────────────────────────────────────────────────── */
+:root{
+  --ink:#0B1220; --ink-2:#334155; --muted:#64748B;
+  --line:#E3EAF6; --line-2:#CBD7EA;
+  --canvas:#EAF1FF; --surface:#FFFFFF;
+  --primary:#0074FF; --primary-700:#0053BD; --accent:#57ABFF;
+  --ok:#0E9F6E;
+  --ring:rgba(0,116,255,.20);
+  --r-lg:18px; --r-md:12px; --r-sm:9px;
+  --shadow:0 18px 50px -18px rgba(11,18,32,.35), 0 2px 8px rgba(11,18,32,.06);
+  --display:"Bricolage Grotesque",system-ui,sans-serif;
+  --body:"Noto Sans",system-ui,sans-serif;
+}
+*{box-sizing:border-box}
+html,body{margin:0;padding:0}
+body{
+  font-family:var(--body); color:var(--ink-2); background:var(--canvas);
+  -webkit-font-smoothing:antialiased; line-height:1.55;
+  background-image:radial-gradient(circle at 12% 8%, rgba(87,171,255,.20), transparent 42%),
+                   radial-gradient(circle at 88% 92%, rgba(0,116,255,.12), transparent 46%);
+  background-attachment:fixed;
+}
+
+/* ── Chrome ─────────────────────────────────────────────────── */
+.topbar{
+  position:sticky; top:0; z-index:60; backdrop-filter:blur(10px);
+  background:rgba(234,241,255,.82); border-bottom:1px solid var(--line);
+}
+.topbar-in{max-width:1180px;margin:0 auto;padding:14px 22px;display:flex;gap:18px;align-items:center;flex-wrap:wrap}
+.brandmark{display:flex;align-items:center;gap:10px;font-family:var(--display);font-weight:800;color:var(--ink);letter-spacing:-.02em;font-size:16px}
+.brandmark i{width:11px;height:11px;border-radius:50%;background:var(--primary);box-shadow:0 0 0 4px var(--ring);display:block;font-style:normal}
+.brandmark small{display:block;font-family:var(--body);font-weight:500;font-size:11px;color:var(--muted);letter-spacing:0}
+.spacer{flex:1}
+.pills{display:flex;gap:5px;background:#fff;padding:5px;border-radius:13px;border:1px solid var(--line);flex-wrap:wrap}
+.pill{
+  appearance:none;border:0;background:transparent;font-family:var(--body);font-weight:600;font-size:13px;
+  color:var(--muted);padding:8px 13px;border-radius:9px;cursor:pointer;transition:.16s;white-space:nowrap;
+}
+.pill:hover{color:var(--ink)}
+.pill[aria-pressed="true"]{background:var(--primary);color:#fff;box-shadow:0 2px 8px var(--ring)}
+.pill:focus-visible{outline:2px solid var(--primary);outline-offset:2px}
+.ghost{
+  appearance:none;font-family:var(--body);font-size:13px;font-weight:600;color:var(--ink-2);
+  background:#fff;border:1px solid var(--line-2);padding:9px 14px;border-radius:10px;cursor:pointer;transition:.16s
+}
+.ghost:hover{border-color:var(--primary);color:var(--primary)}
+.ghost:focus-visible{outline:2px solid var(--primary);outline-offset:2px}
+
+/* ── Stage ──────────────────────────────────────────────────── */
+.wrap{max-width:1180px;margin:0 auto;padding:30px 22px 90px}
+.lede{max-width:660px;margin-bottom:26px}
+.lede h1{font-family:var(--display);font-weight:800;font-size:clamp(26px,3.4vw,38px);line-height:1.1;letter-spacing:-.028em;color:var(--ink);margin:0 0 10px}
+.lede p{margin:0;font-size:15px;color:var(--muted)}
+.lede b{color:var(--ink-2);font-weight:600}
+
+.stage{display:flex;justify-content:center;padding:8px 0 4px}
+.device{
+  width:100%; max-width:720px; background:var(--surface); border:1px solid var(--line);
+  border-radius:var(--r-lg); box-shadow:var(--shadow); overflow:hidden; transition:max-width .28s ease;
+}
+body[data-device="phone"] .device{max-width:412px}
+
+/* mock form */
+.form-head{padding:22px 24px 4px}
+.form-head .eyebrow{font-size:10.5px;font-weight:700;letter-spacing:.13em;text-transform:uppercase;color:var(--primary)}
+.form-head h2{font-family:var(--display);font-weight:700;font-size:21px;color:var(--ink);margin:5px 0 0;letter-spacing:-.02em}
+.form-body{padding:16px 24px 24px;display:grid;gap:14px}
+.field label{display:block;font-size:12.5px;font-weight:600;color:var(--ink-2);margin-bottom:5px}
+.field .req{color:#E11D48}
+.field input,.field select{
+  width:100%;font-family:var(--body);font-size:14px;color:var(--ink);background:#F8FAFF;
+  border:1px solid var(--line-2);border-radius:var(--r-sm);padding:11px 12px;transition:.15s
+}
+.field input:focus,.field select:focus{outline:0;border-color:var(--primary);box-shadow:0 0 0 3px var(--ring);background:#fff}
+.row2{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+body[data-device="phone"] .row2{grid-template-columns:1fr}
+
+.cta{
+  width:100%;font-family:var(--body);font-weight:700;font-size:15px;color:#fff;background:var(--primary);
+  border:0;border-radius:var(--r-md);padding:14px;cursor:pointer;transition:.16s;margin-top:4px
+}
+.cta:hover:not(:disabled){background:var(--primary-700)}
+.cta:disabled{background:#CFE1FF;color:#fff;cursor:not-allowed}
+.cta:focus-visible{outline:2px solid var(--ink);outline-offset:2px}
+.form-foot{padding:0 24px 22px;font-size:12px;color:var(--muted);text-align:center}
+.form-foot b{color:var(--primary)}
+
+.accepted-note{
+  margin:0 24px 20px;padding:12px 14px;border-radius:var(--r-md);background:#ECFDF5;border:1px solid #A7F3D0;
+  color:#065F46;font-size:13px;font-weight:600;display:none;align-items:center;gap:9px
+}
+.accepted-note.show{display:flex}
+.accepted-note svg{flex:none}
+
+/* ── Signature: the constellation meter ─────────────────────────
+   Blue Dots' own visual language is dots joined into a network, so
+   reading progress literally assembles one. Each document is a node;
+   reading it lights the node and fills the edge that reaches it. It
+   encodes real state (which documents are read) rather than decorating.
+   ──────────────────────────────────────────────────────────────── */
+.constel{position:relative;display:flex;justify-content:space-between;align-items:flex-start;padding:2px 6px 0;margin:0 auto;max-width:340px}
+.constel .edge{position:absolute;left:calc(100%/6);right:calc(100%/6);top:9px;height:2px;background:var(--line-2);border-radius:2px;overflow:hidden}
+.constel .edge i{position:absolute;inset:0;width:0;background:linear-gradient(90deg,var(--primary),var(--accent));transition:width .45s cubic-bezier(.4,0,.2,1);display:block}
+.constel.live .edge i{transition:width .1s linear}
+.constel.live .node .dot{transition:background .25s,border-color .25s,box-shadow .25s}
+.node{position:relative;z-index:2;display:flex;flex-direction:column;align-items:center;gap:7px;flex:1}
+.node .dot{
+  width:20px;height:20px;border-radius:50%;background:#fff;border:2px solid var(--line-2);
+  display:grid;place-items:center;transition:.28s
+}
+.node .dot svg{width:11px;height:11px;opacity:0;transform:scale(.5);transition:.24s;color:#fff}
+.node .cap{font-size:10.5px;font-weight:600;color:var(--muted);letter-spacing:.01em;text-align:center;transition:.2s}
+.node[data-state="current"] .dot{border-color:var(--primary);box-shadow:0 0 0 5px var(--ring)}
+.node[data-state="current"] .cap{color:var(--primary)}
+.node[data-state="read"] .dot,.node[data-state="agreed"] .dot{background:var(--primary);border-color:var(--primary)}
+.node[data-state="read"] .dot svg,.node[data-state="agreed"] .dot svg{opacity:1;transform:scale(1)}
+.node[data-state="read"] .cap,.node[data-state="agreed"] .cap{color:var(--ink);font-weight:700}
+
+/* ── Modal shell ────────────────────────────────────────────── */
+.scrim{position:fixed;inset:0;z-index:80;background:rgba(11,18,32,.55);backdrop-filter:blur(3px);display:none;align-items:center;justify-content:center;padding:18px}
+.scrim.open{display:flex}
+.sheet{
+  width:100%;max-width:560px;max-height:min(88vh,760px);background:var(--surface);border-radius:var(--r-lg);
+  box-shadow:var(--shadow);display:flex;flex-direction:column;overflow:hidden;animation:rise .26s cubic-bezier(.2,.7,.3,1)
+}
+body[data-device="phone"] .sheet{max-width:412px}
+@keyframes rise{from{opacity:0;transform:translateY(14px) scale(.985)}to{opacity:1;transform:none}}
+.sheet-head{padding:20px 22px 14px;border-bottom:1px solid var(--line);flex:none}
+.sheet-head .eyebrow{font-size:10.5px;font-weight:700;letter-spacing:.13em;text-transform:uppercase;color:var(--primary)}
+.sheet-head h3{font-family:var(--display);font-weight:700;font-size:19px;color:var(--ink);margin:5px 0 3px;letter-spacing:-.02em}
+.sheet-head p{margin:0;font-size:12.5px;color:var(--muted)}
+.sheet-meter{padding:15px 22px 4px;flex:none}
+.sheet-body{flex:1;overflow:hidden;display:flex;flex-direction:column;padding:0 22px}
+.sheet-foot{flex:none;padding:14px 22px 20px;border-top:1px solid var(--line);background:#FCFDFF}
+
+/* reading surfaces */
+.reader{
+  overflow-y:auto;flex:1;min-height:0;padding:16px 16px;background:#FBFCFF;border:1px solid var(--line);
+  border-radius:var(--r-md);scroll-behavior:smooth;position:relative
+}
+.reader::-webkit-scrollbar{width:9px}
+.reader::-webkit-scrollbar-thumb{background:var(--line-2);border-radius:9px;border:3px solid #FBFCFF}
+.doc h3{font-family:var(--display);font-weight:700;font-size:17px;color:var(--ink);margin:0 0 9px;letter-spacing:-.015em}
+.doc h4{font-family:var(--body);font-weight:700;font-size:13px;color:var(--ink);margin:17px 0 5px}
+.doc p{margin:0 0 10px;font-size:13.2px;line-height:1.62}
+.doc ul{margin:0 0 10px;padding-left:17px}
+.doc li{font-size:13.2px;margin-bottom:5px;line-height:1.55}
+.doc strong{color:var(--ink);font-weight:600}
+.doc .end{margin-top:16px;padding-top:12px;border-top:1px dashed var(--line-2);font-size:11.5px;color:var(--muted);font-style:italic}
+
+/* agree control */
+.agree{display:flex;gap:11px;align-items:flex-start;padding:11px 12px;border-radius:var(--r-md);border:1px solid var(--line);background:#fff;transition:.2s}
+.agree.locked{opacity:.5;background:#F6F8FC}
+.agree.ready{border-color:var(--primary);box-shadow:0 0 0 3px var(--ring)}
+.agree input{width:19px;height:19px;margin:1px 0 0;accent-color:var(--primary);flex:none;cursor:pointer}
+.agree input:disabled{cursor:not-allowed}
+.agree label{font-size:13px;color:var(--ink-2);cursor:pointer;line-height:1.5}
+.agree.locked label{cursor:not-allowed}
+.hint{display:flex;align-items:center;gap:6px;font-size:11.5px;color:var(--muted);margin:9px 2px 0;transition:.2s}
+.hint.done{color:var(--ok);font-weight:600}
+.hint svg{flex:none}
+.foot-actions{display:flex;gap:9px;margin-top:12px}
+.foot-actions .cta{margin-top:0}
+.btn-back{
+  appearance:none;font-family:var(--body);font-weight:600;font-size:14px;color:var(--ink-2);background:#fff;
+  border:1px solid var(--line-2);border-radius:var(--r-md);padding:14px 18px;cursor:pointer;transition:.16s;flex:none
+}
+.btn-back:hover{border-color:var(--ink-2)}
+.btn-back:disabled{opacity:.4;cursor:not-allowed}
+
+/* ── B: accordion ───────────────────────────────────────────── */
+.acc-scroll{overflow-y:auto;flex:1;min-height:0;padding:4px 2px 4px 0;display:grid;gap:10px;align-content:start}
+.acc{border:1px solid var(--line);border-radius:var(--r-md);overflow:hidden;background:#fff;transition:.2s}
+.acc[data-open="true"]{border-color:var(--line-2);box-shadow:0 4px 14px rgba(11,18,32,.05)}
+.acc[data-done="true"]{border-color:#BBF7D0;background:#F7FFFB}
+.acc-hd{width:100%;appearance:none;background:transparent;border:0;padding:13px 14px;display:flex;align-items:center;gap:11px;cursor:pointer;text-align:left;font-family:var(--body)}
+.acc-hd:focus-visible{outline:2px solid var(--primary);outline-offset:-2px}
+.acc-idx{
+  width:22px;height:22px;border-radius:50%;border:2px solid var(--line-2);flex:none;display:grid;place-items:center;
+  font-size:10.5px;font-weight:700;color:var(--muted);transition:.24s
+}
+.acc[data-done="true"] .acc-idx{background:var(--ok);border-color:var(--ok);color:#fff}
+.acc-ttl{flex:1;font-size:13.5px;font-weight:600;color:var(--ink)}
+.acc-ttl span{display:block;font-size:11px;font-weight:500;color:var(--muted);margin-top:1px}
+.acc-chev{color:var(--muted);transition:transform .24s;flex:none}
+.acc[data-open="true"] .acc-chev{transform:rotate(180deg)}
+.acc-panel{display:none;padding:0 14px 14px}
+.acc[data-open="true"] .acc-panel{display:block}
+.acc .reader{max-height:190px;flex:none}
+
+/* ── D: checklist ───────────────────────────────────────────── */
+.check-list{display:grid;gap:9px;padding:4px 0}
+.check-row{
+  width:100%;appearance:none;font-family:var(--body);text-align:left;background:#fff;border:1px solid var(--line);
+  border-radius:var(--r-md);padding:14px;display:flex;align-items:center;gap:12px;cursor:pointer;transition:.18s
+}
+.check-row:hover{border-color:var(--primary);transform:translateY(-1px)}
+.check-row:focus-visible{outline:2px solid var(--primary);outline-offset:2px}
+.check-row[data-done="true"]{background:#F7FFFB;border-color:#BBF7D0}
+.check-ic{width:30px;height:30px;border-radius:9px;background:#EEF4FF;color:var(--primary);display:grid;place-items:center;flex:none;transition:.2s}
+.check-row[data-done="true"] .check-ic{background:var(--ok);color:#fff}
+.check-tx{flex:1;min-width:0}
+.check-tx b{display:block;font-size:13.5px;font-weight:600;color:var(--ink)}
+.check-tx span{display:block;font-size:11.5px;color:var(--muted);margin-top:1px}
+.check-tag{font-size:10.5px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);flex:none}
+.check-row[data-done="true"] .check-tag{color:var(--ok)}
+
+/* ── notes ──────────────────────────────────────────────────── */
+.notes{max-width:720px;margin:26px auto 0;background:rgba(255,255,255,.72);border:1px solid var(--line);border-radius:var(--r-lg);padding:18px 20px}
+.notes h4{font-family:var(--display);font-weight:700;font-size:14px;color:var(--ink);margin:0 0 4px;letter-spacing:-.01em}
+.notes .sub{font-size:12.5px;color:var(--muted);margin:0 0 13px}
+.notes dl{display:grid;grid-template-columns:auto 1fr;gap:7px 12px;margin:0;font-size:12.5px;align-items:start}
+.notes dt{font-weight:700;color:var(--ink);white-space:nowrap}
+.notes dd{margin:0;color:var(--ink-2)}
+.tag-good{color:var(--ok)} .tag-bad{color:#B45309}
+
+.callout{max-width:720px;margin:18px auto 0;border-radius:var(--r-md);padding:13px 15px;background:#FFFBEB;border:1px solid #FDE68A;font-size:12.5px;color:#78350F}
+.callout b{color:#78350F}
+
+/* ── Real phone widths ─────────────────────────────────────────
+   Below 520px the centred dialog is the wrong shape: it wastes the
+   short axis and puts the CTA mid-screen. Become a bottom sheet —
+   full-bleed, flush to the bottom edge, thumb-reachable CTA. dvh (not
+   vh) so iOS Safari's collapsing URL bar cannot clip the footer. */
+@media (max-width:520px){
+  .scrim{padding:0;align-items:flex-end}
+  .sheet,body[data-device="phone"] .sheet{
+    max-width:none;width:100%;max-height:92dvh;
+    border-radius:20px 20px 0 0;animation:sheetUp .28s cubic-bezier(.2,.7,.3,1)
+  }
+  .sheet-head{padding:18px 18px 12px}
+  .sheet-head h3{font-size:18px}
+  .sheet-meter{padding:13px 14px 2px}
+  .sheet-body{padding:0 18px}
+  .sheet-foot{padding:12px 18px calc(18px + env(safe-area-inset-bottom))}
+  .constel{max-width:100%;padding:2px 2px 0}
+  .node .cap{font-size:10px}
+  .reader{padding:14px 13px}
+  .doc p,.doc li{font-size:14px}          /* larger, not smaller, on phones */
+  .acc .reader{max-height:44dvh}
+  .foot-actions{flex-direction:column-reverse}
+  .foot-actions .btn-back,.foot-actions .cta{width:100%}
+  .topbar-in{padding:11px 14px;gap:10px}
+  .wrap{padding:22px 14px 70px}
+}
+@keyframes sheetUp{from{opacity:0;transform:translateY(26px)}to{opacity:1;transform:none}}
+@media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}.reader{scroll-behavior:auto}}
+</style>
+</head>
+<body data-device="desktop">
+
+<header class="topbar">
+  <div class="topbar-in">
+    <div class="brandmark"><i></i><div>Consent UI<small>Four approaches · #636</small></div></div>
+    <div class="spacer"></div>
+    <div class="pills" role="group" aria-label="Approach">
+      <button class="pill" data-approach="E" aria-pressed="true">E · Guided read</button>
+      <button class="pill" data-approach="A" aria-pressed="false">A · Guided steps</button>
+      <button class="pill" data-approach="B" aria-pressed="false">B · Accordion</button>
+      <button class="pill" data-approach="C" aria-pressed="false">C · One read</button>
+      <button class="pill" data-approach="D" aria-pressed="false">D · Checklist</button>
+    </div>
+    <div class="pills" role="group" aria-label="Device">
+      <button class="pill" data-device-btn="desktop" aria-pressed="true">Desktop</button>
+      <button class="pill" data-device-btn="phone" aria-pressed="false">Phone</button>
+    </div>
+    <button class="ghost" id="reset">Reset</button>
+  </div>
+</header>
+
+<main class="wrap">
+  <div class="lede">
+    <h1>Three documents, one decision.</h1>
+    <p>Terms of Service, Privacy Policy, and the profile-creation consent — all gated so nothing can be
+       accepted before it has been read. Pick an approach above, then <b>Submit registration</b> to try it.
+       Every option is fully interactive: the checkbox really does stay locked until you reach the end.</p>
+  </div>
+
+  <div class="stage">
+    <div class="device">
+      <div class="form-head">
+        <p class="eyebrow">Seeker registration</p>
+        <h2>Create your profile</h2>
+      </div>
+      <div class="form-body">
+        <div class="field"><label>Full name <span class="req">*</span></label><input value="Asha Devi" /></div>
+        <div class="row2">
+          <div class="field"><label>Phone <span class="req">*</span></label><input value="+91 98765 43210" /></div>
+          <div class="field"><label>Year of birth <span class="req">*</span></label>
+            <select><option>1998</option><option>1999</option><option>2000</option></select></div>
+        </div>
+        <button class="cta" id="submitBtn">Submit registration</button>
+      </div>
+      <div class="accepted-note" id="acceptedNote">
+        <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+        <span>Consent recorded — all three documents read and agreed.</span>
+      </div>
+      <div class="form-foot">Powered by <b>Blue Dots</b></div>
+    </div>
+  </div>
+
+  <div class="callout">
+    <b>Built-in edge case:</b> the profile-creation consent is a single 111-character sentence — it cannot scroll.
+    A naive “scroll to the bottom” rule would leave its checkbox locked forever and make registration impossible.
+    Every approach here treats “content too short to scroll” as already read. Try it and watch it unlock instantly.
+  </div>
+
+  <div class="notes" id="notes"></div>
+</main>
+
+<div class="scrim" id="scrim" role="dialog" aria-modal="true" aria-label="Review and accept">
+  <div class="sheet" id="sheet"></div>
+</div>
+
+<script>
+/* ═══════════════════════════════════════════════════════════════
+   Real copy, lifted from config/blue_dot/schemas/participant/consent.json
+   ═══════════════════════════════════════════════════════════════ */
+const TICK = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>';
+const SUPPORT = 'hello@bluedotseconomy.org';
+
+const DOCS = [
+  { id:'privacy', cap:'Privacy', title:'Privacy Policy', blurb:'What we collect and why',
+    html:`<div class="doc"><h3>Privacy Policy</h3>
+    <p>This policy explains what <strong>Blue Dots</strong> (seeded by EkStep Foundation) collects, why, and the choices you have. We collect only what is needed to connect you with the right opportunities.</p>
+    <h4>What we collect</h4><ul>
+      <li><strong>Contact details</strong> — your name, email, and phone number.</li>
+      <li><strong>Profile information</strong> you choose to provide — such as your role, skills, experience, and location.</li>
+      <li><strong>Activity</strong> on the network — the connections and applications you make.</li></ul>
+    <h4>Why we use it</h4><p>We use your information to <strong>match you with relevant opportunities, jobs, and providers</strong>, and to make your profile discoverable to relevant participants within the network.</p>
+    <h4>When your contact details are shared</h4><p>Your name, email, and phone number are shared with another seeker or organisation <strong>only when you initiate or accept a connection or application</strong> — and, for applications, only once it is accepted. <strong>We never sell your data</strong> or share it for advertising.</p>
+    <h4>Your control</h4><p>You can <strong>update</strong> your profile from the portal at any time. To have your information removed, contact us at <strong>${SUPPORT}</strong>.</p>
+    <h4>Retention</h4><p>We keep your information only for as long as it is needed to connect you within the network.</p>
+    <h4>Grievances</h4><p>For any privacy question or request, contact <strong>${SUPPORT}</strong>.</p>
+    <p class="end">End of the Privacy Policy.</p></div>` },
+
+  { id:'terms', cap:'Terms', title:'Terms of Service', blurb:'The rules of using the network',
+    html:`<div class="doc"><h3>Terms of Service</h3>
+    <p>Welcome to <strong>Blue Dots</strong>, a digital network — seeded by EkStep Foundation — that helps opportunity seekers, providers, and aggregators discover and connect with one another.</p>
+    <h4>1. Who can use Blue Dots</h4><p>Blue Dots is currently <strong>invite-only</strong>. By continuing you confirm that you are at least 18 years old and that any information you provide is accurate and belongs to you or to an organisation you are authorised to represent.</p>
+    <h4>2. What Blue Dots is</h4><p>Blue Dots is a <strong>discovery and matching network</strong>. We help you find relevant opportunities, jobs, and providers and make your profile discoverable to relevant participants. We are <strong>not a party</strong> to any engagement, employment, or transaction that results — those are solely between the participants involved.</p>
+    <h4>3. Your responsibilities</h4><ul>
+      <li>Keep your profile accurate and up to date.</li>
+      <li>Use the network lawfully and treat other participants with respect.</li>
+      <li>Do not misuse contact details you receive, or share them beyond the purpose for which they were shared.</li></ul>
+    <h4>4. Suspension</h4><p>We may pause or remove access for misuse, fraudulent listings, or activity that harms other participants.</p>
+    <h4>5. Service “as is”</h4><p>Blue Dots is in active development and is provided on an “as is” and “as available” basis, without warranties. We work to keep it reliable but cannot guarantee uninterrupted service.</p>
+    <h4>6. Governing law</h4><p>These terms are governed by the laws of India. Questions or grievances: <strong>${SUPPORT}</strong>.</p>
+    <p class="end">End of the Terms of Service.</p></div>` },
+
+  { id:'profile', cap:'Profile', title:'Profile creation', blurb:'Why your profile is created', short:true,
+    html:`<div class="doc"><h3>Profile creation</h3>
+    <p>The information collected will be used to match you with services and opportunities.</p>
+    <p class="end">This statement is 111 characters — too short to scroll, so it counts as read on open.</p></div>` },
+];
+
+const AGREE_COPY = {
+  privacy:'I have read the Privacy Policy.',
+  terms:'I have read and accept the Terms of Service.',
+  profile:'I consent to the creation of my profile.',
+};
+
+const NOTES = {
+  E:{ h:'E \u00b7 Guided read', s:'One uninterrupted scroll through all three documents, with the tracker following your position live. A single agreement at the end \u2014 approach C\u2019s reading model driven by approach A\u2019s progress meter.',
+      d:[['Strength','Nothing interrupts the read. No per-step checkbox, no Next button \u2014 you scroll once, start to finish.','good'],
+         ['Strength','The tracker turns an anonymous scrollbar into meaning: which document you are in, what is behind you, how much is left.','good'],
+         ['Strength','The short profile statement stops being an edge case \u2014 it is just the end of one long scroll, so it can never lock the form.','good'],
+         ['Cost','One checkbox still covers three consents. Fine while they are accepted together; a blocker only if they ever need recording separately.','bad'],
+         ['Cost','Progress is measured by scroll position, which evidences reaching the end \u2014 not reading it. No UI can prove comprehension.','bad']]},
+  A:{ h:'A · Guided steps', s:'One document at a time. Agreeing advances you to the next. This is the two-tab flow you described, generalised past two.',
+      d:[['Strength','Impossible to miss a document. The path is linear, so there is exactly one thing to do at any moment — the best fit for a first-time user on a phone.','good'],
+         ['Strength','Scales to four or five documents without redesign.','good'],
+         ['Cost','Feels the longest. Three screens to clear before the button unlocks.','bad'],
+         ['Cost','No way to see everything at once, so nothing can be re-checked without stepping back.','bad']]},
+  B:{ h:'B · Accordion', s:'All three stacked in one sheet. Open one, read it, agree, open the next — in any order.',
+      d:[['Strength','Everything is visible up front, so the size of the task is honest.','good'],
+         ['Strength','User controls the order and can reopen anything already agreed.','good'],
+         ['Cost','Nested scrolling — a panel scrolls inside a sheet that also scrolls. Fiddly on small screens.','bad'],
+         ['Cost','Easier to leave one collapsed and wonder why the button is still dead.','bad']]},
+  C:{ h:'C · One continuous read', s:'All three documents concatenated into a single scroll, with one agreement at the very end.',
+      d:[['Strength','Simplest to build and by far the simplest to explain. One scroll, one checkbox.','good'],
+         ['Strength','“Read everything” is guaranteed by construction — you physically scroll past all of it.','good'],
+         ['Cost','One checkbox covers three separate consents. If anyone ever needs them recorded separately, this cannot express that.','bad'],
+         ['Cost','A long unbroken wall of text is the most likely to be scrolled past blindly.','bad']]},
+  D:{ h:'D · Checklist', s:'A list of three items showing what is done. Tap one to read it full-screen; it ticks off when finished.',
+      d:[['Strength','Progress is the whole interface — what is left is always obvious.','good'],
+         ['Strength','Each document gets the full sheet, so no nested scrolling anywhere.','good'],
+         ['Strength','Closest to a familiar mobile pattern, and degrades well to four or more documents.','good'],
+         ['Cost','The most navigation — every document costs an open and a close.','bad']]},
+};
+
+/* ═══════════════════════════════════════════════════════════════
+   State
+   ═══════════════════════════════════════════════════════════════ */
+let approach='E';
+let st={ read:new Set(), agreed:new Set(), step:0, open:null, sub:null };
+
+const $=s=>document.querySelector(s);
+const scrim=$('#scrim'), sheet=$('#sheet');
+const allAgreed=()=>DOCS.every(d=>st.agreed.has(d.id));
+
+function reset(){ st={ read:new Set(), agreed:new Set(), step:0, open:null, sub:null };
+  $('#acceptedNote').classList.remove('show'); closeSheet(); }
+
+/* Scroll gating. The `notScrollable` branch is the whole reason the
+   111-character statement does not brick the form. Re-checked on
+   resize because a font swap or an orientation change can turn a
+   scrollable box into a non-scrollable one after first paint. */
+function gateOnRead(el, id, onRead){
+  const check=()=>{
+    const atEnd = el.scrollTop + el.clientHeight >= el.scrollHeight - 6;
+    const notScrollable = el.scrollHeight <= el.clientHeight + 6;
+    if(atEnd || notScrollable){ if(!st.read.has(id)){ st.read.add(id); onRead(); } }
+  };
+  el.addEventListener('scroll', check, {passive:true});
+  new ResizeObserver(check).observe(el);
+  requestAnimationFrame(check);
+}
+
+function meter(activeId){
+  const nodes=DOCS.map(d=>{
+    const s = st.agreed.has(d.id)?'agreed' : st.read.has(d.id)?'read' : d.id===activeId?'current':'todo';
+    return `<div class="node" data-state="${s}"><span class="dot">${TICK}</span><span class="cap">${d.cap}</span></div>`;
+  }).join('');
+  const pct = DOCS.length<2?0 : (DOCS.filter(d=>st.agreed.has(d.id)).length/(DOCS.length-1))*100;
+  return `<div class="constel"><div class="edge"><i style="width:${Math.min(pct,100)}%"></i></div>${nodes}</div>`;
+}
+
+const hint = done => `<div class="hint ${done?'done':''}">
+  ${done? TICK.replace('<svg','<svg width="13" height="13"') : '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14"/><path d="m19 12-7 7-7-7"/></svg>'}
+  <span>${done?'You have reached the end — you can agree now.':'Scroll to the end to unlock the checkbox.'}</span></div>`;
+
+function openSheet(){ scrim.classList.add('open'); render(); }
+function closeSheet(){ scrim.classList.remove('open'); sheet.innerHTML=''; }
+
+/* ═══════════════════════════════════════════════════════════════
+   Renderers
+   ═══════════════════════════════════════════════════════════════ */
+function render(){ ({A:renderA,B:renderB,C:renderC,D:renderD,E:renderE})[approach](); }
+
+/* ── A · Guided steps ───────────────────────────────────────── */
+function renderA(){
+  const d=DOCS[st.step], last=st.step===DOCS.length-1;
+  const isRead=st.read.has(d.id), isAgreed=st.agreed.has(d.id);
+  sheet.innerHTML=`
+    <div class="sheet-head"><p class="eyebrow">Step ${st.step+1} of ${DOCS.length}</p>
+      <h3>${d.title}</h3><p>${d.blurb}</p></div>
+    <div class="sheet-meter">${meter(d.id)}</div>
+    <div class="sheet-body"><div class="reader" id="rd">${d.html}</div></div>
+    <div class="sheet-foot">
+      ${hint(isRead)}
+      <div class="agree ${isRead?(isAgreed?'ready':'ready'):'locked'}" style="margin-top:10px">
+        <input type="checkbox" id="ag" ${isRead?'':'disabled'} ${isAgreed?'checked':''}/>
+        <label for="ag">${AGREE_COPY[d.id]}</label></div>
+      <div class="foot-actions">
+        <button class="btn-back" id="back" ${st.step===0?'disabled':''}>Back</button>
+        <button class="cta" id="next" ${isAgreed?'':'disabled'}>${last?'Accept & continue':'Next document'}</button>
+      </div></div>`;
+  gateOnRead($('#rd'), d.id, render);
+  $('#ag').onchange=e=>{ e.target.checked?st.agreed.add(d.id):st.agreed.delete(d.id); render(); };
+  $('#back').onclick=()=>{ if(st.step>0){st.step--; render();} };
+  $('#next').onclick=()=>{ if(last){ finish(); } else { st.step++; render(); } };
+}
+
+/* ── B · Accordion ──────────────────────────────────────────── */
+function renderB(){
+  sheet.innerHTML=`
+    <div class="sheet-head"><p class="eyebrow">Before you register</p>
+      <h3>Review &amp; accept to continue</h3><p>Open each one, read it to the end, then agree.</p></div>
+    <div class="sheet-meter">${meter(null)}</div>
+    <div class="sheet-body"><div class="acc-scroll">${DOCS.map((d,i)=>{
+      const open=st.open===d.id, isRead=st.read.has(d.id), isAgreed=st.agreed.has(d.id);
+      return `<div class="acc" data-open="${open}" data-done="${isAgreed}">
+        <button class="acc-hd" data-acc="${d.id}" aria-expanded="${open}">
+          <span class="acc-idx">${isAgreed?TICK:i+1}</span>
+          <span class="acc-ttl">${d.title}<span>${isAgreed?'Agreed':isRead?'Read — agree below':d.blurb}</span></span>
+          <svg class="acc-chev" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
+        </button>
+        <div class="acc-panel">
+          <div class="reader" data-rd="${d.id}">${d.html}</div>
+          ${hint(isRead)}
+          <div class="agree ${isRead?'ready':'locked'}" style="margin-top:9px">
+            <input type="checkbox" data-ag="${d.id}" ${isRead?'':'disabled'} ${isAgreed?'checked':''}/>
+            <label>${AGREE_COPY[d.id]}</label></div>
+        </div></div>`;}).join('')}</div></div>
+    <div class="sheet-foot"><button class="cta" id="done" ${allAgreed()?'':'disabled'}>Accept &amp; continue</button></div>`;
+
+  sheet.querySelectorAll('[data-acc]').forEach(b=>b.onclick=()=>{
+    st.open = st.open===b.dataset.acc ? null : b.dataset.acc; render(); });
+  sheet.querySelectorAll('[data-rd]').forEach(el=>gateOnRead(el, el.dataset.rd, render));
+  sheet.querySelectorAll('[data-ag]').forEach(cb=>cb.onchange=e=>{
+    const id=cb.dataset.ag; e.target.checked?st.agreed.add(id):st.agreed.delete(id);
+    if(e.target.checked){ const nxt=DOCS.find(d=>!st.agreed.has(d.id)); st.open=nxt?nxt.id:null; }
+    render(); });
+  $('#done').onclick=finish;
+}
+
+/* ── C · One continuous read ────────────────────────────────── */
+function renderC(){
+  const done=st.read.has('all'), agreed=st.agreed.has('all');
+  sheet.innerHTML=`
+    <div class="sheet-head"><p class="eyebrow">Before you register</p>
+      <h3>Review &amp; accept to continue</h3><p>Everything you are agreeing to, in one place.</p></div>
+    <div class="sheet-body" style="padding-top:14px"><div class="reader" id="rd">
+      ${DOCS.map(d=>d.html).join('<hr style="border:0;border-top:1px solid var(--line-2);margin:20px 0"/>')}
+    </div></div>
+    <div class="sheet-foot">${hint(done)}
+      <div class="agree ${done?'ready':'locked'}" style="margin-top:10px">
+        <input type="checkbox" id="ag" ${done?'':'disabled'} ${agreed?'checked':''}/>
+        <label for="ag">I have read and accept the Terms of Service and Privacy Policy, and I consent to the creation of my profile.</label></div>
+      <button class="cta" id="done2" style="margin-top:12px" ${agreed?'':'disabled'}>Accept &amp; continue</button></div>`;
+  gateOnRead($('#rd'),'all',render);
+  $('#ag').onchange=e=>{ e.target.checked?st.agreed.add('all'):st.agreed.delete('all'); render(); };
+  $('#done2').onclick=()=>{ DOCS.forEach(d=>st.agreed.add(d.id)); finish(); };
+}
+
+/* ── D · Checklist + drill-in ───────────────────────────────── */
+function renderD(){
+  if(st.sub){ renderDsub(); return; }
+  sheet.innerHTML=`
+    <div class="sheet-head"><p class="eyebrow">Before you register</p>
+      <h3>Three things to read</h3><p>Tap each one. You can do them in any order.</p></div>
+    <div class="sheet-meter">${meter(null)}</div>
+    <div class="sheet-body"><div class="check-list">${DOCS.map(d=>{
+      const ok=st.agreed.has(d.id);
+      return `<button class="check-row" data-go="${d.id}" data-done="${ok}">
+        <span class="check-ic">${ok?TICK.replace('<svg','<svg width="15" height="15"'):'<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>'}</span>
+        <span class="check-tx"><b>${d.title}</b><span>${d.blurb}</span></span>
+        <span class="check-tag">${ok?'Done':'Read'}</span></button>`;}).join('')}</div></div>
+    <div class="sheet-foot"><button class="cta" id="done3" ${allAgreed()?'':'disabled'}>Accept &amp; continue</button></div>`;
+  sheet.querySelectorAll('[data-go]').forEach(b=>b.onclick=()=>{ st.sub=b.dataset.go; render(); });
+  $('#done3').onclick=finish;
+}
+function renderDsub(){
+  const d=DOCS.find(x=>x.id===st.sub);
+  const isRead=st.read.has(d.id), isAgreed=st.agreed.has(d.id);
+  sheet.innerHTML=`
+    <div class="sheet-head"><p class="eyebrow">Document ${DOCS.indexOf(d)+1} of ${DOCS.length}</p>
+      <h3>${d.title}</h3><p>${d.blurb}</p></div>
+    <div class="sheet-body" style="padding-top:14px"><div class="reader" id="rd">${d.html}</div></div>
+    <div class="sheet-foot">${hint(isRead)}
+      <div class="agree ${isRead?'ready':'locked'}" style="margin-top:10px">
+        <input type="checkbox" id="ag" ${isRead?'':'disabled'} ${isAgreed?'checked':''}/>
+        <label for="ag">${AGREE_COPY[d.id]}</label></div>
+      <div class="foot-actions">
+        <button class="btn-back" id="back">Back to list</button>
+        <button class="cta" id="cont" ${isAgreed?'':'disabled'}>Done</button></div></div>`;
+  gateOnRead($('#rd'), d.id, render);
+  $('#ag').onchange=e=>{ e.target.checked?st.agreed.add(d.id):st.agreed.delete(d.id); render(); };
+  $('#back').onclick=()=>{ st.sub=null; render(); };
+  $('#cont').onclick=()=>{ st.sub=null; render(); };
+}
+
+/* ── E · Guided read (C's single scroll + A's tracker) ──────────
+   Rendered once, then mutated in place by updateE(). Never re-render on
+   scroll: replacing innerHTML would reset scrollTop and fight the user. */
+function meterE(){
+  return `<div class="constel live"><div class="edge"><i style="width:0%"></i></div>${
+    DOCS.map(d=>`<div class="node" data-node="${d.id}" data-state="todo"><span class="dot">${TICK}</span><span class="cap">${d.cap}</span></div>`).join('')}</div>`;
+}
+
+function renderE(){
+  sheet.innerHTML=`
+    <div class="sheet-head"><p class="eyebrow">Before you register</p>
+      <h3>Review &amp; accept to continue</h3><p>Read straight through — the tracker follows as you go.</p></div>
+    <div class="sheet-meter">${meterE()}</div>
+    <div class="sheet-body" style="padding-top:12px"><div class="reader" id="rd">${
+      DOCS.map((d,i)=>`<section data-sec="${d.id}"${i?' style="margin-top:24px;padding-top:22px;border-top:1px solid var(--line-2)"':''}>${d.html}</section>`).join('')}</div></div>
+    <div class="sheet-foot" id="footE">
+      <div id="hintE">${hint(false)}</div>
+      <div class="agree locked" style="margin-top:10px">
+        <input type="checkbox" id="ag" disabled/>
+        <label for="ag">I have read and accept the Terms of Service and Privacy Policy, and I consent to the creation of my profile.</label></div>
+      <button class="cta" id="doneE" style="margin-top:12px" disabled>Accept &amp; continue</button></div>`;
+
+  const rd=$('#rd');
+  $('#ag').onchange=e=>{ e.target.checked?st.agreed.add('all'):st.agreed.delete('all'); updateE(); };
+  $('#doneE').onclick=()=>{ DOCS.forEach(d=>st.agreed.add(d.id)); finish(); };
+  rd.addEventListener('scroll', updateE, {passive:true});
+  new ResizeObserver(updateE).observe(rd);
+  requestAnimationFrame(updateE);
+}
+
+function updateE(){
+  const rd=$('#rd'); if(!rd) return;
+  const viewBottom = rd.scrollTop + rd.clientHeight;
+  // Whole stack shorter than the viewport: nothing to scroll, so nothing to gate.
+  const flat = rd.scrollHeight <= rd.clientHeight + 6;
+
+  let cleared=0, frac=0, current=null;
+  DOCS.forEach(d=>{
+    const el=rd.querySelector(`[data-sec="${d.id}"]`); if(!el) return;
+    const top=el.offsetTop, bottom=top+el.offsetHeight;
+    if(flat || viewBottom >= bottom - 8) st.read.add(d.id);   // sticky: scrolling back up never un-reads
+    if(st.read.has(d.id)) cleared++;
+    else if(current===null){
+      current=d.id;
+      frac=Math.min(1,Math.max(0,(viewBottom-top)/Math.max(1,bottom-top)));
+    }
+  });
+
+  // Edge spans node 1 → node N, so each cleared document is worth one segment
+  // and the document in hand contributes its own fraction of the next.
+  const pct=Math.min(100,((cleared+frac)/Math.max(1,DOCS.length-1))*100);
+  DOCS.forEach(d=>{
+    const n=sheet.querySelector(`[data-node="${d.id}"]`); if(!n) return;
+    n.dataset.state = st.read.has(d.id) ? 'read' : (d.id===current ? 'current' : 'todo');
+  });
+  const fill=sheet.querySelector('.constel .edge i'); if(fill) fill.style.width=pct+'%';
+
+  const allRead=DOCS.every(d=>st.read.has(d.id));
+  const cb=$('#ag'), cta=$('#doneE'), ag=sheet.querySelector('#footE .agree'), hn=$('#hintE');
+  if(hn) hn.innerHTML=hint(allRead);
+  if(cb) cb.disabled=!allRead;
+  if(ag){ ag.classList.toggle('locked',!allRead); ag.classList.toggle('ready',allRead); }
+  if(cta) cta.disabled=!(allRead && cb && cb.checked);
+}
+
+function finish(){ closeSheet(); $('#acceptedNote').classList.add('show'); }
+
+/* ═══════════════════════════════════════════════════════════════
+   Wiring
+   ═══════════════════════════════════════════════════════════════ */
+function paintNotes(){
+  const n=NOTES[approach];
+  $('#notes').innerHTML=`<h4>${n.h}</h4><p class="sub">${n.s}</p><dl>${
+    n.d.map(([k,v,t])=>`<dt class="${t==='good'?'tag-good':'tag-bad'}">${k}</dt><dd>${v}</dd>`).join('')}</dl>`;
+}
+document.querySelectorAll('[data-approach]').forEach(b=>b.onclick=()=>{
+  approach=b.dataset.approach;
+  document.querySelectorAll('[data-approach]').forEach(x=>x.setAttribute('aria-pressed', String(x===b)));
+  reset(); paintNotes();
+});
+document.querySelectorAll('[data-device-btn]').forEach(b=>b.onclick=()=>{
+  document.body.dataset.device=b.dataset.deviceBtn;
+  document.querySelectorAll('[data-device-btn]').forEach(x=>x.setAttribute('aria-pressed', String(x===b)));
+});
+$('#submitBtn').onclick=()=>{ if(allAgreed()||st.agreed.has('all')){finish();return;} st.step=0; st.open=DOCS[0].id; st.sub=null; openSheet(); };
+$('#reset').onclick=reset;
+scrim.onclick=e=>{ if(e.target===scrim){ /* gate: outside click must not dismiss */ } };
+document.addEventListener('keydown',e=>{ if(e.key==='Escape'){ /* gate: Esc must not dismiss */ } });
+paintNotes();
+</script>
+</body>
+</html>

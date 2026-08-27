@@ -47,3 +47,6 @@ scripts/e2e/scratch/
 coverage/
 .superpowers/
 
+
+# Captured emails from the local mail sink (local-mail-sink/sink.mjs)
+local-mail-sink/mail/
