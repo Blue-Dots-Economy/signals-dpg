@@ -151,6 +151,12 @@ PEER_AUTH_MODE="permissive"      # permissive (default) | enforced
 SELF_SIGNUP_MODE="gated"
 LOGIN_CHANNELS="phone,email"     # ordered subset of phone,email
 
+# DLT-approved provider template id for OTP SMS (login + guardian OTP);
+# defaults to "login_otp". Set alongside the NOTIFICATION_SERVICE_* creds when
+# CREATE_TEST_OTP is off. (Distinct from the per-event lifecycle SMS templates,
+# which live in apps/api/src/notifications/sms/*.properties.)
+SMS_TEMPLATE_ID=""
+
 # Max profiles a single user may hold (default 5). A network.json domain's
 # max_profiles_per_user overrides this per-domain.
 MAX_PROFILES_PER_USER=5
@@ -181,6 +187,13 @@ CONSENT_SUPPORT_EMAIL="hello@bluedotseconomy.org"
 # also layers from a messages.properties beside network.json in local mode.
 # See docs/operations/email-copy-overrides.md.
 EMAIL_MESSAGES_PATH=""
+
+# Host -> "network/domain" map for a split-UI deployment, identical to the
+# string the UI ingress uses. Inverted at boot so an email CTA points the
+# recipient at their own portal instead of the combined front-door. Empty =
+# single-host install (FRONTEND_BASE_URL is the only source). #569/#602 — see
+# docs/operations/local-split-ui.md.
+UI_HOST_BINDINGS=""
 
 # Auth provider. betterauth (default) uses the in-repo better-auth + OTP flow;
 # keycloak switches the API to validate Keycloak-minted tokens instead. The
