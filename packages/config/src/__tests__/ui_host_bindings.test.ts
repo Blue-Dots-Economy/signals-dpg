@@ -44,28 +44,30 @@ describe('parseUiHostBindings', () => {
     ]);
   });
 
-  it('skips an entry whose binding is not "network/domain" and warns', () => {
-    const result = parseUiHostBindings('a.example.org=seeker');
+  // A malformed entry drops out entirely (empty map) with exactly one warning.
+  // The distinct reasons share one shape, so they are one parameterized test.
+  it.each([
+    {
+      name: 'binding is not "network/domain"',
+      input: 'a.example.org=seeker',
+      warning:
+        'UI_HOST_BINDINGS: skipping entry with invalid "network/domain" binding: "a.example.org=seeker"',
+    },
+    {
+      name: 'host is invalid',
+      input: '=blue_dot/seeker',
+      warning: 'UI_HOST_BINDINGS: skipping entry with an invalid host: "=blue_dot/seeker"',
+    },
+    {
+      name: 'host contains a path',
+      input: 'a.example.org/x=blue_dot/seeker',
+      warning:
+        'UI_HOST_BINDINGS: skipping entry with an invalid host: "a.example.org/x=blue_dot/seeker"',
+    },
+  ])('skips an entry whose $name and warns', ({ input, warning }) => {
+    const result = parseUiHostBindings(input);
     expect(result.byDomain).toEqual({});
-    expect(result.warnings).toEqual([
-      'UI_HOST_BINDINGS: skipping entry with invalid "network/domain" binding: "a.example.org=seeker"',
-    ]);
-  });
-
-  it('skips an entry with an invalid host and warns', () => {
-    const result = parseUiHostBindings('=blue_dot/seeker');
-    expect(result.byDomain).toEqual({});
-    expect(result.warnings).toEqual([
-      'UI_HOST_BINDINGS: skipping entry with an invalid host: "=blue_dot/seeker"',
-    ]);
-  });
-
-  it('skips an entry whose host contains a path and warns', () => {
-    const result = parseUiHostBindings('a.example.org/x=blue_dot/seeker');
-    expect(result.byDomain).toEqual({});
-    expect(result.warnings).toEqual([
-      'UI_HOST_BINDINGS: skipping entry with an invalid host: "a.example.org/x=blue_dot/seeker"',
-    ]);
+    expect(result.warnings).toEqual([warning]);
   });
 
   it('keeps the FIRST host on a duplicate domain and warns', () => {
