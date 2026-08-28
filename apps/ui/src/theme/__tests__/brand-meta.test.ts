@@ -34,4 +34,23 @@ describe('resolveBrandMeta', () => {
       footerLogo: null, footerLogoLight: null,
     });
   });
+
+  it('resolves a network-level footer logo', () => {
+    const reg = {
+      blue_dot: { footerLogo: '/brand/ekstep.png', footerLogoLight: '/brand/ekstep-light.png' },
+    };
+    const m = resolveBrandMeta('blue_dot', 'standard', reg as any);
+    expect(m.footerLogo).toBe('/brand/ekstep.png');
+    expect(m.footerLogoLight).toBe('/brand/ekstep-light.png');
+  });
+
+  it('lets a brand override the footer logo', () => {
+    const reg = {
+      blue_dot: {
+        footerLogo: '/brand/ekstep.png',
+        brands: { upsdm: { footerLogo: '/brand/upsdm.png' } },
+      },
+    };
+    expect(resolveBrandMeta('blue_dot', 'upsdm', reg as any).footerLogo).toBe('/brand/upsdm.png');
+  });
 });

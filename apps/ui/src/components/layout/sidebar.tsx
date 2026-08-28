@@ -14,12 +14,9 @@ import {
   SidebarMenuButton,
   SidebarMenuItem,
   SidebarHeader,
-  SidebarFooter,
   SidebarSeparator,
 } from '@/components/ui/sidebar';
-import { useNetworkTheme } from '@/theme/theme-provider';
-import { useThemeMode } from '@/theme/mode-provider';
-import { resolveBrandMeta } from '@/theme/brand-meta';
+import { SidebarBrandFooter } from './sidebar-brand-footer';
 import { PortalHeader } from './portal-header';
 import { LayoutGrid, Plus, Network, ChevronRight, Activity } from 'lucide-react';
 import { usePendingActionsCount } from '@/hooks/use-actions';
@@ -158,17 +155,6 @@ export function AppSidebar({
   }
 
   const showNetworkSelector = networks.length > 0;
-
-  // Optional "seeded by" footer mark — opt-in per network/brand via brand.json's
-  // footerLogo / footerLogoLight (the light variant is used in dark mode). Absent
-  // ⇒ nothing is rendered, so this is not tied to any specific network.
-  const { themeId, brand } = useNetworkTheme();
-  const { resolved } = useThemeMode();
-  const brandMeta = resolveBrandMeta(themeId, brand);
-  const footerLogoSrc =
-    resolved === 'dark'
-      ? brandMeta.footerLogoLight ?? brandMeta.footerLogo
-      : brandMeta.footerLogo;
 
   return (
     <ShadcnSidebar>
@@ -396,16 +382,7 @@ export function AppSidebar({
         </SidebarGroup>
         </nav>
       </SidebarContent>
-      {footerLogoSrc && (
-        <SidebarFooter className="px-4 py-4">
-          <img
-            src={footerLogoSrc}
-            alt=""
-            aria-hidden="true"
-            className="h-auto w-36 self-start opacity-90"
-          />
-        </SidebarFooter>
-      )}
+      <SidebarBrandFooter />
     </ShadcnSidebar>
   );
 }
