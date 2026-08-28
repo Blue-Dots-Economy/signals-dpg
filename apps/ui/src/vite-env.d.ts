@@ -69,9 +69,11 @@ declare const __DEFAULT_NETWORK_THEME__: string;
 declare const __DEFAULT_BRAND__: string;
 declare const __BRAND_REGISTRY__: Record<string, {
   faviconType?: 'png' | 'svg';
-  logoShape?: 'square' | 'wordmark';
+  logoShape?: 'square' | 'wordmark' | 'lockup';
   copy?: Record<string, string>;
-  brands?: Record<string, { faviconType?: 'png' | 'svg'; logoShape?: 'square' | 'wordmark'; copy?: Record<string, string> }>;
+  footerLogo?: string;
+  footerLogoLight?: string;
+  brands?: Record<string, { faviconType?: 'png' | 'svg'; logoShape?: 'square' | 'wordmark' | 'lockup'; copy?: Record<string, string>; footerLogo?: string; footerLogoLight?: string }>;
 }>;
 
 interface ImportMeta {

@@ -19,13 +19,24 @@ export interface BrandMeta {
   faviconType: FaviconType;
   logoShape: LogoShape;
   copy: Record<string, string>;
+  /**
+   * Optional "seeded by" mark rendered at the bottom of the sidebar. Absent
+   * (null) ⇒ no footer logo — it's opt-in per network/brand via brand.json's
+   * `footerLogo` / `footerLogoLight` (light = the dark-mode variant).
+   */
+  footerLogo: string | null;
+  footerLogoLight: string | null;
 }
 
-type Entry = {
+type MetaFields = {
   faviconType?: FaviconType;
   logoShape?: LogoShape;
   copy?: Record<string, string>;
-  brands?: Record<string, { faviconType?: FaviconType; logoShape?: LogoShape; copy?: Record<string, string> }>;
+  footerLogo?: string;
+  footerLogoLight?: string;
+};
+type Entry = MetaFields & {
+  brands?: Record<string, MetaFields>;
 };
 export type BrandRegistry = Record<string, Entry>;
 
@@ -40,5 +51,7 @@ export function resolveBrandMeta(
     faviconType: brand?.faviconType ?? net?.faviconType ?? 'svg',
     logoShape: brand?.logoShape ?? net?.logoShape ?? 'wordmark',
     copy: { ...(net?.copy ?? {}), ...(brand?.copy ?? {}) },
+    footerLogo: brand?.footerLogo ?? net?.footerLogo ?? null,
+    footerLogoLight: brand?.footerLogoLight ?? net?.footerLogoLight ?? null,
   };
 }
