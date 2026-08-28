@@ -402,7 +402,7 @@ export function AppSidebar({
             src={footerLogoSrc}
             alt=""
             aria-hidden="true"
-            className="h-12 w-auto self-start opacity-90"
+            className="h-auto w-36 self-start opacity-90"
           />
         </SidebarFooter>
       )}
