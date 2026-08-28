@@ -16,6 +16,7 @@ import {
   SidebarHeader,
   SidebarSeparator,
 } from '@/components/ui/sidebar';
+import { SidebarBrandFooter } from './sidebar-brand-footer';
 import { PortalHeader } from './portal-header';
 import { LayoutGrid, Plus, Network, ChevronRight, Activity } from 'lucide-react';
 import { usePendingActionsCount } from '@/hooks/use-actions';
@@ -381,6 +382,7 @@ export function AppSidebar({
         </SidebarGroup>
         </nav>
       </SidebarContent>
+      <SidebarBrandFooter />
     </ShadcnSidebar>
   );
 }
