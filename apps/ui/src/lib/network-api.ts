@@ -1,6 +1,7 @@
 import type { FetchItemsQuery, FetchItemsResponse, Item, ItemLocation } from './item-api';
 import type { DotNetworkSchema } from '../engine/types';
 import { createApiClient } from './api-client';
+import { getRuntimeEnv } from '@/lib/runtime-env';
 
 interface CachedSchemaEntry {
   cache_key: string;
@@ -21,7 +22,7 @@ const networkApiClient = createApiClient();
 const DEFAULT_PROFILE_FETCH_LIMIT = 1000;
 
 export function resolveProfileFetchLimit(): number {
-  const raw = import.meta.env.VITE_PROFILE_FETCH_LIMIT;
+  const raw = getRuntimeEnv('VITE_PROFILE_FETCH_LIMIT');
   if (raw === undefined || raw === '') return DEFAULT_PROFILE_FETCH_LIMIT;
   const parsed = Number(raw);
   if (!Number.isFinite(parsed) || parsed <= 0) return DEFAULT_PROFILE_FETCH_LIMIT;

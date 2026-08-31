@@ -2,6 +2,8 @@ import i18next from 'i18next';
 import LanguageDetector from 'i18next-browser-languagedetector';
 import { initReactI18next } from 'react-i18next';
 
+import { getRuntimeEnv } from '@/lib/runtime-env';
+
 // Eagerly import all locale JSON files. `import: 'default'` makes each value
 // the parsed JSON object itself — without it, eager glob yields the module
 // namespace ({ default: {...} }), which would bury every translation key one
@@ -26,8 +28,16 @@ for (const path of Object.keys(modules)) {
   };
 }
 
-// Parse VITE_ENABLED_LANGUAGES env var
-const rawEnabled = import.meta.env.VITE_ENABLED_LANGUAGES;
+// Parse VITE_ENABLED_LANGUAGES.
+//
+// `getRuntimeEnv` reads the chart's runtime config (window.__DPG_UI_CONFIG__,
+// served from /config.js) and falls back to the build-time value. Reading
+// `import.meta.env` directly does NOT work for a deployed instance: Vite
+// inlines it at build time and CI publishes the UI image with no VITE_ build
+// args, so every deployment fell through to DEFAULT_ENABLED_CODES no matter
+// what the chart set. Runtime config is what lets ONE image serve en,hi in one
+// region and en,hi,kn in another.
+const rawEnabled = getRuntimeEnv('VITE_ENABLED_LANGUAGES');
 const enabledCodes: string[] =
   rawEnabled
     ?.split(',')

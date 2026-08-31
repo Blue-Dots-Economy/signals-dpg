@@ -87,7 +87,8 @@ Each file is a flat JSON of dotted keys, plus a reserved `_name` holding the lan
 
 - **`VITE_ENABLED_LANGUAGES`** (e.g. `en,kn,hi`) — comma-separated codes, in display order. This controls which languages the dropdown offers and which i18next treats as supported (`supportedLngs`).
 - `index.ts` uses `import.meta.glob('./locales/*.json', { eager: true })` to bundle every locale file. `use-languages.ts` intersects the globbed files with `VITE_ENABLED_LANGUAGES` and reads each file's `_name` to build `[{ code, name }]` for the dropdown.
-- **Convenience fallback:** if `VITE_ENABLED_LANGUAGES` is unset, the dropdown shows **all** discovered locale files. So in dev, dropping in a new `fr.json` makes French appear immediately; in a controlled deployment, the env var pins the exact set. (This honors both "explicit control" and "just add a file.")
+- **Unset fallback:** if `VITE_ENABLED_LANGUAGES` is unset, the dropdown shows the curated `DEFAULT_ENABLED_CODES = ['en', 'hi']` (`index.ts`), intersected with the discovered locale files — **not** all discovered locales. This changed in #194; retained-but-inactive locales such as `kn` therefore stay off until a deployment names them explicitly. Dropping in a new `fr.json` alone does *not* surface French; add the code to `VITE_ENABLED_LANGUAGES` as well.
+- **Where the value is read from:** runtime config (`window.__DPG_UI_CONFIG__.VITE_ENABLED_LANGUAGES`, written by the chart into `/config.js`) takes precedence over the build-time `import.meta.env` value. Build-time alone cannot configure a deployed instance — Vite inlines it and CI publishes the UI image with no `VITE_` build args — so a deployment sets this via the chart's `ui.runtimeConfig`, not a pod env var.
 - The dropdown is a small `Select`/`DropdownMenu` (reuse existing `@/components/ui/*`) in `top-bar.tsx`, showing the current language's `_name`; selecting calls `i18n.changeLanguage(code)`.
 
 ---
@@ -152,7 +153,7 @@ After each phase, every touched string is replaced with `t('key')` and added to 
 
 | Env var | Purpose | Default |
 |---------|---------|---------|
-| `VITE_ENABLED_LANGUAGES` | Comma-separated language codes shown in the dropdown, in order | (unset → all discovered locale files) |
+| `VITE_ENABLED_LANGUAGES` | Comma-separated language codes shown in the dropdown, in order. Set via the chart's `ui.runtimeConfig` (runtime config wins over build-time). | (unset → `en,hi`) |
 
 ---
 
