@@ -1,83 +1,149 @@
 /**
- * `SelectWidget` for single-value enum fields: the theme's own select, plus a
- * way back to empty.
+ * `SelectWidget` for enum fields: a keyboard-navigable dropdown that an
+ * optional field can be cleared back out of.
  *
- * Once a value had been picked there was no way to unpick it. Every entry in
- * `@rjsf/shadcn`'s `FancySelect` dropdown sets a value, and re-clicking the
- * current one just re-sets it — so an optional field stayed answered on the
- * strength of a single mis-click, with no path back to "not answered". RJSF's
- * own HTML `<select>` widget adds an empty option for exactly this reason when
- * a field isn't required; `FancySelect` renders only the enum options.
+ * Replaces `@rjsf/shadcn`'s `FancySelect` for the single-value case, which had
+ * two defects, both inside the vendored package and so unreachable from a
+ * wrapper:
  *
- * Rather than reimplement the select (and lose its dropdown, keyboard handling
- * and check-mark styling, or fork it into this repo), this composes the theme
- * widget and overlays a clear button on its trigger. The button is a SIBLING
- * of the trigger, not a child: `FancySelect` renders its trigger as a
- * `<button>`, and a button nested inside a button is invalid HTML that
- * browsers resolve by dropping the inner one.
+ *  - **Arrow keys did nothing visible.** `FancySelect` is a `cmdk` `Command`
+ *    whose trigger is a plain button. Arrow keys do reach `Command`'s own
+ *    handler and move its internal cursor, but `cmdk` only follows focus to
+ *    the item when the active element carries `cmdk-input` or `cmdk-root` —
+ *    the trigger carries neither — and its `CommandItem` had no
+ *    `data-selected` styling, so nothing on screen changed.
+ *  - **Enter could not select.** The trigger's own `onKeyDown` calls
+ *    `stopPropagation()` on Enter, so `Command` never saw it and never
+ *    dispatched its select event. Keyboard-only users could open the dropdown
+ *    and never choose from it.
  *
- * `multiple` (array-of-enum) fields fall straight through — those render
- * `FancyMultiSelect`, whose chips are individually removable already.
+ * Built instead on the app's own `ui/select` (Radix), which is what the
+ * language switcher and birth-year select already use: arrow keys, typeahead,
+ * Home/End, Escape and a visible highlight all come from the primitive rather
+ * than being reimplemented here.
+ *
+ * `multiple` (array-of-enum) fields still fall through to the theme widget —
+ * those render `FancyMultiSelect`, which has a real `CommandInput` and so does
+ * get `cmdk`'s keyboard handling, and whose chips are individually removable.
  */
 import { X } from 'lucide-react';
 import { Widgets } from '@rjsf/shadcn';
-import type { WidgetProps } from '@rjsf/utils';
+import {
+  enumOptionsIndexForValue,
+  enumOptionsValueForIndex,
+  type EnumOptionsType,
+  type WidgetProps,
+} from '@rjsf/utils';
 import { useTranslation } from 'react-i18next';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import { cn } from '@/lib/utils';
 
 const ThemeSelectWidget = Widgets.SelectWidget;
 
-/** True when the field holds something a reader would call a value. */
-function hasValue(value: unknown): boolean {
-  // Not a truthiness check: an enum of numbers or booleans can legitimately
-  // hold `0` or `false`, and those are answers like any other.
-  return value !== undefined && value !== null && value !== '';
-}
-
 export function ClearableSelectWidget(props: WidgetProps) {
   const { t } = useTranslation();
-  const { multiple, required, disabled, readonly, value, onChange, options } = props;
+  const {
+    id,
+    value,
+    required,
+    disabled,
+    readonly,
+    multiple,
+    autofocus,
+    onChange,
+    onBlur,
+    onFocus,
+    options,
+    placeholder,
+    rawErrors = [],
+  } = props;
 
-  // Only offered where clearing is both allowed and meaningful: a single-value
-  // optional field that currently holds something and isn't locked. A required
-  // field is deliberately excluded — emptying it is not a state it may hold,
-  // so the button would invite a validation error rather than a choice.
-  const clearable =
-    !multiple && !required && !disabled && !readonly && hasValue(value);
+  if (multiple) return <ThemeSelectWidget {...props} />;
 
-  if (!clearable) return <ThemeSelectWidget {...props} />;
+  const enumOptions = (options.enumOptions ?? []) as EnumOptionsType[];
+  const enumDisabled = options.enumDisabled as EnumOptionsType['value'][] | undefined;
+
+  // Radix addresses items by string, and an enum's values can be numbers or
+  // booleans, so the option's *index* is the item value — RJSF's own helpers
+  // do that translation for every other theme too. `''` (no match) is exactly
+  // what Radix reads as "no selection", so it shows the placeholder.
+  const selectedIndex = (enumOptionsIndexForValue(value, enumOptions, false) as string) ?? '';
+
+  // Only offered where clearing is both allowed and meaningful: an optional
+  // field that currently holds something and isn't locked. A required field is
+  // deliberately excluded — emptying it is not a state it may hold, so the
+  // button would invite a validation error rather than offer a choice.
+  const clearable = !required && selectedIndex !== '' && !disabled && !readonly;
 
   return (
-    <div
-      // `pr-11` on the trigger keeps a long selected label from sliding under
-      // the button. Applied by descendant selector rather than through
-      // `props.className`, which the theme widget also puts on its wrapping
-      // `Command` element — the same `aria-haspopup=listbox` targeting the
-      // form's own left-align fix uses.
-      className="relative [&_button[aria-haspopup=listbox]]:pr-11"
-    >
-      <ThemeSelectWidget {...props} />
-      <button
-        type="button"
-        // `emptyValue` rather than a bare `undefined`, matching what the theme
-        // widget's own `enumOptionValueDecoder` falls back to. With no
-        // `ui:emptyValue` set (the norm) it IS `undefined`, and RJSF then drops
-        // the key from `formData` instead of storing an empty string.
-        onClick={() => onChange(options.emptyValue)}
-        aria-label={t('form.clear_selection')}
-        title={t('form.clear_selection')}
-        className={cn(
-          // `top-0.5` + `h-9` mirror the theme widget's own `p-0.5` wrapper and
-          // its `h-9` trigger, so the icon lands centred on the trigger and not
-          // on the taller box that includes the option description below it.
-          'absolute right-8 top-0.5 flex h-9 w-6 items-center justify-center',
-          'rounded-md text-muted-foreground transition-colors',
-          'hover:bg-muted hover:text-foreground',
-          'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
-        )}
+    <div className="relative">
+      <Select
+        value={selectedIndex}
+        onValueChange={(index) =>
+          onChange(enumOptionsValueForIndex(index, enumOptions, options.emptyValue))
+        }
+        disabled={disabled || readonly}
+        required={required}
       >
-        <X className="h-3.5 w-3.5" aria-hidden="true" />
-      </button>
+        <SelectTrigger
+          id={id}
+          autoFocus={autofocus}
+          onBlur={() => onBlur(id, value)}
+          onFocus={() => onFocus(id, value)}
+          aria-invalid={rawErrors.length > 0 || undefined}
+          // Padding goes on the VALUE, not the trigger. Padding the trigger
+          // moves the chevron inward — which is what left the first version of
+          // this button sitting outside the chevron, at the very edge of the
+          // field. The value is `flex-1`, so this reserves the button's space
+          // between a long label and a chevron that hasn't moved.
+          className={cn(clearable && '*:data-[slot=select-value]:pr-7')}
+        >
+          <SelectValue placeholder={placeholder || t('form.select_placeholder')} />
+        </SelectTrigger>
+        <SelectContent>
+          {enumOptions.map(({ value: optionValue, label }, index) => (
+            <SelectItem
+              key={`${index}-${label}`}
+              value={String(index)}
+              disabled={Array.isArray(enumDisabled) && enumDisabled.includes(optionValue)}
+            >
+              {label}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+      {clearable && (
+        <button
+          type="button"
+          // `emptyValue`, matching what `enumOptionsValueForIndex` falls back
+          // to above. With no `ui:emptyValue` set (the norm) it IS `undefined`,
+          // and RJSF then drops the key from `formData` rather than storing an
+          // empty string — which is what "not answered" means downstream.
+          onClick={() => onChange(options.emptyValue)}
+          aria-label={t('form.clear_selection')}
+          title={t('form.clear_selection')}
+          // Overlaid on the trigger, not nested in it: Radix's trigger is
+          // itself a `<button>`, and a button inside a button is invalid HTML
+          // that browsers resolve by dropping the inner one. `inset-y-0 my-auto`
+          // centres it on the trigger whatever height the trigger resolves to,
+          // and `right-8` clears the chevron (12px padding + 16px icon = 28px)
+          // without depending on the trigger's own padding.
+          className={cn(
+            'absolute inset-y-0 right-8 my-auto flex size-6 items-center justify-center',
+            'rounded-md text-muted-foreground transition-colors',
+            'hover:bg-muted hover:text-foreground',
+            'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+          )}
+        >
+          <X className="size-3.5" aria-hidden="true" />
+        </button>
+      )}
     </div>
   );
 }

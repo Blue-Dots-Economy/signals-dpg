@@ -387,6 +387,7 @@
   "form.invalid_url": "ಮಾನ್ಯವಾದ ಲಿಂಕ್ ಅನ್ನು ನಮೂದಿಸಿ, ಉದಾ. https://example.com",
   "form.invalid_format": "ದಯವಿಟ್ಟು ಮಾನ್ಯವಾದ {{field}} ನಮೂದಿಸಿ.",
   "form.clear_selection": "ಆಯ್ಕೆಯನ್ನು ತೆರವುಗೊಳಿಸಿ",
+  "form.select_placeholder": "ಆಯ್ಕೆಮಾಡಿ…",
   "consent.title_gate": "ಮುಂದುವರಿಯಲು ಪರಿಶೀಲಿಸಿ ಮತ್ತು ಸ್ವೀಕರಿಸಿ",
   "consent.title_view": "ಗೌಪ್ಯತಾ ನೀತಿ ಮತ್ತು ನಿಯಮಗಳು",
   "consent.desc_gate": "ದಯವಿಟ್ಟು ಗೌಪ್ಯತಾ ನೀತಿ ಮತ್ತು ನಿಯಮಗಳನ್ನು ಓದಿ. ಮುಂದುವರಿಯುವ ಮೊದಲು ನೀವು ಒಪ್ಪಬೇಕು.",

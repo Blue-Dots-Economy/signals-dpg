@@ -10,11 +10,20 @@
  * fire under happy-dom (same reason `schema-form.test.tsx` overrides it).
  * @vitest-environment jsdom
  */
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import type { RJSFSchema } from '@rjsf/utils';
 import { SchemaForm } from '../../schema-form';
+
+// Radix's Select calls these on the trigger; neither jsdom nor happy-dom
+// implements them, and without the stubs opening the dropdown throws.
+beforeEach(() => {
+  Element.prototype.scrollIntoView = vi.fn();
+  Element.prototype.hasPointerCapture = vi.fn().mockReturnValue(false);
+  Element.prototype.setPointerCapture = vi.fn();
+  Element.prototype.releasePointerCapture = vi.fn();
+});
 
 const CLEAR = 'Clear selection';
 
@@ -96,17 +105,43 @@ describe('clearable enum fields', () => {
     expect(screen.queryByRole('button', { name: CLEAR })).not.toBeInTheDocument();
   });
 
-  it('still renders the field and its options after clearing', async () => {
+  it('shows the placeholder again after clearing, on the cleared field itself', async () => {
     const user = userEvent.setup();
-    render(
+    const { container } = render(
       <SchemaForm schema={schema} formData={{ fruit: 'apple', gender: 'male' }} onSubmit={vi.fn()} />,
     );
+    const gender = () => container.querySelector('#root_gender')!;
+    expect(gender()).toHaveTextContent('male');
 
     await user.click(screen.getByRole('button', { name: CLEAR }));
 
-    // The placeholder is back and the dropdown still works, so the field is
-    // re-answerable rather than merely emptied.
-    expect(screen.getByText('Select...')).toBeInTheDocument();
+    // Scoped to this field's own trigger: an unscoped `getByText('Select…')`
+    // also matches the multi-select's placeholder and passes either way.
+    expect(gender()).toHaveTextContent('Select');
+    expect(gender()).not.toHaveTextContent('male');
     expect(screen.queryByRole('button', { name: CLEAR })).not.toBeInTheDocument();
+  });
+
+  it('picks a value with the arrow keys and Enter, without a mouse', async () => {
+    // The reason this widget exists on Radix rather than the theme's cmdk
+    // select: there, arrows moved an invisible cursor and the trigger's own
+    // handler swallowed Enter, so a keyboard user could open the dropdown and
+    // never choose from it.
+    const user = userEvent.setup();
+    const onSubmit = vi.fn();
+    const { container } = render(
+      <SchemaForm schema={schema} formData={{ fruit: 'apple' }} onSubmit={onSubmit} />,
+    );
+
+    (container.querySelector('#root_gender') as HTMLElement).focus();
+    await user.keyboard('{Enter}');
+    await user.keyboard('{ArrowDown}{Enter}');
+
+    expect(container.querySelector('#root_gender')).toHaveTextContent(/male|female/);
+
+    await user.click(screen.getByRole('button', { name: /save|submit/i }));
+    expect(onSubmit).toHaveBeenCalled();
+    const submitted = onSubmit.mock.calls[0]![0] as Record<string, unknown>;
+    expect(submitted.gender).toBeDefined();
   });
 });
