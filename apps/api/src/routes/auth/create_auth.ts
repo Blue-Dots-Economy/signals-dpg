@@ -12,9 +12,7 @@ import { db } from '@api/db/postgres/drizzle_config';
 import { redis } from '@api/db/secondary/redis';
 import { getNotificationClient } from '@/utils/notificationClient';
 import { getDefaultEmailSender } from '@/notifications/email/dispatch_email';
-import { materializeSignupGuardian } from '@/services/signup_guardian';
-import { sendWelcomeNotifications } from '@/notifications/welcome';
-import { resolveSignupDomain } from '@/notifications/resolve_signup_domain';
+import { runAfterUserCreate } from '@/services/auth/on_user_created';
 
 export const authInstance = createAuth({
   appName: instance.INSTANCE_NAME ?? 'DPG',
@@ -88,30 +86,6 @@ export const authInstance = createAuth({
   //     packages/auth so the Keycloak path (which never runs better-auth) sends
   //     the identical messages — see notifications/welcome.ts.
   afterUserCreate: async ({ user }) => {
-    try {
-      await materializeSignupGuardian(user);
-    } catch (err) {
-      console.error('materializeSignupGuardian failed:', err);
-    }
-
-    // Signup domain (from the parked signup extras — the user's `domains` row
-    // isn't written until later) picks the role-correct welcome copy;
-    // best-effort, null ⇒ generic copy. See resolve_signup_domain.ts.
-    const signupDomain = await resolveSignupDomain({
-      email: user.email ?? null,
-      phoneNumber: user.phoneNumber ?? null,
-    });
-
-    await sendWelcomeNotifications(
-      {
-        name: user.name,
-        email: user.email ?? null,
-        phoneNumber: user.phoneNumber ?? null,
-      },
-      // No request context in a module-level hook, so failures go to the
-      // console here exactly as the surrounding code already does.
-      { error: (details, message) => console.error(message, details) },
-      signupDomain
-    );
+    await runAfterUserCreate(user);
   },
 });
