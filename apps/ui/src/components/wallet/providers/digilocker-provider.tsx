@@ -6,7 +6,29 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { registerWalletProvider } from '@/engine/wallet/wallet-registry';
 import type { WalletImportProviderProps, WalletProvider } from '@/engine/wallet/types';
-import { digiLockerApi, isDigiLockerConfigured } from '@/lib/digilocker-api';
+import {
+  digiLockerApi,
+  getDigiLockerCallbackOrigins,
+  isDigiLockerConfigured,
+} from '@/lib/digilocker-api';
+
+/**
+ * Shape of an OAuth 2.0 authorization code, used to keep a malformed or hostile
+ * cross-window payload from being forwarded to the agent as a "code".
+ *
+ * RFC 6749 defines the code as `1*VSCHAR`, and `VSCHAR = %x20-7E` — which does
+ * include the space character. `[!-~]` (`%x21-7E`) is therefore deliberately
+ * one character stricter than the RFC: a space arriving here is essentially
+ * always a `+` that `URLSearchParams.get()` decoded, not something the issuer
+ * sent, and forwarding it would fail at the agent anyway.
+ *
+ * The length bound is a sanity limit on untrusted input, not a spec limit —
+ * neither the Meri Pehchaan nor the DigiLocker partner API publishes a maximum
+ * code length, so it is set far above any realistic code (~50x a typical one)
+ * rather than guessed tight. A code that misses either check is still shown to
+ * the user (see the message handler) instead of being dropped in silence.
+ */
+const AUTH_CODE_PATTERN = /^[!-~]{1,4096}$/;
 
 function extractCode(value: string): string {
   const trimmed = value.trim();
@@ -45,6 +67,11 @@ function detectCodeFromMessage(data: unknown): string | null {
   } catch {
     return null;
   }
+}
+
+/** Whether a code lifted out of a bridge message is shaped like an auth code. */
+function isAuthCodeShaped(code: string): boolean {
+  return AUTH_CODE_PATTERN.test(code);
 }
 
 function DigiLockerProvider({ onSuccess, onCancel }: WalletImportProviderProps) {
@@ -104,10 +131,19 @@ function DigiLockerProvider({ onSuccess, onCancel }: WalletImportProviderProps) 
   );
 
   React.useEffect(() => {
+    // Any window can postMessage to us, so the payload is only trusted when it
+    // came from an origin the DigiLocker callback can legitimately run on.
+    const allowedOrigins = new Set(getDigiLockerCallbackOrigins());
     const handleMessage = (event: MessageEvent) => {
+      if (!allowedOrigins.has(event.origin)) return;
       const detectedCode = detectCodeFromMessage(event.data);
       if (!detectedCode) return;
+      // Fill the field either way. A code that fails the shape check is not
+      // auto-submitted, but it stays visible so the user can check it and use
+      // the manual-paste button — rather than the panel sitting on "waiting…"
+      // until the ten-minute timeout with no signal that anything arrived.
       setAuthCode(detectedCode);
+      if (!isAuthCodeShaped(detectedCode)) return;
       cleanupPopup(true);
       void completeImport(detectedCode);
     };

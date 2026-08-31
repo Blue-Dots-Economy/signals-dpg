@@ -121,11 +121,15 @@ const bulkItem = (over: Partial<BulkGateItem> & { index: number }): BulkGateItem
   ...over,
 });
 
-/** Re-implements the gate's documented scope rule: sha256 of the SORTED tuples. */
+/**
+ * Re-implements the gate's documented scope rule: sha256 of the SORTED tuples.
+ * Sorted by code point (not `localeCompare`) — the hash has to be identical
+ * across processes and locales for the guardian's one OTP to re-match.
+ */
 const expectedBulkScope = (ward: string, network: string, tuples: string[]) =>
   `guardian_action_bulk:${ward}:${network}:` +
   createHash('sha256')
-    .update([...tuples].sort().join(','))
+    .update([...tuples].sort((a, b) => (a < b ? -1 : a > b ? 1 : 0)).join(','))
     .digest('hex');
 
 beforeEach(() => {
@@ -230,6 +234,26 @@ describe('guardianBulkActionGate — batch scope (#393)', () => {
     ]);
     expect(issueGuardianOtp.mock.calls[0][0].scope).toBe(expected);
     expect(issueGuardianOtp.mock.calls[1][0].scope).toBe(expected);
+  });
+
+  it('sorts tuples by code point, not locale collation, so the scope is locale-stable', async () => {
+    getWardAge.mockResolvedValue(11);
+    issueGuardianOtp.mockResolvedValue(undefined);
+
+    await guardianBulkActionGate({
+      items: [
+        bulkItem({ index: 0, actionType: 'apply' }),
+        bulkItem({ index: 1, actionType: 'Bookmark' }),
+      ],
+    });
+
+    // 'B' (0x42) < 'a' (0x61) by code point, so 'Bookmark|…' leads. A
+    // `localeCompare` sort would put 'apply|…' first and change the digest —
+    // and with it the Redis scope the guardian's OTP is stored under.
+    const expected =
+      'guardian_action_bulk:ward-1:blue_dot:' +
+      createHash('sha256').update('Bookmark|src|tgt,apply|src|tgt').digest('hex');
+    expect(issueGuardianOtp.mock.calls[0][0].scope).toBe(expected);
   });
 
   it('produces a different scope when the batch membership changes', async () => {

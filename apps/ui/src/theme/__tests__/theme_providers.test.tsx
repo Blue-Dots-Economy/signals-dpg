@@ -193,7 +193,13 @@ describe('applyNetworkBrand', () => {
     const link = iconLinks()[0];
     expect(link.type).toBe('image/png');
     expect(link.getAttribute('href')).toBe('/brand/blue-dot/upsdm/favicon.png');
-    expect(meta).toEqual({ faviconType: 'png', logoShape: 'square', copy: {} });
+    expect(meta).toEqual({
+      faviconType: 'png',
+      logoShape: 'square',
+      copy: {},
+      footerLogo: null,
+      footerLogoLight: null,
+    });
   });
 
   it('uses the network-level png path (no brand segment) for the standard brand', () => {
@@ -216,6 +222,8 @@ describe('applyNetworkBrand', () => {
       faviconType: 'svg',
       logoShape: 'wordmark',
       copy: { title: 'UPSDM', tagline: 'network base' },
+      footerLogo: null,
+      footerLogoLight: null,
     });
   });
 });

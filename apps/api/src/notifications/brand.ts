@@ -42,3 +42,32 @@ export function resolveBrandColor(networkId: string | null | undefined): string 
   if (!networkId) return DEFAULT_BRAND_COLOR;
   return BRAND_COLOR[networkId] ?? DEFAULT_BRAND_COLOR;
 }
+
+/**
+ * Builds the per-recipient CTA resolver.
+ *
+ * Which portal a mail should link to depends on the RECIPIENT's own domain —
+ * the seeker's "your application was sent" mail belongs on the seeker portal
+ * and the provider's "a seeker applied" mail on the provider portal — so this
+ * cannot be resolved once per process the way it used to be (#569).
+ *
+ * Falls back to the single `FRONTEND_BASE_URL` front-door on a miss. On a split
+ * deployment that host is blocked, so the fallback is a link that does not
+ * work; it is kept anyway because the alternative for a CTA-shell mail is
+ * sending no email at all or changing the template. The boot-time
+ * unknown-domain warning is what tells an operator a mapping is missing.
+ *
+ * @param byDomain - Inverted host bindings; `{}` on a single-host install.
+ * @param fallbackBaseUrl - `FRONTEND_BASE_URL`, when set.
+ * @returns A resolver returning the login URL, or undefined when nothing is configured.
+ */
+export function createCtaUrlResolver(opts: {
+  byDomain: Record<string, string>;
+  fallbackBaseUrl?: string;
+}): (domain: string) => string | undefined {
+  const { byDomain, fallbackBaseUrl } = opts;
+  return (domain: string) => {
+    const origin = byDomain[domain] ?? fallbackBaseUrl;
+    return origin ? buildCtaUrl(origin) : undefined;
+  };
+}

@@ -8,6 +8,12 @@ name: signals-dpg
 #
 #   Infra    postgres (pgvector + postgis), redis (password-protected)
 #   signals  signals-bootstrap (one-shot: schema + init) -> signals-api -> signals-ui
+#   search   signals-search api + worker + a TEI embedding server  (--profile search)
+#
+# signals-search is OPT-IN behind `--profile search` rather than always-on. The
+# embedding server alone wants 3-8 GB (bge-m3 loads a ~2.3 GB ONNX model on CPU),
+# which would roughly double this stack's memory floor for a developer who only
+# wants the API and UI. See LOCAL_SETUP.md §7.
 #
 # This file lives at signals-dpg/local-setup/ and builds only THIS repo, so its
 # build contexts are `..` (the repo root). No sibling repos required.
@@ -27,6 +33,8 @@ name: signals-dpg
 #   Redis         localhost:5555          (password-protected)
 #   Keycloak      localhost:8080          (opt-in: --profile keycloak)
 #   Mailpit UI    localhost:8025          (opt-in: catches email OTPs)
+#   Search API    localhost:3100          (opt-in: --profile search)
+#   Embeddings    (internal only)         (opt-in: --profile search)
 # ═══════════════════════════════════════════════════════════════════════════
 
 services:
@@ -319,6 +327,15 @@ services:
     restart: unless-stopped
     # Inherits the exact same env as the bootstrap step.
     environment: *signals-env
+    # signals-search wiring, and ONLY when the developer opts in: copy
+    # .env.search.example -> .env.search (LOCAL_SETUP.md §7.3). Deliberately a
+    # separate optional file rather than entries in the map above, because
+    # compose's mapping form has no way to omit a key when its value is empty,
+    # and MATCH_SCORE_PROVIDER is a Zod enum — an empty string fails validation
+    # and would break boot for everyone NOT running search.
+    env_file:
+      - path: .env.search
+        required: false
     ports:
       - "${API_PORT:-2742}:2742"
     depends_on:
@@ -347,11 +364,140 @@ services:
     environment:
       UI_VARIANT: signals
     ports:
-      # MUST be 5173 — the Signals API's CORS allow-list is 3000/5173/2742 only.
+      # MUST be 5173 on the host — the Signals API's CORS allow-list is
+      # 3000/5173/2742 only. Container side stays 80: the hardened image runs
+      # as uid 65532, which can still bind 80 because the hosts set
+      # net.ipv4.ip_unprivileged_port_start=0 (see apps/ui/Dockerfile).
       - "5173:80"
     depends_on:
       signals-api:
         condition: service_started
+
+  # ───────────────────────────────────────────────────────────────────────
+  # signals-search — OPT-IN: `docker compose --profile search up -d`
+  # ───────────────────────────────────────────────────────────────────────
+
+  # Embedding server. The image has BAAI/bge-m3 BAKED IN (signals-search
+  # docker/tei-bge-m3/Dockerfile), so nothing downloads the ~2.3 GB model at
+  # runtime and there is no HuggingFace dependency or rate limit. Public on
+  # GHCR — no login needed.
+  #
+  # This is the same model production runs. Do not swap it for another 1024-dim
+  # model "because the dimension matches": model_version feeds the ingest
+  # content hash, so a different model means local relevance scores that do not
+  # correspond to anything deployed.
+  tei-embeddings:
+    profiles: ["search"]
+    image: ghcr.io/blue-dots-economy/tei-bge-m3:cpu-1.7-bge-m3
+    # Both published images are amd64-only: signals-search's CI does not set
+    # `platforms:`, so it publishes just the ubuntu-latest runner's arch, and
+    # upstream HuggingFace TEI publishes no arm64 cpu-* tag at all. Without this
+    # line, `docker pull` on an arm64 machine (Apple Silicon) fails outright with
+    # "no matching manifest for linux/arm64/v8" and the profile cannot start.
+    #
+    # Emulation is viable, and measured, not assumed: on an M-series host this
+    # image loads bge-m3 and serves a 1024-dim embedding ~35s after start, and is
+    # not OOM-killed. Expect embeddings to be slower than on amd64 — fine for
+    # local development, and there is no native alternative to switch to.
+    platform: linux/amd64
+    container_name: tei-embeddings
+    restart: unless-stopped
+    command:
+      - "--model-id"
+      - "BAAI/bge-m3"
+      # MUST match the revision baked into the image: the image sets
+      # HF_HUB_OFFLINE=1, so TEI loads snapshots/<revision> from disk. Without a
+      # matching --revision it tries to resolve "main" offline and fails to boot.
+      - "--revision"
+      - "${BGE_M3_REVISION:-5617a9f61b028005a4858fdac845db406aefb181}"
+      - "--port"
+      - "80"
+      # NOT optional on CPU. At TEI's default 16384, bge-m3's fp32 warmup gets
+      # OOM-killed even with 8 GB available — the container dies during startup
+      # with no obvious cause. 4096 is ample for short search texts.
+      - "--max-batch-tokens"
+      - "4096"
+    # No host port: only the search api/worker talk to it.
+    expose:
+      - "80"
+
+  # Query API. Auth is the `apikey` table in the shared Signals DB — there is no
+  # API-key env var here; mint a key per LOCAL_SETUP.md §7.4.
+  signals-search-api:
+    profiles: ["search"]
+    image: ${SIGNALS_SEARCH_IMAGE:-ghcr.io/blue-dots-economy/signals-search:develop}
+    # amd64-only image (see the note on tei-embeddings). Overridable so a native
+    # build can be used instead of emulation on arm64:
+    #   SIGNALS_SEARCH_IMAGE=signals-search:local
+    #   SEARCH_PLATFORM=linux/arm64
+    # signals-search's Dockerfile builds cleanly on arm64, so that path is real.
+    platform: ${SEARCH_PLATFORM:-linux/amd64}
+    container_name: signals-search-api
+    restart: unless-stopped
+    environment: &search-env
+      # The SAME database signals-dpg uses: signals-search reads `apikey`,
+      # `items` and `item_search` from it. A separate DB silently yields 401s
+      # and an empty index.
+      DATABASE_URL: postgres://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-postgresdb}
+      REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379
+      # Must end in /v1 — the client requests `${EMBEDDING_BASE_URL}/embeddings`.
+      EMBEDDING_BASE_URL: http://tei-embeddings:80/v1
+      EMBEDDING_MODEL: BAAI/bge-m3
+      # 1024 is not a free choice: it must equal both the model's native output
+      # dim AND item_search.embedding's vector(1024) column. The worker refuses
+      # to start otherwise. See LOCAL_SETUP.md §7.6.
+      EMBEDDING_DIM: "1024"
+      # A FILE, not a directory, and not a URL. Directory mode takes the LAST
+      # *.json for a duplicated `id`, which can silently shadow a good config.
+      NETWORK_CONFIG_PATH: /networks/network.json
+      # item_search's DDL is owned by signals-dpg and is already created by
+      # signals-bootstrap (db:init). Leave this off — the worker calls
+      # assertSchemaReady and fails fast if the table is genuinely missing.
+      RUN_MIGRATIONS: "false"
+      API_PORT: "3100"
+      # The reranker is off in production too, and would need its own ~4-6 GB.
+      RERANK_DEFAULT: "false"
+    volumes:
+      # The same network.json signals-api serves, so both agree on which
+      # domains exist and which interactions are permitted.
+      - ../examples/schemas/${SIGNALS_NETWORK:-blue_dot}/network.json:/networks/network.json:ro
+    ports:
+      - "${SEARCH_API_PORT:-3100}:3100"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      # Guarantees item_search exists before assertSchemaReady runs.
+      signals-bootstrap:
+        condition: service_completed_successfully
+
+  # Ingestion worker: consumes the Redis stream, embeds `vectorize` fields and
+  # keeps the item_search read-model current. Same image, different entrypoint.
+  signals-search-worker:
+    profiles: ["search"]
+    image: ${SIGNALS_SEARCH_IMAGE:-ghcr.io/blue-dots-economy/signals-search:develop}
+    # amd64-only image (see the note on tei-embeddings). Overridable so a native
+    # build can be used instead of emulation on arm64:
+    #   SIGNALS_SEARCH_IMAGE=signals-search:local
+    #   SEARCH_PLATFORM=linux/arm64
+    # signals-search's Dockerfile builds cleanly on arm64, so that path is real.
+    platform: ${SEARCH_PLATFORM:-linux/amd64}
+    container_name: signals-search-worker
+    restart: unless-stopped
+    command: ["node", "dist/worker/main.js"]
+    environment:
+      <<: *search-env
+      WORKER_HEALTH_PORT: "3101"
+    volumes:
+      - ../examples/schemas/${SIGNALS_NETWORK:-blue_dot}/network.json:/networks/network.json:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      signals-bootstrap:
+        condition: service_completed_successfully
 
 volumes:
   signals-postgres-data:

@@ -193,7 +193,7 @@ describe('legal content pages', () => {
     });
     const { PrivacyPage } = await import('@/pages/legal/privacy-page');
 
-    render(<PrivacyPage />);
+    render(<PrivacyPage />, { wrapper: MemoryRouter });
 
     expect(screen.getByRole('heading', { level: 1, name: 'Privacy Policy v2' })).toBeInTheDocument();
     // Markdown is actually rendered, not dumped as raw text.
@@ -217,7 +217,7 @@ describe('legal content pages', () => {
     });
     const { TermsPage } = await import('@/pages/legal/terms-page');
 
-    render(<TermsPage />);
+    render(<TermsPage />, { wrapper: MemoryRouter });
 
     expect(
       screen.getByRole('heading', { level: 1, name: 'Terms of Service v2' }),
@@ -230,7 +230,7 @@ describe('legal content pages', () => {
     mockUseConsentConfig.mockReturnValue({ config: null, isLoading: true });
     const { PrivacyPage } = await import('@/pages/legal/privacy-page');
 
-    const { container } = render(<PrivacyPage />);
+    const { container } = render(<PrivacyPage />, { wrapper: MemoryRouter });
 
     expect(container.querySelector('.animate-spin')).not.toBeNull();
     expect(screen.queryByRole('heading', { level: 1 })).not.toBeInTheDocument();
@@ -242,11 +242,11 @@ describe('legal content pages', () => {
     const { PrivacyPage } = await import('@/pages/legal/privacy-page');
     const { TermsPage } = await import('@/pages/legal/terms-page');
 
-    const privacy = render(<PrivacyPage />);
+    const privacy = render(<PrivacyPage />, { wrapper: MemoryRouter });
     expect(screen.getByText('Privacy policy unavailable.')).toBeInTheDocument();
     privacy.unmount();
 
-    render(<TermsPage />);
+    render(<TermsPage />, { wrapper: MemoryRouter });
     expect(screen.getByText('Terms of service unavailable.')).toBeInTheDocument();
   });
 });

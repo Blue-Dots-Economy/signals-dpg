@@ -19,13 +19,24 @@ export interface BrandMeta {
   faviconType: FaviconType;
   logoShape: LogoShape;
   copy: Record<string, string>;
+  /**
+   * Optional "seeded by" mark rendered at the bottom of the sidebar. Absent
+   * (null) ⇒ no footer logo — it's opt-in per network/brand via brand.json's
+   * `footerLogo` / `footerLogoLight` (light = the dark-mode variant).
+   */
+  footerLogo: string | null;
+  footerLogoLight: string | null;
 }
 
-type Entry = {
+type MetaFields = {
   faviconType?: FaviconType;
   logoShape?: LogoShape;
   copy?: Record<string, string>;
-  brands?: Record<string, { faviconType?: FaviconType; logoShape?: LogoShape; copy?: Record<string, string> }>;
+  footerLogo?: string;
+  footerLogoLight?: string;
+};
+type Entry = MetaFields & {
+  brands?: Record<string, MetaFields>;
 };
 export type BrandRegistry = Record<string, Entry>;
 
@@ -36,9 +47,19 @@ export function resolveBrandMeta(
 ): BrandMeta {
   const net = registry[networkId];
   const brand = net?.brands?.[brandSlug];
+  // footerLogo does NOT inherit network → brand (unlike favicon/logoShape/copy).
+  // The "seeded by" footer mark is a network-DEFAULT thing: a specific brand
+  // (e.g. up-gzb, ka-dhwd on blue_dot) shows it only if that brand sets its own
+  // footerLogo, otherwise it's hidden — even though the network sets one. Keyed
+  // on whether a brand entry exists (a real brand is active) vs the plain
+  // network default (no brand entry).
+  const footerFromBrand = brand
+    ? { footerLogo: brand.footerLogo ?? null, footerLogoLight: brand.footerLogoLight ?? null }
+    : { footerLogo: net?.footerLogo ?? null, footerLogoLight: net?.footerLogoLight ?? null };
   return {
     faviconType: brand?.faviconType ?? net?.faviconType ?? 'svg',
     logoShape: brand?.logoShape ?? net?.logoShape ?? 'wordmark',
     copy: { ...(net?.copy ?? {}), ...(brand?.copy ?? {}) },
+    ...footerFromBrand,
   };
 }

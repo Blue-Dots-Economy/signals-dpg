@@ -27,7 +27,7 @@ Both resolve independently through the same priority chain: `?query` param → `
 
 ## i18n
 
-`docs/design/ui-localization-design.md` covers the mechanism (i18next, `import.meta.glob`-bundled `locales/*.json`, `VITE_ENABLED_LANGUAGES` env override) accurately. One drift: the doc's example treats `en`/`kn`/`hi` as equally enabled-by-default; the code now hardcodes `DEFAULT_ENABLED_CODES = ['en', 'hi']` (`src/i18n/index.ts:40`) when the env var is unset, deliberately keeping the retained-but-inactive `kn` locale off by default (see the comment at `index.ts:38-39`). Set `VITE_ENABLED_LANGUAGES=en,hi,kn` to re-enable it. Schema-driven content (a network's own field titles) is explicitly out of scope for i18n — only UI chrome is localized.
+`docs/design/ui-localization-design.md` covers the mechanism (i18next, `import.meta.glob`-bundled `locales/*.json`, `VITE_ENABLED_LANGUAGES` override) accurately, including the unset fallback of `DEFAULT_ENABLED_CODES = ['en', 'hi']` (`src/i18n/index.ts`) that deliberately keeps the retained-but-inactive `kn` locale off. Set `VITE_ENABLED_LANGUAGES=en,hi,kn` to re-enable it — **via the chart's `ui.runtimeConfig`, not a pod env var**: the value is read from runtime config first because `import.meta.env` is inlined at build time and CI publishes the UI image with no `VITE_` build args. The same applies to `VITE_MAP_DEFAULT_CENTER` / `VITE_MAP_DEFAULT_ZOOM`. Schema-driven content (a network's own field titles) is explicitly out of scope for i18n — only UI chrome is localized.
 
 ## Data fetching
 

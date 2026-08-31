@@ -1,4 +1,4 @@
-import { afterEach, describe, it, expect, vi } from 'vitest';
+import { afterEach, beforeEach, describe, it, expect, vi } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import type { ConsentConfigDocument } from '@dpg/schemas';
@@ -45,7 +45,105 @@ const config: ConsentConfigDocument = {
       ],
     },
   },
+  u18_documents: {
+    privacy: {
+      current_version: 1,
+      versions: [
+        {
+          version: 1,
+          title: 'U18 Privacy Policy',
+          content: 'Guardian-facing privacy notice for minors.',
+          effective_from: '2024-01-01',
+        },
+      ],
+    },
+    terms: {
+      current_version: 1,
+      versions: [
+        {
+          version: 1,
+          title: 'U18 Terms of Service',
+          content: 'Guardian-facing terms for minors.',
+          effective_from: '2024-01-01',
+        },
+      ],
+    },
+    profile_creation: {
+      current_version: 1,
+      versions: [
+        {
+          version: 1,
+          statement: 'Guardian agrees to the minor profile creation.',
+          effective_from: '2024-01-01',
+        },
+      ],
+    },
+    guardian_declaration: {
+      current_version: 1,
+      versions: [
+        {
+          version: 1,
+          statement: 'I declare I am the legal guardian.',
+          effective_from: '2024-01-01',
+        },
+      ],
+    },
+  },
 };
+
+/**
+ * Gate mode now delegates to `ConsentGateBody`, which gates the checkbox on
+ * scroll-read progress (see `read-progress.ts`), not just on the checkbox
+ * itself. happy-dom performs no real layout (0x0 geometry by default), so
+ * these tests stub the scroller as fully read — the same technique
+ * `consent-gate.test.tsx`'s `stubScroller(400)` case uses — to reach the
+ * "unlocked" state deterministically before exercising the checkbox/button.
+ *
+ * Stubbed via `getBoundingClientRect`, NOT `offsetTop`/`offsetHeight` — see
+ * the equivalent note in `consent-gate.test.tsx`: offsetTop is relative to
+ * the nearest *positioned* ancestor (this dialog's own `fixed` wrapper, not
+ * the scroller), which made the gate permanently unreachable in every real
+ * browser while offsetTop-based stubs here stayed green.
+ */
+const READER_VIEWPORT_TOP = 149;
+
+function stubRect(el: Element, top: number, height: number) {
+  Object.defineProperty(el, 'getBoundingClientRect', {
+    value: () =>
+      ({
+        top,
+        height,
+        bottom: top + height,
+        left: 0,
+        right: 0,
+        width: 0,
+        x: 0,
+        y: 0,
+        toJSON: () => ({}),
+      }) as DOMRect,
+    configurable: true,
+  });
+}
+
+function stubReader(scrollTop: number) {
+  const el = screen.getByTestId('consent-reader');
+  Object.defineProperty(el, 'scrollHeight', { value: 600, configurable: true });
+  Object.defineProperty(el, 'clientHeight', { value: 200, configurable: true });
+  Object.defineProperty(el, 'scrollTop', { value: scrollTop, writable: true, configurable: true });
+  stubRect(el, READER_VIEWPORT_TOP, 200);
+  const privacy = el.querySelector<HTMLElement>('[data-consent-section="privacy"]')!;
+  stubRect(privacy, READER_VIEWPORT_TOP + 0 - scrollTop, 300);
+  const terms = el.querySelector<HTMLElement>('[data-consent-section="terms"]')!;
+  stubRect(terms, READER_VIEWPORT_TOP + 300 - scrollTop, 300);
+  fireEvent.scroll(el);
+  return el;
+}
+
+// scrollTop 400 puts the viewport bottom past both 300px sections stacked in
+// a 600px-tall document behind a 200px-tall viewport -- fully read.
+function stubReaderAsFullyRead() {
+  return stubReader(400);
+}
 
 describe('ConsentModal — gate mode', () => {
   it('Accept button is disabled until checkbox is checked, then enabled', async () => {
@@ -64,15 +162,29 @@ describe('ConsentModal — gate mode', () => {
     );
 
     const acceptBtn = screen.getByRole('button', { name: /accept/i });
-    expect(acceptBtn).toBeDisabled();
+    expect(acceptBtn).toHaveAttribute('aria-disabled', 'true');
+
+    // Fix round 3 regression pin: with REAL (non-zero, getBoundingClientRect
+    // -based) geometry and the reader genuinely NOT yet scrolled, the
+    // checkbox must stay locked. This is the assertion the earlier version
+    // of this test never made -- it went straight to stubReaderAsFullyRead()
+    // and only ever checked the unlocked side, which an offsetTop-based
+    // regression (reading position relative to the dialog's own `fixed`
+    // wrapper instead of the scroller) would have passed anyway, by
+    // coincidence, at every scroll position.
+    stubReader(0);
+    expect(screen.getByRole('checkbox')).toHaveAttribute('aria-disabled', 'true');
+
+    stubReaderAsFullyRead();
 
     const checkbox = screen.getByRole('checkbox');
+    expect(checkbox).toHaveAttribute('aria-disabled', 'false');
     await user.click(checkbox);
 
-    expect(acceptBtn).not.toBeDisabled();
+    expect(acceptBtn).toHaveAttribute('aria-disabled', 'false');
   });
 
-  it('clicking Accept calls onAccept after checking the checkbox', async () => {
+  it('clicking Accept calls onAccept after reading to the end and checking the checkbox', async () => {
     const user = userEvent.setup();
     const onAccept = vi.fn();
 
@@ -87,6 +199,8 @@ describe('ConsentModal — gate mode', () => {
       />,
     );
 
+    stubReaderAsFullyRead();
+
     const checkbox = screen.getByRole('checkbox');
     await user.click(checkbox);
 
@@ -96,9 +210,7 @@ describe('ConsentModal — gate mode', () => {
     expect(onAccept).toHaveBeenCalledOnce();
   });
 
-  it('switching tabs shows the other document content', async () => {
-    const user = userEvent.setup();
-
+  it('shows every document in one continuous scroll rather than tabs', () => {
     render(
       <ConsentModal
         open
@@ -110,13 +222,8 @@ describe('ConsentModal — gate mode', () => {
       />,
     );
 
-    // Privacy tab is active by default — its content should be visible
+    expect(screen.queryByRole('tab')).not.toBeInTheDocument();
     expect(screen.getByText('We respect your privacy.')).toBeInTheDocument();
-
-    // Click Terms tab
-    const termsTab = screen.getByRole('tab', { name: /terms of service/i });
-    await user.click(termsTab);
-
     expect(
       screen.getByText('By using this service you agree to these terms.'),
     ).toBeInTheDocument();
@@ -204,5 +311,184 @@ describe('ConsentModal — mobile (Drawer) dismissal parity', () => {
     const content = baseElement.querySelector('[data-slot="drawer-content"]') as HTMLElement;
     fireEvent.keyDown(content, { key: 'Escape' });
     expect(onOpenChange).not.toHaveBeenCalled();
+  });
+});
+
+describe('gate mode uses the guided read', () => {
+  beforeEach(() => {
+    vi.stubGlobal(
+      'ResizeObserver',
+      class {
+        observe() {}
+        disconnect() {}
+      },
+    );
+  });
+
+  it('renders no tabs in gate mode', () => {
+    render(<ConsentModal open mode="gate" initialTab="privacy" config={config} />);
+    expect(screen.queryByRole('tab')).not.toBeInTheDocument();
+    expect(screen.getByTestId('consent-reader')).toBeInTheDocument();
+  });
+
+  it('still renders tabs in view mode', () => {
+    render(
+      <ConsentModal open mode="view" initialTab="privacy" config={config} onOpenChange={vi.fn()} />,
+    );
+    expect(screen.getAllByRole('tab').length).toBeGreaterThan(0);
+  });
+
+  it('shows the U18 documents when variant is u18, not the adult ones', () => {
+    render(<ConsentModal open mode="gate" initialTab="privacy" config={config} variant="u18" />);
+    expect(screen.getByTestId('consent-reader')).toBeInTheDocument();
+
+    // U18-specific content from the fixture must be present...
+    expect(screen.getByText('U18 Privacy Policy')).toBeInTheDocument();
+    expect(
+      screen.getByText('Guardian-facing privacy notice for minors.'),
+    ).toBeInTheDocument();
+    expect(screen.getByText('U18 Terms of Service')).toBeInTheDocument();
+    expect(screen.getByText('Guardian-facing terms for minors.')).toBeInTheDocument();
+
+    // ...and the adult document set's content must NOT be, or this would only
+    // prove the reader renders *something*, not that it picked the right set.
+    expect(screen.queryByText('Privacy Policy v1')).not.toBeInTheDocument();
+    expect(screen.queryByText('We respect your privacy.')).not.toBeInTheDocument();
+    expect(screen.queryByText('Terms of Service v1')).not.toBeInTheDocument();
+    expect(
+      screen.queryByText('By using this service you agree to these terms.'),
+    ).not.toBeInTheDocument();
+  });
+
+  /**
+   * Keyboard reachability regression guard. Fix round 1 found that with the
+   * checkbox/button disabled and no close button, Radix's own
+   * `@radix-ui/react-focus-scope` (unmocked here — this exercises the real
+   * library, not a stand-in) found no tabbable candidate on open and fell
+   * back to focusing the outer, non-scrollable dialog wrapper, actively
+   * swallowing Tab. This asserts the actual consequence of that autofocus
+   * pass: `document.activeElement` must be the reader itself once the gate
+   * dialog opens. This is genuine evidence, not an assertion of intent —
+   * before the `tabIndex={0}` fix on `consent-reader`, this test failed with
+   * `document.activeElement` pointing at `[data-slot="dialog-content"]`
+   * instead (confirmed by hand while diagnosing the bug).
+   *
+   * What this test does NOT prove: that pressing the physical Tab key
+   * cycles focus in a real browser. happy-dom/jsdom do not implement the
+   * browser's native Tab-key focus-traversal algorithm, so a `fireEvent`
+   * Tab keydown here would not exercise that path — only Radix's own
+   * FocusScope effects (autofocus-on-mount, and its keydown handler used
+   * for *cycling once already inside*) run for real. The autofocus part is
+   * exactly the part that was broken, and is what's asserted below.
+   */
+  it('gives keyboard focus to the reading pane on open, not the non-scrollable wrapper', () => {
+    render(<ConsentModal open mode="gate" initialTab="privacy" config={config} />);
+    const reader = screen.getByTestId('consent-reader');
+    expect(document.activeElement).toBe(reader);
+  });
+
+  /**
+   * Structural companion to the test above: the reader must actually be a
+   * tab stop (positive `tabIndex`, not `-1` — `-1` is reachable exactly once
+   * via an imperative `.focus()` but drops out of the Tab sequence, so a
+   * user who tabs forward to the checkbox could never tab back to keep
+   * reading) and must announce as a named landmark rather than an anonymous
+   * scroller.
+   */
+  it('makes the reading pane a real, named tab stop', () => {
+    render(<ConsentModal open mode="gate" initialTab="privacy" config={config} />);
+    const reader = screen.getByTestId('consent-reader');
+    expect(reader).toHaveAttribute('tabindex', '0');
+    // `<section>` carries an implicit `region` role once it has an
+    // accessible name — no explicit `role` attribute to assert on, so this
+    // confirms the computed role directly via `getByRole`.
+    const label = reader.getAttribute('aria-label');
+    expect(label).toBeTruthy();
+    expect(screen.getByRole('region', { name: label! })).toBe(reader);
+  });
+});
+
+/**
+ * Regression guard for a Critical found in the sibling aggregator repo
+ * (apps/web): there, `useReadProgress`'s mount effect bails because the gate
+ * body renders unconditionally while the dialog is closed, so the effect's
+ * `if (!el) return` fires on a scroll container that doesn't exist yet — and
+ * because `scrollRef` is a stable ref and `measure` is memoised on stable
+ * inputs, the effect never re-runs once the dialog opens and the container
+ * appears. No listener, no observer, no measurement, ever: `allRead` stays
+ * `false` forever and the gate cannot be completed.
+ *
+ * Signals' `ConsentGateBody` (and therefore `useReadProgress`) only exists
+ * inside `ResponsiveDialog`'s children, which both underlying primitives
+ * (`@radix-ui/react-dialog`'s `Dialog.Content` and vaul's `Drawer.Content`,
+ * which itself wraps the very same `Dialog.Content`) gate behind
+ * `<Presence present={forceMount || context.open}>` — verified by reading
+ * the installed `@radix-ui/react-dialog@1.1.23` and `vaul@1.1.2` bundles
+ * directly, not assumed from docs. Neither this repo's `dialog.tsx`,
+ * `drawer.tsx`, `responsive-dialog.tsx`, nor `consent-modal.tsx` ever passes
+ * `forceMount`, so `present` reduces to `context.open`: the whole subtree,
+ * `ConsentGateBody` included, is absent from the DOM while closed and is
+ * mounted FRESH the instant `open` flips true — never present-but-hidden.
+ * That means `useReadProgress`'s mount effect always runs with the reader
+ * already in the DOM, so it can never hit the aggregator's stale-closure
+ * trap.
+ *
+ * This test exercises exactly the sequence that hid the aggregator's bug:
+ * mount closed, flip to open, then scroll to the end. It must keep passing
+ * even if this component is refactored, or it has silently regressed to the
+ * aggregator's defect.
+ */
+describe('mount-closed-then-open parity (regression guard for aggregator Critical A)', () => {
+  beforeEach(() => {
+    vi.stubGlobal(
+      'ResizeObserver',
+      class {
+        observe() {}
+        disconnect() {}
+      },
+    );
+  });
+
+  it('measures and unlocks the checkbox after opening, even though the gate first mounted closed', async () => {
+    const user = userEvent.setup();
+    const onAccept = vi.fn();
+
+    const { rerender } = render(
+      <ConsentModal
+        open={false}
+        mode="gate"
+        initialTab="privacy"
+        config={config}
+        onAccept={onAccept}
+        onOpenChange={vi.fn()}
+      />,
+    );
+
+    // Precondition: the reader is genuinely absent while closed, not just
+    // hidden -- otherwise this test would not exercise the same mount
+    // sequence as the aggregator's defect.
+    expect(screen.queryByTestId('consent-reader')).not.toBeInTheDocument();
+
+    rerender(
+      <ConsentModal
+        open={true}
+        mode="gate"
+        initialTab="privacy"
+        config={config}
+        onAccept={onAccept}
+        onOpenChange={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByTestId('consent-reader')).toBeInTheDocument();
+
+    stubReaderAsFullyRead();
+
+    const checkbox = screen.getByRole('checkbox');
+    expect(checkbox).toHaveAttribute('aria-disabled', 'false');
+    await user.click(checkbox);
+
+    const acceptBtn = screen.getByRole('button', { name: /accept/i });
+    expect(acceptBtn).toHaveAttribute('aria-disabled', 'false');
   });
 });

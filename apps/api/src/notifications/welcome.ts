@@ -20,10 +20,12 @@
  * separately so a failed SMS still let the email through).
  */
 
-import { instance, notification } from '@/config';
+import { instance, notification, uiHostBindings } from '@/config';
 import { getNotificationClient } from '@/utils/notificationClient';
 
+import { createCtaUrlResolver } from './brand';
 import { getDefaultEmailSender } from './email/dispatch_email';
+import { resolveRecipientRole } from './action_copy';
 
 /**
  * The WhatsApp template this uses is a pre-approved Twilio content template;
@@ -64,7 +66,14 @@ export interface WelcomeLog {
  */
 export async function sendWelcomeNotifications(
   recipient: WelcomeRecipient,
-  log: WelcomeLog
+  log: WelcomeLog,
+  /**
+   * The domain this account signed up into, when known. Drives which portal the
+   * welcome link points at on a split deployment (#569). Undefined for an
+   * account with no parked signup domain (migrated or admin-onboarded), which
+   * falls back to FRONTEND_BASE_URL and then to no link at all.
+   */
+  domain?: string | null
 ): Promise<void> {
   const nc = getNotificationClient();
   if (!nc) return;
@@ -77,17 +86,30 @@ export async function sendWelcomeNotifications(
     // and the HTML shell. Best-effort by registry criticality, so the catch here
     // is belt-and-braces: dispatchEmail already swallows a failed send.
     try {
+      const siteUrl = domain
+        ? createCtaUrlResolver({
+            byDomain: uiHostBindings.byDomain,
+            fallbackBaseUrl: notification.FRONTEND_BASE_URL,
+          })(domain)
+        : notification.FRONTEND_BASE_URL;
+
+      // Role-correct copy: seeker vs provider (service_provider folds into
+      // provider). Domain-less signups (migrated / admin-onboarded) fall back
+      // to the generic `welcome`.
+      const caseId = domain ? `welcome.${resolveRecipientRole(domain)}` : 'welcome';
+
       const sender = getDefaultEmailSender();
       await sender?.dispatchEmail({
-        caseId: 'welcome',
+        caseId,
         to: recipient.email,
         fromName: appName,
         variables: {
           userName: recipient.name || 'user',
           appName,
-          ...(notification.FRONTEND_BASE_URL
-            ? { siteUrl: notification.FRONTEND_BASE_URL }
-            : {}),
+          // Injected ONLY when resolvable: an empty value renders an invisible
+          // dead link, while omitting it lets renderSiteLink fall back to the
+          // words "the platform".
+          ...(siteUrl ? { siteUrl } : {}),
           teamName: appName,
         },
       });

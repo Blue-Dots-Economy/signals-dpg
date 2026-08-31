@@ -51,6 +51,7 @@ vi.mock('@/config', () => ({
     NOTIFICATION_REPLY_TO: 'reply@test.local',
     FRONTEND_BASE_URL: 'http://fe.test',
   },
+  uiHostBindings: { byDomain: {}, warnings: [] },
 }));
 
 // Throwing notification client — the whole point of the test.

@@ -17,6 +17,7 @@ import {
 import type { BulkEnvelope } from '@/lib/bulk';
 import { useAuth } from '@/contexts/auth-context';
 import { queryKeys } from '@/lib/query-keys';
+import { getRuntimeEnv } from '@/lib/runtime-env';
 
 // ─── Query Keys ───────────────────────────────────────────────────
 
@@ -36,8 +37,8 @@ export const actionKeys = queryKeys.actions;
 // 15 seconds, or `"0"` to disable polling entirely and rely on mutations).
 const DEFAULT_POLLING_INTERVAL = 60000;
 
-function resolvePollingInterval(): number | false {
-  const raw = import.meta.env.VITE_ACTION_POLL_INTERVAL_MS;
+export function resolvePollingInterval(): number | false {
+  const raw = getRuntimeEnv('VITE_ACTION_POLL_INTERVAL_MS');
   if (raw === undefined || raw === '') return DEFAULT_POLLING_INTERVAL;
   const parsed = Number(raw);
   if (!Number.isFinite(parsed) || parsed < 0) return DEFAULT_POLLING_INTERVAL;

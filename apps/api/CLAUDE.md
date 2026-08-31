@@ -33,7 +33,19 @@ Auth plugins (`auth_middleware.ts`, `validate_api_key.ts`, `validate_session.ts`
 - `acting_org.ts` (`acting_org_preHandler`) — required acting-org, used by `admin_routes.ts` / `aggregator_routes.ts`.
 - `acting_org_optional.ts` (`acting_org_preHandler_optional`) — acting-org is optional, used only by `action_routes.ts` (a non-admin actor can perform an action without acting on behalf of an org).
 
-## Notifications & support are separate small pipelines, one email sender underneath
+## Notifications & support are separate small pipelines, an email sender and an SMS sender underneath
+
+There are two send paths, both built on the same case-registry model — a
+messages/properties file → a per-case definition → a small sender that renders
+and posts to the notification service:
+
+- **Email** (`src/notifications/email/`, #529) — described below; renders full
+  copy (subject/body/CTA + HTML shell) in-repo.
+- **SMS** (`src/notifications/sms/`, #532/#535) — a parallel, provider-agnostic
+  sender. Phase 1 is **template-id + properties-driven**: the on-wire text is
+  owned by the DLT-approved template registered with the operator, so this repo
+  stores only the per-event routing and a reference body (see the SMS paragraph
+  after the email walk).
 
 `src/notifications/email/` (#529) is the single send path for every email the
 API sends: a messages file (`email/messages.default.properties`, overridable
@@ -83,9 +95,37 @@ caller:
   `dispatchEmail` — see `docs/operations/guardian-otp-templates.md`.
 
 Support has no `NotificationPlan`/`dispatcher.ts` layer above it — it builds
-its `DispatchEmailArgs` inline in the route handler — but every pipeline
+its `DispatchEmailArgs` inline in the route handler — but every email pipeline
 converges on the same sender, so copy for every email in the system lives in
 one file and is overridable without a code change.
+
+The **SMS sender** (`src/notifications/sms/`, #532/#535) mirrors that shape but
+is provider-agnostic and DLT-driven, so it renders nothing on-wire itself:
+
+- `sms/sms_templates.ts` is the SMS registry. `loadSmsTemplateIndex(layers)`
+  merges layered `.properties` texts (instance < network < brand, same
+  precedence as the email loader) into an `SmsTemplateIndex` — one entry per
+  case id, each carrying a `templateId` (the DLT/provider flow id, **empty
+  until approved**), a reference `body` (NOT sent — kept for review, a
+  dev-preview log, and drift tests), and the declared `vars`. `sms.default.properties`
+  is the bundled base layer.
+- `sms/dispatch_sms.ts`'s `createSmsSender(deps).dispatchSms(...)` is the mirror
+  of `dispatch_email.ts`: it looks up the case in the index, forwards **only**
+  the declared vars (dropping undeclared extras keeps stray PII off the wire),
+  and posts `{ channel: 'sms', template_id, to, priority, variables }` to the
+  notification service, which owns the provider (MSG91). A case with no
+  `templateId` is a **no-op skip, not an error**; the sender is best-effort and
+  never throws or blocks the triggering action, and it never logs a raw phone
+  (masked to last 4) or the raw error object (both are PII).
+- Case ids track the item-lifecycle + aggregator-onboarding events (#531/#534):
+  `profile.create` / `offer.create`, `profile.update` / `offer.update`, and
+  `account.aggregator_init` (sent when an aggregator onboards a participant).
+  `renderSmsPreview` substitutes `{{token}}`s in the reference body for the
+  non-prod dev-preview log only.
+
+> Note: `SMS_TEMPLATE_ID` (env) is a **separate** knob — the single generic
+> DLT-approved OTP template id (default `login_otp`) used by login and guardian
+> OTP sends, not the per-event lifecycle templates above.
 
 ## `action/perform` is single-object; bulk is a separate route
 

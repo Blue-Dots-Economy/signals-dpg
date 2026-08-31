@@ -4,6 +4,7 @@ import {
   parseKeycloakAcceptedClientIds,
   parseServedDomains,
   parseLoginChannels,
+  parseUiHostBindings,
 } from '@dpg/config';
 import { loadEnv } from '@/env';
 
@@ -44,6 +45,12 @@ export const apiConfig = {
   peer_fetch_timeout_ms: networkRuntime.PEER_FETCH_TIMEOUT_MS,
   schema_cache_warmup_enabled: networkRuntime.SCHEMA_CACHE_WARMUP_ENABLED,
 };
+
+/**
+ * Inverted host bindings (domain -> portal origin), parsed once at boot. The
+ * warnings are logged by `buildApp`, which is the first point a logger exists.
+ */
+export const uiHostBindings = parseUiHostBindings(notification.UI_HOST_BINDINGS);
 
 export const peerConfig = {
   shared_secret: networkRuntime.INSTANCE_SHARED_SECRET,

@@ -63,7 +63,7 @@ Step by step, as the code actually behaves
 4. **Signals notices the code.** There are three routes, which exist because
    popup callbacks are unreliable in practice:
    - *Bridge page (automatic):* a small page hosted on the callback origin
-     (`apps/ui/public/digilocker-bridge.html`) reads the code and posts it back
+     (`docs/operations/digilocker-bridge.example.html`) reads the code and posts it back
      to the opening window. Signals is listening and picks it up.
    - *Popup polling (automatic):* every second Signals peeks at the popup's URL.
      Once the popup lands back on our own origin, Signals can read the URL and
@@ -148,7 +148,12 @@ with whoever runs the agent, not with Signals.
 
 For the automatic (nicest) callback path, the operator should also host the
 bridge page at the callback origin DigiLocker is configured to redirect to. A
-working example ships at `apps/ui/public/digilocker-bridge.html`.
+working example is kept at `docs/operations/digilocker-bridge.example.html`.
+It is **not** shipped or served — it used to sit in `apps/ui/public/`, which Vite
+copies to the served root, so every deployment exposed it at
+`/digilocker-bridge.html` despite nothing in the app using it (#600). Read its
+header comment before hosting it: the `postMessage` calls target `'*'` and must
+name an exact origin first.
 
 ---
 
@@ -202,7 +207,7 @@ indistinguishable from typed data.
 | `apps/ui/src/components/wallet/wallet-import-modal.tsx` | The provider chooser |
 | `apps/ui/src/engine/wallet/wallet-registry.ts` | Small runtime registry of wallet providers |
 | `apps/ui/src/engine/wallet/types.ts` | The provider contract |
-| `apps/ui/public/digilocker-bridge.html` | Example callback bridge page |
+| `docs/operations/digilocker-bridge.example.html` | Example callback bridge page (reference only — not shipped, not served) |
 | `apps/ui/src/pages/profile-form-page.tsx` | Where the "Import Credentials" button lives |
 
 Adding another wallet provider means calling `registerWalletProvider` with a

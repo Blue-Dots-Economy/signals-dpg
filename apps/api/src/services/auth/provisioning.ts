@@ -440,7 +440,10 @@ async function createMirror(
   //
   // Runs BEFORE guardian materialization on purpose: for a gated minor the
   // guardian capture is the OTP-verified record and must win on DOB.
-  await applySignupExtras(user.id, identity, log);
+  //
+  // Captures the domain this account signed up into so the welcome mail can
+  // link to that portal (#569); previously this value was applied and dropped.
+  const signupDomain = await applySignupExtras(user.id, identity, log);
 
   await ensureOrgMembership(user.id, identity, log);
 
@@ -470,7 +473,8 @@ async function createMirror(
         email: identity.email,
         phoneNumber: identity.phoneNumber,
       },
-      log
+      log,
+      signupDomain
     );
   } catch (err) {
     log.error({ err, user_id: user.id }, 'sendWelcomeNotifications failed');
@@ -544,23 +548,27 @@ async function ensureOrgMembership(
  * the DOB step), so a Redis outage must not fail a login that has already
  * succeeded. A user with no stash — migrated, or admin-onboarded — is the
  * common case and costs one Redis read.
+ *
+ * Returns the applied domain (or `null` when there is none / nothing was
+ * applied / the lookup failed) so the caller can hand it to the welcome mail,
+ * which needs to know which portal to link (#569).
  */
 async function applySignupExtras(
   userId: string,
   identity: TokenIdentity,
   log: FastifyBaseLogger
-): Promise<void> {
+): Promise<string | null> {
   try {
     const extras = await takeSignupExtras({
       email: identity.email,
       phoneNumber: identity.phoneNumber,
     });
-    if (!extras) return;
+    if (!extras) return null;
 
     const updates: Partial<typeof userTable.$inferInsert> = {};
     if (extras.domain) updates.domains = [extras.domain];
     if (typeof extras.age === 'number') updates.age = extras.age;
-    if (Object.keys(updates).length === 0) return;
+    if (Object.keys(updates).length === 0) return null;
 
     updates.updatedAt = new Date();
     await db.update(userTable).set(updates).where(eq(userTable.id, userId));
@@ -568,7 +576,9 @@ async function applySignupExtras(
       { user_id: userId, domain: extras.domain ?? null, age: extras.age ?? null },
       'provisioning: applied parked signup details',
     );
+    return extras.domain ?? null;
   } catch (err) {
     log.error({ err, user_id: userId }, 'provisioning: could not apply parked signup details');
+    return null;
   }
 }

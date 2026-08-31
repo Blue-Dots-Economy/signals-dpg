@@ -23,6 +23,9 @@ vi.mock('@/lib/digilocker-api', () => ({
     transformCredentialSubject: vi.fn(),
   },
   isDigiLockerConfigured: () => true,
+  // The provider only trusts bridge messages from these origins; the real
+  // implementation derives them from window.location + VITE_AGENT_URL.
+  getDigiLockerCallbackOrigins: () => ['http://localhost:3000', 'https://agent.example.org'],
 }));
 
 vi.mock('@/lib/wallet-api', () => ({
@@ -313,11 +316,89 @@ describe('DigiLockerProvider', () => {
   });
 
   describe('bridge postMessage handling', () => {
-    async function postMessage(data: unknown) {
+    const TRUSTED_ORIGIN = 'http://localhost:3000';
+
+    async function postMessage(data: unknown, origin = TRUSTED_ORIGIN) {
       await act(async () => {
-        window.dispatchEvent(new MessageEvent('message', { data }));
+        window.dispatchEvent(new MessageEvent('message', { data, origin }));
       });
     }
+
+    it('ignores a bridge message posted from an untrusted origin', async () => {
+      renderDigiLocker();
+
+      await postMessage(
+        { type: 'DIGILOCKER_REDIRECT', code: 'ATTACKER_CODE' },
+        'https://evil.example.com',
+      );
+
+      expect(digilocker.completeAuth).not.toHaveBeenCalled();
+      expect(screen.getByPlaceholderText('Paste the code or redirect URL here')).toHaveValue('');
+    });
+
+    it('ignores a message with no origin (opaque/sandboxed sender)', async () => {
+      renderDigiLocker();
+
+      await postMessage({ type: 'DIGILOCKER_REDIRECT', code: 'OPAQUE_CODE' }, 'null');
+
+      expect(digilocker.completeAuth).not.toHaveBeenCalled();
+    });
+
+    it('accepts a message from the configured agent origin', async () => {
+      digilocker.completeAuth.mockResolvedValue({ data: { credentialSubject: {} } });
+      renderDigiLocker();
+
+      await postMessage(
+        { type: 'DIGILOCKER_REDIRECT', code: 'AGENT_CODE' },
+        'https://agent.example.org',
+      );
+
+      await waitFor(() => expect(digilocker.completeAuth).toHaveBeenCalledWith('AGENT_CODE'));
+    });
+
+    it('auto-imports a long code that is still within the sanity bound', async () => {
+      // Well past the length of a typical OAuth code (and past the 512 an
+      // earlier revision of this check used), but a shape the agent can be
+      // expected to handle — no published maximum exists to justify rejecting
+      // it, so it must not be dropped.
+      const longCode = `eyJhbGciOiJSUzI1NiJ9.${'x'.repeat(600)}.${'y'.repeat(342)}`;
+      digilocker.completeAuth.mockResolvedValue({ data: { credentialSubject: {} } });
+      renderDigiLocker();
+
+      await postMessage({ type: 'DIGILOCKER_REDIRECT', code: longCode });
+
+      await waitFor(() => expect(digilocker.completeAuth).toHaveBeenCalledWith(longCode));
+    });
+
+    it('shows, but does not auto-import, a code that is not auth-code shaped', async () => {
+      // A silent drop would leave the panel on "waiting…" until the ten-minute
+      // timeout with no signal, so the code is surfaced in the field for the
+      // user to check and submit by hand instead.
+      renderDigiLocker();
+      const field = screen.getByPlaceholderText('Paste the code or redirect URL here');
+
+      // A `+` in the query that `URLSearchParams.get()` decoded to a space.
+      await postMessage({ type: 'DIGILOCKER_DONE', finalUrl: 'https://app.example.org/wallet-redirect?code=ab+cd' });
+      expect(digilocker.completeAuth).not.toHaveBeenCalled();
+      expect(field).toHaveValue('ab cd');
+
+      await postMessage({ type: 'DIGILOCKER_REDIRECT', code: 'x'.repeat(4097) });
+      expect(digilocker.completeAuth).not.toHaveBeenCalled();
+      expect(field).toHaveValue('x'.repeat(4097));
+    });
+
+    it('lets the user import by hand a code the shape check refused to auto-submit', async () => {
+      digilocker.completeAuth.mockResolvedValue({ data: { credentialSubject: {} } });
+      const { onSuccess } = renderDigiLocker();
+
+      await postMessage({ type: 'DIGILOCKER_REDIRECT', code: 'ab cd' });
+      expect(digilocker.completeAuth).not.toHaveBeenCalled();
+
+      await userEvent.click(screen.getByRole('button', { name: 'Import from DigiLocker' }));
+
+      await waitFor(() => expect(onSuccess).toHaveBeenCalledTimes(1));
+      expect(digilocker.completeAuth).toHaveBeenCalledWith('ab cd');
+    });
 
     it('imports from a DIGILOCKER_REDIRECT message and fills the code field', async () => {
       digilocker.completeAuth.mockResolvedValue({ data: { credentialSubject: { name: 'Asha' } } });

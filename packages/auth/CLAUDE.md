@@ -9,6 +9,19 @@ better-auth configuration + the unified OTP plugin. Root `CLAUDE.md`'s "Auth mod
 - Redis as `secondaryStorage` (session + OTP storage — `get`/`set` proxy straight to the injected `redis` client),
 - five plugins: `openAPI`, `bearer`, `admin`, `organization`, `unifiedOtp` (the custom plugin in `plugins/unified_otp.ts`), plus `apiKey` (from `@better-auth/api-key`).
 
+## better-auth is pinned to the `1.6.x` line on purpose (`~1.6.29`)
+
+`package.json` uses `~1.6.29` for `better-auth` and `@better-auth/api-key`, **not** a caret. Do not widen it back to `^` without doing the migration below — a caret lets the resolver take `1.7.x`, which is where two contracts break (#604):
+
+- **`SecondaryStorage` gained required members.** `getAndDelete` and `increment` are optional in `@better-auth/core@1.6.x` and **required** in `1.7.x`, so the Redis adapter at `src/config.ts:70` (`get`/`set`/`delete` only) stops compiling — `TS2739`.
+- **`verifyApiKey` left the inferred API surface**, breaking `apps/api/plugins/auth/auth_middleware.ts` — `TS2339`.
+
+Both are real upstream intent, not bugs: core `1.6.x` carries `TODO(secondary-storage-atomic-consume)` and `TODO(secondary-storage-increment-required)` comments promising exactly this tightening in the next breaking release.
+
+Two things to know before scheduling that migration. **`getAndDelete` is a security-relevant upgrade, not busywork** — `internal-adapter` uses it to consume single-use verification values atomically, and logs a warning and falls back to read-then-delete without it, so a multi-process deployment can race an OTP consume. It maps to Redis `GETDEL`; `increment` maps to `INCR` + `EXPIRE`-on-create (TTL in **seconds**, applied only on creation — later increments must not extend it). **`increment` backs secondary-storage rate limiting, which this package disables** (see the next section), so it needs a correct implementation rather than a load-bearing one.
+
+Note this package is **not** legacy: `AUTH_PROVIDER` defaults to `betterauth` (`packages/config/src/secrets.ts`) and every Keycloak path ships dormant, so this is the live auth provider on a default deployment. Pinning is a deliberate deferral, not abandonment — patches within `1.6.x` still land.
+
 ## The instance-level rate limit is **off** — `apiKey` has its own instead
 
 `config.ts:65-67` sets `rateLimit: { enabled: false }` on the top-level `betterAuth(...)` call — **OTP request/verify endpoints have no built-in rate limiting.** The only rate limit in this package is scoped to the separate `apiKey` plugin's config (`config.ts:12-15`: `timeWindow: 1h, maxRequests: 10000`), which governs API-key usage, not OTP attempts. This is a known gap, not an oversight to quietly "fix" by re-enabling the global limiter (which would also throttle API-key traffic in ways that config wasn't designed for) — if OTP rate limiting is ever added, it should be scoped narrowly to the OTP endpoints, not flipped on globally.

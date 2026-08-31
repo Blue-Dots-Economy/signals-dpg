@@ -171,8 +171,10 @@ function brandThemePlugin(): Plugin {
 
   type BrandMeta = {
     faviconType?: 'png' | 'svg';
-    logoShape?: 'square' | 'wordmark';
+    logoShape?: 'square' | 'wordmark' | 'lockup';
     copy?: Record<string, string>;
+    footerLogo?: string;
+    footerLogoLight?: string;
   };
 
   const extractMeta = (brandJson: any): BrandMeta => {
@@ -189,6 +191,14 @@ function brandThemePlugin(): Plugin {
     }
     if (brandJson?.copy && typeof brandJson.copy === 'object' && !Array.isArray(brandJson.copy)) {
       meta.copy = brandJson.copy as Record<string, string>;
+    }
+    // Optional "seeded by" footer mark rendered at the bottom of the sidebar.
+    // Absent ⇒ no footer logo (opt-in per network/brand).
+    if (typeof brandJson?.footerLogo === 'string' && brandJson.footerLogo.length > 0) {
+      meta.footerLogo = brandJson.footerLogo;
+    }
+    if (typeof brandJson?.footerLogoLight === 'string' && brandJson.footerLogoLight.length > 0) {
+      meta.footerLogoLight = brandJson.footerLogoLight;
     }
     return meta;
   };
@@ -360,6 +370,15 @@ export default defineConfig(({ mode }) => {
           replacement: path.resolve(
             __dirname,
             '../../packages/schemas/src/location_fields.ts',
+          ),
+        },
+        // Same reasoning as location_fields above: a dependency-free subpath so
+        // the browser bundle never pulls the DB-bound @dpg/schemas barrel.
+        {
+          find: '@dpg/schemas/uri_fields',
+          replacement: path.resolve(
+            __dirname,
+            '../../packages/schemas/src/uri_fields.ts',
           ),
         },
         {

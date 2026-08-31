@@ -1,4 +1,3 @@
-import { useState } from 'react';
 import type { ConsentConfigDocument } from '@dpg/schemas';
 import {
   DialogHeader,
@@ -7,9 +6,8 @@ import {
 } from '@/components/ui/dialog';
 import { ResponsiveDialog } from '@/components/ui/responsive-dialog';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
-import { Checkbox } from '@/components/ui/checkbox';
-import { Label } from '@/components/ui/label';
 import { Markdown } from '@/components/consent/markdown';
+import { ConsentGateBody, type ConsentGateDoc } from '@/components/consent/consent-gate';
 import { useNetworkTheme } from '@/theme/theme-provider';
 import { useTranslation } from 'react-i18next';
 
@@ -44,13 +42,27 @@ export function ConsentModal({
   onAccept,
   onOpenChange,
 }: ConsentModalProps) {
-  const [checked, setChecked] = useState(false);
   const { theme } = useNetworkTheme();
   const { t } = useTranslation();
 
   const docs = variant === 'u18' && config.u18_documents ? config.u18_documents : config.documents;
   const privacyVersion = getCurrentVersion(docs.privacy);
   const termsVersion = getCurrentVersion(docs.terms);
+
+  const gateDocs: ConsentGateDoc[] = [
+    privacyVersion && {
+      id: 'privacy',
+      cap: t('consent.tab_privacy'),
+      title: privacyVersion.title,
+      body: privacyVersion.content,
+    },
+    termsVersion && {
+      id: 'terms',
+      cap: t('consent.tab_terms'),
+      title: termsVersion.title,
+      body: termsVersion.content,
+    },
+  ].filter((doc): doc is ConsentGateDoc => Boolean(doc));
 
   const handleOpenChange = (nextOpen: boolean) => {
     if (mode === 'gate') return;
@@ -87,58 +99,39 @@ export function ConsentModal({
         </DialogHeader>
 
         <div className="flex flex-col flex-1 overflow-hidden px-6 pb-4 gap-4">
-          <Tabs defaultValue={initialTab} className="flex flex-col flex-1 overflow-hidden">
-            <TabsList className="w-full shrink-0 h-11 p-1">
-              <TabsTrigger
+          {mode === 'gate' ? (
+            <ConsentGateBody docs={gateDocs} onAccept={() => onAccept?.()} />
+          ) : (
+            <Tabs defaultValue={initialTab} className="flex flex-col flex-1 overflow-hidden">
+              <TabsList className="w-full shrink-0 h-11 p-1">
+                <TabsTrigger
+                  value="privacy"
+                  className="flex-1 data-[state=active]:text-primary data-[state=active]:font-semibold"
+                >
+                  {t('consent.tab_privacy')}
+                </TabsTrigger>
+                <TabsTrigger
+                  value="terms"
+                  className="flex-1 data-[state=active]:text-primary data-[state=active]:font-semibold"
+                >
+                  {t('consent.tab_terms')}
+                </TabsTrigger>
+              </TabsList>
+
+              <TabsContent
                 value="privacy"
-                className="flex-1 data-[state=active]:text-primary data-[state=active]:font-semibold"
+                className="flex-1 overflow-y-auto mt-4 pr-1"
               >
-                {t('consent.tab_privacy')}
-              </TabsTrigger>
-              <TabsTrigger
+                {privacyVersion && <Markdown>{privacyVersion.content}</Markdown>}
+              </TabsContent>
+
+              <TabsContent
                 value="terms"
-                className="flex-1 data-[state=active]:text-primary data-[state=active]:font-semibold"
+                className="flex-1 overflow-y-auto mt-4 pr-1"
               >
-                {t('consent.tab_terms')}
-              </TabsTrigger>
-            </TabsList>
-
-            <TabsContent
-              value="privacy"
-              className="flex-1 overflow-y-auto mt-4 pr-1"
-            >
-              {privacyVersion && <Markdown>{privacyVersion.content}</Markdown>}
-            </TabsContent>
-
-            <TabsContent
-              value="terms"
-              className="flex-1 overflow-y-auto mt-4 pr-1"
-            >
-              {termsVersion && <Markdown>{termsVersion.content}</Markdown>}
-            </TabsContent>
-          </Tabs>
-
-          {mode === 'gate' && (
-            <div className="shrink-0 pt-4 border-t border-border flex flex-col gap-3">
-              <div className="flex items-start gap-2">
-                <Checkbox
-                  id="consent-agree"
-                  checked={checked}
-                  onCheckedChange={(value) => setChecked(value === true)}
-                />
-                <Label htmlFor="consent-agree" className="text-sm leading-snug cursor-pointer">
-                  {t('consent.agree_label')}
-                </Label>
-              </div>
-              <button
-                type="button"
-                disabled={!checked}
-                onClick={onAccept}
-                className="flex w-full items-center justify-center rounded-md py-3 text-sm font-semibold text-[var(--brand-cta-foreground)] transition-all disabled:opacity-60 bg-brand-cta hover:brightness-110 h-11"
-              >
-                {t('consent.accept_continue')}
-              </button>
-            </div>
+                {termsVersion && <Markdown>{termsVersion.content}</Markdown>}
+              </TabsContent>
+            </Tabs>
           )}
         </div>
     </ResponsiveDialog>

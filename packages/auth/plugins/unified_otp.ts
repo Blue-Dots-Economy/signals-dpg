@@ -1,3 +1,4 @@
+import { randomInt } from 'node:crypto';
 import { type User } from 'better-auth';
 import { APIError, createAuthEndpoint } from 'better-auth/api';
 import { type BetterAuthPlugin } from 'better-auth/types';
@@ -122,11 +123,24 @@ export interface unifiedOtpOptions {
   loginChannels: LoginChannel[];
 }
 
-export const generateOtp = (is_test: boolean) => {
-  return is_test
-    ? '000000'
-    : Math.floor(100000 + Math.random() * 900000).toString();
-};
+/** Fixed, non-secret stand-in used when `CREATE_TEST_OTP` is set. */
+const TEST_OTP = '000000';
+
+/**
+ * Six-digit login OTP. Drawn from `node:crypto`'s CSPRNG via `randomInt`, which
+ * rejection-samples and so is uniform over the range (no modulo bias) — a login
+ * code must not be predictable from a non-cryptographic PRNG's state.
+ * The range 100000..999999 keeps the historic format: always six digits, never
+ * a leading zero, and never `TEST_OTP` (which sits below the range).
+ */
+export const generateLoginOtp = () => randomInt(100000, 1000000).toString();
+
+/**
+ * The fixed test code, for instances configured with `CREATE_TEST_OTP`. Split
+ * from `generateLoginOtp` rather than selected by a boolean flag so neither
+ * path can be reached by accident, and so the live generator has no branch.
+ */
+export const generateTestOtp = () => TEST_OTP;
 export const unifiedOtp = ({
   sendPhoneOtp,
   sendEmailOtp,
@@ -358,7 +372,7 @@ export const unifiedOtp = ({
           }
         }
 
-        const otp = generateOtp(createTestOtp || false);
+        const otp = createTestOtp ? generateTestOtp() : generateLoginOtp();
         const expiresInSec = 5 * 60; // 5 mins
 
         const key = phoneNumber

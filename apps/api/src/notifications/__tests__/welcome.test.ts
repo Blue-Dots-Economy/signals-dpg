@@ -19,13 +19,27 @@ interface NotifyPayload {
 const notify = vi.fn(async (_payload: NotifyPayload): Promise<unknown> => ({}));
 let clientConfigured = true;
 
+// Mutable so each test can control both the fallback base URL and the
+// per-domain bindings independently (#569) — a static object literal can't
+// represent "domain resolves to nothing", which the "omits siteUrl entirely"
+// test below needs. Reset in `beforeEach` to the values the pre-existing
+// tests expect.
+const mockNotification: { FRONTEND_BASE_URL: string | undefined } = {
+  FRONTEND_BASE_URL: 'https://blue.example',
+};
+const mockUiHostBindings: { byDomain: Record<string, string>; warnings: string[] } = {
+  byDomain: {},
+  warnings: [],
+};
+
 vi.mock('@/utils/notificationClient', () => ({
   getNotificationClient: () => (clientConfigured ? { notify } : undefined),
 }));
 
 vi.mock('@/config', () => ({
   instance: { INSTANCE_NAME: 'Blue Dots' },
-  notification: { FRONTEND_BASE_URL: 'https://blue.example' },
+  notification: mockNotification,
+  uiHostBindings: mockUiHostBindings,
 }));
 
 /**
@@ -58,6 +72,8 @@ beforeEach(() => {
   dispatchEmail.mockClear();
   dispatchEmail.mockImplementation(async () => ({ ok: true }));
   clientConfigured = true;
+  mockNotification.FRONTEND_BASE_URL = 'https://blue.example';
+  mockUiHostBindings.byDomain = {};
 });
 
 describe('channel selection', () => {
@@ -100,6 +116,30 @@ describe('channel selection', () => {
     clientConfigured = false;
 
     await expect(sendWelcomeNotifications(BOTH, makeLog())).resolves.toBeUndefined();
+  });
+});
+
+describe('per-domain welcome copy', () => {
+  const emailOnly = { name: 'Asha', email: 'asha@example.org', phoneNumber: null };
+
+  it('uses the generic case when no domain is given', async () => {
+    await sendWelcomeNotifications(emailOnly, makeLog());
+    expect(dispatchEmail.mock.calls[0][0].caseId).toBe('welcome');
+  });
+
+  it('uses welcome.seeker for a seeker signup', async () => {
+    await sendWelcomeNotifications(emailOnly, makeLog(), 'seeker');
+    expect(dispatchEmail.mock.calls[0][0].caseId).toBe('welcome.seeker');
+  });
+
+  it('uses welcome.provider for a provider signup', async () => {
+    await sendWelcomeNotifications(emailOnly, makeLog(), 'provider');
+    expect(dispatchEmail.mock.calls[0][0].caseId).toBe('welcome.provider');
+  });
+
+  it('folds service_provider into the provider copy', async () => {
+    await sendWelcomeNotifications(emailOnly, makeLog(), 'service_provider');
+    expect(dispatchEmail.mock.calls[0][0].caseId).toBe('welcome.provider');
   });
 });
 
@@ -153,5 +193,40 @@ describe('message content', () => {
     expect(wa.to).toBe('+911234567890');
     expect(waVars.contentSid).toBe('HX3f2a5d7e4a18e5664124592a12a154eb');
     expect(waVars.contentVariables['1']).toBe('Asha');
+  });
+});
+
+describe('per-domain CTA (#569)', () => {
+  it('links the welcome mail to the signup domain portal', async () => {
+    mockUiHostBindings.byDomain = { seeker: 'https://seeker.example.org' };
+
+    await sendWelcomeNotifications(
+      { name: 'Asha', email: 'asha@example.com', phoneNumber: null },
+      makeLog(),
+      'seeker'
+    );
+
+    const dispatched = dispatchEmail.mock.calls[0]?.[0] as
+      | { variables?: Record<string, unknown> }
+      | undefined;
+    expect(dispatched?.variables?.siteUrl).toBe('https://seeker.example.org/auth/login');
+  });
+
+  it('omits siteUrl entirely when the domain resolves to nothing', async () => {
+    // No mapping and no FRONTEND_BASE_URL: renderSiteLink(undefined) must be
+    // able to fall back to the words "the platform" rather than a dead anchor.
+    mockUiHostBindings.byDomain = {};
+    mockNotification.FRONTEND_BASE_URL = undefined;
+
+    await sendWelcomeNotifications(
+      { name: 'Asha', email: 'asha@example.com', phoneNumber: null },
+      makeLog(),
+      'nosuchdomain'
+    );
+
+    const dispatched = dispatchEmail.mock.calls[0]?.[0] as
+      | { variables?: Record<string, unknown> }
+      | undefined;
+    expect(dispatched?.variables).not.toHaveProperty('siteUrl');
   });
 });

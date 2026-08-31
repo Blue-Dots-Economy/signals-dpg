@@ -1,7 +1,15 @@
 import * as React from 'react';
 import Form from '@rjsf/shadcn';
 import validator from '@rjsf/validator-ajv8';
-import type { RJSFSchema, UiSchema, RegistryWidgetsType, ObjectFieldTemplateProps } from '@rjsf/utils';
+import { useTranslation } from 'react-i18next';
+import type {
+  RJSFSchema,
+  UiSchema,
+  RegistryWidgetsType,
+  ObjectFieldTemplateProps,
+  RJSFValidationError,
+} from '@rjsf/utils';
+import { applyUriPatterns, collectUriFieldKeys, URI_FIELD_MARKER } from '@dpg/schemas/uri_fields';
 import { DatePickerWidget } from './custom-widgets/date-picker-widget';
 import { LocationAutocompleteWidget } from './custom-widgets/location-autocomplete-widget';
 import { MultiLocationAutocompleteWidget } from './custom-widgets/multi-location-autocomplete-widget';
@@ -9,6 +17,9 @@ import { ReferenceAutocompleteWidget } from './custom-widgets/reference-autocomp
 import CustomFieldTemplate from './custom-field-template';
 import { resolveFormLayout, type FormLayout } from '@/theme/form-layouts';
 import { resolveVisibleSchema } from '@/lib/show-if';
+import { filterErrorSchemaToVisited } from './field-error-visibility';
+import { FIELD_ERROR_MESSAGE_MARKER, resolvePatternErrorMessage } from './field-error-message';
+import { cn } from '@/lib/utils';
 
 interface RjsfError {
   property?: string;
@@ -92,7 +103,8 @@ interface SchemaFormProps {
    * Called with the AJV validity of the current form data whenever data changes
    * and once on mount. Only computed when this prop is provided.
    */
-  onValidityChange?: (isValid: boolean) => void;
+  /** `detail` says WHY it is invalid; the boolean stays first for existing callers. */
+  onValidityChange?: (isValid: boolean, detail?: SchemaFormValidity) => void;
   domainId?: string;
   /**
    * Network id, used with domainId to resolve the section layout. Domain ids
@@ -242,7 +254,11 @@ function generateUiSchema(
   };
 
   for (const [key, prop] of Object.entries(schema.properties ?? {})) {
-    const typed = prop as RJSFSchema & { private?: boolean; format?: string };
+    const typed = prop as RJSFSchema & {
+      private?: boolean;
+      format?: string;
+      [URI_FIELD_MARKER]?: unknown;
+    };
 
     if (mode === 'compact' && typed.private === true) {
       uiSchema[key] = { 'ui:widget': 'hidden' };
@@ -255,6 +271,13 @@ function generateUiSchema(
 
     if (typed.format === 'email') {
       uiSchema[key] = { 'ui:placeholder': 'email@example.com' };
+    }
+
+    // A link field (network.json `x-uri`) gets a sample URL as its prompt, so
+    // the expected shape is visible before the user types. Merged (not assigned)
+    // because earlier blocks in this loop may already have written this key.
+    if (typed[URI_FIELD_MARKER] === true) {
+      uiSchema[key] = { ...(uiSchema[key] as object), 'ui:placeholder': 'https://example.com' };
     }
 
     if (typed.enum && typed.type === 'string') {
@@ -393,6 +416,14 @@ function normalizeSchemaForRjsf(schema: RJSFSchema, rootSchema?: RJSFSchema): RJ
     // object) — it's mapped to the reference-autocomplete widget by
     // generateUiSchema, so ajv must not see it.
     if (key === 'x-reference-source') continue;
+    // Strip the custom `x-error-message` keyword (per-field copy for a failed
+    // `pattern`, consumed when building the error message) — ajv must not see it.
+    if (key === FIELD_ERROR_MESSAGE_MARKER) continue;
+    // Strip the custom `x-uri` marker — its effect is the `pattern` injected by
+    // applyUriPatterns before this point, plus the card-side link rendering.
+    // (RJSF's ajv runs strict:false so an unknown keyword would be tolerated,
+    // but every other custom marker is stripped here; keep it consistent.)
+    if (key === URI_FIELD_MARKER) continue;
     result[key] = normalizeSchemaForRjsf(value as RJSFSchema, root);
   }
 
@@ -423,6 +454,60 @@ export function isSchemaFormValid(
   return v.isValid(schema, data, schema);
 }
 
+/** Why a form is invalid, so callers can say which of the two it is. */
+export interface SchemaFormValidity {
+  valid: boolean;
+  /** Required fields the user has not filled in. */
+  missingRequired: number;
+  /** Fields that hold a value which breaks its own rule (pattern, format, …). */
+  invalidValues: number;
+}
+
+/** Resolve an RJSF error `property` (".a", ".a.0") against the form data. */
+function valueAtProperty(data: Record<string, unknown>, property: string | undefined): unknown {
+  if (!property) return undefined;
+  const segments = property.replace(/\[(\w+)\]/g, '.$1').split('.').filter(Boolean);
+  let cursor: unknown = data;
+  for (const segment of segments) {
+    if (cursor === null || typeof cursor !== 'object') return undefined;
+    cursor = (cursor as Record<string, unknown>)[segment];
+  }
+  return cursor;
+}
+
+function isBlank(value: unknown): boolean {
+  if (value === null || value === undefined) return true;
+  if (typeof value === 'string') return value.trim().length === 0;
+  if (Array.isArray(value)) return value.length === 0;
+  return false;
+}
+
+/**
+ * Classify a form's AJV errors into "you have not filled this in" versus "what
+ * you typed is not valid". A single boolean cannot tell those apart, and the two
+ * need different copy — telling someone to "fill in all the required fields"
+ * when the field IS filled (just malformed) sends them looking in the wrong
+ * place. A blank-but-present value counts as missing rather than invalid: it
+ * trips `minLength` in AJV terms, but to the user it is simply not filled in.
+ */
+export function getSchemaFormValidity(
+  v: typeof validator,
+  schema: RJSFSchema,
+  data: Record<string, unknown>,
+): SchemaFormValidity {
+  const { errors } = v.validateFormData(data, schema);
+  let missingRequired = 0;
+  let invalidValues = 0;
+  for (const error of errors) {
+    const blank = isBlank(valueAtProperty(data, error.property));
+    if (error.name === 'required' || blank) missingRequired += 1;
+    else invalidValues += 1;
+  }
+  return { valid: errors.length === 0, missingRequired, invalidValues };
+}
+
+
+
 export function SchemaForm({
   schema,
   formData,
@@ -440,6 +525,8 @@ export function SchemaForm({
   formContext,
   sectionHeadingLevel = 3,
 }: Readonly<SchemaFormProps>) {
+  const { t } = useTranslation();
+
   // Base schema (meta stripped) still carries `x-show-if` so the evaluator can read it.
   const baseSchema = React.useMemo(() => stripMetaSchema(schema), [schema]);
 
@@ -463,7 +550,9 @@ export function SchemaForm({
   const hiddenKey = resolved.hidden.join('|');
 
   const rjsfSchema = React.useMemo(
-    () => normalizeSchemaForRjsf(resolved.schema),
+    // applyUriPatterns FIRST: it injects `pattern` for `x-uri` fields, then
+    // normalizeSchemaForRjsf strips the marker so ajv only sees the pattern.
+    () => normalizeSchemaForRjsf(applyUriPatterns(resolved.schema)),
     // resolved.schema depends only on (schema, visible set); key on hiddenKey.
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [schema, hiddenKey],
@@ -476,6 +565,42 @@ export function SchemaForm({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [schema, hiddenKey, mode, hideSubmit, submitButtonText]);
 
+  // ajv reports a pattern failure as `must match pattern "^\s*$|^\s*(https?..."`,
+  // which is meaningless to a user. Rewrite it for `x-uri` fields only.
+  const uriFieldKeys = React.useMemo(() => new Set(collectUriFieldKeys(baseSchema)), [baseSchema]);
+
+  /**
+   * Readable copy for a failed `pattern`. AJV's own message is the raw regex, so
+   * it must never reach the user; the regex comes from network.json, so the copy
+   * is resolved from the field too (authored `x-error-message`, else the `x-uri`
+   * default, else a generic naming the field). Shared by both error paths below —
+   * `extraErrors` bypasses `transformErrors` entirely, so each needs it.
+   */
+  const patternMessageFor = React.useCallback(
+    (property: string): string => {
+      const properties = (baseSchema.properties ?? {}) as Record<string, Record<string, unknown>>;
+      return resolvePatternErrorMessage(properties[property], uriFieldKeys.has(property), {
+        uri: t('form.invalid_url', 'Enter a valid link, e.g. https://example.com'),
+        generic: (label) => t('form.invalid_format', 'Please enter a valid {{field}}.', { field: label }),
+      });
+    },
+    [baseSchema, uriFieldKeys, t],
+  );
+
+  const transformErrors = React.useCallback(
+    (errors: RJSFValidationError[]) =>
+      errors.map((error) => {
+        if (error.name !== 'pattern') return error;
+        const field = (error.property ?? '').replace(/^\./, '').split('.')[0];
+        const message = patternMessageFor(field);
+        // `stack` is what RJSF's ErrorList template renders, so it has to be
+        // rewritten too — otherwise flipping `showErrorList` on would put the
+        // raw pattern back in front of the user.
+        return { ...error, message, stack: `${error.property} ${message}` };
+      }),
+    [patternMessageFor],
+  );
+
   // Keep a ref to the latest onValidityChange so the validity effect below does
   // not depend on the callback's identity. This prevents a render loop when a
   // consumer passes an unstable function reference (e.g. an inline arrow).
@@ -486,11 +611,63 @@ export function SchemaForm({
 
   // Report AJV validity to the consumer once on mount and whenever data or schema
   // changes. Depends only on [rjsfSchema, data] — not on the callback ref — so it
-  // never re-fires due to an unstable callback identity.
+  // never re-fires due to an unstable callback identity. The second argument says
+  // WHY it is invalid; the boolean stays first so existing callers are unaffected.
   React.useEffect(() => {
     const cb = onValidityChangeRef.current;
-    if (cb) cb(isSchemaFormValid(validator, rjsfSchema, data));
+    if (!cb) return;
+    const detail = getSchemaFormValidity(validator, rjsfSchema, data);
+    cb(detail.valid, detail);
   }, [rjsfSchema, data]);
+
+  // Which fields the user has actually visited, by RJSF field id ("root_phone").
+  // Only these fields' errors are handed to RJSF (see `extraErrors` below), so an
+  // untouched field is never told it is invalid and nothing renders it red.
+  const [touchedFieldIds, setTouchedFieldIds] = React.useState<ReadonlySet<string>>(
+    () => new Set(),
+  );
+  const [submitAttempted, setSubmitAttempted] = React.useState(false);
+
+  const markTouched = React.useCallback((fieldId: string) => {
+    setTouchedFieldIds((prev) => {
+      if (prev.has(fieldId)) return prev;
+      const next = new Set(prev);
+      next.add(fieldId);
+      return next;
+    });
+  }, []);
+
+  // Re-arm on a schema swap (edit-mode load, or a different domain's form) so
+  // one form's touched set never suppresses or leaks into another's.
+  React.useEffect(() => {
+    setTouchedFieldIds(new Set());
+    setSubmitAttempted(false);
+  }, [schema]);
+
+  // Display errors, fed to RJSF as `extraErrors`. `liveValidate` is deliberately
+  // OFF: it hands an error to every invalid field at once, and the theme's own
+  // input/select templates redden their borders straight off `rawErrors`, so a
+  // pristine form lit up as soon as anything was typed. Supplying only the
+  // visited fields' errors means an untouched field never receives one, so every
+  // renderer stays quiet without knowing about the rule. RJSF still validates
+  // natively on submit, so this cannot let invalid data through.
+  const extraErrors = React.useMemo(() => {
+    // Rewrite pattern messages BEFORE filtering: `extraErrors` never passes
+    // through `transformErrors`, so without this the raw regex is what renders.
+    const { errors, errorSchema } = validator.validateFormData(data, rjsfSchema);
+    const patternFields = new Set(
+      errors
+        .filter((error) => error.name === 'pattern')
+        .map((error) => (error.property ?? '').replace(/^\./, '').split('.')[0])
+        .filter(Boolean),
+    );
+    const readable: Record<string, unknown> = { ...errorSchema };
+    for (const property of patternFields) {
+      readable[property] = { __errors: [patternMessageFor(property)] };
+    }
+    return filterErrorSchemaToVisited(readable as typeof errorSchema, touchedFieldIds, submitAttempted);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rjsfSchema, data, touchedFieldIds, submitAttempted, patternMessageFor]);
 
   // Section layout is schema-driven first: an `x-form-layout` block on the item
   // schema (network.json) is the single source of truth, so field add/remove/
@@ -512,7 +689,18 @@ export function SchemaForm({
   const containerRef = React.useRef<HTMLDivElement>(null);
 
   return (
-    <div className={className} ref={containerRef}>
+    <div
+      // Left-align enum/select triggers. `@rjsf/shadcn`'s `FancySelect` renders
+      // its trigger as a `<button>`, and Tailwind's preflight does not reset the
+      // UA `text-align: center` on buttons; its label span is `flex-1`, so it
+      // spans the full trigger width and the value/"Select..." placeholder lands
+      // dead-centre. Fixed here rather than in the vendored widget, and scoped to
+      // the select trigger via `aria-haspopup=listbox` so no other button in the
+      // form is affected. (Same fix as `filters/multi-select-group.tsx`, which
+      // sets `text-left` on its own justify-between trigger.)
+      className={cn('[&_button[aria-haspopup=listbox]]:text-left', className)}
+      ref={containerRef}
+    >
       <Form
         id={id}
         schema={rjsfSchema}
@@ -527,14 +715,21 @@ export function SchemaForm({
           const nextData = resolveVisibleSchema(baseSchema, (next ?? {}) as Record<string, unknown>).formData;
           setData(nextData);
         }}
+        onBlur={(fieldId) => markTouched(fieldId)}
         onSubmit={({ formData: submitted }) => {
+          setSubmitAttempted(true);
           if (submitted) onSubmit(submitted as Record<string, unknown>);
         }}
-        onError={(errors) => onError?.(errors)}
+        onError={(errors) => {
+          setSubmitAttempted(true);
+          onError?.(errors);
+        }}
+        transformErrors={transformErrors}
         focusOnFirstError={(error) =>
           focusErrorField(containerRef.current, error as RjsfError)
         }
         showErrorList={false}
+        extraErrors={extraErrors}
         liveValidate={false}
         noHtml5Validate
         omitExtraData
