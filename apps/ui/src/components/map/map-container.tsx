@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next';
 import type { RJSFSchema } from '@rjsf/utils';
 import type { MapMarker, MapViewport } from '@/engine/types';
 import { getActiveMapProvider } from '@/engine/map/map-registry';
+import { getRuntimeEnv } from '@/lib/runtime-env';
 import { Button } from '@/components/ui/button';
 import { Maximize2, Minimize2 } from 'lucide-react';
 
@@ -110,6 +111,13 @@ interface MapViewProps {
 //   VITE_MAP_DEFAULT_CENTER = "lat,lng"  (e.g. "29.4727,77.7085" for Muzaffarnagar)
 //   VITE_MAP_DEFAULT_ZOOM   = number     (e.g. 12 for city-level)
 // Falls back to a whole-India view when unset/invalid.
+//
+// Both go through `getRuntimeEnv`: the chart's runtime config
+// (window.__DPG_UI_CONFIG__ via /config.js) first, then the build-time value.
+// `import.meta.env` alone could not deliver a per-deployment default at all —
+// Vite inlines it at build time and CI publishes the UI image with no VITE_
+// build args, so every deployed instance silently got the whole-India fallback
+// regardless of what the chart set.
 export const FALLBACK_CENTER: [number, number] = [20.5937, 78.9629];
 export const FALLBACK_ZOOM = 5;
 
@@ -132,12 +140,12 @@ export function parseDefaultZoom(raw: string | undefined): number {
   return Number.isFinite(z) && z > 0 && z <= 22 ? z : FALLBACK_ZOOM;
 }
 
-const DEFAULT_CENTER: [number, number] = parseDefaultCenter(
-  import.meta.env.VITE_MAP_DEFAULT_CENTER,
+export const DEFAULT_CENTER: [number, number] = parseDefaultCenter(
+  getRuntimeEnv('VITE_MAP_DEFAULT_CENTER'),
 );
 // The default zoom the map opens at before its first `onViewportChange`
 // report has landed (overridable via VITE_MAP_DEFAULT_ZOOM).
-const DEFAULT_ZOOM = parseDefaultZoom(import.meta.env.VITE_MAP_DEFAULT_ZOOM);
+export const DEFAULT_ZOOM = parseDefaultZoom(getRuntimeEnv('VITE_MAP_DEFAULT_ZOOM'));
 const PROFILE_ZOOM = 12;
 
 export function MapView({

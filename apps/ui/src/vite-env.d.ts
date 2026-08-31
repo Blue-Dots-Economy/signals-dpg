@@ -41,6 +41,9 @@ interface ImportMetaEnv {
   /** Duration (ms) of the smooth cluster-click zoom animation. Falls back to 2000; 0 = instant. */
   readonly VITE_MAP_CLUSTER_ZOOM_ANIM_MS?: string;
   readonly VITE_ACTION_POLL_INTERVAL_MS?: string;
+  // Max profiles fetched per network request; set per deployment via the
+  // chart's ui.runtimeConfig. Read through getRuntimeEnv (network-api.ts).
+  readonly VITE_PROFILE_FETCH_LIMIT?: string;
   readonly VITE_VC_WALLET_URL: string;
   readonly VITE_VC_WALLET_API_KEY: string;
   readonly VITE_AGENT_URL: string;
