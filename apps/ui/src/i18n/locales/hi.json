@@ -386,6 +386,7 @@
   "profile.fix_invalid_hint": "कुछ प्रविष्टियाँ अभी मान्य नहीं हैं — चिह्नित फ़ील्ड जाँचें।",
   "form.invalid_url": "एक मान्य लिंक दर्ज करें, जैसे https://example.com",
   "form.invalid_format": "कृपया मान्य {{field}} दर्ज करें।",
+  "form.clear_selection": "चयन हटाएँ",
   "consent.title_gate": "जारी रखने के लिए समीक्षा करें और स्वीकार करें",
   "consent.title_view": "गोपनीयता नीति और शर्तें",
   "consent.desc_gate": "कृपया गोपनीयता नीति और शर्तें पढ़ें। जारी रखने से पहले आपको सहमत होना आवश्यक है।",
