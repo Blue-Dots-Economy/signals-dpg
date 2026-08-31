@@ -148,21 +148,19 @@ CASES.set(
     'realtime',
   ),
 );
-CASES.set(
-  'welcome',
-  plainCase(
-    'welcome',
-    {
-      userName: 'text',
-      appName: 'text',
-      siteUrl: 'text',
-      siteLink: 'html',
-      teamName: 'text',
-    },
-    'best_effort',
-    'realtime',
-  ),
-);
+// Welcome (self-signup). `welcome` is the domain-less fallback; `.seeker` /
+// `.provider` carry role-correct copy, picked in notifications/welcome.ts from
+// resolveRecipientRole(domain) so service_provider folds into provider.
+const WELCOME_TOKENS: TokenTypes = {
+  userName: 'text',
+  appName: 'text',
+  siteUrl: 'text',
+  siteLink: 'html',
+  teamName: 'text',
+};
+CASES.set('welcome', plainCase('welcome', WELCOME_TOKENS, 'best_effort', 'realtime'));
+CASES.set('welcome.seeker', plainCase('welcome.seeker', WELCOME_TOKENS, 'best_effort', 'realtime'));
+CASES.set('welcome.provider', plainCase('welcome.provider', WELCOME_TOKENS, 'best_effort', 'realtime'));
 CASES.set(
   'support.request',
   plainCase(

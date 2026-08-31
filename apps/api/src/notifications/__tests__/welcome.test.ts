@@ -119,6 +119,30 @@ describe('channel selection', () => {
   });
 });
 
+describe('per-domain welcome copy', () => {
+  const emailOnly = { name: 'Asha', email: 'asha@example.org', phoneNumber: null };
+
+  it('uses the generic case when no domain is given', async () => {
+    await sendWelcomeNotifications(emailOnly, makeLog());
+    expect(dispatchEmail.mock.calls[0][0].caseId).toBe('welcome');
+  });
+
+  it('uses welcome.seeker for a seeker signup', async () => {
+    await sendWelcomeNotifications(emailOnly, makeLog(), 'seeker');
+    expect(dispatchEmail.mock.calls[0][0].caseId).toBe('welcome.seeker');
+  });
+
+  it('uses welcome.provider for a provider signup', async () => {
+    await sendWelcomeNotifications(emailOnly, makeLog(), 'provider');
+    expect(dispatchEmail.mock.calls[0][0].caseId).toBe('welcome.provider');
+  });
+
+  it('folds service_provider into the provider copy', async () => {
+    await sendWelcomeNotifications(emailOnly, makeLog(), 'service_provider');
+    expect(dispatchEmail.mock.calls[0][0].caseId).toBe('welcome.provider');
+  });
+});
+
 describe('failure isolation', () => {
   it('still sends WhatsApp when the email send rejects', async () => {
     dispatchEmail.mockRejectedValueOnce(new Error('smtp down'));

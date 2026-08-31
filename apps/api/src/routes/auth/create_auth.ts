@@ -9,6 +9,8 @@ import {
   getCurrentApiBaseUrl,
 } from '@/config';
 import { db } from '@api/db/postgres/drizzle_config';
+import { user as userTable } from '@api/db/postgres/schema';
+import { eq } from 'drizzle-orm';
 import { redis } from '@api/db/secondary/redis';
 import { getNotificationClient } from '@/utils/notificationClient';
 import { getDefaultEmailSender } from '@/notifications/email/dispatch_email';
@@ -93,6 +95,21 @@ export const authInstance = createAuth({
       console.error('materializeSignupGuardian failed:', err);
     }
 
+    // Single-role lock stores the signup domain on the user row; read it so the
+    // welcome copy is role-correct (seeker vs provider). Best-effort — a miss
+    // (domain not yet applied / DB hiccup) falls back to the generic copy.
+    let signupDomain: string | null = null;
+    try {
+      const [row] = await db
+        .select({ domains: userTable.domains })
+        .from(userTable)
+        .where(eq(userTable.id, user.id))
+        .limit(1);
+      signupDomain = row?.domains?.[0] ?? null;
+    } catch (err) {
+      console.error('welcome: could not read signup domain:', err);
+    }
+
     await sendWelcomeNotifications(
       {
         name: user.name,
@@ -101,7 +118,8 @@ export const authInstance = createAuth({
       },
       // No request context in a module-level hook, so failures go to the
       // console here exactly as the surrounding code already does.
-      { error: (details, message) => console.error(message, details) }
+      { error: (details, message) => console.error(message, details) },
+      signupDomain
     );
   },
 });
