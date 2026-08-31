@@ -53,4 +53,21 @@ describe('resolveBrandMeta', () => {
     };
     expect(resolveBrandMeta('blue_dot', 'upsdm', reg as any).footerLogo).toBe('/brand/upsdm.png');
   });
+
+  it('does NOT inherit the network footer logo onto a brand that omits it', () => {
+    // up-gzb / ka-dhwd: a real brand with no footerLogo must hide the mark,
+    // even though the blue_dot network sets one.
+    const reg = {
+      blue_dot: {
+        footerLogo: '/brand/ekstep.png',
+        footerLogoLight: '/brand/ekstep-light.png',
+        brands: { 'up-gzb': { logoShape: 'lockup' } },
+      },
+    };
+    const m = resolveBrandMeta('blue_dot', 'up-gzb', reg as any);
+    expect(m.footerLogo).toBeNull();
+    expect(m.footerLogoLight).toBeNull();
+    // the plain network default still shows it
+    expect(resolveBrandMeta('blue_dot', 'standard', reg as any).footerLogo).toBe('/brand/ekstep.png');
+  });
 });
