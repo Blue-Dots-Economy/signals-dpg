@@ -9,13 +9,12 @@ import {
   getCurrentApiBaseUrl,
 } from '@/config';
 import { db } from '@api/db/postgres/drizzle_config';
-import { user as userTable } from '@api/db/postgres/schema';
-import { eq } from 'drizzle-orm';
 import { redis } from '@api/db/secondary/redis';
 import { getNotificationClient } from '@/utils/notificationClient';
 import { getDefaultEmailSender } from '@/notifications/email/dispatch_email';
 import { materializeSignupGuardian } from '@/services/signup_guardian';
 import { sendWelcomeNotifications } from '@/notifications/welcome';
+import { resolveSignupDomain } from '@/notifications/resolve_signup_domain';
 
 export const authInstance = createAuth({
   appName: instance.INSTANCE_NAME ?? 'DPG',
@@ -95,20 +94,9 @@ export const authInstance = createAuth({
       console.error('materializeSignupGuardian failed:', err);
     }
 
-    // Single-role lock stores the signup domain on the user row; read it so the
-    // welcome copy is role-correct (seeker vs provider). Best-effort — a miss
-    // (domain not yet applied / DB hiccup) falls back to the generic copy.
-    let signupDomain: string | null = null;
-    try {
-      const [row] = await db
-        .select({ domains: userTable.domains })
-        .from(userTable)
-        .where(eq(userTable.id, user.id))
-        .limit(1);
-      signupDomain = row?.domains?.[0] ?? null;
-    } catch (err) {
-      console.error('welcome: could not read signup domain:', err);
-    }
+    // Signup domain (single-role lock) picks the role-correct welcome copy;
+    // best-effort, null ⇒ generic copy. See resolve_signup_domain.ts.
+    const signupDomain = await resolveSignupDomain(user.id);
 
     await sendWelcomeNotifications(
       {
