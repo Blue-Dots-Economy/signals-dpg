@@ -314,3 +314,114 @@ real paging defects (`item_id` tiebreaker, rerank truncation guard). **B**
 makes the resulting state legible: one chip bar showing every applied
 constraint, one domain control instead of three, and the counterpart-only rule
 explained rather than silently enforced.
+
+## 8. Design — C: the card metric follows the ranking basis (#646)
+
+### 8.1 Problem
+
+Users conflate the list **order** with the **match score** on each card. Both
+the badge and the modal show the same quantity — `1 - cosine_distance` between
+two BGE-M3 embeddings — through three scales: `/v1/relevance` emits 0–100
+(`relevance_route.ts:14`), the provider divides by 10
+(`providers/signals_search/client.ts:11-14`), the `/discover` seed multiplies
+by 10 (`use-match-score.ts`, `seedFromDiscoverScore`).
+
+**The score is pure cosine. The API composes filters, never scores:**
+
+- `score` = `(1 - (s.embedding <=> :vec))::float8`; nothing else contributes
+- `distanceMeters` is a separate `ST_Distance` column, never folded in
+- facets and `ST_DWithin` are `WHERE` predicates — membership, not position
+- `ORDER BY` picks exactly one expression: cosine, else distance, else recency
+
+So distance is **not** in the relevance %, and no weighted blend exists.
+
+Two further defects: one badge carries two incomparable quantities
+(profile↔item cosine with a profile, typed-text↔item cosine without, gated by
+`VITE_FREETEXT_MATCH_SCORE_ENABLED`); and the Excellent/Good/Moderate/Low
+bands over 0.85/0.70/0.50 are uncalibrated — BGE-M3 profile similarities
+cluster in a narrow range, so the band reads as near-constant.
+
+§3.2's explicit `sort` forces the decision: under `newest`/`nearest` an item
+would be ordered by one quantity and badged with another.
+
+### 8.2 Decision
+
+The card's primary metric **is** the ranking basis, so metric and order can
+never disagree:
+
+| `sort` | Card metric |
+| --- | --- |
+| `relevance` | relevance %, labelled for its basis |
+| `nearest` | distance (`distanceMeters`, already returned) |
+| `newest` | posted date / age (`items.created_at`) |
+
+A per-pair score is therefore shown only under `relevance`, where `/discover`
+already returns it free — no N×`/v1/relevance` calls, which matters because it
+shipped **1:1** (`source`, `target`), not the batched source×N of the original
+design.
+
+Also: one wire scale end to end (both conversion points deleted); the free-text
+basis labelled rather than env-gated (`VITE_FREETEXT_MATCH_SCORE_ENABLED`
+retired); and the dead dpg-scoring-era fields removed (`band`, `confidence`,
+`reasoning`, `signals`, `prompt_version`, `model_provider`, `model` — never
+populated by the `signals_search` provider).
+
+**Design boundary:** this is correct *because* only one quantity ranks at a
+time. A true composite relevance (cosine + proximity + facet bonus, weighted)
+would supersede it and justify one unified relevance % across all sorts. Out of
+scope, not rejected.
+
+### 8.3 Explanation panel — honesty constraint
+
+The panel may show: the sort in force and its metric; the `vectorize: true`
+fields for the domain/item_type and their `vector_weight`; the viewer's and the
+item's values for those fields side by side; and, separately, the constraints
+that shaped the set but not the order.
+
+It may **not** show a per-field breakdown of the score. The cosine is computed
+over a single pooled embedding of the serialized `vectorize` fields
+(`serializeItemText` repeats each line `vector_weight` times) and **cannot be
+decomposed**. Any "what you have in common" display must be computed from
+attribute overlap and labelled illustrative.
+
+### 8.4 Future scope — user-tunable relevance
+
+`vector_weight` is already a per-property knob (`vectorize_fields.ts`) applied
+as literal line repetition at ingest. So user reweighting is buildable:
+re-serialize **the viewer's own** profile with their chosen weights and embed it
+on the fly (one TEI call) as the query vector — the item side needs no
+re-indexing. Caveats: the result-cache key must include the weights;
+per-request embedding gives up the stored-anchor-embedding shortcut. Depends on
+#360 for declaring which fields are tunable.
+
+## 9. Design — D: typed search is inert when an anchor is present (signals-search#148)
+
+`search_route.ts:74` gates text embedding on `!message.intent.item?.id`, and
+`search_query.ts` has **no text `WHERE` clause** — text only ever acts as the
+query vector. With an anchor present, `textSearch` is consumed by nothing
+(`willRerank` also needs it, but `RERANK_DEFAULT=false`). Signals-DPG sends `q`
+and `anchor_item_id` together on every list query, and the anchor is present for
+essentially all signed-in traffic.
+
+**Effect:** typing in the list search box as a signed-in viewer with a profile
+returns an identical set in an identical order. It works only on the *degraded*
+native fallback, which value-matches `q`.
+
+**Fix: text narrows, profile ranks.** Apply `textSearch` as an additional
+value-match `WHERE` predicate ANDed with the existing conditions, alongside the
+anchor query vector. Ranking is unchanged, so §8.2's relevance % still explains
+the position. `normalized` already carries the full `intent`, so the cache key
+is correct.
+
+Rejected: vector blending (fuzzy, unmeasurable today), re-serializing anchor +
+typed text into one embedding (costs an embed per query, still cannot narrow),
+dropping the anchor when text is present (discards profile relevance exactly
+when the user is most specific). Semantic blending is a follow-up.
+
+**Open sub-question — which fields does text match?** The paths disagree today:
+the native fallback uses declared non-private facet fields
+(`resolveTextSearchFields` → `resolveAllowedFacetFields`), signals-search's
+relevance uses `vectorize: true` fields. Recommendation: the `vectorize` set, so
+text-narrowing and cosine-ranking describe the same content; the divergence is
+noted for #360 to settle. `item_search` does not store the serialized text, so
+the predicate runs against `i.item_state` via the existing `JOIN items i`.
