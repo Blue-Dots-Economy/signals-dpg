@@ -62,7 +62,9 @@ export interface ItemLifecycleEvent {
  */
 export function itemLifecycleCaseId(event: ItemLifecycleEvent): string | null {
   if (event.op === 'create' && event.actingOrgType === 'aggregator') {
-    return 'account.aggregator_init';
+    // Per-role activation copy: seeker → "discovering jobs", provider (and
+    // service_provider, which resolveRecipientRole folds in) → "offering services".
+    return `account.aggregator_init.${resolveRecipientRole(event.domain)}`;
   }
   // Offer = provider-like domains (incl. service_provider), profile otherwise.
   const noun = resolveRecipientRole(event.domain) === 'provider' ? 'offer' : 'profile';
@@ -129,8 +131,10 @@ export async function dispatchItemLifecycleNotification(
     const dedupeId = `item_lifecycle:${caseId}:${event.ownerId}${itemSegment}`;
 
     const variables: Record<string, string> = { name: name || 'there' };
-    if (caseId === 'account.aggregator_init') {
+    if (caseId.startsWith('account.aggregator_init')) {
+      // <Aggregator Name> — who onboarded them; <Dot Network> — the network brand.
       variables.aggregatorOrg = event.aggregatorOrgName || brandName;
+      variables.networkName = brandName;
     }
 
     // These cases are best_effort: dispatchEmail catches internally and returns

@@ -27,7 +27,9 @@ vi.mock('@api/db/secondary/redis', () => ({
   },
 }));
 
-const { stashSignupExtras, takeSignupExtras } = await import('../signup_extras.js');
+const { stashSignupExtras, takeSignupExtras, peekSignupExtras } = await import(
+  '../signup_extras.js'
+);
 
 const EMAIL = 'asha@example.org';
 const PHONE = '+919876500001';
@@ -72,6 +74,18 @@ describe('stash / take round-trip', () => {
 
   it('returns null when no identifier is given', async () => {
     expect(await takeSignupExtras({})).toBeNull();
+  });
+
+  it('peek reads the stash WITHOUT deleting it (take still works after)', async () => {
+    await stashSignupExtras({ email: EMAIL }, { domain: 'provider' });
+    expect(await peekSignupExtras({ email: EMAIL })).toEqual({ domain: 'provider' });
+    // Still there for the (consuming) take.
+    expect(await peekSignupExtras({ email: EMAIL })).toEqual({ domain: 'provider' });
+    expect(await takeSignupExtras({ email: EMAIL })).toEqual({ domain: 'provider' });
+  });
+
+  it('peek returns null when nothing is parked', async () => {
+    expect(await peekSignupExtras({ email: EMAIL })).toBeNull();
   });
 });
 

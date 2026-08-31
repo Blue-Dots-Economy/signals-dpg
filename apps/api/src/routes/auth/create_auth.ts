@@ -12,8 +12,7 @@ import { db } from '@api/db/postgres/drizzle_config';
 import { redis } from '@api/db/secondary/redis';
 import { getNotificationClient } from '@/utils/notificationClient';
 import { getDefaultEmailSender } from '@/notifications/email/dispatch_email';
-import { materializeSignupGuardian } from '@/services/signup_guardian';
-import { sendWelcomeNotifications } from '@/notifications/welcome';
+import { runAfterUserCreate } from '@/services/auth/on_user_created';
 
 export const authInstance = createAuth({
   appName: instance.INSTANCE_NAME ?? 'DPG',
@@ -87,21 +86,6 @@ export const authInstance = createAuth({
   //     packages/auth so the Keycloak path (which never runs better-auth) sends
   //     the identical messages — see notifications/welcome.ts.
   afterUserCreate: async ({ user }) => {
-    try {
-      await materializeSignupGuardian(user);
-    } catch (err) {
-      console.error('materializeSignupGuardian failed:', err);
-    }
-
-    await sendWelcomeNotifications(
-      {
-        name: user.name,
-        email: user.email ?? null,
-        phoneNumber: user.phoneNumber ?? null,
-      },
-      // No request context in a module-level hook, so failures go to the
-      // console here exactly as the surrounding code already does.
-      { error: (details, message) => console.error(message, details) }
-    );
+    await runAfterUserCreate(user);
   },
 });

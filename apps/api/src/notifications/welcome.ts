@@ -25,6 +25,7 @@ import { getNotificationClient } from '@/utils/notificationClient';
 
 import { createCtaUrlResolver } from './brand';
 import { getDefaultEmailSender } from './email/dispatch_email';
+import { resolveRecipientRole } from './action_copy';
 
 /**
  * The WhatsApp template this uses is a pre-approved Twilio content template;
@@ -92,9 +93,14 @@ export async function sendWelcomeNotifications(
           })(domain)
         : notification.FRONTEND_BASE_URL;
 
+      // Role-correct copy: seeker vs provider (service_provider folds into
+      // provider). Domain-less signups (migrated / admin-onboarded) fall back
+      // to the generic `welcome`.
+      const caseId = domain ? `welcome.${resolveRecipientRole(domain)}` : 'welcome';
+
       const sender = getDefaultEmailSender();
       await sender?.dispatchEmail({
-        caseId: 'welcome',
+        caseId,
         to: recipient.email,
         fromName: appName,
         variables: {

@@ -37,7 +37,18 @@ describe('itemLifecycleCaseId', () => {
         op: 'create',
         actingOrgType: 'aggregator',
       }),
-    ).toBe('account.aggregator_init');
+    ).toBe('account.aggregator_init.seeker');
+    // provider + service_provider fold into the provider activation copy.
+    expect(
+      itemLifecycleCaseId({
+        ownerId: 'u1', domain: 'provider', network: 'blue_dot', op: 'create', actingOrgType: 'aggregator',
+      }),
+    ).toBe('account.aggregator_init.provider');
+    expect(
+      itemLifecycleCaseId({
+        ownerId: 'u1', domain: 'service_provider', network: 'blue_dot', op: 'create', actingOrgType: 'aggregator',
+      }),
+    ).toBe('account.aggregator_init.provider');
   });
 
   it('routes a draft create to *.create_incomplete, a live/absent-status create to *.create', () => {
@@ -57,7 +68,7 @@ describe('itemLifecycleCaseId', () => {
     // Aggregator create ignores lifecycle status — always the initiation email.
     expect(
       itemLifecycleCaseId({ ...base, domain: 'seeker', lifecycleStatus: 'draft', actingOrgType: 'aggregator' }),
-    ).toBe('account.aggregator_init');
+    ).toBe('account.aggregator_init.seeker');
   });
 
   it('does NOT re-route non-create ops even under an aggregator acting-org', () => {

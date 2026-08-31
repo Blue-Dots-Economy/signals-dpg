@@ -85,9 +85,19 @@ CASES.set('profile.create_incomplete', ctaCase('profile.create_incomplete', ITEM
 CASES.set('offer.create_incomplete', ctaCase('offer.create_incomplete', ITEM_TOKENS));
 CASES.set('profile.update', ctaCase('profile.update', ITEM_TOKENS));
 CASES.set('offer.update', ctaCase('offer.update', ITEM_TOKENS));
+// Aggregator-onboarding initiation email, split per recipient role so the
+// activation copy is domain-correct: a seeker is told about discovering jobs
+// while a provider/service_provider is told about offering their services.
+// `notify_item_lifecycle` picks the suffix from resolveRecipientRole(domain),
+// so service_provider folds into the provider copy.
+const AGGREGATOR_INIT_TOKENS: TokenTypes = { aggregatorOrg: 'text', networkName: 'text' };
 CASES.set(
-  'account.aggregator_init',
-  ctaCase('account.aggregator_init', { name: 'text', aggregatorOrg: 'text' }),
+  'account.aggregator_init.seeker',
+  ctaCase('account.aggregator_init.seeker', AGGREGATOR_INIT_TOKENS),
+);
+CASES.set(
+  'account.aggregator_init.provider',
+  ctaCase('account.aggregator_init.provider', AGGREGATOR_INIT_TOKENS),
 );
 CASES.set('profile.pause', ctaCase('profile.pause', ITEM_TOKENS));
 CASES.set('offer.pause', ctaCase('offer.pause', ITEM_TOKENS));
@@ -138,21 +148,19 @@ CASES.set(
     'realtime',
   ),
 );
-CASES.set(
-  'welcome',
-  plainCase(
-    'welcome',
-    {
-      userName: 'text',
-      appName: 'text',
-      siteUrl: 'text',
-      siteLink: 'html',
-      teamName: 'text',
-    },
-    'best_effort',
-    'realtime',
-  ),
-);
+// Welcome (self-signup). `welcome` is the domain-less fallback; `.seeker` /
+// `.provider` carry role-correct copy, picked in notifications/welcome.ts from
+// resolveRecipientRole(domain) so service_provider folds into provider.
+const WELCOME_TOKENS: TokenTypes = {
+  userName: 'text',
+  appName: 'text',
+  siteUrl: 'text',
+  siteLink: 'html',
+  teamName: 'text',
+};
+CASES.set('welcome', plainCase('welcome', WELCOME_TOKENS, 'best_effort', 'realtime'));
+CASES.set('welcome.seeker', plainCase('welcome.seeker', WELCOME_TOKENS, 'best_effort', 'realtime'));
+CASES.set('welcome.provider', plainCase('welcome.provider', WELCOME_TOKENS, 'best_effort', 'realtime'));
 CASES.set(
   'support.request',
   plainCase(
