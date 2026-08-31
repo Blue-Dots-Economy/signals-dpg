@@ -425,3 +425,59 @@ relevance uses `vectorize: true` fields. Recommendation: the `vectorize` set, so
 text-narrowing and cosine-ranking describe the same content; the divergence is
 noted for #360 to settle. `item_search` does not store the serialized text, so
 the predicate runs against `i.item_state` via the existing `JOIN items i`.
+
+## 10. P6 — the UI discards the server's ranking (confirmed live, folded into #644)
+
+Reproduced on the deployed instance at `/home?view=list`: card badges read
+**49%, 62%, 49%** top to bottom. Adding `&domain=provider` yields **62, 49, 49**.
+
+`home-page.tsx:2396` re-sorts the fetched feed client-side by haversine
+distance (`sortItemsByNearest`, defined at line 141), so the server's cosine
+order arrives correctly and is discarded before render while each card still
+displays the server's cosine score.
+
+The sort sits inside the `selectedDomain === null` branch (line 2359), and
+`selectedDomain` initialises from `searchParams.get('domain')` (line 657). It
+therefore applies whenever no domain is explicitly selected — including for a
+viewer with only **one** visible domain, where the sidebar offers no tab to set
+it and the "Provider" header comes from `resolveHeaderDomain`'s
+single-visible-domain fallback. That is the default landing state for a
+signed-in seeker. The single-domain branch does not sort, which is why
+`?domain=` fixes it.
+
+Aggravating details: `nearestDistanceMeters` returns `Infinity` for an item with
+no/empty `item_locations` (`lib/geo/distance.ts:53-55`), so location-less items
+sort last; stored coordinates carry PII jitter, so printed addresses are not a
+proxy for the sort key (the order looks non-monotonic even as a distance sort);
+and it re-sorts the accumulated pages on each fetch, so positions reshuffle
+during scroll.
+
+**Shared trigger.** `sortItemsByNearest` short-circuits on
+`if (!userLocation) return items` — the same condition that gates the 30 km
+bound (§1.1). A resolved viewer location switches on both defects at once,
+which is why the signed-out list looked correct on both counts and the two
+symptoms always appeared together.
+
+**Origin.** Pre-#419 the "All" view merged N independently-paged per-domain
+feeds that were each server-ordered by distance; concatenating them interleaves
+badly, so a client-side distance re-sort restored a globally coherent order.
+Correct then, destructive now that the feeds are cosine-ranked.
+
+### 10.1 Open design gap: what orders a multi-domain union?
+
+Deleting `sortItemsByNearest` without answering this replaces a wrong order
+with an arbitrary one:
+
+- **Cosine is not comparable across domains.** Feeds anchored on the same
+  profile but scored against different domains' embeddings do not share a
+  scale, so interleaving by raw score is meaningless.
+- Concatenating per domain is coherent within each block but buries the second
+  domain.
+- A true global ranking needs one server-side query across domains, which
+  `/discover` cannot do — it takes exactly one `item_domain` (D8).
+
+Must be decided as part of the §3.2 `sort` work. `nearest` makes a distance
+merge legitimate again — but only when the user has asked for it.
+
+**Blocks §8.2 (#646):** the card cannot honestly report the ranking basis while
+the render silently changes the order.
