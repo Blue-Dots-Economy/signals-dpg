@@ -291,7 +291,7 @@ describe('getEmailMessages (singleton + EMAIL_MESSAGES_PATH + network/brand wiri
 
     const index = await getEmailMessages();
 
-    expect(index.forContext().get('welcome.subject')).toBe('Welcome!');
+    expect(index.forContext().get('welcome.subject')).toBe('Welcome to {{appName}}');
     expect(warnSpy).not.toHaveBeenCalled();
   });
 
@@ -314,7 +314,7 @@ describe('getEmailMessages (singleton + EMAIL_MESSAGES_PATH + network/brand wiri
     const index = await getEmailMessages();
 
     expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining(badPath));
-    expect(index.forContext().get('welcome.subject')).toBe('Welcome!');
+    expect(index.forContext().get('welcome.subject')).toBe('Welcome to {{appName}}');
   });
 
   it('reuses the same instance across calls (singleton) without re-reading', async () => {
@@ -352,7 +352,7 @@ describe('getEmailMessages (singleton + EMAIL_MESSAGES_PATH + network/brand wiri
       networks: ['blue_dot'],
     });
     expect(index.forContext('blue_dot').get('welcome.subject')).toBe('Blue Dot Hello');
-    expect(index.forContext().get('welcome.subject')).toBe('Welcome!');
+    expect(index.forContext().get('welcome.subject')).toBe('Welcome to {{appName}}');
   });
 
   it('falls back to instance/base copy and warns when loadEmailMessagesFiles rejects (e.g. a permissions error)', async () => {
@@ -364,8 +364,8 @@ describe('getEmailMessages (singleton + EMAIL_MESSAGES_PATH + network/brand wiri
 
     const index = await getEmailMessages();
 
-    expect(index.forContext().get('welcome.subject')).toBe('Welcome!');
-    expect(index.forContext('blue_dot').get('welcome.subject')).toBe('Welcome!');
+    expect(index.forContext().get('welcome.subject')).toBe('Welcome to {{appName}}');
+    expect(index.forContext('blue_dot').get('welcome.subject')).toBe('Welcome to {{appName}}');
     expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('EACCES'));
   });
 });
