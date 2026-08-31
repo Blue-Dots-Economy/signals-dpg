@@ -103,6 +103,37 @@ export async function stashSignupExtras(
  * Never throws: a Redis outage here must not fail a login that has otherwise
  * succeeded. The user simply lands without a domain, which is recoverable.
  */
+/**
+ * Read the stash WITHOUT deleting it. The welcome email uses this to learn the
+ * signup domain (seeker vs provider copy) at `afterUserCreate` time — the
+ * user's `domains` column is not written until the later `POST /user/domains`,
+ * so the parked stash is the only source of the domain at that point.
+ *
+ * Non-consuming so it can't race the Keycloak path's `takeSignupExtras`.
+ * Never throws: a miss/outage just yields the generic (domain-less) welcome.
+ */
+export async function peekSignupExtras(
+  identifiers: ExtrasIdentifiers
+): Promise<SignupExtras | null> {
+  const keys = keysFor(identifiers);
+  for (const key of keys) {
+    let raw: string | null = null;
+    try {
+      raw = await redis.get(key);
+    } catch {
+      return null;
+    }
+    if (!raw) continue;
+    try {
+      const { keys: _written, ...extras } = JSON.parse(raw) as StoredExtras;
+      return extras;
+    } catch {
+      return null;
+    }
+  }
+  return null;
+}
+
 export async function takeSignupExtras(
   identifiers: ExtrasIdentifiers
 ): Promise<SignupExtras | null> {

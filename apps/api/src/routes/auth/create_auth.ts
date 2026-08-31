@@ -94,9 +94,13 @@ export const authInstance = createAuth({
       console.error('materializeSignupGuardian failed:', err);
     }
 
-    // Signup domain (single-role lock) picks the role-correct welcome copy;
+    // Signup domain (from the parked signup extras — the user's `domains` row
+    // isn't written until later) picks the role-correct welcome copy;
     // best-effort, null ⇒ generic copy. See resolve_signup_domain.ts.
-    const signupDomain = await resolveSignupDomain(user.id);
+    const signupDomain = await resolveSignupDomain({
+      email: user.email ?? null,
+      phoneNumber: user.phoneNumber ?? null,
+    });
 
     await sendWelcomeNotifications(
       {
