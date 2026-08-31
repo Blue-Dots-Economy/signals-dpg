@@ -119,8 +119,8 @@ describe('dispatchItemLifecycleNotification', () => {
       log,
     );
     expect(dispatchEmail.mock.calls[0]![0]).toMatchObject({
-      caseId: 'account.aggregator_init',
-      variables: { name: 'Asha', aggregatorOrg: 'SkillBridge Network' },
+      caseId: 'account.aggregator_init.seeker',
+      variables: { aggregatorOrg: 'SkillBridge Network', networkName: 'Blue Dot' },
       log: expect.any(Function),
     });
   });

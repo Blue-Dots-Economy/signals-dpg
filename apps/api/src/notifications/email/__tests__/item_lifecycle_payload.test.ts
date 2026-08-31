@@ -46,7 +46,8 @@ const CASES: Array<{ caseId: string; vars: Record<string, string> }> = [
   { caseId: 'offer.create_incomplete', vars: { name: 'Acme Services' } },
   { caseId: 'profile.update', vars: { name: 'Asha' } },
   { caseId: 'offer.update', vars: { name: 'Acme Services' } },
-  { caseId: 'account.aggregator_init', vars: { name: 'Asha', aggregatorOrg: 'SkillBridge Network' } },
+  { caseId: 'account.aggregator_init.seeker', vars: { aggregatorOrg: 'SkillBridge Network', networkName: 'Blue Dot' } },
+  { caseId: 'account.aggregator_init.provider', vars: { aggregatorOrg: 'SkillBridge Network', networkName: 'Blue Dot' } },
   { caseId: 'profile.pause', vars: { name: 'Asha' } },
   { caseId: 'offer.pause', vars: { name: 'Acme Services' } },
   { caseId: 'profile.retire', vars: { name: 'Asha' } },
@@ -97,8 +98,12 @@ describe('item-lifecycle email payload (pre-notification-service)', () => {
       };
     expect(byCase('profile.create').variables.subject).toBe('Your profile is ready');
     expect(byCase('profile.create').variables.html).toContain('Asha');
-    expect(byCase('account.aggregator_init').variables.html).toContain('SkillBridge Network');
-    expect(byCase('account.aggregator_init').variables.subject).toBe('Activate your account');
+    expect(byCase('account.aggregator_init.seeker').variables.html).toContain('SkillBridge Network');
+    expect(byCase('account.aggregator_init.seeker').variables.html).toContain('discovering jobs');
+    expect(byCase('account.aggregator_init.provider').variables.html).toContain('offering your services');
+    expect(byCase('account.aggregator_init.seeker').variables.subject).toBe(
+      'Your account is ready — activate it to get started',
+    );
     // Draft-create copy must NOT claim "live"; it nudges completion (#1 review).
     expect(byCase('profile.create_incomplete').variables.subject).toBe('Complete your profile');
     expect(byCase('profile.create_incomplete').variables.html.toLowerCase()).not.toContain('is live');
