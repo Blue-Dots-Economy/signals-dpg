@@ -218,10 +218,10 @@ function pillFallbackId(renderableDoc: RenderableDoc | undefined, doc: LegalDoc)
 
 /**
  * How close to the top of the viewport a heading must have scrolled to count
- * as "passed" — matches the `scroll-mt-6` (24px) offset headings already
- * carry, plus a little slack for the rest of the reading column's own top
- * padding, so the highlighted entry is the one actually sitting at the top of
- * the reading area, not one still a full viewport away.
+ * as "passed" — the `scroll-mt-20` (80px) offset headings carry so an anchor
+ * lands them clear of the sticky app bar, plus a little slack, so the
+ * highlighted entry is the one actually sitting at the top of the *readable*
+ * area rather than one still hidden behind the bar.
  */
 const READING_LINE_PX = 96;
 
@@ -483,7 +483,20 @@ export function LegalDocumentView({ doc }: Readonly<{ doc: LegalDoc }>): React.J
             actually carries the logo, so it's composed here directly with
             the same language/theme controls, plus the back link — the only
             way back for someone mid-signup. */}
-        <header className="sticky top-0 z-40 flex min-h-14 items-center gap-3 border-b bg-gradient-to-r from-background to-primary/5 px-4 py-2 sm:px-6">
+        {/* `bg-background` under the gradient is load-bearing: `bg-gradient-to-r
+            from-background to-primary/5` is a *translucent* image (its right
+            stop is 5% alpha), and unlike `TopBar` — whose page content lives in
+            its own `overflow-y-auto` <main> and so never passes underneath —
+            this page scrolls the window itself, so without an opaque base the
+            reading column showed straight through the bar. Height and padding
+            still match `TopBar`.
+
+            `h-14` rather than `min-h-14`: a fixed height is what lets the
+            contents rail below park itself exactly under the bar via
+            `md:top-14` without the two measurements drifting apart. Nothing in
+            this bar wraps at any width — the back link collapses to its icon
+            below `sm` — so there is no row for a min-height to grow for. */}
+        <header className="sticky top-0 z-40 flex h-14 items-center gap-3 border-b bg-background bg-gradient-to-r from-background to-primary/5 px-4 py-2 sm:px-6">
           <PortalHeader />
           {/* Label drops below `sm` (icon-only) so a long wordmark plus
               language/theme controls never wrap the row and overlap the
@@ -510,7 +523,18 @@ export function LegalDocumentView({ doc }: Readonly<{ doc: LegalDoc }>): React.J
           <div className="grid gap-6 md:grid-cols-[236px_1fr] md:gap-10">
             <nav
               aria-label={t('legal.contents_label')}
-              className="border-b border-border pb-6 mb-6 md:sticky md:top-6 md:mb-0 md:self-start md:border-b-0 md:border-r md:pb-0 md:pr-6"
+              // `md:top-14` parks the rail directly under the sticky app bar
+              // (`h-14`) rather than under the viewport top, where the bar was
+              // covering its first entries.
+              //
+              // `max-h` + `overflow-y-auto` are what make it usable at all: a
+              // sticky element is only as scrollable as the box it is given, and
+              // this rail is taller than the viewport on every network (two
+              // documents, ~25 sections). Without a bounded height its tail sat
+              // below the fold with no way — wheel, drag or keyboard — to reach
+              // it. `overscroll-contain` stops a wheel that reaches the rail's
+              // end from carrying on into the page behind it.
+              className="border-b border-border pb-6 mb-6 md:sticky md:top-14 md:mb-0 md:max-h-[calc(100svh-3.5rem)] md:self-start md:overflow-y-auto md:overscroll-contain md:border-b-0 md:border-r md:py-6 md:pr-6"
             >
               {availableDocs.map(({ doc: d, version, sections }) => {
                 const headingId = docHeadingId(d);
@@ -565,7 +589,7 @@ export function LegalDocumentView({ doc }: Readonly<{ doc: LegalDoc }>): React.J
                     <DocHeading
                       id={docHeadingId(d)}
                       className={cn(
-                        'text-2xl font-bold text-foreground scroll-mt-6',
+                        'text-2xl font-bold text-foreground scroll-mt-20',
                         index > 0 && 'mt-9',
                       )}
                     >
@@ -585,7 +609,7 @@ export function LegalDocumentView({ doc }: Readonly<{ doc: LegalDoc }>): React.J
                         <div key={section.id}>
                           <h2
                             id={section.id}
-                            className="mt-8 mb-2 text-lg font-semibold text-foreground scroll-mt-6"
+                            className="mt-8 mb-2 text-lg font-semibold text-foreground scroll-mt-20"
                           >
                             {section.heading}
                           </h2>
@@ -595,7 +619,7 @@ export function LegalDocumentView({ doc }: Readonly<{ doc: LegalDoc }>): React.J
                         <div key={section.id}>
                           <h3
                             id={section.id}
-                            className="mt-6 mb-2 text-base font-semibold text-foreground scroll-mt-6"
+                            className="mt-6 mb-2 text-base font-semibold text-foreground scroll-mt-20"
                           >
                             {section.heading}
                           </h3>

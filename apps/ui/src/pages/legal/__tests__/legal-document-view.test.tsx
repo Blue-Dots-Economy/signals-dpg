@@ -267,6 +267,51 @@ describe('<LegalDocumentView />', () => {
   });
 });
 
+// happy-dom has no layout engine — it computes no scroll heights and honours
+// no `position: sticky` — so these assert the utility classes that produce the
+// behaviour rather than the behaviour itself. That is a real limit: they prove
+// the classes are present, not that the rail scrolls. They exist because all
+// three defects below shipped once, and each was a single missing class.
+describe('<LegalDocumentView /> sticky app bar and rail geometry', () => {
+  beforeEach(() => {
+    mockUseConsentConfig.mockReturnValue(REAL_SHAPE);
+  });
+
+  it('gives the app bar an opaque background under its gradient', () => {
+    // `bg-gradient-to-r from-background to-primary/5` alone is translucent at
+    // its right stop, so the reading column scrolled visibly through the bar.
+    const { container } = view('privacy');
+    const bar = container.querySelector('header');
+    expect(bar?.className).toContain('sticky');
+    expect(bar?.className).toContain('bg-background');
+  });
+
+  it('bounds the rail and lets it scroll on its own', () => {
+    // The rail is taller than the viewport on every network, and a sticky
+    // element with no bounded height simply leaves its tail below the fold
+    // with no way to reach it.
+    view('privacy');
+    const rail = screen.getByRole('navigation');
+    expect(rail.className).toMatch(/md:max-h-/);
+    expect(rail.className).toContain('md:overflow-y-auto');
+  });
+
+  it('offsets the rail by the app bar height so the bar does not cover it', () => {
+    view('privacy');
+    const rail = screen.getByRole('navigation');
+    expect(rail.className).toContain('md:top-14');
+  });
+
+  it('offsets every anchor target clear of the app bar', () => {
+    // Without a scroll-margin at least the bar's height, an anchor lands its
+    // heading underneath the bar.
+    view('privacy');
+    for (const name of ['Privacy Policy', 'Retention', 'Terms of Service']) {
+      expect(screen.getByRole('heading', { name }).className).toContain('scroll-mt-20');
+    }
+  });
+});
+
 describe('<LegalDocumentView /> deep-link and arrival scrolling', () => {
   let scrollIntoView: ReturnType<typeof vi.fn>;
 
