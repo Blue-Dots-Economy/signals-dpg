@@ -66,7 +66,7 @@ RUN --mount=type=cache,id=pnpm-store,target=/pnpm/store \
   pnpm turbo run build --filter=ui \
   && pnpm --filter ui run build:tourist
 
-FROM dhi.io/nginx:1.30-alpine AS runner
+FROM dhi.io/nginx:1.31-alpine AS runner
 # Hardened nginx. Three things differ from the stock nginx image and all three
 # are load-bearing below:
 #   1. ENTRYPOINT is ["nginx"] — the official image's docker-entrypoint.sh, and
