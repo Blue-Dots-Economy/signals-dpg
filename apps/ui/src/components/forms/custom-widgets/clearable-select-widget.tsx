@@ -46,7 +46,7 @@ import { cn } from '@/lib/utils';
 
 const ThemeSelectWidget = Widgets.SelectWidget;
 
-export function ClearableSelectWidget(props: WidgetProps) {
+export function ClearableSelectWidget(props: Readonly<WidgetProps>) {
   const { t } = useTranslation();
   const {
     id,

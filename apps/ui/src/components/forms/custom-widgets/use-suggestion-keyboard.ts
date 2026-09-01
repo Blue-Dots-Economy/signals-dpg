@@ -76,18 +76,24 @@ export function useSuggestionKeyboard({
     document.getElementById(optionId(activeIndex))?.scrollIntoView({ block: 'nearest' });
   }, [activeIndex, optionId]);
 
-  const onKeyDown = React.useCallback(
-    (event: React.KeyboardEvent) => {
-      if (count === 0) return;
+  // A closed list responds to exactly two keys: either arrow reveals it, and
+  // entering at the near end (top for Down, bottom for Up) is what a native
+  // combobox does.
+  const handleClosedKey = React.useCallback(
+    (event: React.KeyboardEvent): void => {
+      if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp') return;
+      event.preventDefault();
+      onOpen();
+      setActiveIndex(event.key === 'ArrowDown' ? 0 : count - 1);
+    },
+    [count, onOpen],
+  );
 
+  const handleOpenKey = React.useCallback(
+    (event: React.KeyboardEvent): void => {
       switch (event.key) {
         case 'ArrowDown':
           event.preventDefault();
-          if (!open) {
-            onOpen();
-            setActiveIndex(0);
-            return;
-          }
           // Clamped, not wrapped: a list that jumps back to the top when you
           // reach the bottom hides the fact that you have seen everything.
           setActiveIndex((i) => Math.min(i + 1, count - 1));
@@ -95,25 +101,18 @@ export function useSuggestionKeyboard({
 
         case 'ArrowUp':
           event.preventDefault();
-          if (!open) {
-            onOpen();
-            setActiveIndex(count - 1);
-            return;
-          }
-          // From nothing, ArrowUp enters the list at its END, as every native
-          // combobox does. Clamping from -1 would have entered at the start
-          // instead, so ArrowDown and ArrowUp did the same thing.
+          // From nothing, ArrowUp enters the list at its END. Clamping from -1
+          // would have entered at the start instead, making ArrowUp and
+          // ArrowDown do the same thing.
           setActiveIndex((i) => (i < 0 ? count - 1 : Math.max(i - 1, 0)));
           return;
 
         case 'Home':
-          if (!open) return;
           event.preventDefault();
           setActiveIndex(0);
           return;
 
         case 'End':
-          if (!open) return;
           event.preventDefault();
           setActiveIndex(count - 1);
           return;
@@ -121,13 +120,12 @@ export function useSuggestionKeyboard({
         case 'Enter':
           // Only swallowed when it actually commits a suggestion — otherwise
           // Enter must still reach the form and submit it.
-          if (!open || activeIndex < 0) return;
+          if (activeIndex < 0) return;
           event.preventDefault();
           onSelect(activeIndex);
           return;
 
         case 'Escape':
-          if (!open) return;
           event.preventDefault();
           onClose();
           setActiveIndex(-1);
@@ -136,14 +134,23 @@ export function useSuggestionKeyboard({
         case 'Tab':
           // Not prevented: moving on should move on. The list just shouldn't
           // be left hanging over the next field.
-          if (open) onClose();
+          onClose();
           return;
 
         default:
           return;
       }
     },
-    [count, open, activeIndex, onOpen, onClose, onSelect],
+    [count, activeIndex, onClose, onSelect],
+  );
+
+  const onKeyDown = React.useCallback(
+    (event: React.KeyboardEvent) => {
+      if (count === 0) return;
+      if (open) handleOpenKey(event);
+      else handleClosedKey(event);
+    },
+    [count, open, handleOpenKey, handleClosedKey],
   );
 
   return { activeIndex, setActiveIndex, optionId, listboxId, onKeyDown };
