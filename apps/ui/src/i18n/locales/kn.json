@@ -408,6 +408,7 @@
   "legal.version_effective": "ಆವೃತ್ತಿ {{version}} · {{date}} ರಿಂದ ಜಾರಿಯಲ್ಲಿದೆ",
   "legal.back_to_sign_in": "ಸೈನ್ ಇನ್‌ಗೆ ಹಿಂತಿರುಗಿ",
   "legal.contents_label": "ಪರಿವಿಡಿ",
+  "legal.unavailable": "ಕಾನೂನು ದಾಖಲೆಗಳು ಲಭ್ಯವಿಲ್ಲ.",
   "profile.error_generic_desc": "ಅನಿರೀಕ್ಷಿತ ದೋಷ ಸಂಭವಿಸಿದೆ. ದಯವಿಟ್ಟು ಮತ್ತೆ ಪ್ರಯತ್ನಿಸಿ — ಸಮಸ್ಯೆ ಮುಂದುವರಿದರೆ, ಬೆಂಬಲವನ್ನು ಸಂಪರ್ಕಿಸಿ.",
   "profile.error_role_unavailable_fallback_desc": "ಈ ಪ್ರೊಫೈಲ್ ಪ್ರಕಾರವು ಇಲ್ಲಿ ಬೆಂಬಲಿತವಾಗಿಲ್ಲ. ಬೇರೆ ಪಾತ್ರವನ್ನು ಪ್ರಯತ್ನಿಸಿ ಅಥವಾ ನಿಮ್ಮ ನೆಟ್‌ವರ್ಕ್ ನಿರ್ವಾಹಕರನ್ನು ಸಂಪರ್ಕಿಸಿ.",
   "theme.label_dark": "ಗಾಢ",
