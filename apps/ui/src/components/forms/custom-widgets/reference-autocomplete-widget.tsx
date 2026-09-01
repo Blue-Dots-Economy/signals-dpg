@@ -224,17 +224,18 @@ export function ReferenceAutocompleteWidget({
     return parts.length > 0 ? parts.join(', ') : null;
   }
 
-  const { activeIndex, setActiveIndex, optionId, listboxId, onKeyDown } = useSuggestionKeyboard({
-    count: suggestions.length,
-    open,
-    onOpen: () => setOpen(true),
-    onClose: () => setOpen(false),
-    onSelect: (index) => {
-      const option = suggestions[index];
-      if (option) choose(option);
-    },
-    idPrefix: id,
-  });
+  const { activeIndex, setActiveIndex, optionId, activeDescendantId, listboxId, onKeyDown } =
+    useSuggestionKeyboard({
+      items: suggestions,
+      open,
+      onOpen: () => setOpen(true),
+      onClose: () => setOpen(false),
+      onSelect: (index) => {
+        const option = suggestions[index];
+        if (option) choose(option);
+      },
+      idPrefix: id,
+    });
 
   return (
     <div className="relative space-y-2">
@@ -248,7 +249,7 @@ export function ReferenceAutocompleteWidget({
         aria-expanded={open && suggestions.length > 0}
         aria-controls={listboxId}
         aria-autocomplete="list"
-        aria-activedescendant={activeIndex >= 0 ? optionId(activeIndex) : undefined}
+        aria-activedescendant={activeDescendantId}
         className={cn(rawErrors && rawErrors.length > 0 && 'border-destructive')}
         onChange={(e) => handleInput(e.target.value)}
         onKeyDown={onKeyDown}

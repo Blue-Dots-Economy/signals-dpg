@@ -83,17 +83,18 @@ function RowCombobox({
   onBlurClose,
   onChoose,
 }: Readonly<RowComboboxProps>) {
-  const { activeIndex, setActiveIndex, optionId, listboxId, onKeyDown } = useSuggestionKeyboard({
-    count: suggestions.length,
-    open,
-    onOpen: () => onOpenChange(true),
-    onClose: () => onOpenChange(false),
-    onSelect: (index) => {
-      const suggestion = suggestions[index];
-      if (suggestion) onChoose(suggestion);
-    },
-    idPrefix: id,
-  });
+  const { activeIndex, setActiveIndex, optionId, activeDescendantId, listboxId, onKeyDown } =
+    useSuggestionKeyboard({
+      items: suggestions,
+      open,
+      onOpen: () => onOpenChange(true),
+      onClose: () => onOpenChange(false),
+      onSelect: (index) => {
+        const suggestion = suggestions[index];
+        if (suggestion) onChoose(suggestion);
+      },
+      idPrefix: id,
+    });
 
   return (
     <div className="relative flex-1">
@@ -107,7 +108,7 @@ function RowCombobox({
         aria-expanded={open && suggestions.length > 0}
         aria-controls={listboxId}
         aria-autocomplete="list"
-        aria-activedescendant={activeIndex >= 0 ? optionId(activeIndex) : undefined}
+        aria-activedescendant={activeDescendantId}
         className={cn(hasError && 'border-destructive')}
         onChange={(e) => onInput(e.target.value)}
         onKeyDown={onKeyDown}

@@ -359,6 +359,40 @@ describe('/privacy and /terms redirect into the single page', () => {
     );
   });
 
+  it('never pills a document the network does not publish', () => {
+    // Regression (review of #648): the fallback took a document AND a document
+    // key, so `availableDocs[0]` (whatever loaded) could be paired with
+    // `DOC_ORDER[0]` (`privacy`). A network publishing only `terms`, with no
+    // sections in it, therefore pilled a non-existent `#privacy`.
+    mockUseConsentConfig.mockReturnValue({
+      isLoading: false,
+      config: {
+        documents: {
+          terms: {
+            current_version: 1,
+            versions: [
+              {
+                version: 1,
+                title: 'Terms of Service',
+                content: '## Terms of Service\n\nNo subsections at all.',
+                effective_from: '2026-06-01',
+              },
+            ],
+          },
+        },
+      },
+    });
+
+    view();
+
+    // The one document that exists is anchored and rendered...
+    expect(screen.getByRole('heading', { name: 'Terms of Service' })).toHaveAttribute('id', 'terms');
+    // ...and nothing claims to be the privacy document.
+    expect(document.getElementById('privacy')).toBeNull();
+    const current = document.querySelector('[aria-current="true"]');
+    expect(current?.getAttribute('href') ?? null).not.toBe('#privacy');
+  });
+
   it('keeps a section that slugifies to a document name from stealing its id', () => {
     // A "Privacy" section would otherwise take `#privacy` out from under a
     // link that has already been shared.

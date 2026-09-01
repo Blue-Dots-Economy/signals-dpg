@@ -225,9 +225,14 @@ function prefersReducedMotion(): boolean {
  * passed. Shared by the arrival landing and the scroll-spy so both fall back
  * to the same entry: the document's own first section, or its own heading if
  * it has none.
+ *
+ * Takes the document and derives its key, rather than accepting both: passing
+ * `availableDocs[0]` alongside `DOC_ORDER[0]` let the two disagree, so a
+ * network publishing only `terms` pilled a non-existent `#privacy`.
  */
-function pillFallbackId(renderableDoc: RenderableDoc | undefined, doc: LegalDoc): string {
-  return renderableDoc?.sections[0]?.id ?? docHeadingId(doc);
+function pillFallbackId(renderableDoc: RenderableDoc | undefined): string | undefined {
+  if (!renderableDoc) return undefined;
+  return renderableDoc.sections[0]?.id ?? docHeadingId(renderableDoc.doc);
 }
 
 /**
@@ -321,7 +326,7 @@ export function LegalDocumentView(): React.JSX.Element {
     // Nothing has passed yet — genuinely at the very top of the page. Same
     // "first document's first section" fallback as the "own heading, no
     // section yet" branch below, just spelled out for the empty case.
-    if (!lastPassed) return pillFallbackId(availableDocs[0], DOC_ORDER[0]);
+    if (!lastPassed) return pillFallbackId(availableDocs[0]) ?? activeIdRef.current;
 
     const currentDoc = availableDocs.find((d) => docHeadingId(d.doc) === lastPassed!.id);
     if (!currentDoc) {
@@ -334,7 +339,7 @@ export function LegalDocumentView(): React.JSX.Element {
     // its first section instead of leaving the pill on a bare doc heading,
     // which would be the same "nothing really highlighted" gap this whole
     // fallback exists to close.
-    return pillFallbackId(currentDoc, currentDoc.doc);
+    return pillFallbackId(currentDoc) ?? lastPassed.id;
   }, [spyTargetIds, availableDocs]);
 
   // A just-clicked rail entry, or a programmatic (arrival/deep-link) scroll,
@@ -356,10 +361,9 @@ export function LegalDocumentView(): React.JSX.Element {
   /**
    * Scrolls `targetElId` into view (if it exists) and pins the rail's
    * highlight to `pillId` for the duration of that scroll. The two can
-   * differ: a no-hash arrival at `/terms` scrolls to the *document* heading
-   * (`terms-document`) but pills its *first section* — otherwise the
-   * pinned value itself would be the bare doc heading the fallback above
-   * exists to avoid.
+   * differ: arriving at `/legal#terms` scrolls to the *document* heading
+   * (`terms`) but pills its *first section* — otherwise the pinned value
+   * itself would be the bare doc heading the fallback above exists to avoid.
    */
   const scrollAndPin = useCallback(
     (targetElId: string, pillId: string) => {
@@ -442,12 +446,13 @@ export function LegalDocumentView(): React.JSX.Element {
       // section: there is no rail entry for a bare document heading to
       // highlight, so pinning one would show no pill at all.
       const targetDoc = availableDocs.find((d) => docHeadingId(d.doc) === hashId);
-      const pillId = targetDoc ? pillFallbackId(targetDoc, targetDoc.doc) : hashId;
+      const pillId = (targetDoc && pillFallbackId(targetDoc)) ?? hashId;
       if (document.getElementById(hashId)) scrollAndPin(hashId, pillId);
       return;
     }
     // Top of the page, nothing to scroll to — just seed the pill.
-    setActiveId(pillFallbackId(availableDocs[0], DOC_ORDER[0]));
+    const firstPill = pillFallbackId(availableDocs[0]);
+    if (firstPill) setActiveId(firstPill);
   }, [location.hash, contentReady, availableDocs, scrollAndPin]);
 
   /**

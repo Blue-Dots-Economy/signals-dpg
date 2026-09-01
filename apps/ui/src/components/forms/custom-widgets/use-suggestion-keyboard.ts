@@ -21,8 +21,16 @@
 import * as React from 'react';
 
 interface UseSuggestionKeyboardArgs {
-  /** How many suggestions are currently listed. */
-  count: number;
+  /**
+   * The suggestions currently listed, in display order.
+   *
+   * The array itself, not its length: the highlight has to be dropped whenever
+   * the RESULTS change, and a new result set is frequently the same size as the
+   * one it replaced. Callers must pass a referentially stable array (all three
+   * do — `useState` or `useMemo`), because a fresh identity every render would
+   * clear the highlight on every render.
+   */
+  items: readonly unknown[];
   /** Whether the list is showing. */
   open: boolean;
   /** Reveal the list — ArrowDown/ArrowUp on a closed list with results. */
@@ -40,8 +48,17 @@ interface UseSuggestionKeyboardResult {
   activeIndex: number;
   /** Set by pointer hover so mouse and keyboard don't disagree about the highlight. */
   setActiveIndex: (index: number) => void;
-  /** The DOM id for option `index`, for `aria-activedescendant` and the option itself. */
+  /** The DOM id for option `index`, for the option element itself. */
   optionId: (index: number) => string;
+  /**
+   * What the input's `aria-activedescendant` should be — the active option's
+   * id, or `undefined`.
+   *
+   * Undefined whenever the list is closed, not merely when nothing is active:
+   * the list is unmounted while closed, so pointing `aria-activedescendant` at
+   * one of its options would reference an element that isn't in the document.
+   */
+  activeDescendantId: string | undefined;
   /** The listbox's own id, for the input's `aria-controls`. */
   listboxId: string;
   /** Attach to the text input. */
@@ -49,7 +66,7 @@ interface UseSuggestionKeyboardResult {
 }
 
 export function useSuggestionKeyboard({
-  count,
+  items,
   open,
   onOpen,
   onClose,
@@ -57,17 +74,25 @@ export function useSuggestionKeyboard({
   idPrefix,
 }: UseSuggestionKeyboardArgs): UseSuggestionKeyboardResult {
   const [activeIndex, setActiveIndex] = React.useState(-1);
+  const count = items.length;
 
   const listboxId = `${idPrefix}-listbox`;
   const optionId = React.useCallback((index: number) => `${idPrefix}-option-${index}`, [idPrefix]);
 
-  // A new set of results, or a closed list, has no active option. Without this
-  // the highlight would sit at a stale index — pointing at whichever suggestion
-  // now happens to occupy that slot, so Enter would commit something the reader
-  // never moved to.
+  // A new set of results has no active option. Keyed on the results themselves,
+  // which is load-bearing in two ways that an earlier `[count, open]` got wrong:
+  //
+  //   - Not on `count`. A replacement set is often the same size, and a stale
+  //     index then points at whichever suggestion now occupies that slot — so
+  //     Enter committed something the reader had never moved to. That is the
+  //     exact failure this reset exists to prevent.
+  //   - Not on `open`. Revealing the list from a keypress sets the entry index
+  //     and flips `open` in the same commit, so an `open` dependency wiped the
+  //     highlight the keypress had just set: ArrowDown on a closed list opened
+  //     it with nothing highlighted and had to be pressed twice.
   React.useEffect(() => {
     setActiveIndex(-1);
-  }, [count, open]);
+  }, [items]);
 
   // Keep the highlighted option in view: the list scrolls (`max-h-60`), so
   // holding ArrowDown otherwise walks the highlight out of sight.
@@ -153,5 +178,12 @@ export function useSuggestionKeyboard({
     [count, open, handleOpenKey, handleClosedKey],
   );
 
-  return { activeIndex, setActiveIndex, optionId, listboxId, onKeyDown };
+  return {
+    activeIndex,
+    setActiveIndex,
+    optionId,
+    activeDescendantId: open && activeIndex >= 0 ? optionId(activeIndex) : undefined,
+    listboxId,
+    onKeyDown,
+  };
 }

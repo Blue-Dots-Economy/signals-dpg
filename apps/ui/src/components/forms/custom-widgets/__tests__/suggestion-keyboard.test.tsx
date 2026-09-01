@@ -159,6 +159,51 @@ describe('autocomplete suggestions — keyboard', () => {
     expect(screen.getAllByRole('option')).toHaveLength(1);
   });
 
+  it('enters at the first option when ArrowDown reveals a closed list', async () => {
+    // Regression (review of #648): revealing the list sets the entry index and
+    // flips `open` in the same commit, so a reset keyed on `open` wiped the
+    // highlight the keypress had just set — ArrowDown had to be pressed twice.
+    renderWidget();
+    const input = screen.getByRole('combobox');
+    await openList(input);
+    fireEvent.keyDown(input, { key: 'Escape' });
+    fireEvent.keyDown(input, { key: 'ArrowDown' });
+    expect(input).toHaveAttribute('aria-activedescendant', 'root_location-option-0');
+  });
+
+  it('drops the highlight when a fresh result set is the SAME LENGTH', async () => {
+    // Regression (review of #648): the reset was keyed on the result COUNT, so
+    // a replacement set of equal size kept the stale index — Enter then
+    // committed whichever suggestion had moved into that slot.
+    renderWidget();
+    const input = screen.getByRole('combobox');
+    await openList(input);
+    fireEvent.keyDown(input, { key: 'ArrowDown' });
+    fireEvent.keyDown(input, { key: 'ArrowDown' });
+    suggest.mockResolvedValue([
+      { label: 'Mysuru, Karnataka, India', lat: 12.3, lng: 76.6 },
+      { label: 'Mysuru Rural, Karnataka, India', lat: 12.4, lng: 76.7 },
+      { label: 'Mysuru Urban, Karnataka, India', lat: 12.2, lng: 76.5 },
+    ]);
+    await openList(input, 'Mysuru');
+    expect(input).not.toHaveAttribute('aria-activedescendant');
+  });
+
+  it('claims no active option while the list is closed', async () => {
+    // The list is unmounted while closed, so an `aria-activedescendant` left
+    // pointing into it would reference an element that is not in the document.
+    renderWidget();
+    const input = screen.getByRole('combobox');
+    await openList(input);
+    fireEvent.keyDown(input, { key: 'ArrowDown' });
+    expect(input).toHaveAttribute('aria-activedescendant', 'root_location-option-0');
+
+    fireEvent.keyDown(input, { key: 'Escape' });
+
+    expect(screen.queryByRole('listbox')).not.toBeInTheDocument();
+    expect(input).not.toHaveAttribute('aria-activedescendant');
+  });
+
   it('exposes the list as a listbox the input owns', async () => {
     renderWidget();
     const input = screen.getByRole('combobox');
