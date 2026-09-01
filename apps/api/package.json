@@ -45,7 +45,7 @@
   "dependencies": {
     "@fastify/cors": "^11.3.0",
     "@fastify/swagger": "^9.8.1",
-    "@scalar/fastify-api-reference": "^1.66.1",
+    "@scalar/fastify-api-reference": "^1.67.0",
     "auth": "workspace:*",
     "config": "workspace:*",
     "database": "workspace:*",
