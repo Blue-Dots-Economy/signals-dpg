@@ -226,14 +226,36 @@ if [ "$MODE" != "--verify-only" ]; then
 fi
 
 # Scope 3 — residue. The only check that catches what we neither tagged nor
-# ledgered. A non-zero delta is a REPORTED FAILURE, not a warning.
+# ledgered. A non-zero delta is a REPORTED FAILURE, not a warning — but only
+# when there IS a baseline to diff against, and only in `--verify-only` mode
+# is a missing baseline itself the failure.
+#
+# In full mode the ledger replay + tag sweep above already ran regardless of
+# whether a baseline exists (nothing above is gated on snapshot-before.txt) —
+# this section used to throw that work away by exiting 1 anyway, which made a
+# killed or ad-hoc run (no preceding --snapshot-only) impossible to clean up
+# at all. That's precisely the case `/signals-e2e cleanup [tag]` and the
+# preflight orphan sweep exist to serve (spec §5): there IS no pre-run
+# baseline for an orphan from a run that's already over. So full mode now
+# skips the residue check with a clear warning instead of failing — the
+# deletes still ran and still succeeded; there's just nothing to prove no
+# OTHER residue was left. `--verify-only` does no deletes of its own, so for
+# that mode a missing baseline is still a hard failure: there's nothing else
+# it could report.
 snapshot after
 
 if [ ! -f "$SNAP_DIR/snapshot-before.txt" ]; then
-  echo "[cleanup] FAIL — no snapshot-before.txt for run '$RUN_ID' in $SNAP_DIR." \
-    "Run 'cleanup.sh $RUN_ID --snapshot-only' before the suite starts; there is" \
-    "nothing to diff against otherwise." >&2
-  exit 1
+  if [ "$MODE" = "--verify-only" ]; then
+    echo "[cleanup] FAIL — no snapshot-before.txt for run '$RUN_ID' in $SNAP_DIR." \
+      "Run 'cleanup.sh $RUN_ID --snapshot-only' before the suite starts; there is" \
+      "nothing to diff against otherwise." >&2
+    exit 1
+  fi
+  echo "[cleanup] WARNING — no snapshot-before.txt for run '$RUN_ID' in $SNAP_DIR;" \
+    "skipping the residue check. The ledger replay and tag sweep above still ran," \
+    "so this run's own rows are gone — there is just no pre-run baseline to prove" \
+    "no OTHER residue was left. Treat this as 'deletes ran', not as a verified-clean run." >&2
+  exit 0
 fi
 
 RESIDUE=0

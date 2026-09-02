@@ -16,13 +16,36 @@ function next(): string {
   return `${RUN_ID}${counter.toString(36)}`;
 }
 
+/**
+ * Deterministic 5-digit namespace derived from ANY string id — including one
+ * that isn't hex, is empty, or is shorter than the old 7-char hex slice this
+ * replaced. `E2E_RUN_ID` is a documented, user-settable override (RUN_ID
+ * above), and the default id (a uuid slice) only happens to be hex; a value
+ * like "phaseminus1" made the previous `parseInt(RUN_ID.slice(0, 7), 16)`
+ * return `NaN` immediately (`p` isn't a hex digit), which then flowed,
+ * unchecked, straight into a phone number (`+91900NaN0001`) and a `500` on
+ * signup verify. FNV-1a is defined for every input, including the empty
+ * string, and `>>> 0` before the modulo guarantees a non-negative, always-
+ * in-range `[0, 100000)` result — so the `.padStart(5, '0')` below is never
+ * covering for a sign or a NaN.
+ */
+export function runDigitsFor(id: string): string {
+  let hash = 0x811c9dc5; // FNV-1a 32-bit offset basis
+  for (let i = 0; i < id.length; i++) {
+    hash ^= id.charCodeAt(i);
+    hash = Math.imul(hash, 0x01000193); // FNV-1a 32-bit prime
+  }
+  return String((hash >>> 0) % 100000).padStart(5, '0');
+}
+
 // A stable 5-digit numeric namespace for this run (derived from RUN_ID), so
 // phone numbers from different worker processes rarely collide. Exported so
 // cleanup.sh's tag sweep can match phone-channel personas on the value that
-// actually appears in the number — RUN_ID itself never does (it's hex, not
-// digits, and newPhone() embeds this hash of it, not the literal string) —
-// without hand-deriving the same hash a second time and risking drift.
-export const RUN_DIGITS = String(parseInt(RUN_ID.slice(0, 7), 16) % 100000).padStart(5, '0');
+// actually appears in the number — RUN_ID itself never does (it's an
+// arbitrary, possibly non-numeric string; newPhone() embeds this hash of it,
+// not the literal string) — without hand-deriving the same hash a second
+// time and risking drift.
+export const RUN_DIGITS = runDigitsFor(RUN_ID);
 let phoneSeq = 0;
 
 /**
