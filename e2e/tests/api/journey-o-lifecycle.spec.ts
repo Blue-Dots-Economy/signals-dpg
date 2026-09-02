@@ -68,7 +68,7 @@ test.describe('Journey O — profile lifecycle', () => {
     ).toBe(true);
   });
 
-  test('lifecycle transition guards are enforced', async ({ api, service, cfg, caps, authCtx }) => {
+  test('lifecycle transition guards are enforced', async ({ api, anon, service, cfg, caps, authCtx }) => {
     const u = await createLiveProfileUser(api, service, cfg, caps, {
       authCtx,
       domainKey: cfg.servedDomains[0],
@@ -85,12 +85,13 @@ test.describe('Journey O — profile lifecycle', () => {
     expect(ghost.status).toBe(404);
     expect(ghost.body?.error).toBe('ITEM_NOT_FOUND');
 
-    // unauthenticated
-    const anon = await api.post<{ error?: string }>('/api/v1/item/lifecycle', {
+    // unauthenticated — `anon` carries no cookie from `u`'s login, unlike `api`
+    // (see fixtures.ts), so this is a real 401, not a session the test forgot about.
+    const unauthed = await anon.post<{ error?: string }>('/api/v1/item/lifecycle', {
       item_id: u.itemId,
       action: 'pause',
     });
-    expect(anon.status, 'lifecycle must not be drivable anonymously').toBe(401);
+    expect(unauthed.status, 'lifecycle must not be drivable anonymously').toBe(401);
   });
 
   test('a non-owner cannot change another user\'s lifecycle', async ({ api, service, cfg, caps, authCtx }) => {

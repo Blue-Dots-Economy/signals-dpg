@@ -15,7 +15,7 @@ test.describe('Journey F — PII reveal', () => {
   test.skip(({ cfg, caps }) => provisioningMethod(cfg, caps) === null, 'no way to create users (gated target without service creds)');
   test.skip(({ caps }) => !caps.testOtp, 'requires OTP retrieval (CREATE_TEST_OTP on the target)');
 
-  test('contact details are revealed only to a participant after the reveal status', async ({ api, service, cfg, caps, authCtx }) => {
+  test('contact details are revealed only to a participant after the reveal status', async ({ api, anon, service, cfg, caps, authCtx }) => {
     const source = await createLiveProfileUser(api, service, cfg, caps, { authCtx, domainKey: cfg.servedDomains[0], label: 'fsrc' });
     const target = await createLiveProfileUser(api, service, cfg, caps, { authCtx, domainKey: cfg.servedDomains[1] ?? cfg.servedDomains[0], label: 'ftgt' });
 
@@ -30,9 +30,13 @@ test.describe('Journey F — PII reveal', () => {
     const before = await source.session.client.get(path);
     expect(before.status, 'PII must not reveal before the accept status').toBe(403);
 
-    // unauthenticated → rejected (current source: 401 UNAUTHORIZED; older builds: 403)
-    const anon = await api.get(path);
-    expect([401, 403], `unauthenticated must be rejected, got ${anon.status}`).toContain(anon.status);
+    // unauthenticated → rejected (current source: 401 UNAUTHORIZED; older builds: 403).
+    // Must be `anon`, not `api`: `source` and `target` were both just logged in on
+    // `api`'s shared request context, so `api` here would carry `target`'s session
+    // cookie and this would silently re-test "target reads before accept" (also
+    // 403, so it would still pass) instead of the auth boundary (see fixtures.ts).
+    const unauthed = await anon.get(path);
+    expect([401, 403], `unauthenticated must be rejected, got ${unauthed.status}`).toContain(unauthed.status);
 
     // a non-participant third user → 403 NOT_ACTION_PARTICIPANT
     const stranger = await createLiveProfileUser(api, service, cfg, caps, { authCtx, domainKey: cfg.servedDomains[0], label: 'fstr' });

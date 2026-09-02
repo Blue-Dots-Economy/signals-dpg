@@ -85,16 +85,19 @@ test.describe('Journey P — item update & delete', () => {
     expect(still?.lifecycle_status, 'a refused write must change nothing').toBe('live');
   });
 
-  test('item writes reject an unauthenticated caller', async ({ api, service, cfg, caps, authCtx }) => {
+  test('item writes reject an unauthenticated caller', async ({ api, anon, service, cfg, caps, authCtx }) => {
     const u = await createLiveProfileUser(api, service, cfg, caps, {
       authCtx,
       domainKey: cfg.servedDomains[0],
       label: 'panon',
     });
 
-    const patched = await api.patch(`/api/v1/item/${u.itemId}`, { item_state: u.itemState });
+    // `anon` runs on its own APIRequestContext — unlike `api`, it never sees the
+    // session cookie `u`'s login just set, so a 401 here is a real auth-boundary
+    // check, not a session the test forgot it was holding (see fixtures.ts).
+    const patched = await anon.patch(`/api/v1/item/${u.itemId}`, { item_state: u.itemState });
     expect(patched.status).toBe(401);
-    const deleted = await api.delete(`/api/v1/item/${u.itemId}`);
+    const deleted = await anon.delete(`/api/v1/item/${u.itemId}`);
     expect(deleted.status).toBe(401);
 
     const still = await fetchOwnItemById(u.session, u.binding, u.itemId);
