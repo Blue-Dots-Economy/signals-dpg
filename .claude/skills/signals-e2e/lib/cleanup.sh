@@ -19,6 +19,40 @@ E2E_DIR="$(cd "$HERE/../../../../e2e" && pwd)"
 SNAP_DIR="$E2E_DIR/run/$RUN_ID"
 mkdir -p "$SNAP_DIR"
 
+# Mutual exclusion per run id. Two cleanup.sh invocations racing on the SAME
+# run id (e.g. `/signals-e2e cleanup <tag>` run by hand while that run's own
+# EXIT-trap teardown is also in flight) both call `snapshot after`, which
+# truncates then re-appends every table's line to the SAME
+# snapshot-after.txt — reproduced live: the file ends up with every table
+# listed TWICE, so the residue loop's `awk` lookup below returns a two-line
+# value like "48\n48" for `$after` instead of "48". That fails the
+# `^[0-9]+$` check, which renders as a garbled, line-wrapped
+# "not a readable count ... 48\n48'); cannot verify cleanup." message AND
+# reports a FALSE "N table(s) left rows behind" — the underlying DELETEs
+# succeeded fine; only the snapshot FILE was corrupted by the race. `mkdir`
+# is atomic on any POSIX filesystem and needs no extra dependency (macOS has
+# no `flock`), so it is the lock primitive here.
+LOCK_DIR="$SNAP_DIR/.lock"
+LOCK_HELD=false
+release_lock() {
+  [ "$LOCK_HELD" = true ] && rmdir "$LOCK_DIR" 2>/dev/null
+  return 0
+}
+trap release_lock EXIT
+LOCK_TRIES=0
+while ! mkdir "$LOCK_DIR" 2>/dev/null; do
+  LOCK_TRIES=$((LOCK_TRIES + 1))
+  if [ "$LOCK_TRIES" -ge 30 ]; then
+    echo "[cleanup] FAIL — could not acquire the lock for run '$RUN_ID' after 30s ($LOCK_DIR)." \
+      "Another cleanup.sh is already running against this exact run id, or a stale lock survived" \
+      "one that was killed (SIGKILL bypasses the release trap) — remove $LOCK_DIR by hand only" \
+      "once you are sure nothing else is cleaning up this run." >&2
+    exit 1
+  fi
+  sleep 1
+done
+LOCK_HELD=true
+
 PG_CONTAINER="${PG_CONTAINER:-dpg-db}"
 PGUSER="${PGUSER:-postgres}"
 PGDB="${PGDB:-signals}"

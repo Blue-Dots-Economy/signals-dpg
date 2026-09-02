@@ -163,6 +163,12 @@ CLEANUP_DONE=false
 RESIDUE_COUNT=0
 CLEAN_PGUSER=""
 CLEAN_PGDB=""
+# The PID of whatever long-running foreground command is currently active
+# (stack-up.sh, then npm run e2e:api, then npm run e2e:ui) — see run_fg below.
+MAIN_CHILD_PID=""
+# Set by on_signal only; teardown reads it to decide whether this run's
+# directory is a finished artifact (kept) or interrupted debris (removed).
+INTERRUPTED=false
 
 stop_stubs() {
   local pid
@@ -195,8 +201,74 @@ run_cleanup() {
 teardown() {
   stop_stubs
   run_cleanup || true
+  if [ "$INTERRUPTED" = true ]; then
+    # An interrupted run has no finished report — its directory is debris,
+    # not an artifact worth keeping (unlike a completed run's, which stays
+    # for post-mortem). run_cleanup() above already ran exactly once (guarded
+    # by CLEANUP_DONE) before this removes the directory it wrote into, so
+    # there is nothing left to race.
+    rm -rf "$RUN_DIR"
+    log "interrupted — removed $RUN_DIR (a completed run's directory is kept; an interrupted one is not)"
+  fi
 }
 trap teardown EXIT
+
+# on_signal is the actual fix for "an interrupted run cleans up like a
+# finished one". An `EXIT` trap ALONE does not fire promptly here: this
+# script spends nearly all its time blocked on a foreground child (stack-up.sh,
+# then `npm run e2e:api`/`e2e:ui`), and bash defers a trapped signal until the
+# CURRENT foreground command returns — confirmed empirically on this host,
+# including with an explicit trap already registered. `run_fg` below runs
+# that child as a background job and `wait`s on it instead of exec'ing it
+# directly, because bash's `wait` builtin is special-cased to return AS SOON
+# AS a trapped signal arrives, even though the child keeps running — the trap
+# then fires immediately, without waiting for the child.
+#
+# That still leaves the child alive, so on_signal has to kill it itself — and
+# it must send SIGTERM, never SIGINT/SIGQUIT: confirmed empirically that a
+# non-interactive, job-control-off bash (this script, launched via `... &`,
+# exactly how `/signals-e2e` is invoked) sets SIGINT and SIGQUIT to SIG_IGN
+# for every `&`-backgrounded child BEFORE exec — that disposition cannot be
+# changed by the child itself once inherited, so `kill -INT` on a backgrounded
+# `npm`/`playwright` process is a silent no-op even though the kill call
+# itself reports success. SIGTERM carries no such exemption, and both `npm`
+# and Playwright's own runner already handle it (Playwright installs a
+# SIGTERM/SIGINT handler to abort in-flight browsers rather than orphaning
+# them). No `setsid` on macOS, and process-group signalling behaved
+# inconsistently across `set -m` states when tested here — sending SIGTERM to
+# the direct child is what was actually verified to work, so that is what
+# this does, with a SIGKILL fallback for a child that does not exit promptly.
+on_signal() {
+  local sig="$1" code="$2"
+  log "received SIG$sig — stopping the running command and shutting down..."
+  INTERRUPTED=true
+  if [ -n "$MAIN_CHILD_PID" ]; then
+    kill -TERM "$MAIN_CHILD_PID" >/dev/null 2>&1 || true
+    sleep 1
+    if kill -0 "$MAIN_CHILD_PID" >/dev/null 2>&1; then
+      log "child $MAIN_CHILD_PID still alive 1s after SIGTERM — sending SIGKILL"
+      kill -KILL "$MAIN_CHILD_PID" >/dev/null 2>&1 || true
+    fi
+    wait "$MAIN_CHILD_PID" >/dev/null 2>&1 || true
+  fi
+  # `exit` here runs the EXIT trap (`teardown`) exactly once — no separate
+  # call needed, and no double-teardown to reason about.
+  exit "$code"
+}
+trap 'on_signal INT 130' INT
+trap 'on_signal TERM 143' TERM
+
+# Runs "$@" as a background job and waits on it, recording its pid in
+# MAIN_CHILD_PID for on_signal above. Every long-running foreground command
+# in this script goes through this instead of being exec'd directly.
+run_fg() {
+  "$@" &
+  MAIN_CHILD_PID=$!
+  wait "$MAIN_CHILD_PID"
+  local code=$?
+  MAIN_CHILD_PID=""
+  return $code
+}
 
 # ---------------------------------------------------------------------------
 # 4. Stack reuse: a live marker for the SAME dot skips stack-up.sh entirely.
@@ -242,7 +314,7 @@ else
   # a mid-failure leaves a partially-populated env.sh alongside a non-zero
   # exit, and sourcing that as if it had succeeded would silently run the
   # suite against half-configured capabilities.
-  if ! bash "$HERE/stack-up.sh" "$DOT" "$RUN"; then
+  if ! run_fg bash "$HERE/stack-up.sh" "$DOT" "$RUN"; then
     log "FAIL: stack-up.sh could not bring the target to a ready state (see its output above)."
     log "If the stack itself was never started at all, run the run-signals-dpg skill for dot=$DOT first, then retry."
     exit 1
@@ -373,9 +445,9 @@ export E2E_ENV="${E2E_ENV:-local}"
 
 rm -f test-results/results.json
 if [ -n "$ALIAS_GREP" ]; then
-  npm run e2e:api -- --grep "$ALIAS_GREP"
+  run_fg npm run e2e:api -- --grep "$ALIAS_GREP"
 else
-  npm run e2e:api
+  run_fg npm run e2e:api
 fi
 API_CODE=$?
 if [ -f test-results/results.json ]; then
@@ -387,9 +459,9 @@ log "API tier exit code: $API_CODE"
 
 rm -f test-results/results.json
 if [ -n "$ALIAS_GREP" ]; then
-  npm run e2e:ui -- --headed --grep "$ALIAS_GREP"
+  run_fg npm run e2e:ui -- --headed --grep "$ALIAS_GREP"
 else
-  npm run e2e:ui -- --headed
+  run_fg npm run e2e:ui -- --headed
 fi
 UI_CODE=$?
 if [ -f test-results/results.json ]; then

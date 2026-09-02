@@ -106,6 +106,7 @@ of Playwright.
 | `x-uri` through a `$ref` | `applyUriPatterns` walks `properties`/`items` but not `$defs`/`definitions` — a field marked through a shared `$ref` gets no pattern and its validation silently does nothing. |
 | Peer-fetch HMAC 401 | Inter-instance item fetch can 401 because `lifecycle_filter` is stripped by Zod before the HMAC re-check. Needs a 2nd instance to reproduce — suite 14, parked. |
 | `@known` has no validation | A test can be silenced out of the exit code (though not out of section 3's rendered text) purely by attaching a `@known` annotation, with nothing checking it references a real tracked issue. Treat it like an unchecked eslint-disable — read section 3, don't just trust a green exit code. |
+| `kill -INT` on a `&`-backgrounded run | `run.sh` traps INT and TERM and tears down promptly either way — *except* when it was itself started with a trailing `&` from a non-interactive, job-control-off shell (`nohup bash lib/run.sh ... &`, common from automation). Bash then sets SIGINT to ignore for that process **before it even starts**, and no `trap` inside the script can override that (a documented bash/POSIX rule, verified empirically, not a bug in this script). Plain `kill <pid>` (SIGTERM, the default) always works regardless of how it was launched; so does Ctrl-C at a real terminal. Prefer either over `kill -INT` for a backgrounded invocation. |
 
 ## 6. Running it
 
