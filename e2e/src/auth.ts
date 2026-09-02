@@ -4,6 +4,7 @@ import type { E2EConfig } from './config.js';
 import { KeycloakLogin, keycloakSettingsFrom } from './keycloak.js';
 import { Mailpit } from './mailpit.js';
 import { readKeycloakLogOtp } from './keycloak_log.js';
+import { recordCreated } from './ledger.js';
 
 /**
  * Signals-issued OTPs (guardian challenges, and login under
@@ -230,7 +231,15 @@ export async function signup(
   opts: { domain?: string; age?: number } = {},
 ): Promise<Session> {
   const provider = ctx ? await resolveAuthProvider(api, ctx.cfg) : 'betterauth';
-  if (provider === 'betterauth') return betterAuthSignup(api, id, name);
+  if (provider === 'betterauth') {
+    const session = await betterAuthSignup(api, id, name);
+    // This is the only path that mints a brand-new better-auth user row, so
+    // it's the one choke point that needs to ledger it — every caller of
+    // signup() (direct journeys and flows.ts's createLiveProfileUser) gets
+    // this for free rather than each needing its own recordCreated call.
+    recordCreated('user', session.userId);
+    return session;
+  }
   if (!ctx) throw new Error('[e2e] keycloak signup needs an AuthContext');
 
   const created = await keycloakSelfSignup(api, id, name, opts);
@@ -240,7 +249,12 @@ export async function signup(
     }
     throw new Error(`[e2e] keycloak self-signup failed for ${id.value}: ${created.status} ${JSON.stringify(created.body)}`);
   }
-  return keycloakSessionFor(api, ctx, id);
+  // Keycloak: the local `user` row is materialized right here, on this first
+  // authenticated call (see keycloakSessionFor's doc comment) — same choke
+  // point reasoning as the betterauth branch above.
+  const session = await keycloakSessionFor(api, ctx, id);
+  recordCreated('user', session.userId);
+  return session;
 }
 
 /** Existing-user login. */

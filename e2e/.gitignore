@@ -7,3 +7,4 @@ blob-report/
 .env
 .env.*
 !.env.*.example
+run/

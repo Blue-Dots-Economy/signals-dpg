@@ -12,6 +12,7 @@ import {
   type Session,
 } from './auth.js';
 import { newEmail, newName, newPhone } from './identities.js';
+import { recordCreated } from './ledger.js';
 
 /**
  * A proven-adult age so profiles in guardian-gated domains can go live (an
@@ -179,6 +180,9 @@ export async function createLiveProfileUser(
       throw new Error(`[e2e] item/create failed: ${create.status} ${JSON.stringify(create.body)}`);
     }
     itemId = create.body.item_id;
+    recordCreated('items', itemId);
+    // The user row itself is ledgered inside signup() — it's the one choke
+    // point every signup path (direct journeys included) goes through.
   } else {
     // service provisioning: create the participant + item, then log in as them.
     const id = freshIdentity(cfg, label, { provider });
@@ -208,6 +212,11 @@ export async function createLiveProfileUser(
       throw new Error(`[e2e] admin/participant provisioning failed: ${prov.status} ${JSON.stringify(prov.body)}`);
     }
     itemId = prov.body.items[0].item_id;
+    recordCreated('items', itemId);
+    // Unlike the signup branch, this path never calls signup() — the
+    // participant (and its user row) is minted directly by admin/participant,
+    // so this is the one place that knows its id.
+    recordCreated('user', prov.body.user_id);
     session = await login(api, id, opts.authCtx);
     await acceptCoreConsent(session, binding.network, 'login');
     // The guardian gate keys off the U18 birth data, not the user row's DOB from
