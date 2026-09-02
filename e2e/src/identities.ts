@@ -17,8 +17,12 @@ function next(): string {
 }
 
 // A stable 5-digit numeric namespace for this run (derived from RUN_ID), so
-// phone numbers from different worker processes rarely collide.
-const RUN_DIGITS = String(parseInt(RUN_ID.slice(0, 7), 16) % 100000).padStart(5, '0');
+// phone numbers from different worker processes rarely collide. Exported so
+// cleanup.sh's tag sweep can match phone-channel personas on the value that
+// actually appears in the number — RUN_ID itself never does (it's hex, not
+// digits, and newPhone() embeds this hash of it, not the literal string) —
+// without hand-deriving the same hash a second time and risking drift.
+export const RUN_DIGITS = String(parseInt(RUN_ID.slice(0, 7), 16) % 100000).padStart(5, '0');
 let phoneSeq = 0;
 
 /**
