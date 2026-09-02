@@ -537,7 +537,10 @@ fi
 #    (headed, so the run is watchable). Both run even if the first has
 #    failures — a failing api spec must not hide the ui tier's own results —
 #    and each tier's own `test-results/results.json` is copied out before the
-#    next tier's Playwright invocation overwrites the same path.
+#    next tier's Playwright invocation overwrites the same path. Each tier is
+#    first asked (via `tier_test_count`, below) whether it has anything to run
+#    for the current `--grep` at all, and skipped rather than run-and-fail
+#    when it doesn't — see that function's comment for why.
 # ---------------------------------------------------------------------------
 cd "$E2E_DIR"
 export E2E_ENV="${E2E_ENV:-local}"
@@ -574,36 +577,100 @@ inject_exit_code_error() {
   ' "$path" "$tier" "$code"
 }
 
-rm -f test-results/results.json
-if [ -n "$ALIAS_GREP" ]; then
-  run_fg npm run e2e:api -- --grep "$ALIAS_GREP"
-else
-  run_fg npm run e2e:api
-fi
-API_CODE=$?
-if [ -f test-results/results.json ]; then
-  cp test-results/results.json "$RUN_DIR/results-api.json"
-else
+# Whether a tier has ANYTHING to run for the current --grep, asked of
+# Playwright itself via `--list` rather than inferred from an exit code. An
+# alias whose journey lives in only one tier (e.g. `consent` — API-only) makes
+# the OTHER tier's `--grep` legitimately match nothing: running it for real
+# would exit 1 with "Error: No tests found", which used to get folded (via
+# inject_exit_code_error above) into a section-2 "not working" entry even
+# though the alias's real coverage passed cleanly in its own tier. That is a
+# different failure shape from "this alias matched nothing in EITHER tier"
+# (the original bug this suite's alias table exists to catch, e.g. `map` —
+# no journey written yet at all) — the distinction can only be drawn at the
+# merged-results level (step 7b below), not per tier, so this function's only
+# job is to answer "does this ONE tier have anything", cheaply, before
+# spending the time to actually run it.
+#
+# `--list` always exits 0 (confirmed live, this Playwright version) and prints
+# `Total: N tests in M files` regardless of N — including 0 — so N is parsed
+# out of that line rather than relied on as an exit code. A line that fails to
+# parse (a crashed config, an unexpected output shape) returns -1, which every
+# caller below treats as "unknown — run the tier for real" rather than
+# silently skipping it: an unparseable `--list` must never be the reason a
+# tier's real error goes unseen.
+tier_test_count() {
+  local dir="$1" grep_pat="$2" out n
+  if [ -n "$grep_pat" ]; then
+    out="$(npx playwright test "$dir" --grep "$grep_pat" --list 2>&1)"
+  else
+    out="$(npx playwright test "$dir" --list 2>&1)"
+  fi
+  n="$(printf '%s\n' "$out" | grep -Eo 'Total: [0-9]+ test' | grep -Eo '[0-9]+' | tail -1)"
+  if [[ "$n" =~ ^[0-9]+$ ]]; then
+    printf '%s' "$n"
+  else
+    printf '%s' "-1"
+  fi
+}
+
+API_COUNT="$(tier_test_count tests/api "$ALIAS_GREP")"
+if [ "$API_COUNT" = "0" ]; then
+  log "API tier: --list matched 0 tests (grep: ${ALIAS_GREP:-<none>}) — skipping this tier;" \
+    "this alias's coverage may live entirely in the other tier, which is not a failure on its own."
   echo '{"suites":[]}' > "$RUN_DIR/results-api.json"
+  API_CODE=0
+else
+  rm -f test-results/results.json
+  if [ -n "$ALIAS_GREP" ]; then
+    run_fg npm run e2e:api -- --grep "$ALIAS_GREP"
+  else
+    run_fg npm run e2e:api
+  fi
+  API_CODE=$?
+  if [ -f test-results/results.json ]; then
+    cp test-results/results.json "$RUN_DIR/results-api.json"
+  else
+    echo '{"suites":[]}' > "$RUN_DIR/results-api.json"
+  fi
+  inject_exit_code_error "$RUN_DIR/results-api.json" API "$API_CODE"
 fi
-inject_exit_code_error "$RUN_DIR/results-api.json" API "$API_CODE"
 log "API tier exit code: $API_CODE"
 
-rm -f test-results/results.json
-if [ -n "$ALIAS_GREP" ]; then
-  run_fg npm run e2e:ui -- --headed --grep "$ALIAS_GREP"
-else
-  run_fg npm run e2e:ui -- --headed
-fi
-UI_CODE=$?
-if [ -f test-results/results.json ]; then
-  cp test-results/results.json "$RUN_DIR/results-ui.json"
-else
+UI_COUNT="$(tier_test_count tests/ui "$ALIAS_GREP")"
+if [ "$UI_COUNT" = "0" ]; then
+  log "UI tier: --list matched 0 tests (grep: ${ALIAS_GREP:-<none>}) — skipping this tier;" \
+    "this alias's coverage may live entirely in the other tier, which is not a failure on its own."
   echo '{"suites":[]}' > "$RUN_DIR/results-ui.json"
+  UI_CODE=0
+else
+  rm -f test-results/results.json
+  if [ -n "$ALIAS_GREP" ]; then
+    run_fg npm run e2e:ui -- --headed --grep "$ALIAS_GREP"
+  else
+    run_fg npm run e2e:ui -- --headed
+  fi
+  UI_CODE=$?
+  if [ -f test-results/results.json ]; then
+    cp test-results/results.json "$RUN_DIR/results-ui.json"
+  else
+    echo '{"suites":[]}' > "$RUN_DIR/results-ui.json"
+  fi
+  inject_exit_code_error "$RUN_DIR/results-ui.json" UI "$UI_CODE"
 fi
-inject_exit_code_error "$RUN_DIR/results-ui.json" UI "$UI_CODE"
 log "UI tier exit code: $UI_CODE"
 
+# ---------------------------------------------------------------------------
+# 7b. Merge at the results level, not the exit-code level — this is what
+#     makes "matched nothing in one tier, passed in the other" read as green
+#     and "matched nothing in EITHER tier" (both skipped above, so both
+#     contribute an empty `suites: []` and zero stats) still read as
+#     report.mjs's `zeroExecuted` section-2 entry. `flaky` is carried through
+#     alongside expected/skipped/unexpected — playwright.config.ts sets
+#     `retries: 1` deliberately (a real external-target flake passes on
+#     retry), and dropping `flaky` here made report.mjs's `zeroExecuted` check
+#     blind to a run whose only spec passed on retry (counted as 0 executed)
+#     while section 1 correctly showed it as working.
+# ---------------------------------------------------------------------------
 node -e '
   const fs = require("fs");
   const readJson = (p) => { try { return JSON.parse(fs.readFileSync(p, "utf8")); } catch { return {}; } };
@@ -616,6 +683,7 @@ node -e '
       expected: (a.stats?.expected || 0) + (b.stats?.expected || 0),
       skipped: (a.stats?.skipped || 0) + (b.stats?.skipped || 0),
       unexpected: (a.stats?.unexpected || 0) + (b.stats?.unexpected || 0),
+      flaky: (a.stats?.flaky || 0) + (b.stats?.flaky || 0),
     },
   };
   fs.writeFileSync(process.argv[3], JSON.stringify(merged));

@@ -274,12 +274,24 @@ export function buildReport(input) {
     .map((e) => (typeof e === 'string' ? e : e?.message))
     .filter(Boolean);
   const stats = results.stats;
-  const zeroExecuted = !!stats && Number(stats.expected ?? 0) + Number(stats.skipped ?? 0) === 0;
+  // `unexpected` (failed) and `flaky` (failed at least once, passed on
+  // retry) both mean something ran — omitting them made an all-failed run
+  // gain a second, misleading "zero tests executed" entry alongside its real
+  // failures, and made a run whose only spec passed on retry exit non-zero
+  // (zeroExecuted true) while section 1 correctly showed it as working.
+  const zeroExecuted =
+    !!stats &&
+    Number(stats.expected ?? 0) +
+      Number(stats.skipped ?? 0) +
+      Number(stats.unexpected ?? 0) +
+      Number(stats.flaky ?? 0) ===
+      0;
   if (topLevelErrors.length > 0 || zeroExecuted) {
     const reasons = [...topLevelErrors];
     if (zeroExecuted) {
       reasons.push(
-        `stats report zero tests executed (expected=${stats.expected ?? 0}, skipped=${stats.skipped ?? 0})`,
+        `stats report zero tests executed (expected=${stats.expected ?? 0}, skipped=${stats.skipped ?? 0}, ` +
+          `unexpected=${stats.unexpected ?? 0}, flaky=${stats.flaky ?? 0})`,
       );
     }
     notWorking.push({

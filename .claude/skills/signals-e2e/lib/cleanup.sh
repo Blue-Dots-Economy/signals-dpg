@@ -15,23 +15,29 @@ set -uo pipefail
 RUN_ID="${1:?usage: cleanup.sh <run-id> [--snapshot-only|--verify-only]}"
 MODE="${2:-full}"
 
-# A short run id turns the tag sweep below into a wildcard: the email leg is
-# still a bare substring match (`%${RUN_ID}%`, needed because RUN_ID itself
-# never appears literally in a phone number — see the RUN_DIGITS derivation
-# below), so a value like "e2e" or "529" would match any row whose email
-# happens to contain that substring anywhere, tagged test data or not.
-# identities.ts:11 documents E2E_RUN_ID as user-settable, so this can't be
-# assumed away — enforced here, once, before anything else (including the
-# `mkdir -p` below, so a rejected id leaves no artifact at all), for every
-# mode (snapshot/verify/full), rather than trusting every caller to have
-# picked a safe value.
+# A short run id turns the tag sweep below into a wildcard. Every leg of that
+# sweep is anchored to the suite's own minting namespace, never a bare
+# `%${RUN_ID}%` with nothing else bounding it — the email leg requires the
+# 'e2e+' prefix and '@signals-e2e.test' suffix, the phone leg matches
+# newPhone()'s exact `+919<5 digits><4 digits>` shape (see the RUN_DIGITS
+# derivation below), and the organization slug leg requires the 'e2e-' prefix
+# every org slug the suite mints actually carries. But RUN_ID itself is still
+# free to match ANYWHERE inside each of those bounds, so a short id (say,
+# "e2e" or "529") still turns each leg into a wildcard over its own namespace
+# — a real risk even bounded to "e2e-prefixed orgs" or "e2e+-prefixed test
+# emails", not just over the whole table. identities.ts:11 documents
+# E2E_RUN_ID as user-settable, so this can't be assumed away — enforced here,
+# once, before anything else (including the `mkdir -p` below, so a rejected id
+# leaves no artifact at all), for every mode (snapshot/verify/full), rather
+# than trusting every caller to have picked a safe value.
 MIN_RUN_ID_LEN=6
 if [ "${#RUN_ID}" -lt "$MIN_RUN_ID_LEN" ]; then
   echo "[cleanup] FAIL — run id '$RUN_ID' is only ${#RUN_ID} char(s); refusing anything under" \
-    "$MIN_RUN_ID_LEN. The email leg of the tag sweep is a bare substring match (LIKE '%\${RUN_ID}%')" \
-    "— a short id turns it into a wildcard over every row in the table, which is exactly the" \
-    "data-loss shape this file exists to prevent. run.sh's generated ids are always well over this;" \
-    "only a hand-typed 'cleanup <tag>' invocation can hit this." >&2
+    "$MIN_RUN_ID_LEN. Every leg of the tag sweep (email, phone, organization slug) is anchored to" \
+    "the suite's own minting namespace, but RUN_ID itself is still a free wildcard inside that bound" \
+    "(LIKE '%\${RUN_ID}%') — a short id turns each leg into a wildcard over its own namespace, which" \
+    "is exactly the data-loss shape this file exists to prevent. run.sh's generated ids are always" \
+    "well over this; only a hand-typed 'cleanup <tag>' invocation can hit this." >&2
   exit 1
 fi
 
@@ -345,7 +351,20 @@ if [ "$MODE" != "--verify-only" ]; then
   # too; they moved above the ledger replay for the ordering reason explained
   # there. What's left is just the identity rows the tag itself names.
   psql_q "DELETE FROM \"user\" WHERE ${USER_TAG_WHERE};" >/dev/null 2>&1
-  psql_q "DELETE FROM organization WHERE slug LIKE '%${RUN_ID}%';" >/dev/null 2>&1
+  # Anchored to the 'e2e-' prefix every org slug the suite itself mints
+  # actually carries (journey-i/-j/-v: `e2e-agg-${RUN_ID}`, `e2e-dash-${RUN_ID}`,
+  # `e2e-agg-scope-${RUN_ID}` — see e2e/tests/api/journey-{i,j,v}-*.spec.ts),
+  # same anchoring shape as USER_TAG_WHERE's email leg above (bounded prefix,
+  # RUN_ID free inside). Left bare (`LIKE '%${RUN_ID}%'`, no prefix) this
+  # matched every organization whose slug merely CONTAINS the run id anywhere
+  # — measured live against this DB: `slug LIKE '%lc-int%'` (6 chars, exactly
+  # MIN_RUN_ID_LEN) matched 6 real organizations, `slug LIKE '%agg-int%'`
+  # (7 chars) matched 5 more. `member`/`invitation`/`team` all cascade from
+  # `organization`, and the residue check below only flags counts going UP —
+  # it cannot see any of that loss. Do not drop the 'e2e-%' prefix here; a
+  # predicate that matches nothing the suite creates is a sweep that silently
+  # stops working, which is the same class of bug from the other direction.
+  psql_q "DELETE FROM organization WHERE slug LIKE 'e2e-%${RUN_ID}%';" >/dev/null 2>&1
   echo "[cleanup] tag sweep done"
 
   # Redis: EVAL 'keys(item-*)' matches `item-count:<network>:<domain>:*` and
@@ -379,13 +398,25 @@ if [ "$MODE" != "--verify-only" ]; then
       process.stdout.write(v);
     ' "$STACK_ENV" 2>/dev/null)"
   fi
+  # A passwordless Redis is a configuration this repo explicitly supports —
+  # root docker-compose.yaml's `${REDIS_PASSWORD:+--requirepass …}` only sets
+  # `requirepass` at all when the var is non-empty, so an unset/empty
+  # REDIS_PASSWORD is a valid target state, not a misconfiguration. Failing
+  # hard here (as a prior version of this file did) skipped the clear AND
+  # aborted before `snapshot after` below ever ran, so a passwordless host got
+  # every delete performed, its residue never verified, and a red signoff for
+  # a config nothing is actually wrong with. So: no password found -> run the
+  # EVAL WITHOUT `-a`, and only fail loud if THAT errors (a real connection or
+  # command failure, not "no password configured") — same loud-failure
+  # behaviour as before for a clear that genuinely errors.
   if [ -z "$REDIS_PW" ]; then
-    echo "[cleanup] FAIL — REDIS_PASSWORD not set (env) and not found in $STACK_ENV;" \
-      "cannot clear the inter-instance merge cache on $REDIS_CONTAINER. Set it in that .env or" \
-      "export REDIS_PASSWORD before retrying — skipping this silently is what let it go dead." >&2
-    exit 1
-  fi
-  if ! docker exec "$REDIS_CONTAINER" redis-cli -a "$REDIS_PW" --no-auth-warning \
+    if ! docker exec "$REDIS_CONTAINER" redis-cli --no-auth-warning \
+        EVAL "local n=0; for _,k in ipairs(redis.call('keys','item-*')) do redis.call('del',k); n=n+1 end; return n" 0 >/dev/null 2>&1; then
+      echo "[cleanup] FAIL — could not clear the item-* merge cache on $REDIS_CONTAINER (redis-cli EVAL errored," \
+        "no REDIS_PASSWORD configured on env or $STACK_ENV so this was attempted without -a)." >&2
+      exit 1
+    fi
+  elif ! docker exec "$REDIS_CONTAINER" redis-cli -a "$REDIS_PW" --no-auth-warning \
       EVAL "local n=0; for _,k in ipairs(redis.call('keys','item-*')) do redis.call('del',k); n=n+1 end; return n" 0 >/dev/null 2>&1; then
     echo "[cleanup] FAIL — could not clear the item-* merge cache on $REDIS_CONTAINER (redis-cli EVAL errored)." >&2
     exit 1
