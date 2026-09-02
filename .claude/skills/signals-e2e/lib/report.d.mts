@@ -45,6 +45,8 @@ export interface BuildReportInput {
   residue?: number;
   /** Pre-formatted lines from `npm run coverage --json`. */
   coverageDrift?: string[];
+  /** The suite catalogue; defaults to `SUITES`. See `parseSuiteTable`. */
+  suites?: Suite[];
 }
 
 export interface Suite {
@@ -55,6 +57,8 @@ export interface Suite {
 export declare const SUITES: Suite[];
 
 export declare function parseHumanOnly(markdown: string): string[];
+
+export declare function parseSuiteTable(markdown: string): Suite[];
 
 export declare function buildReport(input: BuildReportInput): ReportSections;
 

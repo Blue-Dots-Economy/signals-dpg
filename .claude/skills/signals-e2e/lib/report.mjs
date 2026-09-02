@@ -134,6 +134,38 @@ export function parseHumanOnly(markdown) {
   return entries;
 }
 
+/**
+ * Parse `coverage.md`'s suite table (the `| # | Suite | ... | ... |` rows
+ * under `## Suites`) into the same `{id, name}` shape as the `SUITES`
+ * constant above. This is the cheap de-duplication a Task 8 reviewer proposed
+ * for the fact that `SUITES` restates that table by hand: `buildReport`'s
+ * input contract stays `{results, humanOnly, scoped, residue}` (frozen), so
+ * this is threaded through as an *optional* `input.suites`, defaulting to the
+ * exported constant — a renumbered suite only has to change in one place
+ * (`coverage.md`) instead of two, without touching the function signature
+ * every existing caller already relies on.
+ *
+ * Matches on a leading `| <digits> |` so it can't accidentally pick up the
+ * `## human-only` bullet list or any other prose elsewhere in the file — the
+ * only other content shaped like that is the suite table itself.
+ */
+export function parseSuiteTable(markdown) {
+  const suites = [];
+  for (const line of markdown.split(/\r?\n/)) {
+    const m = /^\|\s*(\d+)\s*\|\s*([^|]+?)\s*\|/.exec(line);
+    if (!m) continue;
+    // Strip markdown inline-code backticks (e.g. "Tourist (`orange_dot`)")
+    // so a parsed name matches the plain-string SUITES constant exactly.
+    suites.push({ id: Number(m[1]), name: m[2].trim().replace(/`/g, '') });
+  }
+  if (suites.length === 0) {
+    throw new Error(
+      "coverage.md's suite table parsed to zero rows — expected '| # | Suite | ... |' rows under '## Suites'.",
+    );
+  }
+  return suites;
+}
+
 /** True if any annotation marks this as a documented, non-bug behaviour. */
 function hasKnownAnnotation(annotations) {
   return annotations.some(
@@ -206,9 +238,12 @@ function* walkSpecs(suites, path = []) {
  * @param {{alias: string, suites: number[]} | null} input.scoped  Set on a scoped run.
  * @param {number} input.residue            `cleanup.sh`'s residue table count (0 = clean).
  * @param {string[]} [input.coverageDrift]  Pre-formatted lines from `npm run coverage --json`.
+ * @param {{id: number, name: string}[]} [input.suites]  The suite catalogue,
+ *   defaulting to `SUITES`. Pass `parseSuiteTable(coverageMdText)` to source it
+ *   from `coverage.md` instead of the hand-maintained constant.
  */
 export function buildReport(input) {
-  const { results, humanOnly = [], scoped = null, residue = 0, coverageDrift = [] } = input;
+  const { results, humanOnly = [], scoped = null, residue = 0, coverageDrift = [], suites = SUITES } = input;
 
   const working = [];
   const notWorking = [];
@@ -281,7 +316,7 @@ export function buildReport(input) {
   const needsHuman = [...skipReasons, ...humanOnly];
   if (scoped) {
     const ran = new Set(scoped.suites ?? []);
-    for (const suite of SUITES) {
+    for (const suite of suites) {
       if (!ran.has(suite.id)) {
         needsHuman.push(`Suite ${suite.id} (${suite.name}) — not run in this invocation`);
       }
@@ -399,14 +434,28 @@ function main() {
   const residue = Number(args.residue ?? 0);
 
   const results = JSON.parse(readFileSync(resultsPath, 'utf8'));
-  const humanOnly = parseHumanOnly(readFileSync(coveragePath, 'utf8'));
+  const coverageText = readFileSync(coveragePath, 'utf8');
+  const humanOnly = parseHumanOnly(coverageText);
+  const suites = parseSuiteTable(coverageText);
+  // `scoped-suites` may be an empty string — a cross-cutting alias (e.g. the
+  // mail sweep) that doesn't correspond to a single numbered suite still has a
+  // name to report under, it just runs against zero catalogue ids. Filtering
+  // blanks before mapping to Number means that case is `[]`, not `[0]` (an
+  // empty string split on ',' is `['']`, and `Number('')` is `0`).
   const scoped =
-    args['scoped-alias'] && args['scoped-suites']
-      ? { alias: args['scoped-alias'], suites: args['scoped-suites'].split(',').map(Number) }
+    args['scoped-alias'] !== undefined
+      ? {
+          alias: args['scoped-alias'],
+          suites: (args['scoped-suites'] ?? '')
+            .split(',')
+            .map((s) => s.trim())
+            .filter(Boolean)
+            .map(Number),
+        }
       : null;
   const coverageDrift = args['coverage-drift'] ? JSON.parse(readFileSync(args['coverage-drift'], 'utf8')) : [];
 
-  const report = buildReport({ results, humanOnly, scoped, residue, coverageDrift });
+  const report = buildReport({ results, humanOnly, scoped, residue, coverageDrift, suites });
   console.log(renderMarkdown(report));
   process.exit(report.exitCode);
 }

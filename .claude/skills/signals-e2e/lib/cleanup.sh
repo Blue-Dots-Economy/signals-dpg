@@ -216,6 +216,18 @@ if [ "$MODE" != "--verify-only" ]; then
   # this way before this block was moved here).
   psql_q "DELETE FROM item_actions WHERE source_item_owner IN ($TAGGED_USER_IDS) OR target_item_owner IN ($TAGGED_USER_IDS);" >/dev/null 2>&1
   psql_q "DELETE FROM action_events WHERE source_item_owner IN ($TAGGED_USER_IDS) OR target_item_owner IN ($TAGGED_USER_IDS);" >/dev/null 2>&1
+  # item_search is DERIVED from items (search-indexer.mjs / signals-search's own
+  # sweep maintain it off the SAME items the run created) and is never itself
+  # ledgered (nothing calls recordCreated('item_search', ...) — see
+  # pk_column_for's comment above) and carries no owner column of its own to
+  # tag. So a run with the indexer live left it as permanent residue: `items`
+  # went away below while its derived `item_search` row did not, which trained
+  # a reader to treat `RESIDUE item_search: +N` as a known-reason FAIL instead
+  # of the one signal that must never be ignored. MUST run BEFORE the `items`
+  # delete on the next line — the subquery has to see the row while it still
+  # exists. Bound to the exact item_ids this run's tagged users created, never
+  # item_type/item_network.
+  psql_q "DELETE FROM item_search WHERE item_id IN (SELECT item_id FROM items WHERE created_by IN ($TAGGED_USER_IDS));" >/dev/null 2>&1
   psql_q "DELETE FROM items WHERE created_by IN ($TAGGED_USER_IDS);" >/dev/null 2>&1
   echo "[cleanup] L6 pre-clean done"
 
