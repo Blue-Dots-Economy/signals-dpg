@@ -22,6 +22,8 @@ export interface Capabilities {
   serviceAuth: boolean;
   /** A second peer instance is configured (G3). */
   peer: boolean;
+  /** A REAL signals-search is reachable, not the stub — relevance quality is meaningful. */
+  realSearch: boolean;
   /** A readable Mailpit inbox — the email oracle, and the Keycloak email OTP. */
   mailpit: boolean;
   /** The Keycloak container's log is readable, enabling phone-channel OTP. */
@@ -45,6 +47,7 @@ export function capabilitiesFor(cfg: E2EConfig): Capabilities {
     deterministicKey: cfg.deterministicPiiKey,
     serviceAuth: !!cfg.auth.serviceApiKey && !!cfg.auth.actingOrgId,
     peer: !!cfg.peer.apiBaseUrl,
+    realSearch: !!cfg.realSearchUrl,
   };
 }
 
@@ -57,6 +60,9 @@ const REASONS: Record<keyof Capabilities, string> = {
   deterministicKey: 'requires a known SIGNALS_PII_KEY (config.deterministicPiiKey) — a local instance only',
   serviceAuth: 'requires service-caller credentials (config.auth.serviceApiKey + actingOrgId)',
   peer: 'requires a second peer instance (config.peer.apiBaseUrl) — G3 only',
+  realSearch:
+    'requires a real signals-search (config.realSearchUrl / --profile search) — ' +
+    'the stub proves the contract but not relevance quality; amd64-only images need a host that can run them',
   mailpit: 'requires a readable Mailpit inbox (config.mailpitUrl) — a local instance only',
   keycloakPhoneOtp:
     'requires a readable Keycloak container log (config.keycloakLogContainer, KC_SPI_SMS_PROVIDER=log) — a local instance only',

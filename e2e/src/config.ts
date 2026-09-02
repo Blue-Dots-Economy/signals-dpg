@@ -120,6 +120,20 @@ export interface E2EConfig {
 
   /** G3 only — the second already-running peer instance. */
   peer: { apiBaseUrl: string | null };
+
+  /**
+   * Base URL of a REAL signals-search instance (not the stub). Null keeps the
+   * `realSearch` capability off, which is the default even locally: the search
+   * worker's images are amd64-only and its embedder wants 3-8 GB, so running it
+   * is opt-in per host (`--profile search`), never assumed.
+   */
+  realSearchUrl: string | null;
+  /**
+   * Base URL of the search stub — proves the search *contract* (request/response
+   * shape) without needing the real relevance engine. Independent of
+   * `realSearchUrl`: a run can have one, both, or neither.
+   */
+  searchStubUrl: string | null;
 }
 
 type RawConfig = Partial<E2EConfig> & { apiBaseUrl?: string };
@@ -159,6 +173,10 @@ function applyEnvOverrides(c: E2EConfig): E2EConfig {
   if (e.E2E_PEER_API_BASE_URL) c.peer.apiBaseUrl = e.E2E_PEER_API_BASE_URL;
   if (e.E2E_ACTION_TYPE) c.action.type = e.E2E_ACTION_TYPE;
   if (e.E2E_ACTION_ACCEPT_STATUS) c.action.acceptStatus = e.E2E_ACTION_ACCEPT_STATUS;
+  if (e.E2E_REAL_SEARCH_URL) c.realSearchUrl = e.E2E_REAL_SEARCH_URL;
+  if (e.E2E_SEARCH_STUB_URL) c.searchStubUrl = e.E2E_SEARCH_STUB_URL;
+  if (e.E2E_FAULT_INJECTION) c.faultInjection = e.E2E_FAULT_INJECTION === 'true';
+  if (e.E2E_DETERMINISTIC_PII_KEY) c.deterministicPiiKey = e.E2E_DETERMINISTIC_PII_KEY === 'true';
   return c;
 }
 
@@ -205,6 +223,8 @@ export function loadConfig(): E2EConfig {
     deterministicPiiKey: raw.deterministicPiiKey ?? false,
     faultInjection: raw.faultInjection ?? false,
     peer: { apiBaseUrl: raw.peer?.apiBaseUrl ?? null },
+    realSearchUrl: raw.realSearchUrl ?? null,
+    searchStubUrl: raw.searchStubUrl ?? null,
   };
 
   applyEnvOverrides(cfg);
