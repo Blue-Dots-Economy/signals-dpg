@@ -14,10 +14,38 @@ set -uo pipefail
 
 RUN_ID="${1:?usage: cleanup.sh <run-id> [--snapshot-only|--verify-only]}"
 MODE="${2:-full}"
+
+# A short run id turns the tag sweep below into a wildcard: the email leg is
+# still a bare substring match (`%${RUN_ID}%`, needed because RUN_ID itself
+# never appears literally in a phone number — see the RUN_DIGITS derivation
+# below), so a value like "e2e" or "529" would match any row whose email
+# happens to contain that substring anywhere, tagged test data or not.
+# identities.ts:11 documents E2E_RUN_ID as user-settable, so this can't be
+# assumed away — enforced here, once, before anything else (including the
+# `mkdir -p` below, so a rejected id leaves no artifact at all), for every
+# mode (snapshot/verify/full), rather than trusting every caller to have
+# picked a safe value.
+MIN_RUN_ID_LEN=6
+if [ "${#RUN_ID}" -lt "$MIN_RUN_ID_LEN" ]; then
+  echo "[cleanup] FAIL — run id '$RUN_ID' is only ${#RUN_ID} char(s); refusing anything under" \
+    "$MIN_RUN_ID_LEN. The email leg of the tag sweep is a bare substring match (LIKE '%\${RUN_ID}%')" \
+    "— a short id turns it into a wildcard over every row in the table, which is exactly the" \
+    "data-loss shape this file exists to prevent. run.sh's generated ids are always well over this;" \
+    "only a hand-typed 'cleanup <tag>' invocation can hit this." >&2
+  exit 1
+fi
+
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 E2E_DIR="$(cd "$HERE/../../../../e2e" && pwd)"
 SNAP_DIR="$E2E_DIR/run/$RUN_ID"
 mkdir -p "$SNAP_DIR"
+
+# Same SIGNALS_REPO indirection run.sh/stack-up.sh use (this worktree has no
+# root .env of its own) — needed below to read REDIS_PASSWORD the way
+# search-indexer.mjs does, instead of relying on a var nothing ever exports.
+SCRIPT_REPO="$(cd "$HERE/../../../.." && pwd)"
+REPO="${SIGNALS_REPO:-$SCRIPT_REPO}"
+STACK_ENV="$REPO/.env"
 
 # Mutual exclusion per run id. Two cleanup.sh invocations racing on the SAME
 # run id (e.g. `/signals-e2e cleanup <tag>` run by hand while that run's own
@@ -207,7 +235,20 @@ if [ "$MODE" != "--verify-only" ]; then
     echo "[cleanup] FAIL — could not derive RUN_DIGITS from identities.ts for run '$RUN_ID'." >&2
     exit 1
   fi
-  USER_TAG_WHERE="email LIKE '%${RUN_ID}%' OR phone_number LIKE '%${RUN_DIGITS}%'"
+  # Email leg anchored to the suite's own namespace (identities.ts's
+  # newEmail(): `e2e+<label>.<run-id-and-counter>@signals-e2e.test`), not a
+  # bare substring — `%${RUN_ID}%` alone would match any row whose email
+  # happens to contain that text anywhere, tagged test data or not.
+  #
+  # Phone leg anchored to newPhone()'s exact shape (`+919` + 5 run digits +
+  # 4 sequence digits), not a substring either. Measured live against this
+  # DB: 17 phone-bearing users hold 58 distinct 5-digit windows, so a bare
+  # `LIKE '%${RUN_DIGITS}%'` would match roughly 0.06% of run ids against a
+  # REAL local account — reproduced: RUN_DIGITS='30105' matched
+  # +919930105100 (a real seeded user) under the old predicate and zero rows
+  # under this one. Four underscores = the 4 sequence digits, each an exact
+  # single-character wildcard, never a multi-char one.
+  USER_TAG_WHERE="(email LIKE 'e2e+%' AND email LIKE '%${RUN_ID}%' AND email LIKE '%@signals-e2e.test') OR phone_number LIKE '+919${RUN_DIGITS}____'"
   # Reused by every subquery below instead of re-typing `"user" WHERE ...` —
   # one place to keep in sync with USER_TAG_WHERE, and `::text` on `id` guards
   # against a type mismatch against the TEXT owner/created_by columns below
@@ -316,10 +357,38 @@ if [ "$MODE" != "--verify-only" ]; then
   # process-wide, for every network/domain, not just this run's — acceptable
   # because it's a cache (repopulated on next read), not persistent data, but
   # it is not scoped to this run the way every SQL statement above is.
+  # REDIS_PASSWORD is never exported by run.sh (the only references were this
+  # gate and search-indexer.mjs:87) — read it from the target's own .env, the
+  # same way search-indexer.mjs:63-74 already does, instead of a var nothing
+  # ever sets. A silently-skipped cleanup branch (the previous `[ -n ... ]`
+  # gate on a var that's always empty) is the exact failure class this file
+  # exists to prevent, so a clear that's actually attempted must fail loud,
+  # not swallow its own error the way every scoped DELETE above safely can.
   REDIS_CONTAINER="${REDIS_CONTAINER:-dpg-redis}"
-  if [ -n "${REDIS_PASSWORD:-}" ]; then
-    docker exec "$REDIS_CONTAINER" redis-cli -a "$REDIS_PASSWORD" --no-auth-warning \
-      EVAL "local n=0; for _,k in ipairs(redis.call('keys','item-*')) do redis.call('del',k); n=n+1 end; return n" 0 >/dev/null 2>&1
+  REDIS_PW="${REDIS_PASSWORD:-}"
+  if [ -z "$REDIS_PW" ]; then
+    REDIS_PW="$(node -e '
+      const fs = require("fs");
+      const [path] = process.argv.slice(1);
+      let content;
+      try { content = fs.readFileSync(path, "utf8"); } catch { process.exit(2); }
+      const m = content.match(/^REDIS_PASSWORD=(.*)$/m);
+      if (!m) process.exit(3);
+      const v = m[1].trim().replace(/^"(.*)"$/, "$1");
+      if (!v) process.exit(3);
+      process.stdout.write(v);
+    ' "$STACK_ENV" 2>/dev/null)"
+  fi
+  if [ -z "$REDIS_PW" ]; then
+    echo "[cleanup] FAIL — REDIS_PASSWORD not set (env) and not found in $STACK_ENV;" \
+      "cannot clear the inter-instance merge cache on $REDIS_CONTAINER. Set it in that .env or" \
+      "export REDIS_PASSWORD before retrying — skipping this silently is what let it go dead." >&2
+    exit 1
+  fi
+  if ! docker exec "$REDIS_CONTAINER" redis-cli -a "$REDIS_PW" --no-auth-warning \
+      EVAL "local n=0; for _,k in ipairs(redis.call('keys','item-*')) do redis.call('del',k); n=n+1 end; return n" 0 >/dev/null 2>&1; then
+    echo "[cleanup] FAIL — could not clear the item-* merge cache on $REDIS_CONTAINER (redis-cli EVAL errored)." >&2
+    exit 1
   fi
 fi
 

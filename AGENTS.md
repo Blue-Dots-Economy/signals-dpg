@@ -65,10 +65,13 @@ pnpm --filter api exec vitest run src/path/to/file.test.ts   # one file
 pnpm --filter api test:integration                   # integration (needs db+redis running)
 ```
 
-End-to-end signoff: `/signals-e2e` brings the local stack up, runs the suite
-with every local capability enabled, and reports what passed, what failed, and
-what still needs a human. `/signals-e2e <flow>` (e.g. `u18`, `actions`,
-`emails`) scopes it to one flow. See `.claude/skills/signals-e2e/SKILL.md`.
+End-to-end signoff: `/signals-e2e` verifies (or reuses) an already-running
+local Signals stack — bring it up first with `/run-signals-dpg` — runs the
+suite, and reports what passed, what failed, and what still needs a human.
+Its local oracles (email/SMS sink, search stub) are built and unit-tested but
+not yet wired into any spec — that wiring is the follow-on plan, not something
+today's run exercises. `/signals-e2e <flow>` (e.g. `u18`, `actions`,
+`support`) scopes it to one flow. See `.claude/skills/signals-e2e/SKILL.md`.
 
 ### Type Checking
 

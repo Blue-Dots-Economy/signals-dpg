@@ -32,10 +32,12 @@ the index and the gap assignment.
 | 15 | Cross-cutting UI | ui-i18n-theme | brand skin, responsive, a11y structural, console-error budget |
 | 16 | Tourist (`orange_dot`) | — | all of it |
 
-`report.mjs`'s `SUITES` constant mirrors this table by id and name — the
-report's input contract is fixed (`{results, humanOnly, scoped, residue}`), so
-the catalogue is duplicated rather than threaded through as parsed markdown.
-Renumbering a suite means updating both places.
+`report.mjs`'s CLI entry point (`main()`) parses this table directly
+(`parseSuiteTable`), so it is the single source of truth — the exported
+`SUITES` constant is only a fallback default for a caller that passes no
+`input.suites` (a unit test asserting against a fixed catalogue, say).
+Renumbering a suite means updating this table; `report.mjs` picks the change
+up automatically at the CLI entry point, nothing to keep in sync by hand.
 
 ## human-only
 

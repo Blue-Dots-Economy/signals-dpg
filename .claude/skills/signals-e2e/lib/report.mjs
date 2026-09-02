@@ -233,22 +233,64 @@ function* walkSpecs(suites, path = []) {
  * what `report.test.ts` drives directly.
  *
  * @param {object} input
- * @param {{suites: any[]}} input.results   Parsed Playwright JSON reporter output.
+ * @param {{suites: any[], errors?: any[], stats?: object}} input.results  Parsed Playwright JSON reporter output.
  * @param {string[]} input.humanOnly        `coverage.md`'s parsed human-only list.
  * @param {{alias: string, suites: number[]} | null} input.scoped  Set on a scoped run.
  * @param {number} input.residue            `cleanup.sh`'s residue table count (0 = clean).
+ * @param {number} [input.cleanupCode]      `cleanup.sh`'s own exit code (0 = ok). A non-zero code
+ *   that ISN'T reflected in `residue` (a hard failure like an unreadable snapshot count, which
+ *   `run.sh`'s grep-for-"RESIDUE" derivation of `residue` can't see) still has to fail the run.
  * @param {string[]} [input.coverageDrift]  Pre-formatted lines from `npm run coverage --json`.
  * @param {{id: number, name: string}[]} [input.suites]  The suite catalogue,
  *   defaulting to `SUITES`. Pass `parseSuiteTable(coverageMdText)` to source it
  *   from `coverage.md` instead of the hand-maintained constant.
  */
 export function buildReport(input) {
-  const { results, humanOnly = [], scoped = null, residue = 0, coverageDrift = [], suites = SUITES } = input;
+  const {
+    results,
+    humanOnly = [],
+    scoped = null,
+    residue = 0,
+    cleanupCode = 0,
+    coverageDrift = [],
+    suites = SUITES,
+  } = input;
 
   const working = [];
   const notWorking = [];
   const known = [];
   const skipReasons = [];
+
+  // A top-level Playwright error (a throwing fixture, a bad config, "No
+  // tests found" for a --grep matching nothing) or a stats block reporting
+  // zero tests executed are BOTH signs this results.json cannot be trusted
+  // as "nothing failed" — walkSpecs below would see zero specs either way
+  // and let a run in which NOTHING ran report clean. `stats` is only
+  // checked when present: real Playwright JSON always includes it, but a
+  // hand-built fixture (unit tests below) that omits it entirely is not
+  // claiming anything about executed-test counts, so it is not penalised
+  // for the omission.
+  const topLevelErrors = (results.errors ?? [])
+    .map((e) => (typeof e === 'string' ? e : e?.message))
+    .filter(Boolean);
+  const stats = results.stats;
+  const zeroExecuted = !!stats && Number(stats.expected ?? 0) + Number(stats.skipped ?? 0) === 0;
+  if (topLevelErrors.length > 0 || zeroExecuted) {
+    const reasons = [...topLevelErrors];
+    if (zeroExecuted) {
+      reasons.push(
+        `stats report zero tests executed (expected=${stats.expected ?? 0}, skipped=${stats.skipped ?? 0})`,
+      );
+    }
+    notWorking.push({
+      suite: 'playwright',
+      title: 'suite reported no executable tests',
+      detail:
+        'This results.json carries a top-level error and/or zero executed tests — a run in which ' +
+        `nothing actually ran is a failure, not a silent pass:\n  ${reasons.join('\n  ')}`,
+      trace: null,
+    });
+  }
 
   for (const { spec, path } of walkSpecs(results.suites)) {
     const suiteLabel = path[0] ?? '(root)';
@@ -309,6 +351,27 @@ export function buildReport(input) {
         `cleanup.sh reported residue in ${residue} table(s) after teardown. A run that leaves rows ` +
         'behind makes the next run lie (newPhone() derives its sequence from the run id, so leftover ' +
         "rows collide with the next run's identities) — that is worth failing over, not a footnote.",
+      trace: null,
+    });
+  }
+
+  // cleanup.sh can exit non-zero for a reason the residue count above never
+  // sees: `run.sh` derives `residue` by grepping cleanup's stdout for the
+  // "RESIDUE " line prefix, but a hard failure (an unreadable snapshot count,
+  // a lock timeout, an unreachable target) prints a DIFFERENT prefix
+  // ("FAIL — ...") and still exits non-zero. Only surfaced when `residue`
+  // itself is 0 — a non-zero residue already produced its own entry above,
+  // and a non-zero cleanup exit alongside real residue is the same failure,
+  // not two.
+  if (cleanupCode !== 0 && residue === 0) {
+    notWorking.push({
+      suite: 'cleanup',
+      title: 'cleanup.sh exited non-zero',
+      detail:
+        `cleanup.sh exited ${cleanupCode} while reporting zero residue rows — a hard failure (an ` +
+        'unreadable snapshot count, an unreachable target, a lock timeout) rather than leftover rows, ' +
+        "which the residue count can't see on its own. See the run's cleanup-final.log for the actual " +
+        'message; a non-zero cleanup exit is never a clean run.',
       trace: null,
     });
   }
@@ -409,7 +472,7 @@ export function renderMarkdown(report) {
 
 // ---------------------------------------------------------------------------
 // CLI: `node report.mjs --results <path> [--coverage <coverage.md path>]
-//        [--residue <n>] [--scoped-alias <a> --scoped-suites 1,2,3]
+//        [--residue <n>] [--cleanup-code <n>] [--scoped-alias <a> --scoped-suites 1,2,3]
 //        [--coverage-drift <path to a JSON array of strings>]`
 // Prints the markdown report to stdout and exits with the report's code —
 // the shape `run.sh` (Task 10) needs to fail the whole invocation on section 2.
@@ -432,6 +495,7 @@ function main() {
   const resultsPath = args.results ?? 'test-results/results.json';
   const coveragePath = args.coverage ?? new URL('../coverage.md', import.meta.url).pathname;
   const residue = Number(args.residue ?? 0);
+  const cleanupCode = Number(args['cleanup-code'] ?? 0);
 
   const results = JSON.parse(readFileSync(resultsPath, 'utf8'));
   const coverageText = readFileSync(coveragePath, 'utf8');
@@ -455,7 +519,7 @@ function main() {
       : null;
   const coverageDrift = args['coverage-drift'] ? JSON.parse(readFileSync(args['coverage-drift'], 'utf8')) : [];
 
-  const report = buildReport({ results, humanOnly, scoped, residue, coverageDrift, suites });
+  const report = buildReport({ results, humanOnly, scoped, residue, cleanupCode, coverageDrift, suites });
   console.log(renderMarkdown(report));
   process.exit(report.exitCode);
 }

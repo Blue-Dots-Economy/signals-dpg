@@ -32,6 +32,65 @@ STACK_ENV="$REPO/.env"
 log() { echo "[signals-e2e] $*" >&2; }
 
 # ---------------------------------------------------------------------------
+# 0. Preflight: docker + node's own version. SKILL.md's phase table promises
+#    this; a missing docker or an out-of-range node otherwise surfaces ten
+#    minutes later as a confusing knock-on error from stack-up.sh or one of
+#    the stubs (search-stub.mjs imports a bare `.ts` file, relying on node's
+#    default type-stripping — dead below node 22.18 — and this repo's own
+#    `package.json` engines field pins >=24 repo-wide). Runs before the
+#    `cleanup` short-circuit below too: cleanup.sh shells out to `docker exec`
+#    for both psql and redis-cli.
+# ---------------------------------------------------------------------------
+if ! command -v docker >/dev/null 2>&1; then
+  log "FAIL: docker is not on PATH — the local stack (dpg-db, dpg-redis) and cleanup.sh's"
+  log "  psql/redis-cli calls both need it."
+  exit 1
+fi
+if ! docker info >/dev/null 2>&1; then
+  log "FAIL: docker is on PATH but its daemon isn't reachable (docker info failed) — start it and retry."
+  exit 1
+fi
+NODE_MAJOR="$(node -e 'process.stdout.write(process.versions.node.split(".")[0])' 2>/dev/null)"
+if [ -z "$NODE_MAJOR" ] || ! [[ "$NODE_MAJOR" =~ ^[0-9]+$ ]] || [ "$NODE_MAJOR" -lt 24 ]; then
+  log "FAIL: node ${NODE_MAJOR:-<unreadable>} on PATH — this repo pins node >=24 (engines), and the"
+  log "  e2e stubs rely on >=24's default TypeScript type-stripping to import .ts sources directly."
+  exit 1
+fi
+
+# Single .env reader used everywhere below — cat/grep on a .env are
+# permission-blocked in this environment (see run-signals-dpg's notes), so
+# this is a node regex against the raw file. Prints the trimmed, unquoted
+# value and exits 0, or prints nothing and exits non-zero when the key is
+# absent, the file is unreadable, or the value is empty — callers can't
+# mistake "not set" for "set to empty string".
+read_env_value() {
+  local key="$1" path="$2"
+  node -e '
+    const fs = require("fs");
+    const [key, path] = process.argv.slice(1);
+    let content;
+    try { content = fs.readFileSync(path, "utf8"); } catch { process.exit(2); }
+    const m = content.match(new RegExp("^" + key + "=(.*)$", "m"));
+    if (!m) process.exit(3);
+    const v = m[1].trim().replace(/^"(.*)"$/, "$1");
+    if (!v) process.exit(3);
+    process.stdout.write(v);
+  ' "$key" "$path" 2>/dev/null
+}
+
+# `host:port` for a URL string, or empty + non-zero exit for anything that
+# doesn't parse — used below to check an endpoint's VALUE, not just presence.
+host_port_of() {
+  node -e '
+    try {
+      const u = new URL(process.argv[1]);
+      const port = u.port || (u.protocol === "https:" ? "443" : "80");
+      process.stdout.write(`${u.hostname}:${port}`);
+    } catch { process.exit(1); }
+  ' "$1" 2>/dev/null
+}
+
+# ---------------------------------------------------------------------------
 # `cleanup <run-id>` — the standalone teardown-on-demand entry point. Reads
 # the SAME Postgres creds stack-up.sh reads (never cleanup.sh's own generic
 # defaults, which name a "signals" db this repo doesn't use), so a prior or
@@ -41,17 +100,7 @@ if [ "${1:-}" = "cleanup" ]; then
   TAG="${2:?usage: run.sh cleanup <run-id>}"
   read_env_var_or() {
     local key="$1" path="$2" fallback="$3" value
-    value="$(node -e '
-      const fs = require("fs");
-      const [key, path] = process.argv.slice(1);
-      let content;
-      try { content = fs.readFileSync(path, "utf8"); } catch { process.exit(2); }
-      const m = content.match(new RegExp("^" + key + "=(.*)$", "m"));
-      if (!m) process.exit(3);
-      const v = m[1].trim().replace(/^"(.*)"$/, "$1");
-      if (!v) process.exit(3);
-      process.stdout.write(v);
-    ' "$key" "$path" 2>/dev/null)"
+    value="$(read_env_value "$key" "$path")"
     [ -n "$value" ] && printf '%s' "$value" || printf '%s' "$fallback"
   }
   CLEAN_PGUSER="$(read_env_var_or POSTGRES_USER "$STACK_ENV" postgres)"
@@ -335,26 +384,25 @@ log "env loaded — E2E_RUN_ID=${E2E_RUN_ID:-} E2E_UI_BASE_URL=${E2E_UI_BASE_URL
 # the OTP, sends NOTHING — unless ALL THREE of NOTIFICATION_SERVICE_ENDPOINT,
 # _KEY_ID and _SECRET are set on the TARGET (not this worktree). With only the
 # endpoint set, `notificationStub` reads as enabled while every mail assertion
-# silently passes against an empty inbox. The sink at :4545 ignores HMAC, so
-# any non-empty key/secret works — this only asserts presence, never value.
+# silently passes against an empty inbox.
+#
+# Presence alone is NOT enough, though: if the endpoint is a REAL
+# notification service (not this run's sink), the sink stays empty exactly
+# like the all-absent case above, AND this run dispatches real email/SMS —
+# `newPhone()` mints numbers shaped `+919XXXXXXXXX`, valid Indian mobiles,
+# with only the empty DLT template ids standing between that and texting a
+# stranger. So the endpoint's host:port is checked against the sink's, not
+# just asserted non-empty. Key/secret stay presence-only: the sink ignores
+# HMAC, so any non-empty value satisfies it.
 # ---------------------------------------------------------------------------
+NOTIFY_SINK_HOST_PORT="localhost:4545"
+SEARCH_STUB_HOST_PORT="localhost:4546"
+
 assert_notification_env() {
-  local missing="" key value
+  local missing="" key value endpoint got
   for key in NOTIFICATION_SERVICE_ENDPOINT NOTIFICATION_SERVICE_KEY_ID NOTIFICATION_SERVICE_SECRET; do
-    value="$(node -e '
-      const fs = require("fs");
-      const [key, path] = process.argv.slice(1);
-      let content;
-      try { content = fs.readFileSync(path, "utf8"); } catch { process.exit(2); }
-      const m = content.match(new RegExp("^" + key + "=(.*)$", "m"));
-      if (!m) process.exit(3);
-      const v = m[1].trim().replace(/^"(.*)"$/, "$1");
-      if (!v) process.exit(3);
-      process.stdout.write(v);
-    ' "$key" "$STACK_ENV" 2>/dev/null)"
-    if [ -z "$value" ]; then
-      missing="$missing $key"
-    fi
+    value="$(read_env_value "$key" "$STACK_ENV")"
+    [ -z "$value" ] && missing="$missing $key"
   done
   if [ -n "$missing" ]; then
     log "FAIL: the notification client needs ALL THREE of NOTIFICATION_SERVICE_ENDPOINT,"
@@ -364,11 +412,51 @@ assert_notification_env() {
     log "  Set all three (dummy key/secret are fine, the sink ignores HMAC), restart the API, retry."
     return 1
   fi
-  log "notification preflight OK — endpoint/key/secret all present on $STACK_ENV"
+  endpoint="$(read_env_value NOTIFICATION_SERVICE_ENDPOINT "$STACK_ENV")"
+  got="$(host_port_of "$endpoint")"
+  if [ "$got" != "$NOTIFY_SINK_HOST_PORT" ]; then
+    log "FAIL: NOTIFICATION_SERVICE_ENDPOINT=$endpoint does not point at the sink ($NOTIFY_SINK_HOST_PORT)."
+    log "  A real endpoint here means this run dispatches REAL email/SMS — including to +919-shaped"
+    log "  numbers this suite mints itself. Point it at the sink on $STACK_ENV, restart the API, retry."
+    return 1
+  fi
+  log "notification preflight OK — endpoint/key/secret all present on $STACK_ENV and endpoint matches the sink"
+  return 0
+}
+
+# ---------------------------------------------------------------------------
+# 4c. Search preflight. SIGNALS_SEARCH_URL is OPTIONAL — real signals-search
+# is opt-in per host (see stack-up.sh's E2E_REAL_SEARCH_URL comment), so its
+# absence is expected today, not a failure. But if it IS set and points
+# anywhere other than the search stub, the stub's envelope recorder sees no
+# traffic and silently records nothing while the `search-stub` capability
+# still reads as available — same shape of bug as the notification one
+# above, just without the real-world-harm consequence, so it degrades to a
+# warning rather than a hard fail when simply absent.
+# ---------------------------------------------------------------------------
+assert_search_env() {
+  local value got
+  value="$(read_env_value SIGNALS_SEARCH_URL "$STACK_ENV")"
+  if [ -z "$value" ]; then
+    log "SIGNALS_SEARCH_URL not set on $STACK_ENV — the search-stub's envelope recorder will see no"
+    log "  traffic this run (native/items fallback only). Set it to http://$SEARCH_STUB_HOST_PORT"
+    log "  first if this run needs to assert on recorded search envelopes."
+    return 0
+  fi
+  got="$(host_port_of "$value")"
+  if [ "$got" != "$SEARCH_STUB_HOST_PORT" ]; then
+    log "FAIL: SIGNALS_SEARCH_URL=$value does not point at the search stub ($SEARCH_STUB_HOST_PORT) —"
+    log "  the envelope recorder would silently record nothing while this capability reads as enabled."
+    return 1
+  fi
+  log "search preflight OK — SIGNALS_SEARCH_URL matches the search stub"
   return 0
 }
 
 if ! assert_notification_env; then
+  exit 1
+fi
+if ! assert_search_env; then
   exit 1
 fi
 
@@ -431,7 +519,18 @@ else
   exit 1
 fi
 
-PGUSER="$CLEAN_PGUSER" PGDB="$CLEAN_PGDB" bash "$HERE/cleanup.sh" "$RUN" --snapshot-only
+# Exit status checked — an unreachable/misconfigured DB here used to fail
+# silently: cleanup.sh's OWN hard failure ("could not read a row count") still
+# exits non-zero, but nothing here consulted that, so the run carried on with
+# no snapshot-before.txt and later downgraded to "no baseline, skipping the
+# residue check" — a warning, not a failure, ending green with zero evidence
+# the target was ever reachable at all.
+if ! PGUSER="$CLEAN_PGUSER" PGDB="$CLEAN_PGDB" bash "$HERE/cleanup.sh" "$RUN" --snapshot-only; then
+  log "FAIL: could not snapshot the DB before the suite starts (cleanup.sh --snapshot-only exited"
+  log "  non-zero — target unreachable, misconfigured, or a table is missing). Aborting rather than"
+  log "  running the suite blind with no residue baseline to diff against afterward."
+  exit 1
+fi
 
 # ---------------------------------------------------------------------------
 # 7. Run the suite: API tier (deterministic, no browser), then UI tier
@@ -442,6 +541,38 @@ PGUSER="$CLEAN_PGUSER" PGDB="$CLEAN_PGDB" bash "$HERE/cleanup.sh" "$RUN" --snaps
 # ---------------------------------------------------------------------------
 cd "$E2E_DIR"
 export E2E_ENV="${E2E_ENV:-local}"
+
+# A tier that exits non-zero must never be silently discarded just because
+# Playwright itself captured no failed spec — a `--grep` matching zero tests
+# ("No tests found") exits 1 while writing `errors: [...]` and
+# `stats: {expected:0, skipped:0, ...}`, and a fixture throwing or a bad
+# config can exit non-zero with NO results.json at all. Both are consulted
+# here (API_CODE/UI_CODE were previously captured and never read) by folding
+# the exit code into that tier's own `errors[]` whenever it disagrees with
+# what results.json shows — report.mjs's new check on `errors`/`stats` then
+# turns that into a section-2 entry instead of a fabricated, lying "clean"
+# empty-suites file.
+inject_exit_code_error() {
+  local path="$1" tier="$2" code="$3"
+  node -e '
+    const fs = require("fs");
+    const [path, tier, code] = process.argv.slice(1);
+    let data;
+    try { data = JSON.parse(fs.readFileSync(path, "utf8")); } catch { data = { suites: [] }; }
+    const anyFailed = (suites) => (suites || []).some((s) =>
+      anyFailed(s.suites) ||
+      (s.specs || []).some((spec) => (spec.tests || []).some((t) =>
+        (t.results || []).some((r) => r.status === "failed" || r.status === "timedOut"))));
+    const codeNum = Number(code);
+    if (codeNum !== 0 && !anyFailed(data.suites)) {
+      data.errors = [...(data.errors || []), {
+        message: `${tier} tier exited ${codeNum} with no failed spec captured in results.json ` +
+          "(no tests matched --grep, a fixture threw before any test ran, or the reporter crashed).",
+      }];
+    }
+    fs.writeFileSync(path, JSON.stringify(data));
+  ' "$path" "$tier" "$code"
+}
 
 rm -f test-results/results.json
 if [ -n "$ALIAS_GREP" ]; then
@@ -455,6 +586,7 @@ if [ -f test-results/results.json ]; then
 else
   echo '{"suites":[]}' > "$RUN_DIR/results-api.json"
 fi
+inject_exit_code_error "$RUN_DIR/results-api.json" API "$API_CODE"
 log "API tier exit code: $API_CODE"
 
 rm -f test-results/results.json
@@ -469,12 +601,23 @@ if [ -f test-results/results.json ]; then
 else
   echo '{"suites":[]}' > "$RUN_DIR/results-ui.json"
 fi
+inject_exit_code_error "$RUN_DIR/results-ui.json" UI "$UI_CODE"
 log "UI tier exit code: $UI_CODE"
 
 node -e '
   const fs = require("fs");
-  const readSuites = (p) => { try { return JSON.parse(fs.readFileSync(p, "utf8")).suites || []; } catch { return []; } };
-  const merged = { suites: [...readSuites(process.argv[1]), ...readSuites(process.argv[2])] };
+  const readJson = (p) => { try { return JSON.parse(fs.readFileSync(p, "utf8")); } catch { return {}; } };
+  const a = readJson(process.argv[1]);
+  const b = readJson(process.argv[2]);
+  const merged = {
+    suites: [...(a.suites || []), ...(b.suites || [])],
+    errors: [...(a.errors || []), ...(b.errors || [])],
+    stats: {
+      expected: (a.stats?.expected || 0) + (b.stats?.expected || 0),
+      skipped: (a.stats?.skipped || 0) + (b.stats?.skipped || 0),
+      unexpected: (a.stats?.unexpected || 0) + (b.stats?.unexpected || 0),
+    },
+  };
   fs.writeFileSync(process.argv[3], JSON.stringify(merged));
 ' "$RUN_DIR/results-api.json" "$RUN_DIR/results-ui.json" "$RUN_DIR/results-merged.json"
 
@@ -519,6 +662,7 @@ if [ -n "$ALIAS" ]; then
   node "$SKILL_DIR/lib/report.mjs" \
     --results "$RUN_DIR/results-merged.json" \
     --residue "$RESIDUE_COUNT" \
+    --cleanup-code "$CLEANUP_CODE" \
     --coverage-drift "$RUN_DIR/coverage-drift.json" \
     --scoped-alias "$ALIAS" \
     --scoped-suites "$ALIAS_SUITE_ID" \
@@ -527,6 +671,7 @@ else
   node "$SKILL_DIR/lib/report.mjs" \
     --results "$RUN_DIR/results-merged.json" \
     --residue "$RESIDUE_COUNT" \
+    --cleanup-code "$CLEANUP_CODE" \
     --coverage-drift "$RUN_DIR/coverage-drift.json" \
     | tee "$REPORT_MD"
 fi
