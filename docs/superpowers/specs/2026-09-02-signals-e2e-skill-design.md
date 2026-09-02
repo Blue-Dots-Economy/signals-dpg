@@ -114,10 +114,27 @@ Sets `notificationStubUrl`, enabling the `notificationStub` capability.
 
 ### 3.2 `search-stub.mjs` — the ranked feed
 
-`signals_search_client.ts` states it outright: *"signals-search cannot be run
-locally — every test mocks this module or its fetch call."* The contract is a
-plain `POST /v1/search` behind `SIGNALS_SEARCH_URL` + `x-api-key`, with a fully
-specified Beckn envelope in and full item rows out.
+`signals_search_client.ts:8` still says *"signals-search cannot be run locally
+— every test mocks this module or its fetch call."* **That comment is now out
+of date** (see the drift audit §2.1): as of #625 / `ee7e498d`,
+`local-setup/docker-compose.yml` has a `search` profile running
+`signals-search-api` on :3100, the ingestion worker, and a TEI embedding server
+with `BAAI/bge-m3` baked in.
+
+So the stub is a **choice with reasons**, not a workaround, and both modes are
+supported:
+
+- **Stub (default).** The real profile's images are `platform: linux/amd64` and
+  the embedder wants 3–8 GB for a ~2.3 GB ONNX model. On an 8 GB arm64 host
+  that runs under emulation and thrashes. The stub costs nothing, and it keeps
+  two things the real service cannot easily provide: the fault-injection modes
+  and the request-envelope recorder.
+- **Real (opt-in, `realSearch` capability).** `--profile search` for a fidelity
+  run on a machine that can host it. Reported in the signoff as which mode ran,
+  because relevance *quality* is only meaningful under the real service.
+
+The contract is a plain `POST /v1/search` behind `SIGNALS_SEARCH_URL` +
+`x-api-key`, with a fully specified Beckn envelope in and full item rows out.
 
 - Parses the real envelope, queries local Postgres (`item_search` joined to
   `items`, live-only), honours `in`/`contains_any` filter clauses, the single
@@ -215,6 +232,25 @@ is the contract and the gap assignment.
 | 15 | Cross-cutting UI | ui-i18n-theme | brand skin, responsive, a11y structural, console-error budget |
 | 16 | Tourist (`orange_dot`) | — | all of it |
 
+**Post-divergence features.** The suite predates a month of `feature` work, so
+the audit's §3 is part of this coverage contract, not a separate backlog. The
+highest-value entries, because their defining failure mode is *silence* rather
+than an error:
+
+| Feature | Landed | Suite |
+|---|---|---|
+| Whole notification subsystem — externalised copy + dispatcher (#529), per-domain CTA (#569), lifecycle + onboarding mail (#531/#534), SMS engine (#532/#535) | `23d86c4f`, `43f5b9ce`, `5db2d908`, `fac98753` | mail sweep |
+| Item event on **every** lifecycle transition (#557/#564) | `95fe484e` | 10 |
+| Shareable profile links + public page (#476), downloadable QR (#567) | `def4fe0c`, `02b092f0` | 11 |
+| My Actions per-profile filter & sort, server-enforced (#439) | `43e1677e` | 8 |
+| `x-uri` marker + URL validation (#576) | `da9ec9b8` | 4 |
+| Config-driven go-live gates (#344) | `309b7892` | 4 |
+| Consent scroll-gate (#636), one `/legal` route (#637) | `65b18c39`, `500d4465` | 3 |
+| Support attachments + `/support/config` (#551/#552) | `b9a8b5e8` | 12 |
+| Self-action guard; viewport clamping; bbox fallback (#503) | `fe5d7abd`, `8da77e48`, `367459b7` | 7 |
+| Participant-decrypt projection + contact + locations (#521) | `75f44255` | 13 |
+| Brand lockups, sidebar footer, `getRuntimeEnv` settings (#605) | `72185ffe`, `05954e10` | 15 |
+
 **Error codes.** The P0 set from backlog §2.2 is in scope: the U18 fail-closed
 family, pair-cap, and the ownership / PII-boundary codes. Each asserted in both
 directions — the blocked path returns the exact code *and* the allowed path
@@ -286,6 +322,14 @@ signup produces the account shape U18 starts from. Only a full run tests the
 seams between suites.
 
 ## 7. Phase flow
+
+**Phase −1, once, before any of this is meaningful.** The drift audit
+(`docs/testing/e2e-drift-audit-2026-09-02.md` §1) found four defects in the
+lifted suite: the `aria-disabled` consent gate, the stale `domainLabelFromKey`
+mirror, `uiBaseUrl` on the wrong port, and the unmapped `/support/config`
+route. Until those are fixed no UI result from this suite means anything, so
+they are fixed and the suite is run green against a live stack **before** any
+new coverage is written.
 
 | Phase | What | Time |
 |---|---|---|
