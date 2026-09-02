@@ -50,3 +50,7 @@ coverage/
 
 # Captured emails from the local mail sink (local-mail-sink/sink.mjs)
 local-mail-sink/mail/
+
+# Captured email/SMS notifications from the e2e notification-service stand-in
+# (.claude/skills/signals-e2e/lib/notify-sink.mjs)
+.claude/skills/signals-e2e/lib/mail/
