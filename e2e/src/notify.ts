@@ -74,8 +74,46 @@ export function assertNoCopyDrift(all: Captured[]): void {
       throw new Error(`[e2e] unresolved __SUPPORT_EMAIL__ in a "${m.subject}" message to ${m.to}`);
     }
     for (const href of [...body.matchAll(/href="([^"]*)"/g)].map((x) => x[1])) {
-      if (href && !/^https?:\/\//.test(href) && !href.startsWith('mailto:')) {
+      // Empty string is NOT skipped here (fix round 1, finding 3): the plain
+      // shell never emits `href=""`, but the CTA shell's `ctaUrl ?? ''`
+      // fallback can, and a button that links nowhere is exactly the broken
+      // mail this invariant exists to catch — the original `if (href && ...)`
+      // guard let it through by treating '' as "nothing to check".
+      if (href === '') {
+        throw new Error(`[e2e] empty CTA href in a "${m.subject}" message to ${m.to} — the button links nowhere`);
+      }
+      if (!/^https?:\/\//.test(href) && !href.startsWith('mailto:')) {
         throw new Error(`[e2e] relative CTA href "${href}" in a "${m.subject}" message — mail clients cannot resolve it`);
+      }
+    }
+  }
+}
+
+/**
+ * Stricter, OPT-IN CTA check layered on top of the always-on floor above.
+ * `assertNoCopyDrift` only proves a CTA href is SOME absolute URL — it
+ * happily passes a link to the wrong product on the same host. A live send
+ * during fix round 1 of this task confirmed this happens in practice:
+ * login.otp's CTA came back as http://localhost:3000, which on that machine
+ * is the aggregator portal, not Signals (:5173) — an absolute, well-formed,
+ * entirely wrong link. Call this ADDITIONALLY whenever the caller actually
+ * knows what origin the CTA should open (e.g. the target config's own
+ * uiBaseUrl); never hardcode a port here, since it varies per deployment.
+ */
+export function assertCtaOrigin(all: Captured[], expectedOrigin: string): void {
+  for (const m of all) {
+    const html = m.html ?? '';
+    for (const href of [...html.matchAll(/href="(https?:\/\/[^"]*)"/g)].map((x) => x[1])) {
+      let origin: string;
+      try {
+        origin = new URL(href).origin;
+      } catch {
+        continue; // not a parseable absolute URL — assertNoCopyDrift's job, not this one
+      }
+      if (origin !== expectedOrigin) {
+        throw new Error(
+          `[e2e] CTA href "${href}" in a "${m.subject}" message to ${m.to} opens ${origin}, not the expected ${expectedOrigin} — this link may point at the wrong product`,
+        );
       }
     }
   }
@@ -94,21 +132,39 @@ export class NotifySink {
     this.baseUrl = baseUrl;
   }
 
+  /**
+   * Wraps `fetch` so a dead sink fails with an actionable message (fix round
+   * 1, finding 4): a bare "fetch failed" names neither the URL nor the likely
+   * cause, and forgetting to start notify-sink.mjs before a run is exactly
+   * the mistake this exists to catch quickly.
+   */
+  private async request(path: string, init?: RequestInit): Promise<Response> {
+    const url = `${this.baseUrl}${path}`;
+    try {
+      return await fetch(url, init);
+    } catch (err) {
+      throw new Error(
+        `[e2e] could not reach the notification sink at ${url} — is notify-sink.mjs running? ` +
+          `(${err instanceof Error ? err.message : String(err)})`,
+      );
+    }
+  }
+
   async messages(q: Partial<Pick<Captured, 'to' | 'channel'>> = {}): Promise<Captured[]> {
     const params = new URLSearchParams();
     if (q.to) params.set('to', q.to);
     if (q.channel) params.set('channel', q.channel);
-    const res = await fetch(`${this.baseUrl}/_e2e/mail?${params}`);
+    const res = await this.request(`/_e2e/mail?${params}`);
     if (!res.ok) throw new Error(`[e2e] notify sink query failed: ${res.status}`);
     return (await res.json()) as Captured[];
   }
 
   async reset(): Promise<void> {
-    await fetch(`${this.baseUrl}/_e2e/reset`, { method: 'POST' });
+    await this.request('/_e2e/reset', { method: 'POST' });
   }
 
   async failNext(): Promise<void> {
-    await fetch(`${this.baseUrl}/_e2e/fail-next`, { method: 'POST' });
+    await this.request('/_e2e/fail-next', { method: 'POST' });
   }
 }
 
@@ -128,14 +184,21 @@ export class NotifySink {
  * Root of the Signals checkout this module introspects for the case registry
  * and the bundled copy files. Defaults to this worktree (e2e/ sits one level
  * below the repo root), but can be pointed at a different checkout with
- * E2E_SIGNALS_REPO — stack-up.sh's own SIGNALS_REPO documents why: this is an
- * e2e-only worktree, and the stack actually running may be a sibling checkout
- * (typically the main Signals-DPG clone) whose working tree could have
- * diverged from this one. Pointing here at that checkout keeps the oracle
- * honest about what the LIVE instance actually loaded.
+ * SIGNALS_REPO — the SAME variable stack-up.sh already reads
+ * (`SIGNALS_REPO=/path/to/main/checkout bash lib/stack-up.sh ...`), not a
+ * second, differently-named one nobody would think to set. That script's own
+ * comment explains why the two checkouts can differ: this is an e2e-only
+ * worktree, and the stack actually running may be a sibling checkout
+ * (typically the main Signals-DPG clone) whose working tree has diverged from
+ * this one. Pointing here at that checkout keeps the oracle honest about what
+ * the LIVE instance actually loaded. `E2E_SIGNALS_REPO` is accepted too, for
+ * anyone who reached for this file's own `E2E_*` override convention first —
+ * SIGNALS_REPO wins when both are set, since it's the name the documented
+ * workflow actually uses.
  */
 export function repoRoot(): string {
-  if (process.env.E2E_SIGNALS_REPO) return process.env.E2E_SIGNALS_REPO;
+  const override = process.env.SIGNALS_REPO ?? process.env.E2E_SIGNALS_REPO;
+  if (override) return override;
   const here = dirname(fileURLToPath(import.meta.url)); // e2e/src
   return resolve(here, '..', '..');
 }
@@ -168,10 +231,19 @@ export function defaultSmsPropertiesText(): string {
  * The layered copy text for a network, in the order `subjectPatternFor`
  * needs: the network's `messages.properties` override BEFORE the bundled
  * defaults, because `subjectPatternFor`'s `.find()` returns the FIRST
- * "<id>.subject=" line it sees. Mirrors messages.ts's own precedence
- * (defaults < network); the brand layer one level deeper is not reproduced
- * here because no send resolves a brand yet (docs/operations/email-copy-
- * overrides.md), so there is nothing a live send could disagree with.
+ * "<id>.subject=" line it sees.
+ *
+ * This is PARTIAL fidelity to messages.ts's real precedence, not the full
+ * chain — real precedence (docs/operations/email-copy-overrides.md) is
+ * `defaults < instance override (EMAIL_MESSAGES_PATH) < network < brand`.
+ * Two layers are deliberately not reproduced here, for different reasons:
+ * the brand layer, because no send resolves a brand yet, so there is nothing
+ * a live send could disagree with; and the instance-override layer
+ * (EMAIL_MESSAGES_PATH), because it's silently skipped rather than
+ * unreachable — harmless for a stock local run (that var isn't normally set
+ * against this worktree's target), but a run against an instance that DOES
+ * set EMAIL_MESSAGES_PATH would see this function's output disagree with
+ * what that instance actually sends.
  */
 export function layeredEmailPropertiesText(network: string | null): string {
   const defaults = defaultEmailPropertiesText();

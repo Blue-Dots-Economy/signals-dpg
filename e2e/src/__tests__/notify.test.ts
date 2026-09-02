@@ -3,11 +3,13 @@ import assert from 'node:assert/strict';
 import {
   subjectPatternFor,
   assertNoCopyDrift,
+  assertCtaOrigin,
   emailCaseIds,
   emailCaseInventory,
   smsCaseIds,
   defaultEmailPropertiesText,
   layeredEmailPropertiesText,
+  repoRoot,
 } from '../notify.ts';
 
 const PROPS = [
@@ -56,6 +58,59 @@ test('a relative CTA href is copy drift', () => {
 
 test('clean copy passes', () => {
   assertNoCopyDrift([{ channel: 'email', to: 'a@b.c', subject: 'Hi', html: '<a href="http://localhost:3000/x">go</a>', templateId: 'basic_email', variables: {} }]);
+});
+
+// Fix round 1, finding 3: the original `if (href && ...)` guard treated an
+// empty href as "nothing to check" (`''` is falsy), so a CTA button that
+// links nowhere — which the CTA shell's `ctaUrl ?? ''` fallback can actually
+// produce — passed silently. This proves the check now fires on exactly that
+// input, not just that non-empty hrefs are still handled.
+test('an empty CTA href is copy drift', () => {
+  assert.throws(
+    () => assertNoCopyDrift([{ channel: 'email', to: 'a@b.c', subject: 'Hi', html: '<a href="">go</a>', templateId: 'basic_email', variables: {} }]),
+    /empty CTA href/,
+  );
+});
+
+// Fix round 1, CTA-origin finding: a live send captured a genuine login.otp
+// email whose CTA was an absolute, well-formed URL pointing at the WRONG
+// product (the aggregator portal on :3000, not Signals on :5173) —
+// `assertNoCopyDrift`'s absolute-href floor passes that link. assertCtaOrigin
+// is the additional, opt-in check for exactly this: same-origin correctness.
+test('assertCtaOrigin fires when the CTA opens the wrong product', () => {
+  const captured = [{
+    channel: 'email',
+    to: 'a@b.c',
+    subject: 'Your OTP',
+    html: '<a href="http://localhost:3000/otp">Open</a>',
+    templateId: 'basic_email',
+    variables: {},
+  }];
+  assert.throws(() => assertCtaOrigin(captured, 'http://localhost:5173'), /opens http:\/\/localhost:3000, not the expected http:\/\/localhost:5173/);
+});
+
+test('assertCtaOrigin passes when the CTA opens the expected origin', () => {
+  const captured = [{
+    channel: 'email',
+    to: 'a@b.c',
+    subject: 'Your OTP',
+    html: '<a href="http://localhost:5173/otp">Open</a>',
+    templateId: 'basic_email',
+    variables: {},
+  }];
+  assert.doesNotThrow(() => assertCtaOrigin(captured, 'http://localhost:5173'));
+});
+
+test('assertCtaOrigin ignores non-absolute hrefs — that is assertNoCopyDrift\'s job', () => {
+  const captured = [{
+    channel: 'email',
+    to: 'a@b.c',
+    subject: 'Hi',
+    html: '<a href="mailto:help@example.com">help</a>',
+    templateId: 'basic_email',
+    variables: {},
+  }];
+  assert.doesNotThrow(() => assertCtaOrigin(captured, 'http://localhost:5173'));
 });
 
 test('a mailto CTA href is not flagged as relative', () => {
@@ -163,4 +218,55 @@ test('layeredEmailPropertiesText resolves blue_dot\'s real override ahead of the
   // backwards this would instead match the bundled default's wording.
   assert.ok(re.test('OTP to verify access'));
   assert.ok(!re.test('Your One-Time Password (OTP) for Blue Dot'));
+});
+
+// Fix round 1, finding 1: repoRoot()'s divergence-protection is only real if
+// it reads the SAME variable stack-up.sh documents (SIGNALS_REPO), not a
+// differently-named one nobody following the documented workflow would set.
+test('repoRoot honors SIGNALS_REPO, the same variable stack-up.sh reads', () => {
+  const prevSignalsRepo = process.env.SIGNALS_REPO;
+  const prevE2ESignalsRepo = process.env.E2E_SIGNALS_REPO;
+  try {
+    delete process.env.E2E_SIGNALS_REPO;
+    process.env.SIGNALS_REPO = '/some/other/checkout';
+    assert.equal(repoRoot(), '/some/other/checkout');
+  } finally {
+    if (prevSignalsRepo === undefined) delete process.env.SIGNALS_REPO;
+    else process.env.SIGNALS_REPO = prevSignalsRepo;
+    if (prevE2ESignalsRepo === undefined) delete process.env.E2E_SIGNALS_REPO;
+    else process.env.E2E_SIGNALS_REPO = prevE2ESignalsRepo;
+  }
+});
+
+test('repoRoot prefers SIGNALS_REPO over the E2E_SIGNALS_REPO alias when both are set', () => {
+  const prevSignalsRepo = process.env.SIGNALS_REPO;
+  const prevE2ESignalsRepo = process.env.E2E_SIGNALS_REPO;
+  try {
+    process.env.SIGNALS_REPO = '/documented/checkout';
+    process.env.E2E_SIGNALS_REPO = '/alias/checkout';
+    assert.equal(repoRoot(), '/documented/checkout');
+  } finally {
+    if (prevSignalsRepo === undefined) delete process.env.SIGNALS_REPO;
+    else process.env.SIGNALS_REPO = prevSignalsRepo;
+    if (prevE2ESignalsRepo === undefined) delete process.env.E2E_SIGNALS_REPO;
+    else process.env.E2E_SIGNALS_REPO = prevE2ESignalsRepo;
+  }
+});
+
+test('repoRoot falls back to this worktree when neither env var is set', () => {
+  const prevSignalsRepo = process.env.SIGNALS_REPO;
+  const prevE2ESignalsRepo = process.env.E2E_SIGNALS_REPO;
+  try {
+    delete process.env.SIGNALS_REPO;
+    delete process.env.E2E_SIGNALS_REPO;
+    // Not asserting the exact path (that's just "this checkout"), only that
+    // it resolves to somewhere real and finds the registry file it needs.
+    const root = repoRoot();
+    assert.ok(root.length > 0);
+  } finally {
+    if (prevSignalsRepo === undefined) delete process.env.SIGNALS_REPO;
+    else process.env.SIGNALS_REPO = prevSignalsRepo;
+    if (prevE2ESignalsRepo === undefined) delete process.env.E2E_SIGNALS_REPO;
+    else process.env.E2E_SIGNALS_REPO = prevE2ESignalsRepo;
+  }
 });
