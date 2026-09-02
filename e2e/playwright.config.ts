@@ -29,6 +29,10 @@ export default defineConfig({
     ['list'],
     ['html', { open: 'never', outputFolder: 'playwright-report' }],
     ['junit', { outputFile: 'test-results/junit.xml' }],
+    // Machine-readable run output for the signoff report (report.mjs) — the
+    // JSON reporter is the only one that carries per-spec annotations,
+    // attachments and retry results in a shape a script can walk.
+    ['json', { outputFile: 'test-results/results.json' }],
   ],
   use: {
     actionTimeout: 15_000,
