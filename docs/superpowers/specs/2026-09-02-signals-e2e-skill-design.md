@@ -232,6 +232,40 @@ is the contract and the gap assignment.
 | 15 | Cross-cutting UI | ui-i18n-theme | brand skin, responsive, a11y structural, console-error budget |
 | 16 | Tourist (`orange_dot`) | — | all of it |
 
+### 4.1 Per-network theming is assertable, not a matter of taste
+
+Each dot ships its own palette and brand assets, so "does this dot look right"
+is a real question the suite must answer. Most of it is arithmetic:
+
+`theme-provider.tsx` writes `document.documentElement.dataset.network` and
+`.dataset.brand`, and the app reads its own colours through
+`getComputedStyle(documentElement).getPropertyValue('--brand-cta')`. A test
+reads the same values and compares them against `network-themes.ts` — importing
+the source of truth rather than restating it, so the assertion cannot drift from
+the app.
+
+Assert exactly (no human):
+
+- `data-network` / `data-brand` match the requested dot and brand
+- every resolved `--brand-*` token equals that dot's `NetworkTheme` entry
+- the logo `<img src>` resolves to the brand's path **and returns 200** — a
+  missing brand asset is a real, silent failure
+- the favicon is regenerated from `--brand-cta`; the document title is per-brand
+- light / dark / system toggling flips the mode and changes a known token
+- **contrast ratios meet WCAG AA** — computable from the resolved colours
+- responsive structure: the sidebar collapses at mobile width, and no view
+  overflows horizontally (`scrollWidth > clientWidth`)
+- optionally `toHaveScreenshot()` baselines per dot, to catch *unintended*
+  visual change
+
+Left to a human: whether the palette is attractive or on-brand, and the first
+approval of a screenshot baseline.
+
+This is why the run covers more than one dot. `blue_dot` and `purple_dot` differ
+in palette, `purple_dot` labels its provider domain "Service Provider", and
+`upsdm`/`onetac` are brand skins over a network theme — a single-dot run proves
+none of that wiring.
+
 **Post-divergence features.** The suite predates a month of `feature` work, so
 the audit's §3 is part of this coverage contract, not a separate backlog. The
 highest-value entries, because their defining failure mode is *silence* rather
@@ -369,8 +403,10 @@ Stated up front so the skill's promise is not overread. It is *"no human
 testing required to know whether the features work"*, not *"nothing is left for
 a human to look at"*:
 
-- visual and aesthetic judgement — brand skin correctness, whether a responsive
-  layout *looks* right, accessibility beyond structural checks
+- whether a palette or logo is *aesthetically* right / on-brand, and approving a
+  new screenshot baseline the first time. **Note the narrow scope**: per-network
+  theming is mostly *exactly* assertable and belongs in suite 15, not here — see
+  §4.1. Only the taste judgement is human.
 - real Keycloak / OIDC login (config-gated; `authProvider: "auto"`)
 - true multi-instance inter-instance browse (needs a second API)
 - geocoding accuracy when neither `GOOGLE_GEOCODING_API_KEY` nor `PHOTON_URL`
