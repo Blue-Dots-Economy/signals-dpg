@@ -92,12 +92,47 @@ if (!REDIS_PASSWORD) {
 
 let paused = false;
 let stopped = false;
-// '$' = only entries appended after THIS process starts — never replay the
-// backlog. Advanced to the last-consumed id after the first read.
-let lastId = '$';
+// Resolved ONCE at startup (see resolveStartId below) — never the literal
+// '$' passed to XREAD on every poll. '$' is resolved AT COMMAND TIME by a
+// brand-new `docker exec`/redis-cli subprocess each call; an idle BLOCK
+// timeout returns with lastId untouched, so the NEXT poll's '$' re-resolves
+// at whatever moment that new subprocess reaches Redis — anything published
+// in the subprocess-spawn gap between one call ending and the next starting
+// is silently skipped over, never delivered (reproduced live against a
+// disposable key: an XADD between two BLOCK-timeout polls was never
+// returned by the following XREAD $). A concrete id has none of that
+// problem — Redis compares it with a plain `>`, no re-resolution — so this
+// is set once, before the loop, and only ever advances forward from there.
+let lastId;
 const stats = { consumed: 0, indexed: 0, deleted: 0 };
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+/**
+ * The concrete id to start XREAD from — resolved once, before the loop ever
+ * calls XREAD, so no poll ever passes the literal '$' (see the `lastId`
+ * comment above for why that would silently drop events). `XREVRANGE`'s
+ * `+`/`-` range needs no `$`-style resolution: it's a plain point-in-time
+ * read of the current tail, so "start after whatever's already in the
+ * stream" is captured exactly once, honoring the brief's "never replay the
+ * backlog" requirement without a follow-up poll that faces the same race.
+ *
+ * An empty result — a stream that does not exist yet (a fresh local Redis,
+ * before the API's first item event) — falls back to '0': safe precisely
+ * because there is nothing to replay. A genuine failure to reach Redis at
+ * all is NOT treated the same way; it propagates and the caller fails
+ * startup loud, rather than silently defaulting to '0' and risking a replay
+ * of real history the next time this runs against a stream that does exist.
+ */
+async function resolveStartId() {
+  const { stdout } = await execFileAsync('docker', [
+    'exec', REDIS_CONTAINER, 'redis-cli', '-a', REDIS_PASSWORD, '--json', '-2',
+    'XREVRANGE', STREAM, '+', '-', 'COUNT', '1',
+  ]);
+  const trimmed = stdout.trim();
+  const parsed = trimmed ? JSON.parse(trimmed) : [];
+  return parsed[0]?.[0] ?? '0';
+}
 
 /**
  * One XREAD BLOCK, via `docker exec` against the redis container rather than
@@ -222,7 +257,15 @@ const server = createServer((req, res) => {
   json(res, 404, { error: 'NOT_FOUND' });
 });
 
-server.listen(PORT, () => {
-  console.log(`[search-indexer] listening on http://localhost:${PORT}, consuming ${STREAM} from ${REDIS_CONTAINER} at $`);
+server.listen(PORT, async () => {
+  // Resolved before the loop starts consuming — see resolveStartId's own
+  // comment for why this can't just be the literal '$' handed to XREAD.
+  try {
+    lastId = await resolveStartId();
+  } catch (err) {
+    console.error(`[search-indexer] could not resolve a starting id for ${STREAM} — refusing to start rather than guess:`, err.message ?? err);
+    process.exit(1);
+  }
+  console.log(`[search-indexer] listening on http://localhost:${PORT}, consuming ${STREAM} from ${REDIS_CONTAINER} starting after ${lastId}`);
   loop();
 });
