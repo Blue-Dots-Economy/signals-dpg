@@ -28,6 +28,7 @@ paths:
 | **Adding a UI screen or flow** | UI-layer only if it's UI risk (rendering, i18n, theming, form wiring). Business rules belong in an API journey — see strategy §2.3. |
 | **Deleting a route or feature** | Delete the journey/assertions with it, and drop its `coverage-baseline.json` line. The check warns on baseline entries whose route no longer exists. Do not leave a `test.skip` behind as a tombstone. |
 | **Renaming a route** | The check reports the old path as a stale baseline entry and the new one as unmapped. Fix both. |
+| **Adding an email/SMS case, a UI route, or an `x-*` schema marker** | Name it in `.claude/skills/signals-e2e/coverage.md`. `npm run coverage` now enumerates these from the code and fails on anything unnamed — the route table never saw them, which is how a whole notification subsystem reached zero coverage while the gate read 62%. |
 
 ## Mechanics (don't reinvent these)
 

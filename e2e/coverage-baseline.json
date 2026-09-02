@@ -20,5 +20,70 @@
     "POST /api/v1/network/item/markers_local",
     "POST /api/v1/network/refetch_schemas",
     "POST /api/v1/user/domains"
-  ]
+  ],
+  "$featuresComment": "UI routes / email cases / SMS cases / x-* schema markers named nowhere the gate can see (neither coverage.md nor an @covers annotation). Same discipline as allowUncovered above: a DEBT REGISTER, not a permission slip — it may only shrink. This is audit §3's backlog (docs/testing/e2e-drift-audit-2026-09-02.md) — it starts full and burns down as Plan 2 adds coverage. Regenerate with: npm run coverage:baseline",
+  "allowUncoveredFeatures": {
+    "uiRoutes": [
+      "/auth/callback",
+      "/auth/otp",
+      "/my-actions",
+      "/my-actions/*",
+      "/privacy",
+      "/profile/:id/edit",
+      "/public/:network/:domain/:itemType/:itemId",
+      "/terms"
+    ],
+    "emailCases": [
+      "account.aggregator_init.provider",
+      "account.aggregator_init.seeker",
+      "action.apply.provider.inbound_request",
+      "action.apply.provider.inbound_status",
+      "action.apply.provider.outbound_request",
+      "action.apply.provider.outbound_status",
+      "action.apply.seeker.inbound_request",
+      "action.apply.seeker.inbound_status",
+      "action.apply.seeker.outbound_request",
+      "action.apply.seeker.outbound_status",
+      "action.connect.provider.inbound_request",
+      "action.connect.provider.inbound_status",
+      "action.connect.provider.outbound_request",
+      "action.connect.provider.outbound_status",
+      "action.connect.seeker.inbound_request",
+      "action.connect.seeker.inbound_status",
+      "action.connect.seeker.outbound_request",
+      "action.connect.seeker.outbound_status",
+      "guardian.account",
+      "guardian.action",
+      "guardian.action_bulk",
+      "guardian.profile",
+      "login.otp",
+      "offer.create",
+      "offer.create_incomplete",
+      "offer.pause",
+      "offer.retire",
+      "offer.update",
+      "otp.generic",
+      "profile.create",
+      "profile.create_incomplete",
+      "profile.pause",
+      "profile.retire",
+      "profile.update",
+      "retire.cancel",
+      "support.request",
+      "welcome",
+      "welcome.provider",
+      "welcome.seeker"
+    ],
+    "smsCases": [
+      "account.aggregator_init",
+      "offer.create",
+      "offer.update",
+      "profile.create",
+      "profile.update"
+    ],
+    "schemaMarkers": [
+      "x-form-layout",
+      "x-show-if"
+    ]
+  }
 }
