@@ -59,15 +59,19 @@ fi
 #                                      action_type, event_id); event_id is a
 #                                      gen_random_uuid() default, practically
 #                                      unique on its own — same carve-out as
-#                                      items/item_id below. Not ledgered by
-#                                      any recordCreated() call yet (only
-#                                      flows.ts/auth.ts ledger 'items'/'user'
-#                                      so far), so this row is currently inert
-#                                      infrastructure for a later task.
+#                                      items/item_id below. Nothing ledgers
+#                                      this row via recordCreated() (only
+#                                      flows.ts/auth.ts ledger 'items'/'user'),
+#                                      so this pk column is inert for scope 1 —
+#                                      L6's owner-column delete in scope 2
+#                                      (source_item_owner/target_item_owner)
+#                                      is what actually clears these rows.
 #   item_actions     action_id         composite PK (partition_network,
 #                                      action_type, action_id); same
 #                                      practically-unique-uuid carve-out. Also
-#                                      not ledgered yet.
+#                                      not ledgered — same L6 owner-column
+#                                      delete covers it too (in addition to
+#                                      whatever the items delete cascades).
 #   item_search      item_id           composite PK includes item_network/
 #                                      item_domain/item_type/item_id; filtering
 #                                      on item_id alone is the same accepted
@@ -149,9 +153,78 @@ snapshot() {
 if [ "$MODE" = "--snapshot-only" ]; then snapshot before; exit 0; fi
 
 if [ "$MODE" != "--verify-only" ]; then
+  # L6 pre-clean — MUST run before anything below deletes a `user` row.
+  #
+  # Phone match: identities.ts's newPhone() does NOT embed RUN_ID (which is
+  # hex, e.g. "3f9a2b7c") — it embeds RUN_DIGITS, a 5-digit hash OF RUN_ID
+  # (e.g. "91767"). Matching on RUN_ID here would never match a single
+  # phone-channel persona. RUN_DIGITS is derived by importing identities.ts
+  # directly (same reasoning as CLEANUP_TABLES above: one hand-rolled copy of
+  # that hash already drifted from the real formula once; a second copy here
+  # would just be the same bug again) with E2E_RUN_ID pinned to this run's id
+  # so the derivation matches exactly what the run itself used.
+  RUN_DIGITS="$(E2E_RUN_ID="$RUN_ID" node --experimental-strip-types -e '
+    (async () => {
+      const { RUN_DIGITS } = await import(process.argv[1]);
+      process.stdout.write(RUN_DIGITS);
+    })();
+  ' "$E2E_DIR/src/identities.ts" 2>/dev/null)"
+  if [ -z "$RUN_DIGITS" ]; then
+    echo "[cleanup] FAIL — could not derive RUN_DIGITS from identities.ts for run '$RUN_ID'." >&2
+    exit 1
+  fi
+  USER_TAG_WHERE="email LIKE '%${RUN_ID}%' OR phone_number LIKE '%${RUN_DIGITS}%'"
+  # Reused by every subquery below instead of re-typing `"user" WHERE ...` —
+  # one place to keep in sync with USER_TAG_WHERE, and `::text` on `id` guards
+  # against a type mismatch against the TEXT owner/created_by columns below
+  # regardless of whatever type better-auth's own migration gave `user.id`.
+  TAGGED_USER_IDS="SELECT id::text FROM \"user\" WHERE ${USER_TAG_WHERE}"
+
+  # L6: items.created_by -> user is ON DELETE RESTRICT, so a DELETE FROM
+  # "user" fails for any tagged user who still owns an item — and that
+  # failure is swallowed (`2>/dev/null`) wherever it's issued below. Confirmed
+  # live: 65 users survived a run, and deleted fine once their items were
+  # removed. recordCreated('items', ...) doesn't reach every item-creating
+  # call site in the spec suite (a spec that POSTs /item/create directly,
+  # bypassing flows.ts, ledgers nothing), so scope 1's ledger replay below
+  # can't be relied on to have already cleared them. Rather than chase down
+  # every such call site — a list that only grows and silently breaks again
+  # the next time someone forgets it — delete a tagged user's items HERE,
+  # bounded to `created_by IN (this run's own tagged users)`. That subquery is
+  # still just the run's tag, never item_type/item_network, so it can't reach
+  # anyone else's data.
+  #
+  # item_actions / action_events are handled the same way rather than relying
+  # on the items delete above to cascade them: item_actions only cascades from
+  # items on the TARGET side (item_actions_target_item_fk), so an action where
+  # this run's item was the SOURCE would survive; action_events has no FK to
+  # items at all (create_actions_events.sql) and nothing ledgers its rows (see
+  # ledger.ts), so it would otherwise be permanent, never-cleaned residue on
+  # every run that exercises journey D/E/R. Both tables carry the owning
+  # user's id in `source_item_owner`/`target_item_owner` (TEXT), so they can be
+  # bound to the same tagged-user subquery directly, independent of the items
+  # delete's cascade behaviour.
+  #
+  # THE ORDERING REASON THIS WHOLE BLOCK IS UP HERE, AHEAD OF SCOPE 1: it has
+  # to run while `TAGGED_USER_IDS`' subquery can still see every user this run
+  # created. flows.ts/auth.ts DO ledger 'user' (and usually 'items') for the
+  # common creation path, so scope 1's ledger replay below deletes most of
+  # this run's own users by id — if this block ran AFTER that replay, its
+  # subquery would find none of those already-gone users and miss every
+  # action/item row they owned, which is exactly the residue this was meant
+  # to close (reproduced live: a retire test's action_events survived cleanup
+  # this way before this block was moved here).
+  psql_q "DELETE FROM item_actions WHERE source_item_owner IN ($TAGGED_USER_IDS) OR target_item_owner IN ($TAGGED_USER_IDS);" >/dev/null 2>&1
+  psql_q "DELETE FROM action_events WHERE source_item_owner IN ($TAGGED_USER_IDS) OR target_item_owner IN ($TAGGED_USER_IDS);" >/dev/null 2>&1
+  psql_q "DELETE FROM items WHERE created_by IN ($TAGGED_USER_IDS);" >/dev/null 2>&1
+  echo "[cleanup] L6 pre-clean done"
+
   # Scope 1 — the ledger, deleted child-first so FKs never block a delete
   # (items.created_by -> user is ON DELETE RESTRICT: a user row cannot be
-  # removed while it still owns an item, so items must go first).
+  # removed while it still owns an item, so items must go first). Mostly
+  # redundant with the L6 pre-clean above for 'items'/'user' now, but still
+  # the only thing that reaches consent_record and anything else this run
+  # ledgered by id rather than by owner/tag.
   LEDGER="$SNAP_DIR/created.jsonl"
   if [ -f "$LEDGER" ]; then
     for t in $TABLES; do
@@ -181,31 +254,10 @@ if [ "$MODE" != "--verify-only" ]; then
   fi
 
   # Scope 2 — the run tag on minted identifiers. Bound to the tag, nothing
-  # else. Runs AFTER the ledger replay above, so any item this run created but
-  # never ledgered (a gap in today's coverage — see ledger.ts's CLEANUP_TABLES
-  # comment) can still block this DELETE via the same RESTRICT FK; that
-  # failure is swallowed here too, but scope 3 below will catch it as residue
-  # on both `items` and `user` rather than reporting a false clean.
-  #
-  # Phone match: identities.ts's newPhone() does NOT embed RUN_ID (which is
-  # hex, e.g. "3f9a2b7c") — it embeds RUN_DIGITS, a 5-digit hash OF RUN_ID
-  # (e.g. "91767"). Matching on RUN_ID here would never match a single
-  # phone-channel persona. RUN_DIGITS is derived by importing identities.ts
-  # directly (same reasoning as CLEANUP_TABLES above: one hand-rolled copy of
-  # that hash already drifted from the real formula once; a second copy here
-  # would just be the same bug again) with E2E_RUN_ID pinned to this run's id
-  # so the derivation matches exactly what the run itself used.
-  RUN_DIGITS="$(E2E_RUN_ID="$RUN_ID" node --experimental-strip-types -e '
-    (async () => {
-      const { RUN_DIGITS } = await import(process.argv[1]);
-      process.stdout.write(RUN_DIGITS);
-    })();
-  ' "$E2E_DIR/src/identities.ts" 2>/dev/null)"
-  if [ -z "$RUN_DIGITS" ]; then
-    echo "[cleanup] FAIL — could not derive RUN_DIGITS from identities.ts for run '$RUN_ID'." >&2
-    exit 1
-  fi
-  psql_q "DELETE FROM \"user\" WHERE email LIKE '%${RUN_ID}%' OR phone_number LIKE '%${RUN_DIGITS}%';" >/dev/null 2>&1
+  # else. The items/item_actions/action_events legs of this used to live here
+  # too; they moved above the ledger replay for the ordering reason explained
+  # there. What's left is just the identity rows the tag itself names.
+  psql_q "DELETE FROM \"user\" WHERE ${USER_TAG_WHERE};" >/dev/null 2>&1
   psql_q "DELETE FROM organization WHERE slug LIKE '%${RUN_ID}%';" >/dev/null 2>&1
   echo "[cleanup] tag sweep done"
 
