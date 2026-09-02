@@ -1,5 +1,11 @@
 import type { ApiClient } from './api-client.js';
-import { RUN_ID } from './identities.js';
+// Explicit `.ts` extension, unlike the rest of src/ (see ledger.ts for the
+// precedent): schema.ts is now reached directly by `node --experimental-strip-types`
+// via ui-helpers.test.ts's import of ui.ts, which imports getNetworkConfig from
+// here — Node's native loader does not remap a `.js` specifier back to its `.ts`
+// source, so it throws ERR_MODULE_NOT_FOUND. Playwright resolves an explicit
+// `.ts` path just as well, so this works in both run modes.
+import { RUN_ID } from './identities.ts';
 
 /** A served network/domain binding as returned by `GET /`. */
 export interface ServedDomain {
@@ -48,6 +54,39 @@ interface SchemaEntry {
   item_type: string;
   schema_url?: string;
   schema: JsonSchema;
+}
+
+/** A network.json domain entry, as far as label resolution needs it. */
+export interface NetworkConfigDomain {
+  id: string;
+  label?: string;
+}
+
+interface SchemaCacheEntry {
+  kind: string;
+  network?: string;
+  schema: Record<string, unknown>;
+}
+
+/**
+ * The served network's own network.json, read from the schema cache endpoint —
+ * the same source the UI resolves domain labels and card config from. Needed
+ * because /network/schemas' per-schema entries carry no domain metadata.
+ */
+export async function getNetworkConfig(
+  api: ApiClient,
+  network: string,
+): Promise<{ domains: NetworkConfigDomain[] }> {
+  const res = await api.get<SchemaCacheEntry[]>(`/api/v1/network/schemas?network=${encodeURIComponent(network)}`);
+  const entry = (res.body ?? []).find((e) => e.kind === 'network_config');
+  if (!entry) {
+    throw new Error(
+      `[e2e] no network_config entry for "${network}" in /api/v1/network/schemas — ` +
+        'the API is serving a different network, or its schema cache is empty.',
+    );
+  }
+  const domains = (entry.schema.domains as NetworkConfigDomain[] | undefined) ?? [];
+  return { domains };
 }
 
 /** Read the target's served domains from the unauthenticated root endpoint. */

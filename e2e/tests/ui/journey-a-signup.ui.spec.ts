@@ -17,7 +17,7 @@ test.describe('Journey A (UI) — self-signup through the browser', () => {
     const acfg = await api.get('/api/v1/auth/config');
     test.skip(acfg.status === 404, 'target predates the current signup UI flow (no /api/v1/auth/config)');
 
-    const { identifierLabel } = await uiSignupAdult(page, { cfg, domainKey: cfg.servedDomains[0] });
+    const { identifierLabel } = await uiSignupAdult(page, { cfg, api, domainKey: cfg.servedDomains[0] });
 
     // landed on home, signed in
     expect(new URL(page.url()).pathname).toBe('/');
