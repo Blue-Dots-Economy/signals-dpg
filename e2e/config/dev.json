@@ -1,0 +1,49 @@
+{
+  "env": "dev",
+  "apiBaseUrl": "https://REPLACE-dev-api.example",
+  "uiBaseUrl": "https://REPLACE-dev.example",
+  "network": "blue_dot",
+  "servedDomains": [
+    "blue_dot/seeker",
+    "blue_dot/provider"
+  ],
+  "brand": null,
+  "servedBindingHost": null,
+  "language": "en",
+  "selfSignupMode": "gated",
+  "loginChannels": [
+    "phone",
+    "email"
+  ],
+  "peerAuthMode": "permissive",
+  "authProvider": "auto",
+  "keycloak": {
+    "baseUrl": "https://REPLACE-dev-keycloak.example",
+    "internalBaseUrl": "https://REPLACE-dev-keycloak.example",
+    "realm": "bluedots",
+    "uiClientId": "signals-ui",
+    "redirectUri": "https://REPLACE-dev.example/auth/callback"
+  },
+  "action": {
+    "type": "apply",
+    "acceptStatus": "accepted"
+  },
+  "auth": {
+    "serviceApiKey": null,
+    "actingOrgId": null
+  },
+  "otp": {
+    "mode": "test-otp"
+  },
+  "notificationStubUrl": null,
+  "mailpitUrl": null,
+  "keycloakLogContainer": null,
+  "db": {
+    "url": null
+  },
+  "deterministicPiiKey": false,
+  "faultInjection": false,
+  "peer": {
+    "apiBaseUrl": null
+  }
+}
