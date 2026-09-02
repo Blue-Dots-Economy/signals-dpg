@@ -898,13 +898,43 @@ describe('POST /admin/participant', () => {
     expect(body.items).toHaveLength(0);
     expect(dbState.inserts).toHaveLength(0);
     // Assert that the onboarding-field update fired and set the expected fields.
+    //
+    // SS-3 (#640): `onboardedByOrgId` is deliberately NULL here, where it used
+    // to be the acting org. A `network_service` caller is not an aggregator —
+    // tagging its participants to the network's own org satisfied "every
+    // entrant has an owner" on paper while leaving a verification queue nobody
+    // would open. This is `account_only` mode, so there is no profile and no
+    // domain; the default is per (network, domain), so rather than guessing
+    // `'seeker'` the tag is left unset and filled at first profile create,
+    // which is the first moment the domain is actually known.
     expect(dbState.updates).toHaveLength(1);
     expect(dbState.updates[0].set).toMatchObject({
-      onboardedByOrgId: 'org_ns_1',
+      onboardedByOrgId: null,
+      onboardedByDefault: false,
       onboardedVia: 'bulk',
     });
     expect(dbState.updates[0].set).not.toHaveProperty('termsAccepted');
     expect(dbState.updates[0].set).not.toHaveProperty('privacyAccepted');
+  });
+
+  it('aggregator acting org still owns the participants it onboards (SS-3 unchanged path)', async () => {
+    dbState.signUpUserId = 'usr_new_agg_acct';
+    const app = await buildApp({
+      org_id: 'org_agg_1',
+      org_type: 'aggregator',
+    });
+    const res = await app.inject({
+      method: 'POST',
+      url: '/participant',
+      payload: baseBody({ phone_number: VALID_PHONE, email: undefined, item_state: undefined }),
+    });
+    expect(res.statusCode).toBe(200);
+    expect(dbState.updates).toHaveLength(1);
+    expect(dbState.updates[0].set).toMatchObject({
+      onboardedByOrgId: 'org_agg_1',
+      onboardedByDefault: false,
+      onboardedVia: 'bulk',
+    });
   });
 
   it('network_service + existing user + valid item_id → 200 owned_elsewhere:false, item updated', async () => {

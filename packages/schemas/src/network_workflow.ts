@@ -7,9 +7,19 @@ const JsonSchemaDocumentSchema = z.record(z.string(), z.unknown());
 // Go-live gate tokens (NOT field names). The single source of truth for the
 // gate vocabulary — apps/api's classifier imports these rather than redefining
 // them, so the config schema and the runtime evaluator can never drift.
-// `schema_required` is the baseline gate; `consent_required` is opt-in per
-// domain (a guardian-gated domain always enforces it — see the resolver).
-export const PROFILE_GO_LIVE_GATES = ['schema_required', 'consent_required'] as const;
+// `schema_required` is the baseline gate; `consent_required` and
+// `owner_required` are opt-in per domain (a guardian-gated domain always
+// enforces `consent_required` — see the resolver).
+//
+// `owner_required` (#640 / SS-3): the profile owner must have an owning
+// aggregator (`user.onboarded_by_org_id`). Unlike the other two it is NOT a
+// pure function of the item's own state — see the two guards documented on
+// `GO_LIVE_GATE_CHECKS.owner_required` in apps/api.
+export const PROFILE_GO_LIVE_GATES = [
+  'schema_required',
+  'consent_required',
+  'owner_required',
+] as const;
 export type GoLiveGate = (typeof PROFILE_GO_LIVE_GATES)[number];
 
 // Canonical bucket + status enums. Duplicated here from

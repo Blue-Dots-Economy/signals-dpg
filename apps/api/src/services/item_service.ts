@@ -13,6 +13,11 @@ import {
   validateAgainstJsonSchema,
 } from '@dpg/schemas';
 import { classify_item, DEFAULT_GO_LIVE_GATES, type GoLiveGate } from './items/classifier.js';
+import {
+  resolveOwnerGateContext,
+  tagUserWithDefaultAggregator,
+  type OwnerGateContext,
+} from './aggregator/default_aggregator.js';
 import { hasAcceptedProfileConsent } from './consent_acceptance.js';
 import { is_populated } from './metrics/profile_completion.js';
 import { decryptPiiBlob, encryptPiiBlob, getPiiKey } from '@dpg/auth';
@@ -140,6 +145,14 @@ export interface CreateItemServiceParams {
    * seed scripts. Defaults to false — every real create path is capped.
    */
   skip_profile_limit?: boolean;
+  /**
+   * Skip the SS-3 default-aggregator fill (#640). Set by the admin-participant
+   * onboarding path, which resolves ownership itself from the acting org — so
+   * an aggregator onboarding a previously-untagged person must not have them
+   * silently tagged to the *default* aggregator instead. Defaults to false:
+   * every self-service create path fills the tag.
+   */
+  skip_default_tagging?: boolean;
 }
 
 export interface UpdateItemServiceBody {
@@ -333,10 +346,30 @@ export async function createItemInternal(
   // promote a minor), so they stay draft until GUARDIAN consent promotes via
   // the finalize/accept path — see create_item.ts and promoteItemOnProfileConsent.
   const goLiveGates = await resolveGoLiveGates(params.item_network, params.item_domain);
+  // SS-3 (#640): fill the owner's default-aggregator tag BEFORE classifying, so
+  // a first profile created once a default exists goes live immediately rather
+  // than sitting in `draft` until its next edit. No-op when the tag is already
+  // set, when no default is configured, or when the domain hasn't opted into
+  // the gate.
+  if (goLiveGates.includes('owner_required') && !params.skip_default_tagging) {
+    await tagUserWithDefaultAggregator(
+      exec,
+      params.created_by,
+      params.item_network,
+      params.item_domain,
+    );
+  }
   const classification = classify_item({
     schema: itemSchema as { required?: string[] },
     merged_state: submittedItemState,
     current_status: 'draft',
+    owner_context: await ownerContextIfGated(
+      exec,
+      goLiveGates,
+      params.created_by,
+      params.item_network,
+      params.item_domain,
+    ),
     // Guardian-aware already: create_item passes consent_accepted=false for a
     // gated minor (self-consent must not promote), so no separate guardian
     // check is needed on the create path.
@@ -405,6 +438,23 @@ export interface UpdateItemInternalResult {
     created_at: Date;
     updated_at: Date;
   };
+}
+
+/**
+ * Owner context for the `owner_required` gate, resolved only when the domain
+ * actually configures that gate (SS-3, #640). A domain that has not opted in
+ * pays no query — which is what keeps the common profile-write path free of
+ * extra reads.
+ */
+async function ownerContextIfGated(
+  exec: DbOrTx,
+  gates: readonly GoLiveGate[],
+  ownerUserId: string,
+  network: string,
+  domain: string,
+): Promise<OwnerGateContext | undefined> {
+  if (!gates.includes('owner_required')) return undefined;
+  return resolveOwnerGateContext(exec, ownerUserId, network, domain);
 }
 
 /**
@@ -546,6 +596,13 @@ export async function promoteItemOnProfileConsent(
     current_status: 'draft',
     consent_accepted: consentSatisfied,
     gates: goLiveGates,
+    owner_context: await ownerContextIfGated(
+      exec,
+      goLiveGates,
+      item.created_by,
+      item.item_network,
+      item.item_domain,
+    ),
   });
 
   if (lifecycle_status !== 'live') return false;
@@ -680,12 +737,32 @@ async function computeItemStateUpdate(
   const consentSatisfied =
     (await hasAcceptedProfileConsent(exec, existingItem.item_id)) &&
     !(await guardianGateBlocksGoLive(exec, existingItem));
+  // SS-3 (#640) update-path fill: `create_item` only tags on create, so a user
+  // who signed up before a default existed and merely EDITS their profile
+  // would never be tagged — and once the gate is armed their still-`draft`
+  // profile could never be published, with no in-app remedy. Tagging here lets
+  // them self-heal on their next edit instead of waiting on a backfill job.
+  if (goLiveGates.includes('owner_required')) {
+    await tagUserWithDefaultAggregator(
+      exec,
+      existingItem.created_by,
+      existingItem.item_network,
+      existingItem.item_domain,
+    );
+  }
   const classification = classify_item({
     schema: itemSchema as { required?: string[] },
     merged_state: mergedFullState,
     current_status: existingItem.lifecycle_status as 'draft' | 'live' | 'paused',
     consent_accepted: consentSatisfied,
     gates: goLiveGates,
+    owner_context: await ownerContextIfGated(
+      exec,
+      goLiveGates,
+      existingItem.created_by,
+      existingItem.item_network,
+      existingItem.item_domain,
+    ),
   });
 
   return {

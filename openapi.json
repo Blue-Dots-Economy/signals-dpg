@@ -5723,6 +5723,103 @@
         }
       }
     },
+    "/api/v1/admin/aggregator/default": {
+      "post": {
+        "tags": [
+          "admin"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "org_id": {
+                    "type": "string",
+                    "minLength": 1,
+                    "description": "Signals organization id (org_<uuid>) that becomes the default; must be type=aggregator"
+                  },
+                  "bindings": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "pattern": "^[a-z0-9_]+\\/[a-z0-9_]+$"
+                    },
+                    "description": "served-domain bindings this org becomes the default for, e.g. ['blue_dot/seeker','blue_dot/provider']. Replaces the org's current set; [] clears it."
+                  }
+                },
+                "required": [
+                  "org_id",
+                  "bindings"
+                ]
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "in": "header",
+            "name": "x-acting-org-id",
+            "required": true,
+            "description": "Organization this request acts on behalf of. Required for admin/aggregator operations."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "org_id": {
+                      "type": "string"
+                    },
+                    "bindings": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      },
+                      "description": "the org's bindings after the write"
+                    },
+                    "cleared_from": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "org_id": {
+                            "type": "string"
+                          },
+                          "binding": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "org_id",
+                          "binding"
+                        ],
+                        "additionalProperties": false
+                      },
+                      "description": "bindings taken off another org by this call"
+                    }
+                  },
+                  "required": [
+                    "org_id",
+                    "bindings",
+                    "cleared_from"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/admin/participant": {
       "post": {
         "tags": [

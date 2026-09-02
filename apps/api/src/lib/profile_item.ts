@@ -56,6 +56,9 @@ export const create_profile_item = async (
     item_state: input.payload,
     item_locations,
     created_by: input.user_id,
+    // Ownership on this path is decided by the admin-participant route from the
+    // acting org (SS-3, #640) — never overwritten with the default aggregator.
+    skip_default_tagging: true,
   });
 
   return { item_id: result.itemId };

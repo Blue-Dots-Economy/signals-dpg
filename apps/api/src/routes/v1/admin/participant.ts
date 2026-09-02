@@ -10,6 +10,7 @@ import { ensureItemPartition, items } from '@dpg/database';
 import { user } from '../../../../db/postgres/schema/auth.js';
 import { authInstance } from '@/routes/auth/create_auth';
 import { create_profile_item } from '@/lib/profile_item';
+import { resolveDefaultAggregator } from '@/services/aggregator/default_aggregator';
 import { updateItemInternal, type DbOrTx } from '@/services/item_service';
 import { apiConfig, authConfig } from '@/config';
 import {
@@ -68,11 +69,68 @@ export const participant: FastifyPluginAsync = async (app) => {
 type OnboardingFields = {
   phone_norm: string | null;
   age: number | undefined;
-  acting_org_id: string;
+  /**
+   * The aggregator that owns this participant, or null when nobody does yet.
+   *
+   * SS-3 (#640): this is NO LONGER simply the acting org. A `voice` or
+   * `network_service` caller is not an aggregator — the voice agent is hosted
+   * by the network, so a cold inbound caller genuinely has no aggregator — and
+   * tagging them to the network's own org satisfies "every entrant has an
+   * owner" on paper while leaving a verification queue nobody would open.
+   * Those callers resolve the instance's DEFAULT aggregator instead, and get
+   * null when none is configured. See `resolveOnboardingOwnerOrg`.
+   */
+  owner_org_id: string | null;
+  /** True when `owner_org_id` came from the default rather than a real onboarding act. */
+  onboarded_by_default: boolean;
   channel: UpsertBody['channel'];
   source_id: string | undefined;
   now: Date;
 };
+
+/**
+ * Who owns a participant created through this route.
+ *
+ * An aggregator caller owns the participants it onboards, unchanged. Any other
+ * caller (`voice`, `network_service`) falls back to the instance's default
+ * aggregator for the binding the participant is joining.
+ *
+ * `domain` is undefined in `account_only` mode, where no profile — and so no
+ * domain — exists yet. The default is per (network, domain), so rather than
+ * guessing a domain (the request schema documents `domain` as defaulting to
+ * `'seeker'`, which would silently hand a provider participant to the seeker
+ * aggregator) the tag is left null. It is then filled at first profile create,
+ * which is the first moment the domain is actually known.
+ */
+async function resolveOnboardingOwnerOrg(
+  exec: DbOrTx,
+  acting: { org_id: string; org_type: 'aggregator' | 'voice' | 'network_service' },
+  network: string,
+  domain: string | undefined,
+  log: FastifyRequest['log'],
+): Promise<{ owner_org_id: string | null; onboarded_by_default: boolean }> {
+  if (acting.org_type === 'aggregator') {
+    return { owner_org_id: acting.org_id, onboarded_by_default: false };
+  }
+
+  if (!domain) {
+    log.info(
+      { acting_org_id: acting.org_id, org_type: acting.org_type, network },
+      'participant: no domain on an account-only non-aggregator onboard — default tag deferred to first profile create',
+    );
+    return { owner_org_id: null, onboarded_by_default: false };
+  }
+
+  const { org_id } = await resolveDefaultAggregator(exec, network, domain, log);
+  if (!org_id) {
+    log.info(
+      { acting_org_id: acting.org_id, org_type: acting.org_type, network, domain },
+      'participant: no default aggregator configured for this binding — participant left untagged',
+    );
+    return { owner_org_id: null, onboarded_by_default: false };
+  }
+  return { owner_org_id: org_id, onboarded_by_default: true };
+}
 
 const buildOnboardingSet = (f: OnboardingFields) => ({
   phoneNumber: f.phone_norm,
@@ -81,7 +139,8 @@ const buildOnboardingSet = (f: OnboardingFields) => ({
   // send the number; no birth date is accepted. (Deprecated terms/privacy
   // booleans are intentionally NOT written — consent lives in the ledger, #309.)
   age: f.age ?? null,
-  onboardedByOrgId: f.acting_org_id,
+  onboardedByOrgId: f.owner_org_id,
+  onboardedByDefault: f.onboarded_by_default,
   onboardedVia: f.channel,
   onboardedSourceId: f.source_id ?? null,
   onboardedAt: f.now,
@@ -606,14 +665,22 @@ function notifyAggregatorInit(
 async function handleAccountOnlyNewUser(ctx: ParticipantCtx) {
   const { request, reply, body, email_norm, phone_norm } = ctx;
   let consent_recorded = 0;
-  const acting_org_id = request.acting_org!.org_id;
   const network = body.network ?? 'blue_dot';
   const now = new Date();
+
+  const owner = await resolveOnboardingOwnerOrg(
+    db,
+    request.acting_org!,
+    network,
+    undefined,
+    request.log,
+  );
 
   const fields: OnboardingFields = {
     phone_norm,
     age: body.age,
-    acting_org_id,
+    owner_org_id: owner.owner_org_id,
+    onboarded_by_default: owner.onboarded_by_default,
     channel: body.channel,
     source_id: body.source_id,
     now,
@@ -902,7 +969,6 @@ async function handleInsertItem(ctx: ParticipantCtx, existing: ExistingUser) {
 async function handleCreateNewUser(ctx: ParticipantCtx) {
   const { request, reply, body, email_norm, phone_norm } = ctx;
   let consent_recorded = 0;
-  const acting_org_id = request.acting_org!.org_id;
   const network = body.network ?? 'blue_dot';
   const domain = body.domain ?? 'seeker';
   const item_type = body.item_type ?? 'profile_1.0';
@@ -912,10 +978,19 @@ async function handleCreateNewUser(ctx: ParticipantCtx) {
 
   const now = new Date();
 
+  const owner = await resolveOnboardingOwnerOrg(
+    db,
+    request.acting_org!,
+    network,
+    domain,
+    request.log,
+  );
+
   const fields: OnboardingFields = {
     phone_norm,
     age: body.age,
-    acting_org_id,
+    owner_org_id: owner.owner_org_id,
+    onboarded_by_default: owner.onboarded_by_default,
     channel: body.channel,
     source_id: body.source_id,
     now,

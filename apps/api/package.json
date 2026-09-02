@@ -25,6 +25,8 @@
     "keycloak:migrate:users": "tsx scripts/migrate_users_to_keycloak.ts",
     "keycloak:create:admin": "tsx scripts/create_admin_user.ts",
     "db:backfill:consent": "tsx scripts/backfill_demote_consentless.ts",
+    "db:backfill:default-aggregator": "tsx scripts/backfill_default_aggregator.ts",
+    "db:transfer:default-aggregator": "tsx scripts/transfer_default_aggregator.ts",
     "spec:dump": "tsx scripts/dump_openapi.ts",
     "test": "vitest run --passWithNoTests",
     "test:coverage": "vitest run --passWithNoTests --coverage",

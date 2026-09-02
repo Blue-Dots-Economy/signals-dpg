@@ -6,7 +6,9 @@ import {
   integer,
   index,
   jsonb,
+  check,
 } from 'drizzle-orm/pg-core';
+import { sql } from 'drizzle-orm';
 
 export const user = pgTable('user', {
   id: text('id').primaryKey(),
@@ -44,6 +46,13 @@ export const user = pgTable('user', {
   // (which acts on behalf of an aggregator or voice org via acting_org). Null
   // for users created by other paths (better-auth signUp from a UI etc.).
   onboardedByOrgId: text('onboarded_by_org_id').references(() => organization.id),
+  // SS-3 (#640): true when `onboarded_by_org_id` was filled from the
+  // instance's DEFAULT aggregator rather than from a real onboarding act.
+  // Server-only and deliberately NOT derived from `onboarded_via` — that
+  // column is written from the request's `channel` field, so a caller could
+  // set it, and this flag is what the later re-assignment job scopes on (it
+  // decides who is handed PII-decrypt rights over whom).
+  onboardedByDefault: boolean('onboarded_by_default').notNull().default(false),
   onboardedVia: text('onboarded_via'),
   onboardedSourceId: text('onboarded_source_id'),
   onboardedAt: timestamp('onboarded_at'),
@@ -100,7 +109,30 @@ export const organization = pgTable('organization', {
   createdAt: timestamp('created_at').notNull(),
   metadata: text('metadata'),
   type: text('type'),
-});
+  // SS-3 (#640): served-domain bindings ("<network>/<domain>", e.g.
+  // 'blue_dot/seeker') for which this org is the DEFAULT aggregator — the one
+  // that inherits users arriving with no aggregator of their own.
+  //
+  // An array because one aggregator may be the default for several domains
+  // (seeker AND provider is the expected launch shape). Postgres cannot
+  // unique-index an array element, so "one default per binding" is enforced by
+  // POST /api/v1/admin/aggregator/default clearing the binding off every other
+  // org in the same transaction; the read path additionally fails closed if it
+  // ever sees two claimants.
+  //
+  // Deliberately NOT indexed: `organization` holds tens to hundreds of rows,
+  // where a sequential scan beats GIN and GIN would tax every org upsert.
+  defaultForBindings: text('default_for_bindings').array(),
+}, (table) => [
+  // The flag grants PII-decrypt rights over the users it captures, so it must
+  // never land on a `network_service` org — whose "unverified queue" nobody
+  // would ever open. Approval state itself lives in aggregator-dpg and is not
+  // visible here, so this constraint is the only enforceable half.
+  check(
+    'organization_default_requires_aggregator',
+    sql`${table.defaultForBindings} IS NULL OR ${table.type} = 'aggregator'`,
+  ),
+]);
 
 export const member = pgTable('member', {
   id: text('id').primaryKey(),
