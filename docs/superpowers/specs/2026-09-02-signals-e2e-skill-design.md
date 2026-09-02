@@ -282,9 +282,10 @@ previous one's blind spot:
    check that cannot be fooled by something we forgot to both tag *and* ledger.
 
 Scope: `user`, better-auth `session`/`account`/`verification`, `items`,
-`item_locations`, `item_search`, `item_actions`, `action_events`,
+`item_search`, `item_actions`, `action_events`,
 `consent_record`, `item_metrics`, the minor/guardian rows, `organization` +
-members + API keys; Redis item/geo caches, OTP keys, support rate-limit
+members + API keys (note: `item_locations` is a JSONB column on `items`, not a
+table, and better-auth sessions live in Redis rather than Postgres); Redis item/geo caches, OTP keys, support rate-limit
 counters, and this run's ingest-stream entries; on disk the sink mail dir,
 envelopes, and screenshots.
 

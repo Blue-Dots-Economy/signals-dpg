@@ -76,7 +76,7 @@ assertion need one. This task adds it.
 ```ts
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { requireDb, DbNotConfiguredError } from '../db.js';
+import { requireDb, DbNotConfiguredError } from '../db.ts';
 
 test('requireDb throws a named, actionable error when db.url is unset', () => {
   const cfg = { db: { url: null } } as never;
@@ -217,7 +217,7 @@ is the second scope and a row-count snapshot diff is the third.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { rmSync, existsSync } from 'node:fs';
-import { recordCreated, readLedger, ledgerPath, CLEANUP_TABLES } from '../ledger.js';
+import { recordCreated, readLedger, ledgerPath, CLEANUP_TABLES } from '../ledger.ts';
 
 const RUN = 'unit-test-run';
 
@@ -518,7 +518,7 @@ probe belongs.
 ```ts
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { formatDomainLabel } from '../ui.js';
+import { formatDomainLabel } from '../ui.ts';
 
 test('a configured label wins over the title-cased id', () => {
   const domains = [{ id: 'provider', label: 'Service Provider' }, { id: 'seeker' }];
@@ -756,7 +756,7 @@ overrides so **no committed config is mutated**.
 ```ts
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { capabilitiesFor } from '../capabilities.js';
+import { capabilitiesFor } from '../capabilities.ts';
 
 const base = {
   otp: { mode: 'test-otp' }, notificationStubUrl: null, mailpitUrl: null,
@@ -988,7 +988,7 @@ is reachable locally. `local-mail-sink/sink.mjs` is the starting point.
 ```ts
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { subjectPatternFor, assertNoCopyDrift } from '../notify.js';
+import { subjectPatternFor, assertNoCopyDrift } from '../notify.ts';
 
 const PROPS = [
   'profile.create.subject=Your {{domainLabel}} profile is live',
@@ -1307,7 +1307,7 @@ recorded consent into a 500."
 ```ts
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { translateClause } from '../search.js';
+import { translateClause } from '../search.ts';
 
 test('an array facet uses jsonb overlap, never equality', () => {
   // The client comment is explicit: `in` on an array field extracts the
@@ -1509,7 +1509,7 @@ passes every assertion — which is exactly the bug #557/#564 fixed.
 ```ts
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { rowForEvent } from '../../.claude/skills/signals-e2e/lib/index_row.mjs';
+import { rowForEvent } from '../../../.claude/skills/signals-e2e/lib/index_row.mjs';
 
 const EV = { item_network: 'blue_dot', item_domain: 'seeker', item_type: 'profile_1.0', item_id: 'i-1', op: 'upsert' };
 
@@ -1596,9 +1596,14 @@ Expected: PASS, 4 new tests.
   value out of root `.env` with node, the same way `stack-up.sh` does) via
   `XREAD BLOCK 2000 STREAMS <stream> $`, starting at `$` so only this run's
   events are consumed;
-- for each entry, read the item row
-  (`SELECT lifecycle_status, updated_at FROM items WHERE item_id = $1`) and its
-  `item_locations`, call `rowForEvent`, and execute the insert or the delete;
+- for each entry, read the item row in **one** query —
+  `SELECT lifecycle_status, updated_at, item_locations FROM items WHERE item_id = $1`
+  — then call `rowForEvent` and execute the insert or the delete.
+  **`item_locations` is a JSONB column on `items`, not a table** (verified:
+  `apps/api/db/postgres/schema.sql:41`; there is no `CREATE TABLE item_locations`).
+  It holds an array of `{lat, lng, …}` objects, so pass
+  `item.item_locations ?? []` as `rowForEvent`'s third argument — no second
+  query, and no join;
 - expose a tiny HTTP control on `:4547` with `POST /_e2e/pause`,
   `POST /_e2e/resume` and `GET /_e2e/stats` returning
   `{consumed, indexed, deleted, paused}` — pausing is what makes "published but
@@ -1679,7 +1684,7 @@ In `e2e/playwright.config.ts`, add to the `reporter` array:
 ```ts
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { buildReport } from '../../.claude/skills/signals-e2e/lib/report.mjs';
+import { buildReport } from '../../../.claude/skills/signals-e2e/lib/report.mjs';
 
 const results = {
   suites: [{
