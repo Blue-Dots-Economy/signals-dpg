@@ -6,7 +6,7 @@ import type {
 import { Readable } from 'node:stream';
 import { db } from '@api/db/postgres/drizzle_config';
 import { item_metrics } from '../../../../db/postgres/schema/metrics.js';
-import { organization } from '../../../../db/postgres/schema/auth.js';
+import { readConfiguredDomains } from '@/utils/org_metadata';
 import { eq, and, inArray, asc, getTableColumns } from 'drizzle-orm';
 import { ExportQuery, type ExportQuery as ExportQueryType } from '@dpg/schemas';
 import { check_and_refresh_if_stale } from '@/services/metrics/staleness';
@@ -59,22 +59,17 @@ const csv_escape = (v: unknown): string => {
   return s;
 };
 
+/**
+ * The org's declared domains, or null when it has none configured.
+ *
+ * Thin adapter over the shared `readConfiguredDomains` — this route's callers
+ * distinguish "no domains" via null, where the shared helper returns [].
+ */
 const read_configured_domains = async (
   org_id: string,
 ): Promise<string[] | null> => {
-  const [org] = (await db
-    .select({ metadata: organization.metadata })
-    .from(organization)
-    .where(eq(organization.id, org_id))
-    .limit(1)) as Array<{ metadata: string | null }>;
-  if (!org?.metadata) return null;
-  try {
-    const meta = JSON.parse(org.metadata) as { domains?: unknown };
-    if (!Array.isArray(meta.domains)) return null;
-    return (meta.domains as unknown[]).filter((x): x is string => typeof x === 'string');
-  } catch {
-    return null;
-  }
+  const domains = await readConfiguredDomains(org_id);
+  return domains.length === 0 ? null : domains;
 };
 
 async function* generate_csv(

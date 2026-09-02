@@ -10,6 +10,7 @@ export * from './api/bulk_schemas';
 export * from './api/match_score_schemas';
 export * from './consent_config';
 export * from './admin/aggregator_default';
+export * from './admin/error_response';
 export * from './admin/aggregator_upsert';
 export * from './admin/participant';
 export * from './admin/participant_decrypt';

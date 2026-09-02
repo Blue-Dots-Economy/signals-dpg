@@ -351,7 +351,7 @@ export async function createItemInternal(
   // than sitting in `draft` until its next edit. No-op when the tag is already
   // set, when no default is configured, or when the domain hasn't opted into
   // the gate.
-  if (goLiveGates.includes('owner_required') && !params.skip_default_tagging) {
+  if (gatesRequireOwner(goLiveGates) && !params.skip_default_tagging) {
     await tagUserWithDefaultAggregator(
       exec,
       params.created_by,
@@ -441,6 +441,17 @@ export interface UpdateItemInternalResult {
 }
 
 /**
+ * Whether a domain's configured gate set includes the SS-3 owner gate (#640).
+ *
+ * One predicate for "does this write need the default-aggregator work at all",
+ * shared by the tag fill and the gate-context resolution so the two can never
+ * disagree about when they apply.
+ */
+function gatesRequireOwner(gates: readonly GoLiveGate[]): boolean {
+  return gates.includes('owner_required');
+}
+
+/**
  * Owner context for the `owner_required` gate, resolved only when the domain
  * actually configures that gate (SS-3, #640). A domain that has not opted in
  * pays no query — which is what keeps the common profile-write path free of
@@ -453,7 +464,7 @@ async function ownerContextIfGated(
   network: string,
   domain: string,
 ): Promise<OwnerGateContext | undefined> {
-  if (!gates.includes('owner_required')) return undefined;
+  if (!gatesRequireOwner(gates)) return undefined;
   return resolveOwnerGateContext(exec, ownerUserId, network, domain);
 }
 
@@ -742,7 +753,7 @@ async function computeItemStateUpdate(
   // would never be tagged — and once the gate is armed their still-`draft`
   // profile could never be published, with no in-app remedy. Tagging here lets
   // them self-heal on their next edit instead of waiting on a backfill job.
-  if (goLiveGates.includes('owner_required')) {
+  if (gatesRequireOwner(goLiveGates)) {
     await tagUserWithDefaultAggregator(
       exec,
       existingItem.created_by,

@@ -53,30 +53,15 @@
  * the dashboard/private-name path, but the decrypt route's own tenure rules are
  * untouched.
  */
-import { drizzle } from 'drizzle-orm/node-postgres';
-import { Pool } from 'pg';
-import dotenv from 'dotenv';
-import { sql } from 'drizzle-orm';
+import { sql, type SQL } from 'drizzle-orm';
+import { BINDING_KEY_MESSAGE, isBindingKey, parseBindingKey } from '@dpg/schemas';
+import {
+  defaultAggregatorQuery,
+  pickDefaultAggregator,
+} from '../src/services/aggregator/default_aggregator.js';
+import { argReader, createScriptDb, runScript, textArray } from './lib/script_db.js';
 
-dotenv.config({ path: '../../.env' });
-
-const pgUrl =
-  process.env.POSTGRES_URL ??
-  `postgres://${process.env.POSTGRES_USER}:${process.env.POSTGRES_PASSWORD}@${process.env.POSTGRES_HOST ?? '127.0.0.1'}:${process.env.POSTGRES_PORT ?? process.env.DATABASE_PORT ?? '5432'}/${process.env.POSTGRES_DB}`;
-
-const pool = new Pool({ connectionString: pgUrl, ssl: false });
-const db = drizzle(pool);
-
-/**
- * A `text[]` bind for drizzle's `sql` template.
- *
- * Interpolating a JS array directly (`${ids}::text[]`) renders a record —
- * `($1, $2, $3)` — which Postgres rejects with `cannot cast type record to
- * text[]` (42846). Each element must be its own parameter inside an ARRAY[...]
- * constructor.
- */
-const textArray = (values: string[]) =>
-  sql`ARRAY[${sql.join(values.map((v) => sql`${v}`), sql`, `)}]::text[]`;
+const { db, pool, rows } = createScriptDb();
 
 interface Args {
   binding: string;
@@ -88,61 +73,63 @@ interface Args {
 }
 
 function parseArgs(argv: string[]): Args {
-  const get = (name: string): string | undefined =>
-    argv.find((a) => a.startsWith(`--${name}=`))?.split('=')[1];
+  const args = argReader(argv);
 
-  const binding = get('binding');
-  if (!binding || !/^[a-z0-9_]+\/[a-z0-9_]+$/.test(binding)) {
-    throw new Error('--binding=<network>/<domain> is required, e.g. --binding=blue_dot/seeker');
+  const binding = args.value('binding');
+  if (!binding || !isBindingKey(binding)) {
+    throw new Error(`--binding is required and ${BINDING_KEY_MESSAGE}`);
   }
-  const from = get('from');
+  const from = args.value('from');
   if (!from) throw new Error('--from=<org_id> is required (the previous default aggregator)');
 
   return {
     binding,
     from,
-    to: get('to'),
-    actor: get('actor') ?? 'ops',
-    dryRun: argv.includes('--dry-run'),
-    batch: Number(get('batch') ?? 500),
+    to: args.value('to'),
+    actor: args.value('actor') ?? 'ops',
+    dryRun: args.flag('dry-run'),
+    batch: args.number('batch', 500),
   };
 }
 
+/**
+ * The new owner: either given explicitly, or whichever org currently holds the
+ * binding — resolved through the SAME query and fail-closed rule the runtime
+ * uses, so an ambiguous default can never mean one thing to the API and another
+ * to a bulk transfer of PII rights.
+ */
 async function resolveTarget(binding: string, explicit?: string): Promise<string> {
   if (explicit) return explicit;
 
-  const holders = (await db.execute(sql`
-    SELECT id FROM organization
-     WHERE default_for_bindings && ARRAY[${binding}]::text[]
-       AND type = 'aggregator'
-     LIMIT 2
-  `)) as unknown as { rows: Array<{ id: string }> };
+  const claimants = await rows<{ id: string }>(defaultAggregatorQuery(binding));
+  const { org_id } = pickDefaultAggregator(claimants, binding);
 
-  if (holders.rows.length === 0) {
-    throw new Error(`no default aggregator configured for ${binding}; pass --to=<org_id> explicitly`);
-  }
-  if (holders.rows.length > 1) {
+  if (!org_id) {
     throw new Error(
-      `${holders.rows.length} orgs claim ${binding}: ${holders.rows.map((r) => r.id).join(', ')} — refusing to guess`,
+      claimants.length > 1
+        ? `${claimants.length} orgs claim ${binding}: ${claimants.map((r) => r.id).join(', ')} — refusing to guess`
+        : `no default aggregator configured for ${binding}; pass --to=<org_id> explicitly`,
     );
   }
-  return holders.rows[0].id;
+  return org_id;
 }
 
 async function main() {
   const args = parseArgs(process.argv.slice(2));
-  const [network, domain] = args.binding.split('/');
+  const { network, domain } = parseBindingKey(args.binding);
   const to = await resolveTarget(args.binding, args.to);
 
   if (to === args.from) throw new Error('--from and --to are the same org; nothing to transfer');
 
-  const counted = (await db.execute(sql`
-    SELECT count(*)::int AS n
-      FROM "user"
-     WHERE onboarded_by_org_id = ${args.from}
-       AND onboarded_by_default
-  `)) as unknown as { rows: Array<{ n: number }> };
-  const total = counted.rows[0]?.n ?? 0;
+  /** Only participants the OLD org holds by default — never its own onboards. */
+  const movable: SQL = sql`
+    onboarded_by_org_id = ${args.from}
+    AND onboarded_by_default`;
+
+  const counted = await rows<{ n: number }>(
+    sql`SELECT count(*)::int AS n FROM "user" WHERE ${movable}`,
+  );
+  const total = counted[0]?.n ?? 0;
 
   // eslint-disable-next-line no-console
   console.log(
@@ -155,28 +142,25 @@ async function main() {
   let moved = 0;
   for (;;) {
     const batchMoved = await db.transaction(async (tx) => {
-      const picked = (await tx.execute(sql`
-        SELECT id FROM "user"
-         WHERE onboarded_by_org_id = ${args.from}
-           AND onboarded_by_default
-         LIMIT ${args.batch}
-      `)) as unknown as { rows: Array<{ id: string }> };
+      const picked = (await tx.execute(
+        sql`SELECT id FROM "user" WHERE ${movable} LIMIT ${args.batch}`,
+      )) as unknown as { rows?: Array<{ id: string }> };
 
-      const ids = picked.rows.map((r) => r.id);
+      const ids = (picked.rows ?? []).map((r) => r.id);
       if (ids.length === 0) return 0;
+
+      const idList = textArray(ids);
 
       await tx.execute(sql`
         UPDATE "user"
            SET onboarded_by_org_id = ${to}, updated_at = now()
-         WHERE id = ANY(${textArray(ids)})
-      `);
+         WHERE id = ANY(${idList})`);
 
       await tx.execute(sql`
         INSERT INTO participant_reassignment_audit
           (user_id, from_org_id, to_org_id, binding, reason, changed_by)
         SELECT u, ${args.from}, ${to}, ${args.binding}, 'default_change', ${args.actor}
-          FROM unnest(${textArray(ids)}) AS u
-      `);
+          FROM unnest(${idList}) AS u`);
 
       // The old owner's denormalised copy. An upsert cannot fix this — the new
       // owner's recompute writes its own rows and never touches these — so the
@@ -185,10 +169,9 @@ async function main() {
       await tx.execute(sql`
         DELETE FROM item_metrics
          WHERE onboarded_by_org_id = ${args.from}
-           AND owner_user_id = ANY(${textArray(ids)})
+           AND owner_user_id = ANY(${idList})
            AND item_network = ${network}
-           AND item_domain = ${domain}
-      `);
+           AND item_domain = ${domain}`);
 
       return ids.length;
     });
@@ -208,11 +191,4 @@ async function main() {
   );
 }
 
-main()
-  .then(() => pool.end())
-  .catch(async (err) => {
-    // eslint-disable-next-line no-console
-    console.error('transfer failed:', err);
-    await pool.end();
-    process.exit(1);
-  });
+runScript(main, pool, 'transfer');

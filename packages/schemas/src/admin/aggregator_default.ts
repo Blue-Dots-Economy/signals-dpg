@@ -1,18 +1,46 @@
 import z from 'zod';
 
 /**
- * Canonical served-domain binding key: `<network>/<domain>` (e.g.
- * `blue_dot/seeker`). Same shape as `binding.key` in apps/api's
- * `served_domain_guard.ts`.
+ * THE single source of truth for the served-domain binding key format:
+ * `<network>/<domain>` (e.g. `blue_dot/seeker`) — the same shape as
+ * `binding.key` in apps/api's `served_domain_guard.ts`.
  *
  * Network-qualified on purpose (#640): `network` is an optional request
  * parameter that defaults to `blue_dot`, and `blue_dot` / `purple_dot` both
  * declare `seeker` and `provider` — a bare domain name would be ambiguous the
  * moment one instance serves two networks.
+ *
+ * Anything that validates, builds or splits a binding must go through this
+ * module rather than re-declaring the pattern. It lives in `@dpg/schemas`
+ * (a pure package with no env validation) so the API routes, the services and
+ * the standalone ops scripts can all share it.
  */
-export const BindingKey = z
-  .string()
-  .regex(/^[a-z0-9_]+\/[a-z0-9_]+$/, 'binding must be "<network>/<domain>", e.g. blue_dot/seeker');
+export const BINDING_KEY_PATTERN = /^[a-z0-9_]+\/[a-z0-9_]+$/;
+
+export const BINDING_KEY_MESSAGE =
+  'binding must be "<network>/<domain>", e.g. blue_dot/seeker';
+
+export const BindingKey = z.string().regex(BINDING_KEY_PATTERN, BINDING_KEY_MESSAGE);
+
+/** Build a binding key from its parts. */
+export const formatBindingKey = (network: string, domain: string): string =>
+  `${network}/${domain}`;
+
+/** True when `value` is a well-formed binding key. */
+export const isBindingKey = (value: string): boolean => BINDING_KEY_PATTERN.test(value);
+
+/**
+ * Split a binding key into its parts.
+ *
+ * @throws when `value` is not a well-formed binding key — callers that accept
+ *   user input should validate with `isBindingKey` (or the `BindingKey` zod
+ *   schema) first and produce their own error message.
+ */
+export function parseBindingKey(value: string): { network: string; domain: string } {
+  if (!isBindingKey(value)) throw new Error(`${BINDING_KEY_MESSAGE} (got "${value}")`);
+  const [network, domain] = value.split('/');
+  return { network, domain };
+}
 
 /**
  * Body for POST /api/v1/admin/aggregator/default.

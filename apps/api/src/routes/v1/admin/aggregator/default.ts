@@ -4,7 +4,13 @@ import { db } from '@api/db/postgres/drizzle_config';
 import { organization } from '../../../../../db/postgres/schema/auth.js';
 import { aggregator_default_audit } from '../../../../../db/postgres/schema/aggregator_default_audit.js';
 import { isServedDomainBinding } from '@/utils/served_domain_guard';
-import z, { AggregatorDefaultRequest, AggregatorDefaultResponse } from '@dpg/schemas';
+import { readConfiguredDomains } from '@/utils/org_metadata';
+import z, {
+  AdminErrorResponse,
+  AggregatorDefaultRequest,
+  AggregatorDefaultResponse,
+  parseBindingKey,
+} from '@dpg/schemas';
 
 /**
  * POST /api/v1/admin/aggregator/default
@@ -44,7 +50,15 @@ export const aggregator_default: FastifyPluginAsync = async (app) => {
     schema: {
       tags: ['admin'],
       body: AggregatorDefaultRequest,
-      response: { 200: AggregatorDefaultResponse },
+      // Failures are declared, not just the 200 — integrating DPGs read the
+      // generated OpenAPI document to know what they have to handle.
+      response: {
+        200: AggregatorDefaultResponse,
+        400: AdminErrorResponse,
+        403: AdminErrorResponse,
+        404: AdminErrorResponse,
+        500: AdminErrorResponse,
+      },
     },
     handler: aggregator_default_handler,
   });
@@ -61,13 +75,26 @@ export const aggregator_default_handler = async (
     });
   }
 
+  // The audit trail is the only record of who handed an organisation decrypt
+  // rights over an inbound population, so a row attributed to 'unknown' would
+  // defeat the point of writing one. Behind the admin preHandler chain this is
+  // always set; failing loudly beats a useless audit row.
+  const actor = request.user?.id;
+  if (!actor) {
+    request.log.error('aggregator default: authenticated caller has no user id');
+    return reply.code(500).send({
+      error: 'ACTOR_UNRESOLVED',
+      message: 'could not attribute this change to a caller; refusing to write an unattributed audit row',
+    });
+  }
+
   const { org_id } = request.body;
   const wanted = [...new Set(request.body.bindings)];
 
   // Every binding must be one this instance actually serves — a typo would
   // otherwise sit in the column silently and never match a lookup.
   const unserved = wanted.filter((b) => {
-    const [network, domain] = b.split('/');
+    const { network, domain } = parseBindingKey(b);
     return !isServedDomainBinding(network, domain);
   });
   if (unserved.length > 0) {
@@ -78,11 +105,7 @@ export const aggregator_default_handler = async (
   }
 
   const [target] = await db
-    .select({
-      id: organization.id,
-      type: organization.type,
-      metadata: organization.metadata,
-    })
+    .select({ id: organization.id, type: organization.type })
     .from(organization)
     .where(eq(organization.id, org_id))
     .limit(1);
@@ -104,9 +127,9 @@ export const aggregator_default_handler = async (
   // The org's own declared domains, mirrored in at /aggregator/upsert. An
   // aggregator that does not report on a domain has no business inheriting its
   // inbound population. Skipped when the org declared none (legacy mirrors).
-  const declared = parseDeclaredDomains(target.metadata);
+  const declared = await readConfiguredDomains(org_id);
   if (declared.length > 0) {
-    const undeclared = wanted.filter((b) => !declared.includes(b.split('/')[1]));
+    const undeclared = wanted.filter((b) => !declared.includes(parseBindingKey(b).domain));
     if (undeclared.length > 0) {
       return reply.code(400).send({
         error: 'DOMAIN_NOT_DECLARED',
@@ -160,7 +183,7 @@ export const aggregator_default_handler = async (
             binding,
             fromOrgId: previousHolder.get(binding) ?? null,
             toOrgId: org_id,
-            changedBy: request.user?.id ?? 'unknown',
+            changedBy: actor,
           })),
         );
       }
@@ -186,18 +209,5 @@ export const aggregator_default_handler = async (
     throw err;
   }
 };
-
-/** `metadata.domains` as mirrored in by /aggregator/upsert; [] when absent or unreadable. */
-function parseDeclaredDomains(metadata: string | null): string[] {
-  if (!metadata) return [];
-  try {
-    const parsed = JSON.parse(metadata) as { domains?: unknown };
-    return Array.isArray(parsed.domains)
-      ? parsed.domains.filter((d): d is string => typeof d === 'string')
-      : [];
-  } catch {
-    return [];
-  }
-}
 
 export default aggregator_default;

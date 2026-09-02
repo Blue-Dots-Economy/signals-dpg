@@ -35,34 +35,16 @@
  *   --actor=<id>                   recorded as changed_by (default 'ops')
  *
  * Idempotent — a second run finds nothing, because the first run set the tag.
- *
- * Standalone pg pool (like the other backfills) so the script doesn't require
- * the API's full env validation.
  */
-import { drizzle } from 'drizzle-orm/node-postgres';
-import { Pool } from 'pg';
-import dotenv from 'dotenv';
-import { sql } from 'drizzle-orm';
+import { sql, type SQL } from 'drizzle-orm';
+import { BINDING_KEY_MESSAGE, isBindingKey, parseBindingKey } from '@dpg/schemas';
+import {
+  defaultAggregatorQuery,
+  pickDefaultAggregator,
+} from '../src/services/aggregator/default_aggregator.js';
+import { argReader, createScriptDb, runScript, textArray } from './lib/script_db.js';
 
-dotenv.config({ path: '../../.env' });
-
-const pgUrl =
-  process.env.POSTGRES_URL ??
-  `postgres://${process.env.POSTGRES_USER}:${process.env.POSTGRES_PASSWORD}@${process.env.POSTGRES_HOST ?? '127.0.0.1'}:${process.env.POSTGRES_PORT ?? process.env.DATABASE_PORT ?? '5432'}/${process.env.POSTGRES_DB}`;
-
-const pool = new Pool({ connectionString: pgUrl, ssl: false });
-const db = drizzle(pool);
-
-/**
- * A `text[]` bind for drizzle's `sql` template.
- *
- * Interpolating a JS array directly (`${ids}::text[]`) renders a record —
- * `($1, $2, $3)` — which Postgres rejects with `cannot cast type record to
- * text[]` (42846). Each element must be its own parameter inside an ARRAY[...]
- * constructor.
- */
-const textArray = (values: string[]) =>
-  sql`ARRAY[${sql.join(values.map((v) => sql`${v}`), sql`, `)}]::text[]`;
+const { db, pool, rows } = createScriptDb();
 
 interface Args {
   binding: string;
@@ -73,49 +55,46 @@ interface Args {
 }
 
 function parseArgs(argv: string[]): Args {
-  const get = (name: string): string | undefined =>
-    argv.find((a) => a.startsWith(`--${name}=`))?.split('=')[1];
-
-  const binding = get('binding');
-  if (!binding || !/^[a-z0-9_]+\/[a-z0-9_]+$/.test(binding)) {
-    throw new Error('--binding=<network>/<domain> is required, e.g. --binding=blue_dot/seeker');
+  const args = argReader(argv);
+  const binding = args.value('binding');
+  if (!binding || !isBindingKey(binding)) {
+    throw new Error(`--binding is required and ${BINDING_KEY_MESSAGE}`);
   }
 
   return {
     binding,
-    dryRun: argv.includes('--dry-run'),
-    withProfileOnly: argv.includes('--with-profile-only'),
-    batch: Number(get('batch') ?? 500),
-    actor: get('actor') ?? 'ops',
+    dryRun: args.flag('dry-run'),
+    withProfileOnly: args.flag('with-profile-only'),
+    batch: args.number('batch', 500),
+    actor: args.value('actor') ?? 'ops',
   };
+}
+
+/**
+ * Resolve the binding's default through the SAME query and fail-closed rule the
+ * runtime uses, so an ambiguous or missing default can never mean one thing to
+ * the API and another to a bulk write over the whole population.
+ */
+async function resolveDefault(binding: string): Promise<string> {
+  const claimants = await rows<{ id: string }>(defaultAggregatorQuery(binding));
+  const { org_id } = pickDefaultAggregator(claimants, binding);
+
+  if (!org_id) {
+    throw new Error(
+      claimants.length > 1
+        ? `${claimants.length} orgs claim ${binding}: ${claimants.map((r) => r.id).join(', ')} — refusing to guess`
+        : `no default aggregator configured for ${binding} — nominate one via POST /api/v1/admin/aggregator/default first`,
+    );
+  }
+  return org_id;
 }
 
 async function main() {
   const args = parseArgs(process.argv.slice(2));
-  const [network, domain] = args.binding.split('/');
+  const { network, domain } = parseBindingKey(args.binding);
+  const orgId = await resolveDefault(args.binding);
 
-  // Same fail-closed resolution the runtime uses: two claimants means no
-  // default, because an arbitrary pick would hand PII rights to a coin flip.
-  const holders = (await db.execute(sql`
-    SELECT id FROM organization
-     WHERE default_for_bindings && ARRAY[${args.binding}]::text[]
-       AND type = 'aggregator'
-     LIMIT 2
-  `)) as unknown as { rows: Array<{ id: string }> };
-
-  if (holders.rows.length === 0) {
-    throw new Error(
-      `no default aggregator configured for ${args.binding} — nominate one via POST /api/v1/admin/aggregator/default first`,
-    );
-  }
-  if (holders.rows.length > 1) {
-    throw new Error(
-      `${holders.rows.length} orgs claim ${args.binding}: ${holders.rows.map((r) => r.id).join(', ')} — refusing to guess`,
-    );
-  }
-  const orgId = holders.rows[0].id;
-
-  const profileFilter = args.withProfileOnly
+  const profileFilter: SQL = args.withProfileOnly
     ? sql`AND EXISTS (
             SELECT 1 FROM items i
              WHERE i.created_by = u.id
@@ -124,14 +103,16 @@ async function main() {
           )`
     : sql``;
 
-  const counted = (await db.execute(sql`
-    SELECT count(*)::int AS n
-      FROM "user" u
-     WHERE u.onboarded_by_org_id IS NULL
-       AND u.onboarded_via IS NULL
-       ${profileFilter}
-  `)) as unknown as { rows: Array<{ n: number }> };
-  const total = counted.rows[0]?.n ?? 0;
+  /** The pre-default population — see the header for why this is exhaustive. */
+  const untagged: SQL = sql`
+    u.onboarded_by_org_id IS NULL
+    AND u.onboarded_via IS NULL
+    ${profileFilter}`;
+
+  const counted = await rows<{ n: number }>(
+    sql`SELECT count(*)::int AS n FROM "user" u WHERE ${untagged}`,
+  );
+  const total = counted[0]?.n ?? 0;
 
   // eslint-disable-next-line no-console
   console.log(
@@ -143,36 +124,26 @@ async function main() {
 
   let tagged = 0;
   for (;;) {
-    const updated = (await db.execute(sql`
+    const updated = await rows<{ id: string }>(sql`
       UPDATE "user"
          SET onboarded_by_org_id = ${orgId},
              onboarded_by_default = true,
              onboarded_at = now(),
              updated_at = now()
-       WHERE id IN (
-         SELECT u.id
-           FROM "user" u
-          WHERE u.onboarded_by_org_id IS NULL
-            AND u.onboarded_via IS NULL
-            ${profileFilter}
-          LIMIT ${args.batch}
-       )
-      RETURNING id
-    `)) as unknown as { rows: Array<{ id: string }> };
+       WHERE id IN (SELECT u.id FROM "user" u WHERE ${untagged} LIMIT ${args.batch})
+      RETURNING id`);
 
-    if (updated.rows.length === 0) break;
+    if (updated.length === 0) break;
 
     // Same audit trail the transfer writes: this is the first assignment of an
-    // owner (and so of PII-decrypt rights) for these participants.
-    const ids = updated.rows.map((r) => r.id);
+    // owner — and so of PII-decrypt rights — for these participants.
     await db.execute(sql`
       INSERT INTO participant_reassignment_audit
         (user_id, from_org_id, to_org_id, binding, reason, changed_by)
       SELECT u, NULL, ${orgId}, ${args.binding}, 'pre_default_backfill', ${args.actor}
-        FROM unnest(${textArray(ids)}) AS u
-    `);
+        FROM unnest(${textArray(updated.map((r) => r.id))}) AS u`);
 
-    tagged += updated.rows.length;
+    tagged += updated.length;
     // eslint-disable-next-line no-console
     console.log(`  tagged ${tagged}/${total}`);
   }
@@ -186,11 +157,4 @@ async function main() {
   );
 }
 
-main()
-  .then(() => pool.end())
-  .catch(async (err) => {
-    // eslint-disable-next-line no-console
-    console.error('backfill failed:', err);
-    await pool.end();
-    process.exit(1);
-  });
+runScript(main, pool, 'backfill');

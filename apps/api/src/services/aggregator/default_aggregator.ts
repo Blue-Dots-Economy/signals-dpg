@@ -1,7 +1,11 @@
-import { and, eq, isNull, sql } from 'drizzle-orm';
+import { and, eq, isNull, sql, type SQL } from 'drizzle-orm';
 import type { FastifyBaseLogger } from 'fastify';
-import { db } from '@api/db/postgres/drizzle_config';
-import { organization, user } from '@api/db/postgres/schema/auth';
+// Type-only: keeps this module free of a runtime dependency on the API's
+// configured db client, so the standalone ops scripts (which build their own
+// pool and skip the API's env validation) can import the rules below.
+import type { db } from '@api/db/postgres/drizzle_config';
+import { user } from '@api/db/postgres/schema/auth';
+import { formatBindingKey } from '@dpg/schemas';
 
 /**
  * Default-aggregator resolution (#640, SS-3).
@@ -27,9 +31,6 @@ import { organization, user } from '@api/db/postgres/schema/auth';
 type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
 export type Exec = typeof db | Tx;
 
-/** Canonical served-domain binding key, matching `binding.key` in `served_domain_guard.ts`. */
-export const bindingKey = (network: string, domain: string): string => `${network}/${domain}`;
-
 export interface DefaultAggregatorResolution {
   /** The default aggregator's org id, or null when there is none to use. */
   org_id: string | null;
@@ -45,15 +46,50 @@ export interface DefaultAggregatorResolution {
 const NONE: DefaultAggregatorResolution = { org_id: null, configured: false };
 
 /**
- * The default aggregator for a served-domain binding, or `NONE`.
+ * THE lookup for a binding's default aggregator — one definition shared by the
+ * API (via `resolveDefaultAggregator`) and the standalone ops scripts, which
+ * run `db.execute` against their own pool.
  *
- * Fails closed on ambiguity. Postgres cannot unique-index an array element, so
- * "one default per binding" is enforced by the set endpoint clearing the
- * binding off every other org in one transaction — this is the second line of
- * defence if a row is ever edited directly. Two claimants are reported as *no*
- * default rather than an arbitrary pick: an arbitrary pick would hand PII
- * decrypt rights to a coin flip, and treating it as "not configured" keeps the
- * go-live gate inert instead of freezing a whole domain on a misconfiguration.
+ * `LIMIT 2` is load-bearing: the caller has to tell "exactly one" from "more
+ * than one" to apply the fail-closed rule in `pickDefaultAggregator`.
+ */
+export const defaultAggregatorQuery = (binding: string): SQL =>
+  sql`SELECT id FROM organization
+       WHERE default_for_bindings && ARRAY[${binding}]::text[]
+         AND type = 'aggregator'
+       LIMIT 2`;
+
+/**
+ * THE fail-closed rule, shared by every caller that resolves a default.
+ *
+ * Postgres cannot unique-index an array element, so "one default per binding"
+ * is enforced by the set endpoint clearing the binding off every other org in
+ * one transaction. This is the second line of defence if a row is ever edited
+ * directly. Two claimants are reported as *no* default rather than an arbitrary
+ * pick: an arbitrary pick would hand PII decrypt rights to a coin flip, and
+ * treating it as "not configured" keeps the go-live gate inert instead of
+ * freezing a whole domain on a misconfiguration.
+ */
+export function pickDefaultAggregator(
+  rows: Array<{ id: string }>,
+  binding: string,
+  log?: Pick<FastifyBaseLogger, 'error'>,
+): DefaultAggregatorResolution {
+  if (rows.length === 0) return NONE;
+
+  if (rows.length > 1) {
+    log?.error(
+      { binding, org_ids: rows.map((r) => r.id) },
+      'default_aggregator: more than one org claims this binding — refusing to pick one',
+    );
+    return NONE;
+  }
+
+  return { org_id: rows[0].id, configured: true };
+}
+
+/**
+ * The default aggregator for a served-domain binding, or `NONE`.
  *
  * Not cached. It runs at most once per user (and only for domains that
  * configure the gate), inside a transaction that is already writing an item —
@@ -66,30 +102,13 @@ export async function resolveDefaultAggregator(
   domain: string,
   log?: FastifyBaseLogger,
 ): Promise<DefaultAggregatorResolution> {
-  const binding = bindingKey(network, domain);
+  const binding = formatBindingKey(network, domain);
 
-  const rows = await exec
-    .select({ id: organization.id })
-    .from(organization)
-    .where(
-      and(
-        sql`${organization.defaultForBindings} && ARRAY[${binding}]::text[]`,
-        eq(organization.type, 'aggregator'),
-      ),
-    )
-    .limit(2);
+  const result = (await exec.execute(defaultAggregatorQuery(binding))) as unknown as {
+    rows: Array<{ id: string }>;
+  };
 
-  if (rows.length === 0) return NONE;
-
-  if (rows.length > 1) {
-    log?.error(
-      { binding, org_ids: rows.map((r) => r.id) },
-      'default_aggregator: more than one org claims this binding — refusing to pick one',
-    );
-    return NONE;
-  }
-
-  return { org_id: rows[0].id, configured: true };
+  return pickDefaultAggregator(result.rows ?? [], binding, log);
 }
 
 /**

@@ -19,12 +19,13 @@ const dbState = {
 };
 
 vi.mock('@api/db/postgres/drizzle_config', () => {
-  const select = vi.fn((cols: Record<string, unknown>) => ({
+  // The org lookup goes through `db.execute` (one shared SQL definition used by
+  // the API and the ops scripts); the user lookup uses the query builder.
+  const execute = vi.fn(() => Promise.resolve({ rows: dbState.orgRows }));
+  const select = vi.fn(() => ({
     from: vi.fn(() => ({
       where: vi.fn(() => ({
-        limit: vi.fn(() =>
-          Promise.resolve('onboardedByOrgId' in cols ? dbState.userRows : dbState.orgRows),
-        ),
+        limit: vi.fn(() => Promise.resolve(dbState.userRows)),
       })),
     })),
   }));
@@ -38,12 +39,11 @@ vi.mock('@api/db/postgres/drizzle_config', () => {
       })),
     })),
   }));
-  return { db: { select, update } };
+  return { db: { select, update, execute } };
 });
 
 const { db } = await import('@api/db/postgres/drizzle_config');
 const {
-  bindingKey,
   resolveDefaultAggregator,
   tagUserWithDefaultAggregator,
   resolveOwnerGateContext,
@@ -58,12 +58,6 @@ beforeEach(() => {
   dbState.updateReturns = [];
   dbState.updates = [];
   vi.clearAllMocks();
-});
-
-describe('bindingKey', () => {
-  it('is network-qualified, matching served_domain_guard', () => {
-    expect(bindingKey('blue_dot', 'seeker')).toBe('blue_dot/seeker');
-  });
 });
 
 describe('resolveDefaultAggregator', () => {

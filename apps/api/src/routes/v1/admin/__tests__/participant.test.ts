@@ -186,6 +186,12 @@ const dbState: {
   userInsertError: unknown;
   /** user rows deleted (the orphan-cleanup path). */
   userDeletes: number;
+  /**
+   * Orgs claiming the binding in the SS-3 default-aggregator lookup (#640).
+   * Empty = no default configured for this instance, which is the launch state
+   * and what every pre-existing test in this file expects.
+   */
+  defaultAggregatorRows: Array<{ id: string }>;
 } = {
   existingUserRows: [],
   itemsByUser: new Map(),
@@ -198,6 +204,7 @@ const dbState: {
   userInserts: [],
   identityCalls: [],
   identityResult: { ok: true },
+  defaultAggregatorRows: [],
   userInsertError: null,
   userDeletes: 0,
 };
@@ -350,6 +357,9 @@ vi.mock('@api/db/postgres/drizzle_config', () => {
       insert: insertFn,
       transaction,
       delete: deleteFn,
+      // Raw-SQL path. Used by the SS-3 default-aggregator lookup (#640);
+      // `defaultAggregatorRows` decides whether a default is configured.
+      execute: vi.fn(() => Promise.resolve({ rows: dbState.defaultAggregatorRows })),
     },
   };
 });
@@ -502,6 +512,7 @@ const resetDbState = () => {
     dbState.identityResult = { ok: true };
     dbState.userInsertError = null;
     dbState.userDeletes = 0;
+    dbState.defaultAggregatorRows = [];
     mockAuthConfig.keycloak_enabled = false;
     lastQueriedUserId = null;
     lastQueriedItemId = null;
@@ -915,6 +926,56 @@ describe('POST /admin/participant', () => {
     });
     expect(dbState.updates[0].set).not.toHaveProperty('termsAccepted');
     expect(dbState.updates[0].set).not.toHaveProperty('privacyAccepted');
+  });
+
+  it('a non-aggregator caller tags to the default aggregator when one is configured (SS-3)', async () => {
+    // Cold inbound voice: the caller is the network's own service org, so the
+    // participant is tagged to the nominated default aggregator rather than to
+    // the network org (whose verification queue nobody would open).
+    dbState.signUpUserId = 'usr_voice_default';
+    dbState.defaultAggregatorRows = [{ id: 'org_default_agg' }];
+    const app = await buildApp({ org_id: 'org_ns_1', org_type: 'network_service' });
+    const res = await app.inject({
+      method: 'POST',
+      url: '/participant',
+      // A profile is created, so the domain is known and the per-(network,
+      // domain) default can be resolved.
+      payload: baseBody({
+        phone_number: VALID_PHONE,
+        email: undefined,
+        domain: 'seeker',
+        channel: 'voice',
+      }),
+    });
+    expect(res.statusCode).toBe(200);
+    expect(dbState.userInserts.length + dbState.updates.length).toBeGreaterThan(0);
+    const written = (dbState.updates[0]?.set ?? dbState.userInserts[0]) as Record<string, unknown>;
+    expect(written).toMatchObject({
+      onboardedByOrgId: 'org_default_agg',
+      onboardedByDefault: true,
+      onboardedVia: 'voice',
+    });
+  });
+
+  it('defers the default tag in account_only mode, where no domain is known (SS-3)', async () => {
+    // The default is per (network, domain). `domain` is documented as
+    // defaulting to 'seeker', so guessing it here could hand a provider
+    // participant to the seeker aggregator — a misattribution that grants
+    // PII-decrypt rights to the wrong org and leaves no trace. The tag is
+    // left unset and filled at first profile create instead.
+    dbState.signUpUserId = 'usr_voice_account_only';
+    dbState.defaultAggregatorRows = [{ id: 'org_default_agg' }];
+    const app = await buildApp({ org_id: 'org_ns_1', org_type: 'network_service' });
+    const res = await app.inject({
+      method: 'POST',
+      url: '/participant',
+      payload: baseBody({ phone_number: VALID_PHONE, email: undefined, item_state: undefined }),
+    });
+    expect(res.statusCode).toBe(200);
+    expect(dbState.updates[0].set).toMatchObject({
+      onboardedByOrgId: null,
+      onboardedByDefault: false,
+    });
   });
 
   it('aggregator acting org still owns the participants it onboards (SS-3 unchanged path)', async () => {

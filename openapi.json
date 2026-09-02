@@ -5816,6 +5816,106 @@
                 }
               }
             }
+          },
+          "400": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string",
+                      "description": "machine-readable error code, e.g. NOT_AN_AGGREGATOR"
+                    },
+                    "message": {
+                      "type": "string",
+                      "description": "human-readable explanation; not for programmatic use"
+                    }
+                  },
+                  "required": [
+                    "error",
+                    "message"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string",
+                      "description": "machine-readable error code, e.g. NOT_AN_AGGREGATOR"
+                    },
+                    "message": {
+                      "type": "string",
+                      "description": "human-readable explanation; not for programmatic use"
+                    }
+                  },
+                  "required": [
+                    "error",
+                    "message"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string",
+                      "description": "machine-readable error code, e.g. NOT_AN_AGGREGATOR"
+                    },
+                    "message": {
+                      "type": "string",
+                      "description": "human-readable explanation; not for programmatic use"
+                    }
+                  },
+                  "required": [
+                    "error",
+                    "message"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string",
+                      "description": "machine-readable error code, e.g. NOT_AN_AGGREGATOR"
+                    },
+                    "message": {
+                      "type": "string",
+                      "description": "human-readable explanation; not for programmatic use"
+                    }
+                  },
+                  "required": [
+                    "error",
+                    "message"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
           }
         }
       }
