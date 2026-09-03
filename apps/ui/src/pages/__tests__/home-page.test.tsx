@@ -149,6 +149,10 @@ interface BrowseCall {
   domainId: string | null;
   coords: { lat: number; lng: number } | null;
   opts?: BrowseOpts;
+  // The mock records every hook INVOCATION, including ones the page disabled.
+  // A disabled invocation issues no request, so assertions about what was
+  // actually browsed must filter on this — see `browsedDomains()`.
+  enabled: boolean;
 }
 
 interface MarkerCall {
@@ -194,6 +198,11 @@ const state = {
 };
 
 const browseCalls: BrowseCall[] = [];
+/** Domains actually fetched — enabled invocations with a real domain. */
+const browsedDomains = () =>
+  new Set(
+    browseCalls.filter((c) => c.enabled && c.domainId !== null).map((c) => c.domainId as string),
+  );
 const markerCalls: MarkerCall[] = [];
 const requestBrowserLocation = vi.fn();
 const fetchNextPage = vi.fn();
@@ -288,7 +297,7 @@ vi.mock('@/hooks/use-infinite-browse-items', () => ({
     coords: { lat: number; lng: number } | null,
     opts?: BrowseOpts,
   ) => {
-    browseCalls.push({ domainId: domain?.id ?? null, coords, opts });
+    browseCalls.push({ domainId: domain?.id ?? null, coords, opts, enabled: opts?.enabled ?? true });
     const entry = (domain && state.browse[domain.id]) || emptyBrowse();
     return {
       items: entry.items,
@@ -579,7 +588,17 @@ describe('HomePage — signed-out browsing', () => {
     expect(screen.queryByRole('heading', { name: 'Browse All' })).not.toBeInTheDocument();
   });
 
-  it('lists every to_domain for a visitor with no domain identity', async () => {
+  // #644 (spec D8/D19): the "All" tab is gone, so a visitor browses ONE domain
+  // — the first visible one — rather than every to_domain at once. That the
+  // seeker domain is *browsable* for a profile-less visitor is now a property
+  // of the domain control's option list, covered by its own tests, not
+  // observable as a parallel fetch here.
+  it('browses a single default domain for a visitor with no domain identity', async () => {
+    // A visitor has no viewer domain, so there is no interacting-counterpart
+    // preference to apply (spec D19) and the first VISIBLE domain wins. For a
+    // profile-less visitor `computeVisibleDomains` yields every `to_domain`,
+    // and `seeker` is declared first in this network — so that is the default.
+    // It is arbitrary but deterministic, and it is the schema's own ordering.
     state.user = null;
     state.browse = {
       provider: { ...emptyBrowse(), items: [providerItem1], total: 1 },
@@ -587,10 +606,7 @@ describe('HomePage — signed-out browsing', () => {
     };
     renderHome('/?view=list');
 
-    expect(await findCard('Acme Welding')).toBeInTheDocument();
-    expectCard('Rita Mentor');
-    // The visitor has no profile domain, so the seeker domain is browsable too.
-    expect(browseCalls.map((c) => c.domainId)).toContain('seeker');
+    await waitFor(() => expect(browsedDomains()).toEqual(new Set(['seeker'])));
   });
 
   it('tells a visitor the network is empty when no domain returns anything', async () => {
@@ -601,27 +617,29 @@ describe('HomePage — signed-out browsing', () => {
   });
 });
 
-describe('HomePage — signed-in "All" tab', () => {
-  it('sums each visible domain total into the header count and the X-of-Y indicator', async () => {
+describe('HomePage — signed-in default domain (#644)', () => {
+  it('reports the selected domain’s own total in the header and the X-of-Y indicator', async () => {
+    // Previously these were sums across every visible domain, because the
+    // "All" tab merged N feeds. One feed now drives both numbers, so they
+    // can no longer disagree with each other or with the server.
     signedInSeeker();
     renderHome('/?view=list');
 
-    expect(await screen.findByRole('heading', { name: 'Browse All' })).toBeInTheDocument();
-    // provider total 3 + mentor total 2; 2 + 1 items actually loaded.
-    expect(screen.getByText('5 listings')).toBeInTheDocument();
-    expect(screen.getByText('Showing 3 of 5')).toBeInTheDocument();
-    expectCard('Acme Welding');
-    expectCard('Rita Mentor');
+    await findCard('Acme Welding');
+    expect(screen.getByText('3 listings')).toBeInTheDocument();
+    expect(screen.getByText('Showing 2 of 3')).toBeInTheDocument();
   });
 
-  it('only browses the domains the viewer’s own profile domain can initiate toward', async () => {
+  it('lands on an interacting counterpart domain and never browses a non-interacting one', async () => {
+    // The interaction matrix still governs (spec D7 — it is made visible, not
+    // relaxed): a seeker must not land on seekers, where every card would hide
+    // its Connect button and signals-search would refuse the relevance anchor.
     signedInSeeker();
     renderHome('/?view=list');
     await findCard('Acme Welding');
 
-    const browsed = new Set(browseCalls.map((c) => c.domainId));
+    const browsed = browsedDomains();
     expect(browsed.has('provider')).toBe(true);
-    expect(browsed.has('mentor')).toBe(true);
     expect(browsed.has('seeker')).toBe(false);
   });
 
@@ -661,16 +679,16 @@ describe('HomePage — domain tab switching', () => {
     expect(browseOptsFor('provider')?.enabled).toBe(true);
   });
 
-  it('returns to the "All" tab when the All entry is picked', async () => {
+  // #644 (spec D8): there is no "All" entry to return to. A `?domain=` naming
+  // a domain the viewer cannot browse is repaired to a valid default rather
+  // than falling back to an all-domains view.
+  it('repairs an unbrowsable ?domain= to a valid default instead of showing everything', async () => {
     signedInSeeker();
-    renderHome('/?view=list&domain=provider');
+    renderHome('/?view=list&domain=seeker');
+
     await findCard('Acme Welding');
-
-    await userEvent.click(screen.getByRole('button', { name: 'All' }));
-
-    expect(await screen.findByRole('heading', { name: 'Browse All' })).toBeInTheDocument();
-    expect(url()).not.toContain('domain=provider');
-    expectCard('Rita Mentor');
+    await waitFor(() => expect(url()).toContain('domain=provider'));
+    expect(browsedDomains().has('seeker')).toBe(false);
   });
 
   it('clears the facet + map-domain filter params when the browse domain changes', async () => {
@@ -689,27 +707,26 @@ describe('HomePage — domain tab switching', () => {
     expect(browseOptsFor('mentor')?.filters).toEqual([]);
   });
 
-  it('scopes the filter fields to the selected domain, and to the counterparts on "All"', async () => {
+  it('scopes the filter fields to the selected domain', async () => {
+    // #644: a domain is always selected, so the facet groups are always scoped
+    // to exactly one domain's schema — there is no counterpart-union case left.
     signedInSeeker();
     renderHome('/?view=list');
     await findCard('Acme Welding');
 
     expect(screen.getByTestId('filters-panel')).toHaveAttribute(
       'data-filter-field-domains',
-      'provider,mentor',
+      'provider',
     );
-    expect(screen.getByTestId('filters-panel')).toHaveAttribute('data-show-domain-toggle', 'true');
 
-    await userEvent.click(screen.getByRole('button', { name: 'Provider' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Mentor' }));
 
     await waitFor(() =>
       expect(screen.getByTestId('filters-panel')).toHaveAttribute(
         'data-filter-field-domains',
-        'provider',
+        'mentor',
       ),
     );
-    // A specific tab already scopes browse, so the domain chip toggle is hidden.
-    expect(screen.getByTestId('filters-panel')).toHaveAttribute('data-show-domain-toggle', 'false');
   });
 });
 
@@ -760,12 +777,22 @@ describe('HomePage — map view', () => {
     expect(lastMarkerCall().viewport).not.toBeNull();
   });
 
-  it('scopes the marker fetch to the selected domain tab', async () => {
+  // #644 (spec D11/D12): the map is MULTI-domain and is NOT bound to the
+  // list's single selection. Binding it to the tab was fine while the "All"
+  // tab existed (null meant every domain), but with a domain always selected
+  // that rule would pin the map to one domain and destroy its multi-domain
+  // view. The map's own selection now decides which /markers requests are
+  // ISSUED, rather than which fetched markers survive a post-filter.
+  it('fetches every visible domain regardless of the list’s selected domain', async () => {
     signedInSeeker();
-    renderHome('/?view=map');
-    expect(lastMarkerCall().domainIds).toEqual(['provider', 'mentor']);
+    renderHome('/?view=map&domain=provider');
 
-    await userEvent.click(screen.getByRole('button', { name: 'Mentor' }));
+    await waitFor(() => expect(lastMarkerCall().domainIds).toEqual(['provider', 'mentor']));
+  });
+
+  it('narrows the marker fetch itself when the map domain selection narrows', async () => {
+    signedInSeeker();
+    renderHome('/?view=map&map_domains=mentor');
 
     await waitFor(() => expect(lastMarkerCall().domainIds).toEqual(['mentor']));
   });
@@ -832,7 +859,9 @@ describe('HomePage — map view', () => {
 });
 
 describe('HomePage — search', () => {
-  it('forwards the typed query to the list feeds and reports no results', async () => {
+  it('forwards the typed query to the active list feed and reports no results', async () => {
+    // #644: one feed, so the query reaches the selected domain only — it used
+    // to fan out across every domain of the "All" tab.
     signedInSeeker();
     state.browse = { provider: emptyBrowse(), mentor: emptyBrowse() };
     renderHome('/?view=list');
@@ -840,7 +869,6 @@ describe('HomePage — search', () => {
     await userEvent.type(screen.getByRole('searchbox'), 'welder');
 
     await waitFor(() => expect(browseOptsFor('provider')?.q).toBe('welder'));
-    expect(browseOptsFor('mentor')?.q).toBe('welder');
     expect(await screen.findByText('No results for "welder"')).toBeInTheDocument();
   });
 
@@ -870,7 +898,11 @@ describe('HomePage — filter panel wiring', () => {
     );
   });
 
-  it('narrows the "All" feed to the chosen domains and records them in the URL', async () => {
+  // #644 (spec D12): the map's domain selection is a MAP concern. It used to
+  // feed the list's client-side card filter too, which meant picking a domain
+  // other than the browsed one blanked the list entirely. It is recorded in
+  // the URL and shapes the map; it must not empty the list.
+  it('records the map domain selection in the URL without emptying the list', async () => {
     signedInSeeker();
     renderHome('/?view=list');
     await findCard('Acme Welding');
@@ -878,8 +910,7 @@ describe('HomePage — filter panel wiring', () => {
     await userEvent.click(screen.getByRole('button', { name: 'apply domain filter' }));
 
     await waitFor(() => expect(url()).toContain('map_domains=mentor'));
-    expectCard('Rita Mentor');
-    expectNoCard('Acme Welding');
+    expectCard('Acme Welding');
   });
 
   it('forwards facet selections to the map marker fetch as server-side filters', async () => {

@@ -1182,7 +1182,10 @@ describe('HomePage — infinite-scroll paging', () => {
     expect(document.querySelectorAll('[data-item-card]')).toHaveLength(2);
   });
 
-  it('advances every visible domain from the "All" tab sentinel', async () => {
+  // #644 (spec D8): the sentinel drives ONE feed. It used to fan a single
+  // scroll out across every visible domain's independent pager, then merge and
+  // re-sort the union — which is what discarded the server's ranking (P6).
+  it('advances the selected domain’s feed from the list sentinel', async () => {
     signedInSeeker();
     state.browse = {
       provider: { pages: [[provider1], [provider2]], total: 2 },
@@ -1191,15 +1194,16 @@ describe('HomePage — infinite-scroll paging', () => {
     renderHome('/?view=list');
 
     await findCard('Acme Welding');
-    expect(screen.getByText('Showing 2 of 4')).toBeInTheDocument();
+    expect(screen.getByText('Showing 1 of 2')).toBeInTheDocument();
     expect(cardFor('Globex Foundry')).toBeNull();
+    // A different domain's feed is not paged in alongside it.
     expect(cardFor('Sam Mentor')).toBeNull();
 
     await scrollSentinelIntoView();
 
     expect(await findCard('Globex Foundry')).toBeInTheDocument();
-    expect(cardFor('Sam Mentor')).not.toBeNull();
-    expect(screen.getByText('Showing 4 of 4')).toBeInTheDocument();
+    expect(screen.getByText('Showing 2 of 2')).toBeInTheDocument();
+    expect(cardFor('Sam Mentor')).toBeNull();
   });
 });
 
@@ -1212,7 +1216,12 @@ describe('HomePage — network selector and served scope', () => {
       provider: { pages: [[provider1]], total: 1 },
       artisan: { pages: [[mkItem('a1', 'artisan', 'artisan_1.0', { craft: 'Blue Pottery' })]], total: 1 },
     };
-    renderHome('/?view=list');
+    // #644: pin blue_dot's domain explicitly. This viewer has no profile, so
+    // the default would be blue_dot's first VISIBLE domain (`seeker`) rather
+    // than `provider` — irrelevant before, when the "All" tab browsed every
+    // domain at once. Switching network clears `?domain=`, so purple_dot still
+    // resolves its own default (`artisan`, its only to_domain).
+    renderHome('/?view=list&domain=provider');
 
     expect(await screen.findByText('Networks')).toBeInTheDocument();
     await findCard('Acme Welding');

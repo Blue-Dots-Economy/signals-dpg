@@ -144,7 +144,6 @@ describe('buildFilteredCardsForDomain discover bypass', () => {
   const items = [makeItem('a', { subject: 'math', bio: 'loves algebra' })];
   const opts = (discover: boolean) => ({
     search: 'welder',
-    mapSelectedDomains: [] as string[],
     activeFieldFilters: { subject: ['science'] },
     enumFilterFields: enumFields,
     discover,
@@ -159,12 +158,12 @@ describe('buildFilteredCardsForDomain discover bypass', () => {
     expect(cards.map((c) => c.id)).toEqual(['a']);
   });
 
-  it('map-domain skip still applies on the discover path', () => {
-    const cards = buildFilteredCardsForDomain('provider', items, {
-      ...opts(true),
-      mapSelectedDomains: ['seeker'],
-    });
-    expect(cards).toHaveLength(0);
+  // #644: the map's domain multi-select no longer participates in the list's
+  // card filter. It could previously blank the list entirely when it selected
+  // a domain other than the browsed one — a map concern emptying the list.
+  it('the map domain selection can no longer empty the list', () => {
+    const cards = buildFilteredCardsForDomain('provider', items, opts(true));
+    expect(cards.map((c) => c.id)).toEqual(['a']);
   });
 });
 
@@ -286,7 +285,6 @@ describe('excludeOwnItems', () => {
     const filtered = excludeOwnItems([own, other], new Set(['me']));
     const cards = buildFilteredCardsForDomain('provider', filtered, {
       search: '',
-      mapSelectedDomains: [],
       activeFieldFilters: {},
       enumFilterFields: [],
       discover: true,

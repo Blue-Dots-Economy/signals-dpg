@@ -233,7 +233,6 @@ export function itemToCardItem(item: Item): CardItem {
 
 export interface BuildFilteredCardsOpts {
   search: string;
-  mapSelectedDomains: string[];
   activeFieldFilters: Record<string, string[]>;
   enumFilterFields: EnumFilterField[];
   // #203 List PR Task 5 (correctness): when the feed was served by the discover
@@ -246,22 +245,20 @@ export interface BuildFilteredCardsOpts {
   discover: boolean;
 }
 
-// Shared card filter for the LIST view: the map's domain multi-select, plus (on
-// the native path only) free-text search + enum-field filters. Used by both the
-// paged single-domain list and the "All" tab's merged paged union, so the
-// predicate is defined exactly once.
+// Card filter for the LIST view: on the native path only, free-text search +
+// enum-field filters.
+//
+// #644: the map's domain multi-select no longer takes part. It used to blank
+// the list entirely when it selected a domain other than the browsed one — a
+// coupling that made sense while the "All" tab existed and the panel's toggle
+// narrowed that union. The map is now the only consumer of that selection
+// (spec D12), and the list has its own single-select domain control, so a map
+// concern must not be able to empty the list.
 export function buildFilteredCardsForDomain(
-  domainId: string,
+  _domainId: string,
   items: Item[],
   opts: BuildFilteredCardsOpts,
 ): CardItem[] {
-  // Map domain filter: skip this domain entirely if the filter is active and
-  // this domain is not selected. Applies in BOTH modes (client-side membership
-  // check, no server support needed).
-  if (opts.mapSelectedDomains.length > 0 && !opts.mapSelectedDomains.includes(domainId)) {
-    return [];
-  }
-
   const cards = items.map(itemToCardItem);
 
   // Discover path: the server already applied text + facet filtering. Bypass
