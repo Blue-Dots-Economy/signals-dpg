@@ -667,5 +667,18 @@
   "public_profile.action_sent": "{{action}} ವಿನಂತಿ ಕಳುಹಿಸಲಾಗಿದೆ",
   "public_profile.your_profile": "ನಿಮ್ಮ ಪ್ರೊಫೈಲ್",
   "a11y.skip_to_content": "ವಿಷಯಕ್ಕೆ ಹೋಗಿ",
-  "browse.domain_group": "ಕ್ಷೇತ್ರ"
+  "browse.domain_group": "ಕ್ಷೇತ್ರ",
+  "browse.applied_filters": "ಅನ್ವಯಿಸಿದ ಫಿಲ್ಟರ್‌ಗಳು",
+  "browse.remove_filter": "{{label}} ತೆಗೆದುಹಾಕಿ",
+  "browse.clear_all": "ಎಲ್ಲವನ್ನೂ ತೆರವುಗೊಳಿಸಿ",
+  "browse.sort_label": "ಕ್ರಮ",
+  "browse.sort_relevance_profile": "ನಿಮ್ಮ ಪ್ರೊಫೈಲ್‌ಗೆ ಹೊಂದಿಕೆ",
+  "browse.sort_relevance_search": "ನಿಮ್ಮ ಹುಡುಕಾಟಕ್ಕೆ ಹೊಂದಿಕೆ",
+  "browse.sort_newest": "ಹೊಸದು",
+  "browse.sort_nearest": "ಹತ್ತಿರದ",
+  "browse.sort_nearest_unavailable": "ದೂರದ ಪ್ರಕಾರ ಜೋಡಿಸಲು ನಿಮ್ಮ ಸ್ಥಳ ಬೇಕು",
+  "browse.area_label": "ಪ್ರದೇಶ",
+  "browse.area_anywhere": "ಎಲ್ಲಿಯಾದರೂ",
+  "browse.area_radius": "{{km}} ಕಿಮೀ ಒಳಗೆ",
+  "browse.area_radius_unavailable": "ಪ್ರದೇಶ ಸೀಮಿತಗೊಳಿಸಲು ನಿಮ್ಮ ಸ್ಥಳ ಬೇಕು"
 }

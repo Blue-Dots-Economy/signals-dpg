@@ -677,5 +677,18 @@
   "public_profile.action_sent": "{{action}} request sent",
   "public_profile.your_profile": "Your Profile",
   "a11y.skip_to_content": "Skip to content",
-  "browse.domain_group": "Domain"
+  "browse.domain_group": "Domain",
+  "browse.applied_filters": "Applied filters",
+  "browse.remove_filter": "Remove {{label}}",
+  "browse.clear_all": "Clear all",
+  "browse.sort_label": "Sort",
+  "browse.sort_relevance_profile": "Relevance to your profile",
+  "browse.sort_relevance_search": "Relevance to your search",
+  "browse.sort_newest": "Newest",
+  "browse.sort_nearest": "Nearest",
+  "browse.sort_nearest_unavailable": "Needs your location to sort by distance",
+  "browse.area_label": "Area",
+  "browse.area_anywhere": "Anywhere",
+  "browse.area_radius": "Within {{km}} km",
+  "browse.area_radius_unavailable": "Needs your location to limit by area"
 }

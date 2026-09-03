@@ -667,5 +667,18 @@
   "public_profile.action_sent": "{{action}} अनुरोध भेजा गया",
   "public_profile.your_profile": "आपकी प्रोफ़ाइल",
   "a11y.skip_to_content": "सामग्री पर जाएं",
-  "browse.domain_group": "क्षेत्र"
+  "browse.domain_group": "क्षेत्र",
+  "browse.applied_filters": "लागू फ़िल्टर",
+  "browse.remove_filter": "{{label}} हटाएँ",
+  "browse.clear_all": "सभी हटाएँ",
+  "browse.sort_label": "क्रम",
+  "browse.sort_relevance_profile": "आपकी प्रोफ़ाइल से मेल",
+  "browse.sort_relevance_search": "आपकी खोज से मेल",
+  "browse.sort_newest": "नवीनतम",
+  "browse.sort_nearest": "निकटतम",
+  "browse.sort_nearest_unavailable": "दूरी से क्रम लगाने के लिए आपका स्थान आवश्यक है",
+  "browse.area_label": "क्षेत्र",
+  "browse.area_anywhere": "कहीं भी",
+  "browse.area_radius": "{{km}} किमी के भीतर",
+  "browse.area_radius_unavailable": "क्षेत्र सीमित करने के लिए आपका स्थान आवश्यक है"
 }
