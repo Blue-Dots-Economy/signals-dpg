@@ -29,12 +29,6 @@ export interface CreateProfileItemInput {
   domain: string; // e.g. 'seeker'
   item_type: string; // e.g. 'profile_1.0'
   payload: Record<string, unknown>;
-  /**
-   * Set by callers that have already decided ownership (the admin-participant
-   * NEW-user branches, which resolve it from the acting org). Leave unset to
-   * let the default-aggregator fill run — see `createItemInternal`.
-   */
-  skip_default_tagging?: boolean;
 }
 
 export interface CreateProfileItemResult {
@@ -62,13 +56,6 @@ export const create_profile_item = async (
     item_state: input.payload,
     item_locations,
     created_by: input.user_id,
-    // SS-3 (#640): only the caller that has already resolved ownership from the
-    // acting org opts out of the default fill. Setting it here unconditionally
-    // also silenced `handleInsertItem`, which resolves no ownership at all — so
-    // adding a profile for an already-untagged participant left them owned by
-    // nobody, and once `owner_required` is armed that profile could never be
-    // published.
-    skip_default_tagging: input.skip_default_tagging ?? false,
   });
 
   return { item_id: result.itemId };

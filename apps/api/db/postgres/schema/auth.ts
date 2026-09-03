@@ -5,7 +5,6 @@ import {
   boolean,
   integer,
   index,
-  uniqueIndex,
   jsonb,
   check,
 } from 'drizzle-orm/pg-core';
@@ -133,23 +132,15 @@ export const organization = pgTable('organization', {
     'organization_default_requires_aggregator',
     sql`${table.defaultForBindings} IS NULL OR ${table.type} = 'aggregator'`,
   ),
-  // AT MOST ONE default aggregator per instance, enforced by the database.
+  // "No two orgs may hold the SAME binding" is enforced by the
+  // `organization_default_binding_exclusive` trigger (migration 0014).
+  // Postgres cannot unique-index an array *element* and there is no gist
+  // opclass for text[] overlap, so the guarantee cannot be a constraint here.
   //
-  // A unique index on a constant expression, restricted to rows that hold a
-  // binding, means a second org can never become a default: the write fails
-  // with 23505 instead of leaving two claimants behind. That matters because
-  // the tag it drives (`user.onboarded_by_org_id`) is per ACCOUNT, so "which
-  // org owns this person" has to have exactly one answer — with two defaults
-  // there is no sound answer, only a guess that hands PII-decrypt rights to
-  // whichever domain the user happened to write first.
-  //
-  // Enforcing it here rather than in application code is what keeps the
-  // resolution binary (a default exists, or it does not). Postgres cannot
-  // unique-index an array *element*, but it can guarantee a single row holds
-  // the array at all, which is the invariant that actually matters.
-  uniqueIndex('organization_single_default_idx')
-    .on(sql`(true)`)
-    .where(sql`${table.defaultForBindings} IS NOT NULL`),
+  // Note this is per-binding, NOT one default per instance: a user holds
+  // exactly one domain (the single-role lock in `create_item.ts`), so
+  // `blue_dot/seeker` and `blue_dot/provider` may legitimately have different
+  // default aggregators.
 ]);
 
 export const member = pgTable('member', {

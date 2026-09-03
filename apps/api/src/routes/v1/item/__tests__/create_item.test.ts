@@ -110,7 +110,11 @@ vi.mock('@api/db/postgres/drizzle_config', () => ({
         update: () => ({
           set: (v: Record<string, unknown>) => {
             txUpdateSet(v);
-            return { where: async () => undefined };
+            // The single-role bootstrap now reads `.returning()` so it can tell
+            // whether it fired — that is the user-level moment the SS-3 default
+            // aggregator tags the owner (#640). Empty array = the user already
+            // had a domain, so no tagging.
+            return { where: () => ({ returning: async () => [] }) };
           },
         }),
       };

@@ -3,8 +3,9 @@
  *
  * The column these functions read decides who may decrypt an inbound
  * population's PII, so the behaviours pinned here are the safety ones: the
- * write-once tagging, and "no default nominated" as a normal state (the
- * database guarantees at most one default, so there is no ambiguous case).
+ * write-once tagging, and "no default nominated" as a normal state. Defaults
+ * are per binding, so a seeker aggregator and a provider aggregator coexist;
+ * the exclusivity trigger stops two orgs claiming the same binding.
  */
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 
@@ -47,6 +48,7 @@ vi.mock('@api/db/postgres/drizzle_config', () => {
 
 const { db } = await import('@api/db/postgres/drizzle_config');
 const {
+  bindingKey,
   defaultAggregatorQuery,
   resolveDefaultAggregator,
   tagUserWithDefaultAggregator,
@@ -62,12 +64,20 @@ beforeEach(() => {
   vi.clearAllMocks();
 });
 
+describe('bindingKey', () => {
+  it('is network-qualified, matching served_domain_guard', () => {
+    expect(bindingKey('blue_dot', 'seeker')).toBe('blue_dot/seeker');
+  });
+});
+
 describe('defaultAggregatorQuery', () => {
-  // `type = 'aggregator'` matters: without it a network_service org could be
-  // resolved as the owner of an inbound population.
-  it('filters to aggregator orgs holding a binding', () => {
-    const rendered = JSON.stringify(defaultAggregatorQuery());
-    expect(rendered).toContain('default_for_bindings IS NOT NULL');
+  // Both halves matter: without the `&&` overlap the query would return any
+  // default (handing a provider signup to the seeker aggregator), and without
+  // `type = 'aggregator'` a network_service org could own an inbound population.
+  it('filters to the aggregator holding THIS binding', () => {
+    const rendered = JSON.stringify(defaultAggregatorQuery('blue_dot/seeker'));
+    expect(rendered).toContain('default_for_bindings &&');
+    expect(rendered).toContain('blue_dot/seeker');
     expect(rendered).toContain("type = 'aggregator'");
     expect(rendered).toContain('LIMIT 1');
   });
@@ -76,7 +86,7 @@ describe('defaultAggregatorQuery', () => {
 describe('resolveDefaultAggregator', () => {
   it('runs the shared query and applies the rule', async () => {
     dbState.orgRows = [{ id: 'org_agg_1' }];
-    await expect(resolveDefaultAggregator(db)).resolves.toEqual({ org_id: 'org_agg_1' });
+    await expect(resolveDefaultAggregator(db, 'blue_dot', 'seeker')).resolves.toEqual({ org_id: 'org_agg_1' });
     expect(dbState.executed).toHaveLength(1);
   });
 
@@ -87,7 +97,7 @@ describe('tagUserWithDefaultAggregator', () => {
     dbState.orgRows = [{ id: 'org_agg_1' }];
     dbState.updateReturns = [{ id: 'user_1' }];
 
-    const result = await tagUserWithDefaultAggregator(db, 'user_1');
+    const result = await tagUserWithDefaultAggregator(db, 'user_1', 'blue_dot', 'seeker');
     expect(result.tagged).toBe(true);
     expect(result.resolution).toEqual({ org_id: 'org_agg_1' });
 
@@ -101,10 +111,22 @@ describe('tagUserWithDefaultAggregator', () => {
   // A participant onboarded months ago already carries a real onboarded_at.
   // Overwriting it would make a dormant user resurface as brand new in
   // item_metrics.age_days / profile_status.
+  // The tagging basis (#640's last AC). Portal self-signup has no other
+  // writer for this column, so without it the basis is only half recorded.
+  it("records the basis as 'self', without clobbering an existing via", async () => {
+    dbState.orgRows = [{ id: 'org_agg_1' }];
+    dbState.updateReturns = [{ id: 'user_1' }];
+    await tagUserWithDefaultAggregator(db, 'user_1', 'blue_dot', 'seeker');
+    // A coalesce expression, not the literal 'self' — a cold-voice user tagged
+    // later must keep via='voice'.
+    expect(dbState.updates[0].onboardedVia).not.toBe('self');
+    expect(dbState.updates[0].onboardedVia).toHaveProperty('queryChunks');
+  });
+
   it('preserves an existing onboarded_at instead of stamping now()', async () => {
     dbState.orgRows = [{ id: 'org_agg_1' }];
     dbState.updateReturns = [{ id: 'user_1' }];
-    await tagUserWithDefaultAggregator(db, 'user_1');
+    await tagUserWithDefaultAggregator(db, 'user_1', 'blue_dot', 'seeker');
     // A plain Date here would overwrite the genuine join date; it must be a SQL
     // expression (coalesce) so an earlier value survives.
     expect(dbState.updates[0].onboardedAt).not.toBeInstanceOf(Date);
@@ -113,7 +135,7 @@ describe('tagUserWithDefaultAggregator', () => {
 
   it('writes nothing when no default is nominated', async () => {
     dbState.orgRows = [];
-    const result = await tagUserWithDefaultAggregator(db, 'user_1');
+    const result = await tagUserWithDefaultAggregator(db, 'user_1', 'blue_dot', 'seeker');
     expect(result).toEqual({ resolution: { org_id: null }, tagged: false });
     expect(dbState.updates).toHaveLength(0);
   });
@@ -124,7 +146,7 @@ describe('tagUserWithDefaultAggregator', () => {
   it('reports tagged=false when the guarded UPDATE matched no rows', async () => {
     dbState.orgRows = [{ id: 'org_agg_1' }];
     dbState.updateReturns = [];
-    const result = await tagUserWithDefaultAggregator(db, 'user_1');
+    const result = await tagUserWithDefaultAggregator(db, 'user_1', 'blue_dot', 'seeker');
     expect(result.tagged).toBe(false);
     expect(result.resolution.org_id).toBe('org_agg_1');
   });
@@ -134,7 +156,7 @@ describe('resolveOwnerGateContext', () => {
   it('reports an owned user with a resolved default', () => {
     dbState.userRows = [{ onboardedByOrgId: 'org_agg_1' }];
     dbState.orgRows = [{ id: 'org_agg_1' }];
-    return expect(resolveOwnerGateContext(db, 'user_1')).resolves.toEqual({
+    return expect(resolveOwnerGateContext(db, 'user_1', 'blue_dot', 'seeker')).resolves.toEqual({
       has_owner: true,
       default_configured: true,
     });
@@ -143,7 +165,7 @@ describe('resolveOwnerGateContext', () => {
   it('reports an unowned user', () => {
     dbState.userRows = [{ onboardedByOrgId: null }];
     dbState.orgRows = [{ id: 'org_agg_1' }];
-    return expect(resolveOwnerGateContext(db, 'user_1')).resolves.toEqual({
+    return expect(resolveOwnerGateContext(db, 'user_1', 'blue_dot', 'seeker')).resolves.toEqual({
       has_owner: false,
       default_configured: true,
     });
@@ -152,7 +174,7 @@ describe('resolveOwnerGateContext', () => {
   it('reports none so the gate stays inert pre-launch', () => {
     dbState.userRows = [{ onboardedByOrgId: null }];
     dbState.orgRows = [];
-    return expect(resolveOwnerGateContext(db, 'user_1')).resolves.toEqual({
+    return expect(resolveOwnerGateContext(db, 'user_1', 'blue_dot', 'seeker')).resolves.toEqual({
       has_owner: false,
       default_configured: false,
     });
@@ -162,7 +184,7 @@ describe('resolveOwnerGateContext', () => {
   it('treats a missing user row as unowned (fail closed)', () => {
     dbState.userRows = [];
     dbState.orgRows = [{ id: 'org_agg_1' }];
-    return expect(resolveOwnerGateContext(db, 'user_1')).resolves.toEqual({
+    return expect(resolveOwnerGateContext(db, 'user_1', 'blue_dot', 'seeker')).resolves.toEqual({
       has_owner: false,
       default_configured: true,
     });
@@ -172,7 +194,7 @@ describe('resolveOwnerGateContext', () => {
   // profile write at one `organization` read instead of two.
   it('reuses a known resolution instead of re-querying', async () => {
     dbState.userRows = [{ onboardedByOrgId: 'org_agg_1' }];
-    const ctx = await resolveOwnerGateContext(db, 'user_1', { org_id: 'org_agg_1' });
+    const ctx = await resolveOwnerGateContext(db, 'user_1', 'blue_dot', 'seeker', { org_id: 'org_agg_1' });
     expect(ctx).toEqual({ has_owner: true, default_configured: true });
     expect(dbState.executed).toHaveLength(0);
   });

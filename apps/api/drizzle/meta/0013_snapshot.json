@@ -1,5 +1,5 @@
 {
-  "id": "2e165177-5265-47f5-b181-fa8e74f93a0a",
+  "id": "d10234db-ffcc-412c-ae62-b3b1fb7359bc",
   "prevId": "54c3c03a-b4e8-468e-8805-b29472132308",
   "version": "7",
   "dialect": "postgresql",
@@ -592,24 +592,7 @@
           "notNull": false
         }
       },
-      "indexes": {
-        "organization_single_default_idx": {
-          "name": "organization_single_default_idx",
-          "columns": [
-            {
-              "expression": "(true)",
-              "asc": true,
-              "isExpression": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": true,
-          "where": "\"organization\".\"default_for_bindings\" IS NOT NULL",
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
+      "indexes": {},
       "foreignKeys": {},
       "compositePrimaryKeys": {},
       "uniqueConstraints": {

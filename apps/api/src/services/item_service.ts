@@ -16,7 +16,6 @@ import { classify_item, DEFAULT_GO_LIVE_GATES, type GoLiveGate } from './items/c
 import type { DbOrTx } from '@/services/db_types';
 import {
   resolveOwnerGateContext,
-  tagUserWithDefaultAggregator,
   type OwnerGateContext,
 } from './aggregator/default_aggregator.js';
 import { hasAcceptedProfileConsent } from './consent_acceptance.js';
@@ -145,14 +144,6 @@ export interface CreateItemServiceParams {
    * seed scripts. Defaults to false — every real create path is capped.
    */
   skip_profile_limit?: boolean;
-  /**
-   * Skip the SS-3 default-aggregator fill (#640). Set by the admin-participant
-   * onboarding path, which resolves ownership itself from the acting org — so
-   * an aggregator onboarding a previously-untagged person must not have them
-   * silently tagged to the *default* aggregator instead. Defaults to false:
-   * every self-service create path fills the tag.
-   */
-  skip_default_tagging?: boolean;
 }
 
 export interface UpdateItemServiceBody {
@@ -350,12 +341,15 @@ export async function createItemInternal(
     schema: itemSchema as { required?: string[] },
     merged_state: submittedItemState,
     current_status: 'draft',
-    // SS-3 (#640) — see `applyDefaultOwnerAndResolveGate`.
-    owner_context: await applyDefaultOwnerAndResolveGate(
+    // SS-3 (#640): read-only gate check. Tagging happens at the user level —
+    // `create_item`'s first-create bootstrap calls `tagUserForDomain` inside
+    // this same transaction, before this runs.
+    owner_context: await ownerGateContext(
       exec,
       goLiveGates,
       params.created_by,
-      params.skip_default_tagging,
+      params.item_network,
+      params.item_domain,
     ),
     // Guardian-aware already: create_item passes consent_accepted=false for a
     // gated minor (self-consent must not promote), so no separate guardian
@@ -439,44 +433,29 @@ function gatesRequireOwner(gates: readonly GoLiveGate[]): boolean {
 }
 
 /**
- * The whole SS-3 owner step for one profile write (#640): fill the owner's
- * default-aggregator tag, then resolve the `owner_required` gate context.
+ * The `owner_required` gate context for one profile write (#640) — read only,
+ * and only when the domain actually configures the gate.
  *
- * Both profile-write paths need exactly this sequence, in this order, so it
- * lives here once rather than being spelled out at each call site.
+ * **No tagging happens here.** Ownership is a property of the ACCOUNT, decided
+ * once when the user's domain is decided, so the write lives at the user level
+ * (`tagUserForDomain`, called from the three places that establish
+ * `user.domains`). Doing it per item write meant re-resolving the default on
+ * every edit by a user who was already owned — work whose result is always
+ * discarded.
  *
- * **Tag first, then classify.** A first profile created once a default exists
- * must go live immediately rather than sitting in `draft` until its next edit,
- * so the tag has to be written before `classify_item` reads it. The write is a
- * no-op when the tag is already set or no default is nominated.
- *
- * **Tagging is NOT gated on `owner_required` being configured.** The gate set
- * defaults to `['schema_required']`, so coupling the two meant nominating a
- * default silently did nothing for portal self-signup until `network.json` was
- * *also* changed — two independent switches with no signal that both were
- * needed. The write is `IS NULL`-guarded and cheap, so it always runs.
- *
- * **The gate context is gated**, so a domain that has not opted in pays no
- * extra read — and it reuses the resolution the tag write already performed,
- * so a gated write reads `organization` once rather than twice.
- *
- * @param skipTagging - Set by callers that resolve ownership themselves (the
- *   admin-participant NEW-user branches, from the acting org).
  * @returns the gate context, or undefined when the domain does not configure
- *   `owner_required`.
+ *   `owner_required` (which is every domain by default, so this normally costs
+ *   nothing).
  */
-async function applyDefaultOwnerAndResolveGate(
+async function ownerGateContext(
   exec: DbOrTx,
   gates: readonly GoLiveGate[],
   ownerUserId: string,
-  skipTagging = false,
+  network: string,
+  domain: string,
 ): Promise<OwnerGateContext | undefined> {
-  const tagResult = skipTagging
-    ? undefined
-    : await tagUserWithDefaultAggregator(exec, ownerUserId);
-
   if (!gatesRequireOwner(gates)) return undefined;
-  return resolveOwnerGateContext(exec, ownerUserId, tagResult?.resolution);
+  return resolveOwnerGateContext(exec, ownerUserId, network, domain);
 }
 
 /**
@@ -618,9 +597,13 @@ export async function promoteItemOnProfileConsent(
     current_status: 'draft',
     consent_accepted: consentSatisfied,
     gates: goLiveGates,
-    // SS-3 (#640) — this is a draft → live promotion, the moment ownership
-    // matters, so it tags too. See `applyDefaultOwnerAndResolveGate`.
-    owner_context: await applyDefaultOwnerAndResolveGate(exec, goLiveGates, item.created_by),
+    owner_context: await ownerGateContext(
+      exec,
+      goLiveGates,
+      item.created_by,
+      item.item_network,
+      item.item_domain,
+    ),
   });
 
   if (lifecycle_status !== 'live') return false;
@@ -755,9 +738,6 @@ async function computeItemStateUpdate(
   const consentSatisfied =
     (await hasAcceptedProfileConsent(exec, existingItem.item_id)) &&
     !(await guardianGateBlocksGoLive(exec, existingItem));
-  // SS-3 (#640): tagging on this path is what lets a user who signed up before
-  // a default existed self-heal on their next edit, instead of waiting on a
-  // backfill — `create_item` only tags on create.
   const classification = classify_item({
     schema: itemSchema as { required?: string[] },
     merged_state: mergedFullState,
@@ -770,7 +750,13 @@ async function computeItemStateUpdate(
     // live profiles.
     owner_context:
       existingItem.lifecycle_status === 'draft'
-        ? await applyDefaultOwnerAndResolveGate(exec, goLiveGates, existingItem.created_by)
+        ? await ownerGateContext(
+            exec,
+            goLiveGates,
+            existingItem.created_by,
+            existingItem.item_network,
+            existingItem.item_domain,
+          )
         : undefined,
   });
 

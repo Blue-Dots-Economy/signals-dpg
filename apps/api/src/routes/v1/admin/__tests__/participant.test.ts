@@ -468,6 +468,10 @@ const baseBody = (over: Record<string, unknown> = {}) => ({
   terms_accepted: true,
   privacy_accepted: true,
   channel: 'bulk',
+  // SS-3 (#640): a non-aggregator caller must send `domain` — it selects which
+  // default aggregator owns the participant, and the schema's `?? 'seeker'`
+  // fallback would silently hand a provider signup to the seeker aggregator.
+  domain: 'seeker',
   item_state: { whoIAm: { education: 'XII' } },
   ...over,
 });
@@ -955,11 +959,10 @@ describe('POST /admin/participant', () => {
     });
   });
 
-  it('tags in account_only mode too — resolution needs no domain (SS-3)', async () => {
-    // Resolution is account-level, so `account_only` (which has no profile and
-    // therefore no domain) can still be tagged rather than deferred. This also
-    // means the request's optional `domain` field no longer steers which org
-    // inherits the participant's PII.
+  it('tags in account_only mode too — domain rides the body, not the item (SS-3)', async () => {
+    // `domain` is a top-level body field, independent of `item_state`, so an
+    // account-only onboard (no profile yet) still resolves its binding's
+    // default and is tagged at account creation rather than deferred.
     dbState.signUpUserId = 'usr_voice_account_only';
     dbState.defaultAggregatorRows = [{ id: 'org_default_agg' }];
     const app = await buildApp({ org_id: 'org_ns_1', org_type: 'network_service' });
@@ -979,6 +982,39 @@ describe('POST /admin/participant', () => {
     });
   });
 
+
+  it('400s when a non-aggregator caller omits domain (SS-3)', async () => {
+    // Defaults are per (network, domain). The schema documents `domain` as
+    // defaulting to 'seeker', so without this a provider onboard that omitted
+    // it would be handed to the SEEKER aggregator — wrong org gets decrypt
+    // rights, with a 200 and no trace.
+    dbState.signUpUserId = 'usr_no_domain';
+    dbState.defaultAggregatorRows = [{ id: 'org_default_agg' }];
+    const app = await buildApp({ org_id: 'org_ns_1', org_type: 'network_service' });
+    const res = await app.inject({
+      method: 'POST',
+      url: '/participant',
+      payload: baseBody({ phone_number: VALID_PHONE, email: undefined, domain: undefined }),
+    });
+    expect(res.statusCode).toBe(400);
+    expect(res.json().error).toBe('DOMAIN_REQUIRED');
+    expect(dbState.updates).toHaveLength(0);
+  });
+
+  it('an aggregator caller may still omit domain — it owns its own onboards (SS-3)', async () => {
+    // The 400 is scoped to the branch that resolves a default; an aggregator
+    // never does, so its existing contract is unchanged.
+    dbState.signUpUserId = 'usr_agg_no_domain';
+    const app = await buildApp({ org_id: 'org_agg_1', org_type: 'aggregator' });
+    const res = await app.inject({
+      method: 'POST',
+      url: '/participant',
+      payload: baseBody({ phone_number: VALID_PHONE, email: undefined, domain: undefined }),
+    });
+    expect(res.statusCode).toBe(200);
+    const written = (dbState.updates[0]?.set ?? dbState.userInserts[0]) as Record<string, unknown>;
+    expect(written).toMatchObject({ onboardedByOrgId: 'org_agg_1', onboardedByDefault: false });
+  });
 
   it('aggregator acting org still owns the participants it onboards (SS-3 unchanged path)', async () => {
     dbState.signUpUserId = 'usr_new_agg_acct';

@@ -88,35 +88,53 @@ type OnboardingFields = {
   now: Date;
 };
 
+/** A non-aggregator caller omitted `domain`, so no default can be resolved. */
+export const DOMAIN_REQUIRED_FOR_DEFAULT = {
+  error: 'DOMAIN_REQUIRED' as const,
+  message:
+    'domain is required when acting on behalf of a non-aggregator org: it selects which default aggregator owns the participant',
+};
+
 /**
  * Who owns a participant created through this route.
  *
  * An aggregator caller owns the participants it onboards, unchanged. Any other
  * caller (`voice`, `network_service`) is not an aggregator — the voice agent is
  * hosted by the network, so a cold inbound caller genuinely has no aggregator —
- * and falls back to the instance's default.
+ * and falls back to the default nominated for the binding it is joining.
  *
- * Resolution is account-level and takes no network/domain (see the header of
- * `services/aggregator/default_aggregator.ts`). That matters here for two
- * reasons: `account_only` mode has no profile and therefore no domain, so it
- * can still be tagged rather than deferred; and the request's `domain` field —
- * which is optional and documented as defaulting to `'seeker'` — no longer
- * steers which organisation inherits the participant's PII.
+ * `domain` is REQUIRED on that branch. The request schema marks it optional
+ * with a documented default of `'seeker'`, which is fine for the item it
+ * creates but not for this: defaults are per (network, domain), so a silent
+ * `'seeker'` fallback would hand a provider participant — and the right to
+ * decrypt their PII — to the seeker aggregator, with a 200 and no trace. The
+ * voice registration bot always sends it.
+ *
+ * Works in `account_only` mode too: `domain` is a top-level body field,
+ * independent of `item_state`, so a participant with no profile yet is still
+ * tagged at account creation.
+ *
+ * @returns the resolved owner, or `null` when the caller omitted `domain`
+ *   (the caller turns that into a 400).
  */
 async function resolveOnboardingOwnerOrg(
   exec: DbOrTx,
   acting: { org_id: string; org_type: 'aggregator' | 'voice' | 'network_service' },
+  network: string,
+  domain: string | undefined,
   log: FastifyRequest['log'],
-): Promise<{ owner_org_id: string | null; onboarded_by_default: boolean }> {
+): Promise<{ owner_org_id: string | null; onboarded_by_default: boolean } | null> {
   if (acting.org_type === 'aggregator') {
     return { owner_org_id: acting.org_id, onboarded_by_default: false };
   }
 
-  const { org_id } = await resolveDefaultAggregator(exec);
+  if (!domain) return null;
+
+  const { org_id } = await resolveDefaultAggregator(exec, network, domain);
   if (!org_id) {
     log.info(
-      { acting_org_id: acting.org_id, org_type: acting.org_type },
-      'participant: no default aggregator nominated — participant left untagged',
+      { acting_org_id: acting.org_id, org_type: acting.org_type, network, domain },
+      'participant: no default aggregator nominated for this binding — participant left untagged',
     );
     return { owner_org_id: null, onboarded_by_default: false };
   }
@@ -659,7 +677,15 @@ async function handleAccountOnlyNewUser(ctx: ParticipantCtx) {
   const network = body.network ?? 'blue_dot';
   const now = new Date();
 
-  const owner = await resolveOnboardingOwnerOrg(db, request.acting_org!, request.log);
+  // `body.domain`, not a `?? 'seeker'` fallback — see resolveOnboardingOwnerOrg.
+  const owner = await resolveOnboardingOwnerOrg(
+    db,
+    request.acting_org!,
+    network,
+    body.domain,
+    request.log,
+  );
+  if (!owner) return reply.code(400).send(DOMAIN_REQUIRED_FOR_DEFAULT);
 
   const fields: OnboardingFields = {
     phone_norm,
@@ -965,7 +991,14 @@ async function handleCreateNewUser(ctx: ParticipantCtx) {
 
   const now = new Date();
 
-  const owner = await resolveOnboardingOwnerOrg(db, request.acting_org!, request.log);
+  const owner = await resolveOnboardingOwnerOrg(
+    db,
+    request.acting_org!,
+    network,
+    body.domain,
+    request.log,
+  );
+  if (!owner) return reply.code(400).send(DOMAIN_REQUIRED_FOR_DEFAULT);
 
   const fields: OnboardingFields = {
     phone_norm,
@@ -991,9 +1024,6 @@ async function handleCreateNewUser(ctx: ParticipantCtx) {
         domain,
         item_type,
         payload: body.item_state ?? {},
-        // Ownership for this participant was just resolved from the acting org
-        // above, so the default fill must not overwrite it.
-        skip_default_tagging: true,
       });
       onboarded_item_id = item_id;
 

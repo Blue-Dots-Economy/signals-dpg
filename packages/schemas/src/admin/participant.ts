@@ -98,7 +98,9 @@ export const UpsertParticipantRequest = z
       .string()
       .min(1)
       .optional()
-      .describe("domain within the network (default: 'seeker')."),
+      .describe(
+        "domain within the network (default: 'seeker'). REQUIRED when acting on behalf of a non-aggregator org (voice / network_service): it selects which default aggregator owns the participant, so the 'seeker' fallback would mis-assign a provider signup. Omitting it there returns 400 DOMAIN_REQUIRED. Aggregator callers own their own onboards and may omit it.",
+      ),
     item_type: z
       .string()
       .min(1)
