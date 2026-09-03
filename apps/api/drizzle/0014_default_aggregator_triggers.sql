@@ -127,12 +127,19 @@ EXECUTE FUNCTION assert_default_binding_exclusive();
 -- 2. Audit: one row per binding gained or lost.
 --
 --   to_org_id   NULL => the binding was REVOKED (nothing took over)
---   from_org_id NULL => nothing held it immediately before this row
+--   from_org_id NULL => genuinely the FIRST nomination for this binding
 --
--- A hand-over is two rows (a revoke of A, then a grant to B) because
--- exclusivity forces clearing A first, so the grant row looks exactly like a
--- first-ever nomination. Run both UPDATEs in ONE transaction and the pair
--- shares a changed_at, which is how an operator correlates them.
+-- A hand-over is two rows (a revoke of A, then a grant to B, because
+-- exclusivity forces clearing A first), and the grant carries
+-- from_org_id = A — recovered from the audit trail itself, since `organization`
+-- has already forgotten. So a transfer is self-describing and does not depend
+-- on the operator running both statements in one transaction.
+--
+-- `changed_by` is the Postgres role that ran the statement — the only identity
+-- a hand-written UPDATE has. It answers "which role", not "which person": if
+-- support shares one application login, that is all the trail can say. Issue
+-- individual DB logins if per-operator attribution is needed; that operational
+-- control is what makes this audit worth having.
 --
 -- `changed_by` is the Postgres role that ran the statement, the only identity
 -- available for a hand-written UPDATE. `organization` has no `updated_at`, and
@@ -144,24 +151,46 @@ RETURNS TRIGGER
 LANGUAGE plpgsql
 AS $$
 DECLARE
-  binding text;
+  -- Named `bnd`, not `binding`: a plpgsql variable sharing a column name makes
+  -- `WHERE a.binding = binding` ambiguous and the trigger fails at runtime.
+  bnd   text;
+  prior text;
 BEGIN
-  FOR binding IN
+  FOR bnd IN
     SELECT unnest(coalesce(NEW.default_for_bindings, '{}'::text[]))
     EXCEPT
     SELECT unnest(coalesce(OLD.default_for_bindings, '{}'::text[]))
   LOOP
+    -- Who held this binding immediately before now.
+    --
+    -- Exclusivity forces clear-then-set, so by the time this grant fires the
+    -- previous holder's row is already cleared and `organization` no longer
+    -- knows. The audit table does: the last row for this binding names the
+    -- last holder — `to_org_id` on a grant, or `from_org_id` on a revoke.
+    --
+    -- Without this every grant read `from_org_id = NULL`, making a hand-over
+    -- indistinguishable from a first-ever nomination and pushing correlation
+    -- onto the operator running both UPDATEs in one transaction. This table's
+    -- whole job is answering "who changed PII-decrypt rights", so the rows
+    -- need to be self-describing.
+    SELECT coalesce(a.to_org_id, a.from_org_id)
+      INTO prior
+      FROM aggregator_default_audit a
+     WHERE a.binding = bnd
+     ORDER BY a.changed_at DESC, a.change_id DESC
+     LIMIT 1;
+
     INSERT INTO aggregator_default_audit (binding, from_org_id, to_org_id, changed_by)
-    VALUES (binding, NULL, NEW.id, session_user);
+    VALUES (bnd, prior, NEW.id, session_user);
   END LOOP;
 
-  FOR binding IN
+  FOR bnd IN
     SELECT unnest(coalesce(OLD.default_for_bindings, '{}'::text[]))
     EXCEPT
     SELECT unnest(coalesce(NEW.default_for_bindings, '{}'::text[]))
   LOOP
     INSERT INTO aggregator_default_audit (binding, from_org_id, to_org_id, changed_by)
-    VALUES (binding, OLD.id, NULL, session_user);
+    VALUES (bnd, OLD.id, NULL, session_user);
   END LOOP;
 
   RETURN NEW;
