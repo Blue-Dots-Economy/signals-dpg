@@ -26,7 +26,6 @@
     "uiRoutes": [
       "/auth/callback",
       "/auth/otp",
-      "/my-actions",
       "/my-actions/*",
       "/privacy",
       "/profile/:id/edit",

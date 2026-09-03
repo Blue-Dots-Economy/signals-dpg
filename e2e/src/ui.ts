@@ -49,9 +49,18 @@ export function formatDomainLabel(
  * better-auth bearer token into localStorage (the UI reads `auth_token` there).
  * Lets UI tests exercise authenticated flows even on a gated instance where the
  * UI self-signup path is disabled — provision via API, then log the browser in.
+ *
+ * Lands on `/?view=list`, not bare `/`: the home route's *default* view is the
+ * map, and once any live item exists to plot, the map view throws inside
+ * `@vis.gl/react-google-maps`'s `<AdvancedMarker>` on a target whose Google
+ * Maps key is invalid/expired — an uncaught render error with no boundary
+ * above it, which unmounts the whole app (`#root` goes empty) and turns this
+ * navigation into `page.reload: net::ERR_ABORTED; maybe frame was detached?`.
+ * `view=list` is a same-origin route either way, so this is a no-op for any
+ * caller that immediately navigates elsewhere.
  */
 export async function uiLoginAs(page: Page, token: string): Promise<void> {
-  await gotoEn(page, '/'); // establish the origin so localStorage is scoped to the app
+  await gotoEn(page, '/?view=list'); // establish the origin so localStorage is scoped to the app
   await page.evaluate((t) => localStorage.setItem('auth_token', t), token);
   await page.reload();
 }
