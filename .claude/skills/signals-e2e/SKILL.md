@@ -1,15 +1,33 @@
 ---
 name: signals-e2e
-description: Verify (or reuse) an already-running local Signals DPG stack — bring one up first with the run-signals-dpg skill if none is live — run the black-box Playwright suite end to end, and produce a five-section signoff a human can read. The local oracles (email/SMS sink, search stub, item_search indexer) are built and unit-tested but not yet wired into any spec today; that wiring is the follow-on coverage plan, not something this run currently exercises. Use when asked to end-to-end test Signals, run a full e2e, test the U18/guardian flow, sign off on Signals before a release, or "run /signals-e2e".
+description: Bring the local Signals DPG stack up if it is not already running (by invoking the run-signals-dpg skill), or reuse a live one, then run the black-box Playwright suite end to end, and produce a five-section signoff a human can read. The local oracles (email/SMS sink, search stub, item_search indexer) are built and unit-tested but not yet wired into any spec today; that wiring is the follow-on coverage plan, not something this run currently exercises. Use when asked to end-to-end test Signals, run a full e2e, test the U18/guardian flow, sign off on Signals before a release, or "run /signals-e2e".
 ---
 
 # signals-e2e — one command to test Signals and sign off on it
 
-**Prerequisite: the stack must already be up.** `lib/run.sh` (via
-`lib/stack-up.sh`) only *verifies and waits* for a live target on `:2742` —
-it does not start anything, and fails after ~40s if nothing answers. Bring
-the stack up first with the `run-signals-dpg` skill (`/run-signals-dpg [dot]`),
-*then* invoke this one.
+## 0. Stack: reuse it, or bring it up — do this before anything else
+
+**You own this step; the scripts do not.** `lib/stack-up.sh` deliberately only
+*verifies* a live target and fails after ~40s if nothing answers — starting a
+stack means writing `.env` files and launching processes, which is
+`run-signals-dpg`'s job and must not be duplicated here.
+
+So, at the top of every invocation:
+
+```bash
+# Is a stack already serving the requested dot?
+curl -sf "http://localhost:2742/api/v1/network/schemas?network=<network-id>" >/dev/null && echo LIVE || echo DEAD
+```
+
+- **LIVE, right dot** → reuse it. Say so, and continue to §5's phases.
+- **DEAD, or serving a different dot** → **invoke the `run-signals-dpg` skill
+  now** with the requested dot, wait for it to report the stack healthy, then
+  continue. Do not ask the caller to do this themselves — the whole point of
+  this skill is that one invocation tests Signals end to end.
+- Note the network **id** is not always the directory name (`yellow_dot` →
+  `onest_yellow_dot`); §2's matrix has both.
+
+Only once a stack answers do you run `lib/run.sh`.
 
 `/signals-e2e [dot] [alias]` runs the suite; `/signals-e2e cleanup [tag]` tears
 down a prior or orphaned run on demand. `dot` defaults to `blue_dot`; an
@@ -87,9 +105,9 @@ seams between suites.
 | Phase | What | Owner |
 |---|---|---|
 | −1 (once) | Fix the drift audit's static defects, run green against a live stack, *before* trusting any result from this suite | done — Task 3 |
-| −0.5 (every invocation) | **Bring the stack up if it isn't already** — `/run-signals-dpg [dot]` | you, the caller, first |
+| −0.5 (every invocation) | **Reuse a live stack, or bring one up by invoking the `run-signals-dpg` skill** — see §0 | you, the agent running this skill |
 | 0 | Preflight: docker, node ≥24, ports, the notification-env triple-check | `lib/run.sh` |
-| 1 | Reuse the already-live stack, or fail: `lib/stack-up.sh` only *verifies* a target on `:2742` and waits up to 40s for it — it never starts one itself. Then start the 3 stubs, snapshot the DB. | `lib/run.sh` |
+| 1 | Verify the (now-live) stack, start the 3 stubs, snapshot the DB. `lib/stack-up.sh` only *verifies* — §0 is what guarantees something is there to verify. | `lib/run.sh` |
 | 2 | API tier — deterministic, no browser | `npm run e2e:api` via `lib/run.sh` |
 | 3 | UI tier — headed, so the run is watchable | `npm run e2e:ui -- --headed` via `lib/run.sh` |
 | 4 | Mail sweep (parked for Plan 2 — no spec wires the sink yet) | — |
