@@ -79,11 +79,30 @@ SCRIPT_REPO="$(cd "$HERE/../../../.." && pwd)"
 REPO="${SIGNALS_REPO:-$SCRIPT_REPO}"
 STACK_ENV="$REPO/.env"
 
+# A git worktree carries no `.env` of its own — that file is gitignored and
+# lives only in the checkout someone actually runs the stack from. Rather than
+# make every caller remember SIGNALS_REPO, fall back to the main checkout that
+# `git rev-parse --git-common-dir` points at: from a worktree that resolves to
+# the primary clone, and from the primary clone it resolves to itself, so the
+# same line is correct in both. An explicit SIGNALS_REPO still wins.
+if [ ! -f "$STACK_ENV" ] && [ -z "${SIGNALS_REPO:-}" ]; then
+  COMMON_DIR="$(git -C "$SCRIPT_REPO" rev-parse --git-common-dir 2>/dev/null || true)"
+  if [ -n "$COMMON_DIR" ]; then
+    case "$COMMON_DIR" in /*) ;; *) COMMON_DIR="$SCRIPT_REPO/$COMMON_DIR" ;; esac
+    CANDIDATE="$(cd "$COMMON_DIR/.." 2>/dev/null && pwd -P || true)"
+    if [ -n "$CANDIDATE" ] && [ -f "$CANDIDATE/.env" ]; then
+      REPO="$CANDIDATE"
+      STACK_ENV="$REPO/.env"
+      log "no .env in this worktree — using the main checkout at $REPO (set SIGNALS_REPO to override)"
+    fi
+  fi
+fi
+
 if [ ! -f "$STACK_ENV" ]; then
-  log "FAIL: no .env at $STACK_ENV."
-  log "This worktree does not itself run the stack. Set SIGNALS_REPO to the"
-  log "checkout that does (e.g. SIGNALS_REPO=/path/to/your/Signals-DPG clone),"
-  log "and make sure that repo has been brought up once via the run-signals-dpg skill."
+  log "FAIL: no .env at $STACK_ENV, and no main checkout with one could be found."
+  log "Set SIGNALS_REPO to the checkout that runs the stack"
+  log "(e.g. SIGNALS_REPO=/path/to/your/Signals-DPG clone), and bring that stack"
+  log "up once first — see references/bringing-the-stack-up.md."
   exit 1
 fi
 
