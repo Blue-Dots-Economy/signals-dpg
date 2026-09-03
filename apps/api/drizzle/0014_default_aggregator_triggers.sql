@@ -34,6 +34,7 @@ AS $$
 DECLARE
   clash_id   text;
   clash_bind text;
+  declared   jsonb;
 BEGIN
   IF NEW.default_for_bindings IS NULL OR cardinality(NEW.default_for_bindings) = 0 THEN
     RETURN NEW;
@@ -69,20 +70,42 @@ BEGIN
   --
   -- Skipped when the org declares nothing (legacy mirrors predate
   -- metadata.domains), so this cannot lock out an existing deployment.
-  IF coalesce(jsonb_array_length((NEW.metadata::jsonb) -> 'domains'), 0) > 0 THEN
+  -- Parse defensively, matching `apps/api/src/utils/org_metadata.ts`, which
+  -- degrades a null column, malformed JSON, a missing key or a non-array to
+  -- "no declared domains". `metadata` is a plain text column, so a legacy row
+  -- holding junk would otherwise fail the cast with `invalid input syntax for
+  -- type json`, and a scalar `domains` would fail with `cannot get array
+  -- length of a scalar` — turning a clear refusal into a confusing one, on a
+  -- statement support runs by hand.
+  --
+  -- Degrade rather than block, so bad metadata cannot wedge a nomination, but
+  -- WARN so it is visible in the psql output rather than silently skipping a
+  -- safety check.
+  BEGIN
+    declared := (NEW.metadata::jsonb) -> 'domains';
+  EXCEPTION WHEN others THEN
+    declared := NULL;
+  END;
+
+  IF declared IS NULL OR jsonb_typeof(declared) <> 'array' THEN
+    IF NEW.metadata IS NOT NULL AND NEW.metadata <> '' THEN
+      RAISE WARNING
+        'org % has no usable metadata.domains — skipping the declared-domain check',
+        NEW.id;
+    END IF;
+  ELSIF jsonb_array_length(declared) > 0 THEN
     SELECT b
       INTO clash_bind
       FROM unnest(NEW.default_for_bindings) AS b
      WHERE split_part(b, '/', 2) NOT IN (
-             SELECT jsonb_array_elements_text((NEW.metadata::jsonb) -> 'domains'))
+             SELECT jsonb_array_elements_text(declared))
      LIMIT 1;
 
     IF clash_bind IS NOT NULL THEN
       RAISE EXCEPTION
         'org % does not declare the domain in binding % (declares: %)',
         NEW.id, clash_bind,
-        (SELECT string_agg(d, ',')
-           FROM jsonb_array_elements_text((NEW.metadata::jsonb) -> 'domains') AS d)
+        (SELECT string_agg(d, ',') FROM jsonb_array_elements_text(declared) AS d)
         USING ERRCODE = 'check_violation';
     END IF;
   END IF;
