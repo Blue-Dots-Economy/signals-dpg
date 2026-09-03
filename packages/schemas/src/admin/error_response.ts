@@ -12,7 +12,16 @@ import z from 'zod';
  * behaviour change since the runtime payload is unchanged.
  */
 export const AdminErrorResponse = z.object({
-  error: z.string().describe('machine-readable error code, e.g. NOT_AN_AGGREGATOR'),
+  error: z
+    .string()
+    .describe(
+      'machine-readable error code. Route-specific; for /admin/aggregator/default one of ' +
+        'NOT_NETWORK_SERVICE, ACTOR_UNRESOLVED, UNSERVED_DOMAIN_BINDING, ORG_NOT_FOUND, ' +
+        'NOT_AN_AGGREGATOR, DOMAIN_NOT_DECLARED, DEFAULT_ALREADY_SET, DEFAULT_AGGREGATOR_WRITE_FAILED. ' +
+        "Deliberately a string, not an enum: Fastify serialises zod body-validation " +
+        "failures through this same envelope with error='Bad Request', which an enum " +
+        'would reject at serialisation time and turn into a 500.',
+    ),
   message: z.string().describe('human-readable explanation; not for programmatic use'),
 });
 

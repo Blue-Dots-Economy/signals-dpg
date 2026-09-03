@@ -24,9 +24,16 @@ const dbState = {
   /** Every org currently holding any binding. */
   holders: [] as Array<{ id: string; bindings: string[] | null }>,
   served: ['blue_dot/seeker', 'blue_dot/provider'] as string[],
+  declaredDomains: [] as string[],
   updates: [] as Array<{ set: Record<string, unknown> }>,
   audits: [] as Array<Record<string, unknown>>,
+  /** When set, db.transaction rejects with it. */
+  transactionError: null as unknown,
 };
+
+vi.mock('@/utils/org_metadata', () => ({
+  readConfiguredDomains: () => Promise.resolve(dbState.declaredDomains),
+}));
 
 vi.mock('@/utils/served_domain_guard', () => ({
   isServedDomainBinding: (network: string, domain: string) =>
@@ -66,14 +73,20 @@ vi.mock('@api/db/postgres/drizzle_config', () => {
       }),
     }));
 
-  const tx = { select: makeSelect(), update: makeUpdate(), insert: makeInsert() };
+  // `execute` covers the advisory lock the handler takes first.
+  const execute = vi.fn(() => Promise.resolve({ rows: [] }));
+  const tx = { select: makeSelect(), update: makeUpdate(), insert: makeInsert(), execute };
 
   return {
     db: {
       select: makeSelect(),
       update: makeUpdate(),
       insert: makeInsert(),
-      transaction: vi.fn(async (cb: (t: typeof tx) => Promise<unknown>) => cb(tx)),
+      execute,
+      transaction: vi.fn(async (cb: (t: typeof tx) => Promise<unknown>) => {
+        if (dbState.transactionError) throw dbState.transactionError;
+        return cb(tx);
+      }),
     },
   };
 });
@@ -112,8 +125,10 @@ beforeEach(() => {
   dbState.target = { ...AGG };
   dbState.holders = [];
   dbState.served = ['blue_dot/seeker', 'blue_dot/provider'];
+  dbState.declaredDomains = [];
   dbState.updates = [];
   dbState.audits = [];
+  dbState.transactionError = null;
 });
 
 describe('POST /aggregator/default — guards', () => {
@@ -155,14 +170,14 @@ describe('POST /aggregator/default — guards', () => {
   });
 
   it("rejects a domain the org itself does not declare", async () => {
-    dbState.target = { ...AGG, metadata: JSON.stringify({ domains: ['seeker'] }) };
+    dbState.declaredDomains = ['seeker'];
     const res = await post({ org_id: 'org_agg_1', bindings: ['blue_dot/provider'] });
     expect(res.statusCode).toBe(400);
     expect(res.json().error).toBe('DOMAIN_NOT_DECLARED');
   });
 
   it('skips the declared-domain check when the org declares none (legacy mirror)', async () => {
-    dbState.target = { ...AGG, metadata: JSON.stringify({ external_id: 'x' }) };
+    dbState.declaredDomains = [];
     const res = await post({ org_id: 'org_agg_1', bindings: ['blue_dot/provider'] });
     expect(res.statusCode).toBe(200);
   });
@@ -180,6 +195,7 @@ describe('POST /aggregator/default — writes', () => {
       org_id: 'org_agg_1',
       bindings: ['blue_dot/seeker', 'blue_dot/provider'],
       cleared_from: [],
+      revoked: [],
     });
     expect(dbState.audits).toHaveLength(2);
     expect(dbState.audits[0]).toMatchObject({
@@ -219,13 +235,33 @@ describe('POST /aggregator/default — writes', () => {
     expect(dbState.updates[0].set).toEqual({ defaultForBindings: null });
   });
 
-  it('clears every binding when sent an empty list', async () => {
+  // Standing an aggregator down is the most consequential thing this endpoint
+  // does; auditing only additions left it with no trace at all.
+  it('clears every binding when sent an empty list, and audits the revocation', async () => {
     dbState.holders = [{ id: 'org_agg_1', bindings: ['blue_dot/seeker'] }];
     const res = await post({ org_id: 'org_agg_1', bindings: [] });
     expect(res.statusCode).toBe(200);
     expect(res.json().bindings).toEqual([]);
+    expect(res.json().revoked).toEqual(['blue_dot/seeker']);
     expect(dbState.updates.at(-1)?.set).toEqual({ defaultForBindings: null });
-    expect(dbState.audits).toHaveLength(0);
+    expect(dbState.audits).toHaveLength(1);
+    expect(dbState.audits[0]).toMatchObject({
+      binding: 'blue_dot/seeker',
+      fromOrgId: 'org_agg_1',
+      toOrgId: null,
+    });
+  });
+
+  it('reports and audits a binding silently dropped by a partial replace', async () => {
+    dbState.holders = [
+      { id: 'org_agg_1', bindings: ['blue_dot/seeker', 'blue_dot/provider'] },
+    ];
+    const res = await post({ org_id: 'org_agg_1', bindings: ['blue_dot/provider'] });
+    expect(res.statusCode).toBe(200);
+    // seeker is left with NO default — the caller must be able to see that.
+    expect(res.json().revoked).toEqual(['blue_dot/seeker']);
+    expect(dbState.audits).toHaveLength(1);
+    expect(dbState.audits[0]).toMatchObject({ binding: 'blue_dot/seeker', toOrgId: null });
   });
 
   it('is a no-op audit-wise when the org already holds the binding', async () => {
@@ -242,5 +278,62 @@ describe('POST /aggregator/default — writes', () => {
     });
     expect(res.json().bindings).toEqual(['blue_dot/seeker']);
     expect(dbState.audits).toHaveLength(1);
+  });
+});
+
+describe('POST /aggregator/default — failure paths', () => {
+  // An audit row attributed to nobody defeats the point of having one.
+  it('refuses to write when the caller has no resolvable user id', async () => {
+    const app = Fastify().withTypeProvider<ZodTypeProvider>();
+    app.setValidatorCompiler(validatorCompiler);
+    app.setSerializerCompiler(serializerCompiler);
+    app.addHook('preHandler', async (req) => {
+      (req as unknown as { acting_org: unknown }).acting_org = {
+        org_id: 'org_network_service',
+        org_type: 'network_service',
+        service_user_id: 'svc_test',
+      };
+    });
+    await app.register(aggregator_default);
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/aggregator/default',
+      payload: { org_id: 'org_agg_1', bindings: ['blue_dot/seeker'] },
+    });
+    expect(res.statusCode).toBe(500);
+    expect(res.json().error).toBe('ACTOR_UNRESOLVED');
+    expect(dbState.audits).toHaveLength(0);
+  });
+
+  // The database now guarantees at most one default; the endpoint turns that
+  // guarantee into a usable conflict rather than a 500.
+  it('maps the single-default unique violation to 409', async () => {
+    dbState.transactionError = Object.assign(new Error('dup'), {
+      cause: { code: '23505', constraint: 'organization_single_default_idx' },
+    });
+    const res = await post({ org_id: 'org_agg_1', bindings: ['blue_dot/seeker'] });
+    expect(res.statusCode).toBe(409);
+    expect(res.json().error).toBe('DEFAULT_ALREADY_SET');
+  });
+
+  it('maps the CHECK violation to 400, unwrapping drizzle\'s cause', async () => {
+    dbState.transactionError = Object.assign(new Error('check'), {
+      cause: { code: '23514' },
+    });
+    const res = await post({ org_id: 'org_agg_1', bindings: ['blue_dot/seeker'] });
+    expect(res.statusCode).toBe(400);
+    expect(res.json().error).toBe('NOT_AN_AGGREGATOR');
+  });
+
+  // A raw pg error's text can carry the failed SQL and its bound params.
+  it('never surfaces a raw database error', async () => {
+    dbState.transactionError = new Error(
+      'duplicate key value violates unique constraint "x" DETAIL: Key (id)=(org_secret)',
+    );
+    const res = await post({ org_id: 'org_agg_1', bindings: ['blue_dot/seeker'] });
+    expect(res.statusCode).toBe(500);
+    expect(res.json().error).toBe('DEFAULT_AGGREGATOR_WRITE_FAILED');
+    expect(res.json().message).not.toContain('org_secret');
   });
 });

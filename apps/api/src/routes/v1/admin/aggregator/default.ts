@@ -57,6 +57,7 @@ export const aggregator_default: FastifyPluginAsync = async (app) => {
         400: AdminErrorResponse,
         403: AdminErrorResponse,
         404: AdminErrorResponse,
+        409: AdminErrorResponse,
         500: AdminErrorResponse,
       },
     },
@@ -139,7 +140,16 @@ export const aggregator_default_handler = async (
   }
 
   try {
-    const cleared_from = await db.transaction(async (tx) => {
+    const result = await db.transaction(async (tx) => {
+      // Serialise every nomination. The holder read below and the writes that
+      // follow touch DIFFERENT rows, so at READ COMMITTED two concurrent
+      // nominations for the same binding never conflict and both commit —
+      // leaving two claimants, which resolution treats as `ambiguous` and which
+      // then blocks go-live for the whole instance. Application code is the
+      // only thing enforcing exclusivity (Postgres cannot unique-index an array
+      // element), so it has to be serialised explicitly.
+      await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext('aggregator_default'))`);
+
       // Read every current holder BEFORE displacing anyone — this is where the
       // audit's `from_org_id` comes from, and it cannot be recovered after the
       // update. `organization` is tens to hundreds of rows, so the set
@@ -175,30 +185,63 @@ export const aggregator_default_handler = async (
         .set({ defaultForBindings: wanted.length === 0 ? null : wanted })
         .where(eq(organization.id, org_id));
 
-      // Audit only actual changes, so a repeat call is a genuine no-op.
-      const changed = wanted.filter((b) => previousHolder.get(b) !== org_id);
-      if (changed.length > 0) {
-        await tx.insert(aggregator_default_audit).values(
-          changed.map((binding) => ({
-            binding,
-            fromOrgId: previousHolder.get(binding) ?? null,
-            toOrgId: org_id,
-            changedBy: actor,
-          })),
-        );
+      // Every binding whose holder changed, in BOTH directions. Auditing only
+      // additions meant the destructive half went unrecorded: this is a
+      // full-set replace, so a binding the target previously held and that is
+      // absent from `wanted` is silently revoked — and `bindings: []`, the
+      // documented way to stand an aggregator down, wrote zero rows for the
+      // single most consequential operation the endpoint supports.
+      const previouslyHeld = (holders.find((h) => h.id === org_id)?.bindings ?? []);
+      const revoked = previouslyHeld.filter((b) => !wanted.includes(b));
+      const granted = wanted.filter((b) => previousHolder.get(b) !== org_id);
+
+      const auditRows = [
+        ...granted.map((binding) => ({
+          binding,
+          fromOrgId: previousHolder.get(binding) ?? null,
+          toOrgId: org_id as string | null,
+          changedBy: actor,
+        })),
+        // `to_org_id` null = revoked, nothing took over.
+        ...revoked.map((binding) => ({
+          binding,
+          fromOrgId: org_id as string | null,
+          toOrgId: null,
+          changedBy: actor,
+        })),
+      ];
+
+      if (auditRows.length > 0) {
+        await tx.insert(aggregator_default_audit).values(auditRows);
       }
 
-      return displaced;
+      return { displaced, revoked };
     });
 
-    request.log.info({ org_id, bindings: wanted, cleared_from }, 'aggregator default updated');
+    const { displaced: cleared_from, revoked } = result;
 
-    return reply.code(200).send({ org_id, bindings: wanted, cleared_from });
+    request.log.info(
+      { org_id, bindings: wanted, cleared_from, revoked },
+      'aggregator default updated',
+    );
+
+    return reply.code(200).send({ org_id, bindings: wanted, cleared_from, revoked });
   } catch (err) {
     const e = err as { code?: string; cause?: { code?: string } } | null;
     const pg_code = e?.code ?? e?.cause?.code;
     // 23514 = the organization_default_requires_aggregator CHECK. Reachable
     // only if the org's `type` changed between the read above and the write.
+    // 23505 = organization_single_default_idx. The advisory lock serialises the
+    // normal clear-then-set flow, so this is only reachable if a default were
+    // set outside this endpoint; surface it as a conflict rather than a 500.
+    if (pg_code === '23505') {
+      request.log.error({ err, org_id }, 'another org is already the default aggregator');
+      return reply.code(409).send({
+        error: 'DEFAULT_ALREADY_SET',
+        message:
+          'another organization is already the default aggregator; clear it first (ownership is account-level, so only one default may exist)',
+      });
+    }
     if (pg_code === '23514') {
       request.log.error({ err, org_id }, 'default aggregator rejected by CHECK constraint');
       return reply.code(400).send({
@@ -206,7 +249,15 @@ export const aggregator_default_handler = async (
         message: 'only an aggregator org can be a default aggregator',
       });
     }
-    throw err;
+    // Never surface the raw error message: a DB error's text can include the
+    // failed SQL and its bound params (same reasoning as the participant
+    // route). The app registers no setErrorHandler, so a re-throw would echo it
+    // straight to the caller.
+    request.log.error({ err, org_id, bindings: wanted }, 'default aggregator write failed');
+    return reply.code(500).send({
+      error: 'DEFAULT_AGGREGATOR_WRITE_FAILED',
+      message: 'failed to update the default aggregator',
+    });
   }
 };
 

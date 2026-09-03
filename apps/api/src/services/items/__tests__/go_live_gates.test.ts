@@ -57,11 +57,12 @@ describe('GO_LIVE_GATE_CHECKS.owner_required (SS-3, #640)', () => {
 
   // Guard 1 — the default aggregator arrives post-launch (#640 Q1). Without
   // this, every self-signup profile would be frozen in draft from launch.
-  it('is inert while no default aggregator is configured', () => {
+  it('is inert while no default aggregator is nominated', () => {
     expect(
       GO_LIVE_GATE_CHECKS.owner_required(ctx({ hasOwner: false, defaultConfigured: false })),
     ).toBe(true);
   });
+
 
   // Guard 2 — classify_item re-derives draft<->live on EVERY write, so without
   // this an already-live unowned user editing their own profile would be

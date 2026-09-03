@@ -25,7 +25,14 @@ export const aggregator_default_audit = pgTable(
     binding: text('binding').notNull(),
     /** Null on the first assignment for this binding. */
     fromOrgId: text('from_org_id'),
-    toOrgId: text('to_org_id').notNull(),
+    /**
+     * Null when the binding was REVOKED — the org stood down and nothing took
+     * over. Nullable on purpose: `bindings: []` is the documented way to stand
+     * an aggregator down, and a NOT NULL column could not represent it, so the
+     * single most consequential operation the endpoint supports would have gone
+     * unaudited.
+     */
+    toOrgId: text('to_org_id'),
     /** The acting network-service user that made the change. */
     changedBy: text('changed_by').notNull(),
     changedAt: timestamp('changed_at').notNull().defaultNow(),

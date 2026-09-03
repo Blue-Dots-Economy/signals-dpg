@@ -1,11 +1,6 @@
 import { and, eq, isNull, sql, type SQL } from 'drizzle-orm';
-import type { FastifyBaseLogger } from 'fastify';
-// Type-only: keeps this module free of a runtime dependency on the API's
-// configured db client, so the standalone ops scripts (which build their own
-// pool and skip the API's env validation) can import the rules below.
-import type { db } from '@api/db/postgres/drizzle_config';
 import { user } from '@api/db/postgres/schema/auth';
-import { formatBindingKey } from '@dpg/schemas';
+import type { DbOrTx } from '@/services/db_types';
 
 /**
  * Default-aggregator resolution (#640, SS-3).
@@ -22,93 +17,60 @@ import { formatBindingKey } from '@dpg/schemas';
  * enabled Keycloak user, so the "unverified queue" it owns would be a queue
  * nobody can open.
  *
- * Until one is nominated there is simply no default, and inbound users stay
- * untagged. That is the expected state at launch (#640 Q1) and is not an error.
+ * ## One default per instance, enforced by the database
+ *
+ * `organization.default_for_bindings` records which (network, domain) bindings
+ * an org is the default for — product asked for a per-domain default (#640 Q3).
+ * But the tag it drives, `user.onboarded_by_org_id`, is **per account** and
+ * write-once, and `participant_decrypt` scopes on it with no domain condition.
+ * So "which org owns this person" must have exactly one answer; with two
+ * default orgs there is no sound answer, only a guess that would let one
+ * decrypt the other's participants.
+ *
+ * Rather than detect that at runtime, `organization_single_default_idx` makes
+ * it impossible: a unique index over rows holding a binding, so a second
+ * default fails with 23505 at write time. Resolution is therefore binary — a
+ * default exists, or it does not — and the go-live gate needs no third case.
+ *
+ * Per-binding ownership is the per-profile `profile_origin` work in
+ * `docs/superpowers/specs/2026-08-30-account-profile-identity-model-design.md`:
+ * until attribution moves to the profile-creation event, an account-level tag
+ * cannot express it.
  */
-
-// Local rather than imported from item_service: that module imports the
-// go-live classifier, which needs this one for the `owner_required` gate.
-type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
-export type Exec = typeof db | Tx;
 
 export interface DefaultAggregatorResolution {
-  /** The default aggregator's org id, or null when there is none to use. */
+  /** The default aggregator, or null when none is nominated. */
   org_id: string | null;
-  /**
-   * Whether a usable default is configured for this binding. Drives guard 1 of
-   * the `owner_required` go-live gate: while no default exists the gate must be
-   * inert, or every self-signup profile would be frozen in `draft` from launch
-   * until an aggregator is nominated (#640 Q1 vs Q4).
-   */
-  configured: boolean;
 }
 
-const NONE: DefaultAggregatorResolution = { org_id: null, configured: false };
-
 /**
- * THE lookup for a binding's default aggregator — one definition shared by the
- * API (via `resolveDefaultAggregator`) and the standalone ops scripts, which
- * run `db.execute` against their own pool.
+ * THE lookup for the instance's default aggregator.
  *
- * `LIMIT 2` is load-bearing: the caller has to tell "exactly one" from "more
- * than one" to apply the fail-closed rule in `pickDefaultAggregator`.
+ * Not filtered by binding: ownership is account-level, so this asks "which org
+ * is the default?" — a question the unique index guarantees has at most one
+ * answer.
  */
-export const defaultAggregatorQuery = (binding: string): SQL =>
+export const defaultAggregatorQuery = (): SQL =>
   sql`SELECT id FROM organization
-       WHERE default_for_bindings && ARRAY[${binding}]::text[]
+       WHERE default_for_bindings IS NOT NULL
          AND type = 'aggregator'
-       LIMIT 2`;
+       LIMIT 1`;
 
 /**
- * THE fail-closed rule, shared by every caller that resolves a default.
+ * The instance's default aggregator.
  *
- * Postgres cannot unique-index an array element, so "one default per binding"
- * is enforced by the set endpoint clearing the binding off every other org in
- * one transaction. This is the second line of defence if a row is ever edited
- * directly. Two claimants are reported as *no* default rather than an arbitrary
- * pick: an arbitrary pick would hand PII decrypt rights to a coin flip, and
- * treating it as "not configured" keeps the go-live gate inert instead of
- * freezing a whole domain on a misconfiguration.
- */
-export function pickDefaultAggregator(
-  rows: Array<{ id: string }>,
-  binding: string,
-  log?: Pick<FastifyBaseLogger, 'error'>,
-): DefaultAggregatorResolution {
-  if (rows.length === 0) return NONE;
-
-  if (rows.length > 1) {
-    log?.error(
-      { binding, org_ids: rows.map((r) => r.id) },
-      'default_aggregator: more than one org claims this binding — refusing to pick one',
-    );
-    return NONE;
-  }
-
-  return { org_id: rows[0].id, configured: true };
-}
-
-/**
- * The default aggregator for a served-domain binding, or `NONE`.
- *
- * Not cached. It runs at most once per user (and only for domains that
- * configure the gate), inside a transaction that is already writing an item —
- * and the value is changed by an operator, so a cache would introduce a stale
- * window with nothing to invalidate it.
+ * Not cached. It runs at most once per user, inside a transaction that is
+ * already writing an item — and the value is changed by an operator, so a cache
+ * would introduce a stale window with nothing to invalidate it.
  */
 export async function resolveDefaultAggregator(
-  exec: Exec,
-  network: string,
-  domain: string,
-  log?: FastifyBaseLogger,
+  exec: DbOrTx,
 ): Promise<DefaultAggregatorResolution> {
-  const binding = formatBindingKey(network, domain);
-
-  const result = (await exec.execute(defaultAggregatorQuery(binding))) as unknown as {
-    rows: Array<{ id: string }>;
+  const result = (await exec.execute(defaultAggregatorQuery())) as unknown as {
+    rows?: Array<{ id: string }>;
   };
 
-  return pickDefaultAggregator(result.rows ?? [], binding, log);
+  return { org_id: result.rows?.[0]?.id ?? null };
 }
 
 /**
@@ -125,51 +87,54 @@ export async function resolveDefaultAggregator(
  * is written from the request's `channel` field, so a caller could set it, and
  * this flag is the key the re-assignment job scopes on.
  *
- * @returns the org id written, or null when nothing was written.
+ * `onboarded_at` is filled with `coalesce` so a participant who was onboarded
+ * months ago (voice/account-only creates already write a real `onboarded_at`
+ * with a null org) does not have their genuine join date overwritten with the
+ * tagging time — `item_metrics.age_days` and `profile_status` are derived from
+ * it, and a dormant participant must not resurface as brand new.
+ *
+ * @returns the resolution, plus whether this call actually wrote the tag and
+ *   whether the user ends up owned. Callers use this to build the go-live gate
+ *   context without a second round trip.
  */
 export async function tagUserWithDefaultAggregator(
-  exec: Exec,
+  exec: DbOrTx,
   userId: string,
-  network: string,
-  domain: string,
-  log?: FastifyBaseLogger,
-): Promise<string | null> {
-  const { org_id } = await resolveDefaultAggregator(exec, network, domain, log);
-  if (!org_id) return null;
+): Promise<{ resolution: DefaultAggregatorResolution; tagged: boolean }> {
+  const resolution = await resolveDefaultAggregator(exec);
+  if (!resolution.org_id) return { resolution, tagged: false };
 
   const updated = await exec
     .update(user)
     .set({
-      onboardedByOrgId: org_id,
+      onboardedByOrgId: resolution.org_id,
       onboardedByDefault: true,
-      onboardedAt: new Date(),
+      onboardedAt: sql`coalesce(${user.onboardedAt}, now())`,
       updatedAt: new Date(),
     })
     .where(and(eq(user.id, userId), isNull(user.onboardedByOrgId)))
     .returning({ id: user.id });
 
-  return updated.length > 0 ? org_id : null;
+  return { resolution, tagged: updated.length > 0 };
 }
 
 export interface OwnerGateContext {
   has_owner: boolean;
+  /** Whether a default aggregator is nominated at all. */
   default_configured: boolean;
 }
 
 /**
  * The two signals the `owner_required` go-live gate needs: whether the profile
- * owner has an owning aggregator, and whether a default exists for this binding
- * at all.
+ * owner has an owning aggregator, and what state the instance's default is in.
  *
- * Only called when a domain actually configures `owner_required`, so a domain
- * that hasn't opted in pays nothing.
+ * Pass `known` when the caller has already resolved the default (every path
+ * that tags does), so a gated write costs one `organization` read, not two.
  */
 export async function resolveOwnerGateContext(
-  exec: Exec,
+  exec: DbOrTx,
   ownerUserId: string,
-  network: string,
-  domain: string,
-  log?: FastifyBaseLogger,
+  known?: DefaultAggregatorResolution,
 ): Promise<OwnerGateContext> {
   const [owner] = await exec
     .select({ onboardedByOrgId: user.onboardedByOrgId })
@@ -177,13 +142,13 @@ export async function resolveOwnerGateContext(
     .where(eq(user.id, ownerUserId))
     .limit(1);
 
-  const { configured } = await resolveDefaultAggregator(exec, network, domain, log);
+  const resolution = known ?? (await resolveDefaultAggregator(exec));
 
   return {
     // A missing user row counts as "no owner" — fail closed. It should not
     // happen (items FK to `user`), and treating it as owned would be the
     // wrong direction on a gate that exists to guarantee an owner.
     has_owner: Boolean(owner?.onboardedByOrgId),
-    default_configured: configured,
+    default_configured: Boolean(resolution.org_id),
   };
 }

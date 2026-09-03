@@ -5,6 +5,7 @@ import {
   boolean,
   integer,
   index,
+  uniqueIndex,
   jsonb,
   check,
 } from 'drizzle-orm/pg-core';
@@ -120,8 +121,8 @@ export const organization = pgTable('organization', {
   // org in the same transaction; the read path additionally fails closed if it
   // ever sees two claimants.
   //
-  // Deliberately NOT indexed: `organization` holds tens to hundreds of rows,
-  // where a sequential scan beats GIN and GIN would tax every org upsert.
+  // Deliberately NOT indexed for lookup: `organization` holds tens to hundreds
+  // of rows, where a sequential scan beats GIN and GIN would tax every upsert.
   defaultForBindings: text('default_for_bindings').array(),
 }, (table) => [
   // The flag grants PII-decrypt rights over the users it captures, so it must
@@ -132,6 +133,23 @@ export const organization = pgTable('organization', {
     'organization_default_requires_aggregator',
     sql`${table.defaultForBindings} IS NULL OR ${table.type} = 'aggregator'`,
   ),
+  // AT MOST ONE default aggregator per instance, enforced by the database.
+  //
+  // A unique index on a constant expression, restricted to rows that hold a
+  // binding, means a second org can never become a default: the write fails
+  // with 23505 instead of leaving two claimants behind. That matters because
+  // the tag it drives (`user.onboarded_by_org_id`) is per ACCOUNT, so "which
+  // org owns this person" has to have exactly one answer — with two defaults
+  // there is no sound answer, only a guess that hands PII-decrypt rights to
+  // whichever domain the user happened to write first.
+  //
+  // Enforcing it here rather than in application code is what keeps the
+  // resolution binary (a default exists, or it does not). Postgres cannot
+  // unique-index an array *element*, but it can guarantee a single row holds
+  // the array at all, which is the invariant that actually matters.
+  uniqueIndex('organization_single_default_idx')
+    .on(sql`(true)`)
+    .where(sql`${table.defaultForBindings} IS NOT NULL`),
 ]);
 
 export const member = pgTable('member', {

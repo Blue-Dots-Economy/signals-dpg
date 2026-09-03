@@ -19,10 +19,8 @@ import { organization } from '@api/db/postgres/schema/auth';
  * skip the check").
  */
 
-type Exec = Pick<typeof db, 'select'>;
-
 /** Parse the declared domains out of a raw `organization.metadata` value. */
-export function parseConfiguredDomains(metadata: string | null | undefined): string[] {
+function parseConfiguredDomains(metadata: string | null | undefined): string[] {
   if (!metadata) return [];
   try {
     const meta = JSON.parse(metadata) as { domains?: unknown };
@@ -39,8 +37,8 @@ export function parseConfiguredDomains(metadata: string | null | undefined): str
  * @returns the declared domains, or `[]` when the org is missing, has no
  *   metadata, or its metadata does not carry a usable `domains` array.
  */
-export async function readConfiguredDomains(orgId: string, exec: Exec = db): Promise<string[]> {
-  const [org] = (await exec
+export async function readConfiguredDomains(orgId: string): Promise<string[]> {
+  const [org] = (await db
     .select({ metadata: organization.metadata })
     .from(organization)
     .where(eq(organization.id, orgId))

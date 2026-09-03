@@ -59,19 +59,6 @@ const csv_escape = (v: unknown): string => {
   return s;
 };
 
-/**
- * The org's declared domains, or null when it has none configured.
- *
- * Thin adapter over the shared `readConfiguredDomains` — this route's callers
- * distinguish "no domains" via null, where the shared helper returns [].
- */
-const read_configured_domains = async (
-  org_id: string,
-): Promise<string[] | null> => {
-  const domains = await readConfiguredDomains(org_id);
-  return domains.length === 0 ? null : domains;
-};
-
 async function* generate_csv(
   aggregator_id: string,
   scope: string[],
@@ -164,8 +151,8 @@ export const aggregator_export: FastifyPluginAsync = async (app) => {
         });
       }
 
-      const configured = await read_configured_domains(acting.org_id);
-      if (!configured || configured.length === 0) {
+      const configured = await readConfiguredDomains(acting.org_id);
+      if (configured.length === 0) {
         return reply.code(400).send({
           error: 'NO_DOMAINS_CONFIGURED',
           message: 'org.metadata.domains is empty — re-upsert with domains array',

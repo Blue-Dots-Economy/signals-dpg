@@ -64,7 +64,7 @@ export const AggregatorDefaultRequest = z.object({
   bindings: z
     .array(BindingKey)
     .describe(
-      "served-domain bindings this org becomes the default for, e.g. ['blue_dot/seeker','blue_dot/provider']. Replaces the org's current set; [] clears it.",
+      "served-domain bindings this org becomes the default for, e.g. ['blue_dot/seeker','blue_dot/provider']. REPLACES the org's current set — any binding omitted is revoked and reported in `revoked`; [] clears them all (the supported way to stand an aggregator down). Note ownership is account-level, so nominating DIFFERENT orgs for different bindings makes the instance's default ambiguous and blocks go-live until resolved.",
     ),
 });
 
@@ -74,6 +74,11 @@ export const AggregatorDefaultResponse = z.object({
   cleared_from: z
     .array(z.object({ org_id: z.string(), binding: z.string() }))
     .describe('bindings taken off another org by this call'),
+  revoked: z
+    .array(z.string())
+    .describe(
+      'bindings this org previously held and no longer does — this is a full-set replace, so a binding absent from the request is revoked and left with NO default. Reported explicitly because the destructive half of the operation would otherwise be invisible to the caller.',
+    ),
 });
 
 export type AggregatorDefaultRequest = z.infer<typeof AggregatorDefaultRequest>;

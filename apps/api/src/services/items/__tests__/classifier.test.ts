@@ -224,9 +224,10 @@ describe('owner_required through classify_item (SS-3, #640)', () => {
     expect(run('draft', { has_owner: false, default_configured: true })).toBe('draft');
   });
 
-  it('goes live while no default aggregator is configured (guard 1)', () => {
+  it('goes live while no default aggregator is nominated (guard 1)', () => {
     expect(run('draft', { has_owner: false, default_configured: false })).toBe('live');
   });
+
 
   it('leaves an already-live unowned profile live (guard 2)', () => {
     expect(run('live', { has_owner: false, default_configured: true })).toBe('live');

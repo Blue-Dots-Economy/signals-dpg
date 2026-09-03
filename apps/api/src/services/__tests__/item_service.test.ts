@@ -561,6 +561,13 @@ describe('createItemInternal — profile cap', () => {
     });
   });
 
+  /**
+   * The statements the profile cap issues (its advisory lock and its count),
+   * excluding the SS-3 default-aggregator lookup that every create now makes.
+   */
+  const capStatements = (rec: { executes: unknown[] }) =>
+    rec.executes.filter((q) => !JSON.stringify(q).includes('default_for_bindings'));
+
   it('409 PROFILE_LIMIT_REACHED at the global cap', async () => {
     apiConfig.max_profiles_per_user = 2;
     const { exec, queue } = makeExec();
@@ -592,8 +599,12 @@ describe('createItemInternal — profile cap', () => {
 
     await createItemInternal(exec, createParams());
 
-    expect(rec.executes).toHaveLength(0);
-    expect(rec.order).toEqual(['insert']);
+    // The one `execute` here is the SS-3 default-aggregator lookup (#640),
+    // which runs on every create now that tagging is no longer coupled to the
+    // `owner_required` gate. What this test pins is that the CAP took no
+    // advisory lock and ran no count.
+    expect(capStatements(rec)).toHaveLength(0);
+    expect(rec.order).toEqual(['execute', 'insert']);
   });
 
   it('skips the cap entirely for trusted callers (skip_profile_limit)', async () => {
@@ -602,8 +613,9 @@ describe('createItemInternal — profile cap', () => {
 
     await createItemInternal(exec, createParams({ skip_profile_limit: true }));
 
-    expect(rec.executes).toHaveLength(0);
-    expect(rec.order).toEqual(['insert']);
+    expect(capStatements(rec)).toHaveLength(0);
+    // 'execute' is the SS-3 default-aggregator lookup, not the cap.
+    expect(rec.order).toEqual(['execute', 'insert']);
   });
 
   it('counts with no cap when the network config cannot be read', async () => {

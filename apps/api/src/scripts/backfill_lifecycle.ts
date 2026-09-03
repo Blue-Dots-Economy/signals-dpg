@@ -130,9 +130,9 @@ async function main() {
       }
       const current = row.lifecycle_status as LifecycleStatus;
       // No `gates` passed, so DEFAULT_GO_LIVE_GATES apply and the SS-3
-      // `owner_required` gate (#640) is not evaluated here. A backfill must not
-      // be the thing that demotes a population; use the dedicated
-      // backfill_default_aggregator script to tag owners instead.
+      // `owner_required` gate (#640) is not evaluated here — a lifecycle
+      // backfill must not be the thing that demotes a population for want of
+      // an owning aggregator.
       const next = classify_item({
         schema,
         merged_state: (row.item_state ?? {}) as Record<string, unknown>,

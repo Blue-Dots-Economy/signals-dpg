@@ -1,5 +1,5 @@
 {
-  "id": "8eb0e9db-9a00-49d6-8c3c-9aed4e41230a",
+  "id": "2e165177-5265-47f5-b181-fa8e74f93a0a",
   "prevId": "54c3c03a-b4e8-468e-8805-b29472132308",
   "version": "7",
   "dialect": "postgresql",
@@ -31,7 +31,7 @@
           "name": "to_org_id",
           "type": "text",
           "primaryKey": false,
-          "notNull": true
+          "notNull": false
         },
         "changed_by": {
           "name": "changed_by",
@@ -592,7 +592,24 @@
           "notNull": false
         }
       },
-      "indexes": {},
+      "indexes": {
+        "organization_single_default_idx": {
+          "name": "organization_single_default_idx",
+          "columns": [
+            {
+              "expression": "(true)",
+              "asc": true,
+              "isExpression": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "where": "\"organization\".\"default_for_bindings\" IS NOT NULL",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
       "foreignKeys": {},
       "compositePrimaryKeys": {},
       "uniqueConstraints": {
@@ -1528,133 +1545,6 @@
             },
             {
               "expression": "viewed_at",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
-      "foreignKeys": {},
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {},
-      "isRLSEnabled": false
-    },
-    "public.participant_reassignment_audit": {
-      "name": "participant_reassignment_audit",
-      "schema": "",
-      "columns": {
-        "reassignment_id": {
-          "name": "reassignment_id",
-          "type": "uuid",
-          "primaryKey": true,
-          "notNull": true,
-          "default": "gen_random_uuid()"
-        },
-        "user_id": {
-          "name": "user_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "from_org_id": {
-          "name": "from_org_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "to_org_id": {
-          "name": "to_org_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "binding": {
-          "name": "binding",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "reason": {
-          "name": "reason",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "changed_by": {
-          "name": "changed_by",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "changed_at": {
-          "name": "changed_at",
-          "type": "timestamp",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {
-        "participant_reassignment_audit_user_idx": {
-          "name": "participant_reassignment_audit_user_idx",
-          "columns": [
-            {
-              "expression": "user_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "changed_at",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "participant_reassignment_audit_from_idx": {
-          "name": "participant_reassignment_audit_from_idx",
-          "columns": [
-            {
-              "expression": "from_org_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "changed_at",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "participant_reassignment_audit_to_idx": {
-          "name": "participant_reassignment_audit_to_idx",
-          "columns": [
-            {
-              "expression": "to_org_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "changed_at",
               "isExpression": false,
               "asc": true,
               "nulls": "last"

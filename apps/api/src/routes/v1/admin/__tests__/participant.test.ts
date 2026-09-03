@@ -914,10 +914,8 @@ describe('POST /admin/participant', () => {
     // to be the acting org. A `network_service` caller is not an aggregator —
     // tagging its participants to the network's own org satisfied "every
     // entrant has an owner" on paper while leaving a verification queue nobody
-    // would open. This is `account_only` mode, so there is no profile and no
-    // domain; the default is per (network, domain), so rather than guessing
-    // `'seeker'` the tag is left unset and filled at first profile create,
-    // which is the first moment the domain is actually known.
+    // would open. No default is nominated in this test (the launch state), so
+    // the participant is left unowned.
     expect(dbState.updates).toHaveLength(1);
     expect(dbState.updates[0].set).toMatchObject({
       onboardedByOrgId: null,
@@ -957,12 +955,11 @@ describe('POST /admin/participant', () => {
     });
   });
 
-  it('defers the default tag in account_only mode, where no domain is known (SS-3)', async () => {
-    // The default is per (network, domain). `domain` is documented as
-    // defaulting to 'seeker', so guessing it here could hand a provider
-    // participant to the seeker aggregator — a misattribution that grants
-    // PII-decrypt rights to the wrong org and leaves no trace. The tag is
-    // left unset and filled at first profile create instead.
+  it('tags in account_only mode too — resolution needs no domain (SS-3)', async () => {
+    // Resolution is account-level, so `account_only` (which has no profile and
+    // therefore no domain) can still be tagged rather than deferred. This also
+    // means the request's optional `domain` field no longer steers which org
+    // inherits the participant's PII.
     dbState.signUpUserId = 'usr_voice_account_only';
     dbState.defaultAggregatorRows = [{ id: 'org_default_agg' }];
     const app = await buildApp({ org_id: 'org_ns_1', org_type: 'network_service' });
@@ -973,10 +970,15 @@ describe('POST /admin/participant', () => {
     });
     expect(res.statusCode).toBe(200);
     expect(dbState.updates[0].set).toMatchObject({
-      onboardedByOrgId: null,
-      onboardedByDefault: false,
+      onboardedByOrgId: 'org_default_agg',
+      onboardedByDefault: true,
+    });
+    expect(res.json()).toMatchObject({
+      onboarded_by_org_id: 'org_default_agg',
+      onboarded_by_default: true,
     });
   });
+
 
   it('aggregator acting org still owns the participants it onboards (SS-3 unchanged path)', async () => {
     dbState.signUpUserId = 'usr_new_agg_acct';

@@ -21,8 +21,9 @@ export interface GoLiveContext {
   /** `owner_required`: whether the profile owner has an owning aggregator. */
   hasOwner: boolean;
   /**
-   * `owner_required`: whether a default aggregator is configured for this
-   * binding at all. See guard 1 below.
+   * `owner_required`: whether a default aggregator is nominated at all. Binary
+   * because `organization_single_default_idx` guarantees at most one exists —
+   * there is no "two defaults" case to distinguish. See guard 1 below.
    */
   defaultConfigured: boolean;
   /**
@@ -52,11 +53,17 @@ export const GO_LIVE_GATE_CHECKS: Record<GoLiveGate, (ctx: GoLiveContext) => boo
    * invariant stated in `classifier.ts`'s header — deliberately, and it is
    * repeated there. Do not "tidy" either guard away:
    *
-   * Guard 1 — inert while no default aggregator is configured for this binding.
+   * Guard 1 — inert while no default aggregator is nominated.
    *   Product's answer to #640 Q1 is that the default arrives POST-launch: a
    *   real aggregator registers and goes live first, and only then is nominated.
    *   Without this guard, every self-signup profile would be frozen in `draft`
    *   from launch until that happens, so Q1 and Q4 would contradict each other.
+   *
+   *   This is only safe to express as a boolean because the database enforces
+   *   at most one default (`organization_single_default_idx`). If two orgs
+   *   could be defaults, "not configured" and "cannot tell" would be different
+   *   states needing OPPOSITE answers here, and treating them alike would make
+   *   the gate fail open on a misconfiguration.
    *
    * Guard 2 — blocks `draft → live` only; never demotes a profile that is
    *   already live. `classify_item` re-derives draft↔live on EVERY write, not
