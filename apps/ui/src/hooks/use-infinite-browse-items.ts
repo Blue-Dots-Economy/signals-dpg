@@ -4,6 +4,8 @@ import type { DiscoverFacetFilter, DiscoverSource } from '@/lib/network-api';
 import type { Item } from '@/lib/item-api';
 import type { DotNetworkSchema, DotNetworkDomain } from '@/engine/types';
 import { queryKeys } from '@/lib/query-keys';
+import { DEFAULT_BROWSE_AREA } from '@/lib/browse-discover';
+import type { BrowseArea, BrowseSort } from '@/lib/browse-discover';
 
 const BROWSE_STALE_TIME_MS = 90 * 1000;
 const BROWSE_CACHE_TTL_SECONDS = 90;
@@ -36,6 +38,12 @@ interface UseInfiniteBrowseItemsOpts {
   // re-rank, so paging resets and the feed refetches (Task 3 wires the real
   // value in from the page).
   anchorItemId?: string;
+  // #644: the area FILTER. Defaults to `{ mode: 'anywhere' }`, which sends no
+  // coordinates at all — the list is not location-bounded unless the user
+  // explicitly asks. Part of the query key, so changing it resets paging.
+  area?: BrowseArea;
+  // #644: explicit ordering. Also part of the query key.
+  sort?: BrowseSort;
 }
 
 interface UseInfiniteBrowseItemsResult {
@@ -66,6 +74,11 @@ interface UseInfiniteBrowseItemsResult {
   // "within X km". Undefined on the native browse path (no such concept) and
   // on discover when no location was sent (a non-geo search has no radius).
   distanceMeters?: number;
+  // #644: the order the SERVER actually applied (`meta.sort_applied`), which
+  // can differ from what was requested — `relevance` with no anchor and no
+  // text degrades to `newest`. The UI must label from THIS, never from the
+  // requested value, or it will claim an order it did not get.
+  sortApplied?: BrowseSort;
 }
 
 interface BrowsePage {
@@ -78,6 +91,7 @@ interface BrowsePage {
     degraded: boolean;
     partial?: boolean;
     distanceMeters?: number;
+    sortApplied?: BrowseSort;
   };
 }
 
@@ -107,6 +121,29 @@ export function useInfiniteBrowseItems(
   const filters = opts?.filters ?? [];
   const useDiscover = q.length > 0 || filters.length > 0 || (opts?.relevance ?? false);
   const anchorItemId = opts?.anchorItemId;
+  const area = opts?.area ?? DEFAULT_BROWSE_AREA;
+  const sort = opts?.sort ?? 'relevance';
+
+  // The AREA FILTER's centre — only in radius mode. #644: `anywhere` sends
+  // nothing, so signals-search builds no s_dwithin clause and the candidate
+  // set is the whole network.
+  const areaFilter =
+    area.mode === 'radius'
+      ? {
+          item_latitude: area.center.lat,
+          item_longitude: area.center.lng,
+          distance_meters: area.meters,
+        }
+      : undefined;
+
+  // The ORDERING centre — only for `nearest`, and only when the area filter
+  // has not already supplied one (signals-search reuses the filter's centre).
+  // This separation is what keeps "location may sort" distinct from "location
+  // filters": the viewer's coordinates order the feed without bounding it.
+  const orderingCenter =
+    sort === 'nearest' && !areaFilter && userLocation
+      ? { ordering_latitude: userLocation.lat, ordering_longitude: userLocation.lng }
+      : undefined;
 
   // Location + q/filters/mode are all part of the key so any change resets
   // paging (spec §5.1; #203 List PR Task 4 extends this to discover inputs) —
@@ -119,12 +156,22 @@ export function useInfiniteBrowseItems(
   // on the anchor).
   const filterKey = {
     limit: PROFILE_PAGE_SIZE,
-    lat: userLocation?.lat ?? null,
-    lng: userLocation?.lng ?? null,
     mode: useDiscover ? ('discover' as const) : ('native' as const),
     q,
     filters,
-    ...(useDiscover ? { anchorItemId: anchorItemId ?? null } : {}),
+    // Only the coordinates that actually reach the request belong in the key.
+    // #644: on the discover path a resolved location no longer affects a
+    // `relevance` or `newest` request at all, so keying on it would cause a
+    // needless refetch the moment geolocation resolves. The native path still
+    // orders by proximity, so it keeps lat/lng.
+    ...(useDiscover
+      ? {
+          area,
+          sort,
+          anchorItemId: anchorItemId ?? null,
+          ordering: orderingCenter ?? null,
+        }
+      : { lat: userLocation?.lat ?? null, lng: userLocation?.lng ?? null }),
   };
 
   const query = useInfiniteQuery({
@@ -145,9 +192,9 @@ export function useInfiniteBrowseItems(
             offset: pageParam,
             ...(q ? { q } : {}),
             ...(filters.length > 0 ? { filters } : {}),
-            ...(userLocation
-              ? { item_latitude: userLocation.lat, item_longitude: userLocation.lng }
-              : {}),
+            ...(areaFilter ?? {}),
+            ...(orderingCenter ?? {}),
+            sort,
             ...(anchorItemId ? { anchor_item_id: anchorItemId } : {}),
           },
           signal,
@@ -161,6 +208,7 @@ export function useInfiniteBrowseItems(
             source: res.meta.source,
             degraded: res.meta.degraded,
             distanceMeters: res.meta.distance_meters,
+            sortApplied: res.meta.sort_applied,
           },
         };
       }
@@ -238,5 +286,8 @@ export function useInfiniteBrowseItems(
     // that can meaningfully change page-to-page within the same feed, so the
     // latest loaded page's value is the correct one to surface.
     distanceMeters: lastPage?.meta.distanceMeters,
+    // Same reasoning as distanceMeters: a property of the current request, so
+    // the latest loaded page's value is the correct one to surface.
+    sortApplied: lastPage?.meta.sortApplied,
   };
 }
