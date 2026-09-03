@@ -31,7 +31,7 @@ interface UseMatchScoreReturn {
 // cosine-similarity quantity `/v1/relevance` computes), raw ~0-1, on
 // `networkItem.score` (see `item-api.ts`). Seed the badge with it — scaled to
 // the 0-10 internal scale the rest of match-score assumes
-// (`formatScorePercentage`/`getMatchScoreBand`) — so the card shows a % upfront
+// (`formatScorePercentage`) — so the card shows a % upfront
 // instead of requiring a click. It has no `confidence`/`signals`/`reasoning`
 // (those only come from `/v1/relevance`); `source: 'discover'` marks it as
 // such so badge/modal know to hide the confidence line. Absent on native
