@@ -145,7 +145,7 @@ export interface FetchNetworkMarkersQuery {
   /**
    * Facet filter, one entry per `item_state.<field>`. A value is either a
    * scalar (equality/containment match) or a `string[]` — the #203 Task 7
-   * multi-select case (`MapFiltersPanel`'s `selectedFields`) — serialized
+   * multi-select case (`BrowseFiltersPanel`'s `selectedFields`) — serialized
    * below as repeated params so the server parses it back into `string[]`
    * (see the comment at the serialization site).
    */
@@ -193,7 +193,7 @@ export async function fetchNetworkMarkers(
   // filter (unchanged, pre-#203 behavior).
   //
   // An ARRAY value (#203 Task 7 — the map's multi-select facet filters, e.g.
-  // `MapFiltersPanel`'s `selectedFields`) is the critical case: it MUST reach
+  // `BrowseFiltersPanel`'s `selectedFields`) is the critical case: it MUST reach
   // the server as a real array, not `String(value)` (which produced a single
   // comma-joined `"a,b"` string — inert against buildWhereClause's
   // `item_state ->> field = ANY(...)` facet filter, Task 3). The fix is to

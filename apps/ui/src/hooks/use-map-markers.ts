@@ -124,7 +124,7 @@ interface HeldBboxState {
  * `{ gender: ['female'] }`) — forwarded to the server as `item_state` and
  * folded into the query key so a filter change always produces a distinct
  * cache entry. Defaults to `{}` (no filters). `home-page.tsx` passes
- * `MapFiltersPanel`'s `selectedFields` (as `activeFieldFilters`) here (#203
+ * `BrowseFiltersPanel`'s `selectedFields` (as `activeFieldFilters`) here (#203
  * map-serverside-search Task 7); this parameter's shape has been stable
  * since Task 4, which wired the key ahead of the panel actually being
  * connected to it.

@@ -436,7 +436,7 @@ interface FiltersStubProps {
   viewMode?: ViewMode;
 }
 
-// The real panel has its own test suite (map-filters-panel.test.tsx); this stub
+// The real panel has its own test suite (browse-filters-panel.test.tsx); this stub
 // keeps the popover machinery out of the way while still driving home-page's
 // filter handlers and reflecting what the page hands back down.
 function FiltersStub({
@@ -467,8 +467,8 @@ function FiltersStub({
   );
 }
 
-vi.mock('@/components/map/map-filters-panel', () => ({
-  MapFiltersPanel: (props: FiltersStubProps) => <FiltersStub {...props} />,
+vi.mock('@/components/filters/browse-filters-panel', () => ({
+  BrowseFiltersPanel: (props: FiltersStubProps) => <FiltersStub {...props} />,
 }));
 
 // ─── harness ─────────────────────────────────────────────────────────────────

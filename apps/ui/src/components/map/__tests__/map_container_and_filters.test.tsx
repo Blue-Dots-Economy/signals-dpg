@@ -11,7 +11,7 @@ import {
   getRegisteredProviders,
 } from '@/engine/map/map-registry';
 import { FALLBACK_CENTER, FALLBACK_ZOOM, MapView } from '../map-container';
-import { MapFiltersPanel } from '../map-filters-panel';
+import { BrowseFiltersPanel } from '@/components/filters/browse-filters-panel';
 
 /**
  * Component-level tests for the two remaining uncovered halves of the map UI:
@@ -24,8 +24,8 @@ import { MapFiltersPanel } from '../map-filters-panel';
  *    provider is registered instead and renders every prop it receives as text
  *    so assertions stay DOM-level rather than mock-level.
  *
- *  - `MapFiltersPanel` (`map-filters-panel.tsx`) — the interactive branches the
- *    existing `map-filters-panel.test.tsx` deliberately does not touch (it only
+ *  - `BrowseFiltersPanel` (`browse-filters-panel.tsx`) — the interactive branches the
+ *    existing `browse-filters-panel.test.tsx` deliberately does not touch (it only
  *    asserts the trigger's presence): domain chips, enum chip toggling, the
  *    >8-option searchable dropdown, clear-all, close, the help-text variants
  *    and the mobile bottom-sheet chrome.
@@ -597,7 +597,7 @@ describe('MapView — loading, empty state and maximize', () => {
   });
 });
 
-// ─── MapFiltersPanel ─────────────────────────────────────────────────────────
+// ─── BrowseFiltersPanel ─────────────────────────────────────────────────────────
 
 function domain(id: string, properties: Record<string, unknown>): DotNetworkDomain {
   return {
@@ -645,7 +645,7 @@ async function openPanel() {
  */
 const districtToggle = () => screen.getByRole('button', { name: /^District/ });
 
-describe('MapFiltersPanel — domain chips', () => {
+describe('BrowseFiltersPanel — domain chips', () => {
   beforeEach(() => {
     bridge().isMobile = false;
   });
@@ -653,7 +653,7 @@ describe('MapFiltersPanel — domain chips', () => {
   it('humanises each domain id into a chip and toggles it on selection', async () => {
     const onDomainsChange = vi.fn();
     render(
-      <MapFiltersPanel
+      <BrowseFiltersPanel
         domains={[SEEKER, JOB_PROVIDER]}
         selectedDomains={[]}
         onDomainsChange={onDomainsChange}
@@ -675,7 +675,7 @@ describe('MapFiltersPanel — domain chips', () => {
   it('deselects an already-selected domain chip', async () => {
     const onDomainsChange = vi.fn();
     render(
-      <MapFiltersPanel
+      <BrowseFiltersPanel
         domains={[SEEKER, JOB_PROVIDER]}
         selectedDomains={['seeker', 'job_provider']}
         onDomainsChange={onDomainsChange}
@@ -695,7 +695,7 @@ describe('MapFiltersPanel — domain chips', () => {
 
   it('hides the domain group when the sidebar already scopes browse to one domain', async () => {
     render(
-      <MapFiltersPanel
+      <BrowseFiltersPanel
         domains={[SEEKER, JOB_PROVIDER]}
         selectedDomains={[]}
         onDomainsChange={() => {}}
@@ -716,7 +716,7 @@ describe('MapFiltersPanel — domain chips', () => {
 
   it('renders nothing at all when there is neither a domain group nor an enum group', () => {
     const { container } = render(
-      <MapFiltersPanel
+      <BrowseFiltersPanel
         domains={[domain('seeker', { bio: { type: 'string' } })]}
         selectedDomains={[]}
         onDomainsChange={() => {}}
@@ -729,14 +729,14 @@ describe('MapFiltersPanel — domain chips', () => {
   });
 });
 
-describe('MapFiltersPanel — enum chip groups', () => {
+describe('BrowseFiltersPanel — enum chip groups', () => {
   beforeEach(() => {
     bridge().isMobile = false;
   });
 
   it('derives the group label from the schema title, humanising the key when absent', async () => {
     render(
-      <MapFiltersPanel
+      <BrowseFiltersPanel
         domains={[SEEKER]}
         filterFieldDomains={[SEEKER, JOB_PROVIDER]}
         selectedDomains={[]}
@@ -756,7 +756,7 @@ describe('MapFiltersPanel — enum chip groups', () => {
   it('adds a value to the field selection', async () => {
     const onFieldsChange = vi.fn();
     render(
-      <MapFiltersPanel
+      <BrowseFiltersPanel
         domains={[SEEKER]}
         selectedDomains={[]}
         onDomainsChange={() => {}}
@@ -776,7 +776,7 @@ describe('MapFiltersPanel — enum chip groups', () => {
   it('drops the field key entirely when its last value is deselected', async () => {
     const onFieldsChange = vi.fn();
     render(
-      <MapFiltersPanel
+      <BrowseFiltersPanel
         domains={[SEEKER]}
         selectedDomains={[]}
         onDomainsChange={() => {}}
@@ -793,7 +793,7 @@ describe('MapFiltersPanel — enum chip groups', () => {
 
   it('badges the trigger with the total active count across domains and fields', () => {
     render(
-      <MapFiltersPanel
+      <BrowseFiltersPanel
         domains={[SEEKER, JOB_PROVIDER]}
         selectedDomains={['seeker']}
         onDomainsChange={() => {}}
@@ -807,7 +807,7 @@ describe('MapFiltersPanel — enum chip groups', () => {
 
   it('shows no count badge when nothing is selected', () => {
     render(
-      <MapFiltersPanel
+      <BrowseFiltersPanel
         domains={[SEEKER, JOB_PROVIDER]}
         selectedDomains={[]}
         onDomainsChange={() => {}}
@@ -820,7 +820,7 @@ describe('MapFiltersPanel — enum chip groups', () => {
   });
 });
 
-describe('MapFiltersPanel — clear all, close and help text', () => {
+describe('BrowseFiltersPanel — clear all, close and help text', () => {
   beforeEach(() => {
     bridge().isMobile = false;
   });
@@ -829,7 +829,7 @@ describe('MapFiltersPanel — clear all, close and help text', () => {
     const onDomainsChange = vi.fn();
     const onFieldsChange = vi.fn();
     render(
-      <MapFiltersPanel
+      <BrowseFiltersPanel
         domains={[SEEKER, JOB_PROVIDER]}
         selectedDomains={['seeker']}
         onDomainsChange={onDomainsChange}
@@ -847,7 +847,7 @@ describe('MapFiltersPanel — clear all, close and help text', () => {
 
   it('offers no Clear all link while nothing is selected', async () => {
     render(
-      <MapFiltersPanel
+      <BrowseFiltersPanel
         domains={[SEEKER, JOB_PROVIDER]}
         selectedDomains={[]}
         onDomainsChange={() => {}}
@@ -862,7 +862,7 @@ describe('MapFiltersPanel — clear all, close and help text', () => {
 
   it('closes the panel from its own X button', async () => {
     render(
-      <MapFiltersPanel
+      <BrowseFiltersPanel
         domains={[SEEKER, JOB_PROVIDER]}
         selectedDomains={[]}
         onDomainsChange={() => {}}
@@ -884,7 +884,7 @@ describe('MapFiltersPanel — clear all, close and help text', () => {
 
   it('tailors the empty-selection help text to the map view', async () => {
     render(
-      <MapFiltersPanel
+      <BrowseFiltersPanel
         domains={[SEEKER, JOB_PROVIDER]}
         selectedDomains={[]}
         onDomainsChange={() => {}}
@@ -902,7 +902,7 @@ describe('MapFiltersPanel — clear all, close and help text', () => {
 
   it('tailors the empty-selection help text to the list view', async () => {
     render(
-      <MapFiltersPanel
+      <BrowseFiltersPanel
         domains={[SEEKER, JOB_PROVIDER]}
         selectedDomains={[]}
         onDomainsChange={() => {}}
@@ -918,7 +918,7 @@ describe('MapFiltersPanel — clear all, close and help text', () => {
 
   it('hides the help text once a filter is active', async () => {
     render(
-      <MapFiltersPanel
+      <BrowseFiltersPanel
         domains={[SEEKER, JOB_PROVIDER]}
         selectedDomains={['seeker']}
         onDomainsChange={() => {}}
@@ -934,14 +934,14 @@ describe('MapFiltersPanel — clear all, close and help text', () => {
   });
 });
 
-describe('MapFiltersPanel — searchable dropdown for large option sets', () => {
+describe('BrowseFiltersPanel — searchable dropdown for large option sets', () => {
   beforeEach(() => {
     bridge().isMobile = false;
   });
 
   it('collapses a >8-option field into a dropdown that expands on click', async () => {
     render(
-      <MapFiltersPanel
+      <BrowseFiltersPanel
         domains={[MANY_OPTION_DOMAIN]}
         selectedDomains={[]}
         onDomainsChange={() => {}}
@@ -966,7 +966,7 @@ describe('MapFiltersPanel — searchable dropdown for large option sets', () => 
 
   it('summarises the selection count on the collapsed header', async () => {
     render(
-      <MapFiltersPanel
+      <BrowseFiltersPanel
         domains={[MANY_OPTION_DOMAIN]}
         selectedDomains={[]}
         onDomainsChange={() => {}}
@@ -984,7 +984,7 @@ describe('MapFiltersPanel — searchable dropdown for large option sets', () => 
 
   it('filters the checklist by the search box, case-insensitively', async () => {
     render(
-      <MapFiltersPanel
+      <BrowseFiltersPanel
         domains={[MANY_OPTION_DOMAIN]}
         selectedDomains={[]}
         onDomainsChange={() => {}}
@@ -1004,7 +1004,7 @@ describe('MapFiltersPanel — searchable dropdown for large option sets', () => 
 
   it('shows a no-matches message when the query excludes every option', async () => {
     render(
-      <MapFiltersPanel
+      <BrowseFiltersPanel
         domains={[MANY_OPTION_DOMAIN]}
         selectedDomains={[]}
         onDomainsChange={() => {}}
@@ -1024,7 +1024,7 @@ describe('MapFiltersPanel — searchable dropdown for large option sets', () => 
   it('toggles an option from the checklist and reflects its selected state', async () => {
     const onFieldsChange = vi.fn();
     render(
-      <MapFiltersPanel
+      <BrowseFiltersPanel
         domains={[MANY_OPTION_DOMAIN]}
         selectedDomains={[]}
         onDomainsChange={() => {}}
@@ -1050,7 +1050,7 @@ describe('MapFiltersPanel — searchable dropdown for large option sets', () => 
   });
 });
 
-describe('MapFiltersPanel — mobile bottom sheet', () => {
+describe('BrowseFiltersPanel — mobile bottom sheet', () => {
   beforeEach(() => {
     bridge().isMobile = true;
   });
@@ -1060,7 +1060,7 @@ describe('MapFiltersPanel — mobile bottom sheet', () => {
 
   it('opens the filter groups in a drawer instead of a popover, with a single close control', async () => {
     const { baseElement } = render(
-      <MapFiltersPanel
+      <BrowseFiltersPanel
         domains={[SEEKER, JOB_PROVIDER]}
         selectedDomains={[]}
         onDomainsChange={() => {}}

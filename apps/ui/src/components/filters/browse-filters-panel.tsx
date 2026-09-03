@@ -14,7 +14,16 @@ import { getEnumFilterFieldsForDomains } from '@/lib/enum-filters';
 import type { EnumFilterField } from '@/lib/enum-filters';
 import { MultiSelectGroup, CHIP_THRESHOLD } from '@/components/filters/multi-select-group';
 
-export interface MapFiltersPanelProps {
+/**
+ * The facet editor for BOTH browse views.
+ *
+ * Renamed from `MapFiltersPanel` and moved out of `components/map/` (#645):
+ * it has served the list view as well since #394, so the old name and location
+ * misdescribed it to every reader. It is the EDITOR — the applied-filter chip
+ * bar is the read-out (spec §7.1), and the two must not both try to own the
+ * state.
+ */
+export interface BrowseFiltersPanelProps {
   /** All visible domains (from the network config) to show as filter options. */
   domains: DotNetworkDomain[];
   /**
@@ -111,7 +120,7 @@ function FilterGroup({ title, children }: FilterGroupProps) {
  * Active-filter count is shown as a badge on the trigger pill.  A "Clear all"
  * link in the header resets all groups. An X button closes the popover.
  */
-export function MapFiltersPanel({
+export function BrowseFiltersPanel({
   domains,
   filterFieldDomains,
   selectedDomains,
@@ -120,7 +129,7 @@ export function MapFiltersPanel({
   onFieldsChange,
   showDomainToggle = true,
   viewMode = 'map',
-}: MapFiltersPanelProps) {
+}: BrowseFiltersPanelProps) {
   const { t } = useTranslation();
   const isMobile = useIsMobile();
   const [open, setOpen] = React.useState(false);

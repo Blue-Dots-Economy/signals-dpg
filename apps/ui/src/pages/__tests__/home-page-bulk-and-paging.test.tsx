@@ -530,8 +530,8 @@ vi.mock('@/components/map/map-container', () => ({
   MapView: () => <div data-testid="map-view" />,
 }));
 
-vi.mock('@/components/map/map-filters-panel', () => ({
-  MapFiltersPanel: () => <div data-testid="filters-panel" />,
+vi.mock('@/components/filters/browse-filters-panel', () => ({
+  BrowseFiltersPanel: () => <div data-testid="filters-panel" />,
 }));
 
 // The real ActionModal submits through RJSF, which doesn't fire under happy-dom

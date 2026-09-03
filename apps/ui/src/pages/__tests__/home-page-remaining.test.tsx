@@ -588,8 +588,8 @@ function FiltersStub({ filterFieldDomains, selectedFields, onFieldsChange }: Fil
   );
 }
 
-vi.mock('@/components/map/map-filters-panel', () => ({
-  MapFiltersPanel: (props: FiltersStubProps) => <FiltersStub {...props} />,
+vi.mock('@/components/filters/browse-filters-panel', () => ({
+  BrowseFiltersPanel: (props: FiltersStubProps) => <FiltersStub {...props} />,
 }));
 
 // RJSF doesn't submit under happy-dom (and ActionModal has its own suite), so

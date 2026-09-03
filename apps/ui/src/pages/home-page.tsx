@@ -29,7 +29,7 @@ import {
 } from '@/components/ui/dialog';
 import { ActionHandler } from '@/components/actions/action-handler';
 import { MapView } from '@/components/map/map-container';
-import { MapFiltersPanel } from '@/components/map/map-filters-panel';
+import { BrowseFiltersPanel } from '@/components/filters/browse-filters-panel';
 import { MarkerPopupCard } from '@/components/map/marker-popup-card';
 import { MapCountPill } from '@/components/map/map-count-pill';
 import '@/components/map/providers';
@@ -979,7 +979,7 @@ export function HomePage() {
   }, [network, selectedDomain, visibleDomains, myItem, setSearchParams]);
 
   // #203 Task 7: the enum-field facet filters (`mapSelectedFields`, driven by
-  // `MapFiltersPanel`) now reach the server on the MAP path — sent as
+  // `BrowseFiltersPanel`) now reach the server on the MAP path — sent as
   // `item_state.<field>` markers params (`network-api.ts`'s `fetchNetworkMarkers`
   // serializes each field's selected values as REPEATED query params, which
   // the server's `qs`-based parser auto-arrays into `string[]`, matching
@@ -1000,7 +1000,7 @@ export function HomePage() {
   // `item_state` fields, viewport-scoped, same as the list's search. The list
   // still applies `search` itself via `buildFilteredCardsForDomain` below;
   // the two are independent filters over the same query, not one deriving
-  // from the other. `MapFiltersPanel`'s enum-field facets, by contrast,
+  // from the other. `BrowseFiltersPanel`'s enum-field facets, by contrast,
   // drive the map server-side directly via `activeFieldFilters` — #394
   // removed the `filterable: true` gate that used to additionally restrict
   // this to a network.json-marked subset; every declared, non-private enum
@@ -1842,7 +1842,7 @@ export function HomePage() {
   };
 
   const filtersPanel = (
-    <MapFiltersPanel
+    <BrowseFiltersPanel
       domains={visibleDomains}
       filterFieldDomains={filterFieldDomains}
       selectedDomains={mapSelectedDomains}
@@ -1865,7 +1865,7 @@ export function HomePage() {
   // fallback now applies facet filters natively, that pausing no longer
   // applies and this is identical to `filtersPanel` above.
   const listFiltersPanel = (
-    <MapFiltersPanel
+    <BrowseFiltersPanel
       domains={visibleDomains}
       filterFieldDomains={filterFieldDomains}
       selectedDomains={mapSelectedDomains}
