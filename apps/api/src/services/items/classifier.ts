@@ -36,16 +36,14 @@ export interface ClassifierInput {
    */
   gates?: readonly GoLiveGate[];
   /**
-   * `owner_required` only (SS-3, #640): whether the owner has an owning
-   * aggregator, and whether a default aggregator is configured for this
-   * binding. Resolve with `resolveOwnerGateContext` and pass it whenever
+   * `owner_required` only (SS-3, #640). Resolve with
+   * `applyDefaultOwnerAndResolveGate` (`item_service.ts`) and pass it whenever
    * `gates` includes `owner_required`.
    *
-   * Omitted → treated as "a default is configured and the owner has none",
-   * i.e. the gate FAILS CLOSED. A call site that configures the gate but
-   * forgets to resolve the context leaves profiles in `draft`, which is
-   * visible and recoverable; the opposite default would silently publish
-   * unowned profiles.
+   * Omitted → FAILS CLOSED (treated as "a default exists and the owner has
+   * none"): a call site that configures the gate but forgets the context
+   * leaves profiles in `draft`, which is visible and recoverable, where the
+   * opposite default would silently publish unowned profiles.
    */
   owner_context?: { has_owner: boolean; default_configured: boolean };
 }
@@ -64,11 +62,9 @@ export interface ClassifierResult {
  * per domain (`go_live_required`), defaulting to `schema_required`.
  *
  * ⚠️ One documented exception to "EVERY configured gate must pass":
- * `owner_required` (SS-3, #640) lets an ALREADY-live profile through even when
- * it does not satisfy the gate, and is inert while no default aggregator is
- * configured. It is therefore the one gate that is not a pure function of the
- * item's own state. Both guards are load-bearing and explained on the registry
- * entry in `go_live_gates.ts` — read them before changing this function.
+ * `owner_required` (SS-3, #640) can let an already-`live` profile through when
+ * it does not satisfy the gate. Both guards are load-bearing — read
+ * `GO_LIVE_GATE_CHECKS.owner_required` before changing this function.
  * (Completion % is not produced here — the single completion metric is
  * `item_metrics.profile_completion_pct`, computed required-only via
  * `profile_completion_pct`, and is intentionally independent of the gate set.)

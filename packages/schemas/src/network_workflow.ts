@@ -12,9 +12,8 @@ const JsonSchemaDocumentSchema = z.record(z.string(), z.unknown());
 // enforces `consent_required` — see the resolver).
 //
 // `owner_required` (#640 / SS-3): the profile owner must have an owning
-// aggregator (`user.onboarded_by_org_id`). Unlike the other two it is NOT a
-// pure function of the item's own state — see the two guards documented on
-// `GO_LIVE_GATE_CHECKS.owner_required` in apps/api.
+// aggregator. Unlike the other two it is NOT a pure function of the item's own
+// state — see `GO_LIVE_GATE_CHECKS.owner_required` in apps/api for why.
 export const PROFILE_GO_LIVE_GATES = [
   'schema_required',
   'consent_required',
