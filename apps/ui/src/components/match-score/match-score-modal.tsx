@@ -22,6 +22,12 @@ export interface MatchScoreModalProps {
   networkItemName: string;
   onRecalculate: () => void;
   onProceed?: () => void;
+  /**
+   * #646 C4: the "why this result, in this position" panel. Optional so the
+   * modal still works where the caller has no schema/sort context to build it
+   * from (a public profile, My Actions).
+   */
+  explanation?: React.ReactNode;
 }
 
 export function MatchScoreModal({
@@ -33,6 +39,7 @@ export function MatchScoreModal({
   networkItemName,
   onRecalculate,
   onProceed,
+  explanation,
 }: MatchScoreModalProps) {
   const { t } = useTranslation();
   const scoreValue = score?.score ?? 0;
@@ -123,6 +130,8 @@ export function MatchScoreModal({
                   </div>
 
                 </div>
+
+                {explanation}
 
                 {/* #646 §5.5: the Matching Factors and AI Reasoning panels
                     are gone. They rendered `score.signals` and

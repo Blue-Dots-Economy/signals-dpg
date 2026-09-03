@@ -690,5 +690,12 @@
   "card.metric_days_ago": "{{count}} ದಿನಗಳ ಹಿಂದೆ",
   "card.metric_distance_desc": "ನಿಮ್ಮಿಂದ ದೂರ",
   "card.metric_age_desc": "ಇದನ್ನು ಯಾವಾಗ ಪೋಸ್ಟ್ ಮಾಡಲಾಗಿದೆ",
-  "match.tooltip_view_details": "ವಿವರಗಳಿಗಾಗಿ ಟ್ಯಾಪ್ ಮಾಡಿ"
+  "match.tooltip_view_details": "ವಿವರಗಳಿಗಾಗಿ ಟ್ಯಾಪ್ ಮಾಡಿ",
+  "match.explain_position_heading": "ಇದು ಏಕೆ ಇಲ್ಲಿದೆ",
+  "match.explain_fields_heading": "ಈ ಹೊಂದಿಕೆಗೆ ಬಳಸುವ ಕ್ಷೇತ್ರಗಳು",
+  "match.explain_weight": "ತೂಕ {{weight}}",
+  "match.explain_yours": "ನಿಮ್ಮದು",
+  "match.explain_theirs": "ಅವರದು",
+  "match.explain_illustrative": "ವಿವರಣೆಗಾಗಿ ತೋರಿಸಲಾಗಿದೆ. ಮಾದರಿ ಒಂದೇ ಸಂಯುಕ್ತ ಸ್ಕೋರ್ ನೀಡುತ್ತದೆ, ಆದ್ದರಿಂದ ಪ್ರತಿ ಕ್ಷೇತ್ರದ ಕೊಡುಗೆ ಎಷ್ಟು ಎಂದು ಹೇಳಲಾಗುವುದಿಲ್ಲ.",
+  "match.explain_set_heading": "ಈ ಫಲಿತಾಂಶಗಳನ್ನು ಸೀಮಿತಗೊಳಿಸುವವು"
 }

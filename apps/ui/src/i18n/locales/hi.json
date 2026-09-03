@@ -690,5 +690,12 @@
   "card.metric_days_ago": "{{count}} दिन पहले",
   "card.metric_distance_desc": "आपसे दूरी",
   "card.metric_age_desc": "यह कब पोस्ट हुआ",
-  "match.tooltip_view_details": "विवरण के लिए टैप करें"
+  "match.tooltip_view_details": "विवरण के लिए टैप करें",
+  "match.explain_position_heading": "यह यहाँ क्यों है",
+  "match.explain_fields_heading": "इस मेल में शामिल फ़ील्ड",
+  "match.explain_weight": "भार {{weight}}",
+  "match.explain_yours": "आपका",
+  "match.explain_theirs": "उनका",
+  "match.explain_illustrative": "केवल उदाहरण के लिए। मॉडल एक संयुक्त स्कोर देता है, इसलिए हम यह नहीं बता सकते कि प्रत्येक फ़ील्ड का योगदान कितना था।",
+  "match.explain_set_heading": "इन परिणामों को सीमित करने वाले"
 }

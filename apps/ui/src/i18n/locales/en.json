@@ -700,5 +700,12 @@
   "card.metric_days_ago": "{{count}}d ago",
   "card.metric_distance_desc": "Distance from you",
   "card.metric_age_desc": "When this was posted",
-  "match.tooltip_view_details": "Tap for details"
+  "match.tooltip_view_details": "Tap for details",
+  "match.explain_position_heading": "Why this is here",
+  "match.explain_fields_heading": "Fields that feed this relevance",
+  "match.explain_weight": "Weight {{weight}}",
+  "match.explain_yours": "Yours",
+  "match.explain_theirs": "Theirs",
+  "match.explain_illustrative": "Shown for illustration. The model produces one combined score, so we can't say how much each field contributed.",
+  "match.explain_set_heading": "Also narrowing these results"
 }
