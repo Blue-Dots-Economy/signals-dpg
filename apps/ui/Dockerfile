@@ -164,5 +164,24 @@ echo "[ui-variant] serving '${UI_VARIANT:-signals}' from ${ROOT}${UI_HOST_BINDIN
 exec "$@"
 EOF
 EXPOSE 80
+# Declared explicitly even though it changes nothing at runtime: the hardened
+# base already defaults to the unprivileged `nginx` user (uid 65532), which is
+# what the entrypoint and the port-80 bind above are written against. Trivy's
+# DS-0002 check is static — it looks for a literal USER instruction and reported
+# HIGH "specify at least 1 USER command" against this file despite the image
+# never running as root (#548). Numeric rather than `nginx` so the check
+# resolves it without a passwd lookup.
+USER 65532
+
+# Checks the docroot index over HTTP on the port the entrypoint writes into the
+# server block. `/` resolves for both variants (try_files $uri /index.html),
+# so this is correct whether UI_VARIANT is signals or tourist. Uses wget, which
+# this base does ship at /usr/bin/wget (unlike the hardened node image, which
+# ships no HTTP client at all) — verified against dhi.io/nginx:1.31-alpine.
+# Kubernetes ignores Docker HEALTHCHECKs; this serves compose users and scanners.
+# (Trivy DS-0026, #548)
+HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
+  CMD ["wget", "--quiet", "--tries=1", "--spider", "http://127.0.0.1:80/"]
+
 ENTRYPOINT ["/usr/local/bin/ui-variant-entrypoint.sh"]
 CMD ["nginx", "-g", "daemon off;"]
