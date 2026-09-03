@@ -1,4 +1,4 @@
-import { and, eq, isNull, sql, type SQL } from 'drizzle-orm';
+import { eq, sql, type SQL } from 'drizzle-orm';
 import { user } from '@api/db/postgres/schema/auth';
 import type { DbOrTx } from '@/services/db_types';
 import { resolveServedNetworkForDomain } from '@/utils/served_domain_guard';
