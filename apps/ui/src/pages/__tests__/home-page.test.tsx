@@ -626,6 +626,8 @@ describe('HomePage — signed-in default domain (#644)', () => {
     renderHome('/?view=list');
 
     await findCard('Acme Welding');
+    // One count, in the toolbar — it used to also render in the page header,
+    // 40px away, which is a duplicate the moment both are on screen.
     expect(screen.getByText('3 listings')).toBeInTheDocument();
     expect(screen.getByText('Showing 2 of 3')).toBeInTheDocument();
   });
@@ -663,20 +665,21 @@ describe('HomePage — signed-in default domain (#644)', () => {
 });
 
 describe('HomePage — domain tab switching', () => {
-  it('switches to a single-domain feed, retitles the header and records it in the URL', async () => {
+  it('switches the feed, retitles the header and records the domain in the URL', async () => {
+    // #644: `provider` is already the resolved default for a seeker, so
+    // switching has to target a DIFFERENT domain — re-picking the current one
+    // is deliberately a no-op (the list always needs exactly one domain, so
+    // there is nothing to deselect to).
     signedInSeeker();
     renderHome('/?view=list');
     await findCard('Acme Welding');
 
-    await userEvent.click(screen.getByRole('button', { name: 'Provider' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Mentor' }));
 
-    expect(await screen.findByRole('heading', { name: 'Provider' })).toBeInTheDocument();
-    expect(screen.getByText('Employers hiring')).toBeInTheDocument();
-    expect(url()).toContain('domain=provider');
-    // Now driven by the single-domain paged feed (2 loaded of 3).
-    expect(screen.getByText('Showing 2 of 3')).toBeInTheDocument();
-    expectNoCard('Rita Mentor');
-    expect(browseOptsFor('provider')?.enabled).toBe(true);
+    expect(await screen.findByRole('heading', { name: 'Mentor' })).toBeInTheDocument();
+    await waitFor(() => expect(url()).toContain('domain=mentor'));
+    expect(browseOptsFor('mentor')?.enabled).toBe(true);
+    expectNoCard('Acme Welding');
   });
 
   // #644 (spec D8): there is no "All" entry to return to. A `?domain=` naming

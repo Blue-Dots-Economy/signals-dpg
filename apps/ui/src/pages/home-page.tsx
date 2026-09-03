@@ -62,7 +62,11 @@ import {
   excludeOwnItems,
   buildFilteredCardsForDomain,
 } from '@/lib/browse-discover';
-import type { DerivedBrowseParams } from '@/lib/browse-discover';
+import type { DerivedBrowseParams, BrowseArea, BrowseSort } from '@/lib/browse-discover';
+import { DEFAULT_BROWSE_AREA } from '@/lib/browse-discover';
+import { BrowseToolbar } from '@/components/filters/browse-toolbar';
+import type { DomainOption } from '@/components/filters/domain-control';
+import type { AppliedChip } from '@/components/filters/applied-filter-chips';
 import { resolveDefaultDomain } from '@/lib/browse-domain';
 import { getServedScope } from '@/lib/served-binding';
 import { computeVisibleDomains } from '@/lib/visible-domains';
@@ -1085,18 +1089,22 @@ export function HomePage() {
     [userLocation],
   );
 
-  // #394: the list ALWAYS uses the discover BFF now — map the search box +
-  // facet selections to the shared discover params (see `deriveBrowseParams`;
-  // `relevance` is unconditionally true, there is no more ranked/proximity
-  // split). The resolved viewer location (`browseCoords`, from
-  // `LocationSourceToggle`/`preferredSource`) is ALWAYS forwarded too — it's
-  // `null` when none is available (no profile location AND browser location
-  // denied/unsupported), in which case discover just runs anchor-only (or
-  // fully unranked-by-location for a signed-out viewer).
+  // #644: the area filter and the sort are now explicit UI state.
+  //
+  // `area` defaults to `anywhere`, which sends NO coordinates — the list spans
+  // the whole network. Previously `browseCoords` was forwarded unconditionally
+  // and signals-search turns a spatial clause into a hard `s_dwithin` filter,
+  // so every signed-in viewer silently saw only items within ~30 km. The
+  // resolved location is now merely the CENTRE OFFERED when the user picks a
+  // radius, and the ordering centre when they pick `nearest`.
+  const [area, setArea] = React.useState<BrowseArea>(DEFAULT_BROWSE_AREA);
+  const [sort, setSort] = React.useState<BrowseSort>('relevance');
+
   const browseParams = React.useMemo<DerivedBrowseParams>(
-    () => deriveBrowseParams({ search, activeFieldFilters }),
-    [search, activeFieldFilters],
+    () => deriveBrowseParams({ search, activeFieldFilters, area, sort }),
+    [search, activeFieldFilters, area, sort],
   );
+  // Passed to the feed as the ORDERING centre only — it never filters.
   const browseLocation = browseCoords;
   // #394: shared discover params for both list paths — q/filters/relevance are
   // the same regardless of which domain is being browsed. `anchorItemId` is
@@ -1110,6 +1118,8 @@ export function HomePage() {
       q: browseParams.q,
       filters: browseParams.filters,
       relevance: browseParams.relevance,
+      area: browseParams.area,
+      sort: browseParams.sort,
     }),
     [browseParams],
   );
@@ -1179,6 +1189,9 @@ export function HomePage() {
   const listPartial = singleDomainList.partial;
   const listDegraded = singleDomainList.degraded;
   const listDistanceMeters = singleDomainList.distanceMeters;
+  // #644: label from what the server DID, never from what we asked for — a
+  // `relevance` request with no anchor and no text degrades to `newest`.
+  const listSortApplied = singleDomainList.sortApplied;
   // #394 (review fix): whether the viewer actually has a profile anchor being
   // sent for the browsed domain(s) — derived from the SAME rule that gates
   // the anchor itself (`anchorFor`/`anchorItemIdForTarget`, both built on
@@ -1437,7 +1450,94 @@ export function HomePage() {
   );
 
   // "All" tab: same filter applied per-domain to the accumulated paged union.
-  const handleDomainSelect = (domainId: string | null) => {
+  // #644/#645: one source of truth for the chip read-out. Every active
+  // constraint appears exactly once. Adding a constraint means adding it here
+  // AND in `handleRemoveChip` below — and nowhere else.
+  const appliedChips = React.useMemo<AppliedChip[]>(() => {
+    const out: AppliedChip[] = [];
+    const q = search.trim();
+    if (q) {
+      out.push({ kind: 'search', id: 'q', label: `"${q}"`, removable: true });
+    }
+    for (const [field, values] of Object.entries(activeFieldFilters)) {
+      if (values.length === 0) continue;
+      out.push({
+        kind: 'facet',
+        id: `facet:${field}`,
+        label: `${field}: ${values.join(', ')}`,
+        removable: true,
+      });
+    }
+    if (area.mode === 'radius') {
+      out.push({
+        kind: 'area',
+        id: 'area',
+        label: t('browse.area_radius', { km: Math.round(area.meters / 1000) }),
+        removable: true,
+      });
+    }
+    // Sort only appears when non-default, so the common case stays uncluttered.
+    if (sort !== 'relevance') {
+      out.push({ kind: 'sort', id: 'sort', label: t(`browse.sort_${sort}`), removable: true });
+    }
+    return out;
+  }, [search, activeFieldFilters, area, sort, t]);
+
+  const handleRemoveChip = React.useCallback((chip: AppliedChip) => {
+    switch (chip.kind) {
+      // Spec D25: this chip's editor is the app-bar box. Dropping the query
+      // but leaving the typed text sitting in that box would be a lie.
+      case 'search':
+        setSearch('');
+        break;
+      case 'facet': {
+        const field = chip.id.slice('facet:'.length);
+        setMapSelectedFields((prev) => {
+          const next = { ...prev };
+          delete next[field];
+          return next;
+        });
+        break;
+      }
+      case 'area':
+        setArea(DEFAULT_BROWSE_AREA);
+        break;
+      case 'sort':
+        setSort('relevance');
+        break;
+      case 'domain':
+        // Not removable: the list always needs exactly one domain.
+        break;
+    }
+  }, []);
+
+  const handleClearAll = React.useCallback(() => {
+    setSearch('');
+    setMapSelectedFields({});
+    setArea(DEFAULT_BROWSE_AREA);
+    setSort('relevance');
+  }, []);
+
+  // Spec D7: list EVERY domain in the network and explain the ones the viewer
+  // cannot browse. `computeVisibleDomains` is unchanged — the interaction
+  // matrix still governs what is fetchable; we only stop making whole domains
+  // silently vanish.
+  const domainOptions = React.useMemo<DomainOption[]>(() => {
+    const visibleIds = new Set(visibleDomains.map((d) => d.id));
+    return (network?.domains ?? []).map((d) => {
+      const label = formatDomainLabel(d.id, [d]) || d.id;
+      return {
+        id: d.id,
+        label,
+        available: visibleIds.has(d.id),
+        unavailableReason: visibleIds.has(d.id)
+          ? undefined
+          : t('browse.domain_unavailable', { domain: label }),
+      };
+    });
+  }, [network, visibleDomains, t]);
+
+  const handleDomainSelect = (domainId: string) => {
     setSelectedDomain(domainId);
     // Switching the browse domain changes the available filter fields, so reset
     // the map domain + enum-field selections: a leftover domain chip from
@@ -1446,11 +1546,7 @@ export function HomePage() {
     setMapSelectedDomains([]);
     setMapSelectedFields({});
     setSearchParams((prev) => {
-      if (domainId) {
-        prev.set('domain', domainId);
-      } else {
-        prev.delete('domain');
-      }
+      prev.set('domain', domainId);
       prev.delete('map_domains');
       for (const key of [...prev.keys()]) {
         if (key.startsWith('f_')) prev.delete(key);
@@ -1834,7 +1930,10 @@ export function HomePage() {
       <ContentHeader
         title={contentTitle}
         description={contentDescription}
-        count={contentLoading ? undefined : contentCount}
+        // #644: the count lives in the browse toolbar now. Rendering it here
+        // as well put two identical counts within ~40px of each other, and
+        // the toolbar's copy survives scrolling while this header does not.
+        count={undefined}
         noProfilePrompt={{ show: !myItem, networkId: selectedNetworkId ?? '' }}
         actions={headerActions}
       />
@@ -1883,9 +1982,10 @@ export function HomePage() {
       networks={pickNetworksForShell(showNetworkSelector, allNetworks)}
       selectedNetwork={selectedNetworkId}
       onNetworkSelect={handleNetworkSelect}
-      domains={visibleDomains}
-      selectedDomain={selectedDomain}
-      onDomainSelect={handleDomainSelect}
+      // #645 (spec D10): the sidebar no longer carries domain selection —
+      // domain IS a filter and now lives in the browse toolbar with the
+      // others. `hideBrowse` keeps the sidebar's other groups intact.
+      hideBrowse
       currentDomainLabel={currentDomainLabel}
       myItems={myItems}
       activeProfileId={activeProfileId}
@@ -1899,6 +1999,46 @@ export function HomePage() {
       viewMode={viewMode}
       onViewModeChange={handleViewModeChange}
       filtersSlot={listFiltersPanel}
+      toolbarSlot={
+        network ? (
+          <BrowseToolbar
+            viewMode={viewMode}
+            domainOptions={domainOptions}
+            // The map is multi-domain and takes its own selection; the list is
+            // single-select on the one domain driving its feed (spec D11).
+            selectedDomains={
+              viewMode === 'map'
+                ? mapSelectedDomains.length > 0
+                  ? mapSelectedDomains
+                  : visibleDomains.map((d) => d.id)
+                : selectedDomain
+                  ? [selectedDomain]
+                  : []
+            }
+            onDomainsChange={(next) => {
+              if (viewMode === 'map') {
+                handleMapDomainsChange(next);
+                return;
+              }
+              // Single-select: DomainControl always emits exactly one here.
+              if (next[0]) handleDomainSelect(next[0]);
+            }}
+            count={contentLoading ? undefined : contentCount}
+            sort={sort}
+            sortApplied={listSortApplied}
+            // `nearest` needs a centre to order around.
+            nearestAvailable={browseCoords !== null}
+            relevanceBasis={hasProfileAnchor ? 'profile' : search.trim() ? 'search' : null}
+            onSortChange={setSort}
+            area={area}
+            defaultCenter={browseCoords}
+            onAreaChange={setArea}
+            chips={appliedChips}
+            onRemoveChip={handleRemoveChip}
+            onClearAll={handleClearAll}
+          />
+        ) : undefined
+      }
     >
       {renderPageHeader()}
       {showLocationBanner && (

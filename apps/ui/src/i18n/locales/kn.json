@@ -680,5 +680,8 @@
   "browse.area_label": "ಪ್ರದೇಶ",
   "browse.area_anywhere": "ಎಲ್ಲಿಯಾದರೂ",
   "browse.area_radius": "{{km}} ಕಿಮೀ ಒಳಗೆ",
-  "browse.area_radius_unavailable": "ಪ್ರದೇಶ ಸೀಮಿತಗೊಳಿಸಲು ನಿಮ್ಮ ಸ್ಥಳ ಬೇಕು"
+  "browse.area_radius_unavailable": "ಪ್ರದೇಶ ಸೀಮಿತಗೊಳಿಸಲು ನಿಮ್ಮ ಸ್ಥಳ ಬೇಕು",
+  "browse.no_filters": "ಯಾವುದೇ ಫಿಲ್ಟರ್ ಅನ್ವಯಿಸಿಲ್ಲ",
+  "browse.count_listings": "{{count}} ಪಟ್ಟಿಗಳು",
+  "browse.domain_unavailable": "ನೀವು {{domain}} ಜೊತೆ ಸಂಪರ್ಕಿಸಲಾಗುವುದಿಲ್ಲ"
 }

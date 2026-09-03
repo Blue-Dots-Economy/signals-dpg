@@ -680,5 +680,8 @@
   "browse.area_label": "क्षेत्र",
   "browse.area_anywhere": "कहीं भी",
   "browse.area_radius": "{{km}} किमी के भीतर",
-  "browse.area_radius_unavailable": "क्षेत्र सीमित करने के लिए आपका स्थान आवश्यक है"
+  "browse.area_radius_unavailable": "क्षेत्र सीमित करने के लिए आपका स्थान आवश्यक है",
+  "browse.no_filters": "कोई फ़िल्टर लागू नहीं",
+  "browse.count_listings": "{{count}} सूचियाँ",
+  "browse.domain_unavailable": "आप {{domain}} से नहीं जुड़ सकते"
 }

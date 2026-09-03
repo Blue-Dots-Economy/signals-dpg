@@ -20,9 +20,15 @@ interface PageShellProps {
   networks?: DotNetworkSchema[];
   selectedNetwork?: string | null;
   onNetworkSelect?: (networkId: string) => void;
-  domains: DotNetworkDomain[];
-  selectedDomain: string | null;
-  onDomainSelect: (domainId: string | null) => void;
+  /**
+   * Sidebar Browse group. Optional since #645 (spec D10): domain selection
+   * moved out of the sidebar into the browse toolbar, so the browse page
+   * passes `hideBrowse` and omits these. Form pages that still want the
+   * group keep supplying them.
+   */
+  domains?: DotNetworkDomain[];
+  selectedDomain?: string | null;
+  onDomainSelect?: (domainId: string | null) => void;
   currentDomainLabel?: string;
   myItems?: Item[];
   activeProfileId?: string | null;
@@ -35,6 +41,19 @@ interface PageShellProps {
   onViewModeChange?: (mode: ViewMode) => void;
   /** Optional Filters control surfaced in the top bar next to the search input. */
   filtersSlot?: React.ReactNode;
+  /**
+   * Browse state bar (#644, spec §7.2) — domain, sort, area and the applied
+   * filter chips. Rendered BETWEEN the top bar and the scroll area, as a
+   * sibling of `<main>` rather than a `sticky` element inside it.
+   *
+   * That placement is the whole trick. `<main>` is the scroll container
+   * (`overflow-y-auto` in an `h-svh` flex column), so anything outside it is
+   * structurally pinned and needs no `sticky` and no `top-N` offset. A sticky
+   * child of `<main>` would have needed an offset equal to the top bar's
+   * height — and the top bar is `flex-wrap`, so its height changes with
+   * viewport width and any hardcoded offset would gap or overlap.
+   */
+  toolbarSlot?: React.ReactNode;
   /** Label for the form-variant Back control (defaults to "Back" in TopBar). */
   backLabel?: string;
   /** Hide the sidebar's Browse (domain selector) group — form pages. */
@@ -69,6 +88,7 @@ export function PageShell({
   viewMode,
   onViewModeChange,
   filtersSlot,
+  toolbarSlot,
   backLabel,
   hideBrowse,
   footerSlot,
@@ -87,9 +107,9 @@ export function PageShell({
           networks={networks}
           selectedNetwork={selectedNetwork}
           onNetworkSelect={onNetworkSelect}
-          domains={domains}
-          selectedDomain={selectedDomain}
-          onDomainSelect={onDomainSelect}
+          domains={domains ?? []}
+          selectedDomain={selectedDomain ?? null}
+          onDomainSelect={onDomainSelect ?? (() => {})}
           currentDomainLabel={currentDomainLabel}
           myItems={myItems}
           activeProfileId={activeProfileId}
@@ -111,6 +131,11 @@ export function PageShell({
             onViewModeChange={onViewModeChange}
             filtersSlot={filtersSlot}
           />
+          {toolbarSlot && (
+            // `flex-none` so it keeps its natural height instead of being
+            // squeezed by the flex column, matching `footerSlot` below.
+            <div className="flex-none border-b bg-background">{toolbarSlot}</div>
+          )}
           <main
             id="main-content"
             // `min-h-0` is load-bearing: without it a flex child defaults to

@@ -1,0 +1,118 @@
+import { describe, it, expect, vi } from 'vitest';
+import { render, screen } from '@testing-library/react';
+import { BrowseToolbar } from '../browse-toolbar';
+import type { BrowseToolbarProps } from '../browse-toolbar';
+
+const base: BrowseToolbarProps = {
+  viewMode: 'list',
+  domainOptions: [
+    { id: 'provider', label: 'Provider', available: true },
+    { id: 'trainer', label: 'Trainer', available: true },
+  ],
+  selectedDomains: ['provider'],
+  onDomainsChange: vi.fn(),
+  count: 248,
+  sort: 'relevance',
+  sortApplied: 'relevance',
+  nearestAvailable: true,
+  relevanceBasis: 'profile',
+  onSortChange: vi.fn(),
+  area: { mode: 'anywhere' },
+  defaultCenter: { lat: 12.97, lng: 77.59 },
+  onAreaChange: vi.fn(),
+  chips: [],
+  onRemoveChip: vi.fn(),
+  onClearAll: vi.fn(),
+};
+
+describe('BrowseToolbar', () => {
+  it('renders the domain control, sort, area and the result count', () => {
+    render(<BrowseToolbar {...base} />);
+    expect(screen.getByRole('group', { name: /domain/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /sort/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /area/i })).toBeInTheDocument();
+    expect(screen.getByText(/248/)).toBeInTheDocument();
+  });
+
+  it('omits the count while it is still loading', () => {
+    render(<BrowseToolbar {...base} count={undefined} />);
+    expect(screen.queryByText(/248/)).toBeNull();
+  });
+
+  it('OMITS the sort control on the map — absent, not disabled (spec D26)', () => {
+    render(<BrowseToolbar {...base} viewMode="map" />);
+    expect(screen.queryByRole('button', { name: /sort/i })).toBeNull();
+    // Area still applies to the map.
+    expect(screen.getByRole('button', { name: /area/i })).toBeInTheDocument();
+  });
+
+  it('uses single-select domain on the list and multi-select on the map', () => {
+    const { rerender } = render(<BrowseToolbar {...base} viewMode="list" />);
+    expect(screen.getByRole('button', { name: /Provider/ })).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    );
+    expect(screen.getByRole('button', { name: /Trainer/ })).toHaveAttribute(
+      'aria-pressed',
+      'false',
+    );
+
+    rerender(
+      <BrowseToolbar {...base} viewMode="map" selectedDomains={['provider', 'trainer']} />,
+    );
+    expect(screen.getByRole('button', { name: /Trainer/ })).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    );
+  });
+
+  it('keeps row 2 present in both chip states, so the list below does not shift', () => {
+    // A bar that changed height as chips came and went would move the list
+    // under the user's thumb mid-scroll (spec §7.2).
+    const { rerender } = render(<BrowseToolbar {...base} chips={[]} />);
+    expect(screen.getByTestId('toolbar-row-2')).toBeInTheDocument();
+    expect(screen.getByText(/no filters applied/i)).toBeInTheDocument();
+
+    rerender(
+      <BrowseToolbar
+        {...base}
+        chips={[{ kind: 'facet', id: 'facet:sector', label: 'Sector: Energy', removable: true }]}
+      />,
+    );
+    expect(screen.getByTestId('toolbar-row-2')).toBeInTheDocument();
+    expect(screen.queryByText(/no filters applied/i)).toBeNull();
+    expect(screen.getByTestId('applied-chip')).toHaveTextContent('Sector: Energy');
+  });
+
+  it('labels sort from what the server applied, not what was requested', () => {
+    render(<BrowseToolbar {...base} sort="relevance" sortApplied="newest" relevanceBasis={null} />);
+    expect(screen.getByRole('button', { name: /sort/i })).toHaveTextContent(/newest/i);
+  });
+
+  it('is not sticky itself — PageShell pins it structurally', () => {
+    // A `sticky` class here would need an offset equal to the top bar's
+    // height, and that bar is flex-wrap so its height varies by viewport.
+    render(<BrowseToolbar {...base} />);
+    expect(screen.getByTestId('browse-toolbar').className).not.toMatch(/sticky/);
+  });
+
+  it('surfaces an unavailable domain with its reason', () => {
+    render(
+      <BrowseToolbar
+        {...base}
+        domainOptions={[
+          ...base.domainOptions,
+          {
+            id: 'seeker',
+            label: 'Seeker',
+            available: false,
+            unavailableReason: "You can't connect with other seekers",
+          },
+        ]}
+      />,
+    );
+    const seeker = screen.getByRole('button', { name: /Seeker/ });
+    expect(seeker).toBeDisabled();
+    expect(seeker).toHaveAccessibleDescription(/can't connect with other seekers/i);
+  });
+});
