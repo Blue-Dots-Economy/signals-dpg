@@ -7,7 +7,9 @@ import {
   excludeOwnItems,
   isDiscoverActive,
   resolveListNote,
+  DEFAULT_BROWSE_AREA,
 } from './browse-discover';
+import type { BrowseArea } from './browse-discover';
 import type { NetworkInteractionActions } from './browse-discover';
 import type { EnumFilterField } from './enum-filters';
 import type { Item } from './item-api';
@@ -290,5 +292,48 @@ describe('excludeOwnItems', () => {
       discover: true,
     });
     expect(cards.map((c) => c.id)).toEqual(['other']);
+  });
+});
+
+
+// ─── #644: area defaults to anywhere, sort becomes explicit ─────────────────
+
+describe('deriveBrowseParams — area is opt-in (#644)', () => {
+  it('defaults to anywhere when no area is given', () => {
+    const p = deriveBrowseParams({ search: '', activeFieldFilters: {} });
+    expect(p.area).toEqual({ mode: 'anywhere' });
+  });
+
+  it('exports the default so the page and its tests share one source of truth', () => {
+    expect(DEFAULT_BROWSE_AREA).toEqual({ mode: 'anywhere' });
+  });
+
+  it('passes a radius area through unchanged', () => {
+    const area: BrowseArea = {
+      mode: 'radius',
+      center: { lat: 12.97, lng: 77.59 },
+      meters: 25000,
+    };
+    expect(deriveBrowseParams({ search: '', activeFieldFilters: {}, area }).area).toEqual(area);
+  });
+
+  it('defaults sort to relevance — the BFF downgrades it when there is nothing to rank by', () => {
+    expect(deriveBrowseParams({ search: '', activeFieldFilters: {} }).sort).toBe('relevance');
+  });
+
+  it('passes an explicit sort through', () => {
+    expect(
+      deriveBrowseParams({ search: '', activeFieldFilters: {}, sort: 'newest' }).sort,
+    ).toBe('newest');
+  });
+
+  it('still maps search text and facets as before', () => {
+    const p = deriveBrowseParams({
+      search: '  solar  ',
+      activeFieldFilters: { sector: ['energy'] },
+    });
+    expect(p.q).toBe('solar');
+    expect(p.filters).toEqual([{ field: 'sector', values: ['energy'] }]);
+    expect(p.relevance).toBe(true);
   });
 });
