@@ -116,6 +116,33 @@ message: {
 
 Additive, so old callers ignore it.
 
+### 2.1 Known imprecision on the inferred path
+
+When no `sort` is sent, ordering stays on the historical inferred branch —
+which for recency is `s.indexed_at DESC`, **not** `i.created_at DESC` (§3 keeps
+it that way for backward compatibility). `sort_applied` then reports
+`'newest'`, which is the only recency label the enum carries, even though the
+column differs.
+
+Accepted, not a bug to fix: Signals-DPG always sends an explicit `sort` (its
+BFF defaults it via `resolveDiscoverSort` and forwards it unconditionally), so
+the inferred path is reachable only by legacy callers and Raya's
+`/v1/search/flat`, and no user-facing label is derived from it there. A fourth
+enum value would pollute the contract for a path that is on its way out.
+
+### 2.2 `orderingCenter` must not leak into the distance projection
+
+`orderingCenter` may be passed into the SQL layer **only when the applied sort
+is `nearest`**. Resolving it eagerly (e.g. falling back to the anchor's stored
+location for every anchored search) makes the distance expression non-NULL, so
+**every anchor search would start emitting `distanceMeters` on every item** —
+a silent change to the response shape Signals-DPG already consumes, and it
+breaks the existing "no geo → no distance" assertion in
+`search_route.test.ts`.
+
+When a spatial **filter** is present the distance projection still comes from
+its centre, exactly as today. Only the ordering centre is gated.
+
 ---
 
 ## 3. signals-search `ORDER BY` — exact SQL
@@ -289,3 +316,5 @@ Expect   - NO ST_DWithin predicate in the SQL (nearest must not filter)
 | Date | Change |
 | --- | --- |
 | 2026-09-03 | Frozen. Initial version. |
+| 2026-09-03 | Clarifications only, no shape change: §2.1 (the inferred path reports `'newest'` while ordering by `indexed_at`) and §2.2 (`orderingCenter` reaches the SQL layer only under `sort: 'nearest'`, or every anchor search starts emitting `distanceMeters`). Both surfaced while implementing; neither alters a field or a rule. |
+| 2026-09-03 | Note on §5: the radius Signals-DPG SENDS is `distance_meters ?? env` and is legitimately **absent** when neither is set — signals-search then applies `SEARCH_DEFAULT_DISTANCE_METERS`. `meta.distance_meters` folds in DPG's mirror of that default for **reporting only**; it is never put on the wire. |
