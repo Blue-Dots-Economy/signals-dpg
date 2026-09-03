@@ -56,8 +56,21 @@ log() { echo "[stack-up] $*" >&2; }
 # file, the reuse marker) belong to THIS worktree's e2e/run/, regardless of
 # which checkout is actually running the stack or where the caller invoked
 # this script from.
-HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-E2E_DIR="$(cd "$HERE/../../../../e2e" && pwd)"
+# `-P` resolves every symlink component (this skill is normally installed as
+# a symlink at ~/.claude/skills/signals-e2e) — without it, `cd`+`pwd` return
+# the logical, still-symlinked path, and climbing out of that with relative
+# `..`s lands outside the repo entirely rather than at its real e2e/ (see
+# run.sh's matching comment, F2, for the full story and how it was confirmed
+# live). Guarded rather than trusted blindly: this script only sets
+# `-uo pipefail`, not `-e`, so a failed `cd` inside `$(...)` would otherwise
+# silently collapse E2E_DIR to "" and let every later use of it run against
+# an empty/wrong path instead of stopping here.
+HERE="$(cd -P "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
+E2E_DIR="$(cd -P "$HERE/../../../../e2e" 2>/dev/null && pwd -P)"
+if [ -z "$E2E_DIR" ] || [ ! -d "$E2E_DIR" ]; then
+  log "FAIL: could not resolve e2e/ from this script's own location ($HERE/../../../../e2e)."
+  exit 1
+fi
 RUN_DIR="$E2E_DIR/run/$RUN"
 mkdir -p "$RUN_DIR"
 ENV_OUT="$RUN_DIR/env.sh"
@@ -75,7 +88,11 @@ emit_export() {
   printf "export %s='%s'\n" "$key" "$escaped" >> "$ENV_OUT"
 }
 
-SCRIPT_REPO="$(cd "$HERE/../../../.." && pwd)"
+SCRIPT_REPO="$(cd -P "$HERE/../../../.." 2>/dev/null && pwd -P)"
+if [ -z "$SCRIPT_REPO" ] || [ ! -d "$SCRIPT_REPO" ]; then
+  log "FAIL: could not resolve this script's own repo root from $HERE/../../../.."
+  exit 1
+fi
 REPO="${SIGNALS_REPO:-$SCRIPT_REPO}"
 STACK_ENV="$REPO/.env"
 

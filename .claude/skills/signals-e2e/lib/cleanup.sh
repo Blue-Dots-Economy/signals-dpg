@@ -41,15 +41,31 @@ if [ "${#RUN_ID}" -lt "$MIN_RUN_ID_LEN" ]; then
   exit 1
 fi
 
-HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-E2E_DIR="$(cd "$HERE/../../../../e2e" && pwd)"
+# `-P` resolves every symlink component (this skill is normally installed as
+# a symlink at ~/.claude/skills/signals-e2e) — without it, `cd`+`pwd` return
+# the still-symlinked logical path, and climbing out of that with relative
+# `..`s lands outside the repo entirely rather than at its real e2e/ (see
+# run.sh's matching comment, F2, for the full story). Guarded, not trusted
+# blindly: this script only sets `-uo pipefail`, not `-e`, so a failed `cd`
+# inside `$(...)` would otherwise silently collapse E2E_DIR to "" rather than
+# stopping here.
+HERE="$(cd -P "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
+E2E_DIR="$(cd -P "$HERE/../../../../e2e" 2>/dev/null && pwd -P)"
+if [ -z "$E2E_DIR" ] || [ ! -d "$E2E_DIR" ]; then
+  echo "[cleanup] FAIL — could not resolve e2e/ from this script's own location ($HERE/../../../../e2e)." >&2
+  exit 1
+fi
 SNAP_DIR="$E2E_DIR/run/$RUN_ID"
 mkdir -p "$SNAP_DIR"
 
 # Same SIGNALS_REPO indirection run.sh/stack-up.sh use (this worktree has no
 # root .env of its own) — needed below to read REDIS_PASSWORD the way
 # search-indexer.mjs does, instead of relying on a var nothing ever exports.
-SCRIPT_REPO="$(cd "$HERE/../../../.." && pwd)"
+SCRIPT_REPO="$(cd -P "$HERE/../../../.." 2>/dev/null && pwd -P)"
+if [ -z "$SCRIPT_REPO" ] || [ ! -d "$SCRIPT_REPO" ]; then
+  echo "[cleanup] FAIL — could not resolve this script's own repo root from $HERE/../../../.." >&2
+  exit 1
+fi
 REPO="${SIGNALS_REPO:-$SCRIPT_REPO}"
 STACK_ENV="$REPO/.env"
 

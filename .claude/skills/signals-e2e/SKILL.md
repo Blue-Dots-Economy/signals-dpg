@@ -5,33 +5,30 @@ description: Bring the local Signals DPG stack up if it is not already running (
 
 # signals-e2e — one command to test Signals and sign off on it
 
-## 0. Stack: reuse it, or bring it up — do this before anything else
+## 0. Stack: reuse it, or bring it up — `lib/run.sh` does this itself now
 
-**You own this step; the scripts do not.** `lib/stack-up.sh` deliberately only
-*verifies* a live target and fails after ~40s if nothing answers — starting a
-stack means writing `.env` files and launching processes, which is
-a separate concern from asserting behaviour, so it lives in
-`references/bringing-the-stack-up.md` rather than in `lib/`.
+**You do not need to hand-run anything first.** `lib/run.sh` probes the
+requested dot itself: if something already answers, it verifies-only
+(`lib/stack-up.sh`); if nothing does, it brings a stack up itself
+(`lib/bring-stack-up.sh` — a real, executable script, not a doc to
+transcribe) and *then* verifies. Either way, `lib/run.sh` is always the one
+command to run — see §6.
 
-So, at the top of every invocation:
+`lib/bring-stack-up.sh` is self-contained: env (including the e2e-only
+`CREATE_TEST_OTP`, the three `NOTIFICATION_SERVICE_*` vars the mail oracle
+needs, and `SIGNALS_SEARCH_URL`/`SIGNALS_SEARCH_API_KEY` pointed at the search
+stub — both matter, not just the URL), infra, schema,
+cache clears, the direct API + UI launch, and a verification step that
+refuses to continue on an empty schema count. It identifies whatever is
+already listening on a port before touching it — it will not kill a process
+it cannot positively identify as Signals' own (a real machine had the *Blue
+Dots aggregator* portal, a different product, on the UI's usual port).
+`references/bringing-the-stack-up.md` documents it and covers running it
+directly (e.g. to bring a stack up without running the suite yet) — it no
+longer duplicates the recipe.
 
-```bash
-# Is a stack already serving the requested dot?
-curl -sf "http://localhost:2742/api/v1/network/schemas?network=<network-id>" >/dev/null && echo LIVE || echo DEAD
-```
-
-- **LIVE, right dot** → reuse it. Say so, and continue to §5's phases.
-- **DEAD, or serving a different dot** → bring one up yourself now, following
-  `references/bringing-the-stack-up.md`. It is self-contained: env (including
-  the e2e-only `CREATE_TEST_OTP` and the three `NOTIFICATION_SERVICE_*` vars
-  the mail oracle needs), infra, schema, cache clears, the direct API launch,
-  and a verification step that refuses to continue on an empty schema count.
-  Do not ask the caller to do this themselves — the whole point of this skill
-  is that one invocation tests Signals end to end.
-- Note the network **id** is not always the directory name (`yellow_dot` →
-  `onest_yellow_dot`); §2's matrix has both.
-
-Only once a stack answers do you run `lib/run.sh`.
+Note the network **id** is not always the directory name (`yellow_dot` →
+`onest_yellow_dot`); §2's matrix has both.
 
 `/signals-e2e [dot] [alias]` runs the suite; `/signals-e2e cleanup [tag]` tears
 down a prior or orphaned run on demand. `dot` defaults to `blue_dot`; an
@@ -109,9 +106,9 @@ seams between suites.
 | Phase | What | Owner |
 |---|---|---|
 | −1 (once) | Fix the drift audit's static defects, run green against a live stack, *before* trusting any result from this suite | done — Task 3 |
-| −0.5 (every invocation) | **Reuse a live stack, or bring one up** — §0 + `references/bringing-the-stack-up.md` | you, the agent running this skill |
+| −0.5 (every invocation) | **Reuse a live stack, or bring one up** — §0, fully automatic now | `lib/run.sh` (probes, then `lib/bring-stack-up.sh` only if nothing answers) |
 | 0 | Preflight: docker, node ≥24, ports, the notification-env triple-check | `lib/run.sh` |
-| 1 | Verify the (now-live) stack, start the 3 stubs, snapshot the DB. `lib/stack-up.sh` only *verifies* — §0 is what guarantees something is there to verify. | `lib/run.sh` |
+| 1 | Verify the (now-live) stack, start the 3 stubs, snapshot the DB. `lib/stack-up.sh` only *verifies* — phase −0.5 is what guarantees something is there to verify. | `lib/run.sh` |
 | 2 | API tier — deterministic, no browser | `npm run e2e:api` via `lib/run.sh` |
 | 3 | UI tier — headed, so the run is watchable | `npm run e2e:ui -- --headed` via `lib/run.sh` |
 | 4 | Mail sweep (parked for Plan 2 — no spec wires the sink yet) | — |
@@ -129,7 +126,7 @@ of Playwright.
 |---|---|---|
 | `aria-disabled` consent gate | Playwright doesn't wait on `aria-disabled`; a plain `.click()` no-ops. Use `passConsentGate(page)` (`e2e/src/ui.ts`), which waits on the "That's everything" hint text instead. |
 | Blank-UI env pair | `VITE_NETWORK_ID` / `VITE_API_URL` must agree across root `.env` **and** `apps/ui/.env` — root wins. A mismatch renders a blank UI with no console error. |
-| UI port ambiguity | On this machine `:3000` is the **aggregator** portal (Next.js), not Signals (`:5173`). `stack-up.sh` probes both and verifies identity via the `/src/main.tsx` module-script marker — a 200 alone is not enough. |
+| UI port ambiguity | On this machine `:3000` is the **aggregator** portal (Next.js), not Signals (`:5173`). `stack-up.sh` probes both and verifies identity via the `/src/main.tsx` module-script marker — a 200 alone is not enough. `bring-stack-up.sh` uses the same marker before it will kill anything on `:3000`, and refuses to kill an unidentified listener there at all. |
 | Array-facet `contains_any` | A single-value selection on an array-valued facet **must** emit `contains_any` (jsonb `?|`), never `in` — `in` extracts the field as text and silently returns zero rows. Demonstrated live in Task 6. |
 | Map count < list total | *Expected*, not a bug: un-geocoded migrated rows plus the map's viewport scope. **Not currently asserted anywhere** — suite 7 (map) has no spec at all yet (parked for Plan 2), and zero specs in this suite use `@known` today. When suite 7 is written, this behaviour must be annotated `@known`, not left to fail as a surprise. |
 | `x-uri` through a `$ref` | `applyUriPatterns` walks `properties`/`items` but not `$defs`/`definitions` — a field marked through a shared `$ref` gets no pattern and its validation silently does nothing. Not asserted by any spec today either. |
@@ -139,14 +136,16 @@ of Playwright.
 
 ## 6. Running it
 
-**Before any of this**: the stack must already be live. `run.sh`
-(`stack-up.sh`) verifies and waits — it does not bring anything up — so run
-§0's recipe first, once, for whichever dot you're about to test.
-Also confirm the target's `.env` has `NOTIFICATION_SERVICE_ENDPOINT` pointed
-at the notify-sink (`http://localhost:4545`) and, if you need the search
-stub's envelope recorder to see traffic, `SIGNALS_SEARCH_URL` pointed at it
-(`http://localhost:4546`) — `run.sh` checks both and fails loudly rather than
-running blind if the notification one is missing or points elsewhere.
+Just run `lib/run.sh` — no separate setup step. It probes the requested dot
+itself, brings a stack up if nothing answers (`lib/bring-stack-up.sh`), then
+verifies (`lib/stack-up.sh`). `bring-stack-up.sh` also sets
+`NOTIFICATION_SERVICE_ENDPOINT` (the notify-sink, `http://localhost:4545`)
+and `SIGNALS_SEARCH_URL`/`SIGNALS_SEARCH_API_KEY` (the search stub,
+`http://localhost:4546`) on the target's `.env` itself, so both preflight
+checks in `run.sh` normally pass without you doing anything. If you brought
+the stack up some OTHER way (not through this skill), `run.sh` still checks
+both and fails loudly — or, for the search one, warns — rather than running
+blind if either is missing or points elsewhere.
 
 ```bash
 # full run, blue_dot

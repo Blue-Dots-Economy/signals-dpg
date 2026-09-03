@@ -19,17 +19,89 @@
 # argument list instead.
 set -uo pipefail
 
-HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"        # .../lib
-SKILL_DIR="$(cd "$HERE/.." && pwd)"                          # .../signals-e2e
-E2E_DIR="$(cd "$SKILL_DIR/../../../e2e" && pwd)"
+log() { echo "[signals-e2e] $*" >&2; }
+
+# `-P` on both `cd` and `pwd` below resolves every symlink component, not just
+# the leaf — REQUIRED here because this skill is normally INSTALLED as a
+# symlink (`~/.claude/skills/signals-e2e` -> the real directory inside some
+# checkout of this repo). Without `-P`, `cd`+`pwd` return the LOGICAL path
+# (the one that still goes through `~/.claude/skills/...`), and climbing "up
+# 3 dirs then into e2e/" from THAT path lands outside the repo entirely (e.g.
+# `~/e2e`, which does not exist) rather than at the checkout's real `e2e/`.
+# Confirmed live (F2): from the installed symlink, the logical derivation
+# below resolved to a nonexistent directory while `-P` resolves to the real
+# worktree.
+HERE="$(cd -P "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"   # .../lib, symlinks resolved
+SKILL_DIR="$(cd -P "$HERE/.." && pwd -P)"                     # .../signals-e2e, symlinks resolved
+
+# `resolve_dir` never lets a failed `cd` vanish into an empty string the way
+# the old, unguarded `E2E_DIR="$(cd ... && pwd)"` did: this script only sets
+# `-uo pipefail`, not `-e`, so a `cd` failing INSIDE a `$(...)` command
+# substitution does not stop the script — it just makes the substitution
+# print nothing, and the assignment silently becomes `""`. Every use of
+# `resolve_dir` below is followed by an explicit non-empty check for exactly
+# that reason: E2E_DIR (and SCRIPT_REPO) must never be allowed to become ""
+# and then get used as a path anyway.
+resolve_dir() { ( cd -P "$1" 2>/dev/null && pwd -P ); }
+
+SCRIPT_REPO="$(resolve_dir "$HERE/../../../..")"
+if [ -z "$SCRIPT_REPO" ] || [ ! -d "$SCRIPT_REPO" ]; then
+  log "FAIL: could not resolve this script's own repo root from $HERE/../../../.. — unexpected layout."
+  exit 1
+fi
+
+# E2E_DIR resolution (F2) — tried in order, first valid candidate wins, and
+# an explicit override is trusted-or-rejected outright rather than silently
+# falling through to a guess (a caller who bothered to set E2E_DIR gets a
+# clear failure quoting their OWN value, not a mysteriously different
+# directory). "Valid" means more than "exists": a directory could exist
+# without being e2e/ at all, so every candidate is checked for the files
+# every invocation of this script actually needs.
+_looks_like_e2e_dir() { [ -d "$1" ] && [ -f "$1/package.json" ] && [ -f "$1/src/identities.ts" ]; }
+E2E_DIR_OVERRIDE="${E2E_DIR:-}"
+E2E_DIR=""
+E2E_DIR_TRIED=""
+try_e2e_dir() {
+  local label="$1" candidate="$2" resolved
+  [ -z "$candidate" ] && return 1
+  resolved="$(resolve_dir "$candidate")"
+  E2E_DIR_TRIED="$E2E_DIR_TRIED
+  - $label ($candidate) -> ${resolved:-<does not exist>}"
+  if [ -n "$resolved" ] && _looks_like_e2e_dir "$resolved"; then
+    E2E_DIR="$resolved"
+    return 0
+  fi
+  return 1
+}
+
+if [ -n "$E2E_DIR_OVERRIDE" ]; then
+  if ! try_e2e_dir "E2E_DIR override" "$E2E_DIR_OVERRIDE"; then
+    log "FAIL: E2E_DIR was explicitly set to '$E2E_DIR_OVERRIDE' but that is not a usable e2e/ checkout"
+    log "  (expected a package.json and src/identities.ts under it; resolved: ${E2E_DIR_TRIED#*-> })."
+    exit 1
+  fi
+elif try_e2e_dir "SIGNALS_REPO/e2e" "${SIGNALS_REPO:+$SIGNALS_REPO/e2e}"; then
+  :
+elif try_e2e_dir "this skill's own physical location" "$SKILL_DIR/../../../e2e"; then
+  :
+else
+  GIT_TOP="$(git -C "$HERE" rev-parse --show-toplevel 2>/dev/null || true)"
+  try_e2e_dir "git toplevel" "${GIT_TOP:+$GIT_TOP/e2e}" || true
+fi
+
+if [ -z "$E2E_DIR" ]; then
+  log "FAIL: could not resolve the e2e/ checkout. This must never silently proceed with an empty or"
+  log "  nonexistent E2E_DIR. Tried:$E2E_DIR_TRIED"
+  log "Set E2E_DIR explicitly (the e2e/ directory itself), or SIGNALS_REPO (a checkout that carries its"
+  log "  own e2e/), and retry."
+  exit 1
+fi
+
 # This worktree may not be the checkout actually running the stack — same
 # SIGNALS_REPO indirection stack-up.sh/search-indexer.mjs use (see their own
 # header comments): this is an e2e-only worktree with no root .env of its own.
-SCRIPT_REPO="$(cd "$HERE/../../../.." && pwd)"
 REPO="${SIGNALS_REPO:-$SCRIPT_REPO}"
 STACK_ENV="$REPO/.env"
-
-log() { echo "[signals-e2e] $*" >&2; }
 
 # ---------------------------------------------------------------------------
 # 0. Preflight: docker + node's own version. SKILL.md's phase table promises
@@ -320,10 +392,17 @@ run_fg() {
 }
 
 # ---------------------------------------------------------------------------
-# 4. Stack reuse: a live marker for the SAME dot skips stack-up.sh entirely.
-#    Verified live (not just "the marker file exists") by re-probing the api
-#    and ui urls it recorded. This run still gets its OWN E2E_RUN_ID (see the
-#    run-id comment above) even though the underlying stack is reused.
+# 4. Stack reuse, bring-up, or verify-only — three distinct outcomes:
+#      (a) a live marker for the SAME dot from a PRIOR e2e run — reuse it,
+#          skip stack-up.sh entirely. Verified live (not just "the marker
+#          file exists") by re-probing the api and ui urls it recorded.
+#      (b) no marker, but the target already answers (started some other
+#          way) — run stack-up.sh only, to verify + write this run's own
+#          env.sh/marker.
+#      (c) no marker, and nothing answers — actually bring the stack up
+#          first (lib/bring-stack-up.sh), then stack-up.sh to verify + write.
+#    Every path still gets its own fresh E2E_RUN_ID (see the run-id comment
+#    above) even when the underlying stack itself is reused.
 # ---------------------------------------------------------------------------
 find_live_marker() {
   local dot="$1" m api network ui code
@@ -356,7 +435,37 @@ if [ -n "$MARKER_FOUND" ] && [ -f "$(dirname "$MARKER_FOUND")/env.sh" ]; then
   printf "export E2E_RUN_ID='%s'\n" "$RUN" >> "$ENV_FILE"
   STACK_REUSED=true
 else
-  log "no live matching stack for dot=$DOT — running stack-up.sh"
+  # No marker from a PRIOR e2e run — but the target could still be live right
+  # now from an unrelated source (a manual run-signals-dpg session, or an e2e
+  # run whose marker aged out). A cheap, single-shot probe here decides
+  # whether anything needs bringing up at all, rather than assuming "no
+  # marker" means "nothing is running".
+  #
+  # (F3) Before this existed, EVERY cold-machine invocation (nothing running
+  # at all) landed in this branch, logged the line below unconditionally, and
+  # handed straight to stack-up.sh — which only VERIFIES a live target and
+  # gives up after ~40s if nothing answers. The log line read as though
+  # something was being started; nothing was, and the run just died 40s
+  # later with no stack ever brought up. `bring-stack-up.sh` (this repo's
+  # executable copy of `references/bringing-the-stack-up.md`) is what
+  # actually starts docker/db/redis, applies the schema, and launches the API
+  # + UI — it is only invoked when the quick probe below finds nothing live.
+  QUICK_NET_ID="$(cd "$REPO" 2>/dev/null && node -e "try{console.log(require('./examples/schemas/$DOT/network.json').id)}catch{process.exit(1)}" 2>/dev/null || true)"
+  ALREADY_LIVE=false
+  if [ -n "$QUICK_NET_ID" ] && curl -sf "http://localhost:2742/api/v1/network/schemas?network=$QUICK_NET_ID" >/dev/null 2>&1; then
+    ALREADY_LIVE=true
+  fi
+
+  if [ "$ALREADY_LIVE" = true ]; then
+    log "API already answering for dot=$DOT (network=$QUICK_NET_ID) — verifying only (lib/stack-up.sh); nothing to bring up."
+  else
+    log "no live stack for dot=$DOT — bringing one up now (lib/bring-stack-up.sh: infra, schema, API, UI)."
+    if ! run_fg bash "$HERE/bring-stack-up.sh" "$DOT"; then
+      log "FAIL: bring-stack-up.sh could not bring the target to a ready state (see its output above)."
+      exit 1
+    fi
+  fi
+
   # EXECUTED under bash, never sourced (stack-up.sh's own header explains why:
   # BASH_SOURCE and a `local status` are bash-only, and the user's shell is
   # zsh). Its exit status is checked BEFORE the env file it wrote is sourced —
@@ -364,8 +473,7 @@ else
   # exit, and sourcing that as if it had succeeded would silently run the
   # suite against half-configured capabilities.
   if ! run_fg bash "$HERE/stack-up.sh" "$DOT" "$RUN"; then
-    log "FAIL: stack-up.sh could not bring the target to a ready state (see its output above)."
-    log "If the stack itself was never started at all, run the run-signals-dpg skill for dot=$DOT first, then retry."
+    log "FAIL: stack-up.sh could not verify the target (see its output above)."
     exit 1
   fi
 fi
@@ -427,21 +535,46 @@ assert_notification_env() {
 # ---------------------------------------------------------------------------
 # 4c. Search preflight. SIGNALS_SEARCH_URL is OPTIONAL — real signals-search
 # is opt-in per host (see stack-up.sh's E2E_REAL_SEARCH_URL comment), so its
-# absence is expected today, not a failure. But if it IS set and points
-# anywhere other than the search stub, the stub's envelope recorder sees no
-# traffic and silently records nothing while the `search-stub` capability
-# still reads as available — same shape of bug as the notification one
-# above, just without the real-world-harm consequence, so it degrades to a
-# warning rather than a hard fail when simply absent.
+# absence is expected on a target this recipe didn't bring up itself, not a
+# failure. (F7) `bring-stack-up.sh` now sets it — and `SIGNALS_SEARCH_API_KEY`
+# alongside it — pointed at the stub, so this normally reads as OK rather than
+# warning on every cold run.
+#
+# BOTH vars matter, not just the URL: `signals_search_client.ts`'s
+# `searchSignals()` throws "not configured" and the discover BFF silently
+# falls back to native whenever EITHER `SIGNALS_SEARCH_URL` or
+# `SIGNALS_SEARCH_API_KEY` is unset — so a URL-only setup would pass the OLD
+# version of this check while still routing zero traffic to the stub, the
+# exact "capability reads as enabled, records nothing" bug this function
+# exists to catch, just moved one env var over. The stub itself only checks
+# the key's PRESENCE (`Boolean(req.headers['x-api-key'])`), never its value,
+# so a dummy key satisfies it, same as the notification key/secret above.
+#
+# If SIGNALS_SEARCH_URL points anywhere other than the search stub, the
+# stub's envelope recorder sees no traffic and silently records nothing while
+# the `search-stub` capability still reads as available — same shape of bug
+# as the notification one above, just without the real-world-harm
+# consequence, so it degrades to a warning rather than a hard fail when
+# simply absent (a target this recipe didn't bring up may legitimately not
+# have it set).
 # ---------------------------------------------------------------------------
 assert_search_env() {
-  local value got
+  local value key got
   value="$(read_env_value SIGNALS_SEARCH_URL "$STACK_ENV")"
   if [ -z "$value" ]; then
     log "SIGNALS_SEARCH_URL not set on $STACK_ENV — the search-stub's envelope recorder will see no"
     log "  traffic this run (native/items fallback only). Set it to http://$SEARCH_STUB_HOST_PORT"
-    log "  first if this run needs to assert on recorded search envelopes."
+    log "  (and SIGNALS_SEARCH_API_KEY to any non-empty value) first if this run needs to assert on"
+    log "  recorded search envelopes."
     return 0
+  fi
+  key="$(read_env_value SIGNALS_SEARCH_API_KEY "$STACK_ENV")"
+  if [ -z "$key" ]; then
+    log "FAIL: SIGNALS_SEARCH_URL is set on $STACK_ENV but SIGNALS_SEARCH_API_KEY is not — searchSignals()"
+    log "  treats EITHER being unset as \"not configured\" and silently falls back to native, so the stub"
+    log "  would see no traffic while this capability still reads as enabled. Set both (the stub ignores"
+    log "  the key's value, only its presence), restart the API, retry."
+    return 1
   fi
   got="$(host_port_of "$value")"
   if [ "$got" != "$SEARCH_STUB_HOST_PORT" ]; then
@@ -449,7 +582,7 @@ assert_search_env() {
     log "  the envelope recorder would silently record nothing while this capability reads as enabled."
     return 1
   fi
-  log "search preflight OK — SIGNALS_SEARCH_URL matches the search stub"
+  log "search preflight OK — SIGNALS_SEARCH_URL/_API_KEY both present and the URL matches the search stub"
   return 0
 }
 
