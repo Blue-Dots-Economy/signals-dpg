@@ -5,6 +5,7 @@ import {
   boolean,
   integer,
   index,
+  uniqueIndex,
   jsonb,
   check,
 } from 'drizzle-orm/pg-core';
@@ -131,15 +132,37 @@ export const organization = pgTable('organization', {
     'organization_default_requires_aggregator',
     sql`${table.defaultForBindings} IS NULL OR ${table.type} = 'aggregator'`,
   ),
-  // "No two orgs may hold the SAME binding" is enforced by the
-  // `organization_default_binding_exclusive` trigger (migration 0014).
-  // Postgres cannot unique-index an array *element* and there is no gist
-  // opclass for text[] overlap, so the guarantee cannot be a constraint here.
+  // AT MOST ONE default aggregator per instance.
   //
-  // Note this is per-binding, NOT one default per instance: a user holds
-  // exactly one domain (the single-role lock in `create_item.ts`), so
-  // `blue_dot/seeker` and `blue_dot/provider` may legitimately have different
-  // default aggregators.
+  // A unique index on a constant expression, restricted to rows that hold a
+  // binding, so a second org becoming a default fails with 23505 rather than
+  // leaving two claimants behind.
+  //
+  // Why a *global* limit when the column is per-binding: the tag this drives
+  // (`user.onboarded_by_org_id`) is per ACCOUNT and write-once, and
+  // `participant_decrypt` scopes on it with **no domain condition**
+  // (`participant_decrypt.ts`). With two per-domain defaults, a user holding
+  // profiles in both domains has their whole account owned by whichever domain
+  // wrote first — so the other domain's default could decrypt a participant it
+  // does not own. `user.domains` normally holds one entry, but the single-role
+  // lock that keeps it that way is bypassed for admin api-key callers
+  // (`create_item.ts`), which is the path aggregator-dpg uses, so a
+  // multi-domain user is reachable in practice.
+  //
+  // The array shape is deliberate and stays: per-domain defaults are the
+  // intended end state, and one org may already hold several bindings
+  // (`['blue_dot/seeker','blue_dot/provider']`) — which is the expected launch
+  // shape. What is withheld is two *different* orgs holding one binding each.
+  // That is unlocked by the per-profile `profile_origin` work (#661): once
+  // ownership is recorded per profile rather than per account, the cross-domain
+  // exposure is gone and this index comes off. Enforced here rather than in
+  // application code so the guarantee does not depend on which write paths
+  // happen to exist.
+  uniqueIndex('organization_single_default_idx')
+    .on(sql`(true)`)
+    .where(
+      sql`${table.defaultForBindings} IS NOT NULL AND cardinality(${table.defaultForBindings}) > 0`,
+    ),
 ]);
 
 export const member = pgTable('member', {

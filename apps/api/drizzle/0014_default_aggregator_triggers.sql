@@ -11,19 +11,23 @@
 -- ─────────────────────────────────────────────────────────────────────────────
 -- 1. Exclusivity: no two orgs may be the default for the SAME binding.
 --
--- Different aggregators MAY be defaults for different bindings, and that is
--- the expected shape: a user holds exactly one domain (the single-role lock in
--- create_item.ts keeps user.domains at one entry and never grows it), so a
--- seeker aggregator and a provider aggregator can coexist and each owns its own
--- self-signup population.
+-- SECOND LAYER. `organization_single_default_idx` (migration 0013) is the
+-- primary guard and currently permits only ONE default org instance-wide, so
+-- a contested binding cannot arise while that index is in place — a second
+-- nomination fails with 23505 before this trigger is reached.
 --
--- What must never happen is two orgs claiming the same binding: the tag this
--- drives (user.onboarded_by_org_id) has one slot per account, and
--- participant_decrypt scopes on it, so a contested binding would hand PII
--- decrypt rights to whichever row a query happened to return first.
+-- This exists because that index is temporary. Per-domain defaults are the
+-- intended end state, blocked today only by the tag being per ACCOUNT while
+-- `participant_decrypt` scopes without a domain condition — so with two
+-- per-domain defaults, a multi-domain user (reachable: admin api-key callers
+-- bypass the single-role lock in create_item.ts) would let one default decrypt
+-- the other's participant. Once the per-profile `profile_origin` work (#661)
+-- removes that exposure, 0013's index comes off and THIS becomes the guard
+-- that matters: several orgs holding one binding each, never two on the same
+-- binding.
 --
 -- Postgres cannot unique-index an array *element*, and there is no gist opclass
--- for text[] overlap, so this is a trigger rather than a constraint. The
+-- for text[] overlap, so per-binding exclusivity has to be a trigger. The
 -- advisory lock makes it safe against two concurrent nominations, which would
 -- otherwise each see a clear field and both commit.
 -- ─────────────────────────────────────────────────────────────────────────────

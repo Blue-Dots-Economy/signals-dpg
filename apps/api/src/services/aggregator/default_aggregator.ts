@@ -16,7 +16,7 @@ import { resolveServedNetworkForDomain } from '@/utils/served_domain_guard';
  * network admin nominates by a direct backend/support request — a hand-written
  * UPDATE of `organization.default_for_bindings` (#640's answer; there is no API
  * for it, and the database enforces the rules: a CHECK for `type='aggregator'`,
- * the `organization_default_binding_exclusive` trigger for one org per binding,
+ * `organization_single_default_idx` for one default while #661 is open,
  * and an audit trigger so the change is traceable).
  *
  * It is deliberately never system-generated: an org minted by the system has no
@@ -25,26 +25,30 @@ import { resolveServedNetworkForDomain } from '@/utils/served_domain_guard';
  * `organization` has no approval/status column, so "already-approved" is a
  * process guarantee the runbook has to carry, not an enforced one.
  *
- * ## Defaults are per binding
+ * ## Resolution is per binding; only ONE default may exist for now
  *
  * `organization.default_for_bindings` is per (network, domain) — product asked
- * for a per-domain default (#640 Q3) — so a seeker aggregator and a provider
- * aggregator coexist, each owning its own self-signup population.
+ * for a per-domain default (#640 Q3) — and lookups are per binding, so one
+ * aggregator holding `['blue_dot/seeker','blue_dot/provider']` serves both
+ * populations. That is the expected launch shape.
  *
- * That is sound even though the tag itself (`user.onboarded_by_org_id`) is per
- * ACCOUNT, because a user holds exactly one domain: the single-role lock in
- * `create_item.ts` keeps `user.domains` at one entry and never grows it. Each
- * account therefore belongs to one binding, and "which org owns this person"
- * has one answer.
+ * What is withheld is two *different* orgs holding one binding each, blocked by
+ * `organization_single_default_idx` (migration 0013). The reason: the tag
+ * (`user.onboarded_by_org_id`) is per ACCOUNT and write-once, while
+ * `participant_decrypt` scopes on it with **no domain condition** — so a user
+ * with profiles in two domains has their whole account owned by whichever
+ * domain wrote first, and the other domain's default could decrypt a
+ * participant it does not own. `user.domains` normally holds one entry, but
+ * admin api-key callers bypass the single-role lock that keeps it that way
+ * (`create_item.ts`), so a multi-domain user is reachable in practice.
  *
- * Two orgs claiming the SAME binding would break that, and is prevented by the
- * `organization_default_binding_exclusive` trigger (migration 0014).
- *
- * Residual edge: the admin api-key paths bypass the single-role lock, so a user
- * could be given profiles in two domains. That account keeps the owner from
- * whichever profile came first. Not reachable from self-signup, and fixed
- * properly by the per-profile `profile_origin` work in
- * `docs/superpowers/specs/2026-08-30-account-profile-identity-model-design.md`.
+ * Per-domain defaults across separate orgs are the intended end state, unlocked
+ * by the per-profile `profile_origin` work (#661) in
+ * `docs/superpowers/specs/2026-08-30-account-profile-identity-model-design.md`:
+ * once ownership is per profile the exposure is gone, 0013's index comes off,
+ * and the `organization_default_binding_exclusive` trigger becomes the guard
+ * that matters. Nothing else changes — the column is already an array and
+ * resolution is already per binding.
  */
 
 export interface DefaultAggregatorResolution {
