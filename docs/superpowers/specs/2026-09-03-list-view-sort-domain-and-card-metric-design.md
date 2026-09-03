@@ -815,14 +815,24 @@ collapsing (a stable height avoids the list shifting under the user's thumb).
   box; removing it clears that box too (D25). Render it visually distinct
   (dashed border) to signal "remove here, edit above".
 
-### 7.3 Sticky implementation constraint
+### 7.3 Sticky implementation — resolved better than specified
 
-`top-bar.tsx:78` is already `sticky top-0 z-40 min-h-14` — **but it is also
+The constraint was real: `top-bar.tsx:78` is `sticky top-0 z-40 min-h-14` **and
 `flex-wrap`**, so on narrow screens it wraps to two lines and its height is
-**not fixed**. A hardcoded `top-14` on the filter bar would gap or overlap.
+**not fixed**. Any hardcoded `top-14` on the filter bar would gap or overlap.
 
-**Nest both bars in a single sticky container** so they stack without a magic
-offset. Do not hardcode the offset.
+This section originally prescribed nesting both bars in one sticky container.
+Reading `page-shell.tsx` during implementation produced a better answer:
+**`<main>` is the scroll container** (`overflow-y-auto` inside an `h-svh` flex
+column) and the top bar is already its **sibling**, so a new `toolbarSlot`
+rendered between them is **structurally pinned** — no `sticky`, no offset, and
+the flex-wrap problem cannot arise at all. `footerSlot` already used exactly
+this pattern at the bottom of the same column.
+
+**As built:** `PageShell` gains `toolbarSlot`, rendered `flex-none` between
+`<TopBar>` and `<main>`. `BrowseToolbar` carries no positioning classes, and a
+test asserts it does not — a `sticky` class creeping back in would reintroduce
+the offset problem.
 
 ### 7.4 The card metric (D22)
 
@@ -854,6 +864,30 @@ scroll position.
   **Checked and cleared:** no live network exceeds three domains today, so the
   segmented control is fine as specified. If a network ever declares a fourth
   browsable domain, revisit — the mobile fallback would be a dropdown.
+
+### 7.6 Found during implementation, not specified here
+
+- **The result count rendered twice.** `ContentHeader` already showed it, so
+  adding it to the toolbar put two identical counts within ~40px. The header's
+  copy was removed: the toolbar's survives scrolling and the header's does not.
+- **`item_actions.match_score` must stay on its 0-10 scale.** §5.2's "one scale
+  end to end" is about the DISPLAY path. That column is a different artifact —
+  persisted `REAL`, documented 0-10, already holding rows on that scale, and
+  sorted on in SQL (`fetch_actions.ts`). Writing 0-100 into it would leave the
+  table holding both scales with nothing in a row to say which, so every
+  pre-existing My Actions score would render 10x too small. One conversion at
+  that storage boundary (`compute_match_score.ts`) keeps the column's meaning
+  and needs no backfill.
+- **The map's domain multi-select also fed the LIST's card filter**, so picking
+  a domain other than the browsed one blanked the list entirely. Coherent while
+  the All tab existed; a map concern emptying the list once it did not.
+- **The list feed must wait for a VALID domain** before fetching. A stale or
+  unbrowsable `?domain=` otherwise fires one wasted request and, for a
+  non-interacting domain, draws a 403 on the anchor.
+- **The default-domain effect must only rewrite `?domain=` when REPAIRING** an
+  invalid param. Writing it on every resolve raced the network switcher in the
+  same tick and clobbered `?network=`, and would pin a shared link to the
+  sharer's default rather than letting each viewer resolve their own.
 
 ---
 
