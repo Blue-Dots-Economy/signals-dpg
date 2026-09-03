@@ -70,7 +70,28 @@ export interface ReportSections {
    * carry the FIRST attempt's error, not the retry's.
    */
   flaky: FailureEntry[];
+  /**
+   * Section 4's body ONLY — `coverage.md`'s `human-only` list: standing
+   * limits of the black-box approach itself, true regardless of target
+   * config. Mechanical skip provenance no longer lives here (field-test fix
+   * E) — see `skipSummary`/`capabilityGated`/`notRunSuites` below.
+   */
   needsHuman: string[];
+  /**
+   * Dedup'd-with-counts reasons behind the "⏭️ Skipped (capability-gated)"
+   * counter, derived straight from this run's own capability skips — never
+   * a hand-maintained second list. Rendered next to that counter, not in
+   * section 4.
+   */
+  skipSummary: string[];
+  /**
+   * `coverage.md`'s `capability-gated` list — a config gate with no live
+   * `requireCapabilities()` call to derive a skip reason from yet, so it
+   * can't appear in `skipSummary`. Rendered alongside it regardless.
+   */
+  capabilityGated: string[];
+  /** One line per suite a scoped run did not touch (mechanical, not a standing limit). */
+  notRunSuites: string[];
   coverageDrift: string[];
   scoped: Scoped | null;
   gitInfo: GitInfo | null;
@@ -80,8 +101,10 @@ export interface ReportSections {
 export interface BuildReportInput {
   /** Parsed Playwright JSON reporter output (`{ suites: [...] }`). */
   results: { suites: unknown[] };
-  /** coverage.md's parsed `human-only` list. */
+  /** coverage.md's parsed `human-only` list — section 4's body only. */
   humanOnly?: string[];
+  /** coverage.md's parsed `capability-gated` list — rendered next to `skipSummary`. */
+  capabilityGated?: string[];
   /** Set on a scoped run; null for a full run. */
   scoped?: Scoped | null;
   /** cleanup.sh's residue table count (0 = clean). */
@@ -102,6 +125,8 @@ export interface Suite {
 export declare const SUITES: Suite[];
 
 export declare function parseHumanOnly(markdown: string): string[];
+
+export declare function parseCapabilityGated(markdown: string): string[];
 
 export declare function parseSuiteTable(markdown: string): Suite[];
 

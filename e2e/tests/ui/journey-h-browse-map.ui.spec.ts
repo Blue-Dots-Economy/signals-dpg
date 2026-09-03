@@ -119,25 +119,74 @@ test.describe('Journey H (UI) — browse, search, filters and map', () => {
       .locator('.leaflet-marker-icon.leaflet-interactive, [role="button"][aria-label*="marker" i], button[aria-label*="marker" i]')
       .first();
     await expect(marker, 'the map renders at least one item marker').toBeVisible({ timeout: 20_000 });
-    await marker.click();
     // PRODUCT-SUSPECTED, left failing on purpose (spec §"never silently weaken
-    // an assertion"): the marker assertion above passes cleanly — a real,
-    // correctly-targeted, `.leaflet-interactive` marker is found and clicked
-    // (verified with BOTH a plain Playwright click and a raw DOM `element.click()`
-    // dispatch — same result either way) — yet `.leaflet-popup-pane` stays
-    // completely empty (`<div class="leaflet-pane leaflet-popup-pane"></div>`,
-    // no `.leaflet-popup` child ever appears) even after several seconds, with
-    // zero console/page errors. react-leaflet's own `<Marker><Popup>` wiring
-    // (`Marker.js`'s `overlayContainer` context, `Popup.js`'s
-    // `overlayContainer.bindPopup`) is unconditional and independent of the
-    // `MarkerClusterGroup` wrapper (`react-leaflet-cluster`'s own context only
-    // adds `layerContainer`, never touches `overlayContainer`) — so on paper
-    // this should just work regardless of clustering. Not a selector or
-    // capability-gate issue; a real product interaction defect worth its own
-    // filed issue.
-    await expect(
-      page.locator('.leaflet-popup, [role="dialog"][aria-label*="popup" i]').first(),
-      'clicking a marker opens its popup',
-    ).toBeVisible({ timeout: 10_000 });
+    // an assertion"): this is INTERMITTENT, not absent — an earlier version
+    // of this comment claimed the popup pane "stays completely empty ... no
+    // `.leaflet-popup` child ever appears ... even after several seconds",
+    // and that was measured to be false. Driven by hand: three clicks on
+    // this SAME 32×32 single pin, same page load, ~2.5s wait each —
+    // attempt 0 → no popup, attempt 1 → popup opened WITH CONTENT, attempt 2
+    // → no popup. A trusted CDP click (real input, not a synthetic dispatch)
+    // showed the same shape (one open out of three). So the popup opens
+    // roughly 1 click in 3.
+    //
+    // That matters twice over:
+    //  - Our own verification method could not tell "never" from "sometimes"
+    //    from too few trials. At a genuine ~33% hit rate, one Playwright
+    //    click plus one raw DOM `element.click()` dispatch — both landing on
+    //    the confirmed-correct, confirmed-interactive marker — have roughly
+    //    a 4-in-9 chance of BOTH failing even though the popup works fine a
+    //    third of the time. That is the same too-few-trials trap that
+    //    overshot the 4-vs-2-worker finding elsewhere in this suite: a
+    //    couple of failed tries is not enough evidence to call a ~33%-hit
+    //    defect "never".
+    //  - It reframes the defect. `MarkerClusterGroup`'s `chunkedLoading`
+    //    (`leaflet-provider.tsx`) inserts marker instances asynchronously
+    //    and re-renders the cluster layer as chunks land; react-leaflet's
+    //    `bindPopup` wiring is attached to a specific marker INSTANCE, not a
+    //    screen position. If a chunked re-render swaps in a fresh instance
+    //    at the same spot between bind and click, the element actually
+    //    clicked — same position, same classes, same `.leaflet-interactive`
+    //    — is a new instance nothing has bound a popup to yet. That
+    //    produces exactly this shape: same marker, same page load,
+    //    sometimes wired, sometimes not, zero console/page errors either
+    //    way. react-leaflet's own `<Marker><Popup>` plumbing
+    //    (`Marker.js`'s `overlayContainer` context, `Popup.js`'s
+    //    `overlayContainer.bindPopup`) is unconditional and works fine when
+    //    the click lands on the instance it actually bound — so point a fix
+    //    here at MARKER IDENTITY ACROSS CLUSTER RE-RENDERS, not at Leaflet's
+    //    `Popup.js` wiring.
+    //
+    // The assertion below therefore drives the marker up to `attempts`
+    // times — closing the popup between tries with Escape (Leaflet's own
+    // `closeOnEscapeKey: true` default, confirmed in
+    // `node_modules/leaflet/dist/leaflet-src.js`) — and requires EVERY
+    // attempt to open a popup, not just one. A single lucky click should not
+    // turn this spec green: at a genuine ~1-in-3 hit rate, all three
+    // attempts landing on a correctly-bound instance happens by chance under
+    // 4% of the time, so this reliably reports red while still allowing the
+    // rare, honest, all-three-hit green. This is a real, filed-worthy defect
+    // — gating it away would hide it, not fix it.
+    const popup = page.locator('.leaflet-popup, [role="dialog"][aria-label*="popup" i]').first();
+    const attempts = 3;
+    let hits = 0;
+    for (let attempt = 0; attempt < attempts; attempt += 1) {
+      await marker.click();
+      const opened = await popup
+        .waitFor({ state: 'visible', timeout: 3_000 })
+        .then(() => true)
+        .catch(() => false);
+      if (opened) {
+        hits += 1;
+        await page.keyboard.press('Escape');
+        await popup.waitFor({ state: 'hidden', timeout: 2_000 }).catch(() => {});
+      }
+    }
+    expect(
+      hits,
+      `clicking a marker should open its popup on every attempt (opened ${hits}/${attempts}) — ` +
+        'see the comment above: an intermittent marker-identity race across MarkerClusterGroup ' +
+        're-renders (chunked async insertion swapping the bound instance), not missing popup wiring',
+    ).toBe(attempts);
   });
 });

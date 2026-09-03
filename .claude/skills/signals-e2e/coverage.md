@@ -41,13 +41,39 @@ up automatically at the CLI entry point, nothing to keep in sync by hand.
 
 ## human-only
 
+<!--
+  What a PASS here still does not prove — standing limits of the black-box
+  approach itself, true regardless of how this target happens to be
+  configured. This is the opposite of a capability gate: nothing would
+  change if we wired more env vars or seeded more infra. If an entry could
+  be closed by configuring something, it belongs in `## capability-gated`
+  below, not here (field-test fix E moved `geocoding accuracy` for exactly
+  this reason).
+-->
+
 - brand skin correctness (logo, palette) — a screenshot is captured, not judged
 - whether a responsive layout *looks* right at each breakpoint
 - accessibility beyond structural aria/focus checks
 - real Keycloak/OIDC login (config-gated; authProvider defaults to betterauth)
 - true multi-instance inter-instance browse (needs a second API)
-- geocoding accuracy without GOOGLE_GEOCODING_API_KEY or PHOTON_URL
 - real DigiLocker and Dhiway wallet imports
 - real SMS delivery — DLT template ids ship empty by design
 - email deliverability and mail-client rendering
 - relevance quality when the search stub ran instead of --profile search
+
+## capability-gated
+
+<!--
+  Config-gated surface that is "not configured here", not a standing limit —
+  the mechanical twin of the `## human-only` list above. Most entries in
+  this category are already derived straight from the run's own capability
+  skips (`report.mjs`'s `skipSummary`, rendered right under the
+  "⏭️ Skipped (capability-gated)" counter in every report — never
+  hand-maintained). This block exists ONLY for a gate that has no live
+  `requireCapabilities()` call to derive from yet, so it would otherwise be
+  invisible to that automatic summary. Add an entry here only when that is
+  true; the moment a spec starts gating on it for real, delete the line —
+  the automatic summary takes over and duplicating it here would drift.
+-->
+
+- geocoding accuracy without GOOGLE_GEOCODING_API_KEY or PHOTON_URL — no spec gates on this yet, so it can't appear in the derived skip summary above; still "not configured here", not a standing limit

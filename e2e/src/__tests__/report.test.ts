@@ -3,6 +3,8 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import {
   buildReport,
+  parseHumanOnly,
+  parseCapabilityGated,
   parseSuiteTable,
   renderMarkdown,
   SUITES,
@@ -27,13 +29,18 @@ test('passes, failures and skips land in their own sections', () => {
   assert.equal(r.working.length, 2);
   assert.equal(r.notWorking.length, 1);
   assert.match(r.notWorking[0].detail, /expected 409 got 503/);
-  assert.ok(r.needsHuman.some((h) => /service-caller credentials/.test(h)));
+  // Field-test fix E — mechanical skip provenance lives in `skipSummary`,
+  // NOT in `needsHuman` any more (that field is section 4's body, the
+  // standing limits, only).
+  assert.ok(r.skipSummary.some((h) => /service-caller credentials/.test(h)));
+  assert.ok(!r.needsHuman.some((h) => /service-caller credentials/.test(h)));
   assert.ok(r.needsHuman.includes('brand skin correctness'));
 });
 
-test('a scoped run names every suite it did not run', () => {
+test('a scoped run names every suite it did not run — in notRunSuites, not needsHuman', () => {
   const r = buildReport({ results, humanOnly: [], scoped: { alias: 'u18', suites: [5] }, residue: 0 });
-  assert.ok(r.needsHuman.some((h) => /not run in this invocation/.test(h)));
+  assert.ok(r.notRunSuites.some((h) => /not run in this invocation/.test(h)));
+  assert.ok(!r.needsHuman.some((h) => /not run in this invocation/.test(h)));
 });
 
 test('cleanup residue is a failure, not a footnote', () => {
@@ -63,8 +70,8 @@ test('a scoped run can be told to use a caller-supplied suite catalogue', () => 
     residue: 0,
     suites: [{ id: 1, name: 'Only one' }, { id: 2, name: 'Another' }],
   });
-  assert.ok(r.needsHuman.includes('Suite 2 (Another) — not run in this invocation'));
-  assert.ok(!r.needsHuman.some((h) => h.includes('Suite 1')));
+  assert.ok(r.notRunSuites.includes('Suite 2 (Another) — not run in this invocation'));
+  assert.ok(!r.notRunSuites.some((h) => h.includes('Suite 1')));
 });
 
 test('parseSuiteTable rejects a markdown file with no suite table', () => {
@@ -274,14 +281,19 @@ test('section 4 dedupes 20 identical skip reasons down to one line with a count'
   }
   const results20 = { suites: [{ title: 'journey-i', specs }] };
   const report = buildReport({ results: results20, humanOnly: [], scoped: null, residue: 0 });
-  const serviceLine = report.needsHuman.find((h) => h.includes('service-caller credentials'));
+  // Field-test fix E — this is `skipSummary` now, not `needsHuman` (section 4's
+  // body carries only the approach's standing limits, never mechanical
+  // skip provenance).
+  const serviceLine = report.skipSummary.find((h) => h.includes('service-caller credentials'));
   assert.ok(serviceLine, 'the reason must still be present');
   assert.match(serviceLine!, /\(×20\)$/);
-  const gatedLine = report.needsHuman.find((h) => h.includes('is not gated'));
+  const gatedLine = report.skipSummary.find((h) => h.includes('is not gated'));
   assert.ok(gatedLine);
   assert.match(gatedLine!, /\(×3\)$/);
   // Exactly one line per distinct reason, not 23.
-  assert.equal(report.needsHuman.filter((h) => h.includes('service-caller credentials')).length, 1);
+  assert.equal(report.skipSummary.filter((h) => h.includes('service-caller credentials')).length, 1);
+  // None of this mechanical provenance leaks into section 4's body.
+  assert.equal(report.needsHuman.length, 0);
 });
 
 // ---------------------------------------------------------------------------
@@ -400,4 +412,129 @@ test('matching specs/app checkouts render no divergence warning', () => {
   const clean = { suites: [{ title: 's', specs: [{ title: 't', file: 's.spec.ts', ok: true, tests: [{ status: 'expected', results: [{ status: 'passed' }] }] }] }] };
   const md = renderMarkdown(buildReport({ results: clean, humanOnly: [], scoped: null, residue: 0, gitInfo }));
   assert.ok(!md.includes('DIVERGED CHECKOUTS'));
+});
+
+// ---------------------------------------------------------------------------
+// Field-test fix E — section 4 stopped summing two incommensurable things
+// (mechanical skip provenance vs. the approach's standing limits). Mechanical
+// provenance now renders under the at-a-glance counter; section 4 (renamed)
+// carries only the standing limits; a scoped run's untouched suites are
+// mechanical too and render alongside the counter, not in section 4.
+// ---------------------------------------------------------------------------
+
+test('skip provenance renders under the at-a-glance counter, and section 4 carries only the standing limits', () => {
+  const skippy = {
+    suites: [{
+      title: 'journey-i', specs: [
+        {
+          title: 'integrator case', ok: true,
+          tests: [{ results: [{ status: 'skipped' }], annotations: [{ type: 'skip', description: '[capability] requires service-caller credentials (config.auth.serviceApiKey + actingOrgId)' }] }],
+        },
+      ],
+    }],
+  };
+  const md = renderMarkdown(
+    buildReport({
+      results: skippy,
+      humanOnly: ['brand skin correctness (logo, palette) — a screenshot is captured, not judged'],
+      capabilityGated: ['geocoding accuracy without GOOGLE_GEOCODING_API_KEY or PHOTON_URL'],
+      scoped: null,
+      residue: 0,
+    }),
+  );
+
+  const glance = md.slice(md.indexOf('## At a glance'), md.indexOf('## What ran, by spec file'));
+  const section4 = md.slice(md.indexOf('## 4. What a pass here still does not prove'), md.indexOf('## 5. Coverage drift'));
+
+  // Renamed heading — the old "Needs a human" name kept attracting mechanical
+  // provenance, which is exactly the bug this fix closes.
+  assert.match(md, /## 4\. What a pass here still does not prove/);
+  assert.ok(!md.includes('## 4. Not tested'));
+
+  // Mechanical skip provenance (from a real skip THIS run had) is under the
+  // counter, not in section 4.
+  assert.match(glance, /service-caller credentials/);
+  assert.ok(!section4.includes('service-caller credentials'));
+
+  // The capability-gated line (no live skip check exists for it) renders
+  // next to the counter too, not in section 4.
+  assert.match(glance, /geocoding accuracy/);
+  assert.ok(!section4.includes('geocoding accuracy'));
+
+  // Section 4's body is ONLY the standing limit that was passed in.
+  assert.match(section4, /brand skin correctness/);
+});
+
+test('a scoped run still names its untouched suites, under the counter and not in section 4', () => {
+  const clean = { suites: [{ title: 's', specs: [{ title: 't', file: 's.spec.ts', ok: true, tests: [{ status: 'expected', results: [{ status: 'passed' }] }] }] }] };
+  const md = renderMarkdown(
+    buildReport({
+      results: clean,
+      humanOnly: ['brand skin correctness'],
+      scoped: { alias: 'u18', suites: [5] },
+      residue: 0,
+    }),
+  );
+  const glance = md.slice(md.indexOf('## At a glance'), md.indexOf('## What ran, by spec file'));
+  const section4 = md.slice(md.indexOf('## 4. What a pass here still does not prove'), md.indexOf('## 5. Coverage drift'));
+  assert.match(glance, /not run in this invocation/);
+  assert.ok(!section4.includes('not run in this invocation'));
+});
+
+test('parseHumanOnly fails loudly on a missing section, a malformed line, and an empty block', () => {
+  assert.throws(() => parseHumanOnly('# nothing here\n'), /missing its .## human-only. section/);
+  assert.throws(
+    () => parseHumanOnly('## human-only\n\nnot a bullet\n'),
+    /unrecognised line/,
+  );
+  assert.throws(() => parseHumanOnly('## human-only\n\n- \n'), /unrecognised line/);
+  assert.throws(() => parseHumanOnly('## human-only\n'), /parsed to zero entries/);
+});
+
+test('parseHumanOnly tolerates blank lines and HTML comments, single- and multi-line', () => {
+  const md =
+    '## human-only\n\n<!-- a note -->\n- one thing\n\n<!--\n  multi\n  line\n-->\n- another thing\n';
+  assert.deepEqual(parseHumanOnly(md), ['one thing', 'another thing']);
+});
+
+test('parseCapabilityGated parses its own section and fails loudly the same way as parseHumanOnly', () => {
+  const md = '## capability-gated\n\n- geocoding accuracy without a key\n';
+  assert.deepEqual(parseCapabilityGated(md), ['geocoding accuracy without a key']);
+  assert.throws(() => parseCapabilityGated('# nothing here\n'), /missing its .## capability-gated. section/);
+});
+
+test("coverage.md's own capability-gated block still names the geocoding line, and human-only no longer does", () => {
+  const text = readFileSync(
+    new URL('../../../.claude/skills/signals-e2e/coverage.md', import.meta.url),
+    'utf8',
+  );
+  const humanOnly = parseHumanOnly(text);
+  const capabilityGated = parseCapabilityGated(text);
+  assert.ok(!humanOnly.some((h) => /geocoding/i.test(h)), 'geocoding moved out of human-only');
+  assert.ok(capabilityGated.some((h) => /geocoding/i.test(h)), 'geocoding lives in capability-gated instead');
+});
+
+// ---------------------------------------------------------------------------
+// Coordinator follow-up — confirm the "drift" verdict fires on a failure
+// shaped exactly like two hand-maintained/imported constants disagreeing,
+// via a SYNTHETIC error, not by deliberately breaking a real spec. The
+// existing G5-rule-1 test above ("tags a CSS/design-token constant mismatch
+// as drift") already exercises this with fixture text mirroring the real
+// network-themes.ts / index.css failure shape; this test additionally
+// frames the synthetic failure explicitly as "comparing two imported
+// constants" (the shape journey-theming.ui.spec.ts's own assertion has —
+// `expectedTokens[name]` imported from network-themes.ts vs. the resolved
+// CSS custom property) so the rule's applicability to that exact spec shape
+// is asserted directly, not just inferred.
+// ---------------------------------------------------------------------------
+
+test('classifySuiteVsProduct tags a synthetic "two imported constants disagree" failure as drift', () => {
+  const importedConstantsDisagree = classifySuiteVsProduct([
+    'Error: --brand-cta for blue_dot\n\n' +
+      "expect(resolved['--brand-cta'], '--brand-cta for blue_dot').toBe(expectedTokens['--brand-cta'])\n\n" +
+      'Expected: "oklch(0.55 0.22 285)"\n' +
+      'Received: "oklch(0.55 0.20 250)"',
+  ]);
+  assert.equal(importedConstantsDisagree.verdict, 'drift');
+  assert.match(importedConstantsDisagree.reason, /hand-maintained constants/);
 });

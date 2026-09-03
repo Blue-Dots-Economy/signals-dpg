@@ -62,11 +62,13 @@ the place to add a new case.
 - **A summarised signoff is not a signoff.** `run.sh` prints the full
   markdown report as the LAST thing it does, specifically so it can't be
   scrolled past — you must **present the report to the user**, not paraphrase
-  it. At minimum: the at-a-glance table, the per-spec-file table, and
-  section 4 ("Not tested — needs a human") **verbatim**. Reading the file with
-  `cat` and describing it in your own words is exactly the failure mode this
-  rule exists to prevent — a cold field test did precisely that and its human
-  never saw the five sections at all.
+  it. At minimum: the at-a-glance table (which carries the mechanical skip
+  provenance and, on a scoped run, the untouched-suite list right beneath
+  it), the per-spec-file table, and section 4 ("What a pass here still does
+  not prove") **verbatim**. Reading the file with `cat` and describing it in
+  your own words is exactly the failure mode this rule exists to prevent — a
+  cold field test did precisely that and its human never saw the five
+  sections at all.
 
 ## 2. The dot matrix
 
@@ -103,8 +105,11 @@ suite reports it as a SKIP with its reason, never a silent pass.
 table and exits 2. It never falls back to running everything: a scoped run
 that quietly becomes a full one wastes half an hour, and a full run that
 quietly becomes scoped is worse, because it signs off on work it never
-touched. A scoped report's section 4 always names every *other* suite as "not
-run in this invocation", so a scoped pass can never be misread as a full one.
+touched. A scoped report always names every *other* suite as "not run in
+this invocation" — right under the at-a-glance table, next to the mechanical
+skip-provenance line, not in section 4 (that section is reserved for the
+approach's standing limits; a suite this run simply didn't touch is a
+different kind of fact) — so a scoped pass can never be misread as a full one.
 
 Each suite's `references/suite-NN-*.md` declares its fixture recipe under
 `requires:` — prerequisites are seeded directly through the API in seconds,
@@ -209,12 +214,16 @@ hand), then an at-a-glance table, then a per-spec-file table, then the
 sections themselves, in this fixed order: **1. Working** (deduped — a spec
 that ran in both the API and UI tiers, like preflight, appears once), **2.
 Not working** (grouped by ROOT CAUSE — ten failures sharing one collision
-render as one group with a count, tagged `suite-defect` or `unattributed`,
-never a guessed `product-defect`), **2b. Flaky** (failed once, passed on
-Playwright's retry — never counted as a pass, carries the FIRST attempt's
-error), **3. Known / expected**, **4. Not tested — needs a human** (computed,
-never hand-written, deduped with `(×N)` counts), **5. Coverage drift**. Exit
-code is non-zero iff section 2 or 2b is non-empty.
+render as one group with a count, tagged `suite-defect`/`capability-gap`/
+`drift`/`unattributed`, never a guessed `product-defect`), **2b. Flaky**
+(failed once, passed on Playwright's retry — never counted as a pass, carries
+the FIRST attempt's error), **3. Known / expected**, **4. What a pass here
+still does not prove** (ONLY `coverage.md`'s `human-only` list — the
+approach's standing limits, e.g. brand skin, real OIDC, wallet imports;
+mechanical skip provenance lives under the at-a-glance table instead, right
+below the skip counter, computed and deduped with `(×N)` counts from this
+run's own skips, never hand-written), **5. Coverage drift**. Exit code is
+non-zero iff section 2 or 2b is non-empty.
 
 ## 7. Suite index (read just-in-time — not inlined here)
 

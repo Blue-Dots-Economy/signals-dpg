@@ -28,20 +28,36 @@
 //   3. Known/expected  — specs annotated `@known`, so documented look-like-bugs
 //                        (the map count below the list total, `x-uri` through a
 //                        `$ref`) never pollute section 2.
-//   4. Needs a human    — COMPUTED, never hand-written: every capability skip's
-//                        reason, plus coverage.md's `human-only` block, plus —
-//                        on a scoped run — one line per suite this run did not
-//                        touch, worded "not run in this invocation". Deduped
-//                        with `(×N)` counts, first-seen order preserved.
+//   4. What a pass here still does not prove — ONLY coverage.md's
+//                        `human-only` block: the standing limits of the
+//                        black-box approach itself (brand skin, real OIDC,
+//                        wallet imports, ...) — true no matter how this
+//                        target is configured. Renamed from "Needs a human"
+//                        (field-test fix E) because that name kept
+//                        attracting MECHANICAL skip provenance, which is a
+//                        different kind of fact and reads as prose-noise
+//                        here. Never hand-deduped for counts — coverage.md's
+//                        list is already unique by construction.
 //   5. Coverage drift   — whatever `npm run coverage` found unmapped, passed in
 //                        by the caller (that check lives in scripts/, this file
 //                        only renders what it's told).
+//
+// The MECHANICAL provenance that used to live in section 4 — every capability
+// skip's reason (deduped with `(×N)` counts), coverage.md's small
+// `capability-gated` block (a gate with no live skip to derive from yet), and
+// — on a scoped run — one line per suite this run did not touch — is instead
+// rendered right under the "⏭️ Skipped (capability-gated)" row in the
+// at-a-glance table (`skipSummary` / `capabilityGated` / `notRunSuites` on
+// `ReportSections`). It is the SAME information as that counter, just spelled
+// out — re-deriving it as a second, separately-maintained prose list would
+// only let it drift from the counter it explains, so it stays mechanically
+// derived from the same skip data, never hand-written.
 //
 // Exit code is non-zero if section 2 (Not working) OR 2b (Flaky) is
 // non-empty. A bare `test.skip` (no capability reason, no annotation) is NOT
 // quietly dropped — `capabilities.ts` guarantees a reason for every
 // capability skip, so a skip with none is itself a defect and is surfaced in
-// section 2, not folded into "needs a human" where it would look like an
+// section 2, not folded into the skip provenance where it would look like an
 // intentional, documented gap.
 //
 // `buildReport` returns plain data (`ReportSections`); `renderMarkdown` is the
@@ -82,27 +98,32 @@ const ANSI = /\[[0-9;]*m/g;
 const stripAnsi = (s) => String(s ?? '').replace(ANSI, '');
 
 /**
- * Parse `coverage.md`'s `## human-only` block.
+ * Parse one `## <heading>` bullet block out of `coverage.md` — shared by
+ * `parseHumanOnly` (the standing-limits list, section 4's body) and
+ * `parseCapabilityGated` (the small "not wired to a live skip yet" list,
+ * rendered next to the at-a-glance skip counter instead — field-test fix E
+ * split these two, which used to be one flattened list).
  *
- * Format: a `## human-only` heading, then `- entry` bullets until the next
- * `##` heading or end of file. Blank lines and HTML comments (`<!-- ... -->`,
- * single- or multi-line) are tolerated and skipped. Anything else in the
- * block — a stray paragraph, a malformed bullet, an empty bullet — is a loud
- * error, not a silently-dropped line: this list exists specifically to tell a
- * reader what still needs their attention, so a parser that quietly produces
- * fewer entries than were written is worse than one that refuses to run.
+ * Format: the heading, then `- entry` bullets until the next `##` heading or
+ * end of file. Blank lines and HTML comments (`<!-- ... -->`, single- or
+ * multi-line) are tolerated and skipped. Anything else in the block — a
+ * stray paragraph, a malformed bullet, an empty bullet — is a loud error,
+ * not a silently-dropped line: both lists exist specifically to tell a
+ * reader what still needs their attention, so a parser that quietly
+ * produces fewer entries than were written is worse than one that refuses
+ * to run.
  *
  * An empty block (heading present, zero entries) is also a hard error: it
- * would tell a reader "nothing needs your attention", which is the exact lie
- * this section exists to prevent.
+ * would tell a reader "nothing needs your attention", which is the exact
+ * lie these sections exist to prevent.
  */
-export function parseHumanOnly(markdown) {
+function parseBulletBlock(markdown, headingRegex, sectionLabel) {
   const lines = markdown.split(/\r?\n/);
-  const startIdx = lines.findIndex((l) => /^##\s+human-only\s*$/i.test(l.trim()));
+  const startIdx = lines.findIndex((l) => headingRegex.test(l.trim()));
   if (startIdx === -1) {
     throw new Error(
-      "coverage.md is missing its '## human-only' section. This block is load-bearing " +
-        '(it feeds section 4 of the signoff report) — a missing section is a hard error, not an empty list.',
+      `coverage.md is missing its '## ${sectionLabel}' section. This block is load-bearing ` +
+        '(it feeds the signoff report) — a missing section is a hard error, not an empty list.',
     );
   }
 
@@ -132,24 +153,46 @@ export function parseHumanOnly(markdown) {
     const m = /^[-*]\s+(.+)$/.exec(line);
     if (!m) {
       throw new Error(
-        `coverage.md's human-only block has an unrecognised line (expected "- entry", ` +
+        `coverage.md's '${sectionLabel}' block has an unrecognised line (expected "- entry", ` +
           `a blank line, or an HTML comment): "${raw}"`,
       );
     }
     const entry = m[1].trim();
     if (!entry) {
-      throw new Error("coverage.md's human-only block has an empty bullet entry.");
+      throw new Error(`coverage.md's '${sectionLabel}' block has an empty bullet entry.`);
     }
     entries.push(entry);
   }
 
   if (entries.length === 0) {
     throw new Error(
-      "coverage.md's human-only block parsed to zero entries. An empty list here would tell " +
+      `coverage.md's '${sectionLabel}' block parsed to zero entries. An empty list here would tell ` +
         'a reader nothing needs their attention, which is exactly the lie this section exists to prevent.',
     );
   }
   return entries;
+}
+
+/**
+ * Parse `coverage.md`'s `## human-only` block — the standing limits of the
+ * black-box approach itself (section 4's body: "what a pass here still does
+ * not prove"). Deliberately excludes anything a config gate could close —
+ * see `parseCapabilityGated` for that half.
+ */
+export function parseHumanOnly(markdown) {
+  return parseBulletBlock(markdown, /^##\s+human-only\s*$/i, 'human-only');
+}
+
+/**
+ * Parse `coverage.md`'s `## capability-gated` block — surface that is "not
+ * configured here" but has no live `requireCapabilities()` call to derive a
+ * skip reason from yet, so it would otherwise never appear anywhere in the
+ * report. Everything that DOES have a live capability check is derived
+ * straight from this run's own skips (`skipSummary` in `buildReport`) and
+ * never belongs here — this block is only for the gap in between.
+ */
+export function parseCapabilityGated(markdown) {
+  return parseBulletBlock(markdown, /^##\s+capability-gated\s*$/i, 'capability-gated');
 }
 
 /**
@@ -425,7 +468,12 @@ export function dedupeWithCounts(entries) {
  *
  * @param {object} input
  * @param {{suites: any[], errors?: any[], stats?: object}} input.results  Parsed Playwright JSON reporter output.
- * @param {string[]} input.humanOnly        `coverage.md`'s parsed human-only list.
+ * @param {string[]} input.humanOnly        `coverage.md`'s parsed `human-only` list — section 4's
+ *   body ONLY (standing limits of the approach itself). Never mixed with mechanical skip
+ *   provenance any more (field-test fix E) — see `skipSummary`/`capabilityGated` below.
+ * @param {string[]} [input.capabilityGated] `coverage.md`'s parsed `capability-gated` list — a
+ *   config gate with no live `requireCapabilities()` call to derive a skip reason from yet.
+ *   Rendered next to `skipSummary`, not folded into `needsHuman`.
  * @param {{alias: string, suites: number[]} | null} input.scoped  Set on a scoped run.
  * @param {number} input.residue            `cleanup.sh`'s residue table count (0 = clean).
  * @param {number} [input.cleanupCode]      `cleanup.sh`'s own exit code (0 = ok). A non-zero code
@@ -443,6 +491,7 @@ export function buildReport(input) {
   const {
     results,
     humanOnly = [],
+    capabilityGated = [],
     scoped = null,
     residue = 0,
     cleanupCode = 0,
@@ -628,21 +677,47 @@ export function buildReport(input) {
     notWorking.push({ suite: 'cleanup', title: 'cleanup.sh exited non-zero', detail, trace: null, rawError: detail });
   }
 
-  // R2 — section 4 dedupe. `skipReasons` in particular can carry the exact
-  // same capability reason once per spec (e.g. "requires service-caller
-  // credentials" for every spec in a service-gated suite) — dedupe with
-  // counts, first-seen order preserved, so a reader sees ONE line per
-  // distinct reason instead of scrolling past 20 identical ones.
-  const needsHumanRaw = [...skipReasons, ...humanOnly];
+  // R2 — mechanical skip provenance, dedupe with counts. `skipReasons` can
+  // carry the exact same capability reason once per spec (e.g. "requires
+  // service-caller credentials" for every spec in a service-gated suite) —
+  // dedupe with counts, first-seen order preserved, so a reader sees ONE
+  // line per distinct reason instead of scrolling past 20 identical ones.
+  //
+  // Field-test fix E split what used to be one flattened "needsHuman" list
+  // into two categorically different things (a prior field test's own
+  // complaint: mechanical skip provenance and the approach's standing limits
+  // were summing two incommensurable things under one count):
+  //  - `skipSummary` — MECHANICAL, derived straight from this run's own
+  //    capability skips. This is the SAME information as the "⏭️ Skipped
+  //    (capability-gated)" counter above it, just spelled out — so it is
+  //    rendered right next to that counter, not in section 4.
+  //  - `needsHuman` — now ONLY `coverage.md`'s `human-only` block: the
+  //    approach's STANDING limits (section 4's body, renamed "What a pass
+  //    here still does not prove"). Nothing mechanical is mixed in any more.
+  // `capabilityGated` and `notRunSuites` are the two edge cases that are
+  // mechanical in NATURE but can't be derived from `skipReasons` itself (no
+  // live skip exists for them) — see their own fields below.
+  const skipSummary = dedupeWithCounts(skipReasons);
+  const needsHuman = dedupeWithCounts(humanOnly);
+
+  // A scoped run's untouched suites are mechanical provenance too (closer to
+  // `skipSummary` than to the standing-limits list) — a suite this
+  // invocation never touched is "not exercised THIS run", not "can never be
+  // exercised by this approach", so it does not belong in `needsHuman`
+  // alongside things like "real Keycloak/OIDC login" that are true no matter
+  // what ran. Kept as its own field (not merged into `skipSummary`) because
+  // it is not a skip reason at all — it is the complement of `scoped.suites`
+  // against the whole catalogue, and always renders as its own labeled list
+  // rather than one dedupe-with-counts line.
+  const notRunSuites = [];
   if (scoped) {
     const ran = new Set(scoped.suites ?? []);
     for (const suite of suites) {
       if (!ran.has(suite.id)) {
-        needsHumanRaw.push(`Suite ${suite.id} (${suite.name}) — not run in this invocation`);
+        notRunSuites.push(`Suite ${suite.id} (${suite.name}) — not run in this invocation`);
       }
     }
   }
-  const needsHuman = dedupeWithCounts(needsHumanRaw);
 
   // R1 — root-cause grouping for section 2's rendering. `notWorking` itself
   // stays FLAT (one entry per failing spec) so exit-code and count semantics
@@ -665,6 +740,9 @@ export function buildReport(input) {
     known,
     flaky,
     needsHuman,
+    skipSummary,
+    capabilityGated: dedupeWithCounts(capabilityGated),
+    notRunSuites,
     coverageDrift,
     scoped,
     gitInfo,
@@ -754,9 +832,34 @@ export function renderMarkdown(report) {
   lines.push(`| 🎲 Flaky (passed on retry — see below, first-attempt error shown) | ${flakyCount} |`);
   lines.push(`| ⏭️ Skipped (capability-gated) | ${skipCount} |`);
   lines.push(`| ⚑ Known / expected | ${report.known.length} |`);
-  lines.push(`| 👤 Needs a human | ${report.needsHuman.length} |`);
+  lines.push(`| 👤 What a pass here still does not prove (§4) | ${report.needsHuman.length} |`);
   lines.push(`| **Verdict** | **${verdict}** |`);
   lines.push('');
+
+  // ── Skip provenance (field-test fix E) ────────────────────────────────────
+  // MECHANICAL — the "why" behind the skip counter directly above, derived
+  // from this run's own skips (never a hand-maintained second list). This
+  // used to be flattened into section 4 alongside the approach's STANDING
+  // limits, which summed two incommensurable things under one count and
+  // buried the more valuable of the two. Rendered here instead, right next
+  // to the counter it explains; section 4 below now carries only the
+  // standing limits.
+  if ((report.skipSummary ?? []).length > 0) {
+    lines.push(`_${skipCount} skipped — ${report.skipSummary.join('; ')}._`);
+    lines.push('');
+  }
+  if ((report.capabilityGated ?? []).length > 0) {
+    lines.push(
+      '_Also capability-gated, but not wired to any spec\'s skip check yet (so it cannot appear in the ' +
+        `count above): ${report.capabilityGated.join('; ')}._`,
+    );
+    lines.push('');
+  }
+  if ((report.notRunSuites ?? []).length > 0) {
+    lines.push('**Not run this invocation** (scoped run — so a scoped pass can never read as a full signoff):');
+    for (const s of report.notRunSuites) lines.push(`- ${s}`);
+    lines.push('');
+  }
 
   // Per-suite coverage. `report.suites` is the catalogue parsed from
   // coverage.md; a suite with no specs in this run is "not run", which is a
@@ -866,7 +969,14 @@ export function renderMarkdown(report) {
   }
   lines.push('');
 
-  lines.push('## 4. Not tested — needs a human');
+  lines.push('## 4. What a pass here still does not prove');
+  lines.push(
+    '_Standing limits of this black-box approach — true no matter how this target is configured. ' +
+      "Mechanical skip provenance (which capability gates were closed, which suites this run didn't " +
+      'touch) lives under the at-a-glance table above, not here — this list is only the answer to ' +
+      '"what would a green run STILL not tell me".',
+  );
+  lines.push('');
   if (report.needsHuman.length === 0) {
     lines.push('_Nothing — unusual; check that coverage.md loaded correctly._');
   } else {
@@ -917,6 +1027,7 @@ function main() {
   const results = JSON.parse(readFileSync(resultsPath, 'utf8'));
   const coverageText = readFileSync(coveragePath, 'utf8');
   const humanOnly = parseHumanOnly(coverageText);
+  const capabilityGated = parseCapabilityGated(coverageText);
   const suites = parseSuiteTable(coverageText);
   // `scoped-suites` may be an empty string — a cross-cutting alias (e.g. the
   // mail sweep) that doesn't correspond to a single numbered suite still has a
@@ -937,7 +1048,7 @@ function main() {
   const coverageDrift = args['coverage-drift'] ? JSON.parse(readFileSync(args['coverage-drift'], 'utf8')) : [];
   const gitInfo = args['git-info'] ? JSON.parse(readFileSync(args['git-info'], 'utf8')) : null;
 
-  const report = buildReport({ results, humanOnly, scoped, residue, cleanupCode, coverageDrift, suites, gitInfo });
+  const report = buildReport({ results, humanOnly, capabilityGated, scoped, residue, cleanupCode, coverageDrift, suites, gitInfo });
   console.log(renderMarkdown(report));
   process.exit(report.exitCode);
 }
