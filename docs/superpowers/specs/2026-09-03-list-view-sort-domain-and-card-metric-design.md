@@ -767,9 +767,9 @@ scroll position.
 - The unavailable-domain reason cannot fit inline; it becomes a tap/long-press
   tooltip.
 - The domain row **scrolls horizontally** past ~4 domains rather than wrapping.
-  **Open risk:** if any live network has more than roughly four browsable
-  domains, the segmented control likely needs to become a dropdown on mobile.
-  Check the real network configs during implementation.
+  **Checked and cleared:** no live network exceeds three domains today, so the
+  segmented control is fine as specified. If a network ever declares a fourth
+  browsable domain, revisit — the mobile fallback would be a dropdown.
 
 ---
 

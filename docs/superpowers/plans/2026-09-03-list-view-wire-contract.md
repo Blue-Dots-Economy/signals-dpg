@@ -1,0 +1,291 @@
+# FROZEN WIRE CONTRACT — list-view sort + area (#644)
+
+**Status:** FROZEN 2026-09-03. Do not change unilaterally.
+**Spec:** `docs/superpowers/specs/2026-09-03-list-view-sort-domain-and-card-metric-design.md`
+**Consumed by:** `2026-09-03-signals-search-sort-paging-text.md` (repo: signals-search)
+and `2026-09-03-signals-dpg-list-view.md` (repo: Signals-DPG)
+
+---
+
+## Why this document exists
+
+The two repos are being implemented **in parallel, in separate sessions**.
+Signals-DPG's tests never touch a real signals-search — every test mocks the
+client module or its `fetch` (`apps/api/src/services/signals_search_client.ts:6-8`).
+So both halves can compile, both test suites can pass, and integration can
+still fail on the dev cluster if the two sessions invent different field names.
+
+**This file is the only shared truth.** Both plans are written against it.
+
+> **If you are implementing either side and believe this contract is wrong:
+> STOP. Do not "fix" it locally.** Report the problem, get the contract
+> amended here first, and let the other session pick up the amendment. A
+> unilateral change produces a green build and a broken deploy.
+
+---
+
+## 1. signals-search `POST /v1/search` — request
+
+Two **new optional** fields, both inside `message.intent`.
+
+```ts
+// signals-search/src/api/schemas.ts — IntentSchema
+{
+  // ...existing: textSearch, item, spatial, filters
+
+  /**
+   * NEW. Explicit ordering. When ABSENT, ordering falls back to today's
+   * inferred behaviour (cosine if a query vector exists, else distance if a
+   * spatial clause exists, else recency) — so existing callers are unaffected.
+   */
+  sort?: 'relevance' | 'newest' | 'nearest';
+
+  /**
+   * NEW. A centre used ONLY for ordering. It NEVER contributes a WHERE
+   * predicate. This is the capability that makes "location may sort but must
+   * not truncate" expressible; `spatial` continues to filter, unchanged.
+   * GeoJSON order — [lng, lat].
+   */
+  orderingCenter?: { type: 'Point'; coordinates: [number, number] };
+}
+```
+
+### 1.1 Placement is load-bearing
+
+Both fields **MUST** live inside `intent`, not on `message` beside
+`pagination`. `cacheKey(normalized)` (`search_route.ts:64-65`) hashes
+`{networkId, domain, itemType, intent, pagination}`. Inside `intent`, the cache
+key is correct for free. Beside `pagination`, **two different sorts share a
+cache entry.** There is a required test for this (search plan Task 2).
+
+### 1.2 Resolution rules — normative
+
+Applied in this order. The result is reported back as `meta.sort_applied`.
+
+| Requested `sort` | Precondition | If met | If NOT met |
+| --- | --- | --- | --- |
+| `relevance` | an anchor (`intent.item.id`) **or** `textSearch` is present | cosine order | **fall back to `newest`** |
+| `newest` | none | `created_at` order | n/a |
+| `nearest` | a centre resolves (see 1.3) | distance order, **no radius bound** | **fall back to `newest`** |
+| *absent* | — | today's inferred behaviour | n/a |
+
+**Fallbacks never error.** A caller asking for an order it cannot have gets
+`newest` and is told so via `meta.sort_applied`.
+
+### 1.3 Centre resolution for `sort: 'nearest'`
+
+First match wins:
+
+1. `intent.orderingCenter.coordinates`
+2. `intent.spatial[0].geometry.coordinates` (when an area filter is also set,
+   its centre doubles as the ordering centre)
+3. the anchor item's own stored location (already resolved as `anchorLat` /
+   `anchorLng`, `search_route.ts:58-59`)
+4. none of the above → fall back to `newest`
+
+### 1.4 `spatial` is unchanged
+
+`intent.spatial` keeps its exact current meaning: an `ST_DWithin` **filter**,
+with `distanceMeters` defaulting to `SEARCH_DEFAULT_DISTANCE_METERS` (30 000)
+when omitted. Do not alter it, and do not make `sort: 'nearest'` imply it.
+
+---
+
+## 2. signals-search `POST /v1/search` — response
+
+One **new field**, always present.
+
+```ts
+// signals-search/src/api/schemas.ts — SearchResponseSchema
+message: {
+  items: ItemResult[],
+  meta: {
+    total: number,
+    limit: number,
+    offset: number,
+    /**
+     * NEW, ALWAYS PRESENT. The sort that was actually applied, after the
+     * §1.2 fallbacks. Present even when the request sent no `sort`, in which
+     * case it names whichever inferred path ran. The UI must never claim an
+     * order it did not get.
+     */
+    sort_applied: 'relevance' | 'newest' | 'nearest',
+  }
+}
+```
+
+Additive, so old callers ignore it.
+
+---
+
+## 3. signals-search `ORDER BY` — exact SQL
+
+Every clause ends in `s.item_id ASC`. This is the P1 fix and it is
+**non-negotiable** — without it `LIMIT/OFFSET` duplicates and skips rows across
+pages (spec §3.4).
+
+```sql
+-- relevance
+ORDER BY s.embedding <=> :vec ASC, s.item_id ASC
+
+-- newest   (items.created_at, NOT item_search.indexed_at — spec D5)
+ORDER BY i.created_at DESC, s.item_id ASC
+
+-- nearest  (no radius predicate is added by this sort)
+ORDER BY ST_Distance(
+           s.geo,
+           ST_SetSRID(ST_MakePoint(:lng, :lat), 4326)::geography
+         ) ASC NULLS LAST, s.item_id ASC
+```
+
+The three **inferred** (no-`sort`) paths get the same `, s.item_id ASC`
+suffix, including the existing `s.indexed_at DESC` one.
+
+---
+
+## 4. signals-search text predicate (#148) — exact behaviour
+
+`textSearch` becomes an **additional `WHERE` predicate**, ANDed with existing
+conditions, and is applied **whether or not an anchor is present.**
+
+- The gate at `search_route.ts:74` (`!message.intent.item?.id &&`) is removed.
+- When an anchor IS present: the anchor's embedding remains the query vector;
+  text only narrows.
+- When no anchor is present: text continues to become the query vector **and**
+  now also narrows.
+- Fields matched: the `vectorize: true` set,
+  `deps.registry.vectorizeFields(networkId, domain, itemType)` — the same
+  content that defines semantic relevance (spec §3.3).
+- `item_search` does not store serialized text, so the predicate runs against
+  `i.item_state` via the existing `JOIN items i`.
+
+Shape (OR across fields, ANDed into `conds`):
+
+```sql
+(COALESCE(i.item_state->>'field_a','') ILIKE '%' || :q || '%'
+ OR COALESCE(i.item_state->>'field_b','') ILIKE '%' || :q || '%')
+```
+
+**Known looseness, accepted:** for an array-valued field, `->>'f'` yields the
+serialized JSON array as text (`["solar","wind"]`), so `ILIKE` matches against
+that text form. Acceptable for a narrowing predicate; documented, not fixed
+here.
+
+---
+
+## 5. Signals-DPG `POST /v1/network/item/discover` — request
+
+```ts
+// packages/schemas/src/api/discover_schemas.ts — DiscoverItemsBodyBase
+{
+  // ...existing: item_network, item_domain, item_type, q, filters,
+  //              anchor_item_id, limit, offset
+
+  /** NEW. Absent => server default per §5.2. */
+  sort?: 'relevance' | 'newest' | 'nearest',
+
+  // EXISTING FIELDS, MEANING NARROWED — these three now express the AREA
+  // FILTER *only*, and the UI sends them ONLY in `radius` area mode.
+  // `anywhere` (the default) sends none of them. There is no `area_mode`
+  // field: absence IS `anywhere`.
+  item_latitude?: number,
+  item_longitude?: number,
+  distance_meters?: number,
+
+  /**
+   * NEW. The ordering centre for `sort: 'nearest'`. Distinct from the area
+   * filter above, so the candidate set stays network-wide while the order is
+   * nearest-first. Must be sent together (existing paired-field refine
+   * pattern applies).
+   */
+  ordering_latitude?: number,
+  ordering_longitude?: number,
+}
+```
+
+### 5.1 Mapping to the search envelope
+
+| `/discover` field | → `intent` field |
+| --- | --- |
+| `sort` | `intent.sort` |
+| `item_latitude` / `item_longitude` / `distance_meters` | `intent.spatial[0]` (filter) |
+| `ordering_latitude` / `ordering_longitude` | `intent.orderingCenter` |
+
+### 5.2 Default `sort` (server-side)
+
+`relevance` when `anchor_item_id` is present, else `newest`. Never error.
+
+---
+
+## 6. Signals-DPG `/discover` — response
+
+```ts
+meta: {
+  total, limit, offset, source, degraded,
+
+  /**
+   * CHANGED: now present only when an AREA FILTER was actually applied
+   * (i.e. item_latitude/item_longitude were sent). Previously keyed off
+   * "a location was sent", which conflated filtering with ordering.
+   * An `ordering_*` centre alone MUST NOT set this.
+   */
+  distance_meters?: number,
+
+  /** NEW, always present. Passed through from signals-search
+   *  meta.sort_applied; on the native fallback, whatever the fallback did. */
+  sort_applied: 'relevance' | 'newest' | 'nearest',
+}
+```
+
+---
+
+## 7. Native fallback (Signals-DPG only)
+
+No wire change. Behaviour, per spec §3.7:
+
+| `sort` | Native call |
+| --- | --- |
+| `newest` | send **no** lat/lng → `buildDistanceOrderBy` yields `created_at DESC` |
+| `nearest` | send lat/lng, **no** `radius_meters` → distance-ordered, unbounded |
+| `relevance` | unavailable without ranking → behave as `newest`, report `sort_applied: 'newest'` |
+
+Plus the `item_id` tiebreaker in `buildDistanceOrderBy`
+(`apps/api/src/utils/item_fetch_runtime.ts:463-480`).
+
+---
+
+## 8. Match-score scale (Signals-DPG only, no cross-repo impact)
+
+Single wire scale **0–100** end to end, matching what `/v1/relevance` already
+emits. Both conversion points deleted:
+`packages/match_score/src/providers/signals_search/client.ts:15` (`÷10`) and
+`use-match-score.ts:44` (`×10`). signals-search needs **no change** for this —
+it already emits 0–100.
+
+---
+
+## 9. Contract test both sides must satisfy
+
+Each repo asserts the same fixture independently, so a divergence fails a test
+rather than a deploy.
+
+```
+Request  intent = { item: { id: <anchor> },
+                    textSearch: 'solar',
+                    sort: 'nearest',
+                    orderingCenter: { type: 'Point', coordinates: [77.59, 12.97] } }
+         pagination = { limit: 20, offset: 0 }
+
+Expect   - NO ST_DWithin predicate in the SQL (nearest must not filter)
+         - ORDER BY ends in `s.item_id ASC`
+         - text applied as a WHERE predicate, anchor still the query vector
+         - meta.sort_applied === 'nearest'
+```
+
+---
+
+## 10. Change log
+
+| Date | Change |
+| --- | --- |
+| 2026-09-03 | Frozen. Initial version. |
