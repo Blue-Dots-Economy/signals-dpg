@@ -26,15 +26,46 @@ export const DiscoverFacetFilterSchema = z.object({
   values: z.array(DiscoverFacetValueSchema).min(1),
 });
 
+/**
+ * Explicit list ordering (#644). Optional on the wire: the BFF defaults it
+ * (`relevance` when an anchor is sent, else `newest`) and always reports what
+ * it actually applied via `meta.sort_applied`, so the UI can never claim an
+ * order it did not get.
+ *
+ * `relevance` = cosine against the anchor (or the typed text when there is no
+ * anchor); `newest` = `items.created_at DESC` (NOT `item_search.indexed_at`,
+ * which is an ingestion artifact); `nearest` = distance ascending with NO
+ * radius bound.
+ */
+export const DiscoverSortSchema = z.enum(['relevance', 'newest', 'nearest']);
+export type DiscoverSort = z.infer<typeof DiscoverSortSchema>;
+
 const DiscoverItemsBodyBase = z.object({
   item_network: z.string().min(1),
   item_domain: z.string().min(1),
   item_type: z.string().min(1),
   q: z.string().trim().min(1).optional(),
   filters: z.array(DiscoverFacetFilterSchema).optional(),
+  sort: DiscoverSortSchema.optional(),
+  // AREA FILTER, opt-in (#644). Sent ONLY in `radius` area mode; the default
+  // `anywhere` mode sends none of the three, so no spatial clause is built and
+  // the list spans the whole network. There is no `area_mode` field — absence
+  // IS `anywhere`.
+  //
+  // Before #644 the UI forwarded the resolved viewer location unconditionally
+  // and signals-search treats a spatial clause as a hard `s_dwithin`
+  // predicate, so every signed-in viewer with a location silently saw only
+  // items within ~30 km, with no control to widen it.
   item_latitude: z.number().min(-90).max(90).optional(),
   item_longitude: z.number().min(-180).max(180).optional(),
   distance_meters: z.number().positive().optional(),
+  // ORDERING CENTRE for `sort: 'nearest'` — DISTINCT from the area filter
+  // above. Sending only these two orders the whole network nearest-first
+  // WITHOUT bounding the candidate set, which is exactly the capability #644
+  // needs: location may sort, but must not truncate. Never contributes a
+  // spatial clause, and never sets `meta.distance_meters`.
+  ordering_latitude: z.number().min(-90).max(90).optional(),
+  ordering_longitude: z.number().min(-180).max(180).optional(),
   // The viewer's own profile item_id (#394), forwarded to signals-search as
   // the Beckn `intent.item.id` anchor for profile-relevance ranking. Optional
   // — omitted entirely means "no anchor," not ranked-by-relevance-to-nothing.
@@ -50,6 +81,13 @@ export const DiscoverItemsBodySchema = DiscoverItemsBodyBase.refine(
   {
     message: 'item_latitude and item_longitude must be provided together',
     path: ['item_longitude'],
+  }
+).refine(
+  (data) =>
+    (data.ordering_latitude === undefined) === (data.ordering_longitude === undefined),
+  {
+    message: 'ordering_latitude and ordering_longitude must be provided together',
+    path: ['ordering_longitude'],
   }
 );
 
@@ -100,10 +138,20 @@ export const DiscoverResponseSchema = z.object({
     // Effective spatial radius (meters, #394) actually applied to this
     // search — the configured `SIGNALS_SEARCH_DISTANCE_METERS` env, the
     // request's own `distance_meters` override, or DEFAULT_SEARCH_DISTANCE_METERS
-    // when neither is set (mirroring signals-search's own default). Only
-    // present when the request carried a location; omitted otherwise so the
-    // UI never shows a spurious "within X km" note for a non-geo search.
+    // when neither is set (mirroring signals-search's own default).
+    //
+    // #644: present ONLY when an AREA FILTER was actually applied (the request
+    // carried `item_latitude`/`item_longitude`). It previously keyed off "a
+    // location was sent", which conflated filtering with ordering — an
+    // ordering centre bounds nothing, so reporting a radius for one would be a
+    // lie and would make the UI print a "within X km" note for an unbounded
+    // search.
     distance_meters: z.number().optional(),
+    // The order actually applied, after the BFF's defaulting and fallbacks
+    // (#644). Always present. A `relevance` request with neither an anchor nor
+    // typed text degrades to `newest`, so the UI must label from THIS rather
+    // than from what it asked for.
+    sort_applied: DiscoverSortSchema,
   }),
   items: DiscoverResponseItemSchema.array(),
 });
