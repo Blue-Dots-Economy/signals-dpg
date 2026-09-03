@@ -41,7 +41,8 @@ function seedFromDiscoverScore(networkItem: Item): MatchScoreResult | null {
   if (networkItem.score == null) return null;
   return {
     provider: 'discover',
-    score: networkItem.score * 10,
+    // #646 §5.2: /discover already returns 0-100; no conversion.
+    score: networkItem.score,
     source: 'discover',
   };
 }

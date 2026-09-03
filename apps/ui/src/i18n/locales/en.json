@@ -693,5 +693,12 @@
   "browse.area_radius_unavailable": "Needs your location to limit by area",
   "browse.no_filters": "No filters applied",
   "browse.count_listings": "{{count}} listings",
-  "browse.domain_unavailable": "You can't connect with {{domain}}"
+  "browse.domain_unavailable": "You can't connect with {{domain}}",
+  "card.metric_km": "{{km}} km",
+  "card.metric_m": "{{m}} m",
+  "card.metric_today": "Today",
+  "card.metric_days_ago": "{{count}}d ago",
+  "card.metric_distance_desc": "Distance from you",
+  "card.metric_age_desc": "When this was posted",
+  "match.tooltip_view_details": "Tap for details"
 }

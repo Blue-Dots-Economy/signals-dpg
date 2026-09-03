@@ -683,5 +683,12 @@
   "browse.area_radius_unavailable": "क्षेत्र सीमित करने के लिए आपका स्थान आवश्यक है",
   "browse.no_filters": "कोई फ़िल्टर लागू नहीं",
   "browse.count_listings": "{{count}} सूचियाँ",
-  "browse.domain_unavailable": "आप {{domain}} से नहीं जुड़ सकते"
+  "browse.domain_unavailable": "आप {{domain}} से नहीं जुड़ सकते",
+  "card.metric_km": "{{km}} किमी",
+  "card.metric_m": "{{m}} मी",
+  "card.metric_today": "आज",
+  "card.metric_days_ago": "{{count}} दिन पहले",
+  "card.metric_distance_desc": "आपसे दूरी",
+  "card.metric_age_desc": "यह कब पोस्ट हुआ",
+  "match.tooltip_view_details": "विवरण के लिए टैप करें"
 }

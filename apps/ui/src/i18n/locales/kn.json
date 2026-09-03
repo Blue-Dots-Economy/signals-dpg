@@ -683,5 +683,12 @@
   "browse.area_radius_unavailable": "ಪ್ರದೇಶ ಸೀಮಿತಗೊಳಿಸಲು ನಿಮ್ಮ ಸ್ಥಳ ಬೇಕು",
   "browse.no_filters": "ಯಾವುದೇ ಫಿಲ್ಟರ್ ಅನ್ವಯಿಸಿಲ್ಲ",
   "browse.count_listings": "{{count}} ಪಟ್ಟಿಗಳು",
-  "browse.domain_unavailable": "ನೀವು {{domain}} ಜೊತೆ ಸಂಪರ್ಕಿಸಲಾಗುವುದಿಲ್ಲ"
+  "browse.domain_unavailable": "ನೀವು {{domain}} ಜೊತೆ ಸಂಪರ್ಕಿಸಲಾಗುವುದಿಲ್ಲ",
+  "card.metric_km": "{{km}} ಕಿಮೀ",
+  "card.metric_m": "{{m}} ಮೀ",
+  "card.metric_today": "ಇಂದು",
+  "card.metric_days_ago": "{{count}} ದಿನಗಳ ಹಿಂದೆ",
+  "card.metric_distance_desc": "ನಿಮ್ಮಿಂದ ದೂರ",
+  "card.metric_age_desc": "ಇದನ್ನು ಯಾವಾಗ ಪೋಸ್ಟ್ ಮಾಡಲಾಗಿದೆ",
+  "match.tooltip_view_details": "ವಿವರಗಳಿಗಾಗಿ ಟ್ಯಾಪ್ ಮಾಡಿ"
 }

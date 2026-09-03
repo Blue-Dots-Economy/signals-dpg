@@ -10,11 +10,25 @@ import {
 import type { Item } from '@/lib/item-api';
 import type { MatchScoreResult } from '@/lib/match-score-api';
 import { MatchScoreBadge } from './match-score-badge';
+import type { CardMetric } from '@/lib/metric-display';
 
 export interface MatchScoreButtonProps {
   localItem: Item | null;
   networkItem: Item;
   score: MatchScoreResult | null;
+  /**
+   * The card's ranking basis (#646 C1), resolved by the caller from the sort
+   * the SERVER applied. Null when nothing determined this card's position —
+   * the calculate CTA then shows instead.
+   *
+   * OMIT it outside a sorted list (the detail modal trigger, a public profile,
+   * My Actions): there is no sort there, so the only meaningful metric is the
+   * profile relevance score, and that is what the default below uses. Passing
+   * it explicitly is required only on the browse list, where the sort decides.
+   */
+  metric?: CardMetric;
+  /** Which quantity `relevance` means; only used for the tooltip. */
+  basis?: 'profile' | 'search' | null;
   isLoading: boolean;
   error: Error | null;
   onCalculate: () => void;
@@ -25,6 +39,8 @@ export interface MatchScoreButtonProps {
 export function MatchScoreButton({
   localItem,
   score,
+  metric,
+  basis,
   isLoading,
   error,
   onCalculate,
@@ -32,13 +48,22 @@ export function MatchScoreButton({
   disabled = false,
 }: MatchScoreButtonProps) {
   const { t } = useTranslation();
-  // If we have a score, show the badge
-  if (score && !error) {
+  // #646 C1: the pill shows the RANKING BASIS, resolved by the caller from
+  // the sort the server applied — so under `nearest`/`newest` it is a distance
+  // or an age rather than a score badged onto a differently-ordered list.
+  const effectiveMetric: CardMetric =
+    metric !== undefined
+      ? metric
+      : score?.score != null
+        ? { kind: 'relevance', percent: score.score }
+        : null;
+
+  if (effectiveMetric && !error) {
     return (
       <MatchScoreBadge
-        score={score}
+        metric={effectiveMetric}
+        basis={basis ?? 'profile'}
         onClick={onViewDetails}
-        showLabel={false}
       />
     );
   }

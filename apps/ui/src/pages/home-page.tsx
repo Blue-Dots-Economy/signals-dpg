@@ -2227,6 +2227,10 @@ export function HomePage() {
                   openActionItemIds={openActionItemIds}
                   openActionReason={t('actions.pair_open_disabled', 'A request is already open with this profile.')}
                   selection={browseSelection}
+                  // #646 C1: each card's pill shows whatever drove its
+                  // position, keyed off what the SERVER actually applied.
+                  sortApplied={listSortApplied}
+                  relevanceBasis={hasProfileAnchor ? 'profile' : search.trim() ? 'search' : null}
                 />
                 <div ref={singleDomainSentinelRef} aria-hidden="true" className="h-px w-full" />
               </>
