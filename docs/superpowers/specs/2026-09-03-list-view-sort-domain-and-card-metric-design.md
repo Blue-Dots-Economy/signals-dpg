@@ -203,7 +203,7 @@ and visibly.
 | D14 | With an anchor present, the card label is **"matches your profile"** — even when text is also typed | After D13 the score is still 100% profile↔item cosine; text only narrows membership. Labelling it "matches your search" would be false. The typed text is surfaced as its own removable chip instead. |
 | D15 | `VITE_FREETEXT_MATCH_SCORE_ENABLED` is **kept** | Reversing #646's C3. It is a legitimate per-deployment product choice — "does this instance show a score for free-text matches, or only for profile matches?" — not a workaround for an ambiguous badge. Labelling (D14) fixes the ambiguity; the flag keeps its real meaning. |
 | D16 | Offset paging is retained; **keyset paging is a follow-up** | See §3.5. Accepted, measured risk. |
-| D17 | `item_id` is appended as the final `ORDER BY` key in **both** repos | Fixes P1 in signals-search and the identical latent bug in the native fallback. |
+| D17 | `item_id` is appended as the final `ORDER BY` key on the **`newest` and `nearest`** paths in both repos — **not** on `relevance` | Fixes P1 in signals-search and the identical latent bug in the native fallback. Amended 2026-09-03 after measurement: on the cosine path the tiebreaker destroys the HNSW index (115× slower, O(corpus)) and buys little, because ANN returns different candidate *sets* per page regardless of tie ordering. See §3.4. |
 | D18 | The card's primary metric **is** the ranking basis | So metric and order can never disagree. See §5. |
 | D19 | With no `?domain=`, the list defaults to the viewer's **first interacting counterpart domain**, else the first visible domain | The All tab was the previous no-domain default; something must replace it. Invisible for a viewer with one visible domain. |
 | D20 | The explanation panel ("why this result, in this position") is **in scope** | Requested. Subject to the honesty constraint in §5.4. |
@@ -405,15 +405,41 @@ touch it.
 `items.created_at DESC` with no unique key — identical failure mode. It gets
 the same tiebreaker, or the degraded path stays broken.
 
-**One thing to verify, not assume.** There is an HNSW index on `embedding`
-(`signals-search/src/db/migrations/0001_item_search.sql`). On the cosine path,
-adding a second `ORDER BY` key should still use the index via **incremental
-sort** (index for the leading key, sort only within tie groups), but planner
-behaviour is version- and statistics-dependent. `EXPLAIN ANALYZE` the real
-query with and without the tiebreaker at a realistic row count **before
-finalising**. If the plan regresses to a full sort, the fallback is to keep the
-tiebreaker on the recency and distance paths (no ANN index involved, ties
-common) and address cosine ties separately.
+**MEASURED 2026-09-03 — the cosine path is exempt.** The verification this
+section originally called for was run, and the result reverses the plan for one
+of the three paths.
+
+On 20 000 live rows with real 1024-dim vectors (pgvector `vector_cosine_ops`,
+PG16), appending `, s.item_id ASC` to the cosine clause **destroys the HNSW
+index**:
+
+| ORDER BY | Plan | Time |
+| --- | --- | --- |
+| `embedding <=> :vec ASC` | `Index Scan using item_search_embedding_hnsw` | **2.8 ms** |
+| `embedding <=> :vec ASC, s.item_id ASC` | Seq Scan ×2 + `top-N heapsort` | **316 ms** |
+
+115× slower and a full scan of every live row, so O(corpus) — ~3 s at 200 k,
+unusable at 1 M. Architectural, not a costing accident: with `seqscan`,
+`hashjoin` and `mergejoin` forced off there is still no HNSW path; with
+`enable_incremental_sort = on` no Incremental Sort node appears; and removing
+the `JOIN items` changes nothing. pgvector's HNSW scan supplies a pathkey only
+for the exact single-expression ordering, and being *approximate* it cannot
+promise complete tie groups, so an incremental sort over it is not legal.
+
+**The tiebreaker would buy little there in any case.** HNSW is approximate, so
+page 1 (`LIMIT 20`) and page 2 (`LIMIT 20 OFFSET 20`) run different bounds and
+the traversal can return different candidate **sets** — not merely a different
+order within a tie group. Making the window's order deterministic does not
+stabilise which rows are in the window.
+
+**Resolution:** the tiebreaker applies to `newest` and `nearest` (where it is
+free — those paths already performed a sort) and **not** to `relevance`.
+
+**So P1's guarantee is scoped, and this must not be overstated elsewhere:**
+no-duplicates / no-omissions is **firm for `newest` and `nearest`** and
+**best-effort for `relevance`**. Since the list defaults to `relevance`
+whenever an anchor is present, the default view is the best-effort one. The UI
+must not promise stable deep paging there.
 
 ### 3.5 Paging depth: accepted risk (D16)
 
@@ -439,6 +465,12 @@ and it **requires** the D17 tiebreaker to be expressible at all — without
 `item_id` in the comparison you can only say "after this timestamp", which
 skips the rest of the tie group. So D17 is both the correctness fix and the
 prerequisite for the performance fix.
+
+**But only for `newest` and `nearest`.** Keyset paging cannot fix `relevance`:
+you cannot cursor-seek into an approximate ANN graph. Deep relevance paging is
+inherently approximate (§3.4), which is a property of ANN search rather than a
+deferred defect — do not file it as one. If exhaustive enumeration matters more
+than ranking for a given use, the answer is to sort by `newest`.
 
 ### 3.6 Rerank paging guard (P2)
 
@@ -778,12 +810,19 @@ scroll position.
 **Paging correctness**
 - **P1 regression:** seed rows with identical sort keys, page with `limit`
   smaller than the tie group, assert the union of pages equals the full set
-  with no duplicates and no omissions (fails before the tiebreaker)
+  with no duplicates and no omissions (fails before the tiebreaker). Applies to
+  `newest` and `nearest` only (§3.4). **Use ~200 tied rows, not a handful:** at
+  six rows Postgres picks a stable plan by luck and the test passes *before*
+  the fix, which reads as a false pass. Verified — 200 rows sharing one
+  timestamp, paged at `limit` 20, returned 197 distinct ids of 200 before the
+  fix (3 duplicated, 3 never returned).
 - Same regression against the **native fallback** ordering
 - **Rerank guard:** with rerank enabled, `offset >= topN` returns real rows
   rather than an empty page
-- **Query plan:** `EXPLAIN ANALYZE` confirms the HNSW index survives the added
-  tiebreaker on the cosine path (§3.4)
+- **Query plan:** `EXPLAIN ANALYZE` confirms the HNSW index is still used on the
+  cosine path — i.e. that the tiebreaker was NOT added there (§3.4). A plan
+  showing `Seq Scan` + `top-N heapsort` instead of
+  `Index Scan using item_search_embedding_hnsw` means the exemption regressed.
 
 **Fetch contract**
 - **Unbounded default:** a discover request with no area sends no spatial

@@ -147,13 +147,12 @@ its centre, exactly as today. Only the ordering centre is gated.
 
 ## 3. signals-search `ORDER BY` — exact SQL
 
-Every clause ends in `s.item_id ASC`. This is the P1 fix and it is
-**non-negotiable** — without it `LIMIT/OFFSET` duplicates and skips rows across
-pages (spec §3.4).
+**AMENDED 2026-09-03** — the `relevance` clause does NOT take the tiebreaker.
+See §3.1 for the measurement that forced this.
 
 ```sql
--- relevance
-ORDER BY s.embedding <=> :vec ASC, s.item_id ASC
+-- relevance — SINGLE KEY, no tiebreaker (see §3.1)
+ORDER BY s.embedding <=> :vec ASC
 
 -- newest   (items.created_at, NOT item_search.indexed_at — spec D5)
 ORDER BY i.created_at DESC, s.item_id ASC
@@ -165,8 +164,53 @@ ORDER BY ST_Distance(
          ) ASC NULLS LAST, s.item_id ASC
 ```
 
-The three **inferred** (no-`sort`) paths get the same `, s.item_id ASC`
-suffix, including the existing `s.indexed_at DESC` one.
+The **inferred** (no-`sort`) paths take the tiebreaker on distance and
+`s.indexed_at DESC`, and — for the same reason as above — **not** on the
+inferred cosine path.
+
+### 3.1 Why `relevance` is exempt (measured, not assumed)
+
+Appending `, s.item_id ASC` to the cosine clause **destroys the HNSW index**.
+Measured on 20 000 live rows, real 1024-dim vectors, pgvector
+`vector_cosine_ops`, PG16:
+
+| ORDER BY | Plan | Time |
+| --- | --- | --- |
+| `embedding <=> :vec ASC` | `Index Scan using item_search_embedding_hnsw` | **2.8 ms** |
+| `embedding <=> :vec ASC, s.item_id ASC` | Seq Scan ×2 + `top-N heapsort` | **316 ms** |
+
+115× slower, and it is a full scan of every live row — so O(corpus): ~3 s at
+200 k rows, unusable at 1 M.
+
+Confirmed architectural, not a costing accident:
+
+- forcing off `seqscan`/`hashjoin`/`mergejoin` still yields **no HNSW path**
+  (it falls back to `item_search_pkey` + full sort)
+- `enable_incremental_sort = on` produces **no Incremental Sort node**
+- same result with the `JOIN items` removed entirely, so the join is not the
+  cause
+
+Root cause: pgvector's HNSW scan supplies a pathkey only for the exact
+single-expression ordering. A second sort key invalidates that pathkey, and
+because the scan is *approximate* it cannot promise it emits complete tie
+groups — so Postgres cannot legally build an incremental sort over it.
+
+**And the tiebreaker would buy almost nothing there anyway.** HNSW is
+approximate: page 1 (`LIMIT 20`) and page 2 (`LIMIT 20 OFFSET 20`) run
+different bounds, so the traversal can return different candidate **sets**, not
+merely a different order within a tie group. Ordering the window
+deterministically does not stabilise which rows are in the window. Genuine
+cosine ties additionally require byte-identical embeddings; the one real tie
+group is rows with `embedding IS NULL`, which cluster at the tail.
+
+**Consequence, and it must not be understated:** the no-duplicates /
+no-omissions guarantee is **firm for `newest` and `nearest`** and
+**best-effort for `relevance`**. Keyset pagination would not fix `relevance`
+either — you cannot cursor-seek into an approximate graph. This is a property
+of ANN search, not a deferred bug.
+
+Since Signals-DPG defaults to `relevance` whenever an anchor is present, that
+is the default list view. The UI must not promise stable deep paging there.
 
 ---
 
@@ -304,7 +348,8 @@ Request  intent = { item: { id: <anchor> },
          pagination = { limit: 20, offset: 0 }
 
 Expect   - NO ST_DWithin predicate in the SQL (nearest must not filter)
-         - ORDER BY ends in `s.item_id ASC`
+         - ORDER BY ends in `s.item_id ASC` (this fixture uses sort:'nearest';
+           a `relevance` ORDER BY must NOT carry the tiebreaker — see §3.1)
          - text applied as a WHERE predicate, anchor still the query vector
          - meta.sort_applied === 'nearest'
 ```
@@ -317,4 +362,5 @@ Expect   - NO ST_DWithin predicate in the SQL (nearest must not filter)
 | --- | --- |
 | 2026-09-03 | Frozen. Initial version. |
 | 2026-09-03 | Clarifications only, no shape change: §2.1 (the inferred path reports `'newest'` while ordering by `indexed_at`) and §2.2 (`orderingCenter` reaches the SQL layer only under `sort: 'nearest'`, or every anchor search starts emitting `distanceMeters`). Both surfaced while implementing; neither alters a field or a rule. |
+| 2026-09-03 | **AMENDMENT (§3, §9): the `relevance` ORDER BY drops the `s.item_id` tiebreaker.** Measured: it destroys the HNSW index (2.8 ms → 316 ms, full seq scan, O(corpus)) because pgvector supplies a pathkey only for the exact single-expression ordering, and being approximate it cannot support an incremental sort. It also buys almost nothing, since ANN can return different candidate *sets* per page regardless of tie ordering. `newest`/`nearest` keep the tiebreaker at zero cost. P1's guarantee is therefore firm for those two and best-effort for `relevance`. |
 | 2026-09-03 | Note on §5: the radius Signals-DPG SENDS is `distance_meters ?? env` and is legitimately **absent** when neither is set — signals-search then applies `SEARCH_DEFAULT_DISTANCE_METERS`. `meta.distance_meters` folds in DPG's mirror of that default for **reporting only**; it is never put on the wire. |
