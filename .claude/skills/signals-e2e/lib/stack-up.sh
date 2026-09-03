@@ -82,7 +82,7 @@ STACK_ENV="$REPO/.env"
 if [ ! -f "$STACK_ENV" ]; then
   log "FAIL: no .env at $STACK_ENV."
   log "This worktree does not itself run the stack. Set SIGNALS_REPO to the"
-  log "checkout that does (e.g. SIGNALS_REPO=/Users/srivastha/KKB/Github/Signals-DPG),"
+  log "checkout that does (e.g. SIGNALS_REPO=/path/to/your/Signals-DPG clone),"
   log "and make sure that repo has been brought up once via the run-signals-dpg skill."
   exit 1
 fi

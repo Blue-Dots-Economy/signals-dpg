@@ -27,6 +27,15 @@ curl -sf "http://localhost:2742/api/v1/network/schemas?network=<network-id>" >/d
 - Note the network **id** is not always the directory name (`yellow_dot` →
   `onest_yellow_dot`); §2's matrix has both.
 
+- **If the `run-signals-dpg` skill is not available** (it is a personal skill on
+  the author's machine, not committed to this repo — see the note below), do not
+  guess at bringing the stack up. Tell the caller exactly what is needed:
+  Postgres + Redis via `docker compose up -d db redis`, the API on `:2742`, the
+  UI on `:3000` or `:5173`, and root `.env` carrying `CREATE_TEST_OTP=true` plus
+  the three `NOTIFICATION_SERVICE_*` vars. `SETUP.md` is the repo's own
+  walkthrough. Then stop and let them do it — a half-configured stack produces
+  failures that look like product bugs.
+
 Only once a stack answers do you run `lib/run.sh`.
 
 `/signals-e2e [dot] [alias]` runs the suite; `/signals-e2e cleanup [tag]` tears
