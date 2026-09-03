@@ -16,6 +16,7 @@ import {
 import { invalidateItemFetchCache } from '@/utils/item_fetch_cache_invalidate';
 import { publishItemEvent } from '@/utils/publish_item_event';
 import { createItemInternal, ItemServiceError, resolveGoLiveGates } from '@/services/item_service';
+import { tagUserWithDefaultAggregator } from '@/services/aggregator/default_aggregator';
 import { resolveLocationsForCreate } from '@/services/geocoding/resolve_locations_for_create';
 import { getWardAge } from '@/services/minor_guardian_repo';
 import { isMinor, guardianConsentRequired } from '@/services/minor';
@@ -286,6 +287,31 @@ export const create_item_handler = async (
     // rolls the item back too (fail-closed — never a PII item without a consent
     // row). The item event/cache-invalidation happen only after commit.
     const created = await db.transaction(async (tx) => {
+      // SS-3 (#640): give the owner an owning aggregator BEFORE the item is
+      // classified.
+      //
+      // This is the seam between the two levels: the tag is per USER, the
+      // draft/live decision is per ITEM. `createItemInternal` runs
+      // `classify_item`, which reads the tag through `owner_required` — so the
+      // write has to happen first or a brand-new signup's first profile is
+      // classified unowned and lands in `draft`, only going live on some later
+      // write. Same transaction, so it is atomic with the item.
+      //
+      // Not guarded on the role bootstrap below: that only fires when
+      // `user.domains` was empty, and `applySignupExtras` already populates it
+      // at signup — gating on it stranded the population this feature exists
+      // for (signed up before a default was nominated, so never tagged).
+      //
+      // Cheap on every create: one statement whose `IS NULL` guard
+      // short-circuits the org lookup for an already-owned user, matching no
+      // rows and scanning nothing.
+      //
+      // Uses the request's concrete network rather than deriving it from the
+      // bare domain — that derivation returns null when two served networks
+      // declare the same domain, which would leave the user untagged while the
+      // gate (which does know the network) still demanded an owner.
+      await tagUserWithDefaultAggregator(tx, userId, body.item_network, body.item_domain);
+
       const c = await createItemInternal(tx, {
         item_network: body.item_network,
         item_domain: body.item_domain,

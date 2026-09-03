@@ -6,6 +6,7 @@ import { db } from '@api/db/postgres/drizzle_config';
 import { user } from '@api/db/postgres/schema';
 import { auth_middleware_if_enabled } from '@api/plugins/auth/auth_middleware';
 import { apiConfig } from '@/config';
+import { tagUserForDomain } from '@/services/aggregator/default_aggregator';
 
 const SetDomainsBody = z.object({ domains: z.array(z.string().min(1)).min(1) });
 const DomainsResponse = z.object({ domains: z.array(z.string()) });
@@ -59,5 +60,17 @@ const set_domains_handler = async (request: SetReq, reply: FastifyReply) => {
   const [row] = await db.select({ domains: user.domains }).from(user).where(eq(user.id, userId)).limit(1);
   const merged = Array.from(new Set([...(row?.domains ?? []), ...request.body.domains]));
   await db.update(user).set({ domains: merged, updatedAt: new Date() }).where(eq(user.id, userId));
+
+  // SS-3 (#640): the user's domain is now decided, so this is where the default
+  // aggregator can own them. No-op when they already have an owner or no
+  // default is nominated. Best-effort: a tagging failure must not fail the
+  // domain write the client is waiting on.
+  for (const domain of merged) {
+    try {
+      await tagUserForDomain(db, userId, domain);
+    } catch (err) {
+      request.log.error({ err, userId, domain }, 'default-aggregator tagging failed');
+    }
+  }
   return reply.code(200).send({ domains: merged });
 };

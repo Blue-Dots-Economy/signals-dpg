@@ -18,6 +18,21 @@ export interface GoLiveContext {
    * boolean read and the age control can never be a separate, forgettable step.
    */
   consentSatisfied: boolean;
+  /** `owner_required`: whether the profile owner has an owning aggregator. */
+  hasOwner: boolean;
+  /**
+   * `owner_required`: whether a default aggregator is nominated at all. Binary
+   * because `organization_single_default_idx` guarantees at most one default
+   * org exists —
+   * there is no "two defaults" case to distinguish. See guard 1 below.
+   */
+  defaultConfigured: boolean;
+  /**
+   * The item's lifecycle status BEFORE this write. Read only by
+   * `owner_required` (guard 2) — every other gate is a pure function of the
+   * item's own state and must stay that way.
+   */
+  currentStatus: 'draft' | 'live' | 'paused' | 'retired';
 }
 
 /**
@@ -30,6 +45,45 @@ export interface GoLiveContext {
 export const GO_LIVE_GATE_CHECKS: Record<GoLiveGate, (ctx: GoLiveContext) => boolean> = {
   schema_required: (ctx) => (ctx.schema?.required ?? []).every((k) => is_populated(ctx.state[k])),
   consent_required: (ctx) => ctx.consentSatisfied,
+  /**
+   * SS-3 (#640): a profile may not go live while nobody owns its account.
+   *
+   * ⚠️ This gate is NOT a pure function of the item's own state, unlike the
+   * other two. It reads the prior lifecycle status and instance config, and it
+   * lets a `live` profile pass a condition it does not satisfy. That breaks the
+   * invariant stated in `classifier.ts`'s header — deliberately, and it is
+   * repeated there. Do not "tidy" either guard away:
+   *
+   * Guard 1 — inert while no default aggregator is nominated.
+   *   Product's answer to #640 Q1 is that the default arrives POST-launch: a
+   *   real aggregator registers and goes live first, and only then is nominated.
+   *   Without this guard, every self-signup profile would be frozen in `draft`
+   *   from launch until that happens, so Q1 and Q4 would contradict each other.
+   *
+   *   This is only safe to express as a boolean because the database enforces
+   *   that a binding can never be contested — today by
+   *   `organization_single_default_idx` (one default org at all, migration
+   *   0013), and once #661 lifts that, by
+   *   `organization_default_binding_exclusive` (migration 0014). If a binding
+   *   could be contested, "not configured" and "cannot tell" would need
+   *   OPPOSITE answers here, and treating them alike would make the gate fail
+   *   open on a misconfiguration.
+   *
+   * Guard 2 — blocks `draft → live` only; never demotes a profile that is
+   *   already live. `classify_item` re-derives draft↔live on EVERY write, not
+   *   just at creation. Without this guard, an already-live user with no
+   *   owning aggregator who edits one field of their own profile would be
+   *   pushed back to `draft`; the transition publishes an item event and every
+   *   `item_search` read path is live-only, so their profile would silently
+   *   vanish from discover and the map. No admin action, no warning, across the
+   *   whole pre-default self-signup population. This is also what encodes
+   *   "new registrations only".
+   */
+  owner_required: (ctx) => {
+    if (ctx.currentStatus === 'live') return true;
+    if (!ctx.defaultConfigured) return true;
+    return ctx.hasOwner;
+  },
 };
 
 /** True when every configured gate passes for this context. */

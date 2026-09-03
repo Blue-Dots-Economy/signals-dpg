@@ -5,8 +5,11 @@ import {
   boolean,
   integer,
   index,
+  uniqueIndex,
   jsonb,
+  check,
 } from 'drizzle-orm/pg-core';
+import { sql } from 'drizzle-orm';
 
 export const user = pgTable('user', {
   id: text('id').primaryKey(),
@@ -44,6 +47,13 @@ export const user = pgTable('user', {
   // (which acts on behalf of an aggregator or voice org via acting_org). Null
   // for users created by other paths (better-auth signUp from a UI etc.).
   onboardedByOrgId: text('onboarded_by_org_id').references(() => organization.id),
+  // SS-3 (#640): true when `onboarded_by_org_id` was filled from the
+  // instance's DEFAULT aggregator rather than from a real onboarding act.
+  // Server-only and deliberately NOT derived from `onboarded_via` — that
+  // column is written from the request's `channel` field, so a caller could
+  // set it, and this flag is what the later re-assignment job scopes on (it
+  // decides who is handed PII-decrypt rights over whom).
+  onboardedByDefault: boolean('onboarded_by_default').notNull().default(false),
   onboardedVia: text('onboarded_via'),
   onboardedSourceId: text('onboarded_source_id'),
   onboardedAt: timestamp('onboarded_at'),
@@ -100,7 +110,60 @@ export const organization = pgTable('organization', {
   createdAt: timestamp('created_at').notNull(),
   metadata: text('metadata'),
   type: text('type'),
-});
+  // SS-3 (#640): served-domain bindings ("<network>/<domain>", e.g.
+  // 'blue_dot/seeker') for which this org is the DEFAULT aggregator — the one
+  // that inherits users arriving with no aggregator of their own.
+  //
+  // An array because one aggregator may be the default for several domains
+  // (seeker AND provider is the expected launch shape). Postgres cannot
+  // unique-index an array element, so "one org per binding" is enforced by the
+  // `organization_default_binding_exclusive` trigger (migration 0014), which
+  // rejects a nomination for a binding another org already holds.
+  //
+  // Deliberately NOT indexed for lookup: `organization` holds tens to hundreds
+  // of rows, where a sequential scan beats GIN and GIN would tax every upsert.
+  defaultForBindings: text('default_for_bindings').array(),
+}, (table) => [
+  // The flag grants PII-decrypt rights over the users it captures, so it must
+  // never land on a `network_service` org — whose "unverified queue" nobody
+  // would ever open. Approval state itself lives in aggregator-dpg and is not
+  // visible here, so this constraint is the only enforceable half.
+  check(
+    'organization_default_requires_aggregator',
+    sql`${table.defaultForBindings} IS NULL OR ${table.type} = 'aggregator'`,
+  ),
+  // AT MOST ONE default aggregator per instance.
+  //
+  // A unique index on a constant expression, restricted to rows that hold a
+  // binding, so a second org becoming a default fails with 23505 rather than
+  // leaving two claimants behind.
+  //
+  // Why a *global* limit when the column is per-binding: the tag this drives
+  // (`user.onboarded_by_org_id`) is per ACCOUNT and write-once, and
+  // `participant_decrypt` scopes on it with **no domain condition**
+  // (`participant_decrypt.ts`). With two per-domain defaults, a user holding
+  // profiles in both domains has their whole account owned by whichever domain
+  // wrote first — so the other domain's default could decrypt a participant it
+  // does not own. `user.domains` normally holds one entry, but the single-role
+  // lock that keeps it that way is bypassed for admin api-key callers
+  // (`create_item.ts`), which is the path aggregator-dpg uses, so a
+  // multi-domain user is reachable in practice.
+  //
+  // The array shape is deliberate and stays: per-domain defaults are the
+  // intended end state, and one org may already hold several bindings
+  // (`['blue_dot/seeker','blue_dot/provider']`) — which is the expected launch
+  // shape. What is withheld is two *different* orgs holding one binding each.
+  // That is unlocked by the per-profile `profile_origin` work (#661): once
+  // ownership is recorded per profile rather than per account, the cross-domain
+  // exposure is gone and this index comes off. Enforced here rather than in
+  // application code so the guarantee does not depend on which write paths
+  // happen to exist.
+  uniqueIndex('organization_single_default_idx')
+    .on(sql`(true)`)
+    .where(
+      sql`${table.defaultForBindings} IS NOT NULL AND cardinality(${table.defaultForBindings}) > 0`,
+    ),
+]);
 
 export const member = pgTable('member', {
   id: text('id').primaryKey(),

@@ -74,6 +74,14 @@ vi.mock('@dpg/schemas', () => {
   };
 });
 
+// SS-3 (#640): the route now tags the user from the binding's default
+// aggregator once their domain is decided. Mocked so this stays a unit test —
+// the real module reaches served_domain_guard → network config.
+const tagUserForDomain = vi.fn(async () => null);
+vi.mock('@/services/aggregator/default_aggregator', () => ({
+  tagUserForDomain: (...args: unknown[]) => tagUserForDomain(...(args as [])),
+}));
+
 vi.mock('@/config', () => ({
   apiConfig: {
     served_domains: [{ domain: 'student' }, { domain: 'mentor' }],
@@ -335,5 +343,31 @@ describe('POST /domains', () => {
     await expect(
       call('POST', { user: { id: 'u1' }, body: { domains: ['student'] } }),
     ).rejects.toThrow('db down');
+  });
+});
+
+describe('POST /user/domains — default-aggregator tagging (SS-3, #640)', () => {
+  // The user's domain is decided here, so this is the user-level moment the
+  // default aggregator can own them — not on every later profile write.
+  it('tags the user for each domain it stores', async () => {
+    rowQueue.push([{ domains: [] }]);
+    const reply = await call('POST', {
+      user: { id: 'u1' },
+      body: { domains: ['student'] },
+    });
+    expect(reply.statusCode).toBe(200);
+    expect(tagUserForDomain).toHaveBeenCalledTimes(1);
+    expect(tagUserForDomain).toHaveBeenCalledWith(expect.anything(), 'u1', 'student');
+  });
+
+  // A tagging failure must not fail the domain write the client is waiting on.
+  it('still returns 200 when tagging throws', async () => {
+    rowQueue.push([{ domains: [] }]);
+    tagUserForDomain.mockRejectedValueOnce(new Error('boom'));
+    const reply = await call('POST', {
+      user: { id: 'u1' },
+      body: { domains: ['student'] },
+    });
+    expect(reply.statusCode).toBe(200);
   });
 });

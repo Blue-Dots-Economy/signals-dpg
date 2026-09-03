@@ -13,6 +13,11 @@ import {
   validateAgainstJsonSchema,
 } from '@dpg/schemas';
 import { classify_item, DEFAULT_GO_LIVE_GATES, type GoLiveGate } from './items/classifier.js';
+import type { DbOrTx } from '@/services/db_types';
+import {
+  resolveOwnerGateContext,
+  type OwnerGateContext,
+} from './aggregator/default_aggregator.js';
 import { hasAcceptedProfileConsent } from './consent_acceptance.js';
 import { is_populated } from './metrics/profile_completion.js';
 import { decryptPiiBlob, encryptPiiBlob, getPiiKey } from '@dpg/auth';
@@ -92,8 +97,7 @@ export class ItemServiceError extends Error {
   }
 }
 
-type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
-export type DbOrTx = typeof db | Tx;
+export type { DbOrTx } from '@/services/db_types';
 
 /**
  * Whether `userId` is the creator of the item identified by the partition key.
@@ -337,6 +341,16 @@ export async function createItemInternal(
     schema: itemSchema as { required?: string[] },
     merged_state: submittedItemState,
     current_status: 'draft',
+    // SS-3 (#640): read-only gate check. Tagging happens at the user level —
+    // `create_item`'s first-create bootstrap calls `tagUserForDomain` inside
+    // this same transaction, before this runs.
+    owner_context: await ownerGateContext(
+      exec,
+      goLiveGates,
+      params.created_by,
+      params.item_network,
+      params.item_domain,
+    ),
     // Guardian-aware already: create_item passes consent_accepted=false for a
     // gated minor (self-consent must not promote), so no separate guardian
     // check is needed on the create path.
@@ -405,6 +419,43 @@ export interface UpdateItemInternalResult {
     created_at: Date;
     updated_at: Date;
   };
+}
+
+/**
+ * Whether a domain's configured gate set includes the SS-3 owner gate (#640).
+ *
+ * One predicate for "does this write need the default-aggregator work at all",
+ * shared by the tag fill and the gate-context resolution so the two can never
+ * disagree about when they apply.
+ */
+function gatesRequireOwner(gates: readonly GoLiveGate[]): boolean {
+  return gates.includes('owner_required');
+}
+
+/**
+ * The `owner_required` gate context for one profile write (#640) — read only,
+ * and only when the domain actually configures the gate.
+ *
+ * **No tagging happens here.** Ownership is a property of the ACCOUNT, decided
+ * once when the user's domain is decided, so the write lives at the user level
+ * (`tagUserForDomain`, called from the three places that establish
+ * `user.domains`). Doing it per item write meant re-resolving the default on
+ * every edit by a user who was already owned — work whose result is always
+ * discarded.
+ *
+ * @returns the gate context, or undefined when the domain does not configure
+ *   `owner_required` (which is every domain by default, so this normally costs
+ *   nothing).
+ */
+async function ownerGateContext(
+  exec: DbOrTx,
+  gates: readonly GoLiveGate[],
+  ownerUserId: string,
+  network: string,
+  domain: string,
+): Promise<OwnerGateContext | undefined> {
+  if (!gatesRequireOwner(gates)) return undefined;
+  return resolveOwnerGateContext(exec, ownerUserId, network, domain);
 }
 
 /**
@@ -546,6 +597,13 @@ export async function promoteItemOnProfileConsent(
     current_status: 'draft',
     consent_accepted: consentSatisfied,
     gates: goLiveGates,
+    owner_context: await ownerGateContext(
+      exec,
+      goLiveGates,
+      item.created_by,
+      item.item_network,
+      item.item_domain,
+    ),
   });
 
   if (lifecycle_status !== 'live') return false;
@@ -686,6 +744,20 @@ async function computeItemStateUpdate(
     current_status: existingItem.lifecycle_status as 'draft' | 'live' | 'paused',
     consent_accepted: consentSatisfied,
     gates: goLiveGates,
+    // Only for a draft: `owner_required` short-circuits to true on a live item
+    // (guard 2) and `paused` is sticky, so neither the tag nor the context can
+    // change the classification — and most edits in steady state are edits of
+    // live profiles.
+    owner_context:
+      existingItem.lifecycle_status === 'draft'
+        ? await ownerGateContext(
+            exec,
+            goLiveGates,
+            existingItem.created_by,
+            existingItem.item_network,
+            existingItem.item_domain,
+          )
+        : undefined,
   });
 
   return {
