@@ -81,7 +81,7 @@ vi.mock('@/utils/inter_instance_fetch', () => ({
 }));
 
 // Imported after mocks.
-import { discover } from '../discover.js';
+import { discover, resolveDiscoverSort } from '../discover.js';
 import { SignalsSearchError } from '@/services/signals_search_client';
 import { signalsSearchConfig } from '@/config';
 
@@ -198,6 +198,8 @@ describe('POST /api/v1/network/item/discover — direct map (revised, no hydrate
       offset: 0,
       source: 'signals_search',
       degraded: false,
+      // #644: every 200 reports the order actually applied.
+      sort_applied: 'newest',
     });
   });
 
@@ -250,7 +252,14 @@ describe('POST /api/v1/network/item/discover — direct map (revised, no hydrate
 
     expect(res.statusCode).toBe(200);
     expect(res.json()).toEqual({
-      meta: { total: 0, limit: 20, offset: 0, source: 'signals_search', degraded: false },
+      meta: {
+        total: 0,
+        limit: 20,
+        offset: 0,
+        source: 'signals_search',
+        degraded: false,
+        sort_applied: 'newest',
+      },
       items: [],
     });
   });
@@ -317,6 +326,8 @@ describe('POST /api/v1/network/item/discover — profile anchor relevance (#394)
       offset: 0,
       source: 'signals_search',
       degraded: false,
+      // #644: every 200 reports the order actually applied.
+      sort_applied: 'newest',
     });
     expect(body.items[0]).toMatchObject({ item_id: FULL_ITEM_A.item_id });
   });
@@ -468,6 +479,8 @@ describe('POST /api/v1/network/item/discover — native fallback (#203 List PR, 
       offset: 0,
       source: 'native_fallback',
       degraded: true,
+      // #644: every 200 reports the order actually applied.
+      sort_applied: 'newest',
     });
     expect(body.items).toHaveLength(1);
     expect(body.items[0]).toMatchObject({ item_id: FULL_ITEM_A.item_id });
@@ -931,5 +944,293 @@ describe('POST /api/v1/network/item/discover — configurable spatial radius (#3
       filters: Record<string, unknown>;
     };
     expect(callArgs.filters.radius_meters).toBeUndefined();
+  });
+});
+
+// ─── #644: opt-in area filter + explicit sort ────────────────────────────────
+//
+// Contract: docs/superpowers/plans/2026-09-03-list-view-wire-contract.md §5-§7.
+
+describe('resolveDiscoverSort — defaulting and fallbacks (contract §5.2)', () => {
+  const base = { hasAnchor: false, hasQ: false, hasOrderingCenter: false };
+
+  it('defaults to relevance when an anchor is sent', () => {
+    expect(resolveDiscoverSort({ ...base, hasAnchor: true })).toBe('relevance');
+  });
+
+  it('defaults to newest with no anchor', () => {
+    expect(resolveDiscoverSort(base)).toBe('newest');
+  });
+
+  it('falls back to newest for relevance with neither anchor nor q', () => {
+    // Never errors — the response reports what was actually applied.
+    expect(resolveDiscoverSort({ ...base, requested: 'relevance' })).toBe('newest');
+  });
+
+  it('honours relevance when q is present without an anchor', () => {
+    expect(resolveDiscoverSort({ ...base, requested: 'relevance', hasQ: true })).toBe(
+      'relevance',
+    );
+  });
+
+  it('falls back to newest for nearest with no ordering centre', () => {
+    expect(resolveDiscoverSort({ ...base, requested: 'nearest' })).toBe('newest');
+  });
+
+  it('honours nearest with an ordering centre', () => {
+    expect(
+      resolveDiscoverSort({ ...base, requested: 'nearest', hasOrderingCenter: true }),
+    ).toBe('nearest');
+  });
+
+  it('always honours an explicit newest', () => {
+    expect(resolveDiscoverSort({ ...base, requested: 'newest', hasAnchor: true })).toBe(
+      'newest',
+    );
+  });
+});
+
+describe('POST /discover — the area filter is opt-in (#644)', () => {
+  let app: FastifyInstance;
+
+  beforeEach(() => {
+    searchSignalsMock.mockReset();
+    fetchItemsAcrossInstancesMock.mockReset();
+    signalsSearchConfig.distanceMeters = undefined;
+    app = buildApp();
+  });
+
+  async function post(
+    extra: Record<string, unknown> = {},
+    upstreamSort: 'relevance' | 'newest' | 'nearest' = 'newest',
+  ) {
+    searchSignalsMock.mockResolvedValueOnce({
+      items: [],
+      meta: { total: 0, limit: 20, offset: 0, sort_applied: upstreamSort },
+    });
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/v1/network/item/discover',
+      payload: baseBody(extra),
+    });
+    return {
+      res,
+      body: res.json() as { meta: Record<string, unknown> },
+      sent: searchSignalsMock.mock.calls[0]?.[0] as Record<string, unknown> | undefined,
+    };
+  }
+
+  it('sends no coordinates and no radius when no area is requested', async () => {
+    const { res, body, sent } = await post();
+
+    expect(res.statusCode).toBe(200);
+    expect(sent?.lat).toBeUndefined();
+    expect(sent?.lng).toBeUndefined();
+    expect(sent?.distanceMeters).toBeUndefined();
+    expect(body.meta.distance_meters).toBeUndefined();
+  });
+
+  it('does NOT apply the configured env radius without an area filter', async () => {
+    // Regression guard for the #644 root cause: the env fallback previously
+    // resolved a radius whenever a location was sent, and the UI always sent
+    // one — so every signed-in viewer was silently bounded.
+    signalsSearchConfig.distanceMeters = 30000;
+    const { sent, body } = await post();
+
+    expect(sent?.distanceMeters).toBeUndefined();
+    expect(body.meta.distance_meters).toBeUndefined();
+  });
+
+  it('sends and reports a radius in radius mode', async () => {
+    const { sent, body } = await post({
+      item_latitude: 12.97,
+      item_longitude: 77.59,
+      distance_meters: 25000,
+    });
+
+    expect(sent?.lat).toBe(12.97);
+    expect(sent?.lng).toBe(77.59);
+    expect(sent?.distanceMeters).toBe(25000);
+    expect(body.meta.distance_meters).toBe(25000);
+  });
+
+  it('applies the env radius when an area filter is requested without one', async () => {
+    signalsSearchConfig.distanceMeters = 15000;
+    const { sent, body } = await post({ item_latitude: 12.97, item_longitude: 77.59 });
+
+    expect(sent?.distanceMeters).toBe(15000);
+    expect(body.meta.distance_meters).toBe(15000);
+  });
+
+  it('forwards an ordering centre WITHOUT reporting a radius', async () => {
+    // An ordering centre bounds nothing, so a "within X km" note would be a lie.
+    const { sent, body } = await post(
+      { sort: 'nearest', ordering_latitude: 12.97, ordering_longitude: 77.59 },
+      'nearest',
+    );
+
+    expect(sent?.orderingLat).toBe(12.97);
+    expect(sent?.orderingLng).toBe(77.59);
+    expect(sent?.lat).toBeUndefined();
+    expect(body.meta.distance_meters).toBeUndefined();
+    expect(body.meta.sort_applied).toBe('nearest');
+  });
+});
+
+describe('POST /discover — sort defaulting and reporting (#644)', () => {
+  let app: FastifyInstance;
+
+  beforeEach(() => {
+    searchSignalsMock.mockReset();
+    fetchItemsAcrossInstancesMock.mockReset();
+    signalsSearchConfig.distanceMeters = undefined;
+    app = buildApp();
+  });
+
+  it('defaults to relevance when an anchor is sent, and forwards it', async () => {
+    searchSignalsMock.mockResolvedValueOnce({
+      items: [],
+      meta: { total: 0, limit: 20, offset: 0, sort_applied: 'relevance' },
+    });
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/v1/network/item/discover',
+      payload: baseBody({ anchor_item_id: '11111111-1111-4111-8111-111111111111' }),
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(searchSignalsMock.mock.calls[0][0].sort).toBe('relevance');
+    expect((res.json() as { meta: { sort_applied: string } }).meta.sort_applied).toBe(
+      'relevance',
+    );
+  });
+
+  it('defaults to newest with no anchor', async () => {
+    searchSignalsMock.mockResolvedValueOnce({
+      items: [],
+      meta: { total: 0, limit: 20, offset: 0, sort_applied: 'newest' },
+    });
+    await app.inject({
+      method: 'POST',
+      url: '/api/v1/network/item/discover',
+      payload: baseBody(),
+    });
+
+    expect(searchSignalsMock.mock.calls[0][0].sort).toBe('newest');
+  });
+
+  it('prefers the upstream sort_applied over its own request', async () => {
+    // signals-search is the authority on what it actually did.
+    searchSignalsMock.mockResolvedValueOnce({
+      items: [],
+      meta: { total: 0, limit: 20, offset: 0, sort_applied: 'newest' },
+    });
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/v1/network/item/discover',
+      payload: baseBody({ sort: 'relevance', q: 'solar' }),
+    });
+
+    expect(searchSignalsMock.mock.calls[0][0].sort).toBe('relevance');
+    expect((res.json() as { meta: { sort_applied: string } }).meta.sort_applied).toBe(
+      'newest',
+    );
+  });
+
+  it('falls back to its own resolved sort when the upstream omits sort_applied', async () => {
+    // A signals-search deployed BEFORE #644 sends no sort_applied; the BFF must
+    // still answer with a valid value rather than fail serialization.
+    searchSignalsMock.mockResolvedValueOnce({
+      items: [],
+      meta: { total: 0, limit: 20, offset: 0 },
+    });
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/v1/network/item/discover',
+      payload: baseBody({ sort: 'newest' }),
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect((res.json() as { meta: { sort_applied: string } }).meta.sort_applied).toBe(
+      'newest',
+    );
+  });
+});
+
+describe('POST /discover — native fallback ordering (contract §7)', () => {
+  let app: FastifyInstance;
+
+  beforeEach(() => {
+    searchSignalsMock.mockReset();
+    fetchItemsAcrossInstancesMock.mockReset();
+    signalsSearchConfig.distanceMeters = undefined;
+    app = buildApp();
+    searchSignalsMock.mockRejectedValue(new Error('signals-search down'));
+    fetchItemsAcrossInstancesMock.mockResolvedValue({
+      items: [],
+      meta: { total: 0, limit: 20, offset: 0 },
+    });
+  });
+
+  async function post(extra: Record<string, unknown> = {}) {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/v1/network/item/discover',
+      payload: baseBody(extra),
+    });
+    return {
+      res,
+      body: res.json() as { meta: Record<string, unknown> },
+      filters: (fetchItemsAcrossInstancesMock.mock.calls[0]?.[0] as {
+        filters: Record<string, unknown>;
+      })?.filters,
+    };
+  }
+
+  it('newest sends no coordinates, so the native ORDER BY is created_at DESC', async () => {
+    const { res, body, filters } = await post({ sort: 'newest' });
+
+    expect(res.statusCode).toBe(200);
+    expect(filters.item_latitude).toBeUndefined();
+    expect(filters.item_longitude).toBeUndefined();
+    expect(filters.radius_meters).toBeUndefined();
+    expect(body.meta.sort_applied).toBe('newest');
+  });
+
+  it('nearest sends coordinates with NO radius — distance-ordered, unbounded', async () => {
+    const { filters, body } = await post({
+      sort: 'nearest',
+      ordering_latitude: 12.97,
+      ordering_longitude: 77.59,
+    });
+
+    // buildWhereClause only adds a radius clause when lat, lng AND
+    // radius_meters are all present, so omitting the radius orders without
+    // filtering.
+    expect(filters.item_latitude).toBe(12.97);
+    expect(filters.item_longitude).toBe(77.59);
+    expect(filters.radius_meters).toBeUndefined();
+    expect(body.meta.sort_applied).toBe('nearest');
+  });
+
+  it('reports newest for a relevance request — the native path cannot rank', async () => {
+    const { body } = await post({
+      sort: 'relevance',
+      anchor_item_id: '11111111-1111-4111-8111-111111111111',
+    });
+
+    expect(body.meta.degraded).toBe(true);
+    expect(body.meta.sort_applied).toBe('newest');
+  });
+
+  it('still honours an explicit area filter on the degraded path', async () => {
+    const { filters, body } = await post({
+      item_latitude: 12.97,
+      item_longitude: 77.59,
+      distance_meters: 25000,
+    });
+
+    expect(filters.radius_meters).toBe(25000);
+    expect(body.meta.distance_meters).toBe(25000);
   });
 });
