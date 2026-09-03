@@ -76,4 +76,4 @@ up automatically at the CLI entry point, nothing to keep in sync by hand.
   the automatic summary takes over and duplicating it here would drift.
 -->
 
-- geocoding accuracy without GOOGLE_GEOCODING_API_KEY or PHOTON_URL — no spec gates on this yet, so it can't appear in the derived skip summary above; still "not configured here", not a standing limit
+- geocoding accuracy without GOOGLE_GEOCODING_API_KEY or PHOTON_URL

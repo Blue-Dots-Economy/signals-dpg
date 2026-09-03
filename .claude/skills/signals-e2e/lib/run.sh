@@ -363,9 +363,14 @@ node -e '
     specs: { dir: specsDir, sha: specsSha, branch: specsBranch },
     app: { dir: appDir, sha: appSha, branch: appBranch },
     diverged: diverged === "true",
+    // When divergence could not be computed (no common ancestor, a detached
+    // checkout, git unavailable), the ahead-counts are NULL rather than 0 — a
+    // consumer must be able to tell "measured as equal" from "never measured".
+    // Emitting 0 alongside computable:false made those indistinguishable, and
+    // `diverged:false` was then only trustworthy by coincidence.
     computable: computable === "true",
-    specsAhead: Number(specsAhead || 0),
-    appAhead: Number(appAhead || 0),
+    specsAhead: computable === "true" ? Number(specsAhead || 0) : null,
+    appAhead: computable === "true" ? Number(appAhead || 0) : null,
   }));
 ' "$GIT_INFO_FILE" "$E2E_DIR" "$SPECS_SHA" "$SPECS_BRANCH" "$REPO" "$APP_SHA" "$APP_BRANCH" "$GIT_DIVERGED" "$GIT_COMPUTABLE" "$SPECS_AHEAD" "$APP_AHEAD"
 

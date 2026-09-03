@@ -974,7 +974,7 @@ export function renderMarkdown(report) {
     '_Standing limits of this black-box approach — true no matter how this target is configured. ' +
       "Mechanical skip provenance (which capability gates were closed, which suites this run didn't " +
       'touch) lives under the at-a-glance table above, not here — this list is only the answer to ' +
-      '"what would a green run STILL not tell me".',
+      '"what would a green run STILL not tell me"._',
   );
   lines.push('');
   if (report.needsHuman.length === 0) {
