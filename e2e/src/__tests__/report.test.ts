@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { buildReport, parseSuiteTable, SUITES } from '../../../.claude/skills/signals-e2e/lib/report.mjs';
+import { buildReport, parseSuiteTable, renderMarkdown, SUITES } from '../../../.claude/skills/signals-e2e/lib/report.mjs';
 
 const results = {
   suites: [{
@@ -60,4 +60,48 @@ test('a scoped run can be told to use a caller-supplied suite catalogue', () => 
 
 test('parseSuiteTable rejects a markdown file with no suite table', () => {
   assert.throws(() => parseSuiteTable('# nothing here\n'), /parsed to zero rows/);
+});
+
+test('the signoff opens with an at-a-glance table and a per-spec-file table', () => {
+  const results = {
+    stats: { expected: 2, skipped: 1, unexpected: 1, flaky: 0 },
+    suites: [{
+      title: 'journey-x.spec.ts',
+      specs: [
+        { title: 'a passes', ok: true, tests: [{ results: [{ status: 'passed' }] }] },
+        { title: 'b passes', ok: true, tests: [{ results: [{ status: 'passed' }] }] },
+        { title: 'c fails', ok: false, tests: [{ results: [{ status: 'failed', error: { message: 'boom' } }] }] },
+        {
+          title: 'd skips', ok: true,
+          tests: [{
+            annotations: [{ type: 'skip', description: '[capability] requires direct DB access' }],
+            results: [{ status: 'skipped' }],
+          }],
+        },
+      ],
+    }],
+  };
+  const md = renderMarkdown(buildReport({ results, humanOnly: ['judge the palette'], scoped: null, residue: 0 }));
+
+  // Counts must reflect reality, not just render.
+  assert.match(md, /\| ✅ Passed \| 2 \|/);
+  assert.match(md, /\| ❌ Failed \| 1 \|/);
+  assert.match(md, /\| ⏭️ Skipped \(capability-gated\) \| 1 \|/);
+  assert.match(md, /\*\*Verdict\*\* \| \*\*❌ FAIL\*\*/);
+
+  // A failing spec file must read as failing, not as passing-with-a-note.
+  assert.match(md, /\| journey-x\.spec\.ts \| 2 \| 1 \| 1 \| ❌ failing \|/);
+
+  // The tables precede the detail sections, so a skimmer sees the verdict first.
+  assert.ok(md.indexOf('## At a glance') < md.indexOf('## 1. Working'));
+});
+
+test('a clean run reads as PASS in the glance table', () => {
+  const results = {
+    stats: { expected: 1, skipped: 0, unexpected: 0, flaky: 0 },
+    suites: [{ title: 's.spec.ts', specs: [{ title: 'ok', ok: true, tests: [{ results: [{ status: 'passed' }] }] }] }],
+  };
+  const md = renderMarkdown(buildReport({ results, humanOnly: [], scoped: null, residue: 0 }));
+  assert.match(md, /\*\*Verdict\*\* \| \*\*✅ PASS\*\*/);
+  assert.match(md, /\| s\.spec\.ts \| 1 \| 0 \| 0 \| ✅ passing \|/);
 });

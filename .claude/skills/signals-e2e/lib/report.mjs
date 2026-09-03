@@ -431,6 +431,56 @@ export function renderMarkdown(report) {
   );
   lines.push('');
 
+  // ── At-a-glance tables ────────────────────────────────────────────────────
+  // The five sections below carry the detail, but a reader opening this file
+  // wants two answers first: did it pass, and which parts of the product were
+  // actually exercised. Prose lists answer neither at a glance — a spec that
+  // never ran looks identical to one that passed if you are skimming. These
+  // two tables are the summary; everything after them is the evidence.
+  const passCount = report.working.filter((w) => !w.skipped).length;
+  const failCount = report.notWorking.length;
+  const skipCount = report.working.filter((w) => w.skipped).length;
+  const verdict = failCount === 0 ? '✅ PASS' : '❌ FAIL';
+
+  lines.push('## At a glance');
+  lines.push('');
+  lines.push('| | Count |');
+  lines.push('|---|---:|');
+  lines.push(`| ✅ Passed | ${passCount} |`);
+  lines.push(`| ❌ Failed | ${failCount} |`);
+  lines.push(`| ⏭️ Skipped (capability-gated) | ${skipCount} |`);
+  lines.push(`| ⚑ Known / expected | ${report.known.length} |`);
+  lines.push(`| 👤 Needs a human | ${report.needsHuman.length} |`);
+  lines.push(`| **Verdict** | **${verdict}** |`);
+  lines.push('');
+
+  // Per-suite coverage. `report.suites` is the catalogue parsed from
+  // coverage.md; a suite with no specs in this run is "not run", which is a
+  // materially different thing from "passed" and must not read the same.
+  const bySuite = new Map();
+  for (const w of report.working) {
+    const k = w.suite ?? '(unknown)';
+    if (!bySuite.has(k)) bySuite.set(k, { pass: 0, fail: 0, skip: 0 });
+    bySuite.get(k)[w.skipped ? 'skip' : 'pass'] += 1;
+  }
+  for (const f of report.notWorking) {
+    const k = f.suite ?? '(unknown)';
+    if (!bySuite.has(k)) bySuite.set(k, { pass: 0, fail: 0, skip: 0 });
+    bySuite.get(k).fail += 1;
+  }
+  if (bySuite.size > 0) {
+    lines.push('## What ran, by spec file');
+    lines.push('');
+    lines.push('| Spec file | ✅ | ❌ | ⏭️ | State |');
+    lines.push('|---|---:|---:|---:|---|');
+    for (const [suite, c] of [...bySuite.entries()].sort()) {
+      const state =
+        c.fail > 0 ? '❌ failing' : c.pass > 0 ? '✅ passing' : '⏭️ skipped only';
+      lines.push(`| ${suite} | ${c.pass} | ${c.fail} | ${c.skip} | ${state} |`);
+    }
+    lines.push('');
+  }
+
   lines.push('## 1. Working');
   const passing = groupBySuite(report.working.filter((w) => !w.skipped));
   if (passing.size === 0) {
