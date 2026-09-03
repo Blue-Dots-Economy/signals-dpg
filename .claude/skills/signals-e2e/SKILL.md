@@ -54,7 +54,19 @@ the place to add a new case.
   `test.skip` with no reason is treated as a defect (report section 2), not a
   documented gap.
 - **One restart is a fix; a retry loop is a lie.** Anything else needing a
-  retry is a finding, not a pass.
+  retry is a finding, not a pass. A full signoff run (`run.sh` with no alias)
+  runs with `--retries=0` for exactly this reason; a scoped/alias run keeps
+  Playwright's own retry for fast feedback, but a flaky pass there is *never*
+  folded into "Working" — it lands in its own report section (2b), carrying
+  the FIRST attempt's error, and it still fails the run.
+- **A summarised signoff is not a signoff.** `run.sh` prints the full
+  markdown report as the LAST thing it does, specifically so it can't be
+  scrolled past — you must **present the report to the user**, not paraphrase
+  it. At minimum: the at-a-glance table, the per-spec-file table, and
+  section 4 ("Not tested — needs a human") **verbatim**. Reading the file with
+  `cat` and describing it in your own words is exactly the failure mode this
+  rule exists to prevent — a cold field test did precisely that and its human
+  never saw the five sections at all.
 
 ## 2. The dot matrix
 
@@ -165,10 +177,20 @@ bash .claude/skills/signals-e2e/lib/run.sh cleanup <run-id>
 checkout than this worktree (this worktree has no root `.env`/`node_modules`
 of its own — see `lib/stack-up.sh`'s header comment).
 
-The report (`e2e/run/<run-id>/report.md`) has five sections in this fixed
-order: **1. Working**, **2. Not working** (exit code is non-zero iff this is
-non-empty), **3. Known / expected**, **4. Not tested — needs a human**
-(computed, never hand-written), **5. Coverage drift**.
+The report (`e2e/run/<run-id>/report.md`) opens with both checkouts' git SHA
+and branch (the specs' and the app-under-test's — they can differ whenever
+`SIGNALS_REPO` points the stack somewhere other than this worktree, and a
+divergence is called out prominently, not left for a reader to notice by
+hand), then an at-a-glance table, then a per-spec-file table, then the
+sections themselves, in this fixed order: **1. Working** (deduped — a spec
+that ran in both the API and UI tiers, like preflight, appears once), **2.
+Not working** (grouped by ROOT CAUSE — ten failures sharing one collision
+render as one group with a count, tagged `suite-defect` or `unattributed`,
+never a guessed `product-defect`), **2b. Flaky** (failed once, passed on
+Playwright's retry — never counted as a pass, carries the FIRST attempt's
+error), **3. Known / expected**, **4. Not tested — needs a human** (computed,
+never hand-written, deduped with `(×N)` counts), **5. Coverage drift**. Exit
+code is non-zero iff section 2 or 2b is non-empty.
 
 ## 7. Suite index (read just-in-time — not inlined here)
 

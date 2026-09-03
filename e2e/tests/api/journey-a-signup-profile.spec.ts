@@ -48,6 +48,13 @@ test.describe('Journey A — self-signup → profile → discoverable', () => {
     }).catch((e) => skipIfSignupExhausted(test, e));
     expect(session.token).toBeTruthy();
     await acceptCoreConsent(session, cfg.network, 'signup');
+    // Record the USER-LEVEL age snapshot (#331), same as flows.ts's
+    // createLiveProfileUser — the `age: 35` passed to signup() above only lands
+    // on the Keycloak identity attributes, never on the user row. A guardian-
+    // gated domain (blue_dot's seeker) is fail-closed on a null user-level age
+    // (guardianGateBlocksGoLive), so without this the profile below correctly
+    // stays draft even though every other go-live condition is met.
+    await session.client.post('/api/v1/consent/u18/dob', { network: cfg.network, age: 35 });
 
     // build a schema-valid minimal profile in the first served domain
     const binding = await resolveBinding(api, cfg.servedDomains[0]);

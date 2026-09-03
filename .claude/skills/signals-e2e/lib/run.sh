@@ -270,6 +270,61 @@ ENV_FILE="$RUN_DIR/env.sh"
 log "run id: $RUN  dot: $DOT  alias: ${ALIAS:-<full run>}  repo: $REPO"
 
 # ---------------------------------------------------------------------------
+# 3b. Git provenance (R5, field-test fix). SIGNALS_REPO can point the STACK
+#    (the app under test) at a checkout entirely different from the one
+#    E2E_DIR's specs actually live in — this happened for real: app on
+#    fix/637-legal-page-layout, specs on feat/signals-e2e-skill, 57 commits
+#    apart, and nothing recorded or warned about it. That left one UI failure
+#    in that run genuinely uninterpretable: real drift or stale spec,
+#    unknowable. Recorded here (both SHAs/branches), diffed with `git -C`, and
+#    handed to report.mjs so it renders right under the title — a diverged
+#    pair must never be silently swallowed to be discovered only by a reader
+#    who happens to check both checkouts by hand.
+# ---------------------------------------------------------------------------
+GIT_INFO_FILE="$RUN_DIR/git-info.json"
+git_sha_of() { git -C "$1" rev-parse --short=12 HEAD 2>/dev/null || echo unknown; }
+git_branch_of() { git -C "$1" rev-parse --abbrev-ref HEAD 2>/dev/null || echo unknown; }
+
+SPECS_SHA="$(git_sha_of "$E2E_DIR")"
+SPECS_BRANCH="$(git_branch_of "$E2E_DIR")"
+APP_SHA="$(git_sha_of "$REPO")"
+APP_BRANCH="$(git_branch_of "$REPO")"
+
+GIT_DIVERGED=false
+GIT_COMPUTABLE=false
+SPECS_AHEAD=0
+APP_AHEAD=0
+if [ "$SPECS_SHA" != "$APP_SHA" ] && [ "$SPECS_SHA" != "unknown" ] && [ "$APP_SHA" != "unknown" ]; then
+  GIT_DIVERGED=true
+  # Worktrees of the SAME repo share an object database, so this resolves even
+  # though $E2E_DIR and $REPO may be different directories entirely. Two truly
+  # unrelated repositories/histories make this fail — that's caught (non-zero
+  # exit, empty $AHEAD_COUNTS) and surfaced as "diverged but not computable"
+  # rather than crashing the run over a cosmetic detail.
+  AHEAD_COUNTS="$(git -C "$E2E_DIR" rev-list --left-right --count "$APP_SHA...$SPECS_SHA" 2>/dev/null || true)"
+  if [ -n "$AHEAD_COUNTS" ]; then
+    GIT_COMPUTABLE=true
+    APP_AHEAD="$(printf '%s' "$AHEAD_COUNTS" | awk '{print $1}')"
+    SPECS_AHEAD="$(printf '%s' "$AHEAD_COUNTS" | awk '{print $2}')"
+  fi
+  log "⚠️  DIVERGED CHECKOUTS — specs ($E2E_DIR @ $SPECS_SHA/$SPECS_BRANCH) and app ($REPO @ $APP_SHA/$APP_BRANCH)" \
+    "are NOT the same commit. See the report header for details; treat this signoff as provisional."
+fi
+
+node -e '
+  const fs = require("fs");
+  const [out, specsDir, specsSha, specsBranch, appDir, appSha, appBranch, diverged, computable, specsAhead, appAhead] = process.argv.slice(1);
+  fs.writeFileSync(out, JSON.stringify({
+    specs: { dir: specsDir, sha: specsSha, branch: specsBranch },
+    app: { dir: appDir, sha: appSha, branch: appBranch },
+    diverged: diverged === "true",
+    computable: computable === "true",
+    specsAhead: Number(specsAhead || 0),
+    appAhead: Number(appAhead || 0),
+  }));
+' "$GIT_INFO_FILE" "$E2E_DIR" "$SPECS_SHA" "$SPECS_BRANCH" "$REPO" "$APP_SHA" "$APP_BRANCH" "$GIT_DIVERGED" "$GIT_COMPUTABLE" "$SPECS_AHEAD" "$APP_AHEAD"
+
+# ---------------------------------------------------------------------------
 # Teardown — installed BEFORE anything below can start a process or mutate the
 # database, and trapped on EXIT so an interrupted run (Ctrl-C, a killed
 # session) cleans up exactly like a finished one. `run_cleanup` is idempotent
@@ -678,6 +733,22 @@ fi
 cd "$E2E_DIR"
 export E2E_ENV="${E2E_ENV:-local}"
 
+# R4 (field-test fix) — a FULL signoff run gets --retries=0, never
+# playwright.config.ts's own `retries: 1`: a retry on a full run is exactly
+# how a real collision (three workers minting the same phone number) turned
+# into "3 hard failures + 2 flaky passes" that read as partially clean when
+# it was one bug throughout. "One restart is a fix; a retry loop is a lie."
+# A SCOPED/alias run keeps the config default (1) on purpose — its whole
+# point is fast dev feedback on a shared, sometimes-flaky external target,
+# and report.mjs's own new flaky category (2b) means a scoped run's retries
+# no longer hide anything: a flaky pass is reported, never silently folded
+# into section 1, and still fails the run's exit code.
+if [ -z "$ALIAS" ]; then
+  RETRY_ARGS="--retries=0"
+else
+  RETRY_ARGS=""
+fi
+
 # A tier that exits non-zero must never be silently discarded just because
 # Playwright itself captured no failed spec — a `--grep` matching zero tests
 # ("No tests found") exits 1 while writing `errors: [...]` and
@@ -754,8 +825,13 @@ if [ "$API_COUNT" = "0" ]; then
   API_CODE=0
 else
   rm -f test-results/results.json
+  # ALIAS_GREP and RETRY_ARGS are mutually exclusive by construction (both
+  # derive from whether $ALIAS is set) — an alias run never gets --retries=0,
+  # a full run never has a --grep.
   if [ -n "$ALIAS_GREP" ]; then
     run_fg npm run e2e:api -- --grep "$ALIAS_GREP"
+  elif [ -n "$RETRY_ARGS" ]; then
+    run_fg npm run e2e:api -- "$RETRY_ARGS"
   else
     run_fg npm run e2e:api
   fi
@@ -779,6 +855,8 @@ else
   rm -f test-results/results.json
   if [ -n "$ALIAS_GREP" ]; then
     run_fg npm run e2e:ui -- --headed --grep "$ALIAS_GREP"
+  elif [ -n "$RETRY_ARGS" ]; then
+    run_fg npm run e2e:ui -- --headed "$RETRY_ARGS"
   else
     run_fg npm run e2e:ui -- --headed
   fi
@@ -855,8 +933,21 @@ node -e '
 ' "$RUN_DIR/coverage.json" "$RUN_DIR/coverage-drift.json"
 
 # ---------------------------------------------------------------------------
-# 9. The five-section report. Exit with ITS code — non-zero iff section 2
-#    (Not working) is non-empty, per report.mjs's contract.
+# 9. The report (section 2's grouping, 2b flaky, section 4 dedupe, the git-
+#    provenance header — see report.mjs). Exit with ITS code — non-zero iff
+#    section 2 (Not working) or 2b (Flaky) is non-empty, per report.mjs's
+#    contract.
+#
+# R6 (field-test fix) — written to the FILE ONLY here, deliberately not
+# tee'd to stdout at this point. The field-test run DID print the report to
+# stdout, but ~840 lines before the "report written to ..." log line — headed
+# Playwright output and per-failure trace dumps buried it so completely that
+# the agent read the file separately with `cat`, summarised it in its own
+# words, and its human never saw the five sections at all. The fix is to make
+# the full report the LAST thing this script ever prints — after the "written
+# to" log line, not folded into the middle of a thousand-line stream — so a
+# human (or an agent that's supposed to relay this verbatim, per SKILL.md's
+# ground rules) cannot scroll past it.
 # ---------------------------------------------------------------------------
 REPORT_MD="$RUN_DIR/report.md"
 if [ -n "$ALIAS" ]; then
@@ -865,18 +956,24 @@ if [ -n "$ALIAS" ]; then
     --residue "$RESIDUE_COUNT" \
     --cleanup-code "$CLEANUP_CODE" \
     --coverage-drift "$RUN_DIR/coverage-drift.json" \
+    --git-info "$GIT_INFO_FILE" \
     --scoped-alias "$ALIAS" \
     --scoped-suites "$ALIAS_SUITE_ID" \
-    | tee "$REPORT_MD"
+    > "$REPORT_MD"
 else
   node "$SKILL_DIR/lib/report.mjs" \
     --results "$RUN_DIR/results-merged.json" \
     --residue "$RESIDUE_COUNT" \
     --cleanup-code "$CLEANUP_CODE" \
     --coverage-drift "$RUN_DIR/coverage-drift.json" \
-    | tee "$REPORT_MD"
+    --git-info "$GIT_INFO_FILE" \
+    > "$REPORT_MD"
 fi
-REPORT_CODE="${PIPESTATUS[0]}"
+REPORT_CODE=$?
 
 log "report written to $REPORT_MD — exit code $REPORT_CODE"
+log "──────────────────────────────────────────────────────────────────────"
+log "the signoff report follows — this is the point of this run, read it, do not just check the exit code:"
+echo
+cat "$REPORT_MD"
 exit "$REPORT_CODE"

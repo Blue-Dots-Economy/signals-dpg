@@ -1,30 +1,47 @@
-// The five-section signoff. A Playwright list reporter answers "did the suite
-// pass"; the question a signoff has to answer is "can this ship, and what did
-// nobody check" — which needs the skips and the untestable surface promoted to
+// The five-section signoff (plus a 2b: Flaky, added by the field-test fix
+// below). A Playwright list reporter answers "did the suite pass"; the
+// question a signoff has to answer is "can this ship, and what did nobody
+// check" — which needs the skips and the untestable surface promoted to
 // first-class output rather than scrolled past.
 //
-// Five sections, in this fixed order:
-//   1. Working       — passes, grouped by suite.
-//   2. Not working    — failures, each with the error and the trace/screenshot
-//                        path. Cleanup residue lands here too, as a synthetic
-//                        entry, because a run that leaves rows behind makes the
-//                        next run lie.
-//   3. Known/expected — specs annotated `@known`, so documented look-like-bugs
+// Sections, in this fixed order:
+//   1. Working        — passes, grouped by suite. Deduped on (spec file,
+//                        title) BEFORE categorisation — preflight runs as a
+//                        dependency of both the api and ui Playwright
+//                        projects, so every one of its specs would otherwise
+//                        appear twice once results are merged.
+//   2. Not working     — failures, GROUPED BY ROOT CAUSE (a shared, masked
+//                        error signature), each group carrying a count and a
+//                        conservative suite-defect/unattributed tag — never a
+//                        guessed product-defect tag. Ten specs failing on one
+//                        collision read as one group of ten, not ten unrelated
+//                        defects. Cleanup residue lands here too, as a
+//                        synthetic entry, because a run that leaves rows
+//                        behind makes the next run lie.
+//   2b. Flaky          — specs that failed on their FIRST attempt and passed
+//                        on Playwright's retry. Never counted as a pass, and
+//                        never folded into section 1 — the retry did not
+//                        resolve anything, it only hid the failure that
+//                        identifies the bug. Carries the first attempt's
+//                        error, not the retry's.
+//   3. Known/expected  — specs annotated `@known`, so documented look-like-bugs
 //                        (the map count below the list total, `x-uri` through a
 //                        `$ref`) never pollute section 2.
-//   4. Needs a human   — COMPUTED, never hand-written: every capability skip's
+//   4. Needs a human    — COMPUTED, never hand-written: every capability skip's
 //                        reason, plus coverage.md's `human-only` block, plus —
 //                        on a scoped run — one line per suite this run did not
-//                        touch, worded "not run in this invocation".
-//   5. Coverage drift  — whatever `npm run coverage` found unmapped, passed in
+//                        touch, worded "not run in this invocation". Deduped
+//                        with `(×N)` counts, first-seen order preserved.
+//   5. Coverage drift   — whatever `npm run coverage` found unmapped, passed in
 //                        by the caller (that check lives in scripts/, this file
 //                        only renders what it's told).
 //
-// Exit code is non-zero if and only if section 2 is non-empty. A bare
-// `test.skip` (no capability reason, no annotation) is NOT quietly dropped —
-// `capabilities.ts` guarantees a reason for every capability skip, so a skip
-// with none is itself a defect and is surfaced in section 2, not folded into
-// "needs a human" where it would look like an intentional, documented gap.
+// Exit code is non-zero if section 2 (Not working) OR 2b (Flaky) is
+// non-empty. A bare `test.skip` (no capability reason, no annotation) is NOT
+// quietly dropped — `capabilities.ts` guarantees a reason for every
+// capability skip, so a skip with none is itself a defect and is surfaced in
+// section 2, not folded into "needs a human" where it would look like an
+// intentional, documented gap.
 //
 // `buildReport` returns plain data (`ReportSections`); `renderMarkdown` is the
 // only thing that knows about headings and bullet formatting, so a future
@@ -228,6 +245,131 @@ function* walkSpecs(suites, path = []) {
 }
 
 /**
+ * The outcome of ONE `JSONReportTest` entry. Real Playwright JSON always
+ * carries `test.status` (`'skipped' | 'expected' | 'unexpected' | 'flaky'`) —
+ * that field, not the last result alone, is what actually distinguishes "hard
+ * failure" from "flaky" (retried, and the retry passed). Hand-built fixtures
+ * (this file's own unit tests) may omit `status` entirely; for those, derive
+ * the same shape from `results` alone so the fixtures don't all have to be
+ * rewritten just to add a field they were never asserting on.
+ */
+function testOutcome(t) {
+  if (t && typeof t.status === 'string') return t.status;
+  const results = t?.results ?? [];
+  if (results.length === 0) return 'unexpected';
+  const last = results[results.length - 1];
+  const anyEarlierFailed = results.slice(0, -1).some((r) => r.status === 'failed' || r.status === 'timedOut');
+  if (last.status === 'passed') return anyEarlierFailed ? 'flaky' : 'expected';
+  if (last.status === 'skipped') return 'skipped';
+  return 'unexpected';
+}
+
+// Worst-first, so a spec with more than one `test` entry (repeat-each, more
+// than one project) reports its single worst outcome rather than silently
+// picking whichever happens to be last in the array.
+const OUTCOME_PRIORITY = { unexpected: 0, flaky: 1, skipped: 2, expected: 3 };
+
+/**
+ * Root-cause grouping (R1). The raw message with every run-specific
+ * identifier masked out — so "23505 phone_number already exists" from three
+ * different workers, each with a DIFFERENT generated phone number, collapses
+ * to the same signature, while two genuinely different errors never do.
+ * Order matters: UUIDs and emails are masked before the generic long-digit-run
+ * pass, or the digits inside them would already be gone and the more specific
+ * placeholder would never apply.
+ */
+export function normalizeErrorSignature(message) {
+  return String(message ?? '')
+    .replace(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi, '<uuid>')
+    .replace(/[\w.+-]+@[\w.-]+\.[a-z]{2,}/gi, '<email>')
+    .replace(/\d{4}-\d{2}-\d{2}T[\d:.,]+Z?/g, '<timestamp>')
+    .replace(/\+?\d[\d ()-]{8,}\d/g, '<phone>')
+    .replace(/\b\d{5,}\b/g, '<num>')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+/**
+ * Suite-defect vs product-defect, CONSERVATIVELY. Only error shapes carrying
+ * their own evidence get a `suite-defect` tag; everything else is
+ * `unattributed`. This function never returns `product-defect` — that call
+ * needs a human reading the actual assertion. A wrong "suite bug" label
+ * teaches a reader to dismiss a real defect, which is worse than no label at
+ * all, so the bar for `suite-defect` here is "the text itself proves it",
+ * not "it looks infrastructure-shaped".
+ */
+export function classifySuiteVsProduct(rawMessages) {
+  const joined = rawMessages.join('\n');
+  if (/\b23505\b/.test(joined) && /(phone_number|email|already exists|duplicate key)/i.test(joined)) {
+    return {
+      verdict: 'suite-defect',
+      reason:
+        'duplicate-key violation (23505) on a fixture-generated identifier — a collision in generated ' +
+        'test data, not a product defect.',
+    };
+  }
+  if (/No tests found|did not match any files/i.test(joined)) {
+    return {
+      verdict: 'suite-defect',
+      reason: 'Playwright matched zero tests for this invocation — a suite/config wiring issue, not a product failure.',
+    };
+  }
+  if (/Timeout \d+ms exceeded/i.test(joined) && /(waiting for|locator|selector)/i.test(joined)) {
+    return {
+      verdict: 'suite-defect',
+      reason: "a selector/locator timeout — points at the test's own wait/selector, not a confirmed product defect.",
+    };
+  }
+  if (/residue in \d+ table|cleanup\.sh exited non-zero/i.test(joined)) {
+    return {
+      verdict: 'suite-defect',
+      reason: 'cleanup/residue failure — leftover test data from this run, not a product defect.',
+    };
+  }
+  return {
+    verdict: 'unattributed',
+    reason: 'no known suite-noise signature matched this error — it needs a human to read the actual assertion before attributing it either way.',
+  };
+}
+
+/** Group `notWorking` entries by normalized signature (R1). Order = first-seen. */
+export function groupFailures(notWorking) {
+  const groups = new Map();
+  const order = [];
+  for (const f of notWorking) {
+    const sig = normalizeErrorSignature(f.rawError ?? f.detail);
+    if (!groups.has(sig)) {
+      groups.set(sig, []);
+      order.push(sig);
+    }
+    groups.get(sig).push(f);
+  }
+  return order.map((sig) => {
+    const members = groups.get(sig);
+    const { verdict, reason } = classifySuiteVsProduct(members.map((m) => m.rawError ?? m.detail));
+    return { signature: sig, count: members.length, members, verdict, reason };
+  });
+}
+
+/**
+ * Dedupe a list of strings, collapsing exact repeats into one entry suffixed
+ * `(×N)`, preserving FIRST-SEEN order (R2). A unique entry is returned
+ * unchanged — no `(×1)` noise.
+ */
+export function dedupeWithCounts(entries) {
+  const counts = new Map();
+  const order = [];
+  for (const e of entries) {
+    if (!counts.has(e)) {
+      counts.set(e, 0);
+      order.push(e);
+    }
+    counts.set(e, counts.get(e) + 1);
+  }
+  return order.map((e) => (counts.get(e) > 1 ? `${e} (×${counts.get(e)})` : e));
+}
+
+/**
  * Build the five report sections from a Playwright JSON reporter payload plus
  * the run's other signoff inputs. Pure function — no I/O — so it is exactly
  * what `report.test.ts` drives directly.
@@ -244,6 +386,9 @@ function* walkSpecs(suites, path = []) {
  * @param {{id: number, name: string}[]} [input.suites]  The suite catalogue,
  *   defaulting to `SUITES`. Pass `parseSuiteTable(coverageMdText)` to source it
  *   from `coverage.md` instead of the hand-maintained constant.
+ * @param {object} [input.gitInfo]  Both checkouts' git provenance (R5) — see
+ *   `report.d.mts`'s `GitInfo`. Rendered verbatim; `buildReport` never
+ *   inspects it beyond passing it through.
  */
 export function buildReport(input) {
   const {
@@ -254,12 +399,25 @@ export function buildReport(input) {
     cleanupCode = 0,
     coverageDrift = [],
     suites = SUITES,
+    gitInfo = null,
   } = input;
 
   const working = [];
   const notWorking = [];
   const known = [];
+  const flaky = [];
   const skipReasons = [];
+
+  // R3 — preflight runs as a dependency of BOTH the api and ui Playwright
+  // projects, so every one of its specs is present, identically, in both
+  // `results-api.json` and `results-ui.json` before they get merged into one
+  // file here. `spec.file` + `spec.title` identifies "the same test, run
+  // twice" without any risk of collapsing two DIFFERENT tests that merely
+  // share a title in different files. First occurrence wins; later ones are
+  // dropped BEFORE categorisation, so every count downstream (the at-a-glance
+  // table, the per-spec-file table, root-cause grouping) is already correct
+  // rather than needing its own separate dedupe.
+  const seenSpecKeys = new Set();
 
   // A top-level Playwright error (a throwing fixture, a bad config, "No
   // tests found" for a --grep matching nothing) or a stats block reporting
@@ -306,6 +464,20 @@ export function buildReport(input) {
 
   for (const { spec, path } of walkSpecs(results.suites)) {
     const suiteLabel = path[0] ?? '(root)';
+
+    const specKey = `${spec.file ?? suiteLabel}::${spec.title}`;
+    if (seenSpecKeys.has(specKey)) continue;
+    seenSpecKeys.add(specKey);
+
+    const testsArr = spec.tests ?? [];
+    if (testsArr.length === 0) continue; // nothing ran for this spec at all
+
+    // Worst-first across every `test` entry this spec has (normally exactly
+    // one) — see OUTCOME_PRIORITY's comment.
+    const withOutcome = testsArr.map((t) => ({ t, outcome: testOutcome(t) }));
+    withOutcome.sort((a, b) => OUTCOME_PRIORITY[a.outcome] - OUTCOME_PRIORITY[b.outcome]);
+    const outcome = withOutcome[0].outcome;
+
     const attempts = finalResults(spec).filter((a) => a.result);
     const results_ = attempts.map((a) => a.result);
     const annotations = [
@@ -313,21 +485,48 @@ export function buildReport(input) {
       ...attempts.flatMap((a) => a.test.annotations ?? []),
     ];
 
-    const failed = results_.some((r) => r.status === 'failed' || r.status === 'timedOut');
-    const skipped = !failed && results_.some((r) => r.status === 'skipped');
-    const allPassed = results_.length > 0 && results_.every((r) => r.status === 'passed');
-
-    if (failed) {
+    if (outcome === 'unexpected') {
       const detail =
         `${suiteLabel} › ${spec.title}\n  ${errorMessagesFor(results_).join('\n  ')}` +
         (tracePathFor(results_) ? `\n  trace: ${tracePathFor(results_)}` : '\n  trace: (none captured)');
-      const entry = { suite: suiteLabel, title: spec.title, detail, trace: tracePathFor(results_) };
+      const entry = {
+        suite: suiteLabel,
+        title: spec.title,
+        detail,
+        trace: tracePathFor(results_),
+        rawError: errorMessagesFor(results_).join('\n'),
+      };
       if (hasKnownAnnotation(annotations)) known.push(entry);
       else notWorking.push(entry);
       continue;
     }
 
-    if (skipped) {
+    if (outcome === 'flaky') {
+      // R4 — carry the FIRST attempt's error, never the retry's. The retry
+      // passing is exactly what made this worth investigating: it is the
+      // ORIGINAL failure that identifies the bug, not the fact that trying
+      // again happened to succeed. "One restart is a fix; a retry loop is a
+      // lie" — this is the report's own enforcement of that rule.
+      const flakyEntry = withOutcome.find((w) => w.outcome === 'flaky') ?? withOutcome[0];
+      const firstResult = (flakyEntry.t.results ?? [])[0] ?? null;
+      const firstAttemptResults = firstResult ? [firstResult] : [];
+      const firstMsgs = errorMessagesFor(firstAttemptResults);
+      const detail =
+        `${suiteLabel} › ${spec.title}\n  FIRST ATTEMPT (the retry later passed — this is what actually happened):\n  ${firstMsgs.join('\n  ')}` +
+        (tracePathFor(firstAttemptResults)
+          ? `\n  trace: ${tracePathFor(firstAttemptResults)}`
+          : '\n  trace: (none captured on the first attempt)');
+      flaky.push({
+        suite: suiteLabel,
+        title: spec.title,
+        detail,
+        trace: tracePathFor(firstAttemptResults),
+        rawError: firstMsgs.join('\n'),
+      });
+      continue;
+    }
+
+    if (outcome === 'skipped') {
       const reason = skipReason(annotations);
       if (reason) {
         skipReasons.push(reason);
@@ -345,26 +544,22 @@ export function buildReport(input) {
           title: spec.title,
           detail: `${suiteLabel} › ${spec.title}\n  skipped with no reason (a bare test.skip is a defect — every capability skip must carry a reason)`,
           trace: null,
+          rawError: 'skipped with no reason',
         });
       }
       continue;
     }
 
-    if (allPassed) {
-      working.push({ suite: suiteLabel, title: spec.title, skipped: false });
-    }
+    // outcome === 'expected'
+    working.push({ suite: suiteLabel, title: spec.title, skipped: false });
   }
 
   if (residue > 0) {
-    notWorking.push({
-      suite: 'cleanup',
-      title: 'post-run residue check',
-      detail:
-        `cleanup.sh reported residue in ${residue} table(s) after teardown. A run that leaves rows ` +
-        'behind makes the next run lie (newPhone() derives its sequence from the run id, so leftover ' +
-        "rows collide with the next run's identities) — that is worth failing over, not a footnote.",
-      trace: null,
-    });
+    const detail =
+      `cleanup.sh reported residue in ${residue} table(s) after teardown. A run that leaves rows ` +
+      'behind makes the next run lie (newPhone() derives its sequence from the run id, so leftover ' +
+      "rows collide with the next run's identities) — that is worth failing over, not a footnote.";
+    notWorking.push({ suite: 'cleanup', title: 'post-run residue check', detail, trace: null, rawError: detail });
   }
 
   // cleanup.sh can exit non-zero for a reason the residue count above never
@@ -376,36 +571,55 @@ export function buildReport(input) {
   // and a non-zero cleanup exit alongside real residue is the same failure,
   // not two.
   if (cleanupCode !== 0 && residue === 0) {
-    notWorking.push({
-      suite: 'cleanup',
-      title: 'cleanup.sh exited non-zero',
-      detail:
-        `cleanup.sh exited ${cleanupCode} while reporting zero residue rows — a hard failure (an ` +
-        'unreadable snapshot count, an unreachable target, a lock timeout) rather than leftover rows, ' +
-        "which the residue count can't see on its own. See the run's cleanup-final.log for the actual " +
-        'message; a non-zero cleanup exit is never a clean run.',
-      trace: null,
-    });
+    const detail =
+      `cleanup.sh exited ${cleanupCode} while reporting zero residue rows — a hard failure (an ` +
+      'unreadable snapshot count, an unreachable target, a lock timeout) rather than leftover rows, ' +
+      "which the residue count can't see on its own. See the run's cleanup-final.log for the actual " +
+      'message; a non-zero cleanup exit is never a clean run.';
+    notWorking.push({ suite: 'cleanup', title: 'cleanup.sh exited non-zero', detail, trace: null, rawError: detail });
   }
 
-  const needsHuman = [...skipReasons, ...humanOnly];
+  // R2 — section 4 dedupe. `skipReasons` in particular can carry the exact
+  // same capability reason once per spec (e.g. "requires service-caller
+  // credentials" for every spec in a service-gated suite) — dedupe with
+  // counts, first-seen order preserved, so a reader sees ONE line per
+  // distinct reason instead of scrolling past 20 identical ones.
+  const needsHumanRaw = [...skipReasons, ...humanOnly];
   if (scoped) {
     const ran = new Set(scoped.suites ?? []);
     for (const suite of suites) {
       if (!ran.has(suite.id)) {
-        needsHuman.push(`Suite ${suite.id} (${suite.name}) — not run in this invocation`);
+        needsHumanRaw.push(`Suite ${suite.id} (${suite.name}) — not run in this invocation`);
       }
     }
   }
+  const needsHuman = dedupeWithCounts(needsHumanRaw);
+
+  // R1 — root-cause grouping for section 2's rendering. `notWorking` itself
+  // stays FLAT (one entry per failing spec) so exit-code and count semantics
+  // are unchanged; `notWorkingGroups` is purely a rendering aid layered on
+  // top.
+  const notWorkingGroups = groupFailures(notWorking);
+
+  // R4 — a flaky spec is never counted as a pass, and its existence is
+  // itself worth failing the run over: the whole point of first-attempt
+  // reporting is that the retry did not actually resolve anything, it only
+  // hid it. A signoff that reads clean because every real failure happened
+  // to pass on its one retry is exactly the "retry loop is a lie" case the
+  // skill's own ground rules warn about.
+  const exitCode = notWorking.length > 0 || flaky.length > 0 ? 1 : 0;
 
   return {
     working,
     notWorking,
+    notWorkingGroups,
     known,
+    flaky,
     needsHuman,
     coverageDrift,
     scoped,
-    exitCode: notWorking.length > 0 ? 1 : 0,
+    gitInfo,
+    exitCode,
   };
 }
 
@@ -431,6 +645,37 @@ export function renderMarkdown(report) {
   );
   lines.push('');
 
+  // ── Git provenance (R5) ───────────────────────────────────────────────────
+  // Which commit the SPECS came from and which commit the APP under test came
+  // from are two different checkouts whenever SIGNALS_REPO points somewhere
+  // other than this worktree — nothing else in this report can tell a reader
+  // that happened. A diverged pair makes any UI/behavioural failure below
+  // genuinely uninterpretable (stale spec vs real regression) until the two
+  // checkouts match, so this is rendered right under the title, before
+  // anything else, and loudly when it disagrees.
+  if (report.gitInfo) {
+    const g = report.gitInfo;
+    lines.push(`**Specs checkout:** \`${g.specs.dir}\` @ \`${g.specs.sha}\` (\`${g.specs.branch}\`)`);
+    lines.push(`**App checkout:** \`${g.app.dir}\` @ \`${g.app.sha}\` (\`${g.app.branch}\`)`);
+    if (g.diverged) {
+      const spread = g.computable
+        ? `specs are ${g.specsAhead} commit(s) ahead and ${g.appAhead} commit(s) behind the app's HEAD ` +
+          `(${g.specsAhead + g.appAhead} commits apart total)`
+        : 'commit divergence could not be computed (likely unrelated histories/repositories) — the SHAs above differ regardless';
+      lines.push('');
+      lines.push(
+        `> ⚠️ **DIVERGED CHECKOUTS** — the specs and the app under test are NOT the same commit; ${spread}. ` +
+          'Any UI or behavioural failure below may reflect stale specs rather than a real product regression ' +
+          '(or vice versa) — that cannot be told apart until the two checkouts match. Treat this signoff as ' +
+          'provisional until SIGNALS_REPO points at the same commit the specs were written against.',
+      );
+    } else {
+      lines.push('');
+      lines.push('> Specs and app are on the same commit.');
+    }
+    lines.push('');
+  }
+
   // ── At-a-glance tables ────────────────────────────────────────────────────
   // The five sections below carry the detail, but a reader opening this file
   // wants two answers first: did it pass, and which parts of the product were
@@ -439,15 +684,25 @@ export function renderMarkdown(report) {
   // two tables are the summary; everything after them is the evidence.
   const passCount = report.working.filter((w) => !w.skipped).length;
   const failCount = report.notWorking.length;
+  const flakyCount = (report.flaky ?? []).length;
   const skipCount = report.working.filter((w) => w.skipped).length;
-  const verdict = failCount === 0 ? '✅ PASS' : '❌ FAIL';
+  const groupCount = (report.notWorkingGroups ?? []).length;
+  // R1 — the failed-count cell names how many ROOT CAUSES the failures
+  // collapse to, not just how many specs failed, so "10" never reads as "10
+  // independent defects" when it was really one root cause hitting 10 specs.
+  const failedCell = failCount === 0 ? '0' : `${failCount} (${groupCount} root cause${groupCount === 1 ? '' : 's'})`;
+  // R4 — flaky is never folded into the PASS verdict: a spec that failed on
+  // its first attempt and only passed on retry is exactly the signal a
+  // signoff exists to surface, not noise a retry is allowed to erase.
+  const verdict = failCount > 0 ? '❌ FAIL' : flakyCount > 0 ? '⚠️ FLAKY' : '✅ PASS';
 
   lines.push('## At a glance');
   lines.push('');
   lines.push('| | Count |');
   lines.push('|---|---:|');
   lines.push(`| ✅ Passed | ${passCount} |`);
-  lines.push(`| ❌ Failed | ${failCount} |`);
+  lines.push(`| ❌ Failed | ${failedCell} |`);
+  lines.push(`| 🎲 Flaky (passed on retry — see below, first-attempt error shown) | ${flakyCount} |`);
   lines.push(`| ⏭️ Skipped (capability-gated) | ${skipCount} |`);
   lines.push(`| ⚑ Known / expected | ${report.known.length} |`);
   lines.push(`| 👤 Needs a human | ${report.needsHuman.length} |`);
@@ -495,14 +750,53 @@ export function renderMarkdown(report) {
 
   lines.push('## 2. Not working');
   if (report.notWorking.length === 0) {
-    lines.push('_None — exit code 0._');
+    lines.push('_None._');
   } else {
-    for (const f of report.notWorking) {
-      lines.push(`### ${f.suite} — ${f.title}`);
-      lines.push(f.detail);
+    // R1 — one entry per ROOT CAUSE, not per spec: a group of size 1 renders
+    // like the old single-failure entry (plus its attribution tag); a group
+    // of size N>1 renders once, with a count and the shared normalized
+    // error, and every distinct member listed underneath rather than its
+    // full detail repeated N times.
+    for (const g of report.notWorkingGroups ?? []) {
+      const tag = g.verdict === 'suite-defect' ? '🔧 suite-defect' : '❓ unattributed';
+      if (g.count === 1) {
+        const f = g.members[0];
+        lines.push(`### ${f.suite} — ${f.title}  [${tag}]`);
+        lines.push(f.detail);
+        lines.push(`_attribution: ${g.reason}_`);
+        lines.push('');
+      } else {
+        lines.push(`### ${g.count} failures, one root cause — [${tag}]`);
+        lines.push(`**Shared error (normalized):** \`${g.signature}\``);
+        lines.push(`_attribution: ${g.reason}_`);
+        lines.push('');
+        lines.push('Members:');
+        for (const m of g.members) {
+          lines.push(`- ${m.suite} — ${m.title}${m.trace ? ` (trace: ${m.trace})` : ''}`);
+        }
+        lines.push('');
+      }
+    }
+  }
+  lines.push('');
+
+  lines.push('## 2b. Flaky — passed on retry');
+  lines.push(
+    '_Never counted as a pass. Each entry below carries the FIRST attempt\'s error — the one that actually ' +
+      "happened — not the retry's, because the retry is what hid it. See ground rule: \"One restart is a fix; " +
+      'a retry loop is a lie."_',
+  );
+  lines.push('');
+  if (!report.flaky || report.flaky.length === 0) {
+    lines.push('_None this run._');
+  } else {
+    for (const fl of report.flaky) {
+      lines.push(`### ${fl.suite} — ${fl.title}`);
+      lines.push(fl.detail);
       lines.push('');
     }
   }
+  lines.push('');
 
   lines.push('## 3. Known / expected');
   if (report.known.length === 0) {
@@ -535,7 +829,8 @@ export function renderMarkdown(report) {
 // ---------------------------------------------------------------------------
 // CLI: `node report.mjs --results <path> [--coverage <coverage.md path>]
 //        [--residue <n>] [--cleanup-code <n>] [--scoped-alias <a> --scoped-suites 1,2,3]
-//        [--coverage-drift <path to a JSON array of strings>]`
+//        [--coverage-drift <path to a JSON array of strings>]
+//        [--git-info <path to a JSON GitInfo object, see report.d.mts>]`
 // Prints the markdown report to stdout and exits with the report's code —
 // the shape `run.sh` (Task 10) needs to fail the whole invocation on section 2.
 // ---------------------------------------------------------------------------
@@ -580,8 +875,9 @@ function main() {
         }
       : null;
   const coverageDrift = args['coverage-drift'] ? JSON.parse(readFileSync(args['coverage-drift'], 'utf8')) : [];
+  const gitInfo = args['git-info'] ? JSON.parse(readFileSync(args['git-info'], 'utf8')) : null;
 
-  const report = buildReport({ results, humanOnly, scoped, residue, cleanupCode, coverageDrift, suites });
+  const report = buildReport({ results, humanOnly, scoped, residue, cleanupCode, coverageDrift, suites, gitInfo });
   console.log(renderMarkdown(report));
   process.exit(report.exitCode);
 }
