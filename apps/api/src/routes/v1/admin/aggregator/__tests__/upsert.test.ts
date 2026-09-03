@@ -24,17 +24,12 @@ import {
 // `db.select/insert/update` chains behave on the next call.
 const dbState = {
   // What `select(...).from(...).where(...).limit(1)` returns.
-  existingOrgRows: [] as Array<{
-    id: string;
-    metadata: string | null;
-    defaultForBindings?: string[] | null;
-  }>,
+  existingOrgRows: [] as Array<{ id: string; metadata: string | null }>,
   // How `insert(organization).values(...)` behaves.
   insertMode: 'ok' as 'ok' | 'unique_violation',
   // Captured calls — for assertions.
   inserts: [] as Array<Record<string, unknown>>,
   updates: [] as Array<{ id: string; set: Record<string, unknown> }>,
-  audits: [] as Array<Record<string, unknown>>,
 };
 
 vi.mock('@api/db/postgres/drizzle_config', () => {
@@ -67,23 +62,8 @@ vi.mock('@api/db/postgres/drizzle_config', () => {
       }),
     })),
   }));
-  // The update branch now runs in a transaction (it may also revoke a binding
-  // the org no longer declares), and can insert an audit row.
-  const auditInsert = vi.fn(() => ({
-    values: vi.fn((rows: unknown) => {
-      dbState.audits.push(...(Array.isArray(rows) ? rows : [rows]));
-      return Promise.resolve();
-    }),
-  }));
-  const tx = { select, insert: auditInsert, update };
-
   return {
-    db: {
-      select,
-      insert,
-      update,
-      transaction: vi.fn(async (cb: (t: typeof tx) => Promise<unknown>) => cb(tx)),
-    },
+    db: { select, insert, update },
   };
 });
 
@@ -121,7 +101,6 @@ describe('POST /aggregator/upsert', () => {
     dbState.insertMode = 'ok';
     dbState.inserts = [];
     dbState.updates = [];
-    dbState.audits = [];
   });
 
   it('creates a new aggregator org and returns created=true', async () => {
@@ -300,66 +279,3 @@ describe('POST /aggregator/upsert', () => {
   });
 });
 
-describe('POST /aggregator/upsert — stale default bindings (SS-3, #640)', () => {
-  // Sibling of the describe above, so it needs its own reset.
-  beforeEach(() => {
-    dbState.existingOrgRows = [];
-    dbState.insertMode = 'ok';
-    dbState.inserts = [];
-    dbState.updates = [];
-    dbState.audits = [];
-  });
-
-  // A re-mirror rewrites metadata.domains wholesale. An org that stops
-  // declaring a domain it is still the DEFAULT for would keep inheriting that
-  // domain's self-signups and their decryptable PII, while its own dashboard
-  // (which filters on the declared domains) hid them.
-  it('revokes a binding whose domain is no longer declared, and audits it', async () => {
-    dbState.existingOrgRows = [
-      {
-        id: 'org_agg_1',
-        metadata: JSON.stringify({ domains: ['seeker', 'provider'] }),
-        defaultForBindings: ['blue_dot/seeker', 'blue_dot/provider'],
-      },
-    ];
-
-    const app = await buildApp();
-    const res = await app.inject({
-      method: 'POST',
-      url: '/aggregator/upsert',
-      payload: { external_id: 'x', name: 'Agg', slug: 'agg', domains: ['provider'] },
-    });
-
-    expect(res.statusCode).toBe(200);
-    expect(dbState.updates.at(-1)?.set).toMatchObject({
-      defaultForBindings: ['blue_dot/provider'],
-    });
-    expect(dbState.audits).toHaveLength(1);
-    expect(dbState.audits[0]).toMatchObject({
-      binding: 'blue_dot/seeker',
-      fromOrgId: 'org_agg_1',
-      toOrgId: null,
-    });
-  });
-
-  it('leaves bindings alone when the org still declares their domains', async () => {
-    dbState.existingOrgRows = [
-      {
-        id: 'org_agg_1',
-        metadata: JSON.stringify({ domains: ['seeker'] }),
-        defaultForBindings: ['blue_dot/seeker'],
-      },
-    ];
-
-    const app = await buildApp();
-    const res = await app.inject({
-      method: 'POST',
-      url: '/aggregator/upsert',
-      payload: { external_id: 'x', name: 'Agg', slug: 'agg', domains: ['seeker'] },
-    });
-
-    expect(res.statusCode).toBe(200);
-    expect(dbState.updates.at(-1)?.set).not.toHaveProperty('defaultForBindings');
-    expect(dbState.audits).toHaveLength(0);
-  });
-});

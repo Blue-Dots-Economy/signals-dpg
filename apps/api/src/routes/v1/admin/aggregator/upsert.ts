@@ -3,7 +3,6 @@ import { randomUUID } from 'node:crypto';
 import { eq } from 'drizzle-orm';
 import { db } from '@api/db/postgres/drizzle_config';
 import { organization } from '../../../../../db/postgres/schema/auth.js';
-import { aggregator_default_audit } from '../../../../../db/postgres/schema/aggregator_default_audit.js';
 import z, {
   AggregatorUpsertRequest,
   AggregatorUpsertResponse,
@@ -55,11 +54,7 @@ export const aggregator_upsert_handler = async (
   const { external_id, name, slug, logo_url, domains, metadata } = request.body;
 
   const [existing] = await db
-    .select({
-      id: organization.id,
-      metadata: organization.metadata,
-      defaultForBindings: organization.defaultForBindings,
-    })
+    .select({ id: organization.id, metadata: organization.metadata })
     .from(organization)
     .where(eq(organization.slug, slug))
     .limit(1);
@@ -68,49 +63,14 @@ export const aggregator_upsert_handler = async (
   const meta_str = JSON.stringify(meta_obj);
 
   if (existing) {
-    // SS-3 (#640): a re-mirror rewrites `metadata.domains` wholesale, so an org
-    // can stop declaring a domain it is still the DEFAULT aggregator for. It
-    // would keep inheriting that domain's self-signups and their decryptable
-    // PII, while the aggregator dashboard — which filters on the declared
-    // domains — hid them: the "unverified queue nobody can open" the design
-    // exists to prevent. Drop any binding whose domain is no longer declared,
-    // and audit the revocation.
-    const declared = domains ?? [];
-    const held = existing.defaultForBindings ?? [];
-    const stale = held.filter((binding) => !declared.includes(binding.split('/')[1]));
-    const keep = held.filter((binding) => !stale.includes(binding));
-
-    await db.transaction(async (tx) => {
-      await tx
-        .update(organization)
-        .set({
-          name,
-          logo: logo_url ?? null,
-          metadata: meta_str,
-          ...(stale.length > 0 ? { defaultForBindings: keep.length === 0 ? null : keep } : {}),
-        })
-        .where(eq(organization.id, existing.id));
-
-      if (stale.length > 0) {
-        await tx.insert(aggregator_default_audit).values(
-          stale.map((binding) => ({
-            binding,
-            fromOrgId: existing.id,
-            // Revoked, nothing took over — the binding now has no default.
-            toOrgId: null,
-            changedBy: request.user?.id ?? 'aggregator-upsert',
-          })),
-        );
-      }
-    });
-
-    if (stale.length > 0) {
-      request.log.warn(
-        { org_id: existing.id, slug, revoked: stale, declared },
-        'aggregator re-mirror no longer declares a domain it was the default for — binding revoked',
-      );
-    }
-
+    await db
+      .update(organization)
+      .set({
+        name,
+        logo: logo_url ?? null,
+        metadata: meta_str,
+      })
+      .where(eq(organization.id, existing.id));
     return reply.code(200).send({ org_id: existing.id, created: false });
   }
 
