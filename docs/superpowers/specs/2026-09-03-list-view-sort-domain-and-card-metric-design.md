@@ -1,7 +1,7 @@
 # List view: unbounded paging, explicit sort, one domain control, card metric follows the sort
 
 **Date:** 2026-09-03
-**Status:** design approved; UI prototype required before implementation
+**Status:** design approved; UI design approved (§7); ready to plan
 **Issues:** signals-dpg#644, #645, #646, signals-search#148
 **Supersedes:** `2026-08-31-list-view-pagination-and-filter-surface-design.md` (same problem
 space; that document's D6 and D8 are reversed here — see §2.1)
@@ -207,7 +207,13 @@ and visibly.
 | D18 | The card's primary metric **is** the ranking basis | So metric and order can never disagree. See §5. |
 | D19 | With no `?domain=`, the list defaults to the viewer's **first interacting counterpart domain**, else the first visible domain | The All tab was the previous no-domain default; something must replace it. Invisible for a viewer with one visible domain. |
 | D20 | The explanation panel ("why this result, in this position") is **in scope** | Requested. Subject to the honesty constraint in §5.4. |
-| D21 | **A UI prototype is required before implementation**, for (a) the domain + filter bar and (b) the card with the swappable metric | Both are layout problems that prose cannot settle. See §7. |
+| D21 | **A UI prototype was required before implementation**, for (a) the domain + filter bar and (b) the card with the swappable metric | Both were layout problems prose could not settle. **Resolved** — see §7 for the approved design. |
+| D22 | The card metric is an **icon-only pill**; the ranking basis is stated **once** in the sticky bar, not on every card | The sort is a property of the *list*, not of each card, so repeating it 20 times is redundant. Icons are language-neutral, so nothing truncates in hi/kn and the footer stays as roomy as today. The full label lives in the tooltip and the explanation panel. |
+| D23 | The domain + filter bar is **sticky** | This is what makes D22 safe: the basis label stays on screen however far the user scrolls, so a bare `62%` is never unexplained. |
+| D24 | **Search and the facet panel stay in the app bar.** The sticky bar adds only `sort`, `area` and the chip read-out | App bar = **editors**; sticky bar = **state**. Nothing becomes a second editor for the same thing. The facet panel already mounts in the header (`home-page.tsx:2145` → `PageShell`) and does not move. |
+| D25 | Removing the search chip **also clears the app-bar search box** | The chip is a read-out whose editor lives elsewhere; a chip that removed the constraint but left text in the box would be lying. |
+| D26 | **No sort control on the map at all** — hidden, not disabled | Ordering is meaningless for a marker layer. A disabled control would invite the question rather than answer it. |
+| D27 | Map → list **collapses a multi-domain selection to the first domain silently** | No notice. The domain control itself shows the result, which is the read-out's job. |
 
 ### 2.1 Why the "All" tab is removed (D8)
 
@@ -475,7 +481,12 @@ constraint, plus a clear-all:
 - `area`, when not `anywhere`
 
 Shared by list and map, since both read the same state. **Chips are the
-read-out; the panel remains the editor.**
+read-out; the panel remains the editor.** The bar is **sticky** (D23) and sits
+below the app bar per §7.
+
+The search-text chip's editor is the app-bar box, so removing that chip
+**also clears the box** (D25); it is rendered visually distinct to signal
+"remove here, edit above". Layout, states and mobile behaviour: §7.2.
 
 ### 4.2 One domain control (D10, D11, D12)
 
@@ -486,7 +497,8 @@ single first-class domain control living with the chips above the view.
 - **Map view: multi-select.** One `/markers` call per domain already.
 - The selection drives the map's `useQueries` fan-out rather than filtering its
   results afterwards (D12).
-- Map → list collapses a multi-selection to its first domain, visibly (§2.1).
+- Map → list collapses a multi-selection to its first domain **silently**
+  (D27) — no notice; the domain control itself is the read-out.
 
 ### 4.3 Make counterpart-only scoping visible (D7)
 
@@ -507,8 +519,13 @@ references across four test files.
 
 ### 4.5 Sort selector
 
-Sits with the chip bar, driving §3.2. `nearest` renders **disabled with a
-reason** when no location resolves (§3.2).
+Sits in the sticky bar's second row, driving §3.2. `nearest` renders **disabled
+with a reason** when no location resolves (§3.2).
+
+**List view only — the control is absent on the map** (D26), not disabled:
+ordering is meaningless for a marker layer, and a disabled control invites the
+question rather than answering it. A `sort` chip therefore only ever appears on
+the list.
 
 ### 4.6 Accessibility
 
@@ -525,14 +542,19 @@ state and focus returned to the bar after removal. Existing
 The card's primary metric becomes whatever drove its position, so the metric
 and the order can never disagree:
 
-| `sort` | Card metric | Source |
+| `sort` | Card pill | Source |
 | --- | --- | --- |
-| `relevance` | relevance %, labelled for its basis (§5.3) | `/discover` `score` |
-| `nearest` | distance, e.g. `4.2 km` | `distanceMeters`, already returned |
-| `newest` | relative age, e.g. `5d ago` | `items.created_at` (D5) |
+| `relevance` | `★ 62%` | `/discover` `score` |
+| `nearest` | `◎ 4.2 km` | `distanceMeters`, already returned |
+| `newest` | `◷ 5d ago` | `items.created_at` (D5) |
 
 The metric is **never shown when it did not determine the order.** The map popup
-card (`marker-popup-card.tsx`) is kept consistent.
+card (`marker-popup-card.tsx`) is kept consistent — and since the map has no
+sort control (D26), its pill follows whatever sort the list last set.
+
+**The pill is icon-only (D22)** — the basis label is not repeated per card. It
+lives in the sticky bar's `Sort` control (always on screen, D23), the pill
+tooltip, and the explanation panel. Layout rationale: §7.4.
 
 This falls out efficiently: a per-pair score is shown only under `relevance`,
 where `/discover` already returns it for free. **No N×`/v1/relevance` calls** —
@@ -554,9 +576,28 @@ the edge. Delete both conversion points: the provider's `÷10`
 
 **Cache invalidation is mandatory.** `getMatchScoreBand` and
 `formatScorePercentage` (`apps/ui/src/utils/match-score-cache.ts:95,136`) both
-assume 0–10, and scores are persisted in localStorage. Without a cache-version
-bump, every returning user renders cached scores **10× wrong** until their
-cache expires.
+assume 0–10, and scores are persisted in localStorage under
+`CACHE_KEY_PREFIX = 'dpg:matchScore:v1'` (`:3`) with a 24-hour TTL enforced on
+read (`:31-34`).
+
+What breaks without action: a user who viewed a score in the 24 hours before
+the deploy has `6.2` in their browser (the old 0–10 value). The new formatter
+reads it as 0–100 and renders **6%** for what is a 62% match. Silent, no error.
+
+Two required changes:
+
+1. **Bump the prefix to `'dpg:matchScore:v2'`.** Old entries become
+   unreachable, so the new code recomputes instead of misreading. Converting
+   the stored values instead is not possible — there is no scale marker in the
+   payload, so a stored `6.2` is indistinguishable between the two scales. The
+   version prefix *is* the marker.
+2. **One-time sweep of the `dpg:matchScore:v1` prefix on startup.**
+   `localStorage` has no expiry of its own — the TTL is enforced in code, on
+   read, and nothing will read a `v1` key again. `clearMatchScoreCache()` only
+   sweeps the *current* prefix (`:84`), so without an explicit sweep the old
+   entries persist in every user's browser forever. Small, but
+   `setCachedMatchScore` already fails silently when localStorage is full
+   (`:56-58`), so leaking quota is not free.
 
 ### 5.3 Label the basis (D14, D15)
 
@@ -654,19 +695,81 @@ references and closes signals-search#148; the Signals-DPG PR references #644,
 
 ---
 
-## 7. UI prototype gate (D21)
+## 7. UI design (D21 — resolved, approved 2026-09-03)
 
-Implementation does **not** start until two prototypes are reviewed and
-approved:
+Prototyped and approved. Mockups are in `.superpowers/brainstorm/` (gitignored,
+not durable) — this section is the durable record.
 
-1. **The domain + filter bar above the map/list.** Must show: the domain
-   control (single-select on list, multi-select on map), applied-filter chips
-   with individual removal, clear-all, the sort selector, and the area control
-   — legible on mobile, in en/hi/kn.
-2. **The card with the swappable metric.** The badge slot must hold
-   `matches your profile — 62%`, `4.2 km`, or `5d ago`. The current slot is
-   sized for a short numeric pill; a labelled percentage does not fit it. This
-   is a layout problem, not a copy problem.
+### 7.1 Division of labour
+
+**App bar = editors. Sticky bar = state.** (D24)
+
+| Surface | Holds | Changes |
+| --- | --- | --- |
+| **App bar** (existing) | search box, facet panel trigger, location toggle | **nothing moves** — the panel already mounts here via `PageShell` |
+| **Sticky bar** (new) | domain control, `sort`, `area`, applied-filter chips, clear-all, result count | new surface |
+
+Nothing becomes a second editor for the same constraint. `sort` and `area` are
+new controls with no prior home, so they live in the sticky bar.
+
+### 7.2 The sticky bar — two rows
+
+**Row 1:** the domain control, result count right-aligned.
+**Row 2:** `Sort ▾`, `Area ▾`, one chip per applied constraint, `Clear all`.
+When nothing is applied, row 2 reads "No filters applied" rather than
+collapsing (a stable height avoids the list shifting under the user's thumb).
+
+- **Domain control:** single-select on list (D11), multi-select with tick marks
+  on map. Non-interacting domains are listed and greyed with their reason
+  inline — e.g. `Seeker · you can't connect with other seekers` — which is
+  where D7/#645's "make the invisible rule visible" requirement lands.
+- **Area:** `Anywhere` (default) or `Within N km`. Showing `Area: Anywhere`
+  is what makes the §1.1 bug fix *legible* — the user can see that location is
+  not filtering them.
+- **Sort:** list only; **absent on the map** (D26).
+- **Chips:** the search-text chip is a read-out whose editor is the app-bar
+  box; removing it clears that box too (D25). Render it visually distinct
+  (dashed border) to signal "remove here, edit above".
+
+### 7.3 Sticky implementation constraint
+
+`top-bar.tsx:78` is already `sticky top-0 z-40 min-h-14` — **but it is also
+`flex-wrap`**, so on narrow screens it wraps to two lines and its height is
+**not fixed**. A hardcoded `top-14` on the filter bar would gap or overlap.
+
+**Nest both bars in a single sticky container** so they stack without a magic
+offset. Do not hardcode the offset.
+
+### 7.4 The card metric (D22)
+
+An **icon-only pill** in the existing footer slot — the slot keeps its current
+size, and the basis label is *not* repeated per card:
+
+| `sort` | Pill |
+| --- | --- |
+| `relevance` | `★ 62%` |
+| `nearest` | `◎ 4.2 km` |
+| `newest` | `◷ 5d ago` |
+
+Today's pill already renders bare `62%` — `MatchScoreButton` passes
+`showLabel={false}` (`match-score-button.tsx:41`) — so this is a change of
+*content*, not of size. The band label being dropped (§5.5) is consistent with
+that call site.
+
+The basis ("matches your profile" / "matches your search", §5.3) appears in the
+sticky bar's `Sort` control, the pill tooltip, and the explanation panel (§5.4).
+D23's sticky bar is what makes this honest: the label is on screen at every
+scroll position.
+
+### 7.5 Mobile costs (accepted)
+
+- ~74px of permanent vertical space for the two stuck rows.
+- The unavailable-domain reason cannot fit inline; it becomes a tap/long-press
+  tooltip.
+- The domain row **scrolls horizontally** past ~4 domains rather than wrapping.
+  **Open risk:** if any live network has more than roughly four browsable
+  domains, the segmented control likely needs to become a dropdown on mobile.
+  Check the real network configs during implementation.
 
 ---
 
@@ -727,6 +830,14 @@ approved:
 - Chip state is identical between list and map for the same filters
 - Keyboard-only: every chip reachable, removable, focus lands on the bar
   afterwards
+- Removing the search chip clears the app-bar search box (D25) — not just the
+  query
+- The sort control is **absent** in map view, not rendered disabled (D26); no
+  `sort` chip appears on the map
+- The bar stays visible while the list is scrolled, and does not gap or overlap
+  when the app bar wraps to two lines at narrow widths (§7.3)
+- Row 2 keeps a stable height between "nothing applied" and "filters applied",
+  so the list does not shift under the user (§7.2)
 
 **Card metric**
 - Each `sort` renders the matching metric and no other
@@ -736,7 +847,11 @@ approved:
 - No profile + text renders the search label
 - Free-text scores disabled + no profile + `relevance` renders no metric, and
   sorting still works (§5.3)
+- The pill is icon-only and carries no basis label (D22); the basis appears in
+  the sticky bar, the tooltip and the explanation panel
 - Cached 0–10 scores from before §5.2 are invalidated, not rendered 10× wrong
+- The `dpg:matchScore:v1` sweep removes old entries rather than orphaning them
+  (§5.2)
 - The explanation panel lists exactly the `vectorize: true` fields for the
   domain with their weights, and labels any overlap display illustrative (§5.4)
 - No card renders a score sourced from a different anchor than the current
@@ -771,5 +886,7 @@ relevance % under `relevance`, a distance under `nearest`, an age under
 panel that is honest about what a single pooled embedding can and cannot tell
 you.
 
-Both the filter bar and the card need a reviewed prototype before any code
-(§7).
+**UI.** Approved (§7): app bar keeps the editors, a new sticky bar carries the
+state — domain, sort, area, chips — and the card pill becomes icon-only, since
+the sticky bar states the ranking basis once instead of every card repeating
+it.
