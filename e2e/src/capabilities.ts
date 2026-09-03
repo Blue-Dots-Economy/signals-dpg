@@ -28,6 +28,8 @@ export interface Capabilities {
   mailpit: boolean;
   /** The Keycloak container's log is readable, enabling phone-channel OTP. */
   keycloakPhoneOtp: boolean;
+  /** Match-score provider (`MATCH_SCORE_PROVIDER` + its endpoint/key) is configured on the target. */
+  matchScore: boolean;
 }
 
 export function capabilitiesFor(cfg: E2EConfig): Capabilities {
@@ -48,6 +50,7 @@ export function capabilitiesFor(cfg: E2EConfig): Capabilities {
     serviceAuth: !!cfg.auth.serviceApiKey && !!cfg.auth.actingOrgId,
     peer: !!cfg.peer.apiBaseUrl,
     realSearch: !!cfg.realSearchUrl,
+    matchScore: cfg.matchScoreConfigured,
   };
 }
 
@@ -66,6 +69,10 @@ const REASONS: Record<keyof Capabilities, string> = {
   mailpit: 'requires a readable Mailpit inbox (config.mailpitUrl) — a local instance only',
   keycloakPhoneOtp:
     'requires a readable Keycloak container log (config.keycloakLogContainer, KC_SPI_SMS_PROVIDER=log) — a local instance only',
+  matchScore:
+    'requires MATCH_SCORE_PROVIDER (+ SIGNALS_SEARCH_ENDPOINT/_API_KEY) configured on the target (config.matchScoreConfigured) — ' +
+    'optional infra this recipe does not bring up itself; without it getMatchScoreClient() returns undefined and the UI ' +
+    "flow this journey drives has nothing to wait a real /match-score/calculate response for",
 };
 
 /**

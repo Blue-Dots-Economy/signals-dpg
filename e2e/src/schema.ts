@@ -5,7 +5,7 @@ import type { ApiClient } from './api-client.js';
 // here — Node's native loader does not remap a `.js` specifier back to its `.ts`
 // source, so it throws ERR_MODULE_NOT_FOUND. Playwright resolves an explicit
 // `.ts` path just as well, so this works in both run modes.
-import { RUN_ID } from './identities.ts';
+import { RUN_ID, nextGlobalSeq } from './identities.ts';
 
 /** A served network/domain binding as returned by `GET /`. */
 export interface ServedDomain {
@@ -124,12 +124,22 @@ export async function resolveBinding(api: ApiClient, domainKey?: string): Promis
   return { network: picked.network, domain: picked.domain, item_type: entry.item_type, schema: entry.schema };
 }
 
-let fieldSeq = 0;
-
 /**
  * Build the smallest valid value for a schema property. Mirrors
  * `generateMinimalItemState`'s per-type rules so items pass server validation.
  * Throws on $ref/oneOf/anyOf (unsupported — same as the integration helper).
+ *
+ * String field values use `nextGlobalSeq()` (identities.ts), not a bare
+ * module-level counter — a plain per-process counter is exactly the collision
+ * class `nextGlobalSeq()`'s own header comment documents fixing for
+ * `newPhone()`/`newEmail()`: `fullyParallel: true` runs each test as its own
+ * OS process, so a bare counter restarts at 0 in every worker and two items
+ * created by different (or even the same, across worker recycling) processes
+ * can get the IDENTICAL generated string. Confirmed live here: a browse/map
+ * journey's exact-substring search on one item's generated field value
+ * returned TWO different item ids sharing that exact string, because a bare
+ * `let fieldSeq = 0` (this function's previous implementation) had minted the
+ * same value twice across two Playwright workers.
  */
 function minimalValue(name: string, s: JsonSchema): unknown {
   if (s.$ref || s.oneOf || s.anyOf) {
@@ -151,10 +161,10 @@ function minimalValue(name: string, s: JsonSchema): unknown {
         } else if (/^\^?(\[0-9\]|\\d)\+\$?$/.test(s.pattern)) {
           v = '0123456789';
         } else {
-          v = `int-${name}-${RUN_ID}${(fieldSeq++).toString(36)}`;
+          v = `int-${name}-${RUN_ID}${nextGlobalSeq().toString(36)}`;
         }
       } else {
-        v = `int-${name}-${RUN_ID}${(fieldSeq++).toString(36)}`;
+        v = `int-${name}-${RUN_ID}${nextGlobalSeq().toString(36)}`;
       }
       if (s.minLength && v.length < s.minLength) v = v.padEnd(s.minLength, '0');
       return v;
@@ -176,7 +186,7 @@ function minimalValue(name: string, s: JsonSchema): unknown {
       return buildMinimalItemState(s);
     default:
       // untyped / unknown → a harmless string
-      return `int-${name}-${RUN_ID}${(fieldSeq++).toString(36)}`;
+      return `int-${name}-${RUN_ID}${nextGlobalSeq().toString(36)}`;
   }
 }
 

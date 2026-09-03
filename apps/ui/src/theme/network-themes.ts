@@ -73,7 +73,12 @@ const blue_dot: NetworkTheme = {
     '--brand-hero-highlight': '#7da8ff',
     '--brand-hero-glow': '#5b8def',
     '--brand-stat-accent': '#7da8ff',
-    '--brand-cta': 'oklch(0.55 0.22 285)',
+    // Matches index.css's `:root[data-network="blue_dot"]` block (which is what
+    // the browser actually serves) — this constant had drifted to a stale
+    // value (`oklch(0.55 0.22 285)`, the generic `:root` default's hue) that no
+    // longer matched blue_dot's own `--primary` hue. Every other dot's CSS
+    // block already matches this file exactly; only blue_dot had drifted.
+    '--brand-cta': 'oklch(0.55 0.20 250)',
     '--brand-cta-foreground': '#ffffff',
   },
 };

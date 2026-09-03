@@ -122,7 +122,7 @@ seams between suites.
 | 0 | Preflight: docker, node ≥24, ports, the notification-env triple-check | `lib/run.sh` |
 | 1 | Verify the (now-live) stack, start the 3 stubs, snapshot the DB. `lib/stack-up.sh` only *verifies* — phase −0.5 is what guarantees something is there to verify. | `lib/run.sh` |
 | 2 | API tier — deterministic, no browser | `npm run e2e:api` via `lib/run.sh` |
-| 3 | UI tier — headed, so the run is watchable | `npm run e2e:ui -- --headed` via `lib/run.sh` |
+| 3 | UI tier — headless by default (`E2E_HEADED=1` to watch it) | `npm run e2e:ui` via `lib/run.sh` |
 | 4 | Mail sweep (parked for Plan 2 — no spec wires the sink yet) | — |
 | 5 | Report, teardown, residue diff, `git status --porcelain` clean | `lib/report.mjs` + `lib/cleanup.sh` |
 | 6 | `orange_dot` restart + tourist pass | re-invoke with `dot=orange_dot alias=tourist` |
@@ -176,6 +176,30 @@ bash .claude/skills/signals-e2e/lib/run.sh cleanup <run-id>
 `SIGNALS_REPO=/path/to/Signals-DPG` if the running stack lives in a different
 checkout than this worktree (this worktree has no root `.env`/`node_modules`
 of its own — see `lib/stack-up.sh`'s header comment).
+
+**`E2E_WORKERS`** controls Playwright's parallelism (`playwright.config.ts`
+reads it directly; it lives there, not in this file's own logic, which is
+exactly why the first field test only found it by grepping). `run.sh` no
+longer inherits that config's flat default of 4 — this run also hosts the
+app, Postgres, Redis, three stubs, possibly a second product's stack, and one
+headed Chromium per worker, and 4 workers measured 761 MB of free swap and
+manufactured five phantom UI failures on an 8 GB machine (same code, 0
+failures at 2 workers). `run.sh` now derives a default from total system
+memory — `min(4, max(1, floor(totalMemGB / 4)))`, logged at the start of every
+run — and an explicit `E2E_WORKERS=<n>` in the environment always overrides
+that derivation, for a bigger box or for deliberately forcing single-worker
+determinism while triaging a flake.
+
+**`E2E_HEADED`** controls whether the UI tier's Chromium is visible.
+**Default: headless** — a visible browser window opening mid-run is a real
+interruption on a machine someone is actively using, and buys nothing on an
+unattended signoff. Set `E2E_HEADED=1` (or `true`) to opt back in and actually
+watch a run, e.g. while triaging a UI failure interactively; an explicit
+setting always wins, same convention as `E2E_WORKERS` above. Prefer a
+failure's own trace/screenshot/video (all retained under `test-results/`,
+linked from the report) over a headed re-run for triage — they show the exact
+DOM/console/network state at the moment of failure without a browser window
+ever needing to be visible at all.
 
 The report (`e2e/run/<run-id>/report.md`) opens with both checkouts' git SHA
 and branch (the specs' and the app-under-test's — they can differ whenever

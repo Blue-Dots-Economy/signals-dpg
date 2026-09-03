@@ -83,10 +83,17 @@ export interface UiSignupInput {
 }
 
 /**
- * Drive the real login → OTP UI to create + sign in a brand-new adult, ending on
- * the home page. Assumes the target allows self-signup and runs CREATE_TEST_OTP
- * (OTP fixed to 000000). Handles the two-step signup form and the optional
- * terms/privacy consent modal.
+ * Drive the real login → OTP UI to create + sign in a brand-new adult, ending
+ * on `/profile/new` — NOT `/`. #376's post-login redirect
+ * (`lib/post-login-route.ts`'s `resolvePostLoginRedirect`) sends any user with
+ * zero profiles straight to profile creation instead of a home page they
+ * wouldn't know what to do with, and this helper only ever drives the UI
+ * signup form itself (no `item/create` call), so a user it just created
+ * always has zero profiles and always lands here — deterministically, not as
+ * a possible outcome to branch on. Also handles a guardian-gated domain's
+ * birth-year step (SignupDobStep) when the chosen domain requires it, the
+ * optional terms/privacy consent modal, and the OTP screen. Assumes the
+ * target allows self-signup and runs CREATE_TEST_OTP (OTP fixed to 000000).
  */
 export async function uiSignupAdult(page: Page, input: UiSignupInput): Promise<{ identifierLabel: string }> {
   const { cfg } = input;
@@ -132,8 +139,47 @@ export async function uiSignupAdult(page: Page, input: UiSignupInput): Promise<{
     await domainBtn.click();
   }
 
-  // second Continue → consent gate (if configured) then OTP
+  // second Continue → consent gate (if configured) then OTP, UNLESS the chosen
+  // domain is guardian-gated (`guardian_consent_required`, e.g. blue_dot's
+  // `seeker`), in which case this instead reveals a birth-year step
+  // (SignupDobStep, apps/ui/src/components/consent/u18/signup-dob-step.tsx)
+  // BEFORE consent/OTP. Missing this step here previously stranded the whole
+  // signup on that screen (its own Continue stays disabled until a year is
+  // picked) — confirmed live: `uiSignupAdult` timed out waiting for the OTP
+  // heading with the DOB step's "To create an account, please provide"
+  // heading still on screen.
   await page.getByRole('button', { name: 'Continue' }).click();
+
+  // `handleSubmit` awaits an API call (`checkUser`) before deciding whether to
+  // render the birth-year step, so which of the THREE possible next screens
+  // (birth-year step / consent modal / straight to OTP) is actually showing is
+  // NOT yet decided the instant `.click()` above resolves — `.click()` only
+  // confirms the click was dispatched, not that the app finished reacting to
+  // it. `locator.isVisible()` does NOT wait for this (Playwright's own docs:
+  // "does not wait for the element to become visible and returns
+  // immediately" — its `timeout` option is deprecated and ignored), so
+  // checking it right here would race the async gap and read "not visible"
+  // even on a target that WILL show the birth-year step a moment later —
+  // confirmed live: this raced every single time, `uiSignupAdult` never once
+  // detected the step, and the signup then hung on it forever, timing out
+  // deep in the OTP wait below with no explanation of why the OTP screen was
+  // never reached. Wait for whichever of the three genuinely appears first
+  // instead, THEN branch on which one it was.
+  const birthYearSelect = page.getByLabel('Birth year', { exact: true });
+  const consentReader = page.getByTestId('consent-reader');
+  const otpHeading = page.getByRole('heading', { name: 'Enter verification code' });
+  await birthYearSelect.or(consentReader).or(otpHeading).first().waitFor({ state: 'visible', timeout: 15_000 });
+
+  if (await birthYearSelect.isVisible()) {
+    // A comfortably-adult year — this helper only ever drives the ADULT
+    // signup path (a minor is routed to the pre-auth guardian flow instead,
+    // which this helper does not exercise; use SignupGuardianFlow's own
+    // journey for that).
+    const adultYear = String(new Date().getFullYear() - 30);
+    await birthYearSelect.click();
+    await page.getByRole('option', { name: adultYear, exact: true }).click();
+    await page.getByRole('button', { name: 'Continue' }).click();
+  }
 
   // optional terms/privacy consent modal. MUST go through passConsentGate, not
   // a direct click — see its docstring (#636).
@@ -147,8 +193,11 @@ export async function uiSignupAdult(page: Page, input: UiSignupInput): Promise<{
     await boxes.nth(i).fill(digits[i]);
   }
 
-  // completing the OTP auto-verifies and lands on home
-  await page.waitForURL((url) => new URL(url).pathname === '/', { timeout: 20_000 });
+  // Completing the OTP auto-verifies and — per #376's post-login redirect,
+  // since this brand-new user has zero profiles — lands on `/profile/new`,
+  // not `/`. Confirmed live: waiting on `/` here previously timed out with
+  // the browser already sitting on `/profile/new` the whole time.
+  await page.waitForURL((url) => new URL(url).pathname === '/profile/new', { timeout: 20_000 });
   return { identifierLabel };
 }
 
@@ -162,7 +211,24 @@ export async function uiSignupAdult(page: Page, input: UiSignupInput): Promise<{
  */
 export async function passConsentGate(page: Page): Promise<void> {
   const reader = page.getByTestId('consent-reader');
-  if (!(await reader.isVisible().catch(() => false))) return; // gate not shown
+  // `reader.isVisible()` alone does NOT wait (Playwright's own docs: "does
+  // not wait for the element to become visible and returns immediately") —
+  // the caller's own action just triggered an ASYNC pre-check
+  // (`getConsentStatusByIdentifier`/`fetchConsentConfigs` in login-page.tsx)
+  // that decides whether this gate renders at all, so an instant check can
+  // read "not shown" on a target that WILL show it a moment later — confirmed
+  // live: inserting one more async step earlier in a signup flow (a
+  // guardian-gated domain's birth-year step) shifted this race just enough to
+  // make it lose every time, leaving the gate open and untouched while the
+  // caller moved on to wait for a screen that never arrives. Bound the wait
+  // instead of skipping it: shown-eventually and never-shown both still
+  // resolve correctly, just the latter now takes up to this timeout instead
+  // of returning instantly.
+  const shown = await reader
+    .waitFor({ state: 'visible', timeout: 5_000 })
+    .then(() => true)
+    .catch(() => false);
+  if (!shown) return; // gate genuinely not shown
 
   const done = page.getByText("That's everything");
   for (let i = 0; i < 40; i += 1) {

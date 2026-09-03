@@ -134,6 +134,21 @@ export interface E2EConfig {
    * `realSearchUrl`: a run can have one, both, or neither.
    */
   searchStubUrl: string | null;
+
+  /**
+   * True only when the target's `MATCH_SCORE_PROVIDER` (+ its
+   * `SIGNALS_SEARCH_ENDPOINT`/`_API_KEY` pair — a SEPARATE env namespace from
+   * the discover BFF's own `SIGNALS_SEARCH_URL`/`_API_KEY`, see
+   * `packages/config/src/secrets.ts`'s `MatchScoreSecretsSchema`) is actually
+   * set. Declared, not probed — the same pattern as `deterministicPiiKey`/
+   * `faultInjection` above: match-score is optional infra
+   * (`getMatchScoreClient()` returns `undefined` and the route answers `503
+   * MATCH_SCORE_NOT_CONFIGURED` with nothing set), and this recipe's own
+   * `bring-stack-up.sh` does not configure it. Defaults `false` so a target
+   * this recipe brought up itself reports match-score specs as a documented
+   * skip rather than a false "the request never arrived" failure.
+   */
+  matchScoreConfigured: boolean;
 }
 
 type RawConfig = Partial<E2EConfig> & { apiBaseUrl?: string };
@@ -177,6 +192,7 @@ function applyEnvOverrides(c: E2EConfig): E2EConfig {
   if (e.E2E_SEARCH_STUB_URL) c.searchStubUrl = e.E2E_SEARCH_STUB_URL;
   if (e.E2E_FAULT_INJECTION) c.faultInjection = e.E2E_FAULT_INJECTION === 'true';
   if (e.E2E_DETERMINISTIC_PII_KEY) c.deterministicPiiKey = e.E2E_DETERMINISTIC_PII_KEY === 'true';
+  if (e.E2E_MATCH_SCORE_CONFIGURED) c.matchScoreConfigured = e.E2E_MATCH_SCORE_CONFIGURED === 'true';
   return c;
 }
 
@@ -225,6 +241,7 @@ export function loadConfig(): E2EConfig {
     peer: { apiBaseUrl: raw.peer?.apiBaseUrl ?? null },
     realSearchUrl: raw.realSearchUrl ?? null,
     searchStubUrl: raw.searchStubUrl ?? null,
+    matchScoreConfigured: raw.matchScoreConfigured ?? false,
   };
 
   applyEnvOverrides(cfg);

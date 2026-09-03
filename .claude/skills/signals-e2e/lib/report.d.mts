@@ -31,7 +31,7 @@ export interface FailureGroup {
   signature: string;
   count: number;
   members: FailureEntry[];
-  verdict: 'suite-defect' | 'unattributed';
+  verdict: 'suite-defect' | 'capability-gap' | 'drift' | 'unattributed';
   reason: string;
 }
 
@@ -109,7 +109,7 @@ export declare function normalizeErrorSignature(message: string): string;
 
 export declare function classifySuiteVsProduct(
   rawMessages: string[],
-): { verdict: 'suite-defect' | 'unattributed'; reason: string };
+): { verdict: 'suite-defect' | 'capability-gap' | 'drift' | 'unattributed'; reason: string };
 
 export declare function groupFailures(notWorking: FailureEntry[]): FailureGroup[];
 

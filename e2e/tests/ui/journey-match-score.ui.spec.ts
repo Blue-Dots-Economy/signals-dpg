@@ -1,6 +1,7 @@
 import { test, expect } from '../../src/fixtures.js';
 import { createLiveProfileUser, provisioningMethod } from '../../src/flows.js';
 import { uiLoginAs, gotoEn } from '../../src/ui.js';
+import { requireCapabilities } from '../../src/capabilities.js';
 
 /**
  * Journey (UI) — the match-score modal (P2). Opens it from a browse card and
@@ -8,12 +9,22 @@ import { uiLoginAs, gotoEn } from '../../src/ui.js';
  * is optional infra — a target that hasn't configured one returns
  * `MATCH_SCORE_NOT_CONFIGURED`, which this spec treats as a genuine SKIP with a
  * reason, not a silently-weakened assertion.
+ *
+ * `requireCapabilities(['matchScore'])` gates this at the top, before the flow
+ * even starts: without `MATCH_SCORE_PROVIDER` configured, `getMatchScoreClient()`
+ * returns `undefined` server-side and the UI's own click-to-calculate flow has
+ * no real `/match-score/calculate` request to wait for — `waitForResponse`
+ * would simply time out (a suite-defect-shaped failure that hides the real
+ * "not configured here" reason). The runtime `MATCH_SCORE_NOT_CONFIGURED`
+ * check below stays as a second line of defense for a target that reports
+ * itself as configured but still answers 503.
  */
 test.describe('Journey (UI) — match score modal', () => {
   test.skip(({ cfg, caps }) => provisioningMethod(cfg, caps) === null, 'no way to create users');
   test.skip(({ caps }) => !caps.testOtp, 'requires CREATE_TEST_OTP on the target');
 
   test('opening the match-score modal on a card renders its factors', async ({ page, api, service, cfg, caps, authCtx }) => {
+    requireCapabilities(test, caps, ['matchScore']);
     const sourceDomainKey = cfg.servedDomains[0];
     const targetDomainKey = cfg.servedDomains[1] ?? cfg.servedDomains[0];
     const viewer = await createLiveProfileUser(api, service, cfg, caps, { authCtx, domainKey: sourceDomainKey, label: 'mscv' });

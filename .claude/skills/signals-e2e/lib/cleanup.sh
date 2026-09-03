@@ -313,6 +313,19 @@ if [ "$MODE" != "--verify-only" ]; then
   # this way before this block was moved here).
   psql_q "DELETE FROM item_actions WHERE source_item_owner IN ($TAGGED_USER_IDS) OR target_item_owner IN ($TAGGED_USER_IDS);" >/dev/null 2>&1
   psql_q "DELETE FROM action_events WHERE source_item_owner IN ($TAGGED_USER_IDS) OR target_item_owner IN ($TAGGED_USER_IDS);" >/dev/null 2>&1
+  # consent_record, broadly, by tagged user_id — NOT relying on scope 1's
+  # ledger-based special case below, which only reaches a row whose user/item
+  # was itself ledgered via recordCreated(). A pure UI-driven signup
+  # (uiSignupAdult, src/ui.ts) never calls the e2e API client directly for
+  # user creation, so it ledgers nothing — its own T&C-consent-modal accept
+  # AND, on a guardian-gated domain, its birth-year step's DOB consent record
+  # both write a consent_record row that scope 1 would then never find.
+  # Confirmed live: journey-a-signup.ui.spec.ts against a guardian-gated
+  # domain left exactly 2 consent_record rows behind (T&C + DOB) every run,
+  # reported as `RESIDUE consent_record: +2`, until this line was added.
+  # Bound to the SAME tagged-user subquery as everything else in this block,
+  # never a type/network-wide delete.
+  psql_q "DELETE FROM consent_record WHERE user_id::text IN ($TAGGED_USER_IDS);" >/dev/null 2>&1
   # item_search is DERIVED from items (search-indexer.mjs / signals-search's own
   # sweep maintain it off the SAME items the run created) and is never itself
   # ledgered (nothing calls recordCreated('item_search', ...) — see

@@ -147,6 +147,51 @@ test('classifySuiteVsProduct only tags suite-defect on real evidence, never gues
   assert.equal(plain.verdict, 'unattributed');
 });
 
+// G5 rule 1 — real fixture text, mirroring the (fixed) live network-themes.ts
+// / index.css `--brand-cta` drift word-for-word (Playwright's actual `toBe`
+// failure shape, captured live against a throwaway spec before writing this).
+test('classifySuiteVsProduct tags a CSS/design-token constant mismatch as drift, not suite-defect', () => {
+  const themeDrift = classifySuiteVsProduct([
+    'Error: --brand-cta for blue_dot\n\n' +
+      'expect(received).toBe(expected) // Object.is equality\n\n' +
+      'Expected: "oklch(0.55 0.20 250)"\n' +
+      'Received: "oklch(0.55 0.22 285)"',
+  ]);
+  assert.equal(themeDrift.verdict, 'drift');
+  assert.match(themeDrift.reason, /CSS\/design-token/);
+
+  // Both sides must look like CSS values — an ordinary string mismatch must
+  // NOT be swept into "drift" just because it happens to use Expected/Received.
+  const ordinaryStringMismatch = classifySuiteVsProduct([
+    'Expected: "live"\nReceived: "draft"',
+  ]);
+  assert.equal(ordinaryStringMismatch.verdict, 'unattributed');
+});
+
+// G5 rule 2 — real fixture text, captured live from
+// journey-match-score.ui.spec.ts's `waitForResponse` timeout against a target
+// with no MATCH_SCORE_PROVIDER configured (before this spec was gated on the
+// `matchScore` capability).
+test('classifySuiteVsProduct tags a waitForResponse timeout on a known optional endpoint as capability-gap', () => {
+  const matchScoreTimeout = classifySuiteVsProduct([
+    'TimeoutError: page.waitForResponse: Timeout 15000ms exceeded while waiting for event "response"\n\n' +
+      "  40 |       page.waitForResponse((r) => r.url().includes('/api/v1/match-score/calculate')),\n" +
+      "      |            ^\n" +
+      "  41 |       page.getByRole('button', { name: /See Match Score/i }).first().click(),",
+  ]);
+  assert.equal(matchScoreTimeout.verdict, 'capability-gap');
+  assert.match(matchScoreTimeout.reason, /match-score\/calculate/);
+
+  // A waitForResponse timeout on a DIFFERENT (not known-optional) endpoint
+  // must NOT be swept into "capability-gap" — stay on the existing, more
+  // conservative selector/locator-timeout suite-defect tag instead.
+  const otherTimeout = classifySuiteVsProduct([
+    'TimeoutError: page.waitForResponse: Timeout 15000ms exceeded while waiting for event "response"\n\n' +
+      "page.waitForResponse((r) => r.url().includes('/api/v1/item/create')),",
+  ]);
+  assert.notEqual(otherTimeout.verdict, 'capability-gap');
+});
+
 test('groupFailures collapses failures sharing a normalized signature and counts them', () => {
   const notWorking = [
     { suite: 'journey-d', title: 'action event A', detail: 'd1', trace: null, rawError: '23505 phone_number "+919000001" already exists' },

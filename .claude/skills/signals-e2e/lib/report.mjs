@@ -12,8 +12,9 @@
 //                        appear twice once results are merged.
 //   2. Not working     — failures, GROUPED BY ROOT CAUSE (a shared, masked
 //                        error signature), each group carrying a count and a
-//                        conservative suite-defect/unattributed tag — never a
-//                        guessed product-defect tag. Ten specs failing on one
+//                        conservative suite-defect/capability-gap/drift/
+//                        unattributed tag — never a guessed product-defect
+//                        tag. Ten specs failing on one
 //                        collision read as one group of ten, not ten unrelated
 //                        defects. Cleanup residue lands here too, as a
 //                        synthetic entry, because a run that leaves rows
@@ -290,13 +291,23 @@ export function normalizeErrorSignature(message) {
 }
 
 /**
- * Suite-defect vs product-defect, CONSERVATIVELY. Only error shapes carrying
- * their own evidence get a `suite-defect` tag; everything else is
- * `unattributed`. This function never returns `product-defect` — that call
- * needs a human reading the actual assertion. A wrong "suite bug" label
- * teaches a reader to dismiss a real defect, which is worse than no label at
- * all, so the bar for `suite-defect` here is "the text itself proves it",
- * not "it looks infrastructure-shaped".
+ * A CSS/design-token-shaped value: oklch()/rgb()/rgba()/hsl()/hsla(), a hex
+ * colour, or a plain CSS length (px/rem/em/%). Used only by the `drift` rule
+ * below — a value shaped like this on BOTH sides of a failed equality is what
+ * distinguishes "two hand-maintained constants disagree" from an ordinary
+ * assertion that happens to fail on a string.
+ */
+const CSS_VALUE_SHAPE = /^(oklch\(|rgba?\(|hsla?\(|#[0-9a-f]{3,8}\b|-?\d+(\.\d+)?(px|rem|em|%))/i;
+
+/**
+ * Suite-defect / capability-gap / drift vs product-defect, CONSERVATIVELY.
+ * Only error shapes carrying their own evidence get a non-`unattributed` tag;
+ * everything else is `unattributed`. This function never returns
+ * `product-defect` — that call needs a human reading the actual assertion. A
+ * wrong "suite bug" (or "not configured here", or "just drift") label teaches
+ * a reader to dismiss a real defect, which is worse than no label at all, so
+ * the bar here is "the text itself proves it", not "it looks
+ * infrastructure-shaped".
  */
 export function classifySuiteVsProduct(rawMessages) {
   const joined = rawMessages.join('\n');
@@ -314,6 +325,27 @@ export function classifySuiteVsProduct(rawMessages) {
       reason: 'Playwright matched zero tests for this invocation — a suite/config wiring issue, not a product failure.',
     };
   }
+  // G5 rule 2 — a `waitForResponse` timeout on a KNOWN optional/env-gated
+  // endpoint (evidenced live: journey-match-score.ui.spec.ts's
+  // `/api/v1/match-score/calculate` wait, timing out because
+  // `MATCH_SCORE_PROVIDER` is unset on the target — the UI never fires the
+  // request, so there is no response to wait for). Checked BEFORE the
+  // generic locator-timeout rule below, whose broader `waiting for` clause
+  // would otherwise catch this first and mislabel a config gap as a plain
+  // selector defect. Deliberately narrow (one evidenced endpoint, not a
+  // guess at "any waitForResponse timeout is probably unconfigured infra") —
+  // extend this list only when a NEW endpoint is confirmed to fail the same
+  // way, never speculatively.
+  if (/waitForResponse/i.test(joined) && /Timeout \d+ms exceeded/i.test(joined) && /match-score/i.test(joined)) {
+    return {
+      verdict: 'capability-gap',
+      reason:
+        'a waitForResponse timeout on /match-score/calculate — this endpoint is optional infra ' +
+        '(getMatchScoreClient() returns undefined with MATCH_SCORE_PROVIDER unset), so the UI never fires ' +
+        'the request and there is no response to wait for. Gate the spec on the matchScore capability ' +
+        'instead of asserting blind; not a suite or product defect.',
+    };
+  }
   if (/Timeout \d+ms exceeded/i.test(joined) && /(waiting for|locator|selector)/i.test(joined)) {
     return {
       verdict: 'suite-defect',
@@ -324,6 +356,23 @@ export function classifySuiteVsProduct(rawMessages) {
     return {
       verdict: 'suite-defect',
       reason: 'cleanup/residue failure — leftover test data from this run, not a product defect.',
+    };
+  }
+  // G5 rule 1 — an equality assertion where BOTH "Expected"/"Received" look
+  // like a CSS/design-token value (evidenced live: network-themes.ts's
+  // `--brand-cta` constant vs. the value index.css actually serves, both
+  // `oklch(...)` strings). Two hand-maintained constants disagreeing is
+  // config/product DRIFT — a real thing to fix, but not a bug in the suite
+  // itself, and not confidently a "product defect" either without a human
+  // deciding which side is stale.
+  const constMismatch = /Expected:\s*"([^"]*)"[\s\S]{0,400}?Received:\s*"([^"]*)"/.exec(joined);
+  if (constMismatch && CSS_VALUE_SHAPE.test(constMismatch[1].trim()) && CSS_VALUE_SHAPE.test(constMismatch[2].trim())) {
+    return {
+      verdict: 'drift',
+      reason:
+        'both sides of this failed equality are CSS/design-token-shaped values (e.g. oklch/hex/rgb/a length) — ' +
+        'a mismatch between two hand-maintained constants (e.g. an imported theme value vs. a rendered CSS ' +
+        'value), not a suite defect. A human still has to say which side is stale.',
     };
   }
   return {
@@ -757,8 +806,19 @@ export function renderMarkdown(report) {
     // of size N>1 renders once, with a count and the shared normalized
     // error, and every distinct member listed underneath rather than its
     // full detail repeated N times.
+    // G5 — two more conservative, evidenced verdicts alongside the original
+    // suite-defect/unattributed pair (never a guessed product-defect): a
+    // `capability-gap` reads as "not configured here", a `drift` reads as
+    // "two hand-maintained constants disagree" — both distinct from a bug in
+    // the suite ITSELF, and both distinct from "needs a human, no opinion".
+    const VERDICT_TAGS = {
+      'suite-defect': '🔧 suite-defect',
+      'capability-gap': '🔌 capability-gap',
+      drift: '🌊 drift',
+      unattributed: '❓ unattributed',
+    };
     for (const g of report.notWorkingGroups ?? []) {
-      const tag = g.verdict === 'suite-defect' ? '🔧 suite-defect' : '❓ unattributed';
+      const tag = VERDICT_TAGS[g.verdict] ?? VERDICT_TAGS.unattributed;
       if (g.count === 1) {
         const f = g.members[0];
         lines.push(`### ${f.suite} — ${f.title}  [${tag}]`);

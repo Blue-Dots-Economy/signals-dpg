@@ -129,6 +129,51 @@ if [ -z "$NODE_MAJOR" ] || ! [[ "$NODE_MAJOR" =~ ^[0-9]+$ ]] || [ "$NODE_MAJOR" 
   exit 1
 fi
 
+# ---------------------------------------------------------------------------
+# 0b. Worker count (field-test fix, G1). playwright.config.ts's own default
+#    is a flat 4 (`process.env.E2E_WORKERS ?? 4`) — sized for a CI box, not
+#    for a machine that also hosts the app (API+UI), Postgres, Redis, three
+#    e2e stubs, one HEADED Chromium per worker, and possibly a second
+#    product's stack, all at once. A real run of this suite on an 8 GB Mac
+#    measured 761 MB of free swap at 4 workers (10.5 of 11.3 GB used), UI
+#    specs taking 24s-2.6min against 15s internal timeouts, and one failure
+#    that was literally the OS killing a Chromium ("Target page, context or
+#    browser has been closed"). Five whole specs failed at 4 workers and
+#    passed at 2 with NO code change in between — that is this box
+#    manufacturing phantom failures for a human to go hunt down, not real
+#    flakiness.
+#
+#    min(4, max(1, floor(totalMemGB / 4))): floor(total/4) budgets roughly
+#    4 GB per worker (one headed Chromium plus its share of the shared
+#    services above) — that number is exactly what predicts this host's own
+#    result (8 GB -> 2 workers, the setting the field test had to pass
+#    E2E_WORKERS=2 by hand to get a trustworthy run). Capped at 4 so this is
+#    never MORE aggressive than upstream's own default on a bigger box, and
+#    floored at 1 so a run can always proceed even on a very small one. An
+#    explicit E2E_WORKERS in the environment always wins over this
+#    derivation and is never second-guessed.
+# ---------------------------------------------------------------------------
+if [ -n "${E2E_WORKERS:-}" ]; then
+  log "E2E_WORKERS=$E2E_WORKERS set explicitly — using it as-is (no memory-based derivation)."
+else
+  TOTAL_MEM_BYTES="$(sysctl -n hw.memsize 2>/dev/null || true)"
+  if [ -z "$TOTAL_MEM_BYTES" ]; then
+    TOTAL_MEM_BYTES="$(awk '/^MemTotal:/{print $2 * 1024; exit}' /proc/meminfo 2>/dev/null || true)"
+  fi
+  if [ -z "$TOTAL_MEM_BYTES" ] || ! [[ "$TOTAL_MEM_BYTES" =~ ^[0-9]+$ ]] || [ "$TOTAL_MEM_BYTES" -le 0 ]; then
+    log "could not read total system memory (neither 'sysctl hw.memsize' nor /proc/meminfo answered) —"
+    log "  falling back to playwright.config.ts's own default (4 workers). Set E2E_WORKERS explicitly to override."
+  else
+    TOTAL_MEM_GB=$(( TOTAL_MEM_BYTES / 1024 / 1024 / 1024 ))
+    DERIVED_WORKERS=$(( TOTAL_MEM_GB / 4 ))
+    [ "$DERIVED_WORKERS" -lt 1 ] && DERIVED_WORKERS=1
+    [ "$DERIVED_WORKERS" -gt 4 ] && DERIVED_WORKERS=4
+    export E2E_WORKERS="$DERIVED_WORKERS"
+    log "derived E2E_WORKERS=$E2E_WORKERS from ${TOTAL_MEM_GB}GB total system memory" \
+      "(min(4, max(1, floor(mem/4)))) — set E2E_WORKERS explicitly to override."
+  fi
+fi
+
 # Single .env reader used everywhere below — cat/grep on a .env are
 # permission-blocked in this environment (see run-signals-dpg's notes), so
 # this is a node regex against the raw file. Prints the trimmed, unquoted
@@ -722,7 +767,9 @@ fi
 
 # ---------------------------------------------------------------------------
 # 7. Run the suite: API tier (deterministic, no browser), then UI tier
-#    (headed, so the run is watchable). Both run even if the first has
+#    (headless by default — see HEADED_ARGS below; a visible Chromium window
+#    popping up mid-run is a real interruption on a shared desktop, and buys
+#    nothing on an unattended signoff). Both run even if the first has
 #    failures — a failing api spec must not hide the ui tier's own results —
 #    and each tier's own `test-results/results.json` is copied out before the
 #    next tier's Playwright invocation overwrites the same path. Each tier is
@@ -747,6 +794,22 @@ if [ -z "$ALIAS" ]; then
   RETRY_ARGS="--retries=0"
 else
   RETRY_ARGS=""
+fi
+
+# Headless by default (Playwright's own default — this is deliberately
+# ADDITIVE, never subtractive): a visible Chromium window popping up mid-run
+# is a real interruption on a machine someone is actively using, and an
+# unattended signoff gets nothing from being watchable. `E2E_HEADED=1` (or
+# `true`) opts back in, e.g. to actually watch a run or drive the UI
+# interactively while triaging a flake — an explicit setting always wins,
+# same convention as `E2E_WORKERS` above. Headless Chromium is also
+# meaningfully lighter on memory than headed, which helps rather than hurts
+# the worker-count story above.
+if [ "${E2E_HEADED:-}" = "1" ] || [ "${E2E_HEADED:-}" = "true" ]; then
+  HEADED_ARGS="--headed"
+  log "E2E_HEADED=$E2E_HEADED — running the UI tier headed (a visible browser window will open)."
+else
+  HEADED_ARGS=""
 fi
 
 # A tier that exits non-zero must never be silently discarded just because
@@ -853,12 +916,16 @@ if [ "$UI_COUNT" = "0" ]; then
   UI_CODE=0
 else
   rm -f test-results/results.json
+  # $HEADED_ARGS unquoted deliberately: "" word-splits to nothing (headless,
+  # the default), "--headed" contributes exactly one word (E2E_HEADED=1) — the
+  # same bash-3.2-safe "no arrays" approach every other optional flag in this
+  # script uses, see this file's own header comment.
   if [ -n "$ALIAS_GREP" ]; then
-    run_fg npm run e2e:ui -- --headed --grep "$ALIAS_GREP"
+    run_fg npm run e2e:ui -- $HEADED_ARGS --grep "$ALIAS_GREP"
   elif [ -n "$RETRY_ARGS" ]; then
-    run_fg npm run e2e:ui -- --headed "$RETRY_ARGS"
+    run_fg npm run e2e:ui -- $HEADED_ARGS "$RETRY_ARGS"
   else
-    run_fg npm run e2e:ui -- --headed
+    run_fg npm run e2e:ui -- $HEADED_ARGS
   fi
   UI_CODE=$?
   if [ -f test-results/results.json ]; then

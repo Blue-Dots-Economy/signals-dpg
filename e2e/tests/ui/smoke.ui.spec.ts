@@ -17,7 +17,12 @@ test.describe('UI smoke', () => {
 
   test('login page presents an entry field', async ({ page }) => {
     await page.goto('/auth/login');
-    await expect(page.locator('input, [role="textbox"], button').first()).toBeVisible();
+    // `getByRole('textbox')` rather than a plain `input, [role="textbox"], button`
+    // selector: the latter's `.first()` resolves in DOM order, which lands on
+    // AuthShell's mobile-only language-switcher combobox (a `display:none`
+    // responsive twin of the desktop one, rendered first in markup) rather than
+    // the visible Mobile-number/Email field the page actually presents.
+    await expect(page.getByRole('textbox').first()).toBeVisible();
   });
 
   test('the UI can reach the API auth config', async ({ page, cfg }) => {
